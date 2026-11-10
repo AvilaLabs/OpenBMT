@@ -483,7 +483,8 @@ Rules:
   destination, because those need both signatures. Without a Key app (key 2
   on a hardware wallet and no approver device), the counter scans the owner
   phone instead, and the screen says pairing rests on the owner phone alone
-  (§5.4). How a Box, which has no screen, is paired is an open item (§16).
+  (§5.4). A Box has no screen and is paired by an invitation the Key app
+  makes and the merchant types into the Box (`docs/BOX-RULES.md` §2).
 - **Manager sign-in.** The owner adds a manager by name in Owner mode (a
   loosening change). The manager has a PIN of at least 6 digits. 5 wrong tries
   lock that manager for 15 minutes; 10 lock the manager until the owner resets
@@ -1775,11 +1776,15 @@ Each gets a written protocol before it runs.
   version byte (§13).
 - The kit's Bitcoin Core steps name the import ranges, use the single-path
   descriptors and import the receive one as not active (§5.4, E9).
-- **Open:** how a Box, which has no screen, is paired. Until that is designed
-  a Box's reports stay in the "your Box reports it" tier and its key reaches
-  the device list only through the two-root-signed list (§2.9).
+- How a Box, which has no screen, is paired was open here. It was decided
+  on 2026-11-10 (below).
 
 **Decisions of 2026-11-10.**
+- A Box is paired by an invitation: the Key app makes 130 random bits, the
+  merchant types them into the Box, the Box proves it holds them, and the
+  Key app answers with the roots under the same secret. The invitation
+  never passes through the owner phone or the network
+  (`docs/BOX-RULES.md` §2).
 - The counter checks the header chain itself and speaks to peers with its
   own small client; no general light-client library (§13,
   `docs/WATCHER-RULES.md` §1, `docs/NETWORK-RULES.md`).
