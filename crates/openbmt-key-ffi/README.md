@@ -1,14 +1,16 @@
 # openbmt-key-ffi
 
-The OpenBMT Key app's core as a library an Android app calls through
-[UniFFI](https://mozilla.github.io/uniffi-rs/). One object, `KeyApp`, holds
-the one `Approver` of `openbmt-approver` (with the signer of
-`openbmt-signer`) behind a lock. The app implements one callback interface,
-`KeyStore`, for storage, randomness and the clock.
+The OpenBMT Key app's core as a library an Android app calls. One object,
+`KeyApp`, holds the one `Approver` of `openbmt-approver` (with the signer of
+`openbmt-signer`) behind a lock. The app implements one interface,
+`KeyStore`, for storage, randomness and the clock. The library has one entry
+point, `dispatch`, which takes a framed request and returns a framed
+response; on Android the one exported symbol is a JNI function that calls it.
 
 **This crate has had internal review only. No independent security audit
-has been done yet. Not for real funds.** Kotlin has not been compiled or
-run against these bindings.
+has been done yet. Not for real funds.** The Kotlin in `bindings/kotlin/`
+has not been compiled or run: there is no Kotlin compiler on the machine it
+was written on. See "What is checked" below.
 
 This crate holds no rule of its own. Every check and every refusal is in
 the existing crates (`docs/SESSION-RULES.md` section 2,
@@ -16,115 +18,143 @@ the existing crates (`docs/SESSION-RULES.md` section 2,
 stores state before anything is returned. The rule IDs pass through in
 `KeyError.rule`, and the rule crates' own text in `KeyError.text`.
 
-## The object
+## Shape
 
-```text
-KeyApp.open(store: KeyStore)                  restore from store.load()
+- The Rust API is plain Rust: `KeyApp`, `SessionHandle`, the view types,
+  `KeyError`, the `KeyStore` trait (`Send + Sync`) and the free functions.
+  The tests drive it directly and again through `dispatch`.
+- `dispatch(registry, store, request) -> Vec<u8>` (`src/call.rs`) is safe
+  code. A `Registry` holds the open apps and sessions by `u64` handle
+  (starting at 1, never reused in a process; at most 4 apps, and one session
+  handle for each app).
+- `src/jni.rs` is the only file with `unsafe`: 14 blocks (each one JNI call
+  or one read of the function table, with a `SAFETY` line) and 2 impls. It
+  exports `Java_org_openbmt_key_Native_call(env, class, store, request)`,
+  copies the request out, wraps the Java store object, calls `dispatch` and
+  returns the response as a new byte array. The store object is used only
+  during the call and on the calling thread: no global references, no cached
+  environment, no threads. A Java exception in a store method is cleared and
+  becomes a store error. The crate root denies `unsafe`; a test pins the
+  count in `jni.rs` and refuses it anywhere else.
+- `bindings/kotlin/org/openbmt/key/` holds `Native.kt` (the `external`
+  declaration and the `KeyStore` interface) and `KeyApp.kt` (a typed wrapper,
+  one method for each op). No JNA, no generated code, no Kotlin library.
 
-setup (docs/DESIGN.md section 2.1)
-  state() -> SetupState        Empty | HasIdentity | Ready
-  createFromEntropy(source, network)   identity + key 2; stored; words wait
-  createApproverOnly()         identity only (key 2 on a hardware wallet)
-  keyWords() -> [String]       the words, once, never stored (nothing for
-                               a key made from typed words)
-  key2Public() -> Key2Public?  master fingerprint, origin path, xpub
-  deviceRoot(), deviceRootWords()
-  acceptWallet(WalletSetup) -> WalletView   pins wallet + owner root;
-                               with key 2 here, the signer checks the slots
-  walletView()                 checksum words, three keys, first address
-  pairOfferBytes()             the OBMO pair offer for the owner phone
-  checkKit(scanned) -> KitCheck  the scanned kit description against the
-                               Key app's own, byte for byte (Ready only)
+The Cargo feature `jni` (on by default) compiles `jni.rs` on every target so
+that the host can test it against a fake `JNIEnv`; on Android it is always
+compiled.
 
-session (docs/SESSION-RULES.md section 2)
-  openSession(request) -> SessionHandle     one at a time
-    lines() -> [LineView]      flat records, one per item
-    decide(item, Decision)     Approve | Decline(reason)
-    finish() -> bytes          stores (AS-34), then returns the response
-    cancel()                   releases the slot; dropping does the same
+## The call protocol
 
-own screens (the signer's public calls, one to one)
-  signerStatus(), receiveMark()
-  enrollDestination(address, label), removeDestination(address)
-  setCeilings(other, allowlisted), setFeeCeilings(fee)
-  raiseChangeMark(n), raiseReceiveMark(n), correctClock()
+A request is `"OBM8" | 1 | op u16 | handle u64 | fields...`; a response is
+`"OBM9" | 1 | status u8 | ...`. Status 0 is ok and carries the op's result;
+1 refused, 2 store, 3 state and 4 internal (a panic was caught) carry `rule`
+and `text`, each a u16 length and UTF-8. Integers are little-endian, a bool
+is one byte, bytes and strings have a u32 length, an option a flag byte, a
+list a u32 count, an enum a tag byte. A request is at most 1 MiB, is read
+completely before anything is done, and is refused when bytes are left over
+or a length, flag or tag is not defined; an op number that is not in the
+table is refused with the rule `op-unknown`. The handle is the app (from
+op 1), the session (from op 30), or 0 for the free functions.
 
-free functions: coinBits, diceBits, diceFaceCounts (progress of the
-entropy screens, from openbmt_core::entropy); wordSuggestions(prefix) and
-wordIsValid(word) for the word picker; parseDepositCode(text, network) ->
-DepositCode (a bare address or a BIP21 URI; enrols nothing)
-```
+`bindings/PROTOCOL.md` has the layout of every op and type. It is generated
+from the same tables the encoder uses, and a test fails if the committed file
+differs (`OPENBMT_BLESS_PROTOCOL=1 cargo test -p openbmt-key-ffi protocol`
+writes it again). Op numbers are never reused.
 
-Entropy sources follow `docs/DESIGN.md` section 5.4: `Platform` (32 bytes
-from `KeyStore.random`, 24 words), `DiceHashed`, `CoinFlips`,
-`DiceSkewCorrected` and `TypedWords`. With the dice and coin sources nothing
-else is mixed in, so the same throws give the same words in another tool.
-The identity secret always comes from `KeyStore.random`. Key 2 is the BIP39
-seed (empty passphrase) at `m/48'/coin'/0'/2'`.
+| op | name | handle | what it does |
+| --- | --- | --- | --- |
+| 1 | `open` | none | restore the Key app from `store.load()`; returns the app handle |
+| 2 | `close_app` | app | close it and its session |
+| 3 | `close_session` | session | cancel and close the handle |
+| 10 | `state` | app | `Empty`, `HasIdentity`, `Ready` |
+| 11 | `create_from_entropy` | app | identity and key 2 from a source; stored; the words wait |
+| 12 | `create_approver_only` | app | identity only (key 2 on a hardware wallet) |
+| 13 | `key_words` | app | the words, once, never stored |
+| 14 | `key2_public` | app | fingerprint, origin path, xpub, or none |
+| 15 | `device_root` | app | the Key app's root, 32 bytes |
+| 16 | `device_root_words` | app | the same as four words |
+| 17 | `accept_wallet` | app | pin wallet and owner root; returns the wallet view |
+| 18 | `wallet_view` | app | checksum words, three keys, first address |
+| 19 | `pair_offer_bytes` | app | the `OBMO` pair offer for the owner phone |
+| 20 | `check_kit` | app | the scanned description against the Key app's own |
+| 30 | `open_session` | app | check a request and open the session; returns its handle |
+| 31 | `session_id` | session | the session's ID |
+| 32 | `lines` | session | one record for each item |
+| 33 | `decide` | session | approve or decline an item |
+| 34 | `finish` | session | store the new state, then return the response |
+| 35 | `cancel` | session | release the slot |
+| 40 | `signer_status` | app | ceilings, marks, totals, allowlist |
+| 41 | `receive_mark` | app | the receive mark |
+| 42 | `enroll_destination` | app | enrol an address with a label |
+| 43 | `remove_destination` | app | remove one |
+| 44 | `set_ceilings` | app | the two sets of ceilings |
+| 45 | `set_fee_ceilings` | app | the fee ceilings |
+| 46 | `raise_change_mark` | app | raise the change mark |
+| 47 | `raise_receive_mark` | app | raise the receive mark |
+| 48 | `correct_clock` | app | correct a clock that is behind |
+| 60 | `coin_bits` | none | progress of the coin flips |
+| 61 | `dice_bits` | none | progress of the dice rolls |
+| 62 | `dice_face_counts` | none | how often each face came up |
+| 63 | `word_suggestions` | none | up to 8 words for a prefix |
+| 64 | `word_is_valid` | none | whether a word is on the list |
+| 65 | `parse_deposit_code` | none | read an address or BIP21 text; enrols nothing |
 
-### Words the owner already has
+Opening a session ends the handle of the app's previous session. One call
+runs at a time: a call made while another runs, or from inside a store
+method, is refused with the rule `busy` (the Kotlin wrapper serialises its
+calls).
+
+## Behaviour
+
+Setup follows `docs/DESIGN.md` section 2.1. Entropy sources follow section
+5.4: `Platform` (32 bytes from `KeyStore.random`, 24 words), `DiceHashed`,
+`CoinFlips`, `DiceSkewCorrected` and `TypedWords`. With the dice and coin
+sources nothing else is mixed in, so the same throws give the same words in
+another tool. The identity secret always comes from `KeyStore.random`. Key 2
+is the BIP39 seed (empty passphrase) at `m/48'/coin'/0'/2'`.
 
 `TypedWords` takes 12 or 24 BIP39 English words, each trimmed and
-lower-cased, and derives key 2 as for every other source (empty passphrase).
-A wrong count, a word that is not on the list and a wrong checksum are
-refused with the rules `words-count`, `words-unknown` and `words-checksum`;
-the second names the 1-based position of the word, and no error repeats what
-was typed. The words are not stored and `keyWords` returns nothing for this
-source (`words_waiting` is false). This is the same fresh-signer path as the
-other sources: the signer starts with empty history and no rule is relaxed.
-Restore-and-sign mode (`docs/DESIGN.md` section 5.4) is not built.
+lower-cased. A wrong count, a word that is not on the list and a wrong
+checksum are refused with the rules `words-count`, `words-unknown` and
+`words-checksum`; the second names the 1-based position of the word, and no
+error repeats what was typed. The words are not stored.
 
-### The kit check
+`check_kit` compares the scanned text with the Key app's own canonical wallet
+description, byte for byte, after trimming ASCII white space at both ends.
+`Different` carries the position of the first difference, whether the text
+parses as a wallet description, and whether its four checksum words equal the
+Key app's own (the R4-2 case, the most serious result). Nothing is stored.
+Text over 8,192 bytes is refused.
 
-`checkKit` compares the text scanned from the printed kit with the Key
-app's own canonical wallet description, byte for byte, after trimming ASCII
-white space at both ends. `Different` carries the position of the first
-difference, whether the text parses as a wallet description, and whether
-its four checksum words equal the Key app's own. The last case is R4-2 (a
-description made to share the words people compare) and is the most serious
-result. Nothing is stored and the scanned text is not kept; text over 8,192
-bytes is refused. Only the description is checked here: no kit format
-exists in the repository yet, so the kit's other fields (birthday,
-generations, import range, fallback descriptors) are not checked.
+`parse_deposit_code` reads a bare address or a BIP21 URI. A `req-` parameter
+that is not understood refuses the whole code; other unknown parameters are
+listed by name in `ignored` and never acted on. The address must be for the
+given network and of a kind the signer's allowlist takes. The text is at most
+2,048 bytes.
 
-### Deposit codes
-
-`parseDepositCode` reads a bare address or a BIP21 URI (`bitcoin:` in any
-case, `amount` in bitcoin with at most 8 places, converted in integer
-arithmetic, `label`, `message`, percent escapes). A `req-` parameter that is
-not understood refuses the whole code; other unknown parameters, `lightning`
-and `pj` included, are listed by name in `ignored` and never acted on. The
-address must be for the given network and of a kind the signer's allowlist
-takes (P2WPKH, P2WSH, P2TR, P2PKH, P2SH; SR-22, SR-30). The text is at most
-2,048 bytes. The function enrols nothing: the app shows the result, the
-person types the label, and `enrollDestination` applies the signer's rules.
-
-### What the app must do
+## The store contract
 
 - **`save` must be durable before it returns.** The Key app returns a
   response, or the answer of an own-screen call, only after `save` returned
   without error (AS-34). If `save` throws, nothing the Key app keeps has
-  changed and the same call can be made again. A session whose `finish`
-  failed on a store error can be finished again.
+  changed and the same call can be made again.
 - **Protect the bytes at rest.** What `save` receives is the `OBM7`
   envelope. It holds the identity secret and, when this device holds key 2,
   key 2's account secret, in the clear. Wrapping it with a key from the
-  Android Keystore, keeping it out of backups and device transfer, and
-  never writing it anywhere else is the app's job. This crate does none of
-  it.
-- **Show the words once.** `keyWords` returns them one time. They are not in
-  the envelope, so they cannot be shown again after the call or after a
-  restart. Making a key again is allowed until the wallet is accepted.
-- **Release sessions.** A `SessionHandle` that is dropped without `finish`
-  changes nothing, but in Kotlin the object is released when it is closed or
-  collected. Call `cancel()` (or `close()`) when the person leaves the
-  screen. Until then a second `openSession` and every setup or own-screen
-  change is refused with rule `session-open`.
-- **After `KeyError.Internal`** the object is poisoned: every call returns
-  the same error. Open a new `KeyApp` from the stored bytes.
-- The checks the Key app promises of its own software (no root, no
-  overlays, no accessibility services, no screenshots, wipe after wrong
-  tries) are the app's, not this library's.
+  Android Keystore, keeping it out of backups and device transfer, and never
+  writing it anywhere else is the app's job. This crate does none of it.
+- **Show the words once.** `key_words` returns them one time.
+- **Release sessions.** Call `cancel` or `close_session` when the person
+  leaves the screen. Until then a second session and every setup or
+  own-screen change is refused with the rule `session-open`.
+- **After status 4** the app is poisoned: every call returns the same error.
+  Close it and open a new one from the stored bytes.
+- `now()` cannot fail: a store method that throws, or a negative time, reads
+  as 0.
+- The checks the Key app promises of its own software (no root, no overlays,
+  no accessibility services, no screenshots, wipe after wrong tries) are the
+  app's, not this library's.
 
 ### The `OBM7` envelope
 
@@ -132,19 +162,17 @@ person types the label, and `enrollDestination` applies the signer's rules.
 key 2's network, master fingerprint and account key if this device holds
 key 2; and, once the wallet is accepted, the network, the canonical wallet
 description, the owner root, the batch minimum and the approver snapshot
-(`OBM3`). It only parses; the wallet, owner and snapshot are checked by the
-crates that own them when the Key app is restored.
+(`OBM3`).
 
 ### Secrets in memory
 
 Overwritten when dropped: the identity secret, key 2's account key (and the
 approver's copy of it, by the approver), the words after they are taken or
-replaced, and the typed dice rolls and words. Not overwritten, because the
-types do not allow it: the approver's copy of the identity
-(`openbmt_core::Identity` has no erase), the `bip39` mnemonic, the byte
-vectors UniFFI copies across the boundary (the envelope handed to `save`,
-the words returned to Kotlin), and everything on the Kotlin side. The
-compiler and the operating system may keep other copies of any of it.
+replaced, the typed dice rolls and words, and the JNI glue's copy of each
+request. Not overwritten, because the types do not allow it: the approver's
+copy of the identity, the `bip39` mnemonic, the byte arrays on the Java side
+(the envelope handed to `save`, the request and response arrays) and
+everything else on the Kotlin side.
 
 ### Signing seam
 
@@ -154,57 +182,57 @@ protocol (anti-exfil) would change only that function.
 
 ## Errors
 
-`KeyError` has four variants, each with `rule` and `text`:
-`Refused` (a rule crate refused; `rule` is its ID such as `AS-20` or
-`SR-30`, or the name of the check), `Store` (the callback failed, or the
-stored bytes cannot be read), `State` (the call is not possible now, with
-what to do instead) and `Internal` (a panic was caught). The field is
-called `text`, not `message`, because a Kotlin exception already has a
-`message`.
+`KeyError` has four variants, each with `rule` and `text`: `Refused` (a rule
+crate refused; `rule` is its ID such as `AS-20` or `SR-30`, or the name of the
+check), `Store` (the store failed, or the stored bytes cannot be read),
+`State` (the call is not possible now, with what to do instead) and
+`Internal` (a panic was caught). In Kotlin they are one `KeyException` with
+`rule`, `text` and `status`.
 
-## Proof
-
-Everything runs under the memory guard with a separate target directory:
+## What is checked
 
 ```sh
-# 1. host tests: the exported API driven as Kotlin would, through an
-#    in-memory KeyStore, with the owner crate on the other side
-~/.cache/openbmt/guard.sh env CARGO_TARGET_DIR=$HOME/.cache/openbmt/target/keyffi \
+~/.cache/openbmt/guard.sh env CARGO_TARGET_DIR=$HOME/.cache/openbmt/target/keyjni \
     cargo test -p openbmt-key-ffi
-
-# 2 and 3. bindings and Android libraries (one script, prints PASS, FAIL
-#    or NOT RUN for each step)
 scripts/key-ffi-build.sh
 ```
 
-The script runs the bindings generator that is part of this crate
-(`cargo build -p openbmt-key-ffi --features bindgen --bin uniffi-bindgen`,
-then `uniffi-bindgen generate --library target/debug/libopenbmt_key_ffi.so
---config crates/openbmt-key-ffi/uniffi.toml --language kotlin --no-format`),
-twice, and writes `bindings/kotlin/` only if both runs give the same bytes.
-The libraries are built with `rustup target add aarch64-linux-android
-x86_64-linux-android`, then `cargo build --release -p openbmt-key-ffi
---target <target>` with `CARGO_TARGET_<TRIPLE>_LINKER`, `CC_<triple>` and
-`AR_<triple>` set to the NDK's clang (API level 26) and `llvm-ar`. The
-`.so` files stay in the target directory. `llvm-readelf --dyn-syms` lists
-the exported `uniffi_openbmt_key_ffi_*` symbols.
+- The Rust API tests (setup from each source, a whole session, own screens,
+  words, kit check, deposit codes, failing stores, a panic) with the owner
+  crate on the other side; the main flows run again through `dispatch`.
+- Strictness: every cut and every flipped bit of a set of valid requests is
+  refused or handled without a panic and without an internal error; unknown
+  ops, oversized lengths, handles that do not exist and a session handle used
+  after it was closed.
+- The JNI glue against a fake `JNIEnv`: the happy path, a Java exception in
+  each store method, null returns, a wrong array length from `random`, missing
+  methods, no array for the response, use after the call and from another
+  thread.
+- The fuzz target `key_dispatch` (arbitrary request bytes against a Key app
+  that has its wallet and an open session; never panics, the stored bytes
+  always restore).
+- `scripts/key-ffi-build.sh` builds the library for `aarch64-linux-android`
+  and `x86_64-linux-android` (NDK, API 26) and checks with `llvm-readelf`
+  that the only exported `Java_` symbol is the entry point above and that no
+  `uniffi` symbol remains.
+- The Kotlin is **not compiled and not run**. Two tests keep it honest as far
+  as numbers go: `PROTOCOL.md` is generated from the Rust tables, and a test
+  parses `KeyApp.kt` and compares its `OP_*` and `TAG_*` constants with them.
+  Field order in the Kotlin is checked by reading only.
 
-The generated Kotlin calls the library through JNA, so the Android app
-needs the `net.java.dev.jna:jna` AAR as a dependency and the `.so` files in
-`jniLibs`.
+Not built: restore-and-sign mode (a key from words together with a signer that
+starts without allowlist history, `docs/DESIGN.md` section 5.4), the kit's
+other fields in `check_kit` (birthday, generations, import range, fallback
+descriptors), and anti-exfil signing.
 
-Not built: restore-and-sign mode (a key from words together with a
-signer that starts without allowlist history, `docs/DESIGN.md` section
-5.4), the kit's other fields in `checkKit`, and any use of a code's amount
-or `message` beyond reading them.
-
-Not covered: compiling or running the Kotlin, loading the library on a
-device or emulator, and the Android Keystore wrapping.
+Not covered: compiling or running the Kotlin, loading the library on a device
+or emulator, and the Android Keystore wrapping.
 
 ## Dependencies
 
-`uniffi` 0.32.2 (exact pin, MPL-2.0), without its default features (the
-`cargo-metadata` feature pulls in crates that need a newer Rust than 1.89).
-The `bindgen` feature, off by default, adds the generator. `unsafe` is
-allowed in this crate only, for the code UniFFI generates; no hand-written
-line uses it, which a test checks.
+Besides the workspace crates (`openbmt-core`, `openbmt-approver`,
+`openbmt-session`, `openbmt-signer`), the library is built from `bitcoin`
+and `bip39` (the same pins as the signer) and `jni-sys` 0.3.0. `jni-sys`
+0.3.0 has no dependencies of its own; its later releases depend on a macro
+crate and `syn`. The list is `deps/openbmt-key-ffi.txt` (20 packages: the 19
+of the signer plus `jni-sys`); it was 59 while the library used UniFFI.
