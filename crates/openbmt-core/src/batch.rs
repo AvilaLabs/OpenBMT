@@ -497,6 +497,10 @@ impl Approver {
     /// exist before the mark is stored, a crash in between would lose the
     /// mark and the same index range could be signed again for a second
     /// counter.
+    // Each argument is a separate input the caller must supply; bundling
+    // them in a struct would hide which ones are trusted (`own_wallet`,
+    // `approved_counters`, `owner`) and which are not (`batch`, `owner_sig`).
+    #[allow(clippy::too_many_arguments)]
     pub fn check_and_cosign<E>(
         &self,
         own_wallet: &WalletDescription,
