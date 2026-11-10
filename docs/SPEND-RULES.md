@@ -175,6 +175,8 @@ being spent.
   two signatures in the order of their keys in the sorted witness script,
   the witness script. A third signature is not used. Fewer than two, or the
   same key twice, is an error.
+  A file with no input or no output is refused, by `combine` too: with
+  nothing to check, every check would pass.
 - **SP-61.** The input's keychain and index are read from its key-path
   hints; the script spent and the witness script have to equal what the
   wallet derives for them. A file whose witness script is not the wallet's

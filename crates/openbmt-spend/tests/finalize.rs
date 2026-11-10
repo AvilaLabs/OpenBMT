@@ -319,3 +319,34 @@ fn sp_64_the_file_must_be_the_plans() {
         FinalizeError::NotThePlan
     );
 }
+
+#[test]
+fn sp_60_a_file_with_no_input_or_no_output_is_never_finished() {
+    // Found by the fuzzer: with no inputs there is nothing to check, and a
+    // transaction used to come out.
+    let empty = Transaction {
+        version: Version::TWO,
+        lock_time: LockTime::ZERO,
+        input: vec![],
+        output: vec![],
+    };
+    let psbt = Psbt::from_unsigned_tx(empty).unwrap();
+    assert_eq!(
+        finalize(wallet(), &psbt).unwrap_err(),
+        FinalizeError::NotVersionZero
+    );
+    assert!(combine(&psbt, &[]).is_err());
+
+    // Inputs but no output.
+    let r = two_input_run();
+    let mut tx = r.base.unsigned_tx.clone();
+    tx.output.clear();
+    let mut no_outputs = r.base.clone();
+    no_outputs.unsigned_tx = tx;
+    no_outputs.outputs.clear();
+    assert_eq!(
+        finalize(wallet(), &no_outputs).unwrap_err(),
+        FinalizeError::NotVersionZero
+    );
+    assert!(combine(&no_outputs, &[]).is_err());
+}
