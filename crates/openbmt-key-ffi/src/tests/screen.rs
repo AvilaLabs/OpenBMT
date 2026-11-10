@@ -183,8 +183,11 @@ fn ceilings_fee_ceilings_and_marks_are_the_signers_own() {
     // A clock that is not behind changes nothing; one that is behind is
     // confirmed once the app says so.
     let before = rig.app.signer_status().expect("status");
+    let saves = rig.store.saves();
     rig.app.correct_clock().expect("nothing to correct");
     assert_eq!(rig.app.signer_status().expect("status"), before);
+    // Nothing changed, so nothing was stored.
+    assert_eq!(rig.store.saves(), saves);
     rig.app
         .enroll_destination(address(5), "Exchange".to_string())
         .expect("enrolled");

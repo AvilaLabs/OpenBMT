@@ -560,6 +560,38 @@ fn as_38_stored_settings_must_carry_this_key_apps_signature() {
 }
 
 #[test]
+fn as_38_an_own_screen_call_that_changes_nothing_stores_nothing() {
+    let mut a = approver_with_key2();
+    let saves = std::cell::Cell::new(0u32);
+    let persist = |_: &[u8]| {
+        saves.set(saves.get() + 1);
+        Ok::<(), ()>(())
+    };
+    // The clock is not behind the latest time seen: nothing to correct.
+    a.change_signer(persist, |s| {
+        s.correct_clock(1_000, |_| Ok::<(), std::convert::Infallible>(()))
+            .map_err(|e| e.to_string())
+    })
+    .unwrap();
+    assert_eq!(saves.get(), 0);
+    // A real change is stored once.
+    a.change_signer(persist, |s| {
+        s.raise_change_mark(7, |_| Ok::<(), std::convert::Infallible>(()))
+            .map_err(|e| e.to_string())
+    })
+    .unwrap();
+    assert_eq!(saves.get(), 1);
+    // And the same clock call again is still a no-op.
+    a.change_signer(persist, |s| {
+        s.correct_clock(1_000, |_| Ok::<(), std::convert::Infallible>(()))
+            .map_err(|e| e.to_string())
+    })
+    .unwrap();
+    assert_eq!(saves.get(), 1);
+    assert_eq!(a.signer().unwrap().change_mark(), 7);
+}
+
+#[test]
 fn as_38_the_own_screen_calls_are_stored_with_the_rest() {
     let mut a = approver_with_key2();
     let store = Store::default();

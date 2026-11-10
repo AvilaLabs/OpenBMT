@@ -207,7 +207,8 @@ impl Approver {
     /// (enrolling a destination, setting ceilings, raising the change
     /// mark). `f` works on a copy and may call any of the signer's own-screen
     /// calls with a `persist` that does nothing; the whole new snapshot is
-    /// then stored, and only if that succeeds does the Key app take it.
+    /// then stored, and only if that succeeds does the Key app take it. A
+    /// call that leaves the snapshot's bytes as they are does not store.
     pub fn change_signer<E>(
         &mut self,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
@@ -216,7 +217,13 @@ impl Approver {
         let mut next = self.kept.clone();
         let signer = next.signer.as_mut().ok_or(StateError::NoSigner)?;
         f(signer).map_err(StateError::Refused)?;
-        persist(&self.snapshot_of(&next)).map_err(StateError::Store)?;
+        let bytes = self.snapshot_of(&next);
+        if bytes == self.snapshot() {
+            // The call changed nothing (a clock correction that finds the
+            // clock fine, for one): what is stored is already this state.
+            return Ok(());
+        }
+        persist(&bytes).map_err(StateError::Store)?;
         self.kept = next;
         Ok(())
     }
