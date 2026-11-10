@@ -68,7 +68,7 @@ use crate::link::OwnerLink;
 /// The file of the intake state, in the owner node's directory.
 pub const STATE_FILE: &str = "refund-intake";
 /// The magic of the stored intake state.
-pub const MAGIC_INTAKE: [u8; 4] = *b"OBM8";
+pub const MAGIC_INTAKE: [u8; 4] = *b"OBM1";
 /// Most lines the list keeps. Past it the oldest goes first, and the link's
 /// notes say so.
 pub const MAX_NOTES: usize = 256;
@@ -792,7 +792,7 @@ impl RefundIntake {
     /// The stored form.
     ///
     /// ```text
-    /// OBM8 | 1 | n_counters u32 | n * (counter (32) | applied u64)
+    /// OBM1 | 1 | n_counters u32 | n * (counter (32) | applied u64)
     ///   | pending (flag; counter (32) | seq u64 | number u64 | sale u32)
     ///   | n_queued u32 | n * (counter (32) | number u64 | refund id u32)
     ///   | n_notes u32 | n * (counter (32) | seq u64 | number u64 | sale u32

@@ -301,6 +301,33 @@ fn cr_60_a_counter_chain_with_a_request_becomes_exactly_one_queued_refund() {
 }
 
 #[test]
+fn cr_61_request_numbers_may_skip_and_one_ask_that_stopped_is_one_queued_refund() {
+    let mut s = Side::new();
+    // What a counter's records hold after a stop between the desk and the
+    // record (number 1 never written), a stop between the record and the
+    // sale (number 2, adopted by the counter at its next start, so that the
+    // cashier is not led to ask again), and a withdrawal whose sale write
+    // stopped (number 5 is withdrawn in the records).
+    s.push(&[
+        opened(0),
+        finished(0, 5_000),
+        requested(0, 2, 2_000, dest(9), 5_000),
+        requested(0, 5, 1_000, dest(8), 5_000),
+        withdrawn(0, 5),
+    ]);
+    let done = s.apply();
+    assert_eq!((done.queued, done.refused, done.withdrawn), (2, 0, 1));
+    let refunds = s.owner.refunds();
+    assert_eq!(refunds.len(), 1, "one ask, one refund");
+    assert_eq!(
+        (refunds[0].sats, refunds[0].script.clone()),
+        (2_000, dest(9))
+    );
+    assert!(s.intake.queued_id(&counter(), 2).is_some());
+    assert!(s.intake.notes().is_empty());
+}
+
+#[test]
 fn cr_61_a_request_in_the_shops_currency_keeps_its_value_in_the_queue() {
     let mut s = Side::new();
     let mut by_value = requested(0, 1, 2_000, dest(9), 5_000);
@@ -651,7 +678,7 @@ fn cr_60_the_intake_state_is_strict() {
     s.apply();
     let path = s.dir.path().join(STATE_FILE);
     let good = fs::read(&path).unwrap();
-    assert_eq!(&good[..5], b"OBM8\x01");
+    assert_eq!(&good[..5], b"OBM1\x01");
     for n in 0..good.len() {
         fs::write(&path, &good[..n]).unwrap();
         assert!(RefundIntake::open(s.dir.path()).is_err(), "prefix {n}");
