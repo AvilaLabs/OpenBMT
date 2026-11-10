@@ -36,6 +36,7 @@ pub mod netgroup;
 pub mod proof;
 mod refusal;
 pub mod sale;
+pub mod say;
 
 #[cfg(test)]
 mod tests;
