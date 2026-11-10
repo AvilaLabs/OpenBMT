@@ -5,9 +5,10 @@ money goes straight into the merchant's own wallet, and the sale closes in the
 point-of-sale system the shop already uses.
 
 **Status: pre-release.** The design is written down, and the shared rules
-library and the signer's rules are implemented and tested. No app is built
-yet, nothing has been tried on a device, and **no independent security audit
-has been done**. Do not use this with real funds.
+library, the signer's rules and the payment watcher's rules are implemented
+and tested. No app is built yet, nothing has been tried on a device, and
+**no independent security audit has been done**. Do not use this with real
+funds.
 
 ## What it is
 
@@ -51,12 +52,14 @@ sets. The full statement, its conditions and the reasoning are in
 |---|---|
 | [docs/DESIGN.md](docs/DESIGN.md) | The design: flows, architecture, threat table, open questions |
 | [docs/SIGNER-RULES.md](docs/SIGNER-RULES.md) | Every rule under which the Key app refuses to sign |
+| [docs/WATCHER-RULES.md](docs/WATCHER-RULES.md) | What the counter believes about a payment, and what each kind of evidence may prove |
 | [docs/research/](docs/research/) | Research notes, four rounds of internal design review, and the results of the checks against Bitcoin Core |
 | [crates/openbmt-core/](crates/openbmt-core/) | The rules every device must agree on: wallet description, device identity, address batches, signed records, signed settings, instant-acceptance policy |
 | [crates/openbmt-signer/](crates/openbmt-signer/) | The Key app's transaction signer: the rules under which key 2 signs |
+| [crates/openbmt-watch/](crates/openbmt-watch/) | The counter's payment watcher: merkle proofs, full blocks, peer groups, conflicts, health |
 | [scripts/](scripts/) | Checks against Bitcoin Core on regtest: the restore drill, and the signer reading and returning Core's transaction files |
 
-Planned next: the payment watcher, then the apps.
+Planned next: the light-client adapter for the watcher, then the apps.
 
 ## Building
 

@@ -1,0 +1,13 @@
+[package]
+name = "openbmt-watch"
+description = "The OpenBMT counter's payment watcher: what each kind of evidence about a payment may prove"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The same exact bitcoin version as openbmt-core, so the types unify.
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }

@@ -1,6 +1,6 @@
 # Watcher rules: what the counter believes about a payment
 
-Status: specification for `crates/openbmt-watch`, written before the code.
+Status: specification for `crates/openbmt-watch`, which implements it.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement `docs/DESIGN.md` §5.1 ("Checks payments itself") and the inputs
 of §6. Where this file is more exact than the design, this file is what the
