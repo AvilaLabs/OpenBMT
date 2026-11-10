@@ -130,6 +130,7 @@ impl fmt::Display for FactsError {
 impl std::error::Error for FactsError {}
 
 /// A sale being folded.
+#[derive(Debug)]
 struct Folding {
     /// The fact as inferred from the older events (PS-06).
     fact: SaleFact,
@@ -138,6 +139,56 @@ struct Folding {
     explicit: bool,
     explicit_paid_at: Option<u64>,
     explicit_unpaid: bool,
+}
+
+impl Folding {
+    /// The fact as it stands after the events folded so far (PS-09 over
+    /// PS-06).
+    fn current(&self) -> SaleFact {
+        let mut fact = self.fact.clone();
+        if self.explicit {
+            fact.paid_at = self.explicit_paid_at.or(fact.paid_at);
+            fact.unpaid_after = self.explicit_unpaid;
+        }
+        fact
+    }
+}
+
+/// The counter's events folded into sale facts one at a time (PS-06,
+/// PS-09). [`facts_from_chain`] runs one over a verified chain; the counter
+/// node runs one to know when a sale changes state (BX-40).
+#[derive(Debug)]
+pub struct FactFold {
+    counter: DeviceId,
+    sales: BTreeMap<u32, Folding>,
+}
+
+impl FactFold {
+    /// An empty fold for this counter's events.
+    pub fn new(counter: DeviceId) -> Self {
+        Self {
+            counter,
+            sales: BTreeMap::new(),
+        }
+    }
+
+    /// Fold one event. A refused event changes nothing.
+    pub fn apply(&mut self, event: &Event) -> Result<(), FactsError> {
+        if self.sales.len() >= MAX_SALES && !self.sales.contains_key(&event.index()) {
+            return Err(FactsError::TooManySales);
+        }
+        fold_event(&mut self.sales, &self.counter, event)
+    }
+
+    /// The fact of one sale as it stands now.
+    pub fn fact(&self, index: u32) -> Option<SaleFact> {
+        self.sales.get(&index).map(Folding::current)
+    }
+
+    /// Every fact, ordered by sale index.
+    pub fn facts(&self) -> Vec<SaleFact> {
+        self.sales.values().map(Folding::current).collect()
+    }
 }
 
 /// PS-05, PS-06, PS-09: fold a counter's record chain into one fact per sale,
@@ -150,7 +201,7 @@ pub fn facts_from_chain(
     counter: &DeviceId,
 ) -> Result<Vec<SaleFact>, FactsError> {
     chain.verify(devices).map_err(FactsError::Chain)?;
-    let mut sales: BTreeMap<u32, Folding> = BTreeMap::new();
+    let mut fold = FactFold::new(*counter);
     for record in chain.records() {
         let holds_events = matches!(
             record.kind,
@@ -163,22 +214,9 @@ pub fn facts_from_chain(
             seq: record.seq,
             error,
         })?;
-        fold_event(&mut sales, counter, &event)?;
-        if sales.len() > MAX_SALES {
-            return Err(FactsError::TooManySales);
-        }
+        fold.apply(&event)?;
     }
-    Ok(sales
-        .into_values()
-        .map(|f| {
-            let mut fact = f.fact;
-            if f.explicit {
-                fact.paid_at = f.explicit_paid_at.or(fact.paid_at);
-                fact.unpaid_after = f.explicit_unpaid;
-            }
-            fact
-        })
-        .collect())
+    Ok(fold.facts())
 }
 
 fn fold_event(

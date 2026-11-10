@@ -170,6 +170,29 @@ pub trait PosCloser {
     fn close(&mut self, request: &CloseRequest) -> Result<CloseOutcome, PosError>;
 }
 
+/// What the Box needs of a vendor's connector (BX-41, BX-43): the
+/// read-only reader of PS-80, a way to be given the sign-in, and the
+/// optional close of PS-81. A connector that cannot close says so with
+/// [`Connector::can_close`], and the Box then never calls
+/// [`Connector::close`].
+pub trait Connector: PosReader + Send {
+    /// Take the POS sign-in the Box reads from its data directory. The
+    /// connector keeps it for as long as it reads; the Box calls this again
+    /// whenever the file changes and with nothing when it stops reading.
+    fn set_token(&mut self, _token: Option<&str>) {}
+
+    /// Whether this connector can close an order through the POS's API.
+    fn can_close(&self) -> bool {
+        false
+    }
+
+    /// Close an order (PS-81). A retry with the same key does not close it
+    /// twice.
+    fn close(&mut self, _request: &CloseRequest) -> Result<CloseOutcome, PosError> {
+        Err(PosError::Unsupported)
+    }
+}
+
 /// PS-82: a reader that plays a script of pages, for tests. When the script
 /// is spent it answers with an empty page and the cursor it was given.
 #[derive(Debug, Default)]

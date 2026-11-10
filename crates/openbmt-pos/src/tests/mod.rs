@@ -11,6 +11,7 @@ mod kit;
 mod matching;
 mod meta;
 mod model;
+mod notice;
 mod props;
 mod reference;
 mod storage;

@@ -25,6 +25,8 @@
 //! 6. [`matcher`]: the pure matching and the alert rules.
 //! 7. [`ledger`]: what is kept between polls and its stored form (`OBMZ`).
 //! 8. [`connector`]: the traits a vendor adds, a test double and [`sync`].
+//! 9. [`notice`]: the counter's signed paid notice, the Box's signed POS
+//!    notice, and the sale facts built from paid notices (BX-40, BX-42).
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.
@@ -47,6 +49,7 @@ pub mod facts;
 pub mod ledger;
 pub mod matcher;
 pub mod model;
+pub mod notice;
 pub mod reference;
 pub mod settings;
 
@@ -55,10 +58,10 @@ mod tests;
 
 pub use alerts::{Alert, AlertKey, AlertKind, Subject, TenderKey};
 pub use connector::{
-    sync, CloseOutcome, CloseRefused, CloseRequest, Cursor, MemoryCloser, MemoryPos, Page,
-    PosCloser, PosError, PosReader, SyncError, SyncFailed, SyncReport,
+    sync, CloseOutcome, CloseRefused, CloseRequest, Connector, Cursor, MemoryCloser, MemoryPos,
+    Page, PosCloser, PosError, PosReader, SyncError, SyncFailed, SyncReport,
 };
-pub use facts::{facts_from_chain, FactsError, SaleFact, SaleKey};
+pub use facts::{facts_from_chain, FactFold, FactsError, SaleFact, SaleKey};
 pub use ledger::{
     Acknowledged, Blocker, BooksLine, Delta, Ledger, LedgerError, LedgerWriteError, Summary,
 };
@@ -66,6 +69,10 @@ pub use matcher::{Match, MatchHow};
 pub use model::{
     Id, ModelError, OrderId, OrderState, PosOrder, PosTender, TenderId, TenderKind, TenderState,
     Text,
+};
+pub use notice::{
+    facts_from_notices, NoticeDraft, NoticeMaker, NoticeState, PaidNotice, PosItem, PosNotice,
+    SaleMismatch, MAGIC_PAID_NOTICE, MAGIC_POS_NOTICE, PAID_NOTICE_LEN,
 };
 pub use reference::{find_reference, IdempotencyKey, RefCode};
 pub use settings::{LocationCounters, Settings, SettingsError, Timing};

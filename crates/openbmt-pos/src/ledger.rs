@@ -724,7 +724,7 @@ impl Ledger {
         }
         let mut open: BTreeMap<AlertKey, Alert> = BTreeMap::new();
         for _ in 0..r.count(MAX_ALERTS, 50)? {
-            let a = get_alert(&mut r, &orders)?;
+            let a = get_alert(&mut r, Some(&orders))?;
             if open.last_key_value().is_some_and(|(k, _)| *k >= a.key) {
                 return Err(DecodeError::NonCanonical("alerts are not in key order"));
             }
@@ -732,7 +732,7 @@ impl Ledger {
         }
         let mut acked: BTreeMap<AlertKey, Acknowledged> = BTreeMap::new();
         for _ in 0..r.count(MAX_ALERTS, 58)? {
-            let alert = get_alert(&mut r, &orders)?;
+            let alert = get_alert(&mut r, Some(&orders))?;
             let at = r.u64_le()?;
             if acked.last_key_value().is_some_and(|(k, _)| *k >= alert.key)
                 || open.contains_key(&alert.key)
@@ -759,19 +759,19 @@ fn put_count(out: &mut Vec<u8>, n: usize) {
     out.extend_from_slice(&u32::try_from(n).unwrap_or(u32::MAX).to_le_bytes());
 }
 
-fn put_sale(out: &mut Vec<u8>, s: &SaleKey) {
+pub(crate) fn put_sale(out: &mut Vec<u8>, s: &SaleKey) {
     out.extend_from_slice(&s.counter.to_bytes());
     out.extend_from_slice(&s.index.to_le_bytes());
 }
 
-fn get_sale(r: &mut Reader<'_>) -> Result<SaleKey, DecodeError> {
+pub(crate) fn get_sale(r: &mut Reader<'_>) -> Result<SaleKey, DecodeError> {
     Ok(SaleKey {
         counter: r.device_id()?,
         index: r.u32_le()?,
     })
 }
 
-fn put_alert(out: &mut Vec<u8>, a: &Alert) {
+pub(crate) fn put_alert(out: &mut Vec<u8>, a: &Alert) {
     out.push(a.key.kind.to_u8());
     match &a.key.subject {
         Subject::Tender(t) => {
@@ -803,9 +803,9 @@ fn put_alert(out: &mut Vec<u8>, a: &Alert) {
     }
 }
 
-fn get_alert(
+pub(crate) fn get_alert(
     r: &mut Reader<'_>,
-    orders: &BTreeMap<OrderId, PosOrder>,
+    orders: Option<&BTreeMap<OrderId, PosOrder>>,
 ) -> Result<Alert, DecodeError> {
     let kind = AlertKind::from_u8(r.u8()?)
         .ok_or(DecodeError::NonCanonical("an alert kind is not known"))?;
@@ -815,7 +815,7 @@ fn get_alert(
                 order: get_id(r)?,
                 tender: get_id(r)?,
             };
-            if !orders.contains_key(&key.order) {
+            if orders.is_some_and(|o| !o.contains_key(&key.order)) {
                 return Err(DecodeError::NonCanonical(
                     "an alert names an untracked order",
                 ));
