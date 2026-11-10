@@ -295,8 +295,8 @@ These details too leave every rule of section 4 as it is.
   matching window (PS-33, 30 minutes) ago and with no close under way. A
   sale dropped is not judged again; a match to it is kept as it is (PS-36).
   The record of its close goes with it, so the closes recorded never
-  outnumber the sales. If none can be dropped the new notice is refused with a note: nothing
-  else is ever dropped for room.
+  outnumber the sales. If none can be dropped the new notice is refused
+  with a note: nothing else is ever dropped for room.
 - **The timer.** The time is the clock the Box is given. The POS is read
   every 30 seconds, and at once at the next turn of the worker after a
   paid notice was taken; a notice that is refused does not bring a reading.
