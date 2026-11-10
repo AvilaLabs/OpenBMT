@@ -71,7 +71,8 @@ counts the bytes it wrote after the handshake and does not count a
 overhead). The old transport keeps its message-by-message count.
 
 Step 9 sends the 64 key bytes to Core's RPC (HTTP) port. That port does not
-close the connection, the handshake limit of NR-14 ends the session after 30 seconds,
+close the connection, the handshake limit of NR-14 ends the session after 30
+seconds,
 and the line `dropped NR-14: the handshake took 30 seconds or more` is
 printed. A timeout is not taken for a peer that does not speak the
 encrypted transport, so there is no second try with the old transport. The
