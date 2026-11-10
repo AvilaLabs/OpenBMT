@@ -324,7 +324,13 @@ fn sc_01_no_variant_is_missing() {
         .iter()
         .filter(|n| n.starts_with("LedgerError::Full/"))
         .collect();
-    for b in ["OpenAlert", "OpenAlert on a sale", "SaleUnsettled", "TooRecent", "none"] {
+    for b in [
+        "OpenAlert",
+        "OpenAlert on a sale",
+        "SaleUnsettled",
+        "TooRecent",
+        "none",
+    ] {
         assert!(fulls.iter().any(|n| n.ends_with(&format!("/{b}"))), "{b}");
     }
     for w in ["tracked orders", "matches", "alerts", "other"] {

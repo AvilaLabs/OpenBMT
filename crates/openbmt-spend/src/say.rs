@@ -67,7 +67,6 @@ impl CoinError {
     }
 }
 
-
 impl PlanError {
     /// What the owner is told when no payment could be planned. Nothing was
     /// sent and nothing was stored.
@@ -576,13 +575,19 @@ pub fn all_words() -> Vec<(String, Words)> {
     );
 
     let plan: Vec<(&str, PlanError)> = vec![
-        ("PlanError::DuplicateCoin", PlanError::DuplicateCoin(outpoint)),
+        (
+            "PlanError::DuplicateCoin",
+            PlanError::DuplicateCoin(outpoint),
+        ),
         ("PlanError::NoPayments", PlanError::NoPayments),
         (
             "PlanError::SendAllNeedsOnePayment",
             PlanError::SendAllNeedsOnePayment,
         ),
-        ("PlanError::SendAllAmountGiven", PlanError::SendAllAmountGiven),
+        (
+            "PlanError::SendAllAmountGiven",
+            PlanError::SendAllAmountGiven,
+        ),
         ("PlanError::ZeroFeeRate", PlanError::ZeroFeeRate),
         ("PlanError::ChangeScript", PlanError::ChangeScript),
         (
@@ -656,10 +661,7 @@ pub fn all_words() -> Vec<(String, Words)> {
             },
         ),
         ("PlanError::Overflow", PlanError::Overflow),
-        (
-            "PlanError::Internal",
-            PlanError::Internal("a sample check"),
-        ),
+        ("PlanError::Internal", PlanError::Internal("a sample check")),
     ];
     for (name, e) in plan {
         add(name, e.words());
@@ -766,7 +768,10 @@ pub fn all_words() -> Vec<(String, Words)> {
             "FinalizeError::NotEnoughSignatures",
             FinalizeError::NotEnoughSignatures { input: 0, have: 1 },
         ),
-        ("FinalizeError::AmountOutOfRange", FinalizeError::AmountOutOfRange),
+        (
+            "FinalizeError::AmountOutOfRange",
+            FinalizeError::AmountOutOfRange,
+        ),
         (
             "FinalizeError::OutputsExceedInputs",
             FinalizeError::OutputsExceedInputs,

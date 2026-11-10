@@ -43,7 +43,9 @@ fn read_cause(e: &DecodeError) -> &'static str {
         DecodeError::Truncated => "ends too early",
         DecodeError::TrailingBytes => "has extra data after its end",
         DecodeError::BadMagic => "is not a kind of record the books know",
-        DecodeError::UnsupportedVersion(_) => "comes from a version of the app the books do not read",
+        DecodeError::UnsupportedVersion(_) => {
+            "comes from a version of the app the books do not read"
+        }
         DecodeError::TooLarge => "is larger than the books allow",
         DecodeError::NonCanonical(_) => "is written in a form the books do not accept",
         DecodeError::InvalidKey => "holds a key that is not valid",
@@ -430,7 +432,10 @@ pub fn all_words() -> Vec<(String, Words)> {
     }
     for (n, e) in [
         ("EmptyPassphrase", OpenError::EmptyPassphrase),
-        ("WrongPassphraseOrDamaged", OpenError::WrongPassphraseOrDamaged),
+        (
+            "WrongPassphraseOrDamaged",
+            OpenError::WrongPassphraseOrDamaged,
+        ),
     ] {
         add(&format!("OpenError::{n}"), e.words());
     }

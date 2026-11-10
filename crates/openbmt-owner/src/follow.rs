@@ -8,6 +8,11 @@ use crate::state::{Owner, State};
 use crate::types::{Delivery, Stage};
 use crate::MAX_CONFLICT_OUTPOINTS;
 
+/// AS-63, AS-68: the reason a refund or a cash-out carries when its
+/// transaction was reported dropped. The words of a returned entry tell it
+/// from a decline by this text.
+pub(crate) const REASON_DROPPED: &str = "the transaction was dropped";
+
 /// The refunds and the cash-out a waiting transaction pays.
 fn waiting(st: &State, txid: &Txid) -> Option<(usize, Vec<u32>)> {
     st.outbox
@@ -79,7 +84,7 @@ impl Owner {
         for id in ids {
             if let Some(stage) = next.stage_mut(id) {
                 *stage = Stage::Returned {
-                    reason: "the transaction was dropped".to_string(),
+                    reason: REASON_DROPPED.to_string(),
                 };
             }
             if let Some(list) = next.conflict_mut(id) {

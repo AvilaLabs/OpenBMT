@@ -377,7 +377,9 @@ fn read_cause(e: &DecodeError) -> &'static str {
         DecodeError::Truncated => "ends too early",
         DecodeError::TrailingBytes => "has extra data after its end",
         DecodeError::BadMagic => "is not a kind of record the Box knows",
-        DecodeError::UnsupportedVersion(_) => "comes from a version of the app the Box does not read",
+        DecodeError::UnsupportedVersion(_) => {
+            "comes from a version of the app the Box does not read"
+        }
         DecodeError::TooLarge => "is larger than the Box allows",
         DecodeError::NonCanonical(_) => "is written in a form the Box does not accept",
         DecodeError::InvalidKey => "holds a key that is not valid",
@@ -451,9 +453,11 @@ fn blocker_view(b: &Blocker) -> (&'static str, bool, Option<&OrderId>) {
                 Subject::Sale(_) => None,
             },
         ),
-        Blocker::SaleUnsettled { order, .. } => {
-            ("an order still waiting for its sale to be final", false, Some(order))
-        }
+        Blocker::SaleUnsettled { order, .. } => (
+            "an order still waiting for its sale to be final",
+            false,
+            Some(order),
+        ),
         Blocker::TooRecent { order } => ("an order that changed a moment ago", false, Some(order)),
     }
 }
@@ -566,8 +570,16 @@ impl Match {
                 "Check the pairing at the till and the counter if the amounts matter.",
             ),
         };
-        let tone = if self.by_order { Tone::Info } else { Tone::Good };
-        let who = if self.by_order { Who::Owner } else { Who::Nobody };
+        let tone = if self.by_order {
+            Tone::Info
+        } else {
+            Tone::Good
+        };
+        let who = if self.by_order {
+            Who::Owner
+        } else {
+            Who::Nobody
+        };
         let next = if self.by_order {
             next.to_string()
         } else {
@@ -684,7 +696,10 @@ pub fn all_words() -> Vec<(String, Words)> {
     ] {
         add(&format!("PosError::{n}"), e.words());
     }
-    add("CloseRefused::SaleNotPaid", CloseRefused::SaleNotPaid.words());
+    add(
+        "CloseRefused::SaleNotPaid",
+        CloseRefused::SaleNotPaid.words(),
+    );
     let sync: [(&str, SyncError<String>); 3] = [
         ("PageTooLarge", SyncError::PageTooLarge),
         ("NoProgress", SyncError::NoProgress),
@@ -711,7 +726,10 @@ pub fn all_words() -> Vec<(String, Words)> {
     ] {
         add(&format!("ModelError::{n}"), e.words());
     }
-    add("LedgerError::TooManySales", LedgerError::TooManySales.words());
+    add(
+        "LedgerError::TooManySales",
+        LedgerError::TooManySales.words(),
+    );
     add(
         "LedgerError::DuplicateSale",
         LedgerError::DuplicateSale(sale).words(),

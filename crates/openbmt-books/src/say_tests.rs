@@ -149,14 +149,10 @@ fn sc_01_no_variant_is_missing() {
         BooksError::TooMany,
         BooksError::BadOffset { minutes: 0 },
     ];
-    books.extend(
-        chains
-            .iter()
-            .map(|error| BooksError::BadChain {
-                counter,
-                error: error.clone(),
-            }),
-    );
+    books.extend(chains.iter().map(|error| BooksError::BadChain {
+        counter,
+        error: error.clone(),
+    }));
     books.extend(decodes.iter().map(|error| BooksError::BadEvent {
         counter,
         seq: 0,
@@ -182,7 +178,10 @@ fn sc_01_no_variant_is_missing() {
     ] {
         wanted.push(seal_name(&e).to_string());
     }
-    for e in [OpenError::EmptyPassphrase, OpenError::WrongPassphraseOrDamaged] {
+    for e in [
+        OpenError::EmptyPassphrase,
+        OpenError::WrongPassphraseOrDamaged,
+    ] {
         wanted.push(open_name(&e).to_string());
     }
     for name in &wanted {
