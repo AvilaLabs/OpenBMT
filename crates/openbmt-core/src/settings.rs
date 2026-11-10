@@ -160,6 +160,12 @@ impl Settings {
     /// Check the values make sense. `SignedSettings::verify` runs this after
     /// the owner signature check.
     pub fn validate(&self) -> Result<(), SettingsError> {
+        if self.version == 0 {
+            return Err(SettingsError::Invalid("version must be at least 1"));
+        }
+        if self.devices.len() > MAX_DEVICES {
+            return Err(SettingsError::Invalid("more than 256 devices"));
+        }
         if self.underpayment_tolerance_bps > MAX_TOLERANCE_BPS {
             return Err(SettingsError::Invalid(
                 "underpayment tolerance is above 500 basis points",
@@ -191,8 +197,25 @@ impl Settings {
         Ok(())
     }
 
+    /// The counters, as the set the Key app passes to
+    /// [`Approver::check_and_cosign`](crate::batch::Approver::check_and_cosign)
+    /// as `approved_counters`: the keys of `counters`.
+    ///
+    /// A counter may hold a share of 0. It is in this set, so it gets
+    /// address batches, but its slice is 0 satoshis, so it never accepts a
+    /// payment as instant.
+    pub fn counter_set(&self) -> BTreeSet<DeviceId> {
+        self.counters.keys().copied().collect()
+    }
+
     /// Canonical bytes: fixed field order, little-endian numbers, devices
-    /// sorted.
+    /// and counters sorted by key.
+    ///
+    /// The two list lengths are written as `u32`. `validate` limits the
+    /// device list to [`MAX_DEVICES`] entries, and counters must be devices,
+    /// so for validated settings the conversion cannot fail. Calling this
+    /// directly on hand-built settings with 2^32 or more entries in a list
+    /// panics rather than truncating the length.
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(256 + self.devices.len() * 32 + self.counters.len() * 34);
         out.extend_from_slice(&self.version.to_le_bytes());
@@ -205,11 +228,11 @@ impl Settings {
         out.extend_from_slice(&self.heartbeat_max_age_secs.to_le_bytes());
         out.push(u8::from(self.tor_on));
         out.push(u8::from(self.customer_wifi));
-        out.extend_from_slice(&(self.devices.len() as u32).to_le_bytes());
+        out.extend_from_slice(&wire::len_u32(self.devices.len()).to_le_bytes());
         for d in &self.devices {
             out.extend_from_slice(&d.to_bytes());
         }
-        out.extend_from_slice(&(self.counters.len() as u32).to_le_bytes());
+        out.extend_from_slice(&wire::len_u32(self.counters.len()).to_le_bytes());
         for (d, share) in &self.counters {
             out.extend_from_slice(&d.to_bytes());
             out.extend_from_slice(&share.to_le_bytes());
@@ -902,7 +925,8 @@ mod tests {
     #[test]
     fn version_must_increase() {
         let (o, a, roots) = roots();
-        let cur = base();
+        let mut cur = base();
+        cur.version = 5;
         for v in [cur.version, cur.version - 1] {
             let mut new = cur.clone();
             new.version = v;
@@ -1271,6 +1295,73 @@ mod tests {
             store.apply(signed),
             Err(SettingsError::StaleVersion { current: 0, got: 0 })
         );
+    }
+
+    #[test]
+    fn validate_rejects_version_zero() {
+        let mut s = base();
+        s.version = 0;
+        assert_eq!(
+            s.validate(),
+            Err(SettingsError::Invalid("version must be at least 1"))
+        );
+        // Settings with version 0 do not verify even for a first install.
+        let (o, a, roots) = roots();
+        let signed = SignedSettings {
+            owner_sig: s.sign(&o),
+            approver_sig: Some(s.sign(&a)),
+            settings: s,
+        };
+        assert_eq!(
+            signed.verify(&roots, None),
+            Err(SettingsError::Invalid("version must be at least 1"))
+        );
+    }
+
+    #[test]
+    fn validate_limits_the_device_list() {
+        let device = |i: u16| {
+            let mut secret = [0u8; 32];
+            secret[..2].copy_from_slice(&(i + 1).to_le_bytes());
+            Identity::from_secret_bytes(&secret).unwrap().device_id()
+        };
+        let mut s = base();
+        s.devices = (0..MAX_DEVICES as u16).map(device).collect();
+        assert_eq!(s.devices.len(), MAX_DEVICES);
+        assert_eq!(s.validate(), Ok(()));
+        s.devices.insert(device(MAX_DEVICES as u16));
+        assert_eq!(
+            s.validate(),
+            Err(SettingsError::Invalid("more than 256 devices"))
+        );
+        // Counters must be devices, so the counter list is bounded too.
+        s.counters = s.devices.iter().copied().map(|d| (d, 1)).collect();
+        assert!(s.validate().is_err());
+    }
+
+    #[test]
+    fn counter_set_holds_every_counter_including_a_zero_share() {
+        let (full, none, stranger) = (identity(40), identity(41), identity(42));
+        let mut s = base();
+        s.devices = [&full, &none, &stranger]
+            .iter()
+            .map(|i| i.device_id())
+            .collect();
+        s.counters = BTreeMap::from([(full.device_id(), 10_000), (none.device_id(), 0)]);
+        assert_eq!(s.validate(), Ok(()));
+        let set = s.counter_set();
+        assert_eq!(set, BTreeSet::from([full.device_id(), none.device_id()]));
+        assert!(!set.contains(&stranger.device_id()));
+        // The zero-share counter gets addresses but no instant acceptance.
+        for mode in [
+            CheckMode::Light,
+            CheckMode::NodeAlsoSeenByLight,
+            CheckMode::BoxReportsOnly,
+        ] {
+            assert_eq!(s.slice_sats(&none.device_id(), mode), 0);
+            assert_eq!(s.slice_sats(&full.device_id(), mode), s.budget(mode).sats);
+        }
+        assert!(Settings::defaults(RATE).counter_set().is_empty());
     }
 
     // Offsets in a settings message: magic 0..4, version 4, settings

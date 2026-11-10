@@ -24,8 +24,8 @@ batch, record or setting is.
   Signing and verifying always go through a tag.
 - **Address batches** (`batch`). A counter's contiguous range of receive
   addresses, valid only with the owner and Key app signatures. It includes the
-  Key app's check (known counter, re-derive, compare, no gap or overlap,
-  co-sign; a batch for a counter not on the device list is refused) and the
+  Key app's check (right wallet, shape, the owner's signature, known counter,
+  no gap or overlap, re-derive and compare, store the mark, then co-sign) and the
   counter's `next_address` state, which never hands out a script twice and
   returns nothing when the range is empty.
 - **Records** (`records`). Signed records, each carrying the hash of the one
@@ -66,8 +66,6 @@ batch, record or setting is.
   sats-per-dollar number from the caller.
 - No transaction building or signing, and no PSBT checks (the Key app's
   signing rules live elsewhere).
-- No verification of the owner's signature inside the Key app's batch check;
-  the counter does that when it takes the batch.
 
 ## Tests
 

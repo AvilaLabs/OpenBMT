@@ -472,10 +472,23 @@ impl Approver {
         self.identity.device_id()
     }
 
-    /// Check the batch is for a counter in `approved_counters` (the Key app's
-    /// device list), re-derive its range from `own_wallet`, compare the hash,
-    /// check the range starts exactly at the high-water mark (no gap, no
-    /// overlap), then co-sign and advance the mark.
+    /// Check a batch and co-sign it. `owner` is the pinned owner root and
+    /// `owner_sig` the owner's signature over the batch hash; without a valid
+    /// owner signature nobody else can make the Key app use up address
+    /// indexes. The checks run in this order, and the first failure ends the
+    /// call:
+    ///
+    /// 1. the batch is for `own_wallet` (no hashing needed);
+    /// 2. the batch has a valid shape (the batch is untrusted, so this comes
+    ///    before it is encoded and hashed);
+    /// 3. `owner` differs from this approver's own root, and `owner_sig` is
+    ///    a valid signature by `owner` over the batch hash;
+    /// 4. the batch is for a counter in `approved_counters` (the Key app's
+    ///    device list; `Settings::counter_set` gives it);
+    /// 5. the range is in bounds and starts exactly at the high-water mark
+    ///    (no gap, no overlap);
+    /// 6. re-deriving the range from `own_wallet` gives the same hash;
+    /// 7. the new mark is stored (`persist`), then the batch is signed.
     ///
     /// The new mark is computed on a copy and handed to `persist`. Only if
     /// `persist` returns `Ok` is the caller's `high_water` updated and the
@@ -490,10 +503,22 @@ impl Approver {
         batch: &AddressBatch,
         high_water: &mut HighWater,
         approved_counters: &BTreeSet<DeviceId>,
+        owner: &DeviceId,
+        owner_sig: &Sig,
         persist: impl FnOnce(&HighWater) -> Result<(), E>,
     ) -> Result<Sig, CosignError<E>> {
         if batch.wallet_checksum != own_wallet.checksum32() {
             return Err(BatchError::WrongWallet.into());
+        }
+        // `batch` is untrusted: its scripts must pass the shape check before
+        // they are encoded and hashed.
+        batch.check_shape(&self.builder.policy)?;
+        if *owner == self.identity.device_id() {
+            return Err(BatchError::SameRoot.into());
+        }
+        let digest = batch.hash();
+        if !owner.verify_digest(&digest, owner_sig) {
+            return Err(BatchError::OwnerSignatureInvalid.into());
         }
         if !approved_counters.contains(&batch.counter) {
             return Err(BatchError::UnknownCounter.into());
@@ -516,19 +541,16 @@ impl Approver {
             }
             std::cmp::Ordering::Equal => {}
         }
-        // `batch` is untrusted: its scripts must pass the shape check before
-        // they are encoded and hashed, and before any derivation work is done.
-        batch.check_shape(&self.builder.policy)?;
         let own = self
             .builder
             .derive(own_wallet, batch.counter, batch.start, batch.count)?;
-        if own.hash() != batch.hash() {
+        if own.hash() != digest {
             return Err(BatchError::HashMismatch.into());
         }
         let new_mark = HighWater(end);
         persist(&new_mark).map_err(CosignError::Persist)?;
         *high_water = new_mark;
-        Ok(self.identity.sign_digest(&own.hash()))
+        Ok(self.identity.sign_digest(&digest))
     }
 }
 
@@ -908,7 +930,16 @@ mod tests {
             hw: &mut HighWater,
             approved: &BTreeSet<DeviceId>,
         ) -> Result<Sig, BatchError> {
-            match self.check_and_cosign(wallet, batch, hw, approved, persist_ok) {
+            let owner = identity(10);
+            match self.check_and_cosign(
+                wallet,
+                batch,
+                hw,
+                approved,
+                &owner.device_id(),
+                &batch.sign(&owner),
+                persist_ok,
+            ) {
                 Ok(sig) => Ok(sig),
                 Err(CosignError::Refused(e)) => Err(e),
                 Err(CosignError::Persist(never)) => match never {},
@@ -1379,11 +1410,22 @@ mod tests {
         // An oversized script would otherwise reach `encode`.
         b.scripts[1] = ScriptBuf::from_bytes(vec![0x51; 70_000]);
         let mut hw = HighWater::new();
+        // The owner signature cannot be made for such a batch (hashing it
+        // would panic), so a placeholder is passed: the shape error must
+        // come first.
         assert_eq!(
             f.key_app
-                .cosign(&f.wallet, &b, &mut hw, &f.approved)
+                .check_and_cosign(
+                    &f.wallet,
+                    &b,
+                    &mut hw,
+                    &f.approved,
+                    &f.owner.device_id(),
+                    &Sig([0; 64]),
+                    persist_ok,
+                )
                 .unwrap_err(),
-            BatchError::UnexpectedScriptType
+            CosignError::Refused(BatchError::UnexpectedScriptType)
         );
         assert_eq!(hw.next_index(), 0);
     }
@@ -1541,21 +1583,41 @@ mod tests {
         assert_eq!(c.retire_ok(), 0);
     }
 
+    /// The Key app check with the real owner's signature and a chosen store.
+    fn cosign_with<E>(
+        f: &Fx,
+        batch: &AddressBatch,
+        hw: &mut HighWater,
+        persist: impl FnOnce(&HighWater) -> Result<(), E>,
+    ) -> Result<Sig, CosignError<E>> {
+        f.key_app.check_and_cosign(
+            &f.wallet,
+            batch,
+            hw,
+            &f.approved,
+            &f.owner.device_id(),
+            &batch.sign(&f.owner),
+            persist,
+        )
+    }
+
+    fn plain_batch(f: &Fx, start: u32) -> AddressBatch {
+        BatchBuilder::new(SMALL)
+            .derive(&f.wallet, f.counter, start, 3)
+            .unwrap()
+    }
+
     #[test]
     fn cosign_stores_the_new_mark_before_it_signs() {
         let f = fx();
-        let batch = BatchBuilder::new(SMALL)
-            .derive(&f.wallet, f.counter, 0, 3)
-            .unwrap();
+        let batch = plain_batch(&f, 0);
         let mut hw = HighWater::new();
         let mut handed = None;
-        let sig = f
-            .key_app
-            .check_and_cosign(&f.wallet, &batch, &mut hw, &f.approved, |m: &HighWater| {
-                handed = Some(*m);
-                Ok::<(), Infallible>(())
-            })
-            .unwrap();
+        let sig = cosign_with(&f, &batch, &mut hw, |m: &HighWater| {
+            handed = Some(*m);
+            Ok::<(), Infallible>(())
+        })
+        .unwrap();
         assert_eq!(handed, Some(hw));
         assert_eq!(hw.next_index(), 3);
         assert!(f.key_app.device_id().verify_digest(&batch.hash(), &sig));
@@ -1564,39 +1626,29 @@ mod tests {
     #[test]
     fn cosign_with_a_failing_store_signs_nothing_and_keeps_the_mark() {
         let f = fx();
-        let batch = BatchBuilder::new(SMALL)
-            .derive(&f.wallet, f.counter, 4, 3)
-            .unwrap();
+        let batch = plain_batch(&f, 4);
         let mut hw = HighWater::from_next_index(4);
         let before = hw.to_bytes();
         assert_eq!(
-            f.key_app
-                .check_and_cosign(&f.wallet, &batch, &mut hw, &f.approved, persist_fail)
-                .unwrap_err(),
+            cosign_with(&f, &batch, &mut hw, persist_fail).unwrap_err(),
             CosignError::Persist("disk full")
         );
         assert_eq!(hw.to_bytes(), before);
         // Nothing was lost: the same range can still be signed.
-        f.key_app
-            .check_and_cosign(&f.wallet, &batch, &mut hw, &f.approved, persist_ok)
-            .unwrap();
+        cosign_with(&f, &batch, &mut hw, persist_ok).unwrap();
         assert_eq!(hw.next_index(), 7);
     }
 
     #[test]
     fn cosign_does_not_call_the_store_for_a_refused_batch() {
         let f = fx();
-        let batch = BatchBuilder::new(SMALL)
-            .derive(&f.wallet, f.counter, 9, 3)
-            .unwrap();
+        let batch = plain_batch(&f, 9);
         let mut hw = HighWater::new();
         let mut called = false;
-        let r =
-            f.key_app
-                .check_and_cosign(&f.wallet, &batch, &mut hw, &f.approved, |_: &HighWater| {
-                    called = true;
-                    Ok::<(), Infallible>(())
-                });
+        let r = cosign_with(&f, &batch, &mut hw, |_: &HighWater| {
+            called = true;
+            Ok::<(), Infallible>(())
+        });
         assert_eq!(
             r.unwrap_err(),
             CosignError::Refused(BatchError::Gap {
@@ -1605,6 +1657,108 @@ mod tests {
             })
         );
         assert!(!called);
+    }
+
+    #[test]
+    fn cosign_refuses_a_batch_signed_by_a_stranger() {
+        let f = fx();
+        let batch = plain_batch(&f, 0);
+        let mut hw = HighWater::new();
+        let stranger = identity(99);
+        let mut called = false;
+        let r = f.key_app.check_and_cosign(
+            &f.wallet,
+            &batch,
+            &mut hw,
+            &f.approved,
+            &f.owner.device_id(),
+            &batch.sign(&stranger),
+            |_: &HighWater| {
+                called = true;
+                Ok::<(), Infallible>(())
+            },
+        );
+        assert_eq!(
+            r.unwrap_err(),
+            CosignError::Refused(BatchError::OwnerSignatureInvalid)
+        );
+        assert_eq!(hw, HighWater::new());
+        assert!(!called);
+        // The same batch, signed by the owner, goes through.
+        cosign_with(&f, &batch, &mut hw, persist_ok).unwrap();
+    }
+
+    #[test]
+    fn cosign_refuses_an_owner_signature_over_a_different_batch() {
+        let f = fx();
+        let batch = plain_batch(&f, 0);
+        let other = plain_batch(&f, 3);
+        let mut hw = HighWater::new();
+        assert_eq!(
+            f.key_app
+                .check_and_cosign(
+                    &f.wallet,
+                    &batch,
+                    &mut hw,
+                    &f.approved,
+                    &f.owner.device_id(),
+                    &other.sign(&f.owner),
+                    persist_ok,
+                )
+                .unwrap_err(),
+            CosignError::Refused(BatchError::OwnerSignatureInvalid)
+        );
+        assert_eq!(hw, HighWater::new());
+    }
+
+    #[test]
+    fn cosign_refuses_an_owner_that_is_the_approver_itself() {
+        let f = fx();
+        let batch = plain_batch(&f, 0);
+        let mut hw = HighWater::new();
+        // The approver's own valid signature does not make it the owner.
+        let own_sig = batch.sign(&f.key_app.identity);
+        assert_eq!(
+            f.key_app
+                .check_and_cosign(
+                    &f.wallet,
+                    &batch,
+                    &mut hw,
+                    &f.approved,
+                    &f.key_app.device_id(),
+                    &own_sig,
+                    persist_ok,
+                )
+                .unwrap_err(),
+            CosignError::Refused(BatchError::SameRoot)
+        );
+        assert_eq!(hw, HighWater::new());
+    }
+
+    #[test]
+    fn cosign_checks_the_owner_before_the_counter_and_the_mark() {
+        let f = fx();
+        // Unknown counter and a gap, but also a bad owner signature: the
+        // signature is reported, so a stranger learns nothing else.
+        let stranger_counter = identity(98).device_id();
+        let batch = BatchBuilder::new(SMALL)
+            .derive(&f.wallet, stranger_counter, 50, 3)
+            .unwrap();
+        let mut hw = HighWater::new();
+        assert_eq!(
+            f.key_app
+                .check_and_cosign(
+                    &f.wallet,
+                    &batch,
+                    &mut hw,
+                    &f.approved,
+                    &f.owner.device_id(),
+                    &Sig([0; 64]),
+                    persist_ok,
+                )
+                .unwrap_err(),
+            CosignError::Refused(BatchError::OwnerSignatureInvalid)
+        );
     }
 
     #[test]
