@@ -1,0 +1,453 @@
+//! Why the counter refused something.
+//!
+//! Every refusal names the rule of `docs/COUNTER-RULES.md` that it enforces
+//! ([`OpenRefused::rule`] and the like), and its `Display` text starts with
+//! the rule ID. A refusal means the step did not happen; what had already
+//! been stored by an earlier write of the same step is described on the
+//! method that returns it.
+
+use std::fmt;
+
+use openbmt_core::command::CommandError;
+use openbmt_core::records::ChainError;
+use openbmt_core::wire::DecodeError;
+use openbmt_watch::{Problem, Refusal};
+
+use crate::screen::{problem_text, State};
+use crate::store::StoreFault;
+
+/// Why a sale was not opened (CR-01 to CR-04, CR-09, CR-17).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpenRefused<E> {
+    /// CR-09: a rescan is pending after a restore or a reset.
+    RescanPending,
+    /// CR-01: the check is not healthy; the problem is named when known.
+    Unhealthy(Option<Problem>),
+    /// CR-05: the amount is zero.
+    ZeroAmount,
+    /// CR-05: the amount needs more than 21,000,000 bitcoin at the rate.
+    AmountTooLarge,
+    /// CR-17: the amount needs less than the dust line, so a payment for it
+    /// would be dust.
+    BelowDust {
+        /// What the amount needs at the rate.
+        needs_sats: u64,
+    },
+    /// CR-04: too many addresses were handed out in the last hour.
+    RateLimited,
+    /// CR-02: no address is left in the batches.
+    NoAddress,
+    /// CR-02: the address the batches handed out is already used by a sale.
+    AddressInUse,
+    /// CR-03: the next index could not be stored, so no address was handed
+    /// out.
+    AddressNotStored(StoreFault<E>),
+    /// CR-40: another write failed.
+    Store(StoreFault<E>),
+}
+
+impl<E> OpenRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::RescanPending => "CR-09",
+            Self::Unhealthy(_) => "CR-01",
+            Self::ZeroAmount | Self::AmountTooLarge => "CR-05",
+            Self::BelowDust { .. } => "CR-17",
+            Self::RateLimited => "CR-04",
+            Self::NoAddress | Self::AddressInUse => "CR-02",
+            Self::AddressNotStored(_) => "CR-03",
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for OpenRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::RescanPending => write!(
+                f,
+                "a rescan is pending; do not offer Bitcoin, use another payment type"
+            ),
+            Self::Unhealthy(p) => write!(
+                f,
+                "the check is not healthy ({}); do not offer Bitcoin, use another payment type",
+                problem_text(*p)
+            ),
+            Self::ZeroAmount => write!(f, "a sale needs an amount"),
+            Self::AmountTooLarge => write!(f, "the amount is more than all the bitcoin there is"),
+            Self::BelowDust { needs_sats } => write!(
+                f,
+                "the amount is only {needs_sats} sats, below the dust line; use another payment type"
+            ),
+            Self::RateLimited => write!(
+                f,
+                "too many addresses were handed out in the last hour; try again later"
+            ),
+            Self::NoAddress => write!(f, "no address is left; do not offer Bitcoin"),
+            Self::AddressInUse => write!(f, "the address is already used by another sale"),
+            Self::AddressNotStored(e) => write!(
+                f,
+                "the next address was not stored, so none was handed out: {e}"
+            ),
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for OpenRefused<E> {}
+
+/// Why a sale could not be judged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JudgeError<E> {
+    /// CR-11: the counter has no sale with this index.
+    UnknownSale(u32),
+    /// CR-40: a write failed. The caller must treat the sale as not safe
+    /// and ask again; nothing was reported.
+    Store(StoreFault<E>),
+}
+
+impl<E> JudgeError<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::UnknownSale(_) => "CR-11",
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E> From<StoreFault<E>> for JudgeError<E> {
+    fn from(e: StoreFault<E>) -> Self {
+        Self::Store(e)
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for JudgeError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::UnknownSale(i) => write!(f, "there is no sale with index {i}"),
+            Self::Store(e) => write!(f, "{e}; do not hand over, ask again"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for JudgeError<E> {}
+
+/// Why a new quote was refused (CR-05, CR-08).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequoteRefused<E> {
+    /// CR-11: the counter has no sale with this index.
+    UnknownSale(u32),
+    /// CR-05: the sale has ended.
+    SaleEnded,
+    /// CR-08: enough has arrived; the sale takes no new quote.
+    AlreadyEnough,
+    /// CR-05: the sale already has the most quotes.
+    TooManyQuotes,
+    /// CR-05: the amount needs more than 21,000,000 bitcoin at the rate.
+    AmountTooLarge,
+    /// CR-40: a write failed.
+    Store(StoreFault<E>),
+}
+
+impl<E> RequoteRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::UnknownSale(_) => "CR-11",
+            Self::SaleEnded | Self::TooManyQuotes | Self::AmountTooLarge => "CR-05",
+            Self::AlreadyEnough => "CR-08",
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for RequoteRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::UnknownSale(i) => write!(f, "there is no sale with index {i}"),
+            Self::SaleEnded => write!(f, "the sale has ended and takes no new quote"),
+            Self::AlreadyEnough => write!(f, "enough has arrived; the sale takes no new quote"),
+            Self::TooManyQuotes => write!(f, "the sale has the most quotes it can keep"),
+            Self::AmountTooLarge => write!(f, "the amount is more than all the bitcoin there is"),
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for RequoteRefused<E> {}
+
+/// Why a sale was not cancelled (CR-07).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CancelRefused<E> {
+    /// CR-11: the counter has no sale with this index.
+    UnknownSale(u32),
+    /// CR-07: the sale has already ended.
+    AlreadyEnded,
+    /// CR-07: something has arrived for the sale. Money on a cancelled sale
+    /// is a matter for the refund flow, not for cancelling.
+    MoneyArrived,
+    /// CR-40: a write failed.
+    Store(StoreFault<E>),
+}
+
+impl<E> CancelRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::UnknownSale(_) => "CR-11",
+            Self::AlreadyEnded | Self::MoneyArrived => "CR-07",
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for CancelRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::UnknownSale(i) => write!(f, "there is no sale with index {i}"),
+            Self::AlreadyEnded => write!(f, "the sale has already ended"),
+            Self::MoneyArrived => write!(
+                f,
+                "something has arrived for this sale; it cannot be cancelled, \
+                 money on it is for the refund flow"
+            ),
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for CancelRefused<E> {}
+
+/// Why an override was refused (CR-20 to CR-22).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverrideRefused<E> {
+    /// CR-11: the counter has no sale with this index.
+    UnknownSale(u32),
+    /// CR-22: the person's name is empty or too long.
+    BadName,
+    /// CR-20: the sale is in a state a person may not accept.
+    WrongState(State),
+    /// CR-21: a cashier's override is above the per-sale instant limit.
+    OverSaleLimit {
+        /// The amount at risk.
+        sats: u64,
+        /// The limit.
+        limit: u64,
+    },
+    /// CR-21: it would take the cashier's last 24 hours past the daily cap.
+    OverDailyCap {
+        /// The amount at risk.
+        sats: u64,
+        /// The cashier's overrides inside the window already.
+        already: u64,
+        /// The cap.
+        cap: u64,
+    },
+    /// CR-21: it would take the manager's last 24 hours past the ceiling.
+    OverCeiling {
+        /// The amount at risk.
+        sats: u64,
+        /// The manager's overrides inside the window already.
+        already: u64,
+        /// The ceiling.
+        ceiling: u64,
+    },
+    /// CR-21: the desk keeps no more override entries until older ones leave
+    /// the window.
+    TooManyOverrides,
+    /// CR-20: the exposure ledger has no room for the amount.
+    NoRoom,
+    /// The sale could not be judged first.
+    Judge(JudgeError<E>),
+    /// CR-40: a write failed.
+    Store(StoreFault<E>),
+}
+
+impl<E> OverrideRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::UnknownSale(_) | Self::WrongState(_) | Self::NoRoom => "CR-20",
+            Self::BadName => "CR-22",
+            Self::OverSaleLimit { .. }
+            | Self::OverDailyCap { .. }
+            | Self::OverCeiling { .. }
+            | Self::TooManyOverrides => "CR-21",
+            Self::Judge(e) => e.rule(),
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for OverrideRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::UnknownSale(i) => write!(f, "there is no sale with index {i}"),
+            Self::BadName => write!(f, "the person needs a name of 1 to 64 bytes"),
+            Self::WrongState(s) => write!(f, "a sale that shows \"{}\" cannot be accepted", s.name()),
+            Self::OverSaleLimit { sats, limit } => write!(
+                f,
+                "{sats} sats is above the {limit} sats a cashier may accept"
+            ),
+            Self::OverDailyCap { sats, already, cap } => write!(
+                f,
+                "{sats} sats on top of {already} sats in the last 24 hours is above the cashier's cap of {cap} sats"
+            ),
+            Self::OverCeiling {
+                sats,
+                already,
+                ceiling,
+            } => write!(
+                f,
+                "{sats} sats on top of {already} sats in the last 24 hours is above the manager's ceiling of {ceiling} sats"
+            ),
+            Self::TooManyOverrides => write!(f, "too many overrides in the last 24 hours"),
+            Self::NoRoom => write!(f, "the exposure ledger has no room for this amount"),
+            Self::Judge(e) => write!(f, "{e}"),
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for OverrideRefused<E> {}
+
+/// Why an owner command was not carried out (CR-14, CR-40).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandRefused<E> {
+    /// CR-14: the command is not for this counter, is not numbered above
+    /// the last one taken, or is not signed by the owner. Nothing changed.
+    Refused(CommandError),
+    /// CR-40: a write failed. If the command number was stored, the command
+    /// is used up even though its action may not have happened: a command
+    /// that could be played again is worse than one that is lost, and the
+    /// owner can send another.
+    Store(StoreFault<E>),
+}
+
+impl<E> CommandRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::Refused(_) => "CR-14",
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for CommandRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::Refused(e) => write!(f, "{e}"),
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for CommandRefused<E> {}
+
+/// Why a sighting was not taken (WR-40, CR-40).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SightingError<E> {
+    /// The bytes are not a transaction. Nothing changed.
+    Refused(Refusal),
+    /// CR-40: a write failed. Sales stored before it keep what they took;
+    /// offering the sighting again is safe.
+    Store(StoreFault<E>),
+}
+
+impl<E> SightingError<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::Refused(r) => r.rule(),
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for SightingError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(r) => write!(f, "{r}"),
+            Self::Store(e) => write!(f, "{}: {e}", self.rule()),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for SightingError<E> {}
+
+/// Why a block was not taken (WR-01, CR-40).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BlockError<E> {
+    /// The block is not on the chain now. Nothing changed.
+    Refused(Refusal),
+    /// CR-40: a write failed. Sales stored before it keep what they took;
+    /// offering the block again is safe.
+    Store(StoreFault<E>),
+}
+
+impl<E> BlockError<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::Refused(r) => r.rule(),
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for BlockError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(r) => write!(f, "{r}"),
+            Self::Store(e) => write!(f, "{}: {e}", self.rule()),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for BlockError<E> {}
+
+/// Why stored state was not accepted when the counter started (CR-42).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoadError {
+    /// CR-42: the stored address batches do not read back.
+    Batches(DecodeError),
+    /// CR-42: the stored exposure ledger does not read back.
+    Exposure(DecodeError),
+    /// CR-42: the stored pause tracker does not read back.
+    Pause(DecodeError),
+    /// CR-42: the stored desk does not read back.
+    Desk(DecodeError),
+    /// CR-42: the stored record chain does not verify.
+    Records(ChainError),
+}
+
+impl LoadError {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        "CR-42"
+    }
+}
+
+impl fmt::Display for LoadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::Batches(e) => write!(f, "the stored address batches do not read back: {e}"),
+            Self::Exposure(e) => write!(f, "the stored exposure ledger does not read back: {e}"),
+            Self::Pause(e) => write!(f, "the stored pause state does not read back: {e}"),
+            Self::Desk(e) => write!(f, "the stored counter state does not read back: {e}"),
+            Self::Records(e) => write!(f, "the stored records do not verify: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for LoadError {}

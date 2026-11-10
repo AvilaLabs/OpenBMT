@@ -1,0 +1,1478 @@
+//! The counter: its sales, its ledger and its screens (CR-01 to CR-42).
+//!
+//! A [`Counter`] owns the state a counter must keep and nothing that it must
+//! fetch. Every method that changes anything takes a [`Store`]. The rule for
+//! all of them is the same: build the new value, hand its bytes to the
+//! store, and put the value in place only if the store said `Ok`. Where a
+//! step writes more than once, the order is chosen so that stopping between
+//! any two writes leaves the shop on the safe side (CR-41); each method says
+//! what its order is and why.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use bitcoin::consensus::deserialize;
+use bitcoin::hashes::Hash;
+use bitcoin::{ScriptBuf, Transaction, Txid};
+use openbmt_core::batch::{AddError, BatchPolicy, CounterBatches, PinnedRoots, SignedBatch};
+use openbmt_core::command::{Action, SignedCommand};
+use openbmt_core::identity::{DeviceId, Identity};
+use openbmt_core::policy::{
+    amount_at_risk, evaluate, CheckMode, Decision, Exposure, ExposureError, ExposureWriteError,
+    Heartbeat, Inputs, InstantPolicy, PauseStatus, PauseTracker, PaymentId,
+};
+use openbmt_core::records::{AppendError, Chain, DeviceList};
+use openbmt_core::settings::Settings;
+use openbmt_watch::{HeaderChain, Health, Refusal, Sighted, Source, WellFormedBlock};
+
+use crate::desk::{valid_name, Desk, OverrideEntry, Role};
+use crate::events::Event;
+use crate::money::{sats_for, Amount, Currency, Quote, Rate};
+use crate::refusal::{
+    BlockError, CancelRefused, CommandRefused, JudgeError, LoadError, OpenRefused, OverrideRefused,
+    RequoteRefused, SightingError,
+};
+use crate::sale::{End, OverrideMark, PosState, Sale};
+use crate::screen::{Next, Report, Screen, State, Why};
+use crate::store::{Slot, Store, StoreFault};
+use crate::{DUST_SATS, EXPIRY_SECS, MAX_LATE_PAYMENTS, MAX_QUOTES, STUCK_SECS};
+use openbmt_core::policy::{OffReason, WaitReason};
+
+/// What a counter was paired with: the roots it pinned, the wallet it
+/// belongs to and the rule for the size of a batch.
+#[derive(Debug, Clone, Copy)]
+pub struct Pairing {
+    /// The owner and Key app roots pinned at pairing.
+    pub roots: PinnedRoots,
+    /// The checksum of the wallet description.
+    pub wallet_checksum: [u8; 32],
+    /// How big a batch must be.
+    pub batch_policy: BatchPolicy,
+}
+
+/// What the store holds, as read back at start (CR-42). A slot that holds
+/// nothing is `None` (a counter that has never run).
+#[derive(Debug, Clone, Default)]
+pub struct Stored<'a> {
+    /// The address batches (`OBMC`).
+    pub batches: Option<&'a [u8]>,
+    /// The exposure ledger (`OBME`).
+    pub exposure: Option<&'a [u8]>,
+    /// The pause tracker (`OBMP`).
+    pub pause: Option<&'a [u8]>,
+    /// The desk (`OBMG`).
+    pub desk: Option<&'a [u8]>,
+    /// Each sale (`OBML`) with the index of the slot it was in.
+    pub sales: Vec<(u32, &'a [u8])>,
+    /// The record log, as read back.
+    pub records: Chain,
+}
+
+/// What opening a sale needs to know (CR-01, CR-04, CR-09).
+#[derive(Debug, Clone, Copy)]
+pub struct OpenFacts {
+    /// The answer of the watcher's health check, now.
+    pub health: Health,
+    /// A rescan is pending after a restore or a reset (CR-09).
+    pub rescan_pending: bool,
+    /// The time, in seconds.
+    pub now: u64,
+}
+
+/// A sale that was opened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Opened {
+    /// The receive index.
+    pub index: u32,
+    /// The address script to show the customer.
+    pub script: ScriptBuf,
+    /// What the first quote asks for, in satoshis.
+    pub needs_sats: u64,
+    /// The first quote.
+    pub quote: Quote,
+}
+
+/// What judging a sale needs to know (CR-12).
+pub struct Facts<'a, C: HeaderChain + ?Sized> {
+    /// The header chain.
+    pub chain: &'a C,
+    /// The answer of the watcher's health check, now.
+    pub health: Health,
+    /// The owner-phone heartbeat.
+    pub heartbeat: Heartbeat,
+    /// The order is a remote or online order.
+    pub remote_order: bool,
+    /// The time, in seconds.
+    pub now: u64,
+}
+
+/// The person who overrides (CR-21). The caller has already checked the PIN.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Actor {
+    /// Cashier or manager.
+    pub role: Role,
+    /// Who.
+    pub name: String,
+}
+
+/// What offering one transaction did (see [`Counter::sighting`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Sightings {
+    /// For each sale the transaction touched, what the watcher said. Sales
+    /// that ignored it are not listed. A refusal from one sale does not stop
+    /// the others.
+    pub results: Vec<(u32, Result<Sighted, Refusal>)>,
+    /// Late payments (CR-19), stored first.
+    pub reports: Vec<Report>,
+}
+
+/// What one block did to one sale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockEffect {
+    /// Payments the block proved for the sale.
+    pub payments: usize,
+    /// Spends of the sale's coins by other transactions.
+    pub spends: usize,
+}
+
+/// What taking one block did (see [`Counter::block`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BlockTaken {
+    /// For each sale the block touched, what it did or why the watcher
+    /// refused.
+    pub results: Vec<(u32, Result<BlockEffect, Refusal>)>,
+    /// Late payments (CR-19), stored first.
+    pub reports: Vec<Report>,
+}
+
+/// CR-13: the id of a sale in the exposure ledger: the word `sale`, the
+/// index (u32 LE) and zeros. It is under the sale, not under a transaction,
+/// because a fee bump changes the transaction.
+pub fn sale_payment_id(index: u32) -> PaymentId {
+    let mut id = [0u8; 32];
+    let index_bytes = index.to_le_bytes();
+    let head = b"sale".iter().chain(index_bytes.iter());
+    for (dst, src) in id.iter_mut().zip(head) {
+        *dst = *src;
+    }
+    PaymentId(id)
+}
+
+/// Why accepting at once did not happen (CR-13).
+enum AcceptFail {
+    SliceFull,
+    NotStored,
+}
+
+fn put<S: Store>(store: &mut S, slot: Slot, bytes: &[u8]) -> Result<(), StoreFault<S::Error>> {
+    store.put(slot, bytes).map_err(StoreFault::Write)
+}
+
+fn screen_of(state: State, why: Why, next: Next) -> Screen {
+    Screen {
+        state,
+        why,
+        next,
+        received_sats: 0,
+        needs_sats: 0,
+        stuck: false,
+        late: false,
+        check_mode: None,
+        conflict_seen: false,
+        reopened: false,
+        reports: Vec::new(),
+    }
+}
+
+fn ended_screen(sale: &Sale, end: End) -> Screen {
+    let (state, why) = match end {
+        End::Expired => (State::Expired, Why::EndedExpired),
+        End::Cancelled => (State::Cancelled, Why::EndedCancelled),
+    };
+    let mut screen = screen_of(state, why, Next::Nothing);
+    screen.needs_sats = sale.needs_sats();
+    screen.late = sale.is_late();
+    screen
+}
+
+/// The counter.
+#[derive(Debug)]
+pub struct Counter {
+    identity: Identity,
+    roots: PinnedRoots,
+    settings: Settings,
+    batches: CounterBatches,
+    exposure: Exposure,
+    pause: PauseTracker,
+    /// The pause changed in memory and its write failed. It is written again
+    /// before any payment is accepted at once (CR-14).
+    pause_unsaved: bool,
+    /// Sales whose cancel is already in the pause tracker in memory but not
+    /// yet marked on the sale, so that a retry does not count it twice.
+    cancel_applied: BTreeSet<u32>,
+    records: Chain,
+    desk: Desk,
+    sales: BTreeMap<u32, Sale>,
+    /// Scripts of sales that ended or were reported final. They stay watched
+    /// for late payments (CR-07, CR-19).
+    archived: BTreeMap<ScriptBuf, u32>,
+    /// Sales whose stored form did not read back (CR-42).
+    unreadable: BTreeSet<u32>,
+}
+
+impl Counter {
+    /// A counter that has never run, for the identity it signs records with
+    /// and the roots it was paired with. `settings` are plain: the caller
+    /// has checked them with `SettingsStore`.
+    pub fn new(identity: Identity, pairing: Pairing, settings: Settings) -> Self {
+        let me = identity.device_id();
+        Self {
+            batches: CounterBatches::new(
+                me,
+                pairing.roots,
+                pairing.wallet_checksum,
+                pairing.batch_policy,
+            ),
+            identity,
+            roots: pairing.roots,
+            settings,
+            exposure: Exposure::new(),
+            pause: PauseTracker::new(),
+            pause_unsaved: false,
+            cancel_applied: BTreeSet::new(),
+            records: Chain::new(),
+            desk: Desk::new(),
+            sales: BTreeMap::new(),
+            archived: BTreeMap::new(),
+            unreadable: BTreeSet::new(),
+        }
+    }
+
+    /// CR-42: start from what the store holds. Every slot is checked whole.
+    /// A slot of batches, ledger, pause or desk that does not read back
+    /// refuses the start: running without it could hand an address out
+    /// twice or forget exposure. A sale that does not read back is kept as
+    /// unreadable and shown as `NeedsAPerson`, never as paid. The records
+    /// are verified as a chain signed by this counter.
+    pub fn load(
+        identity: Identity,
+        pairing: Pairing,
+        settings: Settings,
+        stored: Stored<'_>,
+    ) -> Result<Self, LoadError> {
+        let me = identity.device_id();
+        let mut counter = Self::new(identity, pairing, settings);
+        if let Some(bytes) = stored.batches {
+            counter.batches = CounterBatches::from_bytes(
+                bytes,
+                me,
+                pairing.roots,
+                pairing.wallet_checksum,
+                pairing.batch_policy,
+            )
+            .map_err(LoadError::Batches)?;
+        }
+        if let Some(bytes) = stored.exposure {
+            counter.exposure = Exposure::from_bytes(bytes).map_err(LoadError::Exposure)?;
+        }
+        if let Some(bytes) = stored.pause {
+            counter.pause = PauseTracker::from_bytes(bytes).map_err(LoadError::Pause)?;
+        }
+        if let Some(bytes) = stored.desk {
+            counter.desk = Desk::from_bytes(bytes).map_err(LoadError::Desk)?;
+        }
+        stored
+            .records
+            .verify(&DeviceList::new([me]))
+            .map_err(LoadError::Records)?;
+        counter.records = stored.records;
+        for (slot_index, bytes) in stored.sales {
+            match Sale::from_bytes(bytes) {
+                Ok(sale) if sale.index == slot_index => counter.install(sale),
+                _ => {
+                    counter.unreadable.insert(slot_index);
+                }
+            }
+        }
+        Ok(counter)
+    }
+
+    /// New settings, already checked by the caller.
+    pub fn set_settings(&mut self, settings: Settings) {
+        self.settings = settings;
+    }
+
+    /// Take a new signed batch of addresses. The batches as they will be are
+    /// handed to the store first; on any error nothing changed.
+    pub fn add_batch<S: Store>(
+        &mut self,
+        signed: SignedBatch,
+        store: &mut S,
+    ) -> Result<(), AddError<S::Error>> {
+        self.batches
+            .add(signed, |bytes| store.put(Slot::Batches, bytes))
+    }
+
+    // Getters.
+
+    /// CR-14: the cancel alarm is up.
+    pub fn alarm(&self) -> bool {
+        self.desk.alarm()
+    }
+
+    /// The pause state at `now`.
+    pub fn pause_status(&self, now: u64) -> PauseStatus {
+        self.pause.status(now)
+    }
+
+    /// The pause could not be saved when it was last changed (CR-14).
+    pub fn pause_unsaved(&self) -> bool {
+        self.pause_unsaved
+    }
+
+    /// What is outstanding in the exposure ledger.
+    pub fn exposure_outstanding(&self) -> u64 {
+        self.exposure.outstanding()
+    }
+
+    /// One sale.
+    pub fn sale(&self, index: u32) -> Option<&Sale> {
+        self.sales.get(&index)
+    }
+
+    /// The indexes of sales whose stored form did not read back (CR-42).
+    pub fn unreadable(&self) -> impl Iterator<Item = u32> + '_ {
+        self.unreadable.iter().copied()
+    }
+
+    /// The counter's own state.
+    pub fn desk(&self) -> &Desk {
+        &self.desk
+    }
+
+    /// The records written so far.
+    pub fn records(&self) -> &Chain {
+        &self.records
+    }
+
+    /// The counter's identity.
+    pub fn device_id(&self) -> DeviceId {
+        self.identity.device_id()
+    }
+
+    /// The address batches.
+    pub fn batches(&self) -> &CounterBatches {
+        &self.batches
+    }
+
+    /// Every script that must stay watched: the live sales, the archived
+    /// ones (CR-07, CR-19) and everything the batches have shown or retired.
+    pub fn watched_scripts(&self) -> Vec<ScriptBuf> {
+        let mut all: BTreeSet<ScriptBuf> = self.batches.watched_scripts().iter().cloned().collect();
+        all.extend(self.sales.values().map(|s| s.script.clone()));
+        all.extend(self.archived.keys().cloned());
+        all.into_iter().collect()
+    }
+
+    // Internal helpers.
+
+    fn install(&mut self, sale: Sale) {
+        if !sale.is_live() {
+            self.archived.insert(sale.script.clone(), sale.index);
+        }
+        self.sales.insert(sale.index, sale);
+    }
+
+    fn put_sale<S: Store>(
+        &mut self,
+        store: &mut S,
+        sale: Sale,
+    ) -> Result<(), StoreFault<S::Error>> {
+        put(store, Slot::Sale(sale.index), &sale.to_bytes())?;
+        self.install(sale);
+        Ok(())
+    }
+
+    fn put_desk<S: Store>(
+        &mut self,
+        store: &mut S,
+        desk: Desk,
+    ) -> Result<(), StoreFault<S::Error>> {
+        put(store, Slot::Desk, &desk.to_bytes())?;
+        self.desk = desk;
+        Ok(())
+    }
+
+    fn write_event<S: Store>(
+        &mut self,
+        store: &mut S,
+        event: &Event,
+    ) -> Result<(), StoreFault<S::Error>> {
+        match self
+            .records
+            .append_stored(&self.identity, event.kind(), event.encode(), |bytes| {
+                store.append_record(bytes)
+            }) {
+            Ok(_) => Ok(()),
+            Err(AppendError::Persist(e)) => Err(StoreFault::Write(e)),
+            Err(AppendError::Refused(e)) => Err(StoreFault::Record(e)),
+        }
+    }
+
+    /// Write the records, then the sale. A record that is written and a sale
+    /// that then fails to store leaves a record for a step the sale does not
+    /// know happened; the step is done again and the record is written again.
+    /// That is the safe side: a report is never made without its record.
+    fn finish<S: Store>(
+        &mut self,
+        store: &mut S,
+        sale: Sale,
+        events: &[Event],
+    ) -> Result<(), StoreFault<S::Error>> {
+        for event in events {
+            self.write_event(store, event)?;
+        }
+        let unchanged = self
+            .sales
+            .get(&sale.index)
+            .is_some_and(|old| old.to_bytes() == sale.to_bytes());
+        if unchanged {
+            return Ok(());
+        }
+        self.put_sale(store, sale)
+    }
+
+    /// CR-14: write the pause again if its last write failed.
+    fn retry_pause<S: Store>(&mut self, store: &mut S) {
+        if self.pause_unsaved && put(store, Slot::Pause, &self.pause.to_bytes()).is_ok() {
+            self.pause_unsaved = false;
+        }
+    }
+
+    // CR-01 to CR-05: opening a sale and its quotes.
+
+    /// CR-01 to CR-04, CR-09, CR-17: open a sale and hand out its address.
+    ///
+    /// Refused, with nothing written, when a rescan is pending, the check is
+    /// not healthy, the amount is zero, too large or below the dust line, the
+    /// hour's addresses are used up, or no address is left.
+    ///
+    /// The writes, in this order:
+    ///
+    /// 1. the desk with the time of this address (CR-04). If the process
+    ///    stops after it, an address time is counted and no address was
+    ///    used: the hour's allowance is spent early, which is the safe side.
+    /// 2. the batches, with the index taken (CR-03, through
+    ///    `CounterBatches::next_script`). If the process stops after it, an
+    ///    index is wasted and never reused.
+    /// 3. the sale. If the process stops after it, the sale is there with
+    ///    its address and expires by itself (CR-07); a payment to it is found.
+    /// 4. a `Sale` record "opened". If it fails, the sale is stored and will
+    ///    expire, but `Err` is returned and the address must not be shown.
+    pub fn open<S: Store>(
+        &mut self,
+        amount: Amount,
+        currency: Currency,
+        rate: Rate,
+        facts: OpenFacts,
+        store: &mut S,
+    ) -> Result<Opened, OpenRefused<S::Error>> {
+        let now = facts.now;
+        if facts.rescan_pending {
+            return Err(OpenRefused::RescanPending);
+        }
+        if !facts.health.healthy {
+            return Err(OpenRefused::Unhealthy(facts.health.problem));
+        }
+        if amount.0 == 0 {
+            return Err(OpenRefused::ZeroAmount);
+        }
+        let needs_sats = sats_for(amount, rate).ok_or(OpenRefused::AmountTooLarge)?;
+        if needs_sats < DUST_SATS {
+            return Err(OpenRefused::BelowDust { needs_sats });
+        }
+        let mut desk = self.desk.pruned(now);
+        if !desk.has_room_for_address() {
+            return Err(OpenRefused::RateLimited);
+        }
+        if self.batches.remaining() == 0 {
+            return Err(OpenRefused::NoAddress);
+        }
+        desk.push_address_time(now);
+        self.put_desk(store, desk).map_err(OpenRefused::Store)?;
+
+        let issued = self
+            .batches
+            .next_script(|bytes| store.put(Slot::Batches, bytes))
+            .map_err(|e| OpenRefused::AddressNotStored(StoreFault::Write(e)))?;
+        let Some((index, script)) = issued else {
+            return Err(OpenRefused::NoAddress);
+        };
+        if self.sales.contains_key(&index)
+            || self.unreadable.contains(&index)
+            || self.archived.contains_key(&script)
+        {
+            return Err(OpenRefused::AddressInUse);
+        }
+
+        let quote = Quote::new(rate, now);
+        let sale = Sale::new(
+            index,
+            script.clone(),
+            now,
+            amount,
+            currency,
+            quote,
+            needs_sats,
+            self.settings.underpayment_tolerance_bps,
+        );
+        self.put_sale(store, sale).map_err(OpenRefused::Store)?;
+        let event = Event::Opened {
+            index,
+            at: now,
+            amount,
+            currency,
+            needs_sats,
+            minor_per_btc: rate.minor_per_btc(),
+        };
+        self.write_event(store, &event)
+            .map_err(OpenRefused::Store)?;
+        Ok(Opened {
+            index,
+            script,
+            needs_sats,
+            quote,
+        })
+    }
+
+    /// CR-05, CR-08: give a sale a new quote. What has arrived is valued at
+    /// the quote in force first; then the new quote is added and the rest of
+    /// the amount is priced at it. Refused once enough has arrived, once the
+    /// sale ended, and once the sale has [`MAX_QUOTES`] quotes (the last one
+    /// stays in force). One write: the sale.
+    pub fn requote<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        rate: Rate,
+        now: u64,
+        headers: &C,
+        store: &mut S,
+    ) -> Result<Quote, RequoteRefused<S::Error>> {
+        let mut sale = self
+            .sales
+            .get(&index)
+            .cloned()
+            .ok_or(RequoteRefused::UnknownSale(index))?;
+        if !sale.is_live() {
+            return Err(RequoteRefused::SaleEnded);
+        }
+        if sale.quotes.len() >= MAX_QUOTES {
+            return Err(RequoteRefused::TooManyQuotes);
+        }
+        if sats_for(sale.amount, rate).is_none() {
+            return Err(RequoteRefused::AmountTooLarge);
+        }
+        let depth = self.depth();
+        sale.refresh(headers, now, depth);
+        if sale.frozen.is_some() {
+            return Err(RequoteRefused::AlreadyEnough);
+        }
+        let quote = Quote::new(rate, now);
+        sale.quotes.push(quote);
+        sale.refresh(headers, now, depth);
+        self.put_sale(store, sale).map_err(RequoteRefused::Store)?;
+        Ok(quote)
+    }
+
+    /// CR-07: the cashier cancels a sale. Refused if the sale has ended or
+    /// anything has arrived for it (even dust): money on a cancelled sale is
+    /// a matter for the refund flow, not for cancelling.
+    ///
+    /// The writes, in this order: a `Sale` record "cancelled", then the
+    /// sale. If the process stops between them the sale is still open and
+    /// expires by itself; the record is written again if it is cancelled
+    /// again.
+    pub fn cancel<S: Store>(
+        &mut self,
+        index: u32,
+        now: u64,
+        store: &mut S,
+    ) -> Result<(), CancelRefused<S::Error>> {
+        let mut sale = self
+            .sales
+            .get(&index)
+            .cloned()
+            .ok_or(CancelRefused::UnknownSale(index))?;
+        if sale.ended.is_some() {
+            return Err(CancelRefused::AlreadyEnded);
+        }
+        if sale.watch.transactions().next().is_some()
+            || sale.accepted.is_some()
+            || sale.overridden.is_some()
+            || !sale.is_live()
+        {
+            return Err(CancelRefused::MoneyArrived);
+        }
+        sale.ended = Some((End::Cancelled, now));
+        let event = Event::Cancelled { index, at: now };
+        self.finish(store, sale, &[event])
+            .map_err(CancelRefused::Store)
+    }
+
+    fn depth(&self) -> u32 {
+        u32::from(self.settings.min_confirmations).max(1)
+    }
+
+    // What arrives: sightings and blocks.
+
+    /// WR-40, CR-19: offer an unconfirmed transaction. It goes to every live
+    /// sale, because a transaction that conflicts with a sale's payment does
+    /// not pay the sale's script, so routing by script is not enough. A
+    /// refusal from one sale does not stop the others. If the transaction
+    /// pays the script of a sale that ended or is final, it is a late
+    /// payment: a `Payment` record, then the sale, then a
+    /// [`Report::LatePayment`].
+    ///
+    /// Each sale that changed is written (the sale is the only write for it).
+    /// A write that fails stops the call; sales written before it keep what
+    /// they took, and offering the same transaction again is safe.
+    pub fn sighting<S: Store>(
+        &mut self,
+        tx_bytes: &[u8],
+        source: Source,
+        now: u64,
+        store: &mut S,
+    ) -> Result<Sightings, SightingError<S::Error>> {
+        let tx: Transaction =
+            deserialize(tx_bytes).map_err(|_| SightingError::Refused(Refusal::NotATransaction))?;
+        let mut out = Sightings::default();
+        let live: Vec<u32> = self
+            .sales
+            .iter()
+            .filter(|(_, s)| s.is_live())
+            .map(|(i, _)| *i)
+            .collect();
+        for index in live {
+            let Some(base) = self.sales.get(&index) else {
+                continue;
+            };
+            let mut next = base.clone();
+            let result = next.watch.sighting(tx_bytes, source, now);
+            if matches!(result, Ok(Sighted::Ignored)) {
+                continue;
+            }
+            self.put_sale(store, next).map_err(SightingError::Store)?;
+            out.results.push((index, result));
+        }
+        let txid = tx.compute_txid();
+        for (index, sats) in self.late_payments_in(&tx) {
+            self.note_late(index, txid, sats, now, store, &mut out.reports)
+                .map_err(SightingError::Store)?;
+        }
+        Ok(out)
+    }
+
+    /// What a transaction pays to the scripts of sales that are not live,
+    /// by sale.
+    fn late_payments_in(&self, tx: &Transaction) -> BTreeMap<u32, u64> {
+        let mut found: BTreeMap<u32, u64> = BTreeMap::new();
+        for output in &tx.output {
+            if output.value.to_sat() == 0 {
+                continue;
+            }
+            if let Some(index) = self.archived.get(&output.script_pubkey) {
+                let sum = found.entry(*index).or_insert(0);
+                *sum = sum.saturating_add(output.value.to_sat());
+            }
+        }
+        found
+    }
+
+    /// CR-19: record a payment to a sale that is not live. The sale's own
+    /// payment, seen again, is not late. Each transaction is recorded once.
+    /// The writes: the `Payment` record, then the sale; the report only after
+    /// both.
+    fn note_late<S: Store>(
+        &mut self,
+        index: u32,
+        txid: Txid,
+        sats: u64,
+        now: u64,
+        store: &mut S,
+        reports: &mut Vec<Report>,
+    ) -> Result<(), StoreFault<S::Error>> {
+        let Some(base) = self.sales.get(&index) else {
+            return Ok(());
+        };
+        if base.late.iter().any(|(t, _)| *t == txid)
+            || base.watch.transactions().any(|t| t.compute_txid() == txid)
+        {
+            return Ok(());
+        }
+        let mut sale = base.clone();
+        if sale.late.len() < MAX_LATE_PAYMENTS {
+            sale.late.push((txid, sats));
+        } else if sale.late_unlisted {
+            return Ok(());
+        } else {
+            sale.late_unlisted = true;
+        }
+        let event = Event::LatePayment {
+            index,
+            at: now,
+            txid: txid.to_byte_array(),
+            sats,
+        };
+        self.write_event(store, &event)?;
+        self.put_sale(store, sale)?;
+        reports.push(Report::LatePayment { index, sats });
+        Ok(())
+    }
+
+    /// WR-30, WR-42, CR-19: take a block. For every live sale the payments
+    /// the block proves are given to the watcher as confirmed, and the spends
+    /// of the sale's coins by other transactions are given as spent
+    /// elsewhere. For sales that are not live, a payment in the block is a
+    /// late payment.
+    ///
+    /// A block that is not on the chain now is refused for all sales. Each
+    /// sale that changed is written. A write that fails stops the call;
+    /// sales written before it keep what they took, and offering the same
+    /// block again is safe.
+    pub fn block<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        block: &WellFormedBlock,
+        headers: &C,
+        now: u64,
+        store: &mut S,
+    ) -> Result<BlockTaken, BlockError<S::Error>> {
+        block.spends(headers, &[]).map_err(BlockError::Refused)?;
+        let mut out = BlockTaken::default();
+        let live: Vec<u32> = self
+            .sales
+            .iter()
+            .filter(|(_, s)| s.is_live())
+            .map(|(i, _)| *i)
+            .collect();
+        for index in live {
+            let Some(base) = self.sales.get(&index) else {
+                continue;
+            };
+            let mut next = base.clone();
+            let script = next.script.clone();
+            let mut effect = BlockEffect {
+                payments: 0,
+                spends: 0,
+            };
+            let mut refused: Option<Refusal> = None;
+            match block.payments(headers, &script) {
+                Ok(list) => {
+                    for proven in list {
+                        match next.watch.confirmed(proven) {
+                            Ok(()) => effect.payments = effect.payments.saturating_add(1),
+                            Err(r) => refused = refused.or(Some(r)),
+                        }
+                    }
+                }
+                Err(r) => refused = Some(r),
+            }
+            if let Ok(found) = block.spends(headers, &next.watch.watched_outpoints()) {
+                for (outpoint, by, hash) in found {
+                    next.watch.spent_elsewhere(outpoint, by, hash);
+                    effect.spends = effect.spends.saturating_add(1);
+                }
+            }
+            if effect.payments == 0 && effect.spends == 0 && refused.is_none() {
+                continue;
+            }
+            self.put_sale(store, next).map_err(BlockError::Store)?;
+            out.results.push((
+                index,
+                match refused {
+                    Some(r) => Err(r),
+                    None => Ok(effect),
+                },
+            ));
+        }
+        let archived: Vec<(ScriptBuf, u32)> =
+            self.archived.iter().map(|(s, i)| (s.clone(), *i)).collect();
+        for (script, index) in archived {
+            let Ok(list) = block.payments(headers, &script) else {
+                continue;
+            };
+            for proven in list {
+                let sats = proven
+                    .tx()
+                    .output
+                    .iter()
+                    .filter(|o| o.script_pubkey == script)
+                    .fold(0u64, |sum, o| sum.saturating_add(o.value.to_sat()));
+                let txid = proven.tx().compute_txid();
+                self.note_late(index, txid, sats, now, store, &mut out.reports)
+                    .map_err(BlockError::Store)?;
+            }
+        }
+        Ok(out)
+    }
+
+    // CR-10 to CR-19: judging a sale.
+
+    /// CR-10 to CR-19, CR-30 to CR-32: work out the state of a sale. This is
+    /// the one place the state is worked out. It asks the watcher for its
+    /// status, keeps what must stick, values what has arrived (CR-06,
+    /// CR-08) and then applies the order of CR-12.
+    ///
+    /// Several things can follow from one call, each stored before it is
+    /// reported (CR-32):
+    ///
+    /// - Accepting at once (CR-13). The writes: the exposure ledger, then the
+    ///   record `PaidAtOnce`, then the sale. Stopping after the ledger leaves
+    ///   exposure counted and the sale not shown as paid; the next call
+    ///   finds the exposure already counted and carries on (the ledger is not
+    ///   charged twice). If the record or the sale cannot be stored the
+    ///   state is `Waiting` and nothing is reported.
+    /// - A cancel (CR-14), when a conflict or a reorg first shows on a sale
+    ///   that was accepted at once or overridden. The writes: the pause
+    ///   (which takes effect in memory even if its write fails, and is
+    ///   written again before any payment is next accepted at once), the
+    ///   desk with the alarm up, the `Conflict` record, then the sale. A cancel
+    ///   is counted once per sale; if the process stops before the sale is
+    ///   written it may be counted again after a restart, which only
+    ///   tightens.
+    /// - Releasing the exposure at the first confirmation (CR-15): the ledger
+    ///   is written, then the sale is marked.
+    /// - Records for what the POS and the books are told (CR-30, CR-31), and
+    ///   for surplus, dust and expiry. The records are written first and the
+    ///   sale last, so a report is never made without its record.
+    ///
+    /// A failed write that no rule above gives a state for is returned as
+    /// [`JudgeError::Store`]; the caller must then treat the sale as not safe
+    /// and ask again. Nothing is reported when it is returned.
+    pub fn judge<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        facts: &Facts<'_, C>,
+        store: &mut S,
+    ) -> Result<Screen, JudgeError<S::Error>> {
+        if self.unreadable.contains(&index) {
+            return Ok(screen_of(
+                State::NeedsAPerson,
+                Why::StoredFormUnreadable,
+                Next::PersonLooks,
+            ));
+        }
+        let mut sale = self
+            .sales
+            .get(&index)
+            .cloned()
+            .ok_or(JudgeError::UnknownSale(index))?;
+        if let Some((end, _)) = sale.ended {
+            return Ok(ended_screen(&sale, end));
+        }
+        self.retry_pause(store);
+
+        let now = facts.now;
+        let depth = self.depth();
+        let final_depth = u32::from(self.settings.final_confirmations).max(depth);
+        let (st, received) = sale.refresh(facts.chain, now, depth);
+        let needs = sale.watch.sale_sats();
+        let confirmed = st.min_confirmations >= depth;
+        let is_final = st.min_confirmations >= final_depth;
+        let mut events: Vec<Event> = Vec::new();
+        let mut reports: Vec<Report> = Vec::new();
+
+        // CR-17: dust is logged and changes no state.
+        if st.received_sats > 0 && st.received_sats < DUST_SATS && !sale.dust_logged {
+            sale.dust_logged = true;
+            events.push(Event::Dust {
+                index,
+                at: now,
+                sats: st.received_sats,
+            });
+            reports.push(Report::Dust {
+                index,
+                sats: st.received_sats,
+            });
+        }
+
+        // CR-07: nothing (above dust) arrived inside the time. A sale that
+        // was accepted or overridden, or that saw a conflict, had a payment
+        // and does not expire.
+        if received == 0
+            && !st.needs_a_person
+            && !st.conflict_seen
+            && sale.accepted.is_none()
+            && sale.overridden.is_none()
+            && now >= sale.opened_at.saturating_add(EXPIRY_SECS)
+        {
+            sale.ended = Some((End::Expired, now));
+            events.push(Event::Expired { index, at: now });
+            self.finish(store, sale.clone(), &events)
+                .map_err(JudgeError::Store)?;
+            let mut screen = ended_screen(&sale, End::Expired);
+            screen.reports = reports;
+            return Ok(screen);
+        }
+
+        // CR-12: the order of judgment. An override remembers the flags as
+        // they were; rules 2 and 3 apply again only to what is new.
+        let (mark_conflict, mark_reopened) = sale
+            .overridden
+            .as_ref()
+            .map_or((false, false), |m| (m.conflict, m.reopened));
+        let reopened_eff = sale.reopened && !mark_reopened && !confirmed;
+        let conflict_eff = st.conflict_seen && !mark_conflict && !confirmed;
+        let mut instant: Option<(openbmt_core::policy::InstantLabel, CheckMode)> = None;
+        let (mut state, mut why, mut next);
+        if st.needs_a_person {
+            (state, why, next) = (
+                State::NeedsAPerson,
+                Why::WatcherNeedsAPerson,
+                Next::PersonLooks,
+            );
+        } else if reopened_eff {
+            (state, why, next) = (
+                State::DoNotHandOver,
+                Why::Reopened,
+                Next::AskOwnerOrOtherPayment,
+            );
+        } else if conflict_eff {
+            (state, why, next) = (
+                State::DoNotHandOver,
+                Why::Replaced,
+                Next::AskOwnerOrOtherPayment,
+            );
+        } else if is_final {
+            (state, why, next) = (
+                State::Final,
+                Why::FinalAt(st.min_confirmations),
+                Next::Nothing,
+            );
+        } else if confirmed {
+            (state, why, next) = (
+                State::Confirmed,
+                Why::ConfirmedAt(st.min_confirmations),
+                Next::FinalAt { depth: final_depth },
+            );
+        } else if let Some(mark) = &sale.overridden {
+            (state, why, next) = (
+                State::Overridden,
+                Why::OverriddenBy { role: mark.role },
+                Next::WaitForConfirmation { depth },
+            );
+        } else if let Some((label, _)) = sale.accepted {
+            (state, why, next) = (
+                State::PaidInstant,
+                Why::Instant(label),
+                Next::WaitForConfirmation { depth },
+            );
+        } else if sale.frozen.is_some() {
+            // Rule 7: enough has arrived, unconfirmed.
+            (state, why, next) = (State::Waiting, Why::NotSeenEnough, Next::KeepWatching);
+            if !facts.health.healthy {
+                (state, why, next) = (
+                    State::DoNotHandOver,
+                    Why::CannotCheck(facts.health.problem),
+                    Next::AskOwnerOrOtherPayment,
+                );
+            } else if st.mode.is_none() {
+                // Waiting: not yet seen by enough of the network.
+            } else if self.pause_unsaved {
+                (why, next) = (Why::PauseNotSaved, Next::WaitForConfirmation { depth });
+            } else if let Some(mode) = st.mode {
+                let id = sale_payment_id(index);
+                // The sale's own exposure, counted by an earlier attempt that
+                // stopped, is not counted against it again.
+                let outstanding = {
+                    let mut ledger = self.exposure.clone();
+                    ledger.release_by_owner(&id);
+                    ledger.outstanding()
+                };
+                let mut policy =
+                    InstantPolicy::for_counter(&self.settings, &self.identity.device_id());
+                policy.underpayment_tolerance_bps = sale.tolerance_bps;
+                let inputs = Inputs {
+                    mode,
+                    sale_sats: needs,
+                    received_sats: received,
+                    outstanding_sats: outstanding,
+                    check_healthy: facts.health.healthy,
+                    heartbeat: facts.heartbeat,
+                    remote_order: facts.remote_order,
+                    customer_wifi: self.settings.customer_wifi,
+                    tor_on: self.settings.tor_on,
+                    pause: self.pause.status(now),
+                    conflict_seen: st.conflict_seen,
+                    secs_since_first_seen: st.secs_since_first_seen,
+                };
+                match evaluate(&policy, &inputs) {
+                    Decision::Instant { label, mode } => {
+                        instant = Some((label, mode));
+                    }
+                    Decision::WaitForConfirmation { reason } => {
+                        why = Why::Wait(reason);
+                        next = match reason {
+                            WaitReason::ConflictWatch { secs_left } => {
+                                Next::WatchSeconds { secs_left }
+                            }
+                            _ => Next::WaitForConfirmation { depth },
+                        };
+                    }
+                    Decision::InstantOff { reason } => {
+                        why = Why::InstantOff(reason);
+                        next = match reason {
+                            OffReason::PausedUntilOwnerReset => Next::OwnerClears,
+                            _ => Next::WaitForConfirmation { depth },
+                        };
+                    }
+                }
+            }
+        } else if received > 0 {
+            (state, why, next) = (
+                State::PartPaid,
+                Why::Part {
+                    received_sats: received,
+                    needs_sats: needs,
+                },
+                Next::CustomerPaysRest {
+                    missing_sats: needs.saturating_sub(received),
+                },
+            );
+        } else {
+            (state, why, next) = (State::NotPaidYet, Why::NothingArrived, Next::CustomerPays);
+        }
+
+        // CR-13: accept at once.
+        let mut accepted_now = false;
+        if let Some((label, mode)) = instant {
+            match self.accept_exposure(index, amount_at_risk(needs, received), mode, store) {
+                Ok(()) => {
+                    sale.accepted = Some((label, mode));
+                    sale.exposure_counted = true;
+                    accepted_now = true;
+                    (state, why, next) = (
+                        State::PaidInstant,
+                        Why::Instant(label),
+                        Next::WaitForConfirmation { depth },
+                    );
+                }
+                Err(AcceptFail::SliceFull) => {
+                    (state, why, next) = (
+                        State::Waiting,
+                        Why::Wait(WaitReason::SliceFull),
+                        Next::WaitForConfirmation { depth },
+                    );
+                }
+                Err(AcceptFail::NotStored) => {
+                    (state, why, next) = (
+                        State::Waiting,
+                        Why::NotStored,
+                        Next::WaitForConfirmation { depth },
+                    );
+                }
+            }
+        }
+
+        // CR-14: a conflict or a reorg on a sale that was accepted at once
+        // or overridden is a cancel.
+        let mut conflict_event: Option<Event> = None;
+        if (sale.accepted.is_some() || sale.overridden.is_some())
+            && !sale.cancel_recorded
+            && (reopened_eff || conflict_eff)
+        {
+            self.raise_cancel(index, now, store)
+                .map_err(JudgeError::Store)?;
+            sale.cancel_recorded = true;
+            reports.push(Report::Alarm { index });
+            conflict_event = Some(if conflict_eff {
+                Event::Replaced { index, at: now }
+            } else {
+                Event::Reopened { index, at: now }
+            });
+        }
+
+        // CR-15: exposure leaves the ledger at the first confirmation.
+        if st.min_confirmations >= 1 && !sale.exposure_released {
+            self.release_exposure(index, store)
+                .map_err(JudgeError::Store)?;
+            sale.exposure_released = true;
+        }
+
+        // CR-30 to CR-32: what the POS and the books are told.
+        if state.is_paid() {
+            // A sale that is reported paid again after it was reported
+            // unpaid gets a record again.
+            if matches!(state, State::Confirmed | State::Final)
+                && (!sale.confirmed_logged || sale.pos != PosState::Paid)
+            {
+                sale.confirmed_logged = true;
+                events.push(Event::Confirmed {
+                    index,
+                    at: now,
+                    received_sats: received,
+                    depth: st.min_confirmations,
+                });
+            }
+            if sale.pos != PosState::Paid {
+                if state == State::PaidInstant {
+                    if let Some((label, mode)) = sale.accepted {
+                        events.push(Event::PaidAtOnce {
+                            index,
+                            at: now,
+                            at_risk_sats: amount_at_risk(needs, received),
+                            label,
+                            mode,
+                        });
+                    }
+                } else if let Some(mark) = &sale.overridden {
+                    // Reported paid again after being reported unpaid: the
+                    // override is written down again.
+                    if state == State::Overridden {
+                        events.push(Event::Override {
+                            index,
+                            at: now,
+                            role: mark.role,
+                            name: mark.name.clone(),
+                            sats: amount_at_risk(needs, received),
+                        });
+                    }
+                }
+                sale.pos = PosState::Paid;
+                reports.push(Report::PosPaid { index });
+            }
+            if state == State::Final && !sale.books_final {
+                sale.books_final = true;
+                events.push(Event::Final {
+                    index,
+                    at: now,
+                    received_sats: received,
+                    depth: st.min_confirmations,
+                });
+                reports.push(Report::BooksFinal {
+                    index,
+                    amount: sale.amount,
+                    currency: sale.currency,
+                    received_sats: received,
+                });
+            }
+            // CR-16: more than the sale needs is paid in full; the rest is
+            // owed to the customer.
+            if let Some(frozen) = sale.frozen {
+                let surplus = received.saturating_sub(frozen);
+                if surplus > sale.surplus_reported {
+                    sale.surplus_reported = surplus;
+                    events.push(Event::SurplusOwed {
+                        index,
+                        at: now,
+                        sats: surplus,
+                    });
+                    reports.push(Report::SurplusOwed {
+                        index,
+                        sats: surplus,
+                    });
+                }
+            }
+        } else if state == State::DoNotHandOver && sale.pos == PosState::Paid {
+            sale.pos = PosState::Unpaid;
+            reports.push(Report::PosUnpaid { index });
+            if conflict_event.is_none() {
+                conflict_event = Some(if reopened_eff {
+                    Event::Reopened { index, at: now }
+                } else {
+                    Event::Replaced { index, at: now }
+                });
+            }
+        }
+        if let Some(event) = conflict_event {
+            events.push(event);
+        }
+
+        let stuck =
+            received > 0 && st.min_confirmations == 0 && st.secs_since_first_seen >= STUCK_SECS;
+        let screen = Screen {
+            state,
+            why,
+            next,
+            received_sats: received,
+            needs_sats: needs,
+            stuck,
+            late: sale.is_late(),
+            check_mode: st.mode,
+            conflict_seen: st.conflict_seen,
+            reopened: sale.reopened,
+            reports: Vec::new(),
+        };
+        let cancel_stored = sale.cancel_recorded;
+        match self.finish(store, sale, &events) {
+            Ok(()) => {
+                if cancel_stored {
+                    self.cancel_applied.remove(&index);
+                }
+                Ok(Screen { reports, ..screen })
+            }
+            Err(_) if accepted_now => Ok(Screen {
+                state: State::Waiting,
+                why: Why::NotStored,
+                next: Next::WaitForConfirmation { depth },
+                ..screen
+            }),
+            Err(e) => Err(JudgeError::Store(e)),
+        }
+    }
+
+    /// CR-13: count the amount at risk in the exposure ledger, under the
+    /// sale, against the slice of the mode the decision used. An earlier
+    /// attempt that stored the exposure and stopped is not an error.
+    fn accept_exposure<S: Store>(
+        &mut self,
+        index: u32,
+        amount: u64,
+        mode: CheckMode,
+        store: &mut S,
+    ) -> Result<(), AcceptFail> {
+        let slice = self.settings.slice_sats(&self.identity.device_id(), mode);
+        match self
+            .exposure
+            .accept_instant(sale_payment_id(index), amount, slice, |bytes| {
+                store.put(Slot::Exposure, bytes)
+            }) {
+            Ok(()) | Err(ExposureWriteError::Refused(ExposureError::AlreadyCounted)) => Ok(()),
+            Err(ExposureWriteError::Refused(ExposureError::SliceFull)) => {
+                Err(AcceptFail::SliceFull)
+            }
+            Err(ExposureWriteError::Persist(_)) => Err(AcceptFail::NotStored),
+        }
+    }
+
+    /// CR-14: the cancel goes into the pause tracker (once per sale), then
+    /// the alarm goes up in the desk. The pause takes effect in memory even
+    /// if its write fails; it is then written again before the next payment
+    /// is accepted at once.
+    fn raise_cancel<S: Store>(
+        &mut self,
+        index: u32,
+        now: u64,
+        store: &mut S,
+    ) -> Result<(), StoreFault<S::Error>> {
+        if !self.cancel_applied.contains(&index) {
+            let stored = self
+                .pause
+                .record_cancel(now, |bytes| store.put(Slot::Pause, bytes));
+            self.pause_unsaved = stored.is_err();
+            self.cancel_applied.insert(index);
+        }
+        if !self.desk.alarm() {
+            let mut desk = self.desk.clone();
+            desk.set_alarm(true);
+            self.put_desk(store, desk)?;
+        }
+        Ok(())
+    }
+
+    /// CR-15: take a sale's exposure out of the ledger. The ledger as it
+    /// will be is stored before it is put in place.
+    fn release_exposure<S: Store>(
+        &mut self,
+        index: u32,
+        store: &mut S,
+    ) -> Result<(), StoreFault<S::Error>> {
+        let mut next = self.exposure.clone();
+        if next
+            .release_on_first_confirmation(&sale_payment_id(index))
+            .is_some()
+        {
+            put(store, Slot::Exposure, &next.to_bytes())?;
+            self.exposure = next;
+        }
+        Ok(())
+    }
+
+    // CR-20 to CR-22: overrides.
+
+    /// CR-20 to CR-22: a person accepts a sale that shows `Waiting`,
+    /// `PartPaid` or `DoNotHandOver`. The sale is judged first. The amount at
+    /// risk is `max(needs, received)`. A cashier is refused above the
+    /// per-sale instant limit of the check mode (`Light` if there is none)
+    /// and when the cashier's overrides of the last 24 hours plus this one
+    /// pass the cashier's daily cap; a manager when the manager's pass the
+    /// ceiling. The caller says who the person is and has checked the PIN.
+    ///
+    /// The writes, in this order: the exposure ledger (`add_override`
+    /// against the slice of the mode; a sale already counted adds nothing but
+    /// the limits still count), the desk with the entry, the `Override`
+    /// record, then the sale. Stopping after the ledger leaves exposure counted
+    /// and the sale not accepted; stopping after the desk leaves an entry that
+    /// counts against the person's limits; stopping after the record leaves
+    /// a record for an override the sale does not show. Each is the safe side.
+    ///
+    /// An override does not clear the cancel alarm and does not make the sale
+    /// `Confirmed`. The returned reports hold [`Report::PosPaid`] once.
+    pub fn override_sale<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        actor: Actor,
+        facts: &Facts<'_, C>,
+        store: &mut S,
+    ) -> Result<Vec<Report>, OverrideRefused<S::Error>> {
+        if !valid_name(&actor.name) {
+            return Err(OverrideRefused::BadName);
+        }
+        let screen = match self.judge(index, facts, store) {
+            Ok(screen) => screen,
+            Err(JudgeError::UnknownSale(i)) => return Err(OverrideRefused::UnknownSale(i)),
+            Err(e) => return Err(OverrideRefused::Judge(e)),
+        };
+        let mut reports = screen.reports;
+        if !matches!(
+            screen.state,
+            State::Waiting | State::PartPaid | State::DoNotHandOver
+        ) {
+            return Err(OverrideRefused::WrongState(screen.state));
+        }
+        let now = facts.now;
+        let amount = amount_at_risk(screen.needs_sats, screen.received_sats);
+        let mode = screen.check_mode.unwrap_or(CheckMode::Light);
+        let me = self.identity.device_id();
+        let already = self.desk.override_total(actor.role, &actor.name, now);
+        let over =
+            |total: u64, limit: u64| u128::from(total) + u128::from(amount) > u128::from(limit);
+        match actor.role {
+            Role::Cashier => {
+                let limit = InstantPolicy::for_counter(&self.settings, &me)
+                    .limits(mode)
+                    .per_sale_sats;
+                if amount > limit {
+                    return Err(OverrideRefused::OverSaleLimit {
+                        sats: amount,
+                        limit,
+                    });
+                }
+                let cap = self.settings.cashier_override_daily_cap.sats;
+                if over(already, cap) {
+                    return Err(OverrideRefused::OverDailyCap {
+                        sats: amount,
+                        already,
+                        cap,
+                    });
+                }
+            }
+            Role::Manager => {
+                let ceiling = self.settings.manager_override_ceiling.sats;
+                if over(already, ceiling) {
+                    return Err(OverrideRefused::OverCeiling {
+                        sats: amount,
+                        already,
+                        ceiling,
+                    });
+                }
+            }
+        }
+        let mut desk = self.desk.pruned(now);
+        if !desk.has_room_for_override() {
+            return Err(OverrideRefused::TooManyOverrides);
+        }
+        let mut sale = self
+            .sales
+            .get(&index)
+            .cloned()
+            .ok_or(OverrideRefused::UnknownSale(index))?;
+
+        let slice = self.settings.slice_sats(&me, mode);
+        match self
+            .exposure
+            .add_override(sale_payment_id(index), amount, slice, |bytes| {
+                store.put(Slot::Exposure, bytes)
+            }) {
+            Ok(()) | Err(ExposureWriteError::Refused(ExposureError::AlreadyCounted)) => {}
+            Err(ExposureWriteError::Refused(ExposureError::SliceFull)) => {
+                return Err(OverrideRefused::NoRoom)
+            }
+            Err(ExposureWriteError::Persist(e)) => {
+                return Err(OverrideRefused::Store(StoreFault::Write(e)))
+            }
+        }
+        desk.push_override(OverrideEntry {
+            role: actor.role,
+            name: actor.name.clone(),
+            at: now,
+            sats: amount,
+        });
+        self.put_desk(store, desk).map_err(OverrideRefused::Store)?;
+        let event = Event::Override {
+            index,
+            at: now,
+            role: actor.role,
+            name: actor.name.clone(),
+            sats: amount,
+        };
+        sale.overridden = Some(OverrideMark {
+            role: actor.role,
+            name: actor.name,
+            at: now,
+            conflict: screen.conflict_seen,
+            reopened: screen.reopened,
+        });
+        sale.exposure_counted = true;
+        sale.exposure_released = false;
+        if sale.pos != PosState::Paid {
+            sale.pos = PosState::Paid;
+            reports.push(Report::PosPaid { index });
+        }
+        self.finish(store, sale, &[event])
+            .map_err(OverrideRefused::Store)?;
+        Ok(reports)
+    }
+
+    // CR-14: the owner's commands.
+
+    /// CR-14: carry out an owner command. It is checked against the pinned
+    /// roots, this counter and the last number taken. Nothing at the counter
+    /// clears the alarm, ends a pause or releases exposure except this.
+    ///
+    /// The writes: the desk with the new command number first (and, for
+    /// `ClearCancelAlarm`, with the alarm down in the same write, so the
+    /// number and the clearing cannot part), then the pause tracker or the
+    /// ledger for the other actions. A command is used up as soon as its
+    /// number is stored, even if the later write fails: a command that could
+    /// be played again is worse than one that is lost, and the owner can send
+    /// another. A lost reset leaves the pause on and a lost release leaves
+    /// the exposure counted; both are the safe side.
+    pub fn command<S: Store>(
+        &mut self,
+        signed: &SignedCommand,
+        _now: u64,
+        store: &mut S,
+    ) -> Result<(), CommandRefused<S::Error>> {
+        signed
+            .verify(
+                &self.roots,
+                &self.identity.device_id(),
+                self.desk.last_command_seq(),
+            )
+            .map_err(CommandRefused::Refused)?;
+        let mut desk = self.desk.clone();
+        desk.set_last_command_seq(signed.command.seq);
+        if signed.command.action == Action::ClearCancelAlarm {
+            desk.set_alarm(false);
+        }
+        self.put_desk(store, desk).map_err(CommandRefused::Store)?;
+        match signed.command.action {
+            Action::ClearCancelAlarm => {}
+            Action::ResetPause => {
+                let mut pause = self.pause.clone();
+                pause.owner_reset();
+                put(store, Slot::Pause, &pause.to_bytes()).map_err(CommandRefused::Store)?;
+                self.pause = pause;
+                self.pause_unsaved = false;
+            }
+            Action::ReleaseExposure(id) => {
+                let mut ledger = self.exposure.clone();
+                if ledger.release_by_owner(&id).is_some() {
+                    put(store, Slot::Exposure, &ledger.to_bytes())
+                        .map_err(CommandRefused::Store)?;
+                    self.exposure = ledger;
+                }
+            }
+        }
+        Ok(())
+    }
+}

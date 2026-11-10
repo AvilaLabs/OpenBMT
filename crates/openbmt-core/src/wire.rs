@@ -13,8 +13,10 @@
 //! settings), `OBMH` (high-water mark), `OBMC` (counter batches), `OBME`
 //! (exposure), `OBMP` (pause tracker) and `OBMK` (the Key app's signer
 //! state, written by the `openbmt-signer` crate), `OBMO` (pair offer), `OBMJ`
-//! (pair request), `OBMD` (signed pairing), `OBMX` (owner command) and `OBMV` (a sale watch, written by the
-//! `openbmt-watch` crate).
+//! (pair request), `OBMD` (signed pairing), `OBMX` (owner command), `OBMV` (a
+//! sale watch, written by the `openbmt-watch` crate), `OBMG` (the counter's
+//! own state, "desk") and `OBML` (a stored sale), the last two written by the
+//! `openbmt-counter` crate.
 //!
 //! [`Reader`], [`start`], [`put_opt_u64`] and [`len_u32`] are public so that
 //! other crates in the workspace write their snapshots the same way.
@@ -65,6 +67,11 @@ pub const MAGIC_SIGNED_PAIRING: [u8; 4] = *b"OBMD";
 pub const MAGIC_OWNER_COMMAND: [u8; 4] = *b"OBMX";
 /// Magic of a sale watch snapshot (the `openbmt-watch` crate).
 pub const MAGIC_SALE_WATCH: [u8; 4] = *b"OBMV";
+/// Magic of the counter's own state: address times, the cancel alarm, the
+/// last command number and override totals (the `openbmt-counter` crate).
+pub const MAGIC_COUNTER_DESK: [u8; 4] = *b"OBMG";
+/// Magic of a stored sale (the `openbmt-counter` crate).
+pub const MAGIC_COUNTER_SALE: [u8; 4] = *b"OBML";
 
 /// Why bytes were not accepted as a message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,6 +143,12 @@ pub struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
+    /// Start reading `buf` as it is, with no magic or version. For a record
+    /// body, which sits inside a framed record.
+    pub fn new(buf: &'a [u8]) -> Self {
+        Self { buf }
+    }
+
     /// Start reading `buf` and check its magic and version.
     pub fn framed(buf: &'a [u8], magic: &[u8; 4]) -> Result<Self, DecodeError> {
         let mut r = Self { buf };

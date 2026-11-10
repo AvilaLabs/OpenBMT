@@ -170,6 +170,12 @@ impl SaleWatch {
         self.sale_sats
     }
 
+    /// The shop's tolerance this watch was made with, in basis points of the
+    /// sale amount (never above 10,000).
+    pub fn tolerance_bps(&self) -> u32 {
+        self.tolerance_bps
+    }
+
     /// The counter moves the amount when the price lock is renewed. Evidence
     /// does not change.
     pub fn set_sale_sats(&mut self, sale_sats: u64) {
