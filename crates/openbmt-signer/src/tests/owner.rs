@@ -141,7 +141,7 @@ fn sr_30_an_entry_is_active_exactly_24_hours_after_enrollment() {
         .unwrap();
     let entry = s.allowlist().next().unwrap();
     assert_eq!(entry.enrolled_at(), NOW);
-    assert_eq!(entry.active_at(), NOW + 86_400);
+    assert_eq!(entry.active_at(), Some(NOW + 86_400));
     let p = simple_to(script, 50_000, 1_000);
     let kind = |t: u64| review_ok(&s, &p, t).outputs()[0].kind.clone();
     assert_eq!(kind(NOW), OutputKind::Other);

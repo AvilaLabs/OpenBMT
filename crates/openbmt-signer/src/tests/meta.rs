@@ -4,9 +4,10 @@ use crate::{Ceiling, ChangeRefusal, Refusal, RegisterError};
 use openbmt_core::wallet::WalletError;
 
 const RULES: &str = include_str!("../../../../docs/SIGNER-RULES.md");
-const TEST_SOURCES: [&str; 10] = [
+const TEST_SOURCES: [&str; 11] = [
     include_str!("batch.rs"),
     include_str!("ceilings.rs"),
+    include_str!("hostile.rs"),
     include_str!("inputs.rs"),
     include_str!("outputs.rs"),
     include_str!("owner.rs"),

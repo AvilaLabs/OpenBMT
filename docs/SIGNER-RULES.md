@@ -46,13 +46,13 @@ can change it; every change below is made on the Key app's own screen.
   days: its ID, the time, the amounts and the inputs it spent. The day and
   week totals come from it. It holds at most 10,000 entries and 100,000
   inputs; when it is full the signer refuses until old entries age out.
-- **Latest time seen.** The largest time the caller has ever passed in
-  (SR-31).
+- **Latest time seen.** The largest time at which the Key app has signed a
+  transaction or enrolled a destination (SR-31).
 
 ## 2. Reading the transaction file
 
 - **SR-01.** The file is a BIP174 PSBT, version 0. Anything else is refused,
-  including PSBT version 2.
+  including PSBT version 2 and a file with bytes after its last map.
 - **SR-02.** The file is at most 8 MiB **[to tune, E8]**. The transaction has
   at least 1 and at most 1,000 inputs, and at least 1 and at most 100
   outputs.
@@ -158,7 +158,8 @@ Every output is exactly one of three kinds.
   last 7 days, both measured back from the current time (SR-31). A signature
   is in the day total while the current time is less than 86,400 seconds
   after its date, and in the week total while it is less than 604,800
-  seconds after. Older entries are dropped from the spend log.
+  seconds after. Older entries count for nothing and are dropped from the
+  spend log at the next signature.
 - **SR-33.** Every signature counts in the totals, whether or not the
   transaction is ever broadcast. The signer cannot see the network, so it
   never assumes that a transaction it signed is dead. There are two

@@ -220,11 +220,12 @@ impl SignerState {
             if time > latest_time_seen {
                 return Err(bad("spend log entry is dated after the latest time seen"));
             }
-            if other_sats > MAX_MONEY_SATS
-                || allowlisted_sats > MAX_MONEY_SATS
-                || fee_sats > MAX_MONEY_SATS
-            {
+            if other_sats > MAX_MONEY_SATS || allowlisted_sats > MAX_MONEY_SATS {
                 return Err(bad("spend log amount is above all bitcoin there can be"));
+            }
+            // No signature is given for a fee above the fixed bound (SR-41).
+            if fee_sats > MAX_FEE_SATS {
+                return Err(bad("spend log fee is above the fixed bound"));
             }
             other_sum += u128::from(other_sats) + u128::from(fee_sats);
             allowlisted_sum += u128::from(allowlisted_sats);

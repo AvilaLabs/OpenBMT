@@ -62,9 +62,10 @@ impl AllowlistEntry {
     }
 
     /// The time from which it counts as allowlisted: 24 hours after it was
-    /// enrolled.
-    pub fn active_at(&self) -> u64 {
-        self.enrolled_at.saturating_add(ALLOWLIST_WAIT_SECS)
+    /// enrolled. `None` if that time is past the end of the clock; such an
+    /// entry is never active.
+    pub fn active_at(&self) -> Option<u64> {
+        self.enrolled_at.checked_add(ALLOWLIST_WAIT_SECS)
     }
 }
 
@@ -280,7 +281,8 @@ impl SignerState {
         self.change_mark
     }
 
-    /// The largest time ever passed in, in seconds (SR-31).
+    /// The largest time at which this state signed or enrolled, in seconds
+    /// (SR-31).
     pub fn latest_time_seen(&self) -> u64 {
         self.latest_time_seen
     }
@@ -331,9 +333,9 @@ impl SignerState {
 
     /// The allowlist entry for `script` if it is active at `effective`.
     pub(crate) fn active_entry(&self, script: &Script, effective: u64) -> Option<&AllowlistEntry> {
-        self.allowlist
-            .iter()
-            .find(|e| e.script.as_script() == script && effective >= e.active_at())
+        self.allowlist.iter().find(|e| {
+            e.script.as_script() == script && e.active_at().is_some_and(|t| effective >= t)
+        })
     }
 
     /// Add `new` (the transaction's own amounts) to the log as SR-33 says.

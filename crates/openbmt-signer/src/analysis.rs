@@ -208,6 +208,44 @@ fn check_output_fields(j: usize, output: &Output) -> Result<(), Refusal> {
     Ok(())
 }
 
+/// A BIP174 compact size at `*at`, which moves past it.
+fn compact_size(bytes: &[u8], at: &mut usize) -> Option<usize> {
+    let first = *bytes.get(*at)?;
+    *at += 1;
+    let width = match first {
+        0xfd => 2,
+        0xfe => 4,
+        0xff => 8,
+        small => return Some(usize::from(small)),
+    };
+    let raw = bytes.get(*at..at.checked_add(width)?)?;
+    *at += width;
+    let value = raw.iter().rev().fold(0u64, |v, b| (v << 8) | u64::from(*b));
+    usize::try_from(value).ok()
+}
+
+/// Where a PSBT of `maps` key-value maps ends in `bytes`: after the five
+/// magic bytes, each map is a run of (key length, key, value length, value)
+/// closed by a zero key length. `None` if the bytes end first.
+fn psbt_len(bytes: &[u8], maps: usize) -> Option<usize> {
+    let mut at = 5usize;
+    for _ in 0..maps {
+        loop {
+            let key_len = compact_size(bytes, &mut at)?;
+            if key_len == 0 {
+                break;
+            }
+            at = at.checked_add(key_len)?;
+            let value_len = compact_size(bytes, &mut at)?;
+            at = at.checked_add(value_len)?;
+            if at > bytes.len() {
+                return None;
+            }
+        }
+    }
+    Some(at)
+}
+
 /// Parse `bytes` and run every check that needs no key: SR-01 to SR-15
 /// and SR-20 to SR-24 (all but the parts that depend on the allowlist, the
 /// change mark and the time).
@@ -217,6 +255,12 @@ pub(crate) fn analyze(state: &SignerState, bytes: &[u8]) -> Result<Parsed, Refus
     }
     let psbt = Psbt::deserialize(bytes).map_err(|_| Refusal::NotAPsbt)?;
     if psbt.version != 0 {
+        return Err(Refusal::NotAPsbt);
+    }
+    // The parser stops after the last map and does not look further. The
+    // file must end there too.
+    let maps = 1 + psbt.inputs.len() + psbt.outputs.len();
+    if psbt_len(bytes, maps) != Some(bytes.len()) {
         return Err(Refusal::NotAPsbt);
     }
     let wallet = &state.wallet;
