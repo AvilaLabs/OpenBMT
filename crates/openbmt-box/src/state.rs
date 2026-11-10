@@ -10,9 +10,9 @@
 //!
 //! | File | Holds |
 //! |---|---|
-//! | `box.key` | `OBMY`, 1, the 32 secret bytes of the Box's identity |
-//! | `invitation` | `OBMI`, 1, the invitation (17), its nonce (32), the time it was entered (8, LE) |
-//! | `roots` | `OBMF`, 1, owner root (32), approver root (32) |
+//! | `box.key` | `OBMf`, 1, the 32 secret bytes of the Box's identity |
+//! | `invitation` | `OBMg`, 1, the invitation (17), its nonce (32), the time it was entered (8, LE) |
+//! | `roots` | `OBMh`, 1, owner root (32), approver root (32) |
 //! | `settings` | the signed settings in force (`OBMS`) |
 //! | `link-inbox`, `link-outbox` | the message numbers (LK-40) |
 //! | `pos.token` | the Box's own POS sign-in (BX-41); erased by BX-23 |
@@ -51,9 +51,9 @@ pub const MAX_TOKEN_BYTES: usize = 1_024;
 /// and the owner may come to.
 pub const MAX_MEMBERS: usize = 64;
 
-const MAGIC_KEY: [u8; 4] = *b"OBMY";
-const MAGIC_INVITATION: [u8; 4] = *b"OBMI";
-const MAGIC_ROOTS: [u8; 4] = *b"OBMF";
+const MAGIC_KEY: [u8; 4] = *b"OBMf";
+const MAGIC_INVITATION: [u8; 4] = *b"OBMg";
+const MAGIC_ROOTS: [u8; 4] = *b"OBMh";
 
 /// What the Box is doing, for the person at its console.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

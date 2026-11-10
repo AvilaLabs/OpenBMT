@@ -22,7 +22,7 @@ fn bx_01_the_first_start_makes_a_key_from_the_randomness_and_keeps_it() {
     let core = fresh_core();
     assert_eq!(core.device_id(), the_box().device_id());
     let stored = core.files().read(KEY_FILE).unwrap().unwrap();
-    assert_eq!(&stored[..5], b"OBMY\x01");
+    assert_eq!(&stored[..5], b"OBMf\x01");
     assert_eq!(&stored[5..], &[BOX_BYTE; 32]);
     // A second start reads the key and does not ask for randomness.
     let mut asked = false;
@@ -49,7 +49,7 @@ fn bx_01_a_failing_randomness_stops_the_start_and_stores_nothing() {
 #[test]
 fn bx_01_a_key_that_is_not_a_valid_secret_is_refused() {
     let mut files = MemFiles::new();
-    let mut bytes = b"OBMY\x01".to_vec();
+    let mut bytes = b"OBMf\x01".to_vec();
     bytes.extend_from_slice(&[0u8; 32]);
     files.put(KEY_FILE, &bytes);
     let err = BoxCore::open(files, &mut fixed_random).unwrap_err();
@@ -560,7 +560,7 @@ fn bx_16_a_paired_box_takes_no_welcome_and_no_invitation() {
 fn bx_16_a_stray_invitation_file_on_a_paired_box_is_dropped_at_start() {
     let (core, _) = paired_core();
     let mut files = core.into_files();
-    let mut stale = b"OBMI\x01".to_vec();
+    let mut stale = b"OBMg\x01".to_vec();
     stale.extend_from_slice(&[1u8; 17 + 32 + 8]);
     files.put(INVITATION_FILE, &stale);
     let mut core = BoxCore::open(files, &mut fixed_random).unwrap();

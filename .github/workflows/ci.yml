@@ -60,6 +60,8 @@ jobs:
         run: cargo fetch --locked
       - name: Lists, sources and licences
         run: scripts/deps-check.sh
+      - name: Every framed encoding has a magic of its own
+        run: scripts/magic-check.sh
       - name: Advisories
         run: |
           cargo install cargo-audit --locked --version 0.22.2
