@@ -235,7 +235,8 @@ in memory, and nothing is changed if the store fails.
   changes; 16 pairings; 1,024 sales' facts; 8 open sessions; 256 finished
   objects waiting to be delivered; 99 refunds in one transaction; 16
   transactions in one session; 64 items in one session (AS-04); 256
-  outpoints kept with one refund or cash-out (AS-68).
+  outpoints kept with one refund or cash-out (AS-68); 65,536 issued address
+  ranges (OC-11).
 - **AS-51.** A refund's destination is a plain on-chain script of a kind the
   signer allows (SR-22: P2WPKH, P2WSH, P2TR, P2PKH or P2SH) and its amount
   is at least the dust limit of that kind (SP-22). The refund QR's own
@@ -243,16 +244,21 @@ in memory, and nothing is changed if the store fails.
   (`docs/DESIGN.md` §2.4).
 - **AS-52.** Never more than was received. The refunds of one sale that are
   not cancelled, whether queued, in a session, returned, signed, sent or
-  paid, add up to at most what the sale's facts say was received. A refund
-  that would pass that is refused. If later facts show less received than
+  paid, add up to at most what the sale's facts say was received. The
+  facts' amount is what the owner's own checked view of the chain shows
+  paid to the sale's address, never a counter's word about it
+  (`docs/OWNER-COINS-RULES.md`, OC-14, OC-15). A refund that would pass that
+  is refused. If later facts show less received than
   the refunds already counted, no refund of that sale is ready until the
   facts fit again. A paid refund that was archived (AS-54) still counts, as
   an amount kept with the sale's facts, and the facts of a sale with
   anything counted cannot be forgotten.
 - **AS-53.** A refund is ready for a session only when the sale's facts say
   it has reached the refund depth. Until then its status is "waiting for
-  depth" (`docs/DESIGN.md` §2.4, §2.7). The facts are the counter's, folded
-  from its verified records by the caller (`SaleFacts`).
+  depth" (`docs/DESIGN.md` §2.4, §2.7). The facts are the owner's own: the
+  caller folds them from the owner's coin view and the address ranges the
+  owner issued (`SaleFacts`, OC-14). A counter's records may be read only to
+  compare with them, and its figure is never the limit.
 - **AS-54.** A refund is a state machine: queued, in a session, returned
   (with the reason the Key app or key 1 gave), signed, sent, paid. It is
   paid only when the caller reports its transaction confirmed. Until then
@@ -288,7 +294,9 @@ in memory, and nothing is changed if the store fails.
   refund, and no coin is used by two transactions of one session.
 - **AS-58.** Batches and pairings are queued as they are. A batch is signed
   with the owner identity when it is queued and must have a shape that can be
-  encoded. A pairing is the counter's request, decoded strictly. A queued
+  encoded. The batch's range is recorded as issued in the same write
+  (OC-10), and a batch that overlaps an issued range is refused (OC-11). A
+  pairing is the counter's request, decoded strictly. A queued
   item is put in a session in the order of its kind and then its number.
 - **AS-59.** Settings: `openbmt_core::settings::classify_change` tells a
   change that loosens from one that tightens, against the settings in force
@@ -355,8 +363,10 @@ in memory, and nothing is changed if the store fails.
 - **AS-65.** The queue's snapshot is `OBM4`, version 1. Decoding is strict
   (AS-03) and bounded (AS-50). It holds the queue, the sales' facts, the
   settings in force, the open sessions (the request bytes and what was
-  frozen, a transaction's change place included) and the objects waiting to
-  be delivered. It is at most 80 MiB:
+  frozen, a transaction's change place included), the objects waiting to
+  be delivered, and the ranges of receive indices issued for good (OC-10),
+  which are ascending, never overlap, and hold every batch that the queue
+  or the waiting objects hold. It is at most 80 MiB:
   eight requests of 8 MiB and room for the queue. Restoring also derives
   every queued batch again and verifies the owner's signature on it and on
   queued settings, checks every queued pairing against the offer and every open
@@ -402,7 +412,8 @@ Stated plainly, because the design promises no overclaiming.
   and the label proves nothing (AS-07). The ceilings and the allowlist
   (`docs/SIGNER-RULES.md`) bound what a false claim can cost. The owner
   phone's own rules (AS-51 to AS-54) hold only as far as the facts the
-  caller hands in are true.
+  caller hands in are true. The caller takes those facts from the owner's
+  own view (AS-52, AS-53), not from a counter.
 - **They do not move a file.** QR frames, BC-UR, a USB-C file and an SD card
   are the transport's. This library produces and reads bytes.
 - **They do not protect stored state.** The snapshots are checked for their
