@@ -176,7 +176,7 @@ Nothing here says what a merchant owes. It writes down what the records say.
   above 4 is refused before Argon2 runs, so that a hostile file cannot keep
   the phone busy. An empty passphrase is refused when sealing and when
   opening. How long a passphrase must be is for the screen that asks.
-- **BK-28.** The bundle is `OBMF`, version 1, with the counters and their
+- **BK-28.** The bundle is `OBM6`, version 1, with the counters and their
   high-water marks, the sales with every field and every unknown, the
   disposals and the returns. Reading is strict. It checks that the opaque
   IDs are the ones the keys give, the order, the references from refunds

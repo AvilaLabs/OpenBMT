@@ -18,7 +18,7 @@
 //! 3. [`model`]: sales, the opaque sale ID, disposals and returns.
 //! 4. [`books`]: [`Books::from_chains`], the folding of events and the totals.
 //! 5. [`export`]: the accounting CSV and the full ledger.
-//! 6. [`bundle`]: the books as a framed byte string (`OBMF`).
+//! 6. [`bundle`]: the books as a framed byte string (`OBM6`).
 //! 7. [`sealed`]: the encrypted export file (`OBMY`).
 //! 8. [`fsio`]: the file helper [`write_whole`].
 //!

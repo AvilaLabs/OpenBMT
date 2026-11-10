@@ -15,7 +15,7 @@ use crate::model::{
 use crate::value::{UnknownField, Value};
 
 /// BK-28: magic of the bundle.
-pub const MAGIC_BUNDLE: [u8; 4] = *b"OBMF";
+pub const MAGIC_BUNDLE: [u8; 4] = *b"OBM6";
 
 /// Fewest bytes a sale takes (it is 111), for the count check.
 const MIN_SALE: usize = 100;

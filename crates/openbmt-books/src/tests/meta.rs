@@ -122,9 +122,9 @@ fn the_rules_say_the_export_is_not_tax_advice_and_covers_us_rules_only() {
 #[test]
 fn the_stored_magics_differ_and_the_rules_name_them() {
     assert_ne!(crate::MAGIC_BUNDLE, crate::MAGIC_EXPORT);
-    assert_eq!(&crate::MAGIC_BUNDLE, b"OBMF");
+    assert_eq!(&crate::MAGIC_BUNDLE, b"OBM6");
     assert_eq!(&crate::MAGIC_EXPORT, b"OBMY");
-    for magic in ["OBMF", "OBMY"] {
+    for magic in ["OBM6", "OBMY"] {
         assert!(RULES.contains(magic));
     }
 }
