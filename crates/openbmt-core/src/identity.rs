@@ -15,10 +15,10 @@
 use std::fmt;
 use std::sync::OnceLock;
 
-use bitcoin::hashes::{sha256, Hash, HashEngine};
 use bitcoin::secp256k1::{schnorr, All, Keypair, Message, Secp256k1, XOnlyPublicKey};
 
-use crate::words::{words_from_digest, WORD_COUNT};
+pub use crate::hashing::tagged_hash;
+use crate::words::{fingerprint_words, WORD_COUNT};
 
 /// Tag for address batches.
 pub const TAG_BATCH: &str = "OpenBMT/batch/v1";
@@ -34,16 +34,6 @@ pub const TAG_FINGERPRINT: &str = "OpenBMT/fingerprint/v1";
 pub(crate) fn secp() -> &'static Secp256k1<All> {
     static CTX: OnceLock<Secp256k1<All>> = OnceLock::new();
     CTX.get_or_init(Secp256k1::new)
-}
-
-/// BIP340 tagged hash of `msg` under `tag`.
-pub fn tagged_hash(tag: &str, msg: &[u8]) -> [u8; 32] {
-    let th = sha256::Hash::hash(tag.as_bytes());
-    let mut eng = sha256::Hash::engine();
-    eng.input(th.as_byte_array());
-    eng.input(th.as_byte_array());
-    eng.input(msg);
-    sha256::Hash::from_engine(eng).to_byte_array()
 }
 
 /// A 64-byte BIP340 signature.
@@ -93,9 +83,11 @@ impl DeviceId {
             .map_err(|_| IdentityError::InvalidPublicKey)
     }
 
-    /// Four words that identify this key on a screen, for pinning a root.
+    /// Four stretched words (see `words`) that identify this key on a screen,
+    /// for pinning a root. A human cross-check only; software compares the
+    /// full key.
     pub fn fingerprint_words(&self) -> [&'static str; WORD_COUNT] {
-        words_from_digest(&tagged_hash(TAG_FINGERPRINT, &self.to_bytes()))
+        fingerprint_words(&tagged_hash(TAG_FINGERPRINT, &self.to_bytes()))
     }
 
     /// Check `sig` over `tagged_hash(tag, msg)`.
@@ -172,6 +164,7 @@ impl Identity {
 mod tests {
     use super::*;
     use crate::testutil::identity;
+    use bitcoin::hashes::{sha256, Hash};
 
     #[test]
     fn tagged_hash_matches_bip340_definition() {

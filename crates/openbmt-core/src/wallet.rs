@@ -24,7 +24,7 @@ use miniscript::descriptor::DescriptorPublicKey;
 use miniscript::Descriptor;
 
 use crate::identity::secp;
-use crate::words::{words_from_digest, WORD_COUNT};
+use crate::words::{fingerprint_words, WORD_COUNT};
 
 const INPUT_CHARSET: &str =
     "0123456789()[],'/*abcdefgh@:$%{}IJKLMNOPQRSTUVWXYZ&+-.;<=>?!^_|~ijklmnopqrstuvwxyzABCDEFGH`#\"\\ ";
@@ -355,12 +355,13 @@ impl WalletDescription {
         sha256::Hash::hash(self.canonical.as_bytes()).to_byte_array()
     }
 
-    /// Four BIP39 words from the first 44 bits of SHA-256 of the full
-    /// canonical string, `#checksum` included. Every device shows the same
-    /// four words for the same wallet; the owner compares them across
-    /// devices (setup, and after every app update).
+    /// Four stretched BIP39 words (see `words`) of `checksum32`, which is the
+    /// SHA-256 of the full canonical string, `#checksum` included. Every
+    /// device shows the same four words for the same wallet; the owner
+    /// compares them across devices (setup, and after every app update). A
+    /// human cross-check only; software compares the full 32-byte hash.
     pub fn checksum_words(&self) -> [&'static str; WORD_COUNT] {
-        words_from_digest(&self.checksum32())
+        fingerprint_words(&self.checksum32())
     }
 
     /// The two single-path descriptors (receive `/0/*`, change `/1/*`), each
@@ -519,6 +520,8 @@ mod tests {
     fn checksum_words_follow_the_documented_rule() {
         let w = wallet(Network::Testnet);
         let digest = sha256::Hash::hash(w.canonical_string().as_bytes()).to_byte_array();
+        // Documented rule: stretch the digest, then take its first 44 bits.
+        let digest = crate::words::stretch(&digest);
         let list = bip39::Language::English.word_list();
         let mut bits = 0u64;
         for b in &digest[..6] {

@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod batch;
+mod hashing;
 pub mod identity;
 pub mod policy;
 pub mod records;
