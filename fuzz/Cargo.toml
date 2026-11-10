@@ -258,6 +258,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "box_notice_decode"
+path = "fuzz_targets/box_notice_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "link_proto_decode"
 path = "fuzz_targets/link_proto_decode.rs"
 test = false
