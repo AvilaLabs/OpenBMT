@@ -7,7 +7,7 @@
 //! words.
 //!
 //! The pieces that keep state between payments are separate and small:
-//! [`ExposureSlice`] (what is outstanding), [`PauseTracker`] (pause after a
+//! [`Exposure`] (what is outstanding), [`PauseTracker`] (pause after a
 //! cancel) and [`classify_replacement`] (fee bump versus cancel).
 
 use std::collections::BTreeMap;
@@ -15,6 +15,7 @@ use std::fmt;
 
 use bitcoin::{Script, TxOut};
 
+use crate::identity::DeviceId;
 use crate::settings::Settings;
 
 /// Light check: largest instant sale, whole dollars.
@@ -78,7 +79,8 @@ impl InstantLabel {
 pub struct ModeLimits {
     /// Largest `max(sale, received)` accepted at once. Zero turns instant off.
     pub per_sale_sats: u64,
-    /// Largest outstanding total for a counter's slice.
+    /// Largest outstanding instant total for this counter. Zero turns
+    /// instant off.
     pub slice_sats: u64,
 }
 
@@ -108,21 +110,23 @@ impl InstantPolicy {
             light: m(LIGHT_PER_SALE_USD, LIGHT_SLICE_USD),
             node: m(NODE_PER_SALE_USD, NODE_SLICE_USD),
             box_only: m(BOX_PER_SALE_USD, BOX_SLICE_USD),
-            underpayment_tolerance_bps: 100,
+            underpayment_tolerance_bps: 50,
             heartbeat_max_age_secs: u64::from(DEFAULT_HEARTBEAT_MAX_AGE_SECS),
         }
     }
 
-    /// The numbers from the shop's signed settings.
-    pub fn from_settings(s: &Settings) -> Self {
-        let m = |per: &crate::settings::Limit, slice: &crate::settings::Limit| ModeLimits {
+    /// The numbers from the shop's signed settings, for one counter. Per-sale
+    /// limits are shop-wide; each mode's slice is `counter`'s share of that
+    /// mode's budget (zero, so instant off, if the counter has no share).
+    pub fn for_counter(s: &Settings, counter: &DeviceId) -> Self {
+        let m = |per: &crate::settings::Limit, mode: CheckMode| ModeLimits {
             per_sale_sats: per.sats,
-            slice_sats: slice.sats,
+            slice_sats: s.slice_sats(counter, mode),
         };
         Self {
-            light: m(&s.light_per_sale, &s.light_budget),
-            node: m(&s.node_per_sale, &s.node_budget),
-            box_only: m(&s.box_per_sale, &s.box_budget),
+            light: m(&s.light_per_sale, CheckMode::Light),
+            node: m(&s.node_per_sale, CheckMode::NodeAlsoSeenByLight),
+            box_only: m(&s.box_per_sale, CheckMode::BoxReportsOnly),
             underpayment_tolerance_bps: s.underpayment_tolerance_bps,
             heartbeat_max_age_secs: u64::from(s.heartbeat_max_age_secs),
         }
@@ -136,15 +140,6 @@ impl InstantPolicy {
             CheckMode::BoxReportsOnly => self.box_only,
         }
     }
-}
-
-/// A counter's slice of the exposure budget, as seen by one decision.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Slice {
-    /// This counter's signed share of the shop budget.
-    pub budget_sats: u64,
-    /// Instant payments accepted and not yet released.
-    pub outstanding_sats: u64,
 }
 
 /// The owner-phone heartbeat.
@@ -176,8 +171,8 @@ pub struct Inputs {
     pub sale_sats: u64,
     /// What actually arrived.
     pub received_sats: u64,
-    /// The counter's slice.
-    pub slice: Slice,
+    /// Instant payments this counter accepted and not yet released.
+    pub outstanding_sats: u64,
     /// The check is healthy (enough peers, current headers).
     pub check_healthy: bool,
     /// The owner-phone heartbeat.
@@ -250,9 +245,20 @@ pub fn amount_at_risk(sale_sats: u64, received_sats: u64) -> u64 {
 /// disabled, check health, watcher, network), then what is wrong with this
 /// payment (conflict, remote, underpaid, limit, slice), then the 8-second
 /// watch.
+///
+/// The mode used for limits and for the label is the effective mode. On a
+/// network that customers can join without Tor, the light client's own
+/// sighting is not independent evidence, so `NodeAlsoSeenByLight` with
+/// `customer_wifi` set and Tor off counts as `BoxReportsOnly`. The light
+/// check on such a network is off altogether (`SharedWifiNeedsTor`).
 pub fn evaluate(policy: &InstantPolicy, i: &Inputs) -> Decision {
     use Decision::{Instant, InstantOff, WaitForConfirmation};
-    let limits = policy.limits(i.mode);
+    let mode = if i.mode == CheckMode::NodeAlsoSeenByLight && i.customer_wifi && !i.tor_on {
+        CheckMode::BoxReportsOnly
+    } else {
+        i.mode
+    };
+    let limits = policy.limits(mode);
 
     match i.pause {
         PauseStatus::PausedFor { secs_left } => {
@@ -282,7 +288,7 @@ pub fn evaluate(policy: &InstantPolicy, i: &Inputs) -> Decision {
             reason: OffReason::NoWatcher,
         };
     }
-    if i.mode == CheckMode::Light && i.customer_wifi && !i.tor_on {
+    if mode == CheckMode::Light && i.customer_wifi && !i.tor_on {
         return InstantOff {
             reason: OffReason::SharedWifiNeedsTor,
         };
@@ -304,8 +310,7 @@ pub fn evaluate(policy: &InstantPolicy, i: &Inputs) -> Decision {
     if amount > limits.per_sale_sats {
         return wait(WaitReason::OverSaleLimit);
     }
-    let budget = i.slice.budget_sats.min(limits.slice_sats);
-    if u128::from(i.slice.outstanding_sats) + u128::from(amount) > u128::from(budget) {
+    if u128::from(i.outstanding_sats) + u128::from(amount) > u128::from(limits.slice_sats) {
         return wait(WaitReason::SliceFull);
     }
     if i.secs_since_first_seen < CONFLICT_WAIT_SECS {
@@ -314,7 +319,7 @@ pub fn evaluate(policy: &InstantPolicy, i: &Inputs) -> Decision {
         });
     }
     Instant {
-        label: match i.mode {
+        label: match mode {
             CheckMode::Light => InstantLabel::LightCheck,
             CheckMode::NodeAlsoSeenByLight => InstantLabel::YourNode,
             CheckMode::BoxReportsOnly => InstantLabel::YourBox,
@@ -329,7 +334,7 @@ pub struct PaymentId(pub [u8; 32]);
 /// Why exposure could not be added.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExposureError {
-    /// The slice has no room for this amount.
+    /// The counter's slice has no room for this amount.
     SliceFull,
     /// This payment is already counted.
     AlreadyCounted,
@@ -346,23 +351,21 @@ impl fmt::Display for ExposureError {
 
 impl std::error::Error for ExposureError {}
 
-/// A counter's slice of the shop's exposure budget, and what is outstanding
-/// against it. A payment enters on instant acceptance (or an override) and
-/// leaves only at its first confirmation or by the owner's action. Nothing
-/// here knows the time, so nothing can leave on a timeout.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExposureSlice {
-    budget_sats: u64,
+/// What a counter has accepted at once and not yet seen settle. A payment
+/// enters on instant acceptance (or an override) and leaves only at its first
+/// confirmation or by the owner's action. Nothing here knows the time, so
+/// nothing can leave on a timeout. The limit it is held to is passed with each
+/// addition (the counter's `slice_sats` for the mode in use), so a new signed
+/// limit takes effect at once and never touches what is already counted.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Exposure {
     entries: BTreeMap<PaymentId, u64>,
 }
 
-impl ExposureSlice {
-    /// A slice with this signed budget.
-    pub fn new(budget_sats: u64) -> Self {
-        Self {
-            budget_sats,
-            entries: BTreeMap::new(),
-        }
+impl Exposure {
+    /// Nothing outstanding.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Sum of everything outstanding.
@@ -372,25 +375,16 @@ impl ExposureSlice {
             .fold(0u64, |a, b| a.saturating_add(*b))
     }
 
-    /// The slice as a decision input.
-    pub fn view(&self) -> Slice {
-        Slice {
-            budget_sats: self.budget_sats,
-            outstanding_sats: self.outstanding(),
-        }
-    }
-
-    /// Install a new signed budget. Outstanding payments stay; a budget below
-    /// them just blocks new ones.
-    pub fn set_budget(&mut self, budget_sats: u64) {
-        self.budget_sats = budget_sats;
-    }
-
-    fn add(&mut self, id: PaymentId, amount: u64) -> Result<(), ExposureError> {
+    fn add(
+        &mut self,
+        id: PaymentId,
+        amount: u64,
+        slice_limit_sats: u64,
+    ) -> Result<(), ExposureError> {
         if self.entries.contains_key(&id) {
             return Err(ExposureError::AlreadyCounted);
         }
-        if u128::from(self.outstanding()) + u128::from(amount) > u128::from(self.budget_sats) {
+        if u128::from(self.outstanding()) + u128::from(amount) > u128::from(slice_limit_sats) {
             return Err(ExposureError::SliceFull);
         }
         self.entries.insert(id, amount);
@@ -398,13 +392,25 @@ impl ExposureSlice {
     }
 
     /// Count a payment accepted as instant (its `max(sale, received)`).
-    pub fn accept_instant(&mut self, id: PaymentId, amount: u64) -> Result<(), ExposureError> {
-        self.add(id, amount)
+    /// Refused when it would take the total above `slice_limit_sats`.
+    pub fn accept_instant(
+        &mut self,
+        id: PaymentId,
+        amount: u64,
+        slice_limit_sats: u64,
+    ) -> Result<(), ExposureError> {
+        self.add(id, amount, slice_limit_sats)
     }
 
-    /// Count a cashier or manager override. Refused when the slice is full.
-    pub fn add_override(&mut self, id: PaymentId, amount: u64) -> Result<(), ExposureError> {
-        self.add(id, amount)
+    /// Count a cashier or manager override. Refused when it would take the
+    /// total above `slice_limit_sats`.
+    pub fn add_override(
+        &mut self,
+        id: PaymentId,
+        amount: u64,
+        slice_limit_sats: u64,
+    ) -> Result<(), ExposureError> {
+        self.add(id, amount, slice_limit_sats)
     }
 
     /// The payment reached its first confirmation. Returns what was released.
@@ -420,6 +426,11 @@ impl ExposureSlice {
 }
 
 /// Pause state after cancels.
+///
+/// The time passed in is whatever clock the caller trusts. A clock moved
+/// forward can end a pause early. The bound on what can be lost does not
+/// depend on the pause: exposure stays counted until a confirmation or the
+/// owner's release, so an early end to a pause adds no room.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PauseTracker {
     last_cancel: Option<u64>,
@@ -471,7 +482,7 @@ impl PauseTracker {
 /// What a replacement transaction did to the payment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplacementKind {
-    /// Still pays us at least the amount: only the fee changed.
+    /// Still pays us at least what the original did: only the fee changed.
     FeeBump,
     /// Anything else.
     Cancel,
@@ -484,18 +495,17 @@ fn paid_to(outputs: &[TxOut], script: &Script) -> u64 {
         .fold(0u64, |a, o| a.saturating_add(o.value.to_sat()))
 }
 
-/// Sort a replacement of a payment we counted. `amount` is what we counted.
-/// It is a fee bump only if the original really paid our script at least
-/// `amount` and the replacement still does. Otherwise it is a cancel.
+/// Sort a replacement of a payment we counted. It is a fee bump only if the
+/// original paid `our_script` more than zero and the replacement pays
+/// `our_script` at least as much as the original did, summing every output to
+/// that script. Otherwise it is a cancel.
 pub fn classify_replacement(
     original_outputs: &[TxOut],
     replacement_outputs: &[TxOut],
     our_script: &Script,
-    amount: u64,
 ) -> ReplacementKind {
-    if paid_to(original_outputs, our_script) >= amount
-        && paid_to(replacement_outputs, our_script) >= amount
-    {
+    let original = paid_to(original_outputs, our_script);
+    if original > 0 && paid_to(replacement_outputs, our_script) >= original {
         ReplacementKind::FeeBump
     } else {
         ReplacementKind::Cancel
@@ -519,10 +529,7 @@ mod tests {
             mode: CheckMode::Light,
             sale_sats: 5_000,
             received_sats: 5_000,
-            slice: Slice {
-                budget_sats: 50_000,
-                outstanding_sats: 0,
-            },
+            outstanding_sats: 0,
             check_healthy: true,
             heartbeat: Heartbeat {
                 verified: true,
@@ -580,13 +587,44 @@ mod tests {
         );
     }
 
+    fn settings_with_counter(share: u16) -> (Settings, DeviceId) {
+        let mut s = Settings::defaults(RATE);
+        let c = crate::testutil::identity(70).device_id();
+        s.devices.insert(c);
+        s.counters.insert(c, share);
+        (s, c)
+    }
+
     #[test]
-    fn policy_follows_settings() {
-        let s = Settings::defaults(RATE);
-        let p = InstantPolicy::from_settings(&s);
+    fn policy_follows_settings_for_one_counter() {
+        let (s, c) = settings_with_counter(10_000);
+        let p = InstantPolicy::for_counter(&s, &c);
         assert_eq!(p.light, policy().light);
         assert_eq!(p.node, policy().node);
+        assert_eq!(p.box_only, policy().box_only);
+        assert_eq!(p.underpayment_tolerance_bps, 50);
         assert_eq!(p.heartbeat_max_age_secs, 600);
+        // half the budget: per-sale limits stay shop-wide, slices halve
+        let (s, c) = settings_with_counter(5_000);
+        let p = InstantPolicy::for_counter(&s, &c);
+        assert_eq!(p.light.per_sale_sats, 10_000);
+        assert_eq!(p.light.slice_sats, 25_000);
+        assert_eq!(p.node.slice_sats, 50_000);
+        assert_eq!(p.box_only.slice_sats, 25_000);
+    }
+
+    #[test]
+    fn a_counter_without_a_share_has_instant_off() {
+        let (s, _) = settings_with_counter(10_000);
+        let stranger = crate::testutil::identity(71).device_id();
+        let p = InstantPolicy::for_counter(&s, &stranger);
+        assert_eq!(p.light.slice_sats, 0);
+        assert_eq!(evaluate(&p, &ok_light()), off(OffReason::Disabled));
+    }
+
+    #[test]
+    fn default_tolerance_is_half_a_percent() {
+        assert_eq!(policy().underpayment_tolerance_bps, 50);
     }
 
     #[test]
@@ -607,10 +645,6 @@ mod tests {
                 mode,
                 sale_sats: 20_000,
                 received_sats: 20_000,
-                slice: Slice {
-                    budget_sats: 1_000_000,
-                    outstanding_sats: 0,
-                },
                 customer_wifi: false,
                 ..ok_light()
             };
@@ -782,44 +816,27 @@ mod tests {
     fn full_slice_waits() {
         let p = policy();
         let room = Inputs {
-            slice: Slice {
-                budget_sats: 50_000,
-                outstanding_sats: 45_000,
-            },
+            outstanding_sats: 45_000,
             ..ok_light()
         };
         assert!(matches!(evaluate(&p, &room), Decision::Instant { .. })); // 45k + 5k = 50k
         let full = Inputs {
-            slice: Slice {
-                budget_sats: 50_000,
-                outstanding_sats: 45_001,
-            },
+            outstanding_sats: 45_001,
             ..ok_light()
         };
         assert_eq!(evaluate(&p, &full), wait(WaitReason::SliceFull));
     }
 
     #[test]
-    fn slice_is_also_capped_by_the_mode_table() {
-        let p = policy();
-        // signed slice is generous, but the light-check total is $50
-        let i = Inputs {
-            slice: Slice {
-                budget_sats: 1_000_000,
-                outstanding_sats: 48_000,
-            },
-            ..ok_light()
-        };
-        assert_eq!(evaluate(&p, &i), wait(WaitReason::SliceFull));
-        // and a small signed slice binds before the table
-        let i = Inputs {
-            slice: Slice {
-                budget_sats: 4_000,
-                outstanding_sats: 0,
-            },
-            ..ok_light()
-        };
-        assert_eq!(evaluate(&p, &i), wait(WaitReason::SliceFull));
+    fn the_counters_own_slice_binds() {
+        let mut p = policy();
+        p.light.slice_sats = 4_000;
+        assert_eq!(evaluate(&p, &ok_light()), wait(WaitReason::SliceFull));
+        p.light.slice_sats = 5_000;
+        assert!(matches!(
+            evaluate(&p, &ok_light()),
+            Decision::Instant { .. }
+        ));
     }
 
     #[test]
@@ -828,10 +845,7 @@ mod tests {
         let i = Inputs {
             sale_sats: 5_000,
             received_sats: 5_500,
-            slice: Slice {
-                budget_sats: 50_000,
-                outstanding_sats: 45_000,
-            },
+            outstanding_sats: 45_000,
             ..ok_light()
         };
         assert_eq!(evaluate(&policy(), &i), wait(WaitReason::SliceFull));
@@ -839,15 +853,15 @@ mod tests {
 
     #[test]
     fn underpayment_waits_unless_within_tolerance() {
-        let p = policy(); // 1%
+        let p = policy(); // 0.5%
         let within = Inputs {
             sale_sats: 10_000,
-            received_sats: 9_900,
+            received_sats: 9_950,
             ..ok_light()
         };
         assert!(matches!(evaluate(&p, &within), Decision::Instant { .. }));
         let under = Inputs {
-            received_sats: 9_899,
+            received_sats: 9_949,
             ..within
         };
         assert_eq!(evaluate(&p, &under), wait(WaitReason::Underpaid));
@@ -898,10 +912,7 @@ mod tests {
         let i = Inputs {
             sale_sats: u64::MAX,
             received_sats: u64::MAX,
-            slice: Slice {
-                budget_sats: u64::MAX,
-                outstanding_sats: u64::MAX,
-            },
+            outstanding_sats: u64::MAX,
             ..ok_light()
         };
         assert_eq!(evaluate(&policy(), &i), wait(WaitReason::OverSaleLimit));
@@ -915,19 +926,14 @@ mod tests {
         PaymentId([n; 32])
     }
 
+    const LIMIT: u64 = 50_000;
+
     #[test]
     fn exposure_is_added_on_acceptance_and_released_on_first_confirmation() {
-        let mut s = ExposureSlice::new(50_000);
-        s.accept_instant(pid(1), 10_000).unwrap();
-        s.accept_instant(pid(2), 5_000).unwrap();
+        let mut s = Exposure::new();
+        s.accept_instant(pid(1), 10_000, LIMIT).unwrap();
+        s.accept_instant(pid(2), 5_000, LIMIT).unwrap();
         assert_eq!(s.outstanding(), 15_000);
-        assert_eq!(
-            s.view(),
-            Slice {
-                budget_sats: 50_000,
-                outstanding_sats: 15_000
-            }
-        );
         assert_eq!(s.release_on_first_confirmation(&pid(1)), Some(10_000));
         assert_eq!(s.outstanding(), 5_000);
         assert_eq!(
@@ -939,14 +945,14 @@ mod tests {
 
     #[test]
     fn exposure_is_released_by_the_owner_only_by_explicit_action() {
-        let mut s = ExposureSlice::new(50_000);
-        s.accept_instant(pid(1), 10_000).unwrap();
+        let mut s = Exposure::new();
+        s.accept_instant(pid(1), 10_000, LIMIT).unwrap();
         // nothing in this API takes a time, and evaluating does not release
         for _ in 0..100 {
             let _ = evaluate(
                 &policy(),
                 &Inputs {
-                    slice: s.view(),
+                    outstanding_sats: s.outstanding(),
                     ..ok_light()
                 },
             );
@@ -959,14 +965,14 @@ mod tests {
 
     #[test]
     fn duplicate_payment_is_not_counted_twice() {
-        let mut s = ExposureSlice::new(50_000);
-        s.accept_instant(pid(1), 10_000).unwrap();
+        let mut s = Exposure::new();
+        s.accept_instant(pid(1), 10_000, LIMIT).unwrap();
         assert_eq!(
-            s.accept_instant(pid(1), 10_000),
+            s.accept_instant(pid(1), 10_000, LIMIT),
             Err(ExposureError::AlreadyCounted)
         );
         assert_eq!(
-            s.add_override(pid(1), 10),
+            s.add_override(pid(1), 10, LIMIT),
             Err(ExposureError::AlreadyCounted)
         );
         assert_eq!(s.outstanding(), 10_000);
@@ -974,48 +980,137 @@ mod tests {
 
     #[test]
     fn overrides_add_to_exposure_and_are_refused_when_full() {
-        let mut s = ExposureSlice::new(20_000);
-        s.accept_instant(pid(1), 10_000).unwrap();
-        s.add_override(pid(2), 10_000).unwrap();
+        let mut s = Exposure::new();
+        s.accept_instant(pid(1), 10_000, 20_000).unwrap();
+        s.add_override(pid(2), 10_000, 20_000).unwrap();
         assert_eq!(s.outstanding(), 20_000);
-        assert_eq!(s.add_override(pid(3), 1), Err(ExposureError::SliceFull));
-        assert_eq!(s.accept_instant(pid(4), 1), Err(ExposureError::SliceFull));
+        assert_eq!(
+            s.add_override(pid(3), 1, 20_000),
+            Err(ExposureError::SliceFull)
+        );
+        assert_eq!(
+            s.accept_instant(pid(4), 1, 20_000),
+            Err(ExposureError::SliceFull)
+        );
         assert_eq!(s.outstanding(), 20_000);
         // room comes back only through a release
         s.release_on_first_confirmation(&pid(2));
-        s.add_override(pid(3), 10_000).unwrap();
+        s.add_override(pid(3), 10_000, 20_000).unwrap();
     }
 
     #[test]
-    fn lowering_the_budget_blocks_new_payments_but_keeps_old_ones() {
-        let mut s = ExposureSlice::new(20_000);
-        s.accept_instant(pid(1), 15_000).unwrap();
-        s.set_budget(10_000);
+    fn lowering_the_limit_blocks_new_payments_but_keeps_old_ones() {
+        let mut s = Exposure::new();
+        s.accept_instant(pid(1), 15_000, 20_000).unwrap();
+        assert_eq!(
+            s.add_override(pid(2), 1, 10_000),
+            Err(ExposureError::SliceFull)
+        );
         assert_eq!(s.outstanding(), 15_000);
-        assert_eq!(s.add_override(pid(2), 1), Err(ExposureError::SliceFull));
     }
 
     #[test]
     fn decision_and_ledger_work_together() {
         let p = policy();
-        let mut slice = ExposureSlice::new(50_000);
+        let mut ledger = Exposure::new();
         let mut accepted = 0;
         for n in 0..20u8 {
             let i = Inputs {
                 sale_sats: 10_000,
                 received_sats: 10_000,
-                slice: slice.view(),
+                outstanding_sats: ledger.outstanding(),
                 ..ok_light()
             };
             match evaluate(&p, &i) {
                 Decision::Instant { .. } => {
-                    slice.accept_instant(pid(n), 10_000).unwrap();
+                    ledger
+                        .accept_instant(pid(n), 10_000, p.light.slice_sats)
+                        .unwrap();
                     accepted += 1;
                 }
                 d => assert_eq!(d, wait(WaitReason::SliceFull)),
             }
         }
         assert_eq!(accepted, 5, "$50 slice holds five $10 sales");
+    }
+
+    fn shared_wifi(mode: CheckMode, tor_on: bool) -> Inputs {
+        Inputs {
+            mode,
+            customer_wifi: true,
+            tor_on,
+            ..ok_light()
+        }
+    }
+
+    #[test]
+    fn node_mode_on_shared_wifi_without_tor_is_judged_as_box_only() {
+        let p = policy();
+        let i = shared_wifi(CheckMode::NodeAlsoSeenByLight, false);
+        assert_eq!(
+            evaluate(&p, &i),
+            Decision::Instant {
+                label: InstantLabel::YourBox
+            }
+        );
+        // $20 fits the node per-sale limit but not the Box one
+        let big = Inputs {
+            sale_sats: 20_000,
+            received_sats: 20_000,
+            ..i
+        };
+        assert_eq!(evaluate(&p, &big), wait(WaitReason::OverSaleLimit));
+        // the node slice is $100 and the Box slice $50
+        let loaded = Inputs {
+            outstanding_sats: 60_000,
+            ..i
+        };
+        assert_eq!(evaluate(&p, &loaded), wait(WaitReason::SliceFull));
+        // a Box limit of zero turns it off even though the node limit is set
+        let mut off_box = policy();
+        off_box.box_only.per_sale_sats = 0;
+        assert_eq!(evaluate(&off_box, &i), off(OffReason::Disabled));
+    }
+
+    #[test]
+    fn node_mode_with_tor_or_private_wifi_keeps_node_label_and_limits() {
+        let p = policy();
+        for i in [
+            shared_wifi(CheckMode::NodeAlsoSeenByLight, true),
+            Inputs {
+                customer_wifi: false,
+                ..shared_wifi(CheckMode::NodeAlsoSeenByLight, false)
+            },
+        ] {
+            assert_eq!(
+                evaluate(&p, &i),
+                Decision::Instant {
+                    label: InstantLabel::YourNode
+                }
+            );
+            let big = Inputs {
+                sale_sats: 20_000,
+                received_sats: 20_000,
+                ..i
+            };
+            assert!(matches!(evaluate(&p, &big), Decision::Instant { .. }));
+            let loaded = Inputs {
+                outstanding_sats: 60_000,
+                ..i
+            };
+            assert!(matches!(evaluate(&p, &loaded), Decision::Instant { .. }));
+        }
+    }
+
+    #[test]
+    fn box_mode_is_unaffected_by_the_network() {
+        let i = shared_wifi(CheckMode::BoxReportsOnly, false);
+        assert_eq!(
+            evaluate(&policy(), &i),
+            Decision::Instant {
+                label: InstantLabel::YourBox
+            }
+        );
     }
 
     #[test]
@@ -1116,7 +1211,7 @@ mod tests {
         let orig = [out(&ours, 10_000), out(&change, 89_000)];
         let repl = [out(&ours, 10_000), out(&change, 88_000)];
         assert_eq!(
-            classify_replacement(&orig, &repl, &ours, 10_000),
+            classify_replacement(&orig, &repl, &ours),
             ReplacementKind::FeeBump
         );
     }
@@ -1127,13 +1222,23 @@ mod tests {
         let orig = [out(&ours, 10_000)];
         let repl = [out(&ours, 12_000), out(&other, 1), out(&change, 5)];
         assert_eq!(
-            classify_replacement(&orig, &repl, &ours, 10_000),
+            classify_replacement(&orig, &repl, &ours),
             ReplacementKind::FeeBump
         );
-        // payment split over two outputs to our script still adds up
+    }
+
+    #[test]
+    fn payment_split_over_two_outputs_to_our_script_is_a_fee_bump() {
+        let (ours, _, _) = scripts();
+        let orig = [out(&ours, 10_000)];
         let split = [out(&ours, 6_000), out(&ours, 4_000)];
         assert_eq!(
-            classify_replacement(&orig, &split, &ours, 10_000),
+            classify_replacement(&orig, &split, &ours),
+            ReplacementKind::FeeBump
+        );
+        // and an original split over two outputs, replaced by one
+        assert_eq!(
+            classify_replacement(&split, &orig, &ours),
             ReplacementKind::FeeBump
         );
     }
@@ -1144,33 +1249,40 @@ mod tests {
         let orig = [out(&ours, 10_000), out(&change, 50)];
         let less = [out(&ours, 9_999)];
         assert_eq!(
-            classify_replacement(&orig, &less, &ours, 10_000),
+            classify_replacement(&orig, &less, &ours),
             ReplacementKind::Cancel
         );
         let elsewhere = [out(&other, 10_000)];
         assert_eq!(
-            classify_replacement(&orig, &elsewhere, &ours, 10_000),
+            classify_replacement(&orig, &elsewhere, &ours),
             ReplacementKind::Cancel
         );
         assert_eq!(
-            classify_replacement(&orig, &[], &ours, 10_000),
+            classify_replacement(&orig, &[], &ours),
             ReplacementKind::Cancel
         );
-        // a different address of the same wallet is not our script
+        // a zero-value output to our script does not make up the amount
         let sibling = [out(&ours.clone(), 0), out(&other, 20_000)];
         assert_eq!(
-            classify_replacement(&orig, &sibling, &ours, 10_000),
+            classify_replacement(&orig, &sibling, &ours),
             ReplacementKind::Cancel
         );
     }
 
     #[test]
-    fn original_that_never_paid_the_amount_is_not_a_fee_bump() {
-        let (ours, _, _) = scripts();
-        let orig = [out(&ours, 9_000)];
+    fn original_that_paid_us_nothing_is_never_a_fee_bump() {
+        let (ours, other, _) = scripts();
         let repl = [out(&ours, 10_000)];
         assert_eq!(
-            classify_replacement(&orig, &repl, &ours, 10_000),
+            classify_replacement(&[out(&other, 10_000)], &repl, &ours),
+            ReplacementKind::Cancel
+        );
+        assert_eq!(
+            classify_replacement(&[], &repl, &ours),
+            ReplacementKind::Cancel
+        );
+        assert_eq!(
+            classify_replacement(&[out(&ours, 0)], &repl, &ours),
             ReplacementKind::Cancel
         );
     }
@@ -1180,9 +1292,7 @@ mod tests {
         let (ours, other, _) = scripts();
         let orig = [out(&ours, 10_000)];
         let mut t = PauseTracker::new();
-        if classify_replacement(&orig, &[out(&other, 10_000)], &ours, 10_000)
-            == ReplacementKind::Cancel
-        {
+        if classify_replacement(&orig, &[out(&other, 10_000)], &ours) == ReplacementKind::Cancel {
             t.record_cancel(500);
         }
         assert!(matches!(t.status(501), PauseStatus::PausedFor { .. }));
