@@ -1,0 +1,320 @@
+//! `DirStore`: slots, records, failed writes and a counter that is saved and
+//! loaded again.
+
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+
+use openbmt_core::policy::Heartbeat;
+use openbmt_core::records::{Chain, Record, RecordKind};
+use openbmt_counter::{Counter, Facts, OpenFacts, Slot, State, Store};
+use openbmt_watch::{HeaderChain, Source};
+
+use super::kit::*;
+use crate::{DirStore, DirStoreError};
+
+/// Records made and signed by the test counter, as the store is given them.
+fn records(n: usize) -> Vec<Vec<u8>> {
+    let mut chain = Chain::new();
+    (0..n)
+        .map(|i| {
+            chain
+                .append(&id(3), RecordKind::Sale, vec![i as u8; 10 + i])
+                .unwrap()
+                .to_bytes()
+        })
+        .collect()
+}
+
+fn append_raw(dir: &std::path::Path, bytes: &[u8]) {
+    let mut f = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(dir.join("records.bin"))
+        .unwrap();
+    f.write_all(bytes).unwrap();
+}
+
+fn framed(record: &[u8]) -> Vec<u8> {
+    let mut out = (record.len() as u32).to_le_bytes().to_vec();
+    out.extend_from_slice(record);
+    out
+}
+
+#[test]
+fn every_slot_and_the_checked_height_read_back() {
+    let dir = Scratch::new();
+    let mut store = DirStore::open(dir.path()).unwrap();
+    assert!(store.load().unwrap().batches.is_none());
+    store.put(Slot::Batches, b"batches").unwrap();
+    store.put(Slot::Exposure, b"exposure").unwrap();
+    store.put(Slot::Pause, b"pause").unwrap();
+    store.put(Slot::Desk, b"desk").unwrap();
+    for index in [12, 0, 7] {
+        store
+            .put(Slot::Sale(index), format!("sale {index}").as_bytes())
+            .unwrap();
+    }
+    store.put_checked(321).unwrap();
+    let loaded = DirStore::open(dir.path()).unwrap().load().unwrap();
+    assert_eq!(loaded.batches.as_deref(), Some(&b"batches"[..]));
+    assert_eq!(loaded.exposure.as_deref(), Some(&b"exposure"[..]));
+    assert_eq!(loaded.pause.as_deref(), Some(&b"pause"[..]));
+    assert_eq!(loaded.desk.as_deref(), Some(&b"desk"[..]));
+    assert_eq!(
+        loaded.sales,
+        vec![
+            (0, b"sale 0".to_vec()),
+            (7, b"sale 7".to_vec()),
+            (12, b"sale 12".to_vec())
+        ]
+    );
+    assert_eq!(loaded.checked, Some(321));
+    assert!(loaded.records.is_empty() && loaded.torn.is_none());
+    // A slot is replaced whole.
+    store.put(Slot::Desk, b"a longer desk than before").unwrap();
+    store.put(Slot::Desk, b"d").unwrap();
+    assert_eq!(store.load().unwrap().desk.as_deref(), Some(&b"d"[..]));
+}
+
+#[test]
+fn files_that_are_not_slots_are_left_alone() {
+    let dir = Scratch::new();
+    let mut store = DirStore::open(dir.path()).unwrap();
+    store.put(Slot::Sale(3), b"three").unwrap();
+    for name in [
+        "sale-4.bin.tmp",
+        "sale-05.bin",
+        "sale-x.bin",
+        "sale-.bin",
+        "headers.bin",
+        "book.bin",
+    ] {
+        fs::write(dir.path().join(name), b"other").unwrap();
+    }
+    let loaded = store.load().unwrap();
+    assert_eq!(loaded.sales, vec![(3, b"three".to_vec())]);
+}
+
+#[test]
+fn a_failed_write_leaves_the_old_value() {
+    let dir = Scratch::new();
+    let mut store = DirStore::open(dir.path()).unwrap();
+    store.put(Slot::Desk, b"old").unwrap();
+    store.put(Slot::Sale(1), b"old sale").unwrap();
+    store.put_checked(5).unwrap();
+    // A directory where the temporary file belongs: the file cannot be made.
+    for name in ["desk.bin.tmp", "sale-1.bin.tmp", "checked.bin.tmp"] {
+        fs::create_dir(dir.path().join(name)).unwrap();
+    }
+    let err = store.put(Slot::Desk, b"new").unwrap_err();
+    assert!(
+        matches!(err, DirStoreError::Io { op: "write", .. }),
+        "{err}"
+    );
+    assert!(store.put(Slot::Sale(1), b"new sale").is_err());
+    assert!(store.put_checked(9).is_err());
+    let loaded = store.load().unwrap();
+    assert_eq!(loaded.desk.as_deref(), Some(&b"old"[..]));
+    assert_eq!(loaded.sales, vec![(1, b"old sale".to_vec())]);
+    assert_eq!(loaded.checked, Some(5));
+    // The error names the file in plain words.
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "could not write desk.bin: {}",
+            std::io::ErrorKind::IsADirectory
+        )
+    );
+}
+
+#[test]
+fn a_checked_file_of_the_wrong_size_is_an_error() {
+    let dir = Scratch::new();
+    let store = DirStore::open(dir.path()).unwrap();
+    fs::write(dir.path().join("checked.bin"), [1, 2, 3]).unwrap();
+    assert!(matches!(
+        store.load().unwrap_err(),
+        DirStoreError::Corrupt {
+            file,
+            ..
+        } if file == "checked.bin"
+    ));
+}
+
+#[test]
+fn records_are_appended_in_order_and_read_back() {
+    let dir = Scratch::new();
+    let mut store = DirStore::open(dir.path()).unwrap();
+    let made = records(5);
+    for r in &made[..3] {
+        store.append_record(r).unwrap();
+    }
+    // A new store on the same directory goes on after the third.
+    let mut again = DirStore::open(dir.path()).unwrap();
+    for r in &made[3..] {
+        again.append_record(r).unwrap();
+    }
+    let loaded = again.load().unwrap();
+    assert!(loaded.torn.is_none());
+    let back: Vec<Vec<u8>> = loaded.records.iter().map(Record::to_bytes).collect();
+    assert_eq!(back, made);
+    Chain::from_records(loaded.records)
+        .verify(&openbmt_core::records::DeviceList::new([id(3).device_id()]))
+        .unwrap();
+}
+
+#[test]
+fn a_torn_last_record_is_cut_off_and_reported() {
+    let made = records(4);
+    // Cut in the data, and cut inside the length.
+    for cut in [framed(&made[3]).len() - 7, 2] {
+        let dir = Scratch::new();
+        let mut store = DirStore::open(dir.path()).unwrap();
+        for r in &made[..3] {
+            store.append_record(r).unwrap();
+        }
+        let whole = fs::metadata(dir.path().join("records.bin")).unwrap().len();
+        append_raw(dir.path(), &framed(&made[3])[..cut]);
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.records.len(), 3);
+        assert_eq!(
+            loaded.torn.map(|t| (t.kept_records, t.cut_bytes)),
+            Some((3, cut as u64))
+        );
+        // The file is whole again, and the next record follows the third.
+        assert_eq!(
+            fs::metadata(dir.path().join("records.bin")).unwrap().len(),
+            whole
+        );
+        store.append_record(&made[3]).unwrap();
+        let loaded = store.load().unwrap();
+        assert!(loaded.torn.is_none());
+        assert_eq!(loaded.records.len(), 4);
+    }
+}
+
+#[test]
+fn garbage_in_the_middle_of_the_records_is_an_error_and_nothing_is_cut() {
+    let made = records(3);
+    let dir = Scratch::new();
+    let mut store = DirStore::open(dir.path()).unwrap();
+    store.append_record(&made[0]).unwrap();
+    // A whole frame whose content is not a record.
+    append_raw(dir.path(), &framed(&[7u8; 40]));
+    store.append_record(&made[2]).unwrap();
+    let size = fs::metadata(dir.path().join("records.bin")).unwrap().len();
+    assert!(matches!(
+        store.load().unwrap_err(),
+        DirStoreError::Corrupt { .. }
+    ));
+    assert_eq!(
+        fs::metadata(dir.path().join("records.bin")).unwrap().len(),
+        size
+    );
+
+    // A length no record has is an error too, not a torn tail.
+    let dir = Scratch::new();
+    let mut store = DirStore::open(dir.path()).unwrap();
+    store.append_record(&made[0]).unwrap();
+    append_raw(dir.path(), &u32::MAX.to_le_bytes());
+    append_raw(dir.path(), &[0; 30]);
+    assert!(matches!(
+        store.load().unwrap_err(),
+        DirStoreError::Corrupt { .. }
+    ));
+
+    // A record that is too long to append is refused before anything is
+    // written.
+    let err = store
+        .append_record(&vec![0; crate::dirstore::MAX_RECORD_BYTES + 1])
+        .unwrap_err();
+    assert!(matches!(err, DirStoreError::RecordTooLarge(_)));
+}
+
+fn open_facts(now: u64) -> OpenFacts {
+    OpenFacts {
+        health: healthy(),
+        rescan_pending: false,
+        now,
+    }
+}
+
+#[test]
+fn a_counter_saved_through_the_store_loads_again_as_it_was() {
+    let dir = Scratch::new();
+    let mut store = DirStore::open(dir.path()).unwrap();
+    let mut c = Counter::new(id(3), pairing(), settings());
+    c.add_batch(batch(0, 10), &mut store).unwrap();
+    // A sale that is accepted at once and then has a conflict: the exposure
+    // goes in and the alarm goes up.
+    let opened = c
+        .open(five_dollars(), usd(), rate(), open_facts(T0), &mut store)
+        .unwrap();
+    let pay = spend(1, &[(&opened.script, opened.needs_sats)]);
+    for n in [20, 21, 22] {
+        c.sighting(&bytes(&pay), Source::Peer(peer(n)), T0, &mut store)
+            .unwrap();
+    }
+    let chain = Chain0;
+    let facts = |now| Facts {
+        chain: &chain,
+        health: healthy(),
+        heartbeat: Heartbeat {
+            verified: true,
+            age_secs: 0,
+        },
+        remote_order: false,
+        now,
+    };
+    let screen = c.judge(0, &facts(T0 + 60), &mut store).unwrap();
+    assert_eq!(screen.state, State::PaidInstant);
+    assert_eq!(c.exposure_outstanding(), 5_000);
+    let other = spend(1, &[(&p2wsh(0x77), 5_000)]);
+    c.sighting(&bytes(&other), Source::Peer(peer(30)), T0 + 61, &mut store)
+        .unwrap();
+    let screen = c.judge(0, &facts(T0 + 62), &mut store).unwrap();
+    assert_eq!(screen.state, State::DoNotHandOver);
+    assert!(c.alarm());
+    // A second sale that is still open, and the next address.
+    let second = c
+        .open(
+            five_dollars(),
+            usd(),
+            rate(),
+            open_facts(T0 + 70),
+            &mut store,
+        )
+        .unwrap();
+    assert_eq!(second.index, 1);
+
+    let loaded = DirStore::open(dir.path()).unwrap().load().unwrap();
+    let back = Counter::load(id(3), pairing(), settings(), loaded.stored()).unwrap();
+    assert_eq!(back.alarm(), c.alarm());
+    assert_eq!(back.exposure_outstanding(), c.exposure_outstanding());
+    assert_eq!(back.pause_status(T0 + 100), c.pause_status(T0 + 100));
+    assert_eq!(back.records().len(), c.records().len());
+    assert_eq!(back.batches().remaining(), c.batches().remaining());
+    assert_eq!(back.watched_scripts(), c.watched_scripts());
+    for index in [0, 1] {
+        assert_eq!(
+            back.sale(index).unwrap().to_bytes(),
+            c.sale(index).unwrap().to_bytes()
+        );
+    }
+    assert!(back.unreadable().next().is_none());
+}
+
+/// A header chain with no block on it.
+struct Chain0;
+
+impl HeaderChain for Chain0 {
+    fn height_of(&self, _: &bitcoin::BlockHash) -> Option<u32> {
+        None
+    }
+    fn tip_height(&self) -> u32 {
+        0
+    }
+    fn tip_time(&self) -> u64 {
+        T0
+    }
+}

@@ -1,0 +1,16 @@
+[package]
+name = "openbmt-counter-node"
+description = "The OpenBMT counter without a screen: the counter's judgment of a sale joined to the network driver and to files on disk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The same exact bitcoin version as the other crates, so the types unify.
+[dependencies]
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+openbmt-core = { path = "../openbmt-core" }
+openbmt-watch = { path = "../openbmt-watch" }
+openbmt-net-io = { path = "../openbmt-net-io" }
+openbmt-counter = { path = "../openbmt-counter" }
