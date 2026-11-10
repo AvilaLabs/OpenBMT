@@ -119,6 +119,10 @@ impl fmt::Display for ChainError {
 impl std::error::Error for ChainError {}
 
 /// The devices whose records are accepted.
+///
+/// Verification must be given every device that was on the signed device list
+/// at any time in the period being checked. Removing a device is enforced
+/// when new records are taken in, not by rejecting its old records.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceList(HashSet<DeviceId>);
 
@@ -259,8 +263,8 @@ impl Chain {
             .expect("40-byte body")
     }
 
-    /// Check the whole chain from the first record: known authors, good
-    /// signatures, consecutive numbers, each `prev` the hash of the record
+    /// Check the whole chain from the first record: known authors, bodies
+    /// within [`MAX_BODY`], good signatures, consecutive numbers, each `prev` the hash of the record
     /// before, and every check-in matching the chain it sits in. This
     /// detects edited, deleted, inserted and reordered records. It cannot
     /// see records cut off the end: compare with a later check-in for that
@@ -270,6 +274,9 @@ impl Chain {
         for (i, r) in self.records.iter().enumerate() {
             if !devices.contains(&r.author) {
                 return Err(ChainError::UnknownAuthor { seq: r.seq });
+            }
+            if r.body.len() > MAX_BODY {
+                return Err(ChainError::BodyTooLarge);
             }
             if !r.signature_ok() {
                 return Err(ChainError::BadSignature { seq: r.seq });
@@ -410,6 +417,24 @@ mod tests {
             ChainError::BodyTooLarge
         );
         assert!(c.is_empty());
+    }
+
+    #[test]
+    fn verify_refuses_an_oversized_body_before_the_signature() {
+        let mut recs = sample().records().to_vec();
+        recs[1].body = vec![0; MAX_BODY + 1];
+        // The signature no longer matches either, but the size is reported.
+        assert_eq!(
+            Chain::from_records(recs).verify(&devices()),
+            Err(ChainError::BodyTooLarge)
+        );
+        let mut recs = sample().records().to_vec();
+        recs[1].body = vec![0; MAX_BODY];
+        resign(&mut recs[1], 1);
+        assert_ne!(
+            Chain::from_records(recs).verify(&devices()),
+            Err(ChainError::BodyTooLarge)
+        );
     }
 
     #[test]
