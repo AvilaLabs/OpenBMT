@@ -1,0 +1,12 @@
+[package]
+name = "openbmt-net"
+description = "The OpenBMT counter's Bitcoin peer client: wire framing and the single-peer session, with no sockets and no clock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The same exact bitcoin version as the other crates, so the types unify.
+[dependencies]
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }

@@ -14,6 +14,7 @@ bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 openbmt-core = { path = "../crates/openbmt-core" }
 openbmt-signer = { path = "../crates/openbmt-signer" }
 openbmt-watch = { path = "../crates/openbmt-watch" }
+openbmt-net = { path = "../crates/openbmt-net" }
 
 # Not a member of the main workspace.
 [workspace]
@@ -126,6 +127,20 @@ bench = false
 [[bin]]
 name = "watch_header_store"
 path = "fuzz_targets/watch_header_store.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_frame"
+path = "fuzz_targets/net_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_session"
+path = "fuzz_targets/net_session.rs"
 test = false
 doc = false
 bench = false

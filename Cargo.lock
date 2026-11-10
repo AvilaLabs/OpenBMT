@@ -162,6 +162,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-net"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+]
+
+[[package]]
 name = "openbmt-signer"
 version = "0.1.0"
 dependencies = [
