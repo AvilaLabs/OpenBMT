@@ -11,6 +11,7 @@
 //!
 //! 1. [`chain`]: the header chain as the library sees it, confirmations and
 //!    the header check on its own.
+//!    [`headers`]: [`HeaderStore`], which builds and checks that chain.
 //! 2. [`proof`]: a confirmation the Box reports, believed only with a merkle
 //!    proof, the coinbase and the payment in full.
 //! 3. [`block`]: a confirmation the light client finds in a full block.
@@ -29,6 +30,7 @@
 
 pub mod block;
 pub mod chain;
+pub mod headers;
 pub mod health;
 pub mod netgroup;
 pub mod proof;
@@ -40,6 +42,7 @@ mod tests;
 
 pub use block::{payments_in_block, spends_in_block, WellFormedBlock};
 pub use chain::{check_header, confirmations, HeaderChain};
+pub use headers::{Accepted, HeaderStore};
 pub use health::{check_health, Health, HealthInput, Peer, Problem};
 pub use netgroup::{network_group, NetGroup, PeerAddr};
 pub use proof::{verify_box_proof, ProvenPayment};

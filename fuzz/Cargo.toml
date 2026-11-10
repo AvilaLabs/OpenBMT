@@ -122,3 +122,10 @@ path = "fuzz_targets/watch_block.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "watch_header_store"
+path = "fuzz_targets/watch_header_store.rs"
+test = false
+doc = false
+bench = false

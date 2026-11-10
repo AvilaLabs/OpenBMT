@@ -1,10 +1,13 @@
 //! Checks that the tests and refusals line up with the rules file.
 
+use openbmt_core::wire::DecodeError;
+
 use crate::{Problem, Refusal};
 
 const RULES: &str = include_str!("../../../../docs/WATCHER-RULES.md");
-const TEST_SOURCES: [&str; 5] = [
+const TEST_SOURCES: [&str; 6] = [
     include_str!("block.rs"),
+    include_str!("headers.rs"),
     include_str!("health.rs"),
     include_str!("netgroup.rs"),
     include_str!("proof.rs"),
@@ -29,7 +32,7 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 30);
+    assert_eq!(ids.len(), 35);
     assert!(ids.contains(&"WR-01".to_string()) && ids.contains(&"WR-53".to_string()));
 }
 
@@ -51,6 +54,28 @@ fn every_refusal_names_a_rule_of_the_file_and_says_so_in_words() {
     let refusals = vec![
         Refusal::NotOnChain,
         Refusal::HeaderProofOfWork,
+        Refusal::NetworkNotSupported,
+        Refusal::UnknownParent,
+        Refusal::WrongBits {
+            expected: 1,
+            found: 2,
+        },
+        Refusal::ChainProofOfWork,
+        Refusal::TimeNotAfterMedian { median: 1, time: 1 },
+        Refusal::AncestorMissing,
+        Refusal::HeightOverflow,
+        Refusal::TimeTooFarAhead { time: 1 },
+        Refusal::SideHeaderTooDeep,
+        Refusal::SideHeadersFull,
+        Refusal::WorkOverflow,
+        Refusal::StoreMalformed(DecodeError::Truncated),
+        Refusal::StoreWrongNetwork,
+        Refusal::StoreWrongStart,
+        Refusal::StoreNotChained,
+        Refusal::StoreHeaderRefused {
+            index: 1,
+            why: Box::new(Refusal::UnknownParent),
+        },
         Refusal::ProofTooLarge { len: 1 },
         Refusal::ProofMalformed,
         Refusal::CoinbaseTooLarge { len: 1 },

@@ -1,7 +1,8 @@
 //! Section 1: the header chain.
 //!
-//! The light client builds the chain and checks it. The library asks three
-//! questions about it and repeats none of that work.
+//! The library asks three questions about the best header chain. The caller
+//! answers them from its own chain, or from a
+//! [`HeaderStore`](crate::HeaderStore), which builds and checks one.
 
 use bitcoin::block::Header;
 use bitcoin::BlockHash;

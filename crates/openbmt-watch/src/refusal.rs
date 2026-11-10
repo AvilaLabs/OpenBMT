@@ -6,6 +6,8 @@
 
 use std::fmt;
 
+use openbmt_core::wire::DecodeError;
+
 /// A reason the watcher will not believe a proof, a block or a sighting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
@@ -13,6 +15,60 @@ pub enum Refusal {
     NotOnChain,
     /// WR-03: the header's hash does not meet the target its own bits state.
     HeaderProofOfWork,
+    /// WR-04: the header store cannot be started for this network.
+    NetworkNotSupported,
+    /// WR-05: the header's parent is not held.
+    UnknownParent,
+    /// WR-05: the header's bits are not what the difficulty rules require
+    /// on its branch.
+    WrongBits {
+        /// The bits the rules require.
+        expected: u32,
+        /// The bits the header states.
+        found: u32,
+    },
+    /// WR-05: the header's hash does not meet its target.
+    ChainProofOfWork,
+    /// WR-05: the header's time is not after the median time of the
+    /// headers before it.
+    TimeNotAfterMedian {
+        /// The median time of the previous headers on the branch.
+        median: u32,
+        /// The header's time.
+        time: u32,
+    },
+    /// WR-05: a header the check needs on the branch is not held.
+    AncestorMissing,
+    /// WR-05: the chain would pass the largest height.
+    HeightOverflow,
+    /// WR-06: the header's time is more than 2 hours ahead of the clock.
+    /// Nothing was stored; the header may be offered again later.
+    TimeTooFarAhead {
+        /// The header's time.
+        time: u32,
+    },
+    /// WR-07: the header's parent is too far below the tip for the header
+    /// to be held.
+    SideHeaderTooDeep,
+    /// WR-07: the store already holds the most headers off the best chain.
+    SideHeadersFull,
+    /// WR-07: the total work does not fit in 256 bits.
+    WorkOverflow,
+    /// WR-08: the stored bytes are not a header store and nothing else.
+    StoreMalformed(DecodeError),
+    /// WR-08: the stored form is for another network.
+    StoreWrongNetwork,
+    /// WR-08: the stored form starts from another block.
+    StoreWrongStart,
+    /// WR-08: a stored header does not extend the tip.
+    StoreNotChained,
+    /// WR-08: a stored header was refused.
+    StoreHeaderRefused {
+        /// Position of the header after the start block, from 0.
+        index: u32,
+        /// Why it was refused.
+        why: Box<Refusal>,
+    },
     /// WR-10: the merkle proof is larger than the limit.
     ProofTooLarge {
         /// Size of the proof in bytes.
@@ -125,6 +181,20 @@ impl Refusal {
         match self {
             Self::NotOnChain => "WR-01",
             Self::HeaderProofOfWork => "WR-03",
+            Self::NetworkNotSupported => "WR-04",
+            Self::UnknownParent
+            | Self::WrongBits { .. }
+            | Self::ChainProofOfWork
+            | Self::TimeNotAfterMedian { .. }
+            | Self::AncestorMissing
+            | Self::HeightOverflow => "WR-05",
+            Self::TimeTooFarAhead { .. } => "WR-06",
+            Self::SideHeaderTooDeep | Self::SideHeadersFull | Self::WorkOverflow => "WR-07",
+            Self::StoreMalformed(_)
+            | Self::StoreWrongNetwork
+            | Self::StoreWrongStart
+            | Self::StoreNotChained
+            | Self::StoreHeaderRefused { .. } => "WR-08",
             Self::ProofTooLarge { .. }
             | Self::ProofMalformed
             | Self::CoinbaseTooLarge { .. }
@@ -159,6 +229,45 @@ impl fmt::Display for Refusal {
             Self::NotOnChain => write!(f, "the block is not on the best chain"),
             Self::HeaderProofOfWork => {
                 write!(f, "the header does not meet the target its bits state")
+            }
+            Self::NetworkNotSupported => {
+                write!(f, "the header store does not start on this network")
+            }
+            Self::UnknownParent => write!(f, "the header's parent is not held"),
+            Self::WrongBits { expected, found } => write!(
+                f,
+                "the header states bits {found:#010x}, the rules require {expected:#010x}"
+            ),
+            Self::ChainProofOfWork => write!(f, "the header does not meet its target"),
+            Self::TimeNotAfterMedian { median, time } => write!(
+                f,
+                "the header's time {time} is not after the median time {median}"
+            ),
+            Self::AncestorMissing => write!(f, "a header the check needs is not held"),
+            Self::HeightOverflow => write!(f, "the chain would pass the largest height"),
+            Self::TimeTooFarAhead { time } => write!(
+                f,
+                "the header's time {time} is more than 2 hours ahead of the clock; try again later"
+            ),
+            Self::SideHeaderTooDeep => write!(
+                f,
+                "the header's parent is too far below the tip for it to be held"
+            ),
+            Self::SideHeadersFull => {
+                write!(
+                    f,
+                    "the store already holds the most headers off the best chain"
+                )
+            }
+            Self::WorkOverflow => write!(f, "the total work does not fit in 256 bits"),
+            Self::StoreMalformed(why) => {
+                write!(f, "the stored bytes are not a header store: {why}")
+            }
+            Self::StoreWrongNetwork => write!(f, "the stored form is for another network"),
+            Self::StoreWrongStart => write!(f, "the stored form starts from another block"),
+            Self::StoreNotChained => write!(f, "a stored header does not extend the tip"),
+            Self::StoreHeaderRefused { index, why } => {
+                write!(f, "the stored header {index} was refused: {why}")
             }
             Self::ProofTooLarge { len } => write!(f, "the proof is {len} bytes, over the limit"),
             Self::ProofMalformed => write!(

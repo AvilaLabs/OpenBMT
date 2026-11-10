@@ -23,6 +23,10 @@ been done yet.** Do not use it with real funds.
 | `HeaderChain` (trait) | The caller's view of the best header chain: height of a hash, tip height, tip time. | WR-01 |
 | `confirmations` | Tip height minus block height plus one; `None` if the block is not on the chain. | WR-01, WR-02 |
 | `check_header` | The header meets the target its own bits state. | WR-03 |
+| `HeaderStore::new` | A header store for mainnet (from a checkpoint), signet or regtest (from genesis). Testnet is refused. | WR-04 |
+| `HeaderStore::accept` | Check a header (parent, bits, work, time, clock) and hold it. Says whether it extended the chain, sits beside it or changed it. | WR-05 to WR-07 |
+| `HeaderStore::to_bytes`, `from_bytes` | The stored form of the best chain, and a read that checks every header again. | WR-08 |
+| `HeaderStore::tip`, `header_at`, `locator` | The tip, the header at a height, and the block locator for peers. | WR-07 |
 | `verify_box_proof` | Header, partial merkle tree, coinbase and payment in full, all checked. Returns a `ProvenPayment`. | WR-10 to WR-16, WR-01 |
 | `payments_in_block` | A full block, checked, and every payment in it to one script. | WR-20 to WR-23, WR-30, WR-01 |
 | `spends_in_block` | A full block, checked, and which of its transactions spend given coins. | WR-20, WR-21, WR-42 |
@@ -44,6 +48,7 @@ a person".
 | Rules | Where |
 |---|---|
 | WR-01 to WR-03 | `src/chain.rs` |
+| WR-04 to WR-08 | `src/headers.rs` |
 | WR-10 to WR-16 | `src/proof.rs`: `verify_box_proof`, `extract_tree` |
 | WR-20 to WR-23 | `src/block.rs` |
 | WR-30 to WR-34, WR-40, WR-42 to WR-46 | `src/sale.rs` |
@@ -73,6 +78,13 @@ Some choices worth knowing:
 - A block that repeats its last transactions has the merkle root of the
   block without the repeat (CVE-2012-2459). `WellFormedBlock::parse` refuses
   any block with two transactions of one ID (under WR-21).
+- `HeaderStore` asks `bitcoin::CompactTarget::from_next_work_required` for
+  the retarget. A test checks it against the two retargets in real mainnet
+  headers. It applies no testnet minimum-difficulty exception and no BIP94.
+- Headers beside the best chain are held in the same map as the best chain.
+  After a switch of chains the old blocks become side headers, so the count
+  of side headers can pass 4,032 for a while; new side headers are refused
+  until pruning brings it down.
 - A payment found in a block is never the coinbase, and a transaction that
   pays the script but is 64 bytes without witness is refused (WR-22).
 
@@ -128,9 +140,9 @@ These are the limits from section 7 of the rules.
 
 - It does not prove that a payment will confirm. An unconfirmed payment can
   be replaced or never mined, whatever was seen.
-- It does not check proof of work across the chain. That is the light
-  client's job. If the header chain it is given is wrong, every confirmation
-  that rests on it is wrong.
+- It checks headers, not blocks. `HeaderStore` checks proof of work,
+  difficulty and time, and trusts its start block. If the header chain it is
+  given is wrong, every confirmation that rests on it is wrong.
 - It does not see what is hidden. Peers and the Box can stay silent about a
   payment or a conflict. It never reports "not paid" (WR-23).
 - It does not judge fees or inputs. A light client cannot.
@@ -154,5 +166,6 @@ wrong coinbase, a coinbase that is not one, a payment that is a coinbase,
 64-byte transactions, a duplicated last pair, a wrong root, a header that was
 never mined, a header not on the chain, a trailing byte, an oversize proof,
 and the depth attack. A header chain that the tests can change simulates
-reorgs. Fuzz targets `watch_box_proof` and `watch_block` are in `fuzz/` at
+reorgs. The header store is tested on 4,043 real mainnet headers that cross
+two retargets (`src/tests/data`), and on mined regtest headers. Fuzz targets `watch_box_proof`, `watch_block` and `watch_header_store` are in `fuzz/` at
 the repository root.
