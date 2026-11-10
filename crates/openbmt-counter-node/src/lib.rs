@@ -41,6 +41,7 @@ pub mod dirstore;
 pub mod link;
 pub mod node;
 pub mod notices;
+pub mod say;
 
 #[cfg(test)]
 mod tests;

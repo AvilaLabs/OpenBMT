@@ -300,7 +300,10 @@ pub fn all_words() -> Vec<(String, Words)> {
         Problem::HeadersBehind,
         Problem::ClockMismatch,
     ] {
-        all.push((format!("Problem::{}", problem_name(problem)), problem.words()));
+        all.push((
+            format!("Problem::{}", problem_name(problem)),
+            problem.words(),
+        ));
     }
     for (name, health) in sample_health() {
         all.push((format!("Health::{name}"), health.words()));

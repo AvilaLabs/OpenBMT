@@ -10,7 +10,8 @@ use crate::say::{Tone, Who, Words};
 
 /// What a waiting sale does next: nothing, and it turns green with the
 /// block, or the cashier takes another kind of payment.
-const WAIT_NEXT: &str = "Nothing to do. It turns green when the payment is in a block, in about ten \
+const WAIT_NEXT: &str =
+    "Nothing to do. It turns green when the payment is in a block, in about ten \
      minutes, or take another kind of payment.";
 
 impl CheckMode {
@@ -70,8 +71,9 @@ impl InstantLabel {
 impl OffReason {
     /// Why accepting at once is off, for a sale that waits for a block.
     pub fn words(&self) -> Words {
-        let waiting =
-            |heading: &str, what: &str| Words::new(Tone::Info, heading, what, Who::Nobody, WAIT_NEXT);
+        let waiting = |heading: &str, what: &str| {
+            Words::new(Tone::Info, heading, what, Who::Nobody, WAIT_NEXT)
+        };
         match self {
             Self::PausedFor { .. } => waiting(
                 "Waiting: instant paused",
@@ -167,7 +169,10 @@ pub fn all_words() -> Vec<(String, Words)> {
         CheckMode::NodeAlsoSeenByLight,
         CheckMode::BoxReportsOnly,
     ] {
-        all.push((format!("CheckMode::{}", check_mode_name(mode)), mode.words()));
+        all.push((
+            format!("CheckMode::{}", check_mode_name(mode)),
+            mode.words(),
+        ));
     }
     for label in [
         InstantLabel::LightCheck,
