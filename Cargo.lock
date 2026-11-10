@@ -613,6 +613,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-box"
+version = "0.1.0"
+dependencies = [
+ "openbmt-core",
+ "openbmt-courier",
+ "openbmt-link",
+ "openbmt-net-io",
+]
+
+[[package]]
 name = "openbmt-core"
 version = "0.1.0"
 dependencies = [

@@ -1,6 +1,7 @@
 # Box rules: the merchant's own small server
 
-Status: specification for `crates/openbmt-box`, written before the code.
+Status: specification for `crates/openbmt-box`. Sections 1, 2, 3 and 5 are
+implemented; section 4 (the POS on the Box) is not yet.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement `docs/DESIGN.md` §5.3 and close the open item of §16: how a Box,
 which has no screen, is paired.
@@ -160,6 +161,68 @@ screen and not a shared computer.
 - **BX-51.** A Box that cannot read its key, its roots or its settings
   does not start as paired and does not make new ones over them: it stops
   and says which file is damaged.
+
+## 5a. What the code fixes
+
+These are details the rules above leave open. None of them changes a rule.
+
+- **Files.** The data directory holds `box.key` (the identity secret),
+  `invitation` (the invitation, its box nonce and the time it was entered),
+  `roots`, `settings` (the signed settings in force), `link-inbox` and
+  `link-outbox` (the message numbers of LK-40), `pos.token` once section 4
+  exists, and the directory `relay/` (the relay's member list and
+  mailboxes). Every file is written with mode 0600.
+- **Welcome request.** The welcome and the first settings reach an unpaired
+  Box over its relay connection as one request (`docs/LINK-RULES.md`,
+  LK-27): the length of the welcome as 4 bytes little endian, the welcome,
+  then the signed settings. The answer is "welcomed" or one refusal for every
+  cause, so that nothing about the invitation leaks. The request is allowed
+  while an invitation is open, and any welcome request spends it (BX-15),
+  also one from a stranger on the network. A stranger therefore cannot pair
+  the Box or learn anything, but can make the merchant enter the invitation
+  again.
+- **What an unpaired Box answers (BX-03).** A hello, a claim while an
+  invitation is open, and a welcome. A request for a challenge is refused,
+  so a mailbox, a fetch, an acknowledgement and a sealed message are all
+  refused, and the member list is empty.
+- **Time (BX-12).** An invitation is good while fewer than 1,800 seconds have
+  passed since it was entered, on the Box's clock. It is kept in
+  `invitation`, so a restart does not extend it. A damaged `invitation` file
+  is forgotten, and so is one found on a paired Box.
+- **Order of the writes (BX-15, BX-50).** The welcome writes `settings`,
+  `link-inbox`, `link-outbox` and last `roots`. A Box is paired when `roots`
+  is there. A stop or a failed write before that leaves it unpaired with the
+  invitation spent and a stale `settings` that is overwritten by the next
+  pairing; a stop after it leaves it paired with everything in place. The
+  Box is never half paired. Unpaired was chosen over finishing the pairing
+  at the next start because the invitation is spent and the welcome is gone:
+  there is nothing to finish from.
+- **Checking stored settings (BX-21, BX-51).** The settings store of
+  `openbmt_core::settings` cannot be seeded with settings that were taken as
+  a tightening and signed by the owner alone, so the Box keeps the settings
+  in force itself and checks new ones with `SignedSettings::verify` against
+  them: that gives the same version floor, the same loosening rule and the
+  same roots. At a start the stored settings are checked again for both
+  signatures that are there and for `validate`; a failure is damage (BX-51).
+- **Damage (BX-51).** A missing `box.key` next to `roots` or `settings` is
+  damage too, and so is `settings` missing next to `roots`. A new key is made
+  only for a directory with none of them.
+- **Members (BX-22).** The relay holds at most 64 members (LK-21). Settings
+  whose device list and owner come to more are refused, so that no change
+  can leave the relay with a list it cannot take.
+- **Turned off (BX-23).** The Box that settings no longer list keeps its
+  files and its roots. With no members nothing can reach it, so only settings
+  put in by hand through the setup can list it again.
+- **Number files (LK-40).** They are made empty when the welcome is taken. A
+  paired Box that finds either one missing does not start: it needs a new
+  pairing.
+- **Invitation file (BX-12).** The first line of the file is the invitation.
+  The file is deleted once it is read, whether or not the invitation was
+  accepted.
+- **Reading its own mailbox (BX-21, BX-24).** The Box opens what is sealed
+  for it with the roles of BX-24 and the rules of LK-05. Settings from the
+  owner go to BX-21; a message of any other kind is noted as not handled yet
+  and dropped.
 
 ## 6. What these rules do not do
 

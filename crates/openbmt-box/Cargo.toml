@@ -1,0 +1,18 @@
+[package]
+name = "openbmt-box"
+description = "The OpenBMT Box, the merchant's own small server: its pairing by invitation, its device list, its relay and its storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+openbmt-link = { path = "../openbmt-link" }
+openbmt-courier = { path = "../openbmt-courier" }
+openbmt-net-io = { path = "../openbmt-net-io" }
+
+[[bin]]
+name = "openbmt-box"
+path = "src/main.rs"
