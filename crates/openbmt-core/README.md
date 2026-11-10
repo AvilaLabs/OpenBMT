@@ -67,7 +67,8 @@ batch, record or setting is.
   message is a 4-byte ASCII magic, a version byte (currently 1) and the
   payload: `OBMB` signed batch, `OBMR` record, `OBMS` signed settings, `OBMH`
   high-water mark, `OBMC` counter batches, `OBME` exposure, `OBMP` pause
-  tracker. The payload of a signed batch, record or signed settings starts
+  tracker, `OBMK` the Key app's signer state (written by `openbmt-signer`,
+  which uses the public `Reader` and `start` helpers). The payload of a signed batch, record or signed settings starts
   with the exact bytes that are hashed and signed, followed by the signatures.
   Decoding is strict: wrong magic, an unknown version, missing or trailing
   bytes, a flag other than 0 or 1, a list that is not in strictly ascending

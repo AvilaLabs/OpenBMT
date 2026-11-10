@@ -8,7 +8,14 @@
 //! ```
 //!
 //! The magic names the type, so bytes meant for one type are never read as
-//! another. The version is currently 1; any other value is refused.
+//! another. The version is currently 1; any other value is refused. The
+//! magics are `OBMB` (signed batch), `OBMR` (record), `OBMS` (signed
+//! settings), `OBMH` (high-water mark), `OBMC` (counter batches), `OBME`
+//! (exposure), `OBMP` (pause tracker) and `OBMK` (the Key app's signer
+//! state, written by the `openbmt-signer` crate).
+//!
+//! [`Reader`], [`start`], [`put_opt_u64`] and [`len_u32`] are public so that
+//! other crates in the workspace write their snapshots the same way.
 //!
 //! Decoding is strict. A message decodes only if it is exactly what
 //! `to_bytes` would have produced for the value it describes: no trailing
@@ -43,6 +50,8 @@ pub const MAGIC_COUNTER_BATCHES: [u8; 4] = *b"OBMC";
 pub const MAGIC_EXPOSURE: [u8; 4] = *b"OBME";
 /// Magic of a [`PauseTracker`](crate::policy::PauseTracker) snapshot.
 pub const MAGIC_PAUSE_TRACKER: [u8; 4] = *b"OBMP";
+/// Magic of the Key app's signer state snapshot (the `openbmt-signer` crate).
+pub const MAGIC_SIGNER_STATE: [u8; 4] = *b"OBMK";
 
 /// Why bytes were not accepted as a message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,7 +93,7 @@ impl fmt::Display for DecodeError {
 impl std::error::Error for DecodeError {}
 
 /// Start a message: magic and version.
-pub(crate) fn start(magic: &[u8; 4], capacity: usize) -> Vec<u8> {
+pub fn start(magic: &[u8; 4], capacity: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(capacity + 5);
     out.extend_from_slice(magic);
     out.push(VERSION);
@@ -92,7 +101,7 @@ pub(crate) fn start(magic: &[u8; 4], capacity: usize) -> Vec<u8> {
 }
 
 /// Write a flag byte, then the u64 only when there is one.
-pub(crate) fn put_opt_u64(out: &mut Vec<u8>, v: Option<u64>) {
+pub fn put_opt_u64(out: &mut Vec<u8>, v: Option<u64>) {
     match v {
         Some(v) => {
             out.push(1);
@@ -104,18 +113,18 @@ pub(crate) fn put_opt_u64(out: &mut Vec<u8>, v: Option<u64>) {
 
 /// A list length as the u32 the wire form carries. Callers hold lists far
 /// below that bound, so a longer one is a programming error.
-pub(crate) fn len_u32(len: usize) -> u32 {
+pub fn len_u32(len: usize) -> u32 {
     u32::try_from(len).expect("list length fits the u32 wire field")
 }
 
 /// Cursor over the bytes being decoded.
-pub(crate) struct Reader<'a> {
+pub struct Reader<'a> {
     buf: &'a [u8],
 }
 
 impl<'a> Reader<'a> {
     /// Start reading `buf` and check its magic and version.
-    pub(crate) fn framed(buf: &'a [u8], magic: &[u8; 4]) -> Result<Self, DecodeError> {
+    pub fn framed(buf: &'a [u8], magic: &[u8; 4]) -> Result<Self, DecodeError> {
         let mut r = Self { buf };
         if r.take(4)? != magic {
             return Err(DecodeError::BadMagic);
@@ -126,7 +135,8 @@ impl<'a> Reader<'a> {
         }
     }
 
-    pub(crate) fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
+    /// The next `n` bytes, or `Truncated` if fewer remain.
+    pub fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
         if n > self.buf.len() {
             return Err(DecodeError::Truncated);
         }
@@ -135,28 +145,33 @@ impl<'a> Reader<'a> {
         Ok(head)
     }
 
-    pub(crate) fn u8(&mut self) -> Result<u8, DecodeError> {
+    /// One byte.
+    pub fn u8(&mut self) -> Result<u8, DecodeError> {
         Ok(self.array::<1>()?[0])
     }
 
-    pub(crate) fn u16_le(&mut self) -> Result<u16, DecodeError> {
+    /// A little-endian u16.
+    pub fn u16_le(&mut self) -> Result<u16, DecodeError> {
         Ok(u16::from_le_bytes(self.array()?))
     }
 
-    pub(crate) fn u32_le(&mut self) -> Result<u32, DecodeError> {
+    /// A little-endian u32.
+    pub fn u32_le(&mut self) -> Result<u32, DecodeError> {
         Ok(u32::from_le_bytes(self.array()?))
     }
 
-    pub(crate) fn u64_le(&mut self) -> Result<u64, DecodeError> {
+    /// A little-endian u64.
+    pub fn u64_le(&mut self) -> Result<u64, DecodeError> {
         Ok(u64::from_le_bytes(self.array()?))
     }
 
-    pub(crate) fn array<const N: usize>(&mut self) -> Result<[u8; N], DecodeError> {
+    /// The next `N` bytes as an array.
+    pub fn array<const N: usize>(&mut self) -> Result<[u8; N], DecodeError> {
         <[u8; N]>::try_from(self.take(N)?).map_err(|_| DecodeError::Truncated)
     }
 
     /// A byte that must be 0 or 1.
-    pub(crate) fn flag(&mut self) -> Result<bool, DecodeError> {
+    pub fn flag(&mut self) -> Result<bool, DecodeError> {
         match self.u8()? {
             0 => Ok(false),
             1 => Ok(true),
@@ -165,7 +180,7 @@ impl<'a> Reader<'a> {
     }
 
     /// A flag byte, then a u64 only when the flag is 1.
-    pub(crate) fn opt_u64(&mut self) -> Result<Option<u64>, DecodeError> {
+    pub fn opt_u64(&mut self) -> Result<Option<u64>, DecodeError> {
         if self.flag()? {
             Ok(Some(self.u64_le()?))
         } else {
@@ -174,11 +189,12 @@ impl<'a> Reader<'a> {
     }
 
     /// A valid x-only public key.
-    pub(crate) fn device_id(&mut self) -> Result<DeviceId, DecodeError> {
+    pub fn device_id(&mut self) -> Result<DeviceId, DecodeError> {
         DeviceId::from_bytes(&self.array()?).map_err(|_| DecodeError::InvalidKey)
     }
 
-    pub(crate) fn sig(&mut self) -> Result<Sig, DecodeError> {
+    /// A 64-byte signature. The bytes are not checked.
+    pub fn sig(&mut self) -> Result<Sig, DecodeError> {
         Ok(Sig(self.array()?))
     }
 
@@ -186,7 +202,7 @@ impl<'a> Reader<'a> {
     /// `min_elem` bytes each. A count above `max` is `TooLarge`; a count that
     /// cannot fit in the bytes left is `Truncated`. Either way it is refused
     /// before the caller reserves anything.
-    pub(crate) fn count(&mut self, max: usize, min_elem: usize) -> Result<usize, DecodeError> {
+    pub fn count(&mut self, max: usize, min_elem: usize) -> Result<usize, DecodeError> {
         let n = usize::try_from(self.u32_le()?).map_err(|_| DecodeError::TooLarge)?;
         if n > max {
             return Err(DecodeError::TooLarge);
@@ -198,7 +214,7 @@ impl<'a> Reader<'a> {
     }
 
     /// Succeed only if every byte was read.
-    pub(crate) fn finish(self) -> Result<(), DecodeError> {
+    pub fn finish(self) -> Result<(), DecodeError> {
         if self.buf.is_empty() {
             Ok(())
         } else {

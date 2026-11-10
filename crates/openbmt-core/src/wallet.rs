@@ -19,7 +19,9 @@ use std::str::FromStr;
 
 use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint, Xpub};
 use bitcoin::hashes::{sha256, Hash};
-use bitcoin::{Address, Network, NetworkKind, ScriptBuf};
+use bitcoin::opcodes::all::{OP_CHECKMULTISIG, OP_PUSHNUM_2, OP_PUSHNUM_3};
+use bitcoin::script::Builder;
+use bitcoin::{Address, Network, NetworkKind, PublicKey, ScriptBuf};
 use miniscript::descriptor::DescriptorPublicKey;
 use miniscript::Descriptor;
 
@@ -407,6 +409,46 @@ impl WalletDescription {
         Ok(derived.script_pubkey())
     }
 
+    /// The three compressed public keys at `<chain>/<index>`, in slot order
+    /// (slot 1, 2, 3), each derived from its slot's account xpub with
+    /// unhardened derivation. The index must be below 2^31.
+    pub fn derived_keys(&self, chain: Keychain, index: u32) -> Result<[PublicKey; 3], WalletError> {
+        if index >= 1 << 31 {
+            return Err(WalletError::IndexOutOfRange);
+        }
+        let path = [
+            ChildNumber::Normal {
+                index: chain.child(),
+            },
+            ChildNumber::Normal { index },
+        ];
+        let mut keys = Vec::with_capacity(3);
+        for slot in &self.slots {
+            let child = slot
+                .xpub
+                .derive_pub(secp(), &path)
+                .map_err(|e| WalletError::Derive(e.to_string()))?;
+            keys.push(PublicKey::new(child.public_key));
+        }
+        Ok(keys.try_into().expect("three keys"))
+    }
+
+    /// The witness script at `index` on `chain`: `OP_2 <k> <k> <k> OP_3
+    /// OP_CHECKMULTISIG` with the keys sorted by their compressed bytes
+    /// (BIP67, as `sortedmulti` sorts them). It is 105 bytes long.
+    pub fn witness_script(&self, chain: Keychain, index: u32) -> Result<ScriptBuf, WalletError> {
+        let mut keys = self.derived_keys(chain, index)?;
+        keys.sort_by_key(|k| k.inner.serialize());
+        Ok(Builder::new()
+            .push_opcode(OP_PUSHNUM_2)
+            .push_key(&keys[0])
+            .push_key(&keys[1])
+            .push_key(&keys[2])
+            .push_opcode(OP_PUSHNUM_3)
+            .push_opcode(OP_CHECKMULTISIG)
+            .into_script())
+    }
+
     /// Receive script at `index`.
     pub fn receive_script(&self, index: u32) -> Result<ScriptBuf, WalletError> {
         self.script(Keychain::Receive, index)
@@ -429,9 +471,6 @@ mod tests {
     use super::*;
     use crate::testutil::{slot_from_mnemonic, wallet, MNEMONICS};
     use bitcoin::bip32::Xpriv;
-    use bitcoin::opcodes::all::{OP_CHECKMULTISIG, OP_PUSHNUM_2, OP_PUSHNUM_3};
-    use bitcoin::script::Builder;
-    use bitcoin::PublicKey;
 
     #[test]
     fn bip380_checksum_test_vector() {
@@ -873,6 +912,91 @@ mod tests {
             WalletError::IndexOutOfRange
         );
         assert!(w.receive_script((1 << 31) - 1).is_ok());
+    }
+
+    #[test]
+    fn witness_script_hashes_to_the_wallet_script() {
+        for net in [Network::Bitcoin, Network::Regtest] {
+            let w = wallet(net);
+            for chain in [Keychain::Receive, Keychain::Change] {
+                for i in [0, 1, 2, 7, 19, 20, 1000, (1 << 31) - 1] {
+                    let ws = w.witness_script(chain, i).unwrap();
+                    assert_eq!(ws.len(), 105, "{chain:?} {i}");
+                    assert_eq!(
+                        ScriptBuf::new_p2wsh(&ws.wscript_hash()),
+                        w.script(chain, i).unwrap(),
+                        "{chain:?} {i}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn witness_script_matches_the_descriptors_explicit_script() {
+        let w = wallet(Network::Testnet);
+        for (chain, d) in [(Keychain::Receive, 0), (Keychain::Change, 1)] {
+            for i in [0, 1, 5, 40] {
+                let explicit = w.chains[d]
+                    .at_derivation_index(i)
+                    .unwrap()
+                    .derived_descriptor(secp())
+                    .unwrap()
+                    .explicit_script()
+                    .unwrap();
+                assert_eq!(w.witness_script(chain, i).unwrap(), explicit);
+            }
+        }
+    }
+
+    #[test]
+    fn derived_keys_are_the_keys_of_the_witness_script_in_slot_order() {
+        let w = wallet(Network::Regtest);
+        for chain in [Keychain::Receive, Keychain::Change] {
+            for i in [0, 3, 99] {
+                let keys = w.derived_keys(chain, i).unwrap();
+                let ws = w.witness_script(chain, i).unwrap();
+                let from_script: HashSet<Vec<u8>> = ws
+                    .instructions()
+                    .filter_map(|ins| match ins.unwrap() {
+                        bitcoin::script::Instruction::PushBytes(b) if b.len() == 33 => {
+                            Some(b.as_bytes().to_vec())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let from_keys: HashSet<Vec<u8>> =
+                    keys.iter().map(|k| k.inner.serialize().to_vec()).collect();
+                assert_eq!(from_script.len(), 3);
+                assert_eq!(from_script, from_keys);
+                // Slot order: key n comes from slot n's xpub.
+                let path = [
+                    ChildNumber::Normal {
+                        index: chain.child(),
+                    },
+                    ChildNumber::Normal { index: i },
+                ];
+                for (k, s) in keys.iter().zip(w.slots()) {
+                    let want = s.xpub.derive_pub(secp(), &path).unwrap().public_key;
+                    assert_eq!(k.inner, want);
+                    assert!(k.compressed);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn witness_script_and_keys_refuse_a_hardened_index() {
+        let w = wallet(Network::Testnet);
+        assert_eq!(
+            w.derived_keys(Keychain::Change, 1 << 31).unwrap_err(),
+            WalletError::IndexOutOfRange
+        );
+        assert_eq!(
+            w.witness_script(Keychain::Receive, 1 << 31).unwrap_err(),
+            WalletError::IndexOutOfRange
+        );
+        assert!(w.witness_script(Keychain::Receive, (1 << 31) - 1).is_ok());
     }
 
     #[test]
