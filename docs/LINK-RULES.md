@@ -299,6 +299,13 @@ over is still checked by the rules of the thing it carries.
   counter) is noted and dropped. No message makes a step fail, and no
   message makes a step stop before the rest are looked at.
 
+The two kinds that involve the Box are carried the same way. A counter sends
+a Paid notice to each Box on its device list when a sale changes state, and
+the Box sends a POS notice to the owner. The contents, how they are numbered
+and stored, and what the receiver checks are in `docs/BOX-RULES.md` section
+4 and its paragraph "What the code fixes". A counter takes a POS notice, opens
+it and drops it with a note (LK-63).
+
 The intervals in LK-56, LK-57, LK-61 and LK-62 are fields of a configuration
 with these defaults. A step that finds the relay unreachable tries again
 after a pause (5 seconds by default), so that a loop that runs several times

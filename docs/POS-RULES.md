@@ -17,8 +17,10 @@ The flow they describe works on every POS and needs only reading from it:
    who picks the Bitcoin tender and keeps cash, an order closed before the
    payment was safe, and a payment that never got an order.
 
-Closing an order through the POS's own API is a later, per-vendor add-on
-(PS-81). Nothing here depends on it.
+Closing an order through the POS's own API is a per-vendor add-on (PS-81).
+Nothing here depends on it. The Box (`docs/BOX-RULES.md` section 4) is the
+one that uses it, and runs this matching on the counters' signed paid
+notices instead of their records.
 
 This library has no network, no clock, no storage and no vendor code. The
 caller passes in the POS orders (through a reader it supplies), the
@@ -54,7 +56,12 @@ effect, and draws what it is told. Times are whole seconds since 1970 UTC.
   first reported paid (if ever), whether it was reported unpaid after that
   and not paid again, whether it is final, and its reference. Facts are
   built only from the counter's signed records. The chain is verified whole
-  first, and a chain that does not verify gives no facts.
+  first, and a chain that does not verify gives no facts. The Box has no
+  records: it builds the same facts from the counter's signed paid notices
+  (BX-40), which carry exactly these fields and nothing else; the
+  reference is worked out from the counter's key and the sale index
+  (PS-20). The counter folds its own records as PS-06 and PS-09 say to know
+  which notices to send, so the two ways give equal facts.
 - **PS-06.** Without PS-09, the facts are read from the counter's events in
   order. The sale is reported paid at the first of `PaidAtOnce`, `Confirmed`,
   `Override` or `Final`. It is reported unpaid after that by `Reopened`, and
@@ -296,7 +303,8 @@ both in plain words, since every unknown explains itself (§2.6).
   the amount and the currency and carries an idempotency key: the tagged
   hash of the counter's key and the sale index. It is made only for a sale
   that is reported paid now (CR-30). A retry carries the same key, and the
-  outcome says whether the order was already closed.
+  outcome says whether the order was already closed. The Box's use of it,
+  and how it finds the order to name, are BX-43.
 - **PS-82.** This crate holds no vendor code, no network and no sign-in.
   The scripted reader and closer it holds are test doubles.
 

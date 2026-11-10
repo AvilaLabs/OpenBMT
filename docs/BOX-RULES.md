@@ -1,7 +1,7 @@
 # Box rules: the merchant's own small server
 
-Status: specification for `crates/openbmt-box`. Sections 1, 2, 3 and 5 are
-implemented; section 4 (the POS on the Box) is not yet.
+Status: specification for `crates/openbmt-box`. All sections are
+implemented, section 4 (the POS on the Box) included.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement `docs/DESIGN.md` §5.3 and close the open item of §16: how a Box,
 which has no screen, is paired.
@@ -171,9 +171,10 @@ These are details the rules above leave open. None of them changes a rule.
 - **Files.** The data directory holds `box.key` (the identity secret),
   `invitation` (the invitation, its box nonce and the time it was entered),
   `roots`, `settings` (the signed settings in force), `link-inbox` and
-  `link-outbox` (the message numbers of LK-40), `pos.token` once section 4
-  exists, and the directory `relay/` (the relay's member list and
-  mailboxes). Every file is written with mode 0600.
+  `link-outbox` (the message numbers of LK-40), `pos.token` (BX-41),
+  `pos-notices` and `pos-ledger` (the POS side, below), and the directory
+  `relay/` (the relay's member list and mailboxes). Every file is written
+  with mode 0600.
 - **Welcome request.** The welcome and the first settings reach an unpaired
   Box over its relay connection as one request (`docs/LINK-RULES.md`,
   LK-27): the length of the welcome as 4 bytes little endian, the welcome,
@@ -226,8 +227,148 @@ These are details the rules above leave open. None of them changes a rule.
   accepted.
 - **Reading its own mailbox (BX-21, BX-24).** The Box opens what is sealed
   for it with the roles of BX-24 and the rules of LK-05. Settings from the
-  owner go to BX-21; a message of any other kind is noted as not handled yet
-  and dropped.
+  owner go to BX-21; a paid notice goes to the POS side (BX-40); a message
+  of any other kind is noted as not handled yet and dropped.
+
+### The POS on the Box (BX-40 to BX-43)
+
+These details too leave every rule of section 4 as it is.
+
+- **The paid notice.** A counter sends it as a sealed message of kind Paid
+  notice to each Box on its device list (LK-08). The content is exactly 141
+  bytes, strict, with the magic `OBM8`:
+
+  ```text
+  "OBM8" | 1 | counter key (32) | number (8) | sale index (4)
+         | amount (8) | currency (3) | opened (8) | state (1)
+         | state time (8) | signature (64)
+  signature = BIP340 over the tagged hash
+              "OpenBMT/paid-notice/v1" of every byte before it
+  ```
+
+  Integers are little endian. The amount is in minor units of the currency,
+  the currency is three capital letters, the state is 1 opened, 2 paid, 3
+  unpaid again or 4 final, and the number is from 1 and zero is refused.
+  There is no field for a satoshi amount, a rate, an address or a
+  transaction ID, and the length is fixed, so none can be added to a notice
+  that reads. The sale reference of PS-20 is not carried: the Box works it
+  out from the counter's key and the sale index.
+- **What a notice says.** A notice is the state of the sale and not a
+  change to it. The time of a "paid" notice is when the sale was first
+  reported paid (so a "paid" notice sent after the sale was unpaid again
+  carries the same time); the time of the other three is when the state
+  was reached. "Unpaid again" and "final" clear each other, and "paid"
+  clears both. A sale that is unpaid again is never also final.
+- **When a counter sends one.** When a sale opens, and whenever the sale as
+  the counter's own records give it (PS-06, PS-09) changes state, or the
+  time it was first reported paid changes. The counter reads its own
+  records to know: it writes nothing and asks nothing of the sale. The
+  number is the counter's, from 1, shared by all its Boxes. The number and
+  the notices not yet taken by the relay are stored whole in
+  `notice-outbox` in the link's directory before anything is sent, and a
+  restart sends again what the relay did not take. The relay taking it is
+  the only acknowledgement there is. A queue is at most 4,096 notices, and
+  when it is full the oldest go and a note says so. With no Box on the
+  list nothing is read, queued or sent; a Box added later is sent the
+  notices of the whole chain, the newest 4,096 of them. A notice that is
+  lost is made good by the next one about the sale, which carries the
+  whole sale. A failure to send or to store is a note on the counter and
+  never an error in front of the cashier, and never changes a sale.
+- **What the Box checks, in order.** That the notice reads; that the key
+  that signed it is the key that sent the message; that the key is a counter
+  in the settings in force (BX-24), which is how a counter taken off the list
+  stops being heard; that the signature is good; that the number is above the
+  last taken from that counter; that the amount, the currency and the time
+  the sale opened are those earlier notices gave, when it has seen the sale.
+  A notice that fails is dropped with a note, and its number is not used up.
+  A notice for a sale the Box has not seen makes the sale from the notice.
+- **What is stored (BX-50).** The Box keeps, for each sale, the fact of
+  PS-05 as the notices gave it, and for each counter the last number taken
+  (at most 256 counters; the numbers of counters no longer on the list are
+  let go when the table is full). They are in `pos-notices` with the closes
+  and the POS notices waiting for the relay, written whole, and the new
+  value is stored before it takes effect, so a number is never taken
+  without being stored. Messages that come together are taken as one write.
+- **How many sales (PS-72).** At most 16,384 sales, about 1.2 MB. When a
+  new sale would be the 16,385th, the Box drops up to 1,024 of the oldest
+  sales that are final, not unpaid again, first reported paid more than the
+  matching window (PS-33, 30 minutes) ago and with no close under way. A
+  sale dropped is not judged again; a match to it is kept as it is (PS-36).
+  If none can be dropped the new notice is refused with a note: nothing
+  else is ever dropped for room.
+- **The timer.** The time is the clock the Box is given. The POS is read
+  every 30 seconds, and at once at the next turn of the worker after a
+  paid notice was taken; a notice that is refused does not bring a reading.
+  Each reading is a sync of PS-74 on all the sales the Box holds. A reading
+  that fails (the POS is down, times out, answers with something that does
+  not read, refuses the sign-in) is a note and changes nothing; the next one
+  is at the next time. A POS that asks to wait is not read again before it
+  said, if that is later. The timer needs a token and a paired Box that the
+  settings list; with the Box unpaired or turned off the connector is told to
+  forget the token and nothing is read (BX-03, BX-23).
+- **The token (BX-41).** It is the one line of `pos.token`, at most 1,024
+  bytes with no control character, in a file with mode 0600. The Box
+  refuses to read it, with an error that names the file and says what its
+  mode is, when the mode has any bit of the group or of others; the relay
+  runs on and the POS is not read. A Box with no token file reads no POS.
+  The console command `pos-token` takes the next line of standard input as
+  the token and stores it; `pos` prints the state of the POS side (whether
+  it reads and why not, whether the connector can close, the time of the
+  last reading and its error, and counts) and never the token. A Box that
+  is unpaired or turned off takes no token.
+- **What the connector is.** The `Connector` trait of `openbmt-pos` is the
+  reader of PS-80 and four things the Box needs: `set_token`, `can_close`
+  (false unless the connector says so), `find_order` and `close` (PS-81).
+  The binary holds no connector, so on its own it keeps the notices and
+  reads no POS; a program that links the library gives it one.
+- **The POS notice.** The Box sends what a reading made new, and what its
+  closing did, to the owner as sealed messages of kind POS notice (LK-08),
+  one thing in each, strict, with the magic `OBM9`:
+
+  ```text
+  "OBM9" | 1 | Box key (32) | number (8) | time (8) | item (1) | body
+         | signature (64)
+  signature = BIP340 over the tagged hash
+              "OpenBMT/pos-notice/v1" of every byte before it
+  ```
+
+  The item is 1 a match (the order, the tender, the sale, how it was
+  matched, whether by order of time, when), 2 an alert (as the ledger of
+  PS-71 stores it, with its why and next step as the alert holds them), 3 an
+  order the Box closed, or 4 a sale reported unpaid again after its order
+  was closed. The number is the Box's, from 1. There is no field for a
+  satoshi amount, an address or a transaction ID. A reading that finds
+  nothing new sends nothing. At most 256 are kept for the relay; the oldest
+  go first, with a note.
+- **What the owner does with it (BX-42).** The owner takes a POS notice only
+  from a key it holds as a Box, with that Box's signature on it and a number
+  above the last from that Box. It keeps the newest 256 as the Box's report
+  and shows them as such. It does not merge them into its own matching and
+  does not act on them. Anything it refuses is a note. The list and the
+  numbers are in memory. A counter takes a POS notice, opens it and drops it
+  with a note.
+- **Closing an order (BX-43).** On each turn the Box looks at the sales whose
+  latest notice is "paid" or "final", which is what "a sale with a
+  counter-signed "paid" notice" comes to once a sale can be final, and for
+  each that has no close recorded asks the connector, which is the only one
+  that knows the POS, for the one open order that carries the sale's
+  reference (`find_order`). With no order named nothing is closed and the
+  sale is tried again on the next turn. With one, the attempt is stored,
+  then the connector is called with the idempotency key of PS-81, and then
+  the result is stored with a POS notice to the owner. A stop between the
+  two leaves the attempt, and the next turn calls again with the same key
+  and the same order. A sale gets at most one close, ever; at most 16
+  orders are closed in a turn. A sale that is not reported paid now is
+  refused before the connector is called, by `CloseRequest::for_sale`.
+  A sale that goes unpaid again after its order was closed makes one POS
+  notice of item 4 to the owner. Nothing is undone, and the sale is not
+  closed again if it is paid once more.
+- **A stop in the middle.** A reading's ledger is stored before the POS
+  notices it made. A stop between the two loses those notices, which are
+  hints; the owner's own matching sees the same conditions.
+- **Files that do not read back.** A `pos-notices` or `pos-ledger` that is
+  there and does not read is not read over and not made new: the POS side
+  is off, a note says which file, and the relay runs on.
 
 ## 6. What these rules do not do
 
