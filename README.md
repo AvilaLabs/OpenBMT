@@ -57,6 +57,7 @@ sets. The full statement, its conditions and the reasoning are in
 | [docs/SPEND-RULES.md](docs/SPEND-RULES.md) | How a transaction is built, joined and finished: coins, change, fee, the PSBT the signer accepts, and the checks on two signatures |
 | [docs/SESSION-RULES.md](docs/SESSION-RULES.md) | The approval session: the file the owner phone and the Key app pass between them, what the Key app checks on every line, what is stored before an answer leaves, and the owner phone's refund queue |
 | [docs/WATCHER-RULES.md](docs/WATCHER-RULES.md) | What the counter believes about a payment, and what each kind of evidence may prove |
+| [docs/FEE-RULES.md](docs/FEE-RULES.md) | How the owner's device works out a fee rate from blocks it has checked itself, with no fee service, and what that number does not say |
 | [docs/POS-RULES.md](docs/POS-RULES.md) | How the owner's device matches the POS orders to the counter's sales, and what raises an alert |
 | [docs/BOOKS-RULES.md](docs/BOOKS-RULES.md) | How the counters' records become the books: per-sale fields and what stays unknown, the two CSV exports and the encrypted export file |
 | [docs/OWNER-COINS-RULES.md](docs/OWNER-COINS-RULES.md) | How the owner's device learns wallet coins from checked blocks, handles reorganizations, and grows its watch set |

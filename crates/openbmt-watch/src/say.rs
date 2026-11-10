@@ -9,6 +9,7 @@
 
 use openbmt_core::say::{Tone, Who, Words};
 
+use crate::fees::FeeError;
 use crate::health::{Health, Problem};
 use crate::refusal::Refusal;
 
@@ -88,6 +89,49 @@ impl Health {
         .code("WR-50")
     }
 }
+
+impl FeeError {
+    /// What the owner's notes say when a block gave no fee sample. The
+    /// sample is only for a fee estimate; no payment waits for it.
+    pub fn words(&self) -> Words {
+        let (heading, what, next) = match self {
+            Self::MerkleRoot => (
+                "Block not used for fees",
+                "A block did not match its header, so it was not used to work out the fee of the last blocks.",
+                "Nothing to do. The fee comes from the next block that checks out.",
+            ),
+            Self::NoCoinbase => (
+                "Block has no miner payment",
+                "A block does not start with the miner's own payment, so it was not used to work out the fee of the last blocks.",
+                "Nothing to do. The fee comes from the next block that checks out.",
+            ),
+            Self::CoinbaseOverflow => (
+                "Block not used for fees",
+                "The first transaction of a block claims an impossible sum, so the block was not used to work out fees.",
+                "Nothing to do. The fee comes from the next block that checks out.",
+            ),
+        };
+        Words::new(Tone::Ended, heading, what, Who::Nobody, next)
+            .code(self.rule())
+            .detail(self.to_string())
+    }
+}
+
+/// The name of a fee refusal, by an exhaustive match.
+pub fn fee_error_name(e: &FeeError) -> &'static str {
+    match e {
+        FeeError::MerkleRoot => "MerkleRoot",
+        FeeError::NoCoinbase => "NoCoinbase",
+        FeeError::CoinbaseOverflow => "CoinbaseOverflow",
+    }
+}
+
+/// One value of every fee refusal.
+pub const ALL_FEE_ERRORS: [FeeError; 3] = [
+    FeeError::MerkleRoot,
+    FeeError::NoCoinbase,
+    FeeError::CoinbaseOverflow,
+];
 
 /// The groups the 50 watcher refusals fall into. Two refusals are in one
 /// group when a person would do the same about both.
@@ -323,6 +367,9 @@ pub fn all_words() -> Vec<(String, Words)> {
     }
     for group in RefusalGroup::ALL {
         all.push((format!("RefusalGroup::{}", group.name()), group.words()));
+    }
+    for e in &ALL_FEE_ERRORS {
+        all.push((format!("FeeError::{}", fee_error_name(e)), e.words()));
     }
     all
 }

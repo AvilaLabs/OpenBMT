@@ -21,6 +21,7 @@
 //!    that `openbmt_core::policy::evaluate` reads; this library does not
 //!    call it.
 //! 6. [`health`]: whether the check is working.
+//! 7. [`fees`]: a fee rate checked from full blocks (`docs/FEE-RULES.md`).
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.
@@ -30,6 +31,7 @@
 
 pub mod block;
 pub mod chain;
+pub mod fees;
 pub mod headers;
 pub mod health;
 pub mod netgroup;
@@ -43,6 +45,7 @@ mod tests;
 
 pub use block::{payments_in_block, spends_in_block, WellFormedBlock};
 pub use chain::{check_header, confirmations, HeaderChain};
+pub use fees::{block_fee_sample, FeeError, FeeHistory, FeeSample};
 pub use headers::{Accepted, HeaderStore};
 pub use health::{check_health, Health, HealthInput, Peer, PeerTransport, Problem};
 pub use netgroup::{host_group, network_group, NetGroup, PeerAddr};

@@ -2,6 +2,7 @@
 //! refusal test checks the exact refusal and the rule it names.
 
 mod block;
+mod fees;
 mod headers;
 mod health;
 mod kit;

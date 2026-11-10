@@ -3,7 +3,7 @@
 use openbmt_core::say::{check, check_distinct, Tone, Who};
 use openbmt_core::wire::DecodeError;
 
-use crate::say::{all_words, problem_name, RefusalGroup};
+use crate::say::{all_words, fee_error_name, problem_name, RefusalGroup, ALL_FEE_ERRORS};
 use crate::{Health, Problem, Refusal};
 
 /// One value of every watcher refusal.
@@ -90,6 +90,9 @@ fn sc_01_no_variant_is_missing() {
     for g in RefusalGroup::ALL {
         assert!(has(format!("RefusalGroup::{}", g.name())));
     }
+    for e in &ALL_FEE_ERRORS {
+        assert!(has(format!("FeeError::{}", fee_error_name(e))));
+    }
     // Every refusal is listed (`Refusal::group` is exhaustive), each one has words that keep the rules,
     // and every group is reached by some refusal.
     let refusals = every_refusal();
@@ -142,4 +145,18 @@ fn sc_03_the_refusal_text_is_only_in_the_small_print() {
     .words();
     assert!(w.detail.is_some_and(|d| d.contains("WR-05")));
     assert!(!w.what.contains("WR-"));
+}
+
+#[test]
+fn sc_01_every_fee_refusal_has_words_with_its_rule() {
+    // `fee_error_name` and `FeeError::rule` are exhaustive matches; this
+    // list has to hold every variant.
+    assert_eq!(ALL_FEE_ERRORS.len(), 3);
+    for e in &ALL_FEE_ERRORS {
+        let w = e.words();
+        assert_eq!(check(&w), Ok(()), "{e}");
+        assert_eq!(w.code, Some(e.rule()));
+        assert!(w.detail.is_some_and(|d| d.contains(e.rule())));
+        assert!(!w.what.contains("FE-"));
+    }
 }
