@@ -18,6 +18,7 @@ pub mod identity;
 pub mod pairing;
 pub mod policy;
 pub mod records;
+pub mod say;
 pub mod settings;
 pub mod wallet;
 pub mod wire;
