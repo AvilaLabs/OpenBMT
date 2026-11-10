@@ -1406,6 +1406,28 @@ after a wave of attacks, which showed how fragile that is.
 - **Consolidate when cheap.** When fees are low, the app suggests merging small
   receipts into fewer outputs. This is a suggestion, never automatic. It
   merges receipts, so it also has a privacy cost (§11).
+- **Small sales are stopped at the counter, not cleaned up afterwards.**
+  Merging receipts moves the cost to a cheaper day; it does not remove it,
+  because every receipt is still paid for once as an input. The only way
+  not to pay it is not to take the receipt. So the owner sets a smallest
+  bitcoin sale for the shop, and the setting screen shows what one
+  receipt costs to spend at a low, a usual and a high fee next to it. A
+  sale below it is not opened: the cashier is told to take another kind
+  of payment. The first value **[to tune]** is the amount at which
+  spending the receipt at 5 sat/vB costs 2% of it, about 26,000 sats.
+  Decided 2026-11-10; not built.
+- **What the owner is shown about receipts.** One line, in the owner's
+  own terms and with no word for the outputs themselves: how many
+  receipts the wallet holds, what spending all of them would cost at the
+  fee of the last blocks, and, when that fee is low against the last
+  weeks, an offer to merge them now with its cost. Approving it is an
+  ordinary two-key approval. The fee comes from the blocks the owner's
+  own device has checked, never from a service. Not built.
+- **Shops with many small sales.** On-chain bitcoin suits sales of tens
+  of dollars and up. For a shop of small tickets the fitting tool is the
+  merchant's own Lightning node (§8), which makes no receipt per sale.
+  The app says so when the smallest-sale setting keeps turning sales
+  away, and never routes a payment through anyone else.
 - **Size cap by PSBT bytes.** One transaction is capped by the size of its
   PSBT in bytes, not by input count, because each input carries a full parent
   transaction (`non_witness_utxo`) and the signers read it by QR or file. The
