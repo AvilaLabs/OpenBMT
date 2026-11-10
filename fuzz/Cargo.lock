@@ -415,6 +415,7 @@ dependencies = [
  "openbmt-link",
  "openbmt-net",
  "openbmt-owner",
+ "openbmt-owner-node",
  "openbmt-pos",
  "openbmt-session",
  "openbmt-signer",
@@ -428,6 +429,20 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "openbmt-core",
+ "openbmt-watch",
+]
+
+[[package]]
+name = "openbmt-counter-node"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "openbmt-core",
+ "openbmt-counter",
+ "openbmt-courier",
+ "openbmt-link",
+ "openbmt-net-io",
+ "openbmt-pos",
  "openbmt-watch",
 ]
 
@@ -491,6 +506,25 @@ dependencies = [
  "openbmt-session",
  "openbmt-signer",
  "openbmt-spend",
+]
+
+[[package]]
+name = "openbmt-owner-node"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "openbmt-core",
+ "openbmt-counter",
+ "openbmt-counter-node",
+ "openbmt-courier",
+ "openbmt-link",
+ "openbmt-net-io",
+ "openbmt-owner",
+ "openbmt-pos",
+ "openbmt-session",
+ "openbmt-signer",
+ "openbmt-spend",
+ "openbmt-watch",
 ]
 
 [[package]]
