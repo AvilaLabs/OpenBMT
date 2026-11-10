@@ -54,6 +54,9 @@
 //!
 //! - `open <minor units> <rate in minor units per bitcoin>`
 //! - `judge <index>`
+//! - `refund <index> <sats> <address>`: a cashier asks for a refund of a
+//!   sale, to the address as a customer's wallet would show it
+//!   (`refund_destination`)
 //! - `heartbeat <hex>`: the bytes of a signed heartbeat from the owner's
 //!   watcher (`owner_regtest`), taken by the node
 //! - `hbstate`
@@ -73,6 +76,8 @@
 //! - `warning ...` for the single-peer switch
 //! - `opened index=<i> address=<address> sats=<n>` or `refused <text>`
 //! - `sale <i> state=<State> received=<sats> needs=<sats> mode=<mode> why=<text>`
+//! - `refund requested index=<i> number=<n>` or `refund refused <rule and
+//!   reason>`
 //! - `report <Kind> index=<i> ...`, once for each report
 //! - `heartbeat taken view=<Verified|NotVerified> ...` or
 //!   `heartbeat refused <rule and reason>`
@@ -108,7 +113,10 @@ use openbmt_core::batch::{BatchBuilder, BatchPolicy, PinnedRoots, SignedBatch};
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::settings::Settings;
 use openbmt_core::wallet::{KeySlot, WalletDescription};
-use openbmt_counter::{Amount, Currency, HeartbeatView, Pairing, Rate, RateSource, Report};
+use openbmt_counter::{
+    refund_destination, Actor, Amount, Currency, HeartbeatView, Pairing, Rate, RateSource,
+    RefundAsk, RefundRequest, Report, Role as CashierRole,
+};
 use openbmt_counter_node::{CounterLink, CounterLinkConfig, Node, NodeConfig};
 use openbmt_courier::{Courier, CourierConfig, FirstStart};
 use openbmt_link::{ClientConfig, Role, Route};
@@ -352,6 +360,31 @@ fn command(
                     show(node, &screen.reports);
                 }
                 Err(e) => say(format!("error {e}")),
+            }
+        }
+        Some("refund") => {
+            let index: u32 = number(words.next(), "the index")?;
+            let sats: u64 = number(words.next(), "the amount")?;
+            let text = words.next().ok_or("the address is missing")?;
+            let destination = match refund_destination(text, Network::Regtest) {
+                Ok(script) => script,
+                Err(e) => {
+                    say(format!("refund refused {e}"));
+                    return Ok(true);
+                }
+            };
+            let request = RefundRequest {
+                ask: RefundAsk::Sats(sats),
+                destination,
+                actor: Actor {
+                    role: CashierRole::Cashier,
+                    name: "ann".to_string(),
+                },
+                reason: "regtest check".to_string(),
+            };
+            match node.request_refund(index, request) {
+                Ok(number) => say(format!("refund requested index={index} number={number}")),
+                Err(e) => say(format!("refund refused {e}")),
             }
         }
         Some("heartbeat") => {

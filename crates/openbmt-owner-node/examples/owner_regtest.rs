@@ -24,8 +24,14 @@
 //! of the link (LK-53) are kept in the data directory: the start is a first
 //! start if neither is there, and any other start needs both.
 //!
-//! **Test only, never use.** The identities are made from fixed bytes that
-//! anyone can read here, the same ones as in `counter_regtest`.
+//! The refund requests in the counter's records are applied to an owner's
+//! queue (`RefundIntake`, `docs/COUNTER-RULES.md` CR-60 to CR-74) after each
+//! link step. The queue is kept in memory, over the same fixed test wallet
+//! as the counter's; the intake's own state is kept in the data directory.
+//!
+//! **Test only, never use.** The identities and the wallet keys are made from
+//! fixed bytes that anyone can read here, the same ones as in
+//! `counter_regtest`.
 //!
 //! `--regtest-single-peer` replaces the answer of the health rules with
 //! "healthy", as in `counter_regtest`: one local node is one peer and, on
@@ -45,6 +51,7 @@
 //! - `status`
 //! - `linkstate`
 //! - `copies`
+//! - `refunds`
 //! - `quit`
 //!
 //! Every command ends with a line `done <n>`.
@@ -63,6 +70,11 @@
 //!   check_in_held=<true|false|none> last_check_in_at=<secs|none>`, for each
 //!   counter (`copies`): the length and head of the owner's copy of its chain,
 //!   the latest check-in kept, and whether the copy holds it at its place
+//! - `refund sale=<i> counter=<hex> sats=<n> address=<address> cashier=<name>
+//!   stage=<Stage>`, for each refund on the owner's queue (`refunds`), and
+//!   `refunds queued=<n> notes=<n>`
+//! - `refundnote seq=<n> number=<n> sale=<i> kind=<Kind> text=<text>`, for
+//!   each line of the intake's list (`refunds`)
 //! - `alert <text>`, once for each alert as it is raised
 //! - `note <text>`
 //! - `stopped`
@@ -76,15 +88,20 @@ use std::sync::mpsc::{channel, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
 use bitcoin::hashes::Hash;
-use bitcoin::Network;
+use bitcoin::secp256k1::Secp256k1;
+use bitcoin::{Address, Network};
+use openbmt_core::batch::BatchPolicy;
 use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::records::DeviceList;
+use openbmt_core::wallet::{KeySlot, WalletDescription};
 use openbmt_courier::{Courier, CourierConfig, FirstStart};
 use openbmt_link::{ClientConfig, Role, Route};
 use openbmt_net_io::DriverConfig;
-use openbmt_owner_node::{OwnerConfig, OwnerLink, OwnerLinkConfig, OwnerWatcher};
+use openbmt_owner::{Options, Owner};
+use openbmt_owner_node::{OwnerConfig, OwnerLink, OwnerLinkConfig, OwnerWatcher, RefundIntake};
 use openbmt_watch::{check_health, network_group, HeaderChain, Health, HealthInput};
 
 const USAGE: &str = "usage: owner_regtest <data dir> <node address> [--regtest-single-peer] \
@@ -95,6 +112,11 @@ const OWNER_SECRET: [u8; 32] = [0x11; 32];
 const APPROVER_SECRET: [u8; 32] = [0x12; 32];
 const COUNTER_SECRET: [u8; 32] = [0x13; 32];
 const OTHER_COUNTER_SECRET: [u8; 32] = [0x14; 32];
+/// TEST ONLY, NEVER USE: the seeds of the three wallet keys, as in
+/// `counter_regtest`.
+const KEY_SEEDS: [[u8; 32]; 3] = [[0xa1; 32], [0xa2; 32], [0xa3; 32]];
+/// The batch size the counter example uses.
+const ADDRESSES: u32 = 20;
 
 /// What the health function saw last, for the `health` and `groups` lines.
 #[derive(Debug, Default)]
@@ -135,6 +157,42 @@ fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
+}
+
+/// One of the three test keys, on the wallet's account path for regtest.
+fn test_slot(index: u8, seed: &[u8; 32]) -> Result<KeySlot, String> {
+    let secp = Secp256k1::new();
+    let master = Xpriv::new_master(Network::Regtest, seed).map_err(|e| e.to_string())?;
+    let path: DerivationPath = "m/48h/1h/0h/2h".parse().map_err(|_| "path".to_string())?;
+    let account = master
+        .derive_priv(&secp, &path)
+        .map_err(|e| e.to_string())?;
+    Ok(KeySlot {
+        index,
+        origin_fingerprint: master.fingerprint(&secp),
+        origin_path: path,
+        xpub: Xpub::from_priv(&secp, &account),
+    })
+}
+
+/// The owner's queue over the counter example's wallet.
+fn start_queue() -> Result<Owner, String> {
+    let slots = [
+        test_slot(1, &KEY_SEEDS[0])?,
+        test_slot(2, &KEY_SEEDS[1])?,
+        test_slot(3, &KEY_SEEDS[2])?,
+    ];
+    let wallet = WalletDescription::new(Network::Regtest, slots).map_err(|e| e.to_string())?;
+    Owner::new(
+        &[0x21; 32],
+        wallet,
+        identity(&OWNER_SECRET)?.device_id(),
+        BatchPolicy {
+            min_count: ADDRESSES,
+        },
+        Options::default(),
+    )
+    .map_err(|e| format!("{e:?}"))
 }
 
 /// The link to the counter through the relay. The counter is the fixed test
@@ -213,6 +271,8 @@ fn variant(
 fn command(
     watcher: &mut OwnerWatcher,
     link: Option<&OwnerLink>,
+    queue: &Owner,
+    intake: &RefundIntake,
     line: &str,
     seen: &Arc<Mutex<Seen>>,
 ) -> Result<bool, String> {
@@ -308,6 +368,31 @@ fn command(
                 ));
             }
         }
+        Some("refunds") => {
+            for r in queue.refunds() {
+                let address = Address::from_script(&r.script, Network::Regtest)
+                    .map_or_else(|_| hex(r.script.as_bytes()), |a| a.to_string());
+                say(format!(
+                    "refund sale={} counter={} sats={} address={address} cashier={} stage={:?}",
+                    r.sale.index,
+                    hex(&r.sale.counter.to_bytes()),
+                    r.sats,
+                    r.cashier,
+                    r.stage
+                ));
+            }
+            for n in intake.notes() {
+                say(format!(
+                    "refundnote seq={} number={} sale={} kind={:?} text={}",
+                    n.seq, n.number, n.sale, n.kind, n.text
+                ));
+            }
+            say(format!(
+                "refunds queued={} notes={}",
+                queue.refunds().len(),
+                intake.notes().len()
+            ));
+        }
         Some("quit") => return Ok(false),
         Some(other) => return Err(format!("unknown command: {other}")),
         None => {}
@@ -401,6 +486,8 @@ fn run(args: &[String]) -> Result<(), String> {
         _ => None,
     };
     let mut alerts_shown = 0usize;
+    let mut queue = start_queue()?;
+    let mut intake = RefundIntake::open(Path::new(dir)).map_err(|e| e.to_string())?;
 
     let (lines, input) = channel();
     std::thread::spawn(move || {
@@ -420,7 +507,14 @@ fn run(args: &[String]) -> Result<(), String> {
     loop {
         match input.try_recv() {
             Ok(line) => {
-                match command(&mut watcher, link.as_ref(), line.trim(), &seen) {
+                match command(
+                    &mut watcher,
+                    link.as_ref(),
+                    &queue,
+                    &intake,
+                    line.trim(),
+                    &seen,
+                ) {
                     Ok(true) => {}
                     Ok(false) => break,
                     Err(e) => say(format!("error {e}")),
@@ -433,6 +527,14 @@ fn run(args: &[String]) -> Result<(), String> {
                 show_notes(&mut watcher);
                 if let Some(link) = link.as_mut() {
                     link.step(&mut watcher, now_secs());
+                    for (counter, applied) in
+                        intake.run(&mut queue, link, &mut |_: &[u8]| Ok::<(), String>(()))
+                    {
+                        say(format!(
+                            "note refunds counter={} {applied:?}",
+                            hex(&counter.to_bytes())
+                        ));
+                    }
                     for note in link.take_notes() {
                         say(format!("note link {note}"));
                     }
