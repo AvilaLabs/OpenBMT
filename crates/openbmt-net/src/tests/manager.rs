@@ -14,7 +14,7 @@ use openbmt_watch::{network_group, HeaderStore, PeerAddr};
 
 use super::kit::{command_field, raw_frame, raw_header, verack_frame, version_frame};
 use super::manager_kit::*;
-use crate::manager::{ANSWER_SECS, FILTER_SETTLE_SECS, MAX_UNANSWERED};
+use crate::manager::{ANSWER_SECS, FILTER_SETTLE_SECS, MAX_ANNOUNCED_BLOCKS, MAX_UNANSWERED};
 use crate::{
     ConnectRefused, Manager, ManagerConfig, Output, PeerAddress, PeerId, MAX_OUTGOING_BYTES,
 };
@@ -818,6 +818,44 @@ fn nr_40_a_block_announced_by_inv_makes_that_peer_eligible() {
     n.tick(FILTER_SETTLE_SECS);
     assert_eq!(filter_requests(&n.sent(a)), vec![(1, hash)]);
     assert!(filter_requests(&n.sent(b)).is_empty());
+}
+
+#[test]
+fn nr_33_a_block_announced_before_its_header_counts_once_the_header_joins() {
+    let mut n = Net::new();
+    let a = n.up_filters(1);
+    let b = n.up_filters(2);
+    let c = n.up(3);
+    assert!(n.m.watch_script(script(1)));
+    let hs = extend(&genesis(), 1, 1);
+    let hash = hs[0].block_hash();
+    // Both filter peers announce the block before any header is known;
+    // then the header comes from the third peer.
+    n.inv_block(a, hash);
+    n.inv_block(b, hash);
+    n.headers(c, &hs);
+    let heights: Vec<u32> = n.m.health_peers().iter().map(|p| p.best_height).collect();
+    assert_eq!(heights, vec![1, 1, 1]);
+    n.sent(a);
+    n.sent(b);
+    n.tick(FILTER_SETTLE_SECS);
+    assert_eq!(filter_requests(&n.sent(a)), vec![(1, hash)]);
+    assert_eq!(filter_requests(&n.sent(b)), vec![(1, hash)]);
+}
+
+#[test]
+fn nr_33_only_the_last_eight_unknown_announcements_are_remembered() {
+    let mut n = Net::new();
+    let a = n.up_filters(1);
+    let c = n.up(3);
+    let hs = extend(&genesis(), 1, 1);
+    n.inv_block(a, hs[0].block_hash());
+    for i in (1u8..).take(MAX_ANNOUNCED_BLOCKS) {
+        n.inv_block(a, BlockHash::from_byte_array([i; 32]));
+    }
+    n.headers(c, &hs);
+    let heights: Vec<u32> = n.m.health_peers().iter().map(|p| p.best_height).collect();
+    assert_eq!(heights, vec![0, 1]);
 }
 
 #[test]

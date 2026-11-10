@@ -113,7 +113,10 @@ thin driver that owns the sockets.
   has shown: the start height it claimed, or the height of the highest
   header it sent that the store accepted, or the height of a block on
   the counter's best chain that it announced with `inv`, whichever is
-  greater. This is what WR-52 reads. The counter also notes when the
+  greater. An announced block that the store does not hold yet is
+  remembered (the last 8 for each peer) and counts once its header has
+  joined the best chain, whichever peer the header came from. This is
+  what WR-52 reads. The counter also notes when the
   height last rose (NR-40). A peer that claims a height more than 2
   blocks above the tip and sends no headers for it within 10 minutes is
   dropped (NR-25): the claim told the counter nothing, and one such peer

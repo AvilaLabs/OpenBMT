@@ -55,6 +55,9 @@ pub const ANSWER_SECS: u64 = 60;
 /// NR-40: seconds a peer must have shown its newest block before it is asked
 /// for that block's filter, so that its filter index has taken the block.
 pub const FILTER_SETTLE_SECS: u64 = 2;
+/// NR-33: most announced blocks remembered for one peer while the store
+/// does not hold them.
+pub const MAX_ANNOUNCED_BLOCKS: usize = 8;
 /// Most filter requests made for one block, over all peers, so that a
 /// block's record never grows with the peers that come and go.
 pub const MAX_FILTER_ASKS: usize = 6;
@@ -215,6 +218,9 @@ struct PeerState {
     shown_height: u32,
     /// When `shown_height` last rose.
     shown_at: u64,
+    /// NR-33: blocks the peer announced that the store did not hold yet,
+    /// newest last, at most [`MAX_ANNOUNCED_BLOCKS`].
+    announced: VecDeque<BlockHash>,
     ahead_since: Option<u64>,
     /// NR-32: when the last re-ask of headers went out.
     last_reask: Option<u64>,
@@ -434,6 +440,7 @@ impl Manager {
                 services: ServiceFlags::NONE,
                 shown_height: 0,
                 shown_at: now,
+                announced: VecDeque::new(),
                 ahead_since: None,
                 last_reask: None,
                 unanswered: 0,
@@ -766,6 +773,25 @@ impl Manager {
                 if let Some(height) = height {
                     self.raise_shown(id, height, now);
                 }
+                // A block the store does not hold yet is remembered: the
+                // header may come from another peer a moment later, and
+                // this peer will not announce the block twice.
+                let unknown: Vec<BlockHash> = blocks
+                    .iter()
+                    .filter(|b| self.store.height_of(b).is_none())
+                    .copied()
+                    .collect();
+                if let Some(peer) = self.peers.get_mut(&id) {
+                    for hash in unknown {
+                        if peer.announced.contains(&hash) {
+                            continue;
+                        }
+                        if peer.announced.len() >= MAX_ANNOUNCED_BLOCKS {
+                            peer.announced.pop_front();
+                        }
+                        peer.announced.push_back(hash);
+                    }
+                }
                 for txid in txids {
                     self.announce(id, txid, out);
                 }
@@ -814,6 +840,30 @@ impl Manager {
             if height > peer.shown_height {
                 peer.shown_height = height;
                 peer.shown_at = now;
+            }
+        }
+    }
+
+    /// NR-33: a block that a peer announced before the store held it, and
+    /// that is on the best chain now, is a block that peer has shown.
+    fn resolve_announced(&mut self, now: u64) {
+        let store = &self.store;
+        for peer in self.peers.values_mut() {
+            if peer.announced.is_empty() {
+                continue;
+            }
+            let best = peer
+                .announced
+                .iter()
+                .filter_map(|hash| store.height_of(hash))
+                .max();
+            peer.announced
+                .retain(|hash| store.height_of(hash).is_none());
+            if let Some(height) = best {
+                if height > peer.shown_height {
+                    peer.shown_height = height;
+                    peer.shown_at = now;
+                }
             }
         }
     }
@@ -900,6 +950,7 @@ impl Manager {
                 peer.blocked = false;
             }
         }
+        self.resolve_announced(now);
         // NR-30: a full message means there may be more.
         if clean && headers.len() == MAX_HEADERS {
             let locator = self.store.locator();
