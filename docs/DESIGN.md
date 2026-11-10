@@ -879,10 +879,11 @@ rest on the owner phone plus spot checks.
   sign under root, USB debugging, accessibility services or screen overlays
   (a promise of the software itself, above). Recommended spare-phone hygiene:
   airplane mode and no accounts.
-- **Restore-and-sign mode.** For recovery, the Key app can restore a wallet
-  from words and sign without the usual allowlist history. The satoshi and fee
-  ceilings still apply in this mode. It is used when moving to a new wallet or
-  onto a new phone.
+- **Restoring.** For recovery, the Key app is made again from key 2's
+  words. It is then a new Key app with no destinations and the first
+  ceilings, and every signer rule applies as before: there is no mode
+  that loosens them (`docs/SIGNER-RULES.md` SR-39, decided 2026-11-10).
+  It is used when moving to a new wallet or onto a new phone.
 - Never auto-updates, and an update is never installed without the owner's
   action. Android enforces only certificate continuity on update, so no
   installed app can block a bad update of itself. Distribution is our own-signed APK and F-Droid only,

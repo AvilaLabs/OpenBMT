@@ -3,8 +3,8 @@
 //!
 //! The typed words are never echoed in an error and never stored. This is
 //! the same fresh-signer path as every other source: the signer starts with
-//! an empty history and no rule is relaxed. Restore-and-sign mode
-//! (`docs/DESIGN.md` §5.4) is not built.
+//! an empty history and no rule is relaxed. That is all restoring is
+//! (`docs/SIGNER-RULES.md` SR-39).
 
 use bip39::{Language, Mnemonic};
 

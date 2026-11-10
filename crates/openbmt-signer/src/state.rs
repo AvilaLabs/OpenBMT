@@ -212,8 +212,9 @@ pub struct SignerState {
 }
 
 impl SignerState {
-    /// Register the wallet (SR-60 to SR-62). This is also restore mode
-    /// (SR-39): the state starts empty with the first values.
+    /// Register the wallet (SR-60 to SR-62). A restored Key app comes
+    /// through here too (SR-39): the state starts empty with the first
+    /// values.
     ///
     /// `description` is the wallet description text. Exactly one key slot
     /// must hold `own_account_key` in full. If `key3` is given, exactly one

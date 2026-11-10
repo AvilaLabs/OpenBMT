@@ -214,8 +214,19 @@ transaction and "O" is the total of other destinations.
 - **SR-38.** First values, used until the owner sets their own **[to tune]**:
   other destinations 100,000 per transaction, 300,000 per day and 1,000,000
   per week; allowlisted destinations 5,000,000, 10,000,000 and 30,000,000.
-- **SR-39.** Restore mode starts from empty state and these first values. The
-  ceilings apply in restore mode exactly as they do otherwise.
+- **SR-39.** There is no restore mode. A Key app made from typed words
+  is a new Key app: no destinations, the first values above, both marks
+  at 0 and no totals. Every rule applies to it as to any other, and
+  nothing is skipped because the words were typed. Whoever holds the
+  words can sign with any wallet software, so a mode that loosened the
+  rules would protect nothing; keeping them protects the holder from a
+  request made by a taken-over owner phone during a recovery. Before a
+  restored Key app signs a larger payment the holder, on its own screen,
+  takes the wallet again and checks it against the kit, raises the
+  receive mark once (SR-70), enrols the destination and waits the 24
+  hours of SR-30, and raises the ceilings if the payment needs it
+  (SR-37). A second key is needed for any payment, so the wait gives a
+  thief with one key nothing.
 
 ## 7. Fee
 

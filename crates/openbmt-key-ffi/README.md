@@ -220,9 +220,9 @@ scripts/key-ffi-build.sh
   parses `KeyApp.kt` and compares its `OP_*` and `TAG_*` constants with them.
   Field order in the Kotlin is checked by reading only.
 
-Not built: restore-and-sign mode (a key from words together with a signer that
-starts without allowlist history, `docs/DESIGN.md` section 5.4), the kit's
-other fields in `check_kit` (birthday, generations, import range, fallback
+There is no restore mode to build: a Key app made from typed words is a new
+Key app under every signer rule (`docs/SIGNER-RULES.md` SR-39). Not built: the
+kit's other fields in `check_kit` (birthday, generations, import range, fallback
 descriptors), and anti-exfil signing.
 
 Not covered: compiling or running the Kotlin, loading the library on a device
