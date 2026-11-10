@@ -27,8 +27,9 @@
 //!   up (10 seconds, then the answer is ignored).
 //! - At most 4 attempts in flight and at most `target_peers + 4` sockets.
 //! - The channel from the reader threads to the core thread holds 256
-//!   messages; the channel of events to the app holds 64. When the app does
-//!   not read, the driver stops reading from the peers (see [`Handle`]).
+//!   messages; the channel of events to the app holds 64 and at most 32 MiB
+//!   of blocks and transactions. When the app does not read, the driver
+//!   stops reading from the peers (see [`Handle`]).
 //! - A write to a peer that takes more than 10 seconds closes the peer.
 //!
 //! The rules the driver decides are NR-70 and on in
@@ -49,7 +50,9 @@ pub mod socks;
 mod tests;
 
 pub use dial::DialError;
-pub use driver::{core_seeds, AppEvent, Driver, DriverConfig, Handle, StartError};
+pub use driver::{
+    core_seeds, AppEvent, Driver, DriverConfig, EventReceiver, Handle, StartError, EVENT_BYTES,
+};
 pub use env::{
     Clock, DirLock, FileStorage, Key, LockError, OsRandomness, Randomness, Storage, SystemClock,
     LOCK_FILE,

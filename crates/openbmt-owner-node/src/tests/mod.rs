@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,7 +13,7 @@ use openbmt_core::batch::PinnedRoots;
 use openbmt_core::heartbeat::SignedHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_counter_node::DriverPort;
-use openbmt_net_io::{AppEvent, Clock, DriverConfig};
+use openbmt_net_io::{AppEvent, Clock, DriverConfig, EventReceiver};
 use openbmt_watch::{HeaderChain, Health, Peer, PeerAddr};
 
 use crate::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE};
@@ -62,10 +62,10 @@ impl Drop for Dir {
     }
 }
 
-struct FakePort(Receiver<AppEvent>);
+struct FakePort(EventReceiver);
 
 impl DriverPort for FakePort {
-    fn events(&self) -> &Receiver<AppEvent> {
+    fn events(&self) -> &EventReceiver {
         &self.0
     }
     fn watch_script(&self, _: ScriptBuf) {}
@@ -115,7 +115,7 @@ fn start_with_rule(
     config.clock = Box::new(TestClock(time.clone()));
     config.health = Box::new(rule);
     let (events, rx) = channel();
-    let watcher = OwnerWatcher::start_with(config, move |_, _| Ok(FakePort(rx))).unwrap();
+    let watcher = OwnerWatcher::start_with(config, move |_, _| Ok(FakePort(rx.into()))).unwrap();
     Rig {
         watcher,
         events,
@@ -369,5 +369,5 @@ fn nr_79_a_second_start_on_the_same_directory_fails_and_a_later_one_succeeds() {
     }
     drop(first);
     let (_events, rx) = channel();
-    assert!(OwnerWatcher::start_with(config(), move |_, _| Ok(FakePort(rx))).is_ok());
+    assert!(OwnerWatcher::start_with(config(), move |_, _| Ok(FakePort(rx.into()))).is_ok());
 }

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use bitcoin::hashes::Hash;
 use bitcoin::p2p::address::AddrV2;
 use bitcoin::p2p::ServiceFlags;
-use bitcoin::Network;
+use bitcoin::{Network, ScriptBuf};
 use openbmt_net::{AddressBook, Source};
 use openbmt_watch::{HeaderStore, PeerAddr};
 
@@ -44,6 +44,34 @@ fn start(config: DriverConfig, storage: &MemStorage, net: Net) -> Handle {
         net,
     )
     .unwrap()
+}
+
+/// Start with a clock the test sets and these watched scripts.
+fn start_clocked(
+    config: DriverConfig,
+    storage: &MemStorage,
+    net: Net,
+    clock: &TestClock,
+    scripts: Vec<ScriptBuf>,
+) -> Handle {
+    Driver::spawn_with(
+        config,
+        storage.clone(),
+        clock.clone(),
+        CountingRandomness(1),
+        scripts,
+        net,
+    )
+    .unwrap()
+}
+
+/// A script that no block pays, watched so that blocks are fetched (NR-42).
+fn watched() -> Vec<ScriptBuf> {
+    vec![ScriptBuf::from_bytes(vec![0x51])]
+}
+
+fn is_block(event: &AppEvent) -> bool {
+    matches!(event, AppEvent::Block { .. })
 }
 
 fn start_system(config: DriverConfig, storage: &MemStorage) -> Handle {
@@ -692,5 +720,84 @@ fn nr_75_peers_is_sent_at_the_start_on_change_and_every_ten_seconds() {
     let gap = waited.elapsed();
     assert!(gap >= Duration::from_secs(8), "{gap:?} after {first_at:?}");
     assert!(gap <= Duration::from_secs(11), "{gap:?}");
+    handle.shutdown();
+}
+
+// ----- NR-74: the byte budget ----------------------------------------------
+
+/// Wait until the bytes waiting for the app stop changing, and return them.
+fn settled_queue(handle: &Handle) -> usize {
+    let mut last = usize::MAX;
+    let mut same = 0;
+    let end = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < end {
+        thread::sleep(Duration::from_millis(300));
+        let now = handle.events().queued_bytes();
+        same = if now == last { same + 1 } else { 0 };
+        last = now;
+        if same >= 5 && now > 0 {
+            return now;
+        }
+    }
+    panic!("the queue did not settle: {last} bytes");
+}
+
+#[test]
+fn nr_74_a_stalled_app_stops_the_readers_at_the_byte_budget_not_at_the_count() {
+    // Twenty blocks of 400 kB are 20 events, far below the 64 that the
+    // count allows, but 8 MB. The budget is 1 MB.
+    let peer = FakePeer::start(Behavior::ServeBlocks(blocks(20, 400_000)));
+    let storage = MemStorage::default();
+    let mut cfg = config(&peer, 30);
+    cfg.event_bytes = 1_000_000;
+    let mut handle = start_clocked(
+        cfg,
+        &storage,
+        Net::system(),
+        &TestClock::at(1_700_000_000),
+        watched(),
+    );
+    let queued = settled_queue(&handle);
+    // Two blocks fit; a third would pass the budget.
+    assert!(queued > 800_000 && queued <= 1_000_000, "{queued} bytes");
+    // The readers have stopped.
+    let shared = handle.shared().clone();
+    let first = shared.chunks_read.load(Ordering::Relaxed);
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(first, shared.chunks_read.load(Ordering::Relaxed));
+    // Taking the events lets them run again, and every block arrives.
+    let mut got = 0usize;
+    let end = Instant::now() + Duration::from_secs(60);
+    while got < 20 && Instant::now() < end {
+        if let Ok(AppEvent::Block { .. }) = handle.events().recv_timeout(Duration::from_millis(200))
+        {
+            got += 1;
+        }
+    }
+    assert_eq!(got, 20);
+    assert_eq!(handle.events().queued_bytes(), 0);
+    handle.shutdown();
+}
+
+#[test]
+fn nr_74_one_event_larger_than_the_budget_is_still_handed_over() {
+    // The budget is 100 kB and each block is 400 kB. The first block goes
+    // through an empty queue; the second waits until the app has taken it.
+    let peer = FakePeer::start(Behavior::ServeBlocks(blocks(2, 400_000)));
+    let storage = MemStorage::default();
+    let mut cfg = config(&peer, 30);
+    cfg.event_bytes = 100_000;
+    let mut handle = start_clocked(
+        cfg,
+        &storage,
+        Net::system(),
+        &TestClock::at(1_700_000_000),
+        watched(),
+    );
+    let queued = settled_queue(&handle);
+    assert!(queued > 400_000 && queued < 500_000, "{queued} bytes");
+    wait_for(&handle, 10, is_block).expect("the large block was not handed over");
+    wait_for(&handle, 10, is_block).expect("the second block did not follow");
+    assert_eq!(handle.events().queued_bytes(), 0);
     handle.shutdown();
 }

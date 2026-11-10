@@ -260,9 +260,14 @@ rules are what it decides where the rules above are silent.
   file that does not read back is replaced by an empty one and reported to
   the app. Storage that cannot be read at all stops the start.
 - **NR-74.** The channel from the peers to the driver and the channel of
-  events to the app are bounded. When the app does not read its events,
-  the driver stops reading from the peers, and the peers wait on their
-  sockets, instead of the driver holding more in memory.
+  events to the app are bounded: the second by the number of events (64)
+  and by the bytes of the blocks and transactions in them (32 MiB). The
+  driver counts those bytes when it hands an event over, and the count
+  goes down when the app takes the event. When the app does not read its
+  events, the driver stops reading from the peers, and the peers wait on
+  their sockets, instead of the driver holding more in memory. An event
+  larger than the byte limit is still handed over once the app has taken
+  the others, so that one large block never stops the driver for good.
 - **NR-75.** The app is told the ready peers, whether a peer is ahead
   and the tip whenever one of them changes and at least every 10 seconds,
   so that it can run the health rules (WR-50 to WR-52). It is told the

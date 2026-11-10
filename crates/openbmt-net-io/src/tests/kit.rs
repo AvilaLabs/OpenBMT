@@ -4,24 +4,30 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use bitcoin::block::{Header, Version};
+use bitcoin::block::{Block, Header, Version};
 use bitcoin::blockdata::constants::genesis_block;
+use bitcoin::consensus::deserialize;
 use bitcoin::hashes::Hash;
 use bitcoin::p2p::address::Address;
 use bitcoin::p2p::message::NetworkMessage;
+use bitcoin::p2p::message_blockdata::Inventory;
 use bitcoin::p2p::message_network::VersionMessage;
 use bitcoin::p2p::{Magic, ServiceFlags};
-use bitcoin::{BlockHash, CompactTarget, Network, TxMerkleNode};
+use bitcoin::transaction::Version as TxVersion;
+use bitcoin::{
+    Amount, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn,
+    TxMerkleNode, TxOut, Witness,
+};
 use openbmt_net::encode;
 
 use crate::dial::{DialError, Net};
 use crate::driver::{AppEvent, Handle};
-use crate::env::{Key, Randomness, Storage};
+use crate::env::{Clock, Key, Randomness, Storage};
 use crate::socks::Target;
 
 /// The start height the fake peer claims.
@@ -33,6 +39,8 @@ pub const GENESIS_TIME: u32 = 1_296_688_602;
 #[derive(Clone, Default)]
 pub struct MemStorage {
     pub values: Arc<Mutex<BTreeMap<Key, Vec<u8>>>>,
+    /// The key of every save, in order.
+    pub saves: Arc<Mutex<Vec<Key>>>,
 }
 
 impl MemStorage {
@@ -45,6 +53,16 @@ impl MemStorage {
     pub fn get(&self, key: Key) -> Option<Vec<u8>> {
         self.values.lock().unwrap().get(&key).cloned()
     }
+
+    /// How many times this key was saved.
+    pub fn save_count(&self, key: Key) -> usize {
+        self.saves
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|k| **k == key)
+            .count()
+    }
 }
 
 impl Storage for MemStorage {
@@ -56,7 +74,28 @@ impl Storage for MemStorage {
 
     fn save(&mut self, key: Key, bytes: &[u8]) -> Result<(), String> {
         self.values.lock().unwrap().insert(key, bytes.to_vec());
+        self.saves.lock().unwrap().push(key);
         Ok(())
+    }
+}
+
+/// A clock the test sets. The driver reads it on every pass.
+#[derive(Clone)]
+pub struct TestClock(pub Arc<AtomicU64>);
+
+impl TestClock {
+    pub fn at(time: u64) -> Self {
+        Self(Arc::new(AtomicU64::new(time)))
+    }
+
+    pub fn set(&self, time: u64) {
+        self.0.store(time, Ordering::SeqCst);
+    }
+}
+
+impl Clock for TestClock {
+    fn now(&self) -> u64 {
+        self.0.load(Ordering::SeqCst)
     }
 }
 
@@ -94,6 +133,58 @@ pub fn chain(n: u32) -> Vec<Header> {
         let header = mine(prev, GENESIS_TIME + 600 * i);
         prev = header.block_hash();
         out.push(header);
+    }
+    out
+}
+
+/// A block on `prev` whose coinbase pays `pad` bytes of script to nobody,
+/// so that a test can make it as large as it needs. The tag makes the
+/// coinbase, and so the block, differ from another on the same parent.
+pub fn block_on(prev: &Header, tag: u32, pad: usize) -> Block {
+    let mut script_sig = vec![0x04];
+    script_sig.extend(tag.to_le_bytes());
+    let coinbase = Transaction {
+        version: TxVersion::TWO,
+        lock_time: bitcoin::absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint::null(),
+            script_sig: ScriptBuf::from_bytes(script_sig),
+            sequence: Sequence::MAX,
+            witness: Witness::new(),
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(5_000_000_000),
+            script_pubkey: ScriptBuf::from_bytes(vec![0x6a; pad.max(1)]),
+        }],
+    };
+    let mut block = Block {
+        header: *prev,
+        txdata: vec![coinbase],
+    };
+    let root = block.compute_merkle_root().unwrap();
+    let mut header = Header {
+        version: Version::from_consensus(0x2000_0000),
+        prev_blockhash: prev.block_hash(),
+        merkle_root: root,
+        time: prev.time + 600,
+        bits: CompactTarget::from_consensus(0x207f_ffff),
+        nonce: 0,
+    };
+    while header.validate_pow(header.target()).is_err() {
+        header.nonce += 1;
+    }
+    block.header = header;
+    block
+}
+
+/// `n` blocks of about `pad` bytes each on top of the genesis block.
+pub fn blocks(n: u32, pad: usize) -> Vec<Block> {
+    let mut prev = genesis_block(Network::Regtest).header;
+    let mut out = Vec::new();
+    for i in 1..=n {
+        let block = block_on(&prev, i, pad);
+        prev = block.header;
+        out.push(block);
     }
     out
 }
@@ -141,6 +232,9 @@ pub enum Behavior {
     Flood(Vec<Header>),
     /// Accept the connection and say nothing.
     Silent,
+    /// Answer `getheaders` with the headers of these blocks, and `getdata`
+    /// with the blocks asked for.
+    ServeBlocks(Vec<Block>),
 }
 
 /// A peer on a loopback socket.
@@ -299,6 +393,10 @@ fn serve(
                             let _ =
                                 stream.write_all(&frame(NetworkMessage::Headers(headers.clone())));
                         }
+                        Behavior::ServeBlocks(blocks) => {
+                            let headers = blocks.iter().map(|b| b.header).collect();
+                            let _ = stream.write_all(&frame(NetworkMessage::Headers(headers)));
+                        }
                         Behavior::CloseAfterHandshake => return,
                         Behavior::Flood(headers) => {
                             for header in headers {
@@ -314,6 +412,21 @@ fn serve(
                             let _ = stream.write_all(&[0xff; 40]);
                         }
                         _ => {}
+                    }
+                }
+                "getdata" => {
+                    if let Behavior::ServeBlocks(blocks) = behavior {
+                        let asked: Vec<Inventory> = deserialize(&payload).unwrap_or_default();
+                        for item in asked {
+                            let (Inventory::Block(hash) | Inventory::WitnessBlock(hash)) = item
+                            else {
+                                continue;
+                            };
+                            if let Some(block) = blocks.iter().find(|b| b.block_hash() == hash) {
+                                let message = NetworkMessage::Block(block.clone());
+                                let _ = stream.write_all(&frame(message));
+                            }
+                        }
                     }
                 }
                 "ping" => {

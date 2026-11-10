@@ -20,9 +20,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpStream};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{
-    channel, sync_channel, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError,
+    channel, sync_channel, Receiver, RecvError, RecvTimeoutError, Sender, SyncSender, TryRecvError,
     TrySendError,
 };
 use std::sync::Arc;
@@ -66,6 +66,10 @@ pub const READ_BUFFER: usize = 65_536;
 pub const INBOUND_CAPACITY: usize = 256;
 /// Events waiting for the app.
 pub const EVENT_CAPACITY: usize = 64;
+/// NR-74: bytes of blocks and transactions that may wait for the app. A
+/// starting value, to be tuned. One event larger than this is still
+/// delivered, alone.
+pub const EVENT_BYTES: usize = 32 * 1024 * 1024;
 /// Seconds a write to a peer may take before the peer is closed.
 pub const WRITE_TIMEOUT_SECS: u64 = 3;
 /// Seconds a reader thread waits in one read before it looks for a stop.
@@ -102,6 +106,9 @@ pub struct DriverConfig {
     /// NR-70: seconds before an address that closed or failed is dialed
     /// again. [`REDIAL_PAUSE_SECS`] unless a test shortens it.
     pub redial_pause_secs: u64,
+    /// NR-74: bytes of events that may wait for the app.
+    /// [`EVENT_BYTES`] unless a test shortens it.
+    pub event_bytes: usize,
 }
 
 /// The DNS seed names that Bitcoin Core 32.1 ships for the network
@@ -144,6 +151,7 @@ impl DriverConfig {
             fixed_peers: Vec::new(),
             allow_local: false,
             redial_pause_secs: REDIAL_PAUSE_SECS,
+            event_bytes: EVENT_BYTES,
         }
     }
 }
@@ -256,19 +264,90 @@ pub(crate) struct Shared {
     pub(crate) chunks_read: AtomicU64,
 }
 
+/// The bytes an event holds that the driver counts against the budget of
+/// [`EVENT_BYTES`]: the payload of a block or a transaction.
+fn payload_bytes(event: &AppEvent) -> usize {
+    match event {
+        AppEvent::Block { bytes, .. } => bytes.len(),
+        AppEvent::Sighting { tx, .. } => tx.len(),
+        _ => 0,
+    }
+}
+
+/// Take `size` off a count of queued bytes, never below zero.
+fn release(queued: &AtomicUsize, size: usize) {
+    let _ = queued.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |q| {
+        Some(q.saturating_sub(size))
+    });
+}
+
+/// The app's end of the channel of events (NR-74). It takes the events in
+/// order, and each one it takes frees its bytes in the driver's budget, so
+/// read through it and not through anything else.
+#[derive(Debug)]
+pub struct EventReceiver {
+    events: Receiver<AppEvent>,
+    queued: Arc<AtomicUsize>,
+}
+
+impl EventReceiver {
+    /// Wrap a plain channel that no driver counts, for an app's own test
+    /// double of the driver.
+    pub fn unmetered(events: Receiver<AppEvent>) -> Self {
+        Self {
+            events,
+            queued: Arc::default(),
+        }
+    }
+
+    /// Wait for the next event.
+    pub fn recv(&self) -> Result<AppEvent, RecvError> {
+        self.events.recv().map(|e| self.taken(e))
+    }
+
+    /// Wait for the next event for up to `timeout`.
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<AppEvent, RecvTimeoutError> {
+        self.events.recv_timeout(timeout).map(|e| self.taken(e))
+    }
+
+    /// The next event if one is waiting.
+    pub fn try_recv(&self) -> Result<AppEvent, TryRecvError> {
+        self.events.try_recv().map(|e| self.taken(e))
+    }
+
+    /// The bytes of blocks and transactions in events that the driver has
+    /// handed over and the app has not taken.
+    pub fn queued_bytes(&self) -> usize {
+        self.queued.load(Ordering::SeqCst)
+    }
+
+    fn taken(&self, event: AppEvent) -> AppEvent {
+        release(&self.queued, payload_bytes(&event));
+        event
+    }
+}
+
+impl From<Receiver<AppEvent>> for EventReceiver {
+    fn from(events: Receiver<AppEvent>) -> Self {
+        Self::unmetered(events)
+    }
+}
+
 /// The app's end of the driver.
 ///
-/// The event channel holds at most [`EVENT_CAPACITY`] events. If the app
-/// does not read it, the core thread waits for room, and so it reads nothing
-/// more from the peers: the reader threads then fill the channel of
+/// The event channel holds at most [`EVENT_CAPACITY`] events and at most
+/// [`EVENT_BYTES`] bytes of blocks and transactions (NR-74). If the app does
+/// not read it, the core thread waits for room, and so it reads nothing more
+/// from the peers: the reader threads then fill the channel of
 /// [`INBOUND_CAPACITY`] messages and wait too, and the peers wait on their
 /// sockets. The driver holds back rather than grow without bound. Blocks are
-/// the largest events, so the bound in bytes is [`EVENT_CAPACITY`] times the
-/// largest block, 4,000,000 bytes (NR-02), and a little more for the one
-/// event the core thread holds.
+/// the largest events, up to 4,000,000 bytes each (NR-02), so the count alone
+/// would allow 64 of them; the byte budget stops at about [`EVENT_BYTES`]
+/// instead, plus the one event the core thread holds. An event that is
+/// larger than the budget is delivered once the app has taken the others.
 #[derive(Debug)]
 pub struct Handle {
-    events: Receiver<AppEvent>,
+    events: EventReceiver,
     commands: Sender<Command>,
     wake: SyncSender<Msg>,
     shared: Arc<Shared>,
@@ -277,7 +356,7 @@ pub struct Handle {
 
 impl Handle {
     /// The events, in order. Read them: see the note on [`Handle`].
-    pub fn events(&self) -> &Receiver<AppEvent> {
+    pub fn events(&self) -> &EventReceiver {
         &self.events
     }
 
@@ -428,6 +507,7 @@ impl Driver {
         }
         let (inbound_tx, inbound_rx) = sync_channel(INBOUND_CAPACITY);
         let (events_tx, events_rx) = sync_channel(EVENT_CAPACITY);
+        let queued = Arc::new(AtomicUsize::new(0));
         let (command_tx, command_rx) = channel();
         let shared = Arc::new(Shared::default());
         let tip = manager.chain().tip().1;
@@ -445,6 +525,7 @@ impl Driver {
             inbound_rx,
             commands: command_rx,
             events: events_tx,
+            queued: queued.clone(),
             shared: shared.clone(),
             notes,
             next_id: 1,
@@ -470,7 +551,10 @@ impl Driver {
             .spawn(move || core.run())
             .map_err(|e| StartError::Thread(e.kind()))?;
         Ok(Handle {
-            events: events_rx,
+            events: EventReceiver {
+                events: events_rx,
+                queued,
+            },
             commands: command_tx,
             wake: inbound_tx,
             shared,
@@ -587,6 +671,9 @@ struct Core<S, C, R> {
     inbound_rx: Receiver<Msg>,
     commands: Receiver<Command>,
     events: SyncSender<AppEvent>,
+    /// NR-74: bytes of blocks and transactions handed to `events` that the
+    /// app has not taken.
+    queued: Arc<AtomicUsize>,
     shared: Arc<Shared>,
     /// Notes from the start, sent first.
     notes: Vec<String>,
@@ -749,25 +836,35 @@ where
         }
     }
 
-    /// Send an event to the app. While the channel is full this waits, which
-    /// is the back-pressure; it gives up when the app asks to stop.
+    /// Send an event to the app. While the channel is full, or the events
+    /// it holds would pass the byte budget with this one, this waits, which
+    /// is the back-pressure (NR-74); it gives up when the app asks to stop.
+    /// An event is always sent when the app has taken every other counted
+    /// event, however large it is.
     fn emit(&self, event: AppEvent) {
+        let size = payload_bytes(&event);
         let mut event = event;
         loop {
-            match self.events.try_send(event) {
-                Ok(()) => return,
-                Err(TrySendError::Disconnected(_)) => {
-                    self.shared.stop.store(true, Ordering::SeqCst);
-                    return;
-                }
-                Err(TrySendError::Full(back)) => {
-                    if self.stopping() {
+            let queued = self.queued.load(Ordering::SeqCst);
+            let over = queued > 0 && queued.saturating_add(size) > self.config.event_bytes;
+            if !over {
+                self.queued.fetch_add(size, Ordering::SeqCst);
+                match self.events.try_send(event) {
+                    Ok(()) => return,
+                    Err(TrySendError::Disconnected(_)) => {
+                        self.shared.stop.store(true, Ordering::SeqCst);
                         return;
                     }
-                    event = back;
-                    thread::sleep(Duration::from_millis(5));
+                    Err(TrySendError::Full(back)) => {
+                        release(&self.queued, size);
+                        event = back;
+                    }
                 }
             }
+            if self.stopping() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(5));
         }
     }
 

@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 
 use bitcoin::absolute::LockTime;
@@ -20,7 +20,7 @@ use openbmt_core::batch::{AddressBatch, BatchPolicy, PinnedRoots, SignedBatch};
 use openbmt_core::identity::Identity;
 use openbmt_core::settings::Settings;
 use openbmt_counter::{Amount, Currency, Pairing, Rate};
-use openbmt_net_io::{AppEvent, Clock, DriverConfig};
+use openbmt_net_io::{AppEvent, Clock, DriverConfig, EventReceiver};
 use openbmt_watch::{HeaderStore, Health, PeerAddr};
 
 use crate::{DriverPort, Launch, Node, NodeConfig};
@@ -295,12 +295,12 @@ pub struct Calls {
 
 /// A driver port whose events the test sends.
 pub struct FakePort {
-    rx: Receiver<AppEvent>,
+    rx: EventReceiver,
     calls: Arc<Mutex<Calls>>,
 }
 
 impl DriverPort for FakePort {
-    fn events(&self) -> &Receiver<AppEvent> {
+    fn events(&self) -> &EventReceiver {
         &self.rx
     }
 
@@ -393,7 +393,7 @@ pub fn start_with(config: NodeConfig, time: Arc<AtomicU64>) -> Rig {
     let node = Node::start_with(config, move |launch| {
         *seen_launch.lock().unwrap() = Some(launch);
         Ok(FakePort {
-            rx,
+            rx: rx.into(),
             calls: port_calls,
         })
     })

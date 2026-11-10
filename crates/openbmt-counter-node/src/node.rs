@@ -78,7 +78,7 @@
 use std::collections::{BTreeSet, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
 use bitcoin::consensus::deserialize;
@@ -95,8 +95,8 @@ use openbmt_counter::{
     Overridden, Pairing, Quote, Rate, Report, RequoteRefused, Screen, SightingError,
 };
 use openbmt_net_io::{
-    AppEvent, Clock, DirLock, Driver, DriverConfig, FileStorage, Handle, Key, OsRandomness,
-    Storage, SystemClock,
+    AppEvent, Clock, DirLock, Driver, DriverConfig, EventReceiver, FileStorage, Handle, Key,
+    OsRandomness, Storage, SystemClock,
 };
 use openbmt_watch::{
     check_health, HeaderChain, HeaderStore, Health, HealthInput, PeerAddr, Source, WellFormedBlock,
@@ -200,7 +200,7 @@ pub struct Launch {
 /// supplies its own and feeds events by hand.
 pub trait DriverPort {
     /// The events, in order.
-    fn events(&self) -> &Receiver<AppEvent>;
+    fn events(&self) -> &EventReceiver;
     /// Watch a script.
     fn watch_script(&self, script: ScriptBuf);
     /// While on, every new block is downloaded in full (NR-44).
@@ -210,7 +210,7 @@ pub trait DriverPort {
 }
 
 impl DriverPort for Handle {
-    fn events(&self) -> &Receiver<AppEvent> {
+    fn events(&self) -> &EventReceiver {
         Handle::events(self)
     }
 
