@@ -36,9 +36,10 @@ use openbmt_net::book::{BAN_SECS, V2_RETRY_SECS};
 use openbmt_net::manager::Wanted;
 use openbmt_net::{
     Added, AddressBook, ConnectRefused, Manager, ManagerConfig, Output, PeerAddress, PeerId,
+    RelayState,
     Source, TransportChoice, V2Entropy,
 };
-use openbmt_watch::{network_group, HeaderStore, Peer, PeerAddr};
+use openbmt_watch::{host_group, network_group, HeaderStore, Peer, PeerAddr};
 
 use crate::dial::{DialError, Net, RESOLVE_SECS};
 use crate::env::{Clock, Key, Randomness, Storage};
@@ -212,6 +213,26 @@ pub enum AppEvent {
     /// rises. The app stores it and passes it as `watch_from` at the next
     /// start, so that a restart does not check the same blocks again.
     Checked(u32),
+    /// NR-86, NR-90: how many peers a transaction the app asked to broadcast
+    /// was announced to and how many have asked for it. Sent when either
+    /// count changes.
+    TxRelayed {
+        /// The transaction.
+        txid: Txid,
+        /// Peers that were sent an announcement.
+        peers_asked: usize,
+        /// Peers that asked for it. A peer that asked may have discarded it.
+        peers_fetched: usize,
+    },
+    /// NR-87, NR-88: what the peers have shown of a transaction the app
+    /// asked to broadcast. Sent when it changes. A confirmation is not
+    /// here: the app reads that from its own checked blocks.
+    TxState {
+        /// The transaction.
+        txid: Txid,
+        /// What the peers have shown.
+        state: RelayState,
+    },
     /// Something the app may want to show or log: a stored file that did not
     /// read back, a save that failed, a peer that was dropped for breaking a
     /// rule.
@@ -254,6 +275,9 @@ enum Command {
     WatchScript(ScriptBuf),
     AllBlocks(bool),
     FetchTransactions(bool),
+    Broadcast(Vec<u8>),
+    Forget(Txid),
+    Rescan(u32),
 }
 
 /// What the threads send the core thread.
@@ -396,6 +420,26 @@ impl Handle {
     /// NR-51, NR-52: whether announced transactions are fetched.
     pub fn set_fetch_transactions(&self, on: bool) {
         self.command(Command::FetchTransactions(on));
+    }
+
+    /// NR-86, NR-90: hold a finished transaction (consensus bytes) and send
+    /// it to the peers. One that is refused (too heavy, not a transaction,
+    /// too many held) comes back as a [`AppEvent::Note`]. What the peers do
+    /// with it comes back as [`AppEvent::TxRelayed`] and
+    /// [`AppEvent::TxState`], until [`Handle::forget`].
+    pub fn broadcast(&self, tx: Vec<u8>) {
+        self.command(Command::Broadcast(tx));
+    }
+
+    /// NR-86, NR-90: stop holding a transaction given to [`Handle::broadcast`].
+    pub fn forget(&self, txid: Txid) {
+        self.command(Command::Forget(txid));
+    }
+
+    /// NR-90: check every block above this height again, against all the
+    /// scripts watched now.
+    pub fn rescan_from(&self, height: u32) {
+        self.command(Command::Rescan(height));
     }
 
     /// Stop. Saves the headers and the address book, closes every socket and
@@ -858,6 +902,18 @@ where
                 }
                 Command::AllBlocks(on) => self.manager.set_all_blocks(on),
                 Command::FetchTransactions(on) => self.manager.set_fetch_transactions(on),
+                Command::Broadcast(tx) => {
+                    if let Err(e) = self.manager.broadcast(&tx) {
+                        self.emit(AppEvent::Note(format!("a transaction was not held: {e}")));
+                    }
+                }
+                Command::Forget(txid) => self.manager.forget(&txid),
+                Command::Rescan(height) => {
+                    self.manager.rescan_from(height);
+                    // The checked height was reported above `height` already;
+                    // it is reported again as it rises.
+                    self.last_checked = Some(height);
+                }
             }
         }
     }
@@ -973,6 +1029,16 @@ where
                 Output::AlsoAnnounced { txid, from } => {
                     self.emit(AppEvent::AlsoAnnounced { txid, from })
                 }
+                Output::TxRelayed {
+                    txid,
+                    peers_asked,
+                    peers_fetched,
+                } => self.emit(AppEvent::TxRelayed {
+                    txid,
+                    peers_asked,
+                    peers_fetched,
+                }),
+                Output::TxState { txid, state } => self.emit(AppEvent::TxState { txid, state }),
             }
         }
     }
@@ -1228,7 +1294,12 @@ where
             };
             // Connections being opened will take their groups.
             for dial in self.dialing.values() {
-                wanted.avoid.insert(network_group(&peer_addr(&dial.target)));
+                let addr = peer_addr(&dial.target);
+                wanted.avoid.insert(if self.config.allow_local {
+                    host_group(&addr)
+                } else {
+                    network_group(&addr)
+                });
             }
             let Some(target) = self.next_target(&wanted, now) else {
                 return;

@@ -909,8 +909,10 @@ impl Manager {
             Event::NotFound { txids, blocks } => self.on_not_found(id, &txids, &blocks),
             Event::Addresses(list) => {
                 if let Some(peer) = self.peers.get(&id) {
+                    // The book knows the groups of `network_group` alone, not
+                    // the host groups of a check on one machine.
                     out.push(Output::Addresses {
-                        from: peer.group,
+                        from: network_group(&peer.addr),
                         list,
                     });
                 }

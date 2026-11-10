@@ -275,6 +275,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 }
                 println!("{t:.1} note {text}");
             }
+            AppEvent::TxRelayed { .. } | AppEvent::TxState { .. } => {}
             AppEvent::Checked(height) => {
                 *kinds.entry("checked").or_default() += 1;
                 println!("{t:.1} checked up to {height}");

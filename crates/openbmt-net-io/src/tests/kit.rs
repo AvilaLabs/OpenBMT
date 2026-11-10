@@ -21,7 +21,7 @@ use bitcoin::p2p::{Magic, ServiceFlags};
 use bitcoin::transaction::Version as TxVersion;
 use bitcoin::{
     Amount, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn,
-    TxMerkleNode, TxOut, Witness,
+    TxMerkleNode, TxOut, Txid, Witness,
 };
 use openbmt_net::encode;
 
@@ -238,6 +238,9 @@ pub enum Behavior {
     /// Answer `getheaders` with the headers of these blocks, and `getdata`
     /// with the blocks asked for.
     ServeBlocks(Vec<Block>),
+    /// Like `Honest`, and ask for every transaction announced with `inv`
+    /// and keep what comes back.
+    Fetches(Vec<Header>),
 }
 
 /// The height the fake peer claims in its version message. A peer that
@@ -245,7 +248,9 @@ pub enum Behavior {
 /// that is to stay must claim what it serves.
 fn claimed_height(behavior: &Behavior) -> u32 {
     match behavior {
-        Behavior::Honest(headers) => u32::try_from(headers.len()).unwrap(),
+        Behavior::Honest(headers) | Behavior::Fetches(headers) => {
+            u32::try_from(headers.len()).unwrap()
+        }
         _ => PEER_HEIGHT,
     }
 }
@@ -261,13 +266,23 @@ pub struct FakePeer {
     pub closed_by_driver: Arc<AtomicUsize>,
     /// Instants of the accepts.
     pub accepted_at: Arc<Mutex<Vec<Instant>>>,
+    /// The txids announced with `inv`, and the payloads of the `tx`
+    /// messages received.
+    pub invs: Arc<Mutex<Vec<Txid>>>,
+    pub txs: Arc<Mutex<Vec<Vec<u8>>>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl FakePeer {
     pub fn start(behavior: Behavior) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        Self::start_on("127.0.0.1", behavior)
+    }
+
+    /// A peer on another loopback address, so that it is a group of its own
+    /// when the driver allows local peers.
+    pub fn start_on(ip: &str, behavior: Behavior) -> Self {
+        let listener = TcpListener::bind(format!("{ip}:0")).unwrap();
         listener.set_nonblocking(true).unwrap();
         let addr = listener.local_addr().unwrap();
         let mut peer = Self {
@@ -276,6 +291,8 @@ impl FakePeer {
             getheaders: Arc::default(),
             closed_by_driver: Arc::default(),
             accepted_at: Arc::default(),
+            invs: Arc::default(),
+            txs: Arc::default(),
             stop: Arc::default(),
             thread: None,
         };
@@ -286,6 +303,7 @@ impl FakePeer {
             peer.accepted_at.clone(),
             peer.stop.clone(),
         );
+        let (invs, txs) = (peer.invs.clone(), peer.txs.clone());
         let thread = thread::spawn(move || {
             let mut handlers = Vec::new();
             while !stop.load(Ordering::SeqCst) {
@@ -299,7 +317,8 @@ impl FakePeer {
                             closed.clone(),
                             stop.clone(),
                         );
-                        handlers.push(thread::spawn(move || serve(stream, &b, &g, &c, &s)));
+                        let seen = (invs.clone(), txs.clone());
+                        handlers.push(thread::spawn(move || serve(stream, &b, &g, &c, &s, &seen)));
                     }
                     Err(_) => thread::sleep(Duration::from_millis(10)),
                 }
@@ -348,8 +367,13 @@ fn messages(buf: &mut Vec<u8>) -> Vec<(String, Vec<u8>)> {
 pub fn serve_stream(stream: TcpStream, behavior: &Behavior, stop: &AtomicBool) {
     let getheaders = Mutex::new(Vec::new());
     let closed = AtomicUsize::new(0);
-    serve(stream, behavior, &getheaders, &closed, stop);
+    let seen = Seen::default();
+    serve(stream, behavior, &getheaders, &closed, stop, &seen);
 }
+
+/// What a fake peer saw of transactions: the txids announced and the
+/// payloads of `tx` messages.
+type Seen = (Arc<Mutex<Vec<Txid>>>, Arc<Mutex<Vec<Vec<u8>>>>);
 
 fn serve(
     mut stream: TcpStream,
@@ -357,6 +381,7 @@ fn serve(
     getheaders: &Mutex<Vec<Vec<u8>>>,
     closed: &AtomicUsize,
     stop: &AtomicBool,
+    seen: &Seen,
 ) {
     stream
         .set_read_timeout(Some(Duration::from_millis(50)))
@@ -395,6 +420,7 @@ fn serve(
                     match behavior {
                         Behavior::Serve(headers)
                         | Behavior::Honest(headers)
+                        | Behavior::Fetches(headers)
                         | Behavior::ServeAndTell(headers, _) => {
                             // The addresses come first, so that the
                             // headers' event proves they were read.
@@ -446,6 +472,20 @@ fn serve(
                         }
                     }
                 }
+                "inv" => {
+                    let announced: Vec<Inventory> = deserialize(&payload).unwrap_or_default();
+                    let mut ask = Vec::new();
+                    for item in announced {
+                        if let Inventory::Transaction(txid) = item {
+                            seen.0.lock().unwrap().push(txid);
+                            ask.push(Inventory::WitnessTransaction(txid));
+                        }
+                    }
+                    if matches!(behavior, Behavior::Fetches(_)) && !ask.is_empty() {
+                        let _ = stream.write_all(&frame(NetworkMessage::GetData(ask)));
+                    }
+                }
+                "tx" => seen.1.lock().unwrap().push(payload),
                 "ping" => {
                     let mut nonce = [0u8; 8];
                     nonce.copy_from_slice(&payload[..8]);

@@ -60,4 +60,5 @@ pub use env::{
     Clock, DirLock, FileStorage, Key, LockError, OsRandomness, Randomness, Storage, SystemClock,
     LOCK_FILE,
 };
+pub use openbmt_net::RelayState;
 pub use socks::{SocksError, Target};

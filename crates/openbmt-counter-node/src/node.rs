@@ -588,6 +588,8 @@ impl<P: DriverPort> Node<P> {
             AppEvent::Checked(height) => self.write_checked(height),
             AppEvent::Note(line) => self.note(line),
             AppEvent::Stopped => self.stopped = true,
+            // The counter never broadcasts (NR-55).
+            AppEvent::TxRelayed { .. } | AppEvent::TxState { .. } => {}
         }
     }
 

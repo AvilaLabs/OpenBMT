@@ -102,6 +102,12 @@ fn describe(event: &AppEvent, script: &ScriptBuf) -> Option<String> {
             Err(e) => format!("sighting unreadable: {e}"),
         },
         AppEvent::AlsoAnnounced { txid, .. } => format!("also {txid}"),
+        AppEvent::TxRelayed {
+            txid,
+            peers_asked,
+            peers_fetched,
+        } => format!("relayed {txid} asked={peers_asked} fetched={peers_fetched}"),
+        AppEvent::TxState { txid, state } => format!("txstate {txid} {state:?}"),
         AppEvent::Note(text) => format!("note {text}"),
         AppEvent::Checked(height) => format!("checked {height}"),
         AppEvent::Stopped => return None,

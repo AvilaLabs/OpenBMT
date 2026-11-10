@@ -1283,3 +1283,110 @@ fn nr_73_a_peer_that_stops_reading_is_dropped_after_the_write_timeout() {
     assert!(ended, "the driver did not close the peer");
     handle.shutdown();
 }
+
+// ----- NR-90: broadcast and rescan ------------------------------------------
+
+fn a_transaction() -> (bitcoin::Transaction, Vec<u8>) {
+    use bitcoin::absolute::LockTime;
+    use bitcoin::transaction::Version;
+    use bitcoin::{Amount, OutPoint, Sequence, TxIn, TxOut, Witness};
+    let tx = bitcoin::Transaction {
+        version: Version::TWO,
+        lock_time: LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint::new(bitcoin::Txid::from_byte_array([5; 32]), 0),
+            script_sig: ScriptBuf::new(),
+            sequence: Sequence::MAX,
+            witness: Witness::new(),
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(10_000),
+            script_pubkey: ScriptBuf::from_bytes(vec![0x51]),
+        }],
+    };
+    let bytes = bitcoin::consensus::serialize(&tx);
+    (tx, bytes)
+}
+
+#[test]
+fn nr_90_a_broadcast_reaches_the_peer_and_the_counts_come_back() {
+    let peer = FakePeer::start(Behavior::Fetches(Vec::new()));
+    let storage = MemStorage::default();
+    let mut handle = start_system(config(&peer, 30), &storage);
+    wait_for(&handle, 10, has_peer).expect("no ready peer");
+    let (tx, bytes) = a_transaction();
+    handle.broadcast(bytes.clone());
+    let txid = tx.compute_txid();
+    let seen = wait_for(&handle, 10, |e| {
+        matches!(
+            e,
+            AppEvent::TxRelayed {
+                peers_fetched: 1,
+                ..
+            }
+        )
+    })
+    .expect("the peer was not reported as having fetched it");
+    assert!(seen
+        .iter()
+        .any(|e| matches!(e, AppEvent::TxRelayed { peers_asked: 1, .. })));
+    assert!(until(5, || !peer.txs.lock().unwrap().is_empty()));
+    assert_eq!(*peer.invs.lock().unwrap(), vec![txid]);
+    assert_eq!(*peer.txs.lock().unwrap(), vec![bytes]);
+    handle.forget(txid);
+    handle.shutdown();
+}
+
+#[test]
+fn nr_90_a_refused_broadcast_comes_back_as_a_note() {
+    let peer = FakePeer::start(Behavior::Serve(Vec::new()));
+    let storage = MemStorage::default();
+    let mut handle = start_system(config(&peer, 30), &storage);
+    wait_for(&handle, 10, has_peer).expect("no ready peer");
+    handle.broadcast(vec![1, 2, 3]);
+    let seen = wait_for(
+        &handle,
+        10,
+        |e| matches!(e, AppEvent::Note(t) if t.contains("NR-86")),
+    );
+    assert!(seen.is_some());
+    handle.shutdown();
+}
+
+#[test]
+fn nr_90_peers_on_one_machine_are_groups_of_their_own_when_local_peers_are_allowed() {
+    let one = FakePeer::start_on("127.0.0.1", Behavior::Serve(Vec::new()));
+    let two = FakePeer::start_on("127.0.0.2", Behavior::Serve(Vec::new()));
+    let storage = MemStorage::default();
+    let mut cfg = config(&one, 2);
+    cfg.fixed_peers = vec![one.addr, two.addr];
+    let mut handle = start_system(cfg, &storage);
+    let two_ready = wait_for(
+        &handle,
+        10,
+        |e| matches!(e, AppEvent::Peers(peers, ..) if peers.len() == 2),
+    );
+    assert!(two_ready.is_some(), "the second local peer was refused");
+    handle.shutdown();
+}
+
+#[test]
+fn nr_90_a_rescan_fetches_the_blocks_above_the_height_again() {
+    let chain_blocks = blocks(3, 100);
+    let peer = FakePeer::start(Behavior::ServeBlocks(chain_blocks));
+    let storage = MemStorage::default();
+    let mut handle = start_clocked(
+        config(&peer, 30),
+        &storage,
+        Net::system(),
+        &TestClock::at(1_700_000_000),
+        watched(),
+    );
+    wait_for(&handle, 10, |e| matches!(e, AppEvent::Checked(3))).expect("not checked");
+    handle.rescan_from(1);
+    // Blocks 2 and 3 come again, and the height is reported again.
+    let again = wait_for(&handle, 10, |e| matches!(e, AppEvent::Checked(3)))
+        .expect("the height was not reported again");
+    assert_eq!(again.iter().filter(|e| is_block(e)).count(), 2);
+    handle.shutdown();
+}

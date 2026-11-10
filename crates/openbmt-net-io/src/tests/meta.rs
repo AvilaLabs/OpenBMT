@@ -11,13 +11,15 @@ const TEST_SOURCES: [&str; 4] = [
 /// The rules this crate implements: those of the net crate that only a
 /// driver can carry out, and the ones the driver decides itself (NR-70 and
 /// on).
-const IMPLEMENTED: [&str; 20] = [
+const IMPLEMENTED: [&str; 21] = [
     "NR-22", "NR-23", "NR-24", "NR-25", "NR-26", "NR-70", "NR-71", "NR-72", "NR-73", "NR-74",
     "NR-75", "NR-76", "NR-77", "NR-78", "NR-79", "NR-80", "NR-81", "NR-82", "NR-83", "NR-85",
+    "NR-90",
 ];
 
-/// Rules from NR-70 on that the net crate alone carries out.
-const IN_NET_ONLY: [&str; 1] = ["NR-84"];
+/// Rules from NR-70 on that another crate alone carries out: the net crate
+/// (NR-84, and the manager's NR-86 to NR-89) and the owner's node (NR-91).
+const IN_NET_ONLY: [&str; 6] = ["NR-84", "NR-86", "NR-87", "NR-88", "NR-89", "NR-91"];
 
 /// Every rule ID that the rules file defines (in bold at the start of a
 /// bullet).
