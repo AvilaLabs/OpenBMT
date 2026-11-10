@@ -47,6 +47,7 @@
 pub mod coins;
 pub mod copy;
 pub mod link;
+pub mod node;
 pub mod refunds;
 pub mod watcher;
 
@@ -56,6 +57,10 @@ mod tests;
 pub use copy::{CheckInTaken, CopyError, CounterCopy, Stop, Taken};
 pub use link::{
     Alert, BoxReport, CounterState, OwnerLink, OwnerLinkConfig, OwnerLinkError, MAX_BOX_REPORTS,
+};
+pub use node::{
+    NodeError, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState, BROADCAST_DIR, COINS_FILE,
+    NO_TOR, QUEUE_FILE,
 };
 pub use refunds::{
     Applied, CashRefundSeen, IntakeError, NoteKind, RefundIntake, RefundNote, Stopped,

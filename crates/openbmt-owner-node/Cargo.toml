@@ -25,9 +25,11 @@ openbmt-owner = { path = "../openbmt-owner" }
 openbmt-session = { path = "../openbmt-session" }
 # For `Coin` and the spend rules the coin view serves.
 openbmt-spend = { path = "../openbmt-spend" }
+# Key 1's signer, which finishes the owner's own transactions.
+openbmt-signer = { path = "../openbmt-signer" }
 
 [dev-dependencies]
-# For the owner's wallet in the tests of the refund intake, and the two
-# crates whose lists of payable scripts the counter's list must agree with.
-openbmt-signer = { path = "../openbmt-signer" }
-openbmt-spend = { path = "../openbmt-spend" }
+# The Key app, in process, for the tests that build and take a session.
+openbmt-approver = { path = "../openbmt-approver" }
+# For the test that the node's weight limit is the net crate's.
+openbmt-net = { path = "../openbmt-net" }

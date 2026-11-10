@@ -21,7 +21,7 @@ use crate::coins::{
     UNDO_BLOCKS,
 };
 
-fn script(n: u8) -> ScriptBuf {
+pub(super) fn script(n: u8) -> ScriptBuf {
     let mut bytes = vec![0x00, 0x20];
     bytes.extend([n; 32]);
     ScriptBuf::from_bytes(bytes)
@@ -37,7 +37,7 @@ fn scripts() -> ScriptSet {
 
 /// A transaction spending `prev` (an outpoint, or a number that makes
 /// one) and paying each (script, sats).
-fn tx_from(prev: OutPoint, outs: &[(&ScriptBuf, u64)]) -> Transaction {
+pub(super) fn tx_from(prev: OutPoint, outs: &[(&ScriptBuf, u64)]) -> Transaction {
     Transaction {
         version: Version::TWO,
         lock_time: LockTime::ZERO,
@@ -58,15 +58,15 @@ fn tx_from(prev: OutPoint, outs: &[(&ScriptBuf, u64)]) -> Transaction {
 }
 
 /// A transaction from a coin nobody here knows (a foreign payment).
-fn foreign(n: u8, outs: &[(&ScriptBuf, u64)]) -> Transaction {
+pub(super) fn foreign(n: u8, outs: &[(&ScriptBuf, u64)]) -> Transaction {
     tx_from(OutPoint::new(Txid::from_byte_array([n; 32]), 0), outs)
 }
 
-fn op(tx: &Transaction, vout: u32) -> OutPoint {
+pub(super) fn op(tx: &Transaction, vout: u32) -> OutPoint {
     OutPoint::new(tx.compute_txid(), vout)
 }
 
-fn coinbase(height: u32, tag: u32) -> Transaction {
+pub(super) fn coinbase(height: u32, tag: u32) -> Transaction {
     let mut s = height.to_le_bytes().to_vec();
     s.extend_from_slice(&tag.to_le_bytes());
     Transaction {
@@ -85,7 +85,7 @@ fn coinbase(height: u32, tag: u32) -> Transaction {
     }
 }
 
-fn mine(prev: BlockHash, height: u32, tag: u32, txs: &[Transaction]) -> Block {
+pub(super) fn mine(prev: BlockHash, height: u32, tag: u32, txs: &[Transaction]) -> Block {
     let mut all = vec![coinbase(height, tag)];
     all.extend(txs.iter().cloned());
     let mut block = Block {
@@ -227,7 +227,7 @@ fn oc_01_a_payment_in_a_checked_block_is_a_coin_with_confirmations_from_the_tip(
     let mut chain = Chain::new();
     let mut view = CoinView::new(0);
     let pay = foreign(1, &[(&script(1), 50_000), (&script(77), 1)]);
-    let block = chain.push(&[pay.clone()]);
+    let block = chain.push(std::slice::from_ref(&pay));
     let effect = apply(&mut view, &chain, &block);
     assert_eq!(effect.created, vec![op(&pay, 0)]);
     assert_eq!(view.balance(), 50_000);
@@ -249,7 +249,7 @@ fn oc_01_a_block_that_fails_its_check_is_ignored() {
     let mut view = CoinView::new(0);
     let pay = foreign(1, &[(&script(1), 50_000)]);
     // A block that was never on the best chain.
-    let stray = mine(chain.tip_hash(), 1, 99, &[pay.clone()]);
+    let stray = mine(chain.tip_hash(), 1, 99, std::slice::from_ref(&pay));
     let err = view
         .apply_block(&parsed(&stray), &chain.view, &scripts(), ok)
         .unwrap_err();
@@ -296,12 +296,12 @@ fn oc_04_an_input_that_spends_a_coin_in_a_checked_block_removes_it() {
     let mut chain = Chain::new();
     let mut view = CoinView::new(0);
     let pay = foreign(1, &[(&script(1), 50_000), (&script(2), 30_000)]);
-    let b1 = chain.push(&[pay.clone()]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
     apply(&mut view, &chain, &b1);
     assert_eq!(view.len(), 2);
     // A spend of the first coin that pays change to the wallet.
     let spend = tx_from(op(&pay, 0), &[(&script(9), 40_000), (&script(55), 9_000)]);
-    let b2 = chain.push(&[spend.clone()]);
+    let b2 = chain.push(std::slice::from_ref(&spend));
     let effect = apply(&mut view, &chain, &b2);
     assert_eq!(effect.spent, vec![op(&pay, 0)]);
     assert_eq!(effect.created, vec![op(&spend, 0)]);
@@ -341,7 +341,7 @@ fn oc_03_the_change_of_an_own_transaction_is_offered_with_no_confirmations() {
     let mut chain = Chain::new();
     let mut view = CoinView::new(0);
     let pay = foreign(1, &[(&script(1), 50_000)]);
-    let b1 = chain.push(&[pay.clone()]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
     apply(&mut view, &chain, &b1);
     let own = tx_from(op(&pay, 0), &[(&script(55), 20_000), (&script(9), 29_000)]);
     assert_eq!(view.add_pending(&own, &scripts(), ok), Ok(true));
@@ -357,7 +357,7 @@ fn oc_03_the_change_of_an_own_transaction_is_offered_with_no_confirmations() {
     assert_eq!(view.spendable(1), 29_000);
     // A block confirms it: it is no longer pending, the change is a real
     // coin and the spent coin is gone.
-    let b2 = chain.push(&[own.clone()]);
+    let b2 = chain.push(std::slice::from_ref(&own));
     let effect = apply(&mut view, &chain, &b2);
     assert_eq!(effect.confirmed, vec![own.compute_txid()]);
     assert!(view.pending().next().is_none());
@@ -369,7 +369,7 @@ fn oc_03_a_held_transaction_is_replaced_when_a_block_spends_its_input_in_another
     let mut chain = Chain::new();
     let mut view = CoinView::new(0);
     let pay = foreign(1, &[(&script(1), 50_000)]);
-    let b1 = chain.push(&[pay.clone()]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
     apply(&mut view, &chain, &b1);
     let mine_tx = tx_from(op(&pay, 0), &[(&script(55), 20_000), (&script(9), 29_000)]);
     view.add_pending(&mine_tx, &scripts(), ok).unwrap();
@@ -404,11 +404,11 @@ fn oc_05_a_reorganization_of_one_block_puts_back_what_it_spent() {
     let mut chain = Chain::new();
     let mut view = CoinView::new(0);
     let pay = foreign(1, &[(&script(1), 50_000)]);
-    let b1 = chain.push(&[pay.clone()]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
     apply(&mut view, &chain, &b1);
     let before = view.clone();
     let spend = tx_from(op(&pay, 0), &[(&script(9), 40_000)]);
-    let b2 = chain.push(&[spend.clone()]);
+    let b2 = chain.push(std::slice::from_ref(&spend));
     apply(&mut view, &chain, &b2);
     assert_eq!(offered(&view, 2), vec![(op(&spend, 0), 40_000, 1)]);
     // Block 2 leaves; a block with no spend takes its place.
@@ -430,15 +430,15 @@ fn oc_05_a_reorganization_of_three_blocks_with_a_spend_inside_is_undone() {
     let mut chain = Chain::new();
     let mut view = CoinView::new(0);
     let pay = foreign(1, &[(&script(1), 50_000), (&script(2), 20_000)]);
-    let b1 = chain.push(&[pay.clone()]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
     apply(&mut view, &chain, &b1);
     let s1 = tx_from(op(&pay, 0), &[(&script(9), 45_000)]);
-    let b2 = chain.push(&[s1.clone()]);
+    let b2 = chain.push(std::slice::from_ref(&s1));
     apply(&mut view, &chain, &b2);
     let b3 = chain.push(&[foreign(2, &[(&script(1), 7_000)])]);
     apply(&mut view, &chain, &b3);
     let s2 = tx_from(op(&s1, 0), &[(&script(2), 44_000)]);
-    let b4 = chain.push(&[s2.clone()]);
+    let b4 = chain.push(std::slice::from_ref(&s2));
     apply(&mut view, &chain, &b4);
     assert_eq!(view.len(), 3);
     // Blocks 2 to 4 leave. The branch that replaces them pays nothing.
@@ -463,11 +463,11 @@ fn oc_05_a_transaction_confirmed_by_a_block_that_leaves_is_held_again() {
     let mut chain = Chain::new();
     let mut view = CoinView::new(0);
     let pay = foreign(1, &[(&script(1), 50_000)]);
-    let b1 = chain.push(&[pay.clone()]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
     apply(&mut view, &chain, &b1);
     let own = tx_from(op(&pay, 0), &[(&script(55), 20_000), (&script(9), 29_000)]);
     view.add_pending(&own, &scripts(), ok).unwrap();
-    let b2 = chain.push(&[own.clone()]);
+    let b2 = chain.push(std::slice::from_ref(&own));
     apply(&mut view, &chain, &b2);
     assert!(view.pending().next().is_none());
     let (left, _) = chain.reorg(1, &[vec![], vec![]]);
@@ -482,7 +482,7 @@ fn oc_06_a_reorganization_deeper_than_100_blocks_is_a_named_state() {
     let mut chain = Chain::new();
     let mut view = CoinView::new(0);
     let pay = foreign(1, &[(&script(1), 50_000)]);
-    let b1 = chain.push(&[pay.clone()]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
     apply(&mut view, &chain, &b1);
     for _ in 0..UNDO_BLOCKS + 1 {
         chain.push(&[]);
@@ -555,7 +555,11 @@ fn oc_07_a_rescan_from_the_birthday_finds_a_payment_to_a_script_added_later() {
     let mut chain = Chain::new();
     let mut view = CoinView::new(0);
     let pay = foreign(1, &[(&script(3), 12_000)]);
-    let blocks = [chain.push(&[]), chain.push(&[pay.clone()]), chain.push(&[])];
+    let blocks = [
+        chain.push(&[]),
+        chain.push(std::slice::from_ref(&pay)),
+        chain.push(&[]),
+    ];
     // The blocks are checked against the scripts known then: nothing.
     for b in &blocks {
         apply(&mut view, &chain, b);
@@ -603,7 +607,7 @@ fn rich_view() -> (CoinView, Chain) {
     let mut chain = Chain::new();
     let mut view = CoinView::new(0);
     let pay = foreign(1, &[(&script(1), 50_000), (&script(2), 20_000)]);
-    let b1 = chain.push(&[pay.clone()]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
     apply(&mut view, &chain, &b1);
     let spend = tx_from(op(&pay, 0), &[(&script(9), 45_000)]);
     let b2 = chain.push(&[spend]);
@@ -685,7 +689,7 @@ fn run_steps(fail_at: Option<usize>) -> (CoinView, usize) {
     );
     let b1 = chain.push(&[pay]);
     let b2 = chain.push(&[spend]);
-    let b3 = chain.push(&[own.clone()]);
+    let b3 = chain.push(std::slice::from_ref(&own));
     let steps = 8;
     let mut step = 0;
     let mut failures = 0;

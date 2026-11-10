@@ -379,6 +379,16 @@ impl CoinView {
         list
     }
 
+    /// The height of the block that confirmed a transaction the owner held,
+    /// if that block is still among the last [`UNDO_BLOCKS`] that changed
+    /// the view.
+    pub fn confirmed_height(&self, txid: &Txid) -> Option<u32> {
+        self.undo
+            .iter()
+            .find(|(_, u)| u.confirmed.iter().any(|p| p.tx.compute_txid() == *txid))
+            .map(|(h, _)| *h)
+    }
+
     /// The height of the block that holds a coin, if the view holds it.
     pub fn height_of(&self, outpoint: &OutPoint) -> Option<u32> {
         self.coins.get(outpoint).map(|c| c.height)
@@ -624,9 +634,10 @@ impl CoinView {
             }
         }
 
-        let changed =
+        let needs_undo =
             !effect.created.is_empty() || !effect.spent.is_empty() || !confirmed.is_empty();
-        if changed {
+        let changed = needs_undo || !effect.replaced.is_empty();
+        if needs_undo {
             let height = match height {
                 Some(h) => h,
                 None => chain

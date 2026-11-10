@@ -99,6 +99,20 @@ pub struct OwnerConfig {
     /// The health rules. [`check_health`] unless a check against a node with
     /// fewer peers than the rules ask for puts something else here.
     pub health: HealthFn,
+    /// The height above which the driver checks blocks for the scripts it
+    /// watches. `None` is the tip of the stored headers: nothing is watched
+    /// and there is nothing to check below the tip.
+    pub watch_from: Option<u32>,
+    /// The wallet's first block: nothing of the wallet is below it. The
+    /// owner node scans from here for scripts it did not watch before.
+    pub birthday: u32,
+    /// A SOCKS5 proxy for Tor, for sending transactions only. With it the
+    /// node runs a second driver of its own, in `<dir>/broadcast`, that
+    /// connects through the proxy and sends (NR-91).
+    pub broadcast_proxy: Option<std::net::SocketAddr>,
+    /// Send transactions through the main driver, which is not behind Tor.
+    /// Off unless the owner turns it on; a note says so each time.
+    pub broadcast_without_tor: bool,
 }
 
 impl OwnerConfig {
@@ -110,6 +124,10 @@ impl OwnerConfig {
             driver,
             clock: Box::new(SystemClock),
             health: Box::new(check_health),
+            watch_from: None,
+            birthday: 0,
+            broadcast_proxy: None,
+            broadcast_without_tor: false,
         }
     }
 }
@@ -156,6 +174,8 @@ impl<P: DriverPort> OwnerWatcher<P> {
             mut driver,
             clock,
             health,
+            watch_from,
+            ..
         } = config;
         // NR-79: before anything in the directory is read. This makes the
         // directory too.
@@ -186,8 +206,8 @@ impl<P: DriverPort> OwnerWatcher<P> {
             },
         };
         let view = ChainView::from_store(&headers);
-        // Nothing is watched, so there are no blocks to check below the tip.
-        driver.watch_from = headers.tip_height();
+        // With nothing watched there are no blocks to check below the tip.
+        driver.watch_from = watch_from.unwrap_or_else(|| headers.tip_height());
 
         let last_seq = match read_seq(&dir) {
             Ok(seq) => seq.unwrap_or(0),
@@ -238,6 +258,11 @@ impl<P: DriverPort> OwnerWatcher<P> {
         self.last_seq
     }
 
+    /// The driver, for the commands of the node that owns this watcher.
+    pub fn port(&self) -> &P {
+        &self.port
+    }
+
     /// The lines the watcher and the driver have logged, oldest first.
     pub fn notes(&self) -> impl Iterator<Item = &str> {
         self.notes.iter().map(String::as_str)
@@ -253,7 +278,8 @@ impl<P: DriverPort> OwnerWatcher<P> {
         self.stopped
     }
 
-    fn note(&mut self, line: String) {
+    /// Log a line.
+    pub fn note(&mut self, line: String) {
         if self.notes.len() >= NOTE_LOG {
             self.notes.pop_front();
         }
@@ -267,45 +293,57 @@ impl<P: DriverPort> OwnerWatcher<P> {
     pub fn pump(&mut self, wait: Duration) {
         let deadline = Instant::now() + wait;
         for _ in 0..MAX_EVENTS_PER_PUMP {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            let got = if remaining.is_zero() {
-                self.port
-                    .events()
-                    .try_recv()
-                    .map_err(|e| matches!(e, std::sync::mpsc::TryRecvError::Disconnected))
-            } else {
-                self.port
-                    .events()
-                    .recv_timeout(remaining)
-                    .map_err(|e| e == RecvTimeoutError::Disconnected)
-            };
-            match got {
-                Ok(event) => self.apply(event),
-                Err(disconnected) => {
-                    if disconnected {
-                        self.stopped = true;
-                    }
-                    break;
-                }
+            match self.next_event(deadline.saturating_duration_since(Instant::now())) {
+                Some(event) => self.apply(&event),
+                None => break,
             }
         }
     }
 
-    fn apply(&mut self, event: AppEvent) {
+    /// The next event, waiting up to `wait` (not at all if zero). The event
+    /// is not applied: the caller that wants more than the watcher does with
+    /// it looks at it first and then hands it to [`OwnerWatcher::apply`].
+    /// `None` when there is none, and the watcher is stopped if the driver
+    /// has gone.
+    pub fn next_event(&mut self, wait: Duration) -> Option<AppEvent> {
+        let got = if wait.is_zero() {
+            self.port
+                .events()
+                .try_recv()
+                .map_err(|e| matches!(e, std::sync::mpsc::TryRecvError::Disconnected))
+        } else {
+            self.port
+                .events()
+                .recv_timeout(wait)
+                .map_err(|e| e == RecvTimeoutError::Disconnected)
+        };
+        match got {
+            Ok(event) => Some(event),
+            Err(disconnected) => {
+                if disconnected {
+                    self.stopped = true;
+                }
+                None
+            }
+        }
+    }
+
+    /// What the watcher itself does with an event (the module docs).
+    pub fn apply(&mut self, event: &AppEvent) {
         match event {
             AppEvent::Peers(peers, ahead_since, (tip_height, tip_time)) => {
-                self.view.set_tip_time(tip_height, tip_time);
+                self.view.set_tip_time(*tip_height, *tip_time);
                 let input = HealthInput {
-                    peers: &peers,
-                    tip_height,
-                    tip_time,
+                    peers,
+                    tip_height: *tip_height,
+                    tip_time: *tip_time,
                     now: self.clock.now(),
-                    behind_since: ahead_since,
+                    behind_since: *ahead_since,
                 };
                 self.health = Some((self.health_fn)(&input));
             }
-            AppEvent::Chain { joined, left } => self.view.apply(&joined, &left),
-            AppEvent::Note(line) => self.note(line),
+            AppEvent::Chain { joined, left } => self.view.apply(joined, left),
+            AppEvent::Note(line) => self.note(line.clone()),
             AppEvent::Stopped => self.stopped = true,
             AppEvent::Sighting { .. }
             | AppEvent::AlsoAnnounced { .. }
@@ -370,13 +408,19 @@ fn read_seq(dir: &Path) -> Result<Option<u64>, String> {
 /// Write the number whole: temporary file, flush, rename, flush the
 /// directory. On an error the old file is as it was.
 fn write_seq(dir: &Path, seq: u64) -> Result<(), String> {
-    let temp = dir.join(format!("{HEARTBEAT_FILE}.tmp"));
+    write_file(dir, HEARTBEAT_FILE, &seq.to_le_bytes())
+}
+
+/// Write a file of the directory whole: temporary file, flush, rename, flush
+/// the directory. On an error the old file is as it was.
+pub fn write_file(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
+    let temp = dir.join(format!("{name}.tmp"));
     let written = File::create(&temp).and_then(|mut f| {
-        f.write_all(&seq.to_le_bytes())?;
+        f.write_all(bytes)?;
         f.sync_all()
     });
     let result = written
-        .and_then(|()| fs::rename(&temp, dir.join(HEARTBEAT_FILE)))
+        .and_then(|()| fs::rename(&temp, dir.join(name)))
         .and_then(|()| File::open(dir).and_then(|d| d.sync_all()));
-    result.map_err(|e| format!("{HEARTBEAT_FILE}: {e}"))
+    result.map_err(|e| format!("{name}: {e}"))
 }
