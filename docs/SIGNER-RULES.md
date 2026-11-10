@@ -1,6 +1,6 @@
 # Signer rules: what the Key app refuses to sign
 
-Status: specification for `crates/openbmt-signer`, written before the code.
+Status: specification for `crates/openbmt-signer`, which implements it.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement `docs/DESIGN.md` §5.4 (Rule 3 and "The OpenBMT Key app"). Where this
 file is more exact than the design, this file is what the code follows.
@@ -31,7 +31,8 @@ can change it; every change below is made on the Key app's own screen.
 - **The registered wallet.** The full wallet description, checked at setup,
   and which of its three key slots is this device's own.
 - **Receive mark.** One past the highest receive index the Key app has
-  co-signed in an address batch. It never goes down.
+  co-signed in an address batch. It never goes down. The owner can raise it
+  on this device (SR-70).
 - **Change mark.** One past the highest change index the Key app has signed
   for. It never goes down. The owner can raise it on this device (SR-34).
   The design's "high-water mark" is these two marks: receive and change
@@ -96,9 +97,10 @@ can change it; every change below is made on the Key app's own screen.
   signer derived. The signer signs with its own derived script, never with
   one from the file.
 - **SR-14.** A signature already in the file for one of the wallet's keys is
-  checked, and a bad one is refused. A signature for any other key is
-  refused. If this device's own valid signature is already there for every
-  input, the signer reports "already signed" and signs nothing.
+  checked, and a bad one is refused. A signature that is not in low-S form
+  counts as bad. A signature for any other key is refused. If this device's
+  own valid signature is already there for every input, the signer reports
+  "already signed" and signs nothing.
 - **SR-15.** Each input amount is at most 21,000,000 BTC, and the total is
   added with overflow checks.
 
@@ -109,8 +111,10 @@ Every output is exactly one of three kinds.
 - **SR-20. Change.** The output's key-path hints name the change keychain (1)
   and an index, under the same matching rule as SR-12; the script the signer
   derives for that index equals the output's script; and the index is below
-  the change mark plus 20 (SR-34). At most one output is change: if more
-  than one qualifies, it is the first in the transaction's order. An output
+  the change mark plus 20 (SR-34). An output that meets the first two
+  conditions with an index at or beyond that bound is refused, whether or
+  not it would be the one taken as change. At most one output is change: if
+  more than one qualifies, it is the first in the transaction's order. An output
   whose hints name the change keychain but whose script is not the derived
   one is not change. It is an "other destination". The screen shows "change
   back to your wallet" only for an output that passed this rule.
@@ -128,16 +132,19 @@ Every output is exactly one of three kinds.
 - **SR-25.** A transaction whose only output is change (SR-20) is allowed.
   It joins many small payments into one coin, which a shop needs to do from
   time to time. Everything but the fee returns to the wallet, and the signer
-  has checked that itself, so only the fee rules apply. The review calls it
+  has checked that itself, so the per-transaction ceilings have nothing to
+  measure. The fee is held to the fee rules and, like every fee, to the day
+  and week ceilings for other destinations (SR-36). The review calls it
   "moves coins inside your wallet".
 
 ## 5. Allowlist and time
 
 - **SR-30.** A destination is enrolled only by a call that the Key app makes
   from its own camera and keyboard: a script of one of the kinds in SR-22,
-  and a label of 1 to 64 characters, none of them a control character. At
-  most 64 entries, and no script twice. It becomes active 24 hours after
-  enrollment. Removing an entry takes effect at once.
+  and a label of 1 to 64 characters and at most 255 bytes of UTF-8, none of
+  them a control character. At most 64 entries, and no script twice. It
+  becomes active 24 hours after enrollment. Removing an entry takes effect
+  at once.
 - **SR-31.** The current time is the larger of the time passed in and the
   latest time seen. Moving the clock back therefore changes nothing. The
   latest time seen is stored with every signature and every enrollment.
@@ -158,7 +165,8 @@ Every output is exactly one of three kinds.
   exceptions, and both are exact:
   - Signing the very same transaction again (same transaction ID) is not
     counted twice and needs no room under the ceilings. It gives out the
-    same signatures as before (SR-53).
+    same signatures as before (SR-53). This holds while the first
+    signature is still in the spend log, which is 7 days.
   - A new transaction that spends every input of an earlier signed one can
     never confirm together with it. The two count once, at the larger of
     each amount (other destinations, allowlisted destinations, fee), dated
@@ -169,7 +177,8 @@ Every output is exactly one of three kinds.
     transactions that do not conflict with each other could both confirm.
 
   Any other transaction counts in full, even if it conflicts with an earlier
-  one.
+  one. A transaction that would take the spend log past its size (section 1)
+  is refused.
 - **SR-34.** A change index must be below the change mark plus 20. An honest
   transaction builder uses the next unused index, so this always holds for
   it. After signing, the mark becomes one past the change index used, if that
@@ -232,7 +241,7 @@ bytes each, with the hash-type byte).
   state and time as they are then. Another transaction may have been signed
   since the review, or a destination removed. If an output's kind or the
   change index is no longer what the review showed, the signer refuses and
-  the owner reviews again.
+  the owner reviews again. A review made for another wallet is refused.
 - **SR-52.** The signing key's account public key equals the registered
   wallet's own slot, in full. A key that only shares its fingerprint is
   refused.
@@ -251,7 +260,8 @@ bytes each, with the hash-type byte).
 
 - **SR-60.** The description parses under the strict rules of `openbmt-core`:
   P2WSH `sortedmulti`, 2-of-3, BIP48 paths for the right network, `<0;1>/*`,
-  a valid checksum, three different keys.
+  a valid checksum, three different keys. The network is mainnet, testnet,
+  signet or regtest.
 - **SR-61.** Exactly one key slot holds this device's own account public key,
   in full.
 - **SR-62.** If the Key app was given key 3's public key directly (by QR from
@@ -266,6 +276,13 @@ this order: the batch names this wallet by full hash, has a valid shape,
 carries key 1's signature, is for a counter on the signed device list, starts
 exactly at the receive mark, and holds the addresses the Key app derives
 itself. The new receive mark is stored before the co-signature is released.
+
+- **SR-70.** The owner can raise the receive mark on this device, and only
+  there. It only goes up. A restored Key app starts with the mark at 0, and
+  the shop has issued addresses up to the index its recovery kit records, so
+  the owner raises the mark to that index before the next batch. Indexes
+  below the mark are never co-signed again.
+
 Settings and pairings follow `docs/DESIGN.md` §2.9 and are specified with
 those parts.
 
@@ -284,8 +301,12 @@ Stated plainly, because the design promises no overclaiming.
   it was signed.
 - **They depend on the Key app's clock for waits and windows.** Someone who
   can unlock the Key app and set its clock forward can end the 24-hour wait
-  early and empty the day and week totals. That person already holds the
-  unlocked key 2 device.
+  early and empty the day and week totals. So can someone who sets the clock
+  back, confirms that as a correction (SR-31) and sets it forward again.
+  That person already holds the unlocked key 2 device.
+- **They do not protect the stored state.** The library checks the shape of
+  the state it is given, not where it came from. Keeping the state where
+  nothing else can write it or put back an older copy is the Key app's job.
 - **They are promises of the Key app's software.** A malicious build of the
   Key app keeps none of them. That is what the separate release key, the
   reproducible builds and the second key holder are for (`docs/DESIGN.md`

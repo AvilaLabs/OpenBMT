@@ -1,0 +1,13 @@
+[package]
+name = "openbmt-signer"
+description = "The OpenBMT Key app's transaction signer: the rules under which key 2 signs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The same exact bitcoin version as openbmt-core, so the types unify.
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }

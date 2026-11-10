@@ -4,10 +4,10 @@ OpenBMT lets a shop take bitcoin at the counter the way it takes a card. The
 money goes straight into the merchant's own wallet, and the sale closes in the
 point-of-sale system the shop already uses.
 
-**Status: pre-release.** The design is written down and the shared rules
-library is implemented and tested. No app is built yet, nothing has been tried
-on a device, and **no independent security audit has been done**. Do not use
-this with real funds.
+**Status: pre-release.** The design is written down, and the shared rules
+library and the signer's rules are implemented and tested. No app is built
+yet, nothing has been tried on a device, and **no independent security audit
+has been done**. Do not use this with real funds.
 
 ## What it is
 
@@ -50,13 +50,13 @@ sets. The full statement, its conditions and the reasoning are in
 | Path | What |
 |---|---|
 | [docs/DESIGN.md](docs/DESIGN.md) | The design: flows, architecture, threat table, open questions |
-| [docs/SIGNER-RULES.md](docs/SIGNER-RULES.md) | Every rule under which the Key app refuses to sign, written before the signer's code |
+| [docs/SIGNER-RULES.md](docs/SIGNER-RULES.md) | Every rule under which the Key app refuses to sign |
 | [docs/research/](docs/research/) | Research notes, four rounds of internal design review, and the restore drill results |
 | [crates/openbmt-core/](crates/openbmt-core/) | The rules every device must agree on: wallet description, device identity, address batches, signed records, signed settings, instant-acceptance policy |
+| [crates/openbmt-signer/](crates/openbmt-signer/) | The Key app's transaction signer: the rules under which key 2 signs |
 | [scripts/](scripts/) | The restore drill: find and spend a wallet with Bitcoin Core alone |
 
-Planned next: the signer built to those rules, the payment watcher, then the
-apps.
+Planned next: the payment watcher, then the apps.
 
 ## Building
 

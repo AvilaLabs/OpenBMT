@@ -68,8 +68,9 @@ batch, record or setting is.
   payload: `OBMB` signed batch, `OBMR` record, `OBMS` signed settings, `OBMH`
   high-water mark, `OBMC` counter batches, `OBME` exposure, `OBMP` pause
   tracker, `OBMK` the Key app's signer state (written by `openbmt-signer`,
-  which uses the public `Reader` and `start` helpers). The payload of a signed batch, record or signed settings starts
-  with the exact bytes that are hashed and signed, followed by the signatures.
+  which uses the public `Reader` and `start` helpers). The payload of a
+  signed batch, record or signed settings starts with the exact bytes that
+  are hashed and signed, followed by the signatures.
   Decoding is strict: wrong magic, an unknown version, missing or trailing
   bytes, a flag other than 0 or 1, a list that is not in strictly ascending
   order, a script that is not 34 bytes, an invalid public key, an unknown
@@ -116,7 +117,7 @@ batch, record or setting is.
 - No storage, no screens, no exchange rates. Dollar amounts come in as a
   sats-per-dollar number from the caller.
 - No transaction building or signing, and no PSBT checks (the Key app's
-  signing rules live elsewhere).
+  signing rules are in `openbmt-signer`).
 
 ## Tests
 
