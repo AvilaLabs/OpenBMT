@@ -264,11 +264,11 @@ impl Chain {
     }
 
     /// Check the whole chain from the first record: known authors, bodies
-    /// within [`MAX_BODY`], good signatures, consecutive numbers, each `prev` the hash of the record
-    /// before, and every check-in matching the chain it sits in. This
-    /// detects edited, deleted, inserted and reordered records. It cannot
-    /// see records cut off the end: compare with a later check-in for that
-    /// ([`Chain::check_against_check_in`]).
+    /// within [`MAX_BODY`], good signatures, consecutive numbers, each `prev`
+    /// the hash of the record before, and every check-in matching the chain
+    /// it sits in. This detects edited, deleted, inserted and reordered
+    /// records. It cannot see records cut off the end: compare with a later
+    /// check-in for that ([`Chain::check_against_check_in`]).
     pub fn verify(&self, devices: &DeviceList) -> Result<(), ChainError> {
         let mut prev = GENESIS;
         for (i, r) in self.records.iter().enumerate() {

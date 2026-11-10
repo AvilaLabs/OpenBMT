@@ -379,12 +379,12 @@ impl Approver {
             }
             std::cmp::Ordering::Equal => {}
         }
+        // `batch` is untrusted: its scripts must pass the shape check before
+        // they are encoded and hashed, and before any derivation work is done.
+        batch.check_shape(&self.builder.policy)?;
         let own = self
             .builder
             .derive(own_wallet, batch.counter, batch.start, batch.count)?;
-        // `batch` is untrusted: its scripts must pass the shape check before
-        // they are encoded and hashed.
-        batch.check_shape(&self.builder.policy)?;
         if own.hash() != batch.hash() {
             return Err(BatchError::HashMismatch);
         }

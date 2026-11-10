@@ -31,8 +31,8 @@ batch, record or setting is.
 - **Records** (`records`). Signed records, each carrying the hash of the one
   before. It finds edited, deleted, inserted and reordered records, oversized
   bodies and unknown authors. Checking a period needs every device that was on
-  the device list at any time in it. A check-in carries the author's head, so a cut-off tail shows up
-  when the chain is compared with a later check-in.
+  the device list at any time in it. A check-in carries the author's head, so
+  a cut-off tail shows up when the chain is compared with a later check-in.
 - **Settings** (`settings`). The shop's limits and switches. Tightening needs
   the owner signature. Loosening, or anything mixed, needs the Key app's
   too. Versions only go up, and a store can start from a version floor so an
