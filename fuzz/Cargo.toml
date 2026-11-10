@@ -326,3 +326,10 @@ path = "fuzz_targets/key_words.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "key_dispatch"
+path = "fuzz_targets/key_dispatch.rs"
+test = false
+doc = false
+bench = false

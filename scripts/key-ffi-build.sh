@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
-# The Key app's FFI library: Kotlin bindings and Android libraries.
+# The Key app's library for Android: the shared library for aarch64 and
+# x86_64, API level 26, linked with the NDK's clang, and a check of what it
+# exports.
 #
-# Step 2: the Kotlin bindings, generated twice by the bindgen binary of
-# crates/openbmt-key-ffi. They are written to
-# crates/openbmt-key-ffi/bindings/kotlin/ only if both runs give the same
-# bytes.
-# Step 3: the shared library for aarch64 and x86_64 Android, API level 26,
-# linked with the NDK's clang. The .so files stay in the target directory
-# and are not committed. The UniFFI symbols are listed with the NDK's own
-# llvm-readelf.
+# The .so files stay in the target directory and are not committed. The
+# check uses the NDK's own llvm-readelf: the only exported symbol whose name
+# starts with Java_ must be the one entry point of the library, and no
+# symbol of the former binding generator may remain.
 #
 # Every cargo call runs under the memory guard. Prints one PASS, FAIL or
-# NOT RUN line for each step. Nothing is downloaded except the Rust
+# NOT RUN line for each target. Nothing is downloaded except the Rust
 # standard library of the Android targets (rustup) and crates.io crates.
 #
 # Usage: scripts/key-ffi-build.sh
@@ -29,8 +27,7 @@ scratch="$HOME/.cache/openbmt/keyffi"
 ndk="${ANDROID_NDK_HOME:-$HOME/Android/Sdk/ndk/26.3.11579264}"
 bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
 api=26
-out="$root/crates/openbmt-key-ffi/bindings/kotlin"
-lib="$target_dir/debug/libopenbmt_key_ffi.so"
+entry="Java_org_openbmt_key_Native_call"
 
 mkdir -p "$scratch"
 cd "$root" || exit 2
@@ -40,43 +37,6 @@ report() { # PASS|FAIL|"NOT RUN" step detail
     printf '%s  %s  %s\n' "$1" "$2" "$3"
     [ "$1" = FAIL ] && status=1
 }
-
-cargo_guarded() {
-    "$guard" env CARGO_TARGET_DIR="$target_dir" CARGO_BUILD_JOBS=2 "$@"
-}
-
-# ---- step 2: Kotlin bindings -----------------------------------------------
-
-if cargo_guarded cargo build -p openbmt-key-ffi --features bindgen --bin uniffi-bindgen \
-    >"$scratch/host-build.log" 2>&1 &&
-    cargo_guarded cargo build -p openbmt-key-ffi >>"$scratch/host-build.log" 2>&1; then
-    rm -rf "$scratch/run1" "$scratch/run2"
-    gen() {
-        "$target_dir/debug/uniffi-bindgen" generate --library "$lib" \
-            --config "$root/crates/openbmt-key-ffi/uniffi.toml" \
-            --language kotlin --no-format --out-dir "$1" >"$1.log" 2>&1
-    }
-    if gen "$scratch/run1" && gen "$scratch/run2"; then
-        f1="$(find "$scratch/run1" -name '*.kt' | sort)"
-        f2="$(find "$scratch/run2" -name '*.kt' | sort)"
-        if [ -n "$f1" ] && [ "$(cd "$scratch/run1" && sha256sum $(find . -name '*.kt' | sort))" = \
-            "$(cd "$scratch/run2" && sha256sum $(find . -name '*.kt' | sort))" ]; then
-            rm -rf "$out"
-            mkdir -p "$out"
-            cp -r "$scratch/run1/." "$out/"
-            report PASS "bindings" "two runs identical; written to crates/openbmt-key-ffi/bindings/kotlin/"
-            (cd "$out" && sha256sum $(find . -name '*.kt' | sort))
-        else
-            report FAIL "bindings" "the two runs differ; not written (see $scratch/run1 and run2)"
-        fi
-    else
-        report FAIL "bindings" "bindgen failed; see $scratch/run1.log"
-    fi
-else
-    report FAIL "bindings" "the host build failed; see $scratch/host-build.log"
-fi
-
-# ---- step 3: Android libraries -----------------------------------------------
 
 android() { # rust-triple clang-triple
     local triple="$1" clang_triple="$2"
@@ -95,20 +55,24 @@ android() { # rust-triple clang-triple
     fi
     if ! "$guard" env CARGO_TARGET_DIR="$target_dir" CARGO_BUILD_JOBS=2 \
         "CARGO_TARGET_${upper}_LINKER=$clang" "CC_${lower}=$clang" "AR_${lower}=$ar" \
-        cargo build --release -p openbmt-key-ffi --target "$triple" \
+        cargo build --release --locked -p openbmt-key-ffi --target "$triple" \
         >"$scratch/android-$triple.log" 2>&1; then
         report FAIL "android $triple" "build failed; see $scratch/android-$triple.log: $(grep -m1 '^error' "$scratch/android-$triple.log")"
         return
     fi
     local so="$target_dir/$triple/release/libopenbmt_key_ffi.so"
-    local size symbols
+    local size defined java uniffi
     size="$(stat -c %s "$so")"
-    symbols="$("$bin/llvm-readelf" --dyn-syms "$so" | grep -c ' uniffi_openbmt_key_ffi_')"
-    if [ "$symbols" -gt 0 ]; then
-        report PASS "android $triple" "$so, $size bytes, $symbols exported uniffi_openbmt_key_ffi_ symbols"
-        "$bin/llvm-readelf" --dyn-syms "$so" | grep -E ' (uniffi_openbmt_key_ffi_(fn_(constructor|method)_keyapp_(open|state|open_session)|fn_method_sessionhandle_(lines|decide|finish))|ffi_openbmt_key_ffi_uniffi_contract_version)'
+    # Defined (not UND) dynamic symbols: the name is the last column.
+    defined="$("$bin/llvm-readelf" --dyn-syms "$so" | awk '$7 != "UND" && $8 != "" {print $8}')"
+    java="$(printf '%s\n' "$defined" | grep -c '^Java_')"
+    uniffi="$(printf '%s\n' "$defined" | grep -ci 'uniffi')"
+    if [ "$java" -eq 1 ] && printf '%s\n' "$defined" | grep -qx "$entry" && [ "$uniffi" -eq 0 ]; then
+        report PASS "android $triple" "$so, $size bytes, exports $entry only, no uniffi symbol"
+        printf '%s\n' "$defined" | sed 's/^/    exported: /'
     else
-        report FAIL "android $triple" "$so, $size bytes, no exported uniffi symbols"
+        report FAIL "android $triple" "$so, $size bytes, $java Java_ symbols, $uniffi uniffi symbols"
+        printf '%s\n' "$defined" | sed 's/^/    exported: /'
     fi
 }
 
