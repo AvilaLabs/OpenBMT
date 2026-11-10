@@ -95,8 +95,8 @@ use openbmt_counter::{
     Overridden, Pairing, Quote, Rate, Report, RequoteRefused, Screen, SightingError,
 };
 use openbmt_net_io::{
-    AppEvent, Clock, Driver, DriverConfig, FileStorage, Handle, Key, OsRandomness, Storage,
-    SystemClock,
+    AppEvent, Clock, DirLock, Driver, DriverConfig, FileStorage, Handle, Key, OsRandomness,
+    Storage, SystemClock,
 };
 use openbmt_watch::{
     check_health, HeaderChain, HeaderStore, Health, HealthInput, PeerAddr, Source, WellFormedBlock,
@@ -123,6 +123,9 @@ const NO_ANSWER_YET: Health = Health {
 /// Why the node did not start.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartError {
+    /// Another process, or another start in this one, is using the
+    /// directory (NR-79).
+    Locked(String),
     /// The directory could not be opened or read.
     Dir(DirStoreError),
     /// The stored headers could not be read at all.
@@ -140,6 +143,7 @@ pub enum StartError {
 impl fmt::Display for StartError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Locked(e) => write!(f, "{e}"),
             Self::Dir(e) => write!(f, "the data directory: {e}"),
             Self::Headers(e) => write!(f, "the stored headers: {e}"),
             Self::Counter(e) => write!(f, "the stored counter: {e}"),
@@ -289,6 +293,8 @@ pub struct Node<P: DriverPort = Handle> {
     checked: u32,
     checked_cap: Option<u32>,
     stopped: bool,
+    /// NR-79. Last, so that it is released after the driver has stopped.
+    _lock: DirLock,
 }
 
 impl Node<Handle> {
@@ -321,6 +327,8 @@ impl<P: DriverPort> Node<P> {
             clock,
             health,
         } = config;
+        // NR-79: before anything in the directory is read.
+        let lock = DirLock::acquire(&dir).map_err(|e| StartError::Locked(e.to_string()))?;
         let mut notes = VecDeque::new();
         let mut store = DirStore::open(&dir).map_err(StartError::Dir)?;
         let loaded = store.load().map_err(StartError::Dir)?;
@@ -402,6 +410,7 @@ impl<P: DriverPort> Node<P> {
             checked: loaded.checked.unwrap_or(watch_from),
             checked_cap: None,
             stopped: false,
+            _lock: lock,
         };
         node.update_all_blocks();
         Ok(node)

@@ -36,7 +36,9 @@ use std::time::Duration;
 
 use bitcoin::consensus::deserialize;
 use bitcoin::{Block, Network, ScriptBuf, Transaction};
-use openbmt_net_io::{AppEvent, Driver, DriverConfig, FileStorage, OsRandomness, SystemClock};
+use openbmt_net_io::{
+    AppEvent, DirLock, Driver, DriverConfig, FileStorage, OsRandomness, SystemClock,
+};
 
 const USAGE: &str = "usage: regtest_node <port> <data dir> <watch from> <script hex>";
 
@@ -109,6 +111,8 @@ fn run(args: &[String]) -> Result<(), String> {
         .parse()
         .map_err(|_| format!("watch from: {watch_from}"))?;
     let script = ScriptBuf::from_hex(script).map_err(|e| format!("script: {e}"))?;
+    // NR-79: this process owns the directory until it ends.
+    let _lock = DirLock::acquire(dir).map_err(|e| e.to_string())?;
     let storage = FileStorage::new(dir).map_err(|e| format!("data dir: {e}"))?;
     let random = OsRandomness::new().map_err(|e| format!("randomness: {e}"))?;
     let mut config = DriverConfig::new(Network::Regtest, watch_from);

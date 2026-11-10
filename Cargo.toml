@@ -6,7 +6,7 @@ members = ["crates/*"]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-rust-version = "1.85"
+rust-version = "1.89"
 publish = false
 
 # Optimize dependencies in test builds so the hashing in `words::stretch` is fast.

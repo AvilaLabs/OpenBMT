@@ -10,9 +10,9 @@ const TEST_SOURCES: [&str; 3] = [
 /// The rules this crate implements: those of the net crate that only a
 /// driver can carry out, and the ones the driver decides itself (NR-70 and
 /// on).
-const IMPLEMENTED: [&str; 14] = [
+const IMPLEMENTED: [&str; 15] = [
     "NR-22", "NR-23", "NR-24", "NR-25", "NR-26", "NR-70", "NR-71", "NR-72", "NR-73", "NR-74",
-    "NR-75", "NR-76", "NR-77", "NR-78",
+    "NR-75", "NR-76", "NR-77", "NR-78", "NR-79",
 ];
 
 /// Every rule ID that the rules file defines (in bold at the start of a

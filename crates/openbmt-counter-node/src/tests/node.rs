@@ -162,6 +162,8 @@ fn a_restarted_node_shows_the_same_states_and_reports_nothing_again() {
     fs::write(dir.path().join("headers.bin"), blocks.stored_headers()).unwrap();
     assert!(rig.node.shutdown().is_empty());
     assert!(rig.calls.lock().unwrap().shutdown);
+    // The directory is the next node's once this one is gone (NR-79).
+    drop(rig);
 
     let mut again = start(dir.path());
     // The driver starts after the blocks that were checked, and watches the
@@ -358,6 +360,8 @@ fn the_driver_starts_where_the_checked_height_and_the_headers_say() {
         3u32.to_le_bytes()
     );
     assert_eq!(rig.node.chain().tip_height(), 3);
+    // Each start below needs the directory free (NR-79).
+    drop(rig);
 
     // A stored height below the tip is used as it is.
     DirStore::open(dir.path()).unwrap().put_checked(2).unwrap();
@@ -372,6 +376,7 @@ fn the_driver_starts_where_the_checked_height_and_the_headers_say() {
     let mut rig = start(dir.path());
     rig.feed(vec![Rig::peers()]);
     rig.node.open(five_dollars(), usd(), rate()).unwrap();
+    drop(rig);
     fs::remove_file(dir.path().join("checked.bin")).unwrap();
     assert_eq!(start(dir.path()).launch.driver.watch_from, 0);
 
@@ -451,6 +456,7 @@ fn a_cut_short_record_is_cut_off_at_start_and_logged() {
     let dir = Scratch::new();
     let (mut rig, _) = rig_with_a_sale(&dir);
     rig.node.shutdown();
+    drop(rig);
     let path = dir.path().join("records.bin");
     let whole = fs::read(&path).unwrap();
     assert!(!whole.is_empty());
@@ -473,6 +479,7 @@ fn pump_waits_for_events_up_to_the_time_and_sees_the_driver_stop() {
     rig.events.send(AppEvent::Stopped).unwrap();
     rig.node.pump(Duration::ZERO);
     assert!(rig.node.stopped());
+    drop(rig);
 
     let mut rig = start(dir.path());
     drop(rig.events);
@@ -540,4 +547,30 @@ fn a_reorganization_takes_the_stored_checked_height_down_to_the_fork() {
     rig.feed(vec![AppEvent::Checked(4)]);
     assert_eq!(rig.node.checked_height(), 4);
     assert_eq!(stored(&dir), Some(4));
+}
+
+#[test]
+fn nr_79_a_second_start_on_the_same_directory_fails_before_it_reads_or_spawns() {
+    let dir = Scratch::new();
+    let first = start(dir.path());
+    let before = fs::read(dir.path().join("records.bin")).ok();
+    let time = Arc::new(AtomicU64::new(T0));
+    let result = Node::start_with(config(dir.path(), &time), |_| -> Result<FakePort, String> {
+        Err("the driver must not start".to_string())
+    });
+    match result.err() {
+        Some(StartError::Locked(why)) => {
+            assert!(
+                why.starts_with("another OpenBMT process is using "),
+                "{why}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    // The first node is as it was.
+    assert_eq!(fs::read(dir.path().join("records.bin")).ok(), before);
+    drop(first);
+    // Released when the first node is dropped.
+    let again = start(dir.path());
+    assert_eq!(again.launch.driver.watch_from, 0);
 }

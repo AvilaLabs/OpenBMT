@@ -16,7 +16,7 @@ use openbmt_counter_node::DriverPort;
 use openbmt_net_io::{AppEvent, Clock, DriverConfig};
 use openbmt_watch::{HeaderChain, Health, Peer, PeerAddr};
 
-use crate::{OwnerConfig, OwnerWatcher, HEARTBEAT_FILE};
+use crate::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE};
 
 const T0: u64 = 1_700_000_000;
 
@@ -343,4 +343,31 @@ fn notes_and_stop_events_are_taken_and_other_events_are_ignored() {
     assert!(!rig.watcher.stopped());
     rig.feed(vec![AppEvent::Stopped]);
     assert!(rig.watcher.stopped());
+}
+
+#[test]
+fn nr_79_a_second_start_on_the_same_directory_fails_and_a_later_one_succeeds() {
+    let dir = Dir::new();
+    let first = start(dir.path());
+    let config = || {
+        let mut c = OwnerConfig::new(dir.path(), id(1), DriverConfig::new(Network::Regtest, 0));
+        c.health = Box::new(|_| healthy());
+        c
+    };
+    let err = OwnerWatcher::start_with(config(), |_, _| -> Result<FakePort, String> {
+        Err("the driver must not start".to_string())
+    })
+    .err();
+    match err {
+        Some(OwnerStartError::Locked(why)) => {
+            assert!(
+                why.starts_with("another OpenBMT process is using "),
+                "{why}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    drop(first);
+    let (_events, rx) = channel();
+    assert!(OwnerWatcher::start_with(config(), move |_, _| Ok(FakePort(rx))).is_ok());
 }

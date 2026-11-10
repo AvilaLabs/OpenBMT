@@ -33,14 +33,14 @@ jobs:
       - run: cargo test --workspace --locked
 
   msrv:
-    name: build and test (Rust 1.85)
+    name: build and test (Rust 1.89)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - name: Install Rust 1.85
+      - name: Install Rust 1.89
         run: |
-          rustup toolchain install 1.85.0 --profile minimal
-          rustup default 1.85.0
+          rustup toolchain install 1.89.0 --profile minimal
+          rustup default 1.89.0
       - run: cargo test --workspace --locked

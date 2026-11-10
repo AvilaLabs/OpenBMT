@@ -4,8 +4,8 @@
 //! The driver asks for these through traits so that an app on another
 //! platform passes its own, and so that the tests pass fakes.
 
-use std::fmt::Display;
-use std::fs::{self, File};
+use std::fmt::{self, Display};
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -184,5 +184,71 @@ impl Storage for FileStorage {
     fn save(&mut self, key: Key, bytes: &[u8]) -> io::Result<()> {
         self.write_temp(key, bytes)?;
         self.commit_temp(key)
+    }
+}
+
+/// Why a [`DirLock`] was not taken.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LockError {
+    /// Another handle holds the lock: another OpenBMT process, or another
+    /// start in this one, is using the directory.
+    Busy(PathBuf),
+    /// The directory or the lock file could not be made or locked.
+    Io(String),
+}
+
+impl fmt::Display for LockError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Busy(dir) => write!(f, "another OpenBMT process is using {}", dir.display()),
+            Self::Io(e) => write!(f, "the directory could not be locked: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for LockError {}
+
+/// The name of the lock file in a data directory.
+pub const LOCK_FILE: &str = "lock";
+
+/// NR-79: the right to use a data directory. Taken once by whatever owns
+/// the directory (a node, a watcher, an example) before it reads anything,
+/// and held until it is dropped. [`FileStorage`] does not take it: it shares
+/// the directory with its owner.
+///
+/// The lock is an exclusive lock on the file `lock` in the directory. The
+/// system releases it when the file is closed or the process ends, so a
+/// crash leaves nothing to clean up, and the file holds no process number.
+#[derive(Debug)]
+pub struct DirLock {
+    dir: PathBuf,
+    // Held for its lock; closing the file releases it.
+    _file: File,
+}
+
+impl DirLock {
+    /// Make the directory if it is missing, then take the lock. Does not
+    /// wait: a directory that is in use is a [`LockError::Busy`].
+    pub fn acquire(dir: impl Into<PathBuf>) -> Result<Self, LockError> {
+        let dir = dir.into();
+        let io = |e: io::Error| LockError::Io(format!("{}: {e}", dir.display()));
+        fs::create_dir_all(&dir).map_err(io)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join(LOCK_FILE))
+            .map_err(io)?;
+        match file.try_lock() {
+            Ok(()) => Ok(Self { dir, _file: file }),
+            Err(TryLockError::WouldBlock) => Err(LockError::Busy(dir)),
+            Err(TryLockError::Error(e)) => Err(io(e)),
+        }
+    }
+
+    /// The directory that is locked.
+    pub fn dir(&self) -> &Path {
+        &self.dir
     }
 }

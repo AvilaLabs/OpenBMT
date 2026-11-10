@@ -27,7 +27,9 @@ use std::time::{Duration, Instant};
 
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::{BlockHash, Network, ScriptBuf, WScriptHash};
-use openbmt_net_io::{AppEvent, Driver, DriverConfig, FileStorage, OsRandomness, SystemClock};
+use openbmt_net_io::{
+    AppEvent, DirLock, Driver, DriverConfig, FileStorage, OsRandomness, SystemClock,
+};
 use openbmt_watch::{network_group, HeaderStore, NetGroup};
 
 const USAGE: &str = "usage: observe <bitcoin|signet> <data dir> <seconds> [headers-only]";
@@ -93,6 +95,8 @@ fn run(args: &[String]) -> Result<(), String> {
         other => return Err(format!("network: {other}")),
     };
     let seconds: u64 = seconds.parse().map_err(|_| format!("seconds: {seconds}"))?;
+    // NR-79: this process owns the directory until it ends.
+    let _lock = DirLock::acquire(dir).map_err(|e| e.to_string())?;
     let storage = FileStorage::new(dir).map_err(|e| format!("data dir: {e}"))?;
     let headers_path = storage.path(openbmt_net_io::Key::Headers);
     let book_path = storage.path(openbmt_net_io::Key::Book);

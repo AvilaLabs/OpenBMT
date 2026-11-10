@@ -280,3 +280,12 @@ rules are what it decides where the rules above are silent.
   name and password. Tor puts connections with different ones on
   different circuits, so two peers are not reached through one exit. A
   proxy that asks for no name and password is used as it is.
+- **NR-79.** One process uses a data directory at a time. Whatever owns
+  the directory (the counter's node, the owner's watcher, an example that
+  runs the driver alone) takes an exclusive lock on the file `lock` in it
+  before it reads anything, and keeps it until it stops. A second start on
+  the same directory does not wait: it fails with "another OpenBMT process
+  is using" the directory, and touches nothing else in it. The driver's
+  storage shares the directory with its owner and does not lock it again.
+  The system lets go of the lock when the process ends, however it ends,
+  so a crash leaves no stale lock and the file holds no process number.

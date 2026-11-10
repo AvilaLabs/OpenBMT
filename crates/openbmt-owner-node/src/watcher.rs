@@ -40,8 +40,8 @@ use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_counter_node::{ChainView, DriverPort, HealthFn, MAX_EVENTS_PER_PUMP};
 use openbmt_net_io::{
-    AppEvent, Clock, Driver, DriverConfig, FileStorage, Handle, Key, OsRandomness, Storage,
-    SystemClock,
+    AppEvent, Clock, DirLock, Driver, DriverConfig, FileStorage, Handle, Key, OsRandomness,
+    Storage, SystemClock,
 };
 use openbmt_watch::{check_health, HeaderChain, HeaderStore, Health, HealthInput};
 
@@ -60,6 +60,9 @@ const NO_ANSWER_YET: Health = Health {
 /// Why the watcher did not start.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OwnerStartError {
+    /// Another process, or another start in this one, is using the
+    /// directory (NR-79).
+    Locked(String),
     /// The directory could not be made or read.
     Dir(String),
     /// The stored headers could not be read at all.
@@ -71,6 +74,7 @@ pub enum OwnerStartError {
 impl fmt::Display for OwnerStartError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Locked(e) => write!(f, "{e}"),
             Self::Dir(e) => write!(f, "the data directory: {e}"),
             Self::Headers(e) => write!(f, "the stored headers: {e}"),
             Self::Driver(e) => write!(f, "the driver: {e}"),
@@ -122,6 +126,8 @@ pub struct OwnerWatcher<P: DriverPort = Handle> {
     last_seq: u64,
     notes: VecDeque<String>,
     stopped: bool,
+    /// NR-79. Last, so that it is released after the driver has stopped.
+    _lock: DirLock,
 }
 
 impl OwnerWatcher<Handle> {
@@ -151,6 +157,9 @@ impl<P: DriverPort> OwnerWatcher<P> {
             clock,
             health,
         } = config;
+        // NR-79: before anything in the directory is read. This makes the
+        // directory too.
+        let lock = DirLock::acquire(&dir).map_err(|e| OwnerStartError::Locked(e.to_string()))?;
         fs::create_dir_all(&dir).map_err(|e| OwnerStartError::Dir(e.to_string()))?;
         let mut notes = VecDeque::new();
 
@@ -203,6 +212,7 @@ impl<P: DriverPort> OwnerWatcher<P> {
             last_seq,
             notes,
             stopped: false,
+            _lock: lock,
         })
     }
 

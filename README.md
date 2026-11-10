@@ -79,7 +79,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Rust 1.85 or newer. Dependency versions are pinned exactly and `Cargo.lock`
+Rust 1.89 or newer. Dependency versions are pinned exactly and `Cargo.lock`
 is committed.
 
 ## Security
