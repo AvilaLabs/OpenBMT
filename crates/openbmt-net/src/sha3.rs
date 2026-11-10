@@ -77,12 +77,11 @@ fn keccak_f(a: &mut [u64; 25]) {
     }
 }
 
-/// XOR a block of at most [`RATE`] bytes into the state, then permute.
+/// XOR a block into the state, then permute.
 fn absorb(state: &mut [u64; 25], block: &[u8; RATE]) {
-    for (lane, bytes) in state.iter_mut().zip(block.chunks_exact(8)) {
-        let mut word = [0u8; 8];
-        word.copy_from_slice(bytes);
-        *lane ^= u64::from_le_bytes(word);
+    let (words, _) = block.as_chunks::<8>();
+    for (lane, word) in state.iter_mut().zip(words) {
+        *lane ^= u64::from_le_bytes(*word);
     }
     keccak_f(state);
 }
@@ -90,16 +89,13 @@ fn absorb(state: &mut [u64; 25], block: &[u8; RATE]) {
 /// SHA3-256 of the input.
 pub(crate) fn sha3_256(input: &[u8]) -> [u8; 32] {
     let mut state = [0u64; 25];
-    let mut blocks = input.chunks_exact(RATE);
-    for chunk in blocks.by_ref() {
-        let mut block = [0u8; RATE];
-        block.copy_from_slice(chunk);
-        absorb(&mut state, &block);
+    let (full, rest) = input.as_chunks::<RATE>();
+    for block in full {
+        absorb(&mut state, block);
     }
     // The last block: what is left, the suffix 01 and the 1 bit of the
     // padding after it, and the last 1 bit of the padding at the end.
     let mut last = [0u8; RATE];
-    let rest = blocks.remainder();
     for (to, from) in last.iter_mut().zip(rest) {
         *to = *from;
     }
@@ -107,8 +103,9 @@ pub(crate) fn sha3_256(input: &[u8]) -> [u8; 32] {
     last[RATE - 1] ^= 0x80;
     absorb(&mut state, &last);
     let mut out = [0u8; 32];
-    for (bytes, lane) in out.chunks_exact_mut(8).zip(state) {
-        bytes.copy_from_slice(&lane.to_le_bytes());
+    let (words, _) = out.as_chunks_mut::<8>();
+    for (word, lane) in words.iter_mut().zip(state) {
+        *word = lane.to_le_bytes();
     }
     out
 }

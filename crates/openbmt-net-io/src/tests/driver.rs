@@ -526,10 +526,13 @@ fn nr_92_the_proxy_is_asked_to_connect_to_the_onion_name_with_these_bytes() {
     server.join().unwrap();
 }
 
+/// The dials with the token of each.
+type TokenLog = Arc<Mutex<Vec<(Target, u64)>>>;
+
 /// A net whose dials are recorded with their tokens and end in a refusal
 /// after `hang_ms`.
-fn hanging_net(hang_ms: u64) -> (Net, Arc<Mutex<Vec<(Target, u64)>>>) {
-    let log: Arc<Mutex<Vec<(Target, u64)>>> = Arc::default();
+fn hanging_net(hang_ms: u64) -> (Net, TokenLog) {
+    let log: TokenLog = Arc::default();
     let l = log.clone();
     let net = Net {
         dial: Arc::new(move |target, _, token| {
