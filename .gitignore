@@ -2,3 +2,12 @@ target/
 fuzz/target
 fuzz/corpus
 fuzz/artifacts
+
+# The Key app for Android: build output and signing keys stay out of the tree
+apps/key-android/build/
+*.apk
+*.aab
+*.dex
+*.p12
+*.jks
+*.keystore
