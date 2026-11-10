@@ -3,7 +3,7 @@
 
 use std::fmt;
 use std::io::ErrorKind;
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -75,9 +75,22 @@ pub fn resolve(name: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
     }
 }
 
+/// NR-72, NR-26: look a seed name up through the Tor proxy. The token keeps
+/// the lookup on a circuit of its own (NR-78). The same time limits as a
+/// connection through the proxy: the connection, then the handshake.
+pub fn proxy_resolve(proxy: SocketAddr, name: &str, token: u64) -> Result<IpAddr, SocksError> {
+    socks::resolve(
+        proxy,
+        name,
+        token,
+        Duration::from_secs(CONNECT_SECS.saturating_add(socks::HANDSHAKE_SECS)),
+    )
+}
+
 type DialFn =
     dyn Fn(&Target, Option<SocketAddr>, u64) -> Result<TcpStream, DialError> + Send + Sync;
 type ResolveFn = dyn Fn(&str, u16) -> Result<Vec<SocketAddr>, String> + Send + Sync;
+type ProxyResolveFn = dyn Fn(SocketAddr, &str, u64) -> Result<IpAddr, SocksError> + Send + Sync;
 
 /// How the driver reaches the outside. The real one is [`Net::system`]; the
 /// tests pass others.
@@ -85,6 +98,9 @@ type ResolveFn = dyn Fn(&str, u16) -> Result<Vec<SocketAddr>, String> + Send + S
 pub(crate) struct Net {
     pub dial: Arc<DialFn>,
     pub resolve: Arc<ResolveFn>,
+    /// Never called without a proxy; the system's resolver is never called
+    /// with one (NR-26).
+    pub proxy_resolve: Arc<ProxyResolveFn>,
 }
 
 impl Net {
@@ -92,6 +108,7 @@ impl Net {
         Self {
             dial: Arc::new(dial),
             resolve: Arc::new(resolve),
+            proxy_resolve: Arc::new(proxy_resolve),
         }
     }
 }

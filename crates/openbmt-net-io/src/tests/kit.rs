@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -28,7 +28,7 @@ use openbmt_net::encode;
 use crate::dial::{DialError, Net};
 use crate::driver::{AppEvent, Handle};
 use crate::env::{Clock, Key, Randomness, Storage};
-use crate::socks::Target;
+use crate::socks::{ReplyCode, SocksError, Target};
 
 /// The start height the fake peer claims.
 pub const PEER_HEIGHT: u32 = 850_000;
@@ -475,8 +475,14 @@ pub fn net_to(to: SocketAddr, resolved: Vec<SocketAddr>) -> (Net, DialLog, Arc<A
             n.fetch_add(1, Ordering::SeqCst);
             Ok(resolved.clone())
         }),
+        proxy_resolve: Arc::new(not_tor),
     };
     (net, log, lookups)
+}
+
+/// A proxy that is not Tor: it does not know the lookup command.
+pub fn not_tor(_: SocketAddr, _: &str, _: u64) -> Result<IpAddr, SocksError> {
+    Err(SocksError::Refused(ReplyCode::CommandNotSupported))
 }
 
 /// Wait up to `secs` for an event the test wants; the events before it are
@@ -522,4 +528,43 @@ pub fn until(secs: u64, cond: impl Fn() -> bool) -> bool {
         thread::sleep(Duration::from_millis(20));
     }
     cond()
+}
+
+/// What a net for Tor tests saw.
+#[derive(Clone, Default)]
+pub struct TorLog {
+    /// The names asked of the proxy, with the token of each lookup.
+    pub asked: Arc<Mutex<Vec<(String, u64)>>>,
+    /// The dials.
+    pub dials: DialLog,
+    /// Calls of the system's resolver.
+    pub system: Arc<AtomicUsize>,
+}
+
+/// A net with a proxy lookup that answers by `answer(n)` for the n-th call
+/// (from 0), every dial refused, and a system resolver that is counted.
+pub fn tor_net(
+    answer: impl Fn(usize) -> Result<IpAddr, SocksError> + Send + Sync + 'static,
+) -> (Net, TorLog) {
+    let log = TorLog::default();
+    let (d, a, r) = (log.dials.clone(), log.asked.clone(), log.system.clone());
+    let net = Net {
+        dial: Arc::new(move |target, proxy, _| {
+            d.lock().unwrap().push((target.clone(), proxy));
+            Err(DialError::Connect(std::io::ErrorKind::ConnectionRefused))
+        }),
+        resolve: Arc::new(move |_, _| {
+            r.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        }),
+        proxy_resolve: Arc::new(move |_, name, token| {
+            let n = {
+                let mut asked = a.lock().unwrap();
+                asked.push((name.to_string(), token));
+                asked.len() - 1
+            };
+            answer(n)
+        }),
+    };
+    (net, log)
 }

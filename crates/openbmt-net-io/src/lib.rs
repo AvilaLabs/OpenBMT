@@ -14,7 +14,8 @@
 //!    the ones for a computer with a file system: [`FileStorage`],
 //!    [`SystemClock`] and [`OsRandomness`]. An app on another platform
 //!    passes its own.
-//! 2. [`socks`]: the client side of SOCKS5, for Tor (NR-26).
+//! 2. [`socks`]: the client side of SOCKS5, for Tor (NR-26): connecting, and
+//!    Tor's name lookup.
 //! 3. [`dial`]: opening a connection and looking up a seed name.
 //! 4. [`driver`]: [`Driver`], [`DriverConfig`], [`Handle`] and [`AppEvent`].
 //!
@@ -24,7 +25,9 @@
 //!   a read timeout of 1 second, so that it notices a stop.
 //! - One short-lived thread per connection attempt (10 seconds to connect,
 //!   20 seconds more for the SOCKS5 handshake) and one per seed name looked
-//!   up (10 seconds, then the answer is ignored).
+//!   up (10 seconds, then the answer is ignored). With Tor on, a seed round
+//!   asks the filter names through the proxy, 3 lookups a seed and at most
+//!   4 at once (NR-72).
 //! - At most 4 attempts in flight and at most `target_peers + 4` sockets.
 //! - The channel from the reader threads to the core thread holds 256
 //!   messages; the channel of events to the app holds 64 and at most 32 MiB

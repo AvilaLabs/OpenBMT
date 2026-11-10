@@ -35,14 +35,14 @@ use bitcoin::{BlockHash, Network, ScriptBuf, Txid};
 use openbmt_net::book::{BAN_SECS, V2_RETRY_SECS};
 use openbmt_net::manager::Wanted;
 use openbmt_net::{
-    AddressBook, ConnectRefused, Manager, ManagerConfig, Output, PeerAddress, PeerId, Source,
-    TransportChoice, V2Entropy,
+    Added, AddressBook, ConnectRefused, Manager, ManagerConfig, Output, PeerAddress, PeerId,
+    Source, TransportChoice, V2Entropy,
 };
 use openbmt_watch::{network_group, HeaderStore, Peer, PeerAddr};
 
 use crate::dial::{DialError, Net, RESOLVE_SECS};
 use crate::env::{Clock, Key, Randomness, Storage};
-use crate::socks::Target;
+use crate::socks::{ReplyCode, SocksError, Target};
 
 /// Most dials in flight at once.
 pub const MAX_DIALS_IN_FLIGHT: usize = 4;
@@ -61,6 +61,14 @@ pub const HEADER_SAVE_SECS: u64 = 60;
 pub const PEERS_EVENT_SECS: u64 = 10;
 /// NR-72: seconds between two rounds of seed lookups.
 pub const SEED_ROUND_SECS: u64 = 300;
+/// NR-72: with Tor on, lookups of each seed's filter name per round, each
+/// on a circuit of its own.
+pub const TOR_LOOKUPS_PER_SEED: usize = 3;
+/// NR-72: most Tor lookups in flight at once; the rest wait their turn.
+pub const MAX_TOR_LOOKUPS_IN_FLIGHT: usize = 4;
+/// NR-72: seconds a round of Tor lookups may take in all, before the
+/// answers still missing are ignored. Three waves of the longest lookup.
+pub const TOR_ROUND_SECS: u64 = 100;
 /// Bytes one read from a socket may return.
 pub const READ_BUFFER: usize = 65_536;
 /// Messages waiting between the reader threads and the core thread.
@@ -258,6 +266,9 @@ enum Msg {
     /// A seed lookup of this round: the name, and the addresses or the
     /// reason it failed.
     Resolved(u64, String, Result<Vec<SocketAddr>, String>),
+    /// A seed lookup through the Tor proxy: the round, the name, and the
+    /// one address or the reason it failed.
+    ProxyResolved(u64, String, Result<IpAddr, SocksError>),
 }
 
 /// What the threads share.
@@ -547,6 +558,8 @@ impl Driver {
             v2: V2Track::default(),
             noted_local: BTreeSet::new(),
             seed_cursor: 0,
+            lookup_unsupported: false,
+            last_round_empty: false,
             round: None,
             round_count: 0,
             last_round: None,
@@ -659,7 +672,17 @@ struct Dial {
 struct Round {
     id: u64,
     started: u64,
+    /// Seconds after `started` that answers are still taken.
+    window: u64,
+    /// Lookups not answered yet, those waiting included.
     outstanding: usize,
+    /// Tor lookups waiting for a free place, by the name to ask.
+    queue: VecDeque<String>,
+    /// Tor lookups in a thread now.
+    in_flight: usize,
+    /// Tor lookups that gave an address the book took, and that failed.
+    usable: usize,
+    failed: usize,
 }
 
 /// NR-80, NR-81: what the driver keeps about the encrypted transport.
@@ -713,6 +736,12 @@ struct Core<S, C, R> {
     /// Anchors, dialed first after a start.
     initial: VecDeque<Target>,
     seed_cursor: usize,
+    /// NR-72: the proxy answered a lookup with "command not supported", so
+    /// it is not Tor; the seed names are dialed as peers from then on.
+    lookup_unsupported: bool,
+    /// NR-72: the last Tor round brought no address, so a seed name may be
+    /// dialed as a peer until the next round starts.
+    last_round_empty: bool,
     round: Option<Round>,
     round_count: u64,
     last_round: Option<u64>,
@@ -856,6 +885,9 @@ where
             }
             Msg::Dialed(id, result) => self.on_dialed(id, result, now),
             Msg::Resolved(round, name, result) => self.on_resolved(round, &name, result, now),
+            Msg::ProxyResolved(round, name, result) => {
+                self.on_proxy_resolved(round, &name, result, now);
+            }
         }
     }
 
@@ -1159,9 +1191,9 @@ where
         let late = self
             .round
             .as_ref()
-            .is_some_and(|r| now >= r.started.saturating_add(RESOLVE_SECS));
+            .is_some_and(|r| now >= r.started.saturating_add(r.window));
         if late {
-            self.round = None;
+            self.end_round();
         }
     }
 
@@ -1245,10 +1277,21 @@ where
             return None;
         }
         let port = default_port(self.config.network);
+        let due = self
+            .last_round
+            .is_none_or(|t| now >= t.saturating_add(SEED_ROUND_SECS));
         if self.config.proxy.is_some() {
-            // NR-26: never resolve. One seed name at a time is dialed as an
-            // ordinary peer, and answers `getaddr` like any peer.
-            if self.has_name() {
+            // NR-26: the system's resolver is never called. The filter
+            // names are looked up through Tor itself (NR-72).
+            if !self.lookup_unsupported && self.round.is_none() && due {
+                self.start_tor_round(now);
+            }
+            // A proxy that cannot look names up, or a round that gave
+            // nothing: one seed name at a time is dialed as an ordinary
+            // peer, and answers `getaddr` like any peer.
+            let fallback =
+                self.lookup_unsupported || (self.round.is_none() && self.last_round_empty);
+            if !fallback || self.has_name() {
                 return None;
             }
             let count = self.config.seeds.len();
@@ -1265,9 +1308,6 @@ where
             }
             return None;
         }
-        let due = self
-            .last_round
-            .is_none_or(|t| now >= t.saturating_add(SEED_ROUND_SECS));
         if self.round.is_none() && due {
             self.start_round(now);
         }
@@ -1338,8 +1378,157 @@ where
         self.round = Some(Round {
             id,
             started: now,
+            window: RESOLVE_SECS,
             outstanding,
+            queue: VecDeque::new(),
+            in_flight: 0,
+            usable: 0,
+            failed: 0,
         });
+    }
+
+    /// NR-72, NR-26: with Tor on, ask each seed's filter name
+    /// [`TOR_LOOKUPS_PER_SEED`] times through the proxy, each lookup in a
+    /// thread of its own with a fresh token and so on its own circuit, at
+    /// most [`MAX_TOR_LOOKUPS_IN_FLIGHT`] at once. Each lookup gives one
+    /// address.
+    fn start_tor_round(&mut self, now: u64) {
+        self.round_count = self.round_count.saturating_add(1);
+        self.last_round = Some(now);
+        self.last_round_empty = false;
+        let mut queue = VecDeque::new();
+        for seed in &self.config.seeds {
+            for _ in 0..TOR_LOOKUPS_PER_SEED {
+                queue.push_back(format!("{FILTER_SEED_PREFIX}{seed}"));
+            }
+        }
+        self.round = Some(Round {
+            id: self.round_count,
+            started: now,
+            window: TOR_ROUND_SECS,
+            outstanding: queue.len(),
+            queue,
+            in_flight: 0,
+            usable: 0,
+            failed: 0,
+        });
+        self.pump_round();
+    }
+
+    /// Start queued lookups while there is a free place.
+    fn pump_round(&mut self) {
+        let Some(proxy) = self.config.proxy else {
+            return;
+        };
+        loop {
+            let Some(round) = self.round.as_mut() else {
+                return;
+            };
+            if round.in_flight >= MAX_TOR_LOOKUPS_IN_FLIGHT {
+                return;
+            }
+            let Some(name) = round.queue.pop_front() else {
+                break;
+            };
+            let id = round.id;
+            // NR-78: a fresh number for each lookup.
+            let token = self.rng.next_u64();
+            let net = self.net.clone();
+            let tx = self.inbound_tx.clone();
+            let asked = name.clone();
+            let spawned = thread::Builder::new()
+                .name("net-seed".to_string())
+                .spawn(move || {
+                    let result = (net.proxy_resolve)(proxy, &asked, token);
+                    let _ = tx.send(Msg::ProxyResolved(id, asked, result));
+                });
+            if let Some(round) = self.round.as_mut() {
+                if spawned.is_ok() {
+                    round.in_flight = round.in_flight.saturating_add(1);
+                } else {
+                    round.outstanding = round.outstanding.saturating_sub(1);
+                    round.failed = round.failed.saturating_add(1);
+                }
+            }
+        }
+        if self.round.as_ref().is_some_and(|r| r.outstanding == 0) {
+            self.end_round();
+        }
+    }
+
+    /// The round is over, because everything came back or its time ran
+    /// out. A Tor round that gave no address lets a seed name be dialed as
+    /// a peer until the next round.
+    fn end_round(&mut self) {
+        let Some(round) = self.round.take() else {
+            return;
+        };
+        if self.config.proxy.is_none() {
+            return;
+        }
+        self.last_round_empty = round.usable == 0;
+        // Lookups that never came back count as asked.
+        let asked = round
+            .usable
+            .saturating_add(round.failed)
+            .saturating_add(round.outstanding);
+        self.emit(AppEvent::Note(format!(
+            "seed round through the proxy: {} of {asked} lookups gave an address",
+            round.usable
+        )));
+    }
+
+    fn on_proxy_resolved(
+        &mut self,
+        round: u64,
+        name: &str,
+        result: Result<IpAddr, SocksError>,
+        now: u64,
+    ) {
+        let port = default_port(self.config.network);
+        let Some(current) = self.round.as_mut() else {
+            return;
+        };
+        if current.id != round || now >= current.started.saturating_add(current.window) {
+            return;
+        }
+        current.in_flight = current.in_flight.saturating_sub(1);
+        current.outstanding = current.outstanding.saturating_sub(1);
+        let services =
+            ServiceFlags::NETWORK | ServiceFlags::WITNESS | ServiceFlags::COMPACT_FILTERS;
+        let mut note = None;
+        match result {
+            Ok(ip) => {
+                let added = self.book.add(&v2_of(ip), port, services, Source::Seed, now);
+                if matches!(added, Added::Refused(_)) {
+                    current.failed = current.failed.saturating_add(1);
+                } else {
+                    current.usable = current.usable.saturating_add(1);
+                }
+            }
+            Err(SocksError::Refused(ReplyCode::CommandNotSupported)) => {
+                current.failed = current.failed.saturating_add(1);
+                // Not Tor: stop asking, for good.
+                let waiting = current.queue.len();
+                current.outstanding = current.outstanding.saturating_sub(waiting);
+                current.queue.clear();
+                if !self.lookup_unsupported {
+                    self.lookup_unsupported = true;
+                    note = Some(
+                        "the proxy cannot look names up (not Tor); seed names are dialed as peers"
+                            .to_string(),
+                    );
+                }
+            }
+            Err(e) => {
+                current.failed = current.failed.saturating_add(1);
+                note = Some(format!("seed lookup {name}: {e}"));
+            }
+        }
+        if let Some(text) = note {
+            self.emit(AppEvent::Note(text));
+        }
+        self.pump_round();
     }
 
     fn on_resolved(

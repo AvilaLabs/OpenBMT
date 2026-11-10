@@ -563,14 +563,23 @@ fn nr_85_through_a_socks5_proxy_the_encrypted_transport_is_used_the_same_way() {
     let s = stop.clone();
     let target = peer.addr;
     let server = thread::spawn(move || {
-        let (mut client, _) = listener.accept().unwrap();
-        let mut greeting = [0u8; 4];
-        client.read_exact(&mut greeting).unwrap();
-        client.write_all(&[5, 0]).unwrap();
-        let mut head = [0u8; 5];
-        client.read_exact(&mut head).unwrap();
-        let mut rest = vec![0u8; usize::from(head[4]) + 2];
-        client.read_exact(&mut rest).unwrap();
+        // The driver first asks for lookups, which this proxy does not
+        // know; the connection it is after comes next.
+        let mut client = loop {
+            let (mut c, _) = listener.accept().unwrap();
+            let mut greeting = [0u8; 4];
+            c.read_exact(&mut greeting).unwrap();
+            c.write_all(&[5, 0]).unwrap();
+            let mut head = [0u8; 5];
+            c.read_exact(&mut head).unwrap();
+            let mut rest = vec![0u8; usize::from(head[4]) + 2];
+            c.read_exact(&mut rest).unwrap();
+            if head[1] == 0xf0 {
+                c.write_all(&[5, 7, 0, 1, 0, 0, 0, 0, 0, 0]).unwrap();
+                continue;
+            }
+            break c;
+        };
         client
             .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0x48, 0x5c])
             .unwrap();

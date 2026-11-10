@@ -1,7 +1,7 @@
 //! The driver against fake peers on loopback sockets.
 
 use std::io::{ErrorKind, Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -19,10 +19,10 @@ use super::kit::*;
 use crate::dial::{DialError, Net};
 use crate::driver::{
     longest_connected, AppEvent, Driver, DriverConfig, Handle, ANCHOR_SECS, HEADER_SAVE_SECS,
-    WRITE_TIMEOUT_SECS,
+    SEED_ROUND_SECS, WRITE_TIMEOUT_SECS,
 };
 use crate::env::{Key, SystemClock};
-use crate::socks::Target;
+use crate::socks::{ReplyCode, SocksError, Target};
 
 fn config(peer: &FakePeer, pause: u64) -> DriverConfig {
     let mut c = DriverConfig::new(Network::Regtest, 0);
@@ -288,6 +288,7 @@ fn nr_71_anchors_come_first_then_fixed_peers_then_the_book() {
             Err(DialError::Connect(std::io::ErrorKind::TimedOut))
         }),
         resolve: Arc::new(|_, _| Ok(Vec::new())),
+        proxy_resolve: Arc::new(not_tor),
     };
     let mut cfg = config(&peer, 30);
     cfg.target_peers = 1;
@@ -327,6 +328,7 @@ fn nr_71_at_most_four_dials_are_in_flight() {
             Err(DialError::Connect(std::io::ErrorKind::TimedOut))
         }),
         resolve: Arc::new(|_, _| Ok(Vec::new())),
+        proxy_resolve: Arc::new(not_tor),
     };
     let mut handle = start(bare(), &storage, net);
     thread::sleep(Duration::from_millis(2_000));
@@ -423,6 +425,7 @@ fn nr_72_a_seed_is_also_asked_for_filter_peers_and_says_which_they_are() {
                 Ok(vec![sock(8, 8, 8, 8, port)])
             }
         }),
+        proxy_resolve: Arc::new(not_tor),
     };
     let mut cfg = bare();
     cfg.seeds = vec!["seed.test".to_string()];
@@ -461,6 +464,7 @@ fn nr_72_a_hung_lookup_does_not_hang_the_driver() {
             thread::sleep(Duration::from_secs(20));
             Ok(Vec::new())
         }),
+        proxy_resolve: Arc::new(not_tor),
     };
     let mut cfg = bare();
     cfg.seeds = vec!["hang.test".to_string()];
@@ -498,6 +502,174 @@ fn nr_26_with_a_proxy_a_seed_name_is_dialed_through_it_and_never_resolved() {
     handle.shutdown();
 }
 
+fn three_seeds() -> Vec<String> {
+    ["a.test", "b.test", "c.test"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn tor_config() -> DriverConfig {
+    let mut cfg = bare();
+    cfg.proxy = Some(sock(127, 0, 0, 1, 9_050));
+    cfg.seeds = three_seeds();
+    cfg
+}
+
+/// A different public address for each lookup.
+fn nth_address(n: usize) -> Result<IpAddr, SocksError> {
+    Ok(IpAddr::V4(Ipv4Addr::new(
+        20u8.saturating_add(n as u8),
+        1,
+        1,
+        1,
+    )))
+}
+
+#[test]
+fn nr_72_with_a_proxy_the_filter_names_are_looked_up_through_it_three_times_a_seed() {
+    let storage = MemStorage::default();
+    let (net, log) = tor_net(nth_address);
+    let mut handle = start(tor_config(), &storage, net);
+    assert!(until(10, || log.asked.lock().unwrap().len() >= 9));
+    wait_for(&handle, 5, is_note).expect("no note");
+    thread::sleep(Duration::from_millis(500));
+    handle.shutdown();
+    let asked = log.asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 9);
+    for seed in three_seeds() {
+        let want = format!("x49.{seed}");
+        assert_eq!(asked.iter().filter(|(n, _)| *n == want).count(), 3);
+    }
+    // NR-78: each lookup has a token of its own.
+    let mut tokens: Vec<u64> = asked.iter().map(|(_, t)| *t).collect();
+    tokens.sort_unstable();
+    tokens.dedup();
+    assert_eq!(tokens.len(), 9);
+    // NR-26: the system's resolver is never called.
+    assert_eq!(log.system.load(Ordering::SeqCst), 0);
+    // The answers are dialed as addresses, never as names, and they are in
+    // the book as stated by a seed to offer filters.
+    let dials = log.dials.lock().unwrap().clone();
+    assert!(!dials.is_empty());
+    for (target, proxy) in &dials {
+        assert!(matches!(target, Target::Addr(_)), "{target:?}");
+        assert_eq!(*proxy, Some(sock(127, 0, 0, 1, 9_050)));
+    }
+    let book = stored_book(&storage);
+    for n in 0..9u8 {
+        let entry = book.get(&v4(20 + n, 1, 1, 1), 18_444).unwrap();
+        assert!(entry.services.has(ServiceFlags::COMPACT_FILTERS));
+        assert_eq!(entry.source, Source::Seed);
+    }
+}
+
+#[test]
+fn nr_72_at_most_four_lookups_through_the_proxy_are_in_flight() {
+    let storage = MemStorage::default();
+    let current = Arc::new(AtomicUsize::new(0));
+    let most = Arc::new(AtomicUsize::new(0));
+    let (c, m) = (current.clone(), most.clone());
+    let (net, log) = tor_net(move |n| {
+        let now = c.fetch_add(1, Ordering::SeqCst) + 1;
+        m.fetch_max(now, Ordering::SeqCst);
+        thread::sleep(Duration::from_millis(300));
+        c.fetch_sub(1, Ordering::SeqCst);
+        nth_address(n)
+    });
+    let mut handle = start(tor_config(), &storage, net);
+    assert!(until(15, || log.asked.lock().unwrap().len() >= 9));
+    thread::sleep(Duration::from_millis(500));
+    handle.shutdown();
+    assert_eq!(most.load(Ordering::SeqCst), 4);
+    assert_eq!(log.asked.lock().unwrap().len(), 9);
+}
+
+#[test]
+fn nr_72_a_proxy_that_is_not_tor_is_asked_once_noted_once_and_the_seed_name_is_dialed() {
+    let storage = MemStorage::default();
+    let (net, log) = tor_net(|_| Err(SocksError::Refused(ReplyCode::CommandNotSupported)));
+    let start_time = 1_700_000_000;
+    let clock = TestClock::at(start_time);
+    let mut cfg = tor_config();
+    cfg.seeds = vec!["a.test".to_string()];
+    let mut handle = start_clocked(cfg, &storage, net, &clock, Vec::new());
+    assert!(until(10, || {
+        log.dials
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(t, _)| matches!(t, Target::Name(..)))
+    }));
+    let first = log.asked.lock().unwrap().len();
+    assert!((1..=3).contains(&first));
+    // Rounds would come every five minutes; none does, for as long as the
+    // driver runs.
+    clock.set(start_time + 2 * SEED_ROUND_SECS);
+    settle();
+    clock.set(start_time + 4 * SEED_ROUND_SECS);
+    settle();
+    assert_eq!(log.asked.lock().unwrap().len(), first);
+    assert_eq!(log.system.load(Ordering::SeqCst), 0);
+    let mut notes = 0;
+    while let Ok(event) = handle.events().try_recv() {
+        if matches!(&event, AppEvent::Note(t) if t.contains("cannot look names up")) {
+            notes += 1;
+        }
+    }
+    assert_eq!(notes, 1);
+    handle.shutdown();
+    let dials = log.dials.lock().unwrap().clone();
+    assert_eq!(
+        dials.first().map(|(t, _)| t.clone()),
+        Some(Target::Name("a.test".to_string(), 18_444))
+    );
+}
+
+#[test]
+fn nr_72_rounds_through_the_proxy_keep_their_spacing_and_a_failed_round_falls_back() {
+    let storage = MemStorage::default();
+    let (net, log) = tor_net(|_| Err(SocksError::Refused(ReplyCode::HostUnreachable)));
+    let start_time = 1_700_000_000;
+    let clock = TestClock::at(start_time);
+    let mut cfg = tor_config();
+    cfg.seeds = vec!["a.test".to_string()];
+    let mut handle = start_clocked(cfg, &storage, net, &clock, Vec::new());
+    assert!(until(10, || log.asked.lock().unwrap().len() == 3));
+    // The round gave nothing, so a seed name is dialed as a peer meanwhile.
+    assert!(until(10, || {
+        log.dials
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(t, _)| matches!(t, Target::Name(..)))
+    }));
+    clock.set(start_time + SEED_ROUND_SECS - 1);
+    settle();
+    assert_eq!(log.asked.lock().unwrap().len(), 3);
+    clock.set(start_time + SEED_ROUND_SECS);
+    assert!(until(10, || log.asked.lock().unwrap().len() == 6));
+    settle();
+    assert_eq!(log.asked.lock().unwrap().len(), 6);
+    assert_eq!(log.system.load(Ordering::SeqCst), 0);
+    handle.shutdown();
+}
+
+#[test]
+fn nr_77_shutdown_returns_within_five_seconds_while_proxy_lookups_hang() {
+    let storage = MemStorage::default();
+    let (net, log) = tor_net(|_| {
+        thread::sleep(Duration::from_secs(20));
+        Err(SocksError::TimedOut)
+    });
+    let mut handle = start(tor_config(), &storage, net);
+    assert!(until(10, || log.asked.lock().unwrap().len() == 4));
+    wait_for(&handle, 2, |e| matches!(e, AppEvent::Peers(..))).expect("no event");
+    let start = Instant::now();
+    handle.shutdown();
+    assert!(start.elapsed() < Duration::from_secs(5));
+}
+
 #[test]
 fn nr_26_the_driver_reaches_a_peer_through_a_socks5_proxy_end_to_end() {
     // A proxy that checks the request, then acts as the peer.
@@ -508,14 +680,23 @@ fn nr_26_the_driver_reaches_a_peer_through_a_socks5_proxy_end_to_end() {
     let s = stop.clone();
     let server = thread::spawn(move || {
         use std::io::{Read, Write};
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut greeting = [0u8; 4];
-        stream.read_exact(&mut greeting).unwrap();
-        stream.write_all(&[5, 0]).unwrap();
-        let mut head = [0u8; 5];
-        stream.read_exact(&mut head).unwrap();
-        let mut rest = vec![0u8; usize::from(head[4]) + 2];
-        stream.read_exact(&mut rest).unwrap();
+        // The driver first asks for lookups, which this proxy does not
+        // know; the connection it is after comes next.
+        let (mut stream, greeting, head, rest) = loop {
+            let (mut c, _) = listener.accept().unwrap();
+            let mut greeting = [0u8; 4];
+            c.read_exact(&mut greeting).unwrap();
+            c.write_all(&[5, 0]).unwrap();
+            let mut head = [0u8; 5];
+            c.read_exact(&mut head).unwrap();
+            let mut rest = vec![0u8; usize::from(head[4]) + 2];
+            c.read_exact(&mut rest).unwrap();
+            if head[1] == 0xf0 {
+                c.write_all(&[5, 7, 0, 1, 0, 0, 0, 0, 0, 0]).unwrap();
+                continue;
+            }
+            break (c, greeting, head, rest);
+        };
         asked_tx.send((greeting, head, rest)).unwrap();
         stream
             .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0x48, 0x5c])
@@ -970,6 +1151,7 @@ fn nr_73_a_peer_that_stops_reading_is_dropped_after_the_write_timeout() {
             }
         }),
         resolve: Arc::new(|_, _| Ok(Vec::new())),
+        proxy_resolve: Arc::new(not_tor),
     };
     let mut cfg = bare();
     cfg.allow_local = true;

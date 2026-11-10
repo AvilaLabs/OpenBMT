@@ -147,6 +147,10 @@ fn run(args: &[String]) -> Result<(), String> {
     let mut time_max_ready: Option<f64> = None;
     let mut not_behind: Option<f64> = None;
     let mut two_filter_groups: Option<f64> = None;
+    let mut first_filter: Option<f64> = None;
+    // With a proxy: lookups of the seeds' filter names, from the round
+    // notes (answered, asked).
+    let mut lookups = (0u64, 0u64);
     let mut last_peers = String::new();
     // NR-81, NR-82: the distinct peers that were ready on each transport,
     // the refusals the driver noted, and the drops by rule. Only counts
@@ -195,6 +199,9 @@ fn run(args: &[String]) -> Result<(), String> {
                 }
                 if ready > 0 && ahead.is_none() && not_behind.is_none() {
                     not_behind = Some(t);
+                }
+                if filters > 0 && first_filter.is_none() {
+                    first_filter = Some(t);
                 }
                 if filter_groups.len() >= 2 && two_filter_groups.is_none() {
                     two_filter_groups = Some(t);
@@ -250,6 +257,15 @@ fn run(args: &[String]) -> Result<(), String> {
                 *kinds.entry("note").or_default() += 1;
                 if text.contains("does not speak the encrypted transport") {
                     v2_refusals += 1;
+                }
+                // "seed round through the proxy: A of B lookups ..."
+                if let Some(rest) = text.strip_prefix("seed round through the proxy: ") {
+                    let mut words = rest.split_whitespace();
+                    let answered = words.next().and_then(|w| w.parse::<u64>().ok());
+                    let asked = words.nth(1).and_then(|w| w.parse::<u64>().ok());
+                    if let (Some(a), Some(b)) = (answered, asked) {
+                        lookups = (lookups.0 + a, lookups.1 + b);
+                    }
                 }
                 if text.contains(" dropped") {
                     if let Some(at) = text.find("NR-") {
@@ -340,9 +356,14 @@ fn run(args: &[String]) -> Result<(), String> {
         "first moment no peer ahead (with a ready peer): {}",
         secs(not_behind)
     );
+    println!("first filter peer ready: {}", secs(first_filter));
     println!(
         "two filter peers in different groups: {}",
         secs(two_filter_groups)
+    );
+    println!(
+        "seed lookups through the proxy: {} answered of {} finished in rounds",
+        lookups.0, lookups.1
     );
     println!("shutdown took: {stop_took:.1}s");
     println!("headers file: {}", size_of(&headers_path));
