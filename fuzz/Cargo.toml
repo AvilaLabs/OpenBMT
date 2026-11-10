@@ -1,0 +1,73 @@
+[package]
+name = "openbmt-core-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# The same exact version as openbmt-core, for the network enum.
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+openbmt-core = { path = "../crates/openbmt-core" }
+
+# Not a member of the main workspace.
+[workspace]
+
+[[bin]]
+name = "signed_batch_decode"
+path = "fuzz_targets/signed_batch_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "record_decode"
+path = "fuzz_targets/record_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "signed_settings_decode"
+path = "fuzz_targets/signed_settings_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "high_water_decode"
+path = "fuzz_targets/high_water_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "counter_batches_decode"
+path = "fuzz_targets/counter_batches_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "exposure_decode"
+path = "fuzz_targets/exposure_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pause_tracker_decode"
+path = "fuzz_targets/pause_tracker_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wallet_parse"
+path = "fuzz_targets/wallet_parse.rs"
+test = false
+doc = false
+bench = false
