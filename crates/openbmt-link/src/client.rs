@@ -276,4 +276,26 @@ impl Client {
             _ => Err(ClientError::Unexpected),
         }
     }
+
+    /// Ask a relay that is a Box for the claim of its open invitation
+    /// (LK-27). A relay with none refuses.
+    pub fn claim(&mut self) -> Result<Vec<u8>, ClientError> {
+        match self.call(&Request::Claim)? {
+            Response::Claim { bytes } => Ok(bytes),
+            Response::Refused(r) => Err(ClientError::Refused(r)),
+            _ => Err(ClientError::Unexpected),
+        }
+    }
+
+    /// Hand a Box the welcome and the first settings (LK-27, BX-15).
+    pub fn welcome(&mut self, welcome: &[u8], settings: &[u8]) -> Result<(), ClientError> {
+        match self.call(&Request::Welcome {
+            welcome: welcome.to_vec(),
+            settings: settings.to_vec(),
+        })? {
+            Response::Welcomed => Ok(()),
+            Response::Refused(r) => Err(ClientError::Refused(r)),
+            _ => Err(ClientError::Unexpected),
+        }
+    }
 }

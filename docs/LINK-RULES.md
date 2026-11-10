@@ -136,6 +136,12 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
   hand out old sealed messages again. The first turns instant acceptance
   off (no fresh heartbeat) and shows as a missed check-in. The second is
   refused by LK-06. It cannot read, change or make a message.
+- **LK-27.** A relay that is a Box answers a claim request while an
+  invitation is open (`docs/BOX-RULES.md` BX-12) and refuses it otherwise;
+  a plain relay always refuses it. A welcome request is handed to the hook
+  its owner installed (BX-15) and a relay with none refuses it. Every
+  failure of a welcome has the one refusal, so that nothing about the
+  invitation leaks.
 
 ## 3. Reaching the relay
 
@@ -186,8 +192,9 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
   file looks like a first start. A paired device with no number file must
   be treated as needing a new pairing (LK-40); the caller makes that
   distinction.
-- **They do not pair a Box.** How a Box with no screen gets onto the
-  signed device list is still open (`docs/DESIGN.md` §16).
+- **They do not pair a Box.** The invitation, the claim and the welcome
+  that do it are `docs/BOX-RULES.md` section 2; the relay only carries the
+  claim and the welcome (LK-27).
 
 ## 6. Carrying the shop's messages
 

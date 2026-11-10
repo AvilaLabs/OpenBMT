@@ -9,7 +9,8 @@
 //! is what the encoder would have written, and the length is checked against
 //! the direction's limit before anything is read or allocated.
 //!
-//! Request types are 1 to 6. An answer to a request of type `t` has type
+//! Request types are 1 to 8 (7 and 8 are the claim and the welcome of a
+//! Box, LK-27). An answer to a request of type `t` has type
 //! `0x80 | t` and a body that starts with a status byte of 0; a refusal has
 //! type `0xFF` and a body of one status byte that is not 0 and names the
 //! rule.
@@ -32,6 +33,11 @@ pub const FETCH_BATCH: usize = 64;
 /// The most sealed bytes in one answer to a fetch (4 MiB, the size of a
 /// full mailbox).
 pub const FETCH_BYTES: usize = 4 * 1024 * 1024;
+/// The longest claim a relay hands out (BX-12): a claim is 101 bytes, and
+/// this leaves room.
+pub const MAX_CLAIM_LEN: usize = 1024;
+/// The longest welcome in a welcome request (BX-15).
+pub const MAX_WELCOME_LEN: usize = 1024;
 /// The longest body a device reads: a full fetch answer with its framing.
 pub const MAX_RESPONSE_BODY: usize = FETCH_BYTES + 4096;
 
@@ -41,6 +47,8 @@ const T_MAKE: u8 = 3;
 const T_PUT: u8 = 4;
 const T_FETCH: u8 = 5;
 const T_ACK: u8 = 6;
+const T_CLAIM: u8 = 7;
+const T_WELCOME: u8 = 8;
 const T_ANSWER: u8 = 0x80;
 const T_REFUSED: u8 = 0xff;
 
@@ -125,11 +133,16 @@ pub enum Refusal {
     /// The relay already took a message with this number or a higher one
     /// from this sender for this reader (LK-20).
     AlreadyTaken,
+    /// This relay holds no invitation, or is not a Box (LK-27).
+    NoClaim,
+    /// The welcome was not taken. One refusal for every cause, so that
+    /// nothing about the invitation leaks (LK-27).
+    WelcomeRefused,
 }
 
 impl Refusal {
     /// Every refusal.
-    pub const ALL: [Refusal; 13] = [
+    pub const ALL: [Refusal; 15] = [
         Refusal::NotWellFormed,
         Refusal::BadSignature,
         Refusal::TooLarge,
@@ -143,6 +156,8 @@ impl Refusal {
         Refusal::SenderNotMember,
         Refusal::ReaderNotMember,
         Refusal::AlreadyTaken,
+        Refusal::NoClaim,
+        Refusal::WelcomeRefused,
     ];
 
     /// The status byte (never 0).
@@ -161,6 +176,8 @@ impl Refusal {
             Self::SenderNotMember => 11,
             Self::ReaderNotMember => 12,
             Self::AlreadyTaken => 13,
+            Self::NoClaim => 14,
+            Self::WelcomeRefused => 15,
         }
     }
 
@@ -185,6 +202,7 @@ impl Refusal {
             | Self::ChallengeSignature
             | Self::NoRandomness => "LK-23",
             Self::Storage => "LK-41",
+            Self::NoClaim | Self::WelcomeRefused => "LK-27",
         }
     }
 }
@@ -200,6 +218,8 @@ impl fmt::Display for Refusal {
             Self::SenderNotMember => "the sender is not a member of this relay",
             Self::ReaderNotMember => "the reader is not a member of this relay",
             Self::AlreadyTaken => "a message with that number or a higher one was already taken",
+            Self::NoClaim => "this relay holds no open invitation",
+            Self::WelcomeRefused => "the welcome was not taken",
             Self::ChallengeUnknown => "the challenge is unknown or already used",
             Self::ChallengeExpired => "the challenge is too old",
             Self::ChallengeSignature => "the challenge signature is not the reader's",
@@ -258,6 +278,15 @@ pub enum Request {
         /// The relay's number of the last message the reader has taken.
         up_to: u64,
     },
+    /// Give me the claim of the invitation you hold (LK-27, BX-12).
+    Claim,
+    /// Take this welcome and these first settings (LK-27, BX-15).
+    Welcome {
+        /// The welcome (`openbmt_core::boxpair::Welcome::to_bytes`).
+        welcome: Vec<u8>,
+        /// The signed settings (`SignedSettings::to_bytes`).
+        settings: Vec<u8>,
+    },
 }
 
 /// What a relay answers.
@@ -294,6 +323,13 @@ pub enum Response {
         /// How many.
         dropped: u32,
     },
+    /// The claim of the open invitation.
+    Claim {
+        /// The claim's bytes.
+        bytes: Vec<u8>,
+    },
+    /// The welcome was taken.
+    Welcomed,
     /// Not done, and why.
     Refused(Refusal),
 }
@@ -373,6 +409,18 @@ impl Request {
                 sig,
                 up_to,
             } => frame(T_ACK, &signed_body(reader, challenge, sig, Some(*up_to)), d),
+            Self::Claim => frame(T_CLAIM, &[], d),
+            Self::Welcome { welcome, settings } => {
+                if welcome.len() > MAX_WELCOME_LEN {
+                    return Err(ProtoError::TooLarge);
+                }
+                let len = u32::try_from(welcome.len()).map_err(|_| ProtoError::TooLarge)?;
+                let mut b = Vec::with_capacity(4 + welcome.len() + settings.len());
+                b.extend_from_slice(&len.to_le_bytes());
+                b.extend_from_slice(welcome);
+                b.extend_from_slice(settings);
+                frame(T_WELCOME, &b, d)
+            }
         }
     }
 
@@ -413,6 +461,17 @@ impl Request {
                     sig,
                     up_to: r.u64_le()?,
                 }
+            }
+            T_CLAIM => Self::Claim,
+            T_WELCOME => {
+                let len = usize::try_from(r.u32_le()?).map_err(|_| DecodeError::TooLarge)?;
+                if len > MAX_WELCOME_LEN {
+                    return Err(DecodeError::TooLarge.into());
+                }
+                let welcome = r.take(len)?.to_vec();
+                let rest = body.len().saturating_sub(4 + len);
+                let settings = r.take(rest)?.to_vec();
+                Self::Welcome { welcome, settings }
             }
             other => return Err(ProtoError::UnknownType(other)),
         };
@@ -475,6 +534,12 @@ impl Response {
                 b.extend_from_slice(&dropped.to_le_bytes());
                 frame(T_ANSWER | T_ACK, &b, d)
             }
+            Self::Claim { bytes } => {
+                let mut b = vec![0];
+                b.extend_from_slice(bytes);
+                frame(T_ANSWER | T_CLAIM, &b, d)
+            }
+            Self::Welcomed => frame(T_ANSWER | T_WELCOME, &[0], d),
             Self::Refused(why) => frame(T_REFUSED, &[why.to_byte()], d),
         }
     }
@@ -522,6 +587,16 @@ impl Response {
             Some(T_ACK) => Self::Acked {
                 dropped: r.u32_le()?,
             },
+            Some(T_CLAIM) => {
+                let rest = body.len().saturating_sub(1);
+                if rest > MAX_CLAIM_LEN {
+                    return Err(DecodeError::TooLarge.into());
+                }
+                Self::Claim {
+                    bytes: r.take(rest)?.to_vec(),
+                }
+            }
+            Some(T_WELCOME) => Self::Welcomed,
             _ => return Err(ProtoError::UnknownType(ty)),
         };
         r.finish()?;

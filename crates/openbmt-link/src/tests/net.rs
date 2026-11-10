@@ -397,3 +397,31 @@ fn lk_23_a_challenge_from_one_socket_is_no_good_on_another() {
     assert_eq!(r, Response::Made);
     server.stop();
 }
+
+#[test]
+fn lk_27_a_client_asks_for_a_claim_and_sends_a_welcome() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let relay = Relay::new(relay_identity(), RelayConfig::default(), MemoryStore::new()).unwrap();
+    let relay = Arc::new(Mutex::new(relay));
+    relay.lock().unwrap().set_claim(Some(vec![5; 101]));
+    relay
+        .lock()
+        .unwrap()
+        .set_welcome_hook(Some(Box::new(|w, _, _| (w == [1, 2, 3]).then(Vec::new))));
+    let server = Server::start_shared(
+        listener,
+        Arc::clone(&relay),
+        Arc::new(SystemClock),
+        ServerConfig::default(),
+    )
+    .unwrap();
+    let mut client = connect(&server);
+    assert_eq!(client.claim(), Ok(vec![5; 101]));
+    assert_eq!(
+        client.welcome(&[9], &[]),
+        Err(ClientError::Refused(Refusal::WelcomeRefused))
+    );
+    // A failed welcome spent the claim.
+    assert_eq!(client.claim(), Err(ClientError::Refused(Refusal::NoClaim)));
+    assert_eq!(client.welcome(&[1, 2, 3], &[7]), Ok(()));
+}

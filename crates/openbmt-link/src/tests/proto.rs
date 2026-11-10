@@ -35,6 +35,15 @@ fn requests() -> Vec<Request> {
             sig,
             up_to: 88,
         },
+        Request::Claim,
+        Request::Welcome {
+            welcome: vec![5; 101],
+            settings: vec![6; 300],
+        },
+        Request::Welcome {
+            welcome: vec![],
+            settings: vec![],
+        },
     ]
 }
 
@@ -56,6 +65,10 @@ fn responses() -> Vec<Response> {
             more: false,
         },
         Response::Acked { dropped: 4 },
+        Response::Claim {
+            bytes: vec![7; 101],
+        },
+        Response::Welcomed,
     ];
     v.extend(Refusal::ALL.map(Response::Refused));
     v
@@ -197,4 +210,39 @@ fn lk_20_every_refusal_names_a_rule_and_has_its_own_byte() {
     }
     assert_eq!(Refusal::from_byte(0), None);
     assert_eq!(Refusal::from_byte(250), None);
+}
+
+#[test]
+fn lk_27_a_welcome_request_is_strict_about_its_lengths() {
+    let frame = |ty: u8, body: &[u8]| {
+        let mut f = Vec::from(*b"OBMQ");
+        f.extend_from_slice(&[1, ty]);
+        f.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        f.extend_from_slice(body);
+        f
+    };
+    // A welcome length above the limit, or past the end of the body.
+    let mut body = (1025u32).to_le_bytes().to_vec();
+    body.extend_from_slice(&[0; 2000]);
+    assert!(Request::decode(&frame(8, &body)).is_err());
+    let mut body = (10u32).to_le_bytes().to_vec();
+    body.extend_from_slice(&[0; 5]);
+    assert!(Request::decode(&frame(8, &body)).is_err());
+    assert!(Request::decode(&frame(8, &[1, 0])).is_err());
+    // The encoder refuses a welcome over the limit.
+    assert_eq!(
+        Request::Welcome {
+            welcome: vec![0; 1025],
+            settings: vec![]
+        }
+        .encode(),
+        Err(ProtoError::TooLarge)
+    );
+    // A claim request has no body, and a claim answer is bounded.
+    assert!(Request::decode(&frame(7, &[1])).is_err());
+    assert!(Response::decode(&frame(0x87, &[1])).is_err());
+    let mut big = vec![0u8];
+    big.extend_from_slice(&[0; 1025]);
+    assert!(Response::decode(&frame(0x87, &big)).is_err());
+    assert!(Response::decode(&frame(0x88, &[0, 0])).is_err());
 }

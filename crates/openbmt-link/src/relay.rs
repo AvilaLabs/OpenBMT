@@ -186,6 +186,11 @@ impl Mailbox {
     }
 }
 
+/// What a relay owner installs to take a welcome (LK-27): it is given the
+/// welcome, the settings and the time, and answers with the member list that
+/// now applies, or `None` for any refusal.
+pub type WelcomeHook = Box<dyn FnMut(&[u8], &[u8], u64) -> Option<Vec<DeviceId>> + Send>;
+
 /// What a relay is asked and what it keeps.
 pub struct Relay<S: MailStore> {
     identity: Identity,
@@ -199,6 +204,12 @@ pub struct Relay<S: MailStore> {
     /// The highest number taken per sender and reader (LK-20). Not stored:
     /// after a restart it starts from the messages still held.
     taken: BTreeMap<(DeviceId, DeviceId), u64>,
+    /// The claim of an open invitation, when this relay is a Box (LK-27).
+    claim: Option<Vec<u8>>,
+    /// Takes a welcome, when this relay is a Box (LK-27).
+    welcome: Option<WelcomeHook>,
+    /// With no members, give out no challenge either (BX-03).
+    quiet_without_members: bool,
 }
 
 /// Why a member list was not set.
@@ -251,7 +262,33 @@ impl<S: MailStore> Relay<S> {
             mailboxes,
             challenges: BTreeMap::new(),
             taken,
+            claim: None,
+            welcome: None,
+            quiet_without_members: false,
         })
+    }
+
+    /// Offer this claim to whoever asks for one, or stop offering (LK-27).
+    /// A plain relay never has one.
+    pub fn set_claim(&mut self, claim: Option<Vec<u8>>) {
+        self.claim = claim;
+    }
+
+    /// The claim on offer.
+    pub fn claim(&self) -> Option<&[u8]> {
+        self.claim.as_deref()
+    }
+
+    /// Install the hook that takes a welcome (LK-27). A relay with none
+    /// refuses every welcome request.
+    pub fn set_welcome_hook(&mut self, hook: Option<WelcomeHook>) {
+        self.welcome = hook;
+    }
+
+    /// Whether a challenge is refused while the member list is empty
+    /// (BX-03). Off by default: a plain relay gives a challenge to anyone.
+    pub fn set_quiet_without_members(&mut self, quiet: bool) {
+        self.quiet_without_members = quiet;
     }
 
     /// The relay's own identity key (LK-32).
@@ -333,7 +370,17 @@ impl<S: MailStore> Relay<S> {
                     .sign_tagged(TAG_HELLO, &hello_message(&nonce, &relay));
                 Response::Hello { relay, sig }
             }
+            Request::Challenge if self.quiet_without_members && self.members.is_empty() => {
+                Response::Refused(Refusal::NotMember)
+            }
             Request::Challenge => self.give_challenge(conn, now, random),
+            Request::Claim => match &self.claim {
+                Some(bytes) => Response::Claim {
+                    bytes: bytes.clone(),
+                },
+                None => Response::Refused(Refusal::NoClaim),
+            },
+            Request::Welcome { welcome, settings } => self.take_welcome(&welcome, &settings, now),
             Request::MakeMailbox {
                 reader,
                 challenge,
@@ -369,6 +416,24 @@ impl<S: MailStore> Relay<S> {
             {
                 Err(why) => Response::Refused(why),
                 Ok(()) => self.ack(&reader, up_to),
+            },
+        }
+    }
+
+    /// LK-27: hand the welcome to the hook. Whatever it says, the claim is
+    /// no longer offered: the invitation is spent (BX-15). Only if it says
+    /// yes does the member list change.
+    fn take_welcome(&mut self, welcome: &[u8], settings: &[u8], now: u64) -> Response {
+        let Some(hook) = self.welcome.as_mut() else {
+            return Response::Refused(Refusal::WelcomeRefused);
+        };
+        let answer = hook(welcome, settings, now);
+        self.claim = None;
+        match answer {
+            None => Response::Refused(Refusal::WelcomeRefused),
+            Some(members) => match self.set_members(&members) {
+                Ok(()) => Response::Welcomed,
+                Err(_) => Response::Refused(Refusal::Storage),
             },
         }
     }

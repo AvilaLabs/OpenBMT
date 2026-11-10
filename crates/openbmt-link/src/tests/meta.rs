@@ -39,9 +39,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_twenty_two_rules() {
+fn the_rules_file_defines_twenty_three_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 22);
+    assert_eq!(ids.len(), 23);
     assert!(ids.contains("LK-01") && ids.contains("LK-41"));
 }
 

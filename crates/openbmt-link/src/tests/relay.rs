@@ -761,3 +761,98 @@ fn lk_20_a_copy_of_a_message_already_taken_is_refused_and_pushes_nothing_out() {
     assert_eq!(rig.make(&counter()), Response::Made);
     assert!(matches!(rig.put(msg(1)), Response::Stored { .. }));
 }
+
+#[test]
+fn lk_27_a_plain_relay_refuses_a_claim_and_a_welcome() {
+    let mut rig = Rig::new();
+    assert_eq!(rig.ask(Request::Claim), Response::Refused(Refusal::NoClaim));
+    let welcome = Request::Welcome {
+        welcome: vec![1; 101],
+        settings: vec![2; 10],
+    };
+    assert_eq!(rig.ask(welcome), Response::Refused(Refusal::WelcomeRefused));
+}
+
+#[test]
+fn lk_27_a_relay_answers_a_claim_while_one_is_set() {
+    let mut rig = Rig::new();
+    rig.relay.set_claim(Some(vec![9; 101]));
+    assert_eq!(
+        rig.ask(Request::Claim),
+        Response::Claim {
+            bytes: vec![9; 101]
+        }
+    );
+    // Asking does not use it up.
+    assert_eq!(
+        rig.ask(Request::Claim),
+        Response::Claim {
+            bytes: vec![9; 101]
+        }
+    );
+    rig.relay.set_claim(None);
+    assert_eq!(rig.ask(Request::Claim), Response::Refused(Refusal::NoClaim));
+}
+
+#[test]
+fn lk_27_a_welcome_goes_to_the_hook_and_a_yes_sets_the_members() {
+    let mut rig = Rig::new();
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = std::sync::Arc::clone(&seen);
+    let members = vec![owner().device_id(), counter().device_id()];
+    rig.relay.set_welcome_hook(Some(Box::new(move |w, s, now| {
+        log.lock().unwrap().push((w.to_vec(), s.to_vec(), now));
+        Some(members.clone())
+    })));
+    rig.relay.set_claim(Some(vec![1; 101]));
+    let answer = rig.ask(Request::Welcome {
+        welcome: vec![3; 5],
+        settings: vec![4; 6],
+    });
+    assert_eq!(answer, Response::Welcomed);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![(vec![3; 5], vec![4; 6], rig.now)]
+    );
+    assert_eq!(rig.relay.members().count(), 2);
+    // The invitation is spent: the claim is no longer offered.
+    assert_eq!(rig.ask(Request::Claim), Response::Refused(Refusal::NoClaim));
+}
+
+#[test]
+fn lk_27_a_refused_welcome_has_one_refusal_and_spends_the_claim() {
+    let mut rig = Rig::new();
+    rig.relay.set_welcome_hook(Some(Box::new(|_, _, _| None)));
+    rig.relay.set_claim(Some(vec![1; 101]));
+    let before: Vec<DeviceId> = rig.relay.members().copied().collect();
+    let answer = rig.ask(Request::Welcome {
+        welcome: vec![3; 5],
+        settings: vec![4; 6],
+    });
+    assert_eq!(answer, Response::Refused(Refusal::WelcomeRefused));
+    let after: Vec<DeviceId> = rig.relay.members().copied().collect();
+    assert_eq!(before, after);
+    assert_eq!(rig.ask(Request::Claim), Response::Refused(Refusal::NoClaim));
+}
+
+#[test]
+fn lk_27_a_relay_can_be_quiet_while_it_has_no_members() {
+    let mut rig = Rig::new();
+    rig.relay.set_quiet_without_members(true);
+    assert!(matches!(
+        rig.ask(Request::Challenge),
+        Response::Challenge { .. }
+    ));
+    rig.relay.set_members(&[]).unwrap();
+    assert_eq!(
+        rig.ask(Request::Challenge),
+        Response::Refused(Refusal::NotMember)
+    );
+    // The hello and the claim are still answered.
+    assert!(matches!(
+        rig.ask(Request::Hello { nonce: [1; 32] }),
+        Response::Hello { .. }
+    ));
+    rig.relay.set_claim(Some(vec![1; 101]));
+    assert!(matches!(rig.ask(Request::Claim), Response::Claim { .. }));
+}

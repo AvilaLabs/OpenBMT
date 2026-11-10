@@ -56,7 +56,7 @@ pub use numbers::{Inbox, NextError, Outbox, TakeError};
 pub use openbmt_core::hkdf;
 pub use proto::{Refusal, Request, Response};
 pub use random::os_random;
-pub use relay::{Mailbox, Relay, RelayConfig};
+pub use relay::{Mailbox, Relay, RelayConfig, WelcomeHook};
 pub use seal::{open, seal, Kind, OpenError, Opened, Role, SealError};
 pub use server::{Server, ServerConfig};
 pub use store::{DirStore, Event, MailStore, MemoryStore};

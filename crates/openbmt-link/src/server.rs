@@ -78,10 +78,24 @@ impl Server {
     where
         S: MailStore + Send + 'static,
     {
+        Self::start_shared(listener, Arc::new(Mutex::new(relay)), clock, cfg)
+    }
+
+    /// Serve a relay the caller also keeps a handle on, so that its owner
+    /// can set its members and its claim and read its mailboxes while it
+    /// serves (the Box does). The caller must not hold the lock for long.
+    pub fn start_shared<S>(
+        listener: TcpListener,
+        relay: Arc<Mutex<Relay<S>>>,
+        clock: Arc<dyn Clock + Send + Sync>,
+        cfg: ServerConfig,
+    ) -> io::Result<Self>
+    where
+        S: MailStore + Send + 'static,
+    {
         let addr = listener.local_addr()?;
         listener.set_nonblocking(true)?;
         let stop = Arc::new(AtomicBool::new(false));
-        let relay = Arc::new(Mutex::new(relay));
         let active = Arc::new(AtomicUsize::new(0));
         let accept = {
             let stop = Arc::clone(&stop);
