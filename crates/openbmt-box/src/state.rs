@@ -108,9 +108,6 @@ pub enum BoxError {
     NoInvitation,
     /// The invitation ran out (BX-12).
     InvitationExpired,
-    /// More than one welcome request in a second while an invitation is
-    /// open (BX-15).
-    WelcomeRate,
     /// The welcome is not a welcome (BX-15).
     BadWelcome(DecodeError),
     /// The welcome's MAC is not the one for the invitation (BX-15).
@@ -146,7 +143,6 @@ impl fmt::Display for BoxError {
             Self::Invitation(e) => write!(f, "{e}"),
             Self::NoInvitation => write!(f, "BX-12: no invitation is open"),
             Self::InvitationExpired => write!(f, "BX-12: the invitation ran out"),
-            Self::WelcomeRate => write!(f, "BX-15: one welcome request a second"),
             Self::BadWelcome(e) => write!(f, "BX-15: the welcome is not valid: {e}"),
             Self::WelcomeMac => write!(
                 f,
@@ -214,8 +210,6 @@ pub struct BoxCore<F: BoxFiles> {
     id: DeviceId,
     open: Option<OpenInvitation>,
     pairing: Option<Pairing>,
-    /// When the last welcome was looked at while an invitation was open.
-    last_welcome: Option<u64>,
 }
 
 impl<F: BoxFiles> fmt::Debug for BoxCore<F> {
@@ -345,7 +339,6 @@ impl<F: BoxFiles> BoxCore<F> {
             id,
             open,
             pairing,
-            last_welcome: None,
         })
     }
 
@@ -463,8 +456,7 @@ impl<F: BoxFiles> BoxCore<F> {
         Some(Claim::make(&open.invitation, self.id, open.nonce).to_bytes())
     }
 
-    /// Take a welcome and the first settings (BX-15), in this order: at
-    /// most one request a second while an invitation is open, the
+    /// Take a welcome and the first settings (BX-15), in this order: the
     /// invitation must be open and not run out (one that ran out is
     /// forgotten), the welcome must read and its MAC must check. Up to here
     /// a failure changes nothing: the invitation stays open, stored, with
@@ -492,10 +484,6 @@ impl<F: BoxFiles> BoxCore<F> {
             self.expire(now);
             return Err(BoxError::InvitationExpired);
         }
-        if self.last_welcome.is_some_and(|last| now <= last) {
-            return Err(BoxError::WelcomeRate);
-        }
-        self.last_welcome = Some(now);
         let welcome = Welcome::from_bytes(welcome).map_err(BoxError::BadWelcome)?;
         let roots = welcome
             .verify(&open.invitation, &self.id, &open.nonce)

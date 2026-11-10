@@ -183,12 +183,9 @@ These are details the rules above leave open. None of them changes a rule.
   open, stored, with the same nonce and expiry, so a stranger on the network
   cannot spend it: the invitation has 130 bits and a welcome with a right
   MAC needs it. One that passes the MAC and then fails (settings signed by
-  other roots, settings that do not list the Box) spends it. An unpaired Box
-  looks at one welcome request a second across all connections while an
-  invitation is open, on the time of the request; any other in that second
-  gets the same refusal. That bounds the work and the log, and means that
-  a real welcome sent in the same second as another request is refused and
-  sent again.
+  other roots, settings that do not list the Box) spends it. Welcome
+  requests are not limited in number: checking one is a single MAC, and a
+  limit would let a stranger hold the real welcome back.
 - **What an unpaired Box answers (BX-03).** A hello, a claim while an
   invitation is open, and a welcome. A request for a challenge is refused,
   so a mailbox, a fetch, an acknowledgement and a sealed message are all

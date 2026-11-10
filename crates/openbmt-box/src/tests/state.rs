@@ -360,7 +360,8 @@ fn bx_15_a_thousand_stranger_welcomes_change_nothing_and_the_real_one_pairs() {
         &Claim::make(&other, core.device_id(), [0x31; 32]).to_bytes(),
     );
     // Garbage of every length and well-formed welcomes with a wrong MAC,
-    // one a second so that the rate is not what refuses them.
+    // many in the same second: nothing limits how often they may come, so
+    // a stranger cannot hold the real welcome back either.
     for n in 0..1000u64 {
         let w: Vec<u8> = if n % 2 == 0 {
             (0..(n % 130) as usize)
@@ -369,39 +370,20 @@ fn bx_15_a_thousand_stranger_welcomes_change_nothing_and_the_real_one_pairs() {
         } else {
             wrong_mac.clone()
         };
-        let err = core.take_welcome(&w, &good, NOW + 1 + n).unwrap_err();
+        let err = core.take_welcome(&w, &good, NOW + 1 + n / 100).unwrap_err();
         assert!(
             matches!(err, BoxError::BadWelcome(_) | BoxError::WelcomeMac),
             "{n}: {err}"
         );
-        assert_eq!(core.claim(NOW + 1 + n), Some(claim.clone()));
+        assert_eq!(core.claim(NOW + 1 + n / 100), Some(claim.clone()));
     }
     assert_eq!(core.files().read(INVITATION_FILE).unwrap(), stored);
-    assert_eq!(core.status(NOW + 1000), BoxStatus::InvitationOpen);
-    // The real welcome still pairs, with the claim the Key app already holds.
+    assert_eq!(core.status(NOW + 10), BoxStatus::InvitationOpen);
+    // The real welcome still pairs, in the same second as the last bad one
+    // and with the claim the Key app already holds.
     let w = welcome_bytes(&inv, &claim);
-    assert_eq!(core.take_welcome(&w, &good, NOW + 1001), Ok(()));
-    assert_eq!(core.status(NOW + 1001), BoxStatus::Paired);
-}
-
-#[test]
-fn bx_15_a_welcome_after_the_rate_waits_a_second() {
-    let mut core = fresh_core();
-    let inv = invitation(5);
-    enter(&mut core, &inv, 0x31);
-    let claim = core.claim(NOW).unwrap();
-    let w = welcome_bytes(&inv, &claim);
-    let good = sign_both(settings_with(1, &core.device_id())).to_bytes();
-    assert!(matches!(
-        core.take_welcome(&[0; 5], &good, NOW + 5),
-        Err(BoxError::BadWelcome(_))
-    ));
-    // The same second, and an earlier one: even the real welcome waits.
-    for at in [NOW + 5, NOW + 4] {
-        assert_eq!(core.take_welcome(&w, &good, at), Err(BoxError::WelcomeRate));
-    }
-    assert_eq!(core.claim(NOW + 5), Some(claim));
-    assert_eq!(core.take_welcome(&w, &good, NOW + 6), Ok(()));
+    assert_eq!(core.take_welcome(&w, &good, NOW + 10), Ok(()));
+    assert_eq!(core.status(NOW + 10), BoxStatus::Paired);
 }
 
 #[test]
