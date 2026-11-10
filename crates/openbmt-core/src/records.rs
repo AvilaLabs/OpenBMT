@@ -119,6 +119,26 @@ impl fmt::Display for ChainError {
 
 impl std::error::Error for ChainError {}
 
+/// Why a record was not appended: it was refused, or it could not be stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppendError<E> {
+    /// The record failed a check. The chain is unchanged.
+    Refused(ChainError),
+    /// The caller's store refused the record. The chain is unchanged.
+    Persist(E),
+}
+
+impl<E: fmt::Display> fmt::Display for AppendError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(e) => write!(f, "{e}"),
+            Self::Persist(e) => write!(f, "could not store the record: {e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for AppendError<E> {}
+
 /// The devices whose records are accepted.
 ///
 /// Verification must be given every device that was on the signed device list
@@ -275,13 +295,13 @@ impl Chain {
         self.records.last().map_or(GENESIS, Record::hash)
     }
 
-    /// Write, sign and append a record.
-    pub fn append(
-        &mut self,
+    /// Build and sign the record that comes next, without adding it.
+    fn next_record(
+        &self,
         author: &Identity,
         kind: RecordKind,
         body: Vec<u8>,
-    ) -> Result<&Record, ChainError> {
+    ) -> Result<Record, ChainError> {
         if body.len() > MAX_BODY {
             return Err(ChainError::BodyTooLarge);
         }
@@ -294,8 +314,42 @@ impl Chain {
             sig: Sig([0; 64]),
         };
         rec.sig = author.sign_tagged(TAG_RECORD, &rec.signing_bytes());
+        Ok(rec)
+    }
+
+    /// Add a record built by `next_record` and return it.
+    fn push(&mut self, rec: Record) -> &Record {
         self.records.push(rec);
-        Ok(self.records.last().expect("just pushed"))
+        self.records.last().expect("just pushed")
+    }
+
+    /// Write, sign and append a record.
+    pub fn append(
+        &mut self,
+        author: &Identity,
+        kind: RecordKind,
+        body: Vec<u8>,
+    ) -> Result<&Record, ChainError> {
+        let rec = self.next_record(author, kind, body)?;
+        Ok(self.push(rec))
+    }
+
+    /// Write and sign a record like [`Chain::append`], hand its wire form
+    /// ([`Record::to_bytes`]) to `persist`, and add it to the chain only if
+    /// `persist` returned `Ok`. On any error the chain is unchanged, so the
+    /// next append reuses the same sequence number.
+    pub fn append_stored<E>(
+        &mut self,
+        author: &Identity,
+        kind: RecordKind,
+        body: Vec<u8>,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<&Record, AppendError<E>> {
+        let rec = self
+            .next_record(author, kind, body)
+            .map_err(AppendError::Refused)?;
+        persist(&rec.to_bytes()).map_err(AppendError::Persist)?;
+        Ok(self.push(rec))
     }
 
     /// Append a check-in that carries the current head: its body is the
@@ -433,6 +487,85 @@ mod tests {
             assert!(!heads.contains(&c.head()));
             heads.push(c.head());
         }
+    }
+
+    #[test]
+    fn stored_bytes_decode_to_the_returned_record() {
+        let a = identity(1);
+        let mut c = Chain::new();
+        let mut stored = Vec::new();
+        let rec = c
+            .append_stored(&a, RecordKind::Sale, b"sale".to_vec(), |b| {
+                stored = b.to_vec();
+                Ok::<(), String>(())
+            })
+            .unwrap()
+            .clone();
+        assert_eq!(Record::from_bytes(&stored).unwrap(), rec);
+        assert_eq!(c.records(), &[rec]);
+    }
+
+    #[test]
+    fn failed_store_leaves_the_chain_unchanged() {
+        let a = identity(1);
+        let mut c = Chain::new();
+        c.append(&a, RecordKind::Sale, b"one".to_vec()).unwrap();
+        let (head, len) = (c.head(), c.len());
+        let err = c
+            .append_stored(&a, RecordKind::Payment, b"two".to_vec(), |_| {
+                Err("disk full".to_string())
+            })
+            .unwrap_err();
+        assert_eq!(err, AppendError::Persist("disk full".to_string()));
+        assert_eq!((c.head(), c.len()), (head, len));
+        // the next append takes the sequence number the failed one would have
+        let next = c.append(&a, RecordKind::Payment, b"two".to_vec()).unwrap();
+        assert_eq!(next.seq, len);
+        assert_eq!(c.verify(&devices()), Ok(()));
+    }
+
+    #[test]
+    fn refused_record_is_not_handed_to_the_store() {
+        let mut c = Chain::new();
+        let mut called = false;
+        let err = c
+            .append_stored(
+                &identity(1),
+                RecordKind::Sale,
+                vec![0; MAX_BODY + 1],
+                |_| {
+                    called = true;
+                    Ok::<(), String>(())
+                },
+            )
+            .unwrap_err();
+        assert_eq!(err, AppendError::Refused(ChainError::BodyTooLarge));
+        assert!(!called && c.is_empty());
+    }
+
+    #[test]
+    fn chain_of_stored_appends_verifies() {
+        let (a, b) = (identity(1), identity(2));
+        let mut c = Chain::new();
+        let mut log = Vec::new();
+        for (i, who) in [&a, &b, &a].into_iter().enumerate() {
+            c.append_stored(who, RecordKind::Sale, vec![i as u8], |bytes| {
+                log.push(bytes.to_vec());
+                Ok::<(), String>(())
+            })
+            .unwrap();
+        }
+        assert_eq!(c.verify(&devices()), Ok(()));
+        let replayed: Vec<Record> = log.iter().map(|b| Record::from_bytes(b).unwrap()).collect();
+        assert_eq!(Chain::from_records(replayed), c);
+    }
+
+    #[test]
+    fn append_error_text_names_the_cause() {
+        let refused: AppendError<String> = AppendError::Refused(ChainError::BodyTooLarge);
+        assert_eq!(refused.to_string(), "record body too large");
+        let persist = AppendError::Persist("disk full".to_string());
+        assert_eq!(persist.to_string(), "could not store the record: disk full");
     }
 
     #[test]
