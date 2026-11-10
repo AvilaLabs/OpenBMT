@@ -240,7 +240,7 @@ pub enum Request {
         /// The relay's number of the last message the reader has.
         cursor: u64,
     },
-    /// I have taken everything up to this number (LK-24).
+    /// The reader has taken everything up to this number (LK-24).
     Ack {
         /// The reader.
         reader: DeviceId,
