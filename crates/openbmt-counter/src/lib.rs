@@ -22,7 +22,8 @@
 //! 5. [`sale`]: one sale, its valuation and its stored form (`OBML`).
 //! 6. [`screen`]: the states, their two texts and what is reported outward.
 //! 7. [`refusal`]: the refusals, each naming its rule.
-//! 8. [`counter`]: the [`Counter`] itself.
+//! 8. [`heartbeat`]: the judgment of the owner's heartbeat (CR-51 to CR-53).
+//! 9. [`counter`]: the [`Counter`] itself.
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.
@@ -42,6 +43,7 @@
 pub mod counter;
 pub mod desk;
 pub mod events;
+pub mod heartbeat;
 pub mod money;
 pub mod refusal;
 pub mod sale;
@@ -57,10 +59,11 @@ pub use counter::{
 };
 pub use desk::{Desk, OverrideEntry, Role};
 pub use events::Event;
+pub use heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
 pub use money::{sats_for, value_of, Amount, Currency, Quote, Rate, QUOTE_SECS};
 pub use refusal::{
-    BlockError, CancelRefused, CommandRefused, JudgeError, LoadError, OpenRefused, OverrideRefused,
-    RequoteRefused, SightingError,
+    BlockError, CancelRefused, CommandRefused, HeartbeatRefused, JudgeError, LoadError,
+    OpenRefused, OverrideRefused, RequoteRefused, SightingError,
 };
 pub use sale::{End, OverrideMark, PosState, Sale, Segment};
 pub use screen::{Color, Next, Report, Screen, State, Why};

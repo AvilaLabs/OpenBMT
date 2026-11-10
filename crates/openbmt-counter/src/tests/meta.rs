@@ -6,8 +6,9 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 8] = [
+const TEST_SOURCES: [&str; 9] = [
     include_str!("encodings.rs"),
+    include_str!("heartbeat.rs"),
     include_str!("open.rs"),
     include_str!("overrides.rs"),
     include_str!("reports.rs"),
@@ -17,9 +18,13 @@ const TEST_SOURCES: [&str; 8] = [
     include_str!("kit.rs"),
 ];
 
-/// Rules this crate does not test, each with the reason. Empty: the counter
-/// implements every rule.
-const NOT_HERE: [(&str, &str); 0] = [];
+/// Rules this crate does not test, each with the reason. The counter
+/// implements every rule except the ones that only state a limit.
+const NOT_HERE: [(&str, &str); 1] = [(
+    "CR-56",
+    "it states what the heartbeat does not guard against (a bad build of the same software \
+     family); there is nothing for the counter to enforce or to test",
+)];
 
 fn defined() -> BTreeSet<String> {
     RULES
@@ -30,10 +35,10 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_twenty_eight_rules() {
+fn the_rules_file_defines_thirty_five_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 28);
-    assert!(ids.contains("CR-01") && ids.contains("CR-42"));
+    assert_eq!(ids.len(), 35);
+    assert!(ids.contains("CR-01") && ids.contains("CR-42") && ids.contains("CR-56"));
 }
 
 #[test]

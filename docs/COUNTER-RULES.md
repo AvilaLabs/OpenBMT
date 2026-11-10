@@ -162,7 +162,50 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   whose stored form does not read back is shown as `NeedsAPerson`, never
   as paid.
 
-## 6. What these rules do not do
+## 6. The owner's heartbeat
+
+Instant acceptance needs a second watcher that is not the counter's own
+(`docs/DESIGN.md` §5.1, §5.2). The owner's device runs one and sends the
+counter a small signed message (`openbmt_core::heartbeat`): a number, its own
+time, the chain tip it sees (height and hash) and whether its own health
+check says it is working. The counter takes it with
+`Counter::heartbeat`, and the instant decision reads the result as the
+`heartbeat` fact (`Counter::heartbeat_for_policy`). How the message travels
+from the owner's device to the counter is not part of these rules.
+
+- **CR-50.** Instant acceptance needs a heartbeat that the counter
+  verified: signed by the owner root pinned at pairing, naming this
+  counter, with a number above the last one taken. A heartbeat that fails
+  any of these is refused and changes nothing.
+- **CR-51.** The age of a heartbeat is the counter's time minus the
+  heartbeat's own time, and it must be within the signed setting
+  (`heartbeat_max_age_secs`); the instant decision checks that. A heartbeat
+  timed more than 120 seconds ahead of the counter's clock **[to tune]** is
+  refused, and its number is not used up.
+- **CR-52.** The owner's watcher must say it is healthy. A heartbeat that
+  says it is not is taken (its number counts) and makes the heartbeat "not
+  verified" until a healthy one comes.
+- **CR-53.** The tip the heartbeat names must agree with the counter's own
+  header chain: the counter holds that hash at that height, and the height
+  is at most 2 below the counter's tip. A tip the counter does not hold yet,
+  at a height above its own tip by at most 2, is "not verified" for now (the
+  counter may be the one that is behind) and is not an alarm. A different
+  hash at a height the counter holds is "not verified" and is logged as a
+  disagreement. The answer is worked out when the heartbeat is taken and not
+  again as the chain moves; the next heartbeat is judged anew.
+- **CR-54.** The last number taken is stored before the heartbeat counts. If
+  the store fails, it does not count and its number is not used up. After a
+  restart the counter has no verified heartbeat until a new one comes, and
+  the stored number refuses replays.
+- **CR-55.** Nothing but an owner-signed heartbeat counts: not the Box's
+  "paid" notice, and not a signature of the approver root.
+- **CR-56.** The heartbeat is a claim by the same software family on another
+  device. It guards against a dead or cut-off owner watcher, not against a
+  bad build: a build that signs "healthy" without watching anything is not
+  seen by the counter. The outside check of `docs/DESIGN.md` §10 is the one
+  that does not depend on this software.
+
+## 7. What these rules do not do
 
 - **They do not check payments.** Proof of work, proofs, peers and
   conflicts are the watcher's. A wrong fact handed in gives a wrong

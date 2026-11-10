@@ -2,6 +2,7 @@
 //! refusal test checks the exact refusal and the rule it names.
 
 mod encodings;
+mod heartbeat;
 mod kit;
 mod meta;
 mod open;

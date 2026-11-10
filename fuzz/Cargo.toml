@@ -175,6 +175,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "heartbeat_decode"
+path = "fuzz_targets/heartbeat_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "watch_sale_decode"
 path = "fuzz_targets/watch_sale_decode.rs"
 test = false

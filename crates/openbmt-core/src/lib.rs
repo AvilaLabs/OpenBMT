@@ -11,6 +11,7 @@ pub mod batch;
 pub mod command;
 pub mod entropy;
 mod hashing;
+pub mod heartbeat;
 pub mod identity;
 pub mod pairing;
 pub mod policy;

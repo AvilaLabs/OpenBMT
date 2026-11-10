@@ -163,6 +163,38 @@ fn the_desk_round_trips_and_refuses_another_magic_or_version() {
 }
 
 #[test]
+fn a_desk_without_a_heartbeat_is_still_written_as_version_one() {
+    let bytes = a_desk().to_bytes();
+    assert_eq!(bytes[4], 1);
+    assert_eq!(Desk::from_bytes(&bytes).unwrap().last_heartbeat_seq(), 0);
+}
+
+#[test]
+fn a_desk_with_a_heartbeat_number_is_version_two_and_strict() {
+    let mut d = a_desk();
+    d.set_last_heartbeat_seq(41);
+    let bytes = d.to_bytes();
+    assert_eq!(&bytes[..5], b"OBMG\x02");
+    // the number follows the alarm byte, and the rest is the version 1 form
+    assert_eq!(&bytes[14..22], &41u64.to_le_bytes());
+    let old = a_desk().to_bytes();
+    assert_eq!(&bytes[22..], &old[14..]);
+    assert_eq!(Desk::from_bytes(&bytes).unwrap(), d);
+    assert_strict(&bytes, Desk::from_bytes, Desk::to_bytes);
+    // version 2 with a zero number is not what the counter writes
+    let mut bad = bytes.clone();
+    bad[14..22].fill(0);
+    assert!(matches!(
+        Desk::from_bytes(&bad),
+        Err(DecodeError::NonCanonical(_))
+    ));
+    // version 1 with the extra eight bytes does not read back
+    let mut bad = bytes;
+    bad[4] = 1;
+    assert!(Desk::from_bytes(&bad).is_err());
+}
+
+#[test]
 fn the_desk_refuses_what_the_counter_never_writes() {
     let good = a_desk().to_bytes();
     // Header: magic 4, version 1, seq 8, alarm 1, count 4, then two times.

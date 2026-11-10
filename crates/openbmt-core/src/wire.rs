@@ -16,7 +16,9 @@
 //! (pair request), `OBMD` (signed pairing), `OBMX` (owner command), `OBMV` (a
 //! sale watch, written by the `openbmt-watch` crate), `OBMG` (the counter's
 //! own state, "desk") and `OBML` (a stored sale), the last two written by the
-//! `openbmt-counter` crate.
+//! `openbmt-counter` crate, and `OBMT` (the owner's signed watcher
+//! heartbeat). The address book (`OBMA`) and the header store (`OBMW`) have
+//! their own magics in the crates that write them.
 //!
 //! [`Reader`], [`start`], [`put_opt_u64`] and [`len_u32`] are public so that
 //! other crates in the workspace write their snapshots the same way.
@@ -65,6 +67,8 @@ pub const MAGIC_PAIR_REQUEST: [u8; 4] = *b"OBMJ";
 pub const MAGIC_SIGNED_PAIRING: [u8; 4] = *b"OBMD";
 /// Magic of a [`SignedCommand`](crate::command::SignedCommand).
 pub const MAGIC_OWNER_COMMAND: [u8; 4] = *b"OBMX";
+/// Magic of a [`SignedHeartbeat`](crate::heartbeat::SignedHeartbeat).
+pub const MAGIC_HEARTBEAT: [u8; 4] = *b"OBMT";
 /// Magic of a sale watch snapshot (the `openbmt-watch` crate).
 pub const MAGIC_SALE_WATCH: [u8; 4] = *b"OBMV";
 /// Magic of the counter's own state: address times, the cancel alarm, the

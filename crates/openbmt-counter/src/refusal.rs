@@ -9,6 +9,7 @@
 use std::fmt;
 
 use openbmt_core::command::CommandError;
+use openbmt_core::heartbeat::HeartbeatError;
 use openbmt_core::records::ChainError;
 use openbmt_core::wire::DecodeError;
 use openbmt_watch::{Problem, Refusal};
@@ -352,6 +353,50 @@ impl<E: fmt::Display> fmt::Display for CommandRefused<E> {
 }
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for CommandRefused<E> {}
+
+/// Why an owner heartbeat was not taken (CR-50, CR-51, CR-54).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HeartbeatRefused<E> {
+    /// CR-50: the heartbeat is not for this counter, is not numbered above
+    /// the last one taken, or is not signed by the owner. Nothing changed.
+    Refused(HeartbeatError),
+    /// CR-51: the heartbeat is timed too far ahead of the counter's clock.
+    /// Nothing changed, and its number is not used up.
+    FromTheFuture {
+        /// How far ahead, in seconds.
+        ahead_secs: u64,
+    },
+    /// CR-54: the number could not be stored, so the heartbeat does not
+    /// count. Nothing changed.
+    Store(StoreFault<E>),
+}
+
+impl<E> HeartbeatRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::Refused(_) => "CR-50",
+            Self::FromTheFuture { .. } => "CR-51",
+            Self::Store(_) => "CR-54",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for HeartbeatRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::Refused(e) => write!(f, "{e}"),
+            Self::FromTheFuture { ahead_secs } => write!(
+                f,
+                "the heartbeat is timed {ahead_secs} seconds ahead of this counter's clock"
+            ),
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for HeartbeatRefused<E> {}
 
 /// Why a sighting was not taken (WR-40, CR-40).
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -15,6 +15,7 @@ use bitcoin::hashes::Hash;
 use bitcoin::{ScriptBuf, Transaction, Txid};
 use openbmt_core::batch::{AddError, BatchPolicy, CounterBatches, PinnedRoots, SignedBatch};
 use openbmt_core::command::{Action, SignedCommand};
+use openbmt_core::heartbeat::SignedHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::policy::{
     amount_at_risk, evaluate, CheckMode, Decision, Exposure, ExposureError, ExposureWriteError,
@@ -26,10 +27,11 @@ use openbmt_watch::{HeaderChain, Health, Refusal, Sighted, Source, WellFormedBlo
 
 use crate::desk::{valid_name, Desk, OverrideEntry, Role};
 use crate::events::Event;
+use crate::heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
 use crate::money::{sats_for, Amount, Currency, Quote, Rate};
 use crate::refusal::{
-    BlockError, CancelRefused, CommandRefused, JudgeError, LoadError, OpenRefused, OverrideRefused,
-    RequoteRefused, SightingError,
+    BlockError, CancelRefused, CommandRefused, HeartbeatRefused, JudgeError, LoadError,
+    OpenRefused, OverrideRefused, RequoteRefused, SightingError,
 };
 use crate::sale::{End, OverrideMark, PosState, Sale};
 use crate::screen::{Next, Report, Screen, State, Why};
@@ -97,7 +99,8 @@ pub struct Facts<'a, C: HeaderChain + ?Sized> {
     pub chain: &'a C,
     /// The answer of the watcher's health check, now.
     pub health: Health,
-    /// The owner-phone heartbeat.
+    /// The owner-phone heartbeat, as [`Counter::heartbeat_for_policy`]
+    /// gives it (CR-50, CR-55).
     pub heartbeat: Heartbeat,
     /// The order is a remote or online order.
     pub remote_order: bool,
@@ -222,6 +225,9 @@ pub struct Counter {
     cancel_applied: BTreeSet<u32>,
     records: Chain,
     desk: Desk,
+    /// CR-54: what the last heartbeat taken in this run came to. Not stored:
+    /// after a restart there is none until a new one comes.
+    heartbeat: Option<HeartbeatView>,
     sales: BTreeMap<u32, Sale>,
     /// Scripts of sales that ended or were reported final. They stay watched
     /// for late payments (CR-07, CR-19).
@@ -252,6 +258,7 @@ impl Counter {
             cancel_applied: BTreeSet::new(),
             records: Chain::new(),
             desk: Desk::new(),
+            heartbeat: None,
             sales: BTreeMap::new(),
             archived: BTreeMap::new(),
             unreadable: BTreeSet::new(),
@@ -358,6 +365,12 @@ impl Counter {
     /// The counter's own state.
     pub fn desk(&self) -> &Desk {
         &self.desk
+    }
+
+    /// CR-50 to CR-54: what the last heartbeat taken since this counter
+    /// started came to, if one was taken.
+    pub fn heartbeat_view(&self) -> Option<HeartbeatView> {
+        self.heartbeat
     }
 
     /// The records written so far.
@@ -1504,5 +1517,62 @@ impl Counter {
             }
         }
         Ok(())
+    }
+
+    // CR-50 to CR-56: the owner's heartbeat.
+
+    /// CR-50: take a heartbeat the owner signed. It is checked against the
+    /// pinned owner root, this counter and the last number taken, and then
+    /// judged against the counter's own header chain and clock (CR-51 to
+    /// CR-53). Nothing but this call makes a heartbeat count (CR-55).
+    ///
+    /// A heartbeat timed too far ahead of the clock is refused and its number
+    /// is not used up. Every other heartbeat that passes the checks is taken:
+    /// its number is stored first (CR-54), and then what the counter makes of
+    /// it is kept, so that an unhealthy heartbeat, or one whose tip the
+    /// counter does not hold, replaces a verified one with "not verified".
+    /// If the store fails, nothing changed. The judgment is made now and is
+    /// not made again as the chain moves: the next heartbeat is.
+    pub fn heartbeat<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        signed: &SignedHeartbeat,
+        chain: &C,
+        now: u64,
+        store: &mut S,
+    ) -> Result<HeartbeatView, HeartbeatRefused<S::Error>> {
+        let hb = signed
+            .verify(
+                &self.roots,
+                &self.identity.device_id(),
+                self.desk.last_heartbeat_seq(),
+            )
+            .map_err(HeartbeatRefused::Refused)?;
+        let view = judge_heartbeat(hb, chain, now);
+        if let HeartbeatView::NotVerified(NotVerified::FromTheFuture { ahead_secs }) = view {
+            return Err(HeartbeatRefused::FromTheFuture { ahead_secs });
+        }
+        let mut desk = self.desk.clone();
+        desk.set_last_heartbeat_seq(hb.seq);
+        self.put_desk(store, desk)
+            .map_err(HeartbeatRefused::Store)?;
+        self.heartbeat = Some(view);
+        Ok(view)
+    }
+
+    /// CR-50, CR-51: the heartbeat as the instant decision reads it at
+    /// `now`: verified only if the last one taken counts, and then as old as
+    /// `now` less its own time. With none taken since the start (CR-54), it
+    /// is not verified.
+    pub fn heartbeat_for_policy(&self, now: u64) -> Heartbeat {
+        match self.heartbeat {
+            Some(HeartbeatView::Verified { sent_at }) => Heartbeat {
+                verified: true,
+                age_secs: now.saturating_sub(sent_at),
+            },
+            _ => Heartbeat {
+                verified: false,
+                age_secs: 0,
+            },
+        }
     }
 }

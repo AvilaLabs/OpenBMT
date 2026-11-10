@@ -36,6 +36,8 @@ pub const TAG_PAIR_REQUEST: &str = "OpenBMT/pair-request/v1";
 pub const TAG_PAIR_SESSION: &str = "OpenBMT/pair-session/v1";
 /// Tag for owner-signed commands to a counter.
 pub const TAG_COMMAND: &str = "OpenBMT/command/v1";
+/// Tag for the owner's signed watcher heartbeat to a counter.
+pub const TAG_HEARTBEAT: &str = "OpenBMT/heartbeat/v1";
 /// Tag for the on-screen identity fingerprint words.
 pub const TAG_FINGERPRINT: &str = "OpenBMT/fingerprint/v1";
 
