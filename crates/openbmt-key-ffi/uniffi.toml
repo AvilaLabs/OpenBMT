@@ -1,0 +1,3 @@
+[bindings.kotlin]
+package_name = "org.openbmt.key.ffi"
+cdylib_name = "openbmt_key_ffi"
