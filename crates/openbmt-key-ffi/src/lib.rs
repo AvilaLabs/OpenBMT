@@ -53,6 +53,7 @@
 )]
 
 mod app;
+mod deposit;
 pub mod envelope;
 mod error;
 mod keys;
@@ -67,6 +68,7 @@ mod words;
 mod tests;
 
 pub use app::{Key2Public, KeyApp, SetupState, SlotView, WalletSetup, WalletView};
+pub use deposit::{parse_deposit_code, DepositCode};
 pub use error::{KeyError, StoreError};
 pub use keys::{
     coin_bits, dice_bits, dice_face_counts, BitProgress, EntropySource, KeyNetwork, KeyWordCount,
