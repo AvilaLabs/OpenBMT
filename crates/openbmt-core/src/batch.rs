@@ -15,7 +15,7 @@
 //!   | for each script: len u16 LE | script bytes
 //! ```
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fmt;
 
 use bitcoin::ScriptBuf;
@@ -68,6 +68,8 @@ pub enum BatchError {
     WrongCounter,
     /// The batch is for another wallet.
     WrongWallet,
+    /// The batch is for a counter that is not on the Key app's device list.
+    UnknownCounter,
     /// The range overlaps one already issued, active or retired.
     OverlapsExisting,
     /// Owner and Key app roots must be different keys.
@@ -95,6 +97,9 @@ impl fmt::Display for BatchError {
             Self::ApproverSignatureInvalid => write!(f, "Key app signature missing or wrong"),
             Self::WrongCounter => write!(f, "batch is for another counter"),
             Self::WrongWallet => write!(f, "batch is for another wallet"),
+            Self::UnknownCounter => {
+                write!(f, "batch is for a counter that is not on the device list")
+            }
             Self::OverlapsExisting => write!(f, "batch overlaps addresses already issued"),
             Self::SameRoot => write!(f, "owner and Key app roots must differ"),
             Self::HashMismatch => write!(f, "addresses differ from the Key app's own derivation"),
@@ -159,6 +164,12 @@ pub struct AddressBatch {
 
 impl AddressBatch {
     /// The canonical bytes that are hashed and signed.
+    ///
+    /// Every script must be a 34-byte P2WSH script, which `check_shape`
+    /// enforces; every path that encodes a batch it did not build itself runs
+    /// `check_shape` first. Calling this directly on a hand-built batch with
+    /// a script longer than `u16::MAX` bytes panics rather than truncating
+    /// the length.
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(72 + self.scripts.len() * 36);
         out.extend_from_slice(&self.wallet_checksum);
@@ -167,7 +178,8 @@ impl AddressBatch {
         out.extend_from_slice(&self.count.to_le_bytes());
         for s in &self.scripts {
             let b = s.as_bytes();
-            out.extend_from_slice(&(b.len() as u16).to_le_bytes());
+            let len = u16::try_from(b.len()).expect("script length checked by check_shape");
+            out.extend_from_slice(&len.to_le_bytes());
             out.extend_from_slice(b);
         }
         out
@@ -333,18 +345,23 @@ impl Approver {
         self.identity.device_id()
     }
 
-    /// Re-derive the batch's range from `own_wallet`, compare the hash, check
-    /// the range starts exactly at the high-water mark (no gap, no overlap),
-    /// then co-sign and advance the mark. On any failure nothing is signed
-    /// and the mark does not move.
+    /// Check the batch is for a counter in `approved_counters` (the Key app's
+    /// device list), re-derive its range from `own_wallet`, compare the hash,
+    /// check the range starts exactly at the high-water mark (no gap, no
+    /// overlap), then co-sign and advance the mark. On any failure nothing is
+    /// signed and the mark does not move.
     pub fn check_and_cosign(
         &self,
         own_wallet: &WalletDescription,
         batch: &AddressBatch,
         high_water: &mut HighWater,
+        approved_counters: &BTreeSet<DeviceId>,
     ) -> Result<Sig, BatchError> {
         if batch.wallet_checksum != own_wallet.checksum32() {
             return Err(BatchError::WrongWallet);
+        }
+        if !approved_counters.contains(&batch.counter) {
+            return Err(BatchError::UnknownCounter);
         }
         let end = batch.end().ok_or(BatchError::RangeOutOfBounds)?;
         match batch.start.cmp(&high_water.0) {
@@ -365,6 +382,9 @@ impl Approver {
         let own = self
             .builder
             .derive(own_wallet, batch.counter, batch.start, batch.count)?;
+        // `batch` is untrusted: its scripts must pass the shape check before
+        // they are encoded and hashed.
+        batch.check_shape(&self.builder.policy)?;
         if own.hash() != batch.hash() {
             return Err(BatchError::HashMismatch);
         }
@@ -500,6 +520,7 @@ mod tests {
         key_app: Approver,
         counter: DeviceId,
         roots: PinnedRoots,
+        approved: BTreeSet<DeviceId>,
     }
 
     fn fx() -> Fx {
@@ -513,6 +534,7 @@ mod tests {
             key_app,
             counter,
             roots,
+            approved: BTreeSet::from([counter]),
         }
     }
 
@@ -520,7 +542,10 @@ mod tests {
         let batch = BatchBuilder::new(SMALL)
             .derive(&f.wallet, f.counter, start, count)
             .unwrap();
-        let approver_sig = f.key_app.check_and_cosign(&f.wallet, &batch, hw).unwrap();
+        let approver_sig = f
+            .key_app
+            .check_and_cosign(&f.wallet, &batch, hw, &f.approved)
+            .unwrap();
         SignedBatch {
             owner_sig: batch.sign(&f.owner),
             approver_sig,
@@ -556,7 +581,7 @@ mod tests {
         assert_eq!(batch.scripts.len(), 1_000);
         let mut hw = HighWater::new();
         let sig = approver
-            .check_and_cosign(&f.wallet, &batch, &mut hw)
+            .check_and_cosign(&f.wallet, &batch, &mut hw, &f.approved)
             .unwrap();
         assert_eq!(hw.next_index(), 1_000);
         let sb = SignedBatch {
@@ -771,7 +796,7 @@ mod tests {
         };
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &mk(11), &mut hw)
+                .check_and_cosign(&f.wallet, &mk(11), &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::Gap {
                 expected: 10,
@@ -780,7 +805,7 @@ mod tests {
         );
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &mk(9), &mut hw)
+                .check_and_cosign(&f.wallet, &mk(9), &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::Overlap {
                 expected: 10,
@@ -789,7 +814,7 @@ mod tests {
         );
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &mk(0), &mut hw)
+                .check_and_cosign(&f.wallet, &mk(0), &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::Overlap {
                 expected: 10,
@@ -799,11 +824,11 @@ mod tests {
         assert_eq!(hw.next_index(), 10);
         // the same range cannot be signed twice
         f.key_app
-            .check_and_cosign(&f.wallet, &mk(10), &mut hw)
+            .check_and_cosign(&f.wallet, &mk(10), &mut hw, &f.approved)
             .unwrap();
         assert!(f
             .key_app
-            .check_and_cosign(&f.wallet, &mk(10), &mut hw)
+            .check_and_cosign(&f.wallet, &mk(10), &mut hw, &f.approved)
             .is_err());
         assert_eq!(hw.next_index(), 13);
     }
@@ -818,7 +843,7 @@ mod tests {
         b.scripts[1] = f.wallet.change_script(1).unwrap();
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &b, &mut hw)
+                .check_and_cosign(&f.wallet, &b, &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::HashMismatch
         );
@@ -855,7 +880,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &b, &mut hw)
+                .check_and_cosign(&f.wallet, &b, &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::WrongWallet
         );
@@ -865,10 +890,71 @@ mod tests {
         b.start = u32::MAX;
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &b, &mut hw)
+                .check_and_cosign(&f.wallet, &b, &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::RangeOutOfBounds
         );
+    }
+
+    #[test]
+    fn approver_refuses_an_unknown_counter_and_keeps_the_mark() {
+        let f = fx();
+        let stranger = identity(99).device_id();
+        let b = BatchBuilder::new(SMALL)
+            .derive(&f.wallet, stranger, 0, 3)
+            .unwrap();
+        let mut hw = HighWater::from_next_index(0);
+        assert_eq!(
+            f.key_app
+                .check_and_cosign(&f.wallet, &b, &mut hw, &f.approved)
+                .unwrap_err(),
+            BatchError::UnknownCounter
+        );
+        assert_eq!(hw.next_index(), 0);
+        // An empty device list refuses everything.
+        let b = BatchBuilder::new(SMALL)
+            .derive(&f.wallet, f.counter, 0, 3)
+            .unwrap();
+        assert_eq!(
+            f.key_app
+                .check_and_cosign(&f.wallet, &b, &mut hw, &BTreeSet::new())
+                .unwrap_err(),
+            BatchError::UnknownCounter
+        );
+        assert_eq!(hw.next_index(), 0);
+    }
+
+    #[test]
+    fn approver_signs_for_a_known_counter() {
+        let f = fx();
+        let mut approved = f.approved.clone();
+        approved.insert(identity(99).device_id());
+        let b = BatchBuilder::new(SMALL)
+            .derive(&f.wallet, f.counter, 0, 3)
+            .unwrap();
+        let mut hw = HighWater::new();
+        f.key_app
+            .check_and_cosign(&f.wallet, &b, &mut hw, &approved)
+            .unwrap();
+        assert_eq!(hw.next_index(), 3);
+    }
+
+    #[test]
+    fn approver_runs_the_shape_check_before_hashing() {
+        let f = fx();
+        let mut b = BatchBuilder::new(SMALL)
+            .derive(&f.wallet, f.counter, 0, 3)
+            .unwrap();
+        // An oversized script would otherwise reach `encode`.
+        b.scripts[1] = ScriptBuf::from_bytes(vec![0x51; 70_000]);
+        let mut hw = HighWater::new();
+        assert_eq!(
+            f.key_app
+                .check_and_cosign(&f.wallet, &b, &mut hw, &f.approved)
+                .unwrap_err(),
+            BatchError::UnexpectedScriptType
+        );
+        assert_eq!(hw.next_index(), 0);
     }
 
     #[test]
@@ -879,7 +965,7 @@ mod tests {
             .derive(&f.wallet, f.counter, 0, 3)
             .unwrap();
         assert!(matches!(
-            strict.check_and_cosign(&f.wallet, &b, &mut HighWater::new()),
+            strict.check_and_cosign(&f.wallet, &b, &mut HighWater::new(), &f.approved),
             Err(BatchError::CountTooSmall { .. })
         ));
     }
