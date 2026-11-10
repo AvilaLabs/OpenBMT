@@ -93,7 +93,7 @@ fn case_and_spaces_around_words_are_accepted() {
         .map(|(i, w)| match i % 3 {
             0 => format!("  {}", w.to_uppercase()),
             1 => format!("{w}\n"),
-            _ => format!("\t{}{} ", &w[..1].to_uppercase(), &w[1..]),
+            _ => format!("\t{}{} ", w[..1].to_uppercase(), &w[1..]),
         })
         .collect();
     let (app, r) = make(EntropySource::TypedWords { words }, KeyNetwork::Mainnet);
