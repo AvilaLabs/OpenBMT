@@ -273,7 +273,7 @@ impl HeaderStore {
             Some(tip) => work > tip.work,
             None => true,
         };
-        // WR-08: every best-chain header must fit in the form we can save and
+        // WR-08: every best-chain header must fit in the form that can be saved and
         // read back. Check before inserting or switching chains; never prune
         // ancestry needed for proof validation or retargets.
         if better && !within_stored_header_limit(self.start_height, height, max_stored_headers) {

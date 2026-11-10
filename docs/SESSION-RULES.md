@@ -348,8 +348,8 @@ in memory, and nothing is changed if the store fails.
   then writes the queue snapshot and key 1 snapshot to their stores and
   removes the journal only after both writes succeed. A restart rolls a
   remaining journal forward; queue changes and another take are refused until
-  the owner's key 1 state store has been restored. A signed transaction waits, as bytes, until
-  the caller reports it confirmed or dropped. A signed batch, settings item or
+  the owner's key 1 state store has been restored. A signed transaction
+  waits, as bytes, until the caller reports it confirmed or dropped. A signed batch, settings item or
   pairing waits until the caller reports it delivered. So a crash after the
   store loses nothing.
 - **AS-65.** The queue's snapshot is `OBM4`, version 1. Decoding is strict
