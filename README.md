@@ -27,7 +27,9 @@ this with real funds.
   the POS, so receipts, inventory and reports keep working.
 - **Standard recovery.** The wallet is an ordinary output descriptor, so it
   can be restored in other wallet software without anything from this
-  project. A restore drill against other wallets is part of the test plan.
+  project. A restore drill against Bitcoin Core runs on regtest
+  ([scripts/restore-drill-core.sh](scripts/restore-drill-core.sh)); drills
+  against other wallets and hardware signers are part of the test plan.
 
 ## The security goal
 
@@ -48,10 +50,13 @@ sets. The full statement, its conditions and the reasoning are in
 | Path | What |
 |---|---|
 | [docs/DESIGN.md](docs/DESIGN.md) | The design: flows, architecture, threat table, open questions |
-| [docs/research/](docs/research/) | Research notes and three rounds of internal design review |
+| [docs/SIGNER-RULES.md](docs/SIGNER-RULES.md) | Every rule under which the Key app refuses to sign, written before the signer's code |
+| [docs/research/](docs/research/) | Research notes, four rounds of internal design review, and the restore drill results |
 | [crates/openbmt-core/](crates/openbmt-core/) | The rules every device must agree on: wallet description, device identity, address batches, signed records, signed settings, instant-acceptance policy |
+| [scripts/](scripts/) | The restore drill: find and spend a wallet with Bitcoin Core alone |
 
-Planned next: the signer's refusal rules, the payment watcher, then the apps.
+Planned next: the signer built to those rules, the payment watcher, then the
+apps.
 
 ## Building
 

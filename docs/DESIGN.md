@@ -1,19 +1,23 @@
-# OpenBMT design (draft 3.1, 2026-11-09, after the round-3 single-component check)
+# OpenBMT design (draft 3.2, 2026-11-09, after the round-4 code and design check)
 
 Status: design, with the first code under way. The shared rules crate
-(`crates/openbmt-core`) exists and is tested; no app is built yet and nothing
-has been tried on a device. Every claim about another system cites a source in
-§17. **[verify]** marks a claim that still needs a
+(`crates/openbmt-core`) exists and is tested, and a restore drill against
+Bitcoin Core passes on regtest (`scripts/restore-drill-core.sh`); no app is
+built yet and nothing has been tried on a device. Every claim about another
+system cites a source in §17. **[verify]** marks a claim that still needs a
 primary check or a device test before we depend on it.
 
-Draft 3.1 applies three security reviews:
+Draft 3.2 applies four security reviews:
 
 - docs/research/security-review-2026-11-09.md (round 1: findings S1–S17,
   decisions Q1–Q4);
 - docs/research/security-review-round2-2026-11-09.md (round 2: findings A, W,
   U and P, each with a decided fix);
 - docs/research/security-review-round3-2026-11-09.md (round 3: findings
-  R3-1 to R3-10, a single-component check, each with a decided fix).
+  R3-1 to R3-10, a single-component check, each with a decided fix);
+- docs/research/security-review-round4-2026-11-09.md (round 4: findings
+  R4-1 to R4-11, a check of the first code against the design, each with a
+  decided fix).
 
 Section 12 maps the findings to where they are handled.
 
@@ -49,13 +53,14 @@ written next to it. If we cannot check something, the screen and the document
 say "not verified" and say what was checked instead.
 
 These are internal design reviews. No independent security audit has been done
-yet. The design has been through three of them: round 1 from six perspectives
+yet. The design has been through four of them: round 1 from six perspectives
 (a remote thief, insiders, a hostile customer, a Bitcoin wallet engineer, a
 privacy and purist critic, and losses without a thief), round 2 from three
 further perspectives (an adversary, a wallet and recovery engineer, and a
-usability critic who also played the hostile purist), and round 3 as a
+usability critic who also played the hostile purist), round 3 as a
 single-component check that asked whether any single component or person could
-cause an unbounded loss. The merged findings and the decisions are in the three
+cause an unbounded loss, and round 4 as a line-by-line check of the first code
+against this document. The merged findings and the decisions are in the four
 files named above. The built software still needs tests, an outside code review
 and an audit before anyone calls it secure.
 
@@ -154,7 +159,9 @@ safety.
    Key app checks byte for byte that the key 2 and key 3 slots hold the exact
    xpubs it knows (key 3's came by QR in step 2). A bad owner phone can then corrupt only the key 1 slot.
    Then **every device shows the same 4-word checksum of the whole wallet
-   description and all three fingerprints**, and the owner compares them. A
+   description and all three fingerprints**, and the owner compares them. The
+   words are a check for people; the software on each device compares full
+   hashes and its own key slots (§5.4). A
    hardware wallet also has the wallet registered on it and shows the first
    receive address on its own screen, to compare with the owner phone. The
    same screen then shows the **pairs screen**: "Any two of these can move all
@@ -163,11 +170,13 @@ safety.
 6. **Print the recovery kit offline.** The one-page kit (§5.4) goes to a
    printer directly or as a PDF on a USB drive, never through a cloud
    service. It holds hints, not secrets. It prints the checksum words, and any
-   reprint is compared against them. The owner checks off "stored safely".
+   reprint is compared against them. **The Key app then scans the printed
+   kit** and compares the whole wallet description with its own, byte for
+   byte (§5.4). The owner checks off "stored safely".
 7. **Connect the counter and the POS, then run a test sale.** The counter
-   shows its own pairing QR, and the Key app scans it directly. The counter
-   shows the two pinned roots as 4-word fingerprints, and the owner compares
-   them with both phones (§2.9).
+   scans the Key app, then shows its own pairing QR, and the Key app scans
+   that. Both screens then show the same four session words, and the owner
+   confirms on both (§2.9).
    The owner phone gets its own read-only sign-in to the POS (§5.3). If the
    owner wants, a **practice mode on signet** runs the test sale with no real
    money first. Then a $1 sale paid from any wallet shows up in the POS as
@@ -438,15 +447,43 @@ Rules:
     loosening waits for a delay counted in **blocks on each counter's own
     header chain** (default 144 blocks **[to tune]**), and is announced on
     every paired device first.
-- **Pairing uses two roots.** The counter shows its own pairing QR, and the
-  Key app scans it directly, so the owner phone does not name the counter. The
-  counter pins the owner phone's root and the Key app's root, and shows both as
-  4-word fingerprints for the owner to compare with both phones. The Key app
-  shows "Pair counter X" and signs the pairing. Re-pairing needs both roots. A
-  two-root-signed device list is kept. It includes the Box's key, and any
-  identity not on it is ignored. A forged sync message cannot
-  raise a limit, move the address index or change a destination, because those
-  need both signatures.
+- **Pairing uses two roots and a fresh number.** The counter pins two roots:
+  the owner phone's and the Key app's. The ceremony has two scans and one
+  comparison:
+  1. **The counter scans the Key app.** The Key app's "Pair a counter" screen
+     shows both roots and the wallet's ID. The counter reads them from that
+     screen and fixes them. The owner phone does not supply the roots and
+     does not name the counter.
+  2. **The Key app scans the counter.** Only after it has fixed the roots,
+     the counter makes a fresh random number. Its pairing QR carries its own
+     identity key, its name, the number, and a hash of the roots and wallet
+     ID it was given. The Key app compares that hash with its own roots and
+     wallet ID, in full, and refuses if they differ.
+  3. **Both screens show four session words.** They come from the roots, the
+     wallet ID, the counter's key and the fresh number together (§5.4). The
+     Key app shows "Pair counter X" with the words. The owner approves there
+     and taps "They match" on the counter. The counter does not finish
+     pairing without that tap.
+  4. **Both roots sign.** The Key app signs the pairing. The owner phone adds
+     its signature and puts the counter on the device list. The counter
+     accepts the list only if both signatures check against the roots it
+     fixed in step 1 and the entry names its own key and number.
+
+  Why the number comes last: the words depend on a number nobody knew when
+  the roots were chosen, so there is nothing to search for ahead of time. A
+  wrong root gets through the comparison with a chance of 1 in 2^44 per
+  ceremony, and every try needs the owner to run the ceremony again. The
+  number is used once and expires after 10 minutes **[to tune]**. The pairing
+  entry also carries the current settings version, and the counter refuses
+  older settings (§6).
+
+  Re-pairing needs both roots. A two-root-signed device list is kept. It
+  includes the Box's key, and any identity not on it is ignored. A forged
+  sync message cannot raise a limit, move the address index or change a
+  destination, because those need both signatures. Without a Key app (key 2
+  on a hardware wallet and no approver device), the counter scans the owner
+  phone instead, and the screen says pairing rests on the owner phone alone
+  (§5.4). How a Box, which has no screen, is paired is an open item (§16).
 - **Manager sign-in.** The owner adds a manager by name in Owner mode (a
   loosening change). The manager has a PIN of at least 6 digits. 5 wrong tries
   lock that manager for 15 minutes; 10 lock the manager until the owner resets
@@ -590,6 +627,18 @@ and no TLS certificate company is needed **[design, R5]**.
   Key app's co-signature: the Key app derives the same index range from its own
   copy of the wallet description and signs the batch's hash, in an approval
   session (§2.10).
+  - **Order of the Key app's checks.** Before it co-signs, the Key app
+    checks, in this order: the batch names its own wallet, by full hash; the
+    batch has a valid size and shape; key 1's signature on it is valid; the
+    counter it is for is on the signed device list; the range starts exactly
+    at the high-water mark, with no gap and no overlap; and the addresses the
+    Key app derives itself are the same. A batch that fails any check moves
+    nothing.
+  - **Stored before released.** The Key app writes its new high-water mark to
+    storage before the co-signature leaves the device. The counter stores its
+    next index before it shows an address, and its exposure before it shows
+    Paid. A crash in between can waste an index or count a sale against the
+    cap twice. It can never reuse an address or forget exposure.
   - **Hardware wallet as key 2 (the weaker path):** the owner picks which
     addresses to compare, and the hardware wallet shows them in its own
     address explorer. The counter does not pick. The key chooser says the Key
@@ -807,10 +856,11 @@ rest on the owner phone plus spot checks.
     destinations (refunds) and also to allowlisted destinations. A dollar
     figure on the Key app is labeled "from the owner phone", because the Key
     app has no rate of its own. Changed only on this device.
-  - **High-water mark.** The highest address index it has signed, never
+  - **High-water marks.** The highest receive index it has co-signed in a
+    batch, and the highest change index it has signed for. Neither is ever
     lowered.
   - **Change-index bound.** A change output must lie within a set distance of
-    the high-water mark. An outlier needs an explicit override on this device.
+    the change mark. An outlier needs an explicit override on this device.
   - **Fee ceiling.** Measured on the total input value, not only the value
     sent, with a hard bound that cannot be raised from the owner phone. It is
     adjustable on this device, so an emergency spend is possible.
@@ -820,6 +870,8 @@ rest on the owner phone plus spot checks.
   frame counts, E8]**.
 - **Input parsers.** QR, BC-UR, PSBT and file parsers are memory-safe code with
   strict size limits. Fuzzing them is a launch condition.
+- **The full list of what it refuses to sign** is `docs/SIGNER-RULES.md`. Each
+  rule there has an ID that the signer's tests name.
 - **Signing hygiene.** RFC 6979 deterministic nonces. Anti-exfil signing needs
   host-supplied entropy that the host verifies, so the Key app uses it only
   where the host does that check **[verify protocol]**. The Key app refuses to
@@ -863,12 +915,35 @@ condition is not met (§16).
 
 Notes:
 
-- **Same seed in two slots.** The app compares the fingerprints of all three
-  keys. If two match, it blocks the setup. "The app checks what it can." It
+- **Same seed in two slots.** The app compares the three account public keys
+  in full, and their fingerprints. If two match, it blocks the setup. The
+  8-character key fingerprints are labels for people and for other wallets:
+  they are 32 bits, a key with a chosen fingerprint is easy to make, and no
+  check in OpenBMT relies on them alone. "The app checks what it can." It
   cannot see inside a hardware wallet, so two hardware wallets loaded with the
   same seed would show matching fingerprints only if the owner reads them out.
   The checksum words and the pairs screen (§2.1) ask the owner to confirm they
   are different.
+- **Four-word checks, and what they are worth.** Four BIP39 words carry 44
+  bits. Three rules follow (round 4, R4-1):
+  - **Software compares full hashes.** Wherever two devices exchange a QR or a
+    file, the receiving software compares the full 32-byte hash and refuses on
+    a mismatch. The words let a person confirm that two screens are in the
+    same step.
+  - **Every word check is stretched.** The hash goes through 2^20 (about a
+    million) rounds of SHA-256 before it becomes words. Finding a second key
+    or wallet description whose words equal a given set then costs about 2^65
+    hash steps, not 2^44. The delay on a phone is under a second **[to
+    measure]**.
+  - **Words that guard a pairing are made per ceremony.** They include a
+    fresh number that the device being paired chooses after it has fixed the
+    keys it was given (§2.9).
+
+  One limit remains and is designed around. A party that supplies both of the
+  things being compared can make two that share their words in about 2^22
+  tries, stretched or not. So the words are never the only check in that
+  case: each device checks its own key slots byte for byte, and the kit is
+  checked by scan (below).
 - **Phone keys** (key 1, or key 2 in the Key app) are hot keys. Purists prefer
   hardware, and the app says so in one line, with a "move to a hardware
   wallet" option at any time. All keys are BIP39. Phone key rules:
@@ -930,6 +1005,12 @@ Notes:
   version and date) holds hints, not secrets:
   - the full wallet description with checksum, all fingerprints and paths, as
     text and QR, and the 4 checksum words;
+  - **the kit is checked by scan.** After any print, the Key app scans the
+    kit's QR and compares the full description with its own. The owner phone
+    supplies both the key 1 slot and the print, so the words alone would not
+    catch a description made to share them (R4-2). The monthly outside check
+    (§10) is set up from the printed kit, so a wrong kit also shows up there
+    as missing payments;
   - the **birthday block height**;
   - **every wallet generation with its status** (current, retired). Old kits
     are kept;
@@ -942,8 +1023,31 @@ Notes:
     key;
   - **restore steps.** The named path is Sparrow with key 2's words, key 3's
     words and the kit, which an heir can realistically follow. The alternative
-    is an unpruned Bitcoin Core with a block filter index. These steps go in
-    the kit only after experiment E9 has tested them.
+    is Bitcoin Core. E9's Core part has been run
+    (docs/research/restore-drill-core-2026-11-09.md), and the kit's Core
+    steps follow what it found:
+    - the import names the range. A default import found payments up to
+      index 1,000 and nothing at 4,321 or above;
+    - the kit gives the two single-path descriptors, each with its own range:
+      receive up to the highest index issued plus the margin, change with a
+      small range;
+    - the receive descriptor is imported as **not active**. A restored
+      wallet only has to find and spend coins, never to hand out a new
+      address. Imported as active, Core writes an address-book entry for
+      every address up to the highest one used. In the drill that took two
+      to three minutes for index 5,000 and twelve minutes for index 20,000.
+      Imported as not active, the restore took about ten seconds for index
+      5,000 and five minutes for index 200,000;
+    - Core does not read seed words. It finds the coins and builds the
+      transaction as a PSBT, and the keys sign in a signer that does read
+      words;
+    - if a Core wallet is used as a signer, it is imported with the same
+      receive range. In the drill a signer wallet with a smaller range
+      added no signature for a coin beyond it, and gave no error;
+    - a balance check needs no wallet and no rescan: `scantxoutset` with the
+      same ranges lists the unspent payments and their indexes.
+
+    These steps go in the kit only after E9's Sparrow part has been run too.
 - **Key 3 inspection.** Yearly, a physical checklist: the words are there, the
   paper or steel is readable, and the place is safe. This is the default
   because a drill re-exposes the words. A full drill, optional, runs in the
@@ -979,7 +1083,8 @@ Notes:
 - **Wide lookahead.** The wallet watches far ahead of the highest index used.
 - **Recovery scans use an explicit import range.** The kit records the highest
   index issued plus a margin, and says to import that whole range rather than
-  rely on a gap limit.
+  rely on a gap limit. E9 showed why on Bitcoin Core: without the range, the
+  payments at high indexes were not found (§5.4).
 - **Refills.** A counter asks for the next batch 4 weeks ahead (§5.1). It
   tells the cashier if it cannot get one. Sales continue until the range is
   used, then Bitcoin is not offered.
@@ -1030,8 +1135,13 @@ turns instant off. Raising any of them is loosening (§2.9).
 - **Exposure is the outstanding unconfirmed instant total, against a budget
   the owner sets for the whole shop.** It is not a per-hour count. Each counter
   gets its own signed slice of that budget, so no counter needs to know what
-  another has taken. The slices add up to the budget; a shared running total
-  cannot be enforced without a coordinator. Overrides at the counter (§2.9)
+  another has taken. The signed settings give each counter a share in
+  hundredths of a percent. The shares add up to at most 100%, and a counter's
+  slice is the budget times its share; a shop with one counter gives it 100%.
+  Adding a counter or raising a share is loosening (§2.9). Removing a counter
+  needs only the owner and leaves the other slices as they were, so the slices
+  never add up to more than the budget. A shared running total cannot be
+  enforced without a coordinator. Overrides at the counter (§2.9)
   count in the counter's slice, and an override is blocked when the slice is
   full. **A payment leaves the slice only at its first confirmation or by the
   owner's action, never on a timeout.** After the first confirmation its risk
@@ -1041,8 +1151,10 @@ turns instant off. Raising any of them is loosening (§2.9).
   lose at most $X" is shown at setup and in the settings, where X is the
   exposure budget plus the override ceilings (the cashier daily caps and the
   manager ceilings).
-- **Fee bump versus cancel.** A replacement that still pays the same address at
-  least the same amount is a fee bump, not a cancel. Anything else is a cancel.
+- **Fee bump versus cancel.** A replacement is a fee bump only if the original
+  paid the sale's address something and the replacement pays that address at
+  least as much as the original did. Anything else is a cancel. The comparison
+  is with what the original paid, not with the sale amount.
 - **Pause after a cancel: 1 hour.** Instant is off for 1 hour. A second cancel
   within 24 hours pauses instant until the owner resets it on the owner phone.
   Pauses appear in the weekly line. This replaces the old separate 24-hour
@@ -1053,6 +1165,17 @@ turns instant off. Raising any of them is loosening (§2.9).
   instant runs only on cellular or with Tor on **[verify latency, E3]**, and
   peers must come from distinct network groups (§5.1). Otherwise instant is
   off.
+- **The own-node check needs it too.** The own-node tier counts only because
+  the counter's light client also saw the payment. On Wi-Fi that customers can
+  join, without Tor, that second sighting is not independent. The sale is then
+  judged and labeled as "your Box reports it", with those limits.
+- **Hard bounds in the software.** Every device refuses signed settings
+  outside these bounds, whoever signed them: an underpayment tolerance above
+  5% (the default is 0.5%), fewer than 1 confirmation, a watcher heartbeat
+  shorter than 1 minute or longer than 1 hour, or shares that add up to more
+  than 100%. The bounds are first values **[to tune]**. A newly paired counter
+  also refuses any settings older than the version named at its pairing
+  (§2.9), so it cannot be handed an old, looser file.
 - **An unhealthy check turns instant off** (§5.1). So does a missing watcher
   heartbeat: "Instant off: no independent watcher".
 - **Hosted-Box orders without a counter signature are never fulfilled
@@ -1294,15 +1417,15 @@ merchant's. The cash-out is recorded in the books with its basis (§10).
 ## 12. Threat model
 
 Each row maps to a finding in the round-1 review (S1–S17), the round-2
-review (A, W, U, P) or the round-3 check (R3-1 to R3-10), or to an existing
-row, corrected.
+review (A, W, U, P), the round-3 check (R3-1 to R3-10) or the round-4 check
+(R4-1 to R4-11), or to an existing row, corrected.
 
 | Threat | Review | Effect | Mitigation | Section |
 |---|---|---|---|---|
 | Setup plants or keeps a key; both devices compare addresses from the same planted description | S1, A2, W1 | Funds go to an attacker | Each key created on its own device; the Key app checks key 2 and key 3 slots byte for byte; same 4-word checksum and three fingerprints on every device; pairs screen; kit prints the checksum | §2.1, §5.4 |
 | Key 3 made on an online, ordinary phone; words typed through the system keyboard | A3, W5, U1 | Seed stolen | Key 3 made with another publisher's app on the counter tablet, offline, then factory reset (or a hardware wallet); key 2's in-app word picker; FLAG_SECURE; environment checks, stated as promises of the software; honest note that the phone could keep the words | §2.1 |
 | One bad update signs on both key 1 and key 2; owner phone is the only authority | S2, A1, A4, A5 | Both screens show the same lie | Key app is the second authority for descriptions, pairings, batches, destinations and loosening; separate code and release key; no auto-update; checksum compare after updates | §2.10, §5.4, §13 |
-| Counter learns its roots from Owner mode | A1 | Fake roots pinned | Counter shows its own QR, the Key app scans it; counter pins both roots and shows them as 4-word fingerprints; two-root-signed device list; re-pairing needs both | §2.9 |
+| Counter learns its roots from Owner mode | A1 | Fake roots pinned | Counter reads the roots from the Key app's screen and shows its own QR, which the Key app scans; full-hash comparison in software; four session words bound to a fresh number (R4-1); two-root-signed device list; re-pairing needs both | §2.9 |
 | Malicious PSBT builder: fake change, false input amounts, blind signing, huge change index | S3, W11 | Funds or fees stolen | Own registered description, `non_witness_utxo`, fee ceiling, change-index bound against high-water mark, separate display | §5.4 |
 | Malicious Key app build leaks data; "no internet" overclaim | P8, A9 | Secret leaked | Honest wording; RFC 6979 and anti-exfil signing; refuses root, USB debugging, accessibility, overlays | §5.4 |
 | Phone event silently kills a key; Auto Backup restores a dead file; PIN only a screen gate | S4, W15 | Two of three keys lost; or key stolen | Memory-hard KDF plus Keystore; escalating delays and wipe; not bound to biometrics; excluded from backup; dead-key detection; health check in sessions | §5.4 |
@@ -1344,11 +1467,22 @@ row, corrected.
 | Allowlist poisoning; no ceiling on allowlisted destinations | R3-4 | Funds to attacker | Enrolled only by scanning the deposit QR with the Key app's camera, label typed there, active after 24 hours on the Key app's clock; satoshi ceilings also on allowlisted destinations | §5.4, §11 |
 | Dollar ceilings on an offline Key app; restore mode; fee measured on value sent | R3-5 | Ceilings meaningless or bypassed | All ceilings in satoshis set on the Key app, per transaction, per day and per week; dollars labeled "from the owner phone"; restore-and-sign enforces ceilings; fee ceiling on total input with a hard bound | §5.4 |
 | Key 2 is a hardware wallet: batches, settings and pairings need only key 1 | R3-6 | Owner phone alone loosens limits | Key app as an approver on a spare device (identity key only); without it, the screen says these rest on the owner phone plus spot checks | §5.4, §2.10 |
-| Counter named by the owner phone at pairing; Box has no pinned identity | R3-7 | Fake counter or Box accepted | Counter shows its own pairing QR, the Key app scans it; 4-word fingerprints of both roots; Box key on the two-root-signed device list | §2.9, §5.1 |
+| Counter named by the owner phone at pairing; Box has no pinned identity | R3-7 | Fake counter or Box accepted | Counter shows its own pairing QR, the Key app scans it; four session words on both screens (R4-1); Box key on the two-root-signed device list | §2.9, §5.1 |
 | Key app claims it cannot back: sale records, wipe, environment checks, anti-exfil | R3-7 | Overclaim | Stated as owner-phone assertions and promises of the software itself; anti-exfil needs host-verified entropy [verify protocol] | §5.4 |
 | Box or host: faked heartbeat; exposure release unspecified; shared total with no coordinator | R3-8 | Instant exposure unbounded or hidden | Heartbeat only from the owner phone with a pinned key; release only at first confirmation or by owner action; per-counter signed slice of the budget; hosted-Box orders without a counter signature never fulfilled automatically | §5.1, §5.3, §6 |
 | Cashier overrides | R3-9 | Exposure grows past the budget | Overrides blocked when the exposure total is full; daily override cap per cashier | §2.6, §2.9, §6 |
 | Key app input parsers | R3-10 | Memory-safety bug in a signer | Memory-safe parsers with strict size limits; fuzzing as a launch condition; QR default, file transport optional | §5.4, §13 |
+| A compromised owner app searches for a fake Key app root whose four words match the real one, and gets a counter to pin it | R4-1 | Batches of the attacker's addresses accepted: incoming payments stolen by one component | Words stretched with 2^20 hash rounds; pairing words bound to a fresh number chosen after the roots are fixed; the counter reads the roots from the Key app's screen; software compares full hashes | §2.9, §5.4 |
+| Owner phone prints a kit whose description differs from the Key app's but shares its four words | R4-2 | Recovery from the kit fails when it is needed | Key app scans the printed kit and compares the full description; monthly outside check is set up from the kit | §2.1, §5.4, §10 |
+| Key app co-signs a batch for a counter that is not on the device list | R4-3 | Addresses issued to an unknown device | Counter must be on the two-root-signed device list before the Key app signs or moves its mark | §5.1 |
+| Unsigned input moves the Key app's high-water mark; a crash loses state after a signature has left | R4-4 | Indexes used up by a batch the owner phone never signed; address reuse or forgotten exposure after a crash | Key 1's signature checked before any stateful step; state stored before a signature, an address or Paid is released | §5.1 |
+| Signing interface accepts a bare hash, so a caller can skip the message-type tag | R4-5 | A signature for one kind of message replayed as another | Signing and checking take the message type and body only; the bare-hash functions are internal | §13 |
+| Per-counter slice not defined; settings had one number for every counter | R4-6 | Shop-wide instant exposure above the budget with several counters | Signed share per counter, at most 100% in total; a slice is budget times share | §6 |
+| Signed settings with extreme values; an old, looser settings file given to a newly paired counter | R4-7 | Checks switched off inside validly signed settings; rollback | Hard bounds refused by every device; settings version floor named at pairing | §2.9, §6 |
+| Own-node tier on Wi-Fi that customers can join, without Tor | R4-8 | The light client's second sighting is not independent, but the higher limits apply | Judged and labeled as "your Box reports it" | §6 |
+| Fee-bump test compared the replacement with the sale amount | R4-9 | Honest fee bumps of a short payment treated as cancels, pausing instant; the rule did not match its text | Compare with what the original paid; the original must have paid the address something | §6 |
+| Record and message decoders accept oversized or non-canonical input | R4-10 | Memory use or two encodings of one signed message | One valid encoding per message, with a type marker, a version byte and size limits; decoders fuzzed | §13 |
+| 8-character key fingerprints treated as identity | R4-11 | A key made to share a fingerprint passes a comparison | Full public keys compared; fingerprints are labels only | §5.4 |
 
 ## 13. Stack
 
@@ -1363,7 +1497,7 @@ Pinned as of 2026-11-09:
   - `uniffi = "=0.31.2"`
 - Android: Kotlin UI, `HostApduService` for the tag, foreground service for
   the watch.
-- OpenBMT Box: Rust, on Bitcoin Core v30 (pruned) via RPC/ZMQ; packaged for a
+- OpenBMT Box: Rust, on Bitcoin Core v32 (pruned) via RPC/ZMQ; packaged for a
   mini PC image, Start9 and Umbrel. UnifiedPush (or ntfy) runs on it.
 - OpenBMT Key app: Kotlin shell plus a minimal Rust crate set: key handling,
   PSBT decode and check, BC-UR and QR. No network crates and no network
@@ -1371,6 +1505,11 @@ Pinned as of 2026-11-09:
   someone other than the main app's author. Parsers are fuzzed (§5.4).
 - Batch-signing keys use hardened derivation or a separate key, so a leaked
   batch-signing key never exposes the wallet.
+- Signed messages between devices (batches, records, settings, pairings) carry
+  BIP340 signatures over a tagged hash that names the message type, so a
+  signature for one kind of message is never valid for another. Each message
+  has exactly one valid byte encoding, with a type marker, a version byte and
+  size limits, and every decoder is fuzzed (round 4, R4-5 and R4-10).
 - Not reused: Avila Node's P2P layer. It drags in a full node's dependencies,
   and `bip157` already has the mempool watch.
 
@@ -1412,7 +1551,7 @@ Each gets a written protocol before it runs.
 | E6 | Clover sandbox: custom tender button, order close, refund. **Also:** can a payment be undone after PayOrder? Polling versus webhooks; a read-only sign-in | Clover developer account |
 | E7 | Double-spend attempts seen by our mempool watch over weeks, to tune T1 limits | Our node |
 | E8 | Hardware-wallet descriptor registration and signing: does each (Coldcard, Jade, Passport, Keystone) accept our P2WSH 2-of-3 wallet, check change against it, and require `non_witness_utxo`? **Also:** BIP389 `<0;1>` support and the single-path fallback; BC-UR support; PSBT frame counts and the byte cap for QR; the address explorer for owner-picked indexes; USB-C and SD file transport on the Key app | The four wallets |
-| E9 | Restore drill: can a wallet be restored from the recovery kit alone in Sparrow and in Bitcoin Core with a block filter index? Does `<0;1>` import work, or does the fallback? Does the explicit import range find every address? | A laptop, the kit |
+| E9 | Restore drill: can a wallet be restored from the recovery kit alone in Sparrow and in Bitcoin Core with a block filter index? Does `<0;1>` import work, or does the fallback? Does the explicit import range find every address? **Bitcoin Core part run on regtest 2026-11-09: pass** (docs/research/restore-drill-core-2026-11-09.md). The Sparrow part and a hardware signer are not yet run. | A laptop, the kit |
 | E10 | Hidden NFC sticker versus emulated tag: can a hidden tag near the counter be detected by the counter's reader mode? What does an Android wallet show when two tags answer? | Two Android phones, sticker tags |
 
 ## 15. Research tracks
@@ -1527,6 +1666,26 @@ Each gets a written protocol before it runs.
   fulfilled automatically; cashiers have a daily override cap (§6).
 - A monthly outside check is recommended (§10).
 - Parser fuzzing is a launch condition (§5.4).
+
+**Round-4 decisions (2026-11-09).** They fix findings R4-1 to R4-11
+(docs/research/security-review-round4-2026-11-09.md).
+
+- Four-word checks are stretched, software compares full hashes, and pairing
+  words are bound to a fresh number chosen after the roots are fixed (§2.9,
+  §5.4). The counter reads the roots from the Key app's screen.
+- The Key app scans the printed kit (§5.4).
+- The Key app checks key 1's signature and the device list before it co-signs
+  a batch, and state is stored before anything is released (§5.1).
+- Each counter has a signed share of the instant budget; settings have hard
+  bounds and a version floor; the own-node tier is downgraded on shared Wi-Fi
+  without Tor; a fee bump is compared with what the original paid (§6).
+- Every signed message has one valid encoding, with a type marker and a
+  version byte (§13).
+- The kit's Bitcoin Core steps name the import ranges, use the single-path
+  descriptors and import the receive one as not active (§5.4, E9).
+- **Open:** how a Box, which has no screen, is paired. Until that is designed
+  a Box's reports stay in the "your Box reports it" tier and its key reaches
+  the device list only through the two-root-signed list (§2.9).
 
 **The two launch conditions** (§0). The claim that no single component or
 person can spend the wallet holds only when both are met:
