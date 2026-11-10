@@ -9,8 +9,8 @@ use openbmt_core::wire::DecodeError;
 use openbmt_watch::{network_group, NetGroup, PeerAddr};
 
 use crate::book::{
-    Added, AddressBook, BookError, Refusal, Source, BAN_SECS, MAX_ENTRIES, MAX_FROM_SEEDS,
-    MAX_PER_GROUP, MAX_PER_PEER_GROUP, RETRY_SECS,
+    Added, AddressBook, BookError, OnionDraw, Refusal, Source, BAN_SECS, MAX_ENTRIES,
+    MAX_FROM_SEEDS, MAX_PER_GROUP, MAX_PER_PEER_GROUP, RETRY_SECS,
 };
 
 const PORT: u16 = 8333;
@@ -30,6 +30,7 @@ fn group_of(addr: &AddrV2) -> NetGroup {
     match addr {
         AddrV2::Ipv4(a) => network_group(&PeerAddr::Ip(IpAddr::V4(*a))),
         AddrV2::Ipv6(a) => network_group(&PeerAddr::Ip(IpAddr::V6(*a))),
+        AddrV2::TorV3(k) => network_group(&PeerAddr::Onion(*k)),
         _ => network_group(&PeerAddr::Named),
     }
 }
@@ -164,7 +165,7 @@ fn nr_22_takes_at_most_eight_per_network_group() {
     assert_eq!(add(&mut book, &v4(30, 1, 0, 1), Source::Own), Added::Known);
     assert_eq!(add(&mut book, &v4(30, 2, 0, 1), Source::Own), Added::New);
     assert_eq!(MAX_PER_GROUP, 8);
-    // All Tor addresses are one group.
+    // Tor addresses whose keys start with the same 4 bits are one group.
     for i in 0..8 {
         assert_eq!(
             add(&mut book, &AddrV2::TorV3([i + 1; 32]), Source::Own),
@@ -172,7 +173,7 @@ fn nr_22_takes_at_most_eight_per_network_group() {
         );
     }
     assert_eq!(
-        add(&mut book, &AddrV2::TorV3([99; 32]), Source::Own),
+        add(&mut book, &AddrV2::TorV3([0x0a; 32]), Source::Own),
         Added::Refused(Refusal::GroupFull)
     );
 }
@@ -1006,4 +1007,165 @@ fn nr_21_has_filter_candidate_skips_connected_groups_and_recent_tries() {
     let told_by = Source::Peer(group_of(&v4(77, 7, 7, 7)));
     book.add(&gv4(2, 1), PORT, filters(), told_by, 0);
     assert!(!book.has_filter_candidate(&none(), 0));
+}
+
+// ----- NR-92 to NR-94: onion addresses in the book ------------------------
+
+/// A Tor v3 address whose key starts with this byte.
+fn onion(first: u8, rest: u8) -> AddrV2 {
+    let mut key = [rest; 32];
+    key[0] = first;
+    AddrV2::TorV3(key)
+}
+
+#[test]
+fn nr_93_a_tor_address_is_in_the_group_of_the_first_four_bits_of_its_key() {
+    let mut book = AddressBook::new();
+    let mut groups = BTreeSet::new();
+    for nibble in 0..16u8 {
+        let addr = onion(nibble << 4 | 0x0f, 9);
+        assert_eq!(add(&mut book, &addr, Source::Own), Added::New);
+        let e = book.get(&addr, PORT).unwrap();
+        assert_eq!(e.group, network_group(&PeerAddr::Onion(key_of(&addr))));
+        groups.insert(e.group);
+    }
+    assert_eq!(groups.len(), 16);
+    // The 16 groups hold 8 each: the limit of NR-22 is per group.
+    for i in 0..7u8 {
+        assert_eq!(add(&mut book, &onion(0x30 | i, 1), Source::Own), Added::New);
+    }
+    assert_eq!(
+        add(&mut book, &onion(0x3f, 2), Source::Own),
+        Added::Refused(Refusal::GroupFull)
+    );
+}
+
+fn key_of(addr: &AddrV2) -> [u8; 32] {
+    match addr {
+        AddrV2::TorV3(k) => *k,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn nr_93_a_book_with_onion_groups_comes_back_from_its_stored_form() {
+    let mut book = AddressBook::new();
+    for nibble in 0..16u8 {
+        let from = Source::Peer(group_of(&onion(nibble << 4, 0)));
+        assert_eq!(add(&mut book, &onion(nibble << 4, 5), from), Added::New);
+    }
+    book.set_anchors(&[(onion(0x20, 5), PORT)]);
+    let back = AddressBook::from_bytes(&book.to_bytes(), 0).unwrap();
+    assert_eq!(back, book);
+}
+
+#[test]
+fn nr_92_without_a_proxy_a_tor_address_is_never_drawn_and_stays() {
+    let mut book = AddressBook::new();
+    assert_eq!(add(&mut book, &onion(0x10, 1), Source::Own), Added::New);
+    assert_eq!(add(&mut book, &onion(0x90, 1), Source::Own), Added::New);
+    for random in 0..50u64 {
+        assert_eq!(
+            book.pick_with(&none(), false, random, 0, OnionDraw::Never),
+            None
+        );
+    }
+    assert!(!book.has_filter_candidate_with(&none(), 0, OnionDraw::Never));
+    assert_eq!(book.len(), 2);
+    // It was not marked as tried.
+    assert_eq!(book.get(&onion(0x10, 1), PORT).unwrap().last_try, None);
+    // The draw that knows no proxy rule still takes it.
+    assert!(book.pick(&none(), false, 1, 0).is_some());
+}
+
+#[test]
+fn nr_92_a_tor_address_is_left_out_beside_clear_ones_when_there_is_no_proxy() {
+    let mut book = own_book(3);
+    assert_eq!(add(&mut book, &onion(0x10, 1), Source::Own), Added::New);
+    for random in 0..64u64 {
+        let mut copy = book_with_free_tries(book.clone());
+        let picked = copy
+            .pick_with(&none(), false, random, 0, OnionDraw::Never)
+            .unwrap();
+        assert!(matches!(picked.addr, AddrV2::Ipv4(_)), "{picked:?}");
+    }
+}
+
+/// The same book with every address free to be drawn again.
+fn book_with_free_tries(book: AddressBook) -> AddressBook {
+    let mut copy = AddressBook::new();
+    for e in book.iter() {
+        copy.add(&e.addr, e.port, e.services, e.source, 0);
+    }
+    copy
+}
+
+#[test]
+fn nr_94_a_mixed_draw_chooses_the_kind_with_equal_chance() {
+    let mut book = own_book(4);
+    for nibble in 0..4u8 {
+        assert_eq!(
+            add(&mut book, &onion(nibble << 4, 1), Source::Own),
+            Added::New
+        );
+    }
+    let (mut tor, mut clear) = (0, 0);
+    for i in 0..200u64 {
+        let random = i.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        let mut copy = book_with_free_tries(book.clone());
+        match copy
+            .pick_with(&none(), false, random, 0, OnionDraw::Mixed)
+            .unwrap()
+            .addr
+        {
+            AddrV2::TorV3(_) => tor += 1,
+            _ => clear += 1,
+        }
+    }
+    // The top bit of the number decides: about half of 200 each.
+    assert!((60..=140).contains(&tor), "{tor} {clear}");
+    assert_eq!(tor + clear, 200);
+    // The top bit set: onion; clear: not.
+    let mut copy = book_with_free_tries(book.clone());
+    let picked = copy
+        .pick_with(&none(), false, 1 << 63, 0, OnionDraw::Mixed)
+        .unwrap();
+    assert!(matches!(picked.addr, AddrV2::TorV3(_)));
+    let mut copy = book_with_free_tries(book);
+    let picked = copy
+        .pick_with(&none(), false, 7, 0, OnionDraw::Mixed)
+        .unwrap();
+    assert!(matches!(picked.addr, AddrV2::Ipv4(_)));
+}
+
+#[test]
+fn nr_94_a_mixed_draw_with_one_kind_in_the_book_takes_that_kind() {
+    let mut book = AddressBook::new();
+    assert_eq!(add(&mut book, &onion(0x10, 1), Source::Own), Added::New);
+    for random in [0, 1 << 63] {
+        let mut copy = book_with_free_tries(book.clone());
+        assert!(copy
+            .pick_with(&none(), false, random, 0, OnionDraw::Mixed)
+            .is_some());
+    }
+    let mut clear = own_book(2);
+    for random in [0, 1 << 63] {
+        let mut copy = book_with_free_tries(clear.clone());
+        assert!(copy
+            .pick_with(&none(), false, random, 0, OnionDraw::Mixed)
+            .is_some());
+    }
+    assert!(clear.pick(&none(), false, 3, 0).is_some());
+}
+
+#[test]
+fn nr_94_a_connected_onion_group_is_not_drawn_again() {
+    let mut book = AddressBook::new();
+    assert_eq!(add(&mut book, &onion(0x10, 1), Source::Own), Added::New);
+    assert_eq!(add(&mut book, &onion(0x11, 2), Source::Own), Added::New);
+    let connected = BTreeSet::from([group_of(&onion(0x1f, 0))]);
+    assert_eq!(
+        book.pick_with(&connected, false, 5, 0, OnionDraw::Mixed),
+        None
+    );
 }

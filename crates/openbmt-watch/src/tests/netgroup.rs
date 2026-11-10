@@ -166,3 +166,50 @@ fn wr_41_a_key_that_is_not_one_groups_own_is_refused() {
     assert!(NetGroup::from_key([2, 8, 8, 0, 0]).is_some());
     assert!(NetGroup::from_key([3, 0x20, 0x01, 0x0d, 0xb8]).is_some());
 }
+
+/// An onion peer whose key starts with this byte.
+fn onion(first: u8, rest: u8) -> PeerAddr {
+    let mut key = [rest; 32];
+    key[0] = first;
+    PeerAddr::Onion(key)
+}
+
+#[test]
+fn nr_93_an_onion_peer_is_grouped_by_the_first_four_bits_of_its_key() {
+    // The rest of the key does not matter, nor the low bits of byte 0.
+    assert_eq!(
+        network_group(&onion(0xa0, 0)),
+        network_group(&onion(0xaf, 0xff))
+    );
+    let groups: BTreeSet<_> = (0..=255u8).map(|b| network_group(&onion(b, 7))).collect();
+    assert_eq!(groups.len(), 16);
+    assert_ne!(
+        network_group(&onion(0x0f, 0)),
+        network_group(&onion(0x10, 0))
+    );
+}
+
+#[test]
+fn nr_93_onion_groups_are_apart_from_every_ip_group_and_from_names() {
+    let named = network_group(&PeerAddr::Named);
+    for b in 0..16u8 {
+        let g = network_group(&onion(b << 4, 1));
+        assert_ne!(g, named);
+        for (a, _) in TABLE {
+            assert_ne!(g, network_group(&ip(a)), "{a}");
+        }
+    }
+}
+
+#[test]
+fn nr_93_an_onion_group_comes_back_from_its_key_and_only_its_own() {
+    for b in 0..16u8 {
+        let g = network_group(&onion(b << 4, 3));
+        assert_eq!(g.key(), [5, b, 0, 0, 0]);
+        assert_eq!(NetGroup::from_key(g.key()), Some(g));
+    }
+    assert_eq!(NetGroup::from_key([5, 16, 0, 0, 0]), None);
+    assert_eq!(NetGroup::from_key([5, 1, 0, 0, 1]), None);
+    assert_eq!(NetGroup::from_key([5, 1, 0, 1, 0]), None);
+    assert_eq!(NetGroup::from_key([5, 1, 1, 0, 0]), None);
+}

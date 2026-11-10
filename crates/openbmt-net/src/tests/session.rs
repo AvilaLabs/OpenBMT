@@ -95,6 +95,17 @@ fn nr_12_a_good_version_is_answered_in_the_order_of_nr_13() {
 }
 
 #[test]
+fn nr_95_sendaddrv2_goes_out_before_the_verack() {
+    let mut s = session();
+    s.take_outgoing();
+    hear(&mut s, &version_frame()).unwrap();
+    let sent: Vec<&'static str> = outgoing(&mut s).iter().map(|m| m.cmd()).collect();
+    let at = |name: &str| sent.iter().position(|c| *c == name);
+    assert!(at("sendaddrv2") < at("verack"), "{sent:?}");
+    assert!(at("sendaddrv2").is_some());
+}
+
+#[test]
 fn nr_12_the_peer_services_and_start_height_are_reported_as_claims() {
     let mut s = session();
     let mut v = peer_version();

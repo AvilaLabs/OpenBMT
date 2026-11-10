@@ -34,14 +34,16 @@
 pub mod book;
 pub mod frame;
 pub mod manager;
+pub mod onion;
 mod reason;
 pub mod session;
+mod sha3;
 pub mod v2;
 
 #[cfg(test)]
 mod tests;
 
-pub use book::{Added, AddressBook, BookError, Picked, Refusal, Source};
+pub use book::{Added, AddressBook, BookError, OnionDraw, Picked, Refusal, Source};
 pub use frame::{encode, Command, Frame, FrameReader, Message, PeerAddress};
 pub use manager::{
     BroadcastRefused, ConnectRefused, Manager, ManagerConfig, Output, PeerId, RelayState,

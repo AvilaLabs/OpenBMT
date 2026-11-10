@@ -17,7 +17,8 @@
 //!
 //! The driver never sends a transaction, an address or a script, so this
 //! only reads. Peer addresses appear in `note` lines, as the driver writes
-//! them; keep the output out of the repository.
+//! them, except onion names, which are printed as `<onion>`; keep the output
+//! out of the repository.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -26,11 +27,13 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
 use bitcoin::hashes::{sha256, Hash};
+use bitcoin::p2p::address::AddrV2;
 use bitcoin::{BlockHash, Network, ScriptBuf, WScriptHash};
+use openbmt_net::AddressBook;
 use openbmt_net_io::{
     AppEvent, DirLock, Driver, DriverConfig, FileStorage, OsRandomness, SystemClock,
 };
-use openbmt_watch::{network_group, HeaderStore, NetGroup, PeerTransport};
+use openbmt_watch::{network_group, HeaderStore, NetGroup, PeerAddr, PeerTransport};
 
 const USAGE: &str = "usage: observe <bitcoin|signet> <data dir> <seconds> [headers-only]";
 
@@ -73,6 +76,36 @@ fn size_of(path: &std::path::Path) -> String {
         Ok(m) => format!("{} bytes", m.len()),
         Err(_) => "missing".to_string(),
     }
+}
+
+/// A line of text with each word that holds an onion name printed as
+/// `<onion>`: the notes name peers, and an onion address is not kept in a
+/// log.
+fn redact(text: &str) -> String {
+    text.split(' ')
+        .map(|w| if w.contains(".onion") { "<onion>" } else { w })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// How many Tor v3 addresses the stored book holds, and how many of them
+/// were drawn (tried) and had a handshake finish at some time.
+fn onion_in_book(path: &std::path::Path) -> (usize, usize, usize) {
+    let Ok(bytes) = fs::read(path) else {
+        return (0, 0, 0);
+    };
+    let Ok(book) = AddressBook::from_bytes(&bytes, 0) else {
+        return (0, 0, 0);
+    };
+    let tor: Vec<_> = book
+        .iter()
+        .filter(|e| matches!(e.addr, AddrV2::TorV3(_)))
+        .collect();
+    (
+        tor.len(),
+        tor.iter().filter(|e| e.last_try.is_some()).count(),
+        tor.iter().filter(|e| e.last_good.is_some()).count(),
+    )
 }
 
 fn secs(t: Option<f64>) -> String {
@@ -122,6 +155,7 @@ fn run(args: &[String]) -> Result<(), String> {
     if let Ok(proxy) = std::env::var("OPENBMT_PROXY") {
         config.proxy = Some(proxy.parse().map_err(|e| format!("OPENBMT_PROXY: {e}"))?);
     }
+    let onion_start = onion_in_book(&book_path);
     let started = Instant::now();
     let (rx0, tx0) = net_dev();
     let io0 = proc_io("rchar:");
@@ -159,6 +193,16 @@ fn run(args: &[String]) -> Result<(), String> {
     let mut seen_v1: BTreeSet<String> = BTreeSet::new();
     let mut v2_refusals = 0u64;
     let mut drops: BTreeMap<String, u64> = BTreeMap::new();
+    // NR-92 to NR-96: onion peers. Distinct keys that were ready, their
+    // groups and the ones that serve filters (never printed), the most at
+    // once, the dials the driver noted and why they failed.
+    let mut onion_ready: BTreeSet<[u8; 32]> = BTreeSet::new();
+    let mut onion_filter_peers: BTreeSet<[u8; 32]> = BTreeSet::new();
+    let mut onion_groups: BTreeSet<NetGroup> = BTreeSet::new();
+    let mut max_onion_ready = 0usize;
+    let mut first_onion_ready: Option<f64> = None;
+    let mut onion_dials = 0u64;
+    let mut onion_failures: BTreeMap<String, u64> = BTreeMap::new();
 
     while Instant::now() < end {
         let wait = end.saturating_duration_since(Instant::now());
@@ -184,12 +228,25 @@ fn run(args: &[String]) -> Result<(), String> {
                     .filter(|p| p.serves_filters)
                     .map(|p| network_group(&p.addr))
                     .collect();
+                let mut onion_now = 0usize;
                 for p in &peers {
+                    if let PeerAddr::Onion(key) = p.addr {
+                        onion_now += 1;
+                        onion_ready.insert(key);
+                        onion_groups.insert(network_group(&p.addr));
+                        if p.serves_filters {
+                            onion_filter_peers.insert(key);
+                        }
+                    }
                     match p.transport {
                         PeerTransport::V2 => seen_v2.insert(format!("{:?}", p.addr)),
                         PeerTransport::V1 => seen_v1.insert(format!("{:?}", p.addr)),
                     };
                 }
+                if onion_now > 0 && first_onion_ready.is_none() {
+                    first_onion_ready = Some(t);
+                }
+                max_onion_ready = max_onion_ready.max(onion_now);
                 if ready > 0 && first_ready.is_none() {
                     first_ready = Some(t);
                 }
@@ -207,8 +264,8 @@ fn run(args: &[String]) -> Result<(), String> {
                     two_filter_groups = Some(t);
                 }
                 let line = format!(
-                    "peers ready={ready} filters={filters} groups={} filter_groups={} \
-                     ahead_since={ahead:?} tip={height}",
+                    "peers ready={ready} onion={onion_now} filters={filters} groups={} \
+                     filter_groups={} ahead_since={ahead:?} tip={height}",
                     groups.len(),
                     filter_groups.len()
                 );
@@ -267,13 +324,19 @@ fn run(args: &[String]) -> Result<(), String> {
                         lookups = (lookups.0 + a, lookups.1 + b);
                     }
                 }
+                if text == "dialing an onion peer" {
+                    onion_dials += 1;
+                }
+                if let Some(why) = text.strip_prefix("onion dial failed: ") {
+                    *onion_failures.entry(redact(why)).or_default() += 1;
+                }
                 if text.contains(" dropped") {
                     if let Some(at) = text.find("NR-") {
                         let rule: String = text.chars().skip(at).take(5).collect();
                         *drops.entry(rule).or_default() += 1;
                     }
                 }
-                println!("{t:.1} note {text}");
+                println!("{t:.1} note {}", redact(&text));
             }
             AppEvent::TxRelayed { .. } | AppEvent::TxState { .. } => {}
             AppEvent::Checked(height) => {
@@ -301,7 +364,7 @@ fn run(args: &[String]) -> Result<(), String> {
             AppEvent::Peers(_, _, (height, _)) => tip_height = height,
             AppEvent::Note(text) => {
                 *kinds.entry("note").or_default() += 1;
-                println!("{t:.1} note {text}");
+                println!("{t:.1} note {}", redact(&text));
             }
             AppEvent::Stopped => {
                 *kinds.entry("stopped").or_default() += 1;
@@ -327,6 +390,27 @@ fn run(args: &[String]) -> Result<(), String> {
         seen_v1.len()
     );
     println!("v2 refusals noted (fallback to v1): {v2_refusals}");
+    let onion_end = onion_in_book(&book_path);
+    println!(
+        "onion addresses in the book: {} at start, {} at the end \
+         ({} drawn, {} with a finished handshake in the stored book)",
+        onion_start.0, onion_end.0, onion_end.1, onion_end.2
+    );
+    println!(
+        "onion dials started: {onion_dials}; failed: {}",
+        onion_failures.values().sum::<u64>()
+    );
+    for (why, n) in &onion_failures {
+        println!("  onion dial failed ({n}): {why}");
+    }
+    println!(
+        "onion peers ready: {} distinct in {} groups, {} serving filters, \
+         most at once {max_onion_ready}, first at {}",
+        onion_ready.len(),
+        onion_groups.len(),
+        onion_filter_peers.len(),
+        secs(first_onion_ready)
+    );
     for (rule, n) in &drops {
         println!("drops by {rule}: {n}");
     }

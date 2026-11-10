@@ -9,6 +9,7 @@ mod kit;
 mod manager;
 mod manager_kit;
 mod meta;
+mod onion;
 mod session;
 mod v2;
 mod v2kit;

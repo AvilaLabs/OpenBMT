@@ -258,19 +258,30 @@ impl Net {
 
     /// Connect peer `n` (in its own group) and finish the handshake.
     pub fn join(&mut self, n: u8, services: ServiceFlags, start_height: i32) -> Joined {
+        self.join_at(n, addr(n), services, start_height)
+    }
+
+    /// Connect peer `n` reached at this address and finish the handshake.
+    pub fn join_at(
+        &mut self,
+        n: u8,
+        at: PeerAddr,
+        services: ServiceFlags,
+        start_height: i32,
+    ) -> Joined {
         let id = PeerId(u64::from(n));
         let mut wire = Wire::for_mode(n);
         match mode() {
             Mode::V1 => self
                 .m
-                .connected(id, addr(n), 0x1000 + u64::from(n), self.now)
+                .connected(id, at, 0x1000 + u64::from(n), self.now)
                 .expect("connected"),
             Mode::V2 => {
                 let entropy = V2Entropy::new([n.max(1); 32], [n ^ 0x33; 32]);
                 self.m
                     .connected_with(
                         id,
-                        addr(n),
+                        at,
                         0x1000 + u64::from(n),
                         self.now,
                         TransportChoice::V2(entropy),

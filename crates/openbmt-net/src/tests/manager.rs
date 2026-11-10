@@ -1837,6 +1837,71 @@ macro_rules! also_over_v2 {
     };
 }
 
+// ----- NR-93: onion groups ----------------------------------------------
+
+/// An onion peer whose key starts with this byte.
+fn onion_at(first: u8) -> PeerAddr {
+    let mut key = [1u8; 32];
+    key[0] = first;
+    PeerAddr::Onion(key)
+}
+
+#[test]
+fn nr_93_two_onion_peers_in_different_groups_are_the_two_filter_peers_of_nr_42() {
+    let mut n = Net::new();
+    n.m.watch_script(script(7));
+    let a = n.join_at(1, onion_at(0x10), filters(), 0).id;
+    let b = n.join_at(2, onion_at(0x20), filters(), 0).id;
+    let blocks = blocks_on(&genesis(), vec![vec![]], 1);
+    n.headers(a, &headers_of(&blocks));
+    n.headers(b, &headers_of(&blocks));
+    n.tick(FILTER_SETTLE_SECS);
+    let want = vec![(1u32, blocks[0].block_hash())];
+    assert_eq!(filter_requests(&n.sent(a)), want);
+    assert_eq!(filter_requests(&n.sent(b)), want);
+    assert_eq!(n.m.sizes().peers, 2);
+}
+
+#[test]
+fn nr_93_two_onion_peers_in_one_group_count_once() {
+    let mut n = Net::new();
+    n.m.watch_script(script(7));
+    let a = n.join_at(1, onion_at(0x10), filters(), 0).id;
+    // The same first 4 bits: refused, and nothing stored.
+    assert_eq!(
+        n.m.connected(PeerId(50), onion_at(0x1f), 7, n.now),
+        Err(ConnectRefused::SameGroup)
+    );
+    assert_eq!(n.m.sizes().peers, 1);
+    // One filter peer is not two: the block is fetched in full.
+    let blocks = blocks_on(&genesis(), vec![vec![]], 1);
+    n.headers(a, &headers_of(&blocks));
+    let sent = n.sent(a);
+    assert!(filter_requests(&sent).is_empty());
+    assert_eq!(block_requests(&sent), vec![blocks[0].block_hash()]);
+}
+
+#[test]
+fn nr_93_an_onion_peer_is_in_a_group_apart_from_ip_peers_and_names() {
+    let mut n = Net::new();
+    n.up(1);
+    assert_eq!(n.m.connected(PeerId(50), PeerAddr::Named, 7, n.now), Ok(()));
+    // Every 4-bit prefix is a group of its own beside them.
+    for (i, first) in (0..16u8).map(|b| b << 4).enumerate() {
+        let id = PeerId(100 + i as u64);
+        let r = n.m.connected(id, onion_at(first), 7, n.now);
+        assert_eq!(
+            r,
+            if i < 6 {
+                Ok(())
+            } else {
+                Err(ConnectRefused::Full)
+            },
+            "{i}"
+        );
+    }
+}
+
 also_over_v2! {
     nr_21_health_peers_say_who_serves_filters_and_how_high_over_v2 =>
         nr_21_health_peers_say_who_serves_filters_and_how_high,

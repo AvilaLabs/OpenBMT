@@ -252,3 +252,59 @@ fn nr_04_several_messages_in_one_read_make_events_in_order() {
     assert!(matches!(events[2], Event::Block(_)));
     assert_eq!(outgoing(&mut s), vec![NetworkMessage::Pong(4)]);
 }
+
+/// One `addrv2` entry as BIP155 writes it: time, services, network id,
+/// address length, address, port.
+fn addrv2_entry(network: u8, addr: &[u8], port: u16) -> Vec<u8> {
+    let mut out = 5u32.to_le_bytes().to_vec();
+    // The services, as a compact size: the bits are claims.
+    out.push(0x09);
+    out.push(network);
+    out.push(u8::try_from(addr.len()).unwrap());
+    out.extend_from_slice(addr);
+    out.extend_from_slice(&port.to_be_bytes());
+    out
+}
+
+#[test]
+fn nr_95_a_tor_v3_entry_of_addrv2_is_read_and_the_book_keeps_it() {
+    let key = [0x42u8; 32];
+    let mut payload = vec![1u8];
+    payload.extend(addrv2_entry(4, &key, 8333));
+    let events = hear(&raw_frame("addrv2", &payload));
+    let Some(Event::Addresses(list)) = events.first() else {
+        panic!("{events:?}");
+    };
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].addr, AddrV2::TorV3(key));
+    assert_eq!(list[0].port, 8333);
+    let mut book = crate::AddressBook::new();
+    let added = book.add(
+        &list[0].addr,
+        list[0].port,
+        list[0].services,
+        crate::Source::Seed,
+        0,
+    );
+    assert_eq!(added, crate::Added::New);
+    assert!(book.get(&AddrV2::TorV3(key), 8333).is_some());
+}
+
+#[test]
+fn nr_95_a_tor_v3_entry_with_a_key_of_another_length_is_not_an_address() {
+    // BIP155 fixes the length of a Tor v3 key at 32 bytes.
+    let mut payload = vec![1u8];
+    payload.extend(addrv2_entry(4, &[0x42u8; 31], 8333));
+    let mut s = ready_session();
+    match s.receive(&raw_frame("addrv2", &payload), START) {
+        Err(Drop::Malformed { command }) => assert_eq!(command, "addrv2"),
+        Ok(events) => {
+            let kept = events.iter().any(|e| {
+                matches!(e, Event::Addresses(l)
+                    if l.iter().any(|a| matches!(a.addr, AddrV2::TorV3(_))))
+            });
+            assert!(!kept, "{events:?}");
+        }
+        other => panic!("{other:?}"),
+    }
+}

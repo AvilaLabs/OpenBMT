@@ -34,9 +34,10 @@ use bitcoin::p2p::ServiceFlags;
 use bitcoin::{BlockHash, Network, ScriptBuf, Txid};
 use openbmt_net::book::{BAN_SECS, V2_RETRY_SECS};
 use openbmt_net::manager::Wanted;
+use openbmt_net::onion::{onion_name, parse_onion_name};
 use openbmt_net::{
-    Added, AddressBook, ConnectRefused, Manager, ManagerConfig, Output, PeerAddress, PeerId,
-    RelayState, Source, TransportChoice, V2Entropy,
+    Added, AddressBook, ConnectRefused, Manager, ManagerConfig, OnionDraw, Output, PeerAddress,
+    PeerId, RelayState, Source, TransportChoice, V2Entropy,
 };
 use openbmt_watch::{host_group, network_group, HeaderStore, Peer, PeerAddr};
 
@@ -579,7 +580,7 @@ impl Driver {
         let shared = Arc::new(Shared::default());
         let tip = manager.chain().tip().1;
         let core = Core {
-            initial: initial_targets(&book),
+            initial: initial_targets(&book, config.proxy.is_some()),
             tip_saved: tip,
             config,
             storage,
@@ -635,13 +636,23 @@ impl Driver {
 
 // ----- addresses ---------------------------------------------------------
 
-/// The ways to reach a book entry. Tor v3 and other kinds are not dialed in
-/// this version (NR-76).
-fn target_of(addr: &AddrV2, port: u16) -> Option<Target> {
+/// The ways to reach a book entry. An address is dialed by its IP address.
+/// A Tor v3 address is dialed only through the proxy, by its host name
+/// (NR-92): without one it has no target. Other kinds are not dialed.
+fn target_of(addr: &AddrV2, port: u16, proxy: bool) -> Option<Target> {
     match addr {
         AddrV2::Ipv4(ip) => Some(Target::Addr(SocketAddr::new(IpAddr::V4(*ip), port))),
         AddrV2::Ipv6(ip) => Some(Target::Addr(SocketAddr::new(IpAddr::V6(*ip), port))),
+        AddrV2::TorV3(key) if proxy => Some(Target::Name(onion_name(key), port)),
         _ => None,
+    }
+}
+
+/// The public key of the onion address that a target names, if it is one.
+fn onion_key(target: &Target) -> Option<[u8; 32]> {
+    match target {
+        Target::Name(name, _) => parse_onion_name(name),
+        Target::Addr(_) => None,
     }
 }
 
@@ -650,22 +661,31 @@ fn book_key(target: &Target) -> Option<(AddrV2, u16)> {
     match target {
         Target::Addr(SocketAddr::V4(a)) => Some((AddrV2::Ipv4(*a.ip()), a.port())),
         Target::Addr(SocketAddr::V6(a)) => Some((AddrV2::Ipv6(*a.ip()), a.port())),
-        Target::Name(..) => None,
+        Target::Name(_, port) => Some((AddrV2::TorV3(onion_key(target)?), *port)),
     }
 }
 
+/// NR-93: an onion peer is grouped by its key, a seed name as a name.
 fn peer_addr(target: &Target) -> PeerAddr {
-    match target {
-        Target::Addr(a) => PeerAddr::Ip(a.ip()),
-        Target::Name(..) => PeerAddr::Named,
+    match (target, onion_key(target)) {
+        (_, Some(key)) => PeerAddr::Onion(key),
+        (Target::Addr(a), None) => PeerAddr::Ip(a.ip()),
+        (Target::Name(..), None) => PeerAddr::Named,
     }
 }
 
-/// NR-24: the stored anchors, to be dialed first.
-fn initial_targets(book: &AddressBook) -> VecDeque<Target> {
+/// NR-94: the most onion peers, connected and being opened, for a target
+/// number of peers: half of it, rounded down, and at least 1.
+pub(crate) fn onion_cap(target_peers: usize) -> usize {
+    (target_peers / 2).max(1)
+}
+
+/// NR-24: the stored anchors, to be dialed first. An onion anchor without a
+/// proxy is skipped and stays in the book.
+fn initial_targets(book: &AddressBook, proxy: bool) -> VecDeque<Target> {
     book.anchors()
         .iter()
-        .filter_map(|(addr, port)| target_of(addr, *port))
+        .filter_map(|(addr, port)| target_of(addr, *port, proxy))
         .collect()
 }
 
@@ -1144,7 +1164,12 @@ where
             let _ = handle.join();
         }
         match result {
-            Err(_) => self.dial_failed(&dial.target, now),
+            Err(e) => {
+                if onion_key(&dial.target).is_some() {
+                    self.emit(AppEvent::Note(format!("onion dial failed: {e}")));
+                }
+                self.dial_failed(&dial.target, now);
+            }
             Ok(stream) => self.adopt(id, dial.target, stream, now),
         }
     }
@@ -1277,7 +1302,9 @@ where
     }
 
     fn has_name(&self) -> bool {
-        let is_name = |t: &Target| matches!(t, Target::Name(..));
+        // An onion peer is a name that the book knows (NR-93): it does not
+        // stand in the way of a seed name.
+        let is_name = |t: &Target| matches!(t, Target::Name(..)) && onion_key(t).is_none();
         self.conns.values().any(|c| is_name(&c.target))
             || self.dialing.values().any(|d| is_name(&d.target))
     }
@@ -1330,24 +1357,52 @@ where
         }
         // NR-72: filters are wanted and the book has no address to dial
         // that offers them: ask the seeds too. The book is dialed meanwhile.
-        if wanted.want_filters && !self.book.has_filter_candidate(&wanted.avoid, now) {
+        let onion = self.onion_draw();
+        if wanted.want_filters
+            && !self
+                .book
+                .has_filter_candidate_with(&wanted.avoid, now, onion)
+        {
             self.start_round_if_due(now);
         }
         for _ in 0..PICK_TRIES {
             let random = self.rng.next_u64();
-            let Some(picked) = self
-                .book
-                .pick(&wanted.avoid, wanted.want_filters, random, now)
+            let Some(picked) =
+                self.book
+                    .pick_with(&wanted.avoid, wanted.want_filters, random, now, onion)
             else {
                 break;
             };
-            if let Some(target) = target_of(&picked.addr, picked.port) {
+            if let Some(target) = target_of(&picked.addr, picked.port, self.config.proxy.is_some())
+            {
                 if self.usable(&target, now) {
                     return Some(target);
                 }
             }
         }
         self.ask_seeds(now)
+    }
+
+    /// NR-92, NR-94: how the next draw treats onion addresses. Never without
+    /// a proxy, and never when the onion peers, connected and being
+    /// opened, are already half of the target (at least 1); otherwise the
+    /// kinds are mixed.
+    fn onion_draw(&self) -> OnionDraw {
+        if self.config.proxy.is_none() {
+            return OnionDraw::Never;
+        }
+        let held = self
+            .conns
+            .values()
+            .map(|c| &c.target)
+            .chain(self.dialing.values().map(|d| &d.target))
+            .filter(|t| onion_key(t).is_some())
+            .count();
+        if held < onion_cap(self.config.target_peers) {
+            OnionDraw::Mixed
+        } else {
+            OnionDraw::Never
+        }
     }
 
     /// NR-72: start a round of seed lookups (through the proxy with Tor on)
@@ -1412,6 +1467,9 @@ where
     fn start_dial(&mut self, target: Target, now: u64) {
         let id = PeerId(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
+        if onion_key(&target).is_some() {
+            self.emit(AppEvent::Note("dialing an onion peer".to_string()));
+        }
         let net = self.net.clone();
         let tx = self.inbound_tx.clone();
         let proxy = self.config.proxy;

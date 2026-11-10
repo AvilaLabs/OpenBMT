@@ -241,7 +241,7 @@ impl Addr {
                 }
                 network_group(&PeerAddr::Ip(IpAddr::V6(a)))
             }
-            Self::Tor(_) => network_group(&PeerAddr::Named),
+            Self::Tor(key) => network_group(&PeerAddr::Onion(key)),
         };
         if group == local_group() {
             Err(Refusal::NotRoutable)
@@ -255,6 +255,24 @@ impl Addr {
 /// False for a kind the book does not keep.
 pub fn is_routable(addr: &AddrV2) -> bool {
     Addr::from_v2(addr).is_some_and(|a| a.classify().is_ok())
+}
+
+/// NR-92, NR-94: how the draw treats the Tor v3 addresses of the book.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnionDraw {
+    /// Every kind of address is drawn, with no preference.
+    Any,
+    /// A Tor v3 address is never drawn: there is no proxy to dial it
+    /// through, or the onion peers are as many as NR-94 allows.
+    Never,
+    /// With a proxy and room for another onion peer: when the book has
+    /// candidates of both kinds, the kind is chosen with equal chance.
+    Mixed,
+}
+
+/// Whether the entry is a Tor v3 address.
+fn is_onion(e: &Entry) -> bool {
+    matches!(e.addr, AddrV2::TorV3(_))
 }
 
 /// NR-23: an entry that may be dialed now: not banned, not in a connected
@@ -295,6 +313,7 @@ fn group_from_key(k: [u8; 5]) -> Option<NetGroup> {
     let group = match k {
         [0, ..] => local_group(),
         [1, ..] => network_group(&PeerAddr::Named),
+        [5, n, ..] if n < 16 => network_group(&PeerAddr::Onion([n << 4; 32])),
         [2, a, b, ..] => network_group(&PeerAddr::Ip(IpAddr::V4(Ipv4Addr::new(a, b, 0, 0)))),
         [3, a, b, c, d] => {
             let o = [a, b, c, d, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -481,10 +500,26 @@ impl AddressBook {
         random: u64,
         now: u64,
     ) -> Option<Picked> {
+        self.pick_with(connected, want_filters, random, now, OnionDraw::Any)
+    }
+
+    /// [`pick`](Self::pick) with the rule for Tor v3 addresses of NR-92 and
+    /// NR-94. With `Never` they are not candidates. With `Mixed`, when the
+    /// candidates are of both kinds (after the filter preference), the top
+    /// bit of `random` chooses the kind, and the draw goes on within it.
+    pub fn pick_with(
+        &mut self,
+        connected: &BTreeSet<NetGroup>,
+        want_filters: bool,
+        random: u64,
+        now: u64,
+        onion: OnionDraw,
+    ) -> Option<Picked> {
         let mut candidates: Vec<Key> = self
             .entries
             .iter()
             .filter(|(_, e)| is_candidate(e, connected, now))
+            .filter(|(_, e)| onion != OnionDraw::Never || !is_onion(e))
             .map(|(k, _)| *k)
             .collect();
         let anchor = self.anchors.iter().find(|a| candidates.contains(a));
@@ -499,6 +534,14 @@ impl AddressBook {
                     .collect();
                 if !filtered.is_empty() {
                     candidates = filtered;
+                }
+            }
+            if onion == OnionDraw::Mixed {
+                let (tor, clear): (Vec<Key>, Vec<Key>) = candidates
+                    .iter()
+                    .partition(|k| matches!(k.addr, Addr::Tor(_)));
+                if !tor.is_empty() && !clear.is_empty() {
+                    candidates = if random >> 63 == 1 { tor } else { clear };
                 }
             }
             let mut groups: BTreeMap<NetGroup, Vec<Key>> = BTreeMap::new();
@@ -524,9 +567,23 @@ impl AddressBook {
     /// (see `pick`) offers the compact-filter service as a seed, the owner
     /// or the peer itself said. It shares both tests with `pick`.
     pub fn has_filter_candidate(&self, connected: &BTreeSet<NetGroup>, now: u64) -> bool {
-        self.entries
-            .values()
-            .any(|e| is_candidate(e, connected, now) && offers_filters(e))
+        self.has_filter_candidate_with(connected, now, OnionDraw::Any)
+    }
+
+    /// [`has_filter_candidate`](Self::has_filter_candidate) for a draw by
+    /// [`pick_with`](Self::pick_with): with `Never`, a Tor v3 address is
+    /// not a candidate.
+    pub fn has_filter_candidate_with(
+        &self,
+        connected: &BTreeSet<NetGroup>,
+        now: u64,
+        onion: OnionDraw,
+    ) -> bool {
+        self.entries.values().any(|e| {
+            is_candidate(e, connected, now)
+                && offers_filters(e)
+                && (onion != OnionDraw::Never || !is_onion(e))
+        })
     }
 
     /// A handshake with the peer completed: failures go to 0, the time is

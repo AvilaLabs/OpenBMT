@@ -227,6 +227,11 @@ thin driver that owns the sockets.
   exit that answers a seed lookup can lie. That costs a dial and nothing
   else: what a peer says about filters is compared across two network
   groups (NR-42), and a peer that lies is dropped (NR-25).
+- **They do not make onion groups as strong as IP groups.** The 16 groups
+  of NR-93 are cut from the first 4 bits of a key that its operator
+  chooses. One operator can run onion peers in every one of the 16 groups
+  at no cost, where an IP address in a group costs one address in it. Two
+  onion peers in two groups are not evidence of two operators.
 - **They do not relay.** The counter gives nothing back to the network.
   A shop that wants to support the network runs the Box's full node.
 
@@ -296,9 +301,8 @@ rules are what it decides where the rules above are silent.
   it stores the height and starts from it next time, so that a restart
   does not check the same blocks again. It is told of every peer that
   goes, with the reason.
-- **NR-76.** A Tor v3 address in the book is kept but not dialed in this
-  version: the driver does not yet turn it into a host name for the
-  proxy.
+- **NR-76.** A Tor v3 address in the book is dialed only as NR-92 says.
+  Before NR-92 it was kept and never dialed.
 - **NR-77.** Stopping saves the data, closes every socket and ends the
   driver's threads within 5 seconds. A thread that is still in a connect or
   a lookup at that time holds no data and is left to end by itself.
@@ -429,3 +433,54 @@ the one place where this crate gives a transaction to the network.
   the transaction, unless the owner has turned on sending without Tor;
   every send then says that the wallet's own connections were used. It
   never falls back to the wallet's connections without saying so.
+
+## 12. Onion peers
+
+With Tor on, the counter also dials Bitcoin nodes that are Tor v3 hidden
+services. A path to one never leaves the Tor network, so no exit sees it.
+This is a path to peers that does not depend on the clear-net exits.
+
+- **NR-92.** A Tor v3 address of the book is dialed only through the
+  proxy of NR-26, never directly, by asking the proxy to connect to the
+  host name of the address. The name is the lower-case base32, without
+  padding, of the 32-byte public key, a 2-byte checksum and the version
+  byte 3, followed by `.onion`: 56 characters and the suffix. The checksum
+  is the first 2 bytes of SHA3-256 of `.onion checksum`, the key and the
+  byte 3. Without a proxy a Tor address is never drawn from the book (the
+  draw of NR-23 leaves it out) and never dialed: it stays in the book. The
+  name goes to the proxy as a host name, as NR-26 allows for a name, and
+  is not looked up by anything else. The counter does not check that a
+  name it has dialed is the key the peer proves: Tor does that. The driver
+  tells the app, without the address, each time it starts an onion dial
+  and each time one fails, with the proxy's reason.
+- **NR-93.** An onion peer's network group (WR-41) is the Tor network and
+  the first 4 bits of its public key: 16 groups, apart from every IP group
+  and from the single group of the peers reached by name (NR-26). A peer
+  reached through the proxy by an IPv4 or IPv6 address keeps its group by
+  that address. Two onion peers whose keys start with different 4 bits are
+  in two groups, so they can be the two peers in different groups of NR-20
+  and NR-42. Two in one group count once. This is how Bitcoin Core groups
+  Tor addresses. The groups are weaker than the IP groups against one
+  operator (see section 8): the key of an onion address is chosen by the
+  one who runs it, and an operator can make as many keys as it likes and
+  keep the ones that start as it wants.
+- **NR-94.** With the proxy set, when the book holds an onion address that
+  may be dialed, at most half of the connections (the target number
+  divided by 2, rounded down, and at least 1) go to onion peers, those
+  open and those being opened together. While fewer do, and the book holds
+  both kinds of address that may be dialed, the draw of NR-23 chooses
+  between an onion address and another with equal chance, and then
+  as NR-23 says. So the clear-net exits are not the only path to peers,
+  and the onion path is not the only one either. The cap and the equal
+  chance are **[to tune]**. The seeds give no onion addresses (NR-72); they
+  come from `addrv2` (NR-95).
+- **NR-95.** An onion address comes from an `addrv2` message (BIP155), the
+  only form that can carry one. The counter sends `sendaddrv2` before its
+  `verack` (NR-13) and reads `addrv2`: an entry of the network kind Tor v3
+  with a 32-byte key is an address like any other (NR-22), and the book
+  keeps it with the services the peer claimed for it. An entry of a kind the
+  book does not keep, a Tor v3 entry with a key of another length, and an
+  `addr` entry with an old Tor address are not kept.
+- **NR-96.** Each dial to an onion peer gives the proxy a fresh random name
+  and password, as every other dial does (NR-78): two onion peers, or an
+  onion peer and a clear-net peer, are not reached through one circuit.

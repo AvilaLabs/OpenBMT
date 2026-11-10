@@ -7,8 +7,11 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 pub enum PeerAddr {
     /// An IP address.
     Ip(IpAddr),
-    /// A name that anyone can make without cost: Tor, I2P or CJDNS.
+    /// A name that anyone can make without cost: I2P, CJDNS, or a host name.
     Named,
+    /// A Tor v3 peer, by the public key of its address. Its group is the
+    /// first 4 bits of the key (NR-93).
+    Onion([u8; 32]),
 }
 
 /// A network group. Two peers in one group count once. The value can be
@@ -27,6 +30,7 @@ impl NetGroup {
             Repr::Host([a, b, c, d]) => [4, a, b, c, d],
             Repr::V4([a, b]) => [2, a, b, 0, 0],
             Repr::V6([a, b, c, d]) => [3, a, b, c, d],
+            Repr::Onion(n) => [5, n, 0, 0, 0],
         }
     }
 
@@ -41,6 +45,7 @@ impl NetGroup {
             1 if [a, b, c, d] == [0; 4] => Self(Repr::Named),
             2 if [c, d] == [0, 0] => Self(Repr::V4([a, b])),
             3 => Self(Repr::V6([a, b, c, d])),
+            5 if a < 16 && [b, c, d] == [0; 3] => Self(Repr::Onion(a)),
             // A host group (kind 4) is for a check on one machine and is
             // never stored.
             _ => return None,
@@ -55,7 +60,7 @@ impl NetGroup {
                 octets[15] = 2;
                 Some(PeerAddr::Ip(IpAddr::V6(Ipv6Addr::from(octets))))
             }
-            Repr::Local | Repr::Named | Repr::Host(_) => None,
+            Repr::Local | Repr::Named | Repr::Onion(_) | Repr::Host(_) => None,
         };
         match probe {
             Some(addr) if network_group(&addr) != group => None,
@@ -75,6 +80,9 @@ enum Repr {
     V4([u8; 2]),
     /// The first 32 bits of an IPv6 address.
     V6([u8; 4]),
+    /// The first 4 bits of the public key of an onion address, as a number
+    /// from 0 to 15.
+    Onion(u8),
     /// One address on this machine, for a check against several nodes that
     /// all run here. The four bytes are the last four of the address.
     Host([u8; 4]),
@@ -90,9 +98,12 @@ enum Repr {
 ///   CGNAT (`100.64.0.0/10`) addresses are one single group. So are
 ///   multicast and reserved addresses, which no peer can have.
 /// - Every peer reached by a name is in one single group.
+/// - An onion peer is grouped by the first 4 bits of its public key: 16
+///   groups, as Bitcoin Core groups Tor addresses (NR-93).
 pub fn network_group(addr: &PeerAddr) -> NetGroup {
     NetGroup(match addr {
         PeerAddr::Named => Repr::Named,
+        PeerAddr::Onion(key) => Repr::Onion(key[0] >> 4),
         PeerAddr::Ip(IpAddr::V4(v4)) => v4_group(*v4),
         PeerAddr::Ip(IpAddr::V6(v6)) => v6_group(*v6),
     })

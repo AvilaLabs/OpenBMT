@@ -1,5 +1,6 @@
 //! The driver against fake peers on loopback sockets.
 
+use std::collections::BTreeSet;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -12,14 +13,15 @@ use bitcoin::hashes::Hash;
 use bitcoin::p2p::address::AddrV2;
 use bitcoin::p2p::ServiceFlags;
 use bitcoin::{Network, ScriptBuf};
+use openbmt_net::onion::onion_name;
 use openbmt_net::{AddressBook, Source};
 use openbmt_watch::{HeaderStore, PeerAddr};
 
 use super::kit::*;
 use crate::dial::{DialError, Net};
 use crate::driver::{
-    longest_connected, AppEvent, Driver, DriverConfig, Handle, ANCHOR_SECS, HEADER_SAVE_SECS,
-    SEED_ROUND_SECS, WRITE_TIMEOUT_SECS,
+    longest_connected, onion_cap, AppEvent, Driver, DriverConfig, Handle, ANCHOR_SECS,
+    HEADER_SAVE_SECS, SEED_ROUND_SECS, WRITE_TIMEOUT_SECS,
 };
 use crate::env::{Key, SystemClock};
 use crate::socks::{ReplyCode, SocksError, Target};
@@ -371,6 +373,245 @@ fn nr_76_a_tor_v3_address_in_the_book_is_not_dialed() {
     thread::sleep(Duration::from_millis(1_200));
     assert!(log.lock().unwrap().is_empty());
     handle.shutdown();
+}
+
+/// A key whose first byte is `first`.
+fn onion_key(first: u8, rest: u8) -> [u8; 32] {
+    let mut key = [rest; 32];
+    key[0] = first;
+    key
+}
+
+/// A stored book with these onion keys (port 18444) and these IPv4 /16s.
+fn onion_book(onions: &[[u8; 32]], clear: &[u8]) -> MemStorage {
+    let mut book = AddressBook::new();
+    let services = ServiceFlags::NETWORK | ServiceFlags::WITNESS;
+    for key in onions {
+        let added = book.add(&AddrV2::TorV3(*key), 18_444, services, Source::Own, 1);
+        assert_eq!(added, openbmt_net::Added::New);
+    }
+    for a in clear {
+        let added = book.add(&v4(*a, 1, 1, 1), 18_444, services, Source::Own, 1);
+        assert_eq!(added, openbmt_net::Added::New);
+    }
+    MemStorage::with(Key::Book, book.to_bytes())
+}
+
+#[test]
+fn nr_92_without_a_proxy_a_tor_address_is_never_dialed_and_stays_in_the_book() {
+    let storage = onion_book(&[onion_key(0x10, 1), onion_key(0x20, 2)], &[30]);
+    let peer = FakePeer::start(Behavior::Silent);
+    let (net, log, _) = net_to(peer.addr, Vec::new());
+    let mut handle = start(bare(), &storage, net);
+    assert!(until(5, || !log.lock().unwrap().is_empty()));
+    thread::sleep(Duration::from_millis(1_200));
+    handle.shutdown();
+    // Only the clear address was dialed, by its address, with no proxy.
+    let dials = log.lock().unwrap().clone();
+    assert_eq!(dials, vec![(Target::Addr(sock(30, 1, 1, 1, 18_444)), None)]);
+    let book = stored_book(&storage);
+    assert_eq!(book.len(), 3);
+    for first in [0x10, 0x20] {
+        let entry = book
+            .get(
+                &AddrV2::TorV3(onion_key(first, u8::from(first == 0x20) + 1)),
+                18_444,
+            )
+            .unwrap();
+        assert_eq!(entry.last_try, None);
+        assert_eq!(entry.failures, 0);
+    }
+}
+
+#[test]
+fn nr_92_with_a_proxy_an_onion_address_is_dialed_by_name_and_never_resolved() {
+    let key = onion_key(0x40, 3);
+    let storage = onion_book(&[key], &[]);
+    let peer = FakePeer::start(Behavior::Serve(Vec::new()));
+    let (net, log, lookups) = net_to(peer.addr, Vec::new());
+    let proxy = sock(127, 0, 0, 1, 9_050);
+    let mut cfg = bare();
+    cfg.proxy = Some(proxy);
+    let mut handle = start(cfg, &storage, net);
+    wait_for(&handle, 10, has_peer).expect("no ready peer");
+    assert_eq!(lookups.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        log.lock().unwrap().first().cloned(),
+        Some((Target::Name(onion_name(&key), 18_444), Some(proxy)))
+    );
+    handle.shutdown();
+    // The handshake is noted in the book under the address itself.
+    let entry = stored_book(&storage)
+        .get(&AddrV2::TorV3(key), 18_444)
+        .cloned()
+        .unwrap();
+    assert!(entry.last_good.is_some());
+}
+
+#[test]
+fn nr_93_an_onion_peer_is_shown_to_the_app_with_its_key_for_the_group() {
+    let key = onion_key(0x40, 3);
+    let storage = onion_book(&[key], &[]);
+    let peer = FakePeer::start(Behavior::Serve(Vec::new()));
+    let (net, _, _) = net_to(peer.addr, Vec::new());
+    let mut cfg = bare();
+    cfg.proxy = Some(sock(127, 0, 0, 1, 9_050));
+    let mut handle = start(cfg, &storage, net);
+    let seen = wait_for(&handle, 10, has_peer).expect("no ready peer");
+    match seen.last() {
+        Some(AppEvent::Peers(peers, ..)) => {
+            assert_eq!(peers.first().map(|p| p.addr), Some(PeerAddr::Onion(key)));
+            let group = openbmt_watch::network_group(&peers[0].addr);
+            assert_eq!(group.key(), [5, 4, 0, 0, 0]);
+        }
+        other => panic!("{other:?}"),
+    }
+    handle.shutdown();
+}
+
+#[test]
+fn nr_92_the_proxy_is_asked_to_connect_to_the_onion_name_with_these_bytes() {
+    let key = onion_key(0x40, 3);
+    let name = onion_name(&key);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy = listener.local_addr().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let (asked_tx, asked_rx) = mpsc::channel();
+    let s = stop.clone();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut greeting = [0u8; 4];
+        stream.read_exact(&mut greeting).unwrap();
+        // Ask for the name and password of NR-78.
+        stream.write_all(&[5, 2]).unwrap();
+        let mut head = [0u8; 2];
+        stream.read_exact(&mut head).unwrap();
+        let mut user = vec![0u8; usize::from(head[1])];
+        stream.read_exact(&mut user).unwrap();
+        let mut plen = [0u8; 1];
+        stream.read_exact(&mut plen).unwrap();
+        let mut pass = vec![0u8; usize::from(plen[0])];
+        stream.read_exact(&mut pass).unwrap();
+        stream.write_all(&[1, 0]).unwrap();
+        let mut request = vec![0u8; 5];
+        stream.read_exact(&mut request).unwrap();
+        let mut rest = vec![0u8; usize::from(request[4]) + 2];
+        stream.read_exact(&mut rest).unwrap();
+        asked_tx
+            .send((greeting, user, pass, request, rest))
+            .unwrap();
+        stream
+            .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0x48, 0x5c])
+            .unwrap();
+        serve_stream(stream, &Behavior::Serve(Vec::new()), &s);
+    });
+    let storage = onion_book(&[key], &[]);
+    let mut cfg = bare();
+    cfg.proxy = Some(proxy);
+    let mut handle = start_system(cfg, &storage);
+    wait_for(&handle, 10, has_peer).expect("no ready peer");
+    let (greeting, user, pass, request, rest) =
+        asked_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(greeting, [5, 2, 0, 2]);
+    // NR-96: a fresh name and password, as for every dial.
+    assert_eq!(user.len(), 16);
+    assert_eq!(user, pass);
+    // CONNECT, a domain name of 62 bytes, then the regtest port 18444.
+    assert_eq!(request, [5, 1, 0, 3, 62]);
+    assert_eq!(&rest[..62], name.as_bytes());
+    assert_eq!(rest[62..], 18_444u16.to_be_bytes());
+    assert_eq!(name.len(), 62);
+    handle.shutdown();
+    stop.store(true, Ordering::SeqCst);
+    server.join().unwrap();
+}
+
+/// A net whose dials are recorded with their tokens and end in a refusal
+/// after `hang_ms`.
+fn hanging_net(hang_ms: u64) -> (Net, Arc<Mutex<Vec<(Target, u64)>>>) {
+    let log: Arc<Mutex<Vec<(Target, u64)>>> = Arc::default();
+    let l = log.clone();
+    let net = Net {
+        dial: Arc::new(move |target, _, token| {
+            l.lock().unwrap().push((target.clone(), token));
+            thread::sleep(Duration::from_millis(hang_ms));
+            Err(DialError::Connect(ErrorKind::ConnectionRefused))
+        }),
+        resolve: Arc::new(|_, _| Ok(Vec::new())),
+        proxy_resolve: Arc::new(not_tor),
+    };
+    (net, log)
+}
+
+fn is_onion_target(target: &Target) -> bool {
+    matches!(target, Target::Name(n, _) if n.ends_with(".onion"))
+}
+
+#[test]
+fn nr_94_the_cap_is_half_of_the_target_rounded_down_and_at_least_one() {
+    assert_eq!(onion_cap(8), 4);
+    assert_eq!(onion_cap(9), 4);
+    assert_eq!(onion_cap(4), 2);
+    assert_eq!(onion_cap(3), 1);
+    assert_eq!(onion_cap(2), 1);
+    assert_eq!(onion_cap(1), 1);
+    assert_eq!(onion_cap(0), 1);
+}
+
+#[test]
+fn nr_94_at_most_half_of_the_slots_are_onion_peers_when_the_book_holds_both() {
+    // 12 onion addresses in 12 groups and 12 clear ones in 12 groups.
+    let onions: Vec<[u8; 32]> = (0..12u8).map(|i| onion_key(i << 4, 1)).collect();
+    let clear: Vec<u8> = (30..42).collect();
+    let storage = onion_book(&onions, &clear);
+    let (net, log) = hanging_net(1_500);
+    let mut cfg = bare();
+    cfg.proxy = Some(sock(127, 0, 0, 1, 9_050));
+    cfg.target_peers = 4;
+    let mut handle = start(cfg, &storage, net);
+    assert!(until(5, || log.lock().unwrap().len() >= 4));
+    thread::sleep(Duration::from_millis(300));
+    handle.shutdown();
+    let dials = log.lock().unwrap().clone();
+    let first: Vec<_> = dials.iter().take(4).collect();
+    let onion_count = first.iter().filter(|(t, _)| is_onion_target(t)).count();
+    // Four slots, all being opened: at most 2 are onion.
+    assert!(onion_count <= onion_cap(4), "{onion_count}");
+    assert!(first.len() == 4);
+}
+
+#[test]
+fn nr_94_a_book_of_onion_addresses_alone_fills_no_more_than_the_cap() {
+    let onions: Vec<[u8; 32]> = (0..12u8).map(|i| onion_key(i << 4, 1)).collect();
+    let storage = onion_book(&onions, &[]);
+    let (net, log) = hanging_net(1_500);
+    let mut cfg = bare();
+    cfg.proxy = Some(sock(127, 0, 0, 1, 9_050));
+    cfg.target_peers = 8;
+    let mut handle = start(cfg, &storage, net);
+    assert!(until(5, || log.lock().unwrap().len() >= 4));
+    thread::sleep(Duration::from_millis(500));
+    handle.shutdown();
+    // The 4 that are open at once are the cap of 8 / 2, and no fifth is
+    // opened while they hang.
+    assert_eq!(log.lock().unwrap().len(), 4);
+}
+
+#[test]
+fn nr_96_every_onion_dial_gets_a_token_of_its_own() {
+    let onions: Vec<[u8; 32]> = (0..4u8).map(|i| onion_key(i << 4, 1)).collect();
+    let storage = onion_book(&onions, &[]);
+    let (net, log) = hanging_net(1_000);
+    let mut cfg = bare();
+    cfg.proxy = Some(sock(127, 0, 0, 1, 9_050));
+    cfg.target_peers = 8;
+    let mut handle = start(cfg, &storage, net);
+    assert!(until(5, || log.lock().unwrap().len() >= 4));
+    handle.shutdown();
+    let dials = log.lock().unwrap().clone();
+    assert!(dials.iter().all(|(t, _)| is_onion_target(t)));
+    let tokens: BTreeSet<u64> = dials.iter().map(|(_, token)| *token).collect();
+    assert_eq!(tokens.len(), dials.len());
 }
 
 #[test]
