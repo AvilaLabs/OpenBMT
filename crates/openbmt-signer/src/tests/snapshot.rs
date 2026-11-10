@@ -8,7 +8,8 @@ use openbmt_core::wire::DecodeError;
 use super::kit::*;
 use crate::state::AllowlistEntry;
 use crate::{
-    Ceilings, FeeCeilings, LogEntry, SignerState, MAX_ALLOWLIST, MAX_MONEY_SATS, WEEK_SECS,
+    Ceilings, FeeCeilings, LogEntry, SignerState, MAX_ALLOWLIST, MAX_FEE_SATS, MAX_MONEY_SATS,
+    WEEK_SECS,
 };
 
 /// Strictness checks for one wire type, as `openbmt-core` runs them: the
@@ -604,4 +605,207 @@ fn counts_are_checked_before_anything_is_allocated() {
     put(&mut m, log_count_at, &1u32.to_le_bytes());
     assert_eq!(decode(&m).err(), Some(DecodeError::Truncated));
     let _ = (l.latest, WEEK_SECS);
+}
+
+/// A state registered on `network`, with the account key it holds. The three
+/// test networks share a coin type, so they share the kit's keys; the main
+/// network gets keys of its own.
+fn on_network(network: Network) -> (SignerState, bitcoin::bip32::Xpub) {
+    if network != Network::Bitcoin {
+        let k = kit();
+        let s = SignerState::register(&k.description, network, &k.xpubs[OWN], None).unwrap();
+        return (s, k.xpubs[OWN]);
+    }
+    use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
+    use openbmt_core::wallet::{KeySlot, WalletDescription};
+    let secp = crate::crypto::secp();
+    let path: DerivationPath = "m/48'/0'/0'/2'".parse().unwrap();
+    let mut slots = Vec::new();
+    for n in 0..3u8 {
+        let master = Xpriv::new_master(network, &[n + 1; 32]).unwrap();
+        let account = master.derive_priv(secp, &path).unwrap();
+        slots.push(KeySlot {
+            index: n + 1,
+            origin_fingerprint: master.fingerprint(secp),
+            origin_path: path.clone(),
+            xpub: Xpub::from_priv(secp, &account),
+        });
+    }
+    let own = slots[OWN].xpub;
+    let wallet = WalletDescription::new(network, slots.try_into().unwrap()).unwrap();
+    let s = SignerState::register(wallet.canonical_string(), network, &own, None).unwrap();
+    (s, own)
+}
+
+#[test]
+fn a_state_round_trips_on_every_network_and_only_on_its_own() {
+    let networks = [
+        Network::Bitcoin,
+        Network::Testnet,
+        Network::Signet,
+        Network::Regtest,
+    ];
+    let all: Vec<_> = networks.iter().map(|n| (*n, on_network(*n))).collect();
+    for (i, (net, (state, key))) in all.iter().enumerate() {
+        let bytes = state.to_bytes();
+        assert_eq!(usize::from(bytes[5]), i, "network byte of {net}");
+        let back = SignerState::from_bytes(&bytes, *net, key).unwrap();
+        assert_eq!(back.to_bytes(), bytes, "{net}");
+        for (other, (_, other_key)) in &all {
+            if other == net {
+                continue;
+            }
+            for k in [key, other_key] {
+                assert!(
+                    matches!(
+                        SignerState::from_bytes(&bytes, *other, k),
+                        Err(DecodeError::NonCanonical(_))
+                    ),
+                    "{net} bytes read as {other}"
+                );
+            }
+        }
+    }
+}
+
+/// The bytes of an empty state up to the spend log's count, with the latest
+/// time seen set to `latest`, followed by a spend log of `entries`, each
+/// `(time, other, allowlisted, fee)` with one input of its own.
+fn with_log(latest: u64, entries: &[(u64, u64, u64, u64)]) -> Vec<u8> {
+    let bytes = state().to_bytes();
+    let l = layout(&bytes);
+    let mut m = bytes[..l.fee + 16 + 4].to_vec();
+    put(&mut m, l.latest, &latest.to_le_bytes());
+    m.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+    for (i, (time, other, allowlisted, fee)) in entries.iter().enumerate() {
+        // Ascending transaction IDs.
+        let mut txid = [0u8; 32];
+        txid[24..].copy_from_slice(&(i as u64 + 1).to_be_bytes());
+        m.extend_from_slice(&txid);
+        for v in [time, other, allowlisted, fee] {
+            m.extend_from_slice(&v.to_le_bytes());
+        }
+        m.extend_from_slice(&1u32.to_le_bytes());
+        m.extend_from_slice(&txid);
+        m.extend_from_slice(&0u32.to_le_bytes());
+    }
+    m
+}
+
+#[test]
+fn a_crafted_spend_log_reads_back_the_way_it_was_written() {
+    let m = with_log(500, &[(500, 7, 8, 9), (100, 1, 2, 3)]);
+    let s = decode(&m).unwrap();
+    assert_eq!(s.to_bytes(), m);
+    assert_eq!(s.latest_time_seen(), 500);
+    assert_eq!(s.log().count(), 2);
+}
+
+#[test]
+fn a_spend_log_entry_may_carry_the_latest_time_seen_but_not_a_later_one() {
+    assert!(decode(&with_log(500, &[(500, 1, 0, 1)])).is_ok());
+    assert!(non_canonical(&with_log(500, &[(501, 1, 0, 1)])));
+    // The same through a real state: the entry is dated at the latest time.
+    let mut s = state();
+    sign_ok(&mut s, &simple(50_000, 1_000), NOW);
+    assert_eq!(s.latest_time_seen(), NOW);
+    assert!(decode(&s.to_bytes()).is_ok());
+}
+
+#[test]
+fn a_spend_log_amount_is_held_to_all_bitcoin_in_each_field() {
+    let top = MAX_MONEY_SATS;
+    assert!(decode(&with_log(9, &[(9, top, 0, 1)])).is_ok());
+    assert!(decode(&with_log(9, &[(9, 0, top, 1)])).is_ok());
+    assert!(non_canonical(&with_log(9, &[(9, top + 1, 0, 1)])));
+    assert!(non_canonical(&with_log(9, &[(9, 0, top + 1, 1)])));
+}
+
+#[test]
+fn a_spend_log_fee_is_held_to_the_fixed_bound() {
+    assert!(decode(&with_log(9, &[(9, 1, 0, MAX_FEE_SATS)])).is_ok());
+    assert!(non_canonical(&with_log(9, &[(9, 1, 0, MAX_FEE_SATS + 1)])));
+}
+
+/// A log of `FULL` entries at all bitcoin in one field (`which`: 0 other
+/// destinations, 1 allowlisted) and a last entry of `last` in that field and
+/// `fee`.
+const FULL: usize = 8_784;
+
+fn heavy_log(which: usize, last: u64, fee: u64) -> Vec<u8> {
+    let at = |amount: u64| {
+        if which == 0 {
+            (amount, 0)
+        } else {
+            (0, amount)
+        }
+    };
+    let mut entries: Vec<(u64, u64, u64, u64)> = (0..FULL)
+        .map(|_| (9, at(MAX_MONEY_SATS).0, at(MAX_MONEY_SATS).1, 0))
+        .collect();
+    entries.push((9, at(last).0, at(last).1, fee));
+    with_log(9, &entries)
+}
+
+#[test]
+fn spend_log_totals_may_reach_the_largest_u64_but_not_pass_it() {
+    // What is left below u64::MAX after FULL entries at all bitcoin.
+    let room = u64::MAX - FULL as u64 * MAX_MONEY_SATS;
+    assert!(room > 0 && room < MAX_MONEY_SATS);
+    let overflows = |m: &[u8]| {
+        matches!(
+            decode(m),
+            Err(DecodeError::NonCanonical("spend log totals overflow"))
+        )
+    };
+
+    // Other destinations: the fee is part of the sum. A sum of exactly
+    // u64::MAX reads; one more does not.
+    let fee = 1_000_000;
+    let m = decode(&heavy_log(0, room - fee, fee));
+    assert!(m.is_ok(), "{:?}", m.err());
+    assert!(overflows(&heavy_log(0, room - fee + 1, fee)));
+    assert!(overflows(&heavy_log(0, room + 1, 0)));
+    // Allowlisted destinations alone, the other sum staying small.
+    let m = decode(&heavy_log(1, room, 1));
+    assert!(m.is_ok(), "{:?}", m.err());
+    assert!(overflows(&heavy_log(1, room + 1, 1)));
+}
+
+#[test]
+fn a_count_of_allowlist_entries_must_fit_the_bytes_at_the_least_size_of_one() {
+    let bytes = state().to_bytes();
+    let count_at = layout(&bytes).fee + 16;
+    let with = |count: u32, after: usize| {
+        let mut m = bytes[..count_at].to_vec();
+        m.extend_from_slice(&count.to_le_bytes());
+        m.resize(m.len() + after, 0);
+        m
+    };
+    // One entry takes at least ten bytes: a script length, a label length
+    // and the time of enrolling.
+    assert_eq!(decode(&with(1, 9)).err(), Some(DecodeError::Truncated));
+    // Ten bytes pass the count; the entry itself is then refused.
+    assert!(non_canonical(&with(1, 10)));
+    assert_eq!(decode(&with(3, 29)).err(), Some(DecodeError::Truncated));
+    assert!(non_canonical(&with(3, 30)));
+}
+
+#[test]
+fn a_count_of_log_entries_must_fit_the_bytes_at_the_least_size_of_one() {
+    let bytes = state().to_bytes();
+    let count_at = layout(&bytes).fee + 16 + 4;
+    let with = |count: u32, after: usize| {
+        let mut m = bytes[..count_at].to_vec();
+        m.extend_from_slice(&count.to_le_bytes());
+        m.resize(m.len() + after, 0);
+        m
+    };
+    // One entry takes at least 104 bytes: a transaction ID, four amounts,
+    // an input count and one input.
+    assert_eq!(decode(&with(1, 103)).err(), Some(DecodeError::Truncated));
+    // 104 bytes pass the count; the entry itself is then refused.
+    assert!(non_canonical(&with(1, 104)));
+    assert_eq!(decode(&with(2, 207)).err(), Some(DecodeError::Truncated));
+    assert!(non_canonical(&with(2, 208)));
 }

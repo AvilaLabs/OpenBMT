@@ -343,6 +343,32 @@ fn sr_24_refuses_an_output_amount_above_all_bitcoin() {
 }
 
 #[test]
+fn sr_24_an_output_of_exactly_all_bitcoin_is_not_refused_as_too_large() {
+    let s = state();
+    // An input of exactly all bitcoin pays one output of exactly all bitcoin.
+    // Something later may refuse it, but not for the size of the output.
+    let p = build(&[coin(MAX_MONEY_SATS)], &[pay(MAX_MONEY_SATS)]);
+    let r = s.review(&p.serialize(), NOW);
+    assert!(
+        !matches!(r, Err(Refusal::OutputAmountTooLarge { .. })),
+        "{r:?}"
+    );
+    // One satoshi more is refused as too large (the input stays at the limit).
+    let mut p = build(&[coin(MAX_MONEY_SATS)], &[pay(MAX_MONEY_SATS)]);
+    p.unsigned_tx.output[0].value = bitcoin::Amount::from_sat(MAX_MONEY_SATS + 1);
+    assert_refused(
+        &s,
+        &p,
+        NOW,
+        Refusal::OutputAmountTooLarge {
+            output: 0,
+            amount: MAX_MONEY_SATS + 1,
+        },
+        "SR-24",
+    );
+}
+
+#[test]
 fn sr_24_refuses_outputs_that_add_up_to_more_than_the_inputs() {
     let s = state();
     let p = build(&[coin(50_000)], &[pay(30_000), pay(20_001)]);

@@ -679,6 +679,117 @@ fn sr_43_the_signed_weight_is_held_to_the_limit() {
     assert_eq!(heavy.rule(), "SR-43");
 }
 
+/// A transaction of `inputs` inputs and one output per script, signed weight.
+fn bare_weight(inputs: usize, outs: &[ScriptBuf]) -> u64 {
+    let tx = bitcoin::Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: bitcoin::absolute::LockTime::ZERO,
+        input: vec![bitcoin::TxIn::default(); inputs],
+        output: outs
+            .iter()
+            .map(|s| bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(1_000),
+                script_pubkey: s.clone(),
+            })
+            .collect(),
+    };
+    crate::analysis::signed_weight(&tx)
+}
+
+/// Distinct payment scripts of four lengths (31, 32, 34 and 43 bytes).
+fn script_of_kind(kind: usize, n: u8) -> ScriptBuf {
+    match kind {
+        0 => external(n),
+        1 => ScriptBuf::new_p2sh(&bitcoin::ScriptHash::from_byte_array([n; 20])),
+        2 => ScriptBuf::new_p2pkh(&bitcoin::PubkeyHash::from_byte_array([n; 20])),
+        _ => ScriptBuf::new_p2wsh(&bitcoin::WScriptHash::from_byte_array([n; 32])),
+    }
+}
+
+/// A transaction of signed weight exactly `target` (or the next weight above
+/// it that can be built), made of paying outputs only so that no earlier
+/// rule refuses it. Returns the transaction and its weight.
+fn of_weight(target: u64) -> (bitcoin::psbt::Psbt, u64) {
+    // An output adds 4 times its serialized size: 8 value bytes, a length
+    // byte and the script.
+    let weight_of = |kind: usize| {
+        bare_weight(1, &[script_of_kind(kind, 0), script_of_kind(0, 1)])
+            - bare_weight(1, &[script_of_kind(0, 1)])
+    };
+    let unit = [0, 1, 2, 3].map(weight_of);
+    for wanted in target.. {
+        for inputs in (700..=1_000).rev() {
+            let base = bare_weight(inputs, &[script_of_kind(0, 0)]);
+            let Some(left) = wanted.checked_sub(base) else {
+                continue;
+            };
+            for kinds in [
+                [0usize; 0].as_slice(),
+                &[1],
+                &[2],
+                &[3],
+                &[1, 2],
+                &[1, 3],
+                &[2, 3],
+            ] {
+                let extra: u64 = kinds.iter().map(|k| unit[*k]).sum();
+                let Some(rest) = left.checked_sub(extra) else {
+                    continue;
+                };
+                if rest % unit[0] != 0 || rest / unit[0] > 95 {
+                    continue;
+                }
+                let plain = (rest / unit[0]) as usize;
+                let mut outs: Vec<ScriptBuf> =
+                    (0..=plain).map(|i| script_of_kind(0, i as u8)).collect();
+                outs.extend(
+                    kinds
+                        .iter()
+                        .enumerate()
+                        .map(|(i, k)| script_of_kind(*k, 200 + i as u8)),
+                );
+                assert_eq!(bare_weight(inputs, &outs), wanted);
+                let coins: Vec<_> = (0..inputs).map(|_| coin(1_000)).collect();
+                let fee = 1_000;
+                let others = outs.len() as u64 - 1;
+                let first = inputs as u64 * 1_000 - fee - 1_000 * others;
+                let outs: Vec<Out> = outs
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, s)| pay_to(s, if i == 0 { first } else { 1_000 }))
+                    .collect();
+                return (build(&coins, &outs), wanted);
+            }
+        }
+    }
+    unreachable!()
+}
+
+#[test]
+fn sr_43_a_transaction_of_exactly_the_weight_limit_is_not_refused_for_weight() {
+    let s = state();
+    let (exact, weight) = of_weight(400_000);
+    assert_eq!(weight, 400_000);
+    let r = s.review(&exact.serialize(), NOW);
+    assert!(!matches!(r, Err(Refusal::WeightTooHigh { .. })), "{r:?}");
+    if let Ok(review) = r {
+        assert_eq!(review.weight(), 400_000);
+    }
+    // The next weight above it that can be built is refused.
+    let (above, weight) = of_weight(400_001);
+    assert!(weight > 400_000 && weight < 400_100);
+    assert_refused(
+        &s,
+        &above,
+        NOW,
+        Refusal::WeightTooHigh {
+            weight,
+            limit: 400_000,
+        },
+        "SR-43",
+    );
+}
+
 #[test]
 fn outputs_kind_shows_in_the_review_of_a_mixed_payment() {
     let script = external(40);
