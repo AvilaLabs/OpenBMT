@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use openbmt_core::identity::{tagged_hash, DeviceId};
-use openbmt_counter::{Currency, Role};
+use openbmt_counter::{Currency, RateSource, Role};
 
 use crate::value::Value;
 
@@ -161,6 +161,24 @@ pub struct LatePayment {
     pub sats: u64,
 }
 
+/// One transaction the final record names, and what it paid the sale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Payment {
+    /// The transaction.
+    pub txid: [u8; 32],
+    /// What it paid the sale's address.
+    pub sats: u64,
+}
+
+/// The transactions the final record names (CR-32), ascending by ID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentList {
+    /// The payments the record holds: all of them, or the largest 32.
+    pub payments: Vec<Payment>,
+    /// The sale had more standing transactions than the record holds.
+    pub more: bool,
+}
+
 /// An override recorded on a sale.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OverrideNote {
@@ -180,9 +198,8 @@ pub enum Settlement {
         /// The surplus in satoshis.
         surplus_sats: u64,
     },
-    /// The satoshis received are below the first quote. A later quote is not
-    /// in the records.
-    BelowFirstQuote {
+    /// The satoshis received are below the last quote's satoshis.
+    BelowLastQuote {
         /// How far below, in satoshis.
         short_sats: u64,
     },
@@ -205,8 +222,15 @@ pub struct Sale {
     pub first_quote_sats: u64,
     /// The first quote's rate, in minor units per bitcoin.
     pub quote_rate_minor_per_btc: u64,
-    /// Where the rate came from.
-    pub rate_source: Value<String>,
+    /// Where the first quote's rate came from.
+    pub rate_source: Value<RateSource>,
+    /// The satoshis the whole amount needed at the last quote: the first
+    /// quote's when the sale was never requoted.
+    pub last_quote_sats: u64,
+    /// The last quote's rate, in minor units per bitcoin.
+    pub last_quote_rate_minor_per_btc: u64,
+    /// Where the last quote's rate came from.
+    pub last_rate_source: Value<RateSource>,
     /// The state after the last event.
     pub state: SaleState,
     /// Funds were recorded and not withdrawn by a conflict.
@@ -219,8 +243,17 @@ pub struct Sale {
     pub sats_received: Value<u64>,
     /// The sales tax in minor units (BK-10).
     pub sales_tax_minor: Value<u64>,
-    /// The dollar value when the payment was first seen.
+    /// What the satoshis received were worth in the shop's currency when
+    /// they were first seen, by the sale's own quotes (the final record).
     pub value_at_first_seen_minor: Value<u64>,
+    /// The earliest time a payment of the sale was first seen, in Unix
+    /// seconds (UTC), from the final record.
+    pub first_seen_at: Option<u64>,
+    /// The transactions that paid the sale, from the final record.
+    pub payments: Value<PaymentList>,
+    /// A payment event other than a late one was recorded and not withdrawn
+    /// by a conflict.
+    pub own_payment: bool,
     /// The address.
     pub address: Value<String>,
     /// Payments that arrived after the sale ended.
@@ -249,7 +282,8 @@ impl Sale {
         }
     }
 
-    /// BK-06: overpaid or underpaid, if the events say.
+    /// BK-06: overpaid or underpaid, if the events say. Underpaid is read
+    /// against the last quote.
     pub fn settlement(&self) -> Option<Settlement> {
         if self.surplus_owed_sats > 0 {
             return Some(Settlement::Overpaid {
@@ -257,9 +291,9 @@ impl Sale {
             });
         }
         match self.sats_received {
-            Value::Known(got) if self.funds_seen && got < self.first_quote_sats => {
-                Some(Settlement::BelowFirstQuote {
-                    short_sats: self.first_quote_sats.saturating_sub(got),
+            Value::Known(got) if self.funds_seen && got < self.last_quote_sats => {
+                Some(Settlement::BelowLastQuote {
+                    short_sats: self.last_quote_sats.saturating_sub(got),
                 })
             }
             _ => None,

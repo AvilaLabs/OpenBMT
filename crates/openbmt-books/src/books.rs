@@ -10,8 +10,8 @@ use openbmt_counter::{Currency, Event};
 use crate::date::{Date, MAX_OFFSET_MINUTES, MAX_UNIX, MIN_OFFSET_MINUTES};
 use crate::error::BooksError;
 use crate::model::{
-    CashReturn, Counting, Disposal, DisposalKind, LatePayment, OverrideNote, PosFacts, PosMark,
-    Sale, SaleId, SaleKey, SaleState,
+    CashReturn, Counting, Disposal, DisposalKind, LatePayment, OverrideNote, Payment, PaymentList,
+    PosFacts, PosMark, Sale, SaleId, SaleKey, SaleState,
 };
 use crate::value::{UnknownField, Value};
 
@@ -66,6 +66,7 @@ fn new_sale(key: SaleKey, event: &Event) -> Option<Sale> {
         currency,
         needs_sats,
         minor_per_btc,
+        source,
         ..
     } = event
     else {
@@ -79,7 +80,10 @@ fn new_sale(key: SaleKey, event: &Event) -> Option<Sale> {
         currency: *currency,
         first_quote_sats: *needs_sats,
         quote_rate_minor_per_btc: *minor_per_btc,
-        rate_source: Value::Unknown(UnknownField::RateSource),
+        rate_source: Value::Known(source.clone()),
+        last_quote_sats: *needs_sats,
+        last_quote_rate_minor_per_btc: *minor_per_btc,
+        last_rate_source: Value::Known(source.clone()),
         state: SaleState::Open,
         funds_seen: false,
         reached_final: false,
@@ -87,6 +91,9 @@ fn new_sale(key: SaleKey, event: &Event) -> Option<Sale> {
         sats_received: Value::Unknown(UnknownField::SatsNotRecorded),
         sales_tax_minor: Value::Unknown(UnknownField::SalesTax),
         value_at_first_seen_minor: Value::Unknown(UnknownField::ValueAtFirstSeen),
+        first_seen_at: None,
+        payments: Value::Unknown(UnknownField::Txid),
+        own_payment: false,
         address: Value::Unknown(UnknownField::Address),
         late_payments: Vec::new(),
         at_risk_sats: None,
@@ -97,11 +104,20 @@ fn new_sale(key: SaleKey, event: &Event) -> Option<Sale> {
     })
 }
 
+/// What the final record says, kept while the events are folded.
+struct FinalFacts {
+    first_seen_at: u64,
+    valued: u64,
+    payments: PaymentList,
+}
+
 /// What a sale needs besides the sale itself while its events are folded.
 #[derive(Default)]
 struct Pending {
     /// The satoshis of the last confirmed or final event.
     confirmed_sats: Option<u64>,
+    /// The final record, until a conflict replaces the payment.
+    final_record: Option<FinalFacts>,
 }
 
 fn funds(sale: &mut Sale, at: u64) {
@@ -116,7 +132,16 @@ fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), Boo
     match event {
         // Opened is handled by the caller.
         Event::Opened { .. } => {}
-        Event::Requoted { .. } => {}
+        Event::Requoted {
+            needs_sats,
+            minor_per_btc,
+            source,
+            ..
+        } => {
+            sale.last_quote_sats = *needs_sats;
+            sale.last_quote_rate_minor_per_btc = *minor_per_btc;
+            sale.last_rate_source = Value::Known(source.clone());
+        }
         Event::Expired { .. } => sale.state = SaleState::Expired,
         Event::Cancelled { .. } => sale.state = SaleState::Cancelled,
         Event::PaidAtOnce {
@@ -124,6 +149,7 @@ fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), Boo
         } => {
             sale.state = SaleState::PaidAtOnce;
             sale.at_risk_sats = Some(*at_risk_sats);
+            sale.own_payment = true;
             funds(sale, *at);
         }
         Event::Confirmed {
@@ -131,14 +157,37 @@ fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), Boo
         } => {
             sale.state = SaleState::Confirmed;
             pending.confirmed_sats = Some(*received_sats);
+            sale.own_payment = true;
             funds(sale, *at);
         }
         Event::Final {
-            at, received_sats, ..
+            at,
+            received_sats,
+            first_seen_at,
+            valued,
+            payments,
+            more,
+            ..
         } => {
+            check_time(*first_seen_at)?;
             sale.state = SaleState::Final;
             sale.reached_final = true;
+            sale.own_payment = true;
             pending.confirmed_sats = Some(*received_sats);
+            pending.final_record = Some(FinalFacts {
+                first_seen_at: *first_seen_at,
+                valued: valued.0,
+                payments: PaymentList {
+                    payments: payments
+                        .iter()
+                        .map(|(txid, sats)| Payment {
+                            txid: *txid,
+                            sats: *sats,
+                        })
+                        .collect(),
+                    more: *more,
+                },
+            });
             funds(sale, *at);
         }
         Event::LatePayment { at, txid, sats, .. } => {
@@ -183,13 +232,16 @@ fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), Boo
                 name: name.clone(),
                 sats: *sats,
             });
+            sale.own_payment = true;
         }
         Event::Replaced { .. } => {
             sale.state = SaleState::Replaced;
             sale.funds_seen = false;
             sale.reached_final = false;
             sale.first_funds_at = None;
+            sale.own_payment = false;
             pending.confirmed_sats = None;
+            pending.final_record = None;
         }
         Event::Reopened { .. } => {
             sale.state = SaleState::Reopened;
@@ -212,11 +264,36 @@ fn sats_of(sale: &Sale, pending: &Pending) -> Result<Value<u64>, BooksError> {
         match (pending.confirmed_sats, sale.late_payments.is_empty()) {
             (Some(c), true) => Value::Known(c),
             (None, false) => Value::Known(late),
-            (Some(_), false) => Value::Unknown(UnknownField::SatsLateAmbiguous),
+            (Some(c), false) => match &pending.final_record {
+                None => Value::Unknown(UnknownField::SatsLateAmbiguous),
+                Some(f) => late_beyond_final(c, sale, &f.payments)?,
+            },
             (None, true) if sale.state == SaleState::Expired && !sale.funds_seen => Value::Known(0),
             (None, true) => Value::Unknown(UnknownField::SatsNotRecorded),
         },
     )
+}
+
+/// BK-09: the final record names its transactions, so a late payment is
+/// either one of them (already in the amount) or not (then it is added). If
+/// the record was cut short and a late payment is not among the ones it
+/// holds, it may be among the ones it left out, and the amount stays unknown.
+fn late_beyond_final(
+    confirmed: u64,
+    sale: &Sale,
+    named: &PaymentList,
+) -> Result<Value<u64>, BooksError> {
+    let mut total = confirmed;
+    for p in &sale.late_payments {
+        if named.payments.iter().any(|n| n.txid == p.txid) {
+            continue;
+        }
+        if named.more {
+            return Ok(Value::Unknown(UnknownField::SatsLateAmbiguous));
+        }
+        total = total.checked_add(p.sats).ok_or(BooksError::Overflow)?;
+    }
+    Ok(Value::Known(total))
 }
 
 impl Books {
@@ -307,6 +384,11 @@ impl Books {
             }
             for (_, (mut sale, pending)) in folding {
                 sale.sats_received = sats_of(&sale, &pending)?;
+                if let Some(f) = pending.final_record {
+                    sale.first_seen_at = Some(f.first_seen_at);
+                    sale.value_at_first_seen_minor = Value::Known(f.valued);
+                    sale.payments = Value::Known(f.payments);
+                }
                 books.sales.push(sale);
             }
             books.high_water.insert(*counter, high);

@@ -44,16 +44,25 @@ pub fn opened(index: u32, at: u64, cents: u64) -> Event {
     }
 }
 
-/// A `Final` record that names one transaction paying `received_sats`.
+/// The transaction a [`final_event`] names for sale `index`.
+pub fn final_txid(index: u32) -> [u8; 32] {
+    [0xa0 + index as u8; 32]
+}
+
+/// What a [`final_event`] says the satoshis were worth, in minor units.
+pub const FINAL_VALUED: u64 = 1_717;
+
+/// A `Final` record that names one transaction paying `received_sats`, and
+/// says the payment was first seen 100 seconds before.
 pub fn final_event(index: u32, at: u64, received_sats: u64) -> Event {
     Event::Final {
         index,
         at,
         received_sats,
         depth: 6,
-        first_seen_at: at,
-        valued: Amount(0),
-        payments: vec![([index as u8 + 1; 32], received_sats)],
+        first_seen_at: at.saturating_sub(100),
+        valued: Amount(FINAL_VALUED),
+        payments: vec![(final_txid(index), received_sats)],
         more: false,
     }
 }

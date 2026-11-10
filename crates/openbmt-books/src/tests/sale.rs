@@ -105,11 +105,15 @@ fn bk_06_a_field_the_records_do_not_carry_is_an_unknown_that_explains_itself() {
     let kit = rich_kit();
     let books = kit.books();
     let s = books.sale(&kit.key(0)).expect("sale");
-    assert_eq!(s.rate_source, Value::Unknown(UnknownField::RateSource));
+    // Sale 4 is confirmed and not final: the final record's fields are not
+    // there yet.
+    let pending = books.sale(&kit.key(4)).expect("sale");
     assert_eq!(
-        s.value_at_first_seen_minor,
+        pending.value_at_first_seen_minor,
         Value::Unknown(UnknownField::ValueAtFirstSeen)
     );
+    assert_eq!(pending.payments, Value::Unknown(UnknownField::Txid));
+    assert_eq!(pending.first_seen_at, None);
     assert_eq!(s.sales_tax_minor, Value::Unknown(UnknownField::SalesTax));
     assert_eq!(s.address, Value::Unknown(UnknownField::Address));
     for f in [
@@ -148,7 +152,7 @@ fn bk_06_overpaid_is_read_from_a_surplus_and_underpaid_from_the_first_quote() {
             .sale(&short.key(0))
             .expect("sale")
             .settlement(),
-        Some(Settlement::BelowFirstQuote {
+        Some(Settlement::BelowLastQuote {
             short_sats: 321_987
         })
     );

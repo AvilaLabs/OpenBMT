@@ -14,9 +14,10 @@ use crate::{BooksError, ExportError, OpenError, SaleKey, SealError};
 
 const RULES: &str = include_str!("../../../../docs/BOOKS-RULES.md");
 
-const TEST_SOURCES: [&str; 6] = [
+const TEST_SOURCES: [&str; 7] = [
     include_str!("input.rs"),
     include_str!("sale.rs"),
+    include_str!("records.rs"),
     include_str!("outflow.rs"),
     include_str!("totals.rs"),
     include_str!("export.rs"),

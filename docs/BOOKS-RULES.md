@@ -51,16 +51,28 @@ Nothing here says what a merchant owes. It writes down what the records say.
   no longer counted as paid until a new payment event is written.
 - **BK-06.** The fields of a sale are what the records carry: the sale's
   UTC opening time, the amount and currency, the satoshis and the rate of
-  the first quote, the time funds were first recorded, the satoshis received
-  (BK-09), the late payments with their transaction IDs, any surplus owed
-  and dust, any override with the person's role and name, and what the POS
-  was told. A field the records do not carry is never made up. It is an
-  explicit unknown that says why it is unknown and what would supply it:
-  the rate source, the dollar value at the time the payment was first seen,
-  the sales tax (unless BK-10 supplies it), the address, and the
-  transaction ID of a payment that was not late. Overpaid is read from a
-  surplus owed. Underpaid is read only as received below the first quote,
-  because the records do not carry a later quote.
+  the first quote and where that rate came from, the satoshis, the rate and
+  the rate source of the last quote (the first quote's when the sale was
+  never requoted), the time funds were first recorded, the satoshis
+  received (BK-09), the late payments with their transaction IDs, any
+  surplus owed and dust, any override with the person's role and name, and
+  what the POS was told. Once the sale is final, the final record adds the
+  transactions that paid it with what each paid, the earliest time one of
+  them was first seen, and what the satoshis received were worth in the
+  shop's currency by the sale's own quotes: the value at first seen. A
+  field the records do not carry is never made up. It is an explicit
+  unknown that says why it is unknown and what would supply it: the sales
+  tax (unless BK-10 supplies it), the address, and, for a sale that is not
+  final, the value at first seen and the transaction IDs of a payment that
+  was not late ("the sale is not final; the final record names its
+  transactions"). A conflict that replaces the payment makes the final
+  record's fields unknown again until a new final record is written.
+  Overpaid is read from a surplus owed. Underpaid is read as received below
+  the satoshis of the last quote. That is a reading of the records and not
+  the counter's own test: a quote that the counter wrote down and the sale
+  never took (CR-59) counts as the last quote, and a part paid before a
+  requote is valued by the counter at the rate of its own quote and here
+  is not.
 - **BK-07.** The opaque sale ID is the first 8 bytes of
   `tagged_hash("OpenBMT/books-sale/v1", counter device ID || index LE)`,
   shown as 13 Crockford base32 characters in groups of 4, 4 and 5
@@ -79,9 +91,13 @@ Nothing here says what a merchant owes. It writes down what the records say.
   with its amount.
 - **BK-09.** The satoshis received are the amount of the last confirmed or
   final event; or, for a sale with only late payments, their sum. When both
-  exist the records do not say whether the first includes the second, so the
-  amount is unknown. For a sale that was only accepted at once the amount
-  is unknown, with the amount put at risk shown beside it.
+  exist, the final record settles it: it names the transactions that paid
+  the sale, so a late payment among them is already in the amount and one
+  that is not is added to it. If there is no final record, or it names only
+  the 32 largest of more transactions (CR-32) and the late payment is not
+  among them, the records do not say, and the amount is unknown. For a sale
+  that was only accepted at once the amount is unknown, with the amount put
+  at risk shown beside it.
 - **BK-10.** Sales tax comes only from the optional `PosFacts` the caller
   passes (a tax amount in minor units for a counter's sale index, from the
   POS match). A tax amount for a sale that is not in the books refuses the
@@ -133,14 +149,18 @@ Nothing here says what a merchant owes. It writes down what the records say.
   column. Lines are in time order.
 - **BK-18.** The description of a line holds the opaque sale ID and fixed
   words, never a transaction ID, an address or an amount in satoshis. A line
-  that is not about a sale holds fixed words only.
+  that is not about a sale holds fixed words only. The export has the three
+  columns of BK-17 and no column for a transaction ID or an address, whatever
+  the records carry.
 - **BK-19.** The full ledger has every sale in every state, every disposal and
-  every return, with the transaction IDs the records carry, the unknowns and
-  what each unknown needs. It can be made only by passing
-  `RevealsPayments::Acknowledged`. The first line is a comment row with the
-  sentence "This file reveals the shop's payments on the blockchain. Share it
-  only with people you trust with that." The second is a comment row with
-  the high-water mark of each counter (BK-11).
+  every return, with the transaction IDs the records carry (those of the
+  final record and the late payments), the rate source, the value at first
+  seen, the time first seen, the satoshis, rate and source of the last
+  quote, the unknowns and what each unknown needs. It can be made only by
+  passing `RevealsPayments::Acknowledged`. The first line is a comment row
+  with the sentence "This file reveals the shop's payments on the
+  blockchain. Share it only with people you trust with that." The second is
+  a comment row with the high-water mark of each counter (BK-11).
 - **BK-20.** CSV is written as RFC 4180: UTF-8 without a byte order mark,
   `\r\n` after every row, a field in double quotes when it holds a comma, a
   double quote, a carriage return or a line feed, and a double quote written
@@ -177,10 +197,13 @@ Nothing here says what a merchant owes. It writes down what the records say.
   the phone busy. An empty passphrase is refused when sealing and when
   opening. How long a passphrase must be is for the screen that asks.
 - **BK-28.** The bundle is `OBM6`, version 1, with the counters and their
-  high-water marks, the sales with every field and every unknown, the
-  disposals and the returns. Reading is strict. It checks that the opaque
-  IDs are the ones the keys give, the order, the references from refunds
-  and returns, and the high-water marks against the sales.
+  high-water marks, the sales with every field and every unknown (including
+  the rate sources, the last quote, the final record's transactions, first
+  seen time and value), the disposals and the returns. Reading is strict:
+  the final record's three fields are all there or all missing, and the
+  transactions are in ascending order of ID, at most 32. It checks that the
+  opaque IDs are the ones the keys give, the order, the references from
+  refunds and returns, and the high-water marks against the sales.
 - **BK-29.** The one file helper writes the bytes to a temporary name in the
   same folder, flushes it and renames it over the target, so that the target
   is either the old file or the whole new one.
@@ -202,10 +225,10 @@ Nothing here says what a merchant owes. It writes down what the records say.
 - **No basis method.** Specific lots are not tracked, and no first-in or
   average method is applied. A basis is kept as the caller gave it, or it is
   unknown.
-- **No fields the records do not carry.** The rate source, the dollar value at
-  the time the payment was first seen, the address and the transaction ID of
-  a normal payment are unknown today. No stand-in is worked out from the
-  quote's rate.
+- **No fields the records do not carry.** The address is unknown. The dollar
+  value at the time the payment was first seen and the transaction IDs of a
+  normal payment are unknown until the sale is final. No stand-in is worked
+  out from the quote's rate.
 - **No rebuild from the chain.** The rebuild-from-chain tool of DESIGN §10 (the
   blockchain read with the wallet description from the recovery kit, using
   the high-water marks) is a separate piece of work.

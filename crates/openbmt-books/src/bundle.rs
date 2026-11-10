@@ -4,21 +4,21 @@ use std::collections::BTreeMap;
 
 use openbmt_core::identity::DeviceId;
 use openbmt_core::wire::{self, DecodeError, Reader};
-use openbmt_counter::{Currency, Role, MAX_NAME_BYTES};
+use openbmt_counter::{Currency, RateSource, Role, MAX_FINAL_PAYMENTS, MAX_NAME_BYTES};
 
 use crate::books::{Books, MAX_COUNTERS, MAX_LINES, MAX_PER_SALE, MAX_SALES};
 use crate::date::MAX_UNIX;
 use crate::model::{
-    Basis, CashReturn, Disposal, DisposalKind, LatePayment, OverrideNote, PosMark, Sale, SaleId,
-    SaleKey, SaleState,
+    Basis, CashReturn, Disposal, DisposalKind, LatePayment, OverrideNote, Payment, PaymentList,
+    PosMark, Sale, SaleId, SaleKey, SaleState,
 };
 use crate::value::{UnknownField, Value};
 
 /// BK-28: magic of the bundle.
 pub const MAGIC_BUNDLE: [u8; 4] = *b"OBM6";
 
-/// Fewest bytes a sale takes (it is 111), for the count check.
-const MIN_SALE: usize = 100;
+/// Fewest bytes a sale takes (it is 133), for the count check.
+const MIN_SALE: usize = 130;
 const MIN_DISPOSAL: usize = 8 + 1 + 3 + 8 + 2;
 const MIN_RETURN: usize = 8 + 36 + 8;
 
@@ -53,6 +53,50 @@ fn get_value<'a, T>(
                 "an unknown field code is not known",
             ))
     }
+}
+
+fn put_source(out: &mut Vec<u8>, s: &RateSource) {
+    put_text(out, s.label());
+    out.extend_from_slice(&s.fetched_at().to_le_bytes());
+}
+
+fn get_source(r: &mut Reader<'_>) -> Result<RateSource, DecodeError> {
+    let label = get_text(r)?;
+    RateSource::new(&label, r.u64_le()?)
+        .map_err(|_| DecodeError::NonCanonical("a rate source label is not valid"))
+}
+
+fn put_payments(out: &mut Vec<u8>, list: &PaymentList) {
+    out.push(u8::from(list.more));
+    out.push(u8::try_from(list.payments.len()).unwrap_or(u8::MAX));
+    for p in &list.payments {
+        out.extend_from_slice(&p.txid);
+        out.extend_from_slice(&p.sats.to_le_bytes());
+    }
+}
+
+fn get_payments(r: &mut Reader<'_>) -> Result<PaymentList, DecodeError> {
+    let more = r.flag()?;
+    let n = usize::from(r.u8()?);
+    if n > MAX_FINAL_PAYMENTS || (more && n < MAX_FINAL_PAYMENTS) {
+        return Err(DecodeError::NonCanonical(
+            "a payment list is longer than the most or says more with fewer",
+        ));
+    }
+    let mut payments: Vec<Payment> = Vec::with_capacity(n);
+    for _ in 0..n {
+        let txid = r.array::<32>()?;
+        if payments.last().is_some_and(|p| p.txid >= txid) {
+            return Err(DecodeError::NonCanonical(
+                "payments are not in ascending order of transaction ID",
+            ));
+        }
+        payments.push(Payment {
+            txid,
+            sats: r.u64_le()?,
+        });
+    }
+    Ok(PaymentList { payments, more })
 }
 
 fn put_text(out: &mut Vec<u8>, s: &str) {
@@ -142,7 +186,10 @@ fn put_sale(out: &mut Vec<u8>, s: &Sale) {
     out.extend_from_slice(&s.currency.code());
     out.extend_from_slice(&s.first_quote_sats.to_le_bytes());
     out.extend_from_slice(&s.quote_rate_minor_per_btc.to_le_bytes());
-    put_value(out, &s.rate_source, |o, t| put_text(o, t));
+    put_value(out, &s.rate_source, put_source);
+    out.extend_from_slice(&s.last_quote_sats.to_le_bytes());
+    out.extend_from_slice(&s.last_quote_rate_minor_per_btc.to_le_bytes());
+    put_value(out, &s.last_rate_source, put_source);
     out.push(s.state as u8);
     out.push(u8::from(s.funds_seen));
     out.push(u8::from(s.reached_final));
@@ -151,6 +198,9 @@ fn put_sale(out: &mut Vec<u8>, s: &Sale) {
     put_value(out, &s.sats_received, put_u64);
     put_value(out, &s.sales_tax_minor, put_u64);
     put_value(out, &s.value_at_first_seen_minor, put_u64);
+    wire::put_opt_u64(out, s.first_seen_at);
+    put_value(out, &s.payments, put_payments);
+    out.push(u8::from(s.own_payment));
     put_value(out, &s.address, |o, t| put_text(o, t));
     put_u32(out, s.late_payments.len());
     for p in &s.late_payments {
@@ -176,7 +226,10 @@ fn get_sale(r: &mut Reader<'_>) -> Result<Sale, DecodeError> {
     let currency = get_currency(r)?;
     let first_quote_sats = r.u64_le()?;
     let quote_rate_minor_per_btc = r.u64_le()?;
-    let rate_source = get_value(r, get_text)?;
+    let rate_source = get_value(r, get_source)?;
+    let last_quote_sats = r.u64_le()?;
+    let last_quote_rate_minor_per_btc = r.u64_le()?;
+    let last_rate_source = get_value(r, get_source)?;
     let state = SaleState::from_u8(r.u8()?)
         .ok_or(DecodeError::NonCanonical("a sale state is not known"))?;
     let funds_seen = r.flag()?;
@@ -188,6 +241,19 @@ fn get_sale(r: &mut Reader<'_>) -> Result<Sale, DecodeError> {
     let sats_received = get_value(r, |r| r.u64_le())?;
     let sales_tax_minor = get_value(r, |r| r.u64_le())?;
     let value_at_first_seen_minor = get_value(r, |r| r.u64_le())?;
+    let first_seen_at = get_opt_time(r)?;
+    let payments = get_value(r, get_payments)?;
+    let own_payment = r.flag()?;
+    // The final record gives all three together, and is a payment.
+    let from_final = payments.known().is_some();
+    if from_final != first_seen_at.is_some()
+        || from_final != value_at_first_seen_minor.known().is_some()
+        || (from_final && !(own_payment && funds_seen))
+    {
+        return Err(DecodeError::NonCanonical(
+            "what a final record gives is not all there or not all missing",
+        ));
+    }
     let address = get_value(r, get_text)?;
     let n = r.count(MAX_PER_SALE, 40)?;
     let mut late_payments = Vec::with_capacity(n);
@@ -230,6 +296,9 @@ fn get_sale(r: &mut Reader<'_>) -> Result<Sale, DecodeError> {
         first_quote_sats,
         quote_rate_minor_per_btc,
         rate_source,
+        last_quote_sats,
+        last_quote_rate_minor_per_btc,
+        last_rate_source,
         state,
         funds_seen,
         reached_final,
@@ -237,6 +306,9 @@ fn get_sale(r: &mut Reader<'_>) -> Result<Sale, DecodeError> {
         sats_received,
         sales_tax_minor,
         value_at_first_seen_minor,
+        first_seen_at,
+        payments,
+        own_payment,
         address,
         late_payments,
         at_risk_sats,

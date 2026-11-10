@@ -4,9 +4,11 @@
 /// The fields that can be unknown, each with its reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnknownField {
-    /// Where the quote's rate came from.
+    /// Where the quote's rate came from. The opened record carries it, so
+    /// the books no longer produce this unknown; the code stays.
     RateSource = 1,
-    /// The dollar value when the payment was first seen.
+    /// The dollar value when the payment was first seen: the final record
+    /// carries it.
     ValueAtFirstSeen = 2,
     /// The sales tax of the sale.
     SalesTax = 3,
@@ -16,7 +18,7 @@ pub enum UnknownField {
     SatsLateAmbiguous = 5,
     /// The address the sale paid.
     Address = 6,
-    /// The transaction ID of a payment that was not late.
+    /// The transaction IDs of the payments, which the final record names.
     Txid = 7,
     /// The dollar value of a disposal.
     DisposalValue = 8,
@@ -68,12 +70,12 @@ impl UnknownField {
     pub fn explain(self) -> Unknown {
         let (why, next_step) = match self {
             Self::RateSource => (
-                "no event records where the quote's rate came from",
-                "the sale-opened event would have to carry a rate source",
+                "the sale-opened record carries no rate source",
+                "the sale-opened record of this counter would have to carry a rate source",
             ),
             Self::ValueAtFirstSeen => (
-                "no event records the rate when the payment was first seen",
-                "the first payment event would have to carry the rate and its source",
+                "the sale is not final; the final record carries the value at first seen",
+                "wait until the sale is final: the final record carries it",
             ),
             Self::SalesTax => (
                 "the counter does not know the order's tax",
@@ -84,17 +86,17 @@ impl UnknownField {
                 "the amount is written when the sale is confirmed",
             ),
             Self::SatsLateAmbiguous => (
-                "a late payment and a confirmation both exist and the records do not say \
-                 whether the confirmed amount includes the late one",
-                "the confirmation event would have to name its transaction",
+                "a late payment and a confirmation both exist and there is no final record \
+                 (or it was cut short) to say whether the confirmed amount includes the late one",
+                "the sale must reach final: the final record names its transactions",
             ),
             Self::Address => (
                 "the records carry the sale index, not the address",
                 "derive it from the wallet description at that index",
             ),
             Self::Txid => (
-                "only a late payment's event carries its transaction ID",
-                "the accepted, confirmed and final events would have to carry it",
+                "the sale is not final; the final record names its transactions",
+                "wait until the sale is final: the final record carries them",
             ),
             Self::DisposalValue => (
                 "the caller gave no dollar value for this disposal",

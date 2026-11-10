@@ -149,8 +149,9 @@ fn bk_18_the_accounting_export_never_holds_a_txid_an_address_or_sats() {
         .into_iter()
         .map(|(_, s)| s)
         .collect();
-    let txid_hex: String = TXID_LATE.iter().map(|b| format!("{b:02x}")).collect();
-    let mut secrets: Vec<String> = vec![txid_hex.clone()];
+    let hex = |t: &[u8; 32]| -> String { t.iter().map(|b| format!("{b:02x}")).collect() };
+    let txid_hex = hex(&TXID_LATE);
+    let mut secrets: Vec<String> = vec![txid_hex.clone(), hex(&final_txid(0)), hex(&final_txid(5))];
     secrets.extend(ADDRESSES.iter().map(|a| a.to_string()));
     for sats in [
         SATS_PAID,
@@ -173,6 +174,7 @@ fn bk_18_the_accounting_export_never_holds_a_txid_an_address_or_sats() {
         .full_ledger(RevealsPayments::Acknowledged)
         .expect("ledger");
     assert!(ledger.contains(&txid_hex));
+    assert!(ledger.contains(&hex(&final_txid(0))) && ledger.contains(&hex(&final_txid(5))));
     assert!(ledger.contains(&SATS_LATE.to_string()));
     assert!(ledger.contains(&SATS_REFUND.to_string()));
 }
@@ -226,7 +228,14 @@ fn bk_19_the_full_ledger_has_every_sale_and_every_unknown_with_its_next_step() {
     ] {
         assert!(ledger.contains(&format!(",{state},")), "no {state}");
     }
-    assert!(ledger.contains("rate source: no event records where the quote's rate came from"));
+    assert!(ledger.contains(
+        "txid: the sale is not final; the final record names its transactions. \
+         Next: wait until the sale is final: the final record carries them"
+    ));
+    assert!(
+        !ledger.contains("rate source:"),
+        "every sale has its rate source"
+    );
     assert!(ledger.contains("Next: pass the tax of the POS match as PosFacts"));
     assert!(ledger.contains("overpaid: 1111117 sats owed to the customer"));
     assert!(ledger.contains("accepted at once with 4321987 sats at risk"));
@@ -309,8 +318,8 @@ fn bk_21_a_name_that_is_a_formula_is_guarded_in_the_ledger() {
         .books()
         .full_ledger(RevealsPayments::Acknowledged)
         .expect("ledger");
-    assert!(ledger.contains(&format!(",'{NASTY_NAME}\r\n")), "{ledger}");
-    assert!(!ledger.contains(&format!(",{NASTY_NAME}\r\n")));
+    assert!(ledger.contains(&format!(",'{NASTY_NAME},")), "{ledger}");
+    assert!(!ledger.contains(&format!(",{NASTY_NAME},")));
 }
 
 #[test]

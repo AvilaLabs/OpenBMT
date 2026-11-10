@@ -206,7 +206,7 @@ impl Books {
     }
 }
 
-const LEDGER_COLUMNS: [&str; 21] = [
+const LEDGER_COLUMNS: [&str; 25] = [
     "Type",
     "Sale ID",
     "Counter",
@@ -228,6 +228,10 @@ const LEDGER_COLUMNS: [&str; 21] = [
     "Note",
     "Unknown",
     "Staff",
+    "First seen (UTC)",
+    "Last quote sats",
+    "Last quote rate (minor per BTC)",
+    "Last rate source",
 ];
 
 fn blank_row() -> Vec<Cell> {
@@ -322,13 +326,22 @@ fn sale_row(sale: &Sale) -> Result<Vec<Cell>, ExportError> {
     set(
         &mut row,
         13,
-        match &sale.rate_source {
-            Value::Known(s) => Cell::text(s.clone()),
-            Value::Unknown(f) => {
-                unknown.push(*f);
-                Cell::text("unknown")
-            }
-        },
+        value_cell(&sale.rate_source, |s| s.label().to_string(), &mut unknown),
+    );
+    set(
+        &mut row,
+        23,
+        Cell::Number(sale.last_quote_rate_minor_per_btc.to_string()),
+    );
+    set(&mut row, 22, Cell::Number(sale.last_quote_sats.to_string()));
+    set(
+        &mut row,
+        24,
+        value_cell(
+            &sale.last_rate_source,
+            |s| s.label().to_string(),
+            &mut unknown,
+        ),
     );
     if sale.funds_seen {
         set(
@@ -340,13 +353,10 @@ fn sale_row(sale: &Sale) -> Result<Vec<Cell>, ExportError> {
                 &mut unknown,
             ),
         );
-        if sale.late_payments.is_empty() {
-            unknown.push(UnknownField::Txid);
-            set(&mut row, 16, Cell::text("unknown"));
-        } else {
-            let ids: Vec<String> = sale.late_payments.iter().map(|p| hex32(&p.txid)).collect();
-            set(&mut row, 16, Cell::text(ids.join(" ")));
+        if let Some(at) = sale.first_seen_at {
+            set(&mut row, 21, time_cell(at)?);
         }
+        set(&mut row, 16, txid_cell(sale, &mut unknown));
         set(
             &mut row,
             17,
@@ -362,6 +372,33 @@ fn sale_row(sale: &Sale) -> Result<Vec<Cell>, ExportError> {
     Ok(row)
 }
 
+/// The transaction IDs the records carry for a sale: those of the final
+/// record, then the late payments' that are not among them. It is unknown,
+/// and says why, when the sale has a payment of its own and no final record
+/// names it.
+fn txid_cell(sale: &Sale, unknown: &mut Vec<UnknownField>) -> Cell {
+    let mut ids: Vec<String> = Vec::new();
+    match &sale.payments {
+        Value::Known(list) => ids.extend(list.payments.iter().map(|p| hex32(&p.txid))),
+        Value::Unknown(f) => {
+            if sale.late_payments.is_empty() || sale.own_payment {
+                unknown.push(*f);
+            }
+        }
+    }
+    for p in &sale.late_payments {
+        let id = hex32(&p.txid);
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    if ids.is_empty() {
+        Cell::text("unknown")
+    } else {
+        Cell::text(ids.join(" "))
+    }
+}
+
 fn hex32(b: &[u8; 32]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
@@ -370,6 +407,12 @@ fn note_cell(sale: &Sale) -> Cell {
     let mut parts: Vec<String> = Vec::new();
     if let Some(n) = sale.at_risk_sats {
         parts.push(format!("accepted at once with {n} sats at risk"));
+    }
+    if let Value::Known(list) = &sale.payments {
+        let n = list.payments.len();
+        let more = if list.more { " and more not named" } else { "" };
+        let s = if n == 1 { "" } else { "s" };
+        parts.push(format!("the final record names {n} payment{s}{more}"));
     }
     for p in &sale.late_payments {
         parts.push(format!("late payment of {} sats", p.sats));
@@ -380,8 +423,8 @@ fn note_cell(sale: &Sale) -> Cell {
                 "overpaid: {surplus_sats} sats owed to the customer"
             ));
         }
-        Some(Settlement::BelowFirstQuote { short_sats }) => {
-            parts.push(format!("below the first quote by {short_sats} sats"));
+        Some(Settlement::BelowLastQuote { short_sats }) => {
+            parts.push(format!("below the last quote by {short_sats} sats"));
         }
         None => {}
     }
