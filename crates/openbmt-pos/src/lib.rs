@@ -51,6 +51,7 @@ pub mod matcher;
 pub mod model;
 pub mod notice;
 pub mod reference;
+pub mod say;
 pub mod settings;
 
 #[cfg(test)]
