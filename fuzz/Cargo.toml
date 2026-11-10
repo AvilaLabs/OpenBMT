@@ -144,3 +144,10 @@ path = "fuzz_targets/net_session.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "entropy_dice"
+path = "fuzz_targets/entropy_dice.rs"
+test = false
+doc = false
+bench = false

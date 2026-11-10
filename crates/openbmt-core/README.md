@@ -18,6 +18,17 @@ batch, record or setting is.
   both compared values can still find a pair in about 2^22 tries, so the words
   are only a human cross-check. Software always compares the full 32-byte
   hashes.
+- **Own randomness** (`entropy`). Seed words from the owner's dice or coin,
+  by two methods. Dice, hashed: at least 99 rolls written as digits 1 to 6,
+  and the 24 words come from the SHA-256 hash of that text. Skew-corrected
+  (von Neumann): throws are taken in pairs, and a pair that differs gives one
+  bit (coin: heads then tails is 1; die: second roll higher is 1) while a
+  pair that matches gives nothing. The first 128 or 256 bits make 12 or 24
+  words. Nothing else is mixed in, so the same throws give the same words in
+  any tool that follows the same steps. Skew correction needs throws that do
+  not affect each other, from the same coin or die thrown the same way, and
+  it cannot fix throws a person made up. There is no random source here, and
+  `SeedWords` hides its words from `Debug`.
 - **Device identity** (`identity`). A separate Schnorr (BIP340) key for each
   device, and tagged signatures, so a signature for a batch can never pass as
   a record or a setting. It also gives four words for showing a pinned root.
