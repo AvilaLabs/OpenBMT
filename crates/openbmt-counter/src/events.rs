@@ -10,8 +10,8 @@ use openbmt_core::records::RecordKind;
 use openbmt_core::wire::{DecodeError, Reader};
 
 use crate::desk::Role;
-use crate::money::{Amount, Currency};
-use crate::MAX_NAME_BYTES;
+use crate::money::{label_is_valid, Amount, Currency, RateSource};
+use crate::{MAX_FINAL_PAYMENTS, MAX_NAME_BYTES};
 
 const TAG_OPENED: u8 = 1;
 const TAG_EXPIRED: u8 = 2;
@@ -27,6 +27,7 @@ const TAG_REPLACED: u8 = 11;
 const TAG_REOPENED: u8 = 12;
 const TAG_POS_PAID: u8 = 13;
 const TAG_POS_UNPAID: u8 = 14;
+const TAG_REQUOTED: u8 = 15;
 
 /// Something that happened to a sale and is written down.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +46,24 @@ pub enum Event {
         needs_sats: u64,
         /// The first quote's rate, in minor units per bitcoin.
         minor_per_btc: u64,
+        /// Where the first quote's rate came from (CR-57).
+        source: RateSource,
+    },
+    /// The sale was given a new quote (CR-59; kind `Sale`). Written by
+    /// `Counter::requote` before the sale is stored: a stop between the two
+    /// leaves this record for a quote the sale does not hold, and the caller
+    /// is told the requote failed.
+    Requoted {
+        /// The receive index.
+        index: u32,
+        /// When.
+        at: u64,
+        /// The satoshis the whole amount needs at the new rate.
+        needs_sats: u64,
+        /// The new quote's rate, in minor units per bitcoin.
+        minor_per_btc: u64,
+        /// Where the new quote's rate came from (CR-57).
+        source: RateSource,
     },
     /// The sale ended with nothing received (CR-07; kind `Sale`).
     Expired {
@@ -95,6 +114,19 @@ pub enum Event {
         received_sats: u64,
         /// The depth reached.
         depth: u32,
+        /// The earliest time any standing payment was first seen; for a
+        /// payment only ever seen in a block, the time the counter learned
+        /// of the block (CR-32).
+        first_seen_at: u64,
+        /// What the received satoshis are worth in the shop's currency, by
+        /// the sale's own quotes (CR-06, CR-32).
+        valued: Amount,
+        /// The standing transactions that pay the sale and what each pays,
+        /// ascending by transaction ID: at most [`MAX_FINAL_PAYMENTS`], and
+        /// when there were more, the largest by amount.
+        payments: Vec<([u8; 32], u64)>,
+        /// There were more standing transactions than `payments` holds.
+        more: bool,
     },
     /// A payment arrived for a sale that had ended (CR-19; kind `Payment`).
     LatePayment {
@@ -213,6 +245,44 @@ pub(crate) fn mode_from_u8(b: u8) -> Option<CheckMode> {
     }
 }
 
+/// A rate source as written: label length (u8), the label, the time (u64 LE).
+fn write_source(out: &mut Vec<u8>, source: &RateSource) {
+    let label = source.label().as_bytes();
+    out.push(u8::try_from(label.len()).unwrap_or(u8::MAX));
+    out.extend_from_slice(label);
+    out.extend_from_slice(&source.fetched_at().to_le_bytes());
+}
+
+fn read_source(r: &mut Reader<'_>) -> Result<RateSource, DecodeError> {
+    let len = usize::from(r.u8()?);
+    let label = r.take(len)?;
+    if !label_is_valid(label) {
+        return Err(DecodeError::NonCanonical(
+            "a rate source label is not valid",
+        ));
+    }
+    let label = std::str::from_utf8(label)
+        .map_err(|_| DecodeError::NonCanonical("a rate source label is not text"))?;
+    let fetched_at = r.u64_le()?;
+    RateSource::new(label, fetched_at)
+        .map_err(|_| DecodeError::NonCanonical("a rate source label is not valid"))
+}
+
+/// CR-32: the transactions a `Final` record names, from the standing
+/// transactions the watcher gave: at most [`MAX_FINAL_PAYMENTS`], the largest
+/// by amount (the smaller transaction ID first among equal amounts), put in
+/// ascending order of ID; and whether any were left out.
+pub(crate) fn final_payments(standing: &[([u8; 32], u64)]) -> (Vec<([u8; 32], u64)>, bool) {
+    let mut all = standing.to_vec();
+    let more = all.len() > MAX_FINAL_PAYMENTS;
+    if more {
+        all.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        all.truncate(MAX_FINAL_PAYMENTS);
+    }
+    all.sort_unstable_by_key(|p| p.0);
+    (all, more)
+}
+
 impl Event {
     /// The sale this event is about.
     pub fn index(&self) -> u32 {
@@ -226,6 +296,7 @@ impl Event {
             | Self::LatePayment { index, .. }
             | Self::SurplusOwed { index, .. }
             | Self::Dust { index, .. }
+            | Self::Requoted { index, .. }
             | Self::Override { index, .. }
             | Self::Replaced { index, .. }
             | Self::Reopened { index, .. }
@@ -237,7 +308,10 @@ impl Event {
     /// The kind of record the event is written as.
     pub fn kind(&self) -> RecordKind {
         match self {
-            Self::Opened { .. } | Self::Expired { .. } | Self::Cancelled { .. } => RecordKind::Sale,
+            Self::Opened { .. }
+            | Self::Requoted { .. }
+            | Self::Expired { .. }
+            | Self::Cancelled { .. } => RecordKind::Sale,
             Self::PaidAtOnce { .. }
             | Self::Confirmed { .. }
             | Self::Final { .. }
@@ -254,6 +328,7 @@ impl Event {
     fn head(&self) -> (u8, u32, u64) {
         match self {
             Self::Opened { index, at, .. } => (TAG_OPENED, *index, *at),
+            Self::Requoted { index, at, .. } => (TAG_REQUOTED, *index, *at),
             Self::Expired { index, at } => (TAG_EXPIRED, *index, *at),
             Self::Cancelled { index, at } => (TAG_CANCELLED, *index, *at),
             Self::PaidAtOnce { index, at, .. } => (TAG_PAID_AT_ONCE, *index, *at),
@@ -282,12 +357,24 @@ impl Event {
                 currency,
                 needs_sats,
                 minor_per_btc,
+                source,
                 ..
             } => {
                 out.extend_from_slice(&amount.0.to_le_bytes());
                 out.extend_from_slice(&currency.code());
                 out.extend_from_slice(&needs_sats.to_le_bytes());
                 out.extend_from_slice(&minor_per_btc.to_le_bytes());
+                write_source(&mut out, source);
+            }
+            Self::Requoted {
+                needs_sats,
+                minor_per_btc,
+                source,
+                ..
+            } => {
+                out.extend_from_slice(&needs_sats.to_le_bytes());
+                out.extend_from_slice(&minor_per_btc.to_le_bytes());
+                write_source(&mut out, source);
             }
             Self::PaidAtOnce {
                 at_risk_sats,
@@ -303,14 +390,29 @@ impl Event {
                 received_sats,
                 depth,
                 ..
+            } => {
+                out.extend_from_slice(&received_sats.to_le_bytes());
+                out.extend_from_slice(&depth.to_le_bytes());
             }
-            | Self::Final {
+            Self::Final {
                 received_sats,
                 depth,
+                first_seen_at,
+                valued,
+                payments,
+                more,
                 ..
             } => {
                 out.extend_from_slice(&received_sats.to_le_bytes());
                 out.extend_from_slice(&depth.to_le_bytes());
+                out.extend_from_slice(&first_seen_at.to_le_bytes());
+                out.extend_from_slice(&valued.0.to_le_bytes());
+                out.push(u8::from(*more));
+                out.push(u8::try_from(payments.len()).unwrap_or(u8::MAX));
+                for (txid, sats) in payments {
+                    out.extend_from_slice(txid);
+                    out.extend_from_slice(&sats.to_le_bytes());
+                }
             }
             Self::LatePayment { txid, sats, .. } => {
                 out.extend_from_slice(txid);
@@ -352,6 +454,14 @@ impl Event {
                     .ok_or(DecodeError::NonCanonical("a currency code is not valid"))?,
                 needs_sats: r.u64_le()?,
                 minor_per_btc: r.u64_le()?,
+                source: read_source(&mut r)?,
+            },
+            TAG_REQUOTED => Self::Requoted {
+                index,
+                at,
+                needs_sats: r.u64_le()?,
+                minor_per_btc: r.u64_le()?,
+                source: read_source(&mut r)?,
             },
             TAG_EXPIRED => Self::Expired { index, at },
             TAG_CANCELLED => Self::Cancelled { index, at },
@@ -370,12 +480,46 @@ impl Event {
                 received_sats: r.u64_le()?,
                 depth: r.u32_le()?,
             },
-            TAG_FINAL => Self::Final {
-                index,
-                at,
-                received_sats: r.u64_le()?,
-                depth: r.u32_le()?,
-            },
+            TAG_FINAL => {
+                let received_sats = r.u64_le()?;
+                let depth = r.u32_le()?;
+                let first_seen_at = r.u64_le()?;
+                let valued = Amount(r.u64_le()?);
+                let more = r.flag()?;
+                let n = usize::from(r.u8()?);
+                if n > MAX_FINAL_PAYMENTS {
+                    return Err(DecodeError::NonCanonical(
+                        "a final record has too many payments",
+                    ));
+                }
+                if more && n < MAX_FINAL_PAYMENTS {
+                    return Err(DecodeError::NonCanonical(
+                        "a final record says there are more payments but holds fewer than the most",
+                    ));
+                }
+                let mut payments = Vec::with_capacity(n);
+                let mut last: Option<[u8; 32]> = None;
+                for _ in 0..n {
+                    let txid = r.array::<32>()?;
+                    if last.is_some_and(|prev| prev >= txid) {
+                        return Err(DecodeError::NonCanonical(
+                            "payments are not in ascending order of transaction ID",
+                        ));
+                    }
+                    last = Some(txid);
+                    payments.push((txid, r.u64_le()?));
+                }
+                Self::Final {
+                    index,
+                    at,
+                    received_sats,
+                    depth,
+                    first_seen_at,
+                    valued,
+                    payments,
+                    more,
+                }
+            }
             TAG_LATE_PAYMENT => Self::LatePayment {
                 index,
                 at,

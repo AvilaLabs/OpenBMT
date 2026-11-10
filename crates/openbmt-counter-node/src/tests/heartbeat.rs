@@ -36,7 +36,9 @@ fn owner_bytes(h: &WatcherHeartbeat) -> Vec<u8> {
 fn rig_with_a_seen_sale(dir: &Scratch) -> Rig {
     let mut rig = start(dir.path());
     assert!(rig.feed(vec![Rig::peers()]).is_empty());
-    rig.node.open(five_dollars(), usd(), rate()).unwrap();
+    rig.node
+        .open(five_dollars(), usd(), rate(), &source_at(&rig.time))
+        .unwrap();
     let pay: Transaction = spend(1, &[(&script_of(0), 5_000)]);
     rig.feed(vec![AppEvent::Sighting {
         tx: bytes(&pay),
@@ -75,7 +77,9 @@ fn a_heartbeat_that_is_too_old_waits_again() {
     // a second sale, seen after the heartbeat's age limit has run out
     let max = u64::from(settings().heartbeat_max_age_secs);
     rig.time.store(T0 + 10 + max + 1, Ordering::SeqCst);
-    rig.node.open(five_dollars(), usd(), rate()).unwrap();
+    rig.node
+        .open(five_dollars(), usd(), rate(), &source_at(&rig.time))
+        .unwrap();
     let pay = spend(2, &[(&script_of(1), 5_000)]);
     rig.feed(vec![AppEvent::Sighting {
         tx: bytes(&pay),

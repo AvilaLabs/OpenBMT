@@ -8,6 +8,7 @@ fn kinds(w: &World) -> Vec<&'static str> {
         .iter()
         .map(|e| match e {
             Event::Opened { .. } => "opened",
+            Event::Requoted { .. } => "requoted",
             Event::Expired { .. } => "expired",
             Event::Cancelled { .. } => "cancelled",
             Event::PaidAtOnce { .. } => "paid-at-once",

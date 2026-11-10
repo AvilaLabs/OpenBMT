@@ -93,7 +93,8 @@ use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
     Actor, Amount, BlockError, CancelRefused, CommandRefused, Counter, Currency, Facts,
     HeartbeatRefused, HeartbeatView, JudgeError, LoadError, OpenFacts, OpenRefused, Opened,
-    Overridden, Pairing, Quote, Rate, Report, RequoteRefused, Screen, SightingError, StoreFault,
+    Overridden, Pairing, Quote, Rate, RateSource, Report, RequoteRefused, Screen, SightingError,
+    StoreFault,
 };
 use openbmt_net_io::{
     AppEvent, Clock, DirLock, Driver, DriverConfig, EventReceiver, FileStorage, Handle, Key,
@@ -770,6 +771,7 @@ impl<P: DriverPort> Node<P> {
         amount: Amount,
         currency: Currency,
         rate: Rate,
+        source: &RateSource,
     ) -> Result<Opened, OpenRefused<DirStoreError>> {
         let facts = OpenFacts {
             health: self.health.unwrap_or(NO_ANSWER_YET),
@@ -778,7 +780,7 @@ impl<P: DriverPort> Node<P> {
         };
         let opened = self
             .counter
-            .open(amount, currency, rate, facts, &mut self.store)?;
+            .open(amount, currency, rate, source, facts, &mut self.store)?;
         self.known.insert(opened.index);
         self.port.watch_script(opened.script.clone());
         Ok(opened)
@@ -803,10 +805,11 @@ impl<P: DriverPort> Node<P> {
         &mut self,
         index: u32,
         rate: Rate,
+        source: &RateSource,
     ) -> Result<Quote, RequoteRefused<DirStoreError>> {
         let now = self.clock.now();
         self.counter
-            .requote(index, rate, now, &self.view, &mut self.store)
+            .requote(index, rate, source, now, &self.view, &mut self.store)
     }
 
     /// The cashier cancels a sale with nothing received (CR-07).

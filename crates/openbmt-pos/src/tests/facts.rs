@@ -3,7 +3,7 @@
 use openbmt_core::identity::Identity;
 use openbmt_core::policy::{CheckMode, InstantLabel};
 use openbmt_core::records::{Chain, ChainError, DeviceList, RecordKind};
-use openbmt_counter::{Amount, Event, Role};
+use openbmt_counter::{Amount, Event, RateSource, Role};
 
 use super::kit::*;
 use crate::*;
@@ -16,6 +16,7 @@ fn opened(index: u32, at: u64, cents: u64) -> Event {
         currency: usd(),
         needs_sats: 1,
         minor_per_btc: 1,
+        source: RateSource::new("test-fixed", at).unwrap(),
     }
 }
 
@@ -44,6 +45,10 @@ fn final_(index: u32, at: u64) -> Event {
         at,
         received_sats: 1,
         depth: 6,
+        first_seen_at: at,
+        valued: Amount(0),
+        payments: vec![([1; 32], 1)],
+        more: false,
     }
 }
 

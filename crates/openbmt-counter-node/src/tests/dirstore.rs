@@ -248,7 +248,14 @@ fn a_counter_saved_through_the_store_loads_again_as_it_was() {
     // A sale that is accepted at once and then has a conflict: the exposure
     // goes in and the alarm goes up.
     let opened = c
-        .open(five_dollars(), usd(), rate(), open_facts(T0), &mut store)
+        .open(
+            five_dollars(),
+            usd(),
+            rate(),
+            &fresh(T0),
+            open_facts(T0),
+            &mut store,
+        )
         .unwrap();
     let pay = spend(1, &[(&opened.script, opened.needs_sats)]);
     for n in [20, 21, 22] {
@@ -281,6 +288,7 @@ fn a_counter_saved_through_the_store_loads_again_as_it_was() {
             five_dollars(),
             usd(),
             rate(),
+            &fresh(T0 + 70),
             open_facts(T0 + 70),
             &mut store,
         )

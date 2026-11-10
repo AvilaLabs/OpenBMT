@@ -249,6 +249,7 @@ fn fold_event(
             s.explicit_unpaid = true;
         }
         Event::Opened { .. }
+        | Event::Requoted { .. }
         | Event::Expired { .. }
         | Event::Cancelled { .. }
         | Event::LatePayment { .. }

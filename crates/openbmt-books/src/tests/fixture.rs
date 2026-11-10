@@ -4,7 +4,7 @@
 
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::records::{Chain, DeviceList};
-use openbmt_counter::{Amount, Currency, Event, Role};
+use openbmt_counter::{Amount, Currency, Event, RateSource, Role};
 
 use crate::{Books, SaleKey};
 
@@ -28,6 +28,10 @@ pub fn usd() -> Currency {
     Currency::new(*b"USD").expect("a currency")
 }
 
+pub fn source(label: &str, fetched_at: u64) -> RateSource {
+    RateSource::new(label, fetched_at).expect("a source")
+}
+
 pub fn opened(index: u32, at: u64, cents: u64) -> Event {
     Event::Opened {
         index,
@@ -36,6 +40,21 @@ pub fn opened(index: u32, at: u64, cents: u64) -> Event {
         currency: usd(),
         needs_sats: 4_321_987,
         minor_per_btc: 4_281_700,
+        source: source("fixture-rate", at),
+    }
+}
+
+/// A `Final` record that names one transaction paying `received_sats`.
+pub fn final_event(index: u32, at: u64, received_sats: u64) -> Event {
+    Event::Final {
+        index,
+        at,
+        received_sats,
+        depth: 6,
+        first_seen_at: at,
+        valued: Amount(0),
+        payments: vec![([index as u8 + 1; 32], received_sats)],
+        more: false,
     }
 }
 
@@ -104,12 +123,7 @@ pub fn rich_events() -> Vec<Event> {
             received_sats: SATS_PAID,
             depth: 1,
         },
-        Event::Final {
-            index: 0,
-            at: FEB_1_0100,
-            received_sats: SATS_PAID,
-            depth: 6,
-        },
+        final_event(0, FEB_1_0100, SATS_PAID),
         // 1: expired.
         opened(1, FEB_1_0100, 500),
         Event::Expired {
@@ -151,12 +165,7 @@ pub fn rich_events() -> Vec<Event> {
             name: NASTY_NAME.to_string(),
             sats: SATS_PAID,
         },
-        Event::Final {
-            index: 5,
-            at: FEB_2_NOON + 900,
-            received_sats: SATS_PAID + SATS_SURPLUS,
-            depth: 6,
-        },
+        final_event(5, FEB_2_NOON + 900, SATS_PAID + SATS_SURPLUS),
         Event::SurplusOwed {
             index: 5,
             at: FEB_2_NOON + 901,

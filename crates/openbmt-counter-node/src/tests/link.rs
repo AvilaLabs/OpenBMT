@@ -398,13 +398,19 @@ fn lk_57_check_ins_are_at_most_one_a_minute_and_only_when_something_changed_or_t
     }
     // A sale is a change, and more than a minute has passed: a check-in.
     assert!(w.rig.feed(vec![Rig::peers()]).is_empty());
-    w.rig.node.open(five_dollars(), usd(), rate()).unwrap();
+    w.rig
+        .node
+        .open(five_dollars(), usd(), rate(), &source_at(&w.rig.time))
+        .unwrap();
     w.step(T0 + 600);
     assert_eq!(count(&mut w), 1);
     // The check-in is the record after the sale.
     assert_eq!(w.records().last().unwrap().kind, RecordKind::CheckIn);
     // A change soon after the last one waits for the minute.
-    w.rig.node.open(five_dollars(), usd(), rate()).unwrap();
+    w.rig
+        .node
+        .open(five_dollars(), usd(), rate(), &source_at(&w.rig.time))
+        .unwrap();
     w.step(T0 + 630);
     assert_eq!(count(&mut w), 0);
     w.step(T0 + 660);

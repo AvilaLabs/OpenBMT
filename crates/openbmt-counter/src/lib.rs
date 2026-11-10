@@ -60,7 +60,10 @@ pub use counter::{
 pub use desk::{Desk, OverrideEntry, Role};
 pub use events::Event;
 pub use heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
-pub use money::{sats_for, value_of, Amount, Currency, Quote, Rate, QUOTE_SECS};
+pub use money::{
+    sats_for, value_of, Amount, BadSourceLabel, Currency, Quote, Rate, RateSource,
+    MAX_RATE_AGE_SECS, MAX_RATE_AHEAD_SECS, MAX_SOURCE_LABEL_BYTES, QUOTE_SECS,
+};
 pub use refusal::{
     BlockError, CancelRefused, CommandRefused, HeartbeatRefused, JudgeError, LoadError,
     OpenRefused, OverrideRefused, RequoteRefused, SightingError,
@@ -83,6 +86,10 @@ pub const STUCK_SECS: u64 = 7_200;
 /// CR-05: most quotes one sale keeps. Past it the last quote stays in force
 /// and a new quote is refused.
 pub const MAX_QUOTES: usize = 64;
+/// CR-32: most transactions a `Final` record names. When a sale has more
+/// standing transactions, the record holds the largest by amount and says
+/// there were more.
+pub const MAX_FINAL_PAYMENTS: usize = 32;
 /// CR-21: the window, in seconds, over which a person's overrides are added
 /// up.
 pub const OVERRIDE_WINDOW_SECS: u64 = 86_400;

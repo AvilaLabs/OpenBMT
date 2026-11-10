@@ -10,7 +10,14 @@ use crate::{
 
 fn try_open(w: &mut World) -> Result<crate::Opened, OpenRefused<&'static str>> {
     let facts = w.open_facts();
-    w.c.open(five_dollars(), usd(), rate(), facts, &mut w.m)
+    w.c.open(
+        five_dollars(),
+        usd(),
+        rate(),
+        &fresh(facts.now),
+        facts,
+        &mut w.m,
+    )
 }
 
 // CR-01.
@@ -100,7 +107,14 @@ fn cr_02_a_counter_with_no_batch_at_all_offers_no_address() {
         now: T0,
     };
     let err = c
-        .open(five_dollars(), usd(), rate(), facts, &mut m)
+        .open(
+            five_dollars(),
+            usd(),
+            rate(),
+            &fresh(facts.now),
+            facts,
+            &mut m,
+        )
         .unwrap_err();
     assert_eq!(err, OpenRefused::NoAddress);
 }
@@ -245,9 +259,17 @@ fn cr_05_a_sale_keeps_at_most_64_quotes_and_the_last_stays_in_force() {
 fn cr_05_a_sale_needs_an_amount_that_bitcoin_can_cover() {
     let mut w = World::new();
     let facts = w.open_facts();
-    let zero = w.c.open(Amount(0), usd(), rate(), facts, &mut w.m);
+    let zero =
+        w.c.open(Amount(0), usd(), rate(), &fresh(facts.now), facts, &mut w.m);
     assert_eq!(zero.unwrap_err(), OpenRefused::ZeroAmount);
-    let huge = w.c.open(Amount(u64::MAX), usd(), rate(), facts, &mut w.m);
+    let huge = w.c.open(
+        Amount(u64::MAX),
+        usd(),
+        rate(),
+        &fresh(facts.now),
+        facts,
+        &mut w.m,
+    );
     let err = huge.unwrap_err();
     assert_eq!(err, OpenRefused::AmountTooLarge);
     assert_eq!(err.rule(), "CR-05");
@@ -333,8 +355,15 @@ fn cr_09_no_sale_opens_while_a_rescan_is_pending() {
         ..w.open_facts()
     };
     let err =
-        w.c.open(five_dollars(), usd(), rate(), facts, &mut w.m)
-            .unwrap_err();
+        w.c.open(
+            five_dollars(),
+            usd(),
+            rate(),
+            &fresh(facts.now),
+            facts,
+            &mut w.m,
+        )
+        .unwrap_err();
     assert_eq!(err, OpenRefused::RescanPending);
     assert_eq!(err.rule(), "CR-09");
     assert!(err.to_string().starts_with("CR-09: "));

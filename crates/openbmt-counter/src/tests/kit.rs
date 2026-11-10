@@ -21,8 +21,8 @@ use openbmt_core::settings::Settings;
 use openbmt_watch::{HeaderChain, Health, PeerAddr, Problem, Source, WellFormedBlock};
 
 use crate::{
-    Actor, Amount, Counter, Currency, Facts, OpenFacts, Opened, Pairing, Rate, Report, Role,
-    Screen, Sightings, Slot, State, Store, Stored,
+    Actor, Amount, Counter, Currency, Facts, OpenFacts, Opened, Pairing, Rate, RateSource, Report,
+    Role, Screen, Sightings, Slot, State, Store, Stored,
 };
 
 /// Satoshis per dollar in the test settings.
@@ -43,6 +43,11 @@ pub fn roots() -> PinnedRoots {
 /// $100,000 per bitcoin, in cents: 1,000 sats per dollar.
 pub fn rate() -> Rate {
     Rate::new(10_000_000).unwrap()
+}
+
+/// A rate source whose rate was fetched at `now`.
+pub fn fresh(now: u64) -> RateSource {
+    RateSource::new("test-fixed", now).unwrap()
 }
 
 /// Dollars.
@@ -384,7 +389,14 @@ impl World {
     pub fn open(&mut self, cents: u64) -> Opened {
         let facts = self.open_facts();
         self.c
-            .open(Amount(cents), usd(), rate(), facts, &mut self.m)
+            .open(
+                Amount(cents),
+                usd(),
+                rate(),
+                &fresh(facts.now),
+                facts,
+                &mut self.m,
+            )
             .unwrap()
     }
 
@@ -541,6 +553,7 @@ impl World {
         self.c.requote(
             index,
             Rate::new(minor_per_btc).unwrap(),
+            &fresh(self.now),
             self.now,
             &self.chain,
             &mut self.m,

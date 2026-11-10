@@ -7,7 +7,7 @@ use openbmt_core::policy::{CheckMode, InstantLabel};
 use openbmt_core::wire::DecodeError;
 
 use super::kit::*;
-use crate::{Amount, Desk, Event, OverrideEntry, Role, Sale};
+use crate::{Amount, Desk, Event, OverrideEntry, RateSource, Role, Sale, MAX_FINAL_PAYMENTS};
 
 /// Same checks as the core's helper, kept here because that one is private
 /// to core's tests.
@@ -76,6 +76,7 @@ fn every_event() -> Vec<Event> {
             currency: usd(),
             needs_sats: 5_000,
             minor_per_btc: 10_000_000,
+            source: RateSource::new("regtest-fixed", T0 - 3).unwrap(),
         },
         Event::Expired {
             index: 4,
@@ -103,6 +104,10 @@ fn every_event() -> Vec<Event> {
             at: T0 + 40,
             received_sats: 5_000,
             depth: 6,
+            first_seen_at: T0 + 12,
+            valued: Amount(500),
+            payments: vec![([3; 32], 2_000), ([9; 32], 3_000)],
+            more: false,
         },
         Event::LatePayment {
             index: 4,
@@ -143,7 +148,27 @@ fn every_event() -> Vec<Event> {
             index: 4,
             at: T0 + 120,
         },
+        Event::Requoted {
+            index: 4,
+            at: T0 + 130,
+            needs_sats: 4_000,
+            minor_per_btc: 12_500_000,
+            source: RateSource::new("a-b+c.9", T0 + 129).unwrap(),
+        },
     ]
+}
+
+fn a_final(payments: Vec<([u8; 32], u64)>, more: bool) -> Event {
+    Event::Final {
+        index: 4,
+        at: T0 + 40,
+        received_sats: 5_000,
+        depth: 6,
+        first_seen_at: T0 + 12,
+        valued: Amount(500),
+        payments,
+        more,
+    }
 }
 
 #[test]
@@ -278,7 +303,7 @@ fn every_event_is_strict() {
         assert_eq!(Event::decode(&bytes).unwrap(), e);
         assert_strict(&bytes, Event::decode, Event::encode);
     }
-    assert_eq!(every_event().len(), 14);
+    assert_eq!(every_event().len(), 15);
 }
 
 #[test]
@@ -333,6 +358,144 @@ fn an_event_with_an_unknown_tag_or_field_is_refused() {
     assert!(Event::decode(&opened).is_err(), "lower case currency");
 }
 
+/// The label of the `Opened` event in `every_event`: its length byte is at
+/// 40 (tag 1, index 4, time 8, amount 8, currency 3, two u64) and the label
+/// follows.
+const LABEL_AT: usize = 41;
+
+#[test]
+fn a_rate_source_label_that_is_not_allowed_is_refused_by_the_decoder() {
+    let good = every_event()[0].encode();
+    assert_eq!(good[LABEL_AT - 1], 13);
+    assert_eq!(&good[LABEL_AT..LABEL_AT + 13], b"regtest-fixed");
+    for bad_byte in [b'A', b' ', b'_', b'/', 0u8, 0xff, b':'] {
+        let mut bad = good.clone();
+        bad[LABEL_AT + 2] = bad_byte;
+        assert!(Event::decode(&bad).is_err(), "byte {bad_byte}");
+    }
+    // An empty label, and one of 33 bytes.
+    let mut bad = good.clone();
+    bad.splice(LABEL_AT - 1..LABEL_AT + 13, [0u8]);
+    assert!(Event::decode(&bad).is_err(), "empty");
+    let mut bad = good.clone();
+    bad.splice(
+        LABEL_AT - 1..LABEL_AT + 13,
+        std::iter::once(33u8).chain([b'a'; 33]),
+    );
+    assert!(Event::decode(&bad).is_err(), "33 bytes");
+    // 32 bytes is the most.
+    let mut ok = good.clone();
+    ok.splice(
+        LABEL_AT - 1..LABEL_AT + 13,
+        std::iter::once(32u8).chain([b'a'; 32]),
+    );
+    assert!(Event::decode(&ok).is_ok());
+}
+
+#[test]
+fn the_new_events_have_these_bytes() {
+    let opened = every_event()[0].encode();
+    let mut expect = vec![1u8];
+    expect.extend(4u32.to_le_bytes());
+    expect.extend(T0.to_le_bytes());
+    expect.extend(500u64.to_le_bytes());
+    expect.extend(*b"USD");
+    expect.extend(5_000u64.to_le_bytes());
+    expect.extend(10_000_000u64.to_le_bytes());
+    expect.push(13);
+    expect.extend(*b"regtest-fixed");
+    expect.extend((T0 - 3).to_le_bytes());
+    assert_eq!(opened, expect);
+
+    let requoted = every_event()[14].encode();
+    let mut expect = vec![15u8];
+    expect.extend(4u32.to_le_bytes());
+    expect.extend((T0 + 130).to_le_bytes());
+    expect.extend(4_000u64.to_le_bytes());
+    expect.extend(12_500_000u64.to_le_bytes());
+    expect.push(7);
+    expect.extend(*b"a-b+c.9");
+    expect.extend((T0 + 129).to_le_bytes());
+    assert_eq!(requoted, expect);
+
+    let fin = every_event()[5].encode();
+    let mut expect = vec![6u8];
+    expect.extend(4u32.to_le_bytes());
+    expect.extend((T0 + 40).to_le_bytes());
+    expect.extend(5_000u64.to_le_bytes());
+    expect.extend(6u32.to_le_bytes());
+    expect.extend((T0 + 12).to_le_bytes());
+    expect.extend(500u64.to_le_bytes());
+    expect.push(0); // more
+    expect.push(2); // payments
+    expect.extend([3u8; 32]);
+    expect.extend(2_000u64.to_le_bytes());
+    expect.extend([9u8; 32]);
+    expect.extend(3_000u64.to_le_bytes());
+    assert_eq!(fin, expect);
+}
+
+#[test]
+fn a_final_record_with_payments_that_are_not_canonical_is_refused() {
+    // Round trip with none, one and the most.
+    for n in [0usize, 1, MAX_FINAL_PAYMENTS] {
+        let payments: Vec<([u8; 32], u64)> = (0..n).map(|i| ([i as u8 + 1; 32], 100)).collect();
+        let e = a_final(payments, n == MAX_FINAL_PAYMENTS);
+        assert_strict(&e.encode(), Event::decode, Event::encode);
+        assert_eq!(Event::decode(&e.encode()).unwrap(), e);
+    }
+    // Not ascending.
+    let e = a_final(vec![([9; 32], 1), ([3; 32], 1)], false);
+    assert!(matches!(
+        Event::decode(&e.encode()),
+        Err(DecodeError::NonCanonical(_))
+    ));
+    // A transaction twice.
+    let e = a_final(vec![([3; 32], 1), ([3; 32], 2)], false);
+    assert!(matches!(
+        Event::decode(&e.encode()),
+        Err(DecodeError::NonCanonical(_))
+    ));
+    // 33 payments.
+    let many: Vec<([u8; 32], u64)> = (0..33).map(|i| ([i as u8 + 1; 32], 100)).collect();
+    let e = a_final(many, true);
+    assert!(matches!(
+        Event::decode(&e.encode()),
+        Err(DecodeError::NonCanonical(_))
+    ));
+    // The flag byte is 0 or 1, and "more" needs a full list.
+    let good = a_final(vec![([3; 32], 1)], false).encode();
+    let flag_at = 1 + 4 + 8 + 8 + 4 + 8 + 8;
+    let mut bad = good.clone();
+    bad[flag_at] = 2;
+    assert!(Event::decode(&bad).is_err());
+    bad[flag_at] = 1;
+    assert!(matches!(
+        Event::decode(&bad),
+        Err(DecodeError::NonCanonical(_))
+    ));
+}
+
+#[test]
+fn the_payments_of_a_final_record_are_the_largest_when_there_are_more_than_the_most() {
+    use crate::events::final_payments;
+    let few: Vec<([u8; 32], u64)> = vec![([1; 32], 5), ([2; 32], 7)];
+    assert_eq!(final_payments(&few), (few.clone(), false));
+    // 33 transactions: the amounts 1..=33, ids in the same order, except
+    // that the two smallest amounts tie and the one with the larger ID goes.
+    let mut many: Vec<([u8; 32], u64)> = (1..=33u8).map(|i| ([i; 32], u64::from(i))).collect();
+    many[1].1 = 1; // ids 1 and 2 both pay 1
+    let (kept, more) = final_payments(&many);
+    assert!(more);
+    assert_eq!(kept.len(), MAX_FINAL_PAYMENTS);
+    assert!(kept.windows(2).all(|p| p[0].0 < p[1].0));
+    assert!(kept.iter().any(|(t, _)| *t == [1; 32]));
+    assert!(kept.iter().all(|(t, _)| *t != [2; 32]));
+    // Exactly the most is not "more".
+    let exact: Vec<([u8; 32], u64)> = (1..=32u8).map(|i| ([i; 32], 1)).collect();
+    assert_eq!(final_payments(&exact), (exact.clone(), false));
+}
+
 #[test]
 fn an_event_keeps_its_index_and_record_kind() {
     use openbmt_core::records::RecordKind;
@@ -341,5 +504,6 @@ fn an_event_keeps_its_index_and_record_kind() {
     assert_eq!(kinds[3], RecordKind::Payment);
     assert_eq!(kinds[9], RecordKind::Override);
     assert_eq!(kinds[10], RecordKind::Conflict);
+    assert_eq!(kinds[14], RecordKind::Sale);
     assert!(every_event().iter().all(|e| e.index() == 4));
 }

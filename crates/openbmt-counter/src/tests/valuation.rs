@@ -379,8 +379,15 @@ fn cr_17_a_sale_below_the_dust_line_is_not_offered() {
     let facts = w.open_facts();
     // 40 cents is 400 sats.
     let err =
-        w.c.open(Amount(40), usd(), rate(), facts, &mut w.m)
-            .unwrap_err();
+        w.c.open(
+            Amount(40),
+            usd(),
+            rate(),
+            &fresh(facts.now),
+            facts,
+            &mut w.m,
+        )
+        .unwrap_err();
     assert_eq!(err, crate::OpenRefused::BelowDust { needs_sats: 400 });
     assert_eq!(err.rule(), "CR-17");
 }

@@ -19,7 +19,7 @@ use bitcoin::{
 use openbmt_core::batch::{AddressBatch, BatchPolicy, PinnedRoots, SignedBatch};
 use openbmt_core::identity::Identity;
 use openbmt_core::settings::Settings;
-use openbmt_counter::{Amount, Currency, Pairing, Rate};
+use openbmt_counter::{Amount, Currency, Pairing, Rate, RateSource};
 use openbmt_net_io::{AppEvent, Clock, DriverConfig, EventReceiver};
 use openbmt_watch::{HeaderStore, Health, PeerAddr};
 
@@ -43,6 +43,16 @@ pub fn roots() -> PinnedRoots {
 /// $100,000 per bitcoin, in cents: 1,000 sats per dollar.
 pub fn rate() -> Rate {
     Rate::new(10_000_000).unwrap()
+}
+
+/// A rate source whose rate was fetched at the clock's time.
+pub fn source_at(time: &Arc<AtomicU64>) -> RateSource {
+    RateSource::new("test-fixed", time.load(Ordering::SeqCst)).unwrap()
+}
+
+/// A rate source whose rate was fetched at `now`.
+pub fn fresh(now: u64) -> RateSource {
+    RateSource::new("test-fixed", now).unwrap()
 }
 
 /// Dollars.

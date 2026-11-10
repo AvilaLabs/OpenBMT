@@ -12,6 +12,14 @@ pub const SATS_PER_BTC: u64 = 100_000_000;
 pub const MAX_SATS: u64 = 21_000_000 * SATS_PER_BTC;
 /// CR-05: how long a quote is good for, in seconds.
 pub const QUOTE_SECS: u64 = 300;
+/// CR-58: the most seconds a rate may have been fetched before the time of
+/// the quote.
+pub const MAX_RATE_AGE_SECS: u64 = 600;
+/// CR-58: the most seconds a rate may have been fetched after the time of
+/// the quote (the clocks of two devices do not agree to the second).
+pub const MAX_RATE_AHEAD_SECS: u64 = 60;
+/// CR-57: the longest label of a rate source, in bytes.
+pub const MAX_SOURCE_LABEL_BYTES: usize = 32;
 
 /// An amount in minor units of the shop's currency (cents, for dollars).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -59,6 +67,75 @@ impl Rate {
     /// Minor units per bitcoin.
     pub fn minor_per_btc(&self) -> u64 {
         self.minor_per_btc
+    }
+}
+
+/// CR-57: where a rate came from, as the caller says. The counter does not
+/// fetch rates and does not read the label; it writes down what it is told.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RateSource {
+    label: String,
+    fetched_at: u64,
+}
+
+/// CR-57: a source label that is not allowed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BadSourceLabel;
+
+impl BadSourceLabel {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        "CR-57"
+    }
+}
+
+impl fmt::Display for BadSourceLabel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "CR-57: a rate source label is 1 to 32 bytes of a-z, 0-9, - + and ."
+        )
+    }
+}
+
+impl std::error::Error for BadSourceLabel {}
+
+/// Whether the bytes are a label CR-57 allows.
+pub(crate) fn label_is_valid(label: &[u8]) -> bool {
+    (1..=MAX_SOURCE_LABEL_BYTES).contains(&label.len())
+        && label
+            .iter()
+            .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'-' | b'+' | b'.'))
+}
+
+impl RateSource {
+    /// A source with a label of 1 to 32 bytes from `a-z 0-9 - + .` and the
+    /// time, in Unix seconds, at which the caller got the rate.
+    pub fn new(label: &str, fetched_at: u64) -> Result<Self, BadSourceLabel> {
+        if !label_is_valid(label.as_bytes()) {
+            return Err(BadSourceLabel);
+        }
+        Ok(Self {
+            label: label.to_string(),
+            fetched_at,
+        })
+    }
+
+    /// The label.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// When the caller got the rate, in Unix seconds.
+    pub fn fetched_at(&self) -> u64 {
+        self.fetched_at
+    }
+
+    /// CR-58: whether a rate fetched at this time may be used for a quote
+    /// made at `now`.
+    pub fn is_fresh_at(&self, now: u64) -> bool {
+        self.fetched_at.saturating_add(MAX_RATE_AGE_SECS) >= now
+            && self.fetched_at <= now.saturating_add(MAX_RATE_AHEAD_SECS)
     }
 }
 

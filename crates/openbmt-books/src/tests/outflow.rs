@@ -160,12 +160,7 @@ fn bk_14_a_sum_that_does_not_fit_is_an_error() {
 
 #[test]
 fn bk_14_totals_that_do_not_fit_are_an_error_not_a_wrapped_number() {
-    let big = |index| Event::Final {
-        index,
-        at: FEB_2_NOON,
-        received_sats: 1,
-        depth: 6,
-    };
+    let big = |index| final_event(index, FEB_2_NOON, 1);
     let kit = kit_with(&[
         opened(0, 1, u64::MAX),
         big(0),
@@ -173,12 +168,7 @@ fn bk_14_totals_that_do_not_fit_are_an_error_not_a_wrapped_number() {
         big(1),
     ]);
     assert_eq!(kit.books().utc_day_totals(), Err(BooksError::Overflow));
-    let sats = |index| Event::Final {
-        index,
-        at: FEB_2_NOON,
-        received_sats: u64::MAX,
-        depth: 6,
-    };
+    let sats = |index| final_event(index, FEB_2_NOON, u64::MAX);
     let kit = kit_with(&[opened(0, 1, 1), sats(0), opened(1, 1, 1), sats(1)]);
     assert_eq!(kit.books().utc_day_totals(), Err(BooksError::Overflow));
 }

@@ -26,9 +26,9 @@ use openbmt_core::settings::Settings;
 use openbmt_watch::{HeaderChain, Health, Refusal, Sighted, Source, WellFormedBlock};
 
 use crate::desk::{valid_name, Desk, OverrideEntry, Role};
-use crate::events::Event;
+use crate::events::{final_payments, Event};
 use crate::heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
-use crate::money::{sats_for, Amount, Currency, Quote, Rate};
+use crate::money::{sats_for, Amount, Currency, Quote, Rate, RateSource};
 use crate::refusal::{
     BlockError, CancelRefused, CommandRefused, HeartbeatRefused, JudgeError, LoadError,
     OpenRefused, OverrideRefused, RequoteRefused, SightingError,
@@ -512,11 +512,17 @@ impl Counter {
     ///    its address and expires by itself (CR-07); a payment to it is found.
     /// 4. a `Sale` record "opened". If it fails, the sale is stored and will
     ///    expire, but `Err` is returned and the address must not be shown.
+    ///
+    /// `source` says where the rate came from (CR-57). A rate fetched more
+    /// than [`crate::MAX_RATE_AGE_SECS`] before `facts.now`, or more than
+    /// [`crate::MAX_RATE_AHEAD_SECS`] after it, is refused (CR-58), with nothing
+    /// written.
     pub fn open<S: Store>(
         &mut self,
         amount: Amount,
         currency: Currency,
         rate: Rate,
+        source: &RateSource,
         facts: OpenFacts,
         store: &mut S,
     ) -> Result<Opened, OpenRefused<S::Error>> {
@@ -533,6 +539,12 @@ impl Counter {
         let needs_sats = sats_for(amount, rate).ok_or(OpenRefused::AmountTooLarge)?;
         if needs_sats < DUST_SATS {
             return Err(OpenRefused::BelowDust { needs_sats });
+        }
+        if !source.is_fresh_at(now) {
+            return Err(OpenRefused::StaleRate {
+                fetched_at: source.fetched_at(),
+                now,
+            });
         }
         let mut desk = self.desk.pruned(now);
         if !desk.has_room_for_address() {
@@ -577,6 +589,7 @@ impl Counter {
             currency,
             needs_sats,
             minor_per_btc: rate.minor_per_btc(),
+            source: source.clone(),
         };
         self.write_event(store, &event)
             .map_err(OpenRefused::Store)?;
@@ -592,11 +605,17 @@ impl Counter {
     /// the quote in force first; then the new quote is added and the rest of
     /// the amount is priced at it. Refused once enough has arrived, once the
     /// sale ended, and once the sale has [`MAX_QUOTES`] quotes (the last one
-    /// stays in force). One write: the sale.
+    /// stays in force). A rate that is stale (CR-58) is refused.
+    ///
+    /// The writes, in this order: a `Sale` record "requoted" (CR-59), then
+    /// the sale. If the process stops between them the sale does not hold
+    /// the new quote and `Err` is returned; the record names a quote the
+    /// sale never took, and asking again writes a second record.
     pub fn requote<C: HeaderChain + ?Sized, S: Store>(
         &mut self,
         index: u32,
         rate: Rate,
+        source: &RateSource,
         now: u64,
         headers: &C,
         store: &mut S,
@@ -612,18 +631,32 @@ impl Counter {
         if sale.quotes.len() >= MAX_QUOTES {
             return Err(RequoteRefused::TooManyQuotes);
         }
-        if sats_for(sale.amount, rate).is_none() {
+        let Some(needs_sats) = sats_for(sale.amount, rate) else {
             return Err(RequoteRefused::AmountTooLarge);
-        }
+        };
         let depth = self.depth();
         sale.refresh(headers, now, depth);
         if sale.frozen.is_some() {
             return Err(RequoteRefused::AlreadyEnough);
         }
+        if !source.is_fresh_at(now) {
+            return Err(RequoteRefused::StaleRate {
+                fetched_at: source.fetched_at(),
+                now,
+            });
+        }
         let quote = Quote::new(rate, now);
         sale.quotes.push(quote);
         sale.refresh(headers, now, depth);
-        self.put_sale(store, sale).map_err(RequoteRefused::Store)?;
+        let event = Event::Requoted {
+            index,
+            at: now,
+            needs_sats,
+            minor_per_btc: rate.minor_per_btc(),
+            source: source.clone(),
+        };
+        self.finish(store, sale, &[event])
+            .map_err(RequoteRefused::Store)?;
         Ok(quote)
     }
 
@@ -811,7 +844,7 @@ impl Counter {
             match block.payments(headers, &script) {
                 Ok(list) => {
                     for proven in list {
-                        match next.watch.confirmed(proven) {
+                        match next.watch.confirmed_at(proven, now) {
                             Ok(()) => effect.payments = effect.payments.saturating_add(1),
                             Err(r) => refused = refused.or(Some(r)),
                         }
@@ -1191,11 +1224,22 @@ impl Counter {
             }
             if state == State::Final && !sale.books_final {
                 sale.books_final = true;
+                let standing: Vec<([u8; 32], u64)> = sale
+                    .watch
+                    .standing()
+                    .into_iter()
+                    .map(|(txid, sats)| (txid.to_byte_array(), sats))
+                    .collect();
+                let (payments, more) = final_payments(&standing);
                 events.push(Event::Final {
                     index,
                     at: now,
                     received_sats: received,
                     depth: st.min_confirmations,
+                    first_seen_at: sale.watch.standing_first_seen().unwrap_or(now),
+                    valued: sale.valued_amount(received, now),
+                    payments,
+                    more,
                 });
                 reports.push(Report::BooksFinal {
                     index,

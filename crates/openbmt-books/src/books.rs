@@ -116,6 +116,7 @@ fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), Boo
     match event {
         // Opened is handled by the caller.
         Event::Opened { .. } => {}
+        Event::Requoted { .. } => {}
         Event::Expired { .. } => sale.state = SaleState::Expired,
         Event::Cancelled { .. } => sale.state = SaleState::Cancelled,
         Event::PaidAtOnce {
@@ -465,6 +466,7 @@ impl Books {
 fn event_time(event: &Event) -> Option<u64> {
     Some(match event {
         Event::Opened { at, .. }
+        | Event::Requoted { at, .. }
         | Event::Expired { at, .. }
         | Event::Cancelled { at, .. }
         | Event::PaidAtOnce { at, .. }

@@ -6,11 +6,12 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 9] = [
+const TEST_SOURCES: [&str; 10] = [
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
     include_str!("open.rs"),
     include_str!("overrides.rs"),
+    include_str!("records.rs"),
     include_str!("reports.rs"),
     include_str!("states.rs"),
     include_str!("storage.rs"),
@@ -35,9 +36,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_thirty_five_rules() {
+fn the_rules_file_defines_thirty_eight_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 35);
+    assert_eq!(ids.len(), 38);
     assert!(ids.contains("CR-01") && ids.contains("CR-42") && ids.contains("CR-56"));
 }
 

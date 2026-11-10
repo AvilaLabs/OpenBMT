@@ -21,7 +21,7 @@ use openbmt_core::records::{Chain, Record};
 use openbmt_core::settings::Settings;
 use openbmt_counter::{
     sale_payment_id, Actor, Amount, Counter, Currency, Event, Facts, OpenFacts, Pairing, Rate,
-    Report, Role, Slot, State, Store, Stored,
+    RateSource, Report, Role, Slot, State, Store, Stored,
 };
 use openbmt_watch::{HeaderChain, Health, PeerAddr, Source, WellFormedBlock};
 
@@ -500,9 +500,10 @@ impl Run {
                     now: self.now,
                 };
                 let usd = Currency::new(*b"USD").unwrap();
+                let source = RateSource::new("fuzz", self.now).unwrap();
                 if let Ok(opened) = self
                     .counter
-                    .open(amount, usd, rate, facts, &mut self.mem)
+                    .open(amount, usd, rate, &source, facts, &mut self.mem)
                 {
                     assert!(
                         self.scripts.insert(opened.script.clone()),
@@ -515,9 +516,15 @@ impl Run {
             1 => {
                 let (index, _) = self.pick(input.byte());
                 let rate = Rate::new((1 + u64::from(input.byte())) * 100_000).unwrap();
-                let _ = self
-                    .counter
-                    .requote(index, rate, self.now, &self.chain, &mut self.mem);
+                let source = RateSource::new("fuzz", self.now).unwrap();
+                let _ = self.counter.requote(
+                    index,
+                    rate,
+                    &source,
+                    self.now,
+                    &self.chain,
+                    &mut self.mem,
+                );
             }
             // A sighting of a payment to a sale from some coin, seen by the
             // network groups in a mask.

@@ -26,7 +26,10 @@ fn sighting(tx: &Transaction, from: Vec<openbmt_watch::PeerAddr>) -> AppEvent {
 fn rig_with_a_sale(dir: &Scratch) -> (Rig, Transaction) {
     let mut rig = start(dir.path());
     assert!(rig.feed(vec![Rig::peers()]).is_empty());
-    let opened = rig.node.open(five_dollars(), usd(), rate()).unwrap();
+    let opened = rig
+        .node
+        .open(five_dollars(), usd(), rate(), &source_at(&rig.time))
+        .unwrap();
     assert_eq!(opened.index, 0);
     assert_eq!(opened.needs_sats, 5_000);
     let pay = spend(1, &[(&script_of(0), 5_000)]);
@@ -139,7 +142,10 @@ fn a_reorganization_before_the_final_depth_turns_the_sale_red() {
 fn a_restarted_node_shows_the_same_states_and_reports_nothing_again() {
     let dir = Scratch::new();
     let (mut rig, pay) = rig_with_a_sale(&dir);
-    let second = rig.node.open(five_dollars(), usd(), rate()).unwrap();
+    let second = rig
+        .node
+        .open(five_dollars(), usd(), rate(), &source_at(&rig.time))
+        .unwrap();
     assert_eq!(second.index, 1);
     let pay_second = spend(2, &[(&script_of(1), 5_000)]);
     rig.feed(vec![
@@ -188,7 +194,10 @@ fn a_restarted_node_shows_the_same_states_and_reports_nothing_again() {
     assert_eq!(again.node.sales().collect::<Vec<_>>(), vec![0, 1]);
 
     // The next address is the third: none is used twice.
-    let third = again.node.open(five_dollars(), usd(), rate()).unwrap();
+    let third = again
+        .node
+        .open(five_dollars(), usd(), rate(), &source_at(&again.time))
+        .unwrap();
     assert_eq!(third.index, 2);
 
     // Five more blocks: the books are told, by the new node, once.
@@ -305,7 +314,9 @@ fn opening_needs_the_health_rules_to_hold() {
     let mut rig = start_with(config, time);
     // No Peers event yet.
     assert!(matches!(
-        rig.node.open(five_dollars(), usd(), rate()).unwrap_err(),
+        rig.node
+            .open(five_dollars(), usd(), rate(), &source_at(&rig.time))
+            .unwrap_err(),
         OpenRefused::Unhealthy(None)
     ));
     // One peer is fewer than three groups (WR-50).
@@ -320,7 +331,9 @@ fn opening_needs_the_health_rules_to_hold() {
         Some(Problem::TooFewPeerGroups)
     );
     assert!(matches!(
-        rig.node.open(five_dollars(), usd(), rate()).unwrap_err(),
+        rig.node
+            .open(five_dollars(), usd(), rate(), &source_at(&rig.time))
+            .unwrap_err(),
         OpenRefused::Unhealthy(Some(Problem::TooFewPeerGroups))
     ));
     // Three groups, two with filters, a tip of this hour.
@@ -331,7 +344,10 @@ fn opening_needs_the_health_rules_to_hold() {
     });
     rig.feed(vec![AppEvent::Peers(peers.clone(), None, (0, T0))]);
     assert!(rig.node.health().unwrap().healthy);
-    let opened = rig.node.open(five_dollars(), usd(), rate()).unwrap();
+    let opened = rig
+        .node
+        .open(five_dollars(), usd(), rate(), &source_at(&rig.time))
+        .unwrap();
     assert_eq!(opened.index, 0);
     // The tip goes stale (WR-51): the answer changes.
     rig.time
@@ -375,7 +391,9 @@ fn the_driver_starts_where_the_checked_height_and_the_headers_say() {
     // Addresses were shown and the height is gone: from the first block.
     let mut rig = start(dir.path());
     rig.feed(vec![Rig::peers()]);
-    rig.node.open(five_dollars(), usd(), rate()).unwrap();
+    rig.node
+        .open(five_dollars(), usd(), rate(), &source_at(&rig.time))
+        .unwrap();
     drop(rig);
     fs::remove_file(dir.path().join("checked.bin")).unwrap();
     assert_eq!(start(dir.path()).launch.driver.watch_from, 0);
@@ -495,7 +513,9 @@ fn a_late_payment_is_reported_by_pump() {
     let time = Arc::new(AtomicU64::new(T0));
     let mut rig = start_at(dir.path(), time.clone());
     rig.feed(vec![Rig::peers()]);
-    rig.node.open(five_dollars(), usd(), rate()).unwrap();
+    rig.node
+        .open(five_dollars(), usd(), rate(), &source_at(&rig.time))
+        .unwrap();
     time.store(T0 + 2_000, std::sync::atomic::Ordering::SeqCst);
     assert_eq!(rig.node.judge(0).unwrap().state, State::Expired);
     let late = spend(1, &[(&script_of(0), 5_000)]);

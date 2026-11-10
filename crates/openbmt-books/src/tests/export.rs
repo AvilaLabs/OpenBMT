@@ -19,12 +19,7 @@ const ADDRESSES: [&str; 2] = [
 fn month_kit() -> (Kit, Books) {
     let last = 1_738_367_999; // 2025-01-31T23:59:59Z
     let first = 1_738_368_000; // 2025-02-01T00:00:00Z
-    let fin = |index, at| Event::Final {
-        index,
-        at,
-        received_sats: SATS_PAID,
-        depth: 6,
-    };
+    let fin = |index, at| final_event(index, at, SATS_PAID);
     let kit = kit_with(&[
         opened(0, last - 5, 1850),
         fin(0, last),
@@ -119,12 +114,7 @@ fn bk_17_more_than_one_currency_refuses_the_export() {
     if let Event::Opened { currency, .. } = &mut opened_eur {
         *currency = eur;
     }
-    let fin = |index| Event::Final {
-        index,
-        at: FEB_2_NOON,
-        received_sats: 1,
-        depth: 6,
-    };
+    let fin = |index| final_event(index, FEB_2_NOON, 1);
     let kit = kit_with(&[opened(0, 10, 100), fin(0), opened_eur, fin(1)]);
     assert_eq!(
         kit.books().accounting_export(),

@@ -34,6 +34,14 @@ pub enum OpenRefused<E> {
         /// What the amount needs at the rate.
         needs_sats: u64,
     },
+    /// CR-58: the rate was fetched too long before the time of the sale, or
+    /// after it.
+    StaleRate {
+        /// When the caller got the rate.
+        fetched_at: u64,
+        /// The time of the sale.
+        now: u64,
+    },
     /// CR-04: too many addresses were handed out in the last hour.
     RateLimited,
     /// CR-02: no address is left in the batches.
@@ -55,6 +63,7 @@ impl<E> OpenRefused<E> {
             Self::Unhealthy(_) => "CR-01",
             Self::ZeroAmount | Self::AmountTooLarge => "CR-05",
             Self::BelowDust { .. } => "CR-17",
+            Self::StaleRate { .. } => "CR-58",
             Self::RateLimited => "CR-04",
             Self::NoAddress | Self::AddressInUse => "CR-02",
             Self::AddressNotStored(_) => "CR-03",
@@ -81,6 +90,10 @@ impl<E: fmt::Display> fmt::Display for OpenRefused<E> {
             Self::BelowDust { needs_sats } => write!(
                 f,
                 "the amount is only {needs_sats} sats, below the dust line; use another payment type"
+            ),
+            Self::StaleRate { fetched_at, now } => write!(
+                f,
+                "the rate was fetched at {fetched_at} and the time is {now}; fetch a rate again"
             ),
             Self::RateLimited => write!(
                 f,
@@ -150,6 +163,14 @@ pub enum RequoteRefused<E> {
     TooManyQuotes,
     /// CR-05: the amount needs more than 21,000,000 bitcoin at the rate.
     AmountTooLarge,
+    /// CR-58: the rate was fetched too long before the time of the quote, or
+    /// after it.
+    StaleRate {
+        /// When the caller got the rate.
+        fetched_at: u64,
+        /// The time of the quote.
+        now: u64,
+    },
     /// CR-40: a write failed.
     Store(StoreFault<E>),
 }
@@ -161,6 +182,7 @@ impl<E> RequoteRefused<E> {
             Self::UnknownSale(_) => "CR-11",
             Self::SaleEnded | Self::TooManyQuotes | Self::AmountTooLarge => "CR-05",
             Self::AlreadyEnough => "CR-08",
+            Self::StaleRate { .. } => "CR-58",
             Self::Store(_) => "CR-40",
         }
     }
@@ -175,6 +197,10 @@ impl<E: fmt::Display> fmt::Display for RequoteRefused<E> {
             Self::AlreadyEnough => write!(f, "enough has arrived; the sale takes no new quote"),
             Self::TooManyQuotes => write!(f, "the sale has the most quotes it can keep"),
             Self::AmountTooLarge => write!(f, "the amount is more than all the bitcoin there is"),
+            Self::StaleRate { fetched_at, now } => write!(
+                f,
+                "the rate was fetched at {fetched_at} and the time is {now}; fetch a rate again"
+            ),
             Self::Store(e) => write!(f, "{e}"),
         }
     }

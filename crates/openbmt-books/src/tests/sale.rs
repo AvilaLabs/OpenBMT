@@ -141,15 +141,7 @@ fn bk_06_overpaid_is_read_from_a_surplus_and_underpaid_from_the_first_quote() {
         })
     );
     assert_eq!(books.sale(&kit.key(0)).expect("sale").settlement(), None);
-    let short = kit_with(&[
-        opened(0, 10, 100),
-        Event::Final {
-            index: 0,
-            at: 11,
-            received_sats: 4_000_000,
-            depth: 6,
-        },
-    ]);
+    let short = kit_with(&[opened(0, 10, 100), final_event(0, 11, 4_000_000)]);
     assert_eq!(
         short
             .books()

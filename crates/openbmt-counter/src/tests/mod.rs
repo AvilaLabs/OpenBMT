@@ -7,6 +7,7 @@ mod kit;
 mod meta;
 mod open;
 mod overrides;
+mod records;
 mod reports;
 mod states;
 mod storage;

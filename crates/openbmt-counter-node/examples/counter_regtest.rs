@@ -108,7 +108,7 @@ use openbmt_core::batch::{BatchBuilder, BatchPolicy, PinnedRoots, SignedBatch};
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::settings::Settings;
 use openbmt_core::wallet::{KeySlot, WalletDescription};
-use openbmt_counter::{Amount, Currency, HeartbeatView, Pairing, Rate, Report};
+use openbmt_counter::{Amount, Currency, HeartbeatView, Pairing, Rate, RateSource, Report};
 use openbmt_counter_node::{CounterLink, CounterLinkConfig, Node, NodeConfig};
 use openbmt_courier::{Courier, CourierConfig, FirstStart};
 use openbmt_link::{ClientConfig, Role, Route};
@@ -324,7 +324,8 @@ fn command(
             let rate: u64 = number(words.next(), "the rate")?;
             let rate = Rate::new(rate).ok_or("the rate is zero")?;
             let usd = Currency::new(*b"USD").ok_or("currency")?;
-            match node.open(Amount(minor), usd, rate) {
+            let source = RateSource::new("regtest-fixed", now_secs()).map_err(|e| e.to_string())?;
+            match node.open(Amount(minor), usd, rate, &source) {
                 Ok(opened) => {
                     let address = Address::from_script(&opened.script, Network::Regtest)
                         .map_err(|e| e.to_string())?;

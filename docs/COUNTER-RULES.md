@@ -38,6 +38,23 @@ draws what it is told.
   rate the caller supplies, good for 5 minutes. When a quote runs out the
   caller supplies a new rate and the sale gets a new quote. The address
   does not change. All quotes of a sale are kept.
+- **CR-57.** A rate comes with its source: a label of 1 to 32 bytes from
+  `a-z`, `0-9`, `-`, `+` and `.`, and the time, in Unix seconds, at which
+  the caller got the rate. A label with any other byte, or none, is
+  refused. The counter does not fetch rates and does not read the label;
+  it writes down what the caller says. The source of the first quote is in
+  the record `Opened`, and the source of every later quote in the record
+  `Requoted` (CR-59).
+- **CR-58.** A sale is not quoted at a stale rate. A rate that the caller
+  got more than 600 seconds before the counter's time, or more than 60
+  seconds after it, is refused, when a sale is opened and when it is
+  requoted. Nothing is written when it is refused.
+- **CR-59.** A new quote is written as a signed record `Requoted` (kind
+  `Sale`): the sale, the time, what the whole amount needs at the new rate
+  in satoshis, the rate and its source. It is stored before the sale takes
+  the quote. If the process stops between the two writes, the record names
+  a quote that the sale does not hold; the caller was told the requote
+  failed, and asking again writes a second record.
 - **CR-06.** Satoshis are valued once, at the quote that was current when
   the counter first learned of them, and that value never changes. If
   none was current, the last quote is used: it is the one the customer
@@ -149,6 +166,17 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   `PosUnpaid`, written exactly when the report is made; "final" to the
   books is the record `Final`, which is written once, with the report. A
   chain written before `PosPaid` and `PosUnpaid` existed has none of them.
+  The record `Final` says what the books need to know about the money:
+  what has arrived and the depth reached; the transactions that pay the
+  sale and what each pays, as the watcher names them at that moment
+  (WR-31); the earliest time any of them was first seen, or, for a payment
+  that was only ever seen in a block, the time the counter learned of the
+  block; and what the received satoshis are worth in the shop's currency
+  by the sale's own quotes (CR-06). The record names at most 32
+  transactions. A sale with more standing transactions is final all the
+  same: the record names the 32 that pay the most (the smaller transaction
+  ID first among equal amounts), in ascending order of ID, and says there
+  were more. The record `Opened` carries the first quote's source (CR-57).
 
 ## 5. Storage
 

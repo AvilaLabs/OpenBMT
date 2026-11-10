@@ -279,17 +279,40 @@ impl Sale {
         u32::try_from(i).unwrap_or(u32::MAX)
     }
 
+    /// CR-06: what the valued segments are worth, each at the rate of its
+    /// own quote. `None` when a segment names a quote the sale does not hold.
+    fn segments_value(&self) -> Option<u64> {
+        let mut valued = 0u64;
+        for s in &self.segments {
+            let rate = self.rate_of(s.quote)?;
+            valued = valued.saturating_add(value_of(s.sats, rate).0);
+        }
+        Some(valued)
+    }
+
+    /// CR-32: what `received` satoshis are worth in the shop's currency: the
+    /// valued segments at their own quotes (CR-06) and the satoshis not
+    /// valued yet at the quote in force at `now`, as [`Sale::value`] would
+    /// value them.
+    pub(crate) fn valued_amount(&self, received: u64, now: u64) -> Amount {
+        let Some(valued) = self.segments_value() else {
+            return Amount(0);
+        };
+        let unvalued = received.saturating_sub(self.segment_sum());
+        let rest = match self.rate_of(self.quote_index_at(now)) {
+            Some(rate) => value_of(unvalued, rate).0,
+            None => 0,
+        };
+        Amount(valued.saturating_add(rest))
+    }
+
     /// CR-08: the satoshis already valued plus the rest of the amount at the
     /// rate of quote `q`, rounded up. A rate that cannot be found gives the
     /// largest number, so nothing is ever enough.
     fn needs_at(&self, q: u32) -> u64 {
-        let mut valued = 0u64;
-        for s in &self.segments {
-            let Some(rate) = self.rate_of(s.quote) else {
-                return u64::MAX;
-            };
-            valued = valued.saturating_add(value_of(s.sats, rate).0);
-        }
+        let Some(valued) = self.segments_value() else {
+            return u64::MAX;
+        };
         let rest = Amount(self.amount.0.saturating_sub(valued));
         let Some(rate) = self.rate_of(q) else {
             return u64::MAX;

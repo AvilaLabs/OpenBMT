@@ -158,8 +158,15 @@ fn cr_41_open_stopped_at_each_of_its_four_writes_is_safe() {
         w.m.fail_on = Some(n);
         let facts = w.open_facts();
         let refused =
-            w.c.open(five_dollars(), usd(), rate(), facts, &mut w.m)
-                .unwrap_err();
+            w.c.open(
+                five_dollars(),
+                usd(),
+                rate(),
+                &fresh(facts.now),
+                facts,
+                &mut w.m,
+            )
+            .unwrap_err();
         assert_eq!(
             refused.rule(),
             if n == 2 { "CR-03" } else { "CR-40" },
@@ -605,8 +612,15 @@ fn cr_42_open_refuses_an_address_a_sale_already_holds() {
     w.restart();
     let facts = w.open_facts();
     let err =
-        w.c.open(five_dollars(), usd(), rate(), facts, &mut w.m)
-            .unwrap_err();
+        w.c.open(
+            five_dollars(),
+            usd(),
+            rate(),
+            &fresh(facts.now),
+            facts,
+            &mut w.m,
+        )
+        .unwrap_err();
     assert_eq!(err, OpenRefused::AddressInUse);
     assert_eq!(err.rule(), "CR-02");
 }
