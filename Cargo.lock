@@ -220,6 +220,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-spend"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "openbmt-core",
+ "openbmt-signer",
+]
+
+[[package]]
 name = "openbmt-watch"
 version = "0.1.0"
 dependencies = [

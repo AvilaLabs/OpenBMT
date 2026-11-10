@@ -1,0 +1,16 @@
+[package]
+name = "openbmt-spend"
+description = "The OpenBMT spend path: plan a transaction from the wallet's coins, write it as a PSBT, join two signers' signatures and finish it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The same exact bitcoin version as openbmt-core, so the types unify. The
+# signer is a dependency for its limits (SR-02, SR-40, SR-41, SR-43), so
+# that the two cannot drift apart.
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+openbmt-signer = { path = "../openbmt-signer" }
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
