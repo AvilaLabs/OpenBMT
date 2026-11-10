@@ -1,0 +1,17 @@
+# Licences an external package may carry. A package with several ("A OR B")
+# needs one of them on this list.
+MIT
+# MIT plus "no false attribution" (hex_lit, a rust-bitcoin helper).
+MITNFA
+Apache-2.0
+Apache-2.0 WITH LLVM-exception
+BSD-2-Clause
+BSD-3-Clause
+CC0-1.0
+ISC
+Unicode-3.0
+Unlicense
+Zlib
+# File-level copyleft, compatible with shipping under MIT. Only uniffi
+# carries it, and uniffi is being removed from the Key app library.
+MPL-2.0

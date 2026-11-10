@@ -59,6 +59,7 @@ sets. The full statement, its conditions and the reasoning are in
 | [docs/POS-RULES.md](docs/POS-RULES.md) | How the owner's device matches the POS orders to the counter's sales, and what raises an alert |
 | [docs/BOOKS-RULES.md](docs/BOOKS-RULES.md) | How the counters' records become the books: per-sale fields and what stays unknown, the two CSV exports and the encrypted export file |
 | [docs/BOX-RULES.md](docs/BOX-RULES.md) | What the merchant's own server holds, how a Box with no screen is paired, and its part in the relay and the POS side (sections 1 to 3 and 5 implemented in `crates/openbmt-box`; the POS side is not yet) |
+| [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Which outside packages each program is built from, the rules for adding or updating one, and the check that enforces them (`scripts/deps-check.sh`, lists in `deps/`) |
 | [docs/research/](docs/research/) | Research notes, four rounds of internal design review, and the results of the checks against Bitcoin Core |
 | [crates/openbmt-core/](crates/openbmt-core/) | The rules every device must agree on: wallet description, device identity, address batches, signed records, signed settings, instant-acceptance policy |
 | [crates/openbmt-signer/](crates/openbmt-signer/) | The Key app's transaction signer: the rules under which key 2 signs |

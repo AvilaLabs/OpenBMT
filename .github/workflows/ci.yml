@@ -44,3 +44,24 @@ jobs:
           rustup toolchain install 1.89.0 --profile minimal
           rustup default 1.89.0
       - run: cargo test --workspace --locked
+
+  deps:
+    name: dependency lists, sources, licences, advisories
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Fetch the locked packages
+        run: cargo fetch --locked
+      - name: Lists, sources and licences
+        run: scripts/deps-check.sh
+      - name: Advisories
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          cargo audit --deny warnings
+          cargo audit --deny warnings --file fuzz/Cargo.lock
