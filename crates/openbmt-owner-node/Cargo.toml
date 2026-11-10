@@ -23,6 +23,8 @@ openbmt-pos = { path = "../openbmt-pos" }
 openbmt-counter = { path = "../openbmt-counter" }
 openbmt-owner = { path = "../openbmt-owner" }
 openbmt-session = { path = "../openbmt-session" }
+# For `Coin` and the spend rules the coin view serves.
+openbmt-spend = { path = "../openbmt-spend" }
 
 [dev-dependencies]
 # For the owner's wallet in the tests of the refund intake, and the two

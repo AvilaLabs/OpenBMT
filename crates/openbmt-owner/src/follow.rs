@@ -100,6 +100,27 @@ impl Owner {
         self.commit(next, persist)
     }
 
+    /// AS-54: the caller saw another transaction spend the coins this one
+    /// spends. Its refunds go back to returned, and no conflict is kept,
+    /// because the coins are gone for good.
+    pub fn mark_replaced<E>(
+        &mut self,
+        txid: &Txid,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), OwnerError<E>> {
+        let mut next = self.state.clone();
+        let (at, ids) = waiting(&next, txid).ok_or(Refusal::UnknownTransaction(*txid))?;
+        for id in ids {
+            if let Some(stage) = next.stage_mut(id) {
+                *stage = Stage::Returned {
+                    reason: "its coins were spent by another transaction".to_string(),
+                };
+            }
+        }
+        next.outbox.remove(at);
+        self.commit(next, persist)
+    }
+
     /// AS-64: the caller delivered a signed batch, settings item or pairing.
     pub fn mark_delivered<E>(
         &mut self,

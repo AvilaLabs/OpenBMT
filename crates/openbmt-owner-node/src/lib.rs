@@ -44,6 +44,7 @@
     )
 )]
 
+pub mod coins;
 pub mod copy;
 pub mod link;
 pub mod refunds;

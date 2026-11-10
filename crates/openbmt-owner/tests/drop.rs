@@ -232,3 +232,39 @@ fn as_68_an_entry_whose_outpoints_another_transaction_of_the_session_took_waits(
     assert_eq!(rig.owner.cash_outs()[0].stage, Stage::Queued);
     let _ = r;
 }
+
+#[test]
+fn as_54_a_replaced_transaction_returns_its_entries_and_keeps_no_conflict() {
+    let mut rig = Rig::new();
+    let id = refund(&mut rig.owner, 1, 50_000, 10_000);
+    let c1 = deep_coin(1, 0, 300_000, 6);
+    rig.round(std::slice::from_ref(&c1), 0);
+    let txid = txid_of(&rig.owner, id);
+    ok(rig.owner.mark_broadcast(&txid, nop));
+    ok(rig.owner.mark_replaced(&txid, nop));
+    assert!(matches!(
+        rig.owner.refunds()[0].stage,
+        Stage::Returned { .. }
+    ));
+    assert!(rig.owner.refunds()[0].conflict.is_empty());
+    assert!(rig.owner.outbox().is_empty());
+    // It is not followed any more.
+    assert!(rig.owner.mark_replaced(&txid, nop).is_err());
+}
+
+#[test]
+fn as_54_the_receive_and_change_marks_follow_what_was_handed_out() {
+    let mut rig = Rig::new();
+    assert_eq!(rig.owner.receive_mark(), 0);
+    assert_eq!(rig.owner.change_mark(), 0);
+    ok(rig.owner.queue_batch(batch(1, 0, 3), nop));
+    assert_eq!(rig.owner.receive_mark(), 3);
+    refund(&mut rig.owner, 1, 50_000, 10_000);
+    let c1 = deep_coin(1, 0, 300_000, 6);
+    let built = rig.build(std::slice::from_ref(&c1), 4);
+    assert_eq!(rig.owner.change_mark(), 5);
+    // The session closes with the answer, and the mark goes with it.
+    let response = rig.answer_all(&built.request);
+    ok(rig.take(&response));
+    assert_eq!(rig.owner.change_mark(), 0);
+}

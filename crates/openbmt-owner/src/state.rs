@@ -376,6 +376,45 @@ impl Owner {
             .map(|s| s.request.as_slice())
     }
 
+    /// The first receive index that no batch the owner phone holds has
+    /// handed out: the highest `start + count` over the batches in the queue
+    /// and over the signed batches waiting to be delivered. A batch that was
+    /// delivered leaves both, so a caller that must not forget it keeps the
+    /// highest value it has seen.
+    pub fn receive_mark(&self) -> u32 {
+        let queued = self
+            .state
+            .batches
+            .iter()
+            .map(|q| q.batch.start.saturating_add(q.batch.count));
+        let waiting = self.state.outbox.iter().filter_map(|d| match &d.what {
+            Delivery::Batch(bytes) => openbmt_core::batch::SignedBatch::from_bytes(bytes)
+                .ok()
+                .map(|b| b.batch.start.saturating_add(b.batch.count)),
+            _ => None,
+        });
+        queued.chain(waiting).max().unwrap_or(0)
+    }
+
+    /// The first change index that no open session has frozen: one above the
+    /// highest change index of a transaction in an open session (0 if none).
+    pub fn change_mark(&self) -> u32 {
+        self.state
+            .sessions
+            .iter()
+            .flat_map(|s| s.frozen.iter())
+            .filter_map(|(_, f)| match f {
+                Frozen::Spend {
+                    change_index,
+                    change_position: Some(_),
+                    ..
+                } => Some(change_index.saturating_add(1)),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
     /// A sale's facts, if any are kept.
     pub fn sale_facts(&self, sale: &SaleKey) -> Option<SaleFacts> {
         self.state.sales.get(sale).map(|s| s.facts)

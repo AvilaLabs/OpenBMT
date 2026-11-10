@@ -18,6 +18,7 @@ use openbmt_watch::{HeaderChain, Health, Peer, PeerAddr, PeerTransport};
 
 use crate::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE};
 
+mod coins;
 mod link;
 mod pos_notice;
 mod refunds;

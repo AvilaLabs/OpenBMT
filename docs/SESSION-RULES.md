@@ -258,10 +258,13 @@ in memory, and nothing is changed if the store fails.
   paid only when the caller reports its transaction confirmed. Until then
   its amount counts against the sale (AS-52). A refund that was signed or
   sent and whose transaction the caller reports dropped goes back to
-  returned, and keeps counting. Only cancelling a refund that is not signed
+  returned, and keeps counting. One whose coins the caller reports spent
+  by another transaction goes back to returned too, and keeps counting,
+  but keeps no list of outpoints, because those coins are gone for good.
+  Only cancelling a refund that is not signed
   or sent frees its amount. The caller reports each transaction as
-  broadcast, confirmed or dropped. Paid refunds can be archived: the record
-  leaves the queue and its amount stays counted (AS-52).
+  broadcast, confirmed, dropped or replaced. Paid refunds can be archived:
+  the record leaves the queue and its amount stays counted (AS-52).
 - **AS-55.** All ready refunds go into one transaction with one output per
   refund (`docs/DESIGN.md` §2.4), at most 99 of them. With the option
   "one transaction for each refund" each refund gets a transaction of its
