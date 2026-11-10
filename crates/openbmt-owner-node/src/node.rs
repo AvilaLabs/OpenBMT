@@ -538,8 +538,16 @@ impl<P: OwnerPort> OwnerNode<P> {
     // The queue and the keys.
 
     /// The marks, from what the queue and the view hold. When they grow the
-    /// new scripts are watched and the blocks above the birthday are checked
-    /// again for them (OC-07). Called by every step that can change them.
+    /// new scripts are given to the driver, which matches the filters of the
+    /// blocks it fetches after that command, and to the node's own set,
+    /// which every block applied later is read with. Nothing is rescanned:
+    /// the scripts are the device's own and were not there to be paid
+    /// before (OC-07). This is why it runs at start before the driver is
+    /// started, right before each block and each reorganization is applied,
+    /// and after each batch is queued and each spend is built or taken.
+    /// The one window left is a block the driver matched before it got the
+    /// command and that was mined after the script was made; [`OwnerNode::rescan`]
+    /// closes it for a person who suspects a missed payment.
     pub fn refresh_marks(&mut self) {
         let (receive, change) = marks_of(&self.owner, &self.view);
         let dir = self.dir.clone();
@@ -560,17 +568,17 @@ impl<P: OwnerPort> OwnerNode<P> {
                     }
                 }
                 self.scripts = new;
-                self.watcher.port().rescan_from(self.view.birthday());
                 self.note(format!(
-                    "new addresses are watched; the blocks above {} are checked again",
-                    self.view.birthday()
+                    "new addresses are watched from the block after {}",
+                    self.view.checked()
                 ));
             }
             Err(e) => self.stop(format!("the coin view could not be stored: {e}")),
         }
     }
 
-    /// Start again from the birthday: for a view in the deep reorg state.
+    /// Start again from the birthday: for a view in the deep reorg state, a
+    /// restored owner or a person who suspects a missed payment.
     pub fn rescan(&mut self) -> Result<(), NodeError> {
         let dir = self.dir.clone();
         self.view
@@ -917,6 +925,7 @@ impl<P: OwnerPort> OwnerNode<P> {
     }
 
     fn left_the_chain(&mut self, left: &[bitcoin::BlockHash]) {
+        self.refresh_marks();
         // The watcher has not applied this event yet, so its view still has
         // the heights of the blocks that left.
         let fork = left
@@ -959,6 +968,9 @@ impl<P: OwnerPort> OwnerNode<P> {
         if self.halted.is_some() {
             return;
         }
+        // The marks first: a script the queue handed out is read in this
+        // block (OC-07).
+        self.refresh_marks();
         let block = match WellFormedBlock::parse(bytes) {
             Ok(b) if b.hash() == *hash => b,
             Ok(_) => return self.stop(format!("a block did not have the hash {hash} it came as")),

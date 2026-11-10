@@ -76,12 +76,14 @@ PASS or FAIL for each numbered step. The pieces:
   state's text.
 - Three nodes of the same software on one machine are not a network. The
   groups are counted by loopback address.
-- Every new mark (a batch handed out, a change index used) makes the node
-  check the blocks above the birthday height again, as the rules ask
-  (`docs/OWNER-COINS-RULES.md`, OC-07). On regtest this is a few blocks; on
-  mainnet it is a rescan from the birthday after each spend, and no session
-  is built while it runs. Whether a rescan is needed when the new scripts lie
-  only beyond the gap is a question left for the coordinator.
+- Marks that grow from the owner's own queue (a batch, a spend's change
+  index) rescan nothing (`docs/OWNER-COINS-RULES.md`, OC-07). The run shows
+  it: the view is ready right after the batch and after the spend, and the
+  example never printed a note about checking blocks again. An earlier
+  version rescanned from the birthday on every such growth and the view was
+  not ready until the rescan had caught up. One window is left: a block the
+  driver matched before it received the new script and that was mined after
+  the script was made. `rescan` closes it on request.
 - Reorganizations deeper than 100 blocks are the named state "deep reorg:
   rescan" and are covered by unit tests, not by this run.
 

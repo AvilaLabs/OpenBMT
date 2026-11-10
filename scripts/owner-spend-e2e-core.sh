@@ -339,6 +339,11 @@ if [ -n "$TX1" ]; then
   note "$(grep -E '^(send|entry|queue)' <<<"$LAST" | tr '\n' ';')"
   chk 2 "the refund entry is Sent" grep -q "^entry $ID1 Sent\$" <<<"$LAST"
   chk 2 "the node says it sent without Tor" grep -q 'sending without Tor' "$EX_LOG"
+  cmd status
+  chk 2 "the view is ready right after the batch and the spend" \
+    grep -q ' view=ready$' <<<"$LAST"
+  chk 2 "no block was checked again for the new addresses" \
+    [ "$(grep -c 'checked again' "$EX_LOG")" = 0 ]
   chk 2 "it was handed over once" [ "$(grep -c "^spent txid=$TX1" "$EX_LOG")" = 1 ]
 fi
 done_step 2 "the refund was signed by both keys, taken and handed to the driver"

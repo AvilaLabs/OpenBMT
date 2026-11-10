@@ -41,10 +41,13 @@
 //!
 //! Receive indices from 0 to the highest a signed batch handed out plus
 //! [`GAP`], change indices from 0 to the next change index plus [`GAP`]. The
-//! two marks are kept here ([`CoinView::raise_marks`]). When they grow, the
-//! view goes back to the birthday height and the blocks above it are
-//! checked again for the new scripts ([`ViewState::Rescanning`]); no coin is
-//! offered until the rescan has caught up with where the view was.
+//! two marks are kept here ([`CoinView::raise_marks`]). They grow with the
+//! device's own queue (a batch handed out, the change index a spend used),
+//! and then the new scripts are watched from the block after the last
+//! checked one: nothing is rescanned and the view stays ready. That holds
+//! only because the caller raises the marks before it applies any later
+//! block or reorganization. A rescan from the birthday is for a new view,
+//! [`CoinView::reset`] and the deep reorg state.
 //!
 //! ## The stored form
 //!
@@ -396,9 +399,12 @@ impl CoinView {
 
     // ---- changing ------------------------------------------------------------
 
-    /// Raise the marks. Returns whether either grew. When one does, the view
-    /// goes back to the birthday and rescans (see the module docs); the new
-    /// value is stored first.
+    /// Raise the marks to what the device's own queue has handed out: a
+    /// batch's addresses, the change index a spend used. Returns whether
+    /// either grew. Nothing is rescanned and the state does not change: a
+    /// script the device has just made cannot have been paid before, as
+    /// long as this is called before any later block is applied (see the
+    /// module docs). The new value is stored first.
     pub fn raise_marks<E>(
         &mut self,
         receive_next: u32,
@@ -413,7 +419,6 @@ impl CoinView {
         let mut next = self.clone();
         next.receive_next = receive_next;
         next.change_next = change_next;
-        next.begin_rescan();
         persist(&encode(&next))?;
         *self = next;
         Ok(true)
@@ -436,22 +441,6 @@ impl CoinView {
         persist(&encode(&next))?;
         *self = next;
         Ok(())
-    }
-
-    /// Go back to the birthday for a rescan of the scripts just added. The
-    /// coins already known stay (a block seen again does not add one twice).
-    fn begin_rescan(&mut self) {
-        let to = match self.state {
-            ViewState::Rescanning { to } => to.max(self.checked),
-            _ => self.checked,
-        };
-        if self.state == ViewState::DeepReorg {
-            return;
-        }
-        if to > self.birthday {
-            self.state = ViewState::Rescanning { to };
-            self.checked = self.birthday;
-        }
     }
 
     /// The driver reports that every block up to `height` has been checked.

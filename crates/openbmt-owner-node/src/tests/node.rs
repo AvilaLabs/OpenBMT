@@ -564,8 +564,15 @@ fn oc_05_a_block_that_leaves_takes_its_coin_with_it_and_the_position_down() {
     assert_eq!(rig.node.view().checked(), 1);
 }
 
+fn rescans(rig: &Rig) -> usize {
+    rig.calls()
+        .iter()
+        .filter(|c| c.starts_with("main rescan"))
+        .count()
+}
+
 #[test]
-fn oc_07_new_marks_watch_new_scripts_and_scan_from_the_birthday_once() {
+fn oc_07_new_marks_watch_new_scripts_and_rescan_nothing() {
     let dir = Dir::new();
     let mut rig = start(&dir, &Setup::default()).unwrap();
     // Nothing is handed out: only the gap is watched, on both keychains.
@@ -574,15 +581,90 @@ fn oc_07_new_marks_watch_new_scripts_and_scan_from_the_birthday_once() {
     rig.queue_refund(10_000);
     let after = rig.calls();
     let new = &after[before.len()..];
-    // 3 more receive scripts, and one scan from the birthday.
+    // 3 more receive scripts, and no scan.
     assert_eq!(new.iter().filter(|c| *c == "main watch").count(), 3);
-    assert_eq!(new.iter().filter(|c| *c == "main rescan 0").count(), 1);
+    assert_eq!(rescans(&rig), 0);
     rig.node.refresh_marks();
     assert_eq!(
         rig.calls().len(),
         after.len(),
         "nothing grew, nothing is said"
     );
+    // A spend raises the change mark: still no scan, and the view is ready
+    // the whole way.
+    rig.fund(300_000);
+    let txid = rig.spend();
+    assert!(rig.node.send_state(&txid).is_some());
+    assert_eq!(rescans(&rig), 0);
+    assert_eq!(rig.node.state(), ViewState::Ready);
+}
+
+#[test]
+fn oc_07_a_payment_in_the_next_block_after_a_batch_is_found_and_a_session_can_be_built() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    rig.mine_empty(2);
+    let write = rig.node.queue_writer();
+    // Larger than the gap: index 29 was not watched before.
+    rig.node
+        .owner_mut()
+        .queue_batch(batch(0, 30), &write)
+        .unwrap();
+    rig.node.refresh_marks();
+    assert_eq!(rig.node.state(), ViewState::Ready);
+    let pay = tx_from(
+        OutPoint::new(Txid::from_byte_array([7; 32]), 0),
+        &[(&receive(29), 70_000)],
+    );
+    rig.mine(std::slice::from_ref(&pay));
+    assert_eq!(rig.node.balance(), 70_000);
+    assert_eq!(rig.node.state(), ViewState::Ready);
+    assert_eq!(rescans(&rig), 0);
+    assert!(!matches!(
+        rig.node.build_request(1_000, NOW),
+        Err(NodeError::NotReady(_))
+    ));
+}
+
+#[test]
+fn oc_07_a_restart_between_the_queue_and_the_view_raises_the_marks_before_the_next_block() {
+    let dir = Dir::new();
+    let chain = {
+        let mut rig = start(&dir, &Setup::default()).unwrap();
+        rig.mine_empty(2);
+        // The batch is stored in the queue; the view is never told.
+        let write = rig.node.queue_writer();
+        rig.node
+            .owner_mut()
+            .queue_batch(batch(0, 30), &write)
+            .unwrap();
+        rig.chain.clone()
+    };
+    let mut rig = start_at(&dir, &Setup::default(), chain).unwrap();
+    // The driver starts with the grown set, and the view holds the marks.
+    assert_eq!(rig.spawned.lock().unwrap()[0].scripts, 50 + 20);
+    assert_eq!(rig.node.view().receive_next(), 30);
+    let pay = tx_from(
+        OutPoint::new(Txid::from_byte_array([7; 32]), 0),
+        &[(&receive(29), 70_000)],
+    );
+    rig.mine(&[pay]);
+    assert_eq!(rig.node.balance(), 70_000);
+    assert_eq!(rescans(&rig), 0);
+}
+
+#[test]
+fn oc_07_only_an_explicit_rescan_asks_the_driver_to_check_again() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    rig.queue_refund(10_000);
+    rig.fund(300_000);
+    assert_eq!(rescans(&rig), 0);
+    // A new view starts the driver at the birthday: no command needed.
+    assert_eq!(rig.spawned.lock().unwrap()[0].watch_from, 0);
+    rig.node.rescan().unwrap();
+    assert_eq!(rescans(&rig), 1);
+    assert!(rig.calls().contains(&"main rescan 0".to_string()));
 }
 
 #[test]

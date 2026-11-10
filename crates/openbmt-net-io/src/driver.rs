@@ -36,8 +36,7 @@ use openbmt_net::book::{BAN_SECS, V2_RETRY_SECS};
 use openbmt_net::manager::Wanted;
 use openbmt_net::{
     Added, AddressBook, ConnectRefused, Manager, ManagerConfig, Output, PeerAddress, PeerId,
-    RelayState,
-    Source, TransportChoice, V2Entropy,
+    RelayState, Source, TransportChoice, V2Entropy,
 };
 use openbmt_watch::{host_group, network_group, HeaderStore, Peer, PeerAddr};
 

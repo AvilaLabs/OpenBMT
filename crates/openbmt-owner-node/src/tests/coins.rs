@@ -536,18 +536,58 @@ fn oc_07_the_watch_set_is_the_marks_plus_the_gap() {
     // Marks never go down, and no growth is no change.
     assert_eq!(view.raise_marks(3, 1, ok), Ok(false));
     assert_eq!((view.receive_next(), view.change_next()), (5, 2));
-    // With blocks checked, growth sends the view back to the birthday.
+    // With blocks checked, growth rescans nothing: the position stays and
+    // the view stays ready, because the new scripts are the device's own.
     view.set_checked(150, ok).unwrap();
     assert_eq!(view.raise_marks(6, 2, ok), Ok(true));
-    assert_eq!(view.state(), ViewState::Rescanning { to: 150 });
-    assert_eq!(view.checked(), 100);
-    assert!(view.coins(150).is_empty());
-    assert_eq!(view.raise_marks(6, 2, ok), Ok(false));
-    view.set_checked(149, ok).unwrap();
-    assert!(matches!(view.state(), ViewState::Rescanning { .. }));
-    view.set_checked(150, ok).unwrap();
     assert_eq!(view.state(), ViewState::Ready);
     assert_eq!(view.checked(), 150);
+    assert_eq!(view.raise_marks(6, 2, ok), Ok(false));
+}
+
+#[test]
+fn oc_07_a_payment_to_a_script_that_just_entered_the_watch_set_is_found_with_no_rescan() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let first = chain.push(&[]);
+    apply(&mut view, &chain, &first);
+    view.set_checked(1, ok).unwrap();
+    // The device hands out script 3 (receive index 2); the view's marks are
+    // raised before the next block is applied.
+    assert_eq!(view.raise_marks(3, 1, ok), Ok(true));
+    assert_eq!(view.state(), ViewState::Ready);
+    let pay = foreign(1, &[(&script(3), 12_000)]);
+    let next = chain.push(std::slice::from_ref(&pay));
+    let mut more = scripts();
+    more.insert(script(3), (Keychain::Receive, 2));
+    view.apply_block(&parsed(&next), &chain.view, &more, ok)
+        .unwrap();
+    view.set_checked(2, ok).unwrap();
+    assert_eq!(view.state(), ViewState::Ready);
+    assert_eq!(offered(&view, 2), vec![(op(&pay, 0), 12_000, 1)]);
+}
+
+#[test]
+fn oc_07_growth_larger_than_the_gap_is_no_rescan_and_the_last_address_is_watched() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let first = chain.push(&[]);
+    apply(&mut view, &chain, &first);
+    view.set_checked(1, ok).unwrap();
+    // A batch of several hundred addresses in one step.
+    assert_eq!(view.raise_marks(500, 1, ok), Ok(true));
+    assert_eq!(view.state(), ViewState::Ready);
+    assert_eq!(view.checked(), 1);
+    assert_eq!(view.receive_watch(), 500 + GAP);
+    let pay = foreign(2, &[(&script(77), 9_000)]);
+    chain.push(&[]);
+    let later = chain.push(std::slice::from_ref(&pay));
+    let mut more = scripts();
+    more.insert(script(77), (Keychain::Receive, 499));
+    view.apply_block(&parsed(&later), &chain.view, &more, ok)
+        .unwrap();
+    assert_eq!(offered(&view, 3), vec![(op(&pay, 0), 9_000, 1)]);
+    assert_eq!(view.coins(3)[0].index, 499);
 }
 
 #[test]
@@ -566,9 +606,11 @@ fn oc_07_a_rescan_from_the_birthday_finds_a_payment_to_a_script_added_later() {
     }
     view.set_checked(3, ok).unwrap();
     assert!(view.is_empty());
-    // The marks grow: script 3 is watched now, and the blocks are read again.
-    assert_eq!(view.raise_marks(1, 1, ok), Ok(true));
+    // A reset (a new view, a restored owner): script 3 is watched now, and
+    // the blocks are read again from the birthday.
+    view.reset(ok).unwrap();
     assert_eq!(view.checked(), 0);
+    assert!(matches!(view.state(), ViewState::Rescanning { to: 3 }));
     let mut more = scripts();
     more.insert(script(3), (Keychain::Receive, 2));
     for b in &blocks {
@@ -591,7 +633,7 @@ fn oc_07_a_rescan_takes_a_spend_that_the_new_script_needs() {
     let spend = tx_from(op(&pay, 0), &[(&script(55), 11_000)]);
     let blocks = [chain.push(&[]), chain.push(&[pay]), chain.push(&[spend])];
     view.set_checked(3, ok).unwrap();
-    view.raise_marks(1, 1, ok).unwrap();
+    view.reset(ok).unwrap();
     let mut more = scripts();
     more.insert(script(3), (Keychain::Receive, 2));
     for b in &blocks {

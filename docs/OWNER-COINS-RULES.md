@@ -42,10 +42,20 @@ not ask a server what the wallet holds.
 
 - **OC-07.** The watch set is the receive scripts from index 0 to the
   highest index a batch handed out plus 20, and the change scripts from 0
-  to the next change index plus 20. It grows when the marks grow. A script
-  that was added later may have been paid before: the view is rescanned
-  from the birthday height, and a spend of a coin that the new script
-  needs is found by the same scan. Marks never go down.
+  to the next change index plus 20. It grows when the marks grow. When the
+  growth comes from the owner's own queue (a batch handed out, the change
+  index a spend used), the new scripts are watched from the block after the
+  last checked block, nothing is rescanned and the view stays ready: a
+  script the device has just made cannot have been paid before it existed.
+  This holds only because the marks are raised in the view before any
+  later block is applied. The node reads them from the owner's queue and
+  raises them at start (before the first block), immediately before each
+  block and each reorganization is applied, and right after a batch is
+  queued and a spend is built or taken. Each raise is stored before the
+  block's effect. A rescan from the birthday height happens only for a new
+  view, for a reset, for the deep reorg state, and when the owner asks for
+  one. An owner restored from the kit starts a new view and so scans from
+  the birthday. Marks never go down.
 
 ## 4. Storage
 
