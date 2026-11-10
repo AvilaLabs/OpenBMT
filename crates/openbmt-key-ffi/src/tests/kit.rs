@@ -308,10 +308,10 @@ pub fn ok_store(_: &[u8]) -> Result<(), String> {
 
 /// The one place that calls the owner crate's `build_request`.
 pub fn build_request(owner: &mut Owner, coins: &[Coin], change_index: u32, tag: u8) -> Built {
-    let mut random = [tag; 64];
+    let mut random = [tag; 96];
     random[32..].fill(tag.wrapping_add(100));
     owner
-        .build_request(coins, 1_000, change_index, NOW, &random, ok_store)
+        .build_request(coins, 1_000, change_index, 0, NOW, &random, ok_store)
         .expect("the request is built")
 }
 
