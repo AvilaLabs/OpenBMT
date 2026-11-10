@@ -86,12 +86,12 @@ fn nr_12_a_good_version_is_answered_in_the_order_of_nr_13() {
     assert!(events.is_empty());
     assert_eq!(
         outgoing(&mut s),
-        vec![
-            NetworkMessage::SendAddrV2,
-            NetworkMessage::SendHeaders,
-            NetworkMessage::Verack
-        ]
+        vec![NetworkMessage::SendAddrV2, NetworkMessage::Verack]
     );
+    // sendheaders waits for the peer's verack: a peer does not read it
+    // before the handshake is over.
+    hear(&mut s, &verack_frame()).unwrap();
+    assert_eq!(outgoing(&mut s), vec![NetworkMessage::SendHeaders]);
 }
 
 #[test]
@@ -164,7 +164,7 @@ fn nr_12_an_unknown_command_before_the_version_is_skipped() {
     let mut stream = raw_frame("getheaders", &[0; 64]);
     stream.extend(version_frame());
     assert!(hear(&mut s, &stream).unwrap().is_empty());
-    assert_eq!(outgoing(&mut s).len(), 3);
+    assert_eq!(outgoing(&mut s).len(), 2);
 }
 
 #[test]
@@ -262,13 +262,16 @@ fn nr_13_only_the_handshake_is_sent_before_both_veracks() {
     assert_eq!(d, Drop::NotReady);
     assert!(early.take_outgoing().is_empty());
 
-    // After the peer's version, before its verack: the three answers only.
+    // After the peer's version, before its verack: the two answers only.
     let mut s = session();
     s.take_outgoing();
     hear(&mut s, &version_frame()).unwrap();
     s.tick(START + 1).unwrap();
     let sent = outgoing(&mut s);
-    assert_eq!(sent.len(), 3);
+    assert_eq!(
+        sent,
+        vec![NetworkMessage::SendAddrV2, NetworkMessage::Verack]
+    );
     let d = dropped(s.send(Request::GetAddr), "NR-13");
     assert_eq!(d, Drop::NotReady);
     assert!(s.take_outgoing().is_empty());
@@ -373,8 +376,8 @@ fn nr_13_a_handshake_fed_one_byte_at_a_time_completes() {
         sent[1..],
         [
             NetworkMessage::SendAddrV2,
-            NetworkMessage::SendHeaders,
-            NetworkMessage::Verack
+            NetworkMessage::Verack,
+            NetworkMessage::SendHeaders
         ]
     );
 }

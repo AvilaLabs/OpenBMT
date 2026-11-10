@@ -57,9 +57,10 @@ thin driver that owns the sockets.
   `NETWORK_LIMITED`, and not carry the counter's own nonce. Its services
   and start height are kept as the peer's claims. They are claims:
   nothing is believed because of them.
-- **NR-13.** The counter sends `sendaddrv2` and `sendheaders` before its
-  `verack`. Nothing but the handshake is sent or read until both sides
-  have sent `verack`. A message that belongs after the handshake and
+- **NR-13.** The counter sends `sendaddrv2` before its `verack`, and
+  `sendheaders` as soon as the peer's `verack` is in: a peer does not
+  read it earlier. Nothing but the handshake is sent or read until both
+  sides have sent `verack`. A message that belongs after the handshake and
   arrives before it ends the connection.
 - **NR-14.** A handshake that is not finished in 30 seconds ends the
   connection. After the handshake the counter sends a `ping` every 2

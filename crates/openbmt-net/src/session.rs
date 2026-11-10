@@ -283,10 +283,7 @@ impl Session {
             // NR-13: only the handshake until both verack.
             return match message {
                 Message::Version(_) => Err(Drop::DuplicateVersion),
-                Message::Verack => {
-                    self.on_verack(now, events);
-                    Ok(())
-                }
+                Message::Verack => self.on_verack(now, events),
                 Message::SendAddrV2 | Message::SendHeaders | Message::Ignored(_) => Ok(()),
                 other => Err(Drop::BeforeHandshake {
                     command: other.command().name(),
@@ -315,8 +312,7 @@ impl Session {
     }
 
     /// NR-12: the checks on the peer's `version`. Then NR-13: the counter
-    /// answers with `sendaddrv2`, `sendheaders` and its `verack`, in that
-    /// order.
+    /// answers with `sendaddrv2` and its `verack`, in that order.
     fn on_version(&mut self, version: VersionMessage) -> Result<(), Drop> {
         if version.version < PROTOCOL_VERSION {
             return Err(Drop::VersionTooOld {
@@ -340,21 +336,23 @@ impl Session {
             });
         }
         self.queue(NetworkMessage::SendAddrV2)?;
-        self.queue(NetworkMessage::SendHeaders)?;
         self.queue(NetworkMessage::Verack)?;
         self.peer = Some((services, version.start_height));
         Ok(())
     }
 
-    /// NR-13: the peer's `verack` ends the handshake.
-    fn on_verack(&mut self, now: u64, events: &mut Vec<Event>) {
+    /// NR-13: the peer's `verack` ends the handshake. `sendheaders` goes
+    /// out now: a peer does not read it before the handshake is over.
+    fn on_verack(&mut self, now: u64, events: &mut Vec<Event>) -> Result<(), Drop> {
         let (services, height) = self.peer.unwrap_or((ServiceFlags::NONE, 0));
         self.ready = true;
         self.last_ping = now;
         self.reader.set_handshake_done();
+        self.queue(NetworkMessage::SendHeaders)?;
         events.push(Event::Ready {
             services,
             start_height: u32::try_from(height).unwrap_or(0),
         });
+        Ok(())
     }
 }
