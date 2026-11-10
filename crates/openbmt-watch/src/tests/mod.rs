@@ -7,5 +7,6 @@ mod health;
 mod kit;
 mod meta;
 mod netgroup;
+mod persist;
 mod proof;
 mod sale;

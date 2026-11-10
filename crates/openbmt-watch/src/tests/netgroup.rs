@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 
-use crate::{network_group, PeerAddr};
+use crate::{network_group, NetGroup, PeerAddr};
 
 fn ip(text: &str) -> PeerAddr {
     PeerAddr::Ip(text.parse::<IpAddr>().unwrap())
@@ -127,4 +127,42 @@ fn wr_41_groups_can_be_counted_and_ordered() {
     .map(network_group)
     .collect();
     assert_eq!(set.len(), 4);
+}
+
+#[test]
+fn wr_41_a_group_comes_back_from_its_key() {
+    let mut groups: BTreeSet<_> = TABLE.iter().map(|(a, _)| network_group(&ip(a))).collect();
+    groups.insert(network_group(&PeerAddr::Named));
+    assert!(groups.len() > 10);
+    let mut kinds = BTreeSet::new();
+    for g in groups {
+        assert_eq!(NetGroup::from_key(g.key()), Some(g));
+        kinds.insert(g.key()[0]);
+    }
+    assert_eq!(kinds, BTreeSet::from([0, 1, 2, 3]));
+}
+
+#[test]
+fn wr_41_a_key_that_is_not_one_groups_own_is_refused() {
+    // an unknown kind
+    for kind in [4u8, 9, 255] {
+        assert_eq!(NetGroup::from_key([kind, 8, 8, 0, 0]), None);
+    }
+    // padding that is not zero
+    assert_eq!(NetGroup::from_key([0, 1, 0, 0, 0]), None);
+    assert_eq!(NetGroup::from_key([1, 0, 0, 0, 1]), None);
+    assert_eq!(NetGroup::from_key([2, 8, 8, 0, 1]), None);
+    assert_eq!(NetGroup::from_key([2, 8, 8, 1, 0]), None);
+    // prefixes that no peer is grouped by: they belong to the local group,
+    // or are read as the IPv4 address they carry
+    assert_eq!(NetGroup::from_key([2, 10, 0, 0, 0]), None);
+    assert_eq!(NetGroup::from_key([2, 192, 168, 0, 0]), None);
+    assert_eq!(NetGroup::from_key([2, 224, 0, 0, 0]), None);
+    assert_eq!(NetGroup::from_key([3, 0xfd, 0, 0, 0]), None);
+    assert_eq!(NetGroup::from_key([3, 0xff, 0x02, 0, 0]), None);
+    assert_eq!(NetGroup::from_key([3, 0x20, 0x02, 8, 8]), None);
+    assert_eq!(NetGroup::from_key([3, 0x20, 0x01, 0, 0]), None);
+    // ordinary ones are fine
+    assert!(NetGroup::from_key([2, 8, 8, 0, 0]).is_some());
+    assert!(NetGroup::from_key([3, 0x20, 0x01, 0x0d, 0xb8]).is_some());
 }

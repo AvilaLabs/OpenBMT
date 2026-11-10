@@ -8,16 +8,18 @@
 
 use std::collections::BTreeSet;
 
-use bitcoin::consensus::deserialize;
-use bitcoin::{BlockHash, OutPoint, ScriptBuf, Transaction, TxOut, Txid};
+use bitcoin::consensus::{deserialize, serialize};
+use bitcoin::hashes::Hash;
+use bitcoin::{BlockHash, OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
 use openbmt_core::policy::{classify_replacement, CheckMode, ReplacementKind};
+use openbmt_core::wire::{self, DecodeError, Reader};
 
 use crate::chain::{confirmations, HeaderChain};
 use crate::netgroup::{network_group, NetGroup, PeerAddr};
 use crate::proof::ProvenPayment;
 use crate::{
-    Refusal, MAX_REPLACED_REMEMBERED, MAX_SALE_TRANSACTIONS, MAX_TOLERANCE_BPS, MAX_TX_BYTES,
-    SEEN_GROUPS,
+    Refusal, MAX_ENTRY_BLOCKS, MAX_ENTRY_GROUPS, MAX_REPLACED_REMEMBERED, MAX_SALE_TRANSACTIONS,
+    MAX_SCRIPT_BYTES, MAX_TOLERANCE_BPS, MAX_TX_BYTES, SEEN_GROUPS,
 };
 
 /// Where a sighting of an unconfirmed transaction came from.
@@ -156,6 +158,22 @@ impl SaleWatch {
             last_confirmed: BTreeSet::new(),
             replaced: BTreeSet::new(),
         }
+    }
+
+    /// The script the sale is paid to.
+    pub fn script(&self) -> &Script {
+        self.script.as_script()
+    }
+
+    /// The amount the sale is judged against.
+    pub fn sale_sats(&self) -> u64 {
+        self.sale_sats
+    }
+
+    /// The counter moves the amount when the price lock is renewed. Evidence
+    /// does not change.
+    pub fn set_sale_sats(&mut self, sale_sats: u64) {
+        self.sale_sats = sale_sats;
     }
 
     /// WR-40: a sighting of an unconfirmed transaction, in full, with where
@@ -414,6 +432,9 @@ impl SaleWatch {
             }
             if let Some(block) = block {
                 if !entry.blocks.contains(&block) {
+                    if entry.blocks.len() >= MAX_ENTRY_BLOCKS {
+                        entry.blocks.remove(0);
+                    }
                     entry.blocks.push(block);
                 }
             }
@@ -495,12 +516,297 @@ impl SaleWatch {
     }
 }
 
+/// Require `key` to sort strictly after the previous one in a list.
+fn ascending<const N: usize>(
+    last: &mut Option<[u8; N]>,
+    key: [u8; N],
+    why: &'static str,
+) -> Result<(), DecodeError> {
+    if last.is_some_and(|prev| prev >= key) {
+        return Err(DecodeError::NonCanonical(why));
+    }
+    *last = Some(key);
+    Ok(())
+}
+
+impl Entry {
+    fn write(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.txid.to_byte_array());
+        let tx = serialize(&self.tx);
+        out.extend_from_slice(&wire::len_u32(tx.len()).to_le_bytes());
+        out.extend_from_slice(&tx);
+        out.extend_from_slice(&self.paid.to_le_bytes());
+        out.extend_from_slice(&wire::len_u32(self.groups.len()).to_le_bytes());
+        for g in &self.groups {
+            out.extend_from_slice(&g.key());
+        }
+        out.push(u8::from(self.by_box));
+        wire::put_opt_u64(out, self.first_seen);
+        let mut blocks: Vec<[u8; 32]> = self.blocks.iter().map(|b| b.to_byte_array()).collect();
+        blocks.sort_unstable();
+        out.extend_from_slice(&wire::len_u32(blocks.len()).to_le_bytes());
+        for b in &blocks {
+            out.extend_from_slice(b);
+        }
+    }
+
+    fn read(r: &mut Reader<'_>, script: &ScriptBuf, latest: u64) -> Result<Self, DecodeError> {
+        let txid = Txid::from_byte_array(r.array()?);
+        let tx_len = usize::try_from(r.u32_le()?).map_err(|_| DecodeError::TooLarge)?;
+        if tx_len > MAX_TX_BYTES {
+            return Err(DecodeError::TooLarge);
+        }
+        let tx_bytes = r.take(tx_len)?;
+        let tx: Transaction = deserialize(tx_bytes)
+            .map_err(|_| DecodeError::NonCanonical("a stored transaction does not parse"))?;
+        if serialize(&tx) != tx_bytes {
+            return Err(DecodeError::NonCanonical(
+                "a stored transaction is not in its canonical form",
+            ));
+        }
+        if tx.compute_txid() != txid {
+            return Err(DecodeError::NonCanonical(
+                "a stored transaction id is not the id of its transaction",
+            ));
+        }
+        let paid = r.u64_le()?;
+        if paid != paid_to(&tx.output, script) {
+            return Err(DecodeError::NonCanonical(
+                "a stored amount is not what its transaction pays the sale",
+            ));
+        }
+        let n = r.count(MAX_ENTRY_GROUPS, 5)?;
+        let mut groups = BTreeSet::new();
+        let mut last: Option<[u8; 5]> = None;
+        for _ in 0..n {
+            let key = r.array::<5>()?;
+            ascending(&mut last, key, "network groups are not in ascending order")?;
+            let group = NetGroup::from_key(key)
+                .ok_or(DecodeError::NonCanonical("a network group is not valid"))?;
+            groups.insert(group);
+        }
+        let by_box = r.flag()?;
+        let first_seen = r.opt_u64()?;
+        let n = r.count(MAX_ENTRY_BLOCKS, 32)?;
+        let mut blocks = Vec::with_capacity(n);
+        let mut last: Option<[u8; 32]> = None;
+        for _ in 0..n {
+            let hash = r.array::<32>()?;
+            ascending(&mut last, hash, "blocks are not in ascending order")?;
+            blocks.push(BlockHash::from_byte_array(hash));
+        }
+        // The clock starts when a transaction first counts as seen or is
+        // reported by the Box, and never before; it cannot be later than the
+        // latest sighting.
+        let counts = by_box || groups.len() >= SEEN_GROUPS;
+        match first_seen {
+            Some(at) if !counts || at > latest => {
+                return Err(DecodeError::NonCanonical(
+                    "a first-seen time does not fit the evidence",
+                ))
+            }
+            None if counts => {
+                return Err(DecodeError::NonCanonical(
+                    "a seen transaction has no first-seen time",
+                ))
+            }
+            _ => {}
+        }
+        Ok(Self {
+            txid,
+            tx,
+            paid,
+            groups,
+            by_box,
+            first_seen,
+            blocks,
+        })
+    }
+}
+
+/// The bytes of a set of transaction ids, smallest first.
+fn sorted_txids(set: &BTreeSet<Txid>) -> Vec<[u8; 32]> {
+    let mut ids: Vec<[u8; 32]> = set.iter().map(|t| t.to_byte_array()).collect();
+    ids.sort_unstable();
+    ids
+}
+
+/// A set of transaction ids that must be in strictly ascending order.
+fn read_txid_set(
+    r: &mut Reader<'_>,
+    max: usize,
+    why: &'static str,
+) -> Result<BTreeSet<Txid>, DecodeError> {
+    let n = r.count(max, 32)?;
+    let mut set = BTreeSet::new();
+    let mut last: Option<[u8; 32]> = None;
+    for _ in 0..n {
+        let id = r.array::<32>()?;
+        ascending(&mut last, id, why)?;
+        set.insert(Txid::from_byte_array(id));
+    }
+    Ok(set)
+}
+
+/// One record of `elsewhere` as stored: the coin, the spending transaction
+/// and the block.
+fn elsewhere_bytes((outpoint, by, block): &(OutPoint, Txid, BlockHash)) -> [u8; 100] {
+    let mut out = [0u8; 100];
+    out[..32].copy_from_slice(&outpoint.txid.to_byte_array());
+    out[32..36].copy_from_slice(&outpoint.vout.to_le_bytes());
+    out[36..68].copy_from_slice(&by.to_byte_array());
+    out[68..].copy_from_slice(&block.to_byte_array());
+    out
+}
+
+impl SaleWatch {
+    /// Snapshot: `OBMV`, version 1, then the script (u32 length and bytes),
+    /// the sale amount (u64 LE), the tolerance (u32 LE), the conflict, needs
+    /// a person flags, the latest time (u64 LE), the transactions in the
+    /// order the sale keeps them, the transactions that were confirmed at the
+    /// last status, the replaced transactions and the spends elsewhere.
+    ///
+    /// Each transaction is its id, its length (u32 LE) and consensus bytes,
+    /// what it pays the sale (u64 LE), its network groups (a u32 count and
+    /// the five-byte keys of [`NetGroup::key`]), the Box flag, the first-seen
+    /// time (a flag byte and, when the flag is 1, a u64 LE) and the blocks
+    /// that held it (a u32 count and the hashes). Every set is written in
+    /// ascending byte order. Each spend elsewhere is the coin (id and index
+    /// u32 LE), the spending transaction and the block.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let script = self.script.as_bytes();
+        let mut out = wire::start(&wire::MAGIC_SALE_WATCH, 64 + script.len());
+        out.extend_from_slice(&wire::len_u32(script.len()).to_le_bytes());
+        out.extend_from_slice(script);
+        out.extend_from_slice(&self.sale_sats.to_le_bytes());
+        out.extend_from_slice(&self.tolerance_bps.to_le_bytes());
+        out.push(u8::from(self.conflict));
+        out.push(u8::from(self.needs_a_person));
+        out.extend_from_slice(&self.latest.to_le_bytes());
+        out.extend_from_slice(&wire::len_u32(self.entries.len()).to_le_bytes());
+        for e in &self.entries {
+            e.write(&mut out);
+        }
+        for set in [&self.last_confirmed, &self.replaced] {
+            let ids = sorted_txids(set);
+            out.extend_from_slice(&wire::len_u32(ids.len()).to_le_bytes());
+            for id in &ids {
+                out.extend_from_slice(id);
+            }
+        }
+        let mut elsewhere: Vec<[u8; 100]> = self.elsewhere.iter().map(elsewhere_bytes).collect();
+        elsewhere.sort_unstable();
+        out.extend_from_slice(&wire::len_u32(elsewhere.len()).to_le_bytes());
+        for e in &elsewhere {
+            out.extend_from_slice(e);
+        }
+        out
+    }
+
+    /// Restore a snapshot strictly (see `openbmt_core::wire`). Besides the
+    /// framing it checks what the live code guarantees: each stored id and
+    /// amount is worked out again from the stored transaction and the script;
+    /// no id repeats; the caps of the live code ([`MAX_SALE_TRANSACTIONS`],
+    /// [`MAX_TX_BYTES`], [`MAX_REPLACED_REMEMBERED`], [`MAX_ENTRY_GROUPS`],
+    /// [`MAX_ENTRY_BLOCKS`], [`MAX_SCRIPT_BYTES`], [`MAX_TOLERANCE_BPS`])
+    /// hold; every set is in strictly ascending order; a first-seen time is
+    /// there exactly when the evidence says the clock started, and is not
+    /// after the latest time; the transactions that were confirmed at the
+    /// last status are transactions of the sale.
+    ///
+    /// The spends elsewhere come back in ascending byte order, which is not
+    /// necessarily the order they were given in.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut r = Reader::framed(bytes, &wire::MAGIC_SALE_WATCH)?;
+        let script_len = usize::try_from(r.u32_le()?).map_err(|_| DecodeError::TooLarge)?;
+        if script_len > MAX_SCRIPT_BYTES {
+            return Err(DecodeError::TooLarge);
+        }
+        let script = ScriptBuf::from_bytes(r.take(script_len)?.to_vec());
+        let sale_sats = r.u64_le()?;
+        let tolerance_bps = r.u32_le()?;
+        if tolerance_bps > MAX_TOLERANCE_BPS {
+            return Err(DecodeError::NonCanonical("tolerance is above 10000"));
+        }
+        let conflict = r.flag()?;
+        let needs_a_person = r.flag()?;
+        let latest = r.u64_le()?;
+
+        let n = r.count(MAX_SALE_TRANSACTIONS, 54)?;
+        let mut entries: Vec<Entry> = Vec::with_capacity(n);
+        for _ in 0..n {
+            let entry = Entry::read(&mut r, &script, latest)?;
+            if entries.iter().any(|e| e.txid == entry.txid) {
+                return Err(DecodeError::NonCanonical("a transaction is stored twice"));
+            }
+            entries.push(entry);
+        }
+        let last_confirmed = read_txid_set(
+            &mut r,
+            MAX_SALE_TRANSACTIONS,
+            "confirmed transactions are not in ascending order",
+        )?;
+        if last_confirmed
+            .iter()
+            .any(|t| !entries.iter().any(|e| e.txid == *t))
+        {
+            return Err(DecodeError::NonCanonical(
+                "a confirmed transaction is not a transaction of the sale",
+            ));
+        }
+        let replaced = read_txid_set(
+            &mut r,
+            MAX_REPLACED_REMEMBERED,
+            "replaced transactions are not in ascending order",
+        )?;
+
+        let n = r.count(usize::MAX, 100)?;
+        let mut elsewhere = Vec::with_capacity(n);
+        let mut last: Option<[u8; 100]> = None;
+        for _ in 0..n {
+            let record = r.array::<100>()?;
+            ascending(
+                &mut last,
+                record,
+                "spends elsewhere are not in ascending order",
+            )?;
+            let [txid @ .., v0, v1, v2, v3] =
+                <[u8; 36]>::try_from(&record[..36]).map_err(|_| DecodeError::Truncated)?;
+            let by = <[u8; 32]>::try_from(&record[36..68]).map_err(|_| DecodeError::Truncated)?;
+            let block = <[u8; 32]>::try_from(&record[68..]).map_err(|_| DecodeError::Truncated)?;
+            elsewhere.push((
+                OutPoint {
+                    txid: Txid::from_byte_array(txid),
+                    vout: u32::from_le_bytes([v0, v1, v2, v3]),
+                },
+                Txid::from_byte_array(by),
+                BlockHash::from_byte_array(block),
+            ));
+        }
+        r.finish()?;
+        Ok(Self {
+            script,
+            sale_sats,
+            tolerance_bps,
+            entries,
+            conflict,
+            needs_a_person,
+            latest,
+            elsewhere,
+            last_confirmed,
+            replaced,
+        })
+    }
+}
+
 /// WR-41, WR-44, WR-46: record who reported a transaction, and start its
 /// clock when it first counts as seen or reported by the Box.
 fn record_source(entry: &mut Entry, source: Source, at: u64) {
     match source {
         Source::Peer(addr) => {
-            entry.groups.insert(network_group(&addr));
+            if entry.groups.len() < MAX_ENTRY_GROUPS {
+                entry.groups.insert(network_group(&addr));
+            }
         }
         Source::Box => entry.by_box = true,
     }

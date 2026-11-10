@@ -28,6 +28,37 @@ impl NetGroup {
             Repr::V6([a, b, c, d]) => [3, a, b, c, d],
         }
     }
+
+    /// The group stored by [`NetGroup::key`]. `None` for an unknown kind
+    /// byte, for padding that is not zero, and for a prefix that no peer can
+    /// have (for example a private IPv4 prefix, which is the local group
+    /// instead), so that each group has exactly one key.
+    pub fn from_key(key: [u8; 5]) -> Option<Self> {
+        let [kind, a, b, c, d] = key;
+        let group = match kind {
+            0 if [a, b, c, d] == [0; 4] => Self(Repr::Local),
+            1 if [a, b, c, d] == [0; 4] => Self(Repr::Named),
+            2 if [c, d] == [0, 0] => Self(Repr::V4([a, b])),
+            3 => Self(Repr::V6([a, b, c, d])),
+            _ => return None,
+        };
+        // A prefix is canonical if a peer with that prefix is put in the
+        // group by `network_group`.
+        let probe = match group.0 {
+            Repr::V4([a, b]) => Some(PeerAddr::Ip(IpAddr::V4(Ipv4Addr::new(a, b, 0, 1)))),
+            Repr::V6([a, b, c, d]) => {
+                let mut octets = [0u8; 16];
+                octets[..4].copy_from_slice(&[a, b, c, d]);
+                octets[15] = 2;
+                Some(PeerAddr::Ip(IpAddr::V6(Ipv6Addr::from(octets))))
+            }
+            Repr::Local | Repr::Named => None,
+        };
+        match probe {
+            Some(addr) if network_group(&addr) != group => None,
+            _ => Some(group),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

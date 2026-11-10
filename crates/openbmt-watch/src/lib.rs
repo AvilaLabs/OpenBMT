@@ -64,6 +64,15 @@ pub const FORBIDDEN_TX_BASE_SIZE: usize = 64;
 pub const MAX_BLOCK_BYTES: usize = 4_000_000;
 /// WR-34: most transactions kept for one sale.
 pub const MAX_SALE_TRANSACTIONS: usize = 20;
+/// Most network groups kept for one transaction. More are not recorded;
+/// the count only matters up to [`SEEN_GROUPS`].
+pub const MAX_ENTRY_GROUPS: usize = 64;
+/// Most blocks kept for one transaction. When a transaction has been in more,
+/// the oldest is forgotten.
+pub const MAX_ENTRY_BLOCKS: usize = 64;
+/// Longest script a stored sale watch may hold, in bytes (the consensus
+/// limit for a script).
+pub const MAX_SCRIPT_BYTES: usize = 10_000;
 /// WR-42: most replaced transactions a sale remembers.
 pub const MAX_REPLACED_REMEMBERED: usize = 64;
 /// WR-32: the most a tolerance can be, in basis points.

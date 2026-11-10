@@ -158,3 +158,17 @@ path = "fuzz_targets/entropy_dice.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "owner_command_decode"
+path = "fuzz_targets/owner_command_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "watch_sale_decode"
+path = "fuzz_targets/watch_sale_decode.rs"
+test = false
+doc = false
+bench = false
