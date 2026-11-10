@@ -660,7 +660,7 @@ and no TLS certificate company is needed **[design, R5]**.
   tag is empty when no sale is open.
 - Checks payments itself. The merchant chooses how (settled
   2026-11-09):
-  - **Default: light check.** The `bip157` light client talks directly to
+  - **Default: light check.** The counter's own light client talks directly to
     several random Bitcoin peers. It watches for payments to our addresses and
     for other transactions that spend the same coins (conflict alerts). It
     confirms with compact block filters. The check asks Bitcoin peers, not a
@@ -909,12 +909,60 @@ condition is not met (§16).
 
 | Key | Choices (★ = recommended) | Why each is safe |
 |---|---|---|
-| Key 1 (owner) | ★ Owner's phone, in Owner mode · A hardware wallet | Phone key rules below. A hardware wallet is the stronger choice. |
-| Key 2 (approver) | ★ A spare phone or tablet you own, running the OpenBMT Key app · A manager's phone running the Key app · A hardware wallet (Coldcard, Jade, Passport, Keystone, others that sign PSBTs, **[verify each, E8]**) · A key card tapped on a different person's phone | A thief has to get past the owner phone **and** the key 2 device. The Key app and hardware wallets show the transaction on their own screens. A **key card has no screen**: it is as safe as the phone it is tapped on, and the app says so. A hardware wallet cannot hold our allowlist or co-sign settings, so loosening uses the block-count fallback (§2.9) and batches the weaker spot check (§5.1). The Key app on a spare device as an approver (identity key only) restores the co-signature for batches, settings and pairings; without it those rest on the owner phone plus spot checks, and the screen says so. Until the Key app's release key has a second holder, a hardware wallet or a different publisher's signer is the recommended choice (Rule 2). |
-| Key 3 (recovery) | ★ Seed words made with a different publisher's wallet app (for example Nunchuk **[verify, E8]**) on the counter tablet before it becomes the counter, in airplane mode, then written on paper or steel and stored away from the shop; the tablet is then factory reset · A hardware wallet in a safe (stronger) · A key card in a safe · A trusted person's device | Used only to recover a lost key. It is made by software that OpenBMT did not publish, on a device that holds no other key, offline. Only its xpub reaches the Key app. |
+| Key 1 (owner) | ★ Owner's phone, in Owner mode · A hardware wallet · An offline computer (below) | Phone key rules below. A hardware wallet is the stronger choice. |
+| Key 2 (approver) | ★ A spare phone or tablet you own, running the OpenBMT Key app · A manager's phone running the Key app · A hardware wallet (Coldcard, Jade, Passport, Keystone, others that sign PSBTs, **[verify each, E8]**) · An offline computer running Sparrow or Bitcoin Core (below) · A key card tapped on a different person's phone | A thief has to get past the owner phone **and** the key 2 device. The Key app and hardware wallets show the transaction on their own screens. A **key card has no screen**: it is as safe as the phone it is tapped on, and the app says so. A hardware wallet cannot hold our allowlist or co-sign settings, so loosening uses the block-count fallback (§2.9) and batches the weaker spot check (§5.1). The Key app on a spare device as an approver (identity key only) restores the co-signature for batches, settings and pairings; without it those rest on the owner phone plus spot checks, and the screen says so. Until the Key app's release key has a second holder, a hardware wallet or a different publisher's signer is the recommended choice (Rule 2). |
+| Key 3 (recovery) | ★ Seed words made with a different publisher's wallet app (for example Nunchuk **[verify, E8]**) on the counter tablet before it becomes the counter, in airplane mode, then written on paper or steel and stored away from the shop; the tablet is then factory reset · A hardware wallet in a safe (stronger) · An offline computer, or words made on one (below) · A key card in a safe · A trusted person's device | Used only to recover a lost key. It is made by software that OpenBMT did not publish, on a device that holds no other key, offline. Only its xpub reaches the Key app. |
 
 Notes:
 
+- **An offline computer as a signer.** A spare laptop that is kept off
+  every network, running Sparrow or Bitcoin Core, can hold any of the three
+  keys. Many people who hold bitcoin seriously prefer this to a
+  manufactured device: the hardware is ordinary, the software is open and
+  widely read, and nothing has to be bought from a wallet vendor. The key
+  chooser offers it next to the hardware wallets, not below them.
+  - It is a signer from another publisher, so it satisfies Rule 2. In
+    every rule of this document, what is said of a hardware wallet as key
+    1 or key 2 holds for an offline computer too, including the fallbacks
+    for settings and batches (§2.9, §5.1) and the Key app as an approver.
+  - Transactions move as standard PSBT files (version 0), by QR where the
+    computer has a camera, or on a USB stick or SD card. A stick is a path
+    between an online machine and the offline one; QR is the cleaner way,
+    and the guide says so.
+  - How far to strip the computer down is the owner's choice. The guide
+    lists the usual steps and what each is for: a fresh install or a live
+    system with no disk, the Wi-Fi and Bluetooth card taken out or turned
+    off in firmware, no accounts, never connected again.
+  - Status: signing our transactions with Bitcoin Core as the second
+    signer, and restoring the wallet in Bitcoin Core from the kit, are
+    checked on a test network (docs/research). Sparrow is not yet checked
+    **[verify, E8 and E9]**.
+- **Where a key's randomness comes from.** A key is only as good as the
+  randomness it was made from, and the owner should not have to trust a
+  device for that.
+  - Every place where OpenBMT software makes a wallet key (key 1 in Owner
+    mode, key 2 in the Key app) offers three ways: "Let this device make
+    it" (the operating system's random source, the default), "Make it
+    yourself" with dice or a coin, and "Type in words I already have".
+  - **Dice:** 99 rolls of a six-sided die for 24 words. The words come
+    from the SHA-256 hash of the rolls written as digits, and nothing
+    else. Hardware wallets that take dice document this same method, so
+    the same rolls should give the same words there **[verify against a
+    device, E8]**.
+  - **Coin:** 256 flips for 24 words. Each flip is one bit, in order.
+    Only the last word's checksum is computed.
+  - **Nothing is mixed in.** With dice or a coin the device adds no
+    randomness of its own. That is on purpose: the owner can put the same
+    rolls into another tool and must get the same words. The screen shows
+    the method, and the guide has the steps to check it by hand or with
+    another program. The cost is that the result is exactly as good as
+    the rolls; the app says so, refuses fewer rolls than the count above,
+    and shows how often each face came up.
+  - Key 3 is made outside OpenBMT software (§2.1). The owner picks a tool
+    that takes dice if they want that; the guide names ones that do.
+  - Device identity keys and pairing numbers always use the operating
+    system's random source. They sign batches, settings and pairings and
+    hold no funds.
 - **Same seed in two slots.** The app compares the three account public keys
   in full, and their fingerprints. If two match, it blocks the setup. The
   8-character key fingerprints are labels for people and for other wallets:
@@ -1495,9 +1543,11 @@ Pinned as of 2026-11-09:
 
 - Rust core:
   - `bdk_wallet = "=3.2.0"`
-  - `bip157 = "=0.8.1"`. Kyoto, renamed from `kyoto-cbf`. Young, with
-    breaking changes every minor release, so it is pinned exactly and gets
-    fuzz and soak tests. We wrap its gossip monitor ourselves.
+  - Our own small peer client (`docs/NETWORK-RULES.md`) in place of a
+    general light-client library (decided 2026-11-10). The watcher has to
+    know which peer reported each transaction and checks every header
+    itself (`docs/WATCHER-RULES.md` §1), so a client that does only that
+    is less code to trust. It gets fuzz and soak tests.
   - `bitcoin 0.32.x`
   - `uniffi = "=0.31.2"`
 - Android: Kotlin UI, `HostApduService` for the tag, foreground service for
@@ -1516,7 +1566,7 @@ Pinned as of 2026-11-09:
   has exactly one valid byte encoding, with a type marker, a version byte and
   size limits, and every decoder is fuzzed (round 4, R4-5 and R4-10).
 - Not reused: Avila Node's P2P layer. It drags in a full node's dependencies,
-  and `bip157` already has the mempool watch.
+  and the counter needs far less than a node.
 
 **Supply chain.**
 - `Cargo.lock` is committed. Builds are reproducible.

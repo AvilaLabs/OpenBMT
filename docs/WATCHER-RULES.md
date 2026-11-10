@@ -11,8 +11,8 @@ is told comes from somewhere that can lie: Bitcoin peers, the shop's Box, the
 network the counter is on. These rules say what each kind of evidence is
 allowed to prove, and nothing is believed beyond that.
 
-The library has no network, no clock and no storage. The light client
-(`bip157`) and the Box connection live in the app around it. The caller
+The library has no network, no clock and no storage. The peer connections
+(`docs/NETWORK-RULES.md`) and the Box connection live around it. The caller
 passes in what was received, from whom, and the time. The library decides
 what it proves. What to do about a payment that is seen but not confirmed is
 decided by `openbmt_core::policy::evaluate`; this library produces the
