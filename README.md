@@ -58,7 +58,7 @@ sets. The full statement, its conditions and the reasoning are in
 | [crates/openbmt-signer/](crates/openbmt-signer/) | The Key app's transaction signer: the rules under which key 2 signs |
 | [crates/openbmt-watch/](crates/openbmt-watch/) | The counter's payment watcher: merkle proofs, full blocks, peer groups, conflicts, health |
 | [crates/openbmt-net/](crates/openbmt-net/) | The counter's Bitcoin peer client, first slice: wire framing and the single-peer session, with no sockets and no clock |
-| [scripts/](scripts/) | Checks against Bitcoin Core on regtest: the restore drill, and the signer reading and returning Core's transaction files |
+| [scripts/](scripts/) | Checks against Bitcoin Core on regtest: the restore drill, the signer reading and returning Core's transaction files, and the peer session fetching headers, filters, blocks and transactions from a Core node |
 
 Planned next: the light-client adapter for the watcher, then the apps.
 

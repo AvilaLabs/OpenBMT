@@ -10,3 +10,8 @@ publish.workspace = true
 # The same exact bitcoin version as the other crates, so the types unify.
 [dependencies]
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+
+# The regtest peer example feeds the headers it receives to the watcher's
+# header store.
+[dev-dependencies]
+openbmt-watch = { path = "../openbmt-watch" }
