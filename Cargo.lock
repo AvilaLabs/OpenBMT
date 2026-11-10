@@ -467,11 +467,13 @@ name = "openbmt-owner-node"
 version = "0.1.0"
 dependencies = [
  "bitcoin",
+ "openbmt-approver",
  "openbmt-core",
  "openbmt-counter",
  "openbmt-counter-node",
  "openbmt-courier",
  "openbmt-link",
+ "openbmt-net",
  "openbmt-net-io",
  "openbmt-owner",
  "openbmt-pos",
