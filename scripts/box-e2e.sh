@@ -363,7 +363,7 @@ say "6. A second process on the same directory"
 SECOND=$(timeout 20 "$BOX_BIN" "$B1" "127.0.0.1:$PORT2" </dev/null 2>&1)
 RC=$?
 note "exit $RC: $SECOND"
-if [ "$RC" != 0 ] && grep -q 'another OpenBMT process' <<<"$SECOND"; then
+if [ "$RC" != 0 ] && grep -q 'Another OpenBMT program is already using' <<<"$SECOND"; then
   pass 6 "the second process was refused with: $SECOND"
 else
   bad 6 "the second process was not refused (exit $RC): $SECOND"
@@ -394,9 +394,10 @@ INV2=$(pair invite "$K2")
 FIRST=${INV2:0:1}
 if [ "$FIRST" = 0 ]; then OTHER=1; else OTHER=0; fi
 TYPO="$OTHER${INV2:1}"
-ask 2 "invite $TYPO" 'invitation' || true
-note "typed with one character changed: $LAST"
-TYPO_ANSWER=$LAST
+# The refusal is the heading, then what happened on the next line.
+ask 2 "invite $TYPO" 'Invitation not read' || true
+TYPO_ANSWER=$(grep -A1 '^Invitation not read' "${LOG[2]}" | tail -2 | tr '\n' ' ')
+note "typed with one character changed: $TYPO_ANSWER"
 S8a=$(state_of 2)
 CLAIM8=$(pair claim "$K2" "127.0.0.1:$PORT2")
 ask 2 "invite $INV2" 'invitation' || true
@@ -406,7 +407,7 @@ INV3=$(pair invite "$K2")
 CLAIM_WRONG=$(pair claim "$K2" "127.0.0.1:$PORT2")
 WELCOME_AFTER=$(pair welcome "$K2" "127.0.0.1:$PORT2")
 note "different invitation: $CLAIM_WRONG"
-if grep -q 'check characters do not match' <<<"$TYPO_ANSWER" && [ "$S8a" = unpaired ] &&
+if grep -q 'do not match the rest' <<<"$TYPO_ANSWER" && [ "$S8a" = unpaired ] &&
   grep -q 'no open invitation' <<<"$CLAIM8" && [ "$S8b" = "invitation open" ] &&
   grep -q 'claim REJECTED' <<<"$CLAIM_WRONG" && ! grep -q '^welcomed' <<<"$WELCOME_AFTER"; then
   pass 8 "the typo was refused by its check and left the Box unpaired with no claim; with a valid invitation open, the Key app holding another one rejected the claim and sent no welcome"

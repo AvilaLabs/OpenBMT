@@ -50,7 +50,10 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use openbmt_box::{BoxRunner, PosSetup};
+use openbmt_box::say::{
+    invite_lines, notes_lines, pos_lines, pos_token_lines, state_lines, unknown_lines,
+};
+use openbmt_box::{BoxError, BoxRunner, PosSetup};
 use openbmt_core::batch::PinnedRoots;
 use openbmt_core::boxpair::{Claim, Invitation, Welcome};
 use openbmt_core::identity::{tagged_hash, DeviceId, Identity};
@@ -336,37 +339,30 @@ fn pos_box(data: &Path, addr: &str, pos_dir: &Path) -> Result<(), String> {
     ));
     say(&format!("key: {}", hex(&runner.device_id().to_bytes())));
     say(&format!("listening: {}", runner.local_addr()));
-    say(&format!("state: {}", runner.status().text()));
+    for line in state_lines(runner.status()) {
+        say(&line);
+    }
+    let answer = |lines: Vec<String>| {
+        for line in lines {
+            say(&line);
+        }
+    };
     let mut lines = io::stdin().lock().lines();
     while let Some(Ok(line)) = lines.next() {
         let line = line.trim().to_string();
         let (command, rest) = line.split_once(' ').unwrap_or((line.as_str(), ""));
         match command {
-            "invite" => match runner.enter_invitation(rest.trim()) {
-                Ok(()) => say("invitation: open for 30 minutes"),
-                Err(e) => say(&format!("invitation refused: {e}")),
-            },
-            "state" => say(&format!("state: {}", runner.status().text())),
+            "invite" => answer(invite_lines(&runner.enter_invitation(rest.trim()))),
+            "state" => answer(state_lines(runner.status())),
             "pos-token" => match lines.next() {
-                Some(Ok(token)) => match runner.store_pos_token(&token) {
-                    Ok(()) => say("pos token: stored"),
-                    Err(e) => say(&format!("pos token refused: {e}")),
-                },
-                _ => say("pos token refused: no line followed the command"),
+                Some(Ok(token)) => answer(pos_token_lines(runner.store_pos_token(&token))),
+                _ => answer(pos_token_lines(Err(BoxError::BadToken("empty")))),
             },
-            "pos" => {
-                for line in runner.pos_view().to_string().lines() {
-                    say(&format!("pos: {line}"));
-                }
-            }
-            "notes" => {
-                for n in runner.notes() {
-                    say(&format!("note: {n}"));
-                }
-            }
+            "pos" => answer(pos_lines(&runner.pos_view(), runner.status())),
+            "notes" => answer(notes_lines(&runner.notes())),
             "quit" => break,
             "" => {}
-            other => say(&format!("unknown command: {other}")),
+            other => answer(unknown_lines(other)),
         }
     }
     runner.stop();

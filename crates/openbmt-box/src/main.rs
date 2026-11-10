@@ -22,7 +22,11 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use openbmt_box::{read_invitation_file, BoxRunner};
+use openbmt_box::say::{
+    invite_lines, members_lines, notes_lines, pos_lines, pos_token_lines, render, state_lines,
+    unknown_lines, ConsoleAnswer,
+};
+use openbmt_box::{read_invitation_file, BoxError, BoxRunner};
 use openbmt_link::ServerConfig;
 use openbmt_net_io::SystemClock;
 
@@ -41,26 +45,50 @@ fn say(line: &str) {
     let _ = out.flush();
 }
 
+fn say_all(lines: Vec<String>) {
+    for line in lines {
+        say(&line);
+    }
+}
+
+fn bad_arguments() -> ExitCode {
+    complain(render(&ConsoleAnswer::BadArguments.words()));
+    usage()
+}
+
+/// An answer for the error stream: the words, as they are given on the
+/// output.
+fn complain(lines: Vec<String>) {
+    for line in lines {
+        eprintln!("{line}");
+    }
+}
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let (Some(dir), Some(bind)) = (args.next(), args.next()) else {
-        return usage();
+        return bad_arguments();
     };
     let mut invitation_file: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
         match (arg.as_str(), args.next()) {
             ("--invitation-file", Some(path)) => invitation_file = Some(PathBuf::from(path)),
-            _ => return usage(),
+            _ => return bad_arguments(),
         }
     }
-    let Ok(bind) = bind.parse::<SocketAddr>() else {
-        eprintln!("{bind} is not an address and port");
+    let Ok(bind_addr) = bind.parse::<SocketAddr>() else {
+        complain(render(&ConsoleAnswer::BadAddress(bind).words()));
         return usage();
     };
-    let runner = match BoxRunner::start(dir, bind, Arc::new(SystemClock), ServerConfig::default()) {
+    let runner = match BoxRunner::start(
+        dir,
+        bind_addr,
+        Arc::new(SystemClock),
+        ServerConfig::default(),
+    ) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("openbmt-box: {e}");
+            complain(render(&e.words()));
             return ExitCode::FAILURE;
         }
     };
@@ -73,51 +101,39 @@ fn main() -> ExitCode {
     if let Some(path) = invitation_file {
         match read_invitation_file(&path) {
             Ok(text) => match runner.enter_invitation(&text) {
-                Ok(()) => say("invitation: open for 30 minutes"),
-                Err(e) => eprintln!("openbmt-box: the invitation was refused: {e}"),
+                Ok(()) => say_all(invite_lines(&Ok(()))),
+                // The same words as the invite command gives.
+                Err(e) => complain(invite_lines(&Err(e))),
             },
-            Err(e) => eprintln!("openbmt-box: {}: {e}", path.display()),
+            Err(e) => complain(render(
+                &ConsoleAnswer::InvitationFileUnreadable {
+                    path: path.display().to_string(),
+                    kind: e.kind(),
+                }
+                .words(),
+            )),
         }
     }
-    say(&format!("state: {}", runner.status().text()));
+    say_all(state_lines(runner.status()));
     let mut lines = io::stdin().lock().lines();
     while let Some(line) = lines.next() {
         let Ok(line) = line else { break };
         let line = line.trim();
         let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
         match command {
-            "invite" => match runner.enter_invitation(rest.trim()) {
-                Ok(()) => say("invitation: open for 30 minutes"),
-                Err(e) => say(&format!("invitation refused: {e}")),
-            },
-            "state" => say(&format!("state: {}", runner.status().text())),
+            "invite" => say_all(invite_lines(&runner.enter_invitation(rest.trim()))),
+            "state" => say_all(state_lines(runner.status())),
             "pos-token" => match lines.next() {
-                Some(Ok(token)) => match runner.store_pos_token(&token) {
-                    Ok(()) => say("pos token: stored"),
-                    Err(e) => say(&format!("pos token refused: {e}")),
-                },
-                _ => say("pos token refused: no line followed the command"),
+                Some(Ok(token)) => say_all(pos_token_lines(runner.store_pos_token(&token))),
+                // No line after the command is an empty token.
+                _ => say_all(pos_token_lines(Err(BoxError::BadToken("empty")))),
             },
-            "pos" => {
-                for line in runner.pos_view().to_string().lines() {
-                    say(&format!("pos: {line}"));
-                }
-            }
-            "members" => {
-                let members = runner.members();
-                say(&format!("members: {}", members.len()));
-                for m in members {
-                    say(&format!("member: {}", hex(&m.to_bytes())));
-                }
-            }
-            "notes" => {
-                for n in runner.notes() {
-                    say(&format!("note: {n}"));
-                }
-            }
+            "pos" => say_all(pos_lines(&runner.pos_view(), runner.status())),
+            "members" => say_all(members_lines(&runner.members())),
+            "notes" => say_all(notes_lines(&runner.notes())),
             "quit" => break,
             "" => {}
-            other => say(&format!("unknown command: {other}")),
+            other => say_all(unknown_lines(other)),
         }
     }
     runner.stop();
