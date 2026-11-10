@@ -324,3 +324,49 @@ They agree.
   groups are the driver's own.
 - Release-profile speed: all runs used the debug profile.
 - Whether any of the 24-hour bans work in practice: no peer was banned.
+
+## Addendum: a 45-minute run that saw blocks
+
+A later run on mainnet lasted 2,700 seconds with one watched script that
+has never been paid, so that new blocks went through the filter path.
+Three blocks arrived (975,281 to 975,283). The saved tip at the end was
+975,283.
+
+| | |
+|---|---|
+| Ready peers | 8, first at 0.7 s, all 8 at 96 s |
+| Two filter peers in different groups | 0.7 s |
+| Transactions sighted | 8,453, all distinct |
+| Blocks that joined the chain | 3 |
+| Blocks settled by two equal filters | 1 |
+| Blocks downloaded in full | 2 (1.56 MB and 1.61 MB) |
+| Peers that closed the connection | 26 |
+| Peers dropped for an unanswered ping (NR-14) | 1 |
+
+**A defect shows in this run.** Two of the three blocks were downloaded
+in full although nothing paid the watched script, each about 61 seconds
+after its header joined the chain: the 60-second limit of NR-42 ran out
+with fewer than two filter answers. And seven of the 26 peers that
+closed the connection did so within 0.3 seconds, or a few seconds, of a
+new header joining the chain.
+
+The cause, as read from the code and from Bitcoin Core's behavior: the
+manager asks two filter peers for a block's filter as soon as the header
+joins the best chain, whichever peer the header came from. A peer that
+has not yet received that block itself does not know the hash it is
+asked about, and Bitcoin Core disconnects a peer that asks for filters
+up to an unknown block. A peer that has the block but whose filter index
+has not caught up sends no answer. Either way the answer never comes,
+the counter waits the full 60 seconds and then downloads the block, and
+it loses filter peers at every new block.
+
+The check against one Core node on regtest could not show this: there,
+the peer that is asked is always the peer the header came from.
+
+This is safe for the shop (the fallback is the full block, which is
+checked) but costs about 1.5 MB and a minute for each block, and it
+sheds peers. While a payment is waiting for its confirmation the counter
+downloads every block at once anyway (NR-44), so the minute does not
+delay a sale. The fix is to ask a peer about a block only after that
+peer has itself shown the block; it is tracked as the next change to
+the manager.
