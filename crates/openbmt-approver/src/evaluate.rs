@@ -5,11 +5,13 @@
 
 use std::convert::Infallible;
 
+use bitcoin::bip32::Xpriv;
+
 use openbmt_core::batch::{BatchError, CosignError, HighWater};
 use openbmt_core::pairing::{check_request, PairOffer};
 use openbmt_core::settings::{changed_fields, Change, SettingsError};
 use openbmt_session::{health_proof, DeclineCode, Item, Label, OutputLabel, Payload, RequestItem};
-use openbmt_signer::{OutputKind, SignError};
+use openbmt_signer::{OutputKind, Review, SignError, Signed, SignerState};
 
 use crate::describe::{field_values, hex};
 use crate::line::{
@@ -193,7 +195,7 @@ fn eval_spend(
             "AS-36: not on this device: key 2 is not held here",
         );
     };
-    match signer.sign(review, key2, session.now, |_| Ok::<(), Infallible>(())) {
+    match sign_spend(signer, review, key2, session.now) {
         Ok(signed) => Checked {
             detail,
             block: None,
@@ -206,6 +208,18 @@ fn eval_spend(
         ),
         Err(SignError::Persist(never)) => match never {},
     }
+}
+
+/// The one place where the Key app asks the signer for a signature. The
+/// nonce is RFC 6979, chosen inside `SignerState::sign`; a nonce protocol
+/// (anti-exfil) would change only this function.
+fn sign_spend(
+    signer: &mut SignerState,
+    review: Review,
+    key2: &Xpriv,
+    now: u64,
+) -> Result<Signed, SignError<Infallible>> {
+    signer.sign(review, key2, now, |_| Ok::<(), Infallible>(()))
 }
 
 // ---- BatchRefill (AS-26) --------------------------------------------------
