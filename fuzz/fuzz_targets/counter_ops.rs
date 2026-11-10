@@ -52,6 +52,8 @@ fn pairing() -> Pairing {
 fn settings() -> Settings {
     let mut s = Settings::defaults(1_000);
     s.customer_wifi = false;
+    // No floor, so small sales still open (CR-75).
+    s.min_sale_sats = 0;
     s.devices.insert(id(3).device_id());
     s.counters.insert(id(3).device_id(), 10_000);
     s

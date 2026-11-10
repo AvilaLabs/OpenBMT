@@ -242,6 +242,9 @@ pub struct Counter {
     archived: BTreeMap<ScriptBuf, u32>,
     /// Sales whose stored form did not read back (CR-42).
     unreadable: BTreeSet<u32>,
+    /// CR-75: sales refused for being below the smallest bitcoin sale since
+    /// this counter started. Not stored.
+    refused_below_minimum: u64,
 }
 
 impl Counter {
@@ -271,6 +274,7 @@ impl Counter {
             sales: BTreeMap::new(),
             archived: BTreeMap::new(),
             unreadable: BTreeSet::new(),
+            refused_below_minimum: 0,
         }
     }
 
@@ -323,6 +327,12 @@ impl Counter {
         // CR-73: the counter's own records are the truth about refunds.
         counter.adopt_refunds();
         Ok(counter)
+    }
+
+    /// CR-75: how many sales this counter has refused for being below the
+    /// smallest bitcoin sale since it started. Kept in memory only.
+    pub fn refused_below_minimum(&self) -> u64 {
+        self.refused_below_minimum
     }
 
     /// New settings, already checked by the caller.
@@ -508,8 +518,8 @@ impl Counter {
     /// CR-01 to CR-04, CR-09, CR-17: open a sale and hand out its address.
     ///
     /// Refused, with nothing written, when a rescan is pending, the check is
-    /// not healthy, the amount is zero, too large or below the dust line, the
-    /// hour's addresses are used up, or no address is left.
+    /// not healthy, the amount is zero, too large, below the dust line or below
+    /// the smallest bitcoin sale (CR-75), the hour's addresses are used up, or no address is left.
     ///
     /// The writes, in this order:
     ///
@@ -550,6 +560,14 @@ impl Counter {
         let needs_sats = sats_for(amount, rate).ok_or(OpenRefused::AmountTooLarge)?;
         if needs_sats < DUST_SATS {
             return Err(OpenRefused::BelowDust { needs_sats });
+        }
+        let min_sats = self.settings.min_sale_sats;
+        if needs_sats < min_sats {
+            self.refused_below_minimum = self.refused_below_minimum.saturating_add(1);
+            return Err(OpenRefused::BelowMinimum {
+                sats: needs_sats,
+                min_sats,
+            });
         }
         if !source.is_fresh_at(now) {
             return Err(OpenRefused::StaleRate {
@@ -616,7 +634,9 @@ impl Counter {
     /// the quote in force first; then the new quote is added and the rest of
     /// the amount is priced at it. Refused once enough has arrived, once the
     /// sale ended, and once the sale has [`MAX_QUOTES`] quotes (the last one
-    /// stays in force). A rate that is stale (CR-58) is refused.
+    /// stays in force). A rate that is stale (CR-58) is refused. A sale with
+    /// nothing received is refused a quote that would put it below the
+    /// smallest bitcoin sale (CR-75).
     ///
     /// The writes, in this order: a `Sale` record "requoted" (CR-59), then
     /// the sale. If the process stops between them the sale does not hold
@@ -649,6 +669,19 @@ impl Counter {
         sale.refresh(headers, now, depth);
         if sale.frozen.is_some() {
             return Err(RequoteRefused::AlreadyEnough);
+        }
+        // CR-75: a sale with nothing received is not requoted below the
+        // smallest bitcoin sale. One paid in part keeps its quotes moving.
+        let min_sats = self.settings.min_sale_sats;
+        if needs_sats < min_sats
+            && sale.watch.transactions().next().is_none()
+            && sale.accepted.is_none()
+            && sale.overridden.is_none()
+        {
+            return Err(RequoteRefused::BelowMinimum {
+                sats: needs_sats,
+                min_sats,
+            });
         }
         if !source.is_fresh_at(now) {
             return Err(RequoteRefused::StaleRate {

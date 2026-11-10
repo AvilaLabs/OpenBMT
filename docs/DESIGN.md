@@ -1415,7 +1415,10 @@ after a wave of attacks, which showed how fragile that is.
   sale below it is not opened: the cashier is told to take another kind
   of payment. The first value **[to tune]** is the amount at which
   spending the receipt at 5 sat/vB costs 2% of it, about 26,000 sats.
-  Decided 2026-11-10; not built.
+  Decided 2026-11-10. Built: the signed setting (raising it tightens,
+  lowering it needs the Key app), the counter's refusal before anything
+  is written (CR-75), the cashier's words, and the helper that prices
+  one receipt at a fee rate. The owner's setting screen is not built.
 - **What the owner is shown about receipts.** One line, in the owner's
   own terms and with no word for the outputs themselves: how many
   receipts the wallet holds, what spending all of them would cost at the

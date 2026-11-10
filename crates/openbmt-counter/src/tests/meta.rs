@@ -44,14 +44,15 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_fifty_three_rules() {
+fn the_rules_file_defines_fifty_four_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 53);
+    assert_eq!(ids.len(), 54);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
             && ids.contains("CR-56")
             && ids.contains("CR-74")
+            && ids.contains("CR-75")
     );
 }
 

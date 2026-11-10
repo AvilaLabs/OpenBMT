@@ -66,6 +66,24 @@ draws what it is told.
   paid. Once enough has arrived the sale takes no new quote.
 - **CR-09.** No sale opens while a rescan is pending after a restore or a
   reset (§5.5).
+- **CR-75.** The shop's signed settings name the smallest bitcoin sale, in
+  satoshis (`min_sale_sats`; 0 means no floor). The first value is 26,000
+  **[to tune]**, about the amount at which spending its receipt at 5
+  sat/vB costs 2% of it. A sale whose amount, at the quote the counter
+  makes for it (CR-05), is worth fewer satoshis than that is refused
+  with `BelowMinimum`, before anything is written: no address is handed
+  out, the desk does not change and no record is made. The cashier is
+  told to take another kind of payment. The dust line (CR-17) is checked
+  first, so when both apply the sale is refused as dust. A sale for
+  exactly the floor opens. A new quote (CR-59) that would put a sale
+  with nothing received below the floor is refused the same way and
+  changes nothing; a sale that has been paid in part is not held to the
+  floor again, because the customer has already paid into it. The
+  counter counts, in memory only, the sales it refused for the floor
+  since it started, so the owner can be told how often the floor turns
+  sales away. Raising the floor is a tightening of the settings;
+  lowering it, or turning it off, is a loosening and needs the Key
+  app's co-signature like every loosening (§2.9 of the design).
 - **CR-07.** A sale with nothing received ends as "expired" 15 minutes
   after it opened **[to tune]**, or when the cashier cancels it. Its
   address stays watched for good.

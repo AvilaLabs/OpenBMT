@@ -13,7 +13,7 @@ use openbmt_core::settings::{changed_fields, Change, SettingsError};
 use openbmt_session::{health_proof, DeclineCode, Item, Label, OutputLabel, Payload, RequestItem};
 use openbmt_signer::{OutputKind, Review, SignError, Signed, SignerState};
 
-use crate::describe::{field_values, hex};
+use crate::describe::{field_values, hex, shown_name};
 use crate::line::{
     BatchLine, CheckStep, Detail, HealthLine, OutputLine, PairingLine, SettingChange, SettingsLine,
     SpendLine, SpendReview, StepStatus,
@@ -390,7 +390,7 @@ fn eval_settings(
             fields
                 .into_iter()
                 .map(|(field, direction)| SettingChange {
-                    field,
+                    field: shown_name(field),
                     old: old_values
                         .iter()
                         .find(|(n, _)| *n == field)
@@ -408,7 +408,7 @@ fn eval_settings(
         None => new_values
             .into_iter()
             .map(|(field, new)| SettingChange {
-                field,
+                field: shown_name(field),
                 old: None,
                 new,
                 direction: Change::Loosening,

@@ -35,7 +35,7 @@ pub use coin::{Coin, CoinError};
 pub use combine::{combine, CombineError, Source};
 pub use finalize::{finalize, finalize_plan, FinalizeError};
 pub use plan::{
-    dust_limit, plan, ChangePosition, Plan, PlanError, PlanInput, PlanOutput, PlannedChange,
-    PlannedPayment, SpendRequest,
+    dust_limit, plan, receipt_spend_cost_sats, ChangePosition, Plan, PlanError, PlanInput,
+    PlanOutput, PlannedChange, PlannedPayment, SpendRequest,
 };
 pub use psbt::PsbtError;

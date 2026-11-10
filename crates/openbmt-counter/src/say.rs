@@ -346,6 +346,16 @@ impl<E: Display> OpenRefused<E> {
                 "Take another kind of payment.",
                 "CR-17",
             ),
+            Self::BelowMinimum { sats: _, min_sats } => refused(
+                "Below the bitcoin minimum",
+                format!(
+                    "This shop takes bitcoin for sales of {} and up.",
+                    sats(*min_sats)
+                ),
+                Who::Cashier,
+                "Take another kind of payment.",
+                "CR-75",
+            ),
             Self::StaleRate { fetched_at, .. } => refused(
                 "Price is too old",
                 "The exchange price is too old to start a sale with.",
@@ -459,6 +469,16 @@ impl<E: Display> RequoteRefused<E> {
                 Who::Cashier,
                 CHECK_AMOUNT_NEXT,
                 "CR-05",
+            ),
+            Self::BelowMinimum { sats: _, min_sats } => refused(
+                "Below the bitcoin minimum",
+                format!(
+                    "At the new price this sale is under the smallest bitcoin sale this shop takes, {}.",
+                    sats(*min_sats)
+                ),
+                Who::Cashier,
+                "Cancel this sale and take another kind of payment.",
+                "CR-75",
             ),
             Self::StaleRate { fetched_at, .. } => refused(
                 "Price too old to renew",
@@ -1515,6 +1535,13 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("AmountTooLarge", OpenRefused::AmountTooLarge),
         ("BelowDust", OpenRefused::BelowDust { needs_sats: 600 }),
         (
+            "BelowMinimum",
+            OpenRefused::BelowMinimum {
+                sats: 20_000,
+                min_sats: 26_000,
+            },
+        ),
+        (
             "StaleRate",
             OpenRefused::StaleRate {
                 fetched_at: 1_700_000_000,
@@ -1544,6 +1571,13 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("AlreadyEnough", RequoteRefused::AlreadyEnough),
         ("TooManyQuotes", RequoteRefused::TooManyQuotes),
         ("AmountTooLarge", RequoteRefused::AmountTooLarge),
+        (
+            "BelowMinimum",
+            RequoteRefused::BelowMinimum {
+                sats: 20_000,
+                min_sats: 26_000,
+            },
+        ),
         (
             "StaleRate",
             RequoteRefused::StaleRate {

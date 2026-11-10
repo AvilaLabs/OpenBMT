@@ -17,7 +17,7 @@ use openbmt_watch::{Problem, Refusal};
 use crate::screen::{problem_text, State};
 use crate::store::StoreFault;
 
-/// Why a sale was not opened (CR-01 to CR-04, CR-09, CR-17).
+/// Why a sale was not opened (CR-01 to CR-04, CR-09, CR-17, CR-75).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenRefused<E> {
     /// CR-09: a rescan is pending after a restore or a reset.
@@ -33,6 +33,14 @@ pub enum OpenRefused<E> {
     BelowDust {
         /// What the amount needs at the rate.
         needs_sats: u64,
+    },
+    /// CR-75: the amount needs fewer satoshis than the shop's smallest
+    /// bitcoin sale.
+    BelowMinimum {
+        /// What the amount needs at the rate.
+        sats: u64,
+        /// The smallest bitcoin sale, from the settings.
+        min_sats: u64,
     },
     /// CR-58: the rate was fetched too long before the time of the sale, or
     /// after it.
@@ -63,6 +71,7 @@ impl<E> OpenRefused<E> {
             Self::Unhealthy(_) => "CR-01",
             Self::ZeroAmount | Self::AmountTooLarge => "CR-05",
             Self::BelowDust { .. } => "CR-17",
+            Self::BelowMinimum { .. } => "CR-75",
             Self::StaleRate { .. } => "CR-58",
             Self::RateLimited => "CR-04",
             Self::NoAddress | Self::AddressInUse => "CR-02",
@@ -90,6 +99,11 @@ impl<E: fmt::Display> fmt::Display for OpenRefused<E> {
             Self::BelowDust { needs_sats } => write!(
                 f,
                 "the amount is only {needs_sats} sats, below the dust line; use another payment type"
+            ),
+            Self::BelowMinimum { sats, min_sats } => write!(
+                f,
+                "the amount is only {sats} sats, below the shop's smallest bitcoin sale of \
+                 {min_sats} sats; use another payment type"
             ),
             Self::StaleRate { fetched_at, now } => write!(
                 f,
@@ -163,6 +177,14 @@ pub enum RequoteRefused<E> {
     TooManyQuotes,
     /// CR-05: the amount needs more than 21,000,000 bitcoin at the rate.
     AmountTooLarge,
+    /// CR-75: the new quote would put a sale with nothing received below
+    /// the shop's smallest bitcoin sale.
+    BelowMinimum {
+        /// What the whole amount needs at the new rate.
+        sats: u64,
+        /// The smallest bitcoin sale, from the settings.
+        min_sats: u64,
+    },
     /// CR-58: the rate was fetched too long before the time of the quote, or
     /// after it.
     StaleRate {
@@ -182,6 +204,7 @@ impl<E> RequoteRefused<E> {
             Self::UnknownSale(_) => "CR-11",
             Self::SaleEnded | Self::TooManyQuotes | Self::AmountTooLarge => "CR-05",
             Self::AlreadyEnough => "CR-08",
+            Self::BelowMinimum { .. } => "CR-75",
             Self::StaleRate { .. } => "CR-58",
             Self::Store(_) => "CR-40",
         }
@@ -196,6 +219,11 @@ impl<E: fmt::Display> fmt::Display for RequoteRefused<E> {
             Self::SaleEnded => write!(f, "the sale has ended and takes no new quote"),
             Self::AlreadyEnough => write!(f, "enough has arrived; the sale takes no new quote"),
             Self::TooManyQuotes => write!(f, "the sale has the most quotes it can keep"),
+            Self::BelowMinimum { sats, min_sats } => write!(
+                f,
+                "at the new rate the sale is only {sats} sats, below the shop's smallest \
+                 bitcoin sale of {min_sats} sats"
+            ),
             Self::AmountTooLarge => write!(f, "the amount is more than all the bitcoin there is"),
             Self::StaleRate { fetched_at, now } => write!(
                 f,

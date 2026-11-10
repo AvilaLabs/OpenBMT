@@ -46,6 +46,7 @@ by hand. To write it again, run the test
 | OpenRefused::ZeroAmount | Sale needs an amount | The sale has no amount, so no payment code was made. | Enter the amount and start the sale again. | the cashier | CR-05 |
 | OpenRefused::AmountTooLarge | Sale amount too large | That is more than any real payment could be, so the sale was not started. | Check the amount and enter it again. | the cashier | CR-05 |
 | OpenRefused::BelowDust | Sale too small for bitcoin | The sale is only 600 sats, too small to be worth sending by bitcoin. | Take another kind of payment. | the cashier | CR-17 |
+| OpenRefused::BelowMinimum | Below the bitcoin minimum | This shop takes bitcoin for sales of 26,000 sats and up. | Take another kind of payment. | the cashier | CR-75 |
 | OpenRefused::StaleRate | Price is too old | The exchange price is too old to start a sale with. | Wait for a new price, or check the internet connection. If it stays old, tell the owner. | the cashier | CR-58 |
 | OpenRefused::RateLimited | Too many sales this hour | The counter has handed out as many payment codes as it may in one hour. | Take another kind of payment, or try again later. Tell the owner if it happens often. | the cashier | CR-04 |
 | OpenRefused::NoAddress | No payment code left | The counter has no payment code left to hand out. | Take another kind of payment. Tell the owner: this counter needs new addresses. | the cashier | CR-02 |
@@ -60,6 +61,7 @@ by hand. To write it again, run the test
 | RequoteRefused::AlreadyEnough | Already paid enough | Enough has arrived for this sale, so it takes no new price. | Nothing to do. The sale screen says when to hand over the goods. | nobody | CR-08 |
 | RequoteRefused::TooManyQuotes | Too many new prices | This sale has had as many new prices as it can keep. | Start a new sale. If the customer already paid on this one, tell the owner. | the cashier | CR-05 |
 | RequoteRefused::AmountTooLarge | New price too large | That is more than any real payment could be, so the price was not changed. | Check the amount and enter it again. | the cashier | CR-05 |
+| RequoteRefused::BelowMinimum | Below the bitcoin minimum | At the new price this sale is under the smallest bitcoin sale this shop takes, 26,000 sats. | Cancel this sale and take another kind of payment. | the cashier | CR-75 |
 | RequoteRefused::StaleRate | Price too old to renew | The exchange price is too old to give this sale a new price. | Wait for a new price, or check the internet connection. If it stays old, tell the owner. | the cashier | CR-58 |
 | RequoteRefused::Store | New price not saved | The counter could not save it, so the sale keeps its old price. | Try once more. If it fails again, tell the owner: the counter cannot save. See Details. | the cashier | CR-40 |
 | CancelRefused::UnknownSale | Sale not found | The counter has no such sale to cancel. | Look the sale up again. If it is missing, tell the owner: the counter lost a sale. | the cashier | CR-11 |

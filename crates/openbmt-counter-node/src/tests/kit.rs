@@ -70,6 +70,8 @@ pub fn five_dollars() -> Amount {
 pub fn settings() -> Settings {
     let mut s = Settings::defaults(SATS_PER_USD);
     s.customer_wifi = false;
+    // No floor, so small sales open (CR-75).
+    s.min_sale_sats = 0;
     s.devices.insert(id(3).device_id());
     s.counters.insert(id(3).device_id(), 10_000);
     s

@@ -11,7 +11,10 @@ use openbmt_core::wallet::WalletDescription;
 use openbmt_signer::{MAX_FEE_RATE_SAT_PER_VB, MAX_FEE_SATS, MAX_INPUTS, MAX_OUTPUTS, MAX_WEIGHT};
 
 use crate::coin::{Coin, CoinError};
-use crate::common::{shape_weight, template_weight, MAX_MONEY, SEQUENCE, TX_VERSION};
+use crate::common::{
+    shape_weight, template_weight, INPUT_BASE_BYTES, INPUT_WITNESS_BYTES, MAX_MONEY, SEQUENCE,
+    TX_VERSION,
+};
 
 /// What to spend.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -431,6 +434,23 @@ pub fn dust_limit(script: &bitcoin::Script) -> Option<u64> {
     } else {
         None
     }
+}
+
+/// What spending one receipt of this wallet costs, in satoshis, at a fee
+/// rate of `sat_per_vb_milli` milli-satoshis per virtual byte (1,000 is 1
+/// sat/vB).
+///
+/// One receipt is one P2WSH 2-of-3 input, signed with the longest
+/// signatures (SP-30). Its weight is `4 * INPUT_BASE_BYTES +
+/// INPUT_WITNESS_BYTES`; its size is that weight over 4, rounded up to a
+/// whole virtual byte, as the planner counts it; the cost is the size times
+/// the rate over 1,000, rounded up to a whole satoshi. The sum is
+/// worked out in 128 bits and cannot overflow.
+pub fn receipt_spend_cost_sats(sat_per_vb_milli: u64) -> u64 {
+    let weight = INPUT_BASE_BYTES * 4 + INPUT_WITNESS_BYTES;
+    let vsize = weight.div_ceil(4);
+    let cost = u128::from(vsize) * u128::from(sat_per_vb_milli);
+    u64::try_from(cost.div_ceil(1000)).unwrap_or(u64::MAX)
 }
 
 /// The fee for `inputs` coins and outputs with scripts of `lens` bytes at

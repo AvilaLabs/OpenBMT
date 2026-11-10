@@ -61,10 +61,12 @@ pub fn five_dollars() -> Amount {
 }
 
 /// Settings with light checks that can be accepted at once: the customers
-/// cannot join the Wi-Fi.
+/// cannot join the Wi-Fi. The smallest bitcoin sale is off (CR-75), so
+/// sales of a few dollars open; the tests of CR-75 set it.
 pub fn settings() -> Settings {
     let mut s = Settings::defaults(SATS_PER_USD);
     s.customer_wifi = false;
+    s.min_sale_sats = 0;
     s.devices.insert(id(3).device_id());
     s.counters.insert(id(3).device_id(), 10_000);
     s

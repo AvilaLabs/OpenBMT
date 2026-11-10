@@ -26,6 +26,15 @@ fn flag(v: bool) -> String {
     if v { "on" } else { "off" }.to_string()
 }
 
+/// The name the key holder is shown for a field. Most fields keep the name
+/// `changed_fields` gives; the smallest bitcoin sale is named in plain words.
+pub(crate) fn shown_name(field: &'static str) -> &'static str {
+    match field {
+        "min_sale_sats" => "Smallest bitcoin sale",
+        other => other,
+    }
+}
+
 /// Every field that `changed_fields` can name, with its value as text.
 pub(crate) fn field_values(s: &Settings) -> Vec<(&'static str, String)> {
     let devices = if s.devices.is_empty() {
@@ -82,6 +91,7 @@ pub(crate) fn field_values(s: &Settings) -> Vec<(&'static str, String)> {
         ),
         ("tor_on", flag(s.tor_on)),
         ("customer_wifi", flag(s.customer_wifi)),
+        ("min_sale_sats", format!("{} sats", s.min_sale_sats)),
         ("devices", devices),
         ("counters", counters),
         ("boxes", boxes),

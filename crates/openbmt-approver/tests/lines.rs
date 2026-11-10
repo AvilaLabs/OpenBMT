@@ -362,6 +362,38 @@ fn as_27_a_later_change_shows_old_and_new_and_the_direction_of_each_field() {
 }
 
 #[test]
+fn as_27_the_smallest_bitcoin_sale_is_listed_in_sats_with_its_direction() {
+    let mut a = approver_with_key2();
+    cosign_settings(&mut a, 200, 2, &[1], &Store::default());
+    // Raising the floor tightens.
+    let mut up = settings_with(3, &[1]);
+    up.min_sale_sats = 50_000;
+    let lines = lines_of(&mut a, vec![settings_item(up)]);
+    let Detail::Settings(s) = &lines[0].detail else {
+        panic!()
+    };
+    assert_eq!(s.changes.len(), 1);
+    let c = &s.changes[0];
+    assert_eq!(c.field, "Smallest bitcoin sale");
+    assert_eq!(c.old.as_deref(), Some("26000 sats"));
+    assert_eq!(c.new, "50000 sats");
+    assert_eq!(c.direction, Change::Tightening);
+    assert_eq!(s.overall, Some(Change::Tightening));
+    // Lowering it to nothing loosens.
+    let mut off = settings_with(3, &[1]);
+    off.min_sale_sats = 0;
+    let lines = lines_of(&mut a, vec![settings_item(off)]);
+    let Detail::Settings(s) = &lines[0].detail else {
+        panic!()
+    };
+    let c = &s.changes[0];
+    assert_eq!(c.field, "Smallest bitcoin sale");
+    assert_eq!(c.new, "0 sats");
+    assert_eq!(c.direction, Change::Loosening);
+    assert_eq!(s.overall, Some(Change::Loosening));
+}
+
+#[test]
 fn as_27_a_change_that_only_tightens_can_be_approved() {
     let mut a = approver_with_key2();
     cosign_settings(&mut a, 200, 2, &[1], &Store::default());

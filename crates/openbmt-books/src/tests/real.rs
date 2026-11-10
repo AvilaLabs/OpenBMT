@@ -157,6 +157,8 @@ impl Run {
     fn new() -> Self {
         let mut settings = Settings::defaults(1_000);
         settings.customer_wifi = false;
+        // No floor, so small sales open (CR-75).
+        settings.min_sale_sats = 0;
         settings.devices.insert(id(3).device_id());
         settings.counters.insert(id(3).device_id(), 10_000);
         let pairing = Pairing {

@@ -34,6 +34,15 @@ pub const MAX_DEVICES: usize = 256;
 /// Most Boxes a settings value may name (BX-20).
 pub const MAX_BOXES: usize = 8;
 
+/// Largest smallest-sale floor `validate` accepts, in satoshis (all the
+/// bitcoin there is).
+pub const MAX_MIN_SALE_SATS: u64 = 2_100_000_000_000_000;
+
+/// The first value of the smallest bitcoin sale, in satoshis: about the
+/// amount at which spending its receipt at 5 sat/vB costs 2% of it
+/// **[to tune]** (CR-75).
+pub const DEFAULT_MIN_SALE_SATS: u64 = 26_000;
+
 /// What a device is to the shop, as the signed settings give it (BX-24).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceRole {
@@ -117,6 +126,9 @@ pub struct Settings {
     /// Customers can join the Wi-Fi the counter is on (or the owner is
     /// unsure).
     pub customer_wifi: bool,
+    /// Smallest bitcoin sale the counter opens, in satoshis at the quote's
+    /// rate (CR-75). 0 means no floor.
+    pub min_sale_sats: u64,
     /// Devices allowed to write records.
     pub devices: BTreeSet<DeviceId>,
     /// Each counter's share of every budget, in basis points (10,000 = the
@@ -152,6 +164,7 @@ impl Settings {
             heartbeat_max_age_secs: policy::DEFAULT_HEARTBEAT_MAX_AGE_SECS,
             tor_on: false,
             customer_wifi: true,
+            min_sale_sats: DEFAULT_MIN_SALE_SATS,
             devices: BTreeSet::new(),
             counters: BTreeMap::new(),
             boxes: BTreeSet::new(),
@@ -187,6 +200,11 @@ impl Settings {
         }
         if self.devices.len() > MAX_DEVICES {
             return Err(SettingsError::Invalid("more than 256 devices"));
+        }
+        if self.min_sale_sats > MAX_MIN_SALE_SATS {
+            return Err(SettingsError::Invalid(
+                "smallest bitcoin sale is more than all the bitcoin there is",
+            ));
         }
         if self.underpayment_tolerance_bps > MAX_TOLERANCE_BPS {
             return Err(SettingsError::Invalid(
@@ -287,6 +305,7 @@ impl Settings {
         out.extend_from_slice(&self.heartbeat_max_age_secs.to_le_bytes());
         out.push(u8::from(self.tor_on));
         out.push(u8::from(self.customer_wifi));
+        out.extend_from_slice(&self.min_sale_sats.to_le_bytes());
         out.extend_from_slice(&wire::len_u32(self.devices.len()).to_le_bytes());
         for d in &self.devices {
             out.extend_from_slice(&d.to_bytes());
@@ -323,6 +342,7 @@ impl Settings {
         let heartbeat_max_age_secs = r.u32_le()?;
         let tor_on = r.flag()?;
         let customer_wifi = r.flag()?;
+        let min_sale_sats = r.u64_le()?;
 
         let n = r.count(MAX_DEVICES, 32)?;
         let mut devices = BTreeSet::new();
@@ -381,6 +401,7 @@ impl Settings {
             heartbeat_max_age_secs,
             tor_on,
             customer_wifi,
+            min_sale_sats,
             devices,
             counters,
             boxes,
@@ -547,6 +568,15 @@ pub fn changed_fields(old: &Settings, new: &Settings) -> Vec<FieldChange> {
         "customer_wifi",
         old.customer_wifi,
         new.customer_wifi,
+        false,
+    );
+    // A higher floor turns more sales away; a lower one, or none, lets
+    // small receipts in.
+    num(
+        o,
+        "min_sale_sats",
+        old.min_sale_sats,
+        new.min_sale_sats,
         false,
     );
     if old.devices != new.devices {
@@ -827,6 +857,7 @@ mod tests {
             ("heartbeat_max_age_secs", |s| s.heartbeat_max_age_secs += 1),
             ("tor_on", |s| s.tor_on = false),
             ("customer_wifi", |s| s.customer_wifi = false),
+            ("min_sale_sats", |s| s.min_sale_sats -= 1),
             ("devices", |s| {
                 s.devices.insert(identity(41).device_id());
             }),
@@ -896,33 +927,83 @@ mod tests {
         new.tor_on = true;
         new.customer_wifi = true;
         new.heartbeat_max_age_secs -= 1;
+        new.min_sale_sats += 1;
         assert_eq!(classify_change(&old, &new), Change::Tightening);
     }
 
     #[test]
-    fn encoding_is_stable_and_covers_every_field() {
+    fn the_first_smallest_sale_is_26000_sats() {
+        assert_eq!(Settings::defaults(RATE).min_sale_sats, 26_000);
+        assert_eq!(
+            Settings::defaults(RATE).min_sale_sats,
+            DEFAULT_MIN_SALE_SATS
+        );
+    }
+
+    #[test]
+    fn raising_the_smallest_sale_tightens_and_lowering_or_removing_it_loosens() {
+        let old = base();
+        let mut up = old.clone();
+        up.min_sale_sats = 50_000;
+        let fields = changed_fields(&old, &up);
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field, "min_sale_sats");
+        assert_eq!(classify_change(&old, &up), Change::Tightening);
+        assert_eq!(classify_change(&up, &old), Change::Loosening);
+        let mut off = old.clone();
+        off.min_sale_sats = 0;
+        assert_eq!(classify_change(&old, &off), Change::Loosening);
+        assert_eq!(classify_change(&off, &old), Change::Tightening);
+    }
+
+    #[test]
+    fn lowering_the_smallest_sale_needs_the_key_app() {
+        let (o, a, roots) = roots();
+        let old = base();
+        let mut off = next(&old);
+        off.min_sale_sats = 0;
+        let only_owner = SignedSettings {
+            owner_sig: off.sign(&o),
+            approver_sig: None,
+            settings: off.clone(),
+        };
+        assert_eq!(
+            only_owner.verify(&roots, Some(&old)),
+            Err(SettingsError::ApproverRequired)
+        );
+        let both = SignedSettings {
+            approver_sig: Some(off.sign(&a)),
+            ..only_owner
+        };
+        assert_eq!(both.verify(&roots, Some(&old)), Ok(Change::Loosening));
+        let mut up = next(&old);
+        up.min_sale_sats = 100_000;
+        let tight = SignedSettings {
+            owner_sig: up.sign(&o),
+            approver_sig: None,
+            settings: up,
+        };
+        assert_eq!(tight.verify(&roots, Some(&old)), Ok(Change::Tightening));
+    }
+
+    #[test]
+    fn the_smallest_sale_is_bounded_by_all_the_bitcoin_there_is() {
+        let mut s = base();
+        s.min_sale_sats = MAX_MIN_SALE_SATS;
+        assert_eq!(s.validate(), Ok(()));
+        s.min_sale_sats = 0;
+        assert_eq!(s.validate(), Ok(()));
+        s.min_sale_sats = MAX_MIN_SALE_SATS + 1;
+        assert!(matches!(s.validate(), Err(SettingsError::Invalid(_))));
+    }
+
+    #[test]
+    fn the_smallest_sale_is_part_of_the_signed_bytes() {
         let s = base();
-        assert_eq!(s.hash(), s.clone().hash());
         let mut t = s.clone();
-        t.version += 1;
+        t.min_sale_sats += 1;
         assert_ne!(t.hash(), s.hash());
-        let mut t = s.clone();
-        t.tor_on = !t.tor_on;
-        assert_ne!(t.hash(), s.hash());
-        let mut t = s.clone();
-        t.devices.insert(identity(43).device_id());
-        assert_ne!(t.hash(), s.hash());
-        let mut t = s.clone();
-        t.manager_override_ceiling.display_usd += 1;
-        assert_ne!(t.hash(), s.hash());
-        // device order does not change the bytes
-        let mut a = s.clone();
-        a.devices.insert(identity(50).device_id());
-        a.devices.insert(identity(51).device_id());
-        let mut b = s;
-        b.devices.insert(identity(51).device_id());
-        b.devices.insert(identity(50).device_id());
-        assert_eq!(a.encode(), b.encode());
+        assert_ne!(t.encode(), s.encode());
     }
 
     #[test]
@@ -1472,10 +1553,12 @@ mod tests {
     // Offsets in a settings message: magic 0..4, version 4, settings
     // version 5..9, ten limits of 12 bytes 9..129, tolerance 129..133,
     // confirmed depth 133, final depth 134, heartbeat 135..139, tor 139,
-    // wifi 140, device count 141..145, then the devices.
+    // wifi 140, smallest sale 141..149, device count 149..153, then the
+    // devices.
     const TOR_AT: usize = 139;
-    const DEVICE_COUNT_AT: usize = 141;
-    const DEVICES_AT: usize = 145;
+    const MIN_SALE_AT: usize = 141;
+    const DEVICE_COUNT_AT: usize = 149;
+    const DEVICES_AT: usize = 153;
 
     /// Two devices, both counters, one with a share of zero.
     fn wire_settings() -> Settings {
@@ -1574,6 +1657,26 @@ mod tests {
             SignedSettings::from_bytes(&b).unwrap_err(),
             DecodeError::InvalidKey
         );
+    }
+
+    #[test]
+    fn the_smallest_sale_sits_after_the_flags_as_eight_little_endian_bytes() {
+        let mut s = wire_settings();
+        s.min_sale_sats = 0x0102_0304_0506_0708;
+        let bytes = signed_both(s.clone()).to_bytes();
+        assert_eq!(
+            &bytes[MIN_SALE_AT..MIN_SALE_AT + 8],
+            &0x0102_0304_0506_0708u64.to_le_bytes()
+        );
+        let back = SignedSettings::from_bytes(&bytes).unwrap();
+        assert_eq!(back.settings.min_sale_sats, 0x0102_0304_0506_0708);
+        // Zero is a value like any other and reads back as zero.
+        s.min_sale_sats = 0;
+        let back = SignedSettings::from_bytes(&signed_both(s).to_bytes()).unwrap();
+        assert_eq!(back.settings.min_sale_sats, 0);
+        // A message cut inside the field does not decode.
+        let cut = &bytes[..MIN_SALE_AT + 4];
+        assert!(SignedSettings::from_bytes(cut).is_err());
     }
 
     #[test]

@@ -180,6 +180,10 @@ pub(crate) fn varint_len(n: u64) -> u64 {
     }
 }
 
+/// Bytes of one input outside its witness: the outpoint, an empty script
+/// and the sequence.
+pub(crate) const INPUT_BASE_BYTES: u64 = 36 + 1 + 4;
+
 /// Bytes of the witness of one input once signed: item count, an empty
 /// item, two signatures of the longest size, the witness script, each item
 /// with its length byte.
@@ -194,7 +198,7 @@ pub(crate) fn shape_weight(inputs: u64, script_lens: &[usize]) -> Option<u64> {
         .checked_add(varint_len(inputs))?
         .checked_add(varint_len(outputs))?
         .checked_add(4)?;
-    base = base.checked_add(inputs.checked_mul(41)?)?;
+    base = base.checked_add(inputs.checked_mul(INPUT_BASE_BYTES)?)?;
     for len in script_lens {
         let len = u64::try_from(*len).ok()?;
         base = base

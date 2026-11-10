@@ -369,3 +369,155 @@ fn cr_09_no_sale_opens_while_a_rescan_is_pending() {
     assert!(err.to_string().starts_with("CR-09: "));
     assert_eq!(w.m.writes, 0);
 }
+
+// CR-75.
+
+/// A world whose smallest bitcoin sale is `min_sats`.
+fn with_floor(min_sats: u64) -> World {
+    let mut w = World::new();
+    let mut s = settings();
+    s.min_sale_sats = min_sats;
+    w.c.set_settings(s);
+    w
+}
+
+fn open_cents(w: &mut World, cents: u64) -> Result<crate::Opened, OpenRefused<&'static str>> {
+    let facts = w.open_facts();
+    w.c.open(
+        Amount(cents),
+        usd(),
+        rate(),
+        &fresh(facts.now),
+        facts,
+        &mut w.m,
+    )
+}
+
+#[test]
+fn cr_75_a_sale_just_below_the_floor_is_refused_and_one_at_it_opens() {
+    // 1,000 sats a dollar: a cent is 10 sats, so the closest amounts are
+    // 10 sats apart.
+    let mut w = with_floor(26_000);
+    let err = open_cents(&mut w, 2_599).unwrap_err();
+    assert_eq!(
+        err,
+        OpenRefused::BelowMinimum {
+            sats: 25_990,
+            min_sats: 26_000
+        }
+    );
+    assert_eq!(err.rule(), "CR-75");
+    let text = err.to_string();
+    assert!(text.starts_with("CR-75: "), "{text}");
+    assert!(text.contains("another payment type"), "{text}");
+    assert!(open_cents(&mut w, 2_600).is_ok());
+    // A floor that is not a multiple of 10: one sat below it is refused.
+    let mut w = with_floor(26_001);
+    assert!(open_cents(&mut w, 2_600).is_err());
+    assert!(open_cents(&mut w, 2_601).is_ok());
+}
+
+#[test]
+fn cr_75_a_floor_of_zero_takes_every_sale_above_dust() {
+    let mut w = with_floor(0);
+    assert!(open_cents(&mut w, 100).is_ok());
+    assert_eq!(w.c.refused_below_minimum(), 0);
+}
+
+#[test]
+fn cr_75_the_first_settings_hold_a_floor_of_26000() {
+    assert_eq!(
+        openbmt_core::settings::Settings::defaults(1_000).min_sale_sats,
+        26_000
+    );
+}
+
+#[test]
+fn cr_75_a_refused_sale_writes_nothing_and_hands_out_no_address() {
+    let mut w = with_floor(26_000);
+    w.m.reset();
+    let before_desk = w.m.slots.get(&Slot::Desk).cloned();
+    let err = open_cents(&mut w, 500).unwrap_err();
+    assert!(matches!(err, OpenRefused::BelowMinimum { .. }));
+    assert_eq!(w.m.writes, 0, "{:?}", w.m.log);
+    assert!(w.m.records.is_empty());
+    assert_eq!(w.m.slots.get(&Slot::Desk).cloned(), before_desk);
+    assert!(w.c.sale(0).is_none());
+    // The address that would have gone to the refused sale goes to the next.
+    let o = open_cents(&mut w, 2_600).unwrap();
+    assert_eq!(o.index, 0);
+}
+
+#[test]
+fn cr_75_a_sale_below_the_dust_line_is_refused_as_dust_not_as_below_the_floor() {
+    let mut w = with_floor(26_000);
+    let err = open_cents(&mut w, 40).unwrap_err();
+    assert_eq!(err, OpenRefused::BelowDust { needs_sats: 400 });
+    assert_eq!(w.c.refused_below_minimum(), 0);
+}
+
+#[test]
+fn cr_75_the_counter_counts_the_sales_it_refused_for_the_floor() {
+    let mut w = with_floor(26_000);
+    assert_eq!(w.c.refused_below_minimum(), 0);
+    open_cents(&mut w, 500).unwrap_err();
+    open_cents(&mut w, 1_000).unwrap_err();
+    open_cents(&mut w, 2_600).unwrap();
+    assert_eq!(w.c.refused_below_minimum(), 2);
+    // The count is in memory only: a restart begins again at 0.
+    w.restart();
+    assert_eq!(w.c.refused_below_minimum(), 0);
+}
+
+#[test]
+fn cr_75_the_floor_is_read_at_the_quotes_rate() {
+    let mut w = with_floor(26_000);
+    // $26 at $100,000 a bitcoin is 26,000 sats; at $200,000 it is 13,000.
+    let facts = w.open_facts();
+    let err =
+        w.c.open(
+            Amount(2_600),
+            usd(),
+            crate::Rate::new(20_000_000).unwrap(),
+            &fresh(facts.now),
+            facts,
+            &mut w.m,
+        )
+        .unwrap_err();
+    assert_eq!(
+        err,
+        OpenRefused::BelowMinimum {
+            sats: 13_000,
+            min_sats: 26_000
+        }
+    );
+}
+
+#[test]
+fn cr_75_a_requote_that_would_go_below_the_floor_is_refused_and_changes_nothing() {
+    let mut w = with_floor(26_000);
+    let o = open_cents(&mut w, 3_000).unwrap();
+    w.m.reset();
+    let err = w.requote(o.index, 20_000_000).unwrap_err();
+    assert_eq!(
+        err,
+        RequoteRefused::BelowMinimum {
+            sats: 15_000,
+            min_sats: 26_000
+        }
+    );
+    assert_eq!(err.rule(), "CR-75");
+    assert_eq!(w.m.writes, 0, "{:?}", w.m.log);
+    assert_eq!(w.c.sale(o.index).unwrap().quotes().len(), 1);
+    // A requote that stays at or above the floor is taken.
+    assert!(w.requote(o.index, 10_000_000).is_ok());
+}
+
+#[test]
+fn cr_75_a_sale_paid_in_part_is_not_held_to_the_floor_again() {
+    let mut w = with_floor(26_000);
+    let o = open_cents(&mut w, 3_000).unwrap();
+    let tx = w.pay(&o, 1_000);
+    w.see(&tx, 1);
+    assert!(w.requote(o.index, 20_000_000).is_ok());
+}

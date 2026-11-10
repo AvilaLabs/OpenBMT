@@ -5,7 +5,7 @@ mod common;
 use bitcoin::absolute::LockTime;
 use bitcoin::transaction::Version;
 use common::*;
-use openbmt_spend::{combine, finalize_plan, plan, PlanError};
+use openbmt_spend::{combine, finalize_plan, plan, receipt_spend_cost_sats, PlanError};
 
 #[test]
 fn sp_30_the_weight_is_the_known_shape() {
@@ -289,4 +289,18 @@ fn sp_37_a_lock_time_that_is_a_time_is_refused() {
         assert_eq!(e, PlanError::LockTimeNotHeight { lock_height: h });
         assert!(e.to_string().starts_with("SP-37"));
     }
+}
+
+#[test]
+fn sp_30_one_receipt_costs_its_input_size_at_the_rate() {
+    // One input weighs 418 units (above), 104.5 vB, counted as 105 vB.
+    assert_eq!(receipt_spend_cost_sats(1_000), 105);
+    assert_eq!(receipt_spend_cost_sats(5_000), 525);
+    assert_eq!(receipt_spend_cost_sats(25_000), 2_625);
+    assert_eq!(receipt_spend_cost_sats(100_000), 10_500);
+    // A fraction of a sat is rounded up; no rate costs nothing but zero.
+    assert_eq!(receipt_spend_cost_sats(1), 1);
+    assert_eq!(receipt_spend_cost_sats(0), 0);
+    // The largest rate does not overflow.
+    assert!(receipt_spend_cost_sats(u64::MAX) > 0);
 }
