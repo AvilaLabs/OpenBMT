@@ -10,8 +10,11 @@
 //! The Box is also a reader of its own mailbox. A courier over the relay in
 //! this process ([`LocalPost`], no socket) fetches what is for the Box and
 //! opens it with the roles of BX-24. A message of kind Settings goes to
-//! [`BoxCore::take_settings`]; any other kind is noted as not handled yet and
-//! dropped.
+//! [`BoxCore::take_settings`]; a paid notice goes to the POS side
+//! ([`BoxPos`], BX-40); any other kind is noted as not handled yet and
+//! dropped. The same worker runs the POS timer and sends what the POS side
+//! found to the owner as POS notices (BX-42). A Box that is not paired or is
+//! turned off runs none of that (BX-03, BX-23).
 //!
 //! The lock order is the relay's, then the core's: the welcome hook runs
 //! inside the relay's lock and takes the core's. Nothing here takes the
@@ -41,6 +44,7 @@ use openbmt_net_io::env::{DirLock, LockError};
 use openbmt_net_io::Clock;
 
 use crate::files::DirFiles;
+use crate::pos::{BoxPos, PosSetup, PosState};
 use crate::state::{BoxCore, BoxError, BoxStatus};
 
 /// The relay's own files (mailboxes, member list) are in this directory of
@@ -99,6 +103,29 @@ fn link_role(role: DeviceRole) -> Role {
 type Relays = Arc<Mutex<Relay<DirStore>>>;
 type Core = Arc<Mutex<BoxCore<DirFiles>>>;
 type Notes = Arc<Mutex<VecDeque<String>>>;
+type View = Arc<Mutex<PosView>>;
+
+/// What the console's `pos` command shows (BX-41): the POS side as the
+/// worker last saw it. It never holds the token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PosView {
+    /// This build has no connector: the Box does not read a POS.
+    NotInstalled,
+    /// The POS side could not be opened, and why. The relay runs on.
+    Disabled(String),
+    /// The POS side as of its last step.
+    State(Box<PosState>),
+}
+
+impl fmt::Display for PosView {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotInstalled => write!(f, "no POS connector is installed in this program"),
+            Self::Disabled(why) => write!(f, "the POS side is off: {why}"),
+            Self::State(state) => write!(f, "{state}"),
+        }
+    }
+}
 
 fn note(notes: &Notes, line: String) {
     let mut n = lock(notes);
@@ -233,6 +260,9 @@ struct Worker {
     notes: Notes,
     dir: PathBuf,
     courier: Option<Courier<LocalPost>>,
+    pos: Option<BoxPos<DirFiles>>,
+    view: View,
+    send_error: Option<String>,
 }
 
 impl Worker {
@@ -274,6 +304,7 @@ impl Worker {
         };
         if !working {
             self.courier = None;
+            self.pos_stop();
             return;
         }
         if self.courier.is_none() {
@@ -314,11 +345,81 @@ impl Worker {
             note(&self.notes, line);
         }
         let mut changed = false;
+        let mut paid_notices = Vec::new();
         for r in received {
-            changed |= self.handle(r);
+            if r.kind == Kind::PaidNotice {
+                paid_notices.push((r.from, r.content));
+            } else {
+                changed |= self.handle(r);
+            }
         }
         if changed {
             sync_relay(&self.core, &self.relay, &*self.clock, &self.notes);
+        }
+        self.pos_step(paid_notices);
+    }
+
+    /// The Box is unpaired or turned off: the POS side stops (BX-03, BX-23).
+    fn pos_stop(&mut self) {
+        if let Some(pos) = self.pos.as_mut() {
+            pos.stop();
+            *lock(&self.view) = PosView::State(Box::new(pos.state()));
+        }
+    }
+
+    /// BX-40 to BX-43: hand the paid notices to the POS side, run its timer,
+    /// and send the owner what it found.
+    fn pos_step(&mut self, notices: Vec<(DeviceId, Vec<u8>)>) {
+        let Some(pos) = self.pos.as_mut() else {
+            if !notices.is_empty() {
+                note(
+                    &self.notes,
+                    format!(
+                        "{} paid notices arrived and this Box has no POS: dropped",
+                        notices.len()
+                    ),
+                );
+            }
+            return;
+        };
+        let now = self.clock.now();
+        let (roles, token, owner) = {
+            let core = lock(&self.core);
+            (
+                core.roles(),
+                core.read_pos_token().map_err(|e| e.to_string()),
+                core.roots().map(|r| r.owner),
+            )
+        };
+        let mut lines = Vec::new();
+        if !notices.is_empty() {
+            lines.extend(pos.take_notices(&notices, &roles, now));
+        }
+        lines.extend(pos.tick(now, token));
+        if let (Some(owner), Some(courier)) = (owner, self.courier.as_mut()) {
+            for report in pos.pending_reports() {
+                match courier.send(&owner, Kind::PosNotice, &report.to_bytes()) {
+                    Ok(()) => {
+                        self.send_error = None;
+                        if let Err(e) = pos.reports_sent(report.number) {
+                            lines.push(format!("BX-50: the reports were not stored: {e}"));
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        let line = format!("a POS notice could not be sent to the owner: {e}");
+                        if self.send_error.as_deref() != Some(line.as_str()) {
+                            self.send_error = Some(line.clone());
+                            lines.push(line);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        *lock(&self.view) = PosView::State(Box::new(pos.state()));
+        for line in lines {
+            note(&self.notes, line);
         }
     }
 
@@ -363,6 +464,7 @@ pub struct BoxRunner {
     relay: Relays,
     clock: Arc<dyn Clock + Send + Sync>,
     notes: Notes,
+    view: View,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
     server: Option<Server>,
@@ -379,6 +481,19 @@ impl BoxRunner {
         bind: SocketAddr,
         clock: Arc<dyn Clock + Send + Sync>,
         cfg: ServerConfig,
+    ) -> Result<Self, StartFailure> {
+        Self::start_with(dir, bind, clock, cfg, None)
+    }
+
+    /// [`BoxRunner::start`] with a POS connector (BX-40 to BX-43). With
+    /// `None` the Box takes no part in the POS. A POS side whose files do
+    /// not read back is left off and noted; the relay runs on.
+    pub fn start_with(
+        dir: impl Into<PathBuf>,
+        bind: SocketAddr,
+        clock: Arc<dyn Clock + Send + Sync>,
+        cfg: ServerConfig,
+        pos: Option<PosSetup>,
     ) -> Result<Self, StartFailure> {
         let dir: PathBuf = dir.into();
         let dir_lock = DirLock::acquire(&dir).map_err(StartFailure::Lock)?;
@@ -423,6 +538,23 @@ impl BoxRunner {
         }
         sync_relay(&core, &relay, &*clock, &notes);
 
+        let (pos_side, view) = match pos {
+            None => (None, PosView::NotInstalled),
+            Some(setup) => {
+                let identity = lock(&core).identity().map_err(StartFailure::State)?;
+                match BoxPos::open(DirFiles::new(&dir), identity, setup) {
+                    Ok(p) => {
+                        let state = PosView::State(Box::new(p.state()));
+                        (Some(p), state)
+                    }
+                    Err(e) => {
+                        note(&notes, format!("the POS side is off: {e}"));
+                        (None, PosView::Disabled(e.to_string()))
+                    }
+                }
+            }
+        };
+        let view: View = Arc::new(Mutex::new(view));
         let mut worker = Worker {
             core: Arc::clone(&core),
             relay: Arc::clone(&relay),
@@ -430,6 +562,9 @@ impl BoxRunner {
             notes: Arc::clone(&notes),
             dir: dir.clone(),
             courier: None,
+            pos: pos_side,
+            view: Arc::clone(&view),
+            send_error: None,
         };
         // A paired Box whose number files are gone stops here (LK-40).
         let paired = matches!(lock(&core).status(clock.now()), BoxStatus::Paired);
@@ -459,6 +594,7 @@ impl BoxRunner {
             relay,
             clock,
             notes,
+            view,
             stop,
             worker: Some(handle),
             server: Some(server),
@@ -497,6 +633,17 @@ impl BoxRunner {
         lock(&self.core).enter_invitation(text, now, nonce)?;
         sync_relay(&self.core, &self.relay, &*self.clock, &self.notes);
         Ok(())
+    }
+
+    /// Store the POS token the merchant typed (BX-41). Only a paired Box that
+    /// the settings list takes one.
+    pub fn store_pos_token(&self, token: &str) -> Result<(), BoxError> {
+        lock(&self.core).store_pos_token(token)
+    }
+
+    /// The POS side as the worker last saw it, without the token (BX-41).
+    pub fn pos_view(&self) -> PosView {
+        lock(&self.view).clone()
     }
 
     /// The notes the Box kept, oldest first.

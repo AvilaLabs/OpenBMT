@@ -9,8 +9,12 @@
 //! named by `--invitation-file`, which is then deleted, or typed on standard
 //! input as `invite <text>`. Other commands on standard input: `state`
 //! (unpaired, invitation open, paired or turned off), `members`, `notes` and
-//! `quit`. The program runs until the end of standard input, `quit` or
-//! SIGTERM. There is no POS code here yet.
+//! `quit`. For the POS (BX-41): `pos-token` reads the POS sign-in from the
+//! next line of standard input and stores it, and `pos` prints the state of
+//! the POS side, never the token. The program runs until the end of standard
+//! input, `quit` or SIGTERM. It holds no vendor's connector, so on its own it
+//! takes the counters' notices no further than the Box's files: a connector
+//! is added by the program that links the library.
 
 use std::io::{self, BufRead, Write};
 use std::net::SocketAddr;
@@ -76,7 +80,8 @@ fn main() -> ExitCode {
         }
     }
     say(&format!("state: {}", runner.status().text()));
-    for line in io::stdin().lock().lines() {
+    let mut lines = io::stdin().lock().lines();
+    while let Some(line) = lines.next() {
         let Ok(line) = line else { break };
         let line = line.trim();
         let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
@@ -86,6 +91,18 @@ fn main() -> ExitCode {
                 Err(e) => say(&format!("invitation refused: {e}")),
             },
             "state" => say(&format!("state: {}", runner.status().text())),
+            "pos-token" => match lines.next() {
+                Some(Ok(token)) => match runner.store_pos_token(&token) {
+                    Ok(()) => say("pos token: stored"),
+                    Err(e) => say(&format!("pos token refused: {e}")),
+                },
+                _ => say("pos token refused: no line followed the command"),
+            },
+            "pos" => {
+                for line in runner.pos_view().to_string().lines() {
+                    say(&format!("pos: {line}"));
+                }
+            }
             "members" => {
                 let members = runner.members();
                 say(&format!("members: {}", members.len()));

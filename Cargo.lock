@@ -357,9 +357,11 @@ name = "openbmt-box"
 version = "0.1.0"
 dependencies = [
  "openbmt-core",
+ "openbmt-counter",
  "openbmt-courier",
  "openbmt-link",
  "openbmt-net-io",
+ "openbmt-pos",
 ]
 
 [[package]]

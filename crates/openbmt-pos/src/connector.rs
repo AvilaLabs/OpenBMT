@@ -186,6 +186,15 @@ pub trait Connector: PosReader + Send {
         false
     }
 
+    /// The open order the POS holds for this sale, if there is exactly one:
+    /// the one whose note carries the sale's reference (PS-21), at a
+    /// location the sale's counter serves, for the sale's amount and
+    /// currency. A connector that cannot say answers `None`. The Box closes
+    /// nothing it cannot name an order for.
+    fn find_order(&mut self, _sale: &SaleFact) -> Result<Option<OrderId>, PosError> {
+        Ok(None)
+    }
+
     /// Close an order (PS-81). A retry with the same key does not close it
     /// twice.
     fn close(&mut self, _request: &CloseRequest) -> Result<CloseOutcome, PosError> {

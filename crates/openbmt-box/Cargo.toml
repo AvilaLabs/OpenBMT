@@ -12,6 +12,9 @@ openbmt-core = { path = "../openbmt-core" }
 openbmt-link = { path = "../openbmt-link" }
 openbmt-courier = { path = "../openbmt-courier" }
 openbmt-net-io = { path = "../openbmt-net-io" }
+openbmt-pos = { path = "../openbmt-pos" }
+# For the shop's money (an amount and a currency) in what the Box stores.
+openbmt-counter = { path = "../openbmt-counter" }
 
 [[bin]]
 name = "openbmt-box"
