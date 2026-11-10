@@ -28,6 +28,12 @@ pub const TAG_RECORD: &str = "OpenBMT/record/v1";
 pub const TAG_SETTINGS: &str = "OpenBMT/settings/v1";
 /// Tag for device pairing.
 pub const TAG_PAIRING: &str = "OpenBMT/pairing/v1";
+/// Tag for the offer binding a counter checks against its roots and wallet.
+pub const TAG_PAIR_OFFER: &str = "OpenBMT/pair-offer/v1";
+/// Tag for the counter's signed pairing request.
+pub const TAG_PAIR_REQUEST: &str = "OpenBMT/pair-request/v1";
+/// Tag for the digest behind the session words.
+pub const TAG_PAIR_SESSION: &str = "OpenBMT/pair-session/v1";
 /// Tag for the on-screen identity fingerprint words.
 pub const TAG_FINGERPRINT: &str = "OpenBMT/fingerprint/v1";
 

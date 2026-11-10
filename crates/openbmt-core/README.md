@@ -61,6 +61,16 @@ batch, record or setting is.
   cancel, and the fee-bump-or-cancel test. A replacement is a fee bump only if
   the original paid our script something and the replacement pays our script
   at least as much in total; anything else is a cancel.
+- **Pairing** (`pairing`). How a counter pins the two roots. The Key app
+  shows an offer (both roots and the wallet checksum); the counter fixes
+  them, then makes a fresh number and signs a request that carries a hash of
+  the offer. The Key app compares that hash in full. Both screens show four
+  words made from the roots, wallet, counter key and number. The Key app
+  signs the pairing entry, the owner phone adds its signature (it never signs
+  first), and the counter accepts only if both signatures check against the
+  roots it fixed and the entry names its own key, name and number. The
+  counter's side is used once and expires after 600 seconds. A name is 1 to
+  32 characters, at most 128 bytes, with no control characters.
 
 - **Wire encodings** (`wire`). Signed batches, records and signed settings
   have one byte form each, and so do the four state snapshots below. Every
@@ -68,7 +78,8 @@ batch, record or setting is.
   payload: `OBMB` signed batch, `OBMR` record, `OBMS` signed settings, `OBMH`
   high-water mark, `OBMC` counter batches, `OBME` exposure, `OBMP` pause
   tracker, `OBMK` the Key app's signer state (written by `openbmt-signer`,
-  which uses the public `Reader` and `start` helpers). The payload of a
+  which uses the public `Reader` and `start` helpers), `OBMO` pair offer,
+  `OBMJ` pair request, `OBMD` signed pairing. The payload of a
   signed batch, record or signed settings starts with the exact bytes that
   are hashed and signed, followed by the signatures.
   Decoding is strict: wrong magic, an unknown version, missing or trailing

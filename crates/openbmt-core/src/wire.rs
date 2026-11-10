@@ -12,7 +12,8 @@
 //! magics are `OBMB` (signed batch), `OBMR` (record), `OBMS` (signed
 //! settings), `OBMH` (high-water mark), `OBMC` (counter batches), `OBME`
 //! (exposure), `OBMP` (pause tracker) and `OBMK` (the Key app's signer
-//! state, written by the `openbmt-signer` crate).
+//! state, written by the `openbmt-signer` crate), `OBMO` (pair offer), `OBMJ`
+//! (pair request) and `OBMD` (signed pairing).
 //!
 //! [`Reader`], [`start`], [`put_opt_u64`] and [`len_u32`] are public so that
 //! other crates in the workspace write their snapshots the same way.
@@ -52,6 +53,13 @@ pub const MAGIC_EXPOSURE: [u8; 4] = *b"OBME";
 pub const MAGIC_PAUSE_TRACKER: [u8; 4] = *b"OBMP";
 /// Magic of the Key app's signer state snapshot (the `openbmt-signer` crate).
 pub const MAGIC_SIGNER_STATE: [u8; 4] = *b"OBMK";
+
+/// Magic of a [`PairOffer`](crate::pairing::PairOffer).
+pub const MAGIC_PAIR_OFFER: [u8; 4] = *b"OBMO";
+/// Magic of a [`PairRequest`](crate::pairing::PairRequest).
+pub const MAGIC_PAIR_REQUEST: [u8; 4] = *b"OBMJ";
+/// Magic of a [`SignedPairing`](crate::pairing::SignedPairing).
+pub const MAGIC_SIGNED_PAIRING: [u8; 4] = *b"OBMD";
 
 /// Why bytes were not accepted as a message.
 #[derive(Debug, Clone, PartialEq, Eq)]

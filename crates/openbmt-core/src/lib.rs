@@ -10,6 +10,7 @@
 pub mod batch;
 mod hashing;
 pub mod identity;
+pub mod pairing;
 pub mod policy;
 pub mod records;
 pub mod settings;
