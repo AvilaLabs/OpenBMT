@@ -29,6 +29,7 @@ mod common;
 mod finalize;
 mod plan;
 mod psbt;
+pub mod say;
 
 pub use coin::{Coin, CoinError};
 pub use combine::{combine, CombineError, Source};
