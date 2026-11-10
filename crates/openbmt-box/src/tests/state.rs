@@ -132,21 +132,28 @@ fn bx_10_a_bad_invitation_is_refused_before_anything_is_stored() {
 }
 
 #[test]
-fn bx_11_an_invitation_is_spent_by_the_first_welcome_it_is_given() {
+fn bx_11_an_invitation_is_spent_once_a_welcome_with_the_right_mac_arrives() {
     let mut core = fresh_core();
     let inv = invitation(5);
     enter(&mut core, &inv, 0x31);
     let claim = core.claim(NOW).unwrap();
-    // A welcome that fails (nothing in it is right) still spends it.
+    // A welcome that fails its MAC changes nothing.
     assert!(core.take_welcome(&[1, 2, 3], &[4], NOW).is_err());
-    assert_eq!(core.claim(NOW), None);
-    assert_eq!(core.status(NOW), BoxStatus::Unpaired);
+    assert_eq!(core.claim(NOW), Some(claim.clone()));
+    assert_eq!(core.status(NOW), BoxStatus::InvitationOpen);
+    assert!(core.files().read(INVITATION_FILE).unwrap().is_some());
+    // One with the right MAC and bad settings spends it.
+    let w = welcome_bytes(&inv, &claim);
+    assert!(core.take_welcome(&w, &[4], NOW + 1).is_err());
+    assert_eq!(core.claim(NOW + 1), None);
+    assert_eq!(core.status(NOW + 1), BoxStatus::Unpaired);
     assert!(core.files().read(INVITATION_FILE).unwrap().is_none());
     // The right welcome now meets no invitation.
-    let w = welcome_bytes(&inv, &claim);
     let s = sign_both(settings_with(1, &core.device_id())).to_bytes();
-    assert_eq!(core.take_welcome(&w, &s, NOW), Err(BoxError::NoInvitation));
-    assert_eq!(core.status(NOW), BoxStatus::Unpaired);
+    assert_eq!(
+        core.take_welcome(&w, &s, NOW + 2),
+        Err(BoxError::NoInvitation)
+    );
 }
 
 #[test]
@@ -169,7 +176,7 @@ fn bx_11_an_invitation_is_good_for_one_box() {
     let w = welcome_bytes(&inv, &claim_b);
     let s = sign_both(settings_with(1, &a.device_id())).to_bytes();
     assert_eq!(a.take_welcome(&w, &s, NOW), Err(BoxError::WelcomeMac));
-    assert_eq!(a.status(NOW), BoxStatus::Unpaired);
+    assert_eq!(a.status(NOW), BoxStatus::InvitationOpen);
 }
 
 #[test]
@@ -307,10 +314,16 @@ fn bx_15_a_welcome_after_the_invitation_ran_out_is_refused() {
         Err(BoxError::InvitationExpired)
     );
     assert_eq!(core.status(NOW + INVITE_SECS), BoxStatus::Unpaired);
+    assert!(core.files().read(INVITATION_FILE).unwrap().is_none());
+    // Gone whatever arrives next, including garbage.
+    assert_eq!(
+        core.take_welcome(&[1], &[2], NOW + INVITE_SECS + 1),
+        Err(BoxError::NoInvitation)
+    );
 }
 
 #[test]
-fn bx_15_a_second_welcome_after_a_failed_one_meets_a_spent_invitation() {
+fn bx_15_a_second_welcome_after_a_spending_failure_meets_a_spent_invitation() {
     let mut core = fresh_core();
     let inv = invitation(5);
     enter(&mut core, &inv, 0x31);
@@ -322,15 +335,73 @@ fn bx_15_a_second_welcome_after_a_failed_one_meets_a_spent_invitation() {
     // Second try, with the right settings: the invitation is gone.
     let good = sign_both(settings_with(1, &core.device_id())).to_bytes();
     assert_eq!(
-        core.take_welcome(&w, &good, NOW),
+        core.take_welcome(&w, &good, NOW + 1),
         Err(BoxError::NoInvitation)
     );
-    assert_eq!(core.status(NOW), BoxStatus::Unpaired);
+    assert_eq!(core.status(NOW + 1), BoxStatus::Unpaired);
     // Only a new invitation, entered again, can pair it.
     enter(&mut core, &inv, 0x32);
     let claim = core.claim(NOW).unwrap();
     let w = welcome_bytes(&inv, &claim);
-    assert_eq!(core.take_welcome(&w, &good, NOW), Ok(()));
+    assert_eq!(core.take_welcome(&w, &good, NOW + 2), Ok(()));
+}
+
+#[test]
+fn bx_15_a_thousand_stranger_welcomes_change_nothing_and_the_real_one_pairs() {
+    let mut core = fresh_core();
+    let inv = invitation(5);
+    enter(&mut core, &inv, 0x31);
+    let claim = core.claim(NOW).unwrap();
+    let stored = core.files().read(INVITATION_FILE).unwrap();
+    let good = sign_both(settings_with(1, &core.device_id())).to_bytes();
+    let other = invitation(6);
+    let wrong_mac = welcome_bytes(
+        &other,
+        &Claim::make(&other, core.device_id(), [0x31; 32]).to_bytes(),
+    );
+    // Garbage of every length and well-formed welcomes with a wrong MAC,
+    // one a second so that the rate is not what refuses them.
+    for n in 0..1000u64 {
+        let w: Vec<u8> = if n % 2 == 0 {
+            (0..(n % 130) as usize)
+                .map(|i| (i as u64 * 31 + n) as u8)
+                .collect()
+        } else {
+            wrong_mac.clone()
+        };
+        let err = core.take_welcome(&w, &good, NOW + 1 + n).unwrap_err();
+        assert!(
+            matches!(err, BoxError::BadWelcome(_) | BoxError::WelcomeMac),
+            "{n}: {err}"
+        );
+        assert_eq!(core.claim(NOW + 1 + n), Some(claim.clone()));
+    }
+    assert_eq!(core.files().read(INVITATION_FILE).unwrap(), stored);
+    assert_eq!(core.status(NOW + 1000), BoxStatus::InvitationOpen);
+    // The real welcome still pairs, with the claim the Key app already holds.
+    let w = welcome_bytes(&inv, &claim);
+    assert_eq!(core.take_welcome(&w, &good, NOW + 1001), Ok(()));
+    assert_eq!(core.status(NOW + 1001), BoxStatus::Paired);
+}
+
+#[test]
+fn bx_15_a_welcome_after_the_rate_waits_a_second() {
+    let mut core = fresh_core();
+    let inv = invitation(5);
+    enter(&mut core, &inv, 0x31);
+    let claim = core.claim(NOW).unwrap();
+    let w = welcome_bytes(&inv, &claim);
+    let good = sign_both(settings_with(1, &core.device_id())).to_bytes();
+    assert!(matches!(
+        core.take_welcome(&[0; 5], &good, NOW + 5),
+        Err(BoxError::BadWelcome(_))
+    ));
+    // The same second, and an earlier one: even the real welcome waits.
+    for at in [NOW + 5, NOW + 4] {
+        assert_eq!(core.take_welcome(&w, &good, at), Err(BoxError::WelcomeRate));
+    }
+    assert_eq!(core.claim(NOW + 5), Some(claim));
+    assert_eq!(core.take_welcome(&w, &good, NOW + 6), Ok(()));
 }
 
 #[test]
@@ -344,7 +415,9 @@ fn bx_15_the_welcome_must_be_made_for_this_invitation() {
     let w = welcome_bytes(&other, &claim);
     let s = sign_both(settings_with(1, &core.device_id())).to_bytes();
     assert_eq!(core.take_welcome(&w, &s, NOW), Err(BoxError::WelcomeMac));
-    assert_eq!(core.status(NOW), BoxStatus::Unpaired);
+    // Nothing changed: the invitation is open with its own claim.
+    assert_eq!(core.status(NOW), BoxStatus::InvitationOpen);
+    assert!(core.claim(NOW).is_some());
 }
 
 #[test]
@@ -362,6 +435,8 @@ fn bx_15_settings_signed_by_other_roots_pair_nothing() {
     };
     let err = core.take_welcome(&w, &forged.to_bytes(), NOW).unwrap_err();
     assert!(matches!(err, BoxError::Settings(_)), "{err}");
+    // The MAC checked, so the invitation is spent.
+    assert_eq!(core.claim(NOW), None);
     assert_eq!(core.status(NOW), BoxStatus::Unpaired);
     assert!(core.files().read(ROOTS_FILE).unwrap().is_none());
     assert!(core.files().read(SETTINGS_FILE).unwrap().is_none());
@@ -418,7 +493,8 @@ fn bx_15_garbage_in_place_of_a_welcome_or_settings_is_refused() {
         let mut core = fresh_core();
         enter(&mut core, &invitation(5), 0x31);
         assert!(core.take_welcome(&w, &s, NOW).is_err());
-        assert_eq!(core.status(NOW), BoxStatus::Unpaired);
+        // The MAC did not check: nothing changed.
+        assert_eq!(core.status(NOW), BoxStatus::InvitationOpen);
     }
     // A good welcome with garbage settings.
     let mut core = fresh_core();

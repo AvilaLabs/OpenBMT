@@ -4,7 +4,9 @@ use openbmt_core::identity::{DeviceId, Identity};
 
 use super::kit::*;
 use crate::proto::{Refusal, Request, Response};
-use crate::relay::{sign_challenge, Action, MembersError, Relay, RelayConfig, CHALLENGE_SECS};
+use crate::relay::{
+    sign_challenge, Action, MembersError, Relay, RelayConfig, WelcomeAnswer, CHALLENGE_SECS,
+};
 use crate::seal::{open, seal, Kind, OpenError, Role, MAX_CONTENT_LEN};
 use crate::store::{Event, MailStore, MemoryStore};
 
@@ -802,7 +804,7 @@ fn lk_27_a_welcome_goes_to_the_hook_and_a_yes_sets_the_members() {
     let members = vec![owner().device_id(), counter().device_id()];
     rig.relay.set_welcome_hook(Some(Box::new(move |w, s, now| {
         log.lock().unwrap().push((w.to_vec(), s.to_vec(), now));
-        Some(members.clone())
+        WelcomeAnswer::Welcomed(members.clone())
     })));
     rig.relay.set_claim(Some(vec![1; 101]));
     let answer = rig.ask(Request::Welcome {
@@ -815,24 +817,36 @@ fn lk_27_a_welcome_goes_to_the_hook_and_a_yes_sets_the_members() {
         vec![(vec![3; 5], vec![4; 6], rig.now)]
     );
     assert_eq!(rig.relay.members().count(), 2);
-    // The invitation is spent: the claim is no longer offered.
+    // Taken: the claim is no longer offered.
     assert_eq!(rig.ask(Request::Claim), Response::Refused(Refusal::NoClaim));
 }
 
 #[test]
-fn lk_27_a_refused_welcome_has_one_refusal_and_spends_the_claim() {
+fn lk_27_a_refusal_keeps_the_claim_unless_the_hook_withdraws_it() {
     let mut rig = Rig::new();
-    rig.relay.set_welcome_hook(Some(Box::new(|_, _, _| None)));
     rig.relay.set_claim(Some(vec![1; 101]));
     let before: Vec<DeviceId> = rig.relay.members().copied().collect();
-    let answer = rig.ask(Request::Welcome {
+    let welcome = || Request::Welcome {
         welcome: vec![3; 5],
         settings: vec![4; 6],
-    });
-    assert_eq!(answer, Response::Refused(Refusal::WelcomeRefused));
-    let after: Vec<DeviceId> = rig.relay.members().copied().collect();
-    assert_eq!(before, after);
-    assert_eq!(rig.ask(Request::Claim), Response::Refused(Refusal::NoClaim));
+    };
+    for (answer, claim_stays) in [
+        (WelcomeAnswer::Refused, true),
+        (WelcomeAnswer::Withdrawn, false),
+    ] {
+        rig.relay.set_claim(Some(vec![1; 101]));
+        let a = answer.clone();
+        rig.relay
+            .set_welcome_hook(Some(Box::new(move |_, _, _| a.clone())));
+        // One refusal for every answer, and the members never change.
+        assert_eq!(
+            rig.ask(welcome()),
+            Response::Refused(Refusal::WelcomeRefused)
+        );
+        let after: Vec<DeviceId> = rig.relay.members().copied().collect();
+        assert_eq!(before, after);
+        assert_eq!(rig.relay.claim().is_some(), claim_stays, "{answer:?}");
+    }
 }
 
 #[test]

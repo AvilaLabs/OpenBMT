@@ -108,6 +108,9 @@ pub enum BoxError {
     NoInvitation,
     /// The invitation ran out (BX-12).
     InvitationExpired,
+    /// More than one welcome request in a second while an invitation is
+    /// open (BX-15).
+    WelcomeRate,
     /// The welcome is not a welcome (BX-15).
     BadWelcome(DecodeError),
     /// The welcome's MAC is not the one for the invitation (BX-15).
@@ -143,6 +146,7 @@ impl fmt::Display for BoxError {
             Self::Invitation(e) => write!(f, "{e}"),
             Self::NoInvitation => write!(f, "BX-12: no invitation is open"),
             Self::InvitationExpired => write!(f, "BX-12: the invitation ran out"),
+            Self::WelcomeRate => write!(f, "BX-15: one welcome request a second"),
             Self::BadWelcome(e) => write!(f, "BX-15: the welcome is not valid: {e}"),
             Self::WelcomeMac => write!(
                 f,
@@ -210,6 +214,8 @@ pub struct BoxCore<F: BoxFiles> {
     id: DeviceId,
     open: Option<OpenInvitation>,
     pairing: Option<Pairing>,
+    /// When the last welcome was looked at while an invitation was open.
+    last_welcome: Option<u64>,
 }
 
 impl<F: BoxFiles> fmt::Debug for BoxCore<F> {
@@ -339,6 +345,7 @@ impl<F: BoxFiles> BoxCore<F> {
             id,
             open,
             pairing,
+            last_welcome: None,
         })
     }
 
@@ -456,13 +463,18 @@ impl<F: BoxFiles> BoxCore<F> {
         Some(Claim::make(&open.invitation, self.id, open.nonce).to_bytes())
     }
 
-    /// Take a welcome and the first settings (BX-15), in this order: the
-    /// invitation is spent, the MAC is checked, the roots are taken from
-    /// the welcome, the settings are checked under them as first settings,
-    /// they must list this Box as a Box, and then the settings, the two
-    /// number files (LK-40) and last the roots are stored. Any failure
-    /// leaves the Box unpaired with the invitation spent. A paired Box
-    /// takes a welcome from nobody (BX-16).
+    /// Take a welcome and the first settings (BX-15), in this order: at
+    /// most one request a second while an invitation is open, the
+    /// invitation must be open and not run out (one that ran out is
+    /// forgotten), the welcome must read and its MAC must check. Up to here
+    /// a failure changes nothing: the invitation stays open, stored, with
+    /// the same nonce and expiry. Once the MAC has checked the invitation is
+    /// spent, removed from memory and disk, and then the roots are taken
+    /// from the welcome, the settings are checked under them as first
+    /// settings, they must list this Box as a Box, and the settings, the two
+    /// number files (LK-40) and last the roots are stored. Any failure after
+    /// the MAC leaves the Box unpaired with the invitation spent. A paired
+    /// Box takes a welcome from nobody (BX-16).
     pub fn take_welcome(
         &mut self,
         welcome: &[u8],
@@ -472,18 +484,27 @@ impl<F: BoxFiles> BoxCore<F> {
         if self.pairing.is_some() {
             return Err(BoxError::AlreadyPaired);
         }
-        let open = self.open.take().ok_or(BoxError::NoInvitation)?;
-        // Spent from here on, whatever happens next (BX-15).
-        self.files
-            .remove(INVITATION_FILE)
-            .map_err(io_err(INVITATION_FILE, "remove"))?;
-        if Self::expired(&open, now) {
+        let Some(open) = self.open.as_ref() else {
+            return Err(BoxError::NoInvitation);
+        };
+        if Self::expired(open, now) {
+            // Gone whatever arrives.
+            self.expire(now);
             return Err(BoxError::InvitationExpired);
         }
+        if self.last_welcome.is_some_and(|last| now <= last) {
+            return Err(BoxError::WelcomeRate);
+        }
+        self.last_welcome = Some(now);
         let welcome = Welcome::from_bytes(welcome).map_err(BoxError::BadWelcome)?;
         let roots = welcome
             .verify(&open.invitation, &self.id, &open.nonce)
             .ok_or(BoxError::WelcomeMac)?;
+        // The MAC checked: the invitation is spent from here on (BX-15).
+        self.open = None;
+        self.files
+            .remove(INVITATION_FILE)
+            .map_err(io_err(INVITATION_FILE, "remove"))?;
         let signed = SignedSettings::from_bytes(settings).map_err(BoxError::BadSettings)?;
         signed.verify(&roots, None).map_err(BoxError::Settings)?;
         if !signed.settings.boxes.contains(&self.id) {

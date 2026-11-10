@@ -139,9 +139,11 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
 - **LK-27.** A relay that is a Box answers a claim request while an
   invitation is open (`docs/BOX-RULES.md` BX-12) and refuses it otherwise;
   a plain relay always refuses it. A welcome request is handed to the hook
-  its owner installed (BX-15) and a relay with none refuses it. Every
-  failure of a welcome has the one refusal, so that nothing about the
-  invitation leaks.
+  its owner installed (BX-15) and a relay with none refuses it. The hook
+  says whether the welcome was taken (and gives the member list that then
+  applies), refused with the claim staying on offer, or refused with the
+  claim withdrawn. Every failure of a welcome has the one refusal, so that
+  nothing about the invitation leaks.
 
 ## 3. Reaching the relay
 

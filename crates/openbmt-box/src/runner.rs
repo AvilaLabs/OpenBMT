@@ -34,7 +34,8 @@ use openbmt_courier::{Courier, FirstStart, Post, Received, StartError};
 use openbmt_link::proto::{Refusal, Request, Response};
 use openbmt_link::relay::{sign_challenge, Action};
 use openbmt_link::{
-    os_random, ClientError, DirStore, Fetched, Kind, Relay, RelayConfig, Role, Server, ServerConfig,
+    os_random, ClientError, DirStore, Fetched, Kind, Relay, RelayConfig, Role, Server,
+    ServerConfig, WelcomeAnswer,
 };
 use openbmt_net_io::env::{DirLock, LockError};
 use openbmt_net_io::Clock;
@@ -395,9 +396,13 @@ impl BoxRunner {
             let core = Arc::clone(&core);
             relay.set_welcome_hook(Some(Box::new(move |welcome, settings, now| {
                 let mut core = lock(&core);
-                core.take_welcome(welcome, settings, now)
-                    .ok()
-                    .map(|()| core.members())
+                match core.take_welcome(welcome, settings, now) {
+                    Ok(()) => WelcomeAnswer::Welcomed(core.members()),
+                    // A welcome that did not spend the invitation leaves the
+                    // claim on offer.
+                    Err(_) if core.invitation_open(now) => WelcomeAnswer::Refused,
+                    Err(_) => WelcomeAnswer::Withdrawn,
+                }
             })));
         }
         let relay: Relays = Arc::new(Mutex::new(relay));

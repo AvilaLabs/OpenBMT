@@ -134,6 +134,16 @@ impl Drop for Server {
     }
 }
 
+/// The first wait after an accept error.
+const ACCEPT_BACKOFF_MIN: Duration = Duration::from_millis(10);
+/// The longest wait after accept errors.
+const ACCEPT_BACKOFF_MAX: Duration = Duration::from_secs(1);
+
+/// The wait after this one: double, up to a second.
+fn next_backoff(current: Duration) -> Duration {
+    current.saturating_mul(2).min(ACCEPT_BACKOFF_MAX)
+}
+
 fn accept_loop<S>(
     listener: TcpListener,
     relay: Arc<Mutex<Relay<S>>>,
@@ -145,15 +155,21 @@ fn accept_loop<S>(
     S: MailStore + Send + 'static,
 {
     let mut next_conn: u64 = 0;
+    let mut backoff = ACCEPT_BACKOFF_MIN;
     while !stop.load(Ordering::SeqCst) {
         let stream = match listener.accept() {
-            Ok((stream, _)) => stream,
+            Ok((stream, _)) => {
+                backoff = ACCEPT_BACKOFF_MIN;
+                stream
+            }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(10));
                 continue;
             }
             Err(_) => {
-                thread::sleep(Duration::from_millis(10));
+                // A persistent error (no descriptors left) must not spin.
+                thread::sleep(backoff);
+                backoff = next_backoff(backoff);
                 continue;
             }
         };
@@ -265,5 +281,22 @@ fn serve<S: MailStore>(
         if stream.write_all(&bytes).is_err() {
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod backoff_tests {
+    use super::*;
+
+    #[test]
+    fn the_wait_doubles_from_10_ms_and_stops_at_a_second() {
+        let mut d = ACCEPT_BACKOFF_MIN;
+        let mut seen = vec![d];
+        for _ in 0..10 {
+            d = next_backoff(d);
+            seen.push(d);
+        }
+        let ms: Vec<u128> = seen.iter().map(Duration::as_millis).collect();
+        assert_eq!(ms, [10, 20, 40, 80, 160, 320, 640, 1000, 1000, 1000, 1000]);
     }
 }

@@ -186,10 +186,20 @@ impl Mailbox {
     }
 }
 
+/// What the hook of a welcome says (LK-27).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WelcomeAnswer {
+    /// Taken: the member list that now applies. The claim is withdrawn.
+    Welcomed(Vec<DeviceId>),
+    /// Refused, and the claim stays on offer.
+    Refused,
+    /// Refused, and the claim is withdrawn.
+    Withdrawn,
+}
+
 /// What a relay owner installs to take a welcome (LK-27): it is given the
-/// welcome, the settings and the time, and answers with the member list that
-/// now applies, or `None` for any refusal.
-pub type WelcomeHook = Box<dyn FnMut(&[u8], &[u8], u64) -> Option<Vec<DeviceId>> + Send>;
+/// welcome, the settings and the time, and decides.
+pub type WelcomeHook = Box<dyn FnMut(&[u8], &[u8], u64) -> WelcomeAnswer + Send>;
 
 /// What a relay is asked and what it keeps.
 pub struct Relay<S: MailStore> {
@@ -420,21 +430,25 @@ impl<S: MailStore> Relay<S> {
         }
     }
 
-    /// LK-27: hand the welcome to the hook. Whatever it says, the claim is
-    /// no longer offered: the invitation is spent (BX-15). Only if it says
-    /// yes does the member list change.
+    /// LK-27: hand the welcome to the hook, which decides whether the claim
+    /// stays. Only a yes changes the member list.
     fn take_welcome(&mut self, welcome: &[u8], settings: &[u8], now: u64) -> Response {
         let Some(hook) = self.welcome.as_mut() else {
             return Response::Refused(Refusal::WelcomeRefused);
         };
-        let answer = hook(welcome, settings, now);
-        self.claim = None;
-        match answer {
-            None => Response::Refused(Refusal::WelcomeRefused),
-            Some(members) => match self.set_members(&members) {
-                Ok(()) => Response::Welcomed,
-                Err(_) => Response::Refused(Refusal::Storage),
-            },
+        match hook(welcome, settings, now) {
+            WelcomeAnswer::Refused => Response::Refused(Refusal::WelcomeRefused),
+            WelcomeAnswer::Withdrawn => {
+                self.claim = None;
+                Response::Refused(Refusal::WelcomeRefused)
+            }
+            WelcomeAnswer::Welcomed(members) => {
+                self.claim = None;
+                match self.set_members(&members) {
+                    Ok(()) => Response::Welcomed,
+                    Err(_) => Response::Refused(Refusal::Storage),
+                }
+            }
         }
     }
 

@@ -81,8 +81,10 @@ merchant types it into the Box.
   The owner's phone hands the Box the welcome and the signed settings. The
   Box checks the MAC with its invitation, then pins the two roots, then
   checks the settings under those roots (they must list the Box's own key
-  as a Box), stores all three, and only then counts as paired. Anything
-  that fails leaves it unpaired with the invitation spent.
+  as a Box), stores all three, and only then counts as paired. A welcome
+  whose MAC does not check changes nothing: the invitation stays open. Once
+  the MAC has checked, anything that fails leaves the Box unpaired with the
+  invitation spent.
 - **BX-16.** Roots are pinned once. A paired Box takes a welcome from
   nobody. To pair it with another shop, or again with the same one, its
   data directory is erased, which also gives it a new key.
@@ -176,11 +178,17 @@ These are details the rules above leave open. None of them changes a rule.
   Box over its relay connection as one request (`docs/LINK-RULES.md`,
   LK-27): the length of the welcome as 4 bytes little endian, the welcome,
   then the signed settings. The answer is "welcomed" or one refusal for every
-  cause, so that nothing about the invitation leaks. The request is allowed
-  while an invitation is open, and any welcome request spends it (BX-15),
-  also one from a stranger on the network. A stranger therefore cannot pair
-  the Box or learn anything, but can make the merchant enter the invitation
-  again.
+  cause, so that nothing about the invitation leaks. A welcome that does not
+  read or whose MAC does not check changes nothing and leaves the invitation
+  open, stored, with the same nonce and expiry, so a stranger on the network
+  cannot spend it: the invitation has 130 bits and a welcome with a right
+  MAC needs it. One that passes the MAC and then fails (settings signed by
+  other roots, settings that do not list the Box) spends it. An unpaired Box
+  looks at one welcome request a second across all connections while an
+  invitation is open, on the time of the request; any other in that second
+  gets the same refusal. That bounds the work and the log, and means that
+  a real welcome sent in the same second as another request is refused and
+  sent again.
 - **What an unpaired Box answers (BX-03).** A hello, a claim while an
   invitation is open, and a welcome. A request for a challenge is refused,
   so a mailbox, a fetch, an acknowledgement and a sealed message are all

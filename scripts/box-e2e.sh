@@ -33,6 +33,8 @@
 #   6. A second `openbmt-box` on the same directory is refused.
 #   7. Settings that drop the Box: its state is "turned off", its members are
 #      empty and its POS token file is erased.
+#   9. A stranger sends welcomes while an invitation is open: refused, the
+#      same claim is still offered, and the real welcome then still pairs.
 #   8. On a second Box: an invitation typed with one character changed is
 #      refused by its check, and a different valid invitation makes the Key
 #      app side reject the claim.
@@ -61,6 +63,7 @@ B1="$BASE/box1"
 B2="$BASE/box2"
 K1="$BASE/keyapp1"
 K2="$BASE/keyapp2"
+K3="$BASE/keyapp3"
 
 say() { printf '\n== %s\n' "$*"; }
 note() { printf '      %s\n' "$*"; }
@@ -74,7 +77,7 @@ pass() { RESULT[$1]=PASS; MESSAGE[$1]=$2; printf 'PASS  step %s: %s\n' "$1" "$2"
 bad() { RESULT[$1]=FAIL; MESSAGE[$1]=$2; printf 'FAIL  step %s: %s\n' "$1" "$2"; }
 notrun() { RESULT[$1]="NOT RUN"; MESSAGE[$1]=$2; printf 'NOT RUN  step %s: %s\n' "$1" "$2"; }
 
-mkdir -p "$B1" "$B2" "$K1" "$K2"
+mkdir -p "$B1" "$B2" "$K1" "$K2" "$K3"
 declare -A PID LOG FDN
 PID[1]=; PID[2]=
 FDN[1]=3; FDN[2]=4
@@ -371,12 +374,39 @@ else
 fi
 stop_box 2
 
+# ---- 9 ---------------------------------------------------------------------------
+
+say "9. A stranger's welcome while the invitation is open"
+A2="127.0.0.1:$PORT2"
+start_box 2 "$B2" "$PORT2" || die "the second Box did not start again: $(cat "${LOG[2]}")"
+INV9=$(pair invite "$K3")
+ask 2 "invite $INV9" 'invitation' || true
+S9a=$(state_of 2)
+BAD1=$(pair badwelcome "$K3" "$A2")
+sleep 2
+BAD2=$(pair badwelcome "$K3" "$A2")
+sleep 2
+S9b=$(state_of 2)
+CLAIM9=$(pair claim "$K3" "$A2")
+WELCOME9=$(pair welcome "$K3" "$A2")
+S9c=$(state_of 2)
+note "stranger: $BAD1 / $BAD2"
+note "state after: $S9b; claim: $(head -1 <<<"$CLAIM9"); welcome: $WELCOME9"
+if [ "$S9a" = "invitation open" ] && grep -q '^refused' <<<"$BAD1" && grep -q '^refused' <<<"$BAD2" &&
+  [ "$S9b" = "invitation open" ] && grep -q '^claim verified' <<<"$CLAIM9" &&
+  [ "$WELCOME9" = welcomed ] && [ "$S9c" = paired ]; then
+  pass 9 "two welcomes from a stranger were refused and left the invitation open; the real claim then verified and the real welcome paired the Box"
+else
+  bad 9 "states '$S9a' '$S9b' '$S9c'; stranger: $BAD1 / $BAD2; claim: $CLAIM9; welcome: $WELCOME9"
+fi
+stop_box 2
+
 # ---- result ----------------------------------------------------------------------
 
 say "Result"
 failed=0
 notrun=0
-for n in 1 2 3 4 5 6 7 8; do
+for n in 1 2 3 4 5 6 7 8 9; do
   printf '%s  step %s\n' "${RESULT[$n]:-FAIL}" "$n"
   case "${RESULT[$n]:-FAIL}" in
     PASS) ;;

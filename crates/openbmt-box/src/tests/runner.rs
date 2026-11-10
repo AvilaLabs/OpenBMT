@@ -287,10 +287,10 @@ fn bx_15_a_welcome_over_the_wire_pairs_the_box_and_opens_the_relay_to_its_member
 }
 
 #[test]
-fn bx_15_every_failed_welcome_has_the_one_refusal_and_spends_the_invitation() {
+fn bx_15_every_failed_welcome_has_the_one_refusal_and_only_a_checked_mac_spends() {
     let inv = invitation(5);
     let dir = TempDir::new("welcomefail");
-    let (r, _) = start(&dir);
+    let (r, clock) = start(&dir);
     let me = r.device_id();
     let good_settings = sign_both(settings_with(1, &me));
     let other_inv = invitation(6);
@@ -298,45 +298,84 @@ fn bx_15_every_failed_welcome_has_the_one_refusal_and_spends_the_invitation() {
     let other_roots =
         openbmt_core::batch::PinnedRoots::new(stranger().device_id(), approver().device_id())
             .unwrap();
+    // (welcome, settings, spends the invitation)
     for n in 0..5 {
         // Each case starts from a fresh invitation and its claim.
         r.enter_invitation(&inv.to_text()).unwrap();
         let mut c = connect(&r);
-        let claim = Claim::from_bytes(&c.claim().unwrap()).unwrap();
-        let (w, s) = match n {
+        let claim_bytes = c.claim().unwrap();
+        let claim = Claim::from_bytes(&claim_bytes).unwrap();
+        let (w, s, spends) = match n {
             // Made for another invitation.
             0 => (
                 Welcome::make(&other_inv, &claim, roots()).to_bytes(),
                 good_settings.to_bytes(),
+                false,
             ),
             // Right MAC, for roots the settings were not signed by.
             1 => (
                 Welcome::make(&inv, &claim, other_roots).to_bytes(),
                 good_settings.to_bytes(),
+                true,
             ),
-            // Settings that do not list the Box.
+            // Right MAC, settings that do not list the Box.
             2 => (
                 Welcome::make(&inv, &claim, roots()).to_bytes(),
                 unlisted.to_bytes(),
+                true,
             ),
             // Garbage.
-            3 => (vec![0; 101], vec![0; 10]),
-            _ => (vec![], vec![]),
+            3 => (vec![0; 101], vec![0; 10], false),
+            _ => (vec![], vec![], false),
         };
+        clock.advance(2);
         assert_eq!(
             refused(c.welcome(&w, &s).unwrap_err()),
             Refusal::WelcomeRefused,
             "case {n}"
         );
-        // Spent: no claim, still unpaired, no members.
-        assert_eq!(
-            refused(c.claim().unwrap_err()),
-            Refusal::NoClaim,
-            "case {n}"
-        );
-        assert_eq!(r.status(), BoxStatus::Unpaired);
+        if spends {
+            assert_eq!(
+                refused(c.claim().unwrap_err()),
+                Refusal::NoClaim,
+                "case {n}"
+            );
+            assert_eq!(r.status(), BoxStatus::Unpaired);
+        } else {
+            // Nothing changed: the same claim is still on offer.
+            assert_eq!(c.claim().unwrap(), claim_bytes, "case {n}");
+            assert_eq!(r.status(), BoxStatus::InvitationOpen);
+        }
         assert!(r.members().is_empty());
+        clock.advance(2);
     }
+}
+
+#[test]
+fn bx_15_a_stranger_welcoming_over_the_wire_cannot_stop_the_real_pairing() {
+    let dir = TempDir::new("strangerwelcome");
+    let (r, clock) = start(&dir);
+    let inv = invitation(5);
+    r.enter_invitation(&inv.to_text()).unwrap();
+    let mut stranger_conn = connect(&r);
+    let claim_bytes = stranger_conn.claim().unwrap();
+    // Within one second only the first is looked at; all are refused alike.
+    for _ in 0..50 {
+        assert_eq!(
+            refused(stranger_conn.welcome(&[7; 101], &[8; 50]).unwrap_err()),
+            Refusal::WelcomeRefused
+        );
+    }
+    clock.advance(2);
+    assert_eq!(stranger_conn.claim().unwrap(), claim_bytes);
+    // The real welcome pairs with the claim already held.
+    let claim = Claim::from_bytes(&claim_bytes).unwrap();
+    let welcome = Welcome::make(&inv, &claim, roots());
+    let settings = sign_both(settings_with(1, &r.device_id()));
+    connect(&r)
+        .welcome(&welcome.to_bytes(), &settings.to_bytes())
+        .unwrap();
+    assert_eq!(r.status(), BoxStatus::Paired);
 }
 
 // ---- sections 3 and 5 ----

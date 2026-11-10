@@ -11,7 +11,7 @@ use openbmt_net_io::SystemClock;
 use super::kit::*;
 use crate::client::{Client, ClientConfig, ClientError, Route};
 use crate::proto::{Refusal, Request, Response, FRAME_HEADER_LEN};
-use crate::relay::{hello_message, Relay, RelayConfig, TAG_HELLO};
+use crate::relay::{hello_message, Relay, RelayConfig, WelcomeAnswer, TAG_HELLO};
 use crate::seal::{open, Kind, OpenError, Role};
 use crate::server::{Server, ServerConfig};
 use crate::store::MemoryStore;
@@ -407,7 +407,13 @@ fn lk_27_a_client_asks_for_a_claim_and_sends_a_welcome() {
     relay
         .lock()
         .unwrap()
-        .set_welcome_hook(Some(Box::new(|w, _, _| (w == [1, 2, 3]).then(Vec::new))));
+        .set_welcome_hook(Some(Box::new(|w, _, _| {
+            if w == [1, 2, 3] {
+                WelcomeAnswer::Welcomed(Vec::new())
+            } else {
+                WelcomeAnswer::Withdrawn
+            }
+        })));
     let server = Server::start_shared(
         listener,
         Arc::clone(&relay),
@@ -421,7 +427,7 @@ fn lk_27_a_client_asks_for_a_claim_and_sends_a_welcome() {
         client.welcome(&[9], &[]),
         Err(ClientError::Refused(Refusal::WelcomeRefused))
     );
-    // A failed welcome spent the claim.
+    // This hook withdrew the claim.
     assert_eq!(client.claim(), Err(ClientError::Refused(Refusal::NoClaim)));
     assert_eq!(client.welcome(&[1, 2, 3], &[7]), Ok(()));
 }

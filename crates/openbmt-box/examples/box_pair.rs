@@ -5,6 +5,7 @@
 //! box_pair invite   <dir>                       make an invitation (BX-10)
 //! box_pair claim    <dir> <addr>                fetch the claim and check it (BX-13, BX-14)
 //! box_pair welcome  <dir> <addr>                send the welcome and first settings (BX-15)
+//! box_pair badwelcome <dir> <addr>              a stranger's welcome (garbage)
 //! box_pair mailbox  <dir> <addr> <name>         make a device's mailbox
 //! box_pair send     <dir> <addr> <from> <to> <text>
 //! box_pair recv     <dir> <addr> <name>
@@ -164,6 +165,13 @@ fn run(args: &[String]) -> Result<(), String> {
             c.welcome(&welcome.to_bytes(), &settings.to_bytes())
                 .map_err(|e| refused(&e))?;
             println!("welcomed");
+        }
+        "badwelcome" => {
+            // A device that holds no invitation: garbage in both places.
+            match connect(arg(2)?, None)?.welcome(&[7; 101], &[8; 50]) {
+                Ok(()) => return Err("ACCEPTED a stranger's welcome".into()),
+                Err(e) => println!("{}", refused(&e)),
+            }
         }
         "key" => {
             println!("{}", hex(&identity(arg(2)?)?.device_id().to_bytes()));
