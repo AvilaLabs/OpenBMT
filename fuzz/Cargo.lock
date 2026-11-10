@@ -229,6 +229,8 @@ name = "openbmt-net"
 version = "0.1.0"
 dependencies = [
  "bitcoin",
+ "openbmt-core",
+ "openbmt-watch",
 ]
 
 [[package]]
