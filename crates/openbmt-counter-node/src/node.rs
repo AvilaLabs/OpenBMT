@@ -91,10 +91,10 @@ use openbmt_core::records::Record;
 use openbmt_core::settings::Settings;
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
-    Actor, Amount, BlockError, CancelRefused, CommandRefused, Counter, Currency, Facts,
+    Actor, Amount, BlockError, CancelRefused, CashRefund, CommandRefused, Counter, Currency, Facts,
     HeartbeatRefused, HeartbeatView, JudgeError, LoadError, OpenFacts, OpenRefused, Opened,
-    Overridden, Pairing, Quote, Rate, RateSource, Report, RequoteRefused, Screen, SightingError,
-    StoreFault,
+    Overridden, Pairing, Quote, Rate, RateSource, RefundRefused, RefundRequest, RefundView, Report,
+    RequoteRefused, Screen, SightingError, StoreFault, WithdrawRefused,
 };
 use openbmt_net_io::{
     AppEvent, Clock, DirLock, Driver, DriverConfig, EventReceiver, FileStorage, Handle, Key,
@@ -831,6 +831,49 @@ impl<P: DriverPort> Node<P> {
         };
         self.counter
             .override_sale(index, actor, &facts, &mut self.store)
+    }
+
+    /// A person asks for a refund of a sale (CR-60 to CR-69). The request is
+    /// a record that travels to the owner with the others; nothing is paid.
+    /// Returns the request number. The caller has checked the PIN, and has
+    /// read the destination with `openbmt_counter::refund_destination`.
+    pub fn request_refund(
+        &mut self,
+        index: u32,
+        request: RefundRequest,
+    ) -> Result<u64, RefundRefused<DirStoreError>> {
+        let now = self.clock.now();
+        self.counter
+            .request_refund(index, request, now, &self.view, &mut self.store)
+    }
+
+    /// A person withdraws a refund request (CR-70). The owner honours it
+    /// only if the refund is still queued and not in an open session.
+    pub fn withdraw_refund(
+        &mut self,
+        index: u32,
+        number: u64,
+        actor: Actor,
+    ) -> Result<(), WithdrawRefused<DirStoreError>> {
+        let now = self.clock.now();
+        self.counter
+            .withdraw_refund(index, number, actor, now, &mut self.store)
+    }
+
+    /// A refund paid in cash from the till (CR-71).
+    pub fn refund_in_cash(
+        &mut self,
+        index: u32,
+        cash: CashRefund,
+    ) -> Result<(), RefundRefused<DirStoreError>> {
+        let now = self.clock.now();
+        self.counter
+            .refund_in_cash(index, cash, now, &self.view, &mut self.store)
+    }
+
+    /// The refunds of a sale, for the screen and the receipt (CR-72).
+    pub fn refund_views(&self, index: u32) -> Vec<RefundView> {
+        self.counter.refund_views(index)
     }
 
     /// Take a heartbeat the owner's watcher signed (CR-50 to CR-56), as the

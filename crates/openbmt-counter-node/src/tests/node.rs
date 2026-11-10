@@ -595,3 +595,77 @@ fn nr_79_a_second_start_on_the_same_directory_fails_before_it_reads_or_spawns() 
     let again = start(dir.path());
     assert_eq!(again.launch.driver.watch_from, 0);
 }
+
+#[test]
+fn a_refund_request_is_a_record_on_the_nodes_chain_and_survives_a_restart() {
+    use openbmt_counter::{Actor, Amount, Event, RefundAsk, RefundRequest, RefundState, Role};
+    let dir = Scratch::new();
+    let (mut rig, pay) = rig_with_a_sale(&dir);
+    let mut blocks = Blocks::default();
+    let first = blocks.extend(std::slice::from_ref(&pay)).clone();
+    let mut events = vec![joined(1, &first), block_event(&first)];
+    for height in 2..=6 {
+        let block = blocks.extend(&[]).clone();
+        events.push(joined(height, &block));
+    }
+    rig.feed(events);
+    assert_eq!(rig.node.judge(0).unwrap().state, State::Final);
+
+    let ann = Actor {
+        role: Role::Cashier,
+        name: "ann".to_string(),
+    };
+    let request = RefundRequest {
+        ask: RefundAsk::Sats(2_000),
+        destination: p2wsh(0xa1),
+        actor: ann.clone(),
+        reason: "wrong size".to_string(),
+    };
+    let records_before = rig.node.counter().records().len();
+    assert_eq!(rig.node.request_refund(0, request).unwrap(), 1);
+    assert_eq!(rig.node.counter().records().len(), records_before + 1);
+    let views = rig.node.refund_views(0);
+    assert_eq!(views.len(), 1);
+    assert_eq!(
+        (views[0].asked, views[0].state),
+        (2_000, RefundState::Requested)
+    );
+
+    // A second request over what was received is refused by the counter.
+    let again = RefundRequest {
+        ask: RefundAsk::Sats(3_001),
+        destination: p2wsh(0xa2),
+        actor: ann.clone(),
+        reason: "wrong size".to_string(),
+    };
+    assert!(rig.node.request_refund(0, again).is_err());
+    rig.node
+        .refund_in_cash(
+            0,
+            openbmt_counter::CashRefund {
+                actor: ann.clone(),
+                minor: Amount(100),
+                reason: "till".to_string(),
+            },
+        )
+        .unwrap();
+    rig.node.withdraw_refund(0, 1, ann).unwrap();
+
+    // The records are on disk: a restarted node reads the same.
+    let kinds: Vec<_> = rig
+        .node
+        .counter()
+        .records()
+        .records()
+        .iter()
+        .filter_map(|r| Event::decode(&r.body).ok())
+        .filter(|e| e.kind() == openbmt_core::records::RecordKind::Refund)
+        .collect();
+    assert_eq!(kinds.len(), 3);
+    drop(rig);
+    let rig = start(dir.path());
+    let views = rig.node.refund_views(0);
+    assert_eq!(views.len(), 2);
+    assert_eq!(views[0].state, RefundState::Withdrawn);
+    assert_eq!(views[1].state, RefundState::PaidInCash);
+}
