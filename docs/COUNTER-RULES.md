@@ -34,14 +34,21 @@ draws what it is told.
   between the two wastes an index and never reuses one.
 - **CR-04.** At most 120 new addresses are handed out per hour **[to
   tune]**. Past that, opening is refused until the hour has moved on.
-- **CR-05.** A sale has an amount in the shop's currency and a quote: the
-  amount in satoshis at the rate the caller supplies, good for 5 minutes.
-  When a quote runs out the caller supplies a new rate and the sale gets a
-  new quote. The address does not change. All quotes of a sale are kept.
-- **CR-06.** A payment is judged against the quote that was in force when
-  the payment was first seen (WR-46), or first reported if it was never
-  "seen". A later quote does not change what an earlier payment had to
-  be.
+- **CR-05.** A sale has an amount in the shop's currency and a quote: a
+  rate the caller supplies, good for 5 minutes. When a quote runs out the
+  caller supplies a new rate and the sale gets a new quote. The address
+  does not change. All quotes of a sale are kept.
+- **CR-06.** Satoshis are valued once, at the quote that was current when
+  the counter first learned of them, and that value never changes. If
+  none was current, the last quote is used: it is the one the customer
+  was shown. If what has arrived shrinks, the newest valuations are
+  dropped first.
+- **CR-08.** What the sale needs, in satoshis, is the satoshis already
+  valued plus the rest of the amount at the current quote, rounded up to
+  a whole satoshi. A new quote moves only the part that has not been
+  paid. Once enough has arrived the sale takes no new quote.
+- **CR-09.** No sale opens while a rescan is pending after a restore or a
+  reset (§5.5).
 - **CR-07.** A sale with nothing received ends as "expired" 15 minutes
   after it opened **[to tune]**, or when the cashier cancels it. Its
   address stays watched for good.
@@ -83,7 +90,9 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   8. something has arrived, not enough: `PartPaid`;
   9. nothing: `NotPaidYet`, or `Expired` under CR-07.
 - **CR-13.** Accepting at once is a step with a record. The counter adds
-  the amount at risk to its exposure ledger and stores it before
+  the amount at risk to its exposure ledger, under the sale and not under
+  a transaction (a fee bump changes the transaction), against the slice of
+  the mode the decision used, and stores it before
   `PaidInstant` is returned for the first time. If the store fails or the
   ledger has no room, the state is `Waiting`. From then on the sale is
   "accepted at once" for good: a later worse answer from the instant
@@ -91,15 +100,17 @@ carries two texts: why it is in this state, and what happens next (§2.6).
 - **CR-14.** A conflict on a sale that was accepted at once is a cancel.
   The counter records it in the pause tracker (instant pauses, §6),
   raises the cancel alarm, and the sale shows `DoNotHandOver`. The alarm
-  stays raised until the owner clears it with a signed message; nothing
-  at the counter clears it.
-- **CR-15.** Exposure leaves the ledger at the payment's first
-  confirmation, or by the owner's signed action. Never on a timeout, and
+  stays raised until the owner clears it with a signed command
+  (`openbmt_core::command`); nothing at the counter clears it. The same
+  holds for resetting a pause and for releasing exposure by hand. A
+  command is taken once: its number must be above the last one taken.
+- **CR-15.** Exposure leaves the ledger when what the sale needs is first
+  confirmed, or by the owner's signed command. Never on a timeout, and
   not when the sale turns red.
-- **CR-16.** "Enough" is the quote's amount less the shop's tolerance
-  (WR-32). More than the quote is paid in full; the surplus is recorded
-  as owed to the customer. The instant decision is asked with the larger
-  of the quote and what arrived.
+- **CR-16.** "Enough" is what the sale needs (CR-08) less the shop's
+  tolerance (WR-32). More than that is paid in full; the surplus is
+  recorded as owed to the customer. The instant decision is asked with
+  the larger of what the sale needs and what arrived.
 - **CR-17.** What arrived for a sale and is below 1,000 satoshis **[to
   tune]** in total is dust: it is logged and changes no state.
 - **CR-18.** A payment that is seen and not confirmed for 2 hours **[to
@@ -112,11 +123,16 @@ carries two texts: why it is in this state, and what happens next (§2.6).
 ## 3. Overrides
 
 - **CR-20.** A person can accept a sale that is `Waiting`, `PartPaid` or
-  `DoNotHandOver`. The amount still at risk goes into the exposure
-  ledger as an override, stored before the screen changes. It is refused
-  when the ledger has no room, and when it is above that person's limit
-  in the signed settings.
-- **CR-21.** An override is recorded with who, when and how much. It
+  `DoNotHandOver`. The amount at risk goes into the exposure ledger as
+  an override, stored before the screen changes. It is refused when the
+  ledger has no room.
+- **CR-21.** A cashier's override is refused above the per-sale instant
+  limit, and when it would take that cashier's overrides of the last 24
+  hours past the cashier's daily cap. A manager's is refused when it
+  would take that manager's overrides of the last 24 hours past the
+  manager's ceiling. The caller says who the person is and has already
+  checked the PIN.
+- **CR-22.** An override is recorded with who, when and how much. It
   does not clear a cancel alarm and does not make the sale `Confirmed`.
 
 ## 4. What leaves the counter
@@ -131,15 +147,33 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   written as a signed record (`openbmt_core::records`), stored before it
   is reported.
 
-## 5. What these rules do not do
+## 5. Storage
+
+- **CR-40.** Everything the counter must remember is handed to the
+  caller's store before the step it belongs to takes effect: the address
+  batches, the exposure ledger, the pause tracker, the counter's own
+  state (address times, the cancel alarm, the last command number,
+  override totals), each sale, and each record.
+- **CR-41.** Where a step writes more than once, the order is chosen so
+  that stopping between any two writes leaves the shop on the safe side:
+  an address counted and not used, exposure counted and not shown as
+  paid, a pause recorded and not yet shown.
+- **CR-42.** A stored form is checked whole when it is read back. A sale
+  whose stored form does not read back is shown as `NeedsAPerson`, never
+  as paid.
+
+## 6. What these rules do not do
 
 - **They do not check payments.** Proof of work, proofs, peers and
   conflicts are the watcher's. A wrong fact handed in gives a wrong
   screen.
 - **They do not see a payment drop out of the network.** A light client
   cannot. A payment that never confirms is "stuck" (CR-18); the limits
-  of §6 are what protect the shop.
+  of `docs/DESIGN.md` §6 are what protect the shop.
 - **They do not refund.** Surplus and cancelled sales with money on them
   are recorded for the owner's refund session (§2.4).
 - **They do not talk to the POS.** CR-30 says what to report; the
   connector reports it.
+- **They do not know who a person is.** The list of managers and their
+  PINs is not in the signed settings yet. The caller names the person
+  and the role.
