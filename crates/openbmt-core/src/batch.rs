@@ -22,6 +22,7 @@ use bitcoin::ScriptBuf;
 
 use crate::identity::{tagged_hash, DeviceId, Identity, Sig, TAG_BATCH};
 use crate::wallet::{WalletDescription, WalletError};
+use crate::wire::{self, DecodeError, Reader};
 
 /// Default smallest batch: about 8 weeks of sales, at least 1,000 addresses.
 pub const DEFAULT_MIN_COUNT: u32 = 1_000;
@@ -29,6 +30,8 @@ pub const DEFAULT_MIN_COUNT: u32 = 1_000;
 pub const MAX_COUNT: u32 = 100_000;
 /// Indexes at or above this are hardened and cannot be derived from an xpub.
 const INDEX_LIMIT: u32 = 1 << 31;
+/// Length of a P2WSH script, the only kind a batch holds.
+const SCRIPT_LEN: usize = 34;
 
 /// Rules for how big a batch must be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,6 +205,30 @@ impl AddressBatch {
         identity.sign_digest(&self.hash())
     }
 
+    /// Read the bytes written by [`AddressBatch::encode`]. This only parses:
+    /// the shape check and the signatures are still the caller's to run.
+    fn read(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let wallet_checksum = r.array::<32>()?;
+        let counter = r.device_id()?;
+        let start = r.u32_le()?;
+        let n = r.count(MAX_COUNT as usize, 2 + SCRIPT_LEN)?;
+        let count = u32::try_from(n).map_err(|_| DecodeError::TooLarge)?;
+        let mut scripts = Vec::with_capacity(n);
+        for _ in 0..n {
+            if usize::from(r.u16_le()?) != SCRIPT_LEN {
+                return Err(DecodeError::NonCanonical("script is not 34 bytes"));
+            }
+            scripts.push(ScriptBuf::from_bytes(r.take(SCRIPT_LEN)?.to_vec()));
+        }
+        Ok(Self {
+            wallet_checksum,
+            counter,
+            start,
+            count,
+            scripts,
+        })
+    }
+
     fn check_shape(&self, policy: &BatchPolicy) -> Result<(), BatchError> {
         if self.count < policy.min_count {
             return Err(BatchError::CountTooSmall {
@@ -301,6 +328,35 @@ impl SignedBatch {
             return Err(BatchError::ApproverSignatureInvalid);
         }
         Ok(())
+    }
+
+    /// Wire form: `OBMB`, version 1, the bytes of [`AddressBatch::encode`]
+    /// (the bytes that are hashed and signed), then the owner and Key app
+    /// signatures. Call it on a batch that passed `verify` or was built by
+    /// the derivation code; `encode` panics on a script longer than
+    /// `u16::MAX` bytes.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let body = self.batch.encode();
+        let mut out = wire::start(&wire::MAGIC_SIGNED_BATCH, body.len() + 128);
+        out.extend_from_slice(&body);
+        out.extend_from_slice(&self.owner_sig.0);
+        out.extend_from_slice(&self.approver_sig.0);
+        out
+    }
+
+    /// Parse the wire form strictly (see [`crate::wire`]). This does not
+    /// check shape or signatures: call [`SignedBatch::verify`].
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut r = Reader::framed(bytes, &wire::MAGIC_SIGNED_BATCH)?;
+        let batch = AddressBatch::read(&mut r)?;
+        let owner_sig = r.sig()?;
+        let approver_sig = r.sig()?;
+        r.finish()?;
+        Ok(Self {
+            batch,
+            owner_sig,
+            approver_sig,
+        })
     }
 }
 
@@ -1112,5 +1168,89 @@ mod tests {
         let f = fx();
         let mut c = counter_state(&f);
         assert_eq!(c.retire_unused(), 0);
+    }
+
+    // Offsets in a signed batch: magic 0..4, version 4, checksum 5..37,
+    // counter 37..69, start 69..73, count 73..77, first script length 77..79.
+    const COUNT_AT: usize = 73;
+    const FIRST_LEN_AT: usize = 77;
+
+    #[test]
+    fn signed_batch_round_trips_and_still_verifies() {
+        let f = fx();
+        let sb = signed(&f, 4, 5, &mut HighWater::from_next_index(4));
+        let bytes = sb.to_bytes();
+        assert_eq!(&bytes[..5], b"OBMB\x01");
+        // The payload is the hashed bytes, then the two signatures.
+        assert_eq!(&bytes[5..bytes.len() - 128], &sb.batch.encode()[..]);
+        let back = SignedBatch::from_bytes(&bytes).unwrap();
+        assert_eq!(back, sb);
+        assert_eq!(back.batch.hash(), sb.batch.hash());
+        assert_eq!(back.to_bytes(), bytes);
+        back.verify(&f.roots, &SMALL).unwrap();
+    }
+
+    #[test]
+    fn signed_batch_decoding_is_strict() {
+        let f = fx();
+        let bytes = signed(&f, 0, 3, &mut HighWater::new()).to_bytes();
+        crate::testutil::assert_strict_decoding(
+            &bytes,
+            SignedBatch::from_bytes,
+            SignedBatch::to_bytes,
+        );
+    }
+
+    #[test]
+    fn signed_batch_rejects_bad_framing_and_fields() {
+        let f = fx();
+        let good = signed(&f, 0, 3, &mut HighWater::new()).to_bytes();
+        let edit = |at: usize, v: u8| {
+            let mut b = good.clone();
+            b[at] = v;
+            SignedBatch::from_bytes(&b).unwrap_err()
+        };
+        assert_eq!(edit(0, b'X'), DecodeError::BadMagic);
+        assert_eq!(edit(4, 0), DecodeError::UnsupportedVersion(0));
+        assert_eq!(edit(4, 2), DecodeError::UnsupportedVersion(2));
+        assert!(matches!(
+            edit(FIRST_LEN_AT, 33),
+            DecodeError::NonCanonical(_)
+        ));
+        assert!(matches!(
+            edit(FIRST_LEN_AT, 35),
+            DecodeError::NonCanonical(_)
+        ));
+        // A counter key that is not on the curve.
+        let mut b = good.clone();
+        b[37..69].fill(0);
+        assert_eq!(
+            SignedBatch::from_bytes(&b).unwrap_err(),
+            DecodeError::InvalidKey
+        );
+    }
+
+    #[test]
+    fn signed_batch_count_is_checked_before_anything_is_reserved() {
+        let f = fx();
+        let good = signed(&f, 0, 3, &mut HighWater::new()).to_bytes();
+        // Over the limit, with almost no bytes behind it.
+        let mut b = good[..COUNT_AT + 4].to_vec();
+        b[COUNT_AT..].copy_from_slice(&(MAX_COUNT + 1).to_le_bytes());
+        assert_eq!(
+            SignedBatch::from_bytes(&b).unwrap_err(),
+            DecodeError::TooLarge
+        );
+        b[COUNT_AT..].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(
+            SignedBatch::from_bytes(&b).unwrap_err(),
+            DecodeError::TooLarge
+        );
+        // Within the limit but more than the bytes can hold.
+        b[COUNT_AT..].copy_from_slice(&MAX_COUNT.to_le_bytes());
+        assert_eq!(
+            SignedBatch::from_bytes(&b).unwrap_err(),
+            DecodeError::Truncated
+        );
     }
 }

@@ -14,6 +14,7 @@ pub mod policy;
 pub mod records;
 pub mod settings;
 pub mod wallet;
+pub mod wire;
 pub mod words;
 
 #[cfg(test)]

@@ -6,6 +6,7 @@ use std::str::FromStr;
 
 use crate::identity::{secp, Identity};
 use crate::wallet::{coin_type, KeySlot, WalletDescription};
+use crate::wire::DecodeError;
 
 /// BIP39 (Trezor) test-vector mnemonics, all distinct seeds.
 pub const MNEMONICS: [&str; 4] = [
@@ -44,4 +45,34 @@ pub fn wallet(network: Network) -> WalletDescription {
 /// A numbered identity (n in 1..=250).
 pub fn identity(n: u8) -> Identity {
     Identity::from_secret_bytes(&[n; 32]).unwrap()
+}
+
+/// Strictness checks shared by every wire type. `valid` must be a message
+/// the type accepts. Checks that it re-encodes to the same bytes, that every
+/// proper prefix is refused, that one extra byte is `TrailingBytes`, and that
+/// flipping any single bit never panics and either fails or decodes to a
+/// value that encodes back to the mutated bytes.
+pub fn assert_strict_decoding<T>(
+    valid: &[u8],
+    decode: impl Fn(&[u8]) -> Result<T, DecodeError>,
+    encode: impl Fn(&T) -> Vec<u8>,
+) {
+    let value = decode(valid).expect("valid message decodes");
+    assert_eq!(encode(&value), valid, "canonical re-encoding");
+    for n in 0..valid.len() {
+        assert!(decode(&valid[..n]).is_err(), "prefix of {n} bytes decoded");
+    }
+    let mut longer = valid.to_vec();
+    longer.push(0);
+    assert_eq!(decode(&longer).err(), Some(DecodeError::TrailingBytes));
+    let mut m = valid.to_vec();
+    for i in 0..m.len() {
+        for bit in 0..8 {
+            m[i] ^= 1 << bit;
+            if let Ok(v) = decode(&m) {
+                assert_eq!(encode(&v), m, "byte {i} bit {bit} decoded non-canonically");
+            }
+            m[i] ^= 1 << bit;
+        }
+    }
 }

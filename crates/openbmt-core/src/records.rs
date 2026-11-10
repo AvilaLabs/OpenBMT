@@ -21,6 +21,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 use crate::identity::{tagged_hash, DeviceId, Identity, Sig, TAG_RECORD};
+use crate::wire::{self, DecodeError, Reader};
 
 /// Tag for the hash that links records together.
 pub const TAG_RECORD_ID: &str = "OpenBMT/record-id/v1";
@@ -157,15 +158,59 @@ pub struct Record {
 
 impl Record {
     /// The canonical bytes that are signed.
+    ///
+    /// The body length is written as a `u32`. `Chain::append` refuses bodies
+    /// above [`MAX_BODY`] and `Chain::verify` rejects them, so every path
+    /// that signs or hashes a record keeps the length far below `u32::MAX`.
+    /// Calling this directly on a hand-built record with a body of 4 GiB or
+    /// more panics rather than truncating the length.
     pub fn signing_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(77 + self.body.len());
         out.extend_from_slice(&self.seq.to_le_bytes());
         out.extend_from_slice(&self.prev);
         out.extend_from_slice(&self.author.to_bytes());
         out.push(self.kind as u8);
-        out.extend_from_slice(&(self.body.len() as u32).to_le_bytes());
+        let len = u32::try_from(self.body.len()).expect("record body length checked by append");
+        out.extend_from_slice(&len.to_le_bytes());
         out.extend_from_slice(&self.body);
         out
+    }
+
+    /// Wire form: `OBMR`, version 1, the bytes of
+    /// [`Record::signing_bytes`], then the signature.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let body = self.signing_bytes();
+        let mut out = wire::start(&wire::MAGIC_RECORD, body.len() + 64);
+        out.extend_from_slice(&body);
+        out.extend_from_slice(&self.sig.0);
+        out
+    }
+
+    /// Parse the wire form strictly (see [`crate::wire`]). A body length
+    /// above [`MAX_BODY`] is refused before the body is read. This does not
+    /// check the signature or the chain: call [`Chain::verify`].
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut r = Reader::framed(bytes, &wire::MAGIC_RECORD)?;
+        let seq = r.u64_le()?;
+        let prev = r.array::<32>()?;
+        let author = r.device_id()?;
+        let kind_byte = r.u8()?;
+        let kind = RecordKind::from_u8(kind_byte).ok_or(DecodeError::UnknownKind(kind_byte))?;
+        let body_len = usize::try_from(r.u32_le()?).map_err(|_| DecodeError::TooLarge)?;
+        if body_len > MAX_BODY {
+            return Err(DecodeError::TooLarge);
+        }
+        let body = r.take(body_len)?.to_vec();
+        let sig = r.sig()?;
+        r.finish()?;
+        Ok(Self {
+            seq,
+            prev,
+            author,
+            kind,
+            body,
+            sig,
+        })
     }
 
     /// The record hash: what the next record's `prev` must equal.
@@ -663,6 +708,78 @@ mod tests {
             bad.check_against_check_in(&r, &devices()),
             Err(ChainError::BadCheckIn { seq: 0 })
         );
+    }
+
+    // Offsets in a record message: magic 0..4, version 4, seq 5..13,
+    // prev 13..45, author 45..77, kind 77, body length 78..82, body 82...
+    const KIND_AT: usize = 77;
+    const BODY_LEN_AT: usize = 78;
+
+    #[test]
+    fn record_round_trips_for_every_kind_and_keeps_its_hash() {
+        let c = sample();
+        for r in c.records() {
+            let bytes = r.to_bytes();
+            assert_eq!(&bytes[..5], b"OBMR\x01");
+            assert_eq!(
+                &bytes[5..bytes.len() - 64],
+                &r.signing_bytes()[..],
+                "payload is the signed bytes"
+            );
+            let back = Record::from_bytes(&bytes).unwrap();
+            assert_eq!(&back, r);
+            assert_eq!(back.hash(), r.hash());
+            assert_eq!(back.to_bytes(), bytes);
+        }
+        let decoded: Vec<Record> = c
+            .records()
+            .iter()
+            .map(|r| Record::from_bytes(&r.to_bytes()).unwrap())
+            .collect();
+        assert_eq!(Chain::from_records(decoded).verify(&devices()), Ok(()));
+        let mut empty_body = Chain::new();
+        let r = empty_body
+            .append(&identity(1), RecordKind::Conflict, Vec::new())
+            .unwrap();
+        assert_eq!(Record::from_bytes(&r.to_bytes()).as_ref(), Ok(r));
+    }
+
+    #[test]
+    fn record_decoding_is_strict() {
+        let bytes = sample().records()[0].to_bytes();
+        crate::testutil::assert_strict_decoding(&bytes, Record::from_bytes, Record::to_bytes);
+    }
+
+    #[test]
+    fn record_rejects_bad_framing_kind_and_key() {
+        let good = sample().records()[0].to_bytes();
+        let edit = |at: usize, v: u8| {
+            let mut b = good.clone();
+            b[at] = v;
+            Record::from_bytes(&b).unwrap_err()
+        };
+        assert_eq!(edit(1, b'X'), DecodeError::BadMagic);
+        assert_eq!(edit(4, 0), DecodeError::UnsupportedVersion(0));
+        assert_eq!(edit(4, 2), DecodeError::UnsupportedVersion(2));
+        assert_eq!(edit(KIND_AT, 0), DecodeError::UnknownKind(0));
+        assert_eq!(edit(KIND_AT, 9), DecodeError::UnknownKind(9));
+        let mut b = good.clone();
+        b[45..77].fill(0);
+        assert_eq!(Record::from_bytes(&b).unwrap_err(), DecodeError::InvalidKey);
+    }
+
+    #[test]
+    fn record_body_length_is_checked_before_the_body_is_read() {
+        let good = sample().records()[0].to_bytes();
+        // A huge length with nothing behind it: too large, not an allocation.
+        let mut b = good[..BODY_LEN_AT + 4].to_vec();
+        for len in [(MAX_BODY as u32) + 1, u32::MAX] {
+            b[BODY_LEN_AT..].copy_from_slice(&len.to_le_bytes());
+            assert_eq!(Record::from_bytes(&b).unwrap_err(), DecodeError::TooLarge);
+        }
+        // At the limit but absent: short input.
+        b[BODY_LEN_AT..].copy_from_slice(&(MAX_BODY as u32).to_le_bytes());
+        assert_eq!(Record::from_bytes(&b).unwrap_err(), DecodeError::Truncated);
     }
 
     #[test]

@@ -1,0 +1,267 @@
+//! Strict wire encodings.
+//!
+//! Every message that crosses a device boundary or is written to storage is
+//! framed the same way:
+//!
+//! ```text
+//! magic (4 ASCII bytes) | version u8 | payload
+//! ```
+//!
+//! The magic names the type, so bytes meant for one type are never read as
+//! another. The version is currently 1; any other value is refused.
+//!
+//! Decoding is strict. A message decodes only if it is exactly what
+//! `to_bytes` would have produced for the value it describes: no trailing
+//! bytes, no alternative spellings (flags are 0 or 1, lists are in ascending
+//! order without repeats, lengths are the canonical ones), and every length
+//! is checked against its limit and against the bytes that are actually
+//! present before anything is allocated. For all bytes `b` that decode,
+//! `to_bytes(from_bytes(b)) == b`.
+//!
+//! Decoding only parses. It does not verify signatures and does not run
+//! `validate` or `verify`; callers must still do that before trusting a
+//! decoded value.
+
+use std::fmt;
+
+use crate::identity::{DeviceId, Sig};
+
+/// The only wire version this crate reads and writes.
+pub const VERSION: u8 = 1;
+
+/// Magic of a [`SignedBatch`](crate::batch::SignedBatch).
+pub const MAGIC_SIGNED_BATCH: [u8; 4] = *b"OBMB";
+/// Magic of a [`Record`](crate::records::Record).
+pub const MAGIC_RECORD: [u8; 4] = *b"OBMR";
+/// Magic of a [`SignedSettings`](crate::settings::SignedSettings).
+pub const MAGIC_SIGNED_SETTINGS: [u8; 4] = *b"OBMS";
+/// Magic of a [`HighWater`](crate::batch::HighWater) snapshot.
+pub const MAGIC_HIGH_WATER: [u8; 4] = *b"OBMH";
+/// Magic of a [`CounterBatches`](crate::batch::CounterBatches) snapshot.
+pub const MAGIC_COUNTER_BATCHES: [u8; 4] = *b"OBMC";
+/// Magic of an [`Exposure`](crate::policy::Exposure) snapshot.
+pub const MAGIC_EXPOSURE: [u8; 4] = *b"OBME";
+/// Magic of a [`PauseTracker`](crate::policy::PauseTracker) snapshot.
+pub const MAGIC_PAUSE_TRACKER: [u8; 4] = *b"OBMP";
+
+/// Why bytes were not accepted as a message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecodeError {
+    /// The input ends before the message does.
+    Truncated,
+    /// Bytes remain after the message.
+    TrailingBytes,
+    /// The first four bytes are not this type's magic.
+    BadMagic,
+    /// The version byte is not one this crate reads.
+    UnsupportedVersion(u8),
+    /// A length or count is above its limit.
+    TooLarge,
+    /// The bytes are not what `to_bytes` would produce; the text says which
+    /// rule failed.
+    NonCanonical(&'static str),
+    /// A public key is not a point on the curve.
+    InvalidKey,
+    /// A record kind byte is not a known kind.
+    UnknownKind(u8),
+}
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Truncated => write!(f, "message is cut short"),
+            Self::TrailingBytes => write!(f, "message has bytes after its end"),
+            Self::BadMagic => write!(f, "message is not of this type"),
+            Self::UnsupportedVersion(v) => write!(f, "message version {v} is not supported"),
+            Self::TooLarge => write!(f, "message length is above its limit"),
+            Self::NonCanonical(why) => write!(f, "message is not in canonical form: {why}"),
+            Self::InvalidKey => write!(f, "message holds an invalid public key"),
+            Self::UnknownKind(k) => write!(f, "unknown record kind {k}"),
+        }
+    }
+}
+
+impl std::error::Error for DecodeError {}
+
+/// Start a message: magic and version.
+pub(crate) fn start(magic: &[u8; 4], capacity: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(capacity + 5);
+    out.extend_from_slice(magic);
+    out.push(VERSION);
+    out
+}
+
+/// Cursor over the bytes being decoded.
+pub(crate) struct Reader<'a> {
+    buf: &'a [u8],
+}
+
+impl<'a> Reader<'a> {
+    /// Start reading `buf` and check its magic and version.
+    pub(crate) fn framed(buf: &'a [u8], magic: &[u8; 4]) -> Result<Self, DecodeError> {
+        let mut r = Self { buf };
+        if r.take(4)? != magic {
+            return Err(DecodeError::BadMagic);
+        }
+        match r.u8()? {
+            VERSION => Ok(r),
+            v => Err(DecodeError::UnsupportedVersion(v)),
+        }
+    }
+
+    /// Bytes not yet read.
+    pub(crate) fn remaining(&self) -> usize {
+        self.buf.len()
+    }
+
+    pub(crate) fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
+        if n > self.buf.len() {
+            return Err(DecodeError::Truncated);
+        }
+        let (head, tail) = self.buf.split_at(n);
+        self.buf = tail;
+        Ok(head)
+    }
+
+    pub(crate) fn u8(&mut self) -> Result<u8, DecodeError> {
+        Ok(self.array::<1>()?[0])
+    }
+
+    pub(crate) fn u16_le(&mut self) -> Result<u16, DecodeError> {
+        Ok(u16::from_le_bytes(self.array()?))
+    }
+
+    pub(crate) fn u32_le(&mut self) -> Result<u32, DecodeError> {
+        Ok(u32::from_le_bytes(self.array()?))
+    }
+
+    pub(crate) fn u64_le(&mut self) -> Result<u64, DecodeError> {
+        Ok(u64::from_le_bytes(self.array()?))
+    }
+
+    pub(crate) fn array<const N: usize>(&mut self) -> Result<[u8; N], DecodeError> {
+        <[u8; N]>::try_from(self.take(N)?).map_err(|_| DecodeError::Truncated)
+    }
+
+    /// A byte that must be 0 or 1.
+    pub(crate) fn flag(&mut self) -> Result<bool, DecodeError> {
+        match self.u8()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(DecodeError::NonCanonical("flag is not 0 or 1")),
+        }
+    }
+
+    /// A valid x-only public key.
+    pub(crate) fn device_id(&mut self) -> Result<DeviceId, DecodeError> {
+        DeviceId::from_bytes(&self.array()?).map_err(|_| DecodeError::InvalidKey)
+    }
+
+    pub(crate) fn sig(&mut self) -> Result<Sig, DecodeError> {
+        Ok(Sig(self.array()?))
+    }
+
+    /// A u32 element count for a list whose elements take at least
+    /// `min_elem` bytes each. A count above `max` is `TooLarge`; a count that
+    /// cannot fit in the bytes left is `Truncated`. Either way it is refused
+    /// before the caller reserves anything.
+    pub(crate) fn count(&mut self, max: usize, min_elem: usize) -> Result<usize, DecodeError> {
+        let n = usize::try_from(self.u32_le()?).map_err(|_| DecodeError::TooLarge)?;
+        if n > max {
+            return Err(DecodeError::TooLarge);
+        }
+        match n.checked_mul(min_elem) {
+            Some(need) if need <= self.buf.len() => Ok(n),
+            _ => Err(DecodeError::Truncated),
+        }
+    }
+
+    /// Succeed only if every byte was read.
+    pub(crate) fn finish(self) -> Result<(), DecodeError> {
+        if self.buf.is_empty() {
+            Ok(())
+        } else {
+            Err(DecodeError::TrailingBytes)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reader_reads_in_order_and_reports_short_input() {
+        let bytes = [1u8, 2, 0, 3, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 9];
+        let mut r = Reader { buf: &bytes };
+        assert_eq!(r.u8(), Ok(1));
+        assert_eq!(r.u16_le(), Ok(2));
+        assert_eq!(r.u32_le(), Ok(3));
+        assert_eq!(r.u64_le(), Ok(4));
+        assert_eq!(r.remaining(), 1);
+        assert_eq!(r.u16_le(), Err(DecodeError::Truncated));
+        assert_eq!(r.finish(), Err(DecodeError::TrailingBytes));
+        assert_eq!(Reader { buf: &[] }.finish(), Ok(()));
+    }
+
+    #[test]
+    fn framing_checks_magic_then_version() {
+        let m = *b"TEST";
+        assert!(Reader::framed(b"TEST\x01", &m).is_ok());
+        assert_eq!(
+            Reader::framed(b"TESX\x01", &m).err(),
+            Some(DecodeError::BadMagic)
+        );
+        assert_eq!(
+            Reader::framed(b"TEST\x00", &m).err(),
+            Some(DecodeError::UnsupportedVersion(0))
+        );
+        assert_eq!(
+            Reader::framed(b"TEST\x02", &m).err(),
+            Some(DecodeError::UnsupportedVersion(2))
+        );
+        assert_eq!(
+            Reader::framed(b"TES", &m).err(),
+            Some(DecodeError::Truncated)
+        );
+        assert_eq!(
+            Reader::framed(b"TEST", &m).err(),
+            Some(DecodeError::Truncated)
+        );
+    }
+
+    #[test]
+    fn count_checks_limit_before_length() {
+        let mut r = Reader {
+            buf: &[255, 255, 255, 255],
+        };
+        assert_eq!(r.count(10, 4), Err(DecodeError::TooLarge));
+        let mut r = Reader {
+            buf: &[3, 0, 0, 0, 1, 2, 3],
+        };
+        assert_eq!(r.count(10, 4), Err(DecodeError::Truncated));
+        let mut r = Reader {
+            buf: &[3, 0, 0, 0, 1, 2, 3],
+        };
+        assert_eq!(r.count(10, 1), Ok(3));
+    }
+
+    #[test]
+    fn flag_accepts_only_zero_and_one() {
+        assert_eq!(Reader { buf: &[0] }.flag(), Ok(false));
+        assert_eq!(Reader { buf: &[1] }.flag(), Ok(true));
+        assert!(matches!(
+            Reader { buf: &[2] }.flag(),
+            Err(DecodeError::NonCanonical(_))
+        ));
+    }
+
+    #[test]
+    fn device_id_must_be_a_curve_point() {
+        // An all-zero x coordinate is not on the curve.
+        assert_eq!(
+            Reader { buf: &[0u8; 32] }.device_id(),
+            Err(DecodeError::InvalidKey)
+        );
+    }
+}

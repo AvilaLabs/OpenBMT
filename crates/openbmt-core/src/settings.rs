@@ -16,6 +16,7 @@ use std::fmt;
 use crate::batch::PinnedRoots;
 use crate::identity::{tagged_hash, DeviceId, Identity, Sig, TAG_SETTINGS};
 use crate::policy::{self, CheckMode};
+use crate::wire::{self, DecodeError, Reader};
 
 /// Largest underpayment tolerance `validate` accepts, in basis points (5%).
 pub const MAX_TOLERANCE_BPS: u32 = 500;
@@ -25,6 +26,23 @@ pub const MIN_HEARTBEAT_MAX_AGE_SECS: u32 = 60;
 pub const MAX_HEARTBEAT_MAX_AGE_SECS: u32 = 3_600;
 /// The whole of a budget, in basis points; counter shares may not sum above it.
 pub const SHARE_TOTAL_BPS: u32 = 10_000;
+
+/// Most devices a settings value may list. Counters must be devices, so this
+/// bounds the counter list too.
+pub const MAX_DEVICES: usize = 256;
+
+/// Require `key` to sort strictly after the previous one in a list.
+fn ascending(
+    last: &mut Option<[u8; 32]>,
+    key: [u8; 32],
+    why: &'static str,
+) -> Result<(), DecodeError> {
+    if last.is_some_and(|prev| prev >= key) {
+        return Err(DecodeError::NonCanonical(why));
+    }
+    *last = Some(key);
+    Ok(())
+}
 
 /// A money limit: satoshis (enforced) and whole dollars (shown).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -197,6 +215,74 @@ impl Settings {
             out.extend_from_slice(&share.to_le_bytes());
         }
         out
+    }
+
+    /// Read the bytes written by [`Settings::encode`], field by field. This
+    /// only parses: `validate` is still the caller's to run.
+    fn read(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let version = r.u32_le()?;
+        let mut limits = [Limit {
+            sats: 0,
+            display_usd: 0,
+        }; 10];
+        for l in &mut limits {
+            l.sats = r.u64_le()?;
+            l.display_usd = r.u32_le()?;
+        }
+        let [light_per_sale, light_budget, node_per_sale, node_budget, box_per_sale, box_budget, refund_cap, refund_daily_cap, cashier_override_daily_cap, manager_override_ceiling] =
+            limits;
+        let underpayment_tolerance_bps = r.u32_le()?;
+        let min_confirmations = r.u8()?;
+        let heartbeat_max_age_secs = r.u32_le()?;
+        let tor_on = r.flag()?;
+        let customer_wifi = r.flag()?;
+
+        let n = r.count(MAX_DEVICES, 32)?;
+        let mut devices = BTreeSet::new();
+        let mut last: Option<[u8; 32]> = None;
+        for _ in 0..n {
+            let key = r.device_id()?;
+            ascending(
+                &mut last,
+                key.to_bytes(),
+                "devices are not in ascending order",
+            )?;
+            devices.insert(key);
+        }
+
+        let n = r.count(MAX_DEVICES, 34)?;
+        let mut counters = BTreeMap::new();
+        let mut last: Option<[u8; 32]> = None;
+        for _ in 0..n {
+            let key = r.device_id()?;
+            ascending(
+                &mut last,
+                key.to_bytes(),
+                "counters are not in ascending order",
+            )?;
+            counters.insert(key, r.u16_le()?);
+        }
+
+        Ok(Self {
+            version,
+            light_per_sale,
+            light_budget,
+            node_per_sale,
+            node_budget,
+            box_per_sale,
+            box_budget,
+            underpayment_tolerance_bps,
+            refund_cap,
+            refund_daily_cap,
+            cashier_override_daily_cap,
+            manager_override_ceiling,
+            min_confirmations,
+            heartbeat_max_age_secs,
+            tor_on,
+            customer_wifi,
+            devices,
+            counters,
+        })
     }
 
     fn limits(&self) -> [&Limit; 10] {
@@ -464,6 +550,45 @@ impl SignedSettings {
             (None, Change::Loosening) => Err(SettingsError::ApproverRequired),
             _ => Ok(change),
         }
+    }
+}
+
+impl SignedSettings {
+    /// Wire form: `OBMS`, version 1, the bytes of [`Settings::encode`] (the
+    /// bytes that are hashed and signed), the owner signature, a flag byte
+    /// (1 if a Key app signature follows, else 0) and, only when the flag is
+    /// 1, the Key app signature. Call it on settings that passed `validate`;
+    /// `encode` panics when a list holds more than `u32::MAX` entries.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let body = self.settings.encode();
+        let mut out = wire::start(&wire::MAGIC_SIGNED_SETTINGS, body.len() + 129);
+        out.extend_from_slice(&body);
+        out.extend_from_slice(&self.owner_sig.0);
+        match &self.approver_sig {
+            Some(sig) => {
+                out.push(1);
+                out.extend_from_slice(&sig.0);
+            }
+            None => out.push(0),
+        }
+        out
+    }
+
+    /// Parse the wire form strictly (see [`crate::wire`]). Lists longer than
+    /// [`MAX_DEVICES`] are refused before anything is allocated. This does
+    /// not check signatures or run `validate`: call
+    /// [`SignedSettings::verify`].
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut r = Reader::framed(bytes, &wire::MAGIC_SIGNED_SETTINGS)?;
+        let settings = Settings::read(&mut r)?;
+        let owner_sig = r.sig()?;
+        let approver_sig = if r.flag()? { Some(r.sig()?) } else { None };
+        r.finish()?;
+        Ok(Self {
+            settings,
+            owner_sig,
+            approver_sig,
+        })
     }
 }
 
@@ -1145,6 +1270,177 @@ mod tests {
         assert_eq!(
             store.apply(signed),
             Err(SettingsError::StaleVersion { current: 0, got: 0 })
+        );
+    }
+
+    // Offsets in a settings message: magic 0..4, version 4, settings
+    // version 5..9, ten limits of 12 bytes 9..129, tolerance 129..133,
+    // confirmations 133, heartbeat 134..138, tor 138, wifi 139, device count
+    // 140..144, then the devices.
+    const TOR_AT: usize = 138;
+    const DEVICE_COUNT_AT: usize = 140;
+    const DEVICES_AT: usize = 144;
+
+    /// Two devices, both counters, one with a share of zero.
+    fn wire_settings() -> Settings {
+        let mut s = base();
+        s.devices = [identity(40), identity(41)]
+            .iter()
+            .map(Identity::device_id)
+            .collect();
+        s.counters = s.devices.iter().copied().zip([2_500u16, 0]).collect();
+        s
+    }
+
+    fn signed_both(s: Settings) -> SignedSettings {
+        let (o, a, _) = roots();
+        SignedSettings {
+            owner_sig: s.sign(&o),
+            approver_sig: Some(s.sign(&a)),
+            settings: s,
+        }
+    }
+
+    fn owner_only(s: Settings) -> SignedSettings {
+        SignedSettings {
+            approver_sig: None,
+            ..signed_both(s)
+        }
+    }
+
+    #[test]
+    fn signed_settings_round_trip_and_still_verify() {
+        let (_, _, roots) = roots();
+        for signed in [signed_both(wire_settings()), owner_only(wire_settings())] {
+            let bytes = signed.to_bytes();
+            assert_eq!(&bytes[..5], b"OBMS\x01");
+            assert_eq!(
+                &bytes[5..5 + signed.settings.encode().len()],
+                &signed.settings.encode()[..]
+            );
+            let back = SignedSettings::from_bytes(&bytes).unwrap();
+            assert_eq!(back, signed);
+            assert_eq!(back.settings.hash(), signed.settings.hash());
+            assert_eq!(back.to_bytes(), bytes);
+            assert_eq!(
+                back.verify(&roots, None).is_ok(),
+                signed.verify(&roots, None).is_ok()
+            );
+        }
+        let back = SignedSettings::from_bytes(&signed_both(wire_settings()).to_bytes()).unwrap();
+        assert_eq!(back.verify(&roots, None), Ok(Change::Loosening));
+    }
+
+    #[test]
+    fn signed_settings_decoding_is_strict() {
+        for signed in [signed_both(wire_settings()), owner_only(wire_settings())] {
+            crate::testutil::assert_strict_decoding(
+                &signed.to_bytes(),
+                SignedSettings::from_bytes,
+                SignedSettings::to_bytes,
+            );
+        }
+    }
+
+    #[test]
+    fn many_devices_round_trip_in_ascending_key_order() {
+        // BTreeSet order must be the byte order the decoder requires.
+        let mut s = base();
+        s.devices = (1..=MAX_DEVICES.min(100) as u8)
+            .map(|n| identity(n).device_id())
+            .collect();
+        s.counters = s.devices.iter().copied().map(|d| (d, 1u16)).collect();
+        let signed = signed_both(s);
+        let back = SignedSettings::from_bytes(&signed.to_bytes()).unwrap();
+        assert_eq!(back, signed);
+    }
+
+    #[test]
+    fn signed_settings_rejects_bad_framing_and_fields() {
+        let good = signed_both(wire_settings()).to_bytes();
+        let edit = |at: usize, v: u8| {
+            let mut b = good.clone();
+            b[at] = v;
+            SignedSettings::from_bytes(&b).unwrap_err()
+        };
+        assert_eq!(edit(3, b'X'), DecodeError::BadMagic);
+        assert_eq!(edit(4, 0), DecodeError::UnsupportedVersion(0));
+        assert_eq!(edit(4, 2), DecodeError::UnsupportedVersion(2));
+        assert!(matches!(edit(TOR_AT, 2), DecodeError::NonCanonical(_)));
+        assert!(matches!(edit(TOR_AT + 1, 2), DecodeError::NonCanonical(_)));
+        // The Key app signature flag is the last byte but 64.
+        let flag_at = good.len() - 65;
+        assert!(matches!(edit(flag_at, 2), DecodeError::NonCanonical(_)));
+        // A device key that is not on the curve.
+        let mut b = good.clone();
+        b[DEVICES_AT..DEVICES_AT + 32].fill(0);
+        assert_eq!(
+            SignedSettings::from_bytes(&b).unwrap_err(),
+            DecodeError::InvalidKey
+        );
+    }
+
+    #[test]
+    fn signed_settings_rejects_unsorted_and_repeated_lists() {
+        let good = signed_both(wire_settings()).to_bytes();
+        let (d0, d1) = (DEVICES_AT, DEVICES_AT + 32);
+        let counters_at = DEVICES_AT + 64 + 4;
+        let (c0, c1) = (counters_at, counters_at + 34);
+
+        let swap = |a: usize, b: usize, len: usize| {
+            let mut m = good.clone();
+            let (x, y) = (good[a..a + len].to_vec(), good[b..b + len].to_vec());
+            m[a..a + len].copy_from_slice(&y);
+            m[b..b + len].copy_from_slice(&x);
+            m
+        };
+        let repeat = |from: usize, to: usize, len: usize| {
+            let mut m = good.clone();
+            m.copy_within(from..from + len, to);
+            m
+        };
+        let unsorted_devices = swap(d0, d1, 32);
+        let repeated_devices = repeat(d0, d1, 32);
+        let unsorted_counters = swap(c0, c1, 34);
+        let repeated_counters = repeat(c0, c1, 34);
+        for bad in [
+            unsorted_devices,
+            repeated_devices,
+            unsorted_counters,
+            repeated_counters,
+        ] {
+            assert!(matches!(
+                SignedSettings::from_bytes(&bad),
+                Err(DecodeError::NonCanonical(_))
+            ));
+        }
+        assert!(SignedSettings::from_bytes(&good).is_ok());
+    }
+
+    #[test]
+    fn signed_settings_list_counts_are_checked_before_allocation() {
+        let good = signed_both(wire_settings()).to_bytes();
+        let mut b = good[..DEVICES_AT].to_vec();
+        for n in [MAX_DEVICES as u32 + 1, u32::MAX] {
+            b[DEVICE_COUNT_AT..].copy_from_slice(&n.to_le_bytes());
+            assert_eq!(
+                SignedSettings::from_bytes(&b).unwrap_err(),
+                DecodeError::TooLarge
+            );
+        }
+        // At the limit but without the bytes to back it.
+        b[DEVICE_COUNT_AT..].copy_from_slice(&(MAX_DEVICES as u32).to_le_bytes());
+        assert_eq!(
+            SignedSettings::from_bytes(&b).unwrap_err(),
+            DecodeError::Truncated
+        );
+        // The same rule for the counter list.
+        let counters_at = DEVICES_AT + 64;
+        let mut b = good[..counters_at + 4].to_vec();
+        b[counters_at..].copy_from_slice(&(MAX_DEVICES as u32 + 1).to_le_bytes());
+        assert_eq!(
+            SignedSettings::from_bytes(&b).unwrap_err(),
+            DecodeError::TooLarge
         );
     }
 }
