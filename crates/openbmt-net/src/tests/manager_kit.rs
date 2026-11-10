@@ -238,6 +238,7 @@ impl Net {
             network: Network::Regtest,
             target_peers,
             watch_from,
+            allow_local: false,
         };
         Self {
             m: Manager::new(config, HeaderStore::new(Network::Regtest).expect("regtest")),

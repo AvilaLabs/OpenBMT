@@ -77,6 +77,7 @@ fuzz_target!(|data: &[u8]| {
         network: Network::Regtest,
         target_peers: usize::from(PEERS),
         watch_from: u32::from(setup >> 4),
+        allow_local: false,
     };
     let Ok(store) = HeaderStore::new(Network::Regtest) else {
         return;

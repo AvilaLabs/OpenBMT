@@ -8,13 +8,15 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use bitcoin::p2p::address::{AddrV2, Address};
 use bitcoin::p2p::message::NetworkMessage;
 use bitcoin::p2p::ServiceFlags;
-use bitcoin::{BlockHash, CompactTarget, ScriptBuf, Txid};
-use openbmt_watch::{network_group, PeerAddr};
+use bitcoin::{BlockHash, CompactTarget, Network, ScriptBuf, Txid};
+use openbmt_watch::{network_group, HeaderStore, PeerAddr};
 
 use super::kit::{command_field, raw_frame, raw_header, verack_frame, version_frame};
 use super::manager_kit::*;
 use crate::manager::MAX_UNANSWERED;
-use crate::{ConnectRefused, Output, PeerAddress, PeerId, MAX_OUTGOING_BYTES};
+use crate::{
+    ConnectRefused, Manager, ManagerConfig, Output, PeerAddress, PeerId, MAX_OUTGOING_BYTES,
+};
 
 // ----- NR-20, NR-21: which peers -----------------------------------------
 
@@ -60,6 +62,19 @@ fn nr_20_the_local_group_is_refused() {
         );
     }
     assert_eq!(n.m.sizes().peers, 0);
+}
+
+#[test]
+fn nr_20_a_local_peer_is_taken_only_when_the_caller_allows_it() {
+    let config = ManagerConfig {
+        network: Network::Regtest,
+        target_peers: 8,
+        watch_from: 0,
+        allow_local: true,
+    };
+    let mut m = Manager::new(config, HeaderStore::new(Network::Regtest).unwrap());
+    let local = PeerAddr::Ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
+    assert_eq!(m.connected(PeerId(1), local, 1, T0), Ok(()));
 }
 
 #[test]
@@ -619,7 +634,41 @@ fn nr_33_ahead_since_is_set_when_a_peer_claims_more_than_two_above_the_tip() {
     n.join(3, plain(), 50);
     assert_eq!(n.m.ahead_since(), Some(t));
     // The claim stands while the headers are not delivered.
-    n.tick(500);
+    n.tick(400);
+    assert_eq!(n.m.ahead_since(), Some(t));
+}
+
+#[test]
+fn nr_33_a_claim_with_no_headers_behind_it_ends_the_peer_after_ten_minutes() {
+    let mut n = Net::new();
+    n.join(1, plain(), 0);
+    n.join(2, plain(), 50);
+    let out = n.tick(599);
+    assert!(disconnects(&out).is_empty(), "{out:?}");
+    let out = n.tick(1);
+    assert_eq!(disconnects(&out), vec![(PeerId(2), true)]);
+    assert!(reason(&out).starts_with("NR-33"), "{}", reason(&out));
+    // The peer no longer holds the check back.
+    assert_eq!(n.m.ahead_since(), None);
+}
+
+#[test]
+fn nr_33_a_peer_whose_headers_the_store_cannot_take_yet_is_kept_and_counts_as_ahead() {
+    let mut n = Net::new();
+    let t = n.now;
+    let a = n.join(1, plain(), 5).id;
+    let g = genesis();
+    // WR-06: dated too far ahead. Not the peer's doing.
+    let future = mine(
+        g.block_hash(),
+        T0 as u32 + 100_000,
+        0x207f_ffff,
+        child(&g, 1).merkle_root,
+    );
+    let out = n.headers(a, &[future]);
+    assert!(out.is_empty(), "{out:?}");
+    let out = n.tick(5_000);
+    assert!(disconnects(&out).is_empty(), "{out:?}");
     assert_eq!(n.m.ahead_since(), Some(t));
 }
 
@@ -662,6 +711,27 @@ fn nr_40_with_no_script_watched_nothing_is_asked() {
     }
     assert_eq!(n.m.checked_height(), 3);
     assert_eq!(n.m.sizes().work, 0);
+}
+
+#[test]
+fn nr_40_filter_peers_take_turns_by_block_height() {
+    let mut n = Net::new();
+    let peers: Vec<PeerId> = (1..=3).map(|i| n.up_filters(i)).collect();
+    assert!(n.m.watch_script(script(1)));
+    let hs = extend(&genesis(), 3, 1);
+    n.headers(peers[0], &hs);
+    let asked: Vec<Vec<u32>> = peers
+        .iter()
+        .map(|id| {
+            filter_requests(&n.sent(*id))
+                .into_iter()
+                .map(|(height, _)| height)
+                .collect()
+        })
+        .collect();
+    // Height 1 starts with the second peer, height 2 with the third, and
+    // height 3 with the first: each peer is left out of one block.
+    assert_eq!(asked, vec![vec![2, 3], vec![1, 3], vec![1, 2]]);
 }
 
 #[test]
@@ -1348,30 +1418,64 @@ fn nr_54_only_the_last_100000_announced_ids_are_remembered() {
     let sizes = n.m.sizes();
     assert_eq!(sizes.txs, 100_000);
     assert_eq!(sizes.tx_order, 100_000);
-    // Turned on, the first 5,000 that are remembered are asked for: the
-    // oldest, number 0, is forgotten.
+    // Turned on, the first 1,000 that are remembered are asked of the one
+    // peer: the oldest, number 0, is forgotten.
     n.m.set_fetch_transactions(true);
     let asked = tx_requests(&n.sent(a));
-    assert_eq!(asked.len(), 5_000);
+    assert_eq!(asked.len(), 1_000);
     assert_eq!(asked[0], fake_txid(1));
-    assert_eq!(asked[4_999], fake_txid(5_000));
+    assert_eq!(asked[999], fake_txid(1_000));
     assert!(!asked.contains(&fake_txid(0)));
 }
 
 #[test]
 fn nr_51_at_most_5000_requests_are_pending_and_room_frees_as_they_end() {
     let mut n = Net::new();
-    let a = n.up(1);
-    let txs: Vec<_> = (0..5_001u32).map(|i| pay(&script(1), 1_000, i)).collect();
-    let ids: Vec<Txid> = txs.iter().map(|t| t.compute_txid()).collect();
-    n.inv_txs(a, &ids);
-    let asked = tx_requests(&n.sent(a));
-    assert_eq!(asked, ids[..5_000].to_vec());
+    let peers: Vec<PeerId> = (1..=6).map(|i| n.up(i)).collect();
+    // Five peers fill the 5,000 places, 1,000 each; the sixth has to wait.
+    let mut first = None;
+    for (k, id) in peers.iter().take(5).enumerate() {
+        let txs: Vec<_> = (0..1_000u32)
+            .map(|i| pay(&script(1), 1_000, k as u32 * 1_000 + i))
+            .collect();
+        let ids: Vec<Txid> = txs.iter().map(|t| t.compute_txid()).collect();
+        n.inv_txs(*id, &ids);
+        assert_eq!(tx_requests(&n.sent(*id)), ids);
+        first.get_or_insert((*id, txs[0].clone()));
+    }
     assert_eq!(n.m.sizes().pending_tx, 5_000);
+    let late = pay(&script(1), 1_000, 9_999).compute_txid();
+    n.inv_txs(peers[5], &[late]);
+    assert!(tx_requests(&n.sent(peers[5])).is_empty());
     // One answer makes room for the one that waited.
-    n.tx(a, &txs[0]);
-    assert_eq!(tx_requests(&n.sent(a)), vec![ids[5_000]]);
+    let (id, tx) = first.unwrap();
+    n.tx(id, &tx);
+    assert_eq!(tx_requests(&n.sent(peers[5])), vec![late]);
     assert_eq!(n.m.sizes().pending_tx, 5_000);
+}
+
+#[test]
+fn nr_51_one_peer_holds_at_most_a_thousand_requests_and_cannot_starve_the_others() {
+    let mut n = Net::new();
+    let a = n.up(1);
+    let b = n.up(2);
+    // Peer a announces far more than its share and answers nothing.
+    let junk: Vec<Txid> = (0..6_000u64).map(fake_txid).collect();
+    n.inv_txs(a, &junk);
+    assert_eq!(tx_requests(&n.sent(a)).len(), 1_000);
+    assert_eq!(n.m.sizes().pending_tx, 1_000);
+    // A transaction from another peer is asked for at once.
+    let tx = pay(&script(1), 1_000, 1);
+    let txid = tx.compute_txid();
+    n.inv_txs(b, &[txid]);
+    assert_eq!(tx_requests(&n.sent(b)), vec![txid]);
+    let out = n.tx(b, &tx);
+    assert!(matches!(out[..], [Output::Sighting { .. }]), "{out:?}");
+    // What waits behind a full share is not lost: it is asked for as the
+    // share frees.
+    assert_eq!(n.m.sizes().waiting, 5_000);
+    n.not_found_tx(a, junk[0]);
+    assert_eq!(tx_requests(&n.sent(a)), vec![junk[1_000]]);
 }
 
 #[test]
@@ -1497,13 +1601,13 @@ fn nr_54_a_peer_that_announces_a_million_transactions_leaves_every_collection_bo
         let sizes = n.m.sizes();
         assert!(sizes.tx_order <= 100_000, "{sizes:?}");
         assert!(sizes.waiting <= 100_000, "{sizes:?}");
-        assert!(sizes.pending_tx <= 5_000, "{sizes:?}");
+        assert!(sizes.pending_tx <= 1_000, "{sizes:?}");
         assert!(sizes.txs <= 105_000, "{sizes:?}");
     }
     let sent = n.m.outgoing(a);
     assert!(sent.len() <= MAX_OUTGOING_BYTES);
-    // Only the requests that fit were written: 5,000 of them.
-    assert_eq!(tx_requests(&decode(&sent)).len(), 5_000);
+    // Only one peer's share was written: 1,000 requests.
+    assert_eq!(tx_requests(&decode(&sent)).len(), 1_000);
     // The line empties as the requests run out, and the peer is dropped for
     // not answering, without a mark.
     let out = n.tick(30);

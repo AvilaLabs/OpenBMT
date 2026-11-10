@@ -91,8 +91,9 @@ thin driver that owns the sockets.
 - **NR-25.** A peer is dropped and not dialed again for 24 hours when it
   breaks a rule of sections 1 or 2, sends a header that WR-05 refuses
   (other than for an unknown parent), sends a block that WR-20 or WR-21
-  refuses, sends a filter that is proven false (NR-43), or sends a block,
-  transaction or filter that was not asked of it.
+  refuses, sends a filter that is proven false (NR-43), sends a block,
+  transaction or filter that was not asked of it, or claims a height it
+  sends no headers for (NR-33).
 - **NR-26.** With Tor on, every connection goes through the SOCKS5 proxy
   the caller names, and no DNS seed is asked directly. Peers reached by
   IP address through Tor are grouped by that address like any other.
@@ -112,20 +113,30 @@ thin driver that owns the sockets.
   has shown: the start height it claimed, or the height of the highest
   header it sent that the store accepted, whichever is greater. This is
   what WR-52 reads. A peer that claims a height more than 2 blocks above
-  the tip and does not deliver the headers within 10 minutes is counted
-  as ahead for that rule; it is not dropped for it.
+  the tip and sends no headers for it within 10 minutes is dropped
+  (NR-25): the claim told the counter nothing, and one such peer must not
+  be able to stop the shop. A peer that did send headers which the store
+  could not take for a reason that is not the peer's doing (WR-06, WR-07)
+  is kept and counts as ahead for WR-52. That is the case the rule is
+  for: the counter's clock or chain may be the one that is wrong.
 
 ## 5. Blocks and filters
 
 - **NR-40.** For every block that joins the best chain after the counter
   started watching, the counter asks for the block's basic compact filter
-  from two peers in different network groups.
+  from two peers in different network groups. The filter peers take
+  turns by block height, so that no two peers are asked about every
+  block.
 - **NR-41.** A filter is matched against every script the counter is
   watching: every address it has shown for a sale, and those not yet
   used in its current batch.
 - **NR-42.** The counter downloads the full block when either filter
   matches, when the two filters are not the same bytes, or when fewer
-  than two peers answered within 60 seconds **[to tune]**.
+  than two peers answered within 60 seconds **[to tune]**. A filter that
+  cannot be read counts as a match. A peer that lets three requests in a
+  row run out (filters, blocks or transactions) is dropped, without the
+  24 hours of NR-25. An answer that comes after the counter gave up on
+  it is ignored and is not "unasked" data.
 - **NR-43.** A downloaded block is handed to the watcher (WR-20 to
   WR-22). If the block pays a watched script and a peer's filter for it
   did not match, that peer sent a false filter (NR-25).
@@ -136,8 +147,10 @@ thin driver that owns the sockets.
   does not know the scripts of the customer's coins. Reading the whole
   block is the only way to see it (WR-42).
 - **NR-45.** A block is asked of one peer at a time, with 60 seconds to
-  answer **[to tune]**, then of another. A block is identified by its
-  hash on the header chain; a peer cannot substitute another.
+  answer **[to tune]**, then of another. When every connected peer has
+  failed to give a block, the counter waits 60 seconds and starts over.
+  A block is identified by its hash on the header chain; a peer cannot
+  substitute another. At most 8 blocks are in work at once.
 - **NR-46.** When the best chain changes, the blocks that joined are
   treated as new under NR-40 to NR-44.
 
@@ -149,17 +162,21 @@ thin driver that owns the sockets.
   have, from the first peer that announced it, with 30 seconds to answer
   and then from the next. It does this all the time by default, not only
   while a sale is open. Asking only during sales would tell every peer
-  when the shop makes a sale.
+  when the shop makes a sale. At most 5,000 requests are out at once, and
+  at most 1,000 of them with one peer, so that a peer which announces
+  much and answers nothing cannot hold up the others.
 - **NR-52.** A shop can choose "less data": transactions are then fetched
   only from the opening of a sale until its payment confirms or the sale
   ends, and for 10 minutes after. The settings screen says what this
   tells peers.
 - **NR-53.** A fetched transaction is handed to the watcher as a sighting
-  from every peer that announced it (WR-40). A later announcement of the
-  same transaction by another peer is a further sighting.
-- **NR-54.** Transactions the watcher ignores are forgotten at once. The
-  counter remembers the IDs of the last 100,000 announced transactions
-  **[to tune]** so that it does not fetch one twice; it keeps no mempool.
+  from every peer that announced it (WR-40), at most 8. A later
+  announcement of the same transaction by another peer is a further
+  sighting, reported by itself.
+- **NR-54.** This crate keeps no transaction: a fetched one is handed on
+  and forgotten. The counter remembers the IDs of the last 100,000
+  announced transactions **[to tune]** so that it does not fetch one
+  twice; it keeps no mempool.
 - **NR-55.** The counter never announces or sends a transaction. It does
   not answer `getdata`, `getheaders`, `getaddr` or `mempool`.
 

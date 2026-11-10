@@ -70,6 +70,12 @@ pub const MAX_UNANSWERED: u32 = 3;
 /// Given-up requests remembered per peer, so that a late answer is not
 /// taken for unasked data.
 pub const MAX_STALE: usize = 64;
+/// NR-51: transactions asked of one peer and not yet answered. One
+/// `getdata`'s worth, so that no single peer can hold every place in
+/// [`MAX_PENDING_TXS`].
+pub const MAX_PENDING_TXS_PER_PEER: usize = 1_000;
+/// NR-33: seconds a peer has to deliver the headers for a height it claims.
+pub const CLAIM_SECS: u64 = 600;
 
 /// Names a connection. The caller chooses it, unique per connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -84,6 +90,10 @@ pub struct ManagerConfig {
     pub target_peers: usize,
     /// NR-40: blocks above this height are checked.
     pub watch_from: u32,
+    /// Take a peer at a local or private address. Off in the counter, where
+    /// such an address is the Box's node (NR-20). On only for a check
+    /// against a node on the same machine.
+    pub allow_local: bool,
 }
 
 /// NR-20, NR-21: what the driver should dial next.
@@ -205,6 +215,9 @@ struct PeerState {
     last_reask: Option<u64>,
     unanswered: u32,
     stale: VecDeque<Stale>,
+    /// NR-33: the peer sent headers that the store could not take for a
+    /// reason that is not the peer's doing.
+    blocked: bool,
 }
 
 /// What a peer's filter said about a block.
@@ -389,7 +402,7 @@ impl Manager {
             return Err(ConnectRefused::IdInUse);
         }
         let group = network_group(&addr);
-        if group == self.local_group {
+        if group == self.local_group && !self.config.allow_local {
             return Err(ConnectRefused::LocalGroup);
         }
         if self.peers.values().any(|p| p.group == group) {
@@ -419,6 +432,7 @@ impl Manager {
                 last_reask: None,
                 unanswered: 0,
                 stale: VecDeque::new(),
+                blocked: false,
             },
         );
         Ok(())
@@ -608,7 +622,7 @@ impl Manager {
     fn settle(&mut self, now: u64, out: &mut Vec<Output>) {
         loop {
             let before = self.drops;
-            self.update_ahead(now);
+            self.update_ahead(now, out);
             self.advance_blocks(now, out);
             self.pump_tx(now, out);
             if self.drops == before {
@@ -617,16 +631,33 @@ impl Manager {
         }
     }
 
-    /// NR-33: note which ready peers show a height above the tip.
-    fn update_ahead(&mut self, now: u64) {
+    /// NR-33: note which ready peers show a height above the tip, and drop
+    /// a peer whose claim has stood for [`CLAIM_SECS`] with no headers to
+    /// back it. A peer whose headers the store could not take stays: that
+    /// is the case WR-52 is for.
+    fn update_ahead(&mut self, now: u64, out: &mut Vec<Output>) {
         let limit = u64::from(self.store.tip_height()).saturating_add(u64::from(BEHIND_BLOCKS));
-        for peer in self.peers.values_mut().filter(|p| p.ready) {
+        let mut empty_claims = Vec::new();
+        for (id, peer) in self.peers.iter_mut().filter(|(_, p)| p.ready) {
             let ahead = u64::from(peer.shown_height) > limit;
             match (ahead, peer.ahead_since) {
                 (true, None) => peer.ahead_since = Some(now),
                 (false, Some(_)) => peer.ahead_since = None,
-                _ => {}
+                (true, Some(since)) => {
+                    if !peer.blocked && now.saturating_sub(since) >= CLAIM_SECS {
+                        empty_claims.push(*id);
+                    }
+                }
+                (false, None) => {}
             }
+        }
+        for id in empty_claims {
+            self.drop_peer(
+                id,
+                "NR-33: claimed a height and did not deliver the headers for it".to_string(),
+                true,
+                out,
+            );
         }
     }
 
@@ -783,6 +814,7 @@ impl Manager {
     /// NR-30 to NR-33.
     fn on_headers(&mut self, id: PeerId, headers: &[Header], now: u64, out: &mut Vec<Output>) {
         let mut clean = true;
+        let mut blocked = false;
         let mut joined: Vec<(u32, BlockHash)> = Vec::new();
         let mut shown = 0u32;
         let mut refused: Option<String> = None;
@@ -816,6 +848,7 @@ impl Manager {
                     | Refusal::AncestorMissing,
                 ) => {
                     clean = false;
+                    blocked = true;
                     break;
                 }
                 // NR-25: any other refusal of WR-05.
@@ -835,6 +868,11 @@ impl Manager {
         }
         if let Some(peer) = self.peers.get_mut(&id) {
             peer.shown_height = peer.shown_height.max(shown);
+            if blocked {
+                peer.blocked = true;
+            } else if clean && !headers.is_empty() {
+                peer.blocked = false;
+            }
         }
         // NR-30: a full message means there may be more.
         if clean && headers.len() == MAX_HEADERS {
@@ -1033,9 +1071,18 @@ impl Manager {
         }
     }
 
-    /// NR-40: ask until two peers in different groups have been asked.
+    /// NR-40: ask until two peers in different groups have been asked. The
+    /// peers take turns by block height, so that no two peers are asked
+    /// about every block.
     fn top_up_filters(&mut self, item: &mut BlockWork, out: &mut Vec<Output>) {
-        for id in self.filter_peers() {
+        let mut peers = self.filter_peers();
+        if let Some(turn) = usize::try_from(item.height)
+            .ok()
+            .and_then(|h| h.checked_rem(peers.len()))
+        {
+            peers.rotate_left(turn);
+        }
+        for id in peers {
             if item.asks.len() >= MIN_FILTER_PEERS || item.asked_total >= MAX_FILTER_ASKS {
                 break;
             }
@@ -1389,10 +1436,21 @@ impl Manager {
             return;
         }
         let mut batches: BTreeMap<PeerId, Vec<Txid>> = BTreeMap::new();
-        while self.pending_tx.len() < MAX_PENDING_TXS {
+        let mut per_peer: BTreeMap<PeerId, usize> = BTreeMap::new();
+        for (id, _) in self.pending_tx.values() {
+            let n = per_peer.entry(*id).or_default();
+            *n = n.saturating_add(1);
+        }
+        // Transactions whose announcers all have a full share keep their
+        // place in the line. One pass looks at each waiting one once.
+        let mut held: Vec<Txid> = Vec::new();
+        let mut looked = 0usize;
+        let limit = self.waiting.len();
+        while self.pending_tx.len() < MAX_PENDING_TXS && looked < limit {
             let Some(txid) = self.waiting.pop_front() else {
                 break;
             };
+            looked = looked.saturating_add(1);
             let Some(entry) = self.txs.get_mut(&txid) else {
                 continue;
             };
@@ -1401,19 +1459,32 @@ impl Manager {
                 continue;
             }
             let peers = &self.peers;
+            let untried = |a: &Announcer| !a.tried && peers.get(&a.id).is_some_and(|p| p.ready);
+            let has_room = |a: &Announcer| {
+                per_peer.get(&a.id).copied().unwrap_or(0) < MAX_PENDING_TXS_PER_PEER
+            };
             let Some(slot) = entry
                 .announcers
                 .iter_mut()
-                .find(|a| !a.tried && peers.get(&a.id).is_some_and(|p| p.ready))
+                .find(|a| untried(a) && has_room(a))
             else {
+                if entry.announcers.iter().any(untried) {
+                    entry.queued = true;
+                    held.push(txid);
+                }
                 continue;
             };
             slot.tried = true;
             let id = slot.id;
+            let n = per_peer.entry(id).or_default();
+            *n = n.saturating_add(1);
             entry.pending = true;
             self.pending_tx
                 .insert(txid, (id, now.saturating_add(TX_ANSWER_SECS)));
             batches.entry(id).or_default().push(txid);
+        }
+        for txid in held.into_iter().rev() {
+            self.waiting.push_front(txid);
         }
         for (id, txids) in batches {
             for chunk in txids.chunks(MAX_TXIDS_PER_REQUEST) {
