@@ -60,5 +60,7 @@ pub use env::{
     Clock, DirLock, FileStorage, Key, LockError, OsRandomness, Randomness, Storage, SystemClock,
     LOCK_FILE,
 };
+/// Most scripts the network manager can watch for payment checks.
+pub use openbmt_net::manager::MAX_WATCHED_SCRIPTS;
 pub use openbmt_net::RelayState;
 pub use socks::{SocksError, Target};

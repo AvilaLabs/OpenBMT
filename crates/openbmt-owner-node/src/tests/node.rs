@@ -2,6 +2,7 @@
 //! from checked blocks, sending and its states, restarts, replacement,
 //! reorganizations and the Tor rule (OC-01 to OC-09, NR-86 to NR-91).
 
+use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Sender};
@@ -25,9 +26,10 @@ use openbmt_spend::Coin;
 
 use super::coins::{mine, tx_from};
 use super::{id, Dir};
-use crate::coins::ViewState;
+use crate::coins::{CoinView, ViewState};
 use crate::{
-    NodeError, OwnerConfig, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState, NO_TOR,
+    NodeError, OwnerConfig, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState, COINS_FILE,
+    NO_TOR,
 };
 
 const NET: Network = Network::Regtest;
@@ -325,6 +327,7 @@ impl Rig {
                 .collect();
             self.scans_seen = log.len();
             let Some(from) = asked.last() else { break };
+            self.deliver(vec![AppEvent::RescanStarted(*from)]);
             self.replay_from(*from);
         }
     }
@@ -387,11 +390,13 @@ impl Rig {
         let write = self.node.queue_writer();
         self.node
             .owner_mut()
+            .unwrap()
             .queue_batch(batch(0, 3), &write)
             .unwrap();
         self.node.refresh_marks();
         self.node
             .owner_mut()
+            .unwrap()
             .set_sale_facts(
                 sale(1),
                 SaleFacts {
@@ -403,6 +408,7 @@ impl Rig {
             .unwrap();
         self.node
             .owner_mut()
+            .unwrap()
             .queue_refund(sale(1), "Mia", external(9), sats, None, &write)
             .unwrap()
     }
@@ -530,6 +536,136 @@ fn oc_02_an_unconfirmed_payment_a_peer_shows_is_not_a_coin() {
 }
 
 #[test]
+fn a_failed_key_store_write_keeps_a_joint_commit_for_same_process_recovery() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    rig.queue_refund(10_000);
+    rig.fund(300_000);
+    let built = rig.node.build_request(1_000, NOW).unwrap();
+    let mut approver = key_app();
+    let response = rig.answer(&mut approver, &built.request);
+    let stale_writer = rig.node.queue_writer();
+    let stale_queue = fs::read(dir.path().join(crate::QUEUE_FILE)).unwrap();
+    let mut signer = key1();
+    let old_snapshot = signer.to_bytes();
+    let error = rig
+        .node
+        .take(&response, &mut signer, &kit().accounts[0], NOW, |_| {
+            Err("key store unavailable".to_string())
+        })
+        .unwrap_err();
+    assert_eq!(error, NodeError::KeyRecoveryRequired);
+    assert_eq!(signer.to_bytes(), old_snapshot);
+    assert!(rig.node.take_recovery_pending());
+    assert_eq!(
+        rig.node.build_request(1_000, NOW).unwrap_err(),
+        NodeError::KeyRecoveryRequired
+    );
+    assert!(rig.node.owner().outbox().is_empty());
+
+    let queue_before_wrong_key = fs::read(dir.path().join(crate::QUEUE_FILE)).unwrap();
+    let mut wrong_key_store_called = false;
+    assert!(rig
+        .node
+        .recover_key1(&mut signer, &kit().accounts[1], |_| {
+            wrong_key_store_called = true;
+            Ok(())
+        })
+        .is_err());
+    assert!(!wrong_key_store_called);
+    assert_eq!(signer.to_bytes(), old_snapshot);
+    assert_eq!(
+        fs::read(dir.path().join(crate::QUEUE_FILE)).unwrap(),
+        queue_before_wrong_key
+    );
+    assert!(dir.path().join(crate::TAKE_JOURNAL_FILE).exists());
+    assert_eq!(
+        rig.node.build_request(1_000, NOW).unwrap_err(),
+        NodeError::KeyRecoveryRequired
+    );
+
+    let mut persisted = Vec::new();
+    rig.node
+        .recover_key1(&mut signer, &kit().accounts[0], |bytes| {
+            persisted = bytes.to_vec();
+            Ok(())
+        })
+        .unwrap();
+    assert!(!rig.node.take_recovery_pending());
+    assert_eq!(signer.to_bytes(), persisted);
+    assert_ne!(signer.to_bytes(), old_snapshot);
+    assert!(signer.latest_time_seen() >= NOW);
+    assert!(signer.change_mark() > 0);
+    let entries: Vec<_> = signer.log().collect();
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].time() >= NOW);
+    assert!(!entries[0].inputs().is_empty());
+    assert_eq!(rig.node.owner().outbox().len(), 1);
+    let committed_queue = fs::read(dir.path().join(crate::QUEUE_FILE)).unwrap();
+    assert!(stale_writer(&stale_queue).is_err());
+    assert_eq!(
+        fs::read(dir.path().join(crate::QUEUE_FILE)).unwrap(),
+        committed_queue
+    );
+}
+
+#[test]
+fn a_pending_take_journal_rolls_forward_after_restart_before_queue_actions() {
+    let dir = Dir::new();
+    let (chain, old_snapshot) = {
+        let mut rig = start(&dir, &Setup::default()).unwrap();
+        rig.queue_refund(10_000);
+        rig.fund(300_000);
+        let built = rig.node.build_request(1_000, NOW).unwrap();
+        let mut approver = key_app();
+        let response = rig.answer(&mut approver, &built.request);
+        let mut signer = key1();
+        let old_snapshot = signer.to_bytes();
+        rig.node
+            .take(&response, &mut signer, &kit().accounts[0], NOW, |_| {
+                Err("key store unavailable".to_string())
+            })
+            .unwrap_err();
+        (rig.chain.clone(), old_snapshot)
+    };
+    let mut rig = start_at(&dir, &Setup::default(), chain).unwrap();
+    assert!(rig.node.take_recovery_pending());
+    assert_eq!(
+        rig.node.build_request(1_000, NOW).unwrap_err(),
+        NodeError::KeyRecoveryRequired
+    );
+    let mut signer = SignerState::from_bytes(&old_snapshot, NET, &kit().xpubs[0]).unwrap();
+    let mut persisted = Vec::new();
+    rig.node
+        .recover_key1(&mut signer, &kit().accounts[0], |bytes| {
+            persisted = bytes.to_vec();
+            Ok(())
+        })
+        .unwrap();
+    let restored = SignerState::from_bytes(&persisted, NET, &kit().xpubs[0]).unwrap();
+    assert_eq!(signer.to_bytes(), restored.to_bytes());
+    assert_ne!(signer.to_bytes(), old_snapshot);
+    assert!(signer.latest_time_seen() >= NOW);
+    assert!(signer.change_mark() > 0);
+    let entries: Vec<_> = signer.log().collect();
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].time() >= NOW);
+    assert!(!entries[0].inputs().is_empty());
+    assert_eq!(rig.node.owner().outbox().len(), 1);
+}
+
+#[test]
+fn an_oversized_journal_file_is_rejected_from_metadata_before_reading_it() {
+    let dir = Dir::new();
+    let path = dir.path().join(crate::TAKE_JOURNAL_FILE);
+    let file = fs::File::create(&path).unwrap();
+    file.set_len(u64::try_from(crate::take_journal::MAX_JOURNAL_BYTES).unwrap() + 1)
+        .unwrap();
+    let error = crate::node::read_take_journal(dir.path()).unwrap_err();
+    assert!(error.contains("too large"));
+}
+
+#[test]
 fn oc_05_a_block_that_leaves_takes_its_coin_with_it_and_the_position_down() {
     let dir = Dir::new();
     let mut rig = start(&dir, &Setup::default()).unwrap();
@@ -572,35 +708,59 @@ fn rescans(rig: &Rig) -> usize {
 }
 
 #[test]
-fn oc_07_new_marks_watch_new_scripts_and_rescan_nothing() {
+fn oc_07_new_marks_rescan_only_the_bounded_checked_range() {
     let dir = Dir::new();
     let mut rig = start(&dir, &Setup::default()).unwrap();
+    rig.mine_empty(2);
     // Nothing is handed out: only the gap is watched, on both keychains.
     assert_eq!(rig.spawned.lock().unwrap()[0].scripts, 40);
     let before = rig.calls();
     rig.queue_refund(10_000);
     let after = rig.calls();
     let new = &after[before.len()..];
-    // 3 more receive scripts, and no scan.
+    // 3 more receive scripts and a bounded scan from the latest checked block.
     assert_eq!(new.iter().filter(|c| *c == "main watch").count(), 3);
-    assert_eq!(rescans(&rig), 0);
+    assert_eq!(new.iter().filter(|c| *c == "main rescan 1").count(), 1);
+    assert_eq!(rig.node.state(), ViewState::Rescanning { to: 2 });
+    assert!(matches!(
+        rig.node.build_request(1_000, NOW),
+        Err(NodeError::NotReady(_))
+    ));
+    rig.rescan();
+    assert_eq!(rig.node.state(), ViewState::Ready);
     rig.node.refresh_marks();
     assert_eq!(
         rig.calls().len(),
         after.len(),
         "nothing grew, nothing is said"
     );
-    // A spend raises the change mark: still no scan, and the view is ready
-    // the whole way.
+    // A spend raises the change mark and starts a short scan.
     rig.fund(300_000);
     let txid = rig.spend();
     assert!(rig.node.send_state(&txid).is_some());
-    assert_eq!(rescans(&rig), 0);
+    assert!(rescans(&rig) >= 1);
+    rig.rescan();
     assert_eq!(rig.node.state(), ViewState::Ready);
 }
 
 #[test]
-fn oc_07_a_payment_in_the_next_block_after_a_batch_is_found_and_a_session_can_be_built() {
+fn oc_07_a_fresh_wallet_waits_for_the_ordered_watch_update_without_a_future_height() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let write = rig.node.queue_writer();
+    rig.node
+        .owner_mut()
+        .unwrap()
+        .queue_batch(batch(0, 3), &write)
+        .unwrap();
+    rig.node.refresh_marks();
+    assert_eq!(rig.node.state(), ViewState::Ready);
+    rig.rescan();
+    assert_eq!(rig.node.state(), ViewState::Ready);
+}
+
+#[test]
+fn oc_07_a_payment_to_a_new_script_is_found_after_the_bounded_scan() {
     let dir = Dir::new();
     let mut rig = start(&dir, &Setup::default()).unwrap();
     rig.mine_empty(2);
@@ -608,18 +768,32 @@ fn oc_07_a_payment_in_the_next_block_after_a_batch_is_found_and_a_session_can_be
     // Larger than the gap: index 29 was not watched before.
     rig.node
         .owner_mut()
+        .unwrap()
         .queue_batch(batch(0, 30), &write)
         .unwrap();
     rig.node.refresh_marks();
-    assert_eq!(rig.node.state(), ViewState::Ready);
+    assert!(matches!(rig.node.state(), ViewState::Rescanning { .. }));
     let pay = tx_from(
         OutPoint::new(Txid::from_byte_array([7; 32]), 0),
         &[(&receive(29), 70_000)],
     );
-    rig.mine(std::slice::from_ref(&pay));
+    // The block can be fetched with the old filters and arrive before the
+    // rescan command. A stale Checked event must not make the view ready.
+    let height = u32::try_from(rig.chain.len()).unwrap() + 1;
+    let block = mine(rig.tip_hash(), height, 0, std::slice::from_ref(&pay));
+    rig.chain.push(block.clone());
+    rig.deliver(vec![
+        AppEvent::Chain {
+            joined: vec![(height, block.block_hash())],
+            left: vec![],
+        },
+        AppEvent::Checked(height),
+    ]);
+    assert!(matches!(rig.node.state(), ViewState::Rescanning { .. }));
+    rig.rescan();
     assert_eq!(rig.node.balance(), 70_000);
     assert_eq!(rig.node.state(), ViewState::Ready);
-    assert_eq!(rescans(&rig), 0);
+    assert_eq!(rescans(&rig), 1);
     assert!(!matches!(
         rig.node.build_request(1_000, NOW),
         Err(NodeError::NotReady(_))
@@ -636,14 +810,17 @@ fn oc_07_a_restart_between_the_queue_and_the_view_raises_the_marks_before_the_ne
         let write = rig.node.queue_writer();
         rig.node
             .owner_mut()
+            .unwrap()
             .queue_batch(batch(0, 30), &write)
             .unwrap();
         rig.chain.clone()
     };
     let mut rig = start_at(&dir, &Setup::default(), chain).unwrap();
-    // The driver starts with the grown set, and the view holds the marks.
+    // The driver starts with the grown set at the safe rewind position, and
+    // the persisted scan resumes without an extra command.
     assert_eq!(rig.spawned.lock().unwrap()[0].scripts, 50 + 20);
     assert_eq!(rig.node.view().receive_next(), 30);
+    assert_eq!(rig.spawned.lock().unwrap()[0].watch_from, 1);
     let pay = tx_from(
         OutPoint::new(Txid::from_byte_array([7; 32]), 0),
         &[(&receive(29), 70_000)],
@@ -654,16 +831,16 @@ fn oc_07_a_restart_between_the_queue_and_the_view_raises_the_marks_before_the_ne
 }
 
 #[test]
-fn oc_07_only_an_explicit_rescan_asks_the_driver_to_check_again() {
+fn oc_07_runtime_growth_is_bounded_and_explicit_rescan_still_starts_at_birthday() {
     let dir = Dir::new();
     let mut rig = start(&dir, &Setup::default()).unwrap();
     rig.queue_refund(10_000);
     rig.fund(300_000);
-    assert_eq!(rescans(&rig), 0);
+    assert_eq!(rescans(&rig), 1);
     // A new view starts the driver at the birthday: no command needed.
     assert_eq!(rig.spawned.lock().unwrap()[0].watch_from, 0);
     rig.node.rescan().unwrap();
-    assert_eq!(rescans(&rig), 1);
+    assert_eq!(rescans(&rig), 2);
     assert!(rig.calls().contains(&"main rescan 0".to_string()));
 }
 
@@ -794,6 +971,14 @@ fn nr_86_a_refund_is_signed_held_sent_followed_and_done_at_the_refund_depth() {
     // offered.
     let change = OutPoint::new(txid, u32::try_from(1 - tx_pays_first(&tx)).unwrap());
     assert_eq!(offered(&rig.node), vec![(change, 0)]);
+    assert_eq!(
+        rig.node.balance(),
+        tx.output
+            .get(usize::try_from(change.vout).unwrap())
+            .unwrap()
+            .value
+            .to_sat()
+    );
     let notes = rig.node.watcher_mut().take_notes();
     assert!(
         notes.iter().any(|n| n.contains("sending without Tor")),
@@ -844,6 +1029,87 @@ fn nr_86_a_refund_is_signed_held_sent_followed_and_done_at_the_refund_depth() {
     ));
     assert!(rig.calls().contains(&format!("main forget {txid}")));
     assert_eq!(rig.node.balance(), rig.node.view().balance());
+}
+
+#[test]
+fn nr_86_paid_refund_reopens_from_undo_after_depth_and_survives_restart() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let refund = rig.queue_refund(10_000);
+    rig.fund(300_000);
+    let txid = rig.spend();
+    let tx = rig.tx(&txid);
+    rig.mine(std::slice::from_ref(&tx));
+    rig.mine_empty(5);
+    assert!(matches!(
+        rig.node.owner().refunds().iter().find(|r| r.id == refund).unwrap().stage,
+        Stage::Paid { txid: paid } if paid == txid
+    ));
+    assert!(rig.node.owner().outbox().is_empty());
+    assert_eq!(rig.node.archive_paid().unwrap(), 0);
+
+    // Replace heights 7..12 with a longer branch. The old confirmation
+    // remains in the 100-block undo horizon, including its signed bytes.
+    let left: Vec<BlockHash> = rig.chain[6..].iter().rev().map(Block::block_hash).collect();
+    let mut branch = Vec::new();
+    let mut prev = rig.chain[5].block_hash();
+    for height in 7..=13 {
+        let block = mine(prev, height, height, &[]);
+        prev = block.block_hash();
+        branch.push(block);
+    }
+    let joined = branch
+        .iter()
+        .enumerate()
+        .map(|(i, block)| (u32::try_from(i).unwrap() + 7, block.block_hash()))
+        .collect();
+    rig.chain.truncate(6);
+    rig.chain.extend(branch.iter().cloned());
+    rig.feed(vec![AppEvent::Chain { joined, left }]);
+    for (i, block) in branch.iter().enumerate() {
+        let height = u32::try_from(i).unwrap() + 7;
+        rig.deliver(vec![
+            AppEvent::Block {
+                hash: block.block_hash(),
+                bytes: serialize(block),
+            },
+            AppEvent::Checked(height),
+        ]);
+    }
+    assert!(matches!(
+        rig.node.owner().refunds().iter().find(|r| r.id == refund).unwrap().stage,
+        Stage::Sent { txid: reopened } if reopened == txid
+    ));
+    let delivery = rig
+        .node
+        .owner()
+        .outbox()
+        .iter()
+        .find_map(|d| match &d.what {
+            Delivery::Transaction { txid: held, tx, .. } if *held == txid => Some(tx.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(deserialize::<Transaction>(&delivery).unwrap(), tx);
+    assert_eq!(rig.node.send_state(&txid), Some(SendState::Sent));
+
+    let chain = rig.chain.clone();
+    rig.node.shutdown();
+    drop(rig);
+    let mut rig = start_at(&dir, &Setup::default(), chain).unwrap();
+    assert_eq!(rig.node.send_state(&txid), Some(SendState::Sent));
+    let restarted_tx = rig.tx(&txid);
+    assert_eq!(restarted_tx, tx);
+
+    rig.mine(std::slice::from_ref(&tx));
+    rig.mine_empty(5);
+    assert!(matches!(
+        rig.node.owner().refunds().iter().find(|r| r.id == refund).unwrap().stage,
+        Stage::Paid { txid: paid } if paid == txid
+    ));
+    rig.mine_empty(95);
+    assert_eq!(rig.node.archive_paid().unwrap(), 1);
+    assert!(rig.node.owner().refunds().iter().all(|r| r.id != refund));
 }
 
 /// The position of the refund output (the one to `external(9)`).
@@ -1129,4 +1395,76 @@ fn the_weight_limit_the_node_relies_on_is_the_signers() {
         openbmt_net::MAX_BROADCAST_WEIGHT,
         openbmt_signer::MAX_WEIGHT
     );
+}
+
+#[test]
+fn oc_07_start_refuses_an_over_limit_watch_range_before_driver_or_mark_write() {
+    let dir = Dir::new();
+    let mut view = CoinView::new(0);
+    view.raise_marks(99_961, 0, |_| Ok::<(), ()>(())).unwrap();
+    let saved = view.to_bytes();
+    fs::write(dir.path().join(COINS_FILE), &saved).unwrap();
+
+    let mut config = OwnerConfig::new(dir.path(), id(0x11), DriverConfig::new(NET, 0));
+    config.health = Box::new(|_| openbmt_watch::Health {
+        healthy: true,
+        problem: None,
+        behind: false,
+    });
+    let mut parts =
+        OwnerParts::new(OWNER_SECRET, kit().wallet.clone(), approver_id(), policy()).unwrap();
+    parts.random = Box::new(Counter(1));
+    let spawned = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let record = spawned.clone();
+    let result = OwnerNode::<FakePort>::start_with(config, parts, move |_, _, _| {
+        record.store(true, std::sync::atomic::Ordering::SeqCst);
+        Err("watch limit should stop startup first".to_string())
+    });
+    match result {
+        Err(NodeError::WatchLimit { needed, limit }) => {
+            assert_eq!(needed, 100_001);
+            assert_eq!(limit, openbmt_net_io::MAX_WATCHED_SCRIPTS);
+        }
+        Err(other) => panic!("unexpected startup error: {other}"),
+        Ok(_) => panic!("over-limit wallet started"),
+    }
+    assert!(!spawned.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(fs::read(dir.path().join(COINS_FILE)).unwrap(), saved);
+}
+
+#[test]
+fn nr_79_second_owner_node_start_locks_before_reading_or_changing_state() {
+    let dir = Dir::new();
+    let _first = start(&dir, &Setup::default()).unwrap();
+
+    // If startup reaches any state read before taking the directory lock,
+    // these deliberately invalid files cause a different error. Keep their
+    // bytes to prove the failed start does not rewrite them either.
+    let sentinels = [
+        (COINS_FILE, vec![0xc1]),
+        (crate::QUEUE_FILE, vec![0xa1]),
+        (crate::TAKE_JOURNAL_FILE, vec![0xb2]),
+    ];
+    for (name, bytes) in &sentinels {
+        fs::write(dir.path().join(name), bytes).unwrap();
+    }
+
+    let config = OwnerConfig::new(dir.path(), id(0x11), DriverConfig::new(NET, 0));
+    let parts =
+        OwnerParts::new(OWNER_SECRET, kit().wallet.clone(), approver_id(), policy()).unwrap();
+    let spawned = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let record = spawned.clone();
+    let result = OwnerNode::<FakePort>::start_with(config, parts, move |_, _, _| {
+        record.store(true, std::sync::atomic::Ordering::SeqCst);
+        Err("a locked node must not spawn".to_string())
+    });
+
+    assert!(matches!(
+        result,
+        Err(NodeError::Start(crate::OwnerStartError::Locked(_)))
+    ));
+    assert!(!spawned.load(std::sync::atomic::Ordering::SeqCst));
+    for (name, bytes) in sentinels {
+        assert_eq!(fs::read(dir.path().join(name)).unwrap(), bytes);
+    }
 }

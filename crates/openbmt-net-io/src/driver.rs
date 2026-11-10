@@ -212,6 +212,9 @@ pub enum AppEvent {
     /// rises. The app stores it and passes it as `watch_from` at the next
     /// start, so that a restart does not check the same blocks again.
     Checked(u32),
+    /// A requested rescan has been applied to the manager. Events before this
+    /// marker may describe work started with an older watch set.
+    RescanStarted(u32),
     /// NR-86, NR-90: how many peers a transaction the app asked to broadcast
     /// was announced to and how many have asked for it. Sent when either
     /// count changes.
@@ -912,6 +915,7 @@ where
                     // The checked height was reported above `height` already;
                     // it is reported again as it rises.
                     self.last_checked = Some(height);
+                    self.emit(AppEvent::RescanStarted(height));
                 }
             }
         }

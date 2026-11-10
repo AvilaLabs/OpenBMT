@@ -418,8 +418,10 @@ the one place where this crate gives a transaction to the network.
   and tells the app the counts and the state as events. It also takes a
   `rescan` of a height: the manager gives up the blocks in work and
   checks every block above that height again against all the scripts
-  watched then (NR-40, NR-41). An app uses it after it has added scripts
-  whose payments may be in blocks it has checked.
+  watched then (NR-40, NR-41). After applying the command, it sends
+  `RescanStarted(height)` in the same ordered event stream, before progress
+  from the restarted work. An app uses it after it has added scripts whose
+  payments may be in blocks it has checked.
 - **NR-91.** The owner's device sends over a driver of its own, apart from
   the one that watches the wallet, with its own directory, lock and
   peers. With a proxy set (NR-26), that driver reaches every peer

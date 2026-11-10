@@ -25,7 +25,7 @@ use crate::combine::Source;
 use crate::{CoinError, CombineError, FinalizeError, PlanError, PsbtError};
 
 /// The sentence every fault of the app itself ends in (SC-10).
-const TELL_SUPPORT: &str = "Nothing was sent. Start again; if it repeats, stop and tell support, and read them the details.";
+const TELL_SUPPORT: &str = "Nothing was sent. Start again; if it repeats, stop and report it to the OpenBMT project with the details.";
 
 fn stop(heading: &str, what: impl Into<String>, who: Who, next: impl Into<String>) -> Words {
     Words::new(Tone::Stop, heading, what, who, next)
@@ -445,7 +445,7 @@ fn not_this_wallet(heading: &str, what: &str, input: usize) -> Words {
         heading,
         what,
         Who::Owner,
-        "Do not use this file. Start the approval again; if it repeats, stop and tell support.",
+        "Do not use this file. Start the approval again; if it repeats, stop and report it to the OpenBMT project.",
     )
     .code("SP-61")
     .detail(format!("input {input}"))

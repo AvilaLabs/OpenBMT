@@ -41,13 +41,11 @@
 //!
 //! Receive indices from 0 to the highest a signed batch handed out plus
 //! [`GAP`], change indices from 0 to the next change index plus [`GAP`]. The
-//! two marks are kept here ([`CoinView::raise_marks`]). They grow with the
-//! device's own queue (a batch handed out, the change index a spend used),
-//! and then the new scripts are watched from the block after the last
-//! checked one: nothing is rescanned and the view stays ready. That holds
-//! only because the caller raises the marks before it applies any later
-//! block or reorganization. A rescan from the birthday is for a new view,
-//! [`CoinView::reset`] and the deep reorg state.
+//! two marks are kept here ([`CoinView::raise_marks_and_rescan`]). At runtime,
+//! growing them stores a rewind to one block below the checked position. The
+//! driver rechecks that short range against the new scripts, covering work
+//! already in flight without rescanning from the birthday. A new view,
+//! [`CoinView::reset`] and the deep reorg state scan from the birthday.
 //!
 //! ## The stored form
 //!
@@ -83,7 +81,7 @@ pub const MAX_TX_BYTES: usize = 400_000;
 /// The largest stored view, in bytes.
 pub const MAX_VIEW_BYTES: usize = 128 * 1024 * 1024;
 /// The largest wallet index (the wallet takes unhardened indices only).
-const INDEX_LIMIT: u32 = 1 << 31;
+pub(crate) const INDEX_LIMIT: u32 = 1 << 31;
 
 /// A script the wallet watches, with its place in the wallet.
 pub type ScriptSet = BTreeMap<ScriptBuf, (Keychain, u32)>;
@@ -392,6 +390,15 @@ impl CoinView {
             .map(|(h, _)| *h)
     }
 
+    /// Transaction IDs whose confirmation and transaction evidence is still
+    /// inside the retained undo horizon.
+    pub fn retained_confirmations(&self) -> BTreeSet<Txid> {
+        self.undo
+            .values()
+            .flat_map(|undo| undo.confirmed.iter().map(|p| p.tx.compute_txid()))
+            .collect()
+    }
+
     /// The height of the block that holds a coin, if the view holds it.
     pub fn height_of(&self, outpoint: &OutPoint) -> Option<u32> {
         self.coins.get(outpoint).map(|c| c.height)
@@ -399,12 +406,9 @@ impl CoinView {
 
     // ---- changing ------------------------------------------------------------
 
-    /// Raise the marks to what the device's own queue has handed out: a
-    /// batch's addresses, the change index a spend used. Returns whether
-    /// either grew. Nothing is rescanned and the state does not change: a
-    /// script the device has just made cannot have been paid before, as
-    /// long as this is called before any later block is applied (see the
-    /// module docs). The new value is stored first.
+    /// Raise the marks without changing the checked position. This is useful
+    /// when the scripts are installed before a new driver starts. Runtime
+    /// growth should use [`CoinView::raise_marks_and_rescan`].
     pub fn raise_marks<E>(
         &mut self,
         receive_next: u32,
@@ -419,6 +423,42 @@ impl CoinView {
         let mut next = self.clone();
         next.receive_next = receive_next;
         next.change_next = change_next;
+        persist(&encode(&next))?;
+        *self = next;
+        Ok(true)
+    }
+
+    /// Raise the watch marks and begin a bounded rescan of the checked range.
+    /// `through` is the highest chain height that may already have been
+    /// checked or fetched with the old scripts. The mark and rescan position
+    /// are stored together so a restart cannot keep stale scripts with a
+    /// ready view. Rewind one block to include the previous checked tip; the
+    /// birthday remains the floor.
+    pub fn raise_marks_and_rescan<E>(
+        &mut self,
+        receive_next: u32,
+        change_next: u32,
+        through: u32,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<bool, E> {
+        let receive_next = receive_next.max(self.receive_next).min(INDEX_LIMIT);
+        let change_next = change_next.max(self.change_next).min(INDEX_LIMIT);
+        if receive_next == self.receive_next && change_next == self.change_next {
+            return Ok(false);
+        }
+        let mut next = self.clone();
+        next.receive_next = receive_next;
+        next.change_next = change_next;
+        if next.state != ViewState::DeepReorg {
+            let safe = next.checked.saturating_sub(1).max(next.birthday);
+            let to = through.max(next.checked);
+            next.checked = safe;
+            next.state = if to > safe {
+                ViewState::Rescanning { to }
+            } else {
+                ViewState::Ready
+            };
+        }
         persist(&encode(&next))?;
         *self = next;
         Ok(true)
@@ -451,15 +491,18 @@ impl CoinView {
         height: u32,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<(), E> {
-        if height <= self.checked {
-            return Ok(());
-        }
         let mut next = self.clone();
-        next.checked = height;
+        let position = height.max(next.checked);
+        next.checked = position;
         if let ViewState::Rescanning { to } = next.state {
-            if height >= to {
+            if position >= to {
                 next.state = ViewState::Ready;
             }
+        }
+        next.undo
+            .retain(|h, _| h.saturating_add(UNDO_BLOCKS) > position.max(*h));
+        if next == *self {
+            return Ok(());
         }
         persist(&encode(&next))?;
         *self = next;

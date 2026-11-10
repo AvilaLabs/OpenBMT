@@ -263,8 +263,10 @@ in memory, and nothing is changed if the store fails.
   but keeps no list of outpoints, because those coins are gone for good.
   Only cancelling a refund that is not signed
   or sent frees its amount. The caller reports each transaction as
-  broadcast, confirmed, dropped or replaced. Paid refunds can be archived:
-  the record leaves the queue and its amount stays counted (AS-52).
+  broadcast, confirmed, dropped or replaced. Paid refunds can be archived
+  after their confirming block leaves the owner coin view's undo horizon
+  (`docs/OWNER-COINS-RULES.md`, OC-05): the record leaves the queue and its
+  amount stays counted (AS-52).
 - **AS-55.** All ready refunds go into one transaction with one output per
   refund (`docs/DESIGN.md` §2.4), at most 99 of them. With the option
   "one transaction for each refund" each refund gets a transaction of its
@@ -313,7 +315,16 @@ in memory, and nothing is changed if the store fails.
   items in it are stored before the bytes are returned. If the store fails,
   nothing is returned and the queue is as it was. An item that does not fit
   (not enough coins, a plan the spend library refuses) stays queued and is
-  reported with its reason.
+  reported with its reason. Inputs frozen into every open session are
+  reserved across later calls, even if a caller passes the same coin list
+  again. Inputs of signed transactions waiting in the outbox are reserved
+  the same way. A node's coin view also removes pending spends, but the
+  owner's own reservation makes standalone callers safe with stale lists.
+  A declined or abandoned session releases its inputs; when an approved
+  spend leaves the open session, its signed outbox transaction keeps the
+  reservation until the caller reports its outcome. A skipped item explains
+  when its only eligible coins, some eligible coins, or a required conflict
+  input are reserved by another approval or waiting signed payment.
 - **AS-62.** `take_response` first runs the checks of AS-13 against the
   request kept for the session, then works on a copy. For each approved
   `Spend` it calls the signer for key 1 (review, then sign), joins the two
@@ -331,9 +342,14 @@ in memory, and nothing is changed if the store fails.
   Key app's code and text. It is not put in the next session by itself: the
   owner requeues it or cancels it. A line that key 1's signer or a check on
   the owner phone refuses is returned with that reason in the same way.
-- **AS-64.** The results of `take_response` are stored with the new queue
-  before they are returned. A signed transaction waits, as bytes, until the
-  caller reports it confirmed or dropped. A signed batch, settings item or
+- **AS-64.** The results of `take_response` and key 1's resulting signer
+  policy snapshot are committed together before they are returned. The owner
+  node first writes a durable `OBMi` take journal containing both snapshots,
+  then writes the queue snapshot and key 1 snapshot to their stores and
+  removes the journal only after both writes succeed. A restart rolls a
+  remaining journal forward; queue changes and another take are refused until
+  the owner's key 1 state store has been restored. A signed transaction waits, as bytes, until
+  the caller reports it confirmed or dropped. A signed batch, settings item or
   pairing waits until the caller reports it delivered. So a crash after the
   store loses nothing.
 - **AS-65.** The queue's snapshot is `OBM4`, version 1. Decoding is strict
@@ -445,9 +461,10 @@ Each case below takes the reading that moves less money and loosens less.
 11. **The cash-out's label** is a text the owner phone supplies (AS-07), since
     the destination's label of the address book is the Key app's own and the
     owner phone cannot know it.
-12. **A paid refund is archived, not kept for ever** (AS-52, AS-54). The
-    design does not say how long a paid refund stays in the queue. Archiving
-    keeps its amount counted against the sale.
+12. **A paid refund can be archived after the undo horizon** (AS-52, AS-54).
+    Until then its queue entry stays linked to the transaction, so a
+    reorganization can reopen it. Archiving keeps its amount counted against
+    the sale.
 13. **A pairing's claimed version** is the version of the settings the owner
     phone knows are in force (AS-10), not the highest it has queued.
 14. **Queued settings supersede each other** (AS-59), so the bound of 16

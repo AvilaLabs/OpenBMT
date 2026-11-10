@@ -1384,6 +1384,8 @@ fn nr_90_a_rescan_fetches_the_blocks_above_the_height_again() {
     );
     wait_for(&handle, 10, |e| matches!(e, AppEvent::Checked(3))).expect("not checked");
     handle.rescan_from(1);
+    wait_for(&handle, 10, |e| matches!(e, AppEvent::RescanStarted(1)))
+        .expect("the rescan start was not acknowledged");
     // Blocks 2 and 3 come again, and the height is reported again.
     let again = wait_for(&handle, 10, |e| matches!(e, AppEvent::Checked(3)))
         .expect("the height was not reported again");

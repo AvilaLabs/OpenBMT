@@ -85,7 +85,7 @@ impl BooksError {
                 "Counter given twice",
                 format!("The records of the counter \"{counter}\" were handed to the books twice."),
                 Who::Owner,
-                "No file was written. Try again; if it repeats, stop and tell support, and read them the details.",
+                "No file was written. Try again; if it repeats, stop and report it to the OpenBMT project with the details.",
             )
             .code("BK-01"),
             Self::BadChain { error, .. } => stop(
@@ -95,7 +95,7 @@ impl BooksError {
                     chain_cause(error)
                 ),
                 Who::Owner,
-                "No file was written. Copy the records from the counter again; if they still fail, stop and tell support.",
+                "No file was written. Copy the records from the counter again; if they still fail, stop and report it to the OpenBMT project.",
             )
             .code("BK-01")
             .detail(error.to_string()),
@@ -106,7 +106,7 @@ impl BooksError {
                     read_cause(error)
                 ),
                 Who::Owner,
-                "No file was written. Copy the records from the counter again; if it repeats, stop and tell support.",
+                "No file was written. Copy the records from the counter again; if it repeats, stop and report it to the OpenBMT project.",
             )
             .code("BK-03")
             .detail(format!("record {seq}: {error}")),
@@ -114,7 +114,7 @@ impl BooksError {
                 "A record has the wrong kind",
                 format!("A record of the counter \"{counter}\" is marked as one kind of event and holds another."),
                 Who::Owner,
-                "No file was written. Copy the records from the counter again; if it repeats, stop and tell support.",
+                "No file was written. Copy the records from the counter again; if it repeats, stop and report it to the OpenBMT project.",
             )
             .code("BK-03")
             .detail(format!("record {seq}")),
@@ -122,7 +122,7 @@ impl BooksError {
                 "Event for an unopened sale",
                 format!("The counter \"{counter}\" has an event for a sale that was never opened."),
                 Who::Owner,
-                "No file was written. Copy the records from the counter again; if it repeats, stop and tell support.",
+                "No file was written. Copy the records from the counter again; if it repeats, stop and report it to the OpenBMT project.",
             )
             .code("BK-04")
             .detail(format!("record {seq}, sale {index}")),
@@ -130,7 +130,7 @@ impl BooksError {
                 "Sale opened twice",
                 format!("The counter \"{counter}\" opens the same sale twice."),
                 Who::Owner,
-                "No file was written. Copy the records from the counter again; if it repeats, stop and tell support.",
+                "No file was written. Copy the records from the counter again; if it repeats, stop and report it to the OpenBMT project.",
             )
             .code("BK-04")
             .detail(format!("record {seq}, sale {index}")),
@@ -138,7 +138,7 @@ impl BooksError {
                 "A sale date is impossible",
                 "A record gives a time outside the years 1970 to 9999, so the books cannot place it.",
                 Who::Owner,
-                "No file was written. Check the clock of the counter and copy its records again; if it repeats, tell support.",
+                "No file was written. Check the clock of the counter and copy its records again; if it repeats, report it to the OpenBMT project.",
             )
             .code("BK-04")
             .detail(format!("time {at} seconds")),
@@ -154,14 +154,14 @@ impl BooksError {
                 "A total is too large",
                 "A total in the books is too large to add up, so the books were not built.",
                 Who::Owner,
-                "No file was written. Stop and tell support, and read them the details.",
+                "No file was written. Stop and report it to the OpenBMT project with the details.",
             )
             .code("BK-14"),
             Self::TooMany => stop(
                 "The books are too big",
                 "The books would hold more lines than the app keeps.",
                 Who::Owner,
-                "No file was written. Stop and tell support: the books have too many lines.",
+                "No file was written. Stop and report it to the OpenBMT project: the books have too many lines.",
             )
             .code("BK-14"),
             Self::BadOffset { minutes } => stop(
@@ -218,7 +218,7 @@ impl ExportError {
                 "An export total is too large",
                 format!("A total in {} is too large to add up, so no file was made.", export.to_lowercase()),
                 Who::Owner,
-                "No file was written. Stop and tell support, and read them the details.",
+                "No file was written. Stop and report it to the OpenBMT project with the details.",
             )
             .code("BK-14"),
         }
@@ -241,21 +241,21 @@ impl SealError {
                 "No random data available",
                 "The phone could not give the random data the lock needs, so no file was made.",
                 Who::Owner,
-                "No file was written. Try again; if it repeats, stop and tell support, and read them the details.",
+                "No file was written. Try again; if it repeats, stop and report it to the OpenBMT project with the details.",
             )
             .code("BK-25"),
             Self::Key => stop(
                 "The lock could not be made",
                 "The app could not make the key from the passphrase, so no file was made.",
                 Who::Owner,
-                "No file was written. Try again; if it repeats, stop and tell support, and read them the details.",
+                "No file was written. Try again; if it repeats, stop and report it to the OpenBMT project with the details.",
             )
             .code("BK-24"),
             Self::Cipher => stop(
                 "The file could not be locked",
                 "The app could not lock the export file, so no file was made.",
                 Who::Owner,
-                "No file was written. Try again; if it repeats, stop and tell support, and read them the details.",
+                "No file was written. Try again; if it repeats, stop and report it to the OpenBMT project with the details.",
             )
             .code("BK-26"),
         }

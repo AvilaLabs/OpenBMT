@@ -110,6 +110,7 @@ fn describe(event: &AppEvent, script: &ScriptBuf) -> Option<String> {
         AppEvent::TxState { txid, state } => format!("txstate {txid} {state:?}"),
         AppEvent::Note(text) => format!("note {text}"),
         AppEvent::Checked(height) => format!("checked {height}"),
+        AppEvent::RescanStarted(height) => format!("rescan from {height}"),
         AppEvent::Stopped => return None,
     })
 }

@@ -235,6 +235,7 @@ fn command(node: &mut OwnerNode, keys: &mut Keys, dir: &Path, line: &str) -> Res
                 .map_err(|e| e.to_string())?;
             let write = node.queue_writer();
             node.owner_mut()
+                .map_err(|e| e.to_string())?
                 .queue_batch(batch, &write)
                 .map_err(|e| e.to_string())?;
             node.refresh_marks();
@@ -255,10 +256,12 @@ fn command(node: &mut OwnerNode, keys: &mut Keys, dir: &Path, line: &str) -> Res
             };
             let key = sale(index)?;
             node.owner_mut()
+                .map_err(|e| e.to_string())?
                 .set_sale_facts(key, facts, &write)
                 .map_err(|e| e.to_string())?;
             let id = node
                 .owner_mut()
+                .map_err(|e| e.to_string())?
                 .queue_refund(key, "Mia", script, sats, None, &write)
                 .map_err(|e| e.to_string())?;
             say(format!("queued refund id={id}"));
@@ -521,6 +524,13 @@ fn run(args: &[String]) -> Result<(), String> {
 
     say(format!("descriptor {}", keys.wallet.canonical_string()));
     let mut node = OwnerNode::start(config, parts).map_err(|e| e.to_string())?;
+    if node.take_recovery_pending() {
+        let account1 = keys.account1;
+        node.recover_key1(&mut keys.key1, &account1, |bytes| {
+            write_file(dir_path, KEY1_FILE, bytes)
+        })
+        .map_err(|e| format!("key 1 recovery: {e}"))?;
+    }
     say(format!(
         "started checked={} tip={} view={}",
         node.view().checked(),

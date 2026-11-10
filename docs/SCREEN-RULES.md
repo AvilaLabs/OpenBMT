@@ -5,9 +5,13 @@ is that nobody using it is ever left not knowing what happened or what to
 do. The rules have numbers (SC-xx) so that tests can be named after them.
 
 **Status.** The shared type and its checker are built
-(`crates/openbmt-core/src/say.rs`). The words of each program are being
-added program by program; a program is done when its test of SC-12 covers
-every state and every refusal it can show. No app screen is drawn yet.
+(`crates/openbmt-core/src/say.rs`), and the words of the counter, the
+owner's libraries, the Key app and the Box console are written and
+listed in `docs/screens/`. Owner-device coin, sending and recovery states
+also have words; its remaining link and refund-intake alerts and notes
+still need coverage. The words have passed the program's check
+only: no person outside the project has read them, and no app screen
+is drawn yet.
 
 ## Who reads a screen
 
@@ -78,10 +82,14 @@ more.
   failed, a file that does not read back, a check inside the program
   that failed) says three things: nothing was changed or what was, what
   to do now (try again, or stop and tell the owner), and that the detail
-  is under "Details". It does not say "internal error".
+  is under "Details". It does not say "internal error". There is no
+  support desk behind OpenBMT, so no screen sends anyone to one: a
+  fault the owner cannot fix is reported to the OpenBMT project.
 - **SC-11. The console keeps the same rules.** Every answer of the Box
-  console is the heading, the two sentences, and the code in brackets at
-  the end of the line. `state` never groups two conditions in one line.
+  console is the heading on one line, what happened on the next, then
+  "Next:" and the step, then "Details:" with the code when there is
+  one. Lines a script reads come after them and keep their form.
+  `state` never groups two conditions in one line.
 - **SC-12. A test for every program.** Each program has a function that
   returns the `Words` of every state and refusal it can show, with at
   least one value for each variant and for each variant inside it. One

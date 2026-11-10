@@ -31,7 +31,12 @@ not ask a server what the wallet holds.
 - **OC-05.** A reorganization undoes the blocks that left: the coins they
   made are removed, the coins they spent are put back, and a pending
   transaction they confirmed is pending again. The last 100 blocks keep
-  what this needs.
+  what this needs, including the exact signed transaction bytes. If a
+  transaction had already reached refund depth, its still-linked paid rows
+  return to sent and the node rebroadcasts those same signed bytes; it never
+  signs a replacement automatically. Paid rows whose transaction remains in
+  this undo horizon cannot be archived. Once the confirmation leaves the
+  horizon, archiving folds refund amounts into the sale's archived total.
 - **OC-06.** A reorganization of more than 100 blocks, or of a block that
   holds coins and has no record kept, cannot be undone. The view takes the
   named state "deep reorg: rescan", offers no coins, and stays so until it
@@ -43,19 +48,28 @@ not ask a server what the wallet holds.
 - **OC-07.** The watch set is the receive scripts from index 0 to the
   highest index a batch handed out plus 20, and the change scripts from 0
   to the next change index plus 20. It grows when the marks grow. When the
-  growth comes from the owner's own queue (a batch handed out, the change
-  index a spend used), the new scripts are watched from the block after the
-  last checked block, nothing is rescanned and the view stays ready: a
-  script the device has just made cannot have been paid before it existed.
-  This holds only because the marks are raised in the view before any
-  later block is applied. The node reads them from the owner's queue and
-  raises them at start (before the first block), immediately before each
-  block and each reorganization is applied, and right after a batch is
-  queued and a spend is built or taken. Each raise is stored before the
-  block's effect. A rescan from the birthday height happens only for a new
-  view, for a reset, for the deep reorg state, and when the owner asks for
-  one. An owner restored from the kit starts a new view and so scans from
-  the birthday. Marks never go down.
+  marks grow at runtime, the view stores the new marks and enters
+  `rescanning` at one block below its last checked height. The node installs
+  the scripts before asking the driver to recheck blocks above that position.
+  The driver's ordered rescan-start event gates old checked-height events, so
+  the view cannot become ready from stale progress. This short catch-up scan
+  covers work already in flight without rescanning from the birthday. The
+  view stays ready when there is no checked block above the birthday to
+  revisit, but the node still waits for the ordered marker before offering a
+  spend. The
+  marks and rewind position are stored together, so a restart starts with the
+  new scripts and resumes the catch-up scan. At start, scripts are installed
+  before peers connect. The node refreshes marks at start, immediately before
+  each block and reorganization is applied, and after a batch is queued or a
+  spend is built or taken. A new view, reset, deep reorganization, or an
+  explicit owner request scans from the birthday. Marks never go down. The
+  total receive and change script ranges, including their gap, must fit the
+  network manager's 100,000-script limit. The node checks this before deriving
+  scripts or saving raised marks. At startup, a larger range stops startup; at
+  runtime, it halts watch updates and reports the limit. It does not silently
+  drop scripts or dispatch a newly committed transaction while halted. Stop
+  issuing new addresses and update the device or report the limit to the
+  OpenBMT project for help.
 
 ## 4. Storage
 

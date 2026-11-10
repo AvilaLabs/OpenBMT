@@ -234,7 +234,11 @@ fn run(seed: u64) {
                         assert_eq!(r.is_err(), kept);
                     }
                 }
-                ok(rig.owner.archive_paid(|b| rig.owner_store.put(b)));
+                ok(rig
+                    .owner
+                    .archive_paid(&std::collections::BTreeSet::new(), |b| {
+                        rig.owner_store.put(b)
+                    }));
             }
             _ => match rng.below(3) {
                 0 => {

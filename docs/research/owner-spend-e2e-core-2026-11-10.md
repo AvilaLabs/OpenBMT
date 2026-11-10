@@ -5,9 +5,10 @@ from checked blocks alone, send a refund that two signers made, and follow it
 through the peers, a restart, a block, a conflicting spend and a
 reorganization, with its coin view equal to Core's at each stop?
 
-**Answer.** Yes, in the run made. All eight steps passed in the last run, after
-the last functional change. The runs before it found two things in the check
-itself and one real defect in the network crate (see "What the runs found").
+**Answer.** All eight steps passed again after the changes to approval
+recovery, watch updates and the handling of reorganizations. Earlier runs
+found two defects in the check itself and one in the network crate (see
+"What the runs found").
 
 ## Method
 
@@ -76,14 +77,12 @@ PASS or FAIL for each numbered step. The pieces:
   state's text.
 - Three nodes of the same software on one machine are not a network. The
   groups are counted by loopback address.
-- Marks that grow from the owner's own queue (a batch, a spend's change
-  index) rescan nothing (`docs/OWNER-COINS-RULES.md`, OC-07). The run shows
-  it: the view is ready right after the batch and after the spend, and the
-  example never printed a note about checking blocks again. An earlier
-  version rescanned from the birthday on every such growth and the view was
-  not ready until the rescan had caught up. One window is left: a block the
-  driver matched before it received the new script and that was mined after
-  the script was made. `rescan` closes it on request.
+- When the owner's queue adds addresses, the driver rechecks a range
+  starting near the last checked block after installing the new scripts
+  (`docs/OWNER-COINS-RULES.md`, OC-07). The focused Rust tests cover work
+  queued before that update and recovery after an interrupted save. This
+  regtest run does not simulate those failures or a reorganization after
+  the refund has reached its required depth.
 - Reorganizations deeper than 100 blocks are the named state "deep reorg:
   rescan" and are covered by unit tests, not by this run.
 

@@ -1,6 +1,8 @@
 //! Following what the caller does with the finished objects (AS-54, AS-64).
 
-use bitcoin::consensus::deserialize;
+use std::collections::BTreeSet;
+
+use bitcoin::consensus::{deserialize, serialize};
 use bitcoin::{OutPoint, Transaction, Txid};
 
 use crate::error::{OwnerError, Refusal};
@@ -62,6 +64,72 @@ impl Owner {
         }
         next.outbox.remove(at);
         self.commit(next, persist)
+    }
+
+    /// AS-54: a transaction that was reported paid left the best chain while
+    /// its undo record was still available. Restore any matching paid rows to
+    /// sent and put the exact signed transaction back in the outbox. Returns
+    /// `false` when all rows have been archived or removed; the caller can
+    /// still resend the transaction from its coin view.
+    pub fn reopen_paid<E>(
+        &mut self,
+        tx: &Transaction,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<bool, OwnerError<E>> {
+        let txid = tx.compute_txid();
+        let bytes = serialize(tx);
+        if waiting(&self.state, &txid).is_some() {
+            return Ok(false);
+        }
+        let refunds: Vec<u32> = self
+            .state
+            .refunds
+            .iter()
+            .filter(|r| matches!(&r.stage, Stage::Paid { txid: paid } if *paid == txid))
+            .map(|r| r.id)
+            .collect();
+        let cash_outs: Vec<u32> = self
+            .state
+            .cash_outs
+            .iter()
+            .filter(|c| matches!(&c.stage, Stage::Paid { txid: paid } if *paid == txid))
+            .map(|c| c.id)
+            .collect();
+        if refunds.is_empty() && cash_outs.is_empty() {
+            return Ok(false);
+        }
+        if cash_outs.len() > 1 {
+            return Err(Refusal::WrongStage(
+                "one transaction cannot reopen more than one cash-out",
+            )
+            .into());
+        }
+        if self.state.outbox.len() >= crate::MAX_OUTBOX {
+            return Err(Refusal::OutboxFull.into());
+        }
+        let mut next = self.state.clone();
+        for id in &refunds {
+            if let Some(entry) = next.refunds.iter_mut().find(|r| r.id == *id) {
+                entry.stage = Stage::Sent { txid };
+            }
+        }
+        for id in &cash_outs {
+            if let Some(entry) = next.cash_outs.iter_mut().find(|c| c.id == *id) {
+                entry.stage = Stage::Sent { txid };
+            }
+        }
+        let id = next.take_id()?;
+        next.outbox.push(crate::types::Deliverable {
+            id,
+            what: Delivery::Transaction {
+                txid,
+                tx: bytes,
+                refunds,
+                cash_out: cash_outs.first().copied(),
+            },
+        });
+        self.commit(next, persist)?;
+        Ok(true)
     }
 
     /// AS-54: the caller reports the transaction dropped. Its refunds go
@@ -148,8 +216,12 @@ impl Owner {
 
     /// AS-50, AS-52: take the paid refunds and cash-outs out of the queue.
     /// What the paid refunds added up to stays counted against their sales.
+    /// `retained_confirmations` must contain every paid transaction whose
+    /// confirmation can still be undone by the caller's chain view. Omitting
+    /// one can archive a row that should be reopened after a reorganization.
     pub fn archive_paid<E>(
         &mut self,
+        retained_confirmations: &BTreeSet<Txid>,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<usize, OwnerError<E>> {
         let mut next = self.state.clone();
@@ -157,7 +229,9 @@ impl Owner {
         let paid: Vec<(u32, crate::types::SaleKey, u64)> = next
             .refunds
             .iter()
-            .filter(|r| matches!(r.stage, Stage::Paid { .. }))
+            .filter(|r| {
+                matches!(&r.stage, Stage::Paid { txid } if !retained_confirmations.contains(txid))
+            })
             .map(|r| (r.id, r.sale, r.sats))
             .collect();
         for (id, sale, sats) in paid {
@@ -168,8 +242,9 @@ impl Owner {
             }
         }
         let before = next.cash_outs.len();
-        next.cash_outs
-            .retain(|c| !matches!(c.stage, Stage::Paid { .. }));
+        next.cash_outs.retain(
+            |c| !matches!(&c.stage, Stage::Paid { txid } if !retained_confirmations.contains(txid)),
+        );
         gone += before - next.cash_outs.len();
         self.commit(next, persist)?;
         Ok(gone)

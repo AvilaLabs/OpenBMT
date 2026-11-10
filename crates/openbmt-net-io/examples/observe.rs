@@ -280,6 +280,9 @@ fn run(args: &[String]) -> Result<(), String> {
                 *kinds.entry("checked").or_default() += 1;
                 println!("{t:.1} checked up to {height}");
             }
+            AppEvent::RescanStarted(height) => {
+                println!("{t:.1} rescan started from {height}");
+            }
             AppEvent::Stopped => {
                 *kinds.entry("stopped").or_default() += 1;
                 println!("{t:.1} stopped");

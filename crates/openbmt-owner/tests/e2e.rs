@@ -211,7 +211,14 @@ fn the_whole_story_pairing_settings_batch_refunds_and_a_cash_out() {
         .refunds()
         .iter()
         .all(|r| matches!(r.stage, Stage::Paid { .. })));
-    assert_eq!(ok(rig.owner.archive_paid(|x| rig.owner_store.put(x))), 4);
+    assert_eq!(
+        ok(rig
+            .owner
+            .archive_paid(&std::collections::BTreeSet::new(), |x| rig
+                .owner_store
+                .put(x))),
+        4
+    );
 
     // Each sale was refunded once, and no sale more than was received.
     for (n, sats) in [(1, 10_000), (2, 11_000), (3, 12_000)] {

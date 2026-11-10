@@ -1090,10 +1090,36 @@ fn as_54_a_confirmed_refund_is_paid_counts_and_can_be_archived() {
     let Stage::Signed { txid } = stage_of(&rig, id) else {
         panic!()
     };
+    let tx_bytes = rig
+        .owner
+        .outbox()
+        .iter()
+        .find_map(|d| match &d.what {
+            Delivery::Transaction { txid: held, tx, .. } if *held == txid => Some(tx.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tx: Transaction = deserialize(&tx_bytes).unwrap();
     ok(rig.owner.mark_confirmed(&txid, nop));
     assert!(matches!(stage_of(&rig, id), Stage::Paid { .. }));
     assert!(rig.owner.outbox().is_empty());
     assert_eq!(rig.owner.refunded_sats(&sale(1)), 10_000);
+    assert_eq!(
+        ok(rig
+            .owner
+            .archive_paid(&std::collections::BTreeSet::from([txid]), nop)),
+        0
+    );
+    assert!(matches!(stage_of(&rig, id), Stage::Paid { .. }));
+    assert!(ok(rig.owner.reopen_paid(&tx, nop)));
+    assert!(matches!(stage_of(&rig, id), Stage::Sent { txid: paid } if paid == txid));
+    assert!(matches!(
+        &rig.owner.outbox()[0].what,
+        Delivery::Transaction { txid: held, tx: exact, .. }
+            if *held == txid && exact == &tx_bytes
+    ));
+    ok(rig.owner.mark_confirmed(&txid, nop));
+    assert!(matches!(stage_of(&rig, id), Stage::Paid { .. }));
     // More than what is left is refused, paid or not.
     assert!(matches!(
         refused(
@@ -1103,8 +1129,14 @@ fn as_54_a_confirmed_refund_is_paid_counts_and_can_be_archived() {
         Refusal::MoreThanReceived { .. }
     ));
     // Archived, the record goes and the amount stays counted.
-    assert_eq!(ok(rig.owner.archive_paid(nop)), 1);
+    assert_eq!(
+        ok(rig
+            .owner
+            .archive_paid(&std::collections::BTreeSet::new(), nop)),
+        1
+    );
     assert!(rig.owner.refunds().is_empty());
+    assert!(!ok(rig.owner.reopen_paid(&tx, nop)));
     assert_eq!(rig.owner.refunded_sats(&sale(1)), 10_000);
     assert!(matches!(
         refused(
@@ -1334,6 +1366,130 @@ fn as_61_the_change_lands_at_every_place_and_the_labels_name_the_real_places() {
             .abandon_session(&built.session_id, |b| rig.owner_store.put(b)));
     }
     assert_eq!(seen.len(), 4, "every place of four was met: {seen:?}");
+}
+
+#[test]
+fn as_61_two_open_sessions_do_not_reuse_inputs_and_abandon_releases_them() {
+    let options = Options {
+        packing: RefundPacking::OneEach,
+        ..Options::default()
+    };
+    let mut rig = Rig::with(options, true);
+    let first_id = refund(&mut rig.owner, 1, 50_000, 10_000);
+    let second_id = refund(&mut rig.owner, 2, 50_000, 10_000);
+    let coins = [coin(1, 0, 300_000)];
+
+    let first = rig.build(&coins, 0);
+    let first_tx = spends(&first.request).remove(0);
+    assert_eq!(
+        stage_of(&rig, first_id),
+        Stage::InSession {
+            session: first.session_id
+        }
+    );
+
+    // The second session is allowed, but it cannot build a spend from an
+    // input already frozen into the first open session.
+    let second = rig.build(&coins, 1);
+    assert!(spends(&second.request).is_empty());
+    assert!(!second.skipped.is_empty());
+    assert_eq!(second.skipped[0].words().heading, "Coins held for approval");
+    assert_eq!(stage_of(&rig, second_id), Stage::Queued);
+
+    ok(rig
+        .owner
+        .abandon_session(&first.session_id, |b| rig.owner_store.put(b)));
+    let after = rig.build(&coins, 2);
+    let after_spends = spends(&after.request);
+    assert_eq!(after_spends.len(), 1);
+    assert_eq!(after_spends[0].input, first_tx.input);
+}
+
+#[test]
+fn as_61_reserved_coins_are_named_without_claiming_they_are_the_only_shortfall() {
+    let options = Options {
+        packing: RefundPacking::OneEach,
+        ..Options::default()
+    };
+    let mut rig = Rig::with(options, true);
+    refund(&mut rig.owner, 1, 50_000, 10_000);
+    let queued_id = refund(&mut rig.owner, 2, 100_000, 100_000);
+
+    let first = rig.build(&[coin(1, 0, 150_000)], 0);
+    assert_eq!(spends(&first.request).len(), 1);
+
+    // The remaining 50,000 sat is old enough but cannot cover the second
+    // refund. The message must describe both the reserved and shortfall parts.
+    let second = rig.build(&[coin(1, 0, 150_000), coin(2, 1, 50_000)], 1);
+    assert!(spends(&second.request).is_empty());
+    let skipped = second
+        .skipped
+        .iter()
+        .find(|entry| entry.id == queued_id)
+        .expect("the second refund remains queued");
+    let words = skipped.words();
+    assert_eq!(words.heading, "Some coins are held");
+    assert!(words.what.contains("rest cannot cover"));
+    assert!(words.next.to_lowercase().contains("lower this amount"));
+}
+
+#[test]
+fn as_61_declining_a_session_releases_its_inputs_for_the_next_request() {
+    let options = Options {
+        packing: RefundPacking::OneEach,
+        ..Options::default()
+    };
+    let mut rig = Rig::with(options, true);
+    let declined_id = refund(&mut rig.owner, 1, 50_000, 10_000);
+    let queued_id = refund(&mut rig.owner, 2, 50_000, 10_000);
+    let coins = [coin(1, 0, 300_000)];
+
+    let first = rig.build(&coins, 0);
+    assert_eq!(spends(&first.request).len(), 1);
+    let response = rig.answer(&first.request, |_| Choice::Decline("declined".to_string()));
+    ok(rig.take(&response));
+    assert!(matches!(
+        stage_of(&rig, declined_id),
+        Stage::Returned { .. }
+    ));
+
+    // The declined session has closed and created no waiting transaction.
+    // A stale caller coin list can now fund the other queued refund.
+    let next = rig.build(&coins, 1);
+    let next_spends = spends(&next.request);
+    assert_eq!(next_spends.len(), 1);
+    assert_eq!(without_change(&next_spends[0])[0].0, external(2));
+    assert_eq!(
+        stage_of(&rig, queued_id),
+        Stage::InSession {
+            session: next.session_id
+        }
+    );
+}
+
+#[test]
+fn as_61_a_signed_outbox_transaction_reserves_inputs_from_stale_coin_lists() {
+    let options = Options {
+        packing: RefundPacking::OneEach,
+        ..Options::default()
+    };
+    let mut rig = Rig::with(options, true);
+    refund(&mut rig.owner, 1, 50_000, 10_000);
+    let queued_id = refund(&mut rig.owner, 2, 50_000, 10_000);
+    let coins = [coin(1, 0, 300_000)];
+
+    let first = rig.build(&coins, 0);
+    let first_tx = spends(&first.request).remove(0);
+    let response = rig.answer_all(&first.request);
+    ok(rig.take(&response));
+    assert_eq!(rig.owner.outbox().len(), 1);
+
+    let next = rig.build(&coins, 1);
+    assert!(spends(&next.request).is_empty());
+    assert!(!next.skipped.is_empty());
+    assert_eq!(stage_of(&rig, queued_id), Stage::Queued);
+    assert_eq!(rig.owner.outbox().len(), 1);
+    assert_eq!(first_tx.input.len(), 1);
 }
 
 #[test]

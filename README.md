@@ -4,12 +4,13 @@ OpenBMT lets a shop take bitcoin at the counter the way it takes a card. The
 money goes straight into the merchant's own wallet, and the sale closes in the
 point-of-sale system the shop already uses.
 
-**Status: pre-release.** The design is written down, and the shared rules
-library, the signer's rules, the payment watcher's rules and the spend path
-(planning, joining and finishing a transaction) are implemented and tested.
-No app is built yet, nothing has been tried on a device, and
-**no independent security audit has been done**. Do not use this with real
-funds.
+**Status: pre-release.** Headless Rust pieces now cover the counter, owner
+coin view and sending path, approval flow, and POS and books logic. The
+user-facing screen word catalogs are written for the counter, owner, Key app,
+and Box console. These are not finished apps: Android/Kotlin integration,
+packaging, and device testing remain. The documented Bitcoin Core regtest
+results are engineering checks, not a security review. **No independent
+security audit has been done.** Do not use this with real funds.
 
 ## What it is
 
@@ -58,6 +59,8 @@ sets. The full statement, its conditions and the reasoning are in
 | [docs/WATCHER-RULES.md](docs/WATCHER-RULES.md) | What the counter believes about a payment, and what each kind of evidence may prove |
 | [docs/POS-RULES.md](docs/POS-RULES.md) | How the owner's device matches the POS orders to the counter's sales, and what raises an alert |
 | [docs/BOOKS-RULES.md](docs/BOOKS-RULES.md) | How the counters' records become the books: per-sale fields and what stays unknown, the two CSV exports and the encrypted export file |
+| [docs/OWNER-COINS-RULES.md](docs/OWNER-COINS-RULES.md) | How the owner's device learns wallet coins from checked blocks, handles reorganizations, and grows its watch set |
+| [docs/screens/](docs/screens/) | Catalogs of the words shown for each counter, owner, Key app, and Box console screen state |
 | [docs/BOX-RULES.md](docs/BOX-RULES.md) | What the merchant's own server holds, how a Box with no screen is paired, and its part in the relay and the POS side (implemented in `crates/openbmt-box`; no vendor's connector is in it) |
 | [docs/SCREEN-RULES.md](docs/SCREEN-RULES.md) | What a person is told on every screen: one screen for every state, always a next step, no notation of the program, and the test each program runs over all of its words |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Which outside packages each program is built from, the rules for adding or updating one, and the check that enforces them (`scripts/deps-check.sh`, lists in `deps/`) |
@@ -70,18 +73,21 @@ sets. The full statement, its conditions and the reasoning are in
 | [crates/openbmt-session/](crates/openbmt-session/) | The approval session file ([rules](docs/SESSION-RULES.md)): the request the owner phone hands to the Key app and the response it hands back, in one strict encoding |
 | [crates/openbmt-approver/](crates/openbmt-approver/) | The Key app's side of the approval session: opens a request, shows one line per item, decides each, and stores before it releases |
 | [crates/openbmt-owner/](crates/openbmt-owner/) | The owner phone's side of the approval session: the refund queue, cash-out, batches, settings and pairings, the session it builds and the Key app's answer it takes |
-| [crates/openbmt-key-ffi/](crates/openbmt-key-ffi/) | The Key app's core for Android: one object, a storage trait, flat records for each line of a session, one `dispatch` function over a framed request and a JNI entry point as the only `unsafe`; every rule stays in the crates above. Internal review only; Kotlin not yet compiled |
+| [crates/openbmt-key-ffi/](crates/openbmt-key-ffi/) | The Key app's core for Android: one object, a storage trait, flat records for each line of a session, one `dispatch` function over a framed request and a JNI entry point as the only `unsafe`; every rule stays in the crates above. The Kotlin binding and OBM9 decoder harness compile and run on the JVM; Android JNI/device integration remains unchecked |
 | [crates/openbmt-watch/](crates/openbmt-watch/) | The counter's payment watcher: merkle proofs, full blocks, peer groups, conflicts, health |
 | [crates/openbmt-net/](crates/openbmt-net/) | The counter's Bitcoin peer client: wire framing, the single-peer session and the manager that runs several peers, checks blocks by filters and fetches announced transactions, with no sockets and no clock |
 | [crates/openbmt-net-io/](crates/openbmt-net-io/) | The counter's network driver: owns the sockets and threads, runs the peer manager and the address book over them, keeps the headers and the address book on disk, and speaks SOCKS5 for Tor |
 | [crates/openbmt-counter/](crates/openbmt-counter/) | The counter's judgment of a sale ([rules](docs/COUNTER-RULES.md)): opening, quotes, the cashier's screens, instant acceptance, overrides, owner commands, and the order of writes to storage |
 | [crates/openbmt-counter-node/](crates/openbmt-counter-node/) | The counter without a screen: the judgment of a sale joined to the network driver and to a directory of files, so that a payment is seen, confirmed, reorganized away and survives a restart ([results against Core](docs/research/counter-e2e-core-2026-11-10.md)) |
-| [crates/openbmt-owner-node/](crates/openbmt-owner-node/) | The owner's watcher without a screen: a network driver of its own, the real health rules, and the signed heartbeat that tells a counter what the owner's side sees, which instant acceptance needs ([rules](docs/COUNTER-RULES.md), CR-50 to CR-56; [results against Core](docs/research/instant-e2e-core-2026-11-10.md)) |
+| [crates/openbmt-owner-node/](crates/openbmt-owner-node/) | The owner's headless watcher and coin view: learns coins from checked blocks, tracks owner spends and reorganizations, and sends approved transactions through the network driver; also provides the signed heartbeat used by instant acceptance ([coin rules](docs/OWNER-COINS-RULES.md); [regtest script](scripts/owner-spend-e2e-core.sh); [documented Core results](docs/research/owner-spend-e2e-core-2026-11-10.md); [heartbeat rules](docs/COUNTER-RULES.md), CR-50 to CR-56) |
 | [crates/openbmt-link/](crates/openbmt-link/) | Messages between the shop's own devices ([rules](docs/LINK-RULES.md)): sealed to one device and signed by the sender, the relay that holds them (mailboxes, challenges, limits, files), and a blocking client and server over TCP or a Tor onion service |
 | [crates/openbmt-pos/](crates/openbmt-pos/) | The vendor-neutral POS side ([rules](docs/POS-RULES.md)): the model of POS orders, the reference a cashier types, the matching of every Bitcoin tender to a counter sale, the alerts for what does not match, and the boundary a POS connector fills. No network and no vendor code |
-| [scripts/](scripts/) | Checks against Bitcoin Core on regtest: the restore drill, the signer reading and returning Core's transaction files, the peer session fetching headers, filters, blocks and transactions from a Core node, and the network driver syncing, following a reorganization and restarting from its stored headers against a Core node, the counter node taking a payment from sighting to final, through a reorganization and a restart, and the owner's heartbeat from the owner's watcher to the counter ([scripts/instant-e2e-core.sh](scripts/instant-e2e-core.sh); on one machine the steps that need three network groups are reported as not run), and a refund planned, signed by two signers, joined, finished and taken by Core, with the mixed-signer, send-all and swapped-signature cases |
+| [scripts/](scripts/) | Regtest checks against Bitcoin Core, including restore, signer, peer and network-driver flows, counter payment tracking, owner heartbeat, and owner coin view and refund sending ([owner check](scripts/owner-spend-e2e-core.sh); its documented results are in [the research note](docs/research/owner-spend-e2e-core-2026-11-10.md)) |
 
-Planned next: the light-client adapter for the watcher, then the apps.
+Headless components and screen word catalogs are available. Further
+hardening and screen-state coverage precede integration into the Android
+and Box applications and testing on devices. Full application flows still
+need to be completed and checked.
 
 ## Building
 

@@ -523,6 +523,31 @@ fn oc_06_exactly_100_blocks_can_still_be_undone() {
 }
 
 #[test]
+fn oc_05_confirmed_transactions_leave_the_undo_horizon_after_empty_checked_blocks() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let funding = foreign(1, &[(&script(1), 50_000)]);
+    let first = chain.push(std::slice::from_ref(&funding));
+    apply(&mut view, &chain, &first);
+    view.set_checked(1, ok).unwrap();
+    let spend = tx_from(op(&funding, 0), &[(&script(2), 40_000)]);
+    view.add_pending(&spend, &scripts(), ok).unwrap();
+    let confirmed = chain.push(std::slice::from_ref(&spend));
+    apply(&mut view, &chain, &confirmed);
+    view.set_checked(2, ok).unwrap();
+    assert_eq!(view.confirmed_height(&spend.compute_txid()), Some(2));
+
+    for height in 3..=101 {
+        chain.push(&[]);
+        view.set_checked(height, ok).unwrap();
+    }
+    assert_eq!(view.confirmed_height(&spend.compute_txid()), Some(2));
+    chain.push(&[]);
+    view.set_checked(102, ok).unwrap();
+    assert_eq!(view.confirmed_height(&spend.compute_txid()), None);
+}
+
+#[test]
 fn oc_07_the_watch_set_is_the_marks_plus_the_gap() {
     let mut view = CoinView::new(100);
     assert_eq!((view.receive_watch(), view.change_watch()), (GAP, GAP));
@@ -543,6 +568,32 @@ fn oc_07_the_watch_set_is_the_marks_plus_the_gap() {
     assert_eq!(view.state(), ViewState::Ready);
     assert_eq!(view.checked(), 150);
     assert_eq!(view.raise_marks(6, 2, ok), Ok(false));
+}
+
+#[test]
+fn oc_07_mark_growth_persists_a_bounded_rewind_and_survives_write_failure() {
+    let mut view = CoinView::new(0);
+    view.set_checked(5, ok).unwrap();
+    let before = view.clone();
+    assert!(view
+        .raise_marks_and_rescan(30, 2, 8, |_| Err::<(), _>("disk"))
+        .is_err());
+    assert_eq!(view, before);
+
+    assert_eq!(view.raise_marks_and_rescan(30, 2, 8, ok), Ok(true));
+    assert_eq!((view.receive_next(), view.change_next()), (30, 2));
+    assert_eq!(view.checked(), 4);
+    assert_eq!(view.state(), ViewState::Rescanning { to: 8 });
+    let restored = CoinView::from_bytes(&view.to_bytes()).unwrap();
+    assert_eq!(restored, view);
+}
+
+#[test]
+fn oc_07_mark_growth_at_the_birthday_has_no_fictitious_future_height() {
+    let mut view = CoinView::new(100);
+    assert_eq!(view.raise_marks_and_rescan(3, 1, 100, ok), Ok(true));
+    assert_eq!(view.checked(), 100);
+    assert_eq!(view.state(), ViewState::Ready);
 }
 
 #[test]

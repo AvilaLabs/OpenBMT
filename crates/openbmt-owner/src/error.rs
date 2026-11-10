@@ -141,7 +141,7 @@ impl fmt::Display for Refusal {
 impl std::error::Error for Refusal {}
 
 /// A refusal, or the caller's store failing (AS-61, AS-64). In both cases
-/// nothing was changed.
+/// nothing was changed in memory; a storage error can leave disk uncertain.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OwnerError<E> {
     /// A rule refused.

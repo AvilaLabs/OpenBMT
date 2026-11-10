@@ -320,6 +320,23 @@ fn sc_07_the_four_response_refusals_read_differently() {
 }
 
 #[test]
+fn sc_12_reserved_coin_skips_explain_the_hold_and_next_step() {
+    let required = find("Skipped::ReservedRequired");
+    assert!(required.what.contains("must use is tied up"));
+    assert!(required.next.contains("Finish or abandon"));
+    assert!(required.next.contains("wait for the signed payment"));
+
+    let none = find("Skipped::ReservedNoEligible");
+    assert!(none.what.contains("coins old enough"));
+    assert!(none.next.contains("Finish or abandon"));
+
+    let partial = find("Skipped::ReservedPartial");
+    assert!(partial.what.contains("held for another approval"));
+    assert!(partial.what.contains("rest cannot cover"));
+    assert!(partial.next.to_lowercase().contains("lower this amount"));
+}
+
+#[test]
 fn sc_08_the_key_holders_reason_is_quoted_and_cleaned() {
     let w = Stage::Returned {
         reason: "wrong\u{202e}amount\nfor Ann ord 4a5e1e4baab89f3a32518a88c31bc87f".to_string(),
@@ -359,7 +376,9 @@ fn sc_07_the_same_root_fault_has_one_sentence_here() {
 fn sc_10_a_failed_store_names_the_details() {
     let w = OwnerError::<String>::Store("disk full".to_string()).words();
     assert_eq!(w.detail.as_deref(), Some("disk full"));
-    assert!(w.what.contains("nothing was changed"));
+    assert!(w.what.contains("could not confirm"));
+    assert!(w.next.contains("check the saved queue"));
+    assert!(!w.what.contains("nothing was changed"));
     assert!(w.next.contains("Details"));
 }
 

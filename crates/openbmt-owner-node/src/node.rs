@@ -10,12 +10,14 @@
 //!
 //! ## Files
 //!
-//! In the node's directory: [`COINS_FILE`] (the coin view, `OBMe`) and
-//! [`QUEUE_FILE`] (the owner's queue, `OBM4`), both written whole through
-//! the watcher's atomic write, and the watcher's own. The queue is written
-//! before the coin view takes the new transaction, so a restart finds the
-//! transaction in the queue's outbox and picks up from there
-//! ([`OwnerNode::start_with`]).
+//! In the node's directory: [`COINS_FILE`] (the coin view, `OBMe`),
+//! [`QUEUE_FILE`] (the owner's queue, `OBM4`), and [`TAKE_JOURNAL_FILE`]
+//! (a joint queue/key 1 roll-forward record), written whole through the
+//! watcher's atomic write. The queue is written before the coin view takes
+//! the new transaction, so a restart finds the transaction in the queue's
+//! outbox and picks up from there ([`OwnerNode::start_with`]). A journal left
+//! by a failed take blocks queue changes until [`OwnerNode::recover_key1`]
+//! has restored both snapshots.
 //!
 //! ## What a restart does
 //!
@@ -46,11 +48,13 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bitcoin::bip32::Xpriv;
+use bitcoin::bip32::Xpub;
 use bitcoin::consensus::deserialize;
 use bitcoin::{Network, OutPoint, ScriptBuf, Transaction, Txid};
 use openbmt_core::batch::BatchPolicy;
@@ -58,20 +62,27 @@ use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::wallet::{Keychain, WalletDescription};
 use openbmt_counter_node::{DriverPort, MAX_EVENTS_PER_PUMP};
 use openbmt_net_io::{
-    AppEvent, Driver, DriverConfig, FileStorage, Handle, OsRandomness, Randomness, RelayState,
-    SystemClock,
+    AppEvent, DirLock, Driver, DriverConfig, FileStorage, Handle, OsRandomness, Randomness,
+    RelayState, SystemClock, MAX_WATCHED_SCRIPTS,
 };
 use openbmt_owner::{Built, Delivery, Options, Owner, OwnerError, Stage, Taken};
 use openbmt_signer::SignerState;
 use openbmt_watch::{HeaderChain, Refusal, WellFormedBlock};
 
-use crate::coins::{ApplyError, CoinView, PendingError, ScriptSet, ViewState, UNDO_BLOCKS};
+use crate::coins::{
+    ApplyError, CoinView, PendingError, ScriptSet, ViewState, GAP, INDEX_LIMIT, UNDO_BLOCKS,
+};
+use crate::take_journal::{TakeJournal, MAX_JOURNAL_BYTES};
 use crate::watcher::{write_file, OwnerConfig, OwnerStartError, OwnerWatcher};
+
+static TAKE_JOURNAL_LOCK: Mutex<()> = Mutex::new(());
 
 /// The coin view's file.
 pub const COINS_FILE: &str = "coins.bin";
 /// The owner's queue file.
 pub const QUEUE_FILE: &str = "owner-queue.bin";
+/// A committed response awaiting roll-forward into the caller's key store.
+pub const TAKE_JOURNAL_FILE: &str = "take-journal.bin";
 /// The directory of the second driver, the one behind the proxy.
 pub const BROADCAST_DIR: &str = "broadcast";
 /// What [`OwnerNode::broadcast`] says when nothing can send (NR-91).
@@ -192,7 +203,16 @@ pub enum NodeError {
     /// The view is not ready to build from, and says why.
     NotReady(String),
     /// The owner's queue refused, or could not be stored.
-    Owner(String),
+    Owner(OwnerError<String>),
+    /// The wallet's receive and change ranges exceed the driver's watch limit.
+    WatchLimit {
+        /// Scripts required by the receive and change ranges together.
+        needed: u64,
+        /// Scripts the network driver can follow at once.
+        limit: usize,
+    },
+    /// A committed take must be rolled forward into the owner's key 1 state.
+    KeyRecoveryRequired,
 }
 
 impl fmt::Display for NodeError {
@@ -203,15 +223,69 @@ impl fmt::Display for NodeError {
             Self::Config(e) => write!(f, "{e}"),
             Self::NotReady(e) => write!(f, "not ready: {e}"),
             Self::Owner(e) => write!(f, "{e}"),
+            Self::WatchLimit { needed, limit } => write!(
+                f,
+                "the wallet needs {needed} watched scripts; the driver limit is {limit}"
+            ),
+            Self::KeyRecoveryRequired => write!(f, "key state needs recovery"),
         }
     }
+}
+
+fn remove_take_journal(dir: &std::path::Path) -> Result<(), String> {
+    match fs::remove_file(dir.join(TAKE_JOURNAL_FILE)) {
+        Ok(()) => fs::File::open(dir)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| format!("{TAKE_JOURNAL_FILE}: {error}")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("{TAKE_JOURNAL_FILE}: {error}")),
+    }
+}
+
+/// Store a queue snapshot under the take-journal serialization lock.
+pub(crate) fn write_queue_file(dir: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    let _commit = TAKE_JOURNAL_LOCK
+        .lock()
+        .map_err(|_| "take journal lock is poisoned".to_string())?;
+    match fs::symlink_metadata(dir.join(TAKE_JOURNAL_FILE)) {
+        Ok(_) => return Err("a committed response needs key 1 recovery".to_string()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
+    write_file(dir, QUEUE_FILE, bytes)
+}
+
+pub(crate) fn read_take_journal(dir: &std::path::Path) -> Result<Option<TakeJournal>, String> {
+    let path = dir.join(TAKE_JOURNAL_FILE);
+    let file = match fs::File::open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("{TAKE_JOURNAL_FILE}: {error}")),
+    };
+    let size = file
+        .metadata()
+        .map_err(|error| format!("{TAKE_JOURNAL_FILE}: {error}"))?
+        .len();
+    if size > u64::try_from(MAX_JOURNAL_BYTES).unwrap_or(u64::MAX) {
+        return Err(format!("{TAKE_JOURNAL_FILE}: file is too large"));
+    }
+    let mut bytes = Vec::new();
+    file.take(u64::try_from(MAX_JOURNAL_BYTES + 1).unwrap_or(u64::MAX))
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("{TAKE_JOURNAL_FILE}: {error}"))?;
+    if bytes.len() > MAX_JOURNAL_BYTES {
+        return Err(format!("{TAKE_JOURNAL_FILE}: file is too large"));
+    }
+    TakeJournal::from_bytes(&bytes)
+        .map(Some)
+        .map_err(|error| format!("{TAKE_JOURNAL_FILE} does not read back: {error}"))
 }
 
 impl std::error::Error for NodeError {}
 
 impl From<OwnerError<String>> for NodeError {
     fn from(e: OwnerError<String>) -> Self {
-        Self::Owner(e.to_string())
+        Self::Owner(e)
     }
 }
 
@@ -256,8 +330,51 @@ impl OwnerParts {
     }
 }
 
-/// The wallet scripts from index 0 up to the marks.
-fn scripts_for(wallet: &WalletDescription, receive: u32, change: u32) -> ScriptSet {
+/// Check the total watch range before deriving or persisting any new marks.
+fn watch_script_count(receive: usize, change: usize) -> Result<usize, NodeError> {
+    let Some(needed) = receive.checked_add(change) else {
+        return Err(NodeError::WatchLimit {
+            needed: u64::MAX,
+            limit: MAX_WATCHED_SCRIPTS,
+        });
+    };
+    if needed > MAX_WATCHED_SCRIPTS {
+        return Err(NodeError::WatchLimit {
+            needed: u64::try_from(needed).unwrap_or(u64::MAX),
+            limit: MAX_WATCHED_SCRIPTS,
+        });
+    }
+    Ok(needed)
+}
+
+fn ensure_watch_budget(receive: u32, change: u32) -> Result<(), NodeError> {
+    let receive = usize::try_from(receive).map_err(|_| NodeError::WatchLimit {
+        needed: u64::from(receive),
+        limit: MAX_WATCHED_SCRIPTS,
+    })?;
+    let change = usize::try_from(change).map_err(|_| NodeError::WatchLimit {
+        needed: u64::from(change),
+        limit: MAX_WATCHED_SCRIPTS,
+    })?;
+    watch_script_count(receive, change).map(|_| ())
+}
+
+fn ensure_marks_fit_watch_budget(receive: u32, change: u32) -> Result<(), NodeError> {
+    // Match CoinView's receive_watch/change_watch ranges before marks are
+    // persisted.
+    ensure_watch_budget(
+        receive.saturating_add(GAP).min(INDEX_LIMIT),
+        change.saturating_add(GAP).min(INDEX_LIMIT),
+    )
+}
+
+/// The wallet scripts from index 0 up to the marks, within the driver cap.
+fn scripts_for(
+    wallet: &WalletDescription,
+    receive: u32,
+    change: u32,
+) -> Result<ScriptSet, NodeError> {
+    ensure_watch_budget(receive, change)?;
     let mut set = ScriptSet::new();
     for i in 0..receive {
         if let Ok(script) = wallet.receive_script(i) {
@@ -269,7 +386,7 @@ fn scripts_for(wallet: &WalletDescription, receive: u32, change: u32) -> ScriptS
             set.insert(script, (Keychain::Change, i));
         }
     }
-    set
+    Ok(set)
 }
 
 /// The marks that follow from what the queue and the view hold.
@@ -306,6 +423,15 @@ pub struct OwnerNode<P: OwnerPort = Handle> {
     states: BTreeMap<Txid, SendState>,
     relays: BTreeMap<Txid, (usize, usize)>,
     halted: Option<String>,
+    /// A watch-range limit is returned directly to queue/build callers too.
+    watch_limit: Option<NodeError>,
+    /// A runtime rescan command is queued, but its ordered start marker has
+    /// not yet reached this node. Ignore old `Checked` events until then.
+    awaiting_rescan: u32,
+    take_journal: Option<TakeJournal>,
+    owner_secret: [u8; 32],
+    approver: DeviceId,
+    policy: BatchPolicy,
 }
 
 impl OwnerNode<Handle> {
@@ -352,6 +478,11 @@ impl<P: OwnerPort> OwnerNode<P> {
                 "the refund depth must be from 1 to {UNDO_BLOCKS}, not {refund_depth}"
             )));
         }
+        // NR-79: own the node directory before reading or changing the
+        // journal, queue, or coin view. The primary watcher takes ownership
+        // of this same lock once it starts.
+        let lock = DirLock::acquire(&dir)
+            .map_err(|e| NodeError::Start(OwnerStartError::Locked(e.to_string())))?;
         fs::create_dir_all(&dir).map_err(|e| NodeError::Files(e.to_string()))?;
 
         let mut view = match fs::read(dir.join(COINS_FILE)) {
@@ -360,7 +491,13 @@ impl<P: OwnerPort> OwnerNode<P> {
             Err(e) if e.kind() == io::ErrorKind::NotFound => CoinView::new(birthday),
             Err(e) => return Err(NodeError::Files(format!("{COINS_FILE}: {e}"))),
         };
-        let owner = match fs::read(dir.join(QUEUE_FILE)) {
+        let take_journal = read_take_journal(&dir).map_err(NodeError::Files)?;
+        let queue_bytes = if let Some(journal) = &take_journal {
+            Ok(journal.queue.clone())
+        } else {
+            fs::read(dir.join(QUEUE_FILE))
+        };
+        let owner = match queue_bytes {
             Ok(bytes) => Owner::restore(&owner_secret, wallet.clone(), approver, policy, &bytes)
                 .map_err(|e| NodeError::Files(format!("{QUEUE_FILE}: {e}")))?,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
@@ -374,9 +511,13 @@ impl<P: OwnerPort> OwnerNode<P> {
 
         // What the queue handed out that the view does not know of yet.
         let (receive, change) = marks_of(&owner, &view);
-        view.raise_marks(receive, change, |b| write_file(&dir, COINS_FILE, b))
-            .map_err(NodeError::Files)?;
-        let scripts = scripts_for(&wallet, view.receive_watch(), view.change_watch());
+        ensure_marks_fit_watch_budget(receive, change)?;
+        let old_checked = view.checked();
+        view.raise_marks_and_rescan(receive, change, old_checked, |b| {
+            write_file(&dir, COINS_FILE, b)
+        })
+        .map_err(NodeError::Files)?;
+        let scripts = scripts_for(&wallet, view.receive_watch(), view.change_watch())?;
 
         let main_config = OwnerConfig {
             dir: dir.clone(),
@@ -390,7 +531,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             broadcast_without_tor,
         };
         let initial: Vec<ScriptBuf> = scripts.keys().cloned().collect();
-        let watcher = OwnerWatcher::start_with(main_config, |d, p| spawn(d, p, initial))
+        let watcher = OwnerWatcher::start_with_lock(main_config, lock, |d, p| spawn(d, p, initial))
             .map_err(NodeError::Start)?;
         // The owner node asks for no unconfirmed transaction: only a
         // checked block makes a coin.
@@ -423,8 +564,20 @@ impl<P: OwnerPort> OwnerNode<P> {
             states: BTreeMap::new(),
             relays: BTreeMap::new(),
             halted: None,
+            watch_limit: None,
+            awaiting_rescan: 0,
+            take_journal,
+            owner_secret,
+            approver,
+            policy,
         };
-        node.reconcile();
+        if node.take_journal.is_none() {
+            node.reconcile();
+        } else {
+            node.note(
+                "a committed response needs key 1 recovery before queue operations".to_string(),
+            );
+        }
         Ok(node)
     }
 
@@ -450,17 +603,141 @@ impl<P: OwnerPort> OwnerNode<P> {
         &self.owner
     }
 
+    /// Whether a committed take still needs to be copied into the owner's
+    /// key 1 state store. Call [`OwnerNode::recover_key1`] before queue changes or another
+    /// response is taken.
+    pub fn take_recovery_pending(&self) -> bool {
+        self.take_journal.is_some()
+    }
+
+    pub(crate) fn ready_for_queue_write(&self) -> Result<(), NodeError> {
+        if let Some(error) = &self.watch_limit {
+            Err(error.clone())
+        } else if self.take_recovery_pending() {
+            Err(NodeError::KeyRecoveryRequired)
+        } else {
+            Ok(())
+        }
+    }
+
     /// The owner's queue, to change. A change is stored through
     /// [`OwnerNode::queue_writer`]; call [`OwnerNode::refresh_marks`]
     /// after one that queues a batch.
-    pub fn owner_mut(&mut self) -> &mut Owner {
-        &mut self.owner
+    pub fn owner_mut(&mut self) -> Result<&mut Owner, NodeError> {
+        self.ready_for_queue_write()?;
+        Ok(&mut self.owner)
     }
 
-    /// A function that stores the queue where the node keeps it.
+    /// A function that stores the queue where the node keeps it. It refuses
+    /// a stale queue snapshot and refuses writes while a take journal awaits
+    /// key 1 recovery.
     pub fn queue_writer(&self) -> impl Fn(&[u8]) -> Result<(), String> + 'static {
         let dir = self.dir.clone();
-        move |bytes| write_file(&dir, QUEUE_FILE, bytes)
+        let journal_path = dir.join(TAKE_JOURNAL_FILE);
+        let was_pending = self.take_recovery_pending();
+        let expected = match fs::read(dir.join(QUEUE_FILE)) {
+            Ok(bytes) => Ok(bytes),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(error) => Err(error.to_string()),
+        };
+        let expected = Arc::new(Mutex::new(expected));
+        move |bytes| {
+            if was_pending {
+                return Err("a committed response needs key 1 recovery".to_string());
+            }
+            let _commit = TAKE_JOURNAL_LOCK
+                .lock()
+                .map_err(|_| "take journal lock is poisoned".to_string())?;
+            match fs::symlink_metadata(&journal_path) {
+                Ok(_) => return Err("a committed response needs key 1 recovery".to_string()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.to_string()),
+            }
+            let mut prior = expected
+                .lock()
+                .map_err(|_| "queue writer lock is poisoned".to_string())?;
+            let expected_bytes = prior.as_ref().map_err(|error| error.clone())?;
+            let current = match fs::read(dir.join(QUEUE_FILE)) {
+                Ok(bytes) => bytes,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
+                Err(error) => return Err(error.to_string()),
+            };
+            if current != *expected_bytes {
+                return Err("owner queue changed since this writer was created".to_string());
+            }
+            write_file(&dir, QUEUE_FILE, bytes)?;
+            *prior = Ok(bytes.to_vec());
+            Ok(())
+        }
+    }
+
+    /// Archive paid rows whose transactions are no longer in the coin view's
+    /// undo horizon. Rows tied to a still-reorgable transaction remain linked
+    /// to it so a reorganization can reopen them.
+    pub fn archive_paid(&mut self) -> Result<usize, NodeError> {
+        let _commit = TAKE_JOURNAL_LOCK
+            .lock()
+            .map_err(|_| NodeError::Files("take journal lock is poisoned".to_string()))?;
+        self.ready_for_queue_write()?;
+        if !self.view.ready() {
+            return Err(NodeError::NotReady(self.view.state().to_string()));
+        }
+        let tip = self.watcher.chain().tip_height();
+        if self.view.checked() < tip {
+            return Err(NodeError::NotReady(format!(
+                "the coin view has checked blocks up to {} and the chain is at {tip}",
+                self.view.checked()
+            )));
+        }
+        let retained = self.view.retained_confirmations();
+        let dir = self.dir.clone();
+        self.owner
+            .archive_paid(&retained, |b| write_file(&dir, QUEUE_FILE, b))
+            .map_err(NodeError::from)
+    }
+
+    /// Roll a committed take forward into the owner's key 1 state store after
+    /// a failed write or restart. The account key is used only as a trust
+    /// anchor when reading the journaled signer snapshot; no private key is
+    /// journaled. The persistence callback must only write key 1 state and
+    /// must not call back into this node while recovery is running.
+    pub fn recover_key1(
+        &mut self,
+        key1: &mut SignerState,
+        key1_account: &Xpriv,
+        persist_key1: impl FnOnce(&[u8]) -> Result<(), String>,
+    ) -> Result<(), NodeError> {
+        let commit = TAKE_JOURNAL_LOCK
+            .lock()
+            .map_err(|_| NodeError::Files("take journal lock is poisoned".to_string()))?;
+        let Some(journal) = self.take_journal.clone() else {
+            return Ok(());
+        };
+        let account = Xpub::from_priv(&bitcoin::secp256k1::Secp256k1::new(), key1_account);
+        let restored = SignerState::from_bytes(&journal.key1, self.network(), &account)
+            .map_err(|e| NodeError::Files(format!("journaled key 1 state is invalid: {e}")))?;
+        let owner = Owner::restore(
+            &self.owner_secret,
+            self.wallet.clone(),
+            self.approver,
+            self.policy,
+            &journal.queue,
+        )
+        .map_err(|e| NodeError::Files(format!("journaled {QUEUE_FILE} is invalid: {e}")))?;
+
+        write_file(&self.dir, QUEUE_FILE, &journal.queue).map_err(NodeError::Files)?;
+        persist_key1(&journal.key1).map_err(NodeError::Files)?;
+        remove_take_journal(&self.dir).map_err(NodeError::Files)?;
+
+        self.owner = owner;
+        *key1 = restored;
+        self.take_journal = None;
+        self.halted = None;
+        self.watch_limit = None;
+        drop(commit);
+        self.refresh_marks();
+        self.reconcile();
+        Ok(())
     }
 
     /// The coins that `build_request` would be given: empty unless the view
@@ -469,10 +746,12 @@ impl<P: OwnerPort> OwnerNode<P> {
         self.view.coins(self.watcher.chain().tip_height())
     }
 
-    /// What the wallet holds as far as the view knows, confirmed and the
-    /// owner's own change.
+    /// What can be offered to a spend: confirmed unreserved coins and the
+    /// owner's own pending change.
     pub fn balance(&self) -> u64 {
-        self.view.balance()
+        self.coins().iter().fold(0u64, |sum, coin| {
+            sum.saturating_add(coin.output().map_or(0, |output| output.value.to_sat()))
+        })
     }
 
     /// The state of the view.
@@ -537,55 +816,82 @@ impl<P: OwnerPort> OwnerNode<P> {
 
     // The queue and the keys.
 
-    /// The marks, from what the queue and the view hold. When they grow the
-    /// new scripts are given to the driver, which matches the filters of the
-    /// blocks it fetches after that command, and to the node's own set,
-    /// which every block applied later is read with. Nothing is rescanned:
-    /// the scripts are the device's own and were not there to be paid
-    /// before (OC-07). This is why it runs at start before the driver is
-    /// started, right before each block and each reorganization is applied,
-    /// and after each batch is queued and each spend is built or taken.
-    /// The one window left is a block the driver matched before it got the
-    /// command and that was mined after the script was made; [`OwnerNode::rescan`]
-    /// closes it for a person who suspects a missed payment.
+    /// The marks, from what the queue and the view hold. On growth, the new
+    /// scripts are installed and the driver rechecks from one block below the
+    /// last checked height. This short scan catches work already in flight;
+    /// it does not revisit the wallet's birthday range. It runs at start
+    /// before the driver is started, right before each block and
+    /// reorganization, and after each batch or spend changes the queue.
     pub fn refresh_marks(&mut self) {
+        let _ = self.refresh_marks_checked();
+    }
+
+    fn refresh_marks_checked(&mut self) -> Result<(), NodeError> {
+        if let Some(error) = &self.watch_limit {
+            return Err(error.clone());
+        }
         let (receive, change) = marks_of(&self.owner, &self.view);
+        if let Err(error) = ensure_marks_fit_watch_budget(receive, change) {
+            self.watch_limit = Some(error.clone());
+            self.stop(error.to_string());
+            return Err(error);
+        }
         let dir = self.dir.clone();
+        let tip = self.watcher.chain().tip_height();
         match self
             .view
-            .raise_marks(receive, change, |b| write_file(&dir, COINS_FILE, b))
+            .raise_marks_and_rescan(receive, change, tip, |b| write_file(&dir, COINS_FILE, b))
         {
-            Ok(false) => {}
+            Ok(false) => Ok(()),
             Ok(true) => {
                 let new = scripts_for(
                     &self.wallet,
                     self.view.receive_watch(),
                     self.view.change_watch(),
-                );
+                )?;
                 for script in new.keys() {
                     if !self.scripts.contains_key(script) {
                         self.watcher.port().watch_script(script.clone());
                     }
                 }
                 self.scripts = new;
-                self.note(format!(
-                    "new addresses are watched from the block after {}",
-                    self.view.checked()
-                ));
+                if self.view.state() != ViewState::DeepReorg {
+                    let from = self.view.checked();
+                    self.awaiting_rescan = self.awaiting_rescan.saturating_add(1);
+                    self.watcher.port().rescan_from(from);
+                    match self.view.state() {
+                        ViewState::Rescanning { to } => self.note(format!(
+                            "new addresses are watched; rechecking blocks after {from} through {to}"
+                        )),
+                        _ => self.note(
+                            "new addresses are watched; the driver is updating its watch set"
+                                .to_string(),
+                        ),
+                    }
+                }
+                Ok(())
             }
-            Err(e) => self.stop(format!("the coin view could not be stored: {e}")),
+            Err(e) => {
+                let detail = format!("the coin view could not be stored: {e}");
+                self.stop(detail.clone());
+                Err(NodeError::Files(detail))
+            }
         }
     }
 
     /// Start again from the birthday: for a view in the deep reorg state, a
     /// restored owner or a person who suspects a missed payment.
     pub fn rescan(&mut self) -> Result<(), NodeError> {
+        let (receive, change) = marks_of(&self.owner, &self.view);
+        ensure_marks_fit_watch_budget(receive, change)?;
         let dir = self.dir.clone();
         self.view
             .reset(|b| write_file(&dir, COINS_FILE, b))
             .map_err(NodeError::Files)?;
         self.watcher.port().rescan_from(self.view.birthday());
+        self.awaiting_rescan = self.awaiting_rescan.saturating_add(1);
         self.halted = None;
+        self.watch_limit = None;
         self.note("rescanning from the birthday height".to_string());
         Ok(())
     }
@@ -594,8 +900,17 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// the view holds. The view must be ready and have checked every block up
     /// to the tip, or nothing is built.
     pub fn build_request(&mut self, fee_rate: u64, now: u64) -> Result<Built, NodeError> {
+        let commit = TAKE_JOURNAL_LOCK
+            .lock()
+            .map_err(|_| NodeError::Files("take journal lock is poisoned".to_string()))?;
+        self.ready_for_queue_write()?;
         if let Some(why) = &self.halted {
             return Err(NodeError::NotReady(why.clone()));
+        }
+        if self.awaiting_rescan > 0 {
+            return Err(NodeError::NotReady(
+                "waiting for the script rescan to start".into(),
+            ));
         }
         if !self.view.ready() {
             return Err(NodeError::NotReady(self.view.state().to_string()));
@@ -623,14 +938,16 @@ impl<P: OwnerPort> OwnerNode<P> {
                 .build_request(&coins, fee_rate, change_index, tip, now, &random, |b| {
                     write_file(&dir, QUEUE_FILE, b)
                 })?;
-        self.refresh_marks();
+        drop(commit);
+        self.refresh_marks_checked()?;
         Ok(built)
     }
 
-    /// Take the Key app's response. The queue and key 1's state are stored
-    /// together first. Then each transaction that came out is held as
-    /// pending, sent, and followed. A step after the store that fails is
-    /// noted and tried again by the next restart.
+    /// Take the Key app's response. A durable journal commits the queue and
+    /// key 1 snapshot as one roll-forward unit before either separate store
+    /// is changed. A failed second store requires [`OwnerNode::recover_key1`].
+    /// The persistence callback must only write key 1 state and must not call
+    /// back into this node while the commit is running.
     pub fn take(
         &mut self,
         response: &[u8],
@@ -639,13 +956,45 @@ impl<P: OwnerPort> OwnerNode<P> {
         now: u64,
         persist_key1: impl FnOnce(&[u8]) -> Result<(), String>,
     ) -> Result<Taken, NodeError> {
+        let commit = TAKE_JOURNAL_LOCK
+            .lock()
+            .map_err(|_| NodeError::Files("take journal lock is poisoned".to_string()))?;
+        self.ready_for_queue_write()?;
         let dir = self.dir.clone();
+        let mut committed = None;
         let taken = self
             .owner
             .take_response(response, key1, key1_account, now, |queue, key| {
+                let journal = TakeJournal {
+                    queue: queue.to_vec(),
+                    key1: key.to_vec(),
+                };
+                let bytes = journal.to_bytes()?;
+                if let Err(error) = write_file(&dir, TAKE_JOURNAL_FILE, &bytes) {
+                    if dir.join(TAKE_JOURNAL_FILE).exists() {
+                        committed = Some(journal);
+                    }
+                    return Err(error);
+                }
+                committed = Some(journal);
                 write_file(&dir, QUEUE_FILE, queue)?;
-                persist_key1(key)
-            })?;
+                persist_key1(key)?;
+                remove_take_journal(&dir)
+            });
+        let taken = match taken {
+            Ok(taken) => taken,
+            Err(error) => {
+                if let Some(journal) = committed {
+                    self.take_journal = Some(journal);
+                    self.stop(format!(
+                        "a committed response needs key 1 recovery: {error}"
+                    ));
+                    return Err(NodeError::KeyRecoveryRequired);
+                }
+                return Err(error.into());
+            }
+        };
+        drop(commit);
         self.refresh_marks();
         self.reconcile();
         Ok(taken)
@@ -703,6 +1052,9 @@ impl<P: OwnerPort> OwnerNode<P> {
 
     /// Send, mark the entries as sent, and record the state.
     fn dispatch(&mut self, txid: Txid, bytes: &[u8]) {
+        if self.halted.is_some() {
+            return;
+        }
         match self.send(&txid, bytes) {
             Ok(()) => {
                 self.states.insert(txid, SendState::Sent);
@@ -710,7 +1062,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                     let dir = self.dir.clone();
                     if let Err(e) = self
                         .owner
-                        .mark_broadcast(&txid, |b| write_file(&dir, QUEUE_FILE, b))
+                        .mark_broadcast(&txid, |b| write_queue_file(&dir, b))
                     {
                         self.note(format!("{txid} was sent but could not be marked: {e}"));
                     }
@@ -733,6 +1085,13 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// Every transaction in the queue's outbox that is not followed yet is
     /// held, sent and followed (the module docs, "What a restart does").
     fn reconcile(&mut self) {
+        if self.halted.is_some() {
+            return;
+        }
+        if self.take_recovery_pending() {
+            self.note("queue recovery waits for the owner's key 1 state recovery".to_string());
+            return;
+        }
         let list: Vec<(Txid, Vec<u8>)> = self
             .owner
             .outbox()
@@ -783,6 +1142,31 @@ impl<P: OwnerPort> OwnerNode<P> {
                 self.states.insert(txid, SendState::Unresolved);
             }
         }
+        // A transaction that was paid and then reorged is present in the
+        // view's pending set even if the UI already archived its rows and its
+        // outbox record. The view's undo record is the durable signed source.
+        let pending: Vec<Transaction> = self.view.pending().map(|p| p.tx.clone()).collect();
+        for tx in pending {
+            let txid = tx.compute_txid();
+            if self.states.contains_key(&txid) {
+                continue;
+            }
+            let bytes = bitcoin::consensus::serialize(&tx);
+            if let Err(e) = self.ready_for_queue_write() {
+                self.note(format!("{txid} waits to reopen after Key recovery: {e}"));
+                return;
+            }
+            let dir = self.dir.clone();
+            match self.owner.reopen_paid(&tx, |b| write_queue_file(&dir, b)) {
+                Ok(_) => self.dispatch(txid, &bytes),
+                Err(e) => {
+                    self.stop(format!(
+                        "{txid} could not be reopened after a reorganization: {e}"
+                    ));
+                    return;
+                }
+            }
+        }
         if self.states.len() > MAX_STATES {
             self.states.retain(|_, s| *s != SendState::Done);
         }
@@ -791,6 +1175,9 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// A transaction at the refund depth is reported paid and let go; one
     /// whose coins another transaction spent goes back to the queue.
     fn settle(&mut self) {
+        if self.halted.is_some() || self.take_recovery_pending() {
+            return;
+        }
         let tip = self.watcher.chain().tip_height();
         let depth = self.refund_depth;
         let done: Vec<Txid> = self
@@ -808,10 +1195,13 @@ impl<P: OwnerPort> OwnerNode<P> {
             })
             .collect();
         for txid in done {
+            if self.ready_for_queue_write().is_err() {
+                return;
+            }
             let dir = self.dir.clone();
             match self
                 .owner
-                .mark_confirmed(&txid, |b| write_file(&dir, QUEUE_FILE, b))
+                .mark_confirmed(&txid, |b| write_queue_file(&dir, b))
             {
                 Ok(()) => {
                     self.unsend(&txid);
@@ -822,13 +1212,47 @@ impl<P: OwnerPort> OwnerNode<P> {
                 Err(e) => self.note(format!("{txid} could not be marked paid: {e}")),
             }
         }
+        // A transaction whose UI rows were archived has no outbox to remove
+        // when it reconfirms. Finish tracking it from the coin view's undo.
+        let finished_without_rows: Vec<Txid> = self
+            .states
+            .iter()
+            .filter_map(|(txid, state)| {
+                if matches!(
+                    state,
+                    SendState::Sent | SendState::SeenBack { .. } | SendState::NotSeen
+                ) && !self.owner.outbox().iter().any(|d| {
+                    matches!(
+                        &d.what,
+                        Delivery::Transaction { txid: held, .. } if held == txid
+                    )
+                }) && self
+                    .view
+                    .confirmed_height(txid)
+                    .is_some_and(|h| tip.saturating_sub(h).saturating_add(1) >= depth)
+                {
+                    Some(*txid)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for txid in finished_without_rows {
+            self.unsend(&txid);
+            self.states.insert(txid, SendState::Done);
+            self.relays.remove(&txid);
+        }
     }
 
     fn replaced(&mut self, txid: Txid) {
+        if self.ready_for_queue_write().is_err() {
+            self.note(format!("{txid} replacement waits for key 1 recovery"));
+            return;
+        }
         let dir = self.dir.clone();
         match self
             .owner
-            .mark_replaced(&txid, |b| write_file(&dir, QUEUE_FILE, b))
+            .mark_replaced(&txid, |b| write_queue_file(&dir, b))
         {
             Ok(()) => self.note(format!(
                 "{txid} was replaced: another transaction spent its coins; its entries are back \
@@ -887,6 +1311,9 @@ impl<P: OwnerPort> OwnerNode<P> {
             AppEvent::Chain { left, .. } if !left.is_empty() => self.left_the_chain(left),
             AppEvent::Block { hash, bytes } => self.block(hash, bytes),
             AppEvent::Checked(height) => self.checked(*height),
+            AppEvent::RescanStarted(_) => {
+                self.awaiting_rescan = self.awaiting_rescan.saturating_sub(1)
+            }
             _ => self.handle_relay(event),
         }
     }
@@ -948,15 +1375,44 @@ impl<P: OwnerPort> OwnerNode<P> {
                     self.note("deep reorg: rescan".to_string());
                 }
                 for txid in effect.reopened {
-                    self.note(format!(
-                        "{txid} was in a block that left the chain; it is sent again"
-                    ));
-                    let bytes = self.owner.outbox().iter().find_map(|d| match &d.what {
-                        Delivery::Transaction { txid: t, tx, .. } if *t == txid => Some(tx.clone()),
-                        _ => None,
-                    });
-                    if let Some(bytes) = bytes {
-                        self.dispatch(txid, &bytes);
+                    let tx = self
+                        .view
+                        .pending()
+                        .find(|p| p.tx.compute_txid() == txid)
+                        .map(|p| p.tx.clone());
+                    let Some(tx) = tx else {
+                        self.stop(format!(
+                            "{txid} left the chain but its signed transaction is missing"
+                        ));
+                        continue;
+                    };
+                    if self.take_recovery_pending() {
+                        self.note(format!(
+                            "{txid} waits to reopen after the owner's key 1 state recovery"
+                        ));
+                        continue;
+                    }
+                    if let Err(e) = self.ready_for_queue_write() {
+                        self.note(format!("{txid} waits to reopen: {e}"));
+                        continue;
+                    }
+                    let dir = self.dir.clone();
+                    match self.owner.reopen_paid(&tx, |b| write_queue_file(&dir, b)) {
+                        Ok(had_rows) => {
+                            if had_rows {
+                                self.note(format!(
+                                    "{txid} left the chain; its paid entries are open again"
+                                ));
+                            } else {
+                                self.note(format!(
+                                    "{txid} left the chain; its signed transaction is sent again"
+                                ));
+                            }
+                            self.dispatch(txid, &bitcoin::consensus::serialize(&tx));
+                        }
+                        Err(e) => self.stop(format!(
+                            "{txid} left the chain but its paid entries could not be reopened: {e}"
+                        )),
                     }
                 }
             }
@@ -965,7 +1421,7 @@ impl<P: OwnerPort> OwnerNode<P> {
     }
 
     fn block(&mut self, hash: &bitcoin::BlockHash, bytes: &[u8]) {
-        if self.halted.is_some() {
+        if self.halted.is_some() || self.awaiting_rescan > 0 {
             return;
         }
         // The marks first: a script the queue handed out is read in this
@@ -1004,7 +1460,7 @@ impl<P: OwnerPort> OwnerNode<P> {
     }
 
     fn checked(&mut self, height: u32) {
-        if self.halted.is_some() {
+        if self.halted.is_some() || self.awaiting_rescan > 0 {
             return;
         }
         let tip = self.watcher.chain().tip_height();
@@ -1019,5 +1475,40 @@ impl<P: OwnerPort> OwnerNode<P> {
                 self.stop(format!("the coin view could not be stored: {e}"));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod watch_budget_tests {
+    use super::{
+        ensure_marks_fit_watch_budget, ensure_watch_budget, watch_script_count, NodeError,
+    };
+    use openbmt_net_io::MAX_WATCHED_SCRIPTS;
+
+    #[test]
+    fn watch_ranges_fit_exactly_at_the_driver_limit() {
+        assert_eq!(ensure_watch_budget(MAX_WATCHED_SCRIPTS as u32, 0), Ok(()));
+        assert_eq!(
+            ensure_marks_fit_watch_budget((MAX_WATCHED_SCRIPTS - 40) as u32, 0),
+            Ok(())
+        );
+        assert_eq!(
+            ensure_marks_fit_watch_budget((MAX_WATCHED_SCRIPTS - 39) as u32, 0),
+            Err(NodeError::WatchLimit {
+                needed: (MAX_WATCHED_SCRIPTS + 1) as u64,
+                limit: MAX_WATCHED_SCRIPTS,
+            })
+        );
+    }
+
+    #[test]
+    fn adding_receive_and_change_ranges_checks_overflow() {
+        assert_eq!(
+            watch_script_count(usize::MAX, 1),
+            Err(NodeError::WatchLimit {
+                needed: u64::MAX,
+                limit: MAX_WATCHED_SCRIPTS,
+            })
+        );
     }
 }

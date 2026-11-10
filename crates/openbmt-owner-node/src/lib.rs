@@ -8,10 +8,10 @@
 //! heartbeat that tells a counter what the watcher sees
 //! (`openbmt_core::heartbeat`, `docs/COUNTER-RULES.md` CR-50 to CR-56).
 //!
-//! **What it does not do yet.** It watches no script in this slice: the
-//! owner's own watching of the shop's payments comes later, and so does
-//! everything that takes a screen. The library takes events from the driver
-//! and gives bytes back.
+//! [`OwnerNode`] joins that watcher to the wallet's checked coin view,
+//! approval queue and sending path. The [`say`] module supplies words for
+//! coin readiness, sending and recovery states. Graphical applications and
+//! device testing are still to come.
 //!
 //! The [`refunds`] module turns the refund requests that arrive in those
 //! records into queued refunds on the owner's queue (`docs/COUNTER-RULES.md`
@@ -49,6 +49,8 @@ pub mod copy;
 pub mod link;
 pub mod node;
 pub mod refunds;
+pub mod say;
+mod take_journal;
 pub mod watcher;
 
 #[cfg(test)]
@@ -60,7 +62,7 @@ pub use link::{
 };
 pub use node::{
     NodeError, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState, BROADCAST_DIR, COINS_FILE,
-    NO_TOR, QUEUE_FILE,
+    NO_TOR, QUEUE_FILE, TAKE_JOURNAL_FILE,
 };
 pub use refunds::{
     Applied, CashRefundSeen, IntakeError, NoteKind, RefundIntake, RefundNote, Stopped,

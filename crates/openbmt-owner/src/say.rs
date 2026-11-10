@@ -92,7 +92,7 @@ fn fault(heading: &str, what: impl Into<String>, code: &'static str) -> Words {
         heading,
         what,
         Who::Owner,
-        "Nothing was changed. Try again; if it repeats, stop and tell support, and read them the details.",
+        "Nothing was changed. Try again; if it repeats, stop and report it to the OpenBMT project with the details.",
     )
     .code(code)
 }
@@ -221,7 +221,7 @@ fn full_words(what: &str) -> Words {
         "the numbering" => (
             "Entry numbers used up",
             "The phone has used up all the entry numbers it can give.",
-            "Nothing was changed. Stop and tell support: the owner phone's numbering is full.",
+            "Nothing was changed. Stop and report it to the OpenBMT project: the owner phone's numbering is full.",
         ),
         "the refund queue" => (
             "Refund queue is full",
@@ -261,7 +261,7 @@ fn full_words(what: &str) -> Words {
         "the list of outpoints kept for a refund" => (
             "Dropped-payment list full",
             "The phone cannot keep track of more coins from dropped payments for this refund.",
-            "Nothing was changed. Stop and tell support: the dropped-payment list is full.",
+            "Nothing was changed. Stop and report it to the OpenBMT project: the dropped-payment list is full.",
         ),
         _ => (
             "A list is full",
@@ -625,17 +625,17 @@ impl Refusal {
 }
 
 impl<E: std::fmt::Display> OwnerError<E> {
-    /// What the owner is told when a call did not go through. Nothing was
-    /// changed. A store that failed is a fault of the phone (SC-10): the
+    /// What the owner is told when a call did not go through. Memory stays
+    /// unchanged; a storage error may leave the saved outcome uncertain. The
     /// system's own text is in the details.
     pub fn words(&self) -> Words {
         match self {
             Self::Refused(r) => r.words(),
             Self::Store(e) => stop(
                 "Change could not be saved",
-                "The phone could not store the new state, so nothing was changed.",
+                "The phone could not confirm that the change was saved.",
                 Who::Owner,
-                "Try again; if it repeats, stop and tell support. The system's own text is under Details.",
+                "Reopen the owner app and check the saved queue before trying again. The system's text is under Details.",
             )
             .code("AS-64")
             .detail(e.to_string()),
@@ -688,7 +688,7 @@ impl RestoreError {
                 "Saved data cannot be read",
                 format!("The saved data on this phone cannot be read: it {}.", read_cause(e)),
                 Who::Owner,
-                "Nothing was changed. Restore the last good backup; if there is none, stop and tell support.",
+                "Nothing was changed. Restore the last good backup; if there is none, stop and report it to the OpenBMT project.",
             )
             .code("AS-65")
             .detail(e.to_string()),
@@ -717,7 +717,7 @@ impl RestoreError {
                 "Saved data disagrees",
                 "The saved data on this phone does not agree with itself, so it was not loaded.",
                 Who::Owner,
-                "Nothing was changed. Restore the last good backup; if there is none, stop and tell support.",
+                "Nothing was changed. Restore the last good backup; if there is none, stop and report it to the OpenBMT project.",
             )
             .code("AS-65")
             .detail(*why),
@@ -749,6 +749,30 @@ impl Skipped {
                 "Nothing to do now. Start another approval after this one is finished.",
             )
             .code("AS-68")
+        } else if r.starts_with(RESERVED_REQUIRED_INPUTS) {
+            info(
+                "Waiting for a reserved coin",
+                "A coin this payment must use is tied up in another open approval or a signed payment waiting for its outcome.",
+                Who::Owner,
+                "Finish or abandon the open approval, or wait for the signed payment to confirm or be dropped, then try again.",
+            )
+            .code("AS-61")
+        } else if r.starts_with(RESERVED_NO_ELIGIBLE) {
+            info(
+                "Coins held for approval",
+                "The coins old enough to build this payment are reserved by another open approval or a signed payment waiting for its outcome.",
+                Who::Owner,
+                "Finish or abandon the open approval, or wait for the signed payment to confirm or be dropped, then try again.",
+            )
+            .code("AS-61")
+        } else if r.starts_with(RESERVED_PARTIAL) {
+            info(
+                "Some coins are held",
+                "Some coins are held for another approval or a signed payment, and the rest cannot cover this payment.",
+                Who::Owner,
+                "Finish or abandon the other approval, or wait for the signed payment's outcome. Lower this amount if needed, then try again.",
+            )
+            .code("AS-61")
         } else if r.starts_with("SP-21:") {
             fault(
                 "No change address left",
@@ -1040,13 +1064,24 @@ pub const WRONG_STAGES: [&str; 6] = [
 
 /// The reasons an entry stays queued when a session is built, as the
 /// session builder words them, with a name for each.
-pub const SKIPPED: [(&str, &str); 7] = [
+pub(crate) const RESERVED_REQUIRED_INPUTS: &str =
+    "AS-61: a coin required to replace a dropped payment is reserved by another approval";
+pub(crate) const RESERVED_NO_ELIGIBLE: &str =
+    "AS-61: all eligible supplied coins are reserved by another approval or waiting signed payment";
+pub(crate) const RESERVED_PARTIAL: &str =
+    "AS-61: some eligible coins are reserved by another approval or waiting signed payment; the unreserved coins did not cover the payment";
+
+/// Every queued-entry skip reason, with a name for the screen catalog.
+pub const SKIPPED: [(&str, &str); 10] = [
     ("Full", "AS-50: the session holds no more items"),
     (
         "Blocked",
         "AS-68: the outpoints its dropped transaction spent are used by another transaction of \
          this session; it waits for the next",
     ),
+    ("ReservedRequired", RESERVED_REQUIRED_INPUTS),
+    ("ReservedNoEligible", RESERVED_NO_ELIGIBLE),
+    ("ReservedPartial", RESERVED_PARTIAL),
     ("NoChangeIndex", "SP-21: no change index is left"),
     ("FeeNotSettled", "AS-56: the fee did not settle"),
     (

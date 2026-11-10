@@ -188,7 +188,7 @@ impl PosError {
                 "Till answer not readable",
                 "The till's system answered with something the Box could not read.",
                 Who::Owner,
-                "Try again later; if it repeats, stop and tell support, and read them the details.",
+                "Try again later; if it repeats, stop and report it to the OpenBMT project with the details.",
             )
             .detail(*why),
             Self::Unsupported => stop(
@@ -224,7 +224,7 @@ fn store_fault(text: &str) -> Words {
         "Till records not saved",
         "The Box could not store the till's records, so the last change was not kept.",
         Who::Owner,
-        "Try again; if it repeats, stop and tell support. The system's own text is under Details.",
+        "Try again; if it repeats, stop and report it to the OpenBMT project. The system's own text is under Details.",
     )
     .code("PS-70")
     .detail(text)
@@ -240,14 +240,14 @@ impl<E: std::fmt::Display> SyncError<E> {
                 "Till sent too much at once",
                 "The till's system sent more orders in one page than the Box takes.",
                 Who::Owner,
-                "Try again later; if it repeats, stop and tell support: the till sends pages that are too large.",
+                "Try again later; if it repeats, stop and report it to the OpenBMT project: the till sends pages that are too large.",
             )
             .code("PS-80"),
             Self::NoProgress => stop(
                 "Till is not moving on",
                 "The till's system says there are more orders, but it does not move on to the next page.",
                 Who::Owner,
-                "Try again later; if it repeats, stop and tell support: the till does not move on.",
+                "Try again later; if it repeats, stop and report it to the OpenBMT project: the till does not move on.",
             )
             .code("PS-80"),
             Self::Ledger(e) => e.words(),
@@ -307,7 +307,7 @@ impl ModelError {
     /// What the owner is told when the till's system gave something the Box
     /// refuses. Nothing was saved from it.
     pub fn words(&self) -> Words {
-        let next = "Nothing was saved from it. Stop and tell support what the till sends; the details are under Details.";
+        let next = "Nothing was saved from it. Stop and report to the OpenBMT project what the till sends; the details are under Details.";
         match self {
             Self::BadId => stop(
                 "Unusable order number",
@@ -394,7 +394,7 @@ fn too_many_sales() -> Words {
         "Too many sales to match",
         "The counter has more sales than the Box can match against the till at once.",
         Who::Owner,
-        "Stop and tell support: the counter has more sales than the Box can match.",
+        "Stop and report it to the OpenBMT project: the counter has more sales than the Box can match.",
     )
     .code("PS-72")
 }
@@ -408,7 +408,7 @@ impl FactsError {
                 "Counter's records refused",
                 format!("The counter's records do not check out: {}.", chain_cause(e)),
                 Who::Owner,
-                "Copy the records from the counter again; if they still fail, stop and tell support.",
+                "Copy the records from the counter again; if they still fail, stop and report it to the OpenBMT project.",
             )
             .code("PS-05")
             .detail(e.to_string()),
@@ -416,7 +416,7 @@ impl FactsError {
                 "A record could not be read",
                 format!("A record of the counter could not be read as a sale event: it {}.", read_cause(error)),
                 Who::Owner,
-                "Copy the records from the counter again; if it repeats, stop and tell support.",
+                "Copy the records from the counter again; if it repeats, stop and report it to the OpenBMT project.",
             )
             .code("PS-06")
             .detail(format!("record {seq}: {error}")),
@@ -424,7 +424,7 @@ impl FactsError {
                 "Event for an unopened sale",
                 "The counter has an event for a sale that was never opened.",
                 Who::Owner,
-                "Copy the records from the counter again; if it repeats, stop and tell support.",
+                "Copy the records from the counter again; if it repeats, stop and report it to the OpenBMT project.",
             )
             .code("PS-06")
             .detail(format!("sale {index}")),
@@ -432,7 +432,7 @@ impl FactsError {
                 "Sale opened twice",
                 "The counter opens the same sale twice.",
                 Who::Owner,
-                "Copy the records from the counter again; if it repeats, stop and tell support.",
+                "Copy the records from the counter again; if it repeats, stop and report it to the OpenBMT project.",
             )
             .code("PS-06")
             .detail(format!("sale {index}")),
@@ -485,7 +485,7 @@ impl LedgerError {
                 "A sale is listed twice",
                 "Two records name the same sale of the same counter.",
                 Who::Owner,
-                "Copy the records from the counter again; if it repeats, stop and tell support.",
+                "Copy the records from the counter again; if it repeats, stop and report it to the OpenBMT project.",
             )
             .code("PS-72")
             .detail(format!("sale {}", k.index)),
@@ -497,7 +497,7 @@ impl LedgerError {
                         heading,
                         format!("The till holds as many {things} as it can, and nothing in particular is in the way."),
                         Who::Owner,
-                        "Stop and tell support: the till records are full.",
+                        "Stop and report it to the OpenBMT project: the till records are full.",
                     )
                     .code("PS-72")
                     .detail(*what),

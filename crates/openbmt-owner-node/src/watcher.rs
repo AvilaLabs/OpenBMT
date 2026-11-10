@@ -7,8 +7,8 @@
 //! - `Chain`: updates the [`ChainView`].
 //! - `Note`: kept in a bounded log.
 //! - `Stopped`: noted.
-//! - `Sighting`, `AlsoAnnounced`, `Block` and `Checked` are not used: the
-//!   watcher has no script to watch in this slice.
+//! - `Sighting`, `AlsoAnnounced`, `Block`, `Checked` and `RescanStarted` are
+//!   not used by the chain view; the owner node handles script scans.
 //!
 //! ## The heartbeat
 //!
@@ -168,6 +168,18 @@ impl<P: DriverPort> OwnerWatcher<P> {
         config: OwnerConfig,
         spawn: impl FnOnce(DriverConfig, PathBuf) -> Result<P, String>,
     ) -> Result<Self, OwnerStartError> {
+        let lock =
+            DirLock::acquire(&config.dir).map_err(|e| OwnerStartError::Locked(e.to_string()))?;
+        Self::start_with_lock(config, lock, spawn)
+    }
+
+    /// Start using a directory lock acquired by an owner node before it read
+    /// or wrote any of its own state in the same directory.
+    pub(crate) fn start_with_lock(
+        config: OwnerConfig,
+        lock: DirLock,
+        spawn: impl FnOnce(DriverConfig, PathBuf) -> Result<P, String>,
+    ) -> Result<Self, OwnerStartError> {
         let OwnerConfig {
             dir,
             identity,
@@ -177,9 +189,11 @@ impl<P: DriverPort> OwnerWatcher<P> {
             watch_from,
             ..
         } = config;
-        // NR-79: before anything in the directory is read. This makes the
-        // directory too.
-        let lock = DirLock::acquire(&dir).map_err(|e| OwnerStartError::Locked(e.to_string()))?;
+        if lock.dir() != dir {
+            return Err(OwnerStartError::Locked(
+                "the pre-acquired directory lock does not match the watcher directory".to_string(),
+            ));
+        }
         fs::create_dir_all(&dir).map_err(|e| OwnerStartError::Dir(e.to_string()))?;
         let mut notes = VecDeque::new();
 
@@ -350,7 +364,8 @@ impl<P: DriverPort> OwnerWatcher<P> {
             | AppEvent::Block { .. }
             | AppEvent::TxRelayed { .. }
             | AppEvent::TxState { .. }
-            | AppEvent::Checked(_) => {}
+            | AppEvent::Checked(_)
+            | AppEvent::RescanStarted(_) => {}
         }
     }
 

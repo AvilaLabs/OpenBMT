@@ -586,6 +586,7 @@ impl<P: DriverPort> Node<P> {
             }
             AppEvent::Block { hash, bytes } => self.take_block(hash, &bytes, touched, reports),
             AppEvent::Checked(height) => self.write_checked(height),
+            AppEvent::RescanStarted(_) => {}
             AppEvent::Note(line) => self.note(line),
             AppEvent::Stopped => self.stopped = true,
             // The counter never broadcasts (NR-55).

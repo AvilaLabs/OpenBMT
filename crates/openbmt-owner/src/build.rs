@@ -1,16 +1,22 @@
 //! Building a session (AS-53 to AS-61).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use bitcoin::consensus::deserialize;
+use bitcoin::psbt::Psbt;
 use bitcoin::{OutPoint, ScriptBuf};
 use openbmt_core::identity::tagged_hash;
 use openbmt_core::wallet::WalletDescription;
+use openbmt_core::wire::DecodeError;
 use openbmt_session::{Item, Label, OutputLabel, Request, RequestItem};
 use openbmt_spend::{dust_limit, plan, ChangePosition, Coin, Plan, PlanOutput, SpendRequest};
 
 use crate::error::{OwnerError, Refusal};
+use crate::say::{RESERVED_NO_ELIGIBLE, RESERVED_PARTIAL, RESERVED_REQUIRED_INPUTS};
 use crate::state::{Frozen, OpenSession, Owner, State};
-use crate::types::{Built, CashAmount, FeePayer, Options, Refund, RefundPacking, Skipped, Stage};
+use crate::types::{
+    Built, CashAmount, Delivery, FeePayer, Options, Refund, RefundPacking, Skipped, Stage,
+};
 use crate::{MAX_ITEMS_PER_SESSION, MAX_OPEN_SESSIONS, MAX_REFUNDS_PER_TX, MAX_TXS_PER_SESSION};
 
 /// AS-61: the tag of the hash that gives each transaction of a session its
@@ -187,6 +193,62 @@ fn take_coins(pool: &mut Vec<Coin>, plan: &Plan) {
     pool.retain(|c| !used.contains(&c.outpoint));
 }
 
+/// Inputs already committed to a transaction the owner has handed out or
+/// signed. Node callers also remove these through their coin view, but the
+/// owner library accepts caller-supplied coins and must be safe when that
+/// list is stale or shared across open sessions.
+fn reserved_outpoints(state: &State) -> Result<BTreeSet<OutPoint>, Refusal> {
+    let mut reserved = BTreeSet::new();
+    for session in &state.sessions {
+        let request = Request::from_bytes(&session.request).map_err(Refusal::Frame)?;
+        for item in request.items() {
+            if let Item::Spend { psbt, .. } = &item.item {
+                let psbt = Psbt::deserialize(psbt).map_err(|_| {
+                    Refusal::Frame(DecodeError::NonCanonical(
+                        "an open spend's transaction does not parse",
+                    ))
+                })?;
+                reserved.extend(
+                    psbt.unsigned_tx
+                        .input
+                        .into_iter()
+                        .map(|input| input.previous_output),
+                );
+            }
+        }
+    }
+    for deliverable in &state.outbox {
+        if let Delivery::Transaction { tx, .. } = &deliverable.what {
+            let tx = deserialize::<bitcoin::Transaction>(tx).map_err(|_| {
+                Refusal::Frame(DecodeError::NonCanonical(
+                    "a waiting spend's transaction does not parse",
+                ))
+            })?;
+            reserved.extend(tx.input.into_iter().map(|input| input.previous_output));
+        }
+    }
+    Ok(reserved)
+}
+
+/// Explain planner failures when eligible supplied coins were withheld for
+/// another approval. Other planner failures keep their original detail.
+fn reservation_reason(
+    why: &str,
+    reserved_eligible: bool,
+    available_eligible: bool,
+) -> Option<&'static str> {
+    if !reserved_eligible {
+        return None;
+    }
+    if why.starts_with("SP-10:") && !available_eligible {
+        Some(RESERVED_NO_ELIGIBLE)
+    } else if why.contains("the eligible coins hold") && available_eligible {
+        Some(RESERVED_PARTIAL)
+    } else {
+        None
+    }
+}
+
 fn thirds(random: &[u8; 96]) -> ([u8; 32], [u8; 32], [u8; 32]) {
     let mut a = [0u8; 32];
     let mut b = [0u8; 32];
@@ -249,14 +311,24 @@ impl Owner {
         let options = next.options;
         let mut items: Vec<(Item, Frozen)> = Vec::new();
         let mut skipped: Vec<Skipped> = Vec::new();
-        let mut pool: Vec<Coin> = coins.to_vec();
+        let original: Vec<OutPoint> = coins.iter().map(|c| c.outpoint).collect();
+        let reserved = reserved_outpoints(&next)?;
+        let mut pool: Vec<Coin> = coins
+            .iter()
+            .filter(|coin| !reserved.contains(&coin.outpoint))
+            .cloned()
+            .collect();
+        let reserved_eligible = coins.iter().any(|coin| {
+            reserved.contains(&coin.outpoint) && coin.confirmations >= options.min_confirmations
+        });
+        let available_eligible = pool
+            .iter()
+            .any(|coin| coin.confirmations >= options.min_confirmations);
         let mut txs: usize = 0;
         let mut k: u32 = 0;
         // One place is kept for the health check (AS-60).
         let room = |items: &Vec<(Item, Frozen)>| items.len() + 1 < MAX_ITEMS_PER_SESSION;
         let full = "AS-50: the session holds no more items";
-        let original: Vec<OutPoint> = coins.iter().map(|c| c.outpoint).collect();
-
         // The refunds (AS-53, AS-55).
         let ready: Vec<Refund> = next
             .refunds
@@ -307,7 +379,12 @@ impl Owner {
                 .map(|r| r.conflict.clone())
                 .unwrap_or_default();
             if blocked(&original, &pool, &must) {
-                skip_all(BLOCKED.to_string(), &mut skipped);
+                let reason = if must.iter().any(|outpoint| reserved.contains(outpoint)) {
+                    RESERVED_REQUIRED_INPUTS
+                } else {
+                    BLOCKED
+                };
+                skip_all(reason.to_string(), &mut skipped);
                 continue;
             }
             let shape = Shape {
@@ -319,7 +396,12 @@ impl Owner {
                 match plan_refunds(&self.wallet, &pool, &group, shape, index, options, &must) {
                     Ok(p) => p,
                     Err(why) => {
-                        skip_all(why, &mut skipped);
+                        skip_all(
+                            reservation_reason(&why, reserved_eligible, available_eligible)
+                                .unwrap_or(&why)
+                                .to_string(),
+                            &mut skipped,
+                        );
                         continue;
                     }
                 };
@@ -410,7 +492,16 @@ impl Owner {
                 CashAmount::All => (0, true),
             };
             if blocked(&original, &pool, &c.conflict) {
-                skip(BLOCKED.to_string(), &mut skipped);
+                let reason = if c
+                    .conflict
+                    .iter()
+                    .any(|outpoint| reserved.contains(outpoint))
+                {
+                    RESERVED_REQUIRED_INPUTS
+                } else {
+                    BLOCKED
+                };
+                skip(reason.to_string(), &mut skipped);
                 continue;
             }
             let shape = Shape {
@@ -429,7 +520,13 @@ impl Owner {
             let planned = match plan(&self.wallet, &pool, &request) {
                 Ok(p) => p,
                 Err(e) => {
-                    skip(e.to_string(), &mut skipped);
+                    let why = e.to_string();
+                    skip(
+                        reservation_reason(&why, reserved_eligible, available_eligible)
+                            .unwrap_or(&why)
+                            .to_string(),
+                        &mut skipped,
+                    );
                     continue;
                 }
             };
