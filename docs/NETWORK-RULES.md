@@ -207,3 +207,46 @@ thin driver that owns the sockets.
   hide a payment until a second peer or a full block shows it (WR-23).
 - **They do not relay.** The counter gives nothing back to the network.
   A shop that wants to support the network runs the Box's full node.
+
+## 9. What the driver decides
+
+The driver (`crates/openbmt-net-io`) owns the sockets and the threads. These
+rules are what it decides where the rules above are silent.
+
+- **NR-70.** An address that closed, failed or was refused is not dialed
+  again for 30 seconds. A fixed peer (one the caller names) is dialed again
+  after the pause, for as long as the driver runs. A fixed peer or seed
+  name that breaks a rule (NR-25) is not dialed for 24 hours; the driver
+  keeps that in memory, because the address book does not hold addresses on
+  this machine.
+- **NR-71.** The next address to dial is, in this order: a stored anchor
+  (NR-24), a fixed peer, an address drawn from the book (NR-23), and
+  last the seeds (NR-72). At most 4 connections are being opened at once
+  and at most the target number of peers plus 4 sockets exist. The groups
+  of connections being opened count as connected for the draw. A
+  connection that the manager refuses (NR-20) is closed at once.
+- **NR-72.** The seeds are asked only when the book has nothing to dial.
+  Without Tor, each seed name is looked up in a thread of its own; an
+  answer that takes more than 10 seconds is ignored, and a round is
+  started at most every 5 minutes. What comes back enters the book as
+  learned from a seed. With Tor on (NR-26), no name is looked up: one seed
+  name at a time is dialed through the proxy as an ordinary peer.
+- **NR-73.** The header store is saved when the tip has moved and 60
+  seconds have passed since the last save. The anchors are set to the two
+  ready peers connected longest, and the book is saved, every 10 minutes.
+  Both are saved, and the anchors set, when the driver stops. A stored
+  file that does not read back is replaced by an empty one and reported to
+  the app. Storage that cannot be read at all stops the start.
+- **NR-74.** The channel from the peers to the driver and the channel of
+  events to the app are bounded. When the app does not read its events,
+  the driver stops reading from the peers, and the peers wait on their
+  sockets, instead of the driver holding more in memory.
+- **NR-75.** The app is told the ready peers, whether a peer is ahead
+  and the tip whenever one of them changes and at least every 10 seconds,
+  so that it can run the health rules (WR-50 to WR-52).
+- **NR-76.** A Tor v3 address in the book is kept but not dialed in this
+  version: the driver does not yet turn it into a host name for the
+  proxy.
+- **NR-77.** Stopping saves the data, closes every socket and ends the
+  driver's threads within 5 seconds. A thread that is still in a connect or
+  a lookup at that time holds no data and is left to end by itself.

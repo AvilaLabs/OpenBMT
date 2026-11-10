@@ -1,0 +1,68 @@
+//! Checks that the tests line up with the rules file.
+
+const RULES: &str = include_str!("../../../../docs/NETWORK-RULES.md");
+const TEST_SOURCES: [&str; 3] = [
+    include_str!("driver.rs"),
+    include_str!("socks.rs"),
+    include_str!("storage.rs"),
+];
+
+/// The rules this crate implements: those of the net crate that only a
+/// driver can carry out, and the ones the driver decides itself (NR-70 and
+/// on).
+const IMPLEMENTED: [&str; 13] = [
+    "NR-22", "NR-23", "NR-24", "NR-25", "NR-26", "NR-70", "NR-71", "NR-72", "NR-73", "NR-74",
+    "NR-75", "NR-76", "NR-77",
+];
+
+/// Every rule ID that the rules file defines (in bold at the start of a
+/// bullet).
+fn rule_ids() -> Vec<String> {
+    let mut ids = Vec::new();
+    for line in RULES.lines() {
+        if let Some(rest) = line.trim_start().strip_prefix("- **NR-") {
+            let id: String = rest.chars().take(2).collect();
+            if id.chars().all(|c| c.is_ascii_digit()) {
+                ids.push(format!("NR-{id}"));
+            }
+        }
+    }
+    ids
+}
+
+#[test]
+fn the_rules_file_defines_the_rules_this_crate_implements() {
+    let ids = rule_ids();
+    for rule in IMPLEMENTED {
+        assert!(ids.contains(&rule.to_string()), "{rule} is not in the file");
+    }
+}
+
+#[test]
+fn every_rule_from_nr_70_on_is_implemented_here() {
+    for id in rule_ids() {
+        let number: u32 = id[3..].parse().unwrap();
+        if number >= 70 {
+            assert!(IMPLEMENTED.contains(&id.as_str()), "{id} has no test here");
+        }
+    }
+}
+
+#[test]
+fn every_implemented_rule_has_at_least_one_test_named_for_it() {
+    let missing: Vec<_> = IMPLEMENTED
+        .iter()
+        .filter(|id| {
+            let needle = format!("fn nr_{}_", &id[3..]);
+            !TEST_SOURCES.iter().any(|src| src.contains(&needle))
+        })
+        .collect();
+    assert!(missing.is_empty(), "rules without a test: {missing:?}");
+}
+
+#[test]
+fn the_rules_file_keeps_its_lines_short() {
+    for (i, line) in RULES.lines().enumerate() {
+        assert!(line.chars().count() <= 80, "line {} is too long", i + 1);
+    }
+}

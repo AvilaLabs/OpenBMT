@@ -1,0 +1,395 @@
+//! Fakes for the tests: a storage in memory, a counting randomness, a peer
+//! on a loopback socket and the nets that map any address to it.
+
+use std::collections::BTreeMap;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
+
+use bitcoin::block::{Header, Version};
+use bitcoin::blockdata::constants::genesis_block;
+use bitcoin::hashes::Hash;
+use bitcoin::p2p::address::Address;
+use bitcoin::p2p::message::NetworkMessage;
+use bitcoin::p2p::message_network::VersionMessage;
+use bitcoin::p2p::{Magic, ServiceFlags};
+use bitcoin::{BlockHash, CompactTarget, Network, TxMerkleNode};
+use openbmt_net::encode;
+
+use crate::dial::{DialError, Net};
+use crate::driver::{AppEvent, Handle};
+use crate::env::{Key, Randomness, Storage};
+use crate::socks::Target;
+
+/// The start height the fake peer claims.
+pub const PEER_HEIGHT: u32 = 850_000;
+/// Time of the regtest genesis block.
+pub const GENESIS_TIME: u32 = 1_296_688_602;
+
+/// A storage that keeps its values in memory and can be shared.
+#[derive(Clone, Default)]
+pub struct MemStorage {
+    pub values: Arc<Mutex<BTreeMap<Key, Vec<u8>>>>,
+}
+
+impl MemStorage {
+    pub fn with(key: Key, bytes: Vec<u8>) -> Self {
+        let s = Self::default();
+        s.values.lock().unwrap().insert(key, bytes);
+        s
+    }
+
+    pub fn get(&self, key: Key) -> Option<Vec<u8>> {
+        self.values.lock().unwrap().get(&key).cloned()
+    }
+}
+
+impl Storage for MemStorage {
+    type Error = String;
+
+    fn load(&mut self, key: Key) -> Result<Option<Vec<u8>>, String> {
+        Ok(self.get(key))
+    }
+
+    fn save(&mut self, key: Key, bytes: &[u8]) -> Result<(), String> {
+        self.values.lock().unwrap().insert(key, bytes.to_vec());
+        Ok(())
+    }
+}
+
+/// Numbers that differ from call to call.
+pub struct CountingRandomness(pub u64);
+
+impl Randomness for CountingRandomness {
+    fn next_u64(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        self.0
+    }
+}
+
+/// A regtest header that extends `prev`, with a valid proof of work.
+pub fn mine(prev: BlockHash, time: u32) -> Header {
+    let mut header = Header {
+        version: Version::from_consensus(0x2000_0000),
+        prev_blockhash: prev,
+        merkle_root: TxMerkleNode::all_zeros(),
+        time,
+        bits: CompactTarget::from_consensus(0x207f_ffff),
+        nonce: 0,
+    };
+    while header.validate_pow(header.target()).is_err() {
+        header.nonce += 1;
+    }
+    header
+}
+
+/// `n` regtest headers on top of the genesis block.
+pub fn chain(n: u32) -> Vec<Header> {
+    let mut prev = genesis_block(Network::Regtest).block_hash();
+    let mut out = Vec::new();
+    for i in 1..=n {
+        let header = mine(prev, GENESIS_TIME + 600 * i);
+        prev = header.block_hash();
+        out.push(header);
+    }
+    out
+}
+
+pub fn magic() -> Magic {
+    Magic::from(Network::Regtest)
+}
+
+fn frame(message: NetworkMessage) -> Vec<u8> {
+    encode(magic(), &message)
+}
+
+fn version_message() -> VersionMessage {
+    let silent = Address {
+        services: ServiceFlags::NONE,
+        address: [0; 8],
+        port: 0,
+    };
+    VersionMessage {
+        version: 70_016,
+        services: ServiceFlags::NETWORK | ServiceFlags::WITNESS,
+        timestamp: 1_700_000_000,
+        receiver: silent.clone(),
+        sender: silent,
+        nonce: 42,
+        user_agent: "/fake:1/".to_string(),
+        start_height: i32::try_from(PEER_HEIGHT).unwrap(),
+        relay: true,
+    }
+}
+
+/// What the fake peer does after the handshake.
+#[derive(Clone)]
+pub enum Behavior {
+    /// Answer `getheaders` with these headers.
+    Serve(Vec<Header>),
+    /// Answer `getheaders`, then tell of these addresses.
+    ServeAndTell(Vec<Header>, Vec<SocketAddr>),
+    /// Close the connection after the first `getheaders`.
+    CloseAfterHandshake,
+    /// Send bytes that are not a message.
+    Garbage,
+    /// Send these headers in messages of one header each, two milliseconds
+    /// apart.
+    Flood(Vec<Header>),
+    /// Accept the connection and say nothing.
+    Silent,
+}
+
+/// A peer on a loopback socket.
+pub struct FakePeer {
+    pub addr: SocketAddr,
+    /// Connections accepted.
+    pub accepts: Arc<AtomicUsize>,
+    /// The payloads of the `getheaders` messages received.
+    pub getheaders: Arc<Mutex<Vec<Vec<u8>>>>,
+    /// Connections the driver closed (a read returned 0).
+    pub closed_by_driver: Arc<AtomicUsize>,
+    /// Instants of the accepts.
+    pub accepted_at: Arc<Mutex<Vec<Instant>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl FakePeer {
+    pub fn start(behavior: Behavior) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut peer = Self {
+            addr,
+            accepts: Arc::default(),
+            getheaders: Arc::default(),
+            closed_by_driver: Arc::default(),
+            accepted_at: Arc::default(),
+            stop: Arc::default(),
+            thread: None,
+        };
+        let (accepts, getheaders, closed, at, stop) = (
+            peer.accepts.clone(),
+            peer.getheaders.clone(),
+            peer.closed_by_driver.clone(),
+            peer.accepted_at.clone(),
+            peer.stop.clone(),
+        );
+        let thread = thread::spawn(move || {
+            let mut handlers = Vec::new();
+            while !stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        accepts.fetch_add(1, Ordering::SeqCst);
+                        at.lock().unwrap().push(Instant::now());
+                        let (b, g, c, s) = (
+                            behavior.clone(),
+                            getheaders.clone(),
+                            closed.clone(),
+                            stop.clone(),
+                        );
+                        handlers.push(thread::spawn(move || serve(stream, &b, &g, &c, &s)));
+                    }
+                    Err(_) => thread::sleep(Duration::from_millis(10)),
+                }
+            }
+            for h in handlers {
+                let _ = h.join();
+            }
+        });
+        peer.thread = Some(thread);
+        peer
+    }
+
+    pub fn accept_count(&self) -> usize {
+        self.accepts.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for FakePeer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+/// Cut complete messages out of the buffer: (command, payload).
+fn messages(buf: &mut Vec<u8>) -> Vec<(String, Vec<u8>)> {
+    let mut out = Vec::new();
+    while buf.len() >= 24 {
+        let len = u32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]) as usize;
+        if buf.len() < 24 + len {
+            break;
+        }
+        let name: Vec<u8> = buf[4..16].iter().copied().take_while(|b| *b != 0).collect();
+        out.push((
+            String::from_utf8_lossy(&name).into_owned(),
+            buf[24..24 + len].to_vec(),
+        ));
+        buf.drain(..24 + len);
+    }
+    out
+}
+
+/// Run a fake peer on a stream that is already connected.
+pub fn serve_stream(stream: TcpStream, behavior: &Behavior, stop: &AtomicBool) {
+    let getheaders = Mutex::new(Vec::new());
+    let closed = AtomicUsize::new(0);
+    serve(stream, behavior, &getheaders, &closed, stop);
+}
+
+fn serve(
+    mut stream: TcpStream,
+    behavior: &Behavior,
+    getheaders: &Mutex<Vec<Vec<u8>>>,
+    closed: &AtomicUsize,
+    stop: &AtomicBool,
+) {
+    stream
+        .set_read_timeout(Some(Duration::from_millis(50)))
+        .unwrap();
+    if matches!(behavior, Behavior::Silent) {
+        // Say nothing; read until the driver closes.
+        let mut buf = [0u8; 1024];
+        while !stop.load(Ordering::SeqCst) {
+            if let Ok(0) = stream.read(&mut buf) {
+                closed.fetch_add(1, Ordering::SeqCst);
+                return;
+            }
+        }
+        return;
+    }
+    let _ = stream.write_all(&frame(NetworkMessage::Version(version_message())));
+    let _ = stream.write_all(&frame(NetworkMessage::Verack));
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let mut garbage_sent = false;
+    while !stop.load(Ordering::SeqCst) {
+        match stream.read(&mut chunk) {
+            Ok(0) => {
+                closed.fetch_add(1, Ordering::SeqCst);
+                return;
+            }
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(_) => {}
+        }
+        for (command, payload) in messages(&mut buf) {
+            match command.as_str() {
+                "getheaders" => {
+                    getheaders.lock().unwrap().push(payload);
+                    match behavior {
+                        Behavior::Serve(headers) | Behavior::ServeAndTell(headers, _) => {
+                            // The addresses come first, so that the
+                            // headers' event proves they were read.
+                            if let Behavior::ServeAndTell(_, told) = behavior {
+                                let list = told
+                                    .iter()
+                                    .map(|a| {
+                                        (1_700_000_000, Address::new(a, ServiceFlags::NETWORK))
+                                    })
+                                    .collect();
+                                let _ = stream.write_all(&frame(NetworkMessage::Addr(list)));
+                            }
+                            let _ =
+                                stream.write_all(&frame(NetworkMessage::Headers(headers.clone())));
+                        }
+                        Behavior::CloseAfterHandshake => return,
+                        Behavior::Flood(headers) => {
+                            for header in headers {
+                                let m = NetworkMessage::Headers(vec![*header]);
+                                if stream.write_all(&frame(m)).is_err() {
+                                    return;
+                                }
+                                thread::sleep(Duration::from_millis(2));
+                            }
+                        }
+                        Behavior::Garbage if !garbage_sent => {
+                            garbage_sent = true;
+                            let _ = stream.write_all(&[0xff; 40]);
+                        }
+                        _ => {}
+                    }
+                }
+                "ping" => {
+                    let mut nonce = [0u8; 8];
+                    nonce.copy_from_slice(&payload[..8]);
+                    let _ =
+                        stream.write_all(&frame(NetworkMessage::Pong(u64::from_le_bytes(nonce))));
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// What the dial hook saw.
+pub type DialLog = Arc<Mutex<Vec<(Target, Option<SocketAddr>)>>>;
+
+/// A net whose dials all go to `to`, and whose lookups return `resolved`.
+pub fn net_to(to: SocketAddr, resolved: Vec<SocketAddr>) -> (Net, DialLog, Arc<AtomicUsize>) {
+    let log: DialLog = Arc::default();
+    let lookups = Arc::new(AtomicUsize::new(0));
+    let (l, n) = (log.clone(), lookups.clone());
+    let net = Net {
+        dial: Arc::new(move |target, proxy| {
+            l.lock().unwrap().push((target.clone(), proxy));
+            TcpStream::connect(to).map_err(|e| DialError::Connect(e.kind()))
+        }),
+        resolve: Arc::new(move |_, _| {
+            n.fetch_add(1, Ordering::SeqCst);
+            Ok(resolved.clone())
+        }),
+    };
+    (net, log, lookups)
+}
+
+/// Wait up to `secs` for an event the test wants; the events before it are
+/// returned too.
+pub fn wait_for(
+    handle: &Handle,
+    secs: u64,
+    want: impl Fn(&AppEvent) -> bool,
+) -> Option<Vec<AppEvent>> {
+    let end = Instant::now() + Duration::from_secs(secs);
+    let mut seen = Vec::new();
+    while let Some(left) = end.checked_duration_since(Instant::now()) {
+        match handle.events().recv_timeout(left) {
+            Ok(event) => {
+                let hit = want(&event);
+                seen.push(event);
+                if hit {
+                    return Some(seen);
+                }
+            }
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
+/// An event with at least one ready peer.
+pub fn has_peer(event: &AppEvent) -> bool {
+    matches!(event, AppEvent::Peers(peers, ..) if !peers.is_empty())
+}
+
+pub fn is_note(event: &AppEvent) -> bool {
+    matches!(event, AppEvent::Note(_))
+}
+
+/// Poll until the condition holds or `secs` pass.
+pub fn until(secs: u64, cond: impl Fn() -> bool) -> bool {
+    let end = Instant::now() + Duration::from_secs(secs);
+    while Instant::now() < end {
+        if cond() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    cond()
+}

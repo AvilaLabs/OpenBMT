@@ -1,0 +1,18 @@
+[package]
+name = "openbmt-net-io"
+description = "The OpenBMT counter's network driver: owns the sockets, the threads and the stored address book and headers, and runs the sans-IO peer manager over them"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The same exact bitcoin version as the other crates, so the types unify.
+[dependencies]
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+
+# The driver runs the net crate's manager and address book, and keeps the
+# watcher's header store on disk.
+openbmt-net = { path = "../openbmt-net" }
+openbmt-watch = { path = "../openbmt-watch" }
+openbmt-core = { path = "../openbmt-core" }

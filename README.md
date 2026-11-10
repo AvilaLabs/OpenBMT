@@ -58,8 +58,9 @@ sets. The full statement, its conditions and the reasoning are in
 | [crates/openbmt-signer/](crates/openbmt-signer/) | The Key app's transaction signer: the rules under which key 2 signs |
 | [crates/openbmt-watch/](crates/openbmt-watch/) | The counter's payment watcher: merkle proofs, full blocks, peer groups, conflicts, health |
 | [crates/openbmt-net/](crates/openbmt-net/) | The counter's Bitcoin peer client: wire framing, the single-peer session and the manager that runs several peers, checks blocks by filters and fetches announced transactions, with no sockets and no clock |
+| [crates/openbmt-net-io/](crates/openbmt-net-io/) | The counter's network driver: owns the sockets and threads, runs the peer manager and the address book over them, keeps the headers and the address book on disk, and speaks SOCKS5 for Tor |
 | [crates/openbmt-counter/](crates/openbmt-counter/) | The counter's judgment of a sale ([rules](docs/COUNTER-RULES.md)): opening, quotes, the cashier's screens, instant acceptance, overrides, owner commands, and the order of writes to storage |
-| [scripts/](scripts/) | Checks against Bitcoin Core on regtest: the restore drill, the signer reading and returning Core's transaction files, and the peer session fetching headers, filters, blocks and transactions from a Core node |
+| [scripts/](scripts/) | Checks against Bitcoin Core on regtest: the restore drill, the signer reading and returning Core's transaction files, the peer session fetching headers, filters, blocks and transactions from a Core node, and the network driver syncing, following a reorganization and restarting from its stored headers against a Core node |
 
 Planned next: the light-client adapter for the watcher, then the apps.
 

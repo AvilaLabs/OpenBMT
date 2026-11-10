@@ -1,0 +1,651 @@
+//! The driver against fake peers on loopback sockets.
+
+use std::net::{Ipv4Addr, SocketAddr, TcpListener};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+use bitcoin::hashes::Hash;
+use bitcoin::p2p::address::AddrV2;
+use bitcoin::p2p::ServiceFlags;
+use bitcoin::Network;
+use openbmt_net::{AddressBook, Source};
+use openbmt_watch::{HeaderStore, PeerAddr};
+
+use super::kit::*;
+use crate::dial::{DialError, Net};
+use crate::driver::{longest_connected, AppEvent, Driver, DriverConfig, Handle};
+use crate::env::{Key, SystemClock};
+use crate::socks::Target;
+
+fn config(peer: &FakePeer, pause: u64) -> DriverConfig {
+    let mut c = DriverConfig::new(Network::Regtest, 0);
+    c.allow_local = true;
+    c.fixed_peers = vec![peer.addr];
+    c.redial_pause_secs = pause;
+    c
+}
+
+/// A config with no fixed peer, for tests that reach peers by the book or
+/// the seeds.
+fn bare() -> DriverConfig {
+    DriverConfig::new(Network::Regtest, 0)
+}
+
+fn start(config: DriverConfig, storage: &MemStorage, net: Net) -> Handle {
+    Driver::spawn_with(
+        config,
+        storage.clone(),
+        SystemClock,
+        CountingRandomness(1),
+        Vec::new(),
+        net,
+    )
+    .unwrap()
+}
+
+fn start_system(config: DriverConfig, storage: &MemStorage) -> Handle {
+    start(config, storage, Net::system())
+}
+
+fn v4(a: u8, b: u8, c: u8, d: u8) -> AddrV2 {
+    AddrV2::Ipv4(Ipv4Addr::new(a, b, c, d))
+}
+
+fn sock(a: u8, b: u8, c: u8, d: u8, port: u16) -> SocketAddr {
+    SocketAddr::new(Ipv4Addr::new(a, b, c, d).into(), port)
+}
+
+/// A stored book with these addresses (all in different groups).
+fn book_bytes(entries: &[(u8, u8, u8, u8, u16)], anchors: &[(u8, u8, u8, u8, u16)]) -> Vec<u8> {
+    let mut book = AddressBook::new();
+    for (a, b, c, d, port) in entries {
+        let added = book.add(
+            &v4(*a, *b, *c, *d),
+            *port,
+            ServiceFlags::NETWORK | ServiceFlags::WITNESS,
+            Source::Own,
+            1,
+        );
+        assert_eq!(added, openbmt_net::Added::New);
+    }
+    let anchors: Vec<(AddrV2, u16)> = anchors
+        .iter()
+        .map(|(a, b, c, d, port)| (v4(*a, *b, *c, *d), *port))
+        .collect();
+    book.set_anchors(&anchors);
+    book.to_bytes()
+}
+
+fn stored_book(storage: &MemStorage) -> AddressBook {
+    AddressBook::from_bytes(&storage.get(Key::Book).unwrap(), 0).unwrap()
+}
+
+fn stored_headers(storage: &MemStorage) -> HeaderStore {
+    HeaderStore::from_bytes(Network::Regtest, &storage.get(Key::Headers).unwrap()).unwrap()
+}
+
+fn tip_is(height: u32) -> impl Fn(&AppEvent) -> bool {
+    move |e| matches!(e, AppEvent::Peers(_, _, (h, _)) if *h == height)
+}
+
+#[test]
+fn nr_71_a_fixed_peer_is_dialed_and_the_handshake_ends_in_a_peers_event() {
+    let peer = FakePeer::start(Behavior::Serve(Vec::new()));
+    let storage = MemStorage::default();
+    let mut handle = start_system(config(&peer, 2), &storage);
+    let seen = wait_for(&handle, 10, has_peer).expect("no ready peer");
+    // The first event is the start: no peers, the genesis tip.
+    match seen.first() {
+        Some(AppEvent::Peers(peers, None, tip)) => {
+            assert!(peers.is_empty());
+            assert_eq!(*tip, (0, u64::from(GENESIS_TIME)));
+        }
+        other => panic!("{other:?}"),
+    }
+    match seen.last() {
+        Some(AppEvent::Peers(peers, _, _)) => {
+            assert_eq!(peers.len(), 1);
+            assert_eq!(
+                peers.first().map(|p| (p.addr, p.best_height)),
+                Some((PeerAddr::Ip(Ipv4Addr::LOCALHOST.into()), PEER_HEIGHT))
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(peer.accept_count(), 1);
+    handle.shutdown();
+}
+
+#[test]
+fn nr_70_a_peer_that_closes_is_forgotten_and_redialed_after_the_pause() {
+    let peer = FakePeer::start(Behavior::CloseAfterHandshake);
+    let storage = MemStorage::default();
+    let mut handle = start_system(config(&peer, 2), &storage);
+    wait_for(&handle, 10, has_peer).expect("no ready peer");
+    // The peer is forgotten ...
+    wait_for(
+        &handle,
+        10,
+        |e| matches!(e, AppEvent::Peers(peers, ..) if peers.is_empty()),
+    )
+    .expect("the closed peer was not forgotten");
+    // ... and is not dialed again at once ...
+    assert_eq!(peer.accept_count(), 1);
+    // ... but after the pause.
+    assert!(until(10, || peer.accept_count() >= 2));
+    let at = peer.accepted_at.lock().unwrap().clone();
+    let gap = at[1].duration_since(at[0]);
+    assert!(gap >= Duration::from_millis(900), "{gap:?}");
+    handle.shutdown();
+}
+
+#[test]
+fn nr_25_a_peer_that_sends_garbage_is_dropped_and_not_dialed_again() {
+    let peer = FakePeer::start(Behavior::Garbage);
+    let storage = MemStorage::default();
+    let mut handle = start_system(config(&peer, 1), &storage);
+    let seen = wait_for(&handle, 10, is_note).expect("no note");
+    match seen.last() {
+        Some(AppEvent::Note(text)) => {
+            assert!(text.contains("dropped") && text.contains("NR-01"), "{text}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(until(5, || peer.closed_by_driver.load(Ordering::SeqCst) == 1));
+    // A peer on this machine is not in the book, so the driver keeps the
+    // ban itself: the pause is over after 1 s and still nothing dials.
+    thread::sleep(Duration::from_millis(3_500));
+    assert_eq!(peer.accept_count(), 1);
+    handle.shutdown();
+}
+
+#[test]
+fn nr_25_a_book_peer_that_misbehaves_is_marked_in_the_book() {
+    let peer = FakePeer::start(Behavior::Garbage);
+    let storage = MemStorage::with(Key::Book, book_bytes(&[(8, 8, 8, 8, 8333)], &[]));
+    let (net, log, _) = net_to(peer.addr, Vec::new());
+    let mut handle = start(bare(), &storage, net);
+    wait_for(&handle, 10, is_note).expect("no note");
+    // The book keeps the ban across the pause and the restart.
+    thread::sleep(Duration::from_millis(1_500));
+    assert_eq!(log.lock().unwrap().len(), 1);
+    handle.shutdown();
+    let book = stored_book(&storage);
+    let entry = book.get(&v4(8, 8, 8, 8), 8333).unwrap();
+    assert!(entry.banned_until.is_some());
+    assert!(book.anchors().is_empty());
+}
+
+#[test]
+fn nr_23_the_next_address_is_drawn_from_the_book_with_the_callers_randomness() {
+    let peer = FakePeer::start(Behavior::Serve(Vec::new()));
+    let storage = MemStorage::with(Key::Book, book_bytes(&[(8, 8, 8, 8, 8333)], &[]));
+    let (net, log, _) = net_to(peer.addr, Vec::new());
+    let mut handle = start(bare(), &storage, net);
+    wait_for(&handle, 10, has_peer).expect("no ready peer");
+    assert_eq!(
+        log.lock().unwrap().first().cloned(),
+        Some((Target::Addr(sock(8, 8, 8, 8, 8333)), None))
+    );
+    handle.shutdown();
+    // The handshake is recorded in the book.
+    let book = stored_book(&storage);
+    let entry = book.get(&v4(8, 8, 8, 8), 8333).unwrap();
+    assert!(entry.last_good.is_some());
+    assert_eq!(entry.failures, 0);
+    assert_eq!(
+        entry.services,
+        ServiceFlags::NETWORK | ServiceFlags::WITNESS
+    );
+}
+
+#[test]
+fn nr_24_the_two_peers_connected_longest_are_stored_as_anchors_at_shutdown() {
+    let peer = FakePeer::start(Behavior::Serve(Vec::new()));
+    let storage = MemStorage::with(Key::Book, book_bytes(&[(8, 8, 8, 8, 8333)], &[]));
+    let (net, _, _) = net_to(peer.addr, Vec::new());
+    let mut handle = start(bare(), &storage, net);
+    wait_for(&handle, 10, has_peer).expect("no ready peer");
+    handle.shutdown();
+    assert_eq!(
+        stored_book(&storage).anchors(),
+        vec![(v4(8, 8, 8, 8), 8333)]
+    );
+}
+
+#[test]
+fn nr_24_the_oldest_two_ready_peers_win() {
+    let ready = [
+        (v4(1, 1, 1, 1), 1, 300),
+        (v4(2, 2, 2, 2), 2, 100),
+        (v4(3, 3, 3, 3), 3, 200),
+        (v4(4, 4, 4, 4), 4, 100),
+    ];
+    assert_eq!(
+        longest_connected(&ready),
+        vec![(v4(2, 2, 2, 2), 2), (v4(4, 4, 4, 4), 4)]
+    );
+    assert_eq!(longest_connected(&ready[..1]), vec![(v4(1, 1, 1, 1), 1)]);
+    assert!(longest_connected(&[]).is_empty());
+}
+
+#[test]
+fn nr_71_anchors_come_first_then_fixed_peers_then_the_book() {
+    let entries = [(8, 8, 8, 8, 8333), (9, 9, 9, 9, 8333), (11, 1, 1, 1, 8333)];
+    let storage = MemStorage::with(Key::Book, book_bytes(&entries, &[(11, 1, 1, 1, 8333)]));
+    let peer = FakePeer::start(Behavior::Silent);
+    // Every dial fails, one at a time, so that the order is the order of
+    // the log.
+    let log: DialLog = Arc::default();
+    let l = log.clone();
+    let net = Net {
+        dial: Arc::new(move |target, proxy| {
+            l.lock().unwrap().push((target.clone(), proxy));
+            Err(DialError::Connect(std::io::ErrorKind::TimedOut))
+        }),
+        resolve: Arc::new(|_, _| Ok(Vec::new())),
+    };
+    let mut cfg = config(&peer, 30);
+    cfg.target_peers = 1;
+    let mut handle = start(cfg, &storage, net);
+    assert!(until(10, || log.lock().unwrap().len() >= 4));
+    handle.shutdown();
+    let log = log.lock().unwrap();
+    let order: Vec<&Target> = log.iter().map(|(t, _)| t).collect();
+    assert_eq!(order[0], &Target::Addr(sock(11, 1, 1, 1, 8333)));
+    assert_eq!(order[1], &Target::Addr(peer.addr));
+    let rest: Vec<&&Target> = order[2..4].iter().collect();
+    assert!(rest.contains(&&&Target::Addr(sock(8, 8, 8, 8, 8333))));
+    assert!(rest.contains(&&&Target::Addr(sock(9, 9, 9, 9, 8333))));
+    // A failed dial is counted against the book entry.
+    assert_eq!(
+        stored_book(&storage)
+            .get(&v4(11, 1, 1, 1), 8333)
+            .unwrap()
+            .failures,
+        1
+    );
+}
+
+#[test]
+fn nr_71_at_most_four_dials_are_in_flight() {
+    let entries: Vec<(u8, u8, u8, u8, u16)> = (1..=10).map(|i| (20 + i, 1, 1, 1, 8333)).collect();
+    let storage = MemStorage::with(Key::Book, book_bytes(&entries, &[]));
+    let current = Arc::new(AtomicUsize::new(0));
+    let most = Arc::new(AtomicUsize::new(0));
+    let (c, m) = (current.clone(), most.clone());
+    let net = Net {
+        dial: Arc::new(move |_, _| {
+            let now = c.fetch_add(1, Ordering::SeqCst) + 1;
+            m.fetch_max(now, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(300));
+            c.fetch_sub(1, Ordering::SeqCst);
+            Err(DialError::Connect(std::io::ErrorKind::TimedOut))
+        }),
+        resolve: Arc::new(|_, _| Ok(Vec::new())),
+    };
+    let mut handle = start(bare(), &storage, net);
+    thread::sleep(Duration::from_millis(2_000));
+    handle.shutdown();
+    assert_eq!(most.load(Ordering::SeqCst), 4);
+}
+
+#[test]
+fn nr_71_a_connection_the_manager_refuses_is_closed_at_once() {
+    let peer = FakePeer::start(Behavior::Serve(Vec::new()));
+    let storage = MemStorage::default();
+    // Local peers are not allowed.
+    let mut cfg = config(&peer, 30);
+    cfg.allow_local = false;
+    let mut handle = start_system(cfg, &storage);
+    let seen = wait_for(&handle, 10, is_note).expect("no note");
+    match seen.last() {
+        Some(AppEvent::Note(text)) => assert!(text.contains("local"), "{text}"),
+        other => panic!("{other:?}"),
+    }
+    assert!(until(5, || peer.closed_by_driver.load(Ordering::SeqCst) == 1));
+    handle.shutdown();
+}
+
+#[test]
+fn nr_76_a_tor_v3_address_in_the_book_is_not_dialed() {
+    let mut book = AddressBook::new();
+    let added = book.add(
+        &AddrV2::TorV3([7; 32]),
+        8333,
+        ServiceFlags::NETWORK,
+        Source::Own,
+        1,
+    );
+    assert_eq!(added, openbmt_net::Added::New);
+    let storage = MemStorage::with(Key::Book, book.to_bytes());
+    let peer = FakePeer::start(Behavior::Silent);
+    let (net, log, _) = net_to(peer.addr, Vec::new());
+    let mut handle = start(bare(), &storage, net);
+    thread::sleep(Duration::from_millis(1_200));
+    assert!(log.lock().unwrap().is_empty());
+    handle.shutdown();
+}
+
+#[test]
+fn nr_22_addresses_a_peer_tells_of_go_to_the_book() {
+    let told = sock(8, 8, 4, 4, 8333);
+    let peer = FakePeer::start(Behavior::ServeAndTell(chain(1), vec![told]));
+    let storage = MemStorage::default();
+    let mut handle = start_system(config(&peer, 30), &storage);
+    // The headers follow the addresses, so their event comes after.
+    wait_for(&handle, 10, |e| matches!(e, AppEvent::Chain { .. })).expect("no headers");
+    handle.shutdown();
+    let book = stored_book(&storage);
+    let entry = book.get(&v4(8, 8, 4, 4), 8333).unwrap();
+    assert!(matches!(entry.source, Source::Peer(_)));
+    assert_eq!(book.len(), 1);
+}
+
+#[test]
+fn nr_72_seeds_are_asked_when_the_book_is_empty() {
+    let peer = FakePeer::start(Behavior::Serve(Vec::new()));
+    let storage = MemStorage::default();
+    let (net, log, lookups) = net_to(peer.addr, vec![sock(8, 8, 8, 8, 18_444)]);
+    let mut cfg = bare();
+    cfg.seeds = vec!["seed.test".to_string()];
+    let mut handle = start(cfg, &storage, net);
+    wait_for(&handle, 10, has_peer).expect("no ready peer");
+    assert_eq!(lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        log.lock().unwrap().first().cloned(),
+        Some((Target::Addr(sock(8, 8, 8, 8, 18_444)), None))
+    );
+    handle.shutdown();
+    let book = stored_book(&storage);
+    let entry = book.get(&v4(8, 8, 8, 8), 18_444).unwrap();
+    assert_eq!(entry.source, Source::Seed);
+    assert!(entry.last_good.is_some());
+}
+
+#[test]
+fn nr_72_a_hung_lookup_does_not_hang_the_driver() {
+    let storage = MemStorage::default();
+    let net = Net {
+        dial: Arc::new(|_, _| Err(DialError::NameWithoutProxy)),
+        resolve: Arc::new(|_, _| {
+            thread::sleep(Duration::from_secs(20));
+            Ok(Vec::new())
+        }),
+    };
+    let mut cfg = bare();
+    cfg.seeds = vec!["hang.test".to_string()];
+    let mut handle = start(cfg, &storage, net);
+    // The driver still answers: the first event is there at once.
+    wait_for(&handle, 2, |e| matches!(e, AppEvent::Peers(..))).expect("no event");
+    thread::sleep(Duration::from_millis(500));
+    let start = Instant::now();
+    handle.shutdown();
+    assert!(start.elapsed() < Duration::from_secs(5));
+}
+
+#[test]
+fn nr_26_with_a_proxy_a_seed_name_is_dialed_through_it_and_never_resolved() {
+    let peer = FakePeer::start(Behavior::Serve(Vec::new()));
+    let storage = MemStorage::default();
+    let (net, log, lookups) = net_to(peer.addr, vec![sock(8, 8, 8, 8, 18_444)]);
+    let proxy = sock(127, 0, 0, 1, 9_050);
+    let mut cfg = bare();
+    cfg.proxy = Some(proxy);
+    cfg.seeds = vec!["seed.test".to_string()];
+    let mut handle = start(cfg, &storage, net);
+    let seen = wait_for(&handle, 10, has_peer).expect("no ready peer");
+    match seen.last() {
+        Some(AppEvent::Peers(peers, ..)) => {
+            assert_eq!(peers.first().map(|p| p.addr), Some(PeerAddr::Named));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(lookups.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        log.lock().unwrap().first().cloned(),
+        Some((Target::Name("seed.test".to_string(), 18_444), Some(proxy)))
+    );
+    handle.shutdown();
+}
+
+#[test]
+fn nr_26_the_driver_reaches_a_peer_through_a_socks5_proxy_end_to_end() {
+    // A proxy that checks the request, then acts as the peer.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy = listener.local_addr().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let (asked_tx, asked_rx) = mpsc::channel();
+    let s = stop.clone();
+    let server = thread::spawn(move || {
+        use std::io::{Read, Write};
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut greeting = [0u8; 3];
+        stream.read_exact(&mut greeting).unwrap();
+        stream.write_all(&[5, 0]).unwrap();
+        let mut head = [0u8; 5];
+        stream.read_exact(&mut head).unwrap();
+        let mut rest = vec![0u8; usize::from(head[4]) + 2];
+        stream.read_exact(&mut rest).unwrap();
+        asked_tx.send((greeting, head, rest)).unwrap();
+        stream
+            .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0x48, 0x5c])
+            .unwrap();
+        serve_stream(stream, &Behavior::Serve(Vec::new()), &s);
+    });
+    let storage = MemStorage::default();
+    let mut cfg = bare();
+    cfg.proxy = Some(proxy);
+    cfg.seeds = vec!["seed.test".to_string()];
+    let mut handle = start_system(cfg, &storage);
+    wait_for(&handle, 10, has_peer).expect("no ready peer");
+    let (greeting, head, rest) = asked_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(greeting, [5, 1, 0]);
+    assert_eq!(head, [5, 1, 0, 3, 9]);
+    assert_eq!(&rest[..9], b"seed.test");
+    // The regtest port, 18444.
+    assert_eq!(rest[9..], 18_444u16.to_be_bytes());
+    handle.shutdown();
+    stop.store(true, Ordering::SeqCst);
+    server.join().unwrap();
+}
+
+#[test]
+fn nr_73_headers_are_stored_at_shutdown_and_loaded_again() {
+    let headers = chain(5);
+    let peer = FakePeer::start(Behavior::Serve(headers.clone()));
+    let storage = MemStorage::default();
+    let mut handle = start_system(config(&peer, 2), &storage);
+    wait_for(&handle, 10, tip_is(5)).expect("the headers did not arrive");
+    handle.shutdown();
+    let store = stored_headers(&storage);
+    assert_eq!(store.tip(), (5, headers[4].block_hash()));
+    // A new driver over the same storage starts at that tip, and asks for
+    // headers from it.
+    let again = FakePeer::start(Behavior::Serve(headers.clone()));
+    let mut handle = start_system(config(&again, 2), &storage);
+    let seen = wait_for(&handle, 10, has_peer).expect("no ready peer");
+    match seen.first() {
+        Some(AppEvent::Peers(_, _, tip)) => {
+            assert_eq!(*tip, (5, u64::from(headers[4].time)));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(until(5, || !again.getheaders.lock().unwrap().is_empty()));
+    let payload = again.getheaders.lock().unwrap()[0].clone();
+    // Version (4 bytes), a count, then the newest hash first.
+    assert_eq!(payload[4], 6);
+    assert_eq!(payload[5..37], headers[4].block_hash().to_byte_array());
+    // Nothing joined: the five headers it sent back were known.
+    thread::sleep(Duration::from_millis(300));
+    while let Ok(event) = handle.events().try_recv() {
+        assert!(!matches!(event, AppEvent::Chain { .. }), "{event:?}");
+    }
+    handle.shutdown();
+}
+
+#[test]
+fn nr_73_stored_files_that_do_not_read_back_are_replaced_and_noted() {
+    let storage = MemStorage::default();
+    storage
+        .values
+        .lock()
+        .unwrap()
+        .insert(Key::Headers, b"not a header store".to_vec());
+    storage
+        .values
+        .lock()
+        .unwrap()
+        .insert(Key::Book, b"not an address book".to_vec());
+    let mut handle = start(
+        bare(),
+        &storage,
+        net_to(sock(127, 0, 0, 1, 1), Vec::new()).0,
+    );
+    let first = handle
+        .events()
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap();
+    let second = handle
+        .events()
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap();
+    match (first, second) {
+        (AppEvent::Note(a), AppEvent::Note(b)) => {
+            assert!(a.contains("headers"), "{a}");
+            assert!(b.contains("address book"), "{b}");
+        }
+        other => panic!("{other:?}"),
+    }
+    handle.shutdown();
+    // Both were replaced by files that read back.
+    assert_eq!(stored_headers(&storage).tip().0, 0);
+    assert!(stored_book(&storage).is_empty());
+}
+
+#[test]
+fn nr_73_a_storage_that_cannot_be_read_stops_the_start() {
+    struct Broken;
+    impl crate::env::Storage for Broken {
+        type Error = String;
+        fn load(&mut self, _: Key) -> Result<Option<Vec<u8>>, String> {
+            Err("disk gone".to_string())
+        }
+        fn save(&mut self, _: Key, _: &[u8]) -> Result<(), String> {
+            Err("disk gone".to_string())
+        }
+    }
+    let err = Driver::spawn(
+        bare(),
+        Broken,
+        SystemClock,
+        CountingRandomness(1),
+        Vec::new(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("disk gone"), "{err}");
+    let mut cfg = bare();
+    cfg.target_peers = 0;
+    let err = Driver::spawn(
+        cfg,
+        MemStorage::default(),
+        SystemClock,
+        CountingRandomness(1),
+        Vec::new(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().starts_with("NR-20"), "{err}");
+}
+
+#[test]
+fn nr_77_shutdown_ends_every_thread_within_five_seconds_with_a_silent_peer() {
+    let peer = FakePeer::start(Behavior::Silent);
+    let storage = MemStorage::default();
+    let mut handle = start_system(config(&peer, 30), &storage);
+    assert!(until(10, || peer.accept_count() == 1));
+    thread::sleep(Duration::from_millis(300));
+    let start = Instant::now();
+    handle.shutdown();
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        start.elapsed()
+    );
+    // The socket was closed by the driver.
+    assert!(until(5, || peer.closed_by_driver.load(Ordering::SeqCst) == 1));
+    // The files were saved, and a second call does nothing.
+    assert!(storage.get(Key::Headers).is_some());
+    assert!(storage.get(Key::Book).is_some());
+    handle.shutdown();
+    // The last event is the end.
+    let mut last = None;
+    while let Ok(event) = handle.events().try_recv() {
+        last = Some(event);
+    }
+    assert_eq!(last, Some(AppEvent::Stopped));
+}
+
+#[test]
+fn nr_77_a_handle_that_is_dropped_stops_the_driver() {
+    let peer = FakePeer::start(Behavior::Silent);
+    let storage = MemStorage::default();
+    let handle = start_system(config(&peer, 30), &storage);
+    assert!(until(10, || peer.accept_count() == 1));
+    drop(handle);
+    assert!(until(5, || peer.closed_by_driver.load(Ordering::SeqCst) == 1));
+    assert!(storage.get(Key::Headers).is_some());
+}
+
+#[test]
+fn nr_74_an_app_that_does_not_read_stops_the_readers() {
+    let headers = chain(1_000);
+    let peer = FakePeer::start(Behavior::Flood(headers));
+    let storage = MemStorage::default();
+    let mut handle = start_system(config(&peer, 30), &storage);
+    // The peer sends for about two seconds; the app reads nothing.
+    assert!(until(10, || !peer.getheaders.lock().unwrap().is_empty()));
+    thread::sleep(Duration::from_millis(3_000));
+    let shared = handle.shared().clone();
+    let first = shared.chunks_read.load(Ordering::Relaxed);
+    thread::sleep(Duration::from_millis(500));
+    let second = shared.chunks_read.load(Ordering::Relaxed);
+    // The readers have stopped: the channels hold what they can, and the
+    // rest of the 1,000 messages waits in the sockets.
+    assert_eq!(first, second);
+    assert!(first < 400, "{first} chunks were read");
+    // Reading the events lets it go on, and nothing is lost.
+    let mut joined = 0usize;
+    let end = Instant::now() + Duration::from_secs(30);
+    while joined < 1_000 && Instant::now() < end {
+        if let Ok(AppEvent::Chain { joined: j, .. }) =
+            handle.events().recv_timeout(Duration::from_millis(200))
+        {
+            joined += j.len();
+        }
+    }
+    assert_eq!(joined, 1_000);
+    handle.shutdown();
+}
+
+#[test]
+fn nr_75_peers_is_sent_at_the_start_on_change_and_every_ten_seconds() {
+    let storage = MemStorage::default();
+    let mut handle = start(
+        bare(),
+        &storage,
+        net_to(sock(127, 0, 0, 1, 1), Vec::new()).0,
+    );
+    let first = Instant::now();
+    wait_for(&handle, 5, |e| matches!(e, AppEvent::Peers(..))).expect("no first event");
+    let first_at = first.elapsed();
+    // Nothing changes, and the next one comes by itself.
+    let waited = Instant::now();
+    wait_for(&handle, 13, |e| matches!(e, AppEvent::Peers(..))).expect("no second event");
+    let gap = waited.elapsed();
+    assert!(gap >= Duration::from_secs(8), "{gap:?} after {first_at:?}");
+    assert!(gap <= Duration::from_secs(11), "{gap:?}");
+    handle.shutdown();
+}
