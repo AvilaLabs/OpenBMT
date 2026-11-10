@@ -56,6 +56,7 @@ mod app;
 pub mod envelope;
 mod error;
 mod keys;
+mod kitcheck;
 mod screen;
 mod session;
 mod store;
@@ -70,6 +71,7 @@ pub use error::{KeyError, StoreError};
 pub use keys::{
     coin_bits, dice_bits, dice_face_counts, BitProgress, EntropySource, KeyNetwork, KeyWordCount,
 };
+pub use kitcheck::KitCheck;
 pub use screen::{AllowlistView, CeilingsView, FeeCeilingsView, SignerStatus};
 pub use session::SessionHandle;
 pub use store::KeyStore;
