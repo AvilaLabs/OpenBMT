@@ -1,0 +1,16 @@
+[package]
+name = "openbmt-books"
+description = "The OpenBMT books: verified counter records turned into per-sale lines, day totals, two CSV exports and an encrypted export file"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# argon2 (RustCrypto) is the one new dependency: the key of BK-24. The AEAD
+# is the one openbmt-link already uses.
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+openbmt-counter = { path = "../openbmt-counter" }
+argon2 = { version = "=0.5.3", default-features = false, features = ["alloc", "zeroize"] }
+chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
