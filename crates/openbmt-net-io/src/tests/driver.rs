@@ -670,6 +670,103 @@ fn nr_77_shutdown_returns_within_five_seconds_while_proxy_lookups_hang() {
     assert!(start.elapsed() < Duration::from_secs(5));
 }
 
+/// A book of the given addresses, with or without the filter service.
+fn gossip_book(filters: bool) -> MemStorage {
+    let mut book = AddressBook::new();
+    let services = if filters {
+        ServiceFlags::NETWORK | ServiceFlags::WITNESS | ServiceFlags::COMPACT_FILTERS
+    } else {
+        ServiceFlags::NETWORK | ServiceFlags::WITNESS
+    };
+    for i in 0..3u8 {
+        let added = book.add(&v4(30 + i, 1, 1, 1), 18_444, services, Source::Own, 1);
+        assert_eq!(added, openbmt_net::Added::New);
+    }
+    MemStorage::with(Key::Book, book.to_bytes())
+}
+
+/// One dial at a time, each hanging a few seconds, so that the book is not
+/// used up: its other addresses stay in it. Returns the dial counter.
+fn slow_dials(net: &mut Net, log: &TorLog) -> Arc<AtomicUsize> {
+    let (d, count) = (log.dials.clone(), Arc::new(AtomicUsize::new(0)));
+    let c = count.clone();
+    net.dial = Arc::new(move |target, proxy, _| {
+        d.lock().unwrap().push((target.clone(), proxy));
+        c.fetch_add(1, Ordering::SeqCst);
+        thread::sleep(Duration::from_secs(3));
+        Err(DialError::Connect(ErrorKind::ConnectionRefused))
+    });
+    count
+}
+
+#[test]
+fn nr_72_without_a_proxy_a_book_of_gossip_asks_the_seeds_and_is_still_dialed() {
+    let storage = gossip_book(false);
+    let (mut net, log) = tor_net(nth_address);
+    let dials = slow_dials(&mut net, &log);
+    let start_time = 1_700_000_000;
+    let clock = TestClock::at(start_time);
+    let mut cfg = bare();
+    cfg.seeds = vec!["a.test".to_string()];
+    cfg.target_peers = 1;
+    let mut handle = start_clocked(cfg, &storage, net, &clock, Vec::new());
+    // The name, and the name for filter peers.
+    assert!(until(2, || log.system.load(Ordering::SeqCst) == 2));
+    assert!(until(10, || dials.load(Ordering::SeqCst) >= 1));
+    // The spacing holds over many ticks, then a round comes.
+    for step in [1, 60, 120, SEED_ROUND_SECS - 1] {
+        clock.set(start_time + step);
+        settle();
+        assert_eq!(log.system.load(Ordering::SeqCst), 2);
+    }
+    clock.set(start_time + SEED_ROUND_SECS);
+    assert!(until(10, || log.system.load(Ordering::SeqCst) == 4));
+    assert_eq!(log.asked.lock().unwrap().len(), 0);
+    handle.shutdown();
+}
+
+#[test]
+fn nr_72_through_a_proxy_a_book_of_gossip_asks_tor_and_is_still_dialed() {
+    let storage = gossip_book(false);
+    let (mut net, log) = tor_net(nth_address);
+    let dials = slow_dials(&mut net, &log);
+    let start_time = 1_700_000_000;
+    let clock = TestClock::at(start_time);
+    let mut cfg = tor_config();
+    cfg.seeds = vec!["a.test".to_string()];
+    cfg.target_peers = 1;
+    let mut handle = start_clocked(cfg, &storage, net, &clock, Vec::new());
+    assert!(until(2, || log.asked.lock().unwrap().len() == 3));
+    assert!(until(10, || dials.load(Ordering::SeqCst) >= 1));
+    for step in [1, 60, 120, SEED_ROUND_SECS - 1] {
+        clock.set(start_time + step);
+        settle();
+        assert_eq!(log.asked.lock().unwrap().len(), 3);
+    }
+    clock.set(start_time + SEED_ROUND_SECS);
+    assert!(until(10, || log.asked.lock().unwrap().len() == 6));
+    assert_eq!(log.system.load(Ordering::SeqCst), 0);
+    handle.shutdown();
+}
+
+#[test]
+fn nr_72_a_book_with_a_filter_candidate_starts_no_round() {
+    for proxy in [false, true] {
+        let storage = gossip_book(true);
+        let (mut net, log) = tor_net(nth_address);
+        let count = slow_dials(&mut net, &log);
+        let mut cfg = if proxy { tor_config() } else { bare() };
+        cfg.seeds = vec!["a.test".to_string()];
+        cfg.target_peers = 1;
+        let mut handle = start(cfg, &storage, net);
+        assert!(until(10, || count.load(Ordering::SeqCst) == 1));
+        settle();
+        assert_eq!(log.system.load(Ordering::SeqCst), 0);
+        assert_eq!(log.asked.lock().unwrap().len(), 0);
+        handle.shutdown();
+    }
+}
+
 #[test]
 fn nr_26_the_driver_reaches_a_peer_through_a_socks5_proxy_end_to_end() {
     // A proxy that checks the request, then acts as the peer.

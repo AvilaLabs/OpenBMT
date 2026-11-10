@@ -1254,6 +1254,11 @@ where
         if fixed.is_some() {
             return fixed;
         }
+        // NR-72: filters are wanted and the book has no address to dial
+        // that offers them: ask the seeds too. The book is dialed meanwhile.
+        if wanted.want_filters && !self.book.has_filter_candidate(&wanted.avoid, now) {
+            self.start_round_if_due(now);
+        }
         for _ in 0..PICK_TRIES {
             let random = self.rng.next_u64();
             let Some(picked) = self
@@ -1269,6 +1274,22 @@ where
             }
         }
         self.ask_seeds(now)
+    }
+
+    /// NR-72: start a round of seed lookups (through the proxy with Tor on)
+    /// if one is due and none is running.
+    fn start_round_if_due(&mut self, now: u64) {
+        let due = self
+            .last_round
+            .is_none_or(|t| now >= t.saturating_add(SEED_ROUND_SECS));
+        if self.config.seeds.is_empty() || self.round.is_some() || !due {
+            return;
+        }
+        if self.config.proxy.is_none() {
+            self.start_round(now);
+        } else if !self.lookup_unsupported {
+            self.start_tor_round(now);
+        }
     }
 
     /// NR-72, NR-26: the book cannot fill the target, so ask the seeds.
