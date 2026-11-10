@@ -519,7 +519,8 @@ impl Counter {
     ///
     /// Refused, with nothing written, when a rescan is pending, the check is
     /// not healthy, the amount is zero, too large, below the dust line or below
-    /// the smallest bitcoin sale (CR-75), the hour's addresses are used up, or no address is left.
+    /// the smallest bitcoin sale (CR-75), the hour's addresses are used up, or
+    /// no address is left.
     ///
     /// The writes, in this order:
     ///

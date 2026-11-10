@@ -425,10 +425,10 @@ fn cr_75_a_floor_of_zero_takes_every_sale_above_dust() {
 }
 
 #[test]
-fn cr_75_the_first_settings_hold_a_floor_of_26000() {
+fn cr_75_the_first_settings_hold_no_floor() {
     assert_eq!(
         openbmt_core::settings::Settings::defaults(1_000).min_sale_sats,
-        26_000
+        0
     );
 }
 

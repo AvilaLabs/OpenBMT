@@ -67,9 +67,9 @@ draws what it is told.
 - **CR-09.** No sale opens while a rescan is pending after a restore or a
   reset (§5.5).
 - **CR-75.** The shop's signed settings name the smallest bitcoin sale, in
-  satoshis (`min_sale_sats`; 0 means no floor). The first value is 26,000
-  **[to tune]**, about the amount at which spending its receipt at 5
-  sat/vB costs 2% of it. A sale whose amount, at the quote the counter
+  satoshis (`min_sale_sats`; 0 means no floor). The first value is 0:
+  the shop takes every sale above the dust line until the owner sets a
+  floor. A sale whose amount, at the quote the counter
   makes for it (CR-05), is worth fewer satoshis than that is refused
   with `BelowMinimum`, before anything is written: no address is handed
   out, the desk does not change and no record is made. The cashier is

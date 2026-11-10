@@ -1406,15 +1406,19 @@ after a wave of attacks, which showed how fragile that is.
 - **Consolidate when cheap.** When fees are low, the app suggests merging small
   receipts into fewer outputs. This is a suggestion, never automatic. It
   merges receipts, so it also has a privacy cost (§11).
-- **Small sales are stopped at the counter, not cleaned up afterwards.**
-  Merging receipts moves the cost to a cheaper day; it does not remove it,
-  because every receipt is still paid for once as an input. The only way
-  not to pay it is not to take the receipt. So the owner sets a smallest
-  bitcoin sale for the shop, and the setting screen shows what one
-  receipt costs to spend at a low, a usual and a high fee next to it. A
-  sale below it is not opened: the cashier is told to take another kind
-  of payment. The first value **[to tune]** is the amount at which
-  spending the receipt at 5 sat/vB costs 2% of it, about 26,000 sats.
+- **The owner may stop small sales at the counter.** Merging receipts
+  moves the cost to a cheaper day; it does not remove it, because every
+  receipt is still paid for once as an input. The only way not to pay it
+  is not to take the receipt. So the owner can set a smallest bitcoin
+  sale for the shop, and the setting screen shows what one receipt costs
+  to spend at a low, a usual and a high fee next to it. A sale below it
+  is not opened: the cashier is told to take another kind of payment.
+  The first value is no floor. At 1 to 2 sat/vB one receipt costs about
+  105 to 210 sats to spend, which for a sale of a few dollars is in line
+  with what a card payment costs the shop, and a receipt taken in a fee
+  spike can wait for a cheaper day. A floor of 26,000 sats was
+  considered as the first value (spending at 5 sat/vB costs 2% of it)
+  and set aside because it turns away the everyday small sale.
   Decided 2026-11-10. Built: the signed setting (raising it tightens,
   lowering it needs the Key app), the counter's refusal before anything
   is written (CR-75), the cashier's words, and the helper that prices

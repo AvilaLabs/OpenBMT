@@ -38,10 +38,9 @@ pub const MAX_BOXES: usize = 8;
 /// bitcoin there is).
 pub const MAX_MIN_SALE_SATS: u64 = 2_100_000_000_000_000;
 
-/// The first value of the smallest bitcoin sale, in satoshis: about the
-/// amount at which spending its receipt at 5 sat/vB costs 2% of it
-/// **[to tune]** (CR-75).
-pub const DEFAULT_MIN_SALE_SATS: u64 = 26_000;
+/// The first value of the smallest bitcoin sale, in satoshis: 0, no floor
+/// (CR-75). The owner sets one when small receipts cost too much to spend.
+pub const DEFAULT_MIN_SALE_SATS: u64 = 0;
 
 /// What a device is to the shop, as the signed settings give it (BX-24).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -796,6 +795,8 @@ mod tests {
         s.devices.insert(identity(40).device_id());
         s.tor_on = true;
         s.customer_wifi = true;
+        // A floor is set, so that lowering it can be tested.
+        s.min_sale_sats = 26_000;
         s
     }
 
@@ -932,8 +933,8 @@ mod tests {
     }
 
     #[test]
-    fn the_first_smallest_sale_is_26000_sats() {
-        assert_eq!(Settings::defaults(RATE).min_sale_sats, 26_000);
+    fn the_first_smallest_sale_is_no_floor() {
+        assert_eq!(Settings::defaults(RATE).min_sale_sats, 0);
         assert_eq!(
             Settings::defaults(RATE).min_sale_sats,
             DEFAULT_MIN_SALE_SATS
