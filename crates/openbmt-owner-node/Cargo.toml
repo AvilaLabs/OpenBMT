@@ -1,0 +1,17 @@
+[package]
+name = "openbmt-owner-node"
+description = "The owner's watcher without a screen: a network driver of its own, the real health rules, and the signed heartbeat for the counter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The same exact bitcoin version as the other crates, so the types unify.
+[dependencies]
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+openbmt-core = { path = "../openbmt-core" }
+openbmt-watch = { path = "../openbmt-watch" }
+openbmt-net-io = { path = "../openbmt-net-io" }
+# For `ChainView` and `DriverPort`, which the two nodes share.
+openbmt-counter-node = { path = "../openbmt-counter-node" }

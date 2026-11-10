@@ -41,6 +41,6 @@ mod tests;
 pub use chainview::ChainView;
 pub use dirstore::{DirStore, DirStoreError, Loaded, TornTail};
 pub use node::{
-    DriverPort, HealthFn, Launch, Node, NodeConfig, StartError, MAX_EVENTS_PER_PUMP, NOTE_LOG,
-    TX_CACHE,
+    DriverPort, HealthFn, HeartbeatNotTaken, HeartbeatTaken, Launch, Node, NodeConfig, StartError,
+    MAX_EVENTS_PER_PUMP, NOTE_LOG, TX_CACHE,
 };

@@ -2,5 +2,6 @@
 
 mod chainview;
 mod dirstore;
+mod heartbeat;
 mod kit;
 mod node;

@@ -57,12 +57,23 @@
 //! stops the stored height below that block for the rest of the run, so that
 //! the next start asks for it again.
 //!
-//! ## The owner phone
+//! ## The owner's heartbeat
 //!
-//! There is no owner phone yet, so the heartbeat that goes to the instant
-//! decision is always "not verified". **Accepting an unconfirmed payment at
-//! once cannot happen in this build of the node, by design:** a sale waits
-//! for a confirmation, whatever the network has seen of it.
+//! Accepting an unconfirmed payment at once needs the owner's signed
+//! heartbeat (CR-50 to CR-56). [`Node::heartbeat`] takes its bytes, hands
+//! them to the counter with the node's header chain and clock, and judges
+//! again every live sale that has a payment, so that a sale that waited for
+//! want of a heartbeat is accepted as soon as one is taken. `judge` and
+//! `override_sale` give the instant decision the counter's own answer
+//! ([`Counter::heartbeat_for_policy`]). Until a heartbeat has been taken
+//! since the start, and whenever the last one does not count, that answer is
+//! "not verified", and a sale waits for a confirmation however many peers
+//! have seen it.
+//!
+//! How the bytes get here from the owner's device is not part of the node;
+//! the transport comes with the Box. A heartbeat that is not verified because
+//! the owner's tip and the node's differ at a height the node holds is
+//! written to the node's log as a disagreement.
 
 use std::collections::{BTreeSet, VecDeque};
 use std::fmt;
@@ -74,13 +85,14 @@ use bitcoin::consensus::deserialize;
 use bitcoin::{BlockHash, ScriptBuf, Transaction, Txid};
 use openbmt_core::batch::{AddError, SignedBatch};
 use openbmt_core::command::SignedCommand;
+use openbmt_core::heartbeat::SignedHeartbeat;
 use openbmt_core::identity::Identity;
-use openbmt_core::policy::Heartbeat;
 use openbmt_core::settings::Settings;
+use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
-    Actor, Amount, BlockError, CancelRefused, CommandRefused, Counter, Currency, Facts, JudgeError,
-    LoadError, OpenFacts, OpenRefused, Opened, Overridden, Pairing, Quote, Rate, Report,
-    RequoteRefused, Screen, SightingError,
+    Actor, Amount, BlockError, CancelRefused, CommandRefused, Counter, Currency, Facts,
+    HeartbeatRefused, HeartbeatView, JudgeError, LoadError, OpenFacts, OpenRefused, Opened,
+    Overridden, Pairing, Quote, Rate, Report, RequoteRefused, Screen, SightingError,
 };
 use openbmt_net_io::{
     AppEvent, Clock, Driver, DriverConfig, FileStorage, Handle, Key, OsRandomness, Storage,
@@ -100,12 +112,6 @@ pub const NOTE_LOG: usize = 256;
 /// Most events one call of [`Node::pump`] takes, so that a driver that never
 /// stops sending cannot keep the call from returning.
 pub const MAX_EVENTS_PER_PUMP: usize = 4096;
-
-/// The heartbeat of an owner phone that does not exist yet.
-const NO_OWNER_PHONE: Heartbeat = Heartbeat {
-    verified: false,
-    age_secs: 0,
-};
 
 /// The answer before the first `Peers` event: the check is not working.
 const NO_ANSWER_YET: Health = Health {
@@ -145,6 +151,35 @@ impl fmt::Display for StartError {
 }
 
 impl std::error::Error for StartError {}
+
+/// Why [`Node::heartbeat`] did not take a heartbeat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HeartbeatNotTaken {
+    /// The bytes are not a heartbeat. Nothing changed.
+    Bytes(DecodeError),
+    /// The counter refused it (CR-50, CR-51, CR-54). Nothing changed.
+    Refused(HeartbeatRefused<DirStoreError>),
+}
+
+impl fmt::Display for HeartbeatNotTaken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Bytes(e) => write!(f, "not a heartbeat: {e}"),
+            Self::Refused(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for HeartbeatNotTaken {}
+
+/// What taking a heartbeat did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeartbeatTaken {
+    /// What the counter makes of the heartbeat (CR-51 to CR-53).
+    pub view: HeartbeatView,
+    /// What judging the sales again reported, once.
+    pub reports: Vec<Report>,
+}
 
 /// What the driver is started with, for [`Node::start_with`].
 #[derive(Debug, Clone)]
@@ -742,12 +777,13 @@ impl<P: DriverPort> Node<P> {
     /// Work out the state of a sale now (CR-10 to CR-19). What it reports is
     /// in the returned screen, once.
     pub fn judge(&mut self, index: u32) -> Result<Screen, JudgeError<DirStoreError>> {
+        let now = self.clock.now();
         let facts = Facts {
             chain: &self.view,
             health: self.health.unwrap_or(NO_ANSWER_YET),
-            heartbeat: NO_OWNER_PHONE,
+            heartbeat: self.counter.heartbeat_for_policy(now),
             remote_order: false,
-            now: self.clock.now(),
+            now,
         };
         self.counter.judge(index, &facts, &mut self.store)
     }
@@ -772,15 +808,51 @@ impl<P: DriverPort> Node<P> {
     /// A person accepts a sale (CR-20 to CR-22). The caller has checked the
     /// PIN.
     pub fn override_sale(&mut self, index: u32, actor: Actor) -> Overridden<DirStoreError> {
+        let now = self.clock.now();
         let facts = Facts {
             chain: &self.view,
             health: self.health.unwrap_or(NO_ANSWER_YET),
-            heartbeat: NO_OWNER_PHONE,
+            heartbeat: self.counter.heartbeat_for_policy(now),
             remote_order: false,
-            now: self.clock.now(),
+            now,
         };
         self.counter
             .override_sale(index, actor, &facts, &mut self.store)
+    }
+
+    /// Take a heartbeat the owner's watcher signed (CR-50 to CR-56), as the
+    /// bytes of `SignedHeartbeat::to_bytes`. The counter judges it against
+    /// the node's header chain and clock. Then every live sale that has a
+    /// payment is judged again, and what that reports is returned once. A
+    /// heartbeat that does not count (unhealthy, or a tip the node does not
+    /// hold) is taken, its number is used up, and the reason is logged; a
+    /// disagreement over a block the node holds is logged as such.
+    pub fn heartbeat(&mut self, bytes: &[u8]) -> Result<HeartbeatTaken, HeartbeatNotTaken> {
+        let signed = SignedHeartbeat::from_bytes(bytes).map_err(HeartbeatNotTaken::Bytes)?;
+        let now = self.clock.now();
+        let view = self
+            .counter
+            .heartbeat(&signed, &self.view, now, &mut self.store)
+            .map_err(HeartbeatNotTaken::Refused)?;
+        if let HeartbeatView::NotVerified(why) = view {
+            if why.is_disagreement() {
+                self.note(format!(
+                    "heartbeat disagreement: {why} (owner tip height {})",
+                    signed.heartbeat.tip_height
+                ));
+            } else {
+                self.note(format!("heartbeat not verified: {why}"));
+            }
+        }
+        let mut reports = Vec::new();
+        for index in self.sales_with_payments() {
+            match self.judge(index) {
+                Ok(screen) => reports.extend(screen.reports),
+                Err(e) => self.note(format!("sale {index} could not be judged: {e}")),
+            }
+        }
+        self.update_all_blocks();
+        Ok(HeartbeatTaken { view, reports })
     }
 
     /// Take a command the owner signed (CR-14).
