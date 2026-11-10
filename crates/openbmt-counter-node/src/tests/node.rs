@@ -502,3 +502,42 @@ fn a_late_payment_is_reported_by_pump() {
     );
     assert!(rig.feed(vec![sighting(&late, vec![peer(21)])]).is_empty());
 }
+
+#[test]
+fn a_reorganization_takes_the_stored_checked_height_down_to_the_fork() {
+    let dir = Scratch::new();
+    let (mut rig, _pay) = rig_with_a_sale(&dir);
+    let mut blocks = Blocks::default();
+    let first = blocks.extend(&[]).clone();
+    let second = blocks.extend(&[]).clone();
+    let third = blocks.extend(&[]).clone();
+    rig.feed(vec![
+        joined(1, &first),
+        joined(2, &second),
+        joined(3, &third),
+        AppEvent::Checked(3),
+    ]);
+    assert_eq!(rig.node.checked_height(), 3);
+    let stored = |dir: &Scratch| DirStore::open(dir.path()).unwrap().load().unwrap().checked;
+    assert_eq!(stored(&dir), Some(3));
+
+    // Blocks 2 and 3 leave; three others take their place. The driver says
+    // nothing new about its checked height until it is above 3 again.
+    let alt2 = mine(first.block_hash(), 2, 1, &[]);
+    let alt3 = mine(alt2.block_hash(), 3, 1, &[]);
+    let alt4 = mine(alt3.block_hash(), 4, 1, &[]);
+    rig.feed(vec![AppEvent::Chain {
+        joined: vec![
+            (2, alt2.block_hash()),
+            (3, alt3.block_hash()),
+            (4, alt4.block_hash()),
+        ],
+        left: vec![third.block_hash(), second.block_hash()],
+    }]);
+    assert_eq!(rig.node.checked_height(), 1);
+    assert_eq!(stored(&dir), Some(1));
+    // When the new branch has been checked, the height rises again.
+    rig.feed(vec![AppEvent::Checked(4)]);
+    assert_eq!(rig.node.checked_height(), 4);
+    assert_eq!(stored(&dir), Some(4));
+}

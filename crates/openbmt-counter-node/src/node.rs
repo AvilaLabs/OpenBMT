@@ -49,6 +49,10 @@
 //! two saves of the headers) makes the node check the blocks above its tip
 //! again.
 //!
+//! When blocks leave the best chain, the stored height is taken down to the
+//! block below the lowest of them before anything else is done with the
+//! event: the blocks that replace them have not been checked yet.
+//!
 //! A block that could not be taken (it did not parse, or a write failed)
 //! stops the stored height below that block for the rest of the run, so that
 //! the next start asks for it again.
@@ -505,7 +509,18 @@ impl<P: DriverPort> Node<P> {
                 self.health = Some(answer);
             }
             AppEvent::Chain { joined, left } => {
+                // The blocks that take the place of the ones that left have
+                // not been checked. The driver tells of its checked height
+                // only when it rises, so the stored one is taken down here.
+                let fork = left
+                    .iter()
+                    .filter_map(|hash| self.view.height_of(hash))
+                    .min()
+                    .map(|lowest| lowest.saturating_sub(1));
                 self.view.apply(&joined, &left);
+                if let Some(fork) = fork {
+                    self.lower_checked(fork);
+                }
                 touched.extend(self.sales_with_payments());
             }
             AppEvent::Sighting { tx, from } => {
@@ -631,6 +646,24 @@ impl<P: DriverPort> Node<P> {
             .height_of(hash)
             .map_or(self.checked, |h| h.saturating_sub(1));
         self.checked_cap = Some(self.checked_cap.map_or(cap, |c| c.min(cap)));
+    }
+
+    /// Blocks above `height` left the chain: what is stored must not say
+    /// that their heights were checked. If the write fails, the stored
+    /// height is held where it is for the rest of the run and the failure
+    /// is logged; the blocks of the new branch are still checked now, in
+    /// this run.
+    fn lower_checked(&mut self, height: u32) {
+        if height >= self.checked {
+            return;
+        }
+        match self.store.put_checked(height) {
+            Ok(()) => self.checked = height,
+            Err(e) => self.note(format!(
+                "the checked height was not taken down to {height} after a \
+                 reorganization: {e}"
+            )),
+        }
     }
 
     fn write_checked(&mut self, height: u32) {

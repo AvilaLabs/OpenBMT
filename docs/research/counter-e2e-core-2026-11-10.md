@@ -4,13 +4,23 @@
 sale is opened on an address from a signed batch of a real 2-of-3 wallet
 description. A payment from Core's wallet is seen, mined, buried and
 reorganized away. A restart shows the same states, repeats no report and
-does not ask for what it already checked.
+does not ask for what it already checked. A kill right after a
+confirmation leaves the sale confirmed.
 
-**Answer.** Yes, in this run: all eight steps passed against one Core node
-on regtest, in four full runs of the script (the first with an earlier
-form of step 7, then three with the final script). Step 1 is not a check
-of the health rules; see below. No defect was found in the existing crates.
-Four places where they did not fit together are listed at the end.
+**Answer.** Yes, after one fix: all nine steps pass against one Core node
+on regtest, in repeated full runs of the script. Step 1 is not a check of
+the health rules; see below.
+
+**One defect was found and fixed.** Step 9 failed when it was first run.
+The driver saved its headers at most once a minute, and the counter
+stored a confirmation as soon as the block came. A node killed in between
+started with a sale that named a block its stored headers did not hold,
+took the block for one that had left the chain, showed `DoNotHandOver`,
+and reported the sale to the POS as unpaid and then as paid a second time
+once the peer was back. The driver now saves the headers before it hands
+a block to the app (NR-73). A second gap, found by reading and not by a
+run, is closed too: after a reorganization the stored checked height
+could stay above the fork (see the end of this note).
 
 ## Setup
 
@@ -78,6 +88,7 @@ only where the clock enters (the keys are fixed, so the addresses repeat).
 | 6 | The payment's block leaves the chain: DoNotHandOver, PosUnpaid once | PASS: `A block that held the payment is no longer on the chain.`, `report PosUnpaid index=1` once |
 | 7 | Restart on the same directory: same states, no repeated report, no old blocks asked for | PASS: sale 0 Final and sale 1 DoNotHandOver both times, 0 reports in the second run, 0 bytes of `getdata` |
 | 8 | The watch-only wallet sees the payment as its own coin | PASS: `listunspent` shows the txid, the address and 0.001 BTC |
+| 9 | Killed with no clean stop right after a confirmation: still Confirmed, nothing reported again | PASS after the fix: `Confirmed` with no peer and with the peer back, PosPaid once, PosUnpaid never. Before the fix: `DoNotHandOver`, PosUnpaid once, PosPaid twice |
 
 What each step compared, beyond the PASS:
 
@@ -98,6 +109,10 @@ What each step compared, beyond the PASS:
   connection, once per run, before the node was stopped and again in the new
   run after it reached the tip and ran six more seconds. See the next
   section.
+- **Step 9.** A third sale was paid and confirmed once, and the example
+  was killed with signal 9 as soon as it showed `Confirmed`. It was then
+  started with a peer address that nothing listens on, so that its answer
+  came from the disk alone, and then once more with the real peer.
 
 ## What the restart asked for
 
@@ -146,15 +161,17 @@ has to catch up.
 - **The real network.** Regtest only, on `127.0.0.1`, with `allow_local`.
   No seeds, no address book that learned anything, no mainnet headers and no
   checkpoint.
-- **A crash.** Every stop in the script is a clean `quit`. A kill in the
-  middle of a write is covered for the directory in unit tests (a cut-short
-  last record, a failed write), not against Core.
+- **A crash at other moments.** Step 9 kills the node at one moment:
+  right after a confirmation. A kill in the middle of a write is covered
+  for the directory in unit tests (a cut-short last record, a failed
+  write), not against Core. A loss of power, where the disk may lose what
+  was not yet flushed, was not tried.
 - **Two processes on one directory.** The directory has no lock.
 
 ## Where the existing crates did not fit
 
-None of these needed a change to an existing crate. Each was handled in the
-node, and each is a place where a later change in the crates would help.
+Each was handled in the node, and each is a place where a later change in
+the crates would help.
 
 1. **`Counter` has no way to list its sales.** It has `sale(index)` and
    nothing that walks them. The node needs them to judge what an event
@@ -173,26 +190,27 @@ node, and each is a place where a later change in the crates would help.
    empty, and its tip is its start block (genesis on regtest, the checkpoint
    on mainnet). The node writes the checked height before any address can be
    shown, and a later `Checked` event raises it. On mainnet a first start
-   would have a `watch_from` of the checkpoint height, not of the real tip.
-   That costs nothing while no address is shown (no script, no block is
-   fetched), but a first sale opened before the headers have caught up makes
-   the manager check the blocks between the checkpoint and the tip for it.
-   A `watch_from` that means "the tip when you get one" would be better.
+   has a `watch_from` of the checkpoint height, not of the real tip. That
+   costs nothing while no address is shown: with no script to look for, a
+   block is done at once, and the checked height follows the headers up.
+   A sale cannot open before the headers have caught up, because the
+   health rules refuse it while peers show a higher chain (WR-52).
 4. **The checked height and a reorganization.** The driver sends `Checked`
    only when the number rises. After a reorganization the manager checks the
-   new branch from the fork, but the height it reports may stay above the
-   fork until it passes the old number. A node that stops in that window
-   starts above blocks of the new branch it did not check. The node stores
-   what it is told; it cannot see the window. This was not exercised (step 6
-   stops no node in the middle).
+   new branch from the fork, but the height it reports stays above the fork
+   until it passes the old number. A node that stopped in that window would
+   have started above blocks of the new branch it did not check. The node
+   now takes its stored height down to the block below the fork when
+   blocks leave the chain, before it does anything else with the event. A
+   unit test covers it; no run against Core stops a node in that window.
 
 Smaller things that did not fit exactly:
 
 - `Counter::watched_scripts` returns the scripts that were shown. NR-41
   says the filters are matched against those not yet used in the current
   batch too. A script that was not shown cannot be paid, so nothing is lost,
-  but the node calls `watch_script` when `open` returns an address (as the
-  brief says) rather than relying on the starting list.
+  but the node calls `watch_script` when `open` returns an address
+  rather than relying on the starting list.
 - `FileStorage` keeps only `Key::Headers` and `Key::Book`, and its write
   halves are `pub(crate)`. `DirStore` writes a file the same way
   (temporary file, flush, rename, flush the directory) by its own code.
@@ -208,21 +226,18 @@ Smaller things that did not fit exactly:
   asks for a healthy check. Sales that are `Confirmed`, `Final` or
   `DoNotHandOver` are not affected, and the check showed no wrong report.
 
-## Things that surprised me
+## Notes
 
-- **A block of equal work does not reorganize.** The brief for step 6 said a
-  new block mined to another address. After `invalidateblock` on the tip,
-  one new block has the same work as the block it replaces, so the header
-  store keeps the old one as best (`Accepted::Side`) and nothing leaves the
-  chain. Two blocks are needed, as in the driver's own check.
-- **An empty directory fetches no block.** I expected the first run to ask
-  for 150 blocks, and it asked for none until the first address was shown.
-  The numbers for a start that has to catch up come from the copy with the
-  checked height deleted.
-- **The first run passed every step.** That made me read the script's
-  conditions again. Each `PASS` rests on a counted line or a compared value
-  (the report counts over all logs, the two derived addresses, the bytes in
-  `getpeerinfo`), not on the absence of a failure.
+- **A block of equal work does not reorganize.** After `invalidateblock` on
+  the tip, one new block has the same work as the block it replaces, so the
+  header store keeps the old one as best and nothing leaves the chain. Step
+  6 mines two blocks, as the driver's own check does.
+- **An empty directory fetches no block.** A first run asks for none until
+  the first address is shown. The numbers for a start that has to catch up
+  come from the copy with the checked height deleted.
+- **What a PASS rests on.** Each one rests on a counted line or a compared
+  value (the report counts over all logs, the two derived addresses, the
+  bytes in `getpeerinfo`), not on the absence of a failure.
 - **Order of events.** A `Block` event came after the `Chain` event that
   puts it on the best chain in every run. If it had not, `Counter::block`
   would have refused it as "not on the chain" and the sale would not have

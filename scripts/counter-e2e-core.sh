@@ -36,6 +36,12 @@
 #      deleted, which has to check every block from the first.
 #   8. The blank watch-only wallet sees the first payment as its own coin:
 #      the money is in the 2-of-3 wallet.
+#   9. A third sale is paid and confirmed once, and the example is killed
+#      at that moment with no clean stop. A start with no peer to ask
+#      shows the sale Confirmed from the disk alone, a start with the peer
+#      back shows the same, and nothing is reported again: the header of
+#      a block is saved before the block is handed to the counter
+#      (NR-73). (Run in the script before step 8.)
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin (the
 # directory is put first on PATH; set CORE_BIN to use another), jq, and
@@ -48,6 +54,7 @@
 #                   ~/.cache/openbmt)
 #   DRILL_RPC_PORT  RPC port for the regtest node (default 18966)
 #   DRILL_P2P_PORT  peer port for the regtest node (default 18967)
+#   DRILL_DEAD_PORT a port on 127.0.0.1 that nothing listens on (18968)
 #   DRILL_KEEP=1    keep the scratch directory afterwards
 #   NODE_BIN        the `counter_regtest` example binary
 #
@@ -61,6 +68,7 @@ CORE_BIN=${CORE_BIN:-$HOME/.local/opt/bitcoin-core-32.1/bin}
 export PATH="$CORE_BIN:$PATH"
 RPC_PORT=${DRILL_RPC_PORT:-18966}
 P2P_PORT=${DRILL_P2P_PORT:-18967}
+DEAD_PORT=${DRILL_DEAD_PORT:-18968}
 mkdir -p "$HOME/.cache/openbmt"
 BASE=${DRILL_DIR:-$(mktemp -d "$HOME/.cache/openbmt/counter-e2e-XXXXXX")}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -147,14 +155,14 @@ fi
 # Start the example on a data directory. Sets EX_PID and EX_LOG; its standard
 # input is a fifo that stays open on descriptor 3, so that commands can be
 # sent.
-start_example() { # tag, data dir
+start_example() { # tag, data dir, [peer]
   EX_LOG="$BASE/example-$1.log"
   : >"$EX_LOG"
   EX_N=0
   rm -f "$FIFO"
   mkfifo "$FIFO"
   exec 3<>"$FIFO"
-  "$NODE_BIN" "$2" "127.0.0.1:$P2P_PORT" --regtest-single-peer <&3 >"$EX_LOG" 2>&1 &
+  "$NODE_BIN" "$2" "${3:-127.0.0.1:$P2P_PORT}" --regtest-single-peer <&3 >"$EX_LOG" 2>&1 &
   EX_PID=$!
 }
 # Send one command and wait for its `done`. LAST holds what it printed.
@@ -487,6 +495,61 @@ else
   bad 7 "the first run did not stop"
 fi
 
+# ---- 9 -------------------------------------------------------------------------
+
+say "9. The node is killed right after a confirmation"
+start_example third "$DATA_DIR"
+STEP9=
+if await "^started " 20 && await_tip 60; then
+  cmd "open $SALE_AMOUNT $SALE_RATE"
+  OPENED=$(grep '^opened ' <<<"$LAST" || true)
+  note "$OPENED"
+  SHOWN2=$(sed -nE 's/.* address=([a-z0-9]+) .*/\1/p' <<<"$OPENED")
+  SATS2=$(sed -nE 's/.* sats=([0-9]+)$/\1/p' <<<"$OPENED")
+  TXID2=
+  if [ -n "$SHOWN2" ]; then
+    TXID2=$(cli -rpcwallet=miner sendtoaddress "$SHOWN2" "$(btc "$SATS2")")
+  fi
+  if [ -n "$TXID2" ] && await_state 2 Waiting 45; then
+    cli generatetoaddress 1 "$MINE" >/dev/null
+    if await_state 2 Confirmed 45; then
+      # No clean stop: nothing is saved on the way out.
+      kill -9 "$EX_PID"
+      wait "$EX_PID" 2>/dev/null
+      EX_PID=
+      exec 3>&-
+      # First with a peer address nothing listens on, so that the answer
+      # comes from what was on disk at the kill and from nothing else.
+      start_example alone "$DATA_DIR" "127.0.0.1:$DEAD_PORT"
+      AT_ONCE=
+      if await "^started " 20; then
+        cmd "pump 2"
+        state_of 2
+        AT_ONCE=$STATE
+        note "$(grep '^sale 2 ' <<<"$LAST")"
+      fi
+      stop_example || note "the run without a peer did not stop cleanly"
+      start_example fourth "$DATA_DIR"
+      if await "^started " 20; then
+        await_tip 60
+        cmd "pump 4"
+        state_of 2
+        LATER=$STATE
+        paid2=$(reports "PosPaid index=2")
+        unpaid2=$(reports "PosUnpaid index=2")
+        note "after the kill: sale 2 $AT_ONCE with no peer, $LATER with the peer back; PosPaid printed $paid2 time, PosUnpaid $unpaid2 times"
+        if [ "$AT_ONCE" = Confirmed ] && [ "$LATER" = Confirmed ] &&
+          [ "$paid2" = 1 ] && [ "$unpaid2" = 0 ]; then
+          STEP9=ok
+          pass 9 "killed with no clean stop right after the confirmation; a start with no peer shows Confirmed from the disk alone, and so does a start with the peer back; PosPaid still $paid2, PosUnpaid $unpaid2"
+        fi
+      fi
+      stop_example || note "the run after the kill did not stop cleanly"
+    fi
+  fi
+fi
+[ -n "$STEP9" ] || bad 9 "a kill right after a confirmation did not leave the sale Confirmed with one PosPaid and no PosUnpaid"
+
 # ---- 8 -------------------------------------------------------------------------
 
 say "8. The watch-only wallet sees the first payment"
@@ -507,7 +570,7 @@ fi
 
 say "Result"
 failed=0
-for n in 1 2 3 4 5 6 7 8; do
+for n in 1 2 3 4 5 6 7 8 9; do
   printf '%s  step %s\n' "${RESULT[$n]:-FAIL}" "$n"
   [ "${RESULT[$n]:-FAIL}" = PASS ] || failed=1
 done

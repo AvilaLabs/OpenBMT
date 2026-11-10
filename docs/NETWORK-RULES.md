@@ -236,7 +236,11 @@ rules are what it decides where the rules above are silent.
   Bitcoin Core 32.1 ships. With Tor on (NR-26), no name is looked up: one seed
   name at a time is dialed through the proxy as an ordinary peer.
 - **NR-73.** The header store is saved when the tip has moved and 60
-  seconds have passed since the last save. The anchors are set to the two
+  seconds have passed since the last save, and always before a block is
+  handed to the app if the tip has moved since the last save: what the
+  app stores about a block must never be ahead of the stored headers,
+  or a crash would make a confirmed payment look like one whose block
+  left the chain. The anchors are set to the two
   ready peers connected longest, and the book is saved, every 10 minutes.
   Both are saved, and the anchors set, when the driver stops. A stored
   file that does not read back is replaced by an empty one and reported to

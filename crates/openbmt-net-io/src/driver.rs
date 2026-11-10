@@ -805,7 +805,17 @@ where
                 }
                 Output::Addresses { from, list } => self.learn(from, &list, now),
                 Output::Chain { joined, left } => self.emit(AppEvent::Chain { joined, left }),
-                Output::Block { hash, bytes } => self.emit(AppEvent::Block { hash, bytes }),
+                Output::Block { hash, bytes } => {
+                    // NR-73: the headers reach the disk before the app can
+                    // store anything that names this block. An app whose
+                    // stored sale named a block that the stored headers do
+                    // not hold would, after a crash, take the block for one
+                    // that left the chain.
+                    if self.manager.chain().tip().1 != self.tip_saved {
+                        self.save_headers(now);
+                    }
+                    self.emit(AppEvent::Block { hash, bytes });
+                }
                 Output::Sighting { tx, from } => self.emit(AppEvent::Sighting { tx, from }),
                 Output::AlsoAnnounced { txid, from } => {
                     self.emit(AppEvent::AlsoAnnounced { txid, from })
