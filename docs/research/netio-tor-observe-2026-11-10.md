@@ -109,44 +109,48 @@ at most 4 lookups at a time, and the answers enter the book as stated by a
 seed to offer filters. A proxy that answers "command not supported" is
 noted once and the seed names are dialed as peers, as before. NR-26 and
 NR-72 say so. Unit tests against a fake proxy and driver tests with injected
-hooks pass; they show 9 lookups for 3 seeds, 0 calls of the system's
-resolver, at most 4 lookups in flight, and the fallback.
+hooks pass.
 
-**The run.** The same Tor client (0.4.9.16, client only, SOCKS port on the
-loopback address), the release build of `observe` on mainnet with the proxy
-set, the data directory of the first run (the stored headers at 975315 and
-an address book of about 20 KB), 20 minutes, one run.
+**The trigger.** The first attempt of this run showed a gap: a round
+started only when the book had nothing to dial, and the data directory held
+gossip-learned addresses, so no round started in 20 minutes and no filter
+peer was met. NR-72 now also starts a round while filters are wanted and the
+book holds no address that can be dialed now with the filter service stated
+by a seed or the peer itself (without Tor as well); the book's other
+addresses are dialed meanwhile, and the spacing of rounds is unchanged.
+
+**The run through Tor.** The same Tor client (0.4.9.16, client only, SOCKS
+port on the loopback address), the release build of `observe` on mainnet
+with the proxy set, the same data directory (stored headers at 975326 and
+the gossip-heavy book), 20 minutes, one run.
 
 | What | Result |
 |---|---|
-| Ready peers (target 8) | 1 at 1.7 s, 4 at most (first at 1101 s) |
-| Peers offering filters | 0, at any point |
-| First filter peer ready | never |
-| Two filter peers in different groups | never |
-| Seed rounds started | 0 |
-| Seed lookups through the proxy | 0 answered of 0 |
-| Lookups seen in Tor's log | none |
-| Blocks fetched in full and checked | 11 (1.2 to 1.8 MB each) |
-| Tip | 975315 to 975326 |
-| Peers dropped | 3 for NR-42 (requests not answered in time), 1 for NR-14 |
-| Transport | 7 distinct peers on v2, 3 on v1, 9 refusals of v2 |
+| First ready peer | 5.3 s |
+| Most ready peers (target 8) | 7, first reached at 1156 s |
+| First filter peer ready | 23.3 s |
+| Two filter peers in different groups | 41.9 s |
+| Seed rounds | 1, started in the first seconds, over at 46.6 s |
+| Lookups through Tor | 18 answered of 21 |
+| Failed lookups | 3, all "host unreachable" from Tor |
+| Blocks fetched in full | 7, between 109 s and 131 s |
+| Blocks checked by filters | 2 (975334 and 975335, at 954 s and 1160 s) |
+| Peers dropped | 1 for NR-42, 1 for NR-14 |
+| Tip | 975326 to 975335 |
 | System lookups | none: no name is looked up by the system with a proxy |
 
-**Which step fails: the lookups are never started.** No seed round began,
-so nothing was asked of Tor. A round starts only when the address book has
-nothing to dial (NR-72, as without Tor). This data directory already held
-about 20 KB of addresses that earlier runs had heard of by `addr`, so the
-book always had something to give, and the seeds, whose `x49.` names are
-the only source of filter peers a Tor-only device has, were never reached.
-The peers that were ready came from the stored anchors and the book. The
-handshakes of the peers that were dialed worked (v2 and v1), and Tor
-carried the traffic; no step after the dial failed.
+The 7 full blocks are the blocks that joined while the run caught up with
+the tip; the reason each was fetched in full was not examined. Both blocks
+that arrived later, with two filter peers held, were checked by filters
+without a full download.
 
-So the fix is in the code and tested against a fake proxy, and it has not
-been seen to work through Tor: `RESOLVE` against a real Tor was not
-exercised by this run. The trigger is the open question. Asking the seeds
-also when filters are wanted and the book holds no address with the filter
-service stated by a seed would reach them with a populated book. That
-changes NR-72 and was not done here.
+**A clear-net run** (no proxy, a fresh data directory with only the stored
+headers copied in, 5 minutes) for a regression check: first ready peer at
+0.5 s, two filter peers in different groups at 0.7 s, 8 ready peers at 51 s,
+0 blocks fetched in full, one block joined and checked.
 
-The log of the run is kept outside the repository.
+Not shown by these runs: whether the third lookup of a seed tends to give a
+different address from the first (the book counts addresses, not lookups),
+and Tor's own view of the circuits.
+
+The logs of the runs are kept outside the repository.
