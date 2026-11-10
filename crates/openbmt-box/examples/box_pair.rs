@@ -11,11 +11,30 @@
 //! box_pair recv     <dir> <addr> <name>
 //! box_pair settings <dir> <addr> <version> <drop-c2 | drop-box>
 //! box_pair key      <dir> <name>                print a device's key in hex
+//! box_pair notice   <dir> <addr> <counter> <index> <opened|paid|unpaid|final> <cents>
+//!                                               a counter's paid notice to the Box (BX-40)
+//! box_pair posrecv  <dir> <addr>                the owner reads the Box's POS notices (BX-42)
+//! box_pair pos-order <pos dir> <id> <open|closed> <cents> <bitcoin|none>
+//!                                               put an order in the test POS
+//! box_pair pos-close-on <pos dir>               let the test POS close orders
+//! box_pair pos-box  <box dir> <addr> <pos dir>  a Box with the test POS (BX-41)
 //!
 //! `drop-c2` takes counter 2 off the list. `drop-box` takes the Box off it
 //! as well (and counter 2, so that it is still a tightening of what
 //! `drop-c2` sent).
 //! ```
+//!
+//! `pos-box` is what a program that links the library does: the Box with a
+//! connector. Its connector is a directory, `<pos dir>`: `orders.txt` holds
+//! one order per line, `<id> <open|closed> <cents> <unix seconds> <bitcoin|none>`
+//! (location `Main`, currency USD; `bitcoin` is a paid tender named
+//! `Bitcoin`), `can-close` (if present) lets it close, `closes.txt` gets a line
+//! `<key hex> <order>` for each order it closed, `calls.txt` a line for each
+//! call of `close` and `token.txt` says whether a sign-in was given. It finds
+//! the one open order without a Bitcoin tender for the sale's amount. Its
+//! console is the Box's (`invite <text>`, `state`, `pos`, `pos-token` and the
+//! line after it, `notes`, `quit`). `pos-order` stamps the order with the
+//! time now.
 //!
 //! The devices are `owner`, `approver`, `c1`, `c2` and `stranger`. Their
 //! keys are made from their names, so that two runs agree: for tests only.
@@ -24,15 +43,28 @@
 //! why not and exits 1.
 
 use std::fs;
+use std::io::{self, BufRead, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use openbmt_box::{BoxRunner, PosSetup};
 use openbmt_core::batch::PinnedRoots;
 use openbmt_core::boxpair::{Claim, Invitation, Welcome};
 use openbmt_core::identity::{tagged_hash, DeviceId, Identity};
 use openbmt_core::settings::{Settings, SignedSettings};
-use openbmt_link::{open, os_random, seal, Client, ClientConfig, ClientError, Kind, Role, Route};
+use openbmt_counter::{Amount, Currency};
+use openbmt_link::{
+    open, os_random, seal, Client, ClientConfig, ClientError, Kind, Role, Route, ServerConfig,
+};
+use openbmt_net_io::SystemClock;
+use openbmt_pos::{
+    CloseOutcome, CloseRequest, Connector, Cursor, Id, LocationCounters, NoticeDraft, NoticeState,
+    OrderId, OrderState, Page, PaidNotice, PosError, PosNotice, PosOrder, PosReader, PosTender,
+    SaleFact, Settings as PosSettings, TenderKind, TenderState, Text,
+};
 
 fn identity(name: &str) -> Result<Identity, String> {
     let secret = tagged_hash("OpenBMT/example/box-pair/v1", name.as_bytes());
@@ -119,6 +151,226 @@ fn next_number(dir: &Path, from: &str, to: &str) -> Result<u64, String> {
 
 fn refused(e: &ClientError) -> String {
     format!("refused: {e}")
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+fn usd() -> Result<Currency, String> {
+    Currency::new(*b"USD").ok_or_else(|| "USD is not a currency".to_string())
+}
+
+/// The shop's POS settings for `pos-box`: location `Main`, served by `c1`.
+fn pos_settings() -> Result<PosSettings, String> {
+    PosSettings::new(
+        vec![Text::new("Bitcoin").map_err(|e| e.to_string())?],
+        vec![LocationCounters {
+            location: Text::new("Main").map_err(|e| e.to_string())?,
+            counters: vec![identity("c1")?.device_id()],
+        }],
+        vec![usd()?],
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// The test POS: the directory described at the top of this file.
+struct FileConnector {
+    dir: PathBuf,
+}
+
+impl FileConnector {
+    fn lines(&self) -> Vec<String> {
+        fs::read_to_string(self.dir.join("orders.txt"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn orders(&self) -> Vec<PosOrder> {
+        self.lines().iter().filter_map(|l| parse_order(l)).collect()
+    }
+
+    fn append(&self, file: &str, line: &str) -> Result<(), PosError> {
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.dir.join(file))
+            .map_err(|_| PosError::Unavailable)?;
+        writeln!(f, "{line}").map_err(|_| PosError::Unavailable)
+    }
+}
+
+fn parse_order(line: &str) -> Option<PosOrder> {
+    let f: Vec<&str> = line.split_whitespace().collect();
+    let [id, state, cents, at, tender] = f[..] else {
+        return None;
+    };
+    let (cents, at): (u64, u64) = (cents.parse().ok()?, at.parse().ok()?);
+    let closed = state == "closed";
+    let tenders = if tender == "bitcoin" {
+        vec![PosTender {
+            id: Id::new(&format!("t-{id}")).ok()?,
+            kind: TenderKind::Other,
+            name: Text::new("Bitcoin").ok()?,
+            amount_minor: cents,
+            tip_minor: 0,
+            state: TenderState::Paid,
+            at,
+            reference: None,
+        }]
+    } else {
+        Vec::new()
+    };
+    Some(PosOrder {
+        id: Id::new(id).ok()?,
+        location: Text::new("Main").ok()?,
+        state: if closed {
+            OrderState::Closed
+        } else {
+            OrderState::Open
+        },
+        currency: Currency::new(*b"USD")?,
+        total_minor: cents,
+        tenders,
+        opened_at: at,
+        closed_at: closed.then_some(at),
+        updated_at: at,
+        reference: None,
+    })
+}
+
+impl PosReader for FileConnector {
+    fn poll(&mut self, cursor: &Cursor) -> Result<Page, PosError> {
+        Ok(Page {
+            orders: self.orders(),
+            next: cursor.clone(),
+            more: false,
+        })
+    }
+}
+
+impl Connector for FileConnector {
+    fn set_token(&mut self, token: Option<&str>) {
+        let line = if token.is_some() { "set" } else { "none" };
+        let _ = fs::write(self.dir.join("token.txt"), line);
+    }
+
+    fn can_close(&self) -> bool {
+        self.dir.join("can-close").exists()
+    }
+
+    fn find_order(&mut self, sale: &SaleFact) -> Result<Option<OrderId>, PosError> {
+        let open: Vec<PosOrder> = self
+            .orders()
+            .into_iter()
+            .filter(|o| {
+                o.state == OrderState::Open
+                    && o.tenders.is_empty()
+                    && o.total_minor == sale.amount.0
+            })
+            .collect();
+        Ok(match open.as_slice() {
+            [one] => Some(one.id.clone()),
+            _ => None,
+        })
+    }
+
+    fn close(&mut self, request: &CloseRequest) -> Result<CloseOutcome, PosError> {
+        let key = request.key.to_hex();
+        self.append("calls.txt", &key)?;
+        let done = fs::read_to_string(self.dir.join("closes.txt")).unwrap_or_default();
+        if done.lines().any(|l| l.starts_with(&key)) {
+            return Ok(CloseOutcome::AlreadyClosed);
+        }
+        self.append("closes.txt", &format!("{key} {}", request.order))?;
+        // The order now carries a paid Bitcoin tender and is closed.
+        let at = now_secs();
+        let lines: Vec<String> = self
+            .lines()
+            .into_iter()
+            .map(|l| match l.split_whitespace().next() {
+                Some(id) if id == request.order.as_str() => {
+                    format!("{id} closed {} {at} bitcoin", request.amount_minor)
+                }
+                _ => l,
+            })
+            .collect();
+        fs::write(self.dir.join("orders.txt"), lines.join("\n") + "\n")
+            .map_err(|_| PosError::Unavailable)?;
+        Ok(CloseOutcome::Closed)
+    }
+}
+
+/// A Box with the test POS, and the Box's console on standard input.
+fn pos_box(data: &Path, addr: &str, pos_dir: &Path) -> Result<(), String> {
+    let bind: SocketAddr = addr
+        .parse()
+        .map_err(|_| format!("{addr} is not an address"))?;
+    fs::create_dir_all(pos_dir).map_err(|e| e.to_string())?;
+    let setup = PosSetup::new(
+        pos_settings()?,
+        Box::new(FileConnector {
+            dir: pos_dir.to_path_buf(),
+        }),
+    );
+    let runner = BoxRunner::start_with(
+        data,
+        bind,
+        Arc::new(SystemClock),
+        ServerConfig::default(),
+        Some(setup),
+    )
+    .map_err(|e| e.to_string())?;
+    let say = |line: &str| {
+        let mut out = io::stdout().lock();
+        let _ = writeln!(out, "{line}");
+        let _ = out.flush();
+    };
+    say(&format!(
+        "fingerprint: {}",
+        runner.fingerprint_words().join(" ")
+    ));
+    say(&format!("key: {}", hex(&runner.device_id().to_bytes())));
+    say(&format!("listening: {}", runner.local_addr()));
+    say(&format!("state: {}", runner.status().text()));
+    let mut lines = io::stdin().lock().lines();
+    while let Some(Ok(line)) = lines.next() {
+        let line = line.trim().to_string();
+        let (command, rest) = line.split_once(' ').unwrap_or((line.as_str(), ""));
+        match command {
+            "invite" => match runner.enter_invitation(rest.trim()) {
+                Ok(()) => say("invitation: open for 30 minutes"),
+                Err(e) => say(&format!("invitation refused: {e}")),
+            },
+            "state" => say(&format!("state: {}", runner.status().text())),
+            "pos-token" => match lines.next() {
+                Some(Ok(token)) => match runner.store_pos_token(&token) {
+                    Ok(()) => say("pos token: stored"),
+                    Err(e) => say(&format!("pos token refused: {e}")),
+                },
+                _ => say("pos token refused: no line followed the command"),
+            },
+            "pos" => {
+                for line in runner.pos_view().to_string().lines() {
+                    say(&format!("pos: {line}"));
+                }
+            }
+            "notes" => {
+                for n in runner.notes() {
+                    say(&format!("note: {n}"));
+                }
+            }
+            "quit" => break,
+            "" => {}
+            other => say(&format!("unknown command: {other}")),
+        }
+    }
+    runner.stop();
+    Ok(())
 }
 
 fn run(args: &[String]) -> Result<(), String> {
@@ -293,6 +545,118 @@ fn run(args: &[String]) -> Result<(), String> {
             }
             return Err(last);
         }
+        "notice" => {
+            // A counter's paid notice, sealed to the Box. The notice's own
+            // number and the message's number are kept apart.
+            let (from, index) = (arg(3)?, arg(4)?);
+            let state = match arg(5)? {
+                "opened" => NoticeState::Opened,
+                "paid" => NoticeState::Paid,
+                "unpaid" => NoticeState::Unpaid,
+                "final" => NoticeState::Final,
+                other => return Err(format!("unknown state {other}")),
+            };
+            let cents: u64 = arg(6)?.parse().map_err(|_| "cents is a number")?;
+            let claim = read_claim(&dir)?;
+            let who = identity(from)?;
+            let now = now_secs();
+            // A sale keeps the time it opened at in every notice about it.
+            let opened_file = dir.join(format!("opened-{from}-{index}"));
+            let opened_at: u64 = match fs::read_to_string(&opened_file) {
+                Ok(t) => t.trim().parse().map_err(|_| "a damaged opening time")?,
+                Err(_) => {
+                    fs::write(&opened_file, now.to_string()).map_err(|e| e.to_string())?;
+                    now
+                }
+            };
+            let draft = NoticeDraft {
+                index: index.parse().map_err(|_| "index is a number")?,
+                amount: Amount(cents),
+                currency: usd()?,
+                opened_at,
+                state,
+                state_at: now,
+            };
+            let number = next_number(&dir, from, "notice")?;
+            let notice = PaidNotice::sign(&who, number, &draft).ok_or("the notice was not made")?;
+            let n = next_number(&dir, from, "box")?;
+            let sealed = seal(
+                &who,
+                role_of(from)?,
+                &claim.box_key,
+                Role::Box,
+                n,
+                Kind::PaidNotice,
+                &notice.to_bytes(),
+                &mut rng,
+            )
+            .map_err(|e| e.to_string())?;
+            connect(arg(2)?, Some(&claim.box_key))?
+                .put(&sealed)
+                .map_err(|e| refused(&e))?;
+            println!("notice {number} sent: sale {index} {}", state.name());
+        }
+        "posrecv" => {
+            let claim = read_claim(&dir)?;
+            let me = identity("owner")?;
+            let mut c = connect(arg(2)?, None)?;
+            c.make_mailbox(&me).map_err(|e| refused(&e))?;
+            let got = c.fetch(&me, 0).map_err(|e| refused(&e))?;
+            let box_key = claim.box_key;
+            let mut last = 0;
+            for (id, sealed) in &got.items {
+                let opened = open(
+                    &me,
+                    Role::Owner,
+                    sealed,
+                    |d| (*d == box_key).then_some(Role::Box),
+                    |_| 0,
+                )
+                .map_err(|e| e.to_string())?;
+                if opened.kind == Kind::PosNotice {
+                    let n = PosNotice::from_bytes(&opened.content).map_err(|e| e.to_string())?;
+                    let ok = n.from == box_key && n.verify();
+                    println!(
+                        "pos notice {} from the Box ({}): {}",
+                        n.number,
+                        if ok {
+                            "signature good"
+                        } else {
+                            "SIGNATURE BAD"
+                        },
+                        n.text()
+                    );
+                }
+                last = *id;
+            }
+            if last > 0 {
+                c.ack(&me, last).map_err(|e| refused(&e))?;
+            }
+            println!("received {}", got.items.len());
+        }
+        "pos-order" => {
+            // `dir` is the test POS's directory; the order gets the time now.
+            let (id, state, cents, tender) = (arg(2)?, arg(3)?, arg(4)?, arg(5)?);
+            if !matches!(state, "open" | "closed") || !matches!(tender, "bitcoin" | "none") {
+                return Err("state is open or closed, tender is bitcoin or none".into());
+            }
+            let cents: u64 = cents.parse().map_err(|_| "cents is a number")?;
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let mut f = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join("orders.txt"))
+                .map_err(|e| e.to_string())?;
+            writeln!(f, "{id} {state} {cents} {} {tender}", now_secs())
+                .map_err(|e| e.to_string())?;
+            println!("order {id} put in the test POS");
+        }
+        "pos-close-on" => {
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            fs::write(dir.join("can-close"), "").map_err(|e| e.to_string())?;
+            println!("the test POS can close orders");
+        }
+        "pos-box" => return pos_box(&dir, arg(2)?, Path::new(arg(3)?)),
         other => return Err(format!("unknown command {other}")),
     }
     Ok(())
