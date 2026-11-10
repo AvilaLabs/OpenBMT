@@ -335,7 +335,7 @@ impl HeaderStore {
     /// WR-05: the bits a block at `height` on the branch of `parent` must
     /// state, as Bitcoin Core works them out.
     fn required_bits(&self, parent: &Entry, height: u32) -> Result<CompactTarget, Refusal> {
-        if height % RETARGET_INTERVAL != 0 {
+        if !height.is_multiple_of(RETARGET_INTERVAL) {
             return Ok(parent.header.bits);
         }
         // The first block of the period that ends at `parent`.

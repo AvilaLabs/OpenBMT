@@ -190,7 +190,9 @@ pub fn face_counts(rolls: &str) -> Result<[u32; 6], EntropyError> {
 /// a partner is ignored.
 pub fn bits_from_coin(flips: &[Flip]) -> Vec<bool> {
     flips
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .filter_map(|pair| match pair {
             [Flip::Heads, Flip::Tails] => Some(true),
             [Flip::Tails, Flip::Heads] => Some(false),
@@ -205,7 +207,9 @@ pub fn bits_from_coin(flips: &[Flip]) -> Vec<bool> {
 pub fn bits_from_dice(rolls: &str) -> Result<Vec<bool>, EntropyError> {
     let faces = parse_faces(rolls, MAX_DICE_ROLLS)?;
     Ok(faces
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .filter_map(|pair| match pair {
             [first, second] if second > first => Some(true),
             [first, second] if second < first => Some(false),

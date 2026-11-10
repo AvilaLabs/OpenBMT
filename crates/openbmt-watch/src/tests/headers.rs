@@ -17,7 +17,9 @@ const LATE: u64 = 4_000_000_000;
 
 /// The 4,043 real headers, heights 967,680 to 971,722.
 fn real() -> Vec<Header> {
-    REAL.chunks_exact(80)
+    REAL.as_chunks::<80>()
+        .0
+        .iter()
         .map(|raw| deserialize(raw).expect("80 bytes are a header"))
         .collect()
 }

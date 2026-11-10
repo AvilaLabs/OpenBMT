@@ -71,7 +71,7 @@ impl RefCode {
     pub fn for_sale(counter: &DeviceId, index: u32) -> Self {
         let digest = tagged_hash(TAG_REFERENCE, &[&counter.to_bytes(), &index.to_le_bytes()]);
         let mut values = [0u32; REF_LEN - 1];
-        for (v, pair) in values.iter_mut().zip(digest.chunks_exact(2)) {
+        for (v, pair) in values.iter_mut().zip(digest.as_chunks::<2>().0) {
             let n = pair.iter().fold(0u32, |a, b| (a << 8) | u32::from(*b));
             *v = n % MODULUS;
         }

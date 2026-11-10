@@ -358,7 +358,7 @@ fn parse_inventory(
     }
     let mut txids = Vec::new();
     let mut blocks = Vec::new();
-    for entry in rest.chunks_exact(ENTRY) {
+    for entry in rest.as_chunks::<ENTRY>().0 {
         let (kind, hash) = entry.split_first_chunk::<4>().ok_or_else(bad)?;
         let hash: [u8; 32] = hash.try_into().map_err(|_| bad())?;
         match u32::from_le_bytes(*kind) {
@@ -401,7 +401,7 @@ fn parse_headers(payload: &[u8]) -> Result<Vec<Header>, Drop> {
         return Err(bad());
     }
     let mut headers = Vec::with_capacity(count);
-    for entry in rest.chunks_exact(HEADERS_ENTRY_LEN) {
+    for entry in rest.as_chunks::<HEADERS_ENTRY_LEN>().0 {
         let (header, zero) = entry
             .split_at_checked(HEADERS_ENTRY_LEN - 1)
             .ok_or_else(bad)?;
