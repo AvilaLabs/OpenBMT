@@ -1,10 +1,12 @@
 package org.openbmt.key
 
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
 
-// This file has not been compiled or run. Its op numbers and tag bytes are
-// compared with the Rust tables by a test of the Rust crate, and PROTOCOL.md
-// is generated from the same tables; nothing else about it is checked.
+// The binding and OBM9 decoder harness compile and run on the JVM. This does
+// not compile or load the Android JNI library or exercise a device UI.
 
 /** A call that did not do what was asked. [rule] is the ID of the rule that refused. */
 class KeyException(
@@ -457,15 +459,28 @@ internal class Reader(private val data: ByteArray) {
 
     fun bytes(): ByteArray = take(count())
 
-    fun string(): String = String(bytes(), Charsets.UTF_8)
+    private fun utf8(bytes: ByteArray): String = try {
+        Charsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(bytes))
+            .toString()
+    } catch (_: CharacterCodingException) {
+        bad("a string is not valid UTF-8")
+    }
+
+    fun string(): String = utf8(bytes())
 
     /** A string with a u16 length, as in an error frame. */
-    fun string16(): String = String(take(u16()), Charsets.UTF_8)
+    fun string16(): String = utf8(take(u16()))
+
+    /** A response status, including success, as defined by OBM9. */
+    fun status(): Int = u8().also { if (it !in 0..4) bad("a status is not 0 to 4") }
 
     /** The words after the rule and the text of an error frame. */
     fun words(): Words {
-        val tone = u8()
-        val who = u8()
+        val tone = u8().also { if (it !in 0..3) bad("a tone is not 0 to 3") }
+        val who = u8().also { if (it !in 0..6) bad("a person is not 0 to 6") }
         val heading = string16()
         val what = string16()
         val next = string16()
@@ -769,11 +784,7 @@ private val RESPONSE_MAGIC = byteArrayOf('O'.code.toByte(), 'B'.code.toByte(), '
  * return a reader at the start of the result. The library runs one call at a
  * time, so calls are made one at a time here too.
  */
-private fun call(store: KeyStore, op: Int, handle: Long, fill: (Writer) -> Unit = {}): Reader {
-    val w = Writer().raw(REQUEST_MAGIC).u8(1).u16(op).u64(handle)
-    fill(w)
-    val response = synchronized(Native) { Native.call(store, w.toByteArray()) }
-        ?: throw KeyException("response-null", "the library gave no response", 4)
+internal fun decodeResponse(response: ByteArray): Reader {
     val r = Reader(response)
     if (!r.take(4).contentEquals(RESPONSE_MAGIC)) {
         throw KeyException("response-magic", "the library's response is not an OBM9 frame", 4)
@@ -781,13 +792,21 @@ private fun call(store: KeyStore, op: Int, handle: Long, fill: (Writer) -> Unit 
     if (r.u8() != 1) {
         throw KeyException("response-version", "the library's response has a version that is not 1", 4)
     }
-    val status = r.u8()
+    val status = r.status()
     if (status == 0) return r
     val rule = r.string16()
     val text = r.string16()
     val words = r.words()
     r.end()
     throw KeyException(rule, text, status, words)
+}
+
+private fun call(store: KeyStore, op: Int, handle: Long, fill: (Writer) -> Unit = {}): Reader {
+    val w = Writer().raw(REQUEST_MAGIC).u8(1).u16(op).u64(handle)
+    fill(w)
+    val response = synchronized(Native) { Native.call(store, w.toByteArray()) }
+        ?: throw KeyException("response-null", "the library gave no response", 4)
+    return decodeResponse(response)
 }
 
 /** A call whose result is nothing. */

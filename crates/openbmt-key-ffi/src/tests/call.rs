@@ -824,7 +824,8 @@ fn a_panic_becomes_status_4_and_poisons_the_app() {
     )
     .expect_err("the panic is caught");
     assert_eq!((status, rule.as_str()), (INTERNAL, "internal"));
-    assert!(text.contains("a panic in random"));
+    assert_eq!(text, "caught a panic: [redacted]");
+    assert!(!text.contains("a panic in random"));
     // Every later call of the app returns the same kind of error.
     for op in [STATE, SIGNER_STATUS, RECEIVE_MARK] {
         assert_eq!(send(op, app, W::new()).expect_err("poisoned").0, INTERNAL);
@@ -1078,6 +1079,18 @@ fn an_error_frame_carries_the_words_after_the_rule_and_the_text() {
     assert!(!c.flag());
     assert_eq!(c.opt_str16().as_deref(), Some("no key has been made yet"));
     assert!(c.done());
+}
+
+#[test]
+fn a_caught_panic_payload_is_not_sent_in_the_error_frame() {
+    let e = KeyError::Internal {
+        rule: "internal".to_string(),
+        text: "caught a panic: secret-seed-and-signing-key".to_string(),
+    };
+    let parsed = parse_response(&error_response(&e)).expect_err("an error");
+    assert_eq!(parsed.1, "internal");
+    assert_eq!(parsed.2, "caught a panic: [redacted]");
+    assert!(!parsed.2.contains("secret"));
 }
 
 #[test]

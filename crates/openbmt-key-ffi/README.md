@@ -8,9 +8,10 @@ point, `dispatch`, which takes a framed request and returns a framed
 response; on Android the one exported symbol is a JNI function that calls it.
 
 **This crate has had internal review only. No independent security audit
-has been done yet. Not for real funds.** The Kotlin in `bindings/kotlin/`
-has not been compiled or run: there is no Kotlin compiler on the machine it
-was written on. See "What is checked" below.
+has been done yet. Not for real funds.** The Kotlin binding and its OBM9
+decoder harness have been compiled and run on the JVM. This does not compile
+the Android JNI library or exercise an Android device. See "What is checked"
+below.
 
 This crate holds no rule of its own. Every check and every refusal is in
 the existing crates (`docs/SESSION-RULES.md` section 2,
@@ -244,20 +245,23 @@ scripts/key-ffi-build.sh
   and `x86_64-linux-android` (NDK, API 26) and checks with `llvm-readelf`
   that the only exported `Java_` symbol is the entry point above and that no
   `uniffi` symbol remains.
-- The Kotlin is **not compiled and not run**. Two tests keep it honest as far
-  as numbers go: `PROTOCOL.md` is generated from the Rust tables, and a test
-  parses `KeyApp.kt` and compares its `OP_*`, `TAG_*`, `TONE_*` and `WHO_*`
-  constants with them. A third reads the text of the `Words` class and of its
-  reader to check that the fields come in the order the frame writes them.
-  Beyond that the Kotlin is checked by reading only.
+- The JVM binding check compiles `Native.kt`, `KeyApp.kt` and
+  `bindings/tests/ProtocolDecoderTest.kt`, then runs the harness. It covers a
+  valid success frame, a valid error frame and rejection of undefined status,
+  tone and person numbers, malformed UTF-8, truncation and trailing bytes.
+  Run it with `bindings/tests/run-jvm.sh` after setting the compiler classpath
+  variables described in `bindings/tests/README.md`.
+- Rust source checks still compare Kotlin `OP_*`, `TAG_*`, `TONE_*` and
+  `WHO_*` constants with the Rust tables and keep the response field order in
+  sync. `PROTOCOL.md` remains generated from the Rust encoder tables.
 
 There is no restore mode to build: a Key app made from typed words is a new
 Key app under every signer rule (`docs/SIGNER-RULES.md` SR-39). Not built: the
 kit's other fields in `check_kit` (birthday, generations, import range, fallback
 descriptors), and anti-exfil signing.
 
-Not covered: compiling or running the Kotlin, loading the library on a device
-or emulator, and the Android Keystore wrapping.
+Not covered: compiling the Android JNI library for Android, loading the
+library on a device or emulator, and the Android Keystore wrapping.
 
 ## Dependencies
 

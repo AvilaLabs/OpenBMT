@@ -116,6 +116,17 @@ fn retry(heading: &str, what: &str, next: &str, text: &str) -> Words {
     Words::new(Tone::Stop, heading, what, Who::KeyHolder, next).detail(text)
 }
 
+/// A refusal involving data supplied by another device. The diagnostic is
+/// kept in `KeyError`, while the screen avoids echoing that data as detail.
+fn retry_input(heading: &str, what: &str, next: &str) -> Words {
+    Words::new(Tone::Stop, heading, what, Who::KeyHolder, next)
+}
+
+fn without_detail(mut words: Words) -> Words {
+    words.detail = None;
+    words
+}
+
 /// The words of a call that the app refused for a scanned payment code.
 fn code_words(rule: &str, text: &str) -> Option<Words> {
     let again = "Scan the code again, or ask the owner for another one.";
@@ -179,23 +190,45 @@ fn typed_words(rule: &str, text: &str) -> Option<Words> {
             "Wrong number of words",
             "A key has 12 or 24 words, and the number typed is neither.",
             "Type all 12 words or all 24 words.",
-            text,
+            "",
         ),
-        "words-unknown" => retry(
-            "Word not on the list",
-            "One of the typed words is not on the word list.",
-            "Check how it is spelled; its place in the list of words is under Details.",
-            text.split(" is ").next().unwrap_or(""),
-        ),
+        "words-unknown" => unknown_word_words(text),
         "words-checksum" => retry(
             "Words do not fit together",
             "The typed words do not fit together: one is wrong or out of order.",
             "Check each word against the paper, in order, and type them again.",
-            text,
+            "",
         ),
         "entropy" => entropy_words(text),
         _ => return None,
     })
+}
+
+/// The parser reports only a word position. Retain that safe number for the
+/// promised Details line, but accept no other text from this error field.
+fn unknown_word_words(text: &str) -> Words {
+    const PREFIX: &str = "word ";
+    const SUFFIX: &str = " is not on the word list; check how it is spelled";
+    let position = text
+        .strip_prefix(PREFIX)
+        .and_then(|rest| rest.strip_suffix(SUFFIX))
+        .and_then(|digits| digits.parse::<u8>().ok())
+        .filter(|n| (1..=24).contains(n))
+        .filter(|n| text == format!("word {n}{SUFFIX}"));
+    let next = if position.is_some() {
+        "Check how it is spelled; its place in the list of words is under Details."
+    } else {
+        "Check how each word is spelled, then type the words again."
+    };
+    let mut words = retry_input(
+        "Word not on the list",
+        "One of the typed words is not on the word list.",
+        next,
+    );
+    if let Some(position) = position {
+        words.detail = Some(format!("word position {position}"));
+    }
+    words
 }
 
 /// The words of a refusal of dice or coin throws, from the text of the
@@ -206,41 +239,41 @@ fn entropy_words(text: &str) -> Words {
             "Not a die face",
             "A character typed is not a die face; only 1 to 6 are used.",
             "Remove it, and type only the numbers 1 to 6.",
-            text,
+            "",
         )
     } else if text.contains("rolls is too few") {
         retry(
             "Too few rolls",
             "Not enough rolls were typed to make a key.",
             "Roll the die more times, and type all the rolls.",
-            text,
+            "",
         )
     } else if text.contains("throws is too many") {
         retry(
             "Too many throws",
             "More throws were typed than this app takes in one go.",
             "Type fewer throws and try again.",
-            text,
+            "",
         )
     } else if text.contains("bits is too few") {
         retry(
             "Too few throws",
             "Not enough throws were typed to make this many words.",
             "Keep throwing until the app shows enough, then go on.",
-            text,
+            "",
         )
     } else if text.contains("could not be made") {
         call_fault(
             "No words were made",
             "Nothing was made, because this app could not turn the throws into words.",
-            text,
+            "",
         )
     } else {
         retry(
             "Throws not accepted",
             "This app did not accept the throws it was given.",
             "Check what was typed and try again.",
-            text,
+            "",
         )
     }
 }
@@ -400,11 +433,10 @@ fn saved_state_words(text: &str) -> Words {
 /// itself: a key or wallet the app was given.
 fn given_words(rule: &str, text: &str) -> Option<Words> {
     Some(match rule {
-        "xpub" => retry(
+        "xpub" => retry_input(
             "Key text not understood",
             "The key text given for key 3 is not a key this app can read.",
             "Scan the key again from the device that made it.",
-            text,
         ),
         "network" => Words::new(
             Tone::Stop,
@@ -414,33 +446,29 @@ fn given_words(rule: &str, text: &str) -> Option<Words> {
             "Do not use this wallet, and tell the owner in person.",
         )
         .detail(text),
-        "owner" => retry(
+        "owner" => retry_input(
             "Owner key not accepted",
             "The owner's key given to this app is not a key it can use.",
             "Scan the owner's phone again.",
-            text,
         ),
-        "wallet" => wallet_words_for_text(text),
-        "kit-too-long" => retry(
+        "wallet" => without_detail(wallet_words_for_text(text)),
+        "kit-too-long" => retry_input(
             "Scanned text too long",
             "The scanned text is too long to be a wallet.",
             "Scan the wallet code on the kit again.",
-            text,
         ),
         "address" => {
             if text.contains("another network") {
-                retry(
+                retry_input(
                     "Address for another network",
                     "This address is for a different network than this wallet.",
                     "Check with the owner that it is the right address.",
-                    text,
                 )
             } else {
-                retry(
+                retry_input(
                     "Not an address",
                     "What was scanned or typed is not a bitcoin address.",
                     "Scan the address again, or ask the owner for it.",
-                    text,
                 )
             }
         }
@@ -610,7 +638,15 @@ fn internal_known(text: &str) -> Option<Words> {
     known
         .into_iter()
         .find(|(prefix, _)| text.starts_with(prefix))
-        .map(|(prefix, words)| words.detail(text.strip_prefix(prefix).unwrap_or(text)))
+        .map(|(prefix, words)| {
+            if prefix == "caught a panic: " {
+                // A panic payload is arbitrary program data and can contain
+                // secrets. Keep it in KeyError for diagnostics, not on-screen.
+                words
+            } else {
+                words.detail(text.strip_prefix(prefix).unwrap_or(text))
+            }
+        })
 }
 
 /// The words of a refusal that came from a rule crate and carries its rule
@@ -652,8 +688,11 @@ pub fn words_for(kind: Kind, rule: &str, text: &str) -> Words {
 }
 
 /// The words for an error that has none of its own.
-fn fallback(kind: Kind, rule: &str, text: &str) -> Words {
-    let detail = format!("{rule}: {text}");
+fn fallback(kind: Kind, rule: &str, _text: &str) -> Words {
+    // Unknown error text can include bytes originating in a seed, key, scan,
+    // or request. Keep it in KeyError for diagnostics, but never put it on a
+    // person's screen without a source-specific sanitization rule.
+    let detail = rule.to_string();
     let (heading, what) = match kind {
         Kind::Refused => (
             "This app refused the call",
@@ -1101,7 +1140,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use openbmt_approver::{DecideError, FinishError, RefuseSession, RestoreError, StateError};
-    use openbmt_core::say::{check, check_distinct, MAX_DETAIL};
+    use openbmt_core::say::{check, check_distinct};
     use openbmt_signer::RegisterError;
 
     use super::*;
@@ -1326,8 +1365,48 @@ mod tests {
             let w = words_for(kind, "no-such-rule", &"x".repeat(70_000));
             assert_eq!(check(&w), Ok(()), "{kind:?}");
             assert_eq!(w.who, Who::KeyHolder);
-            assert!(w.detail.is_some_and(|d| d.chars().count() <= MAX_DETAIL));
+            assert_eq!(w.detail.as_deref(), Some("no-such-rule"));
+            assert!(!w.detail.as_deref().unwrap().contains("x"));
         }
+    }
+
+    #[test]
+    fn seed_and_foreign_input_diagnostics_are_not_screen_details() {
+        for (kind, rule, text) in [
+            (Kind::Refused, "words-count", "words contain secret-seed"),
+            (Kind::Refused, "words-unknown", "secret-seed is not a word"),
+            (Kind::Refused, "words-checksum", "secret-seed does not fit"),
+            (Kind::Refused, "entropy", "secret-seed is not a die face"),
+            (Kind::Refused, "xpub", "secret-key-material"),
+            (Kind::Refused, "owner", "secret-owner-material"),
+            (Kind::Refused, "wallet", "secret-wallet-material"),
+            (Kind::Refused, "unknown-rule", "secret-wallet-material"),
+        ] {
+            let words = words_for(kind, rule, text);
+            assert!(
+                !words.detail.as_deref().unwrap_or("").contains("secret"),
+                "{rule}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_word_shows_only_a_checked_position_in_details() {
+        let valid = words_for(
+            Kind::Refused,
+            "words-unknown",
+            "word 5 is not on the word list; check how it is spelled",
+        );
+        assert_eq!(valid.detail.as_deref(), Some("word position 5"));
+
+        let unexpected = words_for(
+            Kind::Refused,
+            "words-unknown",
+            "word 5 is not on the word list; check how it is spelled: secret-seed",
+        );
+        assert_eq!(unexpected.detail, None);
+        assert!(!unexpected.next.contains("Details"));
+        assert!(!unexpected.what.contains("secret-seed"));
     }
 
     #[test]
@@ -1366,7 +1445,7 @@ mod tests {
         let w = words_for(Kind::Internal, "internal", "caught a panic: x");
         assert!(w.what.contains("nothing was sent"), "{}", w.what);
         assert!(!w.what.starts_with("Nothing was signed"));
-        assert_eq!(w.detail.as_deref(), Some("x"));
+        assert_eq!(w.detail, None);
     }
 
     #[test]
@@ -1475,10 +1554,8 @@ mod tests {
         );
         let b = words_for(Kind::Refused, "wallet", "descriptor has no checksum");
         assert_ne!(a.heading, b.heading);
-        assert_eq!(
-            a.detail.as_deref(),
-            Some("descriptor checksum does not match")
-        );
+        assert_eq!(a.detail, None);
+        assert_eq!(b.detail, None);
     }
 
     #[test]

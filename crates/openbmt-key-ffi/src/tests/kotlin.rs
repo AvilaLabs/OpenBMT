@@ -1,6 +1,6 @@
-//! The hand-written Kotlin, which cannot be compiled here: its op numbers and
-//! tag bytes are compared with the Rust tables, so that at least the numbers
-//! it sends are the ones the library reads.
+//! Source-level checks that keep the hand-written Kotlin constants and frame
+//! field order aligned with Rust. The JVM decoder behavior is exercised by
+//! `bindings/tests/ProtocolDecoderTest.kt`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -123,6 +123,17 @@ fn the_kotlin_words_read_the_fields_in_the_order_the_frame_writes_them() {
         .collect();
     assert!(positions.windows(2).all(|w| w[0] < w[1]), "{positions:?}");
     assert!(text.contains("throw KeyException(rule, text, status, words)"));
+}
+
+#[test]
+fn the_kotlin_error_reader_rejects_undefined_status_tags_and_utf8() {
+    let text = kotlin("KeyApp.kt");
+    assert!(text.contains("fun status(): Int = u8().also { if (it !in 0..4)"));
+    assert!(text.contains("it !in 0..3) bad(\"a tone is not 0 to 3\")"));
+    assert!(text.contains("it !in 0..6) bad(\"a person is not 0 to 6\")"));
+    assert!(text.contains("onMalformedInput(CodingErrorAction.REPORT)"));
+    assert!(text.contains("onUnmappableCharacter(CodingErrorAction.REPORT)"));
+    assert!(text.contains("catch (_: CharacterCodingException)"));
 }
 
 #[test]

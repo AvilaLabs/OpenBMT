@@ -633,7 +633,15 @@ pub fn error_response(e: &KeyError) -> Vec<u8> {
     out.push(VERSION);
     out.push(status);
     put_str16(&mut out, e.rule());
-    put_str16(&mut out, e.text());
+    // Panic payloads are arbitrary program data and may contain secrets.
+    // Do not copy one into the response frame sent to the platform app.
+    let text = if matches!(e, KeyError::Internal { text, .. } if text.starts_with("caught a panic: "))
+    {
+        "caught a panic: [redacted]"
+    } else {
+        e.text()
+    };
+    put_str16(&mut out, text);
     put_words(&mut out, &e.words());
     out
 }
