@@ -51,8 +51,8 @@ merchant types it into the Box.
   with:
 
   ```text
-  claim: "OBMF" | 1 | box key (32) | box nonce (32) | mac (32)
-  mac = HMAC-SHA256(k_claim, "OBMF" | 1 | box key | box nonce)
+  claim: "OBM5" | 1 | box key (32) | box nonce (32) | mac (32)
+  mac = HMAC-SHA256(k_claim, "OBM5" | 1 | box key | box nonce)
   ```
 
   The keys come from the invitation by HKDF-SHA256 with the salt
