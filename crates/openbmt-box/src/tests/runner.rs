@@ -633,3 +633,244 @@ fn bx_50_the_files_of_a_running_box_are_private() {
     }
     let _ = Settings::defaults(1);
 }
+
+// ---- section 4: the POS on the running Box ----
+
+use super::pos_kit::{draft, notice, order, page, pos_settings, TestConnector};
+use crate::pos::{PosSetup, Reading};
+use crate::runner::PosView;
+use openbmt_pos::{NoticeState, PosNotice};
+
+fn start_pos(dir: &TempDir, clock: &Arc<TestClock>, conn: &TestConnector) -> BoxRunner {
+    BoxRunner::start_with(
+        dir.path(),
+        "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
+        Arc::clone(clock) as Arc<dyn Clock + Send + Sync>,
+        ServerConfig::default(),
+        Some(PosSetup::new(pos_settings(), Box::new(conn.clone()))),
+    )
+    .unwrap()
+}
+
+fn reading(r: &BoxRunner) -> Option<Reading> {
+    match r.pos_view() {
+        PosView::State(s) => Some(s.reading),
+        _ => None,
+    }
+}
+
+/// A counter's paid notice, sealed to the Box and put on its relay.
+fn put_notice(r: &BoxRunner, by: &Identity, link_number: u64, notice_bytes: &[u8]) {
+    let m = sealed_to(
+        by,
+        Role::Counter,
+        &r.device_id(),
+        Role::Box,
+        link_number,
+        Kind::PaidNotice,
+        notice_bytes,
+    );
+    // The Box makes its own mailbox when it starts reading.
+    eventually("the Box has a mailbox", || connect(r).put(&m).is_ok());
+}
+
+/// The POS notices the owner has been sent, opened and checked.
+fn owner_reports(r: &BoxRunner) -> Vec<PosNotice> {
+    let got = connect(r).fetch(&owner(), 0).unwrap();
+    let box_key = r.device_id();
+    got.items
+        .iter()
+        .map(|(_, bytes)| {
+            let opened = open(
+                &owner(),
+                Role::Owner,
+                bytes,
+                |d| (*d == box_key).then_some(Role::Box),
+                |_| 0,
+            )
+            .unwrap();
+            assert_eq!(opened.kind, Kind::PosNotice);
+            let n = PosNotice::from_bytes(&opened.content).unwrap();
+            assert!(n.verify() && n.from == box_key);
+            n
+        })
+        .collect()
+}
+
+#[test]
+fn bx_40_paid_notices_through_the_relay_are_matched_and_the_owner_is_told() {
+    let dir = TempDir::new("posflow");
+    let clock = TestClock::new(NOW);
+    let conn = TestConnector::default();
+    let r = start_pos(&dir, &clock, &conn);
+    pair_ok(&r);
+    mailbox(&r, &owner()).unwrap();
+    r.store_pos_token("sk_test_token").unwrap();
+    eventually("the first reading", || !conn.probe().polls.is_empty());
+    assert!(conn
+        .probe()
+        .tokens
+        .contains(&Some("sk_test_token".to_string())));
+    // The next reading, set off by the notices, finds the order.
+    conn.probe()
+        .pages
+        .push_back(Ok(page(vec![order("o1", 1250, NOW)])));
+    put_notice(
+        &r,
+        &counter1(),
+        1,
+        &notice(&counter1(), 1, &draft(1, NoticeState::Opened, NOW, 1250)).to_bytes(),
+    );
+    put_notice(
+        &r,
+        &counter1(),
+        2,
+        &notice(&counter1(), 2, &draft(1, NoticeState::Paid, NOW, 1250)).to_bytes(),
+    );
+    eventually("the owner is told of the match", || {
+        owner_reports(&r)
+            .iter()
+            .any(|n| n.text().contains("matches sale 1"))
+    });
+    assert_eq!(reading(&r), Some(Reading::Reading));
+}
+
+#[test]
+fn bx_40_a_notice_from_a_key_that_is_not_a_counter_never_reaches_the_pos() {
+    let dir = TempDir::new("posstranger");
+    let clock = TestClock::new(NOW);
+    let conn = TestConnector::default();
+    let r = start_pos(&dir, &clock, &conn);
+    pair_ok(&r);
+    r.store_pos_token("sk_test_token").unwrap();
+    // A key outside the list: the relay refuses it before the Box sees it.
+    let m = sealed_to(
+        &stranger(),
+        Role::Counter,
+        &r.device_id(),
+        Role::Box,
+        1,
+        Kind::PaidNotice,
+        &notice(&stranger(), 1, &draft(1, NoticeState::Paid, NOW, 500)).to_bytes(),
+    );
+    assert_eq!(
+        refused(connect(&r).put(&m).unwrap_err()),
+        Refusal::SenderNotMember
+    );
+    // The owner's key cannot seal a paid notice at all (LK-08), and a counter
+    // cannot seal a POS notice to the owner or to the Box.
+    let as_owner = seal(
+        &owner(),
+        Role::Owner,
+        &r.device_id(),
+        Role::Box,
+        1,
+        Kind::PaidNotice,
+        &[0; 141],
+        &mut rng,
+    );
+    assert!(as_owner.is_err());
+    for to in [
+        (owner().device_id(), Role::Owner),
+        (r.device_id(), Role::Box),
+    ] {
+        let pos_notice = seal(
+            &counter1(),
+            Role::Counter,
+            &to.0,
+            to.1,
+            1,
+            Kind::PosNotice,
+            b"x",
+            &mut rng,
+        );
+        assert!(pos_notice.is_err());
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    match r.pos_view() {
+        PosView::State(s) => assert_eq!((s.sales, s.notices_taken), (0, 0)),
+        other => panic!("{other}"),
+    }
+}
+
+#[test]
+fn bx_40_a_box_with_no_pos_drops_the_paid_notices_and_says_so() {
+    let dir = TempDir::new("posnone");
+    let (r, _) = start(&dir);
+    pair_ok(&r);
+    assert_eq!(r.pos_view(), PosView::NotInstalled);
+    put_notice(
+        &r,
+        &counter1(),
+        1,
+        &notice(&counter1(), 1, &draft(1, NoticeState::Paid, NOW, 500)).to_bytes(),
+    );
+    eventually("the notice is dropped with a note", || {
+        r.notes()
+            .iter()
+            .any(|n| n.contains("no POS") && n.contains("dropped"))
+    });
+}
+
+#[test]
+fn bx_41_a_token_file_others_can_read_is_refused_and_the_relay_runs_on() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("postokenmode");
+    let clock = TestClock::new(NOW);
+    let conn = TestConnector::default();
+    let r = start_pos(&dir, &clock, &conn);
+    pair_ok(&r);
+    let path = dir.path().join(POS_TOKEN_FILE);
+    std::fs::write(&path, b"sk_test_token").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    eventually(
+        "the token is refused by name",
+        || matches!(reading(&r), Some(Reading::TokenRefused(why)) if why.contains("0644")),
+    );
+    // The relay keeps working, and the connector was given nothing.
+    mailbox(&r, &counter1()).unwrap();
+    assert!(conn.probe().polls.is_empty());
+    assert!(!conn.probe().tokens.iter().any(Option::is_some));
+    // At 0600 the POS is read.
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    eventually("the POS is read", || reading(&r) == Some(Reading::Reading));
+}
+
+#[test]
+fn bx_41_an_unpaired_box_runs_no_pos_and_gives_the_connector_no_token() {
+    let dir = TempDir::new("posunpaired");
+    let clock = TestClock::new(NOW);
+    let conn = TestConnector::default();
+    let r = start_pos(&dir, &clock, &conn);
+    std::fs::write(dir.path().join(POS_TOKEN_FILE), b"sk_test_token").unwrap();
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(reading(&r), Some(Reading::Stopped));
+    assert!(conn.probe().polls.is_empty());
+    assert!(!conn.probe().tokens.iter().any(Option::is_some));
+    assert_eq!(
+        r.store_pos_token("sk_test_token").unwrap_err(),
+        BoxError::NotPaired
+    );
+}
+
+#[test]
+fn bx_41_settings_that_drop_the_box_stop_the_pos_and_erase_the_token() {
+    let dir = TempDir::new("posoff");
+    let clock = TestClock::new(NOW);
+    let conn = TestConnector::default();
+    let r = start_pos(&dir, &clock, &conn);
+    pair_ok(&r);
+    r.store_pos_token("sk_test_token").unwrap();
+    eventually("the POS is read", || reading(&r) == Some(Reading::Reading));
+    mailbox(&r, &counter1()).unwrap();
+    let mut s = settings_with(2, &r.device_id());
+    s.devices.remove(&r.device_id());
+    s.boxes.clear();
+    send_settings(&r, 1, &sign_owner(s));
+    eventually("the Box is off", || r.status() == BoxStatus::TurnedOff);
+    eventually("the POS has stopped", || {
+        reading(&r) == Some(Reading::Stopped)
+    });
+    assert!(!dir.path().join(POS_TOKEN_FILE).exists());
+    assert_eq!(conn.probe().tokens.last(), Some(&None));
+}
