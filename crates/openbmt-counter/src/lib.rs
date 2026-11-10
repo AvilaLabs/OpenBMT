@@ -52,8 +52,8 @@ pub mod store;
 mod tests;
 
 pub use counter::{
-    sale_payment_id, Actor, BlockEffect, BlockTaken, Counter, Facts, OpenFacts, Opened, Pairing,
-    Sightings, Stored,
+    sale_payment_id, Actor, BlockEffect, BlockTaken, Counter, Facts, OpenFacts, Opened, Overridden,
+    Pairing, Sightings, Stored,
 };
 pub use desk::{Desk, OverrideEntry, Role};
 pub use events::Event;

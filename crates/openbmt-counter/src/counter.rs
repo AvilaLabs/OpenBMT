@@ -144,6 +144,17 @@ pub struct BlockTaken {
     pub reports: Vec<Report>,
 }
 
+/// What an override did (see [`Counter::override_sale`]).
+#[derive(Debug)]
+pub struct Overridden<E> {
+    /// What the POS and the books must be told. The sale is judged before
+    /// the override is tried, and what that judging reports is reported
+    /// once: it is here whether or not the override was then refused.
+    pub reports: Vec<Report>,
+    /// Whether the override was made.
+    pub result: Result<(), OverrideRefused<E>>,
+}
+
 /// CR-13: the id of a sale in the exposure ledger: the word `sale`, the
 /// index (u32 LE) and zeros. It is under the sale, not under a transaction,
 /// because a fee bump changes the transaction.
@@ -793,8 +804,13 @@ impl Counter {
                 },
             ));
         }
-        let archived: Vec<(ScriptBuf, u32)> =
-            self.archived.iter().map(|(s, i)| (s.clone(), *i)).collect();
+        // One pass over the block's outputs finds the archived scripts it
+        // pays; the watcher's check is then asked about those alone.
+        let archived: BTreeMap<ScriptBuf, u32> = block
+            .output_scripts()
+            .filter_map(|s| self.archived.get_key_value(s))
+            .map(|(s, i)| (s.clone(), *i))
+            .collect();
         for (script, index) in archived {
             let Ok(list) = block.payments(headers, &script) else {
                 continue;
@@ -1312,16 +1328,29 @@ impl Counter {
         actor: Actor,
         facts: &Facts<'_, C>,
         store: &mut S,
-    ) -> Result<Vec<Report>, OverrideRefused<S::Error>> {
+    ) -> Overridden<S::Error> {
+        let mut reports = Vec::new();
+        let result = self.override_inner(index, actor, facts, store, &mut reports);
+        Overridden { reports, result }
+    }
+
+    fn override_inner<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        actor: Actor,
+        facts: &Facts<'_, C>,
+        store: &mut S,
+        reports: &mut Vec<Report>,
+    ) -> Result<(), OverrideRefused<S::Error>> {
         if !valid_name(&actor.name) {
             return Err(OverrideRefused::BadName);
         }
-        let screen = match self.judge(index, facts, store) {
+        let mut screen = match self.judge(index, facts, store) {
             Ok(screen) => screen,
             Err(JudgeError::UnknownSale(i)) => return Err(OverrideRefused::UnknownSale(i)),
             Err(e) => return Err(OverrideRefused::Judge(e)),
         };
-        let mut reports = screen.reports;
+        reports.append(&mut screen.reports);
         if !matches!(
             screen.state,
             State::Waiting | State::PartPaid | State::DoNotHandOver
@@ -1413,13 +1442,14 @@ impl Counter {
         });
         sale.exposure_counted = true;
         sale.exposure_released = false;
-        if sale.pos != PosState::Paid {
-            sale.pos = PosState::Paid;
-            reports.push(Report::PosPaid { index });
-        }
+        let tell_pos = sale.pos != PosState::Paid;
+        sale.pos = PosState::Paid;
         self.finish(store, sale, &[event])
             .map_err(OverrideRefused::Store)?;
-        Ok(reports)
+        if tell_pos {
+            reports.push(Report::PosPaid { index });
+        }
+        Ok(())
     }
 
     // CR-14: the owner's commands.

@@ -62,6 +62,18 @@ impl WellFormedBlock {
         self.hash
     }
 
+    /// The script of every output after the coinbase, in block order. This
+    /// proves nothing: it is for finding which of many scripts are worth
+    /// asking [`WellFormedBlock::payments`] about.
+    pub fn output_scripts(&self) -> impl Iterator<Item = &Script> {
+        self.block
+            .txdata
+            .iter()
+            .skip(1)
+            .flat_map(|tx| tx.output.iter())
+            .map(|o| o.script_pubkey.as_script())
+    }
+
     /// WR-30, WR-22, WR-01: every transaction after the coinbase that pays
     /// `script` more than zero, in block order. An empty list is not an
     /// error (WR-23); it proves nothing.

@@ -353,3 +353,27 @@ fn cr_22_an_overridden_sale_goes_red_again_only_for_a_new_cause() {
         .contains(&Report::PosUnpaid { index: o.index }));
     assert!(w.c.alarm());
 }
+
+#[test]
+fn cr_32_what_judging_reports_is_not_lost_when_the_override_is_refused() {
+    let mut w = World::new();
+    let o = w.open_five();
+    // Dust arrives. Nobody has asked for the screen yet, so the dust is
+    // reported by the judging that the override does first.
+    let tx = w.pay(&o, 999);
+    w.see(&tx, 3);
+    let refused = w.override_sale(o.index, Role::Manager, "Ana");
+    assert!(
+        matches!(refused, Err(crate::OverrideRefused::WrongState(_))),
+        "{refused:?}"
+    );
+    assert_eq!(
+        w.override_reports,
+        vec![Report::Dust {
+            index: o.index,
+            sats: 999
+        }]
+    );
+    // Reported once: the next look at the sale does not repeat it.
+    assert!(w.judge(o.index).reports.is_empty());
+}

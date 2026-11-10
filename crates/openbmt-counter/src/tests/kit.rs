@@ -338,6 +338,8 @@ pub struct World {
     pub now: u64,
     pub health: Health,
     pub remote_order: bool,
+    /// What the last override reported, made or refused.
+    pub override_reports: Vec<Report>,
     next_coin: u8,
     next_block: u32,
 }
@@ -360,6 +362,7 @@ impl World {
             now: T0,
             health: healthy(),
             remote_order: false,
+            override_reports: Vec::new(),
             next_coin: 1,
             next_block: 1,
         }
@@ -413,7 +416,7 @@ impl World {
             remote_order: self.remote_order,
             now: self.now,
         };
-        self.c.override_sale(
+        let done = self.c.override_sale(
             index,
             Actor {
                 role,
@@ -421,7 +424,9 @@ impl World {
             },
             &facts,
             &mut self.m,
-        )
+        );
+        self.override_reports = done.reports.clone();
+        done.result.map(|()| done.reports)
     }
 
     /// A transaction paying the sale `sats`, spending a coin of its own.
