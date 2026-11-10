@@ -1,7 +1,8 @@
 # Fuzz targets
 
-Fuzz targets for the decoders and parsers in `openbmt-core` and for the Key
-app's signer (`openbmt-signer`), built with
+Fuzz targets for the decoders and parsers in `openbmt-core`, for the Key
+app's signer (`openbmt-signer`) and for the payment watcher
+(`openbmt-watch`), built with
 [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz). This directory is its
 own cargo project and is not a member of the main workspace, so
 `cargo test --workspace` at the repository root does not touch it.
@@ -21,6 +22,8 @@ exactly the input bytes.
 | `pause_tracker_decode` | `PauseTracker::from_bytes` |
 | `signer_state_decode` | `SignerState::from_bytes` with a fixed network and key, on the input as it is and on the input placed after the wallet text of a valid snapshot (so that it gets past the header); on success the state must encode back to exactly those bytes |
 | `signer_review` | `SignerState::review` on a fixed registered state with arbitrary bytes as the PSBT file; it must never panic. A file that passes is signed on a copy of the state: the stored bytes must be the new state and read back unchanged, no total may go down, and the returned file must be reported as already signed. Seed files that pass every rule come from the `fuzz_seeds` example (below) |
+| `watch_box_proof` | `verify_box_proof` with a chain that knows every block, so that only the proof checks can refuse; the input is split into a proof, a coinbase and a payment by two 16-bit lengths at its start. It must never panic; a proof that passes must prove a non-coinbase transaction that is not 64 bytes long without its witness |
+| `watch_block` | `payments_in_block` with a chain that knows every block; the first byte gives the length (modulo 40) of the shop's script, the rest is the block. It must never panic; every payment returned must be after the coinbase, in block order, pay the script and not be 64 bytes long without its witness |
 | `pair_offer_decode` | `PairOffer::from_bytes` |
 | `pair_request_decode` | `PairRequest::from_bytes` |
 | `signed_pairing_decode` | `SignedPairing::from_bytes` |

@@ -13,6 +13,7 @@ libfuzzer-sys = "0.4"
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 openbmt-core = { path = "../crates/openbmt-core" }
 openbmt-signer = { path = "../crates/openbmt-signer" }
+openbmt-watch = { path = "../crates/openbmt-watch" }
 
 # Not a member of the main workspace.
 [workspace]
@@ -104,6 +105,20 @@ bench = false
 [[bin]]
 name = "signed_pairing_decode"
 path = "fuzz_targets/signed_pairing_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "watch_box_proof"
+path = "fuzz_targets/watch_box_proof.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "watch_block"
+path = "fuzz_targets/watch_block.rs"
 test = false
 doc = false
 bench = false
