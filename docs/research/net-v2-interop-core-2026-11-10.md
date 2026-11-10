@@ -48,6 +48,7 @@ in both settings, in two full runs.
 | 6. Compact filter matches / does not match | PASS | PASS |
 | 7. Full block proves the payment | PASS | PASS |
 | 8. Silence after the handshake, 15 s | PASS, 0 bytes | PASS, 0 bytes |
+| 8b. Message types arriving over the transport (below) | PASS, over `v2` | PASS, over `v1` |
 | 9. A port that is not a peer (RPC port) | PASS, `dropped NR-14` after 30 s | PASS, same |
 
 Step 2b, from the first run with `-v2transport=1` (the IDs change on every
@@ -110,17 +111,98 @@ with one refusal in each run).
 | Driver tests on loopback | `crates/openbmt-net-io/src/tests/v2.rs`: a fake encrypted peer, a peer that closes on the key, a peer that answers with a v1 `version`, endless garbage, a SOCKS5 proxy, and a randomness source that may be guessed. |
 | Core | The two tables above. |
 
+## Message types over v2 (step 8b)
+
+Step 8b of `net-interop-core.sh` runs one session (`regtest_peer mix`) over
+the transport under test while the script pings the node, pays an address
+of the node's wallet, and keeps the payment unconfirmed until the node has
+announced it. The session asks for addresses, the block's compact filter
+and the block. Two things are compared. The session counts what it read
+(the events `Headers`, `Announced`, `Tx`, `Block`, `Filter`, `Addresses`),
+and the node's `getpeerinfo` lists, by message name, the bytes the node sent
+on that connection (`bytessent_per_msg`) and received (`bytesrecv_per_msg`).
+Over `-v2transport=1` the node reported the connection as `v2`, and every
+one of these was seen by both sides:
+
+| Message (ID) | Direction | Node's bytes sent | Session saw |
+| --- | --- | --- | --- |
+| headers (13) | node to counter | 170,713 | 2 messages |
+| inv (14) | node to counter | 58 | 1 |
+| tx (21) | node to counter | 243 | 1 |
+| block (2) | node to counter | 492 | 1 |
+| cfilter (23) | node to counter | 64 | 1 |
+| addrv2 (28) | node to counter | 191 | 1 |
+| ping (18) | node to counter | 58 | answered with 1 pong (19) |
+
+The node read our `pong` (19) under its name (`bytesrecv_per_msg`), and it
+answered our `getheaders` (12), `getdata` (11) and `getcfilters` (22) with
+headers, the block and the filter, so it read those IDs the way we wrote
+them. `getaddr`, `version`, `verack`, `sendaddrv2` and `sendheaders`
+go in the long form (ID 0 and 12 bytes of command), which the node read as
+well. The same step passes over `-v2transport=0` with the old transport, so
+the counts do not depend on the transport.
+
+The first run of this step failed in the script, not the code: a block mined
+right after the payment confirmed it before the node's trickle announced it
+(no `inv`), and four addresses in the node's book are too few for a
+`getaddr` answer (the node gives at most 23 percent of its book, rounded
+down). The script now waits for the announcement and adds 60 addresses.
+
+**Proved by Core:** 2 block, 11 getdata, 12 getheaders, 13 headers, 14 inv,
+18 ping, 19 pong, 21 tx, 22 getcfilters, 23 cfilter, 28 addrv2.
+
+**Not seen in the run, covered only by the table test** (`tests/v2.rs`,
+`nr_80_the_table_of_one_byte_ids_is_the_one_of_bip324_by_name_and_number`,
+which writes the BIP's list by number and name and compares it with the
+table in both directions, and checks that nothing else has a short ID): 1
+addr, 3 blocktxn, 4 cmpctblock, 6 filteradd, 7 filterclear, 8 filterload,
+9 getblocks, 10 getblocktxn, 15 mempool, 16 merkleblock, 17 notfound, 24
+getcfheaders, 25 cfheaders, 26 getcfcheckpt, 27 cfcheckpt. `sendcmpct` (20)
+and `feefilter` (5) are sent by the node after the handshake and the session
+kept the connection open over them, but the session ignores their content,
+so they are counted as not proven by name. `cfheaders` (25) is not asked
+for: the code has no `getcfheaders` request, so the node never sends one.
+
+## Fuzzing
+
+The target `net_v2_bytes` (`fuzz/fuzz_targets/net_v2_bytes.rs`) ran for 300
+seconds under `cargo +nightly fuzz run` with `-max_len=65536`: 224,211 runs,
+no crash and no failed assertion, coverage 1,621 edges, a corpus of 482
+inputs. That is a short run.
+
+## Mainnet, through the observer
+
+`observe` (release build, no proxy) ran twice on mainnet in a fresh data
+directory: 240 seconds with `headers-only`, then 600 seconds normal, from
+the headers of the first run. The observer now counts the distinct peers
+that were ready on each transport, the noted refusals and the drops by rule;
+no addresses are printed here.
+
+| | Run 1, headers only, 240 s | Run 2, normal, 600 s |
+| --- | --- | --- |
+| Start tip, final tip | 967,680 to 975,315 | 975,315 to 975,317 |
+| Distinct peers ready on v2 | 10 | 12 |
+| Distinct peers ready on v1 | 0 | 2 |
+| Refusals noted (NR-81 fallback to v1) | 0 | 2 |
+| Drops by NR-81 or NR-83 | 0 | 0 |
+| Other drops | 2, both NR-14 (handshake timeout) | 0 |
+| Most ready peers at once | 8 | 8 |
+| Two filter peers in different groups | 1.1 s | 0.7 s |
+| Blocks fetched in full | 0 | 0 |
+| Sightings | 897 | 2,825 |
+
+Both runs ended with the saved headers at the final tip, and the driver
+stopped at once. The filters and the 0 blocks match the earlier observer
+note: nothing pays the watched script, so filters are compared and no
+block is fetched. The two NR-14 drops of the first run are peers that did
+not finish the handshake in 30 seconds; the events do not say which
+transport they were on, so they are not counted for or against v2. The two
+refusals of the second run match the two peers that were ready on v1.
+
 ## What is not covered
 
 - Only Bitcoin Core 32.1 was tried. Other implementations of BIP324 were
-  not. The table of short message IDs in `v2.rs` was written from memory of
-  the specification, not copied from a file, and Core is its only check.
-  Core accepted every message the session sent in these steps (`version`,
-  `verack`, `sendaddrv2`, `sendheaders`, `getheaders`, `getdata`,
-  `getcfilters`, `pong`) and the session accepted every message it got, so
-  an error in the entries those use would have shown. An entry that no step
-  sends or receives (for example `cfheaders` or `merkleblock`) is not
-  proven by this run.
+  not. See the next section for which short IDs Core proved.
 - No decoy packet and no garbage from Core was seen in these runs. Both
   are covered by the unit tests only.
 - Rekeying (every 224 messages) was not reached with Core. The unit tests

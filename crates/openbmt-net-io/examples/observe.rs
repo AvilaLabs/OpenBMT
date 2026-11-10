@@ -151,8 +151,8 @@ fn run(args: &[String]) -> Result<(), String> {
     // NR-81, NR-82: the distinct peers that were ready on each transport,
     // the refusals the driver noted, and the drops by rule. Only counts
     // are printed, never addresses.
-    let mut seen_v2: BTreeSet<openbmt_watch::PeerAddr> = BTreeSet::new();
-    let mut seen_v1: BTreeSet<openbmt_watch::PeerAddr> = BTreeSet::new();
+    let mut seen_v2: BTreeSet<String> = BTreeSet::new();
+    let mut seen_v1: BTreeSet<String> = BTreeSet::new();
     let mut v2_refusals = 0u64;
     let mut drops: BTreeMap<String, u64> = BTreeMap::new();
 
@@ -182,8 +182,8 @@ fn run(args: &[String]) -> Result<(), String> {
                     .collect();
                 for p in &peers {
                     match p.transport {
-                        PeerTransport::V2 => seen_v2.insert(p.addr.clone()),
-                        PeerTransport::V1 => seen_v1.insert(p.addr.clone()),
+                        PeerTransport::V2 => seen_v2.insert(format!("{:?}", p.addr)),
+                        PeerTransport::V1 => seen_v1.insert(format!("{:?}", p.addr)),
                     };
                 }
                 if ready > 0 && first_ready.is_none() {
