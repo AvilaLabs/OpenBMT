@@ -57,7 +57,7 @@ sets. The full statement, its conditions and the reasoning are in
 | [crates/openbmt-core/](crates/openbmt-core/) | The rules every device must agree on: wallet description, device identity, address batches, signed records, signed settings, instant-acceptance policy |
 | [crates/openbmt-signer/](crates/openbmt-signer/) | The Key app's transaction signer: the rules under which key 2 signs |
 | [crates/openbmt-watch/](crates/openbmt-watch/) | The counter's payment watcher: merkle proofs, full blocks, peer groups, conflicts, health |
-| [crates/openbmt-net/](crates/openbmt-net/) | The counter's Bitcoin peer client, first slice: wire framing and the single-peer session, with no sockets and no clock |
+| [crates/openbmt-net/](crates/openbmt-net/) | The counter's Bitcoin peer client: wire framing, the single-peer session and the manager that runs several peers, checks blocks by filters and fetches announced transactions, with no sockets and no clock |
 | [scripts/](scripts/) | Checks against Bitcoin Core on regtest: the restore drill, the signer reading and returning Core's transaction files, and the peer session fetching headers, filters, blocks and transactions from a Core node |
 
 Planned next: the light-client adapter for the watcher, then the apps.

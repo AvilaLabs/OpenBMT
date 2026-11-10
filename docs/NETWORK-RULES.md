@@ -91,7 +91,8 @@ thin driver that owns the sockets.
 - **NR-25.** A peer is dropped and not dialed again for 24 hours when it
   breaks a rule of sections 1 or 2, sends a header that WR-05 refuses
   (other than for an unknown parent), sends a block that WR-20 or WR-21
-  refuses, or sends a filter that is proven false (NR-43).
+  refuses, sends a filter that is proven false (NR-43), or sends a block,
+  transaction or filter that was not asked of it.
 - **NR-26.** With Tor on, every connection goes through the SOCKS5 proxy
   the caller names, and no DNS seed is asked directly. Peers reached by
   IP address through Tor are grouped by that address like any other.

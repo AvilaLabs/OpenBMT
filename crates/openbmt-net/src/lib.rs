@@ -1,5 +1,5 @@
-//! The OpenBMT counter's Bitcoin peer client: the wire framing and the
-//! single-peer session.
+//! The OpenBMT counter's Bitcoin peer client: the wire framing, the
+//! single-peer session and the manager of many peers.
 //!
 //! The rules are in `docs/NETWORK-RULES.md`; each has an ID (NR-01 and on),
 //! and the code, the drops and the tests name the rule they belong to.
@@ -17,6 +17,10 @@
 //! 3. [`session`]: [`Session`], one peer from the first `version` to the
 //!    last byte: the handshake, the timers, and the [`Event`]s a good peer
 //!    produces.
+//! 3. [`manager`]: [`Manager`], which runs several sessions at once, feeds
+//!    the headers to the watcher's header store, checks blocks by filters
+//!    and fetches announced transactions, and turns what peers send into
+//!    [`Output`]s for the watcher.
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.
@@ -26,6 +30,7 @@
 
 pub mod book;
 pub mod frame;
+pub mod manager;
 mod reason;
 pub mod session;
 
@@ -34,6 +39,7 @@ mod tests;
 
 pub use book::{Added, AddressBook, BookError, Picked, Refusal, Source};
 pub use frame::{encode, Command, Frame, FrameReader, Message, PeerAddress};
+pub use manager::{ConnectRefused, Manager, ManagerConfig, Output, PeerId, Wanted};
 pub use reason::Drop;
 pub use session::{Event, Request, Session, SessionConfig};
 

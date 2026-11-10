@@ -1,6 +1,6 @@
 [package]
 name = "openbmt-net"
-description = "The OpenBMT counter's Bitcoin peer client: wire framing and the single-peer session, with no sockets and no clock"
+description = "The OpenBMT counter's Bitcoin peer client: wire framing, the single-peer session and the peer manager, with no sockets and no clock"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -15,4 +15,7 @@ bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 # writes its stored form with the core's framed encoding. The regtest peer
 # example feeds the headers it receives to the watcher's header store.
 openbmt-core = { path = "../openbmt-core" }
+
+# The manager feeds the headers it receives to the watcher's header store
+# and checks the blocks with the watcher's rules.
 openbmt-watch = { path = "../openbmt-watch" }

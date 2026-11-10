@@ -5,5 +5,7 @@ mod book;
 mod events;
 mod frame;
 mod kit;
+mod manager;
+mod manager_kit;
 mod meta;
 mod session;

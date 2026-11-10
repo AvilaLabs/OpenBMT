@@ -153,6 +153,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "net_manager"
+path = "fuzz_targets/net_manager.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "entropy_dice"
 path = "fuzz_targets/entropy_dice.rs"
 test = false
