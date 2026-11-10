@@ -1,8 +1,9 @@
 # Fuzz targets
 
 Fuzz targets for the decoders and parsers in `openbmt-core`, for the Key
-app's signer (`openbmt-signer`), for the spend path (`openbmt-spend`) and
-for the payment watcher (`openbmt-watch`), built with
+app's signer (`openbmt-signer`), for the spend path (`openbmt-spend`), for
+the books export (`openbmt-books`) and for the payment watcher
+(`openbmt-watch`), built with
 [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz). This directory is its
 own cargo project and is not a member of the main workspace, so
 `cargo test --workspace` at the repository root does not touch it.
@@ -37,6 +38,7 @@ exactly the input bytes.
 | `counter_event_decode` | `Event::decode` |
 | `counter_ops` | a real counter driven by a script of operations in the input (open, requote, sighting, block, reorg, time, judge, override, cancel, owner command, restart) against a memory store that fails the writes the input chooses; see the target for the invariants it asserts after every operation |
 | `spend_combine` | `openbmt_spend::combine` and `finalize` against the file of one fixed plan; the input is two "signed" files split at the first byte. It must never panic, and no transaction may come out, because nothing in the input is a signature by a wallet key |
+| `books_export_decode` | `Books::from_bundle` (what is read must encode back to the input) and `decode_export_header` (the header must encode back to the input's prefix); a file whose header asks for tiny Argon2 parameters is also given to `open_export` with a fixed passphrase, and must always be refused without a panic |
 | `wallet_parse` | `WalletDescription::parse` for mainnet and testnet on UTF-8 input; on success, parsing the canonical string again must give the same canonical string |
 
 ## Running
