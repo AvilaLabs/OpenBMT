@@ -14,3 +14,8 @@ openbmt-core = { path = "../openbmt-core" }
 openbmt-counter = { path = "../openbmt-counter" }
 argon2 = { version = "=0.5.3", default-features = false, features = ["alloc", "zeroize"] }
 chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
+
+# The tests drive a real counter, which needs transactions and blocks.
+[dev-dependencies]
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+openbmt-watch = { path = "../openbmt-watch" }
