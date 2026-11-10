@@ -251,6 +251,12 @@ impl Addr {
     }
 }
 
+/// NR-22: whether the book would keep this address as publicly routable.
+/// False for a kind the book does not keep.
+pub fn is_routable(addr: &AddrV2) -> bool {
+    Addr::from_v2(addr).is_some_and(|a| a.classify().is_ok())
+}
+
 /// The group of local and private addresses (WR-41).
 fn local_group() -> NetGroup {
     network_group(&PeerAddr::Ip(IpAddr::V4(Ipv4Addr::LOCALHOST)))

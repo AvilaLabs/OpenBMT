@@ -906,3 +906,28 @@ fn nr_22_every_kind_of_source_group_survives_the_stored_form() {
         assert_eq!(e.source, Source::Peer(g));
     }
 }
+
+#[test]
+fn nr_22_is_routable_agrees_with_what_the_book_keeps() {
+    use crate::book::is_routable;
+    let cases = [
+        v4(8, 8, 8, 8),
+        v4(10, 1, 2, 3),
+        v4(127, 0, 0, 1),
+        v4(0, 0, 0, 0),
+        v4(192, 168, 1, 1),
+        v4(203, 0, 113, 5),
+        v6("::"),
+        v6("::1"),
+        v6("fe80::1"),
+        v6("fc00::1"),
+        v6("2001:db8::1"),
+        v6("2606:4700::1"),
+    ];
+    for addr in cases {
+        let mut book = AddressBook::new();
+        let kept = add(&mut book, &addr, Source::Seed) == Added::New;
+        assert_eq!(is_routable(&addr), kept, "{addr:?}");
+    }
+    assert!(!is_routable(&AddrV2::Cjdns(Ipv6Addr::from([0xfc; 16]))));
+}
