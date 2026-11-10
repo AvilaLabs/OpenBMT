@@ -1,20 +1,20 @@
-//! Ties the rules to the tests: every rule of sections 1, 2, 3 and 5 of
-//! `docs/BOX-RULES.md` has a test named for it, or an entry in `NOT_HERE`
-//! that says why not. The rules of section 4 (the POS on the Box) are not in
-//! this crate yet and are listed in `NOT_YET`.
+//! Ties the rules to the tests: every rule of `docs/BOX-RULES.md` has a test
+//! named for it, or an entry in `NOT_HERE` that says why not.
 
 use std::collections::BTreeSet;
 
 const RULES: &str = include_str!("../../../../docs/BOX-RULES.md");
-const ERRORS: [&str; 3] = [
+const ERRORS: [&str; 4] = [
     include_str!("../state.rs"),
     include_str!("../runner.rs"),
     include_str!("../files.rs"),
+    include_str!("../pos.rs"),
 ];
-const TEST_SOURCES: [&str; 2] = [include_str!("state.rs"), include_str!("runner.rs")];
-
-/// Rules of section 4: the POS on the Box. Not in this crate yet.
-const NOT_YET: [&str; 4] = ["BX-40", "BX-41", "BX-42", "BX-43"];
+const TEST_SOURCES: [&str; 3] = [
+    include_str!("state.rs"),
+    include_str!("runner.rs"),
+    include_str!("pos.rs"),
+];
 
 /// Rules this crate does not test, each with the reason.
 const NOT_HERE: [(&str, &str); 1] = [(
@@ -34,24 +34,17 @@ fn all_rules() -> BTreeSet<String> {
 
 fn defined() -> BTreeSet<String> {
     all_rules()
-        .into_iter()
-        .filter(|id| !NOT_YET.contains(&id.as_str()))
-        .collect()
 }
 
 #[test]
-fn the_rules_file_defines_nineteen_rules_and_four_are_not_here_yet() {
+fn the_rules_file_defines_twenty_three_rules() {
     let all = all_rules();
     assert_eq!(all.len(), 23);
-    for id in NOT_YET {
-        assert!(all.contains(id), "{id} is not a rule");
-    }
-    assert_eq!(defined().len(), 19);
-    assert!(defined().contains("BX-01") && defined().contains("BX-51"));
+    assert!(all.contains("BX-01") && all.contains("BX-43") && all.contains("BX-51"));
 }
 
 #[test]
-fn the_not_yet_rules_are_exactly_section_four() {
+fn section_four_has_its_four_rules_and_each_has_tests() {
     // Section 4 is the one between its heading and the next.
     let start = RULES.find("## 4.").unwrap();
     let end = RULES.find("## 5.").unwrap();
@@ -60,13 +53,37 @@ fn the_not_yet_rules_are_exactly_section_four() {
         .filter_map(|l| l.strip_prefix("- **BX-"))
         .map(|rest| format!("BX-{}", &rest[..2]))
         .collect();
-    let listed: BTreeSet<String> = NOT_YET.iter().map(|s| s.to_string()).collect();
-    assert_eq!(section, listed);
-    // And no test pretends to prove one of them.
+    let expected: BTreeSet<String> = ["BX-40", "BX-41", "BX-42", "BX-43"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(section, expected);
     let sources: String = TEST_SOURCES.concat();
-    for id in NOT_YET {
+    for id in &expected {
         let prefix = format!("fn bx_{}_", &id[3..]);
-        assert!(!sources.contains(&prefix), "{id} has a test");
+        assert!(
+            sources.matches(&prefix).count() >= 3,
+            "{id} has fewer than three tests"
+        );
+    }
+}
+
+#[test]
+fn the_rules_file_keeps_its_lines_to_eighty_characters() {
+    let mut in_code = false;
+    for (n, line) in RULES.lines().enumerate() {
+        if line.starts_with("```") || line.trim_start().starts_with("```") {
+            in_code = !in_code;
+        }
+        if in_code || line.starts_with('|') {
+            continue;
+        }
+        assert!(
+            line.chars().count() <= 80,
+            "line {} is {} long",
+            n + 1,
+            line.chars().count()
+        );
     }
 }
 

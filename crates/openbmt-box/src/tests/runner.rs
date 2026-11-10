@@ -530,16 +530,16 @@ fn bx_24_a_counter_cannot_send_settings_and_other_kinds_are_not_handled_yet() {
     // A counter's key sealing as if it were the owner: the role the Box gives
     // the key is what counts.
     let from_counter = to_box(&counter1(), Role::Owner, 1, Kind::Settings, &settings);
-    let paid = to_box(&counter1(), Role::Counter, 2, Kind::PaidNotice, b"x");
+    let list = to_box(&owner(), Role::Owner, 1, Kind::DeviceList, b"x");
     eventually("the Box has a mailbox", || {
         connect(&r).put(&from_counter).is_ok()
     });
-    connect(&r).put(&paid).unwrap();
+    connect(&r).put(&list).unwrap();
     eventually("both are noted", || {
         let notes = r.notes();
         notes
             .iter()
-            .any(|n| n.contains("PaidNotice") && n.contains("not handled yet"))
+            .any(|n| n.contains("DeviceList") && n.contains("not handled yet"))
             && notes.iter().any(|n| n.contains("refused"))
     });
     assert_eq!(r.core().lock().unwrap().settings().unwrap().version, 1);

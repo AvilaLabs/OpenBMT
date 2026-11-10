@@ -3,5 +3,7 @@
 
 mod kit;
 mod meta;
+mod pos;
+mod pos_kit;
 mod runner;
 mod state;
