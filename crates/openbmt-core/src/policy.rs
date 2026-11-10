@@ -352,6 +352,34 @@ impl fmt::Display for ExposureError {
 
 impl std::error::Error for ExposureError {}
 
+/// Why an exposure entry was not added: the rules refused it, or the new
+/// ledger could not be stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExposureWriteError<E> {
+    /// The slice is full or the payment is already counted. The ledger is
+    /// unchanged.
+    Refused(ExposureError),
+    /// The caller's store refused the new ledger. The ledger is unchanged.
+    Persist(E),
+}
+
+impl<E: fmt::Display> fmt::Display for ExposureWriteError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(e) => write!(f, "{e}"),
+            Self::Persist(e) => write!(f, "could not store the new exposure: {e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for ExposureWriteError<E> {}
+
+impl<E> From<ExposureError> for ExposureWriteError<E> {
+    fn from(e: ExposureError) -> Self {
+        Self::Refused(e)
+    }
+}
+
 /// What a counter has accepted at once and not yet seen settle. A payment
 /// enters on instant acceptance (or an override) and leaves only at its first
 /// confirmation or by the owner's action. Nothing here knows the time, so
@@ -376,42 +404,55 @@ impl Exposure {
             .fold(0u64, |a, b| a.saturating_add(*b))
     }
 
-    fn add(
+    fn add<E>(
         &mut self,
         id: PaymentId,
         amount: u64,
         slice_limit_sats: u64,
-    ) -> Result<(), ExposureError> {
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), ExposureWriteError<E>> {
         if self.entries.contains_key(&id) {
-            return Err(ExposureError::AlreadyCounted);
+            return Err(ExposureError::AlreadyCounted.into());
         }
         if u128::from(self.outstanding()) + u128::from(amount) > u128::from(slice_limit_sats) {
-            return Err(ExposureError::SliceFull);
+            return Err(ExposureError::SliceFull.into());
         }
-        self.entries.insert(id, amount);
+        let mut next = self.clone();
+        next.entries.insert(id, amount);
+        persist(&next.to_bytes()).map_err(ExposureWriteError::Persist)?;
+        *self = next;
         Ok(())
     }
 
     /// Count a payment accepted as instant (its `max(sale, received)`).
     /// Refused when it would take the total above `slice_limit_sats`.
-    pub fn accept_instant(
+    ///
+    /// The ledger as it will be with the entry is serialized
+    /// ([`Self::to_bytes`]) and given to `persist`; the entry is added only
+    /// if `persist` returns `Ok`. The order matters: an acceptance that was
+    /// not stored first could be forgotten in a crash, and the lost exposure
+    /// would make room for more instant payments than the slice allows.
+    pub fn accept_instant<E>(
         &mut self,
         id: PaymentId,
         amount: u64,
         slice_limit_sats: u64,
-    ) -> Result<(), ExposureError> {
-        self.add(id, amount, slice_limit_sats)
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), ExposureWriteError<E>> {
+        self.add(id, amount, slice_limit_sats, persist)
     }
 
     /// Count a cashier or manager override. Refused when it would take the
-    /// total above `slice_limit_sats`.
-    pub fn add_override(
+    /// total above `slice_limit_sats`. The `persist` rule is the same as for
+    /// [`Self::accept_instant`], for the same reason.
+    pub fn add_override<E>(
         &mut self,
         id: PaymentId,
         amount: u64,
         slice_limit_sats: u64,
-    ) -> Result<(), ExposureError> {
-        self.add(id, amount, slice_limit_sats)
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), ExposureWriteError<E>> {
+        self.add(id, amount, slice_limit_sats, persist)
     }
 
     /// The payment reached its first confirmation. Returns what was released.
@@ -586,9 +627,56 @@ pub fn classify_replacement(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{persist_fail, persist_ok};
     use bitcoin::{Amount, ScriptBuf};
+    use std::convert::Infallible;
 
     const RATE: u64 = 1_000; // sats per dollar, so $10 = 10_000 sats
+
+    /// The ledger's additions with a store that always succeeds, refusals
+    /// flattened to `ExposureError`.
+    trait Quick {
+        fn accept_ok(
+            &mut self,
+            id: PaymentId,
+            amount: u64,
+            limit: u64,
+        ) -> Result<(), ExposureError>;
+        fn override_ok(
+            &mut self,
+            id: PaymentId,
+            amount: u64,
+            limit: u64,
+        ) -> Result<(), ExposureError>;
+    }
+
+    fn flatten(r: Result<(), ExposureWriteError<Infallible>>) -> Result<(), ExposureError> {
+        match r {
+            Ok(()) => Ok(()),
+            Err(ExposureWriteError::Refused(e)) => Err(e),
+            Err(ExposureWriteError::Persist(never)) => match never {},
+        }
+    }
+
+    impl Quick for Exposure {
+        fn accept_ok(
+            &mut self,
+            id: PaymentId,
+            amount: u64,
+            limit: u64,
+        ) -> Result<(), ExposureError> {
+            flatten(self.accept_instant(id, amount, limit, persist_ok))
+        }
+
+        fn override_ok(
+            &mut self,
+            id: PaymentId,
+            amount: u64,
+            limit: u64,
+        ) -> Result<(), ExposureError> {
+            flatten(self.add_override(id, amount, limit, persist_ok))
+        }
+    }
 
     fn policy() -> InstantPolicy {
         InstantPolicy::defaults(RATE)
@@ -1002,8 +1090,8 @@ mod tests {
     #[test]
     fn exposure_is_added_on_acceptance_and_released_on_first_confirmation() {
         let mut s = Exposure::new();
-        s.accept_instant(pid(1), 10_000, LIMIT).unwrap();
-        s.accept_instant(pid(2), 5_000, LIMIT).unwrap();
+        s.accept_ok(pid(1), 10_000, LIMIT).unwrap();
+        s.accept_ok(pid(2), 5_000, LIMIT).unwrap();
         assert_eq!(s.outstanding(), 15_000);
         assert_eq!(s.release_on_first_confirmation(&pid(1)), Some(10_000));
         assert_eq!(s.outstanding(), 5_000);
@@ -1017,7 +1105,7 @@ mod tests {
     #[test]
     fn exposure_is_released_by_the_owner_only_by_explicit_action() {
         let mut s = Exposure::new();
-        s.accept_instant(pid(1), 10_000, LIMIT).unwrap();
+        s.accept_ok(pid(1), 10_000, LIMIT).unwrap();
         // nothing in this API takes a time, and evaluating does not release
         for _ in 0..100 {
             let _ = evaluate(
@@ -1037,13 +1125,13 @@ mod tests {
     #[test]
     fn duplicate_payment_is_not_counted_twice() {
         let mut s = Exposure::new();
-        s.accept_instant(pid(1), 10_000, LIMIT).unwrap();
+        s.accept_ok(pid(1), 10_000, LIMIT).unwrap();
         assert_eq!(
-            s.accept_instant(pid(1), 10_000, LIMIT),
+            s.accept_ok(pid(1), 10_000, LIMIT),
             Err(ExposureError::AlreadyCounted)
         );
         assert_eq!(
-            s.add_override(pid(1), 10, LIMIT),
+            s.override_ok(pid(1), 10, LIMIT),
             Err(ExposureError::AlreadyCounted)
         );
         assert_eq!(s.outstanding(), 10_000);
@@ -1052,29 +1140,29 @@ mod tests {
     #[test]
     fn overrides_add_to_exposure_and_are_refused_when_full() {
         let mut s = Exposure::new();
-        s.accept_instant(pid(1), 10_000, 20_000).unwrap();
-        s.add_override(pid(2), 10_000, 20_000).unwrap();
+        s.accept_ok(pid(1), 10_000, 20_000).unwrap();
+        s.override_ok(pid(2), 10_000, 20_000).unwrap();
         assert_eq!(s.outstanding(), 20_000);
         assert_eq!(
-            s.add_override(pid(3), 1, 20_000),
+            s.override_ok(pid(3), 1, 20_000),
             Err(ExposureError::SliceFull)
         );
         assert_eq!(
-            s.accept_instant(pid(4), 1, 20_000),
+            s.accept_ok(pid(4), 1, 20_000),
             Err(ExposureError::SliceFull)
         );
         assert_eq!(s.outstanding(), 20_000);
         // room comes back only through a release
         s.release_on_first_confirmation(&pid(2));
-        s.add_override(pid(3), 10_000, 20_000).unwrap();
+        s.override_ok(pid(3), 10_000, 20_000).unwrap();
     }
 
     #[test]
     fn lowering_the_limit_blocks_new_payments_but_keeps_old_ones() {
         let mut s = Exposure::new();
-        s.accept_instant(pid(1), 15_000, 20_000).unwrap();
+        s.accept_ok(pid(1), 15_000, 20_000).unwrap();
         assert_eq!(
-            s.add_override(pid(2), 1, 10_000),
+            s.override_ok(pid(2), 1, 10_000),
             Err(ExposureError::SliceFull)
         );
         assert_eq!(s.outstanding(), 15_000);
@@ -1095,7 +1183,7 @@ mod tests {
             match evaluate(&p, &i) {
                 Decision::Instant { .. } => {
                     ledger
-                        .accept_instant(pid(n), 10_000, p.light.slice_sats)
+                        .accept_ok(pid(n), 10_000, p.light.slice_sats)
                         .unwrap();
                     accepted += 1;
                 }
@@ -1369,11 +1457,60 @@ mod tests {
         assert!(matches!(t.status(501), PauseStatus::PausedFor { .. }));
     }
 
+    #[test]
+    fn exposure_additions_with_a_failing_store_change_nothing() {
+        let mut e = ids(&[1, 2]);
+        let before = e.to_bytes();
+        assert_eq!(
+            e.accept_instant(pid(9), 10, LIMIT, persist_fail),
+            Err(ExposureWriteError::Persist("disk full"))
+        );
+        assert_eq!(e.to_bytes(), before);
+        assert_eq!(
+            e.add_override(pid(9), 10, LIMIT, persist_fail),
+            Err(ExposureWriteError::Persist("disk full"))
+        );
+        assert_eq!(e.to_bytes(), before);
+        // Refusals stay refusals and never reach the store.
+        assert_eq!(
+            e.accept_instant(pid(1), 10, LIMIT, persist_fail),
+            Err(ExposureWriteError::Refused(ExposureError::AlreadyCounted))
+        );
+        assert_eq!(
+            e.add_override(pid(9), LIMIT, LIMIT, persist_fail),
+            Err(ExposureWriteError::Refused(ExposureError::SliceFull))
+        );
+        assert_eq!(e.to_bytes(), before);
+        // The payment is still addable once the store works.
+        e.accept_ok(pid(9), 10, LIMIT).unwrap();
+        assert_eq!(e.outstanding(), 3_010);
+    }
+
+    #[test]
+    fn exposure_additions_hand_persist_the_state_they_then_hold() {
+        let mut e = ids(&[1]);
+        let mut handed = Vec::new();
+        let mut keep = |b: &[u8]| {
+            handed = b.to_vec();
+            Ok::<(), Infallible>(())
+        };
+        e.accept_instant(pid(2), 5, LIMIT, &mut keep).unwrap();
+        assert_eq!(handed, e.to_bytes());
+        assert_eq!(Exposure::from_bytes(&handed).unwrap(), e);
+        let mut handed = Vec::new();
+        e.add_override(pid(3), 7, LIMIT, |b: &[u8]| {
+            handed = b.to_vec();
+            Ok::<(), Infallible>(())
+        })
+        .unwrap();
+        assert_eq!(handed, e.to_bytes());
+        assert_eq!(Exposure::from_bytes(&handed).unwrap(), e);
+    }
+
     fn ids(ns: &[u8]) -> Exposure {
         let mut e = Exposure::new();
         for &n in ns {
-            e.accept_instant(pid(n), u64::from(n) * 1_000, u64::MAX)
-                .unwrap();
+            e.accept_ok(pid(n), u64::from(n) * 1_000, u64::MAX).unwrap();
         }
         e
     }
@@ -1388,8 +1525,8 @@ mod tests {
             assert_eq!(back.to_bytes(), bytes);
             assert_eq!(back.outstanding(), e.outstanding());
             assert_eq!(
-                back.accept_instant(pid(5), 1, u64::MAX).is_err(),
-                e.clone().accept_instant(pid(5), 1, u64::MAX).is_err()
+                back.accept_ok(pid(5), 1, u64::MAX).is_err(),
+                e.clone().accept_ok(pid(5), 1, u64::MAX).is_err()
             );
         }
     }

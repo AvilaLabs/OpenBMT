@@ -2,6 +2,7 @@
 
 use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
 use bitcoin::Network;
+use std::convert::Infallible;
 use std::str::FromStr;
 
 use crate::identity::{secp, Identity};
@@ -45,6 +46,16 @@ pub fn wallet(network: Network) -> WalletDescription {
 /// A numbered identity (n in 1..=250).
 pub fn identity(n: u8) -> Identity {
     Identity::from_secret_bytes(&[n; 32]).unwrap()
+}
+
+/// A store that always succeeds, for tests that are not about persisting.
+pub fn persist_ok<T: ?Sized>(_: &T) -> Result<(), Infallible> {
+    Ok(())
+}
+
+/// A store that always fails.
+pub fn persist_fail<T: ?Sized>(_: &T) -> Result<(), &'static str> {
+    Err("disk full")
 }
 
 /// Strictness checks shared by every wire type. `valid` must be a message

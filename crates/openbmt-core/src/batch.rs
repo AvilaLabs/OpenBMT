@@ -131,6 +131,62 @@ impl From<WalletError> for BatchError {
     }
 }
 
+/// Why the Key app did not co-sign: the batch was refused, or the new
+/// high-water mark could not be stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CosignError<E> {
+    /// The batch failed a check. Nothing was stored or signed.
+    Refused(BatchError),
+    /// The caller's store refused the new mark. Nothing was signed and the
+    /// caller's mark is unchanged.
+    Persist(E),
+}
+
+impl<E: fmt::Display> fmt::Display for CosignError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(e) => write!(f, "{e}"),
+            Self::Persist(e) => write!(f, "could not store the new mark: {e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for CosignError<E> {}
+
+impl<E> From<BatchError> for CosignError<E> {
+    fn from(e: BatchError) -> Self {
+        Self::Refused(e)
+    }
+}
+
+/// Why a counter did not take a batch: it was refused, or the new state could
+/// not be stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AddError<E> {
+    /// The batch failed a check. The counter's state is unchanged.
+    Refused(BatchError),
+    /// The caller's store refused the new state. The counter's state is
+    /// unchanged.
+    Persist(E),
+}
+
+impl<E: fmt::Display> fmt::Display for AddError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(e) => write!(f, "{e}"),
+            Self::Persist(e) => write!(f, "could not store the new state: {e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for AddError<E> {}
+
+impl<E> From<BatchError> for AddError<E> {
+    fn from(e: BatchError) -> Self {
+        Self::Refused(e)
+    }
+}
+
 /// The two roots a counter pinned at pairing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PinnedRoots {
@@ -419,20 +475,28 @@ impl Approver {
     /// Check the batch is for a counter in `approved_counters` (the Key app's
     /// device list), re-derive its range from `own_wallet`, compare the hash,
     /// check the range starts exactly at the high-water mark (no gap, no
-    /// overlap), then co-sign and advance the mark. On any failure nothing is
-    /// signed and the mark does not move.
-    pub fn check_and_cosign(
+    /// overlap), then co-sign and advance the mark.
+    ///
+    /// The new mark is computed on a copy and handed to `persist`. Only if
+    /// `persist` returns `Ok` is the caller's `high_water` updated and the
+    /// signature returned; on a refusal or a persist error nothing is signed
+    /// and the mark does not move. The order matters: if the signature could
+    /// exist before the mark is stored, a crash in between would lose the
+    /// mark and the same index range could be signed again for a second
+    /// counter.
+    pub fn check_and_cosign<E>(
         &self,
         own_wallet: &WalletDescription,
         batch: &AddressBatch,
         high_water: &mut HighWater,
         approved_counters: &BTreeSet<DeviceId>,
-    ) -> Result<Sig, BatchError> {
+        persist: impl FnOnce(&HighWater) -> Result<(), E>,
+    ) -> Result<Sig, CosignError<E>> {
         if batch.wallet_checksum != own_wallet.checksum32() {
-            return Err(BatchError::WrongWallet);
+            return Err(BatchError::WrongWallet.into());
         }
         if !approved_counters.contains(&batch.counter) {
-            return Err(BatchError::UnknownCounter);
+            return Err(BatchError::UnknownCounter.into());
         }
         let end = batch.end().ok_or(BatchError::RangeOutOfBounds)?;
         match batch.start.cmp(&high_water.0) {
@@ -440,13 +504,15 @@ impl Approver {
                 return Err(BatchError::Gap {
                     expected: high_water.0,
                     found: batch.start,
-                })
+                }
+                .into())
             }
             std::cmp::Ordering::Less => {
                 return Err(BatchError::Overlap {
                     expected: high_water.0,
                     found: batch.start,
-                })
+                }
+                .into())
             }
             std::cmp::Ordering::Equal => {}
         }
@@ -457,15 +523,16 @@ impl Approver {
             .builder
             .derive(own_wallet, batch.counter, batch.start, batch.count)?;
         if own.hash() != batch.hash() {
-            return Err(BatchError::HashMismatch);
+            return Err(BatchError::HashMismatch.into());
         }
-        let sig = self.identity.sign_digest(&own.hash());
-        high_water.0 = end;
-        Ok(sig)
+        let new_mark = HighWater(end);
+        persist(&new_mark).map_err(CosignError::Persist)?;
+        *high_water = new_mark;
+        Ok(self.identity.sign_digest(&own.hash()))
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ActiveBatch {
     start: u32,
     scripts: Vec<ScriptBuf>,
@@ -473,7 +540,7 @@ struct ActiveBatch {
 }
 
 /// The counter's verified batches and its `next_address` state.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CounterBatches {
     counter: DeviceId,
     roots: PinnedRoots,
@@ -507,26 +574,37 @@ impl CounterBatches {
     }
 
     /// Verify and store a batch.
-    pub fn add(&mut self, signed: SignedBatch) -> Result<(), BatchError> {
+    ///
+    /// The state as it will be after the batch is added is serialized
+    /// ([`Self::to_bytes`]) and handed to `persist`; the batch is stored only
+    /// if `persist` returns `Ok`, and on any error the state is unchanged.
+    /// Storing the range before it is saved would let a crash forget that the
+    /// range was taken, and a replayed batch could then be accepted again.
+    pub fn add<E>(
+        &mut self,
+        signed: SignedBatch,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), AddError<E>> {
         if signed.batch.counter != self.counter {
-            return Err(BatchError::WrongCounter);
+            return Err(BatchError::WrongCounter.into());
         }
         if signed.batch.wallet_checksum != self.wallet_checksum {
-            return Err(BatchError::WrongWallet);
+            return Err(BatchError::WrongWallet.into());
         }
         signed.verify(&self.roots, &self.policy)?;
         let start = signed.batch.start;
         let end = signed.batch.end().ok_or(BatchError::RangeOutOfBounds)?;
         if self.ranges.iter().any(|&(s, e)| start < e && s < end) {
-            return Err(BatchError::OverlapsExisting);
+            return Err(BatchError::OverlapsExisting.into());
         }
         if signed.batch.scripts.iter().any(|s| self.known.contains(s)) {
-            return Err(BatchError::DuplicateScript);
+            return Err(BatchError::DuplicateScript.into());
         }
-        self.known.extend(signed.batch.scripts.iter().cloned());
-        self.ranges.push((start, end));
-        let pos = self.active.partition_point(|b| b.start < start);
-        self.active.insert(
+        let mut next = self.clone();
+        next.known.extend(signed.batch.scripts.iter().cloned());
+        next.ranges.push((start, end));
+        let pos = next.active.partition_point(|b| b.start < start);
+        next.active.insert(
             pos,
             ActiveBatch {
                 start,
@@ -534,16 +612,44 @@ impl CounterBatches {
                 next: 0,
             },
         );
+        persist(&next.to_bytes()).map_err(AddError::Persist)?;
+        *self = next;
         Ok(())
     }
 
     /// The next unused script and its index. Each script is returned once.
     /// `None` means the range is empty: the caller must not offer Bitcoin.
-    pub fn next_script(&mut self) -> Option<(u32, ScriptBuf)> {
+    ///
+    /// The state as it will be once the script is handed out is serialized
+    /// ([`Self::to_bytes`]) and given to `persist`. The script is released
+    /// only if `persist` returns `Ok`; on an error the state is unchanged and
+    /// nothing is returned. The order matters: if an address could be shown
+    /// before the fact is stored, a crash would bring the same address back
+    /// and two customers could pay it. When nothing is left, `persist` is not
+    /// called. If an index would pass the derivable range (which a verified
+    /// batch never does), no script is returned.
+    ///
+    /// Each call works on a copy of the state, so its cost grows with the
+    /// number of stored scripts, the same as the snapshot it writes.
+    pub fn next_script<E>(
+        &mut self,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<Option<(u32, ScriptBuf)>, E> {
+        let mut next = self.clone();
+        let Some(issued) = next.take_next() else {
+            return Ok(None);
+        };
+        persist(&next.to_bytes())?;
+        *self = next;
+        Ok(Some(issued))
+    }
+
+    fn take_next(&mut self) -> Option<(u32, ScriptBuf)> {
         loop {
             let front = self.active.front_mut()?;
             if front.next < front.scripts.len() {
-                let i = front.start + front.next as u32;
+                let offset = u32::try_from(front.next).ok()?;
+                let i = front.start.checked_add(offset)?;
                 let s = front.scripts[front.next].clone();
                 front.next += 1;
                 self.watched.push(s.clone());
@@ -562,13 +668,28 @@ impl CounterBatches {
     /// still watched, but never handed out, and their index range stays
     /// blocked so a fresh batch must cover new indexes. Returns how many
     /// were retired.
-    pub fn retire_unused(&mut self) -> usize {
-        let mut n = 0;
-        for b in self.active.drain(..) {
-            n += b.scripts.len() - b.next;
-            self.watched.extend(b.scripts.into_iter().skip(b.next));
+    ///
+    /// The resulting state is serialized ([`Self::to_bytes`]) and given to
+    /// `persist`; scripts are retired only if it returns `Ok`, and on an
+    /// error the state is unchanged. If the retirement were lost in a crash,
+    /// scripts that a reset meant to withdraw would be handed out again. When
+    /// no batch is active, `persist` is not called.
+    pub fn retire_unused<E>(
+        &mut self,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<usize, E> {
+        if self.active.is_empty() {
+            return Ok(0);
         }
-        n
+        let mut next = self.clone();
+        let mut n = 0;
+        for b in next.active.drain(..) {
+            n += b.scripts.len() - b.next;
+            next.watched.extend(b.scripts.into_iter().skip(b.next));
+        }
+        persist(&next.to_bytes())?;
+        *self = next;
+        Ok(n)
     }
 
     /// Every script that was shown or retired. These stay watched forever.
@@ -761,10 +882,70 @@ fn read_p2wsh(r: &mut Reader<'_>) -> Result<ScriptBuf, DecodeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{identity, wallet};
+    use crate::testutil::{identity, persist_fail, persist_ok, wallet};
     use bitcoin::Network;
+    use std::convert::Infallible;
 
     const SMALL: BatchPolicy = BatchPolicy { min_count: 3 };
+
+    /// The Key app check with a store that always succeeds, refusals flattened
+    /// to `BatchError`.
+    trait Cosign {
+        fn cosign(
+            &self,
+            wallet: &WalletDescription,
+            batch: &AddressBatch,
+            hw: &mut HighWater,
+            approved: &BTreeSet<DeviceId>,
+        ) -> Result<Sig, BatchError>;
+    }
+
+    impl Cosign for Approver {
+        fn cosign(
+            &self,
+            wallet: &WalletDescription,
+            batch: &AddressBatch,
+            hw: &mut HighWater,
+            approved: &BTreeSet<DeviceId>,
+        ) -> Result<Sig, BatchError> {
+            match self.check_and_cosign(wallet, batch, hw, approved, persist_ok) {
+                Ok(sig) => Ok(sig),
+                Err(CosignError::Refused(e)) => Err(e),
+                Err(CosignError::Persist(never)) => match never {},
+            }
+        }
+    }
+
+    /// The counter's mutating calls with a store that always succeeds.
+    trait Quick {
+        fn add_ok(&mut self, signed: SignedBatch) -> Result<(), BatchError>;
+        fn next_ok(&mut self) -> Option<(u32, ScriptBuf)>;
+        fn retire_ok(&mut self) -> usize;
+    }
+
+    impl Quick for CounterBatches {
+        fn add_ok(&mut self, signed: SignedBatch) -> Result<(), BatchError> {
+            match self.add(signed, persist_ok) {
+                Ok(()) => Ok(()),
+                Err(AddError::Refused(e)) => Err(e),
+                Err(AddError::Persist(never)) => match never {},
+            }
+        }
+
+        fn next_ok(&mut self) -> Option<(u32, ScriptBuf)> {
+            match self.next_script(persist_ok) {
+                Ok(v) => v,
+                Err(never) => match never {},
+            }
+        }
+
+        fn retire_ok(&mut self) -> usize {
+            match self.retire_unused(persist_ok) {
+                Ok(n) => n,
+                Err(never) => match never {},
+            }
+        }
+    }
 
     struct Fx {
         wallet: WalletDescription,
@@ -796,7 +977,7 @@ mod tests {
             .unwrap();
         let approver_sig = f
             .key_app
-            .check_and_cosign(&f.wallet, &batch, hw, &f.approved)
+            .cosign(&f.wallet, &batch, hw, &f.approved)
             .unwrap();
         SignedBatch {
             owner_sig: batch.sign(&f.owner),
@@ -833,7 +1014,7 @@ mod tests {
         assert_eq!(batch.scripts.len(), 1_000);
         let mut hw = HighWater::new();
         let sig = approver
-            .check_and_cosign(&f.wallet, &batch, &mut hw, &f.approved)
+            .cosign(&f.wallet, &batch, &mut hw, &f.approved)
             .unwrap();
         assert_eq!(hw.next_index(), 1_000);
         let sb = SignedBatch {
@@ -1048,7 +1229,7 @@ mod tests {
         };
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &mk(11), &mut hw, &f.approved)
+                .cosign(&f.wallet, &mk(11), &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::Gap {
                 expected: 10,
@@ -1057,7 +1238,7 @@ mod tests {
         );
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &mk(9), &mut hw, &f.approved)
+                .cosign(&f.wallet, &mk(9), &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::Overlap {
                 expected: 10,
@@ -1066,7 +1247,7 @@ mod tests {
         );
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &mk(0), &mut hw, &f.approved)
+                .cosign(&f.wallet, &mk(0), &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::Overlap {
                 expected: 10,
@@ -1076,11 +1257,11 @@ mod tests {
         assert_eq!(hw.next_index(), 10);
         // the same range cannot be signed twice
         f.key_app
-            .check_and_cosign(&f.wallet, &mk(10), &mut hw, &f.approved)
+            .cosign(&f.wallet, &mk(10), &mut hw, &f.approved)
             .unwrap();
         assert!(f
             .key_app
-            .check_and_cosign(&f.wallet, &mk(10), &mut hw, &f.approved)
+            .cosign(&f.wallet, &mk(10), &mut hw, &f.approved)
             .is_err());
         assert_eq!(hw.next_index(), 13);
     }
@@ -1095,7 +1276,7 @@ mod tests {
         b.scripts[1] = f.wallet.change_script(1).unwrap();
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &b, &mut hw, &f.approved)
+                .cosign(&f.wallet, &b, &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::HashMismatch
         );
@@ -1132,7 +1313,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &b, &mut hw, &f.approved)
+                .cosign(&f.wallet, &b, &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::WrongWallet
         );
@@ -1142,7 +1323,7 @@ mod tests {
         b.start = u32::MAX;
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &b, &mut hw, &f.approved)
+                .cosign(&f.wallet, &b, &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::RangeOutOfBounds
         );
@@ -1158,7 +1339,7 @@ mod tests {
         let mut hw = HighWater::from_next_index(0);
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &b, &mut hw, &f.approved)
+                .cosign(&f.wallet, &b, &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::UnknownCounter
         );
@@ -1169,7 +1350,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &b, &mut hw, &BTreeSet::new())
+                .cosign(&f.wallet, &b, &mut hw, &BTreeSet::new())
                 .unwrap_err(),
             BatchError::UnknownCounter
         );
@@ -1185,9 +1366,7 @@ mod tests {
             .derive(&f.wallet, f.counter, 0, 3)
             .unwrap();
         let mut hw = HighWater::new();
-        f.key_app
-            .check_and_cosign(&f.wallet, &b, &mut hw, &approved)
-            .unwrap();
+        f.key_app.cosign(&f.wallet, &b, &mut hw, &approved).unwrap();
         assert_eq!(hw.next_index(), 3);
     }
 
@@ -1202,7 +1381,7 @@ mod tests {
         let mut hw = HighWater::new();
         assert_eq!(
             f.key_app
-                .check_and_cosign(&f.wallet, &b, &mut hw, &f.approved)
+                .cosign(&f.wallet, &b, &mut hw, &f.approved)
                 .unwrap_err(),
             BatchError::UnexpectedScriptType
         );
@@ -1217,7 +1396,7 @@ mod tests {
             .derive(&f.wallet, f.counter, 0, 3)
             .unwrap();
         assert!(matches!(
-            strict.check_and_cosign(&f.wallet, &b, &mut HighWater::new(), &f.approved),
+            strict.cosign(&f.wallet, &b, &mut HighWater::new(), &f.approved),
             Err(BatchError::CountTooSmall { .. })
         ));
     }
@@ -1226,19 +1405,19 @@ mod tests {
     fn counter_issues_each_script_once_in_order() {
         let f = fx();
         let mut c = counter_state(&f);
-        assert_eq!(c.next_script(), None);
-        c.add(signed(&f, 0, 3, &mut HighWater::new())).unwrap();
+        assert_eq!(c.next_ok(), None);
+        c.add_ok(signed(&f, 0, 3, &mut HighWater::new())).unwrap();
         assert_eq!(c.remaining(), 3);
         let mut seen = HashSet::new();
         for i in 0..3 {
-            let (idx, s) = c.next_script().unwrap();
+            let (idx, s) = c.next_ok().unwrap();
             assert_eq!(idx, i);
             assert_eq!(s, f.wallet.receive_script(i).unwrap());
             assert!(seen.insert(s));
             assert_eq!(c.remaining(), (2 - i) as usize);
         }
-        assert_eq!(c.next_script(), None);
-        assert_eq!(c.next_script(), None);
+        assert_eq!(c.next_ok(), None);
+        assert_eq!(c.next_ok(), None);
         assert_eq!(c.watched_scripts().len(), 3);
     }
 
@@ -1249,9 +1428,9 @@ mod tests {
         let b1 = signed(&f, 0, 3, &mut hw);
         let b2 = signed(&f, 3, 3, &mut hw);
         let mut c = counter_state(&f);
-        c.add(b2).unwrap(); // added out of order
-        c.add(b1).unwrap();
-        let idx: Vec<u32> = std::iter::from_fn(|| c.next_script().map(|x| x.0)).collect();
+        c.add_ok(b2).unwrap(); // added out of order
+        c.add_ok(b1).unwrap();
+        let idx: Vec<u32> = std::iter::from_fn(|| c.next_ok().map(|x| x.0)).collect();
         assert_eq!(idx, vec![0, 1, 2, 3, 4, 5]);
     }
 
@@ -1264,13 +1443,13 @@ mod tests {
         let mut tampered = good.clone();
         tampered.batch.scripts[0] = f.wallet.receive_script(99).unwrap();
         assert_eq!(
-            c.add(tampered).unwrap_err(),
+            c.add_ok(tampered).unwrap_err(),
             BatchError::OwnerSignatureInvalid
         );
 
         let mut one_sig = good.clone();
         one_sig.owner_sig = Sig([0; 64]);
-        assert!(c.add(one_sig).is_err());
+        assert!(c.add_ok(one_sig).is_err());
 
         // a batch for some other counter, validly signed
         let mut other = good.batch.clone();
@@ -1280,7 +1459,7 @@ mod tests {
             approver_sig: other.sign(&f.key_app.identity),
             batch: other,
         };
-        assert_eq!(c.add(sb).unwrap_err(), BatchError::WrongCounter);
+        assert_eq!(c.add_ok(sb).unwrap_err(), BatchError::WrongCounter);
 
         // a batch for another wallet
         let mut other = good.batch.clone();
@@ -1290,10 +1469,10 @@ mod tests {
             approver_sig: other.sign(&f.key_app.identity),
             batch: other,
         };
-        assert_eq!(c.add(sb).unwrap_err(), BatchError::WrongWallet);
+        assert_eq!(c.add_ok(sb).unwrap_err(), BatchError::WrongWallet);
 
         assert_eq!(c.remaining(), 0);
-        c.add(good).unwrap();
+        c.add_ok(good).unwrap();
     }
 
     #[test]
@@ -1302,8 +1481,8 @@ mod tests {
         let mut hw = HighWater::new();
         let b1 = signed(&f, 0, 4, &mut hw);
         let mut c = counter_state(&f);
-        c.add(b1.clone()).unwrap();
-        assert_eq!(c.add(b1).unwrap_err(), BatchError::OverlapsExisting);
+        c.add_ok(b1.clone()).unwrap();
+        assert_eq!(c.add_ok(b1).unwrap_err(), BatchError::OverlapsExisting);
         // overlapping range, validly double-signed by someone holding both keys
         let b = BatchBuilder::new(SMALL)
             .derive(&f.wallet, f.counter, 2, 4)
@@ -1313,7 +1492,7 @@ mod tests {
             approver_sig: b.sign(&f.key_app.identity),
             batch: b,
         };
-        assert_eq!(c.add(sb).unwrap_err(), BatchError::OverlapsExisting);
+        assert_eq!(c.add_ok(sb).unwrap_err(), BatchError::OverlapsExisting);
         assert_eq!(c.remaining(), 4);
     }
 
@@ -1322,10 +1501,10 @@ mod tests {
         let f = fx();
         let b1 = signed(&f, 0, 3, &mut HighWater::new());
         let mut c = counter_state(&f);
-        c.add(b1.clone()).unwrap();
-        while c.next_script().is_some() {}
-        assert_eq!(c.add(b1).unwrap_err(), BatchError::OverlapsExisting);
-        assert_eq!(c.next_script(), None);
+        c.add_ok(b1.clone()).unwrap();
+        while c.next_ok().is_some() {}
+        assert_eq!(c.add_ok(b1).unwrap_err(), BatchError::OverlapsExisting);
+        assert_eq!(c.next_ok(), None);
     }
 
     #[test]
@@ -1334,18 +1513,14 @@ mod tests {
         let mut hw = HighWater::new();
         let b1 = signed(&f, 0, 5, &mut hw);
         let mut c = counter_state(&f);
-        c.add(b1.clone()).unwrap();
-        let (_, first) = c.next_script().unwrap();
-        let (_, second) = c.next_script().unwrap();
-        assert_eq!(c.retire_unused(), 3);
+        c.add_ok(b1.clone()).unwrap();
+        let (_, first) = c.next_ok().unwrap();
+        let (_, second) = c.next_ok().unwrap();
+        assert_eq!(c.retire_ok(), 3);
         assert_eq!(c.remaining(), 0);
-        assert_eq!(
-            c.next_script(),
-            None,
-            "reset counter must not offer bitcoin"
-        );
+        assert_eq!(c.next_ok(), None, "reset counter must not offer bitcoin");
         // old batch cannot come back
-        assert_eq!(c.add(b1).unwrap_err(), BatchError::OverlapsExisting);
+        assert_eq!(c.add_ok(b1).unwrap_err(), BatchError::OverlapsExisting);
         // all five stay watched
         let w = c.watched_scripts();
         assert_eq!(w.len(), 5);
@@ -1355,15 +1530,190 @@ mod tests {
         }
         // a fresh batch from the next range works
         let b2 = signed(&f, 5, 3, &mut hw);
-        c.add(b2).unwrap();
-        assert_eq!(c.next_script().unwrap().0, 5);
+        c.add_ok(b2).unwrap();
+        assert_eq!(c.next_ok().unwrap().0, 5);
     }
 
     #[test]
     fn retire_with_nothing_unused_is_zero() {
         let f = fx();
         let mut c = counter_state(&f);
-        assert_eq!(c.retire_unused(), 0);
+        assert_eq!(c.retire_ok(), 0);
+    }
+
+    #[test]
+    fn cosign_stores_the_new_mark_before_it_signs() {
+        let f = fx();
+        let batch = BatchBuilder::new(SMALL)
+            .derive(&f.wallet, f.counter, 0, 3)
+            .unwrap();
+        let mut hw = HighWater::new();
+        let mut handed = None;
+        let sig = f
+            .key_app
+            .check_and_cosign(&f.wallet, &batch, &mut hw, &f.approved, |m: &HighWater| {
+                handed = Some(*m);
+                Ok::<(), Infallible>(())
+            })
+            .unwrap();
+        assert_eq!(handed, Some(hw));
+        assert_eq!(hw.next_index(), 3);
+        assert!(f.key_app.device_id().verify_digest(&batch.hash(), &sig));
+    }
+
+    #[test]
+    fn cosign_with_a_failing_store_signs_nothing_and_keeps_the_mark() {
+        let f = fx();
+        let batch = BatchBuilder::new(SMALL)
+            .derive(&f.wallet, f.counter, 4, 3)
+            .unwrap();
+        let mut hw = HighWater::from_next_index(4);
+        let before = hw.to_bytes();
+        assert_eq!(
+            f.key_app
+                .check_and_cosign(&f.wallet, &batch, &mut hw, &f.approved, persist_fail)
+                .unwrap_err(),
+            CosignError::Persist("disk full")
+        );
+        assert_eq!(hw.to_bytes(), before);
+        // Nothing was lost: the same range can still be signed.
+        f.key_app
+            .check_and_cosign(&f.wallet, &batch, &mut hw, &f.approved, persist_ok)
+            .unwrap();
+        assert_eq!(hw.next_index(), 7);
+    }
+
+    #[test]
+    fn cosign_does_not_call_the_store_for_a_refused_batch() {
+        let f = fx();
+        let batch = BatchBuilder::new(SMALL)
+            .derive(&f.wallet, f.counter, 9, 3)
+            .unwrap();
+        let mut hw = HighWater::new();
+        let mut called = false;
+        let r =
+            f.key_app
+                .check_and_cosign(&f.wallet, &batch, &mut hw, &f.approved, |_: &HighWater| {
+                    called = true;
+                    Ok::<(), Infallible>(())
+                });
+        assert_eq!(
+            r.unwrap_err(),
+            CosignError::Refused(BatchError::Gap {
+                expected: 0,
+                found: 9
+            })
+        );
+        assert!(!called);
+    }
+
+    #[test]
+    fn next_script_with_a_failing_store_releases_nothing() {
+        let f = fx();
+        let mut c = mid_batch(&f);
+        let before = c.to_bytes();
+        assert_eq!(c.next_script(persist_fail), Err("disk full"));
+        assert_eq!(c.to_bytes(), before);
+        assert_eq!(c.remaining(), 2);
+        // The same script comes out once the store works again.
+        assert_eq!(c.next_ok().unwrap().0, 4);
+    }
+
+    #[test]
+    fn next_script_hands_persist_the_state_it_then_holds() {
+        let f = fx();
+        let mut c = mid_batch(&f);
+        let mut handed = Vec::new();
+        let issued = c
+            .next_script(|b: &[u8]| {
+                handed = b.to_vec();
+                Ok::<(), Infallible>(())
+            })
+            .unwrap();
+        assert_eq!(issued.unwrap().0, 4);
+        assert_eq!(handed, c.to_bytes());
+        assert_eq!(restore(&f, &handed).unwrap().to_bytes(), c.to_bytes());
+    }
+
+    #[test]
+    fn next_script_skips_the_store_when_nothing_is_left() {
+        let f = fx();
+        let mut c = counter_state(&f);
+        assert_eq!(c.next_script(persist_fail), Ok(None));
+        c.add_ok(signed(&f, 0, 3, &mut HighWater::new())).unwrap();
+        while c.next_ok().is_some() {}
+        assert_eq!(c.next_script(persist_fail), Ok(None));
+    }
+
+    #[test]
+    fn add_with_a_failing_store_leaves_the_state_unchanged() {
+        let f = fx();
+        let mut c = mid_batch(&f);
+        let before = c.to_bytes();
+        let sb = signed(&f, 6, 3, &mut HighWater::from_next_index(6));
+        assert_eq!(
+            c.add(sb.clone(), persist_fail),
+            Err(AddError::Persist("disk full"))
+        );
+        assert_eq!(c.to_bytes(), before);
+        assert_eq!(c.remaining(), 2);
+        // Refusals come back as refusals and never reach the store.
+        assert_eq!(
+            c.add(
+                signed(&f, 3, 3, &mut HighWater::from_next_index(3)),
+                persist_fail
+            ),
+            Err(AddError::Refused(BatchError::OverlapsExisting))
+        );
+        // And the batch is still addable.
+        c.add_ok(sb).unwrap();
+        assert_eq!(c.remaining(), 5);
+    }
+
+    #[test]
+    fn add_hands_persist_the_state_it_then_holds() {
+        let f = fx();
+        let mut c = mid_batch(&f);
+        let mut handed = Vec::new();
+        c.add(
+            signed(&f, 6, 3, &mut HighWater::from_next_index(6)),
+            |b: &[u8]| {
+                handed = b.to_vec();
+                Ok::<(), Infallible>(())
+            },
+        )
+        .unwrap();
+        assert_eq!(handed, c.to_bytes());
+        assert_eq!(restore(&f, &handed).unwrap().to_bytes(), c.to_bytes());
+    }
+
+    #[test]
+    fn retire_with_a_failing_store_keeps_every_script() {
+        let f = fx();
+        let mut c = mid_batch(&f);
+        let before = c.to_bytes();
+        assert_eq!(c.retire_unused(persist_fail), Err("disk full"));
+        assert_eq!(c.to_bytes(), before);
+        assert_eq!(c.remaining(), 2);
+        assert_eq!(c.next_ok().unwrap().0, 4);
+    }
+
+    #[test]
+    fn retire_hands_persist_the_state_it_then_holds() {
+        let f = fx();
+        let mut c = mid_batch(&f);
+        let mut handed = Vec::new();
+        let n = c
+            .retire_unused(|b: &[u8]| {
+                handed = b.to_vec();
+                Ok::<(), Infallible>(())
+            })
+            .unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(handed, c.to_bytes());
+        assert_eq!(restore(&f, &handed).unwrap().to_bytes(), c.to_bytes());
+        // With nothing active there is nothing to store.
+        assert_eq!(c.retire_unused(persist_fail), Ok(0));
     }
 
     fn restore(f: &Fx, bytes: &[u8]) -> Result<CounterBatches, DecodeError> {
@@ -1375,10 +1725,10 @@ mod tests {
     fn mid_batch(f: &Fx) -> CounterBatches {
         let mut hw = HighWater::new();
         let mut c = counter_state(f);
-        c.add(signed(f, 0, 3, &mut hw)).unwrap();
-        c.add(signed(f, 3, 3, &mut hw)).unwrap();
+        c.add_ok(signed(f, 0, 3, &mut hw)).unwrap();
+        c.add_ok(signed(f, 3, 3, &mut hw)).unwrap();
         for _ in 0..4 {
-            c.next_script().unwrap();
+            c.next_ok().unwrap();
         }
         c
     }
@@ -1431,7 +1781,7 @@ mod tests {
         assert_eq!(restored.watched_scripts(), original.watched_scripts());
         // Both hand out the same addresses to the end.
         loop {
-            let (a, b) = (original.next_script(), restored.next_script());
+            let (a, b) = (original.next_ok(), restored.next_ok());
             assert_eq!(a, b);
             if a.is_none() {
                 break;
@@ -1441,11 +1791,11 @@ mod tests {
         // And refuse the same replays.
         let replay = signed(&f, 3, 3, &mut HighWater::from_next_index(3));
         assert_eq!(
-            original.add(replay.clone()).unwrap_err(),
+            original.add_ok(replay.clone()).unwrap_err(),
             BatchError::OverlapsExisting
         );
         assert_eq!(
-            restored.add(replay).unwrap_err(),
+            restored.add_ok(replay).unwrap_err(),
             BatchError::OverlapsExisting
         );
     }
@@ -1456,17 +1806,20 @@ mod tests {
         let mut hw = HighWater::new();
         let b1 = signed(&f, 0, 5, &mut hw);
         let mut c = counter_state(&f);
-        c.add(b1.clone()).unwrap();
-        c.next_script().unwrap();
-        c.retire_unused();
+        c.add_ok(b1.clone()).unwrap();
+        c.next_ok().unwrap();
+        c.retire_ok();
         let mut restored = restore(&f, &c.to_bytes()).unwrap();
         assert_eq!(restored.remaining(), 0);
-        assert_eq!(restored.next_script(), None);
+        assert_eq!(restored.next_ok(), None);
         assert_eq!(restored.watched_scripts().len(), 5);
-        assert_eq!(restored.add(b1).unwrap_err(), BatchError::OverlapsExisting);
+        assert_eq!(
+            restored.add_ok(b1).unwrap_err(),
+            BatchError::OverlapsExisting
+        );
         // A fresh range still works and is handed out from its start.
-        restored.add(signed(&f, 5, 3, &mut hw)).unwrap();
-        assert_eq!(restored.next_script().unwrap().0, 5);
+        restored.add_ok(signed(&f, 5, 3, &mut hw)).unwrap();
+        assert_eq!(restored.next_ok().unwrap().0, 5);
     }
 
     #[test]
