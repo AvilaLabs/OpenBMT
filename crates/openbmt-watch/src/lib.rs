@@ -45,7 +45,7 @@ pub use block::{payments_in_block, spends_in_block, WellFormedBlock};
 pub use chain::{check_header, confirmations, HeaderChain};
 pub use headers::{Accepted, HeaderStore};
 pub use health::{check_health, Health, HealthInput, Peer, PeerTransport, Problem};
-pub use netgroup::{network_group, NetGroup, PeerAddr};
+pub use netgroup::{host_group, network_group, NetGroup, PeerAddr};
 pub use proof::{verify_box_proof, ProvenPayment};
 pub use refusal::Refusal;
 pub use sale::{SaleStatus, SaleWatch, Sighted, Source};

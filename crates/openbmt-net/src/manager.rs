@@ -32,12 +32,18 @@ use bitcoin::hashes::{sha256, Hash};
 use bitcoin::p2p::ServiceFlags;
 use bitcoin::{Block, BlockHash, Network, ScriptBuf, Transaction, Txid};
 use openbmt_watch::{
-    network_group, Accepted, HeaderChain, HeaderStore, NetGroup, Peer, PeerAddr, PeerTransport,
-    Refusal, WellFormedBlock, BEHIND_BLOCKS,
+    host_group, network_group, Accepted, HeaderChain, HeaderStore, NetGroup, Peer, PeerAddr,
+    PeerTransport, Refusal, WellFormedBlock, BEHIND_BLOCKS,
 };
 
 use crate::v2::V2Entropy;
 use crate::{Drop, Event, PeerAddress, Request, Session, SessionConfig, MAX_HEADERS};
+
+mod broadcast;
+use broadcast::Held;
+pub use broadcast::{
+    BroadcastRefused, RelayState, MAX_BROADCAST_WEIGHT, MAX_HELD, NOT_SEEN_SECS, SEEN_BACK_GROUPS,
+};
 
 /// NR-20: connections the counter keeps, as the caller sets it.
 pub const DEFAULT_TARGET_PEERS: usize = 8;
@@ -220,6 +226,25 @@ pub enum Output {
         /// Where the peer was reached.
         from: PeerAddr,
     },
+    /// NR-86: how many peers a held transaction was announced to and how
+    /// many have asked for it. Sent when either count changes.
+    TxRelayed {
+        /// The held transaction.
+        txid: Txid,
+        /// Peers that were sent an `inv` for it.
+        peers_asked: usize,
+        /// Peers that asked for it and were sent it. A peer that asked may
+        /// have thrown it away.
+        peers_fetched: usize,
+    },
+    /// NR-87, NR-88: what the peers have shown of a held transaction. Sent
+    /// when it changes.
+    TxState {
+        /// The held transaction.
+        txid: Txid,
+        /// What the peers have shown.
+        state: RelayState,
+    },
 }
 
 /// A request the manager gave up on, which a slow peer may still answer.
@@ -351,6 +376,8 @@ pub struct Manager {
     pending_tx: BTreeMap<Txid, (PeerId, u64)>,
     /// Outputs made by calls that return none.
     deferred: Vec<Output>,
+    /// NR-86: transactions the app asked to broadcast.
+    held: BTreeMap<Txid, Held>,
     /// How many peers were forgotten, so that a pass can see a drop.
     drops: u64,
 }
@@ -392,6 +419,7 @@ impl Manager {
             waiting: VecDeque::new(),
             pending_tx: BTreeMap::new(),
             deferred: Vec::new(),
+            held: BTreeMap::new(),
             drops: 0,
         };
         manager.next_height = manager.floor();
@@ -451,7 +479,11 @@ impl Manager {
         if self.peers.contains_key(&id) {
             return Err(ConnectRefused::IdInUse);
         }
-        let group = network_group(&addr);
+        let group = if self.config.allow_local {
+            host_group(&addr)
+        } else {
+            network_group(&addr)
+        };
         if group == self.local_group && !self.config.allow_local {
             return Err(ConnectRefused::LocalGroup);
         }
@@ -542,6 +574,7 @@ impl Manager {
             self.push_stale(id, Stale::Tx(txid));
             self.note_unanswered(id, &mut out);
         }
+        self.age_held(now, &mut out);
         self.settle(now, &mut out);
         out
     }
@@ -583,6 +616,23 @@ impl Manager {
         }
         self.scripts.insert(script);
         true
+    }
+
+    /// NR-40, NR-41: check the blocks above `height` again, against every
+    /// script that is watched now. Work in progress is given up and starts
+    /// over from the first block above `height`. For a caller that has
+    /// added scripts whose payments may be in blocks it has checked already.
+    pub fn rescan_from(&mut self, height: u32) {
+        self.config.watch_from = height;
+        let heights: Vec<u32> = self.work.keys().copied().collect();
+        for h in heights {
+            if let Some(mut item) = self.work.remove(&h) {
+                self.abandon_asks(&mut item);
+                self.abandon_fetch(&mut item);
+            }
+        }
+        self.next_height = self.floor();
+        self.settle_now();
     }
 
     /// NR-44: while on, every new block is downloaded in full. The caller
@@ -852,6 +902,7 @@ impl Manager {
                     self.announce(id, txid, out);
                 }
             }
+            Event::Requested(txids) => self.serve_held(id, &txids, out),
             Event::Tx(bytes) => self.on_tx(id, bytes, out),
             Event::Block(bytes) => self.on_block(id, bytes, out),
             Event::Filter { block, filter } => self.on_filter(id, block, &filter, out),
@@ -887,6 +938,8 @@ impl Manager {
         let locator = self.store.locator();
         if self.send(id, Request::GetHeaders { locator }, out) {
             self.send(id, Request::GetAddr, out);
+            // NR-86: what is held is announced to a peer that comes late.
+            self.announce_held_to_new(id, out);
         }
     }
 
@@ -1465,6 +1518,10 @@ impl Manager {
 
     /// NR-50: this peer says it has this transaction.
     fn announce(&mut self, id: PeerId, txid: Txid, out: &mut Vec<Output>) {
+        // NR-87: one of the counter's own broadcasts, heard back.
+        if self.heard_held(id, &txid, out) {
+            return;
+        }
         let Some(addr) = self.peers.get(&id).map(|p| p.addr) else {
             return;
         };

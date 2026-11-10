@@ -567,9 +567,7 @@ fn nr_05_a_message_in_progress_is_held_while_it_arrives() {
 
 #[test]
 fn nr_55_a_request_from_the_peer_is_not_answered() {
-    let one_inv = vec![Inventory::Transaction(Txid::from_byte_array([1; 32]))];
     let requests = [
-        frame(NetworkMessage::GetData(one_inv)),
         frame(NetworkMessage::GetHeaders(
             bitcoin::p2p::message_blockdata::GetHeadersMessage {
                 version: 70_016,

@@ -232,6 +232,8 @@ pub struct Net {
     /// The peer's side of each connection made by `join`, on the transport
     /// of the kit's mode.
     pub wires: BTreeMap<PeerId, Wire>,
+    /// Whether `inv` and `tx` may be written too: a test of NR-86.
+    pub allow_broadcast: bool,
 }
 
 impl Net {
@@ -250,6 +252,7 @@ impl Net {
             m: Manager::new(config, HeaderStore::new(Network::Regtest).expect("regtest")),
             now: T0,
             wires: BTreeMap::new(),
+            allow_broadcast: false,
         }
     }
 
@@ -311,8 +314,9 @@ impl Net {
             None => super::kit::decode_all(&bytes),
         };
         for message in &messages {
+            let broadcast = self.allow_broadcast && matches!(message.cmd(), "inv" | "tx");
             assert!(
-                MAY_SEND.contains(&message.cmd()),
+                MAY_SEND.contains(&message.cmd()) || broadcast,
                 "the counter wrote a {}",
                 message.cmd()
             );

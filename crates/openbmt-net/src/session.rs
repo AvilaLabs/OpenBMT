@@ -17,7 +17,7 @@ use bitcoin::p2p::message_blockdata::{GetHeadersMessage, Inventory};
 use bitcoin::p2p::message_filter::GetCFilters;
 use bitcoin::p2p::message_network::VersionMessage;
 use bitcoin::p2p::{Magic, ServiceFlags};
-use bitcoin::{BlockHash, Network, Txid};
+use bitcoin::{BlockHash, Network, Transaction, Txid};
 
 use crate::frame::{Message, PeerAddress};
 use crate::v2::{Transport, V2Entropy};
@@ -37,8 +37,9 @@ pub struct SessionConfig {
     pub tip_height: u32,
 }
 
-/// What the counter asks of a peer after the handshake. None of them sends
-/// a transaction (NR-55).
+/// What the counter asks of a peer after the handshake. Only the last two
+/// announce or send a transaction, and only one the app asked to broadcast
+/// (NR-55, NR-86).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     /// `getheaders` from the locator, with no stop hash (NR-30).
@@ -59,6 +60,12 @@ pub enum Request {
     },
     /// `getaddr` (NR-22).
     GetAddr,
+    /// `inv` of these transactions, by txid: the counter's own broadcast
+    /// (NR-86). The only transaction this session announces.
+    Announce(Vec<Txid>),
+    /// `tx`: a transaction the peer asked for after the announcement
+    /// (NR-86), in the form with witness data.
+    SendTx(Box<Transaction>),
 }
 
 /// What a good peer produced. Nothing in an event is believed: the watcher
@@ -103,6 +110,9 @@ pub enum Event {
     },
     /// Addresses the peer told of, at most 1,000 (NR-22).
     Addresses(Vec<PeerAddress>),
+    /// The transactions the peer asks for with `getdata` (NR-86). Whether
+    /// any is one the counter holds is for the manager to say.
+    Requested(Vec<Txid>),
 }
 
 /// One peer connection, as bytes and events.
@@ -275,6 +285,11 @@ impl Session {
                     }))
                 }
                 Request::GetAddr => s.queue(NetworkMessage::GetAddr),
+                Request::Announce(txids) if txids.is_empty() => Ok(()),
+                Request::Announce(txids) => s.queue(NetworkMessage::Inv(
+                    txids.into_iter().map(Inventory::Transaction).collect(),
+                )),
+                Request::SendTx(tx) => s.queue(NetworkMessage::Tx(*tx)),
             }
         })
     }
@@ -365,6 +380,11 @@ impl Session {
             Message::Block(bytes) => events.push(Event::Block(bytes)),
             Message::CFilter { block, filter } => events.push(Event::Filter { block, filter }),
             Message::Addresses(list) => events.push(Event::Addresses(list)),
+            Message::GetData { txids } => {
+                if !txids.is_empty() {
+                    events.push(Event::Requested(txids));
+                }
+            }
         }
         Ok(())
     }

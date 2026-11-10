@@ -57,6 +57,8 @@ pub enum Command {
     Inv,
     /// `notfound`
     NotFound,
+    /// `getdata`, read for the transactions a peer asks of a broadcast
+    GetData,
     /// `tx`
     Tx,
     /// `block`
@@ -85,6 +87,7 @@ impl Command {
             Self::Headers => "headers",
             Self::Inv => "inv",
             Self::NotFound => "notfound",
+            Self::GetData => "getdata",
             Self::Tx => "tx",
             Self::Block => "block",
             Self::CFilter => "cfilter",
@@ -107,6 +110,7 @@ impl Command {
             "headers" => Self::Headers,
             "inv" => Self::Inv,
             "notfound" => Self::NotFound,
+            "getdata" => Self::GetData,
             "tx" => Self::Tx,
             "block" => Self::Block,
             "cfilter" => Self::CFilter,
@@ -123,7 +127,7 @@ impl Command {
             Self::Tx => MAX_TX_PAYLOAD,
             Self::CFilter => MAX_CFILTER_PAYLOAD,
             Self::Headers => MAX_HEADERS_PAYLOAD,
-            Self::Inv | Self::NotFound => MAX_INV_PAYLOAD,
+            Self::Inv | Self::NotFound | Self::GetData => MAX_INV_PAYLOAD,
             Self::Addr | Self::AddrV2 => MAX_ADDR_PAYLOAD,
             Self::Version => MAX_VERSION_PAYLOAD,
             Self::Verack
@@ -208,6 +212,12 @@ pub enum Message {
         /// Blocks.
         blocks: Vec<BlockHash>,
     },
+    /// `getdata`: the transactions the peer asks for, by txid, with or
+    /// without the witness flag; other entries are dropped
+    GetData {
+        /// The transactions asked for.
+        txids: Vec<Txid>,
+    },
     /// `tx`: the bytes, checked to be one transaction and nothing more
     Tx(Vec<u8>),
     /// `block`: the bytes, not parsed here
@@ -237,6 +247,7 @@ impl Message {
             Self::Headers(_) => Command::Headers,
             Self::Inv { .. } => Command::Inv,
             Self::NotFound { .. } => Command::NotFound,
+            Self::GetData { .. } => Command::GetData,
             Self::Tx(_) => Command::Tx,
             Self::Block(_) => Command::Block,
             Self::CFilter { .. } => Command::CFilter,
@@ -272,6 +283,10 @@ impl Frame {
                 } else {
                     Message::NotFound { txids, blocks }
                 }
+            }
+            Command::GetData => {
+                let (txids, _) = parse_inventory(p, name, true)?;
+                Message::GetData { txids }
             }
             Command::Tx => {
                 // Checked to be one transaction, then handed on as bytes.

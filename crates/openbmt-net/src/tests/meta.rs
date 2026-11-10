@@ -3,8 +3,9 @@
 use crate::Drop;
 
 const RULES: &str = include_str!("../../../../docs/NETWORK-RULES.md");
-const TEST_SOURCES: [&str; 6] = [
+const TEST_SOURCES: [&str; 7] = [
     include_str!("book.rs"),
+    include_str!("broadcast.rs"),
     include_str!("events.rs"),
     include_str!("frame.rs"),
     include_str!("manager.rs"),
@@ -13,11 +14,12 @@ const TEST_SOURCES: [&str; 6] = [
 ];
 
 /// The rules the crate implements so far. The driver is a later slice.
-const IMPLEMENTED: [&str; 38] = [
+const IMPLEMENTED: [&str; 43] = [
     "NR-01", "NR-02", "NR-03", "NR-04", "NR-05", "NR-11", "NR-12", "NR-13", "NR-14", "NR-20",
     "NR-21", "NR-22", "NR-23", "NR-24", "NR-25", "NR-30", "NR-31", "NR-32", "NR-33", "NR-40",
     "NR-41", "NR-42", "NR-43", "NR-44", "NR-45", "NR-46", "NR-50", "NR-51", "NR-52", "NR-53",
-    "NR-54", "NR-55", "NR-80", "NR-81", "NR-82", "NR-83", "NR-84", "NR-85",
+    "NR-54", "NR-55", "NR-80", "NR-81", "NR-82", "NR-83", "NR-84", "NR-85", "NR-86", "NR-87",
+    "NR-88", "NR-89", "NR-90",
 ];
 
 /// Every rule ID that the rules file defines (in bold at the start of a
@@ -79,7 +81,7 @@ fn every_drop() -> Vec<Drop> {
 #[test]
 fn the_rules_file_defines_the_rules_this_slice_implements() {
     let ids = rule_ids();
-    assert!(ids.len() >= 43, "{}", ids.len());
+    assert!(ids.len() >= 48, "{}", ids.len());
     for rule in IMPLEMENTED {
         assert!(ids.contains(&rule.to_string()), "{rule} is not in the file");
     }

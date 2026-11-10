@@ -179,14 +179,14 @@ fn nr_02_a_huge_length_is_dropped_before_anything_is_kept() {
 #[test]
 fn nr_03_an_unknown_command_is_skipped_at_100000_and_dropped_at_100001() {
     let mut r = open_reader();
-    let mut bytes = raw_frame("getdata", &vec![0u8; 100_000]);
+    let mut bytes = raw_frame("mempool", &vec![0u8; 100_000]);
     bytes.extend(frame(NetworkMessage::Ping(5)));
     let got = feed(&mut r, &bytes).unwrap();
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].command, Command::Ping);
 
     let mut r = open_reader();
-    let d = expect_drop(feed(&mut r, &header_only("getdata", 100_001)), "NR-03");
+    let d = expect_drop(feed(&mut r, &header_only("mempool", 100_001)), "NR-03");
     assert_eq!(d, Drop::UnknownTooLong { len: 100_001 });
 }
 
@@ -462,7 +462,7 @@ fn nr_01_a_message_split_at_every_byte_boundary_is_read() {
 #[test]
 fn nr_01_a_stream_fed_one_byte_at_a_time_is_read() {
     let mut stream = frame(NetworkMessage::Ping(1));
-    stream.extend(raw_frame("getdata", &[9; 40]));
+    stream.extend(raw_frame("mempool", &[9; 40]));
     stream.extend(frame(NetworkMessage::Pong(2)));
     let mut r = open_reader();
     let mut got = Vec::new();

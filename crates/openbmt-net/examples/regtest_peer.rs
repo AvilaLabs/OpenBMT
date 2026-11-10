@@ -667,6 +667,7 @@ fn event_name(event: &Event) -> &'static str {
         Event::Filter { .. } => "filter",
         Event::NotFound { .. } => "notfound",
         Event::Addresses(_) => "addresses",
+        Event::Requested(_) => "getdata",
     }
 }
 

@@ -2,6 +2,7 @@
 //! drop test checks the exact drop and the rule it names.
 
 mod book;
+mod broadcast;
 mod events;
 mod frame;
 mod kit;

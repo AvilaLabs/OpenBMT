@@ -192,8 +192,10 @@ thin driver that owns the sockets.
   and forgotten. The counter remembers the IDs of the last 100,000
   announced transactions **[to tune]** so that it does not fetch one
   twice; it keeps no mempool.
-- **NR-55.** The counter never announces or sends a transaction. It does
-  not answer `getdata`, `getheaders`, `getaddr` or `mempool`.
+- **NR-55.** The counter never announces or sends a transaction, except
+  one the app asked it to broadcast (NR-86). It does not answer
+  `getheaders`, `getaddr` or `mempool`, and it answers `getdata` only for
+  a transaction it holds for broadcast.
 
 ## 7. What peers and the network learn
 
@@ -372,3 +374,56 @@ writes none of it.
   compared out of band. Nothing uses it yet.
 - **NR-85.** With Tor on (NR-26) the same rules apply: v2 inside the
   connection through the proxy is allowed and is not required.
+
+## 11. Broadcasting a transaction
+
+The owner's device sends the transactions the Key app approved. It is
+the one place where this crate gives a transaction to the network.
+
+- **NR-86.** The app hands a finished transaction to the manager with
+  `broadcast`. The manager holds it until the app says `forget`: at most
+  64 at a time, each at most 400,000 weight units (the signer's own
+  limit). Giving one that is held already changes nothing. A held
+  transaction is announced with `inv` by its txid to half of the ready
+  peers, at least one, by lowest connection number. The counter does not
+  ask for wtxid relay, so a peer announces and asks by txid too. The
+  manager answers `getdata` for a held transaction with the whole
+  transaction, witness included, to any peer that asks. A peer that
+  becomes ready while a transaction is held is announced to at once.
+  Nothing else is announced or sent.
+- **NR-87.** A held transaction counts as seen back when peers that were
+  not sent its announcement announce it to the counter, from at least 2
+  network groups. The same group twice counts once, and a peer that was
+  sent the announcement counts for nothing. A transaction that is
+  announced back is never asked for. The manager says `Sent` until then,
+  and `SeenBack` with the number of groups after. This is evidence that
+  the network relayed it. It is not evidence that anyone will mine it:
+  a peer can announce a transaction and drop it, and peers that look
+  alike can be one operator. A block that holds the transaction is the
+  only proof that it was mined, and the app reads that from its own
+  checked blocks, not from this crate.
+- **NR-88.** A held transaction that has not been seen back 10 minutes
+  after it was announced is reported as `NotSeen` and announced to every
+  ready peer again. The same happens every 10 minutes after, until it is
+  seen back or the app lets it go. The manager never drops a held
+  transaction by itself. Once every ready peer has been sent the
+  announcement, there is no peer left to see it back from; a block is
+  then the only evidence.
+- **NR-89.** Peers send no `reject` message that the counter reads, and
+  the counter invents none: a peer that fetched a transaction and
+  discarded it, or never fetched it, looks the same as a peer that is
+  slow. The counts the manager reports (peers asked, peers that fetched)
+  are what happened on the wire and nothing more.
+- **NR-90.** The driver passes `broadcast` and `forget` to the manager,
+  and tells the app the counts and the state as events. It also takes a
+  `rescan` of a height: the manager gives up the blocks in work and
+  checks every block above that height again against all the scripts
+  watched then (NR-40, NR-41). An app uses it after it has added scripts
+  whose payments may be in blocks it has checked.
+- **NR-91.** The owner's device sends over a driver of its own, apart from
+  the one that watches the wallet, with its own directory, lock and
+  peers. With a proxy set (NR-26), that driver reaches every peer
+  through it. With no proxy, the app refuses to send, says so, and holds
+  the transaction, unless the owner has turned on sending without Tor;
+  every send then says that the wallet's own connections were used. It
+  never falls back to the wallet's connections without saying so.

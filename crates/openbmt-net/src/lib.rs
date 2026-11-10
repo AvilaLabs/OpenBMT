@@ -44,7 +44,8 @@ mod tests;
 pub use book::{Added, AddressBook, BookError, Picked, Refusal, Source};
 pub use frame::{encode, Command, Frame, FrameReader, Message, PeerAddress};
 pub use manager::{
-    ConnectRefused, Manager, ManagerConfig, Output, PeerId, TransportChoice, Wanted,
+    BroadcastRefused, ConnectRefused, Manager, ManagerConfig, Output, PeerId, RelayState,
+    TransportChoice, Wanted, MAX_BROADCAST_WEIGHT, MAX_HELD, NOT_SEEN_SECS, SEEN_BACK_GROUPS,
 };
 pub use reason::Drop;
 pub use session::{Event, Request, Session, SessionConfig};

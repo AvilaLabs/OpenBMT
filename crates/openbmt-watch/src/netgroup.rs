@@ -24,6 +24,7 @@ impl NetGroup {
         match self.0 {
             Repr::Local => [0, 0, 0, 0, 0],
             Repr::Named => [1, 0, 0, 0, 0],
+            Repr::Host([a, b, c, d]) => [4, a, b, c, d],
             Repr::V4([a, b]) => [2, a, b, 0, 0],
             Repr::V6([a, b, c, d]) => [3, a, b, c, d],
         }
@@ -40,6 +41,8 @@ impl NetGroup {
             1 if [a, b, c, d] == [0; 4] => Self(Repr::Named),
             2 if [c, d] == [0, 0] => Self(Repr::V4([a, b])),
             3 => Self(Repr::V6([a, b, c, d])),
+            // A host group (kind 4) is for a check on one machine and is
+            // never stored.
             _ => return None,
         };
         // A prefix is canonical if a peer with that prefix is put in the
@@ -52,7 +55,7 @@ impl NetGroup {
                 octets[15] = 2;
                 Some(PeerAddr::Ip(IpAddr::V6(Ipv6Addr::from(octets))))
             }
-            Repr::Local | Repr::Named => None,
+            Repr::Local | Repr::Named | Repr::Host(_) => None,
         };
         match probe {
             Some(addr) if network_group(&addr) != group => None,
@@ -72,6 +75,9 @@ enum Repr {
     V4([u8; 2]),
     /// The first 32 bits of an IPv6 address.
     V6([u8; 4]),
+    /// One address on this machine, for a check against several nodes that
+    /// all run here. The four bytes are the last four of the address.
+    Host([u8; 4]),
 }
 
 /// The network group of a peer (WR-41).
@@ -90,6 +96,29 @@ pub fn network_group(addr: &PeerAddr) -> NetGroup {
         PeerAddr::Ip(IpAddr::V4(v4)) => v4_group(*v4),
         PeerAddr::Ip(IpAddr::V6(v6)) => v6_group(*v6),
     })
+}
+
+/// The group of a peer when the caller allows peers on this machine: an
+/// address that [`network_group`] puts in the local group is a group of its
+/// own, by its whole address, so that several nodes on one machine count as
+/// several groups. Every other address is grouped as [`network_group`]
+/// does. Only a check against nodes on one machine has a use for it; the
+/// health rules and the address book never see these groups.
+pub fn host_group(addr: &PeerAddr) -> NetGroup {
+    let group = network_group(addr);
+    match (group, addr) {
+        (NetGroup(Repr::Local), PeerAddr::Ip(ip)) => {
+            let tail = match ip {
+                IpAddr::V4(v4) => v4.octets(),
+                IpAddr::V6(v6) => {
+                    let o = v6.octets();
+                    [o[12], o[13], o[14], o[15]]
+                }
+            };
+            NetGroup(Repr::Host(tail))
+        }
+        _ => group,
+    }
 }
 
 fn v4_group(addr: Ipv4Addr) -> Repr {
