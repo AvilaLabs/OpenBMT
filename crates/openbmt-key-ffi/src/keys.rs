@@ -259,3 +259,26 @@ pub(crate) fn make_material(
         )),
     }
 }
+
+#[cfg(test)]
+mod vector {
+    use super::*;
+    use bitcoin::bip32::Xpub;
+
+    /// The well-known all-"abandon" 12-word phrase, as other wallets derive
+    /// it: master fingerprint 73c5da0a and the account key at m/48'/0'/0'/2'.
+    #[test]
+    fn key_2_is_derived_as_other_wallets_derive_it() {
+        let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon \
+                      abandon abandon abandon about";
+        let mnemonic = bip39::Mnemonic::parse_normalized(phrase).unwrap();
+        let seed = mnemonic.to_seed_normalized("");
+        let key = key2_from_seed(&seed, Network::Bitcoin).unwrap();
+        assert_eq!(key.master_fingerprint.to_string(), "73c5da0a");
+        let secp = Secp256k1::new();
+        assert_eq!(
+            Xpub::from_priv(&secp, &key.account).to_string(),
+            "xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf"
+        );
+    }
+}
