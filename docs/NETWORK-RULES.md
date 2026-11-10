@@ -245,7 +245,12 @@ rules are what it decides where the rules above are silent.
   and at most the target number of peers plus 4 sockets exist. The groups
   of connections being opened count as connected for the draw. A
   connection that the manager refuses (NR-20) is closed at once.
-- **NR-72.** The seeds are asked only when the book has nothing to dial.
+- **NR-72.** The seeds are asked when the book has nothing to dial, and
+  also while filters are wanted (fewer than two ready filter peers in
+  different groups) and the book holds no address that can be dialed now
+  whose filter service was stated by a seed, the owner or the peer itself
+  (NR-21). In that second case the book's other addresses go on being
+  dialed meanwhile: the round waits for them no more than they wait for it.
   Without Tor, each seed name is looked up in a thread of its own; an
   answer that takes more than 10 seconds is ignored, and a round is
   started at most every 5 minutes. What comes back enters the book as
