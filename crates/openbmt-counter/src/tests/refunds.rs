@@ -560,6 +560,33 @@ fn cr_66_a_reorg_that_undoes_the_payment_puts_the_flag_back() {
     );
 }
 
+#[test]
+fn cr_66_a_request_after_a_reorg_took_a_final_sale_below_the_depth_is_waiting() {
+    let mut w = World::new();
+    let o = w.open_five();
+    let t = w.pay(&o, 5_000);
+    let block = w.confirm(&[t], 95);
+    assert_eq!(w.judge(o.index).state, crate::State::Final);
+    w.orphan(&block);
+    // The sale had been final once; now no block holds the payment. The
+    // flag is worked out from the sale as it is, not from the earlier state.
+    let number = ask(&mut w, o.index, 1_000, ann()).unwrap();
+    match refund_events(&w).last().unwrap() {
+        Event::RefundRequested {
+            number: n,
+            waiting_for_depth,
+            ..
+        } => assert_eq!((*n, *waiting_for_depth), (number, true)),
+        e => panic!("{e:?}"),
+    }
+    // The screen's state follows the next judgment of the sale.
+    w.judge(o.index);
+    assert_eq!(
+        w.c.refund_views(o.index)[0].state,
+        RefundState::WaitingForDepth
+    );
+}
+
 // CR-67.
 
 #[test]
@@ -1031,64 +1058,223 @@ fn cr_73_a_stop_after_the_desk_wastes_a_number_and_never_reuses_one() {
     assert_eq!(ask(&mut w, i, 1_000, ann()), Ok(2));
 }
 
-#[test]
-fn cr_73_a_stop_after_the_record_leaves_a_record_the_sale_does_not_hold() {
-    let mut w = World::new();
-    let i = final_sale(&mut w);
-    w.m.reset();
-    w.m.fail_on = Some(3); // the sale
-    assert!(matches!(
-        ask(&mut w, i, 4_000, ann()).unwrap_err(),
-        RefundRefused::Store(_)
-    ));
-    // The record is there, with number 1; the sale holds no entry.
-    let events = refund_events(&w);
-    assert_eq!(events.len(), 1);
-    assert!(matches!(
-        events[0],
-        Event::RefundRequested {
-            number: 1,
-            sats: 4_000,
-            ..
-        }
-    ));
-    assert!(w.c.refund_views(i).is_empty());
-    // Asking again writes a second record with a new number: the sale counts
-    // only the one it holds. The owner's own check, against what was
-    // received, is what catches the pair.
-    w.m.reset();
-    assert_eq!(ask(&mut w, i, 4_000, ann()), Ok(2));
-    assert_eq!(refund_events(&w).len(), 2);
-    assert_eq!(w.c.refund_views(i).len(), 1);
-    assert_eq!(w.c.refund_views(i)[0].number, Some(2));
+/// The refund requests the counter's records hold, as `(number, sats)`.
+fn recorded_requests(w: &World) -> Vec<(u64, u64)> {
+    refund_events(w)
+        .into_iter()
+        .filter_map(|e| match e {
+            Event::RefundRequested { number, sats, .. } => Some((number, sats)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// What the views of a sale say, as `(number, asked, state)`.
+fn viewed(w: &World, index: u32) -> Vec<(Option<u64>, u64, RefundState)> {
+    w.c.refund_views(index)
+        .into_iter()
+        .map(|v| (v.number, v.asked, v.state))
+        .collect()
 }
 
 #[test]
-fn cr_73_a_stop_between_the_record_and_the_sale_of_a_withdrawal_or_a_cash_refund_leaves_the_sale_as_it_was(
-) {
+fn cr_73_a_stop_after_each_write_of_a_request_leaves_the_sale_equal_to_the_records() {
+    for stop in 1..=3usize {
+        let mut w = World::new();
+        let i = final_sale(&mut w);
+        w.m.reset();
+        w.m.fail_on = Some(stop); // 1 the desk, 2 the record, 3 the sale
+        assert!(matches!(
+            ask(&mut w, i, 2_000, ann()).unwrap_err(),
+            RefundRefused::Store(_)
+        ));
+        let held = usize::from(stop == 3);
+        // (a), (b): as soon as the call failed, and again after a restart,
+        // the views are what the records say.
+        for restarted in [false, true] {
+            if restarted {
+                w.m.reset();
+                w.restart();
+            }
+            assert_eq!(recorded_requests(&w).len(), held, "stop {stop}");
+            let views = viewed(&w, i);
+            assert_eq!(views.len(), held, "stop {stop} restarted {restarted}");
+            if held == 1 {
+                assert_eq!(views[0], (Some(1), 2_000, RefundState::Requested));
+            }
+        }
+        // (c): the room left counts the adopted request. 3,001 more is over
+        // what was received only when the 2,000 is held.
+        w.m.reset();
+        let more = ask(&mut w, i, 3_001, ann());
+        if held == 1 {
+            assert_eq!(
+                more.unwrap_err(),
+                RefundRefused::MoreThanReceived {
+                    received: 5_000,
+                    asked: 2_000,
+                    sats: 3_001
+                },
+                "stop {stop}"
+            );
+            assert_eq!(ask(&mut w, i, 3_000, ann()), Ok(2));
+        } else {
+            // A number may skip: after a stop following the desk it does.
+            assert_eq!(more, Ok(if stop == 1 { 1 } else { 2 }), "stop {stop}");
+        }
+        // The stored sale agrees with the records after the next call.
+        w.restart();
+        let numbers: Vec<_> = viewed(&w, i).into_iter().map(|v| v.0).collect();
+        let recorded: Vec<_> = recorded_requests(&w)
+            .into_iter()
+            .map(|(n, _)| Some(n))
+            .collect();
+        assert_eq!(numbers, recorded, "stop {stop}");
+    }
+}
+
+#[test]
+fn cr_73_one_ask_that_stopped_after_the_record_is_one_record_and_one_refund() {
+    let mut w = World::new();
+    let i = final_sale(&mut w);
+    w.m.reset();
+    w.m.fail_on = Some(3);
+    assert!(ask(&mut w, i, 4_000, ann()).is_err());
+    w.m.reset();
+    w.restart();
+    // The cashier reads the views, sees the request, and does not ask again.
+    // If the same ask is made again it is the same room: 4,000 and 4,000 is
+    // more than 5,000 was received.
+    assert_eq!(
+        ask(&mut w, i, 4_000, ann()).unwrap_err().rule(),
+        "CR-67",
+        "the second ask is refused"
+    );
+    assert_eq!(recorded_requests(&w), vec![(1, 4_000)]);
+    assert_eq!(w.c.refund_views(i).len(), 1);
+}
+
+#[test]
+fn cr_73_a_sale_that_cannot_be_stored_again_stops_the_next_call_before_it_acts() {
+    let mut w = World::new();
+    let i = final_sale(&mut w);
+    w.m.reset();
+    w.m.fail_on = Some(3);
+    assert!(ask(&mut w, i, 1_000, ann()).is_err());
+    w.m.reset();
+    w.restart();
+    // The first write of the next call is the sale adopted from the record.
+    w.m.fail_on = Some(1);
+    let before = recorded_requests(&w).len();
+    assert!(matches!(
+        ask(&mut w, i, 1_000, ann()).unwrap_err(),
+        RefundRefused::Store(_)
+    ));
+    assert_eq!(recorded_requests(&w).len(), before, "nothing was done");
+    assert_eq!(w.c.desk().last_refund_no(), 1);
+    w.m.reset();
+    assert_eq!(ask(&mut w, i, 1_000, ann()), Ok(2));
+    w.restart();
+    assert_eq!(w.c.refund_views(i).len(), 2);
+}
+
+#[test]
+fn cr_73_a_stop_after_each_write_of_a_withdrawal_leaves_the_sale_equal_to_the_records() {
+    for stop in 1..=2usize {
+        let mut w = World::new();
+        let i = final_sale(&mut w);
+        ask(&mut w, i, 4_000, ann()).unwrap();
+        w.m.reset();
+        w.m.fail_on = Some(stop); // 1 the record, 2 the sale
+        assert!(withdraw(&mut w, i, 1, ann()).is_err());
+        let withdrawn = stop == 2;
+        let want = if withdrawn {
+            RefundState::Withdrawn
+        } else {
+            RefundState::Requested
+        };
+        for restarted in [false, true] {
+            if restarted {
+                w.m.reset();
+                w.restart();
+            }
+            assert_eq!(viewed(&w, i), vec![(Some(1), 4_000, want)], "stop {stop}");
+            let records = refund_events(&w)
+                .iter()
+                .filter(|e| matches!(e, Event::RefundWithdrawn { .. }))
+                .count();
+            assert_eq!(records, usize::from(withdrawn));
+        }
+        w.m.reset();
+        if withdrawn {
+            // The owner and the counter agree: it is withdrawn, and the
+            // room it held is free again.
+            assert_eq!(
+                withdraw(&mut w, i, 1, ann()).unwrap_err(),
+                WithdrawRefused::AlreadyWithdrawn(1)
+            );
+            assert_eq!(ask(&mut w, i, 5_000, ann()), Ok(2));
+        } else {
+            assert_eq!(ask(&mut w, i, 2_000, ann()).unwrap_err().rule(), "CR-67");
+            withdraw(&mut w, i, 1, ann()).unwrap();
+        }
+    }
+}
+
+#[test]
+fn cr_73_a_stop_after_each_write_of_a_cash_refund_leaves_the_sale_equal_to_the_records() {
+    for stop in 1..=2usize {
+        let mut w = World::new();
+        let i = big_sale(&mut w);
+        w.m.reset();
+        w.m.fail_on = Some(stop); // 1 the record, 2 the sale
+                                  // 9,000 cents are 90,000 satoshis at ten satoshis a cent.
+        assert!(ask_cash(&mut w, i, 9_000, ann()).is_err());
+        let held = usize::from(stop == 2);
+        for restarted in [false, true] {
+            if restarted {
+                w.m.reset();
+                w.restart();
+            }
+            let cash = refund_events(&w)
+                .iter()
+                .filter(|e| matches!(e, Event::RefundPaidInCash { .. }))
+                .count();
+            assert_eq!(cash, held, "stop {stop}");
+            assert_eq!(w.c.refund_views(i).len(), held);
+            if held == 1 {
+                assert_eq!(w.c.refund_views(i)[0].state, RefundState::PaidInCash);
+            }
+        }
+        // The cashier's daily cap of 300,000 counts the cash refund: two
+        // requests of 90,000 bring it to 270,000 only when it is held.
+        w.m.reset();
+        ask(&mut w, i, 90_000, ann()).unwrap();
+        ask(&mut w, i, 90_000, ann()).unwrap();
+        let third = ask(&mut w, i, 40_000, ann());
+        if held == 1 {
+            assert_eq!(third.unwrap_err().rule(), "CR-69");
+        } else {
+            assert!(third.is_ok());
+        }
+        // Never more than received counts it too.
+        w.m.reset();
+        let rest = ask(&mut w, i, 1_000_000, max()).unwrap_err();
+        assert_eq!(rest.rule(), "CR-67");
+    }
+}
+
+#[test]
+fn cr_73_the_desks_last_number_is_never_below_the_highest_record() {
     let mut w = World::new();
     let i = final_sale(&mut w);
     ask(&mut w, i, 1_000, ann()).unwrap();
+    // An older desk than the records: the number is taken from the records.
+    w.m.slots.insert(Slot::Desk, crate::Desk::new().to_bytes());
+    w.restart();
+    assert_eq!(w.c.desk().last_refund_no(), 1);
     w.m.reset();
-    w.m.fail_on = Some(2); // the sale, after the record
-    assert!(withdraw(&mut w, i, 1, ann()).is_err());
-    assert_eq!(w.c.refund_views(i)[0].state, RefundState::Requested);
-    assert!(matches!(
-        refund_events(&w).last().unwrap(),
-        Event::RefundWithdrawn { number: 1, .. }
-    ));
-    w.m.reset();
-    withdraw(&mut w, i, 1, ann()).unwrap();
-    assert_eq!(w.c.refund_views(i)[0].state, RefundState::Withdrawn);
-
-    w.m.reset();
-    w.m.fail_on = Some(2);
-    assert!(ask_cash(&mut w, i, 10, ann()).is_err());
-    assert_eq!(w.c.refund_views(i).len(), 1);
-    assert!(matches!(
-        refund_events(&w).last().unwrap(),
-        Event::RefundPaidInCash { .. }
-    ));
+    assert_eq!(ask(&mut w, i, 1_000, ann()), Ok(2));
 }
 
 #[test]

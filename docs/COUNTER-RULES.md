@@ -257,7 +257,10 @@ has been made).
   script; the cashier's name and role, as an override does (CR-21); the
   reason; the time; the satoshis the counter saw received for the sale
   at that time; whether the sale had reached the refund depth; and a
-  request number, rising per counter from 1. The signed settings have no
+  request number, rising per counter from 1. Numbers rise and may skip: a
+  number the desk gave out for a request that was never written (CR-73) is
+  not used again, and the owner does not need them to follow one another.
+  The signed settings have no
   "refund at the dollar price or at the bitcoin amount" choice, so the
   caller passes the choice with each call. A name and a reason are 1 to 64
   characters, at most 255 bytes, with no control character: the labels of
@@ -324,13 +327,21 @@ has been made).
   words on the customer's receipt are the app's.
 - **CR-73.** The writes of a request, in this order: the desk with the
   next request number, the record, then the sale. A stop after the desk
-  wastes a number and never reuses one. A stop after the record leaves a
-  record for a request the sale does not hold: the owner may queue it, and
-  the caller was told the request failed. Asking again writes a second
-  record with a new number; the owner's own check (AS-52, never more than
-  received) and its list, which shows both, are what catch the pair.
-  Withdrawing and a cash refund write the record, then the sale, and leave
-  the same on a stop between them.
+  wastes a number and never reuses one. The record is the truth: the
+  counter's own records say which refunds exist, and the sale's refund
+  entries are what those records say, in record order. When a counter is
+  opened, and before any refund call acts, every sale's entries are made
+  equal to its records: a request, a withdrawal or a cash refund whose record
+  was written and whose sale was not is taken in and the sale is stored
+  again. If that cannot be stored, the call is refused. The same is done at
+  once after a call whose sale could not be stored. So after any stop the
+  views show what was recorded, the room left counts it (CR-67, CR-69), and
+  asking again cannot give a second record for the same ask: it gives a
+  second refund only if the cashier means one. A call that fails after
+  its record was written still reports the failure; the caller reads the
+  views. The desk's last number is never below the highest in the records.
+  Withdrawing and a cash refund write the record, then the sale, and follow
+  the same rule.
 - **CR-74.** These rules do not prove who the customer is. They do not stop
   a cashier, or a cashier with a manager's help, from asking for a wrong
   destination: the owner and the Key app see every line before it is paid,

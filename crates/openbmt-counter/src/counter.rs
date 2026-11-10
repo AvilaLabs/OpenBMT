@@ -227,6 +227,10 @@ pub struct Counter {
     /// Sales whose cancel is already in the pause tracker in memory but not
     /// yet marked on the sale, so that a retry does not count it twice.
     cancel_applied: BTreeSet<u32>,
+    /// Sales whose refund entries were taken from the counter's records and
+    /// differ from what is stored, so that the stored sale is written again
+    /// before the next refund call acts (CR-73).
+    refund_unsaved: BTreeSet<u32>,
     records: Chain,
     desk: Desk,
     /// CR-54: what the last heartbeat taken in this run came to. Not stored:
@@ -260,6 +264,7 @@ impl Counter {
             pause: PauseTracker::new(),
             pause_unsaved: false,
             cancel_applied: BTreeSet::new(),
+            refund_unsaved: BTreeSet::new(),
             records: Chain::new(),
             desk: Desk::new(),
             heartbeat: None,
@@ -315,6 +320,8 @@ impl Counter {
                 }
             }
         }
+        // CR-73: the counter's own records are the truth about refunds.
+        counter.adopt_refunds();
         Ok(counter)
     }
 
@@ -1559,10 +1566,9 @@ impl Counter {
     /// The writes, in this order: the desk with the next request number
     /// (CR-73), a `Refund` record "requested", then the sale with the new
     /// entry. If the process stops after the desk, a number is wasted and
-    /// never reused. If it stops after the record, the record names a
-    /// request the sale does not hold: the owner may queue it, and the
-    /// caller was told the request failed; asking again writes a second
-    /// record with a new number.
+    /// never reused. If it stops after the record, the record stands: the
+    /// caller is told the call failed, the views already show the request,
+    /// and the sale is written again before the next refund call (CR-73).
     pub fn request_refund<C: HeaderChain + ?Sized, S: Store>(
         &mut self,
         index: u32,
@@ -1577,6 +1583,7 @@ impl Counter {
             actor,
             reason,
         } = request;
+        self.settle_refunds(store).map_err(RefundRefused::Store)?;
         if !refund_text_ok(&actor.name) {
             return Err(RefundRefused::BadText("name"));
         }
@@ -1658,8 +1665,10 @@ impl Counter {
             value_minor,
             withdrawn: false,
         });
-        self.finish(store, sale, &[event])
-            .map_err(RefundRefused::Store)?;
+        let done = self.finish(store, sale, &[event]);
+        // A record that was written stands even if the sale was not (CR-73).
+        self.adopt_refunds();
+        done.map_err(RefundRefused::Store)?;
         Ok(number)
     }
 
@@ -1670,9 +1679,8 @@ impl Counter {
     /// withdrawn request no longer counts for "never more than received"
     /// (CR-67), and still counts for the cashier's cap (CR-69).
     ///
-    /// If the process stops between the two writes the record is there and
-    /// the sale still shows the request; withdrawing again writes a second
-    /// record, which the owner ignores.
+    /// If the process stops between the two writes the record stands and
+    /// the request is withdrawn from then on (CR-73).
     pub fn withdraw_refund<S: Store>(
         &mut self,
         index: u32,
@@ -1681,6 +1689,7 @@ impl Counter {
         now: u64,
         store: &mut S,
     ) -> Result<(), WithdrawRefused<S::Error>> {
+        self.settle_refunds(store).map_err(WithdrawRefused::Store)?;
         if !refund_text_ok(&actor.name) {
             return Err(WithdrawRefused::BadName);
         }
@@ -1705,8 +1714,9 @@ impl Counter {
             role: actor.role,
             name: actor.name,
         };
-        self.finish(store, sale, &[event])
-            .map_err(WithdrawRefused::Store)
+        let done = self.finish(store, sale, &[event]);
+        self.adopt_refunds();
+        done.map_err(WithdrawRefused::Store)
     }
 
     /// CR-71, CR-73: a refund paid in cash from the till. The amount is in
@@ -1717,9 +1727,8 @@ impl Counter {
     /// those of a destination and a rate.
     ///
     /// The writes, in this order: a `Refund` record "paid in cash", then the
-    /// sale. If the process stops between them the record is there and the
-    /// sale does not hold the entry; the caller was told it failed, and
-    /// asking again writes a second record.
+    /// sale. If the process stops between them the record stands and the
+    /// refund is on the sale from then on (CR-73).
     pub fn refund_in_cash<C: HeaderChain + ?Sized, S: Store>(
         &mut self,
         index: u32,
@@ -1733,6 +1742,7 @@ impl Counter {
             minor,
             reason,
         } = cash;
+        self.settle_refunds(store).map_err(RefundRefused::Store)?;
         if !refund_text_ok(&actor.name) {
             return Err(RefundRefused::BadText("name"));
         }
@@ -1775,8 +1785,112 @@ impl Counter {
             value_minor: Some(minor.0),
             withdrawn: false,
         });
-        self.finish(store, sale, &[event])
-            .map_err(RefundRefused::Store)
+        let done = self.finish(store, sale, &[event]);
+        self.adopt_refunds();
+        done.map_err(RefundRefused::Store)
+    }
+
+    /// CR-73: make every sale's refund entries what the counter's own
+    /// records say, in memory. A request, a withdrawal or a cash refund whose
+    /// record was written and whose sale was not (the process stopped, or the
+    /// write failed) is taken in, in record order; requests are numbered as
+    /// their records say, and the desk's last number is never below the
+    /// highest of them. A sale that now differs from what is stored is
+    /// marked, and [`Self::settle_refunds`] writes it before the next refund
+    /// call acts. Nothing is dropped from the records, so the result is the
+    /// same however often it is run.
+    fn adopt_refunds(&mut self) {
+        let mut by_sale: BTreeMap<u32, Vec<RefundEntry>> = BTreeMap::new();
+        let mut highest = 0u64;
+        for record in self.records.records() {
+            if record.kind != RecordKind::Refund {
+                continue;
+            }
+            let Ok(event) = Event::decode(&record.body) else {
+                continue;
+            };
+            match event {
+                Event::RefundRequested {
+                    index,
+                    at,
+                    number,
+                    role,
+                    name,
+                    sats,
+                    ask,
+                    ..
+                } => {
+                    highest = highest.max(number);
+                    by_sale.entry(index).or_default().push(RefundEntry {
+                        kind: EntryKind::Request,
+                        number,
+                        at,
+                        role,
+                        name,
+                        sats,
+                        value_minor: match ask {
+                            Ask::Sats => None,
+                            Ask::Value { minor, .. } => Some(minor),
+                        },
+                        withdrawn: false,
+                    });
+                }
+                Event::RefundWithdrawn { index, number, .. } => {
+                    if let Some(entry) = by_sale
+                        .entry(index)
+                        .or_default()
+                        .iter_mut()
+                        .find(|e| e.kind == EntryKind::Request && e.number == number)
+                    {
+                        entry.withdrawn = true;
+                    }
+                }
+                Event::RefundPaidInCash {
+                    index,
+                    at,
+                    role,
+                    name,
+                    minor,
+                    sats,
+                    ..
+                } => by_sale.entry(index).or_default().push(RefundEntry {
+                    kind: EntryKind::Cash,
+                    number: 0,
+                    at,
+                    role,
+                    name,
+                    sats,
+                    value_minor: Some(minor),
+                    withdrawn: false,
+                }),
+                _ => {}
+            }
+        }
+        for (index, sale) in &mut self.sales {
+            let entries = by_sale.remove(index).unwrap_or_default();
+            if sale.refunds != entries {
+                sale.refunds = entries;
+                self.refund_unsaved.insert(*index);
+            }
+        }
+        if highest > self.desk.last_refund_no() {
+            self.desk.set_last_refund_no(highest);
+        }
+    }
+
+    /// CR-73: write the sales that [`Self::adopt_refunds`] changed. A refund
+    /// call does nothing until this has worked, so that it never acts on a
+    /// sale that the store does not hold.
+    fn settle_refunds<S: Store>(&mut self, store: &mut S) -> Result<(), StoreFault<S::Error>> {
+        self.adopt_refunds();
+        let pending: Vec<u32> = self.refund_unsaved.iter().copied().collect();
+        for index in pending {
+            if let Some(sale) = self.sales.get(&index).cloned() {
+                put(store, Slot::Sale(index), &sale.to_bytes())?;
+            }
+            self.refund_unsaved.remove(&index);
+        }
+        Ok(())
     }
 
     /// CR-72: the refunds of a sale, oldest first, for the screen and the
