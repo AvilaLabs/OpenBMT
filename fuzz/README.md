@@ -31,6 +31,7 @@ exactly the input bytes.
 | `signed_pairing_decode` | `SignedPairing::from_bytes` |
 | `owner_command_decode` | `SignedCommand::from_bytes` |
 | `watch_sale_decode` | `SaleWatch::from_bytes` |
+| `net_v2_bytes` | a session on the encrypted transport after a good handshake with a fixed responder: the input is the raw stream, or the contents of valid packets (genuine or decoys) that the session decrypts and parses. It must never panic, a drop names its rule, and the bytes waiting never pass the session cap |
 | `net_book_decode` | `AddressBook::from_bytes` |
 | `entropy_dice` | `words_from_dice_hashed`, `face_counts` and `bits_from_dice` on UTF-8 input; success must mean the input held only the digits 1 to 6 |
 | `counter_sale_decode` | `Sale::from_bytes` |

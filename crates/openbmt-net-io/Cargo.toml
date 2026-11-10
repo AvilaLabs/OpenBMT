@@ -16,3 +16,8 @@ bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 openbmt-net = { path = "../openbmt-net" }
 openbmt-watch = { path = "../openbmt-watch" }
 openbmt-core = { path = "../openbmt-core" }
+
+# The tests' fake peer speaks the encrypted transport with the same crate
+# that the net crate uses.
+[dev-dependencies]
+bip324 = { version = "=0.11.1", default-features = false }

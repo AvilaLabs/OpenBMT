@@ -3,6 +3,7 @@
 //! manager writes is decoded with the bitcoin crate, and every command in it
 //! is checked against the list the counter may send (NR-55).
 
+use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
 
 use bitcoin::absolute::LockTime;
@@ -22,9 +23,10 @@ use bitcoin::{
 };
 use openbmt_watch::{HeaderStore, PeerAddr};
 
-use super::kit::{decode_all, frame, peer_version, verack_frame};
+use super::kit::peer_version;
+use super::v2kit::{mode, Mode, Wire};
 use crate::manager::FILTER_SETTLE_SECS;
-use crate::{Manager, ManagerConfig, Output, PeerId};
+use crate::{Manager, ManagerConfig, Output, PeerId, TransportChoice, V2Entropy};
 
 /// The caller's clock when a test starts, in seconds. Regtest headers are
 /// from 2011 on, so none is too far ahead of it.
@@ -227,6 +229,9 @@ pub struct Joined {
 pub struct Net {
     pub m: Manager,
     pub now: u64,
+    /// The peer's side of each connection made by `join`, on the transport
+    /// of the kit's mode.
+    pub wires: BTreeMap<PeerId, Wire>,
 }
 
 impl Net {
@@ -244,15 +249,35 @@ impl Net {
         Self {
             m: Manager::new(config, HeaderStore::new(Network::Regtest).expect("regtest")),
             now: T0,
+            wires: BTreeMap::new(),
         }
     }
 
     /// Connect peer `n` (in its own group) and finish the handshake.
     pub fn join(&mut self, n: u8, services: ServiceFlags, start_height: i32) -> Joined {
         let id = PeerId(u64::from(n));
-        self.m
-            .connected(id, addr(n), 0x1000 + u64::from(n), self.now)
-            .expect("connected");
+        let mut wire = Wire::for_mode(n);
+        match mode() {
+            Mode::V1 => self
+                .m
+                .connected(id, addr(n), 0x1000 + u64::from(n), self.now)
+                .expect("connected"),
+            Mode::V2 => {
+                let entropy = V2Entropy::new([n.max(1); 32], [n ^ 0x33; 32]);
+                self.m
+                    .connected_with(
+                        id,
+                        addr(n),
+                        0x1000 + u64::from(n),
+                        self.now,
+                        TransportChoice::V2(entropy),
+                    )
+                    .expect("connected");
+                let reply = wire.answer(&self.m.outgoing(id));
+                assert!(self.m.received(id, &reply, self.now).is_empty());
+            }
+        }
+        self.wires.insert(id, wire);
         let first = self.sent(id);
         assert!(
             matches!(first[..], [NetworkMessage::Version(_)]),
@@ -261,8 +286,8 @@ impl Net {
         let mut version = peer_version();
         version.services = services;
         version.start_height = start_height;
-        let mut stream = frame(NetworkMessage::Version(version));
-        stream.extend(verack_frame());
+        let mut stream = self.frame(id, NetworkMessage::Version(version));
+        stream.extend(self.frame(id, NetworkMessage::Verack));
         let out = self.m.received(id, &stream, self.now);
         let sent = self.sent(id);
         Joined { id, out, sent }
@@ -280,7 +305,11 @@ impl Net {
 
     /// What the manager wrote to the peer, decoded and checked (NR-55).
     pub fn sent(&mut self, id: PeerId) -> Vec<NetworkMessage> {
-        let messages = decode_all(&self.m.outgoing(id));
+        let bytes = self.m.outgoing(id);
+        let messages = match self.wires.get_mut(&id) {
+            Some(wire) => wire.decode(&bytes),
+            None => super::kit::decode_all(&bytes),
+        };
         for message in &messages {
             assert!(
                 MAY_SEND.contains(&message.cmd()),
@@ -291,8 +320,17 @@ impl Net {
         messages
     }
 
+    /// A message from this peer in bytes, on its transport.
+    pub fn frame(&mut self, id: PeerId, message: NetworkMessage) -> Vec<u8> {
+        match self.wires.get_mut(&id) {
+            Some(wire) => wire.frame(message),
+            None => super::kit::frame(message),
+        }
+    }
+
     pub fn feed(&mut self, id: PeerId, message: NetworkMessage) -> Vec<Output> {
-        self.m.received(id, &frame(message), self.now)
+        let bytes = self.frame(id, message);
+        self.m.received(id, &bytes, self.now)
     }
 
     pub fn feed_bytes(&mut self, id: PeerId, bytes: &[u8]) -> Vec<Output> {

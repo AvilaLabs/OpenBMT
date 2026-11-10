@@ -23,6 +23,13 @@
 //! - `silent <seconds>`: send nothing after the handshake and print what
 //!   arrives.
 //!
+//! The transport is the counter's (NR-80, NR-81): the encrypted one first,
+//! and after a peer that does not speak it the old one at once, which is
+//! remembered in the file named by `REGTEST_MEMORY` (default: none, so each
+//! run begins with the encrypted transport). `REGTEST_V2=off` uses the old
+//! transport alone. After the handshake every command prints
+//! `transport v1|v2`, `fallback yes|no` and `session_id <hex or none>`.
+//!
 //! The output is one fact per line, ending with exit code 0, or a line
 //! `failed <reason>` and exit code 1, or a line `dropped <NR-xx: reason>`
 //! and exit code 2 when the session ended the connection.
@@ -30,6 +37,7 @@
 //! This is a test tool, built for regtest alone. The nonce is taken from
 //! the system time, which a real caller must not do (NR-11).
 
+use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::process::ExitCode;
@@ -40,7 +48,7 @@ use bitcoin::bip158::BlockFilter;
 use bitcoin::consensus::deserialize;
 use bitcoin::p2p::ServiceFlags;
 use bitcoin::{BlockHash, Network, ScriptBuf, Transaction};
-use openbmt_net::{Drop, Event, Request, Session, SessionConfig};
+use openbmt_net::{Drop, Event, Request, Session, SessionConfig, V2Entropy};
 use openbmt_watch::{payments_in_block, Accepted, HeaderStore};
 
 const NETWORK: Network = Network::Regtest;
@@ -123,10 +131,74 @@ struct Peer {
     sent_after_handshake: usize,
     accepted: usize,
     header_messages: usize,
+    /// Whether the old transport is in use because the encrypted one was
+    /// refused (NR-81).
+    fallback: bool,
+}
+
+/// A key's worth of entropy from the system.
+fn entropy() -> Result<V2Entropy, Exit> {
+    let mut secret = [0u8; 32];
+    let mut aux = [0u8; 32];
+    let read = File::open("/dev/urandom").and_then(|mut f| {
+        f.read_exact(&mut secret)?;
+        f.read_exact(&mut aux)
+    });
+    if let Err(e) = read {
+        return failed(format!("randomness: {e}"));
+    }
+    Ok(V2Entropy::new(secret, aux))
+}
+
+/// NR-81: ports whose peer did not speak the encrypted transport, as
+/// `<port> <until>` lines in the file of `REGTEST_MEMORY`.
+fn remembered(port: u16) -> bool {
+    let Ok(path) = std::env::var("REGTEST_MEMORY") else {
+        return false;
+    };
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    text.lines().any(|line| {
+        let mut parts = line.split_whitespace();
+        let (Some(p), Some(until)) = (parts.next(), parts.next()) else {
+            return false;
+        };
+        p == port.to_string() && until.parse::<u64>().is_ok_and(|u| u > now_secs())
+    })
+}
+
+/// Remember the port for a day.
+fn remember(port: u16) {
+    if let Ok(path) = std::env::var("REGTEST_MEMORY") {
+        let line = format!("{port} {}\n", now_secs() + 86_400);
+        let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+        text.push_str(&line);
+        let _ = std::fs::write(path, text);
+    }
 }
 
 impl Peer {
-    fn connect(port: u16) -> Result<Self, Exit> {
+    /// Connect and run the handshake: the encrypted transport first, and the
+    /// old one when the peer does not speak it.
+    fn open(port: u16) -> Result<(Self, ServiceFlags, u32), Exit> {
+        let off = std::env::var("REGTEST_V2").is_ok_and(|v| v == "off");
+        if !off && !remembered(port) {
+            let mut peer = Self::connect(port, true)?;
+            match peer.handshake() {
+                Ok((services, height)) => return Ok((peer, services, height)),
+                Err(Exit::Dropped(Drop::V2NotSpoken)) => remember(port),
+                Err(other) => return Err(other),
+            }
+            let mut peer = Self::connect(port, false)?;
+            peer.fallback = true;
+            let (services, height) = peer.handshake()?;
+            return Ok((peer, services, height));
+        }
+        let mut peer = Self::connect(port, false)?;
+        let (services, height) = peer.handshake()?;
+        Ok((peer, services, height))
+    }
+
+    fn connect(port: u16, v2: bool) -> Result<Self, Exit> {
         let stream = match TcpStream::connect(("127.0.0.1", port)) {
             Ok(s) => s,
             Err(e) => return failed(format!("connect to port {port}: {e}")),
@@ -144,9 +216,14 @@ impl Peer {
             nonce,
             tip_height: store.tip().0,
         };
+        let session = if v2 {
+            Session::new_v2(config, now_secs(), entropy()?)?
+        } else {
+            Session::new(config, now_secs())
+        };
         let mut peer = Self {
             stream,
-            session: Session::new(config, now_secs()),
+            session,
             store,
             received: Scanner::default(),
             sent: Scanner::default(),
@@ -157,6 +234,7 @@ impl Peer {
             sent_after_handshake: 0,
             accepted: 0,
             header_messages: 0,
+            fallback: false,
         };
         peer.flush()?;
         Ok(peer)
@@ -168,11 +246,19 @@ impl Peer {
         if bytes.is_empty() {
             return Ok(());
         }
-        for (command, len) in self.sent.push(&bytes) {
-            if self.counting && command != "pong" {
-                self.sent_after_handshake += 24 + len;
+        if self.session.is_v2() {
+            // Packets cannot be read here. A `pong` is one packet of 29
+            // bytes (9 of contents, 20 of overhead); other bytes count.
+            if self.counting && bytes.len() != 29 {
+                self.sent_after_handshake += bytes.len();
             }
-            self.sent_log.push(command);
+        } else {
+            for (command, len) in self.sent.push(&bytes) {
+                if self.counting && command != "pong" {
+                    self.sent_after_handshake += 24 + len;
+                }
+                self.sent_log.push(command);
+            }
         }
         if let Err(e) = self.stream.write_all(&bytes) {
             return failed(format!("write: {e}"));
@@ -184,10 +270,14 @@ impl Peer {
     fn pump(&mut self) -> Result<Vec<Event>, Exit> {
         let mut buf = [0u8; 65_536];
         let events = match self.stream.read(&mut buf) {
+            // NR-81: a close before any packet authenticated.
+            Ok(0) if self.session.v2_unproven() => return Err(Exit::Dropped(Drop::V2NotSpoken)),
             Ok(0) => return failed("the peer closed the connection"),
             Ok(n) => {
-                for (command, _) in self.received.push(&buf[..n]) {
-                    self.received_log.push(command);
+                if !self.session.is_v2() {
+                    for (command, _) in self.received.push(&buf[..n]) {
+                        self.received_log.push(command);
+                    }
                 }
                 self.session.receive(&buf[..n], now_secs())?
             }
@@ -347,14 +437,26 @@ fn run(port: u16, args: &[String]) -> Result<(), Exit> {
         }
         _ => return failed(USAGE),
     }
-    let mut peer = Peer::connect(port)?;
-    let (services, start_height) = peer.handshake()?;
+    let (mut peer, services, start_height) = Peer::open(port)?;
+    println!(
+        "transport {}",
+        if peer.session.is_v2() { "v2" } else { "v1" }
+    );
+    println!("fallback {}", if peer.fallback { "yes" } else { "no" });
+    match peer.session.v2_session_id() {
+        Some(id) => println!("session_id {}", hex(&id)),
+        None => println!("session_id none"),
+    }
     match command {
         "handshake" => {
             println!("ready {:x} {start_height}", services.to_u64());
             let filters = services.has(ServiceFlags::COMPACT_FILTERS);
             println!("filters {}", if filters { "yes" } else { "no" });
-            println!("sent {}", peer.sent_log.join(" "));
+            if peer.session.is_v2() {
+                println!("sent encrypted");
+            } else {
+                println!("sent {}", peer.sent_log.join(" "));
+            }
         }
         "sync" => {
             let expected: BlockHash = parse("tip hash", arg(1)?)?;
@@ -489,6 +591,10 @@ fn run(port: u16, args: &[String]) -> Result<(), Exit> {
         _ => unreachable!("checked above"),
     }
     Ok(())
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn event_name(event: &Event) -> &'static str {

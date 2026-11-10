@@ -45,6 +45,14 @@ pub trait Clock {
 pub trait Randomness {
     /// The next number.
     fn next_u64(&mut self) -> u64;
+
+    /// Whether the numbers can be used for a secret key (NR-80). A source
+    /// that has fallen back to numbers an observer could guess says no, and
+    /// the driver then does not offer the encrypted transport. A source that
+    /// does not know says yes.
+    fn unpredictable(&self) -> bool {
+        true
+    }
 }
 
 /// The system clock. A clock set before 1970 reads as 0.
@@ -92,6 +100,10 @@ impl OsRandomness {
 }
 
 impl Randomness for OsRandomness {
+    fn unpredictable(&self) -> bool {
+        self.fallbacks == 0
+    }
+
     fn next_u64(&mut self) -> u64 {
         let mut bytes = [0u8; 8];
         self.counter = self.counter.wrapping_add(1);

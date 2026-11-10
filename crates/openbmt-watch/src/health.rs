@@ -22,6 +22,17 @@ use crate::{
     MIN_PEER_GROUPS,
 };
 
+/// How a connection to a peer is carried (NR-82). No health rule reads it;
+/// the app shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PeerTransport {
+    /// The old transport: plain bytes, readable and changeable on the path.
+    #[default]
+    V1,
+    /// The encrypted transport of BIP324.
+    V2,
+}
+
 /// A peer the light client is connected to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Peer {
@@ -31,6 +42,8 @@ pub struct Peer {
     pub serves_filters: bool,
     /// The best height the peer announced.
     pub best_height: u32,
+    /// How the connection to the peer is carried (NR-82).
+    pub transport: PeerTransport,
 }
 
 /// What the health rules read.

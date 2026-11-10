@@ -5,6 +5,9 @@
 //! received and the time in seconds, takes out the bytes to send, and reads
 //! the [`Event`]s. Any error is a [`Drop`](crate::Drop): the connection must
 //! be closed, and every later call returns the same drop.
+//!
+//! The session works on messages. How they become bytes is the
+//! [`Transport`]'s: the old one, or the encrypted one of BIP324 (NR-80).
 
 use bitcoin::block::Header;
 use bitcoin::hashes::Hash;
@@ -16,10 +19,11 @@ use bitcoin::p2p::message_network::VersionMessage;
 use bitcoin::p2p::{Magic, ServiceFlags};
 use bitcoin::{BlockHash, Network, Txid};
 
-use crate::frame::{encode, Message, PeerAddress};
+use crate::frame::{Message, PeerAddress};
+use crate::v2::{Transport, V2Entropy};
 use crate::{
-    Drop, FrameReader, HANDSHAKE_SECS, MAX_OUTGOING_BYTES, MAX_USER_AGENT, PING_SECS,
-    PROTOCOL_VERSION, PUSH_SLACK,
+    Drop, HANDSHAKE_SECS, MAX_OUTGOING_BYTES, MAX_USER_AGENT, PING_SECS, PROTOCOL_VERSION,
+    PUSH_SLACK,
 };
 
 /// What a session needs to start. The caller supplies the nonce.
@@ -105,8 +109,7 @@ pub enum Event {
 #[derive(Debug)]
 pub struct Session {
     config: SessionConfig,
-    magic: Magic,
-    reader: FrameReader,
+    transport: Transport,
     outgoing: Vec<u8>,
     started: u64,
     /// The peer's services and start height, once its `version` is good.
@@ -119,10 +122,46 @@ pub struct Session {
 }
 
 impl Session {
-    /// A session that has queued the counter's `version` (NR-11). `now` is
-    /// in seconds.
+    /// A session on the old transport that has queued the counter's
+    /// `version` (NR-11). `now` is in seconds.
     pub fn new(config: SessionConfig, now: u64) -> Self {
-        let magic = Magic::from(config.network);
+        let transport = Transport::v1(Magic::from(config.network));
+        Self::start(config, now, transport, Vec::new())
+            .unwrap_or_else(|d| Self::failed(config, now, d))
+    }
+
+    /// A session on the encrypted transport (NR-80): its first bytes are
+    /// the counter's key, and `version` goes out once the peer's version
+    /// packet is in. Fails when the entropy gives no key.
+    pub fn new_v2(config: SessionConfig, now: u64, entropy: V2Entropy) -> Result<Self, Drop> {
+        let mut outgoing = Vec::new();
+        let transport = Transport::v2(Magic::from(config.network), entropy, &mut outgoing)?;
+        Self::start(config, now, transport, outgoing)
+    }
+
+    /// A session that has dropped before it began. The old transport cannot
+    /// come to this; the match keeps the constructor free of a panic.
+    fn failed(config: SessionConfig, now: u64, drop: Drop) -> Self {
+        Self {
+            config,
+            transport: Transport::v1(Magic::from(config.network)),
+            outgoing: Vec::new(),
+            started: now,
+            peer: None,
+            ready: false,
+            last_ping: now,
+            pings_sent: 0,
+            awaiting_pong: None,
+            dropped: Some(drop),
+        }
+    }
+
+    fn start(
+        config: SessionConfig,
+        now: u64,
+        mut transport: Transport,
+        mut outgoing: Vec<u8>,
+    ) -> Result<Self, Drop> {
         let silent = Address {
             services: ServiceFlags::NONE,
             address: [0; 8],
@@ -139,11 +178,11 @@ impl Session {
             start_height: i32::try_from(config.tip_height).unwrap_or(i32::MAX),
             relay: true,
         };
-        Self {
+        transport.send(&NetworkMessage::Version(version), &mut outgoing)?;
+        Ok(Self {
             config,
-            magic,
-            reader: FrameReader::new(magic),
-            outgoing: encode(magic, &NetworkMessage::Version(version)),
+            transport,
+            outgoing,
             started: now,
             peer: None,
             ready: false,
@@ -151,7 +190,25 @@ impl Session {
             pings_sent: 0,
             awaiting_pong: None,
             dropped: None,
-        }
+        })
+    }
+
+    /// NR-82: whether the connection is carried by the encrypted transport.
+    pub fn is_v2(&self) -> bool {
+        self.transport.is_v2()
+    }
+
+    /// NR-84: the session ID of the encrypted transport, which both ends
+    /// derive and so can compare over another channel. `None` on the old
+    /// transport, and before the peer's version packet is in.
+    pub fn v2_session_id(&self) -> Option<[u8; 32]> {
+        self.transport.v2_session_id()
+    }
+
+    /// NR-81: true while the encrypted transport is in use and no packet of
+    /// the peer has authenticated. A peer that closes now does not speak it.
+    pub fn v2_unproven(&self) -> bool {
+        self.transport.v2_unproven()
     }
 
     /// Bytes received from the peer, and the time. Returns the events they
@@ -161,8 +218,8 @@ impl Session {
             s.check_handshake_time(now)?;
             let mut events = Vec::new();
             for chunk in bytes.chunks(PUSH_SLACK) {
-                s.reader.push(chunk)?;
-                while let Some(frame) = s.reader.next()? {
+                s.transport.push(chunk, &mut s.outgoing)?;
+                while let Some(frame) = s.transport.next_frame()? {
                     s.handle(frame.parse()?, now, &mut events)?;
                 }
             }
@@ -238,7 +295,8 @@ impl Session {
 
     /// NR-05: queue a message, unless too many bytes already wait.
     fn queue(&mut self, message: NetworkMessage) -> Result<(), Drop> {
-        let bytes = encode(self.magic, &message);
+        let mut bytes = Vec::new();
+        self.transport.send(&message, &mut bytes)?;
         if self.outgoing.len().saturating_add(bytes.len()) > MAX_OUTGOING_BYTES {
             return Err(Drop::SendBacklog);
         }
@@ -347,7 +405,7 @@ impl Session {
         let (services, height) = self.peer.unwrap_or((ServiceFlags::NONE, 0));
         self.ready = true;
         self.last_ping = now;
-        self.reader.set_handshake_done();
+        self.transport.set_handshake_done();
         self.queue(NetworkMessage::SendHeaders)?;
         events.push(Event::Ready {
             services,

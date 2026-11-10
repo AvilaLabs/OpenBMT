@@ -29,13 +29,17 @@ fn config(peer: &FakePeer, pause: u64) -> DriverConfig {
     c.allow_local = true;
     c.fixed_peers = vec![peer.addr];
     c.redial_pause_secs = pause;
+    // The fake peers speak the old transport alone; v2 has tests of its own.
+    c.v2 = false;
     c
 }
 
 /// A config with no fixed peer, for tests that reach peers by the book or
 /// the seeds.
 fn bare() -> DriverConfig {
-    DriverConfig::new(Network::Regtest, 0)
+    let mut c = DriverConfig::new(Network::Regtest, 0);
+    c.v2 = false;
+    c
 }
 
 fn start(config: DriverConfig, storage: &MemStorage, net: Net) -> Handle {

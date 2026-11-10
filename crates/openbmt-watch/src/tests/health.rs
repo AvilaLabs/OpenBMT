@@ -1,6 +1,6 @@
 //! Section 6: health, each threshold at its exact edge.
 
-use crate::{check_health, HealthInput, Peer, PeerAddr, Problem};
+use crate::{check_health, HealthInput, Peer, PeerAddr, PeerTransport, Problem};
 
 const NOW: u64 = 1_700_000_000;
 const TIP: u32 = 800_000;
@@ -10,6 +10,7 @@ fn peer(addr: &str, filters: bool, best_height: u32) -> Peer {
         addr: PeerAddr::Ip(addr.parse().unwrap()),
         serves_filters: filters,
         best_height,
+        transport: PeerTransport::V1,
     }
 }
 
@@ -64,6 +65,7 @@ fn wr_50_all_named_peers_are_one_group() {
             addr: PeerAddr::Named,
             serves_filters: true,
             best_height: TIP,
+            transport: PeerTransport::V1,
         })
         .collect();
     assert_eq!(problem(&input(&peers)), Some(Problem::TooFewPeerGroups));

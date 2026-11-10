@@ -15,7 +15,8 @@ use bitcoin::{
     TxMerkleNode, TxOut, Txid, Witness,
 };
 
-use crate::{encode, Event, FrameReader, Session, SessionConfig};
+use super::v2kit::{mode, Mode, Wire, SESSION_WIRE};
+use crate::{Event, FrameReader, Session, SessionConfig, V2Entropy};
 
 /// The counter's nonce in the tests.
 pub const OUR_NONCE: u64 = 0x1122_3344_5566_7788;
@@ -34,8 +35,26 @@ pub fn config() -> SessionConfig {
     }
 }
 
+/// A session on the transport of the kit's mode. On the encrypted one the
+/// handshake is through, and the session's `version` is the first thing
+/// [`outgoing`] returns.
 pub fn session() -> Session {
-    Session::new(config(), START)
+    match mode() {
+        Mode::V1 => {
+            SESSION_WIRE.with(|w| *w.borrow_mut() = Wire::v1());
+            Session::new(config(), START)
+        }
+        Mode::V2 => {
+            let mut s = Session::new_v2(config(), START, V2Entropy::new([7; 32], [9; 32])).unwrap();
+            let mut wire = Wire::v2(1);
+            let reply = wire.answer(&s.take_outgoing());
+            assert!(s.receive(&reply, START).unwrap().is_empty());
+            let first = s.take_outgoing();
+            wire.backlog = wire.decode(&first);
+            SESSION_WIRE.with(|w| *w.borrow_mut() = wire);
+            s
+        }
+    }
 }
 
 /// A reader that has seen the handshake, so that every command is read.
@@ -70,8 +89,9 @@ pub fn peer_version() -> VersionMessage {
     }
 }
 
+/// A message from the peer, in bytes, on the transport of the kit's mode.
 pub fn frame(message: NetworkMessage) -> Vec<u8> {
-    encode(magic(), &message)
+    SESSION_WIRE.with(|w| w.borrow_mut().frame(message))
 }
 
 pub fn version_frame() -> Vec<u8> {
@@ -139,7 +159,12 @@ pub fn decode_all(mut bytes: &[u8]) -> Vec<NetworkMessage> {
 
 /// Take what the session queued, as messages.
 pub fn outgoing(s: &mut Session) -> Vec<NetworkMessage> {
-    decode_all(&s.take_outgoing())
+    SESSION_WIRE.with(|w| {
+        let mut wire = w.borrow_mut();
+        let mut out = std::mem::take(&mut wire.backlog);
+        out.extend(wire.decode(&s.take_outgoing()));
+        out
+    })
 }
 
 /// A session that has finished the handshake; its output is taken.
@@ -149,7 +174,8 @@ pub fn ready_session() -> Session {
     stream.extend(verack_frame());
     let events = s.receive(&stream, START).unwrap();
     assert!(matches!(events[..], [Event::Ready { .. }]));
-    s.take_outgoing();
+    // What the handshake wrote is read and dropped.
+    outgoing(&mut s);
     s
 }
 

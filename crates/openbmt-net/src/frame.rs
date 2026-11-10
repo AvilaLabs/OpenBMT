@@ -93,7 +93,7 @@ impl Command {
         }
     }
 
-    fn from_name(name: &str) -> Option<Self> {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
         Some(match name {
             "version" => Self::Version,
             "verack" => Self::Verack,
@@ -138,7 +138,7 @@ impl Command {
     }
 
     /// NR-13: whether the command may arrive before the handshake ends.
-    fn belongs_to_handshake(self) -> bool {
+    pub(crate) fn belongs_to_handshake(self) -> bool {
         matches!(
             self,
             Self::Version
@@ -447,7 +447,7 @@ fn split_header(bytes: &[u8]) -> Option<Header24> {
 }
 
 /// NR-01: the command is printable ASCII, then NULs to the end.
-fn command_name(field: &[u8; 12]) -> Result<&str, Drop> {
+pub(crate) fn command_name(field: &[u8; 12]) -> Result<&str, Drop> {
     let end = field.iter().position(|b| *b == 0).unwrap_or(field.len());
     let (name, padding) = field.split_at_checked(end).ok_or(Drop::BadCommand)?;
     if name.is_empty()

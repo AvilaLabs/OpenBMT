@@ -12,7 +12,8 @@
 //! address book in `<data dir>`, and prints one line for each thing the app
 //! is told:
 //!
-//! - `peers <ready> filters=<n> best=<height> tip=<height> ahead=<yes|no>`
+//! - `peers <ready> filters=<n> best=<height> tip=<height> ahead=<yes|no>
+//!   v2=<n>` (`v2` counts the ready peers on the encrypted transport)
 //! - `chain joined=<n> top=<height> left=<n>`
 //! - `block <hash> <bytes> pays <txid>:<sats> ...`
 //! - `sighting <txid> from=<n> pays <sats>`
@@ -39,6 +40,7 @@ use bitcoin::{Block, Network, ScriptBuf, Transaction};
 use openbmt_net_io::{
     AppEvent, DirLock, Driver, DriverConfig, FileStorage, OsRandomness, SystemClock,
 };
+use openbmt_watch::PeerTransport;
 
 const USAGE: &str = "usage: regtest_node <port> <data dir> <watch from> <script hex>";
 
@@ -56,8 +58,12 @@ fn describe(event: &AppEvent, script: &ScriptBuf) -> Option<String> {
         AppEvent::Peers(peers, ahead, (height, _)) => {
             let filters = peers.iter().filter(|p| p.serves_filters).count();
             let best = peers.iter().map(|p| p.best_height).max().unwrap_or(0);
+            let v2 = peers
+                .iter()
+                .filter(|p| p.transport == PeerTransport::V2)
+                .count();
             format!(
-                "peers {} filters={filters} best={best} tip={height} ahead={}",
+                "peers {} filters={filters} best={best} tip={height} ahead={} v2={v2}",
                 peers.len(),
                 if ahead.is_some() { "yes" } else { "no" }
             )

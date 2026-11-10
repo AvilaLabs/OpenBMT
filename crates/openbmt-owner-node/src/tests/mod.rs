@@ -14,7 +14,7 @@ use openbmt_core::heartbeat::SignedHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_counter_node::DriverPort;
 use openbmt_net_io::{AppEvent, Clock, DriverConfig, EventReceiver};
-use openbmt_watch::{HeaderChain, Health, Peer, PeerAddr};
+use openbmt_watch::{HeaderChain, Health, Peer, PeerAddr, PeerTransport};
 
 use crate::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE};
 
@@ -195,6 +195,7 @@ fn the_health_rules_run_on_every_peers_event() {
         addr: PeerAddr::Ip(format!("{n}.{n}.1.1").parse().unwrap()),
         serves_filters: filters,
         best_height: 0,
+        transport: PeerTransport::V1,
     };
     let three = vec![peer(20, true), peer(21, true), peer(22, false)];
     rig.feed(vec![AppEvent::Peers(three.clone(), None, (0, T0 - 8_000))]);

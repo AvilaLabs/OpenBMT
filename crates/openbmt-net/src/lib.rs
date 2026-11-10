@@ -17,7 +17,10 @@
 //! 3. [`session`]: [`Session`], one peer from the first `version` to the
 //!    last byte: the handshake, the timers, and the [`Event`]s a good peer
 //!    produces.
-//! 3. [`manager`]: [`Manager`], which runs several sessions at once, feeds
+//! 4. [`v2`]: [`Transport`], which a session reads and writes through: the
+//!    old transport, or the encrypted one of BIP324 (NR-80 to NR-85), with
+//!    the cryptography of the `bip324` crate.
+//! 5. [`manager`]: [`Manager`], which runs several sessions at once, feeds
 //!    the headers to the watcher's header store, checks blocks by filters
 //!    and fetches announced transactions, and turns what peers send into
 //!    [`Output`]s for the watcher.
@@ -33,15 +36,19 @@ pub mod frame;
 pub mod manager;
 mod reason;
 pub mod session;
+pub mod v2;
 
 #[cfg(test)]
 mod tests;
 
 pub use book::{Added, AddressBook, BookError, Picked, Refusal, Source};
 pub use frame::{encode, Command, Frame, FrameReader, Message, PeerAddress};
-pub use manager::{ConnectRefused, Manager, ManagerConfig, Output, PeerId, Wanted};
+pub use manager::{
+    ConnectRefused, Manager, ManagerConfig, Output, PeerId, TransportChoice, Wanted,
+};
 pub use reason::Drop;
 pub use session::{Event, Request, Session, SessionConfig};
+pub use v2::{Transport, V2Entropy};
 
 /// NR-02: largest `block` payload in bytes.
 pub const MAX_BLOCK_PAYLOAD: u32 = 4_000_000;

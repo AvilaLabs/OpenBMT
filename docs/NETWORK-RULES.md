@@ -204,10 +204,11 @@ thin driver that owns the sockets.
   that the counter was interested in that block. NR-44 and the
   two-filter rule mean many downloaded blocks hold nothing for the shop;
   the rule does not hide the interest completely.
-- **NR-62.** Connections are not encrypted in this version (the BIP324
-  transport is not built yet). Someone who can read the counter's
-  traffic sees that it is a Bitcoin client and which blocks it
-  downloads. With Tor on, Tor encrypts the path to the exit.
+- **NR-62.** A connection that uses the old transport (v1) is not
+  encrypted. Someone who can read the counter's traffic on it sees that
+  it is a Bitcoin client and which blocks it downloads. A connection
+  that uses the encrypted transport (§10) hides that from someone who
+  only listens. With Tor on, Tor encrypts the path to the exit.
 
 ## 8. What these rules do not do
 
@@ -294,3 +295,62 @@ rules are what it decides where the rules above are silent.
   storage shares the directory with its owner and does not lock it again.
   The system lets go of the lock when the process ends, however it ends,
   so a crash leaves no stale lock and the file holds no process number.
+
+## 10. Encrypted transport
+
+The counter speaks the encrypted transport of BIP324 (v2) to peers that
+offer it, so that someone on the shop's network or on the path cannot read
+what the counter asks its peers for, and cannot change it without the peer
+noticing. It speaks the old transport (v1, section 1) to the others. The
+message-level rules above are the same on both: a session hands a message
+to the transport and gets bytes, and feeds it bytes and gets messages.
+
+This is protection against someone who listens. It is not protection
+against someone who changes what is sent, and it does not tell the counter
+who the peer is: the key exchange is not authenticated, as in BIP324
+itself. The counter's cryptography is the `bip324` crate's; the counter
+writes none of it.
+
+- **NR-80.** The counter tries v2 first on every outbound connection: to
+  a peer whose services, from the address book or a seed, include
+  `NODE_P2P_V2` (bit 11), to a fixed peer, and to a peer whose services
+  are not known. It goes straight to v1 only to a peer that stated its
+  own services in its `version` without that bit, and to a peer that
+  NR-81 names. What a seed or another peer says about a peer's services
+  does not keep the counter from trying v2: someone could use that to
+  hold the counter to v1. The counter sends 64 bytes of key and no
+  garbage; the key and the 32 bytes that randomize its encoding come from
+  the caller, as the nonce does (NR-11), and nothing in the crate draws
+  random numbers. Its `version` follows the peer's version packet.
+- **NR-81.** If the v2 handshake fails before any encrypted packet of the
+  peer was read, because the peer closed the connection or answered with
+  the start of a v1 message (the network magic and `version`), the counter
+  connects to that peer once more at once with v1, and the address book
+  remembers for that peer that v2 failed, for 24 hours **[to tune]**
+  (kept in memory: a restart forgets it). After an encrypted packet was
+  read there is no way back to v1: a failure then is a dropped peer, with
+  no ban and no mark against it (NR-25 does not apply), just closed. An
+  attacker on the path can force v1 this way, as BIP324 itself says:
+  v2 here protects against a passive listener, not against an active one.
+  Which transport each peer uses is shown to the app (NR-82), so that the
+  shop's screen can say so.
+- **NR-82.** The list of peers the app is given (`health_peers` and the
+  `Peers` event) names the transport of each peer, v1 or v2. No health
+  rule reads it.
+- **NR-83.** Limits. The peer's garbage is at most 4,095 bytes, then the
+  terminator, or the peer is dropped. Before its version packet a peer may
+  send at most 8 decoy packets of at most 4,096 bytes of contents each.
+  After the handshake a packet holds at most 4,000,013 bytes of contents,
+  which is the largest message of NR-02 and the 13 bytes that name its
+  command; the length is checked from the 3 length bytes, before any of
+  the packet is kept. The limits of NR-02 and NR-03 apply to the payload
+  of the message in a packet. Decoy packets are read and ignored, and
+  their bytes are counted: more than 1,000,000 in all drops the peer
+  **[to tune]**. A packet that fails its authentication drops the peer at
+  once.
+- **NR-84.** The session ID of v2, which both ends derive and nobody
+  else can, is available from the session once the peer's version packet
+  has been read (`Session::v2_session_id`), so that it can later be
+  compared out of band. Nothing uses it yet.
+- **NR-85.** With Tor on (NR-26) the same rules apply: v2 inside the
+  connection through the proxy is allowed and is not required.

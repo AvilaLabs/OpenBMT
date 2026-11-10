@@ -93,6 +93,25 @@ pub enum Drop {
     HandshakeTimeout,
     /// NR-14: the last ping was still unanswered when the next was due.
     PingUnanswered,
+    /// NR-81: the peer answered the encrypted handshake with the start of
+    /// an old-transport message. The caller may try this peer again with
+    /// the old transport.
+    V2NotSpoken,
+    /// NR-83: the key exchange or a cipher could not be set up.
+    V2Crypto,
+    /// NR-83: 4,095 bytes of garbage came and no terminator.
+    V2Garbage,
+    /// NR-83: a packet failed its authentication.
+    V2Auth,
+    /// NR-83: a packet is longer than a message may be.
+    V2TooLong {
+        /// The length the packet states, in bytes of contents.
+        len: u32,
+        /// The longest allowed.
+        limit: u32,
+    },
+    /// NR-83: more decoy packets than the limit.
+    V2Decoys,
 }
 
 impl Drop {
@@ -116,6 +135,12 @@ impl Drop {
             | Self::DuplicateVerack
             | Self::NotReady => "NR-13",
             Self::HandshakeTimeout | Self::PingUnanswered => "NR-14",
+            Self::V2NotSpoken => "NR-81",
+            Self::V2Crypto
+            | Self::V2Garbage
+            | Self::V2Auth
+            | Self::V2TooLong { .. }
+            | Self::V2Decoys => "NR-83",
         }
     }
 }
@@ -174,6 +199,14 @@ impl fmt::Display for Drop {
             Self::NotReady => write!(f, "a request before the handshake ended"),
             Self::HandshakeTimeout => write!(f, "the handshake took 30 seconds or more"),
             Self::PingUnanswered => write!(f, "the last ping was not answered"),
+            Self::V2NotSpoken => write!(f, "the peer does not speak the encrypted transport"),
+            Self::V2Crypto => write!(f, "the encrypted transport could not be set up"),
+            Self::V2Garbage => write!(f, "4095 bytes of garbage and no terminator"),
+            Self::V2Auth => write!(f, "a packet did not authenticate"),
+            Self::V2TooLong { len, limit } => {
+                write!(f, "a packet of {len} bytes is over the limit {limit}")
+            }
+            Self::V2Decoys => write!(f, "too many decoy packets"),
         }
     }
 }

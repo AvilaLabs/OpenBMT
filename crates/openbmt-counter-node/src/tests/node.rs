@@ -10,7 +10,7 @@ use bitcoin::Transaction;
 use openbmt_core::policy::{CheckMode, OffReason};
 use openbmt_counter::{OpenRefused, Report, State, Store, Why};
 use openbmt_net_io::AppEvent;
-use openbmt_watch::{check_health, HeaderChain, Peer, Problem};
+use openbmt_watch::{check_health, HeaderChain, Peer, PeerTransport, Problem};
 
 use super::kit::*;
 use crate::{DirStore, Node, StartError, NOTE_LOG, TX_CACHE};
@@ -324,6 +324,7 @@ fn opening_needs_the_health_rules_to_hold() {
         addr: peer(n),
         serves_filters: true,
         best_height: 0,
+        transport: PeerTransport::V1,
     };
     rig.feed(vec![AppEvent::Peers(vec![peer_at(20)], None, (0, T0))]);
     assert_eq!(

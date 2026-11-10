@@ -1,19 +1,23 @@
 //! Checks that the tests line up with the rules file.
 
 const RULES: &str = include_str!("../../../../docs/NETWORK-RULES.md");
-const TEST_SOURCES: [&str; 3] = [
+const TEST_SOURCES: [&str; 4] = [
     include_str!("driver.rs"),
     include_str!("socks.rs"),
     include_str!("storage.rs"),
+    include_str!("v2.rs"),
 ];
 
 /// The rules this crate implements: those of the net crate that only a
 /// driver can carry out, and the ones the driver decides itself (NR-70 and
 /// on).
-const IMPLEMENTED: [&str; 15] = [
+const IMPLEMENTED: [&str; 20] = [
     "NR-22", "NR-23", "NR-24", "NR-25", "NR-26", "NR-70", "NR-71", "NR-72", "NR-73", "NR-74",
-    "NR-75", "NR-76", "NR-77", "NR-78", "NR-79",
+    "NR-75", "NR-76", "NR-77", "NR-78", "NR-79", "NR-80", "NR-81", "NR-82", "NR-83", "NR-85",
 ];
+
+/// Rules from NR-70 on that the net crate alone carries out.
+const IN_NET_ONLY: [&str; 1] = ["NR-84"];
 
 /// Every rule ID that the rules file defines (in bold at the start of a
 /// bullet).
@@ -43,7 +47,10 @@ fn every_rule_from_nr_70_on_is_implemented_here() {
     for id in rule_ids() {
         let number: u32 = id[3..].parse().unwrap();
         if number >= 70 {
-            assert!(IMPLEMENTED.contains(&id.as_str()), "{id} has no test here");
+            assert!(
+                IMPLEMENTED.contains(&id.as_str()) || IN_NET_ONLY.contains(&id.as_str()),
+                "{id} has no test here"
+            );
         }
     }
 }

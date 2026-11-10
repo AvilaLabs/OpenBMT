@@ -701,3 +701,41 @@ fn nr_01_a_session_drops_a_message_for_another_network() {
     );
     assert_eq!(d, Drop::WrongMagic);
 }
+
+// ----- the same, on the encrypted transport ----------------------------------
+
+use super::v2kit::in_v2;
+
+macro_rules! also_over_v2 {
+    ($($name:ident => $test:ident,)*) => {
+        $(
+            #[test]
+            fn $name() {
+                in_v2($test);
+            }
+        )*
+    };
+}
+
+also_over_v2! {
+    nr_11_the_version_the_counter_sends_says_as_little_as_it_can_over_v2 =>
+        nr_11_the_version_the_counter_sends_says_as_little_as_it_can,
+    nr_11_nothing_asks_for_compact_blocks_or_addresses_over_v2 =>
+        nr_11_nothing_asks_for_compact_blocks_or_addresses,
+    nr_12_the_peer_services_and_start_height_are_reported_as_claims_over_v2 =>
+        nr_12_the_peer_services_and_start_height_are_reported_as_claims,
+    nr_13_a_request_is_sent_once_both_veracks_are_in_over_v2 =>
+        nr_13_a_request_is_sent_once_both_veracks_are_in,
+    nr_14_a_ping_is_sent_every_two_minutes_and_must_be_answered_over_v2 =>
+        nr_14_a_ping_is_sent_every_two_minutes_and_must_be_answered,
+    nr_14_an_unanswered_ping_when_the_next_is_due_is_dropped_over_v2 =>
+        nr_14_an_unanswered_ping_when_the_next_is_due_is_dropped,
+    nr_14_a_pong_with_the_wrong_nonce_is_ignored_over_v2 =>
+        nr_14_a_pong_with_the_wrong_nonce_is_ignored,
+    nr_14_the_peers_ping_is_answered_with_the_same_nonce_over_v2 =>
+        nr_14_the_peers_ping_is_answered_with_the_same_nonce,
+    nr_14_a_receive_sends_the_ping_that_is_due_over_v2 =>
+        nr_14_a_receive_sends_the_ping_that_is_due,
+    nr_30_each_request_is_written_as_the_rules_say_over_v2 =>
+        nr_30_each_request_is_written_as_the_rules_say,
+}

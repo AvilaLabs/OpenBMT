@@ -22,11 +22,21 @@
 #   9. A connection to a port that is not a Bitcoin peer ends within the
 #      handshake limit and does not hang.
 #
-# Needs: bitcoind and bitcoin-cli (Bitcoin Core 32.0 or newer), jq on PATH,
-# and cargo unless PEER names a prebuilt `regtest_peer` example binary.
+# Every step runs against a node with -v2transport=$DRILL_V2TRANSPORT (1 by
+# default, 0 for a node that speaks the old transport only). Step 2 checks
+# the transport (NR-80, NR-81) and step 2b compares the session ID that
+# both ends derive (NR-84). `scripts/net-v2-interop-core.sh` runs both
+# settings.
+#
+# Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin (the
+# directory is put first on PATH; set CORE_BIN to use another), jq, and
+# cargo unless PEER names a prebuilt `regtest_peer` example binary.
 #
 # Environment:
-#   DRILL_DIR       scratch directory (default: a new temporary directory)
+#   CORE_BIN        directory with bitcoind and bitcoin-cli
+#   DRILL_V2TRANSPORT  1 (default) or 0: the node's -v2transport setting
+#   DRILL_DIR       scratch directory (default: a new directory under
+#                   ~/.cache/openbmt)
 #   DRILL_RPC_PORT  RPC port for the regtest node (default 18946)
 #   DRILL_P2P_PORT  peer port for the regtest node (default 18947)
 #   DRILL_KEEP=1    keep the scratch directory afterwards
@@ -37,9 +47,17 @@
 
 set -euo pipefail
 
+CORE_BIN=${CORE_BIN:-$HOME/.local/opt/bitcoin-core-32.1/bin}
+export PATH="$CORE_BIN:$PATH"
+V2T=${DRILL_V2TRANSPORT:-1}
+case "$V2T" in 0 | 1) ;; *) echo "DRILL_V2TRANSPORT must be 0 or 1" >&2; exit 1 ;; esac
 RPC_PORT=${DRILL_RPC_PORT:-18946}
 P2P_PORT=${DRILL_P2P_PORT:-18947}
-DIR=${DRILL_DIR:-$(mktemp -d)}
+mkdir -p "$HOME/.cache/openbmt"
+DIR=${DRILL_DIR:-$(mktemp -d "$HOME/.cache/openbmt/net-XXXXXX")}
+# NR-81: the example remembers a peer that does not speak the encrypted
+# transport in this file, as the counter's address book does.
+export REGTEST_MEMORY="$DIR/v2-memory"
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PEER=${PEER:-cargo run --quiet --locked --manifest-path "$ROOT/Cargo.toml" -p openbmt-net --example regtest_peer --}
 BLOCKS=2105
@@ -59,12 +77,14 @@ show() { sed 's/^/      /'; }
 for tool in bitcoind bitcoin-cli jq; do
   command -v "$tool" >/dev/null || fail "$tool is not on PATH"
 done
+[ "$(command -v bitcoind)" = "$CORE_BIN/bitcoind" ] || fail "bitcoind is not the one in $CORE_BIN"
 VERSION=$(bitcoind --version | head -1)
 case "$VERSION" in
   "Bitcoin Core daemon version"*) ;;
   *) fail "this check is for Bitcoin Core; found: $VERSION" ;;
 esac
-say "$VERSION"
+say "$VERSION (-v2transport=$V2T)"
+if [ "$V2T" = 1 ]; then WANT=v2; else WANT=v1; fi
 
 mkdir -p "$DIR"
 NODE_PID=
@@ -104,7 +124,7 @@ wait_filters() {
 bitcoind -regtest -datadir="$DIR" -rpcport="$RPC_PORT" -port="$P2P_PORT" \
   -listen=1 -bind=127.0.0.1 -listenonion=0 -daemonwait \
   -blockfilterindex=1 -peerblockfilters=1 -txindex=0 \
-  -fallbackfee=0.0001 -dbcache=50 >/dev/null
+  -fallbackfee=0.0001 -dbcache=50 -v2transport="$V2T" >/dev/null
 NODE_PID=$(cat "$DIR/regtest/bitcoind.pid")
 
 say "1. A node that serves filters, and $BLOCKS blocks"
@@ -129,6 +149,7 @@ say "2. Handshake"
 for TRY in 1 2 3 4 5 6 7 8 9 10; do
   peer handshake
   [ "$CODE" = 0 ] || fail "the handshake did not finish"
+  [ "$TRY" = 1 ] && FIRST=$OUT
   [ "$(field ready 3 <<<"$OUT")" = "$BLOCKS" ] && break
   echo "      start height $(field ready 3 <<<"$OUT") on try $TRY, not $BLOCKS yet"
   sleep 1
@@ -138,6 +159,47 @@ SERVICES=$(field ready 2 <<<"$OUT")
 [ "$(field filters 2 <<<"$OUT")" = yes ] || fail "the compact filter service is not offered"
 [ $((16#$SERVICES & 0x40)) -ne 0 ] || fail "services $SERVICES do not have bit 6"
 ok "ready, services $SERVICES, start height $BLOCKS, compact filters offered"
+[ "$(field transport 2 <<<"$FIRST")" = "$WANT" ] || fail "the first connection did not end on $WANT"
+if [ "$WANT" = v1 ]; then
+  [ "$(field fallback 2 <<<"$FIRST")" = yes ] || fail "the first connection to a v1 node was not the NR-81 fallback"
+  peer handshake
+  [ "$CODE" = 0 ] || fail "the second handshake did not finish"
+  [ "$(field transport 2 <<<"$OUT")" = v1 ] || fail "a later connection was not on v1"
+  [ "$(field fallback 2 <<<"$OUT")" = no ] || fail "a later connection tried the encrypted transport again"
+  ok "the first connection fell back to v1 (NR-81); the next went straight to v1"
+else
+  [ "$(field fallback 2 <<<"$FIRST")" = no ] || fail "a fallback to v1 against a node that speaks v2"
+  ok "the first connection used the encrypted transport (NR-80), no fallback"
+fi
+
+say "2b. The transport as the node sees it (NR-82, NR-84)"
+SIL="$DIR/silent.out"
+: >"$SIL"
+$PEER "$P2P_PORT" silent 12 >"$SIL" 2>&1 &
+SIL_PID=$!
+for _ in $(seq 1 30); do
+  grep -q '^session_id ' "$SIL" && break
+  sleep 0.5
+done
+grep -q '^session_id ' "$SIL" || fail "the session did not get ready"
+INFO=$(cli getpeerinfo | jq -c '[.[] | select(.inbound == true)] | .[0] | {transport_protocol_type, session_id}')
+echo "      node: $INFO"
+CODE=0
+wait "$SIL_PID" || CODE=$?
+[ "$CODE" = 0 ] || fail "the silent session ended with exit code $CODE"
+OURS=$(field session_id 2 <"$SIL")
+echo "      ours: transport $(field transport 2 <"$SIL"), session_id $OURS"
+[ "$(jq -r .transport_protocol_type <<<"$INFO")" = "$WANT" ] || fail "the node reports a transport other than $WANT"
+[ "$(field transport 2 <"$SIL")" = "$WANT" ] || fail "the example reports a transport other than $WANT"
+if [ "$WANT" = v2 ]; then
+  THEIRS=$(jq -r .session_id <<<"$INFO")
+  [ -n "$OURS" ] && [ "$OURS" != none ] || fail "no session ID on our side"
+  [ "$OURS" = "$THEIRS" ] || fail "the session IDs differ: ours $OURS, the node's $THEIRS"
+  ok "transport v2 on both sides, and the session ID is the same: $OURS"
+else
+  [ "$OURS" = none ] || fail "a v1 connection has a session ID"
+  ok "transport v1 on both sides; no session ID on either"
+fi
 
 say "3. Header sync (NR-30, NR-31)"
 peer sync "$BEST"
@@ -225,13 +287,13 @@ ok "15 s without a drop; nothing sent after the handshake except answers to ping
 say "9. A port that is not a Bitcoin peer (NR-14)"
 START=$(date +%s)
 CODE=0
-OUT=$(timeout 45 $PEER "$RPC_PORT" handshake) || CODE=$?
+OUT=$(timeout 80 $PEER "$RPC_PORT" handshake) || CODE=$?
 SECS=$(($(date +%s) - START))
 printf '%s\n' "$OUT" | show
 echo "      exit code $CODE after $SECS s"
 case "$CODE" in
   1 | 2) grep -Eq '^(dropped|failed) ' <<<"$OUT" || fail "no dropped or failed line" ;;
-  124) fail "the connection to the RPC port hung past 45 s" ;;
+  124) fail "the connection to the RPC port hung past 80 s" ;;
   *) fail "unexpected exit code $CODE" ;;
 esac
 ok "the RPC port ended the session with a clear line after $SECS s"

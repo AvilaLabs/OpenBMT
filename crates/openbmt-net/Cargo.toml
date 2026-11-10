@@ -19,3 +19,9 @@ openbmt-core = { path = "../openbmt-core" }
 # The manager feeds the headers it receives to the watcher's header store
 # and checks the blocks with the watcher's rules.
 openbmt-watch = { path = "../openbmt-watch" }
+
+# The encrypted transport (NR-80 to NR-85): the key exchange and the packet
+# ciphers of BIP324, with no I/O of their own. Pinned exactly: 0.11.1 is the
+# first version whose key encoding is not a fingerprint. The `std` feature is
+# off, because the randomness comes from the caller.
+bip324 = { version = "=0.11.1", default-features = false }

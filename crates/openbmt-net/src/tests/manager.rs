@@ -1821,3 +1821,59 @@ fn nr_45_a_block_that_cannot_be_had_stays_one_item_and_the_rest_go_on() {
     assert_eq!(n.m.sizes().work, 1);
     assert_eq!(n.m.checked_height(), 0);
 }
+
+// ----- the same, on the encrypted transport ----------------------------------
+
+use super::v2kit::in_v2;
+
+macro_rules! also_over_v2 {
+    ($($name:ident => $test:ident,)*) => {
+        $(
+            #[test]
+            fn $name() {
+                in_v2($test);
+            }
+        )*
+    };
+}
+
+also_over_v2! {
+    nr_21_health_peers_say_who_serves_filters_and_how_high_over_v2 =>
+        nr_21_health_peers_say_who_serves_filters_and_how_high,
+    nr_22_getaddr_is_sent_once_right_after_ready_and_addresses_pass_through_over_v2 =>
+        nr_22_getaddr_is_sent_once_right_after_ready_and_addresses_pass_through,
+    nr_25_a_peer_that_does_not_answer_a_ping_is_no_misbehaviour_over_v2 =>
+        nr_25_a_peer_that_does_not_answer_a_ping_is_no_misbehaviour,
+    nr_30_every_peer_is_asked_for_headers_when_ready_over_v2 =>
+        nr_30_every_peer_is_asked_for_headers_when_ready,
+    nr_30_a_full_message_of_2000_headers_is_answered_with_another_request_over_v2 =>
+        nr_30_a_full_message_of_2000_headers_is_answered_with_another_request,
+    nr_31_headers_go_to_the_store_and_a_second_peer_sees_them_known_over_v2 =>
+        nr_31_headers_go_to_the_store_and_a_second_peer_sees_them_known,
+    nr_31_a_better_chain_from_a_second_peer_gives_joined_and_left_over_v2 =>
+        nr_31_a_better_chain_from_a_second_peer_gives_joined_and_left,
+    nr_40_two_peers_in_different_groups_are_asked_for_each_filter_over_v2 =>
+        nr_40_two_peers_in_different_groups_are_asked_for_each_filter,
+    nr_42_a_match_makes_the_counter_fetch_the_block_over_v2 =>
+        nr_42_a_match_makes_the_counter_fetch_the_block,
+    nr_43_a_filter_that_hides_a_payment_is_proven_false_and_the_peer_dropped_over_v2 =>
+        nr_43_a_filter_that_hides_a_payment_is_proven_false_and_the_peer_dropped,
+    nr_44_with_a_payment_waiting_every_block_is_fetched_without_a_filter_over_v2 =>
+        nr_44_with_a_payment_waiting_every_block_is_fetched_without_a_filter,
+    nr_45_the_block_is_asked_of_a_peer_that_has_shown_it_over_v2 =>
+        nr_45_the_block_is_asked_of_a_peer_that_has_shown_it,
+    nr_45_not_found_moves_on_at_once_over_v2 =>
+        nr_45_not_found_moves_on_at_once,
+    nr_45_a_peer_that_closes_hands_its_block_to_another_over_v2 =>
+        nr_45_a_peer_that_closes_hands_its_block_to_another,
+    nr_46_a_reorganisation_starts_the_checks_again_from_the_fork_over_v2 =>
+        nr_46_a_reorganisation_starts_the_checks_again_from_the_fork,
+    nr_51_an_announced_transaction_is_asked_for_from_the_first_announcer_over_v2 =>
+        nr_51_an_announced_transaction_is_asked_for_from_the_first_announcer,
+    nr_51_thirty_seconds_without_an_answer_the_next_announcer_is_asked_over_v2 =>
+        nr_51_thirty_seconds_without_an_answer_the_next_announcer_is_asked,
+    nr_53_a_fetched_transaction_is_a_sighting_from_every_announcer_over_v2 =>
+        nr_53_a_fetched_transaction_is_a_sighting_from_every_announcer,
+    nr_55_everything_the_manager_writes_is_a_request_or_a_handshake_message_over_v2 =>
+        nr_55_everything_the_manager_writes_is_a_request_or_a_handshake_message,
+}

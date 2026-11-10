@@ -41,6 +41,9 @@ pub const MAX_ANCHORS: usize = 2;
 pub const MAX_FAILURES: u32 = 3;
 /// NR-25: seconds a peer that broke a rule is not dialed.
 pub const BAN_SECS: u64 = 86_400;
+/// NR-81: seconds after which a peer that did not speak the encrypted
+/// transport is tried with it again **[to tune]**.
+pub const V2_RETRY_SECS: u64 = 86_400;
 
 /// Where the counter heard of an address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +117,10 @@ pub struct Entry {
     pub last_good: Option<u64>,
     /// The time its ban ends (NR-25).
     pub banned_until: Option<u64>,
+    /// NR-81: the time until which the peer is dialed with the old
+    /// transport at once, because it did not speak the encrypted one. Kept
+    /// in memory: the stored form does not hold it, so a start forgets it.
+    pub v2_failed_until: Option<u64>,
 }
 
 /// Why a stored form was refused.
@@ -430,6 +437,7 @@ impl AddressBook {
                 failures: 0,
                 last_good: None,
                 banned_until: None,
+                v2_failed_until: None,
             },
         );
         Added::New
@@ -548,6 +556,28 @@ impl AddressBook {
         }
     }
 
+    /// NR-81: the peer did not speak the encrypted transport. It is dialed
+    /// with the old one for [`V2_RETRY_SECS`].
+    pub fn v2_failed(&mut self, addr: &AddrV2, port: u16, now: u64) {
+        if let Some(entry) = Key::of(addr, port).and_then(|k| self.entries.get_mut(&k)) {
+            entry.v2_failed_until = Some(now.saturating_add(V2_RETRY_SECS));
+        }
+    }
+
+    /// NR-80: whether to try the encrypted transport first with this peer.
+    /// Yes, unless NR-81 says it did not speak it lately, or the peer itself
+    /// (not a seed, not another peer) stated services without
+    /// `NODE_P2P_V2`. An address that is not in the book is tried.
+    pub fn v2_first(&self, addr: &AddrV2, port: u16, now: u64) -> bool {
+        let Some(entry) = self.get(addr, port) else {
+            return true;
+        };
+        if matches!(entry.v2_failed_until, Some(until) if now < until) {
+            return false;
+        }
+        entry.last_good.is_none() || entry.services.has(ServiceFlags::P2P_V2)
+    }
+
     /// NR-24: set the anchors: the first two of these that are entries of
     /// the book. Others are ignored.
     pub fn set_anchors(&mut self, anchors: &[(AddrV2, u16)]) {
@@ -656,6 +686,7 @@ impl AddressBook {
                     failures,
                     last_good,
                     banned_until,
+                    v2_failed_until: None,
                 },
             );
         }

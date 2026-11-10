@@ -32,10 +32,11 @@ use std::time::{Duration, Instant};
 use bitcoin::p2p::address::AddrV2;
 use bitcoin::p2p::ServiceFlags;
 use bitcoin::{BlockHash, Network, ScriptBuf, Txid};
-use openbmt_net::book::BAN_SECS;
+use openbmt_net::book::{BAN_SECS, V2_RETRY_SECS};
 use openbmt_net::manager::Wanted;
 use openbmt_net::{
     AddressBook, ConnectRefused, Manager, ManagerConfig, Output, PeerAddress, PeerId, Source,
+    TransportChoice, V2Entropy,
 };
 use openbmt_watch::{network_group, HeaderStore, Peer, PeerAddr};
 
@@ -109,6 +110,9 @@ pub struct DriverConfig {
     /// NR-74: bytes of events that may wait for the app.
     /// [`EVENT_BYTES`] unless a test shortens it.
     pub event_bytes: usize,
+    /// NR-80: try the encrypted transport first. On in the counter; off only
+    /// to check the driver against peers that speak the old one alone.
+    pub v2: bool,
 }
 
 /// The DNS seed names that Bitcoin Core 32.1 ships for the network
@@ -152,6 +156,7 @@ impl DriverConfig {
             allow_local: false,
             redial_pause_secs: REDIAL_PAUSE_SECS,
             event_bytes: EVENT_BYTES,
+            v2: true,
         }
     }
 }
@@ -539,6 +544,7 @@ impl Driver {
             retired: Vec::new(),
             pause: BTreeMap::new(),
             banned: BTreeMap::new(),
+            v2: V2Track::default(),
             noted_local: BTreeSet::new(),
             seed_cursor: 0,
             round: None,
@@ -656,6 +662,16 @@ struct Round {
     outstanding: usize,
 }
 
+/// NR-80, NR-81: what the driver keeps about the encrypted transport.
+#[derive(Default)]
+struct V2Track {
+    /// Connections whose peer did not speak it, until they are removed.
+    refused: BTreeSet<PeerId>,
+    /// Targets that get the old transport until this time, for the ones that
+    /// the address book does not hold.
+    v1_until: BTreeMap<Target, u64>,
+}
+
 /// What `Peers` carried last.
 #[derive(PartialEq)]
 struct Snapshot {
@@ -692,6 +708,7 @@ struct Core<S, C, R> {
     /// NR-25: not dialed before this time, for peers the book may not hold
     /// (a peer on this machine, or a seed name).
     banned: BTreeMap<Target, u64>,
+    v2: V2Track,
     noted_local: BTreeSet<Target>,
     /// Anchors, dialed first after a start.
     initial: VecDeque<Target>,
@@ -829,6 +846,7 @@ where
             Msg::Closed(id) => {
                 if let Some(target) = self.conns.get(&id).map(|c| c.target.clone()) {
                     let out = self.manager.closed(id, now);
+                    self.note_v2_refusals(&out);
                     self.remove_conn(id, now, false);
                     self.emit(AppEvent::Note(format!(
                         "peer {target} closed the connection"
@@ -897,6 +915,7 @@ where
                         )));
                     }
                 }
+                Output::V2NotSpoken { id } => self.note_v2_refused(id),
                 Output::Ready { id, services } => {
                     if let Some(conn) = self.conns.get_mut(&id) {
                         conn.ready_at = Some(now);
@@ -946,7 +965,12 @@ where
         if let Some(reader) = conn.reader.take() {
             self.retired.push(reader);
         }
-        self.pause_target(&conn.target, now);
+        let v2_refused = self.v2.refused.remove(&id);
+        if v2_refused {
+            self.fall_back_to_v1(&conn.target, now);
+        } else {
+            self.pause_target(&conn.target, now);
+        }
         if misbehaved {
             // NR-25.
             self.banned
@@ -954,11 +978,54 @@ where
             if let Some((addr, port)) = book_key(&conn.target) {
                 self.book.misbehaved(&addr, port, now);
             }
-        } else if conn.ready_at.is_none() {
+        } else if conn.ready_at.is_none() && !v2_refused {
             if let Some((addr, port)) = book_key(&conn.target) {
                 self.book.failed(&addr, port, now);
             }
         }
+    }
+
+    /// NR-81: a peer that did not speak the encrypted transport is tried
+    /// again at once with the old one, and is dialed with it for a day.
+    fn fall_back_to_v1(&mut self, target: &Target, now: u64) {
+        self.v2
+            .v1_until
+            .insert(target.clone(), now.saturating_add(V2_RETRY_SECS));
+        if let Some((addr, port)) = book_key(target) {
+            self.book.v2_failed(&addr, port, now);
+        }
+        self.initial.push_front(target.clone());
+        self.emit(AppEvent::Note(format!(
+            "peer {target} does not speak the encrypted transport; trying the old one"
+        )));
+    }
+
+    fn note_v2_refused(&mut self, id: PeerId) {
+        if self.conns.contains_key(&id) {
+            self.v2.refused.insert(id);
+        }
+    }
+
+    /// The `V2NotSpoken` outputs, noted before the connection is removed.
+    fn note_v2_refusals(&mut self, outputs: &[Output]) {
+        for output in outputs {
+            if let Output::V2NotSpoken { id } = output {
+                self.note_v2_refused(*id);
+            }
+        }
+    }
+
+    /// NR-80: which transport a new connection to this target speaks. The
+    /// old one when the settings say so, when the randomness may be
+    /// predictable (a key from it would be no protection), or when NR-81 or
+    /// the address book says so.
+    fn transport_for(&mut self, target: &Target, now: u64) -> TransportChoice {
+        let remembered = self.v2.v1_until.get(target).is_some_and(|t| *t > now);
+        let book_says_v1 = book_key(target).is_some_and(|(a, p)| !self.book.v2_first(&a, p, now));
+        if !self.config.v2 || remembered || book_says_v1 || !self.rng.unpredictable() {
+            return TransportChoice::V1;
+        }
+        TransportChoice::V2(V2Entropy::from_words(|| self.rng.next_u64()))
     }
 
     fn pause_target(&mut self, target: &Target, now: u64) {
@@ -992,7 +1059,11 @@ where
     /// A socket is open: give it to the manager, or close it at once.
     fn adopt(&mut self, id: PeerId, target: Target, stream: TcpStream, now: u64) {
         let nonce = self.rng.next_u64();
-        if let Err(refused) = self.manager.connected(id, peer_addr(&target), nonce, now) {
+        let transport = self.transport_for(&target, now);
+        if let Err(refused) =
+            self.manager
+                .connected_with(id, peer_addr(&target), nonce, now, transport)
+        {
             let _ = stream.shutdown(Shutdown::Both);
             self.pause_target(&target, now);
             if refused == ConnectRefused::LocalGroup && self.noted_local.insert(target.clone()) {
@@ -1057,6 +1128,7 @@ where
                 if conn.stream.write_all(&bytes).is_err() {
                     failed = true;
                     let out = self.manager.closed(id, now);
+                    self.note_v2_refusals(&out);
                     self.remove_conn(id, now, false);
                     self.handle_outputs(out, now);
                 }
@@ -1083,6 +1155,7 @@ where
     fn expire(&mut self, now: u64) {
         self.pause.retain(|_, until| *until > now);
         self.banned.retain(|_, until| *until > now);
+        self.v2.v1_until.retain(|_, until| *until > now);
         let late = self
             .round
             .as_ref()

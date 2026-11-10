@@ -16,6 +16,8 @@ openbmt-signer = { path = "../crates/openbmt-signer" }
 openbmt-spend = { path = "../crates/openbmt-spend" }
 openbmt-watch = { path = "../crates/openbmt-watch" }
 openbmt-net = { path = "../crates/openbmt-net" }
+# The same exact version as openbmt-net, for the peer's side of the handshake.
+bip324 = { version = "=0.11.1", default-features = false }
 openbmt-counter = { path = "../crates/openbmt-counter" }
 openbmt-link = { path = "../crates/openbmt-link" }
 openbmt-courier = { path = "../crates/openbmt-courier" }
@@ -157,6 +159,13 @@ bench = false
 [[bin]]
 name = "net_session"
 path = "fuzz_targets/net_session.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net_v2_bytes"
+path = "fuzz_targets/net_v2_bytes.rs"
 test = false
 doc = false
 bench = false

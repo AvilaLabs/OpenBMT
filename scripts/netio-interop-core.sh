@@ -21,6 +21,14 @@
 #   7. The driver is stopped, one more block is mined, and the driver is
 #      started again over the same data directory: it starts at the stored
 #      tip and the node sends it about one header, not the whole chain.
+#   8. The node drops the driver and the driver dials again: on a node that
+#      speaks the old transport only, the second connection goes straight to
+#      v1 (NR-81) and the driver notes the refusal once.
+#
+# Every step runs against a node with -v2transport=$DRILL_V2TRANSPORT (1 by
+# default, 0 for a node that speaks the old transport only). The first
+# Peers event with a ready peer says which transport it is on, and so does
+# the node's `getpeerinfo`. `scripts/net-v2-interop-core.sh` runs both.
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin (the
 # directory is put first on PATH; set CORE_BIN to use another), jq, and
@@ -28,6 +36,7 @@
 #
 # Environment:
 #   CORE_BIN        directory with bitcoind and bitcoin-cli
+#   DRILL_V2TRANSPORT  1 (default) or 0: the node's -v2transport setting
 #   DRILL_DIR       scratch directory (default: a new directory under
 #                   ~/.cache/openbmt)
 #   DRILL_RPC_PORT  RPC port for the regtest node (default 18956)
@@ -42,8 +51,11 @@ set -euo pipefail
 
 CORE_BIN=${CORE_BIN:-$HOME/.local/opt/bitcoin-core-32.1/bin}
 export PATH="$CORE_BIN:$PATH"
+V2T=${DRILL_V2TRANSPORT:-1}
+case "$V2T" in 0 | 1) ;; *) echo "DRILL_V2TRANSPORT must be 0 or 1" >&2; exit 1 ;; esac
 RPC_PORT=${DRILL_RPC_PORT:-18956}
 P2P_PORT=${DRILL_P2P_PORT:-18957}
+mkdir -p "$HOME/.cache/openbmt"
 BASE=${DRILL_DIR:-$(mktemp -d "$HOME/.cache/openbmt/netio-XXXXXX")}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 NODE_DIR="$BASE/node"
@@ -69,7 +81,8 @@ case "$VERSION" in
   "Bitcoin Core daemon version"*) ;;
   *) fail "this check is for Bitcoin Core; found: $VERSION" ;;
 esac
-say "$VERSION"
+say "$VERSION (-v2transport=$V2T)"
+if [ "$V2T" = 1 ]; then WANT=1; WANT_NAME=v2; else WANT=0; WANT_NAME=v1; fi
 
 mkdir -p "$NODE_DIR" "$STORE_DIR"
 NODE_PID=
@@ -142,7 +155,7 @@ headers_bytes() {
 bitcoind -regtest -datadir="$NODE_DIR" -rpcport="$RPC_PORT" \
   -listen=1 -bind="127.0.0.1:$P2P_PORT" -listenonion=0 -daemonwait \
   -blockfilterindex=1 -peerblockfilters=1 -txindex=0 \
-  -fallbackfee=0.0001 -dbcache=50 >/dev/null
+  -fallbackfee=0.0001 -dbcache=50 -v2transport="$V2T" >/dev/null
 NODE_PID=$(cat "$NODE_DIR/regtest/bitcoind.pid")
 
 say "1. A node that serves filters, and $BLOCKS blocks"
@@ -159,6 +172,16 @@ start_driver first
 await "^peers 0 .* tip=0 " 10 || fail "no first Peers event at the genesis tip"
 await "^peers 1 filters=1 " 30 || fail "no Peers event with one ready peer that offers filters"
 ok "start at the genesis tip, then a ready peer with compact filters: $(grep -E '^peers 1 ' "$LOG" | head -1)"
+grep -Eq "^peers 1 .* v2=$WANT\$" "$LOG" || fail "the ready peer is not on $WANT_NAME (NR-82)"
+NODE_SAYS=$(cli getpeerinfo | jq -r '[.[] | select(.inbound == true)] | .[0].transport_protocol_type')
+[ "$NODE_SAYS" = "$WANT_NAME" ] || fail "the node reports transport $NODE_SAYS, not $WANT_NAME"
+REFUSED=$(grep -c 'does not speak the encrypted transport' "$LOG" || true)
+if [ "$WANT" = 1 ]; then
+  [ "$REFUSED" = 0 ] || fail "the driver fell back to v1 against a node that speaks v2"
+else
+  [ "$REFUSED" = 1 ] || fail "the driver noted the refusal $REFUSED times, not once (NR-81)"
+fi
+ok "the driver's Peers event and the node both say $WANT_NAME; refusals noted: $REFUSED"
 
 say "3. Headers"
 await "tip=$BLOCKS " 30 || fail "the tip did not reach $BLOCKS"
@@ -210,6 +233,27 @@ SENT=$((SECOND - before))
 echo "      the node sent $SENT bytes of headers messages to the driver on the second run (first run: $HEADERS_FIRST)"
 [ "$SENT" -le 400 ] || fail "the node sent $SENT bytes of headers: the chain was downloaded again"
 ok "started at the stored tip $((BLOCKS + 2)), one header joined, $SENT bytes of headers sent (the first run took $HEADERS_FIRST)"
+
+say "8. The node drops the driver; the next connection (NR-80, NR-81)"
+before_ready=$(grep -c '^peers 1 ' "$LOG" || true)
+PEER_ADDR=$(cli getpeerinfo | jq -r '[.[] | select(.inbound == true)] | .[0].addr')
+cli disconnectnode "$PEER_ADDR" >/dev/null
+await "^peers 0 .* tip=$TIP_AFTER " 10 || fail "the driver did not see the connection end"
+for _ in $(seq 1 240); do
+  [ "$(grep -c '^peers 1 ' "$LOG" || true)" -gt "$before_ready" ] && break
+  sleep 0.5
+done
+[ "$(grep -c '^peers 1 ' "$LOG" || true)" -gt "$before_ready" ] || fail "the driver did not dial again"
+grep '^peers 1 ' "$LOG" | tail -1 | grep -Eq "v2=$WANT\$" || fail "the new connection is not on $WANT_NAME"
+NODE_SAYS=$(cli getpeerinfo | jq -r '[.[] | select(.inbound == true)] | .[0].transport_protocol_type')
+[ "$NODE_SAYS" = "$WANT_NAME" ] || fail "the node reports transport $NODE_SAYS for the new connection, not $WANT_NAME"
+REFUSED=$(grep -c 'does not speak the encrypted transport' "$LOG" || true)
+if [ "$WANT" = 1 ]; then
+  [ "$REFUSED" = 0 ] || fail "a refusal was noted against a node that speaks v2"
+else
+  [ "$REFUSED" = 1 ] || fail "the refusal was noted $REFUSED times; the second connection did not go straight to v1"
+fi
+ok "the second connection is on $WANT_NAME; refusals noted in this run: $REFUSED"
 stop_driver
 
 say "Result"

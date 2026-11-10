@@ -32,10 +32,11 @@ use bitcoin::hashes::{sha256, Hash};
 use bitcoin::p2p::ServiceFlags;
 use bitcoin::{Block, BlockHash, Network, ScriptBuf, Transaction, Txid};
 use openbmt_watch::{
-    network_group, Accepted, HeaderChain, HeaderStore, NetGroup, Peer, PeerAddr, Refusal,
-    WellFormedBlock, BEHIND_BLOCKS,
+    network_group, Accepted, HeaderChain, HeaderStore, NetGroup, Peer, PeerAddr, PeerTransport,
+    Refusal, WellFormedBlock, BEHIND_BLOCKS,
 };
 
+use crate::v2::V2Entropy;
 use crate::{Drop, Event, PeerAddress, Request, Session, SessionConfig, MAX_HEADERS};
 
 /// NR-20: connections the counter keeps, as the caller sets it.
@@ -112,6 +113,16 @@ pub struct Wanted {
     pub want_filters: bool,
 }
 
+/// NR-80: how a new connection is to speak. The caller decides; the
+/// randomness of the encrypted transport comes with it.
+#[derive(Debug)]
+pub enum TransportChoice {
+    /// The old transport (NR-81 after a refusal of the encrypted one).
+    V1,
+    /// The encrypted transport of BIP324.
+    V2(V2Entropy),
+}
+
 /// Why [`Manager::connected`] did not take a connection. Nothing is stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectRefused {
@@ -123,6 +134,8 @@ pub enum ConnectRefused {
     LocalGroup,
     /// NR-20: the target number of peers is connected.
     Full,
+    /// NR-80: the randomness for the encrypted transport gives no key.
+    BadEntropy,
 }
 
 impl fmt::Display for ConnectRefused {
@@ -132,6 +145,7 @@ impl fmt::Display for ConnectRefused {
             Self::SameGroup => write!(f, "NR-20: a connected peer is in the same network group"),
             Self::LocalGroup => write!(f, "NR-20: the address is local"),
             Self::Full => write!(f, "NR-20: the target number of peers is connected"),
+            Self::BadEntropy => write!(f, "NR-80: the randomness gives no key"),
         }
     }
 }
@@ -151,6 +165,15 @@ pub enum Output {
         /// a header, block or filter that is refused, or sent data that was
         /// not asked of it. The driver tells the address book.
         misbehaved: bool,
+    },
+    /// NR-81: the encrypted transport was not spoken by this peer: it closed,
+    /// or answered with an old-transport message, before any of its packets
+    /// authenticated. The driver may try the peer again with the old
+    /// transport, and remembers that it did not speak the new one. Sent
+    /// before the `Disconnect` of the same connection, if there is one.
+    V2NotSpoken {
+        /// The connection.
+        id: PeerId,
     },
     /// The handshake is done. The driver tells the address book.
     Ready {
@@ -399,14 +422,30 @@ impl Manager {
         })
     }
 
-    /// NR-20: a new outbound connection is open. Nothing is stored when it
-    /// is refused. The peer's `version` waits in [`Manager::outgoing`].
+    /// NR-20: a new outbound connection is open, on the old transport.
+    /// Nothing is stored when it is refused. The counter's `version` waits
+    /// in [`Manager::outgoing`].
     pub fn connected(
         &mut self,
         id: PeerId,
         addr: PeerAddr,
         nonce: u64,
         now: u64,
+    ) -> Result<(), ConnectRefused> {
+        self.connected_with(id, addr, nonce, now, TransportChoice::V1)
+    }
+
+    /// NR-20, NR-80: a new outbound connection is open, to speak the
+    /// transport the caller chose. On the encrypted one, the counter's key
+    /// waits in [`Manager::outgoing`] and the `version` follows the peer's
+    /// version packet.
+    pub fn connected_with(
+        &mut self,
+        id: PeerId,
+        addr: PeerAddr,
+        nonce: u64,
+        now: u64,
+        transport: TransportChoice,
     ) -> Result<(), ConnectRefused> {
         self.now = now;
         if self.peers.contains_key(&id) {
@@ -422,14 +461,17 @@ impl Manager {
         if self.peers.len() >= self.config.target_peers {
             return Err(ConnectRefused::Full);
         }
-        let session = Session::new(
-            SessionConfig {
-                network: self.config.network,
-                nonce,
-                tip_height: self.store.tip().0,
-            },
-            now,
-        );
+        let config = SessionConfig {
+            network: self.config.network,
+            nonce,
+            tip_height: self.store.tip().0,
+        };
+        let session = match transport {
+            TransportChoice::V1 => Session::new(config, now),
+            TransportChoice::V2(entropy) => {
+                Session::new_v2(config, now, entropy).map_err(|_| ConnectRefused::BadEntropy)?
+            }
+        };
         self.peers.insert(
             id,
             PeerState {
@@ -518,7 +560,11 @@ impl Manager {
     pub fn closed(&mut self, id: PeerId, now: u64) -> Vec<Output> {
         self.now = now;
         let mut out = std::mem::take(&mut self.deferred);
-        if self.peers.remove(&id).is_some() {
+        if let Some(peer) = self.peers.remove(&id) {
+            // NR-81: a close before any packet authenticated.
+            if peer.session.v2_unproven() {
+                out.push(Output::V2NotSpoken { id });
+            }
             self.drops = self.drops.saturating_add(1);
             self.release_tx_of(id);
         }
@@ -564,6 +610,11 @@ impl Manager {
                 addr: p.addr,
                 serves_filters: p.services.has(ServiceFlags::COMPACT_FILTERS),
                 best_height: p.shown_height,
+                transport: if p.session.is_v2() {
+                    PeerTransport::V2
+                } else {
+                    PeerTransport::V1
+                },
             })
             .collect()
     }
@@ -692,7 +743,12 @@ impl Manager {
     /// A session ended. NR-25 applies to every rule of sections 1 and 2, and
     /// not to the timeouts of NR-14.
     fn drop_session(&mut self, id: PeerId, d: Drop, out: &mut Vec<Output>) {
-        let misbehaved = d.rule() != "NR-14";
+        // NR-25 does not apply to a timeout (NR-14), nor to the encrypted
+        // transport (NR-81, NR-83): a path can make those happen.
+        let misbehaved = !matches!(d.rule(), "NR-14" | "NR-81" | "NR-83");
+        if d == Drop::V2NotSpoken && self.peers.contains_key(&id) {
+            out.push(Output::V2NotSpoken { id });
+        }
         self.drop_peer(id, d.to_string(), misbehaved, out);
     }
 
