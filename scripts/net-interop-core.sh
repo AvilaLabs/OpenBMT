@@ -19,6 +19,10 @@
 #      watcher's block checks.
 #   8. After the handshake the session sends nothing but answers to pings
 #      (NR-55) and is not dropped.
+#   8b. Message types: over the transport under test (v2 by default), the
+#      session sees `headers`, `inv`, `tx`, `block`, `cfilter` and `addrv2`
+#      arrive from the node and answers its `ping` with `pong`, and the
+#      node's own counters (`getpeerinfo`) agree that it sent them.
 #   9. A connection to a port that is not a Bitcoin peer ends within the
 #      handshake limit and does not hang.
 #
@@ -283,6 +287,61 @@ echo "      node tip $(cli getbestblockhash)"
 [ "$CODE" = 0 ] || fail "the session ended with exit code $CODE, not a quiet run"
 [ "$(field sent-bytes-after-handshake 2 <<<"$OUT")" = 0 ] || fail "the session sent bytes other than pong after the handshake"
 ok "15 s without a drop; nothing sent after the handshake except answers to pings"
+
+say "8b. Message types over $WANT (the one-byte IDs of BIP324 when v2)"
+# Routable addresses in the node's address book. The node answers `getaddr`
+# with at most 23 percent of its book, rounded down, so a few dozen are
+# needed for an `addrv2` message that is not empty.
+ADDED=0
+for I in $(seq 1 60); do
+  if [ "$(cli addpeeraddress "$((60 + I)).$((10 + I)).$((100 + I)).7" 8333 true | jq -r .success)" = true ]; then
+    ADDED=$((ADDED + 1))
+  fi
+done
+[ "$ADDED" -ge 20 ] || fail "only $ADDED addresses were added to the node's book"
+wait_filters
+MIX="$DIR/mix.out"
+: >"$MIX"
+$PEER "$P2P_PORT" mix 30 "$(cli getblockcount)" "$(cli getbestblockhash)" >"$MIX" 2>&1 &
+MIX_PID=$!
+for _ in $(seq 1 60); do
+  grep -q '^ready-for-actions' "$MIX" && break
+  sleep 0.5
+done
+grep -q '^ready-for-actions' "$MIX" || fail "the mixed session did not get going"
+cli ping
+ADDR_M=$(cli -rpcwallet=miner getnewaddress)
+cli -rpcwallet=miner sendtoaddress "$ADDR_M" 0.001 >/dev/null
+# The payment stays unconfirmed until the node has announced it: a block
+# that holds it first would make the announcement pointless.
+KINDS="headers inv tx block cfilter addrv2 ping"
+SENT_BY_NODE=
+for _ in $(seq 1 25); do
+  SENT_BY_NODE=$(cli getpeerinfo | jq -c '[.[] | select(.inbound == true)] | .[0]')
+  ALL=yes
+  for K in $KINDS; do
+    [ "$(jq -r ".bytessent_per_msg.$K // 0" <<<"$SENT_BY_NODE")" -gt 0 ] || ALL=no
+  done
+  [ "$ALL" = yes ] && break
+  sleep 1
+done
+CODE=0
+wait "$MIX_PID" || CODE=$?
+show <"$MIX"
+[ "$CODE" = 0 ] || fail "the mixed session ended with exit code $CODE"
+[ "$(field transport 2 <"$MIX")" = "$WANT" ] || fail "the mixed session is not on $WANT"
+[ "$(jq -r .transport_protocol_type <<<"$SENT_BY_NODE")" = "$WANT" ] || fail "the node does not report $WANT for this connection"
+for K in $KINDS; do
+  N=$(jq -r ".bytessent_per_msg.$K // 0" <<<"$SENT_BY_NODE")
+  [ "$N" -gt 0 ] || fail "the node did not send a $K message on this connection"
+  echo "      the node sent $K: $N bytes"
+done
+for K in headers inv tx block cfilter addrv2; do
+  [ "$(awk -v k="$K" '$1 == "seen" && $2 == k { print $3 }' <"$MIX")" -gt 0 ] || fail "the session did not see a $K message arrive"
+done
+[ "$(field pongs 2 <"$MIX")" -ge 1 ] || fail "the session did not answer the node's ping"
+[ "$(jq -r '.bytesrecv_per_msg.pong // 0' <<<"$SENT_BY_NODE")" -gt 0 ] || fail "the node did not receive a pong"
+ok "over $WANT: headers, inv, tx, block, cfilter, addrv2 and ping arrived from the node, each read by the session; the pong was read by the node"
 
 say "9. A port that is not a Bitcoin peer (NR-14)"
 START=$(date +%s)

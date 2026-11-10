@@ -30,7 +30,7 @@ use bitcoin::{BlockHash, Network, ScriptBuf, WScriptHash};
 use openbmt_net_io::{
     AppEvent, DirLock, Driver, DriverConfig, FileStorage, OsRandomness, SystemClock,
 };
-use openbmt_watch::{network_group, HeaderStore, NetGroup};
+use openbmt_watch::{network_group, HeaderStore, NetGroup, PeerTransport};
 
 const USAGE: &str = "usage: observe <bitcoin|signet> <data dir> <seconds> [headers-only]";
 
@@ -148,6 +148,13 @@ fn run(args: &[String]) -> Result<(), String> {
     let mut not_behind: Option<f64> = None;
     let mut two_filter_groups: Option<f64> = None;
     let mut last_peers = String::new();
+    // NR-81, NR-82: the distinct peers that were ready on each transport,
+    // the refusals the driver noted, and the drops by rule. Only counts
+    // are printed, never addresses.
+    let mut seen_v2: BTreeSet<openbmt_watch::PeerAddr> = BTreeSet::new();
+    let mut seen_v1: BTreeSet<openbmt_watch::PeerAddr> = BTreeSet::new();
+    let mut v2_refusals = 0u64;
+    let mut drops: BTreeMap<String, u64> = BTreeMap::new();
 
     while Instant::now() < end {
         let wait = end.saturating_duration_since(Instant::now());
@@ -173,6 +180,12 @@ fn run(args: &[String]) -> Result<(), String> {
                     .filter(|p| p.serves_filters)
                     .map(|p| network_group(&p.addr))
                     .collect();
+                for p in &peers {
+                    match p.transport {
+                        PeerTransport::V2 => seen_v2.insert(p.addr.clone()),
+                        PeerTransport::V1 => seen_v1.insert(p.addr.clone()),
+                    };
+                }
                 if ready > 0 && first_ready.is_none() {
                     first_ready = Some(t);
                 }
@@ -235,6 +248,15 @@ fn run(args: &[String]) -> Result<(), String> {
             }
             AppEvent::Note(text) => {
                 *kinds.entry("note").or_default() += 1;
+                if text.contains("does not speak the encrypted transport") {
+                    v2_refusals += 1;
+                }
+                if text.contains(" dropped") {
+                    if let Some(at) = text.find("NR-") {
+                        let rule: String = text.chars().skip(at).take(5).collect();
+                        *drops.entry(rule).or_default() += 1;
+                    }
+                }
                 println!("{t:.1} note {text}");
             }
             AppEvent::Checked(height) => {
@@ -279,6 +301,15 @@ fn run(args: &[String]) -> Result<(), String> {
         "sightings: {sightings} ({} distinct txids)",
         sighting_ids.len()
     );
+    println!(
+        "peers ready on v2: {} distinct, on v1: {} distinct",
+        seen_v2.len(),
+        seen_v1.len()
+    );
+    println!("v2 refusals noted (fallback to v1): {v2_refusals}");
+    for (rule, n) in &drops {
+        println!("drops by {rule}: {n}");
+    }
     println!("blocks fetched in full: {}", blocks.len());
     for (t, h, hash, size) in &blocks {
         println!("  at {t:.1}s height {h} {hash} {size} bytes");

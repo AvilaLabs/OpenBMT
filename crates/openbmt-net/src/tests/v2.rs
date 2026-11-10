@@ -15,7 +15,8 @@ use super::manager_kit::*;
 use super::v2kit::{in_v2, message_of, Peer2};
 use crate::book::{Source, V2_RETRY_SECS};
 use crate::v2::{
-    contents_of, wipe, MAX_CONTENTS, MAX_DECOY_BYTES, MAX_GARBAGE, MAX_HANDSHAKE_DECOYS,
+    contents_of, short_id, short_name, wipe, MAX_CONTENTS, MAX_DECOY_BYTES, MAX_GARBAGE,
+    MAX_HANDSHAKE_DECOYS,
 };
 use crate::{
     AddressBook, ConnectRefused, Drop, Event, Output, PeerId, Session, TransportChoice, V2Entropy,
@@ -765,4 +766,54 @@ fn nr_85_a_peer_reached_by_name_takes_the_same_transport_rules() {
         n.m.connected_with(PeerId(2), PeerAddr::Named, 2, n.now, TransportChoice::V1),
         Err(ConnectRefused::SameGroup)
     );
+}
+
+/// BIP324's list of one-byte message IDs, written out here by number and
+/// name, apart from the table in `v2.rs`.
+const BIP_IDS: [(u8, &str); 28] = [
+    (1, "addr"),
+    (2, "block"),
+    (3, "blocktxn"),
+    (4, "cmpctblock"),
+    (5, "feefilter"),
+    (6, "filteradd"),
+    (7, "filterclear"),
+    (8, "filterload"),
+    (9, "getblocks"),
+    (10, "getblocktxn"),
+    (11, "getdata"),
+    (12, "getheaders"),
+    (13, "headers"),
+    (14, "inv"),
+    (15, "mempool"),
+    (16, "merkleblock"),
+    (17, "notfound"),
+    (18, "ping"),
+    (19, "pong"),
+    (20, "sendcmpct"),
+    (21, "tx"),
+    (22, "getcfilters"),
+    (23, "cfilter"),
+    (24, "getcfheaders"),
+    (25, "cfheaders"),
+    (26, "getcfcheckpt"),
+    (27, "cfcheckpt"),
+    (28, "addrv2"),
+];
+
+#[test]
+fn nr_80_the_table_of_one_byte_ids_is_the_one_of_bip324_by_name_and_number() {
+    for (id, name) in BIP_IDS {
+        assert_eq!(short_name(id), Some(name), "ID {id}");
+        assert_eq!(short_id(name), Some(id), "{name}");
+    }
+    // Nothing else has a short ID: 0 means a long command follows, and the
+    // numbers above 28 are not assigned.
+    assert_eq!(short_name(0), None);
+    for id in 29..=255u8 {
+        assert_eq!(short_name(id), None, "ID {id}");
+    }
+    assert_eq!(short_id("version"), None);
+    assert_eq!(short_id("verack"), None);
+    assert_eq!(short_id(""), None);
 }

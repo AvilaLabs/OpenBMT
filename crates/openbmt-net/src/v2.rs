@@ -105,7 +105,7 @@ pub(crate) fn short_name(id: u8) -> Option<&'static str> {
 }
 
 /// The one-byte ID of a command, if it has one.
-fn short_id(name: &str) -> Option<u8> {
+pub(crate) fn short_id(name: &str) -> Option<u8> {
     let at = SHORT_IDS.iter().skip(1).position(|n| *n == name)?;
     u8::try_from(at.checked_add(1)?).ok()
 }

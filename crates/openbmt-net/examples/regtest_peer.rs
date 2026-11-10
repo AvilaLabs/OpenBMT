@@ -22,6 +22,13 @@
 //!   them and stop at the first that pays the script.
 //! - `silent <seconds>`: send nothing after the handshake and print what
 //!   arrives.
+//! - `mix <seconds> <height> <block hash>`: sync, ask for addresses, the
+//!   block's filter and the block, print `ready-for-actions`, and for the
+//!   given seconds answer what arrives (fetching announced transactions).
+//!   It ends with `seen <kind> <n>` lines for headers, inv, tx, block,
+//!   cfilter and addrv2 messages that arrived, and `pongs <n>`, the replies
+//!   to the peer's pings. The script reads the peer's own count of what it
+//!   sent from `getpeerinfo` in the middle of the window.
 //!
 //! The transport is the counter's (NR-80, NR-81): the encrypted one first,
 //! and after a peer that does not speak it the old one at once, which is
@@ -54,7 +61,7 @@ use openbmt_watch::{payments_in_block, Accepted, HeaderStore};
 const NETWORK: Network = Network::Regtest;
 const USAGE: &str = "usage: regtest_peer <port> handshake | sync <tip hash> | announce <seconds> \
 | filter <height> <block hash> <script hex> | block <block hash> <script hex> \
-| tx <seconds> <script hex> | silent <seconds>";
+| tx <seconds> <script hex> | silent <seconds> | mix <seconds> <height> <block hash>";
 /// Seconds to wait for one answer.
 const ANSWER_SECS: u64 = 30;
 /// Seconds a sync may take.
@@ -134,6 +141,8 @@ struct Peer {
     /// Whether the old transport is in use because the encrypted one was
     /// refused (NR-81).
     fallback: bool,
+    /// Replies to the peer's pings.
+    pongs: usize,
 }
 
 /// A key's worth of entropy from the system.
@@ -235,6 +244,7 @@ impl Peer {
             accepted: 0,
             header_messages: 0,
             fallback: false,
+            pongs: 0,
         };
         peer.flush()?;
         Ok(peer)
@@ -252,10 +262,16 @@ impl Peer {
             if self.counting && bytes.len() != 29 {
                 self.sent_after_handshake += bytes.len();
             }
+            if self.counting && bytes.len() == 29 {
+                self.pongs += 1;
+            }
         } else {
             for (command, len) in self.sent.push(&bytes) {
                 if self.counting && command != "pong" {
                     self.sent_after_handshake += 24 + len;
+                }
+                if self.counting && command == "pong" {
+                    self.pongs += 1;
                 }
                 self.sent_log.push(command);
             }
@@ -422,6 +438,11 @@ fn run(port: u16, args: &[String]) -> Result<(), Exit> {
         "announce" | "silent" => {
             parse::<u64>("seconds", arg(1)?)?;
         }
+        "mix" => {
+            parse::<u64>("seconds", arg(1)?)?;
+            parse::<u32>("height", arg(2)?)?;
+            parse::<BlockHash>("block hash", arg(3)?)?;
+        }
         "filter" => {
             parse::<u32>("height", arg(1)?)?;
             parse::<BlockHash>("block hash", arg(2)?)?;
@@ -565,6 +586,45 @@ fn run(port: u16, args: &[String]) -> Result<(), Exit> {
                     }
                 }
             }
+        }
+        "mix" => {
+            let seconds: u64 = parse("seconds", arg(1)?)?;
+            let height: u32 = parse("height", arg(2)?)?;
+            let block: BlockHash = parse("block hash", arg(3)?)?;
+            peer.sync(None)?;
+            peer.send(Request::GetAddr)?;
+            peer.send(Request::GetFilter { height, block })?;
+            peer.send(Request::GetBlock(block))?;
+            println!("ready-for-actions");
+            let (mut inv, mut tx, mut full, mut cfilter, mut addrv2) = (0, 0, 0, 0, 0);
+            let deadline = Instant::now() + Duration::from_secs(seconds);
+            while Instant::now() < deadline {
+                for event in peer.pump()? {
+                    match event {
+                        Event::Announced { txids, blocks } => {
+                            inv += 1;
+                            if !txids.is_empty() {
+                                peer.send(Request::GetTx(txids))?;
+                            }
+                            if !blocks.is_empty() {
+                                peer.ask_headers()?;
+                            }
+                        }
+                        Event::Tx(_) => tx += 1,
+                        Event::Block(_) => full += 1,
+                        Event::Filter { .. } => cfilter += 1,
+                        Event::Addresses(_) => addrv2 += 1,
+                        _ => {}
+                    }
+                }
+            }
+            println!("seen headers {}", peer.header_messages);
+            println!("seen inv {inv}");
+            println!("seen tx {tx}");
+            println!("seen block {full}");
+            println!("seen cfilter {cfilter}");
+            println!("seen addrv2 {addrv2}");
+            println!("pongs {}", peer.pongs);
         }
         "silent" => {
             let seconds: u64 = parse("seconds", arg(1)?)?;
