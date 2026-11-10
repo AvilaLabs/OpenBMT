@@ -9,8 +9,10 @@ node with the real health rules?
 Short answer: the heartbeat path works end to end (steps 3a, 5, 6a, 7
 below). Instant acceptance cannot be reached on one machine, and the real
 health rules cannot hold there. Both have the same cause, which is in the
-grouping rule and was not changed. Five steps are marked FAIL for that
-reason, with the exact text the run printed.
+grouping rule and was not changed. Five steps are reported as NOT RUN for
+that reason, with the exact text the run printed: they did not show what
+they were written to show. They are not passes. With peers in three
+network groups the same outcome would be a failure.
 
 ## What was run
 
@@ -80,16 +82,16 @@ The same table on both runs.
 
 | Step | What | Result |
 |---|---|---|
-| 1 | Counter and owner watcher healthy by the real rules | FAIL |
+| 1 | Counter and owner watcher healthy by the real rules | NOT RUN |
 | 1b | Both examples reach their node, the tip is 150, both answer healthy under the switch | PASS |
 | 2a | No heartbeat taken: the counter shows view none, not verified, last number 0 | PASS |
-| 2b | A paid sale waits with the "no independent watcher" reason | FAIL |
+| 2b | A paid sale waits with the "no independent watcher" reason | NOT RUN |
 | 3a | A fresh heartbeat from the owner watcher is taken and verified | PASS |
-| 3b | A new paid sale shows `PaidInstant` | FAIL |
-| 4 | `PosPaid` once, exposure on the ledger, released at the first confirmation | FAIL |
+| 3b | A new paid sale shows `PaidInstant` | NOT RUN |
+| 4 | `PosPaid` once, exposure on the ledger, released at the first confirmation | NOT RUN |
 | 5 | A replayed heartbeat, one signed by the approver key and one naming another counter are refused, each for its own reason | PASS |
 | 6a | With the age limit at 60 seconds, the heartbeat really ages past it (the script waits 65 seconds) | PASS |
-| 6b | A new paid sale shows `Waiting` again with the no-watcher reason | FAIL |
+| 6b | A new paid sale shows `Waiting` again with the no-watcher reason | NOT RUN |
 | 7 | A tip the counter does not hold is "not verified" and no alarm; another block at a held height is "not verified" and logged as a disagreement | PASS |
 
 What the run printed:
@@ -162,7 +164,7 @@ tests, not against Core in this slice.
 ## Where the existing crates did not fit
 
 - **The grouping rule and the manager.** See "The loopback limit". It is
-  the reason for five FAIL lines. It looks like a limit of regtest and not a
+  the reason for the five NOT RUN lines. It looks like a limit of regtest and not a
   defect: a counter on a real network has peers in real groups.
 - **`Facts.heartbeat`.** The counter's `Facts` still carries a
   `Heartbeat` supplied by the caller, because the counter's own tests use it.
