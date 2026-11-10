@@ -70,6 +70,26 @@ smaller list is not worth a weaker primitive.
    on the lists, are never compiled into a shipped program, and follow
    rules 2, 3, 6 and 7.
 
+## The Android Key app
+
+The Key app for Android (`apps/key-android/`) is built without Gradle,
+without AndroidX and without Jetpack Compose. It has no Cargo package of its
+own and is not in `deps/`; its Rust part is the `openbmt-key-ffi` list above.
+
+- **One runtime library: the Kotlin standard library**, `kotlin-stdlib.jar`
+  2.2.20, Apache License 2.0. `d8` puts the classes the app uses into the
+  APK's dex. Nothing else is linked in: no AndroidX, no Compose, no HTTP or
+  JSON library, no image or QR library. The build script checks the jar's
+  SHA-256 against the value of the 2.2.20 release it was taken from.
+- **Build tools, never shipped:** the Kotlin compiler 2.2.20 (not copied into
+  the repository), JDK 21 with `keytool`, the Android SDK's `android.jar` of
+  platform 36 and build-tools 36.0.0 (`aapt2`, `d8`, `zipalign`,
+  `apksigner`), and the Android NDK 26.3.11579264 (clang, `llvm-strip`,
+  `llvm-readelf`). They run on the builder's machine with the builder's
+  rights and are trusted as the Rust toolchain is.
+- **Signing key.** The build makes a throwaway test key with `keytool`. It is
+  never committed and is not the release key.
+
 ## What this does not do
 
 - **It does not review the packages.** Reading a diff before an update is
