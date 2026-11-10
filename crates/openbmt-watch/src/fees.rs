@@ -136,9 +136,16 @@ pub fn block_fee_sample(
     let vsize_wide = block.weight().to_vbytes_ceil();
     let vsize = u32::try_from(vsize_wide).unwrap_or(u32::MAX);
     let rate_milli = if block.txdata.len() > 1 {
-        let others = vsize_wide.saturating_sub(coinbase.vsize() as u64);
-        (u128::from(fees_sats) * 1000)
-            .checked_div(u128::from(others))
+        // FE-05: the weight of the transactions that pay a fee, without the
+        // coinbase and without the header and count (as Core's `avgfeerate`).
+        let others: u128 = block
+            .txdata
+            .iter()
+            .skip(1)
+            .map(|tx| u128::from(tx.weight().to_wu()))
+            .sum();
+        (u128::from(fees_sats) * 4000)
+            .checked_div(others)
             .and_then(|r| u64::try_from(r).ok())
     } else {
         None

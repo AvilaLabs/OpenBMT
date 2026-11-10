@@ -45,9 +45,11 @@ the stored form.
   (`claimed_less`).
 - **FE-05.** The size is the block's weight divided by 4, rounded up. The
   rate is the fees in thousandths of a satoshi per virtual byte
-  (`rate_milli`): fees times 1,000, divided by the block's size minus the
-  coinbase's own size, rounded down. The coinbase is left out of the size
-  because it pays no fee.
+  (`rate_milli`): fees times 4,000, divided by the summed weight of the
+  block's transactions other than the coinbase, rounded down. The
+  coinbase, the header and the transaction count are left out because
+  they pay no fee. This is the measure of Bitcoin Core's `avgfeerate`
+  (`getblockstats`), in thousandths.
 - **FE-06.** A block with only a coinbase has no rate: it holds no
   information about fees. It is still a sample, with fees and size.
 

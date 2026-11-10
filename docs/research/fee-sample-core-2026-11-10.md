@@ -6,8 +6,9 @@ counts them, with no outside data about the transactions' inputs?
 
 **Answer.** Yes. In the run below every step passes: the fees match
 Core's `totalfee` exactly in three blocks, the size matches Core's
-weights exactly, and the empty block gives fees 0 and no rate. The
-regtest halving at block 150 is used correctly.
+weights exactly, the rate in whole sat/vB equals Core's `avgfeerate`,
+and the empty block gives fees 0 and no rate. The regtest halving at
+block 150 is used correctly.
 
 ## Setup
 
@@ -31,9 +32,12 @@ For each block the sample is compared with `getblockstats` and `getblock`.
 
 | Block | Fees (sample = Core) | Size in vB | Rate (sat/vB) | Core's average |
 |---|---|---|---|---|
-| 102, five transactions | 88,654 sats | 990 | 104.298 | 115 |
+| 102, five transactions | 115,800 sats | 990 | 150.585 | 150 |
 | 103, no transactions | 0 | 221 | none | 0 |
-| 156, five transactions, halved subsidy | 29,032 sats | 1,059 | 31.625 | 34 |
+| 156, five transactions, halved subsidy | 29,032 sats | 1,059 | 34.696 | 34 |
+
+The fees of block 102 differ from run to run, because the regtest wallet
+picks its own coins and so its transactions differ in size.
 
 - The fees equal `totalfee` in all three blocks.
 - The block's weight equals the weight of its transactions without the
@@ -44,17 +48,16 @@ For each block the sample is compared with `getblockstats` and `getblock`.
 - Block 156 pays a little over 25 coins in all, so the halved subsidy of
   regtest (FE-03) is the one the sample subtracts.
 
-## One difference, by design
+## The rate is Core's measure
 
-Core's `avgfeerate` divides the fees by the weight of the transactions
-without the coinbase. The sample divides by the block's size less the
-coinbase's own size (FE-05), which also counts the 81 bytes of the header
-and the transaction count. The sample is therefore a little lower than
-Core's number: 104 against 115 in a block of about 1,000 virtual bytes,
-31 against 34 in another. In a full block of about 1,000,000 virtual
-bytes the difference is below 0.01 percent. The script checks that the
-sample is never above Core's figure and is below it by no more than that
-share of it (plus one).
+The rate divides the fees by the weight of the transactions other than
+the coinbase (FE-05), which is the weight Core reports as `total_weight`
+and divides by for `avgfeerate`. The script checks that the sample's rate
+equals fees times 4,000 over Core's `total_weight`, and that its whole
+sat/vB equals Core's `avgfeerate`. A first version divided by the block's
+size less the coinbase's, which also counts the 81 bytes of header and
+transaction count; in a small block that read about a fifth lower than
+Core, so it was changed.
 
 ## Limits of this check
 

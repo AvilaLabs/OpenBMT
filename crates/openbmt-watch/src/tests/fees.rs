@@ -105,8 +105,9 @@ fn fe_01_a_fee_paying_transaction_gives_its_fee() {
     let weight = 4 * 81 + b.txdata.iter().map(|t| t.weight().to_wu()).sum::<u64>();
     assert_eq!(b.weight().to_wu(), weight);
     assert_eq!(u64::from(s.vsize), weight.div_ceil(4));
-    let others = u64::from(s.vsize) - b.txdata[0].vsize() as u64;
-    assert_eq!(s.rate_milli, Some(fee * 1000 / others));
+    // FE-05: the rate is over the weight of the transactions but the coinbase.
+    let others: u64 = b.txdata[1..].iter().map(|t| t.weight().to_wu()).sum();
+    assert_eq!(s.rate_milli, Some(fee * 4000 / others));
 }
 
 #[test]

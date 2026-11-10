@@ -10,8 +10,7 @@
 #   2. Mines 101 blocks, sends transactions at several fee rates, mines a
 #      block, and compares the sample of that block with `getblockstats`:
 #      the fees with `totalfee`, the size with `total_weight`, the rate with
-#      `avgfeerate` (which leaves out the 81 bytes of header
-#      and count).
+#      `avgfeerate`, which must be equal.
 #   3. Does the same for a block with no transactions.
 #   4. Mines past the regtest halving (block 150), sends again, and compares
 #      once more, so that the halved subsidy is used.
@@ -115,25 +114,17 @@ compare() {
   same "$label: weight without the coinbase" "$((weight - cbw - 324))" "$total"
   vsize=$(((weight + 3) / 4))
   same "$label: vsize" "$(field "$line" vsize)" "$vsize"
-  cbv=$(((cbw + 3) / 4))
   rate=$(field "$line" rate_milli)
   if [ "$txs" -le 1 ]; then
     same "$label: rate" "$rate" none
   else
-    want=$((fees * 1000 / (vsize - cbv)))
+    # FE-05: fees times 4,000 over the weight of the transactions but the
+    # coinbase, which is Core's `total_weight`; Core's `avgfeerate` is the
+    # same measure in whole sat/vB.
+    want=$((fees * 4000 / total))
     same "$label: rate from Core's numbers" "$rate" "$want"
-    # Core's average divides by the weight of the transactions but the
-    # coinbase. The sample divides by the block's size less the coinbase's,
-    # so it also counts the 81 bytes of header and count (FE-05): never
-    # above Core's figure, and below it by at most that share.
-    avg=$(jq -r '.avgfeerate' <<<"$stats")
-    diff=$((avg - rate / 1000))
-    slack=$((avg * 327 / total + 1))
-    if [ "$diff" -ge 0 ] && [ "$diff" -le "$slack" ]; then
-      ok "$label: rate $((rate / 1000)) sat/vB, Core's average $avg, header share allowed $slack"
-    else
-      bad "$label: rate $((rate / 1000)) sat/vB, Core's average $avg, header share allowed $slack"
-    fi
+    same "$label: rate in whole sat/vB against Core's avgfeerate" \
+      "$((rate / 1000))" "$(jq -r '.avgfeerate' <<<"$stats")"
   fi
 }
 
