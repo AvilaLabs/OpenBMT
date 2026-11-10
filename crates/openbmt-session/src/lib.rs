@@ -26,6 +26,7 @@ mod error;
 mod item;
 mod request;
 mod response;
+mod say;
 mod text;
 
 pub use error::{BindError, EncodeError, VerifyError};
@@ -34,6 +35,7 @@ pub use request::Request;
 pub use response::{
     health_message, health_proof, DeclineCode, ItemResult, Payload, Response, Verdict,
 };
+pub use say::all_words;
 pub use text::{label_text_ok, reason_text_ok};
 
 /// AS-01: the magic of a request.

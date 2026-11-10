@@ -30,6 +30,7 @@ mod analysis;
 mod crypto;
 mod refusal;
 mod review;
+mod say;
 mod sign;
 mod snapshot;
 mod state;
@@ -39,6 +40,10 @@ mod tests;
 
 pub use refusal::{Ceiling, ChangeError, ChangeRefusal, Refusal, RegisterError, SignError};
 pub use review::{OutputKind, Remaining, Review, ReviewedOutput};
+pub use say::{
+    all_words, change_refusal_words_for_text, clock_behind_words, waiting_address_words,
+    wallet_error_words,
+};
 pub use sign::Signed;
 pub use state::{AllowlistEntry, Ceilings, FeeCeilings, LogEntry, SignerState, Totals};
 

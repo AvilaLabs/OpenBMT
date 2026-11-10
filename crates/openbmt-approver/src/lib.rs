@@ -37,6 +37,7 @@ mod describe;
 mod error;
 mod evaluate;
 mod line;
+mod say;
 mod session;
 mod state;
 
@@ -45,6 +46,7 @@ pub use line::{
     BatchLine, CheckStep, Choice, Detail, HealthLine, Line, OutputLine, PairingLine, SettingChange,
     SettingsLine, SpendLine, SpendReview, StepStatus,
 };
+pub use say::{all_words, no_key2_words, receive_range_words, RECEIVE_MARK_REFUSED};
 pub use session::Session;
 pub use state::Approver;
 
