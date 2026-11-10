@@ -55,6 +55,8 @@ mod codec;
 mod deposit;
 pub mod envelope;
 mod error;
+#[cfg(any(target_os = "android", feature = "jni"))]
+mod jni;
 mod keys;
 mod kitcheck;
 mod screen;

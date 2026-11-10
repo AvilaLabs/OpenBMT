@@ -304,34 +304,64 @@ fn rig_again(rig: &Rig) -> Rig {
     }
 }
 
+/// The code of `text` with comments dropped, one entry per line.
+fn code_lines(text: &str) -> impl Iterator<Item = (usize, &str)> {
+    text.lines()
+        .enumerate()
+        .map(|(n, l)| (n + 1, l.split("//").next().unwrap_or("")))
+}
+
 #[test]
-fn the_source_has_no_unsafe_of_its_own() {
-    // The crate denies `unsafe`; the hand-written
-    // files must not. A line counts only outside comments and strings of
-    // this kind of check: the word as code.
+fn the_only_unsafe_is_the_jni_glue_and_it_is_counted() {
+    // The crate denies `unsafe`; `jni.rs` allows it for itself. No other
+    // file may hold the word as code. The glue's own count is pinned: every
+    // block is one JNI call or one read of the function table, and adding one
+    // means changing the numbers below on purpose.
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut files = vec![dir.clone()];
+    let mut dirs = vec![dir];
     let mut seen = 0;
-    while let Some(d) = files.pop() {
+    while let Some(d) = dirs.pop() {
         for entry in std::fs::read_dir(d).expect("a directory") {
             let path = entry.expect("an entry").path();
             if path.is_dir() {
-                files.push(path);
-            } else if path.extension().is_some_and(|e| e == "rs") {
-                seen += 1;
-                let text = std::fs::read_to_string(&path).expect("readable");
-                for (n, line) in text.lines().enumerate() {
-                    let code = line.split("//").next().unwrap_or("");
-                    let is_this_check = path.ends_with("tests/screen.rs");
-                    if !is_this_check
-                        && code.contains("unsafe")
-                        && !code.contains("deny(unsafe_code)")
-                    {
-                        panic!("unsafe at {}:{}", path.display(), n + 1);
-                    }
+                dirs.push(path);
+                continue;
+            }
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            seen += 1;
+            let text = std::fs::read_to_string(&path).expect("readable");
+            if path.ends_with("src/jni.rs") {
+                // The glue, without its test module.
+                let glue = text.split("\n#[cfg(test)]").next().expect("a first part");
+                let blocks = code_lines(glue)
+                    .filter(|(_, l)| l.contains("unsafe {"))
+                    .count();
+                let impls = code_lines(glue)
+                    .filter(|(_, l)| l.contains("unsafe impl"))
+                    .count();
+                assert_eq!(blocks, 14, "unsafe blocks in jni.rs");
+                assert_eq!(impls, 2, "unsafe impls in jni.rs");
+                assert_eq!(
+                    code_lines(glue)
+                        .filter(|(_, l)| l.contains("unsafe"))
+                        .count(),
+                    blocks + impls + 1,
+                    "only blocks, impls and the allow of the file"
+                );
+                continue;
+            }
+            // This file spells the word in its own checks.
+            if path.ends_with("tests/screen.rs") {
+                continue;
+            }
+            for (n, line) in code_lines(&text) {
+                if line.contains("unsafe") && !line.contains("deny(unsafe_code)") {
+                    panic!("unsafe at {}:{n}", path.display());
                 }
             }
         }
     }
-    assert!(seen >= 8);
+    assert!(seen >= 12);
 }

@@ -9,5 +9,5 @@ mod protocol;
 mod screen;
 mod session;
 mod setup;
-mod wire;
+pub(crate) mod wire;
 mod words;
