@@ -11,7 +11,8 @@ offering compact filters at any point. Both blocks that arrived were
 therefore downloaded in full and checked (NR-42), which is the designed
 fallback and is correct, but costs about 1.5 MB per block through Tor.
 The cause is understood and is in the driver's design, not in Tor; see
-"Why no filter peer". It is not fixed yet.
+"Why no filter peer". The fix was built the same day; its first run is in
+"Second run: lookups through Tor" at the end, and did not reach it.
 
 ## What was run
 
@@ -97,3 +98,55 @@ Until then a Tor-only device works, and checks every block in full.
 - How often peers close a connection through Tor compared with without:
   17 closes in 21 minutes with 2 to 4 peers held is more churn than the
   clear-net run showed, and its cause was not looked into.
+
+## Second run: lookups through Tor (2026-11-10)
+
+**What was built.** The fix of "What would fix it": `socks::resolve` sends
+Tor's `RESOLVE` request with a token of its own as name and password, and
+refuses any reply that is not an IPv4 or IPv6 address that the book would
+keep. With a proxy, a seed round asks each seed's `x49.` name three times,
+at most 4 lookups at a time, and the answers enter the book as stated by a
+seed to offer filters. A proxy that answers "command not supported" is
+noted once and the seed names are dialed as peers, as before. NR-26 and
+NR-72 say so. Unit tests against a fake proxy and driver tests with injected
+hooks pass; they show 9 lookups for 3 seeds, 0 calls of the system's
+resolver, at most 4 lookups in flight, and the fallback.
+
+**The run.** The same Tor client (0.4.9.16, client only, SOCKS port on the
+loopback address), the release build of `observe` on mainnet with the proxy
+set, the data directory of the first run (the stored headers at 975315 and
+an address book of about 20 KB), 20 minutes, one run.
+
+| What | Result |
+|---|---|
+| Ready peers (target 8) | 1 at 1.7 s, 4 at most (first at 1101 s) |
+| Peers offering filters | 0, at any point |
+| First filter peer ready | never |
+| Two filter peers in different groups | never |
+| Seed rounds started | 0 |
+| Seed lookups through the proxy | 0 answered of 0 |
+| Lookups seen in Tor's log | none |
+| Blocks fetched in full and checked | 11 (1.2 to 1.8 MB each) |
+| Tip | 975315 to 975326 |
+| Peers dropped | 3 for NR-42 (requests not answered in time), 1 for NR-14 |
+| Transport | 7 distinct peers on v2, 3 on v1, 9 refusals of v2 |
+| System lookups | none: no name is looked up by the system with a proxy |
+
+**Which step fails: the lookups are never started.** No seed round began,
+so nothing was asked of Tor. A round starts only when the address book has
+nothing to dial (NR-72, as without Tor). This data directory already held
+about 20 KB of addresses that earlier runs had heard of by `addr`, so the
+book always had something to give, and the seeds, whose `x49.` names are
+the only source of filter peers a Tor-only device has, were never reached.
+The peers that were ready came from the stored anchors and the book. The
+handshakes of the peers that were dialed worked (v2 and v1), and Tor
+carried the traffic; no step after the dial failed.
+
+So the fix is in the code and tested against a fake proxy, and it has not
+been seen to work through Tor: `RESOLVE` against a real Tor was not
+exercised by this run. The trigger is the open question. Asking the seeds
+also when filters are wanted and the book holds no address with the filter
+service stated by a seed would reach them with a populated book. That
+changes NR-72 and was not done here.
+
+The log of the run is kept outside the repository.
