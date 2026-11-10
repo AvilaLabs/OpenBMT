@@ -40,10 +40,10 @@ fuzz_target!(|data: &[u8]| {
         Ok(proven) => {
             // What passed is a transaction after the coinbase that is not a
             // coinbase and is not 64 bytes long without its witness.
-            assert!(proven.position > 0);
-            assert!(!proven.tx.is_coinbase());
-            assert_ne!(proven.tx.base_size(), 64);
-            assert_eq!(proven.height, 0);
+            assert!(proven.position() > 0);
+            assert!(!proven.tx().is_coinbase());
+            assert_ne!(proven.tx().base_size(), 64);
+            assert_eq!(proven.height(), 0);
         }
         Err(refusal) => {
             assert!(refusal.to_string().starts_with(refusal.rule()));

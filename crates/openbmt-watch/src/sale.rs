@@ -15,7 +15,10 @@ use openbmt_core::policy::{classify_replacement, CheckMode, ReplacementKind};
 use crate::chain::{confirmations, HeaderChain};
 use crate::netgroup::{network_group, NetGroup, PeerAddr};
 use crate::proof::ProvenPayment;
-use crate::{Refusal, MAX_SALE_TRANSACTIONS, MAX_TOLERANCE_BPS, MAX_TX_BYTES, SEEN_GROUPS};
+use crate::{
+    Refusal, MAX_REPLACED_REMEMBERED, MAX_SALE_TRANSACTIONS, MAX_TOLERANCE_BPS, MAX_TX_BYTES,
+    SEEN_GROUPS,
+};
 
 /// Where a sighting of an unconfirmed transaction came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +33,7 @@ pub enum Source {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sighted {
     /// The transaction pays the sale nothing and conflicts with nothing the
-    /// sale knows. It was ignored.
+    /// sale knows, or a fee bump took its place earlier. It was ignored.
     Ignored,
     /// A new transaction, kept.
     New,
@@ -123,6 +126,9 @@ pub struct SaleWatch {
     elsewhere: Vec<(OutPoint, Txid, BlockHash)>,
     /// The transactions that were confirmed at the last status.
     last_confirmed: BTreeSet<Txid>,
+    /// Transactions a fee bump took the place of. A late sighting of one is
+    /// not a new conflict.
+    replaced: BTreeSet<Txid>,
 }
 
 /// WR-30: the sum of all outputs whose script is exactly `script`.
@@ -148,6 +154,7 @@ impl SaleWatch {
             latest: 0,
             elsewhere: Vec::new(),
             last_confirmed: BTreeSet::new(),
+            replaced: BTreeSet::new(),
         }
     }
 
@@ -272,8 +279,9 @@ impl SaleWatch {
             })
             .collect();
 
-        // WR-31.
-        let received_sats = self.sum(|i| standing[i]);
+        // WR-31: standing transactions that conflict with each other count
+        // once, at the smallest amount any of them pays.
+        let received_sats = self.received(&standing);
         let confirmed_sats = self.sum(|i| standing[i] && confs[i] >= 1);
 
         // WR-32.
@@ -340,6 +348,47 @@ impl SaleWatch {
         }
     }
 
+    /// WR-31: the sum over the standing transactions, where each group of
+    /// transactions joined by conflicts counts once at its smallest amount.
+    /// Only one transaction of such a group can confirm.
+    fn received(&self, standing: &[bool]) -> u64 {
+        let n = self.entries.len();
+        let mut group: Vec<usize> = (0..n).collect();
+        // At most 20 entries: joining by repeated passes is enough.
+        loop {
+            let mut changed = false;
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    if standing[i]
+                        && standing[j]
+                        && group[i] != group[j]
+                        && self.entries[i].conflicts_with(&self.entries[j].tx)
+                    {
+                        let (keep, drop) = (group[i].min(group[j]), group[i].max(group[j]));
+                        for g in &mut group {
+                            if *g == drop {
+                                *g = keep;
+                            }
+                        }
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        let mut total = 0u64;
+        for g in 0..n {
+            let smallest = (0..n)
+                .filter(|&i| standing[i] && group[i] == g)
+                .map(|i| self.entries[i].paid)
+                .min();
+            total = total.saturating_add(smallest.unwrap_or(0));
+        }
+        total
+    }
+
     /// The sum of what the chosen transactions pay.
     fn sum(&self, keep: impl Fn(usize) -> bool) -> u64 {
         self.entries
@@ -369,6 +418,14 @@ impl SaleWatch {
                 }
             }
             return Ok(Sighted::Known);
+        }
+
+        // WR-42: an unconfirmed transaction that a fee bump already took
+        // the place of. A peer that is slow to hear of the bump still relays
+        // it; that is not a new conflict. In a block it is a different
+        // matter and goes on.
+        if block.is_none() && self.replaced.contains(&txid) {
+            return Ok(Sighted::Ignored);
         }
 
         // WR-40.
@@ -416,6 +473,11 @@ impl SaleWatch {
         }
         let kind = if bump {
             let replaced: BTreeSet<usize> = conflicts.into_iter().collect();
+            for &i in &replaced {
+                if self.replaced.len() < MAX_REPLACED_REMEMBERED {
+                    self.replaced.insert(self.entries[i].txid);
+                }
+            }
             let mut index = 0;
             self.entries.retain(|_| {
                 index += 1;

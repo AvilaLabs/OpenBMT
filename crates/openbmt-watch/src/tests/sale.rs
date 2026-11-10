@@ -127,6 +127,50 @@ fn wr_31_a_transaction_seen_and_then_confirmed_counts_once() {
 }
 
 #[test]
+fn wr_31_two_conflicting_transactions_count_once_at_the_smaller_amount() {
+    // Only one of the two can confirm. Counting both would show a sale of
+    // 13,000 as paid when at most 10,000 can ever arrive.
+    let mut w = watch(13_000, 0);
+    sight(&mut w, &pays(1, 10_000), peer(20), NOW);
+    assert_eq!(
+        sight(&mut w, &pays(1, 3_000), peer(21), NOW),
+        Sighted::Conflicting
+    );
+    let s = status(&mut w, &TestChain::new(1));
+    assert_eq!(s.received_sats, 3_000);
+    assert!(s.conflict_seen);
+}
+
+#[test]
+fn wr_31_a_chain_of_conflicts_counts_once_and_others_still_add_up() {
+    let mut w = watch(50_000, 0);
+    // a and c do not conflict with each other; b conflicts with both and
+    // pays less than either, so it is no fee bump. If b confirms, neither
+    // a nor c can.
+    let a = spend_coins(&[coin(1)], &[(&shop(), 10_000)]);
+    let c = spend_coins(&[coin(2)], &[(&shop(), 7_000)]);
+    let b = spend_coins(&[coin(1), coin(2)], &[(&shop(), 4_000)]);
+    let apart = pays(9, 20_000);
+    for tx in [&a, &c, &b, &apart] {
+        sight(&mut w, tx, peer(20), NOW);
+    }
+    let s = status(&mut w, &TestChain::new(1));
+    assert_eq!(s.received_sats, 4_000 + 20_000);
+}
+
+#[test]
+fn wr_31_once_one_of_the_conflicting_transactions_confirms_its_amount_counts() {
+    let mut w = watch(10_000, 0);
+    let good = pays(1, 10_000);
+    sight(&mut w, &good, peer(20), NOW);
+    sight(&mut w, &pays(1, 3_000), peer(21), NOW);
+    let mut chain = TestChain::new(5);
+    confirm_in(&mut w, &mut chain, &[good], 5);
+    let s = status(&mut w, &chain);
+    assert_eq!((s.received_sats, s.confirmed_sats), (10_000, 10_000));
+}
+
+#[test]
 fn wr_31_an_empty_watch_has_nothing() {
     let mut w = watch(10_000, 0);
     let s = status(&mut w, &TestChain::new(1));
@@ -572,6 +616,40 @@ fn wr_42_a_fee_bump_restarts_first_seen_and_the_group_count() {
 }
 
 #[test]
+fn wr_42_a_late_sighting_of_a_replaced_transaction_is_not_a_conflict() {
+    // A peer that has not heard of the fee bump still relays the old one.
+    let mut w = watch(10_000, 0);
+    let chain = TestChain::new(1);
+    let old = pays(1, 10_000);
+    sight(&mut w, &old, peer(20), NOW);
+    let bump = pays(1, 12_000);
+    assert_eq!(sight(&mut w, &bump, peer(20), NOW + 10), Sighted::Replaced);
+    assert_eq!(sight(&mut w, &old, peer(21), NOW + 20), Sighted::Ignored);
+    assert_eq!(sight(&mut w, &old, Source::Box, NOW + 20), Sighted::Ignored);
+    assert_eq!(w.transactions().collect::<Vec<_>>(), vec![&bump]);
+    let s = w.status(&chain, NOW + 30);
+    assert!(!s.conflict_seen);
+    assert_eq!(s.received_sats, 12_000);
+}
+
+#[test]
+fn wr_42_a_replaced_transaction_that_confirms_after_all_is_admitted() {
+    // A miner can still mine the old one. A block is evidence; it is not
+    // ignored, and the bump it conflicts with is displaced (WR-43).
+    let mut w = watch(10_000, 0);
+    let old = pays(1, 10_000);
+    sight(&mut w, &old, peer(20), NOW);
+    let bump = pays(1, 12_000);
+    sight(&mut w, &bump, peer(20), NOW + 10);
+    let mut chain = TestChain::new(5);
+    confirm_in(&mut w, &mut chain, &[old], 5);
+    let s = status(&mut w, &chain);
+    assert_eq!((s.received_sats, s.confirmed_sats), (10_000, 10_000));
+    assert_eq!(s.min_confirmations, 1);
+    assert!(s.conflict_seen);
+}
+
+#[test]
 fn wr_42_a_replacement_that_pays_the_same_is_a_fee_bump() {
     let mut w = watch(10_000, 0);
     sight(&mut w, &pays(1, 10_000), peer(20), NOW);
@@ -718,8 +796,8 @@ fn wr_43_a_confirmed_transaction_displaces_the_one_it_conflicts_with() {
     let other = pays(1, 10_000);
     seen_by(&mut w, &original, 3, NOW);
     sight(&mut w, &other, peer(30), NOW);
-    // Both stand while neither is confirmed.
-    assert_eq!(status(&mut w, &chain).received_sats, 50_000);
+    // Both stand while neither is confirmed, and count once (WR-31).
+    assert_eq!(status(&mut w, &chain).received_sats, 10_000);
     let b = confirm_in(&mut w, &mut chain, &[other], 100);
     let s = status(&mut w, &chain);
     assert_eq!(s.received_sats, 10_000);
@@ -728,7 +806,7 @@ fn wr_43_a_confirmed_transaction_displaces_the_one_it_conflicts_with() {
     // The block leaves the chain: the original stands again.
     chain.remove(&b.block_hash());
     let s = status(&mut w, &chain);
-    assert_eq!(s.received_sats, 50_000);
+    assert_eq!(s.received_sats, 10_000);
     assert!(s.conflict_seen);
 }
 

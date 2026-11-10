@@ -103,7 +103,10 @@ nothing: filters have false positives, and a peer can serve a false filter.
 - **WR-31.** A sale's received amount is the sum over the transactions that
   pay it and are still standing: seen or confirmed, and not displaced by a
   conflict (WR-42). A transaction counts once, however many times and from
-  however many sources it is reported.
+  however many sources it is reported. Standing transactions that conflict
+  with each other count once between them, at the smallest amount any of
+  them pays: only one of them can confirm, and the sale must not show more
+  than the worst case.
 - **WR-32.** A sale is confirmed at depth `d` when transactions with at
   least `d` confirmations each (WR-02) pay it at least the sale amount less
   the shop's tolerance. The tolerance is the settings' value in basis
@@ -144,7 +147,12 @@ that.
     `openbmt_core::policy::classify_replacement` (it pays the sale's script
     at least as much), it takes the earlier one's place. The sale's
     "first seen" time starts again from this sighting, and the peer count
-    starts again from the peers that reported the new one;
+    starts again from the peers that reported the new one. The sale
+    remembers the ID of the one replaced (up to 64) and ignores later
+    unconfirmed sightings of it: a peer that is slow to hear of the bump
+    still relays the old one, and that is not a new conflict. If the old
+    one turns up in a block on the chain it is taken as a confirmation
+    like any other, and a conflict is set;
   - otherwise the sale has a conflict. The conflict flag is set and it
     stays set for the life of the sale, even if the conflicting
     transaction is never seen again. Both transactions are kept.
@@ -185,6 +193,9 @@ Instant acceptance needs a check that is working. The library answers
   often means the counter has been cut off.
 - **WR-52.** No connected peer has announced a best height more than 2
   blocks above the counter's tip for longer than 10 minutes **[to tune]**.
+  The library keeps no state: the caller holds the time since when a peer
+  has been ahead and passes it back with each check. A caller that drops
+  it never fails this rule.
 - **WR-53.** The clock is not more than 2 hours behind the tip's header
   time. A header's time can run up to 2 hours ahead of real time and no
   further, so a clock further behind than that is wrong. The library then

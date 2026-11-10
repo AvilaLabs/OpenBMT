@@ -37,11 +37,11 @@ fuzz_target!(|data: &[u8]| {
             for payment in found {
                 // After the coinbase, in block order, paying the script,
                 // and not 64 bytes long without its witness.
-                assert!(payment.position > last);
-                last = payment.position;
-                assert!(!payment.tx.is_coinbase());
-                assert_ne!(payment.tx.base_size(), 64);
-                assert!(payment.tx.output.iter().any(|o| o.script_pubkey == script));
+                assert!(payment.position() > last);
+                last = payment.position();
+                assert!(!payment.tx().is_coinbase());
+                assert_ne!(payment.tx().base_size(), 64);
+                assert!(payment.tx().output.iter().any(|o| o.script_pubkey == script));
             }
         }
         Err(refusal) => {

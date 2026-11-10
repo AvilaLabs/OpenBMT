@@ -61,6 +61,8 @@ pub const FORBIDDEN_TX_BASE_SIZE: usize = 64;
 pub const MAX_BLOCK_BYTES: usize = 4_000_000;
 /// WR-34: most transactions kept for one sale.
 pub const MAX_SALE_TRANSACTIONS: usize = 20;
+/// WR-42: most replaced transactions a sale remembers.
+pub const MAX_REPLACED_REMEMBERED: usize = 64;
 /// WR-32: the most a tolerance can be, in basis points.
 pub const MAX_TOLERANCE_BPS: u32 = 10_000;
 /// WR-44: network groups that must report a transaction for it to count as
