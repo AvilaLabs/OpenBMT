@@ -230,7 +230,13 @@ pub enum WaitReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decision {
     /// Accept now. The caller then records the exposure.
-    Instant { label: InstantLabel },
+    Instant {
+        /// The label to show.
+        label: InstantLabel,
+        /// The mode the limits were taken from. The caller uses it to pick the
+        /// slice for the exposure ledger.
+        mode: CheckMode,
+    },
     /// Wait for a confirmation.
     WaitForConfirmation { reason: WaitReason },
     /// Instant is off.
@@ -325,6 +331,7 @@ pub fn evaluate(policy: &InstantPolicy, i: &Inputs) -> Decision {
             CheckMode::NodeAlsoSeenByLight => InstantLabel::YourNode,
             CheckMode::BoxReportsOnly => InstantLabel::YourBox,
         },
+        mode,
     }
 }
 
@@ -743,7 +750,8 @@ mod tests {
         assert_eq!(
             evaluate(&policy(), &ok_light()),
             Decision::Instant {
-                label: InstantLabel::LightCheck
+                label: InstantLabel::LightCheck,
+                mode: CheckMode::Light
             }
         );
         assert_eq!(InstantLabel::LightCheck.text(), "Paid (light check)");
@@ -825,6 +833,7 @@ mod tests {
                 CheckMode::NodeAlsoSeenByLight,
                 Decision::Instant {
                     label: InstantLabel::YourNode,
+                    mode: CheckMode::NodeAlsoSeenByLight,
                 },
             ),
         ] {
@@ -844,7 +853,8 @@ mod tests {
         assert_eq!(
             evaluate(&p, &i),
             Decision::Instant {
-                label: InstantLabel::YourBox
+                label: InstantLabel::YourBox,
+                mode: CheckMode::BoxReportsOnly
             }
         );
         assert_eq!(InstantLabel::YourNode.text(), "Paid (your node checked it)");
@@ -1237,7 +1247,8 @@ mod tests {
         assert_eq!(
             evaluate(&p, &i),
             Decision::Instant {
-                label: InstantLabel::YourBox
+                label: InstantLabel::YourBox,
+                mode: CheckMode::BoxReportsOnly
             }
         );
         // $20 fits the node per-sale limit but not the Box one
@@ -1272,7 +1283,8 @@ mod tests {
             assert_eq!(
                 evaluate(&p, &i),
                 Decision::Instant {
-                    label: InstantLabel::YourNode
+                    label: InstantLabel::YourNode,
+                    mode: CheckMode::NodeAlsoSeenByLight
                 }
             );
             let big = Inputs {
@@ -1290,12 +1302,25 @@ mod tests {
     }
 
     #[test]
+    fn the_decision_carries_the_effective_mode() {
+        let i = shared_wifi(CheckMode::NodeAlsoSeenByLight, false);
+        assert!(matches!(
+            evaluate(&policy(), &i),
+            Decision::Instant {
+                mode: CheckMode::BoxReportsOnly,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn box_mode_is_unaffected_by_the_network() {
         let i = shared_wifi(CheckMode::BoxReportsOnly, false);
         assert_eq!(
             evaluate(&policy(), &i),
             Decision::Instant {
-                label: InstantLabel::YourBox
+                label: InstantLabel::YourBox,
+                mode: CheckMode::BoxReportsOnly
             }
         );
     }
