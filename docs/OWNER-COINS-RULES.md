@@ -50,7 +50,7 @@ not ask a server what the wallet holds.
 ## 4. Storage
 
 - **OC-08.** The view is stored in a framed form with its own magic
-  (`OBM8`) and a version, in the node's atomic file writes. It is stored
+  (`OBMe`) and a version, in the node's atomic file writes. It is stored
   before the chain position advances, so a restart at any write point
   gives the same view and fetches nothing again. Reading is strict: a cut,
   a trailing byte, a wrong magic or version, a changed byte that breaks an

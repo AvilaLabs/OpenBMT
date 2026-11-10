@@ -48,7 +48,7 @@
 //!
 //! ## The stored form
 //!
-//! `OBM8`, version 1, strict like the other stored forms: sorted lists, no
+//! `OBMe`, version 1, strict like the other stored forms: sorted lists, no
 //! repeats, every length checked before anything is reserved, and every coin
 //! must be an output of the transaction it carries. The chain position
 //! (`checked`) is in the same bytes as the coins it reflects, so a restart
@@ -65,8 +65,8 @@ use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_spend::Coin;
 use openbmt_watch::{HeaderChain, Refusal, WellFormedBlock};
 
-/// The magic of the stored coin view: `OBM8`.
-pub const MAGIC_OWNER_COINS: [u8; 4] = *b"OBM8";
+/// The magic of the stored coin view: `OBMe`.
+pub const MAGIC_OWNER_COINS: [u8; 4] = *b"OBMe";
 /// Unused indices watched beyond the highest one in use.
 pub const GAP: u32 = 20;
 /// Blocks of undo entries kept.
@@ -745,7 +745,7 @@ impl CoinView {
 
     // ---- stored form ---------------------------------------------------------
 
-    /// The stored form, `OBM8`.
+    /// The stored form, `OBMe`.
     pub fn to_bytes(&self) -> Vec<u8> {
         encode(self)
     }

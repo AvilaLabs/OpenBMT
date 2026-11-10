@@ -10,7 +10,7 @@
 //!
 //! ## Files
 //!
-//! In the node's directory: [`COINS_FILE`] (the coin view, `OBM8`) and
+//! In the node's directory: [`COINS_FILE`] (the coin view, `OBMe`) and
 //! [`QUEUE_FILE`] (the owner's queue, `OBM4`), both written whole through
 //! the watcher's atomic write, and the watcher's own. The queue is written
 //! before the coin view takes the new transaction, so a restart finds the
