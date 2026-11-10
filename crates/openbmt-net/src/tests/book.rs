@@ -948,7 +948,7 @@ fn nr_21_has_filter_candidate_agrees_with_pick_on_random_books() {
         let mut keys = Vec::new();
         for i in 0..(next(&mut state) % 12) as u16 {
             let addr = gv4(round % 50 * 3 + i % 6, 1 + (i % 200) as u8);
-            let services = if next(&mut state) % 2 == 0 {
+            let services = if next(&mut state).is_multiple_of(2) {
                 filters()
             } else {
                 svc()
@@ -970,7 +970,7 @@ fn nr_21_has_filter_candidate_agrees_with_pick_on_random_books() {
         let now = 10 + next(&mut state) % 1_000;
         let mut connected = BTreeSet::new();
         for addr in &keys {
-            if next(&mut state) % 4 == 0 {
+            if next(&mut state).is_multiple_of(4) {
                 connected.insert(group_of(addr));
             }
         }
