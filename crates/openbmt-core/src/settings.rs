@@ -93,6 +93,9 @@ pub struct Settings {
     pub manager_override_ceiling: Limit,
     /// Confirmations that settle a sale (T0 depth).
     pub min_confirmations: u8,
+    /// Confirmations at which a sale is final and a refund may be paid (the
+    /// refund depth).
+    pub final_confirmations: u8,
     /// Longest age of the owner-phone heartbeat that still allows instant.
     pub heartbeat_max_age_secs: u32,
     /// Tor switch is on.
@@ -128,6 +131,7 @@ impl Settings {
             cashier_override_daily_cap: usd(20),
             manager_override_ceiling: usd(100),
             min_confirmations: 1,
+            final_confirmations: 6,
             heartbeat_max_age_secs: policy::DEFAULT_HEARTBEAT_MAX_AGE_SECS,
             tor_on: false,
             customer_wifi: true,
@@ -174,6 +178,11 @@ impl Settings {
         if self.min_confirmations < 1 {
             return Err(SettingsError::Invalid(
                 "at least one confirmation must settle a sale",
+            ));
+        }
+        if self.final_confirmations < self.min_confirmations {
+            return Err(SettingsError::Invalid(
+                "final depth must be at least the confirmed depth",
             ));
         }
         if !(MIN_HEARTBEAT_MAX_AGE_SECS..=MAX_HEARTBEAT_MAX_AGE_SECS)
@@ -225,6 +234,7 @@ impl Settings {
         }
         out.extend_from_slice(&self.underpayment_tolerance_bps.to_le_bytes());
         out.push(self.min_confirmations);
+        out.push(self.final_confirmations);
         out.extend_from_slice(&self.heartbeat_max_age_secs.to_le_bytes());
         out.push(u8::from(self.tor_on));
         out.push(u8::from(self.customer_wifi));
@@ -256,6 +266,7 @@ impl Settings {
             limits;
         let underpayment_tolerance_bps = r.u32_le()?;
         let min_confirmations = r.u8()?;
+        let final_confirmations = r.u8()?;
         let heartbeat_max_age_secs = r.u32_le()?;
         let tor_on = r.flag()?;
         let customer_wifi = r.flag()?;
@@ -300,6 +311,7 @@ impl Settings {
             cashier_override_daily_cap,
             manager_override_ceiling,
             min_confirmations,
+            final_confirmations,
             heartbeat_max_age_secs,
             tor_on,
             customer_wifi,
@@ -444,6 +456,13 @@ pub fn changed_fields(old: &Settings, new: &Settings) -> Vec<FieldChange> {
         "min_confirmations",
         old.min_confirmations,
         new.min_confirmations,
+        false,
+    );
+    num(
+        o,
+        "final_confirmations",
+        old.final_confirmations,
+        new.final_confirmations,
         false,
     );
     num(
@@ -729,6 +748,7 @@ mod tests {
                 s.manager_override_ceiling.sats += 1
             }),
             ("min_confirmations", |s| s.min_confirmations -= 1),
+            ("final_confirmations", |s| s.final_confirmations -= 1),
             ("heartbeat_max_age_secs", |s| s.heartbeat_max_age_secs += 1),
             ("tor_on", |s| s.tor_on = false),
             ("customer_wifi", |s| s.customer_wifi = false),
@@ -797,6 +817,7 @@ mod tests {
         let mut new = old.clone();
         new.light_per_sale.sats /= 2;
         new.min_confirmations += 2;
+        new.final_confirmations += 2;
         new.tor_on = true;
         new.customer_wifi = true;
         new.heartbeat_max_age_secs -= 1;
@@ -1177,6 +1198,13 @@ mod tests {
         s.min_confirmations = 0;
         reasons.push(reason(&s));
 
+        let mut s = base();
+        s.min_confirmations = 3;
+        s.final_confirmations = 3;
+        assert_eq!(s.validate(), Ok(()));
+        s.final_confirmations = 2;
+        reasons.push(reason(&s));
+
         for ok in [60, 3_600] {
             let mut s = base();
             s.heartbeat_max_age_secs = ok;
@@ -1199,10 +1227,10 @@ mod tests {
         s.counters.insert(identity(66).device_id(), 2);
         reasons.push(reason(&s));
 
-        // the five rules give five different texts (heartbeat appears twice)
+        // the six rules give six different texts (heartbeat appears twice)
         reasons.sort_unstable();
         reasons.dedup();
-        assert_eq!(reasons.len(), 5);
+        assert_eq!(reasons.len(), 6);
     }
 
     #[test]
@@ -1366,11 +1394,11 @@ mod tests {
 
     // Offsets in a settings message: magic 0..4, version 4, settings
     // version 5..9, ten limits of 12 bytes 9..129, tolerance 129..133,
-    // confirmations 133, heartbeat 134..138, tor 138, wifi 139, device count
-    // 140..144, then the devices.
-    const TOR_AT: usize = 138;
-    const DEVICE_COUNT_AT: usize = 140;
-    const DEVICES_AT: usize = 144;
+    // confirmed depth 133, final depth 134, heartbeat 135..139, tor 139,
+    // wifi 140, device count 141..145, then the devices.
+    const TOR_AT: usize = 139;
+    const DEVICE_COUNT_AT: usize = 141;
+    const DEVICES_AT: usize = 145;
 
     /// Two devices, both counters, one with a share of zero.
     fn wire_settings() -> Settings {
