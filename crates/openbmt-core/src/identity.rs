@@ -15,7 +15,9 @@
 use std::fmt;
 use std::sync::OnceLock;
 
-use bitcoin::secp256k1::{schnorr, All, Keypair, Message, Secp256k1, XOnlyPublicKey};
+use bitcoin::secp256k1::{
+    schnorr, All, Keypair, Message, PublicKey, Scalar, Secp256k1, XOnlyPublicKey,
+};
 
 pub use crate::hashing::tagged_hash;
 use crate::words::{fingerprint_words, WORD_COUNT};
@@ -170,6 +172,20 @@ impl Identity {
     pub fn fingerprint_words(&self) -> [&'static str; WORD_COUNT] {
         self.device_id().fingerprint_words()
     }
+
+    /// The x coordinate of `point` multiplied by this key's secret: the
+    /// shared value of an ECDH exchange, for a message sealed to this device.
+    /// Only the x coordinate leaves, so it does not matter which of the two
+    /// points with that x the peer used. `None` only if the product is not a
+    /// valid point, which a valid key and point never give.
+    pub fn shared_x(&self, point: &PublicKey) -> Option<[u8; 32]> {
+        let secret = Scalar::from_be_bytes(self.keypair.secret_bytes()).ok()?;
+        let product = point.mul_tweak(secp(), &secret).ok()?;
+        let full = product.serialize();
+        let mut x = [0u8; 32];
+        x.copy_from_slice(full.get(1..33)?);
+        Some(x)
+    }
 }
 
 #[cfg(test)]
@@ -260,6 +276,22 @@ mod tests {
         assert_eq!(a.fingerprint_words(), a.device_id().fingerprint_words());
         assert_eq!(a.fingerprint_words(), identity(1).fingerprint_words());
         assert_ne!(a.fingerprint_words(), b.fingerprint_words());
+    }
+
+    #[test]
+    fn shared_x_agrees_from_both_sides() {
+        let a = identity(1);
+        let b = identity(2);
+        let lift = |id: &Identity| {
+            PublicKey::from_x_only_public_key(
+                XOnlyPublicKey::from_slice(&id.device_id().to_bytes()).unwrap(),
+                bitcoin::secp256k1::Parity::Even,
+            )
+        };
+        let ab = a.shared_x(&lift(&b)).unwrap();
+        let ba = b.shared_x(&lift(&a)).unwrap();
+        assert_eq!(ab, ba);
+        assert_ne!(ab, a.shared_x(&lift(&identity(3))).unwrap());
     }
 
     #[test]

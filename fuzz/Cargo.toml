@@ -17,6 +17,7 @@ openbmt-spend = { path = "../crates/openbmt-spend" }
 openbmt-watch = { path = "../crates/openbmt-watch" }
 openbmt-net = { path = "../crates/openbmt-net" }
 openbmt-counter = { path = "../crates/openbmt-counter" }
+openbmt-link = { path = "../crates/openbmt-link" }
 
 # Not a member of the main workspace.
 [workspace]
@@ -220,6 +221,20 @@ bench = false
 [[bin]]
 name = "spend_combine"
 path = "fuzz_targets/spend_combine.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "link_open"
+path = "fuzz_targets/link_open.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "link_proto_decode"
+path = "fuzz_targets/link_proto_decode.rs"
 test = false
 doc = false
 bench = false

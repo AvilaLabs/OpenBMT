@@ -1,0 +1,17 @@
+[package]
+name = "openbmt-link"
+description = "Sealed messages between the shop's own devices and the relay that holds them: one-device encryption, sender signatures, mailboxes, and a blocking client and server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The same exact bitcoin version as the other crates, so the types unify.
+# chacha20poly1305 is the one new dependency: the AEAD of LK-02.
+[dependencies]
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
+openbmt-core = { path = "../openbmt-core" }
+# Only for its SOCKS5 client and its clock trait.
+openbmt-net-io = { path = "../openbmt-net-io" }

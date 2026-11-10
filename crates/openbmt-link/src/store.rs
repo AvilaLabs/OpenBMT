@@ -1,0 +1,395 @@
+//! Where a relay keeps its mailboxes (LK-41).
+//!
+//! A store keeps, per reader, an append-only list of events: a message put
+//! under a number, and a floor (every number up to it is gone). Replaying
+//! the events in order gives the mailbox. [`MemoryStore`] is for tests.
+//! [`DirStore`] keeps one log file per mailbox.
+//!
+//! A log record is `length u32 LE | type u8 | body | check 4`, where the
+//! length counts the type and the body, and the check is the first four
+//! bytes of the SHA-256 of the type and the body. A torn write leaves a
+//! last record that is short or fails its check; loading cuts the file back
+//! to the last good record, so at most the message being written is lost.
+//! When more than half of a file is records that no longer count
+//! (acknowledged or pushed out), the file is rewritten whole: a temporary
+//! file, flushed, renamed over the log, and the directory flushed.
+
+use std::collections::HashMap;
+use std::fmt::{self, Display};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+
+use bitcoin::hashes::{sha256, Hash};
+use openbmt_core::identity::DeviceId;
+
+use crate::relay::Mailbox;
+use crate::seal::MAX_SEALED_LEN;
+
+/// One thing a store remembers about a mailbox.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Event {
+    /// A message held under this number.
+    Put {
+        /// The relay's number for it.
+        id: u64,
+        /// The sealed bytes.
+        sealed: Vec<u8>,
+    },
+    /// Every number up to this one is gone.
+    Floor(u64),
+}
+
+/// A place to keep mailboxes. Every write is on disk (or in memory, for the
+/// test store) before it returns.
+pub trait MailStore {
+    /// What a failed call says.
+    type Error: Display;
+
+    /// Every mailbox and its events, in order.
+    fn load(&mut self) -> Result<Vec<(DeviceId, Vec<Event>)>, Self::Error>;
+
+    /// Make an empty mailbox. Does nothing if there is one.
+    fn create(&mut self, reader: &DeviceId) -> Result<(), Self::Error>;
+
+    /// Record a message put under `id`.
+    fn put(&mut self, reader: &DeviceId, id: u64, sealed: &[u8]) -> Result<(), Self::Error>;
+
+    /// Record that every number up to `up_to` is gone.
+    fn ack(&mut self, reader: &DeviceId, up_to: u64) -> Result<(), Self::Error>;
+
+    /// Rewrite the mailbox's record from `live` if most of it is dead. The
+    /// relay ignores a failure: the old record is still whole.
+    fn compact(&mut self, reader: &DeviceId, live: &Mailbox) -> Result<(), Self::Error>;
+
+    /// Remove every mailbox.
+    fn clear(&mut self) -> Result<(), Self::Error>;
+}
+
+/// A store in memory, for tests. Set `fail_writes` to make every write fail.
+#[derive(Debug, Default)]
+pub struct MemoryStore {
+    boxes: HashMap<DeviceId, Vec<Event>>,
+    /// Make `create`, `put`, `ack` and `clear` fail.
+    pub fail_writes: bool,
+}
+
+/// The test store's only error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryFailure;
+
+impl Display for MemoryFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "the memory store was told to fail")
+    }
+}
+
+impl MemoryStore {
+    /// An empty store.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The mailboxes held.
+    pub fn len(&self) -> usize {
+        self.boxes.len()
+    }
+
+    /// Whether there are no mailboxes.
+    pub fn is_empty(&self) -> bool {
+        self.boxes.is_empty()
+    }
+
+    /// What is kept for one reader.
+    pub fn events(&self, reader: &DeviceId) -> Vec<Event> {
+        self.boxes.get(reader).cloned().unwrap_or_default()
+    }
+}
+
+impl MailStore for MemoryStore {
+    type Error = MemoryFailure;
+
+    fn load(&mut self) -> Result<Vec<(DeviceId, Vec<Event>)>, MemoryFailure> {
+        Ok(self.boxes.iter().map(|(k, v)| (*k, v.clone())).collect())
+    }
+
+    fn create(&mut self, reader: &DeviceId) -> Result<(), MemoryFailure> {
+        if self.fail_writes {
+            return Err(MemoryFailure);
+        }
+        self.boxes.entry(*reader).or_default();
+        Ok(())
+    }
+
+    fn put(&mut self, reader: &DeviceId, id: u64, sealed: &[u8]) -> Result<(), MemoryFailure> {
+        if self.fail_writes {
+            return Err(MemoryFailure);
+        }
+        self.boxes.entry(*reader).or_default().push(Event::Put {
+            id,
+            sealed: sealed.to_vec(),
+        });
+        Ok(())
+    }
+
+    fn ack(&mut self, reader: &DeviceId, up_to: u64) -> Result<(), MemoryFailure> {
+        if self.fail_writes {
+            return Err(MemoryFailure);
+        }
+        self.boxes
+            .entry(*reader)
+            .or_default()
+            .push(Event::Floor(up_to));
+        Ok(())
+    }
+
+    fn compact(&mut self, _reader: &DeviceId, _live: &Mailbox) -> Result<(), MemoryFailure> {
+        Ok(())
+    }
+
+    fn clear(&mut self) -> Result<(), MemoryFailure> {
+        if self.fail_writes {
+            return Err(MemoryFailure);
+        }
+        self.boxes.clear();
+        Ok(())
+    }
+}
+
+const REC_PUT: u8 = 1;
+const REC_FLOOR: u8 = 2;
+const CHECK_LEN: usize = 4;
+/// The extension of a log file.
+const EXT: &str = "mbx";
+
+/// One log file per mailbox, in a directory.
+#[derive(Debug)]
+pub struct DirStore {
+    dir: PathBuf,
+    /// Bytes in each log, as last written or loaded.
+    sizes: HashMap<DeviceId, u64>,
+}
+
+fn record(kind: u8, body: &[u8]) -> Vec<u8> {
+    let inner_len = body.len().saturating_add(1);
+    let mut inner = Vec::with_capacity(inner_len);
+    inner.push(kind);
+    inner.extend_from_slice(body);
+    let check = sha256::Hash::hash(&inner).to_byte_array();
+    let mut out = Vec::with_capacity(4 + inner.len() + CHECK_LEN);
+    out.extend_from_slice(&u32::try_from(inner_len).unwrap_or(u32::MAX).to_le_bytes());
+    out.extend_from_slice(&inner);
+    out.extend_from_slice(check.get(..CHECK_LEN).unwrap_or(&[]));
+    out
+}
+
+fn put_record(id: u64, sealed: &[u8]) -> Vec<u8> {
+    let mut body = Vec::with_capacity(8 + sealed.len());
+    body.extend_from_slice(&id.to_le_bytes());
+    body.extend_from_slice(sealed);
+    record(REC_PUT, &body)
+}
+
+fn floor_record(up_to: u64) -> Vec<u8> {
+    record(REC_FLOOR, &up_to.to_le_bytes())
+}
+
+/// Read records until the bytes end or one is bad. Returns the events and
+/// the length of the good part.
+fn parse_log(bytes: &[u8]) -> (Vec<Event>, usize) {
+    let mut events = Vec::new();
+    let mut at = 0usize;
+    while let Some(rest) = bytes.get(at..) {
+        let Some(head) = rest.get(..4).and_then(|h| <[u8; 4]>::try_from(h).ok()) else {
+            break;
+        };
+        let Ok(len) = usize::try_from(u32::from_le_bytes(head)) else {
+            break;
+        };
+        if len == 0 || len > MAX_SEALED_LEN + 9 {
+            break;
+        }
+        let Some(end) = len.checked_add(4 + CHECK_LEN) else {
+            break;
+        };
+        let Some(whole) = rest.get(..end) else { break };
+        let (Some(inner), Some(check)) = (whole.get(4..4 + len), whole.get(4 + len..)) else {
+            break;
+        };
+        let want = sha256::Hash::hash(inner).to_byte_array();
+        if want.get(..CHECK_LEN) != Some(check) {
+            break;
+        }
+        let Some((kind, body)) = inner.split_first() else {
+            break;
+        };
+        let event = match *kind {
+            REC_PUT => {
+                let Some((id, sealed)) = body.split_at_checked(8) else {
+                    break;
+                };
+                let Ok(id) = <[u8; 8]>::try_from(id) else {
+                    break;
+                };
+                Event::Put {
+                    id: u64::from_le_bytes(id),
+                    sealed: sealed.to_vec(),
+                }
+            }
+            REC_FLOOR => {
+                let Ok(n) = <[u8; 8]>::try_from(body) else {
+                    break;
+                };
+                Event::Floor(u64::from_le_bytes(n))
+            }
+            _ => break,
+        };
+        events.push(event);
+        at = at.saturating_add(end);
+    }
+    (events, at)
+}
+
+fn hex(bytes: &[u8; 32]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn unhex(name: &str) -> Option<DeviceId> {
+    if name.len() != 64 {
+        return None;
+    }
+    let mut bytes = [0u8; 32];
+    for (slot, pair) in bytes.iter_mut().zip(name.as_bytes().chunks(2)) {
+        let text = std::str::from_utf8(pair).ok()?;
+        *slot = u8::from_str_radix(text, 16).ok()?;
+    }
+    DeviceId::from_bytes(&bytes).ok()
+}
+
+impl DirStore {
+    /// Keep logs in this directory, which is created if it is missing.
+    pub fn new(dir: impl Into<PathBuf>) -> io::Result<Self> {
+        let dir = dir.into();
+        fs::create_dir_all(&dir)?;
+        Ok(Self {
+            dir,
+            sizes: HashMap::new(),
+        })
+    }
+
+    /// The directory the logs are in.
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// The log file of a reader's mailbox.
+    pub fn path(&self, reader: &DeviceId) -> PathBuf {
+        self.dir.join(format!("{}.{EXT}", hex(&reader.to_bytes())))
+    }
+
+    fn append(&mut self, reader: &DeviceId, bytes: &[u8]) -> io::Result<()> {
+        let mut file = OpenOptions::new().append(true).open(self.path(reader))?;
+        file.write_all(bytes)?;
+        file.sync_data()?;
+        let size = self.sizes.entry(*reader).or_insert(0);
+        *size = size.saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+        Ok(())
+    }
+
+    fn sync_dir(&self) -> io::Result<()> {
+        File::open(&self.dir)?.sync_all()
+    }
+}
+
+impl MailStore for DirStore {
+    type Error = io::Error;
+
+    fn load(&mut self) -> io::Result<Vec<(DeviceId, Vec<Event>)>> {
+        let mut out = Vec::new();
+        for entry in fs::read_dir(&self.dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|e| e.to_str()) != Some(EXT) {
+                continue;
+            }
+            let Some(reader) = path.file_stem().and_then(|s| s.to_str()).and_then(unhex) else {
+                continue;
+            };
+            let bytes = fs::read(&path)?;
+            let (events, good) = parse_log(&bytes);
+            if good < bytes.len() {
+                // A torn tail: cut the file back to the last whole record.
+                let file = OpenOptions::new().write(true).open(&path)?;
+                file.set_len(u64::try_from(good).unwrap_or(0))?;
+                file.sync_all()?;
+            }
+            self.sizes
+                .insert(reader, u64::try_from(good).unwrap_or(u64::MAX));
+            out.push((reader, events));
+        }
+        Ok(out)
+    }
+
+    fn create(&mut self, reader: &DeviceId) -> io::Result<()> {
+        let path = self.path(reader);
+        if path.exists() {
+            return Ok(());
+        }
+        File::create(path)?.sync_all()?;
+        self.sync_dir()?;
+        self.sizes.insert(*reader, 0);
+        Ok(())
+    }
+
+    fn put(&mut self, reader: &DeviceId, id: u64, sealed: &[u8]) -> io::Result<()> {
+        self.append(reader, &put_record(id, sealed))
+    }
+
+    fn ack(&mut self, reader: &DeviceId, up_to: u64) -> io::Result<()> {
+        self.append(reader, &floor_record(up_to))
+    }
+
+    fn compact(&mut self, reader: &DeviceId, live: &Mailbox) -> io::Result<()> {
+        let size = self.sizes.get(reader).copied().unwrap_or(0);
+        let floor = live.next_id().saturating_sub(1);
+        // What the rewritten file would hold: a floor record and the live
+        // puts. A record is 4 (length) + 1 (type) + body + 4 (check).
+        let mut live_len = if floor > 0 { 17usize } else { 0 };
+        for (_, sealed) in live.messages() {
+            live_len = live_len.saturating_add(17).saturating_add(sealed.len());
+        }
+        let live_len = u64::try_from(live_len).unwrap_or(u64::MAX);
+        // Compact only when more than half of the file is dead.
+        if size.saturating_sub(live_len).saturating_mul(2) <= size {
+            return Ok(());
+        }
+        let mut fresh = Vec::new();
+        if floor > 0 {
+            fresh.extend_from_slice(&floor_record(floor));
+        }
+        for (id, sealed) in live.messages() {
+            fresh.extend_from_slice(&put_record(id, sealed));
+        }
+        let path = self.path(reader);
+        let temp = path.with_extension("mbx.tmp");
+        let mut file = File::create(&temp)?;
+        file.write_all(&fresh)?;
+        file.sync_all()?;
+        fs::rename(&temp, &path)?;
+        self.sync_dir()?;
+        self.sizes.insert(*reader, live_len);
+        Ok(())
+    }
+
+    fn clear(&mut self) -> io::Result<()> {
+        for entry in fs::read_dir(&self.dir)? {
+            let path = entry?.path();
+            let ext = path.extension().and_then(|e| e.to_str());
+            if ext == Some(EXT) || ext == Some("tmp") {
+                fs::remove_file(path)?;
+            }
+        }
+        self.sync_dir()?;
+        self.sizes.clear();
+        Ok(())
+    }
+}
