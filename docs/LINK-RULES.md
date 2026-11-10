@@ -94,8 +94,12 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
   identity keys of the shop's devices. It takes a sealed message only if
   it is well formed and the signature is valid (LK-04), is at most the
   largest size step plus the header, both the sender and the reader are
-  members, and the reader's mailbox exists. With an empty list it takes
-  nothing. The relay has no device list of the kind a device has: it
+  members, the reader's mailbox exists, and its number is above the
+  highest the relay has taken from that sender for that reader. The last
+  point stops a copy of an old message from pushing new ones out of a
+  full mailbox; the relay keeps those numbers in memory only, so after a
+  restart it knows only the messages it still holds. With an empty list
+  it takes nothing. The relay has no device list of the kind a device has: it
   cannot tell an owner from a counter, only a member from a key it does
   not know.
 - **LK-21.** A mailbox exists only for a member. It is made the first

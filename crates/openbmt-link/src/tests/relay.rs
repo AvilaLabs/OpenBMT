@@ -715,3 +715,49 @@ fn lk_41_a_relay_restarted_over_its_store_has_the_same_mailboxes() {
     );
     assert_eq!(a.next_id(), 5);
 }
+
+#[test]
+fn lk_20_a_copy_of_a_message_already_taken_is_refused_and_pushes_nothing_out() {
+    let cfg = RelayConfig {
+        max_messages: 3,
+        ..RelayConfig::default()
+    };
+    let mut rig = Rig::with(cfg);
+    assert_eq!(rig.make(&counter()), Response::Made);
+    let first = msg(1);
+    assert!(matches!(rig.put(first.clone()), Response::Stored { .. }));
+    assert!(matches!(rig.put(msg(2)), Response::Stored { .. }));
+    assert!(matches!(rig.put(msg(3)), Response::Stored { .. }));
+    // The same bytes again, and an older number, as often as one likes.
+    for _ in 0..10 {
+        assert_eq!(
+            rig.put(first.clone()),
+            Response::Refused(Refusal::AlreadyTaken)
+        );
+        assert_eq!(rig.put(msg(2)), Response::Refused(Refusal::AlreadyTaken));
+    }
+    assert_eq!(ids(rig.fetch(&counter(), 0)), vec![1, 2, 3]);
+    // A gap is fine, and what was skipped is then too old.
+    assert!(matches!(rig.put(msg(9)), Response::Stored { .. }));
+    assert_eq!(rig.put(msg(5)), Response::Refused(Refusal::AlreadyTaken));
+    // Another sender's numbers are its own.
+    let mut rng = Counting(0);
+    let from_box = seal(
+        &the_box(),
+        Role::Box,
+        &counter().device_id(),
+        Role::Counter,
+        1,
+        Kind::PosNotice,
+        b"x",
+        &mut |b| rng.fill(b),
+    )
+    .unwrap();
+    assert!(matches!(rig.put(from_box), Response::Stored { .. }));
+    // A member that leaves and comes back starts again.
+    let members: Vec<DeviceId> = rig.relay.members().copied().collect();
+    rig.relay.set_members(&[]).unwrap();
+    rig.relay.set_members(&members).unwrap();
+    assert_eq!(rig.make(&counter()), Response::Made);
+    assert!(matches!(rig.put(msg(1)), Response::Stored { .. }));
+}

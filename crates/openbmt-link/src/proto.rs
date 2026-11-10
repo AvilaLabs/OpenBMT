@@ -122,11 +122,14 @@ pub enum Refusal {
     /// The reader of a sealed message is not a member of this relay
     /// (LK-20).
     ReaderNotMember,
+    /// The relay already took a message with this number or a higher one
+    /// from this sender for this reader (LK-20).
+    AlreadyTaken,
 }
 
 impl Refusal {
     /// Every refusal.
-    pub const ALL: [Refusal; 12] = [
+    pub const ALL: [Refusal; 13] = [
         Refusal::NotWellFormed,
         Refusal::BadSignature,
         Refusal::TooLarge,
@@ -139,6 +142,7 @@ impl Refusal {
         Refusal::NoRandomness,
         Refusal::SenderNotMember,
         Refusal::ReaderNotMember,
+        Refusal::AlreadyTaken,
     ];
 
     /// The status byte (never 0).
@@ -156,6 +160,7 @@ impl Refusal {
             Self::NoRandomness => 10,
             Self::SenderNotMember => 11,
             Self::ReaderNotMember => 12,
+            Self::AlreadyTaken => 13,
         }
     }
 
@@ -172,7 +177,8 @@ impl Refusal {
             | Self::TooLarge
             | Self::NoMailbox
             | Self::SenderNotMember
-            | Self::ReaderNotMember => "LK-20",
+            | Self::ReaderNotMember
+            | Self::AlreadyTaken => "LK-20",
             Self::NotMember => "LK-21",
             Self::ChallengeUnknown
             | Self::ChallengeExpired
@@ -193,6 +199,7 @@ impl fmt::Display for Refusal {
             Self::NotMember => "the device is not a member of this relay",
             Self::SenderNotMember => "the sender is not a member of this relay",
             Self::ReaderNotMember => "the reader is not a member of this relay",
+            Self::AlreadyTaken => "a message with that number or a higher one was already taken",
             Self::ChallengeUnknown => "the challenge is unknown or already used",
             Self::ChallengeExpired => "the challenge is too old",
             Self::ChallengeSignature => "the challenge signature is not the reader's",

@@ -196,6 +196,9 @@ pub struct Relay<S: MailStore> {
     /// The one challenge each connection may hold, with the time given
     /// (LK-23).
     challenges: BTreeMap<u64, ([u8; 32], u64)>,
+    /// The highest number taken per sender and reader (LK-20). Not stored:
+    /// after a restart it starts from the messages still held.
+    taken: BTreeMap<(DeviceId, DeviceId), u64>,
 }
 
 /// Why a member list was not set.
@@ -227,9 +230,17 @@ impl<S: MailStore> Relay<S> {
         } = store.load()?;
         let members: BTreeSet<DeviceId> = members.into_iter().collect();
         let mut mailboxes = BTreeMap::new();
+        let mut taken = BTreeMap::new();
         for (reader, events) in loaded {
             if members.contains(&reader) {
-                mailboxes.insert(reader, Mailbox::replay(events, &cfg));
+                let mailbox = Mailbox::replay(events, &cfg);
+                for (_, sealed) in mailbox.messages() {
+                    if let Ok(seen) = inspect(sealed) {
+                        let last = taken.entry((seen.sender, reader)).or_insert(0);
+                        *last = seen.number.max(*last);
+                    }
+                }
+                mailboxes.insert(reader, mailbox);
             }
         }
         Ok(Self {
@@ -239,6 +250,7 @@ impl<S: MailStore> Relay<S> {
             members,
             mailboxes,
             challenges: BTreeMap::new(),
+            taken,
         })
     }
 
@@ -287,6 +299,8 @@ impl<S: MailStore> Relay<S> {
             .set_members(&ordered)
             .map_err(MembersError::Store)?;
         self.mailboxes.retain(|reader, _| list.contains(reader));
+        self.taken
+            .retain(|(sender, reader), _| list.contains(sender) && list.contains(reader));
         self.members = list;
         Ok(())
     }
@@ -433,10 +447,22 @@ impl<S: MailStore> Relay<S> {
         let Some(mailbox) = self.mailboxes.get_mut(&seen.reader) else {
             return Response::Refused(Refusal::NoMailbox);
         };
+        // A sealed message that was seen on the wire can be put again by
+        // anyone. The reader refuses it (LK-06), but until then it would
+        // push newer messages out of a full mailbox.
+        let pair = (seen.sender, seen.reader);
+        if self
+            .taken
+            .get(&pair)
+            .is_some_and(|last| seen.number <= *last)
+        {
+            return Response::Refused(Refusal::AlreadyTaken);
+        }
         let id = mailbox.next_id();
         if self.store.put(&seen.reader, id, &sealed).is_err() {
             return Response::Refused(Refusal::Storage);
         }
+        self.taken.insert(pair, seen.number);
         mailbox.push(id, sealed, &self.cfg);
         // Best effort: a failed compaction loses nothing.
         let _ = self.store.compact(&seen.reader, mailbox);
