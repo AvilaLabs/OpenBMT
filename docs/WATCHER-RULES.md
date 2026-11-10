@@ -20,10 +20,59 @@ facts that decision reads.
 
 ## 1. The header chain
 
-The counter keeps its own chain of block headers in every mode (§5.1). The
-light client builds it: it checks each header's proof of work and the
-difficulty rules. This library does not repeat that work. It sees the chain
-through three questions the caller answers:
+The counter keeps its own chain of block headers in every mode (§5.1), and
+this library is what checks it. The light client is only the transport
+that fetches headers from peers. Nothing it reports about the chain is
+believed: every header goes through the rules below first. A light
+client library is free to check less than this, and may change what it
+checks from one release to the next. The counter's judgment must not
+depend on that.
+
+- **WR-04.** The chain starts at a checkpoint compiled into the library: a
+  block header and its height, for a block at the start of a difficulty
+  period (a height that is a multiple of 2,016). Nothing below the
+  checkpoint is held and no chain that leaves out the checkpoint is
+  accepted. Mainnet and signet have a checkpoint; regtest starts at its
+  genesis block. Testnet3 is not supported by the watcher: its
+  minimum-difficulty exception makes its headers prove too little to be
+  worth the rules.
+- **WR-05.** A header is accepted only if all of these hold:
+  - its previous-block hash is a header already held;
+  - its bits field is exactly the value the difficulty rule requires at
+    its height: the parent's bits inside a period, and at the start of a
+    period the retarget Bitcoin Core computes (the time from the first to
+    the last block of the period just ended, held between a quarter and
+    four times two weeks, never easier than the network's limit, in
+    Core's own rounding). On regtest the bits never change;
+  - its hash meets the target its bits state;
+  - its time is later than the median time of the 11 headers before it
+    (or of as many as are held, back to the checkpoint).
+- **WR-06.** A header whose time is more than 2 hours ahead of the
+  caller's clock is refused for now. It is not marked bad and can be
+  offered again later.
+- **WR-07.** The best chain is the one with the most work counted from the
+  checkpoint. Of two chains with equal work, the one held first stays. A
+  change of best chain is reported with the blocks that left it. Headers
+  off the best chain are kept only while they are within 2,016 blocks of
+  the tip, and at most 4,032 of them **[to tune]**; past that a new side
+  header is refused.
+- **WR-08.** The chain can be written out and read back. The stored form
+  is strict (magic, version, network, checkpoint hash, then the headers of
+  the best chain in order, nothing after). Reading it runs WR-05 on every
+  header again from the compiled-in checkpoint; one failure refuses the
+  whole file and the counter fetches the headers again. WR-06 is not
+  applied to stored headers: they passed it when first accepted.
+
+Why work counted from the checkpoint is enough: under WR-05 the
+difficulty can fall by at most a factor of four per period, and each
+period is 2,016 blocks that must be mined at the difficulty then in
+force. An attacker cannot hand over a cheap chain from the checkpoint;
+every header costs real work at close to the network's difficulty.
+
+Stored headers are not protected from being rolled back to an older copy.
+An older copy is a valid chain with an old tip, and WR-51 reports it.
+
+The rest of the library sees the chain through three questions:
 
 - the height of a block hash on the best chain, if it is there;
 - the height of the tip;
@@ -208,9 +257,14 @@ Instant acceptance needs a check that is working. The library answers
 - **They do not prove that a payment will confirm.** An unconfirmed
   payment can be replaced or never mined, whatever was seen. The limits of
   §6 are the protection; the labels say what was checked.
-- **They do not check proof of work across the chain.** That is the light
-  client's job (section 1). If the header chain is wrong, every
-  confirmation that rests on it is wrong.
+- **They do not check blocks in full.** Section 1 checks the work in
+  every header and the difficulty rules. It does not run the scripts or
+  check the coins of each transaction; no light client can. A payment in a
+  block is as good as the work on top of it, which is why the shop sets a
+  confirmation depth.
+- **They do not check the signet block signature.** On signet the headers
+  are checked for work only, and signet work is cheap. Test networks prove
+  nothing about money.
 - **They do not see what is hidden.** Peers and the Box can stay silent
   about a payment or a conflict. Counting network groups makes that harder
   and does not make it impossible.
