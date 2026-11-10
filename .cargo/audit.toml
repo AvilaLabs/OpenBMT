@@ -1,8 +1,4 @@
 # Advisories shown not to apply, each with its reason (docs/DEPENDENCIES.md,
 # rule 7).
 [advisories]
-ignore = [
-    # basic-toml is unmaintained. It is used only at build time by uniffi's
-    # macros, on input from this repository. It goes away with uniffi.
-    "RUSTSEC-2026-0374",
-]
+ignore = []
