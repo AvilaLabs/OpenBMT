@@ -32,6 +32,10 @@ exactly the input bytes.
 | `watch_sale_decode` | `SaleWatch::from_bytes` |
 | `net_book_decode` | `AddressBook::from_bytes` |
 | `entropy_dice` | `words_from_dice_hashed`, `face_counts` and `bits_from_dice` on UTF-8 input; success must mean the input held only the digits 1 to 6 |
+| `counter_sale_decode` | `Sale::from_bytes` |
+| `counter_desk_decode` | `Desk::from_bytes` |
+| `counter_event_decode` | `Event::decode` |
+| `counter_ops` | a real counter driven by a script of operations in the input (open, requote, sighting, block, reorg, time, judge, override, cancel, owner command, restart) against a memory store that fails the writes the input chooses; see the target for the invariants it asserts after every operation |
 | `wallet_parse` | `WalletDescription::parse` for mainnet and testnet on UTF-8 input; on success, parsing the canonical string again must give the same canonical string |
 
 ## Running

@@ -15,6 +15,7 @@ openbmt-core = { path = "../crates/openbmt-core" }
 openbmt-signer = { path = "../crates/openbmt-signer" }
 openbmt-watch = { path = "../crates/openbmt-watch" }
 openbmt-net = { path = "../crates/openbmt-net" }
+openbmt-counter = { path = "../crates/openbmt-counter" }
 
 # Not a member of the main workspace.
 [workspace]
@@ -176,6 +177,34 @@ bench = false
 [[bin]]
 name = "watch_sale_decode"
 path = "fuzz_targets/watch_sale_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "counter_sale_decode"
+path = "fuzz_targets/counter_sale_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "counter_desk_decode"
+path = "fuzz_targets/counter_desk_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "counter_event_decode"
+path = "fuzz_targets/counter_event_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "counter_ops"
+path = "fuzz_targets/counter_ops.rs"
 test = false
 doc = false
 bench = false
