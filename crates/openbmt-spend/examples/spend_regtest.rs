@@ -209,6 +209,7 @@ fn cmd_plan(args: &[String]) -> Result<ExitCode, String> {
         change_index: u32::try_from(a.number("change-index")?).map_err(|_| "change index")?,
         min_confirmations: u32::try_from(a.number("min-conf")?).map_err(|_| "min-conf")?,
         send_all: a.flags.iter().any(|f| f == "send-all"),
+        must_spend: Vec::new(),
     };
     let planned = match plan(&k.wallet, &coins, &request) {
         Ok(p) => p,

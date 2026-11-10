@@ -1,0 +1,19 @@
+[package]
+name = "openbmt-owner"
+description = "The OpenBMT owner phone's side of the approval session: the refund queue, cash-out, batches, settings and pairings, the request it builds and the response it takes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The same exact bitcoin version as openbmt-core, so the types unify.
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+openbmt-signer = { path = "../openbmt-signer" }
+openbmt-spend = { path = "../openbmt-spend" }
+openbmt-session = { path = "../openbmt-session" }
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+openbmt-approver = { path = "../openbmt-approver" }

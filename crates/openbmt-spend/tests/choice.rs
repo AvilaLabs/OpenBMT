@@ -1,4 +1,4 @@
-//! SP-10 to SP-12: which coins are spent.
+//! SP-10 to SP-13: which coins are spent.
 
 mod common;
 
@@ -137,6 +137,71 @@ fn sp_12_send_all_spends_every_eligible_coin_to_one_payment_with_no_change() {
     // With min 0 the unconfirmed coin goes too.
     r.min_confirmations = 0;
     assert_eq!(plan(wallet(), &coins, &r).unwrap().inputs().len(), 4);
+}
+
+#[test]
+fn sp_13_a_coin_that_must_be_spent_is_taken_first_even_if_it_is_not_needed() {
+    let old = coin_conf(1, 0, 400_000, 9);
+    let young = coin_conf(2, 1, 40_000, 2);
+    let coins = [old.clone(), young.clone()];
+    // Without the request the oldest coin pays alone.
+    let r = request(vec![(external(1), 20_000)], 1000);
+    assert_eq!(
+        spent(&plan(wallet(), &coins, &r).unwrap()),
+        vec![old.outpoint]
+    );
+    // With the young coin named, it is spent first and, being enough, the
+    // old one is not touched.
+    let mut named = r.clone();
+    named.must_spend = vec![young.outpoint];
+    let p = plan(wallet(), &coins, &named).unwrap();
+    assert_eq!(spent(&p), vec![young.outpoint]);
+    // Naming both spends both, in the order of SP-11.
+    named.must_spend = vec![young.outpoint, old.outpoint];
+    let p = plan(wallet(), &coins, &named).unwrap();
+    assert_eq!(spent(&p), vec![old.outpoint, young.outpoint]);
+    // A named coin that is not enough alone is followed by the others.
+    let mut big = request(vec![(external(1), 100_000)], 1000);
+    big.must_spend = vec![young.outpoint];
+    let p = plan(wallet(), &coins, &big).unwrap();
+    assert_eq!(spent(&p), vec![young.outpoint, old.outpoint]);
+}
+
+#[test]
+fn sp_13_a_named_coin_that_is_gone_is_ignored_and_one_that_is_too_shallow_fails() {
+    let a = coin_conf(1, 0, 400_000, 9);
+    let fresh = coin_conf(2, 1, 400_000, 0);
+    let gone = coin_conf(3, 2, 400_000, 5).outpoint;
+    let mut r = request(vec![(external(1), 20_000)], 1000);
+    // Not among the coins handed in: planned freely.
+    r.must_spend = vec![gone];
+    let p = plan(wallet(), std::slice::from_ref(&a), &r).unwrap();
+    assert_eq!(spent(&p), vec![a.outpoint]);
+    // Present but with no confirmation (min 1): the plan fails, naming the
+    // rule, even though another coin could pay.
+    r.must_spend = vec![fresh.outpoint];
+    let err = plan(wallet(), &[a.clone(), fresh.clone()], &r).unwrap_err();
+    assert_eq!(
+        err,
+        PlanError::MustSpendNotEligible {
+            outpoint: fresh.outpoint,
+            confirmations: 0,
+            needed: 1
+        }
+    );
+    assert!(err.to_string().starts_with("SP-13"));
+    // With min 0 it is eligible and is taken first.
+    r.min_confirmations = 0;
+    let p = plan(wallet(), &[a, fresh.clone()], &r).unwrap();
+    assert_eq!(p.inputs()[0].coin.outpoint, fresh.outpoint);
+    // A coin named twice is taken once; with send_all every coin goes.
+    let mut all = request(vec![(external(7), 0)], 1000);
+    all.send_all = true;
+    all.must_spend = vec![fresh.outpoint, fresh.outpoint];
+    all.min_confirmations = 0;
+    let c = coin_conf(4, 3, 50_000, 3);
+    let p = plan(wallet(), &[c, fresh], &all).unwrap();
+    assert_eq!(p.inputs().len(), 2);
 }
 
 #[test]

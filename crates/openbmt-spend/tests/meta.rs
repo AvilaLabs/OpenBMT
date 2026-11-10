@@ -36,7 +36,7 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 34);
+    assert_eq!(ids.len(), 35);
     assert!(ids.contains(&"SP-01".to_string()) && ids.contains(&"SP-71".to_string()));
     let mut sorted = ids.clone();
     sorted.sort();
@@ -82,6 +82,12 @@ fn every_error_says_which_rule_in_words() {
         PlanError::NoPayments.to_string(),
         PlanError::SendAllNeedsOnePayment.to_string(),
         PlanError::SendAllAmountGiven.to_string(),
+        PlanError::MustSpendNotEligible {
+            outpoint,
+            confirmations: 0,
+            needed: 1,
+        }
+        .to_string(),
         PlanError::ZeroFeeRate.to_string(),
         PlanError::PaymentScriptKind { payment: 1 }.to_string(),
         PlanError::PaymentBelowDust {

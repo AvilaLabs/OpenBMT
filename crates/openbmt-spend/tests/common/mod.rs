@@ -136,6 +136,7 @@ pub fn request(payments: Vec<(ScriptBuf, u64)>, rate: u64) -> openbmt_spend::Spe
         change_index: 0,
         min_confirmations: 1,
         send_all: false,
+        must_spend: Vec::new(),
     }
 }
 

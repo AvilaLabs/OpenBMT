@@ -28,6 +28,11 @@ pub struct SpendRequest {
     pub min_confirmations: u32,
     /// Spend every eligible coin to the one payment, with no change.
     pub send_all: bool,
+    /// SP-13: coins to take first. Each of these that is among the coins
+    /// handed in and eligible is spent before the oldest-first choice; one
+    /// that is among them but not eligible fails the plan. One that is not
+    /// among the coins is ignored: something else has spent it.
+    pub must_spend: Vec<OutPoint>,
 }
 
 /// An input of a plan: the coin and its amount.
@@ -114,6 +119,15 @@ pub enum PlanError {
         /// What payments plus the fee would take with all of them.
         needed: u64,
     },
+    /// SP-13: a coin that must be spent has too few confirmations.
+    MustSpendNotEligible {
+        /// The coin.
+        outpoint: OutPoint,
+        /// Its confirmations.
+        confirmations: u32,
+        /// What `min_confirmations` asks for.
+        needed: u32,
+    },
     /// SP-12: after the fee, the amount of a `send_all` is below dust.
     SendAllBelowDust {
         /// What is left after the fee.
@@ -189,6 +203,15 @@ impl fmt::Display for PlanError {
             Self::InsufficientFunds { available, needed } => write!(
                 f,
                 "the eligible coins hold {available} sat; the payments and the fee need {needed} sat"
+            ),
+            Self::MustSpendNotEligible {
+                outpoint,
+                confirmations,
+                needed,
+            } => write!(
+                f,
+                "SP-13: coin {outpoint} must be spent but has {confirmations} confirmations; \
+                 {needed} are needed"
             ),
             Self::SendAllBelowDust { sats, dust } => write!(
                 f,
@@ -421,6 +444,35 @@ pub fn plan(
             .cmp(&a.confirmations)
             .then_with(|| a.outpoint_key().cmp(&b.outpoint_key()))
     });
+    // SP-13: coins that must be spent come first, in the order of SP-11.
+    let mut must: Vec<&Coin> = Vec::new();
+    for outpoint in &request.must_spend {
+        if must.iter().any(|c| c.outpoint == *outpoint) {
+            continue;
+        }
+        if let Some(coin) = coins.iter().find(|c| c.outpoint == *outpoint) {
+            if coin.confirmations < request.min_confirmations {
+                return Err(PlanError::MustSpendNotEligible {
+                    outpoint: *outpoint,
+                    confirmations: coin.confirmations,
+                    needed: request.min_confirmations,
+                });
+            }
+            must.push(coin);
+        }
+    }
+    let must_n = must.len();
+    if must_n > 0 {
+        eligible.retain(|c| !must.iter().any(|m| m.outpoint == c.outpoint));
+        let mut ordered = must;
+        ordered.sort_by(|a, b| {
+            b.confirmations
+                .cmp(&a.confirmations)
+                .then_with(|| a.outpoint_key().cmp(&b.outpoint_key()))
+        });
+        ordered.extend(eligible);
+        eligible = ordered;
+    }
     if eligible.is_empty() {
         return Err(PlanError::NoEligibleCoins);
     }
@@ -459,6 +511,11 @@ pub fn plan(
                 weight,
                 limit: MAX_WEIGHT,
             });
+        }
+        // SP-13: every coin that must be spent is taken before the plan may
+        // end.
+        if taken < must_n && !request.send_all {
+            continue;
         }
         if request.send_all {
             // Everything is spent; the last coin decides.

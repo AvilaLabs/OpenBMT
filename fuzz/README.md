@@ -39,6 +39,10 @@ exactly the input bytes.
 | `counter_ops` | a real counter driven by a script of operations in the input (open, requote, sighting, block, reorg, time, judge, override, cancel, owner command, restart) against a memory store that fails the writes the input chooses; see the target for the invariants it asserts after every operation |
 | `spend_combine` | `openbmt_spend::combine` and `finalize` against the file of one fixed plan; the input is two "signed" files split at the first byte. It must never panic, and no transaction may come out, because nothing in the input is a signature by a wallet key |
 | `books_export_decode` | `Books::from_bundle` (what is read must encode back to the input) and `decode_export_header` (the header must encode back to the input's prefix); a file whose header asks for tiny Argon2 parameters is also given to `open_export` with a fixed passphrase, and must always be refused without a panic |
+| `session_request_decode` | `Request::from_bytes` (the approval session request); on success the value must encode back to exactly the input |
+| `session_response_decode` | `Response::from_bytes` (the approval session response); on success the value must encode back to exactly the input |
+| `approver_state_decode` | `Approver::restore` (the Key app's stored state), with and without key 2; on success the snapshot must equal the input |
+| `owner_queue_decode` | `Owner::restore` (the owner phone's stored queue); on success the snapshot must equal the input |
 | `wallet_parse` | `WalletDescription::parse` for mainnet and testnet on UTF-8 input; on success, parsing the canonical string again must give the same canonical string |
 
 ## Running

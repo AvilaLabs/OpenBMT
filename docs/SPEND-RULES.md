@@ -56,6 +56,15 @@ out silently.
   payment, with no change. The request carries that payment's script and
   the amount 0; the amount paid is the total of the coins minus the fee. It
   serves a cash-out of everything and a consolidation (SP-24).
+- **SP-13.** The request may name coins that must be spent (`must_spend`).
+  Each of them that is among the coins handed in and eligible (SP-10) is
+  taken first, in the order of SP-11, before the oldest-first choice
+  continues; the plan does not end until all of them are taken. A named coin
+  that is among the coins handed in but has too few confirmations makes the
+  plan an error that names this rule. A named coin that is not among the
+  coins handed in is ignored: something else has spent it. It serves a
+  transaction that must conflict with an earlier one, so that the two cannot
+  both confirm.
 
 ## 3. Outputs
 

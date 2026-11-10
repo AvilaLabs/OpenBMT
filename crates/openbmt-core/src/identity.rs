@@ -42,6 +42,14 @@ pub const TAG_COMMAND: &str = "OpenBMT/command/v1";
 pub const TAG_HEARTBEAT: &str = "OpenBMT/heartbeat/v1";
 /// Tag for the on-screen identity fingerprint words.
 pub const TAG_FINGERPRINT: &str = "OpenBMT/fingerprint/v1";
+/// Tag for the owner's signature on an approval session request.
+pub const TAG_SESSION_REQUEST: &str = "OpenBMT/session-request/v1";
+/// Tag for the approver's signature on an approval session response.
+pub const TAG_SESSION_RESPONSE: &str = "OpenBMT/session-response/v1";
+/// Tag for the hash of a session request, which a response names.
+pub const TAG_SESSION_HASH: &str = "OpenBMT/session-hash/v1";
+/// Tag for the approver's signed answer to a session health check.
+pub const TAG_SESSION_HEALTH: &str = "OpenBMT/session-health/v1";
 
 pub(crate) fn secp() -> &'static Secp256k1<All> {
     static CTX: OnceLock<Secp256k1<All>> = OnceLock::new();

@@ -261,6 +261,14 @@ impl AddressBatch {
         identity.sign_digest(&self.hash())
     }
 
+    /// Check `sig` as the owner's signature on this batch, against the owner
+    /// root alone. No Key app signature is needed, so an owner can check a
+    /// batch it has signed and not yet had co-signed. It does not check the
+    /// shape.
+    pub fn owner_signature_valid(&self, owner: &DeviceId, sig: &Sig) -> bool {
+        owner.verify_digest(&self.hash(), sig)
+    }
+
     /// Read the bytes written by [`AddressBatch::encode`]. This only parses:
     /// the shape check and the signatures are still the caller's to run.
     fn read(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
@@ -1023,6 +1031,25 @@ mod tests {
 
     fn counter_state(f: &Fx) -> CounterBatches {
         CounterBatches::new(f.counter, f.roots, f.wallet.checksum32(), SMALL)
+    }
+
+    #[test]
+    fn owner_signature_alone_is_checked_against_the_owner_root() {
+        let f = fx();
+        let batch = BatchBuilder::new(SMALL)
+            .derive(&f.wallet, f.counter, 0, 3)
+            .unwrap();
+        let sig = batch.sign(&f.owner);
+        assert!(batch.owner_signature_valid(&f.owner.device_id(), &sig));
+        // Another key, another batch, or a changed signature fails.
+        assert!(!batch.owner_signature_valid(&f.key_app.device_id(), &sig));
+        let other = BatchBuilder::new(SMALL)
+            .derive(&f.wallet, f.counter, 3, 3)
+            .unwrap();
+        assert!(!other.owner_signature_valid(&f.owner.device_id(), &sig));
+        let mut bad = sig;
+        bad.0[0] ^= 1;
+        assert!(!batch.owner_signature_valid(&f.owner.device_id(), &bad));
     }
 
     #[test]

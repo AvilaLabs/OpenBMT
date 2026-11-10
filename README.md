@@ -54,14 +54,19 @@ sets. The full statement, its conditions and the reasoning are in
 | [docs/DESIGN.md](docs/DESIGN.md) | The design: flows, architecture, threat table, open questions |
 | [docs/SIGNER-RULES.md](docs/SIGNER-RULES.md) | Every rule under which the Key app refuses to sign |
 | [docs/SPEND-RULES.md](docs/SPEND-RULES.md) | How a transaction is built, joined and finished: coins, change, fee, the PSBT the signer accepts, and the checks on two signatures |
+| [docs/SESSION-RULES.md](docs/SESSION-RULES.md) | The approval session: the file the owner phone and the Key app pass between them, what the Key app checks on every line, what is stored before an answer leaves, and the owner phone's refund queue |
 | [docs/WATCHER-RULES.md](docs/WATCHER-RULES.md) | What the counter believes about a payment, and what each kind of evidence may prove |
 | [docs/POS-RULES.md](docs/POS-RULES.md) | How the owner's device matches the POS orders to the counter's sales, and what raises an alert |
+| [docs/BOOKS-RULES.md](docs/BOOKS-RULES.md) | How the counters' records become the books: per-sale fields and what stays unknown, the two CSV exports and the encrypted export file |
 | [docs/BOX-RULES.md](docs/BOX-RULES.md) | What the merchant's own server holds, how a Box with no screen is paired, and its part in the relay and the POS side (rules only; no code yet) |
 | [docs/research/](docs/research/) | Research notes, four rounds of internal design review, and the results of the checks against Bitcoin Core |
 | [crates/openbmt-core/](crates/openbmt-core/) | The rules every device must agree on: wallet description, device identity, address batches, signed records, signed settings, instant-acceptance policy |
 | [crates/openbmt-signer/](crates/openbmt-signer/) | The Key app's transaction signer: the rules under which key 2 signs |
 | [crates/openbmt-spend/](crates/openbmt-spend/) | The spend path around the signer ([rules](docs/SPEND-RULES.md)): plan a transaction from the wallet's coins, write it as a PSBT the signer accepts, join two signers' signatures and finish it ([results against Core](docs/research/spend-e2e-core-2026-11-10.md)) |
 | [crates/openbmt-books/](crates/openbmt-books/) | The merchant's books ([rules](docs/BOOKS-RULES.md)): the counters' verified records turned into sales lines and end-of-day totals, an accounting CSV that holds only opaque sale IDs, a full ledger behind a warning, and an encrypted export file that reads back. No network and no clock; not tax advice, US rules only |
+| [crates/openbmt-session/](crates/openbmt-session/) | The approval session file ([rules](docs/SESSION-RULES.md)): the request the owner phone hands to the Key app and the response it hands back, in one strict encoding |
+| [crates/openbmt-approver/](crates/openbmt-approver/) | The Key app's side of the approval session: opens a request, shows one line per item, decides each, and stores before it releases |
+| [crates/openbmt-owner/](crates/openbmt-owner/) | The owner phone's side of the approval session: the refund queue, cash-out, batches, settings and pairings, the session it builds and the Key app's answer it takes |
 | [crates/openbmt-watch/](crates/openbmt-watch/) | The counter's payment watcher: merkle proofs, full blocks, peer groups, conflicts, health |
 | [crates/openbmt-net/](crates/openbmt-net/) | The counter's Bitcoin peer client: wire framing, the single-peer session and the manager that runs several peers, checks blocks by filters and fetches announced transactions, with no sockets and no clock |
 | [crates/openbmt-net-io/](crates/openbmt-net-io/) | The counter's network driver: owns the sockets and threads, runs the peer manager and the address book over them, keeps the headers and the address book on disk, and speaks SOCKS5 for Tor |

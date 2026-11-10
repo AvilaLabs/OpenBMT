@@ -70,6 +70,7 @@ fn fixed() -> &'static (WalletDescription, Psbt) {
             change_index: 0,
             min_confirmations: 1,
             send_all: false,
+            must_spend: Vec::new(),
         };
         let psbt = plan(&wallet, &coins, &request)
             .unwrap()

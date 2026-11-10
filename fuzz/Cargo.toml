@@ -20,6 +20,9 @@ openbmt-counter = { path = "../crates/openbmt-counter" }
 openbmt-link = { path = "../crates/openbmt-link" }
 openbmt-pos = { path = "../crates/openbmt-pos" }
 openbmt-books = { path = "../crates/openbmt-books" }
+openbmt-session = { path = "../crates/openbmt-session" }
+openbmt-approver = { path = "../crates/openbmt-approver" }
+openbmt-owner = { path = "../crates/openbmt-owner" }
 
 # Not a member of the main workspace.
 [workspace]
@@ -251,6 +254,34 @@ bench = false
 [[bin]]
 name = "books_export_decode"
 path = "fuzz_targets/books_export_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "session_request_decode"
+path = "fuzz_targets/session_request_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "session_response_decode"
+path = "fuzz_targets/session_response_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "approver_state_decode"
+path = "fuzz_targets/approver_state_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "owner_queue_decode"
+path = "fuzz_targets/owner_queue_decode.rs"
 test = false
 doc = false
 bench = false

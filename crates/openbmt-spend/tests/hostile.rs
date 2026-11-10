@@ -57,6 +57,7 @@ fn random_case(rng: &mut Rng) -> (Vec<Coin>, openbmt_spend::SpendRequest) {
         change_index: rng.range(0, 15) as u32,
         min_confirmations: rng.range(0, 2) as u32,
         send_all,
+        must_spend: Vec::new(),
     };
     (coins, request)
 }
@@ -227,6 +228,7 @@ fn sp_70_hostile_requests_are_errors_not_panics() {
             change_index,
             min_confirmations: u32::MAX,
             send_all,
+            must_spend: Vec::new(),
         };
         let e = plan(wallet(), &coins, &r).unwrap_err();
         assert!(!e.to_string().is_empty());
