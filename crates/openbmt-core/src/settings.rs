@@ -10,12 +10,21 @@
 //! in whole display dollars "from the owner phone", which is only a label.
 //! Moving either number up counts as loosening.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::batch::PinnedRoots;
 use crate::identity::{tagged_hash, DeviceId, Identity, Sig, TAG_SETTINGS};
-use crate::policy;
+use crate::policy::{self, CheckMode};
+
+/// Largest underpayment tolerance `validate` accepts, in basis points (5%).
+pub const MAX_TOLERANCE_BPS: u32 = 500;
+/// Shortest heartbeat age limit `validate` accepts, in seconds.
+pub const MIN_HEARTBEAT_MAX_AGE_SECS: u32 = 60;
+/// Longest heartbeat age limit `validate` accepts, in seconds.
+pub const MAX_HEARTBEAT_MAX_AGE_SECS: u32 = 3_600;
+/// The whole of a budget, in basis points; counter shares may not sum above it.
+pub const SHARE_TOTAL_BPS: u32 = 10_000;
 
 /// A money limit: satoshis (enforced) and whole dollars (shown).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,16 +52,16 @@ pub struct Settings {
     pub version: u32,
     /// Light check: largest instant sale.
     pub light_per_sale: Limit,
-    /// Light check: this counter's slice of the outstanding total.
-    pub light_slice: Limit,
+    /// Light check: shop-wide outstanding instant total.
+    pub light_budget: Limit,
     /// Own node: largest instant sale.
     pub node_per_sale: Limit,
-    /// Own node: this counter's slice.
-    pub node_slice: Limit,
+    /// Own node: shop-wide outstanding instant total.
+    pub node_budget: Limit,
     /// Box reports only: largest instant sale.
     pub box_per_sale: Limit,
-    /// Box reports only: this counter's slice.
-    pub box_slice: Limit,
+    /// Box reports only: shop-wide outstanding instant total.
+    pub box_budget: Limit,
     /// How far under the sale amount a payment may fall and still count, in
     /// basis points (100 = 1%).
     pub underpayment_tolerance_bps: u32,
@@ -75,6 +84,9 @@ pub struct Settings {
     pub customer_wifi: bool,
     /// Devices allowed to write records.
     pub devices: BTreeSet<DeviceId>,
+    /// Each counter's share of every budget, in basis points (10,000 = the
+    /// whole budget).
+    pub counters: BTreeMap<DeviceId, u16>,
 }
 
 impl Settings {
@@ -87,12 +99,12 @@ impl Settings {
         Self {
             version: 1,
             light_per_sale: usd(policy::LIGHT_PER_SALE_USD),
-            light_slice: usd(policy::LIGHT_SLICE_USD),
+            light_budget: usd(policy::LIGHT_SLICE_USD),
             node_per_sale: usd(policy::NODE_PER_SALE_USD),
-            node_slice: usd(policy::NODE_SLICE_USD),
+            node_budget: usd(policy::NODE_SLICE_USD),
             box_per_sale: usd(policy::BOX_PER_SALE_USD),
-            box_slice: usd(policy::BOX_SLICE_USD),
-            underpayment_tolerance_bps: 100,
+            box_budget: usd(policy::BOX_SLICE_USD),
+            underpayment_tolerance_bps: 50,
             refund_cap: usd(100),
             refund_daily_cap: usd(300),
             cashier_override_daily_cap: usd(20),
@@ -102,13 +114,69 @@ impl Settings {
             tor_on: false,
             customer_wifi: true,
             devices: BTreeSet::new(),
+            counters: BTreeMap::new(),
         }
+    }
+
+    /// The shop-wide outstanding instant total for a check mode.
+    pub fn budget(&self, mode: CheckMode) -> &Limit {
+        match mode {
+            CheckMode::Light => &self.light_budget,
+            CheckMode::NodeAlsoSeenByLight => &self.node_budget,
+            CheckMode::BoxReportsOnly => &self.box_budget,
+        }
+    }
+
+    /// `counter`'s slice of the budget for `mode`, in satoshis:
+    /// `budget * share / 10_000`, rounded down. Zero when the device has no
+    /// entry in `counters`.
+    pub fn slice_sats(&self, counter: &DeviceId, mode: CheckMode) -> u64 {
+        let Some(share) = self.counters.get(counter) else {
+            return 0;
+        };
+        let sats = u128::from(self.budget(mode).sats) * u128::from(*share) / 10_000;
+        // `share` can exceed 10_000 only in unvalidated settings.
+        u64::try_from(sats).unwrap_or(u64::MAX)
+    }
+
+    /// Check the values make sense. `SignedSettings::verify` runs this after
+    /// the owner signature check.
+    pub fn validate(&self) -> Result<(), SettingsError> {
+        if self.underpayment_tolerance_bps > MAX_TOLERANCE_BPS {
+            return Err(SettingsError::Invalid(
+                "underpayment tolerance is above 500 basis points",
+            ));
+        }
+        if self.min_confirmations < 1 {
+            return Err(SettingsError::Invalid(
+                "at least one confirmation must settle a sale",
+            ));
+        }
+        if !(MIN_HEARTBEAT_MAX_AGE_SECS..=MAX_HEARTBEAT_MAX_AGE_SECS)
+            .contains(&self.heartbeat_max_age_secs)
+        {
+            return Err(SettingsError::Invalid(
+                "heartbeat age limit is outside 60 to 3600 seconds",
+            ));
+        }
+        if self.counters.keys().any(|c| !self.devices.contains(c)) {
+            return Err(SettingsError::Invalid(
+                "a counter with a share is not on the device list",
+            ));
+        }
+        let total: u32 = self.counters.values().map(|s| u32::from(*s)).sum();
+        if total > SHARE_TOTAL_BPS {
+            return Err(SettingsError::Invalid(
+                "counter shares add up to more than 10000 basis points",
+            ));
+        }
+        Ok(())
     }
 
     /// Canonical bytes: fixed field order, little-endian numbers, devices
     /// sorted.
     pub fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(256 + self.devices.len() * 32);
+        let mut out = Vec::with_capacity(256 + self.devices.len() * 32 + self.counters.len() * 34);
         out.extend_from_slice(&self.version.to_le_bytes());
         for l in self.limits() {
             out.extend_from_slice(&l.sats.to_le_bytes());
@@ -123,17 +191,22 @@ impl Settings {
         for d in &self.devices {
             out.extend_from_slice(&d.to_bytes());
         }
+        out.extend_from_slice(&(self.counters.len() as u32).to_le_bytes());
+        for (d, share) in &self.counters {
+            out.extend_from_slice(&d.to_bytes());
+            out.extend_from_slice(&share.to_le_bytes());
+        }
         out
     }
 
     fn limits(&self) -> [&Limit; 10] {
         [
             &self.light_per_sale,
-            &self.light_slice,
+            &self.light_budget,
             &self.node_per_sale,
-            &self.node_slice,
+            &self.node_budget,
             &self.box_per_sale,
-            &self.box_slice,
+            &self.box_budget,
             &self.refund_cap,
             &self.refund_daily_cap,
             &self.cashier_override_daily_cap,
@@ -226,11 +299,11 @@ pub fn changed_fields(old: &Settings, new: &Settings) -> Vec<FieldChange> {
         &old.light_per_sale,
         &new.light_per_sale,
     );
-    limit(o, "light_slice", &old.light_slice, &new.light_slice);
+    limit(o, "light_budget", &old.light_budget, &new.light_budget);
     limit(o, "node_per_sale", &old.node_per_sale, &new.node_per_sale);
-    limit(o, "node_slice", &old.node_slice, &new.node_slice);
+    limit(o, "node_budget", &old.node_budget, &new.node_budget);
     limit(o, "box_per_sale", &old.box_per_sale, &new.box_per_sale);
-    limit(o, "box_slice", &old.box_slice, &new.box_slice);
+    limit(o, "box_budget", &old.box_budget, &new.box_budget);
     num(
         o,
         "underpayment_tolerance_bps",
@@ -288,6 +361,17 @@ pub fn changed_fields(old: &Settings, new: &Settings) -> Vec<FieldChange> {
             direction: dir(added),
         });
     }
+    if old.counters != new.counters {
+        // A new counter, or a bigger share for one, lets more through.
+        let loosens = new
+            .counters
+            .iter()
+            .any(|(d, share)| old.counters.get(d).is_none_or(|before| share > before));
+        o.push(FieldChange {
+            field: "counters",
+            direction: dir(loosens),
+        });
+    }
     out
 }
 
@@ -314,6 +398,8 @@ pub enum SettingsError {
     ApproverSignatureInvalid,
     /// The version did not go up.
     StaleVersion { current: u32, got: u32 },
+    /// The values are not acceptable; the text says which rule failed.
+    Invalid(&'static str),
 }
 
 impl fmt::Display for SettingsError {
@@ -322,6 +408,7 @@ impl fmt::Display for SettingsError {
             Self::OwnerSignatureInvalid => write!(f, "owner signature missing or wrong"),
             Self::ApproverRequired => write!(f, "this change needs the Key app's co-signature"),
             Self::ApproverSignatureInvalid => write!(f, "Key app signature is wrong"),
+            Self::Invalid(reason) => write!(f, "settings are not valid: {reason}"),
             Self::StaleVersion { current, got } => {
                 write!(
                     f,
@@ -358,6 +445,7 @@ impl SignedSettings {
         if !roots.owner.verify_digest(&h, &self.owner_sig) {
             return Err(SettingsError::OwnerSignatureInvalid);
         }
+        self.settings.validate()?;
         if let Some(cur) = current {
             if self.settings.version <= cur.version {
                 return Err(SettingsError::StaleVersion {
@@ -383,14 +471,24 @@ impl SignedSettings {
 #[derive(Debug)]
 pub struct SettingsStore {
     roots: PinnedRoots,
+    min_version: u32,
     current: Option<SignedSettings>,
 }
 
 impl SettingsStore {
     /// An empty store for these pinned roots.
     pub fn new(roots: PinnedRoots) -> Self {
+        Self::with_floor(roots, 0)
+    }
+
+    /// An empty store that refuses any settings whose version is
+    /// `min_version` or lower, even before it holds any. A restored device
+    /// passes the newest version it knew of, so an old signed copy cannot be
+    /// replayed into an empty store.
+    pub fn with_floor(roots: PinnedRoots, min_version: u32) -> Self {
         Self {
             roots,
+            min_version,
             current: None,
         }
     }
@@ -402,6 +500,12 @@ impl SettingsStore {
 
     /// Verify and take new settings. Nothing changes on failure.
     pub fn apply(&mut self, signed: SignedSettings) -> Result<Change, SettingsError> {
+        if signed.settings.version <= self.min_version {
+            return Err(SettingsError::StaleVersion {
+                current: self.min_version,
+                got: signed.settings.version,
+            });
+        }
         let change = signed.verify(&self.roots, self.current())?;
         self.current = Some(signed);
         Ok(change)
@@ -440,11 +544,11 @@ mod tests {
     fn defaults_follow_the_policy_table() {
         let s = Settings::defaults(RATE);
         assert_eq!(s.light_per_sale.sats, 10 * RATE);
-        assert_eq!(s.light_slice.display_usd, 50);
+        assert_eq!(s.light_budget.display_usd, 50);
         assert_eq!(s.node_per_sale.sats, 25 * RATE);
-        assert_eq!(s.node_slice.sats, 100 * RATE);
+        assert_eq!(s.node_budget.sats, 100 * RATE);
         assert_eq!(s.box_per_sale.display_usd, 10);
-        assert_eq!(s.box_slice.display_usd, 50);
+        assert_eq!(s.box_budget.display_usd, 50);
     }
 
     #[test]
@@ -460,11 +564,11 @@ mod tests {
         type Edit = fn(&mut Settings);
         let cases: Vec<(&str, Edit)> = vec![
             ("light_per_sale", |s| s.light_per_sale.sats += 1),
-            ("light_slice", |s| s.light_slice.sats += 1),
+            ("light_budget", |s| s.light_budget.sats += 1),
             ("node_per_sale", |s| s.node_per_sale.sats += 1),
-            ("node_slice", |s| s.node_slice.sats += 1),
+            ("node_budget", |s| s.node_budget.sats += 1),
             ("box_per_sale", |s| s.box_per_sale.sats += 1),
-            ("box_slice", |s| s.box_slice.sats += 1),
+            ("box_budget", |s| s.box_budget.sats += 1),
             ("underpayment_tolerance_bps", |s| {
                 s.underpayment_tolerance_bps += 1
             }),
@@ -518,7 +622,7 @@ mod tests {
     fn mixed_changes_are_loosening() {
         let old = base();
         let mut new = old.clone();
-        new.light_slice.sats -= 100; // tightening
+        new.light_budget.sats -= 100; // tightening
         new.refund_cap.sats += 1; // loosening
         assert_eq!(classify_change(&old, &new), Change::Loosening);
         let fields = changed_fields(&old, &new);
@@ -751,5 +855,296 @@ mod tests {
         };
         assert_eq!(store.apply(bad), Err(SettingsError::ApproverRequired));
         assert_eq!(store.current(), Some(&s2));
+    }
+
+    /// `base()` with a counter that is on the device list and holds a share.
+    fn with_counter(share: u16) -> (Settings, DeviceId) {
+        let mut s = base();
+        let c = identity(60).device_id();
+        s.devices.insert(c);
+        s.counters.insert(c, share);
+        (s, c)
+    }
+
+    #[test]
+    fn default_tolerance_is_half_a_percent_and_defaults_validate() {
+        let s = Settings::defaults(RATE);
+        assert_eq!(s.underpayment_tolerance_bps, 50);
+        assert_eq!(s.validate(), Ok(()));
+        assert!(s.counters.is_empty());
+        assert_eq!(base().validate(), Ok(()));
+    }
+
+    #[test]
+    fn budget_fields_are_named_in_changed_fields() {
+        let old = base();
+        for (name, edit) in [
+            (
+                "light_budget",
+                (|s: &mut Settings| s.light_budget.sats += 1) as fn(&mut Settings),
+            ),
+            ("node_budget", |s| s.node_budget.sats += 1),
+            ("box_budget", |s| s.box_budget.sats += 1),
+        ] {
+            let mut new = old.clone();
+            edit(&mut new);
+            assert_eq!(changed_fields(&old, &new)[0].field, name);
+        }
+    }
+
+    #[test]
+    fn slice_arithmetic_rounds_down_in_wide_integers() {
+        let (mut s, c) = with_counter(3_333);
+        s.light_budget = Limit {
+            sats: 5_000_000,
+            display_usd: 50,
+        };
+        assert_eq!(s.slice_sats(&c, CheckMode::Light), 1_666_500);
+        s.light_budget.sats = 10;
+        assert_eq!(s.slice_sats(&c, CheckMode::Light), 3); // 3.333 rounds down
+                                                           // a budget near u64::MAX does not overflow
+        s.node_budget.sats = u64::MAX;
+        s.counters.insert(c, 10_000);
+        assert_eq!(s.slice_sats(&c, CheckMode::NodeAlsoSeenByLight), u64::MAX);
+        s.box_budget.sats = 1_000;
+        s.counters.insert(c, 2_500);
+        assert_eq!(s.slice_sats(&c, CheckMode::BoxReportsOnly), 250);
+    }
+
+    #[test]
+    fn slice_is_zero_for_a_device_without_a_share() {
+        let (s, _) = with_counter(5_000);
+        let stranger = identity(61).device_id();
+        for mode in [
+            CheckMode::Light,
+            CheckMode::NodeAlsoSeenByLight,
+            CheckMode::BoxReportsOnly,
+        ] {
+            assert_eq!(s.slice_sats(&stranger, mode), 0);
+        }
+    }
+
+    #[test]
+    fn counters_are_part_of_the_signed_bytes_in_key_order() {
+        let (s, c) = with_counter(1_000);
+        let mut t = s.clone();
+        t.counters.insert(c, 1_001);
+        assert_ne!(s.hash(), t.hash());
+        let mut u = s.clone();
+        u.counters.clear();
+        assert_ne!(s.hash(), u.hash());
+        // tail of the encoding: count u32 LE, then id | share u16 LE
+        let enc = s.encode();
+        let tail = &enc[enc.len() - 38..];
+        assert_eq!(&tail[..4], &1u32.to_le_bytes());
+        assert_eq!(&tail[4..36], &c.to_bytes());
+        assert_eq!(&tail[36..], &1_000u16.to_le_bytes());
+        // insertion order does not change the bytes
+        let (a, b) = (identity(62).device_id(), identity(63).device_id());
+        let mut x = base();
+        let mut y = base();
+        x.counters.insert(a, 1);
+        x.counters.insert(b, 2);
+        y.counters.insert(b, 2);
+        y.counters.insert(a, 1);
+        assert_eq!(x.encode(), y.encode());
+    }
+
+    #[test]
+    fn counter_change_directions() {
+        let (old, c) = with_counter(2_000);
+        let other = identity(64).device_id();
+        let dir_of = |new: &Settings| {
+            let f = changed_fields(&old, new);
+            assert_eq!(f.len(), 1);
+            assert_eq!(f[0].field, "counters");
+            f[0].direction
+        };
+        let mut raised = old.clone();
+        raised.counters.insert(c, 2_001);
+        assert_eq!(dir_of(&raised), Change::Loosening);
+        let mut lowered = old.clone();
+        lowered.counters.insert(c, 1_999);
+        assert_eq!(dir_of(&lowered), Change::Tightening);
+        let mut removed = old.clone();
+        removed.counters.remove(&c);
+        assert_eq!(dir_of(&removed), Change::Tightening);
+        let mut added = old.clone();
+        added.counters.insert(other, 1);
+        assert_eq!(dir_of(&added), Change::Loosening);
+        // one counter up and another down is mixed, so loosening
+        let mut mixed = old.clone();
+        mixed.counters.insert(c, 100);
+        mixed.counters.insert(other, 500);
+        assert_eq!(dir_of(&mixed), Change::Loosening);
+    }
+
+    #[test]
+    fn raised_share_needs_the_key_app_and_removal_needs_only_the_owner() {
+        let (o, a, roots) = roots();
+        let (cur, c) = with_counter(2_000);
+        let mut up = next(&cur);
+        up.counters.insert(c, 3_000);
+        let owner_only = SignedSettings {
+            owner_sig: up.sign(&o),
+            approver_sig: None,
+            settings: up.clone(),
+        };
+        assert_eq!(
+            owner_only.verify(&roots, Some(&cur)),
+            Err(SettingsError::ApproverRequired)
+        );
+        let both = SignedSettings {
+            approver_sig: Some(up.sign(&a)),
+            ..owner_only
+        };
+        assert_eq!(both.verify(&roots, Some(&cur)), Ok(Change::Loosening));
+
+        let mut gone = next(&cur);
+        gone.counters.remove(&c);
+        let signed = SignedSettings {
+            owner_sig: gone.sign(&o),
+            approver_sig: None,
+            settings: gone,
+        };
+        assert_eq!(signed.verify(&roots, Some(&cur)), Ok(Change::Tightening));
+    }
+
+    #[test]
+    fn validate_rules_each_have_their_own_reason() {
+        let reason = |s: &Settings| match s.validate() {
+            Err(SettingsError::Invalid(r)) => r,
+            other => panic!("expected Invalid, got {other:?}"),
+        };
+        let mut reasons = Vec::new();
+
+        let mut s = base();
+        s.underpayment_tolerance_bps = MAX_TOLERANCE_BPS;
+        assert_eq!(s.validate(), Ok(()));
+        s.underpayment_tolerance_bps = MAX_TOLERANCE_BPS + 1;
+        reasons.push(reason(&s));
+
+        let mut s = base();
+        s.min_confirmations = 0;
+        reasons.push(reason(&s));
+
+        for ok in [60, 3_600] {
+            let mut s = base();
+            s.heartbeat_max_age_secs = ok;
+            assert_eq!(s.validate(), Ok(()));
+        }
+        for bad in [59, 3_601] {
+            let mut s = base();
+            s.heartbeat_max_age_secs = bad;
+            reasons.push(reason(&s));
+        }
+
+        let mut s = base();
+        s.counters.insert(identity(65).device_id(), 100);
+        reasons.push(reason(&s));
+
+        let (mut s, c) = with_counter(10_000);
+        assert_eq!(s.validate(), Ok(()));
+        s.counters.insert(c, 9_999);
+        s.devices.insert(identity(66).device_id());
+        s.counters.insert(identity(66).device_id(), 2);
+        reasons.push(reason(&s));
+
+        // the five rules give five different texts (heartbeat appears twice)
+        reasons.sort_unstable();
+        reasons.dedup();
+        assert_eq!(reasons.len(), 5);
+    }
+
+    #[test]
+    fn invalid_settings_fail_verification_after_the_owner_signature() {
+        let (o, a, roots) = roots();
+        let mut bad = base();
+        bad.counters.insert(identity(67).device_id(), 10_001);
+        let signed = SignedSettings {
+            owner_sig: bad.sign(&o),
+            approver_sig: Some(bad.sign(&a)),
+            settings: bad.clone(),
+        };
+        assert!(matches!(
+            signed.verify(&roots, None),
+            Err(SettingsError::Invalid(_))
+        ));
+        // a bad owner signature is reported first
+        let forged = SignedSettings {
+            owner_sig: bad.sign(&a),
+            ..signed
+        };
+        assert_eq!(
+            forged.verify(&roots, None),
+            Err(SettingsError::OwnerSignatureInvalid)
+        );
+        assert_eq!(
+            SettingsError::Invalid("x").to_string(),
+            "settings are not valid: x"
+        );
+    }
+
+    #[test]
+    fn shares_summing_past_the_whole_budget_are_refused() {
+        let (mut s, _) = with_counter(5_000);
+        let d = identity(68).device_id();
+        s.devices.insert(d);
+        s.counters.insert(d, 5_000);
+        assert_eq!(s.validate(), Ok(()));
+        s.counters.insert(d, 5_001);
+        assert!(matches!(s.validate(), Err(SettingsError::Invalid(_))));
+    }
+
+    #[test]
+    fn counter_must_be_on_the_device_list() {
+        let mut s = base();
+        s.counters.insert(identity(69).device_id(), 1);
+        assert!(matches!(s.validate(), Err(SettingsError::Invalid(_))));
+    }
+
+    #[test]
+    fn store_floor_refuses_old_versions_even_when_empty() {
+        let (o, a, roots) = roots();
+        let mut store = SettingsStore::with_floor(roots, 5);
+        for v in [4, 5] {
+            let mut s = base();
+            s.version = v;
+            let signed = SignedSettings {
+                owner_sig: s.sign(&o),
+                approver_sig: Some(s.sign(&a)),
+                settings: s,
+            };
+            assert_eq!(
+                store.apply(signed),
+                Err(SettingsError::StaleVersion { current: 5, got: v })
+            );
+            assert!(store.current().is_none());
+        }
+        let mut s = base();
+        s.version = 6;
+        let signed = SignedSettings {
+            owner_sig: s.sign(&o),
+            approver_sig: Some(s.sign(&a)),
+            settings: s,
+        };
+        assert_eq!(store.apply(signed), Ok(Change::Loosening));
+    }
+
+    #[test]
+    fn new_store_is_a_floor_of_zero() {
+        let (o, a, roots) = roots();
+        let mut store = SettingsStore::new(roots);
+        let mut s = base();
+        s.version = 0;
+        let signed = SignedSettings {
+            owner_sig: s.sign(&o),
+            approver_sig: Some(s.sign(&a)),
+            settings: s,
+        };
+        assert_eq!(
+            store.apply(signed),
+            Err(SettingsError::StaleVersion { current: 0, got: 0 })
+        );
     }
 }

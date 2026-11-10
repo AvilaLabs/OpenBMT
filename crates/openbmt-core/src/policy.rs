@@ -120,9 +120,9 @@ impl InstantPolicy {
             slice_sats: slice.sats,
         };
         Self {
-            light: m(&s.light_per_sale, &s.light_slice),
-            node: m(&s.node_per_sale, &s.node_slice),
-            box_only: m(&s.box_per_sale, &s.box_slice),
+            light: m(&s.light_per_sale, &s.light_budget),
+            node: m(&s.node_per_sale, &s.node_budget),
+            box_only: m(&s.box_per_sale, &s.box_budget),
             underpayment_tolerance_bps: s.underpayment_tolerance_bps,
             heartbeat_max_age_secs: u64::from(s.heartbeat_max_age_secs),
         }
