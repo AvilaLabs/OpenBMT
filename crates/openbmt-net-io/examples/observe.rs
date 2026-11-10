@@ -115,7 +115,13 @@ fn run(args: &[String]) -> Result<(), String> {
     let script = ScriptBuf::new_p2wsh(&WScriptHash::from_raw_hash(digest));
 
     let random = OsRandomness::new().map_err(|e| format!("randomness: {e}"))?;
-    let config = DriverConfig::new(network, start_tip);
+    let mut config = DriverConfig::new(network, start_tip);
+    // With OPENBMT_PROXY set to the address of a SOCKS5 proxy (Tor's),
+    // every peer is reached through it and no name is resolved here
+    // (NR-26, NR-78).
+    if let Ok(proxy) = std::env::var("OPENBMT_PROXY") {
+        config.proxy = Some(proxy.parse().map_err(|e| format!("OPENBMT_PROXY: {e}"))?);
+    }
     let started = Instant::now();
     let (rx0, tx0) = net_dev();
     let io0 = proc_io("rchar:");
