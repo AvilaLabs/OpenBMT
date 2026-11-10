@@ -345,7 +345,10 @@ fn event_at(event: &Event) -> u64 {
         | Event::Replaced { at, .. }
         | Event::Reopened { at, .. }
         | Event::PosPaid { at, .. }
-        | Event::PosUnpaid { at, .. } => *at,
+        | Event::PosUnpaid { at, .. }
+        | Event::RefundRequested { at, .. }
+        | Event::RefundWithdrawn { at, .. }
+        | Event::RefundPaidInCash { at, .. } => *at,
     }
 }
 
