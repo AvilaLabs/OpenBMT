@@ -4,13 +4,15 @@ use openbmt_core::identity::{DeviceId, Identity};
 
 use super::kit::*;
 use crate::proto::{Refusal, Request, Response};
-use crate::relay::{sign_challenge, Action, Relay, RelayConfig, CHALLENGE_SECS};
+use crate::relay::{sign_challenge, Action, MembersError, Relay, RelayConfig, CHALLENGE_SECS};
 use crate::seal::{open, seal, Kind, OpenError, Role, MAX_CONTENT_LEN};
 use crate::store::{Event, MailStore, MemoryStore};
 
 pub struct Rig<S: MailStore = MemoryStore> {
     pub relay: Relay<S>,
     pub now: u64,
+    /// The connection the helpers speak on.
+    pub conn: u64,
     rng: Counting,
 }
 
@@ -29,9 +31,13 @@ impl<S: MailStore> Rig<S> {
     where
         S::Error: std::fmt::Debug,
     {
+        let mut relay = Relay::new(id(99), cfg, store).unwrap();
+        let members = [owner(), counter(), the_box()].map(|i| i.device_id());
+        relay.set_members(&members).unwrap();
         Self {
-            relay: Relay::new(id(99), cfg, store).unwrap(),
+            relay,
             now: 1_000,
+            conn: 1,
             rng: Counting(100),
         }
     }
@@ -41,8 +47,12 @@ impl<S: MailStore> Rig<S> {
     }
 
     pub fn ask(&mut self, r: Request) -> Response {
+        self.ask_on(self.conn, r)
+    }
+
+    pub fn ask_on(&mut self, conn: u64, r: Request) -> Response {
         let rng = &mut self.rng;
-        self.relay.handle(r, self.now, &mut |b| rng.fill(b))
+        self.relay.handle(conn, r, self.now, &mut |b| rng.fill(b))
     }
 
     pub fn challenge(&mut self) -> [u8; 32] {
@@ -114,7 +124,8 @@ fn rig_with_counter_mailbox() -> Rig {
 #[test]
 fn lk_20_a_relay_takes_a_well_formed_signed_message_for_an_existing_mailbox() {
     let mut rig = rig_with_counter_mailbox();
-    // The relay has no device list: a sender it never heard of is taken.
+    // A message from a member to a member is taken; one from a key that is
+    // not a member is not.
     let mut rng = Counting(0);
     let from_stranger = seal(
         &stranger(),
@@ -127,8 +138,66 @@ fn lk_20_a_relay_takes_a_well_formed_signed_message_for_an_existing_mailbox() {
         &mut |b| rng.fill(b),
     )
     .unwrap();
-    assert_eq!(rig.put(from_stranger), Response::Stored { id: 1 });
-    assert_eq!(rig.put(msg(1)), Response::Stored { id: 2 });
+    assert_eq!(
+        rig.put(from_stranger),
+        Response::Refused(Refusal::SenderNotMember)
+    );
+    assert_eq!(rig.put(msg(1)), Response::Stored { id: 1 });
+}
+
+#[test]
+fn lk_20_a_message_for_a_key_that_is_not_a_member_is_refused() {
+    let mut rig = rig_with_counter_mailbox();
+    let mut rng = Counting(0);
+    let to_stranger = seal(
+        &owner(),
+        Role::Owner,
+        &stranger().device_id(),
+        Role::Counter,
+        1,
+        Kind::Command,
+        b"x",
+        &mut |b| rng.fill(b),
+    )
+    .unwrap();
+    assert_eq!(
+        rig.put(to_stranger),
+        Response::Refused(Refusal::ReaderNotMember)
+    );
+}
+
+#[test]
+fn lk_20_a_relay_with_no_members_takes_nothing() {
+    let mut rig = rig_with_counter_mailbox();
+    rig.relay.set_members(&[]).unwrap();
+    assert_eq!(rig.relay.members().count(), 0);
+    assert_eq!(rig.relay.mailbox_count(), 0);
+    assert_eq!(rig.put(msg(1)), Response::Refused(Refusal::SenderNotMember));
+    assert_eq!(rig.make(&counter()), Response::Refused(Refusal::NotMember));
+}
+
+#[test]
+fn lk_20_a_key_outside_the_list_cannot_fill_a_mailbox_with_junk() {
+    let mut rig = rig_with_counter_mailbox();
+    // The real message is there; an outside key seals as many validly
+    // signed messages to the counter as it likes.
+    assert_eq!(rig.put(msg(1)), Response::Stored { id: 1 });
+    let mut rng = Counting(0);
+    for n in 1..=100u64 {
+        let junk = seal(
+            &stranger(),
+            Role::Owner,
+            &counter().device_id(),
+            Role::Counter,
+            n,
+            Kind::Command,
+            b"junk",
+            &mut |b| rng.fill(b),
+        )
+        .unwrap();
+        assert_eq!(rig.put(junk), Response::Refused(Refusal::SenderNotMember));
+    }
+    assert_eq!(ids(rig.fetch(&counter(), 0)), vec![1]);
 }
 
 #[test]
@@ -201,19 +270,63 @@ fn lk_21_a_mailbox_is_made_when_the_reader_proves_its_key() {
 }
 
 #[test]
-fn lk_21_a_relay_has_a_fixed_number_of_mailboxes_and_the_merchant_can_clear_them() {
+fn lk_21_a_mailbox_exists_only_for_a_member() {
     let mut rig = Rig::new();
+    assert_eq!(rig.make(&stranger()), Response::Refused(Refusal::NotMember));
+    assert_eq!(rig.relay.mailbox_count(), 0);
+    assert_eq!(rig.make(&counter()), Response::Made);
+}
+
+#[test]
+fn lk_21_a_relay_has_at_most_64_members() {
+    let mut rig = Rig::new();
+    let ids64: Vec<DeviceId> = (1..=64u8).map(|n| id(n).device_id()).collect();
+    rig.relay.set_members(&ids64).unwrap();
     for n in 1..=64u8 {
         assert_eq!(rig.make(&id(n)), Response::Made, "mailbox {n}");
     }
     assert_eq!(rig.relay.mailbox_count(), 64);
-    assert_eq!(rig.make(&id(65)), Response::Refused(Refusal::MailboxesFull));
-    // An existing one is still answered.
-    assert_eq!(rig.make(&id(1)), Response::Made);
-    rig.relay.clear().unwrap();
-    assert_eq!(rig.relay.mailbox_count(), 0);
-    assert_eq!(rig.make(&id(65)), Response::Made);
+    let mut ids65 = ids64.clone();
+    ids65.push(id(65).device_id());
+    assert!(matches!(
+        rig.relay.set_members(&ids65),
+        Err(MembersError::TooMany)
+    ));
+    // The list is as it was.
+    assert_eq!(rig.relay.members().count(), 64);
+    assert_eq!(rig.make(&id(65)), Response::Refused(Refusal::NotMember));
+}
+
+#[test]
+fn lk_21_the_mailbox_of_a_removed_member_is_gone() {
+    let mut rig = rig_with_counter_mailbox();
+    assert_eq!(rig.make(&the_box()), Response::Made);
+    assert_eq!(rig.put(msg(1)), Response::Stored { id: 1 });
+    let keep = [owner().device_id(), the_box().device_id()];
+    rig.relay.set_members(&keep).unwrap();
+    assert!(rig.relay.mailbox(&counter().device_id()).is_none());
+    assert_eq!(rig.relay.mailbox_count(), 1);
     assert_eq!(rig.relay.store().len(), 1);
+    assert_eq!(
+        rig.fetch(&counter(), 0),
+        Response::Refused(Refusal::NoMailbox)
+    );
+    // Added back: an empty mailbox, not the old messages.
+    let all = [
+        owner().device_id(),
+        counter().device_id(),
+        the_box().device_id(),
+    ];
+    rig.relay.set_members(&all).unwrap();
+    assert_eq!(rig.make(&counter()), Response::Made);
+    assert!(items(rig.fetch(&counter(), 0)).is_empty());
+    // A list the store refuses changes nothing.
+    rig.relay.store_mut().fail_writes = true;
+    assert!(matches!(
+        rig.relay.set_members(&keep),
+        Err(MembersError::Store(_))
+    ));
+    assert_eq!(rig.relay.members().count(), 3);
 }
 
 #[test]
@@ -355,28 +468,70 @@ fn lk_23_a_signature_by_another_key_or_for_another_request_is_refused() {
     assert_eq!(r, Response::Refused(Refusal::ChallengeSignature));
 }
 
-#[test]
-fn lk_23_the_relay_bounds_the_challenges_it_remembers() {
-    let cfg = RelayConfig {
-        max_challenges: 4,
-        ..RelayConfig::default()
-    };
-    let mut rig = Rig::with(cfg);
-    let first = rig.challenge();
-    for _ in 0..4 {
-        rig.challenge();
-    }
-    let sig = sign_challenge(&counter(), &first, &rig.relay_key(), Action::Make, 0);
-    let r = rig.ask(Request::MakeMailbox {
+fn make_request(rig: &Rig, challenge: [u8; 32]) -> Request {
+    let sig = sign_challenge(&counter(), &challenge, &rig.relay_key(), Action::Make, 0);
+    Request::MakeMailbox {
         reader: counter().device_id(),
-        challenge: first,
+        challenge,
         sig,
-    });
-    assert_eq!(r, Response::Refused(Refusal::ChallengeUnknown));
-    // Randomness that fails gives no challenge.
+    }
+}
+
+fn challenge_on(rig: &mut Rig, conn: u64) -> [u8; 32] {
+    match rig.ask_on(conn, Request::Challenge) {
+        Response::Challenge { challenge } => challenge,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn lk_23_a_challenge_is_good_only_on_the_connection_that_asked() {
+    let mut rig = Rig::new();
+    let c = challenge_on(&mut rig, 1);
+    let req = make_request(&rig, c);
+    assert_eq!(
+        rig.ask_on(2, req.clone()),
+        Response::Refused(Refusal::ChallengeUnknown)
+    );
+    // The attempt on another connection did not use it up.
+    assert_eq!(rig.ask_on(1, req), Response::Made);
+}
+
+#[test]
+fn lk_23_a_connection_holds_one_challenge_and_a_new_one_replaces_it() {
+    let mut rig = Rig::new();
+    let first = challenge_on(&mut rig, 1);
+    let second = challenge_on(&mut rig, 1);
+    assert_ne!(first, second);
+    let old = make_request(&rig, first);
+    assert_eq!(
+        rig.ask_on(1, old),
+        Response::Refused(Refusal::ChallengeUnknown)
+    );
+    // The wrong value used up the connection's challenge too: ask again.
+    let third = challenge_on(&mut rig, 1);
+    let ok = make_request(&rig, third);
+    assert_eq!(rig.ask_on(1, ok), Response::Made);
+    // Other connections have their own.
+    let a = challenge_on(&mut rig, 5);
+    let b = challenge_on(&mut rig, 6);
+    assert_eq!(rig.ask_on(6, make_request(&rig, b)), Response::Made);
+    assert_eq!(rig.ask_on(5, make_request(&rig, a)), Response::Made);
+}
+
+#[test]
+fn lk_23_a_challenge_dies_with_its_connection() {
+    let mut rig = Rig::new();
+    let c = challenge_on(&mut rig, 1);
+    rig.relay.close(1);
+    assert_eq!(
+        rig.ask_on(1, make_request(&rig, c)),
+        Response::Refused(Refusal::ChallengeUnknown)
+    );
+    // And randomness that fails gives no challenge.
     let r = rig
         .relay
-        .handle(Request::Challenge, 0, &mut |_: &mut [u8; 32]| {
+        .handle(1, Request::Challenge, 0, &mut |_: &mut [u8; 32]| {
             Err::<(), _>("no")
         });
     assert_eq!(r, Response::Refused(Refusal::NoRandomness));
@@ -541,7 +696,9 @@ fn lk_41_a_relay_restarted_over_its_store_has_the_same_mailboxes() {
     rig.fetch(&counter(), 0);
     rig.ack(&counter(), 2);
     let mut store = MemoryStore::new();
-    for (reader, events) in rig.relay.store_mut().load().unwrap() {
+    let loaded = rig.relay.store_mut().load().unwrap();
+    store.set_members(&loaded.members).unwrap();
+    for (reader, events) in loaded.mailboxes {
         for e in events {
             match e {
                 Event::Put { id, sealed } => store.put(&reader, id, &sealed).unwrap(),

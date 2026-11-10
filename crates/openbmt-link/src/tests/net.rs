@@ -22,7 +22,10 @@ pub fn relay_identity() -> openbmt_core::identity::Identity {
 
 pub fn start(cfg: ServerConfig) -> Server {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let relay = Relay::new(relay_identity(), RelayConfig::default(), MemoryStore::new()).unwrap();
+    let mut relay =
+        Relay::new(relay_identity(), RelayConfig::default(), MemoryStore::new()).unwrap();
+    let members = [owner(), counter(), the_box()].map(|i| i.device_id());
+    relay.set_members(&members).unwrap();
     Server::start(listener, relay, Arc::new(SystemClock), cfg).unwrap()
 }
 
@@ -357,5 +360,40 @@ fn lk_33_the_frames_carry_the_sealed_bytes_and_are_not_encrypted_again() {
     assert_eq!(c.put(&sealed).unwrap(), 1);
     let e = open(&counter(), Role::Counter, &sealed, allowed, |_| 1).unwrap_err();
     assert!(matches!(e, OpenError::Replay { .. }));
+    server.stop();
+}
+
+#[test]
+fn lk_23_a_challenge_from_one_socket_is_no_good_on_another() {
+    let server = start(ServerConfig::default());
+    let mut a = TcpStream::connect(server.local_addr()).unwrap();
+    let mut b = TcpStream::connect(server.local_addr()).unwrap();
+    a.write_all(&Request::Challenge.encode().unwrap()).unwrap();
+    let Response::Challenge { challenge } =
+        Response::decode(&read_answer(&mut a).unwrap()).unwrap()
+    else {
+        panic!()
+    };
+    let relay = relay_identity().device_id();
+    let sig = crate::relay::sign_challenge(
+        &counter(),
+        &challenge,
+        &relay,
+        crate::relay::Action::Make,
+        0,
+    );
+    let req = Request::MakeMailbox {
+        reader: counter().device_id(),
+        challenge,
+        sig,
+    }
+    .encode()
+    .unwrap();
+    b.write_all(&req).unwrap();
+    let r = Response::decode(&read_answer(&mut b).unwrap()).unwrap();
+    assert_eq!(r, Response::Refused(Refusal::ChallengeUnknown));
+    a.write_all(&req).unwrap();
+    let r = Response::decode(&read_answer(&mut a).unwrap()).unwrap();
+    assert_eq!(r, Response::Made);
     server.stop();
 }

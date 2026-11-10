@@ -47,6 +47,10 @@ pub const MAX_SEALED_LEN: usize = HEADER_LEN + 65536 + AEAD_TAG_LEN;
 /// length.
 pub const MAX_CONTENT_LEN: usize = 65536 - 4;
 
+/// The most a number may be above the last one taken from its sender
+/// (LK-06): 2^32. One message cannot move a sender's numbers out of reach.
+pub const MAX_NUMBER_JUMP: u64 = 1 << 32;
+
 /// What a device is to the shop (LK-08).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
@@ -189,6 +193,14 @@ pub enum OpenError {
         /// The number in the message.
         got: u64,
     },
+    /// The number is more than [`MAX_NUMBER_JUMP`] above the last one taken
+    /// from this sender.
+    NumberTooFar {
+        /// The last number taken.
+        last: u64,
+        /// The number in the message.
+        got: u64,
+    },
     /// The ciphertext did not open.
     Decrypt,
     /// The padding is not the one LK-07 gives.
@@ -209,6 +221,9 @@ impl fmt::Display for OpenError {
             Self::CiphertextHash => write!(f, "LK-04: ciphertext is not the one signed"),
             Self::Replay { last, got } => {
                 write!(f, "LK-06: number {got} is not above the last, {last}")
+            }
+            Self::NumberTooFar { last, got } => {
+                write!(f, "LK-06: number {got} is too far above the last, {last}")
             }
             Self::Decrypt => write!(f, "LK-02: the ciphertext does not open"),
             Self::Padding => write!(f, "LK-07: the padding is not well formed"),
@@ -555,7 +570,8 @@ pub fn inspect(sealed: &[u8]) -> Result<Seen, OpenError> {
 /// first failure: the frame; the reader; the sender on the list (`allowed`
 /// gives its role); the kind (known, and sent by that role to this one: this
 /// is LK-08's early refusal, before the signature and the decryption); the
-/// signature and hash; the number above `last_number` for that sender; the
+/// signature and hash; the number above `last_number` for that sender and no more than
+/// [`MAX_NUMBER_JUMP`] above it; the
 /// ciphertext; the padding.
 ///
 /// Opening does not store the number. Use [`Inbox::open`](crate::Inbox::open),
@@ -580,6 +596,12 @@ pub fn open(
     let last = last_number(&p.sender);
     if p.number <= last {
         return Err(OpenError::Replay {
+            last,
+            got: p.number,
+        });
+    }
+    if p.number.saturating_sub(last) > MAX_NUMBER_JUMP {
+        return Err(OpenError::NumberTooFar {
             last,
             got: p.number,
         });

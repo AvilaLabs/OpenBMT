@@ -40,14 +40,29 @@ pub enum Event {
     Floor(u64),
 }
 
+/// What a store holds when it is opened.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Loaded {
+    /// The member list.
+    pub members: Vec<DeviceId>,
+    /// Each member's mailbox as events.
+    pub mailboxes: Vec<(DeviceId, Vec<Event>)>,
+}
+
 /// A place to keep mailboxes. Every write is on disk (or in memory, for the
 /// test store) before it returns.
 pub trait MailStore {
     /// What a failed call says.
     type Error: Display;
 
-    /// Every mailbox and its events, in order.
-    fn load(&mut self) -> Result<Vec<(DeviceId, Vec<Event>)>, Self::Error>;
+    /// The member list and every member's mailbox with its events, in
+    /// order. A mailbox of a device that is not a member is not returned.
+    fn load(&mut self) -> Result<Loaded, Self::Error>;
+
+    /// Replace the member list (LK-21) and remove the mailboxes of every
+    /// device that is not on it. The list is stored before the mailboxes
+    /// go.
+    fn set_members(&mut self, members: &[DeviceId]) -> Result<(), Self::Error>;
 
     /// Make an empty mailbox. Does nothing if there is one.
     fn create(&mut self, reader: &DeviceId) -> Result<(), Self::Error>;
@@ -61,16 +76,14 @@ pub trait MailStore {
     /// Rewrite the mailbox's record from `live` if most of it is dead. The
     /// relay ignores a failure: the old record is still whole.
     fn compact(&mut self, reader: &DeviceId, live: &Mailbox) -> Result<(), Self::Error>;
-
-    /// Remove every mailbox.
-    fn clear(&mut self) -> Result<(), Self::Error>;
 }
 
 /// A store in memory, for tests. Set `fail_writes` to make every write fail.
 #[derive(Debug, Default)]
 pub struct MemoryStore {
     boxes: HashMap<DeviceId, Vec<Event>>,
-    /// Make `create`, `put`, `ack` and `clear` fail.
+    members: Vec<DeviceId>,
+    /// Make `create`, `put`, `ack` and `set_members` fail.
     pub fail_writes: bool,
 }
 
@@ -109,8 +122,25 @@ impl MemoryStore {
 impl MailStore for MemoryStore {
     type Error = MemoryFailure;
 
-    fn load(&mut self) -> Result<Vec<(DeviceId, Vec<Event>)>, MemoryFailure> {
-        Ok(self.boxes.iter().map(|(k, v)| (*k, v.clone())).collect())
+    fn load(&mut self) -> Result<Loaded, MemoryFailure> {
+        Ok(Loaded {
+            members: self.members.clone(),
+            mailboxes: self
+                .boxes
+                .iter()
+                .filter(|(k, _)| self.members.contains(k))
+                .map(|(k, v)| (*k, v.clone()))
+                .collect(),
+        })
+    }
+
+    fn set_members(&mut self, members: &[DeviceId]) -> Result<(), MemoryFailure> {
+        if self.fail_writes {
+            return Err(MemoryFailure);
+        }
+        self.members = members.to_vec();
+        self.boxes.retain(|k, _| members.contains(k));
+        Ok(())
     }
 
     fn create(&mut self, reader: &DeviceId) -> Result<(), MemoryFailure> {
@@ -146,14 +176,6 @@ impl MailStore for MemoryStore {
     fn compact(&mut self, _reader: &DeviceId, _live: &Mailbox) -> Result<(), MemoryFailure> {
         Ok(())
     }
-
-    fn clear(&mut self) -> Result<(), MemoryFailure> {
-        if self.fail_writes {
-            return Err(MemoryFailure);
-        }
-        self.boxes.clear();
-        Ok(())
-    }
 }
 
 const REC_PUT: u8 = 1;
@@ -161,6 +183,8 @@ const REC_FLOOR: u8 = 2;
 const CHECK_LEN: usize = 4;
 /// The extension of a log file.
 const EXT: &str = "mbx";
+/// The file that holds the member list.
+const MEMBERS_FILE: &str = "members.set";
 
 /// One log file per mailbox, in a directory.
 #[derive(Debug)]
@@ -267,6 +291,32 @@ fn unhex(name: &str) -> Option<DeviceId> {
 }
 
 impl DirStore {
+    /// The member list, or an empty one if none was ever stored. A file that
+    /// fails its check is an error: the relay does not start on a list it
+    /// cannot trust.
+    fn read_members(&self) -> io::Result<Vec<DeviceId>> {
+        let bytes = match fs::read(self.dir.join(MEMBERS_FILE)) {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let bad = || io::Error::new(io::ErrorKind::InvalidData, "the member file is damaged");
+        let split = bytes.len().checked_sub(CHECK_LEN).ok_or_else(bad)?;
+        let (keys, check) = bytes.split_at(split);
+        let want = sha256::Hash::hash(keys).to_byte_array();
+        if want.get(..CHECK_LEN) != Some(check) || keys.len() % 32 != 0 {
+            return Err(bad());
+        }
+        keys.chunks(32)
+            .map(|c| {
+                <[u8; 32]>::try_from(c)
+                    .ok()
+                    .and_then(|k| DeviceId::from_bytes(&k).ok())
+                    .ok_or_else(bad)
+            })
+            .collect()
+    }
+
     /// Keep logs in this directory, which is created if it is missing.
     pub fn new(dir: impl Into<PathBuf>) -> io::Result<Self> {
         let dir = dir.into();
@@ -304,7 +354,8 @@ impl DirStore {
 impl MailStore for DirStore {
     type Error = io::Error;
 
-    fn load(&mut self) -> io::Result<Vec<(DeviceId, Vec<Event>)>> {
+    fn load(&mut self) -> io::Result<Loaded> {
+        let members = self.read_members()?;
         let mut out = Vec::new();
         for entry in fs::read_dir(&self.dir)? {
             let path = entry?.path();
@@ -314,6 +365,13 @@ impl MailStore for DirStore {
             let Some(reader) = path.file_stem().and_then(|s| s.to_str()).and_then(unhex) else {
                 continue;
             };
+            if !members.contains(&reader) {
+                // Left behind by a crash between storing a new list and
+                // removing the files; it must not come back if the device
+                // is added again.
+                fs::remove_file(&path)?;
+                continue;
+            }
             let bytes = fs::read(&path)?;
             let (events, good) = parse_log(&bytes);
             if good < bytes.len() {
@@ -326,7 +384,10 @@ impl MailStore for DirStore {
                 .insert(reader, u64::try_from(good).unwrap_or(u64::MAX));
             out.push((reader, events));
         }
-        Ok(out)
+        Ok(Loaded {
+            members,
+            mailboxes: out,
+        })
     }
 
     fn create(&mut self, reader: &DeviceId) -> io::Result<()> {
@@ -380,16 +441,33 @@ impl MailStore for DirStore {
         Ok(())
     }
 
-    fn clear(&mut self) -> io::Result<()> {
+    fn set_members(&mut self, members: &[DeviceId]) -> io::Result<()> {
+        let mut body = Vec::with_capacity(members.len().saturating_mul(32));
+        for m in members {
+            body.extend_from_slice(&m.to_bytes());
+        }
+        let check = sha256::Hash::hash(&body).to_byte_array();
+        body.extend_from_slice(check.get(..CHECK_LEN).unwrap_or(&[]));
+        let path = self.dir.join(MEMBERS_FILE);
+        let temp = self.dir.join(format!("{MEMBERS_FILE}.tmp"));
+        let mut file = File::create(&temp)?;
+        file.write_all(&body)?;
+        file.sync_all()?;
+        fs::rename(&temp, &path)?;
+        self.sync_dir()?;
         for entry in fs::read_dir(&self.dir)? {
             let path = entry?.path();
-            let ext = path.extension().and_then(|e| e.to_str());
-            if ext == Some(EXT) || ext == Some("tmp") {
-                fs::remove_file(path)?;
+            if path.extension().and_then(|e| e.to_str()) != Some(EXT) {
+                continue;
+            }
+            let Some(reader) = path.file_stem().and_then(|s| s.to_str()).and_then(unhex) else {
+                continue;
+            };
+            if !members.contains(&reader) {
+                fs::remove_file(&path)?;
+                self.sizes.remove(&reader);
             }
         }
-        self.sync_dir()?;
-        self.sizes.clear();
-        Ok(())
+        self.sync_dir()
     }
 }

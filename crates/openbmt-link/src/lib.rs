@@ -26,8 +26,8 @@
 //!   answers, and the reader's signature covers the action and its number
 //!   as well as the challenge and the relay's key, so that a frame changed
 //!   on the way cannot become another request (LK-23, LK-33).
-//! - The relay bounds the challenges it remembers (256 by default); the
-//!   rules do not (LK-23).
+//! - A challenge belongs to one connection (the relay is told when a
+//!   connection closes), and a connection holds one at a time (LK-23).
 //! - Each message in a mailbox has a number the relay gives it; a cursor
 //!   and an acknowledgement are such numbers, and an acknowledgement drops
 //!   only numbers already handed out in a fetch (LK-24).

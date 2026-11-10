@@ -13,13 +13,14 @@
 //!
 //! A relay keeps the sealed bytes and nothing else about a message (LK-25).
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::fmt;
 
 use openbmt_core::identity::{DeviceId, Identity, Sig};
 
 use crate::proto::{Refusal, Request, Response, FETCH_BATCH, FETCH_BYTES};
 use crate::seal::{inspect, OpenError, MAX_SEALED_LEN};
-use crate::store::{Event, MailStore};
+use crate::store::{Event, Loaded, MailStore};
 
 /// The tag of a reader's signature over a challenge (LK-23).
 pub const TAG_FETCH: &str = "OpenBMT/link-fetch/v1";
@@ -49,11 +50,8 @@ impl Action {
     }
 }
 
-/// The bytes a reader signs for LK-23: the challenge, the relay's key, and
-/// what is asked (the action and its number). LK-23 names the first two;
-/// the last two are added so that a frame changed on the way, on a network
-/// where frames are not encrypted (LK-33), cannot turn one request into
-/// another under the same signature.
+/// The bytes a reader signs for LK-23: the challenge, the relay's key, the
+/// action and the action's number (cursor or `up_to`).
 pub fn challenge_message(
     challenge: &[u8; 32],
     relay: &DeviceId,
@@ -93,15 +91,12 @@ pub fn hello_message(nonce: &[u8; 32], relay: &DeviceId) -> Vec<u8> {
 /// A relay's limits. The defaults are the ones in the rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RelayConfig {
-    /// Mailboxes (LK-21).
+    /// Members, and so mailboxes (LK-21).
     pub max_mailboxes: usize,
     /// Messages in a mailbox (LK-22).
     pub max_messages: usize,
     /// Sealed bytes in a mailbox (LK-22).
     pub max_bytes: usize,
-    /// Challenges given and not yet used. Not in the rules: without a bound
-    /// the relay's memory is the limit (see the notes in `lib.rs`).
-    pub max_challenges: usize,
 }
 
 impl Default for RelayConfig {
@@ -110,7 +105,6 @@ impl Default for RelayConfig {
             max_mailboxes: 64,
             max_messages: 256,
             max_bytes: 4 * 1024 * 1024,
-            max_challenges: 256,
         }
     }
 }
@@ -197,24 +191,54 @@ pub struct Relay<S: MailStore> {
     identity: Identity,
     cfg: RelayConfig,
     store: S,
+    members: BTreeSet<DeviceId>,
     mailboxes: BTreeMap<DeviceId, Mailbox>,
-    /// Challenges given and not used, oldest first, with the time given.
-    challenges: VecDeque<([u8; 32], u64)>,
+    /// The one challenge each connection may hold, with the time given
+    /// (LK-23).
+    challenges: BTreeMap<u64, ([u8; 32], u64)>,
 }
+
+/// Why a member list was not set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MembersError<E> {
+    /// More members than the relay allows.
+    TooMany,
+    /// The storage said no, so the list is unchanged.
+    Store(E),
+}
+
+impl<E: fmt::Display> fmt::Display for MembersError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooMany => write!(f, "LK-21: more members than the relay allows"),
+            Self::Store(e) => write!(f, "LK-41: the member list could not be stored: {e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for MembersError<E> {}
 
 impl<S: MailStore> Relay<S> {
     /// A relay that loads what `store` holds.
     pub fn new(identity: Identity, cfg: RelayConfig, mut store: S) -> Result<Self, S::Error> {
+        let Loaded {
+            members,
+            mailboxes: loaded,
+        } = store.load()?;
+        let members: BTreeSet<DeviceId> = members.into_iter().collect();
         let mut mailboxes = BTreeMap::new();
-        for (reader, events) in store.load()? {
-            mailboxes.insert(reader, Mailbox::replay(events, &cfg));
+        for (reader, events) in loaded {
+            if members.contains(&reader) {
+                mailboxes.insert(reader, Mailbox::replay(events, &cfg));
+            }
         }
         Ok(Self {
             identity,
             cfg,
             store,
+            members,
             mailboxes,
-            challenges: VecDeque::new(),
+            challenges: BTreeMap::new(),
         })
     }
 
@@ -244,16 +268,38 @@ impl<S: MailStore> Relay<S> {
         &mut self.store
     }
 
-    /// Remove every mailbox: the merchant's way to clear them (LK-21).
-    pub fn clear(&mut self) -> Result<(), S::Error> {
-        self.store.clear()?;
-        self.mailboxes.clear();
+    /// The members (LK-21).
+    pub fn members(&self) -> impl Iterator<Item = &DeviceId> {
+        self.members.iter()
+    }
+
+    /// Replace the member list (LK-20, LK-21). It is stored first; only if
+    /// that works does it take effect, and then the mailboxes of devices
+    /// that are no longer members are gone. An empty list makes the relay
+    /// take nothing.
+    pub fn set_members(&mut self, members: &[DeviceId]) -> Result<(), MembersError<S::Error>> {
+        let list: BTreeSet<DeviceId> = members.iter().copied().collect();
+        if list.len() > self.cfg.max_mailboxes {
+            return Err(MembersError::TooMany);
+        }
+        let ordered: Vec<DeviceId> = list.iter().copied().collect();
+        self.store
+            .set_members(&ordered)
+            .map_err(MembersError::Store)?;
+        self.mailboxes.retain(|reader, _| list.contains(reader));
+        self.members = list;
         Ok(())
+    }
+
+    /// A connection has closed: its challenge is gone (LK-23).
+    pub fn close(&mut self, conn: u64) {
+        self.challenges.remove(&conn);
     }
 
     /// Answer one request.
     pub fn handle<E>(
         &mut self,
+        conn: u64,
         request: Request,
         now: u64,
         random: &mut impl FnMut(&mut [u8; 32]) -> Result<(), E>,
@@ -266,12 +312,12 @@ impl<S: MailStore> Relay<S> {
                     .sign_tagged(TAG_HELLO, &hello_message(&nonce, &relay));
                 Response::Hello { relay, sig }
             }
-            Request::Challenge => self.give_challenge(now, random),
+            Request::Challenge => self.give_challenge(conn, now, random),
             Request::MakeMailbox {
                 reader,
                 challenge,
                 sig,
-            } => match self.check_request(&reader, &challenge, &sig, Action::Make, 0, now) {
+            } => match self.check_request(conn, &reader, &challenge, &sig, Action::Make, 0, now) {
                 Err(why) => Response::Refused(why),
                 Ok(()) => self.make(reader),
             },
@@ -281,7 +327,15 @@ impl<S: MailStore> Relay<S> {
                 challenge,
                 sig,
                 cursor,
-            } => match self.check_request(&reader, &challenge, &sig, Action::Fetch, cursor, now) {
+            } => match self.check_request(
+                conn,
+                &reader,
+                &challenge,
+                &sig,
+                Action::Fetch,
+                cursor,
+                now,
+            ) {
                 Err(why) => Response::Refused(why),
                 Ok(()) => self.fetch(&reader, cursor),
             },
@@ -290,7 +344,8 @@ impl<S: MailStore> Relay<S> {
                 challenge,
                 sig,
                 up_to,
-            } => match self.check_request(&reader, &challenge, &sig, Action::Ack, up_to, now) {
+            } => match self.check_request(conn, &reader, &challenge, &sig, Action::Ack, up_to, now)
+            {
                 Err(why) => Response::Refused(why),
                 Ok(()) => self.ack(&reader, up_to),
             },
@@ -299,6 +354,7 @@ impl<S: MailStore> Relay<S> {
 
     fn give_challenge<E>(
         &mut self,
+        conn: u64,
         now: u64,
         random: &mut impl FnMut(&mut [u8; 32]) -> Result<(), E>,
     ) -> Response {
@@ -306,25 +362,18 @@ impl<S: MailStore> Relay<S> {
         if random(&mut challenge).is_err() {
             return Response::Refused(Refusal::NoRandomness);
         }
-        while self
-            .challenges
-            .front()
-            .is_some_and(|(_, at)| now.saturating_sub(*at) > CHALLENGE_SECS)
-        {
-            self.challenges.pop_front();
-        }
-        while self.challenges.len() >= self.cfg.max_challenges.max(1) {
-            self.challenges.pop_front();
-        }
-        self.challenges.push_back((challenge, now));
+        // A new challenge replaces the connection's old one.
+        self.challenges.insert(conn, (challenge, now));
         Response::Challenge { challenge }
     }
 
     /// LK-23: the challenge is one this relay gave, unused and under 60
     /// seconds old, and the reader signed it for this request. The challenge
     /// is used up whatever the outcome.
+    #[allow(clippy::too_many_arguments)]
     fn check_request(
         &mut self,
+        conn: u64,
         reader: &DeviceId,
         challenge: &[u8; 32],
         sig: &Sig,
@@ -332,13 +381,13 @@ impl<S: MailStore> Relay<S> {
         number: u64,
         now: u64,
     ) -> Result<(), Refusal> {
-        let at = self
+        let (given, at) = self
             .challenges
-            .iter()
-            .position(|(c, _)| c == challenge)
-            .and_then(|i| self.challenges.remove(i))
-            .map(|(_, at)| at)
+            .remove(&conn)
             .ok_or(Refusal::ChallengeUnknown)?;
+        if given != *challenge {
+            return Err(Refusal::ChallengeUnknown);
+        }
         if now.saturating_sub(at) > CHALLENGE_SECS {
             return Err(Refusal::ChallengeExpired);
         }
@@ -351,11 +400,11 @@ impl<S: MailStore> Relay<S> {
     }
 
     fn make(&mut self, reader: DeviceId) -> Response {
+        if !self.members.contains(&reader) {
+            return Response::Refused(Refusal::NotMember);
+        }
         if self.mailboxes.contains_key(&reader) {
             return Response::Made;
-        }
-        if self.mailboxes.len() >= self.cfg.max_mailboxes {
-            return Response::Refused(Refusal::MailboxesFull);
         }
         if self.store.create(&reader).is_err() {
             return Response::Refused(Refusal::Storage);
@@ -375,6 +424,12 @@ impl<S: MailStore> Relay<S> {
             }
             Err(_) => return Response::Refused(Refusal::NotWellFormed),
         };
+        if !self.members.contains(&seen.sender) {
+            return Response::Refused(Refusal::SenderNotMember);
+        }
+        if !self.members.contains(&seen.reader) {
+            return Response::Refused(Refusal::ReaderNotMember);
+        }
         let Some(mailbox) = self.mailboxes.get_mut(&seen.reader) else {
             return Response::Refused(Refusal::NoMailbox);
         };

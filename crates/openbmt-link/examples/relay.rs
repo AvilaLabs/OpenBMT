@@ -7,7 +7,12 @@
 //! The relay's identity is read from `<data dir>/identity.key` (32 bytes),
 //! made from the operating system's randomness the first time it starts,
 //! with mode 0600. `--test-identity` uses a fixed, public key instead and
-//! writes no key file: for tests only. Mailboxes are kept in
+//! writes no key file: for tests only. The members are the identity keys of
+//! the shop's devices, one 64-hex-character key per line in
+//! `<data dir>/members`; blank lines and `#` comments are skipped and
+//! anything else stops the start. Without the file the relay has no members
+//! and takes nothing. The list is put there by hand until the Box's pairing
+//! is settled. Mailboxes are kept in
 //! `<data dir>/mailboxes`. The relay's public key is printed on the first
 //! line, then the address it listens on.
 
@@ -19,7 +24,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use openbmt_core::identity::Identity;
+use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_link::store::DirStore;
 use openbmt_link::{os_random, Relay, RelayConfig, Server, ServerConfig};
 use openbmt_net_io::SystemClock;
@@ -50,6 +55,36 @@ fn load_identity(dir: &Path) -> Result<Identity, String> {
     Identity::from_secret_bytes(&secret).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+fn read_members(dir: &Path) -> Result<Vec<DeviceId>, String> {
+    let path = dir.join("members");
+    let text = match fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+    };
+    let mut members = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let bad = || format!("{}:{}: not a 64-character hex key", path.display(), n + 1);
+        if line.len() != 64 || !line.is_ascii() {
+            return Err(bad());
+        }
+        let mut key = [0u8; 32];
+        for (slot, pair) in key.iter_mut().zip(line.as_bytes().chunks(2)) {
+            let text = std::str::from_utf8(pair).map_err(|_| bad())?;
+            *slot = u8::from_str_radix(text, 16).map_err(|_| bad())?;
+        }
+        members.push(
+            DeviceId::from_bytes(&key)
+                .map_err(|_| format!("{}:{}: not a valid key", path.display(), n + 1))?,
+        );
+    }
+    Ok(members)
+}
+
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let test = args.iter().any(|a| a == "--test-identity");
@@ -66,7 +101,11 @@ fn run() -> Result<(), String> {
     };
     let key = identity.device_id().to_bytes();
     let store = DirStore::new(dir.join("mailboxes")).map_err(|e| e.to_string())?;
-    let relay = Relay::new(identity, RelayConfig::default(), store).map_err(|e| e.to_string())?;
+    let mut relay =
+        Relay::new(identity, RelayConfig::default(), store).map_err(|e| e.to_string())?;
+    let members = read_members(dir)?;
+    relay.set_members(&members).map_err(|e| e.to_string())?;
+    let count = relay.members().count();
     let listener =
         TcpListener::bind(bind.as_str()).map_err(|e| format!("cannot bind {bind}: {e}"))?;
     let server = Server::start(
@@ -79,6 +118,7 @@ fn run() -> Result<(), String> {
     let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
     println!("{hex}");
     println!("{}", server.local_addr());
+    println!("{count} members");
     loop {
         std::thread::sleep(Duration::from_secs(3600));
     }

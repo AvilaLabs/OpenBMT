@@ -57,7 +57,7 @@ fn lk_41_a_torn_tail_loses_at_most_the_message_being_written() {
     for cut in last_start..whole.len() {
         fs::write(&path, &whole[..cut]).unwrap();
         let mut store = DirStore::new(&dir.0).unwrap();
-        let loaded = store.load().unwrap();
+        let loaded = store.load().unwrap().mailboxes;
         assert_eq!(loaded.len(), 1);
         let events = &loaded[0].1;
         assert_eq!(events.len(), 1, "cut at {cut}");
@@ -68,7 +68,7 @@ fn lk_41_a_torn_tail_loses_at_most_the_message_being_written() {
     f.write_all(&[0xde, 0xad, 0xbe, 0xef, 1, 2, 3]).unwrap();
     drop(f);
     let mut store = DirStore::new(&dir.0).unwrap();
-    assert_eq!(store.load().unwrap()[0].1.len(), 1);
+    assert_eq!(store.load().unwrap().mailboxes[0].1.len(), 1);
     // A flipped byte in the second record cuts there, not before.
     fs::write(&path, &whole).unwrap();
     let mut bad = whole.clone();
@@ -76,7 +76,7 @@ fn lk_41_a_torn_tail_loses_at_most_the_message_being_written() {
     bad[n - 10] ^= 1;
     fs::write(&path, &bad).unwrap();
     let mut store = DirStore::new(&dir.0).unwrap();
-    assert_eq!(store.load().unwrap()[0].1.len(), 1);
+    assert_eq!(store.load().unwrap().mailboxes[0].1.len(), 1);
     // The relay starts from what is left and goes on numbering above it.
     let mut rig = dir_rig(&dir);
     assert_eq!(ids(rig.fetch(&counter(), 0)), vec![1]);
@@ -117,18 +117,30 @@ fn lk_41_the_log_is_rewritten_when_acknowledged_messages_pass_half_of_it() {
 }
 
 #[test]
-fn lk_41_clear_removes_the_files_and_other_files_are_left_alone() {
+fn lk_41_removing_a_member_removes_the_file_and_other_files_are_left_alone() {
     let dir = TempDir::new("clear");
     fs::write(dir.0.join("notes.txt"), b"keep").unwrap();
     let mut rig = dir_rig(&dir);
     rig.make(&counter());
     rig.make(&the_box());
     assert!(log_path(&dir).exists());
-    rig.relay.clear().unwrap();
+    rig.relay.set_members(&[the_box().device_id()]).unwrap();
     assert!(!log_path(&dir).exists());
     assert!(dir.0.join("notes.txt").exists());
     let mut store = DirStore::new(&dir.0).unwrap();
-    assert!(store.load().unwrap().is_empty());
+    let loaded = store.load().unwrap();
+    assert_eq!(loaded.members, vec![the_box().device_id()]);
+    assert_eq!(loaded.mailboxes.len(), 1);
+    // With none stored, there are no members.
+    let empty = TempDir::new("nomembers");
+    let mut store = DirStore::new(&empty.0).unwrap();
+    assert_eq!(store.load().unwrap(), crate::store::Loaded::default());
+    // A damaged list stops the start.
+    let path = dir.0.join("members.set");
+    let mut bytes = fs::read(&path).unwrap();
+    bytes[3] ^= 1;
+    fs::write(&path, bytes).unwrap();
+    assert!(DirStore::new(&dir.0).unwrap().load().is_err());
 }
 
 #[test]

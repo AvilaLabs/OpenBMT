@@ -30,7 +30,10 @@ what arrives as if it came from an enemy.
   one-time public key, the reader's key and the sender's key are bound
   into the derivation. The nonce is all zeros, which is sound only
   because a key is never used for two messages; LK-03 is what keeps that
-  true.
+  true. The associated data of the AEAD is the signed header without the
+  ciphertext hash: the hash is made from the ciphertext, so it cannot go
+  into what the ciphertext is made with, and the signature over the hash
+  binds the two the other way.
 - **LK-03.** The one-time key comes from the caller's randomness, 32
   bytes each time. Sealing fails if the randomness fails. The library
   never reuses a one-time key, never derives one from the content, and
@@ -44,13 +47,17 @@ what arrives as if it came from an enemy.
   fails: the frame (magic, version, exact length); the reader's key is
   this device's; the sender is on the reader's signed device list (the
   caller supplies the list); the signature; the message number is above
-  the last one taken from that sender; the ciphertext opens; the padding
-  is well formed. Nothing of the content is returned on any failure.
+  the last one taken from that sender and not too far above it (LK-06);
+  the ciphertext opens; the padding is well formed. Nothing of the
+  content is returned on any failure.
 - **LK-06.** Message numbers rise per sender and reader pair. A reader
   takes any number above the last and stores the new last number before
   it hands the content on. A number at or below the last is refused as a
   replay. Gaps are allowed: the link may lose messages, and what must not
-  be lost has its own numbering (records, commands, heartbeats).
+  be lost has its own numbering (records, commands, heartbeats). A number
+  more than 2^32 above the last one taken from that sender is refused, so
+  that one message cannot move a sender's numbers out of reach; a sender
+  that adds 1 each time never comes near it.
 - **LK-07.** The content is padded before it is encrypted, up to the next
   of these sizes: 256, 1,024, 4,096, 16,384, 65,536 bytes. Larger content
   is refused; the sender splits it. A relay sees only which size step a
@@ -83,20 +90,34 @@ what arrives as if it came from an enemy.
 A relay holds sealed messages until the reader fetches them. The Box is
 one. A merchant with no Box can use any relay: it sees ciphertext.
 
-- **LK-20.** A relay takes a sealed message only if it is well formed
-  and the signature is valid (LK-04), is at most the largest size step
-  plus the header, and the reader's mailbox exists. It does not check a
-  device list: it has none.
-- **LK-21.** A mailbox is made for a reader's key the first time that
-  reader proves it holds the key (LK-23). A relay has a fixed number of
-  mailboxes (default 64) and refuses more. The merchant can clear them.
+- **LK-20.** A relay has a member list, set by whoever runs it: the
+  identity keys of the shop's devices. It takes a sealed message only if
+  it is well formed and the signature is valid (LK-04), is at most the
+  largest size step plus the header, both the sender and the reader are
+  members, and the reader's mailbox exists. With an empty list it takes
+  nothing. The relay has no device list of the kind a device has: it
+  cannot tell an owner from a counter, only a member from a key it does
+  not know.
+- **LK-21.** A mailbox exists only for a member. It is made the first
+  time that member proves it holds the key (LK-23). A relay has at most
+  64 members (the most it will hold). Replacing the list stores the new
+  list first, and then the mailboxes of members that are gone are
+  deleted; the merchant clears a relay by replacing the list with an
+  empty one. How the list reaches a Box from the owner (a signed device
+  list) is part of the Box pairing that is still open (section 5); until
+  then it is put there by hand.
 - **LK-22.** A mailbox holds at most 256 messages and 4 MiB. When full,
   the oldest message goes. A relay promises nothing about delivery.
 - **LK-23.** To fetch or to make a mailbox, the reader signs a fresh
   32-byte challenge from the relay (BIP340, tag `OpenBMT/link-fetch/v1`,
-  over the challenge and the relay's own key). The challenge is used
-  once and is good for 60 seconds. Without it nobody can read, list or
-  empty a mailbox.
+  over the challenge, the relay's own key, the action and the action's
+  parameters: the cursor of a fetch, the number of an acknowledgement).
+  The request names the challenge it answers. The challenge is used once
+  and is good for 60 seconds, and only on the connection that asked for
+  it. A connection holds at most one challenge: a new one replaces the
+  old, and it goes when the connection closes. Without it nobody can
+  read, list or empty a mailbox, and a request changed on the way (LK-33)
+  no longer matches its signature.
 - **LK-24.** Fetching returns the messages after a cursor the reader
   gives, oldest first, at most 64 at a time, and does not delete them.
   The reader says which it has taken; the relay then drops those.
@@ -114,7 +135,8 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
 - **LK-30.** The conversation with a relay is frames over one TCP
   connection: a 4-byte magic, a version, a type, a 4-byte length, the
   body. One request, one answer. A frame over the limit closes the
-  connection. A connection that sends nothing for 30 seconds is closed.
+  connection. A connection that sends nothing for 30 seconds is closed. A
+  relay serves at most 32 connections at once.
 - **LK-31.** The relay is reached on the local network by address and
   port, or through a Tor onion service by name through a SOCKS5 proxy
   (the driver's own SOCKS code, with a new circuit per connection).
@@ -122,7 +144,9 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
 - **LK-32.** The relay has an identity key of its own. A device that was
   given that key (through the signed device list) checks the relay's
   signature on its hello and refuses another relay. The relay's key
-  gives it no other right.
+  gives it no other right. Only the hello is signed by the relay: later
+  frames on a local connection can be dropped or delayed by someone on
+  that network, with the effect LK-26 describes.
 - **LK-33.** On the local network the frames are not encrypted a second
   time: the bodies are sealed already, and what LK-25 lists is visible
   to anyone on that network. The setup text says so. Over Tor the
@@ -147,5 +171,13 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
   are read; a sender's key alone opens nothing.
 - **They do not deliver.** Anything that must arrive is asked for again
   by the rules that need it.
+- **They do not protect a reader restored from an old copy.** A device
+  whose inbox file is put back from an old copy will take old messages
+  again. What must not repeat carries its own numbers (records, commands,
+  heartbeats) and is refused there.
+- **They cannot tell a first start from a lost file.** A missing number
+  file looks like a first start. A paired device with no number file must
+  be treated as needing a new pairing (LK-40); the caller makes that
+  distinction.
 - **They do not pair a Box.** How a Box with no screen gets onto the
   signed device list is still open (`docs/DESIGN.md` §16).

@@ -103,8 +103,9 @@ pub enum Refusal {
     TooLarge,
     /// The reader has no mailbox (LK-20).
     NoMailbox,
-    /// The relay has all the mailboxes it allows (LK-21).
-    MailboxesFull,
+    /// The device asking for a mailbox is not a member of this relay
+    /// (LK-21).
+    NotMember,
     /// The challenge was never given, or was already used (LK-23).
     ChallengeUnknown,
     /// The challenge is older than 60 seconds (LK-23).
@@ -115,21 +116,29 @@ pub enum Refusal {
     Storage,
     /// The relay could not make a challenge (LK-23).
     NoRandomness,
+    /// The sender of a sealed message is not a member of this relay
+    /// (LK-20).
+    SenderNotMember,
+    /// The reader of a sealed message is not a member of this relay
+    /// (LK-20).
+    ReaderNotMember,
 }
 
 impl Refusal {
     /// Every refusal.
-    pub const ALL: [Refusal; 10] = [
+    pub const ALL: [Refusal; 12] = [
         Refusal::NotWellFormed,
         Refusal::BadSignature,
         Refusal::TooLarge,
         Refusal::NoMailbox,
-        Refusal::MailboxesFull,
+        Refusal::NotMember,
         Refusal::ChallengeUnknown,
         Refusal::ChallengeExpired,
         Refusal::ChallengeSignature,
         Refusal::Storage,
         Refusal::NoRandomness,
+        Refusal::SenderNotMember,
+        Refusal::ReaderNotMember,
     ];
 
     /// The status byte (never 0).
@@ -139,12 +148,14 @@ impl Refusal {
             Self::BadSignature => 2,
             Self::TooLarge => 3,
             Self::NoMailbox => 4,
-            Self::MailboxesFull => 5,
+            Self::NotMember => 5,
             Self::ChallengeUnknown => 6,
             Self::ChallengeExpired => 7,
             Self::ChallengeSignature => 8,
             Self::Storage => 9,
             Self::NoRandomness => 10,
+            Self::SenderNotMember => 11,
+            Self::ReaderNotMember => 12,
         }
     }
 
@@ -156,8 +167,13 @@ impl Refusal {
     /// The rule this refusal comes from.
     pub fn rule(self) -> &'static str {
         match self {
-            Self::NotWellFormed | Self::BadSignature | Self::TooLarge | Self::NoMailbox => "LK-20",
-            Self::MailboxesFull => "LK-21",
+            Self::NotWellFormed
+            | Self::BadSignature
+            | Self::TooLarge
+            | Self::NoMailbox
+            | Self::SenderNotMember
+            | Self::ReaderNotMember => "LK-20",
+            Self::NotMember => "LK-21",
             Self::ChallengeUnknown
             | Self::ChallengeExpired
             | Self::ChallengeSignature
@@ -174,7 +190,9 @@ impl fmt::Display for Refusal {
             Self::BadSignature => "the sealed message's signature is not valid",
             Self::TooLarge => "the sealed message is too large",
             Self::NoMailbox => "there is no mailbox for that reader",
-            Self::MailboxesFull => "the relay has no room for another mailbox",
+            Self::NotMember => "the device is not a member of this relay",
+            Self::SenderNotMember => "the sender is not a member of this relay",
+            Self::ReaderNotMember => "the reader is not a member of this relay",
             Self::ChallengeUnknown => "the challenge is unknown or already used",
             Self::ChallengeExpired => "the challenge is too old",
             Self::ChallengeSignature => "the challenge signature is not the reader's",

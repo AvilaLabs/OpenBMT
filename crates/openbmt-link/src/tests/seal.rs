@@ -665,3 +665,44 @@ fn lk_05_nothing_of_the_content_is_in_an_error() {
     let e = open(&counter(), Role::Counter, &m, allowed, |_| 9).unwrap_err();
     assert!(!format!("{e:?}{e}").contains("SECRET"));
 }
+
+#[test]
+fn lk_06_a_number_more_than_2_pow_32_above_the_last_is_refused() {
+    let jump = 1u64 << 32;
+    let last = 5u64;
+    let mut rng = Counting(0);
+    let mut make = |number: u64| {
+        seal(
+            &owner(),
+            Role::Owner,
+            &counter().device_id(),
+            Role::Counter,
+            number,
+            Kind::Command,
+            b"x",
+            &mut |b| rng.fill(b),
+        )
+        .unwrap()
+    };
+    let at_limit = make(last + jump);
+    let past = make(last + jump + 1);
+    let r = open(&counter(), Role::Counter, &at_limit, allowed, |_| last);
+    assert_eq!(r.unwrap().number, last + jump);
+    let r = open(&counter(), Role::Counter, &past, allowed, |_| last);
+    let e = r.unwrap_err();
+    assert_eq!(
+        e,
+        OpenError::NumberTooFar {
+            last,
+            got: last + jump + 1
+        }
+    );
+    assert!(e.to_string().contains("LK-06"));
+    // The first message from a sender may be at most 2^32.
+    let first = make(jump + 1);
+    let r = open(&counter(), Role::Counter, &first, allowed, none_taken);
+    assert!(matches!(r, Err(OpenError::NumberTooFar { .. })));
+    // An honest sender adds 1, which is always within reach.
+    let ok = make(last + 1);
+    assert!(open(&counter(), Role::Counter, &ok, allowed, |_| last).is_ok());
+}

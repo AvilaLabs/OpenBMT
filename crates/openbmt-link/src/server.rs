@@ -130,6 +130,7 @@ fn accept_loop<S>(
 ) where
     S: MailStore + Send + 'static,
 {
+    let mut next_conn: u64 = 0;
     while !stop.load(Ordering::SeqCst) {
         let stream = match listener.accept() {
             Ok((stream, _)) => stream,
@@ -147,6 +148,8 @@ fn accept_loop<S>(
             drop(stream);
             continue;
         }
+        next_conn = next_conn.wrapping_add(1);
+        let conn = next_conn;
         let slot = Slot(Arc::clone(&active));
         let relay = Arc::clone(&relay);
         let clock = Arc::clone(&clock);
@@ -155,7 +158,12 @@ fn accept_loop<S>(
             .name("link-conn".into())
             .spawn(move || {
                 let _slot = slot;
-                serve(stream, &relay, &*clock, cfg, &stop);
+                serve(stream, conn, &relay, &*clock, cfg, &stop);
+                // The connection is over: its challenge goes with it.
+                relay
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .close(conn);
             });
         // If no thread could be made, the closure (and its slot) is gone and
         // the stream is closed.
@@ -202,6 +210,7 @@ fn read_full(
 
 fn serve<S: MailStore>(
     mut stream: TcpStream,
+    conn: u64,
     relay: &Mutex<Relay<S>>,
     clock: &(dyn Clock + Send + Sync),
     cfg: ServerConfig,
@@ -234,7 +243,7 @@ fn serve<S: MailStore>(
         };
         let answer = {
             let mut relay = relay.lock().unwrap_or_else(PoisonError::into_inner);
-            relay.handle(request, clock.now(), &mut os_random)
+            relay.handle(conn, request, clock.now(), &mut os_random)
         };
         let Ok(bytes) = answer.encode() else {
             return;
