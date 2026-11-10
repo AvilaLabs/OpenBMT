@@ -13,7 +13,8 @@
 //! settings), `OBMH` (high-water mark), `OBMC` (counter batches), `OBME`
 //! (exposure), `OBMP` (pause tracker) and `OBMK` (the Key app's signer
 //! state, written by the `openbmt-signer` crate), `OBMO` (pair offer), `OBMJ`
-//! (pair request) and `OBMD` (signed pairing).
+//! (pair request), `OBMD` (signed pairing), `OBMX` (owner command) and `OBMV` (a sale watch, written by the
+//! `openbmt-watch` crate).
 //!
 //! [`Reader`], [`start`], [`put_opt_u64`] and [`len_u32`] are public so that
 //! other crates in the workspace write their snapshots the same way.
@@ -60,6 +61,10 @@ pub const MAGIC_PAIR_OFFER: [u8; 4] = *b"OBMO";
 pub const MAGIC_PAIR_REQUEST: [u8; 4] = *b"OBMJ";
 /// Magic of a [`SignedPairing`](crate::pairing::SignedPairing).
 pub const MAGIC_SIGNED_PAIRING: [u8; 4] = *b"OBMD";
+/// Magic of a [`SignedCommand`](crate::command::SignedCommand).
+pub const MAGIC_OWNER_COMMAND: [u8; 4] = *b"OBMX";
+/// Magic of a sale watch snapshot (the `openbmt-watch` crate).
+pub const MAGIC_SALE_WATCH: [u8; 4] = *b"OBMV";
 
 /// Why bytes were not accepted as a message.
 #[derive(Debug, Clone, PartialEq, Eq)]
