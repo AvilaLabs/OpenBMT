@@ -930,9 +930,21 @@ Notes:
     between an online machine and the offline one; QR is the cleaner way,
     and the guide says so.
   - How far to strip the computer down is the owner's choice. The guide
-    lists the usual steps and what each is for: a fresh install or a live
-    system with no disk, the Wi-Fi and Bluetooth card taken out or turned
-    off in firmware, no accounts, never connected again.
+    lists the usual steps and what each is for:
+    - a cheap or used laptop kept for this alone;
+    - a fresh Linux install with disk encryption, or a live system on a
+      USB stick that never touches the disk; reflashing the firmware is
+      optional;
+    - updates and the wallet software installed, and their signatures
+      checked, before it goes offline, with an offline seed tool to check
+      words against;
+    - the Wi-Fi and Bluetooth card taken out, the ends of its antenna
+      wires taped, a seal over any network socket;
+    - the microphone off, and the camera covered when it is not reading a
+      QR code (or off for good, with files moved on a stick instead);
+    - a check that the system shows no wireless device at all;
+    - an everyday user that is not the administrator;
+    - never connected to a network again.
   - Status: signing our transactions with Bitcoin Core as the second
     signer, and restoring the wallet in Bitcoin Core from the kit, are
     checked on a test network (docs/research). Sparrow is not yet checked
@@ -948,22 +960,37 @@ Notes:
   device for that.
   - Every place where OpenBMT software makes a wallet key (key 1 in Owner
     mode, key 2 in the Key app) offers three ways: "Let this device make
-    it" (the operating system's random source, the default), "Make it
-    yourself" with dice or a coin, and "Type in words I already have".
-  - **Dice:** 99 rolls of a six-sided die for 24 words. The words come
-    from the SHA-256 hash of the rolls written as digits, and nothing
-    else. Hardware wallets that take dice document this same method, so
-    the same rolls should give the same words there **[verify against a
-    device, E8]**.
-  - **Coin:** 256 flips for 24 words. Each flip is one bit, in order.
-    Only the last word's checksum is computed.
-  - **Nothing is mixed in.** With dice or a coin the device adds no
+    it" (the operating system's random source, 24 words, the default),
+    "Make it yourself" with dice or a coin, and "Type in words I already
+    have".
+  - "Make it yourself" has two methods, and the screen says in one line
+    what each is for:
+    - **Dice, hashed.** 99 rolls of a six-sided die for 24 words. The
+      words come from the SHA-256 hash of the rolls written as digits, and
+      nothing else. Hardware wallets that take dice document this same
+      method, so the same rolls should give the same words there
+      **[verify against a device, E8]**. It leans on the hash to even out
+      a die that is not quite fair.
+    - **Coin or dice, skew-corrected.** This is von Neumann's method. It
+      gives bits with no lean at all from a coin or die that does lean,
+      and it uses no hash. Coin: flip twice; heads then tails is 1, tails
+      then heads is 0, two the same are thrown away. Dice: roll twice;
+      second roll higher is 1, lower is 0, two the same are thrown away.
+      The app counts the bits and stops when it has enough. With a fair
+      coin that is about 4 flips per bit and with a fair die about 2.4
+      rolls per bit: roughly 1,030 flips or 620 rolls for 24 words, half
+      that for 12. A coin or die that leans needs more throws and still
+      gives clean bits. The owner picks 12 or 24 words here.
+  - **What skew correction needs to be true:** the throws do not affect
+    each other, and the same coin or die is thrown the same way from start
+    to finish. It cannot fix throws that a person made up. The screen says
+    so.
+  - **Nothing is mixed in.** With either method the device adds no
     randomness of its own. That is on purpose: the owner can put the same
-    rolls into another tool and must get the same words. The screen shows
-    the method, and the guide has the steps to check it by hand or with
-    another program. The cost is that the result is exactly as good as
-    the rolls; the app says so, refuses fewer rolls than the count above,
-    and shows how often each face came up.
+    throws into another tool, or work them through by hand, and must get
+    the same words. The screen shows the method, and the guide has the
+    steps to check it. The hashed method refuses fewer than 99 rolls and
+    shows how often each face came up.
   - Key 3 is made outside OpenBMT software (§2.1). The owner picks a tool
     that takes dice if they want that; the guide names ones that do.
   - Device identity keys and pairing numbers always use the operating
@@ -1029,7 +1056,11 @@ Notes:
     says so.
   - **Key 1 has no seed words by default.** If the owner turns this on, the
     app shows them once. They must be stored apart from key 3's and key 2's
-    words.
+    words. Noted as a departure from common advice, which is never to use
+    a wallet that gives no recovery data. The wallet as a whole does give
+    it: keys 2 and 3 have words and any two keys spend. Leaving key 1
+    without words means one less written seed to steal. Kept as is for
+    now and listed for review (§16).
 - **Losing the wallet description.** Funds need two keys and the wallet
   description. The recovery kit holds the description, so it is not lost with a
   phone.
@@ -1748,6 +1779,21 @@ Each gets a written protocol before it runs.
   a Box's reports stay in the "your Box reports it" tier and its key reaches
   the device list only through the two-root-signed list (§2.9).
 
+**Decisions of 2026-11-10.**
+- The counter checks the header chain itself and speaks to peers with its
+  own small client; no general light-client library (§13,
+  `docs/WATCHER-RULES.md` §1, `docs/NETWORK-RULES.md`).
+- An offline computer running Sparrow or Bitcoin Core is offered for any
+  key, next to the hardware wallets (§5.4).
+- Keys made by OpenBMT software can be made from the owner's own dice or
+  coin, by hashing or by von Neumann's skew correction, with nothing
+  mixed in (§5.4).
+- Seed words go on steel; paper is shown as temporary (§5.4).
+- **Open, for review:** key 1 has no seed words by default (§5.4). Common
+  advice is never to use a wallet without recovery data. The wallet is
+  recoverable from keys 2 and 3; the question is whether key 1 should
+  show words by default all the same.
+
 **The two launch conditions** (§0). The claim that no single component or
 person can spend the wallet holds only when both are met:
 
@@ -1778,7 +1824,9 @@ person can spend the wallet holds only when both are met:
 - Android NFC dispatch: https://developer.android.com/develop/connectivity/nfc/nfc
 - Android HCE: https://developer.android.com/develop/connectivity/nfc/hce
 - Numo: https://github.com/cashubtc/Numo (spec: docs/NDEF_Payer_Side_Spec.md)
-- Kyoto / bip157: https://github.com/2140-dev/kyoto
+- Von Neumann's skew correction for coins and dice:
+  https://pit-claudel.fr/clement/blog/generating-uniformly-random-data-from-skewed-input-biased-coins-loaded-dice-skew-correction-and-the-von-neumann-extractor/
+- Glacier Protocol (offline computers, dice): https://glacierprotocol.org/docs/overview/
 - bdk_wallet: https://github.com/bitcoindevkit/bdk_wallet/releases ·
   bdk-ffi v3.1.1: https://github.com/bitcoindevkit/bdk-ffi/releases/tag/v3.1.1
 - Clover custom tenders: https://docs.clover.com/docs/creating-custom-tenders-apps
