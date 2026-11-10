@@ -495,7 +495,7 @@ impl LedgerError {
                 match oldest.first() {
                     None => stop(
                         heading,
-                        format!("The till's {things} are full, and nothing in particular is in the way."),
+                        format!("The till holds as many {things} as it can, and nothing in particular is in the way."),
                         Who::Owner,
                         "Stop and tell support: the till records are full.",
                     )
@@ -504,7 +504,7 @@ impl LedgerError {
                     Some(b) => {
                         let (clause, owner_acts, order) = blocker_view(b);
                         let what_text = format!(
-                            "The till's {things} are full, and the oldest thing in the way is {clause}."
+                            "The till holds as many {things} as it can; the oldest thing in the way is {clause}."
                         );
                         let words = if owner_acts {
                             stop(

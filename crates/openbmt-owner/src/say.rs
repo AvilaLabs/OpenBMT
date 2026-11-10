@@ -122,18 +122,18 @@ impl Stage {
             )
             .code("AS-61"),
             Self::Returned { reason } if reason == REASON_DROPPED => {
-                let what = if payment {
-                    format!("The network dropped the payment this {n} was in.")
+                let (what, next) = if payment {
+                    (
+                        format!("The network dropped the payment this {n} was in."),
+                        "Queue it again. It cannot be cancelled, because the dropped payment could still confirm.",
+                    )
                 } else {
-                    format!("The delivery of this {n} was dropped.")
+                    (
+                        format!("The delivery of this {n} was dropped."),
+                        "Queue it again so that it can be delivered.",
+                    )
                 };
-                stop(
-                    &format!("{label}: dropped"),
-                    what,
-                    Who::Owner,
-                    "Queue it again. It cannot be cancelled, because the dropped payment could still confirm.",
-                )
-                .code("AS-68")
+                stop(&format!("{label}: dropped"), what, Who::Owner, next).code("AS-68")
             }
             Self::Returned { reason } => stop(
                 &format!("{label}: sent back"),
@@ -669,7 +669,7 @@ impl SetupError {
             }
             Self::SameRoot => stop(
                 "Phones share one secret",
-                "The owner's phone and the Key app were set up from the same secret.",
+                "The owner's phone and the Key app were set up from the same secret, but they must be two separate devices.",
                 Who::KeyHolder,
                 "Set the Key app up again on its own device from its own new secret, then pair the two.",
             )

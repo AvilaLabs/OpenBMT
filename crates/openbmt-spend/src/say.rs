@@ -215,7 +215,7 @@ impl PlanError {
                     sats(*limit)
                 ),
                 Who::Owner,
-                "Choose a lower fee rate, or pay fewer coins at a time. This limit is built in.",
+                "Choose a lower fee rate. The wallet's top limit is fixed; the key holder can set a lower one on the Key app.",
             )
             .code("SP-32"),
             Self::FeeRateTooHigh { fee, vsize, limit } => stop(
@@ -225,7 +225,7 @@ impl PlanError {
                     sats(*limit)
                 ),
                 Who::Owner,
-                "Choose a lower fee rate and try again. This limit is built into the wallet.",
+                "Choose a lower fee rate. The wallet's top limit is fixed; the key holder can set a lower one on the Key app.",
             )
             .code("SP-32")
             .detail(format!("fee {fee} sat over {vsize} vB")),
