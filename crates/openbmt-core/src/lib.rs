@@ -8,10 +8,12 @@
 #![forbid(unsafe_code)]
 
 pub mod batch;
+pub mod boxpair;
 pub mod command;
 pub mod entropy;
 mod hashing;
 pub mod heartbeat;
+pub mod hkdf;
 pub mod identity;
 pub mod pairing;
 pub mod policy;

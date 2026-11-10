@@ -76,6 +76,10 @@ pub const MAGIC_SALE_WATCH: [u8; 4] = *b"OBMV";
 pub const MAGIC_COUNTER_DESK: [u8; 4] = *b"OBMG";
 /// Magic of a stored sale (the `openbmt-counter` crate).
 pub const MAGIC_COUNTER_SALE: [u8; 4] = *b"OBML";
+/// Magic of a Box's claim (BX-12).
+pub const MAGIC_BOX_CLAIM: [u8; 4] = *b"OBM5";
+/// Magic of the welcome a Box takes (BX-15).
+pub const MAGIC_BOX_WELCOME: [u8; 4] = *b"OBMM";
 
 /// Why bytes were not accepted as a message.
 #[derive(Debug, Clone, PartialEq, Eq)]

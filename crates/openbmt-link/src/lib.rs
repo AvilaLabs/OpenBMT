@@ -39,7 +39,6 @@
 #![deny(missing_docs)]
 
 pub mod client;
-pub mod hkdf;
 pub mod numbers;
 pub mod proto;
 pub mod random;
@@ -53,6 +52,8 @@ mod tests;
 
 pub use client::{Client, ClientConfig, ClientError, Fetched, Route};
 pub use numbers::{Inbox, NextError, Outbox, TakeError};
+/// HKDF-SHA256 now lives in the core crate (the Box pairing uses it too).
+pub use openbmt_core::hkdf;
 pub use proto::{Refusal, Request, Response};
 pub use random::os_random;
 pub use relay::{Mailbox, Relay, RelayConfig};
