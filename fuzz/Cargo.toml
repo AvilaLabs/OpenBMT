@@ -13,6 +13,7 @@ libfuzzer-sys = "0.4"
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 openbmt-core = { path = "../crates/openbmt-core" }
 openbmt-signer = { path = "../crates/openbmt-signer" }
+openbmt-spend = { path = "../crates/openbmt-spend" }
 openbmt-watch = { path = "../crates/openbmt-watch" }
 openbmt-net = { path = "../crates/openbmt-net" }
 openbmt-counter = { path = "../crates/openbmt-counter" }
@@ -212,6 +213,13 @@ bench = false
 [[bin]]
 name = "counter_ops"
 path = "fuzz_targets/counter_ops.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spend_combine"
+path = "fuzz_targets/spend_combine.rs"
 test = false
 doc = false
 bench = false

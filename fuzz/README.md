@@ -1,8 +1,8 @@
 # Fuzz targets
 
 Fuzz targets for the decoders and parsers in `openbmt-core`, for the Key
-app's signer (`openbmt-signer`) and for the payment watcher
-(`openbmt-watch`), built with
+app's signer (`openbmt-signer`), for the spend path (`openbmt-spend`) and
+for the payment watcher (`openbmt-watch`), built with
 [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz). This directory is its
 own cargo project and is not a member of the main workspace, so
 `cargo test --workspace` at the repository root does not touch it.
@@ -36,6 +36,7 @@ exactly the input bytes.
 | `counter_desk_decode` | `Desk::from_bytes` |
 | `counter_event_decode` | `Event::decode` |
 | `counter_ops` | a real counter driven by a script of operations in the input (open, requote, sighting, block, reorg, time, judge, override, cancel, owner command, restart) against a memory store that fails the writes the input chooses; see the target for the invariants it asserts after every operation |
+| `spend_combine` | `openbmt_spend::combine` and `finalize` against the file of one fixed plan; the input is two "signed" files split at the first byte. It must never panic, and no transaction may come out, because nothing in the input is a signature by a wallet key |
 | `wallet_parse` | `WalletDescription::parse` for mainnet and testnet on UTF-8 input; on success, parsing the canonical string again must give the same canonical string |
 
 ## Running
