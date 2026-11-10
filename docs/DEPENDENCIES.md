@@ -16,7 +16,7 @@ for each program that ships. The lists themselves are in `deps/`.
 | Owner | `deps/openbmt-owner-node.txt` | 38 |
 | Box | `deps/openbmt-box.txt` | 38 |
 | Books export | `deps/openbmt-books.txt` | 42 |
-| Key app library | `deps/openbmt-key-ffi.txt` | 59 |
+| Key app library | `deps/openbmt-key-ffi.txt` | 20 |
 
 Where they come from:
 
@@ -28,11 +28,11 @@ Where they come from:
 - **Encrypted peer connections, 3 more.** The `bip324` crate and its two
   helpers, from the rust-bitcoin project, with no further dependencies.
 - **The books export, 4 more.** Argon2, for the passphrase (BK-24).
-- **The Key app library, about 40 more, to be removed.** The binding
-  generator `uniffi` and what it needs, most of it at build time. The Key
-  app holds a signing key and is meant to have the smallest set of all;
-  a hand-written binding replaces `uniffi` and brings this list back to
-  the base plus one small crate.
+- **The Key app library, 1 more.** `jni-sys`, the declarations of the
+  Java native interface, with no dependencies of its own. The Key app
+  holds a signing key and has the smallest set of all: the base plus
+  this one crate. Its binding to the app is written by hand, in place of
+  a binding generator that brought in about 40 packages.
 
 Two implementations of ChaCha20-Poly1305 are in the counter: RustCrypto's
 for sealed messages and rust-bitcoin's inside `bip324`. Using the second

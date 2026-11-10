@@ -722,6 +722,7 @@ private fun call(store: KeyStore, op: Int, handle: Long, fill: (Writer) -> Unit 
     val w = Writer().raw(REQUEST_MAGIC).u8(1).u16(op).u64(handle)
     fill(w)
     val response = synchronized(Native) { Native.call(store, w.toByteArray()) }
+        ?: throw KeyException("response-null", "the library gave no response", 4)
     val r = Reader(response)
     if (!r.take(4).contentEquals(RESPONSE_MAGIC)) {
         throw KeyException("response-magic", "the library's response is not an OBM9 frame", 4)

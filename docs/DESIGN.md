@@ -1587,7 +1587,9 @@ Pinned as of 2026-11-09:
     itself (`docs/WATCHER-RULES.md` §1), so a client that does only that
     is less code to trust. It gets fuzz and soak tests.
   - `bitcoin 0.32.x`
-  - `uniffi = "=0.31.2"`
+  - A hand-written binding to the apps over `jni-sys = "=0.3.0"`, in
+    place of a binding generator (decided 2026-11-10,
+    `docs/DEPENDENCIES.md`).
 - Android: Kotlin UI, `HostApduService` for the tag, foreground service for
   the watch.
 - OpenBMT Box: Rust, on Bitcoin Core v32 (pruned) via RPC/ZMQ; packaged for a

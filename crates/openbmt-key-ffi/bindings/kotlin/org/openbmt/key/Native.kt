@@ -32,7 +32,10 @@ object Native {
         System.loadLibrary("openbmt_key_ffi")
     }
 
-    /** One request frame in, one response frame out (see PROTOCOL.md). */
+    /**
+     * One request frame in, one response frame out (see PROTOCOL.md). Null
+     * when the library could not make a response at all.
+     */
     @JvmStatic
-    external fun call(store: KeyStore, request: ByteArray): ByteArray
+    external fun call(store: KeyStore, request: ByteArray): ByteArray?
 }
