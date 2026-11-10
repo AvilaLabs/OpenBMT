@@ -34,6 +34,8 @@ exactly the input bytes.
 | `net_v2_bytes` | a session on the encrypted transport after a good handshake with a fixed responder: the input is the raw stream, or the contents of valid packets (genuine or decoys) that the session decrypts and parses. It must never panic, a drop names its rule, and the bytes waiting never pass the session cap |
 | `net_book_decode` | `AddressBook::from_bytes` |
 | `entropy_dice` | `words_from_dice_hashed`, `face_counts` and `bits_from_dice` on UTF-8 input; success must mean the input held only the digits 1 to 6 |
+| `key_deposit_code` | `parse_deposit_code` of `openbmt-key-ffi` on UTF-8 input, the first byte choosing the network; it must never panic, refuse only with a `deposit-` or `address` rule, and a code that is read must give an amount in range, a label without control characters, no `req-` or understood name in `ignored`, and an address that reads again as itself |
+| `key_words` | `KeyApp::create_from_entropy` with `TypedWords`, from lines of text or from indices into the English list; it must never panic, refuse only with `words-count`, `words-unknown` or `words-checksum` (and then leave the Key app empty, with no long word echoed), and an accepted phrase must leave no words waiting |
 | `counter_sale_decode` | `Sale::from_bytes` |
 | `counter_desk_decode` | `Desk::from_bytes` |
 | `counter_event_decode` | `Event::decode` |

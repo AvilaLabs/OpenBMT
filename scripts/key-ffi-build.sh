@@ -17,12 +17,14 @@
 # Usage: scripts/key-ffi-build.sh
 #   ANDROID_NDK_HOME  the NDK (default: ~/Android/Sdk/ndk/26.3.11579264)
 #   OPENBMT_GUARD     the memory guard (default: ~/.cache/openbmt/guard.sh)
+#   OPENBMT_KEY_TARGET  the cargo target directory
+#                     (default: ~/.cache/openbmt/target/keyffi)
 
 set -u
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 guard="${OPENBMT_GUARD:-$HOME/.cache/openbmt/guard.sh}"
-target_dir="$HOME/.cache/openbmt/target/keyffi"
+target_dir="${OPENBMT_KEY_TARGET:-$HOME/.cache/openbmt/target/keyffi}"
 scratch="$HOME/.cache/openbmt/keyffi"
 ndk="${ANDROID_NDK_HOME:-$HOME/Android/Sdk/ndk/26.3.11579264}"
 bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"

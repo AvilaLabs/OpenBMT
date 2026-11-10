@@ -25,13 +25,16 @@ setup (docs/DESIGN.md section 2.1)
   state() -> SetupState        Empty | HasIdentity | Ready
   createFromEntropy(source, network)   identity + key 2; stored; words wait
   createApproverOnly()         identity only (key 2 on a hardware wallet)
-  keyWords() -> [String]       the words, once, never stored
+  keyWords() -> [String]       the words, once, never stored (nothing for
+                               a key made from typed words)
   key2Public() -> Key2Public?  master fingerprint, origin path, xpub
   deviceRoot(), deviceRootWords()
   acceptWallet(WalletSetup) -> WalletView   pins wallet + owner root;
                                with key 2 here, the signer checks the slots
   walletView()                 checksum words, three keys, first address
   pairOfferBytes()             the OBMO pair offer for the owner phone
+  checkKit(scanned) -> KitCheck  the scanned kit description against the
+                               Key app's own, byte for byte (Ready only)
 
 session (docs/SESSION-RULES.md section 2)
   openSession(request) -> SessionHandle     one at a time
@@ -47,15 +50,54 @@ own screens (the signer's public calls, one to one)
   raiseChangeMark(n), raiseReceiveMark(n), correctClock()
 
 free functions: coinBits, diceBits, diceFaceCounts (progress of the
-entropy screens, from openbmt_core::entropy)
+entropy screens, from openbmt_core::entropy); wordSuggestions(prefix) and
+wordIsValid(word) for the word picker; parseDepositCode(text, network) ->
+DepositCode (a bare address or a BIP21 URI; enrols nothing)
 ```
 
 Entropy sources follow `docs/DESIGN.md` section 5.4: `Platform` (32 bytes
-from `KeyStore.random`, 24 words), `DiceHashed`, `CoinFlips` and
-`DiceSkewCorrected`. With the last three nothing else is mixed in, so the
-same throws give the same words in another tool. The identity secret always
-comes from `KeyStore.random`. Key 2 is the BIP39 seed (empty passphrase) at
-`m/48'/coin'/0'/2'`.
+from `KeyStore.random`, 24 words), `DiceHashed`, `CoinFlips`,
+`DiceSkewCorrected` and `TypedWords`. With the dice and coin sources nothing
+else is mixed in, so the same throws give the same words in another tool.
+The identity secret always comes from `KeyStore.random`. Key 2 is the BIP39
+seed (empty passphrase) at `m/48'/coin'/0'/2'`.
+
+### Words the owner already has
+
+`TypedWords` takes 12 or 24 BIP39 English words, each trimmed and
+lower-cased, and derives key 2 as for every other source (empty passphrase).
+A wrong count, a word that is not on the list and a wrong checksum are
+refused with the rules `words-count`, `words-unknown` and `words-checksum`;
+the second names the 1-based position of the word, and no error repeats what
+was typed. The words are not stored and `keyWords` returns nothing for this
+source (`words_waiting` is false). This is the same fresh-signer path as the
+other sources: the signer starts with empty history and no rule is relaxed.
+Restore-and-sign mode (`docs/DESIGN.md` section 5.4) is not built.
+
+### The kit check
+
+`checkKit` compares the text scanned from the printed kit with the Key
+app's own canonical wallet description, byte for byte, after trimming ASCII
+white space at both ends. `Different` carries the position of the first
+difference, whether the text parses as a wallet description, and whether
+its four checksum words equal the Key app's own. The last case is R4-2 (a
+description made to share the words people compare) and is the most serious
+result. Nothing is stored and the scanned text is not kept; text over 8,192
+bytes is refused. Only the description is checked here: no kit format
+exists in the repository yet, so the kit's other fields (birthday,
+generations, import range, fallback descriptors) are not checked.
+
+### Deposit codes
+
+`parseDepositCode` reads a bare address or a BIP21 URI (`bitcoin:` in any
+case, `amount` in bitcoin with at most 8 places, converted in integer
+arithmetic, `label`, `message`, percent escapes). A `req-` parameter that is
+not understood refuses the whole code; other unknown parameters, `lightning`
+and `pj` included, are listed by name in `ignored` and never acted on. The
+address must be for the given network and of a kind the signer's allowlist
+takes (P2WPKH, P2WSH, P2TR, P2PKH, P2SH; SR-22, SR-30). The text is at most
+2,048 bytes. The function enrols nothing: the app shows the result, the
+person types the label, and `enrollDestination` applies the signer's rules.
 
 ### What the app must do
 
@@ -97,12 +139,12 @@ crates that own them when the Key app is restored.
 
 Overwritten when dropped: the identity secret, key 2's account key (and the
 approver's copy of it, by the approver), the words after they are taken or
-replaced, and the typed dice rolls. Not overwritten, because the types do
-not allow it: the approver's copy of the identity (`openbmt_core::Identity`
-has no erase), the `bip39` mnemonic, the byte vectors UniFFI copies across
-the boundary (the envelope handed to `save`, the words returned to Kotlin),
-and everything on the Kotlin side. The compiler and the operating system
-may keep other copies of any of it.
+replaced, and the typed dice rolls and words. Not overwritten, because the
+types do not allow it: the approver's copy of the identity
+(`openbmt_core::Identity` has no erase), the `bip39` mnemonic, the byte
+vectors UniFFI copies across the boundary (the envelope handed to `save`,
+the words returned to Kotlin), and everything on the Kotlin side. The
+compiler and the operating system may keep other copies of any of it.
 
 ### Signing seam
 
@@ -150,6 +192,11 @@ the exported `uniffi_openbmt_key_ffi_*` symbols.
 The generated Kotlin calls the library through JNA, so the Android app
 needs the `net.java.dev.jna:jna` AAR as a dependency and the `.so` files in
 `jniLibs`.
+
+Not built: restore-and-sign mode (a key from words together with a
+signer that starts without allowlist history, `docs/DESIGN.md` section
+5.4), the kit's other fields in `checkKit`, and any use of a code's amount
+or `message` beyond reading them.
 
 Not covered: compiling or running the Kotlin, loading the library on a
 device or emulator, and the Android Keystore wrapping.

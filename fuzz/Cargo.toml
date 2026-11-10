@@ -26,6 +26,9 @@ openbmt-books = { path = "../crates/openbmt-books" }
 openbmt-session = { path = "../crates/openbmt-session" }
 openbmt-approver = { path = "../crates/openbmt-approver" }
 openbmt-owner = { path = "../crates/openbmt-owner" }
+openbmt-key-ffi = { path = "../crates/openbmt-key-ffi" }
+# The same exact version as openbmt-key-ffi, for the word list.
+bip39 = { version = "=2.2.2", default-features = false, features = ["std"] }
 
 # Not a member of the main workspace.
 [workspace]
@@ -306,6 +309,20 @@ bench = false
 [[bin]]
 name = "courier_records_decode"
 path = "fuzz_targets/courier_records_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "key_deposit_code"
+path = "fuzz_targets/key_deposit_code.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "key_words"
+path = "fuzz_targets/key_words.rs"
 test = false
 doc = false
 bench = false

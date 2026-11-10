@@ -28,10 +28,10 @@
 //!
 //! Secret bytes held by this crate are overwritten when dropped where the
 //! types allow it: the identity secret, key 2's account key, the words and
-//! the typed rolls. They are not overwritten in the approver's own copy of
-//! the identity (the core `Identity` type has no erase), in the `bip39`
-//! mnemonic, in the byte vectors UniFFI copies across the boundary, or in
-//! the app's own memory.
+//! the typed rolls and words. They are not overwritten in the approver's own
+//! copy of the identity (the core `Identity` type has no erase), in the
+//! `bip39` mnemonic, in the byte vectors UniFFI copies across the boundary,
+//! or in the app's own memory.
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet. Not for real funds.
