@@ -10,8 +10,9 @@ publish.workspace = true
 # bitcoin and miniscript are pinned to the exact versions that bdk_wallet 3.2.0
 # depends on (bitcoin 0.32.8, miniscript 12.3.5), so the later wallet crate
 # will unify with them. bip39 2.2.2 is bdk_wallet's pin too; it supplies the
-# English wordlist and the test-vector mnemonics.
+# English wordlist and the test-vector mnemonics. Its `std` feature is left
+# off because it pulls in serde, which nothing here uses.
 [dependencies]
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 miniscript = { version = "=12.3.5", default-features = false, features = ["std"] }
-bip39 = { version = "=2.2.2", default-features = false, features = ["std"] }
+bip39 = { version = "=2.2.2", default-features = false, features = ["alloc"] }

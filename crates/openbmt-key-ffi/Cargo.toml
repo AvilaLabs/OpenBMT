@@ -26,7 +26,7 @@ openbmt-approver = { path = "../openbmt-approver" }
 openbmt-session = { path = "../openbmt-session" }
 openbmt-signer = { path = "../openbmt-signer" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
-bip39 = { version = "=2.2.2", default-features = false, features = ["std"] }
+bip39 = { version = "=2.2.2", default-features = false, features = ["alloc"] }
 # No default features: the cargo-metadata one pulls in crates newer than Rust 1.89.
 uniffi = { version = "=0.32.2", default-features = false }
 
