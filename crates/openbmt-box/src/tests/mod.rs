@@ -6,4 +6,5 @@ mod meta;
 mod pos;
 mod pos_kit;
 mod runner;
+mod say;
 mod state;

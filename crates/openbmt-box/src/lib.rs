@@ -37,6 +37,7 @@
 pub mod files;
 pub mod pos;
 pub mod runner;
+pub mod say;
 pub mod state;
 
 #[cfg(test)]

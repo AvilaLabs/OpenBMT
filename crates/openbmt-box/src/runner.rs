@@ -44,7 +44,7 @@ use openbmt_net_io::env::{DirLock, LockError};
 use openbmt_net_io::Clock;
 
 use crate::files::DirFiles;
-use crate::pos::{BoxPos, PosSetup, PosState};
+use crate::pos::{BoxPos, PosOpenError, PosSetup, PosState};
 use crate::state::{BoxCore, BoxError, BoxStatus};
 
 /// The relay's own files (mailboxes, member list) are in this directory of
@@ -112,7 +112,7 @@ pub enum PosView {
     /// This build has no connector: the Box does not read a POS.
     NotInstalled,
     /// The POS side could not be opened, and why. The relay runs on.
-    Disabled(String),
+    Disabled(PosOpenError),
     /// The POS side as of its last step.
     State(Box<PosState>),
 }
@@ -549,7 +549,7 @@ impl BoxRunner {
                     }
                     Err(e) => {
                         note(&notes, format!("the POS side is off: {e}"));
-                        (None, PosView::Disabled(e.to_string()))
+                        (None, PosView::Disabled(e))
                     }
                 }
             }
