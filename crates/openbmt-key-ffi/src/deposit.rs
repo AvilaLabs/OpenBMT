@@ -9,6 +9,7 @@ use std::str::FromStr;
 
 use bitcoin::{Address, Network};
 
+use crate::codec::wire_record;
 use crate::error::{refused_by, KeyError};
 use crate::keys::KeyNetwork;
 
@@ -33,6 +34,13 @@ pub struct DepositCode {
     /// parameter is read and dropped, and is not listed.
     pub ignored: Vec<String>,
 }
+
+wire_record!(DepositCode {
+    address,
+    amount_sats,
+    label,
+    ignored,
+});
 
 fn bad(rule: &str, text: &str) -> KeyError {
     refused_by(rule, text)

@@ -16,6 +16,7 @@ use openbmt_signer::{
 };
 
 use crate::app::{save_ready, Inner, KeyApp, ReadyState};
+use crate::codec::{wire_record, wire_record_get};
 use crate::error::{refused, refused_by, store_failed, KeyError, StoreError};
 use crate::views::script_hex;
 
@@ -111,6 +112,50 @@ pub struct SignerStatus {
     /// The destinations.
     pub allowlist: Vec<AllowlistView>,
 }
+
+wire_record!(CeilingsView {
+    per_tx,
+    per_day,
+    per_week,
+});
+wire_record_get!(CeilingsView {
+    per_tx,
+    per_day,
+    per_week,
+});
+wire_record!(FeeCeilingsView {
+    sat_per_vb,
+    absolute_sats,
+});
+wire_record_get!(FeeCeilingsView {
+    sat_per_vb,
+    absolute_sats,
+});
+wire_record!(AllowlistView {
+    address,
+    script_hex,
+    label,
+    enrolled_at,
+    active_at,
+});
+wire_record!(SignerStatus {
+    ceilings_other,
+    ceilings_allowlisted,
+    fee_ceilings,
+    max_fee_rate_sat_per_vb,
+    max_fee_sats,
+    allowlist_wait_secs,
+    receive_mark,
+    change_mark,
+    latest_time_seen,
+    effective_time_now,
+    other_day,
+    other_week,
+    allowlisted_day,
+    allowlisted_week,
+    spend_log_count,
+    allowlist,
+});
 
 fn state_error(e: StateError<StoreError>) -> KeyError {
     match e {

@@ -27,7 +27,7 @@ use openbmt_signer::SignerState;
 use openbmt_spend::Coin;
 
 use crate::{
-    EntropySource, KeyApp, KeyNetwork, KeyStore, SessionHandle, SetupState, StoreError,
+    EntropySource, Key2Public, KeyApp, KeyNetwork, KeyStore, SessionHandle, SetupState, StoreError,
     WalletSetup, WalletView,
 };
 
@@ -186,6 +186,11 @@ pub fn wallet_with(app: &KeyApp) -> (WalletDescription, Xpriv, Xpub) {
         .key2_public()
         .expect("asked")
         .expect("this device holds key 2");
+    wallet_from_public(&public)
+}
+
+/// The same, from the public parts of key 2 as the app gave them.
+pub fn wallet_from_public(public: &Key2Public) -> (WalletDescription, Xpriv, Xpub) {
     let (key1, slot1) = fixed_key(1, 1);
     let (_, slot3) = fixed_key(3, 3);
     let slot2 = KeySlot {

@@ -9,6 +9,11 @@ use openbmt_core::settings::Change;
 use openbmt_session::{ItemKind, Label};
 use openbmt_signer::{OutputKind, Remaining};
 
+use crate::codec::{
+    bad_tag, wire_record, wire_unit_enum, Define, Get, Put, Reader, Shaped, TypeDef,
+};
+use crate::error::KeyError;
+
 /// What kind of item a line is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineKind {
@@ -333,6 +338,258 @@ pub struct LineView {
     pub decision: Option<Decision>,
     /// What the checks found.
     pub detail: LineDetail,
+}
+
+// ---- the call protocol's encoding of the records above -------------------------
+
+wire_unit_enum!(LineKind {
+    Spend = 0,
+    BatchRefill = 1,
+    Settings = 2,
+    Pairing = 3,
+    HealthCheck = 4,
+});
+wire_unit_enum!(CheckStatus {
+    Passed = 0,
+    Failed = 1,
+    NotChecked = 2,
+});
+wire_unit_enum!(Direction {
+    Tightening = 0,
+    Loosening = 1,
+});
+wire_unit_enum!(OwnerLabelKind {
+    Refund = 0,
+    CashOut = 1,
+    Change = 2,
+});
+
+wire_record!(CheckView { name, status });
+wire_record!(OwnerLabelView {
+    is_claim,
+    kind,
+    counter,
+    sale_index,
+    cashier,
+    shop_value_minor,
+    shop_currency,
+    destination,
+});
+wire_record!(OutputView {
+    index,
+    address,
+    script_hex,
+    amount_sats,
+    kind,
+    owner_phone_label,
+});
+wire_record!(CeilingsRemaining {
+    other_per_tx,
+    other_day,
+    other_week,
+    allowlisted_per_tx,
+    allowlisted_day,
+    allowlisted_week,
+});
+wire_record!(SpendReviewView {
+    outputs,
+    change_index,
+    change_sats,
+    moves_coins_inside_wallet,
+    fee_sats,
+    fee_rate_sat_per_vb,
+    input_count,
+    input_total_sats,
+    other_total_sats,
+    allowlisted_total_sats,
+    remaining,
+    already_counted,
+    clock_behind_by,
+});
+wire_record!(SpendDetail {
+    review,
+    outputs_without_label,
+    labels_without_output,
+    claimed_change_not_proven,
+});
+wire_record!(BatchDetail {
+    counter,
+    counter_words,
+    start,
+    end,
+    count,
+    receive_mark,
+    checks,
+});
+wire_record!(SettingChangeView {
+    field,
+    old,
+    new,
+    direction,
+});
+wire_record!(SettingsDetail {
+    new_version,
+    last_version,
+    changes,
+    overall,
+    checks,
+});
+wire_record!(PairingDetail {
+    name,
+    counter_key,
+    session_words,
+    claimed_settings_version,
+    settings_version_to_sign,
+});
+wire_record!(HealthDetail { nonce });
+wire_record!(LineView {
+    item,
+    kind,
+    title,
+    can_approve,
+    failure,
+    decision,
+    detail,
+});
+
+const DECISION_APPROVE: u8 = 0;
+const DECISION_DECLINE: u8 = 1;
+
+impl Shaped for Decision {
+    fn shape() -> String {
+        "Decision".to_string()
+    }
+}
+
+impl Put for Decision {
+    fn put(&self, out: &mut Vec<u8>) {
+        match self {
+            Self::Approve => out.push(DECISION_APPROVE),
+            Self::Decline { reason } => {
+                out.push(DECISION_DECLINE);
+                reason.put(out);
+            }
+        }
+    }
+}
+
+impl Get for Decision {
+    fn get(r: &mut Reader<'_>) -> Result<Self, KeyError> {
+        match r.u8()? {
+            DECISION_APPROVE => Ok(Self::Approve),
+            DECISION_DECLINE => Ok(Self::Decline {
+                reason: String::get(r)?,
+            }),
+            t => Err(bad_tag("Decision", t)),
+        }
+    }
+}
+
+impl Define for Decision {
+    fn define() -> TypeDef {
+        TypeDef {
+            name: "Decision",
+            body: "enum: Approve | Decline{reason: string}".to_string(),
+            tags: vec![("Approve", DECISION_APPROVE), ("Decline", DECISION_DECLINE)],
+        }
+    }
+}
+
+const OUTPUT_CHANGE: u8 = 0;
+const OUTPUT_ALLOWLISTED: u8 = 1;
+const OUTPUT_OTHER: u8 = 2;
+
+impl Shaped for OutputKindView {
+    fn shape() -> String {
+        "OutputKindView".to_string()
+    }
+}
+
+impl Put for OutputKindView {
+    fn put(&self, out: &mut Vec<u8>) {
+        match self {
+            Self::Change { index } => {
+                out.push(OUTPUT_CHANGE);
+                index.put(out);
+            }
+            Self::Allowlisted { label } => {
+                out.push(OUTPUT_ALLOWLISTED);
+                label.put(out);
+            }
+            Self::Other => out.push(OUTPUT_OTHER),
+        }
+    }
+}
+
+impl Define for OutputKindView {
+    fn define() -> TypeDef {
+        TypeDef {
+            name: "OutputKindView",
+            body: "enum: Change{index: u32} | Allowlisted{label: string} | Other".to_string(),
+            tags: vec![
+                ("Change", OUTPUT_CHANGE),
+                ("Allowlisted", OUTPUT_ALLOWLISTED),
+                ("Other", OUTPUT_OTHER),
+            ],
+        }
+    }
+}
+
+const DETAIL_SPEND: u8 = 0;
+const DETAIL_BATCH: u8 = 1;
+const DETAIL_SETTINGS: u8 = 2;
+const DETAIL_PAIRING: u8 = 3;
+const DETAIL_HEALTH: u8 = 4;
+
+impl Shaped for LineDetail {
+    fn shape() -> String {
+        "LineDetail".to_string()
+    }
+}
+
+impl Put for LineDetail {
+    fn put(&self, out: &mut Vec<u8>) {
+        match self {
+            Self::Spend { detail } => {
+                out.push(DETAIL_SPEND);
+                detail.put(out);
+            }
+            Self::Batch { detail } => {
+                out.push(DETAIL_BATCH);
+                detail.put(out);
+            }
+            Self::Settings { detail } => {
+                out.push(DETAIL_SETTINGS);
+                detail.put(out);
+            }
+            Self::Pairing { detail } => {
+                out.push(DETAIL_PAIRING);
+                detail.put(out);
+            }
+            Self::Health { detail } => {
+                out.push(DETAIL_HEALTH);
+                detail.put(out);
+            }
+        }
+    }
+}
+
+impl Define for LineDetail {
+    fn define() -> TypeDef {
+        TypeDef {
+            name: "LineDetail",
+            body: "enum: Spend{SpendDetail} | Batch{BatchDetail} | Settings{SettingsDetail} \
+                   | Pairing{PairingDetail} | Health{HealthDetail}"
+                .to_string(),
+            tags: vec![
+                ("Spend", DETAIL_SPEND),
+                ("Batch", DETAIL_BATCH),
+                ("Settings", DETAIL_SETTINGS),
+                ("Pairing", DETAIL_PAIRING),
+                ("Health", DETAIL_HEALTH),
+            ],
+        }
+    }
 }
 
 fn hex(bytes: &[u8]) -> String {

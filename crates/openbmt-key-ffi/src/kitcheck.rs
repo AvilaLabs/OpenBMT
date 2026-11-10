@@ -8,6 +8,7 @@
 use openbmt_core::wallet::WalletDescription;
 
 use crate::app::KeyApp;
+use crate::codec::{Define, Put, Shaped, TypeDef};
 use crate::error::{refused_by, KeyError};
 
 /// The longest scanned text that is looked at, in bytes. A wallet
@@ -35,6 +36,45 @@ pub enum KitCheck {
         /// network.
         parses: bool,
     },
+}
+
+const KIT_SAME: u8 = 0;
+const KIT_DIFFERENT: u8 = 1;
+
+impl Shaped for KitCheck {
+    fn shape() -> String {
+        "KitCheck".to_string()
+    }
+}
+
+impl Put for KitCheck {
+    fn put(&self, out: &mut Vec<u8>) {
+        match self {
+            Self::Same => out.push(KIT_SAME),
+            Self::Different {
+                first_difference,
+                same_checksum_words,
+                parses,
+            } => {
+                out.push(KIT_DIFFERENT);
+                first_difference.put(out);
+                same_checksum_words.put(out);
+                parses.put(out);
+            }
+        }
+    }
+}
+
+impl Define for KitCheck {
+    fn define() -> TypeDef {
+        TypeDef {
+            name: "KitCheck",
+            body: "enum: Same | Different{first_difference: u32, same_checksum_words: bool, \
+                   parses: bool}"
+                .to_string(),
+            tags: vec![("Same", KIT_SAME), ("Different", KIT_DIFFERENT)],
+        }
+    }
 }
 
 /// Compare `scanned` with `own`, byte for byte after trimming ASCII white

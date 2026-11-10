@@ -13,10 +13,11 @@ use openbmt_core::pairing::PairOffer;
 use openbmt_core::wallet::{Keychain, WalletDescription};
 use openbmt_signer::SignerState;
 
+use crate::codec::{wire_record, wire_record_get, Define, Put, Shaped, TypeDef};
 use crate::envelope::{self, wipe_string, Material, WalletPart};
 use crate::error::{internal, refused, refused_by, store_failed, wrong_state, KeyError};
 use crate::keys::{make_material, EntropySource, KeyNetwork};
-use crate::store::KeyStore;
+use crate::store::{Detached, KeyStore};
 
 /// Where the Key app is in its setup (`docs/DESIGN.md` §2.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,6 +100,86 @@ pub struct WalletView {
     pub own_root_words: Vec<String>,
     /// The pinned owner root's four fingerprint words.
     pub owner_root_words: Vec<String>,
+}
+
+wire_record!(Key2Public {
+    network,
+    master_fingerprint,
+    origin_path,
+    account_xpub,
+});
+wire_record!(SlotView {
+    index,
+    fingerprint,
+    xpub,
+});
+wire_record!(WalletView {
+    checksum_words,
+    wallet_id,
+    slots,
+    first_receive_address,
+    own_root_words,
+    owner_root_words,
+});
+wire_record!(WalletSetup {
+    description,
+    network,
+    owner_root,
+    key3_xpub,
+    batch_min_count,
+});
+wire_record_get!(WalletSetup {
+    description,
+    network,
+    owner_root,
+    key3_xpub,
+    batch_min_count,
+});
+
+const STATE_EMPTY: u8 = 0;
+const STATE_HAS_IDENTITY: u8 = 1;
+const STATE_READY: u8 = 2;
+
+impl Shaped for SetupState {
+    fn shape() -> String {
+        "SetupState".to_string()
+    }
+}
+
+impl Put for SetupState {
+    fn put(&self, out: &mut Vec<u8>) {
+        match self {
+            Self::Empty => out.push(STATE_EMPTY),
+            Self::HasIdentity {
+                holds_key2,
+                words_waiting,
+            } => {
+                out.push(STATE_HAS_IDENTITY);
+                holds_key2.put(out);
+                words_waiting.put(out);
+            }
+            Self::Ready { holds_key2 } => {
+                out.push(STATE_READY);
+                holds_key2.put(out);
+            }
+        }
+    }
+}
+
+impl Define for SetupState {
+    fn define() -> TypeDef {
+        TypeDef {
+            name: "SetupState",
+            body: "enum: Empty | HasIdentity{holds_key2: bool, words_waiting: bool} \
+                   | Ready{holds_key2: bool}"
+                .to_string(),
+            tags: vec![
+                ("Empty", STATE_EMPTY),
+                ("HasIdentity", STATE_HAS_IDENTITY),
+                ("Ready", STATE_READY),
+            ],
+        }
+    }
 }
 
 /// The states of the Key app.
@@ -216,6 +297,21 @@ impl KeyApp {
                 Err(internal(format!("caught a panic: {}", panic_text(&*p))))
             }
         }
+    }
+
+    /// Use `store` for the calls that follow. The call protocol hands the
+    /// store in with every call, so that nothing of the app's side is kept
+    /// between two calls.
+    pub(crate) fn attach(&self, store: Arc<dyn KeyStore>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.store = store;
+        }
+    }
+
+    /// Drop the store that [`attach`](Self::attach) set: every call that
+    /// reaches for the store fails until the next `attach`.
+    pub(crate) fn detach(&self) {
+        self.attach(Arc::new(Detached));
     }
 
     fn open_inner(store: Arc<dyn KeyStore>) -> Result<Inner, KeyError> {

@@ -2,6 +2,34 @@
 
 use crate::error::StoreError;
 
+/// The store of a Key app between two calls of the call protocol: nothing
+/// is kept, nothing is drawn, and the clock reads 0.
+pub(crate) struct Detached;
+
+impl KeyStore for Detached {
+    fn load(&self) -> Result<Option<Vec<u8>>, StoreError> {
+        Err(detached())
+    }
+
+    fn save(&self, _bytes: Vec<u8>) -> Result<(), StoreError> {
+        Err(detached())
+    }
+
+    fn random(&self, _n: u32) -> Result<Vec<u8>, StoreError> {
+        Err(detached())
+    }
+
+    fn now(&self) -> u64 {
+        0
+    }
+}
+
+fn detached() -> StoreError {
+    StoreError::Failed {
+        text: "no store is attached outside a call".to_string(),
+    }
+}
+
 /// What the Android app implements. The Rust side never touches the file
 /// system, the clock or a random source itself.
 ///

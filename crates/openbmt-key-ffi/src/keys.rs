@@ -12,6 +12,7 @@ use openbmt_core::entropy::{
 use openbmt_core::identity::Identity;
 use openbmt_core::wallet::coin_type;
 
+use crate::codec::{bad_tag, wire_record, wire_unit_enum, Define, Get, Reader, Shaped, TypeDef};
 use crate::envelope::{wipe_string, Key2, Material, Secret32};
 use crate::error::{internal, refused_by, KeyError};
 use crate::store::KeyStore;
@@ -128,6 +129,73 @@ pub struct BitProgress {
     pub have: u32,
     /// Bits still needed for the chosen word count; 0 once there are enough.
     pub still_needed: u32,
+}
+
+wire_unit_enum!(KeyNetwork {
+    Mainnet = 0,
+    Testnet = 1,
+    Signet = 2,
+    Regtest = 3,
+});
+wire_unit_enum!(KeyWordCount {
+    Twelve = 0,
+    TwentyFour = 1,
+});
+wire_record!(BitProgress { have, still_needed });
+
+const SOURCE_PLATFORM: u8 = 0;
+const SOURCE_DICE_HASHED: u8 = 1;
+const SOURCE_COIN_FLIPS: u8 = 2;
+const SOURCE_DICE_SKEW_CORRECTED: u8 = 3;
+const SOURCE_TYPED_WORDS: u8 = 4;
+
+impl Shaped for EntropySource {
+    fn shape() -> String {
+        "EntropySource".to_string()
+    }
+}
+
+impl Get for EntropySource {
+    fn get(r: &mut Reader<'_>) -> Result<Self, KeyError> {
+        match r.u8()? {
+            SOURCE_PLATFORM => Ok(Self::Platform),
+            SOURCE_DICE_HASHED => Ok(Self::DiceHashed {
+                rolls: String::get(r)?,
+            }),
+            SOURCE_COIN_FLIPS => Ok(Self::CoinFlips {
+                heads: Vec::get(r)?,
+                words: KeyWordCount::get(r)?,
+            }),
+            SOURCE_DICE_SKEW_CORRECTED => Ok(Self::DiceSkewCorrected {
+                rolls: String::get(r)?,
+                words: KeyWordCount::get(r)?,
+            }),
+            SOURCE_TYPED_WORDS => Ok(Self::TypedWords {
+                words: Vec::get(r)?,
+            }),
+            t => Err(bad_tag("EntropySource", t)),
+        }
+    }
+}
+
+impl Define for EntropySource {
+    fn define() -> TypeDef {
+        TypeDef {
+            name: "EntropySource",
+            body: "enum: Platform | DiceHashed{rolls: string} \
+                   | CoinFlips{heads: list<bool>, words: KeyWordCount} \
+                   | DiceSkewCorrected{rolls: string, words: KeyWordCount} \
+                   | TypedWords{words: list<string>}"
+                .to_string(),
+            tags: vec![
+                ("Platform", SOURCE_PLATFORM),
+                ("DiceHashed", SOURCE_DICE_HASHED),
+                ("CoinFlips", SOURCE_COIN_FLIPS),
+                ("DiceSkewCorrected", SOURCE_DICE_SKEW_CORRECTED),
+                ("TypedWords", SOURCE_TYPED_WORDS),
+            ],
+        }
+    }
 }
 
 fn progress(have: usize, words: KeyWordCount) -> BitProgress {

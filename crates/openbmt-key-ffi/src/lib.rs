@@ -29,7 +29,7 @@
 //! types allow it: the identity secret, key 2's account key, the words and
 //! the typed rolls and words. They are not overwritten in the approver's own
 //! copy of the identity (the core `Identity` type has no erase), in the
-//! `bip39` mnemonic, in the byte vectors are copied across the boundary,
+//! `bip39` mnemonic, in the byte vectors copied across the boundary,
 //! or in the app's own memory.
 //!
 //! This crate has had internal review only. No independent security audit
@@ -50,6 +50,8 @@
 )]
 
 mod app;
+mod call;
+mod codec;
 mod deposit;
 pub mod envelope;
 mod error;
@@ -65,6 +67,7 @@ mod words;
 mod tests;
 
 pub use app::{Key2Public, KeyApp, SetupState, SlotView, WalletSetup, WalletView};
+pub use call::{dispatch, error_response, protocol_description, Registry, MAX_APPS};
 pub use deposit::{parse_deposit_code, DepositCode};
 pub use error::{KeyError, StoreError};
 pub use keys::{
