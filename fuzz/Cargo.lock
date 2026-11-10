@@ -219,6 +219,15 @@ dependencies = [
  "bitcoin",
  "libfuzzer-sys",
  "openbmt-core",
+ "openbmt-signer",
+]
+
+[[package]]
+name = "openbmt-signer"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "openbmt-core",
 ]
 
 [[package]]

@@ -1,6 +1,7 @@
 # Fuzz targets
 
-Fuzz targets for the decoders and parsers in `openbmt-core`, built with
+Fuzz targets for the decoders and parsers in `openbmt-core` and for the Key
+app's signer (`openbmt-signer`), built with
 [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz). This directory is its
 own cargo project and is not a member of the main workspace, so
 `cargo test --workspace` at the repository root does not touch it.
@@ -18,6 +19,8 @@ exactly the input bytes.
 | `counter_batches_decode` | `CounterBatches::from_bytes`, with fixed roots and policy; the counter and wallet checksum are read from the input's own header |
 | `exposure_decode` | `Exposure::from_bytes` |
 | `pause_tracker_decode` | `PauseTracker::from_bytes` |
+| `signer_state_decode` | `SignerState::from_bytes` with a fixed network and key, on the input as it is and on the input placed after the wallet text of a valid snapshot (so that it gets past the header); on success the state must encode back to exactly those bytes |
+| `signer_review` | `SignerState::review` on a fixed registered state with arbitrary bytes as the PSBT file; it must never panic and must not change the state. Without a seed corpus of valid PSBT files, most inputs stop at parsing |
 | `wallet_parse` | `WalletDescription::parse` for mainnet and testnet on UTF-8 input; on success, parsing the canonical string again must give the same canonical string |
 
 ## Running

@@ -12,6 +12,7 @@ libfuzzer-sys = "0.4"
 # The same exact version as openbmt-core, for the network enum.
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 openbmt-core = { path = "../crates/openbmt-core" }
+openbmt-signer = { path = "../crates/openbmt-signer" }
 
 # Not a member of the main workspace.
 [workspace]
@@ -68,6 +69,20 @@ bench = false
 [[bin]]
 name = "wallet_parse"
 path = "fuzz_targets/wallet_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "signer_state_decode"
+path = "fuzz_targets/signer_state_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "signer_review"
+path = "fuzz_targets/signer_review.rs"
 test = false
 doc = false
 bench = false
