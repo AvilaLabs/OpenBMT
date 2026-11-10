@@ -7,7 +7,7 @@ use std::fmt;
 /// the rule that refused (for example `AS-20` or `SR-30`) when the refusal
 /// comes from one of the rule crates, and the crate's own text, which says
 /// why and what to do next where the underlying error has it.
-#[derive(Debug, uniffi::Error)]
+#[derive(Debug)]
 pub enum KeyError {
     /// A rule in one of the existing crates refused. `rule` is its ID, or
     /// the name of the check when the error has no ID.
@@ -129,14 +129,15 @@ pub(crate) fn store_failed(why: &StoreError) -> KeyError {
 
 /// The error of a [`KeyStore`](crate::KeyStore) call, raised by the app's
 /// own code.
-#[derive(Debug, uniffi::Error)]
+#[derive(Debug)]
 pub enum StoreError {
     /// The platform call failed. Nothing was stored.
     Failed {
         /// What the platform said.
         text: String,
     },
-    /// The app's callback threw something it did not declare.
+    /// The app's callback threw something it did not declare, or the call
+    /// could not be made.
     Unexpected {
         /// What was thrown.
         text: String,
@@ -152,12 +153,6 @@ impl fmt::Display for StoreError {
 }
 
 impl std::error::Error for StoreError {}
-
-impl From<uniffi::UnexpectedUniFFICallbackError> for StoreError {
-    fn from(e: uniffi::UnexpectedUniFFICallbackError) -> Self {
-        Self::Unexpected { text: e.reason }
-    }
-}
 
 #[cfg(test)]
 mod tests {

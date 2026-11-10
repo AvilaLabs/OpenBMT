@@ -20,7 +20,7 @@ use crate::error::{refused, refused_by, store_failed, KeyError, StoreError};
 use crate::views::script_hex;
 
 /// Three ceilings in satoshis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CeilingsView {
     /// Most one transaction may send.
     pub per_tx: u64,
@@ -51,7 +51,7 @@ impl From<CeilingsView> for Ceilings {
 }
 
 /// The two fee ceilings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeeCeilingsView {
     /// Highest fee rate, in satoshis per virtual byte.
     pub sat_per_vb: u64,
@@ -60,7 +60,7 @@ pub struct FeeCeilingsView {
 }
 
 /// A cash-out destination.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AllowlistView {
     /// The address, in the wallet's network.
     pub address: Option<String>,
@@ -75,7 +75,7 @@ pub struct AllowlistView {
 }
 
 /// What the signer holds, for the Key app's own screen.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignerStatus {
     /// Ceilings for other destinations (refunds).
     pub ceilings_other: CeilingsView,
@@ -154,7 +154,6 @@ fn no_store<T>(r: Result<T, openbmt_signer::ChangeError<Infallible>>) -> Result<
     r.map_err(|e| e.to_string())
 }
 
-#[uniffi::export]
 impl KeyApp {
     /// What the signer holds. Refused when key 2 is not on this device.
     pub fn signer_status(&self) -> Result<SignerStatus, KeyError> {

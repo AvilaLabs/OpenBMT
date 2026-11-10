@@ -19,7 +19,7 @@ const MAX_BYTES: usize = 2_048;
 const MAX_SATS: u64 = 21_000_000 * 100_000_000;
 
 /// What a scanned deposit code holds.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DepositCode {
     /// The address, for the wallet's network, in its usual spelling.
     pub address: String,
@@ -54,7 +54,6 @@ fn bad(rule: &str, text: &str) -> KeyError {
 ///   are refused.
 /// - The address must be for `network` and of a kind the signer's
 ///   allowlist takes (SR-22, SR-30): P2WPKH, P2WSH, P2TR, P2PKH or P2SH.
-#[uniffi::export]
 pub fn parse_deposit_code(text: String, network: KeyNetwork) -> Result<DepositCode, KeyError> {
     if text.len() > MAX_BYTES {
         return Err(bad(

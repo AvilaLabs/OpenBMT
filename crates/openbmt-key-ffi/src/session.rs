@@ -29,7 +29,6 @@ struct HandleState {
 /// handle without `finish` changes nothing; call `cancel` (or close the
 /// object) to release the slot at once instead of waiting for the garbage
 /// collector.
-#[derive(uniffi::Object)]
 pub struct SessionHandle {
     app: Arc<KeyApp>,
     id: u64,
@@ -54,7 +53,6 @@ fn reopen<'a>(
     Ok(session)
 }
 
-#[uniffi::export]
 impl KeyApp {
     /// AS-20: read and check a request and open the session. Nothing is
     /// stored or released. A second session is refused while one is open.
@@ -121,7 +119,6 @@ impl SessionHandle {
     }
 }
 
-#[uniffi::export]
 impl SessionHandle {
     /// The session's ID, 32 bytes.
     pub fn session_id(&self) -> Result<Vec<u8>, KeyError> {

@@ -10,7 +10,7 @@ use openbmt_session::{ItemKind, Label};
 use openbmt_signer::{OutputKind, Remaining};
 
 /// What kind of item a line is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineKind {
     /// A transaction.
     Spend,
@@ -25,7 +25,7 @@ pub enum LineKind {
 }
 
 /// The person's decision on a line (AS-30).
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
     /// Approve the line.
     Approve,
@@ -57,7 +57,7 @@ impl From<&Choice> for Decision {
 }
 
 /// Whether a check passed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckStatus {
     /// It passed.
     Passed,
@@ -68,7 +68,7 @@ pub enum CheckStatus {
 }
 
 /// One check, in its order.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckView {
     /// What the check is.
     pub name: String,
@@ -77,7 +77,7 @@ pub struct CheckView {
 }
 
 /// Whether a change loosens or tightens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     /// Stricter only.
     Tightening,
@@ -86,7 +86,7 @@ pub enum Direction {
 }
 
 /// What an output is, by the signer's own check.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutputKindView {
     /// Change back to the wallet, proven by the signer.
     Change {
@@ -103,7 +103,7 @@ pub enum OutputKindView {
 }
 
 /// What an owner-phone label says an output is for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OwnerLabelKind {
     /// A refund of a sale.
     Refund,
@@ -116,7 +116,7 @@ pub enum OwnerLabelKind {
 /// The owner phone's label of an output. It is the owner phone's claim and
 /// proves nothing; `is_claim` is always true so that a screen cannot show it
 /// as a finding.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnerLabelView {
     /// Always true.
     pub is_claim: bool,
@@ -137,7 +137,7 @@ pub struct OwnerLabelView {
 }
 
 /// One output of a transaction.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputView {
     /// Position in the transaction.
     pub index: u32,
@@ -154,7 +154,7 @@ pub struct OutputView {
 }
 
 /// What would remain under each ceiling, in satoshis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CeilingsRemaining {
     /// Per transaction, other destinations.
     pub other_per_tx: u64,
@@ -171,7 +171,7 @@ pub struct CeilingsRemaining {
 }
 
 /// The signer's review of a transaction.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpendReviewView {
     /// Every output, change included.
     pub outputs: Vec<OutputView>,
@@ -202,7 +202,7 @@ pub struct SpendReviewView {
 }
 
 /// The detail of a transaction line.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpendDetail {
     /// The review, or `None` when the signer refused the file or key 2 is
     /// not on this device (the line's failure text says which).
@@ -217,7 +217,7 @@ pub struct SpendDetail {
 }
 
 /// The detail of an address batch line.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BatchDetail {
     /// The counter's key, in full.
     pub counter: Vec<u8>,
@@ -236,7 +236,7 @@ pub struct BatchDetail {
 }
 
 /// One settings field that differs.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingChangeView {
     /// The field's name.
     pub field: String,
@@ -249,7 +249,7 @@ pub struct SettingChangeView {
 }
 
 /// The detail of a settings line.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsDetail {
     /// The new version.
     pub new_version: u32,
@@ -264,7 +264,7 @@ pub struct SettingsDetail {
 }
 
 /// The detail of a pairing line.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PairingDetail {
     /// The counter's name.
     pub name: String,
@@ -280,14 +280,14 @@ pub struct PairingDetail {
 }
 
 /// The detail of a health check line.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HealthDetail {
     /// The number the Key app would sign.
     pub nonce: Vec<u8>,
 }
 
 /// What a line shows, by kind.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LineDetail {
     /// A transaction.
     Spend {
@@ -317,7 +317,7 @@ pub enum LineDetail {
 }
 
 /// One line of the session (AS-23).
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineView {
     /// The item's number, which `decide` takes.
     pub item: u32,

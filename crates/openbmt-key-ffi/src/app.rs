@@ -19,7 +19,7 @@ use crate::keys::{make_material, EntropySource, KeyNetwork};
 use crate::store::KeyStore;
 
 /// Where the Key app is in its setup (`docs/DESIGN.md` §2.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetupState {
     /// Nothing is stored.
     Empty,
@@ -41,7 +41,7 @@ pub enum SetupState {
 
 /// What the Key app is given when the owner phone has built the wallet
 /// (`docs/DESIGN.md` §2.1 step 5).
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone)]
 pub struct WalletSetup {
     /// The wallet description text, with its checksum.
     pub description: String,
@@ -59,7 +59,7 @@ pub struct WalletSetup {
 }
 
 /// Key 2's public parts, for the owner phone to build the wallet from.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Key2Public {
     /// The network the key was made for.
     pub network: KeyNetwork,
@@ -72,7 +72,7 @@ pub struct Key2Public {
 }
 
 /// One key of the wallet, for the check on screen.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotView {
     /// 1, 2 or 3.
     pub index: u32,
@@ -85,7 +85,7 @@ pub struct SlotView {
 /// What the Key app shows to compare with the other devices
 /// (`docs/DESIGN.md` §2.1 step 5). The words are for people; the software
 /// compares full values.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalletView {
     /// The four checksum words of the wallet description.
     pub checksum_words: Vec<String>,
@@ -169,7 +169,6 @@ impl Inner {
 /// The Key app. One object holds the one approver behind a lock; every
 /// rule is enforced in the existing crates, and every change of state is
 /// stored through [`KeyStore::save`] before a call returns.
-#[derive(uniffi::Object)]
 pub struct KeyApp {
     pub(crate) inner: Mutex<Inner>,
 }
@@ -287,12 +286,10 @@ fn words4(words: [&'static str; 4]) -> Vec<String> {
     words.iter().map(|w| (*w).to_string()).collect()
 }
 
-#[uniffi::export]
 impl KeyApp {
     /// Open the Key app from what `store` holds. An empty store gives an
     /// empty Key app; stored bytes that do not decode strictly, or that the
     /// approver refuses, are an error.
-    #[uniffi::constructor]
     pub fn open(store: Arc<dyn KeyStore>) -> Result<Arc<Self>, KeyError> {
         let inner = match catch_unwind(AssertUnwindSafe(|| Self::open_inner(store))) {
             Ok(r) => r?,

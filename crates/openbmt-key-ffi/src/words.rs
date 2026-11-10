@@ -24,7 +24,6 @@ fn clean(word: &str) -> String {
 
 /// Up to 8 BIP39 English words that start with `prefix` (trimmed and
 /// lower-cased), for the word picker. Empty for an empty prefix.
-#[uniffi::export]
 pub fn word_suggestions(prefix: String) -> Vec<String> {
     let prefix = clean(&prefix);
     if prefix.is_empty() || prefix.len() > MAX_TYPED_WORD_BYTES {
@@ -39,7 +38,6 @@ pub fn word_suggestions(prefix: String) -> Vec<String> {
 }
 
 /// Whether `word` (trimmed and lower-cased) is on the BIP39 English list.
-#[uniffi::export]
 pub fn word_is_valid(word: String) -> bool {
     let word = clean(&word);
     word.len() <= MAX_TYPED_WORD_BYTES && Language::English.find_word(&word).is_some()

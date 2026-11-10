@@ -10,7 +10,6 @@ use crate::error::StoreError;
 /// secret. The Rust side does not protect them at rest. Wrapping them with
 /// a key from the Android Keystore, keeping them out of backups and out of
 /// device transfer, and never writing them anywhere else, is the app's job.
-#[uniffi::export(with_foreign)]
 pub trait KeyStore: Send + Sync {
     /// The bytes last passed to `save`, or `None` on a first start.
     fn load(&self) -> Result<Option<Vec<u8>>, StoreError>;

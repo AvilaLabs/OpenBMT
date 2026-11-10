@@ -1,5 +1,4 @@
-//! The OpenBMT Key app's core as a library an Android app calls through
-//! UniFFI.
+//! The OpenBMT Key app's core as a library an Android app calls.
 //!
 //! The Key app is the `Approver` of `openbmt-approver` with the signer of
 //! `openbmt-signer` (`docs/SESSION-RULES.md` section 2,
@@ -30,17 +29,15 @@
 //! types allow it: the identity secret, key 2's account key, the words and
 //! the typed rolls and words. They are not overwritten in the approver's own
 //! copy of the identity (the core `Identity` type has no erase), in the
-//! `bip39` mnemonic, in the byte vectors UniFFI copies across the boundary,
+//! `bip39` mnemonic, in the byte vectors are copied across the boundary,
 //! or in the app's own memory.
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet. Not for real funds.
 
-// UniFFI's generated scaffolding (the `extern "C"` functions and the
-// pointer handling behind `#[uniffi::export]`) needs `unsafe`. The
-// allowance is scoped to this crate; no hand-written line uses it, which a
-// test checks.
-#![allow(unsafe_code)]
+// The one `unsafe` of this crate is the JNI glue; a test checks that no
+// other file uses it.
+#![deny(unsafe_code)]
 #![deny(missing_docs)]
 #![cfg_attr(
     not(test),
@@ -83,5 +80,3 @@ pub use views::{
     PairingDetail, SettingChangeView, SettingsDetail, SpendDetail, SpendReviewView,
 };
 pub use words::{word_is_valid, word_suggestions};
-
-uniffi::setup_scaffolding!();

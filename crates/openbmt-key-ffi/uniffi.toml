@@ -1,4 +1,0 @@
-# The bindgen's global config format (UniFFI 0.32): passed with --config.
-[crates.openbmt_key_ffi.bindings.kotlin]
-package_name = "org.openbmt.key.ffi"
-cdylib_name = "openbmt_key_ffi"

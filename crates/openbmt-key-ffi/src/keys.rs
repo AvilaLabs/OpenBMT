@@ -18,7 +18,7 @@ use crate::store::KeyStore;
 use crate::words::mnemonic_from_typed;
 
 /// A network the Key app works on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyNetwork {
     /// Bitcoin mainnet.
     Mainnet,
@@ -42,7 +42,7 @@ impl From<KeyNetwork> for Network {
 }
 
 /// How many words a skew-corrected key has.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyWordCount {
     /// 12 words, 128 bits.
     Twelve,
@@ -62,7 +62,7 @@ impl From<KeyWordCount> for WordCount {
 /// Where key 2's randomness comes from (`docs/DESIGN.md` §5.4). With every
 /// source but `Platform` nothing else is mixed in, so the same throws give
 /// the same words in another tool.
-#[derive(Debug, Clone, uniffi::Enum)]
+#[derive(Debug, Clone)]
 pub enum EntropySource {
     /// "Let this device make it": 32 bytes from the platform's random
     /// source, 24 words.
@@ -99,7 +99,6 @@ pub enum EntropySource {
 
 /// How often each die face came up in `rolls`, ones first (the hashed
 /// method shows this). Wraps `openbmt_core::entropy::face_counts`.
-#[uniffi::export]
 pub fn dice_face_counts(rolls: String) -> Result<Vec<u32>, KeyError> {
     face_counts(&rolls)
         .map(|c| c.to_vec())
@@ -108,7 +107,6 @@ pub fn dice_face_counts(rolls: String) -> Result<Vec<u32>, KeyError> {
 
 /// How many skew-corrected bits `heads` gives, and how many more `words`
 /// need, for a progress display. Wraps `openbmt_core::entropy`.
-#[uniffi::export]
 pub fn coin_bits(heads: Vec<bool>, words: KeyWordCount) -> BitProgress {
     let flips: Vec<Flip> = heads
         .iter()
@@ -118,14 +116,13 @@ pub fn coin_bits(heads: Vec<bool>, words: KeyWordCount) -> BitProgress {
 }
 
 /// The same for die rolls.
-#[uniffi::export]
 pub fn dice_bits(rolls: String, words: KeyWordCount) -> Result<BitProgress, KeyError> {
     let bits = bits_from_dice(&rolls).map_err(|e| refused_by("entropy", e))?;
     Ok(progress(bits.len(), words))
 }
 
 /// Bits gathered and bits still needed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BitProgress {
     /// Bits so far.
     pub have: u32,

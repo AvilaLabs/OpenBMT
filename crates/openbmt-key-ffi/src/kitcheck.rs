@@ -15,7 +15,7 @@ use crate::error::{refused_by, KeyError};
 const MAX_SCANNED_BYTES: usize = 8_192;
 
 /// What the scan of the kit's description showed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KitCheck {
     /// The scanned text is the Key app's own wallet description, byte for
     /// byte (leading and trailing ASCII white space apart).
@@ -67,7 +67,6 @@ pub(crate) fn compare_kit(
     }
 }
 
-#[uniffi::export]
 impl KeyApp {
     /// `docs/DESIGN.md` §5.4: the kit is checked by scan. Compare the text
     /// of the kit's QR with this Key app's own wallet description, byte for

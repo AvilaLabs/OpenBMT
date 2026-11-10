@@ -234,7 +234,6 @@ fn the_receive_mark_of_an_approver_only_key_app_goes_up_through_the_store() {
 
 // ---- a panic stays inside ------------------------------------------------------
 
-#[uniffi::export]
 impl KeyApp {
     /// Test only: panics inside the lock, the way a bug would.
     pub fn debug_panic(&self) -> Result<(), KeyError> {
@@ -307,7 +306,7 @@ fn rig_again(rig: &Rig) -> Rig {
 
 #[test]
 fn the_source_has_no_unsafe_of_its_own() {
-    // The scaffolding UniFFI generates needs `unsafe`; the hand-written
+    // The crate denies `unsafe`; the hand-written
     // files must not. A line counts only outside comments and strings of
     // this kind of check: the word as code.
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -326,7 +325,7 @@ fn the_source_has_no_unsafe_of_its_own() {
                     let is_this_check = path.ends_with("tests/screen.rs");
                     if !is_this_check
                         && code.contains("unsafe")
-                        && !code.contains("allow(unsafe_code)")
+                        && !code.contains("deny(unsafe_code)")
                     {
                         panic!("unsafe at {}:{}", path.display(), n + 1);
                     }
