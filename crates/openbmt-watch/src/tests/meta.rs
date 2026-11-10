@@ -67,6 +67,7 @@ fn every_refusal_names_a_rule_of_the_file_and_says_so_in_words() {
         Refusal::TimeTooFarAhead { time: 1 },
         Refusal::SideHeaderTooDeep,
         Refusal::SideHeadersFull,
+        Refusal::HeaderStoreFull,
         Refusal::WorkOverflow,
         Refusal::StoreMalformed(DecodeError::Truncated),
         Refusal::StoreWrongNetwork,

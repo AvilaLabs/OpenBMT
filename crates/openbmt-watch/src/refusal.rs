@@ -52,6 +52,8 @@ pub enum Refusal {
     SideHeaderTooDeep,
     /// WR-07: the store already holds the most headers off the best chain.
     SideHeadersFull,
+    /// WR-08: the best chain has reached the stored-form header limit.
+    HeaderStoreFull,
     /// WR-07: the total work does not fit in 256 bits.
     WorkOverflow,
     /// WR-08: the stored bytes are not a header store and nothing else.
@@ -190,6 +192,7 @@ impl Refusal {
             | Self::HeightOverflow => "WR-05",
             Self::TimeTooFarAhead { .. } => "WR-06",
             Self::SideHeaderTooDeep | Self::SideHeadersFull | Self::WorkOverflow => "WR-07",
+            Self::HeaderStoreFull => "WR-08",
             Self::StoreMalformed(_)
             | Self::StoreWrongNetwork
             | Self::StoreWrongStart
@@ -259,6 +262,10 @@ impl fmt::Display for Refusal {
                     "the store already holds the most headers off the best chain"
                 )
             }
+            Self::HeaderStoreFull => write!(
+                f,
+                "the best chain reached the stored-form limit of 2,000,000 headers after its start block"
+            ),
             Self::WorkOverflow => write!(f, "the total work does not fit in 256 bits"),
             Self::StoreMalformed(why) => {
                 write!(f, "the stored bytes are not a header store: {why}")

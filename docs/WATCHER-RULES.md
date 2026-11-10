@@ -61,7 +61,13 @@ every header goes through the rules below first.
   it checks the network and the start block against the library's, then
   puts every header through the checks of WR-05, in order, each extending
   the tip. WR-06 is not asked, since the headers are old. Any failure
-  refuses the whole file. Headers beside the best chain are not stored.
+  refuses the whole file. Headers beside the best chain are not stored. The
+  best chain cannot grow past 2,000,000 headers after its start block: a
+  better header past that limit is refused before it is stored or the best
+  chain is changed. The store keeps all best-chain headers; it does not
+  prune old headers or replace them with a checkpoint, because that would
+  remove proof needed to check the chain. If the limit is reached, update
+  the counter or contact the OpenBMT project for help before restarting.
 
 Why work counted from the checkpoint is enough: under WR-05 the
 difficulty can fall by at most a factor of four per period, and each

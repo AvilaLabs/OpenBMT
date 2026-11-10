@@ -31,6 +31,15 @@ pub const SIDE_DEPTH: u32 = 2_016;
 /// WR-07: most headers held off the best chain.
 pub const MAX_SIDE_HEADERS: usize = 4_032;
 
+/// Whether a best-chain tip at `height` fits in the stored-form header limit.
+/// The start block is not counted in the stored form.
+fn within_stored_header_limit(start_height: u32, height: u32, limit: usize) -> bool {
+    let Some(count) = height.checked_sub(start_height) else {
+        return false;
+    };
+    usize::try_from(count).is_ok_and(|count| count <= limit)
+}
+
 /// WR-04: the mainnet checkpoint: the 80-byte header of block 967,680.
 pub(crate) const MAINNET_CHECKPOINT: [u8; 80] = [
     0x00, 0x00, 0x00, 0x30, 0x41, 0x0c, 0xcb, 0x1c, 0xba, 0x62, 0x3e, 0x26, 0xf2, 0xe0, 0x2f, 0x3f,
@@ -210,6 +219,15 @@ impl HeaderStore {
     }
 
     fn accept_inner(&mut self, header: &Header, now: Option<u64>) -> Result<Accepted, Refusal> {
+        self.accept_inner_with_limit(header, now, MAX_STORED_HEADERS)
+    }
+
+    fn accept_inner_with_limit(
+        &mut self,
+        header: &Header,
+        now: Option<u64>,
+        max_stored_headers: usize,
+    ) -> Result<Accepted, Refusal> {
         let hash = header.block_hash();
         if self.held.contains_key(&hash) {
             return Ok(Accepted::Known);
@@ -255,6 +273,12 @@ impl HeaderStore {
             Some(tip) => work > tip.work,
             None => true,
         };
+        // WR-08: every best-chain header must fit in the form we can save and
+        // read back. Check before inserting or switching chains; never prune
+        // ancestry needed for proof validation or retargets.
+        if better && !within_stored_header_limit(self.start_height, height, max_stored_headers) {
+            return Err(Refusal::HeaderStoreFull);
+        }
         if !better && self.side_count() >= MAX_SIDE_HEADERS {
             return Err(Refusal::SideHeadersFull);
         }
@@ -448,5 +472,71 @@ impl HeaderChain for HeaderStore {
         self.held
             .get(&self.tip().1)
             .map_or(0, |e| u64::from(e.header.time))
+    }
+}
+
+#[cfg(test)]
+mod stored_limit_tests {
+    use super::{within_stored_header_limit, Accepted, HeaderStore};
+    use crate::Refusal;
+    use bitcoin::block::{Header, Version};
+    use bitcoin::blockdata::constants::genesis_block;
+    use bitcoin::hashes::Hash;
+    use bitcoin::{Network, TxMerkleNode};
+
+    fn mine(parent: &Header, time: u32, tag: u32) -> Header {
+        let mut root = [0u8; 32];
+        root[..4].copy_from_slice(&tag.to_le_bytes());
+        let mut header = Header {
+            version: Version::ONE,
+            prev_blockhash: parent.block_hash(),
+            merkle_root: TxMerkleNode::from_byte_array(root),
+            time,
+            bits: parent.bits,
+            nonce: 0,
+        };
+        while header.validate_pow(header.target()).is_err() {
+            header.nonce += 1;
+        }
+        header
+    }
+
+    #[test]
+    fn limit_counts_after_the_start_block_without_height_overflow() {
+        assert!(within_stored_header_limit(100, 100, 2));
+        assert!(within_stored_header_limit(100, 102, 2));
+        assert!(!within_stored_header_limit(100, 103, 2));
+        assert!(!within_stored_header_limit(100, 99, 2));
+        assert!(!within_stored_header_limit(0, u32::MAX, 2));
+    }
+
+    #[test]
+    fn full_limit_refuses_extension_and_reorg_before_mutating_store() {
+        let start = genesis_block(Network::Regtest).header;
+        let mut store = HeaderStore::new(Network::Regtest).expect("regtest");
+        let first = mine(&start, start.time + 1, 1);
+        assert_eq!(
+            store.accept_inner_with_limit(&first, None, 0),
+            Err(Refusal::HeaderStoreFull)
+        );
+        assert_eq!(store.tip().1, start.block_hash());
+        assert_eq!(store.held.len(), 1);
+
+        assert_eq!(
+            store.accept_inner_with_limit(&first, None, 1),
+            Ok(Accepted::Extended)
+        );
+        let side = mine(&start, start.time + 1, 2);
+        assert_eq!(
+            store.accept_inner_with_limit(&side, None, 1),
+            Ok(Accepted::Side)
+        );
+        let better_side = mine(&side, side.time + 1, 3);
+        assert_eq!(
+            store.accept_inner_with_limit(&better_side, None, 1),
+            Err(Refusal::HeaderStoreFull)
+        );
+        assert_eq!(store.tip().1, first.block_hash());
+        assert!(!store.holds(&better_side.block_hash()));
     }
 }

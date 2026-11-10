@@ -4,7 +4,7 @@
 //! Two things reach a person. A [`Problem`] with the check is what the owner
 //! looks at when a cashier says "the counter cannot check payments". A
 //! watcher [`Refusal`] reaches people only as a line in the counter's notes;
-//! the 49 variants are sorted into [`RefusalGroup`]s, one group for each
+//! the 50 variants are sorted into [`RefusalGroup`]s, one group for each
 //! thing a person would do differently, and each group has one [`Words`].
 
 use openbmt_core::say::{Tone, Who, Words};
@@ -89,7 +89,7 @@ impl Health {
     }
 }
 
-/// The groups the 49 watcher refusals fall into. Two refusals are in one
+/// The groups the 50 watcher refusals fall into. Two refusals are in one
 /// group when a person would do the same about both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefusalGroup {
@@ -102,6 +102,8 @@ pub enum RefusalGroup {
     HeaderFromTheFuture,
     /// The saved headers cannot be used (WR-04, WR-08).
     SavedHeadersUnusable,
+    /// The header store reached the largest form it can save and read (WR-08).
+    HeaderStoreFull,
     /// A proof of a payment did not check out (WR-10 to WR-16).
     ProofNotBelieved,
     /// A whole block did not check out (WR-20 to WR-22).
@@ -116,11 +118,12 @@ pub enum RefusalGroup {
 
 impl RefusalGroup {
     /// Every group.
-    pub const ALL: [RefusalGroup; 9] = [
+    pub const ALL: [RefusalGroup; 10] = [
         Self::LeftTheChain,
         Self::HeaderNotBelieved,
         Self::HeaderFromTheFuture,
         Self::SavedHeadersUnusable,
+        Self::HeaderStoreFull,
         Self::ProofNotBelieved,
         Self::BlockNotBelieved,
         Self::PaysNothing,
@@ -135,6 +138,7 @@ impl RefusalGroup {
             Self::HeaderNotBelieved => "HeaderNotBelieved",
             Self::HeaderFromTheFuture => "HeaderFromTheFuture",
             Self::SavedHeadersUnusable => "SavedHeadersUnusable",
+            Self::HeaderStoreFull => "HeaderStoreFull",
             Self::ProofNotBelieved => "ProofNotBelieved",
             Self::BlockNotBelieved => "BlockNotBelieved",
             Self::PaysNothing => "PaysNothing",
@@ -176,6 +180,14 @@ impl RefusalGroup {
                 "The block headers this counter saved cannot be used, so nothing was changed and it cannot build on them.",
                 Who::Owner,
                 "Restart the counter. If this comes back, the saved headers need to be replaced.",
+            )
+            .code("WR-08"),
+            Self::HeaderStoreFull => Words::new(
+                Tone::Stop,
+                "Chain record is full",
+                "The saved record of blocks is full, so this device stopped checking new payments.",
+                Who::Owner,
+                "Take another payment method. Tell the owner to update this device or report the full record to the OpenBMT project.",
             )
             .code("WR-08"),
             Self::ProofNotBelieved => Words::new(
@@ -238,6 +250,7 @@ impl Refusal {
             | Self::SideHeaderTooDeep
             | Self::SideHeadersFull
             | Self::WorkOverflow => RefusalGroup::HeaderNotBelieved,
+            Self::HeaderStoreFull => RefusalGroup::HeaderStoreFull,
             Self::TimeTooFarAhead { .. } => RefusalGroup::HeaderFromTheFuture,
             Self::NetworkNotSupported
             | Self::StoreMalformed(_)
@@ -288,7 +301,7 @@ impl Refusal {
 }
 
 /// Every one of these words, for SC-12: one value for each problem, for each
-/// answer of the health check and, because the 49 refusals share one
+/// answer of the health check and, because the 50 refusals share one
 /// sentence for each group, one for each group of refusals (see
 /// [`Refusal::group`]).
 pub fn all_words() -> Vec<(String, Words)> {

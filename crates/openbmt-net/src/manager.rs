@@ -1029,6 +1029,7 @@ impl Manager {
                     Refusal::TimeTooFarAhead { .. }
                     | Refusal::SideHeaderTooDeep
                     | Refusal::SideHeadersFull
+                    | Refusal::HeaderStoreFull
                     | Refusal::AncestorMissing,
                 ) => {
                     clean = false;

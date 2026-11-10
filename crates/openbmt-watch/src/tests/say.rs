@@ -25,6 +25,7 @@ fn every_refusal() -> Vec<Refusal> {
         Refusal::TimeTooFarAhead { time: 9 },
         Refusal::SideHeaderTooDeep,
         Refusal::SideHeadersFull,
+        Refusal::HeaderStoreFull,
         Refusal::WorkOverflow,
         Refusal::StoreMalformed(DecodeError::Truncated),
         Refusal::StoreWrongNetwork,
@@ -92,7 +93,7 @@ fn sc_01_no_variant_is_missing() {
     // Every refusal is listed (`Refusal::group` is exhaustive), each one has words that keep the rules,
     // and every group is reached by some refusal.
     let refusals = every_refusal();
-    assert_eq!(refusals.len(), 49);
+    assert_eq!(refusals.len(), 50);
     let mut reached = Vec::new();
     for r in &refusals {
         assert_eq!(check(&r.words()), Ok(()), "{r}");
