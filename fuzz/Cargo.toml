@@ -248,6 +248,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "box_claim_decode"
+path = "fuzz_targets/box_claim_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "link_proto_decode"
 path = "fuzz_targets/link_proto_decode.rs"
 test = false

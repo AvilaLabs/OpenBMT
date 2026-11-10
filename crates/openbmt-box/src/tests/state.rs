@@ -681,7 +681,7 @@ fn bx_22_settings_that_come_to_more_members_than_the_relay_holds_are_refused() {
     let me = core.device_id();
     let mut big = settings_with(2, &me);
     let mut n = 100u8;
-    while big.devices.len() + 1 <= MAX_MEMBERS {
+    while big.devices.len() < MAX_MEMBERS {
         big.devices.insert(id(n).device_id());
         n += 1;
     }

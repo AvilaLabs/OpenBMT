@@ -46,6 +46,7 @@ exactly the input bytes.
 | `owner_queue_decode` | `Owner::restore` (the owner phone's stored queue); on success the snapshot must equal the input |
 | `wallet_parse` | `WalletDescription::parse` for mainnet and testnet on UTF-8 input; on success, parsing the canonical string again must give the same canonical string |
 | `courier_records_decode` | `decode_records`, the content of a Records message; on success each record encoded again behind its length must give the input back |
+| `box_claim_decode` | `Claim::from_bytes` and `Welcome::from_bytes` (each must encode back to the input) and `Invitation::from_text` on UTF-8 input (one that reads must read back from its own text to the same invitation) |
 
 ## Running
 

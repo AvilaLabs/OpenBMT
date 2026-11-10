@@ -644,9 +644,8 @@ mod tests {
         for bit in 0..good.len() * 8 {
             let mut b = good.clone();
             b[bit / 8] ^= 1 << (bit % 8);
-            match Claim::from_bytes(&b) {
-                Ok(c) => assert!(!c.verify(&i), "bit {bit}"),
-                Err(_) => {}
+            if let Ok(c) = Claim::from_bytes(&b) {
+                assert!(!c.verify(&i), "bit {bit}");
             }
         }
     }
