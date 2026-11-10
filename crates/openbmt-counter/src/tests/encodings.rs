@@ -3,11 +3,12 @@
 //! byte too many, another magic and another version, and never decodes a
 //! flipped bit into something that would not encode back to the same bytes.
 
+use bitcoin::hashes::Hash;
 use openbmt_core::policy::{CheckMode, InstantLabel};
 use openbmt_core::wire::DecodeError;
 
 use super::kit::*;
-use crate::{Amount, Desk, Event, OverrideEntry, RateSource, Role, Sale, MAX_FINAL_PAYMENTS};
+use crate::{Amount, Ask, Desk, Event, OverrideEntry, RateSource, Role, Sale, MAX_FINAL_PAYMENTS};
 
 /// Same checks as the core's helper, kept here because that one is private
 /// to core's tests.
@@ -155,7 +156,45 @@ fn every_event() -> Vec<Event> {
             minor_per_btc: 12_500_000,
             source: RateSource::new("a-b+c.9", T0 + 129).unwrap(),
         },
+        a_request(Ask::Sats),
+        a_request(Ask::Value {
+            minor: 20,
+            minor_per_btc: 10_000_000,
+            source: RateSource::new("regtest-fixed", T0 + 138).unwrap(),
+        }),
+        Event::RefundWithdrawn {
+            index: 4,
+            at: T0 + 150,
+            number: 3,
+            role: Role::Manager,
+            name: "max".to_string(),
+        },
+        Event::RefundPaidInCash {
+            index: 4,
+            at: T0 + 160,
+            role: Role::Cashier,
+            name: "ann".to_string(),
+            reason: "wrong size".to_string(),
+            minor: 20,
+            sats: 2_000,
+        },
     ]
+}
+
+fn a_request(ask: Ask) -> Event {
+    Event::RefundRequested {
+        index: 4,
+        at: T0 + 140,
+        number: 3,
+        role: Role::Cashier,
+        name: "ann".to_string(),
+        reason: "wrong size".to_string(),
+        destination: p2wsh(0x11),
+        received_sats: 5_000,
+        waiting_for_depth: true,
+        sats: 2_000,
+        ask,
+    }
 }
 
 fn a_final(payments: Vec<([u8; 32], u64)>, more: bool) -> Event {
@@ -284,10 +323,10 @@ fn the_sale_round_trips_and_refuses_another_magic_or_version() {
     bad[3] = b'X';
     assert_eq!(Sale::from_bytes(&bad).err(), Some(DecodeError::BadMagic));
     let mut bad = good.clone();
-    bad[4] = 2;
+    bad[4] = 3;
     assert_eq!(
         Sale::from_bytes(&bad).err(),
-        Some(DecodeError::UnsupportedVersion(2))
+        Some(DecodeError::UnsupportedVersion(3))
     );
     // A desk is not a sale.
     assert_eq!(
@@ -303,7 +342,7 @@ fn every_event_is_strict() {
         assert_eq!(Event::decode(&bytes).unwrap(), e);
         assert_strict(&bytes, Event::decode, Event::encode);
     }
-    assert_eq!(every_event().len(), 15);
+    assert_eq!(every_event().len(), 19);
 }
 
 #[test]
@@ -436,6 +475,272 @@ fn the_new_events_have_these_bytes() {
 }
 
 #[test]
+fn the_refund_events_have_these_bytes() {
+    let events = every_event();
+    let mut expect = vec![16u8];
+    expect.extend(4u32.to_le_bytes());
+    expect.extend((T0 + 140).to_le_bytes());
+    expect.extend(3u64.to_le_bytes()); // number
+    expect.push(1); // cashier
+    expect.push(3);
+    expect.extend(*b"ann");
+    expect.push(10);
+    expect.extend(*b"wrong size");
+    expect.push(34); // script
+    expect.extend([0x00, 0x20]);
+    expect.extend([0x11u8; 32]);
+    expect.extend(5_000u64.to_le_bytes()); // received
+    expect.push(1); // waiting for depth
+    expect.extend(2_000u64.to_le_bytes()); // asked
+    let mut by_sats = expect.clone();
+    by_sats.push(1); // asked in satoshis
+    assert_eq!(events[15].encode(), by_sats);
+    let mut by_value = expect;
+    by_value.push(2); // asked in the shop's currency
+    by_value.extend(20u64.to_le_bytes());
+    by_value.extend(10_000_000u64.to_le_bytes());
+    by_value.push(13);
+    by_value.extend(*b"regtest-fixed");
+    by_value.extend((T0 + 138).to_le_bytes());
+    assert_eq!(events[16].encode(), by_value);
+
+    let mut expect = vec![17u8];
+    expect.extend(4u32.to_le_bytes());
+    expect.extend((T0 + 150).to_le_bytes());
+    expect.extend(3u64.to_le_bytes());
+    expect.push(2); // manager
+    expect.push(3);
+    expect.extend(*b"max");
+    assert_eq!(events[17].encode(), expect);
+
+    let mut expect = vec![18u8];
+    expect.extend(4u32.to_le_bytes());
+    expect.extend((T0 + 160).to_le_bytes());
+    expect.push(1);
+    expect.push(3);
+    expect.extend(*b"ann");
+    expect.push(10);
+    expect.extend(*b"wrong size");
+    expect.extend(20u64.to_le_bytes()); // minor units
+    expect.extend(2_000u64.to_le_bytes()); // sats
+    assert_eq!(events[18].encode(), expect);
+}
+
+/// Offsets in a request with the sats ask: tag 1, index 4, time 8, number 8,
+/// role 1, name length 1 and "ann" 3, reason length 1 and "wrong size" 10,
+/// script length 1.
+const REQ_NUMBER_AT: usize = 13;
+const REQ_ROLE_AT: usize = 21;
+const REQ_NAME_LEN_AT: usize = 22;
+const REQ_REASON_LEN_AT: usize = 26;
+const REQ_SCRIPT_LEN_AT: usize = 37;
+const REQ_SCRIPT_AT: usize = 38;
+
+#[test]
+fn a_refund_request_with_fields_the_counter_never_writes_is_refused() {
+    let good = a_request(Ask::Sats).encode();
+    assert_eq!(good[REQ_NUMBER_AT], 3);
+    assert_eq!(good[REQ_ROLE_AT], 1);
+    assert_eq!(good[REQ_NAME_LEN_AT], 3);
+    assert_eq!(good[REQ_REASON_LEN_AT], 10);
+    assert_eq!(good[REQ_SCRIPT_LEN_AT], 34);
+    let refused = |mut bad: Vec<u8>, at: usize, v: u8, why: &str| {
+        bad[at] = v;
+        assert!(Event::decode(&bad).is_err(), "{why}");
+    };
+    refused(good.clone(), REQ_ROLE_AT, 7, "an unknown role");
+    refused(good.clone(), REQ_NAME_LEN_AT, 0, "an empty name");
+    refused(
+        good.clone(),
+        REQ_NAME_LEN_AT + 1,
+        0x07,
+        "a control character in the name",
+    );
+    refused(good.clone(), REQ_REASON_LEN_AT, 0, "an empty reason");
+    refused(
+        good.clone(),
+        REQ_REASON_LEN_AT + 1,
+        0xff,
+        "a reason that is not text",
+    );
+    refused(good.clone(), REQ_SCRIPT_LEN_AT, 0, "an empty script");
+    refused(good.clone(), REQ_SCRIPT_LEN_AT, 35, "a script too long");
+    refused(
+        good.clone(),
+        REQ_SCRIPT_AT,
+        0x6a,
+        "a script that is not a payment script",
+    );
+    // a number of zero
+    let mut bad = good.clone();
+    bad[REQ_NUMBER_AT..REQ_NUMBER_AT + 8].fill(0);
+    assert!(Event::decode(&bad).is_err(), "a request number of zero");
+    // the flag after the received amount
+    let flag_at = REQ_SCRIPT_AT + 34 + 8;
+    refused(good.clone(), flag_at, 2, "a flag that is not 0 or 1");
+    // an amount of zero and an amount above what was received
+    let sats_at = flag_at + 1;
+    let mut bad = good.clone();
+    bad[sats_at..sats_at + 8].fill(0);
+    assert!(Event::decode(&bad).is_err(), "asks for nothing");
+    let mut bad = good.clone();
+    bad[sats_at..sats_at + 8].copy_from_slice(&5_001u64.to_le_bytes());
+    assert!(
+        Event::decode(&bad).is_err(),
+        "asks for more than was received"
+    );
+    // an ask that is not known
+    refused(good.clone(), sats_at + 8, 3, "an unknown ask");
+    // a value or a rate of zero
+    let by_value = a_request(Ask::Value {
+        minor: 20,
+        minor_per_btc: 10_000_000,
+        source: RateSource::new("regtest-fixed", T0 + 138).unwrap(),
+    })
+    .encode();
+    for at in [sats_at + 9, sats_at + 17] {
+        let mut bad = by_value.clone();
+        bad[at..at + 8].fill(0);
+        assert!(Event::decode(&bad).is_err(), "a zero value or rate at {at}");
+    }
+    // a destination of every kind the signer pays reads back; others do not
+    for script in [
+        bitcoin::ScriptBuf::new_p2pkh(&bitcoin::PubkeyHash::from_byte_array([1; 20])),
+        bitcoin::ScriptBuf::new_p2sh(&bitcoin::ScriptHash::from_byte_array([1; 20])),
+        bitcoin::ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([1; 20])),
+        p2wsh(2),
+    ] {
+        let mut e = a_request(Ask::Sats);
+        if let Event::RefundRequested { destination, .. } = &mut e {
+            *destination = script;
+        }
+        assert_strict(&e.encode(), Event::decode, Event::encode);
+    }
+}
+
+#[test]
+fn a_withdrawal_and_a_cash_refund_with_fields_the_counter_never_writes_are_refused() {
+    let events = every_event();
+    let withdrawn = events[17].encode();
+    let mut bad = withdrawn.clone();
+    bad[13..21].fill(0);
+    assert!(Event::decode(&bad).is_err(), "a request number of zero");
+    let mut bad = withdrawn.clone();
+    bad[21] = 0;
+    assert!(Event::decode(&bad).is_err(), "an unknown role");
+    let mut bad = withdrawn;
+    bad[22] = 0;
+    assert!(Event::decode(&bad).is_err(), "an empty name");
+
+    let cash = events[18].encode();
+    let n = cash.len();
+    let mut bad = cash.clone();
+    bad[n - 16..n - 8].fill(0);
+    assert!(Event::decode(&bad).is_err(), "no amount");
+    let mut bad = cash.clone();
+    bad[n - 8..].fill(0);
+    assert!(Event::decode(&bad).is_err(), "no satoshis");
+    let mut bad = cash;
+    bad[13] = 9;
+    assert!(Event::decode(&bad).is_err(), "an unknown role");
+}
+
+#[test]
+fn a_desk_with_a_request_number_is_version_three_and_strict() {
+    let mut d = a_desk();
+    d.set_last_refund_no(5);
+    let bytes = d.to_bytes();
+    assert_eq!(&bytes[..5], b"OBMG");
+    // heartbeat number, then request number, after the alarm byte
+    assert_eq!(&bytes[14..22], &0u64.to_le_bytes());
+    assert_eq!(&bytes[22..30], &5u64.to_le_bytes());
+    let old = a_desk().to_bytes();
+    assert_eq!(&bytes[30..], &old[14..]);
+    assert_eq!(Desk::from_bytes(&bytes).unwrap(), d);
+    assert_strict(&bytes, Desk::from_bytes, Desk::to_bytes);
+    // with a heartbeat number as well
+    d.set_last_heartbeat_seq(41);
+    let both = d.to_bytes();
+    assert_eq!(&both[14..22], &41u64.to_le_bytes());
+    assert_strict(&both, Desk::from_bytes, Desk::to_bytes);
+    // version 3 with a zero request number is not what the counter writes
+    let mut bad = bytes.clone();
+    bad[22..30].fill(0);
+    assert!(matches!(
+        Desk::from_bytes(&bad),
+        Err(DecodeError::NonCanonical(_))
+    ));
+    // a desk with neither number keeps its old spelling
+    assert_eq!(a_desk().to_bytes()[4], 1);
+}
+
+/// A sale with one request and one cash refund.
+fn a_sale_with_refunds() -> Sale {
+    use crate::{Actor, CashRefund, RefundAsk, RefundRequest};
+    let mut w = World::new();
+    let o = w.open_five();
+    let t = w.pay(&o, 5_000);
+    w.confirm(&[t], 100);
+    w.judge(o.index);
+    let request = RefundRequest {
+        ask: RefundAsk::Sats(1_000),
+        destination: p2wsh(0xa1),
+        actor: Actor {
+            role: Role::Cashier,
+            name: "ann".to_string(),
+        },
+        reason: "wrong size".to_string(),
+    };
+    w.c.request_refund(o.index, request, w.now, &w.chain, &mut w.m)
+        .unwrap();
+    w.c.refund_in_cash(
+        o.index,
+        CashRefund {
+            actor: Actor {
+                role: Role::Cashier,
+                name: "ann".to_string(),
+            },
+            minor: Amount(50),
+            reason: "wrong size".to_string(),
+        },
+        w.now,
+        &w.chain,
+        &mut w.m,
+    )
+    .unwrap();
+    w.c.withdraw_refund(
+        o.index,
+        1,
+        Actor {
+            role: Role::Manager,
+            name: "max".to_string(),
+        },
+        w.now,
+        &mut w.m,
+    )
+    .unwrap();
+    w.c.sale(o.index).unwrap().clone()
+}
+
+#[test]
+fn a_sale_with_refund_entries_is_version_two_and_strict() {
+    let sale = a_sale_with_refunds();
+    let bytes = sale.to_bytes();
+    assert_eq!(&bytes[..5], b"OBML");
+    assert_strict(&bytes, Sale::from_bytes, |s| s.to_bytes());
+    // a sale without one keeps the old spelling
+    assert_eq!(a_sale().to_bytes()[4], 1);
+    // version 2 with no entry is not what the counter writes
+    let mut bare = a_sale().to_bytes();
+    bare[4] = 2;
+    bare.extend(0u32.to_le_bytes());
+    assert!(matches!(
+        Sale::from_bytes(&bare),
+        Err(DecodeError::NonCanonical(_))
+    ));
+}
+
+#[test]
 fn a_final_record_with_payments_that_are_not_canonical_is_refused() {
     // Round trip with none, one and the most.
     for n in [0usize, 1, MAX_FINAL_PAYMENTS] {
@@ -505,5 +810,6 @@ fn an_event_keeps_its_index_and_record_kind() {
     assert_eq!(kinds[9], RecordKind::Override);
     assert_eq!(kinds[10], RecordKind::Conflict);
     assert_eq!(kinds[14], RecordKind::Sale);
+    assert!(kinds[15..].iter().all(|k| *k == RecordKind::Refund));
     assert!(every_event().iter().all(|e| e.index() == 4));
 }

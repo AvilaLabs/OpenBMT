@@ -522,3 +522,236 @@ impl fmt::Display for LoadError {
 }
 
 impl std::error::Error for LoadError {}
+
+/// Why a refund QR code was not taken as a destination (CR-62, CR-63).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DestinationRefused {
+    /// CR-62: the text is longer than the counter reads.
+    TooLong,
+    /// CR-62: the text holds a character that is not printable ASCII.
+    NotPrintable,
+    /// CR-62: no address could be read from it.
+    NotAnAddress,
+    /// CR-63: the address is for another network.
+    WrongNetwork,
+    /// CR-63: the address is of a kind the Key app's signer would not pay.
+    ScriptKind,
+}
+
+impl DestinationRefused {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::TooLong | Self::NotPrintable | Self::NotAnAddress => "CR-62",
+            Self::WrongNetwork | Self::ScriptKind => "CR-63",
+        }
+    }
+}
+
+impl fmt::Display for DestinationRefused {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::TooLong => write!(f, "the code is too long to be an address"),
+            Self::NotPrintable => write!(
+                f,
+                "the code holds a character that an address does not carry"
+            ),
+            Self::NotAnAddress => write!(f, "no on-chain address could be read from the code"),
+            Self::WrongNetwork => write!(f, "the address is for another network"),
+            Self::ScriptKind => write!(
+                f,
+                "the address is not a P2WPKH, P2WSH, P2TR, P2PKH or P2SH address"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for DestinationRefused {}
+
+/// Why a refund was not requested or not paid in cash (CR-61 to CR-69,
+/// CR-71, CR-73).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefundRefused<E> {
+    /// CR-61: a name or a reason is not a label of 1 to 64 characters with
+    /// no control character.
+    BadText(&'static str),
+    /// CR-63: the destination script is of a kind the signer would not pay.
+    DestinationKind,
+    /// CR-64: the counter has no sale with this index.
+    UnknownSale(u32),
+    /// CR-58: the rate that turns an amount into satoshis is stale.
+    StaleRate {
+        /// When the caller got the rate.
+        fetched_at: u64,
+        /// The time of the request.
+        now: u64,
+    },
+    /// CR-67: the amount is zero.
+    ZeroAmount,
+    /// CR-67: the amount is more than all the bitcoin there is.
+    AmountTooLarge,
+    /// CR-67: the amount is below the dust limit of the destination.
+    BelowDust {
+        /// The amount asked for.
+        sats: u64,
+        /// The dust limit of the destination's kind.
+        dust: u64,
+    },
+    /// CR-68: the destination is one of the wallet's own scripts.
+    OwnScript,
+    /// CR-65: nothing has arrived for the sale.
+    NothingReceived,
+    /// CR-67: the sale keeps the most refund entries it can.
+    TooManyRefunds,
+    /// CR-67: the sale's refunds would add up to more than was received.
+    MoreThanReceived {
+        /// What was received for the sale, in satoshis.
+        received: u64,
+        /// What the earlier requests and cash refunds ask, in satoshis.
+        asked: u64,
+        /// What this one asks, in satoshis.
+        sats: u64,
+    },
+    /// CR-69: a cashier asks for more than the largest single refund; a
+    /// manager is needed.
+    NeedsManagerSingle {
+        /// What is asked, in satoshis.
+        sats: u64,
+        /// The largest single refund.
+        limit: u64,
+    },
+    /// CR-69: the cashier's refunds of the last 24 hours would pass the
+    /// daily cap; a manager is needed.
+    NeedsManagerDaily {
+        /// What is asked, in satoshis.
+        sats: u64,
+        /// The cashier's refunds inside the window already.
+        already: u64,
+        /// The cap.
+        cap: u64,
+    },
+    /// CR-40: a write failed.
+    Store(StoreFault<E>),
+}
+
+impl<E> RefundRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::BadText(_) => "CR-61",
+            Self::DestinationKind => "CR-63",
+            Self::UnknownSale(_) => "CR-64",
+            Self::StaleRate { .. } => "CR-58",
+            Self::ZeroAmount
+            | Self::AmountTooLarge
+            | Self::BelowDust { .. }
+            | Self::TooManyRefunds
+            | Self::MoreThanReceived { .. } => "CR-67",
+            Self::OwnScript => "CR-68",
+            Self::NothingReceived => "CR-65",
+            Self::NeedsManagerSingle { .. } | Self::NeedsManagerDaily { .. } => "CR-69",
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for RefundRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::BadText(what) => write!(
+                f,
+                "the {what} is not a label of 1 to 64 characters with no control character"
+            ),
+            Self::DestinationKind => write!(
+                f,
+                "the destination is not a P2WPKH, P2WSH, P2TR, P2PKH or P2SH script"
+            ),
+            Self::UnknownSale(i) => write!(f, "there is no sale with index {i}"),
+            Self::StaleRate { fetched_at, now } => write!(
+                f,
+                "the rate was fetched at {fetched_at} and the time is {now}; fetch a rate again"
+            ),
+            Self::ZeroAmount => write!(f, "a refund needs an amount"),
+            Self::AmountTooLarge => write!(f, "the amount is more than all the bitcoin there is"),
+            Self::BelowDust { sats, dust } => write!(
+                f,
+                "{sats} sats is below the {dust} sats the destination can take"
+            ),
+            Self::OwnScript => write!(
+                f,
+                "the destination is one of this shop's own addresses; ask the customer for \
+                 an address of their own wallet"
+            ),
+            Self::NothingReceived => write!(f, "nothing has arrived for this sale"),
+            Self::TooManyRefunds => write!(f, "the sale has the most refund entries it can keep"),
+            Self::MoreThanReceived {
+                received,
+                asked,
+                sats,
+            } => write!(
+                f,
+                "{sats} sats on top of {asked} sats already asked is more than the {received} \
+                 sats received"
+            ),
+            Self::NeedsManagerSingle { sats, limit } => write!(
+                f,
+                "{sats} sats is above the {limit} sats a cashier may refund; a manager is needed"
+            ),
+            Self::NeedsManagerDaily { sats, already, cap } => write!(
+                f,
+                "{sats} sats on top of {already} sats in the last 24 hours is above the \
+                 cashier's cap of {cap} sats; a manager is needed"
+            ),
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for RefundRefused<E> {}
+
+/// Why a refund request was not withdrawn (CR-61, CR-64, CR-70).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WithdrawRefused<E> {
+    /// CR-61: the person's name is not a label.
+    BadName,
+    /// CR-64: the counter has no sale with this index.
+    UnknownSale(u32),
+    /// CR-70: the sale has no request with this number.
+    UnknownRequest(u64),
+    /// CR-70: the request was withdrawn already.
+    AlreadyWithdrawn(u64),
+    /// CR-40: a write failed.
+    Store(StoreFault<E>),
+}
+
+impl<E> WithdrawRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::BadName => "CR-61",
+            Self::UnknownSale(_) => "CR-64",
+            Self::UnknownRequest(_) | Self::AlreadyWithdrawn(_) => "CR-70",
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for WithdrawRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::BadName => write!(
+                f,
+                "the name is not a label of 1 to 64 characters with no control character"
+            ),
+            Self::UnknownSale(i) => write!(f, "there is no sale with index {i}"),
+            Self::UnknownRequest(n) => write!(f, "the sale has no refund request {n}"),
+            Self::AlreadyWithdrawn(n) => write!(f, "refund request {n} was withdrawn already"),
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for WithdrawRefused<E> {}

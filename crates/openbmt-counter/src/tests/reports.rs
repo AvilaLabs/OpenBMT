@@ -22,6 +22,9 @@ fn kinds(w: &World) -> Vec<&'static str> {
             Event::Reopened { .. } => "reopened",
             Event::PosPaid { .. } => "pos-paid",
             Event::PosUnpaid { .. } => "pos-unpaid",
+            Event::RefundRequested { .. } => "refund-requested",
+            Event::RefundWithdrawn { .. } => "refund-withdrawn",
+            Event::RefundPaidInCash { .. } => "refund-paid-in-cash",
         })
         .collect()
 }

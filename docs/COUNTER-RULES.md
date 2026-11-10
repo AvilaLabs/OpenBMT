@@ -236,7 +236,109 @@ from the owner's device to the counter is not part of these rules.
   seen by the counter. The outside check of `docs/DESIGN.md` §10 is the one
   that does not depend on this software.
 
-## 7. What these rules do not do
+## 7. Refunds: the cashier's side
+
+A refund is two things in two places: the cashier asks at the counter, and
+the owner's device pays in an approval session (`docs/DESIGN.md` §2.4,
+`docs/SESSION-RULES.md` AS-50 to AS-57). These rules are the asking. A
+sale's refund state is stored with the sale (`OBML`, version 2, written
+only for a sale that has a refund entry; a version 1 sale has none) and the
+request number in the desk (`OBMG`, version 3, written only once a request
+has been made).
+
+- **CR-60.** A refund request is a record, not a payment. The counter holds
+  no key that can move funds. A request is a record of kind `Refund`
+  (`RefundRequested`) on the counter's chain. It reaches the owner with the
+  other records (`docs/LINK-RULES.md` LK-54 to LK-58) and becomes a queued
+  refund there only after the owner's device has checked it. Nothing is
+  paid until an approval session.
+- **CR-61.** A request names: the sale's receive index; the amount, in
+  satoshis or in the shop's currency, one of the two; the destination
+  script; the cashier's name and role, as an override does (CR-21); the
+  reason; the time; the satoshis the counter saw received for the sale
+  at that time; whether the sale had reached the refund depth; and a
+  request number, rising per counter from 1. The signed settings have no
+  "refund at the dollar price or at the bitcoin amount" choice, so the
+  caller passes the choice with each call. A name and a reason are 1 to 64
+  characters, at most 255 bytes, with no control character: the labels of
+  AS-07. A value in the shop's currency comes with a rate and its source
+  and is turned into satoshis at that rate, rounded down in the shop's
+  favour; the rate is as fresh as CR-58 asks.
+- **CR-62.** The destination comes from the customer's QR code and only a
+  plain on-chain address is taken from it. `refund_destination` accepts a
+  bare address or a `bitcoin:` URI and takes the address and nothing else.
+  The amount, the label, the message and every other field are ignored,
+  including a field named `req-`. This differs from the Key app's deposit
+  reader on purpose: that reader refuses a code with a `req-` field, as
+  BIP21 says, because it enrols an address; here the amount is the shop's
+  and the code may carry anything. A text over 2,048 bytes, a character
+  that is not printable ASCII, and an empty or unreadable address are
+  refused.
+- **CR-63.** An address for another network is refused. So is an address
+  whose script is not one the Key app's signer would pay (P2WPKH, P2WSH,
+  P2TR, P2PKH or P2SH, SR-22). The counter crate does not depend on the
+  signer; it keeps its own copy of the list, and a test in a crate that
+  depends on both checks the two agree.
+- **CR-64.** A request for a sale the counter does not hold is refused.
+- **CR-65.** A request for a sale for which nothing has arrived is refused.
+  A sale that only holds dust, or that is `Expired` or `Cancelled`, has
+  nothing to refund.
+- **CR-66.** A sale that has not reached the refund depth (the setting
+  `final_confirmations`) is not a refusal. The request is recorded and is
+  shown as "waiting for depth" until the sale is final (DESIGN §2.4). It is
+  one stored state with a flag: the view works the flag out again from the
+  sale each time it is asked for, as CR-11 does for the screen. A reorg
+  that undoes the payment puts the flag back.
+- **CR-67.** A request is refused when its amount is zero, or when it
+  would take what is asked for the sale past what was received for it.
+  What is asked is the sum of the earlier requests that are not withdrawn
+  and the cash refunds (CR-71), valued in satoshis at the sale's last
+  quote. This holds across parts: two requests that together pass what was
+  received make the second one refused.
+- **CR-68.** A request whose destination is a script of the wallet's own, as
+  far as the counter can tell (any script in its address batches, shown or
+  not), is refused. The counter cannot check further: the owner and the Key
+  app see every line.
+- **CR-69.** A cashier's request is refused when it is above the largest
+  single refund of the settings, or when it would take that cashier's
+  refunds of the last 24 hours (requests, withdrawn ones included, and cash
+  refunds) past the settings' daily refund cap. The refusal says a manager
+  is needed. A manager's request is not held to either; it is held to CR-67
+  and to the owner's and the Key app's own limits. The caller says who the
+  person is and has checked the PIN, as for an override (CR-21).
+- **CR-70.** A cashier or a manager can withdraw a request. A
+  `RefundWithdrawn` record is written, naming the request number. The
+  counter cannot know whether the owner has taken the request, so the
+  withdrawal is a message and not a fact: the owner honours it only if the
+  refund is still queued and not in an open session. A withdrawn request no
+  longer counts for CR-67; it still counts for the cap (CR-69). A request
+  that is withdrawn, or does not exist, cannot be withdrawn again.
+- **CR-71.** A cash refund from the till (the shop's option, DESIGN §2.4) is
+  a record `RefundPaidInCash` with the amount in the shop's currency, the
+  cashier and the reason. It is valued at the sale's last quote and counts
+  for CR-67, rounded up to a whole satoshi, and for the cashier's cap
+  (CR-69). It asks the owner for nothing: the bitcoin is kept.
+- **CR-72.** For each sale the counter gives a `RefundView` for each entry:
+  the sale, what was asked in satoshis, the state (`Requested`,
+  `WaitingForDepth`, `Withdrawn` or `PaidInCash`), who asked and when. The
+  words on the customer's receipt are the app's.
+- **CR-73.** The writes of a request, in this order: the desk with the
+  next request number, the record, then the sale. A stop after the desk
+  wastes a number and never reuses one. A stop after the record leaves a
+  record for a request the sale does not hold: the owner may queue it, and
+  the caller was told the request failed. Asking again writes a second
+  record with a new number; the owner's own check (AS-52, never more than
+  received) and its list, which shows both, are what catch the pair.
+  Withdrawing and a cash refund write the record, then the sale, and leave
+  the same on a stop between them.
+- **CR-74.** These rules do not prove who the customer is. They do not stop
+  a cashier, or a cashier with a manager's help, from asking for a wrong
+  destination: the owner and the Key app see every line before it is paid,
+  and the Key app limits refunds to unknown destinations. The counter does
+  not learn whether a refund was paid: that would need a message from the
+  owner back to the counter, which these rules do not have.
+
+## 8. What these rules do not do
 
 - **They do not check payments.** Proof of work, proofs, peers and
   conflicts are the watcher's. A wrong fact handed in gives a wrong

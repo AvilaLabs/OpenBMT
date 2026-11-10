@@ -292,7 +292,10 @@ fn fold_event(
         | Event::Cancelled { .. }
         | Event::LatePayment { .. }
         | Event::SurplusOwed { .. }
-        | Event::Dust { .. } => {}
+        | Event::Dust { .. }
+        | Event::RefundRequested { .. }
+        | Event::RefundWithdrawn { .. }
+        | Event::RefundPaidInCash { .. } => {}
     }
     Ok(())
 }

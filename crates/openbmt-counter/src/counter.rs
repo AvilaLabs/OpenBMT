@@ -25,13 +25,17 @@ use openbmt_core::records::{AppendError, Chain, DeviceList, Record, RecordKind};
 use openbmt_core::settings::Settings;
 use openbmt_watch::{HeaderChain, Health, Refusal, Sighted, Source, WellFormedBlock};
 
-use crate::desk::{valid_name, Desk, OverrideEntry, Role};
+use crate::desk::{in_override_window, valid_name, Desk, OverrideEntry, Role};
 use crate::events::{final_payments, Event};
 use crate::heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
-use crate::money::{sats_for, Amount, Currency, Quote, Rate, RateSource};
+use crate::money::{sats_for, Amount, Currency, Quote, Rate, RateSource, MAX_SATS};
+use crate::refund::{
+    dust_limit, refund_text_ok, sats_floor, Ask, CashRefund, EntryKind, RefundAsk, RefundEntry,
+    RefundRequest, RefundState, RefundView, MAX_REFUNDS_PER_SALE,
+};
 use crate::refusal::{
     BlockError, CancelRefused, CommandRefused, HeartbeatRefused, JudgeError, LoadError,
-    OpenRefused, OverrideRefused, RequoteRefused, SightingError,
+    OpenRefused, OverrideRefused, RefundRefused, RequoteRefused, SightingError, WithdrawRefused,
 };
 use crate::sale::{End, OverrideMark, PosState, Sale};
 use crate::screen::{Next, Report, Screen, State, Why};
@@ -1533,6 +1537,347 @@ impl Counter {
             reports.push(Report::PosPaid { index });
         }
         Ok(())
+    }
+
+    // CR-60 to CR-74: refunds, the cashier's side.
+
+    /// CR-60 to CR-69, CR-73: a person asks for a refund of a sale. The
+    /// request is a record and is not a payment: nothing is paid until the
+    /// owner's device has checked it and an approval session has signed it.
+    /// Returns the request number (CR-61).
+    ///
+    /// The sale is looked at as it is now: what has arrived for it and
+    /// whether it has reached the refund depth (CR-66). A sale below the
+    /// refund depth is not refused; the request is recorded and shown as
+    /// "waiting for depth". Refused, with nothing written, for a bad name or
+    /// reason, a destination that is not a script the signer pays, an unknown
+    /// sale, a stale rate, a zero amount or one below the destination's dust
+    /// limit, one of the wallet's own scripts, a sale with nothing received,
+    /// an amount that would take the sale's refunds past what was received,
+    /// and a cashier over the single or the daily cap.
+    ///
+    /// The writes, in this order: the desk with the next request number
+    /// (CR-73), a `Refund` record "requested", then the sale with the new
+    /// entry. If the process stops after the desk, a number is wasted and
+    /// never reused. If it stops after the record, the record names a
+    /// request the sale does not hold: the owner may queue it, and the
+    /// caller was told the request failed; asking again writes a second
+    /// record with a new number.
+    pub fn request_refund<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        request: RefundRequest,
+        now: u64,
+        headers: &C,
+        store: &mut S,
+    ) -> Result<u64, RefundRefused<S::Error>> {
+        let RefundRequest {
+            ask,
+            destination,
+            actor,
+            reason,
+        } = request;
+        if !refund_text_ok(&actor.name) {
+            return Err(RefundRefused::BadText("name"));
+        }
+        if !refund_text_ok(&reason) {
+            return Err(RefundRefused::BadText("reason"));
+        }
+        let dust = dust_limit(&destination).ok_or(RefundRefused::DestinationKind)?;
+        let base = self
+            .sales
+            .get(&index)
+            .cloned()
+            .ok_or(RefundRefused::UnknownSale(index))?;
+        let (sats, ask) = match ask {
+            RefundAsk::Sats(sats) => (sats, Ask::Sats),
+            RefundAsk::Value {
+                minor,
+                rate,
+                source,
+            } => {
+                if !source.is_fresh_at(now) {
+                    return Err(RefundRefused::StaleRate {
+                        fetched_at: source.fetched_at(),
+                        now,
+                    });
+                }
+                let sats = sats_floor(minor, rate).ok_or(RefundRefused::AmountTooLarge)?;
+                let ask = Ask::Value {
+                    minor,
+                    minor_per_btc: rate.minor_per_btc(),
+                    source,
+                };
+                (sats, ask)
+            }
+        };
+        if sats == 0 {
+            return Err(RefundRefused::ZeroAmount);
+        }
+        if sats > MAX_SATS {
+            return Err(RefundRefused::AmountTooLarge);
+        }
+        if sats < dust {
+            return Err(RefundRefused::BelowDust { sats, dust });
+        }
+        if self.batches.holds_script(&destination) {
+            return Err(RefundRefused::OwnScript);
+        }
+        let (received, confirmations) = self.refund_facts(&base, now, headers);
+        self.refund_limits(&base, &actor, sats, received, now)?;
+        let final_depth = self.final_depth();
+        let number = self.desk.last_refund_no().saturating_add(1);
+        let mut desk = self.desk.clone();
+        desk.set_last_refund_no(number);
+        self.put_desk(store, desk).map_err(RefundRefused::Store)?;
+        let value_minor = match &ask {
+            Ask::Sats => None,
+            Ask::Value { minor, .. } => Some(*minor),
+        };
+        let event = Event::RefundRequested {
+            index,
+            at: now,
+            number,
+            role: actor.role,
+            name: actor.name.clone(),
+            reason,
+            destination,
+            received_sats: received,
+            waiting_for_depth: confirmations < final_depth,
+            sats,
+            ask,
+        };
+        let mut sale = base;
+        sale.refunds.push(RefundEntry {
+            kind: EntryKind::Request,
+            number,
+            at: now,
+            role: actor.role,
+            name: actor.name,
+            sats,
+            value_minor,
+            withdrawn: false,
+        });
+        self.finish(store, sale, &[event])
+            .map_err(RefundRefused::Store)?;
+        Ok(number)
+    }
+
+    /// CR-70, CR-73: withdraw a request. A `Refund` record "withdrawn" is
+    /// written, then the sale with the entry marked. The counter cannot know
+    /// whether the owner has taken the request: the owner honours the record
+    /// only if the refund is still queued and not in an open session. A
+    /// withdrawn request no longer counts for "never more than received"
+    /// (CR-67), and still counts for the cashier's cap (CR-69).
+    ///
+    /// If the process stops between the two writes the record is there and
+    /// the sale still shows the request; withdrawing again writes a second
+    /// record, which the owner ignores.
+    pub fn withdraw_refund<S: Store>(
+        &mut self,
+        index: u32,
+        number: u64,
+        actor: Actor,
+        now: u64,
+        store: &mut S,
+    ) -> Result<(), WithdrawRefused<S::Error>> {
+        if !refund_text_ok(&actor.name) {
+            return Err(WithdrawRefused::BadName);
+        }
+        let mut sale = self
+            .sales
+            .get(&index)
+            .cloned()
+            .ok_or(WithdrawRefused::UnknownSale(index))?;
+        let entry = sale
+            .refunds
+            .iter_mut()
+            .find(|e| e.kind == EntryKind::Request && e.number == number)
+            .ok_or(WithdrawRefused::UnknownRequest(number))?;
+        if entry.withdrawn {
+            return Err(WithdrawRefused::AlreadyWithdrawn(number));
+        }
+        entry.withdrawn = true;
+        let event = Event::RefundWithdrawn {
+            index,
+            at: now,
+            number,
+            role: actor.role,
+            name: actor.name,
+        };
+        self.finish(store, sale, &[event])
+            .map_err(WithdrawRefused::Store)
+    }
+
+    /// CR-71, CR-73: a refund paid in cash from the till. The amount is in
+    /// the shop's currency; it is valued at the sale's last quote, rounded up
+    /// to a whole satoshi, and counts for "never more than received" (CR-67)
+    /// and for the cashier's cap (CR-69). It asks the owner for nothing and
+    /// moves no bitcoin. Refused for the same reasons as a request, except
+    /// those of a destination and a rate.
+    ///
+    /// The writes, in this order: a `Refund` record "paid in cash", then the
+    /// sale. If the process stops between them the record is there and the
+    /// sale does not hold the entry; the caller was told it failed, and
+    /// asking again writes a second record.
+    pub fn refund_in_cash<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        cash: CashRefund,
+        now: u64,
+        headers: &C,
+        store: &mut S,
+    ) -> Result<(), RefundRefused<S::Error>> {
+        let CashRefund {
+            actor,
+            minor,
+            reason,
+        } = cash;
+        if !refund_text_ok(&actor.name) {
+            return Err(RefundRefused::BadText("name"));
+        }
+        if !refund_text_ok(&reason) {
+            return Err(RefundRefused::BadText("reason"));
+        }
+        let base = self
+            .sales
+            .get(&index)
+            .cloned()
+            .ok_or(RefundRefused::UnknownSale(index))?;
+        if minor.0 == 0 {
+            return Err(RefundRefused::ZeroAmount);
+        }
+        let rate = base
+            .quotes
+            .last()
+            .map(|q| q.rate)
+            .ok_or(RefundRefused::UnknownSale(index))?;
+        let sats = sats_for(minor, rate).ok_or(RefundRefused::AmountTooLarge)?;
+        let (received, _) = self.refund_facts(&base, now, headers);
+        self.refund_limits(&base, &actor, sats, received, now)?;
+        let event = Event::RefundPaidInCash {
+            index,
+            at: now,
+            role: actor.role,
+            name: actor.name.clone(),
+            reason,
+            minor: minor.0,
+            sats,
+        };
+        let mut sale = base;
+        sale.refunds.push(RefundEntry {
+            kind: EntryKind::Cash,
+            number: 0,
+            at: now,
+            role: actor.role,
+            name: actor.name,
+            sats,
+            value_minor: Some(minor.0),
+            withdrawn: false,
+        });
+        self.finish(store, sale, &[event])
+            .map_err(RefundRefused::Store)
+    }
+
+    /// CR-72: the refunds of a sale, oldest first, for the screen and the
+    /// receipt. Empty for a sale the counter does not hold.
+    pub fn refund_views(&self, index: u32) -> Vec<RefundView> {
+        let Some(sale) = self.sales.get(&index) else {
+            return Vec::new();
+        };
+        sale.refunds
+            .iter()
+            .map(|e| RefundView {
+                sale: index,
+                number: (e.kind == EntryKind::Request).then_some(e.number),
+                asked: e.sats,
+                value_minor: e.value_minor,
+                state: match e.kind {
+                    EntryKind::Cash => RefundState::PaidInCash,
+                    EntryKind::Request if e.withdrawn => RefundState::Withdrawn,
+                    EntryKind::Request if sale.at_refund_depth() => RefundState::Requested,
+                    EntryKind::Request => RefundState::WaitingForDepth,
+                },
+                by: Actor {
+                    role: e.role,
+                    name: e.name.clone(),
+                },
+                at: e.at,
+            })
+            .collect()
+    }
+
+    /// The refund depth (CR-66): the setting `final_confirmations`, and never
+    /// below the shop's own depth (as CR-12 reads it).
+    fn final_depth(&self) -> u32 {
+        u32::from(self.settings.final_confirmations).max(self.depth())
+    }
+
+    /// What has arrived for a sale and how deep it is, looked at on a copy:
+    /// the sale itself is not changed (CR-65, CR-66).
+    fn refund_facts<C: HeaderChain + ?Sized>(
+        &self,
+        sale: &Sale,
+        now: u64,
+        headers: &C,
+    ) -> (u64, u32) {
+        let mut copy = sale.clone();
+        let (status, received) = copy.refresh(headers, now, self.depth());
+        (received, status.min_confirmations)
+    }
+
+    /// CR-65, CR-67, CR-69: the checks that a request and a cash refund
+    /// share, for `sats` more asked on a sale that has `received`.
+    fn refund_limits<E>(
+        &self,
+        sale: &Sale,
+        actor: &Actor,
+        sats: u64,
+        received: u64,
+        now: u64,
+    ) -> Result<(), RefundRefused<E>> {
+        if received == 0 {
+            return Err(RefundRefused::NothingReceived);
+        }
+        if sale.refunds.len() >= MAX_REFUNDS_PER_SALE {
+            return Err(RefundRefused::TooManyRefunds);
+        }
+        let asked = sale
+            .refunds
+            .iter()
+            .filter(|e| e.counts_as_asked())
+            .fold(0u64, |sum, e| sum.saturating_add(e.sats));
+        if u128::from(asked) + u128::from(sats) > u128::from(received) {
+            return Err(RefundRefused::MoreThanReceived {
+                received,
+                asked,
+                sats,
+            });
+        }
+        if actor.role == Role::Cashier {
+            let limit = self.settings.refund_cap.sats;
+            if sats > limit {
+                return Err(RefundRefused::NeedsManagerSingle { sats, limit });
+            }
+            let already = self.refund_total(actor, now);
+            let cap = self.settings.refund_daily_cap.sats;
+            if u128::from(already) + u128::from(sats) > u128::from(cap) {
+                return Err(RefundRefused::NeedsManagerDaily { sats, already, cap });
+            }
+        }
+        Ok(())
+    }
+
+    /// CR-69: what a person has asked for in refunds inside the window
+    /// before `now`, over every sale: requests (withdrawn ones too) and cash
+    /// refunds. The sum saturates.
+    fn refund_total(&self, actor: &Actor, now: u64) -> u64 {
+        self.sales
+            .values()
+            .flat_map(|s| s.refunds.iter())
+            .filter(|e| e.role == actor.role && e.name == actor.name)
+            .filter(|e| in_override_window(e.at, now))
+            .fold(0u64, |sum, e| sum.saturating_add(e.sats))
     }
 
     // CR-14: the owner's commands.

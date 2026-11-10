@@ -6,12 +6,13 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 10] = [
+const TEST_SOURCES: [&str; 11] = [
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
     include_str!("open.rs"),
     include_str!("overrides.rs"),
     include_str!("records.rs"),
+    include_str!("refunds.rs"),
     include_str!("reports.rs"),
     include_str!("states.rs"),
     include_str!("storage.rs"),
@@ -21,11 +22,18 @@ const TEST_SOURCES: [&str; 10] = [
 
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit.
-const NOT_HERE: [(&str, &str); 1] = [(
-    "CR-56",
-    "it states what the heartbeat does not guard against (a bad build of the same software \
-     family); there is nothing for the counter to enforce or to test",
-)];
+const NOT_HERE: [(&str, &str); 2] = [
+    (
+        "CR-56",
+        "it states what the heartbeat does not guard against (a bad build of the same software \
+         family); there is nothing for the counter to enforce or to test",
+    ),
+    (
+        "CR-74",
+        "it states what the refund rules do not do (prove who the customer is, stop a wrong \
+         destination, learn whether a refund was paid); there is nothing to enforce or to test",
+    ),
+];
 
 fn defined() -> BTreeSet<String> {
     RULES
@@ -36,10 +44,15 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_thirty_eight_rules() {
+fn the_rules_file_defines_fifty_three_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 38);
-    assert!(ids.contains("CR-01") && ids.contains("CR-42") && ids.contains("CR-56"));
+    assert_eq!(ids.len(), 53);
+    assert!(
+        ids.contains("CR-01")
+            && ids.contains("CR-42")
+            && ids.contains("CR-56")
+            && ids.contains("CR-74")
+    );
 }
 
 #[test]

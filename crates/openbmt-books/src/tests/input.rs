@@ -1,5 +1,6 @@
 //! BK-01 to BK-04: what is read, and what refuses the build.
 
+use bitcoin::hashes::Hash;
 use openbmt_core::records::{Chain, RecordKind};
 use openbmt_counter::Event;
 
@@ -93,22 +94,124 @@ fn bk_02_only_the_counters_own_event_records_are_read() {
     assert_eq!(books.sales().len(), 1);
 }
 
+/// A request for a refund of sale `index`, as the counter writes it.
+fn requested(index: u32, at: u64, number: u64, sats: u64) -> Event {
+    Event::RefundRequested {
+        index,
+        at,
+        number,
+        role: openbmt_counter::Role::Cashier,
+        name: "ann".to_string(),
+        reason: "wrong size".to_string(),
+        destination: bitcoin::ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array(
+            [7; 20],
+        )),
+        received_sats: 4_321_987,
+        waiting_for_depth: false,
+        sats,
+        ask: openbmt_counter::Ask::Sats,
+    }
+}
+
 #[test]
-fn bk_02_a_refund_kind_record_refuses_the_build() {
+fn bk_02_a_refund_kind_record_that_is_no_event_refuses_the_build() {
     let mut kit = kit_with(&[opened(0, JAN_31_235930, 100)]);
     kit.chain
         .append(&kit.counter, RecordKind::Refund, vec![1, 2, 3])
         .expect("appended");
     let err =
         Books::from_chains(&kit.devices, &[(kit.counter_id(), &kit.chain)]).expect_err("refused");
-    assert_eq!(
-        err,
-        BooksError::RefundRecord {
-            counter: kit.counter_id(),
-            seq: 1
-        }
+    assert!(
+        matches!(err, BooksError::BadEvent { seq: 1, .. }),
+        "{err:?}"
     );
-    assert!(err.to_string().contains("BK-02"));
+    assert!(err.to_string().contains("BK-03"));
+}
+
+#[test]
+fn bk_02_a_request_and_a_withdrawal_are_read_and_are_not_a_disposal() {
+    let kit = kit_with(&[
+        opened(0, JAN_31_235930, 100),
+        final_event(0, FEB_1_0100, SATS_PAID),
+        requested(0, FEB_1_0100 + 5, 1, 1_000),
+        Event::RefundWithdrawn {
+            index: 0,
+            at: FEB_1_0100 + 9,
+            number: 1,
+            role: openbmt_counter::Role::Manager,
+            name: "max".to_string(),
+        },
+    ]);
+    let books = kit.books();
+    assert!(books.disposals().is_empty());
+    assert!(books.cash_returns().is_empty());
+    assert_eq!(books.sales().len(), 1);
+    assert_eq!(books.high_water().get(&kit.counter_id()), Some(&Some(0)));
+}
+
+#[test]
+fn bk_13_a_cash_refund_record_is_a_return_line() {
+    let kit = kit_with(&[
+        opened(0, JAN_31_235930, 100),
+        final_event(0, FEB_1_0100, SATS_PAID),
+        Event::RefundPaidInCash {
+            index: 0,
+            at: FEB_1_0100 + 50,
+            role: openbmt_counter::Role::Cashier,
+            name: "ann".to_string(),
+            reason: "wrong size".to_string(),
+            minor: 25,
+            sats: 1_000,
+        },
+    ]);
+    let books = kit.books();
+    assert_eq!(
+        books.cash_returns(),
+        [crate::CashReturn {
+            at: FEB_1_0100 + 50,
+            sale: kit.key(0),
+            minor: 25
+        }]
+    );
+    // A caller's own returns are added to it, in time order.
+    let more = books
+        .with_cash_returns(vec![crate::CashReturn {
+            at: FEB_1_0100 + 10,
+            sale: kit.key(0),
+            minor: 5,
+        }])
+        .expect("returns");
+    let minors: Vec<u64> = more.cash_returns().iter().map(|r| r.minor).collect();
+    assert_eq!(minors, [5, 25]);
+}
+
+#[test]
+fn bk_04_a_refund_event_for_a_sale_never_opened_refuses_the_build() {
+    let kit = kit_with(&[requested(3, FEB_1_0100, 1, 1_000)]);
+    let err =
+        Books::from_chains(&kit.devices, &[(kit.counter_id(), &kit.chain)]).expect_err("refused");
+    assert!(
+        matches!(err, BooksError::UnknownSale { index: 3, .. }),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn bk_03_a_refund_event_written_as_another_kind_refuses_the_build() {
+    let mut kit = kit_with(&[opened(0, JAN_31_235930, 100)]);
+    kit.chain
+        .append(
+            &kit.counter,
+            RecordKind::Sale,
+            requested(0, FEB_1_0100, 1, 1_000).encode(),
+        )
+        .expect("appended");
+    let err =
+        Books::from_chains(&kit.devices, &[(kit.counter_id(), &kit.chain)]).expect_err("refused");
+    assert!(
+        matches!(err, BooksError::KindMismatch { seq: 1, .. }),
+        "{err:?}"
+    );
 }
 
 #[test]

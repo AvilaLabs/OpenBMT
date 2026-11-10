@@ -27,9 +27,12 @@ Nothing here says what a merchant owes. It writes down what the records say.
   names the counter and, for a bad chain, the record.
 - **BK-02.** Only records written by the counter itself are read, and of
   those only the kinds that hold sale events: sale, payment, override and
-  conflict. A check-in, a setting or a pairing record holds no money and is
-  passed over. A record of the refund kind is not read by this version and
-  refuses the build, so that a refund is never passed over silently.
+  conflict, refund. A check-in, a setting or a pairing record holds no money
+  and is passed over. The refund kind holds three events (COUNTER-RULES
+  CR-60 to CR-71): a request, a withdrawal and a refund paid in cash. A
+  request and a withdrawal are asks to the owner, not money: they are read,
+  checked as every event is, and are not a disposal. A refund that was paid
+  is a disposal the caller gives (BK-12); the counter does not learn of it.
 - **BK-03.** Each event is decoded with the counter's own decoder
   (`openbmt_counter::Event`). A body that does not decode, an event tag that
   is not known and an event whose kind is not the record's kind refuse the
@@ -117,9 +120,12 @@ Nothing here says what a merchant owes. It writes down what the records say.
   must name a sale that is in the books. The books keep the lines as given.
   A value or a basis that is not given is unknown and says what would supply
   it. Specific lots are not tracked.
-- **BK-13.** A cash return from the till is given by the caller: the time,
-  the sale and the amount in minor units. The sale must be in the books. It
-  is a return line in the currency of that sale and moves no satoshis.
+- **BK-13.** A cash return from the till is a return line in the currency of
+  its sale and moves no satoshis. It comes from the counter's record of a
+  cash refund (`RefundPaidInCash`: the time, the sale and the amount in
+  minor units) and from the caller, who may give more: the time, the sale and
+  the amount. The sale must be in the books. The two are kept together in
+  time order.
 - **BK-14.** Every sum is checked. A sum that does not fit, or a list that is
   longer than the limit, is an error and never a wrapped or cut number.
 

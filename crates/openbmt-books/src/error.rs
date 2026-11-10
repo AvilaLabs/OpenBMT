@@ -33,13 +33,6 @@ pub enum BooksError {
         /// What failed, with the record's number.
         error: ChainError,
     },
-    /// BK-02: a record of the refund kind, which this version does not read.
-    RefundRecord {
-        /// The counter.
-        counter: DeviceId,
-        /// The record.
-        seq: u64,
-    },
     /// BK-03: the body is not an event the counter writes.
     BadEvent {
         /// The counter.
@@ -109,11 +102,6 @@ impl fmt::Display for BooksError {
             Self::BadChain { counter, error } => write!(
                 f,
                 "BK-01: the records of counter {} are refused: {error}",
-                hex_id(counter)
-            ),
-            Self::RefundRecord { counter, seq } => write!(
-                f,
-                "BK-02: record {seq} of counter {} is of the refund kind, which is not read",
                 hex_id(counter)
             ),
             Self::BadEvent {

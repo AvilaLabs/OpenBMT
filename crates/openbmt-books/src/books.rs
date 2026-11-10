@@ -249,6 +249,12 @@ fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), Boo
         }
         Event::PosPaid { .. } => sale.pos = PosMark::Paid,
         Event::PosUnpaid { .. } => sale.pos = PosMark::Unpaid,
+        // BK-02: a request and a withdrawal are asks, not money; they are
+        // not a disposal and change nothing here. A cash refund becomes a
+        // return line where the events are read.
+        Event::RefundRequested { .. }
+        | Event::RefundWithdrawn { .. }
+        | Event::RefundPaidInCash { .. } => {}
     }
     Ok(())
 }
@@ -322,6 +328,7 @@ impl Books {
                     error,
                 })?;
             let mut folding: BTreeMap<u32, (Sale, Pending)> = BTreeMap::new();
+            let mut cash_returns: Vec<CashReturn> = Vec::new();
             let mut high: Option<u32> = None;
             for record in chain.records() {
                 if &record.author != counter {
@@ -331,13 +338,8 @@ impl Books {
                     RecordKind::Sale
                     | RecordKind::Payment
                     | RecordKind::Override
-                    | RecordKind::Conflict => {}
-                    RecordKind::Refund => {
-                        return Err(BooksError::RefundRecord {
-                            counter: *counter,
-                            seq: record.seq,
-                        })
-                    }
+                    | RecordKind::Conflict
+                    | RecordKind::Refund => {}
                     RecordKind::Setting | RecordKind::Pairing | RecordKind::CheckIn => continue,
                 }
                 let event = Event::decode(&record.body).map_err(|error| BooksError::BadEvent {
@@ -377,6 +379,17 @@ impl Books {
                             index,
                         })?;
                     fold(sale, pending, &event)?;
+                    if let Event::RefundPaidInCash { at, minor, .. } = &event {
+                        // BK-13: a cash refund is a return line.
+                        if books.returns.len().saturating_add(cash_returns.len()) >= MAX_LINES {
+                            return Err(BooksError::TooMany);
+                        }
+                        cash_returns.push(CashReturn {
+                            at: *at,
+                            sale: key,
+                            minor: *minor,
+                        });
+                    }
                 }
                 if books.sales.len().saturating_add(folding.len()) > MAX_SALES {
                     return Err(BooksError::TooMany);
@@ -391,9 +404,12 @@ impl Books {
                 }
                 books.sales.push(sale);
             }
+            books.returns.append(&mut cash_returns);
             books.high_water.insert(*counter, high);
         }
         books.sales.sort_by_key(|s| s.key);
+        books.returns.sort_by_key(|r| r.at);
+        books.check_return_sums()?;
         Ok(books)
     }
 
@@ -442,24 +458,33 @@ impl Books {
         Ok(self)
     }
 
-    /// BK-13, BK-14: set the cash returns. They are kept in time order. Each
-    /// must name a sale in the books.
-    pub fn with_cash_returns(mut self, mut returns: Vec<CashReturn>) -> Result<Self, BooksError> {
-        if returns.len() > MAX_LINES {
+    /// BK-13, BK-14: add cash returns to the ones the counters' records
+    /// carry (`RefundPaidInCash`). They are kept in time order. Each must name
+    /// a sale in the books.
+    pub fn with_cash_returns(mut self, returns: Vec<CashReturn>) -> Result<Self, BooksError> {
+        if returns.len().saturating_add(self.returns.len()) > MAX_LINES {
             return Err(BooksError::TooMany);
         }
-        let mut per_sale: BTreeMap<SaleKey, u64> = BTreeMap::new();
         for r in &returns {
             check_time(r.at)?;
             if self.sale(&r.sale).is_none() {
                 return Err(BooksError::SaleNotInBooks { sale: r.sale });
             }
+        }
+        self.returns.extend(returns);
+        self.returns.sort_by_key(|r| r.at);
+        self.check_return_sums()?;
+        Ok(self)
+    }
+
+    /// BK-14: the returns of each sale add up inside 64 bits.
+    fn check_return_sums(&self) -> Result<(), BooksError> {
+        let mut per_sale: BTreeMap<SaleKey, u64> = BTreeMap::new();
+        for r in &self.returns {
             let e = per_sale.entry(r.sale).or_insert(0);
             *e = e.checked_add(r.minor).ok_or(BooksError::Overflow)?;
         }
-        returns.sort_by_key(|r| r.at);
-        self.returns = returns;
-        Ok(self)
+        Ok(())
     }
 
     /// The sales, ordered by counter and sale index.
@@ -561,6 +586,9 @@ fn event_time(event: &Event) -> Option<u64> {
         | Event::Replaced { at, .. }
         | Event::Reopened { at, .. }
         | Event::PosPaid { at, .. }
-        | Event::PosUnpaid { at, .. } => *at,
+        | Event::PosUnpaid { at, .. }
+        | Event::RefundRequested { at, .. }
+        | Event::RefundWithdrawn { at, .. }
+        | Event::RefundPaidInCash { at, .. } => *at,
     })
 }

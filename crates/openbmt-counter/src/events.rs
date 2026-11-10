@@ -9,8 +9,11 @@ use openbmt_core::policy::{CheckMode, InstantLabel};
 use openbmt_core::records::RecordKind;
 use openbmt_core::wire::{DecodeError, Reader};
 
+use bitcoin::ScriptBuf;
+
 use crate::desk::Role;
 use crate::money::{label_is_valid, Amount, Currency, RateSource};
+use crate::refund::{is_payment_script, refund_text_ok, Ask, MAX_SCRIPT_BYTES};
 use crate::{MAX_FINAL_PAYMENTS, MAX_NAME_BYTES};
 
 const TAG_OPENED: u8 = 1;
@@ -28,6 +31,9 @@ const TAG_REOPENED: u8 = 12;
 const TAG_POS_PAID: u8 = 13;
 const TAG_POS_UNPAID: u8 = 14;
 const TAG_REQUOTED: u8 = 15;
+const TAG_REFUND_REQUESTED: u8 = 16;
+const TAG_REFUND_WITHDRAWN: u8 = 17;
+const TAG_REFUND_PAID_IN_CASH: u8 = 18;
 
 /// Something that happened to a sale and is written down.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,6 +207,64 @@ pub enum Event {
         /// When.
         at: u64,
     },
+    /// The cashier asked for a refund (CR-60, CR-61; kind `Refund`). Written
+    /// by `Counter::request_refund` before the sale is stored (CR-73).
+    RefundRequested {
+        /// The receive index.
+        index: u32,
+        /// When.
+        at: u64,
+        /// The request number: rising per counter from 1.
+        number: u64,
+        /// Cashier or manager.
+        role: Role,
+        /// Who.
+        name: String,
+        /// Why, as the person typed it.
+        reason: String,
+        /// Where the money goes: a script of a kind the signer pays.
+        destination: ScriptBuf,
+        /// What the counter saw received for the sale, in satoshis.
+        received_sats: u64,
+        /// The sale had not reached the refund depth (CR-66).
+        waiting_for_depth: bool,
+        /// What is asked for, in satoshis.
+        sats: u64,
+        /// How the amount was given (CR-61).
+        ask: Ask,
+    },
+    /// A request was withdrawn (CR-70; kind `Refund`). The owner honours it
+    /// only if the refund is still queued and not in an open session.
+    RefundWithdrawn {
+        /// The receive index.
+        index: u32,
+        /// When.
+        at: u64,
+        /// The number of the request.
+        number: u64,
+        /// Cashier or manager.
+        role: Role,
+        /// Who.
+        name: String,
+    },
+    /// A refund was paid in cash from the till (CR-71; kind `Refund`). It
+    /// asks the owner for nothing.
+    RefundPaidInCash {
+        /// The receive index.
+        index: u32,
+        /// When.
+        at: u64,
+        /// Cashier or manager.
+        role: Role,
+        /// Who.
+        name: String,
+        /// Why, as the person typed it.
+        reason: String,
+        /// The amount in the shop's currency, in minor units.
+        minor: u64,
+        /// What that is in satoshis at the sale's last quote, rounded up.
+        sats: u64,
+    },
 }
 
 fn label_byte(l: InstantLabel) -> u8 {
@@ -268,6 +332,38 @@ fn read_source(r: &mut Reader<'_>) -> Result<RateSource, DecodeError> {
         .map_err(|_| DecodeError::NonCanonical("a rate source label is not valid"))
 }
 
+const ASK_SATS: u8 = 1;
+const ASK_VALUE: u8 = 2;
+
+/// A person as written: role (u8), then the name as a text.
+fn write_person(out: &mut Vec<u8>, role: Role, name: &str) {
+    out.push(role as u8);
+    write_text(out, name);
+}
+
+/// A text as written: length (u8), the bytes.
+fn write_text(out: &mut Vec<u8>, text: &str) {
+    out.push(u8::try_from(text.len()).unwrap_or(u8::MAX));
+    out.extend_from_slice(text.as_bytes());
+}
+
+fn read_text(r: &mut Reader<'_>, what: &'static str) -> Result<String, DecodeError> {
+    let len = usize::from(r.u8()?);
+    let text = std::str::from_utf8(r.take(len)?)
+        .map_err(|_| DecodeError::NonCanonical("a text is not text"))?
+        .to_string();
+    if !refund_text_ok(&text) {
+        return Err(DecodeError::NonCanonical(what));
+    }
+    Ok(text)
+}
+
+fn read_person(r: &mut Reader<'_>) -> Result<(Role, String), DecodeError> {
+    let role = Role::from_u8(r.u8()?).ok_or(DecodeError::NonCanonical("a role is not known"))?;
+    let name = read_text(r, "a name is not a label")?;
+    Ok((role, name))
+}
+
 /// CR-32: the transactions a `Final` record names, from the standing
 /// transactions the watcher gave: at most [`MAX_FINAL_PAYMENTS`], the largest
 /// by amount (the smaller transaction ID first among equal amounts), put in
@@ -301,7 +397,10 @@ impl Event {
             | Self::Replaced { index, .. }
             | Self::Reopened { index, .. }
             | Self::PosPaid { index, .. }
-            | Self::PosUnpaid { index, .. } => *index,
+            | Self::PosUnpaid { index, .. }
+            | Self::RefundRequested { index, .. }
+            | Self::RefundWithdrawn { index, .. }
+            | Self::RefundPaidInCash { index, .. } => *index,
         }
     }
 
@@ -322,6 +421,9 @@ impl Event {
             | Self::PosUnpaid { .. } => RecordKind::Payment,
             Self::Override { .. } => RecordKind::Override,
             Self::Replaced { .. } | Self::Reopened { .. } => RecordKind::Conflict,
+            Self::RefundRequested { .. }
+            | Self::RefundWithdrawn { .. }
+            | Self::RefundPaidInCash { .. } => RecordKind::Refund,
         }
     }
 
@@ -342,6 +444,9 @@ impl Event {
             Self::Reopened { index, at } => (TAG_REOPENED, *index, *at),
             Self::PosPaid { index, at } => (TAG_POS_PAID, *index, *at),
             Self::PosUnpaid { index, at } => (TAG_POS_UNPAID, *index, *at),
+            Self::RefundRequested { index, at, .. } => (TAG_REFUND_REQUESTED, *index, *at),
+            Self::RefundWithdrawn { index, at, .. } => (TAG_REFUND_WITHDRAWN, *index, *at),
+            Self::RefundPaidInCash { index, at, .. } => (TAG_REFUND_PAID_IN_CASH, *index, *at),
         }
     }
 
@@ -427,6 +532,60 @@ impl Event {
                 out.push(*role as u8);
                 out.push(u8::try_from(name.len()).unwrap_or(u8::MAX));
                 out.extend_from_slice(name.as_bytes());
+                out.extend_from_slice(&sats.to_le_bytes());
+            }
+            Self::RefundRequested {
+                number,
+                role,
+                name,
+                reason,
+                destination,
+                received_sats,
+                waiting_for_depth,
+                sats,
+                ask,
+                ..
+            } => {
+                out.extend_from_slice(&number.to_le_bytes());
+                write_person(&mut out, *role, name);
+                write_text(&mut out, reason);
+                let script = destination.as_bytes();
+                out.push(u8::try_from(script.len()).unwrap_or(u8::MAX));
+                out.extend_from_slice(script);
+                out.extend_from_slice(&received_sats.to_le_bytes());
+                out.push(u8::from(*waiting_for_depth));
+                out.extend_from_slice(&sats.to_le_bytes());
+                match ask {
+                    Ask::Sats => out.push(ASK_SATS),
+                    Ask::Value {
+                        minor,
+                        minor_per_btc,
+                        source,
+                    } => {
+                        out.push(ASK_VALUE);
+                        out.extend_from_slice(&minor.to_le_bytes());
+                        out.extend_from_slice(&minor_per_btc.to_le_bytes());
+                        write_source(&mut out, source);
+                    }
+                }
+            }
+            Self::RefundWithdrawn {
+                number, role, name, ..
+            } => {
+                out.extend_from_slice(&number.to_le_bytes());
+                write_person(&mut out, *role, name);
+            }
+            Self::RefundPaidInCash {
+                role,
+                name,
+                reason,
+                minor,
+                sats,
+                ..
+            } => {
+                write_person(&mut out, *role, name);
+                write_text(&mut out, reason);
+                out.extend_from_slice(&minor.to_le_bytes());
                 out.extend_from_slice(&sats.to_le_bytes());
             }
             Self::Expired { .. }
@@ -558,6 +717,95 @@ impl Event {
             TAG_REOPENED => Self::Reopened { index, at },
             TAG_POS_PAID => Self::PosPaid { index, at },
             TAG_POS_UNPAID => Self::PosUnpaid { index, at },
+            TAG_REFUND_REQUESTED => {
+                let number = r.u64_le()?;
+                if number == 0 {
+                    return Err(DecodeError::NonCanonical("a request number is zero"));
+                }
+                let (role, name) = read_person(&mut r)?;
+                let reason = read_text(&mut r, "a reason is not a label")?;
+                let script_len = usize::from(r.u8()?);
+                if script_len == 0 || script_len > MAX_SCRIPT_BYTES {
+                    return Err(DecodeError::NonCanonical("a destination has a bad length"));
+                }
+                let destination = ScriptBuf::from_bytes(r.take(script_len)?.to_vec());
+                if !is_payment_script(&destination) {
+                    return Err(DecodeError::NonCanonical(
+                        "a destination is not a script the signer pays",
+                    ));
+                }
+                let received_sats = r.u64_le()?;
+                let waiting_for_depth = r.flag()?;
+                let sats = r.u64_le()?;
+                if sats == 0 || sats > received_sats {
+                    return Err(DecodeError::NonCanonical(
+                        "a request asks for nothing or for more than was received",
+                    ));
+                }
+                let ask = match r.u8()? {
+                    ASK_SATS => Ask::Sats,
+                    ASK_VALUE => {
+                        let minor = r.u64_le()?;
+                        let minor_per_btc = r.u64_le()?;
+                        if minor == 0 || minor_per_btc == 0 {
+                            return Err(DecodeError::NonCanonical(
+                                "a value or a rate in a request is zero",
+                            ));
+                        }
+                        Ask::Value {
+                            minor,
+                            minor_per_btc,
+                            source: read_source(&mut r)?,
+                        }
+                    }
+                    _ => return Err(DecodeError::NonCanonical("an ask is not known")),
+                };
+                Self::RefundRequested {
+                    index,
+                    at,
+                    number,
+                    role,
+                    name,
+                    reason,
+                    destination,
+                    received_sats,
+                    waiting_for_depth,
+                    sats,
+                    ask,
+                }
+            }
+            TAG_REFUND_WITHDRAWN => {
+                let number = r.u64_le()?;
+                if number == 0 {
+                    return Err(DecodeError::NonCanonical("a request number is zero"));
+                }
+                let (role, name) = read_person(&mut r)?;
+                Self::RefundWithdrawn {
+                    index,
+                    at,
+                    number,
+                    role,
+                    name,
+                }
+            }
+            TAG_REFUND_PAID_IN_CASH => {
+                let (role, name) = read_person(&mut r)?;
+                let reason = read_text(&mut r, "a reason is not a label")?;
+                let minor = r.u64_le()?;
+                let sats = r.u64_le()?;
+                if minor == 0 || sats == 0 {
+                    return Err(DecodeError::NonCanonical("a cash refund is for nothing"));
+                }
+                Self::RefundPaidInCash {
+                    index,
+                    at,
+                    role,
+                    name,
+                    reason,
+                    minor,
+                    sats,
+                }
+            }
             _ => return Err(DecodeError::NonCanonical("an event tag is not known")),
         };
         r.finish()?;

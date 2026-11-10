@@ -726,6 +726,12 @@ impl CounterBatches {
         Ok(n)
     }
 
+    /// Whether `script` is in any batch the counter holds, shown or not
+    /// (the wallet's own scripts, as far as the counter can tell).
+    pub fn holds_script(&self, script: &bitcoin::Script) -> bool {
+        self.known.contains(script)
+    }
+
     /// Every script that was shown or retired. These stay watched forever.
     pub fn watched_scripts(&self) -> &[ScriptBuf] {
         &self.watched

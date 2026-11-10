@@ -150,7 +150,6 @@ fn every_error_says_which_rule_in_words() {
             error: ChainError::BadSignature { seq: 2 },
         }
         .to_string(),
-        BooksError::RefundRecord { counter: c, seq: 1 }.to_string(),
         BooksError::BadEvent {
             counter: c,
             seq: 1,

@@ -19,7 +19,14 @@
 //!   | surplus_reported u64
 //!   | late_unlisted flag | n_late u32 | n_late * (txid (32) | sats u64)
 //!   | watch_len u32 | the sale watch (OBMV)
+//!
+//! OBML | 2 | the fields of version 1
+//!   | n_refunds u32 | n_refunds * refund entry   (see `refund::RefundEntry`)
 //! ```
+//!
+//! Version 2 is written only for a sale that has a refund entry (CR-61,
+//! CR-73); a sale without one is written as version 1, which is what every
+//! earlier build wrote. A version 2 form with no entry does not read back.
 
 use bitcoin::hashes::Hash;
 use bitcoin::{ScriptBuf, Txid};
@@ -30,9 +37,13 @@ use openbmt_watch::{HeaderChain, SaleStatus, SaleWatch, MAX_SCRIPT_BYTES, MAX_TO
 use crate::desk::{len32, valid_name, Role};
 use crate::events::{label_from_u8, label_to_u8, mode_from_u8, mode_to_u8};
 use crate::money::{is_enough, sats_for, value_of, Amount, Currency, Quote, Rate, QUOTE_SECS};
+use crate::refund::{RefundEntry, MAX_REFUNDS_PER_SALE};
 use crate::{
     DUST_SATS, MAX_LATE_PAYMENTS, MAX_NAME_BYTES, MAX_QUOTES, MAX_SEGMENTS, MAX_WATCH_BYTES,
 };
+
+/// The version byte of a sale that holds refund entries (CR-73).
+const SALE_VERSION_WITH_REFUNDS: u8 = 2;
 
 /// How a sale ended (CR-07).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +118,7 @@ pub struct Sale {
     pub(crate) surplus_reported: u64,
     pub(crate) late: Vec<(Txid, u64)>,
     pub(crate) late_unlisted: bool,
+    pub(crate) refunds: Vec<RefundEntry>,
 }
 
 impl Sale {
@@ -149,6 +161,7 @@ impl Sale {
             surplus_reported: 0,
             late: Vec::new(),
             late_unlisted: false,
+            refunds: Vec::new(),
         }
     }
 
@@ -246,6 +259,13 @@ impl Sale {
     /// (CR-19).
     pub fn late_payments(&self) -> &[(Txid, u64)] {
         &self.late
+    }
+
+    /// CR-61 to CR-72: whether the sale was at the refund depth the last
+    /// time it was judged and has not been reopened since. A refund request
+    /// is "waiting for depth" until then (CR-66).
+    pub fn at_refund_depth(&self) -> bool {
+        self.books_final && !self.reopened
     }
 
     /// CR-19: a payment arrived after the sale ended or was final.
@@ -485,6 +505,15 @@ impl Sale {
         }
         out.extend_from_slice(&len32(watch.len()).to_le_bytes());
         out.extend_from_slice(&watch);
+        if !self.refunds.is_empty() {
+            if let Some(byte) = out.get_mut(4) {
+                *byte = SALE_VERSION_WITH_REFUNDS;
+            }
+            out.extend_from_slice(&len32(self.refunds.len()).to_le_bytes());
+            for entry in &self.refunds {
+                entry.write(&mut out);
+            }
+        }
         out
     }
 
@@ -501,7 +530,15 @@ impl Sale {
     /// tolerance.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
         let bad = DecodeError::NonCanonical;
-        let mut r = Reader::framed(bytes, &wire::MAGIC_COUNTER_SALE)?;
+        // `Reader::framed` reads only version 1, and this form has two.
+        let mut r = Reader::new(bytes);
+        if r.take(4)? != wire::MAGIC_COUNTER_SALE {
+            return Err(DecodeError::BadMagic);
+        }
+        let version = r.u8()?;
+        if version != wire::VERSION && version != SALE_VERSION_WITH_REFUNDS {
+            return Err(DecodeError::UnsupportedVersion(version));
+        }
         let index = r.u32_le()?;
         let opened_at = r.u64_le()?;
         let script_len = usize::try_from(r.u32_le()?).map_err(|_| DecodeError::TooLarge)?;
@@ -624,6 +661,24 @@ impl Sale {
             return Err(DecodeError::TooLarge);
         }
         let watch = SaleWatch::from_bytes(r.take(watch_len)?)?;
+        let mut refunds: Vec<RefundEntry> = Vec::new();
+        if version == SALE_VERSION_WITH_REFUNDS {
+            let n = r.count(MAX_REFUNDS_PER_SALE, 28)?;
+            if n == 0 {
+                return Err(bad("version 2 holds no refund entry"));
+            }
+            for _ in 0..n {
+                let entry = RefundEntry::read(&mut r)?;
+                if entry.kind == crate::refund::EntryKind::Request
+                    && refunds
+                        .iter()
+                        .any(|e| e.kind == entry.kind && e.number >= entry.number)
+                {
+                    return Err(bad("request numbers are not rising"));
+                }
+                refunds.push(entry);
+            }
+        }
         r.finish()?;
 
         if watch.script() != script.as_script() {
@@ -665,6 +720,7 @@ impl Sale {
             surplus_reported,
             late,
             late_unlisted,
+            refunds,
         })
     }
 }

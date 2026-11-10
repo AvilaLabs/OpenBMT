@@ -13,13 +13,19 @@
 //!
 //! OBMG | 2 | last_command_seq u64 | alarm flag | last_heartbeat_seq u64
 //!   | the rest as in version 1
+//!
+//! OBMG | 3 | last_command_seq u64 | alarm flag | last_heartbeat_seq u64
+//!   | last_refund_no u64 | the rest as in version 1
 //! ```
 //!
 //! Version 2 is written only when a heartbeat has been taken, and its
 //! `last_heartbeat_seq` is then above zero. A desk that has taken none is
 //! written as version 1, which is what every earlier build wrote and what
-//! this one reads as "no heartbeat taken". Each desk has one spelling, so a
-//! version 2 form with a zero number does not read back.
+//! this one reads as "no heartbeat taken". Version 3 is written only once a
+//! refund request has been made (CR-61, CR-73): `last_refund_no` is then above
+//! zero, and `last_heartbeat_seq` may be zero. Each desk has one spelling, so
+//! a version 2 form with a zero number and a version 3 form with a zero
+//! request number do not read back.
 
 use openbmt_core::wire::{self, DecodeError, Reader};
 
@@ -27,6 +33,8 @@ use crate::{MAX_ADDRESSES_PER_HOUR, MAX_NAME_BYTES, MAX_OVERRIDE_ENTRIES, OVERRI
 
 /// The version byte of a desk that holds a heartbeat number (CR-54).
 const DESK_VERSION_WITH_HEARTBEAT: u8 = 2;
+/// The version byte of a desk that holds a refund request number (CR-73).
+const DESK_VERSION_WITH_REFUNDS: u8 = 3;
 
 /// Seconds in the window over which new addresses are counted (CR-04).
 pub const ADDRESS_WINDOW_SECS: u64 = 3_600;
@@ -86,6 +94,7 @@ pub struct Desk {
     alarm: bool,
     last_command_seq: u64,
     last_heartbeat_seq: u64,
+    last_refund_no: u64,
     overrides: Vec<OverrideEntry>,
 }
 
@@ -108,6 +117,11 @@ impl Desk {
     /// CR-54: the number of the last owner heartbeat taken (0 if none).
     pub fn last_heartbeat_seq(&self) -> u64 {
         self.last_heartbeat_seq
+    }
+
+    /// CR-61: the number of the last refund request made (0 if none).
+    pub fn last_refund_no(&self) -> u64 {
+        self.last_refund_no
     }
 
     /// The overrides kept, oldest first.
@@ -142,6 +156,10 @@ impl Desk {
 
     pub(crate) fn set_last_heartbeat_seq(&mut self, seq: u64) {
         self.last_heartbeat_seq = seq;
+    }
+
+    pub(crate) fn set_last_refund_no(&mut self, no: u64) {
+        self.last_refund_no = no;
     }
 
     /// A copy with the address times and overrides older than their windows
@@ -182,15 +200,23 @@ impl Desk {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = wire::start(
             &wire::MAGIC_COUNTER_DESK,
-            25 + self.address_times.len() * 8 + self.overrides.len() * 40,
+            33 + self.address_times.len() * 8 + self.overrides.len() * 40,
         );
         out.extend_from_slice(&self.last_command_seq.to_le_bytes());
         out.push(u8::from(self.alarm));
-        if self.last_heartbeat_seq != 0 {
-            if let Some(version) = out.get_mut(4) {
-                *version = DESK_VERSION_WITH_HEARTBEAT;
+        if self.last_heartbeat_seq != 0 || self.last_refund_no != 0 {
+            let version = if self.last_refund_no != 0 {
+                DESK_VERSION_WITH_REFUNDS
+            } else {
+                DESK_VERSION_WITH_HEARTBEAT
+            };
+            if let Some(byte) = out.get_mut(4) {
+                *byte = version;
             }
             out.extend_from_slice(&self.last_heartbeat_seq.to_le_bytes());
+            if self.last_refund_no != 0 {
+                out.extend_from_slice(&self.last_refund_no.to_le_bytes());
+            }
         }
         out.extend_from_slice(&len32(self.address_times.len()).to_le_bytes());
         for t in &self.address_times {
@@ -219,16 +245,31 @@ impl Desk {
             return Err(DecodeError::BadMagic);
         }
         let version = r.u8()?;
-        if version != wire::VERSION && version != DESK_VERSION_WITH_HEARTBEAT {
+        if !matches!(
+            version,
+            wire::VERSION | DESK_VERSION_WITH_HEARTBEAT | DESK_VERSION_WITH_REFUNDS
+        ) {
             return Err(DecodeError::UnsupportedVersion(version));
         }
         let last_command_seq = r.u64_le()?;
         let alarm = r.flag()?;
-        let last_heartbeat_seq = if version == DESK_VERSION_WITH_HEARTBEAT {
-            match r.u64_le()? {
+        let last_heartbeat_seq = match version {
+            DESK_VERSION_WITH_HEARTBEAT => match r.u64_le()? {
                 0 => {
                     return Err(DecodeError::NonCanonical(
                         "version 2 holds a heartbeat number of zero",
+                    ))
+                }
+                n => n,
+            },
+            DESK_VERSION_WITH_REFUNDS => r.u64_le()?,
+            _ => 0,
+        };
+        let last_refund_no = if version == DESK_VERSION_WITH_REFUNDS {
+            match r.u64_le()? {
+                0 => {
+                    return Err(DecodeError::NonCanonical(
+                        "version 3 holds a request number of zero",
                     ))
                 }
                 n => n,
@@ -277,6 +318,7 @@ impl Desk {
             alarm,
             last_command_seq,
             last_heartbeat_seq,
+            last_refund_no,
             overrides,
         })
     }
