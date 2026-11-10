@@ -926,8 +926,10 @@ pub enum NoteKind {
     OrderAlreadyClosed,
     /// The order was not closed.
     OrderNotClosed,
-    /// The close was not recorded.
-    CloseNotRecorded,
+    /// The close attempt could not be saved, so the Box did not call the till.
+    CloseAttemptNotSaved,
+    /// The till closed the order, but the Box could not save that result.
+    CloseResultNotSaved,
     /// Reports were dropped for room.
     ReportsDropped,
     /// The POS token could not be erased.
@@ -983,8 +985,12 @@ impl NoteKind {
             } else {
                 (Self::Other, line)
             }
-        } else if let Some(rest) = after("BX-50: the close was not recorded: ") {
-            (Self::CloseNotRecorded, rest)
+        } else if let Some(rest) = after("BX-50: the close attempt was not saved: ") {
+            (Self::CloseAttemptNotSaved, rest)
+        } else if let Some(rest) =
+            after("BX-50: the close result was not saved after the till closed the order: ")
+        {
+            (Self::CloseResultNotSaved, rest)
         } else if let Some(rest) = after("BX-42: more than ") {
             (Self::ReportsDropped, rest)
         } else if let Some(rest) = after("BX-23: the POS token could not be erased: ") {
@@ -1151,11 +1157,19 @@ impl NoteKind {
                     words.detail(format!("sale {sale}"))
                 }
             }
-            Self::CloseNotRecorded => stop(
-                "Close not saved",
-                "The Box tried to close an order but could not save that.".into(),
+            Self::CloseAttemptNotSaved => stop(
+                "Close attempt not saved",
+                "The Box could not save its record before asking the till to close the order, so it did not ask the till.".into(),
                 Who::BoxKeeper,
-                "Check the disk and the data folder; the till system refuses a second close of the same order.",
+                "Check that the disk has room and the data folder can be written; the Box tries again by itself.",
+            )
+            .code("BX-50")
+            .detail(rest),
+            Self::CloseResultNotSaved => stop(
+                "Close result not saved",
+                "The till closed the order, but the Box could not save that result.".into(),
+                Who::BoxKeeper,
+                "Free disk space or fix folder access; the Box retries the same request. Check the till before closing by hand.",
             )
             .code("BX-50")
             .detail(rest),
@@ -1573,7 +1587,7 @@ pub fn all_words() -> Vec<(String, Words)> {
 
 /// One stored note for every kind of note, as its writer words it, with the
 /// name of the entry in [`all_words`].
-const SAMPLE_NOTES: [(&str, &str); 28] = [
+const SAMPLE_NOTES: [(&str, &str); 29] = [
     (
         "NoteKind::MemberListNotReplaced",
         "the member list was not replaced: could not write members: permission denied",
@@ -1663,8 +1677,12 @@ const SAMPLE_NOTES: [(&str, &str); 28] = [
         "BX-43: order o2 was not closed for sale 2: the POS refused the close",
     ),
     (
-        "NoteKind::CloseNotRecorded",
-        "BX-50: the close was not recorded: permission denied",
+        "NoteKind::CloseAttemptNotSaved",
+        "BX-50: the close attempt was not saved: permission denied",
+    ),
+    (
+        "NoteKind::CloseResultNotSaved",
+        "BX-50: the close result was not saved after the till closed the order: permission denied",
     ),
     (
         "NoteKind::ReportsDropped",

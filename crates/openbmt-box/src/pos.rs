@@ -897,7 +897,7 @@ impl<F: BoxFiles> BoxPos<F> {
                 match self.persist(&next) {
                     Ok(()) => self.store = next,
                     Err(e) => {
-                        notes.push(format!("BX-50: the close was not recorded: {e}"));
+                        notes.push(format!("BX-50: the close attempt was not saved: {e}"));
                         continue;
                     }
                 }
@@ -927,7 +927,9 @@ impl<F: BoxFiles> BoxPos<F> {
                         Ok(()) => self.store = next,
                         // The attempt stays stored: the next tick asks again
                         // with the same key.
-                        Err(e) => notes.push(format!("BX-50: the close was not recorded: {e}")),
+                        Err(e) => notes.push(format!(
+                            "BX-50: the close result was not saved after the till closed the order: {e}"
+                        )),
                     }
                 }
                 Err(e) => notes.push(format!(

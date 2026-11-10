@@ -695,10 +695,63 @@ fn bx_43_a_close_that_could_not_be_recorded_is_not_made() {
     p.files_mut().fail_writes_from(1);
     let notes = p.tick(NOW + 12, token());
     assert!(
-        notes.iter().any(|n| n.contains("not recorded")),
+        notes
+            .iter()
+            .any(|n| n.contains("close attempt was not saved")),
         "{notes:?}"
     );
     assert!(conn.probe().closes.is_empty());
+}
+
+#[test]
+fn bx_43_a_closed_order_with_an_unsaved_result_retries_the_same_request() {
+    let conn = TestConnector::closing("o9");
+    conn.probe()
+        .close_script
+        .push_back(Ok(CloseOutcome::Closed));
+    conn.probe()
+        .close_script
+        .push_back(Ok(CloseOutcome::AlreadyClosed));
+    let mut p = pos(&conn);
+    paid_sale(&mut p, 1, 0);
+    // The first write saves the attempt; the second, after the connector has
+    // closed the order, fails to save the result.
+    p.files_mut().fail_writes_from(2);
+    let notes = p.tick(NOW + 12, token());
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("close result was not saved")),
+        "{notes:?}"
+    );
+    let files = p.files().clone();
+    assert_eq!(conn.probe().closes.len(), 1);
+    assert!(!p
+        .pending_reports()
+        .iter()
+        .any(|n| matches!(n.item, PosItem::Closed { .. })));
+
+    // The Box retries the stored attempt after restart. The till recognizes
+    // the same idempotency key and reports that the order was already closed.
+    let mut again = pos_over(files, &conn);
+    again.files_mut().stop_failing();
+    let notes = again.tick(NOW + 100, token());
+    assert!(
+        notes.iter().any(|n| n.contains("already closed")),
+        "{notes:?}"
+    );
+    let c = conn.probe();
+    assert_eq!(c.closes.len(), 2);
+    assert_eq!(c.closes[0].key, c.closes[1].key);
+    assert_eq!(c.closes[0].order, c.closes[1].order);
+    assert_eq!(
+        again
+            .pending_reports()
+            .iter()
+            .filter(|n| matches!(n.item, PosItem::Closed { .. }))
+            .count(),
+        1
+    );
 }
 
 #[test]
