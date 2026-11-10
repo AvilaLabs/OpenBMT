@@ -1166,6 +1166,7 @@ impl Counter {
                     }
                 }
                 sale.pos = PosState::Paid;
+                events.push(Event::PosPaid { index, at: now });
                 reports.push(Report::PosPaid { index });
             }
             if state == State::Final && !sale.books_final {
@@ -1202,6 +1203,7 @@ impl Counter {
             }
         } else if state == State::DoNotHandOver && sale.pos == PosState::Paid {
             sale.pos = PosState::Unpaid;
+            events.push(Event::PosUnpaid { index, at: now });
             reports.push(Report::PosUnpaid { index });
             if conflict_event.is_none() {
                 conflict_event = Some(if reopened_eff {
@@ -1457,7 +1459,11 @@ impl Counter {
         sale.exposure_released = false;
         let tell_pos = sale.pos != PosState::Paid;
         sale.pos = PosState::Paid;
-        self.finish(store, sale, &[event])
+        let mut events = vec![event];
+        if tell_pos {
+            events.push(Event::PosPaid { index, at: now });
+        }
+        self.finish(store, sale, &events)
             .map_err(OverrideRefused::Store)?;
         if tell_pos {
             reports.push(Report::PosPaid { index });

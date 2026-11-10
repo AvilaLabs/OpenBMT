@@ -42,9 +42,10 @@ fn ps_01_a_page_with_one_bad_order_is_refused_whole() {
     let r = sync(&mut pos, &mut ledger, &[], &settings(), T0 + 10, ok);
     assert_eq!(
         r,
-        Err(SyncError::Ledger(LedgerError::Order(
-            ModelError::TooManyTenders
-        )))
+        Err(SyncFailed {
+            error: SyncError::Ledger(LedgerError::Order(ModelError::TooManyTenders)),
+            pages_kept: 0
+        })
     );
     assert_eq!(ledger, before);
 }
@@ -81,10 +82,10 @@ fn ps_03_text_is_one_to_sixty_four_bytes_without_control_characters() {
 }
 
 #[test]
-fn ps_04_the_two_clocks_are_not_corrected_for_skew() {
-    // The tender is one second before the sale opened: no match.
-    let s = sale(3, 1, 500, T0 + 100);
-    let o = simple("o1", "Main", 500, T0 + 99);
+fn ps_04_the_two_clocks_are_not_otherwise_corrected() {
+    // The tender is 121 seconds before the sale opened: past the slack.
+    let s = sale(3, 1, 500, T0 + 200);
+    let o = simple("o1", "Main", 500, T0 + 79);
     let mut l = Ledger::new();
     step(&mut l, &[o], &[s], T0 + 1_000);
     assert!(l.matches().is_empty());
@@ -221,4 +222,29 @@ fn ps_14_a_location_the_settings_do_not_name_cannot_match() {
     let k = kinds(&l);
     assert!(k.contains(&AlertKind::TenderWithoutPayment));
     assert!(k.contains(&AlertKind::PaymentWithoutTender));
+}
+
+#[test]
+fn ps_15_the_tenders_kept_are_those_of_the_settings_when_the_order_was_taken() {
+    let mut crypto = tender("t", 500, T0);
+    crypto.name = text("Crypto");
+    let o = order("o", "Main", vec![crypto, tender("b", 100, T0)]);
+    // First seen when only "Bitcoin" counts: the other tender is not kept.
+    let l = Ledger::new()
+        .updated(&[o.clone()], Cursor::start(), &[], &settings(), T0 + 10)
+        .unwrap()
+        .0;
+    assert_eq!(l.orders()[&oid("o")].tenders.len(), 1);
+    // Later the shop adds the name. The stored order is not read again...
+    let mut more = settings();
+    more.bitcoin_tenders.push(text("Crypto"));
+    let (l2, _) = l
+        .updated(&[], Cursor::start(), &[], &more, T0 + 20)
+        .unwrap();
+    assert_eq!(l2.orders()[&oid("o")].tenders.len(), 1);
+    // ...until the POS hands the order in again.
+    let (l3, _) = l2
+        .updated(&[o], Cursor::start(), &[], &more, T0 + 30)
+        .unwrap();
+    assert_eq!(l3.orders()[&oid("o")].tenders.len(), 2);
 }

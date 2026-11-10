@@ -9,8 +9,9 @@ use openbmt_counter::Currency;
 
 use crate::model::{PosTender, TenderKind, Text};
 use crate::{
-    CLOSED_BEFORE_PAID_SECS, GRACE_SECS, MATCH_WINDOW_SECS, MAX_COUNTERS_PER_LOCATION,
-    MAX_CURRENCIES, MAX_LOCATIONS, MAX_NO_POS, MAX_TENDER_NAMES, NEVER_PAID_SPAN_SECS, RETIRE_SECS,
+    CLOCK_SLACK_SECS, CLOSED_BEFORE_PAID_SECS, GRACE_SECS, MATCH_WINDOW_SECS,
+    MAX_COUNTERS_PER_LOCATION, MAX_CURRENCIES, MAX_LOCATIONS, MAX_NO_POS, MAX_TENDER_NAMES,
+    NEVER_PAID_SPAN_SECS, RETIRE_SECS,
 };
 
 /// Why settings were refused.
@@ -23,7 +24,7 @@ pub enum SettingsError {
     /// PS-14: too many locations, a location listed twice, too many counters
     /// at one, or a counter in two places.
     Locations,
-    /// A timing figure is zero, or the retire time is not above the grace.
+    /// A timing figure is zero (the clock slack may be), or the retire time is not above the grace.
     Timing,
 }
 
@@ -68,6 +69,9 @@ pub struct Timing {
     pub closed_before_paid_secs: u64,
     /// PS-33: how long after first reported paid a tender may match.
     pub match_window_secs: u64,
+    /// PS-08: how long before a sale opened a tender may be timed and still
+    /// match it.
+    pub clock_slack_secs: u64,
     /// PS-33: the stand-in span after opening for a sale never reported
     /// paid.
     pub never_paid_span_secs: u64,
@@ -81,6 +85,7 @@ impl Default for Timing {
             grace_secs: GRACE_SECS,
             closed_before_paid_secs: CLOSED_BEFORE_PAID_SECS,
             match_window_secs: MATCH_WINDOW_SECS,
+            clock_slack_secs: CLOCK_SLACK_SECS,
             never_paid_span_secs: NEVER_PAID_SPAN_SECS,
             retire_secs: RETIRE_SECS,
         }

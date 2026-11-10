@@ -131,11 +131,16 @@ impl std::error::Error for FactsError {}
 
 /// A sale being folded.
 struct Folding {
+    /// The fact as inferred from the older events (PS-06).
     fact: SaleFact,
     confirmed_now: bool,
+    /// The counter wrote `PosPaid` or `PosUnpaid` for this sale (PS-09).
+    explicit: bool,
+    explicit_paid_at: Option<u64>,
+    explicit_unpaid: bool,
 }
 
-/// PS-05, PS-06: fold a counter's record chain into one fact per sale,
+/// PS-05, PS-06, PS-09: fold a counter's record chain into one fact per sale,
 /// ordered by sale index. The chain is verified whole first against
 /// `devices`. Only the records the counter itself wrote are read, and of
 /// those only the kinds that hold sale events. Nothing is guessed.
@@ -163,7 +168,17 @@ pub fn facts_from_chain(
             return Err(FactsError::TooManySales);
         }
     }
-    Ok(sales.into_values().map(|f| f.fact).collect())
+    Ok(sales
+        .into_values()
+        .map(|f| {
+            let mut fact = f.fact;
+            if f.explicit {
+                fact.paid_at = f.explicit_paid_at.or(fact.paid_at);
+                fact.unpaid_after = f.explicit_unpaid;
+            }
+            fact
+        })
+        .collect())
 }
 
 fn fold_event(
@@ -187,6 +202,9 @@ fn fold_event(
             Folding {
                 fact: SaleFact::opened(*counter, index, *amount, *currency, *at),
                 confirmed_now: false,
+                explicit: false,
+                explicit_paid_at: None,
+                explicit_unpaid: false,
             },
         );
         return Ok(());
@@ -220,6 +238,15 @@ fn fold_event(
             if s.fact.paid_at.is_some() && !s.confirmed_now {
                 s.fact.unpaid_after = true;
             }
+        }
+        Event::PosPaid { at, .. } => {
+            s.explicit = true;
+            s.explicit_paid_at.get_or_insert(*at);
+            s.explicit_unpaid = false;
+        }
+        Event::PosUnpaid { .. } => {
+            s.explicit = true;
+            s.explicit_unpaid = true;
         }
         Event::Opened { .. }
         | Event::Expired { .. }

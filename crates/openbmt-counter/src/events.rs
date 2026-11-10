@@ -25,6 +25,8 @@ const TAG_DUST: u8 = 9;
 const TAG_OVERRIDE: u8 = 10;
 const TAG_REPLACED: u8 = 11;
 const TAG_REOPENED: u8 = 12;
+const TAG_POS_PAID: u8 = 13;
+const TAG_POS_UNPAID: u8 = 14;
 
 /// Something that happened to a sale and is written down.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,6 +153,22 @@ pub enum Event {
         /// When.
         at: u64,
     },
+    /// The POS was told the sale is paid: written with `Report::PosPaid`
+    /// (CR-30, CR-32; kind `Payment`).
+    PosPaid {
+        /// The receive index.
+        index: u32,
+        /// When.
+        at: u64,
+    },
+    /// The POS was told the sale is not paid any more: written with
+    /// `Report::PosUnpaid` (CR-30, CR-32; kind `Payment`).
+    PosUnpaid {
+        /// The receive index.
+        index: u32,
+        /// When.
+        at: u64,
+    },
 }
 
 fn label_byte(l: InstantLabel) -> u8 {
@@ -210,7 +228,9 @@ impl Event {
             | Self::Dust { index, .. }
             | Self::Override { index, .. }
             | Self::Replaced { index, .. }
-            | Self::Reopened { index, .. } => *index,
+            | Self::Reopened { index, .. }
+            | Self::PosPaid { index, .. }
+            | Self::PosUnpaid { index, .. } => *index,
         }
     }
 
@@ -223,7 +243,9 @@ impl Event {
             | Self::Final { .. }
             | Self::LatePayment { .. }
             | Self::SurplusOwed { .. }
-            | Self::Dust { .. } => RecordKind::Payment,
+            | Self::Dust { .. }
+            | Self::PosPaid { .. }
+            | Self::PosUnpaid { .. } => RecordKind::Payment,
             Self::Override { .. } => RecordKind::Override,
             Self::Replaced { .. } | Self::Reopened { .. } => RecordKind::Conflict,
         }
@@ -243,6 +265,8 @@ impl Event {
             Self::Override { index, at, .. } => (TAG_OVERRIDE, *index, *at),
             Self::Replaced { index, at } => (TAG_REPLACED, *index, *at),
             Self::Reopened { index, at } => (TAG_REOPENED, *index, *at),
+            Self::PosPaid { index, at } => (TAG_POS_PAID, *index, *at),
+            Self::PosUnpaid { index, at } => (TAG_POS_UNPAID, *index, *at),
         }
     }
 
@@ -306,7 +330,9 @@ impl Event {
             Self::Expired { .. }
             | Self::Cancelled { .. }
             | Self::Replaced { .. }
-            | Self::Reopened { .. } => {}
+            | Self::Reopened { .. }
+            | Self::PosPaid { .. }
+            | Self::PosUnpaid { .. } => {}
         }
         out
     }
@@ -386,6 +412,8 @@ impl Event {
             }
             TAG_REPLACED => Self::Replaced { index, at },
             TAG_REOPENED => Self::Reopened { index, at },
+            TAG_POS_PAID => Self::PosPaid { index, at },
+            TAG_POS_UNPAID => Self::PosUnpaid { index, at },
             _ => return Err(DecodeError::NonCanonical("an event tag is not known")),
         };
         r.finish()?;

@@ -154,12 +154,23 @@ fn ps_45_voided_or_refunded_or_gone_after_payment_alerts() {
     refunded.tenders[0].state = TenderState::Refunded { amount_minor: 200 };
     let mut gone = base.clone();
     gone.tenders = vec![cash("c", 500, T0 + 90)];
-    for changed in [voided_order, voided_tender, refunded, gone] {
+    // A refund is raised at once; a void or a removal once it is 10 minutes
+    // old.
+    for (changed, now) in [
+        (voided_order, T0 + 1_000),
+        (voided_tender, T0 + 1_000),
+        (refunded, T0 + 410),
+        (gone, T0 + 1_000),
+    ] {
         let mut l = Ledger::new();
         step(&mut l, &[base.clone()], &[s.clone()], T0 + 100);
         let mut c = changed;
         c.updated_at = T0 + 400;
-        step(&mut l, &[c], &[s.clone()], T0 + 410);
+        step(&mut l, &[c.clone()], &[s.clone()], now - 1);
+        if now == T0 + 1_000 {
+            assert!(l.open_alerts().is_empty(), "within the grace time");
+        }
+        step(&mut l, &[], &[s.clone()], now);
         assert_eq!(kinds(&l), vec![AlertKind::VoidedAfterPayment]);
         assert!(l.matches().contains_key(&tkey("o", "t-o")));
     }
@@ -426,4 +437,82 @@ fn ps_62_the_books_get_a_line_for_each_final_match_and_nothing_else() {
     v.updated_at = T0 + 500;
     step(&mut l, &[v], &[s1.clone(), s2], T0 + 510);
     assert!(l.books_lines(&[s1]).is_empty());
+}
+
+fn voided_order(o: &PosOrder, at: u64) -> PosOrder {
+    let mut v = o.clone();
+    v.tenders[0].state = TenderState::Voided;
+    v.updated_at = at;
+    v
+}
+
+#[test]
+fn ps_38_void_then_ring_again_within_the_grace_time_raises_no_alert_at_all() {
+    let s = paid(sale(3, 1, 500, T0), T0 + 60);
+    let o = simple("o", "Main", 500, T0 + 90);
+    let mut l = Ledger::new();
+    let mut raised = 0;
+    raised += step(&mut l, &[o.clone()], &[s.clone()], T0 + 100)
+        .new_alerts
+        .len();
+    raised += step(
+        &mut l,
+        &[voided_order(&o, T0 + 200)],
+        &[s.clone()],
+        T0 + 300,
+    )
+    .new_alerts
+    .len();
+    raised += step(
+        &mut l,
+        &[simple("o2", "Main", 500, T0 + 400)],
+        &[s],
+        T0 + 500,
+    )
+    .new_alerts
+    .len();
+    assert_eq!(raised, 0);
+    assert!(l.open_alerts().is_empty());
+}
+
+#[test]
+fn ps_38_void_alert_then_ring_again_later_clears_the_alert() {
+    let s = paid(sale(3, 1, 500, T0), T0 + 60);
+    let o = simple("o", "Main", 500, T0 + 90);
+    let mut l = Ledger::new();
+    step(&mut l, &[o.clone()], &[s.clone()], T0 + 100);
+    step(
+        &mut l,
+        &[voided_order(&o, T0 + 200)],
+        &[s.clone()],
+        T0 + 900,
+    );
+    assert_eq!(kinds(&l), vec![AlertKind::VoidedAfterPayment]);
+    let d = step(
+        &mut l,
+        &[simple("o2", "Main", 500, T0 + 1_000)],
+        &[s],
+        T0 + 1_010,
+    );
+    assert!(l.open_alerts().is_empty());
+    assert_eq!(d.cleared.len(), 1);
+    assert_eq!(d.cleared[0].kind, AlertKind::VoidedAfterPayment);
+}
+
+#[test]
+fn ps_38_void_and_nothing_else_keeps_the_alert() {
+    let s = paid(sale(3, 1, 500, T0), T0 + 60);
+    let o = simple("o", "Main", 500, T0 + 90);
+    let mut l = Ledger::new();
+    step(&mut l, &[o.clone()], &[s.clone()], T0 + 100);
+    step(
+        &mut l,
+        &[voided_order(&o, T0 + 200)],
+        &[s.clone()],
+        T0 + 900,
+    );
+    for later in [T0 + 5_000, T0 + 50_000] {
+        step(&mut l, &[], &[s.clone()], later);
+        assert_eq!(kinds(&l), vec![AlertKind::VoidedAfterPayment]);
+    }
 }

@@ -161,10 +161,19 @@ pub fn evaluate(input: &Input<'_>) -> Output {
         }
     }
 
-    // PS-36: what stays and what is worked out again.
+    // PS-36, PS-38: what stays, what is worked out again, and what is freed.
     let mut matches: BTreeMap<TenderKey, Match> = BTreeMap::new();
+    let mut freed: Vec<(TenderKey, Match)> = Vec::new();
     let mut taken: BTreeSet<SaleKey> = BTreeSet::new();
     for (key, m) in prior {
+        let order = orders.get(&key.order);
+        let tender = order.and_then(|o| o.tender(&key.tender));
+        let voided = order.is_none_or(|o| o.state == OrderState::Voided)
+            || tender.is_none_or(|t| t.state == TenderState::Voided);
+        if voided && facts.contains_key(&m.sale) {
+            freed.push((key.clone(), m.clone()));
+            continue;
+        }
         let again = m.how == MatchHow::AmountAndTime
             && cands.contains_key(key)
             && facts.contains_key(&m.sale);
@@ -255,7 +264,7 @@ pub fn evaluate(input: &Input<'_>) -> Output {
         .collect();
     let eligible = |c: &Candidate<'_>, s: &SaleFact| {
         settings.counters_at(&c.order.location).contains(&s.counter)
-            && c.tender.at >= s.opened_at
+            && c.tender.at.saturating_add(timing.clock_slack_secs) >= s.opened_at
             && c.tender.at <= latest_tender_time(s, settings)
     };
     let sales_for = |c: &Candidate<'_>| -> Vec<&SaleFact> {
@@ -299,6 +308,14 @@ pub fn evaluate(input: &Input<'_>) -> Output {
         );
     }
 
+    // PS-38: a sale whose tender was voided goes to the tender that rings it
+    // again, and otherwise stays with the voided one.
+    for (key, m) in freed {
+        if !matches.values().any(|n| n.sale == m.sale) {
+            matches.insert(key, m);
+        }
+    }
+
     // PS-41, PS-44, PS-45: alerts about matches.
     for (key, m) in &matches {
         let Some(order) = orders.get(&key.order) else {
@@ -308,8 +325,8 @@ pub fn evaluate(input: &Input<'_>) -> Output {
             continue;
         };
         let tender = order.tender(&key.tender);
-        let live = order.state != OrderState::Voided
-            && tender.is_some_and(|t| t.state == TenderState::Paid);
+        let order_voided = order.state == OrderState::Voided;
+        let live = !order_voided && tender.is_some_and(|t| t.state == TenderState::Paid);
         let subject = Subject::Tender(key.clone());
         let at = tender.map_or(order.updated_at, |t| t.at);
         let fill = |a: &mut Alert| {
@@ -320,7 +337,13 @@ pub fn evaluate(input: &Input<'_>) -> Output {
             a.at = at;
         };
         if !live {
-            if fact.is_paid_now() {
+            // PS-45: a refund is reported at once; a void, or a tender gone
+            // from the order, only once it is older than the grace time
+            // without another tender taking the sale.
+            let refund_only = !order_voided
+                && tender.is_some_and(|t| matches!(t.state, TenderState::Refunded { .. }));
+            let old_enough = now >= order.updated_at.saturating_add(timing.grace_secs);
+            if fact.is_paid_now() && (refund_only || old_enough) {
                 alerts.put(AlertKind::VoidedAfterPayment, subject, fill);
             }
             continue;

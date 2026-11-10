@@ -320,3 +320,67 @@ fn ps_07_what_the_events_do_not_carry_stays_empty() {
     // The times are the counter's, taken from the events.
     assert_eq!(f.opened_at, T0);
 }
+
+fn pos_paid(index: u32, at: u64) -> Event {
+    Event::PosPaid { index, at }
+}
+
+fn pos_unpaid(index: u32, at: u64) -> Event {
+    Event::PosUnpaid { index, at }
+}
+
+#[test]
+fn ps_09_the_explicit_records_are_used_when_a_sale_has_them() {
+    // The times come from the explicit record, not from the paid event.
+    let f = one(&[opened(1, T0, 500), at_once(1, T0 + 5), pos_paid(1, T0 + 7)]);
+    assert_eq!(f.paid_at, Some(T0 + 7));
+    assert!(f.is_paid_now());
+    // Unpaid and paid again.
+    let f = one(&[
+        opened(1, T0, 500),
+        pos_paid(1, T0 + 7),
+        pos_unpaid(1, T0 + 9),
+    ]);
+    assert!(f.unpaid_after && f.paid_at == Some(T0 + 7));
+    let f = one(&[
+        opened(1, T0, 500),
+        pos_paid(1, T0 + 7),
+        pos_unpaid(1, T0 + 9),
+        pos_paid(1, T0 + 20),
+    ]);
+    assert!(!f.unpaid_after && f.paid_at == Some(T0 + 7));
+}
+
+#[test]
+fn ps_09_a_conflict_on_a_confirmed_sale_is_not_unpaid_unless_the_counter_said_so() {
+    // The inference would say unpaid; the counter wrote no PosUnpaid.
+    let f = one(&[
+        opened(1, T0, 500),
+        at_once(1, T0 + 5),
+        pos_paid(1, T0 + 5),
+        Event::Replaced {
+            index: 1,
+            at: T0 + 9,
+        },
+    ]);
+    assert!(f.is_paid_now());
+}
+
+#[test]
+fn ps_09_without_the_records_the_inference_applies_per_sale() {
+    // Sale 1 comes from before the records existed, sale 2 after.
+    let f = facts_of(&[
+        opened(1, T0, 500),
+        at_once(1, T0 + 5),
+        Event::Reopened {
+            index: 1,
+            at: T0 + 9,
+        },
+        opened(2, T0 + 100, 700),
+        at_once(2, T0 + 105),
+        pos_paid(2, T0 + 105),
+    ])
+    .unwrap();
+    assert!(f[0].unpaid_after && f[0].paid_at == Some(T0 + 5));
+    assert!(f[1].is_paid_now());
+}

@@ -47,7 +47,7 @@ fn ps_80_a_page_of_more_than_five_hundred_orders_is_refused() {
         T0,
         ok,
     );
-    assert_eq!(r, Err(SyncError::PageTooLarge));
+    assert_eq!(r.unwrap_err().error, SyncError::PageTooLarge);
     assert_eq!(l, Ledger::new());
     let fits = many[..MAX_PAGE_ORDERS].to_vec();
     assert!(sync(
@@ -77,7 +77,7 @@ fn ps_80_a_reader_that_says_more_and_does_not_move_is_refused() {
         T0,
         ok,
     );
-    assert_eq!(r, Err(SyncError::NoProgress));
+    assert_eq!(r.unwrap_err().error, SyncError::NoProgress);
 }
 
 #[test]

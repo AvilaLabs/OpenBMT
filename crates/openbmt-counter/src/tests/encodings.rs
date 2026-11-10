@@ -135,6 +135,14 @@ fn every_event() -> Vec<Event> {
             index: 4,
             at: T0 + 100,
         },
+        Event::PosPaid {
+            index: 4,
+            at: T0 + 110,
+        },
+        Event::PosUnpaid {
+            index: 4,
+            at: T0 + 120,
+        },
     ]
 }
 
@@ -270,7 +278,7 @@ fn every_event_is_strict() {
         assert_eq!(Event::decode(&bytes).unwrap(), e);
         assert_strict(&bytes, Event::decode, Event::encode);
     }
-    assert_eq!(every_event().len(), 12);
+    assert_eq!(every_event().len(), 14);
 }
 
 #[test]

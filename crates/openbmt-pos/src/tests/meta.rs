@@ -38,7 +38,7 @@ fn sources() -> String {
 #[test]
 fn the_rules_file_defines_its_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 47, "{ids:?}");
+    assert_eq!(ids.len(), 55, "{ids:?}");
     assert!(ids.contains("PS-01") && ids.contains("PS-82"));
 }
 
@@ -129,7 +129,7 @@ fn the_stored_magic_is_used_nowhere_else_in_the_workspace() {
                 walk(&path, hits);
             } else if path.extension().is_some_and(|e| e == "rs") {
                 let text = std::fs::read_to_string(&path).unwrap();
-                if text.contains("b\"OBMQ\"") {
+                if text.contains("b\"OBMZ\"") {
                     hits.push(path.display().to_string());
                 }
             }

@@ -207,7 +207,8 @@ fn ps_32_a_second_tender_naming_a_taken_sale_is_a_duplicate() {
 fn ps_33_the_window_runs_from_opening_to_thirty_minutes_after_paid() {
     let s = paid(sale(3, 1, 500, T0 + 100), T0 + 400);
     for (at, should) in [
-        (T0 + 99, false),
+        (T0 + 100 - 121, false),
+        (T0 + 100 - 120, true),
         (T0 + 100, true),
         (T0 + 400 + 1_800, true),
         (T0 + 400 + 1_801, false),
@@ -368,32 +369,191 @@ fn ps_36_a_match_by_reference_never_changes() {
 }
 
 #[test]
-fn ps_36_a_match_stays_when_its_tender_is_voided_and_the_sale_stays_taken() {
+fn ps_36_a_match_stays_when_its_tender_is_refunded_and_the_sale_stays_taken() {
     let s = paid(sale(3, 1, 500, T0), T0 + 60);
     let o = simple("o", "Main", 500, T0 + 90);
     let mut l = Ledger::new();
     step(&mut l, &[o.clone()], &[s.clone()], T0 + 100);
-    assert_eq!(l.matches().len(), 1);
-
-    let mut voided = o;
-    voided.tenders[0].state = TenderState::Voided;
-    voided.updated_at = T0 + 200;
-    step(&mut l, &[voided], &[s.clone()], T0 + 210);
+    let mut refunded = o;
+    refunded.tenders[0].state = TenderState::Refunded { amount_minor: 500 };
+    refunded.updated_at = T0 + 200;
+    step(&mut l, &[refunded], &[s.clone()], T0 + 210);
     assert_eq!(l.matches().len(), 1);
     assert_eq!(kinds(&l), vec![AlertKind::VoidedAfterPayment]);
-
-    // The cashier rings it again as a new order: the sale is already taken.
+    // A refund is not a void: another tender does not take the sale.
     step(
         &mut l,
         &[simple("o2", "Main", 500, T0 + 300)],
-        &[s.clone()],
+        &[s],
         T0 + 1_000,
     );
     assert_eq!(l.matches().len(), 1);
+    assert!(l.matches().contains_key(&tkey("o", "t-o")));
     assert!(kinds(&l).contains(&AlertKind::TenderWithoutPayment));
     assert!(!kinds(&l).contains(&AlertKind::PaymentWithoutTender));
 }
 
+#[test]
+fn ps_08_a_tender_up_to_the_clock_slack_before_the_sale_still_matches() {
+    let s = paid(sale(3, 1, 500, T0 + 200), T0 + 260);
+    for (at, should) in [(T0 + 79, false), (T0 + 80, true), (T0 + 150, true)] {
+        let mut l = Ledger::new();
+        step(
+            &mut l,
+            &[simple("o", "Main", 500, at)],
+            &[s.clone()],
+            T0 + 5_000,
+        );
+        assert_eq!(!l.matches().is_empty(), should, "at {}", at - T0);
+    }
+    // The slack is a setting, and may be zero.
+    let mut none = settings();
+    none.timing.clock_slack_secs = 0;
+    let early = simple("o", "Main", 500, T0 + 199);
+    let (l, _) = Ledger::new()
+        .updated(&[early], Cursor::start(), &[s.clone()], &none, T0 + 5_000)
+        .unwrap();
+    assert!(l.matches().is_empty());
+}
+
+#[test]
+fn ps_08_a_reference_match_has_no_time_test() {
+    let s = paid(sale(3, 1, 500, T0 + 5_000), T0 + 5_060);
+    let mut t = tender("t", 500, T0);
+    t.reference = note(&s);
+    let mut l = Ledger::new();
+    step(&mut l, &[order("o", "Main", vec![t])], &[s], T0 + 5_100);
+    assert_eq!(only_match(&l).1.how, MatchHow::Reference);
+}
+
+fn voided(o: &PosOrder, at: u64) -> PosOrder {
+    let mut v = o.clone();
+    v.tenders[0].state = TenderState::Voided;
+    v.updated_at = at;
+    v
+}
+
+#[test]
+fn ps_38_a_sale_goes_to_the_tender_that_rings_it_again() {
+    let s = paid(sale(3, 1, 500, T0), T0 + 60);
+    let o = simple("o", "Main", 500, T0 + 90);
+    let mut l = Ledger::new();
+    step(&mut l, &[o.clone()], &[s.clone()], T0 + 100);
+    step(&mut l, &[voided(&o, T0 + 200)], &[s.clone()], T0 + 210);
+    // Within the grace time: still with the voided tender, and no alert.
+    assert_eq!(l.matches().keys().next(), Some(&tkey("o", "t-o")));
+    assert!(l.open_alerts().is_empty());
+    // Rung again as another order.
+    let d = step(
+        &mut l,
+        &[simple("o2", "Main", 500, T0 + 250)],
+        &[s],
+        T0 + 260,
+    );
+    assert_eq!(l.matches().len(), 1);
+    assert_eq!(l.matches().keys().next(), Some(&tkey("o2", "t-o2")));
+    assert_eq!(d.new_matches.len(), 1);
+    assert!(l.open_alerts().is_empty());
+}
+
+#[test]
+fn ps_38_a_sale_goes_to_a_tender_that_carries_its_reference() {
+    let s = paid(sale(3, 1, 500, T0), T0 + 60);
+    let o = simple("o", "Main", 500, T0 + 90);
+    let mut l = Ledger::new();
+    step(&mut l, &[o.clone()], &[s.clone()], T0 + 100);
+    step(&mut l, &[voided(&o, T0 + 200)], &[s.clone()], T0 + 210);
+    let mut t = tender("t", 500, T0 + 5_000);
+    t.reference = note(&s);
+    step(&mut l, &[order("o2", "Main", vec![t])], &[s], T0 + 5_100);
+    assert_eq!(l.matches().keys().next(), Some(&tkey("o2", "t")));
+    assert_eq!(l.matches().len(), 1);
+    assert_eq!(
+        l.matches().values().next().unwrap().how,
+        MatchHow::Reference
+    );
+}
+
+#[test]
+fn ps_39_the_first_tender_seen_with_a_reference_keeps_the_sale() {
+    let s = paid(sale(3, 1, 500, T0), T0 + 60);
+    let mut later = tender("b", 500, T0 + 300);
+    later.reference = note(&s);
+    let mut earlier = tender("a", 500, T0 + 100);
+    earlier.reference = note(&s);
+    let mut l = Ledger::new();
+    step(
+        &mut l,
+        &[order("ob", "Main", vec![later])],
+        &[s.clone()],
+        T0 + 400,
+    );
+    step(
+        &mut l,
+        &[order("oa", "Main", vec![earlier])],
+        &[s.clone()],
+        T0 + 500,
+    );
+    assert_eq!(
+        l.matches().keys().collect::<Vec<_>>(),
+        vec![&tkey("ob", "b")]
+    );
+    assert!(kinds(&l).contains(&AlertKind::DuplicateReference));
+}
+
+#[test]
+fn ps_39_a_reference_outranks_a_pairing_by_order() {
+    let s1 = paid(sale(3, 1, 500, T0), T0 + 60);
+    let s2 = paid(sale(3, 2, 500, T0), T0 + 60);
+    // The plain tender is earlier and would take s1 by order; the one with
+    // the reference names s1 and takes it.
+    let plain = simple("plain", "Main", 500, T0 + 100);
+    let mut named = tender("named", 500, T0 + 200);
+    named.reference = note(&s1);
+    let mut l = Ledger::new();
+    step(
+        &mut l,
+        &[plain, order("on", "Main", vec![named])],
+        &[s1.clone(), s2.clone()],
+        T0 + 300,
+    );
+    assert_eq!(l.matches()[&tkey("on", "named")].sale, s1.key());
+    assert_eq!(l.matches()[&tkey("plain", "t-plain")].sale, s2.key());
+}
+
+#[test]
+fn ps_23_a_reference_naming_two_sales_takes_the_first_that_fits() {
+    let a = paid(sale(3, 1, 500, T0), T0 + 60);
+    let mut b = paid(sale(3, 2, 700, T0), T0 + 60);
+    b.reference = a.reference;
+    let mut c = tender("t", 700, T0 + 100);
+    c.reference = note(&a);
+    let mut l = Ledger::new();
+    step(
+        &mut l,
+        &[order("o", "Main", vec![c])],
+        &[a, b.clone()],
+        T0 + 200,
+    );
+    assert_eq!(only_match(&l).1.sale, b.key());
+}
+
+#[test]
+fn ps_23_a_word_that_passes_the_check_but_names_no_sale_is_ignored() {
+    let s = paid(sale(3, 1, 500, T0), T0 + 60);
+    let other = sale(3, 90, 100, T0).reference.unwrap();
+    let mut t = tender("t", 500, T0 + 100);
+    t.reference = Some(text(&format!("paid {other}")));
+    let mut l = Ledger::new();
+    step(
+        &mut l,
+        &[order("o", "Main", vec![t])],
+        &[s.clone()],
+        T0 + 200,
+    );
+    assert_eq!(only_match(&l).1.how, MatchHow::AmountAndTime);
+    assert_eq!(only_match(&l).1.sale, s.key());
+}
 #[test]
 fn ps_36_a_match_stays_when_its_sale_leaves_the_facts() {
     let s = paid(sale(3, 1, 500, T0), T0 + 60);

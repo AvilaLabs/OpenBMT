@@ -19,6 +19,8 @@ fn kinds(w: &World) -> Vec<&'static str> {
             Event::Override { .. } => "override",
             Event::Replaced { .. } => "replaced",
             Event::Reopened { .. } => "reopened",
+            Event::PosPaid { .. } => "pos-paid",
+            Event::PosUnpaid { .. } => "pos-unpaid",
         })
         .collect()
 }
@@ -27,14 +29,13 @@ fn kinds(w: &World) -> Vec<&'static str> {
 fn has_record(w: &World, report: &Report) -> bool {
     let events = w.m.events();
     match report {
-        Report::PosPaid { index } => events.iter().any(|e| {
-            e.index() == *index
-                && matches!(
-                    e,
-                    Event::PaidAtOnce { .. } | Event::Confirmed { .. } | Event::Override { .. }
-                )
-        }),
-        Report::PosUnpaid { index } | Report::Alarm { index } => events.iter().any(|e| {
+        Report::PosPaid { index } => events
+            .iter()
+            .any(|e| e.index() == *index && matches!(e, Event::PosPaid { .. })),
+        Report::PosUnpaid { index } => events
+            .iter()
+            .any(|e| e.index() == *index && matches!(e, Event::PosUnpaid { .. })),
+        Report::Alarm { index } => events.iter().any(|e| {
             e.index() == *index && matches!(e, Event::Replaced { .. } | Event::Reopened { .. })
         }),
         Report::BooksFinal { index, .. } => events
@@ -110,7 +111,10 @@ fn cr_32_the_whole_journey_reports_each_change_once_after_its_record() {
     assert!(s.reports.is_empty());
 
     assert_eq!(all.len(), 2);
-    assert_eq!(kinds(&w), ["opened", "paid-at-once", "confirmed", "final"]);
+    assert_eq!(
+        kinds(&w),
+        ["opened", "paid-at-once", "pos-paid", "confirmed", "final"]
+    );
 }
 
 // CR-30.

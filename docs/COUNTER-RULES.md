@@ -145,7 +145,10 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   that it is pending.
 - **CR-32.** Every change of state that CR-30 or CR-31 reports is also
   written as a signed record (`openbmt_core::records`), stored before it
-  is reported.
+  is reported. "Paid" and "unpaid" to the POS are the records `PosPaid` and
+  `PosUnpaid`, written exactly when the report is made; "final" to the
+  books is the record `Final`, which is written once, with the report. A
+  chain written before `PosPaid` and `PosUnpaid` existed has none of them.
 
 ## 5. Storage
 

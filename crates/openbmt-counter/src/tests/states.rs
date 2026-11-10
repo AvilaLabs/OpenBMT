@@ -399,20 +399,26 @@ fn cr_13_the_exposure_is_counted_under_the_sale_and_stored_before_paid_is_return
     w.m.reset();
     let screen = w.judge(o.index);
     assert_eq!(screen.state, State::PaidInstant);
-    assert_eq!(w.m.log, ["Exposure", "record", "Sale(0)"]);
+    // PaidAtOnce and PosPaid are two records, both before the sale.
+    assert_eq!(w.m.log, ["Exposure", "record", "record", "Sale(0)"]);
     let mut expected = Exposure::new();
     expected
         .accept_instant(sale_payment_id(0), 5_000, 50_000, |_| Ok::<(), ()>(()))
         .unwrap();
     assert_eq!(w.m.slots[&Slot::Exposure], expected.to_bytes());
     assert_eq!(w.c.exposure_outstanding(), 5_000);
+    let events = w.m.events();
     assert!(matches!(
-        w.m.events().last().unwrap(),
+        events.iter().rev().nth(1).unwrap(),
         Event::PaidAtOnce {
             index: 0,
             at_risk_sats: 5_000,
             ..
         }
+    ));
+    assert!(matches!(
+        events.last().unwrap(),
+        Event::PosPaid { index: 0, .. }
     ));
 }
 

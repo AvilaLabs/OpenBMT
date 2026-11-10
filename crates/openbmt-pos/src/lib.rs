@@ -23,7 +23,7 @@
 //!    the counter's signed events.
 //! 5. [`alerts`]: the alerts, each with its why and its next step.
 //! 6. [`matcher`]: the pure matching and the alert rules.
-//! 7. [`ledger`]: what is kept between polls and its stored form (`OBMQ`).
+//! 7. [`ledger`]: what is kept between polls and its stored form (`OBMZ`).
 //! 8. [`connector`]: the traits a vendor adds, a test double and [`sync`].
 //!
 //! This crate has had internal review only. No independent security audit
@@ -56,10 +56,12 @@ mod tests;
 pub use alerts::{Alert, AlertKey, AlertKind, Subject, TenderKey};
 pub use connector::{
     sync, CloseOutcome, CloseRefused, CloseRequest, Cursor, MemoryCloser, MemoryPos, Page,
-    PosCloser, PosError, PosReader, SyncError, SyncReport,
+    PosCloser, PosError, PosReader, SyncError, SyncFailed, SyncReport,
 };
 pub use facts::{facts_from_chain, FactsError, SaleFact, SaleKey};
-pub use ledger::{Acknowledged, BooksLine, Delta, Ledger, LedgerError, LedgerWriteError, Summary};
+pub use ledger::{
+    Acknowledged, Blocker, BooksLine, Delta, Ledger, LedgerError, LedgerWriteError, Summary,
+};
 pub use matcher::{Match, MatchHow};
 pub use model::{
     Id, ModelError, OrderId, OrderState, PosOrder, PosTender, TenderId, TenderKind, TenderState,
@@ -111,6 +113,12 @@ pub const GRACE_SECS: u64 = 600;
 /// PS-41: seconds by which a tender may precede the sale's paid time before
 /// it is an alert **[to tune]**.
 pub const CLOSED_BEFORE_PAID_SECS: u64 = 120;
+/// PS-08: seconds before a sale opened that a tender may be timed and still
+/// match it, for the difference between the POS's clock and the counter's
+/// **[to tune]**.
+pub const CLOCK_SLACK_SECS: u64 = 120;
+/// PS-76: most blocking items a `Full` refusal names.
+pub const MAX_NAMED_BLOCKERS: usize = 10;
 /// PS-73: seconds an order must stay unchanged before its settled matches
 /// retire **[to tune]**.
 pub const RETIRE_SECS: u64 = 7 * 86_400;

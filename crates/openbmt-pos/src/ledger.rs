@@ -1,6 +1,6 @@
 //! What is kept between polls (PS-36, PS-50 to PS-52, PS-60 to PS-62,
 //! PS-70 to PS-74): the tracked orders, the matches, the alerts and the POS
-//! cursor, and the stored form of all of it (`OBMQ`).
+//! cursor, and the stored form of all of it (`OBMZ`).
 //!
 //! A change is made by building the new value, handing its stored form to the
 //! caller's `persist`, and swapping only if that returned `Ok`.
@@ -20,10 +20,12 @@ use crate::model::{
 };
 use crate::reference::tagged_hash;
 use crate::settings::{Settings, SettingsError};
-use crate::{MAX_ALERTS, MAX_CURSOR_BYTES, MAX_MATCHES, MAX_SALES, MAX_TRACKED_ORDERS};
+use crate::{
+    MAX_ALERTS, MAX_CURSOR_BYTES, MAX_MATCHES, MAX_NAMED_BLOCKERS, MAX_SALES, MAX_TRACKED_ORDERS,
+};
 
 /// Magic of a stored ledger. No other stored form in this workspace uses it.
-pub const MAGIC_POS_LEDGER: [u8; 4] = *b"OBMQ";
+pub const MAGIC_POS_LEDGER: [u8; 4] = *b"OBMZ";
 /// Tag of the hash that ends a stored ledger.
 pub const TAG_LEDGER: &str = "OpenBMT/pos-ledger/v1";
 
@@ -38,8 +40,15 @@ pub enum LedgerError {
     TooManySales,
     /// Two facts name the same sale.
     DuplicateSale(SaleKey),
-    /// The ledger would grow past a bound (PS-72). The text says which.
-    Full(&'static str),
+    /// The ledger would grow past a bound (PS-72, PS-76). `what` says which,
+    /// and `oldest` names what is in the way, oldest first, so that the owner
+    /// can acknowledge it.
+    Full {
+        /// The bound that was reached.
+        what: &'static str,
+        /// The oldest blocking items, at most 10.
+        oldest: Vec<Blocker>,
+    },
     /// PS-52: the alert to acknowledge is not open.
     NotOpen,
 }
@@ -53,10 +62,13 @@ impl fmt::Display for LedgerError {
             Self::DuplicateSale(k) => {
                 write!(f, "two facts name sale {} of the same counter", k.index)
             }
-            Self::Full(what) => write!(
-                f,
-                "PS-72: the ledger is full ({what}); acknowledge alerts or raise the bound"
-            ),
+            Self::Full { what, oldest } => {
+                write!(f, "PS-72: the ledger is full ({what}).")?;
+                for b in oldest {
+                    write!(f, " {b};")?;
+                }
+                write!(f, " acknowledge the alerts named here, or raise the bound")
+            }
             Self::NotOpen => write!(f, "PS-52: that alert is not open"),
         }
     }
@@ -91,6 +103,52 @@ pub struct Acknowledged {
     pub alert: Alert,
     /// When the owner acknowledged it.
     pub at: u64,
+}
+
+/// Something that keeps the ledger from retiring an order or an alert, named
+/// in a `Full` refusal (PS-76).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Blocker {
+    /// An alert nobody has acknowledged. Acknowledge it to let go.
+    OpenAlert(AlertKey),
+    /// The order is matched to a sale that is not yet final, or not known.
+    SaleUnsettled {
+        /// The order.
+        order: OrderId,
+        /// The sale.
+        sale: SaleKey,
+    },
+    /// The order changed less than the retire time ago.
+    TooRecent {
+        /// The order.
+        order: OrderId,
+    },
+}
+
+impl fmt::Display for Blocker {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OpenAlert(k) => match &k.subject {
+                Subject::Tender(t) => write!(
+                    f,
+                    "open alert \"{}\" on order {}, tender {}",
+                    k.kind.name(),
+                    t.order,
+                    t.tender
+                ),
+                Subject::Sale(s) => write!(
+                    f,
+                    "open alert \"{}\" on sale {} of a counter",
+                    k.kind.name(),
+                    s.index
+                ),
+            },
+            Self::SaleUnsettled { order, sale } => {
+                write!(f, "order {order} waits for sale {} to be final", sale.index)
+            }
+            Self::TooRecent { order } => write!(f, "order {order} changed recently"),
+        }
+    }
 }
 
 /// What a change made new (PS-60).
@@ -262,18 +320,20 @@ impl Ledger {
         settings: &Settings,
         now: u64,
     ) -> Result<(Self, Delta), LedgerError> {
-        settings.validate().map_err(LedgerError::Settings)?;
-        if facts.len() > MAX_SALES {
-            return Err(LedgerError::TooManySales);
-        }
-        let mut fact_map: BTreeMap<SaleKey, SaleFact> = BTreeMap::new();
-        for f in facts {
-            if fact_map.insert(f.key(), f.clone()).is_some() {
-                return Err(LedgerError::DuplicateSale(f.key()));
-            }
-        }
+        self.absorbed(incoming, next, settings)?
+            .reconciled(facts, settings, now)
+    }
 
-        // Orders: the newest version of each wins; an older one is ignored.
+    /// PS-74, PS-75: take in one page of orders and the cursor that goes
+    /// with it, without matching. The newest version of each order wins; an
+    /// older one is ignored. `self` is not changed.
+    pub fn absorbed(
+        &self,
+        incoming: &[PosOrder],
+        next: Cursor,
+        settings: &Settings,
+    ) -> Result<Self, LedgerError> {
+        settings.validate().map_err(LedgerError::Settings)?;
         let mut newest: BTreeMap<OrderId, PosOrder> = BTreeMap::new();
         for o in incoming {
             o.validate().map_err(LedgerError::Order)?;
@@ -295,6 +355,35 @@ impl Ledger {
                 }
             }
         }
+        let next_ledger = Self {
+            cursor: next,
+            orders,
+            ..self.clone()
+        };
+        next_ledger.check_bounds()?;
+        Ok(next_ledger)
+    }
+
+    /// PS-74: work out the matches and the alerts on what is held, raise what
+    /// is new, clear what is resolved and retire what is settled. `self` is
+    /// not changed.
+    pub fn reconciled(
+        &self,
+        facts: &[SaleFact],
+        settings: &Settings,
+        now: u64,
+    ) -> Result<(Self, Delta), LedgerError> {
+        settings.validate().map_err(LedgerError::Settings)?;
+        if facts.len() > MAX_SALES {
+            return Err(LedgerError::TooManySales);
+        }
+        let mut fact_map: BTreeMap<SaleKey, SaleFact> = BTreeMap::new();
+        for f in facts {
+            if fact_map.insert(f.key(), f.clone()).is_some() {
+                return Err(LedgerError::DuplicateSale(f.key()));
+            }
+        }
+        let mut orders = self.orders.clone();
 
         let out = evaluate(&Input {
             settings,
@@ -390,7 +479,7 @@ impl Ledger {
             .collect();
 
         let next_ledger = Self {
-            cursor: next,
+            cursor: self.cursor.clone(),
             orders,
             matches,
             open,
@@ -420,6 +509,45 @@ impl Ledger {
         Ok(delta)
     }
 
+    /// PS-74: [`Self::absorbed`], stored as in [`Self::update_stored`]. A
+    /// page that is stored stays stored whatever happens to the next one.
+    pub fn absorb_stored<E>(
+        &mut self,
+        incoming: &[PosOrder],
+        next: Cursor,
+        settings: &Settings,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), LedgerWriteError<E>> {
+        let new = self
+            .absorbed(incoming, next, settings)
+            .map_err(LedgerWriteError::Refused)?;
+        if new == *self {
+            return Ok(());
+        }
+        persist(&new.to_bytes()).map_err(LedgerWriteError::Persist)?;
+        *self = new;
+        Ok(())
+    }
+
+    /// PS-74: [`Self::reconciled`], stored as in [`Self::update_stored`].
+    pub fn reconcile_stored<E>(
+        &mut self,
+        facts: &[SaleFact],
+        settings: &Settings,
+        now: u64,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<Delta, LedgerWriteError<E>> {
+        let (new, delta) = self
+            .reconciled(facts, settings, now)
+            .map_err(LedgerWriteError::Refused)?;
+        if new == *self {
+            return Ok(delta);
+        }
+        persist(&new.to_bytes()).map_err(LedgerWriteError::Persist)?;
+        *self = new;
+        Ok(delta)
+    }
+
     /// PS-52: the owner acknowledges an open alert. The change is stored as
     /// in [`Self::update_stored`]. Signing the acknowledgement as the owner's
     /// command is not done here.
@@ -443,14 +571,56 @@ impl Ledger {
 
     fn check_bounds(&self) -> Result<(), LedgerError> {
         if self.orders.len() > MAX_TRACKED_ORDERS {
-            Err(LedgerError::Full("tracked orders"))
+            Err(self.full("tracked orders"))
         } else if self.matches.len() > MAX_MATCHES {
-            Err(LedgerError::Full("matches"))
+            Err(self.full("matches"))
         } else if self.open.len() > MAX_ALERTS || self.acked.len() > MAX_ALERTS {
-            Err(LedgerError::Full("alerts"))
+            Err(self.full("alerts"))
         } else {
             Ok(())
         }
+    }
+
+    /// PS-76: a `Full` refusal that names the oldest items in the way.
+    fn full(&self, what: &'static str) -> LedgerError {
+        let mut oldest: Vec<Blocker> = Vec::new();
+        for a in self.open_alerts() {
+            if oldest.len() >= MAX_NAMED_BLOCKERS {
+                break;
+            }
+            oldest.push(Blocker::OpenAlert(a.key.clone()));
+        }
+        if oldest.len() < MAX_NAMED_BLOCKERS {
+            let mut orders: Vec<&PosOrder> = self.orders.values().collect();
+            orders.sort_by(|a, b| (a.updated_at, &a.id).cmp(&(b.updated_at, &b.id)));
+            for o in orders {
+                if oldest.len() >= MAX_NAMED_BLOCKERS {
+                    break;
+                }
+                let has_alert = self
+                    .open
+                    .keys()
+                    .any(|k| matches!(&k.subject, Subject::Tender(t) if t.order == o.id));
+                if has_alert {
+                    continue;
+                }
+                let sale = self
+                    .matches
+                    .iter()
+                    .find(|(k, _)| k.order == o.id)
+                    .map(|(_, m)| m.sale);
+                oldest.push(match sale {
+                    Some(sale) => Blocker::SaleUnsettled {
+                        order: o.id.clone(),
+                        sale,
+                    },
+                    None => Blocker::TooRecent {
+                        order: o.id.clone(),
+                    },
+                });
+            }
+        }
+        LedgerError::Full { what, oldest }
     }
 
     /// PS-71: the stored form. Keys are in ascending order and a tagged hash

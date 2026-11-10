@@ -110,7 +110,8 @@ fn cr_20_the_ledger_is_stored_before_the_screen_changes() {
     let i = waiting_sale(&mut w, 500, 5_000);
     w.m.reset();
     w.override_sale(i, Role::Cashier, "ann").unwrap();
-    assert_eq!(w.m.log, ["Exposure", "Desk", "record", "Sale(0)"]);
+    // The override and the PosPaid record both come before the sale.
+    assert_eq!(w.m.log, ["Exposure", "Desk", "record", "record", "Sale(0)"]);
     assert_eq!(w.c.exposure_outstanding(), 5_000);
 }
 
@@ -269,7 +270,15 @@ fn cr_22_an_override_is_recorded_with_who_when_and_how_much() {
     let i = waiting_sale(&mut w, 500, 5_000);
     w.tick(33);
     w.override_sale(i, Role::Cashier, "ann").unwrap();
-    let event = w.m.events().pop().unwrap();
+    let mut events = w.m.events();
+    assert_eq!(
+        events.pop(),
+        Some(Event::PosPaid {
+            index: i,
+            at: w.now
+        })
+    );
+    let event = events.pop().unwrap();
     assert_eq!(
         event,
         Event::Override {

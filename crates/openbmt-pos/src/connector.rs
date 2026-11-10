@@ -235,7 +235,7 @@ impl PosCloser for MemoryCloser {
     }
 }
 
-/// Why a sync did not happen. The ledger and its cursor are unchanged.
+/// Why a sync stopped. What was stored before it stopped stays stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyncError<E> {
     /// The reader failed.
@@ -266,10 +266,28 @@ impl<E: fmt::Display> fmt::Display for SyncError<E> {
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for SyncError<E> {}
 
+/// A sync that stopped (PS-74): why, and how many pages were kept. Each kept
+/// page and its cursor are stored, so the next sync goes on from there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncFailed<E> {
+    /// Why it stopped.
+    pub error: SyncError<E>,
+    /// Pages that were read and stored before it stopped.
+    pub pages_kept: usize,
+}
+
+impl<E: fmt::Display> fmt::Display for SyncFailed<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({} pages were kept)", self.error, self.pages_kept)
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for SyncFailed<E> {}
+
 /// What a sync did (PS-60).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncReport {
-    /// Pages read.
+    /// Pages read and stored.
     pub pages: usize,
     /// Orders read.
     pub orders_read: usize,
@@ -279,52 +297,64 @@ pub struct SyncReport {
     pub delta: Delta,
 }
 
-/// PS-74, PS-80: pull the pages of orders (at most 64), build the new ledger
-/// from them, store it and swap. All or nothing: if the reader, the ledger or
-/// the store fails, the ledger and its cursor are as they were. Reading the
-/// same pages again changes nothing and raises nothing again.
+/// PS-74, PS-80: pull the pages of orders (at most 64). Each page, with its
+/// cursor, is stored as soon as it is read, so a POS that fails on a later
+/// page still makes progress. Matching and alerts are worked out once, on
+/// what is stored, after the last page that was read. If the reader, the
+/// ledger or the store fails, what was stored stays, and the failure says how
+/// many pages were kept. Reading the same pages again changes nothing and
+/// raises nothing again.
 pub fn sync<R: PosReader, E>(
     reader: &mut R,
     ledger: &mut Ledger,
     facts: &[SaleFact],
     settings: &Settings,
     now: u64,
-    persist: impl FnOnce(&[u8]) -> Result<(), E>,
-) -> Result<SyncReport, SyncError<E>> {
+    mut persist: impl FnMut(&[u8]) -> Result<(), E>,
+) -> Result<SyncReport, SyncFailed<E>> {
     let mut cursor = ledger.cursor().clone();
-    let mut orders: Vec<PosOrder> = Vec::new();
-    let mut pages = 0usize;
+    let mut kept = 0usize;
+    let mut orders_read = 0usize;
     let mut more = false;
+    let stop = |error, pages_kept| SyncFailed { error, pages_kept };
     loop {
-        if pages >= MAX_PAGES {
+        if kept >= MAX_PAGES {
             more = true;
             break;
         }
-        let page = reader.poll(&cursor).map_err(SyncError::Pos)?;
+        let page = reader
+            .poll(&cursor)
+            .map_err(|e| stop(SyncError::Pos(e), kept))?;
         if page.orders.len() > MAX_PAGE_ORDERS {
-            return Err(SyncError::PageTooLarge);
+            return Err(stop(SyncError::PageTooLarge, kept));
         }
         if page.more && page.next == cursor {
-            return Err(SyncError::NoProgress);
+            return Err(stop(SyncError::NoProgress, kept));
         }
-        pages += 1;
-        orders.extend(page.orders);
+        ledger
+            .absorb_stored(&page.orders, page.next.clone(), settings, &mut persist)
+            .map_err(|e| stop(write_error(e), kept))?;
+        kept += 1;
+        orders_read += page.orders.len();
         cursor = page.next;
         if !page.more {
             break;
         }
     }
-    let orders_read = orders.len();
     let delta = ledger
-        .update_stored(&orders, cursor, facts, settings, now, persist)
-        .map_err(|e| match e {
-            LedgerWriteError::Refused(e) => SyncError::Ledger(e),
-            LedgerWriteError::Persist(e) => SyncError::Persist(e),
-        })?;
+        .reconcile_stored(facts, settings, now, &mut persist)
+        .map_err(|e| stop(write_error(e), kept))?;
     Ok(SyncReport {
-        pages,
+        pages: kept,
         orders_read,
         more,
         delta,
     })
+}
+
+fn write_error<E>(e: LedgerWriteError<E>) -> SyncError<E> {
+    match e {
+        LedgerWriteError::Refused(e) => SyncError::Ledger(e),
+        LedgerWriteError::Persist(e) => SyncError::Persist(e),
+    }
 }
