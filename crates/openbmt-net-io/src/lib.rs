@@ -49,6 +49,6 @@ pub mod socks;
 mod tests;
 
 pub use dial::DialError;
-pub use driver::{AppEvent, Driver, DriverConfig, Handle, StartError};
+pub use driver::{core_seeds, AppEvent, Driver, DriverConfig, Handle, StartError};
 pub use env::{Clock, FileStorage, Key, OsRandomness, Randomness, Storage, SystemClock};
 pub use socks::{SocksError, Target};

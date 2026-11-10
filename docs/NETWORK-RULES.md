@@ -229,7 +229,11 @@ rules are what it decides where the rules above are silent.
   Without Tor, each seed name is looked up in a thread of its own; an
   answer that takes more than 10 seconds is ignored, and a round is
   started at most every 5 minutes. What comes back enters the book as
-  learned from a seed. With Tor on (NR-26), no name is looked up: one seed
+  learned from a seed. Each seed is also asked for nodes that state the
+  compact-filter service (the `x49.` prefix); those enter the book with
+  that service stated by a seed (NR-21). Without two filter peers every
+  block is downloaded in full (NR-42). The default names are the ones
+  Bitcoin Core 32.1 ships. With Tor on (NR-26), no name is looked up: one seed
   name at a time is dialed through the proxy as an ordinary peer.
 - **NR-73.** The header store is saved when the tip has moved and 60
   seconds have passed since the last save. The anchors are set to the two
@@ -250,3 +254,7 @@ rules are what it decides where the rules above are silent.
 - **NR-77.** Stopping saves the data, closes every socket and ends the
   driver's threads within 5 seconds. A thread that is still in a connect or
   a lookup at that time holds no data and is left to end by itself.
+- **NR-78.** With Tor on, each connection gives the proxy a fresh random
+  name and password. Tor puts connections with different ones on
+  different circuits, so two peers are not reached through one exit. A
+  proxy that asks for no name and password is used as it is.

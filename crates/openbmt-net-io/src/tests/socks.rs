@@ -316,3 +316,82 @@ fn nr_26_every_error_says_its_rule_in_words() {
         assert!(text.len() > 12);
     }
 }
+
+// ----- NR-78: a connection kept apart from the others ---------------------
+
+fn run_isolated(addr: SocketAddr, token: u64) -> Result<TcpStream, SocksError> {
+    socks::connect_isolated(
+        addr,
+        &v4_target(),
+        Duration::from_secs(5),
+        TOTAL,
+        Some(token),
+    )
+}
+
+/// Read the two-method greeting, pick name-and-password, and return the
+/// name and password that were sent.
+fn sign_in(stream: &mut TcpStream) -> (Vec<u8>, Vec<u8>) {
+    assert_eq!(read_n(stream, 4), [5, 2, 0, 2]);
+    stream.write_all(&[5, 2]).unwrap();
+    assert_eq!(read_n(stream, 2), [1, 16]);
+    let name = read_n(stream, 16);
+    assert_eq!(read_n(stream, 1), [16]);
+    let password = read_n(stream, 16);
+    (name, password)
+}
+
+#[test]
+fn nr_78_a_token_is_sent_as_name_and_password_when_the_proxy_asks() {
+    let (addr, handle) = proxy(|mut s| {
+        let (name, password) = sign_in(&mut s);
+        assert_eq!(name, b"00000000deadbeef");
+        assert_eq!(password, name);
+        s.write_all(&[1, 0]).unwrap();
+        assert_eq!(read_n(&mut s, 10), [5, 1, 0, 1, 8, 8, 4, 4, 0x20, 0x8d]);
+        s.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).unwrap();
+        s.write_all(b"ok").unwrap();
+    });
+    let mut stream = run_isolated(addr, 0xdead_beef).unwrap();
+    assert_eq!(read_n(&mut stream, 2), b"ok");
+    handle.join().unwrap();
+}
+
+#[test]
+fn nr_78_a_proxy_that_wants_no_sign_in_is_used_as_it_is() {
+    let (addr, handle) = proxy(|mut s| {
+        assert_eq!(read_n(&mut s, 4), [5, 2, 0, 2]);
+        s.write_all(&[5, 0]).unwrap();
+        assert_eq!(read_n(&mut s, 10), [5, 1, 0, 1, 8, 8, 4, 4, 0x20, 0x8d]);
+        s.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).unwrap();
+    });
+    run_isolated(addr, 7).unwrap();
+    handle.join().unwrap();
+}
+
+#[test]
+fn nr_78_a_refused_sign_in_and_a_wrong_version_are_errors() {
+    for (answer, want) in [
+        ([1u8, 1u8], SocksError::AuthRefused(1)),
+        ([5, 0], SocksError::BadAuthVersion(5)),
+    ] {
+        let (addr, handle) = proxy(move |mut s| {
+            sign_in(&mut s);
+            s.write_all(&answer).unwrap();
+        });
+        assert_eq!(run_isolated(addr, 7).unwrap_err(), want);
+        handle.join().unwrap();
+    }
+}
+
+#[test]
+fn nr_78_without_a_token_the_sign_in_method_is_not_offered_or_accepted() {
+    let (addr, handle) = proxy(|mut s| {
+        greet(&mut s, &[5, 2]);
+    });
+    assert_eq!(
+        run(addr, &v4_target()).unwrap_err(),
+        SocksError::MethodNotOffered(2)
+    );
+    handle.join().unwrap();
+}

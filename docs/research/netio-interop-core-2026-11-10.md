@@ -104,7 +104,8 @@ the node. After `quit` on the example's input, the driver wrote
 `headers.bin` and `book.bin`; one block was mined while it was stopped. The
 second run printed `peers 0 ... tip=152` before it had talked to anyone,
 reached tip 153 with one header joined, and the node had sent 106 bytes of
-`headers` messages to it: one header of 81 bytes, a one-byte count and 24 bytes of message header. So
+`headers` messages to it: one header of 81 bytes, a one-byte count and 24 bytes
+of message header. So
 the driver asked from its stored tip and was not sent the chain again. The
 script reads the 106 from the node's `getpeerinfo`
 (`bytessent_per_msg.headers`), because the `Chain` events alone cannot tell:

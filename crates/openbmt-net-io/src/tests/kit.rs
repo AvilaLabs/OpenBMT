@@ -337,7 +337,7 @@ pub fn net_to(to: SocketAddr, resolved: Vec<SocketAddr>) -> (Net, DialLog, Arc<A
     let lookups = Arc::new(AtomicUsize::new(0));
     let (l, n) = (log.clone(), lookups.clone());
     let net = Net {
-        dial: Arc::new(move |target, proxy| {
+        dial: Arc::new(move |target, proxy, _| {
             l.lock().unwrap().push((target.clone(), proxy));
             TcpStream::connect(to).map_err(|e| DialError::Connect(e.kind()))
         }),

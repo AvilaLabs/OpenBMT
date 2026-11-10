@@ -42,15 +42,22 @@ impl fmt::Display for DialError {
 impl std::error::Error for DialError {}
 
 /// Open a connection to the target, through the proxy when there is one
-/// (NR-26).
-pub fn dial(target: &Target, proxy: Option<SocketAddr>) -> Result<TcpStream, DialError> {
+/// (NR-26). `token` is a fresh random number for this connection; the proxy
+/// is given it so that it keeps the connection apart from the others
+/// (NR-78).
+pub fn dial(
+    target: &Target,
+    proxy: Option<SocketAddr>,
+    token: u64,
+) -> Result<TcpStream, DialError> {
     let connect = Duration::from_secs(CONNECT_SECS);
     match (proxy, target) {
-        (Some(proxy), target) => socks::connect_through(
+        (Some(proxy), target) => socks::connect_isolated(
             proxy,
             target,
             connect,
             Duration::from_secs(socks::HANDSHAKE_SECS),
+            Some(token),
         )
         .map_err(DialError::Proxy),
         (None, Target::Addr(addr)) => {
@@ -68,7 +75,8 @@ pub fn resolve(name: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
     }
 }
 
-type DialFn = dyn Fn(&Target, Option<SocketAddr>) -> Result<TcpStream, DialError> + Send + Sync;
+type DialFn =
+    dyn Fn(&Target, Option<SocketAddr>, u64) -> Result<TcpStream, DialError> + Send + Sync;
 type ResolveFn = dyn Fn(&str, u16) -> Result<Vec<SocketAddr>, String> + Send + Sync;
 
 /// How the driver reaches the outside. The real one is [`Net::system`]; the

@@ -3,7 +3,7 @@
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -242,7 +242,7 @@ fn nr_71_anchors_come_first_then_fixed_peers_then_the_book() {
     let log: DialLog = Arc::default();
     let l = log.clone();
     let net = Net {
-        dial: Arc::new(move |target, proxy| {
+        dial: Arc::new(move |target, proxy, _| {
             l.lock().unwrap().push((target.clone(), proxy));
             Err(DialError::Connect(std::io::ErrorKind::TimedOut))
         }),
@@ -278,7 +278,7 @@ fn nr_71_at_most_four_dials_are_in_flight() {
     let most = Arc::new(AtomicUsize::new(0));
     let (c, m) = (current.clone(), most.clone());
     let net = Net {
-        dial: Arc::new(move |_, _| {
+        dial: Arc::new(move |_, _, _| {
             let now = c.fetch_add(1, Ordering::SeqCst) + 1;
             m.fetch_max(now, Ordering::SeqCst);
             thread::sleep(Duration::from_millis(300));
@@ -354,7 +354,8 @@ fn nr_72_seeds_are_asked_when_the_book_is_empty() {
     cfg.seeds = vec!["seed.test".to_string()];
     let mut handle = start(cfg, &storage, net);
     wait_for(&handle, 10, has_peer).expect("no ready peer");
-    assert_eq!(lookups.load(Ordering::SeqCst), 1);
+    // The name itself and the name for filter peers.
+    assert_eq!(lookups.load(Ordering::SeqCst), 2);
     assert_eq!(
         log.lock().unwrap().first().cloned(),
         Some((Target::Addr(sock(8, 8, 8, 8, 18_444)), None))
@@ -367,10 +368,54 @@ fn nr_72_seeds_are_asked_when_the_book_is_empty() {
 }
 
 #[test]
+fn nr_72_a_seed_is_also_asked_for_filter_peers_and_says_which_they_are() {
+    let storage = MemStorage::default();
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let seen = asked.clone();
+    let net = Net {
+        dial: Arc::new(|_, _, _| Err(DialError::Connect(std::io::ErrorKind::ConnectionRefused))),
+        resolve: Arc::new(move |name, port| {
+            seen.lock().unwrap().push(name.to_string());
+            if name.starts_with("x49.") {
+                Ok(vec![sock(9, 9, 9, 9, port)])
+            } else {
+                Ok(vec![sock(8, 8, 8, 8, port)])
+            }
+        }),
+    };
+    let mut cfg = bare();
+    cfg.seeds = vec!["seed.test".to_string()];
+    let mut handle = start(cfg, &storage, net);
+    wait_for(&handle, 2, |e| matches!(e, AppEvent::Peers(..))).expect("no event");
+    thread::sleep(Duration::from_millis(800));
+    handle.shutdown();
+    let mut names = asked.lock().unwrap().clone();
+    names.sort();
+    assert_eq!(names, vec!["seed.test", "x49.seed.test"]);
+    let book = stored_book(&storage);
+    let plain = book.get(&v4(8, 8, 8, 8), 18_444).unwrap();
+    let filter = book.get(&v4(9, 9, 9, 9), 18_444).unwrap();
+    assert!(!plain.services.has(ServiceFlags::COMPACT_FILTERS));
+    assert!(filter.services.has(ServiceFlags::COMPACT_FILTERS));
+    assert_eq!(filter.source, Source::Seed);
+}
+
+#[test]
+fn core_seeds_are_the_names_bitcoin_core_ships_and_regtest_has_none() {
+    let main = crate::core_seeds(bitcoin::Network::Bitcoin);
+    assert_eq!(main.len(), 7);
+    assert!(main.iter().all(|n| !n.ends_with('.') && !n.contains(' ')));
+    assert!(crate::core_seeds(bitcoin::Network::Regtest).is_empty());
+    assert!(DriverConfig::new(bitcoin::Network::Regtest, 0)
+        .seeds
+        .is_empty());
+}
+
+#[test]
 fn nr_72_a_hung_lookup_does_not_hang_the_driver() {
     let storage = MemStorage::default();
     let net = Net {
-        dial: Arc::new(|_, _| Err(DialError::NameWithoutProxy)),
+        dial: Arc::new(|_, _, _| Err(DialError::NameWithoutProxy)),
         resolve: Arc::new(|_, _| {
             thread::sleep(Duration::from_secs(20));
             Ok(Vec::new())
@@ -423,7 +468,7 @@ fn nr_26_the_driver_reaches_a_peer_through_a_socks5_proxy_end_to_end() {
     let server = thread::spawn(move || {
         use std::io::{Read, Write};
         let (mut stream, _) = listener.accept().unwrap();
-        let mut greeting = [0u8; 3];
+        let mut greeting = [0u8; 4];
         stream.read_exact(&mut greeting).unwrap();
         stream.write_all(&[5, 0]).unwrap();
         let mut head = [0u8; 5];
@@ -443,7 +488,7 @@ fn nr_26_the_driver_reaches_a_peer_through_a_socks5_proxy_end_to_end() {
     let mut handle = start_system(cfg, &storage);
     wait_for(&handle, 10, has_peer).expect("no ready peer");
     let (greeting, head, rest) = asked_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-    assert_eq!(greeting, [5, 1, 0]);
+    assert_eq!(greeting, [5, 2, 0, 2]);
     assert_eq!(head, [5, 1, 0, 3, 9]);
     assert_eq!(&rest[..9], b"seed.test");
     // The regtest port, 18444.

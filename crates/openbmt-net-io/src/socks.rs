@@ -16,7 +16,9 @@ pub const HANDSHAKE_SECS: u64 = 20;
 
 const VERSION: u8 = 5;
 const METHOD_NONE: u8 = 0;
+const METHOD_USER_PASS: u8 = 2;
 const METHOD_REFUSED: u8 = 0xff;
+const AUTH_VERSION: u8 = 1;
 const CMD_CONNECT: u8 = 1;
 const ATYP_V4: u8 = 1;
 const ATYP_NAME: u8 = 3;
@@ -115,6 +117,11 @@ pub enum SocksError {
     /// The proxy chose a method that was not offered. The code is the one
     /// it chose.
     MethodNotOffered(u8),
+    /// The proxy's answer to the name and password has a version other
+    /// than 1.
+    BadAuthVersion(u8),
+    /// The proxy refused the name and password, with this status.
+    AuthRefused(u8),
     /// The proxy refused the connection with this reply code.
     Refused(ReplyCode),
     /// The reserved byte of the reply was not 0.
@@ -143,6 +150,12 @@ impl fmt::Display for SocksError {
                     f,
                     "NR-26: the proxy chose method {m}, which was not offered"
                 )
+            }
+            Self::BadAuthVersion(v) => {
+                write!(f, "NR-26: the proxy's sign-in answer has version {v}")
+            }
+            Self::AuthRefused(status) => {
+                write!(f, "NR-26: the proxy refused the sign-in, status {status}")
             }
             Self::Refused(code) => write!(f, "NR-26: the proxy refused: {code}"),
             Self::BadReserved(b) => write!(f, "NR-26: the reply has reserved byte {b}"),
@@ -250,22 +263,65 @@ pub fn handshake(
     target: &Target,
     total: Duration,
 ) -> Result<(), SocksError> {
+    handshake_isolated(stream, target, total, None)
+}
+
+/// The name and password sent for a token: its 16 hex digits, twice.
+fn credentials(token: u64) -> Vec<u8> {
+    let text = format!("{token:016x}");
+    let mut out = vec![AUTH_VERSION, 16];
+    out.extend_from_slice(text.as_bytes());
+    out.push(16);
+    out.extend_from_slice(text.as_bytes());
+    out
+}
+
+/// [`handshake`], with a token that keeps this connection apart from the
+/// others (NR-78). With a token, the name-and-password method is offered
+/// too, and the token is sent as both. Tor accepts any name and password
+/// and gives connections with different ones different circuits, so two
+/// peers do not share an exit. A proxy that picks "no authentication"
+/// anyway is used as it is.
+pub fn handshake_isolated(
+    stream: &mut TcpStream,
+    target: &Target,
+    total: Duration,
+    token: Option<u64>,
+) -> Result<(), SocksError> {
     let deadline = Deadline {
         end: Instant::now() + total,
     };
     let request = request(target)?;
-    // Offer one method: no authentication.
-    send(stream, &deadline, &[VERSION, 1, METHOD_NONE])?;
+    match token {
+        None => send(stream, &deadline, &[VERSION, 1, METHOD_NONE])?,
+        Some(_) => send(
+            stream,
+            &deadline,
+            &[VERSION, 2, METHOD_NONE, METHOD_USER_PASS],
+        )?,
+    }
     let mut choice = [0u8; 2];
     take(stream, &deadline, &mut choice)?;
     let [version, method] = choice;
     if version != VERSION {
         return Err(SocksError::BadVersion(version));
     }
-    match method {
-        METHOD_NONE => {}
-        METHOD_REFUSED => return Err(SocksError::NoAcceptableMethod),
-        other => return Err(SocksError::MethodNotOffered(other)),
+    match (method, token) {
+        (METHOD_NONE, _) => {}
+        (METHOD_USER_PASS, Some(token)) => {
+            send(stream, &deadline, &credentials(token))?;
+            let mut answer = [0u8; 2];
+            take(stream, &deadline, &mut answer)?;
+            let [auth_version, status] = answer;
+            if auth_version != AUTH_VERSION {
+                return Err(SocksError::BadAuthVersion(auth_version));
+            }
+            if status != 0 {
+                return Err(SocksError::AuthRefused(status));
+            }
+        }
+        (METHOD_REFUSED, _) => return Err(SocksError::NoAcceptableMethod),
+        (other, _) => return Err(SocksError::MethodNotOffered(other)),
     }
     send(stream, &deadline, &request)?;
     let mut head = [0u8; 4];
@@ -306,8 +362,20 @@ pub fn connect_through(
     connect_timeout: Duration,
     total: Duration,
 ) -> Result<TcpStream, SocksError> {
+    connect_isolated(proxy, target, connect_timeout, total, None)
+}
+
+/// [`connect_through`], with a token that keeps this connection apart from
+/// the others (see [`handshake_isolated`]).
+pub fn connect_isolated(
+    proxy: SocketAddr,
+    target: &Target,
+    connect_timeout: Duration,
+    total: Duration,
+    token: Option<u64>,
+) -> Result<TcpStream, SocksError> {
     let mut stream = TcpStream::connect_timeout(&proxy, connect_timeout)
         .map_err(|e| SocksError::Connect(e.kind()))?;
-    handshake(&mut stream, target, total)?;
+    handshake_isolated(&mut stream, target, total, token)?;
     Ok(stream)
 }

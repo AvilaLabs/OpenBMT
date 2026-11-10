@@ -67,7 +67,7 @@ pub const INBOUND_CAPACITY: usize = 256;
 /// Events waiting for the app.
 pub const EVENT_CAPACITY: usize = 64;
 /// Seconds a write to a peer may take before the peer is closed.
-pub const WRITE_TIMEOUT_SECS: u64 = 10;
+pub const WRITE_TIMEOUT_SECS: u64 = 3;
 /// Seconds a reader thread waits in one read before it looks for a stop.
 pub const READ_TIMEOUT_SECS: u64 = 1;
 /// Seconds `shutdown` waits for the threads before it lets go of the ones
@@ -104,6 +104,33 @@ pub struct DriverConfig {
     pub redial_pause_secs: u64,
 }
 
+/// The DNS seed names that Bitcoin Core 32.1 ships for the network
+/// (`kernel/chainparams.cpp`), without the final dot. Empty for a network
+/// that has none.
+pub fn core_seeds(network: Network) -> Vec<String> {
+    let names: &[&str] = match network {
+        Network::Bitcoin => &[
+            "dnsseed.bluematt.me",
+            "seed.bitcoin.jonasschnelli.ch",
+            "seed.btc.petertodd.net",
+            "seed.bitcoin.sprovoost.nl",
+            "dnsseed.emzy.de",
+            "seed.bitcoin.wiz.biz",
+            "seed.mainnet.achownodes.xyz",
+        ],
+        Network::Signet => &[
+            "seed.signet.bitcoin.sprovoost.nl",
+            "seed.signet.achownodes.xyz",
+        ],
+        _ => &[],
+    };
+    names.iter().map(|n| (*n).to_string()).collect()
+}
+
+/// NR-72: the prefix that asks a seed only for nodes that state the
+/// network, witness and compact-filter services (bits 1, 8 and 64).
+pub const FILTER_SEED_PREFIX: &str = "x49.";
+
 impl DriverConfig {
     /// The counter's settings: 8 peers, no proxy, no seeds, no fixed peers,
     /// no local addresses.
@@ -113,7 +140,7 @@ impl DriverConfig {
             target_peers: openbmt_net::manager::DEFAULT_TARGET_PEERS,
             watch_from,
             proxy: None,
-            seeds: Vec::new(),
+            seeds: core_seeds(network),
             fixed_peers: Vec::new(),
             allow_local: false,
             redial_pause_secs: REDIAL_PAUSE_SECS,
@@ -1052,10 +1079,12 @@ where
         let tx = self.inbound_tx.clone();
         let proxy = self.config.proxy;
         let to = target.clone();
+        // NR-78: a fresh number for each connection.
+        let token = self.rng.next_u64();
         let spawned = thread::Builder::new()
             .name("net-dial".to_string())
             .spawn(move || {
-                let result = (net.dial)(&to, proxy);
+                let result = (net.dial)(&to, proxy, token);
                 let _ = tx.send(Msg::Dialed(id, result));
             });
         match spawned {
@@ -1081,7 +1110,16 @@ where
         let id = self.round_count;
         let port = default_port(self.config.network);
         let mut outstanding = 0usize;
-        for name in self.config.seeds.clone() {
+        // Each seed is asked twice: for any node, and for nodes that state
+        // the compact-filter service. A seed that does not know the second
+        // question answers nothing.
+        let names: Vec<String> = self
+            .config
+            .seeds
+            .iter()
+            .flat_map(|n| [n.clone(), format!("{FILTER_SEED_PREFIX}{n}")])
+            .collect();
+        for name in names {
             let net = self.net.clone();
             let tx = self.inbound_tx.clone();
             let asked = name.clone();
@@ -1119,17 +1157,20 @@ where
         if current.outstanding == 0 {
             self.round = None;
         }
+        let filtered = name.starts_with(FILTER_SEED_PREFIX);
+        let services = if filtered {
+            ServiceFlags::NETWORK | ServiceFlags::WITNESS | ServiceFlags::COMPACT_FILTERS
+        } else {
+            ServiceFlags::NETWORK | ServiceFlags::WITNESS
+        };
         match result {
+            // Not every seed knows the filtered question.
+            Err(_) if filtered => {}
             Err(e) => self.emit(AppEvent::Note(format!("seed {name}: {e}"))),
             Ok(found) => {
                 for addr in found {
-                    self.book.add(
-                        &v2_of(addr.ip()),
-                        addr.port(),
-                        ServiceFlags::NETWORK | ServiceFlags::WITNESS,
-                        Source::Seed,
-                        now,
-                    );
+                    self.book
+                        .add(&v2_of(addr.ip()), addr.port(), services, Source::Seed, now);
                 }
             }
         }
