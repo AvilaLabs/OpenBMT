@@ -910,7 +910,7 @@ condition is not met (§16).
 | Key | Choices (★ = recommended) | Why each is safe |
 |---|---|---|
 | Key 1 (owner) | ★ Owner's phone, in Owner mode · A hardware wallet · An offline computer (below) | Phone key rules below. A hardware wallet is the stronger choice. |
-| Key 2 (approver) | ★ A spare phone or tablet you own, running the OpenBMT Key app · A manager's phone running the Key app · A hardware wallet (Coldcard, Jade, Passport, Keystone, others that sign PSBTs, **[verify each, E8]**) · An offline computer running Sparrow or Bitcoin Core (below) · A key card tapped on a different person's phone | A thief has to get past the owner phone **and** the key 2 device. The Key app and hardware wallets show the transaction on their own screens. A **key card has no screen**: it is as safe as the phone it is tapped on, and the app says so. A hardware wallet cannot hold our allowlist or co-sign settings, so loosening uses the block-count fallback (§2.9) and batches the weaker spot check (§5.1). The Key app on a spare device as an approver (identity key only) restores the co-signature for batches, settings and pairings; without it those rest on the owner phone plus spot checks, and the screen says so. Until the Key app's release key has a second holder, a hardware wallet or a different publisher's signer is the recommended choice (Rule 2). |
+| Key 2 (approver) | ★ A spare phone or tablet you own, running the OpenBMT Key app · A manager's phone running the Key app · A hardware wallet (Coldcard, Jade, Passport, Keystone, or a build-it-yourself signer such as SeedSigner, Krux or Specter DIY; others that sign PSBTs, **[verify each, E8]**) · An offline computer running Sparrow or Bitcoin Core (below) · A key card tapped on a different person's phone | A thief has to get past the owner phone **and** the key 2 device. The Key app and hardware wallets show the transaction on their own screens. A **key card has no screen**: it is as safe as the phone it is tapped on, and the app says so. A hardware wallet cannot hold our allowlist or co-sign settings, so loosening uses the block-count fallback (§2.9) and batches the weaker spot check (§5.1). The Key app on a spare device as an approver (identity key only) restores the co-signature for batches, settings and pairings; without it those rest on the owner phone plus spot checks, and the screen says so. Until the Key app's release key has a second holder, a hardware wallet or a different publisher's signer is the recommended choice (Rule 2). |
 | Key 3 (recovery) | ★ Seed words made with a different publisher's wallet app (for example Nunchuk **[verify, E8]**) on the counter tablet before it becomes the counter, in airplane mode, then written on paper or steel and stored away from the shop; the tablet is then factory reset · A hardware wallet in a safe (stronger) · An offline computer, or words made on one (below) · A key card in a safe · A trusted person's device | Used only to recover a lost key. It is made by software that OpenBMT did not publish, on a device that holds no other key, offline. Only its xpub reaches the Key app. |
 
 Notes:
@@ -937,6 +937,12 @@ Notes:
     signer, and restoring the wallet in Bitcoin Core from the kit, are
     checked on a test network (docs/research). Sparrow is not yet checked
     **[verify, E8 and E9]**.
+- **Words go on steel.** Paper burns, fades and tears. The setup tells the
+  owner to put every set of seed words on steel, and treats paper as a
+  stopgap: a key whose words are only on paper is shown as "backup:
+  temporary" in the key health screen until the owner says it is on
+  steel. The app sells no backup product and names none; the guide links
+  to independent stress tests.
 - **Where a key's randomness comes from.** A key is only as good as the
   randomness it was made from, and the owner should not have to trust a
   device for that.
