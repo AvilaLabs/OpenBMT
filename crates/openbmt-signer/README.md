@@ -104,6 +104,13 @@ signature from key 1 or key 3, and finalize the transaction. The signatures
 and the witness script are checked against a BIP143 hash that the test writes
 out again itself, so they do not rest on the code under test.
 
+`src/tests/hostile.rs` holds call sequences and files built to make the
+signer break a rule: chains of replacements, a review used after the state
+changed, a full spend log, clocks at 0 and at the largest value, and a sweep
+that changes every byte of a valid file. `scripts/signer-interop-core.sh`
+checks the signer against Bitcoin Core on regtest
+([results](../../docs/research/signer-interop-core-2026-11-10.md)).
+
 Other tests cover persisting (a failing store changes nothing; a working one
 receives exactly the bytes of the new state; a refusal never reaches it), the
 time boundaries (24-hour wait, day and week windows, clock correction), every

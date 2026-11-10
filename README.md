@@ -51,10 +51,10 @@ sets. The full statement, its conditions and the reasoning are in
 |---|---|
 | [docs/DESIGN.md](docs/DESIGN.md) | The design: flows, architecture, threat table, open questions |
 | [docs/SIGNER-RULES.md](docs/SIGNER-RULES.md) | Every rule under which the Key app refuses to sign |
-| [docs/research/](docs/research/) | Research notes, four rounds of internal design review, and the restore drill results |
+| [docs/research/](docs/research/) | Research notes, four rounds of internal design review, and the results of the checks against Bitcoin Core |
 | [crates/openbmt-core/](crates/openbmt-core/) | The rules every device must agree on: wallet description, device identity, address batches, signed records, signed settings, instant-acceptance policy |
 | [crates/openbmt-signer/](crates/openbmt-signer/) | The Key app's transaction signer: the rules under which key 2 signs |
-| [scripts/](scripts/) | The restore drill: find and spend a wallet with Bitcoin Core alone |
+| [scripts/](scripts/) | Checks against Bitcoin Core on regtest: the restore drill, and the signer reading and returning Core's transaction files |
 
 Planned next: the payment watcher, then the apps.
 

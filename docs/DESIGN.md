@@ -1044,6 +1044,11 @@ Notes:
     - if a Core wallet is used as a signer, it is imported with the same
       receive range. In the drill a signer wallet with a smaller range
       added no signature for a coin beyond it, and gave no error;
+    - Core is asked for the transaction file as PSBT version 0
+      (`psbt_version=0`). Core 32 writes version 2 unless told otherwise,
+      and the Key app reads version 0 only
+      (docs/research/signer-interop-core-2026-11-10.md). Whether Sparrow
+      and the hardware signers read version 2 has not been tested here;
     - a balance check needs no wallet and no rescan: `scantxoutset` with the
       same ranges lists the unspent payments and their indexes.
 
