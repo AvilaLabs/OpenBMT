@@ -10,11 +10,15 @@ One function, `dispatch`, takes a request and returns a response.
 request   "OBM8" | version 1 | op u16 | handle u64 | fields...
 response  "OBM9" | version 1 | status u8 | ...
   status 0  ok: the result of the op
-  status 1  refused   then rule and text
-  status 2  store     then rule and text
-  status 3  state     then rule and text
-  status 4  internal  then rule and text
+  status 1  refused   then rule, text and words
+  status 2  store     then rule, text and words
+  status 3  state     then rule, text and words
+  status 4  internal  then rule, text and words
   rule and text are each a u16 length and UTF-8
+  words: tone u8 | who u8 | heading | what | next
+    | code (flag, string) | at (flag, u64)
+    | quoted (flag, from, text) | detail (flag, string)
+    every string is a u16 length and UTF-8
 ```
 
 Integers are little-endian. A bool is one byte, 0 or 1. A string is a
@@ -24,6 +28,20 @@ then the value. An enum is a tag byte and then the fields of its
 variant. A record is its fields in the order given. A request is at
 most 1048576 bytes, is read completely before anything is done, and
 is refused when bytes are left over.
+
+## Words
+
+The words of an error say what a person is shown. The numbers of the
+tone and of the person who does the next step are:
+
+```text
+tone: Info=0 Good=1 Stop=2 Ended=3
+who:  Nobody=0 Customer=1 Cashier=2 Manager=3 Owner=4 KeyHolder=5 BoxKeeper=6
+```
+
+The time `at` is in seconds since 1970, for the app to show on the
+person's own clock. `quoted` is text from another device, with where it
+came from. `detail` is for the small print.
 
 ## Ops
 

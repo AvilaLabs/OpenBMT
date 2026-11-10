@@ -12,7 +12,44 @@ class KeyException(
     val text: String,
     /** 1 refused, 2 store, 3 state, 4 internal (a panic was caught). */
     val status: Int = 1,
+    /** What the person is shown. Null for an error the Kotlin side made itself. */
+    val words: Words? = null,
 ) : Exception(text)
+
+/** Text from another device or a scanned code: [from] says where it came from. */
+data class Quoted(val from: String, val text: String)
+
+/**
+ * What a person is shown for an error: the fields of the Rust `Words`, in the
+ * order the response frame carries them. [tone] is one of the TONE_ numbers and
+ * [who] one of the WHO_ numbers below. [at] is in seconds since 1970, for the
+ * app to show on the person's own clock.
+ */
+data class Words(
+    val tone: Int,
+    val who: Int,
+    val heading: String,
+    val what: String,
+    val next: String,
+    val code: String?,
+    val at: Long?,
+    val quoted: Quoted?,
+    val detail: String?,
+)
+
+// ---- tone and who numbers of the words (PROTOCOL.md) --------------------------------
+
+private const val TONE_INFO = 0
+private const val TONE_GOOD = 1
+private const val TONE_STOP = 2
+private const val TONE_ENDED = 3
+private const val WHO_NOBODY = 0
+private const val WHO_CUSTOMER = 1
+private const val WHO_CASHIER = 2
+private const val WHO_MANAGER = 3
+private const val WHO_OWNER = 4
+private const val WHO_KEY_HOLDER = 5
+private const val WHO_BOX_KEEPER = 6
 
 // ---- op numbers (PROTOCOL.md; never reused) -------------------------------------
 
@@ -425,6 +462,20 @@ internal class Reader(private val data: ByteArray) {
     /** A string with a u16 length, as in an error frame. */
     fun string16(): String = String(take(u16()), Charsets.UTF_8)
 
+    /** The words after the rule and the text of an error frame. */
+    fun words(): Words {
+        val tone = u8()
+        val who = u8()
+        val heading = string16()
+        val what = string16()
+        val next = string16()
+        val code = option { string16() }
+        val at = option { u64() }
+        val quoted = option { Quoted(string16(), string16()) }
+        val detail = option { string16() }
+        return Words(tone, who, heading, what, next, code, at, quoted, detail)
+    }
+
     fun <T> option(read: () -> T): T? =
         when (u8()) {
             0 -> null
@@ -734,8 +785,9 @@ private fun call(store: KeyStore, op: Int, handle: Long, fill: (Writer) -> Unit 
     if (status == 0) return r
     val rule = r.string16()
     val text = r.string16()
+    val words = r.words()
     r.end()
-    throw KeyException(rule, text, status)
+    throw KeyException(rule, text, status, words)
 }
 
 /** A call whose result is nothing. */

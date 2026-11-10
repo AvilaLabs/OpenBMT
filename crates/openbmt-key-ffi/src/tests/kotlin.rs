@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::call::{enum_tags, ops};
+use crate::say::{TONES, WHOS};
 
 fn kotlin(file: &str) -> String {
     let path: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -68,6 +69,60 @@ fn the_kotlin_tag_bytes_are_the_rust_ones() {
         .collect();
     let kotlin = constants(&kotlin("KeyApp.kt"), "TAG_");
     assert_eq!(kotlin, rust);
+}
+
+#[test]
+fn the_kotlin_tone_and_person_numbers_are_the_rust_ones() {
+    let text = kotlin("KeyApp.kt");
+    let tones: BTreeMap<String, u32> = TONES
+        .iter()
+        .map(|(_, name, byte)| (format!("TONE_{}", upper_snake(name)), u32::from(*byte)))
+        .collect();
+    assert_eq!(constants(&text, "TONE_"), tones);
+    let whos: BTreeMap<String, u32> = WHOS
+        .iter()
+        .map(|(_, name, byte)| (format!("WHO_{}", upper_snake(name)), u32::from(*byte)))
+        .collect();
+    assert_eq!(constants(&text, "WHO_"), whos);
+}
+
+#[test]
+fn the_kotlin_words_read_the_fields_in_the_order_the_frame_writes_them() {
+    let text = kotlin("KeyApp.kt");
+    // The order of the fields of the data class and of the reader.
+    let fields = [
+        "val tone: Int",
+        "val who: Int",
+        "val heading: String",
+        "val what: String",
+        "val next: String",
+        "val code: String?",
+        "val at: Long?",
+        "val quoted: Quoted?",
+        "val detail: String?",
+    ];
+    let positions: Vec<usize> = fields
+        .iter()
+        .map(|f| text.find(f).unwrap_or_else(|| panic!("{f}")))
+        .collect();
+    assert!(positions.windows(2).all(|w| w[0] < w[1]), "{positions:?}");
+    let reader = [
+        "val tone = u8()",
+        "val who = u8()",
+        "val heading = string16()",
+        "val what = string16()",
+        "val next = string16()",
+        "val code = option { string16() }",
+        "val at = option { u64() }",
+        "val quoted = option { Quoted(string16(), string16()) }",
+        "val detail = option { string16() }",
+    ];
+    let positions: Vec<usize> = reader
+        .iter()
+        .map(|f| text.find(f).unwrap_or_else(|| panic!("{f}")))
+        .collect();
+    assert!(positions.windows(2).all(|w| w[0] < w[1]), "{positions:?}");
+    assert!(text.contains("throw KeyException(rule, text, status, words)"));
 }
 
 #[test]

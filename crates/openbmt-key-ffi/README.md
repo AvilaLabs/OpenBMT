@@ -49,7 +49,11 @@ compiled.
 A request is `"OBM8" | 1 | op u16 | handle u64 | fields...`; a response is
 `"OBM9" | 1 | status u8 | ...`. Status 0 is ok and carries the op's result;
 1 refused, 2 store, 3 state and 4 internal (a panic was caught) carry `rule`
-and `text`, each a u16 length and UTF-8. Integers are little-endian, a bool
+and `text`, each a u16 length and UTF-8, and then the words a person is
+shown: tone u8, who u8, heading, what, next (each a u16 length and UTF-8),
+code (a flag byte and a string), at (a flag byte and a u64), quoted (a flag
+byte, then from and text) and detail (a flag byte and a string). Integers
+are little-endian, a bool
 is one byte, bytes and strings have a u32 length, an option a flag byte, a
 list a u32 count, an enum a tag byte. A request is at most 1 MiB, is read
 completely before anything is done, and is refused when bytes are left over
@@ -187,7 +191,27 @@ crate refused; `rule` is its ID such as `AS-20` or `SR-30`, or the name of the
 check), `Store` (the store failed, or the stored bytes cannot be read),
 `State` (the call is not possible now, with what to do instead) and
 `Internal` (a panic was caught). In Kotlin they are one `KeyException` with
-`rule`, `text` and `status`.
+`rule`, `text`, `status` and `words`.
+
+`rule` and `text` are for logs and tests. A person is shown the words: every
+error response carries them, made by `KeyError::words` (and `words_for`, from
+the kind, the rule string and the text) under `docs/SCREEN-RULES.md`. The
+heading, `what` and `next` hold no rule number, no key and no raw number; the
+rule goes in `code`, a time in `at` and what the system said in `detail`, and
+the app shows `code` and `detail` only under "Details". Text that came from
+another device or a scanned code would go in `quoted`, never in the
+sentences. A rule string the crate has no words for gets the words of its
+kind, which say that the cause is not known and send the person to the owner;
+a test fails when a rule string passed to `refused_by`, `wrong_state` or
+`internal` has no words of its own. The words of the setup state, of a check
+and of the kit check are `SetupState::words`, `CheckStatus::words` and
+`KitCheck::words`; the words of every refusal of the signer, the session and
+the approver are in those crates, and `docs/screens/key.md` lists them all
+(`OPENBMT_WRITE_SCREENS=1 cargo test -p openbmt-key-ffi screens_list` writes
+it again).
+
+Not changed here: the line `failure` text of a session is still the rule
+crates' own text, and `Decision::Decline` reasons are the key holder's own.
 
 ## What is checked
 
@@ -203,7 +227,12 @@ scripts/key-ffi-build.sh
 - Strictness: every cut and every flipped bit of a set of valid requests is
   refused or handled without a panic and without an internal error; unknown
   ops, oversized lengths, handles that do not exist and a session handle used
-  after it was closed.
+  after it was closed. Every error response of that corpus carries words that
+  pass `check` (SC-12).
+- The words: every state and refusal has words, none breaks the rules of
+  `docs/SCREEN-RULES.md`, no two read the same, and every rule string the
+  source passes to `refused_by`, `wrong_state` and `internal` has words of
+  its own.
 - The JNI glue against a fake `JNIEnv`: the happy path, a Java exception in
   each store method, null returns, a wrong array length from `random`, missing
   methods, no array for the response, use after the call and from another
@@ -217,8 +246,10 @@ scripts/key-ffi-build.sh
   `uniffi` symbol remains.
 - The Kotlin is **not compiled and not run**. Two tests keep it honest as far
   as numbers go: `PROTOCOL.md` is generated from the Rust tables, and a test
-  parses `KeyApp.kt` and compares its `OP_*` and `TAG_*` constants with them.
-  Field order in the Kotlin is checked by reading only.
+  parses `KeyApp.kt` and compares its `OP_*`, `TAG_*`, `TONE_*` and `WHO_*`
+  constants with them. A third reads the text of the `Words` class and of its
+  reader to check that the fields come in the order the frame writes them.
+  Beyond that the Kotlin is checked by reading only.
 
 There is no restore mode to build: a Key app made from typed words is a new
 Key app under every signer rule (`docs/SIGNER-RULES.md` SR-39). Not built: the

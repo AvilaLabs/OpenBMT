@@ -41,8 +41,8 @@ mod tests;
 pub use refusal::{Ceiling, ChangeError, ChangeRefusal, Refusal, RegisterError, SignError};
 pub use review::{OutputKind, Remaining, Review, ReviewedOutput};
 pub use say::{
-    all_words, change_refusal_words_for_text, clock_behind_words, waiting_address_words,
-    wallet_error_words,
+    all_words, clock_behind_words, waiting_address_words, wallet_error_words,
+    wallet_words_for_text, words_for_text,
 };
 pub use sign::Signed;
 pub use state::{AllowlistEntry, Ceilings, FeeCeilings, LogEntry, SignerState, Totals};

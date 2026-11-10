@@ -59,6 +59,7 @@ mod error;
 mod jni;
 mod keys;
 mod kitcheck;
+mod say;
 mod screen;
 mod session;
 mod store;
@@ -76,6 +77,7 @@ pub use keys::{
     coin_bits, dice_bits, dice_face_counts, BitProgress, EntropySource, KeyNetwork, KeyWordCount,
 };
 pub use kitcheck::KitCheck;
+pub use say::{all_words, screens_markdown, words_for, Kind};
 pub use screen::{AllowlistView, CeilingsView, FeeCeilingsView, SignerStatus};
 pub use session::SessionHandle;
 pub use store::KeyStore;

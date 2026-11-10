@@ -9,7 +9,6 @@ use std::fmt;
 
 use openbmt_core::say::{Tone, Who, Words};
 use openbmt_session::EncodeError;
-use openbmt_signer::change_refusal_words_for_text;
 
 use crate::{DecideError, FinishError, RefuseSession, RestoreError, SetupError, StateError};
 
@@ -303,10 +302,80 @@ impl<E: fmt::Display> StateError<E> {
     }
 }
 
+/// The words of the error whose `Display` text is `text`, for a caller that
+/// has only the text (the Key app's calls carry it as a string). The errors
+/// of the signer are looked up in the signer's own list. `None` for a text
+/// of no known kind.
+///
+/// A saved state that fails its setup reads like the setup error, since
+/// the text is the same.
+pub fn words_for_text(text: &str) -> Option<Words> {
+    let mut fixed: Vec<(String, Words)> = Vec::new();
+    for e in refuse_sessions()
+        .into_iter()
+        .filter(|e| !matches!(e, RefuseSession::Frame(_)))
+    {
+        fixed.push((e.to_string(), e.words()));
+    }
+    for e in [DecideError::Finished, DecideError::BadReason] {
+        fixed.push((e.to_string(), e.words()));
+    }
+    let finished = FinishError::<String>::Finished;
+    fixed.push((finished.to_string(), finished.words()));
+    for e in setup_errors()
+        .into_iter()
+        .filter(|e| !matches!(e, SetupError::Identity(_)))
+    {
+        fixed.push((e.to_string(), e.words()));
+    }
+    for e in restore_errors()
+        .into_iter()
+        .filter(|e| !matches!(e, RestoreError::Decode(_)))
+    {
+        fixed.push((e.to_string(), e.words()));
+    }
+    let no_signer = StateError::<String>::NoSigner;
+    fixed.push((no_signer.to_string(), no_signer.words()));
+    if let Some((_, words)) = fixed.into_iter().find(|(t, _)| t == text) {
+        return Some(words);
+    }
+    if let Some(rest) = text.strip_prefix("AS-03: the request is not in canonical form: ") {
+        let e = RefuseSession::Frame(openbmt_core::wire::DecodeError::Truncated);
+        return Some(e.words().detail(rest));
+    }
+    if let Some(rest) = text.strip_prefix("AS-30: the request has no item ") {
+        let n = rest.parse::<u32>().ok()?;
+        return Some(DecideError::UnknownItem(n).words());
+    }
+    if let Some(rest) = text.strip_prefix("AS-23: the line cannot be approved: ") {
+        return Some(DecideError::CannotApprove(rest.to_string()).words());
+    }
+    if let Some(rest) = text.strip_prefix("AS-37: the response cannot be built: ") {
+        let cause = if rest.starts_with("AS-02:") {
+            EncodeError::TooLarge
+        } else {
+            EncodeError::ItemCount
+        };
+        return Some(response_words(&cause).detail(rest));
+    }
+    if let Some(rest) = text.strip_prefix("AS-38: identity: ") {
+        let e = SetupError::Identity(openbmt_core::identity::IdentityError::InvalidSecret);
+        return Some(e.words().detail(rest));
+    }
+    if let Some(rest) = text.strip_prefix("AS-38: the snapshot is not in canonical form: ") {
+        let e = RestoreError::Decode(openbmt_core::wire::DecodeError::Truncated);
+        return Some(e.words().detail(rest));
+    }
+    if text == RECEIVE_MARK_REFUSED {
+        return Some(refused_words(text));
+    }
+    openbmt_signer::words_for_text(text)
+}
+
 /// The words of the refusal whose text is `why`: a refusal of the signer, the
 /// receive mark, or any other text.
 fn refused_words(why: &str) -> Words {
-    if let Some(words) = change_refusal_words_for_text(why) {
+    if let Some(words) = openbmt_signer::words_for_text(why) {
         return words;
     }
     if why == RECEIVE_MARK_REFUSED {
@@ -674,6 +743,43 @@ mod tests {
     #[test]
     fn the_receive_mark_text_is_the_one_the_state_gives() {
         assert!(include_str!("state.rs").contains(RECEIVE_MARK_REFUSED));
+    }
+
+    #[test]
+    fn the_text_of_an_error_finds_its_words() {
+        let same = |text: String, words: Words| {
+            let found = words_for_text(&text).unwrap_or_else(|| panic!("{text}"));
+            assert_eq!(found.heading, words.heading, "{text}");
+            assert_eq!(found.what, words.what, "{text}");
+            assert_eq!(found.code, words.code, "{text}");
+        };
+        for e in refuse_sessions() {
+            same(e.to_string(), e.words());
+        }
+        for e in decide_errors() {
+            same(e.to_string(), e.words());
+        }
+        for e in finish_errors() {
+            if !matches!(e, FinishError::Store(_)) {
+                same(e.to_string(), e.words());
+            }
+        }
+        for e in setup_errors() {
+            same(e.to_string(), e.words());
+        }
+        for e in restore_errors() {
+            same(e.to_string(), e.words());
+        }
+        // A saved state that fails its setup reads like the setup error.
+        for e in setup_errors() {
+            same(RestoreError::Setup(e.clone()).to_string(), e.words());
+        }
+        same(StateError::<String>::NoSigner.to_string(), no_key2_words());
+        // The signer's own texts are found through this one.
+        for r in [ChangeRefusal::AllowlistFull, ChangeRefusal::MarkTooHigh] {
+            same(r.to_string(), r.words());
+        }
+        assert_eq!(words_for_text("something else"), None);
     }
 
     #[test]

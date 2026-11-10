@@ -465,14 +465,59 @@ impl ChangeRefusal {
     }
 }
 
-/// The words of the change refusal whose `Display` text is `text`, for a
-/// caller that has only the text (the Key app's own-screen calls carry it
-/// as a string). `None` for any other text.
-pub fn change_refusal_words_for_text(text: &str) -> Option<Words> {
-    change_refusals()
+/// The words of the refusal or registration error whose `Display` text is
+/// `text`, for a caller that has only the text (the Key app's calls carry
+/// it as a string). `None` for any other text.
+pub fn words_for_text(text: &str) -> Option<Words> {
+    if let Some(r) = change_refusals()
         .into_iter()
         .find(|r| r.to_string() == text)
-        .map(|r| r.words())
+    {
+        return Some(r.words());
+    }
+    let fixed = [
+        RegisterError::UnsupportedNetwork,
+        RegisterError::OwnKeyNotInWallet,
+        RegisterError::Key3NotInWallet,
+    ];
+    if let Some(r) = fixed.into_iter().find(|r| r.to_string() == text) {
+        return Some(r.words());
+    }
+    text.strip_prefix("SR-60: ")
+        .map(|rest| wallet_words_for_text(rest).code("SR-60"))
+}
+
+/// The words for the text of a [`WalletError`], when only the text is
+/// known. A text that is none of the twelve gets words of its own.
+pub fn wallet_words_for_text(text: &str) -> Words {
+    let slots = (1..=3u8).flat_map(|slot| {
+        [
+            WalletError::BadPath { slot },
+            WalletError::BadXpubDepth { slot },
+            WalletError::NetworkMismatch { slot },
+        ]
+    });
+    if let Some(e) = wallet_errors()
+        .into_iter()
+        .chain(slots)
+        .find(|e| e.to_string() == text)
+    {
+        return wallet_error_words(&e);
+    }
+    if text.starts_with("cannot read descriptor") {
+        return wallet_error_words(&WalletError::Parse(String::new())).detail(text);
+    }
+    if text.starts_with("key derivation failed") {
+        return wallet_error_words(&WalletError::Derive(String::new())).detail(text);
+    }
+    Words::new(
+        Tone::Stop,
+        "Wallet not accepted",
+        "This app did not accept the wallet it was given.",
+        Who::KeyHolder,
+        "Scan or copy the wallet from the owner's phone again.",
+    )
+    .detail(text)
 }
 
 /// What the key holder is shown when a wallet description is not accepted.
@@ -1067,6 +1112,25 @@ mod tests {
         assert!(a.what.contains("less than 24 hours ago"));
         assert_eq!(ALLOWLIST_WAIT_SECS, 24 * 3_600);
         assert_eq!(check(&a), Ok(()));
+    }
+
+    #[test]
+    fn the_text_of_a_refusal_finds_its_words() {
+        for r in change_refusals() {
+            assert_eq!(words_for_text(&r.to_string()), Some(r.words()));
+        }
+        for r in register_errors() {
+            assert_eq!(words_for_text(&r.to_string()), Some(r.words()));
+        }
+        for e in wallet_errors() {
+            let w = wallet_words_for_text(&e.to_string());
+            assert_eq!(w.heading, wallet_error_words(&e).heading);
+            assert_eq!(w.detail, Some(e.to_string()));
+        }
+        // A text of no known kind has no words here, and the wallet's own
+        // fallback is a valid screen.
+        assert_eq!(words_for_text("something else"), None);
+        assert_eq!(check(&wallet_words_for_text("something else")), Ok(()));
     }
 
     #[test]

@@ -3,16 +3,19 @@
 
 use std::sync::{Arc, Mutex};
 
+use openbmt_core::say::{check, Quoted, Words};
 use openbmt_owner::ItemOutcome;
 
 use super::kit::*;
 use super::wire::{frame, Rd, W};
+use crate::say::{tone_byte, who_byte, TONES, WHOS};
 use crate::{
     coin_bits, dice_bits, dice_face_counts, dispatch, envelope, error_response, parse_deposit_code,
     word_is_valid, word_suggestions, CeilingsView, Decision, EntropySource, FeeCeilingsView,
     KeyApp, KeyError, KeyNetwork, KeyStore, KeyWordCount, KitCheck, LineKind, Registry, SetupState,
     StoreError, MAX_APPS,
 };
+use crate::{words_for, Kind};
 
 // ---- the ops, by number -----------------------------------------------------------
 
@@ -63,6 +66,107 @@ const INTERNAL: u8 = 4;
 /// What a response says: the result, or the status, rule and text.
 type Reply = Result<Vec<u8>, (u8, String, String)>;
 
+thread_local! {
+    /// How many error responses this thread's `parse_response` has found
+    /// words in that keep the rules.
+    static CHECKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// A strict cursor over the body of a response.
+pub(crate) struct Cur<'a> {
+    data: &'a [u8],
+    p: usize,
+}
+
+impl<'a> Cur<'a> {
+    pub(crate) fn new(data: &'a [u8]) -> Self {
+        Self { data, p: 0 }
+    }
+
+    fn take(&mut self, n: usize) -> &'a [u8] {
+        let bytes = self.data.get(self.p..self.p + n).expect("bytes");
+        self.p += n;
+        bytes
+    }
+
+    fn u8(&mut self) -> u8 {
+        *self.take(1).first().expect("a byte")
+    }
+
+    fn flag(&mut self) -> bool {
+        match self.u8() {
+            0 => false,
+            1 => true,
+            other => panic!("a flag of {other}"),
+        }
+    }
+
+    fn str16(&mut self) -> String {
+        let n = usize::from(u16::from_le_bytes(self.take(2).try_into().expect("2")));
+        String::from_utf8(self.take(n).to_vec()).expect("UTF-8")
+    }
+
+    fn opt_str16(&mut self) -> Option<String> {
+        self.flag().then(|| self.str16())
+    }
+
+    fn done(&self) -> bool {
+        self.p == self.data.len()
+    }
+}
+
+/// The words at the end of an error response, read strictly. The `code`
+/// and the `from` of a quote are `&'static str` in `Words`, so the few a
+/// test reads are leaked.
+pub(crate) fn read_words(body: &[u8]) -> Words {
+    let mut c = Cur::new(body);
+    let tone = c.u8();
+    let who = c.u8();
+    let tone = TONES
+        .iter()
+        .find(|t| t.2 == tone)
+        .unwrap_or_else(|| panic!("tone {tone}"))
+        .0;
+    let who = WHOS
+        .iter()
+        .find(|w| w.2 == who)
+        .unwrap_or_else(|| panic!("who {who}"))
+        .0;
+    let heading = c.str16();
+    let what = c.str16();
+    let next = c.str16();
+    let code = c.opt_str16();
+    let at = c
+        .flag()
+        .then(|| u64::from_le_bytes(c.take(8).try_into().expect("8")));
+    let quoted = c.flag().then(|| {
+        let from = c.str16();
+        let text = c.str16();
+        (from, text)
+    });
+    let detail = c.opt_str16();
+    assert!(c.done(), "bytes left over after the words");
+    let mut w = Words::new(tone, heading, what, who, next);
+    w.code = code.map(|c| &*Box::leak(c.into_boxed_str()));
+    w.at = at;
+    w.quoted = quoted.map(|(from, text)| Quoted {
+        from: Box::leak(from.into_boxed_str()),
+        text,
+    });
+    w.detail = detail;
+    w
+}
+
+fn kind_of(status: u8) -> Kind {
+    match status {
+        REFUSED => Kind::Refused,
+        STORE => Kind::Store,
+        STATE_ERR => Kind::State,
+        INTERNAL => Kind::Internal,
+        other => panic!("status {other}"),
+    }
+}
+
 fn parse_response(response: &[u8]) -> Reply {
     assert_eq!(response.get(..4), Some(b"OBM9".as_slice()), "magic");
     assert_eq!(response.get(4), Some(&1), "version");
@@ -72,18 +176,15 @@ fn parse_response(response: &[u8]) -> Reply {
         return Ok(body.to_vec());
     }
     assert!(status <= INTERNAL, "status {status}");
-    let mut p = 0;
-    let mut text = || {
-        let n = usize::from(u16::from_le_bytes(
-            body.get(p..p + 2).expect("a length").try_into().expect("2"),
-        ));
-        let s = std::str::from_utf8(body.get(p + 2..p + 2 + n).expect("text")).expect("UTF-8");
-        p += 2 + n;
-        s.to_string()
-    };
-    let rule = text();
-    let text = text();
-    assert_eq!(p, body.len(), "bytes left over");
+    let mut c = Cur::new(body);
+    let rule = c.str16();
+    let text = c.str16();
+    let words = read_words(body.get(c.p..).expect("the words"));
+    // Every error response carries words that keep the rules, and they are
+    // the words of its kind, rule and text.
+    assert_eq!(check(&words), Ok(()), "{rule}: {text}");
+    assert_eq!(words, words_for(kind_of(status), &rule, &text));
+    CHECKED.with(|n| n.set(n.get() + 1));
     Err((status, rule, text))
 }
 
@@ -946,6 +1047,85 @@ fn an_error_frame_is_well_formed_for_every_kind() {
     assert!(got.2.chars().all(|c| c == '\u{e9}'));
 }
 
+#[test]
+fn an_error_frame_carries_the_words_after_the_rule_and_the_text() {
+    let e = KeyError::State {
+        rule: "empty".to_string(),
+        text: "no key has been made yet".to_string(),
+    };
+    let frame = error_response(&e);
+    // Magic, version, status 3, then rule and text.
+    let mut expect = b"OBM9".to_vec();
+    expect.extend_from_slice(&[1, STATE_ERR]);
+    for text in ["empty", "no key has been made yet"] {
+        expect.extend_from_slice(&(text.len() as u16).to_le_bytes());
+        expect.extend_from_slice(text.as_bytes());
+    }
+    assert_eq!(frame.get(..expect.len()), Some(expect.as_slice()));
+    let words = frame.get(expect.len()..).expect("the words");
+    // Tone Info is 0 and who KeyHolder is 5; then heading, what, next.
+    assert_eq!(&words[..2], &[0, 5]);
+    let mut c = Cur::new(&words[2..]);
+    assert_eq!(c.str16(), "No key yet");
+    assert_eq!(c.str16(), "This app has no key yet.");
+    assert_eq!(
+        c.str16(),
+        "Make the key, or type the words of an existing key."
+    );
+    // No code, no time, no quoted text, a detail with the text.
+    assert!(!c.flag());
+    assert!(!c.flag());
+    assert!(!c.flag());
+    assert_eq!(c.opt_str16().as_deref(), Some("no key has been made yet"));
+    assert!(c.done());
+}
+
+#[test]
+fn every_field_of_the_words_is_written_and_read_back() {
+    use crate::call::put_words;
+    use openbmt_core::say::{Tone, Who};
+    let full = Words::new(
+        Tone::Stop,
+        "A heading",
+        "What happened.",
+        Who::Owner,
+        "What to do.",
+    )
+    .code("AS-20")
+    .at(1_700_000_000)
+    .quoted(Quoted::new("The owner's phone says", "Refund for Ann"))
+    .detail("record 7");
+    let mut out = Vec::new();
+    put_words(&mut out, &full);
+    assert_eq!(read_words(&out), full);
+    for (tone, _, byte) in TONES {
+        assert_eq!(tone_byte(tone), byte);
+    }
+    for (who, _, byte) in WHOS {
+        assert_eq!(who_byte(who), byte);
+    }
+    let bare = Words::new(Tone::Good, "Done", "It is done.", Who::Nobody, "Nothing.");
+    let mut out = Vec::new();
+    put_words(&mut out, &bare);
+    assert_eq!(read_words(&out), bare);
+}
+
+#[test]
+fn every_error_the_crate_can_name_travels_with_words_that_keep_the_rules() {
+    for (kind, rule, text) in crate::say::samples() {
+        let (rule, text) = (rule.to_string(), text.to_string());
+        let e = match kind {
+            Kind::Refused => KeyError::Refused { rule, text },
+            Kind::Store => KeyError::Store { rule, text },
+            Kind::State => KeyError::State { rule, text },
+            Kind::Internal => KeyError::Internal { rule, text },
+        };
+        // `parse_response` checks the words and compares them with
+        // `words_for`.
+        parse_response(&error_response(&e)).expect_err("an error");
+    }
+}
+
 /// A Key app that is ready, with a session open, in a fresh registry:
 /// app handle 1, session handle 2.
 fn world(stored: &[u8], request: &[u8]) -> Client {
@@ -1131,4 +1311,8 @@ fn every_cut_and_every_flipped_bit_of_a_valid_request_is_handled() {
         }
     }
     assert!(flips > 2_000, "{flips}");
+    // Every error response of the corpus carried words that keep the rules
+    // (`parse_response` checks each one).
+    let checked = CHECKED.with(std::cell::Cell::get);
+    assert!(checked > 2_000, "{checked}");
 }

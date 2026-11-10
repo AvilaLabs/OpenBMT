@@ -11,8 +11,15 @@
 //!   status 2  store    (KeyError::Store)
 //!   status 3  state    (KeyError::State)
 //!   status 4  internal (KeyError::Internal, a panic was caught)
-//!   status 1 to 4 carry rule and text, each a u16 length and UTF-8
+//!   status 1 to 4 carry rule and text, then the words (see below)
 //! ```
+//!
+//! After rule and text an error response carries the words the person is
+//! shown (`docs/SCREEN-RULES.md`), in this order and with every string a u16
+//! length and UTF-8: tone u8, who u8, heading, what, next, code (a flag
+//! byte, then a string), at (a flag byte, then a u64), quoted (a flag byte,
+//! then from and text) and detail (a flag byte, then a string). The numbers
+//! of tone and who are in `bindings/PROTOCOL.md`.
 //!
 //! Integers are little-endian; the field encodings are in
 //! [`codec`](crate::codec). The request is read completely before anything
@@ -48,6 +55,8 @@ use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
 
+use openbmt_core::say::Words;
+
 use crate::app::{Key2Public, KeyApp, SetupState, SlotView, WalletSetup, WalletView};
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::deposit::{parse_deposit_code, DepositCode};
@@ -56,6 +65,7 @@ use crate::keys::{
     coin_bits, dice_bits, dice_face_counts, BitProgress, EntropySource, KeyNetwork, KeyWordCount,
 };
 use crate::kitcheck::KitCheck;
+use crate::say::{tone_byte, who_byte, TONES, WHOS};
 use crate::screen::{AllowlistView, CeilingsView, FeeCeilingsView, SignerStatus};
 use crate::session::SessionHandle;
 use crate::store::KeyStore;
@@ -572,6 +582,43 @@ fn put_str16(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(s.as_bytes().get(..n).unwrap_or_default());
 }
 
+fn put_flagged_str16(out: &mut Vec<u8>, s: Option<&str>) {
+    match s {
+        Some(s) => {
+            out.push(1);
+            put_str16(out, s);
+        }
+        None => out.push(0),
+    }
+}
+
+/// The words of an error as the response frame carries them, after the rule
+/// and the text.
+pub(crate) fn put_words(out: &mut Vec<u8>, w: &Words) {
+    out.push(tone_byte(w.tone));
+    out.push(who_byte(w.who));
+    put_str16(out, &w.heading);
+    put_str16(out, &w.what);
+    put_str16(out, &w.next);
+    put_flagged_str16(out, w.code);
+    match w.at {
+        Some(at) => {
+            out.push(1);
+            out.extend_from_slice(&at.to_le_bytes());
+        }
+        None => out.push(0),
+    }
+    match &w.quoted {
+        Some(q) => {
+            out.push(1);
+            put_str16(out, q.from);
+            put_str16(out, &q.text);
+        }
+        None => out.push(0),
+    }
+    put_flagged_str16(out, w.detail.as_deref());
+}
+
 /// The response frame of an error. For a binding that fails before it can
 /// call [`dispatch`].
 pub fn error_response(e: &KeyError) -> Vec<u8> {
@@ -587,6 +634,7 @@ pub fn error_response(e: &KeyError) -> Vec<u8> {
     out.push(status);
     put_str16(&mut out, e.rule());
     put_str16(&mut out, e.text());
+    put_words(&mut out, &e.words());
     out
 }
 
@@ -671,11 +719,15 @@ pub fn protocol_description() -> String {
          request   \"OBM8\" | version 1 | op u16 | handle u64 | fields...\n\
          response  \"OBM9\" | version 1 | status u8 | ...\n\
          \x20 status 0  ok: the result of the op\n\
-         \x20 status 1  refused   then rule and text\n\
-         \x20 status 2  store     then rule and text\n\
-         \x20 status 3  state     then rule and text\n\
-         \x20 status 4  internal  then rule and text\n\
+         \x20 status 1  refused   then rule, text and words\n\
+         \x20 status 2  store     then rule, text and words\n\
+         \x20 status 3  state     then rule, text and words\n\
+         \x20 status 4  internal  then rule, text and words\n\
          \x20 rule and text are each a u16 length and UTF-8\n\
+         \x20 words: tone u8 | who u8 | heading | what | next\n\
+         \x20   | code (flag, string) | at (flag, u64)\n\
+         \x20   | quoted (flag, from, text) | detail (flag, string)\n\
+         \x20   every string is a u16 length and UTF-8\n\
          ```\n\
          \n\
          Integers are little-endian. A bool is one byte, 0 or 1. A string is a\n\
@@ -712,5 +764,24 @@ pub fn protocol_description() -> String {
         }
     }
     s.push_str("```\n");
-    s
+    let numbers = |names: Vec<String>| names.join(" ");
+    let words = format!(
+        "## Words\n\
+         \n\
+         The words of an error say what a person is shown. The numbers of the\n\
+         tone and of the person who does the next step are:\n\
+         \n\
+         ```text\n\
+         tone: {}\n\
+         who:  {}\n\
+         ```\n\
+         \n\
+         The time `at` is in seconds since 1970, for the app to show on the\n\
+         person's own clock. `quoted` is text from another device, with where it\n\
+         came from. `detail` is for the small print.\n\
+         \n",
+        numbers(TONES.iter().map(|(_, n, b)| format!("{n}={b}")).collect()),
+        numbers(WHOS.iter().map(|(_, n, b)| format!("{n}={b}")).collect()),
+    );
+    s.replacen("## Ops\n", &format!("{words}## Ops\n"), 1)
 }
