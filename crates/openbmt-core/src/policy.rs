@@ -628,7 +628,7 @@ fn paid_to(outputs: &[TxOut], script: &Script) -> u64 {
         .fold(0u64, |a, o| a.saturating_add(o.value.to_sat()))
 }
 
-/// Sort a replacement of a payment we counted. It is a fee bump only if the
+/// Sort a replacement of a payment that was counted. It is a fee bump only if the
 /// original paid `our_script` more than zero and the replacement pays
 /// `our_script` at least as much as the original did, summing every output to
 /// that script. Otherwise it is a cancel.
@@ -1473,7 +1473,7 @@ mod tests {
             classify_replacement(&orig, &[], &ours),
             ReplacementKind::Cancel
         );
-        // a zero-value output to our script does not make up the amount
+        // a zero-value output to the shop's script does not make up the amount
         let sibling = [out(&ours.clone(), 0), out(&other, 20_000)];
         assert_eq!(
             classify_replacement(&orig, &sibling, &ours),

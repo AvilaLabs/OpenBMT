@@ -873,7 +873,7 @@ impl Manager {
                 if blocks.iter().any(|b| !self.store.holds(b)) {
                     self.reask(id, now, out);
                 }
-                // NR-40: a peer that announces a block on our best chain
+                // NR-40: a peer that announces a block on this best chain
                 // has shown it.
                 let height = blocks.iter().filter_map(|b| self.store.height_of(b)).max();
                 if let Some(height) = height {

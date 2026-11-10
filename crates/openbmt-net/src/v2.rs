@@ -209,8 +209,8 @@ fn our_key(magic: [u8; 4], entropy: &V2Entropy) -> Result<[u8; KEY_LEN], Drop> {
     Ok(out)
 }
 
-/// The handshake after our version packet, and the bytes of our garbage
-/// terminator and version packet. The same entropy and the same peer key
+/// The handshake after this side's version packet, and the bytes of this
+/// side's garbage terminator and version packet. The same entropy and the same peer key
 /// always give the same result.
 fn sent_version(
     magic: [u8; 4],
@@ -305,7 +305,7 @@ fn attempt(
 struct Garbage {
     entropy: V2Entropy,
     peer_key: [u8; KEY_LEN],
-    /// The handshake after our version packet; `None` while it has been
+    /// The handshake after this side's version packet; `None` while it has been
     /// used up by a read that stopped inside a packet.
     sent: Option<Handshake<SentVersion>>,
     /// Everything after the peer's key.

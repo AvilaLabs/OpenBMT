@@ -3,8 +3,8 @@
 //! Settings are signed by the owner root. A change that only makes things
 //! stricter (tightening) needs that one signature. A change that lets more
 //! money leave or be accepted at risk, or removes a check or an alert
-//! (loosening), also needs the Key app's co-signature (§2.9). A change we
-//! cannot sort is loosening, and a change that mixes both is loosening.
+//! (loosening), also needs the Key app's co-signature (§2.9). A change that
+//! cannot be sorted is loosening, and a change that mixes both is loosening.
 //!
 //! Each money limit is kept in satoshis, which is what counters enforce, and
 //! in whole display dollars "from the owner phone", which is only a label.
