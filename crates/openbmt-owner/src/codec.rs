@@ -6,11 +6,12 @@
 //!   | next number u32
 //!   | known settings: flag, then length u32 and the `OBMS` bytes
 //!   | sales | refunds | cash-outs | batches | settings | pairings
-//!   | open sessions | finished objects
+//!   | open sessions | finished objects | issued ranges
 //! ```
 //!
 //! Every list is a u32 count and then its entries in ascending order of
-//! their key. Decoding is strict (AS-03 in the file's rules, AS-65 here): a
+//! their key (the issued ranges: counter, start and count, ascending by
+//! start and never overlapping, OC-10, OC-11). Decoding is strict (AS-03 in the file's rules, AS-65 here): a
 //! snapshot is accepted only if encoding what it describes gives the same
 //! bytes.
 
@@ -30,13 +31,13 @@ use openbmt_spend::dust_limit;
 use crate::error::{Refusal, RestoreError};
 use crate::state::{outputs_fit, Frozen, OpenSession, Owner, SaleEntry, State};
 use crate::types::{
-    CashAmount, CashOut, Deliverable, Delivery, FeePayer, Options, QueuedBatch, QueuedPairing,
-    QueuedSettings, Refund, RefundPacking, SaleFacts, SaleKey, Stage,
+    CashAmount, CashOut, Deliverable, Delivery, FeePayer, IssuedRange, Options, QueuedBatch,
+    QueuedPairing, QueuedSettings, Refund, RefundPacking, SaleFacts, SaleKey, Stage,
 };
 use crate::{
-    MAGIC_OWNER_QUEUE, MAX_BATCHES, MAX_CASH_OUTS, MAX_CONFLICT_OUTPOINTS, MAX_ITEMS_PER_SESSION,
-    MAX_OPEN_SESSIONS, MAX_OUTBOX, MAX_PAIRINGS, MAX_REFUNDS, MAX_REFUNDS_PER_TX, MAX_SALES,
-    MAX_SESSION_REQUEST, MAX_SETTINGS, MAX_SNAPSHOT_BYTES,
+    MAGIC_OWNER_QUEUE, MAX_BATCHES, MAX_CASH_OUTS, MAX_CONFLICT_OUTPOINTS, MAX_ISSUED_RANGES,
+    MAX_ITEMS_PER_SESSION, MAX_OPEN_SESSIONS, MAX_OUTBOX, MAX_PAIRINGS, MAX_REFUNDS,
+    MAX_REFUNDS_PER_TX, MAX_SALES, MAX_SESSION_REQUEST, MAX_SETTINGS, MAX_SNAPSHOT_BYTES,
 };
 
 fn bad(why: &'static str) -> DecodeError {
@@ -298,6 +299,12 @@ pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
                 put_blob(&mut out, b);
             }
         }
+    }
+    put_u32(&mut out, st.issued.len());
+    for range in &st.issued {
+        out.extend_from_slice(&range.counter.to_bytes());
+        out.extend_from_slice(&range.start.to_le_bytes());
+        out.extend_from_slice(&range.count.to_le_bytes());
     }
     if out.len() > MAX_SNAPSHOT_BYTES {
         return Err(Refusal::SnapshotTooLarge);
@@ -691,6 +698,27 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
         };
         st.outbox.push(Deliverable { id, what });
     }
+
+    let n = r.count(MAX_ISSUED_RANGES, 40).map_err(d)?;
+    let mut next_free: u64 = 0;
+    for _ in 0..n {
+        let counter = r.device_id().map_err(d)?;
+        let start = r.u32_le().map_err(d)?;
+        let count = r.u32_le().map_err(d)?;
+        let range = IssuedRange {
+            start,
+            count,
+            counter,
+        };
+        if count == 0 || range.end() > u64::from(u32::MAX) {
+            return Err(d(bad("an issued range is empty or past the last index")));
+        }
+        if u64::from(start) < next_free {
+            return Err(d(bad("issued ranges overlap or are not in order")));
+        }
+        next_free = range.end();
+        st.issued.push(range);
+    }
     r.finish().map_err(d)?;
 
     check_consistency(owner, &st)?;
@@ -728,6 +756,30 @@ fn check_consistency(owner: &Owner, st: &State) -> Result<(), RestoreError> {
         if id >= st.next_id || !seen.insert(id) {
             return Err(bad("a number is used twice or is not below the next"));
         }
+    }
+    // OC-10: every batch the owner holds lies in a range issued for its
+    // counter. Ranges outlive batches, so the other way round is not asked.
+    let covered = |counter: openbmt_core::identity::DeviceId, start: u32, count: u32| {
+        st.issued
+            .iter()
+            .any(|r| r.counter == counter && r.start == start && r.count == count)
+    };
+    let waiting_batches: Vec<SignedBatch> = st
+        .outbox
+        .iter()
+        .filter_map(|d| match &d.what {
+            Delivery::Batch(bytes) => SignedBatch::from_bytes(bytes).ok(),
+            _ => None,
+        })
+        .collect();
+    if !st
+        .batches
+        .iter()
+        .map(|q| &q.batch)
+        .chain(waiting_batches.iter().map(|b| &b.batch))
+        .all(|b| covered(b.counter, b.start, b.count))
+    {
+        return Err(bad("a batch is not among the issued ranges"));
     }
     // Entries that are not refunds or cash-outs have only the first three
     // stages.

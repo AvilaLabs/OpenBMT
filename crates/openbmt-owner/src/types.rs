@@ -16,14 +16,37 @@ pub struct SaleKey {
     pub index: u32,
 }
 
-/// What the counter's verified records say about a sale, folded by the
-/// caller (AS-52, AS-53). The owner phone takes these as given.
+/// What a sale received and whether it reached the refund depth (AS-52,
+/// AS-53). The owner phone takes these as given, so the caller must fold
+/// them from the owner's own checked view of the chain and the ranges the
+/// owner issued (OC-14), never from a counter's records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SaleFacts {
     /// What was received for the sale, in satoshis.
     pub received_sats: u64,
     /// Whether the payment has reached the refund depth (AS-53).
     pub reached_refund_depth: bool,
+}
+
+/// A range of receive indices the owner has signed an address batch for
+/// (OC-10). It is kept for good: delivering or archiving the batch does not
+/// remove it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IssuedRange {
+    /// The first receive index.
+    pub start: u32,
+    /// How many indices.
+    pub count: u32,
+    /// The counter the batch was signed for.
+    pub counter: DeviceId,
+}
+
+impl IssuedRange {
+    /// The first index past the range, as a wider number so that it cannot
+    /// overflow.
+    pub fn end(&self) -> u64 {
+        u64::from(self.start) + u64::from(self.count)
+    }
 }
 
 /// Who pays the fee of a refund transaction (AS-56).

@@ -50,9 +50,9 @@ mod types;
 pub use error::{OwnerError, Refusal, RestoreError, SetupError};
 pub use state::Owner;
 pub use types::{
-    Built, CashAmount, CashOut, Deliverable, Delivery, FeePayer, ItemOutcome, Options, QueuedBatch,
-    QueuedPairing, QueuedSettings, Refund, RefundPacking, SaleFacts, SaleKey, SettingsQueued,
-    Skipped, Stage, Taken,
+    Built, CashAmount, CashOut, Deliverable, Delivery, FeePayer, IssuedRange, ItemOutcome, Options,
+    QueuedBatch, QueuedPairing, QueuedSettings, Refund, RefundPacking, SaleFacts, SaleKey,
+    SettingsQueued, Skipped, Stage, Taken,
 };
 
 /// AS-65: the magic of the owner phone's stored queue.
@@ -69,6 +69,8 @@ pub const MAX_SETTINGS: usize = 16;
 pub const MAX_PAIRINGS: usize = 16;
 /// AS-50: most sales whose facts are kept.
 pub const MAX_SALES: usize = 1024;
+/// OC-11, AS-50: most address ranges kept as issued.
+pub const MAX_ISSUED_RANGES: usize = 65_536;
 /// AS-50: most open sessions.
 pub const MAX_OPEN_SESSIONS: usize = 8;
 /// AS-50: most finished objects waiting to be delivered.

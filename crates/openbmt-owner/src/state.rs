@@ -14,12 +14,12 @@ use openbmt_spend::dust_limit;
 use crate::codec;
 use crate::error::{OwnerError, Refusal, RestoreError, SetupError};
 use crate::types::{
-    CashAmount, CashOut, Deliverable, Delivery, Options, QueuedBatch, QueuedPairing,
+    CashAmount, CashOut, Deliverable, Delivery, IssuedRange, Options, QueuedBatch, QueuedPairing,
     QueuedSettings, Refund, SaleFacts, SaleKey, SettingsQueued, Stage,
 };
 use crate::{
-    MAX_BATCHES, MAX_CASH_OUTS, MAX_PAIRINGS, MAX_REFUNDS, MAX_SALES, MAX_SETTINGS,
-    MAX_SNAPSHOT_BYTES,
+    MAX_BATCHES, MAX_CASH_OUTS, MAX_ISSUED_RANGES, MAX_PAIRINGS, MAX_REFUNDS, MAX_SALES,
+    MAX_SETTINGS, MAX_SNAPSHOT_BYTES,
 };
 
 /// 21,000,000 BTC in satoshis.
@@ -105,6 +105,9 @@ pub(crate) struct State {
     pub known: Option<SignedSettings>,
     pub sessions: Vec<OpenSession>,
     pub outbox: Vec<Deliverable>,
+    /// OC-10: the ranges the owner signed batches for, ascending by start,
+    /// never overlapping, never removed.
+    pub issued: Vec<IssuedRange>,
 }
 
 impl State {
@@ -121,7 +124,40 @@ impl State {
             known: None,
             sessions: Vec::new(),
             outbox: Vec::new(),
+            issued: Vec::new(),
         }
+    }
+
+    /// OC-10: the counter whose issued range holds this receive index.
+    pub fn counter_of(&self, index: u32) -> Option<DeviceId> {
+        let at = self.issued.partition_point(|r| r.start <= index);
+        let range = self.issued.get(at.checked_sub(1)?)?;
+        (u64::from(index) < range.end()).then_some(range.counter)
+    }
+
+    /// OC-11: record a range as issued. It must not overlap one issued
+    /// already, and the list is bounded.
+    pub fn issue(&mut self, range: IssuedRange) -> Result<(), Refusal> {
+        let at = self.issued.partition_point(|r| r.start < range.start);
+        let before_overlaps = at
+            .checked_sub(1)
+            .and_then(|i| self.issued.get(i))
+            .is_some_and(|r| r.end() > u64::from(range.start));
+        let after_overlaps = self
+            .issued
+            .get(at)
+            .is_some_and(|r| u64::from(r.start) < range.end());
+        if before_overlaps || after_overlaps {
+            return Err(Refusal::BatchOverlaps {
+                start: range.start,
+                count: range.count,
+            });
+        }
+        if self.issued.len() >= MAX_ISSUED_RANGES {
+            return Err(Refusal::IssuedRangesFull);
+        }
+        self.issued.insert(at, range);
+        Ok(())
     }
 
     /// A new number for a queue entry or a finished object.
@@ -376,12 +412,28 @@ impl Owner {
             .map(|s| s.request.as_slice())
     }
 
-    /// The first receive index that no batch the owner phone holds has
-    /// handed out: the highest `start + count` over the batches in the queue
-    /// and over the signed batches waiting to be delivered. A batch that was
-    /// delivered leaves both, so a caller that must not forget it keeps the
-    /// highest value it has seen.
+    /// OC-10: the counter that a receive index was issued to, if the owner
+    /// signed a batch that holds the index. Ranges are kept for good, so
+    /// the answer does not change when the batch is delivered or archived.
+    pub fn counter_of(&self, index: u32) -> Option<DeviceId> {
+        self.state.counter_of(index)
+    }
+
+    /// OC-10: the ranges issued, ascending by start.
+    pub fn issued_ranges(&self) -> &[IssuedRange] {
+        &self.state.issued
+    }
+
+    /// The first receive index that no batch the owner phone signed has
+    /// handed out: the highest `start + count` over the issued ranges, which
+    /// are kept after a batch is delivered, so no caller has to remember
+    /// the highest value it has seen.
     pub fn receive_mark(&self) -> u32 {
+        let issued = self
+            .state
+            .issued
+            .iter()
+            .map(|r| u32::try_from(r.end()).unwrap_or(u32::MAX));
         let queued = self
             .state
             .batches
@@ -393,7 +445,7 @@ impl Owner {
                 .map(|b| b.batch.start.saturating_add(b.batch.count)),
             _ => None,
         });
-        queued.chain(waiting).max().unwrap_or(0)
+        issued.chain(queued).chain(waiting).max().unwrap_or(0)
     }
 
     /// The first change index that no open session has frozen: one above the
@@ -436,7 +488,9 @@ impl Owner {
 
     // ---- facts and options ----------------------------------------------------
 
-    /// AS-52, AS-53: set what the counter's records say about a sale.
+    /// AS-52, AS-53: set what a sale received and whether it reached the
+    /// refund depth. The caller takes these from the owner's own view
+    /// (OC-14), never from a counter's records.
     pub fn set_sale_facts<E>(
         &mut self,
         sale: SaleKey,
@@ -586,6 +640,12 @@ impl Owner {
         if next.batches.len() >= MAX_BATCHES {
             return Err(Refusal::Full("the batch queue").into());
         }
+        // OC-10, OC-11: the range is recorded in the same write as the batch.
+        next.issue(IssuedRange {
+            start: batch.start,
+            count: batch.count,
+            counter: batch.counter,
+        })?;
         let id = next.take_id()?;
         let owner_sig = batch.sign(&self.identity);
         next.batches.push(QueuedBatch {

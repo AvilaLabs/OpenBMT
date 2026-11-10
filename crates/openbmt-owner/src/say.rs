@@ -529,6 +529,21 @@ impl Refusal {
                 "Make the batch again from this wallet for the same counter, then queue it.",
             )
             .code("AS-58"),
+            Self::BatchOverlaps { start, count } => stop(
+                "Addresses already given out",
+                "Some of these addresses were already signed for a counter, and an address is never given out twice.",
+                Who::Owner,
+                "Make the batch again from the first address that was not given out yet.",
+            )
+            .code("OC-11")
+            .detail(format!("{count} addresses from {start}")),
+            Self::IssuedRangesFull => stop(
+                "No more address batches",
+                "This phone has signed the most address batches it keeps a record of.",
+                Who::Owner,
+                "Do not sign more batches. Report this limit to the OpenBMT project.",
+            )
+            .code("OC-11"),
             Self::PairingRequest(why) => stop(
                 "Pairing request not accepted",
                 "The Key app's offer does not accept this counter's pairing request.",
@@ -925,6 +940,14 @@ pub fn all_words() -> Vec<(String, Words)> {
         );
     }
     add("Refusal::BatchNotDerived", Refusal::BatchNotDerived.words());
+    add(
+        "Refusal::BatchOverlaps",
+        Refusal::BatchOverlaps { start: 3, count: 3 }.words(),
+    );
+    add(
+        "Refusal::IssuedRangesFull",
+        Refusal::IssuedRangesFull.words(),
+    );
     add(
         "Refusal::PairingRequest",
         Refusal::PairingRequest("a sample".to_string()).words(),

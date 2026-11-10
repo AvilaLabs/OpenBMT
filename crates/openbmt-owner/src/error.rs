@@ -45,6 +45,16 @@ pub enum Refusal {
     WrongStage(&'static str),
     /// AS-58: a batch does not equal what the wallet derives for it.
     BatchNotDerived,
+    /// OC-11: a batch overlaps a range of receive indices that was issued
+    /// already.
+    BatchOverlaps {
+        /// The first index of the batch.
+        start: u32,
+        /// How many indices the batch holds.
+        count: u32,
+    },
+    /// OC-11: the most ranges that are kept as issued are kept already.
+    IssuedRangesFull,
     /// AS-58: a pairing request is not one the Key app's offer accepts.
     PairingRequest(String),
     /// AS-59: settings that do not pass the settings rules.
@@ -108,6 +118,14 @@ impl fmt::Display for Refusal {
             Self::BatchNotDerived => write!(
                 f,
                 "AS-58: the batch is not what the wallet derives for that counter and range"
+            ),
+            Self::BatchOverlaps { start, count } => write!(
+                f,
+                "OC-11: the batch of {count} indices from {start} overlaps a range issued already"
+            ),
+            Self::IssuedRangesFull => write!(
+                f,
+                "OC-11: the most issued ranges are kept already; no new batch is signed"
             ),
             Self::PairingRequest(why) => {
                 write!(f, "AS-58: the pairing request is refused: {why}")
