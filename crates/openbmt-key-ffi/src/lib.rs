@@ -60,6 +60,7 @@ mod screen;
 mod session;
 mod store;
 mod views;
+mod words;
 
 #[cfg(test)]
 mod tests;
@@ -77,5 +78,6 @@ pub use views::{
     LineDetail, LineKind, LineView, OutputKindView, OutputView, OwnerLabelKind, OwnerLabelView,
     PairingDetail, SettingChangeView, SettingsDetail, SpendDetail, SpendReviewView,
 };
+pub use words::{word_is_valid, word_suggestions};
 
 uniffi::setup_scaffolding!();

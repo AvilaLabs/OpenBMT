@@ -273,6 +273,7 @@ fn wipe_source(source: EntropySource) {
         EntropySource::DiceHashed { rolls } | EntropySource::DiceSkewCorrected { rolls, .. } => {
             wipe_string(rolls);
         }
+        EntropySource::TypedWords { words } => words.into_iter().for_each(wipe_string),
         EntropySource::Platform | EntropySource::CoinFlips { .. } => {}
     }
 }

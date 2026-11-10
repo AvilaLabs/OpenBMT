@@ -15,6 +15,7 @@ use openbmt_core::wallet::coin_type;
 use crate::envelope::{wipe_string, Key2, Material, Secret32};
 use crate::error::{internal, refused_by, KeyError};
 use crate::store::KeyStore;
+use crate::words::mnemonic_from_typed;
 
 /// A network the Key app works on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -85,6 +86,14 @@ pub enum EntropySource {
         rolls: String,
         /// 12 or 24 words.
         words: KeyWordCount,
+    },
+    /// Twelve or 24 words the owner already has, typed in (BIP39 English,
+    /// no passphrase). Each word is trimmed and lower-cased. The words are
+    /// not kept and `key_words` returns nothing for this source. The
+    /// signer starts with empty history, as with every source.
+    TypedWords {
+        /// The words, in order.
+        words: Vec<String>,
     },
 }
 
@@ -197,8 +206,14 @@ pub(crate) fn make_key2(
                 .map_err(|e| refused_by("entropy", e))?
                 .into_mnemonic()
         }
+        EntropySource::TypedWords { words } => mnemonic_from_typed(words)?,
     };
-    let words: Vec<String> = mnemonic.words().map(str::to_string).collect();
+    // The owner typed these words in: they are not kept or returned.
+    let words: Vec<String> = if matches!(source, EntropySource::TypedWords { .. }) {
+        Vec::new()
+    } else {
+        mnemonic.words().map(str::to_string).collect()
+    };
     let mut seed = mnemonic.to_seed_normalized("");
     let key = key2_from_seed(&seed, network);
     seed.fill(0);
@@ -247,7 +262,7 @@ pub(crate) fn make_material(
                     identity,
                     key2: Some(key2),
                 },
-                Some(words),
+                Some(words).filter(|w| !w.is_empty()),
             ))
         }
         None => Ok((

@@ -5,3 +5,4 @@ mod kit;
 mod screen;
 mod session;
 mod setup;
+mod words;
