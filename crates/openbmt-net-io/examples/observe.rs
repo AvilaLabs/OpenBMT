@@ -30,7 +30,7 @@ use bitcoin::{BlockHash, Network, ScriptBuf, WScriptHash};
 use openbmt_net_io::{AppEvent, Driver, DriverConfig, FileStorage, OsRandomness, SystemClock};
 use openbmt_watch::{network_group, HeaderStore, NetGroup};
 
-const USAGE: &str = "usage: observe <bitcoin|signet> <data dir> <seconds>";
+const USAGE: &str = "usage: observe <bitcoin|signet> <data dir> <seconds> [headers-only]";
 
 /// A line of `/proc/self/io`, or 0.
 fn proc_io(field: &str) -> u64 {
@@ -78,8 +78,14 @@ fn secs(t: Option<f64>) -> String {
 }
 
 fn run(args: &[String]) -> Result<(), String> {
-    let [network, dir, seconds] = args else {
-        return Err(USAGE.to_string());
+    // A fourth argument, `headers-only`, watches no script: the headers
+    // are fetched and stored and no block is checked. Run it once on a
+    // fresh data dir before the real run, so that the real run starts at
+    // the network's tip and not at the start block.
+    let (network, dir, seconds, headers_only) = match args {
+        [n, d, s] => (n, d, s, false),
+        [n, d, s, mode] if mode == "headers-only" => (n, d, s, true),
+        _ => return Err(USAGE.to_string()),
     };
     let network = match network.as_str() {
         "bitcoin" => Network::Bitcoin,
@@ -109,8 +115,13 @@ fn run(args: &[String]) -> Result<(), String> {
     let started = Instant::now();
     let (rx0, tx0) = net_dev();
     let io0 = proc_io("rchar:");
-    let mut handle = Driver::spawn(config, storage, SystemClock, random, vec![script])
-        .map_err(|e| e.to_string())?;
+    let scripts = if headers_only {
+        Vec::new()
+    } else {
+        vec![script]
+    };
+    let mut handle =
+        Driver::spawn(config, storage, SystemClock, random, scripts).map_err(|e| e.to_string())?;
     println!("0.0 start network={network} start_tip={start_tip} {start_hash} seconds={seconds}");
 
     let end = started + Duration::from_secs(seconds);
@@ -215,6 +226,10 @@ fn run(args: &[String]) -> Result<(), String> {
             AppEvent::Note(text) => {
                 *kinds.entry("note").or_default() += 1;
                 println!("{t:.1} note {text}");
+            }
+            AppEvent::Checked(height) => {
+                *kinds.entry("checked").or_default() += 1;
+                println!("{t:.1} checked up to {height}");
             }
             AppEvent::Stopped => {
                 *kinds.entry("stopped").or_default() += 1;

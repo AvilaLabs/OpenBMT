@@ -186,6 +186,11 @@ pub enum AppEvent {
     /// height and time. Sent whenever the ready peers or the tip change, and
     /// at least every 10 seconds, so that the app can run the health check.
     Peers(Vec<Peer>, Option<u64>, (u32, u64)),
+    /// Every block above `watch_from` up to and including this height has
+    /// been checked against the scripts that were watched. Sent when it
+    /// rises. The app stores it and passes it as `watch_from` at the next
+    /// start, so that a restart does not check the same blocks again.
+    Checked(u32),
     /// Something the app may want to show or log: a stored file that did not
     /// read back, a save that failed, a peer that was dropped for breaking a
     /// rule.
@@ -456,6 +461,7 @@ impl Driver {
             last_tick: None,
             last_peers: None,
             last_peers_at: 0,
+            last_checked: None,
             last_header_save: now,
             next_anchor_at: now.saturating_add(ANCHOR_SECS),
         };
@@ -604,6 +610,7 @@ struct Core<S, C, R> {
     last_tick: Option<u64>,
     last_peers: Option<Snapshot>,
     last_peers_at: u64,
+    last_checked: Option<u32>,
     tip_saved: BlockHash,
     last_header_save: u64,
     next_anchor_at: u64,
@@ -728,9 +735,12 @@ where
                 }
             }
             Msg::Closed(id) => {
-                if self.conns.contains_key(&id) {
+                if let Some(target) = self.conns.get(&id).map(|c| c.target.clone()) {
                     let out = self.manager.closed(id, now);
                     self.remove_conn(id, now, false);
+                    self.emit(AppEvent::Note(format!(
+                        "peer {target} closed the connection"
+                    )));
                     self.handle_outputs(out, now);
                 }
             }
@@ -774,8 +784,15 @@ where
                     // The manager has forgotten the peer already.
                     let target = self.conns.get(&id).map(|c| c.target.clone());
                     self.remove_conn(id, now, misbehaved);
-                    if let (true, Some(target)) = (misbehaved, target) {
-                        self.emit(AppEvent::Note(format!("peer {target} dropped: {reason}")));
+                    if let Some(target) = target {
+                        let mark = if misbehaved {
+                            " (not dialed for 24 h)"
+                        } else {
+                            ""
+                        };
+                        self.emit(AppEvent::Note(format!(
+                            "peer {target} dropped{mark}: {reason}"
+                        )));
                     }
                 }
                 Output::Ready { id, services } => {
@@ -1197,6 +1214,11 @@ where
                 snapshot.tip,
             ));
             self.last_peers = Some(snapshot);
+        }
+        let checked = self.manager.checked_height();
+        if self.last_checked.is_none_or(|c| checked > c) {
+            self.last_checked = Some(checked);
+            self.emit(AppEvent::Checked(checked));
         }
     }
 

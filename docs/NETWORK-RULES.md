@@ -247,7 +247,11 @@ rules are what it decides where the rules above are silent.
   sockets, instead of the driver holding more in memory.
 - **NR-75.** The app is told the ready peers, whether a peer is ahead
   and the tip whenever one of them changes and at least every 10 seconds,
-  so that it can run the health rules (WR-50 to WR-52).
+  so that it can run the health rules (WR-50 to WR-52). It is told the
+  height up to which every block has been checked whenever that rises;
+  it stores the height and starts from it next time, so that a restart
+  does not check the same blocks again. It is told of every peer that
+  goes, with the reason.
 - **NR-76.** A Tor v3 address in the book is kept but not dialed in this
   version: the driver does not yet turn it into a host name for the
   proxy.

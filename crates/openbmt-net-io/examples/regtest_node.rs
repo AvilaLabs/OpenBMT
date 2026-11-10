@@ -95,6 +95,7 @@ fn describe(event: &AppEvent, script: &ScriptBuf) -> Option<String> {
         },
         AppEvent::AlsoAnnounced { txid, .. } => format!("also {txid}"),
         AppEvent::Note(text) => format!("note {text}"),
+        AppEvent::Checked(height) => format!("checked {height}"),
         AppEvent::Stopped => return None,
     })
 }
