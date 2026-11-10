@@ -276,9 +276,14 @@ fn payload_bytes(event: &AppEvent) -> usize {
 
 /// Take `size` off a count of queued bytes, never below zero.
 fn release(queued: &AtomicUsize, size: usize) {
-    let _ = queued.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |q| {
-        Some(q.saturating_sub(size))
-    });
+    let mut now = queued.load(Ordering::SeqCst);
+    loop {
+        let next = now.saturating_sub(size);
+        match queued.compare_exchange_weak(now, next, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return,
+            Err(seen) => now = seen,
+        }
+    }
 }
 
 /// The app's end of the channel of events (NR-74). It takes the events in
