@@ -4,10 +4,21 @@
 //!
 //! ```text
 //! counter_regtest <data dir> <node address> [--regtest-single-peer]
+//!     [--heartbeat-max-age <seconds>] [--customers-off-wifi]
 //! ```
 //!
 //! `scripts/counter-e2e-core.sh` uses this to check the whole receive path
-//! against Bitcoin Core. The node is the one fixed local peer of the driver.
+//! against Bitcoin Core, and `scripts/instant-e2e-core.sh` to check the
+//! owner's heartbeat. The node is the one fixed local peer of the driver.
+//!
+//! `--heartbeat-max-age` sets the signed setting `heartbeat_max_age_secs`
+//! (60 to 3600; the default settings say 600), so that a check of an old
+//! heartbeat need not wait ten minutes.
+//!
+//! `--customers-off-wifi` sets the signed setting `customer_wifi` to false:
+//! the customers cannot join the counter's network, as on a counter on its
+//! own cellular line. With the default (true) the light check needs Tor to
+//! accept anything at once, and the example has no Tor.
 //!
 //! **Test only, never use.** The three identities and the three wallet keys
 //! are made from fixed bytes that anyone can read here. The money they would
@@ -29,8 +40,12 @@
 //!
 //! - `open <minor units> <rate in minor units per bitcoin>`
 //! - `judge <index>`
+//! - `heartbeat <hex>`: the bytes of a signed heartbeat from the owner's
+//!   watcher (`owner_regtest`), taken by the node
+//! - `hbstate`
 //! - `pump <seconds>`
 //! - `health`
+//! - `groups`
 //! - `status`
 //! - `quit`
 //!
@@ -44,18 +59,25 @@
 //! - `opened index=<i> address=<address> sats=<n>` or `refused <text>`
 //! - `sale <i> state=<State> received=<sats> needs=<sats> mode=<mode> why=<text>`
 //! - `report <Kind> index=<i> ...`, once for each report
+//! - `heartbeat taken view=<Verified|NotVerified> ...` or
+//!   `heartbeat refused <rule and reason>`
+//! - `hbstate view=<none|Verified|NotVerified> policy_verified=<bool>
+//!   policy_age=<secs> last_seq=<n>`
 //! - `health used=<healthy|unhealthy> real=<ok|problem> peers=<n>`
+//! - `groups peers=<n> groups=<n> filter_groups=<n>`: the network groups
+//!   (WR-41) of the ready peers at the last check
 //! - `status tip=<h> checked=<h> peers=<n>`
 //! - `note <text>`
 //! - `stopped`
 
+use std::collections::BTreeSet;
 use std::io::{BufRead, Write};
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::str::FromStr;
 use std::sync::mpsc::{channel, TryRecvError};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
 use bitcoin::secp256k1::Secp256k1;
@@ -64,12 +86,13 @@ use openbmt_core::batch::{BatchBuilder, BatchPolicy, PinnedRoots, SignedBatch};
 use openbmt_core::identity::Identity;
 use openbmt_core::settings::Settings;
 use openbmt_core::wallet::{KeySlot, WalletDescription};
-use openbmt_counter::{Amount, Currency, Pairing, Rate, Report};
+use openbmt_counter::{Amount, Currency, HeartbeatView, Pairing, Rate, Report};
 use openbmt_counter_node::{Node, NodeConfig};
 use openbmt_net_io::DriverConfig;
-use openbmt_watch::{check_health, HeaderChain, Health, HealthInput};
+use openbmt_watch::{check_health, network_group, HeaderChain, Health, HealthInput};
 
-const USAGE: &str = "usage: counter_regtest <data dir> <node address> [--regtest-single-peer]";
+const USAGE: &str = "usage: counter_regtest <data dir> <node address> [--regtest-single-peer] \
+                     [--heartbeat-max-age <seconds>] [--customers-off-wifi]";
 const ADDRESSES: u32 = 20;
 
 /// TEST ONLY, NEVER USE: the secret bytes of the three identities.
@@ -84,6 +107,8 @@ const KEY_SEEDS: [[u8; 32]; 3] = [[0xa1; 32], [0xa2; 32], [0xa3; 32]];
 struct Seen {
     real: Option<Health>,
     peers: usize,
+    groups: usize,
+    filter_groups: usize,
 }
 
 fn identity(secret: &[u8; 32]) -> Result<Identity, String> {
@@ -115,6 +140,8 @@ fn setup(
     dir: &str,
     peer: SocketAddr,
     single_peer: bool,
+    heartbeat_max_age: Option<u32>,
+    customers_off_wifi: bool,
     seen: &Arc<Mutex<Seen>>,
 ) -> Result<Setup, String> {
     let owner = identity(&OWNER_SECRET)?;
@@ -141,6 +168,12 @@ fn setup(
     let mut settings = Settings::defaults(1_000);
     settings.devices.insert(counter.device_id());
     settings.counters.insert(counter.device_id(), 10_000);
+    if customers_off_wifi {
+        settings.customer_wifi = false;
+    }
+    if let Some(secs) = heartbeat_max_age {
+        settings.heartbeat_max_age_secs = secs;
+    }
 
     let batch = BatchBuilder::new(policy)
         .derive(&wallet, counter.device_id(), 0, ADDRESSES)
@@ -162,6 +195,19 @@ fn setup(
         if let Ok(mut s) = seen.lock() {
             s.real = Some(real);
             s.peers = input.peers.len();
+            s.groups = input
+                .peers
+                .iter()
+                .map(|p| network_group(&p.addr))
+                .collect::<BTreeSet<_>>()
+                .len();
+            s.filter_groups = input
+                .peers
+                .iter()
+                .filter(|p| p.serves_filters)
+                .map(|p| network_group(&p.addr))
+                .collect::<BTreeSet<_>>()
+                .len();
         }
         if single_peer {
             // Regtest with one local node only. Not the rules.
@@ -215,6 +261,20 @@ fn show(node: &mut Node, reports: &[Report]) {
     }
 }
 
+fn unhex(word: Option<&str>) -> Result<Vec<u8>, String> {
+    let text = word.ok_or("the hex is missing")?;
+    if text.len() % 2 != 0 || !text.is_ascii() {
+        return Err("the hex is not whole bytes".to_string());
+    }
+    (0..text.len() / 2)
+        .map(|i| {
+            text.get(2 * i..2 * i + 2)
+                .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+                .ok_or_else(|| "the hex has a character that is not a digit".to_string())
+        })
+        .collect()
+}
+
 fn number<T: FromStr>(word: Option<&str>, what: &str) -> Result<T, String> {
     word.ok_or_else(|| format!("{what} is missing"))?
         .parse()
@@ -259,6 +319,42 @@ fn command(node: &mut Node, line: &str, seen: &Arc<Mutex<Seen>>) -> Result<bool,
                 Err(e) => say(format!("error {e}")),
             }
         }
+        Some("heartbeat") => {
+            let bytes = unhex(words.next())?;
+            match node.heartbeat(&bytes) {
+                Ok(taken) => {
+                    match taken.view {
+                        HeartbeatView::Verified { sent_at } => {
+                            say(format!("heartbeat taken view=Verified sent_at={sent_at}"))
+                        }
+                        HeartbeatView::NotVerified(why) => say(format!(
+                            "heartbeat taken view=NotVerified rule={} disagreement={} why={why}",
+                            why.rule(),
+                            why.is_disagreement()
+                        )),
+                    }
+                    show(node, &taken.reports);
+                }
+                Err(e) => say(format!("heartbeat refused {e}")),
+            }
+        }
+        Some("hbstate") => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            let view = match node.counter().heartbeat_view() {
+                None => "none".to_string(),
+                Some(HeartbeatView::Verified { .. }) => "Verified".to_string(),
+                Some(HeartbeatView::NotVerified(_)) => "NotVerified".to_string(),
+            };
+            let policy = node.counter().heartbeat_for_policy(now);
+            say(format!(
+                "hbstate view={view} policy_verified={} policy_age={} last_seq={}",
+                policy.verified,
+                policy.age_secs,
+                node.counter().desk().last_heartbeat_seq()
+            ));
+        }
         Some("pump") => {
             let secs: f64 = number(words.next(), "the seconds")?;
             let reports = node.pump(Duration::from_secs_f64(secs.clamp(0.0, 600.0)));
@@ -279,6 +375,13 @@ fn command(node: &mut Node, line: &str, seen: &Arc<Mutex<Seen>>) -> Result<bool,
                 seen.peers
             ));
         }
+        Some("groups") => {
+            let seen = seen.lock().map_err(|_| "lock".to_string())?;
+            say(format!(
+                "groups peers={} groups={} filter_groups={}",
+                seen.peers, seen.groups, seen.filter_groups
+            ));
+        }
         Some("status") => {
             let peers = seen.lock().map_err(|_| "lock".to_string())?.peers;
             say(format!(
@@ -296,10 +399,18 @@ fn command(node: &mut Node, line: &str, seen: &Arc<Mutex<Seen>>) -> Result<bool,
 
 fn run(args: &[String]) -> Result<(), String> {
     let mut single_peer = false;
+    let mut heartbeat_max_age = None;
+    let mut customers_off_wifi = false;
     let mut rest = Vec::new();
-    for arg in args {
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
         if arg == "--regtest-single-peer" {
             single_peer = true;
+        } else if arg == "--customers-off-wifi" {
+            customers_off_wifi = true;
+        } else if arg == "--heartbeat-max-age" {
+            let secs = args.next().ok_or(USAGE)?;
+            heartbeat_max_age = Some(secs.parse().map_err(|_| format!("seconds: {secs}"))?);
         } else {
             rest.push(arg.as_str());
         }
@@ -309,7 +420,14 @@ fn run(args: &[String]) -> Result<(), String> {
     };
     let peer: SocketAddr = peer.parse().map_err(|_| format!("node address: {peer}"))?;
     let seen = Arc::new(Mutex::new(Seen::default()));
-    let Setup { wallet, config } = setup(dir, peer, single_peer, &seen)?;
+    let Setup { wallet, config } = setup(
+        dir,
+        peer,
+        single_peer,
+        heartbeat_max_age,
+        customers_off_wifi,
+        &seen,
+    )?;
 
     say(format!("descriptor {}", wallet.canonical_string()));
     if single_peer {

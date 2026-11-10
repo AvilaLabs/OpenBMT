@@ -147,9 +147,11 @@ has to catch up.
 
 - **The health rules (WR-50 to WR-53)** with real peers. The single-peer
   switch hides them in this run (see above).
-- **Instant acceptance.** There is no owner phone, so the heartbeat is
-  always "not verified" and a sale cannot be accepted at once in this build.
-  No step reached `PaidInstant`, and none was meant to. The unit test
+- **Instant acceptance.** No heartbeat from the owner's watcher was taken
+  in this run, so the heartbeat was always "not verified" and a sale could
+  not be accepted at once. (The node takes the heartbeat since this note was
+  written; see `instant-e2e-core-2026-11-10.md`.) No step reached
+  `PaidInstant`, and none was meant to. The unit test
   `announcements_add_groups_only_for_cached_transactions` shows a payment
   seen by three groups staying `Waiting` with "no independent watcher".
   Sightings from three groups were not made against Core.

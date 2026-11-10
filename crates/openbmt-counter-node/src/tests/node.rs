@@ -236,8 +236,8 @@ fn announcements_add_groups_only_for_cached_transactions() {
         txid,
         from: peer(22),
     }]);
-    // Three groups have seen it. Even so it is not accepted at once: there
-    // is no owner phone in this build.
+    // Three groups have seen it. Even so it is not accepted at once: no
+    // owner heartbeat has been taken.
     let screen = rig.node.judge(0).unwrap();
     assert_eq!(screen.check_mode, Some(CheckMode::Light));
     assert_eq!(screen.state, State::Waiting);
