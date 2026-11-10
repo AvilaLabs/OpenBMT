@@ -3,16 +3,18 @@
 use crate::Drop;
 
 const RULES: &str = include_str!("../../../../docs/NETWORK-RULES.md");
-const TEST_SOURCES: [&str; 3] = [
+const TEST_SOURCES: [&str; 4] = [
+    include_str!("book.rs"),
     include_str!("events.rs"),
     include_str!("frame.rs"),
     include_str!("session.rs"),
 ];
 
-/// The rules this slice of the crate implements. The address book, the
-/// peer manager and the driver are later slices.
-const IMPLEMENTED: [&str; 9] = [
-    "NR-01", "NR-02", "NR-03", "NR-04", "NR-05", "NR-11", "NR-12", "NR-13", "NR-14",
+/// The rules this part of the crate implements. The peer manager and the
+/// driver are later slices.
+const IMPLEMENTED: [&str; 13] = [
+    "NR-01", "NR-02", "NR-03", "NR-04", "NR-05", "NR-11", "NR-12", "NR-13", "NR-14", "NR-22",
+    "NR-23", "NR-24", "NR-25",
 ];
 
 /// Every rule ID that the rules file defines (in bold at the start of a

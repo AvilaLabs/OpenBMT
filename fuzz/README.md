@@ -27,6 +27,7 @@ exactly the input bytes.
 | `pair_offer_decode` | `PairOffer::from_bytes` |
 | `pair_request_decode` | `PairRequest::from_bytes` |
 | `signed_pairing_decode` | `SignedPairing::from_bytes` |
+| `net_book_decode` | `AddressBook::from_bytes` |
 | `entropy_dice` | `words_from_dice_hashed`, `face_counts` and `bits_from_dice` on UTF-8 input; success must mean the input held only the digits 1 to 6 |
 | `wallet_parse` | `WalletDescription::parse` for mainnet and testnet on UTF-8 input; on success, parsing the canonical string again must give the same canonical string |
 

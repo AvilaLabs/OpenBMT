@@ -132,6 +132,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "net_book_decode"
+path = "fuzz_targets/net_book_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "net_frame"
 path = "fuzz_targets/net_frame.rs"
 test = false

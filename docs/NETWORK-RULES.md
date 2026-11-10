@@ -77,8 +77,10 @@ thin driver that owns the sockets.
 - **NR-22.** Addresses come from the network's DNS seeds, from `addr` and
   `addrv2` messages, and from the counter's own stored address book. The
   book holds at most 2,000 addresses and at most 8 per network group, so
-  that one peer cannot fill it with its own. Only publicly routable
-  addresses are kept.
+  that one peer cannot fill it with its own, and at most 64 learned from
+  the peers of any one network group, so that one peer cannot fill the
+  book with addresses it made up. Only publicly routable addresses are
+  kept.
 - **NR-23.** The next address to dial is drawn at random, with randomness
   the caller supplies, from groups that have no connection now.
 - **NR-24.** The two peers that have been connected longest without

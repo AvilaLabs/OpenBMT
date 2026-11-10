@@ -9,10 +9,12 @@
 //!
 //! The parts are:
 //!
-//! 1. [`frame`]: [`FrameReader`], which cuts a byte stream into messages
+//! 1. [`book`]: [`AddressBook`], the peers the counter may dial, with the
+//!    limits on what it keeps, the draw of the next peer and the bans.
+//! 2. [`frame`]: [`FrameReader`], which cuts a byte stream into messages
 //!    and decides from each 24-byte header alone whether to read on, and
 //!    [`encode`], which writes a message.
-//! 2. [`session`]: [`Session`], one peer from the first `version` to the
+//! 3. [`session`]: [`Session`], one peer from the first `version` to the
 //!    last byte: the handshake, the timers, and the [`Event`]s a good peer
 //!    produces.
 //!
@@ -22,6 +24,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod book;
 pub mod frame;
 mod reason;
 pub mod session;
@@ -29,6 +32,7 @@ pub mod session;
 #[cfg(test)]
 mod tests;
 
+pub use book::{Added, AddressBook, BookError, Picked, Refusal, Source};
 pub use frame::{encode, Command, Frame, FrameReader, Message, PeerAddress};
 pub use reason::Drop;
 pub use session::{Event, Request, Session, SessionConfig};

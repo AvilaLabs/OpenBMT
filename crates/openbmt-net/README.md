@@ -14,9 +14,10 @@ for the rule it proves.
 **This crate has had internal review only. No independent security audit has
 been done yet.** Do not use it with real funds.
 
-This slice implements NR-01 to NR-05 and NR-11 to NR-14. The address book,
-the manager of several peers and the driver that owns the sockets (NR-10,
-NR-20 to NR-26, and the policy of NR-30 to NR-54) are later slices. Of NR-55
+This crate implements NR-01 to NR-05 and NR-11 to NR-14, and the address
+book: NR-22 to NR-24 and the 24 hours of NR-25. The manager of several
+peers and the driver that owns the sockets (NR-10, NR-20, NR-21, NR-26,
+and the policy of NR-30 to NR-54) are later slices. Of NR-55
 this slice does its part: no request sends a transaction, and a request from
 the peer is not answered.
 
@@ -35,6 +36,12 @@ the peer is not answered.
 | `Session::send` | A `Request` after the handshake: `GetHeaders`, `GetTx`, `GetBlock`, `GetFilter`, `GetAddr`. | NR-13, NR-55 |
 | `Event` | `Ready`, `Headers`, `Announced`, `Tx`, `Block`, `Filter`, `NotFound`, `Addresses`. | NR-04, NR-12 |
 | `Drop` | Why a session ends. | all of the above |
+| `AddressBook::add` | Keeps an address heard of from a seed, a peer or the owner. Refuses what is not publicly routable, not IPv4, IPv6 or Tor v3, or has port 0. At most 2,000 in all, 8 per network group, 64 from the peers of one group, 256 from seeds. A full book drops only entries that failed 3 times. | NR-22 |
+| `AddressBook::pick` | Draws the next address to dial from a caller-supplied random number: not banned, not in a connected group, not tried in 600 seconds; anchors first; compact-filter peers first when asked; groups drawn with equal chance. | NR-23, NR-24, NR-21 |
+| `AddressBook::connected_ok`, `failed` | A finished handshake clears the failures; the third failure in a row drops the entry. | NR-22 |
+| `AddressBook::misbehaved` | Bans an address for 24 hours (kept in the book) and ends its time as an anchor. | NR-24, NR-25 |
+| `AddressBook::set_anchors`, `anchors` | At most 2 stored peers that are dialed first. | NR-24 |
+| `AddressBook::to_bytes`, `from_bytes` | The stored form (`OBMA`, version 1). Reading applies every rule of `add` again and refuses the whole file on any failure. | NR-22 |
 
 A drop means the connection must be closed. Once a session has returned a
 drop, every later call returns the same drop.
@@ -46,6 +53,7 @@ drop, every later call returns the same drop.
 | NR-01 to NR-04 | `src/frame.rs`: `FrameReader`, `Frame::parse` |
 | NR-05 | `src/frame.rs` (what is received), `src/session.rs` (what is queued) |
 | NR-11 to NR-14 | `src/session.rs` |
+| NR-22 to NR-25 (book) | `src/book.rs`: `AddressBook` |
 | Drops and their rule IDs | `src/reason.rs` |
 | Limits and times | `pub const`s in `src/lib.rs`, named for their rule |
 
@@ -95,7 +103,8 @@ Some choices worth knowing:
 - It does not open a socket, read a clock or make a nonce.
 - It does not check a header, a block, a filter or a transaction against the
   chain. The watcher does that.
-- It keeps no address book and knows of no other peer.
+- The session keeps no address book and knows of no other peer. The book
+  (`AddressBook`) is separate and has no sockets or clock either.
 - It does not relay. It sends no transaction, and answers no `getdata`,
   `getheaders`, `getaddr` or `mempool`.
 - It does not encrypt (NR-62).
@@ -111,3 +120,11 @@ every byte, a handshake fed one byte at a time, each refusal of a bad
 `version`, every ordering case, the timers at their edges, the queue cap, and
 every kind of event. Fuzz targets `net_frame` and `net_session` are in
 `fuzz/` at the repository root.
+
+The address book is tested for every refused kind and range, every limit at
+the limit and one over, a flood of made-up addresses from one peer, the
+draw (never a connected, banned or recently tried address; equal chance for
+a group of eight and a group of one; same inputs, same result), the ban at
+86,399 and 86,400 seconds and under a clock that goes back, and the stored
+form (every truncation, and each rule of `add` applied to a file). The fuzz
+target `net_book_decode` is in `fuzz/`.
