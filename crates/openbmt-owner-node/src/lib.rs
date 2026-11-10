@@ -48,5 +48,7 @@ pub mod watcher;
 mod tests;
 
 pub use copy::{CheckInTaken, CopyError, CounterCopy, Stop, Taken};
-pub use link::{Alert, CounterState, OwnerLink, OwnerLinkConfig, OwnerLinkError};
+pub use link::{
+    Alert, BoxReport, CounterState, OwnerLink, OwnerLinkConfig, OwnerLinkError, MAX_BOX_REPORTS,
+};
 pub use watcher::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE, NOTE_LOG};

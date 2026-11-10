@@ -17,6 +17,8 @@ openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-counter-node = { path = "../openbmt-counter-node" }
 openbmt-courier = { path = "../openbmt-courier" }
 openbmt-link = { path = "../openbmt-link" }
+# For the Box's POS notices (BX-42).
+openbmt-pos = { path = "../openbmt-pos" }
 
 [dev-dependencies]
 # For the counter's `Pairing` in the tests that run a counter node against

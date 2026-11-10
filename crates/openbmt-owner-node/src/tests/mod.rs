@@ -19,6 +19,7 @@ use openbmt_watch::{HeaderChain, Health, Peer, PeerAddr, PeerTransport};
 use crate::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE};
 
 mod link;
+mod pos_notice;
 
 const T0: u64 = 1_700_000_000;
 

@@ -27,8 +27,14 @@
 //!   counter runs from the first step.
 //! - A divergence alert stays until [`OwnerLink::clear`] is called. The
 //!   evidence is kept, so a message that shows it again raises it again.
-//! - Nothing is done for the settings, device lists and Box notices that are
-//!   not handled yet: they are noted and dropped.
+//! - Nothing is done for the settings and device lists that are not handled
+//!   yet: they are noted and dropped.
+//! - A POS notice (BX-42) is taken only from a key the table holds as a Box,
+//!   with the Box's own signature and a number above the last from that Box.
+//!   It is kept, the newest [`MAX_BOX_REPORTS`], as the Box's report and is
+//!   never merged into the owner's own matching. The list and the numbers
+//!   are in memory: a report is a hint, and the owner's own matching does
+//!   not depend on it. Anything refused is noted.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -41,13 +47,29 @@ use openbmt_counter_node::DriverPort;
 use openbmt_courier::{
     decode_records, received_content, Courier, Post, Received, RelayPost, SendError,
 };
-use openbmt_link::Kind;
+use openbmt_link::{Kind, Role};
+use openbmt_pos::PosNotice;
 
 use crate::copy::{CheckInTaken, CopyError, CounterCopy, Stop};
 use crate::watcher::OwnerWatcher;
 
 /// Most lines the link's own notes keep; the oldest goes first.
 pub const NOTE_LOG: usize = 64;
+
+/// Most reports of the Box the link keeps; the oldest goes first.
+pub const MAX_BOX_REPORTS: usize = 256;
+
+/// One thing the Box reported (BX-42): shown as the Box's, never as the
+/// owner's own finding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoxReport {
+    /// The Box that sent it.
+    pub from: DeviceId,
+    /// What it said, as the Box signed it.
+    pub notice: PosNotice,
+    /// When the link took it, by the clock the steps were given.
+    pub taken_at: u64,
+}
 
 /// The intervals of the link (LK-61, LK-62). The defaults are the ones in the
 /// rules.
@@ -150,6 +172,8 @@ pub struct OwnerLink<R: Post = RelayPost> {
     last_heartbeat_at: Option<u64>,
     next_relay_at: u64,
     notes: VecDeque<String>,
+    box_reports: VecDeque<BoxReport>,
+    box_numbers: BTreeMap<DeviceId, u64>,
 }
 
 impl<R: Post> OwnerLink<R> {
@@ -197,6 +221,8 @@ impl<R: Post> OwnerLink<R> {
             last_heartbeat_at: None,
             next_relay_at: 0,
             notes,
+            box_reports: VecDeque::new(),
+            box_numbers: BTreeMap::new(),
         })
     }
 
@@ -252,6 +278,12 @@ impl<R: Post> OwnerLink<R> {
     /// is raised again by the next message that shows it.
     pub fn clear(&mut self, alert: &Alert) {
         self.alerts.retain(|a| a != alert);
+    }
+
+    /// What the Box reported, oldest first (BX-42). These are the Box's
+    /// words and are never merged into the owner's own matching.
+    pub fn box_reports(&self) -> impl Iterator<Item = &BoxReport> {
+        self.box_reports.iter()
     }
 
     /// The lines the link and its courier have logged, oldest first.
@@ -359,6 +391,7 @@ impl<R: Post> OwnerLink<R> {
         match message.kind {
             Kind::Records => self.take_records(message.from, &message.content, reply_due),
             Kind::CheckIn => self.take_check_in(message.from, &message.content, now),
+            Kind::PosNotice => self.take_pos_notice(&message, now),
             other => self.note(format!("a {other:?} message: not handled yet")),
         }
     }
@@ -399,6 +432,51 @@ impl<R: Post> OwnerLink<R> {
                 reply_due.remove(&from);
             }
         }
+    }
+
+    /// BX-42: keep a Box's report. Refused, with a note, unless the sender is
+    /// a Box in the table, the notice reads, it names that sender, its
+    /// signature is good and its number is above the last from that Box.
+    fn take_pos_notice(&mut self, message: &Received, now: u64) {
+        let from = message.from;
+        if message.role != Role::Box {
+            self.note(format!(
+                "BX-42: a POS notice from {from:?}, which is not a Box: refused"
+            ));
+            return;
+        }
+        let notice = match PosNotice::from_bytes(&message.content) {
+            Ok(notice) => notice,
+            Err(e) => {
+                self.note(format!(
+                    "BX-42: a POS notice from {from:?} does not decode: {e}"
+                ));
+                return;
+            }
+        };
+        if notice.from != from || !notice.verify() {
+            self.note(format!(
+                "BX-42: a POS notice from {from:?} is not signed by that Box: refused"
+            ));
+            return;
+        }
+        let last = self.box_numbers.get(&from).copied().unwrap_or(0);
+        if notice.number <= last {
+            self.note(format!(
+                "BX-42: a POS notice from {from:?} numbered {} is not above {last}: refused",
+                notice.number
+            ));
+            return;
+        }
+        self.box_numbers.insert(from, notice.number);
+        if self.box_reports.len() >= MAX_BOX_REPORTS {
+            self.box_reports.pop_front();
+        }
+        self.box_reports.push_back(BoxReport {
+            from,
+            notice,
+            taken_at: now,
+        });
     }
 
     /// LK-60.
