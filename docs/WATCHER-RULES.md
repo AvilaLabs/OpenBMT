@@ -156,6 +156,15 @@ nothing: filters have false positives, and a peer can serve a false filter.
   with each other count once between them, at the smallest amount any of
   them pays: only one of them can confirm, and the sale must not show more
   than the worst case.
+  The library also names the transactions that make up that amount, as
+  the last status found them: the standing transactions that pay the sale,
+  and what each pays, ascending by transaction ID. Of two or more that
+  conflict, the one that pays the least is named (the smaller ID if they
+  pay the same). What they pay adds up to the received amount. The earliest
+  first-seen time of these (WR-46) is given as well; for a payment that was
+  never seen before a block held it, it is the time the caller gave when
+  it told the library of the block, and when the caller gave none the
+  payment has no time.
 - **WR-32.** A sale is confirmed at depth `d` when transactions with at
   least `d` confirmations each (WR-02) pay it at least the sale amount less
   the shop's tolerance. The tolerance is the settings' value in basis

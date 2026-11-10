@@ -70,16 +70,16 @@ fn set_sale_sats_moves_only_the_amount() {
     confirm_in(&mut w, &mut chain, &[pays(1, 8_000)], 100);
     assert_eq!(w.sale_sats(), 10_000);
     // Short: not confirmed.
-    assert_eq!(w.status(&chain, NOW).min_confirmations, 0);
+    assert_eq!(status_at(&mut w, &chain, NOW).min_confirmations, 0);
     let before = w.to_bytes();
     // Lowered: enough.
     w.set_sale_sats(8_000);
     assert_eq!(w.sale_sats(), 8_000);
-    let s = w.status(&chain, NOW);
+    let s = status_at(&mut w, &chain, NOW);
     assert_eq!((s.received_sats, s.min_confirmations), (8_000, 1));
     // Raised again: short again. The evidence never changed.
     w.set_sale_sats(8_001);
-    assert_eq!(w.status(&chain, NOW).min_confirmations, 0);
+    assert_eq!(status_at(&mut w, &chain, NOW).min_confirmations, 0);
     assert_eq!(w.transactions().count(), 1);
     w.set_sale_sats(10_000);
     assert_eq!(w.to_bytes(), before);
@@ -151,7 +151,7 @@ fn a_confirmation_and_its_reorg_round_trip() {
         b.block_hash()
     };
     // The memory of the last status is saved too.
-    assert_eq!(w.status(&chain, NOW).min_confirmations, 1);
+    assert_eq!(status_at(&mut w, &chain, NOW).min_confirmations, 1);
     let confirmed = round_trip(&w, &chain, NOW);
     assert_eq!(status_of(&confirmed, &chain, NOW).min_confirmations, 1);
     chain.remove(&hash);
@@ -171,7 +171,7 @@ fn a_spend_elsewhere_round_trips() {
     let b = block(vec![coinbase(9), other.clone()]);
     chain.add(b.block_hash(), 100);
     w.spent_elsewhere(coin(1), other.compute_txid(), b.block_hash());
-    assert_eq!(w.status(&chain, NOW).received_sats, 0);
+    assert_eq!(status_at(&mut w, &chain, NOW).received_sats, 0);
     let back = round_trip(&w, &chain, NOW);
     assert_eq!(back.spent_elsewhere_in(), w.spent_elsewhere_in());
     assert!(status_of(&back, &chain, NOW).conflict_seen);
@@ -239,7 +239,7 @@ impl Sample {
         let bytes = w.to_bytes();
         let tx_len = self::bytes(&tx).len();
         let s = Self { bytes, tx_len };
-        assert_eq!(s.bytes.len(), 141 + tx_len);
+        assert_eq!(s.bytes.len(), 142 + tx_len);
         s
     }
 
@@ -277,8 +277,11 @@ impl Sample {
     fn n_blocks(&self) -> usize {
         self.first_seen() + 8
     }
-    fn n_confirmed(&self) -> usize {
+    fn learned_flag(&self) -> usize {
         self.n_blocks() + 4
+    }
+    fn n_confirmed(&self) -> usize {
+        self.learned_flag() + 1
     }
     fn n_replaced(&self) -> usize {
         self.n_confirmed() + 4
@@ -348,7 +351,7 @@ fn cutting_the_bytes_anywhere_is_refused() {
     let tx = pays(1, 10_000);
     seen_by(&mut w, &tx, 3, NOW);
     confirm_in(&mut w, &mut chain, &[tx], 100);
-    w.status(&chain, NOW);
+    status_at(&mut w, &chain, NOW);
     let other = spend(2, &[(&script(0x55), 1)]);
     w.spent_elsewhere(
         coin(1),
@@ -546,4 +549,32 @@ fn the_script_is_stored_whole() {
     w = SaleWatch::new(ScriptBuf::from_bytes(vec![0x6a; 10_000]), 1, 0);
     let back = SaleWatch::from_bytes(&w.to_bytes()).unwrap();
     assert_eq!(back.script(), w.script());
+}
+
+#[test]
+fn the_time_a_block_was_learned_round_trips_and_needs_a_block() {
+    let mut w = SaleWatch::new(shop(), 10_000, 0);
+    let tx = pays(1, 10_000);
+    let mut chain = TestChain::new(5);
+    let b = block_at(vec![coinbase(5), tx.clone()], 5);
+    chain.add(b.block_hash(), 5);
+    w.confirmed_at(proven(&b, 1, 5), 321).unwrap();
+    let mut back = round_trip(&w, &chain, NOW);
+    status_at(&mut back, &chain, NOW);
+    assert_eq!(back.standing_first_seen(), Some(321));
+    // The standing payments are worked out again, not stored.
+    let fresh = SaleWatch::from_bytes(&w.to_bytes()).unwrap();
+    assert!(fresh.standing().is_empty());
+    // A time with no block behind it is refused.
+    let mut v = SaleWatch::new(shop(), 10_000, 0);
+    sight(&mut v, &tx, peer(20), NOW);
+    let mut saved = v.to_bytes();
+    let last = saved.len();
+    // The entry ends with its blocks (u32 count = 0) and the flag byte of
+    // the time; the sets after it are three empty counts (12 bytes).
+    let flag_at = last - 12 - 1;
+    assert_eq!(saved[flag_at], 0);
+    saved[flag_at] = 1;
+    saved.splice(flag_at + 1..flag_at + 1, 5u64.to_le_bytes());
+    assert!(SaleWatch::from_bytes(&saved).is_err());
 }

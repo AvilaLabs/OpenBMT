@@ -19,7 +19,7 @@ use bitcoin::{
 };
 
 use crate::proof::ProvenPayment;
-use crate::HeaderChain;
+use crate::{HeaderChain, SaleStatus, SaleWatch};
 
 /// A header chain the tests can change: block hashes with heights, a tip.
 pub struct TestChain {
@@ -296,4 +296,19 @@ pub fn proven(block: &Block, position: u32, height: u32) -> ProvenPayment {
         position,
         tx: block.txdata[position as usize].clone(),
     }
+}
+
+/// The status of the watch, after checking WR-31: what the standing
+/// transactions pay adds up to the received amount, they are in ascending
+/// order of id and each pays something.
+pub fn status_at(w: &mut SaleWatch, chain: &TestChain, now: u64) -> SaleStatus {
+    let s = w.status(chain, now);
+    let standing = w.standing();
+    let sum: u64 = standing.iter().map(|(_, paid)| *paid).sum();
+    assert_eq!(sum, s.received_sats, "WR-31: standing adds up");
+    assert!(standing.iter().all(|(_, paid)| *paid > 0));
+    assert!(standing
+        .windows(2)
+        .all(|p| p[0].0.to_byte_array() < p[1].0.to_byte_array()));
+    s
 }

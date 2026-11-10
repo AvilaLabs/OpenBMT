@@ -53,7 +53,7 @@ fn confirm_in(w: &mut SaleWatch, chain: &mut TestChain, txs: &[Transaction], hei
 }
 
 fn status(w: &mut SaleWatch, chain: &TestChain) -> SaleStatus {
-    w.status(chain, NOW)
+    status_at(w, chain, NOW)
 }
 
 // WR-30, WR-31.
@@ -577,7 +577,7 @@ fn wr_42_a_fee_bump_takes_the_place_of_the_earlier_transaction() {
     let bump = spend(1, &[(&shop(), 10_000), (&script(0x55), 1)]);
     assert_eq!(sight(&mut w, &bump, peer(30), NOW + 100), Sighted::Replaced);
     assert_eq!(w.transactions().collect::<Vec<_>>(), vec![&bump]);
-    let s = w.status(&TestChain::new(1), NOW + 200);
+    let s = status_at(&mut w, &TestChain::new(1), NOW + 200);
     assert!(!s.conflict_seen);
     assert_eq!(s.received_sats, 10_000);
     // The groups and the Box start again from the new transaction.
@@ -593,7 +593,7 @@ fn wr_42_a_fee_bump_restarts_first_seen_and_the_group_count() {
     let old = pays(1, 10_000);
     seen_by(&mut w, &old, 3, 1_000);
     let chain = TestChain::new(1);
-    let s = w.status(&chain, 1_500);
+    let s = status_at(&mut w, &chain, 1_500);
     assert_eq!(
         (s.mode, s.peer_groups, s.secs_since_first_seen),
         (Some(CheckMode::Light), 3, 500)
@@ -601,13 +601,13 @@ fn wr_42_a_fee_bump_restarts_first_seen_and_the_group_count() {
     let bump = pays(1, 12_000);
     sight(&mut w, &bump, peer(20), 1_600);
     sight(&mut w, &bump, peer(21), 1_700);
-    let s = w.status(&chain, 1_900);
+    let s = status_at(&mut w, &chain, 1_900);
     assert_eq!(
         (s.mode, s.peer_groups, s.secs_since_first_seen),
         (None, 2, 0)
     );
     sight(&mut w, &bump, peer(22), 1_800);
-    let s = w.status(&chain, 1_900);
+    let s = status_at(&mut w, &chain, 1_900);
     assert_eq!(
         (s.mode, s.peer_groups, s.secs_since_first_seen),
         (Some(CheckMode::Light), 3, 100)
@@ -627,7 +627,7 @@ fn wr_42_a_late_sighting_of_a_replaced_transaction_is_not_a_conflict() {
     assert_eq!(sight(&mut w, &old, peer(21), NOW + 20), Sighted::Ignored);
     assert_eq!(sight(&mut w, &old, Source::Box, NOW + 20), Sighted::Ignored);
     assert_eq!(w.transactions().collect::<Vec<_>>(), vec![&bump]);
-    let s = w.status(&chain, NOW + 30);
+    let s = status_at(&mut w, &chain, NOW + 30);
     assert!(!s.conflict_seen);
     assert_eq!(s.received_sats, 12_000);
 }
@@ -663,17 +663,17 @@ fn wr_42_a_cancel_sets_the_conflict_flag_for_good_and_both_are_kept() {
     let chain = TestChain::new(1);
     let original = pays(1, 10_000);
     seen_by(&mut w, &original, 3, NOW);
-    assert!(!w.status(&chain, NOW).conflict_seen);
+    assert!(!status_at(&mut w, &chain, NOW).conflict_seen);
     // The replacement pays the shop less.
     let cancel = pays(1, 3_000);
     assert_eq!(sight(&mut w, &cancel, peer(30), NOW), Sighted::Conflicting);
     assert_eq!(w.transactions().count(), 2);
     for later in [NOW, NOW + 10_000, NOW + 1_000_000] {
-        assert!(w.status(&chain, later).conflict_seen);
+        assert!(status_at(&mut w, &chain, later).conflict_seen);
     }
     // The cancel is never seen again; the flag stays.
     sight(&mut w, &original, peer(31), NOW + 5);
-    assert!(w.status(&chain, NOW + 99).conflict_seen);
+    assert!(status_at(&mut w, &chain, NOW + 99).conflict_seen);
 }
 
 #[test]
@@ -702,7 +702,7 @@ fn wr_42_a_transaction_that_replaces_two_is_a_fee_bump_only_for_both() {
     let merged = spend_coins(&[coin(1), coin(2)], &[(&shop(), 20_000)]);
     assert_eq!(sight(&mut w, &merged, peer(21), NOW), Sighted::Replaced);
     assert_eq!(w.transactions().count(), 1);
-    assert!(!w.status(&TestChain::new(1), NOW).conflict_seen);
+    assert!(!status_at(&mut w, &TestChain::new(1), NOW).conflict_seen);
 }
 
 #[test]
@@ -924,7 +924,7 @@ fn wr_45_a_sale_is_only_as_checked_as_its_least_checked_part() {
     seen_by(&mut w, &strong, 4, 1_000);
     sight(&mut w, &weak, peer(20), 2_000);
     sight(&mut w, &weak, Source::Box, 2_000);
-    let s = w.status(&chain, 3_000);
+    let s = status_at(&mut w, &chain, 3_000);
     assert_eq!(s.received_sats, 10_000);
     assert_eq!(s.peer_groups, 1);
     assert_eq!(s.mode, Some(CheckMode::BoxReportsOnly));
@@ -933,13 +933,13 @@ fn wr_45_a_sale_is_only_as_checked_as_its_least_checked_part() {
     let mut w = watch(10_000, 0);
     seen_by(&mut w, &pays(1, 5_000), 3, 1_000);
     seen_by(&mut w, &pays(2, 5_000), 3, 2_500);
-    assert_eq!(w.status(&chain, 3_000).secs_since_first_seen, 500);
+    assert_eq!(status_at(&mut w, &chain, 3_000).secs_since_first_seen, 500);
     // A confirmed part is not the weakest one.
     let mut chain = TestChain::new(100);
     let mut w = watch(10_000, 0);
     confirm_in(&mut w, &mut chain, &[pays(1, 5_000)], 100);
     seen_by(&mut w, &pays(2, 5_000), 3, 1_000);
-    let s = w.status(&chain, 1_100);
+    let s = status_at(&mut w, &chain, 1_100);
     assert_eq!(
         (s.mode, s.peer_groups, s.secs_since_first_seen),
         (Some(CheckMode::Light), 3, 100)
@@ -955,10 +955,10 @@ fn wr_46_the_time_counts_from_the_sighting_that_made_it_seen() {
     let tx = pays(1, 10_000);
     sight(&mut w, &tx, peer(20), 1_000);
     sight(&mut w, &tx, peer(21), 1_100);
-    assert_eq!(w.status(&chain, 1_200).secs_since_first_seen, 0);
+    assert_eq!(status_at(&mut w, &chain, 1_200).secs_since_first_seen, 0);
     sight(&mut w, &tx, peer(22), 1_300);
     sight(&mut w, &tx, peer(23), 1_400);
-    assert_eq!(w.status(&chain, 1_500).secs_since_first_seen, 200);
+    assert_eq!(status_at(&mut w, &chain, 1_500).secs_since_first_seen, 200);
 }
 
 #[test]
@@ -968,12 +968,12 @@ fn wr_46_the_time_counts_from_the_box_report_when_that_came_first() {
     let tx = pays(1, 10_000);
     sight(&mut w, &tx, Source::Box, 1_000);
     seen_by(&mut w, &tx, 3, 1_400);
-    assert_eq!(w.status(&chain, 1_500).secs_since_first_seen, 500);
+    assert_eq!(status_at(&mut w, &chain, 1_500).secs_since_first_seen, 500);
     // And from the third group when that came first.
     let mut w = watch(10_000, 0);
     seen_by(&mut w, &tx, 3, 1_000);
     sight(&mut w, &tx, Source::Box, 1_400);
-    assert_eq!(w.status(&chain, 1_500).secs_since_first_seen, 500);
+    assert_eq!(status_at(&mut w, &chain, 1_500).secs_since_first_seen, 500);
 }
 
 #[test]
@@ -982,10 +982,10 @@ fn wr_46_a_clock_that_goes_back_gives_zero_seconds() {
     let mut w = watch(10_000, 0);
     let tx = pays(1, 10_000);
     sight(&mut w, &tx, Source::Box, 1_000);
-    assert_eq!(w.status(&chain, 1_000).secs_since_first_seen, 0);
-    assert_eq!(w.status(&chain, 999).secs_since_first_seen, 0);
-    assert_eq!(w.status(&chain, 0).secs_since_first_seen, 0);
-    assert_eq!(w.status(&chain, 1_001).secs_since_first_seen, 1);
+    assert_eq!(status_at(&mut w, &chain, 1_000).secs_since_first_seen, 0);
+    assert_eq!(status_at(&mut w, &chain, 999).secs_since_first_seen, 0);
+    assert_eq!(status_at(&mut w, &chain, 0).secs_since_first_seen, 0);
+    assert_eq!(status_at(&mut w, &chain, 1_001).secs_since_first_seen, 1);
 }
 
 #[test]
@@ -998,7 +998,7 @@ fn wr_46_a_sighting_with_an_earlier_clock_does_not_move_the_time_back() {
     // latest time already seen.
     let tx = pays(1, 10_000);
     sight(&mut w, &tx, Source::Box, 100);
-    assert_eq!(w.status(&chain, 5_100).secs_since_first_seen, 100);
+    assert_eq!(status_at(&mut w, &chain, 5_100).secs_since_first_seen, 100);
 }
 
 #[test]
@@ -1006,5 +1006,126 @@ fn wr_46_a_payment_neither_seen_nor_reported_by_the_box_has_no_time() {
     let chain = TestChain::new(1);
     let mut w = watch(10_000, 0);
     sight(&mut w, &pays(1, 10_000), peer(20), 1_000);
-    assert_eq!(w.status(&chain, 9_000).secs_since_first_seen, 0);
+    assert_eq!(status_at(&mut w, &chain, 9_000).secs_since_first_seen, 0);
+}
+
+// WR-31: what stands.
+
+#[test]
+fn wr_31_standing_lists_what_each_payment_pays_ascending_by_id() {
+    let mut w = watch(30_000, 0);
+    assert!(w.standing().is_empty());
+    let (a, b, c) = (pays(1, 5_000), pays(2, 7_000), pays(3, 9_000));
+    for tx in [&a, &b, &c] {
+        sight(&mut w, tx, peer(20), NOW);
+    }
+    let s = status_at(&mut w, &TestChain::new(1), NOW);
+    assert_eq!(s.received_sats, 21_000);
+    let mut expect = vec![
+        (a.compute_txid(), 5_000),
+        (b.compute_txid(), 7_000),
+        (c.compute_txid(), 9_000),
+    ];
+    expect.sort_by_key(|(t, _)| bitcoin::hashes::Hash::to_byte_array(*t));
+    assert_eq!(w.standing(), expect);
+}
+
+#[test]
+fn wr_31_standing_names_the_smaller_of_two_conflicting_payments() {
+    let mut w = watch(13_000, 0);
+    let big = pays(1, 10_000);
+    let small = pays(1, 3_000);
+    sight(&mut w, &big, peer(20), NOW);
+    sight(&mut w, &small, peer(21), NOW);
+    status_at(&mut w, &TestChain::new(1), NOW);
+    assert_eq!(w.standing(), vec![(small.compute_txid(), 3_000)]);
+}
+
+#[test]
+fn wr_31_standing_leaves_out_a_payment_a_confirmed_conflict_displaced() {
+    let mut w = watch(10_000, 0);
+    let good = pays(1, 10_000);
+    let other = pays(1, 3_000);
+    sight(&mut w, &good, peer(20), NOW);
+    sight(&mut w, &other, peer(21), NOW);
+    let mut chain = TestChain::new(5);
+    confirm_in(&mut w, &mut chain, std::slice::from_ref(&good), 5);
+    status_at(&mut w, &chain, NOW);
+    assert_eq!(w.standing(), vec![(good.compute_txid(), 10_000)]);
+}
+
+#[test]
+fn wr_31_standing_leaves_out_a_replaced_payment() {
+    let mut w = watch(10_000, 0);
+    let old = spend(1, &[(&shop(), 10_000)]);
+    let bump = spend(1, &[(&shop(), 10_000), (&script(0x55), 5)]);
+    sight(&mut w, &old, peer(20), NOW);
+    sight(&mut w, &bump, peer(21), NOW);
+    status_at(&mut w, &TestChain::new(1), NOW);
+    assert_eq!(w.standing(), vec![(bump.compute_txid(), 10_000)]);
+}
+
+#[test]
+fn wr_31_a_conflict_that_pays_nothing_leaves_nothing_standing() {
+    // The pair counts once at the smaller amount, which is nothing.
+    let mut w = watch(10_000, 0);
+    let pay = pays(1, 10_000);
+    sight(&mut w, &pay, peer(20), NOW);
+    let nothing = spend_coins(&[coin(1)], &[(&script(0x55), 1)]);
+    assert_eq!(sight(&mut w, &nothing, peer(22), NOW), Sighted::Conflicting);
+    let s = status_at(&mut w, &TestChain::new(1), NOW);
+    assert_eq!(s.received_sats, 0);
+    assert!(w.standing().is_empty());
+}
+
+#[test]
+fn wr_31_the_first_seen_time_is_the_earliest_of_the_standing_payments() {
+    let mut w = watch(20_000, 0);
+    let late = pays(1, 10_000);
+    let early = pays(2, 10_000);
+    sight(&mut w, &late, Source::Box, 2_000);
+    sight(&mut w, &early, Source::Box, 1_000);
+    // The clock cannot go back (WR-46): the second sighting is recorded at
+    // the latest time already seen.
+    status_at(&mut w, &TestChain::new(1), 3_000);
+    assert_eq!(w.standing_first_seen(), Some(2_000));
+    let mut v = watch(10_000, 0);
+    assert_eq!(v.standing_first_seen(), None);
+    sight(&mut v, &pays(1, 10_000), peer(20), 1_000);
+    status_at(&mut v, &TestChain::new(1), 3_000);
+    // Reported by one peer only: it never counted as seen.
+    assert_eq!(v.standing_first_seen(), None);
+}
+
+#[test]
+fn wr_31_a_payment_only_ever_seen_in_a_block_has_the_time_the_block_was_learned() {
+    let mut w = watch(10_000, 0);
+    let tx = pays(1, 10_000);
+    let mut chain = TestChain::new(5);
+    let b = block_at(vec![coinbase(5), tx.clone()], 5);
+    chain.add(b.block_hash(), 5);
+    w.confirmed_at(proven(&b, 1, 5), 777).unwrap();
+    // A later report of the same block does not move the time.
+    w.confirmed_at(proven(&b, 1, 5), 900).unwrap();
+    status_at(&mut w, &chain, NOW);
+    assert_eq!(w.standing(), vec![(tx.compute_txid(), 10_000)]);
+    assert_eq!(w.standing_first_seen(), Some(777));
+    // Without a time given there is none.
+    let mut v = watch(10_000, 0);
+    v.confirmed(proven(&b, 1, 5)).unwrap();
+    status_at(&mut v, &chain, NOW);
+    assert_eq!(v.standing_first_seen(), None);
+}
+
+#[test]
+fn wr_31_a_seen_payment_keeps_its_first_seen_time_when_a_block_holds_it() {
+    let mut w = watch(10_000, 0);
+    let tx = pays(1, 10_000);
+    sight(&mut w, &tx, Source::Box, 1_000);
+    let mut chain = TestChain::new(5);
+    let b = block_at(vec![coinbase(5), tx], 5);
+    chain.add(b.block_hash(), 5);
+    w.confirmed_at(proven(&b, 1, 5), 4_000).unwrap();
+    status_at(&mut w, &chain, 5_000);
+    assert_eq!(w.standing_first_seen(), Some(1_000));
 }

@@ -89,6 +89,19 @@ struct Entry {
     first_seen: Option<u64>,
     /// Blocks that held it, whether or not they are still on the chain.
     blocks: Vec<BlockHash>,
+    /// The caller's clock when a block first held it, if the caller gave
+    /// one (see [`SaleWatch::confirmed_at`]).
+    learned: Option<u64>,
+}
+
+/// One standing payment as the last status found it.
+#[derive(Debug, Clone, Copy)]
+struct Standing {
+    txid: Txid,
+    paid: u64,
+    /// WR-31: when it was first seen, or the block that held it was first
+    /// learned of when it never counted as seen.
+    at: Option<u64>,
 }
 
 impl Entry {
@@ -131,6 +144,9 @@ pub struct SaleWatch {
     /// Transactions a fee bump took the place of. A late sighting of one is
     /// not a new conflict.
     replaced: BTreeSet<Txid>,
+    /// The payments that counted at the last status, ascending by id. Not
+    /// stored: every status works it out again.
+    last_standing: Vec<Standing>,
 }
 
 /// WR-30: the sum of all outputs whose script is exactly `script`.
@@ -157,6 +173,7 @@ impl SaleWatch {
             elsewhere: Vec::new(),
             last_confirmed: BTreeSet::new(),
             replaced: BTreeSet::new(),
+            last_standing: Vec::new(),
         }
     }
 
@@ -211,10 +228,29 @@ impl SaleWatch {
     /// known is refused (WR-30). One that conflicts with a known
     /// transaction is handled as in WR-42.
     pub fn confirmed(&mut self, proven: ProvenPayment) -> Result<(), Refusal> {
-        match self.admit(proven.tx, None, Some(proven.block))? {
-            Sighted::Ignored => Err(Refusal::PaysNothing),
-            _ => Ok(()),
+        self.take_proven(proven, None)
+    }
+
+    /// As [`SaleWatch::confirmed`], with the caller's clock in seconds: the
+    /// time the caller learned of the block. A payment that was never seen
+    /// before a block held it has that time as its first-seen time in
+    /// [`SaleWatch::standing_first_seen`] (WR-31).
+    pub fn confirmed_at(&mut self, proven: ProvenPayment, now: u64) -> Result<(), Refusal> {
+        self.take_proven(proven, Some(now))
+    }
+
+    fn take_proven(&mut self, proven: ProvenPayment, learned: Option<u64>) -> Result<(), Refusal> {
+        let txid = proven.tx.compute_txid();
+        let result = self.admit(proven.tx, None, Some(proven.block))?;
+        if result == Sighted::Ignored {
+            return Err(Refusal::PaysNothing);
         }
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.txid == txid) {
+            if entry.learned.is_none() {
+                entry.learned = learned;
+            }
+        }
+        Ok(())
     }
 
     /// The last sentence of WR-42: a block on the chain holds `by`, a
@@ -305,7 +341,22 @@ impl SaleWatch {
 
         // WR-31: standing transactions that conflict with each other count
         // once, at the smallest amount any of them pays.
-        let received_sats = self.received(&standing);
+        let counted = self.counted(&standing);
+        let received_sats = self.sum(|i| counted.contains(&i));
+        let mut last: Vec<Standing> = counted
+            .iter()
+            .filter(|&&i| self.entries[i].paid > 0)
+            .map(|&i| {
+                let e = &self.entries[i];
+                Standing {
+                    txid: e.txid,
+                    paid: e.paid,
+                    at: e.first_seen.or(e.learned),
+                }
+            })
+            .collect();
+        last.sort_unstable_by_key(|p| p.txid.to_byte_array());
+        self.last_standing = last;
         let confirmed_sats = self.sum(|i| standing[i] && confs[i] >= 1);
 
         // WR-32.
@@ -372,10 +423,11 @@ impl SaleWatch {
         }
     }
 
-    /// WR-31: the sum over the standing transactions, where each group of
-    /// transactions joined by conflicts counts once at its smallest amount.
-    /// Only one transaction of such a group can confirm.
-    fn received(&self, standing: &[bool]) -> u64 {
+    /// WR-31: the transactions that make up the received amount: each group
+    /// of standing transactions joined by conflicts is represented by the
+    /// one that pays the least (the smaller id when two pay the same). Only
+    /// one transaction of such a group can confirm.
+    fn counted(&self, standing: &[bool]) -> BTreeSet<usize> {
         let n = self.entries.len();
         let mut group: Vec<usize> = (0..n).collect();
         // At most 20 entries: joining by repeated passes is enough.
@@ -402,15 +454,32 @@ impl SaleWatch {
                 break;
             }
         }
-        let mut total = 0u64;
-        for g in 0..n {
-            let smallest = (0..n)
-                .filter(|&i| standing[i] && group[i] == g)
-                .map(|i| self.entries[i].paid)
-                .min();
-            total = total.saturating_add(smallest.unwrap_or(0));
-        }
-        total
+        (0..n)
+            .filter_map(|g| {
+                (0..n)
+                    .filter(|&i| standing[i] && group[i] == g)
+                    .min_by_key(|&i| (self.entries[i].paid, self.entries[i].txid.to_byte_array()))
+            })
+            .collect()
+    }
+
+    /// WR-31: the standing transactions that pay the sale and what each
+    /// pays, ascending by id, as the last [`SaleWatch::status`] found them.
+    /// Their sum is that status's `received_sats`. Empty before the first
+    /// status, and after a restart until the next one.
+    pub fn standing(&self) -> Vec<(Txid, u64)> {
+        self.last_standing
+            .iter()
+            .map(|p| (p.txid, p.paid))
+            .collect()
+    }
+
+    /// WR-31: the earliest time any payment of [`SaleWatch::standing`] was
+    /// first seen; for a payment that was never seen before a block held
+    /// it, the time the caller gave to [`SaleWatch::confirmed_at`]. `None`
+    /// when no standing payment has a time.
+    pub fn standing_first_seen(&self) -> Option<u64> {
+        self.last_standing.iter().filter_map(|p| p.at).min()
     }
 
     /// The sum of what the chosen transactions pay.
@@ -494,6 +563,7 @@ impl SaleWatch {
             by_box: false,
             first_seen: None,
             blocks: block.into_iter().collect(),
+            learned: None,
         };
         if let Some((source, at)) = sighted {
             record_source(&mut entry, source, at);
@@ -554,6 +624,7 @@ impl Entry {
         for b in &blocks {
             out.extend_from_slice(b);
         }
+        wire::put_opt_u64(out, self.learned);
     }
 
     fn read(r: &mut Reader<'_>, script: &ScriptBuf, latest: u64) -> Result<Self, DecodeError> {
@@ -601,6 +672,12 @@ impl Entry {
             ascending(&mut last, hash, "blocks are not in ascending order")?;
             blocks.push(BlockHash::from_byte_array(hash));
         }
+        let learned = r.opt_u64()?;
+        if learned.is_some() && blocks.is_empty() {
+            return Err(DecodeError::NonCanonical(
+                "a block time is stored for a transaction that no block held",
+            ));
+        }
         // The clock starts when a transaction first counts as seen or is
         // reported by the Box, and never before; it cannot be later than the
         // latest sighting.
@@ -626,6 +703,7 @@ impl Entry {
             by_box,
             first_seen,
             blocks,
+            learned,
         })
     }
 }
@@ -675,8 +753,10 @@ impl SaleWatch {
     /// Each transaction is its id, its length (u32 LE) and consensus bytes,
     /// what it pays the sale (u64 LE), its network groups (a u32 count and
     /// the five-byte keys of [`NetGroup::key`]), the Box flag, the first-seen
-    /// time (a flag byte and, when the flag is 1, a u64 LE) and the blocks
-    /// that held it (a u32 count and the hashes). Every set is written in
+    /// time (a flag byte and, when the flag is 1, a u64 LE), the blocks
+    /// that held it (a u32 count and the hashes) and the time a block was
+    /// first learned of (a flag byte and, when the flag is 1, a u64 LE;
+    /// the flag is 0 when no block held it). Every set is written in
     /// ascending byte order. Each spend elsewhere is the coin (id and index
     /// u32 LE), the spending transaction and the block.
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -801,6 +881,7 @@ impl SaleWatch {
             elsewhere,
             last_confirmed,
             replaced,
+            last_standing: Vec::new(),
         })
     }
 }
