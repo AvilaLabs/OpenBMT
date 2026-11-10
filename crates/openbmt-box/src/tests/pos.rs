@@ -98,7 +98,9 @@ fn bx_40_a_replayed_notice_and_an_older_number_are_refused() {
     let conn = TestConnector::default();
     let mut p = pos(&conn);
     let first = item(&c1(), 5, &draft(0, NoticeState::Opened, NOW, 500));
-    assert!(p.take_notices(&[first.clone()], &roles(), NOW).is_empty());
+    assert!(p
+        .take_notices(std::slice::from_ref(&first), &roles(), NOW)
+        .is_empty());
     // The same notice again, and one with a lower number.
     let older = item(&c1(), 4, &draft(1, NoticeState::Opened, NOW, 700));
     let notes = p.take_notices(&[first, older], &roles(), NOW);
