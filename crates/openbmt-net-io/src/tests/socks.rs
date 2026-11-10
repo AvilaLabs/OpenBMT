@@ -1,7 +1,7 @@
 //! NR-26: the SOCKS5 client, against a fake proxy on a loopback socket.
 
 use std::io::{Read, Write};
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -394,4 +394,249 @@ fn nr_78_without_a_token_the_sign_in_method_is_not_offered_or_accepted() {
         SocksError::MethodNotOffered(2)
     );
     handle.join().unwrap();
+}
+
+// ----- NR-26: a lookup through the proxy (Tor's RESOLVE) ------------------
+
+fn lookup(addr: SocketAddr, token: u64) -> Result<IpAddr, SocksError> {
+    socks::resolve(addr, "seed.test", token, TOTAL)
+}
+
+/// Sign in, read the RESOLVE request for "seed.test" and check its bytes.
+fn take_lookup(stream: &mut TcpStream) -> (Vec<u8>, Vec<u8>) {
+    let signed = sign_in(stream);
+    stream.write_all(&[1, 0]).unwrap();
+    let mut want = vec![5, 0xf0, 0, 3, 9];
+    want.extend_from_slice(b"seed.test");
+    want.extend_from_slice(&[0, 0]);
+    assert_eq!(read_n(stream, want.len()), want);
+    signed
+}
+
+/// A proxy that answers a lookup with `reply` and closes.
+fn lookup_proxy(reply: Vec<u8>) -> (SocketAddr, JoinHandle<()>) {
+    proxy(move |mut s| {
+        take_lookup(&mut s);
+        s.write_all(&reply).unwrap();
+    })
+}
+
+#[test]
+fn nr_26_a_lookup_sends_resolve_and_reads_an_ipv4_answer() {
+    let (addr, handle) = lookup_proxy(vec![5, 0, 0, 1, 8, 8, 4, 4, 0, 0]);
+    assert_eq!(
+        lookup(addr, 0xabc).unwrap(),
+        IpAddr::V4(Ipv4Addr::new(8, 8, 4, 4))
+    );
+    handle.join().unwrap();
+}
+
+#[test]
+fn nr_26_a_lookup_reads_an_ipv6_answer() {
+    let ip = Ipv6Addr::new(0x2606, 0x4700, 0, 0, 0, 0, 0, 1);
+    let mut reply = vec![5, 0, 0, 4];
+    reply.extend_from_slice(&ip.octets());
+    reply.extend_from_slice(&[0, 0]);
+    let (addr, handle) = lookup_proxy(reply);
+    assert_eq!(lookup(addr, 1).unwrap(), IpAddr::V6(ip));
+    handle.join().unwrap();
+}
+
+#[test]
+fn nr_26_a_lookup_opens_no_stream_and_asks_port_zero() {
+    // The request is pinned by `take_lookup`; the proxy sees nothing more
+    // after it, and the client closes at once.
+    let (addr, handle) = proxy(|mut s| {
+        take_lookup(&mut s);
+        s.write_all(&[5, 0, 0, 1, 9, 9, 9, 9, 0, 0]).unwrap();
+        let mut rest = Vec::new();
+        s.read_to_end(&mut rest).unwrap();
+        assert!(rest.is_empty());
+    });
+    lookup(addr, 1).unwrap();
+    handle.join().unwrap();
+}
+
+#[test]
+fn nr_26_a_lookup_maps_every_reply_code_to_its_error() {
+    let cases = [
+        (1u8, ReplyCode::GeneralFailure),
+        (2, ReplyCode::NotAllowed),
+        (3, ReplyCode::NetworkUnreachable),
+        (4, ReplyCode::HostUnreachable),
+        (5, ReplyCode::ConnectionRefused),
+        (6, ReplyCode::TtlExpired),
+        (7, ReplyCode::CommandNotSupported),
+        (8, ReplyCode::AddressTypeNotSupported),
+        (9, ReplyCode::Other(9)),
+        (0xf0, ReplyCode::Other(0xf0)),
+    ];
+    for (code, expected) in cases {
+        let (addr, handle) = lookup_proxy(vec![5, code, 0, 1, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(lookup(addr, 1).unwrap_err(), SocksError::Refused(expected));
+        handle.join().unwrap();
+    }
+}
+
+#[test]
+fn nr_26_a_lookup_refuses_a_wrong_version_reserved_byte_or_address_type() {
+    let cases = [
+        (
+            vec![4u8, 0, 0, 1, 8, 8, 4, 4, 0, 0],
+            SocksError::BadVersion(4),
+        ),
+        (
+            vec![5, 0, 1, 1, 8, 8, 4, 4, 0, 0],
+            SocksError::BadReserved(1),
+        ),
+        (
+            vec![5, 0, 0, 2, 8, 8, 4, 4, 0, 0],
+            SocksError::BadAddressType(2),
+        ),
+        (
+            vec![5, 0, 0, 0, 8, 8, 4, 4, 0, 0],
+            SocksError::BadAddressType(0),
+        ),
+        // A domain-name reply is refused, however well formed.
+        (
+            vec![5, 0, 0, 3, 3, b'a', b'b', b'c', 0, 0],
+            SocksError::NameReply,
+        ),
+    ];
+    for (reply, expected) in cases {
+        let (addr, handle) = lookup_proxy(reply);
+        assert_eq!(lookup(addr, 1).unwrap_err(), expected);
+        handle.join().unwrap();
+    }
+}
+
+#[test]
+fn nr_26_a_lookup_answer_cut_short_is_an_error_at_each_point() {
+    let cuts: [&[u8]; 4] = [
+        &[5, 0],
+        &[5, 0, 0, 1, 8, 8],
+        &[5, 0, 0, 1, 8, 8, 4, 4, 0],
+        &[5, 0, 0, 4, 1, 2, 3],
+    ];
+    for cut in cuts {
+        let (addr, handle) = lookup_proxy(cut.to_vec());
+        assert_eq!(lookup(addr, 1).unwrap_err(), SocksError::Truncated);
+        handle.join().unwrap();
+    }
+}
+
+#[test]
+fn nr_26_a_lookup_that_is_never_answered_times_out_within_the_total() {
+    let (addr, handle) = proxy(|mut s| {
+        take_lookup(&mut s);
+        let mut buf = [0u8; 16];
+        let _ = s.read(&mut buf);
+    });
+    let start = Instant::now();
+    let err = socks::resolve(addr, "seed.test", 1, Duration::from_millis(500)).unwrap_err();
+    let took = start.elapsed();
+    assert_eq!(err, SocksError::TimedOut);
+    assert!(took >= Duration::from_millis(450), "{took:?}");
+    assert!(took < Duration::from_secs(3), "{took:?}");
+    handle.join().unwrap();
+}
+
+#[test]
+fn nr_26_a_lookup_answer_that_is_not_publicly_routable_is_refused() {
+    let v4s: [[u8; 4]; 7] = [
+        [0, 0, 0, 0],
+        [127, 0, 0, 1],
+        [10, 1, 2, 3],
+        [172, 16, 0, 1],
+        [192, 168, 1, 1],
+        [169, 254, 1, 1],
+        [255, 255, 255, 255],
+    ];
+    for octets in v4s {
+        let mut reply = vec![5, 0, 0, 1];
+        reply.extend_from_slice(&octets);
+        reply.extend_from_slice(&[0, 0]);
+        let (addr, handle) = lookup_proxy(reply);
+        assert_eq!(
+            lookup(addr, 1).unwrap_err(),
+            SocksError::NotRoutable(IpAddr::V4(Ipv4Addr::from(octets)))
+        );
+        handle.join().unwrap();
+    }
+    for text in ["::", "::1", "fe80::1", "fc00::1", "::ffff:8.8.8.8"] {
+        let ip: Ipv6Addr = text.parse().unwrap();
+        let mut reply = vec![5, 0, 0, 4];
+        reply.extend_from_slice(&ip.octets());
+        reply.extend_from_slice(&[0, 0]);
+        let (addr, handle) = lookup_proxy(reply);
+        assert_eq!(
+            lookup(addr, 1).unwrap_err(),
+            SocksError::NotRoutable(IpAddr::V6(ip))
+        );
+        handle.join().unwrap();
+    }
+}
+
+#[test]
+fn nr_78_each_lookup_sends_its_own_token_as_name_and_password() {
+    let mut seen = Vec::new();
+    for token in [1u64, 2, 0xdead_beef] {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (addr, handle) = proxy(move |mut s| {
+            let signed = take_lookup(&mut s);
+            tx.send(signed).unwrap();
+            s.write_all(&[5, 0, 0, 1, 8, 8, 4, 4, 0, 0]).unwrap();
+        });
+        lookup(addr, token).unwrap();
+        handle.join().unwrap();
+        let (name, password) = rx.recv().unwrap();
+        assert_eq!(name, format!("{token:016x}").into_bytes());
+        assert_eq!(password, name);
+        seen.push(name);
+    }
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), 3);
+}
+
+#[test]
+fn nr_26_a_lookup_cannot_send_an_empty_or_long_name_and_a_missing_proxy_is_a_connect_error() {
+    // A name that cannot be sent is refused before any connection: the
+    // proxy address here has nobody listening, which would be a different
+    // error.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let gone = listener.local_addr().unwrap();
+    drop(listener);
+    assert_eq!(
+        socks::resolve(gone, "", 1, TOTAL).unwrap_err(),
+        SocksError::EmptyName
+    );
+    assert_eq!(
+        socks::resolve(gone, &"a".repeat(256), 1, TOTAL).unwrap_err(),
+        SocksError::NameTooLong
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let gone = listener.local_addr().unwrap();
+    drop(listener);
+    assert!(matches!(
+        lookup(gone, 1).unwrap_err(),
+        SocksError::Connect(_)
+    ));
+}
+
+#[test]
+fn nr_26_a_lookup_signs_in_like_a_connection_and_names_its_errors() {
+    let (addr, handle) = proxy(|mut s| {
+        sign_in(&mut s);
+        s.write_all(&[1, 1]).unwrap();
+    });
+    assert_eq!(lookup(addr, 1).unwrap_err(), SocksError::AuthRefused(1));
+    handle.join().unwrap();
+    for e in [
+        SocksError::NotRoutable(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+        SocksError::NameReply,
+    ] {
+        let text = e.to_string();
+        assert!(text.starts_with("NR-26: "), "{text}");
+    }
 }

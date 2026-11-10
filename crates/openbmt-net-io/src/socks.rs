@@ -1,15 +1,19 @@
 //! The client side of SOCKS5 (RFC 1928), for NR-26: with Tor on, every
 //! connection goes through the proxy the caller names.
 //!
-//! Only the "no authentication" method is offered, and only CONNECT is
-//! asked. A proxy that answers with any other method, any other version or a
-//! reply that does not fit the form is an error with its own name. The
-//! whole handshake has one deadline.
+//! Only the "no authentication" method is offered (and name and password
+//! when a token is given), and only CONNECT and Tor's RESOLVE are asked. A
+//! proxy that answers with any other method, any other version or a reply
+//! that does not fit the form is an error with its own name. The whole
+//! handshake has one deadline.
 
 use std::fmt;
 use std::io::{self, ErrorKind, Read, Write};
-use std::net::{IpAddr, SocketAddr, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 use std::time::{Duration, Instant};
+
+use bitcoin::p2p::address::AddrV2;
+use openbmt_net::book::is_routable;
 
 /// NR-26: seconds the whole SOCKS5 handshake may take.
 pub const HANDSHAKE_SECS: u64 = 20;
@@ -20,6 +24,8 @@ const METHOD_USER_PASS: u8 = 2;
 const METHOD_REFUSED: u8 = 0xff;
 const AUTH_VERSION: u8 = 1;
 const CMD_CONNECT: u8 = 1;
+/// Tor's extension: look a name up through Tor, open no stream.
+const CMD_RESOLVE: u8 = 0xf0;
 const ATYP_V4: u8 = 1;
 const ATYP_NAME: u8 = 3;
 const ATYP_V6: u8 = 4;
@@ -132,6 +138,11 @@ pub enum SocksError {
     EmptyName,
     /// The host name is longer than 255 bytes.
     NameTooLong,
+    /// A lookup answered with an address that is not publicly routable
+    /// (unspecified, loopback, private, documentation and the like).
+    NotRoutable(IpAddr),
+    /// A lookup answered with a host name, not an address.
+    NameReply,
 }
 
 impl fmt::Display for SocksError {
@@ -162,6 +173,10 @@ impl fmt::Display for SocksError {
             Self::BadAddressType(t) => write!(f, "NR-26: the reply has address type {t}"),
             Self::EmptyName => write!(f, "NR-26: the host name is empty"),
             Self::NameTooLong => write!(f, "NR-26: the host name is longer than 255 bytes"),
+            Self::NotRoutable(ip) => {
+                write!(f, "NR-26: the lookup answered with {ip}, not routable")
+            }
+            Self::NameReply => write!(f, "NR-26: the lookup answered with a name"),
         }
     }
 }
@@ -276,6 +291,46 @@ fn credentials(token: u64) -> Vec<u8> {
     out
 }
 
+/// The greeting, and the sign-in when the proxy picks name and password.
+fn negotiate(
+    stream: &mut TcpStream,
+    deadline: &Deadline,
+    token: Option<u64>,
+) -> Result<(), SocksError> {
+    match token {
+        None => send(stream, deadline, &[VERSION, 1, METHOD_NONE])?,
+        Some(_) => send(
+            stream,
+            deadline,
+            &[VERSION, 2, METHOD_NONE, METHOD_USER_PASS],
+        )?,
+    }
+    let mut choice = [0u8; 2];
+    take(stream, deadline, &mut choice)?;
+    let [version, method] = choice;
+    if version != VERSION {
+        return Err(SocksError::BadVersion(version));
+    }
+    match (method, token) {
+        (METHOD_NONE, _) => {}
+        (METHOD_USER_PASS, Some(token)) => {
+            send(stream, deadline, &credentials(token))?;
+            let mut answer = [0u8; 2];
+            take(stream, deadline, &mut answer)?;
+            let [auth_version, status] = answer;
+            if auth_version != AUTH_VERSION {
+                return Err(SocksError::BadAuthVersion(auth_version));
+            }
+            if status != 0 {
+                return Err(SocksError::AuthRefused(status));
+            }
+        }
+        (METHOD_REFUSED, _) => return Err(SocksError::NoAcceptableMethod),
+        (other, _) => return Err(SocksError::MethodNotOffered(other)),
+    }
+    Ok(())
+}
+
 /// [`handshake`], with a token that keeps this connection apart from the
 /// others (NR-78). With a token, the name-and-password method is offered
 /// too, and the token is sent as both. Tor accepts any name and password
@@ -292,37 +347,7 @@ pub fn handshake_isolated(
         end: Instant::now() + total,
     };
     let request = request(target)?;
-    match token {
-        None => send(stream, &deadline, &[VERSION, 1, METHOD_NONE])?,
-        Some(_) => send(
-            stream,
-            &deadline,
-            &[VERSION, 2, METHOD_NONE, METHOD_USER_PASS],
-        )?,
-    }
-    let mut choice = [0u8; 2];
-    take(stream, &deadline, &mut choice)?;
-    let [version, method] = choice;
-    if version != VERSION {
-        return Err(SocksError::BadVersion(version));
-    }
-    match (method, token) {
-        (METHOD_NONE, _) => {}
-        (METHOD_USER_PASS, Some(token)) => {
-            send(stream, &deadline, &credentials(token))?;
-            let mut answer = [0u8; 2];
-            take(stream, &deadline, &mut answer)?;
-            let [auth_version, status] = answer;
-            if auth_version != AUTH_VERSION {
-                return Err(SocksError::BadAuthVersion(auth_version));
-            }
-            if status != 0 {
-                return Err(SocksError::AuthRefused(status));
-            }
-        }
-        (METHOD_REFUSED, _) => return Err(SocksError::NoAcceptableMethod),
-        (other, _) => return Err(SocksError::MethodNotOffered(other)),
-    }
+    negotiate(stream, &deadline, token)?;
     send(stream, &deadline, &request)?;
     let mut head = [0u8; 4];
     take(stream, &deadline, &mut head)?;
@@ -378,4 +403,80 @@ pub fn connect_isolated(
         .map_err(|e| SocksError::Connect(e.kind()))?;
     handshake_isolated(&mut stream, target, total, token)?;
     Ok(stream)
+}
+
+/// The RESOLVE request for a name: the CONNECT form with the command byte
+/// 0xf0, a domain-name address and port 0.
+fn resolve_request(name: &str) -> Result<Vec<u8>, SocksError> {
+    let bytes = name.as_bytes();
+    if bytes.is_empty() {
+        return Err(SocksError::EmptyName);
+    }
+    let len = u8::try_from(bytes.len()).map_err(|_| SocksError::NameTooLong)?;
+    let mut out = vec![VERSION, CMD_RESOLVE, 0, ATYP_NAME, len];
+    out.extend_from_slice(bytes);
+    out.extend_from_slice(&0u16.to_be_bytes());
+    Ok(out)
+}
+
+/// Look `name` up through the proxy, which must be Tor (the `RESOLVE`
+/// request, NR-26). No stream is opened: the one address the reply carries
+/// is the answer. `token` is sent as the name and password (NR-78), so each
+/// lookup rides its own circuit. The connection to the proxy and the whole
+/// exchange must end within `total`.
+///
+/// The reply must be version 5, code 0, reserved 0 and an IPv4 or IPv6
+/// address; a name in the reply is refused. An address that is not publicly
+/// routable is refused as well.
+pub fn resolve(
+    proxy: SocketAddr,
+    name: &str,
+    token: u64,
+    total: Duration,
+) -> Result<IpAddr, SocksError> {
+    let deadline = Deadline {
+        end: Instant::now() + total,
+    };
+    let request = resolve_request(name)?;
+    let mut stream = TcpStream::connect_timeout(&proxy, deadline.left()?)
+        .map_err(|e| SocksError::Connect(e.kind()))?;
+    negotiate(&mut stream, &deadline, Some(token))?;
+    send(&mut stream, &deadline, &request)?;
+    let mut head = [0u8; 4];
+    take(&mut stream, &deadline, &mut head)?;
+    let [version, reply, reserved, atyp] = head;
+    if version != VERSION {
+        return Err(SocksError::BadVersion(version));
+    }
+    if reply != 0 {
+        return Err(SocksError::Refused(ReplyCode::from_byte(reply)));
+    }
+    if reserved != 0 {
+        return Err(SocksError::BadReserved(reserved));
+    }
+    let ip = match atyp {
+        ATYP_V4 => {
+            let mut bytes = [0u8; 4];
+            take(&mut stream, &deadline, &mut bytes)?;
+            IpAddr::V4(Ipv4Addr::from(bytes))
+        }
+        ATYP_V6 => {
+            let mut bytes = [0u8; 16];
+            take(&mut stream, &deadline, &mut bytes)?;
+            IpAddr::V6(Ipv6Addr::from(bytes))
+        }
+        ATYP_NAME => return Err(SocksError::NameReply),
+        other => return Err(SocksError::BadAddressType(other)),
+    };
+    // The port: read, not used.
+    let mut port = [0u8; 2];
+    take(&mut stream, &deadline, &mut port)?;
+    let v2 = match ip {
+        IpAddr::V4(a) => AddrV2::Ipv4(a),
+        IpAddr::V6(a) => AddrV2::Ipv6(a),
+    };
+    if !is_routable(&v2) {
+        return Err(SocksError::NotRoutable(ip));
+    }
+    Ok(ip)
 }
