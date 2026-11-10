@@ -305,6 +305,13 @@ impl<S: MailStore> Relay<S> {
         Ok(())
     }
 
+    /// Forget the numbers taken (LK-20), as a restart with empty mailboxes
+    /// does. A reader must not depend on the relay for refusing copies
+    /// (LK-06), and a test of a reader uses this to hand it some.
+    pub fn forget_taken(&mut self) {
+        self.taken.clear();
+    }
+
     /// A connection has closed: its challenge is gone (LK-23).
     pub fn close(&mut self, conn: u64) {
         self.challenges.remove(&conn);

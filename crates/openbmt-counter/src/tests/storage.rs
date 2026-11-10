@@ -610,3 +610,26 @@ fn cr_42_open_refuses_an_address_a_sale_already_holds() {
     assert_eq!(err, OpenRefused::AddressInUse);
     assert_eq!(err.rule(), "CR-02");
 }
+
+#[test]
+fn a_check_in_goes_through_the_stored_path_and_reads_back() {
+    let mut w = ready_to_accept();
+    let before = w.c.records().len();
+    w.m.reset();
+    w.m.fail_all = true;
+    assert!(w.c.check_in(&mut w.m).is_err());
+    assert_eq!(w.c.records().len(), before, "a failed write adds nothing");
+    w.m.reset();
+    let rec = w.c.check_in(&mut w.m).unwrap();
+    assert_eq!(rec.seq, before);
+    assert_eq!(rec.check_in_claim().unwrap(), (before, rec.prev));
+    assert_eq!(w.c.records().len(), before + 1);
+    // The record was stored before it counted, and the chain reads back.
+    assert_eq!(w.m.log, vec!["record".to_string()]);
+    let again = Counter::load(id(3), pairing(), settings(), w.m.stored()).unwrap();
+    assert_eq!(again.records().head(), w.c.records().head());
+    assert!(again
+        .records()
+        .check_against_check_in(&rec, &DeviceList::new([id(3).device_id()]))
+        .is_ok());
+}

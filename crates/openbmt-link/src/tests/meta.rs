@@ -1,5 +1,7 @@
 //! Ties the rules to the tests: every rule in `docs/LINK-RULES.md` has a
-//! test named for it, or an entry in `NOT_HERE` that says why not.
+//! test named for it, or an entry in `NOT_HERE` that says why not. The
+//! rules of section 6 (LK-50 and up) are the courier's and the nodes', and
+//! `crates/openbmt-courier` ties those.
 
 use std::collections::BTreeSet;
 
@@ -32,6 +34,7 @@ fn defined() -> BTreeSet<String> {
         .lines()
         .filter_map(|l| l.strip_prefix("- **LK-"))
         .map(|rest| format!("LK-{}", &rest[..2]))
+        .filter(|id| id.as_str() < "LK-50")
         .collect()
 }
 

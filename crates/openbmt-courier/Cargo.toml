@@ -1,0 +1,12 @@
+[package]
+name = "openbmt-courier"
+description = "The shop's messages over the link: one object for each device that numbers, seals, sends, polls, opens and acknowledges, and the contents that carry the chain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+openbmt-link = { path = "../openbmt-link" }

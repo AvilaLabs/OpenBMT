@@ -14,3 +14,5 @@ openbmt-core = { path = "../openbmt-core" }
 openbmt-watch = { path = "../openbmt-watch" }
 openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-counter = { path = "../openbmt-counter" }
+openbmt-courier = { path = "../openbmt-courier" }
+openbmt-link = { path = "../openbmt-link" }

@@ -10,9 +10,12 @@
 //!
 //! **What it does not do yet.** It watches no script in this slice: the
 //! owner's own watching of the shop's payments comes later, and so does
-//! everything that takes a screen. How the heartbeat's bytes travel to the
-//! counter is not part of this crate either; the transport comes with the
-//! Box. The library takes events from the driver and gives bytes back.
+//! everything that takes a screen. The library takes events from the driver
+//! and gives bytes back.
+//!
+//! The [`link`] module carries those bytes to the counters through a relay
+//! (`docs/LINK-RULES.md` section 6), and [`copy`] keeps the owner's verified
+//! copy of each counter's records, which the counters send back the same way.
 //!
 //! The view of the chain is the counter node's [`ChainView`], and the driver
 //! is reached through the counter node's [`DriverPort`], so that the two
@@ -37,9 +40,13 @@
     )
 )]
 
+pub mod copy;
+pub mod link;
 pub mod watcher;
 
 #[cfg(test)]
 mod tests;
 
+pub use copy::{CheckInTaken, CopyError, CounterCopy, Stop, Taken};
+pub use link::{Alert, CounterState, OwnerLink, OwnerLinkConfig, OwnerLinkError};
 pub use watcher::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE, NOTE_LOG};

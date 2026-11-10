@@ -379,6 +379,7 @@ dependencies = [
  "openbmt-books",
  "openbmt-core",
  "openbmt-counter",
+ "openbmt-courier",
  "openbmt-link",
  "openbmt-net",
  "openbmt-owner",
@@ -396,6 +397,14 @@ dependencies = [
  "bitcoin",
  "openbmt-core",
  "openbmt-watch",
+]
+
+[[package]]
+name = "openbmt-courier"
+version = "0.1.0"
+dependencies = [
+ "openbmt-core",
+ "openbmt-link",
 ]
 
 [[package]]

@@ -18,6 +18,7 @@ openbmt-watch = { path = "../crates/openbmt-watch" }
 openbmt-net = { path = "../crates/openbmt-net" }
 openbmt-counter = { path = "../crates/openbmt-counter" }
 openbmt-link = { path = "../crates/openbmt-link" }
+openbmt-courier = { path = "../crates/openbmt-courier" }
 openbmt-pos = { path = "../crates/openbmt-pos" }
 openbmt-books = { path = "../crates/openbmt-books" }
 openbmt-session = { path = "../crates/openbmt-session" }
@@ -282,6 +283,13 @@ bench = false
 [[bin]]
 name = "owner_queue_decode"
 path = "fuzz_targets/owner_queue_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "courier_records_decode"
+path = "fuzz_targets/courier_records_decode.rs"
 test = false
 doc = false
 bench = false

@@ -18,6 +18,8 @@ use openbmt_watch::{HeaderChain, Health, Peer, PeerAddr};
 
 use crate::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE};
 
+mod link;
+
 const T0: u64 = 1_700_000_000;
 
 fn id(n: u8) -> Identity {

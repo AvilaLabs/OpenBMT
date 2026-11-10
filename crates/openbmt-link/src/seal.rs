@@ -83,11 +83,13 @@ pub enum Kind {
     PaidNotice,
     /// A notice from the Box (a hint, CR-55).
     PosNotice,
+    /// The owner telling a counter how many of its records it holds (LK-55).
+    RecordsReceived,
 }
 
 impl Kind {
     /// Every kind.
-    pub const ALL: [Kind; 9] = [
+    pub const ALL: [Kind; 10] = [
         Kind::Heartbeat,
         Kind::Command,
         Kind::Settings,
@@ -97,6 +99,7 @@ impl Kind {
         Kind::Records,
         Kind::PaidNotice,
         Kind::PosNotice,
+        Kind::RecordsReceived,
     ];
 
     /// The byte that is signed.
@@ -111,6 +114,7 @@ impl Kind {
             Kind::Records => 7,
             Kind::PaidNotice => 8,
             Kind::PosNotice => 9,
+            Kind::RecordsReceived => 10,
         }
     }
 
@@ -124,7 +128,9 @@ impl Kind {
     pub fn allowed(self, from: Role, to: Role) -> bool {
         use Role::{Box as TheBox, Counter, Owner};
         match self {
-            Kind::Heartbeat | Kind::Command | Kind::Batch => from == Owner && to == Counter,
+            Kind::Heartbeat | Kind::Command | Kind::Batch | Kind::RecordsReceived => {
+                from == Owner && to == Counter
+            }
             Kind::Settings | Kind::DeviceList => from == Owner && (to == Counter || to == TheBox),
             Kind::CheckIn | Kind::Records => from == Counter && to == Owner,
             Kind::PaidNotice => from == Counter && to == TheBox,

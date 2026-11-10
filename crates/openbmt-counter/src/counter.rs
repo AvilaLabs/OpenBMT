@@ -21,7 +21,7 @@ use openbmt_core::policy::{
     amount_at_risk, evaluate, CheckMode, Decision, Exposure, ExposureError, ExposureWriteError,
     Heartbeat, Inputs, InstantPolicy, PauseStatus, PauseTracker, PaymentId,
 };
-use openbmt_core::records::{AppendError, Chain, DeviceList};
+use openbmt_core::records::{AppendError, Chain, DeviceList, Record, RecordKind};
 use openbmt_core::settings::Settings;
 use openbmt_watch::{HeaderChain, Health, Refusal, Sighted, Source, WellFormedBlock};
 
@@ -376,6 +376,26 @@ impl Counter {
     /// The records written so far.
     pub fn records(&self) -> &Chain {
         &self.records
+    }
+
+    /// Append a check-in to the records (`docs/DESIGN.md` §2.9): a signed
+    /// record whose body is the number of records before it and their head.
+    /// It goes through the same stored path as every other record (CR-40):
+    /// the store is given its bytes first, and on an error the chain is
+    /// unchanged. Returns the record.
+    pub fn check_in<S: Store>(&mut self, store: &mut S) -> Result<Record, StoreFault<S::Error>> {
+        let mut body = Vec::with_capacity(40);
+        body.extend_from_slice(&self.records.len().to_le_bytes());
+        body.extend_from_slice(&self.records.head());
+        match self
+            .records
+            .append_stored(&self.identity, RecordKind::CheckIn, body, |bytes| {
+                store.append_record(bytes)
+            }) {
+            Ok(record) => Ok(record.clone()),
+            Err(AppendError::Persist(e)) => Err(StoreFault::Write(e)),
+            Err(AppendError::Refused(e)) => Err(StoreFault::Record(e)),
+        }
     }
 
     /// The counter's identity.

@@ -44,6 +44,7 @@ exactly the input bytes.
 | `approver_state_decode` | `Approver::restore` (the Key app's stored state), with and without key 2; on success the snapshot must equal the input |
 | `owner_queue_decode` | `Owner::restore` (the owner phone's stored queue); on success the snapshot must equal the input |
 | `wallet_parse` | `WalletDescription::parse` for mainnet and testnet on UTF-8 input; on success, parsing the canonical string again must give the same canonical string |
+| `courier_records_decode` | `decode_records`, the content of a Records message; on success each record encoded again behind its length must give the input back |
 
 ## Running
 

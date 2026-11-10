@@ -1,6 +1,8 @@
 # Link rules: messages between the shop's own devices
 
-Status: specification for `crates/openbmt-link`, written before the code.
+Status: specification for `crates/openbmt-link` (sections 1 to 5) and for
+`crates/openbmt-courier` and the two nodes' link modules (section 6), written
+before the code.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement `docs/DESIGN.md` §5.3 ("Record sync", "ciphertext") and research
 track R5 for the part that carries bytes from one of the shop's devices to
@@ -75,6 +77,7 @@ what arrives as if it came from an enemy.
   | Device list | owner | counter, Box |
   | Check-in | counter | owner |
   | Records | counter | owner |
+  | Records received | owner | counter |
   | Paid notice | counter | Box |
   | POS notice | Box | counter, owner |
 
@@ -185,3 +188,109 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
   distinction.
 - **They do not pair a Box.** How a Box with no screen gets onto the
   signed device list is still open (`docs/DESIGN.md` §16).
+
+## 6. Carrying the shop's messages
+
+`crates/openbmt-courier` joins the sealed message and the relay into one
+object that each side holds, and the counter node and the owner node use it
+to carry what the earlier documents leave to "the transport": the owner's
+heartbeat, commands and batches to a counter, and a counter's check-ins and
+records to the owner. The courier adds no authority (LK-09): what it hands
+over is still checked by the rules of the thing it carries.
+
+- **LK-50.** A courier has the device's identity and role, the relay
+  (route, key and timeouts), and a table of the devices it talks to with
+  their roles, as the signed device list gives them. A message from a key
+  that is not in the table is refused (LK-05), and so is a message to one.
+  The courier opens a connection to the relay for each batch of work and
+  drops it afterwards; it has no networking of its own beyond the client of
+  section 3.
+- **LK-51.** To send, the courier takes the next number for that reader and
+  stores it (LK-40) before it seals, and seals before it hands the relay
+  anything. A relay that cannot be reached is an error the caller may try
+  again. A second try takes a new number and a new one-time key (LK-03): a
+  number is never used for two messages, even when the first did not get
+  through.
+- **LK-52.** To poll, the courier makes the device's mailbox if it has not
+  yet (LK-21), fetches from the start of the mailbox (LK-24), opens each
+  message by LK-05 and hands the content of those that open to the caller
+  with the sender, its role and the kind. A message that does not open is
+  skipped and counted, and the reason is kept in a short list that drops its
+  oldest line first. Every message that was taken or refused is acknowledged
+  so that the mailbox empties. A message whose number could not be stored
+  is not taken and not acknowledged. Because the mailbox is emptied, the
+  courier starts each poll from the start; a relay that hands an old message
+  out again meets LK-06.
+- **LK-53.** A courier is told whether this is the device's first start. On
+  a first start it makes the two number files (`link-inbox` and
+  `link-outbox`) empty. On any other start a missing or unreadable file
+  stops the start with the message that the device needs a new pairing
+  (LK-40): the numbers are never started again from zero here. Each file is
+  written whole to a temporary file, flushed and renamed over the old one.
+- **LK-54.** A message of kind Records carries whole records, oldest first:
+  for each record its length as 4 bytes little endian and then the bytes of
+  `Record::to_bytes`. The sender puts in as many whole records as fit one
+  message. A content that is empty, that stops inside a length or a record,
+  that has a record which does not parse, or that has anything after the
+  last record is refused whole.
+- **LK-55.** A message of kind Records received says what the owner holds of
+  a counter's chain: the number of records as 8 bytes little endian and then
+  the 32-byte head after them (the hash of the last record, or 32 zeros for
+  none). The counter takes it as the owner's mark only if the number is not
+  more than the counter's own length and the head is the hash of its own
+  record at that place. Any other is ignored and noted. A valid mark below
+  the last one is taken: the owner may have lost part of its copy.
+- **LK-56.** The counter sends records to the owner when its chain is longer
+  than the owner's mark and either some of the records after the mark were
+  never sent or 30 seconds have passed since the last send. What it sends
+  starts after the mark, oldest first (after what was already sent, when
+  nothing is overdue). It sends at most 4 messages in one step. A mark that
+  never moves therefore costs a resend every 30 seconds and no more.
+- **LK-57.** The counter checks in by appending a check-in record to its
+  own chain (`openbmt_core::records`), through the same stored path as every
+  other record, and sending that record as a message of kind Check-in. It
+  does so once at start and then every 15 minutes (`docs/DESIGN.md` §2.9),
+  whether or not its chain has changed. The configuration has two
+  intervals, the shortest time between check-ins when the chain has
+  changed and the longest when it has not; both are 15 minutes by default.
+  The check-in is part of the chain, so it reaches the owner in the
+  records as well.
+- **LK-58.** The owner keeps a copy of each counter's chain. It takes a
+  record into the copy only if its author is on the signed device list, the
+  signature is valid, its number is the copy's length and its `prev` is the
+  copy's head. The first record that fails stops the message; the records
+  before it were taken. A record is written to the copy's file, which only
+  grows, before it counts; a last record cut short by a crash is cut off at
+  the next start, as the counter does with its own file.
+- **LK-59.** A record the copy already holds (same number, same hash) is
+  skipped without a word. A record with the number of one the copy holds and
+  another hash, or that follows another record than the one the copy holds,
+  is a divergence: the owner raises an alert naming the counter and the
+  number and overwrites nothing.
+- **LK-60.** A check-in from a counter is taken only if it is genuine and the
+  copy, when it is long enough, holds it at its place
+  (`Chain::check_against_check_in`). The owner keeps the latest one for each
+  counter; one with a lower number than the kept one is ignored. When the
+  kept check-in names records the copy holds differently, that is a
+  divergence (LK-59). After taking records the owner sends the counter a
+  Records received message for them, at most once in a step for each counter.
+- **LK-61.** The owner sends its heartbeat to each counter on its list every
+  20 seconds, and sends commands and batches when asked, as messages of kind
+  Heartbeat, Command and Batch with the bytes of the signed thing as the
+  content. The counter hands each to the same call a hand-fed one would use,
+  and that call checks it by its own rules (CR-50 to CR-56 for a heartbeat,
+  CR-14 for a command, `openbmt_core::batch` for a batch).
+- **LK-62.** The owner raises an alert for a counter from which no check-in
+  has arrived for 30 minutes, and one for a divergence. An alert is raised
+  once and stays in the owner's list until it clears: a check-in clears the
+  first, and the owner's own word clears the second.
+- **LK-63.** A message that opened but whose content does not decode, or
+  that the node refuses by its own rules, is noted and the step goes on.
+  A kind that the device does not handle yet (settings and device lists to a
+  counter) is noted and dropped. No message makes a step fail, and no
+  message makes a step stop before the rest are looked at.
+
+The intervals in LK-56, LK-57, LK-61 and LK-62 are fields of a configuration
+with these defaults. A step that finds the relay unreachable tries again
+after a pause (5 seconds by default), so that a loop that runs several times
+a second does not wait for a connection each time.

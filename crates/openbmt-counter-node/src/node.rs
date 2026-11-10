@@ -87,12 +87,13 @@ use openbmt_core::batch::{AddError, SignedBatch};
 use openbmt_core::command::SignedCommand;
 use openbmt_core::heartbeat::SignedHeartbeat;
 use openbmt_core::identity::Identity;
+use openbmt_core::records::Record;
 use openbmt_core::settings::Settings;
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
     Actor, Amount, BlockError, CancelRefused, CommandRefused, Counter, Currency, Facts,
     HeartbeatRefused, HeartbeatView, JudgeError, LoadError, OpenFacts, OpenRefused, Opened,
-    Overridden, Pairing, Quote, Rate, Report, RequoteRefused, Screen, SightingError,
+    Overridden, Pairing, Quote, Rate, Report, RequoteRefused, Screen, SightingError, StoreFault,
 };
 use openbmt_net_io::{
     AppEvent, Clock, DirLock, Driver, DriverConfig, EventReceiver, FileStorage, Handle, Key,
@@ -868,6 +869,14 @@ impl<P: DriverPort> Node<P> {
     pub fn command(&mut self, signed: &SignedCommand) -> Result<(), CommandRefused<DirStoreError>> {
         let now = self.clock.now();
         self.counter.command(signed, now, &mut self.store)
+    }
+
+    /// Append a check-in record to the counter's chain, through the same
+    /// stored path as the other records: the file is written first and the
+    /// chain changes only if that worked. Returns the record, which the link
+    /// sends to the owner (LK-57).
+    pub fn check_in(&mut self) -> Result<Record, StoreFault<DirStoreError>> {
+        self.counter.check_in(&mut self.store)
     }
 
     /// Take a new signed batch of addresses.

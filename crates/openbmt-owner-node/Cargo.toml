@@ -15,3 +15,10 @@ openbmt-watch = { path = "../openbmt-watch" }
 openbmt-net-io = { path = "../openbmt-net-io" }
 # For `ChainView` and `DriverPort`, which the two nodes share.
 openbmt-counter-node = { path = "../openbmt-counter-node" }
+openbmt-courier = { path = "../openbmt-courier" }
+openbmt-link = { path = "../openbmt-link" }
+
+[dev-dependencies]
+# For the counter's `Pairing` in the tests that run a counter node against
+# the owner's link.
+openbmt-counter = { path = "../openbmt-counter" }

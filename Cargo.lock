@@ -347,8 +347,18 @@ dependencies = [
  "bitcoin",
  "openbmt-core",
  "openbmt-counter",
+ "openbmt-courier",
+ "openbmt-link",
  "openbmt-net-io",
  "openbmt-watch",
+]
+
+[[package]]
+name = "openbmt-courier"
+version = "0.1.0"
+dependencies = [
+ "openbmt-core",
+ "openbmt-link",
 ]
 
 [[package]]
@@ -398,7 +408,10 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "openbmt-core",
+ "openbmt-counter",
  "openbmt-counter-node",
+ "openbmt-courier",
+ "openbmt-link",
  "openbmt-net-io",
  "openbmt-watch",
 ]

@@ -5,11 +5,25 @@
 //! ```text
 //! counter_regtest <data dir> <node address> [--regtest-single-peer]
 //!     [--heartbeat-max-age <seconds>] [--customers-off-wifi]
+//!     [--relay <address> --relay-key <hex>]
 //! ```
 //!
 //! `scripts/counter-e2e-core.sh` uses this to check the whole receive path
-//! against Bitcoin Core, and `scripts/instant-e2e-core.sh` to check the
-//! owner's heartbeat. The node is the one fixed local peer of the driver.
+//! against Bitcoin Core, `scripts/instant-e2e-core.sh` to check the owner's
+//! heartbeat, and `scripts/link-e2e-core.sh` to check that the owner's
+//! heartbeat, and the counter's check-ins and records, travel through a relay
+//! (`openbmt-link`'s `relay` example). The node is the one fixed local peer of
+//! the driver.
+//!
+//! `--relay <address> --relay-key <hex>` starts the link (`CounterLink`,
+//! `docs/LINK-RULES.md` section 6) next to the node: the relay's address and
+//! its key (the first line the relay example prints). The owner is the
+//! example owner's fixed test key (`owner_regtest`). The link step runs in
+//! the loop between commands; heartbeats that arrive through it are taken by
+//! the node as the `heartbeat` command would, and what they report is
+//! printed as usual. The two number files of the link (LK-53) are kept in the
+//! data directory: the start is a first start if neither is there, and any
+//! other start needs both.
 //!
 //! `--heartbeat-max-age` sets the signed setting `heartbeat_max_age_secs`
 //! (60 to 3600; the default settings say 600), so that a check of an old
@@ -43,6 +57,7 @@
 //! - `heartbeat <hex>`: the bytes of a signed heartbeat from the owner's
 //!   watcher (`owner_regtest`), taken by the node
 //! - `hbstate`
+//! - `linkstate`
 //! - `pump <seconds>`
 //! - `health`
 //! - `groups`
@@ -63,6 +78,12 @@
 //!   `heartbeat refused <rule and reason>`
 //! - `hbstate view=<none|Verified|NotVerified> policy_verified=<bool>
 //!   policy_age=<secs> last_seq=<n>`
+//! - `linkstate owner_records=<n> owner_head=<hex> last_check_in_at=<secs|none>
+//!   refused=<n> marks_ignored=<n> record_messages_sent=<n> heartbeats_taken=<n>
+//!   node_refusals=<n> reachable=<bool> chain_records=<n> chain_head=<hex>`: the
+//!   owner's mark (how many of the counter's records the owner says it holds),
+//!   the last check-in, how many messages the courier refused, and the
+//!   counter's own chain
 //! - `health used=<healthy|unhealthy> real=<ok|problem> peers=<n>`
 //! - `groups peers=<n> groups=<n> filter_groups=<n>`: the network groups
 //!   (WR-41) of the ready peers at the last check
@@ -70,9 +91,10 @@
 //! - `note <text>`
 //! - `stopped`
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, Write};
 use std::net::SocketAddr;
+use std::path::Path;
 use std::process::ExitCode;
 use std::str::FromStr;
 use std::sync::mpsc::{channel, TryRecvError};
@@ -83,16 +105,19 @@ use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::{Address, Network};
 use openbmt_core::batch::{BatchBuilder, BatchPolicy, PinnedRoots, SignedBatch};
-use openbmt_core::identity::Identity;
+use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::settings::Settings;
 use openbmt_core::wallet::{KeySlot, WalletDescription};
 use openbmt_counter::{Amount, Currency, HeartbeatView, Pairing, Rate, Report};
-use openbmt_counter_node::{Node, NodeConfig};
+use openbmt_counter_node::{CounterLink, CounterLinkConfig, Node, NodeConfig};
+use openbmt_courier::{Courier, CourierConfig, FirstStart};
+use openbmt_link::{ClientConfig, Role, Route};
 use openbmt_net_io::DriverConfig;
 use openbmt_watch::{check_health, network_group, HeaderChain, Health, HealthInput};
 
 const USAGE: &str = "usage: counter_regtest <data dir> <node address> [--regtest-single-peer] \
-                     [--heartbeat-max-age <seconds>] [--customers-off-wifi]";
+                     [--heartbeat-max-age <seconds>] [--customers-off-wifi] \
+                     [--relay <address> --relay-key <hex>]";
 const ADDRESSES: u32 = 20;
 
 /// TEST ONLY, NEVER USE: the secret bytes of the three identities.
@@ -275,6 +300,10 @@ fn unhex(word: Option<&str>) -> Result<Vec<u8>, String> {
         .collect()
 }
 
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn number<T: FromStr>(word: Option<&str>, what: &str) -> Result<T, String> {
     word.ok_or_else(|| format!("{what} is missing"))?
         .parse()
@@ -282,7 +311,12 @@ fn number<T: FromStr>(word: Option<&str>, what: &str) -> Result<T, String> {
 }
 
 /// Run one command. `Ok(false)` is `quit`.
-fn command(node: &mut Node, line: &str, seen: &Arc<Mutex<Seen>>) -> Result<bool, String> {
+fn command(
+    node: &mut Node,
+    link: Option<&CounterLink>,
+    line: &str,
+    seen: &Arc<Mutex<Seen>>,
+) -> Result<bool, String> {
     let mut words = line.split_whitespace();
     match words.next() {
         Some("open") => {
@@ -355,6 +389,29 @@ fn command(node: &mut Node, line: &str, seen: &Arc<Mutex<Seen>>) -> Result<bool,
                 node.counter().desk().last_heartbeat_seq()
             ));
         }
+        Some("linkstate") => {
+            let link = link.ok_or("the link is not started: give --relay and --relay-key")?;
+            let state = link.state();
+            let chain = node.counter().records();
+            say(format!(
+                "linkstate owner_records={} owner_head={} last_check_in_at={} refused={} \
+                 marks_ignored={} record_messages_sent={} heartbeats_taken={} \
+                 node_refusals={} reachable={} chain_records={} chain_head={}",
+                state.owner_records,
+                hex(&state.owner_head),
+                state
+                    .last_check_in_at
+                    .map_or("none".to_string(), |t| t.to_string()),
+                state.refused,
+                state.marks_ignored,
+                state.record_messages_sent,
+                state.heartbeats_taken,
+                state.node_refusals,
+                state.relay_reachable,
+                chain.len(),
+                hex(&chain.head()),
+            ));
+        }
         Some("pump") => {
             let secs: f64 = number(words.next(), "the seconds")?;
             let reports = node.pump(Duration::from_secs_f64(secs.clamp(0.0, 600.0)));
@@ -397,14 +454,63 @@ fn command(node: &mut Node, line: &str, seen: &Arc<Mutex<Seen>>) -> Result<bool,
     Ok(true)
 }
 
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// The link to the owner through the relay. The owner is the fixed test key
+/// of `owner_regtest`.
+fn start_link(dir: &str, addr: SocketAddr, relay_key: DeviceId) -> Result<CounterLink, String> {
+    let owner = identity(&OWNER_SECRET)?.device_id();
+    let first = if ["link-inbox", "link-outbox"]
+        .iter()
+        .any(|f| Path::new(dir).join(f).exists())
+    {
+        FirstStart::No
+    } else {
+        FirstStart::Yes
+    };
+    let courier = Courier::start(
+        CourierConfig {
+            dir: dir.into(),
+            identity: identity(&COUNTER_SECRET)?,
+            role: Role::Counter,
+            peers: BTreeMap::from([(owner, Role::Owner)]),
+            route: Route::Direct(addr),
+            relay: relay_key,
+            client: ClientConfig::default(),
+        },
+        first,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(CounterLink::new(
+        courier,
+        owner,
+        CounterLinkConfig::default(),
+    ))
+}
+
 fn run(args: &[String]) -> Result<(), String> {
     let mut single_peer = false;
     let mut heartbeat_max_age = None;
     let mut customers_off_wifi = false;
+    let mut relay: Option<SocketAddr> = None;
+    let mut relay_key: Option<DeviceId> = None;
     let mut rest = Vec::new();
     let mut args = args.iter();
     while let Some(arg) = args.next() {
-        if arg == "--regtest-single-peer" {
+        if arg == "--relay" {
+            let addr = args.next().ok_or(USAGE)?;
+            relay = Some(addr.parse().map_err(|_| format!("relay address: {addr}"))?);
+        } else if arg == "--relay-key" {
+            let key = args.next().ok_or(USAGE)?;
+            let bytes: [u8; 32] = unhex(Some(key))?
+                .try_into()
+                .map_err(|_| "the relay key is not 32 bytes".to_string())?;
+            relay_key = Some(DeviceId::from_bytes(&bytes).map_err(|e| format!("relay key: {e}"))?);
+        } else if arg == "--regtest-single-peer" {
             single_peer = true;
         } else if arg == "--customers-off-wifi" {
             customers_off_wifi = true;
@@ -418,6 +524,9 @@ fn run(args: &[String]) -> Result<(), String> {
     let [dir, peer] = rest.as_slice() else {
         return Err(USAGE.to_string());
     };
+    if relay.is_some() != relay_key.is_some() {
+        return Err("--relay and --relay-key go together".to_string());
+    }
     let peer: SocketAddr = peer.parse().map_err(|_| format!("node address: {peer}"))?;
     let seen = Arc::new(Mutex::new(Seen::default()));
     let Setup { wallet, config } = setup(
@@ -441,6 +550,10 @@ fn run(args: &[String]) -> Result<(), String> {
         node.checked_height(),
         node.chain().tip_height()
     ));
+    let mut link = match (relay, relay_key) {
+        (Some(addr), Some(key)) => Some(start_link(dir, addr, key)?),
+        _ => None,
+    };
 
     let (lines, input) = channel();
     std::thread::spawn(move || {
@@ -460,7 +573,7 @@ fn run(args: &[String]) -> Result<(), String> {
     loop {
         match input.try_recv() {
             Ok(line) => {
-                match command(&mut node, line.trim(), &seen) {
+                match command(&mut node, link.as_ref(), line.trim(), &seen) {
                     Ok(true) => {}
                     Ok(false) => break,
                     Err(e) => say(format!("error {e}")),
@@ -469,7 +582,13 @@ fn run(args: &[String]) -> Result<(), String> {
                 say(format!("done {done}"));
             }
             Err(TryRecvError::Empty) => {
-                let reports = node.pump(Duration::from_millis(100));
+                let mut reports = node.pump(Duration::from_millis(100));
+                if let Some(link) = link.as_mut() {
+                    reports.extend(link.step(&mut node, now_secs()));
+                    for note in link.take_notes() {
+                        say(format!("note link {note}"));
+                    }
+                }
                 show(&mut node, &reports);
             }
             Err(TryRecvError::Disconnected) => break,

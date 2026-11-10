@@ -10,6 +10,9 @@
 //!    kept up to date from the driver's events.
 //! 3. [`node`]: [`Node`], which owns a counter, a driver and the two above,
 //!    applies the driver's events, and answers the cashier's calls.
+//! 4. [`link`]: [`CounterLink`], which carries the owner's heartbeat, commands
+//!    and batches to the node and the counter's check-ins and records to the
+//!    owner, through a relay (`docs/LINK-RULES.md` section 6).
 //!
 //! The rules the node follows are `docs/COUNTER-RULES.md` and, for what the
 //! driver does, `docs/NETWORK-RULES.md` (NR-44, NR-53, NR-75 above all). The
@@ -33,6 +36,7 @@
 
 pub mod chainview;
 pub mod dirstore;
+pub mod link;
 pub mod node;
 
 #[cfg(test)]
@@ -40,6 +44,7 @@ mod tests;
 
 pub use chainview::ChainView;
 pub use dirstore::{DirStore, DirStoreError, Loaded, TornTail};
+pub use link::{CounterLink, CounterLinkConfig, LinkState};
 pub use node::{
     DriverPort, HealthFn, HeartbeatNotTaken, HeartbeatTaken, Launch, Node, NodeConfig, StartError,
     MAX_EVENTS_PER_PUMP, NOTE_LOG, TX_CACHE,

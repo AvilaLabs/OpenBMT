@@ -530,7 +530,7 @@ fn lk_07_padding_that_is_not_zero_or_not_minimal_is_refused() {
 #[test]
 fn lk_08_the_table_of_kinds() {
     use Role::{Box as B, Counter as C, Owner as O};
-    let table: [(Kind, Role, Role); 12] = [
+    let table: [(Kind, Role, Role); 13] = [
         (Kind::Heartbeat, O, C),
         (Kind::Command, O, C),
         (Kind::Settings, O, C),
@@ -540,6 +540,7 @@ fn lk_08_the_table_of_kinds() {
         (Kind::DeviceList, O, B),
         (Kind::CheckIn, C, O),
         (Kind::Records, C, O),
+        (Kind::RecordsReceived, O, C),
         (Kind::PaidNotice, C, B),
         (Kind::PosNotice, B, C),
         (Kind::PosNotice, B, O),
@@ -592,8 +593,36 @@ fn lk_08_seal_and_open_refuse_a_kind_the_role_may_not_send() {
         open_as_counter(&unknown).unwrap_err(),
         OpenError::UnknownKind(0)
     );
-    unknown[77] = 10;
-    assert_eq!(inspect(&unknown).unwrap_err(), OpenError::UnknownKind(10));
+    unknown[77] = 11;
+    assert_eq!(inspect(&unknown).unwrap_err(), OpenError::UnknownKind(11));
+}
+
+#[test]
+fn lk_08_records_received_goes_from_the_owner_to_a_counter_only() {
+    let m = owner_to_counter(1, Kind::RecordsReceived, &[7u8; 40]);
+    let opened = open_as_counter(&m).unwrap();
+    assert_eq!(opened.kind, Kind::RecordsReceived);
+    assert_eq!(Kind::RecordsReceived.to_byte(), 10);
+    // A counter may not send it, and nobody may send it to the owner.
+    let mut rng = Counting(0);
+    let r = seal(
+        &counter(),
+        Role::Counter,
+        &owner().device_id(),
+        Role::Owner,
+        1,
+        Kind::RecordsReceived,
+        &[0u8; 40],
+        &mut |b| rng.fill(b),
+    );
+    assert_eq!(r.unwrap_err(), SealError::KindNotAllowed);
+    // From the listed counter's key, the reader refuses it before decrypting.
+    let m = hand_signed_by(&counter(), &owner(), Kind::RecordsReceived);
+    let r = open(&owner(), Role::Owner, &m, allowed, none_taken);
+    assert_eq!(
+        r.unwrap_err(),
+        OpenError::KindNotAllowed(Kind::RecordsReceived)
+    );
 }
 
 /// A message `from` seals to `to` with a kind the table would not allow,
