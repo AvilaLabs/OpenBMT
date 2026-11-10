@@ -715,11 +715,17 @@ internal object IntegrityCheckingUniffiLib {
     }
 
     internal fun ensureInitialized() = Unit
+    external fun uniffi_openbmt_key_ffi_checksum_func_parse_deposit_code(
+    ): Int
     external fun uniffi_openbmt_key_ffi_checksum_func_coin_bits(
     ): Int
     external fun uniffi_openbmt_key_ffi_checksum_func_dice_bits(
     ): Int
     external fun uniffi_openbmt_key_ffi_checksum_func_dice_face_counts(
+    ): Int
+    external fun uniffi_openbmt_key_ffi_checksum_func_word_is_valid(
+    ): Int
+    external fun uniffi_openbmt_key_ffi_checksum_func_word_suggestions(
     ): Int
     external fun uniffi_openbmt_key_ffi_checksum_method_keyapp_accept_wallet(
     ): Int
@@ -740,6 +746,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_openbmt_key_ffi_checksum_method_keyapp_state(
     ): Int
     external fun uniffi_openbmt_key_ffi_checksum_method_keyapp_wallet_view(
+    ): Int
+    external fun uniffi_openbmt_key_ffi_checksum_method_keyapp_check_kit(
     ): Int
     external fun uniffi_openbmt_key_ffi_checksum_method_keyapp_correct_clock(
     ): Int
@@ -828,6 +836,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_openbmt_key_ffi_fn_method_keyapp_wallet_view(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_openbmt_key_ffi_fn_method_keyapp_check_kit(`ptr`: Long,`scanned`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_openbmt_key_ffi_fn_method_keyapp_correct_clock(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_openbmt_key_ffi_fn_method_keyapp_enroll_destination(`ptr`: Long,`address`: RustBuffer.ByValue,`label`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -876,11 +886,17 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_openbmt_key_ffi_fn_method_keystore_now(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    external fun uniffi_openbmt_key_ffi_fn_func_parse_deposit_code(`text`: RustBuffer.ByValue,`network`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_openbmt_key_ffi_fn_func_coin_bits(`heads`: RustBuffer.ByValue,`words`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_openbmt_key_ffi_fn_func_dice_bits(`rolls`: RustBuffer.ByValue,`words`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_openbmt_key_ffi_fn_func_dice_face_counts(`rolls`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_openbmt_key_ffi_fn_func_word_is_valid(`word`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_openbmt_key_ffi_fn_func_word_suggestions(`prefix`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun ffi_openbmt_key_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1001,6 +1017,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if ((lib.uniffi_openbmt_key_ffi_checksum_func_parse_deposit_code() and 0xFFFF) != 47597) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_openbmt_key_ffi_checksum_func_coin_bits() and 0xFFFF) != 25418) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1008,6 +1027,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_openbmt_key_ffi_checksum_func_dice_face_counts() and 0xFFFF) != 14834) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_openbmt_key_ffi_checksum_func_word_is_valid() and 0xFFFF) != 45005) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_openbmt_key_ffi_checksum_func_word_suggestions() and 0xFFFF) != 56950) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_openbmt_key_ffi_checksum_method_keyapp_accept_wallet() and 0xFFFF) != 2032) {
@@ -1038,6 +1063,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_openbmt_key_ffi_checksum_method_keyapp_wallet_view() and 0xFFFF) != 9377) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_openbmt_key_ffi_checksum_method_keyapp_check_kit() and 0xFFFF) != 31044) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_openbmt_key_ffi_checksum_method_keyapp_correct_clock() and 0xFFFF) != 9528) {
@@ -1600,6 +1628,20 @@ public interface KeyAppInterface {
     fun `walletView`(): WalletView
     
     /**
+     * `docs/DESIGN.md` §5.4: the kit is checked by scan. Compare the text
+     * of the kit's QR with this Key app's own wallet description, byte for
+     * byte, after trimming leading and trailing ASCII white space only.
+     *
+     * `Different` with `same_checksum_words` true is the R4-2 attack and
+     * the most serious result: the four words people compare match, the
+     * keys do not. Nothing changes and the scanned text is not kept. Text
+     * over 8,192 bytes is refused first (`kit-too-long`). Only the
+     * description is checked; the kit's other fields are not. Allowed in
+     * the Ready state only.
+     */
+    fun `checkKit`(`scanned`: kotlin.String): KitCheck
+    
+    /**
      * SR-31: confirm a clock correction, using the clock the app gave.
      */
     fun `correctClock`()
@@ -1940,6 +1982,33 @@ open class KeyApp: Disposable, AutoCloseable, KeyAppInterface
     UniffiLib.uniffi_openbmt_key_ffi_fn_method_keyapp_wallet_view(
         it,
         _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * `docs/DESIGN.md` §5.4: the kit is checked by scan. Compare the text
+     * of the kit's QR with this Key app's own wallet description, byte for
+     * byte, after trimming leading and trailing ASCII white space only.
+     *
+     * `Different` with `same_checksum_words` true is the R4-2 attack and
+     * the most serious result: the four words people compare match, the
+     * keys do not. Nothing changes and the scanned text is not kept. Text
+     * over 8,192 bytes is refused first (`kit-too-long`). Only the
+     * description is checked; the kit's other fields are not. Allowed in
+     * the Ready state only.
+     */
+    @Throws(KeyException::class)override fun `checkKit`(`scanned`: kotlin.String): KitCheck {
+            return FfiConverterTypeKitCheck.lift(
+    callWithHandle {
+    uniffiRustCallWithError(KeyException) { _status ->
+    UniffiLib.uniffi_openbmt_key_ffi_fn_method_keyapp_check_kit(
+        it,
+        
+        FfiConverterString.lower(`scanned`),_status)
 }
     }
     )
@@ -3404,6 +3473,72 @@ public object FfiConverterTypeCheckView: FfiConverterRustBuffer<CheckView> {
 
 
 /**
+ * What a scanned deposit code holds.
+ */
+data class DepositCode (
+    /**
+     * The address, for the wallet's network, in its usual spelling.
+     */
+    var `address`: kotlin.String
+    , 
+    /**
+     * The amount asked for, in satoshis, if the code has one.
+     */
+    var `amountSats`: kotlin.ULong?
+    , 
+    /**
+     * The label the code carries, if any. It is not the label the signer
+     * stores: the person types that on this device (SR-30).
+     */
+    var `label`: kotlin.String?
+    , 
+    /**
+     * The names of the parameters that were read and not acted on, such
+     * as `lightning` or `pj`, in the order they came. The `message`
+     * parameter is read and dropped, and is not listed.
+     */
+    var `ignored`: List<kotlin.String>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDepositCode: FfiConverterRustBuffer<DepositCode> {
+    override fun read(buf: ByteBuffer): DepositCode {
+        return DepositCode(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalULong.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterSequenceString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: DepositCode) = (
+            FfiConverterString.allocationSize(value.`address`) +
+            FfiConverterOptionalULong.allocationSize(value.`amountSats`) +
+            FfiConverterOptionalString.allocationSize(value.`label`) +
+            FfiConverterSequenceString.allocationSize(value.`ignored`)
+    )
+
+    override fun write(value: DepositCode, buf: ByteBuffer) {
+            FfiConverterString.write(value.`address`, buf)
+            FfiConverterOptionalULong.write(value.`amountSats`, buf)
+            FfiConverterOptionalString.write(value.`label`, buf)
+            FfiConverterSequenceString.write(value.`ignored`, buf)
+    }
+}
+
+
+
+/**
  * The two fee ceilings.
  */
 data class FeeCeilingsView (
@@ -4835,6 +4970,24 @@ sealed class EntropySource {
         companion object
     }
     
+    /**
+     * Twelve or 24 words the owner already has, typed in (BIP39 English,
+     * no passphrase). Each word is trimmed and lower-cased. The words are
+     * not kept and `key_words` returns nothing for this source. The
+     * signer starts with empty history, as with every source.
+     */
+    data class TypedWords(
+        /**
+         * The words, in order.
+         */
+        val `words`: List<kotlin.String>) : EntropySource()
+        
+    {
+        
+
+        companion object
+    }
+    
 
     
 
@@ -4862,6 +5015,9 @@ public object FfiConverterTypeEntropySource : FfiConverterRustBuffer<EntropySour
             4 -> EntropySource.DiceSkewCorrected(
                 FfiConverterString.read(buf),
                 FfiConverterTypeKeyWordCount.read(buf),
+                )
+            5 -> EntropySource.TypedWords(
+                FfiConverterSequenceString.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
         }
@@ -4897,6 +5053,13 @@ public object FfiConverterTypeEntropySource : FfiConverterRustBuffer<EntropySour
                 + FfiConverterTypeKeyWordCount.allocationSize(value.`words`)
             )
         }
+        is EntropySource.TypedWords -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceString.allocationSize(value.`words`)
+            )
+        }
     }
 
     override fun write(value: EntropySource, buf: ByteBuffer) {
@@ -4920,6 +5083,11 @@ public object FfiConverterTypeEntropySource : FfiConverterRustBuffer<EntropySour
                 buf.putInt(4)
                 FfiConverterString.write(value.`rolls`, buf)
                 FfiConverterTypeKeyWordCount.write(value.`words`, buf)
+                Unit
+            }
+            is EntropySource.TypedWords -> {
+                buf.putInt(5)
+                FfiConverterSequenceString.write(value.`words`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -5207,6 +5375,112 @@ public object FfiConverterTypeKeyWordCount: FfiConverterRustBuffer<KeyWordCount>
 
     override fun write(value: KeyWordCount, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * What the scan of the kit's description showed.
+ */
+sealed class KitCheck {
+    
+    /**
+     * The scanned text is the Key app's own wallet description, byte for
+     * byte (leading and trailing ASCII white space apart).
+     */
+    object Same : KitCheck()
+    
+    
+    /**
+     * The scanned text differs from the Key app's description.
+     */
+    data class Different(
+        /**
+         * The byte position of the first difference, from 0. When one
+         * text is the start of the other, the length of the shorter.
+         */
+        val `firstDifference`: kotlin.UInt, 
+        /**
+         * The scanned text is a wallet description whose four checksum
+         * words are the Key app's own. This is the R4-2 case: a
+         * description made to share the words people compare, with other
+         * keys in it. It must be shown as the most serious result, above
+         * every other difference.
+         */
+        val `sameChecksumWords`: kotlin.Boolean, 
+        /**
+         * The scanned text parses as a wallet description for this
+         * network.
+         */
+        val `parses`: kotlin.Boolean) : KitCheck()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeKitCheck : FfiConverterRustBuffer<KitCheck>{
+    override fun read(buf: ByteBuffer): KitCheck {
+        return when(buf.getInt()) {
+            1 -> KitCheck.Same
+            2 -> KitCheck.Different(
+                FfiConverterUInt.read(buf),
+                FfiConverterBoolean.read(buf),
+                FfiConverterBoolean.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: KitCheck): ULong = when(value) {
+        is KitCheck.Same -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is KitCheck.Different -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterUInt.allocationSize(value.`firstDifference`)
+                + FfiConverterBoolean.allocationSize(value.`sameChecksumWords`)
+                + FfiConverterBoolean.allocationSize(value.`parses`)
+            )
+        }
+    }
+
+    override fun write(value: KitCheck, buf: ByteBuffer) {
+        when(value) {
+            is KitCheck.Same -> {
+                buf.putInt(1)
+                Unit
+            }
+            is KitCheck.Different -> {
+                buf.putInt(2)
+                FfiConverterUInt.write(value.`firstDifference`, buf)
+                FfiConverterBoolean.write(value.`sameChecksumWords`, buf)
+                FfiConverterBoolean.write(value.`parses`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 }
 
@@ -6412,6 +6686,37 @@ public object FfiConverterSequenceTypeSlotView: FfiConverterRustBuffer<List<Slot
     }
 }
         /**
+         * Read `text` as a bare address or a BIP21 URI for `network`.
+         *
+         * - The scheme `bitcoin:` is accepted in any case; parameter names are
+         * compared in ASCII lower case.
+         * - `amount` is a decimal number of bitcoin with at most 8 places, no
+         * sign and no exponent, from 1 satoshi to 21,000,000 bitcoin.
+         * - `label` and `message` are percent-decoded; the label may not hold a
+         * control character.
+         * - A parameter that starts with `req-` is not understood by this
+         * parser, so the whole code is refused, as BIP21 says. Any other
+         * unknown parameter is listed by name in `ignored` and never acted on.
+         * - A parameter given twice, a bad percent escape, a space or other
+         * character that should have been escaped, and a text over 2,048 bytes
+         * are refused.
+         * - The address must be for `network` and of a kind the signer's
+         * allowlist takes (SR-22, SR-30): P2WPKH, P2WSH, P2TR, P2PKH or P2SH.
+         */
+    @Throws(KeyException::class) fun `parseDepositCode`(`text`: kotlin.String, `network`: KeyNetwork): DepositCode {
+            return FfiConverterTypeDepositCode.lift(
+    uniffiRustCallWithError(KeyException) { _status ->
+    UniffiLib.uniffi_openbmt_key_ffi_fn_func_parse_deposit_code(
+    
+        
+        FfiConverterString.lower(`text`),
+        FfiConverterTypeKeyNetwork.lower(`network`),_status)
+}
+    )
+    }
+    
+
+        /**
          * How many skew-corrected bits `heads` gives, and how many more `words`
          * need, for a progress display. Wraps `openbmt_core::entropy`.
          */ fun `coinBits`(`heads`: List<kotlin.Boolean>, `words`: KeyWordCount): BitProgress {
@@ -6454,6 +6759,35 @@ public object FfiConverterSequenceTypeSlotView: FfiConverterRustBuffer<List<Slot
     
         
         FfiConverterString.lower(`rolls`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Whether `word` (trimmed and lower-cased) is on the BIP39 English list.
+         */ fun `wordIsValid`(`word`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_openbmt_key_ffi_fn_func_word_is_valid(
+    
+        
+        FfiConverterString.lower(`word`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Up to 8 BIP39 English words that start with `prefix` (trimmed and
+         * lower-cased), for the word picker. Empty for an empty prefix.
+         */ fun `wordSuggestions`(`prefix`: kotlin.String): List<kotlin.String> {
+            return FfiConverterSequenceString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_openbmt_key_ffi_fn_func_word_suggestions(
+    
+        
+        FfiConverterString.lower(`prefix`),_status)
 }
     )
     }
