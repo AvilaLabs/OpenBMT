@@ -95,7 +95,8 @@ thin driver that owns the sockets.
   transaction or filter that was not asked of it, or claims a height it
   sends no headers for (NR-33).
 - **NR-26.** With Tor on, every connection goes through the SOCKS5 proxy
-  the caller names, and no DNS seed is asked directly. Peers reached by
+  the caller names, and no name reaches the system's resolver. The seeds'
+  filter names are looked up through Tor itself (NR-72). Peers reached by
   IP address through Tor are grouped by that address like any other.
 
 ## 4. Headers
@@ -220,6 +221,10 @@ thin driver that owns the sockets.
   instant acceptance off when the chain stops moving.
 - **They do not check that a filter is complete.** A false filter can
   hide a payment until a second peer or a full block shows it (WR-23).
+- **They do not trust the exit that answers a lookup.** With Tor on, the
+  exit that answers a seed lookup can lie. That costs a dial and nothing
+  else: what a peer says about filters is compared across two network
+  groups (NR-42), and a peer that lies is dropped (NR-25).
 - **They do not relay.** The counter gives nothing back to the network.
   A shop that wants to support the network runs the Box's full node.
 
@@ -248,8 +253,16 @@ rules are what it decides where the rules above are silent.
   compact-filter service (the `x49.` prefix); those enter the book with
   that service stated by a seed (NR-21). Without two filter peers every
   block is downloaded in full (NR-42). The default names are the ones
-  Bitcoin Core 32.1 ships. With Tor on (NR-26), no name is looked up: one seed
-  name at a time is dialed through the proxy as an ordinary peer.
+  Bitcoin Core 32.1 ships. With Tor on (NR-26), no name reaches the
+  system's resolver. A round, at the same spacing, asks each seed's
+  filter name through the proxy's own lookup command (Tor's `RESOLVE`):
+  three lookups a seed, each on its own circuit (NR-78), each giving one
+  address, at most 4 at a time. What a lookup returns enters the book as
+  stated by a seed to offer filters, as without Tor, unless it is not
+  publicly routable (NR-22). A proxy that cannot do this, or a round that
+  gave no address, is noted once, and one seed name at a time is dialed
+  through the proxy as an ordinary peer, as before. A proxy that answers
+  "command not supported" is not asked again while the driver runs.
 - **NR-73.** The header store is saved when the tip has moved and 60
   seconds have passed since the last save, and always before a block is
   handed to the app if the tip has moved since the last save: what the
