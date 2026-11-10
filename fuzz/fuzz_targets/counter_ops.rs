@@ -20,8 +20,8 @@ use openbmt_core::policy::{CheckMode, Heartbeat};
 use openbmt_core::records::{Chain, Record};
 use openbmt_core::settings::Settings;
 use openbmt_counter::{
-    sale_payment_id, Actor, Amount, Counter, Currency, Event, Facts, OpenFacts, Pairing, Rate,
-    RateSource, Report, Role, Slot, State, Store, Stored,
+    sale_payment_id, Actor, Amount, CashRefund, Counter, Currency, Event, Facts, OpenFacts,
+    Pairing, Rate, RateSource, RefundAsk, RefundRequest, Report, Role, Slot, State, Store, Stored,
 };
 use openbmt_watch::{HeaderChain, Health, PeerAddr, Source, WellFormedBlock};
 
@@ -451,6 +451,11 @@ impl Run {
         }
     }
 
+    /// The number of the last refund request the desk handed out.
+    fn last_refund_no(&self) -> u64 {
+        self.counter.desk().last_refund_no()
+    }
+
     /// Rebuild the counter from what the store holds.
     fn restart(&mut self) {
         let loaded = Counter::load(id(3), pairing(), self.settings.clone(), self.mem.stored());
@@ -458,6 +463,15 @@ impl Run {
             Ok(counter) => counter,
             Err(e) => panic!("the counter's own store did not load: {e:?}"),
         };
+        for index in 0..self.opened.len() {
+            let index = self.opened[index].0;
+            // What the views say of a sale survives the restart.
+            assert_eq!(
+                counter.refund_views(index),
+                self.counter.refund_views(index),
+                "the refunds of sale {index} changed over a restart"
+            );
+        }
         self.counter = counter;
         let unreadable: Vec<u32> = self.counter.unreadable().collect();
         for slot in self.mem.slots.keys() {
@@ -485,7 +499,7 @@ impl Run {
         let failures_before = self.mem.failures;
         let mut cleared = false;
         let mut reports: Vec<Report> = Vec::new();
-        match head % 11 {
+        match head % 14 {
             // Open a sale.
             0 => {
                 let amount = Amount(1 + u64::from(input.word()));
@@ -676,6 +690,96 @@ impl Run {
                 {
                     cleared = true;
                 }
+            }
+            // A cashier or a manager asks for a refund, to one of a few
+            // scripts (some of them not payable), by amount or by value.
+            10 => {
+                let (index, _) = self.pick(input.byte());
+                let b = input.byte();
+                let sats = u64::from(input.word()) * (1 + u64::from(b >> 6));
+                let ask = if b & 1 == 0 {
+                    RefundAsk::Sats(sats)
+                } else {
+                    RefundAsk::Value {
+                        minor: sats / 7,
+                        rate: Rate::new((1 + u64::from(input.byte())) * 100_000).unwrap(),
+                        source: RateSource::new("fuzz", self.now).unwrap(),
+                    }
+                };
+                let destination = match (b >> 1) % 6 {
+                    0 => ScriptBuf::new_op_return([1, 2, 3]),
+                    // The sale's own script, which the owner's batches hold.
+                    1 => self.pick(input.byte()).1,
+                    n => p2wsh(0x80 + n),
+                };
+                let role = if b & 0x20 == 0 {
+                    Role::Cashier
+                } else {
+                    Role::Manager
+                };
+                let name = NAMES[usize::from(input.byte()) % NAMES.len()].to_string();
+                let request = RefundRequest {
+                    ask,
+                    destination,
+                    actor: Actor { role, name },
+                    reason: "fuzz".to_string(),
+                };
+                let last = self.last_refund_no();
+                let result = self.counter.request_refund(
+                    index,
+                    request,
+                    self.now,
+                    &self.chain,
+                    &mut self.mem,
+                );
+                self.sync_events();
+                if let Ok(number) = result {
+                    assert!(number > last, "a request number did not rise");
+                    let written = self.events[from..]
+                        .iter()
+                        .filter(|e| {
+                            matches!(e, Event::RefundRequested { number: n, .. } if *n == number)
+                        })
+                        .count();
+                    assert_eq!(written, 1, "request {number} is not one record");
+                }
+            }
+            // A person withdraws a request, by a number that may be wrong.
+            11 => {
+                let (index, _) = self.pick(input.byte());
+                let number = u64::from(input.byte() % 6);
+                let role = if input.byte() & 1 == 0 {
+                    Role::Cashier
+                } else {
+                    Role::Manager
+                };
+                let name = NAMES[usize::from(input.byte()) % NAMES.len()].to_string();
+                let _ = self.counter.withdraw_refund(
+                    index,
+                    number,
+                    Actor { role, name },
+                    self.now,
+                    &mut self.mem,
+                );
+            }
+            // A refund paid in cash.
+            12 => {
+                let (index, _) = self.pick(input.byte());
+                let cash = CashRefund {
+                    actor: Actor {
+                        role: Role::Manager,
+                        name: "bob".to_string(),
+                    },
+                    minor: Amount(u64::from(input.word())),
+                    reason: "fuzz".to_string(),
+                };
+                let _ = self.counter.refund_in_cash(
+                    index,
+                    cash,
+                    self.now,
+                    &self.chain,
+                    &mut self.mem,
+                );
             }
             // Restart from the store.
             _ => self.restart(),
