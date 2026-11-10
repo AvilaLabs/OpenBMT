@@ -82,7 +82,7 @@ Tools (none is downloaded):
 | Tool | Where the script looks |
 |---|---|
 | JDK 21 | `JAVA_HOME`, default `~/Android/jdk21` |
-| Kotlin 2.2.20 compiler | `KOTLIN_HOME`, default the checked toolchain folder; the stdlib's SHA-256 is pinned in the script |
+| Kotlin 2.2.20 compiler | `KOTLIN_HOME`, default `~/.cache/openbmt/tools/kotlinc` (the `kotlin-compiler-2.2.20.zip` release, whose SHA-256 CI checks); the stdlib's SHA-256 is pinned in the script |
 | Android SDK, platform `android-36`, build-tools `36.0.0` | `ANDROID_SDK`, default `~/Android/Sdk` |
 | NDK `26.3.11579264` | `ANDROID_NDK_HOME` |
 | Rust with the two Android targets | `rustup` |

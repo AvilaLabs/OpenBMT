@@ -13,7 +13,7 @@
 #   JAVA_HOME         a JDK 21           (default: ~/Android/jdk21)
 #   ANDROID_SDK       the SDK            (default: ~/Android/Sdk)
 #   ANDROID_NDK_HOME  the NDK            (default: $ANDROID_SDK/ndk/26.3.11579264)
-#   KOTLIN_HOME       Kotlin 2.2.20      (default: the checked toolchain folder)
+#   KOTLIN_HOME       Kotlin 2.2.20      (default: ~/.cache/openbmt/tools/kotlinc)
 #   OPENBMT_GUARD     the memory guard   (default: ~/.cache/openbmt/guard.sh)
 #   KEYAPK_OUT        build directory    (default: ~/.cache/openbmt/target/keyapk/apk)
 #   KEYAPK_SKIP_RUST  set to 1 to reuse the .so files of an earlier run
@@ -27,7 +27,7 @@ guard="${OPENBMT_GUARD:-$cache/guard.sh}"
 export JAVA_HOME="${JAVA_HOME:-$HOME/Android/jdk21}"
 sdk="${ANDROID_SDK:-$HOME/Android/Sdk}"
 ndk="${ANDROID_NDK_HOME:-$sdk/ndk/26.3.11579264}"
-export KOTLIN_HOME="${KOTLIN_HOME:-$HOME/Documents/Avila-Labs/openbmt-private/handoffs/2026-11-10-resume/toolchain/kotlin-release/kotlinc}"
+export KOTLIN_HOME="${KOTLIN_HOME:-$cache/tools/kotlinc}"
 out="${KEYAPK_OUT:-$cache/target/keyapk/apk}"
 cargo_target="$cache/target/keyapk"
 keydir="$cache/tmp/keyapk"
