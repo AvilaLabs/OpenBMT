@@ -457,7 +457,7 @@ WELCOME10=$(pair welcome "$K4" "$A3")
 await_state 2 paired 10 || true
 S10=$(state_of 2)
 # A token file that its group and others can read.
-printf 'sk_test_token' >"$B3/pos.token"
+printf 'pos-token-test' >"$B3/pos.token"
 chmod 644 "$B3/pos.token"
 if await_line 2 pos 'pos: reading:' 'mode 0644' 10; then REFUSED10=$LAST; else REFUSED10="none: $LAST"; fi
 note "$REFUSED10"
@@ -561,7 +561,7 @@ stop_box 2
 say "14. An unpaired Box runs no POS"
 mkdir -p "$PD2"
 pair pos-order "$PD2" p1 closed 100 bitcoin >/dev/null
-printf 'sk_test_token' >"$B4/pos.token"
+printf 'pos-token-test' >"$B4/pos.token"
 chmod 600 "$B4/pos.token"
 EXTRA=("$PD2")
 start_box 2 "$B4" "$PORT2" || die "the unpaired Box with the test POS did not start: $(cat "${LOG[2]}")"

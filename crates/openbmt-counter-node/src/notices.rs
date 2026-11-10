@@ -41,7 +41,7 @@ pub const MAX_QUEUED: usize = 4_096;
 /// Most Boxes the file remembers a send mark for.
 pub const MAX_BOXES: usize = 64;
 
-const MAGIC_NOTICE_OUTBOX: [u8; 4] = *b"OBM1";
+const MAGIC_NOTICE_OUTBOX: [u8; 4] = *b"OBMb";
 
 /// Why the notice file could not be opened or written.
 #[derive(Debug, Clone, PartialEq, Eq)]

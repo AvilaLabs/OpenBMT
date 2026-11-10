@@ -29,9 +29,9 @@ use crate::matcher::{Match, MatchHow};
 use crate::model::{get_id, put_str, OrderId};
 
 /// The magic of a paid notice.
-pub const MAGIC_PAID_NOTICE: [u8; 4] = *b"OBM8";
+pub const MAGIC_PAID_NOTICE: [u8; 4] = *b"OBMc";
 /// The magic of a POS notice.
-pub const MAGIC_POS_NOTICE: [u8; 4] = *b"OBM9";
+pub const MAGIC_POS_NOTICE: [u8; 4] = *b"OBMd";
 /// The tag of the hash a paid notice's signature covers.
 pub const TAG_PAID_NOTICE: &str = "OpenBMT/paid-notice/v1";
 /// The tag of the hash a POS notice's signature covers.

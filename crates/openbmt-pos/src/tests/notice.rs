@@ -32,7 +32,7 @@ fn bx_40_a_paid_notice_has_a_fixed_length_and_no_satoshi_rate_address_or_txid() 
     // currency 3, opened 8, state 1, state time 8, signature 64.
     assert_eq!(PAID_NOTICE_LEN, 5 + 32 + 8 + 4 + 8 + 3 + 8 + 1 + 8 + 64);
     assert_eq!(bytes.len(), PAID_NOTICE_LEN);
-    assert_eq!(&bytes[..4], b"OBM8");
+    assert_eq!(&bytes[..4], b"OBMc");
     // Every notice is that long, whatever it says: there is nowhere for a
     // satoshi amount, a rate, an address or a transaction ID to go.
     for state in [
@@ -419,7 +419,7 @@ fn bx_42_a_pos_notice_reads_back_strictly_for_every_item() {
     for (n, item) in items.into_iter().enumerate() {
         let notice = PosNotice::sign(&identity(7), n as u64 + 1, T0, item).unwrap();
         let bytes = notice.to_bytes();
-        assert_eq!(&bytes[..4], b"OBM9");
+        assert_eq!(&bytes[..4], b"OBMd");
         let back = PosNotice::from_bytes(&bytes).unwrap();
         assert_eq!(back, notice);
         assert!(back.verify());

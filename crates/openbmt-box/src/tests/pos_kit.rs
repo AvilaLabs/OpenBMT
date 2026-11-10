@@ -26,6 +26,8 @@ pub struct Probe {
     pub can_close: bool,
     pub order: Option<OrderId>,
     pub find_calls: usize,
+    /// The sale indexes `find_order` was asked for, in order.
+    pub asked: Vec<u32>,
     pub close_script: VecDeque<Result<CloseOutcome, PosError>>,
     pub closes: Vec<CloseRequest>,
 }
@@ -74,9 +76,10 @@ impl Connector for TestConnector {
         self.probe().can_close
     }
 
-    fn find_order(&mut self, _sale: &SaleFact) -> Result<Option<OrderId>, PosError> {
+    fn find_order(&mut self, sale: &SaleFact) -> Result<Option<OrderId>, PosError> {
         let mut p = self.probe();
         p.find_calls += 1;
+        p.asked.push(sale.index);
         Ok(p.order.clone())
     }
 
@@ -186,5 +189,5 @@ pub fn pos(connector: &TestConnector) -> BoxPos<MemFiles> {
 }
 
 pub fn token() -> Result<Option<String>, String> {
-    Ok(Some("sk_test_token".to_string()))
+    Ok(Some("pos-token-test".to_string()))
 }

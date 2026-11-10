@@ -236,10 +236,10 @@ These details too leave every rule of section 4 as it is.
 
 - **The paid notice.** A counter sends it as a sealed message of kind Paid
   notice to each Box on its device list (LK-08). The content is exactly 141
-  bytes, strict, with the magic `OBM8`:
+  bytes, strict, with the magic `OBMc`:
 
   ```text
-  "OBM8" | 1 | counter key (32) | number (8) | sale index (4)
+  "OBMc" | 1 | counter key (32) | number (8) | sale index (4)
          | amount (8) | currency (3) | opened (8) | state (1)
          | state time (8) | signature (64)
   signature = BIP340 over the tagged hash
@@ -294,7 +294,8 @@ These details too leave every rule of section 4 as it is.
   sales that are final, not unpaid again, first reported paid more than the
   matching window (PS-33, 30 minutes) ago and with no close under way. A
   sale dropped is not judged again; a match to it is kept as it is (PS-36).
-  If none can be dropped the new notice is refused with a note: nothing
+  The record of its close goes with it, so the closes recorded never
+  outnumber the sales. If none can be dropped the new notice is refused with a note: nothing
   else is ever dropped for room.
 - **The timer.** The time is the clock the Box is given. The POS is read
   every 30 seconds, and at once at the next turn of the worker after a
@@ -323,10 +324,10 @@ These details too leave every rule of section 4 as it is.
   reads no POS; a program that links the library gives it one.
 - **The POS notice.** The Box sends what a reading made new, and what its
   closing did, to the owner as sealed messages of kind POS notice (LK-08),
-  one thing in each, strict, with the magic `OBM9`:
+  one thing in each, strict, with the magic `OBMd`:
 
   ```text
-  "OBM9" | 1 | Box key (32) | number (8) | time (8) | item (1) | body
+  "OBMd" | 1 | Box key (32) | number (8) | time (8) | item (1) | body
          | signature (64)
   signature = BIP340 over the tagged hash
               "OpenBMT/pos-notice/v1" of every byte before it
@@ -353,12 +354,18 @@ These details too leave every rule of section 4 as it is.
   each that has no close recorded asks the connector, which is the only one
   that knows the POS, for the one open order that carries the sale's
   reference (`find_order`). With no order named nothing is closed and the
-  sale is tried again on the next turn. With one, the attempt is stored,
+  sale is tried again on a later turn. The connector is asked about at
+  most 16 sales in a turn, taken in turn so that a sale with no order does
+  not keep the others waiting, and only about sales first reported paid
+  inside the matching window (PS-33): an older one is left to the owner.
+  With one, the attempt is stored,
   then the connector is called with the idempotency key of PS-81, and then
   the result is stored with a POS notice to the owner. A stop between the
   two leaves the attempt, and the next turn calls again with the same key
-  and the same order. A sale gets at most one close, ever; at most 16
-  orders are closed in a turn. A sale that is not reported paid now is
+  and the same order. A sale gets at most one close: the Box records
+  it, and the key of PS-81 makes the POS refuse a second one even after
+  the Box dropped the record with the sale. At most 16 orders are closed
+  in a turn. A sale that is not reported paid now is
   refused before the connector is called, by `CloseRequest::for_sale`.
   A sale that goes unpaid again after its order was closed makes one POS
   notice of item 4 to the owner. Nothing is undone, and the sale is not

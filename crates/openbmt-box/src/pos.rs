@@ -13,7 +13,7 @@
 //!
 //! | File | Holds |
 //! |---|---|
-//! | `pos-notices` | `OBM0`, 1, the last notice number taken from each counter, each sale as the notices gave it, the closes made, the number of the last POS notice and the POS notices not yet taken by the relay |
+//! | `pos-notices` | `OBMa`, 1, the last notice number taken from each counter, each sale as the notices gave it, the closes made, the number of the last POS notice and the POS notices not yet taken by the relay |
 //! | `pos-ledger` | the ledger of `openbmt-pos` (`OBMZ`) |
 //!
 //! Where the rules are silent, the choices are in the paragraph "What the
@@ -49,10 +49,12 @@ pub const MAX_OUT: usize = 256;
 pub const PRUNE_CHUNK: usize = 1_024;
 /// Most orders closed in one tick.
 pub const MAX_CLOSES_PER_TICK: usize = 16;
+/// Most sales the connector is asked to name an order for in one tick.
+pub const MAX_FINDS_PER_TICK: usize = 16;
 /// Most lines of notes one call returns.
 const MAX_NOTES: usize = 64;
 
-const MAGIC_POS_STORE: [u8; 4] = *b"OBM0";
+const MAGIC_POS_STORE: [u8; 4] = *b"OBMa";
 
 /// What the Box is given to run the POS with.
 pub struct PosSetup {
@@ -391,6 +393,9 @@ pub struct BoxPos<F: BoxFiles> {
     ledger: Ledger,
     next_poll_at: u64,
     poll_now: bool,
+    /// The last sale the connector was asked to name an order for: the
+    /// next tick starts after it, so that no sale is always asked first.
+    asked_last: Option<SaleKey>,
     reading: Reading,
     token_given: Option<String>,
     last_poll_at: Option<u64>,
@@ -443,6 +448,7 @@ impl<F: BoxFiles> BoxPos<F> {
             ledger,
             next_poll_at: 0,
             poll_now: false,
+            asked_last: None,
             reading: Reading::Stopped,
             token_given: None,
             last_poll_at: None,
@@ -612,6 +618,7 @@ impl<F: BoxFiles> BoxPos<F> {
     /// are final, are not unpaid again, were first reported paid more than
     /// the matching window ago (PS-33) and have no close under way. A sale
     /// dropped is not judged again; a match to it is kept as it is (PS-36).
+    /// The record of its close is dropped with it.
     fn prune(&self, work: &mut Store, now: u64) {
         let mut old: Vec<(u64, SaleKey)> = work
             .sales
@@ -628,6 +635,9 @@ impl<F: BoxFiles> BoxPos<F> {
         old.sort();
         for (_, key) in old.into_iter().take(PRUNE_CHUNK) {
             work.sales.remove(&key);
+            // Its close, if one was made, goes with it: the closes stay
+            // within the bound of the sales.
+            work.closes.remove(&key);
         }
     }
 
@@ -814,20 +824,30 @@ impl<F: BoxFiles> BoxPos<F> {
         let Some(tender_name) = self.settings.bitcoin_tenders.first().cloned() else {
             return;
         };
-        let paid: Vec<SaleFact> = self
+        // The attempts found stored come first. After them, the sales with
+        // no close yet that were first reported paid inside the matching
+        // window (PS-33): an older one has no open order left to find. They
+        // are taken in key order from after the last one asked, so a sale
+        // the POS has no order for does not keep the others waiting.
+        let window = self.settings.timing.match_window_secs;
+        let (mut paid, fresh): (Vec<SaleFact>, Vec<SaleFact>) = self
             .store
             .sales
             .values()
             .filter(|f| f.is_paid_now())
-            .filter(|f| {
-                self.store
-                    .closes
-                    .get(&f.key())
-                    .is_none_or(|e| e.state == CloseState::Attempted)
+            .filter(|f| match self.store.closes.get(&f.key()) {
+                Some(e) => e.state == CloseState::Attempted,
+                None => f.paid_at.is_some_and(|p| now.saturating_sub(p) <= window),
             })
             .cloned()
-            .collect();
+            .partition(|f| self.store.closes.contains_key(&f.key()));
+        let (before, after): (Vec<SaleFact>, Vec<SaleFact>) = fresh
+            .into_iter()
+            .partition(|f| self.asked_last.is_some_and(|last| f.key() <= last));
+        paid.extend(after);
+        paid.extend(before);
         let mut made = 0;
+        let mut asked = 0;
         for sale in paid {
             if made >= MAX_CLOSES_PER_TICK {
                 break;
@@ -841,6 +861,11 @@ impl<F: BoxFiles> BoxPos<F> {
                         notes.push("PS-72: too many closes are recorded: none is made".into());
                         break;
                     }
+                    if asked >= MAX_FINDS_PER_TICK {
+                        break;
+                    }
+                    asked += 1;
+                    self.asked_last = Some(key);
                     match self.connector.find_order(&sale) {
                         Ok(Some(order)) => order,
                         Ok(None) => continue,

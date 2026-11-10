@@ -9,7 +9,9 @@ use openbmt_pos::{
 use super::kit::*;
 use super::pos_kit::*;
 use crate::files::{BoxFiles, MemFiles};
-use crate::pos::{Reading, LEDGER_FILE, MAX_OUT, NOTICES_FILE, POLL_SECS, PRUNE_CHUNK};
+use crate::pos::{
+    Reading, LEDGER_FILE, MAX_FINDS_PER_TICK, MAX_OUT, NOTICES_FILE, POLL_SECS, PRUNE_CHUNK,
+};
 use crate::state::{BoxError, POS_TOKEN_FILE};
 
 fn c1() -> openbmt_core::identity::Identity {
@@ -333,8 +335,8 @@ fn bx_40_the_matching_runs_on_the_facts_the_notices_gave() {
 fn bx_41_the_token_is_read_only_from_a_file_only_the_boxs_user_can_read() {
     let (mut core, _) = paired_core();
     assert_eq!(core.read_pos_token(), Ok(None));
-    core.store_pos_token("  sk_live_abc \n").unwrap();
-    assert_eq!(core.read_pos_token(), Ok(Some("sk_live_abc".to_string())));
+    core.store_pos_token("  pos-token-abc \n").unwrap();
+    assert_eq!(core.read_pos_token(), Ok(Some("pos-token-abc".to_string())));
     for mode in [0o644, 0o640, 0o604, 0o660, 0o666, 0o601] {
         core.files_mut().set_mode(POS_TOKEN_FILE, mode);
         assert_eq!(
@@ -405,11 +407,11 @@ fn bx_41_without_a_usable_token_nothing_is_read_and_the_token_is_never_shown() {
     assert_eq!(conn.probe().polls.len(), 1);
     assert_eq!(
         conn.probe().tokens.last().cloned().flatten().as_deref(),
-        Some("sk_test_token")
+        Some("pos-token-test")
     );
     // Nothing the Box says about itself holds the token.
     let shown = format!("{}{notes:?}", p.state());
-    assert!(!shown.contains("sk_test_token"), "{shown}");
+    assert!(!shown.contains("pos-token-test"), "{shown}");
     // A token that goes away is taken from the connector again.
     p.tick(NOW + 300, Ok(None));
     assert_eq!(conn.probe().tokens.last().cloned().flatten(), None);
@@ -836,6 +838,79 @@ fn bx_43_no_order_to_name_means_no_close_and_the_sale_is_tried_again_later() {
     conn.probe().order = Some(openbmt_pos::Id::new("o9").unwrap());
     p.tick(NOW + 12 + POLL_SECS, token());
     assert_eq!(conn.probe().closes.len(), 1);
+}
+
+#[test]
+fn bx_43_the_pos_is_asked_for_few_orders_in_a_tick_and_every_sale_gets_its_turn() {
+    let conn = TestConnector::closing("o9");
+    conn.probe().order = None;
+    let mut p = pos(&conn);
+    let sales = (MAX_FINDS_PER_TICK * 2 + 4) as u32;
+    let items: Vec<_> = (1..=sales)
+        .map(|i| {
+            item(
+                &c1(),
+                u64::from(i),
+                &draft(i, NoticeState::Paid, NOW + 10, 500),
+            )
+        })
+        .collect();
+    assert!(p.take_notices(&items, &roles(), NOW + 11).is_empty());
+    // One tick asks for no more than the bound.
+    p.tick(NOW + 12, token());
+    assert_eq!(conn.probe().asked.len(), MAX_FINDS_PER_TICK);
+    // Three ticks have asked for every sale, each once.
+    p.tick(NOW + 12 + POLL_SECS, token());
+    p.tick(NOW + 12 + 2 * POLL_SECS, token());
+    let mut asked = conn.probe().asked.clone();
+    asked.truncate(sales as usize);
+    asked.sort_unstable();
+    assert_eq!(asked, (1..=sales).collect::<Vec<_>>());
+    assert!(conn.probe().closes.is_empty());
+}
+
+#[test]
+fn bx_43_a_sale_paid_before_the_matching_window_is_not_asked_about() {
+    let conn = TestConnector::closing("o9");
+    conn.probe().order = None;
+    let mut p = pos(&conn);
+    paid_sale(&mut p, 1, 0);
+    p.tick(NOW + 12, token());
+    assert_eq!(conn.probe().find_calls, 1);
+    // Long after the window the POS is read, and the sale is left alone.
+    let late = NOW + 12 + openbmt_pos::MATCH_WINDOW_SECS + POLL_SECS;
+    p.tick(late, token());
+    assert_eq!(conn.probe().find_calls, 1);
+    assert_eq!(conn.probe().polls.len(), 2);
+}
+
+#[test]
+fn bx_43_the_record_of_a_close_is_dropped_with_its_sale() {
+    let conn = TestConnector::closing("o9");
+    let mut p = pos(&conn);
+    // Sale 0 is paid, closed and then final, long ago.
+    paid_sale(&mut p, 1, 0);
+    p.tick(NOW + 12, token());
+    assert_eq!(p.state().closes, 1);
+    let mut number = 100;
+    let mut fill = |p: &mut crate::pos::BoxPos<MemFiles>, from: u32, to: u32| {
+        for chunk in (from..to).collect::<Vec<_>>().chunks(1_000) {
+            let items: Vec<_> = chunk
+                .iter()
+                .map(|index| {
+                    number += 1;
+                    let d = draft(*index, NoticeState::Final, NOW + u64::from(*index), 500);
+                    item(&c1(), number, &d)
+                })
+                .collect();
+            assert!(p.take_notices(&items, &roles(), NOW + 100_000).is_empty());
+        }
+    };
+    // The book fills and one more sale makes room: sale 0 goes, and its
+    // close with it.
+    fill(&mut p, 0, MAX_SALES as u32 + 1);
+    assert!(p.sales().iter().all(|s| s.index != 0));
+    assert_eq!(p.state().closes, 0);
 }
 
 #[test]

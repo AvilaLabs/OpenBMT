@@ -705,12 +705,12 @@ fn bx_40_paid_notices_through_the_relay_are_matched_and_the_owner_is_told() {
     let r = start_pos(&dir, &clock, &conn);
     pair_ok(&r);
     mailbox(&r, &owner()).unwrap();
-    r.store_pos_token("sk_test_token").unwrap();
+    r.store_pos_token("pos-token-test").unwrap();
     eventually("the first reading", || !conn.probe().polls.is_empty());
     assert!(conn
         .probe()
         .tokens
-        .contains(&Some("sk_test_token".to_string())));
+        .contains(&Some("pos-token-test".to_string())));
     // The next reading, set off by the notices, finds the order.
     conn.probe()
         .pages
@@ -742,7 +742,7 @@ fn bx_40_a_notice_from_a_key_that_is_not_a_counter_never_reaches_the_pos() {
     let conn = TestConnector::default();
     let r = start_pos(&dir, &clock, &conn);
     pair_ok(&r);
-    r.store_pos_token("sk_test_token").unwrap();
+    r.store_pos_token("pos-token-test").unwrap();
     // A key outside the list: the relay refuses it before the Box sees it.
     let m = sealed_to(
         &stranger(),
@@ -821,7 +821,7 @@ fn bx_41_a_token_file_others_can_read_is_refused_and_the_relay_runs_on() {
     let r = start_pos(&dir, &clock, &conn);
     pair_ok(&r);
     let path = dir.path().join(POS_TOKEN_FILE);
-    std::fs::write(&path, b"sk_test_token").unwrap();
+    std::fs::write(&path, b"pos-token-test").unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
     eventually(
         "the token is refused by name",
@@ -842,13 +842,13 @@ fn bx_41_an_unpaired_box_runs_no_pos_and_gives_the_connector_no_token() {
     let clock = TestClock::new(NOW);
     let conn = TestConnector::default();
     let r = start_pos(&dir, &clock, &conn);
-    std::fs::write(dir.path().join(POS_TOKEN_FILE), b"sk_test_token").unwrap();
+    std::fs::write(dir.path().join(POS_TOKEN_FILE), b"pos-token-test").unwrap();
     std::thread::sleep(Duration::from_millis(600));
     assert_eq!(reading(&r), Some(Reading::Stopped));
     assert!(conn.probe().polls.is_empty());
     assert!(!conn.probe().tokens.iter().any(Option::is_some));
     assert_eq!(
-        r.store_pos_token("sk_test_token").unwrap_err(),
+        r.store_pos_token("pos-token-test").unwrap_err(),
         BoxError::NotPaired
     );
 }
@@ -860,7 +860,7 @@ fn bx_41_settings_that_drop_the_box_stop_the_pos_and_erase_the_token() {
     let conn = TestConnector::default();
     let r = start_pos(&dir, &clock, &conn);
     pair_ok(&r);
-    r.store_pos_token("sk_test_token").unwrap();
+    r.store_pos_token("pos-token-test").unwrap();
     eventually("the POS is read", || reading(&r) == Some(Reading::Reading));
     mailbox(&r, &counter1()).unwrap();
     let mut s = settings_with(2, &r.device_id());
