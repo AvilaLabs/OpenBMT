@@ -348,3 +348,10 @@ path = "fuzz_targets/owner_coins_decode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fee_history_decode"
+path = "fuzz_targets/fee_history_decode.rs"
+test = false
+doc = false
+bench = false
