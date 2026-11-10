@@ -214,6 +214,11 @@ impl Manager {
     /// NR-88: held transactions that have not been seen back in time are
     /// reported and announced to every ready peer again.
     pub(super) fn age_held(&mut self, now: u64, out: &mut Vec<Output>) {
+        // A transaction held before the manager had its first time was
+        // given time 0: its ten minutes start now.
+        for held in self.held.values_mut().filter(|h| h.since == 0) {
+            held.since = now;
+        }
         let due: Vec<Txid> = self
             .held
             .iter()

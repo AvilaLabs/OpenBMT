@@ -320,6 +320,21 @@ fn nr_88_a_transaction_not_seen_back_in_ten_minutes_is_reported_and_announced_ag
 }
 
 #[test]
+fn nr_88_a_transaction_held_before_the_first_time_is_given_waits_its_ten_minutes() {
+    // A node that starts and sends what it still holds: the manager has had
+    // no time yet, and that must not count as ten minutes long gone.
+    let mut n = net();
+    let txid = n.m.broadcast(&serialize(&the_tx(1))).unwrap();
+    let ids: Vec<PeerId> = (1..=3).map(|i| n.up(i)).collect();
+    flush(&mut n);
+    let (outs, _) = run(&mut n, &ids, NOT_SEEN_SECS - 100);
+    assert!(states(&outs).is_empty(), "{:?}", states(&outs));
+    assert_eq!(n.m.relay_state(&txid), Some(RelayState::Sent));
+    let (outs, _) = run(&mut n, &ids, 200);
+    assert_eq!(states(&outs), vec![RelayState::NotSeen]);
+}
+
+#[test]
 fn nr_88_a_transaction_seen_back_is_not_reported_as_not_seen() {
     let mut n = net();
     n.up(1);

@@ -273,6 +273,9 @@ fn command(node: &mut OwnerNode, keys: &mut Keys, dir: &Path, line: &str) -> Res
                     return Ok(true);
                 }
             };
+            for skipped in &built.skipped {
+                say(format!("skipped {} {}", skipped.id, skipped.reason));
+            }
             let response = {
                 let mut session = keys
                     .approver
@@ -297,7 +300,10 @@ fn command(node: &mut OwnerNode, keys: &mut Keys, dir: &Path, line: &str) -> Res
             let account1 = keys.account1;
             let persist = |b: &[u8]| write_file(dir, KEY1_FILE, b);
             match node.take(&response, &mut keys.key1, &account1, now_secs(), persist) {
-                Ok(_) => {
+                Ok(taken) => {
+                    for (item, outcome) in &taken.outcomes {
+                        say(format!("outcome {item} {outcome:?}"));
+                    }
                     let new: Vec<Txid> = node
                         .owner()
                         .outbox()
