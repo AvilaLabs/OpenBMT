@@ -174,7 +174,7 @@ fn a_store_that_fails_changes_nothing_and_the_session_finishes_later() {
     let err = session.finish().expect_err("the store fails");
     assert!(matches!(err, KeyError::Store { .. }));
     assert_eq!(err.rule(), "AS-34");
-    assert!(err.message().contains("disk full"));
+    assert!(err.text().contains("disk full"));
     // Nothing was stored and nothing kept changed.
     assert_eq!(rig.store.saved().expect("stored"), before);
     assert_eq!(rig.app.signer_status().expect("status").spend_log_count, 0);

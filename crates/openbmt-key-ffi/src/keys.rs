@@ -141,7 +141,7 @@ pub(crate) fn random_bytes(store: &Arc<dyn KeyStore>, n: usize) -> Result<Vec<u8
     if bytes.len() != n {
         return Err(KeyError::Store {
             rule: "random".to_string(),
-            message: format!("the platform gave {} random bytes, not {n}", bytes.len()),
+            text: format!("the platform gave {} random bytes, not {n}", bytes.len()),
         });
     }
     Ok(bytes)
@@ -162,7 +162,7 @@ pub(crate) fn new_identity_secret(store: &Arc<dyn KeyStore>) -> Result<Secret32,
     }
     Err(KeyError::Store {
         rule: "random".to_string(),
-        message: "the platform's random source gave no valid identity key in 8 tries".to_string(),
+        text: "the platform's random source gave no valid identity key in 8 tries".to_string(),
     })
 }
 

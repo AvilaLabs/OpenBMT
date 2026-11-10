@@ -15,9 +15,10 @@
 //!   (`signer_status`, `enroll_destination`, ceilings, marks) are methods.
 //! - [`SessionHandle`] is one approval session: `lines`, `decide`, `finish`.
 //!   Only one is open at a time.
-//! - Errors are one enum, [`KeyError`], with a rule string and a message.
-//!   A panic in any exported call is caught, becomes `KeyError::Internal`
-//!   and poisons the object.
+//! - Errors are one enum, [`KeyError`], with a `rule` string and a `text`
+//!   (not called `message`: a Kotlin exception has a `message` of its
+//!   own). A panic in any exported call is caught, becomes
+//!   `KeyError::Internal` and poisons the object.
 //!
 //! What `KeyStore.save` receives is the `OBM7` envelope
 //! ([`envelope`]): it holds the identity secret and, when this device

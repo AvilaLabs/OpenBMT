@@ -93,7 +93,7 @@ impl KeyStore for MemStore {
         let mut s = self.state();
         if s.fail_save {
             return Err(StoreError::Failed {
-                message: "disk full".to_string(),
+                text: "disk full".to_string(),
             });
         }
         s.saves += 1;

@@ -222,14 +222,14 @@ impl KeyApp {
     fn open_inner(store: Arc<dyn KeyStore>) -> Result<Inner, KeyError> {
         let loaded = store.load().map_err(|e| KeyError::Store {
             rule: "load".to_string(),
-            message: format!("could not read the stored state: {e}"),
+            text: format!("could not read the stored state: {e}"),
         })?;
         let phase = match loaded {
             None => Phase::Empty,
             Some(bytes) => {
                 let decoded = envelope::decode(&bytes).map_err(|e| KeyError::Store {
                     rule: "OBM7".to_string(),
-                    message: format!("OBM7: the stored state is not readable: {e}"),
+                    text: format!("OBM7: the stored state is not readable: {e}"),
                 })?;
                 match decoded.wallet {
                     None => Phase::Identity(decoded.material),

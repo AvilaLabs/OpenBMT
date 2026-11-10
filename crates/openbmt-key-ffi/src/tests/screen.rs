@@ -250,7 +250,7 @@ fn a_panic_becomes_an_internal_error_and_poisons_the_object() {
     let err = rig.app.debug_panic().expect_err("the panic is caught");
     assert!(matches!(err, KeyError::Internal { .. }));
     assert_eq!(err.rule(), "internal");
-    assert!(err.message().contains("a test panic"));
+    assert!(err.text().contains("a test panic"));
     // Every later call, exported or not, returns the same kind of error
     // and touches nothing.
     let saves = rig.store.saves();

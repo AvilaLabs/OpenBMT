@@ -15,7 +15,7 @@ pub enum KeyError {
         /// The rule's ID.
         rule: String,
         /// The refusal, as the rule crate words it.
-        message: String,
+        text: String,
     },
     /// The storage callback failed, or the stored bytes cannot be read.
     /// Nothing was changed.
@@ -23,14 +23,14 @@ pub enum KeyError {
         /// `AS-34` for a failed store, `OBM7` for unreadable bytes.
         rule: String,
         /// What went wrong.
-        message: String,
+        text: String,
     },
     /// The call is not possible in the state the Key app is in.
     State {
         /// A short name of the state rule.
         rule: String,
         /// What to do instead.
-        message: String,
+        text: String,
     },
     /// A panic was caught. The object is poisoned: every later call
     /// returns this error until the app opens the object again.
@@ -38,17 +38,17 @@ pub enum KeyError {
         /// Always `internal`.
         rule: String,
         /// What was caught.
-        message: String,
+        text: String,
     },
 }
 
 impl fmt::Display for KeyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Refused { message, .. }
-            | Self::Store { message, .. }
-            | Self::State { message, .. }
-            | Self::Internal { message, .. } => write!(f, "{message}"),
+            Self::Refused { text, .. }
+            | Self::Store { text, .. }
+            | Self::State { text, .. }
+            | Self::Internal { text, .. } => write!(f, "{text}"),
         }
     }
 }
@@ -66,13 +66,13 @@ impl KeyError {
         }
     }
 
-    /// The message of any variant.
-    pub fn message(&self) -> &str {
+    /// The text of any variant.
+    pub fn text(&self) -> &str {
         match self {
-            Self::Refused { message, .. }
-            | Self::Store { message, .. }
-            | Self::State { message, .. }
-            | Self::Internal { message, .. } => message,
+            Self::Refused { text, .. }
+            | Self::Store { text, .. }
+            | Self::State { text, .. }
+            | Self::Internal { text, .. } => text,
         }
     }
 }
@@ -91,30 +91,30 @@ fn leading_rule(text: &str) -> Option<&str> {
 /// A refusal from a rule crate. The rule ID is the one the text starts
 /// with; the text is passed through unchanged.
 pub(crate) fn refused(text: impl fmt::Display) -> KeyError {
-    let message = text.to_string();
-    let rule = leading_rule(&message).unwrap_or("check").to_string();
-    KeyError::Refused { rule, message }
+    let text = text.to_string();
+    let rule = leading_rule(&text).unwrap_or("check").to_string();
+    KeyError::Refused { rule, text }
 }
 
 /// A refusal that names its own check, for errors that carry no rule ID.
 pub(crate) fn refused_by(rule: &str, text: impl fmt::Display) -> KeyError {
     KeyError::Refused {
         rule: rule.to_string(),
-        message: text.to_string(),
+        text: text.to_string(),
     }
 }
 
-pub(crate) fn wrong_state(rule: &str, message: &str) -> KeyError {
+pub(crate) fn wrong_state(rule: &str, text: &str) -> KeyError {
     KeyError::State {
         rule: rule.to_string(),
-        message: message.to_string(),
+        text: text.to_string(),
     }
 }
 
-pub(crate) fn internal(message: impl fmt::Display) -> KeyError {
+pub(crate) fn internal(text: impl fmt::Display) -> KeyError {
     KeyError::Internal {
         rule: "internal".to_string(),
-        message: message.to_string(),
+        text: text.to_string(),
     }
 }
 
@@ -123,7 +123,7 @@ pub(crate) fn internal(message: impl fmt::Display) -> KeyError {
 pub(crate) fn store_failed(why: &StoreError) -> KeyError {
     KeyError::Store {
         rule: "AS-34".to_string(),
-        message: format!("AS-34: could not store the new state: {why}"),
+        text: format!("AS-34: could not store the new state: {why}"),
     }
 }
 
@@ -134,19 +134,19 @@ pub enum StoreError {
     /// The platform call failed. Nothing was stored.
     Failed {
         /// What the platform said.
-        message: String,
+        text: String,
     },
     /// The app's callback threw something it did not declare.
     Unexpected {
         /// What was thrown.
-        message: String,
+        text: String,
     },
 }
 
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Failed { message } | Self::Unexpected { message } => write!(f, "{message}"),
+            Self::Failed { text } | Self::Unexpected { text } => write!(f, "{text}"),
         }
     }
 }
@@ -155,7 +155,7 @@ impl std::error::Error for StoreError {}
 
 impl From<uniffi::UnexpectedUniFFICallbackError> for StoreError {
     fn from(e: uniffi::UnexpectedUniFFICallbackError) -> Self {
-        Self::Unexpected { message: e.reason }
+        Self::Unexpected { text: e.reason }
     }
 }
 
