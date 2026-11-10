@@ -529,7 +529,19 @@ impl PauseTracker {
     /// A cancel happened at `now` (seconds on the counter's own clock). It
     /// pauses instant for 1 hour. A second cancel within 24 hours of the
     /// last one pauses it until the owner resets.
-    pub fn record_cancel(&mut self, now: u64) {
+    ///
+    /// The new state is serialized ([`Self::to_bytes`]) and given to
+    /// `persist`. Unlike the calls that release something, the pause takes
+    /// effect here whether or not `persist` succeeds: a cancel only
+    /// tightens, so keeping it is the safe side of a failed store. On an
+    /// error the caller must store [`Self::to_bytes`] again before it
+    /// accepts another instant payment, or a restart would forget the
+    /// cancel.
+    pub fn record_cancel<E>(
+        &mut self,
+        now: u64,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
         if let Some(prev) = self.last_cancel {
             if now.saturating_sub(prev) <= SECOND_CANCEL_WINDOW_SECS {
                 self.locked = true;
@@ -539,6 +551,7 @@ impl PauseTracker {
             self.paused_until = Some(now.saturating_add(PAUSE_AFTER_CANCEL_SECS));
         }
         self.last_cancel = Some(now);
+        persist(&self.to_bytes())
     }
 
     /// The pause state at `now`.
@@ -555,7 +568,8 @@ impl PauseTracker {
     }
 
     /// The owner reset the pause on the owner phone. Clears the cancel
-    /// history too.
+    /// history too. The caller stores [`Self::to_bytes`] afterwards; a reset
+    /// lost in a crash leaves the pause on, which is the safe side.
     pub fn owner_reset(&mut self) {
         *self = Self::default();
     }
@@ -655,6 +669,20 @@ mod tests {
             Ok(()) => Ok(()),
             Err(ExposureWriteError::Refused(e)) => Err(e),
             Err(ExposureWriteError::Persist(never)) => match never {},
+        }
+    }
+
+    /// A cancel with a store that always succeeds.
+    trait Cancel {
+        fn cancel(&mut self, now: u64);
+    }
+
+    impl Cancel for PauseTracker {
+        fn cancel(&mut self, now: u64) {
+            match self.record_cancel(now, persist_ok) {
+                Ok(()) => {}
+                Err(never) => match never {},
+            }
         }
     }
 
@@ -1276,7 +1304,7 @@ mod tests {
     fn first_cancel_pauses_for_one_hour() {
         let mut t = PauseTracker::new();
         assert_eq!(t.status(0), PauseStatus::Running);
-        t.record_cancel(1_000);
+        t.cancel(1_000);
         assert_eq!(t.status(1_000), PauseStatus::PausedFor { secs_left: 3_600 });
         assert_eq!(t.status(2_000), PauseStatus::PausedFor { secs_left: 2_600 });
         assert_eq!(t.status(4_599), PauseStatus::PausedFor { secs_left: 1 });
@@ -1286,14 +1314,14 @@ mod tests {
     #[test]
     fn second_cancel_within_24h_pauses_until_owner_reset() {
         let mut t = PauseTracker::new();
-        t.record_cancel(0);
-        t.record_cancel(10_000); // pause had ended, still inside 24 h
+        t.cancel(0);
+        t.cancel(10_000); // pause had ended, still inside 24 h
         assert_eq!(t.status(10_000), PauseStatus::UntilOwnerReset);
         assert_eq!(t.status(10_000_000), PauseStatus::UntilOwnerReset);
         t.owner_reset();
         assert_eq!(t.status(10_000_001), PauseStatus::Running);
         // history is cleared: the next cancel is a first cancel again
-        t.record_cancel(10_000_100);
+        t.cancel(10_000_100);
         assert_eq!(
             t.status(10_000_100),
             PauseStatus::PausedFor { secs_left: 3_600 }
@@ -1303,16 +1331,16 @@ mod tests {
     #[test]
     fn second_cancel_after_24h_is_a_new_first_cancel() {
         let mut t = PauseTracker::new();
-        t.record_cancel(0);
-        t.record_cancel(SECOND_CANCEL_WINDOW_SECS + 1);
+        t.cancel(0);
+        t.cancel(SECOND_CANCEL_WINDOW_SECS + 1);
         assert_eq!(
             t.status(SECOND_CANCEL_WINDOW_SECS + 1),
             PauseStatus::PausedFor { secs_left: 3_600 }
         );
         // exactly 24 h counts as within
         let mut t = PauseTracker::new();
-        t.record_cancel(0);
-        t.record_cancel(SECOND_CANCEL_WINDOW_SECS);
+        t.cancel(0);
+        t.cancel(SECOND_CANCEL_WINDOW_SECS);
         assert_eq!(
             t.status(SECOND_CANCEL_WINDOW_SECS),
             PauseStatus::UntilOwnerReset
@@ -1322,17 +1350,17 @@ mod tests {
     #[test]
     fn cancel_while_already_locked_stays_locked_and_clock_going_back_is_safe() {
         let mut t = PauseTracker::new();
-        t.record_cancel(5_000);
-        t.record_cancel(4_000); // clock went backwards: treated as within the window
+        t.cancel(5_000);
+        t.cancel(4_000); // clock went backwards: treated as within the window
         assert_eq!(t.status(0), PauseStatus::UntilOwnerReset);
-        t.record_cancel(9_000_000);
+        t.cancel(9_000_000);
         assert_eq!(t.status(9_000_000), PauseStatus::UntilOwnerReset);
     }
 
     #[test]
     fn pause_status_feeds_the_decision() {
         let mut t = PauseTracker::new();
-        t.record_cancel(100);
+        t.cancel(100);
         let i = Inputs {
             pause: t.status(160),
             ..ok_light()
@@ -1452,7 +1480,7 @@ mod tests {
         let orig = [out(&ours, 10_000)];
         let mut t = PauseTracker::new();
         if classify_replacement(&orig, &[out(&other, 10_000)], &ours) == ReplacementKind::Cancel {
-            t.record_cancel(500);
+            t.cancel(500);
         }
         assert!(matches!(t.status(501), PauseStatus::PausedFor { .. }));
     }
@@ -1589,15 +1617,45 @@ mod tests {
     }
 
     #[test]
+    fn a_cancel_is_handed_to_the_store_as_the_state_it_leaves() {
+        let mut t = PauseTracker::new();
+        let mut handed = Vec::new();
+        t.record_cancel(1_000, |b: &[u8]| {
+            handed = b.to_vec();
+            Ok::<(), Infallible>(())
+        })
+        .unwrap();
+        assert_eq!(handed, t.to_bytes());
+        assert_eq!(PauseTracker::from_bytes(&handed).unwrap(), t);
+    }
+
+    #[test]
+    fn a_cancel_pauses_even_when_the_store_fails() {
+        let mut t = PauseTracker::new();
+        assert_eq!(t.record_cancel(1_000, persist_fail), Err("disk full"));
+        assert_eq!(
+            t.status(1_001),
+            PauseStatus::PausedFor {
+                secs_left: PAUSE_AFTER_CANCEL_SECS - 1
+            }
+        );
+        // The second cancel inside the window still locks.
+        assert_eq!(t.record_cancel(2_000, persist_fail), Err("disk full"));
+        assert_eq!(t.status(2_001), PauseStatus::UntilOwnerReset);
+        // What the caller stores on its retry is the tightened state.
+        assert_eq!(PauseTracker::from_bytes(&t.to_bytes()).unwrap(), t);
+    }
+
+    #[test]
     fn pause_snapshot_resumes_exactly() {
         let mut states = vec![PauseTracker::new()];
         let mut t = PauseTracker::new();
-        t.record_cancel(1_000);
+        t.cancel(1_000);
         states.push(t.clone());
-        t.record_cancel(2_000);
+        t.cancel(2_000);
         states.push(t.clone());
         t.owner_reset();
-        t.record_cancel(90_000);
+        t.cancel(90_000);
         states.push(t);
         for s in states {
             let bytes = s.to_bytes();
@@ -1609,8 +1667,8 @@ mod tests {
                 assert_eq!(back.status(now), s.status(now));
             }
             let mut original = s.clone();
-            back.record_cancel(95_000);
-            original.record_cancel(95_000);
+            back.cancel(95_000);
+            original.cancel(95_000);
             assert_eq!(back, original);
         }
     }
@@ -1623,8 +1681,8 @@ mod tests {
             PauseTracker::from_bytes,
             PauseTracker::to_bytes,
         );
-        t.record_cancel(10);
-        t.record_cancel(20);
+        t.cancel(10);
+        t.cancel(20);
         crate::testutil::assert_strict_decoding(
             &t.to_bytes(),
             PauseTracker::from_bytes,
@@ -1635,7 +1693,7 @@ mod tests {
     #[test]
     fn pause_snapshot_rejects_bad_flags_and_impossible_state() {
         let mut t = PauseTracker::new();
-        t.record_cancel(10);
+        t.cancel(10);
         let good = t.to_bytes();
         // last_cancel flag 5, paused_until flag 14, locked flag 23.
         for at in [5, 14, 23] {

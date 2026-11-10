@@ -99,7 +99,10 @@ batch, record or setting is.
   only if `persist` returns `Ok` (an address shown twice would be paid by two
   customers). On a persist error the state is unchanged and nothing is
   released; the error comes back to the caller as `Persist`, apart from a
-  refusal.
+  refusal. `PauseTracker::record_cancel` also takes `persist`, with the
+  opposite rule on failure: a cancel only tightens, so the pause holds in
+  memory even when the store fails, and the caller stores the state again
+  before it accepts another instant payment.
 
 ## What it deliberately does not do
 
