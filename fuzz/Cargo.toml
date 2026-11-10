@@ -18,6 +18,7 @@ openbmt-watch = { path = "../crates/openbmt-watch" }
 openbmt-net = { path = "../crates/openbmt-net" }
 openbmt-counter = { path = "../crates/openbmt-counter" }
 openbmt-link = { path = "../crates/openbmt-link" }
+openbmt-pos = { path = "../crates/openbmt-pos" }
 
 # Not a member of the main workspace.
 [workspace]
@@ -235,6 +236,13 @@ bench = false
 [[bin]]
 name = "link_proto_decode"
 path = "fuzz_targets/link_proto_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pos_ledger_decode"
+path = "fuzz_targets/pos_ledger_decode.rs"
 test = false
 doc = false
 bench = false

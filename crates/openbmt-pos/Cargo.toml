@@ -1,0 +1,15 @@
+[package]
+name = "openbmt-pos"
+description = "The vendor-neutral POS side of OpenBMT: POS orders, matching of Bitcoin tenders to counter sales, and the alerts for what does not match"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The same exact bitcoin version as openbmt-core: the hash functions come from
+# it, so no package is added to the lock file.
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+openbmt-counter = { path = "../openbmt-counter" }
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }

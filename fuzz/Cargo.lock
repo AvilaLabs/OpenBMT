@@ -311,6 +311,7 @@ dependencies = [
  "openbmt-counter",
  "openbmt-link",
  "openbmt-net",
+ "openbmt-pos",
  "openbmt-signer",
  "openbmt-spend",
  "openbmt-watch",
@@ -352,6 +353,15 @@ dependencies = [
  "openbmt-core",
  "openbmt-net",
  "openbmt-watch",
+]
+
+[[package]]
+name = "openbmt-pos"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "openbmt-core",
+ "openbmt-counter",
 ]
 
 [[package]]

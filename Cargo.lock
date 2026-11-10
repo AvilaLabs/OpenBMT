@@ -323,6 +323,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-pos"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "openbmt-core",
+ "openbmt-counter",
+]
+
+[[package]]
 name = "openbmt-signer"
 version = "0.1.0"
 dependencies = [
