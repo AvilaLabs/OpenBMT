@@ -95,8 +95,9 @@ impl DeviceId {
         self.verify_digest(&tagged_hash(tag, msg), sig)
     }
 
-    /// Check `sig` over an already tagged-hashed 32-byte digest.
-    pub fn verify_digest(&self, digest: &[u8; 32], sig: &Sig) -> bool {
+    /// Check `sig` over an already tagged-hashed 32-byte digest. Crate-private
+    /// so that outside callers can only verify under a tag.
+    pub(crate) fn verify_digest(&self, digest: &[u8; 32], sig: &Sig) -> bool {
         let Ok(s) = schnorr::Signature::from_slice(&sig.0) else {
             return false;
         };
@@ -148,8 +149,9 @@ impl Identity {
         self.sign_digest(&tagged_hash(tag, msg))
     }
 
-    /// Sign an already tagged-hashed 32-byte digest.
-    pub fn sign_digest(&self, digest: &[u8; 32]) -> Sig {
+    /// Sign an already tagged-hashed 32-byte digest. Crate-private so that
+    /// outside callers can only sign under a tag.
+    pub(crate) fn sign_digest(&self, digest: &[u8; 32]) -> Sig {
         let s = secp().sign_schnorr_no_aux_rand(&Message::from_digest(*digest), &self.keypair);
         Sig(*s.as_ref())
     }
