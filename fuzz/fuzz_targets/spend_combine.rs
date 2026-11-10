@@ -11,7 +11,7 @@ use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
 use libfuzzer_sys::fuzz_target;
 use openbmt_core::wallet::{KeySlot, Keychain, WalletDescription};
-use openbmt_spend::{combine, finalize, plan, Coin, SpendRequest};
+use openbmt_spend::{combine, finalize, plan, ChangePosition, Coin, SpendRequest};
 
 const NETWORK: Network = Network::Regtest;
 
@@ -71,6 +71,8 @@ fn fixed() -> &'static (WalletDescription, Psbt) {
             min_confirmations: 1,
             send_all: false,
             must_spend: Vec::new(),
+            lock_height: 850_000,
+            change_position: ChangePosition::Seed([5; 32]),
         };
         let psbt = plan(&wallet, &coins, &request)
             .unwrap()

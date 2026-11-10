@@ -7,8 +7,9 @@
 //! ```text
 //! spend_regtest keys [index ...]
 //! spend_regtest plan --coins FILE --rate N --change-index N --min-conf N
-//!     --out FILE [--send-all] [--signed FILE ...] [--combined-out FILE]
-//!     [--hex-out FILE] <address:sats> ...
+//!     --out FILE [--lock-height N] [--change-seed HEX] [--send-all]
+//!     [--signed FILE ...] [--combined-out FILE] [--hex-out FILE]
+//!     <address:sats> ...
 //! spend_regtest sign --who 1|2|3 --state FILE --now SECONDS --in FILE --out FILE
 //! spend_regtest forge --psbt FILE --hex-out FILE
 //! ```
@@ -19,7 +20,10 @@
 //!   at the indexes given.
 //! - `plan` reads coins (one per line: `txid vout confirmations chain index
 //!   previous-transaction-hex`, with chain 0 for receive and 1 for change),
-//!   plans the payments, prints the plan and writes the PSBT. With `--signed`
+//!   plans the payments, prints the plan and writes the PSBT. `--lock-height`
+//!   is the block height for the lock time (default 0) and `--change-seed`
+//!   is 64 hex digits that place the change among the outputs (default: last).
+//!   With `--signed`
 //!   it joins those signed copies into the file, finishes it against the
 //!   same plan and writes the transaction in hex.
 //! - `sign` runs the real signer as key 1, 2 or 3: review, then sign. The
@@ -42,13 +46,16 @@ use std::str::FromStr;
 use bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv, Xpub};
 use bitcoin::consensus::encode::{deserialize_hex, serialize_hex};
 use bitcoin::hashes::Hash;
+use bitcoin::hex::FromHex;
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::{All, Message, Secp256k1};
 use bitcoin::sighash::{EcdsaSighashType, SighashCache};
 use bitcoin::{ecdsa, Address, Amount, Network, OutPoint, Transaction, Txid, Witness};
 use openbmt_core::wallet::{KeySlot, Keychain, WalletDescription};
 use openbmt_signer::{Ceilings, FeeCeilings, SignError, SignerState, MAX_MONEY_SATS};
-use openbmt_spend::{combine, finalize, finalize_plan, plan, Coin, SpendRequest};
+use openbmt_spend::{
+    combine, finalize, finalize_plan, plan, ChangePosition, Coin, PlanOutput, SpendRequest,
+};
 
 const NETWORK: Network = Network::Regtest;
 
@@ -116,6 +123,13 @@ impl Args {
         match self.values.get(name).map(Vec::as_slice) {
             Some([v]) => Ok(v),
             _ => Err(format!("--{name} is needed once")),
+        }
+    }
+    fn optional(&self, name: &str) -> Result<Option<&str>, String> {
+        match self.values.get(name).map(Vec::as_slice) {
+            None => Ok(None),
+            Some([v]) => Ok(Some(v)),
+            _ => Err(format!("--{name} is allowed once")),
         }
     }
     fn number(&self, name: &str) -> Result<u64, String> {
@@ -210,6 +224,18 @@ fn cmd_plan(args: &[String]) -> Result<ExitCode, String> {
         min_confirmations: u32::try_from(a.number("min-conf")?).map_err(|_| "min-conf")?,
         send_all: a.flags.iter().any(|f| f == "send-all"),
         must_spend: Vec::new(),
+        lock_height: match a.optional("lock-height")? {
+            Some(h) => h.parse().map_err(|_| "--lock-height is not a number")?,
+            None => 0,
+        },
+        change_position: match a.optional("change-seed")? {
+            Some(hex) => {
+                let bytes = <[u8; 32]>::from_hex(hex)
+                    .map_err(|_| "--change-seed is 64 hex digits".to_string())?;
+                ChangePosition::Seed(bytes)
+            }
+            None => ChangePosition::Last,
+        },
     };
     let planned = match plan(&k.wallet, &coins, &request) {
         Ok(p) => p,
@@ -230,13 +256,23 @@ fn cmd_plan(args: &[String]) -> Result<ExitCode, String> {
             c.outpoint, i.amount_sats, c.confirmations, c.index
         );
     }
-    for p in planned.payments() {
-        let address = Address::from_script(&p.script, NETWORK).map_err(|e| e.to_string())?;
-        println!("payment {address} {}", p.sats);
+    println!("lock-height {}", planned.lock_height());
+    for o in planned.outputs() {
+        match o {
+            PlanOutput::Payment(p) => {
+                let address =
+                    Address::from_script(&p.script, NETWORK).map_err(|e| e.to_string())?;
+                println!("payment {address} {}", p.sats);
+            }
+            PlanOutput::Change(c) => {
+                let address =
+                    Address::from_script(&c.script, NETWORK).map_err(|e| e.to_string())?;
+                println!("change {} {address} {}", c.index, c.sats);
+            }
+        }
     }
-    if let Some(c) = planned.change() {
-        let address = Address::from_script(&c.script, NETWORK).map_err(|e| e.to_string())?;
-        println!("change {} {address} {}", c.index, c.sats);
+    if let Some(at) = planned.change_position() {
+        println!("change-position {at}");
     }
     if let Some(d) = planned.dropped_change_sats() {
         println!("dropped {d}");

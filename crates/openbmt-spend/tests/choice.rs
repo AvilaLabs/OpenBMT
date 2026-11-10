@@ -238,3 +238,28 @@ fn sp_12_send_all_takes_one_payment_with_no_amount() {
         "{r:?}"
     );
 }
+
+#[test]
+fn sp_13_must_spend_works_with_a_seeded_change_and_a_lock_height() {
+    let old = coin_conf(1, 0, 400_000, 9);
+    let young = coin_conf(2, 1, 40_000, 2);
+    let coins = [old.clone(), young.clone()];
+    let mut named = request(vec![(external(1), 20_000)], 1000);
+    named.must_spend = vec![young.outpoint];
+    let plain = plan(wallet(), &coins, &named).unwrap();
+    named.lock_height = 850_000;
+    named.change_position = openbmt_spend::ChangePosition::Seed([3; 32]);
+    let p = plan(wallet(), &coins, &named).unwrap();
+    assert_eq!(spent(&p), vec![young.outpoint]);
+    assert_eq!(spent(&p), spent(&plain));
+    assert_eq!(p.fee_sats(), plain.fee_sats());
+    assert_eq!(p.lock_height(), 850_000);
+    // The coins that must be spent are taken before the others.
+    let mut big = request(vec![(external(1), 100_000)], 1000);
+    big.must_spend = vec![young.outpoint];
+    big.lock_height = 850_000;
+    big.change_position = openbmt_spend::ChangePosition::Seed([4; 32]);
+    let p = plan(wallet(), &coins, &big).unwrap();
+    assert_eq!(spent(&p), vec![young.outpoint, old.outpoint]);
+    assert!(p.change_position().is_some());
+}

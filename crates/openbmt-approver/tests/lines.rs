@@ -23,6 +23,64 @@ fn spend_detail(line: &openbmt_approver::Line) -> &openbmt_approver::SpendLine {
 }
 
 #[test]
+fn as_24_the_change_is_shown_as_change_first_and_in_the_middle() {
+    let coins = [coin(1, 0, 300_000)];
+    let payments = vec![(external(8), 30_000), (external(9), 40_000)];
+    for position in [0usize, 1, 2] {
+        let mut a = approver_with_key2();
+        let psbt = psbt_bytes_with_change_at(&coins, payments.clone(), 0, position);
+        // Honest labels: the refunds at the places of the payments, and the
+        // change at its own place.
+        let mut labels = Vec::new();
+        let mut next_refund = 0u32;
+        for at in 0..3u32 {
+            if at as usize == position {
+                labels.push(change_label(at));
+            } else {
+                labels.push(refund_label(at, "Mia"));
+                next_refund += 1;
+            }
+        }
+        assert_eq!(next_refund, 2);
+        let lines = lines_of(&mut a, vec![Item::Spend { psbt, labels }]);
+        let spend = spend_detail(&lines[0]);
+        let review = spend
+            .review
+            .as_ref()
+            .unwrap_or_else(|| panic!("{:?}", lines[0].failure));
+        assert!(lines[0].can_approve, "change at {position}");
+        assert_eq!(review.outputs.len(), 3);
+        for (at, out) in review.outputs.iter().enumerate() {
+            if at == position {
+                assert!(matches!(out.kind, OutputKind::Change { index: 0 }));
+            } else {
+                assert_eq!(out.kind, OutputKind::Other);
+            }
+        }
+        assert!(review.change.is_some());
+        assert!(spend.outputs_without_label.is_empty());
+        assert!(spend.labels_without_output.is_empty());
+        assert!(spend.claimed_change_not_proven.is_empty());
+        // A label that claims the change at the wrong place is not believed.
+        let wrong = (position + 1) % 3;
+        let mut labels = Vec::new();
+        for at in 0..3u32 {
+            labels.push(if at as usize == wrong {
+                change_label(at)
+            } else {
+                refund_label(at, "Mia")
+            });
+        }
+        let psbt = psbt_bytes_with_change_at(&coins, payments.clone(), 0, position);
+        let lines = lines_of(&mut a, vec![Item::Spend { psbt, labels }]);
+        assert_eq!(
+            spend_detail(&lines[0]).claimed_change_not_proven,
+            vec![wrong]
+        );
+    }
+}
+
+#[test]
 fn as_23_the_line_comes_from_the_transaction_and_not_from_the_labels() {
     let mut a = approver_with_key2();
     let coins = [coin(1, 0, 300_000)];

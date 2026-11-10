@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use bitcoin::absolute::LockTime;
 use bitcoin::ecdsa;
 use bitcoin::psbt::Psbt;
 use bitcoin::sighash::{EcdsaSighashType, SighashCache};
@@ -105,6 +106,11 @@ pub enum FinalizeError {
     },
     /// SP-62: the check of the finished transaction failed.
     FinalCheckFailed(&'static str),
+    /// SP-37: the lock time is a time, not a block height.
+    LockTimeNotHeight {
+        /// The lock time found.
+        lock_time: u32,
+    },
     /// SP-64: the file's transaction is not the plan's.
     NotThePlan,
     /// SP-64: the fee is not the plan's fee.
@@ -182,6 +188,10 @@ impl fmt::Display for FinalizeError {
                     "SP-62: the check of the finished transaction failed: {what}"
                 )
             }
+            Self::LockTimeNotHeight { lock_time } => write!(
+                f,
+                "SP-37: the lock time {lock_time} is not a block height (below 500,000,000)"
+            ),
             Self::NotThePlan => write!(f, "SP-64: the file's transaction is not the plan's"),
             Self::FeeNotThePlan { found, planned } => write!(
                 f,
@@ -334,6 +344,12 @@ fn witness_for(
 fn audit(wallet: &WalletDescription, psbt: &Psbt, tx: &Transaction) -> Result<u64, FinalizeError> {
     let fail = FinalizeError::FinalCheckFailed;
     let unsigned = &psbt.unsigned_tx;
+    // SP-37: any block height; a time is refused.
+    if let LockTime::Seconds(t) = tx.lock_time {
+        return Err(FinalizeError::LockTimeNotHeight {
+            lock_time: t.to_consensus_u32(),
+        });
+    }
     // The transaction ID does not cover witnesses, so this is also the
     // check that nothing but witnesses changed.
     if tx.compute_txid() != unsigned.compute_txid() {
@@ -422,6 +438,11 @@ fn audit(wallet: &WalletDescription, psbt: &Psbt, tx: &Transaction) -> Result<u6
 fn finish(wallet: &WalletDescription, psbt: &Psbt) -> Result<(Transaction, u64), FinalizeError> {
     if !shape_is_v0(psbt) {
         return Err(FinalizeError::NotVersionZero);
+    }
+    if let LockTime::Seconds(t) = psbt.unsigned_tx.lock_time {
+        return Err(FinalizeError::LockTimeNotHeight {
+            lock_time: t.to_consensus_u32(),
+        });
     }
     let mut tx = psbt.unsigned_tx.clone();
     let mut cache = SighashCache::new(&psbt.unsigned_tx);

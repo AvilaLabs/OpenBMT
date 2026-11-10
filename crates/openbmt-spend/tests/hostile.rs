@@ -58,6 +58,14 @@ fn random_case(rng: &mut Rng) -> (Vec<Coin>, openbmt_spend::SpendRequest) {
         min_confirmations: rng.range(0, 2) as u32,
         send_all,
         must_spend: Vec::new(),
+        lock_height: rng.range(0, 1_500_000) as u32,
+        change_position: if rng.range(0, 2) == 0 {
+            openbmt_spend::ChangePosition::Last
+        } else {
+            let mut seed = [0u8; 32];
+            seed[..8].copy_from_slice(&rng.next().to_le_bytes());
+            openbmt_spend::ChangePosition::Seed(seed)
+        },
     };
     (coins, request)
 }
@@ -229,6 +237,8 @@ fn sp_70_hostile_requests_are_errors_not_panics() {
             min_confirmations: u32::MAX,
             send_all,
             must_spend: Vec::new(),
+            lock_height: 0,
+            change_position: openbmt_spend::ChangePosition::Last,
         };
         let e = plan(wallet(), &coins, &r).unwrap_err();
         assert!(!e.to_string().is_empty());

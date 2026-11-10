@@ -197,6 +197,19 @@ pub fn new_approver(with_key2: bool) -> Approver {
 
 // ---- coins, sales, scripts --------------------------------------------------------
 
+/// The outputs of `tx` that are not change to one of the wallet's first
+/// sixteen change scripts, in the order of the transaction. The change can
+/// stand at any place (AS-61).
+pub fn pays(tx: &Transaction) -> Vec<&bitcoin::TxOut> {
+    let change: Vec<ScriptBuf> = (0..16)
+        .map(|i| wallet().change_script(i).unwrap())
+        .collect();
+    tx.output
+        .iter()
+        .filter(|o| !change.contains(&o.script_pubkey))
+        .collect()
+}
+
 pub fn external(n: u8) -> ScriptBuf {
     ScriptBuf::new_p2wpkh(&WPubkeyHash::from_byte_array([n; 20]))
 }
@@ -347,6 +360,8 @@ pub struct Rig {
     pub owner_store: Store,
     pub key1_store: Store,
     pub approver_store: Store,
+    /// The lock height every transaction of the next sessions is built with.
+    pub lock_height: u32,
     session_no: u8,
 }
 
@@ -363,16 +378,20 @@ impl Rig {
             owner_store: Store::default(),
             key1_store: Store::default(),
             approver_store: Store::default(),
+            lock_height: 850_000,
             session_no: 0,
         }
     }
 
     /// Random bytes for the next session.
-    pub fn random(&mut self) -> [u8; 64] {
+    pub fn random(&mut self) -> [u8; 96] {
         self.session_no += 1;
-        let mut r = [self.session_no; 64];
+        let mut r = [self.session_no; 96];
         for b in r.iter_mut().skip(32) {
             *b = self.session_no.wrapping_add(100);
+        }
+        for b in r.iter_mut().skip(64) {
+            *b = self.session_no.wrapping_mul(7).wrapping_add(200);
         }
         r
     }
@@ -380,9 +399,15 @@ impl Rig {
     pub fn build(&mut self, coins: &[Coin], change_index: u32) -> Built {
         let random = self.random();
         let store = &self.owner_store;
-        ok(self
-            .owner
-            .build_request(coins, 1_000, change_index, NOW, &random, |b| store.put(b)))
+        ok(self.owner.build_request(
+            coins,
+            1_000,
+            change_index,
+            self.lock_height,
+            NOW,
+            &random,
+            |b| store.put(b),
+        ))
     }
 
     /// The Key app opens the request and decides each line with `decide`.

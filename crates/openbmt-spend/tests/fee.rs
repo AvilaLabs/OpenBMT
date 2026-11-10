@@ -1,4 +1,4 @@
-//! SP-30 to SP-36: size, fee and limits.
+//! SP-30 to SP-37: size, fee and limits.
 
 mod common;
 
@@ -251,4 +251,42 @@ fn sp_36_the_plan_exposes_what_a_person_is_shown() {
     assert_eq!(p.total_in_sats(), 700_000);
     assert_eq!(p.total_out_sats(), 700_000 - p.fee_sats());
     assert_eq!(p.txid(), p.unsigned_tx().compute_txid());
+}
+
+#[test]
+fn sp_37_the_lock_time_is_the_height_asked_for() {
+    let coins = [coin(1, 0, 300_000), coin(2, 1, 400_000)];
+    let mut r = request(vec![(external(1), 500_000)], 1000);
+    let none = plan(wallet(), &coins, &r).unwrap();
+    assert_eq!(none.lock_height(), 0);
+    assert_eq!(none.unsigned_tx().lock_time, LockTime::ZERO);
+    for h in [1, 850_123, 499_999_999] {
+        r.lock_height = h;
+        let p = plan(wallet(), &coins, &r).unwrap();
+        assert_eq!(p.lock_height(), h);
+        assert_eq!(p.unsigned_tx().lock_time, LockTime::from_height(h).unwrap());
+        // Every sequence is below 0xFFFFFFFF, so the lock time takes effect,
+        // and the transaction still signals replacement.
+        for input in &p.unsigned_tx().input {
+            assert_eq!(input.sequence.0, 0xFFFF_FFFD);
+            assert!(input.sequence.0 < 0xFFFF_FFFF);
+        }
+        assert!(p.unsigned_tx().is_explicitly_rbf());
+        // Nothing else moves: the same coins, fee and outputs.
+        assert_eq!(p.fee_sats(), none.fee_sats());
+        assert_eq!(p.unsigned_tx().output, none.unsigned_tx().output);
+        assert_eq!(p.inputs(), none.inputs());
+    }
+}
+
+#[test]
+fn sp_37_a_lock_time_that_is_a_time_is_refused() {
+    let coins = [coin(1, 0, 300_000)];
+    for h in [500_000_000, 500_000_001, 1_700_000_000, u32::MAX] {
+        let mut r = request(vec![(external(1), 100_000)], 1000);
+        r.lock_height = h;
+        let e = plan(wallet(), &coins, &r).unwrap_err();
+        assert_eq!(e, PlanError::LockTimeNotHeight { lock_height: h });
+        assert!(e.to_string().starts_with("SP-37"));
+    }
 }

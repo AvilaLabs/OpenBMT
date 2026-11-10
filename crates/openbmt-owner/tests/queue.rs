@@ -95,7 +95,7 @@ fn as_50_open_sessions_are_bounded() {
     let random = rig.random();
     let err = rig
         .owner
-        .build_request(&[], 1_000, 0, NOW, &random, nop)
+        .build_request(&[], 1_000, 0, 0, NOW, &random, nop)
         .expect_err("refused");
     assert!(matches!(
         err,
@@ -619,6 +619,48 @@ fn as_65_a_frozen_item_that_is_not_in_its_request_is_refused() {
     let mut b = bytes.clone();
     b[later] ^= 1;
     assert!(restore_owner(&b).is_err());
+}
+
+#[test]
+fn as_65_a_frozen_change_position_that_is_not_the_requests_is_refused() {
+    let mut rig = Rig::new();
+    set_facts(&mut rig.owner, sale(1), deep(500_000));
+    ok(rig
+        .owner
+        .queue_refund(sale(1), "Mia", external(1), 40_000, None, nop));
+    let built = rig.build(&[coin(1, 0, 300_000)], 0);
+    let request = openbmt_session::Request::from_bytes(&built.request).unwrap();
+    let openbmt_session::Item::Spend { psbt, .. } = &request.items()[0].item else {
+        panic!()
+    };
+    let tx = bitcoin::psbt::Psbt::deserialize(psbt).unwrap().unsigned_tx;
+    let place = tx
+        .output
+        .iter()
+        .position(|o| o.script_pubkey == wallet().change_script(0).unwrap())
+        .unwrap();
+    let bytes = rig.owner.snapshot().unwrap();
+    assert!(restore_owner(&bytes).is_ok());
+    // The frozen payment is the last place the amount appears (the open
+    // sessions follow the queue); after it come the change index (4 bytes),
+    // a flag and the change position (4 bytes).
+    let needle = 40_000u64.to_le_bytes();
+    let frozen = bytes
+        .windows(8)
+        .rposition(|w| w == needle)
+        .expect("the frozen amount is in the snapshot");
+    let flag = frozen + 8 + 4;
+    assert_eq!(bytes[flag], 1, "the change is frozen");
+    assert_eq!(bytes[flag + 1..flag + 5], (place as u32).to_le_bytes());
+    // The other place, a place past the outputs, and no change at all.
+    for other in [1 - place as u32, 2, u32::MAX] {
+        let mut b = bytes.clone();
+        b[flag + 1..flag + 5].copy_from_slice(&other.to_le_bytes());
+        assert!(restore_owner(&b).is_err(), "place {other}");
+    }
+    let mut b = bytes.clone();
+    b[flag] = 0;
+    assert!(restore_owner(&b).is_err(), "no change frozen");
 }
 
 #[test]

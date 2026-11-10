@@ -173,7 +173,8 @@ fn as_68_refunds_of_one_dropped_transaction_stay_together_in_one_transaction() {
     assert_eq!(txs[0].output.len(), 3, "two refunds and the change");
     assert!(inputs(&txs[0]).contains(&young.outpoint));
     assert!(!inputs(&txs[1]).contains(&young.outpoint));
-    assert_eq!(txs[1].output[0].value.to_sat(), 12_000);
+    // The change may stand at any place among the outputs (AS-61).
+    assert!(txs[1].output.iter().any(|o| o.value.to_sat() == 12_000));
     let _ = c;
 }
 

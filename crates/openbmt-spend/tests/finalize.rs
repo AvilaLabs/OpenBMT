@@ -10,7 +10,7 @@ use bitcoin::transaction::Version;
 use bitcoin::{Amount, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
 use common::*;
 use openbmt_core::wallet::Keychain;
-use openbmt_spend::{combine, finalize, finalize_plan, plan, FinalizeError};
+use openbmt_spend::{combine, finalize, finalize_plan, plan, ChangePosition, FinalizeError};
 
 fn two_input_run() -> Run {
     run(
@@ -349,4 +349,116 @@ fn sp_60_a_file_with_no_input_or_no_output_is_never_finished() {
         FinalizeError::NotVersionZero
     );
     assert!(combine(&no_outputs, &[]).is_err());
+}
+
+/// A request for one payment of 500,000 from two coins, with the change and
+/// the lock time as the test asks.
+fn shaped(position: ChangePosition, lock_height: u32) -> openbmt_spend::SpendRequest {
+    let mut r = request(vec![(external(1), 500_000)], 2000);
+    r.change_position = position;
+    r.lock_height = lock_height;
+    r
+}
+
+fn two_coins() -> [openbmt_spend::Coin; 2] {
+    [coin(1, 0, 300_000), coin(2, 3, 300_000)]
+}
+
+/// A seed whose place for the plan above is the first.
+fn seed_for_first() -> ChangePosition {
+    (0..=255u8)
+        .map(|n| ChangePosition::Seed([n; 32]))
+        .find(|pos| {
+            plan(wallet(), &two_coins(), &shaped(*pos, 0))
+                .unwrap()
+                .change_position()
+                == Some(0)
+        })
+        .expect("a seed puts the change first")
+}
+
+#[test]
+fn sp_62_any_block_height_lock_time_is_finished_and_the_file_must_be_the_plans() {
+    for h in [0, 1, 850_000, 499_999_999] {
+        let r = run_request(&two_coins(), &shaped(ChangePosition::Last, h));
+        let signed = combine(&r.base, &[r.by1.clone(), r.by2.clone()]).unwrap();
+        let tx = finalize(wallet(), &signed).unwrap();
+        assert_eq!(tx.lock_time, LockTime::from_height(h).unwrap());
+        // SP-64: the plan's lock time is held too.
+        assert_eq!(finalize_plan(wallet(), &signed, &r.plan).unwrap(), tx);
+    }
+    // A file with another lock time is not the plan's.
+    let a = run_request(&two_coins(), &shaped(ChangePosition::Last, 100));
+    let b = run_request(&two_coins(), &shaped(ChangePosition::Last, 101));
+    let signed = combine(&b.base, &[b.by1.clone(), b.by2.clone()]).unwrap();
+    assert_eq!(
+        finalize_plan(wallet(), &signed, &a.plan).unwrap_err(),
+        FinalizeError::NotThePlan
+    );
+}
+
+#[test]
+fn sp_62_a_lock_time_that_is_a_time_is_refused() {
+    let r = run_request(&two_coins(), &shaped(ChangePosition::Last, 100));
+    for t in [500_000_000, 1_700_000_000, u32::MAX] {
+        let mut file = r.base.clone();
+        file.unsigned_tx.lock_time = LockTime::from_consensus(t);
+        let e = finalize(wallet(), &file).unwrap_err();
+        assert_eq!(e, FinalizeError::LockTimeNotHeight { lock_time: t });
+        assert!(e.to_string().starts_with("SP-37"));
+        // The signer refuses it too (SR-03).
+        let refusal = signer(1).review(&file.serialize(), NOW).unwrap_err();
+        assert_eq!(refusal.rule(), "SR-03");
+        // Signatures on the changed file do not help.
+        sign_as(&mut file, 0);
+        sign_as(&mut file, 1);
+        assert_eq!(
+            finalize(wallet(), &file).unwrap_err(),
+            FinalizeError::LockTimeNotHeight { lock_time: t }
+        );
+    }
+}
+
+#[test]
+fn sp_62_a_plan_with_the_change_first_finalizes_and_matches_finalize_plan() {
+    let first = seed_for_first();
+    let r = run_request(&two_coins(), &shaped(first, 850_000));
+    assert_eq!(r.plan.change_position(), Some(0));
+    let signed = combine(&r.base, &[r.by1.clone(), r.by2.clone()]).unwrap();
+    let tx = finalize(wallet(), &signed).unwrap();
+    let planned = finalize_plan(wallet(), &signed, &r.plan).unwrap();
+    assert_eq!(tx, planned);
+    assert_eq!(tx.compute_txid(), r.plan.txid());
+    assert_eq!(
+        tx.output[0].script_pubkey,
+        wallet().change_script(0).unwrap()
+    );
+    assert_eq!(tx.output[1].script_pubkey, external(1));
+    assert_eq!(tx.output[1].value.to_sat(), 500_000);
+}
+
+#[test]
+fn sp_64_a_file_whose_outputs_were_reordered_is_not_the_plans() {
+    // Two plans of the same request that differ only in where the change
+    // is; the file of the one, fully and validly signed, is refused for the
+    // other.
+    let last = run_request(&two_coins(), &shaped(ChangePosition::Last, 850_000));
+    let first = run_request(&two_coins(), &shaped(seed_for_first(), 850_000));
+    assert_eq!(last.plan.fee_sats(), first.plan.fee_sats());
+    assert_ne!(last.plan.txid(), first.plan.txid());
+    let signed_first = combine(&first.base, &[first.by1.clone(), first.by2.clone()]).unwrap();
+    assert!(finalize(wallet(), &signed_first).is_ok());
+    assert_eq!(
+        finalize_plan(wallet(), &signed_first, &last.plan).unwrap_err(),
+        FinalizeError::NotThePlan
+    );
+    assert!(finalize_plan(wallet(), &signed_first, &first.plan).is_ok());
+    // The same file with its outputs swapped by hand: the signatures no
+    // longer verify, and the plan check refuses it before that.
+    let mut swapped = signed_first.clone();
+    swapped.unsigned_tx.output.swap(0, 1);
+    assert_eq!(
+        finalize_plan(wallet(), &swapped, &first.plan).unwrap_err(),
+        FinalizeError::NotThePlan
+    );
 }

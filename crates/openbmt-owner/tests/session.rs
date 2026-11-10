@@ -48,6 +48,25 @@ fn paid(tx: &Transaction) -> Vec<(ScriptBuf, u64)> {
         .collect()
 }
 
+/// The outputs that are not change to one of the first sixteen change
+/// scripts, with their amounts, in the order of the transaction (AS-61: the
+/// change can stand at any place).
+fn without_change(tx: &Transaction) -> Vec<(ScriptBuf, u64)> {
+    pays(tx)
+        .iter()
+        .map(|o| (o.script_pubkey.clone(), o.value.to_sat()))
+        .collect()
+}
+
+/// The position of the change to `index` in `tx`.
+fn change_position(tx: &Transaction, index: u32) -> usize {
+    let script = wallet().change_script(index).unwrap();
+    tx.output
+        .iter()
+        .position(|o| o.script_pubkey == script)
+        .expect("the transaction has that change")
+}
+
 fn stage_of(rig: &Rig, id: u32) -> Stage {
     rig.owner
         .refunds()
@@ -114,8 +133,9 @@ fn as_55_all_ready_refunds_go_into_one_transaction() {
     let txs = spends(&built.request);
     assert_eq!(txs.len(), 1);
     // One output for each refund, in queue order, and the change.
-    let out = paid(&txs[0]);
-    assert_eq!(out.len(), 4);
+    assert_eq!(paid(&txs[0]).len(), 4);
+    let out = without_change(&txs[0]);
+    assert_eq!(out.len(), 3);
     for n in 1..=3u8 {
         assert_eq!(out[usize::from(n) - 1], (external(n), 10_000));
     }
@@ -149,7 +169,13 @@ fn as_55_one_transaction_for_each_refund_is_the_owners_option() {
     assert_eq!(inputs.len(), 3);
     for (k, tx) in txs.iter().enumerate() {
         let change = wallet().change_script(5 + k as u32).unwrap();
-        assert_eq!(tx.output.last().unwrap().script_pubkey, change);
+        assert_eq!(
+            tx.output
+                .iter()
+                .filter(|o| o.script_pubkey == change)
+                .count(),
+            1
+        );
     }
 }
 
@@ -220,8 +246,8 @@ fn as_56_the_shop_pays_the_fee_on_top() {
     refund(&mut rig.owner, 2, 50_000, 12_000);
     let built = rig.build(&[coin(1, 0, 300_000)], 0);
     let tx = &spends(&built.request)[0];
-    assert_eq!(tx.output[0].value.to_sat(), 10_000);
-    assert_eq!(tx.output[1].value.to_sat(), 12_000);
+    assert_eq!(pays(tx)[0].value.to_sat(), 10_000);
+    assert_eq!(pays(tx)[1].value.to_sat(), 12_000);
 }
 
 #[test]
@@ -238,7 +264,8 @@ fn as_56_the_customer_pays_an_equal_share_and_the_sums_agree() {
     let coin = coin(1, 0, 300_000);
     let built = rig.build(std::slice::from_ref(&coin), 0);
     let tx = &spends(&built.request)[0];
-    let out: Vec<u64> = tx.output.iter().take(3).map(|o| o.value.to_sat()).collect();
+    let out: Vec<u64> = pays(tx).iter().map(|o| o.value.to_sat()).collect();
+    assert_eq!(out.len(), 3);
     let total: u64 = amounts.iter().sum();
     let fee = 300_000 - tx.output.iter().map(|o| o.value.to_sat()).sum::<u64>();
     // The refund outputs and the fee add up to the refunds' amounts.
@@ -330,16 +357,25 @@ fn as_57_an_amount_cash_out_has_change_and_a_label_for_it() {
         .queue_cash_out(external(9), CashAmount::Sats(50_000), "Bank", nop));
     let built = rig.build(&[coin(1, 0, 200_000)], 3);
     let tx = &spends(&built.request)[0];
-    assert_eq!(tx.output[0].value.to_sat(), 50_000);
-    assert_eq!(
-        tx.output[1].script_pubkey,
-        wallet().change_script(3).unwrap()
-    );
+    assert_eq!(tx.output.len(), 2);
+    assert_eq!(without_change(tx), vec![(external(9), 50_000)]);
+    let at = change_position(tx, 3);
     let request = Request::from_bytes(&built.request).unwrap();
     let Item::Spend { labels, .. } = &request.items()[0].item else {
         panic!()
     };
-    assert_eq!(labels[1].label, Label::Change);
+    // The labels name the real positions, in ascending order.
+    assert_eq!(labels.len(), 2);
+    assert_eq!((labels[0].output, labels[1].output), (0, 1));
+    let cash = labels.iter().find(|l| l.output == 1 - at as u32).unwrap();
+    assert_eq!(
+        cash.label,
+        Label::CashOut {
+            destination: "Bank".to_string()
+        }
+    );
+    let change = labels.iter().find(|l| l.output == at as u32).unwrap();
+    assert_eq!(change.label, Label::Change);
 }
 
 #[test]
@@ -384,7 +420,7 @@ fn as_60_every_session_ends_with_a_health_check_from_the_random_bytes() {
         r.random()
     };
     // The first session of a rig uses the same fixed random bytes.
-    assert_eq!(&random[32..], nonce);
+    assert_eq!(&random[32..64], nonce);
     assert_eq!(request.session_id(), &built.session_id);
     assert_eq!(&random[..32], &built.session_id);
     // A session with nothing else is only the health check.
@@ -404,7 +440,7 @@ fn as_61_the_session_is_stored_before_the_bytes_are_returned() {
     let random = rig.random();
     let err = rig
         .owner
-        .build_request(&[coin(1, 0, 300_000)], 1_000, 0, NOW, &random, |b| {
+        .build_request(&[coin(1, 0, 300_000)], 1_000, 0, 0, NOW, &random, |b| {
             store.put(b)
         })
         .expect_err("the store fails");
@@ -413,11 +449,12 @@ fn as_61_the_session_is_stored_before_the_bytes_are_returned() {
     assert!(rig.owner.open_sessions().is_empty());
     // With a store that works, what it was handed restores to the session.
     store.fail_next(false);
-    let built = ok(rig
-        .owner
-        .build_request(&[coin(1, 0, 300_000)], 1_000, 0, NOW, &random, |b| {
-            store.put(b)
-        }));
+    let built =
+        ok(rig
+            .owner
+            .build_request(&[coin(1, 0, 300_000)], 1_000, 0, 0, NOW, &random, |b| {
+                store.put(b)
+            }));
     let restored = restore_owner(&store.last()).unwrap();
     assert_eq!(restored.open_sessions(), vec![built.session_id]);
     assert_eq!(
@@ -449,12 +486,12 @@ fn as_61_a_fee_rate_of_zero_and_a_used_session_id_are_refused() {
     let mut rig = Rig::new();
     let random = rig.random();
     assert_eq!(
-        refused(rig.owner.build_request(&[], 0, 0, NOW, &random, nop)),
+        refused(rig.owner.build_request(&[], 0, 0, 0, NOW, &random, nop)),
         Refusal::ZeroFeeRate
     );
-    ok(rig.owner.build_request(&[], 1_000, 0, NOW, &random, nop));
+    ok(rig.owner.build_request(&[], 1_000, 0, 0, NOW, &random, nop));
     assert_eq!(
-        refused(rig.owner.build_request(&[], 1_000, 0, NOW, &random, nop)),
+        refused(rig.owner.build_request(&[], 1_000, 0, 0, NOW, &random, nop)),
         Refusal::SessionIdUsed
     );
 }
@@ -689,6 +726,8 @@ fn as_62_a_file_for_another_transaction_is_returned_and_not_finished() {
             min_confirmations: 1,
             send_all: false,
             must_spend: Vec::new(),
+            lock_height: 0,
+            change_position: openbmt_spend::ChangePosition::Last,
         },
     )
     .unwrap();
@@ -1124,7 +1163,17 @@ fn as_66_an_abandoned_session_puts_its_entries_back_and_a_lost_answer_costs_noth
     // Asking again, with the same coins: the same transaction, counted once
     // by key 2 and given the same signatures.
     let again = rig.build(&[coin(1, 0, 300_000)], 0);
-    assert_eq!(spends(&again.request), spends(&built.request));
+    // The change position comes from fresh random bytes, so the order of the
+    // outputs may differ: another transaction over the same inputs, which the
+    // signer counts together with the first (SR-33).
+    let (first, second) = (&spends(&built.request)[0], &spends(&again.request)[0]);
+    assert_eq!(first.input, second.input);
+    assert_eq!(first.lock_time, second.lock_time);
+    let mut a = paid(first);
+    let mut b = paid(second);
+    a.sort();
+    b.sort();
+    assert_eq!(a, b);
     let response = rig.answer_all(&again.request);
     ok(rig.take(&response));
     assert!(matches!(stage_of(&rig, id), Stage::Signed { .. }));
@@ -1160,17 +1209,203 @@ fn as_67_the_outputs_are_the_frozen_lines_in_order_and_the_change() {
         }
     }
     assert_eq!(txs.len(), 2);
-    let refunds = paid(&txs[0]);
-    assert_eq!(refunds.len(), 4);
+    assert_eq!(paid(&txs[0]).len(), 4);
+    let refunds = without_change(&txs[0]);
+    assert_eq!(refunds.len(), 3);
     for n in 1..=3u8 {
         assert_eq!(
             refunds[usize::from(n) - 1],
             (external(n), 10_000 + u64::from(n))
         );
     }
-    assert_eq!(refunds[3].0, wallet().change_script(4).unwrap());
-    let cash = paid(&txs[1]);
-    assert_eq!(cash[0], (external(9), 20_000));
-    assert_eq!(cash[1].0, wallet().change_script(5).unwrap());
+    change_position(&txs[0], 4);
+    assert_eq!(paid(&txs[1]).len(), 2);
+    assert_eq!(without_change(&txs[1]), vec![(external(9), 20_000)]);
+    change_position(&txs[1], 5);
     let _: DeviceId = rig.owner.owner_id();
+}
+
+// ---- AS-61, AS-67: the lock time and the place of the change ----------------------------
+
+/// Builds sessions, abandoning each, until the first transaction has its
+/// change to change index `index` at `want`.
+fn build_with_change_at(
+    rig: &mut Rig,
+    coins: &[openbmt_spend::Coin],
+    index: u32,
+    want: usize,
+) -> openbmt_owner::Built {
+    for _ in 0..80 {
+        let built = rig.build(coins, index);
+        let tx = &spends(&built.request)[0];
+        if change_position(tx, index) == want {
+            return built;
+        }
+        ok(rig
+            .owner
+            .abandon_session(&built.session_id, |b| rig.owner_store.put(b)));
+    }
+    panic!("no random bytes put the change at {want}");
+}
+
+fn one_each_rig() -> Rig {
+    let options = Options {
+        packing: RefundPacking::OneEach,
+        ..Options::default()
+    };
+    Rig::with(options, true)
+}
+
+fn three_refunds_rig() -> Rig {
+    let options = Options {
+        packing: RefundPacking::OneTransaction,
+        ..Options::default()
+    };
+    let mut rig = Rig::with(options, true);
+    for n in 1..=3 {
+        refund(&mut rig.owner, n, 50_000, 10_000 + u64::from(n));
+    }
+    rig
+}
+
+#[test]
+fn as_61_every_transaction_has_the_lock_height_and_the_same_request_the_same_bytes() {
+    let mut rig = one_each_rig();
+    rig.lock_height = 851_000;
+    for n in 1..=2 {
+        refund(&mut rig.owner, n, 50_000, 10_000);
+    }
+    ok(rig
+        .owner
+        .queue_cash_out(external(9), CashAmount::Sats(20_000), "Bank", nop));
+    let coins = [
+        coin(1, 0, 300_000),
+        coin(2, 1, 300_000),
+        coin(3, 2, 300_000),
+    ];
+    let built = rig.build(&coins, 0);
+    let txs = spends(&built.request);
+    assert_eq!(txs.len(), 3);
+    for tx in &txs {
+        assert_eq!(tx.lock_time.to_consensus_u32(), 851_000);
+        assert!(tx.is_explicitly_rbf());
+    }
+    // Another rig in the same state, with the same random bytes, asks the
+    // same bytes.
+    let mut twin = one_each_rig();
+    twin.lock_height = 851_000;
+    for n in 1..=2 {
+        refund(&mut twin.owner, n, 50_000, 10_000);
+    }
+    ok(twin
+        .owner
+        .queue_cash_out(external(9), CashAmount::Sats(20_000), "Bank", nop));
+    assert_eq!(twin.build(&coins, 0).request, built.request);
+}
+
+#[test]
+fn as_61_the_change_lands_at_every_place_and_the_labels_name_the_real_places() {
+    let mut rig = three_refunds_rig();
+    let coins = [coin(1, 0, 300_000)];
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..60 {
+        let built = rig.build(&coins, 2);
+        let request = Request::from_bytes(&built.request).unwrap();
+        let Item::Spend { psbt, labels } = &request.items()[0].item else {
+            panic!()
+        };
+        let tx = Psbt::deserialize(psbt).unwrap().unsigned_tx;
+        let at = change_position(&tx, 2);
+        seen.insert(at);
+        // Ascending labels: the three refunds at the places of the payments
+        // and the change at its own place.
+        assert_eq!(labels.len(), 4);
+        assert!(labels.windows(2).all(|w| w[0].output < w[1].output));
+        for (n, l) in labels.iter().enumerate() {
+            assert_eq!(l.output as usize, n);
+            if n == at {
+                assert_eq!(l.label, Label::Change);
+            } else {
+                assert!(matches!(l.label, Label::Refund { .. }));
+            }
+        }
+        ok(rig
+            .owner
+            .abandon_session(&built.session_id, |b| rig.owner_store.put(b)));
+    }
+    assert_eq!(seen.len(), 4, "every place of four was met: {seen:?}");
+}
+
+#[test]
+fn as_61_the_transactions_of_one_session_have_places_of_their_own() {
+    // Each transaction takes its own seed from the session's bytes, so
+    // across many sessions the second transaction's place is not tied to
+    // the first's.
+    let mut rig = one_each_rig();
+    for n in 1..=2 {
+        refund(&mut rig.owner, n, 50_000, 10_000);
+    }
+    let coins = [coin(1, 0, 300_000), coin(2, 1, 300_000)];
+    let mut pairs = std::collections::BTreeSet::new();
+    for _ in 0..80 {
+        let built = rig.build(&coins, 0);
+        let txs = spends(&built.request);
+        assert_eq!(txs.len(), 2);
+        pairs.insert((change_position(&txs[0], 0), change_position(&txs[1], 1)));
+        ok(rig
+            .owner
+            .abandon_session(&built.session_id, |b| rig.owner_store.put(b)));
+    }
+    assert_eq!(pairs.len(), 4, "{pairs:?}");
+}
+
+#[test]
+fn as_67_a_transaction_with_the_change_first_or_in_the_middle_is_finished() {
+    for want in [0usize, 1, 2, 3] {
+        let mut rig = three_refunds_rig();
+        let built = build_with_change_at(&mut rig, &[coin(1, 0, 300_000)], 4, want);
+        let response = rig.answer_all(&built.request);
+        let taken = ok(rig.take(&response));
+        assert!(
+            matches!(taken.outcomes[0].1, ItemOutcome::Delivered(_)),
+            "place {want}"
+        );
+        let mut txs = Vec::new();
+        for d in rig.owner.outbox() {
+            if let Delivery::Transaction { tx, .. } = &d.what {
+                txs.push(deserialize::<Transaction>(tx).unwrap());
+            }
+        }
+        assert_eq!(txs.len(), 1);
+        let tx = &txs[0];
+        assert_eq!(tx.lock_time.to_consensus_u32(), rig.lock_height);
+        assert_eq!(change_position(tx, 4), want);
+        let refunds = without_change(tx);
+        assert_eq!(refunds.len(), 3);
+        for n in 1..=3u8 {
+            assert_eq!(
+                refunds[usize::from(n) - 1],
+                (external(n), 10_000 + u64::from(n))
+            );
+        }
+    }
+}
+
+#[test]
+fn as_67_a_response_for_a_transaction_with_the_change_moved_is_not_taken() {
+    // Hostile: the answer is for the same inputs and payments with the
+    // change at another place. It is signed validly, but it is another
+    // request's answer and not the session's.
+    let mut rig = three_refunds_rig();
+    let coins = [coin(1, 0, 300_000)];
+    let asked = build_with_change_at(&mut rig, &coins, 4, 0);
+    let mut twin = three_refunds_rig();
+    let moved = build_with_change_at(&mut twin, &coins, 4, 3);
+    assert_ne!(
+        spends(&moved.request)[0].compute_txid(),
+        spends(&asked.request)[0].compute_txid()
+    );
+    let response = twin.answer_all(&moved.request);
+    assert!(rig.take(&response).is_err());
+    assert!(rig.owner.outbox().is_empty());
 }

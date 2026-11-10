@@ -13,28 +13,35 @@
 #      with the library's.
 #   2. The example reads the coins (Core's `listunspent` and
 #      `getrawtransaction`), plans a refund of a fixed amount to a Core
-#      address at a given rate, and prints the plan: oldest coins first, the
-#      change at the given index.
+#      address at a given rate and with the chain tip's height as the lock
+#      time, and prints the plan: oldest coins first, the change at the given
+#      index.
 #   3. Core's `decodepsbt` and `analyzepsbt` agree with the plan: the fee,
 #      the inputs, the outputs, and the next role is "signer".
 #   4. Two signers, the real `openbmt-signer` as key 1 and as key 2, in
 #      separate runs of the example, each sign. `combine` joins them and
 #      `finalize` finishes the transaction.
-#   5. Core's `testmempoolaccept` allows it, its vsize and fee give a rate at
+#   5. Core's `testmempoolaccept` allows it with the lock time of the tip's
+#      height, its vsize and fee give a rate at
 #      or above the asked rate, `sendrawtransaction` takes it, a block
 #      confirms it, the refund address has the coin, and the watch-only
 #      wallet shows the change at the expected change index.
 #   6. A second refund, signed by Core as one of the two signers (a Core
 #      wallet that holds key 3's private descriptor, `walletprocesspsbt`) and
-#      by the signer as key 1: mixed signers join, finish and confirm. Core's
-#      `combinepsbt` and `finalizepsbt` on the signer's two files (key 1 and
-#      key 2) give the same transaction bytes as `finalize`.
+#      by the signer as key 1: mixed signers join, finish and confirm. The
+#      change is placed first among the outputs by a seed, and Core sees it
+#      there. Core's `combinepsbt` and `finalizepsbt` on the signer's two
+#      files (key 1 and key 2) give the same transaction bytes as `finalize`.
 #   7. `send_all`: everything left goes to one Core address with no change
 #      and the watch-only wallet is empty after a block.
 #   8. Negative: two fresh coins are planned; a transaction in which one of
 #      the two signatures on input 0 was made for input 1 is refused by
 #      `finalize`, and when it is forced out by hand in the example, Core's
 #      `testmempoolaccept` refuses it too.
+#   9. A lock height above the tip: a transaction planned, signed, combined
+#      and finished with a lock time ten blocks ahead is refused by Core as
+#      non-final, which is the expected result and counts as a pass. After ten
+#      more blocks Core takes the same transaction.
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin (the
 # directory is put first on PATH; set CORE_BIN to use another; the bitcoind in
@@ -213,10 +220,11 @@ now() { date +%s; }
 
 # ---- 2 -------------------------------------------------------------------------
 
-say "2. Plan a refund of 120,000 sat at $RATE sat per 1000 vB"
+say "2. Plan a refund of 120,000 sat at $RATE sat per 1000 vB, locked to the tip"
 DEST=$(cli -rpcwallet=miner getnewaddress)
 make_coins "$WORK/coins1.txt"
-PLAN1_ARGS=(--coins "$WORK/coins1.txt" --rate "$RATE" --change-index 0 --min-conf 1 --out "$WORK/base1.psbt")
+TIP=$(cli getblockcount)
+PLAN1_ARGS=(--coins "$WORK/coins1.txt" --rate "$RATE" --change-index 0 --min-conf 1 --lock-height "$TIP" --out "$WORK/base1.psbt")
 ex plan "${PLAN1_ARGS[@]}" "$DEST:120000" >"$WORK/plan1.txt"
 code=$?
 sed 's/^/      /' "$WORK/plan1.txt"
@@ -228,6 +236,7 @@ P_CHANGE=$(sed -n 's/^change 0 \([a-z0-9]*\) \([0-9]*\)$/\1 \2/p' "$WORK/plan1.t
 chk 2 "three inputs, oldest first (depths 5, 4, 3; 40000, 55000, 70000)" \
   [ "$(sed -n 's/^input [0-9a-f]*:[0-9]* \([0-9]*\) \([0-9]*\) .*/\1@\2/p' "$WORK/plan1.txt" | tr '\n' ' ')" = "40000@5 55000@4 70000@3 " ]
 chk 2 "the change goes to change index 0, which is Core's change address 0" [ "${P_CHANGE%% *}" = "${CADDR[0]}" ]
+chk 2 "the plan's lock time is the tip's height ($TIP)" [ "$(sed -n 's/^lock-height //p' "$WORK/plan1.txt")" = "$TIP" ]
 chk 2 "the fee is ceil(vsize * rate / 1000)" [ "$P_FEE" = "$(((P_VSIZE * RATE + 999) / 1000))" ]
 chk 2 "the change is the coins minus 120000 minus the fee" [ "${P_CHANGE##* }" = "$((165000 - 120000 - P_FEE))" ]
 done_step 2 "the example read Core's coins and planned: oldest first, change at index 0, fee $P_FEE sat over $P_VSIZE vB"
@@ -243,6 +252,7 @@ chk 3 "Core sees three inputs" [ "$(jq -r '.tx.vin | length' <<<"$DEC")" = 3 ]
 chk 3 "Core sees two outputs: the refund and the change" [ "$(jq -r '.tx.vout | length' <<<"$DEC")" = 2 ]
 chk 3 "the refund output is 120000 sat to the refund address" [ "$(tx_paying "$(jq -c '.tx' <<<"$DEC")" "$DEST")" = 120000 ]
 chk 3 "the change output is the plan's change" [ "$(tx_paying "$(jq -c '.tx' <<<"$DEC")" "${P_CHANGE%% *}")" = "${P_CHANGE##* }" ]
+chk 3 "Core reads the file's lock time as the tip's height ($TIP)" [ "$(jq -r '.tx.locktime' <<<"$DEC")" = "$TIP" ]
 chk 3 "Core's txid of the file equals the plan's" [ "$(jq -r '.tx.txid' <<<"$DEC")" = "$P_TXID" ]
 chk 3 "analyzepsbt: the next role is signer" [ "$(jq -r '.next' <<<"$ANA")" = signer ]
 chk 3 "analyzepsbt: every input has its utxo and none is final" \
@@ -284,6 +294,8 @@ note "testmempoolaccept: $(jq -c '.[0] | {allowed, vsize, fees}' <<<"$TMA")"
 CVS=$(jq -r '.[0].vsize' <<<"$TMA")
 CFEE=$(jq -r '.[0].fees.base * 100000000 | round' <<<"$TMA")
 chk 5 "testmempoolaccept allows it" [ "$(jq -r '.[0].allowed' <<<"$TMA")" = true ]
+chk 5 "the transaction carries the lock time of the tip's height ($TIP), and Core takes it" \
+  [ "$(cli decoderawtransaction "$HEX1" | jq -r '.locktime')" = "$TIP" ]
 chk 5 "Core's fee is the plan's fee" [ "$CFEE" = "$P_FEE" ]
 chk 5 "the rate Core computes ($CFEE sat over $CVS vB) is at least the asked $RATE per 1000 vB" [ $((CFEE * 1000)) -ge $((RATE * CVS)) ]
 chk 5 "Core's vsize is at most the plan's (the plan counts signatures at their longest)" [ "$CVS" -le "$P_VSIZE" ]
@@ -305,13 +317,26 @@ done_step 5 "Core allowed, relayed and confirmed it at $CFEE sat over $CVS vB; t
 say "6. Mixed signers, and Core's own combine and finalize"
 DEST2=$(cli -rpcwallet=miner getnewaddress)
 make_coins "$WORK/coins2.txt"
-PLAN2_ARGS=(--coins "$WORK/coins2.txt" --rate 3000 --change-index 1 --min-conf 1 --out "$WORK/base2.psbt")
-ex plan "${PLAN2_ARGS[@]}" "$DEST2:150000" >"$WORK/plan2.txt"
-chk 6 "the second plan was made" [ "$?" = 0 ]
+TIP2=$(cli getblockcount)
+# The change goes at a place taken from a seed and the inputs, and the inputs
+# are Core's coins, which differ on every run. Seeds are tried until one puts
+# the change first among the outputs.
+for n in $(seq 0 63); do
+  SEED2=$(printf '%064x' "$n")
+  PLAN2_ARGS=(--coins "$WORK/coins2.txt" --rate 3000 --change-index 1 --min-conf 1 --lock-height "$TIP2" --change-seed "$SEED2" --out "$WORK/base2.psbt")
+  ex plan "${PLAN2_ARGS[@]}" "$DEST2:150000" >"$WORK/plan2.txt"
+  code=$?
+  [ "$code" = 0 ] && [ "$(sed -n 's/^change-position //p' "$WORK/plan2.txt")" = 0 ] && break
+done
+chk 6 "the second plan was made" [ "$code" = 0 ]
 sed 's/^/      /' "$WORK/plan2.txt"
 P2_TXID=$(sed -n 's/^txid //p' "$WORK/plan2.txt")
 P2_FEE=$(sed -n 's/^fee //p' "$WORK/plan2.txt")
 chk 6 "it spends two coins (the two oldest: 85000 and 100000)" [ "$(grep -c '^input ' "$WORK/plan2.txt")" = 2 ]
+P2_AT=$(sed -n 's/^change-position //p' "$WORK/plan2.txt")
+chk 6 "the seed puts the change first among the outputs (place $P2_AT)" [ "$P2_AT" = 0 ]
+chk 6 "Core reads the change at that place, to change address 1" \
+  [ "$(cli decodepsbt "$(b64 "$WORK/base2.psbt")" | jq -r --argjson n "${P2_AT:-9}" '.tx.vout[$n].scriptPubKey.address')" = "${CADDR[1]}" ]
 B2=$(b64 "$WORK/base2.psbt")
 # Core signs as key 3.
 C3=$(cli -rpcwallet=core3 walletprocesspsbt "$B2" true ALL true false | jq -r '.psbt')
@@ -425,11 +450,40 @@ chk 8 "for a script failure, not for some other reason" \
   [ "$(jq -r '.[0]["reject-reason"] // ""' <<<"$TMAF" | grep -c 'script-verify-flag')" = 1 ]
 done_step 8 "finalize refused the swapped signature, and Core refused the same transaction forced out by hand"
 
+# ---- 9 -------------------------------------------------------------------------
+
+say "9. A lock height above the tip is refused as non-final"
+make_coins "$WORK/coins5.txt"
+TIP9=$(cli getblockcount)
+AHEAD=$((TIP9 + 10))
+DEST5=$(cli -rpcwallet=miner getnewaddress)
+PLAN5_ARGS=(--coins "$WORK/coins5.txt" --rate 2000 --change-index 4 --min-conf 1 --lock-height "$AHEAD" --out "$WORK/base5.psbt")
+ex plan "${PLAN5_ARGS[@]}" "$DEST5:90000" >"$WORK/plan5.txt"
+chk 9 "a plan with the lock height $AHEAD (tip $TIP9 plus 10) was made" [ "$?" = 0 ]
+chk 9 "the plan carries that lock height" [ "$(sed -n 's/^lock-height //p' "$WORK/plan5.txt")" = "$AHEAD" ]
+ex sign --who 1 --state "$WORK/key1.state" --now "$(now)" --in "$WORK/base5.psbt" --out "$WORK/s1_5.psbt" >"$WORK/sign1e.txt"
+chk 9 "the signer signed as key 1 with a lock time ahead of the tip" [ "$?" = 0 ]
+ex sign --who 2 --state "$WORK/key2.state" --now "$(now)" --in "$WORK/base5.psbt" --out "$WORK/s2_5.psbt" >"$WORK/sign2e.txt"
+chk 9 "the signer signed as key 2" [ "$?" = 0 ]
+ex plan "${PLAN5_ARGS[@]}" --signed "$WORK/s1_5.psbt" --signed "$WORK/s2_5.psbt" \
+  --hex-out "$WORK/tx5.hex" "$DEST5:90000" >"$WORK/fin5.txt"
+chk 9 "combine and finalize succeeded" [ "$?" = 0 ]
+HEX5=$(cat "$WORK/tx5.hex" 2>/dev/null)
+TMA5=$(cli testmempoolaccept "[\"$HEX5\"]")
+note "Core on the transaction locked ahead of the tip: $(jq -c '.[0] | {allowed, "reject-reason"}' <<<"$TMA5")"
+chk 9 "Core's testmempoolaccept refuses it (expected)" [ "$(jq -r '.[0].allowed' <<<"$TMA5")" = false ]
+chk 9 "for being non-final, not for some other reason" \
+  [ "$(jq -r '.[0]["reject-reason"] // ""' <<<"$TMA5" | grep -c 'non-final')" = 1 ]
+cli generatetoaddress 10 "$MINE" >/dev/null
+TMA5B=$(cli testmempoolaccept "[\"$HEX5\"]")
+chk 9 "once the tip has reached $AHEAD, Core takes the same transaction" [ "$(jq -r '.[0].allowed' <<<"$TMA5B")" = true ]
+done_step 9 "a lock height ten blocks ahead of the tip was refused by Core as non-final (the expected result), and accepted once the chain reached it"
+
 # ---- result -------------------------------------------------------------------
 
 say "Result"
 failed=0
-for n in 1 2 3 4 5 6 7 8; do
+for n in 1 2 3 4 5 6 7 8 9; do
   printf '%s  step %s: %s\n' "${RESULT[$n]:-FAIL}" "$n" "${MESSAGE[$n]:-did not run}"
   [ "${RESULT[$n]:-FAIL}" = PASS ] || failed=1
 done

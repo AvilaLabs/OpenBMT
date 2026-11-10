@@ -41,11 +41,43 @@ pub(crate) enum Frozen {
         cash_out: Option<u32>,
         payments: Vec<(ScriptBuf, u64)>,
         change_index: u32,
+        /// The change output's position among the outputs, if the plan has
+        /// change (AS-61, AS-67).
+        change_position: Option<u32>,
     },
     Batch(u32),
     Settings(u32),
     Pairing(u32),
     Health,
+}
+
+/// AS-67: whether `outputs` are the frozen payments, in order, with one
+/// more output, the change, at `change_position` when there is one. The
+/// change's script is checked by the caller, who has the wallet.
+pub(crate) fn outputs_fit(
+    outputs: &[bitcoin::TxOut],
+    payments: &[(ScriptBuf, u64)],
+    change_position: Option<u32>,
+) -> bool {
+    let change = change_position.and_then(|p| usize::try_from(p).ok());
+    if outputs.len() != payments.len() + usize::from(change_position.is_some()) {
+        return false;
+    }
+    if change.is_some_and(|c| c >= outputs.len()) {
+        return false;
+    }
+    let mut paid = payments.iter();
+    for (at, out) in outputs.iter().enumerate() {
+        if change == Some(at) {
+            continue;
+        }
+        match paid.next() {
+            Some((script, sats)) if out.script_pubkey == *script && out.value.to_sat() == *sats => {
+            }
+            _ => return false,
+        }
+    }
+    true
 }
 
 /// A session that was built and has not been answered (AS-61, AS-65).

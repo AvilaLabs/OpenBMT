@@ -199,6 +199,22 @@ fn sr_03_refuses_a_lock_time_that_is_a_time() {
 }
 
 #[test]
+fn sr_03_accepts_a_tip_height_lock_time_with_the_sequence_the_spend_library_sets() {
+    // The spend library sets the lock time to the chain tip (SP-37) and the
+    // sequence to 0xFFFFFFFD on every input: both are accepted.
+    let s = state();
+    for h in [850_000, 1_200_000] {
+        let p = tweak(|p| {
+            p.unsigned_tx.lock_time = LockTime::from_consensus(h);
+            for input in &mut p.unsigned_tx.input {
+                input.sequence = Sequence(0xFFFF_FFFD);
+            }
+        });
+        assert!(s.review(&p.serialize(), NOW).is_ok(), "height {h}");
+    }
+}
+
+#[test]
 fn sr_03_refuses_a_relative_time_lock_in_any_input() {
     let s = state();
     for seq in [0, 1, 0x0040_0000, 0xFFFF_FFFC] {

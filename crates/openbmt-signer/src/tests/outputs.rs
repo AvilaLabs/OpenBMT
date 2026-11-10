@@ -94,6 +94,32 @@ fn sr_20_refuses_output_hints_that_disagree() {
 }
 
 #[test]
+fn sr_20_change_is_proved_by_derivation_not_by_its_place() {
+    // The spend library may put the change anywhere among the outputs
+    // (SP-26): first, in the middle or last, the signer shows it as change.
+    let s = state();
+    let layouts: [[Out; 3]; 3] = [
+        [change(0, 30_000), pay(30_000), pay_to(external(2), 39_000)],
+        [pay(30_000), change(0, 30_000), pay_to(external(2), 39_000)],
+        [pay(30_000), pay_to(external(2), 39_000), change(0, 30_000)],
+    ];
+    for (at, outs) in layouts.iter().enumerate() {
+        let p = build(&[coin(100_000)], outs);
+        let r = review_ok(&s, &p, NOW);
+        assert_eq!(r.change(), Some((0, 30_000)), "change at {at}");
+        for (n, out) in r.outputs().iter().enumerate() {
+            let expect = if n == at {
+                OutputKind::Change { index: 0 }
+            } else {
+                OutputKind::Other
+            };
+            assert_eq!(out.kind, expect, "output {n}, change at {at}");
+        }
+        assert_eq!(r.other_total_sats(), 69_000);
+    }
+}
+
+#[test]
 fn sr_20_with_two_qualifying_outputs_the_first_is_change() {
     let mut s = state();
     let p = build(

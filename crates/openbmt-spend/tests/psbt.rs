@@ -6,7 +6,7 @@ use bitcoin::psbt::{Input, Output, Psbt};
 use common::*;
 use openbmt_core::wallet::Keychain;
 use openbmt_signer::OutputKind;
-use openbmt_spend::{plan, PsbtError};
+use openbmt_spend::{plan, ChangePosition, PlanOutput, PsbtError};
 
 #[test]
 fn sp_40_the_file_holds_what_the_signer_needs_and_nothing_else() {
@@ -177,4 +177,61 @@ fn sp_42_a_plan_with_no_change_and_a_send_all_pass_the_signer_too() {
     let p = plan(wallet(), &many, &r).unwrap();
     let signed = sign_with_signer(&p.to_psbt(wallet()).unwrap(), 1);
     assert!(signed.inputs.iter().all(|i| i.partial_sigs.len() == 1));
+}
+
+#[test]
+fn sp_37_the_lock_height_survives_the_file() {
+    let coins = [coin(1, 0, 300_000)];
+    let mut r = request(vec![(external(1), 100_000)], 1000);
+    r.lock_height = 851_234;
+    let p = plan(wallet(), &coins, &r).unwrap();
+    let psbt = p.to_psbt(wallet()).unwrap();
+    assert_eq!(
+        psbt.unsigned_tx.lock_time,
+        bitcoin::absolute::LockTime::from_height(851_234).unwrap()
+    );
+    let again = Psbt::deserialize(&psbt.serialize()).unwrap();
+    assert_eq!(again.unsigned_tx, *p.unsigned_tx());
+    assert_eq!(again.unsigned_tx.lock_time.to_consensus_u32(), 851_234);
+    // The signer reviews and signs it.
+    let signed = sign_with_signer(&psbt, 0);
+    assert!(signed.inputs.iter().all(|i| i.partial_sigs.len() == 1));
+}
+
+#[test]
+fn sp_41_the_change_carries_hints_wherever_it_is() {
+    let coins = [coin(1, 0, 1_000_000)];
+    let mut at = std::collections::BTreeSet::new();
+    for n in 0..40u8 {
+        let mut r = request(vec![(external(1), 100_000), (external(2), 50_000)], 1000);
+        r.change_index = 5;
+        r.change_position = ChangePosition::Seed([n; 32]);
+        let p = plan(wallet(), &coins, &r).unwrap();
+        let place = p.change_position().unwrap();
+        at.insert(place);
+        let psbt = p.to_psbt(wallet()).unwrap();
+        for (position, entry) in psbt.outputs.iter().enumerate() {
+            if position == place {
+                assert_eq!(entry.bip32_derivation.len(), 3);
+                assert!(entry.witness_script.is_some());
+            } else {
+                assert!(entry.bip32_derivation.is_empty() && entry.witness_script.is_none());
+            }
+        }
+        // The signer shows exactly that output as change (SP-42).
+        let review = signer(1).review(&psbt.serialize(), NOW).unwrap();
+        let change = p.change().unwrap();
+        assert_eq!(review.change(), Some((5, change.sats)));
+        for (position, out) in review.outputs().iter().enumerate() {
+            match p.outputs()[position] {
+                PlanOutput::Change(_) => assert_eq!(out.kind, OutputKind::Change { index: 5 }),
+                PlanOutput::Payment(_) => assert_eq!(out.kind, OutputKind::Other),
+            }
+        }
+        assert!(sign_with_signer(&psbt, 1)
+            .inputs
+            .iter()
+            .all(|i| i.partial_sigs.len() == 1));
+    }
+    assert_eq!(at.len(), 3, "every place of three was met");
 }

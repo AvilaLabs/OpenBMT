@@ -36,7 +36,7 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 35);
+    assert_eq!(ids.len(), 37);
     assert!(ids.contains(&"SP-01".to_string()) && ids.contains(&"SP-71".to_string()));
     let mut sorted = ids.clone();
     sorted.sort();
@@ -97,6 +97,10 @@ fn every_error_says_which_rule_in_words() {
         }
         .to_string(),
         PlanError::PaymentToOwnScript { payment: 1 }.to_string(),
+        PlanError::LockTimeNotHeight {
+            lock_height: 500_000_000,
+        }
+        .to_string(),
         PlanError::TooManyOutputs.to_string(),
         PlanError::TooManyInputs.to_string(),
         PlanError::NoEligibleCoins.to_string(),
@@ -137,6 +141,10 @@ fn every_error_says_which_rule_in_words() {
         FinalizeError::NotEnoughSignatures { input: 0, have: 1 }.to_string(),
         FinalizeError::TooHeavy { weight: 9 }.to_string(),
         FinalizeError::FinalCheckFailed("x").to_string(),
+        FinalizeError::LockTimeNotHeight {
+            lock_time: 500_000_000,
+        }
+        .to_string(),
         FinalizeError::NotThePlan.to_string(),
         FinalizeError::FeeNotThePlan {
             found: 1,

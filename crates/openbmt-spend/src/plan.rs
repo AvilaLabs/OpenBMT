@@ -6,6 +6,7 @@ use std::fmt;
 use bitcoin::absolute::LockTime;
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
+use openbmt_core::identity::tagged_hash;
 use openbmt_core::wallet::WalletDescription;
 use openbmt_signer::{MAX_FEE_RATE_SAT_PER_VB, MAX_FEE_SATS, MAX_INPUTS, MAX_OUTPUTS, MAX_WEIGHT};
 
@@ -33,6 +34,42 @@ pub struct SpendRequest {
     /// that is among them but not eligible fails the plan. One that is not
     /// among the coins is ignored: something else has spent it.
     pub must_spend: Vec<OutPoint>,
+    /// SP-37: the lock time, as a block height. 0 is no lock time; a value
+    /// of 500,000,000 or more is a time and is refused. The library has no
+    /// chain, so the caller passes the height.
+    pub lock_height: u32,
+    /// SP-26: where the change output goes among the outputs.
+    pub change_position: ChangePosition,
+}
+
+/// SP-26: where the change output goes among the outputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangePosition {
+    /// After the payments.
+    Last,
+    /// A position taken from this seed and the inputs of the plan: every
+    /// position is equally likely, and the same request gives the same
+    /// plan.
+    Seed([u8; 32]),
+}
+
+/// The tag of the hash that picks the change position (SP-26).
+const CHANGE_POSITION_TAG: &str = "OpenBMT/spend-change-position/v1";
+
+/// SP-26: the position of the change among `payments + 1` places.
+fn seeded_position(seed: &[u8; 32], inputs: &[&Coin], payments: usize) -> usize {
+    let mut msg = seed.to_vec();
+    for coin in inputs {
+        msg.extend_from_slice(coin.outpoint.txid.as_ref());
+        msg.extend_from_slice(&coin.outpoint.vout.to_le_bytes());
+    }
+    let hash = tagged_hash(CHANGE_POSITION_TAG, &msg);
+    let mut first = [0u8; 8];
+    first.copy_from_slice(&hash[..8]);
+    let x = u64::from_le_bytes(first);
+    let n = (payments as u128) + 1;
+    // Multiply-shift: x * n / 2^64 is in 0..n.
+    usize::try_from((u128::from(x) * n) >> 64).unwrap_or(0)
 }
 
 /// An input of a plan: the coin and its amount.
@@ -54,6 +91,15 @@ pub struct PlannedPayment {
     /// Whether this is the one output of a consolidation (SP-24), paid to
     /// the wallet's own change script.
     pub to_own_change: bool,
+}
+
+/// One output of a plan, in the order of the transaction (SP-26).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanOutput<'a> {
+    /// A payment.
+    Payment(&'a PlannedPayment),
+    /// The change.
+    Change(&'a PlannedChange),
 }
 
 /// The change output of a plan.
@@ -101,6 +147,11 @@ pub enum PlanError {
     },
     /// SP-22, SP-34: an amount above 21,000,000 BTC, alone or in total.
     AmountTooLarge,
+    /// SP-37: the lock time asked for is a time, not a block height.
+    LockTimeNotHeight {
+        /// The value asked for.
+        lock_height: u32,
+    },
     /// SP-24: a payment to one of the wallet's own scripts.
     PaymentToOwnScript {
         /// Position in the request.
@@ -197,6 +248,10 @@ impl fmt::Display for PlanError {
                 f,
                 "SP-24: payment {payment} is to one of the wallet's own scripts"
             ),
+            Self::LockTimeNotHeight { lock_height } => write!(
+                f,
+                "SP-37: the lock time {lock_height} is not a block height (below 500,000,000)"
+            ),
             Self::TooManyOutputs => write!(f, "SP-25: more than {MAX_OUTPUTS} outputs"),
             Self::TooManyInputs => write!(f, "SP-33: more than {MAX_INPUTS} inputs are needed"),
             Self::NoEligibleCoins => write!(f, "SP-10: no coin has enough confirmations"),
@@ -250,6 +305,8 @@ pub struct Plan {
     pub(crate) payments: Vec<PlannedPayment>,
     pub(crate) change: Option<PlannedChange>,
     pub(crate) change_index: u32,
+    pub(crate) change_position: Option<usize>,
+    pub(crate) lock_height: u32,
     pub(crate) dropped_change: Option<u64>,
     pub(crate) fee: u64,
     pub(crate) weight: u64,
@@ -271,9 +328,37 @@ impl Plan {
         &self.payments
     }
 
-    /// The change output, last in the transaction, if there is one.
+    /// The change output, if there is one.
     pub fn change(&self) -> Option<&PlannedChange> {
         self.change.as_ref()
+    }
+
+    /// SP-26: the change output's position among the transaction's outputs.
+    pub fn change_position(&self) -> Option<usize> {
+        self.change_position
+    }
+
+    /// SP-37: the lock time, as a block height (0 for none).
+    pub fn lock_height(&self) -> u32 {
+        self.lock_height
+    }
+
+    /// SP-26: every output in the order of the transaction, each said to be
+    /// a payment or the change.
+    pub fn outputs(&self) -> Vec<PlanOutput<'_>> {
+        let mut payments = self.payments.iter();
+        let mut out = Vec::with_capacity(self.tx.output.len());
+        for position in 0..self.tx.output.len() {
+            match (&self.change, self.change_position) {
+                (Some(change), Some(at)) if at == position => out.push(PlanOutput::Change(change)),
+                _ => {
+                    if let Some(p) = payments.next() {
+                        out.push(PlanOutput::Payment(p));
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// SP-23: the change that was below dust and went into the fee.
@@ -387,6 +472,11 @@ pub fn plan(
     if request.payments.len() > MAX_OUTPUTS {
         return Err(PlanError::TooManyOutputs);
     }
+    // SP-37
+    let lock_time =
+        LockTime::from_height(request.lock_height).map_err(|_| PlanError::LockTimeNotHeight {
+            lock_height: request.lock_height,
+        })?;
 
     // SP-01, SP-02, SP-03: every coin, eligible or not.
     let mut seen: HashSet<OutPoint> = HashSet::new();
@@ -646,7 +736,7 @@ pub fn plan(
     let chosen: Vec<&Coin> = eligible.into_iter().take(taken).collect();
     let mut tx = Transaction {
         version: Version(TX_VERSION),
-        lock_time: LockTime::ZERO,
+        lock_time,
         input: chosen
             .iter()
             .map(|c| TxIn {
@@ -664,12 +754,24 @@ pub fn plan(
             })
             .collect(),
     };
-    if let Some(c) = &change {
-        tx.output.push(TxOut {
-            value: Amount::from_sat(c.sats),
-            script_pubkey: c.script.clone(),
-        });
-    }
+    // SP-26: the position depends on nothing that was decided above.
+    let change_position = match &change {
+        Some(c) => {
+            let at = match request.change_position {
+                ChangePosition::Last => tx.output.len(),
+                ChangePosition::Seed(seed) => seeded_position(&seed, &chosen, payments.len()),
+            };
+            tx.output.insert(
+                at,
+                TxOut {
+                    value: Amount::from_sat(c.sats),
+                    script_pubkey: c.script.clone(),
+                },
+            );
+            Some(at)
+        }
+        None => None,
+    };
     if tx.input.len() > MAX_INPUTS || tx.output.len() > MAX_OUTPUTS {
         return Err(PlanError::TooManyOutputs);
     }
@@ -703,6 +805,8 @@ pub fn plan(
         payments,
         change,
         change_index: request.change_index,
+        change_position,
+        lock_height: request.lock_height,
         dropped_change,
         fee,
         weight,

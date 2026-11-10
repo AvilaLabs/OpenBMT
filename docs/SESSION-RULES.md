@@ -297,16 +297,27 @@ in memory, and nothing is changed if the store fails.
 - **AS-61.** `build_request` freezes the ready items into one session. The
   coins are the caller's, the fee rate is the caller's, and the change
   indexes are the caller's index and the ones after it, one for each
-  transaction. The session and the items in it are stored before the bytes
-  are returned. If the store fails, nothing is returned and the queue is
-  as it was. An item that does not fit (not enough coins, a plan the spend
-  library refuses) stays queued and is reported with its reason.
+  transaction. The lock height is the caller's too, the chain's tip height
+  as it knows it (SP-37), and every transaction of the session has it as its
+  lock time. The caller's 96 random bytes are the session ID, the health
+  check's number and a seed for the change places: the transaction in place
+  `k` of the session takes
+  `tagged_hash("OpenBMT/owner-change-seed/v1", seed || k)`, with `k` as 4
+  bytes in little-endian order, as the seed of its change position (SP-26),
+  so each transaction's change stands at a place of its own among the
+  outputs. The labels name the outputs by those real places, in ascending
+  order, and what is frozen includes the change's place. The session and the
+  items in it are stored before the bytes are returned. If the store fails,
+  nothing is returned and the queue is as it was. An item that does not fit
+  (not enough coins, a plan the spend library refuses) stays queued and is
+  reported with its reason.
 - **AS-62.** `take_response` first runs the checks of AS-13 against the
   request kept for the session, then works on a copy. For each approved
   `Spend` it calls the signer for key 1 (review, then sign), joins the two
   signatures with `combine` and finishes with `finalize`, which checks the
   transaction again from scratch (SP-62). It then checks that the outputs
-  are exactly the outputs frozen into the session. A batch, a settings item
+  are exactly the outputs frozen into the session: the payments in order,
+  and the change at its frozen place. A batch, a settings item
   or a pairing is completed and verified with the core crate's own
   functions. A pairing whose signed settings version is below the claim, or
   above the highest settings version the owner phone has itself signed (in
@@ -325,7 +336,8 @@ in memory, and nothing is changed if the store fails.
 - **AS-65.** The queue's snapshot is `OBM4`, version 1. Decoding is strict
   (AS-03) and bounded (AS-50). It holds the queue, the sales' facts, the
   settings in force, the open sessions (the request bytes and what was
-  frozen) and the objects waiting to be delivered. It is at most 80 MiB:
+  frozen, a transaction's change place included) and the objects waiting to
+  be delivered. It is at most 80 MiB:
   eight requests of 8 MiB and room for the queue. Restoring also derives
   every queued batch again and verifies the owner's signature on it and on
   queued settings, checks every queued pairing against the offer and every open
@@ -335,10 +347,15 @@ in memory, and nothing is changed if the store fails.
 - **AS-66.** An open session that never got an answer can be abandoned. Its
   refunds and items go back to queued. The Key app may already have
   stored what the session used (AS-35), and the same transaction asked for
-  again counts once only while the signer's log holds it (SR-33).
+  again counts once only while the signer's log holds it (SR-33). A new
+  session has new random bytes, so the change may stand at another place:
+  the transaction is then another one over the same inputs, which the
+  signer joins with the first and counts once (SR-33).
 - **AS-67.** The outputs of a transaction that `take_response` returns are
   exactly the refund lines that were frozen for it, or the cash-out, in
-  order, and the change. No other output can come out.
+  order, and the change at the place that was frozen, to the change index
+  that was frozen. No other output can come out, and the change cannot
+  stand at another place.
 - **AS-68.** A transaction that was dropped and is asked for again must
   conflict with the old one. When the caller reports a signed or sent
   transaction dropped, each refund and cash-out it paid keeps the outpoints

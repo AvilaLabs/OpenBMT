@@ -28,7 +28,7 @@ use openbmt_session::{label_text_ok, reason_text_ok, Request, ShopValue};
 use openbmt_spend::dust_limit;
 
 use crate::error::{Refusal, RestoreError};
-use crate::state::{Frozen, OpenSession, Owner, SaleEntry, State};
+use crate::state::{outputs_fit, Frozen, OpenSession, Owner, SaleEntry, State};
 use crate::types::{
     CashAmount, CashOut, Deliverable, Delivery, FeePayer, Options, QueuedBatch, QueuedPairing,
     QueuedSettings, Refund, RefundPacking, SaleFacts, SaleKey, Stage,
@@ -119,6 +119,7 @@ fn put_frozen(out: &mut Vec<u8>, number: u32, f: &Frozen) {
             cash_out,
             payments,
             change_index,
+            change_position,
         } => {
             out.push(0);
             put_txid(out, txid);
@@ -136,6 +137,13 @@ fn put_frozen(out: &mut Vec<u8>, number: u32, f: &Frozen) {
                 out.extend_from_slice(&sats.to_le_bytes());
             }
             out.extend_from_slice(&change_index.to_le_bytes());
+            match change_position {
+                Some(p) => {
+                    out.push(1);
+                    out.extend_from_slice(&p.to_le_bytes());
+                }
+                None => out.push(0),
+            }
         }
         Frozen::Batch(n) => {
             out.push(1);
@@ -399,12 +407,18 @@ fn read_frozen(r: &mut Reader<'_>) -> Result<(u32, Frozen), DecodeError> {
                 let script = read_script(r)?;
                 payments.push((script, r.u64_le()?));
             }
+            let change_index = r.u32_le()?;
+            let change_position = read_opt_id(r)?;
+            if change_position.is_some_and(|p| usize::try_from(p).map_or(true, |p| p > n)) {
+                return Err(bad("a change position is past the outputs"));
+            }
             Frozen::Spend {
                 txid,
                 refunds,
                 cash_out,
                 payments,
-                change_index: r.u32_le()?,
+                change_index,
+                change_position,
             }
         }
         1 => Frozen::Batch(r.u32_le()?),
@@ -780,19 +794,19 @@ fn check_consistency(owner: &Owner, st: &State) -> Result<(), RestoreError> {
             // in the request.
             if let (
                 openbmt_session::Item::Spend { psbt, .. },
-                Frozen::Spend { txid, payments, .. },
+                Frozen::Spend {
+                    txid,
+                    payments,
+                    change_position,
+                    ..
+                },
             ) = (&asked.item, f)
             {
                 let parsed = bitcoin::psbt::Psbt::deserialize(psbt)
                     .map_err(|_| bad("an open session's transaction does not parse"))?;
                 let tx = &parsed.unsigned_tx;
                 let same = tx.compute_txid() == *txid
-                    && tx.output.len() >= payments.len()
-                    && tx
-                        .output
-                        .iter()
-                        .zip(payments)
-                        .all(|(o, (s, v))| o.script_pubkey == *s && o.value.to_sat() == *v);
+                    && outputs_fit(&tx.output, payments, *change_position);
                 if !same {
                     return Err(bad("a frozen transaction is not the one in the request"));
                 }

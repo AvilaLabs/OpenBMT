@@ -1,4 +1,4 @@
-//! SP-20 to SP-25: outputs.
+//! SP-20 to SP-26: outputs.
 
 mod common;
 
@@ -6,8 +6,9 @@ use bitcoin::opcodes::all::OP_RETURN;
 use bitcoin::script::Builder;
 use bitcoin::{PubkeyHash, ScriptBuf, ScriptHash, WScriptHash};
 use common::*;
+use openbmt_core::identity::tagged_hash;
 use openbmt_core::wallet::Keychain;
-use openbmt_spend::{dust_limit, plan, PlanError};
+use openbmt_spend::{dust_limit, plan, ChangePosition, PlanError, PlanOutput};
 
 fn p2pkh() -> ScriptBuf {
     ScriptBuf::new_p2pkh(&PubkeyHash::from_byte_array([3; 20]))
@@ -264,4 +265,144 @@ fn sp_25_at_least_one_payment_and_at_most_100_outputs() {
         plan(wallet(), &coins, &request(many(101), 1000)),
         Err(PlanError::TooManyOutputs)
     );
+}
+
+fn seeded(seed: u8) -> openbmt_spend::SpendRequest {
+    let mut r = request(
+        vec![
+            (external(9), 30_000),
+            (external(2), 20_000),
+            (p2wsh(), 10_000),
+        ],
+        1000,
+    );
+    r.change_position = ChangePosition::Seed([seed; 32]);
+    r
+}
+
+#[test]
+fn sp_26_only_the_order_differs_from_a_plan_with_change_last() {
+    let coins = [coin(1, 0, 400_000), coin(2, 1, 300_000)];
+    let last = plan(wallet(), &coins, &request(seeded(0).payments, 1000)).unwrap();
+    assert_eq!(last.change_position(), Some(3));
+    let mut seen = std::collections::BTreeSet::new();
+    for seed in 0..40u8 {
+        let p = plan(wallet(), &coins, &seeded(seed)).unwrap();
+        let at = p.change_position().unwrap();
+        seen.insert(at);
+        assert_eq!(p.inputs(), last.inputs());
+        assert_eq!(p.fee_sats(), last.fee_sats());
+        assert_eq!(p.weight(), last.weight());
+        assert_eq!(p.total_out_sats(), last.total_out_sats());
+        assert_eq!(p.payments(), last.payments());
+        assert_eq!(p.change(), last.change());
+        // The same outputs, with the change moved: the payments keep their
+        // order relative to each other.
+        let mut moved = p.unsigned_tx().output.clone();
+        let change = moved.remove(at);
+        moved.push(change);
+        assert_eq!(moved, last.unsigned_tx().output);
+        assert_eq!(p.unsigned_tx().input, last.unsigned_tx().input);
+        // The same request gives the same plan (SP-71).
+        assert_eq!(p, plan(wallet(), &coins, &seeded(seed)).unwrap());
+    }
+    assert!(seen.len() > 1, "the seeds do not all give one place");
+}
+
+#[test]
+fn sp_26_the_outputs_view_is_in_transaction_order_and_says_which_is_which() {
+    let coins = [coin(1, 0, 1_000_000)];
+    for seed in 0..12u8 {
+        let p = plan(wallet(), &coins, &seeded(seed)).unwrap();
+        let view = p.outputs();
+        assert_eq!(view.len(), 4);
+        let at = p.change_position().unwrap();
+        let mut payments = p.payments().iter();
+        for (n, (item, out)) in view.iter().zip(&p.unsigned_tx().output).enumerate() {
+            match item {
+                PlanOutput::Change(c) => {
+                    assert_eq!(n, at);
+                    assert_eq!(c.script, out.script_pubkey);
+                    assert_eq!(c.sats, out.value.to_sat());
+                }
+                PlanOutput::Payment(pay) => {
+                    assert_ne!(n, at);
+                    assert_eq!(Some(*pay), payments.next());
+                    assert_eq!(pay.script, out.script_pubkey);
+                    assert_eq!(pay.sats, out.value.to_sat());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn sp_26_the_place_is_the_one_the_rule_text_gives() {
+    let coins = [coin(1, 0, 400_000), coin(2, 1, 300_000)];
+    for seed in 0..20u8 {
+        let p = plan(wallet(), &coins, &seeded(seed)).unwrap();
+        let mut msg = vec![seed; 32];
+        for i in p.inputs() {
+            msg.extend_from_slice(i.coin.outpoint.txid.as_ref());
+            msg.extend_from_slice(&i.coin.outpoint.vout.to_le_bytes());
+        }
+        let h = tagged_hash("OpenBMT/spend-change-position/v1", &msg);
+        let x = u64::from_le_bytes(h[..8].try_into().unwrap());
+        let at = ((u128::from(x) * 4) >> 64) as usize;
+        assert_eq!(p.change_position(), Some(at), "seed {seed}");
+    }
+}
+
+#[test]
+fn sp_26_over_2000_seeds_every_place_occurs_about_equally_often() {
+    let coins = [coin(1, 0, 1_000_000)];
+    let mut counts = [0u32; 4];
+    for n in 0..2000u32 {
+        let mut seed = [0u8; 32];
+        seed[..4].copy_from_slice(&n.to_le_bytes());
+        let mut r = seeded(0);
+        r.change_position = ChangePosition::Seed(seed);
+        let p = plan(wallet(), &coins, &r).unwrap();
+        counts[p.change_position().unwrap()] += 1;
+    }
+    // 500 expected each; the standard deviation is about 19, so 380 to 620
+    // is more than six deviations wide.
+    for (at, c) in counts.iter().enumerate() {
+        assert!(
+            (380..=620).contains(c),
+            "place {at}: {c} of 2000 ({counts:?})"
+        );
+    }
+}
+
+#[test]
+fn sp_26_with_one_payment_the_change_is_first_or_last() {
+    let coins = [coin(1, 0, 1_000_000)];
+    let mut seen = [false; 2];
+    for n in 0..64u8 {
+        let mut r = request(vec![(external(9), 300_000)], 1000);
+        r.change_position = ChangePosition::Seed([n; 32]);
+        let p = plan(wallet(), &coins, &r).unwrap();
+        seen[p.change_position().unwrap()] = true;
+    }
+    assert_eq!(seen, [true, true]);
+}
+
+#[test]
+fn sp_26_a_plan_with_no_change_has_no_place() {
+    let coins = [coin(1, 0, 50_146)];
+    let mut r = request(vec![(external(1), 50_000)], 1000);
+    r.change_position = ChangePosition::Seed([7; 32]);
+    let p = plan(wallet(), &coins, &r).unwrap();
+    assert!(p.change().is_none() && p.change_position().is_none());
+    assert_eq!(p.outputs().len(), 1);
+    // A consolidation: one payment to the change script, no change output.
+    let coins = [coin(2, 0, 300_000), coin(3, 1, 300_000)];
+    let mut r = request(vec![(wallet().change_script(3).unwrap(), 0)], 1000);
+    r.change_index = 3;
+    r.send_all = true;
+    r.change_position = ChangePosition::Seed([7; 32]);
+    let p = plan(wallet(), &coins, &r).unwrap();
+    assert!(p.change_position().is_none());
+    assert!(matches!(p.outputs()[0], PlanOutput::Payment(pay) if pay.to_own_change));
 }

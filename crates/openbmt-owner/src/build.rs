@@ -3,14 +3,19 @@
 use std::collections::BTreeMap;
 
 use bitcoin::{OutPoint, ScriptBuf};
+use openbmt_core::identity::tagged_hash;
 use openbmt_core::wallet::WalletDescription;
 use openbmt_session::{Item, Label, OutputLabel, Request, RequestItem};
-use openbmt_spend::{dust_limit, plan, Coin, Plan, SpendRequest};
+use openbmt_spend::{dust_limit, plan, ChangePosition, Coin, Plan, PlanOutput, SpendRequest};
 
 use crate::error::{OwnerError, Refusal};
 use crate::state::{Frozen, OpenSession, Owner, State};
 use crate::types::{Built, CashAmount, FeePayer, Options, Refund, RefundPacking, Skipped, Stage};
 use crate::{MAX_ITEMS_PER_SESSION, MAX_OPEN_SESSIONS, MAX_REFUNDS_PER_TX, MAX_TXS_PER_SESSION};
+
+/// AS-61: the tag of the hash that gives each transaction of a session its
+/// own seed for the change position.
+const TAG_CHANGE_SEED: &str = "OpenBMT/owner-change-seed/v1";
 
 /// AS-56: rounds of looking for the fee the shares must cover.
 const FEE_ROUNDS: usize = 8;
@@ -41,9 +46,18 @@ struct PlannedTx {
     held: Vec<(usize, String)>,
 }
 
+/// What every transaction of a session shares: the fee rate, the lock
+/// height and the seed of the change position (AS-61).
+#[derive(Clone, Copy)]
+struct Shape {
+    fee_rate: u64,
+    lock_height: u32,
+    change_seed: [u8; 32],
+}
+
 fn spend_request(
     payments: Vec<(ScriptBuf, u64)>,
-    fee_rate: u64,
+    shape: Shape,
     change_index: u32,
     options: Options,
     send_all: bool,
@@ -51,12 +65,29 @@ fn spend_request(
 ) -> SpendRequest {
     SpendRequest {
         payments,
-        fee_rate,
+        fee_rate: shape.fee_rate,
         change_index,
         min_confirmations: options.min_confirmations,
         send_all,
         must_spend: must.to_vec(),
+        lock_height: shape.lock_height,
+        change_position: ChangePosition::Seed(shape.change_seed),
     }
+}
+
+/// The positions of the payments among the outputs of `plan`, in the order
+/// of the payments, and the position of the change (AS-61).
+fn output_positions(plan: &Plan) -> (Vec<u32>, Option<u32>) {
+    let mut payments = Vec::new();
+    let mut change = None;
+    for (at, out) in plan.outputs().iter().enumerate() {
+        let at = u32::try_from(at).unwrap_or(u32::MAX);
+        match out {
+            PlanOutput::Payment(_) => payments.push(at),
+            PlanOutput::Change(_) => change = Some(at),
+        }
+    }
+    (payments, change)
 }
 
 /// AS-55, AS-56: one transaction for `group`.
@@ -64,7 +95,7 @@ fn plan_refunds(
     wallet: &WalletDescription,
     pool: &[Coin],
     group: &[Refund],
-    fee_rate: u64,
+    shape: Shape,
     change_index: u32,
     options: Options,
     must: &[OutPoint],
@@ -73,7 +104,7 @@ fn plan_refunds(
     let mut held: Vec<(usize, String)> = Vec::new();
     if options.fee_payer == FeePayer::Shop {
         let payments = group.iter().map(|r| (r.script.clone(), r.sats)).collect();
-        let request = spend_request(payments, fee_rate, change_index, options, false, must);
+        let request = spend_request(payments, shape, change_index, options, false, must);
         let plan = plan(wallet, pool, &request).map_err(|e| e.to_string())?;
         return Ok(PlannedTx {
             plan,
@@ -117,7 +148,7 @@ fn plan_refunds(
                 }
                 continue 'again;
             }
-            let request = spend_request(payments, fee_rate, change_index, options, false, must);
+            let request = spend_request(payments, shape, change_index, options, false, must);
             let planned = plan(wallet, pool, &request).map_err(|e| e.to_string())?;
             let fee = planned.fee_sats();
             max_seen = max_seen.max(fee);
@@ -156,16 +187,28 @@ fn take_coins(pool: &mut Vec<Coin>, plan: &Plan) {
     pool.retain(|c| !used.contains(&c.outpoint));
 }
 
-fn halves(random: &[u8; 64]) -> ([u8; 32], [u8; 32]) {
+fn thirds(random: &[u8; 96]) -> ([u8; 32], [u8; 32], [u8; 32]) {
     let mut a = [0u8; 32];
     let mut b = [0u8; 32];
+    let mut c = [0u8; 32];
     for (dst, src) in a.iter_mut().zip(random.iter()) {
         *dst = *src;
     }
     for (dst, src) in b.iter_mut().zip(random.iter().skip(32)) {
         *dst = *src;
     }
-    (a, b)
+    for (dst, src) in c.iter_mut().zip(random.iter().skip(64)) {
+        *dst = *src;
+    }
+    (a, b, c)
+}
+
+/// AS-61: the seed of the change position of the transaction in place `k`
+/// of the session.
+fn seed_for(change_seed: &[u8; 32], k: u32) -> [u8; 32] {
+    let mut msg = change_seed.to_vec();
+    msg.extend_from_slice(&k.to_le_bytes());
+    tagged_hash(TAG_CHANGE_SEED, &msg)
 }
 
 impl Owner {
@@ -173,18 +216,23 @@ impl Owner {
     ///
     /// `coins` are the wallet's coins and `fee_rate` is in satoshis per 1000
     /// virtual bytes, both the caller's. Each transaction takes a change
-    /// index from `change_index` upwards. `random` is 64 bytes from the
-    /// caller's random source: the session ID and the health check's
-    /// number. The session and what it froze are stored before the request
-    /// bytes are returned. An entry that does not fit stays queued and is
-    /// reported in [`Built::skipped`].
+    /// index from `change_index` upwards. `lock_height` is the chain's tip
+    /// height as the caller knows it: every transaction's lock time (SP-37).
+    /// `random` is 96 bytes from the caller's random source: the session ID,
+    /// the health check's number and the seed of the change positions, each
+    /// transaction taking its own seed from it. The session and what it
+    /// froze are stored before the request bytes are returned. An entry
+    /// that does not fit stays queued and is reported in
+    /// [`Built::skipped`].
+    #[allow(clippy::too_many_arguments)]
     pub fn build_request<E>(
         &mut self,
         coins: &[Coin],
         fee_rate: u64,
         change_index: u32,
+        lock_height: u32,
         now: u64,
-        random: &[u8; 64],
+        random: &[u8; 96],
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<Built, OwnerError<E>> {
         if fee_rate == 0 {
@@ -194,7 +242,7 @@ impl Owner {
         if next.sessions.len() >= MAX_OPEN_SESSIONS {
             return Err(Refusal::Full("the list of open sessions").into());
         }
-        let (session_id, nonce) = halves(random);
+        let (session_id, nonce, change_seed) = thirds(random);
         if next.sessions.iter().any(|s| s.id == session_id) {
             return Err(Refusal::SessionIdUsed.into());
         }
@@ -262,8 +310,13 @@ impl Owner {
                 skip_all(BLOCKED.to_string(), &mut skipped);
                 continue;
             }
+            let shape = Shape {
+                fee_rate,
+                lock_height,
+                change_seed: seed_for(&change_seed, k),
+            };
             let planned =
-                match plan_refunds(&self.wallet, &pool, &group, fee_rate, index, options, &must) {
+                match plan_refunds(&self.wallet, &pool, &group, shape, index, options, &must) {
                     Ok(p) => p,
                     Err(why) => {
                         skip_all(why, &mut skipped);
@@ -285,12 +338,13 @@ impl Owner {
                     });
                 }
             }
+            let (places, change_position) = output_positions(&planned.plan);
             let mut labels: Vec<OutputLabel> = Vec::new();
             let mut ids: Vec<u32> = Vec::new();
             for (pos, gi) in planned.included.iter().enumerate() {
                 let Some(r) = group.get(*gi) else { continue };
                 labels.push(OutputLabel {
-                    output: u32::try_from(pos).unwrap_or(u32::MAX),
+                    output: places.get(pos).copied().unwrap_or(u32::MAX),
                     label: Label::Refund {
                         counter: r.sale.counter,
                         sale_index: r.sale.index,
@@ -306,12 +360,13 @@ impl Owner {
                 .iter()
                 .map(|p| (p.script.clone(), p.sats))
                 .collect();
-            if planned.plan.change().is_some() {
+            if let Some(at) = change_position {
                 labels.push(OutputLabel {
-                    output: u32::try_from(payments.len()).unwrap_or(u32::MAX),
+                    output: at,
                     label: Label::Change,
                 });
             }
+            labels.sort_by_key(|l| l.output);
             take_coins(&mut pool, &planned.plan);
             items.push((
                 Item::Spend { psbt, labels },
@@ -321,6 +376,7 @@ impl Owner {
                     cash_out: None,
                     payments,
                     change_index: index,
+                    change_position,
                 },
             ));
             txs += 1;
@@ -357,9 +413,14 @@ impl Owner {
                 skip(BLOCKED.to_string(), &mut skipped);
                 continue;
             }
+            let shape = Shape {
+                fee_rate,
+                lock_height,
+                change_seed: seed_for(&change_seed, k),
+            };
             let request = spend_request(
                 vec![(c.script.clone(), amount)],
-                fee_rate,
+                shape,
                 index,
                 options,
                 send_all,
@@ -379,8 +440,9 @@ impl Owner {
                     continue;
                 }
             };
+            let (places, change_position) = output_positions(&planned);
             let mut labels = vec![OutputLabel {
-                output: 0,
+                output: places.first().copied().unwrap_or(u32::MAX),
                 label: Label::CashOut {
                     destination: c.label.clone(),
                 },
@@ -390,12 +452,13 @@ impl Owner {
                 .iter()
                 .map(|p| (p.script.clone(), p.sats))
                 .collect();
-            if planned.change().is_some() {
+            if let Some(at) = change_position {
                 labels.push(OutputLabel {
-                    output: 1,
+                    output: at,
                     label: Label::Change,
                 });
             }
+            labels.sort_by_key(|l| l.output);
             take_coins(&mut pool, &planned);
             items.push((
                 Item::Spend { psbt, labels },
@@ -405,6 +468,7 @@ impl Owner {
                     cash_out: Some(c.id),
                     payments,
                     change_index: index,
+                    change_position,
                 },
             ));
             txs += 1;

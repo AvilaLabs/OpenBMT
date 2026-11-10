@@ -178,12 +178,12 @@ fn the_whole_story_pairing_settings_batch_refunds_and_a_cash_out() {
     // The finished transactions pay what was frozen, and nothing else.
     let txs = transactions(&rig.owner);
     assert_eq!(txs.len(), 3);
-    assert_eq!(txs[0].output[0].script_pubkey, external(1));
-    assert_eq!(txs[0].output[0].value.to_sat(), 10_000);
-    assert_eq!(txs[1].output[0].script_pubkey, external(3));
-    assert_eq!(txs[1].output[0].value.to_sat(), 12_000);
-    assert_eq!(txs[2].output[0].script_pubkey, external(9));
-    assert_eq!(txs[2].output[0].value.to_sat(), 20_000);
+    assert_eq!(pays(&txs[0])[0].script_pubkey, external(1));
+    assert_eq!(pays(&txs[0])[0].value.to_sat(), 10_000);
+    assert_eq!(pays(&txs[1])[0].script_pubkey, external(3));
+    assert_eq!(pays(&txs[1])[0].value.to_sat(), 12_000);
+    assert_eq!(pays(&txs[2])[0].script_pubkey, external(9));
+    assert_eq!(pays(&txs[2])[0].value.to_sat(), 20_000);
     assert!(txs
         .iter()
         .all(|t| t.output.len() == 2 && t.input.iter().all(|i| !i.witness.is_empty())));
@@ -203,7 +203,7 @@ fn the_whole_story_pairing_settings_batch_refunds_and_a_cash_out() {
     assert!(matches!(taken.outcomes[0].1, ItemOutcome::Delivered(_)));
     let txs = transactions(&rig.owner);
     assert_eq!(txs.len(), 1);
-    assert_eq!(txs[0].output[0].value.to_sat(), 11_000);
+    assert_eq!(pays(&txs[0])[0].value.to_sat(), 11_000);
     let txid = txs[0].compute_txid();
     ok(rig.owner.mark_confirmed(&txid, |x| rig.owner_store.put(x)));
     assert!(rig

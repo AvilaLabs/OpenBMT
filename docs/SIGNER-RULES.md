@@ -58,7 +58,9 @@ can change it; every change below is made on the Key app's own screen.
   outputs.
 - **SR-03.** The unsigned transaction has version 2. Its lock time is a block
   height (below 500,000,000). Every input's sequence number is 0xFFFFFFFD or
-  higher, so no input carries a relative time lock.
+  higher, so no input carries a relative time lock. Any block height is
+  accepted, the current tip's included, so a transaction with an
+  anti-fee-sniping lock time passes.
 - **SR-04.** No input appears twice.
 - **SR-05.** No input is already final (no final script or final witness
   field).
@@ -118,6 +120,8 @@ Every output is exactly one of three kinds.
   whose hints name the change keychain but whose script is not the derived
   one is not change. It is an "other destination". The screen shows "change
   back to your wallet" only for an output that passed this rule.
+  Change is proved by its derivation, never by its place: it may be first,
+  in the middle or last.
 - **SR-21. Allowlisted destination.** The output's script equals an allowlist
   entry that is active at the current time (SR-31).
 - **SR-22. Other destination.** Any other output. Its script is one of:

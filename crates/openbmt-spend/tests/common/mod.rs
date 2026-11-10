@@ -137,6 +137,8 @@ pub fn request(payments: Vec<(ScriptBuf, u64)>, rate: u64) -> openbmt_spend::Spe
         min_confirmations: 1,
         send_all: false,
         must_spend: Vec::new(),
+        lock_height: 0,
+        change_position: openbmt_spend::ChangePosition::Last,
     }
 }
 
@@ -339,7 +341,12 @@ pub struct Run {
 }
 
 pub fn run(coins: &[Coin], payments: Vec<(ScriptBuf, u64)>, rate: u64) -> Run {
-    let plan = openbmt_spend::plan(wallet(), coins, &request(payments, rate)).unwrap();
+    run_request(coins, &request(payments, rate))
+}
+
+/// [`run`] for a request the test has shaped.
+pub fn run_request(coins: &[Coin], request: &openbmt_spend::SpendRequest) -> Run {
+    let plan = openbmt_spend::plan(wallet(), coins, request).unwrap();
     let base = plan.to_psbt(wallet()).unwrap();
     let by1 = sign_with_signer(&base, 0);
     let by2 = sign_with_signer(&base, 1);

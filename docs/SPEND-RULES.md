@@ -21,7 +21,7 @@ is what comes around it:
 
 It has no network, no clock, no storage and no randomness. The same coins
 and the same request always give the same plan, byte for byte. The caller
-supplies the coins, the fee rate and the change index.
+supplies the coins, the fee rate, the change index and the lock height.
 
 ## 1. Coins
 
@@ -68,11 +68,11 @@ out silently.
 
 ## 3. Outputs
 
-- **SP-20.** The outputs are the payments in the order given, then the
-  change output if there is one. The order is not sorted (BIP 69 is not
-  used). The signer's rules do not fix an order, and a change output that
-  is always last is easy to pick out on the chain; that cost is accepted
-  here and is an open point.
+- **SP-20.** The outputs are the payments in the order given, with the
+  change output, if there is one, among them at the place SP-26 gives. The
+  payments keep their order relative to each other. The order is not sorted
+  (BIP 69 is not used). The signer's rules do not fix an order: it proves
+  change by its derivation (SR-20), not by its place.
 - **SP-21.** Change goes to the wallet's own change script at
   `change_index`, and its amount is the coins' total minus the payments
   minus the fee. The caller supplies the index; the signer accepts it only
@@ -98,6 +98,22 @@ out silently.
   cannot be told from a payment to someone else.
 - **SP-25.** At least one payment is required. There are at most 100
   outputs in total (SR-02), change included, and at most 1,000 inputs.
+- **SP-26.** The request says where the change goes: last, or at a place
+  taken from a seed. With a seed, the place is the first 8 bytes, read as
+  a u64 `x` in little-endian order, of
+  `tagged_hash("OpenBMT/spend-change-position/v1", seed || inputs)`, where
+  `inputs` is the outpoints of the inputs in transaction order, each as
+  the 32 bytes of its transaction ID and the output index as 4 bytes in
+  little-endian order, and `tagged_hash` is the BIP 340 tagged hash. The
+  place is `(x * n) >> 64` computed in 128 bits, with `n` the number of
+  payments plus one, so that every place from 0 to the number of payments
+  is equally likely up to 2^-64, and the same request gives the same plan.
+  Nothing else depends on the place: the coins, the fee, the amounts and
+  the size are the ones that last would give. With no change output there
+  is no place. The plan says where the change is and shows its outputs in
+  the order of the transaction. A caller passes a seed that is random and
+  kept secret from anyone who might guess the place; a seed that is
+  public gives a place that is public.
 
 ## 4. Size and fee
 
@@ -126,14 +142,24 @@ out silently.
 - **SP-34.** Every amount is added with checked arithmetic. Each coin and
   each output is at most 21,000,000 BTC. The total in always equals the
   total out plus the fee.
-- **SP-35.** The transaction has version 2, lock time 0 (a block height, as
-  SR-03 wants) and sequence 0xFFFFFFFD on every input (RBF signalling, no
-  relative time lock). The signer's rules ask for no anti-fee-sniping lock
-  time, and the library has no clock or chain height to set one, so the lock
-  time is 0.
+- **SP-35.** The transaction has version 2, the lock time of SP-37 and
+  sequence 0xFFFFFFFD on every input (RBF signalling, no relative time
+  lock, as SR-03 wants).
 - **SP-36.** The plan exposes what a person must be shown: every payment,
   the change, the dropped change if any, the fee in satoshis and as a rate,
   the virtual size and the totals in and out.
+- **SP-37.** The request carries a lock height, and the transaction's lock
+  time is that block height. 0 is no lock time. A value of 500,000,000 or
+  more is a time, not a height, and the plan is an error that names this
+  rule. The library has no clock and no chain, so the caller passes the
+  height. A caller passes the current tip height, as Bitcoin Core's wallet
+  does: then the transaction cannot be mined into a block that replaces the
+  tip (fee sniping), and it looks like the transactions of the most common
+  wallets. Now and then a caller may pass a height up to 100 below the tip,
+  as Core does. A height above the tip makes the transaction non-final, and
+  nodes refuse it, until the chain reaches it. Every input's sequence,
+  0xFFFFFFFD, is below 0xFFFFFFFF, so the lock time takes effect; the
+  replaceability signal is as before.
 
 ## 5. The PSBT
 
@@ -193,14 +219,16 @@ being spent.
 - **SP-62.** Before the transaction is returned it is checked from scratch,
   from the finished transaction and not from the working variables: its
   transaction ID equals that of the unsigned transaction; its outputs,
-  version, lock time and sequences equal those of the file; each input's
+  version, lock time and sequences equal those of the file; the lock time
+  is a block height, any height, and a time is refused (SP-37); each input's
   witness has the shape of SP-60 and its two signatures verify against the
   BIP 143 hash, in the way OP_CHECKMULTISIG matches them; the fee equals
   the inputs minus the outputs; no amount is out of range.
 - **SP-63.** The weight of the finished transaction is at most 400,000
   units.
 - **SP-64.** `finalize_plan` also holds the file to the plan: the unsigned
-  transaction is the plan's, and the fee is the plan's fee.
+  transaction is the plan's, with the same lock time and the same order of
+  outputs, and the fee is the plan's fee.
 
 ## 8. All inputs are hostile
 
@@ -229,10 +257,15 @@ being spent.
   own, made with the `bitcoin` crate's hashing and secp256k1. There is no
   consensus library here. Bitcoin Core's `testmempoolaccept` in
   `scripts/spend-e2e-core.sh` is the independent check.
-- **Privacy is not solved.** Change is always last, and the lock time is
-  always 0, so the transactions have a recognizable shape. Oldest-first
-  choice can link many old receipts in one transaction. A caller that wants
-  fewer links spends fewer coins by passing only some of them.
+- **Privacy is only partly addressed.** The lock time is a block height
+  that the caller sets to the tip, as common wallets do (SP-37), and the
+  change can sit at any place among the outputs (SP-26), so neither marks
+  these transactions. What remains: oldest-first choice (SP-11) can link
+  many old receipts in one transaction, and a caller that wants fewer links
+  spends fewer coins by passing only some of them; the change is an address
+  of the wallet's own script type (P2WSH), which stands out when the payees
+  use other types; and the amounts are not disguised, so a change amount
+  that is not round beside a round payment points to the change.
 - **No replacement or fee bump.** A new plan over the same coins is a new
   transaction; the signer joins it with the old one in its totals (SR-33).
 - **No Taproot, no other wallet shape.** One script shape (P2WSH 2-of-3

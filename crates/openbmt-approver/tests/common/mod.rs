@@ -244,6 +244,8 @@ pub fn spend_request(
         min_confirmations: 1,
         send_all: false,
         must_spend: Vec::new(),
+        lock_height: 0,
+        change_position: openbmt_spend::ChangePosition::Last,
     }
 }
 
@@ -252,6 +254,28 @@ pub fn psbt_bytes(coins: &[Coin], payments: Vec<(ScriptBuf, u64)>, change_index:
     let plan =
         openbmt_spend::plan(wallet(), coins, &spend_request(payments, change_index)).unwrap();
     plan.to_psbt(wallet()).unwrap().serialize()
+}
+
+/// The PSBT bytes of a plan with the change at `position` among the outputs
+/// (AS-24: the line comes from the signer's review, whatever the place).
+pub fn psbt_bytes_with_change_at(
+    coins: &[Coin],
+    payments: Vec<(ScriptBuf, u64)>,
+    change_index: u32,
+    position: usize,
+) -> Vec<u8> {
+    // A seed that puts the change at `position` is found by search; the place
+    // depends on the seed and the inputs only.
+    for n in 0..=u8::MAX {
+        let mut request = spend_request(payments.clone(), change_index);
+        request.lock_height = 850_000;
+        request.change_position = openbmt_spend::ChangePosition::Seed([n; 32]);
+        let plan = openbmt_spend::plan(wallet(), coins, &request).unwrap();
+        if plan.change_position() == Some(position) {
+            return plan.to_psbt(wallet()).unwrap().serialize();
+        }
+    }
+    panic!("no seed puts the change at {position}");
 }
 
 pub fn refund_label(output: u32, name: &str) -> OutputLabel {

@@ -38,7 +38,8 @@ impl Plan {
     ///
     /// Each input carries the whole previous transaction, the previous
     /// output, the witness script and the key-path hints of the three keys.
-    /// The change output (and the one output of a consolidation) carries the
+    /// The change output (at the plan's change position) and the one output of
+    /// a consolidation carry the
     /// witness script and the hints, so that the signer can prove it is the
     /// wallet's. The coins are checked against `wallet` again.
     pub fn to_psbt(&self, wallet: &WalletDescription) -> Result<Psbt, PsbtError> {
@@ -63,12 +64,14 @@ impl Plan {
             entry.bip32_derivation =
                 key_hints(wallet, coin.chain, coin.index).ok_or(PsbtError::Derivation)?;
         }
-        // The change output, when there is one, is last; the output of a
-        // consolidation is a payment to the change script.
-        let last = self.tx.output.len().saturating_sub(1);
+        // The change output sits at the plan's change position; the output
+        // of a consolidation is a payment to the change script.
+        let mut payments = self.payments.iter();
         for (position, entry) in psbt.outputs.iter_mut().enumerate() {
-            let index = match (&self.change, self.payments.get(position)) {
-                (Some(change), _) if position == last => change.index,
+            let at_change = self.change_position == Some(position);
+            let payment = if at_change { None } else { payments.next() };
+            let index = match (&self.change, payment) {
+                (Some(change), _) if at_change => change.index,
                 (_, Some(payment)) if payment.to_own_change => self.change_index,
                 _ => continue,
             };

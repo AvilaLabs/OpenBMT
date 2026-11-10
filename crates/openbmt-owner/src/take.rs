@@ -16,7 +16,7 @@ use openbmt_spend::{combine, finalize};
 
 use crate::codec;
 use crate::error::{OwnerError, Refusal};
-use crate::state::{Frozen, Owner, State};
+use crate::state::{outputs_fit, Frozen, Owner, State};
 use crate::types::{Deliverable, Delivery, ItemOutcome, Stage, Taken};
 use crate::{MAX_OUTBOX, MAX_SNAPSHOT_BYTES};
 
@@ -58,30 +58,29 @@ fn entries(f: &Frozen) -> Vec<u32> {
     }
 }
 
-/// AS-67: the outputs are exactly the frozen payments, in order, and then
-/// at most the change to the index that was frozen.
+/// AS-67: the outputs are exactly the frozen payments, in order, and the
+/// change, if there was one, at the position that was frozen and to the
+/// index that was frozen.
 fn outputs_are_frozen(
     owner: &Owner,
     tx: &Transaction,
     payments: &[(ScriptBuf, u64)],
     change_index: u32,
+    change_position: Option<u32>,
 ) -> bool {
-    let n = payments.len();
-    let paid = tx
-        .output
-        .iter()
-        .take(n)
-        .zip(payments)
-        .all(|(out, (s, v))| out.script_pubkey == *s && out.value.to_sat() == *v);
-    let change_ok = match tx.output.len().checked_sub(n) {
-        Some(0) => true,
-        Some(1) => match (tx.output.last(), owner.wallet.change_script(change_index)) {
-            (Some(out), Ok(script)) => out.script_pubkey == script,
-            _ => false,
-        },
-        _ => false,
+    if !outputs_fit(&tx.output, payments, change_position) {
+        return false;
+    }
+    let Some(position) = change_position else {
+        return true;
     };
-    paid && change_ok && tx.output.len() >= n
+    let at = usize::try_from(position)
+        .ok()
+        .and_then(|p| tx.output.get(p));
+    match (at, owner.wallet.change_script(change_index)) {
+        (Some(out), Ok(script)) => out.script_pubkey == script,
+        _ => false,
+    }
 }
 
 impl Owner {
@@ -99,6 +98,7 @@ impl Owner {
             txid,
             payments,
             change_index,
+            change_position,
             ..
         } = frozen
         else {
@@ -115,7 +115,9 @@ impl Owner {
             .map_err(|e| format!("AS-62: the Key app's file is not a PSBT: {e}"))?;
         let both = combine(&base, &[other]).map_err(|e| e.to_string())?;
         let tx = finalize(&self.wallet, &both).map_err(|e| e.to_string())?;
-        if tx.compute_txid() != *txid || !outputs_are_frozen(self, &tx, payments, *change_index) {
+        if tx.compute_txid() != *txid
+            || !outputs_are_frozen(self, &tx, payments, *change_index, *change_position)
+        {
             return Err(
                 "AS-67: the finished transaction is not the one that was frozen".to_string(),
             );
