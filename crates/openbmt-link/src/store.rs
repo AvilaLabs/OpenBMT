@@ -64,7 +64,9 @@ pub trait MailStore {
     /// go.
     fn set_members(&mut self, members: &[DeviceId]) -> Result<(), Self::Error>;
 
-    /// Make an empty mailbox. Does nothing if there is one.
+    /// Make an empty mailbox. The relay asks only when it holds none for
+    /// that reader, so anything a store still has under that name is left
+    /// over from a removed member and is emptied.
     fn create(&mut self, reader: &DeviceId) -> Result<(), Self::Error>;
 
     /// Record a message put under `id`.
@@ -147,7 +149,7 @@ impl MailStore for MemoryStore {
         if self.fail_writes {
             return Err(MemoryFailure);
         }
-        self.boxes.entry(*reader).or_default();
+        self.boxes.insert(*reader, Vec::new());
         Ok(())
     }
 
@@ -391,11 +393,7 @@ impl MailStore for DirStore {
     }
 
     fn create(&mut self, reader: &DeviceId) -> io::Result<()> {
-        let path = self.path(reader);
-        if path.exists() {
-            return Ok(());
-        }
-        File::create(path)?.sync_all()?;
+        File::create(self.path(reader))?.sync_all()?;
         self.sync_dir()?;
         self.sizes.insert(*reader, 0);
         Ok(())
@@ -464,10 +462,14 @@ impl MailStore for DirStore {
                 continue;
             };
             if !members.contains(&reader) {
-                fs::remove_file(&path)?;
+                // The list is stored, so the change has happened. A file
+                // that will not go is removed at the next start (`load`)
+                // and emptied if the device is added again (`create`).
+                let _ = fs::remove_file(&path);
                 self.sizes.remove(&reader);
             }
         }
-        self.sync_dir()
+        let _ = self.sync_dir();
+        Ok(())
     }
 }

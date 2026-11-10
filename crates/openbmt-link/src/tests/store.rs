@@ -161,3 +161,31 @@ fn lk_41_replay_applies_the_limits_the_same_way() {
     assert_eq!(ids(again.fetch(&counter(), 0)), vec![3, 4, 5]);
     let _ = Event::Floor(0);
 }
+
+#[test]
+fn lk_41_a_file_left_from_a_removed_member_is_emptied_when_the_member_returns() {
+    let dir = TempDir::new("leftover");
+    let mut rig = dir_rig(&dir);
+    assert_eq!(rig.make(&counter()), Response::Made);
+    assert_eq!(rig.put(msg(1)), Response::Stored { id: 1 });
+    let old = fs::read(log_path(&dir)).unwrap();
+    assert!(!old.is_empty());
+    // The counter leaves, and its file comes back as if it had not been
+    // removed.
+    let members: Vec<_> = rig.relay.members().copied().collect();
+    let without: Vec<_> = members
+        .iter()
+        .copied()
+        .filter(|m| *m != counter().device_id())
+        .collect();
+    rig.relay.set_members(&without).unwrap();
+    assert!(!log_path(&dir).exists());
+    fs::write(log_path(&dir), &old).unwrap();
+    // It returns: the mailbox is empty in memory and on disk.
+    rig.relay.set_members(&members).unwrap();
+    assert_eq!(rig.make(&counter()), Response::Made);
+    assert_eq!(fs::metadata(log_path(&dir)).unwrap().len(), 0);
+    drop(rig);
+    let mut again = dir_rig(&dir);
+    assert!(items(again.fetch(&counter(), 0)).is_empty());
+}
