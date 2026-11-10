@@ -370,7 +370,7 @@ fn state_of(fact: &SaleFact) -> NoticeState {
 /// after an earlier paid event replaces what was inferred, PS-09). Folding
 /// the notices again with [`facts_from_notices`] gives the facts that
 /// [`crate::facts_from_chain`] gives for the same events.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NoticeMaker {
     fold: FactFold,
     sent: BTreeMap<u32, (NoticeState, Option<u64>)>,

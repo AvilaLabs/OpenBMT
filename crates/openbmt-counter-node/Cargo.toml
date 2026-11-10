@@ -16,3 +16,5 @@ openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-counter = { path = "../openbmt-counter" }
 openbmt-courier = { path = "../openbmt-courier" }
 openbmt-link = { path = "../openbmt-link" }
+# For the paid notices a counter sends to a Box (BX-40).
+openbmt-pos = { path = "../openbmt-pos" }

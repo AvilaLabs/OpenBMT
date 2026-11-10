@@ -130,7 +130,7 @@ impl fmt::Display for FactsError {
 impl std::error::Error for FactsError {}
 
 /// A sale being folded.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Folding {
     /// The fact as inferred from the older events (PS-06).
     fact: SaleFact,
@@ -157,7 +157,7 @@ impl Folding {
 /// The counter's events folded into sale facts one at a time (PS-06,
 /// PS-09). [`facts_from_chain`] runs one over a verified chain; the counter
 /// node runs one to know when a sale changes state (BX-40).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FactFold {
     counter: DeviceId,
     sales: BTreeMap<u32, Folding>,

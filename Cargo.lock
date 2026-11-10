@@ -390,6 +390,7 @@ dependencies = [
  "openbmt-courier",
  "openbmt-link",
  "openbmt-net-io",
+ "openbmt-pos",
  "openbmt-watch",
 ]
 

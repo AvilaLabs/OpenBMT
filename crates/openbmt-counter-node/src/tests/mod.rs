@@ -6,3 +6,4 @@ mod heartbeat;
 mod kit;
 mod link;
 mod node;
+mod notices;

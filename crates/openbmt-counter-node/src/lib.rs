@@ -13,6 +13,8 @@
 //! 4. [`link`]: [`CounterLink`], which carries the owner's heartbeat, commands
 //!    and batches to the node and the counter's check-ins and records to the
 //!    owner, through a relay (`docs/LINK-RULES.md` section 6).
+//! 5. [`notices`]: [`NoticeOutbox`], the paid notices the link sends to a
+//!    Box (`docs/BOX-RULES.md` section 4).
 //!
 //! The rules the node follows are `docs/COUNTER-RULES.md` and, for what the
 //! driver does, `docs/NETWORK-RULES.md` (NR-44, NR-53, NR-75 above all). The
@@ -38,6 +40,7 @@ pub mod chainview;
 pub mod dirstore;
 pub mod link;
 pub mod node;
+pub mod notices;
 
 #[cfg(test)]
 mod tests;
@@ -49,3 +52,4 @@ pub use node::{
     DriverPort, HealthFn, HeartbeatNotTaken, HeartbeatTaken, Launch, Node, NodeConfig, StartError,
     MAX_EVENTS_PER_PUMP, NOTE_LOG, TX_CACHE,
 };
+pub use notices::{NoticeOutbox, NoticeStoreError};
