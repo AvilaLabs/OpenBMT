@@ -603,6 +603,32 @@ impl<P: OwnerPort> OwnerNode<P> {
         &self.owner
     }
 
+    /// The refund depth the node was started with.
+    pub fn refund_depth(&self) -> u32 {
+        self.refund_depth
+    }
+
+    /// OC-14, OC-15: apply the refund requests that arrived on the link to
+    /// the owner's queue, with the sales' facts taken from this node's own
+    /// coin view at its own tip, never from the counters' records. A request
+    /// whose facts must wait for the view is tried again on the next call.
+    /// Refused while a committed take needs key 1 recovery.
+    pub fn run_refund_intake<R: openbmt_courier::Post>(
+        &mut self,
+        intake: &mut crate::refunds::RefundIntake,
+        link: &crate::link::OwnerLink<R>,
+    ) -> Result<Vec<(DeviceId, crate::refunds::Applied)>, NodeError> {
+        self.ready_for_queue_write()?;
+        let evidence = crate::refunds::Evidence {
+            view: &self.view,
+            tip: self.watcher.chain().tip_height(),
+            refund_depth: self.refund_depth,
+        };
+        let write = self.queue_writer();
+        let mut persist = |bytes: &[u8]| write(bytes);
+        Ok(intake.run(&mut self.owner, link, &evidence, &mut persist))
+    }
+
     /// Whether a committed take still needs to be copied into the owner's
     /// key 1 state store. Call [`OwnerNode::recover_key1`] before queue changes or another
     /// response is taken.

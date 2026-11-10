@@ -46,6 +46,7 @@
 
 pub mod coins;
 pub mod copy;
+pub mod facts;
 pub mod link;
 pub mod node;
 pub mod refunds;
@@ -57,6 +58,7 @@ pub mod watcher;
 mod tests;
 
 pub use copy::{CheckInTaken, CopyError, CounterCopy, Stop, Taken};
+pub use facts::{verified_facts, FactsRefused};
 pub use link::{
     Alert, BoxReport, CounterState, OwnerLink, OwnerLinkConfig, OwnerLinkError, MAX_BOX_REPORTS,
 };
@@ -65,6 +67,6 @@ pub use node::{
     NO_TOR, QUEUE_FILE, TAKE_JOURNAL_FILE,
 };
 pub use refunds::{
-    Applied, CashRefundSeen, IntakeError, NoteKind, RefundIntake, RefundNote, Stopped,
+    Applied, CashRefundSeen, Evidence, IntakeError, NoteKind, RefundIntake, RefundNote, Stopped,
 };
 pub use watcher::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE, NOTE_LOG};

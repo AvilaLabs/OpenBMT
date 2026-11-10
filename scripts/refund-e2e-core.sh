@@ -17,7 +17,10 @@
 # between the devices: the record, and the owner's copy of the chain, go
 # through the relay's TCP port. The owner example applies the new refund
 # requests in its verified copy to an owner's queue (`RefundIntake`) in
-# memory; the script reads that queue with the `refunds` command.
+# memory; the script reads that queue with the `refunds` command. The facts
+# of a sale, what it received and whether that reached the refund depth, come
+# from the owner's own coin view and the address batch the owner signed for
+# the counter, never from the counter's records (OC-10 to OC-15).
 #
 # THE HEALTH RULES ARE NOT CHECKED HERE. Both examples are started with
 # `--regtest-single-peer` (see `scripts/link-e2e-core.sh`). Nothing is paid
@@ -36,6 +39,11 @@
 #   5. A second request for the whole amount received is refused at the
 #      counter, writes no record, and the owner's queue and copy do not
 #      change.
+#   6. A second sale is paid and refunded in part, and the amount the owner
+#      holds for it, taken from its own view, equals what Core shows for the
+#      sale's address: `listreceivedbyaddress` of a watch-only wallet that
+#      imports the address, and `gettransaction` of the payment in the
+#      paying wallet.
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin (put first on
 # PATH; set CORE_BIN to use another), jq, and cargo unless the four binaries
@@ -458,6 +466,63 @@ else
   bad 5 "the second request was not refused by CR-67: $REFUSAL"
 fi
 
+# ---- 6 ---------------------------------------------------------------------------
+
+say "6. The owner's facts come from its own view and equal what Core shows"
+SALE2=
+SADDR2=
+SSATS2=
+TXID2=
+S6_OK=
+if open_sale; then
+  SALE2=$SALE; SADDR2=$SADDR; SSATS2=$SSATS
+  pay_sale "$SADDR2" "$SSATS2"
+  TXID2=$TXID
+  cli_a generatetoaddress 6 "$MINE" >/dev/null
+  HEIGHT=$((HEIGHT + 6))
+  if await_tip c "$HEIGHT" 90 && await_tip o "$HEIGHT" 90 && await_state "$SALE2" Final 90; then S6_OK=yes; fi
+fi
+note "second sale $SALE2 of $SSATS2 sats to ${SADDR2:-none}, final: ${S6_OK:-no}"
+REFUND2=1000
+xcmd c "refund ${SALE2:-0} $REFUND2 $(cli_a -rpcwallet=miner getnewaddress)"
+note "$(grep '^refund ' <<<"$LAST")"
+QUEUED2=
+for _ in $(seq 1 60); do
+  xcmd o refunds || break
+  if grep -q '^refunds queued=2 ' <<<"$LAST"; then QUEUED2=yes; break; fi
+  sleep 1
+done
+RLINE2=$(grep "^refund sale=${SALE2:-x} " <<<"$LAST" || true)
+note "$RLINE2"
+xcmd o "facts ${SALE2:-0}"
+FLINE=$(grep '^facts ' <<<"$LAST" || true)
+note "$FLINE"
+# Core: a watch-only wallet that imports the sale's address shows what that
+# address received; the paying wallet shows the payment's output.
+CORE_RECV=
+CORE_PAID=
+if [ -n "$SADDR2" ]; then
+  DESC=$(cli_a getdescriptorinfo "addr($SADDR2)" | jq -r .descriptor)
+  cli_a -named createwallet wallet_name=watch disable_private_keys=true blank=true >/dev/null
+  cli_a -rpcwallet=watch importdescriptors "[{\"desc\":\"$DESC\",\"timestamp\":0}]" >/dev/null
+  CORE_RECV=$(cli_a -rpcwallet=watch -named listreceivedbyaddress minconf=1 include_empty=false \
+    address_filter="$SADDR2" | jq -r '[.[] | (.amount * 100000000 | round)] | add')
+  CORE_PAID=$(cli_a -rpcwallet=miner gettransaction "$TXID2" | jq -r --arg a "$SADDR2" \
+    '[.details[] | select(.address == $a and .category == "send") | (-.amount * 100000000 | round)] | add')
+fi
+note "Core: listreceivedbyaddress $CORE_RECV sats, gettransaction $CORE_PAID sats, the counter opened it for $SSATS2"
+HELD=$(kv "$FLINE" held_received)
+SEEN=$(kv "$FLINE" view_received)
+if [ -n "$S6_OK" ] && [ -n "$QUEUED2" ] && [ "$(kv "$RLINE2" sats)" = "$REFUND2" ] &&
+  [ "$(kv "$RLINE2" stage)" = Queued ] && [ -n "$CORE_RECV" ] &&
+  [ "$HELD" = "$CORE_RECV" ] && [ "$SEEN" = "$CORE_RECV" ] && [ "$CORE_PAID" = "$CORE_RECV" ] &&
+  [ "$CORE_RECV" = "$SSATS2" ] && [ "$(kv "$FLINE" held_deep)" = true ] &&
+  [ "$(kv "$FLINE" view_deep)" = true ] && [ "$(kv "$FLINE" receipts)" = 1 ]; then
+  pass 6 "sale $SALE2: the owner holds $HELD sats from its own view, one payment, at the refund depth; Core shows $CORE_RECV sats for the address; a refund of $REFUND2 sats is queued"
+else
+  bad 6 "the owner's facts do not match Core (held ${HELD:-none}, view ${SEEN:-none}, Core $CORE_RECV / $CORE_PAID, opened $SSATS2): ${FLINE:-no line}"
+fi
+
 stop_ex c || note "the counter example did not stop cleanly"
 stop_ex o || note "the owner example did not stop cleanly"
 
@@ -466,7 +531,7 @@ stop_ex o || note "the owner example did not stop cleanly"
 say "Result"
 failed=0
 notrun=0
-for n in 1 2 3 4 5; do
+for n in 1 2 3 4 5 6; do
   printf '%s  step %s\n' "${RESULT[$n]:-FAIL}" "$n"
   case "${RESULT[$n]:-FAIL}" in
     PASS) ;;

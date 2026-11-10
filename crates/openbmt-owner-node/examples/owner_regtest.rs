@@ -24,10 +24,16 @@
 //! of the link (LK-53) are kept in the data directory: the start is a first
 //! start if neither is there, and any other start needs both.
 //!
-//! The refund requests in the counter's records are applied to an owner's
+//! The refund requests in the counter's records are applied to the owner's
 //! queue (`RefundIntake`, `docs/COUNTER-RULES.md` CR-60 to CR-74) after each
-//! link step. The queue is kept in memory, over the same fixed test wallet
-//! as the counter's; the intake's own state is kept in the data directory.
+//! link step. The queue is the owner node's (`OwnerNode`), over the same
+//! fixed test wallet as the counter's; the intake's own state is kept in the
+//! data directory. The facts of a sale, what it received and whether that
+//! reached the refund depth, come from the node's own coin view
+//! (`docs/OWNER-COINS-RULES.md`, OC-14, OC-15), never from the counter's
+//! records. At its first start the owner signs one batch of 20 addresses
+//! for the counter (OC-10), which is what makes the sale addresses the
+//! owner's; the node then watches them.
 //!
 //! **Test only, never use.** The identities and the wallet keys are made from
 //! fixed bytes that anyone can read here, the same ones as in
@@ -52,6 +58,7 @@
 //! - `linkstate`
 //! - `copies`
 //! - `refunds`
+//! - `facts <sale>`
 //! - `quit`
 //!
 //! Every command ends with a line `done <n>`.
@@ -75,6 +82,11 @@
 //!   `refunds queued=<n> notes=<n>`
 //! - `refundnote seq=<n> number=<n> sale=<i> kind=<Kind> text=<text>`, for
 //!   each line of the intake's list (`refunds`)
+//! - `facts sale=<i> held_received=<n> held_deep=<bool> view_received=<n>
+//!   view_deep=<bool> receipts=<n>` (`facts`): what the owner's queue holds
+//!   for the sale, and what the node's own view shows now, with the number
+//!   of payments to the sale's address that the view recorded; or
+//!   `facts sale=<i> refused <why>` when the view cannot say
 //! - `alert <text>`, once for each alert as it is raised
 //! - `note <text>`
 //! - `stopped`
@@ -92,7 +104,7 @@ use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::{Address, Network};
-use openbmt_core::batch::BatchPolicy;
+use openbmt_core::batch::{BatchBuilder, BatchPolicy};
 use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::records::DeviceList;
@@ -100,8 +112,11 @@ use openbmt_core::wallet::{KeySlot, WalletDescription};
 use openbmt_courier::{Courier, CourierConfig, FirstStart};
 use openbmt_link::{ClientConfig, Role, Route};
 use openbmt_net_io::DriverConfig;
-use openbmt_owner::{Options, Owner};
-use openbmt_owner_node::{OwnerConfig, OwnerLink, OwnerLinkConfig, OwnerWatcher, RefundIntake};
+use openbmt_owner::{Options, SaleKey};
+use openbmt_owner_node::{
+    verified_facts, OwnerConfig, OwnerLink, OwnerLinkConfig, OwnerNode, OwnerParts, OwnerWatcher,
+    RefundIntake,
+};
 use openbmt_watch::{check_health, network_group, HeaderChain, Health, HealthInput};
 
 const USAGE: &str = "usage: owner_regtest <data dir> <node address> [--regtest-single-peer] \
@@ -175,24 +190,38 @@ fn test_slot(index: u8, seed: &[u8; 32]) -> Result<KeySlot, String> {
     })
 }
 
-/// The owner's queue over the counter example's wallet.
-fn start_queue() -> Result<Owner, String> {
+/// The wallet of the counter example.
+fn test_wallet() -> Result<WalletDescription, String> {
     let slots = [
         test_slot(1, &KEY_SEEDS[0])?,
         test_slot(2, &KEY_SEEDS[1])?,
         test_slot(3, &KEY_SEEDS[2])?,
     ];
-    let wallet = WalletDescription::new(Network::Regtest, slots).map_err(|e| e.to_string())?;
-    Owner::new(
-        &[0x21; 32],
-        wallet,
-        identity(&OWNER_SECRET)?.device_id(),
-        BatchPolicy {
-            min_count: ADDRESSES,
-        },
-        Options::default(),
-    )
-    .map_err(|e| format!("{e:?}"))
+    WalletDescription::new(Network::Regtest, slots).map_err(|e| e.to_string())
+}
+
+/// The refund depth of the owner, as the counter example's final state.
+const REFUND_DEPTH: u32 = 6;
+
+/// OC-10: sign the one batch of addresses for the counter, if the owner has
+/// not done it yet, and tell the node to watch them.
+fn issue_addresses(node: &mut OwnerNode, wallet: &WalletDescription) -> Result<(), String> {
+    let counter = identity(&COUNTER_SECRET)?.device_id();
+    if node.owner().counter_of(0) == Some(counter) {
+        return Ok(());
+    }
+    let batch = BatchBuilder::new(BatchPolicy {
+        min_count: ADDRESSES,
+    })
+    .derive(wallet, counter, 0, ADDRESSES)
+    .map_err(|e| e.to_string())?;
+    let write = node.queue_writer();
+    node.owner_mut()
+        .map_err(|e| e.to_string())?
+        .queue_batch(batch, &write)
+        .map_err(|e| e.to_string())?;
+    node.refresh_marks();
+    Ok(())
 }
 
 /// The link to the counter through the relay. The counter is the fixed test
@@ -240,8 +269,8 @@ fn start_link(
     .map_err(|e| e.to_string())
 }
 
-fn show_notes(watcher: &mut OwnerWatcher) {
-    for note in watcher.take_notes() {
+fn show_notes(node: &mut OwnerNode) {
+    for note in node.watcher_mut().take_notes() {
         say(format!("note {note}"));
     }
 }
@@ -269,9 +298,8 @@ fn variant(
 }
 
 fn command(
-    watcher: &mut OwnerWatcher,
+    node: &mut OwnerNode,
     link: Option<&OwnerLink>,
-    queue: &Owner,
     intake: &RefundIntake,
     line: &str,
     seen: &Arc<Mutex<Seen>>,
@@ -281,11 +309,19 @@ fn command(
     match words.next() {
         Some("heartbeat") => {
             let made = match words.next().unwrap_or("owner") {
-                "owner" => watcher.heartbeat(counter),
-                "approver" => Some(variant(watcher, counter, &identity(&APPROVER_SECRET)?)?),
+                "owner" => node.watcher_mut().heartbeat(counter),
+                "approver" => Some(variant(
+                    node.watcher_mut(),
+                    counter,
+                    &identity(&APPROVER_SECRET)?,
+                )?),
                 "other-counter" => {
                     let other = identity(&OTHER_COUNTER_SECRET)?.device_id();
-                    Some(variant(watcher, other, &identity(&OWNER_SECRET)?)?)
+                    Some(variant(
+                        node.watcher_mut(),
+                        other,
+                        &identity(&OWNER_SECRET)?,
+                    )?)
                 }
                 other => return Err(format!("unknown kind of heartbeat: {other}")),
             };
@@ -293,7 +329,7 @@ fn command(
                 Some(bytes) => say(format!("heartbeat {}", hex(&bytes))),
                 None => say("heartbeat none it could not be made (see the notes)"),
             }
-            show_notes(watcher);
+            show_notes(node);
         }
         Some("pump") => {
             let secs: f64 = words
@@ -301,12 +337,12 @@ fn command(
                 .ok_or("the seconds are missing")?
                 .parse()
                 .map_err(|_| "the seconds are not a number".to_string())?;
-            watcher.pump(Duration::from_secs_f64(secs.clamp(0.0, 600.0)));
-            show_notes(watcher);
+            node.pump(Duration::from_secs_f64(secs.clamp(0.0, 600.0)));
+            show_notes(node);
         }
         Some("health") => {
             let seen = seen.lock().map_err(|_| "lock".to_string())?;
-            let used = match watcher.health() {
+            let used = match node.watcher().health() {
                 Some(h) if h.healthy => "healthy",
                 _ => "unhealthy",
             };
@@ -327,14 +363,15 @@ fn command(
             ));
         }
         Some("status") => {
-            let tip = watcher.chain().tip_height();
-            let hash = watcher
+            let tip = node.watcher().chain().tip_height();
+            let hash = node
+                .watcher()
                 .chain()
                 .hash_at(tip)
                 .map_or("none".to_string(), |h| hex(&h.to_byte_array()));
             say(format!(
                 "status tip={tip} hash={hash} seq={}",
-                watcher.last_seq()
+                node.watcher().last_seq()
             ));
         }
         Some("linkstate") => {
@@ -369,7 +406,7 @@ fn command(
             }
         }
         Some("refunds") => {
-            for r in queue.refunds() {
+            for r in node.owner().refunds() {
                 let address = Address::from_script(&r.script, Network::Regtest)
                     .map_or_else(|_| hex(r.script.as_bytes()), |a| a.to_string());
                 say(format!(
@@ -389,9 +426,32 @@ fn command(
             }
             say(format!(
                 "refunds queued={} notes={}",
-                queue.refunds().len(),
+                node.owner().refunds().len(),
                 intake.notes().len()
             ));
+        }
+        Some("facts") => {
+            let index: u32 = words
+                .next()
+                .ok_or("the sale is missing")?
+                .parse()
+                .map_err(|_| "the sale is not a number".to_string())?;
+            let key = SaleKey { counter, index };
+            let held = node.owner().sale_facts(&key);
+            let tip = node.watcher().chain().tip_height();
+            let view = node.view();
+            match verified_facts(view, node.owner(), key, tip, node.refund_depth()) {
+                Ok(seen) => say(format!(
+                    "facts sale={index} held_received={} held_deep={} view_received={} \
+                     view_deep={} receipts={}",
+                    held.map_or("none".to_string(), |f| f.received_sats.to_string()),
+                    held.map_or("none".to_string(), |f| f.reached_refund_depth.to_string()),
+                    seen.received_sats,
+                    seen.reached_refund_depth,
+                    view.receipts_at(index).len()
+                )),
+                Err(why) => say(format!("facts sale={index} refused {why}")),
+            }
         }
         Some("quit") => return Ok(false),
         Some(other) => return Err(format!("unknown command: {other}")),
@@ -475,18 +535,30 @@ fn run(args: &[String]) -> Result<(), String> {
         say("warning loopback addresses are one network group, so WR-50 cannot hold:");
         say("warning THIS RUN IS NOT A CHECK OF THE HEALTH RULES");
     }
-    let mut watcher = OwnerWatcher::start(config).map_err(|e| e.to_string())?;
+    let wallet = test_wallet()?;
+    let mut parts = OwnerParts::new(
+        OWNER_SECRET,
+        wallet.clone(),
+        identity(&APPROVER_SECRET)?.device_id(),
+        BatchPolicy {
+            min_count: ADDRESSES,
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    parts.options = Options::default();
+    parts.refund_depth = REFUND_DEPTH;
+    let mut node = OwnerNode::start(config, parts).map_err(|e| e.to_string())?;
+    issue_addresses(&mut node, &wallet)?;
     say(format!(
         "started tip={} owner={}",
-        watcher.chain().tip_height(),
-        hex(&watcher.device_id().to_bytes())
+        node.watcher().chain().tip_height(),
+        hex(&node.watcher().device_id().to_bytes())
     ));
     let mut link = match (relay, relay_key) {
         (Some(addr), Some(key)) => Some(start_link(dir, addr, key, heartbeat_every)?),
         _ => None,
     };
     let mut alerts_shown = 0usize;
-    let mut queue = start_queue()?;
     let mut intake = RefundIntake::open(Path::new(dir)).map_err(|e| e.to_string())?;
 
     let (lines, input) = channel();
@@ -507,14 +579,7 @@ fn run(args: &[String]) -> Result<(), String> {
     loop {
         match input.try_recv() {
             Ok(line) => {
-                match command(
-                    &mut watcher,
-                    link.as_ref(),
-                    &queue,
-                    &intake,
-                    line.trim(),
-                    &seen,
-                ) {
+                match command(&mut node, link.as_ref(), &intake, line.trim(), &seen) {
                     Ok(true) => {}
                     Ok(false) => break,
                     Err(e) => say(format!("error {e}")),
@@ -523,17 +588,29 @@ fn run(args: &[String]) -> Result<(), String> {
                 say(format!("done {done}"));
             }
             Err(TryRecvError::Empty) => {
-                watcher.pump(Duration::from_millis(100));
-                show_notes(&mut watcher);
+                node.pump(Duration::from_millis(100));
+                show_notes(&mut node);
                 if let Some(link) = link.as_mut() {
-                    link.step(&mut watcher, now_secs());
-                    for (counter, applied) in
-                        intake.run(&mut queue, link, &mut |_: &[u8]| Ok::<(), String>(()))
-                    {
-                        say(format!(
-                            "note refunds counter={} {applied:?}",
-                            hex(&counter.to_bytes())
-                        ));
+                    link.step(node.watcher_mut(), now_secs());
+                    // OC-14, OC-15: the facts come from the node's own view.
+                    match node.run_refund_intake(&mut intake, link) {
+                        Ok(done) => {
+                            for (counter, applied) in done {
+                                // A request that only waits for the view is
+                                // not news on every turn.
+                                let news = openbmt_owner_node::Applied {
+                                    waiting: None,
+                                    ..applied.clone()
+                                };
+                                if news != openbmt_owner_node::Applied::default() {
+                                    say(format!(
+                                        "note refunds counter={} {applied:?}",
+                                        hex(&counter.to_bytes())
+                                    ));
+                                }
+                            }
+                        }
+                        Err(e) => say(format!("note refunds not applied: {e}")),
                     }
                     for note in link.take_notes() {
                         say(format!("note link {note}"));
@@ -548,8 +625,8 @@ fn run(args: &[String]) -> Result<(), String> {
             Err(TryRecvError::Disconnected) => break,
         }
     }
-    watcher.shutdown();
-    show_notes(&mut watcher);
+    node.shutdown();
+    show_notes(&mut node);
     say("stopped");
     Ok(())
 }

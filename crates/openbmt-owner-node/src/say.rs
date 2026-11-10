@@ -7,8 +7,10 @@ use openbmt_core::say::{Tone, Who, Words};
 use openbmt_watch::say::RefusalGroup;
 use openbmt_watch::Problem;
 
-use crate::coins::{ApplyError, PendingError, ViewState};
+use crate::coins::{ApplyError, PendingError, ReceiptState, ViewState};
+use crate::facts::FactsRefused;
 use crate::node::{NodeError, SendRefused, SendState};
+use crate::refunds::{NoteKind, RefundNote};
 use crate::watcher::OwnerStartError;
 
 /// An alert the owner can receive from the watcher.
@@ -89,6 +91,101 @@ impl ViewState {
                 "Start a fresh check from the wallet's first block.",
             ),
         }
+    }
+}
+
+impl ReceiptState {
+    /// OC-13: the words for the state of the record of payments received.
+    pub fn words(self) -> Words {
+        match self {
+            Self::Complete => Words::new(
+                Tone::Good,
+                "Payments are recorded",
+                "The wallet keeps a record of every payment it has seen for its addresses.",
+                Who::Nobody,
+                "Nothing to do. New payments are recorded as blocks arrive.",
+            )
+            .code("OC-13"),
+            Self::LogFull => Words::new(
+                Tone::Stop,
+                "Payment record is full",
+                "The wallet cannot keep more records of payments, so it cannot say what a sale received.",
+                Who::Owner,
+                "Report this limit to the OpenBMT project. You can still spend from the wallet.",
+            )
+            .code("OC-13"),
+        }
+    }
+}
+
+impl FactsRefused {
+    /// OC-14: the words for a sale whose amount received cannot be given.
+    pub fn words(self) -> Words {
+        match self {
+            Self::ViewNotReady => Words::new(
+                Tone::Info,
+                "Wallet catching up",
+                "Waiting for the wallet to catch up with the chain before this refund request is checked.",
+                Who::Nobody,
+                "Nothing to do. The request is checked again by itself.",
+            )
+            .code("OC-14"),
+            Self::ReceiptLogFull => ReceiptState::LogFull.words(),
+            Self::NotThisCountersAddress => Words::new(
+                Tone::Stop,
+                "Address not given out",
+                "The counter asked for a refund on an address this wallet never gave to it.",
+                Who::Owner,
+                "Do not refund this sale. Check this counter.",
+            )
+            .code("OC-14"),
+        }
+    }
+}
+
+impl NoteKind {
+    /// The words for a line of the refund requests' list.
+    pub fn words(self) -> Words {
+        match self {
+            Self::Refused => Words::new(
+                Tone::Stop,
+                "Refund request refused",
+                "The queue did not accept a refund request from a counter.",
+                Who::Owner,
+                "Read the reason in the details, then dismiss the line.",
+            ),
+            Self::WithdrawalNotApplied => Words::new(
+                Tone::Info,
+                "Withdrawal not applied",
+                "A counter withdrew a refund request, but the refund is already past the point where it can be removed.",
+                Who::Owner,
+                "Check the refund and decide whether to go on with it.",
+            ),
+            Self::Interrupted => Words::new(
+                Tone::Info,
+                "Request may be half done",
+                "The app stopped while it was taking in a refund request, so the result is not known.",
+                Who::Owner,
+                "Check the queue for this request, then dismiss the line.",
+            ),
+            Self::ClaimedMoreThanSeen => Words::new(
+                Tone::Stop,
+                "Counter claims too much",
+                "The counter says this sale received more than the wallet's own checks show, so the smaller amount was used.",
+                Who::Owner,
+                "Check this counter before approving any refund for the sale.",
+            )
+            .code("OC-15"),
+        }
+    }
+}
+
+impl RefundNote {
+    /// The words for this line, with its own text as the details.
+    pub fn words(&self) -> Words {
+        self.kind
+            .words()
+            .detail(openbmt_core::say::clean_foreign(&self.text))
     }
 }
 
@@ -336,6 +433,29 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("Unresolved", SendState::Unresolved),
     ] {
         add(&format!("SendState::{name}"), state.words());
+    }
+    for (name, state) in [
+        ("Complete", ReceiptState::Complete),
+        ("LogFull", ReceiptState::LogFull),
+    ] {
+        add(&format!("ReceiptState::{name}"), state.words());
+    }
+    for (name, why) in [
+        ("ViewNotReady", FactsRefused::ViewNotReady),
+        (
+            "NotThisCountersAddress",
+            FactsRefused::NotThisCountersAddress,
+        ),
+    ] {
+        add(&format!("FactsRefused::{name}"), why.words());
+    }
+    for (name, kind) in [
+        ("Refused", NoteKind::Refused),
+        ("WithdrawalNotApplied", NoteKind::WithdrawalNotApplied),
+        ("Interrupted", NoteKind::Interrupted),
+        ("ClaimedMoreThanSeen", NoteKind::ClaimedMoreThanSeen),
+    ] {
+        add(&format!("NoteKind::{name}"), kind.words());
     }
     add("SendRefused::Malformed", SendRefused::Malformed.words());
     add("SendRefused::NoTor", SendRefused::NoTor.words());

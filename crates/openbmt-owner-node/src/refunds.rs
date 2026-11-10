@@ -32,14 +32,25 @@
 //! - **A refusal is listed, not retried.** A request that `queue_refund`
 //!   refuses stays in the list with the refusal and its rule, until the app
 //!   dismisses it. It is not tried again.
-//! - **The sale's facts** come from the same copy: what was received (the
-//!   last `Confirmed` or `Final` record, and for a sale that has neither, the
-//!   request's own figure), whether the sale reached the refund depth (a
-//!   `Final` record not undone by a later `Replaced` or `Reopened`). They are
-//!   given to the owner before the request is queued and are refreshed for
-//!   every sale that has a refund in the queue when the copy grows, so that
-//!   "waiting for depth" ends by itself (AS-53). The owner's checks are not
-//!   loosened.
+//! - **The sale's facts come from the owner's own view, never from the
+//!   counter** (`docs/OWNER-COINS-RULES.md`, OC-14, OC-15): what the owner's
+//!   checked coin view shows paid to the sale's address, and whether every
+//!   such payment has the refund depth ([`crate::facts::verified_facts`]).
+//!   They are given to the owner before the request is queued and are
+//!   refreshed for every sale that has a refund in the queue each time the
+//!   intake runs, so that "waiting for depth" ends by itself (AS-53). The
+//!   counter's own records are still folded, but only to compare: when the
+//!   counter claims more received than the view shows, a line of the kind
+//!   [`NoteKind::ClaimedMoreThanSeen`] says so with both amounts, and the
+//!   view's amount is used. A claim below the view's amount is not noted.
+//!   The owner's checks are not loosened.
+//! - **A request waits for the view.** If the view is not ready, or has not
+//!   checked the chain up to the tip, the request is neither dropped nor
+//!   listed as refused. The position stays before it, the call says why in
+//!   [`Applied::waiting`], and the next call tries again, with no time limit.
+//!   The records after it wait with it, so the order of a counter's records
+//!   holds. A request for an index the owner never issued to that counter is
+//!   refused and listed.
 //! - **A withdrawal** removes a refund that is still queued (or returned and
 //!   not in a session) with the owner's `cancel`. A refund in an open
 //!   session stays, and the list says so; so does one that is signed. A
@@ -62,7 +73,9 @@ use openbmt_courier::Post;
 use openbmt_owner::{Owner, OwnerError, SaleFacts, SaleKey, Stage};
 use openbmt_session::ShopValue;
 
+use crate::coins::CoinView;
 use crate::copy::CounterCopy;
+use crate::facts::{verified_facts, FactsRefused};
 use crate::link::OwnerLink;
 
 /// The file of the intake state, in the owner node's directory.
@@ -90,6 +103,9 @@ pub enum NoteKind {
     /// The process stopped while the request was being applied; the owner
     /// checks the queue.
     Interrupted,
+    /// OC-15: the counter's record claims more received for the sale than the
+    /// owner's own view shows. The view's amount was used.
+    ClaimedMoreThanSeen,
 }
 
 impl NoteKind {
@@ -98,6 +114,7 @@ impl NoteKind {
             Self::Refused => 1,
             Self::WithdrawalNotApplied => 2,
             Self::Interrupted => 3,
+            Self::ClaimedMoreThanSeen => 4,
         }
     }
 
@@ -106,6 +123,7 @@ impl NoteKind {
             1 => Some(Self::Refused),
             2 => Some(Self::WithdrawalNotApplied),
             3 => Some(Self::Interrupted),
+            4 => Some(Self::ClaimedMoreThanSeen),
             _ => None,
         }
     }
@@ -202,6 +220,28 @@ pub struct Applied {
     pub held: u64,
     /// Why the call stopped early, if it did.
     pub stopped: Option<Stopped>,
+    /// OC-15: the next request waits, because the owner's view cannot give the
+    /// sale's facts yet. It is tried again on the next call.
+    pub waiting: Option<FactsRefused>,
+}
+
+/// The owner's own evidence about the chain, for the facts of a sale
+/// (OC-14): the coin view, the tip it must have checked up to, and the
+/// refund depth.
+#[derive(Debug, Clone, Copy)]
+pub struct Evidence<'a> {
+    /// The owner's coin view.
+    pub view: &'a CoinView,
+    /// The tip height of the owner's chain.
+    pub tip: u32,
+    /// Confirmations at which a sale has reached the refund depth.
+    pub refund_depth: u32,
+}
+
+impl Evidence<'_> {
+    fn facts(&self, owner: &Owner, sale: SaleKey) -> Result<SaleFacts, FactsRefused> {
+        verified_facts(self.view, owner, sale, self.tip, self.refund_depth)
+    }
 }
 
 /// A request being applied when the state was last written.
@@ -213,7 +253,8 @@ struct Pending {
     sale: u32,
 }
 
-/// What the records of a counter say about one sale.
+/// What the records of a counter say about one sale. It is the counter's
+/// claim: read only to compare with the owner's own view (OC-15).
 #[derive(Debug, Clone, Default)]
 struct SaleFold {
     received: u64,
@@ -406,6 +447,7 @@ impl RefundIntake {
         &mut self,
         owner: &mut Owner,
         link: &OwnerLink<R>,
+        evidence: &Evidence<'_>,
         persist: &mut impl FnMut(&[u8]) -> Result<(), E>,
     ) -> Vec<(DeviceId, Applied)> {
         let mut done = Vec::new();
@@ -413,7 +455,7 @@ impl RefundIntake {
             let Some(copy) = link.copy(counter) else {
                 continue;
             };
-            let applied = self.apply(owner, *counter, copy, persist);
+            let applied = self.apply(owner, *counter, copy, evidence, persist);
             if applied != Applied::default() {
                 done.push((*counter, applied));
             }
@@ -429,6 +471,7 @@ impl RefundIntake {
         owner: &mut Owner,
         counter: DeviceId,
         copy: &CounterCopy,
+        evidence: &Evidence<'_>,
         persist: &mut impl FnMut(&[u8]) -> Result<(), E>,
     ) -> Applied {
         let mut out = Applied::default();
@@ -478,18 +521,57 @@ impl RefundIntake {
                         number,
                         sale: index,
                     };
+                    // OC-14, OC-15: the facts are the owner's own. A request
+                    // that must wait for the view stays where it is.
+                    let verified = evidence.facts(owner, sale);
+                    if let Err(why) = verified {
+                        if why.waits() {
+                            out.waiting = Some(why);
+                            break;
+                        }
+                    }
                     if let Err(stopped) = self.begin(&pending) {
                         out.stopped = Some(stopped);
                         break;
                     }
-                    let facts = self
+                    let facts = match verified {
+                        Ok(facts) => facts,
+                        Err(why) => {
+                            self.push_note(RefundNote {
+                                counter,
+                                seq: record.seq,
+                                number,
+                                sale: index,
+                                kind: NoteKind::Refused,
+                                text: format!("refused: {why}"),
+                                withdrawn: false,
+                            });
+                            out.refused = out.refused.saturating_add(1);
+                            self.finish(None);
+                            continue;
+                        }
+                    };
+                    // The counter's claim is read only to compare.
+                    let claimed = self
                         .folds
                         .get(&counter)
                         .and_then(|f| f.facts(index))
-                        .unwrap_or(SaleFacts {
-                            received_sats: 0,
-                            reached_refund_depth: false,
+                        .map(|c| c.received_sats);
+                    if let Some(claimed) = claimed.filter(|c| *c > facts.received_sats) {
+                        self.push_note(RefundNote {
+                            counter,
+                            seq: record.seq,
+                            number,
+                            sale: index,
+                            kind: NoteKind::ClaimedMoreThanSeen,
+                            text: format!(
+                                "the counter claims {claimed} sat received for this sale; \
+                                 the wallet's own view shows {} sat",
+                                facts.received_sats
+                            ),
+                            withdrawn: false,
                         });
+                    }
                     let effect = Self::queue(
                         owner,
                         sale,
@@ -576,7 +658,7 @@ impl RefundIntake {
             }
         }
         if out.stopped.is_none() {
-            self.refresh_facts(owner, counter, persist, &mut out);
+            self.refresh_facts(owner, counter, evidence, persist, &mut out);
             // Forget what became of requests whose refund has left the queue.
             let live: Vec<u32> = owner.refunds().iter().map(|r| r.id).collect();
             self.queued.retain(|_, id| live.contains(id));
@@ -696,12 +778,14 @@ impl RefundIntake {
     }
 
     /// Refresh the facts of every sale of this counter that has a refund in
-    /// the queue, so that "waiting for depth" ends when the sale is final
-    /// (AS-53).
+    /// the queue from the owner's own view, so that "waiting for depth" ends
+    /// when the sale has reached the refund depth (AS-53, OC-14). While the
+    /// view cannot give facts, the facts held stay as they are.
     fn refresh_facts<E: fmt::Display>(
         &mut self,
         owner: &mut Owner,
         counter: DeviceId,
+        evidence: &Evidence<'_>,
         persist: &mut impl FnMut(&[u8]) -> Result<(), E>,
         out: &mut Applied,
     ) {
@@ -714,7 +798,7 @@ impl RefundIntake {
         sales.sort();
         sales.dedup();
         for sale in sales {
-            let Some(facts) = self.folds.get(&counter).and_then(|f| f.facts(sale.index)) else {
+            let Ok(facts) = evidence.facts(owner, sale) else {
                 continue;
             };
             if owner.sale_facts(&sale) == Some(facts) {

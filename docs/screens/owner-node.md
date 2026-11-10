@@ -17,6 +17,14 @@ file again.
 | SendState::Done | Payment depth reached | The payment reached the chosen number of blocks in the owner's light check. | Nothing to do. | Nobody |  |
 | SendState::Replaced | Payment replaced | Another payment spent the same coins, so this payment will not complete. | Review the returned entries and decide whether to sign them again. | Owner |  |
 | SendState::Unresolved | Payment needs a fresh check | The saved view cannot tell whether this payment completed or was replaced. | Start a fresh check from the wallet's first block. | Owner |  |
+| ReceiptState::Complete | Payments are recorded | The wallet keeps a record of every payment it has seen for its addresses. | Nothing to do. New payments are recorded as blocks arrive. | Nobody | OC-13 |
+| ReceiptState::LogFull | Payment record is full | The wallet cannot keep more records of payments, so it cannot say what a sale received. | Report this limit to the OpenBMT project. You can still spend from the wallet. | Owner | OC-13 |
+| FactsRefused::ViewNotReady | Wallet catching up | Waiting for the wallet to catch up with the chain before this refund request is checked. | Nothing to do. The request is checked again by itself. | Nobody | OC-14 |
+| FactsRefused::NotThisCountersAddress | Address not given out | The counter asked for a refund on an address this wallet never gave to it. | Do not refund this sale. Check this counter. | Owner | OC-14 |
+| NoteKind::Refused | Refund request refused | The queue did not accept a refund request from a counter. | Read the reason in the details, then dismiss the line. | Owner |  |
+| NoteKind::WithdrawalNotApplied | Withdrawal not applied | A counter withdrew a refund request, but the refund is already past the point where it can be removed. | Check the refund and decide whether to go on with it. | Owner |  |
+| NoteKind::Interrupted | Request may be half done | The app stopped while it was taking in a refund request, so the result is not known. | Check the queue for this request, then dismiss the line. | Owner |  |
+| NoteKind::ClaimedMoreThanSeen | Counter claims too much | The counter says this sale received more than the wallet's own checks show, so the smaller amount was used. | Check this counter before approving any refund for the sale. | Owner | OC-15 |
 | SendRefused::Malformed | Payment could not be sent | The finished payment could not be read as one payment. | Nothing was sent. Tell the OpenBMT project and include the details. | Owner |  |
 | SendRefused::NoTor | Choose how to send | The finished payment is held because sending is not set up. | Set up a proxy for sending, or turn on sending without Tor. | Owner |  |
 | OwnerStartError::Locked | Owner app already open | Another owner app is using this data folder. | Close the other owner app, then try again. | Owner |  |

@@ -1,7 +1,9 @@
 use openbmt_core::say::{check, check_distinct};
 
-use crate::coins::{ApplyError, PendingError, ViewState};
+use crate::coins::{ApplyError, PendingError, ReceiptState, ViewState};
+use crate::facts::FactsRefused;
 use crate::node::{NodeError, SendRefused, SendState};
+use crate::refunds::NoteKind;
 use crate::say::{all_words, screens_markdown, Alert};
 use crate::watcher::OwnerStartError;
 
@@ -10,6 +12,34 @@ fn view_name(value: ViewState) -> String {
         ViewState::Ready => "ViewState::Ready",
         ViewState::Rescanning { .. } => "ViewState::Rescanning",
         ViewState::DeepReorg => "ViewState::DeepReorg",
+    }
+    .to_string()
+}
+
+fn receipt_name(value: ReceiptState) -> String {
+    match value {
+        ReceiptState::Complete => "ReceiptState::Complete",
+        ReceiptState::LogFull => "ReceiptState::LogFull",
+    }
+    .to_string()
+}
+
+fn facts_name(value: FactsRefused) -> String {
+    match value {
+        FactsRefused::ViewNotReady => "FactsRefused::ViewNotReady",
+        // The same words as the full receipt log (OC-13).
+        FactsRefused::ReceiptLogFull => "ReceiptState::LogFull",
+        FactsRefused::NotThisCountersAddress => "FactsRefused::NotThisCountersAddress",
+    }
+    .to_string()
+}
+
+fn note_name(value: NoteKind) -> String {
+    match value {
+        NoteKind::Refused => "NoteKind::Refused",
+        NoteKind::WithdrawalNotApplied => "NoteKind::WithdrawalNotApplied",
+        NoteKind::Interrupted => "NoteKind::Interrupted",
+        NoteKind::ClaimedMoreThanSeen => "NoteKind::ClaimedMoreThanSeen",
     }
     .to_string()
 }
@@ -120,6 +150,14 @@ fn sc_01_every_listed_variant_is_present() {
         "SendState::Done",
         "SendState::Replaced",
         "SendState::Unresolved",
+        "ReceiptState::Complete",
+        "ReceiptState::LogFull",
+        "FactsRefused::ViewNotReady",
+        "FactsRefused::NotThisCountersAddress",
+        "NoteKind::Refused",
+        "NoteKind::WithdrawalNotApplied",
+        "NoteKind::Interrupted",
+        "NoteKind::ClaimedMoreThanSeen",
         "SendRefused::Malformed",
         "SendRefused::NoTor",
         "OwnerStartError::Locked",
@@ -160,6 +198,15 @@ fn sc_01_every_listed_variant_is_present() {
         view_name(ViewState::Ready),
         view_name(ViewState::Rescanning { to: 10 }),
         view_name(ViewState::DeepReorg),
+        receipt_name(ReceiptState::Complete),
+        receipt_name(ReceiptState::LogFull),
+        facts_name(FactsRefused::ViewNotReady),
+        facts_name(FactsRefused::ReceiptLogFull),
+        facts_name(FactsRefused::NotThisCountersAddress),
+        note_name(NoteKind::Refused),
+        note_name(NoteKind::WithdrawalNotApplied),
+        note_name(NoteKind::Interrupted),
+        note_name(NoteKind::ClaimedMoreThanSeen),
         send_name(SendState::Waiting),
         send_name(SendState::Sent),
         send_name(SendState::SeenBack { groups: 2 }),

@@ -14,7 +14,7 @@ use bitcoin::{
     Amount as Sats, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid,
     WPubkeyHash, Witness,
 };
-use openbmt_core::batch::BatchPolicy;
+use openbmt_core::batch::{BatchBuilder, BatchPolicy};
 use openbmt_core::records::{Chain, DeviceList, RecordKind};
 use openbmt_core::wallet::{KeySlot, Keychain, WalletDescription};
 use openbmt_counter::{Amount, Ask, Currency, Event, RateSource, Role};
@@ -22,8 +22,12 @@ use openbmt_owner::{Options, Owner, SaleFacts, SaleKey, Stage};
 use openbmt_spend::Coin;
 
 use super::*;
+use crate::coins::{CoinView, Receipt};
 use crate::copy::{CounterCopy, Stop};
-use crate::refunds::{NoteKind, RefundIntake, Stopped, MAGIC_INTAKE, MAX_NOTES, STATE_FILE};
+use crate::facts::FactsRefused;
+use crate::refunds::{
+    Evidence, NoteKind, RefundIntake, Stopped, MAGIC_INTAKE, MAX_NOTES, STATE_FILE,
+};
 
 const NET: Network = Network::Regtest;
 
@@ -63,15 +67,52 @@ fn kit() -> &'static Kit {
     })
 }
 
-fn new_owner() -> Owner {
-    Owner::new(
+/// The tip of the chain the owner's view has checked, and the refund depth.
+pub(super) const TIP: u32 = 100;
+pub(super) const DEPTH: u32 = 6;
+
+/// An owner that signed one batch of 20 addresses, from index 0, for
+/// `counter` (OC-10).
+pub(super) fn new_owner_for(counter: DeviceId) -> Owner {
+    let mut owner = Owner::new(
         &[1; 32],
         kit().wallet.clone(),
         id(2).device_id(),
         BatchPolicy { min_count: 3 },
         Options::default(),
     )
-    .unwrap()
+    .unwrap();
+    let batch = BatchBuilder::new(BatchPolicy { min_count: 3 })
+        .derive(&kit().wallet, counter, 0, 20)
+        .unwrap();
+    owner.queue_batch(batch, |_| Ok::<(), String>(())).unwrap();
+    owner
+}
+
+pub(super) fn new_owner() -> Owner {
+    new_owner_for(counter())
+}
+
+/// A coin view that has checked the chain up to [`TIP`] and holds one
+/// payment for each `(index, sats, depth)`, the tip block counting as depth
+/// 1 (OC-12).
+pub(super) fn view_with(paid: &[(u32, u64, u32)]) -> CoinView {
+    let mut view = CoinView::new(0);
+    view.set_checked(TIP, |_| Ok::<(), ()>(())).unwrap();
+    for (n, (index, sats, depth)) in paid.iter().enumerate() {
+        let n = u32::try_from(n).unwrap();
+        let mut txid = [0u8; 32];
+        txid[..4].copy_from_slice(&n.to_le_bytes());
+        txid[4..8].copy_from_slice(&index.to_le_bytes());
+        assert!(view.add_receipt_for_test(Receipt {
+            index: *index,
+            outpoint: OutPoint::new(Txid::from_byte_array(txid), 0),
+            sats: *sats,
+            height: TIP - depth + 1,
+            block: bitcoin::BlockHash::from_byte_array([u8::try_from(n).unwrap() + 1; 32]),
+        }));
+    }
+    view
 }
 
 /// A coin of `sats` on the receive keychain at `index`, 6 deep.
@@ -222,10 +263,17 @@ struct Side {
     copy: CounterCopy,
     intake: RefundIntake,
     owner: Owner,
+    /// The owner's own view of the chain: the facts of a sale come from it.
+    view: CoinView,
 }
 
 impl Side {
+    /// A side whose view shows sale 0 paid 5,000 sats, at the refund depth.
     fn new() -> Self {
+        Self::with_view(view_with(&[(0, 5_000, DEPTH)]))
+    }
+
+    fn with_view(view: CoinView) -> Self {
         let dir = Dir::new();
         let (copy, _) = CounterCopy::open(dir.path(), counter(), &devices()).unwrap();
         let intake = RefundIntake::open(dir.path()).unwrap();
@@ -235,6 +283,7 @@ impl Side {
             copy,
             intake,
             owner: new_owner(),
+            view,
         }
     }
 
@@ -254,8 +303,13 @@ impl Side {
     }
 
     fn apply_with(&mut self, persist: &mut Persist) -> crate::Applied {
+        let evidence = Evidence {
+            view: &self.view,
+            tip: TIP,
+            refund_depth: DEPTH,
+        };
         self.intake
-            .apply(&mut self.owner, counter(), &self.copy, persist)
+            .apply(&mut self.owner, counter(), &self.copy, &evidence, persist)
     }
 
     /// The intake as a restarted app would open it.
@@ -359,9 +413,14 @@ fn cr_60_replaying_the_same_chain_adds_nothing() {
     s.restart_intake();
     assert_eq!(s.apply(), crate::Applied::default());
     let (copy, _) = CounterCopy::open(s.dir.path(), counter(), &devices()).unwrap();
+    let evidence = Evidence {
+        view: &s.view,
+        tip: TIP,
+        refund_depth: DEPTH,
+    };
     let again = s
         .intake
-        .apply(&mut s.owner, counter(), &copy, &mut ok_persist());
+        .apply(&mut s.owner, counter(), &copy, &evidence, &mut ok_persist());
     assert_eq!(again, crate::Applied::default());
     // The same records offered to the copy again are skipped, so the copy
     // does not grow and nothing is applied.
@@ -420,8 +479,8 @@ fn cr_60_a_request_written_by_another_device_on_the_list_is_not_the_counters() {
 }
 
 #[test]
-fn cr_66_a_request_below_the_refund_depth_waits_and_follows_the_chain() {
-    let mut s = Side::new();
+fn cr_66_a_request_below_the_refund_depth_waits_and_follows_the_owners_view() {
+    let mut s = Side::with_view(view_with(&[(0, 5_000, 1)]));
     s.push(&[
         opened(0),
         confirmed(0, 5_000),
@@ -431,26 +490,202 @@ fn cr_66_a_request_below_the_refund_depth_waits_and_follows_the_chain() {
     let id = s.owner.refunds()[0].id;
     assert_eq!(s.owner.waiting_for_depth(id), Some(true));
     assert!(!s.owner.sale_facts(&key(0)).unwrap().reached_refund_depth);
-    // The sale reaches the refund depth: the facts follow the copy and the
-    // queued refund stops waiting, with no new request.
-    s.push(&[finished(0, 5_000)]);
+    // The payment reaches the refund depth in the owner's view: the facts
+    // follow it and the queued refund stops waiting, with no new request.
+    s.view = view_with(&[(0, 5_000, DEPTH)]);
     let done = s.apply();
     assert_eq!((done.queued, done.refused, done.stopped), (0, 0, None));
     assert_eq!(s.owner.waiting_for_depth(id), Some(false));
-    // A reorg that undoes the payment puts it back to waiting.
-    s.push(&[Event::Reopened {
-        index: 0,
-        at: T0 + 60,
-    }]);
+    // A reorganization that undoes the depth puts it back to waiting.
+    s.view = view_with(&[(0, 5_000, 1)]);
+    s.apply();
+    assert_eq!(s.owner.waiting_for_depth(id), Some(true));
+    // What the counter's records say does not matter: a final record from
+    // the counter changes nothing.
+    s.push(&[finished(0, 5_000)]);
     s.apply();
     assert_eq!(s.owner.waiting_for_depth(id), Some(true));
 }
 
 #[test]
-fn cr_66_a_request_for_a_sale_with_no_confirmation_record_uses_its_own_figure() {
-    let mut s = Side::new();
+fn oc_15_a_sale_the_view_shows_nothing_paid_for_is_refused_and_the_claim_is_noted() {
+    let mut s = Side::with_view(view_with(&[]));
     s.push(&[opened(0), requested(0, 1, 2_000, dest(9), 5_000)]);
+    let done = s.apply();
+    assert_eq!((done.queued, done.refused, done.waiting), (0, 1, None));
+    assert!(s.owner.refunds().is_empty());
+    assert_eq!(
+        s.owner.sale_facts(&key(0)),
+        Some(SaleFacts {
+            received_sats: 0,
+            reached_refund_depth: false
+        })
+    );
+    let notes = s.intake.notes();
+    assert_eq!(notes.len(), 2);
+    assert_eq!(notes[0].kind, NoteKind::ClaimedMoreThanSeen);
+    assert!(notes[0].text.contains("5000") && notes[0].text.contains(" 0 sat"));
+    assert_eq!(notes[1].kind, NoteKind::Refused);
+    assert!(
+        notes[1].text.starts_with("refused: AS-52"),
+        "{}",
+        notes[1].text
+    );
+}
+
+#[test]
+fn oc_15_a_counter_that_claims_50000_when_20000_arrived_gets_the_20000() {
+    let mut s = Side::with_view(view_with(&[(0, 20_000, DEPTH)]));
+    s.push(&[
+        opened(0),
+        finished(0, 50_000),
+        requested(0, 1, 30_000, dest(9), 50_000),
+    ]);
+    let done = s.apply();
+    assert_eq!((done.queued, done.refused), (0, 1));
+    // The facts are the view's, not the counter's.
+    assert_eq!(
+        s.owner.sale_facts(&key(0)),
+        Some(SaleFacts {
+            received_sats: 20_000,
+            reached_refund_depth: true
+        })
+    );
+    assert!(s.owner.refunds().is_empty());
+    let notes = s.intake.notes();
+    assert_eq!(notes.len(), 2);
+    assert_eq!(notes[0].kind, NoteKind::ClaimedMoreThanSeen);
+    assert!(
+        notes[0].text.contains("50000") && notes[0].text.contains("20000"),
+        "{}",
+        notes[0].text
+    );
+    // The owner's own rule refused the refund of 30,000.
+    assert_eq!(notes[1].kind, NoteKind::Refused);
+    assert!(
+        notes[1].text.starts_with("refused: AS-52"),
+        "{}",
+        notes[1].text
+    );
+    assert!(notes[1].text.contains("20000"), "{}", notes[1].text);
+    // A refund within what arrived is queued, with the facts of 20,000.
+    s.push(&[requested(0, 2, 20_000, dest(8), 50_000)]);
+    let done = s.apply();
+    assert_eq!((done.queued, done.refused), (1, 0));
+    assert_eq!(
+        s.owner.sale_facts(&key(0)),
+        Some(SaleFacts {
+            received_sats: 20_000,
+            reached_refund_depth: true
+        })
+    );
+    // The line is noted for this request too, and the list reads back.
+    assert_eq!(s.intake.notes().len(), 3);
+    s.restart_intake();
+    assert_eq!(s.intake.notes()[0].kind, NoteKind::ClaimedMoreThanSeen);
+}
+
+#[test]
+fn oc_15_a_claim_below_what_the_view_shows_is_not_noted() {
+    // A late payment or a surplus: the view shows more than the counter says.
+    let mut s = Side::with_view(view_with(&[(0, 5_000, DEPTH), (0, 1_000, DEPTH)]));
+    s.push(&[
+        opened(0),
+        finished(0, 5_000),
+        requested(0, 1, 4_500, dest(9), 5_000),
+    ]);
+    let done = s.apply();
+    assert_eq!(
+        (done.queued, done.refused),
+        (1, 0),
+        "{:?}",
+        s.intake.notes()
+    );
+    assert!(s.intake.notes().is_empty());
+    assert_eq!(s.owner.sale_facts(&key(0)).unwrap().received_sats, 6_000);
+}
+
+#[test]
+fn oc_15_a_request_waits_for_the_view_and_is_applied_on_a_later_run() {
+    // A view that has checked nothing yet.
+    let mut s = Side::with_view(CoinView::new(0));
+    s.push(&[
+        opened(0),
+        finished(0, 5_000),
+        requested(0, 1, 2_000, dest(9), 5_000),
+        withdrawn(0, 1),
+        requested(0, 2, 1_000, dest(8), 5_000),
+    ]);
+    let done = s.apply();
+    assert_eq!(done.waiting, Some(FactsRefused::ViewNotReady));
+    assert_eq!((done.queued, done.refused, done.stopped), (0, 0, None));
+    assert!(s.owner.refunds().is_empty());
+    assert!(s.intake.notes().is_empty(), "not listed as refused");
+    assert_eq!(s.intake.applied_up_to(&counter()), 2, "stays before it");
+    // And again, and after a restart: still not dropped, no time limit.
+    assert_eq!(s.apply().waiting, Some(FactsRefused::ViewNotReady));
+    s.restart_intake();
+    assert_eq!(s.apply().waiting, Some(FactsRefused::ViewNotReady));
+    assert!(s.intake.notes().is_empty());
+    // A view that is behind the tip waits too.
+    s.view = view_with(&[(0, 5_000, DEPTH)]);
+    s.view.reset(|_| Ok::<(), ()>(())).unwrap();
+    assert_eq!(s.apply().waiting, Some(FactsRefused::ViewNotReady));
+    // The view catches up: the requests are applied in order, the withdrawal
+    // after the first one removes it again.
+    s.view = view_with(&[(0, 5_000, DEPTH)]);
+    let done = s.apply();
+    assert_eq!(done.waiting, None);
+    assert_eq!((done.queued, done.withdrawn, done.refused), (2, 1, 0));
+    assert_eq!(s.owner.refunds().len(), 1);
+    assert_eq!(s.owner.refunds()[0].sats, 1_000);
+    assert!(s.intake.notes().is_empty());
+}
+
+#[test]
+fn oc_14_an_index_never_issued_to_the_counter_is_refused_and_listed() {
+    // Outside every range the owner issued.
+    let mut s = Side::with_view(view_with(&[(25, 5_000, DEPTH)]));
+    s.push(&[
+        opened(25),
+        finished(25, 5_000),
+        requested(25, 1, 2_000, dest(9), 5_000),
+    ]);
+    let done = s.apply();
+    assert_eq!((done.queued, done.refused, done.waiting), (0, 1, None));
+    assert!(s.owner.refunds().is_empty());
+    let notes = s.intake.notes();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].kind, NoteKind::Refused);
+    assert!(
+        notes[0].text.starts_with("refused: OC-14"),
+        "{}",
+        notes[0].text
+    );
+    assert_eq!((notes[0].sale, notes[0].number), (25, 1));
+    // Not retried.
+    assert_eq!(s.apply(), crate::Applied::default());
+
+    // An index inside a range that was issued to another counter.
+    let mut s = Side::new();
+    s.owner = new_owner_for(id(4).device_id());
+    s.push(&[
+        opened(0),
+        finished(0, 5_000),
+        requested(0, 1, 2_000, dest(9), 5_000),
+    ]);
+    let done = s.apply();
+    assert_eq!((done.queued, done.refused), (0, 1));
+    assert!(s.owner.refunds().is_empty());
+    assert!(s.intake.notes()[0].text.starts_with("refused: OC-14"));
+}
+
+#[test]
+fn oc_14_two_payments_to_one_index_are_deep_only_when_both_are() {
+    let mut s = Side::with_view(view_with(&[(0, 3_000, DEPTH), (0, 2_000, 2)]));
+    s.push(&[opened(0), requested(0, 1, 4_000, dest(9), 5_000)]);
     assert_eq!(s.apply().queued, 1);
+    let id = s.owner.refunds()[0].id;
     assert_eq!(
         s.owner.sale_facts(&key(0)),
         Some(SaleFacts {
@@ -458,13 +693,15 @@ fn cr_66_a_request_for_a_sale_with_no_confirmation_record_uses_its_own_figure() 
             reached_refund_depth: false
         })
     );
-    // A payment replaced by a conflict is received no more.
-    s.push(&[Event::Replaced {
-        index: 0,
-        at: T0 + 60,
-    }]);
+    assert_eq!(s.owner.waiting_for_depth(id), Some(true));
+    // The shallow payment gets one block short of the depth: still waiting.
+    s.view = view_with(&[(0, 3_000, DEPTH), (0, 2_000, DEPTH - 1)]);
     s.apply();
-    assert_eq!(s.owner.sale_facts(&key(0)).unwrap().received_sats, 0);
+    assert_eq!(s.owner.waiting_for_depth(id), Some(true));
+    // Both deep.
+    s.view = view_with(&[(0, 3_000, DEPTH + 4), (0, 2_000, DEPTH)]);
+    s.apply();
+    assert_eq!(s.owner.waiting_for_depth(id), Some(false));
 }
 
 #[test]
@@ -782,6 +1019,12 @@ mod through_the_link {
 
         let mut intake = RefundIntake::open(owner_dir.path()).unwrap();
         let mut owner = new_owner();
+        let view = view_with(&[(0, 5_000, DEPTH)]);
+        let evidence = Evidence {
+            view: &view,
+            tip: TIP,
+            refund_depth: DEPTH,
+        };
         let mut persist = ok_persist();
 
         let mut chain = Chain::new();
@@ -806,7 +1049,7 @@ mod through_the_link {
             ],
         );
         link.step(&mut rig.watcher, T0);
-        let done = intake.run(&mut owner, &link, &mut persist);
+        let done = intake.run(&mut owner, &link, &evidence, &mut persist);
         assert_eq!(done.len(), 1);
         assert_eq!(done[0].0, counter());
         assert_eq!(done[0].1.queued, 1);
@@ -814,17 +1057,21 @@ mod through_the_link {
         assert_eq!(owner.refunds()[0].script, dest(9));
         // Nothing new: nothing applied.
         link.step(&mut rig.watcher, T0 + 1);
-        assert!(intake.run(&mut owner, &link, &mut persist).is_empty());
+        assert!(intake
+            .run(&mut owner, &link, &evidence, &mut persist)
+            .is_empty());
         // The withdrawal comes the same way.
         send(&mut chain, &mut counter_side, &[withdrawn(0, 1)]);
         link.step(&mut rig.watcher, T0 + 2);
-        let done = intake.run(&mut owner, &link, &mut persist);
+        let done = intake.run(&mut owner, &link, &evidence, &mut persist);
         assert_eq!(done[0].1.withdrawn, 1);
         assert!(owner.refunds().is_empty());
         // A copy that grew with something else costs nothing.
         send(&mut chain, &mut counter_side, &[confirmed(0, 5_000)]);
         link.step(&mut rig.watcher, T0 + 3);
-        assert!(intake.run(&mut owner, &link, &mut persist).is_empty());
+        assert!(intake
+            .run(&mut owner, &link, &evidence, &mut persist)
+            .is_empty());
     }
 }
 

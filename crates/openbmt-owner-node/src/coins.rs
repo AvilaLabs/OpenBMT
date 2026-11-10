@@ -37,6 +37,18 @@
 //! ("deep reorg: rescan"): no coin is offered until [`CoinView::reset`]
 //! starts a rescan from the birthday height. It is never silent.
 //!
+//! ## Receipts
+//!
+//! Every output that pays a receive script in a checked block is also kept as
+//! a [`Receipt`], and a receipt stays when the coin is spent. Receipts are
+//! what the owner's own figure of "what a sale received" is made from
+//! (OC-12 to OC-14, `crate::facts`). A reorganization removes the receipts of
+//! the blocks that left with the same undo records as the coins. At most
+//! [`MAX_RECEIPTS`] are kept; past that the view takes the named state
+//! "receipt log full" ([`ReceiptState::LogFull`]): no more receipts are
+//! recorded and no facts are given, while the coins are still tracked and
+//! the owner can still spend.
+//!
 //! ## What is watched
 //!
 //! Receive indices from 0 to the highest a signed batch handed out plus
@@ -50,8 +62,9 @@
 //! ## The stored form
 //!
 //! `OBMe`, version 1, strict like the other stored forms: sorted lists, no
-//! repeats, every length checked before anything is reserved, and every coin
-//! must be an output of the transaction it carries. The chain position
+//! repeats, every length checked before anything is reserved, every coin
+//! must be an output of the transaction it carries, and, unless the receipt
+//! log is full, every unspent receive coin has its receipt. The chain position
 //! (`checked`) is in the same bytes as the coins it reflects, so a restart
 //! sees both or neither.
 
@@ -74,6 +87,8 @@ pub const GAP: u32 = 20;
 pub const UNDO_BLOCKS: u32 = 100;
 /// Most coins held.
 pub const MAX_COINS: usize = 20_000;
+/// OC-13: most receipts kept.
+pub const MAX_RECEIPTS: usize = 262_144;
 /// Most held transactions kept as pending.
 pub const MAX_PENDING: usize = 64;
 /// The largest transaction a stored coin may carry, in bytes.
@@ -111,6 +126,41 @@ impl fmt::Display for ViewState {
             Self::DeepReorg => write!(f, "deep reorg: rescan"),
         }
     }
+}
+
+/// Whether the view holds every receipt it has seen (OC-13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReceiptState {
+    /// Every receipt seen since the last rescan is kept.
+    Complete,
+    /// "Receipt log full". [`MAX_RECEIPTS`] are kept and no more are
+    /// recorded, so no sale's facts are given. Coins are still tracked.
+    LogFull,
+}
+
+impl fmt::Display for ReceiptState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Complete => write!(f, "complete"),
+            Self::LogFull => write!(f, "receipt log full"),
+        }
+    }
+}
+
+/// A payment to one of the wallet's receive scripts, in a checked block. It
+/// stays after the coin is spent (OC-12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Receipt {
+    /// The receive index of the script paid.
+    pub index: u32,
+    /// The output.
+    pub outpoint: OutPoint,
+    /// The amount in satoshis.
+    pub sats: u64,
+    /// The height of the block that holds it.
+    pub height: u32,
+    /// That block.
+    pub block: BlockHash,
 }
 
 /// An output of the wallet that is unspent as far as the view knows.
@@ -229,6 +279,11 @@ pub struct CoinView {
     coins: BTreeMap<OutPoint, OwnedCoin>,
     undo: BTreeMap<u32, Undo>,
     pending: BTreeMap<Txid, PendingTx>,
+    /// OC-12: the receipts by receive index, each list ascending by
+    /// outpoint.
+    receipts: BTreeMap<u32, Vec<Receipt>>,
+    receipt_total: usize,
+    receipt_log_full: bool,
 }
 
 impl CoinView {
@@ -246,6 +301,9 @@ impl CoinView {
             coins: BTreeMap::new(),
             undo: BTreeMap::new(),
             pending: BTreeMap::new(),
+            receipts: BTreeMap::new(),
+            receipt_total: 0,
+            receipt_log_full: false,
         }
     }
 
@@ -291,6 +349,26 @@ impl CoinView {
     /// Whether the coins can be offered to a spend.
     pub fn ready(&self) -> bool {
         self.state == ViewState::Ready
+    }
+
+    /// OC-12: the receipts at a receive index, lowest outpoint first. A
+    /// receipt is kept after its coin is spent.
+    pub fn receipts_at(&self, index: u32) -> &[Receipt] {
+        self.receipts.get(&index).map_or(&[], Vec::as_slice)
+    }
+
+    /// How many receipts are kept.
+    pub fn receipt_count(&self) -> usize {
+        self.receipt_total
+    }
+
+    /// OC-13: whether every receipt seen is kept.
+    pub fn receipt_state(&self) -> ReceiptState {
+        if self.receipt_log_full {
+            ReceiptState::LogFull
+        } else {
+            ReceiptState::Complete
+        }
     }
 
     /// The confirmed coins held, lowest outpoint first.
@@ -472,6 +550,7 @@ impl CoinView {
         let to = next.checked.max(next.birthday);
         next.coins.clear();
         next.undo.clear();
+        next.clear_receipts();
         next.checked = next.birthday;
         next.state = if to > next.birthday {
             ViewState::Rescanning { to }
@@ -507,6 +586,54 @@ impl CoinView {
         persist(&encode(&next))?;
         *self = next;
         Ok(())
+    }
+
+    /// Forget every receipt, and the full state with them.
+    fn clear_receipts(&mut self) {
+        self.receipts.clear();
+        self.receipt_total = 0;
+        self.receipt_log_full = false;
+    }
+
+    /// OC-12, OC-13: keep a receipt once. Returns whether the view changed.
+    fn record_receipt(&mut self, receipt: Receipt) -> bool {
+        if self.receipt_log_full {
+            return false;
+        }
+        let known = self.receipts.get(&receipt.index).is_some_and(|list| {
+            list.binary_search_by_key(&receipt.outpoint, |r| r.outpoint)
+                .is_ok()
+        });
+        if known {
+            return false;
+        }
+        if self.receipt_total >= MAX_RECEIPTS {
+            self.receipt_log_full = true;
+            return true;
+        }
+        let list = self.receipts.entry(receipt.index).or_default();
+        let at = list.partition_point(|r| r.outpoint < receipt.outpoint);
+        list.insert(at, receipt);
+        self.receipt_total += 1;
+        true
+    }
+
+    /// A receipt added by hand, for tests of what rests on receipts.
+    #[cfg(test)]
+    pub(crate) fn add_receipt_for_test(&mut self, receipt: Receipt) -> bool {
+        self.record_receipt(receipt)
+    }
+
+    /// OC-12: remove the receipts of one block.
+    fn remove_receipts_of(&mut self, block: &BlockHash) {
+        let mut removed = 0;
+        self.receipts.retain(|_, list| {
+            let before = list.len();
+            list.retain(|r| r.block != *block);
+            removed += before - list.len();
+            !list.is_empty()
+        });
+        self.receipt_total = self.receipt_total.saturating_sub(removed);
     }
 
     /// Hold a transaction of the owner's own: its change is offered with 0
@@ -581,6 +708,7 @@ impl CoinView {
         let hash = block.hash();
         let mut effect = BlockEffect::default();
         let mut height = None;
+        let mut receipts_changed = false;
 
         // The scripts this block pays.
         let hits: BTreeSet<&ScriptBuf> = block
@@ -604,6 +732,17 @@ impl CoinView {
                         continue;
                     };
                     let outpoint = OutPoint::new(txid, vout);
+                    // OC-12: a payment to a receive script is a receipt,
+                    // whether or not a later block spends it.
+                    if *keychain == Keychain::Receive {
+                        receipts_changed |= next.record_receipt(Receipt {
+                            index: *index,
+                            outpoint,
+                            sats: out.value.to_sat(),
+                            height: proven.height(),
+                            block: proven.block(),
+                        });
+                    }
                     if next.coins.contains_key(&outpoint) {
                         continue;
                     }
@@ -668,7 +807,7 @@ impl CoinView {
 
         let needs_undo =
             !effect.created.is_empty() || !effect.spent.is_empty() || !confirmed.is_empty();
-        let changed = needs_undo || !effect.replaced.is_empty();
+        let changed = needs_undo || !effect.replaced.is_empty() || receipts_changed;
         if needs_undo {
             let height = match height {
                 Some(h) => h,
@@ -754,11 +893,15 @@ impl CoinView {
                         next.coins.remove(&op);
                         effect.removed += 1;
                     }
+                    // OC-12: the receipts go with the coins.
+                    next.remove_receipts_of(hash);
                 }
                 None => {
-                    // A block with no undo entry that holds a coin was
-                    // applied and pruned.
-                    if next.coins.values().any(|c| c.block == *hash) {
+                    // A block with no undo entry that holds a coin or a
+                    // receipt was applied and pruned.
+                    if next.coins.values().any(|c| c.block == *hash)
+                        || next.receipts.values().flatten().any(|r| r.block == *hash)
+                    {
                         deep = true;
                     }
                 }
@@ -870,6 +1013,18 @@ fn encode(v: &CoinView) -> Vec<u8> {
     out.extend_from_slice(&len32(v.pending.len()).to_le_bytes());
     for p in v.pending.values() {
         put_pending(&mut out, p);
+    }
+    // OC-12, OC-13: the log-full flag, then the receipts ascending by index
+    // and outpoint.
+    out.push(u8::from(v.receipt_log_full));
+    out.extend_from_slice(&len32(v.receipt_total).to_le_bytes());
+    for r in v.receipts.values().flatten() {
+        out.extend_from_slice(&r.index.to_le_bytes());
+        out.extend_from_slice(&r.outpoint.txid.to_byte_array());
+        out.extend_from_slice(&r.outpoint.vout.to_le_bytes());
+        out.extend_from_slice(&r.sats.to_le_bytes());
+        out.extend_from_slice(&r.height.to_le_bytes());
+        out.extend_from_slice(&r.block.to_byte_array());
     }
     out
 }
@@ -1029,7 +1184,53 @@ fn decode(bytes: &[u8]) -> Result<CoinView, DecodeError> {
         last = Some(txid);
         pending.insert(txid, p);
     }
+    let receipt_log_full = r.flag()?;
+    let n = r.count(MAX_RECEIPTS, 84)?;
+    let mut receipts: BTreeMap<u32, Vec<Receipt>> = BTreeMap::new();
+    let mut outpoints: BTreeSet<OutPoint> = BTreeSet::new();
+    let mut last: Option<(u32, OutPoint)> = None;
+    for _ in 0..n {
+        let index = r.u32_le()?;
+        let txid = Txid::from_byte_array(r.array()?);
+        let vout = r.u32_le()?;
+        let outpoint = OutPoint::new(txid, vout);
+        let sats = r.u64_le()?;
+        let height = r.u32_le()?;
+        let block = BlockHash::from_byte_array(r.array()?);
+        if index >= INDEX_LIMIT {
+            return Err(DecodeError::NonCanonical("index is out of range"));
+        }
+        if last.is_some_and(|l| l >= (index, outpoint)) {
+            return Err(DecodeError::NonCanonical("receipts are not in order"));
+        }
+        if !outpoints.insert(outpoint) {
+            return Err(DecodeError::NonCanonical("a receipt is listed twice"));
+        }
+        last = Some((index, outpoint));
+        receipts.entry(index).or_default().push(Receipt {
+            index,
+            outpoint,
+            sats,
+            height,
+            block,
+        });
+    }
     r.finish()?;
+    // Unless the log is full, every unspent receive coin has its receipt.
+    if !receipt_log_full {
+        for c in coins.values().filter(|c| c.chain == Keychain::Receive) {
+            let held = receipts
+                .get(&c.index)
+                .and_then(|list| list.iter().find(|r| r.outpoint == c.outpoint));
+            let fits = held
+                .is_some_and(|r| r.sats == c.sats() && r.height == c.height && r.block == c.block);
+            if !fits {
+                return Err(DecodeError::NonCanonical(
+                    "a receive coin has no matching receipt",
+                ));
+            }
+        }
+    }
     Ok(CoinView {
         birthday,
         checked,
@@ -1039,5 +1240,8 @@ fn decode(bytes: &[u8]) -> Result<CoinView, DecodeError> {
         coins,
         undo,
         pending,
+        receipts,
+        receipt_total: n,
+        receipt_log_full,
     })
 }

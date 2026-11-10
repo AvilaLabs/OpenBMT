@@ -16,10 +16,14 @@ use openbmt_core::wallet::Keychain;
 use openbmt_counter_node::ChainView;
 use openbmt_watch::{HeaderChain, HeaderStore, Refusal, WellFormedBlock};
 
+use openbmt_owner::SaleKey;
+
+use super::counter;
 use crate::coins::{
-    ApplyError, CoinView, PendingError, ScriptSet, ViewState, GAP, MAGIC_OWNER_COINS, MAX_PENDING,
-    UNDO_BLOCKS,
+    ApplyError, CoinView, PendingError, Receipt, ReceiptState, ScriptSet, ViewState, GAP,
+    MAGIC_OWNER_COINS, MAX_PENDING, MAX_RECEIPTS, UNDO_BLOCKS,
 };
+use crate::facts::{verified_facts, FactsRefused};
 
 pub(super) fn script(n: u8) -> ScriptBuf {
     let mut bytes = vec![0x00, 0x20];
@@ -857,4 +861,331 @@ fn oc_09_depth_counts_the_tip_block_and_a_stale_tip_is_zero() {
     assert_eq!(coin.vout, 0);
     // A tip below the coin's block (a stale tip) is 0, not a wrap.
     assert_eq!(offered(&view, 0)[0].2, 0);
+}
+
+// ---- receipts (OC-12, OC-13) ---------------------------------------------------------
+
+fn receipt(index: u32, tx: &Transaction, vout: u32, height: u32, block: &Block) -> Receipt {
+    Receipt {
+        index,
+        outpoint: op(tx, vout),
+        sats: tx.output[vout as usize].value.to_sat(),
+        height,
+        block: block.block_hash(),
+    }
+}
+
+#[test]
+fn oc_12_a_payment_to_a_receive_script_is_a_receipt_and_change_is_not() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    // Receive index 0 and 1, change index 0, and a script nobody watches.
+    let pay = foreign(
+        1,
+        &[
+            (&script(1), 50_000),
+            (&script(2), 30_000),
+            (&script(9), 7_000),
+            (&script(77), 1),
+        ],
+    );
+    let block = chain.push(std::slice::from_ref(&pay));
+    apply(&mut view, &chain, &block);
+    assert_eq!(view.receipts_at(0), &[receipt(0, &pay, 0, 1, &block)]);
+    assert_eq!(view.receipts_at(1), &[receipt(1, &pay, 1, 1, &block)]);
+    assert_eq!(view.receipt_count(), 2, "the change is no receipt");
+    assert_eq!(view.receipt_state(), ReceiptState::Complete);
+    // Another payment to the same script: both are kept, lowest outpoint first.
+    let more = foreign(2, &[(&script(1), 4_000)]);
+    let b2 = chain.push(std::slice::from_ref(&more));
+    apply(&mut view, &chain, &b2);
+    assert_eq!(view.receipts_at(0).len(), 2);
+    assert_eq!(
+        view.receipts_at(0).iter().map(|r| r.sats).sum::<u64>(),
+        54_000
+    );
+    assert!(view.receipts_at(0)[0].outpoint < view.receipts_at(0)[1].outpoint);
+    assert!(view.receipts_at(5).is_empty());
+}
+
+#[test]
+fn oc_12_a_receipt_stays_when_its_coin_is_spent() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let pay = foreign(1, &[(&script(1), 50_000)]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
+    apply(&mut view, &chain, &b1);
+    let spend = tx_from(op(&pay, 0), &[(&script(55), 49_000)]);
+    let b2 = chain.push(std::slice::from_ref(&spend));
+    apply(&mut view, &chain, &b2);
+    assert!(view.is_empty(), "the coin is gone");
+    assert_eq!(view.receipts_at(0), &[receipt(0, &pay, 0, 1, &b1)]);
+    // A coin made and spent in one block is never held, and is a receipt.
+    let pay2 = foreign(2, &[(&script(2), 20_000)]);
+    let spend2 = tx_from(op(&pay2, 0), &[(&script(55), 19_000)]);
+    let b3 = chain.push(&[pay2.clone(), spend2]);
+    apply(&mut view, &chain, &b3);
+    assert!(view.is_empty());
+    assert_eq!(view.receipts_at(1), &[receipt(1, &pay2, 0, 3, &b3)]);
+}
+
+#[test]
+fn oc_12_a_block_seen_twice_records_one_receipt() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let block = chain.push(&[foreign(1, &[(&script(1), 50_000)])]);
+    apply(&mut view, &chain, &block);
+    let once = view.clone();
+    apply(&mut view, &chain, &block);
+    assert_eq!(view, once);
+    assert_eq!(view.receipt_count(), 1);
+    // The receipt of a spent coin is not recorded again either.
+    let pay = foreign(2, &[(&script(2), 5_000)]);
+    let spend = tx_from(op(&pay, 0), &[(&script(55), 4_000)]);
+    let b2 = chain.push(&[pay, spend]);
+    apply(&mut view, &chain, &b2);
+    let twice = view.clone();
+    apply(&mut view, &chain, &b2);
+    assert_eq!(view, twice);
+    assert_eq!(view.receipt_count(), 2);
+}
+
+#[test]
+fn oc_12_a_reorganization_undoes_receipts_and_the_replacement_chain_records_its_own() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let first = foreign(1, &[(&script(1), 50_000)]);
+    let b1 = chain.push(std::slice::from_ref(&first));
+    apply(&mut view, &chain, &b1);
+    // Block 2 spends the first coin and pays the same index again.
+    let second = tx_from(op(&first, 0), &[(&script(1), 20_000)]);
+    let b2 = chain.push(std::slice::from_ref(&second));
+    apply(&mut view, &chain, &b2);
+    assert_eq!(view.receipt_count(), 2);
+    // Block 2 leaves: its receipt goes, the earlier one stays, and the
+    // coin that block 2 spent is back.
+    let replacement = foreign(3, &[(&script(1), 9_000), (&script(2), 4_000)]);
+    let (left, new) = chain.reorg(1, &[vec![replacement.clone()], vec![]]);
+    assert_eq!(left, vec![b2.block_hash()]);
+    view.reorganize(&left, 1, ok).unwrap();
+    assert_eq!(view.receipts_at(0), &[receipt(0, &first, 0, 1, &b1)]);
+    assert_eq!(view.receipt_count(), 1);
+    assert_eq!(view.balance(), 50_000);
+    // The replacement chain puts its own receipts in.
+    for b in &new {
+        apply(&mut view, &chain, b);
+    }
+    assert_eq!(view.receipt_count(), 3);
+    assert_eq!(view.receipts_at(0).len(), 2);
+    assert_eq!(
+        view.receipts_at(0).iter().map(|r| r.sats).sum::<u64>(),
+        59_000
+    );
+    assert_eq!(
+        view.receipts_at(1).iter().map(|r| r.sats).sum::<u64>(),
+        4_000
+    );
+    // The same view comes out of a chain that never held the old block.
+    let mut fresh = CoinView::new(0);
+    for b in [&b1, &new[0], &new[1]] {
+        apply(&mut fresh, &chain, b);
+    }
+    assert_eq!(fresh.receipts_at(0), view.receipts_at(0));
+    assert_eq!(fresh.receipts_at(1), view.receipts_at(1));
+}
+
+#[test]
+fn oc_12_a_block_that_left_with_a_receipt_and_no_undo_record_is_a_deep_reorg() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let pay = foreign(1, &[(&script(1), 50_000)]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
+    apply(&mut view, &chain, &b1);
+    // The coin is spent, so no coin of the view names block 1 any more.
+    let spend = tx_from(op(&pay, 0), &[(&script(55), 49_000)]);
+    let b2 = chain.push(std::slice::from_ref(&spend));
+    apply(&mut view, &chain, &b2);
+    for _ in 0..UNDO_BLOCKS + 1 {
+        chain.push(&[]);
+    }
+    view.set_checked(chain.height(), ok).unwrap();
+    assert!(view.is_empty());
+    // The undo record of block 1 has left the horizon; only its receipt
+    // names it. Block 1 leaving is a deep reorganization.
+    view.reorganize(&[b1.block_hash()], 0, ok).unwrap();
+    assert_eq!(view.state(), ViewState::DeepReorg);
+}
+
+#[test]
+fn oc_12_a_reset_drops_the_receipts_and_the_rescan_finds_them_again() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let pay = foreign(1, &[(&script(1), 50_000)]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
+    apply(&mut view, &chain, &b1);
+    view.reset(ok).unwrap();
+    assert_eq!(view.receipt_count(), 0);
+    apply(&mut view, &chain, &b1);
+    assert_eq!(view.receipts_at(0), &[receipt(0, &pay, 0, 1, &b1)]);
+}
+
+#[test]
+fn oc_13_the_log_is_bounded_and_past_the_bound_it_takes_a_named_state() {
+    assert_eq!(MAX_RECEIPTS, 262_144);
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    for n in 0..MAX_RECEIPTS {
+        let n = u32::try_from(n).unwrap();
+        let mut txid = [0u8; 32];
+        txid[..4].copy_from_slice(&n.to_le_bytes());
+        assert!(view.add_receipt_for_test(Receipt {
+            index: n,
+            outpoint: OutPoint::new(Txid::from_byte_array(txid), 0),
+            sats: 1,
+            height: 1,
+            block: BlockHash::from_byte_array([1; 32]),
+        }));
+    }
+    assert_eq!(view.receipt_count(), MAX_RECEIPTS);
+    assert_eq!(view.receipt_state(), ReceiptState::Complete, "at the bound");
+    // One more receipt does not fit: the named state, and nothing else
+    // about the view changes.
+    let pay = foreign(1, &[(&script(1), 50_000)]);
+    let block = chain.push(std::slice::from_ref(&pay));
+    apply(&mut view, &chain, &block);
+    assert_eq!(view.receipt_state(), ReceiptState::LogFull);
+    assert_eq!(view.receipt_state().to_string(), "receipt log full");
+    assert_eq!(view.receipt_count(), MAX_RECEIPTS);
+    assert!(view.receipts_at(0).iter().all(|r| r.sats == 1));
+    // The coin is tracked, and the owner can still spend it.
+    assert_eq!(view.len(), 1);
+    assert!(view.ready());
+    assert_eq!(offered(&view, 1), vec![(op(&pay, 0), 50_000, 1)]);
+    // No facts are given while the log is full.
+    view.set_checked(1, ok).unwrap();
+    let sale = SaleKey {
+        counter: counter(),
+        index: 0,
+    };
+    assert_eq!(
+        verified_facts(&view, &super::refunds::new_owner(), sale, 1, 1),
+        Err(FactsRefused::ReceiptLogFull)
+    );
+    // The state is stored, and read back strictly.
+    let bytes = view.to_bytes();
+    let back = CoinView::from_bytes(&bytes).unwrap();
+    assert_eq!(back.receipt_state(), ReceiptState::LogFull);
+    assert_eq!(back.to_bytes(), bytes);
+    // A second block with a receipt still records nothing.
+    let more = foreign(2, &[(&script(2), 5_000)]);
+    let b2 = chain.push(std::slice::from_ref(&more));
+    apply(&mut view, &chain, &b2);
+    assert_eq!(view.receipt_count(), MAX_RECEIPTS);
+    assert_eq!(view.len(), 2);
+    // A reset and rescan ends it.
+    view.reset(ok).unwrap();
+    assert_eq!(view.receipt_state(), ReceiptState::Complete);
+    assert_eq!(view.receipt_count(), 0);
+}
+
+#[test]
+fn oc_12_a_receipt_that_was_spent_still_counts_for_a_sales_facts() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let pay = foreign(1, &[(&script(1), 50_000)]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
+    apply(&mut view, &chain, &b1);
+    let spend = tx_from(op(&pay, 0), &[(&script(55), 49_000)]);
+    let b2 = chain.push(std::slice::from_ref(&spend));
+    apply(&mut view, &chain, &b2);
+    for _ in 0..4 {
+        chain.push(&[]);
+    }
+    view.set_checked(chain.height(), ok).unwrap();
+    assert!(view.is_empty());
+    let sale = SaleKey {
+        counter: counter(),
+        index: 0,
+    };
+    let owner = super::refunds::new_owner();
+    // The payment is in block 1 and the tip is block 6: six deep.
+    assert_eq!(
+        verified_facts(&view, &owner, sale, chain.height(), 6),
+        Ok(openbmt_owner::SaleFacts {
+            received_sats: 50_000,
+            reached_refund_depth: true
+        })
+    );
+    assert!(
+        !verified_facts(&view, &owner, sale, chain.height(), 7)
+            .unwrap()
+            .reached_refund_depth
+    );
+}
+
+/// The bytes of `rich_view`, where its receipts start, and one entry's size.
+fn rich_receipts() -> (Vec<u8>, usize, usize) {
+    let (view, _) = rich_view();
+    let bytes = view.to_bytes();
+    assert_eq!(view.receipt_count(), 2);
+    let at = bytes.len() - 5 - 2 * 84;
+    (bytes, at, 84)
+}
+
+#[test]
+fn oc_12_the_stored_receipts_are_read_strictly() {
+    let (bytes, at, size) = rich_receipts();
+    let back = CoinView::from_bytes(&bytes).unwrap();
+    assert_eq!(back.receipts_at(0).len(), 1);
+    assert_eq!(back.receipts_at(1).len(), 1);
+    // The two entries, and the pieces around them.
+    let head = &bytes[..at];
+    let (e0, e1) = (&bytes[at + 5..at + 5 + size], &bytes[at + 5 + size..]);
+    let make = |flag: u8, entries: &[&[u8]]| {
+        let mut v = head.to_vec();
+        v.push(flag);
+        v.extend_from_slice(&u32::try_from(entries.len()).unwrap().to_le_bytes());
+        for e in entries {
+            v.extend_from_slice(e);
+        }
+        v
+    };
+    assert_eq!(make(0, &[e0, e1]), bytes);
+    // Out of order, and listed twice.
+    assert!(CoinView::from_bytes(&make(0, &[e1, e0])).is_err());
+    assert!(CoinView::from_bytes(&make(0, &[e0, e0])).is_err());
+    // An unspent receive coin without its receipt, unless the log is full.
+    assert!(CoinView::from_bytes(&make(0, &[e0])).is_err());
+    assert!(CoinView::from_bytes(&make(0, &[])).is_err());
+    assert!(CoinView::from_bytes(&make(1, &[e0])).is_ok());
+    // A receipt that does not match its coin.
+    let mut wrong = e1.to_vec();
+    wrong[40] ^= 1;
+    assert!(CoinView::from_bytes(&make(0, &[e0, &wrong])).is_err());
+    // A flag that is not 0 or 1, an index out of range, a count that is
+    // more than the bound.
+    let mut flagged = bytes.clone();
+    flagged[at] = 2;
+    assert!(CoinView::from_bytes(&flagged).is_err());
+    let mut high = e1.to_vec();
+    high[3] = 0x80;
+    assert!(CoinView::from_bytes(&make(1, &[e0, &high])).is_err());
+    let mut count = bytes.clone();
+    count[at + 1..at + 5].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert!(CoinView::from_bytes(&count).is_err());
+    // A cut, and a byte after the end, in the receipts.
+    for cut in at..bytes.len() {
+        assert!(CoinView::from_bytes(&bytes[..cut]).is_err(), "cut {cut}");
+    }
+    let mut more = bytes.clone();
+    more.push(0);
+    assert!(CoinView::from_bytes(&more).is_err());
+    // A flip of one byte of the receipts is refused or reads back the same.
+    for i in at..bytes.len() {
+        let mut flipped = bytes.clone();
+        flipped[i] ^= 0x01;
+        if let Ok(v) = CoinView::from_bytes(&flipped) {
+            assert_eq!(v.to_bytes(), flipped, "flip at {i}");
+        }
+    }
 }
