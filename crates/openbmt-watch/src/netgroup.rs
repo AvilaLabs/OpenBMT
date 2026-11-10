@@ -16,6 +16,20 @@ pub enum PeerAddr {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NetGroup(Repr);
 
+impl NetGroup {
+    /// The group as five bytes, for storing: a kind byte (0 local, 1 named,
+    /// 2 IPv4, 3 IPv6) and the prefix, padded with zeros. Two groups have
+    /// the same bytes only if they are the same group.
+    pub fn key(self) -> [u8; 5] {
+        match self.0 {
+            Repr::Local => [0, 0, 0, 0, 0],
+            Repr::Named => [1, 0, 0, 0, 0],
+            Repr::V4([a, b]) => [2, a, b, 0, 0],
+            Repr::V6([a, b, c, d]) => [3, a, b, c, d],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum Repr {
     /// Local, private, link-local, unspecified, CGNAT and addresses that no

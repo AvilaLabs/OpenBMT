@@ -73,7 +73,9 @@ thin driver that owns the sockets.
   connected peers are in the same network group (WR-41). The Box's node
   is never one of them.
 - **NR-21.** At least 2 of the connections go to peers that offer the
-  compact-filter service, when the address book has them.
+  compact-filter service, when the address book has them. What one peer
+  says about another's services earns no preference: only what a seed or
+  the peer itself has said.
 - **NR-22.** Addresses come from the network's DNS seeds, from `addr` and
   `addrv2` messages, and from the counter's own stored address book. The
   book holds at most 2,000 addresses and at most 8 per network group, so

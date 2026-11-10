@@ -414,6 +414,32 @@ fn nr_21_want_filters_restricts_when_such_peers_exist_and_falls_back() {
 }
 
 #[test]
+fn nr_21_a_peers_claim_that_another_serves_filters_earns_no_preference() {
+    // Otherwise one peer could make up addresses that all claim the
+    // service and be drawn first whenever filter peers are wanted.
+    let mut book = AddressBook::new();
+    let teller = Source::Peer(group_of(&gv4(200, 1)));
+    for i in 1..9 {
+        book.add(&gv4(i, 1), PORT, filters(), teller, 0);
+    }
+    let honest = gv4(50, 1);
+    book.add(&honest, PORT, filters(), Source::Seed, 0);
+    for random in 0..50 {
+        let mut copy = book.clone();
+        assert_eq!(copy.pick(&none(), true, random, 0).unwrap().addr, honest);
+    }
+    // Once a claimed one has shown the service itself, it counts.
+    let proven = gv4(3, 1);
+    book.connected_ok(&proven, PORT, filters(), 5);
+    let mut seen = BTreeSet::new();
+    for random in 0..50 {
+        let mut copy = book.clone();
+        seen.insert(copy.pick(&none(), true, random, 10_000).unwrap().group);
+    }
+    assert_eq!(seen, BTreeSet::from([group_of(&honest), group_of(&proven)]));
+}
+
+#[test]
 fn nr_23_an_empty_book_gives_nothing() {
     let mut book = AddressBook::new();
     assert_eq!(book.pick(&none(), false, 0, 0), None);

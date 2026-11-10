@@ -255,34 +255,9 @@ fn v4_documentation(b: [u8; 4]) -> bool {
     matches!(b, [192, 0, 2, _] | [198, 51, 100, _] | [203, 0, 113, _])
 }
 
-/// The network group as five bytes for the stored form: a kind byte and
-/// four bytes of prefix. The group type is opaque, so its debug text is
-/// read; a test pins that text for every kind.
+/// The network group as five bytes for the stored form.
 fn group_key(group: NetGroup) -> [u8; 5] {
-    let text = format!("{group:?}");
-    let inner = text
-        .strip_prefix("NetGroup(")
-        .and_then(|t| t.strip_suffix(')'))
-        .unwrap_or("");
-    let numbers = |prefix: &str| -> Vec<u8> {
-        inner
-            .strip_prefix(prefix)
-            .and_then(|t| t.strip_suffix("])"))
-            .map(|t| {
-                t.split(',')
-                    .filter_map(|n| n.trim().parse::<u8>().ok())
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-    if inner == "Named" {
-        return [1, 0, 0, 0, 0];
-    }
-    match (numbers("V4([").as_slice(), numbers("V6([").as_slice()) {
-        ([a, b], _) => [2, *a, *b, 0, 0],
-        (_, [a, b, c, d]) => [3, *a, *b, *c, *d],
-        _ => [0; 5],
-    }
+    group.key()
 }
 
 /// The group a five-byte key names, if the key is exactly what `group_key`
@@ -293,8 +268,7 @@ fn group_from_key(k: [u8; 5]) -> Option<NetGroup> {
         [1, ..] => network_group(&PeerAddr::Named),
         [2, a, b, ..] => network_group(&PeerAddr::Ip(IpAddr::V4(Ipv4Addr::new(a, b, 0, 0)))),
         [3, a, b, c, d] => {
-            let mut o = [0u8; 16];
-            o[..4].copy_from_slice(&[a, b, c, d]);
+            let o = [a, b, c, d, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
             network_group(&PeerAddr::Ip(IpAddr::V6(Ipv6Addr::from(o))))
         }
         _ => return None,
@@ -495,9 +469,13 @@ impl AddressBook {
                 let filtered: Vec<Key> = candidates
                     .iter()
                     .filter(|k| {
-                        self.entries
-                            .get(k)
-                            .is_some_and(|e| e.services.has(ServiceFlags::COMPACT_FILTERS))
+                        // A peer's word about another peer's services is
+                        // not used to prefer it: only what a seed, the
+                        // owner or the peer itself said.
+                        self.entries.get(k).is_some_and(|e| {
+                            e.services.has(ServiceFlags::COMPACT_FILTERS)
+                                && (e.last_good.is_some() || !matches!(e.source, Source::Peer(_)))
+                        })
                     })
                     .copied()
                     .collect();
