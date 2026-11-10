@@ -931,3 +931,79 @@ fn nr_22_is_routable_agrees_with_what_the_book_keeps() {
     }
     assert!(!is_routable(&AddrV2::Cjdns(Ipv6Addr::from([0xfc; 16]))));
 }
+
+/// The next number of a small xorshift generator.
+fn next(state: &mut u64) -> u64 {
+    *state ^= *state << 13;
+    *state ^= *state >> 7;
+    *state ^= *state << 17;
+    *state
+}
+
+#[test]
+fn nr_21_has_filter_candidate_agrees_with_pick_on_random_books() {
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    for round in 0..300u16 {
+        let mut book = AddressBook::new();
+        let mut keys = Vec::new();
+        for i in 0..(next(&mut state) % 12) as u16 {
+            let addr = gv4(round % 50 * 3 + i % 6, 1 + (i % 200) as u8);
+            let services = if next(&mut state) % 2 == 0 {
+                filters()
+            } else {
+                svc()
+            };
+            let source = match next(&mut state) % 3 {
+                0 => Source::Seed,
+                1 => Source::Own,
+                _ => Source::Peer(group_of(&v4(77, 7, 7, 7))),
+            };
+            if book.add(&addr, PORT, services, source, 0) == Added::New {
+                keys.push(addr.clone());
+            }
+            match next(&mut state) % 5 {
+                0 => book.connected_ok(&addr, PORT, services, 5),
+                1 => book.misbehaved(&addr, PORT, 5),
+                _ => {}
+            }
+        }
+        let now = 10 + next(&mut state) % 1_000;
+        let mut connected = BTreeSet::new();
+        for addr in &keys {
+            if next(&mut state) % 4 == 0 {
+                connected.insert(group_of(addr));
+            }
+        }
+        let expect = book.has_filter_candidate(&connected, now);
+        let random = next(&mut state);
+        let mut copy = book.clone();
+        let picked = copy.pick(&connected, true, random, now);
+        let trusted_filter = picked.is_some_and(|p| {
+            let e = book.get(&p.addr, p.port).unwrap();
+            e.services.has(ServiceFlags::COMPACT_FILTERS)
+                && (e.last_good.is_some() || !matches!(e.source, Source::Peer(_)))
+        });
+        // With a candidate that offers filters, pick takes one; without,
+        // it never takes one that offers filters.
+        assert_eq!(expect, trusted_filter, "round {round}");
+    }
+}
+
+#[test]
+fn nr_21_has_filter_candidate_skips_connected_groups_and_recent_tries() {
+    let mut book = AddressBook::new();
+    let a = gv4(1, 1);
+    book.add(&a, PORT, filters(), Source::Seed, 0);
+    assert!(book.has_filter_candidate(&none(), 0));
+    let mut connected = none();
+    connected.insert(group_of(&a));
+    assert!(!book.has_filter_candidate(&connected, 0));
+    book.pick(&none(), true, 0, 100);
+    assert!(!book.has_filter_candidate(&none(), 100));
+    assert!(book.has_filter_candidate(&none(), 100 + RETRY_SECS));
+    // A peer's word is not enough.
+    let mut book = AddressBook::new();
+    let told_by = Source::Peer(group_of(&v4(77, 7, 7, 7)));
+    book.add(&gv4(2, 1), PORT, filters(), told_by, 0);
+    assert!(!book.has_filter_candidate(&none(), 0));
+}

@@ -257,6 +257,22 @@ pub fn is_routable(addr: &AddrV2) -> bool {
     Addr::from_v2(addr).is_some_and(|a| a.classify().is_ok())
 }
 
+/// NR-23: an entry that may be dialed now: not banned, not in a connected
+/// group and not tried in the last [`RETRY_SECS`].
+fn is_candidate(e: &Entry, connected: &BTreeSet<NetGroup>, now: u64) -> bool {
+    !banned(e, now)
+        && !connected.contains(&e.group)
+        && e.last_try.is_none_or(|t| now >= t && now - t >= RETRY_SECS)
+}
+
+/// NR-21: an entry that offers the compact-filter service. A peer's word
+/// about another peer's services is not used to prefer it: only what a
+/// seed, the owner or the peer itself said.
+fn offers_filters(e: &Entry) -> bool {
+    e.services.has(ServiceFlags::COMPACT_FILTERS)
+        && (e.last_good.is_some() || !matches!(e.source, Source::Peer(_)))
+}
+
 /// The group of local and private addresses (WR-41).
 fn local_group() -> NetGroup {
     network_group(&PeerAddr::Ip(IpAddr::V4(Ipv4Addr::LOCALHOST)))
@@ -468,11 +484,7 @@ impl AddressBook {
         let mut candidates: Vec<Key> = self
             .entries
             .iter()
-            .filter(|(_, e)| {
-                !banned(e, now)
-                    && !connected.contains(&e.group)
-                    && e.last_try.is_none_or(|t| now >= t && now - t >= RETRY_SECS)
-            })
+            .filter(|(_, e)| is_candidate(e, connected, now))
             .map(|(k, _)| *k)
             .collect();
         let anchor = self.anchors.iter().find(|a| candidates.contains(a));
@@ -482,15 +494,7 @@ impl AddressBook {
             if want_filters {
                 let filtered: Vec<Key> = candidates
                     .iter()
-                    .filter(|k| {
-                        // A peer's word about another peer's services is
-                        // not used to prefer it: only what a seed, the
-                        // owner or the peer itself said.
-                        self.entries.get(k).is_some_and(|e| {
-                            e.services.has(ServiceFlags::COMPACT_FILTERS)
-                                && (e.last_good.is_some() || !matches!(e.source, Source::Peer(_)))
-                        })
-                    })
+                    .filter(|k| self.entries.get(k).is_some_and(offers_filters))
                     .copied()
                     .collect();
                 if !filtered.is_empty() {
@@ -513,6 +517,16 @@ impl AddressBook {
             port: chosen.port,
             group: entry.group,
         })
+    }
+
+    /// Whether [`pick`](Self::pick) with `want_filters` would choose among
+    /// addresses that offer filters: some entry that is a candidate now
+    /// (see `pick`) offers the compact-filter service as a seed, the owner
+    /// or the peer itself said. It shares both tests with `pick`.
+    pub fn has_filter_candidate(&self, connected: &BTreeSet<NetGroup>, now: u64) -> bool {
+        self.entries
+            .values()
+            .any(|e| is_candidate(e, connected, now) && offers_filters(e))
     }
 
     /// A handshake with the peer completed: failures go to 0, the time is
