@@ -13,6 +13,10 @@
 //! everything that takes a screen. The library takes events from the driver
 //! and gives bytes back.
 //!
+//! The [`refunds`] module turns the refund requests that arrive in those
+//! records into queued refunds on the owner's queue (`docs/COUNTER-RULES.md`
+//! CR-60 to CR-74).
+//!
 //! The [`link`] module carries those bytes to the counters through a relay
 //! (`docs/LINK-RULES.md` section 6), and [`copy`] keeps the owner's verified
 //! copy of each counter's records, which the counters send back the same way.
@@ -42,6 +46,7 @@
 
 pub mod copy;
 pub mod link;
+pub mod refunds;
 pub mod watcher;
 
 #[cfg(test)]
@@ -50,5 +55,8 @@ mod tests;
 pub use copy::{CheckInTaken, CopyError, CounterCopy, Stop, Taken};
 pub use link::{
     Alert, BoxReport, CounterState, OwnerLink, OwnerLinkConfig, OwnerLinkError, MAX_BOX_REPORTS,
+};
+pub use refunds::{
+    Applied, CashRefundSeen, IntakeError, NoteKind, RefundIntake, RefundNote, Stopped,
 };
 pub use watcher::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE, NOTE_LOG};

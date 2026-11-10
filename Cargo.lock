@@ -473,7 +473,11 @@ dependencies = [
  "openbmt-courier",
  "openbmt-link",
  "openbmt-net-io",
+ "openbmt-owner",
  "openbmt-pos",
+ "openbmt-session",
+ "openbmt-signer",
+ "openbmt-spend",
  "openbmt-watch",
 ]
 

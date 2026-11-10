@@ -20,6 +20,7 @@ use crate::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE};
 
 mod link;
 mod pos_notice;
+mod refunds;
 
 const T0: u64 = 1_700_000_000;
 
