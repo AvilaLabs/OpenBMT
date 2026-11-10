@@ -91,6 +91,23 @@ pub(crate) fn start(magic: &[u8; 4], capacity: usize) -> Vec<u8> {
     out
 }
 
+/// Write a flag byte, then the u64 only when there is one.
+pub(crate) fn put_opt_u64(out: &mut Vec<u8>, v: Option<u64>) {
+    match v {
+        Some(v) => {
+            out.push(1);
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        None => out.push(0),
+    }
+}
+
+/// A list length as the u32 the wire form carries. Callers hold lists far
+/// below that bound, so a longer one is a programming error.
+pub(crate) fn len_u32(len: usize) -> u32 {
+    u32::try_from(len).expect("list length fits the u32 wire field")
+}
+
 /// Cursor over the bytes being decoded.
 pub(crate) struct Reader<'a> {
     buf: &'a [u8],
@@ -107,11 +124,6 @@ impl<'a> Reader<'a> {
             VERSION => Ok(r),
             v => Err(DecodeError::UnsupportedVersion(v)),
         }
-    }
-
-    /// Bytes not yet read.
-    pub(crate) fn remaining(&self) -> usize {
-        self.buf.len()
     }
 
     pub(crate) fn take(&mut self, n: usize) -> Result<&'a [u8], DecodeError> {
@@ -149,6 +161,15 @@ impl<'a> Reader<'a> {
             0 => Ok(false),
             1 => Ok(true),
             _ => Err(DecodeError::NonCanonical("flag is not 0 or 1")),
+        }
+    }
+
+    /// A flag byte, then a u64 only when the flag is 1.
+    pub(crate) fn opt_u64(&mut self) -> Result<Option<u64>, DecodeError> {
+        if self.flag()? {
+            Ok(Some(self.u64_le()?))
+        } else {
+            Ok(None)
         }
     }
 
@@ -198,7 +219,6 @@ mod tests {
         assert_eq!(r.u16_le(), Ok(2));
         assert_eq!(r.u32_le(), Ok(3));
         assert_eq!(r.u64_le(), Ok(4));
-        assert_eq!(r.remaining(), 1);
         assert_eq!(r.u16_le(), Err(DecodeError::Truncated));
         assert_eq!(r.finish(), Err(DecodeError::TrailingBytes));
         assert_eq!(Reader { buf: &[] }.finish(), Ok(()));

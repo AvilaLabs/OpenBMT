@@ -17,6 +17,7 @@ use bitcoin::{Script, TxOut};
 
 use crate::identity::DeviceId;
 use crate::settings::Settings;
+use crate::wire::{self, DecodeError, Reader};
 
 /// Light check: largest instant sale, whole dollars.
 pub const LIGHT_PER_SALE_USD: u32 = 10;
@@ -423,6 +424,46 @@ impl Exposure {
     pub fn release_by_owner(&mut self, id: &PaymentId) -> Option<u64> {
         self.entries.remove(id)
     }
+
+    /// Snapshot: `OBME`, version 1, the entry count as u32 LE, then each
+    /// entry as the 32-byte payment id and its amount as u64 LE, in
+    /// ascending id order.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = wire::start(&wire::MAGIC_EXPOSURE, 4 + self.entries.len() * 40);
+        out.extend_from_slice(&wire::len_u32(self.entries.len()).to_le_bytes());
+        for (id, amount) in &self.entries {
+            out.extend_from_slice(&id.0);
+            out.extend_from_slice(&amount.to_le_bytes());
+        }
+        out
+    }
+
+    /// Restore a snapshot strictly (see [`crate::wire`]). Ids must be in
+    /// strictly ascending order, and the amounts must not add up past
+    /// `u64::MAX`; otherwise the result is `NonCanonical`.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut r = Reader::framed(bytes, &wire::MAGIC_EXPOSURE)?;
+        let n = r.count(usize::MAX, 40)?;
+        let mut entries = BTreeMap::new();
+        let mut last: Option<[u8; 32]> = None;
+        let mut total = 0u64;
+        for _ in 0..n {
+            let id = r.array::<32>()?;
+            if last.is_some_and(|prev| prev >= id) {
+                return Err(DecodeError::NonCanonical(
+                    "payment ids are not in ascending order",
+                ));
+            }
+            last = Some(id);
+            let amount = r.u64_le()?;
+            total = total
+                .checked_add(amount)
+                .ok_or(DecodeError::NonCanonical("outstanding total overflows"))?;
+            entries.insert(PaymentId(id), amount);
+        }
+        r.finish()?;
+        Ok(Self { entries })
+    }
 }
 
 /// Pause state after cancels.
@@ -476,6 +517,36 @@ impl PauseTracker {
     /// history too.
     pub fn owner_reset(&mut self) {
         *self = Self::default();
+    }
+
+    /// Snapshot: `OBMP`, version 1, then `last_cancel` and `paused_until`
+    /// (each a flag byte and, when the flag is 1, a u64 LE) and the `locked`
+    /// flag.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = wire::start(&wire::MAGIC_PAUSE_TRACKER, 20);
+        wire::put_opt_u64(&mut out, self.last_cancel);
+        wire::put_opt_u64(&mut out, self.paused_until);
+        out.push(u8::from(self.locked));
+        out
+    }
+
+    /// Restore a snapshot strictly (see [`crate::wire`]). A pause or lock
+    /// without a recorded cancel cannot arise from `record_cancel`, so it is
+    /// `NonCanonical`.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut r = Reader::framed(bytes, &wire::MAGIC_PAUSE_TRACKER)?;
+        let last_cancel = r.opt_u64()?;
+        let paused_until = r.opt_u64()?;
+        let locked = r.flag()?;
+        r.finish()?;
+        if last_cancel.is_none() && (paused_until.is_some() || locked) {
+            return Err(DecodeError::NonCanonical("pause state without a cancel"));
+        }
+        Ok(Self {
+            last_cancel,
+            paused_until,
+            locked,
+        })
     }
 }
 
@@ -1296,5 +1367,167 @@ mod tests {
             t.record_cancel(500);
         }
         assert!(matches!(t.status(501), PauseStatus::PausedFor { .. }));
+    }
+
+    fn ids(ns: &[u8]) -> Exposure {
+        let mut e = Exposure::new();
+        for &n in ns {
+            e.accept_instant(pid(n), u64::from(n) * 1_000, u64::MAX)
+                .unwrap();
+        }
+        e
+    }
+
+    #[test]
+    fn exposure_snapshot_round_trips_and_behaves_the_same() {
+        for e in [Exposure::new(), ids(&[3]), ids(&[9, 1, 5, 200])] {
+            let bytes = e.to_bytes();
+            assert_eq!(&bytes[..5], b"OBME\x01");
+            let mut back = Exposure::from_bytes(&bytes).unwrap();
+            assert_eq!(back, e);
+            assert_eq!(back.to_bytes(), bytes);
+            assert_eq!(back.outstanding(), e.outstanding());
+            assert_eq!(
+                back.accept_instant(pid(5), 1, u64::MAX).is_err(),
+                e.clone().accept_instant(pid(5), 1, u64::MAX).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn exposure_snapshot_decoding_is_strict() {
+        crate::testutil::assert_strict_decoding(
+            &ids(&[2, 4, 6]).to_bytes(),
+            Exposure::from_bytes,
+            Exposure::to_bytes,
+        );
+        crate::testutil::assert_strict_decoding(
+            &Exposure::new().to_bytes(),
+            Exposure::from_bytes,
+            Exposure::to_bytes,
+        );
+    }
+
+    #[test]
+    fn exposure_snapshot_rejects_bad_framing_order_and_overflow() {
+        let good = ids(&[1, 2]).to_bytes();
+        let mut b = good.clone();
+        b[2] = b'X';
+        assert_eq!(Exposure::from_bytes(&b), Err(DecodeError::BadMagic));
+        for v in [0, 2] {
+            let mut b = good.clone();
+            b[4] = v;
+            assert_eq!(
+                Exposure::from_bytes(&b),
+                Err(DecodeError::UnsupportedVersion(v))
+            );
+        }
+        // Entries start at 9 and take 40 bytes each.
+        let (e0, e1) = (9, 49);
+        let mut unsorted = good.clone();
+        unsorted.copy_within(e1..e1 + 32, e0);
+        unsorted[e1..e1 + 32].fill(1);
+        assert!(matches!(
+            Exposure::from_bytes(&unsorted),
+            Err(DecodeError::NonCanonical(_))
+        ));
+        let mut repeated = good.clone();
+        repeated.copy_within(e0..e0 + 32, e1);
+        assert!(matches!(
+            Exposure::from_bytes(&repeated),
+            Err(DecodeError::NonCanonical(_))
+        ));
+        // Two amounts that add up past u64::MAX.
+        let mut overflow = good.clone();
+        overflow[e0 + 32..e0 + 40].fill(0xff);
+        overflow[e1 + 32..e1 + 40].copy_from_slice(&1u64.to_le_bytes());
+        assert_eq!(
+            Exposure::from_bytes(&overflow),
+            Err(DecodeError::NonCanonical("outstanding total overflows"))
+        );
+        // A count with no bytes behind it is refused without allocating.
+        let mut huge = good[..9].to_vec();
+        huge[5..9].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(Exposure::from_bytes(&huge), Err(DecodeError::Truncated));
+    }
+
+    #[test]
+    fn pause_snapshot_resumes_exactly() {
+        let mut states = vec![PauseTracker::new()];
+        let mut t = PauseTracker::new();
+        t.record_cancel(1_000);
+        states.push(t.clone());
+        t.record_cancel(2_000);
+        states.push(t.clone());
+        t.owner_reset();
+        t.record_cancel(90_000);
+        states.push(t);
+        for s in states {
+            let bytes = s.to_bytes();
+            assert_eq!(&bytes[..5], b"OBMP\x01");
+            let mut back = PauseTracker::from_bytes(&bytes).unwrap();
+            assert_eq!(back, s);
+            assert_eq!(back.to_bytes(), bytes);
+            for now in [0, 1_000, 4_599, 4_600, 90_000, 1_000_000] {
+                assert_eq!(back.status(now), s.status(now));
+            }
+            let mut original = s.clone();
+            back.record_cancel(95_000);
+            original.record_cancel(95_000);
+            assert_eq!(back, original);
+        }
+    }
+
+    #[test]
+    fn pause_snapshot_decoding_is_strict() {
+        let mut t = PauseTracker::new();
+        crate::testutil::assert_strict_decoding(
+            &t.to_bytes(),
+            PauseTracker::from_bytes,
+            PauseTracker::to_bytes,
+        );
+        t.record_cancel(10);
+        t.record_cancel(20);
+        crate::testutil::assert_strict_decoding(
+            &t.to_bytes(),
+            PauseTracker::from_bytes,
+            PauseTracker::to_bytes,
+        );
+    }
+
+    #[test]
+    fn pause_snapshot_rejects_bad_flags_and_impossible_state() {
+        let mut t = PauseTracker::new();
+        t.record_cancel(10);
+        let good = t.to_bytes();
+        // last_cancel flag 5, paused_until flag 14, locked flag 23.
+        for at in [5, 14, 23] {
+            let mut b = good.clone();
+            b[at] = 2;
+            assert!(matches!(
+                PauseTracker::from_bytes(&b),
+                Err(DecodeError::NonCanonical(_))
+            ));
+        }
+        // A pause with no cancel on record.
+        let mut b = good.clone();
+        b[5] = 0;
+        b.drain(6..14);
+        assert_eq!(
+            PauseTracker::from_bytes(&b),
+            Err(DecodeError::NonCanonical("pause state without a cancel"))
+        );
+        let mut b = PauseTracker::new().to_bytes();
+        *b.last_mut().unwrap() = 1;
+        assert_eq!(
+            PauseTracker::from_bytes(&b),
+            Err(DecodeError::NonCanonical("pause state without a cancel"))
+        );
+        let mut b = good.clone();
+        b[4] = 2;
+        assert_eq!(
+            PauseTracker::from_bytes(&b),
+            Err(DecodeError::UnsupportedVersion(2))
+        );
     }
 }

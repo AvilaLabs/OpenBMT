@@ -379,6 +379,21 @@ impl HighWater {
     pub fn next_index(&self) -> u32 {
         self.0
     }
+
+    /// Snapshot: `OBMH`, version 1, the next index as u32 LE.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = wire::start(&wire::MAGIC_HIGH_WATER, 4);
+        out.extend_from_slice(&self.0.to_le_bytes());
+        out
+    }
+
+    /// Restore a snapshot strictly (see [`crate::wire`]).
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut r = Reader::framed(bytes, &wire::MAGIC_HIGH_WATER)?;
+        let next = r.u32_le()?;
+        r.finish()?;
+        Ok(Self(next))
+    }
 }
 
 /// The Key app's batch check (§5.1), as a pure function over its own state.
@@ -560,6 +575,187 @@ impl CounterBatches {
     pub fn watched_scripts(&self) -> &[ScriptBuf] {
         &self.watched
     }
+
+    /// Snapshot of everything needed to resume exactly: the issued index
+    /// ranges (retired ones included), each active batch with its scripts and
+    /// the position of the next unused one, and the watched scripts in the
+    /// order they were shown or retired. The pinned roots, the policy, and
+    /// the counter and wallet the state belongs to are not trusted from
+    /// storage: the counter and wallet checksum are written so a snapshot
+    /// for another counter or wallet is noticed, and [`Self::from_bytes`]
+    /// takes all four from the caller.
+    ///
+    /// ```text
+    /// OBMC | 1 | counter (32) | wallet checksum (32)
+    ///   | n_ranges u32 | (start u32, end u32)*
+    ///   | n_active u32 | (start u32, next u32, n u32, n * 34-byte script)*
+    ///   | n_watched u32 | n_watched * 34-byte script
+    /// ```
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let scripts: usize = self.active.iter().map(|b| b.scripts.len()).sum();
+        let mut out = wire::start(
+            &wire::MAGIC_COUNTER_BATCHES,
+            76 + self.ranges.len() * 8
+                + self.active.len() * 12
+                + (scripts + self.watched.len()) * SCRIPT_LEN,
+        );
+        out.extend_from_slice(&self.counter.to_bytes());
+        out.extend_from_slice(&self.wallet_checksum);
+        out.extend_from_slice(&wire::len_u32(self.ranges.len()).to_le_bytes());
+        for &(start, end) in &self.ranges {
+            out.extend_from_slice(&start.to_le_bytes());
+            out.extend_from_slice(&end.to_le_bytes());
+        }
+        out.extend_from_slice(&wire::len_u32(self.active.len()).to_le_bytes());
+        for b in &self.active {
+            out.extend_from_slice(&b.start.to_le_bytes());
+            out.extend_from_slice(&wire::len_u32(b.next).to_le_bytes());
+            out.extend_from_slice(&wire::len_u32(b.scripts.len()).to_le_bytes());
+            for s in &b.scripts {
+                out.extend_from_slice(s.as_bytes());
+            }
+        }
+        out.extend_from_slice(&wire::len_u32(self.watched.len()).to_le_bytes());
+        for s in &self.watched {
+            out.extend_from_slice(s.as_bytes());
+        }
+        out
+    }
+
+    /// Restore a snapshot strictly (see [`crate::wire`]) for `counter`.
+    ///
+    /// `roots`, `wallet_checksum` and `policy` come from the caller, as they
+    /// do for [`CounterBatches::new`], so stored bytes cannot change who is
+    /// trusted. The snapshot must be for the same counter and wallet, and the
+    /// invariants the type keeps must hold, else the result is
+    /// `NonCanonical`: issued ranges do not overlap, each active batch fills
+    /// exactly one issued range in ascending order with its position inside
+    /// it, every script is a P2WSH script, no script appears twice, and the
+    /// scripts already shown from an active batch are exactly the watched
+    /// ones. The result then behaves exactly as the snapshotted state did.
+    pub fn from_bytes(
+        bytes: &[u8],
+        counter: DeviceId,
+        roots: PinnedRoots,
+        wallet_checksum: [u8; 32],
+        policy: BatchPolicy,
+    ) -> Result<Self, DecodeError> {
+        let mut r = Reader::framed(bytes, &wire::MAGIC_COUNTER_BATCHES)?;
+        if r.device_id()? != counter {
+            return Err(DecodeError::NonCanonical("snapshot is for another counter"));
+        }
+        if r.array::<32>()? != wallet_checksum {
+            return Err(DecodeError::NonCanonical("snapshot is for another wallet"));
+        }
+
+        let n = r.count(usize::MAX, 8)?;
+        let mut ranges = Vec::with_capacity(n);
+        for _ in 0..n {
+            let (start, end) = (r.u32_le()?, r.u32_le()?);
+            if start >= end || end > INDEX_LIMIT {
+                return Err(DecodeError::NonCanonical(
+                    "issued range is empty or out of bounds",
+                ));
+            }
+            ranges.push((start, end));
+        }
+        let mut sorted = ranges.clone();
+        sorted.sort_unstable();
+        if sorted.windows(2).any(|w| w[1].0 < w[0].1) {
+            return Err(DecodeError::NonCanonical("issued ranges overlap"));
+        }
+
+        let n = r.count(usize::MAX, 12)?;
+        let mut active: VecDeque<ActiveBatch> = VecDeque::with_capacity(n);
+        for _ in 0..n {
+            let start = r.u32_le()?;
+            let next = usize::try_from(r.u32_le()?).map_err(|_| DecodeError::TooLarge)?;
+            let len = r.count(MAX_COUNT as usize, SCRIPT_LEN)?;
+            if next > len {
+                return Err(DecodeError::NonCanonical("position is past the batch"));
+            }
+            let end = u32::try_from(len)
+                .ok()
+                .and_then(|l| start.checked_add(l))
+                .filter(|&e| e <= INDEX_LIMIT)
+                .ok_or(DecodeError::NonCanonical("active batch is out of bounds"))?;
+            if sorted.binary_search(&(start, end)).is_err() {
+                return Err(DecodeError::NonCanonical(
+                    "active batch is not an issued range",
+                ));
+            }
+            if active.back().is_some_and(|prev| prev.start >= start) {
+                return Err(DecodeError::NonCanonical(
+                    "active batches are not in ascending order",
+                ));
+            }
+            let mut scripts = Vec::with_capacity(len);
+            for _ in 0..len {
+                scripts.push(read_p2wsh(&mut r)?);
+            }
+            active.push_back(ActiveBatch {
+                start,
+                scripts,
+                next,
+            });
+        }
+
+        let n = r.count(usize::MAX, SCRIPT_LEN)?;
+        let mut watched = Vec::with_capacity(n);
+        for _ in 0..n {
+            watched.push(read_p2wsh(&mut r)?);
+        }
+        r.finish()?;
+
+        let mut watched_set = HashSet::with_capacity(watched.len());
+        if !watched.iter().all(|s| watched_set.insert(s)) {
+            return Err(DecodeError::NonCanonical("watched scripts repeat"));
+        }
+        let mut known: HashSet<ScriptBuf> = watched.iter().cloned().collect();
+        let mut active_seen = HashSet::new();
+        for b in &active {
+            for (i, s) in b.scripts.iter().enumerate() {
+                if !active_seen.insert(s) {
+                    return Err(DecodeError::NonCanonical("an active script repeats"));
+                }
+                let shown = i < b.next;
+                if watched_set.contains(s) != shown {
+                    return Err(DecodeError::NonCanonical(
+                        "shown scripts do not match the watched scripts",
+                    ));
+                }
+                if !shown {
+                    known.insert(s.clone());
+                }
+            }
+        }
+        let issued: u64 = ranges.iter().map(|&(s, e)| u64::from(e - s)).sum();
+        if watched.len() as u64 > issued {
+            return Err(DecodeError::NonCanonical(
+                "more watched scripts than issued addresses",
+            ));
+        }
+
+        Ok(Self {
+            counter,
+            roots,
+            wallet_checksum,
+            policy,
+            active,
+            ranges,
+            known,
+            watched,
+        })
+    }
+}
+
+/// Read one 34-byte script, which must be P2WSH.
+fn read_p2wsh(r: &mut Reader<'_>) -> Result<ScriptBuf, DecodeError> {
+    let script = ScriptBuf::from_bytes(r.take(SCRIPT_LEN)?.to_vec());
+    if !script.is_p2wsh() {
+        return Err(DecodeError::NonCanonical("script is not P2WSH"));
+    }
+    Ok(script)
 }
 
 #[cfg(test)]
@@ -1168,6 +1364,198 @@ mod tests {
         let f = fx();
         let mut c = counter_state(&f);
         assert_eq!(c.retire_unused(), 0);
+    }
+
+    fn restore(f: &Fx, bytes: &[u8]) -> Result<CounterBatches, DecodeError> {
+        CounterBatches::from_bytes(bytes, f.counter, f.roots, f.wallet.checksum32(), SMALL)
+    }
+
+    /// Batches 0..3 and 3..6 added, four scripts handed out: the first batch
+    /// is used up and gone, the second is one script in.
+    fn mid_batch(f: &Fx) -> CounterBatches {
+        let mut hw = HighWater::new();
+        let mut c = counter_state(f);
+        c.add(signed(f, 0, 3, &mut hw)).unwrap();
+        c.add(signed(f, 3, 3, &mut hw)).unwrap();
+        for _ in 0..4 {
+            c.next_script().unwrap();
+        }
+        c
+    }
+
+    // Offsets in `mid_batch` bytes: header 69, range count 69, ranges 73..89,
+    // active count 89, then the one active batch: start 93, next 97, count
+    // 101, scripts 105..207, watched count 207, watched scripts 211...
+    const RANGE_1_START_AT: usize = 81;
+    const ACTIVE_START_AT: usize = 93;
+    const ACTIVE_NEXT_AT: usize = 97;
+    const ACTIVE_SCRIPT_1_AT: usize = 139;
+    const WATCHED_AT: usize = 211;
+
+    #[test]
+    fn high_water_round_trips_and_is_strict() {
+        for n in [0, 1, 1_000, u32::MAX] {
+            let hw = HighWater::from_next_index(n);
+            let bytes = hw.to_bytes();
+            assert_eq!(&bytes[..5], b"OBMH\x01");
+            assert_eq!(HighWater::from_bytes(&bytes), Ok(hw));
+        }
+        crate::testutil::assert_strict_decoding(
+            &HighWater::from_next_index(77).to_bytes(),
+            HighWater::from_bytes,
+            HighWater::to_bytes,
+        );
+        let good = HighWater::new().to_bytes();
+        let mut b = good.clone();
+        b[0] = b'X';
+        assert_eq!(HighWater::from_bytes(&b), Err(DecodeError::BadMagic));
+        for v in [0, 2] {
+            let mut b = good.clone();
+            b[4] = v;
+            assert_eq!(
+                HighWater::from_bytes(&b),
+                Err(DecodeError::UnsupportedVersion(v))
+            );
+        }
+    }
+
+    #[test]
+    fn counter_snapshot_resumes_exactly() {
+        let f = fx();
+        let mut original = mid_batch(&f);
+        let bytes = original.to_bytes();
+        assert_eq!(&bytes[..5], b"OBMC\x01");
+        let mut restored = restore(&f, &bytes).unwrap();
+        assert_eq!(restored.to_bytes(), bytes);
+        assert_eq!(restored.remaining(), original.remaining());
+        assert_eq!(restored.watched_scripts(), original.watched_scripts());
+        // Both hand out the same addresses to the end.
+        loop {
+            let (a, b) = (original.next_script(), restored.next_script());
+            assert_eq!(a, b);
+            if a.is_none() {
+                break;
+            }
+        }
+        assert_eq!(original.to_bytes(), restored.to_bytes());
+        // And refuse the same replays.
+        let replay = signed(&f, 3, 3, &mut HighWater::from_next_index(3));
+        assert_eq!(
+            original.add(replay.clone()).unwrap_err(),
+            BatchError::OverlapsExisting
+        );
+        assert_eq!(
+            restored.add(replay).unwrap_err(),
+            BatchError::OverlapsExisting
+        );
+    }
+
+    #[test]
+    fn counter_snapshot_keeps_retired_ranges_blocked() {
+        let f = fx();
+        let mut hw = HighWater::new();
+        let b1 = signed(&f, 0, 5, &mut hw);
+        let mut c = counter_state(&f);
+        c.add(b1.clone()).unwrap();
+        c.next_script().unwrap();
+        c.retire_unused();
+        let mut restored = restore(&f, &c.to_bytes()).unwrap();
+        assert_eq!(restored.remaining(), 0);
+        assert_eq!(restored.next_script(), None);
+        assert_eq!(restored.watched_scripts().len(), 5);
+        assert_eq!(restored.add(b1).unwrap_err(), BatchError::OverlapsExisting);
+        // A fresh range still works and is handed out from its start.
+        restored.add(signed(&f, 5, 3, &mut hw)).unwrap();
+        assert_eq!(restored.next_script().unwrap().0, 5);
+    }
+
+    #[test]
+    fn empty_counter_snapshot_round_trips() {
+        let f = fx();
+        let c = counter_state(&f);
+        let restored = restore(&f, &c.to_bytes()).unwrap();
+        assert_eq!(restored.to_bytes(), c.to_bytes());
+        assert_eq!(restored.remaining(), 0);
+    }
+
+    #[test]
+    fn counter_snapshot_decoding_is_strict() {
+        let f = fx();
+        crate::testutil::assert_strict_decoding(
+            &mid_batch(&f).to_bytes(),
+            |b| restore(&f, b),
+            CounterBatches::to_bytes,
+        );
+    }
+
+    #[test]
+    fn counter_snapshot_for_another_counter_or_wallet_is_refused() {
+        let f = fx();
+        let bytes = mid_batch(&f).to_bytes();
+        let other_counter = CounterBatches::from_bytes(
+            &bytes,
+            identity(55).device_id(),
+            f.roots,
+            f.wallet.checksum32(),
+            SMALL,
+        );
+        assert!(matches!(other_counter, Err(DecodeError::NonCanonical(_))));
+        let other_wallet = CounterBatches::from_bytes(&bytes, f.counter, f.roots, [9; 32], SMALL);
+        assert!(matches!(other_wallet, Err(DecodeError::NonCanonical(_))));
+    }
+
+    #[test]
+    fn counter_snapshot_invariants_are_rechecked() {
+        let f = fx();
+        let good = mid_batch(&f).to_bytes();
+        let refused = |edit: &dyn Fn(&mut Vec<u8>)| {
+            let mut b = good.clone();
+            edit(&mut b);
+            restore(&f, &b).err().unwrap()
+        };
+        assert_eq!(
+            refused(&|b| b[RANGE_1_START_AT] = 2),
+            DecodeError::NonCanonical("issued ranges overlap")
+        );
+        assert_eq!(
+            refused(&|b| b[ACTIVE_START_AT] = 4),
+            DecodeError::NonCanonical("active batch is not an issued range")
+        );
+        assert_eq!(
+            refused(&|b| b[ACTIVE_NEXT_AT] = 4),
+            DecodeError::NonCanonical("position is past the batch")
+        );
+        assert_eq!(
+            refused(&|b| b[ACTIVE_NEXT_AT] = 0),
+            DecodeError::NonCanonical("shown scripts do not match the watched scripts")
+        );
+        assert_eq!(
+            // The second byte of a P2WSH script is the push length, 0x20.
+            refused(&|b| b[ACTIVE_SCRIPT_1_AT + 1] = 0),
+            DecodeError::NonCanonical("script is not P2WSH")
+        );
+        assert_eq!(
+            refused(&|b| b.copy_within(WATCHED_AT..WATCHED_AT + 34, WATCHED_AT + 34)),
+            DecodeError::NonCanonical("watched scripts repeat")
+        );
+        // An unused script that is also marked as watched.
+        assert_eq!(
+            refused(&|b| b.copy_within(ACTIVE_SCRIPT_1_AT..ACTIVE_SCRIPT_1_AT + 34, WATCHED_AT)),
+            DecodeError::NonCanonical("shown scripts do not match the watched scripts")
+        );
+    }
+
+    #[test]
+    fn counter_snapshot_counts_are_checked_before_allocation() {
+        let f = fx();
+        let good = mid_batch(&f).to_bytes();
+        let mut b = good[..73].to_vec();
+        b[69..73].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(restore(&f, &b).err(), Some(DecodeError::Truncated));
+        // A script count above the batch limit inside an active batch.
+        let mut b = good[..105].to_vec();
+        b[101..105].copy_from_slice(&(MAX_COUNT + 1).to_le_bytes());
+        assert_eq!(restore(&f, &b).err(), Some(DecodeError::TooLarge));
     }
 
     // Offsets in a signed batch: magic 0..4, version 4, checksum 5..37,
