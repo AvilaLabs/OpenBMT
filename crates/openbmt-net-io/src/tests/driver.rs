@@ -1,6 +1,7 @@
 //! The driver against fake peers on loopback sockets.
 
-use std::net::{Ipv4Addr, SocketAddr, TcpListener};
+use std::io::{ErrorKind, Read, Write};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -16,7 +17,10 @@ use openbmt_watch::{HeaderStore, PeerAddr};
 
 use super::kit::*;
 use crate::dial::{DialError, Net};
-use crate::driver::{longest_connected, AppEvent, Driver, DriverConfig, Handle};
+use crate::driver::{
+    longest_connected, AppEvent, Driver, DriverConfig, Handle, ANCHOR_SECS, HEADER_SAVE_SECS,
+    WRITE_TIMEOUT_SECS,
+};
 use crate::env::{Key, SystemClock};
 use crate::socks::Target;
 
@@ -854,5 +858,145 @@ fn nr_73_a_second_block_at_the_same_tip_does_not_save_the_headers_again() {
     settle();
     // One save for both blocks. The save at shutdown comes after this.
     assert_eq!(storage.save_count(Key::Headers), 1);
+    handle.shutdown();
+}
+
+// ----- NR-73: when the files are saved ------------------------------------
+
+#[test]
+fn nr_73_the_headers_are_saved_a_minute_after_the_last_save_if_the_tip_moved() {
+    let headers = chain(5);
+    let peer = FakePeer::start(Behavior::Serve(headers.clone()));
+    let storage = MemStorage::default();
+    let start_time = 1_700_000_000;
+    let clock = TestClock::at(start_time);
+    let mut handle = start_clocked(
+        config(&peer, 30),
+        &storage,
+        Net::system(),
+        &clock,
+        Vec::new(),
+    );
+    // The tip has moved, and nothing is saved yet.
+    wait_for(&handle, 10, tip_is(5)).expect("the headers did not arrive");
+    settle();
+    assert_eq!(storage.save_count(Key::Headers), 0);
+    // Not before a minute has passed ...
+    clock.set(start_time + HEADER_SAVE_SECS - 1);
+    settle();
+    assert_eq!(storage.save_count(Key::Headers), 0);
+    // ... and then at once.
+    clock.set(start_time + HEADER_SAVE_SECS);
+    assert!(until(5, || storage.save_count(Key::Headers) == 1));
+    assert_eq!(stored_headers(&storage).tip(), (5, headers[4].block_hash()));
+    // The tip has not moved since, so the next minutes save nothing.
+    clock.set(start_time + 3 * HEADER_SAVE_SECS);
+    settle();
+    assert_eq!(storage.save_count(Key::Headers), 1);
+    handle.shutdown();
+}
+
+#[test]
+fn nr_73_the_anchors_are_set_and_the_book_saved_every_ten_minutes() {
+    let peer = FakePeer::start(Behavior::Honest(Vec::new()));
+    let storage = MemStorage::with(Key::Book, book_bytes(&[(8, 8, 8, 8, 8333)], &[]));
+    let (net, _, _) = net_to(peer.addr, Vec::new());
+    let start_time = 1_700_000_000;
+    let clock = TestClock::at(start_time);
+    let mut handle = start_clocked(bare(), &storage, net, &clock, Vec::new());
+    wait_for(&handle, 10, has_peer).expect("no ready peer");
+    // Nothing is saved while the ten minutes run, and the clock is moved in
+    // steps so that the manager's own timers see an ordinary peer.
+    for step in [100, 300, ANCHOR_SECS - 1] {
+        clock.set(start_time + step);
+        settle();
+    }
+    assert_eq!(storage.save_count(Key::Book), 0);
+    assert_eq!(storage.save_count(Key::Headers), 0);
+    // At ten minutes the book is saved, with the connected peer as the
+    // anchor.
+    clock.set(start_time + ANCHOR_SECS);
+    assert!(until(5, || storage.save_count(Key::Book) == 1));
+    assert_eq!(
+        stored_book(&storage).anchors(),
+        vec![(v4(8, 8, 8, 8), 8333)]
+    );
+    // Headers are not part of it: the tip has not moved.
+    assert_eq!(storage.save_count(Key::Headers), 0);
+    // And again ten minutes later, not before.
+    clock.set(start_time + ANCHOR_SECS + 300);
+    settle();
+    assert_eq!(storage.save_count(Key::Book), 1);
+    clock.set(start_time + 2 * ANCHOR_SECS);
+    assert!(until(5, || storage.save_count(Key::Book) == 2));
+    handle.shutdown();
+}
+
+// ----- the write timeout ---------------------------------------------------
+
+#[test]
+fn nr_73_a_peer_that_stops_reading_is_dropped_after_the_write_timeout() {
+    // A connected pair whose far end never reads, filled until a write
+    // blocks, so that the first thing the driver writes to it (its version
+    // message) cannot be sent.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut near = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut far, _) = listener.accept().unwrap();
+    near.set_write_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
+    let chunk = [0u8; 65_536];
+    let mut filled = 0usize;
+    while let Ok(n) = near.write(&chunk) {
+        filled += n;
+    }
+    while near.write(&[0u8]).is_ok() {
+        filled += 1;
+    }
+    assert!(filled > 0);
+
+    let stalled: Arc<Mutex<Option<TcpStream>>> = Arc::new(Mutex::new(Some(near)));
+    let dials: Arc<Mutex<Vec<Instant>>> = Arc::default();
+    let (take, log) = (stalled.clone(), dials.clone());
+    let net = Net {
+        dial: Arc::new(move |_, _, _| {
+            log.lock().unwrap().push(Instant::now());
+            match take.lock().unwrap().take() {
+                Some(stream) => Ok(stream),
+                None => Err(DialError::Connect(ErrorKind::ConnectionRefused)),
+            }
+        }),
+        resolve: Arc::new(|_, _| Ok(Vec::new())),
+    };
+    let mut cfg = bare();
+    cfg.allow_local = true;
+    cfg.fixed_peers = vec![sock(127, 0, 0, 1, 9)];
+    cfg.redial_pause_secs = 1;
+    let storage = MemStorage::default();
+    let mut handle = start(cfg, &storage, net);
+
+    // The driver is blocked in the write for the timeout, then drops the
+    // peer, pauses it for a second and dials again. The gap between the two
+    // dials is therefore the timeout and the pause, and no more.
+    assert!(until(20, || dials.lock().unwrap().len() >= 2));
+    let at = dials.lock().unwrap().clone();
+    let gap = at[1].duration_since(at[0]);
+    let timeout = Duration::from_secs(WRITE_TIMEOUT_SECS);
+    assert!(gap >= timeout, "the write did not block: {gap:?}");
+    assert!(
+        gap < timeout + Duration::from_secs(1 + 2),
+        "the driver stalled for {gap:?}"
+    );
+    // The driver closed its end: the far end reads what was written, then
+    // the end of the stream (or a reset).
+    far.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let mut sink = vec![0u8; 65_536];
+    let ended = loop {
+        match far.read(&mut sink) {
+            Ok(0) => break true,
+            Ok(_) => {}
+            Err(e) => break !matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut),
+        }
+    };
+    assert!(ended, "the driver did not close the peer");
     handle.shutdown();
 }

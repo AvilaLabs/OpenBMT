@@ -197,7 +197,7 @@ fn frame(message: NetworkMessage) -> Vec<u8> {
     encode(magic(), &message)
 }
 
-fn version_message() -> VersionMessage {
+fn version_message(start_height: u32) -> VersionMessage {
     let silent = Address {
         services: ServiceFlags::NONE,
         address: [0; 8],
@@ -211,7 +211,7 @@ fn version_message() -> VersionMessage {
         sender: silent,
         nonce: 42,
         user_agent: "/fake:1/".to_string(),
-        start_height: i32::try_from(PEER_HEIGHT).unwrap(),
+        start_height: i32::try_from(start_height).unwrap(),
         relay: true,
     }
 }
@@ -221,6 +221,9 @@ fn version_message() -> VersionMessage {
 pub enum Behavior {
     /// Answer `getheaders` with these headers.
     Serve(Vec<Header>),
+    /// Like `Serve`, but claim a height of exactly these headers, so that
+    /// the manager never takes the peer for one that claims too much.
+    Honest(Vec<Header>),
     /// Answer `getheaders`, then tell of these addresses.
     ServeAndTell(Vec<Header>, Vec<SocketAddr>),
     /// Close the connection after the first `getheaders`.
@@ -235,6 +238,16 @@ pub enum Behavior {
     /// Answer `getheaders` with the headers of these blocks, and `getdata`
     /// with the blocks asked for.
     ServeBlocks(Vec<Block>),
+}
+
+/// The height the fake peer claims in its version message. A peer that
+/// claims more than it proves is dropped after 10 minutes (NR-33), so one
+/// that is to stay must claim what it serves.
+fn claimed_height(behavior: &Behavior) -> u32 {
+    match behavior {
+        Behavior::Honest(headers) => u32::try_from(headers.len()).unwrap(),
+        _ => PEER_HEIGHT,
+    }
 }
 
 /// A peer on a loopback socket.
@@ -359,7 +372,9 @@ fn serve(
         }
         return;
     }
-    let _ = stream.write_all(&frame(NetworkMessage::Version(version_message())));
+    let _ = stream.write_all(&frame(NetworkMessage::Version(version_message(
+        claimed_height(behavior),
+    ))));
     let _ = stream.write_all(&frame(NetworkMessage::Verack));
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
@@ -378,7 +393,9 @@ fn serve(
                 "getheaders" => {
                     getheaders.lock().unwrap().push(payload);
                     match behavior {
-                        Behavior::Serve(headers) | Behavior::ServeAndTell(headers, _) => {
+                        Behavior::Serve(headers)
+                        | Behavior::Honest(headers)
+                        | Behavior::ServeAndTell(headers, _) => {
                             // The addresses come first, so that the
                             // headers' event proves they were read.
                             if let Behavior::ServeAndTell(_, told) = behavior {

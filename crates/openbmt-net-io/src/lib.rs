@@ -30,7 +30,7 @@
 //!   messages; the channel of events to the app holds 64 and at most 32 MiB
 //!   of blocks and transactions. When the app does not read, the driver
 //!   stops reading from the peers (see [`Handle`]).
-//! - A write to a peer that takes more than 10 seconds closes the peer.
+//! - A write to a peer that takes more than 3 seconds closes the peer.
 //!
 //! The rules the driver decides are NR-70 and on in
 //! `docs/NETWORK-RULES.md`.
