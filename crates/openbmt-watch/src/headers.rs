@@ -5,7 +5,7 @@
 //! work. It has no network, no clock and no storage: the caller passes in
 //! the header and the time, and keeps the bytes of [`HeaderStore::to_bytes`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bitcoin::block::Header;
 use bitcoin::blockdata::constants::genesis_block;
@@ -79,6 +79,8 @@ pub struct HeaderStore {
     held: BTreeMap<BlockHash, Entry>,
     /// The best chain from the start block; never empty.
     best: Vec<BlockHash>,
+    /// The held headers that are not on the best chain.
+    side: BTreeSet<BlockHash>,
 }
 
 fn network_byte(network: Network) -> Option<u8> {
@@ -132,6 +134,7 @@ impl HeaderStore {
             start_hash,
             held,
             best: vec![start_hash],
+            side: BTreeSet::new(),
         })
     }
 
@@ -170,7 +173,7 @@ impl HeaderStore {
 
     /// How many headers are held beside the best chain.
     pub fn side_count(&self) -> usize {
-        self.held.len().saturating_sub(self.best.len())
+        self.side.len()
     }
 
     /// Whether the store holds this header, on the best chain or beside it.
@@ -264,6 +267,7 @@ impl HeaderStore {
             },
         );
         if !better {
+            self.side.insert(hash);
             return Ok(Accepted::Side);
         }
         let outcome = if self.tip().1 == header.prev_blockhash {
@@ -295,6 +299,10 @@ impl HeaderStore {
         let mut left: Vec<BlockHash> = self.best.drain(keep..).collect();
         left.reverse();
         branch.reverse();
+        self.side.extend(left.iter().copied());
+        for hash in &branch {
+            self.side.remove(hash);
+        }
         self.best.extend(branch);
         Accepted::Reorganized { left }
     }
@@ -302,12 +310,14 @@ impl HeaderStore {
     /// Drop headers beside the best chain that are too far below the tip,
     /// and those whose parent was dropped.
     fn prune(&mut self) {
+        if self.side.is_empty() {
+            return;
+        }
         let tip = self.tip_height();
         let mut side: Vec<(u32, BlockHash)> = self
-            .held
+            .side
             .iter()
-            .filter(|(hash, e)| self.best_at(e.height) != Some(*hash))
-            .map(|(hash, e)| (e.height, *hash))
+            .filter_map(|hash| self.held.get(hash).map(|e| (e.height, *hash)))
             .collect();
         side.sort();
         for (height, hash) in side {
@@ -317,6 +327,7 @@ impl HeaderStore {
             };
             if height.saturating_add(SIDE_DEPTH) < tip || orphaned {
                 self.held.remove(&hash);
+                self.side.remove(&hash);
             }
         }
     }
