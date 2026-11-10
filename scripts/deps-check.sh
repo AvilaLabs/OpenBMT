@@ -21,7 +21,8 @@ write=0
 fail=0
 
 externals() {
-    cargo tree --locked --offline -p "$1" -e normal,build --prefix none \
+    CARGO_TERM_COLOR=never cargo tree --color never --locked --offline \
+        -p "$1" -e normal,build --prefix none \
         -f '{p}' 2>/dev/null |
         sed 's/ (\*)$//' | grep -v ' (/' | grep -v '^$' |
         sed 's/ (proc-macro)$//' | sort -u
