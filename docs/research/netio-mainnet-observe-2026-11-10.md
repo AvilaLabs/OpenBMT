@@ -370,3 +370,27 @@ downloads every block at once anyway (NR-44), so the minute does not
 delay a sale. The fix is to ask a peer about a block only after that
 peer has itself shown the block; it is tracked as the next change to
 the manager.
+
+## Addendum 2: the same run after the fix
+
+The manager now asks a peer for a block's filter only after that peer
+has itself shown the block (NR-33, NR-40). The 45-minute run was
+repeated on mainnet with the same never-paid watched script.
+
+| | Before the fix | After the fix |
+|---|---|---|
+| Blocks that joined the chain | 3 | 8 |
+| Blocks settled by two equal filters | 1 | 8 |
+| Blocks downloaded in full | 2 | 0 |
+| Time from the header to "checked" | about 61 s for two of three | 1.4 to 2.4 s |
+| Peers that closed the connection | 26 | 10 |
+| Of those, within seconds of a new header | 7 | 0 |
+
+Nine of the ten closed connections in the second run came in the first
+73 seconds, while the first peers were being dialed; one came later, at
+a moment when no header had arrived for four minutes. The saved tip at
+the end was 975,293.
+
+This is one run on one day. It shows the defect gone in that run; it
+does not show how the manager behaves around a reorganization on the
+live network, which did not happen in either run.
