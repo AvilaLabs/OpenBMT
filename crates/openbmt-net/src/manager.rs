@@ -52,6 +52,9 @@ pub const MAX_WATCHED_SCRIPTS: usize = 100_000;
 pub const MAX_BLOCKS_IN_WORK: usize = 8;
 /// NR-42, NR-45: seconds a filter or a block may take to arrive.
 pub const ANSWER_SECS: u64 = 60;
+/// NR-40: seconds a peer must have shown its newest block before it is asked
+/// for that block's filter, so that its filter index has taken the block.
+pub const FILTER_SETTLE_SECS: u64 = 2;
 /// Most filter requests made for one block, over all peers, so that a
 /// block's record never grows with the peers that come and go.
 pub const MAX_FILTER_ASKS: usize = 6;
@@ -210,6 +213,8 @@ struct PeerState {
     services: ServiceFlags,
     /// NR-33: the highest block the peer has shown.
     shown_height: u32,
+    /// When `shown_height` last rose.
+    shown_at: u64,
     ahead_since: Option<u64>,
     /// NR-32: when the last re-ask of headers went out.
     last_reask: Option<u64>,
@@ -428,6 +433,7 @@ impl Manager {
                 ready: false,
                 services: ServiceFlags::NONE,
                 shown_height: 0,
+                shown_at: now,
                 ahead_since: None,
                 last_reask: None,
                 unanswered: 0,
@@ -754,6 +760,12 @@ impl Manager {
                 if blocks.iter().any(|b| !self.store.holds(b)) {
                     self.reask(id, now, out);
                 }
+                // NR-40: a peer that announces a block on our best chain
+                // has shown it.
+                let height = blocks.iter().filter_map(|b| self.store.height_of(b)).max();
+                if let Some(height) = height {
+                    self.raise_shown(id, height, now);
+                }
                 for txid in txids {
                     self.announce(id, txid, out);
                 }
@@ -788,10 +800,21 @@ impl Manager {
         peer.ready = true;
         peer.services = services;
         peer.shown_height = start_height;
+        peer.shown_at = self.now;
         out.push(Output::Ready { id, services });
         let locator = self.store.locator();
         if self.send(id, Request::GetHeaders { locator }, out) {
             self.send(id, Request::GetAddr, out);
+        }
+    }
+
+    /// NR-33, NR-40: the peer has shown this height.
+    fn raise_shown(&mut self, id: PeerId, height: u32, now: u64) {
+        if let Some(peer) = self.peers.get_mut(&id) {
+            if height > peer.shown_height {
+                peer.shown_height = height;
+                peer.shown_at = now;
+            }
         }
     }
 
@@ -867,7 +890,10 @@ impl Manager {
             return;
         }
         if let Some(peer) = self.peers.get_mut(&id) {
-            peer.shown_height = peer.shown_height.max(shown);
+            if shown > peer.shown_height {
+                peer.shown_height = shown;
+                peer.shown_at = now;
+            }
             if blocked {
                 peer.blocked = true;
             } else if clean && !headers.is_empty() {
@@ -1006,6 +1032,17 @@ impl Manager {
             .collect()
     }
 
+    /// NR-40: whether this ready peer has shown the block at this height,
+    /// long enough ago that its filter index has taken it. A peer that has
+    /// shown a higher block has had the time already.
+    fn filter_ready(&self, id: PeerId, height: u32, now: u64) -> bool {
+        self.peers.get(&id).is_some_and(|p| {
+            p.shown_height > height
+                || (p.shown_height == height
+                    && now >= p.shown_at.saturating_add(FILTER_SETTLE_SECS))
+        })
+    }
+
     /// Move one block's work on. False when the block is done.
     fn advance_item(&mut self, item: &mut BlockWork, now: u64, out: &mut Vec<Output>) -> bool {
         item.failed.retain(|id| self.peers.contains_key(id));
@@ -1063,7 +1100,7 @@ impl Manager {
                         item.stage = Stage::Fetch;
                         continue;
                     }
-                    self.top_up_filters(item, out);
+                    self.top_up_filters(item, now, out);
                     return true;
                 }
                 Stage::Fetch => return self.advance_fetch(item, now, out),
@@ -1071,11 +1108,15 @@ impl Manager {
         }
     }
 
-    /// NR-40: ask until two peers in different groups have been asked. The
-    /// peers take turns by block height, so that no two peers are asked
-    /// about every block.
-    fn top_up_filters(&mut self, item: &mut BlockWork, out: &mut Vec<Output>) {
-        let mut peers = self.filter_peers();
+    /// NR-40: ask until two peers in different groups have been asked, but
+    /// only peers that have shown the block. The peers take turns by block
+    /// height, so that no two peers are asked about every block.
+    fn top_up_filters(&mut self, item: &mut BlockWork, now: u64, out: &mut Vec<Output>) {
+        let mut peers: Vec<PeerId> = self
+            .filter_peers()
+            .into_iter()
+            .filter(|id| self.filter_ready(*id, item.height, now))
+            .collect();
         if let Some(turn) = usize::try_from(item.height)
             .ok()
             .and_then(|h| h.checked_rem(peers.len()))
@@ -1127,7 +1168,17 @@ impl Manager {
             return true;
         }
         let ready = self.ready_peers();
-        match ready.iter().find(|id| !item.failed.contains(id)) {
+        // NR-45: a peer that has shown the block is asked first.
+        let shown = |id: &PeerId| {
+            self.peers
+                .get(id)
+                .is_some_and(|p| p.shown_height >= item.height)
+        };
+        let pick = ready
+            .iter()
+            .find(|id| !item.failed.contains(id) && shown(id))
+            .or_else(|| ready.iter().find(|id| !item.failed.contains(id)));
+        match pick {
             Some(&id) => {
                 item.fetch_peer = Some(id);
                 item.fetch_since = now;

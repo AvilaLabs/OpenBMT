@@ -23,6 +23,7 @@ use bitcoin::{
 use openbmt_watch::{HeaderStore, PeerAddr};
 
 use super::kit::{decode_all, frame, peer_version, verack_frame};
+use crate::manager::FILTER_SETTLE_SECS;
 use crate::{Manager, ManagerConfig, Output, PeerId};
 
 /// The caller's clock when a test starts, in seconds. Regtest headers are
@@ -447,7 +448,9 @@ pub fn chain_out(out: &[Output]) -> Vec<Change> {
 }
 
 /// A rig with a script watched, two peers that serve filters (1 and 2) and
-/// one that does not (3), and a chain of blocks delivered by peer 3.
+/// one that does not (3), and a chain of blocks. Peer 3 delivers the headers
+/// first; then both filter peers send them too and the clock moves past
+/// [`FILTER_SETTLE_SECS`], so that every peer has shown every block (NR-40).
 pub struct Rig {
     pub n: Net,
     pub a: PeerId,
@@ -470,8 +473,19 @@ impl Rig {
         let b = n.up_filters(2);
         let c = n.up(3);
         let blocks = blocks_on(&genesis(), specs, 1);
-        n.headers(c, &headers_of(&blocks));
-        Self { n, a, b, c, blocks }
+        let headers = headers_of(&blocks);
+        n.headers(c, &headers);
+        let mut rig = Self { n, a, b, c, blocks };
+        rig.show(&headers);
+        rig
+    }
+
+    /// Both filter peers send these headers too, and the clock moves past
+    /// [`FILTER_SETTLE_SECS`], so that they are asked for the filters.
+    pub fn show(&mut self, headers: &[Header]) {
+        self.n.headers(self.a, headers);
+        self.n.headers(self.b, headers);
+        self.n.tick(FILTER_SETTLE_SECS);
     }
 
     /// The block at this height.

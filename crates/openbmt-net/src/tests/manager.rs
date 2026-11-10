@@ -5,6 +5,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
+use bitcoin::hashes::Hash;
 use bitcoin::p2p::address::{AddrV2, Address};
 use bitcoin::p2p::message::NetworkMessage;
 use bitcoin::p2p::ServiceFlags;
@@ -13,7 +14,7 @@ use openbmt_watch::{network_group, HeaderStore, PeerAddr};
 
 use super::kit::{command_field, raw_frame, raw_header, verack_frame, version_frame};
 use super::manager_kit::*;
-use crate::manager::MAX_UNANSWERED;
+use crate::manager::{ANSWER_SECS, FILTER_SETTLE_SECS, MAX_UNANSWERED};
 use crate::{
     ConnectRefused, Manager, ManagerConfig, Output, PeerAddress, PeerId, MAX_OUTGOING_BYTES,
 };
@@ -716,10 +717,13 @@ fn nr_40_with_no_script_watched_nothing_is_asked() {
 #[test]
 fn nr_40_filter_peers_take_turns_by_block_height() {
     let mut n = Net::new();
-    let peers: Vec<PeerId> = (1..=3).map(|i| n.up_filters(i)).collect();
+    // The peers state a start height of 3, so that all have shown the
+    // blocks; the settle delay passes for the one at height 3.
+    let peers: Vec<PeerId> = (1..=3).map(|i| n.join(i, filters(), 3).id).collect();
     assert!(n.m.watch_script(script(1)));
     let hs = extend(&genesis(), 3, 1);
     n.headers(peers[0], &hs);
+    n.tick(FILTER_SETTLE_SECS);
     let asked: Vec<Vec<u32>> = peers
         .iter()
         .map(|id| {
@@ -732,6 +736,122 @@ fn nr_40_filter_peers_take_turns_by_block_height() {
     // Height 1 starts with the second peer, height 2 with the third, and
     // height 3 with the first: each peer is left out of one block.
     assert_eq!(asked, vec![vec![2, 3], vec![1, 3], vec![1, 2]]);
+}
+
+/// A net with a script watched, two filter peers (1 and 2) that state these
+/// start heights, and a peer without filters (3) that delivers the headers of
+/// `k` blocks.
+fn unshown_net(start_a: i32, start_b: i32, k: usize) -> (Net, PeerId, PeerId, Vec<bitcoin::Block>) {
+    let mut n = Net::new();
+    assert!(n.m.watch_script(script(7)));
+    let a = n.join(1, filters(), start_a).id;
+    let b = n.join(2, filters(), start_b).id;
+    let c = n.up(3);
+    let blocks = blocks_on(&genesis(), vec![vec![]; k], 1);
+    n.headers(c, &headers_of(&blocks));
+    (n, a, b, blocks)
+}
+
+#[test]
+fn nr_40_a_filter_peer_that_has_not_shown_the_block_is_not_asked_until_it_does() {
+    let (mut n, a, b, blocks) = unshown_net(0, 0, 1);
+    let hash = blocks[0].block_hash();
+    // The header came from a third peer: neither filter peer knows it.
+    n.tick(10);
+    for id in [a, b] {
+        assert!(filter_requests(&n.sent(id)).is_empty());
+    }
+    // a sends the header; it is asked after the settle delay, b is not.
+    n.headers(a, &headers_of(&blocks));
+    assert!(filter_requests(&n.sent(a)).is_empty());
+    n.tick(FILTER_SETTLE_SECS);
+    assert_eq!(filter_requests(&n.sent(a)), vec![(1, hash)]);
+    assert!(filter_requests(&n.sent(b)).is_empty());
+    // Then b does too.
+    n.headers(b, &headers_of(&blocks));
+    n.tick(FILTER_SETTLE_SECS);
+    assert_eq!(filter_requests(&n.sent(b)), vec![(1, hash)]);
+    assert!(filter_requests(&n.sent(a)).is_empty());
+}
+
+#[test]
+fn nr_40_a_peer_that_shows_a_higher_block_is_asked_at_once() {
+    // Catch-up is not slowed: both peers show height 4, above all 3 blocks.
+    let (mut n, a, b, blocks) = unshown_net(4, 4, 3);
+    let want: Vec<_> = blocks
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (i as u32 + 1, b.block_hash()))
+        .collect();
+    assert_eq!(filter_requests(&n.sent(a)), want);
+    assert_eq!(filter_requests(&n.sent(b)), want);
+}
+
+#[test]
+fn nr_40_a_peer_at_exactly_the_blocks_height_is_asked_after_two_seconds() {
+    let (mut n, a, b, blocks) = unshown_net(1, 1, 1);
+    let hash = blocks[0].block_hash();
+    for id in [a, b] {
+        assert!(filter_requests(&n.sent(id)).is_empty());
+    }
+    n.tick(FILTER_SETTLE_SECS - 1);
+    for id in [a, b] {
+        assert!(filter_requests(&n.sent(id)).is_empty());
+    }
+    n.tick(1);
+    assert_eq!(filter_requests(&n.sent(a)), vec![(1, hash)]);
+    assert_eq!(filter_requests(&n.sent(b)), vec![(1, hash)]);
+}
+
+#[test]
+fn nr_40_a_block_announced_by_inv_makes_that_peer_eligible() {
+    let (mut n, a, b, blocks) = unshown_net(0, 0, 1);
+    let hash = blocks[0].block_hash();
+    // A hash the chain does not hold shows nothing.
+    n.inv_block(b, blocks[0].header.prev_blockhash);
+    n.inv_block(b, BlockHash::from_byte_array([9; 32]));
+    n.inv_block(a, hash);
+    let heights: Vec<u32> = n.m.health_peers().iter().map(|p| p.best_height).collect();
+    // Peer 3 sent the header itself.
+    assert_eq!(heights, vec![1, 0, 1]);
+    n.sent(a);
+    n.tick(FILTER_SETTLE_SECS);
+    assert_eq!(filter_requests(&n.sent(a)), vec![(1, hash)]);
+    assert!(filter_requests(&n.sent(b)).is_empty());
+}
+
+#[test]
+fn nr_42_with_one_peer_that_has_shown_the_block_it_is_fetched_after_sixty_seconds() {
+    // a shows 3 blocks and is asked for all; b never shows them and is
+    // never asked. The three requests that a lets run out end a, and not b.
+    let (mut n, a, b, blocks) = unshown_net(3, 0, 3);
+    n.tick(FILTER_SETTLE_SECS);
+    assert_eq!(filter_requests(&n.sent(a)).len(), 3);
+    assert!(filter_requests(&n.sent(b)).is_empty());
+    assert!(n.tick(ANSWER_SECS - FILTER_SETTLE_SECS - 1).is_empty());
+    let out = n.tick(1);
+    assert_eq!(disconnects(&out), vec![(a, false)]);
+    let mut asked = block_requests(&n.sent(b));
+    asked.extend(block_requests(&n.sent(PeerId(3))));
+    for block in &blocks {
+        assert!(asked.contains(&block.block_hash()));
+    }
+}
+
+#[test]
+fn nr_45_the_block_is_asked_of_a_peer_that_has_shown_it() {
+    let mut n = Net::new();
+    n.m.set_all_blocks(true);
+    let (a, b) = (n.up(1), n.up(2));
+    let blocks = blocks_on(&genesis(), vec![vec![]], 1);
+    let hash = blocks[0].block_hash();
+    // Only b sent the header, though a has the lower ID.
+    n.headers(b, &headers_of(&blocks));
+    assert!(block_requests(&n.sent(a)).is_empty());
+    assert_eq!(block_requests(&n.sent(b)), vec![hash]);
+    // When b has not got it, a is the fallback.
+    n.not_found_block(b, hash);
+    assert_eq!(block_requests(&n.sent(a)), vec![hash]);
 }
 
 #[test]
@@ -880,6 +1000,7 @@ fn nr_42_with_fewer_than_two_filter_peers_the_block_is_fetched() {
     let a = n.up_filters(1);
     let b = n.up(2);
     let blocks = blocks_on(&genesis(), vec![vec![]], 1);
+    n.headers(a, &headers_of(&blocks));
     n.headers(b, &headers_of(&blocks));
     let sent = n.sent(a);
     assert!(filter_requests(&sent).is_empty());
@@ -892,7 +1013,8 @@ fn nr_42_sixty_seconds_without_two_answers_the_block_is_fetched() {
     let hash = r.hash(1);
     // One answers, one stays silent.
     r.n.filter(r.a, hash, filter_of(r.at(1)));
-    assert!(r.n.tick(59).is_empty());
+    // The rig let the settle delay pass already: 59 seconds in all.
+    assert!(r.n.tick(59 - FILTER_SETTLE_SECS).is_empty());
     assert!(block_requests(&r.n.sent(r.a)).is_empty());
     let out = r.n.tick(1);
     assert!(disconnects(&out).is_empty());
@@ -912,7 +1034,10 @@ fn nr_42_a_replacement_filter_peer_is_asked_when_one_goes() {
     let mut r = Rig::new(vec![vec![]]);
     let d = r.n.up_filters(4);
     let hash = r.hash(1);
-    // a and b were asked; d was not.
+    let headers = headers_of(&r.blocks);
+    r.n.headers(d, &headers);
+    r.n.tick(FILTER_SETTLE_SECS);
+    // a and b were asked; d, which has shown the block, was not.
     assert!(filter_requests(&r.n.sent(d)).is_empty());
     r.n.m.closed(r.b, r.n.now);
     assert_eq!(filter_requests(&r.n.sent(d)), vec![(1, hash)]);
@@ -982,6 +1107,7 @@ fn nr_44_with_a_payment_waiting_every_block_is_fetched_without_a_filter() {
     n.m.watch_script(script(7));
     n.m.set_all_blocks(true);
     let blocks = blocks_on(&genesis(), vec![vec![]; 2], 1);
+    n.headers(a, &headers_of(&blocks));
     n.headers(b, &headers_of(&blocks));
     let want: Vec<BlockHash> = blocks.iter().map(|b| b.block_hash()).collect();
     let sent = n.sent(a);
@@ -1013,6 +1139,7 @@ fn nr_44_turning_it_on_takes_the_blocks_that_wait_for_filters() {
     r.n.m.set_all_blocks(false);
     let more = blocks_on(&r.at(2).header, vec![vec![]], 50);
     r.n.headers(r.c, &headers_of(&more));
+    r.show(&headers_of(&more));
     assert_eq!(
         filter_requests(&r.n.sent(r.a)),
         vec![(3, more[0].block_hash())]
@@ -1133,9 +1260,12 @@ fn nr_45_a_block_is_handed_out_only_when_the_chain_holds_it() {
         let out = n.block(a, block);
         assert!(out.is_empty(), "{out:?}");
     }
-    // The new ones are asked for.
+    // The new ones are asked for. A peer has shown a height, not a branch
+    // (NR-33): a, which showed 2 on the old branch, is asked for the first
+    // two, and b, which showed 3, for the third.
     let want: Vec<BlockHash> = better.iter().map(|h| h.block_hash()).collect();
-    assert_eq!(block_requests(&n.sent(a)), want);
+    assert_eq!(block_requests(&n.sent(a)), want[..2].to_vec());
+    assert_eq!(block_requests(&n.sent(b)), want[2..].to_vec());
 }
 
 #[test]
@@ -1162,6 +1292,7 @@ fn nr_46_a_reorganisation_starts_the_checks_again_from_the_fork() {
     // A chain that forks after block 2 and gets longer.
     let other = blocks_on(&r.at(2).header, vec![vec![]; 3], 100);
     let out = r.n.headers(r.c, &headers_of(&other));
+    r.show(&headers_of(&other));
     let changes = chain_out(&out);
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].1, vec![r.hash(4), r.hash(3)]);
@@ -1189,6 +1320,7 @@ fn nr_46_work_in_progress_for_blocks_that_left_is_dropped() {
     let (old3, old4) = (r.hash(3), r.hash(4));
     let other = blocks_on(&r.at(2).header, vec![vec![]; 3], 100);
     r.n.headers(r.c, &headers_of(&other));
+    r.show(&headers_of(&other));
     assert_eq!(r.n.m.sizes().work, 3);
     // Their late filters are no unasked data, and finish nothing.
     let f3 = filter_of(r.at(3));
@@ -1215,6 +1347,7 @@ fn nr_46_the_checks_never_go_back_below_the_starting_height() {
     // The fork is after block 1: below the starting height.
     let other = blocks_on(&r.at(1).header, vec![vec![]; 5], 100);
     r.n.headers(r.c, &headers_of(&other));
+    r.show(&headers_of(&other));
     let want: Vec<_> = other
         .iter()
         .enumerate()

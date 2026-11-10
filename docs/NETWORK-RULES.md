@@ -111,28 +111,38 @@ thin driver that owns the sockets.
   peer again from its locator, at most once per minute per peer.
 - **NR-33.** For each peer the counter records the highest block the peer
   has shown: the start height it claimed, or the height of the highest
-  header it sent that the store accepted, whichever is greater. This is
-  what WR-52 reads. A peer that claims a height more than 2 blocks above
-  the tip and sends no headers for it within 10 minutes is dropped
-  (NR-25): the claim told the counter nothing, and one such peer must not
-  be able to stop the shop. A peer that did send headers which the store
-  could not take for a reason that is not the peer's doing (WR-06, WR-07)
-  is kept and counts as ahead for WR-52. That is the case the rule is
-  for: the counter's clock or chain may be the one that is wrong.
+  header it sent that the store accepted, or the height of a block on
+  the counter's best chain that it announced with `inv`, whichever is
+  greater. This is what WR-52 reads. The counter also notes when the
+  height last rose (NR-40). A peer that claims a height more than 2
+  blocks above the tip and sends no headers for it within 10 minutes is
+  dropped (NR-25): the claim told the counter nothing, and one such peer
+  must not be able to stop the shop. A peer that did send headers which
+  the store could not take for a reason that is not the peer's doing
+  (WR-06, WR-07) is kept and counts as ahead for WR-52. That is the case
+  the rule is for: the counter's clock or chain may be the one that is
+  wrong.
 
 ## 5. Blocks and filters
 
 - **NR-40.** For every block that joins the best chain after the counter
   started watching, the counter asks for the block's basic compact filter
-  from two peers in different network groups. The filter peers take
-  turns by block height, so that no two peers are asked about every
+  from two peers in different network groups. Only a peer that has
+  itself shown the block (NR-33) is asked: a node drops a peer that asks
+  about a block it does not know, and a node whose filter index has not
+  caught up sends nothing. A peer whose shown height is above the block
+  is asked at once; a peer whose newest block it is is asked 2 seconds
+  after it showed it **[to tune]**. The filter peers that may be asked
+  take turns by block height, so that no two peers are asked about every
   block.
 - **NR-41.** A filter is matched against every script the counter is
   watching: every address it has shown for a sale, and those not yet
   used in its current batch.
 - **NR-42.** The counter downloads the full block when either filter
   matches, when the two filters are not the same bytes, or when fewer
-  than two peers answered within 60 seconds **[to tune]**. A filter that
+  than two peers answered within 60 seconds **[to tune]**, counted from
+  when the block entered the filter stage. A peer that was never asked
+  is not counted as one that did not answer. A filter that
   cannot be read counts as a match. A peer that lets three requests in a
   row run out (filters, blocks or transactions) is dropped, without the
   24 hours of NR-25. An answer that comes after the counter gave up on
@@ -147,7 +157,8 @@ thin driver that owns the sockets.
   does not know the scripts of the customer's coins. Reading the whole
   block is the only way to see it (WR-42).
 - **NR-45.** A block is asked of one peer at a time, with 60 seconds to
-  answer **[to tune]**, then of another. When every connected peer has
+  answer **[to tune]**, then of another. A peer that has shown the block
+  is preferred to one that has not. When every connected peer has
   failed to give a block, the counter waits 60 seconds and starts over.
   A block is identified by its hash on the header chain; a peer cannot
   substitute another. At most 8 blocks are in work at once.
