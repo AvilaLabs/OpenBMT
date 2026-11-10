@@ -74,6 +74,11 @@ fn is_block(event: &AppEvent) -> bool {
     matches!(event, AppEvent::Block { .. })
 }
 
+/// Let the driver's loop pass a few times at the time the clock reads.
+fn settle() {
+    thread::sleep(Duration::from_millis(700));
+}
+
 fn start_system(config: DriverConfig, storage: &MemStorage) -> Handle {
     start(config, storage, Net::system())
 }
@@ -799,5 +804,55 @@ fn nr_74_one_event_larger_than_the_budget_is_still_handed_over() {
     wait_for(&handle, 10, is_block).expect("the large block was not handed over");
     wait_for(&handle, 10, is_block).expect("the second block did not follow");
     assert_eq!(handle.events().queued_bytes(), 0);
+    handle.shutdown();
+}
+
+// ----- NR-73: when the files are saved ------------------------------------
+
+#[test]
+fn nr_73_the_headers_are_stored_before_a_block_is_handed_to_the_app() {
+    let chain_blocks = blocks(1, 100);
+    let hash = chain_blocks[0].block_hash();
+    let peer = FakePeer::start(Behavior::ServeBlocks(chain_blocks));
+    let storage = MemStorage::default();
+    // The clock never moves, so the minute rule cannot be what saves them.
+    let clock = TestClock::at(1_700_000_000);
+    let mut handle = start_clocked(
+        config(&peer, 30),
+        &storage,
+        Net::system(),
+        &clock,
+        watched(),
+    );
+    wait_for(&handle, 10, is_block).expect("no block reached the app");
+    // At the moment the app has the block, the stored headers end at it.
+    let store = stored_headers(&storage);
+    assert_eq!(store.tip(), (1, hash));
+    assert_eq!(storage.save_count(Key::Headers), 1);
+    handle.shutdown();
+}
+
+#[test]
+fn nr_73_a_second_block_at_the_same_tip_does_not_save_the_headers_again() {
+    // Both headers come in one message, so the tip is the second block's
+    // when the first block is handed over.
+    let chain_blocks = blocks(2, 100);
+    let tip = chain_blocks[1].block_hash();
+    let peer = FakePeer::start(Behavior::ServeBlocks(chain_blocks));
+    let storage = MemStorage::default();
+    let clock = TestClock::at(1_700_000_000);
+    let mut handle = start_clocked(
+        config(&peer, 30),
+        &storage,
+        Net::system(),
+        &clock,
+        watched(),
+    );
+    wait_for(&handle, 10, is_block).expect("no first block");
+    assert_eq!(stored_headers(&storage).tip(), (2, tip));
+    wait_for(&handle, 10, is_block).expect("no second block");
+    settle();
+    // One save for both blocks. The save at shutdown comes after this.
+    assert_eq!(storage.save_count(Key::Headers), 1);
     handle.shutdown();
 }
