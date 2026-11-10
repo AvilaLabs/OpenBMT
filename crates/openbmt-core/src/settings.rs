@@ -31,6 +31,20 @@ pub const SHARE_TOTAL_BPS: u32 = 10_000;
 /// bounds the counter list too.
 pub const MAX_DEVICES: usize = 256;
 
+/// Most Boxes a settings value may name (BX-20).
+pub const MAX_BOXES: usize = 8;
+
+/// What a device is to the shop, as the signed settings give it (BX-24).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceRole {
+    /// The owner root's key.
+    Owner,
+    /// A key with a share (a key in `counters`).
+    Counter,
+    /// A key in `boxes`.
+    Box,
+}
+
 /// Require `key` to sort strictly after the previous one in a list.
 fn ascending(
     last: &mut Option<[u8; 32]>,
@@ -108,6 +122,9 @@ pub struct Settings {
     /// Each counter's share of every budget, in basis points (10,000 = the
     /// whole budget).
     pub counters: BTreeMap<DeviceId, u16>,
+    /// Devices that are Boxes (BX-20). Each is also on the device list, and
+    /// none is also a counter.
+    pub boxes: BTreeSet<DeviceId>,
 }
 
 impl Settings {
@@ -137,6 +154,7 @@ impl Settings {
             customer_wifi: true,
             devices: BTreeSet::new(),
             counters: BTreeMap::new(),
+            boxes: BTreeSet::new(),
         }
     }
 
@@ -203,7 +221,36 @@ impl Settings {
                 "counter shares add up to more than 10000 basis points",
             ));
         }
+        if self.boxes.len() > MAX_BOXES {
+            return Err(SettingsError::Invalid("BX-20: more than 8 Boxes"));
+        }
+        if self.boxes.iter().any(|b| !self.devices.contains(b)) {
+            return Err(SettingsError::Invalid(
+                "BX-20: a Box is not on the device list",
+            ));
+        }
+        if self.boxes.iter().any(|b| self.counters.contains_key(b)) {
+            return Err(SettingsError::Invalid(
+                "BX-20: a key is both a counter and a Box",
+            ));
+        }
         Ok(())
+    }
+
+    /// What `key` is to the shop (BX-24): the owner root's key is the
+    /// owner, a key with a share is a counter, a key in `boxes` is a Box.
+    /// Any other key has no role. The owner root is checked first, so it is
+    /// the owner even if it is also listed as something else.
+    pub fn role_of(&self, owner_root: &DeviceId, key: &DeviceId) -> Option<DeviceRole> {
+        if key == owner_root {
+            Some(DeviceRole::Owner)
+        } else if self.counters.contains_key(key) {
+            Some(DeviceRole::Counter)
+        } else if self.boxes.contains(key) {
+            Some(DeviceRole::Box)
+        } else {
+            None
+        }
     }
 
     /// The counters, as the set the Key app passes to
@@ -226,7 +273,9 @@ impl Settings {
     /// directly on hand-built settings with 2^32 or more entries in a list
     /// panics rather than truncating the length.
     pub fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(256 + self.devices.len() * 32 + self.counters.len() * 34);
+        let mut out = Vec::with_capacity(
+            256 + self.devices.len() * 32 + self.counters.len() * 34 + self.boxes.len() * 32,
+        );
         out.extend_from_slice(&self.version.to_le_bytes());
         for l in self.limits() {
             out.extend_from_slice(&l.sats.to_le_bytes());
@@ -246,6 +295,10 @@ impl Settings {
         for (d, share) in &self.counters {
             out.extend_from_slice(&d.to_bytes());
             out.extend_from_slice(&share.to_le_bytes());
+        }
+        out.extend_from_slice(&wire::len_u32(self.boxes.len()).to_le_bytes());
+        for b in &self.boxes {
+            out.extend_from_slice(&b.to_bytes());
         }
         out
     }
@@ -297,6 +350,19 @@ impl Settings {
             counters.insert(key, r.u16_le()?);
         }
 
+        let n = r.count(MAX_BOXES, 32)?;
+        let mut boxes = BTreeSet::new();
+        let mut last: Option<[u8; 32]> = None;
+        for _ in 0..n {
+            let key = r.device_id()?;
+            ascending(
+                &mut last,
+                key.to_bytes(),
+                "boxes are not in ascending order",
+            )?;
+            boxes.insert(key);
+        }
+
         Ok(Self {
             version,
             light_per_sale,
@@ -317,6 +383,7 @@ impl Settings {
             customer_wifi,
             devices,
             counters,
+            boxes,
         })
     }
 
@@ -498,6 +565,14 @@ pub fn changed_fields(old: &Settings, new: &Settings) -> Vec<FieldChange> {
         o.push(FieldChange {
             field: "counters",
             direction: dir(loosens),
+        });
+    }
+    if old.boxes != new.boxes {
+        // A new Box is a new device that reads the shop's orders (BX-20).
+        let added = new.boxes.difference(&old.boxes).next().is_some();
+        o.push(FieldChange {
+            field: "boxes",
+            direction: dir(added),
         });
     }
     out
@@ -1103,9 +1178,11 @@ mod tests {
         let mut u = s.clone();
         u.counters.clear();
         assert_ne!(s.hash(), u.hash());
-        // tail of the encoding: count u32 LE, then id | share u16 LE
+        // tail of the encoding: count u32 LE, then id | share u16 LE, then
+        // the empty Box list (a zero count)
         let enc = s.encode();
-        let tail = &enc[enc.len() - 38..];
+        assert_eq!(&enc[enc.len() - 4..], &0u32.to_le_bytes());
+        let tail = &enc[enc.len() - 42..enc.len() - 4];
         assert_eq!(&tail[..4], &1u32.to_le_bytes());
         assert_eq!(&tail[4..36], &c.to_bytes());
         assert_eq!(&tail[36..], &1_000u16.to_le_bytes());
@@ -1561,5 +1638,196 @@ mod tests {
             SignedSettings::from_bytes(&b).unwrap_err(),
             DecodeError::TooLarge
         );
+    }
+
+    /// Two devices, one counter and one Box.
+    fn with_box() -> (Settings, DeviceId, DeviceId) {
+        let (counter, boxed) = (identity(80).device_id(), identity(81).device_id());
+        let mut s = base();
+        s.devices = [counter, boxed].into_iter().collect();
+        s.counters.insert(counter, 2_000);
+        s.boxes.insert(boxed);
+        (s, counter, boxed)
+    }
+
+    #[test]
+    fn bx_20_a_box_is_a_device_and_not_a_counter() {
+        let (s, counter, boxed) = with_box();
+        assert_eq!(s.validate(), Ok(()));
+        let mut off_list = s.clone();
+        off_list.devices.remove(&boxed);
+        assert!(matches!(
+            off_list.validate(),
+            Err(SettingsError::Invalid(why)) if why.contains("not on the device list")
+        ));
+        let mut both = s.clone();
+        both.boxes.insert(counter);
+        assert!(matches!(
+            both.validate(),
+            Err(SettingsError::Invalid(why)) if why.contains("both a counter and a Box")
+        ));
+        let mut counted = s;
+        counted.counters.insert(boxed, 1);
+        assert!(counted.validate().is_err());
+    }
+
+    #[test]
+    fn bx_20_at_most_eight_boxes() {
+        let mut s = base();
+        for n in 100..108u8 {
+            let d = identity(n).device_id();
+            s.devices.insert(d);
+            s.boxes.insert(d);
+        }
+        assert_eq!(s.boxes.len(), MAX_BOXES);
+        assert_eq!(s.validate(), Ok(()));
+        let ninth = identity(108).device_id();
+        s.devices.insert(ninth);
+        s.boxes.insert(ninth);
+        assert!(matches!(
+            s.validate(),
+            Err(SettingsError::Invalid(why)) if why.contains("more than 8")
+        ));
+    }
+
+    #[test]
+    fn bx_20_boxes_are_part_of_the_signed_bytes_in_key_order() {
+        let (s, _, boxed) = with_box();
+        let mut t = s.clone();
+        t.boxes.clear();
+        assert_ne!(s.encode(), t.encode());
+        assert_ne!(s.hash(), t.hash());
+        // The Box list is the last field: a count, then the keys.
+        let bytes = s.encode();
+        assert_eq!(&bytes[bytes.len() - 36..bytes.len() - 32], &[1, 0, 0, 0]);
+        assert_eq!(&bytes[bytes.len() - 32..], &boxed.to_bytes());
+        let mut x = base();
+        let (a, b) = (identity(82).device_id(), identity(83).device_id());
+        x.boxes.extend([a, b]);
+        let mut y = base();
+        y.boxes.extend([b, a]);
+        assert_eq!(x.encode(), y.encode());
+    }
+
+    #[test]
+    fn bx_20_signed_settings_with_boxes_round_trip_and_read_strictly() {
+        let (s, _, _) = with_box();
+        let signed = signed_both(s);
+        assert_eq!(
+            SignedSettings::from_bytes(&signed.to_bytes()),
+            Ok(signed.clone())
+        );
+        crate::testutil::assert_strict_decoding(
+            &signed.to_bytes(),
+            SignedSettings::from_bytes,
+            SignedSettings::to_bytes,
+        );
+        // Two Boxes out of order, and the same one twice, are refused.
+        let (a, b) = (identity(82).device_id(), identity(83).device_id());
+        let mut two = base();
+        two.devices.extend([a, b]);
+        two.boxes.extend([a, b]);
+        let good = signed_both(two).to_bytes();
+        // After the Boxes come the owner signature (64) and the flag and
+        // Key app signature (65).
+        let first = good.len() - 129 - 64;
+        let mut swapped = good.clone();
+        let (x, y) = (
+            good[first..first + 32].to_vec(),
+            good[first + 32..first + 64].to_vec(),
+        );
+        swapped[first..first + 32].copy_from_slice(&y);
+        swapped[first + 32..first + 64].copy_from_slice(&x);
+        let mut repeated = good.clone();
+        repeated.copy_within(first..first + 32, first + 32);
+        for bad in [swapped, repeated] {
+            assert!(matches!(
+                SignedSettings::from_bytes(&bad),
+                Err(DecodeError::NonCanonical(_))
+            ));
+        }
+        assert!(SignedSettings::from_bytes(&good).is_ok());
+        // A count above the limit is refused before anything is read.
+        let count_at = first - 4;
+        let mut big = good.clone();
+        big[count_at..count_at + 4].copy_from_slice(&(MAX_BOXES as u32 + 1).to_le_bytes());
+        assert_eq!(
+            SignedSettings::from_bytes(&big).unwrap_err(),
+            DecodeError::TooLarge
+        );
+    }
+
+    #[test]
+    fn bx_20_box_change_directions() {
+        let (old, _, boxed) = with_box();
+        let other = identity(84).device_id();
+        let dir_of = |new: &Settings| {
+            let f = changed_fields(&old, new);
+            assert_eq!(f.len(), 1);
+            assert_eq!(f[0].field, "boxes");
+            f[0].direction
+        };
+        let mut added = old.clone();
+        added.boxes.insert(other);
+        assert_eq!(dir_of(&added), Change::Loosening);
+        let mut removed = old.clone();
+        removed.boxes.remove(&boxed);
+        assert_eq!(dir_of(&removed), Change::Tightening);
+        // One out and another in is mixed, so loosening.
+        let mut swapped = old.clone();
+        swapped.boxes.remove(&boxed);
+        swapped.boxes.insert(other);
+        assert_eq!(dir_of(&swapped), Change::Loosening);
+        assert_eq!(classify_change(&old, &added), Change::Loosening);
+        assert_eq!(classify_change(&old, &removed), Change::Tightening);
+    }
+
+    #[test]
+    fn bx_20_adding_a_box_needs_the_key_app_and_removing_one_does_not() {
+        let (o, a, roots) = roots();
+        let (cur, _, boxed) = with_box();
+        let mut up = next(&cur);
+        let other = identity(85).device_id();
+        up.devices.insert(other);
+        up.boxes.insert(other);
+        let owner_only = SignedSettings {
+            owner_sig: up.sign(&o),
+            approver_sig: None,
+            settings: up.clone(),
+        };
+        assert_eq!(
+            owner_only.verify(&roots, Some(&cur)),
+            Err(SettingsError::ApproverRequired)
+        );
+        let both = SignedSettings {
+            approver_sig: Some(up.sign(&a)),
+            ..owner_only
+        };
+        assert_eq!(both.verify(&roots, Some(&cur)), Ok(Change::Loosening));
+        let mut gone = next(&cur);
+        gone.boxes.remove(&boxed);
+        let signed = SignedSettings {
+            owner_sig: gone.sign(&o),
+            approver_sig: None,
+            settings: gone,
+        };
+        assert_eq!(signed.verify(&roots, Some(&cur)), Ok(Change::Tightening));
+    }
+
+    #[test]
+    fn bx_24_role_of_gives_owner_counter_box_or_nothing() {
+        let (s, counter, boxed) = with_box();
+        let owner = identity(86).device_id();
+        let stranger = identity(87).device_id();
+        assert_eq!(s.role_of(&owner, &owner), Some(DeviceRole::Owner));
+        assert_eq!(s.role_of(&owner, &counter), Some(DeviceRole::Counter));
+        assert_eq!(s.role_of(&owner, &boxed), Some(DeviceRole::Box));
+        assert_eq!(s.role_of(&owner, &stranger), None);
+        // A device on the list with neither a share nor a Box entry has no role.
+        let mut plain = s.clone();
+        plain.devices.insert(stranger);
+        assert_eq!(plain.role_of(&owner, &stranger), None);
+        // The owner root wins over any other entry.
+        assert_eq!(s.role_of(&counter, &counter), Some(DeviceRole::Owner));
     }
 }

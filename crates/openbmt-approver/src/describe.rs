@@ -42,6 +42,11 @@ pub(crate) fn field_values(s: &Settings) -> Vec<(&'static str, String)> {
             .collect::<Vec<_>>()
             .join(", ")
     };
+    let boxes = if s.boxes.is_empty() {
+        "none".to_string()
+    } else {
+        s.boxes.iter().map(short).collect::<Vec<_>>().join(", ")
+    };
     vec![
         ("light_per_sale", limit(&s.light_per_sale)),
         ("light_budget", limit(&s.light_budget)),
@@ -79,5 +84,6 @@ pub(crate) fn field_values(s: &Settings) -> Vec<(&'static str, String)> {
         ("customer_wifi", flag(s.customer_wifi)),
         ("devices", devices),
         ("counters", counters),
+        ("boxes", boxes),
     ]
 }
