@@ -110,6 +110,9 @@ pub enum PairRefused {
     NotOnCounters,
     /// CR-96: the first batch was refused by the batch checks.
     Batch(BatchError),
+    /// CR-130: the relay in the bundle is not signed by the owner root this
+    /// pairing pinned.
+    RelayNotSigned,
     /// CR-97: the saved pairing record does not read back.
     Record(DecodeError),
     /// CR-97: the saved pairing record holds a secret that is not a key.
@@ -122,6 +125,7 @@ impl PairRefused {
         match self {
             Self::NoCeremony | Self::NoRandomness => "CR-91",
             Self::Pair(_) | Self::Bundle(_) => "CR-92",
+            Self::RelayNotSigned => "CR-130",
             Self::Settings(_) | Self::SettingsOld { .. } => "CR-94",
             Self::NotOnDevices | Self::NotOnCounters => "CR-95",
             Self::Batch(_) => "CR-96",
@@ -146,6 +150,10 @@ impl fmt::Display for PairRefused {
             ),
             Self::NotOnDevices => write!(f, "this counter is not on the settings' device list"),
             Self::NotOnCounters => write!(f, "this counter is not among the settings' counters"),
+            Self::RelayNotSigned => write!(
+                f,
+                "the bundle's relay is not signed by the owner root this pairing pinned"
+            ),
             Self::Batch(e) => write!(f, "the first batch is refused: {e}"),
             Self::Record(e) => write!(f, "the saved pairing does not read back: {e}"),
             Self::RecordKey => write!(f, "the saved pairing holds a secret that is not a key"),
@@ -312,6 +320,13 @@ impl Ceremony {
             return Err(PairRefused::NoCeremony);
         };
         let paired = pairing.finish(&bundle.pairing, true, now)?;
+        // CR-130: the relay is kept only with the owner root's signature,
+        // checked against the root this same pairing pinned.
+        if let Some(signed) = &bundle.relay {
+            if !signed.verify(&paired.roots().owner) {
+                return Err(PairRefused::RelayNotSigned);
+            }
+        }
         let record = PairingRecord {
             identity_secret: self.secret,
             roots: paired.roots(),
@@ -321,7 +336,7 @@ impl Ceremony {
             settings: bundle.settings,
             first_batch: bundle.first_batch,
             peers: bundle.peers,
-            relay: bundle.relay,
+            relay: bundle.relay.map(|signed| signed.hint),
         };
         record.check(policy)?;
         Ok(record)

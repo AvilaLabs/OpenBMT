@@ -41,7 +41,7 @@ use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{tagged_hash, DeviceId, Identity};
 use openbmt_core::pairing::{check_request, owner_cosign, PairOffer, PairRequest};
 use openbmt_core::records::RecordKind;
-use openbmt_core::relay::{RelayHint, RelayRoute};
+use openbmt_core::relay::{RelayHint, RelayRoute, SignedRelayHint};
 use openbmt_core::settings::{Limit, SettingNote, Settings, SignedSettings};
 use openbmt_counter_ffi::{dispatch, Registry};
 use openbmt_counter_node::{batch_policy, Ceremony, PairingRecord};
@@ -90,7 +90,7 @@ fn base_settings(counter: DeviceId) -> Settings {
 }
 
 /// The counter's pairing, by the whole ceremony, from a bundle that holds
-/// the Box as its relay.
+/// the Box as its relay, signed by the owner.
 fn pair(relay: RelayHint, peer: &str) -> Result<(PairingRecord, Vec<u8>), String> {
     let (owner, approver, counter) = (identity("owner"), identity("approver"), identity("c1"));
     let offer = PairOffer::new(
@@ -116,7 +116,7 @@ fn pair(relay: RelayHint, peer: &str) -> Result<(PairingRecord, Vec<u8>), String
     };
     let bundle = CounterBundle::new(pairing, signed, None, vec![peer.to_string()])
         .map_err(|e| e.to_string())?
-        .with_relay(Some(relay));
+        .with_relay(Some(SignedRelayHint::sign(relay, &owner)));
     let bytes = bundle.to_bytes();
     ceremony.confirm(now()).map_err(|e| e.to_string())?;
     let record = ceremony

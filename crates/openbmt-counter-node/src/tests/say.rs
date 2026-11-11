@@ -46,6 +46,7 @@ fn pair_refused_name(e: &PairRefused) -> &'static str {
         PairRefused::Bundle(_) => "Bundle",
         PairRefused::Settings(_) => "Settings",
         PairRefused::SettingsOld { .. } => "SettingsOld",
+        PairRefused::RelayNotSigned => "RelayNotSigned",
         PairRefused::NotOnDevices => "NotOnDevices",
         PairRefused::NotOnCounters => "NotOnCounters",
         PairRefused::Batch(_) => "Batch",
@@ -127,7 +128,7 @@ fn sc_01_no_variant_is_missing() {
     // Every refusal of a pairing step has words, except the one that wraps
     // a pairing error, which has the words of that error with its rule.
     let refused = every_pair_refused();
-    assert_eq!(refused.len(), 10);
+    assert_eq!(refused.len(), 11);
     for (name, e) in &refused {
         assert_eq!(pair_refused_name(e), *name);
         assert!(has(format!("PairRefused::{name}")));

@@ -531,7 +531,12 @@ fn cr_130_the_code_carries_the_relay_of_the_owner_s_link() {
     // The code is of the version that holds a relay, and holds this one.
     assert_eq!(code[4], 2);
     let decoded = CounterBundle::from_bytes(&code).expect("a bundle");
-    assert_eq!(decoded.relay, Some(hint(RelayRoute::Direct(addr))));
+    let carried = decoded.relay.expect("a relay");
+    assert_eq!(carried.hint, hint(RelayRoute::Direct(addr)));
+    // The relay is signed by the owner root, which the counter checks.
+    let owner = Identity::from_secret_bytes(&OWNER_SECRET).unwrap();
+    assert!(carried.verify(&owner.device_id()));
+    assert!(!carried.verify(&id(0x22).device_id()));
     // The counter keeps it with its pairing (CR-131).
     ceremony.confirm(T0 + 60).expect("they match");
     let record = ceremony
@@ -551,7 +556,7 @@ fn cr_130_an_onion_link_gives_the_name_without_its_ending_and_the_owner_s_proxy_
     let (code, _) = bundle(&rig, handle, &scanned.counter).expect("a bundle");
     let decoded = CounterBundle::from_bytes(&code).expect("a bundle");
     assert_eq!(
-        decoded.relay,
+        decoded.relay.map(|signed| signed.hint),
         Some(hint(RelayRoute::Onion {
             name: ONION_NAME.to_string(),
             port: 48333

@@ -1403,11 +1403,10 @@ impl Entry {
                 .owner()
                 .counter_bundle(&counter)
                 .map_err(|r| queue_error(&OwnerError::Refused(r)))?;
-            // CR-130: the bundle carries the relay of the owner's link.
+            // CR-130: the bundle carries the owner-signed relay of the
+            // owner's link.
             let said = words(made.words());
-            let bundle = made
-                .bundle
-                .with_relay(st.relay.as_ref().map(|s| s.hint.clone()));
+            let bundle = made.bundle.with_relay(st.relay.clone());
             Ok(CounterBundleView {
                 code: bundle.to_bytes(),
                 with_batch: made.parts.batch.is_some(),

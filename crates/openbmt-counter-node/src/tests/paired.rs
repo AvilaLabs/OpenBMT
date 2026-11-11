@@ -702,7 +702,7 @@ fn cr_131_the_bundles_relay_is_kept_in_the_record() {
         vec![],
     )
     .unwrap()
-    .with_relay(Some(relay_hint()));
+    .with_relay(Some(SignedRelayHint::sign(relay_hint(), &id(1))));
     let record = c.finish(&bundle.to_bytes(), &SMALL, T0 + 1).unwrap();
     assert_eq!(record.relay, Some(relay_hint()));
     // The record is version 2 and reads back as it was.
@@ -722,6 +722,54 @@ fn cr_131_the_bundles_relay_is_kept_in_the_record() {
     let record = c.finish(&bare.to_bytes(), &SMALL, T0 + 1).unwrap();
     assert_eq!(record.relay, None);
     assert_eq!(&record.to_bytes()[..5], b"OBMt\x01");
+}
+
+#[test]
+fn cr_130_a_relay_the_owner_did_not_sign_is_refused_and_the_ceremony_used_up() {
+    let bundle_with = |request: &_, relay: SignedRelayHint| {
+        CounterBundle::new(
+            signed_pairing(&offer(), request, FLOOR),
+            settings_for(3, FLOOR + 1),
+            None,
+            vec![],
+        )
+        .unwrap()
+        .with_relay(Some(relay))
+        .to_bytes()
+    };
+    let genuine = SignedRelayHint::sign(relay_hint(), &id(1));
+    // The owner root is identity 1: the Key app's root, a stranger's and the
+    // genuine signature carried over to another relay are all refused.
+    let carried = SignedRelayHint {
+        hint: other_hint(),
+        owner_sig: genuine.owner_sig,
+    };
+    let forged = [
+        SignedRelayHint::sign(other_hint(), &id(2)),
+        SignedRelayHint::sign(other_hint(), &id(77)),
+        carried,
+    ];
+    for (n, relay) in forged.into_iter().enumerate() {
+        let (mut c, request) = begun(&offer(), 3, 7);
+        c.confirm(T0).unwrap();
+        let bytes = bundle_with(&request, relay);
+        let refused = c.finish(&bytes, &SMALL, T0 + 1).unwrap_err();
+        assert_eq!(refused, PairRefused::RelayNotSigned, "{n}");
+        assert!(refused.to_string().starts_with("CR-130"));
+        // The ceremony is used up, as for any other refusal.
+        assert_eq!(
+            c.finish(&bytes, &SMALL, T0 + 1).unwrap_err(),
+            PairRefused::NoCeremony
+        );
+    }
+    // The owner's own relay still pairs.
+    let (mut c, request) = begun(&offer(), 3, 7);
+    c.confirm(T0).unwrap();
+    let bytes = bundle_with(&request, genuine);
+    assert_eq!(
+        c.finish(&bytes, &SMALL, T0 + 1).unwrap().relay,
+        Some(relay_hint())
+    );
 }
 
 #[test]

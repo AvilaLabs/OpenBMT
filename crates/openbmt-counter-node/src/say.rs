@@ -421,6 +421,11 @@ impl PairRefused {
                 "Show the code on the owner's phone again and scan it again.",
             )
             .detail(e.to_string()),
+            Self::RelayNotSigned => stop(
+                "Owner code damaged",
+                "The code from the owner's phone was changed or damaged on the way, so pairing stopped.",
+                "Make a new setup code on the owner's phone and scan it again.",
+            ),
             Self::Settings(e) => stop(
                 "Settings not signed",
                 "The shop's settings that came with the pairing are not signed by both the owner's phone and the Key app, so pairing stopped.",
@@ -728,6 +733,7 @@ pub fn every_pair_refused() -> Vec<(&'static str, PairRefused)> {
             PairRefused::Settings(SettingsError::ApproverRequired),
         ),
         ("SettingsOld", PairRefused::SettingsOld { floor: 4, got: 4 }),
+        ("RelayNotSigned", PairRefused::RelayNotSigned),
         ("NotOnDevices", PairRefused::NotOnDevices),
         ("NotOnCounters", PairRefused::NotOnCounters),
         (

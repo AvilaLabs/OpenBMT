@@ -862,12 +862,19 @@ and the screen line are the app's.
 - **CR-130.** The counter bundle may carry a relay: one route and the relay's
   key. The route is a literal address and port (not port 0), or a version 3
   onion name of 56 characters, without `.onion`, and a port. The key is a
-  key. The bundle is version 2 when it carries a relay and version 1 when it
-  does not, byte for byte as before; version 1 reads and has no relay. A
-  version that is not 1 or 2, a route tag that is not defined, a name that
-  is not a name, a port that is 0 and any byte left over are refused. The
-  owner fills the relay from its link's settings when it shows the code;
-  a route that cannot be written as a relay gives a code with none.
+  key. The relay is carried as the owner's signed relay of CR-132 (the
+  `OBMz` frame, behind a length byte), signed by the owner root. The bundle
+  is version 2 when it carries a relay and version 1 when it does not, byte
+  for byte as before; version 1 reads and has no relay. A version that is
+  not 1 or 2, a route tag that is not defined, a name that is not a name, a
+  port that is 0, a relay that is not a whole frame and any byte left over
+  are refused. The owner fills the relay from its link's settings and signs
+  it when it shows the code; a route that cannot be written as a relay gives
+  a code with none. The counter keeps the relay only if the owner root it
+  pinned in that same pairing signed it. A bundle whose relay is signed by
+  anyone else, or whose relay was changed after it was signed, is refused
+  with words (the code from the owner's phone was changed or damaged: make a
+  new one on the owner's phone), nothing is kept and the ceremony is used up.
 - **CR-131.** The counter keeps the relay with its pairing record. The
   record (`OBMt`) is version 2 when it holds a relay and version 1 when it
   does not; version 1 reads and has none. CR-97 applies to both: strict
