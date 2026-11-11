@@ -55,6 +55,15 @@
 #   9. Settings that remove the counter reach it the same way (CR-165): it
 #      applies them, says on Home that it was removed, and refuses to open a
 #      new sale.
+#  10. A batch of addresses that the relay loses is sent again by the owner's
+#      link until the counter's records show it held (LK-70, LK-71, CR-167):
+#      with the counter stopped the owner hands the link a batch, and the relay
+#      is restarted with its mailboxes removed, so the first message is gone.
+#      The counter, started again, holds the batch after the owner's resend
+#      (the owner example sends again every 5 seconds here), the owner's copy
+#      shows it and the batch stops waiting. The owner then hands over the
+#      same batch once more, and the counter's records still show it once
+#      (CR-168).
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin (put first on
 # PATH; set CORE_BIN to use another), jq, and cargo unless the four binaries
@@ -100,6 +109,7 @@ SALE_AMOUNT=500       # $5.00 in cents, 5,000 sats at the rate below
 SALE_RATE=10000000    # $100,000 per bitcoin, in cents
 MAX_AGE=60            # the signed heartbeat age limit, at its minimum
 HB_EVERY=3            # seconds between the owner's heartbeats
+BATCH_RESEND=5        # seconds between the owner's sends of a batch that waits
 FRESH=20              # a heartbeat younger than this is fresh, in seconds
 
 say() { printf '\n== %s\n' "$*"; }
@@ -237,7 +247,7 @@ start_ex() { # who data-dir peer-port relay-port relay-key
   else
     exec 4<>"$fifo"
     "$OWNER_BIN" "$2" "127.0.0.1:$3" --regtest-single-peer --relay "127.0.0.1:$4" \
-      --relay-key "$5" --heartbeat-every "$HB_EVERY" <&4 >"${LOG[o]}" 2>&1 &
+      --relay-key "$5" --heartbeat-every "$HB_EVERY" --batch-resend "$BATCH_RESEND" <&4 >"${LOG[o]}" 2>&1 &
   fi
   PID[$who]=$!
 }
@@ -618,6 +628,73 @@ fi
 stop_pid "$BOX_PID"
 BOX_PID=
 
+# ---- 10 --------------------------------------------------------------------------
+
+say "10. A batch the relay loses is sent again, and the counter holds it once"
+if [ -z "$RELAY_UP" ]; then
+  notrun 10 "the relay is not running"
+else
+  xcmd c batches
+  B0=$(grep '^batches ' <<<"$LAST")
+  REM0=$(kv "$B0" remaining)
+  note "counter before: $B0"
+  if [ "$(kv "$B0" records)" != 0 ] || [ -z "$REM0" ]; then
+    bad 10 "the counter already shows a batch, or the example printed no batches line: $B0"
+  elif ! stop_ex c; then
+    bad 10 "the counter example did not stop"
+  else
+    xcmd o "sendbatch 20"
+    SENT8=$(grep '^sendbatch ' <<<"$LAST")
+    note "owner: $SENT8"
+    xcmd o batches
+    note "owner: $(grep '^batches ' <<<"$LAST")"
+    # The relay has the message. Take it away: stop the relay, remove its
+    # mailboxes (the members file stays), start it again.
+    stop_pid "$RELAY_PID"
+    RELAY_PID=
+    rm -rf -- "$R_DATA/mailboxes"
+    if ! start_relay || [ "$(sed -n 1p "$RELAY_LOG")" != "$RELAY_KEY" ]; then
+      bad 10 "the relay did not start again with the same key: $(cat "$RELAY_LOG")"
+    else
+      start_ex c "$C_DATA" "$A_P2P" "$RELAY_PORT" "$RELAY_KEY"
+      if ! xawait c "^started " 30 || ! await_tip c "$HEIGHT" 60; then
+        bad 10 "the counter example did not start again: $(tail -3 "${LOG[c]}")"
+      else
+        HELD8=
+        for _ in $(seq 1 90); do
+          xcmd c batches || break
+          B8=$(grep '^batches ' <<<"$LAST")
+          if [ "$(kv "$B8" records)" = 1 ] && [ "$(kv "$B8" ranges)" = 20-40 ]; then HELD8=yes; break; fi
+          sleep 1
+        done
+        note "counter after: ${B8:-none}"
+        # The owner's copy has the counter's record, and the batch stops waiting.
+        GONE8=
+        for _ in $(seq 1 60); do
+          xcmd o batches
+          O8=$(grep '^batches ' <<<"$LAST")
+          if [ "$(kv "$O8" waiting)" = 0 ]; then GONE8=yes; break; fi
+          sleep 1
+        done
+        note "owner after: ${O8:-none}"
+        # The same batch handed over again changes nothing at the counter.
+        xcmd o "sendbatch 20"
+        sleep $((BATCH_RESEND * 3))
+        xcmd c batches
+        B8B=$(grep '^batches ' <<<"$LAST")
+        note "counter after a second hand-over: $B8B"
+        REM8=$(kv "$B8B" remaining)
+        if [ -n "$HELD8" ] && [ -n "$GONE8" ] && [ "$(kv "$B8B" records)" = 1 ] &&
+          [ "$REM8" = $((REM0 + 20)) ] && await_same_chain 60; then
+          pass 10 "the first message was lost with the relay's mailboxes; the counter held the batch 20-40 after the owner's resend ($REM0 addresses left before, $REM8 after), the owner's copy showed it and the batch stopped waiting, and a second hand-over left one record"
+        else
+          bad 10 "held: ${HELD8:-no}; stopped waiting: ${GONE8:-no}; records after the second hand-over: $(kv "$B8B" records); addresses left $REM0 -> ${REM8:-?}"
+        fi
+      fi
+    fi
+  fi
+fi
+
 stop_ex c || note "the counter example did not stop cleanly"
 stop_ex o || note "the owner example did not stop cleanly"
 
@@ -626,7 +703,7 @@ stop_ex o || note "the owner example did not stop cleanly"
 say "Result"
 failed=0
 notrun=0
-for n in 1 2 3 4 5 6 7 8 9; do
+for n in 1 2 3 4 5 6 7 8 9 10; do
   printf '%s  step %s\n' "${RESULT[$n]:-FAIL}" "$n"
   case "${RESULT[$n]:-FAIL}" in
     PASS) ;;
