@@ -1,125 +1,114 @@
 # Limits and risks
 
-> **Status: internal review only. No independent security audit has been done.
-> None of the three Android apps has been run on a phone. Do not use OpenBMT
-> with real funds.**
+> **OpenBMT has had internal review only and no independent security audit.
+> None of the Android apps has been run on a phone. Do not use it with real
+> funds.**
 
 ## What the protection claims, and when it does not hold
 
-The design makes this claim: **once two launch conditions hold, no single
-compromised OpenBMT component, device or person can spend the wallet.**
+The wallet design is intended to withstand one compromised OpenBMT
+component, device or person without allowing a spend. That requires both
+of these conditions:
 
-1. Key 3 is made outside OpenBMT software and away from the key 2 device.
-2. The Key app's release key is held by a second, independent person.
+1. Key 3 is generated outside OpenBMT software and away from the key 2
+   device.
+2. An independent second person holds the Key app's release key.
 
-Condition 1 is built into the setup design. Condition 2 is **not met**: the
-second holder has not been named. Reproducible builds and an independent
-rebuilder, which the design also requires before launch, are **Not built yet**.
-So **today the claim does not hold**, and the documents and screens say so.
+The first is part of the setup design. The second is unmet: no second
+holder has been named. Reproducible builds and an independent rebuilder
+are also launch requirements and are not in place. The single-component
+protection claim does not hold today; the documents and screens say so.
 
-Even when both conditions hold, the claim covers spending the wallet.
-Protection for sales proceeds and goods extends only up to the stated
-limits, and depends on the owner's reconciliation to catch a bad counter,
-build or Box.
+Even with those conditions met, protecting the wallet does not prevent
+every loss at the counter. Limits bound the exposure of sales proceeds
+and goods, and the owner must reconcile records to catch a bad counter,
+app build or Box.
 
 ## The threat model in plain words
 
-| What goes wrong | What it costs | What limits it |
+| Incident | Potential loss | Protection and its limit |
 |---|---|---|
-| A thief takes one phone | One key of three. No spend alone | The PIN lock, the wipe, the other two keys |
-| A thief takes two keys | The wallet | Keys are kept apart: owner phone, spare phone, steel words away from the shop |
-| A bad update or build of the main app | Could show wrong addresses or fake "Paid" | The Key app co-signs every address batch and spend; a separate release key; no automatic updates. Only as strong as the separation, which is not complete (condition 2) |
-| A counter shows its own address and says Paid | Sales proceeds lost until noticed | The monthly outside check (below); the owner phone matches orders to funds |
-| A customer cancels an instant payment | Up to the instant limit | The limit and the exposure total; the alarm; a signed record of the cancel; a pause |
-| A hostile cashier | Up to the cashier's caps | Per-sale limit, daily cap, the exposure total, names in signed records |
-| A hacked or hosted Box | A false "paid" notice, held-back messages | The Box cannot move funds, pick addresses or close an order without the counter's signature. The owner phone matches every order itself |
-| A refund sent to the wrong place | Up to the Key app's ceilings | Ceilings in satoshis, an allowlist enrolled on the Key app, the owner and the Key app see each line |
-| A lost recovery kit and one lost key | The wallet is unspendable | Two keys needed. Reminders and inspection are design only |
-| Peers all controlled by one attacker | False "seen", missed conflicts | Distinct network groups, own node, an unhealthy check turns instant off |
+| One phone stolen | One of the three keys; insufficient to spend alone | PIN, wipe and two remaining keys |
+| Two keys stolen | The wallet | Keep the owner phone, spare phone and off-site steel words apart |
+| Malicious main-app build | Wrong addresses or false "Paid" screens | Key app co-signing, separate release key and manual updates; release separation is incomplete |
+| Counter displays its own address and reports payment | Sales proceeds until detected | Owner matching of orders to funds and the monthly outside check |
+| Customer cancels an instant payment | Up to the instant limit | Per-sale and exposure limits, alarm, signed cancel record and pause |
+| Hostile cashier | Up to the cashier's caps | Per-sale and daily caps, exposure total and names in signed records |
+| Compromised or hosted Box | False payment notices or withheld messages | It cannot spend, select addresses or close an order without the counter's signature; owner independently matches orders |
+| Refund sent to the wrong destination | Up to the Key app's ceilings | Satoshi ceilings, allowlist enrollment on the Key app and review on both devices |
+| Recovery kit lost along with one key | Wallet cannot be spent | Two keys are still required; reminders and inspection remain design-only |
+| All reachable peers controlled by an attacker | False sightings or missed conflicts | Distinct network groups, own-node checks and disabling instant when checks are unhealthy |
 
 ## What the light check cannot see
 
-The counter's default check asks Bitcoin peers directly. It cannot see the
-amounts of an unconfirmed payment's inputs, cannot tell whether those inputs
-are confirmed, and cannot work out its fee rate. It watches for conflicting
-spends and requires peers from different network groups, nothing more. It does
-not run scripts or check the coins of each transaction in a block
-(`docs/WATCHER-RULES.md`, section 8). A payment in a block is as good as the
-work on top of it, which is why the shop sets a confirmation depth.
+The light check asks Bitcoin peers directly. For an unconfirmed payment,
+it cannot inspect input amounts, establish whether the inputs are
+confirmed, or calculate the fee rate. It monitors conflicting spends and
+requires different peer network groups. It does not execute scripts or
+check each transaction's coins within a block (`docs/WATCHER-RULES.md`,
+section 8). Confirmation depth is therefore a choice about how much work
+must accumulate above the payment.
 
-If every peer the counter can reach belongs to one attacker, that attacker
-chooses what the counter sees. Distinct network groups, stored long-lived
-peers and Tor make that harder. They do not make it impossible
-(`docs/NETWORK-RULES.md`, section 8).
+An attacker controlling every reachable peer controls what the counter
+sees. Distinct network groups, stored long-lived peers and Tor make this
+harder without ruling it out (`docs/NETWORK-RULES.md`, section 8).
 
-On signet, headers are checked for work only. Test networks prove nothing
-about money.
+On signet, the header check verifies work only. Test-network results do
+not establish protection for real funds.
 
 ## What the PIN does not stop
 
-A PIN keeps a phone's key unreadable to someone who has the phone and not the
-PIN, and slows guessing. It does not stop:
+The phone's key file is locked behind the PIN, and guessing is slowed.
+That does not protect against someone using an unlocked phone, restoring
+an older stored file, or obtaining both the file and the Keystore material
+needed for offline guessing.
 
-- someone who has the unlocked phone;
-- a rooted phone, or one with a hostile keyboard or accessibility service
-  (the Key app refuses to run with an accessibility service or debugging on, but
-  that is a promise of the Key app's own software);
-- someone who puts back an older copy of the stored file;
-- an offline guesser who has both the locked file and what the Keystore holds.
-
-A cashier PIN on the counter stops a casual hand and nothing more.
+A rooted phone, hostile keyboard or accessibility service can read input
+or displayed data. The Key app refuses to run with debugging or an
+accessibility service enabled, but that refusal is enforced by the app
+itself. A cashier PIN on the counter deters casual access only.
 
 ## Phone and hardware risks
 
-- The apps run only while open. There is no background service, so the Owner
-  app does not follow the chain while closed, and the counter must be kept open
-  and plugged in.
-- The Owner app and the Counter app need Orbot, a separate Android app, to use
-  Tor.
-- Android versions may change how wallets open from a tag. Tap to pay is Not
-  built yet, so this is not tested.
-- The Keystore may be software only on some phones. The app says so on screen.
-- The apps assume a phone that is not already controlled by someone else.
+The apps run only while open. The Owner app does not follow the chain
+when closed, and the counter must stay open and plugged in. The Owner and
+Counter apps need Orbot, a separate Android app, to use Tor. Some phones
+offer a software-only Keystore; the app reports this on screen. The design
+assumes the phone is not already
+controlled by an attacker.
+
+Android versions may handle wallet opening from an NFC tag differently.
+Tap to pay is not built and this behavior is untested.
 
 ## Unverified items
 
-These are named so that nobody mistakes them for checked facts.
-
-- **Hardware signers (design experiment E8).** Whether Coldcard, Jade,
-  Passport or Keystone accept the wallet, check change against it, and require
-  full previous transactions has **not been tested**. Frame counts for large
-  QR transfers are not measured. Signing with Bitcoin Core as the second signer
-  was checked on a test network. Sparrow has not been checked.
-- **POS readers (E5, E6).** The Square and Clover readers were written from
-  documentation. Nothing was captured from a real seller account. Whether
-  Square charges a fee for an order paid with a custom tender is not known from
-  its pages. Clover's rules for apps that deal in virtual currency could not
-  be read.
-- **Lightning.** The request and reply shapes were read from the node
-  software's source and documentation. No node was run.
-- **Recovery with Sparrow.** Not run.
-- **NFC tap (E1, E10).** Not built.
-- **Timings.** Setup time, time to "Seen", battery and bandwidth are not
-  measured.
-- **Competitor figures in the design.** The design marks each one "to
-  verify" and keeps them off merchant screens until sourced. The card fees
-  in [Why bitcoin](why-bitcoin.md) are quoted from the processors' own pages,
-  read 2026-11-11, and can change at any time.
+| Area | What remains unknown |
+|---|---|
+| Hardware signers, experiment E8 | Coldcard, Jade, Passport and Keystone have not been tested for wallet acceptance, change checks or full previous-transaction requirements. Large QR transfer frame counts are unmeasured. Bitcoin Core was tested as a second signer on a test network; Sparrow was not. |
+| POS readers, E5 and E6 | No real Square or Clover seller account has been used. Square's custom-tender order fee is unknown from its pages. Clover's virtual-currency app rules could not be read. |
+| Lightning | Request and response formats came from source and documentation. No real node has been run. |
+| Sparrow recovery | No restore has been run. |
+| NFC tap, E1 and E10 | Not built. |
+| Timings | Setup time, time to "Seen", battery use and bandwidth have not been measured. |
+| Competitor figures in the design | Marked "to verify" and excluded from merchant screens until sourced. The processor fees in [Why bitcoin](why-bitcoin.md) came from their own pages, read 2026-11-11, and may change. |
 
 ## The monthly outside check
 
-The only check independent of OpenBMT's software is manual. Once a month, the
-owner opens the kit's wallet description as watch-only in
-Sparrow or Bitcoin Core and compares the receipts with the POS bitcoin-tender
-total. It takes about five minutes (not measured). This is the only check that
-catches a bad counter or main-app build showing its own address and saying
-Paid. The reminder and app steps are **Planned**.
+Once a month, open the recovery kit's wallet description as watch-only in
+Sparrow or Bitcoin Core. Compare the receipts with the POS Bitcoin-tender
+total. This is the only check independent of OpenBMT's software, and the
+only one that catches a counter or main-app build substituting its own
+address while claiming payment.
+
+The estimate is five minutes; it has not been measured. In-app reminders
+and instructions are planned.
 
 ## The audit status
 
-Four internal design reviews have covered these viewpoints: a remote
-thief, insiders, a hostile customer, a wallet engineer, a privacy critic, an
-adversary, a recovery engineer, a single-component check, and a comparison of
-the first code with the design. These reviews are internal, not an audit.
-The built software still needs tests on devices, an outside code review and an
-independent audit before anyone should call it safe for real money.
+The four internal design reviews examined remote theft, insiders, hostile
+customers, wallet engineering, privacy, adversarial behavior and recovery.
+They also checked single-component compromise and compared the first
+implementation with the design. They were not an independent audit.
+
+Device testing, outside code review and an independent security audit
+remain necessary before OpenBMT can be considered for real funds.

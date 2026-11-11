@@ -1,85 +1,87 @@
 # Introduction
 
-OpenBMT (Bitcoin Merchant Terminal) lets a shop take bitcoin at the counter
-the way it takes a card. The customer pays from their own wallet. The money
-goes straight into a wallet that the shop owns. The sale then closes in the
-point-of-sale system (POS) the shop already uses.
+OpenBMT is a Bitcoin checkout system for shops. The cashier enters a sale
+amount, the customer scans a payment code, and the money goes to the shop's
+wallet. The cashier then closes the order in the shop's existing
+point-of-sale system (POS).
 
-> **Status: pre-release. Internal review only. No independent security audit
-> has been done yet. Do not use OpenBMT with real funds.**
+> **OpenBMT is pre-release. It has had internal review only and no independent
+> security audit. Do not use it with real funds.**
 
-## What OpenBMT is
+<a id="what-openbmt-is"></a>
 
-The wallet is the shop's. It needs two of three keys to spend, and the shop
-holds all three. No company holds one, and no company can move or freeze the
-money.
+## The shop's devices
 
-The counter screen shows the sale and a QR code, and a line that says what
-checked the payment: "Light check", "Your Box reports it", "Your Box and light
-check" or "Your node and light check". Each names a different source, and the
-screen never merges them.
+OpenBMT has three Android apps and an optional server:
 
-A small separate app, the Key app, holds the second key. It checks every
-spend, every address batch and every loosening of a safety limit on its own
-screen.
+| Part | Job |
+|---|---|
+| Counter app | Displays the sale and payment code, watches for payment, and tells the cashier what has been checked. It holds no wallet signing key. |
+| Owner app | Tracks the shop's coins and prepares refunds, cash-outs and settings changes. |
+| Key app | Holds a second wallet key on a separate device. It reviews spends, address batches and changes that loosen the shop's limits. |
+| Box | Relays messages between the shop's devices and reads POS orders. The shop runs it; it holds no wallet key. |
 
-The Box is an optional small server of the shop's own. It links the shop's
-devices and reads the POS. It holds no key.
+The shop holds all three keys to its wallet, and any two are needed to
+spend. OpenBMT and Avila Labs hold none of them. Keeping the keys on separate
+devices prevents a single stolen phone from being enough to spend the
+money. The [wallet chapter](safety.md) explains the other conditions this
+protection depends on, including work that is still unfinished.
 
-The wallet is a standard output descriptor, so it can be restored in other
-wallet software without anything from this project.
+The wallet uses a standard output descriptor: a description that other
+wallet software can read. Recovery therefore does not require OpenBMT to
+remain available.
 
-## Who it is for
+<a id="what-openbmt-is-not"></a>
 
-This handbook is for shop owners and managers. Technical readers can check
-claims against rule IDs
-such as `SR-34` and `CR-15`, which point to rules in the repository's `docs/`
-folder. Tests in the code use those rule IDs as names.
+## Payments and records
 
-## What OpenBMT is not
+OpenBMT checks payments directly through the Bitcoin network and can add a
+check from the shop's own node. The counter identifies whether information
+came from its peer check, the Box or the node. [Getting paid](getting-paid.md)
+explains these reports and the risk of handing over goods before a payment
+confirms.
 
-No company sits between the customer and the shop's wallet, and nobody holds
-a balance for the shop. OpenBMT is not an exchange. The shop chooses and
-works with its own exchange to turn bitcoin into dollars. OpenBMT prepares
-the transaction; the shop approves it.
+There is no OpenBMT account, hosted balance or payment processor between
+the customer and the wallet. If the shop wants dollars, it chooses an
+exchange and approves a transaction to it. OpenBMT prepares that
+transaction; it does not exchange the money.
 
-The accounting export follows United States rules only and reports what is
-in the records. It does not provide tax advice.
+The accounting export reports what is in the records and follows United
+States rules only. It does not provide tax advice.
 
 ## What is built today
 
-The handbook uses four status words with fixed meanings.
-
-| Word | Meaning |
-|---|---|
-| **Built** | The code exists and its tests have run, on a desktop or against Bitcoin Core on a test network. |
-| **Not run on a phone** | Built into an Android app that has been started on an Android emulator but not yet tried on a phone. |
-| **Planned** | Written in the design only. |
-| **Not built yet** | Named so that a reader does not expect it. |
-
-Where things stand:
+"Built" means the code exists and has passed tests on a desktop or against
+Bitcoin Core on a test network. The Android apps have started on an
+emulator but have not been tried on a phone. "Planned" means a feature is in
+the design; "Not built yet" marks something that is still absent.
 
 | Part | Status |
 |---|---|
-| The rules every device shares: wallet, batches, settings, signed records, instant acceptance | Built |
-| The Key app's signing rules (what it refuses to sign) | Built |
-| The counter's judgment of a sale, and its Bitcoin peer client | Built, checked against Bitcoin Core on a test network |
-| The owner's coin view, refund queue, spending and approval session | Built, checked against Bitcoin Core on a test network |
-| Key app, Counter app and Owner app for Android | First build. Started on an emulator; not run on a phone |
-| The Box and its packaging (container, Umbrel, StartOS) | Built. The container image is built and smoke-tested; the Umbrel and StartOS packages have not been run on a device |
-| Tap to pay by NFC | Not built yet |
-| Square and Clover order matching (read-only) | Built. Written from vendor documentation, not from a real account |
-| Lightning with the shop's own node | Built at the counter. Never run against a real node |
-| Books and exports | Built as a library. The apps have no books screen yet |
-| Recovery kit printing | Not built yet. The Key app checks a scanned kit against its own wallet |
-| Push wake-ups, a full node on the Box, a hosted Box | Not built yet |
-| Reproducible builds, a second holder of the Key app's release key | Not built yet |
+| Shared wallet, address batches, settings, signed records and instant acceptance | Built |
+| Key app signing rules | Built |
+| Counter sale handling and Bitcoin peer client | Built; tested against Bitcoin Core on a test network |
+| Owner coin view, refund queue, spending and approval session | Built; tested against Bitcoin Core on a test network |
+| Counter, Owner and Key Android apps | First builds; started on an emulator, not run on a phone |
+| Box and its container, Umbrel and StartOS packages | Built; container image smoke-tested, Umbrel and StartOS packages not run on a device |
+| NFC tap to pay | Not built yet |
+| Square and Clover order matching | Built, read-only; based on vendor documentation, not tested with a real seller account |
+| Lightning through the shop's own node | Built at the counter; not run against a real node |
+| Books and exports | Built as a library; no books screen in the apps |
+| Recovery kit printing | Not built yet; the Key app can check a scanned wallet description against its own |
+| Push wake-ups, a full node on the Box and a hosted Box | Not built yet |
+| Reproducible builds and a second holder of the Key app's release key | Not in place yet |
 
-The chapters on setup, the Box, refunds, books and cash-out are still to
-come. Their entries appear under "Using OpenBMT" in the contents.
+The chapters under "Using OpenBMT", including setup, the Box, refunds,
+books and cash-out, have not been written yet.
 
-## How to read a safety claim
+<a id="who-it-is-for"></a>
+<a id="how-to-read-a-safety-claim"></a>
 
-Each safety claim names the checks and conditions it depends on, and
-explains what can still go wrong. "Not verified" means
-a claim has not been checked; the text says what was checked instead.
+## Checking the implementation
+
+This handbook is written for shop owners and managers. References such as
+`SR-34` and `CR-15` are for readers who want to check the implementation:
+they identify rules in the repository's `docs/` folder, with corresponding
+test names in the code. When a claim is marked "not verified", the text
+states what was checked and what remains unknown.

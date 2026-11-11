@@ -1,102 +1,95 @@
 # Principles
 
-OpenBMT checks each decision against three standards. A decision must meet
-all three.
+OpenBMT is intended to give a shop control of its Bitcoin payments without
+making checkout harder for the cashier or customer. Its design has three
+requirements, all of which must be met.
 
-## The standard
+<a id="the-standard"></a>
 
-1. **Easy.** A merchant, a cashier or a customer who has never seen it should
-   get it right the first time. If something is confusing, that is a defect
-   in OpenBMT, not in the person.
-2. **Best in class.** For every measure a merchant or customer would compare
-   (setup time, taps, time to "paid", fees, refunds, books), OpenBMT must
-   match or beat the best product available, custodial ones included.
-   This is a target, not a result. Setup time and most speeds have not been
-   measured; the design marks them "to measure".
-3. **Purist-approved.** No custody, no trusted server, no claim beyond what
-   was checked, private by default, built on open standards.
+## Design requirements
+
+A new merchant, cashier or customer should be able to use it correctly on
+the first attempt. Confusing behavior is a defect in the software.
+
+The performance target is to match or beat the best available checkout
+products, including custodial ones, on setup time, taps, time to "paid",
+fees, refunds and bookkeeping. These are targets. Setup time and most
+speeds have not been measured; the design still marks them "to measure".
+
+OpenBMT also follows a bitcoin purist position: the shop keeps custody,
+payments do not depend on a trusted server, privacy is the default, and the
+wallet uses open standards. Claims about a payment must stay within what
+the software actually checked.
 
 ### Why a purist objection is a veto
 
-OpenBMT takes a bitcoin purist position. It rejects any proposal that lets a
-third party hold, move, freeze or redirect the shop's funds, or gives that
-party the shop's keys, wallet description or addresses. This veto also rules
-out keeping such a proposal as an option or deferring it to a later phase.
+A proposal is rejected if it would let a third party hold, move, freeze or
+redirect the shop's funds, or give that party the shop's keys, wallet
+description or addresses. Rejected proposals cannot be retained as options
+or deferred to a later version. An exception could become the default and
+leave the shop dependent on a processor again.
 
-A shop that takes bitcoin to avoid depending on a processor gains nothing
-from a design that adds one back. An exception could become the default, so
-OpenBMT does not make one.
+This rule excluded co-signed instant payments: the shop would have to trust
+a group of signers that could freeze funds and see every spend. It also
+excluded Lightning through a third-party swap provider, which would see
+each sale's amount, timing and both sides of the swap.
 
-This veto ruled out two ideas. Co-signed instant payments, where a
-group of co-signers vouches for an unconfirmed payment, need merchants to
-trust a signer set and give that set the power to freeze and to see every
-spend. Lightning through a third-party swap provider makes every such sale
-depend on a central service that sees amounts, timing and both sides.
+An optional service may see metadata alone if it is never the default, its
+use is disclosed where the shop chooses it, and its exposure is listed in
+[Privacy](privacy.md). OpenBMT has no such service today.
 
-The veto allows one narrow exception: an optional service that sees only
-metadata, provided it is never the default, it is labeled where the shop
-chooses it, and it is listed in [Privacy](privacy.md). OpenBMT has no such
-service today.
+<a id="choice-without-confusion"></a>
 
-### Choice without confusion
+### Configuration choices
 
-Merchants can choose which keys to use, how long to wait and which node to
-connect. Each available option must be safe and acceptable under the purist
-standard on its own. OpenBMT marks one option as recommended and does not
-offer unsafe combinations.
+Shops can choose their keys, node and waiting periods. Every offered
+combination must meet the safety and purist requirements on its own;
+unsafe combinations are excluded. OpenBMT marks one option as recommended
+so that a new user does not have to research every choice before starting.
 
 ## Bitcoin only
 
-OpenBMT takes bitcoin only. It has no second coin, stablecoin or token.
-[What OpenBMT will never do](never.md) says what that rules out and why.
+OpenBMT accepts bitcoin only. Other coins, stablecoins and tokens are
+excluded. [What OpenBMT will never do](never.md) sets out this policy and
+the other permanent restrictions.
 
-## Your keys
+<a id="your-keys"></a>
 
-The shop holds all three keys of its wallet. Any two can spend. The three
-live on different devices, and no single device may hold or drive two of
-them. [How your money is kept safe](safety.md) explains how.
+## Key ownership
+
+The shop holds all three wallet keys. Any two can spend, so the keys must
+be kept on separate devices. No device may hold two keys or cause a second
+key to sign without an independent review on that key's device. The
+[wallet chapter](safety.md) describes this separation and its current limits.
 
 ## No company in the payment path
 
-Payments travel between the customer's wallet and the shop's wallet over the
-Bitcoin network. The shop's devices check them by connecting to Bitcoin peers
-or to the shop's own node. No OpenBMT server handles a payment, and the apps
-require no OpenBMT account.
+A payment travels from the customer's wallet to the shop's wallet over the
+Bitcoin network. The shop's devices check it through Bitcoin peers or the
+shop's own node. There is no OpenBMT payment server or account.
 
-Other companies may be involved in these ways:
+Some activity is still visible outside the shop. The POS vendor sees its
+orders, price sources see price requests, and an exchange sees deposits the
+shop sends for cash-out. Bitcoin peers see the counter's network address
+unless it uses Tor. [Privacy](privacy.md) describes these contacts.
 
-- the POS vendor sees every order, because it is the shop's POS;
-- price sources see that a device asked for the price;
-- Bitcoin peers see the counter's network address unless Tor is on;
-- an exchange sees the cash-out deposit, because the shop chose it.
+<a id="status-words"></a>
 
-None of them is in the payment path. [Privacy](privacy.md) lists each.
+## Payment evidence and status
 
-## Status words
+The counter must identify the check behind a payment report and distinguish
+its sources of evidence (`CR-105`, `docs/screens/counter.md`). The actual
+labels are explained in [Getting
+paid](getting-paid.md#which-check-saw-the-payment).
+No screen says "fully verified". "Settled" and "final" refer to the refund
+depth chosen by the shop. More blocks reduce the chance of reversal without
+making it impossible.
 
-OpenBMT reports what it checked on screen and in the documents.
+The same precision is required in documentation. Conditions belong beside
+the claims that depend on them, and an unverified claim must be labeled
+"not verified". The status terms in the [Introduction](introduction.md)
+distinguish working code from plans and untested features.
 
-On the counter, each payment carries a line naming what saw it:
-
-- "Your Box reports it": only the Box has seen it so far.
-- "Light check": the counter's own check against Bitcoin peers saw it.
-- "Your Box and light check": both saw it.
-- "Your node and light check": the shop's own node and the light check both
-  saw it.
-
-The rules for these lines are CR-105 and the counter's screen table
-(`docs/screens/counter.md`). No screen says "fully verified".
-"Settled" and "final" are reserved for the refund depth the shop sets, and even
-then they mean "more blocks on top make a reversal less likely", never "zero
-risk".
-
-In the documents, every safety claim must be true as written. If it holds
-only under a condition, the condition appears beside it. If something could
-not be checked, the document says "not verified". This handbook follows the
-same rule and uses the four status words from the
-[Introduction](introduction.md).
-
-OpenBMT does not claim to be proof against attack. It remains under internal
-review; no independent security audit has been done. Four internal design
-reviews are complete. The built software still needs device testing, an
-outside code review and an audit.
+Four internal design reviews are complete. Device testing, an outside
+code review and an independent security audit are still needed. OpenBMT
+makes no claim to be proof against attack.

@@ -1,75 +1,79 @@
 # Glossary
 
-**Address batch.** A signed list of receive addresses for one counter, a
-contiguous range, signed by key 1 and co-signed by the Key app.
+**Address batch.** A contiguous range of receive addresses assigned to one
+counter, signed by key 1 and co-signed by the Key app.
 
-**Approval session.** A session where the owner uses key 2 to approve queued
-items. The owner phone shows them, and the Key app checks and signs each.
-Nothing that moves money or loosens a limit happens outside one.
+**Approval session.** The owner reviews queued items with key 2 available.
+The owner phone presents them; the Key app checks and signs the approved
+items. Money movements and loosening changes require a session.
 
-**Approver.** A Key app that holds an identity key only and no wallet key,
-used when key 2 is a hardware wallet.
+**Approver.** A Key app holding an identity key but no wallet key, used
+when key 2 is a hardware wallet.
 
-**BC-UR.** The format for sending data in animated QR codes, used by Sparrow
-and hardware wallets.
+**BC-UR.** A format used by Sparrow and hardware wallets to transfer data
+through animated QR codes.
 
 **BIP321.** The standard for a `bitcoin:` payment request.
 
-**Box.** The shop's own small server. Relays messages between the shop's
-devices, reads the POS. Holds no key.
+**Box.** The shop's optional server for relaying device messages and reading
+POS orders. It holds no wallet key.
 
-**Change.** The part of a spend that returns to the shop's own wallet.
+**Change.** Money returned to the shop's wallet by its own spending
+transaction.
 
-**Compact block filter.** A small summary of a block that lets a light client
-tell whether a block might matter to it.
+**Compact block filter.** A small summary used by a light client to find
+blocks that might contain a relevant transaction.
 
-**Confirmation.** A block that holds the payment. The shop sets two depths:
-the confirmation depth (1 block at first) and the refund depth (6 at first),
-after which a refund can be paid out. The counter shows "Paid" at both, with
-words saying which.
+**Confirmation.** Inclusion of a payment in a block. The shop's confirmation
+depth starts at 1 block and its refund depth at 6. A refund can be paid at
+the latter. Both show "Paid", with text distinguishing the depth.
 
-**Counter.** The shop's phone or tablet that shows the sale. Holds no key.
+**Counter.** The phone or tablet displaying the sale and payment code.
+It holds no wallet signing key.
 
-**Descriptor (wallet description).** The text that says how the wallet's
-addresses are made from its three public keys.
+**Descriptor (wallet description).** Text describing how to derive the
+wallet's addresses from its three public keys.
 
-**Exposure.** The total of instant sales not yet in a block.
+**Exposure.** Instant sales still waiting for their first block.
 
-**Full node.** A computer that checks every block itself. The shop's own
-node is optional.
+**Full node.** A computer that checks every block itself. Running one is
+optional for the shop.
 
-**Heartbeat.** A small signed message from the owner phone that tells the
-counter the owner's watcher is alive.
+**Heartbeat.** A signed message from the owner phone telling the counter
+that the owner's watcher is running.
 
-**Instant.** Handing over goods before the first block, within the shop's
-limit.
+**Instant.** Acceptance before the first block, within the shop's limit.
 
-**Key app.** The separate app that holds key 2 and is the second authority.
+**Key app.** The separate app holding key 2 and providing the second
+approval.
 
-**Light check.** Asking Bitcoin peers directly, with compact filters, instead of
-running a node.
+**Light check.** A check through Bitcoin peers and compact block filters
+without running a full node.
 
-**Loosening / tightening.** A change that allows more risk or less.
+**Loosening / tightening.** A settings change that permits more risk, or
+one that reduces it.
 
-**Multisig, two of three.** A wallet that needs two of its three keys to spend.
+**Multisig, two of three.** A wallet requiring any two of its three keys
+to spend.
 
-**Orbot.** An Android app that provides Tor for other apps.
+**Orbot.** A separate Android app providing Tor connections to other apps.
 
-**PSBT.** The standard file for a transaction that is passed between signers.
+**PSBT.** A standard transaction file passed between signers.
 
-**Recovery kit.** A printed page of instructions for restoring the wallet. It
-contains no secrets.
+**Recovery kit.** A printed page of wallet recovery information, without
+secret keys or seed words.
 
-**Release key.** The key that signs an app for download. It is not a wallet
-key.
+**Release key.** A key signing an app for distribution, separate from the
+wallet's keys.
 
-**Reorganization (reorg).** When blocks are replaced by a different set.
+**Reorganization (reorg).** Replacement of blocks by a different set of
+blocks.
 
-**Root.** The identity key of the owner phone or the Key app that a counter
-pins at pairing.
+**Root.** An owner-phone or Key-app identity key pinned by a counter at
+pairing.
 
 **Satoshi (sat).** One hundred-millionth of a bitcoin.
 
-**Tor.** A network that hides where a connection comes from.
+**Tor.** A network that hides where a connection originates.
 
-**xpub.** A public key that can derive addresses without being able to spend.
+**xpub.** A public key used to derive addresses without being able to spend.
