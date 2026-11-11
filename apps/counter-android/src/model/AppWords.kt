@@ -1,6 +1,5 @@
 package org.openbmt.counter.app
 
-import org.openbmt.app.CameraWords
 import org.openbmt.app.Format
 import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
@@ -29,22 +28,45 @@ object AppWords {
         Tones.INFO, "Not set up yet",
         "This counter has not been paired with the shop yet, so it cannot take a sale.",
         Who.MANAGER,
-        "Paste the pairing text from the owner's phone, choose a PIN and save.",
+        "Type a name, a PIN and the address of Orbot, then tap Pair, and scan the Key app's code with this phone.",
     )
 
     val pairingSaved = w(
         Tones.GOOD, "Counter set up",
-        "The pairing and the PIN are saved on this phone.",
+        "The counter is paired with the shop, and the pairing and the PIN are saved on this phone.",
         Who.CASHIER,
         "Keep the app open at the counter. It starts looking for the network now.",
     )
 
-    fun pairingNotReadable(problem: String?) = w(
-        Tones.STOP, "Pairing text not read",
-        "The pairing text is not in the form this app reads, so nothing was saved.",
+    // ---- pairing, step by step (CR-98) -----------------------------------------------
+
+    val pairingScanOffer = w(
+        Tones.INFO, "Scan the Key app",
+        "The Key app shows a code on its Pair a counter screen. This counter reads the shop's keys and network from it.",
         Who.MANAGER,
-        "Copy the pairing text again from the owner's phone, then try again.",
-        detailOf(problem),
+        "Open Pair a counter on the Key app, then tap Scan and hold this phone's camera to its code.",
+    )
+
+    val pairingCompare = w(
+        Tones.INFO, "Compare the four words",
+        "The Key app shows four words for this pairing, and the same four are below. If they are not the same, someone changed the code on the way.",
+        Who.MANAGER,
+        "Check all four words on the Key app, then tap They match, or tap They differ if any word is not the same.",
+    )
+
+    val pairingScanBundle = w(
+        Tones.INFO, "Scan the owner's phone",
+        "The four words matched. The owner's phone now shows the code that finishes the pairing.",
+        Who.MANAGER,
+        "On the owner's phone open the counter's code, then tap Scan and hold this phone's camera to it.",
+    )
+
+    /** The app was left while a pairing was open: the library forgot it and nothing was saved. */
+    val pairingForgotten = w(
+        Tones.STOP, "Pairing not finished",
+        "The app was closed or left before the pairing was finished, so it was forgotten and nothing was saved.",
+        Who.MANAGER,
+        "Start again from the Key app: open Pair a counter, then tap Pair on this counter and scan its code.",
     )
 
     val pinNotAccepted = w(
@@ -52,6 +74,13 @@ object AppWords {
         "A PIN is 6 to 12 digits, and the two entries must be the same, so nothing was saved.",
         Who.MANAGER,
         "Type a PIN of 6 to 12 digits twice, then save again.",
+    )
+
+    val counterNameNotAccepted = w(
+        Tones.STOP, "Counter name not accepted",
+        "The name of this counter is 1 to 32 characters long, so it was not used.",
+        Who.MANAGER,
+        "Type a shorter name for this counter, then tap Pair again.",
     )
 
     val nameNotAccepted = w(
@@ -166,9 +195,20 @@ object AppWords {
     // ---- the camera ----------------------------------------------------------------
 
     /** The camera permission was refused, or "don't ask again" was chosen. */
-    val cameraOff = CameraWords.off(Who.MANAGER)
+    val cameraOff = w(
+        Tones.STOP, "Camera is off for this app",
+        "This app is not allowed to use the camera, and pairing needs it to read the codes, so nothing was paired.",
+        Who.MANAGER,
+        "Allow the camera for this app in the phone's settings, then start the pairing again.",
+    )
 
-    fun cameraNotStarted(problem: String?) = CameraWords.notStarted(Who.MANAGER, problem)
+    fun cameraNotStarted(problem: String?) = w(
+        Tones.STOP, "Camera did not start",
+        "The camera could not be opened, so no code was read and nothing was paired.",
+        Who.MANAGER,
+        "Close any other app that uses the camera, then start the pairing again.",
+        detailOf(problem)?.take(200),
+    )
 
     val notANumber = w(
         Tones.STOP, "Check what you typed",
@@ -275,7 +315,7 @@ object AppWords {
         Tones.STOP, "File not read",
         "The file could not be opened or read, so nothing was done.",
         Who.MANAGER,
-        "Pick the file again, or paste the text instead.",
+        "Try again. If it happens again, stop and tell the owner in person.",
         detailOf(problem),
     )
 
@@ -322,7 +362,11 @@ object AppWords {
     fun all(): List<Pair<String, SayWords>> = listOf(
         "notSetUp" to notSetUp,
         "pairingSaved" to pairingSaved,
-        "pairingNotReadable" to pairingNotReadable("a problem"),
+        "pairingScanOffer" to pairingScanOffer,
+        "pairingCompare" to pairingCompare,
+        "pairingScanBundle" to pairingScanBundle,
+        "pairingForgotten" to pairingForgotten,
+        "counterNameNotAccepted" to counterNameNotAccepted,
         "pinNotAccepted" to pinNotAccepted,
         "nameNotAccepted" to nameNotAccepted,
         "torAddressNotAccepted" to torAddressNotAccepted,

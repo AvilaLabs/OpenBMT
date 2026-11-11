@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The tests of the counter app's pure parts, on the desktop JVM: its words
 # (and docs/screens/counter-app.md), the PIN store with a fake clock, the
-# pairing text, the config, the keypad, the QR layout, the price schedule and
+# pairing steps, the config, the keypad, the QR layout, the price schedule and
 # book with a fake clock and a fake fetcher, the Tor gate and the screen
 # choice; then the tests of the shared code (apps/android-common/tests). No
 # Android class is used and nothing is fetched.

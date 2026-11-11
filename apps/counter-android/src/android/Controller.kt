@@ -2,12 +2,8 @@ package org.openbmt.counter.app
 
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.Intent
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.text.Editable
-import android.text.TextWatcher
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -18,6 +14,7 @@ import android.widget.TextView
 import java.io.File
 import java.io.IOException
 import java.security.GeneralSecurityException
+import org.openbmt.app.AnimatedQrView
 import org.openbmt.app.Format
 import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.SayWords
@@ -25,11 +22,15 @@ import org.openbmt.app.ScanFlow
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Ui
 import org.openbmt.app.UrScan
+import org.openbmt.app.UrWords
 import org.openbmt.app.Who
+import org.openbmt.app.WordsModel
 import org.openbmt.counter.Actor
 import org.openbmt.counter.ActorRole
 import org.openbmt.counter.CounterException
 import org.openbmt.counter.CounterNode
+import org.openbmt.counter.PairStarted
+import org.openbmt.counter.Pairing
 import org.openbmt.counter.Payment
 import org.openbmt.counter.RateSource
 import org.openbmt.counter.Rates
@@ -37,6 +38,7 @@ import org.openbmt.counter.RefundAsk
 import org.openbmt.counter.RefundState
 import org.openbmt.counter.SaleState
 import org.openbmt.counter.Shop
+import org.openbmt.counter.StartConfig
 
 /**
  * The screens and what they do. The node runs while the activity is visible:
@@ -57,11 +59,12 @@ class Controller(private val act: MainActivity) {
     private val configFile = ConfigFile(dir)
 
     // What is saved, as read at the last start.
-    private var pairing: Pairing? = null
+    private var record: ByteArray? = null
     private var config: AppConfig? = null
 
-    // What the first screen holds while a file picker is open.
-    private var draftText = ""
+    // What the first screen holds while the pairing runs, and where the pairing has got to (CR-98).
+    private val progress = PairingProgress()
+    private var draftCounterName = "Counter"
     private var draftName = ""
     private var draftProxy = AppConfig.DEFAULT_PROXY
 
@@ -86,24 +89,34 @@ class Controller(private val act: MainActivity) {
     // What this run knows of its sales: the amount in the shop's currency of each, by index.
     private val amounts = HashMap<Long, Long>()
 
-    private var pickerOpen = false
-    private var pickerDone: ((Uri) -> Unit)? = null
-
     private fun nowSecs(): Long = System.currentTimeMillis() / 1000
 
     // ---- visible, hidden -------------------------------------------------------------------------
 
     fun visible() {
         visible = true
-        if (pickerOpen || scan.asking) return
+        if (scan.asking) return
         begin()
     }
 
     fun hidden() {
         visible = false
-        if (pickerOpen || scan.asking) return
+        if (scan.asking) return
+        forgetCeremony()
         scan.stop()
         stopNode()
+    }
+
+    /** CR-91, CR-98: a ceremony open when the app is left is forgotten, in the library too. */
+    private fun forgetCeremony() {
+        if (!progress.left()) return
+        try {
+            Pairing.cancel()
+        } catch (_: CounterException) {
+            // The library has no ceremony: it was ended already.
+        } catch (_: LinkageError) {
+            // No library, no ceremony.
+        }
     }
 
     private fun begin() {
@@ -118,14 +131,10 @@ class Controller(private val act: MainActivity) {
             fault = AppWords.fileNotRead(e.message)
             return render()
         }
-        if (!setup.complete) return showFirstStart(null)
+        if (!setup.complete) return showFirstStart(if (progress.takeForgotten()) AppWords.pairingForgotten else null)
         try {
-            val text = SealedFile(dir, KeystoreSealer(KEY_ALIAS), PAIRING_FILE).load()
+            record = SealedFile(dir, KeystoreSealer(KEY_ALIAS), PAIRING_FILE).load()
                 ?: throw IOException("the pairing is missing")
-            pairing = Pairing.parse(String(text, Charsets.UTF_8))
-        } catch (e: PairingFormatException) {
-            fault = AppWords.pairingNotReadable(e.message)
-            return render()
         } catch (e: IOException) {
             fault = AppWords.storageUnavailable(e.message)
             return render()
@@ -152,13 +161,13 @@ class Controller(private val act: MainActivity) {
     private fun startNode() {
         val id = ++runId
         page(listOf(ui.words(AppWords.starting)))
-        val p = pairing ?: return
+        val rec = record ?: return
         val cfg = config ?: return
         val thread = Thread {
             try {
                 val sources = Rates.sources()
-                val settings = Shop.settings(p.settings)
-                val gate = TorGate(settings.torOn, cfg.proxy)
+                // For display only: the library checks the record again at the start (CR-97).
+                val gate = TorGate(Shop.pairing(rec).settings.torOn, cfg.proxy)
                 if (!gate.available()) {
                     main.post {
                         if (id == runId) {
@@ -171,7 +180,7 @@ class Controller(private val act: MainActivity) {
                 synchronized(startLock) {
                     if (id != runId) return@Thread
                     nodeDir.mkdirs()
-                    val n = CounterNode.start(p.startConfig(nodeDir.path, nowSecs(), gate.proxy))
+                    val n = CounterNode.start(StartConfig(nodeDir.path, nowSecs(), rec, gate.proxy))
                     if (id != runId) {
                         n.close()
                         return@Thread
@@ -303,36 +312,9 @@ class Controller(private val act: MainActivity) {
     private fun showFirstStart(message: SayWords?) {
         val views = ArrayList<View>()
         views.add(ui.words(message ?: AppWords.notSetUp))
-        views.add(label("Pairing text from the owner's phone"))
-        val pasted = ui.field("Paste the pairing text here", lines = 6).also { it.setText(draftText) }
-        views.add(pasted)
-        for (source in sources()) views.add(ui.button(source.label) {
-            source.begin({ text -> draftText = text; showFirstStart(message) }, { w -> showFirstStart(w) })
-        })
-        val tor = Slot(act)
-        views.add(tor)
-        fun readTor() {
-            val text = pasted.text.toString()
-            draftText = text
-            val words = try {
-                if (text.isBlank()) null else if (Shop.settings(Pairing.parse(text).settings).torOn) AppWords.torIsOn else AppWords.torIsOff
-            } catch (_: PairingFormatException) {
-                null
-            } catch (_: CounterException) {
-                null
-            } catch (_: LinkageError) {
-                null
-            }
-            if (words == null) tor.show() else tor.show(ui.words(words))
-        }
-        pasted.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-
-            override fun afterTextChanged(s: Editable?) = readTor()
-        })
-        readTor()
+        views.add(label("Name of this counter"))
+        val counterName = ui.field("Name of this counter").also { it.setText(draftCounterName) }
+        views.add(counterName)
         views.add(label("Manager's name"))
         val name = ui.field("Name of the manager").also { it.setText(draftName) }
         views.add(name)
@@ -344,46 +326,28 @@ class Controller(private val act: MainActivity) {
         views.add(label("Address of Orbot (used only when the shop's settings turn Tor on)"))
         val proxy = ui.field("host:port").also { it.setText(draftProxy) }
         views.add(proxy)
-        val save = ui.button("Save and start") {
-            draftName = name.text.toString()
-            draftProxy = proxy.text.toString()
-            draftText = pasted.text.toString()
-            saveFirstStart(draftText, draftName.trim(), pin1.text.toString(), pin2.text.toString(), draftProxy.trim())
-        }
-        views.add(save)
+        views.add(ui.button("Pair with the Key app") {
+            draftCounterName = counterName.text.toString().trim()
+            draftName = name.text.toString().trim()
+            draftProxy = proxy.text.toString().trim()
+            startPairing(draftCounterName, draftName, pin1.text.toString(), pin2.text.toString(), draftProxy)
+        })
         page(views)
     }
 
-    private fun saveFirstStart(text: String, name: String, pin1: String, pin2: String, proxy: String) {
-        val p = try {
-            Pairing.parse(text)
-        } catch (e: PairingFormatException) {
-            return showFirstStart(AppWords.pairingNotReadable(e.message))
-        }
-        try {
-            Shop.settings(p.settings)
-        } catch (e: CounterException) {
-            return showFirstStart(e.sayWords())
-        } catch (e: LinkageError) {
-            return showFirstStart(AppWords.libraryMissing(e.message))
-        }
-        if (!AppConfig.validName(name)) return showFirstStart(AppWords.nameNotAccepted)
-        if (!PinStore.validPin(pin1) || pin1 != pin2) return showFirstStart(AppWords.pinNotAccepted)
-        if (!HostPort.valid(proxy)) return showFirstStart(AppWords.torAddressNotAccepted)
+    /**
+     * What was typed is checked and kept first (the PIN and the config; the pairing is what completes the
+     * setup), then the pairing begins with the camera for the Key app's offer.
+     */
+    private fun startPairing(counterName: String, managerName: String, pin1: String, pin2: String, proxy: String) {
+        FirstStartCheck.problem(counterName, managerName, pin1, pin2, proxy)?.let { return showFirstStart(it) }
         page(listOf(ui.words(AppWords.starting)))
         async({
-            // Pairing first, then the PIN, then the config: the config is the last thing a finished setup adds.
-            SealedFile(dir, KeystoreSealer(KEY_ALIAS), PAIRING_FILE).save(text.toByteArray(Charsets.UTF_8))
             pin.set(pin1)
-            configFile.save(AppConfig(proxy, name, ""))
+            configFile.save(AppConfig(proxy, managerName, ""))
         }) { r ->
-            val e = r.exceptionOrNull()
-            when (e) {
-                null -> {
-                    draftText = ""
-                    draftName = ""
-                    showMessage(AppWords.pairingSaved, "Start") { begin() }
-                }
+            when (val e = r.exceptionOrNull()) {
+                null -> scanOffer()
                 is IOException -> showFirstStart(AppWords.fileNotSaved(e.message))
                 is GeneralSecurityException -> showFirstStart(AppWords.storageUnavailable(e.message))
                 else -> throw e
@@ -391,81 +355,143 @@ class Controller(private val act: MainActivity) {
         }
     }
 
-    /** The places the pairing text can come from besides the field. */
-    private fun sources(): List<PairingSource> = listOf(
-        object : PairingSource {
-            override val label = "Choose a pairing file"
+    // ---- pairing: scan the offer, compare the words, scan the bundle (CR-91 to CR-98) ---------------------
 
-            override fun begin(onText: (String) -> Unit, onFailed: (SayWords) -> Unit) {
-                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
-                openPicker(intent) { uri ->
-                    try {
-                        onText(readText(uri))
-                    } catch (e: IOException) {
-                        onFailed(AppWords.fileNotRead(e.message))
-                    } catch (e: SecurityException) {
-                        onFailed(AppWords.fileNotRead(e.message))
-                    }
+    /** A page with [words] and a Scan button: the camera is asked for only when Scan is tapped (CR-90). */
+    private fun scanPage(words: SayWords, scanNow: () -> Unit, cancel: () -> Unit) {
+        page(listOf(ui.words(words), ui.button("Scan") { scanNow() }, ui.button("Cancel") { cancel() }))
+    }
+
+    private fun failedScan(f: org.openbmt.app.ScanFailure) {
+        endCeremony()
+        showFirstStart(f.words ?: if (f.off) AppWords.cameraOff else AppWords.cameraNotStarted(f.problem))
+    }
+
+    /** The ceremony is over, here and in the library. */
+    private fun endCeremony() {
+        progress.cancelled()
+        try {
+            Pairing.cancel()
+        } catch (_: CounterException) {
+            // No ceremony in the library.
+        } catch (_: LinkageError) {
+            // No library, no ceremony.
+        }
+    }
+
+    private fun scanOffer() {
+        progress.cancelled()
+        progress.start()
+        scanPage(AppWords.pairingScanOffer, {
+            scan.begin(
+                show = { v -> tick = null; act.show(v) },
+                onBytes = { bytes -> offerRead(bytes) },
+                onFailed = { f -> failedScan(f) },
+                onCancel = { endCeremony(); showFirstStart(null) },
+                // The offer may be longer than one code: ur:bytes, whole or in parts (UR-20).
+                ur = UrScan(setOf(TYPE_BYTES), Who.MANAGER) { _, payload -> offerRead(payload) },
+            )
+        }, { endCeremony(); showFirstStart(null) })
+    }
+
+    private fun offerRead(offer: ByteArray) {
+        page(listOf(ui.words(AppWords.starting)))
+        async({ Pairing.begin(offer, draftCounterName, nowSecs()) }) { r ->
+            val started = r.getOrNull()
+            if (started != null && progress.offerRead()) return@async compare(started)
+            endCeremony()
+            when (val e = r.exceptionOrNull()) {
+                is CounterException -> showMessage(e.sayWords(), "Back") { showFirstStart(null) }
+                is LinkageError -> showMessage(AppWords.libraryMissing(e.message), "Back") { showFirstStart(null) }
+                else -> showFirstStart(null)
+            }
+        }
+    }
+
+    /** The request as a code, and the four words, the most prominent thing on the screen (CR-98). */
+    private fun compare(started: PairStarted) {
+        val views = ArrayList<View>()
+        views.add(ui.text(FirstStartCheck.wordsLine(started.words), 34f, bold = true))
+        views.add(ui.words(AppWords.pairingCompare))
+        val metrics = act.resources.displayMetrics
+        val made = AnimatedQrView.make(act, Who.MANAGER, TYPE_BYTES, started.request, (metrics.heightPixels * 0.5).toInt())
+        val view = made.view
+        if (view == null) {
+            views.add(ui.words(made.words ?: UrWords.cannotShow(Who.MANAGER)))
+        } else {
+            views.add(ui.words(if (view.animated) UrWords.showingAnimated(Who.MANAGER) else UrWords.showingStill(Who.MANAGER)))
+            views.add(view)
+        }
+        views.add(ui.button("They match") { theyMatch() })
+        views.add(ui.button("They differ") { theyDiffer() })
+        page(views)
+    }
+
+    private fun theyMatch() {
+        if (!progress.matched()) return
+        try {
+            Pairing.match(nowSecs())
+        } catch (e: CounterException) {
+            endCeremony()
+            return showMessage(e.sayWords(), "Back") { showFirstStart(null) }
+        } catch (e: LinkageError) {
+            endCeremony()
+            return showMessage(AppWords.libraryMissing(e.message), "Back") { showFirstStart(null) }
+        }
+        scanBundle()
+    }
+
+    /** CR-92: the ceremony ends, the key and the number are forgotten, and the words say to start again. */
+    private fun theyDiffer() {
+        if (!progress.differed()) return
+        val words = try {
+            Pairing.differ()
+        } catch (e: CounterException) {
+            e.words
+        } catch (e: LinkageError) {
+            null
+        }
+        showMessage(words?.say() ?: AppWords.pairingForgotten, "Back") { showFirstStart(null) }
+    }
+
+    private fun scanBundle() {
+        scanPage(AppWords.pairingScanBundle, {
+            scan.begin(
+                show = { v -> tick = null; act.show(v) },
+                onBytes = { bytes -> bundleRead(bytes) },
+                onFailed = { f -> failedScan(f) },
+                onCancel = { endCeremony(); showFirstStart(null) },
+                ur = UrScan(setOf(TYPE_BYTES), Who.MANAGER) { _, payload -> bundleRead(payload) },
+            )
+        }, { endCeremony(); showFirstStart(null) })
+    }
+
+    /** The bundle is given to the library; what comes back is the record, sealed here with the Keystore (CR-97). */
+    private fun bundleRead(bundle: ByteArray) {
+        page(listOf(ui.words(AppWords.starting)))
+        async({
+            val kept = Pairing.finish(nowSecs(), bundle)
+            SealedFile(dir, KeystoreSealer(KEY_ALIAS), PAIRING_FILE).save(kept)
+        }) { r ->
+            val e = r.exceptionOrNull()
+            // Whatever the outcome, the library's ceremony is over once it has taken a bundle.
+            if (e == null) progress.finished() else endCeremony()
+            when (e) {
+                null -> {
+                    draftName = ""
+                    showMessage(AppWords.pairingSaved, "Start") { begin() }
                 }
+                is CounterException -> showMessage(e.sayWords(), "Back") { showFirstStart(null) }
+                is LinkageError -> showMessage(AppWords.libraryMissing(e.message), "Back") { showFirstStart(null) }
+                is IOException -> showFirstStart(AppWords.fileNotSaved(e.message))
+                is GeneralSecurityException -> showFirstStart(AppWords.storageUnavailable(e.message))
+                else -> throw e
             }
-        },
-        object : PairingSource {
-            override val label = "Scan the pairing code"
-
-            override fun begin(onText: (String) -> Unit, onFailed: (SayWords) -> Unit) {
-                scan.begin(
-                    show = { v -> tick = null; act.show(v) },
-                    onBytes = { bytes -> onText(String(bytes, Charsets.UTF_8)) },
-                    onFailed = { f -> onFailed(f.words ?: if (f.off) AppWords.cameraOff else AppWords.cameraNotStarted(f.problem)) },
-                    onCancel = { showFirstStart(null) },
-                    // The pairing text may be longer than one code: ur:bytes, whole or in parts (UR-20).
-                    ur = UrScan(setOf("bytes"), Who.MANAGER) { _, payload -> onText(String(payload, Charsets.UTF_8)) },
-                )
-            }
-        },
-    )
+        }
+    }
 
     /** The answer of the system's permission dialog. */
     fun permission(code: Int, results: IntArray) = scan.permissionResult(code, results)
-
-    @Suppress("DEPRECATION")
-    private fun openPicker(intent: Intent, done: (Uri) -> Unit) {
-        pickerOpen = true
-        pickerDone = done
-        try {
-            act.startActivityForResult(intent, REQUEST_PICK)
-        } catch (e: RuntimeException) {
-            pickerOpen = false
-            pickerDone = null
-            showFirstStart(AppWords.fileNotRead(e.message))
-        }
-    }
-
-    fun picked(code: Int, result: Int, data: Intent?) {
-        if (code != REQUEST_PICK) return
-        pickerOpen = false
-        val done = pickerDone
-        pickerDone = null
-        val uri = data?.data
-        if (result != android.app.Activity.RESULT_OK || uri == null || done == null) return showFirstStart(null)
-        done(uri)
-    }
-
-    /** At most one character more than a pairing text may hold, so that the parser can refuse a file that is too long. */
-    private fun readText(uri: Uri): String {
-        val input = act.contentResolver.openInputStream(uri) ?: throw IOException("the file could not be opened")
-        input.use {
-            val out = java.io.ByteArrayOutputStream()
-            val buf = ByteArray(8192)
-            val limit = Pairing.MAX_TEXT * 4 + 1
-            while (out.size() < limit) {
-                val n = it.read(buf, 0, minOf(buf.size, limit - out.size()))
-                if (n < 0) break
-                out.write(buf, 0, n)
-            }
-            return String(out.toByteArray(), Charsets.UTF_8)
-        }
-    }
 
     // ---- home ----------------------------------------------------------------------------------------------------------
 
@@ -938,7 +964,7 @@ class Controller(private val act: MainActivity) {
                 ),
                 label("Not built yet"),
                 ui.text(
-                    "Reading the pairing code with the camera (pairing is pasted text or a file); a lock screen of the app's own; " +
+                    "A lock screen of the app's own; " +
                         "a list of cashiers and managers with their own PINs (there is one manager PIN for this phone); " +
                         "end-of-day totals and receipts; changing the shop's settings after pairing.",
                     16f,
@@ -957,7 +983,7 @@ class Controller(private val act: MainActivity) {
         const val VERSION = "0.1.0"
         const val KEY_ALIAS = "openbmt-counter-pairing-v1"
         const val PAIRING_FILE = "pairing.obks"
-        const val REQUEST_PICK = 1
+        const val TYPE_BYTES = "bytes"
         private const val MAX_LISTED = 50
     }
 }

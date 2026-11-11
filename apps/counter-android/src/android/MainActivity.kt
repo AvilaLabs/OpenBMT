@@ -1,7 +1,6 @@
 package org.openbmt.counter.app
 
 import android.app.Activity
-import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
@@ -35,13 +34,6 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         controller.hidden()
         super.onDestroy()
-    }
-
-    @Suppress("DEPRECATION")
-    @Deprecated("The platform's own result call; no AndroidX is used")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        controller.picked(requestCode, resultCode, data)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {

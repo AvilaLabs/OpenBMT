@@ -12,7 +12,7 @@ sealed class Screen {
     /** The app could not read its own state or the library did not load: nothing else is offered but trying again. */
     class Fault(val words: SayWords) : Screen()
 
-    /** Nothing, or not everything, is saved: pairing text, PIN and Tor address are asked for. */
+    /** Nothing, or not everything, is saved: the pairing, PIN and Tor address are asked for. */
     object FirstStart : Screen()
 
     /** Tor is on for the shop and Orbot did not answer: nothing is sent, and the app says so. */

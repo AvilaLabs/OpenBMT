@@ -12,9 +12,13 @@ These are the words of what the app decides itself.
 
 | State | Heading | What happened | What to do next | Who | Code |
 |---|---|---|---|---|---|
-| notSetUp | Not set up yet | This counter has not been paired with the shop yet, so it cannot take a sale. | Paste the pairing text from the owner's phone, choose a PIN and save. | a manager |  |
-| pairingSaved | Counter set up | The pairing and the PIN are saved on this phone. | Keep the app open at the counter. It starts looking for the network now. | the cashier |  |
-| pairingNotReadable | Pairing text not read | The pairing text is not in the form this app reads, so nothing was saved. | Copy the pairing text again from the owner's phone, then try again. | a manager |  |
+| notSetUp | Not set up yet | This counter has not been paired with the shop yet, so it cannot take a sale. | Type a name, a PIN and the address of Orbot, then tap Pair, and scan the Key app's code with this phone. | a manager |  |
+| pairingSaved | Counter set up | The counter is paired with the shop, and the pairing and the PIN are saved on this phone. | Keep the app open at the counter. It starts looking for the network now. | the cashier |  |
+| pairingScanOffer | Scan the Key app | The Key app shows a code on its Pair a counter screen. This counter reads the shop's keys and network from it. | Open Pair a counter on the Key app, then tap Scan and hold this phone's camera to its code. | a manager |  |
+| pairingCompare | Compare the four words | The Key app shows four words for this pairing, and the same four are below. If they are not the same, someone changed the code on the way. | Check all four words on the Key app, then tap They match, or tap They differ if any word is not the same. | a manager |  |
+| pairingScanBundle | Scan the owner's phone | The four words matched. The owner's phone now shows the code that finishes the pairing. | On the owner's phone open the counter's code, then tap Scan and hold this phone's camera to it. | a manager |  |
+| pairingForgotten | Pairing not finished | The app was closed or left before the pairing was finished, so it was forgotten and nothing was saved. | Start again from the Key app: open Pair a counter, then tap Pair on this counter and scan its code. | a manager |  |
+| counterNameNotAccepted | Counter name not accepted | The name of this counter is 1 to 32 characters long, so it was not used. | Type a shorter name for this counter, then tap Pair again. | a manager |  |
 | pinNotAccepted | PIN not accepted | A PIN is 6 to 12 digits, and the two entries must be the same, so nothing was saved. | Type a PIN of 6 to 12 digits twice, then save again. | a manager |  |
 | nameNotAccepted | Name not accepted | A name is 1 to 64 characters long, so it was not saved. | Type the name again. | the cashier |  |
 | torAddressNotAccepted | Tor address not accepted | The address of Orbot must be a host, a colon and a port, like 127.0.0.1:9050. | Type the address again. | a manager |  |
@@ -29,8 +33,8 @@ These are the words of what the app decides itself.
 | sourceRefusedStatus | Price source said no | A price source answered with a refusal, so its price is missing this turn. | Nothing to do. The app asks again in a minute. | nobody |  |
 | sourceReplyTooLong | Price reply too long | A price source sent more than the app reads, so its price is missing this turn. | Nothing to do. The app asks again in a minute. | nobody |  |
 | amountNeeded | Amount needed | Type an amount above zero to start a sale. | Press the digits of the amount, then press Open. | the cashier |  |
-| cameraOff | Camera is off for this app | This app is not allowed to use the camera, so it cannot scan a code. | Allow the camera for this app in the phone's settings, or paste the text or choose a file instead. | a manager |  |
-| cameraNotStarted | Camera did not start | The camera could not be opened, so nothing was scanned. | Close any other app that uses the camera and try again, or paste the text or choose a file instead. | a manager |  |
+| cameraOff | Camera is off for this app | This app is not allowed to use the camera, and pairing needs it to read the codes, so nothing was paired. | Allow the camera for this app in the phone's settings, then start the pairing again. | a manager |  |
+| cameraNotStarted | Camera did not start | The camera could not be opened, so no code was read and nothing was paired. | Close any other app that uses the camera, then start the pairing again. | a manager |  |
 | notANumber | Check what you typed | The amount is empty or has something other than digits in it. | Type whole numbers only, then try again. | the cashier |  |
 | nameNeeded | Name needed | A refund or an override is written down with the name of the person who asked for it. | Type your name on the home screen, then try again. | the cashier |  |
 | destinationNeeded | Address needed | A refund needs the address the customer wants the money sent to. | Paste the address or the payment request the customer shows, then try again. | the cashier |  |
@@ -44,7 +48,7 @@ These are the words of what the app decides itself.
 | libraryMissing | The app is incomplete | The part of this app that runs the counter did not load, so nothing was done. | Do not use this copy. Install the app again from the place you got it. | the owner |  |
 | fault | Answer not readable | The app could not read an answer from the counter part, so nothing was changed. | Close the app and open it again. If it happens again, stop and tell the owner in person. | the owner |  |
 | storageUnavailable | Phone storage not usable | The phone's protected storage did not start, so the saved pairing was not opened. | Restart the phone and open this app again. If it happens again, stop and tell the owner in person. | the owner |  |
-| fileNotRead | File not read | The file could not be opened or read, so nothing was done. | Pick the file again, or paste the text instead. | a manager |  |
+| fileNotRead | File not read | The file could not be opened or read, so nothing was done. | Try again. If it happens again, stop and tell the owner in person. | a manager |  |
 | fileNotSaved | Not saved | The app could not write to this phone's storage, so nothing was saved. | Try again. If it happens again, stop and tell the owner in person. | a manager |  |
 | UrWords.reading | Reading the animated code | Reading the animated code: 3 of about 9 parts. | Keep the phone pointed at the code until it is done. | a manager |  |
 | UrWords.restarted | Code did not add up | The parts read did not fit together, so reading starts again. | Keep the phone pointed at the code. It reads from the first part again. | a manager |  |

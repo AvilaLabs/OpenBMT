@@ -14,7 +14,8 @@ local test key; release signing is a separate step (see "Signing").
 
 | Screen | What it shows |
 |---|---|
-| First start | The pairing text (pasted or from a file), the manager's name and PIN, the address of Orbot. |
+| First start | The counter's name, the manager's name and PIN, the address of Orbot, and Pair with the Key app. |
+| Pairing | Scan the Key app's offer; the counter's own request as a code with its four words and They match / They differ; scan the owner phone's bundle. |
 | Home | Whether Bitcoin is ready, the price and each source's note, New sale, Sales, the cashier's name, About. |
 | New sale | A keypad in the shop's currency. |
 | Sale | The payment code, the amount in currency and in sats, what has arrived, the library's words in the colour of their tone, Requote, Cancel, Override, Copy. |
@@ -26,17 +27,29 @@ Every refusal of the library is shown through its `words`; the app's own
 states and faults have words written in `src/model/AppWords.kt` under
 `docs/SCREEN-RULES.md`, listed in `docs/screens/counter-app.md`.
 
-The pairing text comes from the field (pasted), from a file, or from the
-pairing code read with the phone's camera: three `PairingSource` choices, the
-second and third behind one interface. See "The camera scan" below.
+Pairing is the camera's (`docs/COUNTER-RULES.md` CR-90 to CR-99, DESIGN
+section 2.9). On the first screen the manager types the counter's name, a PIN
+and the address of Orbot and taps Pair. The app then asks for the camera, only
+when Scan is tapped, and reads the Key app's offer (`ur:bytes`, whole or in
+parts) and hands it to the library's `pair_begin`. The library makes the
+counter's own key and a fresh number from the system's random source and
+returns the counter's request and four words. The screen shows the four words
+as its largest text and the request as a code that changes if it needs several
+parts (`AnimatedQrView`), with They match and They differ. They differ ends the
+ceremony, and the words say to start again from the Key app. They match is the
+only way to the camera for the owner phone's bundle; the bundle goes to
+`pair_finish`, which checks it (CR-92 to CR-96) and returns the stored pairing
+record. The app seals that record with an Android Keystore key and hands it
+back at every start (`StartConfig`); it keeps nothing of a ceremony that is
+under way. If the app is left in the middle, the library forgets the ceremony
+and the next first screen says so. There is no pairing text, no paste and no
+file picker.
 
-A pairing text can be longer than one QR code. The scan therefore also takes
-the pairing text as a `ur:bytes` code (BC-UR, `docs/UR-RULES.md`, UR-20), whole
-or as a code that changes on the owner's phone: after the first `ur:` part the
-camera stays on, each part goes to one decoder of the library, and the page
-says "Reading the animated code: N of about M parts" until the text is
-complete. A plain code is read as before. Any other type of UR gets the words
-"Not the code expected". The words of reading are listed in
+The UR reading of a code that changes is described in `docs/UR-RULES.md`
+(UR-20): after the first `ur:` part the camera stays on, each part goes to one
+decoder of the library, and the page says "Reading the animated code: N of
+about M parts" until the message is complete. Any other type of UR gets the
+words "Not the code expected". The words of reading are listed in
 `docs/screens/counter-app.md`.
 
 Not built yet: a lock screen of the app's own, a list of cashiers
@@ -56,18 +69,18 @@ from a frame: it is zeroed after it is read and never written to disk or sent
 anywhere (CR-90). The scan page has a preview so the manager can aim.
 
 If the permission is refused, or "don't ask again" was chosen, a words page
-says the camera is off for this app, to allow it in the phone's settings or to
-paste the text or choose a file instead, and that a manager does this.
+says the camera is off for this app, that pairing needs it, and to allow it in
+the phone's settings, and that a manager does this.
 
-## Pairing text
+## The pairing record
 
-The app's own plain-line format (no pairing ceremony is built yet): a header,
-the network, the counter's identity secret, the owner's and approver's public
-roots, the wallet checksum, the shop's signed settings and the first address
-batch in hex, and optional peers. `src/model/PairingText.kt` documents it,
-parses it and refuses anything else, with the line it stopped at. The
-pairing is kept sealed with an Android Keystore key (AES-GCM) in
-`noBackupFilesDir`.
+What the library returns from `pair_finish` is one framed record (`OBMt`,
+CR-97): the counter's identity secret, the two roots, the wallet check, the
+network, the settings floor, the signed settings, the first batch and the
+peers. The app does not read it: it seals the bytes with an Android Keystore
+key (AES-GCM) in `noBackupFilesDir`, and gives them to `Shop.pairing` (for the
+network and the Tor setting, display only) and to `StartConfig`. The library
+checks the record again at every start.
 
 ## Rules the app keeps without a device
 
@@ -129,7 +142,7 @@ checks the manifest. The result is under
 ## Tests
 
 - `tests/run-jvm.sh` runs the common model tests, then the counter's model
-  tests (PIN store, pairing text, amount entry, QR layout, price schedule,
+  tests (PIN store, pairing steps, amount entry, QR layout, price schedule,
   Tor gate, sale model, screen choice, words). They need no device.
   `OPENBMT_WRITE_SCREENS=1` rewrites `docs/screens/counter-app.md`.
 - `apps/android-common/tests/qr-jni-test.sh` builds the QR reader for the
@@ -148,8 +161,8 @@ release key.
 ## Not checked without a device
 
 Everything that needs a running Android: that the library loads and starts,
-how the screens look and lay out, the keyboard types of the fields, the file
-picker, the camera scan (the permission dialog, the preview, reading a code
+how the screens look and lay out, the keyboard types of the fields, the
+camera scan (the permission dialog, the preview, reading a code
 from a screen and from paper, reading a code that changes at five parts a
 second, releasing the camera), the Keystore sealing, the
 SOCKS probe against a real Orbot, real fetches of the sources, the QR code

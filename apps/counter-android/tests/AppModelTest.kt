@@ -22,7 +22,7 @@ import org.openbmt.counter.Words
 
 /**
  * The tests of the pure parts of the counter app: its words, the PIN store
- * with a fake clock, the pairing text, the config, the amount keypad, the QR
+ * with a fake clock, the pairing steps, the config, the amount keypad, the QR
  * layout, the price schedule and book with a fake clock and a fake fetcher
  * (no network, no library), the Tor gate, the screen choice and the sale
  * buttons. They run on the desktop JVM, where no Android class exists. Run the
@@ -44,8 +44,6 @@ object AppModelTest {
         } catch (_: IOException) {
             return
         } catch (_: IllegalArgumentException) {
-            return
-        } catch (_: PairingFormatException) {
             return
         }
         throw AssertionError("FAILED: no error for $what")
@@ -72,7 +70,8 @@ object AppModelTest {
         ok(AppWords.waitText(60) == "1 minute" && AppWords.waitText(300) == "5 minutes" && AppWords.waitText(121) == "3 minutes", "long waits")
         ok(AppWords.priceReady("1.00 USD", 1).tone == Tones.GOOD, "a ready price is green")
         ok(AppWords.cameraOff.who == Who.MANAGER && AppWords.cameraOff.tone == Tones.STOP, "the camera-off words: the manager, stop")
-        ok(AppWords.cameraOff.next.contains("settings") && AppWords.cameraOff.next.contains("paste") && AppWords.cameraOff.next.contains("file"), "they say to allow it, paste or choose a file")
+        ok(AppWords.cameraOff.next.contains("settings") && !AppWords.cameraOff.next.contains("paste") && !AppWords.cameraOff.what.contains("file"), "they say to allow it, and that pairing needs the camera (CR-90)")
+        ok(AppWords.cameraOff.what.contains("pairing needs it"), "the camera-off words say why")
         ok(AppWords.cameraNotStarted("bad\u0007 text").detail == "bad text", "the camera's own text is cleaned in the details")
         ok(all.map { it.first }.toSet().size == all.size, "every name is used once")
         val dirty = AppWords.fileNotRead("bad\u0007 text‮")
@@ -215,66 +214,52 @@ object AppModelTest {
         clean(dir)
     }
 
-    // ---- the pairing text -------------------------------------------------------------------
-
-    private fun hex(n: Int, v: Int) = (0 until n).joinToString("") { "%02x".format((v + it) and 0xff) }
-
-    private fun pairingText(
-        header: String = Pairing.HEADER,
-        extra: String = "",
-        drop: String? = null,
-        network: String = "regtest",
-        eol: String = "\n",
-    ): String {
-        val lines = listOf(
-            header,
-            "network: $network",
-            "identity-secret: ${hex(32, 1)}",
-            "owner-root: ${hex(32, 2)}",
-            "approver-root: ${hex(32, 3)}",
-            "wallet-checksum: ${hex(32, 4)}",
-            "batch-min-count: 5",
-            "settings: 0a0b0c",
-            "first-batch: 0d0e",
-            "peer: 10.0.0.1:8333",
-        ).filter { drop == null || !it.startsWith("$drop:") }
-        return lines.joinToString(eol) + eol + extra
-    }
+    // ---- the pairing steps ------------------------------------------------------------------
 
     private fun pairingTests() {
-        val p = Pairing.parse(pairingText())
-        ok(p.network == CounterNetwork.Regtest && p.batchMinCount == 5L, "network and batch size")
-        ok(p.identitySecret.contentEquals(ByteArray(32) { (1 + it).toByte() }), "the identity secret")
-        ok(p.ownerRoot[0].toInt() == 2 && p.approverRoot[0].toInt() == 3 && p.walletChecksum[0].toInt() == 4, "the roots and the wallet check")
-        ok(p.settings.contentEquals(byteArrayOf(10, 11, 12)) && p.firstBatch!!.contentEquals(byteArrayOf(13, 14)), "settings and first batch")
-        ok(p.peers == listOf("10.0.0.1:8333"), "a peer")
-        val c = p.startConfig("/data/node", 1_700_000_000L, "127.0.0.1:9050")
-        ok(c.dir == "/data/node" && c.now == 1_700_000_000L && c.proxy == "127.0.0.1:9050" && c.fixedPeers == p.peers, "the start config")
-        ok(p.startConfig("d", 1, null).proxy == null, "no proxy with Tor off")
-        ok(Pairing.parse(pairingText(drop = "first-batch")).firstBatch == null, "the first batch is optional")
-        ok(Pairing.parse(pairingText(drop = "peer")).peers.isEmpty(), "peers are optional")
-        ok(Pairing.parse(pairingText().dropLast(1)).batchMinCount == 5L, "the last line end may be missing")
-        ok(Pairing.parse(pairingText(eol = "\r\n")).batchMinCount == 5L, "a pasted text with CRLF")
-        for (n in listOf("mainnet", "testnet", "signet")) ok(Pairing.parse(pairingText(network = n)).network.name.lowercase() == n, "network $n")
-        throws("another network name") { Pairing.parse(pairingText(network = "bitcoin")) }
-        throws("another header") { Pairing.parse(pairingText(header = "openbmt-counter-pairing 2")) }
-        throws("no header") { Pairing.parse(pairingText().substringAfter('\n')) }
-        for (key in listOf("network", "identity-secret", "owner-root", "approver-root", "wallet-checksum", "batch-min-count", "settings")) {
-            throws("no $key") { Pairing.parse(pairingText(drop = key)) }
-        }
-        throws("a repeated key") { Pairing.parse(pairingText(extra = "network: regtest\n")) }
-        throws("an unknown key") { Pairing.parse(pairingText(extra = "color: blue\n")) }
-        throws("a line with no colon") { Pairing.parse(pairingText(extra = "nonsense\n")) }
-        throws("a short secret") { Pairing.parse(pairingText().replace(hex(32, 1), hex(31, 1))) }
-        throws("a secret that is not hex") { Pairing.parse(pairingText().replace(hex(32, 1), "zz" + hex(31, 1))) }
-        throws("odd settings hex") { Pairing.parse(pairingText().replace("0a0b0c", "0a0b0")) }
-        throws("a batch size that is not a number") { Pairing.parse(pairingText().replace("batch-min-count: 5", "batch-min-count: five")) }
-        throws("a batch size past 32 bits") { Pairing.parse(pairingText().replace("batch-min-count: 5", "batch-min-count: 4294967296")) }
-        throws("a value with spaces around it") { Pairing.parse(pairingText().replace("batch-min-count: 5", "batch-min-count:  5")) }
-        throws("an empty value") { Pairing.parse(pairingText().replace("settings: 0a0b0c", "settings: ")) }
-        throws("a bad peer") { Pairing.parse(pairingText(extra = "peer: nohost\n")) }
-        throws("too many peers") { Pairing.parse(pairingText(extra = (1..8).joinToString("") { "peer: 10.0.0.$it:8333\n" })) }
-        throws("a text that is too long") { Pairing.parse(pairingText() + " ".repeat(Pairing.MAX_TEXT)) }
+        // The order of the screens (CR-98): the camera for the bundle opens only after "They match".
+        val p = PairingProgress()
+        ok(p.phase == PairPhase.Idle, "nothing under way at first")
+        ok(!p.offerRead() && !p.matched() && !p.differed() && !p.finished(), "no step is taken from idle")
+        ok(p.start() && p.phase == PairPhase.ScanOffer, "the camera opens for the offer")
+        ok(!p.matched() && !p.finished() && !p.start(), "the offer comes first, and a second start is refused")
+        ok(p.offerRead() && p.phase == PairPhase.Compare, "the words are on the screen")
+        ok(!p.finished() && !p.offerRead(), "no bundle is taken before They match")
+        ok(p.matched() && p.phase == PairPhase.ScanBundle, "They match opens the camera for the bundle")
+        ok(!p.matched() && !p.differed(), "They match cannot be said twice, and They differ is too late")
+        ok(p.finished() && p.phase == PairPhase.Idle, "the pairing is over")
+        // They differ ends it.
+        ok(p.start() && p.offerRead() && p.differed() && p.phase == PairPhase.Idle, "They differ ends the ceremony")
+        ok(!p.matched() && !p.finished(), "after They differ there is nothing to match or finish")
+        // A cancel ends any phase and says whether one was open.
+        ok(!p.cancelled(), "nothing to cancel when idle")
+        p.start()
+        p.offerRead()
+        p.matched()
+        ok(p.cancelled() && p.phase == PairPhase.Idle, "a cancel ends the camera for the bundle")
+        // Leaving the app with a ceremony open forgets it and says so once; leaving with none says nothing.
+        ok(!p.left() && !p.takeForgotten(), "leaving with nothing open says nothing")
+        p.start()
+        p.offerRead()
+        ok(p.left() && p.phase == PairPhase.Idle, "leaving ends the ceremony, and the library is told")
+        ok(p.takeForgotten() && !p.takeForgotten(), "the message comes once")
+        ok(AppWords.pairingForgotten.next.contains("Key app") && AppWords.pairingForgotten.what.contains("forgotten"), "the words say what happened and to start again from the Key app")
+
+        // What is checked before the camera opens.
+        fun problem(counter: String = "Front", manager: String = "Mia", pin1: String = "246810", pin2: String = "246810", proxy: String = "127.0.0.1:9050") =
+            FirstStartCheck.problem(counter, manager, pin1, pin2, proxy)
+        ok(problem() == null, "good entries")
+        ok(problem(counter = "") === AppWords.counterNameNotAccepted, "no counter name")
+        ok(problem(counter = "x".repeat(33)) === AppWords.counterNameNotAccepted, "a counter name of 33 characters")
+        ok(problem(counter = "x".repeat(32)) == null, "a counter name of 32 characters")
+        ok(problem(counter = "\u00e9".repeat(32)) == null, "a name of 32 two-byte characters")
+        ok(problem(counter = "a\nb") === AppWords.counterNameNotAccepted, "a control character")
+        ok(problem(manager = "") === AppWords.nameNotAccepted, "no manager name")
+        ok(problem(pin1 = "12345", pin2 = "12345") === AppWords.pinNotAccepted, "a short PIN")
+        ok(problem(pin2 = "246811") === AppWords.pinNotAccepted, "two different PINs")
+        ok(problem(proxy = "orbot") === AppWords.torAddressNotAccepted, "an address that is not host:port")
+        ok(FirstStartCheck.wordsLine(listOf("river", "tulip", "anchor", "maple")) == "river   tulip   anchor   maple", "the four words on one line, spaced")
+
         ok(HostPort.valid("127.0.0.1:9050") && HostPort.valid("localhost:1") && HostPort.valid("[::1]:9050") && HostPort.valid("a.b-c.onion:65535"), "host:port")
         ok(!HostPort.valid("127.0.0.1") && !HostPort.valid(":9050") && !HostPort.valid("h:0") && !HostPort.valid("h:65536") && !HostPort.valid("h:") && !HostPort.valid("h p:1") && !HostPort.valid("[]:1"), "not host:port")
     }
