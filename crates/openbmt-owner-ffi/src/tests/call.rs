@@ -816,6 +816,8 @@ fn lk_66_settings_wait_in_the_outbox_and_the_row_says_which_devices_lack_them() 
     for row in &after {
         check_wire_words(&row.7).expect("words");
         assert!(row.7.what.contains("1 counter"), "{}", row.7.what);
+    }
+}
 
 // ---- a hardware signer as key 2 (AS-90 to AS-99) ------------------------------------
 
