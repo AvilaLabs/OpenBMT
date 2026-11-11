@@ -60,7 +60,7 @@ pub use counter::{
     equal_shares, BundleParts, CounterBundleMade, CounterQueued, CounterRequest, WaitingCounter,
 };
 pub use edit::{
-    parse_lightning_node, sats_per_usd_at, LightningEdit, SettingsEdit, SettingsPreview,
+    parse_lightning_node, sats_per_usd_at, LightningEdit, SettingsEdit, SettingsPreview, WatchEdit,
     MAX_EDIT_CONFIRMATIONS, MAX_USD_PER_BTC, MIN_USD_PER_BTC,
 };
 pub use error::{BoxGap, BundleGap, NodeKeyFault, OwnerError, Refusal, RestoreError, SetupError};

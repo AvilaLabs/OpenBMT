@@ -397,6 +397,29 @@ fn as_27_the_lightning_node_is_shown_in_full_and_naming_it_loosens() {
 }
 
 #[test]
+fn as_27_the_watch_key_is_shown_in_full_and_naming_it_loosens() {
+    let key = openbmt_core::identity::Identity::from_secret_bytes(&[9; 32])
+        .unwrap()
+        .device_id();
+    let key_hex: String = key.to_bytes().iter().map(|b| format!("{b:02x}")).collect();
+    let mut a = approver_with_key2();
+    cosign_settings(&mut a, 200, 2, &[1], &Store::default());
+    let mut named = settings_with(3, &[1]);
+    named.watch_key = Some(key);
+    let lines = lines_of(&mut a, vec![settings_item(named.clone())]);
+    let Detail::Settings(s) = &lines[0].detail else {
+        panic!()
+    };
+    assert_eq!(s.changes.len(), 1);
+    let c = &s.changes[0];
+    assert_eq!(c.field, "Watch key");
+    assert_eq!(c.old.as_deref(), Some("no watch key"));
+    assert!(c.new.contains(&key_hex), "{}", c.new);
+    assert_eq!(c.direction, Change::Loosening);
+    assert_eq!(s.overall, Some(Change::Loosening));
+}
+
+#[test]
 fn as_27_the_smallest_bitcoin_sale_is_listed_in_sats_with_its_direction() {
     let mut a = approver_with_key2();
     cosign_settings(&mut a, 200, 2, &[1], &Store::default());

@@ -7,7 +7,7 @@ use common::*;
 use openbmt_core::settings::{Change, FieldChange, Limit, Settings};
 use openbmt_owner::{
     parse_lightning_node, sats_per_usd_at, LightningEdit, NodeKeyFault, Refusal, SettingsEdit,
-    SettingsQueued, MAX_USD_PER_BTC, MIN_USD_PER_BTC,
+    SettingsQueued, WatchEdit, MAX_USD_PER_BTC, MIN_USD_PER_BTC,
 };
 
 /// $100,000 a bitcoin: 1,000 satoshis to a dollar, the rate of the rig's settings.
@@ -660,4 +660,35 @@ fn as_77_the_preview_and_the_queue_agree_end_to_end() {
     };
     assert_eq!(signed.settings, preview.settings);
     assert_eq!(rig.owner.known_settings().unwrap().version, 3);
+}
+
+#[test]
+fn as_74_the_watch_key_in_an_edit_is_named_removed_and_sorted() {
+    let key = openbmt_core::identity::Identity::from_secret_bytes(&[0x77; 32])
+        .unwrap()
+        .device_id();
+    let rig = held(plain);
+    let set = SettingsEdit {
+        watch_key: Some(WatchEdit::Set(key)),
+        ..SettingsEdit::default()
+    };
+    let preview = rig.owner.settings_preview(&set).unwrap();
+    assert_eq!(preview.settings.watch_key, Some(key));
+    assert_eq!(preview.change, Change::Loosening);
+    assert_eq!(preview.fields.len(), 1);
+    assert_eq!(preview.fields[0].field, "watch_key");
+    let rig = held(|s| s.watch_key = Some(key));
+    let remove = SettingsEdit {
+        watch_key: Some(WatchEdit::Remove),
+        ..SettingsEdit::default()
+    };
+    let preview = rig.owner.settings_preview(&remove).unwrap();
+    assert_eq!(preview.settings.watch_key, None);
+    assert_eq!(preview.change, Change::Tightening);
+    // The same key again changes nothing.
+    let same = SettingsEdit {
+        watch_key: Some(WatchEdit::Set(key)),
+        ..SettingsEdit::default()
+    };
+    assert!(rig.owner.settings_preview(&same).unwrap().fields.is_empty());
 }

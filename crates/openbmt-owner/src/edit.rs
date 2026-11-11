@@ -25,6 +25,15 @@ pub enum LightningEdit {
     Set(String),
 }
 
+/// What an edit does to the watch key (CR-185).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WatchEdit {
+    /// Name no watch key: heartbeats signed by one stop counting.
+    Remove,
+    /// Name this watch key.
+    Set(DeviceId),
+}
+
 /// A change of the settings: each field that is `None` (or empty) is kept
 /// as it is (AS-74). Money is in whole dollars, 0 meaning off.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -71,6 +80,8 @@ pub struct SettingsEdit {
     pub shares: Vec<(DeviceId, u16)>,
     /// The Lightning node: `None` keeps it.
     pub lightning_node: Option<LightningEdit>,
+    /// The watch key: `None` keeps it.
+    pub watch_key: Option<WatchEdit>,
 }
 
 /// What an edit would do, before anything is stored (AS-77).
@@ -303,6 +314,11 @@ impl Owner {
             None => {}
             Some(LightningEdit::Remove) => s.lightning_node = None,
             Some(LightningEdit::Set(text)) => s.lightning_node = Some(parse_lightning_node(text)?),
+        }
+        match &edit.watch_key {
+            None => {}
+            Some(WatchEdit::Remove) => s.watch_key = None,
+            Some(WatchEdit::Set(key)) => s.watch_key = Some(*key),
         }
         s.validate()
             .map_err(|e| Refusal::SettingsInvalid(e.to_string()))?;

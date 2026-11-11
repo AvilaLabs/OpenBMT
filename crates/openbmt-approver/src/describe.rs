@@ -32,6 +32,7 @@ pub(crate) fn shown_name(field: &'static str) -> &'static str {
     match field {
         "min_sale_sats" => "Smallest bitcoin sale",
         "lightning_node" => "Lightning node",
+        "watch_key" => "Watch key",
         other => other,
     }
 }
@@ -43,6 +44,20 @@ fn lightning_node(key: &Option<[u8; LIGHTNING_NODE_BYTES]>) -> String {
     match key {
         Some(k) => format!("Lightning payments go to node {}", hex(k)),
         None => "no Lightning node".to_string(),
+    }
+}
+
+/// The line for the watch key (CR-185). The key is shown in full, as the
+/// Lightning node's is: the key holder compares it with what the owner's
+/// phone shows before co-signing.
+fn watch_key(key: &Option<DeviceId>) -> String {
+    match key {
+        Some(k) => format!(
+            "heartbeats from the owner's phone while its app is closed are \
+             taken from key {}",
+            hex(&k.to_bytes())
+        ),
+        None => "no watch key".to_string(),
     }
 }
 
@@ -107,5 +122,6 @@ pub(crate) fn field_values(s: &Settings) -> Vec<(&'static str, String)> {
         ("counters", counters),
         ("boxes", boxes),
         ("lightning_node", lightning_node(&s.lightning_node)),
+        ("watch_key", watch_key(&s.watch_key)),
     ]
 }
