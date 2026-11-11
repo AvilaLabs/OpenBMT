@@ -19,7 +19,6 @@ import org.openbmt.owner.SettingsQueued
 internal fun Controller.showWatch(message: SayWords? = null) {
     val on = watchStore.enabled()
     val views = ArrayList<View>()
-    views.add(ui.text(AppWords.watchSetting.heading, 22f, bold = true))
     views.add(ui.words(AppWords.watchSetting))
     views.add(ui.text(AppWords.watchSettingMore, 15f))
     views.add(ui.text(if (on) "On" else "Off", 16f, bold = true))
