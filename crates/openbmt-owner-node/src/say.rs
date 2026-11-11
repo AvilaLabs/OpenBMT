@@ -815,6 +815,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("NoCounters", PosRefused::NoCounters),
         ("TooSoon", PosRefused::TooSoon { wait_secs: 30 }),
         ("NothingAsked", PosRefused::NothingAsked),
+        ("TooManyPayments", PosRefused::TooManyPayments),
         ("SignInRefused", PosRefused::SignInRefused { status: 401 }),
         ("RateLimited", PosRefused::RateLimited),
         ("Unavailable", PosRefused::Unavailable { status: 500 }),

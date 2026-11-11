@@ -222,6 +222,7 @@ fn sc_01_every_listed_variant_is_present() {
         "PosRefused::SignInRefused",
         "PosRefused::RateLimited",
         "PosRefused::Unavailable",
+        "PosRefused::TooManyPayments",
         "PosRefused::Store",
         "PosRefused::Corrupt",
     ];

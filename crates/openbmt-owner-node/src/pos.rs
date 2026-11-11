@@ -61,6 +61,10 @@ pub const POS_LEDGER_FILE: &str = "pos-ledger.bin";
 pub const MAGIC_POS_SETUP: [u8; 4] = *b"OBMr";
 /// OC-33: orders asked for in one page.
 pub const POS_PAGE_ORDERS: usize = 100;
+/// OC-33: payments asked for in one page of Square's payments.
+pub const POS_PAYMENTS_LIMIT: usize = 100;
+/// OC-34: most pages of payments taken for one page of orders (PS-95).
+pub const POS_MAX_PAYMENT_PAGES: usize = 64;
 /// OC-34: fewest seconds between the starts of two reads of the till.
 pub const POS_MIN_POLL_SECS: u64 = 60;
 /// OC-33: where Square's orders are read. **[verify, E5]**
@@ -299,6 +303,9 @@ pub enum PosRefused {
     Request(RequestRefused),
     /// The till says there is more and does not move on (PS-80).
     NoProgress,
+    /// Square has more pages of payments than one page of orders may take
+    /// (OC-34).
+    TooManyPayments,
     /// The settings were refused (PS-10, PS-13, PS-14).
     Setup(SettingsError),
     /// A text was refused (PS-03).
@@ -350,6 +357,11 @@ impl fmt::Display for PosRefused {
             Self::NoProgress => {
                 write!(f, "PS-80: the till says there is more and does not move on")
             }
+            Self::TooManyPayments => write!(
+                f,
+                "OC-34: Square has more than {} payments for one page of orders",
+                POS_MAX_PAYMENT_PAGES * POS_PAYMENTS_LIMIT
+            ),
             Self::Setup(e) => write!(f, "{e}"),
             Self::Model(e) => write!(f, "{e}"),
             Self::Ledger(e) => write!(f, "{e}"),
@@ -431,6 +443,14 @@ impl PosRefused {
             Self::Unreadable(e) => e.words(),
             Self::Request(e) => e.words(),
             Self::NoProgress => openbmt_pos::SyncError::<String>::NoProgress.words(),
+            Self::TooManyPayments => Words::new(
+                Tone::Stop,
+                "Too many payments",
+                "Square has more payments in the window of one read than this phone takes, so the read was refused whole.",
+                Who::Owner,
+                "Nothing was cut or guessed. Read the till again later, and report it if it keeps happening.",
+            )
+            .code("OC-34"),
             Self::Setup(e) => e.words(),
             Self::Model(e) => e.words(),
             Self::Ledger(e) => e.words(),
@@ -520,6 +540,19 @@ struct Asked {
     cursor: Cursor,
     settings: Settings,
     vendor: VendorRequest,
+    /// The request is for a page of Square's payments, not of its orders.
+    payments: bool,
+}
+
+/// A page of Square orders that has orders, held until its payments are all
+/// read (OC-34): it takes effect only then.
+#[derive(Debug, Clone)]
+struct Held {
+    asked: Asked,
+    orders_body: Vec<u8>,
+    pages: Vec<Vec<u8>>,
+    marker: Option<String>,
+    more: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -536,6 +569,7 @@ pub struct OwnerPos {
     ledger: Ledger,
     broken: Option<PosRefused>,
     asked: Option<Asked>,
+    hold: Option<Held>,
     in_sync: bool,
     pages: usize,
     orders_read: usize,
@@ -569,6 +603,7 @@ impl OwnerPos {
             ledger: Ledger::new(),
             broken: None,
             asked: None,
+            hold: None,
             in_sync: false,
             pages: 0,
             orders_read: 0,
@@ -638,6 +673,7 @@ impl OwnerPos {
         write_file(&self.dir, POS_SETUP_FILE, &setup.to_bytes()).map_err(PosRefused::Store)?;
         self.setup = Some(setup);
         self.asked = None;
+        self.hold = None;
         self.in_sync = false;
         self.pages = 0;
         self.orders_read = 0;
@@ -662,6 +698,7 @@ impl OwnerPos {
         self.ledger = Ledger::new();
         self.broken = None;
         self.asked = None;
+        self.hold = None;
         self.in_sync = false;
         self.pages = 0;
         self.orders_read = 0;
@@ -692,6 +729,25 @@ impl OwnerPos {
                     });
                 }
             }
+        }
+        if let Some(h) = &self.hold {
+            // The orders of this page have payments to read first (OC-34).
+            let VendorRequest::Square(r) = &h.asked.vendor else {
+                return Err(PosRefused::NothingAsked);
+            };
+            let path = r
+                .payments_path(POS_PAYMENTS_LIMIT, h.marker.as_deref())
+                .map_err(PosRefused::Request)?;
+            let request = PosRequest {
+                method: PosMethod::Get,
+                url: format!("{SQUARE_HOST}{path}"),
+                body: Vec::new(),
+            };
+            self.asked = Some(Asked {
+                payments: true,
+                ..h.asked.clone()
+            });
+            return Ok(request);
         }
         let settings = setup.settings(counters).map_err(PosRefused::Setup)?;
         let cursor = self.ledger.cursor().clone();
@@ -732,6 +788,7 @@ impl OwnerPos {
             cursor,
             settings,
             vendor,
+            payments: false,
         });
         Ok(request)
     }
@@ -752,6 +809,7 @@ impl OwnerPos {
         let asked = self.asked.take().ok_or(PosRefused::NothingAsked)?;
         let out = self.take_reply(asked, status, body, now, facts);
         if !out.as_ref().is_ok_and(|p| p.again) {
+            self.hold = None;
             self.in_sync = false;
             self.pages = 0;
             self.orders_read = 0;
@@ -773,11 +831,87 @@ impl OwnerPos {
             429 => return Err(PosRefused::RateLimited),
             _ => return Err(PosRefused::Unavailable { status }),
         }
-        let page = match &asked.vendor {
-            VendorRequest::Square(r) => r.parse(body, None),
-            VendorRequest::Clover(r) => r.parse(body),
+        if asked.payments {
+            return self.take_payments(body, now, facts);
         }
-        .map_err(PosRefused::Unreadable)?;
+        let page = match &asked.vendor {
+            VendorRequest::Square(r) => {
+                let first = r.parse(body, None).map_err(PosRefused::Unreadable)?;
+                if first.more && first.next == asked.cursor {
+                    return Err(PosRefused::NoProgress);
+                }
+                if !first.orders.is_empty() {
+                    // The page takes effect only when its payments are read
+                    // (OC-34); a page with no order asks for none.
+                    self.hold = Some(Held {
+                        asked: asked.clone(),
+                        orders_body: body.to_vec(),
+                        pages: Vec::new(),
+                        marker: None,
+                        more: first.more,
+                    });
+                    return Ok(PosPolled {
+                        pages: self.pages,
+                        orders_read: self.orders_read,
+                        again: true,
+                        more_left: first.more,
+                        delta: Delta::default(),
+                    });
+                }
+                first
+            }
+            VendorRequest::Clover(r) => r.parse(body).map_err(PosRefused::Unreadable)?,
+        };
+        self.finish_page(&asked, page, now, facts)
+    }
+
+    /// OC-34: one page of Square's payments for the held page of orders.
+    /// When the last one is in, the page is read with all of them (PS-96).
+    fn take_payments(
+        &mut self,
+        body: &[u8],
+        now: u64,
+        facts: impl FnOnce() -> Result<Vec<SaleFact>, PosRefused>,
+    ) -> Result<PosPolled, PosRefused> {
+        let mut held = self.hold.take().ok_or(PosRefused::NothingAsked)?;
+        let next = square::Request::payments_next(body).map_err(PosRefused::Unreadable)?;
+        held.pages.push(body.to_vec());
+        // A page that repeats its marker ends the payments (PS-96).
+        let next = next.filter(|m| held.marker.as_deref() != Some(m.as_str()));
+        if let Some(m) = next {
+            if held.pages.len() >= POS_MAX_PAYMENT_PAGES {
+                return Err(PosRefused::TooManyPayments);
+            }
+            held.marker = Some(m);
+            let out = PosPolled {
+                pages: self.pages,
+                orders_read: self.orders_read,
+                again: true,
+                more_left: held.more,
+                delta: Delta::default(),
+            };
+            self.hold = Some(held);
+            return Ok(out);
+        }
+        let VendorRequest::Square(r) = &held.asked.vendor else {
+            return Err(PosRefused::NothingAsked);
+        };
+        let replies: Vec<&[u8]> = held.pages.iter().map(Vec::as_slice).collect();
+        let page = r
+            .parse_pages(&held.orders_body, &replies)
+            .map_err(PosRefused::Unreadable)?;
+        self.finish_page(&held.asked, page, now, facts)
+    }
+
+    /// OC-33, OC-35: a page that is whole takes effect: stored with its
+    /// cursor (PS-74), and after the last page matched.
+    fn finish_page(
+        &mut self,
+        asked: &Asked,
+        page: openbmt_pos::Page,
+        now: u64,
+        facts: impl FnOnce() -> Result<Vec<SaleFact>, PosRefused>,
+    ) -> Result<PosPolled, PosRefused> {
         if page.more && page.next == asked.cursor {
             return Err(PosRefused::NoProgress);
         }

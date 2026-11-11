@@ -148,7 +148,9 @@ connection that is not Bitcoin's.
   method, its address and its body, with the token added as an
   `Authorization` header in Kotlin and nowhere else. The address must be
   `https://` to `connect.squareup.com` or `api.clover.com`, with a path and
-  no port, login or space; any other is not sent. The connection goes
+  no port, login or space; any other is not sent. That holds for each
+  request of a read, the pages of Square's payments (a GET of
+  `/v2/payments`) as much as the pages of orders. The connection goes
   through the SOCKS proxy of OA-05 with the name left to the proxy, and if
   the proxy does not answer nothing is sent. It follows no redirect, keeps
   no cookie or cache, asks for no compression, uses the same generic

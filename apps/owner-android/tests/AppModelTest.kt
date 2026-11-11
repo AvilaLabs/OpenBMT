@@ -753,7 +753,7 @@ object AppModelTest {
     }
 
     private fun oa_17_the_till_is_read_through_tor_from_two_known_systems() {
-        for (good in listOf("https://connect.squareup.com/v2/orders/search", "https://api.clover.com/v3/merchants/ABC123/orders?limit=100&expand=payments")) {
+        for (good in listOf("https://connect.squareup.com/v2/orders/search", "https://api.clover.com/v3/merchants/ABC123/orders?limit=100&expand=payments", "https://connect.squareup.com/v2/payments?begin_time=2026-11-10T00:00:00Z&location_id=LOC1&sort_order=ASC&limit=100&cursor=PAY%3D%3D")) {
             ok(PosUrl.allowed(good), "allowed: $good")
         }
         for (bad in listOf(
@@ -777,6 +777,21 @@ object AppModelTest {
         val done = PosPoll.readOnce(link, { r, t -> fetched.add(r.url to t); PosFetch.Reply(200, ByteArray(7)) }, "TOK", { 42L })
         ok(done is PosOutcome.Done && done.newAlerts == 3 && !done.moreLeft && link.requests == 2, "two pages, the alerts of both counted")
         ok(fetched.size == 2 && fetched.all { it.second == "TOK" } && link.answers == listOf(Triple(42L, 200L, 7), Triple(42L, 200L, 7)), "each answer is handed back with its status and its bytes")
+        // A Square page with orders is followed by its payments, each a GET with no body that is fetched like the rest.
+        val payLink = object : PosLink {
+            val sent = ArrayList<PosRequest>()
+            var step = 0
+
+            override fun request(now: Long): PosRequest {
+                val r = if (step == 1) PosRequest(PosMethod.Get, "https://connect.squareup.com/v2/payments?location_id=LOC1&limit=100", ByteArray(0)) else posRequest()
+                sent.add(r)
+                return r
+            }
+
+            override fun reply(now: Long, status: Long, body: ByteArray): PosReply = posReply(again = ++step < 2)
+        }
+        val paid = PosPoll.readOnce(payLink, { _, _ -> PosFetch.Reply(200, ByteArray(3)) }, "TOK", { 42L })
+        ok(paid is PosOutcome.Done && payLink.sent.map { it.method } == listOf(PosMethod.Post, PosMethod.Get) && payLink.sent[1].body.isEmpty(), "the orders, then the payments, both fetched")
         fun failed(fetch: PosFetch): SayWords? = (PosPoll.readOnce(ScriptedLink(ArrayDeque(listOf(posReply(false)))), { _, _ -> fetch }, "T", { 1L }) as? PosOutcome.Failed)?.words
         ok(failed(PosFetch.TorMissing) == AppWords.orbotNotRunning, "no Orbot: nothing is read, and it says so")
         ok(failed(PosFetch.TooLong) == AppWords.posPageTooLong, "a page that is too long")

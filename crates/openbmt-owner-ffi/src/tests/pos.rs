@@ -9,6 +9,8 @@ use crate::{LinkConfig, RouteView};
 
 const SQUARE_PAGE1: &[u8] =
     include_bytes!("../../../openbmt-pos-readers/tests/fixtures/square_orders_page1.json");
+const SQUARE_PAYMENTS: &[u8] =
+    include_bytes!("../../../openbmt-pos-readers/tests/fixtures/square_payments.json");
 const SQUARE_LAST: &[u8] =
     include_bytes!("../../../openbmt-pos-readers/tests/fixtures/square_orders_last.json");
 
@@ -247,8 +249,27 @@ fn oc_33_a_read_is_a_request_the_app_sends_and_a_reply_it_hands_back() {
     let (new_matches, new_alerts, cleared, retired) =
         (r.u32(), r.list(read_alert), r.u32(), r.u64());
     r.done();
-    assert!(again && more_left && pages == 1 && orders > 0);
+    assert!(again && more_left && pages == 0 && orders == 0);
     assert!((new_matches, cleared, retired) == (0, 0, 0) && new_alerts.is_empty());
+    // A page with orders asks for its payments first: a GET, no body.
+    let response = rig.call(OP_REQUEST, handle, &W::new().u64(later).0);
+    let mut r = Rd::ok(&response);
+    let (method, url, body) = (r.u8(), r.string(), r.bytes());
+    r.done();
+    assert_eq!(method, 0);
+    assert!(
+        url.starts_with("https://connect.squareup.com/v2/payments?"),
+        "{url}"
+    );
+    assert!(body.is_empty());
+    let response = rig.call(OP_REPLY, handle, &reply_fields(later, 200, SQUARE_PAYMENTS));
+    let mut r = Rd::ok(&response);
+    let (again, more_left, pages, _orders) = (r.bool(), r.bool(), r.u32(), r.u32());
+    let (new_matches, new_alerts, _cleared, _retired) =
+        (r.u32(), r.list(read_alert), r.u32(), r.u64());
+    r.done();
+    assert!(again && more_left && pages == 1);
+    assert!(new_matches == 0 && new_alerts.is_empty());
     let response = rig.call(OP_REQUEST, handle, &W::new().u64(later).0);
     let mut r = Rd::ok(&response);
     let (_, _, body) = (r.u8(), r.string(), r.bytes());
@@ -260,6 +281,9 @@ fn oc_33_a_read_is_a_request_the_app_sends_and_a_reply_it_hands_back() {
     // holds no records of the counter yet, so no sale is there for a Bitcoin
     // tender to match, and its alerts are raised.
     let response = rig.call(OP_REPLY, handle, &reply_fields(later, 200, SQUARE_LAST));
+    Rd::ok(&response);
+    Rd::ok(&rig.call(OP_REQUEST, handle, &W::new().u64(later).0));
+    let response = rig.call(OP_REPLY, handle, &reply_fields(later, 200, SQUARE_PAYMENTS));
     // (the clock of the matching is the reply's)
     let mut r = Rd::ok(&response);
     let (again, more_left, pages, _orders) = (r.bool(), r.bool(), r.u32(), r.u32());

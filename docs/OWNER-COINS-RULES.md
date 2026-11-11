@@ -375,11 +375,19 @@ the reply (OA-16 to OA-19).
   with `openbmt-pos-readers`. The request carries no sign-in text. Only a
   200 is read. A 401 or 403 is "sign-in refused", a 429 is "asked to wait",
   and any other status is "vendor unavailable"; each has its own words. A
-  reply that does not parse is a named refusal and changes nothing.
+  reply that does not parse is a named refusal and changes nothing. After
+  a Square orders reply that has orders, the node hands out Square's
+  payments (a GET of `/v2/payments`, as PS-95 says) one request at a time,
+  and the page takes effect only when its payments are all read, through
+  `parse_pages` (PS-96). A page with no orders asks for no payments.
 - **OC-34.** A read starts at most once in `POS_MIN_POLL_SECS` (60). The
-  next page of a read already begun is not held back. A read is at most 64
-  pages (`MAX_PAGES`). A page that says more is coming but does not move the
-  cursor ends the read with a named refusal.
+  next page of a read already begun is not held back, and nor is a request
+  for payments, which is not a page. A read is at most 64 pages
+  (`MAX_PAGES`). A page that says more is coming but does not move the
+  cursor ends the read with a named refusal. The payments of one page of
+  orders are at most 64 pages of 100 (`POS_MAX_PAYMENT_PAGES`); a page that
+  repeats its marker ends them, and more than that refuses the whole read
+  with its own words, so nothing is cut or guessed.
 - **OC-35.** The pages are matched as PS-10 to PS-40 say, with the facts of
   OC-30, when the last page has been taken or the page limit is reached. The
   reply tells the app which matches and alerts are new, which cleared and

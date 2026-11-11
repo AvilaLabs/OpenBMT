@@ -25,6 +25,12 @@ use crate::{OwnerLink, OwnerLinkConfig};
 
 const SQUARE_PAGE1: &[u8] =
     include_bytes!("../../../openbmt-pos-readers/tests/fixtures/square_orders_page1.json");
+const SQUARE_PAYMENTS: &[u8] =
+    include_bytes!("../../../openbmt-pos-readers/tests/fixtures/square_payments.json");
+const SQUARE_PAYMENTS_PAGE1: &[u8] =
+    include_bytes!("../../../openbmt-pos-readers/tests/fixtures/square_payments_page1.json");
+const SQUARE_EMPTY: &[u8] =
+    include_bytes!("../../../openbmt-pos-readers/tests/fixtures/square_orders_empty.json");
 const SQUARE_LAST: &[u8] =
     include_bytes!("../../../openbmt-pos-readers/tests/fixtures/square_orders_last.json");
 const CLOVER: &[u8] =
@@ -71,6 +77,39 @@ fn sale(index: u32, cents: u64, opened_at: u64, paid_at: Option<u64>) -> SaleFac
     s
 }
 
+/// A Square page: the orders reply, and then, when the node asks for them
+/// (OC-34), the payments of the fixture, one page.
+fn sq(
+    pos: &mut OwnerPos,
+    now: u64,
+    orders: &[u8],
+    facts: impl FnOnce() -> Result<Vec<SaleFact>, PosRefused>,
+) -> Result<crate::pos::PosPolled, PosRefused> {
+    sq_with(pos, now, orders, &[SQUARE_PAYMENTS], facts)
+}
+
+/// As [`sq`], with these pages of payments.
+fn sq_with(
+    pos: &mut OwnerPos,
+    now: u64,
+    orders: &[u8],
+    payments: &[&[u8]],
+    facts: impl FnOnce() -> Result<Vec<SaleFact>, PosRefused>,
+) -> Result<crate::pos::PosPolled, PosRefused> {
+    let mut facts = Some(facts);
+    let mut call = || facts.take().map_or_else(|| Ok(Vec::new()), |f| f());
+    let mut out = pos.reply(200, orders, now, &mut call)?;
+    for page in payments {
+        if !out.again {
+            break;
+        }
+        let r = pos.request(now, &[counter()])?;
+        assert!(r.url.contains("/v2/payments"), "{}", r.url);
+        out = pos.reply(200, page, now, &mut call)?;
+    }
+    Ok(out)
+}
+
 /// One whole read of a single-page reply.
 fn poll(
     pos: &mut OwnerPos,
@@ -79,6 +118,9 @@ fn poll(
     sales: Vec<SaleFact>,
 ) -> Result<crate::pos::PosPolled, PosRefused> {
     pos.request(now, &[counter()])?;
+    if pos.setup().is_some_and(|s| s.vendor == PosVendor::Square) {
+        return sq(pos, now, body, || Ok(sales));
+    }
     pos.reply(200, body, now, || Ok(sales))
 }
 
@@ -225,9 +267,7 @@ fn oc_30_a_counter_whose_records_give_no_sales_gives_none_and_nothing_is_matched
     let dir = Dir::new();
     let mut pos = pos_in(&dir, square());
     pos.request(NOW, &[counter()]).unwrap();
-    let got = pos
-        .reply(200, SQUARE_LAST, NOW, || counter_facts(&link))
-        .unwrap_err();
+    let got = sq(&mut pos, NOW, SQUARE_LAST, || counter_facts(&link)).unwrap_err();
     assert_eq!(got, err);
     assert_eq!(pos.ledger().orders().len(), 1);
     assert!(pos.ledger().matches().is_empty());
@@ -420,7 +460,7 @@ fn oc_32_a_ledger_that_cannot_be_stored_takes_no_effect() {
     let before = pos.ledger().clone();
     pos.request(NOW, &[counter()]).unwrap();
     fs::remove_dir_all(dir.path()).unwrap();
-    let err = pos.reply(200, SQUARE_LAST, NOW, no_facts).unwrap_err();
+    let err = sq(&mut pos, NOW, SQUARE_LAST, no_facts).unwrap_err();
     assert!(matches!(err, PosRefused::Store(_)), "{err:?}");
     assert_eq!(pos.ledger(), &before);
     assert!(err.words().detail.is_some());
@@ -550,11 +590,11 @@ fn oc_34_a_read_starts_at_most_once_a_minute_and_its_pages_are_not_held_back() {
     let dir = Dir::new();
     let mut pos = pos_in(&dir, square());
     pos.request(NOW, &[counter()]).unwrap();
-    let first = pos.reply(200, SQUARE_PAGE1, NOW, no_facts).unwrap();
+    let first = sq(&mut pos, NOW, SQUARE_PAGE1, no_facts).unwrap();
     assert!(first.again && first.more_left);
     // The second page of the same read comes at once.
     pos.request(NOW, &[counter()]).unwrap();
-    let last = pos.reply(200, SQUARE_LAST, NOW, no_facts).unwrap();
+    let last = sq(&mut pos, NOW, SQUARE_LAST, no_facts).unwrap();
     assert!(!last.again);
     // A new read waits for the minute that began with the first.
     assert_eq!(
@@ -606,6 +646,131 @@ fn oc_34_a_page_that_says_more_and_does_not_move_on_ends_the_read() {
     );
 }
 
+#[test]
+fn oc_34_a_page_of_orders_takes_effect_only_when_its_payments_are_all_read() {
+    let dir = Dir::new();
+    let mut pos = pos_in(&dir, square());
+    pos.request(NOW, &[counter()]).unwrap();
+    let first = pos.reply(200, SQUARE_PAGE1, NOW, no_facts).unwrap();
+    // Held: nothing is stored and the next request is the payments.
+    assert!(first.again && first.delta.new_alerts.is_empty());
+    assert_eq!(pos.view().unwrap().last_poll_at, None);
+    let r = pos.request(NOW, &[counter()]).unwrap();
+    assert_eq!(r.method, PosMethod::Get);
+    assert!(r.body.is_empty());
+    assert!(r.url.starts_with(SQUARE_HOST), "{}", r.url);
+    assert!(r.url.contains("/v2/payments?"), "{}", r.url);
+    assert!(
+        r.url.contains("limit=100") && !r.url.contains("cursor="),
+        "{}",
+        r.url
+    );
+    let more = pos
+        .reply(200, SQUARE_PAYMENTS_PAGE1, NOW, no_facts)
+        .unwrap();
+    assert!(more.again && more.delta.new_matches.is_empty());
+    assert_eq!(pos.view().unwrap().last_poll_at, None);
+    // The second payments request carries the cursor of the first.
+    let r = pos.request(NOW, &[counter()]).unwrap();
+    assert!(r.url.contains("cursor=PAYCURSOR1"), "{}", r.url);
+    pos.reply(200, SQUARE_PAYMENTS, NOW, no_facts).unwrap();
+    // Now the page is whole: the orders go on to the next page.
+    let r = pos.request(NOW, &[counter()]).unwrap();
+    assert_eq!(r.method, PosMethod::Post);
+    assert!(String::from_utf8(r.body)
+        .unwrap()
+        .contains("PAGE2OPAQUE-cursor_value.1"));
+    sq(&mut pos, NOW, SQUARE_LAST, no_facts).unwrap();
+    assert_eq!(pos.view().unwrap().last_poll_at, Some(NOW));
+}
+
+#[test]
+fn oc_34_a_cancelled_payment_makes_its_tender_voided() {
+    // The 7.00 Bitcoin tender of the last page, paid at the counter.
+    let (link, _a, _b) = link_with(&[opened(0, 1_794_322_800, 700), at_once(0, 1_794_322_860)]);
+    let dir = Dir::new();
+    let mut pos = pos_in(&dir, square());
+    // Seen first without the payments' word: the tender stands and matches.
+    pos.request(NOW, &[counter()]).unwrap();
+    sq_with(&mut pos, NOW, SQUARE_LAST, &[br#"{"payments":[]}"#], || {
+        counter_facts(&link)
+    })
+    .unwrap();
+    assert_eq!(pos.view().unwrap().summary.matches, 1);
+    assert!(!kinds(&pos).contains(&AlertKind::VoidedAfterPayment));
+    // Then Square says the payment was cancelled.
+    let later = NOW + POS_MIN_POLL_SECS;
+    pos.request(later, &[counter()]).unwrap();
+    sq(&mut pos, later, SQUARE_LAST, || counter_facts(&link)).unwrap();
+    assert!(kinds(&pos).contains(&AlertKind::VoidedAfterPayment));
+}
+
+#[test]
+fn oc_34_a_page_with_no_orders_asks_for_no_payments() {
+    let dir = Dir::new();
+    let mut pos = pos_in(&dir, square());
+    pos.request(NOW, &[counter()]).unwrap();
+    let out = pos.reply(200, SQUARE_EMPTY, NOW, no_facts).unwrap();
+    assert!(!out.again);
+    assert_eq!(pos.view().unwrap().last_poll_at, Some(NOW));
+    // The next request is a fresh read, not payments.
+    let r = pos.request(NOW + POS_MIN_POLL_SECS, &[counter()]).unwrap();
+    assert!(r.url.contains("/v2/orders/search"), "{}", r.url);
+}
+
+#[test]
+fn oc_34_a_page_that_repeats_the_payments_cursor_ends_them() {
+    let dir = Dir::new();
+    let mut pos = pos_in(&dir, square());
+    pos.request(NOW, &[counter()]).unwrap();
+    pos.reply(200, SQUARE_LAST, NOW, no_facts).unwrap();
+    pos.request(NOW, &[counter()]).unwrap();
+    assert!(
+        pos.reply(200, SQUARE_PAYMENTS_PAGE1, NOW, no_facts)
+            .unwrap()
+            .again
+    );
+    // The same marker comes back: the payments end and the page is read.
+    let r = pos.request(NOW, &[counter()]).unwrap();
+    assert!(r.url.contains("cursor=PAYCURSOR1"));
+    let out = pos
+        .reply(200, SQUARE_PAYMENTS_PAGE1, NOW, no_facts)
+        .unwrap();
+    assert!(!out.again);
+    assert_eq!(pos.view().unwrap().last_poll_at, Some(NOW));
+}
+
+#[test]
+fn oc_34_more_than_64_pages_of_payments_refuse_the_read_with_words() {
+    let dir = Dir::new();
+    let mut pos = pos_in(&dir, square());
+    pos.request(NOW, &[counter()]).unwrap();
+    pos.reply(200, SQUARE_LAST, NOW, no_facts).unwrap();
+    let mut got = None;
+    for n in 0..70 {
+        pos.request(NOW, &[counter()]).unwrap();
+        let page = format!(r#"{{"payments":[],"cursor":"C{n}"}}"#);
+        match pos.reply(200, page.as_bytes(), NOW, no_facts) {
+            Ok(o) => assert!(o.again, "{n}"),
+            Err(e) => {
+                got = Some((n, e));
+                break;
+            }
+        }
+    }
+    let (n, e) = got.unwrap();
+    assert_eq!((n, &e), (63, &PosRefused::TooManyPayments));
+    assert!(e.to_string().starts_with("OC-34"));
+    assert_eq!(openbmt_core::say::check(&e.words()), Ok(()));
+    // Nothing took effect, and the read can start again.
+    assert_eq!(pos.view().unwrap().last_poll_at, None);
+    assert!(pos
+        .request(NOW + POS_MIN_POLL_SECS, &[counter()])
+        .unwrap()
+        .url
+        .contains("/v2/orders/search"));
+}
+
 // ---- the matching -----------------------------------------------------------------
 
 #[test]
@@ -622,18 +787,14 @@ fn oc_35_square_fixtures_and_the_counters_records_give_a_match_and_three_alerts(
     let mut pos = pos_in(&dir, square());
     // Page 1: the order with the Bitcoin tender and its tip.
     pos.request(NOW, &[counter()]).unwrap();
-    let first = pos
-        .reply(200, SQUARE_PAGE1, NOW, || counter_facts(&link))
-        .unwrap();
+    let first = sq(&mut pos, NOW, SQUARE_PAGE1, || counter_facts(&link)).unwrap();
     assert!(first.again && first.delta.new_matches.is_empty());
     // The second request carries Square's marker.
     let second = pos.request(NOW, &[counter()]).unwrap();
     assert!(String::from_utf8(second.body)
         .unwrap()
         .contains("PAGE2OPAQUE-cursor_value.1"));
-    let done = pos
-        .reply(200, SQUARE_LAST, NOW, || counter_facts(&link))
-        .unwrap();
+    let done = sq(&mut pos, NOW, SQUARE_LAST, || counter_facts(&link)).unwrap();
     assert!(!done.again && !done.more_left);
     assert_eq!((done.pages, done.orders_read), (2, 4));
     // One match, by amount and time, to the first sale.
@@ -668,11 +829,10 @@ fn oc_35_square_fixtures_and_the_counters_records_give_a_match_and_three_alerts(
     // Reading the same pages again raises nothing again (PS-74).
     let mut pos = again;
     pos.request(NOW + POS_MIN_POLL_SECS, &[counter()]).unwrap();
-    let repeat = pos
-        .reply(200, SQUARE_LAST, NOW + POS_MIN_POLL_SECS, || {
-            counter_facts(&link)
-        })
-        .unwrap();
+    let repeat = sq(&mut pos, NOW + POS_MIN_POLL_SECS, SQUARE_LAST, || {
+        counter_facts(&link)
+    })
+    .unwrap();
     assert!(repeat.delta.new_alerts.is_empty() && repeat.delta.new_matches.is_empty());
     assert_eq!(pos.view().unwrap().open, view.open);
 }
@@ -832,9 +992,7 @@ fn oc_36_an_alert_is_acknowledged_on_this_phone_and_stays_acknowledged() {
     assert!(view.open.iter().all(|a| a.key != payment));
     // It is not raised again while the condition holds.
     pos.request(NOW + POS_MIN_POLL_SECS, &[counter()]).unwrap();
-    let again = pos
-        .reply(200, SQUARE_LAST, NOW + POS_MIN_POLL_SECS, || Ok(sales))
-        .unwrap();
+    let again = sq(&mut pos, NOW + POS_MIN_POLL_SECS, SQUARE_LAST, || Ok(sales)).unwrap();
     assert!(again.delta.new_alerts.iter().all(|a| a.key != payment));
     assert_eq!(pos.view().unwrap().summary.acknowledged_alerts, 1);
     // Stored: it is still acknowledged after a restart.
@@ -869,6 +1027,7 @@ fn oc_37_every_refusal_has_words_and_the_wrapped_ones_have_their_own() {
         PosRefused::Unreadable(ReadRefused::TooLong),
         PosRefused::Request(RequestRefused::BadMerchant),
         PosRefused::NoProgress,
+        PosRefused::TooManyPayments,
         PosRefused::Setup(SettingsError::Currencies),
         PosRefused::Model(openbmt_pos::ModelError::BadText),
         PosRefused::Ledger(openbmt_pos::LedgerError::NotOpen),
