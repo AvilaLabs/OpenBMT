@@ -129,9 +129,9 @@ safety.
    a wallet app from a different publisher (★ nothing to buy; for example
    Nunchuk, **[verify that it exports a BIP48 P2WSH multisig key with origin,
    E8]**). The app runs on the counter tablet before it becomes the counter,
-   in airplane mode. A hardware wallet is the stronger choice. The owner writes
-   the words on paper or steel and checks them with the app's own backup
-   check. Only key 3's public key (xpub) goes to the Key app, by QR. The tablet
+   in airplane mode. A hardware wallet is the stronger choice. The owner puts
+   the words on steel and checks them with the app's own backup check.
+   Only key 3's public key (xpub) goes to the Key app, by QR. The tablet
    is then **factory reset** before OpenBMT is installed on it. The Key app
    never makes or shows key 3's words. The screen says "do this step alone":
    key 3's words and key 2's words are written in separate sittings, with no
@@ -203,7 +203,7 @@ what to expect before that screen appears.
    to pay" on Android (iPhone customers scan). The cashier waits and reads one
    of four plain states:
    - **Green plus a chime: "Paid, hand over goods".** The screen also says
-     what was checked, for example "Paid (light check)" (§6).
+     what was checked, for example "Light check" (§6).
    - **Green: "Paid, could still be cancelled for about N min".** This shows
      for an instant sale. The goods can go. The risk is the shop's limit.
    - **Blue: "Not paid yet, wait".** Neutral. It shows while a sale is open,
@@ -220,6 +220,14 @@ what to expect before that screen appears.
 
 If the connection is down at the start, the counter does not offer Bitcoin
 (§5.1). The cashier is told to choose another payment type.
+
+As built (2026-11), steps 2 and 4 are not automatic yet. The cashier types the
+amount on the counter's keypad, and once the counter shows "Paid" closes the
+order in the POS with the shop's "Bitcoin" tender; the owner phone then matches
+each tender to a counter sale (`docs/POS-RULES.md`). Tap to pay is not built,
+so every customer scans. The counter's headings and words are generated in
+`docs/screens/counter.md`: the heading is "Paid", the words say whether a
+block holds the payment, and a check line names what saw it (`CR-105`).
 
 ### 2.3 Customer payment
 
@@ -376,7 +384,10 @@ payment without knowing, and must understand up front that it can happen.
   shows up only when the next block is found" (§6.2).
 - **Words on every sale: Paid, Confirmed (1 block), Final.** An instant sale
   shows "Paid, could still be cancelled for about N min". At 1 block it shows
-  **"Confirmed (1 block)"**. **"Final" is reserved for the refund depth**,
+  **"Confirmed (1 block)"**. (As built, the heading is "Paid" in each case and
+  the words under it carry the difference: "could still be undone", "The
+  payment is in a block", "settled, so a refund can be paid out"; see
+  `docs/screens/counter.md`.) **"Final" is reserved for the refund depth**,
   which the shop sets (§2.4, §6). "Final" is depth-based: more blocks on top
   make a reversal less likely. It never claims zero risk.
 - **The books never count unfinished money.** POS and books mark an instant
@@ -491,11 +502,14 @@ Rules:
   phone instead, and the screen says pairing rests on the owner phone alone
   (§5.4). A Box has no screen and is paired by an invitation the Key app
   makes and the merchant types into the Box (`docs/BOX-RULES.md` §2).
-- **Manager sign-in.** The owner adds a manager by name in Owner mode (a
-  loosening change). The manager has a PIN of at least 6 digits. 5 wrong tries
-  lock that manager for 15 minutes; 10 lock the manager until the owner resets
-  it **[to tune]**. Removing a manager is tightening and reaches counters at
-  their next check-in (below).
+- **Manager sign-in.** As built, each counter has one manager, named and
+  given a PIN of 6 to 12 digits at pairing (`CR-84`). A wrong try holds the
+  PIN for 1 second, then 2, 4, 8 and so on up to 5 minutes (`CR-85`); there is
+  no lockout and no wipe, because the counter holds no key. Cashiers are a
+  local list on the counter behind the manager's PIN (`CR-140` onward).
+  **[design]** Named managers: the owner adds a manager by name on the owner
+  phone (a loosening change, so it needs the Key app) and the enrolment
+  reaches counters in the signed settings; removing a manager is tightening.
 - **Check-ins.** Each counter reports a signed record head to the owner phone
   at fixed intervals (default 15 minutes **[to tune]**). A missed check-in
   alerts the owner.
@@ -557,14 +571,14 @@ screens until sourced.
 | Time to "Seen" | Lightning POS: about 1–5 s **[verify]** | < 5 s (E3) |
 | Time to "Paid", small sale | Lightning POS: about 1–5 s | < 10 s within the instant limit |
 | Processor fee | BTCPay, Numo, Zaprite: 0% | 0% processor fee on receiving. Spending the money later costs the merchant network fees (§9) |
-| Network fee | Card: 1.5–3.5% to the merchant **[verify]** | Paid by the customer: about $0.11–0.42 flat at 1–3 sat/vB **[verify]**. Spending each receipt later costs the merchant about 104 vB |
+| Network fee | Card: 2.4–3.5% plus 15–30 cents per payment to the merchant (Square and Stripe United States pricing pages, read 2026-11-11) | Paid by the customer: about $0.11–0.42 flat at 1–3 sat/vB **[verify]**. Spending each receipt later costs the merchant about 104 vB |
 | Custody | BTCPay: merchant single key | Merchant 2-of-3; no one else holds a key |
 | Closes the sale in the POS | Square bitcoin: native | Square, Clover, Lightspeed-style gateway |
 | Refunds | BTCPay: refund flow | 3 cashier steps, queued, paid in an approval session; cash-from-till option |
 | Books | Rarely offered | One-tap QuickBooks/Xero CSV plus a full ledger; owner-held copy |
 | Who can see the wallet | BTCPay host: yes (xpub) | Only the merchant's devices. The counter holds address batches, not the wallet description. A hosted Box host (optional) sees orders and revenue, not addresses (§4.1) |
 | Explained states | Rare | Every wait says why and what's next |
-| Honest check labels | Rare | Every payment says what was checked: light check, or your node |
+| Check labels | Rare | Every payment says what saw it: the light check, the Box, or the shop's own node with the light check |
 
 ## 4. Purist checklist
 
@@ -573,8 +587,8 @@ screens until sourced.
 | Sharing an xpub reveals all history (Stacker News 112663) | The wallet description stays on the owner phone, the Key app and the merchant's own Box. The counter gets signed address batches only. No third party receives the description. |
 | Gap-limit exhaustion hides payments (Stacker News 408359) | A shown address is never reused. Each counter has its own contiguous index range. Wide lookahead; late payments still detected; the kit records an explicit import range (§5.4, §5.5) |
 | Public Electrum/Esplora servers leak addresses and IP (Stacker News 1586239, 1336584) | No third-party indexer. Payments are checked over the Bitcoin P2P network directly, or by the merchant's own node. Tor is one switch for the counter. Spends go out over Tor by default. |
-| Light clients trust peers about the best chain (Core PR #18876 debate) | Status text says what was checked: "Seen by 3 peers (not verified by this device)", "Confirmed (light check)", "Confirmed (your node)". Never "fully verified" unless the merchant's own node said so, and the counter still checks proof-of-work (§5.1). |
-| 0-conf treated as settled after full-RBF (Peter Todd, Stacker News 93588) | Instant only within a limit the shop sets and can afford to lose. The light check has a lower cap and says "Paid (light check)". The screen never calls it final (§6). |
+| Light clients trust peers about the best chain (Core PR #18876 debate) | Each payment carries a check line naming what saw it: "Light check", "Your Box reports it", "Your Box and light check", "Your node and light check" (`CR-105`). Never "fully verified" unless the merchant's own node said so, and the counter still checks proof-of-work (§5.1). |
+| 0-conf treated as settled after full-RBF (Peter Todd, Stacker News 93588) | Instant only within a limit the shop sets and can afford to lose. The light check has a lower cap, and the check line says "Light check". The screen never calls it final (§6). |
 | Custodial processors, KYC | No custody. No account tied to identity. No company in the payment path. The optional sync relay and hosted Box are not in the payment path (§5.3). |
 | Trusted server decides where money goes (BTCPay third-party hosting docs) | Addresses come from batches made on the owner phone and co-signed by the Key app or spot-checked on a hardware wallet. A server cannot add one, and neither can a bad OpenBMT update alone (§5.1). |
 | iPhone tap needs a web page that a server could rewrite | Removed. iPhone customers scan the QR. No page, no server in the address path (§7). |
@@ -676,12 +690,16 @@ and no TLS certificate company is needed **[design, R5]**.
     inputs and cannot confirm that its inputs are confirmed (§6).
   - **Option: your own node.** The merchant's own full node (on their OpenBMT
     Box, Start9, Umbrel, or a home node). The device then checks against it.
-  - The screen always says which check was done. Labels, from weakest to
-    strongest:
-    - "Seen by 3 peers (not verified by this device)"
-    - "Paid (your Box reports it)"
-    - "Confirmed (light check)"
-    - "Confirmed (your node)"
+    As built, the counter reaches the own node only at its Tor v3 address:
+    the address is the node's public key, so it says which machine answers.
+    A node on the shop's local network or at a plain internet address is not
+    accepted as the own node (`NR-98`, `NR-99`, `CR-100` to `CR-102`).
+  - The screen always says which check was done. As built, a check line
+    under the sale's heading names it (`CR-105`):
+    - "Your Box reports it" (only the Box has seen it)
+    - "Light check"
+    - "Your Box and light check"
+    - "Your node and light check"
 - **Peers come from distinct network groups.** The light client will not count
   two peers in the same network group (for example the same IP range) as
   separate peers. This makes it harder for one attacker to pose as several.
@@ -694,8 +712,8 @@ and no TLS certificate company is needed **[design, R5]**.
   make up a confirmation.
 - **Own-node unconfirmed payments.** The own-node label and caps apply to an
   unconfirmed payment only when the counter's own light client also saw the
-  transaction from independent peers. Otherwise the label is "Paid (your Box
-  reports it)" and the light-check caps apply (§6).
+  transaction from independent peers. Otherwise the check line is "Your Box
+  reports it" or "Light check" and the light-check caps apply (§6).
 - **Stall and unhealthy state.** If the light client has few filter-serving
   peers, stops getting new blocks, or sees headers fall behind, the counter
   shows "Check unhealthy" and **turns instant acceptance off** until the check
@@ -742,6 +760,11 @@ and no TLS certificate company is needed **[design, R5]**.
 - Holds the head of the hash chain of records (§2.9) and an owner-held copy of
   the books (§10).
 - Broadcasts refunds and cash-outs over Tor by default (§11).
+- As built, every connection of the owner phone goes through Tor, by the
+  SOCKS5 proxy of Orbot (a separate Android app), and the Owner app does not
+  start while Orbot does not answer (`OA-05`). There is no setting to turn it
+  off. The counter's Tor switch also uses Orbot; the counter keeps the proxy
+  address on its Network screen, behind the manager's PIN.
 
 ### 5.3 OpenBMT Box: the merchant's own server
 
@@ -968,12 +991,12 @@ Notes:
     signer, and restoring the wallet in Bitcoin Core from the kit, are
     checked on a test network (docs/research). Sparrow is not yet checked
     **[verify, E8 and E9]**.
-- **Words go on steel.** Paper burns, fades and tears. The setup tells the
-  owner to put every set of seed words on steel, and treats paper as a
-  stopgap: a key whose words are only on paper is shown as "backup:
-  temporary" in the key health screen until the owner says it is on
-  steel. The app sells no backup product and names none; the guide links
-  to independent stress tests.
+- **Words go on steel, never on paper as the backup.** Paper burns, fades
+  and tears. The setup tells the owner to put every set of seed words on
+  steel. If the words are first written on paper while the steel is
+  stamped, the paper is destroyed once the steel has been checked against
+  the app; it is never kept as a backup. The app sells no backup product and
+  names none; the guide links to independent stress tests.
 - **Where a key's randomness comes from.** A key is only as good as the
   randomness it was made from, and the owner should not have to trust a
   device for that.
@@ -1256,11 +1279,17 @@ be replaced. The shop chooses, and the screen always says which rule applied.
 **T1 limits (Q2, decided).** Instant stays available under both checks. The
 defaults are lower under the light check, and the label says so.
 
-| Check | Per sale | Outstanding total (each counter's own slice of the budget) | Label |
+| Check | Per sale | Outstanding total (each counter's own slice of the budget) | Check line |
 |---|---|---|---|
-| Light check (default) | $10 | $50 | "Paid (light check)" |
-| Merchant's own node, also seen by the counter's light client | $25 | $100 | "Paid (your node checked it)" |
-| Box reports it only | $10 | $50 | "Paid (your Box reports it)" |
+| Light check (default) | $10 | $50 | "Light check" |
+| Merchant's own node, also seen by the counter's light client | $25 | $100 | "Your node and light check" |
+| Box reports it only | $10 | $50 | "Your Box reports it" |
+
+As built, each limit is set in whole dollars on the owner phone and signed
+into the settings as satoshis at the price of that moment, with the dollar
+figure kept for display (`Limit` in `crates/openbmt-core/src/settings.rs`).
+The counter enforces the satoshi amount. When the price moves, the dollar
+value of a limit moves with it until the owner signs new settings.
 
 All amounts are shop-adjustable and **[to tune with data, E7]**. Setting zero
 turns instant off. Raising any of them is loosening (§2.9).
@@ -1790,7 +1819,8 @@ Each gets a written protocol before it runs.
 - **Q1. iPhone: scan, not tap.** Tap is Android-only. iPhone customers scan the
   QR. The https payment page is removed (§7).
 - **Q2. Instant on the light check: kept, tighter and labeled.** $10 per sale
-  and $50 outstanding with the light check ("Paid (light check)"); $25 and $100
+  and $50 outstanding with the light check (check line "Light check"); $25
+  and $100
   with the merchant's own node, only when the counter's light client also saw
   the payment (§6).
 - **Q3. Release keys.** The Key app has its own release key, kept offline on a
@@ -1890,7 +1920,7 @@ Each gets a written protocol before it runs.
 - Keys made by OpenBMT software can be made from the owner's own dice or
   coin, by hashing or by von Neumann's skew correction, with nothing
   mixed in (§5.4).
-- Seed words go on steel; paper is shown as temporary (§5.4).
+- Seed words go on steel; paper is never kept as a backup (§5.4).
 - **Open, for review:** key 1 has no seed words by default (§5.4). Common
   advice is never to use a wallet without recovery data. The wallet is
   recoverable from keys 2 and 3; the question is whether key 1 should
