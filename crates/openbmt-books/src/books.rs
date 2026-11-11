@@ -10,8 +10,8 @@ use openbmt_counter::{Currency, Event};
 use crate::date::{Date, MAX_OFFSET_MINUTES, MAX_UNIX, MIN_OFFSET_MINUTES};
 use crate::error::BooksError;
 use crate::model::{
-    CashReturn, Counting, Disposal, DisposalKind, LatePayment, OverrideNote, Payment, PaymentList,
-    PosFacts, PosMark, Sale, SaleId, SaleKey, SaleState,
+    CashReturn, Counting, Disposal, DisposalKind, LatePayment, LightningPayment, OverrideNote,
+    Payment, PaymentList, PaymentMode, PosFacts, PosMark, Sale, SaleId, SaleKey, SaleState,
 };
 use crate::value::{UnknownField, Value};
 
@@ -101,6 +101,7 @@ fn new_sale(key: SaleKey, event: &Event) -> Option<Sale> {
         dust_sats: 0,
         overrides: Vec::new(),
         pos: PosMark::NotRecorded,
+        payment_mode: PaymentMode::OnChain,
     })
 }
 
@@ -186,6 +187,37 @@ fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), Boo
                         })
                         .collect(),
                     more: *more,
+                },
+            });
+            funds(sale, *at);
+        }
+        Event::PaidByLightning {
+            at,
+            payment_hash,
+            amount_msat,
+            settled_at,
+            valued,
+            ..
+        } => {
+            // BK-32: final at once, with no transaction of its own.
+            if let Some(t) = settled_at {
+                check_time(*t)?;
+            }
+            sale.state = SaleState::Final;
+            sale.reached_final = true;
+            sale.own_payment = true;
+            sale.payment_mode = PaymentMode::Lightning(LightningPayment {
+                payment_hash: *payment_hash,
+                amount_msat: *amount_msat,
+                settled_at: *settled_at,
+            });
+            pending.confirmed_sats = Some(*amount_msat / 1_000);
+            pending.final_record = Some(FinalFacts {
+                first_seen_at: *at,
+                valued: valued.0,
+                payments: PaymentList {
+                    payments: Vec::new(),
+                    more: false,
                 },
             });
             funds(sale, *at);
@@ -579,6 +611,7 @@ fn event_time(event: &Event) -> Option<u64> {
         | Event::PaidAtOnce { at, .. }
         | Event::Confirmed { at, .. }
         | Event::Final { at, .. }
+        | Event::PaidByLightning { at, .. }
         | Event::LatePayment { at, .. }
         | Event::SurplusOwed { at, .. }
         | Event::Dust { at, .. }

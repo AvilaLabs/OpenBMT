@@ -260,7 +260,8 @@ fn fold_event(
             paid(s, *at);
             s.confirmed_now = true;
         }
-        Event::Final { at, .. } => {
+        // A Lightning payment is final at once (CR-109).
+        Event::Final { at, .. } | Event::PaidByLightning { at, .. } => {
             paid(s, *at);
             s.confirmed_now = true;
             s.fact.is_final = true;

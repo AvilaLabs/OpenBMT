@@ -4,6 +4,7 @@ mod export;
 mod fixture;
 mod hostile;
 mod input;
+mod lightning;
 mod meta;
 mod outflow;
 mod real;

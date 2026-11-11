@@ -205,6 +205,45 @@ pub enum Settlement {
     },
 }
 
+/// BK-32: what the shop's node reported of a Lightning payment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LightningPayment {
+    /// The payment hash of the invoice.
+    pub payment_hash: [u8; 32],
+    /// What the node received, in millisatoshis.
+    pub amount_msat: u64,
+    /// When the node says it settled, in Unix seconds, if it says.
+    pub settled_at: Option<u64>,
+}
+
+/// BK-32: how a sale was paid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaymentMode {
+    /// On the chain, or not paid yet: what every sale was before the
+    /// counter could take Lightning.
+    OnChain,
+    /// Over Lightning, to the shop's own node. Final at once.
+    Lightning(LightningPayment),
+}
+
+impl PaymentMode {
+    /// The word for the mode.
+    pub fn text(&self) -> &'static str {
+        match self {
+            Self::OnChain => "on-chain",
+            Self::Lightning(_) => "lightning",
+        }
+    }
+
+    /// The Lightning payment, if the sale was paid that way.
+    pub fn lightning(&self) -> Option<&LightningPayment> {
+        match self {
+            Self::OnChain => None,
+            Self::Lightning(p) => Some(p),
+        }
+    }
+}
+
 /// BK-06: one sale, with what the records carry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sale {
@@ -268,6 +307,8 @@ pub struct Sale {
     pub overrides: Vec<OverrideNote>,
     /// What the POS was told.
     pub pos: PosMark,
+    /// BK-32: how the sale was paid.
+    pub payment_mode: PaymentMode,
 }
 
 impl Sale {
@@ -289,6 +330,12 @@ impl Sale {
             return Some(Settlement::Overpaid {
                 surplus_sats: self.surplus_owed_sats,
             });
+        }
+        // BK-34: the invoice of a Lightning sale may have been made at an
+        // earlier quote than the last, and the counter took it as paid in
+        // full; it is not read against the last quote.
+        if self.payment_mode.lightning().is_some() {
+            return None;
         }
         match self.sats_received {
             Value::Known(got) if self.funds_seen && got < self.last_quote_sats => {

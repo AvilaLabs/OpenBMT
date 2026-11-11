@@ -60,8 +60,9 @@ pub use error::{BooksError, ExportError, OpenError, SealError};
 pub use export::{RevealsPayments, LEDGER_WARNING};
 pub use fsio::write_whole;
 pub use model::{
-    Basis, CashReturn, Counting, Disposal, DisposalKind, LatePayment, OverrideNote, Payment,
-    PaymentList, PosFacts, PosMark, Sale, SaleId, SaleKey, SaleState, Settlement,
+    Basis, CashReturn, Counting, Disposal, DisposalKind, LatePayment, LightningPayment,
+    OverrideNote, Payment, PaymentList, PaymentMode, PosFacts, PosMark, Sale, SaleId, SaleKey,
+    SaleState, Settlement,
 };
 pub use money::{format_minor, minor_digits};
 pub use sealed::{

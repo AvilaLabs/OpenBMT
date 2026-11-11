@@ -9,13 +9,17 @@ use openbmt_counter::{Currency, RateSource, Role, MAX_FINAL_PAYMENTS, MAX_NAME_B
 use crate::books::{Books, MAX_COUNTERS, MAX_LINES, MAX_PER_SALE, MAX_SALES};
 use crate::date::MAX_UNIX;
 use crate::model::{
-    Basis, CashReturn, Disposal, DisposalKind, LatePayment, OverrideNote, Payment, PaymentList,
-    PosMark, Sale, SaleId, SaleKey, SaleState,
+    Basis, CashReturn, Disposal, DisposalKind, LatePayment, LightningPayment, OverrideNote,
+    Payment, PaymentList, PaymentMode, PosMark, Sale, SaleId, SaleKey, SaleState,
 };
 use crate::value::{UnknownField, Value};
 
 /// BK-28: magic of the bundle.
 pub const MAGIC_BUNDLE: [u8; 4] = *b"OBM6";
+
+/// BK-33: the version of a bundle that holds a sale paid over Lightning.
+/// Version 1 is written when no sale was, and is still read.
+const VERSION_LIGHTNING: u8 = 2;
 
 /// Fewest bytes a sale takes (it is 133), for the count check.
 const MIN_SALE: usize = 130;
@@ -179,7 +183,40 @@ pub(crate) fn get_marks(
     Ok(out)
 }
 
-fn put_sale(out: &mut Vec<u8>, s: &Sale) {
+fn put_mode(out: &mut Vec<u8>, mode: &PaymentMode) {
+    match mode {
+        PaymentMode::OnChain => out.push(0),
+        PaymentMode::Lightning(p) => {
+            out.push(1);
+            out.extend_from_slice(&p.payment_hash);
+            out.extend_from_slice(&p.amount_msat.to_le_bytes());
+            wire::put_opt_u64(out, p.settled_at);
+        }
+    }
+}
+
+fn get_mode(r: &mut Reader<'_>) -> Result<PaymentMode, DecodeError> {
+    match r.u8()? {
+        0 => Ok(PaymentMode::OnChain),
+        1 => {
+            let payment_hash = r.array::<32>()?;
+            let amount_msat = r.u64_le()?;
+            if amount_msat == 0 {
+                return Err(DecodeError::NonCanonical(
+                    "a Lightning payment is for nothing",
+                ));
+            }
+            Ok(PaymentMode::Lightning(LightningPayment {
+                payment_hash,
+                amount_msat,
+                settled_at: get_opt_time(r)?,
+            }))
+        }
+        _ => Err(DecodeError::NonCanonical("a payment mode is not known")),
+    }
+}
+
+fn put_sale(out: &mut Vec<u8>, s: &Sale, with_mode: bool) {
     put_key(out, &s.key);
     out.extend_from_slice(&s.opened_at.to_le_bytes());
     out.extend_from_slice(&s.amount_minor.to_le_bytes());
@@ -217,9 +254,12 @@ fn put_sale(out: &mut Vec<u8>, s: &Sale) {
         out.extend_from_slice(&o.sats.to_le_bytes());
     }
     out.push(s.pos as u8);
+    if with_mode {
+        put_mode(out, &s.payment_mode);
+    }
 }
 
-fn get_sale(r: &mut Reader<'_>) -> Result<Sale, DecodeError> {
+fn get_sale(r: &mut Reader<'_>, with_mode: bool) -> Result<Sale, DecodeError> {
     let key = get_key(r)?;
     let opened_at = get_time(r)?;
     let amount_minor = r.u64_le()?;
@@ -287,6 +327,19 @@ fn get_sale(r: &mut Reader<'_>) -> Result<Sale, DecodeError> {
         2 => PosMark::Unpaid,
         _ => return Err(DecodeError::NonCanonical("a POS mark is not known")),
     };
+    let payment_mode = if with_mode {
+        get_mode(r)?
+    } else {
+        PaymentMode::OnChain
+    };
+    // A Lightning payment is final at once, and is the sale's own payment.
+    if payment_mode.lightning().is_some()
+        && !(reached_final && own_payment && state == SaleState::Final)
+    {
+        return Err(DecodeError::NonCanonical(
+            "a sale paid over Lightning is not final",
+        ));
+    }
     Ok(Sale {
         key,
         id: SaleId::for_sale(&key),
@@ -316,6 +369,7 @@ fn get_sale(r: &mut Reader<'_>) -> Result<Sale, DecodeError> {
         dust_sats,
         overrides,
         pos,
+        payment_mode,
     })
 }
 
@@ -358,10 +412,21 @@ impl Books {
     /// back.
     pub fn to_bundle(&self) -> Vec<u8> {
         let mut out = wire::start(&MAGIC_BUNDLE, 1024);
+        // BK-33: version 2 only when a sale was paid over Lightning, so
+        // every other bundle is the one every earlier build wrote.
+        let with_mode = self
+            .sales
+            .iter()
+            .any(|s| s.payment_mode.lightning().is_some());
+        if with_mode {
+            if let Some(byte) = out.get_mut(4) {
+                *byte = VERSION_LIGHTNING;
+            }
+        }
         put_marks(&mut out, &self.high_water);
         put_u32(&mut out, self.sales.len());
         for s in &self.sales {
-            put_sale(&mut out, s);
+            put_sale(&mut out, s, with_mode);
         }
         put_u32(&mut out, self.disposals.len());
         for d in &self.disposals {
@@ -379,12 +444,21 @@ impl Books {
     /// BK-28, BK-30: read a bundle strictly. What it gives encodes back to
     /// the input.
     pub fn from_bundle(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut r = Reader::framed(bytes, &MAGIC_BUNDLE)?;
+        // `Reader::framed` reads only version 1, and this form has two.
+        let mut r = Reader::new(bytes);
+        if r.take(4)? != MAGIC_BUNDLE {
+            return Err(DecodeError::BadMagic);
+        }
+        let with_mode = match r.u8()? {
+            wire::VERSION => false,
+            VERSION_LIGHTNING => true,
+            v => return Err(DecodeError::UnsupportedVersion(v)),
+        };
         let high_water = get_marks(&mut r)?;
         let n = r.count(MAX_SALES, MIN_SALE)?;
         let mut sales: Vec<Sale> = Vec::with_capacity(n.min(4096));
         for _ in 0..n {
-            let sale = get_sale(&mut r)?;
+            let sale = get_sale(&mut r, with_mode)?;
             if sales.last().is_some_and(|p| p.key >= sale.key) {
                 return Err(DecodeError::NonCanonical("sales are not in order"));
             }
@@ -413,6 +487,13 @@ impl Books {
             returns.push(c);
         }
         r.finish()?;
+        // A version 2 bundle holds a sale paid over Lightning, or it would
+        // have been written as version 1 (the bundle encodes back to itself).
+        if with_mode && !sales.iter().any(|s| s.payment_mode.lightning().is_some()) {
+            return Err(DecodeError::NonCanonical(
+                "a version 2 bundle holds no sale paid over Lightning",
+            ));
+        }
         // The marks must be the ones the sales give.
         let mut derived: BTreeMap<DeviceId, Option<u32>> =
             high_water.keys().map(|k| (*k, None)).collect();

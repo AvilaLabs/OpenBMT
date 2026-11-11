@@ -338,6 +338,7 @@ fn event_at(event: &Event) -> u64 {
         | Event::PaidAtOnce { at, .. }
         | Event::Confirmed { at, .. }
         | Event::Final { at, .. }
+        | Event::PaidByLightning { at, .. }
         | Event::LatePayment { at, .. }
         | Event::SurplusOwed { at, .. }
         | Event::Dust { at, .. }

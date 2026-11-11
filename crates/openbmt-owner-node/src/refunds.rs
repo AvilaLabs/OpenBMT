@@ -298,6 +298,18 @@ impl Fold {
                 s.reached = true;
                 s.confirmed_seen = true;
             }
+            // CR-111: what arrived over Lightning is received, and at the
+            // refund depth at once.
+            Event::PaidByLightning {
+                index, amount_msat, ..
+            } => {
+                let s = self.sales.entry(*index).or_default();
+                s.received = amount_msat / 1_000;
+                s.reached = true;
+                // A request's own figure, which the counter works out from
+                // everything it holds for the sale, still replaces this one.
+                s.confirmed_seen = false;
+            }
             Event::Replaced { index, .. } => {
                 let s = self.sales.entry(*index).or_default();
                 s.received = 0;

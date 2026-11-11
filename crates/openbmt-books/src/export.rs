@@ -206,7 +206,7 @@ impl Books {
     }
 }
 
-const LEDGER_COLUMNS: [&str; 25] = [
+const LEDGER_COLUMNS: [&str; 29] = [
     "Type",
     "Sale ID",
     "Counter",
@@ -232,6 +232,10 @@ const LEDGER_COLUMNS: [&str; 25] = [
     "Last quote sats",
     "Last quote rate (minor per BTC)",
     "Last rate source",
+    "Payment mode",
+    "Payment hash",
+    "Lightning amount (msat)",
+    "Lightning settled (UTC)",
 ];
 
 fn blank_row() -> Vec<Cell> {
@@ -365,6 +369,14 @@ fn sale_row(sale: &Sale) -> Result<Vec<Cell>, ExportError> {
     }
     set(&mut row, 18, note_cell(sale));
     set(&mut row, 19, explain(&unknown));
+    set(&mut row, 25, Cell::text(sale.payment_mode.text()));
+    if let Some(p) = sale.payment_mode.lightning() {
+        set(&mut row, 26, Cell::Number(hex32(&p.payment_hash)));
+        set(&mut row, 27, Cell::Number(p.amount_msat.to_string()));
+        if let Some(at) = p.settled_at {
+            set(&mut row, 28, time_cell(at)?);
+        }
+    }
     let names: Vec<&str> = sale.overrides.iter().map(|o| o.name.as_str()).collect();
     if !names.is_empty() {
         set(&mut row, 20, Cell::text(names.join("; ")));
@@ -392,7 +404,10 @@ fn txid_cell(sale: &Sale, unknown: &mut Vec<UnknownField>) -> Cell {
             ids.push(id);
         }
     }
-    if ids.is_empty() {
+    if ids.is_empty() && sale.payment_mode.lightning().is_some() {
+        // BK-32: a Lightning payment has no transaction.
+        Cell::Empty
+    } else if ids.is_empty() {
         Cell::text("unknown")
     } else {
         Cell::text(ids.join(" "))
@@ -408,7 +423,12 @@ fn note_cell(sale: &Sale) -> Cell {
     if let Some(n) = sale.at_risk_sats {
         parts.push(format!("accepted at once with {n} sats at risk"));
     }
-    if let Value::Known(list) = &sale.payments {
+    if let Some(p) = sale.payment_mode.lightning() {
+        parts.push(format!(
+            "paid over Lightning, {} msat, final at once",
+            p.amount_msat
+        ));
+    } else if let Value::Known(list) = &sale.payments {
         let n = list.payments.len();
         let more = if list.more { " and more not named" } else { "" };
         let s = if n == 1 { "" } else { "s" };

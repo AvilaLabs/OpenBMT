@@ -222,7 +222,41 @@ Nothing here says what a merchant owes. It writes down what the records say.
 - **BK-31.** The same books give the same CSV and the same bundle, byte for
   byte. Only the salt differs from one encrypted file to the next.
 
-## 8. What these rules do not do
+## 8. A sale paid over Lightning
+
+The counter can take a payment over Lightning through the shop's own node
+(`docs/COUNTER-RULES.md`, CR-109 to CR-111). Such a sale is final at once and
+has no transaction. The record is `PaidByLightning`.
+
+- **BK-32.** A `PaidByLightning` record makes the sale final: its state is
+  final, it is counted (BK-08) from the time of the record, and its payment
+  mode is Lightning, with the payment hash, the amount in millisatoshis and
+  the time the node says it settled, if it says. The satoshis received (BK-09)
+  are the millisatoshis rounded down; the value at first seen is the value
+  the record carries; the time first seen is the time of the record; and
+  the transactions the final record names are none, a known empty list and not
+  an unknown. A sale with no such record has the payment mode on-chain, which
+  is what every sale was before. Surplus (CR-111) and late payments are read
+  as for any sale, and a late payment is added to the satoshis received (BK-09).
+  The full ledger has four more columns at the end: the payment mode (`on-chain`
+  or `lightning`), the payment hash, the amount in millisatoshis and the settle
+  time. The accounting export is unchanged: it holds fixed words only (BK-18),
+  and a Lightning sale is a counted sale in it like any other.
+- **BK-33.** The bundle (BK-28) is version 2 when at least one sale was paid
+  over Lightning, and then every sale ends with its payment mode: 0 for
+  on-chain, or 1, the 32 bytes of the payment hash, the amount in
+  millisatoshis (not zero) and the settle time as a flag and a time. A bundle
+  with no such sale is written as version 1, byte for byte what earlier builds
+  wrote, and version 1 is still read, with every sale on-chain. Reading is
+  strict: a mode that is not known, an amount of nothing, a Lightning sale that
+  is not final or is not its own payment, and a version 2 bundle with no
+  Lightning sale (it would not encode back to itself) are refused.
+- **BK-34.** A sale paid over Lightning is not read as underpaid against the
+  last quote (BK-06). The invoice was made at the quote in force when it was
+  asked for, a later quote may ask for more or for less, and the counter took
+  the payment as paid in full. Overpaid is read as for any sale.
+
+## 9. What these rules do not do
 
 - **No tax advice, and US rules only.** The export writes down what the records
   say. Whether a sale is income, which value counts, and what a disposal
