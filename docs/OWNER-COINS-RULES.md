@@ -113,20 +113,24 @@ amount.
   exactly as it undoes coins: the receipts of a block that left are removed,
   and the replacement chain records its own. A block that left and holds a
   receipt but has no undo record is a deep reorganization (OC-06). A reset
-  drops the receipts with the coins; the rescan from the birthday finds them
-  again. A block seen twice records a receipt once.
-- **OC-13.** At most 262,144 receipts are kept. Past that, the view takes the
-  named state "receipt log full": it records no more receipts, gives no
-  sale's facts (OC-14), and says so in words. Coins are still tracked and the
-  owner can still spend. The state ends with a reset and rescan. Receipts are
-  stored in the view's own form (`OBMe`, OC-08), strictly: sorted by index
-  and outpoint, no outpoint twice, and, unless the log is full, every
-  unspent receive coin has its receipt. At 300 payments a day the log holds
-  about 874 days, a little under two and a half years. When it is full, the
-  coins are still followed and the owner can still spend, but no sale's facts
-  are given and refund requests wait. A reset and rescan does not make room:
-  the rescan finds the same payments again and fills the log again, so the
-  words tell the owner to report the limit to the OpenBMT project.
+  drops the receipts with the coins and the marker of pruned indices
+  (OC-29); the rescan from the birthday finds them again. A block seen
+  twice records a receipt once. A receipt may leave the log only as OC-28
+  says.
+- **OC-13.** At most 262,144 receipts are kept. When pruning (OC-28) can free
+  nothing and the cap is reached, the view takes the named state "receipt log
+  full": it records no more receipts, gives no sale's facts (OC-14), and says
+  so in words. Coins are still tracked and the owner can still spend. Every
+  kept receipt is then of an unspent coin or of a block younger than the keep
+  time, so the state means the wallet holds more than 262,144 such payments;
+  a reset and rescan does not end it, because the rescan finds the same
+  payments again, and the words tell the owner to report the limit to the
+  OpenBMT project. Receipts are stored in the view's own form (`OBMe`,
+  OC-08), strictly: sorted by index and outpoint, no outpoint twice, and,
+  unless the log is full, every unspent receive coin has its receipt, then
+  the pruned index ranges (OC-29). At 300 payments a day, 400 days of
+  receipts are about 120,000, well under the cap, so a shop that spends its
+  coins does not reach the state.
 - **OC-14.** The facts of a sale come from `verified_facts`. The view must be
   ready, the receipt log must not be full, and the view must have checked the
   chain up to the tip given; otherwise nothing is said and the caller waits
@@ -136,7 +140,13 @@ amount.
   that are in a block at or below the tip. The sale has reached the refund
   depth when something was received and every one of those receipts has at
   least the refund depth of confirmations (tip minus height, plus one). A
-  receipt that was spent still counts.
+  receipt that was spent still counts. An index that lost a receipt to
+  pruning (OC-29) is refused with its own named refusal, "too old for
+  facts", after the check of the counter and before any sum: the wallet
+  cannot tell what was paid, and a sum of the receipts that are left would be
+  a wrong zero or a wrong low figure. The refusal is final, not a wait. Its
+  words say "This sale is too old for the wallet to check what was paid.",
+  name the owner, and the next step is that the owner decides by hand.
 - **OC-15.** The intake of refund requests gives the owner these facts, both
   when it queues a request and when it refreshes the facts of queued
   refunds. The counter's own figure is read only to compare. When the claim
@@ -297,6 +307,38 @@ the rest by a check once a month. The code is in
   applied once. If a restart finds a script set aside that holds a coin (a
   stop between a find and its return to the live watch), the script goes
   back in the live watch at start.
+
+- **OC-28.** Receipts of spent coins leave the log when it fills. A receipt
+  may leave only when both hold: its coin is not held (a receipt of a held
+  coin, one that a pending transaction spends included, always stays), and
+  its block is more than `RECEIPT_KEEP_BLOCKS` below the tip, 57,600 blocks
+  (400 days at 144 a day) **[to tune]**, longer than any refund window a
+  shop is likely to honour. The age is counted in blocks because the view
+  keeps no block time per receipt, and the header chain gives only the tip's.
+  Pruning runs when more than 90% of the cap (`PRUNE_START`) is kept: when
+  the node starts, with the position the view reflects as the tip, and
+  before and after the receipts of each applied block are recorded. It lets
+  go of the oldest blocks first, frees down to 80% (`PRUNE_TO`), and is
+  stored with the block that caused it, in one write. When a coin that was
+  spent is put back by a reorganization, its receipt is kept again from the
+  undo record; if the log is at the cap by then, the view takes the named
+  state of OC-13. A reorganization deeper than the keep time cannot happen
+  in practice, and this is what the view does if it does: it stays whole,
+  keeps the marker (OC-29), and names its state, and it does not panic.
+  A rescan that re-reads old blocks records their receipts again and prunes
+  them again as it reads the blocks that spend them.
+- **OC-29.** The receive indices that lost a receipt to pruning are kept as
+  a list of ranges (start and end, inclusive), sorted and apart, at most
+  `MAX_PRUNED_RANGES` (1,024) of them, stored after the receipts (OC-13)
+  and read strictly: start not above end, end below 2^31, each range
+  starting more than one above the end of the one before. Ranges that touch
+  join. Past the bound, the two ranges with the least space between them
+  join, so the list cannot grow without bound; an index in that space is
+  then refused as too old as well, which is wrong in the safe direction (a
+  sale is never answered with a wrong figure). Indices are handed out in
+  order and old blocks are pruned first, so in practice the list is a few
+  ranges. A payment that arrives late at a pruned index is still refused for
+  that index. A reset drops the list with the receipts.
 
 ## What these rules do not say
 

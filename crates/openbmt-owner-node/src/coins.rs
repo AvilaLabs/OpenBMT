@@ -865,7 +865,8 @@ impl CoinView {
             let mut best = 0;
             let mut best_gap = u32::MAX;
             for (i, pair) in joined.windows(2).enumerate() {
-                let gap = pair[1].0.saturating_sub(pair[0].1);
+                let [first, second] = pair else { continue };
+                let gap = second.0.saturating_sub(first.1);
                 if gap < best_gap {
                     best_gap = gap;
                     best = i;

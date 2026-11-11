@@ -1472,7 +1472,10 @@ fn oc_28_a_reorganization_that_unspends_a_pruned_receipts_coin_keeps_the_receipt
     assert_eq!(r.len(), 1, "its receipt is kept again");
     assert_eq!(r[0].height, 1);
     assert_eq!(r[0].block, b1.block_hash());
-    assert!(view.is_pruned(0), "the marker stays: the index lost receipts");
+    assert!(
+        view.is_pruned(0),
+        "the marker stays: the index lost receipts"
+    );
     assert_eq!(view.receipt_state(), ReceiptState::Complete);
     // The stored form passes its own strict read.
     let bytes = view.to_bytes();
