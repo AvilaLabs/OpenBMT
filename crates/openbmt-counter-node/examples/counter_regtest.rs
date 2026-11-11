@@ -132,8 +132,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
-use bitcoin::secp256k1::Secp256k1;
 use bitcoin::hashes::Hash;
+use bitcoin::secp256k1::Secp256k1;
 use bitcoin::{Address, Network, ScriptBuf, Txid};
 use openbmt_core::batch::{BatchBuilder, BatchPolicy, PinnedRoots, SignedBatch};
 use openbmt_core::heartbeat::WatcherHeartbeat;
@@ -608,7 +608,8 @@ fn command<P: DriverPort>(
                     let asked = own.asked.lock().map_err(|_| "lock".to_string())?;
                     say(format!(
                         "own usable={} heading={} asked={} last_asked={} retried={}",
-                        health.usable, heading,
+                        health.usable,
+                        heading,
                         asked.len(),
                         asked.last().map_or("none".to_string(), |t| t.to_string()),
                         own.retried.load(Ordering::SeqCst)
@@ -822,11 +823,21 @@ fn run(args: &[String]) -> Result<(), String> {
         say("warning THIS RUN IS NOT A CHECK OF THE HEALTH RULES");
     }
     if own_node {
-        say("warning --regtest-own-node: the own node is said by hand (own up, own down, own has),");
+        say(
+            "warning --regtest-own-node: the own node is said by hand (own up, own down, own has),",
+        );
         say("warning every payment is offered as seen from three network groups,");
         say("warning and heartbeat self is signed with the test owner key");
         let (node, control) = start_with_own_port(config)?;
-        return serve(node, Some(&control), &settings, relay, relay_key, dir, &seen);
+        return serve(
+            node,
+            Some(&control),
+            &settings,
+            relay,
+            relay_key,
+            dir,
+            &seen,
+        );
     }
     let node = Node::start(config).map_err(|e| e.to_string())?;
     serve(node, None, &settings, relay, relay_key, dir, &seen)

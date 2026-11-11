@@ -14,7 +14,7 @@ use crate::StartConfig;
 const NAME: &str = "a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad.onion";
 const REGTEST: u8 = 3;
 
-fn check(rig: &Rig, text: &str, tor: bool) -> Result<String, (String, Words)> {
+fn check(rig: &Rig, text: &str, tor: bool) -> Result<String, Box<(String, Words)>> {
     let response = rig.call(
         49,
         0,
@@ -29,7 +29,7 @@ fn check(rig: &Rig, text: &str, tor: bool) -> Result<String, (String, Words)> {
         }
         Some(f) => {
             assert_eq!(f.status, 1);
-            Err((f.rule, f.words))
+            Err(Box::new((f.rule, f.words)))
         }
     }
 }
@@ -85,12 +85,12 @@ fn cr_100_the_check_makes_the_canonical_text() {
         check(&rig, &format!(" {NAME}:9999 "), true),
         Ok(format!("{NAME}:9999"))
     );
-    let (rule, words) = check(&rig, "nonsense.onion", true).unwrap_err();
+    let (rule, words) = *check(&rig, "nonsense.onion", true).unwrap_err();
     assert_eq!(
         (rule.as_str(), words.heading.as_str()),
         ("CR-100", "Tor address not accepted")
     );
-    let (rule, _) = check(&rig, &format!("{NAME}:0"), true).unwrap_err();
+    let (rule, _) = *check(&rig, &format!("{NAME}:0"), true).unwrap_err();
     assert_eq!(rule, "CR-100");
 }
 
@@ -98,7 +98,7 @@ fn cr_100_the_check_makes_the_canonical_text() {
 fn cr_101_a_home_network_address_is_refused_with_words() {
     let rig = Rig::new();
     for text in ["192.168.1.20:8333", "umbrel.local", "127.0.0.1:18444"] {
-        let (rule, words) = check(&rig, text, true).unwrap_err();
+        let (rule, words) = *check(&rig, text, true).unwrap_err();
         assert_eq!(rule, "CR-101", "{text}");
         assert_eq!(words.heading, "Not a Tor address");
         assert!(words.what.contains("cannot prove which machine answers"));
@@ -109,7 +109,7 @@ fn cr_101_a_home_network_address_is_refused_with_words() {
 #[test]
 fn cr_102_without_tor_the_check_says_to_turn_on_orbot() {
     let rig = Rig::new();
-    let (rule, words) = check(&rig, NAME, false).unwrap_err();
+    let (rule, words) = *check(&rig, NAME, false).unwrap_err();
     assert_eq!(rule, "CR-102");
     assert_eq!(words.heading, "Turn on Orbot first");
 }

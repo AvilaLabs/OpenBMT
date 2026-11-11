@@ -74,5 +74,5 @@ pub(crate) fn network_of(network: CounterNetwork) -> Network {
 pub(crate) fn own_node_check(a: OwnNodeCheckArgs) -> Result<String, CounterError> {
     own_node_setting(&a.text, network_of(a.network), a.tor)
         .map(|setting| setting.text)
-        .map_err(|e| from_rule(e.rule(), &e, e.words()))
+        .map_err(|e| from_rule(e.rule(), e, e.words()))
 }
