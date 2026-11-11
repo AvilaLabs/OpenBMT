@@ -1715,10 +1715,7 @@ mod watch_budget_tests {
             ensure_marks_fit_watch_budget((MAX_WATCHED_SCRIPTS - 39) as u32, 0, 1),
             Ok(())
         );
-        assert_eq!(
-            ensure_marks_fit_watch_budget(500_000, 5, 410_000),
-            Ok(())
-        );
+        assert_eq!(ensure_marks_fit_watch_budget(500_000, 5, 410_000), Ok(()));
         assert!(ensure_marks_fit_watch_budget(500_000, 5, 399_000).is_err());
     }
 }

@@ -87,7 +87,7 @@ draws what it is told.
 - **CR-07.** A sale with nothing received ends as "expired" 15 minutes
   after it opened **[to tune]**, or when the cashier cancels it. Its
   address stays watched by the counter until the sale is settled (CR-76),
-  and by the owner's wallet for good (CR-80).
+  and by the owner's wallet (CR-80).
 
 ## 2. What the cashier sees
 
@@ -433,10 +433,13 @@ and sales not yet settled wait for the owner's copy to catch up.
   the counter cannot tell which address it held. The counter does not
   learn what an address it does not hold received: that is the owner's.
 - **CR-80.** What the counter does not watch any more, the owner's wallet
-  does, for good (OC-07, OC-10 to OC-12). A late payment to the address of
-  a settled sale is not reported by the counter; the owner's coin view
-  sees it and records its receipt. A shop that wants the counter to flag
-  such a payment must not settle: there is no switch for it.
+  does (OC-07, OC-10 to OC-12): every issued address is watched, all the
+  time while the wallet's addresses fit the live watch, and by a check once a
+  month after that (OC-22 to OC-26). A late payment to the address of a
+  settled sale is not reported by the counter; the owner's coin view sees it
+  and records its receipt, at once or at the next monthly check. A shop
+  that wants the counter to flag such a payment must not settle: there is no
+  switch for it.
 - **CR-81.** **[not built]** Records at or below the owner's mark that are
   older than the newest `KEEP_RECORDS` (1,024 **[to tune]**) would leave the
   counter's memory and stay on disk, the counter keeping the chain's length,

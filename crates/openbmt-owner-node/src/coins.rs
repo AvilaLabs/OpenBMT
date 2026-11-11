@@ -1355,8 +1355,9 @@ fn decode(bytes: &[u8]) -> Result<CoinView, DecodeError> {
         let end = r.u32_le()?;
         pairs.push((start, end));
     }
-    let released = Spans::from_pairs(&pairs)
-        .ok_or(DecodeError::NonCanonical("set-aside runs are not canonical"))?;
+    let released = Spans::from_pairs(&pairs).ok_or(DecodeError::NonCanonical(
+        "set-aside runs are not canonical",
+    ))?;
     let deep = DeepSchedule {
         last: r.u64_le()?,
         due: r.u64_le()?,

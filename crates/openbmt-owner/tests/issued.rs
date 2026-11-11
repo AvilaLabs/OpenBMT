@@ -58,7 +58,9 @@ fn oc_10_the_range_is_recorded_in_the_same_write_as_the_batch() {
     let mut o2 = new_owner(Default::default());
     let failing = Store::default();
     failing.fail_next(true);
-    assert!(o2.queue_batch(batch(1, 0, 3), 1_000, |b| failing.put(b)).is_err());
+    assert!(o2
+        .queue_batch(batch(1, 0, 3), 1_000, |b| failing.put(b))
+        .is_err());
     assert!(o2.issued_ranges().is_empty());
     assert_eq!(o2.counter_of(0), None);
     assert!(o.counter_of(0).is_some());
@@ -243,7 +245,7 @@ fn oc_10_the_stored_ranges_are_read_strictly() {
 }
 
 #[test]
-fn oc_22_the_time_the_batch_was_signed_is_kept_with_its_range() {
+fn oc_23_the_time_the_batch_was_signed_is_kept_with_its_range() {
     let mut o = new_owner(Default::default());
     let store = Store::default();
     ok(o.queue_batch(batch(1, 0, 3), 5_000, |b| store.put(b)));

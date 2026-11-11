@@ -109,10 +109,12 @@ impl Spans {
 
     /// How many indices below `limit` are held.
     pub fn count_below(&self, limit: u32) -> u64 {
-        self.0.iter().take_while(|(s, _)| **s < limit).fold(
-            0u64,
-            |n, (s, e)| n.saturating_add(u64::from((*e).min(limit) - s)),
-        )
+        self.0
+            .iter()
+            .take_while(|(s, _)| **s < limit)
+            .fold(0u64, |n, (s, e)| {
+                n.saturating_add(u64::from((*e).min(limit) - s))
+            })
     }
 
     /// Whether the index is held.

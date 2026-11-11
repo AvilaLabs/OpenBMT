@@ -1168,8 +1168,10 @@ Notes:
   recorded. The counter watches it until the sale is settled: ended 30 days
   ago, nothing pending, and every record of it held by the owner
   (`docs/COUNTER-RULES.md` CR-76 to CR-80). The owner's wallet watches every
-  issued address for good, so a late payment to a settled sale is still
-  seen there.
+  issued address: all the time while they fit its live watch, and by a check
+  once a month for the oldest quiet ones after that
+  (`docs/OWNER-COINS-RULES.md`, OC-22 to OC-26). A late payment to a settled
+  sale is still seen there, at once or at the next monthly check.
 - **Payment first seen before the sale opened is flagged, not Paid.** If an old
   payment arrives for an address before its sale starts, it is not shown as
   paying the new sale. The cashier sees the flag.

@@ -139,7 +139,7 @@ fn oc_22_below_the_bound_nothing_leaves() {
 }
 
 #[test]
-fn oc_22_over_the_bound_only_quiet_scripts_leave_oldest_first_never_one_with_a_coin() {
+fn oc_23_over_the_bound_only_quiet_scripts_leave_oldest_first_never_one_with_a_coin() {
     let dir = Dir::new();
     let (setup, time) = setup(60);
     let mut rig = start(&dir, &setup).unwrap();
@@ -181,7 +181,7 @@ fn oc_22_over_the_bound_only_quiet_scripts_leave_oldest_first_never_one_with_a_c
 }
 
 #[test]
-fn oc_22_a_script_issued_but_not_yet_quiet_never_leaves_however_far_over_the_bound() {
+fn oc_23_a_script_issued_but_not_yet_quiet_never_leaves_however_far_over_the_bound() {
     let dir = Dir::new();
     let (setup, time) = setup(40);
     let mut rig = start(&dir, &setup).unwrap();
@@ -214,7 +214,7 @@ fn oc_22_the_live_watch_of_a_restarted_node_leaves_the_set_aside_scripts_out() {
 }
 
 #[test]
-fn oc_22_the_issue_time_is_the_owner_clock_of_the_batch_not_the_nodes_view_of_it() {
+fn oc_23_the_issue_time_is_the_owner_clock_of_the_batch_not_the_nodes_view_of_it() {
     // A batch signed long ago and seen by the node only now is quiet at
     // once: the time comes from the owner's record.
     let dir = Dir::new();
@@ -352,7 +352,7 @@ fn oc_24_the_check_runs_on_request_and_only_when_something_is_set_aside() {
     let (setup, _time) = setup(60);
     let mut rig = start(&dir, &setup).unwrap();
     // Nothing is set aside: nothing to check.
-    assert_eq!(rig.node.request_deep_check().unwrap(), false);
+    assert!(!rig.node.request_deep_check().unwrap());
     rig.tick();
     assert!(rig.deep_starts().is_empty());
 
@@ -405,7 +405,11 @@ fn oc_24_passes_are_bounded_by_the_live_watch_and_a_payment_in_the_last_is_found
         .unwrap();
     rig.tick();
     assert!(rig.node.deep_running());
-    assert_eq!(rig.count("deep unwatch 20"), 1, "the early Checked is stale");
+    assert_eq!(
+        rig.count("deep unwatch 20"),
+        1,
+        "the early Checked is stale"
+    );
     tx.send(AppEvent::RescanStarted(from)).unwrap();
     rig.deep_feed(from);
     // Pass 2 is done; pass 3 holds script 50.
@@ -475,7 +479,10 @@ fn oc_26_a_driver_that_makes_no_progress_fails_the_check() {
     assert!(rig.node.deep_running());
     time.store(due + DEEP_STALL_SECS, Ordering::SeqCst);
     rig.tick();
-    assert!(rig.node.deep_running(), "an hour of silence is not yet a stall");
+    assert!(
+        rig.node.deep_running(),
+        "an hour of silence is not yet a stall"
+    );
     time.store(due + DEEP_STALL_SECS + 1, Ordering::SeqCst);
     rig.tick();
     assert!(!rig.node.deep_running());

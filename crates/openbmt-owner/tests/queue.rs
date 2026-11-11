@@ -308,7 +308,10 @@ fn as_58_a_batch_must_be_what_the_wallet_derives() {
     let mut o = new_owner(Options::default());
     let mut b = batch(1, 0, 3);
     b.scripts.swap(0, 1);
-    assert_eq!(refused(o.queue_batch(b, 1_000, nop)), Refusal::BatchNotDerived);
+    assert_eq!(
+        refused(o.queue_batch(b, 1_000, nop)),
+        Refusal::BatchNotDerived
+    );
     // Fewer than the policy minimum is not derived either.
     assert_eq!(
         refused(o.queue_batch(batch(1, 0, 3).clone_with_count(2), 1_000, nop)),

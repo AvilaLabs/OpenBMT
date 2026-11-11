@@ -15,12 +15,12 @@ const TEST_SOURCES: [&str; 8] = [
 ];
 
 /// The rules the crate implements so far. The driver is a later slice.
-const IMPLEMENTED: [&str; 47] = [
+const IMPLEMENTED: [&str; 48] = [
     "NR-01", "NR-02", "NR-03", "NR-04", "NR-05", "NR-11", "NR-12", "NR-13", "NR-14", "NR-20",
     "NR-21", "NR-22", "NR-23", "NR-24", "NR-25", "NR-30", "NR-31", "NR-32", "NR-33", "NR-40",
     "NR-41", "NR-42", "NR-43", "NR-44", "NR-45", "NR-46", "NR-50", "NR-51", "NR-52", "NR-53",
     "NR-54", "NR-55", "NR-80", "NR-81", "NR-82", "NR-83", "NR-84", "NR-85", "NR-86", "NR-87",
-    "NR-88", "NR-89", "NR-90", "NR-92", "NR-93", "NR-94", "NR-95",
+    "NR-88", "NR-89", "NR-90", "NR-92", "NR-93", "NR-94", "NR-95", "NR-97",
 ];
 
 /// Every rule ID that the rules file defines (in bold at the start of a

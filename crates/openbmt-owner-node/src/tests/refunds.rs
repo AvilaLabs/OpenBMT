@@ -85,7 +85,9 @@ pub(super) fn new_owner_for(counter: DeviceId) -> Owner {
     let batch = BatchBuilder::new(BatchPolicy { min_count: 3 })
         .derive(&kit().wallet, counter, 0, 20)
         .unwrap();
-    owner.queue_batch(batch, 1_000, |_| Ok::<(), String>(())).unwrap();
+    owner
+        .queue_batch(batch, 1_000, |_| Ok::<(), String>(()))
+        .unwrap();
     owner
 }
 

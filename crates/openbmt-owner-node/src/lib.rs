@@ -60,14 +60,14 @@ pub mod watcher;
 #[cfg(test)]
 mod tests;
 
-pub use live::{
-    DeepLine, Spans, WatchLimits, DEEP_CHECK_SECS, DEEP_RETRY_SECS, DEEP_STALL_SECS, OWNER_LIVE_WATCH,
-    QUIET_SECS,
-};
 pub use copy::{CheckInTaken, CopyError, CounterCopy, Stop, Taken};
 pub use facts::{verified_facts, FactsRefused};
 pub use link::{
     Alert, BoxReport, CounterState, OwnerLink, OwnerLinkConfig, OwnerLinkError, MAX_BOX_REPORTS,
+};
+pub use live::{
+    DeepLine, Spans, WatchLimits, DEEP_CHECK_SECS, DEEP_RETRY_SECS, DEEP_STALL_SECS,
+    OWNER_LIVE_WATCH, QUIET_SECS,
 };
 pub use node::{
     NodeError, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState, BROADCAST_DIR, COINS_FILE,

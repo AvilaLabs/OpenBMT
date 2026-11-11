@@ -65,13 +65,14 @@ not ask a server what the wallet holds.
   each block and reorganization is applied, and after a batch is queued or a
   spend is built or taken. A new view, reset, deep reorganization, or an
   explicit owner request scans from the birthday. Marks never go down. The
-  total receive and change script ranges, including their gap, must fit the
-  network manager's 100,000-script limit. The node checks this before deriving
-  scripts or saving raised marks. At startup, a larger range stops startup; at
-  runtime, it halts watch updates and reports the limit. It does not silently
-  drop scripts or dispatch a newly committed transaction while halted. Stop
-  issuing new addresses and update the device or report the limit to the
-  OpenBMT project for help.
+  receive and change scripts the live watch holds (OC-22), including the
+  gap, must fit the network manager's 100,000-script limit (NR-41). Receive
+  scripts that are set aside (OC-23) are not counted. The node checks this
+  before deriving scripts or saving raised marks. At startup, a larger set
+  stops startup; at runtime, it halts watch updates and reports the limit. It
+  does not silently drop scripts or dispatch a newly committed transaction
+  while halted. Stop issuing new addresses and update the device or report
+  the limit to the OpenBMT project for help.
 
 ## 4. Storage
 
@@ -99,7 +100,8 @@ amount.
   the batch is delivered, cancelled or archived. `Owner::counter_of(index)`
   names the counter whose range holds the receive index, or nothing.
   `Owner::receive_mark` counts the ranges, so a caller no longer has to keep
-  the highest value it has seen.
+  the highest value it has seen. Each range also keeps the owner's clock, in
+  seconds, at the moment the batch was signed (OC-23).
 - **OC-11.** Ranges never overlap: a batch that overlaps a range already
   issued is refused, and the refusal names this rule. At most 65,536 ranges
   are kept. A batch beyond that is refused with the named refusal "issued
@@ -119,7 +121,12 @@ amount.
   owner can still spend. The state ends with a reset and rescan. Receipts are
   stored in the view's own form (`OBMe`, OC-08), strictly: sorted by index
   and outpoint, no outpoint twice, and, unless the log is full, every
-  unspent receive coin has its receipt.
+  unspent receive coin has its receipt. At 300 payments a day the log holds
+  about 874 days, a little under two and a half years. When it is full, the
+  coins are still followed and the owner can still spend, but no sale's facts
+  are given and refund requests wait. A reset and rescan does not make room:
+  the rescan finds the same payments again and fills the log again, so the
+  words tell the owner to report the limit to the OpenBMT project.
 - **OC-14.** The facts of a sale come from `verified_facts`. The view must be
   ready, the receipt log must not be full, and the view must have checked the
   chain up to the tip given; otherwise nothing is said and the caller waits
@@ -206,8 +213,98 @@ code is in `crates/openbmt-owner-node/src/receipts.rs`.
   then say "400 of your 1,000 payments", and its cost is that of the merge
   it builds.
 
+## 7. The live watch and the deep check
+
+The network manager watches at most 100,000 scripts (NR-41). The owner's
+wallet issues receive addresses for good (OC-10), so a shop with a few
+hundred sales a day would pass that in about a year. Before these rules the
+node stopped there: it refused to start, or, when it was running, halted
+and refused every change of the queue (OC-07). The rules below keep the
+wallet watching every address it has issued, some of them all the time and
+the rest by a check once a month. The code is in
+`crates/openbmt-owner-node/src/live.rs` and `deep.rs`.
+
+- **OC-22.** The live watch is the set of scripts the node has the driver
+  watch for the wallet: every change script from index 0 to the change mark
+  plus the gap, and every receive script from index 0 to the receive mark
+  plus the gap, except those set aside (OC-23). Its bound is
+  `OWNER_LIVE_WATCH`, 90,000 scripts **[to tune]**, which leaves room under
+  the driver's limit for change and for growth. Nothing is set aside while
+  the live watch is at the bound or below it. The node tells the driver to
+  stop watching what is set aside (NR-97). The set aside is stored as runs of
+  indices in the coin view, in the same write as the marks (OC-08), and is
+  never larger than what was issued.
+- **OC-23.** When the live watch would pass the bound, receive scripts are
+  set aside, oldest issued first (by the time of the batch, then by index),
+  and only as many as bring it to the bound. A receive script may be set
+  aside only when it is quiet: its batch was signed at least `QUIET_SECS`
+  ago by the owner's clock, 60 days **[to tune]** (the time is kept with the
+  issued range, OC-10, and read back strictly), and the view holds no
+  unspent coin at it and no held transaction pays it. A script with an
+  unspent coin always stays, because the spend of the coin must be seen. A
+  change script never leaves. A receive index that no issued range holds is
+  never set aside. If too few scripts are quiet, the live watch stays over
+  the bound; the limit that stops the node is the driver's (OC-07). The node
+  looks for scripts to set aside when the marks grow, and at least every 10
+  minutes, and not while a deep check runs (OC-24).
+- **OC-24.** The scripts set aside are checked by a deep check every
+  `DEEP_CHECK_SECS`, 30 days **[to tune]**, counted from the end of the last
+  one (from the first time scripts were set aside, if none has run), and at
+  once when the owner asks (`OwnerNode::request_deep_check`). The check reads
+  the blocks above `from`, the height above which the view has not checked
+  them, up to the tip the node had when the check began, using the driver's
+  rescan over compact filters (NR-90) and the view's `apply_block` (OC-01),
+  not a scanner of its own. `from` is the view's position when the first
+  script was set aside, and goes down to the fork of any reorganization
+  (OC-05) and to the birthday when the view is reset (OC-06). It goes up to
+  the target of a check that finished. The check runs only when the view is
+  ready and has checked up to the tip. The scripts are checked in passes of
+  at most `OWNER_LIVE_WATCH` at a time. The check runs on a second driver of
+  its own, in `<dir>/deepcheck`, with its own lock and headers, started the
+  way the sending driver is (NR-91). It does not touch the live watch, and a
+  block it hands over changes coins and receipts only; the view's position
+  and state stay as they were while it runs. A block that the node's own
+  chain does not hold is passed over. A change of the chain stops the check
+  without calling it a failure, and it starts again when the view has caught
+  up. A payment found to a script set aside is applied like any other: it is
+  a receipt (OC-12) and a coin (OC-01), spendable at once. At the end of
+  each pass the scripts that were paid go back in the live watch, and the
+  main driver reads the blocks above the target again for them, so that
+  nothing between the target and now is missed. When every pass is done, the
+  view stores the time, the next due time and the new `from`.
+- **OC-25.** While any script is set aside, the owner is told in one line:
+  how many old addresses are checked once a month instead of all the time,
+  that a payment to one shows up at the next check, and when the last check
+  was (in whole days) and when the next is (a time the app shows on the
+  owner's own clock). Before the first check the line says none has run. The
+  words are in `crate::say` and under SC-01 to SC-12; there is no line while
+  nothing is set aside.
+- **OC-26.** A deep check that is running has its own words, and so has one
+  that failed. A check fails when its driver cannot start or stops, when it
+  hands over a block that does not pass the checks, when it has made no
+  progress for `DEEP_STALL_SECS` (1 hour **[to tune]**), or when the view
+  cannot be stored. A failure sets aside nothing and loses nothing: the
+  scripts stay as they were, the failure is stored with the time of the next
+  try, `DEEP_RETRY_SECS` later (1 hour **[to tune]**), and the words give
+  that time. The next successful check clears it.
+- **OC-27.** The scripts set aside and the schedule (last check, next check,
+  failure, `from`) are stored in the coin view, strictly (OC-08): runs
+  ascending, not empty, not touching and not past the last index; no
+  schedule when nothing is set aside, and a due time when something is. The
+  progress of a check in progress is not stored. A restart in the middle
+  starts the check again from the stored `from`, which loses nothing: a
+  payment already found is a stored receipt and a block read twice is
+  applied once. If a restart finds a script set aside that holds a coin (a
+  stop between a find and its return to the live watch), the script goes
+  back in the live watch at start.
+
 ## What these rules do not say
 
+- **They do not watch an address set aside all the time.** A payment to one
+  is seen at the next deep check, up to `DEEP_CHECK_SECS` later (OC-24),
+  and a spend of it, when it is found, from then on. The owner is told
+  (OC-25). A shop that cannot wait that long for a late payment should not
+  issue more addresses than the live watch holds.
 - **They do not prove the wallet holds the coins on the network.** A
   checked block shows the payment is in a block the counter's peers agreed
   on. A deeper reorganization than 100 blocks is a named state, not a

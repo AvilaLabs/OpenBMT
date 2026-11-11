@@ -308,7 +308,9 @@ impl<P: OwnerPort> OwnerNode<P> {
             // or after a change the node has not seen yet (which cancels the
             // check when it comes). Passed over.
             Err(ApplyError::Refused(Refusal::NotOnChain)) => {
-                self.note(format!("block {hash} of the old-address check is not on the best chain; passed over"));
+                self.note(format!(
+                    "block {hash} of the old-address check is not on the best chain; passed over"
+                ));
                 Ok(())
             }
             Err(ApplyError::Store(e)) => {
@@ -353,15 +355,10 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// driver read the blocks above `target` for them.
     fn back_to_live(&mut self, indices: &[u32], target: u32) {
         let dir = self.dir.clone();
-        let through = self
-            .view
-            .checked()
-            .max(self.watcher.chain().tip_height());
-        match self
-            .view
-            .return_to_live(indices, target, through, |b| {
-                write_file(&dir, crate::node::COINS_FILE, b)
-            }) {
+        let through = self.view.checked().max(self.watcher.chain().tip_height());
+        match self.view.return_to_live(indices, target, through, |b| {
+            write_file(&dir, crate::node::COINS_FILE, b)
+        }) {
             Ok(true) => {
                 for index in indices {
                     if let Ok(script) = self.wallet.receive_script(*index) {
@@ -403,9 +400,10 @@ impl<P: OwnerPort> OwnerNode<P> {
         self.note(format!("the check of old addresses failed: {why}"));
         let dir = self.dir.clone();
         let retry = now.saturating_add(DEEP_RETRY_SECS).max(2);
-        if let Err(e) = self.view.deep_failed(retry, |b| {
-            write_file(&dir, crate::node::COINS_FILE, b)
-        }) {
+        if let Err(e) = self
+            .view
+            .deep_failed(retry, |b| write_file(&dir, crate::node::COINS_FILE, b))
+        {
             self.stop(format!("the coin view could not be stored: {e}"));
         }
     }

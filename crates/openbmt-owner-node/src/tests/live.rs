@@ -36,7 +36,7 @@ fn oc_22_the_numbers_are_the_documented_ones() {
     assert_eq!(DEEP_RETRY_SECS, 3_600);
     assert_eq!(DEEP_STALL_SECS, 3_600);
     // Room under the driver's limit for change and growth.
-    assert!(OWNER_LIVE_WATCH + 10_000 <= openbmt_net_io::MAX_WATCHED_SCRIPTS);
+    const { assert!(OWNER_LIVE_WATCH + 10_000 <= openbmt_net_io::MAX_WATCHED_SCRIPTS) };
     let d = WatchLimits::default();
     assert_eq!(
         (d.live, d.quiet_secs, d.deep_secs),
@@ -149,7 +149,10 @@ fn oc_22_a_plan_is_stored_with_the_marks_in_one_write() {
     assert_eq!(view.receive_next(), 100);
     assert_eq!(view.released().iter().collect::<Vec<_>>(), vec![1, 2, 3, 7]);
     let deep = view.deep();
-    assert_eq!((deep.due, deep.last, deep.failed, deep.from), (5_000, 0, false, 0));
+    assert_eq!(
+        (deep.due, deep.last, deep.failed, deep.from),
+        (5_000, 0, false, 0)
+    );
     // 120 receive and 23 change watched, 4 set aside.
     assert_eq!(view.live_count(), 120 - 4 + 23);
     // The same plan again changes nothing and writes nothing.
@@ -189,7 +192,8 @@ fn oc_22_the_height_from_which_set_aside_scripts_are_unchecked_only_goes_down() 
     view.reorganize(&[], 60, ok).unwrap();
     assert_eq!(view.deep().from, 60);
     // A finished check lifts it to its target and no higher.
-    view.deep_finished(900, 900 + DEEP_CHECK_SECS, 110, ok).unwrap();
+    view.deep_finished(900, 900 + DEEP_CHECK_SECS, 110, ok)
+        .unwrap();
     let deep = view.deep();
     assert_eq!(
         (deep.from, deep.last, deep.due, deep.failed),
@@ -220,7 +224,7 @@ fn oc_24_a_return_puts_scripts_back_and_rewinds_for_them() {
     let deep = view.deep();
     assert_eq!((deep.due, deep.from, deep.failed), (0, 0, false));
     assert_eq!(deep.last, 10, "when the last check finished is kept");
-    assert!(view.deep_request(ok).unwrap() == false);
+    assert!(!view.deep_request(ok).unwrap());
 }
 
 #[test]
@@ -266,7 +270,10 @@ fn oc_27_the_stored_form_holds_the_set_and_the_schedule_and_reads_back() {
     let bytes = view.to_bytes();
     let back = CoinView::from_bytes(&bytes).unwrap();
     assert_eq!(back, view);
-    assert_eq!(back.released().pairs().collect::<Vec<_>>(), vec![(1, 4), (40, 42)]);
+    assert_eq!(
+        back.released().pairs().collect::<Vec<_>>(),
+        vec![(1, 4), (40, 42)]
+    );
     assert_eq!(back.deep(), view.deep());
     assert_eq!(back.to_bytes(), bytes);
     // A view with nothing set aside has the same fields, empty.
@@ -358,7 +365,9 @@ fn oc_25_the_line_says_how_many_are_checked_monthly_and_when_the_last_and_next_a
         days_ago: 12,
         next: 1_800_000_000,
     });
-    assert!(w.what.contains("1,200 old addresses are checked once a month"));
+    assert!(w
+        .what
+        .contains("1,200 old addresses are checked once a month"));
     assert!(w.what.contains("shows up at the next check"));
     assert!(w.next.contains("12 days ago"));
     // The next check is a time for the app to show, never seconds in a
