@@ -66,11 +66,14 @@ class PriceSchedule(private val ids: List<String>, startMs: Long, val intervalMs
     private val next = HashMap<String, Long>().also { m -> ids.forEach { m[it] = startMs } }
 
     /** The milliseconds until the source's turn; 0 or less means it is due. */
+    @Synchronized
     fun waitMs(id: String, nowMs: Long): Long = (next[id] ?: Long.MAX_VALUE) - nowMs
 
+    @Synchronized
     fun due(id: String, nowMs: Long): Boolean = waitMs(id, nowMs) <= 0
 
     /** The turn of [id] was taken at [nowMs]: the next one is on the fixed grid, after now. */
+    @Synchronized
     fun taken(id: String, nowMs: Long) {
         var n = next[id] ?: return
         while (n <= nowMs) n += intervalMs
@@ -100,6 +103,7 @@ sealed class PriceStatus {
 class PriceBook(private val rates: RatesPort, private val clockSecs: () -> Long) {
     private val samples = LinkedHashMap<String, Sample>()
     private val notes = LinkedHashMap<String, SourceNote>()
+    @Volatile
     private var torMissing = false
 
     /** The last turn of each source, for the owner. */

@@ -23,6 +23,22 @@ class Money(val code: String, val exponent: Int) {
         return out.toString()
     }
 
+    /**
+     * What a person typed for an amount, in minor units: digits, and at most
+     * [exponent] digits after one point ("12", "12.3", "12.34", ",": separators
+     * are dropped). Null for anything else, for nothing, and for more than 12
+     * digits.
+     */
+    fun parse(text: String): Long? {
+        val t = text.trim().replace(",", "")
+        val (whole, fraction) = if (t.contains('.')) t.substringBefore('.') to t.substringAfter('.') else t to ""
+        if (whole.isEmpty() && fraction.isEmpty()) return null
+        if (!(whole + fraction).all { it in '0'..'9' } || fraction.length > exponent || t.count { it == '.' } > 1) return null
+        if (whole.length + exponent > 12) return null
+        val digits = whole + fraction.padEnd(exponent, '0')
+        return digits.toLongOrNull()
+    }
+
     companion object {
         /** The currencies of the price table. Only USD has sources so far (RT-03). */
         fun of(code: String): Money? = when (code) {
