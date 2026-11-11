@@ -439,6 +439,18 @@ to 85 of `openbmt-owner-ffi`. OC-38 and OC-39 are not used.
   roots, the batch minimum, the refund depth and the birthday.
 - **OC-46.** Every stage and every refusal has words that pass the checks
   of `docs/SCREEN-RULES.md`, with no rule numbers.
+- **OC-47.** The facts of a queued refund follow the chain, whoever queued
+  it. When blocks leave the chain, in the same step that changes the coin
+  view, the facts of every sale with a refund in the queue, manual or from
+  intake, are worked out again from the view as it is (OC-14, at the height
+  the view has checked), built, stored, and swapped in only when the store
+  succeeds. A sale the view cannot give facts for keeps its amount and is
+  no longer at the refund depth. A refund whose facts no longer fit (AS-52,
+  AS-53) stays queued and waits for depth, as it already does, and is in no
+  session until they fit again. The same refresh runs again when a session
+  is built, on the view at the tip, so a refund is never ready on facts
+  older than the view, and one whose receipt confirmed again is ready
+  again. No new words: the refund shows the state it already has.
 
 ## What these rules do not say
 

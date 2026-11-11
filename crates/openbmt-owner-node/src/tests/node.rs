@@ -439,11 +439,13 @@ impl Rig {
             .unwrap()
     }
 
-    /// Fund receive index 0 with a payment, and bury it.
+    /// Fund receive index 0 with a payment, and bury it. The sale that
+    /// `queue_refund` queues against, at index 1, is paid 50,000 in the same
+    /// transaction, so the view's own facts (OC-47) hold what the rig says.
     fn fund(&mut self, sats: u64) -> Transaction {
         let pay = tx_from(
             OutPoint::new(Txid::from_byte_array([7; 32]), 0),
-            &[(&receive(0), sats)],
+            &[(&receive(0), sats), (&receive(1), 50_000)],
         );
         self.mine(std::slice::from_ref(&pay));
         self.mine_empty(5);
@@ -531,8 +533,9 @@ fn oc_01_a_payment_in_a_checked_block_is_a_coin() {
     rig.queue_refund(10_000);
     let pay = rig.fund(300_000);
     let op = OutPoint::new(pay.compute_txid(), 0);
-    assert_eq!(offered(&rig.node), vec![(op, 6)]);
-    assert_eq!(rig.node.balance(), 300_000);
+    let sale_coin = OutPoint::new(pay.compute_txid(), 1);
+    assert_eq!(offered(&rig.node), vec![(op, 6), (sale_coin, 6)]);
+    assert_eq!(rig.node.balance(), 350_000);
     assert_eq!(rig.node.state(), ViewState::Ready);
 }
 
@@ -724,6 +727,95 @@ fn oc_05_a_block_that_leaves_takes_its_coin_with_it_and_the_position_down() {
     assert_eq!(rig.node.balance(), 0);
     assert!(rig.node.coins().is_empty());
     assert_eq!(rig.node.view().checked(), 1);
+}
+
+#[test]
+fn oc_47_a_refund_waits_while_its_receipt_is_off_the_chain_and_goes_when_it_is_back() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let refund = rig.queue_refund(10_000);
+    rig.fund(300_000);
+    let facts = |rig: &Rig| rig.node.owner().sale_facts(&sale(1)).unwrap();
+    let stage = |rig: &Rig| {
+        rig.node
+            .owner()
+            .refunds()
+            .iter()
+            .find(|r| r.id == refund)
+            .unwrap()
+            .stage
+            .clone()
+    };
+    // The receipt is on the chain, deep enough.
+    assert_eq!(
+        facts(&rig),
+        SaleFacts {
+            received_sats: 50_000,
+            reached_refund_depth: true
+        }
+    );
+    assert_eq!(rig.node.owner().waiting_for_depth(refund), Some(false));
+
+    // A longer branch from the genesis block drops every receipt.
+    let left: Vec<BlockHash> = rig.chain.iter().rev().map(Block::block_hash).collect();
+    let mut branch = Vec::new();
+    let mut prev = bitcoin::blockdata::constants::genesis_block(NET).block_hash();
+    for height in 1..=7 {
+        let block = mine(prev, height, 100 + height, &[]);
+        prev = block.block_hash();
+        branch.push(block);
+    }
+    let joined = branch
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (u32::try_from(i).unwrap() + 1, b.block_hash()))
+        .collect();
+    rig.chain = branch.clone();
+    rig.feed(vec![AppEvent::Chain { joined, left }]);
+    // The facts fell in the step that changed the coin view, before any
+    // block of the new branch was handed over.
+    assert!(!facts(&rig).reached_refund_depth);
+    assert_eq!(facts(&rig).received_sats, 0);
+    assert_eq!(rig.node.owner().waiting_for_depth(refund), Some(true));
+    for (i, block) in branch.iter().enumerate() {
+        rig.deliver(vec![
+            AppEvent::Block {
+                hash: block.block_hash(),
+                bytes: serialize(block),
+            },
+            AppEvent::Checked(u32::try_from(i).unwrap() + 1),
+        ]);
+    }
+    assert_eq!(rig.node.owner().waiting_for_depth(refund), Some(true));
+
+    // A stale cache cannot make it ready: a session works the facts out
+    // again first.
+    let write = rig.node.queue_writer();
+    rig.node
+        .owner_mut()
+        .unwrap()
+        .set_sale_facts(
+            sale(1),
+            SaleFacts {
+                received_sats: 50_000,
+                reached_refund_depth: true,
+            },
+            &write,
+        )
+        .unwrap();
+    rig.node.build_request(1_000, NOW).unwrap();
+    assert_eq!(stage(&rig), Stage::Queued);
+    assert!(!facts(&rig).reached_refund_depth);
+
+    // The receipt confirms again and the refund is ready again.
+    let again = tx_from(
+        OutPoint::new(Txid::from_byte_array([8; 32]), 0),
+        &[(&receive(0), 300_000), (&receive(1), 50_000)],
+    );
+    rig.mine(&[again]);
+    rig.mine_empty(5);
+    rig.node.build_request(1_000, NOW).unwrap();
+    assert!(matches!(stage(&rig), Stage::InSession { .. }));
 }
 
 fn rescans(rig: &Rig) -> usize {
@@ -934,7 +1026,7 @@ fn oc_08_a_restart_resumes_from_the_stored_position_and_coins() {
     // The driver is told where to start, and the coins are there.
     assert_eq!(rig.spawned.lock().unwrap()[0].watch_from, 6);
     assert_eq!(rig.spawned.lock().unwrap()[0].scripts, 43);
-    assert_eq!(rig.node.balance(), 300_000);
+    assert_eq!(rig.node.balance(), 350_000);
 }
 
 #[test]
@@ -996,14 +1088,18 @@ fn nr_86_a_refund_is_signed_held_sent_followed_and_done_at_the_refund_depth() {
     // Its change is a coin at no confirmations, and the spent coin is not
     // offered.
     let change = OutPoint::new(txid, u32::try_from(1 - tx_pays_first(&tx)).unwrap());
-    assert_eq!(offered(&rig.node), vec![(change, 0)]);
+    let sale_coin = OutPoint::new(pay.compute_txid(), 1);
+    let mut want = vec![(change, 0), (sale_coin, 6)];
+    want.sort();
+    assert_eq!(offered(&rig.node), want);
     assert_eq!(
         rig.node.balance(),
-        tx.output
-            .get(usize::try_from(change.vout).unwrap())
-            .unwrap()
-            .value
-            .to_sat()
+        50_000
+            + tx.output
+                .get(usize::try_from(change.vout).unwrap())
+                .unwrap()
+                .value
+                .to_sat()
     );
     let notes = rig.node.watcher_mut().take_notes();
     assert!(
@@ -1033,7 +1129,9 @@ fn nr_86_a_refund_is_signed_held_sent_followed_and_done_at_the_refund_depth() {
         rig.node.send_state(&txid),
         Some(SendState::Confirmed { depth: 1 })
     );
-    assert_eq!(offered(&rig.node), vec![(change, 1)]);
+    let mut want = vec![(change, 1), (sale_coin, 7)];
+    want.sort();
+    assert_eq!(offered(&rig.node), want);
     rig.mine_empty(4);
     assert_eq!(
         rig.node.send_state(&txid),
@@ -1174,7 +1272,8 @@ fn nr_86_a_restart_sends_again_what_was_not_confirmed_and_signs_nothing_again() 
     // The transaction and its change are in the view, and its input is not
     // offered.
     assert_eq!(rig.node.view().pending().count(), 1);
-    assert_eq!(rig.node.coins().len(), 1);
+    // The change, and the coin of the sale the refund is for.
+    assert_eq!(rig.node.coins().len(), 2);
 }
 
 #[test]
@@ -1220,7 +1319,8 @@ fn nr_86_a_transaction_another_spent_over_is_replaced_and_not_signed_again() {
     }
     assert!(rig.node.owner().open_sessions().is_empty());
     assert!(rig.node.view().pending().next().is_none());
-    assert!(rig.node.coins().is_empty());
+    // Only the coin of the sale the refund is for is left.
+    assert_eq!(rig.node.coins().len(), 1);
     assert!(rig.calls().contains(&format!("main forget {txid}")));
     let notes = rig.node.watcher_mut().take_notes();
     assert!(

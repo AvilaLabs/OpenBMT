@@ -310,13 +310,15 @@ fn oc_24_a_coin_found_by_the_deep_check_is_spendable() {
     let dir = Dir::new();
     let (mut rig, time) = aged(&dir, 60);
     let pay = pay_to(3, 7, 300_000);
-    rig.mine(std::slice::from_ref(&pay));
+    // The sale the refund is for was paid at index 1, in the same block.
+    let sale_pay = pay_to(1, 8, 50_000);
+    rig.mine(&[pay.clone(), sale_pay.clone()]);
     rig.mine_empty(6);
     time.store(rig.node.view().deep().due, Ordering::SeqCst);
     rig.tick();
     let from = rig.deep_starts()[0].watch_from;
     rig.deep_feed(from);
-    assert_eq!(rig.node.balance(), 300_000);
+    assert_eq!(rig.node.balance(), 350_000);
 
     // A refund of the sale on the counter's address 1 is signed by both
     // keys and takes the found coin.
@@ -340,10 +342,10 @@ fn oc_24_a_coin_found_by_the_deep_check_is_spendable() {
         .unwrap();
     let txid = rig.spend();
     let tx = rig.tx(&txid);
-    assert!(tx
-        .input
-        .iter()
-        .any(|i| i.previous_output == OutPoint::new(pay.compute_txid(), 0)));
+    assert!(tx.input.iter().any(|i| {
+        i.previous_output == OutPoint::new(pay.compute_txid(), 0)
+            || i.previous_output == OutPoint::new(sale_pay.compute_txid(), 0)
+    }));
 }
 
 #[test]

@@ -1147,6 +1147,12 @@ impl<P: OwnerPort> OwnerNode<P> {
                 self.view.checked()
             )));
         }
+        // OC-47: a refund is ready on the facts of the view as it is now.
+        {
+            let dir = self.dir.clone();
+            self.refresh_refund_facts(tip, &mut |b| write_file(&dir, QUEUE_FILE, b))
+                .map_err(NodeError::Files)?;
+        }
         let coins = pick(self.view.coins(tip));
         let mut random = [0u8; 96];
         for chunk in random.chunks_mut(8) {
@@ -1697,6 +1703,20 @@ impl<P: OwnerPort> OwnerNode<P> {
                 if self.view.state() == ViewState::DeepReorg {
                     self.note("deep reorg: rescan".to_string());
                 }
+                // OC-47: the facts of every queued refund follow the receipts
+                // that left, in the same step as the coin view.
+                match self.ready_for_queue_write() {
+                    Ok(()) => {
+                        let dir = self.dir.clone();
+                        let tip = self.view.checked();
+                        if let Err(e) =
+                            self.refresh_refund_facts(tip, &mut |b| write_queue_file(&dir, b))
+                        {
+                            self.stop(format!("the refunds' facts could not be stored: {e}"));
+                        }
+                    }
+                    Err(e) => self.note(format!("the refunds' facts wait to be refreshed: {e}")),
+                }
                 for txid in effect.reopened {
                     let tx = self
                         .view
@@ -1741,6 +1761,45 @@ impl<P: OwnerPort> OwnerNode<P> {
             }
             Err(e) => self.stop(format!("the coin view could not be stored: {e}")),
         }
+    }
+
+    /// OC-47: work out again, from the coin view as it is, the facts of
+    /// every sale that has a refund in the queue, manual or from intake. A
+    /// sale the view cannot give facts for keeps its amount and no longer
+    /// counts as at the refund depth. Each change is stored before it is
+    /// swapped in.
+    fn refresh_refund_facts<E: std::fmt::Display>(
+        &mut self,
+        tip: u32,
+        persist: &mut impl FnMut(&[u8]) -> Result<(), E>,
+    ) -> Result<(), String> {
+        let mut sales: Vec<openbmt_owner::SaleKey> =
+            self.owner.refunds().iter().map(|r| r.sale).collect();
+        sales.sort();
+        sales.dedup();
+        for sale in sales {
+            let held = self.owner.sale_facts(&sale);
+            let fresh = match crate::facts::verified_facts(
+                &self.view,
+                &self.owner,
+                sale,
+                tip,
+                self.refund_depth,
+            ) {
+                Ok(facts) => facts,
+                Err(_) => openbmt_owner::SaleFacts {
+                    received_sats: held.map_or(0, |f| f.received_sats),
+                    reached_refund_depth: false,
+                },
+            };
+            if held == Some(fresh) {
+                continue;
+            }
+            self.owner
+                .set_sale_facts(sale, fresh, &mut *persist)
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     fn block(&mut self, hash: &bitcoin::BlockHash, bytes: &[u8]) {
