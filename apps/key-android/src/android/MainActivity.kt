@@ -22,7 +22,10 @@ class MainActivity : Activity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        if (isNight(newConfig) != night) recreate()
+        if (isNight(newConfig) != night) {
+            finish()
+            startActivity(Intent(this, MainActivity::class.java))
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

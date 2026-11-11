@@ -1,6 +1,7 @@
 package org.openbmt.counter.app
 
 import android.app.Activity
+import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
 import android.view.View
@@ -22,7 +23,10 @@ class MainActivity : Activity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        if (isNight(newConfig) != night) recreate()
+        if (isNight(newConfig) != night) {
+            finish()
+            startActivity(Intent(this, MainActivity::class.java))
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

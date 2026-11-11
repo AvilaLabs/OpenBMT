@@ -358,7 +358,12 @@ class Ui(private val context: Context) {
             }
             addOnAttachStateChangeListener(
                 object : View.OnAttachStateChangeListener {
-                    override fun onViewAttachedToWindow(v: View) = appearance()
+                    override fun onViewAttachedToWindow(v: View) {
+                        // An activity started again after a change of night mode needs this said once more.
+                        decorUnderBars()
+                        appearance()
+                        v.requestApplyInsets()
+                    }
 
                     override fun onViewDetachedFromWindow(v: View) {}
                 },
@@ -412,6 +417,12 @@ class Ui(private val context: Context) {
             if (lightNav) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
             act.window.decorView.systemUiVisibility = flags
         }
+    }
+
+    /** The window lays its content out behind the bars (API 30 and later; earlier ones use the layout flags). */
+    @Suppress("DEPRECATION")
+    private fun decorUnderBars() {
+        if (Build.VERSION.SDK_INT >= 30) activity()?.window?.setDecorFitsSystemWindows(false)
     }
 
     private fun activity(): Activity? {
