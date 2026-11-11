@@ -46,10 +46,11 @@ payment watcher is still running. If that check stops, instant acceptance
 stops too.
 
 Tor sends network connections through a separate routing system to hide
-the device's network address from its Bitcoin peers. On Android the apps
-need a separate app called Orbot to use it. The Owner app always requires
-Tor. The counter has a switch, but it must use Tor for instant acceptance
-on a network customers can join. Plan for that dependency rather than
+the device's network address from its Bitcoin peers. The Owner app always
+uses Tor. It runs Tor itself, or goes through Orbot, a separate Android
+app, if the owner chooses. The counter needs Orbot to use Tor. It has a
+switch, but it must use Tor for instant acceptance on a network customers
+can join. Plan for that dependency rather than
 expecting a phone on guest Wi-Fi to work unattended.
 
 The counter also needs a supply of addresses approved by both wallet

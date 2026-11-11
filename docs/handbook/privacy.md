@@ -67,10 +67,12 @@ and refunds through Tor, with no switch to turn that off. An explicitly
 configured local link between shop devices can run directly over the
 local network.
 
-Both apps need Orbot, a separate Android app, to use Tor. If Orbot stops
-answering, the Owner app will not start and a counter with Tor enabled
-will not send around it. This is a real operating dependency: turning Tor
-on requires keeping Orbot running.
+The Owner app runs Tor itself, so it needs no other app; the owner can
+choose Orbot, a separate Android app, instead. The counter needs Orbot to
+use Tor. If Tor cannot connect, the Owner app does not start its node, and
+a counter with Tor enabled does not send around it. For the counter this
+is a real operating dependency: turning Tor on requires keeping Orbot
+running.
 
 <a id="the-shops-own-node"></a>
 

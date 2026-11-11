@@ -76,8 +76,10 @@ must be running. If it is unavailable, the counter reports the problem
 and sends nothing around it (`CR-87`).
 
 The Owner app sends its Bitcoin peer traffic and spend or refund
-broadcasts through Tor, and will not start if Orbot is not answering
-(`OA-05`). Its behavior does not depend on the counter's switch. An
+broadcasts through Tor. It runs Tor itself, or uses Orbot if the owner
+chooses it in Settings, and does not start its node until Tor is
+connected (`OA-05`, `OA-97` to `OA-100`). Its behavior does not depend on
+the counter's switch. An
 explicit `direct` local link route is not sent through Tor.
 
 The counter switch is off by default for speed. If customers can join its
@@ -214,7 +216,8 @@ itself. A cashier PIN on the counter deters casual access only.
 The Counter app runs only while open, and the counter must stay open and
 plugged in. The Owner app follows the chain while closed only with Watch in
 the background turned on, and Android may stop that while the phone sleeps.
-The Owner and Counter apps need Orbot, a separate Android app, to use Tor.
+The Counter app needs Orbot, a separate Android app, to use Tor. The
+Owner app runs Tor itself unless the owner chooses Orbot.
 Some phones offer a software-only Keystore; the app reports this on screen.
 The design assumes the phone is not already
 controlled by an attacker.
@@ -467,7 +470,9 @@ what it is being asked to install. The dependency policy accepts only
 licences on its published list (`docs/DEPENDENCIES.md`, rule 6).
 
 Dependencies retain their own licences. OpenBMT does not publish the
-phone's operating system or Orbot, the separate app needed for Tor.
+phone's operating system or Orbot, the separate app the counter needs
+for Tor. The Owner app includes Tor itself, as built by the Guardian
+Project from the Tor Project's code (`docs/DEPENDENCIES.md`).
 Reproducible builds, which would let someone check a released app against
 the source, are not built yet.
 

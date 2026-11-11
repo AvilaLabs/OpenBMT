@@ -97,10 +97,10 @@ The Owner app keeps watching the wallet while it is closed only when the
 owner turns on Watch in the background, and a notification shows while it
 runs. Android may still stop it while the phone sleeps; instant sales then
 wait for blocks. The Counter app runs only while open. Instant acceptance
-needs the counter linked, and Tor needs Orbot running. A closed counter or a
-broken connection can stop the intended payment flow. The counter must stay
-open and powered. Some phones provide only software protection for stored
-keys; the apps report that condition.
+needs the counter linked, and a counter using Tor needs Orbot running. A
+closed counter or a broken connection can stop the intended payment flow.
+The counter must stay open and powered. Some phones provide only software
+protection for stored keys; the apps report that condition.
 
 The shop also maintains any Box or Lightning node it chooses. These are
 owner responsibilities rather than a service operated by OpenBMT.
