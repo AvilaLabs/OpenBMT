@@ -635,6 +635,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         let main_config = OwnerConfig {
             dir: dir.clone(),
             identity,
+            watch_key: false,
             driver: driver.clone(),
             clock,
             health,

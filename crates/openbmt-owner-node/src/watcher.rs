@@ -89,8 +89,12 @@ pub struct OwnerConfig {
     /// The directory for everything the watcher keeps. It is its own: the
     /// driver's headers and address book, and the heartbeat number.
     pub dir: PathBuf,
-    /// The owner root's identity, which signs the heartbeats.
+    /// The identity that signs the heartbeats: the owner root's, or, with
+    /// `watch_key` set, the watch key's.
     pub identity: Identity,
+    /// `identity` is the shop's watch key (CR-186): the heartbeats are signed
+    /// under the tag of the watch key and not as the owner root.
+    pub watch_key: bool,
     /// The driver's settings. Its `watch_from` is replaced by the tip of the
     /// stored headers.
     pub driver: DriverConfig,
@@ -121,6 +125,7 @@ impl OwnerConfig {
         Self {
             dir: dir.into(),
             identity,
+            watch_key: false,
             driver,
             clock: Box::new(SystemClock),
             health: Box::new(check_health),
@@ -135,6 +140,7 @@ impl OwnerConfig {
 /// The owner's watcher. See the module docs.
 pub struct OwnerWatcher<P: DriverPort = Handle> {
     identity: Identity,
+    watch_key: bool,
     port: P,
     dir: PathBuf,
     view: ChainView,
@@ -183,6 +189,7 @@ impl<P: DriverPort> OwnerWatcher<P> {
         let OwnerConfig {
             dir,
             identity,
+            watch_key,
             mut driver,
             clock,
             health,
@@ -237,6 +244,7 @@ impl<P: DriverPort> OwnerWatcher<P> {
         let port = spawn(driver, dir.clone()).map_err(OwnerStartError::Driver)?;
         Ok(Self {
             identity,
+            watch_key,
             port,
             dir,
             view,
@@ -252,7 +260,8 @@ impl<P: DriverPort> OwnerWatcher<P> {
 
     // What the watcher knows.
 
-    /// The owner's key, which a counter pins as its owner root.
+    /// The key the heartbeats are signed with: the owner's, which a counter
+    /// pins as its owner root, or the watch key.
     pub fn device_id(&self) -> DeviceId {
         self.identity.device_id()
     }
@@ -404,7 +413,12 @@ impl<P: DriverPort> OwnerWatcher<P> {
             tip_hash: tip_hash.to_byte_array(),
             healthy,
         };
-        Some(heartbeat.sign(&self.identity).to_bytes())
+        let signed = if self.watch_key {
+            heartbeat.sign_watch(&self.identity)
+        } else {
+            heartbeat.sign(&self.identity)
+        };
+        Some(signed.to_bytes())
     }
 
     /// Stop the driver, then take the events it left in the channel.

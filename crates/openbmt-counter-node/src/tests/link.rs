@@ -797,3 +797,92 @@ fn cr_166_a_device_list_message_is_dropped_with_a_note_that_says_why() {
     );
     assert_eq!(w.link.state().node_refusals, 0);
 }
+
+// LK-74: the watch key as a sender.
+
+fn watch_heartbeat_bytes(seq: u64) -> Vec<u8> {
+    WatcherHeartbeat {
+        counter: counter(),
+        seq,
+        time: T0,
+        tip_height: 0,
+        tip_hash: genesis().to_byte_array(),
+        healthy: true,
+    }
+    .sign_watch(&id(30))
+    .to_bytes()
+}
+
+/// Settings that name (or, with `None`, drop) the watch key, signed by both
+/// roots because naming it loosens.
+fn naming(version: u32, key: Option<DeviceId>) -> SignedSettings {
+    let mut s = settings();
+    s.version = version;
+    s.watch_key = key;
+    SignedSettings {
+        owner_sig: s.sign(&id(1)),
+        approver_sig: Some(s.sign(&id(2))),
+        settings: s,
+    }
+}
+
+#[test]
+fn lk_74_the_counter_listens_to_the_watch_key_the_settings_name_and_to_no_other() {
+    let mut w = world(config());
+    w.relay
+        .set_members(&[owner(), counter(), id(30).device_id()])
+        .unwrap();
+    let watch_dir = Scratch::new();
+    let mut watch = Courier::start_with(
+        w.relay.post(),
+        id(30),
+        Role::Watch,
+        [(counter(), Role::Counter)].into_iter().collect(),
+        watch_dir.path(),
+        FirstStart::Yes,
+    )
+    .unwrap();
+    w.rig.feed(vec![Rig::peers()]);
+    // Nothing names the key yet: its message is not from a device the
+    // counter talks to.
+    watch
+        .send(&counter(), Kind::Heartbeat, &watch_heartbeat_bytes(1))
+        .unwrap();
+    w.step(T0);
+    assert_eq!(w.link.state().heartbeats_taken, 0);
+    assert!(w.link.courier().peers().values().all(|r| *r != Role::Watch));
+    // The settings name it (loosening, so both roots signed): from the next
+    // step its heartbeats are taken, as a watcher's and nothing else.
+    w.send(
+        Kind::Settings,
+        &naming(2, Some(id(30).device_id())).to_bytes(),
+    );
+    w.step(T0 + 1);
+    assert_eq!(
+        w.link.courier().peers().get(&id(30).device_id()),
+        Some(&Role::Watch)
+    );
+    watch
+        .send(&counter(), Kind::Heartbeat, &watch_heartbeat_bytes(2))
+        .unwrap();
+    w.step(T0 + 2);
+    assert_eq!(w.link.state().heartbeats_taken, 1);
+    assert_eq!(w.rig.node.counter().desk().last_heartbeat_seq(), 2);
+    for kind in [Kind::Command, Kind::Settings, Kind::Batch, Kind::DeviceList] {
+        assert_eq!(
+            watch.send(&counter(), kind, b"x"),
+            Err(openbmt_courier::SendError::KindNotAllowed),
+            "{kind:?}"
+        );
+    }
+    // The settings take the key away (tightening): it is dropped from the
+    // table at once, and what it sends is not taken.
+    w.send(Kind::Settings, &naming(3, None).to_bytes());
+    w.step(T0 + 3);
+    assert!(w.link.courier().peers().values().all(|r| *r != Role::Watch));
+    watch
+        .send(&counter(), Kind::Heartbeat, &watch_heartbeat_bytes(3))
+        .unwrap();
+    w.step(T0 + 4);
+    assert_eq!(w.link.state().heartbeats_taken, 1);
+}

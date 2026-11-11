@@ -20,7 +20,7 @@ use openbmt_link::{Kind, Role};
 
 use super::*;
 use crate::copy::{CheckInTaken, CopyError, CounterCopy, Stop};
-use crate::{Alert, OwnerLink, OwnerLinkConfig, SettingsNotCarried};
+use crate::{Alert, OwnerLink, OwnerLinkConfig, SettingsNotCarried, WatchLink, WatchLinkConfig};
 
 fn owner() -> DeviceId {
     id(1).device_id()
@@ -636,7 +636,7 @@ fn lk_61_a_heartbeat_goes_to_each_counter_every_twenty_seconds() {
             .map(|r| {
                 SignedHeartbeat::from_bytes(&r.content)
                     .unwrap()
-                    .verify(&roots(), &counter(), 0)
+                    .verify(&roots(), None, &counter(), 0)
                     .unwrap()
                     .seq
             })
@@ -1606,4 +1606,122 @@ fn lk_70_a_counter_node_that_missed_the_first_message_holds_the_batch_after_the_
     let after = node.records_from(0, usize::MAX).unwrap();
     assert_eq!(showing(&after), 1, "no second record");
     assert!(owner_side.batches_waiting(&counter()).is_none());
+}
+
+// LK-75: the watcher of the closed app.
+
+fn watch_key() -> DeviceId {
+    id(30).device_id()
+}
+
+struct WatchWorld {
+    rig: Rig,
+    link: WatchLink<MemoryPost>,
+    counter_side: Courier<MemoryPost>,
+    relay: MemoryRelay,
+    _dirs: (Dir, Dir, Dir),
+}
+
+fn watch_world(members: &[DeviceId]) -> WatchWorld {
+    let relay = MemoryRelay::new(id(99), members).unwrap();
+    let (link_dir, watcher_dir, counter_dir) = (Dir::new(), Dir::new(), Dir::new());
+    let rig = start_as_watch_key(watcher_dir.path());
+    let watch_courier = courier(
+        &relay,
+        id(30),
+        Role::Watch,
+        (counter(), Role::Counter),
+        &link_dir,
+        FirstStart::Yes,
+    );
+    let link = WatchLink::new(
+        watch_courier,
+        vec![counter()],
+        WatchLinkConfig {
+            retry_secs: 0,
+            ..WatchLinkConfig::default()
+        },
+    );
+    let mut counter_side = courier(
+        &relay,
+        id(3),
+        Role::Counter,
+        (watch_key(), Role::Watch),
+        &counter_dir,
+        FirstStart::Yes,
+    );
+    counter_side.poll().unwrap();
+    WatchWorld {
+        rig,
+        link,
+        counter_side,
+        relay,
+        _dirs: (link_dir, watcher_dir, counter_dir),
+    }
+}
+
+#[test]
+fn lk_75_the_watcher_sends_heartbeats_signed_by_the_watch_key_every_twenty_seconds() {
+    let mut w = watch_world(&[watch_key(), counter()]);
+    w.rig.feed(vec![peers()]);
+    let taken = |w: &mut WatchWorld| -> Vec<Received> { w.counter_side.poll().unwrap() };
+    w.link.step(&mut w.rig.watcher, T0);
+    let got = taken(&mut w);
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].kind, Kind::Heartbeat);
+    assert_eq!(got[0].from, watch_key());
+    assert_eq!(got[0].role, Role::Watch);
+    let signed = SignedHeartbeat::from_bytes(&got[0].content).unwrap();
+    assert!(signed
+        .verify(&roots(), Some(&watch_key()), &counter(), 0)
+        .is_ok());
+    assert!(signed.verify(&roots(), None, &counter(), 0).is_err());
+    for dt in [1, 10, 19] {
+        w.link.step(&mut w.rig.watcher, T0 + dt);
+        assert!(taken(&mut w).is_empty(), "at +{dt}");
+    }
+    w.link.step(&mut w.rig.watcher, T0 + 20);
+    assert_eq!(taken(&mut w).len(), 1);
+    assert_eq!(w.link.state().sent, 2);
+    assert!(w.link.state().reached);
+    // A relay that is down costs no number and is not "refused".
+    w.relay.set_down(true);
+    w.link.step(&mut w.rig.watcher, T0 + 40);
+    assert!(!w.link.state().reached);
+    assert!(!w.link.state().relay_refused);
+}
+
+#[test]
+fn lk_75_the_watcher_sends_nothing_but_heartbeats() {
+    let mut w = watch_world(&[watch_key(), counter()]);
+    let courier = w.link.courier_mut();
+    for kind in Kind::ALL {
+        if kind == Kind::Heartbeat {
+            continue;
+        }
+        assert_eq!(
+            courier.send(&counter(), kind, b"x"),
+            Err(openbmt_courier::SendError::KindNotAllowed),
+            "{kind:?}"
+        );
+    }
+    // The link never polls a mailbox: it has no way to read what the
+    // counters send to the owner, which is sealed to the owner's key.
+    assert_eq!(w.link.state().sent, 0);
+}
+
+#[test]
+fn lk_75_a_relay_that_does_not_list_the_watch_key_refuses_and_the_link_says_so() {
+    let mut w = watch_world(&[counter()]);
+    w.rig.feed(vec![peers()]);
+    w.link.step(&mut w.rig.watcher, T0);
+    let state = w.link.state();
+    assert_eq!(state.sent, 0);
+    assert!(!state.reached);
+    assert!(state.relay_refused);
+    // Listed, the next turn gets through.
+    w.relay.set_members(&[watch_key(), counter()]).unwrap();
+    w.link.step(&mut w.rig.watcher, T0 + 1);
+    assert_eq!(w.link.state().sent, 1);
+    assert!(!w.link.state().relay_refused);
 }

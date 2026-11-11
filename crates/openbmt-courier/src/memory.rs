@@ -83,6 +83,15 @@ impl MemoryRelay {
         }
     }
 
+    /// Replace the member list, as whoever runs the relay does (LK-21).
+    pub fn set_members(&self, members: &[DeviceId]) -> Result<(), String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| "the relay is broken".to_string())?;
+        inner.relay.set_members(members).map_err(|e| e.to_string())
+    }
+
     /// While down, every call fails as an unreachable relay does.
     pub fn set_down(&self, down: bool) {
         if let Ok(mut i) = self.inner.lock() {

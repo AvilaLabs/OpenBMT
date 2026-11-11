@@ -158,9 +158,8 @@ impl SignedHeartbeat {
         let by_owner = roots
             .owner
             .verify_tagged(TAG_HEARTBEAT, &body, &self.owner_sig);
-        let by_watch = watch.is_some_and(|w| {
-            w.verify_tagged(TAG_WATCH_HEARTBEAT, &body, &self.owner_sig)
-        });
+        let by_watch =
+            watch.is_some_and(|w| w.verify_tagged(TAG_WATCH_HEARTBEAT, &body, &self.owner_sig));
         if !by_owner && !by_watch {
             return Err(HeartbeatError::OwnerSignatureInvalid);
         }

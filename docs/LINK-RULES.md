@@ -383,6 +383,31 @@ merged).
   itself. After 24 hours it says that the counter has not taken its new
   addresses and that the owner should check that it is on and linked. The
   words follow `docs/SCREEN-RULES.md`.
+- **LK-74.** The owner phone's background watcher is a sender of its own: the
+  watch key the signed settings name (CR-185), in the role Watch. It sends
+  messages of kind Heartbeat to a counter and no other kind to anyone (LK-08);
+  the courier refuses to seal any other, and a reader refuses any other that
+  is made by hand. A counter lists the watch key of the settings in force as
+  a Watch peer, and no other: the table follows the settings at each step,
+  adds the key they name, drops one they no longer name, and a message from a
+  key that is not in the table is refused (LK-05). The relay lists the watch
+  key as a member like any sender (LK-20); the person who runs the relay adds
+  it. The heartbeat inside is checked as CR-186 says, so a message from the
+  Watch role is taken only if the content is signed by the watch key.
+- **LK-75.** The owner phone's watcher while the app is closed (`WatchNode`)
+  runs the watcher and a link that sends heartbeats and reads nothing: it
+  starts with the watch key's secret, the counters, the relay and the network
+  settings, and holds no owner secret and no key 1. It sends each counter a
+  heartbeat signed by the watch key (CR-186) every `heartbeat_every_secs`
+  (20 by default), calling the relay at most that often, and after a failure
+  not again before `retry_secs` (5). It does not poll a mailbox: what the
+  counters send to the owner is sealed to the owner's key (LK-02), so their
+  check-ins and records wait for the owner app. Its number files are in a
+  folder of their own, `watch-link`, in the node's folder, and the heartbeat
+  number is the same file the owner node uses. It takes the node's folder
+  and its lock, so it does not run with the owner node. A relay that answers
+  and refuses (the watch key is not a member) is told from one that is down,
+  and the link says so.
 
 The two kinds that involve the Box are carried the same way. A counter sends
 a Paid notice to each Box on its device list when a sale changes state, and

@@ -133,6 +133,22 @@ fn start_with_rule(
     }
 }
 
+/// A watcher that signs as the watch key `id(30)` (CR-186).
+fn start_as_watch_key(dir: &Path) -> Rig {
+    let time = Arc::new(AtomicU64::new(T0));
+    let mut config = OwnerConfig::new(dir, id(30), DriverConfig::new(Network::Regtest, 0));
+    config.watch_key = true;
+    config.clock = Box::new(TestClock(time.clone()));
+    config.health = Box::new(|_| healthy());
+    let (events, rx) = channel();
+    let watcher = OwnerWatcher::start_with(config, move |_, _| Ok(FakePort(rx.into()))).unwrap();
+    Rig {
+        watcher,
+        events,
+        time,
+    }
+}
+
 fn start(dir: &Path) -> Rig {
     start_with_rule(dir, &Arc::new(AtomicU64::new(T0)), |_| healthy())
 }
@@ -152,7 +168,7 @@ fn the_heartbeat_is_signed_by_the_owner_and_names_the_tip_and_the_time() {
     rig.feed(vec![peers()]);
     let bytes = rig.watcher.heartbeat(counter()).unwrap();
     let signed = open(&bytes);
-    let hb = signed.verify(&roots(), &counter(), 0).unwrap();
+    let hb = signed.verify(&roots(), None, &counter(), 0).unwrap();
     assert_eq!(hb.counter, counter());
     assert_eq!(hb.time, T0);
     assert_eq!(hb.tip_height, 0);
@@ -161,7 +177,21 @@ fn the_heartbeat_is_signed_by_the_owner_and_names_the_tip_and_the_time() {
     assert_eq!(rig.watcher.device_id(), id(1).device_id());
     // only the owner root's signature verifies, not another key's
     let other = PinnedRoots::new(id(5).device_id(), id(2).device_id()).unwrap();
-    assert!(signed.verify(&other, &counter(), 0).is_err());
+    assert!(signed.verify(&other, None, &counter(), 0).is_err());
+}
+
+#[test]
+fn cr_186_a_watch_key_watcher_signs_under_the_watch_tag() {
+    let dir = Dir::new();
+    let mut rig = start_as_watch_key(dir.path());
+    rig.feed(vec![peers()]);
+    let signed = open(&rig.watcher.heartbeat(counter()).unwrap());
+    let watch = id(30).device_id();
+    assert_eq!(rig.watcher.device_id(), watch);
+    assert!(signed.verify(&roots(), Some(&watch), &counter(), 0).is_ok());
+    // It is not the owner root's: a counter with no watch key named, or the
+    // owner root alone, refuses it.
+    assert!(signed.verify(&roots(), None, &counter(), 0).is_err());
 }
 
 #[test]
@@ -169,12 +199,12 @@ fn before_the_first_peers_event_the_heartbeat_says_unhealthy() {
     let dir = Dir::new();
     let mut rig = start(dir.path());
     let hb = *open(&rig.watcher.heartbeat(counter()).unwrap())
-        .verify(&roots(), &counter(), 0)
+        .verify(&roots(), None, &counter(), 0)
         .unwrap();
     assert!(!hb.healthy);
     rig.feed(vec![peers()]);
     let hb = *open(&rig.watcher.heartbeat(counter()).unwrap())
-        .verify(&roots(), &counter(), 0)
+        .verify(&roots(), None, &counter(), 0)
         .unwrap();
     assert!(hb.healthy);
 }
@@ -193,7 +223,7 @@ fn the_health_rules_run_on_every_peers_event() {
         Some(openbmt_watch::Problem::TooFewPeerGroups)
     );
     let hb = *open(&rig.watcher.heartbeat(counter()).unwrap())
-        .verify(&roots(), &counter(), 0)
+        .verify(&roots(), None, &counter(), 0)
         .unwrap();
     assert!(!hb.healthy);
 
@@ -215,7 +245,7 @@ fn the_health_rules_run_on_every_peers_event() {
     rig.feed(vec![AppEvent::Peers(three, None, (0, T0 - 100))]);
     assert!(rig.watcher.health().unwrap().healthy);
     let hb = *open(&rig.watcher.heartbeat(counter()).unwrap())
-        .verify(&roots(), &counter(), 0)
+        .verify(&roots(), None, &counter(), 0)
         .unwrap();
     assert!(hb.healthy);
     assert_eq!(rig.watcher.chain().tip_time(), T0 - 100);
@@ -232,7 +262,7 @@ fn a_chain_event_moves_the_tip_the_heartbeat_names() {
         left: vec![],
     }]);
     let hb = *open(&rig.watcher.heartbeat(counter()).unwrap())
-        .verify(&roots(), &counter(), 0)
+        .verify(&roots(), None, &counter(), 0)
         .unwrap();
     assert_eq!((hb.tip_height, hb.tip_hash), (1, [1; 32]));
     // a reorganization: block 1 leaves and another takes its place
@@ -241,7 +271,7 @@ fn a_chain_event_moves_the_tip_the_heartbeat_names() {
         left: vec![one],
     }]);
     let hb = *open(&rig.watcher.heartbeat(counter()).unwrap())
-        .verify(&roots(), &counter(), 0)
+        .verify(&roots(), None, &counter(), 0)
         .unwrap();
     assert_eq!((hb.tip_height, hb.tip_hash), (1, [2; 32]));
 }

@@ -62,6 +62,7 @@ pub mod receipts;
 pub mod refunds;
 pub mod say;
 mod take_journal;
+pub mod watch;
 pub mod watcher;
 
 #[cfg(test)]
@@ -90,5 +91,8 @@ pub use pos::{
 pub use receipts::{MergeOffer, MergeRefused, ReceiptsLine, FEE_FILE, MERGE_MIN_COINS};
 pub use refunds::{
     Applied, CashRefundSeen, Evidence, IntakeError, NoteKind, RefundIntake, RefundNote, Stopped,
+};
+pub use watch::{
+    WatchConfig, WatchLink, WatchLinkConfig, WatchNode, WatchStartError, WatchState, WATCH_LINK_DIR,
 };
 pub use watcher::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE, NOTE_LOG};
