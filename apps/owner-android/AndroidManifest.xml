@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Two permissions: INTERNET (the node connects to the Bitcoin network and
+     the link's relay, through Orbot) and CAMERA (for reading the Key app's
+     response from a code; no camera code is in this build, and a phone
+     without a camera can still install the app). Nothing else is asked for:
+     no notifications, no foreground service. tests/check-manifest.sh fails
+     the build if the list differs, or if anything but the launcher activity
+     is exported. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.openbmt.owner.app">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false" />
+
+    <application
+        android:label="@string/app_name"
+        android:theme="@style/OwnerTheme"
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:usesCleartextTraffic="false"
+        android:extractNativeLibs="false"
+        android:supportsRtl="true">
+
+        <activity
+            android:name="org.openbmt.owner.app.MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|screenLayout|smallestScreenSize|uiMode"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
