@@ -12,6 +12,7 @@ use openbmt_core::pairing::{check_request, PairOffer, PairRequest, SignedPairing
 use openbmt_core::settings::{Settings, SignedSettings, SHARE_TOTAL_BPS};
 use openbmt_core::words::WORD_COUNT;
 
+use crate::edit::sats_per_usd_at;
 use crate::error::{BundleGap, OwnerError, Refusal};
 use crate::state::{Owner, State};
 use crate::types::{Delivery, SettingsQueued, Stage};
@@ -165,19 +166,19 @@ impl Owner {
     }
 
     /// AS-70: the settings that add `counter`: the latest held or queued
-    /// settings (or the starting values at `sats_per_usd` when there are
-    /// none), with the counter on the device list and in the counters, the
+    /// settings (or the starting values at a bitcoin price of `usd_per_btc`
+    /// dollars when there are none), with the counter on the device list and in the counters, the
     /// shares split equally ([`equal_shares`]) and the version one above
     /// every version signed so far.
     pub fn settings_with_counter(
         &self,
         counter: DeviceId,
-        sats_per_usd: u64,
+        usd_per_btc: u64,
     ) -> Result<Settings, Refusal> {
         let mut settings = match self.state.latest_settings() {
             Some(s) => s.clone(),
-            None if sats_per_usd == 0 => return Err(Refusal::NoSettingsRate),
-            None => Settings::defaults(sats_per_usd),
+            None if usd_per_btc == 0 => return Err(Refusal::NoSettingsRate),
+            None => Settings::defaults(sats_per_usd_at(usd_per_btc)?),
         };
         settings.version = self
             .state
@@ -201,7 +202,7 @@ impl Owner {
     pub fn queue_counter<E>(
         &mut self,
         pairing: u32,
-        sats_per_usd: u64,
+        usd_per_btc: u64,
         count: u32,
         now: u64,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
@@ -213,7 +214,7 @@ impl Owner {
             .find(|p| p.id == pairing && p.stage == Stage::Queued)
             .map(|p| p.request.counter)
             .ok_or(Refusal::UnknownEntry(pairing))?;
-        let settings = self.settings_with_counter(counter, sats_per_usd)?;
+        let settings = self.settings_with_counter(counter, usd_per_btc)?;
         let version = settings.version;
         let shares: Vec<(DeviceId, u16)> =
             settings.counters.iter().map(|(c, s)| (*c, *s)).collect();

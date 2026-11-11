@@ -1235,16 +1235,17 @@ impl Entry {
                 .queue_counter_request(&request, &write)
                 .map_err(|e| queue_error(&e))?;
             let needs_rate = !owner.has_settings_base();
-            // The shares do not depend on the rate; any rate above 0 makes
+            // The shares do not depend on the price; any price in range makes
             // the preview when the phone holds no settings.
-            let preview = match owner.settings_with_counter(queued.counter, 1) {
-                Ok(s) => s,
-                Err(r) => {
-                    // The request stays queued only when the person can go on.
-                    let _ = owner.cancel(queued.id, &write);
-                    return Err(queue_error(&OwnerError::Refused(r)));
-                }
-            };
+            let preview =
+                match owner.settings_with_counter(queued.counter, openbmt_owner::MIN_USD_PER_BTC) {
+                    Ok(s) => s,
+                    Err(r) => {
+                        // The request stays queued only when the person can go on.
+                        let _ = owner.cancel(queued.id, &write);
+                        return Err(queue_error(&OwnerError::Refused(r)));
+                    }
+                };
             Ok(CounterScanView {
                 pairing: queued.id,
                 counter: queued.counter.to_bytes().to_vec(),
@@ -1273,7 +1274,7 @@ impl Entry {
                 .node
                 .owner_mut()
                 .map_err(|e| node_error(&e))?
-                .queue_counter(a.pairing, a.sats_per_usd, count, now, &write)
+                .queue_counter(a.pairing, a.usd_per_btc, count, now, &write)
                 .map_err(|e| queue_error(&e))?;
             st.node.refresh_marks();
             Ok(CounterQueuedView {
@@ -1713,7 +1714,6 @@ impl Entry {
                 sats: l.sats,
                 display_usd: l.display_usd,
             };
-            let rate = st.node.owner().settings_rate();
             Ok(st.node.owner().known_settings().map(|s| SettingsHeldView {
                 version: s.version,
                 light_per_sale: limit(&s.light_per_sale),
@@ -1744,7 +1744,6 @@ impl Entry {
                     .collect(),
                 boxes: s.boxes.iter().map(|d| d.to_bytes().to_vec()).collect(),
                 lightning_node: s.lightning_node.map(|k| k.to_vec()),
-                rate,
             }))
         })
     }

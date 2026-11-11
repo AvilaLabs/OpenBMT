@@ -214,12 +214,20 @@ object AppWords {
         "If they match, say so below. If they differ, say so and nothing is paired.",
     )
 
-    /** A phone with no settings needs a rate to start them. */
-    val counterRateNeeded = w(
-        Tones.INFO, "Rate needed",
-        "This phone holds no settings yet, and the starting limits are in dollars, so it needs today's rate.",
+    /** A phone with no settings needs today's price of a bitcoin to start them. */
+    val counterPriceNeeded = w(
+        Tones.INFO, "Price needed",
+        "This phone holds no settings yet, and the starting limits are in dollars, so it needs today's price of a bitcoin.",
         Who.OWNER,
-        "Type satoshis to a dollar as a whole number above 0, then say the words match.",
+        "Type today's price of one bitcoin in whole dollars, then say the words match.",
+    )
+
+    /** The price typed is not a whole number of dollars above 0. */
+    val priceNotRead = w(
+        Tones.STOP, "Price not read",
+        "The price of a bitcoin is a whole number of dollars above 0, so nothing was queued.",
+        Who.OWNER,
+        "Type today's price of one bitcoin in whole dollars, like 98500.",
     )
 
     /** The owner said the words differ, and the queued request was taken out. */
@@ -998,7 +1006,8 @@ object AppWords {
         "sharesNote" to sharesNote(2),
         "sharesNoteOne" to sharesNote(1),
         "counterCompare" to counterCompare,
-        "counterRateNeeded" to counterRateNeeded,
+        "counterPriceNeeded" to counterPriceNeeded,
+        "priceNotRead" to priceNotRead,
         "counterCancelled" to counterCancelled,
         "counterNotPaired" to counterNotPaired,
         "counterCodeAnimated" to counterCodeAnimated,

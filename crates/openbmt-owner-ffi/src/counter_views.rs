@@ -45,18 +45,18 @@ wire_record!(CounterScanView {
 pub struct CounterConfirmArgs {
     /// The pairing's number, from `counter_scan`.
     pub pairing: u32,
-    /// Satoshis to a dollar, for the starting settings when the phone holds
-    /// none; ignored when it does.
-    pub sats_per_usd: u64,
+    /// Today's price of one bitcoin in whole dollars, for the starting
+    /// settings when the phone holds none; ignored when it does (AS-70).
+    pub usd_per_btc: u64,
 }
 
 wire_record!(CounterConfirmArgs {
     pairing,
-    sats_per_usd
+    usd_per_btc
 });
 wire_record_get!(CounterConfirmArgs {
     pairing,
-    sats_per_usd
+    usd_per_btc
 });
 
 /// What `counter_confirm` queued (AS-70, AS-71).

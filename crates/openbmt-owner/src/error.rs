@@ -119,17 +119,19 @@ pub enum Refusal {
     /// AS-69: the counter is on a device list, in the queue or finished and
     /// waiting already.
     PairingKnown,
-    /// AS-70: the owner phone holds no settings and was given no rate to
-    /// start them from.
+    /// AS-70: the owner phone holds no settings and was given no bitcoin
+    /// price to start them from.
     NoSettingsRate,
     /// AS-72: a counter's bundle cannot be made yet: something it needs is
     /// not here.
     BundleNotReady(BundleGap),
     /// AS-74: the owner phone holds no settings, held or queued, to change.
     NoSettingsToChange,
-    /// AS-75: a changed limit in dollars needs a rate and the settings held
-    /// give none to take it from.
+    /// AS-75: a changed limit in dollars needs today's price of a bitcoin
+    /// and the edit gave none.
     EditNeedsRate,
+    /// AS-75: the price of a bitcoin given is outside $1,000 to $10,000,000.
+    PriceOutOfRange,
     /// AS-76: the text given as the Lightning node is not a node key or
     /// address.
     LightningNode(NodeKeyFault),
@@ -216,14 +218,18 @@ impl fmt::Display for Refusal {
             Self::PairingKnown => write!(f, "AS-69: this counter is paired or waiting already"),
             Self::NoSettingsRate => write!(
                 f,
-                "AS-70: no settings are held and no rate was given to start them"
+                "AS-70: no settings are held and no bitcoin price was given to start them"
             ),
             Self::NoSettingsToChange => {
                 write!(f, "AS-74: no settings are held or queued to change")
             }
             Self::EditNeedsRate => write!(
                 f,
-                "AS-75: a limit in dollars changed and no rate is known to turn it into satoshis"
+                "AS-75: a limit in dollars changed and no price of a bitcoin was given"
+            ),
+            Self::PriceOutOfRange => write!(
+                f,
+                "AS-75: the price of a bitcoin is outside $1,000 to $10,000,000"
             ),
             Self::LightningNode(why) => write!(f, "AS-76: the Lightning node is refused: {why}"),
             Self::BundleNotReady(gap) => write!(f, "AS-72: the bundle is not ready: {gap}"),

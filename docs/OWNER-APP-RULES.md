@@ -248,8 +248,10 @@ owner's choices.
   settings and the first batch together; "The words differ" takes the queued
   request out. The shares are equal, 1/n each, and the words say that custom
   shares are set in the settings editor. A phone that holds no settings
-  asks for the rate in satoshis to a dollar, a whole number above 0, and
-  queues nothing without it. Leaving the screen queues no settings.
+  asks for today's price of one bitcoin in whole dollars, above 0, and
+  queues nothing without it; the node turns the price into satoshis to a
+  dollar and judges its range (AS-75). Leaving the screen queues no
+  settings.
 - **OA-24.** After the confirmation the approval is the request and
   response screens of OA-20 and OA-21; nothing in the app marks anything as
   approved. When the response has been taken, a counter whose pairing it
@@ -378,11 +380,14 @@ so. It builds no settings bytes and signs nothing.
   and shows every change as a line with its name, its old value and its new
   one, those that need the Key app (loosening) apart from those that take
   effect when delivered (tightening), with the library's own words for a
-  refusal. When the library says a rate is needed the review asks for
-  satoshis to a dollar, a whole number above 0, and asks again. A change
-  that changes nothing is said so and cannot be queued. Only "Queue the
-  change" calls `queueSettings`, with the bytes the preview gave, and then
-  clears what was typed.
+  refusal. A changed limit is shown with its satoshis and the price they
+  were counted at. When the library says a price is needed, or that the one
+  given is outside its range, the review asks for today's price of one
+  bitcoin in whole dollars, above 0, in an empty field: the price is never
+  filled in or kept, it is forgotten when the review is left, and the node
+  converts it (OA-07). A change that changes nothing is said so and cannot
+  be queued. Only "Queue the change" calls `queueSettings`, with the bytes
+  the preview gave, and then clears what was typed.
 - **OA-35.** After the queue call the owner is taken to the screens that
   exist: a change that needs the Key app goes to the request screen of
   OA-20 and its response (OA-21), and a stricter one, which the node signs

@@ -29,9 +29,9 @@ pub enum LightningEdit {
 /// as it is (AS-74). Money is in whole dollars, 0 meaning off.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SettingsEdit {
-    /// Satoshis to a dollar for the limits this edit changes. Taken from
-    /// the settings held when it is `None` (AS-75).
-    pub sats_per_usd: Option<u64>,
+    /// Today's price of one bitcoin in whole dollars, for the limits this
+    /// edit changes. A changed limit without it is refused (AS-75).
+    pub usd_per_btc: Option<u64>,
     /// Light check: largest instant sale.
     pub light_per_sale: Option<u32>,
     /// Light check: shop-wide outstanding instant total.
@@ -89,8 +89,24 @@ pub struct SettingsPreview {
     /// The whole change as the queue sorts it: loosening needs the Key
     /// app's co-signature.
     pub change: Change,
-    /// The rate the changed limits were made at, when any was.
-    pub rate: Option<u64>,
+    /// The price of a bitcoin in dollars and the satoshis to a dollar that
+    /// the changed limits were made at, when any was (AS-75).
+    pub price: Option<(u64, u64)>,
+}
+
+/// Lowest price of a bitcoin in dollars that is taken (AS-75).
+pub const MIN_USD_PER_BTC: u64 = 1_000;
+/// Highest price of a bitcoin in dollars that is taken (AS-75).
+pub const MAX_USD_PER_BTC: u64 = 10_000_000;
+
+/// AS-75: satoshis to a dollar at a price of `usd_per_btc` dollars for a
+/// bitcoin: 100,000,000 over the price, rounded to the nearest whole number
+/// (a half rounds up). A price outside $1,000 to $10,000,000 is refused.
+pub fn sats_per_usd_at(usd_per_btc: u64) -> Result<u64, Refusal> {
+    if !(MIN_USD_PER_BTC..=MAX_USD_PER_BTC).contains(&usd_per_btc) {
+        return Err(Refusal::PriceOutOfRange);
+    }
+    Ok((200_000_000 + usd_per_btc) / (2 * usd_per_btc))
 }
 
 fn hex_val(c: char) -> Option<u8> {
@@ -153,30 +169,9 @@ pub fn parse_lightning_node(text: &str) -> Result<[u8; LIGHTNING_NODE_BYTES], Re
     Ok(bytes)
 }
 
-/// The rate the limits of `s` were made at: satoshis over dollars of the
-/// first limit that is on and has both (AS-75).
-fn implied_rate(s: &Settings) -> Option<u64> {
-    [
-        &s.light_per_sale,
-        &s.light_budget,
-        &s.node_per_sale,
-        &s.node_budget,
-        &s.box_per_sale,
-        &s.box_budget,
-        &s.refund_cap,
-        &s.refund_daily_cap,
-        &s.cashier_override_daily_cap,
-        &s.manager_override_ceiling,
-    ]
-    .into_iter()
-    .find(|l| l.display_usd > 0 && l.sats > 0)
-    .map(|l| l.sats / u64::from(l.display_usd))
-    .filter(|rate| *rate > 0)
-}
-
 /// AS-74, AS-75: the limit after an edit of `usd` dollars. The same dollars
 /// keep the limit as it is, satoshis too; 0 turns it off; any other amount
-/// is made at `rate`.
+/// is made at `rate`, satoshis to a dollar from today's price.
 fn edited_limit(
     old: &Limit,
     usd: Option<u32>,
@@ -231,10 +226,10 @@ impl Owner {
             .state
             .latest_settings()
             .ok_or(Refusal::NoSettingsToChange)?;
-        let rate = edit
-            .sats_per_usd
-            .filter(|r| *r > 0)
-            .or_else(|| implied_rate(base));
+        let rate = match edit.usd_per_btc {
+            Some(price) => Some(sats_per_usd_at(price)?),
+            None => None,
+        };
         let mut used = false;
         let mut s = base.clone();
         s.version = self
@@ -323,12 +318,10 @@ impl Owner {
             reference,
             fields,
             change,
-            rate: if used { rate } else { None },
+            price: match (used, edit.usd_per_btc, rate) {
+                (true, Some(price), Some(rate)) => Some((price, rate)),
+                _ => None,
+            },
         })
-    }
-
-    /// AS-75: the rate the settings held were made at, when they give one.
-    pub fn settings_rate(&self) -> Option<u64> {
-        self.state.latest_settings().and_then(implied_rate)
     }
 }

@@ -401,7 +401,6 @@ struct Held {
     counters: usize,
     boxes: usize,
     node: Option<Vec<u8>>,
-    rate: Option<u64>,
 }
 
 /// `SettingsHeldView`, field by field as the frame writes them.
@@ -425,7 +424,6 @@ fn read_settings(r: &mut Rd<'_>) -> Held {
     let counters = r.list(|r| (r.bytes(), r.u32()));
     let boxes = r.list(Rd::bytes);
     let node = r.opt(Rd::bytes);
-    let rate = r.opt(Rd::u64);
     Held {
         version,
         limits,
@@ -436,7 +434,6 @@ fn read_settings(r: &mut Rd<'_>) -> Held {
         counters: counters.len(),
         boxes: boxes.len(),
         node,
-        rate,
     }
 }
 
@@ -493,8 +490,8 @@ fn the_settings_the_node_holds_and_the_outbox_follow_an_approval() {
         (1, 0),
         "one counter share, no Box"
     );
-    // No Lightning node is named; the limits were made at 1,000 sats to a dollar.
-    assert_eq!((held.node, held.rate), (None, Some(1_000)));
+    // No Lightning node is named.
+    assert_eq!((held.node), None);
     assert!(queue(&rig, handle).others.is_empty(), "both left the queue");
 
     let response = rig.call(27, handle, &[]);

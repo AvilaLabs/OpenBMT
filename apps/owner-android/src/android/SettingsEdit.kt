@@ -272,7 +272,7 @@ internal fun Controller.showEditReview() {
         val p = try {
             n.previewSettings(args)
         } catch (e: OwnerException) {
-            if (e.rule == "AS-75") showEditRate(e.sayWords()) else showChangeSettings(e.sayWords())
+            if (e.rule == "AS-75") showEditPrice(e.sayWords()) else showChangeSettings(e.sayWords())
             return@withHeld
         } catch (e: LinkageError) {
             showChangeSettings(AppWords.libraryMissing(e.message))
@@ -294,7 +294,6 @@ internal fun Controller.showEditReview() {
                 for (line in delivered) views.add(ui.text(line, 15f))
             }
             SettingsEditModel.reviewShares(p)?.let { views.add(ui.text(it, 15f)) }
-            p.rate?.let { views.add(ui.text(SettingsEditModel.rateLine(it), 15f)) }
             views.add(
                 ui.button("Queue the change") {
                     val q = attempt(msg) { n.queueSettings(p.settings) } ?: return@button
@@ -308,25 +307,35 @@ internal fun Controller.showEditReview() {
             )
         }
         views.add(msg)
-        views.add(ui.button("Back") { showChangeSettings() })
+        views.add(
+            ui.button("Back") {
+                settingsDraft.price = ""
+                showChangeSettings()
+            },
+        )
         page(views)
     }
 }
 
-/** The library said a rate is needed: its words, a field for satoshis to a dollar, and the review again. */
-private fun Controller.showEditRate(words: SayWords) {
+/**
+ * The library said a price is needed, or that the one typed is not one: its words, an empty field for today's price
+ * of one bitcoin in whole dollars (never filled in), and the review again. The price is forgotten on the way in and
+ * on the way out, so it is typed afresh each time (OA-34).
+ */
+private fun Controller.showEditPrice(words: SayWords) {
+    settingsDraft.price = ""
     val msg = Slot(act)
-    val field = numberField(act, "Satoshis to a dollar")
+    val field = numberField(act, "Dollars for one bitcoin")
     page(
         listOf(
-            ui.text("A rate is needed", 22f, bold = true),
+            ui.text("Today's price", 22f, bold = true),
             ui.words(words),
             field,
             ui.button("Review again") {
-                when (val r = CounterModel.rate(field.text.toString())) {
+                when (val r = CounterModel.price(field.text.toString())) {
                     is Form.Refused -> msg.show(ui.words(r.words))
                     is Form.Ok -> {
-                        settingsDraft.rate = field.text.toString()
+                        settingsDraft.price = field.text.toString()
                         showEditReview()
                     }
                 }

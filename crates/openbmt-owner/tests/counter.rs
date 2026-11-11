@@ -8,7 +8,8 @@ use common::*;
 use openbmt_core::bundle::CounterBundle;
 use openbmt_owner::{equal_shares, BundleGap, Delivery, OwnerError, Refusal, Stage};
 
-const RATE: u64 = 1_000;
+/// $100,000 a bitcoin, which is 1,000 satoshis to a dollar.
+const PRICE: u64 = 100_000;
 
 /// Queue counter `n`'s request, its settings and its batch of 3.
 fn add(rig: &mut Rig, n: u8) -> openbmt_owner::CounterQueued {
@@ -16,7 +17,7 @@ fn add(rig: &mut Rig, n: u8) -> openbmt_owner::CounterQueued {
     let queued = ok(rig.owner.queue_counter_request(&request, nop));
     ok(rig
         .owner
-        .queue_counter(queued.id, RATE, SMALL_BATCH, NOW, nop))
+        .queue_counter(queued.id, PRICE, SMALL_BATCH, NOW, nop))
 }
 
 #[test]
@@ -85,7 +86,7 @@ fn as_69_a_counter_that_is_queued_waiting_or_listed_is_refused() {
         refused(rig.owner.queue_counter_request(&request, nop)),
         Refusal::PairingKnown
     );
-    ok(rig.owner.queue_counter(1, RATE, SMALL_BATCH, NOW, nop));
+    ok(rig.owner.queue_counter(1, PRICE, SMALL_BATCH, NOW, nop));
     rig.round(&[], 0);
     // Finished and waiting in the outbox, and listed in the settings held.
     assert_eq!(
@@ -103,7 +104,7 @@ fn as_69_a_counter_that_is_queued_waiting_or_listed_is_refused() {
 }
 
 #[test]
-fn as_70_with_no_settings_a_rate_is_needed_and_the_first_counter_has_all_of_the_budget() {
+fn as_70_with_no_settings_a_price_is_needed_and_the_first_counter_has_all_of_the_budget() {
     let mut rig = Rig::new();
     assert!(!rig.owner.has_settings_base());
     let (_, request) = pair_request(&rig.owner, 1);
@@ -114,18 +115,34 @@ fn as_70_with_no_settings_a_rate_is_needed_and_the_first_counter_has_all_of_the_
         Refusal::NoSettingsRate
     );
     assert_eq!(rig.owner.snapshot().unwrap(), before);
+    // A price outside $1,000 to $10,000,000 is refused and nothing is queued.
+    for bad in [1, 999, 10_000_001] {
+        assert_eq!(
+            refused(
+                rig.owner
+                    .queue_counter(queued.id, bad, SMALL_BATCH, NOW, nop)
+            ),
+            Refusal::PriceOutOfRange
+        );
+    }
+    assert_eq!(rig.owner.snapshot().unwrap(), before);
     let made = ok(rig
         .owner
-        .queue_counter(queued.id, RATE, SMALL_BATCH, NOW, nop));
+        .queue_counter(queued.id, PRICE, SMALL_BATCH, NOW, nop));
     assert_eq!(made.settings_version, 1);
     assert_eq!(made.shares, vec![(counter(1).device_id(), 10_000)]);
     let s = &rig.owner.queued_settings()[0].signed.settings;
     assert!(s.devices.contains(&counter(1).device_id()));
     assert_eq!(s.light_per_sale.display_usd, {
-        openbmt_core::settings::Settings::defaults(RATE)
+        openbmt_core::settings::Settings::defaults(PRICE)
             .light_per_sale
             .display_usd
     });
+    // The starting limits are counted at the price: $100,000 is 1,000 sats a dollar.
+    assert_eq!(
+        s.light_per_sale.sats,
+        u64::from(s.light_per_sale.display_usd) * 1_000
+    );
     assert_eq!(made.words().code, Some("AS-70"));
 }
 
@@ -212,12 +229,12 @@ fn as_71_nothing_is_queued_unless_the_pairing_the_settings_and_the_batch_all_are
     let before = rig.owner.snapshot().unwrap();
     // A batch below the owner phone's own minimum is not derived.
     assert_eq!(
-        refused(rig.owner.queue_counter(queued.id, RATE, 2, NOW, nop)),
+        refused(rig.owner.queue_counter(queued.id, PRICE, 2, NOW, nop)),
         Refusal::BatchNotDerived
     );
     // A pairing that is not queued has no counter to add.
     assert_eq!(
-        refused(rig.owner.queue_counter(99, RATE, SMALL_BATCH, NOW, nop)),
+        refused(rig.owner.queue_counter(99, PRICE, SMALL_BATCH, NOW, nop)),
         Refusal::UnknownEntry(99)
     );
     assert_eq!(rig.owner.snapshot().unwrap(), before);
@@ -229,7 +246,7 @@ fn as_71_nothing_is_queued_unless_the_pairing_the_settings_and_the_batch_all_are
     assert!(matches!(
         refused(
             rig.owner
-                .queue_counter(queued.id, RATE, SMALL_BATCH, NOW, nop)
+                .queue_counter(queued.id, PRICE, SMALL_BATCH, NOW, nop)
         ),
         Refusal::Full("the batch queue")
     ));
@@ -245,7 +262,7 @@ fn as_71_a_store_that_fails_changes_nothing() {
     let before = rig.owner.snapshot().unwrap();
     let err = rig
         .owner
-        .queue_counter(queued.id, RATE, SMALL_BATCH, NOW, |_| Err::<(), _>("disk"))
+        .queue_counter(queued.id, PRICE, SMALL_BATCH, NOW, |_| Err::<(), _>("disk"))
         .expect_err("refused");
     assert!(matches!(err, OwnerError::Store("disk")));
     assert_eq!(rig.owner.snapshot().unwrap(), before);

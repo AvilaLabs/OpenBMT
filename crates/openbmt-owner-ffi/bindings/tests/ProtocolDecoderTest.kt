@@ -106,7 +106,7 @@ object ProtocolDecoderTest {
         check(held.heartbeatMaxAgeSecs == 900L && held.torOn && !held.customerWifi && held.minSaleSats == 0L)
         check(held.devices.size == 1 && held.counters.size == 1 && held.counters[0].bps == 10_000L)
         check(held.boxes.isEmpty())
-        check(held.lightningNode!!.size == 33 && held.lightningNode!![0].toInt() == 2 && held.rate == 1_000L)
+        check(held.lightningNode!!.size == 33 && held.lightningNode!![0].toInt() == 2)
         check(decodeResponse(header(0, byteArrayOf(0))).let { r -> r.option { r.settingsHeld() } } == null)
         rejects("a settings flag") { decodeResponse(header(0, byteArrayOf(2))).let { r -> r.option { r.settingsHeld() } } }
         rejects("a short settings") { decodeResponse(settingsFrame().copyOf(40)).let { r -> r.option { r.settingsHeld() } } }
@@ -116,7 +116,7 @@ object ProtocolDecoderTest {
         check(preview.changes[0].field == "refund_cap" && preview.changes[0].counter == null)
         check(preview.changes[0].old == "$100" && preview.changes[0].new == "$150" && preview.changes[0].loosening)
         check(preview.changes[1].counter!!.size == 32 && preview.changes[1].new == "33.33%")
-        check(!preview.changes[1].loosening && preview.sharesTotalBps == 8_333L && preview.rate == 1_000L)
+        check(!preview.changes[1].loosening && preview.sharesTotalBps == 8_333L && preview.usdPerBtc == 98_500L && preview.satsPerUsd == 1_015L)
         check(preview.settings.size == 2)
         rejects("a preview flag") { decodeResponse(previewFrame(needsKeyApp = 2)).settingsPreview() }
         rejects("a short preview") { decodeResponse(previewFrame().copyOf(30)).settingsPreview() }
@@ -548,7 +548,7 @@ object ProtocolDecoderTest {
         w.u32(1).bytes(ByteArray(32) { 1 })
         w.u32(1).bytes(ByteArray(32) { 2 }).u32(10_000)
         w.u32(0)
-        w.u8(1).bytes(ByteArray(33) { if (it == 0) 2 else 7 }).u8(1).u64(1_000)
+        w.u8(1).bytes(ByteArray(33) { if (it == 0) 2 else 7 })
         return header(0, w.toByteArray())
     }
 
@@ -558,7 +558,7 @@ object ProtocolDecoderTest {
         w.string("refund_cap").string("Largest single refund").u8(0).string("$100").string("$150").bool(true)
         w.string("counters").string("Counter's share").u8(1).bytes(ByteArray(32) { 5 })
             .string("50%").string("33.33%").bool(false)
-        w.u8(needsKeyApp).bool(false).u32(8_333).u8(1).u64(1_000).bytes(byteArrayOf(9, 9))
+        w.u8(needsKeyApp).bool(false).u32(8_333).u8(1).u64(98_500).u8(1).u64(1_015).bytes(byteArrayOf(9, 9))
         return header(0, w.toByteArray())
     }
 
@@ -568,7 +568,7 @@ object ProtocolDecoderTest {
 
     private fun sampleEdit() =
         SettingsEditArgs(
-            satsPerUsd = 1_000,
+            usdPerBtc = 1_000,
             lightPerSale = 10,
             nodeBudget = 50,
             refundCap = 100,

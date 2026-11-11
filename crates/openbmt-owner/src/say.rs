@@ -576,10 +576,10 @@ impl Refusal {
             )
             .code("AS-69"),
             Self::NoSettingsRate => stop(
-                "A rate is needed",
-                "This phone holds no settings for the shop yet, and their limits in dollars need today's rate.",
+                "A price is needed",
+                "This phone holds no settings for the shop yet, and their limits in dollars need today's price of a bitcoin.",
                 Who::Owner,
-                "Enter how many satoshis one dollar buys today, then add the counter again.",
+                "Enter today's price of one bitcoin in dollars, then add the counter again.",
             )
             .code("AS-70"),
             Self::NoSettingsToChange => stop(
@@ -590,10 +590,17 @@ impl Refusal {
             )
             .code("AS-74"),
             Self::EditNeedsRate => stop(
-                "A rate is needed",
-                "A limit in dollars was changed, and the settings held give no rate to count it in satoshis.",
+                "A price is needed",
+                "A limit in dollars was changed, and counting it in satoshis needs today's price of a bitcoin.",
                 Who::Owner,
-                "Enter how many satoshis one dollar buys today, then review the change again.",
+                "Enter today's price of one bitcoin in dollars, then review the change again.",
+            )
+            .code("AS-75"),
+            Self::PriceOutOfRange => stop(
+                "Check the price",
+                "The price of a bitcoin must be from $1,000 to $10,000,000, so this price was not taken.",
+                Who::Owner,
+                "Check today's price of one bitcoin in dollars and enter it again.",
             )
             .code("AS-75"),
             Self::LightningNode(fault) => {
@@ -1114,6 +1121,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         Refusal::NoSettingsToChange.words(),
     );
     add("Refusal::EditNeedsRate", Refusal::EditNeedsRate.words());
+    add("Refusal::PriceOutOfRange", Refusal::PriceOutOfRange.words());
     for (n, fault) in NODE_KEY_FAULTS {
         add(
             &format!("Refusal::LightningNode/{n}"),

@@ -6,8 +6,12 @@ mod common;
 use common::*;
 use openbmt_core::settings::{Change, FieldChange, Limit, Settings};
 use openbmt_owner::{
-    parse_lightning_node, LightningEdit, NodeKeyFault, Refusal, SettingsEdit, SettingsQueued,
+    parse_lightning_node, sats_per_usd_at, LightningEdit, NodeKeyFault, Refusal, SettingsEdit,
+    SettingsQueued, MAX_USD_PER_BTC, MIN_USD_PER_BTC,
 };
+
+/// $100,000 a bitcoin: 1,000 satoshis to a dollar, the rate of the rig's settings.
+const PRICE: u64 = 100_000;
 
 /// The generator point, as a compressed key: a real point on the curve.
 const KEY: &str = "0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798";
@@ -212,7 +216,10 @@ fn as_74_every_field_has_an_edit_that_loosens_and_one_that_tightens() {
     let mut seen = std::collections::BTreeSet::new();
     for case in cases() {
         let mut rig = held(case.base);
-        let mut edit = SettingsEdit::default();
+        let mut edit = SettingsEdit {
+            usd_per_btc: Some(PRICE),
+            ..SettingsEdit::default()
+        };
         (case.edit)(&mut edit);
         let preview = rig.owner.settings_preview(&edit).expect("a preview");
         assert_eq!(
@@ -260,6 +267,7 @@ fn as_74_the_edit_is_applied_to_the_latest_settings_and_shown_against_those_in_f
     // A queued loosening that is not approved yet.
     let loosen = SettingsEdit {
         refund_cap: Some(500),
+        usd_per_btc: Some(PRICE),
         ..SettingsEdit::default()
     };
     let first = rig.owner.settings_preview(&loosen).unwrap();
@@ -290,7 +298,6 @@ fn as_74_no_settings_held_or_queued_is_refused() {
         o.settings_preview(&edit).unwrap_err(),
         Refusal::NoSettingsToChange
     );
-    assert_eq!(o.settings_rate(), None);
 }
 
 #[test]
@@ -367,7 +374,7 @@ fn as_74_shares_that_add_up_to_more_than_the_whole_are_refused() {
 }
 
 #[test]
-fn as_75_a_changed_limit_without_a_rate_is_refused() {
+fn as_75_a_changed_limit_without_a_price_is_refused() {
     let rig = held(|s| {
         for l in [
             &mut s.light_per_sale,
@@ -387,7 +394,6 @@ fn as_75_a_changed_limit_without_a_rate_is_refused() {
             };
         }
     });
-    assert_eq!(rig.owner.settings_rate(), None);
     let edit = SettingsEdit {
         light_per_sale: Some(5),
         ..SettingsEdit::default()
@@ -396,68 +402,91 @@ fn as_75_a_changed_limit_without_a_rate_is_refused() {
         rig.owner.settings_preview(&edit).unwrap_err(),
         Refusal::EditNeedsRate
     );
-    // A rate of 0 is no rate.
-    let zero = SettingsEdit {
-        sats_per_usd: Some(0),
-        ..edit.clone()
-    };
-    assert_eq!(
-        rig.owner.settings_preview(&zero).unwrap_err(),
-        Refusal::EditNeedsRate
-    );
-    // Turning a limit off, or changing another field, needs none.
+    // Turning a limit off, or changing another field, needs no price.
     let off = SettingsEdit {
         light_per_sale: Some(0),
         tor_on: Some(true),
         ..SettingsEdit::default()
     };
-    assert!(rig.owner.settings_preview(&off).is_ok());
-    // With a rate the limit is made at it.
-    let rated = SettingsEdit {
-        sats_per_usd: Some(1_500),
+    let preview = rig.owner.settings_preview(&off).unwrap();
+    assert_eq!(preview.price, None);
+    // With a price the limit is made at it.
+    let priced = SettingsEdit {
+        usd_per_btc: Some(PRICE),
         ..edit
     };
-    let preview = rig.owner.settings_preview(&rated).unwrap();
-    assert_eq!(preview.settings.light_per_sale, Limit::from_usd(5, 1_500));
-    assert_eq!(preview.rate, Some(1_500));
+    let preview = rig.owner.settings_preview(&priced).unwrap();
+    assert_eq!(preview.settings.light_per_sale, Limit::from_usd(5, 1_000));
+    assert_eq!(preview.price, Some((PRICE, 1_000)));
 }
 
 #[test]
-fn as_75_the_rate_is_taken_from_the_settings_held_and_a_limit_left_alone_keeps_its_satoshis() {
+fn as_75_the_price_is_turned_into_satoshis_to_a_dollar_rounded_to_the_nearest() {
+    assert_eq!(sats_per_usd_at(100_000), Ok(1_000));
+    assert_eq!(sats_per_usd_at(98_500), Ok(1_015));
+    assert_eq!(sats_per_usd_at(1_000), Ok(100_000));
+    assert_eq!(sats_per_usd_at(10_000_000), Ok(10));
+    // 100,000,000 / 3,000 is 33,333.33, / 6,000 is 16,666.67 and / 1,600,000 is 62.5: a half rounds up.
+    assert_eq!(sats_per_usd_at(3_000), Ok(33_333));
+    assert_eq!(sats_per_usd_at(6_000), Ok(16_667));
+    assert_eq!(sats_per_usd_at(80_000), Ok(1_250));
+    assert_eq!(sats_per_usd_at(1_600_000), Ok(63));
+    assert_eq!(
+        sats_per_usd_at(MIN_USD_PER_BTC - 1),
+        Err(Refusal::PriceOutOfRange)
+    );
+    assert_eq!(
+        sats_per_usd_at(MAX_USD_PER_BTC + 1),
+        Err(Refusal::PriceOutOfRange)
+    );
+    assert_eq!(sats_per_usd_at(0), Err(Refusal::PriceOutOfRange));
+    assert_eq!(sats_per_usd_at(u64::MAX), Err(Refusal::PriceOutOfRange));
+}
+
+#[test]
+fn as_75_a_price_outside_the_range_is_refused_and_a_limit_left_alone_keeps_its_satoshis() {
     let rig = held(plain);
-    assert_eq!(rig.owner.settings_rate(), Some(1_000));
-    // The same dollars at another rate change nothing.
+    for bad in [0, 999, 10_000_001] {
+        let edit = SettingsEdit {
+            usd_per_btc: Some(bad),
+            node_per_sale: Some(30),
+            ..SettingsEdit::default()
+        };
+        assert_eq!(
+            rig.owner.settings_preview(&edit).unwrap_err(),
+            Refusal::PriceOutOfRange
+        );
+    }
+    // The same dollars at another price change nothing.
     let same = SettingsEdit {
-        sats_per_usd: Some(2_000),
+        usd_per_btc: Some(50_000),
         light_per_sale: Some(10),
         light_budget: Some(60),
         ..SettingsEdit::default()
     };
     let preview = rig.owner.settings_preview(&same).unwrap();
     assert_eq!(preview.settings.light_per_sale, Limit::from_usd(10, 1_000));
-    // Only the limit that changed is made at the rate that was given.
+    // Only the limit that changed is made at the price that was given.
     assert_eq!(preview.settings.light_budget, Limit::from_usd(60, 2_000));
-    assert_eq!(preview.rate, Some(2_000));
+    assert_eq!(preview.price, Some((50_000, 2_000)));
     let names: Vec<_> = preview.fields.iter().map(|f| f.field).collect();
     assert_eq!(names, ["light_budget"]);
-    // Without a rate of its own the edit uses the shop's.
-    let own = SettingsEdit {
-        node_per_sale: Some(30),
+    // A price is not used when no limit changed, and is not shown.
+    let none = SettingsEdit {
+        usd_per_btc: Some(50_000),
+        tor_on: Some(true),
         ..SettingsEdit::default()
     };
-    let preview = rig.owner.settings_preview(&own).unwrap();
-    assert_eq!(preview.settings.node_per_sale, Limit::from_usd(30, 1_000));
-    assert_eq!(preview.rate, Some(1_000));
-    // A limit that cannot be counted in satoshis is refused.
-    let huge = SettingsEdit {
-        sats_per_usd: Some(u64::MAX),
-        node_per_sale: Some(30),
+    assert_eq!(rig.owner.settings_preview(&none).unwrap().price, None);
+    // $98,500 gives 1,015 sats to a dollar: $100 is 101,500 satoshis.
+    let odd = SettingsEdit {
+        usd_per_btc: Some(98_500),
+        node_per_sale: Some(100),
         ..SettingsEdit::default()
     };
-    assert!(matches!(
-        rig.owner.settings_preview(&huge),
-        Err(Refusal::SettingsInvalid(_))
-    ));
+    let preview = rig.owner.settings_preview(&odd).unwrap();
+    assert_eq!(preview.settings.node_per_sale, Limit::from_usd(100, 1_015));
+    assert_eq!(preview.settings.node_per_sale.sats, 101_500);
 }
 
 #[test]
@@ -572,7 +601,10 @@ fn as_77_a_preview_stores_and_changes_nothing() {
     let outbox = rig.owner.outbox().len();
     let stores = rig.owner_store.calls();
     for case in cases() {
-        let mut edit = SettingsEdit::default();
+        let mut edit = SettingsEdit {
+            usd_per_btc: Some(PRICE),
+            ..SettingsEdit::default()
+        };
         (case.edit)(&mut edit);
         let _ = rig.owner.settings_preview(&edit);
     }
@@ -588,6 +620,7 @@ fn as_77_the_preview_and_the_queue_agree_end_to_end() {
     // A loosening edit with a tightening one in it is loosening as a whole.
     let edit = SettingsEdit {
         refund_cap: Some(150),
+        usd_per_btc: Some(PRICE),
         tor_on: Some(true),
         ..SettingsEdit::default()
     };
@@ -614,6 +647,7 @@ fn as_77_the_preview_and_the_queue_agree_end_to_end() {
     // A tightening edit is signed by the owner alone and handed back.
     let tighten = SettingsEdit {
         refund_cap: Some(50),
+        usd_per_btc: Some(PRICE),
         ..SettingsEdit::default()
     };
     let preview = rig.owner.settings_preview(&tighten).unwrap();

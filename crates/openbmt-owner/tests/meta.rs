@@ -92,6 +92,7 @@ fn every_error_says_which_rule_in_words() {
         Refusal::NoSettingsRate.to_string(),
         Refusal::NoSettingsToChange.to_string(),
         Refusal::EditNeedsRate.to_string(),
+        Refusal::PriceOutOfRange.to_string(),
         Refusal::LightningNode(openbmt_owner::NodeKeyFault::NotOnCurve).to_string(),
         Refusal::BundleNotReady(openbmt_owner::BundleGap::Pairing).to_string(),
         Refusal::BundleNotReady(openbmt_owner::BundleGap::Settings).to_string(),

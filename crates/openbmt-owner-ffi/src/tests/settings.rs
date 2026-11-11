@@ -22,7 +22,7 @@ const SET: u8 = 2;
 /// An edit as the app writes it: every field absent unless set.
 #[derive(Default)]
 struct Edit {
-    rate: Option<u64>,
+    price: Option<u64>,
     limits: [Option<u32>; 10],
     tolerance: Option<u32>,
     min_conf: Option<u8>,
@@ -50,7 +50,7 @@ fn opt32(w: W, v: Option<u32>) -> W {
 
 impl Edit {
     fn bytes(&self) -> Vec<u8> {
-        let mut w = match self.rate {
+        let mut w = match self.price {
             None => W::new().u8(0),
             Some(r) => W::new().u8(1).u64(r),
         };
@@ -105,6 +105,7 @@ struct Preview {
     needs_key_app: bool,
     nothing_changed: bool,
     total: u32,
+    price: Option<u64>,
     rate: Option<u64>,
     settings: Vec<u8>,
 }
@@ -129,6 +130,7 @@ fn preview(rig: &Rig, handle: u64, edit: &Edit) -> Result<Preview, Fault> {
         needs_key_app: r.bool(),
         nothing_changed: r.bool(),
         total: r.u32(),
+        price: r.opt(Rd::u64),
         rate: r.opt(Rd::u64),
         settings: r.bytes(),
     };
@@ -192,10 +194,11 @@ fn as_77_a_loosening_edit_is_shown_in_words_and_queued_with_the_bytes_of_the_pre
     let mut edit = Edit::default();
     edit.limits[REFUND_CAP] = Some(150);
     edit.tor = Some(true);
+    edit.price = Some(98_500);
     let p = preview(&rig, handle, &edit).expect("a preview");
     assert_eq!(p.version, 2);
     assert!(p.needs_key_app && !p.nothing_changed);
-    assert_eq!(p.rate, Some(1_000));
+    assert_eq!((p.price, p.rate), (Some(98_500), Some(1_015)));
     let lines: Vec<_> = p
         .changes
         .iter()
@@ -212,7 +215,13 @@ fn as_77_a_loosening_edit_is_shown_in_words_and_queued_with_the_bytes_of_the_pre
     assert_eq!(
         lines,
         [
-            ("refund_cap", "Largest single refund", "$100", "$150", true),
+            (
+                "refund_cap",
+                "Largest single refund",
+                "$100",
+                "$150 (152,250 sats at $98,500 a bitcoin)",
+                true
+            ),
             ("tor_on", "Tor", "off", "on", false),
         ]
     );
@@ -261,7 +270,11 @@ fn as_77_a_tightening_edit_is_signed_by_the_owner_alone_and_handed_back() {
             ("Smallest bitcoin sale", "none", "5,000 sats", false),
         ]
     );
-    assert_eq!(p.rate, None, "no limit changed, so no rate was used");
+    assert_eq!(
+        (p.price, p.rate),
+        (None, None),
+        "no limit changed, so no price was used"
+    );
     let (tightening, _, signed) = queue_settings(&rig, handle, &p.settings);
     assert!(tightening && signed.is_some());
     // The next preview starts from the settings now in force.
@@ -419,17 +432,16 @@ fn as_74_values_the_settings_rules_refuse_come_back_with_their_words() {
         let f = preview(&rig, handle, &edit).expect_err("refused");
         assert_eq!((f.status, f.rule.as_str()), (1, "AS-59"), "{f:?}");
     }
-    // A limit at an explicit rate and a flag: the other limits stay as they
-    // are.
+    // A limit at a price and a flag: the other limits stay as they are.
     let mut edit = Edit {
-        rate: Some(2_000),
+        price: Some(50_000),
         wifi: Some(false),
         ..Edit::default()
     };
     edit.limits[LIGHT_PER_SALE] = Some(12);
     edit.limits[MANAGER] = Some(100);
     let p = preview(&rig, handle, &edit).expect("a preview");
-    assert_eq!(p.rate, Some(2_000));
+    assert_eq!((p.price, p.rate), (Some(50_000), Some(2_000)));
     let fields: Vec<_> = p.changes.iter().map(|c| c.field.as_str()).collect();
     assert_eq!(fields, ["light_per_sale", "customer_wifi"]);
     assert_eq!(p.changes[1].new, "no");

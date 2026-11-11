@@ -431,8 +431,9 @@ items are AS-26 to AS-28.
 - **AS-70.** The settings that add a counter are made from the settings with
   the highest version among those held and those queued (any stage), so a
   counter added before the last one is approved stays in. With none held
-  or queued, they are the starting values at a rate the caller gives, and a
-  rate of 0 is refused. The counter is put on the device list and among the
+  or queued, they are the starting values at the satoshis to a dollar that
+  AS-75 makes from the price of a bitcoin the caller gives; a price of 0 is
+  refused, and a price outside AS-75's range is refused. The counter is put on the device list and among the
   counters; every counter's share becomes the whole budget (10,000 basis
   points) divided by the number of counters, rounded down, and the counter
   that comes first by key gets what is left over, so the shares always add
@@ -489,10 +490,16 @@ the only one that does.
   `validate`. With no settings held or queued it is refused.
 - **AS-75.** A limit is edited in whole dollars. The same dollars as now keep
   the limit as it is, satoshis too, so that an untouched limit never changes
-  with the rate; 0 turns it off; any other amount is made with
-  `Limit::from_usd` at the rate the edit gives, else at the rate of the
-  settings held (satoshis over dollars of the first limit that is on). With
-  neither, a changed limit is refused and says a rate is needed.
+  with the price; 0 turns it off and needs no price; any other amount is
+  made with `Limit::from_usd` at satoshis to a dollar from the price of one
+  bitcoin in whole dollars (`usd_per_btc`) that the edit gives. A changed
+  limit without a price is refused and says a price is needed. A price
+  below $1,000 or above $10,000,000 is refused and says to check it. The
+  conversion is `sats_per_usd_at`: 100,000,000 divided by the price, rounded
+  to the nearest whole number, a half rounding up ($100,000 is 1,000, and
+  $98,500 is 1,015). The same function and range start the settings of
+  AS-70. A price given when no limit changed is not used and not shown; the
+  preview gives the price and the satoshis to a dollar when it was used.
 - **AS-76.** The Lightning node is named by text, typed, pasted or scanned
   (plain text of a code), or removed. The text is a compressed public key of
   66 hexadecimal digits, or an address `key@host:port` of which only the key
@@ -611,12 +618,14 @@ Each case below takes the reading that moves less money and loosens less.
     counter takes a bundle without one (CR-96), so a batch that was handed
     to the link before the bundle was made does not stop the ceremony, whose
     window is short.
-19. **The rate of an edit is the shop's own** (AS-75). The owner node holds
-    no exchange rate, so a limit changed in dollars is counted at the rate
-    the settings already use, or at one the caller gives. A limit left alone
-    keeps its satoshis, so the dollar amount shown beside it may be as old as
-    the rate it was made at; the owner is asked for a rate only when the
-    settings give none.
+19. **The price of an edit is asked for, not remembered** (AS-75). Settings
+    may be months old, made at another price, so a limit typed as $100 at
+    the rate they imply would be enforced at a different real amount while
+    the screen says $100. Every changed limit is converted at today's
+    price, which the owner types with no prefill; the limits left alone keep
+    their satoshis, and the review says what each changed limit is in
+    satoshis and at which price. The conversion and its range live in the
+    library so no app converts.
 20. **Pasted node text is judged, not repaired** (AS-76). Spaces around the
     text are dropped and capitals are read; a key with dots, a short key or
     an address with no port is refused and the owner enters it again,

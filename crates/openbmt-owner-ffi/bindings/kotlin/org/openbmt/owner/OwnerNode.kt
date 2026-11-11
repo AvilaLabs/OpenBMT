@@ -447,8 +447,6 @@ class SettingsHeld(
     val boxes: List<ByteArray>,
     /** The 33-byte key of the shop's own Lightning node, when the settings name one. */
     val lightningNode: ByteArray?,
-    /** Satoshis to a dollar, as the limits were made, when the settings give one. */
-    val rate: Long?,
 )
 
 /** What an edit does to the Lightning node. */
@@ -460,7 +458,8 @@ enum class LightningAction { Keep, Remove, Set }
  * [heartbeatMaxAgeSecs] in seconds. [lightningText] is read only when [lightning] is Set.
  */
 data class SettingsEditArgs(
-    val satsPerUsd: Long? = null,
+    /** Today's price of one bitcoin in whole dollars; a changed limit needs it. */
+    val usdPerBtc: Long? = null,
     val lightPerSale: Long? = null,
     val lightBudget: Long? = null,
     val nodePerSale: Long? = null,
@@ -500,7 +499,10 @@ class SettingsPreview(
     val needsKeyApp: Boolean,
     val nothingChanged: Boolean,
     val sharesTotalBps: Long,
-    val rate: Long?,
+    /** The price of a bitcoin in dollars the changed limits were made at, when any was. */
+    val usdPerBtc: Long?,
+    /** The satoshis to a dollar that price gives. */
+    val satsPerUsd: Long?,
     val settings: ByteArray,
 )
 
@@ -524,7 +526,7 @@ class OutboxRow(
 /**
  * A counter's request that was queued: [sessionWords] are the four words the
  * counter and the Key app show, [needsRate] says the phone holds no settings
- * yet (confirming then needs a rate), [windowSecs] is how long the counter
+ * yet (confirming then needs a price), [windowSecs] is how long the counter
  * waits for its code, and [shares] are the counters' shares once it is added.
  * [name] is text from the counter.
  */
@@ -1175,7 +1177,7 @@ internal fun Reader.settingsHeld(): SettingsHeld =
         u32(), limit(), limit(), limit(), limit(), limit(), limit(), u32(),
         limit(), limit(), limit(), limit(), u8(), u8(), u32(), bool(), bool(), u64(),
         list { bytes() }, list { CounterShare(bytes(), u32()) }, list { bytes() },
-        option { bytes() }, option { u64() },
+        option { bytes() },
     )
 
 private fun Reader.settingChange(): SettingChange =
@@ -1183,7 +1185,7 @@ private fun Reader.settingChange(): SettingChange =
 
 internal fun Reader.settingsPreview(): SettingsPreview =
     SettingsPreview(
-        u32(), list { settingChange() }, bool(), bool(), u32(), option { u64() }, bytes(),
+        u32(), list { settingChange() }, bool(), bool(), u32(), option { u64() }, option { u64() }, bytes(),
     )
 
 private fun Writer.lightningAction(v: LightningAction): Writer =
@@ -1196,7 +1198,7 @@ private fun Writer.lightningAction(v: LightningAction): Writer =
     )
 
 internal fun Writer.settingsEdit(a: SettingsEditArgs): Writer {
-    option(a.satsPerUsd) { u64(it) }
+    option(a.usdPerBtc) { u64(it) }
     for (usd in listOf(
         a.lightPerSale, a.lightBudget, a.nodePerSale, a.nodeBudget, a.boxPerSale, a.boxBudget,
     )) {
@@ -1499,11 +1501,11 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     }
 
     /**
-     * Queue the settings that add the counter and its first batch. [satsPerUsd] starts the settings
-     * when the phone holds none, and is ignored when it does.
+     * Queue the settings that add the counter and its first batch. [usdPerBtc], today's price of one
+     * bitcoin in whole dollars, starts the settings when the phone holds none, and is ignored when it does.
      */
-    fun counterConfirm(now: Long, pairing: Long, satsPerUsd: Long): CounterQueued {
-        val r = call(OP_COUNTER_CONFIRM, handle) { it.u64(now).u32(pairing).u64(satsPerUsd) }
+    fun counterConfirm(now: Long, pairing: Long, usdPerBtc: Long): CounterQueued {
+        val r = call(OP_COUNTER_CONFIRM, handle) { it.u64(now).u32(pairing).u64(usdPerBtc) }
         return r.counterQueued().also { r.end() }
     }
 

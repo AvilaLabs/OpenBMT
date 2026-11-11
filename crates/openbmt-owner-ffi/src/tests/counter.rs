@@ -84,9 +84,13 @@ fn confirm(
     handle: u64,
     now: u64,
     pairing: u32,
-    rate: u64,
+    usd_per_btc: u64,
 ) -> Result<Confirmed, super::wire::Fault> {
-    let response = rig.call(91, handle, &W::new().u64(now).u32(pairing).u64(rate).0);
+    let response = rig.call(
+        91,
+        handle,
+        &W::new().u64(now).u32(pairing).u64(usd_per_btc).0,
+    );
     if let Some(e) = Rd::error(&response) {
         words(&e.words);
         return Err(e);
@@ -210,7 +214,7 @@ fn as_69_to_73_a_counter_is_added_from_its_request_to_its_first_sale() {
 
     // AS-70, AS-71: settings and the first batch, in one step.
     let (_, version, _, count, shares) =
-        confirm(&rig, handle, T0 + 20, scanned.pairing, 1_000).expect("confirmed");
+        confirm(&rig, handle, T0 + 20, scanned.pairing, 100_000).expect("confirmed");
     assert_eq!(version, 1);
     assert_eq!(count, BATCH_MIN_COUNT, "the counter's own minimum");
     assert_eq!(shares, scanned.shares);
@@ -269,7 +273,7 @@ fn as_72_a_waiting_counter_survives_a_restart_and_its_code_is_the_same() {
     let handle = rig.start();
     let (_, request, _) = begin(0x32, &offer_for(NET), T0);
     let s = scan(&rig, handle, &request).expect("scanned");
-    confirm(&rig, handle, T0 + 20, s.pairing, 1_000).expect("confirmed");
+    confirm(&rig, handle, T0 + 20, s.pairing, 100_000).expect("confirmed");
     ready(&rig, handle);
     let session_request = build(&rig, handle, T0 + 30);
     let (_, response) = approve(&mut key_app(), &session_request, T0 + 40);
@@ -291,7 +295,7 @@ fn as_70_a_second_counter_splits_the_instant_limit_in_equal_shares() {
     let offer = offer_for(NET);
     let (_, first, _) = begin(0x32, &offer, T0);
     let one = scan(&rig, handle, &first).expect("scanned");
-    confirm(&rig, handle, T0 + 20, one.pairing, 1_000).expect("confirmed");
+    confirm(&rig, handle, T0 + 20, one.pairing, 100_000).expect("confirmed");
     ready(&rig, handle);
     let session_request = build(&rig, handle, T0 + 30);
     let (_, response) = approve(&mut key_app(), &session_request, T0 + 40);
@@ -355,7 +359,7 @@ fn as_69_a_counter_that_is_waiting_or_paired_is_refused_again() {
     let e = scan(&rig, handle, &request).expect_err("refused");
     assert_eq!(e.rule, "AS-69", "{e:?}");
     // Paired and waiting.
-    confirm(&rig, handle, T0 + 20, s.pairing, 1_000).expect("confirmed");
+    confirm(&rig, handle, T0 + 20, s.pairing, 100_000).expect("confirmed");
     ready(&rig, handle);
     let session_request = build(&rig, handle, T0 + 30);
     let (_, response) = approve(&mut key_app(), &session_request, T0 + 40);
@@ -366,15 +370,17 @@ fn as_69_a_counter_that_is_waiting_or_paired_is_refused_again() {
 }
 
 #[test]
-fn as_70_the_start_needs_a_rate_when_the_phone_holds_no_settings() {
+fn as_70_the_start_needs_a_price_when_the_phone_holds_no_settings() {
     let rig = Rig::new();
     let handle = rig.start();
     let (_, request, _) = begin(0x32, &offer_for(NET), T0);
     let s = scan(&rig, handle, &request).expect("scanned");
     let e = confirm(&rig, handle, T0 + 20, s.pairing, 0).expect_err("refused");
     assert_eq!(e.rule, "AS-70", "{e:?}");
-    // Nothing was queued: a rate makes it work.
-    confirm(&rig, handle, T0 + 30, s.pairing, 1_000).expect("confirmed");
+    // A price outside $1,000 to $10,000,000 is refused too; a price makes it work.
+    let e = confirm(&rig, handle, T0 + 25, s.pairing, 999).expect_err("refused");
+    assert_eq!(e.rule, "AS-75", "{e:?}");
+    confirm(&rig, handle, T0 + 30, s.pairing, 100_000).expect("confirmed");
     Rd::ok(&rig.call(2, handle, &[])).pump();
 }
 
@@ -382,7 +388,7 @@ fn as_70_the_start_needs_a_rate_when_the_phone_holds_no_settings() {
 fn as_70_a_pairing_that_was_never_queued_is_refused() {
     let rig = Rig::new();
     let handle = rig.start();
-    let e = confirm(&rig, handle, T0, 77, 1_000).expect_err("refused");
+    let e = confirm(&rig, handle, T0, 77, 100_000).expect_err("refused");
     assert!(e.rule.starts_with("AS-"), "{e:?}");
     Rd::ok(&rig.call(2, handle, &[])).pump();
 }
@@ -410,7 +416,7 @@ fn as_72_a_bundle_before_the_approval_is_not_ready() {
     let s = scan(&rig, handle, &request).expect("scanned");
     let e = bundle(&rig, handle, &s.counter).expect_err("not ready");
     assert!(e.rule.starts_with("AS-"), "{e:?}");
-    confirm(&rig, handle, T0 + 20, s.pairing, 1_000).expect("confirmed");
+    confirm(&rig, handle, T0 + 20, s.pairing, 100_000).expect("confirmed");
     let e = bundle(&rig, handle, &s.counter).expect_err("still not ready");
     assert!(e.rule.starts_with("AS-"), "{e:?}");
     let e = bundle(&rig, handle, &[7u8; 32]).expect_err("an unknown counter");
@@ -426,7 +432,7 @@ fn as_71_a_key_app_that_declines_leaves_the_counter_unpaired() {
     let handle = rig.start();
     let (_, request, _) = begin(0x32, &offer_for(NET), T0);
     let s = scan(&rig, handle, &request).expect("scanned");
-    confirm(&rig, handle, T0 + 20, s.pairing, 1_000).expect("confirmed");
+    confirm(&rig, handle, T0 + 20, s.pairing, 100_000).expect("confirmed");
     ready(&rig, handle);
     let session_request = build(&rig, handle, T0 + 30);
     let mut approver = key_app();
@@ -464,8 +470,8 @@ fn as_60_a_response_for_another_session_is_refused() {
     let (_, request2, _) = begin(0x34, &offer, T0);
     let s1 = scan(&one, h1, &request).expect("scanned");
     let s2 = scan(&other, h2, &request2).expect("scanned");
-    confirm(&one, h1, T0 + 20, s1.pairing, 1_000).expect("confirmed");
-    confirm(&other, h2, T0 + 20, s2.pairing, 1_000).expect("confirmed");
+    confirm(&one, h1, T0 + 20, s1.pairing, 100_000).expect("confirmed");
+    confirm(&other, h2, T0 + 20, s2.pairing, 100_000).expect("confirmed");
     ready(&one, h1);
     ready(&other, h2);
     let r1 = build(&one, h1, T0 + 30);

@@ -322,7 +322,7 @@ object AppModelTest {
         val l = Limit(7000, 7)
         return SettingsHeld(
             3, l, l, l, l, l, l, 105, l, l, l, l, 1, 6, 900, true, false, floor,
-            listOf(ByteArray(32) { 1 }, ByteArray(32) { 2 }), counters, emptyList(), null, 1000,
+            listOf(ByteArray(32) { 1 }, ByteArray(32) { 2 }), counters, emptyList(), null,
         )
     }
 
@@ -1017,11 +1017,12 @@ object AppModelTest {
         ok(CounterModel.requestResult(ByteArray(CounterModel.MAX_REQUEST_BYTES)) is SourceResult.Bytes, "the most is accepted")
         val long = CounterModel.requestResult(ByteArray(CounterModel.MAX_REQUEST_BYTES + 1))
         ok(long is SourceResult.Failed && long.words === AppWords.counterCodeNotRequest, "a longer code is refused before the library sees it")
-        ok(CounterModel.rate("1000") is Form.Ok && (CounterModel.rate("1,000") as Form.Ok).value == 1_000L, "a rate is a whole number")
-        for (bad in listOf("", "0", "  ", "ten", "-5", "1.5", "1".repeat(19))) {
-            val f = CounterModel.rate(bad)
-            ok(f is Form.Refused && f.words === AppWords.counterRateNeeded, "a rate of '$bad' is refused with words")
+        ok(CounterModel.price("98500") is Form.Ok && (CounterModel.price("98,500") as Form.Ok).value == 98_500L && (CounterModel.price("$98,500") as Form.Ok).value == 98_500L, "a price is a whole number of dollars")
+        for (bad in listOf("", "0", "  ", "ten", "-5", "1.5", "98,500.50", "1".repeat(19))) {
+            val f = CounterModel.price(bad)
+            ok(f is Form.Refused && f.words === AppWords.priceNotRead, "a price of '$bad' is refused with words")
         }
+        ok(CounterModel.price("5") is Form.Ok, "a price that is too low is the library's to refuse, not the app's")
 
         val still = CounterModel.codeStep(made = true, withBatch = true, animated = false)
         val moving = CounterModel.codeStep(made = true, withBatch = true, animated = true)
@@ -1080,8 +1081,8 @@ object AppModelTest {
         val check = add.substringAfter("private fun Controller.showCounterCheck(").substringBefore("private fun Controller.showCounterQueued(")
         ok(check.contains("CounterModel.nameOf(s.name)") && check.contains("CounterModel.wordsLine(s.sessionWords), 30f, bold = true"), "the name, cleaned, and the four words large")
         ok(check.contains("AppWords.counterCompare") && check.contains("AppWords.sharesNote(s.shares.size)") && check.contains("CounterModel.shareLines(s.shares)") && check.contains("CounterModel.windowLine(s.windowSecs)"), "the words to compare, the shares and the window")
-        ok(check.contains("if (s.needsRate)") && check.contains("CounterModel.rate(rate.text.toString())"), "a phone with no settings asks for the rate, and the model checks it")
-        ok(check.indexOf("is Form.Refused -> msg.show(") < check.indexOf("n.counterConfirm("), "nothing is queued before the rate is accepted")
+        ok(check.contains("if (s.needsRate)") && check.contains("CounterModel.price(price.text.toString())") && check.contains("Dollars for one bitcoin"), "a phone with no settings asks for the price of a bitcoin, and the model checks its shape")
+        ok(check.indexOf("is Form.Refused -> msg.show(") < check.indexOf("n.counterConfirm("), "nothing is queued before the price is accepted")
         ok(check.contains("ui.button(\"The four words match\")") && check.contains("ui.button(\"The words differ\")") && check.contains("n.cancel(s.pairing)"), "the two answers; a difference takes the request out")
         ok(Regex("n\\.counterConfirm\\(").findAll(check).count() == 1 && !check.contains("n.buildRequest("), "only the first answer confirms, and it builds no request")
         val queued = add.substringAfter("private fun Controller.showCounterQueued(").substringBefore("internal fun Controller.showCounterCode(")
@@ -1089,7 +1090,7 @@ object AppModelTest {
         ok(queued.contains("showSpend()"), "the approval goes on from the spend screen's request")
         ok(AppWords.sharesNote(2).next.contains("Change settings"), "the shares are equal and the words say where custom ones are set")
         ok(AppWords.counterCompare.what.contains("Key app shows them too"), "the words are compared on the Key app too")
-        ok(AppWords.counterRateNeeded.next.contains("whole number above 0"), "the rate's words say what to type")
+        ok(AppWords.counterPriceNeeded.next.contains("price of one bitcoin in whole dollars") && !check.contains("Satoshis to a dollar"), "the price's words say what to type, and no satoshis are asked for")
         ok(!source("src/android/Screens.kt").contains("changing the shop's settings"), "the About screen no longer lists the settings editor as not built")
         ok(!source("src/android/Screens.kt").substringAfter("label(\"Not built yet\")").contains("adding a counter"), "and does not say it is not built")
     }
@@ -1346,19 +1347,19 @@ object AppModelTest {
 
     private fun oa_34_review_calls_the_preview_and_queues_only_on_the_button() {
         val e = source("src/android/SettingsEdit.kt")
-        val review = e.substringAfter("internal fun Controller.showEditReview(").substringBefore("internal fun Controller.showEditRate(")
+        val review = e.substringAfter("internal fun Controller.showEditReview(").substringBefore("private fun Controller.showEditPrice(")
         ok(review.contains("n.previewSettings(args)") && review.indexOf("n.previewSettings(") < review.indexOf("\"Queue the change\""), "the preview comes first")
         ok(Regex("n\\.queueSettings\\(").findAll(e).count() == 1 && review.contains("n.queueSettings(p.settings)"), "one queue call, with the bytes the preview gave")
         ok(review.contains("\"Needs the Key app\"") && review.contains("whenDelivered") && review.contains("nothingChanged"), "the two kinds of change are apart and nothing changed is said")
         ok(review.contains("settingsDraft = SettingsDraft()"), "the draft is cleared after the queue")
-        ok(e.contains("fun Controller.showEditRate("), "a rate is asked for when the library needs one")
+        ok(e.contains("fun Controller.showEditPrice(") && e.contains("settingsDraft.price = \"\"") && !e.contains("Satoshis to a dollar"), "a price is asked for when the library needs one, empty, and forgotten")
         fun change(f: String, o: String, n: String, loose: Boolean, c: ByteArray? = null) = SettingChange(f, f, c, o, n, loose)
-        val p = SettingsPreview(4, listOf(change("Refund cap", "$50", "$100", true), change("Heartbeat", "15 minutes", "10 minutes", false), change("share", "50%", "60%", false, ByteArray(32) { 1 })), true, false, 6000, null, ByteArray(0))
+        val p = SettingsPreview(4, listOf(change("Refund cap", "$50", "$100", true), change("Heartbeat", "15 minutes", "10 minutes", false), change("share", "50%", "60%", false, ByteArray(32) { 1 })), true, false, 6000, 98_500L, 1_015L, ByteArray(0))
         val lines = SettingsEditModel.reviewLines(p)
         ok(lines[0].text == "Refund cap: $50 → $100" && lines[2].text == "Share of Counter 01010101: 50% → 60%", "old to new: ${lines.map { it.text }}")
         ok(SettingsEditModel.needKeyApp(p) == listOf("Refund cap: $50 → $100") && SettingsEditModel.whenDelivered(p).size == 2, "loosening apart from tightening")
-        val plain = SettingsPreview(4, listOf(change("Heartbeat", "a", "b", false)), false, false, 0, null, ByteArray(0))
-        ok(SettingsEditModel.reviewWords(p) === AppWords.editNeedsKeyApp && SettingsEditModel.reviewWords(SettingsPreview(4, emptyList(), false, true, 0, null, ByteArray(0))) === AppWords.editNothingChanged, "the words above the review")
+        val plain = SettingsPreview(4, listOf(change("Heartbeat", "a", "b", false)), false, false, 0, null, null, ByteArray(0))
+        ok(SettingsEditModel.reviewWords(p) === AppWords.editNeedsKeyApp && SettingsEditModel.reviewWords(SettingsPreview(4, emptyList(), false, true, 0, null, null, ByteArray(0))) === AppWords.editNothingChanged, "the words above the review")
         ok(SettingsEditModel.reviewWords(plain) === AppWords.editTakesEffect, "a stricter change takes effect when delivered")
         ok(SettingsEditModel.reviewShares(p) == "Total 60%. Left over: 40%." && SettingsEditModel.reviewShares(plain) == null, "the shares line is only for share changes")
         val held = sampleSettings()
@@ -1370,13 +1371,16 @@ object AppModelTest {
         val a = (SettingsEditModel.args(d, held) as Form.Ok).value
         ok(a.shares.size == 1 && a.shares[0].bps == 7550L && a.lightning == LightningAction.Remove, "the arguments carry the shares and the removal")
         ok(SettingsEditModel.args(SettingsDraft(), held).let { it is Form.Ok && it.value == SettingsEditArgs() }, "an empty draft is an empty edit")
-        d.rate = "0"
-        ok(SettingsEditModel.args(d, held) is Form.Refused, "a rate of 0 is refused with words")
+        d.price = "0"
+        ok(SettingsEditModel.args(d, held) is Form.Refused, "a price of 0 is refused with words")
+        d.price = "$98,500"
+        ok((SettingsEditModel.args(d, held) as Form.Ok).value.usdPerBtc == 98_500L, "the price goes to the node as whole dollars, and the node converts it")
+        ok(SettingsEditModel.args(SettingsDraft(), held).let { it is Form.Ok && it.value.usdPerBtc == null }, "no price is sent that was not typed")
     }
 
     private fun oa_35_after_the_queue_the_existing_screens_take_over() {
         val e = source("src/android/SettingsEdit.kt")
-        val review = e.substringAfter("internal fun Controller.showEditReview(").substringBefore("internal fun Controller.showEditRate(")
+        val review = e.substringAfter("internal fun Controller.showEditReview(").substringBefore("private fun Controller.showEditPrice(")
         ok(review.contains("showOutbox()") && review.contains("showSpend()"), "a stricter change goes to the outbox, a looser one to the request screen")
         ok(!e.contains("approveMerge") && !e.contains("buildRequest(") && !e.contains(".take(") && !e.contains("signBatch"), "the editor has no approval flow of its own")
         ok(AppWords.editQueuedLoosening.what.contains("Key app") && AppWords.editQueuedTightening.what.isNotEmpty(), "the words after the queue")

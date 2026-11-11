@@ -1265,9 +1265,6 @@ pub struct SettingsHeldView {
     pub boxes: Vec<Vec<u8>>,
     /// The key of the shop's own Lightning node, 33 bytes, when it names one.
     pub lightning_node: Option<Vec<u8>>,
-    /// The rate the settings' limits were made at, satoshis to a dollar,
-    /// when they give one (AS-75): the editor asks for a rate only without.
-    pub rate: Option<u64>,
 }
 
 wire_record!(SettingsHeldView {
@@ -1292,8 +1289,7 @@ wire_record!(SettingsHeldView {
     devices,
     counters,
     boxes,
-    lightning_node,
-    rate
+    lightning_node
 });
 
 /// The kinds of signed object that wait in the outbox.

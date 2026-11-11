@@ -6,7 +6,7 @@
 //! blocks, minutes, on and off, and the node's key in full. The values are
 //! written and read like those of [`views`](crate::views).
 
-use openbmt_core::settings::{Change, Settings, SignedSettings, LIGHTNING_NODE_BYTES};
+use openbmt_core::settings::{Change, Limit, Settings, SignedSettings, LIGHTNING_NODE_BYTES};
 use openbmt_owner::{LightningEdit, SettingsEdit, SettingsPreview};
 
 use crate::codec::{wire_record, wire_record_get, wire_unit_enum};
@@ -35,9 +35,9 @@ wire_unit_enum!(LightningAction {
 /// in basis points and the heartbeat in seconds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsEditArgs {
-    /// Satoshis to a dollar for the limits changed; the shop's own rate when
-    /// absent (AS-75).
-    pub sats_per_usd: Option<u64>,
+    /// Today's price of one bitcoin in whole dollars, for the limits
+    /// changed; a changed limit without it is refused (AS-75).
+    pub usd_per_btc: Option<u64>,
     /// Light check: largest instant sale.
     pub light_per_sale: Option<u32>,
     /// Light check: shop-wide outstanding instant total.
@@ -81,7 +81,7 @@ pub struct SettingsEditArgs {
 }
 
 wire_record_get!(SettingsEditArgs {
-    sats_per_usd,
+    usd_per_btc,
     light_per_sale,
     light_budget,
     node_per_sale,
@@ -105,7 +105,7 @@ wire_record_get!(SettingsEditArgs {
 });
 
 wire_record!(SettingsEditArgs {
-    sats_per_usd,
+    usd_per_btc,
     light_per_sale,
     light_budget,
     node_per_sale,
@@ -167,8 +167,11 @@ pub struct SettingsPreviewView {
     pub nothing_changed: bool,
     /// What the counters' shares add up to after the change, in basis points.
     pub shares_total_bps: u32,
-    /// The rate the changed limits were made at, satoshis to a dollar.
-    pub rate: Option<u64>,
+    /// The price of a bitcoin in dollars the changed limits were made at,
+    /// when any limit was changed (AS-75).
+    pub usd_per_btc: Option<u64>,
+    /// The satoshis to a dollar that price gives, which the limits use.
+    pub sats_per_usd: Option<u64>,
     /// The settings, as the bytes `queue_settings` takes.
     pub settings: Vec<u8>,
 }
@@ -179,7 +182,8 @@ wire_record!(SettingsPreviewView {
     needs_key_app,
     nothing_changed,
     shares_total_bps,
-    rate,
+    usd_per_btc,
+    sats_per_usd,
     settings
 });
 
@@ -203,7 +207,7 @@ pub(crate) fn to_edit(
         LightningAction::Set => Some(LightningEdit::Set(a.lightning_text)),
     };
     Ok(SettingsEdit {
-        sats_per_usd: a.sats_per_usd,
+        usd_per_btc: a.usd_per_btc,
         light_per_sale: a.light_per_sale,
         light_budget: a.light_budget,
         node_per_sale: a.node_per_sale,
@@ -239,6 +243,17 @@ fn grouped(n: u64) -> String {
         out.push(c);
     }
     out
+}
+
+/// A limit changed at a price (AS-75): `$100 (101,500 sats at $98,500 a
+/// bitcoin)`, the dollars and what they come to in satoshis.
+fn limit_at_price(usd: u32, sats: u64, price: u64) -> String {
+    format!(
+        "{} ({} sats at ${} a bitcoin)",
+        dollars(usd),
+        grouped(sats),
+        grouped(price)
+    )
 }
 
 /// Whole dollars: `$25`, `$1,250`, or `off` for 0.
@@ -310,32 +325,38 @@ fn field_words(
     name: &str,
     old: &Settings,
     new: &Settings,
+    price: Option<u64>,
 ) -> Option<(&'static str, String, String)> {
-    let usd = |f: fn(&Settings) -> u32| (dollars(f(old)), dollars(f(new)));
+    // A limit that is on and changed was made at the price: say what it is
+    // in satoshis; one that is off, or the same, is just its dollars.
+    let usd = |f: fn(&Settings) -> &Limit| {
+        let (before, after) = (f(old), f(new));
+        let new_words = match price {
+            Some(p) if after.display_usd != 0 && after.display_usd != before.display_usd => {
+                limit_at_price(after.display_usd, after.sats, p)
+            }
+            _ => dollars(after.display_usd),
+        };
+        (dollars(before.display_usd), new_words)
+    };
     let (label, (o, n)): (&'static str, (String, String)) = match name {
         "light_per_sale" => (
             "Largest instant sale, light check",
-            usd(|s| s.light_per_sale.display_usd),
+            usd(|s| &s.light_per_sale),
         ),
         "light_budget" => (
             "Instant sales at risk at once, light check",
-            usd(|s| s.light_budget.display_usd),
+            usd(|s| &s.light_budget),
         ),
-        "node_per_sale" => (
-            "Largest instant sale, own node",
-            usd(|s| s.node_per_sale.display_usd),
-        ),
+        "node_per_sale" => ("Largest instant sale, own node", usd(|s| &s.node_per_sale)),
         "node_budget" => (
             "Instant sales at risk at once, own node",
-            usd(|s| s.node_budget.display_usd),
+            usd(|s| &s.node_budget),
         ),
-        "box_per_sale" => (
-            "Largest instant sale, Box only",
-            usd(|s| s.box_per_sale.display_usd),
-        ),
+        "box_per_sale" => ("Largest instant sale, Box only", usd(|s| &s.box_per_sale)),
         "box_budget" => (
             "Instant sales at risk at once, Box only",
-            usd(|s| s.box_budget.display_usd),
+            usd(|s| &s.box_budget),
         ),
         "underpayment_tolerance_bps" => (
             "Underpayment tolerance",
@@ -344,18 +365,15 @@ fn field_words(
                 percent(new.underpayment_tolerance_bps),
             ),
         ),
-        "refund_cap" => ("Largest single refund", usd(|s| s.refund_cap.display_usd)),
-        "refund_daily_cap" => (
-            "Most refunded in a day",
-            usd(|s| s.refund_daily_cap.display_usd),
-        ),
+        "refund_cap" => ("Largest single refund", usd(|s| &s.refund_cap)),
+        "refund_daily_cap" => ("Most refunded in a day", usd(|s| &s.refund_daily_cap)),
         "cashier_override_daily_cap" => (
             "Cashier's override cap per day",
-            usd(|s| s.cashier_override_daily_cap.display_usd),
+            usd(|s| &s.cashier_override_daily_cap),
         ),
         "manager_override_ceiling" => (
             "Manager's override ceiling",
-            usd(|s| s.manager_override_ceiling.display_usd),
+            usd(|s| &s.manager_override_ceiling),
         ),
         "min_confirmations" => (
             "Blocks that settle a sale",
@@ -423,7 +441,12 @@ pub(crate) fn preview_view(p: &SettingsPreview) -> SettingsPreviewView {
     for f in &p.fields {
         if f.field == "counters" {
             changes.extend(share_lines(&p.reference, &p.settings));
-        } else if let Some((label, old, new)) = field_words(f.field, &p.reference, &p.settings) {
+        } else if let Some((label, old, new)) = field_words(
+            f.field,
+            &p.reference,
+            &p.settings,
+            p.price.map(|(price, _)| price),
+        ) {
             changes.push(SettingChangeView {
                 field: f.field.to_string(),
                 label: label.to_string(),
@@ -446,7 +469,8 @@ pub(crate) fn preview_view(p: &SettingsPreview) -> SettingsPreviewView {
         changes,
         needs_key_app: p.change == Change::Loosening,
         shares_total_bps: total,
-        rate: p.rate,
+        usd_per_btc: p.price.map(|(price, _)| price),
+        sats_per_usd: p.price.map(|(_, rate)| rate),
         settings: unsigned.to_bytes(),
     }
 }

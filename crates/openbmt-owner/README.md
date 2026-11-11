@@ -23,7 +23,7 @@ been done yet.** Do not use it with real funds.
 | `counter_of`, `issued_ranges`, `receive_mark` | The counter a receive index was issued to, kept for good after the batch is delivered | OC-10, OC-11 |
 | `queue_refund`, `queue_cash_out` | A refund or a cash-out, with its destination and amount checked | AS-51 to AS-57 |
 | `queue_batch`, `queue_pairing`, `queue_settings` | A batch signed here, a counter's pairing request, settings sorted into loosening (queued) and tightening (signed alone, handed back) | AS-58, AS-59 |
-| `settings_preview`, `settings_rate` | What an edit of the settings would do: the settings it makes, each changed field with its direction, and whether the Key app must co-sign. Stores nothing | AS-74 to AS-77 |
+| `settings_preview`, `sats_per_usd_at` | What an edit of the settings would do: the settings it makes, each changed field with its direction, and whether the Key app must co-sign; a changed limit is made at the price of a bitcoin the edit gives. Stores nothing | AS-74 to AS-77 |
 | `build_request` | Freezes the ready items into one session, stores it, returns the request bytes. The health check is last | AS-55 to AS-61 |
 | `take_response` | Checks the answer against the request, signs with key 1, joins, finishes, checks the outputs, stores, returns | AS-62 to AS-64, AS-67 |
 | `mark_broadcast`, `mark_confirmed`, `mark_dropped`, `mark_delivered`, `archive_paid` | Follow the finished objects | AS-54, AS-64 |

@@ -57,7 +57,8 @@ pub use counter::{
     equal_shares, BundleParts, CounterBundleMade, CounterQueued, CounterRequest, WaitingCounter,
 };
 pub use edit::{
-    parse_lightning_node, LightningEdit, SettingsEdit, SettingsPreview, MAX_EDIT_CONFIRMATIONS,
+    parse_lightning_node, sats_per_usd_at, LightningEdit, SettingsEdit, SettingsPreview,
+    MAX_EDIT_CONFIRMATIONS, MAX_USD_PER_BTC, MIN_USD_PER_BTC,
 };
 pub use error::{BundleGap, NodeKeyFault, OwnerError, Refusal, RestoreError, SetupError};
 pub use state::Owner;

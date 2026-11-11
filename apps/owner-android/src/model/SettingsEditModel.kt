@@ -47,8 +47,11 @@ class SettingsDraft {
     var node: NodeChoice = NodeChoice.Keep
     var nodeText: String = ""
 
-    /** Satoshis to a dollar, typed when the library asked for one (AS-75). */
-    var rate: String = ""
+    /**
+     * Today's price of one bitcoin in dollars, typed when the library asked for one (AS-75). It is never offered
+     * again: it is forgotten when the review is left, so a price is typed afresh each time.
+     */
+    var price: String = ""
 
     val isEmpty: Boolean get() = typed.isEmpty() && shares.isEmpty() && node == NodeChoice.Keep
 }
@@ -223,9 +226,6 @@ object SettingsEditModel {
         return if (bps.any { it == null }) "Some share is not a percent yet." else sharesTotalLine(bps.filterNotNull())
     }
 
-    /** The rate the changed limits were counted at, for the review. */
-    fun rateLine(satsPerUsd: Long): String = "Changed limits are counted at ${Format.sats(satsPerUsd)} to a dollar."
-
     /** One line for a counter's share and what it holds now. */
     fun shareNow(s: CounterShare): String = "${OwnerModel.counterLabel(s.counter)}: now ${percentText(s.bps)}"
 
@@ -261,10 +261,10 @@ object SettingsEditModel {
                 is Form.Ok -> a.copy(lightning = LightningAction.Set, lightningText = t.value)
             }
         }
-        if (draft.rate.isNotBlank()) {
-            when (val r = CounterModel.rate(draft.rate)) {
+        if (draft.price.isNotBlank()) {
+            when (val r = CounterModel.price(draft.price)) {
                 is Form.Refused -> return r
-                is Form.Ok -> a = a.copy(satsPerUsd = r.value)
+                is Form.Ok -> a = a.copy(usdPerBtc = r.value)
             }
         }
         return Form.Ok(a)

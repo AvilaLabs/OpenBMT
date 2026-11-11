@@ -58,9 +58,13 @@ object CounterModel {
     fun requestResult(payload: ByteArray): SourceResult =
         if (payload.size > MAX_REQUEST_BYTES) SourceResult.Failed(AppWords.counterCodeNotRequest) else SourceResult.Bytes(payload)
 
-    /** The rate typed for a phone that holds no settings yet: a whole number above 0. */
-    fun rate(text: String): Form<Long> =
-        Forms.number(text)?.takeIf { it > 0 }?.let { Form.Ok(it) } ?: Form.Refused(AppWords.counterRateNeeded)
+    /**
+     * Today's price of one bitcoin in whole dollars, typed for a phone that holds no settings yet or for a changed
+     * limit: a whole number above 0, with a dollar sign and commas allowed. Whether it is a price that makes sense is
+     * the library's to say (AS-75, OA-07); the conversion to satoshis is the library's too.
+     */
+    fun price(text: String): Form<Long> =
+        SettingsEditModel.dollars(text)?.takeIf { it > 0 }?.let { Form.Ok(it) } ?: Form.Refused(AppWords.priceNotRead)
 
     /** The words of the code for the counter: with the first addresses in it or without. */
     fun codeStep(made: Boolean, withBatch: Boolean, animated: Boolean): ExchangeStep.Code = when {

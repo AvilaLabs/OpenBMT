@@ -90,15 +90,15 @@ private fun Controller.showCounterCheck(n: OwnerNode, s: CounterScan) {
     views.add(ui.words(AppWords.sharesNote(s.shares.size)))
     for (line in CounterModel.shareLines(s.shares)) views.add(ui.text(line, 14f, mono = true))
     views.add(ui.text(CounterModel.windowLine(s.windowSecs), 15f))
-    val rate = if (s.needsRate) {
-        views.add(ui.words(AppWords.counterRateNeeded))
-        numberField(act, "Satoshis to a dollar").also { views.add(it) }
+    val price = if (s.needsRate) {
+        views.add(ui.words(AppWords.counterPriceNeeded))
+        numberField(act, "Dollars for one bitcoin").also { views.add(it) }
     } else {
         null
     }
     views.add(
         ui.button("The four words match") {
-            when (val f = if (rate == null) Form.Ok(0L) else CounterModel.rate(rate.text.toString())) {
+            when (val f = if (price == null) Form.Ok(0L) else CounterModel.price(price.text.toString())) {
                 is Form.Refused -> msg.show(ui.words(f.words))
                 is Form.Ok -> attempt(msg) { n.counterConfirm(nowSecs(), s.pairing, f.value) }?.let { showCounterQueued(it) }
             }
