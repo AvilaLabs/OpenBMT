@@ -106,9 +106,20 @@ object ProtocolDecoderTest {
         check(held.heartbeatMaxAgeSecs == 900L && held.torOn && !held.customerWifi && held.minSaleSats == 0L)
         check(held.devices.size == 1 && held.counters.size == 1 && held.counters[0].bps == 10_000L)
         check(held.boxes.isEmpty())
+        check(held.lightningNode!!.size == 33 && held.lightningNode!![0].toInt() == 2 && held.rate == 1_000L)
         check(decodeResponse(header(0, byteArrayOf(0))).let { r -> r.option { r.settingsHeld() } } == null)
         rejects("a settings flag") { decodeResponse(header(0, byteArrayOf(2))).let { r -> r.option { r.settingsHeld() } } }
         rejects("a short settings") { decodeResponse(settingsFrame().copyOf(40)).let { r -> r.option { r.settingsHeld() } } }
+
+        val preview = decodeResponse(previewFrame()).settingsPreview()
+        check(preview.version == 4L && preview.changes.size == 2 && preview.needsKeyApp && !preview.nothingChanged)
+        check(preview.changes[0].field == "refund_cap" && preview.changes[0].counter == null)
+        check(preview.changes[0].old == "$100" && preview.changes[0].new == "$150" && preview.changes[0].loosening)
+        check(preview.changes[1].counter!!.size == 32 && preview.changes[1].new == "33.33%")
+        check(!preview.changes[1].loosening && preview.sharesTotalBps == 8_333L && preview.rate == 1_000L)
+        check(preview.settings.size == 2)
+        rejects("a preview flag") { decodeResponse(previewFrame(needsKeyApp = 2)).settingsPreview() }
+        rejects("a short preview") { decodeResponse(previewFrame().copyOf(30)).settingsPreview() }
 
         val scan = decodeResponse(counterScanFrame()).counterScan()
         check(scan.pairing == 4L && scan.counter.size == 32 && scan.name == "Front counter")
@@ -326,6 +337,8 @@ object ProtocolDecoderTest {
             hex(frame) == "4f424d6b010a000100000000000000" + "00f1536500000000" + "05000000",
         ) { hex(frame) }
         check(hex(startFrame(sampleConfig())) == START_FRAME_HEX) { hex(startFrame(sampleConfig())) }
+        val edit = requestFrame(47, 1) { it.settingsEdit(sampleEdit()) }
+        check(hex(edit) == EDIT_FRAME_HEX) { hex(edit) }
         val reply = requestFrame(74, 1) { it.u64(5).u32(200).bytes(byteArrayOf(9)) }
         check(hex(reply) == "4f424d6b014a000100000000000000" + "0500000000000000" + "c8000000" + "0100000009") { hex(reply) }
     }
@@ -535,8 +548,34 @@ object ProtocolDecoderTest {
         w.u32(1).bytes(ByteArray(32) { 1 })
         w.u32(1).bytes(ByteArray(32) { 2 }).u32(10_000)
         w.u32(0)
+        w.u8(1).bytes(ByteArray(33) { if (it == 0) 2 else 7 }).u8(1).u64(1_000)
         return header(0, w.toByteArray())
     }
+
+    /** A preview of two changes, the second a counter's share, as `settings_preview` answers. */
+    private fun previewFrame(needsKeyApp: Int = 1): ByteArray {
+        val w = Writer().u32(4).u32(2)
+        w.string("refund_cap").string("Largest single refund").u8(0).string("$100").string("$150").bool(true)
+        w.string("counters").string("Counter's share").u8(1).bytes(ByteArray(32) { 5 })
+            .string("50%").string("33.33%").bool(false)
+        w.u8(needsKeyApp).bool(false).u32(8_333).u8(1).u64(1_000).bytes(byteArrayOf(9, 9))
+        return header(0, w.toByteArray())
+    }
+
+    /** The request `previewSettings` writes for [sampleEdit]; the Rust test of the same name writes it too. */
+    private const val EDIT_FRAME_HEX =
+        "4f424d6b012f00010000000000000001e803000000000000010a0000000000013200000000000001640000000000000103000001010000000000000100000000"
+
+    private fun sampleEdit() =
+        SettingsEditArgs(
+            satsPerUsd = 1_000,
+            lightPerSale = 10,
+            nodeBudget = 50,
+            refundCap = 100,
+            minConfirmations = 3,
+            torOn = true,
+            lightning = LightningAction.Remove,
+        )
 
     private fun posStateFrame(vendor: Int = 1, kind: Int = 7, subject: Int = 0): ByteArray {
         val out = ByteArrayOutputStream()

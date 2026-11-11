@@ -31,7 +31,7 @@ handles are never given out twice.
 | Lines | `status`, `receipts_line`, `merge_offer`, `send_states`, `settings`, `outbox` |
 | Live watch | `old_addresses`, `request_deep_check` |
 | Approval | `build_request`, `approve_merge`, `take`, `sessions`, `session_request`, `abandon_session` |
-| Queue | `queue`, `queue_refund`, `cancel`, `requeue`, `cash_out`, `sign_batch`, `queue_settings` |
+| Queue | `queue`, `queue_refund`, `cancel`, `requeue`, `cash_out`, `sign_batch`, `queue_settings`, `settings_preview` |
 | Link | `link_state`, `clear_alert`, `refund_notes`, `dismiss_refund_note` |
 | Upkeep | `notes`, `rescan`, `recover_key1`, `archive_paid` |
 | Till | `pos_state`, `pos_setup`, `pos_remove`, `pos_request`, `pos_reply`, `pos_acknowledge` |
@@ -48,6 +48,11 @@ a request may be 9 MiB: a till page is at most 8 MiB.
 read-only view (none until the first settings are taken). `outbox` lists the
 signed objects that wait, by kind; the node keeps no time for them, so only a
 batch carries `signed_at`, read from the range the phone issued for it.
+
+`settings_preview` (`docs/SESSION-RULES.md`, AS-74 to AS-77) takes an edit in
+which every field is optional and gives back each changed field in the words
+of a screen, whether the Key app must co-sign, and the bytes `queue_settings`
+takes. It stores nothing. The app never builds settings bytes itself.
 
 `queue_refund` takes no amount received from the app: what the sale
 received and whether it is at the refund depth come from the wallet's own

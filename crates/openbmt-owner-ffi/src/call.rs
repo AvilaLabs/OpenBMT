@@ -38,7 +38,9 @@
 //!   check, the settings the node holds, the signed objects that wait).
 //! - 30 to 35: the approval with the Key app (build, take the response, the
 //!   open sessions).
-//! - 40 to 46: the queue (refunds, cash-outs, batches, settings).
+//! - 40 to 47: the queue (refunds, cash-outs, batches, settings) and the
+//!   preview of a change of the settings (`docs/SESSION-RULES.md`, AS-74 to
+//!   AS-77), which stores nothing and gives the bytes `queue_settings` takes.
 //! - 50 to 53: the link and the refund requests from the counters.
 //! - 60 to 63: notes, a fresh check, recovery, archiving.
 //! - 80 to 86: the key ceremony on this phone (`docs/DESIGN.md` §2.1 steps 4
@@ -81,6 +83,9 @@ use crate::pos_views::{
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
 };
 use crate::say::{TONES, WHOS};
+use crate::settings_edit::{
+    LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,
+};
 use crate::views::{
     put_words, AlertKind, AlertView, BatchArgs, BuiltView, CashAmountView, CashOutArgs, CashOutRow,
     ClearArgs, CounterShareView, CounterView, DeepRequestView, DeliverView, EntryKindView,
@@ -388,6 +393,9 @@ fn build_ops() -> Vec<Op> {
         op(46, "queue_settings", Node, |c, bytes: Vec<u8>| {
             c.entry()?.queue_settings(bytes)
         }),
+        op(47, "settings_preview", Node, |c, a: SettingsEditArgs| {
+            c.entry()?.settings_preview(a)
+        }),
         op(50, "link_state", Node, |c, ()| c.entry()?.link_state()),
         op(51, "clear_alert", Node, |c, a: ClearArgs| {
             c.entry()?.clear_alert(a)
@@ -627,6 +635,10 @@ fn definitions() -> Vec<TypeDef> {
         QueueView::define(),
         QueuedRefund::define(),
         SettingsQueuedView::define(),
+        LightningAction::define(),
+        SettingsEditArgs::define(),
+        SettingChangeView::define(),
+        SettingsPreviewView::define(),
         DeliverView::define(),
         AlertView::define(),
         CounterView::define(),

@@ -57,6 +57,7 @@ pub mod host;
 mod jni;
 mod pos_views;
 mod say;
+mod settings_edit;
 mod views;
 
 #[cfg(test)]
@@ -80,6 +81,9 @@ pub use pos_views::{
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
 };
 pub use say::{all_words, words_for};
+pub use settings_edit::{
+    LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,
+};
 pub use views::{
     AlertKind, AlertView, BatchArgs, BuiltView, CashAmountView, CashOutArgs, CashOutRow, ClearArgs,
     CounterShareView, CounterView, DeepRequestView, DeliverView, EntryKindView, EntryRow,

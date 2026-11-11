@@ -61,6 +61,7 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (44, "cash_out"),
         (45, "sign_batch"),
         (46, "queue_settings"),
+        (47, "settings_preview"),
         (50, "link_state"),
         (51, "clear_alert"),
         (52, "refund_notes"),

@@ -261,6 +261,14 @@ const RULES: &[Entry] = &[
         BUG,
     ),
     (
+        "share-range",
+        Kind::Refused,
+        "Share not usable",
+        "A counter's share is more than a counter can be given, so nothing was previewed.",
+        Who::Owner,
+        BUG,
+    ),
+    (
         "settings-bytes",
         Kind::Refused,
         "Settings not readable",

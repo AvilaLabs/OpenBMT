@@ -1213,6 +1213,7 @@ pub struct CounterShareView {
 }
 
 wire_record!(CounterShareView { counter, bps });
+wire_record_get!(CounterShareView { counter, bps });
 
 /// The shop's settings that the owner phone holds as in force, decoded: the
 /// fields of `openbmt_core::settings::Settings`, for a read-only view.
@@ -1262,6 +1263,11 @@ pub struct SettingsHeldView {
     pub counters: Vec<CounterShareView>,
     /// The devices that are Boxes, 32 bytes each.
     pub boxes: Vec<Vec<u8>>,
+    /// The key of the shop's own Lightning node, 33 bytes, when it names one.
+    pub lightning_node: Option<Vec<u8>>,
+    /// The rate the settings' limits were made at, satoshis to a dollar,
+    /// when they give one (AS-75): the editor asks for a rate only without.
+    pub rate: Option<u64>,
 }
 
 wire_record!(SettingsHeldView {
@@ -1285,7 +1291,9 @@ wire_record!(SettingsHeldView {
     min_sale_sats,
     devices,
     counters,
-    boxes
+    boxes,
+    lightning_node,
+    rate
 });
 
 /// The kinds of signed object that wait in the outbox.

@@ -169,6 +169,9 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "DeepRequest(bool(), words())",
         "Limit(u64(), u32())",
         "CounterShare(bytes(), u32())",
+        "SettingChange(string(), string(), option { bytes() }, string(), string(), bool())",
+        "u32(), list { settingChange() }, bool(), bool(), u32(), option { u64() }, bytes(),",
+        "option { bytes() }, option { u64() },",
         "u32(), limit(), limit(), limit(), limit(), limit(), limit(), u32(),",
         "limit(), limit(), limit(), limit(), u8(), u8(), u32(), bool(), bool(), u64(),",
         "list { bytes() }, list { CounterShare(bytes(), u32()) }, list { bytes() },",
@@ -212,6 +215,9 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "FinishedView: record: record: list<u8>, state_words: Words",
         "CeremonyDefaults: record: batch_min_count: u32, refund_depth: u32, birthday: u32",
         "SetupStageView: record: stage: u8, words: Words",
+        "SettingsEditArgs: record: sats_per_usd: option<u64>, light_per_sale: option<u32>, light_budget: option<u32>, node_per_sale: option<u32>, node_budget: option<u32>, box_per_sale: option<u32>, box_budget: option<u32>, underpayment_tolerance_bps: option<u32>, refund_cap: option<u32>, refund_daily_cap: option<u32>, cashier_override_daily_cap: option<u32>, manager_override_ceiling: option<u32>, min_confirmations: option<u8>, final_confirmations: option<u8>, heartbeat_max_age_secs: option<u32>, tor_on: option<bool>, customer_wifi: option<bool>, min_sale_sats: option<u64>, shares: list<CounterShareView>, lightning: LightningAction, lightning_text: string",
+        "SettingChangeView: record: field: string, label: string, counter: option<list<u8>>, old: string, new: string, loosening: bool",
+        "SettingsPreviewView: record: version: u32, changes: list<SettingChangeView>, needs_key_app: bool, nothing_changed: bool, shares_total_bps: u32, rate: option<u64>, settings: list<u8>",
         "OldAddressesView: record: kind: OldKind, count: u64, days_ago: u64, next: option<u64>, running: bool, words: option<Words>",
     ] {
         assert!(protocol.contains(line), "{line}");
@@ -344,4 +350,57 @@ fn the_start_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
         .map(|(_, s)| s)
         .collect();
     assert_eq!(kotlin_hex, START_FRAME_HEX);
+}
+
+const EDIT_FRAME_HEX: &str =
+    "4f424d6b012f00010000000000000001e803000000000000010a0000000000013200000000000001640000000000000103000001010000000000000100000000";
+
+#[test]
+fn the_settings_edit_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
+    use crate::settings_edit::{LightningAction, SettingsEditArgs};
+    let edit = SettingsEditArgs {
+        sats_per_usd: Some(1_000),
+        light_per_sale: Some(10),
+        light_budget: None,
+        node_per_sale: None,
+        node_budget: Some(50),
+        box_per_sale: None,
+        box_budget: None,
+        underpayment_tolerance_bps: None,
+        refund_cap: Some(100),
+        refund_daily_cap: None,
+        cashier_override_daily_cap: None,
+        manager_override_ceiling: None,
+        min_confirmations: Some(3),
+        final_confirmations: None,
+        heartbeat_max_age_secs: None,
+        tor_on: Some(true),
+        customer_wifi: None,
+        min_sale_sats: None,
+        shares: Vec::new(),
+        lightning: LightningAction::Remove,
+        lightning_text: String::new(),
+    };
+    let mut fields = Vec::new();
+    crate::codec::Put::put(&edit, &mut fields);
+    let hex: String = frame(47, 1, &fields)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    assert_eq!(hex, EDIT_FRAME_HEX);
+    // The Kotlin harness holds the same literal.
+    let harness = read(bindings("tests/ProtocolDecoderTest.kt"));
+    let kotlin_hex: String = harness
+        .split("EDIT_FRAME_HEX =")
+        .nth(1)
+        .expect("the constant")
+        .split("private fun sampleEdit")
+        .next()
+        .expect("up to the sample")
+        .split('"')
+        .enumerate()
+        .filter(|(i, _)| i % 2 == 1)
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(kotlin_hex, EDIT_FRAME_HEX);
 }

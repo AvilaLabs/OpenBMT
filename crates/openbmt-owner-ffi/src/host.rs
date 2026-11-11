@@ -80,6 +80,7 @@ use crate::pos_views::{
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
 };
 use crate::say::{counter_words, link_alert_words, words_for};
+use crate::settings_edit::{preview_view, to_edit, SettingsEditArgs, SettingsPreviewView};
 use crate::views::{
     AlertKind, AlertView, BatchArgs, BuiltView, CashAmountView, CashOutArgs, CashOutRow, ClearArgs,
     CounterShareView, CounterView, DeepRequestView, DeliverView, EntryKindView, EntryRow,
@@ -1203,6 +1204,24 @@ impl Entry {
         })
     }
 
+    /// What an edit of the shop's settings would do (AS-74 to AS-77): the
+    /// changes in words, whether the Key app must co-sign, and the bytes
+    /// `queue_settings` takes. Nothing is stored.
+    pub(crate) fn settings_preview(
+        &self,
+        args: SettingsEditArgs,
+    ) -> Result<SettingsPreviewView, AppError> {
+        let edit = to_edit(args, |b| device("a counter's root", "id-length", b))?;
+        self.run(None, move |st| {
+            let preview = st
+                .node
+                .owner()
+                .settings_preview(&edit)
+                .map_err(|r| queue_error(&OwnerError::Refused(r)))?;
+            Ok(preview_view(&preview))
+        })
+    }
+
     /// Read a counter's request (AS-69): queue its pairing and give back its
     /// name, the four words and the shares the settings that add it would
     /// give. A phone that holds no settings says so, because the starting
@@ -1694,6 +1713,7 @@ impl Entry {
                 sats: l.sats,
                 display_usd: l.display_usd,
             };
+            let rate = st.node.owner().settings_rate();
             Ok(st.node.owner().known_settings().map(|s| SettingsHeldView {
                 version: s.version,
                 light_per_sale: limit(&s.light_per_sale),
@@ -1723,6 +1743,8 @@ impl Entry {
                     })
                     .collect(),
                 boxes: s.boxes.iter().map(|d| d.to_bytes().to_vec()).collect(),
+                lightning_node: s.lightning_node.map(|k| k.to_vec()),
+                rate,
             }))
         })
     }

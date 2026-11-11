@@ -83,6 +83,7 @@ private const val OP_REQUEUE = 43
 private const val OP_CASH_OUT = 44
 private const val OP_SIGN_BATCH = 45
 private const val OP_QUEUE_SETTINGS = 46
+private const val OP_SETTINGS_PREVIEW = 47
 private const val OP_LINK_STATE = 50
 private const val OP_CLEAR_ALERT = 51
 private const val OP_REFUND_NOTES = 52
@@ -120,6 +121,9 @@ private const val TAG_ROUTE_VIEW_DIRECT = 0
 private const val TAG_ROUTE_VIEW_ONION = 1
 private const val TAG_CASH_AMOUNT_VIEW_SATS = 0
 private const val TAG_CASH_AMOUNT_VIEW_ALL = 1
+private const val TAG_LIGHTNING_ACTION_KEEP = 0
+private const val TAG_LIGHTNING_ACTION_REMOVE = 1
+private const val TAG_LIGHTNING_ACTION_SET = 2
 private const val TAG_ALERT_KIND_MISSED_CHECK_IN = 0
 private const val TAG_ALERT_KIND_DIVERGED = 1
 private const val TAG_VIEW_KIND_READY = 0
@@ -441,6 +445,63 @@ class SettingsHeld(
     val devices: List<ByteArray>,
     val counters: List<CounterShare>,
     val boxes: List<ByteArray>,
+    /** The 33-byte key of the shop's own Lightning node, when the settings name one. */
+    val lightningNode: ByteArray?,
+    /** Satoshis to a dollar, as the limits were made, when the settings give one. */
+    val rate: Long?,
+)
+
+/** What an edit does to the Lightning node. */
+enum class LightningAction { Keep, Remove, Set }
+
+/**
+ * A change of the settings for [OwnerNode.previewSettings]: a null field (an empty [shares]) is kept.
+ * Dollars are whole dollars and 0 is off; [underpaymentToleranceBps] is in basis points and
+ * [heartbeatMaxAgeSecs] in seconds. [lightningText] is read only when [lightning] is Set.
+ */
+class SettingsEditArgs(
+    val satsPerUsd: Long? = null,
+    val lightPerSale: Long? = null,
+    val lightBudget: Long? = null,
+    val nodePerSale: Long? = null,
+    val nodeBudget: Long? = null,
+    val boxPerSale: Long? = null,
+    val boxBudget: Long? = null,
+    val underpaymentToleranceBps: Long? = null,
+    val refundCap: Long? = null,
+    val refundDailyCap: Long? = null,
+    val cashierOverrideDailyCap: Long? = null,
+    val managerOverrideCeiling: Long? = null,
+    val minConfirmations: Int? = null,
+    val finalConfirmations: Int? = null,
+    val heartbeatMaxAgeSecs: Long? = null,
+    val torOn: Boolean? = null,
+    val customerWifi: Boolean? = null,
+    val minSaleSats: Long? = null,
+    val shares: List<CounterShare> = emptyList(),
+    val lightning: LightningAction = LightningAction.Keep,
+    val lightningText: String = "",
+)
+
+/** One changed field in the words of a screen; [counter] is set for a counter's share. */
+class SettingChange(
+    val field: String,
+    val label: String,
+    val counter: ByteArray?,
+    val old: String,
+    val new: String,
+    val loosening: Boolean,
+)
+
+/** What [OwnerNode.previewSettings] found; [settings] are the bytes [OwnerNode.queueSettings] takes. */
+class SettingsPreview(
+    val version: Long,
+    val changes: List<SettingChange>,
+    val needsKeyApp: Boolean,
+    val nothingChanged: Boolean,
+    val sharesTotalBps: Long,
+    val rate: Long?,
+    val settings: ByteArray,
 )
 
 enum class OutboxKind { Transaction, Batch, Settings, Pairing }
@@ -1114,7 +1175,48 @@ internal fun Reader.settingsHeld(): SettingsHeld =
         u32(), limit(), limit(), limit(), limit(), limit(), limit(), u32(),
         limit(), limit(), limit(), limit(), u8(), u8(), u32(), bool(), bool(), u64(),
         list { bytes() }, list { CounterShare(bytes(), u32()) }, list { bytes() },
+        option { bytes() }, option { u64() },
     )
+
+private fun Reader.settingChange(): SettingChange =
+    SettingChange(string(), string(), option { bytes() }, string(), string(), bool())
+
+internal fun Reader.settingsPreview(): SettingsPreview =
+    SettingsPreview(
+        u32(), list { settingChange() }, bool(), bool(), u32(), option { u64() }, bytes(),
+    )
+
+private fun Writer.lightningAction(v: LightningAction): Writer =
+    u8(
+        when (v) {
+            LightningAction.Keep -> TAG_LIGHTNING_ACTION_KEEP
+            LightningAction.Remove -> TAG_LIGHTNING_ACTION_REMOVE
+            LightningAction.Set -> TAG_LIGHTNING_ACTION_SET
+        },
+    )
+
+internal fun Writer.settingsEdit(a: SettingsEditArgs): Writer {
+    option(a.satsPerUsd) { u64(it) }
+    for (usd in listOf(
+        a.lightPerSale, a.lightBudget, a.nodePerSale, a.nodeBudget, a.boxPerSale, a.boxBudget,
+    )) {
+        option(usd) { u32(it) }
+    }
+    option(a.underpaymentToleranceBps) { u32(it) }
+    for (usd in listOf(
+        a.refundCap, a.refundDailyCap, a.cashierOverrideDailyCap, a.managerOverrideCeiling,
+    )) {
+        option(usd) { u32(it) }
+    }
+    option(a.minConfirmations) { u8(it) }
+    option(a.finalConfirmations) { u8(it) }
+    option(a.heartbeatMaxAgeSecs) { u32(it) }
+    option(a.torOn) { bool(it) }
+    option(a.customerWifi) { bool(it) }
+    option(a.minSaleSats) { u64(it) }
+    list(a.shares) { bytes(it.counter).u32(it.bps) }
+    return lightningAction(a.lightning).string(a.lightningText)
+}
 
 internal fun Reader.outboxRow(): OutboxRow =
     OutboxRow(
@@ -1376,6 +1478,15 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     fun queueSettings(signedSettings: ByteArray): SettingsQueued {
         val r = call(OP_QUEUE_SETTINGS, handle) { it.bytes(signedSettings) }
         return r.settingsQueued().also { r.end() }
+    }
+
+    /**
+     * What a change of the settings would do: each changed field in words, whether the Key app must
+     * co-sign, and the bytes [queueSettings] takes. Nothing is stored.
+     */
+    fun previewSettings(edit: SettingsEditArgs): SettingsPreview {
+        val r = call(OP_SETTINGS_PREVIEW, handle) { it.settingsEdit(edit) }
+        return r.settingsPreview().also { r.end() }
     }
 
     /**
