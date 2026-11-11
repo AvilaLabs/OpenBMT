@@ -144,6 +144,7 @@ object OwnerModel {
         "Tor" to if (s.torOn) "on" else "off",
         "Customers can join the Wi-Fi" to if (s.customerWifi) "yes or unsure" else "no",
         "Smallest sale a counter opens" to if (s.minSaleSats == 0L) "no floor" else Format.sats(s.minSaleSats),
+        "Tips" to SettingsEditModel.tipsNow(s),
         "Devices that write records" to s.devices.size.toString(),
         "Counters and their shares" to if (s.counters.isEmpty()) "none" else s.counters.joinToString("; ") { counterLabel(it.counter) + " " + percent(it.bps) },
         "Boxes" to s.boxes.size.toString(),

@@ -72,6 +72,11 @@ pub struct SettingsEditArgs {
     pub customer_wifi: Option<bool>,
     /// The smallest bitcoin sale, in satoshis; 0 is none.
     pub min_sale_sats: Option<u64>,
+    /// The counters ask the customer for a tip (CR-187).
+    pub tips_on: Option<bool>,
+    /// The suggested tips in whole percent, at most three; the whole list
+    /// replaces the one held, and an empty list suggests none (CR-187).
+    pub tip_percents: Option<Vec<u8>>,
     /// New shares for some counters, in basis points; the others keep theirs.
     pub shares: Vec<CounterShareView>,
     /// What to do with the Lightning node.
@@ -99,6 +104,8 @@ wire_record_get!(SettingsEditArgs {
     tor_on,
     customer_wifi,
     min_sale_sats,
+    tips_on,
+    tip_percents,
     shares,
     lightning,
     lightning_text
@@ -123,6 +130,8 @@ wire_record!(SettingsEditArgs {
     tor_on,
     customer_wifi,
     min_sale_sats,
+    tips_on,
+    tip_percents,
     shares,
     lightning,
     lightning_text
@@ -225,6 +234,8 @@ pub(crate) fn to_edit(
         tor_on: a.tor_on,
         customer_wifi: a.customer_wifi,
         min_sale_sats: a.min_sale_sats,
+        tips_on: a.tips_on,
+        tip_percents: a.tip_percents,
         shares,
         lightning_node,
         watch_key: None,
@@ -309,6 +320,19 @@ fn sats_floor(sats: u64) -> String {
         "none".to_string()
     } else {
         format!("{} sats", grouped(sats))
+    }
+}
+
+/// The suggested tips: `10%, 15%, 20%`, or `none` for no suggestion (CR-187).
+pub(crate) fn tip_percents(percents: &[u8]) -> String {
+    if percents.is_empty() {
+        "none".to_string()
+    } else {
+        percents
+            .iter()
+            .map(|p| format!("{p}%"))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -402,6 +426,14 @@ fn field_words(
         "min_sale_sats" => (
             "Smallest bitcoin sale",
             (sats_floor(old.min_sale_sats), sats_floor(new.min_sale_sats)),
+        ),
+        "tips_on" => ("Ask for a tip", (on_off(old.tips_on), on_off(new.tips_on))),
+        "tip_percents" => (
+            "Tips",
+            (
+                tip_percents(&old.tip_percents),
+                tip_percents(&new.tip_percents),
+            ),
         ),
         "lightning_node" => (
             "Lightning node",

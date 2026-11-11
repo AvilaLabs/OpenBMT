@@ -692,3 +692,81 @@ fn as_74_the_watch_key_in_an_edit_is_named_removed_and_sorted() {
     };
     assert!(rig.owner.settings_preview(&same).unwrap().fields.is_empty());
 }
+
+#[test]
+fn cr_187_the_tips_setting_and_its_percents_are_edited_and_tighten_both_ways() {
+    let mut rig = held(plain);
+    // Off with 10, 15 and 20 is what the settings start with.
+    let first = rig.owner.known_settings().unwrap().clone();
+    assert!(!first.tips_on);
+    assert_eq!(first.tip_percents, vec![10, 15, 20]);
+    for (edit, name) in [
+        (
+            SettingsEdit {
+                tips_on: Some(true),
+                ..SettingsEdit::default()
+            },
+            "tips_on",
+        ),
+        (
+            SettingsEdit {
+                tip_percents: Some(vec![5, 12]),
+                ..SettingsEdit::default()
+            },
+            "tip_percents",
+        ),
+        (
+            SettingsEdit {
+                tip_percents: Some(Vec::new()),
+                ..SettingsEdit::default()
+            },
+            "tip_percents",
+        ),
+    ] {
+        let preview = rig.owner.settings_preview(&edit).expect("a preview");
+        assert_eq!(
+            preview.fields,
+            vec![FieldChange {
+                field: name,
+                direction: Change::Tightening
+            }]
+        );
+        assert_eq!(preview.change, Change::Tightening);
+        // The owner phone signs alone: the queue sorts it as a tightening.
+        let queued = ok(rig.owner.queue_settings(preview.settings, nop));
+        assert!(matches!(queued, SettingsQueued::Tightening { .. }));
+        rig.round(&[], 0);
+    }
+    // What is not named is kept: the percents survive a change of the switch.
+    let kept = rig
+        .owner
+        .settings_preview(&SettingsEdit {
+            tips_on: Some(false),
+            ..SettingsEdit::default()
+        })
+        .expect("a preview");
+    assert!(kept.settings.tip_percents.is_empty());
+}
+
+#[test]
+fn cr_187_a_suggested_tip_outside_one_to_fifty_or_a_fourth_one_is_refused() {
+    let rig = held(plain);
+    for percents in [vec![0], vec![51], vec![1, 2, 3, 4], vec![10, 0, 20]] {
+        let edit = SettingsEdit {
+            tip_percents: Some(percents.clone()),
+            ..SettingsEdit::default()
+        };
+        assert!(
+            matches!(
+                rig.owner.settings_preview(&edit),
+                Err(Refusal::SettingsInvalid(_))
+            ),
+            "{percents:?}"
+        );
+    }
+    let edge = SettingsEdit {
+        tip_percents: Some(vec![1, 50]),
+        ..SettingsEdit::default()
+    };
+    assert!(rig.owner.settings_preview(&edge).is_ok());
+}

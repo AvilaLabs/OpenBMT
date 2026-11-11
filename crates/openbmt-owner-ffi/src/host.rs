@@ -2158,6 +2158,8 @@ impl Entry {
                 tor_on: s.tor_on,
                 customer_wifi: s.customer_wifi,
                 min_sale_sats: s.min_sale_sats,
+                tips_on: s.tips_on,
+                tip_percents: s.tip_percents.clone(),
                 devices: s.devices.iter().map(|d| d.to_bytes().to_vec()).collect(),
                 counters: s
                     .counters

@@ -630,6 +630,13 @@ object AppWords {
         "Change what you need, then press Done.",
     )
 
+    val editGroupTips = w(
+        Tones.INFO, "Tips",
+        "Whether the counters ask the customer for a tip, and which tips they suggest.",
+        Who.OWNER,
+        "Turn tips on, and set up to three percents.",
+    )
+
     val editGroupRefunds = w(
         Tones.INFO, "Refunds and overrides",
         "How much can be refunded, and how much cashiers and managers may accept against a red screen.",
@@ -727,8 +734,17 @@ object AppWords {
         "Type each share again, like 50 or 33.33.",
     )
 
+    /** A suggested tip was not a whole percent from 1 to 50. */
+    val editTipNotRead = w(
+        Tones.STOP, "Tip not accepted",
+        "A suggested tip must be a whole percent from 1 to 50, so nothing was saved.",
+        Who.OWNER,
+        "Type it again, like 15, or leave it empty.",
+    )
+
     /** What was typed for a field is not the kind of number it takes. */
     fun editValueNotRead(kind: FieldKind, label: String): SayWords {
+        if (kind == FieldKind.TipPercent) return editTipNotRead
         val (what, next) = when (kind) {
             FieldKind.Dollars -> "is not a whole number of dollars" to "Type whole dollars, like 25, or 0 to turn it off."
             FieldKind.Percent -> "is not a percent" to "Type a percent with up to two decimals, like 0.5."
@@ -736,6 +752,7 @@ object AppWords {
             FieldKind.Minutes -> "is not a whole number of minutes" to "Type whole minutes, like 10."
             FieldKind.Sats -> "is not a whole number of satoshis" to "Type whole satoshis, like 1000, or 0 for none."
             FieldKind.Switch -> "was not chosen" to "Choose one of the two answers."
+            FieldKind.TipPercent -> return editTipNotRead
         }
         return w(
             Tones.STOP, "Value not accepted",
@@ -796,6 +813,26 @@ object AppWords {
             Tones.INFO, "Smallest bitcoin sale",
             "A bitcoin sale below this is turned away, because a tiny receipt can cost more to spend than it holds.",
             Who.OWNER, "Whole satoshis. 0 means no smallest sale.",
+        ),
+        "tips_on" to w(
+            Tones.INFO, "Ask for a tip",
+            editGroupTips.what,
+            Who.OWNER, editGroupTips.next,
+        ),
+        "tip_1" to w(
+            Tones.INFO, "First tip",
+            editGroupTips.what,
+            Who.OWNER, "A percent from 1 to 50, or empty.",
+        ),
+        "tip_2" to w(
+            Tones.INFO, "Second tip",
+            editGroupTips.what,
+            Who.OWNER, "A percent from 1 to 50, or empty.",
+        ),
+        "tip_3" to w(
+            Tones.INFO, "Third tip",
+            editGroupTips.what,
+            Who.OWNER, "A percent from 1 to 50, or empty.",
         ),
         "refund_cap" to w(
             Tones.INFO, "Largest single refund",
@@ -1171,6 +1208,7 @@ object AppWords {
         "editIntro" to editIntro,
         "editGroupInstant" to editGroupInstant,
         "editGroupPayments" to editGroupPayments,
+        "editGroupTips" to editGroupTips,
         "editGroupRefunds" to editGroupRefunds,
         "editGroupSafety" to editGroupSafety,
         "editGroupShares" to editGroupShares,
@@ -1184,6 +1222,7 @@ object AppWords {
         "editNodeNeeded" to editNodeNeeded,
         "editNoCounters" to editNoCounters,
         "editSharesNotPercent" to editSharesNotPercent,
+        "editTipNotRead" to editTipNotRead,
         "editValueNotReadDollars" to editValueNotRead(FieldKind.Dollars, "Refunds per day"),
         "editValueNotReadPercent" to editValueNotRead(FieldKind.Percent, "Underpayment still counted"),
         "editValueNotReadBlocks" to editValueNotRead(FieldKind.Blocks, "Blocks to settle a sale"),

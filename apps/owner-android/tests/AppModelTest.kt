@@ -328,16 +328,17 @@ object AppModelTest {
         val byLabel = sl.toMap()
         ok(byLabel["Underpayment still counted"] == "1.05%" && byLabel["Tor"] == "on" && byLabel["Customers can join the Wi-Fi"] == "no", "percent and switches: $byLabel")
         ok(byLabel["Smallest sale a counter opens"] == "no floor" && byLabel["Boxes"] == "0" && byLabel["Devices that write records"] == "2", "floor, boxes, devices")
+        ok(byLabel["Tips"] == "Off" && OwnerModel.settingsLines(sampleSettings(tipsOn = true)).toMap()["Tips"] == "10%, 15%, 20%", "the tips line")
         ok(byLabel["Counters and their shares"] == "Counter 02020202 100.00%", "the counters' shares: ${byLabel["Counters and their shares"]}")
         ok(byLabel["Blocks to settle a sale"] == "1" && byLabel["Blocks until a refund may be paid"] == "6", "the depths")
         ok(OwnerModel.settingsLines(sampleSettings(floor = 5000, counters = emptyList())).toMap()["Smallest sale a counter opens"] == "5,000 sats", "a floor")
     }
 
-    private fun sampleSettings(floor: Long = 0, counters: List<CounterShare> = listOf(CounterShare(ByteArray(32) { 2 }, 10_000))): SettingsHeld {
+    private fun sampleSettings(floor: Long = 0, counters: List<CounterShare> = listOf(CounterShare(ByteArray(32) { 2 }, 10_000)), tipsOn: Boolean = false, tipPercents: List<Int> = listOf(10, 15, 20)): SettingsHeld {
         val l = Limit(7000, 7)
         return SettingsHeld(
             3, l, l, l, l, l, l, 105, l, l, l, l, 1, 6, 900, true, false, floor,
-            listOf(ByteArray(32) { 1 }, ByteArray(32) { 2 }), counters, emptyList(), null,
+            tipsOn, tipPercents, listOf(ByteArray(32) { 1 }, ByteArray(32) { 2 }), counters, emptyList(), null,
         )
     }
 
@@ -674,7 +675,7 @@ object AppModelTest {
         ok(outbox.contains("n.outbox()") && !outbox.contains("ui.field(") && !outbox.contains("n.cancel(") && !outbox.contains("n.requeue("), "the outbox screen reads and changes nothing")
         val s = sampleSettings()
         ok(OwnerModel.settingsLines(s) == OwnerModel.settingsLines(s), "a fixed order")
-        ok(OwnerModel.settingsLines(s).size == 22, "every field of the settings has a line: ${OwnerModel.settingsLines(s).size}")
+        ok(OwnerModel.settingsLines(s).size == 23, "every field of the settings has a line: ${OwnerModel.settingsLines(s).size}")
         val noTime = OwnerModel.outboxLines(OutboxRow(1, OutboxKind.Pairing, null, null, null, null, 10, words()), 5)
         ok(noTime.contains("The node keeps no signing time for this one."), "an object with no time says so")
         ok(AppWords.noSettingsYet.who == Who.OWNER && SayCheck.problem(AppWords.noSettingsYet) == null, "no settings yet has words")
@@ -1341,7 +1342,7 @@ object AppModelTest {
         val e = source("src/android/SettingsEdit.kt")
         val menu = e.substringAfter("internal fun Controller.showChangeSettings(").substringBefore("internal fun Controller.showEditGroup(")
         for (w in listOf("editGroupShares.heading", "editGroupLightning.heading", "\"Review\"", "\"Start over\"", "settingsDraft = SettingsDraft()")) ok(menu.contains(w), "the menu has $w")
-        ok(SettingsEditModel.groups.size == 4 && SettingsEditModel.groups.map { it.words.heading } == listOf("Instant sales", "Payments", "Refunds and overrides", "Safety"), "four screens of fields: ${SettingsEditModel.groups.map { it.words.heading }}")
+        ok(SettingsEditModel.groups.size == 5 && SettingsEditModel.groups.map { it.words.heading } == listOf("Instant sales", "Payments", "Tips", "Refunds and overrides", "Safety"), "five screens of fields: ${SettingsEditModel.groups.map { it.words.heading }}")
         ok(AppWords.editGroupShares.heading == "Counters' shares" && AppWords.editGroupLightning.heading == "Lightning node", "the other two")
         ok(SettingsEditModel.fields.map { it.id }.toSet().size == SettingsEditModel.fields.size && SettingsEditModel.fields.size >= 15, "each field once: ${SettingsEditModel.fields.size}")
         ok(e.indexOf("n.queueSettings(") > e.indexOf("n.previewSettings("), "nothing is queued before the preview")
@@ -1367,6 +1368,26 @@ object AppModelTest {
         ok(SettingsEditModel.sats("5000") == 5000L && SettingsEditModel.sats("5,000") == 5000L && SettingsEditModel.sats("5.5") == null && SettingsEditModel.sats("") == null, "satoshis")
         ok(SettingsEditModel.parse(FieldKind.Switch, "1") == 1L && SettingsEditModel.parse(FieldKind.Switch, "0") == 0L && SettingsEditModel.parse(FieldKind.Switch, "yes") == null, "a switch")
         ok(SettingsEditModel.percentInput(105) == "1.05" && SettingsEditModel.percentInput(1000) == "10" && SettingsEditModel.percentInput(50) == "0.5" && SettingsEditModel.percentText(3333) == "33.33%", "percent from basis points")
+        ok(SettingsEditModel.tipPercent("15") == 15L && SettingsEditModel.tipPercent(" 1 ") == 1L && SettingsEditModel.tipPercent("50%") == 50L && SettingsEditModel.tipPercent("") == 0L, "a suggested tip is a percent from 1 to 50, or empty")
+        ok(listOf("0", "51", "1.5", "-3", "abc", "100", "1,5").all { SettingsEditModel.tipPercent(it) == null }, "not a suggested tip")
+        val tipHeld = sampleSettings(tipsOn = true, tipPercents = listOf(5, 12))
+        val tipFields = SettingsEditModel.tips.fields
+        ok(tipFields.map { it.id } == listOf("tips_on", "tip_1", "tip_2", "tip_3") && tipFields.map { it.label } == listOf("Ask for a tip", "First tip", "Second tip", "Third tip"), "the tips screen: ${tipFields.map { it.label }}")
+        ok(tipFields.drop(1).map { SettingsEditModel.input(it, tipHeld) } == listOf("5", "12", "") && tipFields.drop(1).map { SettingsEditModel.now(it, tipHeld) } == listOf("5%", "12%", "none"), "what the tips are now")
+        ok(tipFields.all { it.words.what == AppWords.editGroupTips.what } && tipFields.drop(1).all { it.words.next == "A percent from 1 to 50, or empty." }, "the tips' hint")
+        ok(AppWords.editValueNotRead(FieldKind.TipPercent, "First tip") === AppWords.editTipNotRead && AppWords.editTipNotRead.heading == "Tip not accepted", "a tip that is not read has its own words")
+        ok(SettingsEditModel.tipsNow(sampleSettings()) == "Off" && SettingsEditModel.tipsNow(tipHeld) == "5%, 12%" && SettingsEditModel.tipsNow(sampleSettings(tipsOn = true, tipPercents = emptyList())) == "none", "the read-only line")
+        run {
+            val td = SettingsDraft()
+            ok(SettingsEditModel.args(td, tipHeld).let { it is Form.Ok && it.value.tipPercents == null && it.value.tipsOn == null }, "tips not touched are not sent")
+            td.typed["tips_on"] = "0"
+            ok((SettingsEditModel.args(td, tipHeld) as Form.Ok).value.let { it.tipsOn == false && it.tipPercents == null }, "the switch alone")
+            td.typed["tip_1"] = ""
+            td.typed["tip_3"] = "25"
+            ok((SettingsEditModel.args(td, tipHeld) as Form.Ok).value.tipPercents == listOf(12, 25), "an empty field is left out, an untouched one is kept, in order")
+            td.typed["tip_2"] = "51"
+            ok((SettingsEditModel.args(td, tipHeld) as Form.Refused).words === AppWords.editTipNotRead, "a percent above 50 is refused with the tip words")
+        }
         val key = "02" + "ab".repeat(32)
         ok(SettingsEditModel.nodeText("  $key  ").let { it is Form.Ok && it.value == key }, "a node key is trimmed")
         ok(SettingsEditModel.nodeText("$key@host.onion:9735").let { it is Form.Ok && it.value == "$key@host.onion:9735" }, "an address goes through whole; the library takes the key")
@@ -2167,7 +2188,7 @@ object AppModelTest {
         ok(back.all { l -> table.rows.any { r -> l.first.substringAfter(", ").replaceFirstChar { it.uppercase() } == r.first } }, "and only the first letter differs")
         ok(rest.none { it.first.startsWith("Largest instant sale") || it.first.startsWith("Instant total") }, "the lines of the table are not left in the rest")
         val folded = OwnerLook.settingsFolded(rest)
-        ok(folded.map { it.first } == listOf("Payments", "Refunds and overrides", "Safety", "Counters' shares", "Lightning node"), "the groups: ${folded.map { it.first }}")
+        ok(folded.map { it.first } == listOf("Payments", "Tips", "Refunds and overrides", "Safety", "Counters' shares", "Lightning node"), "the groups: ${folded.map { it.first }}")
         val every = folded.flatMap { it.second }
         val expected = lines.filter { it.first != "Version" && it !in back && it.first != "Underpayment still counted" }
         ok(every.toSet() == expected.toSet() && every.size == expected.size, "every other line is in a group once, and the version is the bar's")

@@ -1285,6 +1285,10 @@ pub struct SettingsHeldView {
     pub customer_wifi: bool,
     /// The smallest sale a counter opens, in satoshis; 0 is no floor.
     pub min_sale_sats: u64,
+    /// The counters ask the customer for a tip (CR-187).
+    pub tips_on: bool,
+    /// The suggested tips, in whole percent, at most three (CR-187).
+    pub tip_percents: Vec<u8>,
     /// The devices that may write records, 32 bytes each.
     pub devices: Vec<Vec<u8>>,
     /// Each counter's share of every budget.
@@ -1314,6 +1318,8 @@ wire_record!(SettingsHeldView {
     tor_on,
     customer_wifi,
     min_sale_sats,
+    tips_on,
+    tip_percents,
     devices,
     counters,
     boxes,

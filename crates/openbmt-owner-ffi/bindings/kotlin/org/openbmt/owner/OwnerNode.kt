@@ -525,6 +525,10 @@ class SettingsHeld(
     val torOn: Boolean,
     val customerWifi: Boolean,
     val minSaleSats: Long,
+    /** The counters ask the customer for a tip. */
+    val tipsOn: Boolean,
+    /** The suggested tips in whole percent, at most three. */
+    val tipPercents: List<Int>,
     val devices: List<ByteArray>,
     val counters: List<CounterShare>,
     val boxes: List<ByteArray>,
@@ -560,6 +564,10 @@ data class SettingsEditArgs(
     val torOn: Boolean? = null,
     val customerWifi: Boolean? = null,
     val minSaleSats: Long? = null,
+    /** The counters ask the customer for a tip. */
+    val tipsOn: Boolean? = null,
+    /** The suggested tips in whole percent, at most three; the whole list replaces the one held, and an empty list suggests none. */
+    val tipPercents: List<Int>? = null,
     val shares: List<CounterShare> = emptyList(),
     val lightning: LightningAction = LightningAction.Keep,
     val lightningText: String = "",
@@ -1318,6 +1326,7 @@ internal fun Reader.settingsHeld(): SettingsHeld =
     SettingsHeld(
         u32(), limit(), limit(), limit(), limit(), limit(), limit(), u32(),
         limit(), limit(), limit(), limit(), u8(), u8(), u32(), bool(), bool(), u64(),
+        bool(), bytes().map { it.toInt() and 0xff },
         list { bytes() }, list { CounterShare(bytes(), u32()) }, list { bytes() },
         option { bytes() },
     )
@@ -1358,6 +1367,8 @@ internal fun Writer.settingsEdit(a: SettingsEditArgs): Writer {
     option(a.torOn) { bool(it) }
     option(a.customerWifi) { bool(it) }
     option(a.minSaleSats) { u64(it) }
+    option(a.tipsOn) { bool(it) }
+    option(a.tipPercents) { p -> bytes(ByteArray(p.size) { i -> p[i].toByte() }) }
     list(a.shares) { bytes(it.counter).u32(it.bps) }
     return lightningAction(a.lightning).string(a.lightningText)
 }

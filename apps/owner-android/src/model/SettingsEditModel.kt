@@ -9,11 +9,12 @@ import org.openbmt.owner.SettingsHeld
 import org.openbmt.owner.SettingsPreview
 
 /** The kinds of value a field of the editor holds. */
-enum class FieldKind { Dollars, Percent, Blocks, Minutes, Sats, Switch }
+enum class FieldKind { Dollars, Percent, Blocks, Minutes, Sats, Switch, TipPercent }
 
 /**
  * One field the owner can change (OA-33). [read] is the value the settings hold in the field's own unit (whole
- * dollars, basis points, blocks, seconds, satoshis, or 1 and 0 for a switch); [put] sets the field of an edit
+ * dollars, basis points, blocks, seconds, satoshis, or 1 and 0 for a switch, or a suggested tip's whole percent, 0 for
+ * none); [put] sets the field of an edit
  * from a value in that unit. Everything that has a meaning is the library's: the app judges the shape of what
  * was typed and nothing more (OA-07).
  */
@@ -83,6 +84,19 @@ object SettingsEditModel {
         ),
     )
 
+    /** One of the three suggested tips. They are put together in [args], so a field of its own sets nothing. */
+    private fun tip(id: String, at: Int) =
+        EditField(id, FieldKind.TipPercent, { (it.tipPercents.getOrNull(at) ?: 0).toLong() }, { a, _ -> a })
+
+    private val tipFields = listOf(tip("tip_1", 0), tip("tip_2", 1), tip("tip_3", 2))
+
+    val tips = EditGroup(
+        AppWords.editGroupTips,
+        listOf(
+            EditField("tips_on", FieldKind.Switch, { if (it.tipsOn) 1 else 0 }, { a, v -> a.copy(tipsOn = v == 1L) }),
+        ) + tipFields,
+    )
+
     val refunds = EditGroup(
         AppWords.editGroupRefunds,
         listOf(
@@ -103,7 +117,7 @@ object SettingsEditModel {
     )
 
     /** The groups that are screens of fields, in the order the menu lists them. The shares and the node have screens of their own. */
-    val groups: List<EditGroup> = listOf(instant, payments, refunds, safety)
+    val groups: List<EditGroup> = listOf(instant, payments, tips, refunds, safety)
 
     /** Every field of the screens of fields, in the order of the groups. */
     val fields: List<EditField> = groups.flatMap { it.fields }
@@ -129,6 +143,13 @@ object SettingsEditModel {
     /** A whole number of blocks that fits a byte. */
     fun blocks(text: String): Long? = Forms.number(text.trim())?.takeIf { it <= 255 }
 
+    /** A suggested tip: nothing (0, no tip), or a whole percent from 1 to 50. */
+    fun tipPercent(text: String): Long? {
+        val t = text.trim().removeSuffix("%").trim()
+        if (t.isEmpty()) return 0L
+        return Forms.number(t)?.takeIf { it in 1..50 }
+    }
+
     /** Whole satoshis. */
     fun sats(text: String): Long? = Forms.number(text.trim())
 
@@ -145,6 +166,7 @@ object SettingsEditModel {
         FieldKind.Blocks -> blocks(text)
         FieldKind.Minutes -> minutesToSecs(text)
         FieldKind.Sats -> sats(text)
+        FieldKind.TipPercent -> tipPercent(text)
         FieldKind.Switch -> when (text) {
             "1" -> 1L
             "0" -> 0L
@@ -187,6 +209,7 @@ object SettingsEditModel {
         return when (f.kind) {
             FieldKind.Percent -> percentInput(v)
             FieldKind.Minutes -> (v / 60).toString()
+            FieldKind.TipPercent -> if (v == 0L) "" else v.toString()
             else -> v.toString()
         }
     }
@@ -200,11 +223,19 @@ object SettingsEditModel {
             FieldKind.Blocks -> if (v == 1L) "1 block" else "$v blocks"
             FieldKind.Minutes -> if (v % 60 == 0L) (if (v == 60L) "1 minute" else "${v / 60} minutes") else "$v seconds"
             FieldKind.Sats -> if (v == 0L) "none" else Format.sats(v)
+            FieldKind.TipPercent -> if (v == 0L) "none" else "$v%"
             FieldKind.Switch -> when (f.id) {
                 "customer_wifi" -> if (v == 1L) "yes or unsure" else "no"
                 else -> if (v == 1L) "on" else "off"
             }
         }
+    }
+
+    /** The suggested tips as the settings view writes them: "Off" with tips off, else "10%, 15%, 20%" ("none" with no percents). */
+    fun tipsNow(held: SettingsHeld): String = when {
+        !held.tipsOn -> "Off"
+        held.tipPercents.isEmpty() -> "none"
+        else -> held.tipPercents.joinToString(", ") { "$it%" }
     }
 
     /** The key of the node in full, 66 digits, or "none". */
@@ -245,6 +276,15 @@ object SettingsEditModel {
             val text = draft.typed[f.id] ?: continue
             val v = parse(f.kind, text) ?: return Form.Refused(AppWords.editValueNotRead(f.kind, f.label))
             a = f.put(a, v)
+        }
+        // The three suggested tips are one list: a field not typed keeps what the settings hold, and an empty one is left out.
+        if (tipFields.any { draft.typed.containsKey(it.id) }) {
+            val percents = ArrayList<Int>()
+            for (f in tipFields) {
+                val v = draft.typed[f.id]?.let { parse(f.kind, it) } ?: f.read(held)
+                if (v > 0) percents.add(v.toInt())
+            }
+            a = a.copy(tipPercents = percents)
         }
         val shares = ArrayList<CounterShare>()
         for (s in held.counters) {

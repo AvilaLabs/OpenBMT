@@ -75,6 +75,11 @@ pub struct SettingsEdit {
     pub customer_wifi: Option<bool>,
     /// Smallest bitcoin sale, in satoshis; 0 means none.
     pub min_sale_sats: Option<u64>,
+    /// The counters ask the customer for a tip (CR-187).
+    pub tips_on: Option<bool>,
+    /// The suggested tips, in whole percent, at most three (CR-187): the
+    /// whole list replaces the one held, and an empty list suggests none.
+    pub tip_percents: Option<Vec<u8>>,
     /// New shares for counters, in basis points. A counter that is not
     /// named keeps its share; a key that is not a counter is refused.
     pub shares: Vec<(DeviceId, u16)>,
@@ -299,6 +304,12 @@ impl Owner {
         }
         if let Some(v) = edit.min_sale_sats {
             s.min_sale_sats = v;
+        }
+        if let Some(v) = edit.tips_on {
+            s.tips_on = v;
+        }
+        if let Some(v) = &edit.tip_percents {
+            s.tip_percents.clone_from(v);
         }
         for (counter, bps) in &edit.shares {
             match s.counters.get_mut(counter) {
