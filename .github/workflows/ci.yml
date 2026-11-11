@@ -73,6 +73,8 @@ jobs:
           echo "KOTLIN_ANNOTATIONS_JAR=$kotlin_home/lib/annotations-13.0.jar" >> "$GITHUB_ENV"
       - name: Run Key binding decoder harness
         run: crates/openbmt-key-ffi/bindings/tests/run-jvm.sh
+      - name: Run Counter binding decoder harness
+        run: crates/openbmt-counter-ffi/bindings/tests/run-jvm.sh
 
   qr-crosscheck:
     name: QR encoder against ZXing

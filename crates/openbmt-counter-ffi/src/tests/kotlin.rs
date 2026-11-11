@@ -1,0 +1,267 @@
+//! Source-level checks that keep the hand-written Kotlin constants and frame
+//! field order aligned with Rust. The JVM decoder behavior is exercised by
+//! `bindings/tests/ProtocolDecoderTest.kt`.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use super::wire::{frame, W};
+use crate::call::{enum_tags, ops};
+use crate::say::{TONES, WHOS};
+use crate::{CounterNetwork, StartConfig};
+
+fn bindings(file: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("bindings")
+        .join(file)
+}
+
+fn read(path: PathBuf) -> String {
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+fn kotlin(file: &str) -> String {
+    read(bindings(&format!("kotlin/org/openbmt/counter/{file}")))
+}
+
+/// `private const val NAME = 12` lines whose name starts with `prefix`.
+fn constants(text: &str, prefix: &str) -> BTreeMap<String, u32> {
+    text.lines()
+        .filter_map(|l| {
+            let rest = l.trim().strip_prefix("private const val ")?;
+            let (name, value) = rest.split_once(" = ")?;
+            if !name.starts_with(prefix) {
+                return None;
+            }
+            Some((name.to_string(), value.trim().parse().ok()?))
+        })
+        .collect()
+}
+
+/// `RefundAskView` becomes `REFUND_ASK_VIEW`.
+fn upper_snake(name: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in name.chars().enumerate() {
+        if c.is_ascii_uppercase() && i > 0 {
+            out.push('_');
+        }
+        out.push(c.to_ascii_uppercase());
+    }
+    out
+}
+
+#[test]
+fn the_kotlin_op_numbers_are_the_rust_ones() {
+    let rust: BTreeMap<String, u32> = ops()
+        .iter()
+        .map(|o| {
+            (
+                format!("OP_{}", o.name.to_ascii_uppercase()),
+                u32::from(o.num),
+            )
+        })
+        .collect();
+    assert_eq!(constants(&kotlin("CounterNode.kt"), "OP_"), rust);
+}
+
+#[test]
+fn the_kotlin_tag_bytes_are_the_rust_ones() {
+    let rust: BTreeMap<String, u32> = enum_tags()
+        .iter()
+        .map(|(ty, variant, tag)| {
+            (
+                format!("TAG_{}_{}", upper_snake(ty), upper_snake(variant)),
+                u32::from(*tag),
+            )
+        })
+        .collect();
+    assert_eq!(constants(&kotlin("CounterNode.kt"), "TAG_"), rust);
+}
+
+#[test]
+fn the_kotlin_tone_and_person_numbers_are_the_rust_ones() {
+    let text = kotlin("CounterNode.kt");
+    let tones: BTreeMap<String, u32> = TONES
+        .iter()
+        .map(|(_, name, byte)| (format!("TONE_{}", upper_snake(name)), u32::from(*byte)))
+        .collect();
+    assert_eq!(constants(&text, "TONE_"), tones);
+    let whos: BTreeMap<String, u32> = WHOS
+        .iter()
+        .map(|(_, name, byte)| (format!("WHO_{}", upper_snake(name)), u32::from(*byte)))
+        .collect();
+    assert_eq!(constants(&text, "WHO_"), whos);
+}
+
+fn in_order(text: &str, needles: &[&str]) {
+    let positions: Vec<usize> = needles
+        .iter()
+        .map(|f| text.find(f).unwrap_or_else(|| panic!("{f}")))
+        .collect();
+    assert!(positions.windows(2).all(|w| w[0] < w[1]), "{positions:?}");
+}
+
+#[test]
+fn the_kotlin_words_read_the_fields_in_the_order_the_frame_writes_them() {
+    let text = kotlin("CounterNode.kt");
+    in_order(
+        &text,
+        &[
+            "val tone: Int",
+            "val who: Int",
+            "val heading: String",
+            "val what: String",
+            "val next: String",
+            "val code: String?",
+            "val at: Long?",
+            "val quoted: Quoted?",
+            "val detail: String?",
+        ],
+    );
+    in_order(
+        &text,
+        &[
+            "val tone = u8()",
+            "val who = u8()",
+            "val heading = string16()",
+            "val what = string16()",
+            "val next = string16()",
+            "val code = option { string16() }",
+            "val at = option { u64() }",
+            "val quoted = option { Quoted(string16(), string16()) }",
+            "val detail = option { string16() }",
+        ],
+    );
+    assert!(text.contains("throw CounterException(rule, text, status, words)"));
+}
+
+#[test]
+fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them() {
+    let text = kotlin("CounterNode.kt");
+    // Each reader, with the fields in the order of the Rust record.
+    for needle in [
+        "Opened(u32(), u64(), u64(), u64(), u64(), payment())",
+        "Payment(string(), string(), string(), u32(), bytes())",
+        "saleState(), words(), list { words() }, u64(), u64(), bool(), bool(), bool(), bool(),",
+        "reports(), option { payment() },",
+        "Pump(reports(), strings(), bool())",
+        "u32(), option { u64() }, u64(), option { u64() }, refundState(), role(), string(), u64(),",
+        "HeartbeatOutcome(bool(), option { u64() }, words(), reports())",
+        "u32(), u32(), option { Health(bool(), bool(), words()) }, u32s(), u64(), bool(),",
+        "Report.BooksFinal(u32(), u64(), string(), u64())",
+    ] {
+        assert!(text.contains(needle), "{needle}");
+    }
+    // And the Rust records those readers mirror, in the same order.
+    let protocol = read(bindings("PROTOCOL.md"));
+    for line in [
+        "OpenedView: record: index: u32, needs_sats: u64, quote_rate: u64, quote_from: u64, quote_until: u64, payment: Payment",
+        "Payment: record: address: string, uri: string, copy_uri: string, qr_size: u32, qr_bits: list<u8>",
+        "PumpView: record: reports: list<ReportView>, notes: list<string>, stopped: bool",
+        "HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, reports: list<ReportView>",
+        "StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool",
+        "HealthView: record: healthy: bool, behind: bool, words: Words",
+    ] {
+        assert!(protocol.contains(line), "{line}");
+    }
+    assert!(protocol.contains(
+        "ScreenView: record: state: StateView, words: Words, flags: list<Words>, received_sats: u64, \
+         needs_sats: u64, stuck: bool, late: bool, reopened: bool, conflict_seen: bool, \
+         reports: list<ReportView>, payment: option<Payment>"
+    ));
+    assert!(protocol.contains(
+        "RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: option<u64>, \
+         state: RefundStateView, by_role: ActorRole, by_name: string, at: u64, words: Words"
+    ));
+}
+
+#[test]
+fn the_kotlin_error_reader_rejects_undefined_status_tags_and_utf8() {
+    let text = kotlin("CounterNode.kt");
+    assert!(text.contains("fun status(): Int = u8().also { if (it !in 0..4)"));
+    assert!(text.contains("it !in 0..3) bad(\"a tone is not 0 to 3\")"));
+    assert!(text.contains("it !in 0..6) bad(\"a person is not 0 to 6\")"));
+    assert!(text.contains("onMalformedInput(CodingErrorAction.REPORT)"));
+    assert!(text.contains("onUnmappableCharacter(CodingErrorAction.REPORT)"));
+    assert!(text.contains("catch (_: CharacterCodingException)"));
+    assert!(text.contains("the library's response is not an OBMn frame"));
+    assert!(
+        text.contains("'O'.code.toByte(), 'B'.code.toByte(), 'M'.code.toByte(), 'n'.code.toByte()")
+    );
+    assert!(
+        text.contains("'O'.code.toByte(), 'B'.code.toByte(), 'M'.code.toByte(), 'm'.code.toByte()")
+    );
+}
+
+#[test]
+fn the_kotlin_native_declaration_matches_the_exported_symbol() {
+    let text = kotlin("Native.kt");
+    assert!(text.contains("package org.openbmt.counter\n"));
+    assert!(text.contains("object Native {"));
+    assert!(text.contains("System.loadLibrary(\"openbmt_counter_ffi\")"));
+    assert!(text.contains("external fun call(request: ByteArray): ByteArray?"));
+    // The symbol the JVM looks for: package, class and method of the
+    // declaration above (no name has an underscore to escape).
+    let glue = read(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/jni.rs"));
+    assert!(glue.contains("pub extern \"system\" fn Java_org_openbmt_counter_Native_call("));
+}
+
+#[test]
+fn the_kotlin_wrapper_takes_no_lock_so_that_pump_and_the_screen_can_run_together() {
+    for file in ["CounterNode.kt", "Native.kt"] {
+        let text = kotlin(file);
+        for line in text.lines() {
+            let code = line.trim_start();
+            if code.starts_with("//") || code.starts_with('*') || code.starts_with("/*") {
+                continue;
+            }
+            assert!(!code.contains("synchronized"), "{file}: {line}");
+            assert!(!code.contains("@Synchronized"), "{file}: {line}");
+            assert!(!code.contains("ReentrantLock"), "{file}: {line}");
+        }
+    }
+}
+
+const START_FRAME_HEX: &str =
+    "4f424d6d01010000000000000000000100000064030100000000000000010000000101000000020100000003\
+010000000405000000010000000600010100000070010000000100000061";
+
+#[test]
+fn the_start_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
+    let sample = StartConfig {
+        dir: "d".to_string(),
+        network: CounterNetwork::Regtest,
+        now: 1,
+        identity_secret: vec![1],
+        owner_root: vec![2],
+        approver_root: vec![3],
+        wallet_checksum: vec![4],
+        batch_min_count: 5,
+        settings: vec![6],
+        first_batch: None,
+        proxy: Some("p".to_string()),
+        fixed_peers: vec!["a".to_string()],
+    };
+    let bytes = frame(1, 0, &W::new().start(&sample).0);
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(hex, START_FRAME_HEX);
+    // Through the real encoder, too.
+    let mut fields = Vec::new();
+    crate::codec::Put::put(&sample, &mut fields);
+    assert_eq!(frame(1, 0, &fields), bytes);
+    // The Kotlin harness holds the same literal.
+    let harness = read(bindings("tests/ProtocolDecoderTest.kt"));
+    let kotlin_hex: String = harness
+        .split("START_FRAME_HEX =")
+        .nth(1)
+        .expect("the constant")
+        .split("@JvmStatic")
+        .next()
+        .expect("up to main")
+        .split('"')
+        .enumerate()
+        .filter(|(i, _)| i % 2 == 1)
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(kotlin_hex, START_FRAME_HEX);
+}

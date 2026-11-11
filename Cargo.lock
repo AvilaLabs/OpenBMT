@@ -383,6 +383,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-counter-ffi"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "jni-sys",
+ "openbmt-core",
+ "openbmt-counter",
+ "openbmt-counter-node",
+ "openbmt-net-io",
+ "openbmt-qr",
+ "openbmt-watch",
+]
+
+[[package]]
 name = "openbmt-counter-node"
 version = "0.1.0"
 dependencies = [
