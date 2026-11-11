@@ -133,9 +133,9 @@ fn unknown_source(id: &str) -> CounterError {
 pub(crate) fn rate_parse(args: RateParseArgs) -> Result<SampleView, CounterError> {
     let src = source(&args.source).ok_or_else(|| unknown_source(&args.source))?;
     let cents =
-        parse_response(src, &args.response).map_err(|e| from_rule(e.rule(), &e, e.words()))?;
+        parse_response(src, &args.response).map_err(|e| from_rule(e.rule(), e, e.words()))?;
     let sample =
-        Sample::new(src, args.fetched_at, cents).map_err(|e| from_rule(e.rule(), &e, e.words()))?;
+        Sample::new(src, args.fetched_at, cents).map_err(|e| from_rule(e.rule(), e, e.words()))?;
     Ok(SampleView {
         source: src.id.to_string(),
         fetched_at: sample.fetched_at(),
@@ -156,11 +156,11 @@ pub(crate) fn rate_combine(args: RateCombineArgs) -> Result<RateView, CounterErr
         let src = source(&s.source).ok_or_else(|| unknown_source(&s.source))?;
         samples.push(
             Sample::new(src, s.fetched_at, s.minor_per_btc)
-                .map_err(|e| from_rule(e.rule(), &e, e.words()))?,
+                .map_err(|e| from_rule(e.rule(), e, e.words()))?,
         );
     }
     let (rate, src) =
-        combine(&samples, args.now).map_err(|e| from_rule(e.rule(), &e, e.words()))?;
+        combine(&samples, args.now).map_err(|e| from_rule(e.rule(), e, e.words()))?;
     Ok(RateView {
         rate: rate.minor_per_btc(),
         source_label: src.label().to_string(),

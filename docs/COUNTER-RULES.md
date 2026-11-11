@@ -519,7 +519,51 @@ and sales not yet settled wait for the owner's copy to catch up.
   is handed to the app as its side length and its modules, most
   significant bit first, row by row.
 
-## 9. What these rules do not do
+## 9. The Android counter app
+
+`apps/counter-android` is the cashier's screen. These rules are the app's
+own; the library judges sales and prices and knows nothing of them.
+
+- **CR-84.** The manager's PIN is 6 to 12 digits. It is kept as
+  PBKDF2-HMAC-SHA256 with 600,000 iterations and a random 16-byte salt, in
+  one file in the app's `noBackupFilesDir`. It is written in the order of
+  CR-40 by atomic steps (new file, sync, rename, sync of the folder), so a
+  crash leaves the old PIN or the new one. The PIN is never in the settings, the
+  logs or a screen.
+- **CR-85.** A PIN is compared in constant time. A wrong try holds the PIN
+  for 1 second, then 2, 4, 8 and so on, up to 5 minutes. While it is held
+  the PIN is not looked at, and the screen says how long to wait. The count
+  is written before the answer is given, so closing the app does not reset
+  it.
+- **CR-86.** A cashier's action needs no PIN: opening, requoting and
+  cancelling a sale, asking for or withdrawing a refund, and a cash refund.
+  The actions of CR-21 (an override) and of CR-67 to CR-69 (a refund asked
+  for or withdrawn by a manager) are made with the manager as the actor
+  only after the PIN was checked. The app never names the manager as the
+  actor without it. Each action names its actor, and the library keeps the
+  name.
+- **CR-87.** When the signed settings have Tor on, every connection of the
+  app, the node's and the price fetch's, goes through the SOCKS5 proxy of
+  the app's setting (`127.0.0.1:9050` unless the owner changed it), and no
+  name is looked up by the phone. Before the node starts, and before every
+  price fetch, the app asks the proxy for a SOCKS5 greeting. If the proxy
+  does not answer, nothing is sent around it: the node is not started, no
+  price is fetched, and the app says "Tor is on for this shop, but Orbot is
+  not running." and "Open Orbot and turn it on." The manager is the one
+  who acts. This is NR-26 applied: the proxy is the caller's.
+- **CR-88.** The node runs only while the app is on the screen. It starts
+  when the activity becomes visible and is stopped, cleanly, when it stops
+  being visible, so that it lets go of its folder. The screen is kept on
+  while the app is open. The app has no service and no notification. The
+  About screen and the README say so.
+- **CR-89.** The price is fetched by the app on the schedule of RT-40 to
+  RT-45: a fixed interval of 60 seconds, never because a sale opened; at
+  most 64 KiB read; a timeout of 20 seconds on the whole fetch; no cookies,
+  no cache, no redirect, no compression; one fixed generic User-Agent for
+  every shop. The reply is given to the library's `rate_parse`, the samples
+  to `rate_combine`; the app parses no JSON.
+
+## 10. What these rules do not do
 
 - **They do not check payments.** Proof of work, proofs, peers and
   conflicts are the watcher's. A wrong fact handed in gives a wrong

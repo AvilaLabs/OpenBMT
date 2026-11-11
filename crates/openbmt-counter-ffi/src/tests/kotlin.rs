@@ -316,3 +316,31 @@ fn the_price_requests_are_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
     assert_eq!(harness_hex("RATE_PARSE_HEX"), RATE_PARSE_HEX);
     assert_eq!(harness_hex("RATE_COMBINE_HEX"), RATE_COMBINE_HEX);
 }
+
+/// The counter app's fetch limits are the library's (RT-40, RT-43, RT-10).
+#[test]
+fn the_counter_app_fetch_limits_are_the_rates_library_ones() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../apps/counter-android/src/model/PriceSchedule.kt");
+    let text = read(path);
+    let value = |name: &str| -> String {
+        let line = text
+            .lines()
+            .find(|l| l.contains(&format!("const val {name} =")))
+            .unwrap_or_else(|| panic!("no {name} in PriceSchedule.kt"));
+        let v = line.split('=').nth(1).unwrap_or("").trim();
+        v.trim_end_matches('L').replace(' ', "")
+    };
+    assert_eq!(
+        value("FETCH_INTERVAL_SECS"),
+        openbmt_rates::FETCH_INTERVAL_SECS.to_string()
+    );
+    assert_eq!(
+        value("FETCH_TIMEOUT_SECS"),
+        openbmt_rates::FETCH_TIMEOUT_SECS.to_string()
+    );
+    assert_eq!(
+        value("MAX_RESPONSE_BYTES"),
+        format!("{}*1024", openbmt_rates::MAX_RESPONSE_BYTES / 1024)
+    );
+}
