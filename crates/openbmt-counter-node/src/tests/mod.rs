@@ -11,6 +11,7 @@ mod notices;
 mod own_node;
 mod ownnode;
 mod paired;
+mod relaylink;
 mod records;
 mod say;
 mod settle;

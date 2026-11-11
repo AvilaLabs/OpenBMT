@@ -14,7 +14,8 @@ use openbmt_core::settings::SettingsError;
 
 use crate::dirstore::DirStoreError;
 use crate::node::{HeartbeatNotTaken, StartError};
-use crate::paired::PairRefused;
+use crate::paired::{PairRefused, RelayRefused};
+use crate::relaylink::LinkLine;
 
 impl DirStoreError {
     /// What the owner is told about a file of the counter's data folder.
@@ -359,6 +360,116 @@ impl PairRefused {
     }
 }
 
+impl LinkLine {
+    /// What the counter's screen says about the link to the owner (CR-136).
+    /// The link never holds up a sale, and the words say so.
+    pub fn words(&self) -> Words {
+        match *self {
+            Self::Connecting => Words::new(
+                Tone::Info,
+                "Connecting to the Box",
+                "The counter is reaching the owner through the shop's Box. Sales do not wait for it.",
+                Who::Nobody,
+                "Nothing to do. This line changes when the Box answers.",
+            ),
+            Self::Connected => Words::new(
+                Tone::Info,
+                "Connected to the Box",
+                "The counter can send its records to the owner and take the owner's heartbeat.",
+                Who::Nobody,
+                "Nothing to do.",
+            ),
+            Self::NotReachable { since } => {
+                let words = Words::new(
+                    Tone::Info,
+                    "Box not reachable",
+                    "The counter cannot reach the Box, so it cannot send its records to the owner or take the owner's heartbeat.",
+                    Who::Owner,
+                    "Check that the Box is on and on the same network. The counter tries again by itself.",
+                );
+                match since {
+                    Some(at) => words.at(at),
+                    None => words,
+                }
+            }
+            Self::Refused => Words::new(
+                Tone::Info,
+                "Box refused this counter",
+                "The Box answered but did not accept this counter, so nothing goes to the owner through it.",
+                Who::Owner,
+                "Tell the owner. The owner's phone must list this counter in the shop's settings.",
+            ),
+            Self::NeedsTor => Words::new(
+                Tone::Info,
+                "Orbot needed for the Box",
+                "The Box is reached over Tor and Orbot is not running, so the counter cannot reach it.",
+                Who::Manager,
+                "Open Orbot and turn it on. The counter tries again by itself.",
+            ),
+            Self::NotStarted => Words::new(
+                Tone::Info,
+                "Box link did not start",
+                "The counter could not open the files of its link to the Box, so it does not talk to the owner. Sales are not affected.",
+                Who::Manager,
+                "Close the counter and open it again. If it stays, tell the owner.",
+            ),
+        }
+        .code("CR-136")
+    }
+}
+
+impl RelayRefused {
+    /// What the owner is told when the counter does not take a relay for
+    /// counters (CR-132). Nothing was changed.
+    pub fn words(&self) -> Words {
+        match self {
+            Self::Bytes(e) => Words::new(
+                Tone::Ended,
+                "Box code not readable",
+                "The code is not what the counter expects for the owner's Box, so nothing was changed.",
+                Who::Owner,
+                "Show the Box code on the owner's phone again and scan it again.",
+            )
+            .detail(e.to_string()),
+            Self::NotFromOwner => Words::new(
+                Tone::Ended,
+                "Box code not from the owner",
+                "The code was not signed by the owner's phone this counter was paired with, so nothing was changed.",
+                Who::Owner,
+                "Show the Box code on the owner's own phone and scan it again.",
+            ),
+        }
+        .code(self.rule())
+    }
+}
+
+/// One value of every line the link can show.
+pub fn every_link_line() -> Vec<(&'static str, LinkLine)> {
+    vec![
+        ("Connecting", LinkLine::Connecting),
+        ("Connected", LinkLine::Connected),
+        (
+            "NotReachable",
+            LinkLine::NotReachable {
+                since: Some(1_700_000_000),
+            },
+        ),
+        ("NotReachableNoTime", LinkLine::NotReachable { since: None }),
+        ("Refused", LinkLine::Refused),
+        ("NeedsTor", LinkLine::NeedsTor),
+        ("NotStarted", LinkLine::NotStarted),
+    ]
+}
+
+/// One value of every refusal of a relay for counters.
+pub fn every_relay_refused() -> Vec<(&'static str, RelayRefused)> {
+    use openbmt_core::wire::DecodeError;
+    vec![
+        ("Bytes", RelayRefused::Bytes(DecodeError::Truncated)),
+        ("NotFromOwner", RelayRefused::NotFromOwner),
+    ]
+}
+
 /// Every one of the words that only this crate gives, for SC-12: one value
 /// for every variant of the start errors, of the data folder errors, of the
 /// pairing errors and of the pairing steps.
@@ -429,6 +540,16 @@ pub fn all_words() -> Vec<(String, Words)> {
     }
     for (name, e) in every_pair_refused() {
         all.push((format!("PairRefused::{name}"), e.words()));
+    }
+    for (name, line) in every_link_line() {
+        // The one that has no time is the same state as the one that has:
+        // listed once.
+        if name != "NotReachableNoTime" {
+            all.push((format!("LinkLine::{name}"), line.words()));
+        }
+    }
+    for (name, e) in every_relay_refused() {
+        all.push((format!("RelayRefused::{name}"), e.words()));
     }
     all
 }

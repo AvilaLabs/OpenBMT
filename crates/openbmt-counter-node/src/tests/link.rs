@@ -651,3 +651,86 @@ fn cr_81_a_store_fault_below_the_base_is_noted_and_the_step_goes_on() {
         (len, head, base, held)
     );
 }
+
+#[test]
+fn cr_135_a_step_in_three_parts_does_what_the_step_does() {
+    let mut whole = world(config());
+    let mut parts = world(config());
+    for w in [&mut whole, &mut parts] {
+        assert!(w.rig.feed(vec![Rig::peers()]).is_empty());
+        w.send(Kind::Heartbeat, &heartbeat_bytes(1));
+    }
+    whole.step(T0);
+    let polled = parts.link.poll_step(T0);
+    assert!(polled.is_some());
+    let (reports, out) = parts.link.take_step(&mut parts.rig.node, polled, T0);
+    assert!(reports.is_empty());
+    parts.link.send_step(out, T0);
+    assert_eq!(whole.link.state(), parts.link.state());
+    assert_eq!(whole.records().len(), parts.records().len());
+    let a: Vec<Kind> = whole.owner_gets().iter().map(|r| r.kind).collect();
+    let b: Vec<Kind> = parts.owner_gets().iter().map(|r| r.kind).collect();
+    assert_eq!(a, b);
+    assert!(a.contains(&Kind::CheckIn) && a.contains(&Kind::Records));
+    assert_eq!(parts.link.state().heartbeats_taken, 1);
+}
+
+#[test]
+fn cr_135_the_node_is_not_needed_while_the_relay_is_called() {
+    // The first part and the last do not take the node, so a caller can
+    // hold the node for the middle alone: a relay that is down is found
+    // out by the first part, and the middle then writes and sends nothing.
+    let mut w = world(config());
+    w.relay.set_down(true);
+    let before = w.records().len();
+    let polled = w.link.poll_step(T0).expect("it is time");
+    let (reports, out) = w.link.take_step(&mut w.rig.node, Some(polled), T0);
+    assert!(reports.is_empty());
+    w.link.send_step(out, T0);
+    assert_eq!(w.records().len(), before);
+    assert!(!w.link.state().relay_reachable);
+    assert!(!w.link.state().relay_refused);
+    // Not yet time again: the first part says so and the rest do nothing.
+    let cfg = CounterLinkConfig {
+        poll_secs: 1,
+        retry_secs: 5,
+        ..CounterLinkConfig::default()
+    };
+    let mut slow = world(cfg);
+    assert!(slow.link.poll_step(T0).is_some());
+    assert!(slow.link.poll_step(T0).is_none());
+    let (reports, out) = slow.link.take_step(&mut slow.rig.node, None, T0);
+    assert!(reports.is_empty());
+    slow.link.send_step(out, T0);
+    assert!(slow.link.poll_step(T0 + 1).is_some());
+}
+
+#[test]
+fn cr_136_a_relay_that_answers_and_refuses_is_told_from_one_that_is_down() {
+    // The counter is not a member of this relay.
+    let relay = MemoryRelay::new(id(99), &[owner()]).unwrap();
+    let node_dir = Scratch::new();
+    let link_dir = Scratch::new();
+    let mut rig = start(node_dir.path());
+    let mut link = CounterLink::new(
+        courier(
+            &relay,
+            id(3),
+            Role::Counter,
+            (owner(), Role::Owner),
+            &link_dir,
+        ),
+        owner(),
+        config(),
+    );
+    assert!(link.state().relay_reachable);
+    link.step(&mut rig.node, T0);
+    let state = link.state();
+    assert!(!state.relay_reachable);
+    assert!(state.relay_refused);
+    // A relay that is down is not a refusal.
+    relay.set_down(true);
+    link.step(&mut rig.node, T0 + 1);
+    assert!(!link.state().relay_refused);
+    assert!(!link.state().relay_reachable);
+}

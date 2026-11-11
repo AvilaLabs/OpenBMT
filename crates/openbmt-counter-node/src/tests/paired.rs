@@ -9,12 +9,14 @@ use openbmt_core::pairing::{
     check_request, owner_cosign, PairError, PairOffer, PairRequest, SignedPairing,
     PAIRING_WINDOW_SECS,
 };
+use openbmt_core::relay::{RelayHint, RelayRoute, SignedRelayHint};
 use openbmt_core::settings::{Settings, SettingsError, SignedSettings};
 use openbmt_core::wire::DecodeError;
 
 use super::kit::{batch, id};
 use crate::paired::{
-    batch_policy, Ceremony, PairRefused, PairingRecord, BATCH_MIN_COUNT, MAGIC_PAIRING_RECORD,
+    batch_policy, Ceremony, PairRefused, PairingRecord, RelayRefused, BATCH_MIN_COUNT,
+    MAGIC_PAIRING_RECORD,
 };
 
 const T0: u64 = 5_000;
@@ -566,7 +568,8 @@ fn cr_97_the_record_refuses_what_is_not_a_pairing() {
         bad(&|e| e[..4].copy_from_slice(b"OBMs")),
         DecodeError::BadMagic
     );
-    assert_eq!(bad(&|e| e[4] = 2), DecodeError::UnsupportedVersion(2));
+    assert_eq!(bad(&|e| e[4] = 3), DecodeError::UnsupportedVersion(3));
+    assert_eq!(bad(&|e| e[4] = 0), DecodeError::UnsupportedVersion(0));
     // The secret, the roots, the network.
     assert!(matches!(
         bad(&|e| e[5..37].fill(0)),
@@ -667,4 +670,147 @@ fn every_refusal_names_its_rule() {
         assert!(e.to_string().starts_with(e.rule()), "{name}");
         assert!(e.rule().starts_with("CR-"), "{name}");
     }
+}
+
+fn relay_hint() -> RelayHint {
+    RelayHint::new(
+        RelayRoute::Direct("192.168.1.20:48333".parse().unwrap()),
+        id(40).device_id().to_bytes(),
+    )
+    .unwrap()
+}
+
+fn other_hint() -> RelayHint {
+    RelayHint::new(
+        RelayRoute::Onion {
+            name: "a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad".to_string(),
+            port: 48333,
+        },
+        id(41).device_id().to_bytes(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn cr_131_the_bundles_relay_is_kept_in_the_record() {
+    let (mut c, request) = begun(&offer(), 3, 7);
+    c.confirm(T0).unwrap();
+    let bundle = CounterBundle::new(
+        signed_pairing(&offer(), &request, FLOOR),
+        settings_for(3, FLOOR + 1),
+        None,
+        vec![],
+    )
+    .unwrap()
+    .with_relay(Some(relay_hint()));
+    let record = c.finish(&bundle.to_bytes(), &SMALL, T0 + 1).unwrap();
+    assert_eq!(record.relay, Some(relay_hint()));
+    // The record is version 2 and reads back as it was.
+    let enc = record.to_bytes();
+    assert_eq!(&enc[..5], b"OBMt\x02");
+    assert_eq!(PairingRecord::from_bytes(&enc).unwrap(), record);
+    // A bundle with no relay gives a record with none, in version 1.
+    let (mut c, request) = begun(&offer(), 3, 8);
+    c.confirm(T0).unwrap();
+    let bare = CounterBundle::new(
+        signed_pairing(&offer(), &request, FLOOR),
+        settings_for(3, FLOOR + 1),
+        None,
+        vec![],
+    )
+    .unwrap();
+    let record = c.finish(&bare.to_bytes(), &SMALL, T0 + 1).unwrap();
+    assert_eq!(record.relay, None);
+    assert_eq!(&record.to_bytes()[..5], b"OBMt\x01");
+}
+
+#[test]
+fn cr_131_the_record_decodes_strictly_in_version_2_and_version_1_still_reads() {
+    let (mut c, bytes) = ready();
+    let mut record = finish(&mut c, &bytes).unwrap();
+    let v1 = record.to_bytes();
+    record.relay = Some(relay_hint());
+    let v2 = record.to_bytes();
+    assert_eq!(&v2[..5], b"OBMt\x02");
+    assert_eq!(&v2[5..v1.len()], &v1[5..]);
+    assert_eq!(PairingRecord::from_bytes(&v1).unwrap().relay, None);
+    // Version 2 needs its relay and version 1 takes nothing after the peers.
+    let mut cut = v1.clone();
+    cut[4] = 2;
+    assert_eq!(
+        PairingRecord::from_bytes(&cut).unwrap_err(),
+        DecodeError::Truncated
+    );
+    let mut extra = v2.clone();
+    extra[4] = 1;
+    assert_eq!(
+        PairingRecord::from_bytes(&extra).unwrap_err(),
+        DecodeError::TrailingBytes
+    );
+    for n in 0..v2.len() {
+        assert!(PairingRecord::from_bytes(&v2[..n]).is_err(), "prefix {n}");
+    }
+    let mut longer = v2.clone();
+    longer.push(0);
+    assert_eq!(
+        PairingRecord::from_bytes(&longer).unwrap_err(),
+        DecodeError::TrailingBytes
+    );
+    // A bit flipped anywhere reads back to the same bytes, or not at all.
+    let mut m = v2.clone();
+    for i in 0..m.len() {
+        for bit in 0..8 {
+            m[i] ^= 1 << bit;
+            if let Ok(v) = PairingRecord::from_bytes(&m) {
+                assert_eq!(v.to_bytes(), m, "byte {i} bit {bit}");
+            }
+            m[i] ^= 1 << bit;
+        }
+    }
+}
+
+#[test]
+fn cr_132_a_relay_for_counters_is_taken_only_from_the_pinned_owner() {
+    let (mut c, bytes) = ready();
+    let record = finish(&mut c, &bytes).unwrap();
+    assert_eq!(record.relay, None);
+    // The owner root is identity 1 in these tests.
+    let signed = SignedRelayHint::sign(relay_hint(), &id(1));
+    let next = record.with_relay(&signed).unwrap();
+    assert_eq!(next.relay, Some(relay_hint()));
+    // Nothing else changed, and the record it came from is as it was.
+    assert_eq!(next.identity_secret, record.identity_secret);
+    assert_eq!(next.roots, record.roots);
+    assert_eq!(next.settings, record.settings);
+    assert_eq!(next.first_batch, record.first_batch);
+    assert_eq!(next.peers, record.peers);
+    assert_eq!(record.relay, None);
+    // A new one replaces the old.
+    let again = next
+        .with_relay(&SignedRelayHint::sign(other_hint(), &id(1)))
+        .unwrap();
+    assert_eq!(again.relay, Some(other_hint()));
+    // The Key app's root, the counter's own key and a stranger's do not
+    // count, and a signature carried over to another hint does not either.
+    for n in [2u8, 3, 77] {
+        assert_eq!(
+            record
+                .with_relay(&SignedRelayHint::sign(relay_hint(), &id(n)))
+                .unwrap_err(),
+            RelayRefused::NotFromOwner,
+            "{n}"
+        );
+    }
+    let carried = SignedRelayHint {
+        hint: other_hint(),
+        owner_sig: signed.owner_sig,
+    };
+    assert_eq!(
+        record.with_relay(&carried).unwrap_err(),
+        RelayRefused::NotFromOwner
+    );
+    assert!(RelayRefused::NotFromOwner.to_string().starts_with("CR-132"));
+    assert!(RelayRefused::Bytes(DecodeError::Truncated)
+        .to_string()
+        .starts_with("CR-132"));
 }

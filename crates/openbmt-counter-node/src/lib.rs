@@ -48,6 +48,7 @@ pub mod node;
 pub mod notices;
 pub mod ownnode;
 pub mod paired;
+pub mod relaylink;
 pub mod say;
 
 #[cfg(test)]
@@ -59,7 +60,7 @@ pub use lightning::{
     Lightning, LightningOff, LightningRecord, LightningStatus, LnEvent, LnRequest, LnTransport,
     SaleLightning, SetupRefused, SetupStep, MAGIC_LIGHTNING_RECORD,
 };
-pub use link::{CounterLink, CounterLinkConfig, LinkState};
+pub use link::{CounterLink, CounterLinkConfig, LinkState, Outgoing, Polled};
 pub use node::{
     DriverPort, HealthFn, HeartbeatNotTaken, HeartbeatTaken, Launch, Node, NodeConfig, StartError,
     MAX_EVENTS_PER_PUMP, MAX_OWN_ASKS, MAX_OWN_EVENTS_PER_PUMP, NOTE_LOG, SETTLE_EVERY_SECS,
@@ -70,6 +71,7 @@ pub use ownnode::{
     default_port, every_setting_refusal, own_node_setting, OwnNodeSetting, OwnNodeSettingRefused,
 };
 pub use paired::{
-    batch_policy, Ceremony, PairRefused, PairingRecord, Started, BATCH_MIN_COUNT,
+    batch_policy, Ceremony, PairRefused, PairingRecord, RelayRefused, Started, BATCH_MIN_COUNT,
     MAGIC_PAIRING_RECORD,
 };
+pub use relaylink::{link_route, start_link, LinkLine, LinkNotStarted};

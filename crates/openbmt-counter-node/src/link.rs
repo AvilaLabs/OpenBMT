@@ -45,10 +45,10 @@ use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::records::GENESIS;
 use openbmt_counter::Report;
 use openbmt_courier::{
-    decode_received, records_content, Courier, Post, Received, RelayPost, SendError,
+    decode_received, records_content, Courier, PollError, Post, Received, RelayPost, SendError,
 };
 use openbmt_link::seal::MAX_CONTENT_LEN;
-use openbmt_link::{Kind, Role};
+use openbmt_link::{ClientError, Kind, Role};
 
 use crate::node::{DriverPort, Node};
 use crate::notices::{NoticeOutbox, NoticeStoreError};
@@ -117,6 +117,31 @@ pub struct LinkState {
     pub node_refusals: u64,
     /// Whether the last call to the relay worked.
     pub relay_reachable: bool,
+    /// Whether the last call that failed was refused by the relay, which
+    /// answered: the counter is not a member of it. False when the relay
+    /// could not be reached, and after a call that worked.
+    pub relay_refused: bool,
+}
+
+/// What the first part of a step brought: see [`CounterLink::poll_step`].
+pub struct Polled {
+    received: Vec<Received>,
+    reached: bool,
+}
+
+/// What the second part of a step decided to send: see
+/// [`CounterLink::take_step`].
+#[derive(Default)]
+pub struct Outgoing {
+    /// A connection was opened for this step and must be closed.
+    active: bool,
+    /// The relay was reached by the poll.
+    reached: bool,
+    check_in: Option<Vec<u8>>,
+    /// Where the records to send start, and each message with the number of
+    /// records in it.
+    records_from: u64,
+    records: Vec<(Vec<u8>, usize)>,
 }
 
 /// The counter's end of the link. See the module docs.
@@ -134,6 +159,7 @@ pub struct CounterLink<R: Post = RelayPost> {
     unsent_check_in: Option<Vec<u8>>,
     next_relay_at: u64,
     too_long_noted: bool,
+    relay_refused: bool,
     marks_ignored: u64,
     record_messages_sent: u64,
     heartbeats_taken: u64,
@@ -161,6 +187,7 @@ impl<R: Post> CounterLink<R> {
             unsent_check_in: None,
             next_relay_at: 0,
             too_long_noted: false,
+            relay_refused: false,
             marks_ignored: 0,
             record_messages_sent: 0,
             heartbeats_taken: 0,
@@ -215,7 +242,14 @@ impl<R: Post> CounterLink<R> {
             heartbeats_taken: self.heartbeats_taken,
             node_refusals: self.node_refusals,
             relay_reachable: self.courier.reachable(),
+            relay_refused: self.relay_refused,
         }
+    }
+
+    /// Make the next step call the relay whatever the pause after the last
+    /// call or failure was (the manager's Try again, CR-136).
+    pub fn retry_now(&mut self) {
+        self.next_relay_at = 0;
     }
 
     /// The lines the link and its courier have logged, oldest first.
@@ -243,32 +277,95 @@ impl<R: Post> CounterLink<R> {
     /// One turn of the link at `now` (seconds). Returns what the node
     /// reported when a heartbeat made it judge the sales again; the app acts
     /// on those as on the reports of `Node::pump`.
+    ///
+    /// The turn is [`CounterLink::poll_step`], [`CounterLink::take_step`] and
+    /// [`CounterLink::send_step`] one after the other. A caller that shares
+    /// the node with other threads calls the three itself, so that the node
+    /// is held only for the second, which makes no call to the relay.
     pub fn step<P: DriverPort>(&mut self, node: &mut Node<P>, now: u64) -> Vec<Report> {
-        let mut reports = Vec::new();
+        let polled = self.poll_step(now);
+        let (reports, out) = self.take_step(node, polled, now);
+        self.send_step(out, now);
+        reports
+    }
+
+    /// The first part of a step: call the relay and fetch what is waiting.
+    /// `None` when it is not yet time (the relay is polled at most every
+    /// `poll_secs`, and after a failure not before `retry_secs`). This part
+    /// does not touch the node and can wait as long as the relay does.
+    pub fn poll_step(&mut self, now: u64) -> Option<Polled> {
         if now < self.next_relay_at {
-            return reports;
+            return None;
         }
         self.next_relay_at = now.saturating_add(self.cfg.poll_secs);
         self.courier.begin();
-        self.queue_notices(node);
-        let reached = match self.courier.poll() {
+        let polled = match self.courier.poll() {
             Ok(received) => {
-                for message in received {
-                    self.route(node, message, &mut reports);
+                self.relay_refused = false;
+                Polled {
+                    received,
+                    reached: true,
                 }
-                true
             }
-            Err(_) => false,
+            Err(PollError::Relay(e)) => {
+                self.relay_refused = matches!(e, ClientError::Refused(_));
+                Polled {
+                    received: Vec::new(),
+                    reached: false,
+                }
+            }
         };
-        let reached = reached
-            && self.send_check_in(node, now)
-            && self.send_records(node, now)
+        if !polled.reached {
+            self.next_relay_at = now.saturating_add(self.cfg.retry_secs);
+        }
+        Some(polled)
+    }
+
+    /// The second part: hand what came to the node, and decide what goes
+    /// out (the check-in, the records after the owner's mark, LK-56, LK-57).
+    /// Nothing here calls the relay. Returns what the node reported, and
+    /// what [`CounterLink::send_step`] is to send.
+    pub fn take_step<P: DriverPort>(
+        &mut self,
+        node: &mut Node<P>,
+        polled: Option<Polled>,
+        now: u64,
+    ) -> (Vec<Report>, Outgoing) {
+        let mut reports = Vec::new();
+        let Some(polled) = polled else {
+            return (reports, Outgoing::default());
+        };
+        self.queue_notices(node);
+        for message in polled.received {
+            self.route(node, message, &mut reports);
+        }
+        let mut out = Outgoing {
+            active: true,
+            reached: polled.reached,
+            ..Outgoing::default()
+        };
+        if polled.reached {
+            out.check_in = self.prepare_check_in(node, now);
+            self.prepare_records(node, now, &mut out);
+        }
+        (reports, out)
+    }
+
+    /// The third part: send what [`CounterLink::take_step`] decided, then
+    /// the paid notices, and let go of the connection. Does not touch the
+    /// node.
+    pub fn send_step(&mut self, out: Outgoing, now: u64) {
+        if !out.active {
+            return;
+        }
+        let reached = out.reached
+            && self.send_check_in(out.check_in)
+            && self.send_records(out.records_from, out.records, now)
             && self.send_notices();
         self.courier.end();
         if !reached {
             self.next_relay_at = now.saturating_add(self.cfg.retry_secs);
         }
-        reports
     }
 
     fn route<P: DriverPort>(
@@ -359,8 +456,10 @@ impl<R: Post> CounterLink<R> {
         }
     }
 
-    /// LK-57. `false` if the relay could not be reached.
-    fn send_check_in<P: DriverPort>(&mut self, node: &mut Node<P>, now: u64) -> bool {
+    /// LK-57: write the check-in when one is due, and give the record to
+    /// send: the one just written, or the one an earlier step could not
+    /// deliver.
+    fn prepare_check_in<P: DriverPort>(&mut self, node: &mut Node<P>, now: u64) -> Option<Vec<u8>> {
         let len = node.records_len();
         let due = match self.last_check_in_at {
             None => true,
@@ -387,7 +486,12 @@ impl<R: Post> CounterLink<R> {
         }
         // A check-in that did not reach the relay is sent again, the same
         // record, until it does: no new record is written for it.
-        let Some(bytes) = self.unsent_check_in.take() else {
+        self.unsent_check_in.take()
+    }
+
+    /// LK-57. `false` if the relay could not be reached.
+    fn send_check_in(&mut self, bytes: Option<Vec<u8>>) -> bool {
+        let Some(bytes) = bytes else {
             return true;
         };
         match self.courier.send(&self.owner, Kind::CheckIn, &bytes) {
@@ -401,11 +505,11 @@ impl<R: Post> CounterLink<R> {
         }
     }
 
-    /// LK-56. `false` if the relay could not be reached.
-    fn send_records<P: DriverPort>(&mut self, node: &Node<P>, now: u64) -> bool {
+    /// LK-56: read the messages of records to send, when some are due.
+    fn prepare_records<P: DriverPort>(&mut self, node: &Node<P>, now: u64, out: &mut Outgoing) {
         let len = node.records_len();
         if len <= self.mark.0 {
-            return true;
+            return;
         }
         let base = self.sent_upto.max(self.mark.0);
         let unsent = len > base;
@@ -413,12 +517,11 @@ impl<R: Post> CounterLink<R> {
             .last_send_at
             .is_some_and(|at| now >= at.saturating_add(self.cfg.resend_secs));
         if !unsent && !overdue {
-            return true;
+            return;
         }
         let start = if overdue { self.mark.0 } else { base };
+        out.records_from = start;
         let mut end = start;
-        let mut sent_any = false;
-        let mut reached = true;
         for _ in 0..self.cfg.max_messages_per_step {
             // The records come from memory, and from the record file below
             // what memory holds (CR-81). A read that fails is a note and the
@@ -443,6 +546,17 @@ impl<R: Post> CounterLink<R> {
                 }
                 break;
             }
+            out.records.push((content, count));
+            end = end.saturating_add(count as u64);
+        }
+    }
+
+    /// LK-56. `false` if the relay could not be reached.
+    fn send_records(&mut self, start: u64, messages: Vec<(Vec<u8>, usize)>, now: u64) -> bool {
+        let mut end = start;
+        let mut sent_any = false;
+        let mut reached = true;
+        for (content, count) in messages {
             match self.courier.send(&self.owner, Kind::Records, &content) {
                 Ok(()) => {
                     sent_any = true;
@@ -552,6 +666,7 @@ impl<R: Post> CounterLink<R> {
     /// problem.
     fn send_failed(&mut self, e: &SendError, what: &str) -> bool {
         if e.is_retryable() {
+            self.relay_refused = matches!(e, SendError::Relay(ClientError::Refused(_)));
             false
         } else {
             self.note(format!("{what} could not be sent: {e}"));

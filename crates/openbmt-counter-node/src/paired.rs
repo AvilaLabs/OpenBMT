@@ -28,12 +28,19 @@
 //! The record's wire form (strict, [`openbmt_core::wire`]):
 //!
 //! ```text
-//! "OBMt" | 1 | identity secret (32) | owner (32) | Key app (32) | wallet (32)
+//! "OBMt" | 1 or 2 | identity secret (32) | owner (32) | Key app (32) | wallet (32)
 //!   | network u8 | settings floor u32 LE
 //!   | settings len u32 | signed settings ("OBMS")
 //!   | batch flag u8 | (batch len u32 | signed batch ("OBMB"))
 //!   | peer count u8 | per peer: len u8 | "host:port"
+//!   | version 2 only: relay hint ([`openbmt_core::relay`])
 //! ```
+//!
+//! Version 2 is the version with a relay (CR-131): a record with no relay is
+//! written as version 1, and a version 2 record always has one. The relay
+//! comes from the bundle, or later from the owner's signed relay for counters
+//! ([`PairingRecord::with_relay`]); like the peers it is a hint and adds no
+//! authority (`docs/LINK-RULES.md`, LK-09).
 
 use std::convert::Infallible;
 use std::fmt;
@@ -47,6 +54,7 @@ use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pairing::{
     network_code, network_from_code, CounterPairing, PairError, PAIRING_WINDOW_SECS,
 };
+use openbmt_core::relay::{RelayHint, SignedRelayHint};
 use openbmt_core::settings::{SettingsError, SignedSettings};
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_core::words::WORD_COUNT;
@@ -146,6 +154,37 @@ impl fmt::Display for PairRefused {
 }
 
 impl std::error::Error for PairRefused {}
+
+/// Why a relay for counters was not taken (CR-132). Nothing was changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelayRefused {
+    /// What was shown is not a relay for counters.
+    Bytes(DecodeError),
+    /// The signature is not the owner root's this counter pinned.
+    NotFromOwner,
+}
+
+impl RelayRefused {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        "CR-132"
+    }
+}
+
+impl fmt::Display for RelayRefused {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::Bytes(e) => write!(f, "the code is not a relay for counters: {e}"),
+            Self::NotFromOwner => write!(
+                f,
+                "the relay for counters is not signed by the owner this counter was paired with"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RelayRefused {}
 
 impl From<PairError> for PairRefused {
     fn from(e: PairError) -> Self {
@@ -282,6 +321,7 @@ impl Ceremony {
             settings: bundle.settings,
             first_batch: bundle.first_batch,
             peers: bundle.peers,
+            relay: bundle.relay,
         };
         record.check(policy)?;
         Ok(record)
@@ -307,6 +347,9 @@ pub struct PairingRecord {
     pub first_batch: Option<SignedBatch>,
     /// Peers to try first.
     pub peers: Vec<String>,
+    /// The relay the counter reaches the owner through, if it knows one
+    /// (CR-131).
+    pub relay: Option<RelayHint>,
 }
 
 impl fmt::Debug for PairingRecord {
@@ -373,14 +416,31 @@ impl PairingRecord {
         Ok(())
     }
 
+    /// CR-132: this record with the relay of a relay for counters, if the
+    /// owner root this counter pinned signed it. A relay the record already
+    /// has is replaced; nothing else changes, and `self` is not touched.
+    pub fn with_relay(&self, signed: &SignedRelayHint) -> Result<Self, RelayRefused> {
+        if !signed.verify(&self.roots.owner) {
+            return Err(RelayRefused::NotFromOwner);
+        }
+        let mut next = self.clone();
+        next.relay = Some(signed.hint.clone());
+        Ok(next)
+    }
+
     /// Wire form: see the module docs.
     pub fn to_bytes(&self) -> Vec<u8> {
         let settings = self.settings.to_bytes();
         let batch = self.first_batch.as_ref().map(SignedBatch::to_bytes);
         let mut out = wire::start(
             &MAGIC_PAIRING_RECORD,
-            160 + settings.len() + batch.as_ref().map_or(0, Vec::len) + self.peers.len() * 24,
+            260 + settings.len() + batch.as_ref().map_or(0, Vec::len) + self.peers.len() * 24,
         );
+        if self.relay.is_some() {
+            if let Some(version) = out.get_mut(4) {
+                *version = 2;
+            }
+        }
         out.extend_from_slice(&self.identity_secret);
         out.extend_from_slice(&self.roots.owner.to_bytes());
         out.extend_from_slice(&self.roots.approver.to_bytes());
@@ -402,15 +462,19 @@ impl PairingRecord {
             out.push(u8::try_from(p.len()).unwrap_or(u8::MAX));
             out.extend_from_slice(p.as_bytes());
         }
+        if let Some(relay) = &self.relay {
+            out.extend_from_slice(&relay.to_bytes());
+        }
         out
     }
 
     /// Parse the wire form strictly. The secret must be a valid key, the
     /// roots different valid keys, the network a code of the offer, every
     /// length within its limit, and the peers valid and ascending. This does
-    /// not check signatures: [`PairingRecord::check`] does.
+    /// not check signatures: [`PairingRecord::check`] does. Version 1 has no
+    /// relay and version 2 has one at the end.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut r = Reader::framed(bytes, &MAGIC_PAIRING_RECORD)?;
+        let (mut r, version) = Reader::framed_up_to(bytes, &MAGIC_PAIRING_RECORD, 2)?;
         let identity_secret: [u8; 32] = r.array()?;
         if Identity::from_secret_bytes(&identity_secret).is_err() {
             return Err(DecodeError::NonCanonical(
@@ -455,6 +519,11 @@ impl PairingRecord {
             }
             peers.push(text.to_owned());
         }
+        let relay = if version >= 2 {
+            Some(RelayHint::read(&mut r)?)
+        } else {
+            None
+        };
         r.finish()?;
         Ok(Self {
             identity_secret,
@@ -465,6 +534,7 @@ impl PairingRecord {
             settings,
             first_batch,
             peers,
+            relay,
         })
     }
 }

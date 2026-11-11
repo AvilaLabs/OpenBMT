@@ -4,9 +4,12 @@ use openbmt_core::pairing::PairError;
 use openbmt_core::say::{check, check_distinct, Tone, Who};
 
 use crate::paired::PairRefused;
+use crate::relaylink::LinkLine;
 use crate::say::{
-    all_words, every_pair_error, every_pair_refused, program_words, screens_markdown, PairStep,
+    all_words, every_link_line, every_pair_error, every_pair_refused, every_relay_refused,
+    program_words, screens_markdown, PairStep,
 };
+use crate::RelayRefused;
 
 /// The name of a pairing error, by an exhaustive match: a new variant does
 /// not compile until it is named here, and the test then wants its words.
@@ -48,6 +51,57 @@ fn pair_refused_name(e: &PairRefused) -> &'static str {
         PairRefused::Batch(_) => "Batch",
         PairRefused::Record(_) => "Record",
         PairRefused::RecordKey => "RecordKey",
+    }
+}
+
+/// The same for the lines of the link: a new variant does not compile until
+/// it is named here.
+fn link_line_name(l: &LinkLine) -> &'static str {
+    match l {
+        LinkLine::Connecting => "Connecting",
+        LinkLine::Connected => "Connected",
+        LinkLine::NotReachable { .. } => "NotReachable",
+        LinkLine::Refused => "Refused",
+        LinkLine::NeedsTor => "NeedsTor",
+        LinkLine::NotStarted => "NotStarted",
+    }
+}
+
+fn relay_refused_name(e: &RelayRefused) -> &'static str {
+    match e {
+        RelayRefused::Bytes(_) => "Bytes",
+        RelayRefused::NotFromOwner => "NotFromOwner",
+    }
+}
+
+#[test]
+fn cr_136_every_line_of_the_link_and_every_refused_relay_has_words() {
+    let all = all_words();
+    let has = |name: String| all.iter().any(|(n, _)| *n == name);
+    let lines = every_link_line();
+    assert_eq!(lines.len(), 7);
+    for (name, line) in &lines {
+        let base = link_line_name(line);
+        assert!(*name == base || *name == "NotReachableNoTime");
+        assert!(has(format!("LinkLine::{base}")), "{name}");
+        assert_eq!(line.words().code, Some("CR-136"), "{name}");
+        assert_eq!(check(&line.words()), Ok(()), "{name}");
+    }
+    // The time of the failures is the time of the words, and they read the
+    // same without it.
+    let timed = LinkLine::NotReachable { since: Some(5) }.words();
+    assert_eq!(timed.at, Some(5));
+    assert_eq!(LinkLine::NotReachable { since: None }.words().at, None);
+    // The link never stops a sale: no line is red, and none says to stop.
+    for (name, line) in &lines {
+        assert_ne!(line.words().tone, Tone::Stop, "{name}");
+    }
+    let refusals = every_relay_refused();
+    assert_eq!(refusals.len(), 2);
+    for (name, e) in &refusals {
+        assert_eq!(relay_refused_name(e), *name);
+        assert!(has(format!("RelayRefused::{name}")), "{name}");
+        assert_eq!(e.words().code, Some("CR-132"), "{name}");
     }
 }
 
