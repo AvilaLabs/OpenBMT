@@ -6,8 +6,9 @@
 //! file converts types. It has no state, no network and no clock: the app
 //! fetches, through Tor, and hands the bytes over. Neither op takes a node.
 
+use openbmt_core::currency::ShopCurrency;
 use openbmt_owner_node::{agreed_price, PriceReply};
-use openbmt_rates::SOURCES;
+use openbmt_rates::sources_for;
 
 use crate::codec::{wire_record, wire_record_get};
 use crate::error::{from_words, AppError, Kind};
@@ -75,10 +76,11 @@ wire_record!(AgreedPriceView {
     source_label
 });
 
-/// RT-01: the table of sources.
+/// RT-01, RT-40: the table of sources, the dollar ones: a phone with no
+/// settings prices in dollars, and the sources of another currency are not
+/// asked.
 pub(crate) fn sources() -> Vec<PriceSourceView> {
-    SOURCES
-        .iter()
+    sources_for(ShopCurrency::Usd)
         .map(|s| PriceSourceView {
             id: s.id.to_string(),
             url: s.url.to_string(),
