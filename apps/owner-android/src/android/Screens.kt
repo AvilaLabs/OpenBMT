@@ -47,7 +47,7 @@ internal fun Controller.showHome(): Unit = withNode { n ->
     views.add(label("The receipts line"))
     views.add(lines)
     views.add(ui.button("Receipts and merge") { showReceipts() })
-    views.add(ui.button("Spend") { showSpend() })
+    views.add(ui.primary("Spend") { showSpend() })
     views.add(ui.button("Open approvals") { showSessions() })
     views.add(ui.button("Waiting to be delivered") { showOutbox() })
     views.add(ui.button("Refund queue") { showQueue() })
@@ -149,7 +149,7 @@ internal fun Controller.showReceipts(): Unit = withNode { n ->
                             "Spending them as they are usually costs ${Format.sats(m.usualCostSats)}. The saving is ${Format.sats(m.savingSats)}.",
                         15f,
                     ),
-                    ui.button("Build the merge request") {
+                    ui.primary("Build the merge request") {
                         attempt(msg) { n.approveMerge(nowSecs()) }?.let { showBuilt(it) { showReceipts() } }
                     },
                 )
@@ -182,7 +182,7 @@ internal fun Controller.showSpend(): Unit = withNode { n ->
     } catch (_: OwnerException) {
     }
     views.add(fee)
-    views.add(ui.button("Build the request") {
+    views.add(ui.primary("Build the request") {
         when (val f = Forms.feeRate(fee.text.toString())) {
             is Form.Refused -> msg.show(ui.words(f.words))
             is Form.Ok -> attempt(msg) { n.buildRequest(nowSecs(), f.value) }?.let { showBuilt(it) { showSpend() } }
@@ -215,7 +215,7 @@ internal fun Controller.showSessions(message: SayWords? = null): Unit = withNode
                 },
             )
             views.add(
-                ui.button("Abandon it") {
+                ui.danger("Abandon it") {
                     if (attempt(msg) { n.abandonSession(id) } != null) showSessions(AppWords.sessionAbandoned)
                 },
             )
@@ -265,7 +265,7 @@ private fun Controller.entryButtons(n: OwnerNode, id: Long, stage: Stage, msg: S
     }
     if (stage.kind == StageKind.Queued || stage.kind == StageKind.Returned) {
         into.add(
-            ui.button("Cancel it") {
+            ui.danger("Cancel it") {
                 if (attempt(msg) { n.cancel(id) } != null) { refresh() }
             },
         )
@@ -320,7 +320,7 @@ internal fun Controller.showQueue(prefillCounter: ByteArray? = null, prefillSale
     } else {
         null
     }
-    val counterField = ui.field("Counter identity, 64 digits").also {
+    val counterField = ui.field("Counter identity, 64 digits", mono = true).also {
         if (group == null && prefillCounter != null) it.setText(prefillCounter.joinToString("") { b -> "%02x".format(b) })
     }
     views.add(counterField)
@@ -328,13 +328,13 @@ internal fun Controller.showQueue(prefillCounter: ByteArray? = null, prefillSale
     views.add(sale)
     val cashier = ui.field("Name of the cashier who asked")
     views.add(cashier)
-    val address = ui.field("Address the customer wants the money sent to")
+    val address = ui.field("Address the customer wants the money sent to", mono = true)
     views.add(address)
     val sats = numberField(act, "Amount in satoshis")
     views.add(sats)
     val result = Slot(act)
     views.add(
-        ui.button("Queue the refund") {
+        ui.primary("Queue the refund") {
             val typed = counterField.text.toString()
             val counter = if (typed.isNotBlank()) {
                 Forms.counter(typed) ?: byteArrayOf()
@@ -378,7 +378,7 @@ internal fun Controller.showCashOut(): Unit = withNode { n ->
         ),
     )
     views.add(label("Address"))
-    val address = ui.field("Address")
+    val address = ui.field("Address", mono = true)
     views.add(address)
     views.add(label("How much"))
     val which = ui.choice(listOf("An amount", "Everything the wallet can spend"))
@@ -389,7 +389,7 @@ internal fun Controller.showCashOut(): Unit = withNode { n ->
     val name = ui.field("Label")
     views.add(name)
     views.add(
-        ui.button("Queue the cash-out") {
+        ui.primary("Queue the cash-out") {
             when (val f = Forms.cashOut(address.text.toString(), ui.chosen(which) == 1, sats.text.toString(), name.text.toString())) {
                 is Form.Refused -> msg.show(ui.words(f.words))
                 is Form.Ok -> if (attempt(msg) { n.cashOut(f.value) } != null) {
@@ -425,7 +425,7 @@ internal fun Controller.showOld(): Unit = withNode { n ->
     views.add(ui.text("Old addresses", 22f, bold = true))
     views.add(line)
     views.add(
-        ui.button("Check them now") {
+        ui.primary("Check them now") {
             attempt(msg) { n.requestDeepCheck(nowSecs()) }?.let { msg.show(ui.words(it.words.say())) }
         },
     )
@@ -582,7 +582,7 @@ internal fun Controller.showSettings(): Unit = withNode { n ->
         }
     }
     views.add(
-        ui.button("Change settings") {
+        ui.primary("Change settings") {
             settingsDraft = SettingsDraft()
             showChangeSettings()
         },

@@ -206,8 +206,8 @@ class Controller(private val act: MainActivity) {
 
     private fun render(screen: Screen, state: SetupState? = null) {
         when (screen) {
-            is Screen.Refused -> act.show(ui.page(screen.words.map { ui.words(it) } + ui.button("Check again") { start() }))
-            is Screen.Fault -> act.show(ui.page(listOf(ui.words(screen.words), ui.button("Try again") { start() })))
+            is Screen.Refused -> act.show(ui.page(screen.words.map { ui.words(it) } + ui.primary("Check again") { start() }))
+            is Screen.Fault -> act.show(ui.page(listOf(ui.words(screen.words), ui.primary("Try again") { start() })))
             is Screen.Unlock -> showUnlock(null)
             is Screen.SetPin -> showSetPin(screen.upgrade, null)
             is Screen.Wiped -> showWiped()
@@ -233,7 +233,7 @@ class Controller(private val act: MainActivity) {
     }
 
     private fun showMessage(words: Words, back: () -> Unit) {
-        act.show(ui.page(listOf(ui.words(words), ui.button("Back") { back() })))
+        act.show(ui.page(listOf(ui.words(words), ui.primary("Back", WordsModel.buttonColour(words.say().tone)) { back() })))
     }
 
     private fun banner(): List<View> =
@@ -260,6 +260,8 @@ class Controller(private val act: MainActivity) {
         } else {
             InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
+        // A password type makes the font monospace; the system sans again.
+        ui.style(it)
     }
 
     /**
@@ -288,6 +290,7 @@ class Controller(private val act: MainActivity) {
                 } else {
                     InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_PASSWORD
                 }
+                ui.style(f)
             }
         }
         val views = ArrayList<View>(banner())
@@ -295,7 +298,7 @@ class Controller(private val act: MainActivity) {
         views.add(ui.words(if (upgrade) AppWords.upgradePin else AppWords.choosePin))
         views.addAll(listOf(kind, first, again))
         views.add(
-            ui.button("Set the PIN") {
+            ui.primary("Set the PIN") {
                 allowed {
                     val pin = first.text.toString()
                     val same = pin == again.text.toString()
@@ -341,7 +344,7 @@ class Controller(private val act: MainActivity) {
         }
         val field = secret("PIN or passphrase", false)
         val countdown = ui.text("", 20f, bold = true)
-        val unlock = ui.button("Unlock") {
+        val unlock = ui.primary("Unlock") {
             allowed {
                 val pin = field.text.toString()
                 field.setText("")
@@ -422,7 +425,7 @@ class Controller(private val act: MainActivity) {
         try {
             Wipe.run(act.noBackupFilesDir, tries) { KeyWipe.deleteKey() }
         } catch (e: IOException) {
-            return act.show(ui.page(listOf(ui.words(AppWords.wipeFailed(e.message)), ui.button("Try again") { start() })))
+            return act.show(ui.page(listOf(ui.words(AppWords.wipeFailed(e.message)), ui.primary("Try again") { start() })))
         }
         showWiped()
     }
@@ -432,7 +435,7 @@ class Controller(private val act: MainActivity) {
             ui.page(
                 listOf(
                     ui.words(AppWords.wiped),
-                    ui.button("Restore the key from its words") { start() },
+                    ui.primary("Restore the key from its words") { start() },
                 ),
             ),
         )
@@ -454,7 +457,7 @@ class Controller(private val act: MainActivity) {
         if (check.waitLeft > 0) views.add(ui.text("Wait ${Tries.waitText(check.waitLeft)}", 20f, bold = true))
         views.addAll(listOf(current, first, again))
         views.add(
-            ui.button("Change the PIN") {
+            ui.primary("Change the PIN") {
                 allowed {
                     val old = current.text.toString()
                     val new = first.text.toString()
@@ -485,9 +488,9 @@ class Controller(private val act: MainActivity) {
             views.add(ui.text(row.label, 18f, bold = true))
             views.add(ui.text(row.address, 15f, mono = true))
             views.add(ui.text("Added ${row.enrolled}, ${row.status}", 14f))
-            row.removable?.let { address -> views.add(ui.button("Remove") { showRemoveAddress(row, address) }) }
+            row.removable?.let { address -> views.add(ui.danger("Remove") { showRemoveAddress(row, address) }) }
         }
-        views.add(ui.button("Add an address") { showScanDeposit() })
+        views.add(ui.primary("Add an address") { showScanDeposit() })
         views.add(ui.button("Back") { refresh() })
         act.show(ui.page(views))
     }
@@ -500,7 +503,7 @@ class Controller(private val act: MainActivity) {
                 ui.page(
                     listOf(
                         ui.words(AppWords.scanDeposit),
-                        ui.button("Scan the deposit code") {
+                        ui.primary("Scan the deposit code") {
                             allowed {
                                 scan.begin(
                                     show = { act.show(it) },
@@ -539,7 +542,7 @@ class Controller(private val act: MainActivity) {
                     ui.words(AppWords.nameAddress),
                     ui.text(CashOut.groupsOfFour(address), 16f, mono = true),
                     field,
-                    ui.button("Next") { showConfirmAddress(text, address, field.text.toString().trim()) },
+                    ui.primary("Next") { showConfirmAddress(text, address, field.text.toString().trim()) },
                     ui.button("Back") { showCashOut() },
                 ),
             ),
@@ -555,7 +558,7 @@ class Controller(private val act: MainActivity) {
                     ui.words(AppWords.checkAddress),
                     ui.text(Format.cleanForeign(label), 18f, bold = true),
                     ui.text(CashOut.groupsOfFour(address), 22f, bold = true, mono = true),
-                    ui.button("Add this address") {
+                    ui.primary("Add this address") {
                         allowed {
                             attempt({ showNameAddress(text, address, label) }) { a.enrollDestination(text, label) }
                                 ?.let { showMessage(AppWords.addressAdded) { showCashOut() } }
@@ -575,7 +578,7 @@ class Controller(private val act: MainActivity) {
                     ui.words(AppWords.removeAddress),
                     ui.text(row.label, 18f, bold = true),
                     ui.text(row.address, 16f, mono = true),
-                    ui.button("Remove it") {
+                    ui.danger("Remove it") {
                         allowed {
                             attempt({ showCashOut() }) { a.removeDestination(address) }
                                 ?.let { showMessage(AppWords.addressRemoved) { showCashOut() } }
@@ -654,7 +657,7 @@ class Controller(private val act: MainActivity) {
                     ui.text("Make the key yourself", 20f, bold = true),
                     ui.text("Nothing but your throws goes into the key: the same throws give the same words in another tool.", 14f),
                     method, count, input, progress,
-                    ui.button("Make the key") {
+                    ui.primary("Make the key") {
                         allowed {
                             val text = input.text.toString()
                             val source: EntropySource? = when (ui.chosen(method)) {
@@ -704,7 +707,7 @@ class Controller(private val act: MainActivity) {
                     ui.text("Network", 16f, bold = true),
                     networkChoice(),
                     input, hint,
-                    ui.button("Use these words") {
+                    ui.primary("Use these words") {
                         allowed {
                             val words = input.text.toString().trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
                             attempt({ showTypedWords() }) { a.createFromEntropy(EntropySource.TypedWords(words), network) }
@@ -729,7 +732,7 @@ class Controller(private val act: MainActivity) {
                 banner() + listOf(
                     ui.words(AppWords.state(SetupState.HasIdentity(true, true))),
                     shown,
-                    ui.button("Words written down") {
+                    ui.primary("Words written down") {
                         shown.text = ""
                         refresh()
                     },
@@ -757,11 +760,11 @@ class Controller(private val act: MainActivity) {
      * when key 3 is already held and is being changed; with none, the screen has no Back.
      */
     private fun showKey3(back: (() -> Unit)?) {
-        val paste = ui.field(AppWords.Text.PASTE_KEY3, lines = 3)
+        val paste = ui.field(AppWords.Text.PASTE_KEY3, lines = 3, mono = true)
         val views = ArrayList<View>(banner())
         views.add(ui.words(AppWords.key3Needed))
         views.addAll(advanced(AppWords.Text.ADVANCED_KEY3))
-        views.add(ui.button(AppWords.Text.SCAN_KEY3) { scanKey3(back) })
+        views.add(ui.primary(AppWords.Text.SCAN_KEY3) { scanKey3(back) })
         views.add(paste)
         views.add(ui.button("Use the pasted text") { allowed { takeKey3(CeremonyModel.readKey3Text(paste.text.toString()), back) } })
         if (back != null) views.add(ui.button("Back") { back() })
@@ -799,8 +802,8 @@ class Controller(private val act: MainActivity) {
         views.add(ui.text(c.fingerprint, 40f, bold = true, mono = true))
         views.add(ui.text(c.network, 14f))
         views.addAll(advanced(c.advanced.joinToString("\n")))
-        views.add(ui.button("They match") { showAnswer(v) })
-        views.add(ui.button("They differ") { showMessage(AppWords.key3Mismatch) { showKey3(null) } })
+        views.add(ui.primary("They match") { showAnswer(v) })
+        views.add(ui.danger("They differ") { showMessage(AppWords.key3Mismatch) { showKey3(null) } })
         act.show(ui.page(views))
     }
 
@@ -826,7 +829,7 @@ class Controller(private val act: MainActivity) {
                 views.add(view)
             }
             views.add(ui.text("Key 3: ${CeremonyModel.groupFingerprint(key3.masterFingerprint)}", 14f, mono = true))
-            views.add(ui.button("Scan the owner phone's wallet") { showScanWallet(key3) })
+            views.add(ui.primary("Scan the owner phone's wallet") { showScanWallet(key3) })
             views.add(ui.button("Use another key 3") { showKey3 { showAnswer(key3) } })
             act.show(ui.page(views))
         }
@@ -839,7 +842,7 @@ class Controller(private val act: MainActivity) {
                 banner() + listOf(
                     ui.text("Scan the owner phone's wallet", 22f, bold = true),
                     ui.words(AppWords.scanOwnerWallet),
-                    ui.button("Scan the wallet code") { scanWallet(key3) },
+                    ui.primary("Scan the wallet code") { scanWallet(key3) },
                     ui.button("Back") { showAnswer(key3) },
                 ),
             ),
@@ -886,9 +889,9 @@ class Controller(private val act: MainActivity) {
         views.add(ui.text(c.identities.joinToString("\n"), 13f))
         views.add(ui.text("First address:\n${c.firstAddress}", 13f, mono = true))
         if (fresh) {
-            views.add(ui.button("They match") { allowed { attempt({ showWallet(v, true) }) { app?.confirmWallet() }?.let { refresh() } } })
+            views.add(ui.primary("They match") { allowed { attempt({ showWallet(v, true) }) { app?.confirmWallet() }?.let { refresh() } } })
             views.add(
-                ui.button("They differ") {
+                ui.danger("They differ") {
                     allowed { attempt({ showWallet(v, true) }) { app?.discardWallet() }?.let { showMessage(AppWords.walletMismatch) { refresh() } } }
                 },
             )
@@ -913,7 +916,7 @@ class Controller(private val act: MainActivity) {
 
     private fun showKitCheck() {
         val a = app ?: return
-        val input = ui.field("The wallet text from the printed kit", lines = 6)
+        val input = ui.field("The wallet text from the printed kit", lines = 6, mono = true)
         act.show(
             ui.page(
                 listOf(
@@ -921,7 +924,7 @@ class Controller(private val act: MainActivity) {
                     ui.text("Paste the wallet text read from the paper. It is compared with this app's own copy.", 14f),
                     input,
                     scanButton("Scan the wallet code from the paper", input),
-                    ui.button("Check") {
+                    ui.primary("Check") {
                         attempt({ showKitCheck() }) { a.checkKit(input.text.toString()) }?.let {
                             showMessage(AppWords.kit(it)) { refresh() }
                         }
@@ -937,7 +940,7 @@ class Controller(private val act: MainActivity) {
     private fun showHome(state: SetupState) {
         val views = ArrayList<View>(banner())
         views.add(ui.words(AppWords.state(state)))
-        views.add(ui.button("Answer a request from the owner's phone") { pickRequest() })
+        views.add(ui.primary("Answer a request from the owner's phone") { pickRequest() })
         views.add(ui.button("Scan a request code from the owner's phone") { scanRequest() })
         if (answerFile.isFile) {
             views.add(ui.button("Save the last answer again") { saveAnswer(answerFile.readBytes()) })
@@ -1127,7 +1130,7 @@ class Controller(private val act: MainActivity) {
             views.add(f)
         }
         views.add(
-            ui.button("Save the limits") {
+            ui.primary("Save the limits") {
                 allowed {
                     val n = fields.map { Format.toAmount(it.text.toString()) }
                     if (n.any { it == null }) {
@@ -1295,18 +1298,18 @@ class Controller(private val act: MainActivity) {
         }
         for (q in t.quoted) views.add(ui.quoted("Text from elsewhere, not written by this app. ${q.from}:", "“${q.text}”"))
         t.failure?.let {
-            views.add(ui.text("This item cannot be approved. The checks said:", 14f, bold = true, colour = 0xFFC62828.toInt()))
+            views.add(ui.text("This item cannot be approved. The checks said:", 14f, bold = true, colour = ui.pal.stop.ink))
             views.add(ui.text(it, 14f))
         }
         val reason = ui.field("Why you decline (optional)")
-        val approve = ui.button("Approve this item") {
+        val approve = ui.primary("Approve this item") {
             allowed { attempt({ showLine(index) }) { s.decide(line.item, Decision.Approve) }?.let { showLine(index + 1) } }
         }
         approve.isEnabled = t.canApprove
         views.add(approve)
         views.add(reason)
         views.add(
-            ui.button("Decline this item") {
+            ui.danger("Decline this item") {
                 allowed {
                     val why = reason.text.toString().trim()
                     attempt({ showLine(index) }) { s.decide(line.item, Decision.Decline(why)) }?.let { showLine(index + 1) }
@@ -1314,7 +1317,7 @@ class Controller(private val act: MainActivity) {
             },
         )
         views.add(
-            ui.button("Stop and answer nothing") {
+            ui.danger("Stop and answer nothing") {
                 dropSession()
                 refresh()
             },
@@ -1343,7 +1346,7 @@ class Controller(private val act: MainActivity) {
             ui.page(
                 listOf(
                     ui.words(AppWords.answersReady),
-                    ui.button("Save the answer file") { saveAnswer(bytes) },
+                    ui.primary("Save the answer file") { saveAnswer(bytes) },
                     ui.button("Show as code") { showAnswerCode(bytes) { showAnswerReady(bytes) } },
                     ui.button("Done") {
                         pendingAnswer = null

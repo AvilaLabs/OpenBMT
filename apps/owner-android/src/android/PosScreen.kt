@@ -4,6 +4,7 @@ import android.content.ClipboardManager
 import android.view.View
 import java.io.IOException
 import java.security.GeneralSecurityException
+import org.openbmt.app.ButtonKind
 import org.openbmt.app.SayWords
 import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.OwnerException
@@ -49,7 +50,7 @@ internal fun Controller.showTill(message: SayWords? = null): Unit = withTillNode
     views.add(ui.text(PosLines.till(till), 14f))
     val body = Slot(act)
     views.add(body)
-    views.add(ui.button("Read the till now") { readTillNow() })
+    views.add(ui.primary("Read the till now") { readTillNow() })
     views.add(label("Replace the sign-in"))
     val token = secretField(act, "New read-only sign-in")
     views.add(token)
@@ -65,7 +66,7 @@ internal fun Controller.showTill(message: SayWords? = null): Unit = withTillNode
         },
     )
     views.add(
-        ui.button("Take the till off") {
+        ui.danger("Take the till off") {
             if (attempt(msg) { n.posRemove() } != null) {
                 posConnected = false
                 posFault = null
@@ -132,7 +133,7 @@ private fun Controller.connectForm(n: OwnerNode, msg: Slot): List<View> {
     val token = secretField(act, "Read-only sign-in")
     views.add(token)
     views.add(
-        ui.button("Connect the till") {
+        ui.button("Connect the till", ButtonKind.Primary) {
             val t = when (val f = PosForms.token(token.text.toString())) {
                 is Form.Refused -> return@button msg.show(ui.words(f.words))
                 is Form.Ok -> f.value

@@ -25,6 +25,7 @@ import org.openbmt.app.Tries
 import org.openbmt.app.TriesFile
 import org.openbmt.app.Ui
 import org.openbmt.app.UrScan
+import org.openbmt.app.WordsModel
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.PosReply
@@ -354,7 +355,7 @@ class Controller(internal val act: MainActivity) {
     }
 
     internal fun showMessage(words: SayWords, label: String = "Back", back: () -> Unit) {
-        page(listOf(ui.words(words), ui.button(label) { back() }))
+        page(listOf(ui.words(words), ui.primary(label, WordsModel.buttonColour(words.tone)) { back() }))
     }
 
     internal fun <T> async(work: () -> T, done: (Result<T>) -> Unit) {
@@ -391,7 +392,7 @@ class Controller(internal val act: MainActivity) {
         }
         val views = ArrayList<View>()
         views.add(ui.words(message ?: AppWords.notSetUp))
-        views.add(ui.button("Make a new shop wallet") { startCeremony() })
+        views.add(ui.primary("Make a new shop wallet") { startCeremony() })
         views.add(ui.button("Use setup text") { showPasteSetup(null) })
         page(views)
     }
@@ -401,14 +402,14 @@ class Controller(internal val act: MainActivity) {
         val views = ArrayList<View>()
         views.add(ui.words(message ?: AppWords.setupTextNeeded))
         views.add(label("Setup text from the key ceremony"))
-        val pasted = ui.field("Paste the setup text here", lines = 6).also { it.setText(draftText) }
+        val pasted = ui.field("Paste the setup text here", lines = 6, mono = true).also { it.setText(draftText) }
         views.add(pasted)
         for (source in setupSources()) views.add(ui.button(source.label) {
             draftText = pasted.text.toString()
             source.begin({ text -> draftText = text; showPasteSetup(message) }, { w -> showPasteSetup(w) })
         })
         val proxy = orbotViews(views, draftProxy)
-        views.add(ui.button("Save and start") {
+        views.add(ui.primary("Save and start") {
             draftProxy = proxy.text.toString()
             draftText = pasted.text.toString()
             saveSetup(draftText, draftProxy.trim(), { w -> showPasteSetup(w) })
@@ -421,7 +422,7 @@ class Controller(internal val act: MainActivity) {
     internal fun orbotViews(views: MutableList<View>, initial: String): EditText {
         views.add(ui.words(AppWords.torAlwaysOn))
         views.add(label("Address of Orbot"))
-        val proxy = ui.field("host:port").also { it.setText(initial) }
+        val proxy = ui.field("host:port", mono = true).also { it.setText(initial) }
         views.add(proxy)
         return proxy
     }

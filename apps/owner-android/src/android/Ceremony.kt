@@ -51,7 +51,7 @@ private fun Controller.keep(record: ByteArray, next: () -> Unit) {
 }
 
 private fun Controller.notKept(words: SayWords, record: ByteArray, next: () -> Unit) {
-    page(listOf(ui.words(words), ui.button("Try again") { keep(record, next) }, ui.button("Back") { begin() }))
+    page(listOf(ui.words(words), ui.primary("Try again") { keep(record, next) }, ui.button("Back") { begin() }))
 }
 
 // ---- the first step: key 1 ----------------------------------------------------------------------------------------
@@ -83,7 +83,7 @@ private fun Controller.showKeyMade(stateWords: SayWords) {
     views.add(ui.text("Key 1 is made", 22f, bold = true))
     views.add(ui.words(stateWords))
     views.add(ui.words(AppWords.ceremonyScanNext))
-    views.add(ui.button(ResumeAction.ScanAnswer.label) { scanAnswer() })
+    views.add(ui.primary(ResumeAction.ScanAnswer.label) { scanAnswer() })
     views.add(ui.button("Start again") { showStartAgain() })
     page(views)
 }
@@ -118,7 +118,7 @@ internal fun Controller.showCeremonyResume(message: SayWords?) {
     views.add(ui.words(at.words.say()))
     views.add(ui.words(CeremonyModel.resumeWords(action)))
     views.add(
-        ui.button(action.label) {
+        ui.primary(action.label) {
             when (action) {
                 ResumeAction.ScanAnswer, ResumeAction.ScanAnswerAgain -> scanAnswer()
                 ResumeAction.SaveSetup -> saveFinished(record)
@@ -131,7 +131,7 @@ internal fun Controller.showCeremonyResume(message: SayWords?) {
 
 /** A record that does not read: the way out is to start again, which throws it away after a confirmation. */
 private fun Controller.notReadable(words: SayWords) {
-    page(listOf(ui.words(words), ui.button("Start again") { showStartAgain() }, ui.button("Try again") { begin() }))
+    page(listOf(ui.words(words), ui.button("Start again") { showStartAgain() }, ui.primary("Try again") { begin() }))
 }
 
 /** The confirmation before the unfinished ceremony is thrown away. */
@@ -139,8 +139,8 @@ internal fun Controller.showStartAgain() {
     val views = ArrayList<View>()
     views.add(ui.text("Start again?", 22f, bold = true))
     views.add(ui.words(AppWords.ceremonyStartAgain))
-    views.add(ui.button("Start again") { throwAway() })
-    views.add(ui.button("Keep going") { begin() })
+    views.add(ui.danger("Start again") { throwAway() })
+    views.add(ui.primary("Keep going") { begin() })
     page(views)
 }
 
@@ -180,7 +180,7 @@ private fun Controller.showAnswerFailed(words: SayWords) {
     page(
         listOf(
             ui.words(words),
-            ui.button(ResumeAction.ScanAnswer.label) { scanAnswer() },
+            ui.primary(ResumeAction.ScanAnswer.label) { scanAnswer() },
             ui.button("Start again") { showStartAgain() },
         ),
     )
@@ -213,12 +213,12 @@ private fun Controller.showRootCheck(d: CeremonyDraft, read: AnswerView) {
     views.add(ui.text(CeremonyModel.wordsLine(read.keyAppRootWords), 30f, bold = true))
     views.add(ui.words(AppWords.ceremonyCompareRoot))
     views.add(
-        ui.button("The Key app shows the same words") {
+        ui.primary("The Key app shows the same words") {
             if (read.key2 == null) showKey2(d, null) else buildWallet(d)
         },
     )
     views.add(
-        ui.button("They differ") {
+        ui.danger("They differ") {
             d.answer = null
             d.read = null
             showAnswerFailed(AppWords.ceremonyRootDiffers)
@@ -235,7 +235,7 @@ private fun Controller.showKey2(d: CeremonyDraft, message: SayWords?) {
     val views = ArrayList<View>()
     views.add(ui.text("Key 2", 22f, bold = true))
     views.add(ui.words(message ?: AppWords.ceremonyKey2Needed))
-    val pasted = ui.field("[fingerprint/path]key", lines = 4)
+    val pasted = ui.field("[fingerprint/path]key", lines = 4, mono = true)
     views.add(pasted)
     views.add(
         ui.button("Use the pasted text") {
@@ -248,7 +248,7 @@ private fun Controller.showKey2(d: CeremonyDraft, message: SayWords?) {
             }
         },
     )
-    views.add(ui.button("Scan key 2's code") { scanKey2(d) })
+    views.add(ui.primary("Scan key 2's code") { scanKey2(d) })
     views.add(ui.button("Start again") { showStartAgain() })
     page(views)
 }
@@ -321,7 +321,7 @@ private fun Controller.showBuildRefused(d: CeremonyDraft, words: SayWords) {
     val views = ArrayList<View>()
     views.add(ui.words(words))
     if (d.read?.key2 == null && d.answer != null) views.add(ui.button("Give key 2 again") { showKey2(d, null) })
-    views.add(ui.button(ResumeAction.ScanAnswer.label) { scanAnswer() })
+    views.add(ui.primary(ResumeAction.ScanAnswer.label) { scanAnswer() })
     views.add(ui.button("Start again") { showStartAgain() })
     page(views)
 }
@@ -342,7 +342,7 @@ private fun Controller.showWalletCheck(d: CeremonyDraft, built: WalletBuiltView)
     for (line in CeremonyModel.pairLines(built.pairs)) views.add(ui.text(line, 14f))
     views.add(label("First receive address"))
     views.add(ui.text(built.firstReceiveAddress, 14f, mono = true))
-    views.add(ui.button("Show the Key app its setup") { showSetupCode(d, built) })
+    views.add(ui.primary("Show the Key app its setup") { showSetupCode(d, built) })
     views.add(ui.button("Start again") { showStartAgain() })
     page(views)
 }
@@ -369,8 +369,8 @@ private fun Controller.showSetupCode(d: CeremonyDraft, built: WalletBuiltView) {
         views.add(ui.words(AppWords.ceremonyCompareSetup))
         views.add(ui.text(CeremonyModel.wordsLine(built.checksumWords), 30f, bold = true))
         for (line in CeremonyModel.fingerprintLines(built.fingerprints)) views.add(ui.text(line, 14f, mono = true))
-        views.add(ui.button("The Key app shows the same words") { finishCeremony(d) })
-        views.add(ui.button("They differ") { showWordsDiffer(d, built) })
+        views.add(ui.primary("The Key app shows the same words") { finishCeremony(d) })
+        views.add(ui.danger("They differ") { showWordsDiffer(d, built) })
     } else {
         views.add(ui.button("Show again") { showSetupCode(d, built) })
     }
@@ -414,7 +414,7 @@ private fun Controller.finishCeremony(d: CeremonyDraft) {
 private fun Controller.showFinishFailed(words: SayWords, d: CeremonyDraft) {
     val views = ArrayList<View>()
     views.add(ui.words(words))
-    views.add(ui.button("Try again") { finishCeremony(d) })
+    views.add(ui.primary("Try again") { finishCeremony(d) })
     views.add(ui.button("Start again") { showStartAgain() })
     page(views)
 }
@@ -438,7 +438,7 @@ private fun Controller.saveFinished(record: ByteArray, message: SayWords? = null
     views.add(ui.words(message ?: AppWords.ceremonySaveNext))
     val proxy = orbotViews(views, AppConfig.DEFAULT_PROXY)
     views.add(
-        ui.button("Save and start") {
+        ui.primary("Save and start") {
             saveSetup(
                 text, proxy.text.toString().trim(),
                 onRefused = { w -> saveFinished(record, w) },
@@ -453,5 +453,5 @@ private fun Controller.saveFinished(record: ByteArray, message: SayWords? = null
 }
 
 private fun Controller.showSaveFailed(words: SayWords, record: ByteArray) {
-    page(listOf(ui.words(words), ui.button("Try again") { saveFinished(record) }, ui.button("Start again") { showStartAgain() }))
+    page(listOf(ui.words(words), ui.primary("Try again") { saveFinished(record) }, ui.button("Start again") { showStartAgain() }))
 }

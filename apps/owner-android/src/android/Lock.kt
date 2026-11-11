@@ -5,6 +5,7 @@ import android.view.View
 import android.widget.EditText
 import java.io.IOException
 import java.security.GeneralSecurityException
+import org.openbmt.app.ButtonKind
 import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.SayWords
 import org.openbmt.app.SealedFile
@@ -38,6 +39,8 @@ internal fun Controller.secret(hint: String, numeric: Boolean): EditText = ui.fi
     } else {
         InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_PASSWORD
     }
+    // A password type makes the font monospace; the system sans again.
+    ui.style(it)
 }
 
 /**
@@ -124,6 +127,7 @@ internal fun Controller.askNewPin(
             } else {
                 InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_PASSWORD
             }
+            ui.style(f)
         }
     }
     val views = ArrayList<View>()
@@ -131,7 +135,7 @@ internal fun Controller.askNewPin(
     views.add(ui.words(if (upgrade) AppWords.upgradePin else AppWords.choosePin))
     views.addAll(listOf(kind, first, again))
     views.add(
-        ui.button("Set the PIN") {
+        ui.button("Set the PIN", ButtonKind.Primary) {
             val pin = first.text.toString()
             val same = pin == again.text.toString()
             first.setText("")
@@ -197,7 +201,7 @@ internal fun Controller.showUnlock(stored: ByteArray, message: SayWords?) {
     }
     val field = secret("PIN or passphrase", false)
     val countdown = ui.text("", 20f, bold = true)
-    val unlock = ui.button("Unlock") {
+    val unlock = ui.primary("Unlock") {
         val pin = field.text.toString()
         field.setText("")
         if (pin.isNotEmpty()) {
@@ -304,9 +308,9 @@ internal fun Controller.wipe() {
     try {
         WipeOrder.run(appDir, SetupLock.WIPE_FILES, tries) { OwnerWipe.deleteKey() }
     } catch (e: IOException) {
-        return page(listOf(ui.words(AppWords.wipeFailed(e.message)), ui.button("Try again") { begin() }))
+        return page(listOf(ui.words(AppWords.wipeFailed(e.message)), ui.primary("Try again") { begin() }))
     }
-    page(listOf(ui.words(AppWords.wiped), ui.button("Continue") { begin() }))
+    page(listOf(ui.words(AppWords.wiped), ui.primary("Continue") { begin() }))
 }
 
 // ---- changing the PIN ---------------------------------------------------------------------------------------------------
@@ -326,7 +330,7 @@ internal fun Controller.showChangePin(message: SayWords?) {
     if (check.waitLeft > 0) views.add(ui.text("Wait ${Tries.waitText(check.waitLeft)}", 20f, bold = true))
     views.addAll(listOf(current, first, again))
     views.add(
-        ui.button("Change the PIN") {
+        ui.button("Change the PIN", ButtonKind.Primary) {
             val old = current.text.toString()
             val new = first.text.toString()
             val same = new == again.text.toString()

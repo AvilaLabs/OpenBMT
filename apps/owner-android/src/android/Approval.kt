@@ -2,6 +2,7 @@ package org.openbmt.owner.app
 
 import android.view.View
 import org.openbmt.app.AnimatedQrView
+import org.openbmt.app.ButtonKind
 import org.openbmt.owner.Built
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
@@ -34,7 +35,7 @@ internal fun Controller.showBuilt(built: Built, back: () -> Unit) {
     val name = ApprovalText.fileName("request", built.sessionId)
     for (action in ExchangeModel.requestActions) {
         views.add(
-            ui.button(action.label) {
+            ui.button(action.label, if (action == RequestAction.ShowCode) ButtonKind.Primary else ButtonKind.Secondary) {
                 when (action) {
                     RequestAction.ShowCode -> showBuiltCode(built, back)
                     RequestAction.SaveFile -> saveFile(name, built.request, { showBuilt(built, back) }) { words ->
@@ -71,7 +72,7 @@ private fun Controller.showBuiltCode(built: Built, back: () -> Unit) {
     views.add(ui.text("Request for the Key app", 22f, bold = true))
     views.add(ui.words(step.words))
     if (view != null) views.add(view)
-    if (step.done) views.add(ui.button("Done") { showResponse(built, back, ExchangeStep.Response(null)) })
+    if (step.done) views.add(ui.primary("Done") { showResponse(built, back, ExchangeStep.Response(null)) })
     views.add(ui.button("Back") { showBuilt(built, back) })
     page(views)
 }
@@ -87,12 +88,12 @@ private fun Controller.showResponse(built: Built, back: () -> Unit, step: Exchan
     step.message?.let { msg.show(ui.words(it)) }
     val views = ArrayList<View>()
     views.add(ui.text("The Key app's response", 22f, bold = true))
-    val pasted = ui.field("Paste the response text here", lines = 4)
+    val pasted = ui.field("Paste the response text here", lines = 4, mono = true)
     val sources = responseSources({ pasted.text.toString() }, { showResponse(built, back, ExchangeStep.Response(null)) })
     for ((kind, source) in ExchangeModel.responseKinds.zip(sources)) {
         if (kind == ResponseKind.Pasted) views.add(pasted)
         views.add(
-            ui.button(source.label) {
+            ui.button(source.label, if (kind == ExchangeModel.responseKinds.first()) ButtonKind.Primary else ButtonKind.Secondary) {
                 source.begin({ bytes -> takeResponse(n, bytes, msg) }) { words ->
                     // A scan has taken the screen: show this one again with the words.
                     if (source.leavesScreen) showResponse(built, back, ExchangeStep.Response(words)) else msg.show(ui.words(words))
@@ -132,6 +133,6 @@ private fun Controller.showTaken(taken: Taken) {
     node?.let { n -> views.addAll(waitingCounterViews(n, Slot(act)) { showHome() }) }
     // A Box whose welcome this response approved waits to be handed over (OA-43).
     node?.let { n -> views.addAll(pendingBoxViews(n, Slot(act)) { showHome() }) }
-    views.add(ui.button("Done") { showHome() })
+    views.add(ui.primary("Done") { showHome() })
     page(views)
 }

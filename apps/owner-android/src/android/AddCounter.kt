@@ -27,7 +27,7 @@ internal fun Controller.showAddCounter(message: SayWords? = null) {
     views.add(ui.text("Add a counter", 22f, bold = true))
     message?.let { views.add(ui.words(it)) }
     for (line in CounterModel.explanation) views.add(ui.text(line, 16f))
-    views.add(ui.button("Scan the counter's code") { scanCounter() })
+    views.add(ui.primary("Scan the counter's code") { scanCounter() })
     views.add(ui.button("Back") { showHome() })
     page(views)
 }
@@ -97,7 +97,7 @@ private fun Controller.showCounterCheck(n: OwnerNode, s: CounterScan) {
         null
     }
     views.add(
-        ui.button("The four words match") {
+        ui.primary("The four words match") {
             when (val f = if (price == null) Form.Ok(0L) else CounterModel.price(price.text.toString())) {
                 is Form.Refused -> msg.show(ui.words(f.words))
                 is Form.Ok -> attempt(msg) { n.counterConfirm(nowSecs(), s.pairing, f.value) }?.let { showCounterQueued(it) }
@@ -105,7 +105,7 @@ private fun Controller.showCounterCheck(n: OwnerNode, s: CounterScan) {
         },
     )
     views.add(
-        ui.button("The words differ") {
+        ui.danger("The words differ") {
             if (attempt(msg) { n.cancel(s.pairing) } != null) {
                 page(listOf(ui.words(AppWords.counterCancelled), ui.button("Back") { showHome() }))
             }
@@ -125,7 +125,7 @@ private fun Controller.showCounterQueued(q: CounterQueued) {
     for (line in CounterModel.shareLines(q.shares)) views.add(ui.text(line, 14f, mono = true))
     views.add(ui.text(CounterModel.batchLine(q.batchCount), 15f))
     views.add(ui.text(CounterModel.nextLine, 15f))
-    views.add(ui.button("Build the request for the Key app") { showSpend() })
+    views.add(ui.primary("Build the request for the Key app") { showSpend() })
     views.add(ui.button("Later") { showHome() })
     page(views)
 }
@@ -162,9 +162,9 @@ internal fun Controller.showCounterCode(w: WaitingCounter, back: () -> Unit) {
     if (view != null) views.add(view)
     if (step.done) {
         views.add(
-            ui.button("The counter shows Paired") {
+            ui.primary("The counter shows Paired") {
                 if (attempt(msg) { n.counterDelivered(w.counter) } != null) {
-                    page(listOf(ui.words(AppWords.counterDelivered), ui.button("Done") { showHome() }))
+                    page(listOf(ui.words(AppWords.counterDelivered), ui.primary("Done") { showHome() }))
                 }
             },
         )
