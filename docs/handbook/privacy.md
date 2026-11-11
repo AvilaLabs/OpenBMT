@@ -1,100 +1,119 @@
-# Privacy
+<a id="privacy"></a>
 
-A Bitcoin payment need not carry a customer's name, but its transaction is
-public. An address or transaction ID can let someone connect that payment
-to other activity. OpenBMT keeps these details out of the POS and ordinary
-accounting exports, and does not upload analytics or crash data.
+# What others can see
 
-> **This network behavior is built. It has been checked against Bitcoin
-> Core and observed on test and live networks. The apps have not been run
-> on a phone.**
+Paying with bitcoin does not require the customer to send a name or bank
+account number with the payment. It still creates a public transaction.
+Anyone who knows the payment address or transaction ID, its identifying
+number, can look up the movement of bitcoin and follow links to other
+transactions.
 
-## Who sees what
+A customer knows the address used for their purchase. An exchange knows
+the deposit you send it. A person who connects an address with your shop
+may be able to learn more than the amount of one sale. OpenBMT limits
+what it shares, but does not make the shop's activity invisible.
 
-| Party | What it sees | What you can do |
-|---|---|---|
-| Bitcoin peers used by the light check | The counter's network address, that it follows the chain, and the blocks it requests | Use Tor; add the shop's own node |
-| Internet provider or carrier | That the device speaks Bitcoin and when; with Tor, that it uses Tor | Use Tor |
-| DNS seeds used to find peers | The address of a device looking for peers | With Tor, seed lookups stay inside Tor rather than reaching the phone's resolver |
-| Price sources | Price requests and their timing, without a sale or address | Fetch over Tor; requests already run every 60 seconds rather than in response to sales |
-| POS vendor | Every order, amount and "Bitcoin" tender, without an address or transaction ID | The vendor necessarily sees its own orders |
-| An outside Box host | Order amounts and timing, without addresses, transaction IDs or the wallet description | Run the Box yourself; a hosted Box is not built yet |
-| Push services | Nothing; push wake-ups are not built yet | |
-| App download host | The downloader's network address and requested version | Download over Tor |
-| Customer's phone | The address and amount for that sale | OpenBMT uses a fresh address for each sale |
-| Cash-out exchange | Its deposit and the coins the owner chooses to send | Use coin control; see the accounting section below |
+<a id="who-sees-what"></a>
 
-The counter never sends a shop address or script to a Bitcoin peer
-(`NR-60`). It requests compact block filters, then whole blocks when a
-filter matches. This reveals interest in those blocks. While waiting for
-a payment's first block, it also downloads every new block in full:
-a cancelling spend is absent from the filters it could match (`NR-44`).
-These requests do not completely conceal which blocks interest the shop
-(`NR-61`).
+## The main contacts
 
-## Tor
+| Who | What it can learn |
+|---|---|
+| Customer | The address and amount for that purchase. |
+| POS vendor | Its orders, prices and the fact that a Bitcoin payment type was used. OpenBMT does not put wallet addresses or transaction IDs in those fields. |
+| Bitcoin peers | Computers used for payment checking can see the counter's network address and which blocks it requests. |
+| Price sources | That a device requested a price and when. They receive no sale or wallet address. |
+| Someone hosting a Box for you | Order amounts and timing, enough to estimate activity using the public bitcoin price. |
+| Exchange | The deposit and the incoming payments linked when you spend them together. |
 
-With the counter's Tor switch on, all connections, including Bitcoin peers
-and price sources, go through Orbot. Orbot is a separate Android app and
-must be running. If it is unavailable, the counter reports the problem
-and sends nothing around it (`CR-87`).
+The [network reference](network-reference.md#who-sees-what) lists every
+contact and the exact data exposed. OpenBMT sends no analytics or crash
+uploads to its publisher. Push wake-ups and a hosted Box service are not
+built yet.
 
-The Owner app always uses Tor and will not start if Orbot is not answering
-(`OA-05`). That includes broadcasting spends and refunds. Its behavior
-does not depend on the counter's switch.
+## A fresh address helps, but is not a private account
 
-The counter switch is off by default for speed. If customers can join its
-network, instant acceptance requires Tor, because a customer on the same
-network could feed the counter false data.
+OpenBMT uses a new address for each sale. That prevents every customer
+from seeing all receipts at one reused shop address. The transaction
+record remains public, and later spending can link the receipts.
 
-Peers use encrypted BIP324 transport when they support it. This conceals
-requests from a passive listener but does not establish the peer's
-identity (`NR-62`). Tor hides the device's address from peers; it does
-not hide that the traffic belongs to a Bitcoin wallet (`OA` section 9).
-Onion peers are grouped coarsely, so two onion peers do not establish two
-independent operators (`docs/NETWORK-RULES.md`, section 8).
+Suppose you receive several purchases, then send their bitcoin together
+to an exchange. That one transaction links the incoming payments. A
+customer following their own payment, or the exchange receiving the
+transfer, can see the association. Consolidating small incoming payments
+has the same effect. The app warns when it offers a merge.
 
-## The shop's own node
+Wallet software can also leave recognizable patterns in the transactions
+it builds. OpenBMT does not claim to hide which software created its
+transactions. The [fingerprint
+reference](network-reference.md#wallet-fingerprints)
+links a detector for readers who want to inspect that issue.
 
-You can run Bitcoin Core on a Box, Umbrel, StartOS or a computer at home,
-and have the counter check payments against it. The node adds a check;
-it does not replace the counter's light client.
+<a id="tor"></a>
 
-The current counter accepts an own-node connection only at a Tor v3
-address. The address authenticates the node through its public key. A
-local-network address or plain internet address is not enough to establish
-who answers, so it is not accepted as the own node (`NR-98`, `NR-99`,
-`CR-100` to `CR-102`). The counter retains its own header chain from random
-peers, preventing a Box from inventing a confirmation.
+## What Tor changes
 
-## The Box
+Tor routes connections through other computers so the destination does
+not see the phone's ordinary network address. It does not hide the public
+Bitcoin transaction. It also does not turn an unconfirmed payment into a
+reliable one.
 
-The Box relays sealed messages between the shop's devices, reads the POS
-and matches orders to sales. It can be reached on the local network or
-through an onion address. Only the recipient can read a relayed message.
+The Counter app's Tor switch covers its Bitcoin and price connections.
+It is off by default for speed. If customers can join the counter's
+network, instant acceptance requires Tor, because a customer on that
+network could feed the counter false information. The Owner app sends its
+Bitcoin peer traffic and broadcasts of spends
+and refunds through Tor, with no switch to turn that off. An explicitly
+configured local link between shop devices can run directly over the
+local network.
 
-It sees order amounts in the shop's currency and their timing, as the POS
-vendor does. It holds no wallet key and sees no address, transaction ID
-or wallet description (`BX-04`, `BX-40`). A host can nevertheless estimate
-payments by combining the orders with a public Bitcoin price. Run the
-Box yourself to keep that information inside the shop
-(`docs/BOX-RULES.md`, section 6).
+Both apps need Orbot, a separate Android app, to use Tor. If Orbot stops
+answering, the Owner app will not start and a counter with Tor enabled
+will not send around it. This is a real operating dependency: turning Tor
+on requires keeping Orbot running.
 
-## The books and the export
+<a id="the-shops-own-node"></a>
 
-The accountant's export contains opaque sale IDs. It excludes transaction
-IDs, addresses and satoshi amounts, as do all POS fields, because those
-would let the recipient trace payments on the public ledger. The full
-ledger contains those details and is shown behind a warning.
+## Checking through your own node
 
-Spending several receipts in one transaction links them on the blockchain.
-Someone who paid the shop, or an exchange receiving the spend, can then
-see that the receipts belong to one wallet. Consolidating receipts has
-the same effect. The app warns when offering a merge (design section 9).
+A full node checks the Bitcoin rules on a computer you run. OpenBMT can
+add its report to the counter's own light check. It does not replace that
+check or remove the need to wait for confirmations under the shop's
+policy.
 
-## Wallet fingerprints
+The current own-node connection requires a Tor v3 address. This address
+also helps establish that the counter has reached the intended node.
+The [network reference](network-reference.md#the-shops-own-node) explains
+the connection restriction and why the counter retains its own chain
+checks.
 
-Transactions can also reveal which wallet software built them. OpenBMT
-does not claim to hide that fingerprint. A wallet fingerprint detector
-is listed at <https://btcmaxis.com/bitcoin-information/privacy.html>
-(read 2026-11-11).
+<a id="the-box"></a>
+
+## Who runs the Box matters
+
+The Box relays messages and reads POS orders. Device messages are
+encrypted so only their intended recipient can read the contents. The
+Box has no wallet key, wallet description,
+address or transaction ID. It can still see order values and timing.
+Someone else running it can estimate how much the shop sells.
+
+Running it yourself keeps that information inside the shop. The Box can
+be reached on the local network or through a Tor address. A hosted Box
+service is not built yet.
+
+<a id="the-books-and-the-export"></a>
+
+## Give the accountant the accounting export
+
+The ordinary accounting export uses sale IDs that do not reveal a
+blockchain transaction by themselves. It excludes wallet addresses,
+transaction IDs and bitcoin amounts in satoshis. The full ledger does
+contain those details and is placed behind a warning. Choose the file
+that fits the recipient's job rather than sending every wallet detail
+with the accounts.
+
+<a id="wallet-fingerprints"></a>
+
+The network reference also explains block-request patterns, encrypted
+peer connections and transaction fingerprints. These are limits on what
+observers can learn, rather than a promise of anonymity.

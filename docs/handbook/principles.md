@@ -2,91 +2,93 @@
 
 # Design choices
 
-OpenBMT separates the work done at the counter from control of the wallet.
-That separation determines which devices hold keys, which services the
-shop depends on, and what the cashier can approve.
+OpenBMT gives the shop control of its receipts by keeping spending keys
+and payment checking on shop-run devices. That choice reduces dependence
+on a payment company and creates work for the owner. The design has to be
+judged with both effects in view.
 
 <a id="the-standard"></a>
 <a id="design-requirements"></a>
 <a id="your-keys"></a>
 <a id="key-ownership"></a>
+<a id="keys-and-counter-access"></a>
 
-## Keys and counter access
+## Why use separate devices
 
-The counter displays payment requests and watches for receipts. It has no
-key that can spend the shop's money and does not display the wallet
-balance. Refunds and cash-outs go through the owner phone and a second
-signer. Compromising the counter should not give someone the wallet.
+| Choice | Reason | Cost to the shop |
+|---|---|---|
+| The counter has no wallet spending key | A stolen till alone cannot spend the existing wallet. | It can still divert new sales or report false payment; the owner must reconcile records. |
+| Spending needs two of three wallet keys | One lost or compromised key is insufficient to spend. | Two lost keys make the funds unspendable; keys and backups need separate storage. |
+| A second app reviews spends and address batches | The owner phone does not get to validate its own request without another check. | Refunds, transfers and more payment addresses need an approval session. |
+| The recovery key is generated outside OpenBMT | The third key does not depend on the same software that made key 2. | The owner must use another tool and preserve the recovery information. |
 
-The shop holds three keys, with any two needed to spend. No device may
-hold two of them or cause a second key to sign without a review on that
-key's own device. The Key app checks spends and address batches
-independently of the owner phone. It also approves settings changes that
-allow more risk. The remaining release and device-testing conditions are
-explained in [The wallet and its keys](safety.md).
+The Key app checks the transaction it receives; it cannot know whether a
+customer really deserves a refund. Independent review also depends on
+the releases and devices being independent. The second release-key holder
+and reproducible builds are not in place, so the intended protection is
+not established today. [Who controls the money](safety.md) explains the
+consequences, and the [technical overview](technical-overview.md) separates
+wallet keys, device identities and app release keys.
 
 <a id="why-a-purist-objection-is-a-veto"></a>
 <a id="no-company-in-the-payment-path"></a>
+<a id="services-and-custody"></a>
 
-## Services and custody
+## Why there is no OpenBMT payment account
 
-There is no OpenBMT account or server through which payments pass. The
-counter checks the Bitcoin network directly, with an optional additional
-check from the shop's own node. The wallet uses open standards so the shop
-can recover it with other software.
+A hosted balance would put another company's release of funds between the
+sale and the shop's control. OpenBMT instead sends payments to the shop's
+wallet. It excludes services able to hold, move, freeze or redirect those
+funds, or obtain the keys, wallet description or addresses. These remain
+excluded as optional integrations and future features.
 
-OpenBMT excludes services that could hold, move, freeze or redirect the
-shop's funds, or obtain its keys, wallet description or addresses. These
-are permanent exclusions, including optional integrations. They ruled
-out co-signed instant payments, whose signer group could freeze funds and
-see spends, and third-party Lightning swaps, whose provider would see the
-amount, timing and both sides of each swap.
+This ruled out co-signed instant payments, whose signer group could freeze
+funds and see spends. It also ruled out third-party Lightning swaps,
+whose provider would see the amount, timing and both sides of each swap.
+The supported Lightning route uses the shop's own node.
 
-The POS vendor still sees its orders, and an exchange sees deposits sent
-to it. [Privacy](privacy.md) lists the other contacts. Any optional service
-that saw metadata alone would have to be off by default, disclose that
-exposure where it is selected, and appear in that list. No such service
-is offered today.
+The POS vendor and a chosen cash-out exchange still see their part of the
+business. Any future optional service that saw metadata alone would have
+to be off by default, explain the exposure where it was selected, and be
+listed in [Privacy](privacy.md). No such service is offered today.
 
 <a id="choice-without-confusion"></a>
 <a id="configuration-choices"></a>
+<a id="shop-settings"></a>
 
-## Shop settings
+## Why the owner sets the checkout limits
 
-The owner chooses keys, a node and waiting periods. Configuration should
-use plain questions and a recommended option, with unsafe combinations
-excluded. The cashier works within those settings. Confusing checkout
-behavior is a problem for OpenBMT to fix.
+The owner decides the amount the shop can afford to release before a
+payment confirms. The counter applies that policy; a cashier does not
+have to judge the Bitcoin network while a customer waits.
 
-For on-chain payments, accepting a small sale before a block is an
-owner-selected risk, bounded by the instant limit and exposure budget.
-Sales above those limits wait for a block. The owner can choose the risk
-without asking a cashier to judge the Bitcoin network during a sale.
+Lowering risk can take effect immediately. Increasing it needs the second
+approval device. Owners can choose keys, a node and waiting periods only
+within supported combinations. The interface recommends an option and
+excludes unsafe combinations. These choices and current restrictions are
+explained in [Equipment, daily work and fit](fit.md).
 
 ## Bitcoin only
 
-OpenBMT is built for receiving and holding bitcoin. Its currency choice
-rests on Bitcoin's monetary rules and the network enforcing them. The
-[bitcoin-only policy](never.md#never-anything-but-bitcoin) explains that
-choice and why it excludes other independently mined currencies as well as
-issuer-controlled tokens.
+OpenBMT chooses Bitcoin's monetary rules and the network enforcing them.
+The [bitcoin-only chapter](never.md) explains that choice, including why
+independently mined alternatives are excluded. It is a different argument
+from objecting to a token issuer's control.
 
 <a id="status-words"></a>
 <a id="payment-evidence-and-status"></a>
+<a id="payment-reports"></a>
 
-## Payment reports
+## Why the counter names its evidence
 
-Seeing an unconfirmed transaction, finding it in a block and checking it
-against the shop's own node provide different evidence. The counter must
-keep those reports distinct (`CR-105`, `docs/screens/counter.md`).
-[Getting paid](getting-paid.md#which-check-saw-the-payment) explains the
-labels.
+An unconfirmed transaction report, a payment in a block and a report from
+the shop's own node are different observations. Combining them into one
+unqualified "paid" claim would hide a decision the merchant needs to
+understand.
 
-No screen says "fully verified". "Settled" and "final" mean the shop's
-chosen refund depth; they do not mean a reversal is impossible. Conditions
-and unverified details must also be stated beside claims in the handbook.
-
-OpenBMT has had four internal design reviews. It still needs device
-testing, outside code review and an independent security audit. Setup
-time and most speed measurements are also unfinished; see
-[Limits and risks](limits.md).
+The counter names the check that was done. It uses the shop's refund depth
+for "settled" or "final", without claiming that reversal is impossible.
+The [payment chapter](getting-paid.md) explains the result in cashier
+terms; the [technical reference](payment-reference.md) gives exact screen
+wording and acceptance conditions, including `CR-105` and
+`docs/screens/counter.md`.

@@ -1,150 +1,183 @@
 <a id="best-practices"></a>
+<a id="operating-precautions"></a>
 
-# Operating precautions
+# Backups and routine checks
 
-> **OpenBMT is pre-release and has had internal review only. No independent
-> security audit has been done. Do not use it with real funds.**
+Direct control of the wallet means the shop has to preserve the information
+needed to use it. Replacing a phone is only part of recovery. You also need
+enough keys and the wallet description to find and spend the money again.
 
-For general self-custody guidance from the same bitcoin purist position,
-see <https://btcmaxis.com/>. The pages linked here were read on 2026-11-11.
-Some procedures below remain part of OpenBMT's design rather than controls
-the software enforces.
+These are responsibilities to plan before live use. OpenBMT is still
+pre-release, has had no independent audit and must not be used with real
+funds. The setup and recovery walkthroughs remain unfinished.
 
-## Keys
+<a id="keys"></a>
 
-Keep key 1 on the owner phone, key 2 on a separate phone or hardware signer
-stored away from it, and key 3 away from the shop. Any two can spend. Storing
-two together removes the protection against losing or compromising one
-location.
+## Keep the secret words and public description separately
 
-Record each set of words alone, in separate sittings with nobody watching.
-Never keep key 2's words with key 3's. Use steel. Paper burns and tears,
-and writing can fade. As the linked guidance puts it, "Paper is not an
-acceptable form of backup because it is so fragile"
-(<https://btcmaxis.com/bitcoin-information/recommended-wallets.html>, read
-2026-11-11). If paper is needed while stamping the steel, compare the steel
-with the phone, then destroy the paper. Do not retain paper as a backup.
+Recovery words can recreate a key. Anyone who obtains two of the three
+wallet keys can spend, so recording two sets together would make one loss
+or theft affect both. Keys 2 and 3 should have separate steel records,
+kept apart from each other and from the owner phone.
 
-Generate key 3 outside OpenBMT, offline, on a device holding no other key,
-or use a hardware wallet. Factory-reset a phone or tablet used for this
-step afterward.
+Record each set alone, without someone watching. Use steel rather than
+paper for the retained backup. Paper can burn or tear and writing can
+fade. If paper is needed while stamping steel, compare the steel with the
+phone and destroy the paper afterward. Do not keep it as a backup.
 
-Until an independent second person holds the Key app's release key, prefer
-a hardware signer or another publisher's signer for key 2. Hardware
-signers are planned and have not been tried. Before choosing one, read its
-public disclosure history. The "Historic Wallet Failures" list on the
-[recommended-wallets page](https://btcmaxis.com/bitcoin-information/recommended-wallets.html)
-collects reported hardware-wallet flaws (read 2026-11-11).
+Key 3 is generated outside OpenBMT, offline and away from key 2. A phone
+or tablet used for that job is factory-reset afterward. The detailed
+procedures and current hardware-signer limitations are in the
+[wallet reference](wallet-reference.md#three-rules-about-the-keys).
 
-Keep a current, dated recovery kit with the wallet description away from
-the shop, and check the description by scanning it with the Key app.
-Kit printing is not built yet. Once a year, inspect key 3 without exposing
-the words: check that the steel is still present, readable and safely kept.
+The wallet description is different. It tells compatible software how to
+find the wallet's addresses, but does not authorize spending. The planned
+recovery kit puts this description, the key locations and recovery steps
+on one printed page. It contains no secret words. Keep it current, dated
+and available to the people who may need to act.
 
-## PINs
+The Key app can compare a scanned description with its own. It does not
+verify every kit field, and producing and printing the kit is not built.
+Do not assume a successful scan proves that every recovery instruction
+or key location is correct.
 
-Use at least six digits for the locks on keys 1 and 2, preferably a
-passphrase of eight characters or more. The tenth wrong attempt wipes the
-key from that phone. Never keep a PIN beside the words.
+<a id="test-recovery-first"></a>
 
-Cashier PINs should differ from the manager PIN. Change any PIN a former
-employee knew.
+## Test that the plan can recover the wallet
 
-## The phone
+A backup that cannot be read or used will not help after a loss. The design
+calls for a restore test with a small amount before relying on the wallet
+for more. In today's pre-release project, money tests belong on a test
+network, not in real-funds use.
 
-Keep the operating system updated and the screen lock enabled. Install
-apps only from known sources; do not sideload apps onto the owner
-or Key phone. A hostile keyboard or accessibility service can read input.
-The Key app refuses to run with an accessibility service enabled.
+The Bitcoin Core test-network restore passed. A Sparrow restore has not
+been run. Both are used watch-only for finding the funds: they receive
+the public wallet description, not the secret keys. A separate signer
+provides the signatures needed to spend. The eventual kit instructions
+are held back until the Sparrow test is complete.
 
-Keep the spare phone in airplane mode with no accounts on it. Leave cloud
-backup off for the apps. They deliberately exclude key files: each is
-wrapped with a key in that phone's Keystore, so its copy could not be
-opened on another phone.
+Inspect key 3 once a year without exposing its words. Confirm that the
+steel is still present and readable and that its storage remains
+appropriate. That inspection is a planned responsibility, not a reminder
+the app currently enforces.
 
-## Tor and the shop's own node
+## Compare the records each month
 
-If customers can join the counter's Wi-Fi, enable Tor or use cellular
-instead. Instant acceptance on a shared network requires Tor. The apps
-need Orbot running to use it.
+The monthly outside check uses different wallet software to compare
+incoming payments with the POS Bitcoin total. Watch-only means the
+software can display activity but cannot spend. This helps catch a bad
+counter or app claiming the shop received payments that actually went
+elsewhere.
 
-Run your own node if you can. The counter accepts it as an own-node check
-only through a Tor v3 address.
+Bitcoin Core on a computer you run can provide this view; Sparrow is
+another option in the design. The future guide also needs to explain
+privacy configuration, so the check does not hand the wallet description
+or addresses to a public service. Never provide recovery words to a
+website for a balance check.
 
-## The instant limit
+The estimated five minutes has not been measured. In-app reminders and
+instructions are planned. This task still needs a place in the owner's
+routine.
 
-Set the instant limit to an amount the shop can afford to lose. The
-default light-check limits are first guesses. Zero disables instant
-acceptance and makes the sale wait for a block. Overrides also count
-toward the exposure total.
+<a id="if-the-owner-dies-or-cannot-act"></a>
 
-For a large sale, the Bitcoin Confirmation Risk Calculator linked on
-<https://btcmaxis.com/bitcoin-information/security.html> (read 2026-11-11)
-can help choose how many confirmations to wait for. It does not change
-what the shop can afford to lose before confirmation.
+## Arrange access for someone acting for the owner
 
-## Seed splitting
+Decide who should be able to act and how they could reach two keys and the
+wallet description. A sealed letter can give locations and contacts
+without containing the secret words themselves. The recovery kit should
+be somewhere those people can find it.
 
-Do not split a key's words with Seed XOR, Penlock or similar tools.
-The two-of-three wallet already distributes control across three keys.
-Splitting one adds pieces that can be lost. The linked security guidance
-advises "keep it as simple as possible"
-(<https://btcmaxis.com/bitcoin-information/security.html>, read 2026-11-11).
+OpenBMT cannot reset a key or override the wallet if the owner dies or
+cannot act. A will or trust is a matter for a lawyer. General inheritance
+resources and the original self-custody guidance are linked in the
+[precautions reference](wallet-reference.md#if-the-owner-dies-or-cannot-act).
 
-## If the owner dies or cannot act
+<a id="pins"></a>
+<a id="the-phone"></a>
 
-Choose who should be able to act and make sure they can reach two of the
-three keys. Keys 1 and 2 are on devices; key 3 is on steel. Leave the
-recovery kit where those people can find it: the wallet description lets
-other software locate the funds.
+## Protect the phones without depending on them as backups
 
-A sealed letter can state where each key is kept without containing the
-words themselves. OpenBMT has no company that can reset a key or open the
-wallet. Without access to two keys, nobody can restore it. Ask a lawyer
-whether a will or trust should name the people who can act.
+Use at least six digits for a signing app's PIN or, preferably, a
+passphrase of at least eight characters. The tenth wrong attempt wipes
+that phone's key. Never keep the PIN beside the words. A cashier PIN
+should differ from the manager PIN, and any PIN known by a former employee
+should be changed.
 
-The security page links inheritance resources:
-<https://btcmaxis.com/bitcoin-information/security.html> (read 2026-11-11).
+Keep the operating system updated, use a screen lock and avoid unrelated
+apps on the signing phones. Do not sideload apps onto the owner or Key
+phone. A hostile keyboard or accessibility service can read input; the
+Key app refuses to run with an accessibility service enabled. A phone
+already controlled by someone else cannot be made trustworthy by an
+OpenBMT PIN.
 
-## Cash-out and what the shop keeps
+The signing apps exclude their key files from cloud backup and device
+transfer. Those files depend on Android's protected key storage on that
+phone, so copying them to another phone would not provide a usable
+restore. The spare Key phone should stay in airplane mode with no
+accounts on it.
 
-If keeping bitcoin, move it regularly from the shop wallet to long-term
-storage the shop controls. Leave only working amounts in the wallet the
-counters pay into, and approve the transfers in an approval session.
+<a id="tor-and-the-shops-own-node"></a>
+<a id="the-instant-limit"></a>
 
-Enroll a cash-out destination by scanning it on the Key app, then wait
-24 hours. Consolidating small receipts links them on the public ledger;
-do it deliberately, when fees are low.
+## Review checkout risk when the shop changes
 
-## Staff
+Set the instant limit to what the shop can afford to lose, not merely the
+amount that avoids a wait. Zero turns instant acceptance off. Overrides
+also count toward exposure. If customers can join the counter's network,
+instant acceptance requires Tor through Orbot; cellular is another way
+to keep the counter off their shared Wi-Fi.
 
-Give each cashier a name and PIN so the records identify who acted.
-The cashier list is local to that counter phone. There is currently one
-manager PIN; give it only to the person running the counter.
+For larger sales, choose how many confirmations to wait for. The
+[reference](wallet-reference.md#the-instant-limit) links a confirmation-risk
+calculator. It does not turn the default limits into measured guarantees.
+Running a full node adds an independent check; the counter accepts its
+own-node connection only through a Tor v3 address.
 
-## If a phone is lost
+<a id="cash-out-and-what-the-shop-keeps"></a>
+<a id="staff"></a>
 
-| Phone | Response |
+## Include approvals and money transfers in the routine
+
+Review refunds, cash-outs, more payment addresses and sensitive settings
+with the second signer. A new cash-out address must be enrolled on the
+Key app and wait 24 hours. Cashiers should know that requesting a refund
+does not pay it immediately.
+
+If the shop keeps bitcoin, the design calls for moving savings to separate
+long-term storage it controls while leaving working amounts in the shop
+wallet. Approve those transfers in a session. Combining small incoming
+payments links them publicly; choose when to do it deliberately rather
+than treating it as a privacy-neutral housekeeping task.
+
+Give each cashier a name and PIN so records identify who acted. The list
+is local to the counter phone. There is one manager PIN today; restrict
+it to the person running the counter.
+
+<a id="if-a-phone-is-lost"></a>
+
+## Know the response to a lost device
+
+| Lost device | Planned or current response |
 |---|---|
-| Owner | Treat the loss as urgent and follow the recovery kit. The phone holds one key of three. Moving to a new wallet is the designed response, but the "Move to a new wallet" feature is not built yet. |
-| Spare Key phone | Restore key 2 from its words on a new phone. The restored Key app starts with its initial ceilings. |
-| Counter | Remove it on the owner phone and pair a replacement. |
+| Owner phone | Treat the loss as urgent. Use the remaining keys and recovery plan to move to a new wallet. The automatic "Move to a new wallet" feature is not built. |
+| Key phone | Restore key 2 from its words on a new device. The new Key app starts with its original spending ceilings and no enrolled destinations. |
+| Counter | Remove it from the owner phone and pair a replacement. Its local cashier list is lost with it. |
 
-## Test recovery first
+<a id="seed-splitting"></a>
 
-Test restoration with a small amount before depending on the wallet for
-more. A Bitcoin Core restore has been run on a test network; a Sparrow
-restore has not. Both are used watch-only: the keys never go into them.
-The linked guidance advises newcomers against putting keys in a node's
-built-in wallet.
+Do not split a set of recovery words into extra pieces. The two-of-three
+wallet already distributes control among three keys. Splitting one key
+adds pieces that can be lost. The detailed reference discusses Seed XOR
+and similar tools and links the source guidance.
 
-Each month, open the wallet description watch-only in Sparrow or Bitcoin
-Core and compare the receipts with the POS Bitcoin-tender total. This
-checks the records using software outside OpenBMT.
+<a id="verify-what-you-download"></a>
 
-## Verify what you download
+## Check the software you install
 
-Check the app's signature and published hash before installation.
-Reproducible builds are not available yet. The hash establishes that you
-have the file the publisher released; it cannot establish that the build
-matches the source.
+Verify the app's signature and published hash before installation. These
+checks help establish that you have the file released by the publisher.
+They do not prove that the released file matches the source code.
+Reproducible builds and independent rebuilding, which would help check
+that, are not available yet. The
+[technical design](technical-overview.md) explains this remaining dependency.

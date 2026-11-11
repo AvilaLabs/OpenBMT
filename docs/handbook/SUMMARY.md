@@ -1,29 +1,32 @@
 # Summary
 
-[Introduction](introduction.md)
+[Start here](introduction.md)
 
-- [Why accept bitcoin](why-bitcoin.md)
+# Merchant guide
+
+- [What a bitcoin payment is](bitcoin-basics.md)
+- [A sale at the counter](getting-paid.md)
+- [Costs and cashing out](why-bitcoin.md)
+- [Who controls the money](safety.md)
+- [Equipment, daily work and fit](fit.md)
+- [What others can see](privacy.md)
+- [Risks and current limits](limits.md)
+- [Backups and routine checks](best-practices.md)
+
+# Project choices
+
 - [Design choices](principles.md)
-- [What OpenBMT will never do](never.md)
-- [The wallet and its keys](safety.md)
-- [Getting paid](getting-paid.md)
-- [Privacy](privacy.md)
-- [Limits and risks](limits.md)
-- [Operating precautions](best-practices.md)
+- [Why Bitcoin only](never.md)
+
+# Technical design
+
+- [Technical overview and trust boundaries](technical-overview.md)
+- [Payment rules and screens](payment-reference.md)
+- [Wallet and recovery details](wallet-reference.md)
+- [Network, risks and policy details](network-reference.md)
+
+# Status and sources
+
+- [What is built and tested](status.md)
+- [Fee figures, tax details and sources](cost-reference.md)
 - [Glossary](glossary.md)
-
-# Using OpenBMT
-
-- [Getting started]()
-  - [Choosing your keys]()
-  - [The key ceremony]()
-- [Setting up counters]()
-- [The Box]()
-- [Point of sale]()
-- [Daily use]()
-- [Refunds]()
-- [End of day and books]()
-- [Cash-out]()
-- [Hardware signers]()
-- [Troubleshooting]()
-- [For developers]()

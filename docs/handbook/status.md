@@ -1,0 +1,52 @@
+# What is built and tested
+
+> **OpenBMT is pre-release. Internal review only. No independent security
+> audit has been completed. Do not use it with real funds.**
+
+The handbook describes a design and the code built so far. A successful
+software test does not establish that a shop can rely on the whole system.
+The Android apps have started on an emulator but have not been tried on a
+physical phone.
+
+## How the status terms are used
+
+| Term | Meaning |
+|---|---|
+| Built | Code exists and has passed tests on a desktop or against Bitcoin Core on a test network. |
+| Not run on a phone | An Android build has started on an emulator, but has not been tried on a physical phone. |
+| Planned | A feature is described in the design. |
+| Not built yet | The named feature is absent. |
+| Not verified | The stated claim or behavior has not been checked; the text identifies the evidence that is available. |
+
+A test network uses test bitcoin rather than money for live purchases.
+Bitcoin Core is a full-node implementation used in the project's
+engineering tests. The current results are not an independent audit.
+
+## Current components
+
+| Part | Status |
+|---|---|
+| Shared wallet, address batches, settings, signed records and instant acceptance | Built |
+| Key app signing rules | Built |
+| Counter sale handling and Bitcoin peer client | Built; tested against Bitcoin Core on a test network |
+| Owner coin view, refund queue, spending and approval session | Built; tested against Bitcoin Core on a test network |
+| Counter, Owner and Key Android apps | First builds; started on an emulator, not run on a phone |
+| Box and its container, Umbrel and StartOS packages | Built; container image smoke-tested, Umbrel and StartOS packages not run on a device |
+| NFC tap to pay | Not built yet |
+| Square and Clover order matching | Built, read-only; based on vendor documentation, not tested with a real seller account |
+| Lightning through the shop's own node | Built at the counter; not run against a real node |
+| Books and exports | Built as a library; no books screen in the apps |
+| Recovery kit printing | Not built yet; the Key app can check a scanned wallet description against its own |
+| Push wake-ups, a full node on the Box and a hosted Box | Not built yet |
+| Reproducible builds and a second holder of the Key app's release key | Not in place yet |
+
+Four internal design reviews are complete. Device testing, outside code
+review and an independent security audit remain necessary.
+
+## Guides still to be written
+
+The step-by-step guides for choosing keys and the key ceremony, counter
+setup, the Box, POS integration, daily use, refunds, end-of-day books,
+cash-out, hardware signers, troubleshooting and development are unfinished.
+The merchant chapters explain what the work involves so you can assess
+it; they are not a substitute for those tested setup instructions.

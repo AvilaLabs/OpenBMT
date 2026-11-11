@@ -1,218 +1,154 @@
 <a id="why-bitcoin-for-a-merchant"></a>
+<a id="why-accept-bitcoin"></a>
 
-# Why accept bitcoin
+# Costs and cashing out
 
-A shop accepting bitcoin directly receives the payment in its own wallet,
-without a processor taking a percentage or controlling the payout. It also
-takes responsibility for its keys, network fees and the value of the
-bitcoin it keeps. Whether this is useful depends on the shop's customers
-and costs. OpenBMT does not recommend buying or holding bitcoin as an
-investment and makes no price prediction.
+A card processor usually deducts a fee from each sale and pays the
+remainder to your bank. With OpenBMT, the customer sends bitcoin directly
+to the shop's wallet. There is no OpenBMT percentage fee or scheduled
+OpenBMT payout. The costs occur in different places.
 
 <a id="you-keep-the-whole-sale"></a>
+<a id="processing-and-network-fees"></a>
 
-## Processing and network fees
+## Who pays which fee
 
-A $20 card sale on Square's United States Free plan costs $0.67:
-2.6% of $20 is $0.52, plus $0.15. At 1,000 such sales a month, that is
-$670 a month or $8,040 a year, before dispute or payout fees.
-
-Square's pricing, read on 2026-11-11, lists:
-
-| Payment | Rate |
+| Event | Who pays and what matters |
 |---|---|
-| In person: tap, dip or swipe, Free plan | 2.6% + 15 cents |
-| In person, Plus plan | 2.5% + 15 cents |
-| In person, Premium plan | 2.4% + 15 cents |
-| Keyed in or card on file | 3.5% + 15 cents |
-| Online or invoice, Free plan | 3.3% + 30 cents |
-| Card issued outside the United States | Additional 1.5% |
+| Customer sends an on-chain payment | The customer pays the network fee in addition to sending the requested sale amount. It can be large relative to a small purchase. |
+| Shop later moves the bitcoin | The shop pays a network fee to spend its receipts, whether sending to storage or an exchange. It depends on transaction size and the current fee rate. |
+| Shop sells bitcoin and withdraws money | The chosen exchange's terms apply. OpenBMT does not provide the conversion or bank withdrawal. |
+| Shop runs its equipment | The owner provides and maintains the phones and any optional servers. |
 
-Stripe's page, read the same day, lists 2.9% + 30 cents for a domestic
-online card payment, another 1.5% for an international card and another
-1% for currency conversion.
+The on-chain fee depends on how much transaction data must be processed,
+not a percentage of the sale amount. When the wallet sends several incoming
+payments together, the new transaction has to describe each one being
+spent. Many small payments can therefore cost more to move than one larger
+payment of the same total value. That cost appears later, when you move
+the money.
 
-An on-chain payment to an OpenBMT wallet has no processor fee. The
-customer pays to send it; the shop pays a network fee when it later
-spends the receipt, cashes out or consolidates receipts. That fee depends
-on transaction size and the current fee rate rather than the sale amount.
+During a busy fee market, a very small receipt can cost more to spend than
+it is worth. The shop can set a minimum on-chain sale. A shop running its
+own Lightning node can offer that route for small purchases, with its own
+routing fees and operating work.
 
-On 2026-11-11, mempool.space listed a fastest rate of 4 satoshis per
-virtual byte. A spend from one receipt in the shop's two-of-three wallet
-to two outputs, payment and change, is 201 virtual bytes: 804 satoshis at
-that rate. The size is calculated from the weight rules in BIP 141.
-Each additional receipt spent adds 104.5 virtual bytes (design section 9).
+## Compare a familiar sale
 
-During a fee spike, spending a small receipt can cost more than it is
-worth. A shop can set a minimum on-chain sale or use its own Lightning
-node for small purchases, avoiding a separate on-chain receipt for each
-sale. Lightning has routing fees: the mempool.space snapshot of
-2026-08-30 showed a median channel charge of 500 millisatoshi plus
-100 parts per million. Check <https://mempool.space/> for current rates.
-[Getting paid](getting-paid.md) describes both options.
+On Square's United States Free plan, the in-person rate read on
+2026-11-11 was 2.6% plus 15 cents. For a $20 purchase, that is:
 
-<a id="a-paid-sale-stays-paid"></a>
+- 2.6% of $20 = $0.52.
+- $0.52 + $0.15 = $0.67.
 
-## Disputes and refunds
+At 1,000 such sales a month, that would be $670 a month, or $8,040 a year,
+before dispute or payout fees. These are dated figures, not a quote for
+your account or a prediction of future pricing.
 
-Card disputes can reach well beyond the day of sale. The Visa Core Rules,
-24 October 2026 edition, allow a card-fraud dispute up to 120 calendar
-days after processing. For goods or services not received, the period
-runs from expected delivery and ends no later than 540 days after the
-transaction.
-
-Stripe charges $15 when a dispute arrives and retains it even if the
-merchant wins. Countering costs another $15, returned only on a win.
-The disputed amount is held for the process, which Stripe says can take
-2 to 3 months. Square lists no dispute fee, but holds the funds immediately
-and keeps its processing fee when the payer wins.
-
-A payer or bank cannot pull back a bitcoin payment confirmed in a block.
-A refund requires the shop to send a new payment. A chain reversal remains
-possible, becoming less likely as blocks accumulate; no depth makes it
-impossible.
-
-Before confirmation, the sender can replace a payment. Above the instant
-limit, OpenBMT waits for a block. Below it, the shop accepts the risk that
-a customer could cancel during the roughly ten-minute wait, with the loss
-bounded by the limit. See [Getting paid](getting-paid.md) for the checks
-and exposure budget.
+A direct Bitcoin receipt has no processor deduction. You still need to
+allow for the customer's sending fee, your later spending fee, conversion
+terms if you want dollars, and the work of operating the system. The
+comparison does not establish that Bitcoin is always cheaper. The
+[fee reference](cost-reference.md#processing-and-network-fees) has the
+full card-rate table and a dated Bitcoin fee calculation.
 
 <a id="nobody-holds-your-money"></a>
+<a id="payouts-and-reserves"></a>
 
-## Payouts and reserves
+## There is no processor payout to release
 
-Card processors can hold funds under their published terms:
+When a card processor holds a payout or reserve, you wait for it to release
+the money under its terms. A Bitcoin payment to the shop's wallet is under
+the shop's control once the required payment conditions are met. OpenBMT
+has no account balance to release or freeze.
 
-- Square can delay payouts during chargebacks, withhold funds or require
-a reserve. Its rolling-reserve page names advance payment before delivery,
-high dispute rates and a lack of processing history as factors.
-- PayPal can place a reserve on a business account at any time. A risk-based
-hold generally lasts up to 21 days, and a balance can be held for up to
-180 days. Its rolling-reserve example holds 10% of payments for 90 days.
-- Stripe says reserve funds cannot be paid out or transferred.
-
-Square's default payout is the next business day; instant transfer costs
-1.95%. Stripe's standard United States payout is 2 business days after
-payment; instant payout costs 1.5%.
-
-OpenBMT receives the money in the shop's wallet. There is no payout to
-request, and no company holds a wallet key or has a switch to stop receipt.
-A company cannot freeze that wallet. The shop must keep its own access:
-losing two keys makes the money unspendable, and approving a bad spend
-cannot be reversed. [The wallet chapter](safety.md) and
-[Operating precautions](best-practices.md) explain the precautions.
+This also means there is no company to restore access after you lose the
+necessary wallet keys. Control of the receipts and responsibility for
+access come together. [Who controls the money](safety.md) explains the
+three-key arrangement.
 
 <a id="no-account-no-approval"></a>
+<a id="merchant-accounts"></a>
 
-## Merchant accounts
+## Turning the bitcoin into a bank deposit
 
-A card merchant applies to a processor, supplies identity and bank details,
-and accepts its terms. The processor decides whether to serve the shop
-and can later close the account.
+The dollar amount displayed at checkout is a price quote. It does not
+sell the bitcoin for you. In the design, cashing out involves separate
+steps. The owner phone prepares the transfer, and the Key app, a separate
+approval app on another phone, reviews it:
 
-OpenBMT needs the shop's phones and, optionally, a Box. There is no sign-up,
-identity check or company approval. The shop's tax, licensing and trade
-obligations still apply. [What OpenBMT will never do](never.md) explains
-the account policy.
+1. Choose an exchange and obtain its deposit address.
+2. Enroll that destination on the Key app by scanning it. A new destination
+   has a 24-hour wait on that app before use.
+3. Prepare the transfer on the owner phone and review it on the separate
+   signer. The two signatures authorize spending from the shop's wallet.
+4. Send the bitcoin to the exchange. Selling it and withdrawing to a bank
+   are your dealings with that exchange, outside OpenBMT.
+
+OpenBMT does not choose the exchange or control its deposit, conversion or
+withdrawal terms. The exchange may have its own sign-up and identity
+checks. OpenBMT's lack of an account does not remove those requirements
+from other services, or the shop's tax, licensing and trade obligations.
+The cash-out walkthrough is still being written.
 
 <a id="money-with-a-fixed-supply"></a>
+<a id="supply-and-price"></a>
 
-## Supply and price
+## Decide what to keep
 
-The Federal Reserve states a goal of "inflation of 2 percent over the longer
-run", measured by the personal consumption expenditures price index
-(read 2026-11-11). At that rate, a dollar held for ten years buys about
-18% less: 1 / 1.02^10 = 0.82. Higher inflation would erode it further.
+The price of bitcoin can change between the sale and cash-out. Receiving
+$20 worth today does not promise a $20 bank deposit later. The
+[opening example](bitcoin-basics.md#receiving-bitcoin-and-receiving-dollars)
+shows how the same bitcoin amount could later be worth $16 or $24.
 
-Bitcoin's block reward began at 50 bitcoin and halves every 210,000
-blocks, about four years. Total issuance therefore cannot reach 21 million.
-Bitcoin Core computes this in `GetBlockSubsidy` in `src/validation.cpp`,
-using the interval in `src/kernel/chainparams.cpp`. Full nodes reject blocks
-that pay too much. An operator who keeps the existing rules continues to
-reject excess issuance; publishing different rules cannot force adoption.
+You choose how much to retain and when to sell. OpenBMT makes no price
+prediction and does not recommend buying or holding bitcoin as an
+investment. The reasons for choosing Bitcoin as the project's money are
+explained in [Why Bitcoin only](never.md); that choice does not remove
+price risk.
 
-This supply schedule does not stabilize the dollar price. Bitcoin has
-risen and fallen sharply. A shop holding receipts bears both directions
-of that movement, and chooses how much to retain or cash out. OpenBMT
-does not convert the money. Cash-out is an owner-approved transaction to
-the chosen exchange; its walkthrough will be in the next part.
+<a id="a-paid-sale-stays-paid"></a>
+<a id="disputes-and-refunds"></a>
+
+## Refunds and disputes work differently
+
+A cardholder can dispute a payment through their bank, and the processor
+can hold the merchant's money while the dispute proceeds. A payer or bank
+cannot pull a confirmed Bitcoin payment back from your wallet. A chain
+reversal remains possible; more confirmations reduce its likelihood.
+
+A customer refund is a new Bitcoin payment approved by the shop. The
+cashier requests it; the owner and second signer approve spending. The
+customer does not get a card-style chargeback mechanism through OpenBMT.
+This makes a clear shop refund policy important. Consumer obligations
+still apply.
+
+The [source reference](cost-reference.md#disputes-and-refunds) preserves
+the dated Visa dispute periods and processor dispute fees. The reference
+also documents payout and reserve terms for comparison.
 
 <a id="what-the-shop-takes-on"></a>
+<a id="running-the-system"></a>
+<a id="united-states-tax-records"></a>
 
-## Running the system
+## Keep records in the shop's currency
 
-The shop operates its own phones and optional Box, keeping them charged,
-updated and protected. Small on-chain purchases can be uneconomic; its
-own Lightning node is an option, but the counter integration has not
-been tested against a real node. OpenBMT is pre-release and has had no
-independent audit. Do not use it with real funds.
+For United States reporting, bitcoin received for goods or services is
+income at its dollar fair market value on the day received. That value is
+also the basis used to work out a later gain or loss when the bitcoin is
+sold or spent. The sale record and the later disposal record therefore
+matter even when you eventually want only dollars.
 
-Fewer customers pay with bitcoin than with cards. OpenBMT makes no claim
-about adoption numbers. Treat it as an additional payment method when
-planning for the shop's customers.
+OpenBMT's accounting export follows United States rules only and reports
+what is in its records. It is not tax advice. Ask a tax professional about
+your circumstances. The [tax
+reference](cost-reference.md#united-states-tax-records)
+contains the dated IRS sources, reporting-form distinctions and unresolved
+regulation check from 2026-11-11.
 
-### United States tax records
+<a id="customers-and-privacy"></a>
+<a id="sources"></a>
 
-The following is information, not tax advice. Ask a tax professional about
-your situation. OpenBMT's accounting export follows United States rules
-only.
-
-Under IRS Notice 2014-21, Q&A-3 and Q&A-4, bitcoin received for goods or
-services is income at its dollar fair market value on the day received.
-That value is also the shop's basis. The IRS digital-assets page,
-reviewed 2 September 2026, treats digital assets as property rather than
-currency. Selling or spending them can create a gain or loss.
-
-Brokers file Form 1099-DA about their customers; a shop does not file it
-for its own sales. Form 8300 reports cash above $10,000 received in a trade
-or business. IRS Announcement 2024-4 says digital assets do not count
-toward that threshold until regulations are published. No final regulation
-was found on 2026-11-11; check irs.gov for the current rule.
-
-## Customers and privacy
-
-A customer holding bitcoin can pay a shop that accepts it. A foreign-issued
-card carries a foreign-exchange fee; bitcoin has no such fee, while the
-customer still pays the network fee.
-
-A payment contains no customer name or shop bank details. The wallet
-description stays on the shop's devices, and OpenBMT does not give its
-addresses to a company. Anyone with an address or transaction ID can,
-however, inspect linked payments on Bitcoin's public ledger.
-[Privacy](privacy.md) describes what the POS vendor and network still see.
-
-## Sources
-
-
-Each page below was read on 2026-11-11.
-
-- Square pricing: <https://squareup.com/us/en/pricing>
-- Square deposits:
-  <https://squareup.com/help/us/en/article/3807-deposit-options-with-square>
-- Square disputes:
-  <https://squareup.com/help/us/en/article/3882-payment-disputes-walkthrough>
-- Square payment terms: <https://squareup.com/us/en/legal/general/payment>
-- Square reserves: <https://squareup.com/help/us/en/article/6832-reserves-faq>
-- Stripe pricing: <https://stripe.com/pricing>
-- Stripe disputes: <https://docs.stripe.com/disputes/how-disputes-work>
-- Stripe balances and reserves: <https://docs.stripe.com/payments/balances>
-- Visa Core Rules, 24 October 2026 edition, section 11.8.2.4 and condition
-  13.1: <https://usa.visa.com/dam/VCOM/download/about-visa/visa-rules-public.pdf>
-- PayPal User Agreement:
-  <https://www.paypal.com/us/legalhub/paypal/useragreement-full>
-- Federal Reserve, inflation goal:
-  <https://www.federalreserve.gov/faqs/economy_14400.htm>
-- Bitcoin Core block reward:
-  <https://github.com/bitcoin/bitcoin/blob/master/src/validation.cpp> and
-  <https://github.com/bitcoin/bitcoin/blob/master/src/kernel/chainparams.cpp>
-- IRS Notice 2014-21: <https://www.irs.gov/pub/irs-drop/n-14-21.pdf>
-- IRS digital assets: <https://www.irs.gov/filing/digital-assets>
-- IRS Announcement 2024-4: <https://www.irs.gov/pub/irs-drop/a-24-04.pdf>
-- IRS Form 8300:
-  <https://www.irs.gov/businesses/small-businesses-self-employed/form-8300-and-reporting-cash-payments-of-over-10000>
-- Transaction weight (BIP 141):
-  <https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki>
-- Fee rates: <https://mempool.space/api/v1/fees/recommended>
-- Lightning fee snapshot (dated 2026-08-30):
-  <https://mempool.space/api/v1/lightning/statistics/latest>
+Customers still need bitcoin to pay this way. OpenBMT makes no claim about
+how many of your customers will want it. Its [fit chapter](fit.md) considers
+that demand alongside the equipment and owner work. The full fee, reserve,
+supply and tax source material is in the [reference chapter](cost-reference.md).

@@ -1,7 +1,7 @@
 [book]
 title = "OpenBMT Handbook"
 authors = ["Avila Labs"]
-description = "How OpenBMT lets a shop take bitcoin straight into its own wallet, what keeps the money safe, and where that protection stops."
+description = "A merchant's guide to Bitcoin checkout with OpenBMT, with detailed technical references."
 language = "en"
 src = "docs/handbook"
 

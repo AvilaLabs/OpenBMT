@@ -1,213 +1,175 @@
-# What OpenBMT will never do
+<a id="what-openbmt-will-never-do"></a>
 
-These restrictions apply to future versions as well as the current design.
-Some depend on release safeguards that are still unfinished; those limits
-are stated here. The [design choices](principles.md) explain how they shape
-the checkout system.
+# Why Bitcoin only
 
-## Never anything but bitcoin
+OpenBMT is intended for a shop that wants to receive bitcoin directly and
+keep control of it. That is a choice of money and of the network used to
+settle payments. It is not a promise that Bitcoin will have the lowest fee
+or that its price will be stable.
 
-OpenBMT accepts BTC on the Bitcoin network, and bitcoin over the shop's own
-Lightning node. Other currencies, stablecoins and tokens on any layer are
-excluded.
+<a id="never-anything-but-bitcoin"></a>
+<a id="why-bitcoin"></a>
 
-### Why Bitcoin
+## Bitcoin's rules and the network enforcing them
 
-OpenBMT's starting point is money whose supply the holder can verify and
-whose rules do not depend on an issuer's discretion. Bitcoin's issuance
-schedule approaches a limit of 21 million. A full node checks that schedule
-itself and rejects a block that creates too much, even if miners produced
-it. Developers can publish different software, but cannot make a holder's
-node accept different rules.[^validation]
+Bitcoin's issuance schedule approaches a limit of 21 million. A full node
+checks that rule itself and rejects a block creating too much, even if
+miners produced it. Developers can release different software, but cannot
+make a holder's existing node accept different rules.[^validation]
 
-A supply limit is useful only while people enforce it. The currency also
-needs miners doing the work that protects settlement and people willing to
-hold and accept it. OpenBMT regards Bitcoin's record of enforcing its
-issuance rules, independent validation and established use as the strongest
-basis for money. That judgment is why the project builds on this network;
-a supply cap or proof-of-work algorithm alone is not enough.[^network]
+A limit written into software is useful only while people enforce it.
+Payments also depend on miners doing the work that protects settlement
+and people continuing to hold and accept the currency. OpenBMT regards
+Bitcoin's record of enforcing its issuance rules, independent validation
+and established use as the strongest basis for the money it supports.
+That is the project's judgment about a monetary network.[^network]
 
 <a id="why-that-excludes-bitcoin-cash-and-litecoin"></a>
 
-### Other monetary networks
+## Other monetary networks
 
-Other currencies can also use proof of work, cap their supply and let
-anyone verify issuance without a central issuer. Those properties do not
-make the currencies interchangeable. Each network settles its own asset
-under its own rules.[^other-networks]
+Other currencies can use proof of work, cap their supply and let anyone
+verify issuance without a central issuer. Those properties do not make
+the currencies interchangeable. Each network settles its own asset under
+its own rules.[^other-networks]
 
-Copying Bitcoin's code or specifying another supply cap does not by itself
-reproduce the people choosing to use Bitcoin, the mining work protecting
-its current payments, or their continued agreement on its rules. A chain
-split can share the earlier ledger, but the networks follow separate rules
-and settle different currencies after the split. Creating those currencies
-does not create more BTC on the Bitcoin ledger.[^forks]
+Copying Bitcoin's code or choosing another supply cap does not by itself
+reproduce the people using Bitcoin, the mining work protecting its current
+payments or the continued agreement on its rules. A chain split can share
+the earlier transaction record, then settle a different currency under
+separate rules. It does not create more BTC on the Bitcoin record.[^forks]
 
-Independent verification also depends on what it costs to run a node.
-More transaction data has to be downloaded and checked; increasing
-base-layer capacity can make that work more demanding. OpenBMT favors
-keeping verification practical for the shop.[^verification-cost]
+Verification also has an operating cost. If more transaction data has to
+be downloaded and checked, running a full node can become more demanding.
+OpenBMT favors keeping that check practical for the shop.[^verification-cost]
 
-OpenBMT gives greater weight to preserving Bitcoin's monetary rules and
-independent verification than to a different chain's block interval or
-advertised transaction fee. Lower fees alone are not a reason to ask the
-shop to receive another currency. For small purchases, the supported
-alternative is bitcoin through the shop's own Lightning node. For on-chain
-payments, the shop can set a minimum sale and choose how many confirmations
-to wait for.
+The project gives more weight to Bitcoin's monetary rules and independent
+verification than to another network's advertised fee or block interval.
+For small purchases, its supported alternative is bitcoin through the
+shop's own Lightning node. For on-chain purchases, the shop can set a
+minimum sale and decide how many confirmations to wait for.
 
-### Tokens, sidechains and mints
+## Tokens, sidechains and mints
 
-An issuer-controlled token introduces another objection: its issuer may
-retain powers over issuance, redemption or transfers. Those powers create
-a dependence on that issuer, in addition to the reasons for choosing BTC
-over another currency.
+An issuer-controlled token adds a dependence on the issuer, which may
+retain powers over creation, redemption or transfers. That is an
+additional objection, separate from the choice between independently
+mined currencies.
 
-The exclusion includes tokens on Lightning, Taproot Assets and RGB. A token
-carried over Bitcoin-related infrastructure is still a different asset.
-Federated sidechains such as Liquid require a federation to hold the coins,
-and ecash mints such as Cashu or Fedimint hold money while issuing claims
-against it. OpenBMT does not accept those claims as payment.
+The exclusion covers stablecoins, other coins and tokens on every layer,
+including tokens on Lightning, Taproot Assets and RGB. Using Bitcoin-related
+infrastructure does not make a different asset into bitcoin.
 
-The wallet is native segwit, two of three (`SR-60`). The Key app rejects
-data outputs, non-standard scripts and inputs containing Taproot fields
-(`SR-22`, `SR-06`), and refuses transactions carrying tokens. Lightning
-accepts bitcoin invoices from the shop's own node only (`LN-01`). The
-checks follow the currency choice described above.
+A federated sidechain such as Liquid asks a group of operators to hold
+the coins behind its system. An ecash mint such as Cashu or Fedimint holds
+money while giving users claims against it. OpenBMT excludes those claims
+as well. These are permanent restrictions, including optional features
+and later versions.
 
-Bitcoin still has price risk and fees. Choosing it does not establish a
-stable purchasing power or remove the payment risks described in
-[Getting paid](getting-paid.md). The exclusions are not trials or features
-waiting for a later release.
+The [technical policy
+reference](network-reference.md#never-anything-but-bitcoin)
+explains the transaction-format restrictions and their limits. Those
+checks implement a Bitcoin wallet; they should not be mistaken for a
+universal detector of every token protocol.
 
-## Never custody
+<a id="never-custody"></a>
 
-Neither OpenBMT nor Avila Labs holds a shop's wallet key or balance, and
-there is no hosted wallet. A processor's failure, sanction or account
-freeze therefore cannot lock up money held in the shop's own wallet.
+## The shop keeps custody
 
-The Owner app holds key 1 and no other secret key (`OA-08`); the Key app
-holds key 2. The counter cannot sign a spend. Its refund request is a
-record, not a payment (`CR-60`). The Box holds no wallet description,
-address, transaction ID or key that signs for the shop (`BX-04`).
+OpenBMT and Avila Labs hold no shop wallet key or account balance. The
+phones holding the wallet keys belong to the shop, and a payment does
+not pass through an OpenBMT company account. That prevents a processor's
+payout freeze from locking the wallet's funds.
 
-The shop takes responsibility for lost and stolen devices; see
-[The wallet and its keys](safety.md). Avila Labs will hold app release
-keys, which are separate from wallet keys. A malicious app release remains
-a risk: the Key app is separate, but its independent release-key holder
-has not been named.
+It leaves recovery with the shop. Losing two usable keys can make the
+money unspendable. A bad software release also remains a risk while the
+Key app's independent release arrangements are unfinished. The
+[wallet chapter](safety.md) explains both limits.
 
-## Never an account or an identity check
+<a id="never-an-account-or-an-identity-check"></a>
 
-OpenBMT requires no sign-up or KYC. An account could be closed, frozen,
-subpoenaed or breached, and software that holds no funds for a shop should
-not need its identity.
+## There is no OpenBMT sign-up
 
-A device identifies itself with a key it generates. Staff names on the
-counter are labels entered by the shop, without identity verification
-(`CR-156`). There is no OpenBMT account or payment server.
+OpenBMT requires no account or identity verification. Devices identify
+themselves using keys, and staff names are labels entered by the shop.
+The shop still has its own POS and exchange relationships. Their account
+and legal requirements remain outside OpenBMT.
 
-The shop still deals with accounts at its POS vendor and chosen exchange.
-Those companies have their own sign-up and checks. OpenBMT neither asks
-for those accounts nor sees them.
+<a id="never-a-third-party-deciding-where-money-goes"></a>
 
-## Never a third party deciding where money goes
+## Payment addresses come from the shop's devices
 
-Only the shop's devices can choose its payment addresses. A counter
-accepts address batches signed by two separate devices, checked against
-the roots pinned at pairing (`CR-02`, design section 5.1). It cannot make
-an address of its own, and the Box cannot choose or alter one (`BX-04`).
-An address-selection server would have the power to substitute a thief's
-address.
+A remote address-selection service could substitute someone else's
+address for the shop's. OpenBMT instead uses addresses approved by the
+shop's own devices. The Box cannot select or change them.
 
-OpenBMT also excludes public Electrum and Esplora indexers. Giving one the
-shop's addresses would reveal its sales and let the server link them.
-The counter instead requests compact block filters and blocks without
-sending an address or script (`NR-60`).
+It also avoids public address-indexing services, which could learn the
+shop's history from its address queries. The counter requests Bitcoin
+network data without handing peers its shop addresses. Peers can still
+learn which blocks it asks for or withhold information. The
+[privacy chapter](privacy.md) explains that exposure.
 
-Peers can still observe which blocks it requests or withhold information.
-Several peers from different network groups make interference harder,
-but cannot eliminate it. The counter reports when it lacks enough
-information (`NR-61`; `docs/NETWORK-RULES.md`, section 8).
+<a id="never-telemetry-analytics-or-crash-upload"></a>
 
-## Never telemetry, analytics or crash upload
+## No automatic reporting to the publisher
 
-OpenBMT does not send the publisher the shop's sales activity. The Key
-app has camera permission only, with no network permission; a build check
-fails if its manifest changes. The Counter and Owner apps have network
-permission only for the contacts listed in the design: Bitcoin peers, price
-sources, POS reads, and the shop's own Box and node. The Owner app itself
-opens no connection beyond the proxy greeting and till read (`OA-15`).
-[Privacy](privacy.md) lists all contacts.
+OpenBMT does not upload analytics or crash data. The Key app has no network
+permission. The other apps make the contacts described in
+[Privacy](privacy.md). To share a crash log, the shop must export it and
+send it manually.
 
-These rules and manifest checks have not had outside review. They cannot
-control a compromised device or an operating system that leaks data.
-To share crash information, the shop must export a local log and send it
-manually.
+The operating system or a compromised device can still leak information.
+The app rules and permission checks have not had independent review.
 
-## Never automatic updates, and never a remote switch
+<a id="never-automatic-updates-and-never-a-remote-switch"></a>
 
-The owner must choose to install an update. Automatic installation would
-let the publisher, or someone taking over its releases, change the shop's
-devices without that choice. The apps have no update check and no
-background service, receiver or provider to run one; each app's manifest
-check verifies this.
+## The owner chooses updates
 
-There is no OpenBMT service for a remote switch. Counter commands require
-the owner phone's signature and sequence numbers that prevent replay
-(`CR-14`).
+The apps do not check for and install their own updates, and there is no
+OpenBMT service that can switch the shop off remotely. Counter commands
+must come from the shop's owner and are protected against replaying old
+commands.
 
-The Box ships as a container without an updater. Its host, such as a mini
-PC, Umbrel or StartOS, controls its own update behavior. The shop must
-manage that there.
+A Box host such as Umbrel or StartOS controls its own updates, which the
+shop must manage there. The proposed signed release process, installation
+delay, F-Droid or signed-file distribution and reproducible builds are
+still planned. Google Play distribution is excluded.
 
-The Key app's proposed signed release manifest, install-date delay,
-F-Droid and signed-file distribution, and reproducible builds are planned.
-Google Play distribution is excluded.
+<a id="never-a-lightning-service-provider-holding-the-shops-channels"></a>
 
-## Never a Lightning service provider holding the shop's channels
+## Lightning belongs on the shop's node
 
-Lightning connects to the shop's existing LND or Core Lightning node.
-OpenBMT does not run, rent or select one (design section 8). A provider
-holding the channels would hold the money and see every payment. The
-same reason excluded third-party swaps.
+OpenBMT connects only to the shop's LND or Core Lightning node. It does
+not choose, run or rent one. A provider holding the channels would control
+those funds and see payments. Third-party swaps are excluded for the same
+reason.
 
-The node's public key is in the signed settings. Naming or changing it
-needs the Key app's co-signature, and each invoice must be signed by that
-key (`LN-03`, `LN-17`). Setup checks that the counter's credential permits
-invoices only (`LN-04` to `LN-20`).
+Naming or changing the node needs approval through the Key app. OpenBMT
+cannot establish who actually operates the named node: pointing it at a
+node run by a hosting company would leave those channels with that
+operator. The shop must manage liquidity, updates and backups, and the
+counter integration has not yet been tried against a real node.
 
-OpenBMT cannot establish who actually operates the named node. If the shop
-chooses a hosting company's node, that company holds its channels.
-OpenBMT offers no such provider. Setup explains that the shop must manage
-liquidity, updates and backups. The counter integration is built but has
-never been run against a real node.
+<a id="never-calling-an-unconfirmed-payment-final"></a>
 
-## Never calling an unconfirmed payment final
+## The report cannot promise more than the check
 
-An unconfirmed payment can be replaced by its sender. The fixed counter
-states (`CR-10`) therefore show "Paid" with "it could still be undone"
-when accepting before a block. A payment is confirmed at the shop's
-confirmation depth; "final" refers only to its refund depth. The books
-count it as money at that refund depth (`CR-31`). More blocks reduce the
-chance of reversal without making it impossible.
+An unconfirmed on-chain payment can be replaced. A payment in a block can
+still be affected by a chain reversal. The counter identifies its evidence
+and uses the shop's refund depth for "settled" or "final". The own-node
+label requires both the shop's node and the light check to see the
+payment. No screen says "fully verified".
 
-Each screen identifies its check (`CR-105`). The own-node label requires
-both the shop's node and the counter's light client to see the payment
-(`CR-104`). OpenBMT will not say "fully verified" without a report from
-the shop's own node.
+<a id="never-closed-source"></a>
 
-## Never closed source
+## The source remains available
 
-The code, rules and design are published under the MIT licence in
-`LICENSE`. A shop should be able to read the source, build it and check
-what it is being asked to install. The dependency policy accepts only
-licences on its published list (`docs/DEPENDENCIES.md`, rule 6).
-
-Dependencies retain their own licences. OpenBMT does not publish the
-phone's operating system or Orbot, the separate app needed for Tor.
-Reproducible builds, which would let someone check a released app against
-the source, are not built yet.
+The code, rules and design are published under the MIT licence. The
+project also restricts dependency licences. A shop can inspect and build
+the source, although reproducible releases that can be independently
+checked against it are not built yet. Dependencies, the phone's operating
+system and Orbot remain separate software with their own licences and
+maintainers.
 
 [^validation]: [Bitcoin Core validation](https://bitcoin.org/en/bitcoin-core/features/validation)
     explains full-node enforcement of the supply limit. The
