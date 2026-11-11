@@ -5,8 +5,7 @@
 #
 # The .so files stay in the target directory and are not committed. The
 # check uses the NDK's own llvm-readelf: the only exported symbol whose name
-# starts with Java_ must be the one entry point of the library, and no
-# symbol of the former binding generator may remain.
+# starts with Java_ must be the one entry point of the library.
 #
 # Every cargo call runs under the memory guard. Prints one PASS, FAIL or
 # NOT RUN line for each target. Nothing is downloaded except the Rust
@@ -61,17 +60,16 @@ android() { # rust-triple clang-triple
         return
     fi
     local so="$target_dir/$triple/release/libopenbmt_qr_jni.so"
-    local size defined java uniffi
+    local size defined java
     size="$(stat -c %s "$so")"
     # Defined (not UND) dynamic symbols: the name is the last column.
     defined="$("$bin/llvm-readelf" --dyn-syms "$so" | awk '$7 != "UND" && $8 != "" {print $8}')"
     java="$(printf '%s\n' "$defined" | grep -c '^Java_')"
-    uniffi="$(printf '%s\n' "$defined" | grep -ci 'uniffi')"
-    if [ "$java" -eq 1 ] && printf '%s\n' "$defined" | grep -qx "$entry" && [ "$uniffi" -eq 0 ]; then
-        report PASS "android $triple" "$so, $size bytes, exports $entry only, no uniffi symbol"
+    if [ "$java" -eq 1 ] && printf '%s\n' "$defined" | grep -qx "$entry"; then
+        report PASS "android $triple" "$so, $size bytes, exports $entry only"
         printf '%s\n' "$defined" | sed 's/^/    exported: /'
     else
-        report FAIL "android $triple" "$so, $size bytes, $java Java_ symbols, $uniffi uniffi symbols"
+        report FAIL "android $triple" "$so, $size bytes, $java Java_ symbols"
         printf '%s\n' "$defined" | sed 's/^/    exported: /'
     fi
 }

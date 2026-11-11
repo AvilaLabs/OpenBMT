@@ -37,17 +37,23 @@ if [ "$perms" = "uses-permission: name='android.permission.CAMERA' uses-permissi
 else
     fail "aapt2 dump permissions lists: $perms"
 fi
-if [ "$(count 'E: uses-feature')" -eq 1 ] && printf '%s\n' "$tree" | grep -q 'android.hardware.camera.any'; then
-    pass "exactly one uses-feature element, android.hardware.camera.any"
+# Two uses-feature elements, both not required: camera.any, and camera,
+# which the CAMERA permission would otherwise imply as required (a store
+# would then hide the app from a phone without a back camera).
+if [ "$(count 'E: uses-feature')" -eq 2 ] \
+    && printf '%s\n' "$tree" | grep -q '"android.hardware.camera.any"' \
+    && printf '%s\n' "$tree" | grep -q '"android.hardware.camera"'; then
+    pass "exactly two uses-feature elements, android.hardware.camera.any and android.hardware.camera"
 else
-    fail "the uses-feature elements are not exactly android.hardware.camera.any"
+    fail "the uses-feature elements are not exactly android.hardware.camera.any and android.hardware.camera"
 fi
-# aapt2 also lists the camera it implies from the CAMERA permission; that is its own reading
-# for stores, not an element of the manifest (checked above: one uses-feature element).
-if "$aapt2" dump badging "$apk" 2>&1 | grep -q "uses-feature-not-required: name='android.hardware.camera.any'"; then
-    pass "badging lists android.hardware.camera.any as not required"
+badging="$("$aapt2" dump badging "$apk" 2>&1)"
+if printf '%s\n' "$badging" | grep -q "uses-feature-not-required: name='android.hardware.camera.any'" \
+    && printf '%s\n' "$badging" | grep -q "uses-feature-not-required: name='android.hardware.camera'" \
+    && ! printf '%s\n' "$badging" | grep -q -E "^uses-feature: name='android.hardware.camera"; then
+    pass "badging lists the camera as not required, with no required camera feature"
 else
-    fail "badging does not list android.hardware.camera.any as not required"
+    fail "badging lists a required camera feature"
 fi
 
 # 2. Backup and data extraction.
