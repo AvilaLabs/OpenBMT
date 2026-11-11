@@ -47,6 +47,14 @@
 #      reach the owner, each through the Box (CR-134 to CR-136). The example
 #      `counter_box_link` of `openbmt-counter-ffi` does the counter and the
 #      owner; this script starts and pairs the Box.
+#   8. Settings reach the counter through that Box (CR-160 to CR-163, LK-64):
+#      a tightening the owner signed alone, then a loosening co-signed by a
+#      test approver, each sent by the owner through the Box. The counter
+#      applies both, and the owner's copy of the counter's records holds the
+#      `Setting` record of each version.
+#   9. Settings that remove the counter reach it the same way (CR-165): it
+#      applies them, says on Home that it was removed, and refuses to open a
+#      new sale.
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin (put first on
 # PATH; set CORE_BIN to use another), jq, and cargo unless the four binaries
@@ -573,7 +581,7 @@ if [ -n "$BOX_UP" ]; then
     OUT7=$("$BOXLINK_BIN" "$L7" "127.0.0.1:$BOX_PORT" "$BOX_KEY" "127.0.0.1:$A_P2P" 2>&1)
     RC7=$?
     note "$(sed 's/^/counter: /' <<<"$OUT7")"
-    if [ "$RC7" = 0 ] && grep -q '^bundle: version 2' <<<"$OUT7" &&
+    if grep -q '^bundle: version 2' <<<"$OUT7" &&
       grep -q '^paired: the record holds the relay' <<<"$OUT7" &&
       grep -q '^owner: heartbeat .* sent through the Box' <<<"$OUT7" &&
       grep -q '^counter link: ok' <<<"$OUT7"; then
@@ -581,11 +589,31 @@ if [ -n "$BOX_UP" ]; then
     else
       bad 7 "the counter's link through the Box did not complete (exit $RC7): $(tail -3 <<<"$OUT7")"
     fi
+    if grep -q '^owner: settings version 2 sent through the Box' <<<"$OUT7" &&
+      grep -q '^owner: settings version 3 sent through the Box' <<<"$OUT7" &&
+      grep -q '^counter: settings version 3 applied' <<<"$OUT7" &&
+      grep -q '^owner: Setting records for versions {1, 2, 3} received through the Box' <<<"$OUT7" &&
+      grep -q '^counter settings: ok' <<<"$OUT7"; then
+      pass 8 "a tightening and a loosening co-signed by the approver went from the owner through the Box to the counter, which applied both, and the owner's copy holds the Setting records for versions 1, 2 and 3"
+    else
+      bad 8 "the settings did not reach the counter through the Box (exit $RC7): $(tail -3 <<<"$OUT7")"
+    fi
+    if [ "$RC7" = 0 ] && grep -q '^counter: Home says ' <<<"$OUT7" &&
+      grep -q '^counter: a new sale is refused, the counter was removed from the shop (CR-165)' <<<"$OUT7" &&
+      grep -q '^counter removal: ok' <<<"$OUT7"; then
+      pass 9 "settings that remove the counter reached it through the Box, it applied them, said so on Home and refused to open a new sale"
+    else
+      bad 9 "the counter removed by the owner's settings did not refuse a new sale (exit $RC7): $(tail -3 <<<"$OUT7")"
+    fi
   else
     bad 7 "the Box was not paired: welcome '$WELCOME7', key '$BOX_KEY'"
+    notrun 8 "the Box was not paired"
+    notrun 9 "the Box was not paired"
   fi
 else
   bad 7 "the Box did not start: $(cat "$BOX_LOG")"
+  notrun 8 "the Box did not start"
+  notrun 9 "the Box did not start"
 fi
 stop_pid "$BOX_PID"
 BOX_PID=
@@ -598,7 +626,7 @@ stop_ex o || note "the owner example did not stop cleanly"
 say "Result"
 failed=0
 notrun=0
-for n in 1 2 3 4 5 6 7; do
+for n in 1 2 3 4 5 6 7 8 9; do
   printf '%s  step %s\n' "${RESULT[$n]:-FAIL}" "$n"
   case "${RESULT[$n]:-FAIL}" in
     PASS) ;;

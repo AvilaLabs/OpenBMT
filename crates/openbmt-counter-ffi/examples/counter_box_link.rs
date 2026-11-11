@@ -16,10 +16,17 @@
 //! second (CR-135). It also plays the owner, with a courier on the Box:
 //! it sends a heartbeat to the counter and reads what the counter sends back.
 //!
-//! It prints one line for each thing it checked and exits 0 when the owner's
-//! heartbeat was taken by the counter and the owner received the counter's
-//! records and a check-in; otherwise it prints why not and exits 1.
+//! Then it plays the owner's settings (CR-160 to CR-166, LK-64): a tightening
+//! signed by the owner alone and a loosening co-signed by the approver both
+//! go to the counter through the Box; the counter applies them and the owner
+//! reads the `Setting` records among the records it is sent. A last settings
+//! removes the counter from the shop: the counter says so on Home and refuses
+//! to open a sale.
+//!
+//! It prints one line for each thing it checked and exits 0 when all of it
+//! held; otherwise it prints why not and exits 1.
 
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -33,16 +40,18 @@ use openbmt_core::bundle::CounterBundle;
 use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{tagged_hash, DeviceId, Identity};
 use openbmt_core::pairing::{check_request, owner_cosign, PairOffer, PairRequest};
+use openbmt_core::records::RecordKind;
 use openbmt_core::relay::{RelayHint, RelayRoute};
-use openbmt_core::settings::{Settings, SignedSettings};
+use openbmt_core::settings::{Limit, SettingNote, Settings, SignedSettings};
 use openbmt_counter_ffi::{dispatch, Registry};
 use openbmt_counter_node::{batch_policy, Ceremony, PairingRecord};
-use openbmt_courier::{Courier, CourierConfig, FirstStart};
+use openbmt_courier::{decode_records, Courier, CourierConfig, FirstStart, RelayPost};
 use openbmt_link::{ClientConfig, Kind, Role, Route};
 
 const WALLET: [u8; 32] = [9; 32];
 const OP_START: u16 = 1;
 const OP_STOP: u16 = 2;
+const OP_OPEN: u16 = 11;
 const OP_LINK_STEP: u16 = 24;
 const OP_LINK_STATE: u16 = 25;
 
@@ -69,6 +78,17 @@ fn hex_key(text: &str) -> Result<DeviceId, String> {
     DeviceId::from_bytes(&bytes).map_err(|e| e.to_string())
 }
 
+/// The settings the counter is paired with.
+fn base_settings(counter: DeviceId) -> Settings {
+    let mut settings = Settings::defaults(1_000);
+    settings.version = 1;
+    settings.customer_wifi = false;
+    settings.min_sale_sats = 0;
+    settings.devices.insert(counter);
+    settings.counters.insert(counter, 10_000);
+    settings
+}
+
 /// The counter's pairing, by the whole ceremony, from a bundle that holds
 /// the Box as its relay.
 fn pair(relay: RelayHint, peer: &str) -> Result<(PairingRecord, Vec<u8>), String> {
@@ -88,12 +108,7 @@ fn pair(relay: RelayHint, peer: &str) -> Result<(PairingRecord, Vec<u8>), String
     let pending = check_request(&offer, &request).map_err(|e| e.to_string())?;
     let (entry, sig) = pending.approve(&approver, 0).map_err(|e| e.to_string())?;
     let pairing = owner_cosign(&offer, entry, sig, &owner).map_err(|e| e.to_string())?;
-    let mut settings = Settings::defaults(1_000);
-    settings.version = 1;
-    settings.customer_wifi = false;
-    settings.min_sale_sats = 0;
-    settings.devices.insert(counter.device_id());
-    settings.counters.insert(counter.device_id(), 10_000);
+    let settings = base_settings(counter.device_id());
     let signed = SignedSettings {
         owner_sig: settings.sign(&owner),
         approver_sig: Some(settings.sign(&approver)),
@@ -149,6 +164,10 @@ struct Link {
     heading: String,
     connected: bool,
     heartbeats_taken: u64,
+    settings_version: u32,
+    restart_needed: bool,
+    /// The heading of the settings line of Home, when there is one.
+    settings_line: Option<String>,
 }
 
 struct Cursor<'a>(&'a [u8]);
@@ -162,6 +181,10 @@ impl<'a> Cursor<'a> {
 
     fn u8(&mut self) -> u8 {
         self.take(1)[0]
+    }
+
+    fn u32(&mut self) -> u32 {
+        u32::from_le_bytes(self.take(4).try_into().expect("4"))
     }
 
     fn u64(&mut self) -> u64 {
@@ -179,7 +202,8 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    fn link(&mut self) -> Link {
+    /// A words value; its heading.
+    fn words(&mut self) -> String {
         let _ = (self.u8(), self.u8());
         let heading = self.str16();
         let _ = (self.str16(), self.str16());
@@ -189,6 +213,11 @@ impl<'a> Cursor<'a> {
         });
         self.opt(|c| drop((c.str16(), c.str16())));
         self.opt(|c| drop(c.str16()));
+        heading
+    }
+
+    fn link(&mut self) -> Link {
+        let heading = self.words();
         let connected = self.u8() == 1;
         self.opt(|c| {
             let _ = c.u64();
@@ -196,10 +225,19 @@ impl<'a> Cursor<'a> {
         let _refused = self.u8();
         let heartbeats_taken = self.u64();
         let _owner_records = self.u64();
+        self.opt(|c| {
+            let _ = c.u64();
+        });
+        let settings_version = self.u32();
+        let restart_needed = self.u8() == 1;
+        let settings_line = (self.u8() == 1).then(|| self.words());
         Link {
             heading,
             connected,
             heartbeats_taken,
+            settings_version,
+            restart_needed,
+            settings_line,
         }
     }
 }
@@ -278,7 +316,7 @@ fn run(dir: PathBuf, box_addr: SocketAddr, box_key: DeviceId, peer: &str) -> Res
     let tip = genesis_block(Network::Regtest).block_hash().to_byte_array();
     let mut sent = false;
     let mut seq = 0;
-    let (mut records, mut check_ins) = (0, 0);
+    let mut seen = Seen::default();
     let mut link = before;
     let end = Instant::now() + Duration::from_secs(60);
     while Instant::now() < end {
@@ -302,16 +340,8 @@ fn run(dir: PathBuf, box_addr: SocketAddr, box_key: DeviceId, peer: &str) -> Res
                 println!("owner: heartbeat {seq} sent through the Box");
             }
         }
-        if let Ok(got) = courier.poll() {
-            for m in got {
-                match m.kind {
-                    Kind::Records => records += 1,
-                    Kind::CheckIn => check_ins += 1,
-                    _ => {}
-                }
-            }
-        }
-        if sent && link.heartbeats_taken >= 1 && records > 0 && check_ins > 0 {
+        seen.take(&mut courier);
+        if sent && link.heartbeats_taken >= 1 && seen.records > 0 && seen.check_ins > 0 {
             break;
         }
         std::thread::sleep(Duration::from_secs(1));
@@ -321,15 +351,183 @@ fn run(dir: PathBuf, box_addr: SocketAddr, box_key: DeviceId, peer: &str) -> Res
         link.heading, link.connected, link.heartbeats_taken
     );
     println!(
-        "owner: {records} messages of records, {check_ins} check-ins received through the Box"
+        "owner: {} messages of records, {} check-ins received through the Box",
+        seen.records, seen.check_ins
     );
-    let _ = dispatch(&registry, &request(OP_STOP, handle, &[]));
-    if link.heartbeats_taken >= 1 && records > 0 && check_ins > 0 {
-        println!("counter link: ok");
-        Ok(())
-    } else {
-        Err("the exchange through the Box did not complete".to_string())
+    if !(link.heartbeats_taken >= 1 && seen.records > 0 && seen.check_ins > 0) {
+        let _ = dispatch(&registry, &request(OP_STOP, handle, &[]));
+        return Err("the exchange through the Box did not complete".to_string());
     }
+    println!("counter link: ok");
+
+    let result = settings_phase(&registry, handle, &mut courier, &mut seen, &counter);
+    let _ = dispatch(&registry, &request(OP_STOP, handle, &[]));
+    result
+}
+
+/// What the owner has been sent through the Box.
+#[derive(Default)]
+struct Seen {
+    records: u32,
+    check_ins: u32,
+    /// The versions that `Setting` records among the records name.
+    setting_versions: BTreeSet<u32>,
+}
+
+impl Seen {
+    fn take(&mut self, courier: &mut Courier<RelayPost>) {
+        let Ok(got) = courier.poll() else { return };
+        for m in got {
+            match m.kind {
+                Kind::Records => {
+                    self.records += 1;
+                    for r in decode_records(&m.content).unwrap_or_default() {
+                        if r.kind == RecordKind::Setting {
+                            if let Ok(note) = SettingNote::from_body(&r.body) {
+                                self.setting_versions.insert(note.version);
+                            }
+                        }
+                    }
+                }
+                Kind::CheckIn => self.check_ins += 1,
+                _ => {}
+            }
+        }
+    }
+}
+
+fn signed_alone(settings: Settings, owner: &Identity) -> SignedSettings {
+    SignedSettings {
+        owner_sig: settings.sign(owner),
+        approver_sig: None,
+        settings,
+    }
+}
+
+fn signed_by_both(settings: Settings, owner: &Identity, approver: &Identity) -> SignedSettings {
+    SignedSettings {
+        owner_sig: settings.sign(owner),
+        approver_sig: Some(settings.sign(approver)),
+        settings,
+    }
+}
+
+/// Send `signed` to the counter through the Box, and step the link until
+/// the counter has applied it and the owner holds its record.
+fn deliver_settings(
+    registry: &Registry,
+    handle: u64,
+    courier: &mut Courier<RelayPost>,
+    seen: &mut Seen,
+    counter: &DeviceId,
+    signed: &SignedSettings,
+) -> Result<Link, String> {
+    let version = signed.settings.version;
+    courier
+        .send(counter, Kind::Settings, &signed.to_bytes())
+        .map_err(|e| format!("settings version {version} were not sent: {e}"))?;
+    println!("owner: settings version {version} sent through the Box");
+    let end = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < end {
+        let link = link_step(registry, handle)?;
+        seen.take(courier);
+        if link.settings_version >= version && seen.setting_versions.contains(&version) {
+            println!(
+                "counter: settings version {version} applied; the owner holds its Setting record"
+            );
+            return Ok(link);
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    Err(format!(
+        "settings version {version} did not reach the counter and come back as a record"
+    ))
+}
+
+fn settings_phase(
+    registry: &Registry,
+    handle: u64,
+    courier: &mut Courier<RelayPost>,
+    seen: &mut Seen,
+    counter: &DeviceId,
+) -> Result<(), String> {
+    let (owner, approver) = (identity("owner"), identity("approver"));
+    // The counter records the settings it was paired with at its first start
+    // (CR-162), and the owner is sent that record.
+    let end = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < end && !seen.setting_versions.contains(&1) {
+        link_step(registry, handle)?;
+        seen.take(courier);
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    if !seen.setting_versions.contains(&1) {
+        return Err("the owner was not sent the Setting record of the paired settings".to_string());
+    }
+    // A tightening, signed by the owner alone.
+    let mut tighter = base_settings(*counter);
+    tighter.version = 2;
+    tighter.refund_cap = Limit::from_usd(50, 1_000);
+    deliver_settings(
+        registry,
+        handle,
+        courier,
+        seen,
+        counter,
+        &signed_alone(tighter.clone(), &owner),
+    )?;
+    // A loosening needs the approver's signature as well.
+    let mut looser = tighter;
+    looser.version = 3;
+    looser.refund_cap = Limit::from_usd(150, 1_000);
+    let link = deliver_settings(
+        registry,
+        handle,
+        courier,
+        seen,
+        counter,
+        &signed_by_both(looser.clone(), &owner, &approver),
+    )?;
+    if link.restart_needed || link.settings_line.is_some() {
+        return Err(format!("home has a settings line it should not: {link:?}"));
+    }
+    println!(
+        "owner: Setting records for versions {:?} received through the Box",
+        seen.setting_versions
+    );
+    println!("counter settings: ok");
+
+    // Settings that remove the counter.
+    let mut gone = looser;
+    gone.version = 4;
+    gone.devices.remove(counter);
+    gone.counters.clear();
+    let link = deliver_settings(
+        registry,
+        handle,
+        courier,
+        seen,
+        counter,
+        &signed_by_both(gone, &owner, &approver),
+    )?;
+    match &link.settings_line {
+        Some(heading) => println!("counter: Home says {heading:?}"),
+        None => return Err("a removed counter has no line on Home".to_string()),
+    }
+    let mut fields = now().to_le_bytes().to_vec();
+    fields.extend_from_slice(&1_000u64.to_le_bytes());
+    put_bytes(&mut fields, b"USD");
+    fields.extend_from_slice(&10_000_000u64.to_le_bytes());
+    put_bytes(&mut fields, b"test");
+    fields.extend_from_slice(&now().to_le_bytes());
+    let response = dispatch(registry, &request(OP_OPEN, handle, &fields));
+    if payload(&response).is_ok() || !response.windows(6).any(|w| w == b"CR-165") {
+        return Err(format!(
+            "a removed counter did not refuse a new sale with CR-165: {response:?}"
+        ));
+    }
+    println!("counter: a new sale is refused, the counter was removed from the shop (CR-165)");
+    println!("counter removal: ok");
+    Ok(())
 }
 
 fn main() -> ExitCode {
