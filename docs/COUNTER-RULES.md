@@ -86,7 +86,8 @@ draws what it is told.
   app's co-signature like every loosening (§2.9 of the design).
 - **CR-07.** A sale with nothing received ends as "expired" 15 minutes
   after it opened **[to tune]**, or when the cashier cancels it. Its
-  address stays watched for good.
+  address stays watched by the counter until the sale is settled (CR-76),
+  and by the owner's wallet for good (CR-80).
 
 ## 2. What the cashier sees
 
@@ -153,7 +154,9 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   does not change and the sale does not close.
 - **CR-19.** A payment that arrives for a sale that expired or was
   cancelled is recorded on that sale, flagged for the owner, and shown
-  as "late payment". It never changes another sale.
+  as "late payment". It never changes another sale. This holds until the
+  sale is settled (CR-76); after that the counter no longer watches the
+  address, and a payment to it is seen by the owner's wallet (CR-80).
 
 ## 3. Overrides
 
@@ -367,7 +370,92 @@ has been made).
   not learn whether a refund was paid: that would need a message from the
   owner back to the counter, which these rules do not have.
 
-## 8. What these rules do not do
+## 8. Settling old sales
+
+The counter watches every address it showed, and keeps every sale and every
+record in memory, so a shop that sells every day would reach the network
+manager's limit on watched scripts (NR-41) and grow without end. The owner's
+wallet already watches every issued receive index for good and keeps a
+receipt of every payment (OC-07, OC-10 to OC-12), so the counter can let an
+old sale go once the owner holds everything the counter wrote about it.
+
+The owner's mark (LK-55) says how many of the counter's records the owner
+holds. The link hands it to the counter with `Counter::set_owner_mark`. The
+mark is kept in memory only; after a start there is none until the owner's
+next message of records received, and until then nothing is settled. A
+mark that goes down is taken as it is: sales already settled stay settled,
+and sales not yet settled wait for the owner's copy to catch up.
+
+- **CR-76.** A sale is settled when all of these hold at the time the caller
+  passes:
+  1. it is not live (`Sale::is_live`): it ended or the books were told it
+     is final;
+  2. its last change is at least `SETTLE_SECS` (30 days **[to tune]**) old:
+     the last change is the later of the time it ended and the time of the
+     newest record that names it. A sale with neither time is never
+     settled;
+  3. none of its refund entries is `Requested` or `WaitingForDepth` (CR-72);
+  4. every record that names it is at or below the owner's mark, that is,
+     the number of the newest such record is below the number of records
+     the owner holds;
+  5. it is not unreadable (CR-42): a sale that does not read back is never
+     settled and its slot is never removed;
+  6. its exposure is not still counted in the ledger (CR-15): a sale
+     accepted at once whose exposure has not been released is not settled.
+  A sale that is live, or that the counter has no owner's mark for, is
+  never settled.
+- **CR-77.** `Counter::settle(store, now)` settles at most
+  `MAX_SETTLE_PER_CALL` (256) sales in one call, the one whose last change
+  is oldest first (the lower index first among equal times), and says how
+  many it settled and whether more are waiting. For each sale it removes
+  the stored sale (`Store::delete` of `Slot::Sale`) first and the sale from
+  memory second. If the store refuses, the call stops at that sale, nothing
+  is half removed in memory, and the fault is returned; the sales settled
+  before it stay settled. A stop between the two steps leaves the sale in
+  memory and its slot gone; when the counter is opened again a sale whose
+  slot is gone is not loaded, which is the settled state. Settling writes no
+  record: the records are the truth and the owner already holds them. The
+  desk's numbers and the batches' issued ranges are not touched, so the
+  index of a settled sale is never handed out again.
+- **CR-78.** After a settled sale is gone, the counter does not judge it, does
+  not report it and does not take sightings for its address (CR-80). A
+  call that names its index is refused as for any sale the counter does not
+  hold. The refund numbers in the records still count (CR-73).
+- **CR-79.** The batches keep the time at which each script was shown or
+  retired, in their stored form (`OBMC`, same version). A script that no
+  sale of the counter holds, that was shown or retired at least
+  `SETTLE_SECS` ago, leaves the counter's watch list: it is not in
+  `Counter::watched_scripts()` after the next call to `settle`. This covers
+  an address that was handed out and never used for a sale (CR-41), an
+  address of a retired batch, and the address of a sale that was settled.
+  The index stays issued: the range is kept and the index is never handed out
+  again. Nothing is released while any sale is unreadable (CR-42), because
+  the counter cannot tell which address it held. The counter does not
+  learn what an address it does not hold received: that is the owner's.
+- **CR-80.** What the counter does not watch any more, the owner's wallet
+  does, for good (OC-07, OC-10 to OC-12). A late payment to the address of
+  a settled sale is not reported by the counter; the owner's coin view
+  sees it and records its receipt. A shop that wants the counter to flag
+  such a payment must not settle: there is no switch for it.
+- **CR-81.** **[not built]** Records at or below the owner's mark that are
+  older than the newest `KEEP_RECORDS` (1,024 **[to tune]**) would leave the
+  counter's memory and stay on disk, the counter keeping the chain's length,
+  its head and the records above a base point; the check of LK-55 and the
+  resends of LK-56 from below the base would read the records back from the
+  store. This is not built. `Counter::records()` hands out the whole chain
+  and the link, the notice outbox and the tests of four crates read it as a
+  slice; the store has no way to read records back; and the load path checks
+  the whole chain from the first record. Changing them is a change of its
+  own, and the sale and address bounds above hold without it. Until it is
+  built, memory still grows by the records (about 200 bytes each).
+- **CR-82.** `openbmt-counter-node` calls `settle` from the node's pump once
+  at start, as soon as the owner's mark is known, and then once an hour, and
+  never more often than once a minute. The list of scripts the driver is
+  started with (`watched_scripts()`) is then the shorter one. The node keeps
+  a line in its log when it settles: the count only, no index and no
+  address. A store fault in a settle is a note and changes nothing else.
+
+## 9. What these rules do not do
 
 - **They do not check payments.** Proof of work, proofs, peers and
   conflicts are the watcher's. A wrong fact handed in gives a wrong
