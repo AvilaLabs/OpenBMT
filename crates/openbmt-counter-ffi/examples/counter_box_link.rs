@@ -519,6 +519,8 @@ fn settings_phase(
     fields.extend_from_slice(&10_000_000u64.to_le_bytes());
     put_bytes(&mut fields, b"test");
     fields.extend_from_slice(&now().to_le_bytes());
+    // No person is signed in.
+    fields.push(0);
     let response = dispatch(registry, &request(OP_OPEN, handle, &fields));
     if payload(&response).is_ok() || !response.windows(6).any(|w| w == b"CR-165") {
         return Err(format!(
