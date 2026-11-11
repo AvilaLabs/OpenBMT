@@ -48,8 +48,8 @@ use openbmt_core::pairing::{
     network_code, network_from_code, CounterPairing, PairError, PAIRING_WINDOW_SECS,
 };
 use openbmt_core::settings::{SettingsError, SignedSettings};
-use openbmt_core::words::WORD_COUNT;
 use openbmt_core::wire::{self, DecodeError, Reader};
+use openbmt_core::words::WORD_COUNT;
 use openbmt_counter::Pairing;
 
 /// Magic of a [`PairingRecord`].
@@ -413,7 +413,9 @@ impl PairingRecord {
         let mut r = Reader::framed(bytes, &MAGIC_PAIRING_RECORD)?;
         let identity_secret: [u8; 32] = r.array()?;
         if Identity::from_secret_bytes(&identity_secret).is_err() {
-            return Err(DecodeError::NonCanonical("the identity secret is not a key"));
+            return Err(DecodeError::NonCanonical(
+                "the identity secret is not a key",
+            ));
         }
         let owner = r.device_id()?;
         let approver = r.device_id()?;

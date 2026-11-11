@@ -627,9 +627,14 @@ impl KeyApp {
     pub fn pair_offer_bytes(&self) -> Result<Vec<u8>, KeyError> {
         self.run(|inner| {
             let a = &inner.ready()?.approver;
-            PairOffer::new(a.owner(), a.device_id(), *a.wallet_id(), a.wallet().network())
-                .map(|o| o.to_bytes())
-                .map_err(refused)
+            PairOffer::new(
+                a.owner(),
+                a.device_id(),
+                *a.wallet_id(),
+                a.wallet().network(),
+            )
+            .map(|o| o.to_bytes())
+            .map_err(refused)
         })
     }
 }

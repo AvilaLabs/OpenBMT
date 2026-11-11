@@ -442,10 +442,7 @@ pub fn every_pair_refused() -> Vec<(&'static str, PairRefused)> {
             "Settings",
             PairRefused::Settings(SettingsError::ApproverRequired),
         ),
-        (
-            "SettingsOld",
-            PairRefused::SettingsOld { floor: 4, got: 4 },
-        ),
+        ("SettingsOld", PairRefused::SettingsOld { floor: 4, got: 4 }),
         ("NotOnDevices", PairRefused::NotOnDevices),
         ("NotOnCounters", PairRefused::NotOnCounters),
         (

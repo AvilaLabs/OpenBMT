@@ -389,12 +389,15 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "jni-sys",
+ "openbmt-approver",
  "openbmt-core",
  "openbmt-counter",
  "openbmt-counter-node",
  "openbmt-net-io",
+ "openbmt-owner",
  "openbmt-qr",
  "openbmt-rates",
+ "openbmt-signer",
  "openbmt-watch",
 ]
 

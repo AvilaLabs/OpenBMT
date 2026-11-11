@@ -147,10 +147,7 @@ fn cr_91_begin_refuses_what_the_ceremony_refuses() {
 fn cr_91_a_ceremony_is_used_once_and_a_second_finish_finds_none() {
     let (mut c, bytes) = ready();
     assert!(finish(&mut c, &bytes).is_ok());
-    assert_eq!(
-        finish(&mut c, &bytes).unwrap_err(),
-        PairRefused::NoCeremony
-    );
+    assert_eq!(finish(&mut c, &bytes).unwrap_err(), PairRefused::NoCeremony);
     assert_eq!(c.confirm(T0 + 40).unwrap_err(), PairRefused::NoCeremony);
     // A refused finish uses it up as well.
     let (mut c, request) = begun(&offer(), 3, 7);
@@ -162,10 +159,7 @@ fn cr_91_a_ceremony_is_used_once_and_a_second_finish_finds_none() {
         &[],
     );
     assert_eq!(finish(&mut c, &bad).unwrap_err(), PairRefused::NotOnDevices);
-    assert_eq!(
-        finish(&mut c, &bad).unwrap_err(),
-        PairRefused::NoCeremony
-    );
+    assert_eq!(finish(&mut c, &bad).unwrap_err(), PairRefused::NoCeremony);
 }
 
 #[test]
@@ -356,7 +350,12 @@ fn cr_94_the_settings_need_both_roots_signatures() {
     let try_settings = |signed: SignedSettings| {
         let (mut c, request) = begun(&offer(), 3, 7);
         c.confirm(T0).unwrap();
-        let bytes = bundle_bytes(signed_pairing(&offer(), &request, FLOOR), signed, false, &[]);
+        let bytes = bundle_bytes(
+            signed_pairing(&offer(), &request, FLOOR),
+            signed,
+            false,
+            &[],
+        );
         finish(&mut c, &bytes).unwrap_err()
     };
     // No Key app signature.
@@ -420,7 +419,12 @@ fn cr_95_this_counter_must_be_on_the_device_and_counter_lists() {
     let run = |signed: SignedSettings| {
         let (mut c, request) = begun(&offer(), 3, 7);
         c.confirm(T0).unwrap();
-        let bytes = bundle_bytes(signed_pairing(&offer(), &request, FLOOR), signed, false, &[]);
+        let bytes = bundle_bytes(
+            signed_pairing(&offer(), &request, FLOOR),
+            signed,
+            false,
+            &[],
+        );
         finish(&mut c, &bytes)
     };
     // Settings that list another counter only.
@@ -525,7 +529,10 @@ fn cr_97_the_record_round_trips_and_decodes_strictly() {
     assert_eq!(PairingRecord::from_bytes(&bare.to_bytes()).unwrap(), bare);
     for valid in [enc.clone(), bare.to_bytes()] {
         for n in 0..valid.len() {
-            assert!(PairingRecord::from_bytes(&valid[..n]).is_err(), "prefix {n}");
+            assert!(
+                PairingRecord::from_bytes(&valid[..n]).is_err(),
+                "prefix {n}"
+            );
         }
         let mut longer = valid.clone();
         longer.push(0);
@@ -555,7 +562,10 @@ fn cr_97_the_record_refuses_what_is_not_a_pairing() {
         edit(&mut e);
         PairingRecord::from_bytes(&e).unwrap_err()
     };
-    assert_eq!(bad(&|e| e[..4].copy_from_slice(b"OBMs")), DecodeError::BadMagic);
+    assert_eq!(
+        bad(&|e| e[..4].copy_from_slice(b"OBMs")),
+        DecodeError::BadMagic
+    );
     assert_eq!(bad(&|e| e[4] = 2), DecodeError::UnsupportedVersion(2));
     // The secret, the roots, the network.
     assert!(matches!(

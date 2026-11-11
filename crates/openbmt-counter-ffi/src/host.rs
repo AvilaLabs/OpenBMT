@@ -188,8 +188,8 @@ fn check_start(
     if req.dir.is_empty() {
         return Err(refused_by("start-dir", "the data folder is empty"));
     }
-    let record = PairingRecord::from_bytes(&req.record)
-        .map_err(|e| refused(PairRefused::Record(e)))?;
+    let record =
+        PairingRecord::from_bytes(&req.record).map_err(|e| refused(PairRefused::Record(e)))?;
     // CR-94 to CR-96 again, on what was kept: the settings' signatures, the
     // lists, the version and the first batch.
     record.check(&policy).map_err(refused)?;

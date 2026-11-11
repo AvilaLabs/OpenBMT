@@ -764,7 +764,13 @@ mod tests {
     const NET: Network = Network::Regtest;
 
     fn offer() -> PairOffer {
-        PairOffer::new(identity(1).device_id(), identity(2).device_id(), [7; 32], NET).unwrap()
+        PairOffer::new(
+            identity(1).device_id(),
+            identity(2).device_id(),
+            [7; 32],
+            NET,
+        )
+        .unwrap()
     }
 
     /// A ceremony stopped just before `finish`.
@@ -854,8 +860,10 @@ mod tests {
         let n = [9; 32];
         let base = session_digest(&o, &c, &n);
         assert_eq!(base, session_digest(&o, &c, &n));
-        let other_owner = PairOffer::new(identity(4).device_id(), o.approver, o.wallet, NET).unwrap();
-        let other_approver = PairOffer::new(o.owner, identity(4).device_id(), o.wallet, NET).unwrap();
+        let other_owner =
+            PairOffer::new(identity(4).device_id(), o.approver, o.wallet, NET).unwrap();
+        let other_approver =
+            PairOffer::new(o.owner, identity(4).device_id(), o.wallet, NET).unwrap();
         let other_wallet = PairOffer::new(o.owner, o.approver, [8; 32], NET).unwrap();
         assert_ne!(base, session_digest(&other_owner, &c, &n));
         assert_ne!(base, session_digest(&other_approver, &c, &n));

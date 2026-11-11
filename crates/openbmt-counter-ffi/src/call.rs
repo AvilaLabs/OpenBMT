@@ -367,16 +367,23 @@ fn build_ops() -> Vec<Op> {
         op(42, "rate_combine", Zero, |_, a: RateCombineArgs| {
             rate_combine(a)
         }),
-        op(43, "pairing_read", Zero, |_, bytes: Vec<u8>| pairing_read(bytes)),
+        op(43, "pairing_read", Zero, |_, bytes: Vec<u8>| {
+            pairing_read(bytes)
+        }),
         op(44, "pair_begin", Zero, |c, a: PairBeginArgs| {
             c.registry.pair_begin(a)
         }),
-        op(45, "pair_match", Zero, |c, now: u64| c.registry.pair_match(now)),
+        op(45, "pair_match", Zero, |c, now: u64| {
+            c.registry.pair_match(now)
+        }),
         op(46, "pair_differ", Zero, |c, ()| c.registry.pair_differ()),
         op(47, "pair_cancel", Zero, |c, ()| c.registry.pair_cancel()),
-        op(48, "pair_finish", Zero, |c, (now, bundle): (u64, Vec<u8>)| {
-            c.registry.pair_finish(now, &bundle)
-        }),
+        op(
+            48,
+            "pair_finish",
+            Zero,
+            |c, (now, bundle): (u64, Vec<u8>)| c.registry.pair_finish(now, &bundle),
+        ),
     ]
 }
 

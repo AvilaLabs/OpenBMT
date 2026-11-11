@@ -29,3 +29,9 @@ bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 # The JNI types, nothing else. 0.3.0 has no dependencies of its own; the
 # later releases (0.3.1, 0.4) depend on a macro crate and syn.
 jni-sys = "=0.3.0"
+
+[dev-dependencies]
+# The other ends of the pairing ceremony, for the test that runs it whole.
+openbmt-approver = { path = "../openbmt-approver" }
+openbmt-owner = { path = "../openbmt-owner" }
+openbmt-signer = { path = "../openbmt-signer" }

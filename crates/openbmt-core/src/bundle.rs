@@ -141,7 +141,11 @@ impl CounterBundle {
             &wire::MAGIC_COUNTER_BUNDLE,
             pairing.len() + settings.len() + batch.len() + 16 + self.peers.len() * 24,
         );
-        out.extend_from_slice(&u16::try_from(pairing.len()).unwrap_or(u16::MAX).to_le_bytes());
+        out.extend_from_slice(
+            &u16::try_from(pairing.len())
+                .unwrap_or(u16::MAX)
+                .to_le_bytes(),
+        );
         out.extend_from_slice(&pairing);
         out.extend_from_slice(&wire::len_u32(settings.len()).to_le_bytes());
         out.extend_from_slice(&settings);

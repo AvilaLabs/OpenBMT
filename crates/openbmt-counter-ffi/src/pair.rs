@@ -92,7 +92,9 @@ impl Registry {
     /// number are forgotten, and the words say what happened and what to do.
     pub(crate) fn pair_differ(&self) -> Result<WordsView, CounterError> {
         *self.ceremony() = None;
-        Ok(WordsView(openbmt_counter_node::say::PairStep::Differ.words()))
+        Ok(WordsView(
+            openbmt_counter_node::say::PairStep::Differ.words(),
+        ))
     }
 
     /// The person leaves the ceremony: it is forgotten.

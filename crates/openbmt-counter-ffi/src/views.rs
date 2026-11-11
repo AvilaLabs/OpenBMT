@@ -12,8 +12,8 @@ use crate::codec::{
 };
 use crate::error::CounterError;
 use crate::pay::Payment;
-use crate::shop::SettingsView;
 use crate::say::{tone_byte, who_byte};
+use crate::shop::SettingsView;
 
 // ---- requests -------------------------------------------------------------------
 

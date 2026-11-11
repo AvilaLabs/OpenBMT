@@ -160,7 +160,10 @@ fn the_price_ops_work_on_no_node() {
 #[test]
 fn nr_26_the_pairing_is_read_before_the_node_starts() {
     let mut signed = signed_settings();
-    let response = call(43, &W::new().bytes(&record_with(signed.clone()).to_bytes()).0);
+    let response = call(
+        43,
+        &W::new().bytes(&record_with(signed.clone()).to_bytes()).0,
+    );
     let mut r = Rd::ok(&response);
     // The network tag of regtest, then the settings.
     assert_eq!(r.u8(), 3);
