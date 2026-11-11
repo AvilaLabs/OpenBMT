@@ -34,6 +34,8 @@ pub enum UrError {
     Psbt(&'static str),
     /// UR-16: text longer than any UR within the bounds.
     TextTooLong,
+    /// UR-32: an output descriptor that cannot be written.
+    Output(&'static str),
 }
 
 impl UrError {
@@ -55,6 +57,7 @@ impl UrError {
             Self::Cbor(_) => "UR-13",
             Self::Psbt(_) => "UR-14",
             Self::TextTooLong => "UR-16",
+            Self::Output(_) => "UR-32",
         }
     }
 }
@@ -72,7 +75,8 @@ impl fmt::Display for UrError {
             | Self::Disagrees(why)
             | Self::Message(why)
             | Self::Cbor(why)
-            | Self::Psbt(why) => write!(f, "{code}: {why}"),
+            | Self::Psbt(why)
+            | Self::Output(why) => write!(f, "{code}: {why}"),
             Self::MessageSize => write!(f, "{code}: the message is empty or over 1 MiB"),
             Self::SeqLen => write!(f, "{code}: the sequence length is 0 or over 10000"),
             Self::BytewordsChecksum => write!(f, "{code}: the Bytewords checksum does not match"),

@@ -31,25 +31,31 @@ const SLIP_SECRET: [[u8; 4]; 10] = [
 // ---- the keys ------------------------------------------------------------
 
 /// m/48'/0'/0'/2' of the master key of seed [3; 32].
-const MAIN_FP: u32 = 0x56c4_fac3;
-const MAIN_PARENT: u32 = 0xc074_36a2;
-const MAIN_KEY: &str = "02d44daf959d7b3bf9343e2aea84ea21391ccf306a2765c35859c94cecb870aaea";
-const MAIN_CHAIN: &str = "f4ef1818131a780976e9dc1f30a4bd39903a9b8bbffad099035c49f886e85aed";
-const MAIN_XPUB: &str = "xpub6Ewx2N9hNSArJyF35CUGhaZLuZxQPNmJzWVwmpoV9U7Xu5wqka93nd3zEzokew9MzkNV4u6TCVDkHHR6QHQuYEFaasKzWkrkncXHMXGNdZP";
+pub(super) const MAIN_FP: u32 = 0x56c4_fac3;
+pub(super) const MAIN_PARENT: u32 = 0xc074_36a2;
+pub(super) const MAIN_KEY: &str =
+    "02d44daf959d7b3bf9343e2aea84ea21391ccf306a2765c35859c94cecb870aaea";
+pub(super) const MAIN_CHAIN: &str =
+    "f4ef1818131a780976e9dc1f30a4bd39903a9b8bbffad099035c49f886e85aed";
+pub(super) const MAIN_XPUB: &str = "xpub6Ewx2N9hNSArJyF35CUGhaZLuZxQPNmJzWVwmpoV9U7Xu5wqka93nd3zEzokew9MzkNV4u6TCVDkHHR6QHQuYEFaasKzWkrkncXHMXGNdZP";
 const MAIN_ZPUB: &str = "Zpub75WZkwDyEkpBS8negaWVwq69yJHZUyRu91C4FsroHFhhdU9D2HrT7sEC67gQDBg73Vg5SSHh12KMB2Fz8uPtHBjTA1qF5yxjDnvSidAz9yt";
 
 /// m/48'/1'/0'/2' of the same master key.
-const TEST_PARENT: u32 = 0x686a_e4bf;
-const TEST_KEY: &str = "0241ea5cb48ecc741308624baf221aa4e3057447056e4fa48749572714abff29f1";
-const TEST_CHAIN: &str = "d0b08dc903742e8e907aed44ced618ec55545adf33a8f3cfe444470bb19fe79b";
-const TEST_TPUB: &str = "tpubDEg3kqr2jo5ergkJbFqRHvCpiob7wR7Hi44J7y987G1JZfbzBND77XKTyPZzGvh3uyDf8kexMJnFD9W8FuraJ4wLMsx6YuZVXRSRRcx6QdD";
+pub(super) const TEST_PARENT: u32 = 0x686a_e4bf;
+pub(super) const TEST_KEY: &str =
+    "0241ea5cb48ecc741308624baf221aa4e3057447056e4fa48749572714abff29f1";
+pub(super) const TEST_CHAIN: &str =
+    "d0b08dc903742e8e907aed44ced618ec55545adf33a8f3cfe444470bb19fe79b";
+pub(super) const TEST_TPUB: &str = "tpubDEg3kqr2jo5ergkJbFqRHvCpiob7wR7Hi44J7y987G1JZfbzBND77XKTyPZzGvh3uyDf8kexMJnFD9W8FuraJ4wLMsx6YuZVXRSRRcx6QdD";
 
 /// m/48'/0'/0'/2' of the master key of seed [7; 32].
-const OTHER_FP: u32 = 0xe286_7bb6;
-const OTHER_PARENT: u32 = 0xd51a_d7f4;
-const OTHER_KEY: &str = "037b73c092866bc4d0ed4a38bdeb8fd92e6f50da46b8e0df3ae383b2a84aeec26b";
-const OTHER_CHAIN: &str = "364c446c3033c79f7b7b30617e8abaf7aa02b67cd15a294dcadcf0866c37d7a3";
-const OTHER_XPUB: &str = "xpub6F6kdziwgeYBty6BhQQxf73MxQDNPcKKApsvENDUEx3mBPumWC4GcBFi7gk8wE7r2V4gKRmC92UXPWPxz7HxP3U4n46xutvWWLsUAWswLWe";
+pub(super) const OTHER_FP: u32 = 0xe286_7bb6;
+pub(super) const OTHER_PARENT: u32 = 0xd51a_d7f4;
+pub(super) const OTHER_KEY: &str =
+    "037b73c092866bc4d0ed4a38bdeb8fd92e6f50da46b8e0df3ae383b2a84aeec26b";
+pub(super) const OTHER_CHAIN: &str =
+    "364c446c3033c79f7b7b30617e8abaf7aa02b67cd15a294dcadcf0866c37d7a3";
+pub(super) const OTHER_XPUB: &str = "xpub6F6kdziwgeYBty6BhQQxf73MxQDNPcKKApsvENDUEx3mBPumWC4GcBFi7gk8wE7r2V4gKRmC92UXPWPxz7HxP3U4n46xutvWWLsUAWswLWe";
 
 fn main_text() -> String {
     format!("[56c4fac3/48h/0h/0h/2h]{MAIN_XPUB}")

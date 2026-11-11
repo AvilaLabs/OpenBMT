@@ -226,6 +226,28 @@ export in `bytes`. It takes nothing it cannot rebuild exactly.
   UTF-8. A request that is not framed, or a type over 64 characters, is
   refused as in UR-21.
 
+## 8. A shared wallet's descriptor as a code
+
+So that a signer can be told the wallet and check the addresses and the
+change of a PSBT against it, the library writes the descriptor
+`wsh(sortedmulti(2, key, key, key))` as a `crypto-output` (BCR-2020-010),
+the form SeedSigner, Krux and Sparrow read.
+
+- **UR-32.** `wsh_sortedmulti_cbor` writes the message of a
+  `ur:crypto-output` for `wsh(sortedmulti(k, keys...))` with one to fifteen
+  keys and a threshold of one to the number of keys: tag 401 around tag 407
+  around a map of the threshold (key 1) and the array of keys (key 2). Each
+  key is a `crypto-hdkey` (tag 303) with the keys 3 to 8, in ascending
+  order: the key data (33 bytes), the chain code (32), the coin and network
+  (tag 305, `{1: 0, 2: 0}` or `{2: 1}` for a test network), the origin (tag
+  304: the steps as pairs of an index and a hardened flag, the master
+  fingerprint as an integer, the depth), the children (tag 304: one
+  unhardened step, then the wildcard as an empty array and a flag) and the
+  parent's fingerprint as an integer. Every head is in the shortest form.
+  The keys stay in the order given, which for `sortedmulti` is not part of
+  the wallet; an origin of none or over sixteen steps, and a threshold or
+  count out of range, are refused. `output_to_ur_parts` makes the parts.
+
 ## What these rules do not do
 
 - **No check that the PSBT is valid.** Only the five-byte magic is looked
@@ -236,10 +258,10 @@ export in `bytes`. It takes nothing it cannot rebuild exactly.
   Its checksums find a misread, not a forgery.
 - **No other registry types.** Only `bytes`, `crypto-psbt` and `psbt` have
   helpers for their payload here, and section 7 reads a cosigner key out of
-  `crypto-account`, `crypto-hdkey` and a JSON `bytes`. A `crypto-output`, the
-  newer `hdkey`, `account-descriptor` and `output-descriptor`, and the text
-  of BSMS are not read as keys. Other types are returned as the bytes they
-  came in.
+  `crypto-account`, `crypto-hdkey` and a JSON `bytes`. A `crypto-output` is
+  written (section 8) and not read as a key; the newer `hdkey`,
+  `account-descriptor` and `output-descriptor`, and the text of BSMS are
+  not read as keys. Other types are returned as the bytes they came in.
 - **No other key than the first account's.** Only the account 0 key for
   `48h/<coin>h/0h/2h` is taken; a signer that writes another account, a
   `zpub` in JSON or a key without its chain code is refused, with words that

@@ -3,6 +3,7 @@
 mod hash;
 mod key;
 mod meta;
+mod output;
 mod refusals;
 mod roundtrip;
 mod vectors;
