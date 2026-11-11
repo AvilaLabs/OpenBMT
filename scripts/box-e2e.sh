@@ -22,7 +22,8 @@
 # roots) and sends the welcome. The script carries nothing between the two:
 # the invitation is typed into the Box's console (its standard input), and
 # everything else goes through the Box's TCP port. Steps 10 to 14 need a Box
-# with a POS connector, which the `openbmt-box` binary does not carry: they run
+# with a test POS connector, which the `openbmt-box` binary does not carry (it
+# reads Square and Clover over curl, step 16): they run
 # `box_pair pos-box`, the same Box library with a connector made of files in a
 # directory (the line format is in the example's header), and the counters'
 # notices are sent by `box_pair notice`.
@@ -64,6 +65,12 @@
 #      mailboxes, a message and new settings: every restart finds the same
 #      key and the right state with no error line, a message accepted before
 #      a kill is read after it (BX-52), and SIGTERM ends it with exit 143.
+#  16. A Box set up for Square with `pos-setup` and a fake curl (a script that
+#      prints a Square reply and a status) named by the curl-path setting: the
+#      sale the counter reported matches the order, the owner is told, curl is
+#      run only for searches, the token is on curl's standard input and in no
+#      argument, environment or log; with a curl path that is not there the
+#      Box's notes say curl is not installed on this Box (BX-44 to BX-49).
 #
 # Environment:
 #   DRILL_DIR      scratch directory (default: a new one under ~/.cache/openbmt)
@@ -671,12 +678,111 @@ else
 fi
 if [ -n "$NC_PID" ]; then kill9_nc; fi
 
+# ---- 16 --------------------------------------------------------------------------
+
+say "16. A Square vendor read over a fake curl, named by the curl-path setting"
+B6="$BASE/box6"
+K6="$BASE/keyapp6"
+FC="$BASE/fakecurl"
+mkdir -p "$B6" "$K6" "$FC"
+A6="127.0.0.1:$PORT2"
+TOKEN16=e2e-square-token-xyz
+# The fake curl: it keeps what it was given (the arguments, the standard
+# input and the environment) and prints a Square reply with an order that
+# has a Bitcoin tender of 1250 at the time now, then the status 200, as
+# curl's --write-out would.
+cat >"$FC/curl" <<EOF
+#!/bin/sh
+d='$FC'
+echo x >> "\$d/calls"
+for a in "\$@"; do printf '%s\n' "\$a"; done >> "\$d/args"
+/bin/cat >> "\$d/stdin"
+/usr/bin/env > "\$d/env"
+now=\$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)
+printf '{"orders":[{"id":"SQE2E1","location_id":"LOC16","state":"COMPLETED","created_at":"%s","updated_at":"%s","closed_at":"%s","total_money":{"amount":1250,"currency":"USD"},"tenders":[{"id":"TE2E1","type":"OTHER","created_at":"%s","note":"Bitcoin","amount_money":{"amount":1250,"currency":"USD"},"payment_id":"PE2E1"}]}]}200' "\$now" "\$now" "\$now" "\$now"
+EOF
+chmod 755 "$FC/curl"
+RUN=("$BOX_BIN")
+EXTRA=()
+start_box 2 "$B6" "$PORT2" || die "the Box for step 16 did not start: $(cat "${LOG[2]}")"
+INV16=$(pair invite "$K6")
+ask 2 "invite $INV16" 'invitation' || true
+pair claim "$K6" "$A6" >/dev/null
+WELCOME16=$(pair welcome "$K6" "$A6")
+await_state 2 paired 10 || true
+S16=$(state_of 2)
+# The setup line: the vendor, its location, the currency, the exact name of
+# the Bitcoin tender, and the path of the fake curl.
+printf '%s\n' pos-setup "vendor=square|location=LOC16|currency=USD|tenders=Bitcoin|curl=$FC/curl" >&"${FDN[2]}"
+for _ in $(seq 1 20); do
+  grep -q '^pos-setup: square' "${LOG[2]}" && break
+  sleep 0.25
+done
+SETUP16=$(grep '^pos-setup: ' "${LOG[2]}" | tail -1)
+# The setup is used from the next start.
+stop_box 2
+start_box 2 "$B6" "$PORT2" || die "the Box for step 16 did not start again: $(cat "${LOG[2]}")"
+await_state 2 paired 10 || true
+pair mailbox "$K6" "$A6" c1 >/dev/null
+pair mailbox "$K6" "$A6" owner >/dev/null
+# The counter's two notices come first, while the Box has no token; the
+# token comes after them, so that the first reading has the sale to match.
+N1_16=$(pair notice "$K6" "$A6" c1 1 opened 1250)
+N2_16=$(pair notice "$K6" "$A6" c1 1 paid 1250)
+sleep 1
+printf '%s' "$TOKEN16" >"$B6/pos.token"
+chmod 600 "$B6/pos.token"
+if await_line 2 pos 'pos: matches:' 'matches: 1' 20; then MATCHED16=yes; else MATCHED16=no; fi
+RECV16=$(pair posrecv "$K6" "$A6")
+note "$RECV16"
+CALLS16=$(lines_in "$FC/calls")
+ARGS16=$(cat "$FC/args" 2>/dev/null)
+STDIN16=$(cat "$FC/stdin" 2>/dev/null)
+ENV16=$(cat "$FC/env" 2>/dev/null)
+SEARCHES16=$(grep -c '^https://connect.squareup.com/v2/orders/search$' "$FC/args" 2>/dev/null)
+URLS16=$(grep -c '^https://' "$FC/args" 2>/dev/null)
+note "curl was run $CALLS16 times; searches $SEARCHES16 of $URLS16 URLs"
+TOKEN_IN_ARGS=no; grep -q -- "$TOKEN16" <<<"$ARGS16" && TOKEN_IN_ARGS=yes
+TOKEN_IN_ENV=no; grep -q -- "$TOKEN16" <<<"$ENV16" && TOKEN_IN_ENV=yes
+TOKEN_ON_STDIN=no; grep -q -- "Authorization: Bearer $TOKEN16" <<<"$STDIN16" && TOKEN_ON_STDIN=yes
+TOKEN_IN_LOG=no
+# The token is in no log the Box wrote either.
+grep -q -- "$TOKEN16" "${LOG[2]}" && TOKEN_IN_LOG=yes
+# A curl that is not there: the same setup with another path.
+stop_box 2
+start_box 2 "$B6" "$PORT2" || die "the Box for step 16 did not start for the second time: $(cat "${LOG[2]}")"
+printf '%s\n' pos-setup "vendor=square|location=LOC16|currency=USD|tenders=Bitcoin|curl=$FC/no-such-curl" >&"${FDN[2]}"
+for _ in $(seq 1 20); do
+  [ "$(grep -c '^pos-setup: square' "${LOG[2]}")" -ge 1 ] && break
+  sleep 0.25
+done
+stop_box 2
+start_box 2 "$B6" "$PORT2" || die "the Box for step 16 did not start for the third time: $(cat "${LOG[2]}")"
+NOCURL16=no
+for _ in $(seq 1 20); do
+  ask 2 notes 'note: ' || true
+  if grep -q 'curl is not installed on this Box' "${LOG[2]}"; then NOCURL16=yes; break; fi
+  sleep 0.5
+done
+note "no curl: $NOCURL16"
+if [ "$S16" = paired ] && [ "$WELCOME16" = welcomed ] && [ "$SETUP16" = "pos-setup: square" ] &&
+  [ "$MATCHED16" = yes ] && grep -q 'matches sale 1' <<<"$RECV16" && grep -q 'signature good' <<<"$RECV16" &&
+  [ "$CALLS16" -ge 1 ] && [ "$SEARCHES16" = "$URLS16" ] && [ "$URLS16" -ge 1 ] &&
+  grep -q -- '^--proto$' <<<"$ARGS16" && grep -q -- '^=https$' <<<"$ARGS16" &&
+  [ "$TOKEN_IN_ARGS" = no ] && [ "$TOKEN_IN_ENV" = no ] && [ "$TOKEN_ON_STDIN" = yes ] &&
+  [ "$TOKEN_IN_LOG" = no ] && [ "$NOCURL16" = yes ]; then
+  pass 16 "a Box set up for Square with a fake curl named by the curl-path setting read the POS $CALLS16 times, each time a search of orders and nothing else, with the token on curl's standard input only; the counter's sale matched the order and the owner was told; with a curl path that is not there the notes said curl is not installed on this Box"
+else
+  bad 16 "state '$S16'; setup '$SETUP16'; matched $MATCHED16; owner read: $RECV16; curl calls $CALLS16, searches $SEARCHES16 of $URLS16; token in args $TOKEN_IN_ARGS, in env $TOKEN_IN_ENV, on stdin $TOKEN_ON_STDIN, in log $TOKEN_IN_LOG; no curl: $NOCURL16"
+fi
+stop_box 2
+
 # ---- result ----------------------------------------------------------------------
 
 say "Result"
 failed=0
 notrun=0
-for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
   printf '%s  step %s\n' "${RESULT[$n]:-FAIL}" "$n"
   case "${RESULT[$n]:-FAIL}" in
     PASS) ;;

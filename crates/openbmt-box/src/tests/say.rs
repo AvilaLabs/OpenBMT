@@ -10,7 +10,9 @@ use openbmt_courier::StartError;
 use openbmt_net_io::env::LockError;
 use openbmt_pos::SettingsError as PosSettingsError;
 
+use crate::https::HttpsKind;
 use crate::pos::{PosOpenError, PosState, Reading};
+use crate::pos_config::PosConfigError;
 use crate::runner::{PosView, StartFailure};
 use crate::say::{
     all_words, invite_lines, iso_utc, members_lines, note_words, notes_lines, pos_lines,
@@ -144,6 +146,19 @@ fn open_name(e: &PosOpenError) -> &'static str {
         PosOpenError::Damaged { .. } => "PosOpenError::Damaged",
         PosOpenError::Io { .. } => "PosOpenError::Io",
         PosOpenError::Settings(_) => "PosOpenError::Settings",
+        PosOpenError::Config(_) => "PosOpenError::Config",
+    }
+}
+
+fn config_name(e: &PosConfigError) -> &'static str {
+    match e {
+        PosConfigError::BadWord(_) => "PosConfigError::BadWord",
+        PosConfigError::Missing(_) => "PosConfigError::Missing",
+        PosConfigError::UnknownVendor(_) => "PosConfigError::UnknownVendor",
+        PosConfigError::BadValue(_) => "PosConfigError::BadValue",
+        PosConfigError::Damaged(_) => "PosConfigError::Damaged",
+        PosConfigError::Settings(_) => "PosConfigError::Settings",
+        PosConfigError::Io(_) => "PosConfigError::Io",
     }
 }
 
@@ -176,6 +191,7 @@ fn answer_name(a: &ConsoleAnswer) -> &'static str {
     match a {
         ConsoleAnswer::InvitationTaken => "ConsoleAnswer::InvitationTaken",
         ConsoleAnswer::PosTokenStored => "ConsoleAnswer::PosTokenStored",
+        ConsoleAnswer::PosSetupStored(_) => "ConsoleAnswer::PosSetupStored",
         ConsoleAnswer::Members(_) => "ConsoleAnswer::Members",
         ConsoleAnswer::NoNotes => "ConsoleAnswer::NoNotes",
         ConsoleAnswer::UnknownCommand(_) => "ConsoleAnswer::UnknownCommand",
@@ -197,6 +213,8 @@ fn kind_name(k: NoteKind) -> &'static str {
         NoteKind::PaidNoticeRefused(_) => "NoteKind::PaidNoticeRefused",
         NoteKind::PaidNoticesNotStored => "NoteKind::PaidNoticesNotStored",
         NoteKind::PosNotRead => "NoteKind::PosNotRead",
+        NoteKind::PosNotReached(_) => "NoteKind::PosNotReached",
+        NoteKind::CountersNotTaken => "NoteKind::CountersNotTaken",
         NoteKind::NoOrderToClose => "NoteKind::NoOrderToClose",
         NoteKind::CloseRefused => "NoteKind::CloseRefused",
         NoteKind::OrderAlreadyClosed => "NoteKind::OrderAlreadyClosed",
@@ -320,8 +338,20 @@ fn sc_01_no_variant_is_missing() {
             kind: io::ErrorKind::NotFound,
         },
         PosOpenError::Settings(PosSettingsError::Timing),
+        PosOpenError::Config(PosConfigError::Missing("vendor")),
     ] {
         need(open_name(&e));
+    }
+    for e in [
+        PosConfigError::BadWord(String::new()),
+        PosConfigError::Missing("vendor"),
+        PosConfigError::UnknownVendor(String::new()),
+        PosConfigError::BadValue("tenders"),
+        PosConfigError::Damaged(String::new()),
+        PosConfigError::Settings(PosSettingsError::Timing),
+        PosConfigError::Io(io::ErrorKind::NotFound),
+    ] {
+        need(config_name(&e));
     }
     for e in [
         StartFailure::Lock(LockError::Io(String::new())),
@@ -349,6 +379,7 @@ fn sc_01_no_variant_is_missing() {
     for a in [
         ConsoleAnswer::InvitationTaken,
         ConsoleAnswer::PosTokenStored,
+        ConsoleAnswer::PosSetupStored(String::new()),
         ConsoleAnswer::Members(0),
         ConsoleAnswer::NoNotes,
         ConsoleAnswer::UnknownCommand(String::new()),
@@ -372,6 +403,8 @@ fn sc_01_no_variant_is_missing() {
         NoteKind::PaidNoticeRefused(NoticeWhy::Other),
         NoteKind::PaidNoticesNotStored,
         NoteKind::PosNotRead,
+        NoteKind::PosNotReached(HttpsKind::Timeout),
+        NoteKind::CountersNotTaken,
         NoteKind::NoOrderToClose,
         NoteKind::CloseRefused,
         NoteKind::OrderAlreadyClosed,

@@ -43,9 +43,12 @@ use openbmt_link::{
 use openbmt_net_io::env::{DirLock, LockError};
 use openbmt_net_io::Clock;
 
-use crate::files::DirFiles;
+use crate::files::{BoxFiles, DirFiles};
+use crate::https::{CurlRunner, Transport};
 use crate::pos::{BoxPos, PosOpenError, PosSetup, PosState};
+use crate::pos_config::{PosConfig, PosConfigError, POS_CONFIG_FILE};
 use crate::state::{BoxCore, BoxError, BoxStatus};
+use crate::vendor::{VendorConnector, VENDOR_POLL_SECS};
 
 /// The relay's own files (mailboxes, member list) are in this directory of
 /// the data directory.
@@ -383,15 +386,19 @@ impl Worker {
             return;
         };
         let now = self.clock.now();
-        let (roles, token, owner) = {
+        let (roles, token, owner, tor) = {
             let core = lock(&self.core);
             (
                 core.roles(),
                 core.read_pos_token().map_err(|e| e.to_string()),
                 core.roots().map(|r| r.owner),
+                // A Box that cannot tell goes through Tor (BX-47).
+                core.settings().is_none_or(|s| s.tor_on),
             )
         };
+        pos.set_tor(tor);
         let mut lines = Vec::new();
+        lines.extend(pos.follow_counters(&roles));
         if !notices.is_empty() {
             lines.extend(pos.take_notices(&notices, &roles, now));
         }
@@ -475,14 +482,18 @@ pub struct BoxRunner {
 
 impl BoxRunner {
     /// Take the data directory (BX-02), load the state (BX-51), make the
-    /// relay and serve it on `bind`.
+    /// relay and serve it on `bind`. When the data directory holds a
+    /// `pos-config` (BX-49) the Box reads that vendor's POS over curl; a
+    /// config that does not read leaves the POS side off and says why.
     pub fn start(
         dir: impl Into<PathBuf>,
         bind: SocketAddr,
         clock: Arc<dyn Clock + Send + Sync>,
         cfg: ServerConfig,
     ) -> Result<Self, StartFailure> {
-        Self::start_with(dir, bind, clock, cfg, None)
+        let dir: PathBuf = dir.into();
+        let pos = vendor_setup(&dir);
+        Self::start_inner(dir, bind, clock, cfg, pos)
     }
 
     /// [`BoxRunner::start`] with a POS connector (BX-40 to BX-43). With
@@ -495,7 +506,16 @@ impl BoxRunner {
         cfg: ServerConfig,
         pos: Option<PosSetup>,
     ) -> Result<Self, StartFailure> {
-        let dir: PathBuf = dir.into();
+        Self::start_inner(dir.into(), bind, clock, cfg, Ok(pos))
+    }
+
+    fn start_inner(
+        dir: PathBuf,
+        bind: SocketAddr,
+        clock: Arc<dyn Clock + Send + Sync>,
+        cfg: ServerConfig,
+        pos: Result<Option<PosSetup>, PosOpenError>,
+    ) -> Result<Self, StartFailure> {
         let dir_lock = DirLock::acquire(&dir).map_err(StartFailure::Lock)?;
         let core =
             BoxCore::open(DirFiles::new(&dir), &mut os_random).map_err(StartFailure::State)?;
@@ -539,8 +559,12 @@ impl BoxRunner {
         sync_relay(&core, &relay, &*clock, &notes);
 
         let (pos_side, view) = match pos {
-            None => (None, PosView::NotInstalled),
-            Some(setup) => {
+            Err(e) => {
+                note(&notes, format!("the POS side is off: {e}"));
+                (None, PosView::Disabled(e))
+            }
+            Ok(None) => (None, PosView::NotInstalled),
+            Ok(Some(setup)) => {
                 let identity = lock(&core).identity().map_err(StartFailure::State)?;
                 match BoxPos::open(DirFiles::new(&dir), identity, setup) {
                     Ok(p) => {
@@ -641,6 +665,17 @@ impl BoxRunner {
         lock(&self.core).store_pos_token(token)
     }
 
+    /// BX-49: take the line `pos-setup` was given, keep it as the Box's POS
+    /// vendor and say when it takes effect: at the next start.
+    pub fn store_pos_config(&self, line: &str) -> Result<PosConfig, PosConfigError> {
+        let config = PosConfig::parse(line)?;
+        lock(&self.core)
+            .files_mut()
+            .write(POS_CONFIG_FILE, &config.to_bytes())
+            .map_err(|e| PosConfigError::Io(e.kind()))?;
+        Ok(config)
+    }
+
     /// The POS side as the worker last saw it, without the token (BX-41).
     pub fn pos_view(&self) -> PosView {
         lock(&self.view).clone()
@@ -681,6 +716,36 @@ impl Drop for BoxRunner {
     fn drop(&mut self) {
         self.shutdown();
     }
+}
+
+/// BX-49: the POS side the data directory's `pos-config` asks for: none when
+/// there is no file, the vendor's reader over curl when there is one.
+fn vendor_setup(dir: &Path) -> Result<Option<PosSetup>, PosOpenError> {
+    let bytes = match DirFiles::new(dir).read(POS_CONFIG_FILE) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => return Ok(None),
+        Err(e) => {
+            return Err(PosOpenError::Io {
+                file: POS_CONFIG_FILE,
+                kind: e.kind(),
+            })
+        }
+    };
+    let config = PosConfig::from_bytes(&bytes).map_err(PosOpenError::Config)?;
+    let transport = Arc::new(Transport::new());
+    let connector = VendorConnector::new(
+        &config,
+        Box::new(CurlRunner::new(config.curl_path())),
+        Arc::clone(&transport),
+    )
+    .map_err(PosOpenError::Config)?;
+    let settings = config.settings(Vec::new()).map_err(PosOpenError::Config)?;
+    let mut setup = PosSetup::new(settings, Box::new(connector));
+    setup.interval_secs = VENDOR_POLL_SECS;
+    setup.min_gap_secs = VENDOR_POLL_SECS;
+    setup.counters_from_list = true;
+    setup.transport = Some(transport);
+    Ok(Some(setup))
 }
 
 /// Read an invitation from a file once and delete the file (BX-12). The

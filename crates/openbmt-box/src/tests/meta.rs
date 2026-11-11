@@ -4,16 +4,21 @@
 use std::collections::BTreeSet;
 
 const RULES: &str = include_str!("../../../../docs/BOX-RULES.md");
-const ERRORS: [&str; 4] = [
+const ERRORS: [&str; 7] = [
     include_str!("../state.rs"),
     include_str!("../runner.rs"),
     include_str!("../files.rs"),
     include_str!("../pos.rs"),
+    include_str!("../https.rs"),
+    include_str!("../pos_config.rs"),
+    include_str!("../vendor.rs"),
 ];
-const TEST_SOURCES: [&str; 4] = [
+const TEST_SOURCES: [&str; 6] = [
     include_str!("state.rs"),
     include_str!("runner.rs"),
     include_str!("pos.rs"),
+    include_str!("https.rs"),
+    include_str!("vendor.rs"),
     include_str!("../../tests/no_console.rs"),
 ];
 
@@ -38,14 +43,14 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_twenty_four_rules() {
+fn the_rules_file_defines_thirty_rules() {
     let all = all_rules();
-    assert_eq!(all.len(), 24);
+    assert_eq!(all.len(), 30);
     assert!(all.contains("BX-01") && all.contains("BX-43") && all.contains("BX-52"));
 }
 
 #[test]
-fn section_four_has_its_four_rules_and_each_has_tests() {
+fn section_four_has_its_ten_rules_and_each_has_tests() {
     // Section 4 is the one between its heading and the next.
     let start = RULES.find("## 4.").unwrap();
     let end = RULES.find("## 5.").unwrap();
@@ -54,10 +59,12 @@ fn section_four_has_its_four_rules_and_each_has_tests() {
         .filter_map(|l| l.strip_prefix("- **BX-"))
         .map(|rest| format!("BX-{}", &rest[..2]))
         .collect();
-    let expected: BTreeSet<String> = ["BX-40", "BX-41", "BX-42", "BX-43"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let expected: BTreeSet<String> = [
+        "BX-40", "BX-41", "BX-42", "BX-43", "BX-44", "BX-45", "BX-46", "BX-47", "BX-48", "BX-49",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
     assert_eq!(section, expected);
     let sources: String = TEST_SOURCES.concat();
     for id in &expected {

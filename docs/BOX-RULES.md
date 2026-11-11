@@ -1,7 +1,8 @@
 # Box rules: the merchant's own small server
 
 Status: specification for `crates/openbmt-box`. All sections are
-implemented, section 4 (the POS on the Box) included.
+implemented, section 4 (the POS on the Box, and its way to a vendor over
+curl) included.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement `docs/DESIGN.md` §5.3 and close the open item of §16: how a Box,
 which has no screen, is paired.
@@ -154,6 +155,51 @@ screen and not a shared computer.
 - **BX-43.** The Box closes an order in a POS only through a connector
   that can, only for a sale with a counter-signed "paid" notice, and with
   the idempotency key of PS-81. With no such connector it closes nothing.
+
+- **BX-44.** The Box reaches a POS vendor over HTTPS only through the
+  system's `curl`, run as a child process once for each request. It has no
+  TLS library and no HTTP library, and the dependency lists do not change
+  for it: curl and its TLS library come from the system and get the
+  system's security updates. The path of curl is a setting, `curl` from
+  `PATH` unless the shop's setup names another. A curl that is not there, or
+  that the system will not run, is a refusal with words ("curl is not
+  installed on this Box"), never a panic and never another way out.
+- **BX-45.** The POS token is never in the arguments of curl and never in
+  its environment. A request is given to curl as a config on its standard
+  input (`--config -`): every header, the token's among them, and the body.
+  The arguments hold the flags of BX-46 and the URL only. The child is run
+  with an empty environment (so that no proxy variable and no user config
+  file can change what it does), but for the places of the certificates, and
+  `-q` is its first argument. A header or a body that cannot be written
+  into a config is refused before curl is run.
+- **BX-46.** Every request is bounded. The flags are `--proto =https`,
+  `--tlsv1.2` (or later), `--max-time` of 30 seconds, a connect time of 15,
+  `--max-filesize`, `--silent --show-error` and `--write-out '%{http_code}'`;
+  redirects are not followed. The reply goes to standard output and is read
+  with a cap of 8 MiB (PS-90): curl is ended when the cap is passed. A
+  request body is at most 16 KiB. A time out, a name or server that cannot
+  be reached, a TLS failure, a reply over the cap, a curl that failed in
+  another way and an output with no status are each a refusal with words;
+  the reading fails and changes nothing (PS-74).
+- **BX-47.** When the settings in force say Tor is on, every request goes
+  through the SOCKS5 proxy of the setup (`127.0.0.1:9050` unless it names
+  another) with `--socks5-hostname`, so that the proxy resolves the name.
+  A Box that cannot tell whether Tor is on takes it as on. If the proxy is
+  not there, or refuses, the request is refused and nothing else is tried:
+  there is no fallback to a direct request.
+- **BX-48.** The status of a reply decides what it is. 200 to 299 is read.
+  401 and 403 are "the token was refused": the words say to make a new
+  read-only token at the vendor and give it with `pos-token`. 429 is "wait":
+  the reading is not made again for at least a minute, or the time the
+  vendor named if that is longer. A redirect is refused, and any other
+  status is refused with it named.
+- **BX-49.** The Box reads the POS of the vendor its own `pos-config` names
+  (Square or Clover) with the reader of `openbmt-pos-readers` for it:
+  one request for each page, a page at a time, the cursor stored after each
+  page and a page that does not move it refused (PS-74, PS-80). A reading is
+  made once a minute at most, a paid notice's wish for one at once
+  included. The Box closes no order through the vendor's API: Square is
+  read-only (`docs/DESIGN.md` section 5.6) and no Clover close is built.
 
 ## 5. Storage
 
@@ -382,6 +428,55 @@ These details too leave every rule of section 4 as it is.
 - **Files that do not read back.** A `pos-notices` or `pos-ledger` that is
   there and does not read is not read over and not made new: the POS side
   is off, a note says which file, and the relay runs on.
+
+### The way to a vendor (BX-44 to BX-49)
+
+These details too leave every rule of section 4 as it is.
+
+- **The file `pos-config`.** The Box's own file, written whole (BX-50) and
+  read strictly, with the magic `OBMo` and version 1. It holds the vendor
+  (1 Square, 2 Clover), the currency, the vendor's location (Square's
+  location id, or Clover's merchant id, which is 1 to 32 letters and
+  digits), 1 to 8 exact names of the Bitcoin tenders (PS-10) and three
+  optional texts: the path of curl, the Tor proxy as `host:port` and the
+  vendor's host (`https://` and a name; the vendor's own when it is left
+  out, which for Clover is the North American one). It holds no token. A
+  file that is there and does not read back, or whose values are not valid,
+  leaves the POS side off with a note; it is not read over and not replaced.
+- **`pos-setup`.** The console command takes the next line of standard
+  input as `key=value` words separated by `|`: `vendor`, `location`,
+  `currency` and `tenders` (separated by `;`) are needed, `curl`, `socks`
+  and `host` may be given. It stores the file and says the setup is used
+  from the next start of the Box. A word that is not a key the Box knows, a
+  key twice, a key left out or a value that is not valid is refused with
+  words and nothing is stored.
+- **One location.** The Box serves the one location the setup names. The
+  counters at it are the counters on the device list in force, whatever the
+  list is when the settings change, so a counter added or taken off is heard
+  or not at the next step. A list the POS settings do not allow (PS-14: at
+  most 16 counters to a location) is not taken, with one note, and the old
+  list stays.
+- **What curl is run with.** For a Square read: `curl -q --config - --silent
+  --show-error --proto =https --tlsv1.2 --max-time 30 --connect-timeout 15
+  --max-filesize 8388608 --request POST --write-out %{http_code}` and the
+  URL, with `--socks5-hostname <proxy>` when Tor is on. The config has the
+  headers (`Authorization: Bearer <token>`, `Accept`, and for a POST
+  `Content-Type`) and, for a POST, the body as `data-binary`. A body that
+  starts with `@` is refused, because curl would read it as a file. The
+  environment is empty but for `SSL_CERT_FILE` and `SSL_CERT_DIR`, when
+  they are set. `Square-Version` is not sent: the reply is in the version
+  set for the application at the vendor.
+- **What a failure comes to.** Each refusal of BX-44 to BX-49 becomes the
+  POS side's `PosError` for the sync (401 and 403 a refused sign-in, 429 a
+  request to wait, a time out or an unreachable server "not reached", the
+  rest an answer that did not read) and a note of the form `the POS was not
+  reached (<kind>): <rule>: <detail>`, whose words the `notes` and `pos`
+  commands show. The reading after a 429 is not made before the later of
+  the minute and the time the vendor asked for, which is a minute when the
+  vendor did not say (curl is not asked for the header).
+- **What is not read.** A Square payment is not asked for, so a Square
+  tender of type `OTHER` is known by its note only, and a payment that was
+  cancelled after the order closed is not seen (PS-96, **[verify, E5]**).
 
 ## 6. What these rules do not do
 

@@ -11,10 +11,16 @@
 //! (unpaired, invitation open, paired or turned off), `members`, `notes` and
 //! `quit`. For the POS (BX-41): `pos-token` reads the POS sign-in from the
 //! next line of standard input and stores it, and `pos` prints the state of
-//! the POS side, never the token. The program runs until the end of standard
-//! input or `quit`. It holds no vendor's connector, so on its own it
-//! takes the counters' notices no further than the Box's files: a connector
-//! is added by the program that links the library.
+//! the POS side, never the token. `pos-setup` reads the next line of standard
+//! input as the shop's POS vendor (BX-49) and stores it; the Box reads that
+//! vendor's POS over the system's `curl` from its next start. The line is
+//! `key=value` words separated by `|`: `vendor` (`square` or `clover`),
+//! `location` (Square's location id or Clover's merchant id), `currency`,
+//! `tenders` (the exact names of the Bitcoin tenders, separated by `;`) and,
+//! if needed, `curl` (a path), `socks` (the Tor proxy, `host:port`) and `host`
+//! (`https://` and a name). The program runs until the end of standard input
+//! or `quit`. Without a `pos-setup` it reads no POS and keeps the counters'
+//! notices no further than the Box's files.
 //!
 //! With `--no-console` the Box reads no standard input (a service has none)
 //! and an invitation comes only from `--invitation-file`. It runs until the
@@ -29,10 +35,10 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use openbmt_box::say::{
-    invite_lines, members_lines, notes_lines, pos_lines, pos_token_lines, render, state_lines,
-    unknown_lines, ConsoleAnswer,
+    invite_lines, members_lines, notes_lines, pos_lines, pos_setup_lines, pos_token_lines, render,
+    state_lines, unknown_lines, ConsoleAnswer,
 };
-use openbmt_box::{read_invitation_file, BoxError, BoxRunner};
+use openbmt_box::{read_invitation_file, BoxError, BoxRunner, PosConfigError};
 use openbmt_link::ServerConfig;
 use openbmt_net_io::SystemClock;
 
@@ -146,6 +152,11 @@ fn main() -> ExitCode {
                 Some(Ok(token)) => say_all(pos_token_lines(runner.store_pos_token(&token))),
                 // No line after the command is an empty token.
                 _ => say_all(pos_token_lines(Err(BoxError::BadToken("empty")))),
+            },
+            "pos-setup" => match lines.next() {
+                Some(Ok(setup)) => say_all(pos_setup_lines(&runner.store_pos_config(&setup))),
+                // No line after the command is a setup with no words.
+                _ => say_all(pos_setup_lines(&Err(PosConfigError::Missing("vendor")))),
             },
             "pos" => say_all(pos_lines(&runner.pos_view(), runner.status())),
             "members" => say_all(members_lines(&runner.members())),

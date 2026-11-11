@@ -362,6 +362,7 @@ dependencies = [
  "openbmt-link",
  "openbmt-net-io",
  "openbmt-pos",
+ "openbmt-pos-readers",
 ]
 
 [[package]]

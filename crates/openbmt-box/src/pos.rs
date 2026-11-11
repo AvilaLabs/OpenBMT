@@ -22,6 +22,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::io;
+use std::sync::Arc;
 
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::settings::DeviceRole;
@@ -34,6 +35,8 @@ use openbmt_pos::{
 };
 
 use crate::files::BoxFiles;
+use crate::https::Transport;
+use crate::pos_config::PosConfigError;
 
 /// The sales, the numbers and the closes (BX-40, BX-43).
 pub const NOTICES_FILE: &str = "pos-notices";
@@ -64,6 +67,15 @@ pub struct PosSetup {
     pub connector: Box<dyn Connector>,
     /// Seconds between two readings; [`POLL_SECS`] by default.
     pub interval_secs: u64,
+    /// Fewest seconds between two readings, a paid notice's wish for one at
+    /// once included (BX-49); 0 by default.
+    pub min_gap_secs: u64,
+    /// Whether the counters of the shop's one location are the counters on
+    /// the Box's device list, whatever the settings in force say (BX-49).
+    pub counters_from_list: bool,
+    /// What the connector and the POS side share, when the connector reads
+    /// over HTTPS (BX-47).
+    pub transport: Option<Arc<Transport>>,
 }
 
 impl PosSetup {
@@ -73,6 +85,9 @@ impl PosSetup {
             settings,
             connector,
             interval_secs: POLL_SECS,
+            min_gap_secs: 0,
+            counters_from_list: false,
+            transport: None,
         }
     }
 }
@@ -97,6 +112,9 @@ pub enum PosOpenError {
     },
     /// The shop's POS settings are not valid.
     Settings(openbmt_pos::SettingsError),
+    /// The Box's POS vendor file does not read or its values are not valid
+    /// (BX-49).
+    Config(PosConfigError),
 }
 
 impl fmt::Display for PosOpenError {
@@ -109,6 +127,7 @@ impl fmt::Display for PosOpenError {
             ),
             Self::Io { file, kind } => write!(f, "BX-50: could not read {file}: {kind}"),
             Self::Settings(e) => write!(f, "{e}"),
+            Self::Config(e) => write!(f, "{e}"),
         }
     }
 }
@@ -389,6 +408,10 @@ pub struct BoxPos<F: BoxFiles> {
     settings: PosSettings,
     connector: Box<dyn Connector>,
     interval: u64,
+    min_gap: u64,
+    counters_from_list: bool,
+    follow_error: Option<String>,
+    transport: Option<Arc<Transport>>,
     store: Store,
     ledger: Ledger,
     next_poll_at: u64,
@@ -428,6 +451,9 @@ impl<F: BoxFiles> BoxPos<F> {
             settings,
             connector,
             interval_secs,
+            min_gap_secs,
+            counters_from_list,
+            transport,
         } = setup;
         settings.validate().map_err(PosOpenError::Settings)?;
         let store = match files.read(NOTICES_FILE).map_err(io_error(NOTICES_FILE))? {
@@ -444,6 +470,10 @@ impl<F: BoxFiles> BoxPos<F> {
             settings,
             connector,
             interval: interval_secs.max(1),
+            min_gap: min_gap_secs,
+            counters_from_list,
+            follow_error: None,
+            transport,
             store,
             ledger,
             next_poll_at: 0,
@@ -508,7 +538,54 @@ impl<F: BoxFiles> BoxPos<F> {
 
     /// Whether a reading is due at `now`.
     pub fn due(&self, now: u64) -> bool {
-        self.poll_now || now >= self.next_poll_at
+        let gap_passed = self
+            .last_poll_at
+            .is_none_or(|at| now >= at.saturating_add(self.min_gap));
+        (self.poll_now && gap_passed) || now >= self.next_poll_at
+    }
+
+    /// BX-47: tell the connector whether the settings in force have Tor on.
+    pub fn set_tor(&self, on: bool) {
+        if let Some(transport) = &self.transport {
+            transport.set_tor(on);
+        }
+    }
+
+    /// BX-49: when the setup says so, the counters of the shop's one
+    /// location become the counters on the device list in `roles`. Returns
+    /// a note when the list makes settings that are not valid, once for each
+    /// fault.
+    pub fn follow_counters(&mut self, roles: &BTreeMap<DeviceId, DeviceRole>) -> Option<String> {
+        if !self.counters_from_list {
+            return None;
+        }
+        let counters: Vec<DeviceId> = roles
+            .iter()
+            .filter(|(_, role)| **role == DeviceRole::Counter)
+            .map(|(id, _)| *id)
+            .collect();
+        let mut next = self.settings.clone();
+        let place = next.locations.first_mut()?;
+        if place.counters == counters {
+            return None;
+        }
+        place.counters = counters;
+        match next.validate() {
+            Ok(()) => {
+                self.settings = next;
+                self.follow_error = None;
+                None
+            }
+            Err(e) => {
+                let line = format!("BX-49: the counters on the device list were not taken: {e}");
+                if self.follow_error.as_deref() == Some(line.as_str()) {
+                    None
+                } else {
+                    self.follow_error = Some(line.clone());
+                    Some(line)
+                }
+            }
+        }
     }
 
     fn persist(&mut self, next: &Store) -> Result<(), io::Error> {
@@ -713,7 +790,16 @@ impl<F: BoxFiles> BoxPos<F> {
                 {
                     self.next_poll_at = now.saturating_add(self.interval.max(*retry_after_secs));
                 }
-                let line = format!("the POS was not read: {failed}");
+                let line = match (
+                    self.transport.as_ref().and_then(|t| t.take()),
+                    &failed.error,
+                ) {
+                    (Some(why), openbmt_pos::SyncError::Pos(_)) if failed.pages_kept > 0 => {
+                        format!("{} ({} pages kept)", why.note(), failed.pages_kept)
+                    }
+                    (Some(why), openbmt_pos::SyncError::Pos(_)) => why.note(),
+                    _ => format!("the POS was not read: {failed}"),
+                };
                 self.last_error = Some(line.clone());
                 notes.push(line);
             }

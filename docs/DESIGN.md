@@ -751,6 +751,16 @@ service or on the local network (§4.1).
   smallest exposure the POS allows and the setup screen says what is exposed.
 - **Idempotent calls.** Every call to the POS carries a key so that a retry
   does not pay an order twice.
+- **The Box reaches a POS over the system's `curl`, not a Rust TLS stack.**
+  The Box runs `curl` as a child process for each request, with the token on
+  its standard input and the Tor proxy when Tor is on (`docs/BOX-RULES.md`
+  BX-44 to BX-49). A TLS and HTTP stack in the Box's own dependencies would
+  put a large body of code, and every certificate and protocol fix to it,
+  into the lists in `deps/`, to be reviewed and kept up to date by this
+  project. curl and its TLS library come from the system, get the system's
+  security updates, and are what the merchant's own host already trusts; the
+  Box's container image installs curl. The dependency lists stay as they
+  are. A Box with no curl refuses to read the POS and says so.
 - **"Not yet in your POS" queue.** If a sale is paid but the POS call fails, the
   sale goes into a visible queue and is retried. It is never lost and never
   closed in the POS without payment.

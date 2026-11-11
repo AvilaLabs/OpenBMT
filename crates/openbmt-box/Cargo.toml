@@ -13,6 +13,8 @@ openbmt-link = { path = "../openbmt-link" }
 openbmt-courier = { path = "../openbmt-courier" }
 openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-pos = { path = "../openbmt-pos" }
+# The readers of the two vendors the Box reads (BX-49).
+openbmt-pos-readers = { path = "../openbmt-pos-readers" }
 # For the shop's money (an amount and a currency) in what the Box stores.
 openbmt-counter = { path = "../openbmt-counter" }
 

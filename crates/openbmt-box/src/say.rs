@@ -22,7 +22,9 @@ use openbmt_courier::StartError;
 use openbmt_net_io::env::LockError;
 use openbmt_pos::SettingsError as PosSettingsError;
 
-use crate::pos::{PosOpenError, PosState, Reading, POLL_SECS};
+use crate::https::{HttpsKind, TIMEOUT_SECS};
+use crate::pos::{PosOpenError, PosState, Reading};
+use crate::pos_config::{PosConfig, PosConfigError, POS_CONFIG_FILE};
 use crate::runner::{PosView, StartFailure};
 use crate::state::{
     BoxError, BoxStatus, INVITE_SECS, MAX_MEMBERS, MAX_TOKEN_BYTES, POS_TOKEN_FILE,
@@ -436,7 +438,169 @@ impl PosOpenError {
             .code("BX-50")
             .detail(format!("{kind}")),
             Self::Settings(e) => pos_settings_words(e),
+            Self::Config(e) => e.words(),
         }
+    }
+}
+
+impl PosConfigError {
+    /// What a person is told about a till setup that was not taken, or a
+    /// stored one that does not read back (BX-49).
+    pub fn words(&self) -> Words {
+        match self {
+            Self::BadWord(word) => stop(
+                "Setup word not known",
+                "The Box does not know one of the words in the setup line.".into(),
+                Who::BoxKeeper,
+                "Give words as key=value separated by |: vendor, location, currency, tenders, and if needed curl, socks, host.",
+            )
+            .code("BX-49")
+            .quoted(Quoted::new("You typed", word)),
+            Self::Missing(key) => stop(
+                "Setup word missing",
+                "The setup line leaves out a word the Box needs.".into(),
+                Who::BoxKeeper,
+                "Add vendor, location, currency and tenders, each as key=value, and type pos-setup again.",
+            )
+            .code("BX-49")
+            .detail(format!("missing: {key}")),
+            Self::UnknownVendor(vendor) => stop(
+                "Vendor not known",
+                "The Box reads Square and Clover, and the vendor you typed is neither.".into(),
+                Who::BoxKeeper,
+                "Type vendor=square or vendor=clover in the setup line.",
+            )
+            .code("BX-49")
+            .quoted(Quoted::new("You typed", vendor)),
+            Self::BadValue(key) => stop(
+                "Setup value not valid",
+                "One value in the setup line is not valid.".into(),
+                Who::BoxKeeper,
+                "Check the value named under Details and type pos-setup again.",
+            )
+            .code("BX-49")
+            .detail(format!("not valid: {key}")),
+            Self::Damaged(why) => stop(
+                "Till link off: setup damaged",
+                format!("The till link is switched off because the file {POS_CONFIG_FILE} is damaged, and the Box did not replace it."),
+                Who::BoxKeeper,
+                "Type pos-setup again to make a new one, then start the Box again.",
+            )
+            .code("BX-49")
+            .detail(plain(why)),
+            Self::Settings(e) => pos_settings_words(e),
+            Self::Io(kind) => stop(
+                "Setup not saved",
+                "The Box could not save the till setup, so it keeps the old one.".into(),
+                Who::BoxKeeper,
+                "Check that the disk has room and the data folder can be written, then type pos-setup again.",
+            )
+            .code("BX-50")
+            .detail(format!("{kind}")),
+        }
+    }
+}
+
+impl HttpsKind {
+    /// What a person is told when the Box could not reach the till system
+    /// or could not use its answer (BX-44 to BX-49). `detail` is the text
+    /// the note carried.
+    pub fn words(self, detail: &str) -> Words {
+        let detail = plain(detail);
+        let words = match self {
+            Self::CurlMissing => stop(
+                "curl is not installed",
+                "The Box cannot reach the till system because curl is not installed on this Box.".into(),
+                Who::BoxKeeper,
+                "Install curl with the system's package manager, or give its path to pos-setup, then start the Box again.",
+            ),
+            Self::CurlNotRun => stop(
+                "curl could not start",
+                "The Box found curl but the system would not run it, so it did not reach the till system.".into(),
+                Who::BoxKeeper,
+                "Check that this user may run the file named under Details, then start the Box again.",
+            ),
+            Self::BadRequest => stop(
+                "Request not made",
+                "The Box did not send its request to the till system because something in it was not valid.".into(),
+                Who::BoxKeeper,
+                "Check the till setup with pos-setup, and keep the text under Details for whoever looks after this Box.",
+            ),
+            Self::Timeout => stop(
+                "Till system too slow",
+                format!("The till system did not answer within {TIMEOUT_SECS} seconds."),
+                Who::BoxKeeper,
+                "Check the Box's internet connection; the Box tries again by itself.",
+            ),
+            Self::Unreachable => stop(
+                "Till system not reached",
+                "The Box could not reach the till system, or the connection broke.".into(),
+                Who::BoxKeeper,
+                "Check the Box's internet connection; the Box tries again by itself.",
+            ),
+            Self::Tls => stop(
+                "Secure connection failed",
+                "The Box could not make a secure connection to the till system, so it read nothing.".into(),
+                Who::BoxKeeper,
+                "Check the Box's clock and its list of trusted certificates; the Box tries again by itself.",
+            ),
+            Self::ReplyTooLarge => stop(
+                "Till reply too large",
+                "The till system's reply was larger than the Box accepts, so it read nothing from it.".into(),
+                Who::BoxKeeper,
+                "Keep the text under Details for whoever looks after this Box; the Box tries again by itself.",
+            ),
+            Self::CurlFailed => stop(
+                "curl failed",
+                "The program curl stopped with an error the Box has no plain words for, so it read nothing.".into(),
+                Who::BoxKeeper,
+                "Keep the text under Details for whoever looks after this Box; the Box tries again by itself.",
+            ),
+            Self::BadOutput => stop(
+                "curl gave no status",
+                "The program curl finished but did not say how the till system answered, so the Box read nothing.".into(),
+                Who::BoxKeeper,
+                "Check that the curl on this Box is a normal one; the Box tries again by itself.",
+            ),
+            Self::ProxyUnreachable => stop(
+                "Tor proxy not usable",
+                "The Box is set to use Tor and could not use its proxy, so it did not go to the till system without it.".into(),
+                Who::BoxKeeper,
+                "Start Tor on this Box or correct the proxy address in pos-setup; the Box tries again by itself.",
+            ),
+            Self::TokenRefused => stop(
+                "Till refused the token",
+                "The till system refused the Box's POS token, so the Box reads nothing from it.".into(),
+                Who::BoxKeeper,
+                "Make a new read-only token at the till system, then type pos-token and the new token on the next line.",
+            ),
+            Self::RateLimited => Words::new(
+                Tone::Info,
+                "Till asks to wait",
+                "The till system asked the Box to call less often, so the Box is waiting.",
+                Who::Nobody,
+                "Nothing to do. The Box waits and asks again by itself.",
+            ),
+            Self::Redirected => stop(
+                "Till system redirected",
+                "The till system answered with a redirect, which the Box does not follow.".into(),
+                Who::BoxKeeper,
+                "Check the host in pos-setup, and keep the text under Details for whoever looks after this Box.",
+            ),
+            Self::Status => stop(
+                "Till system error",
+                "The till system answered with an error status, so the Box read nothing.".into(),
+                Who::BoxKeeper,
+                "Check the till system's own status page; the Box tries again by itself.",
+            ),
+            Self::Unreadable => stop(
+                "Till reply not readable",
+                "The reader could not make orders of the till system's reply, so the Box read nothing from it.".into(),
+                Who::BoxKeeper,
+                "Keep the text under Details for whoever looks after this Box; the Box tries again by itself.",
+            ),
+        };
+        words.code(self.code()).detail(detail)
     }
 }
 
@@ -484,7 +648,7 @@ impl Reading {
             Self::Reading => Words::new(
                 Tone::Info,
                 "Reading the till system",
-                format!("The Box has its token and reads the till system every {POLL_SECS} seconds."),
+                "The Box has its token and reads the till system on its timer.",
                 Who::Nobody,
                 "Nothing to do. Run pos to see how the last reading went.",
             )
@@ -533,6 +697,11 @@ impl PosState {
     pub fn words(&self, status: BoxStatus) -> Words {
         let base = self.reading.words(status);
         let words = match (&self.reading, &self.last_error, self.last_poll_at) {
+            (Reading::Reading, Some(error), _)
+                if matches!(NoteKind::of(error).0, NoteKind::PosNotReached(_)) =>
+            {
+                note_words(error)
+            }
             (Reading::Reading, Some(error), _) => Words::new(
                 Tone::Stop,
                 "Till reading failed",
@@ -547,7 +716,7 @@ impl PosState {
                 "Waiting to read the till",
                 "The Box has its token and has not read the till system yet.",
                 Who::Nobody,
-                format!("Nothing to do. It reads within {POLL_SECS} seconds."),
+                "Nothing to do. It reads within a minute.",
             )
             .code("BX-40"),
             _ => base,
@@ -583,11 +752,11 @@ impl PosView {
     pub fn words(&self, status: BoxStatus) -> Words {
         match self {
             Self::NotInstalled => Words::new(
-                Tone::Ended,
-                "No till connector",
-                "This Box program has no connector to a till system, so it reads none.",
-                Who::Nobody,
-                "Nothing to do here. Only a Box program built with a till connector reads a till system.",
+                Tone::Info,
+                "No till system set up",
+                "This Box has no till system set up, so it reads none.",
+                Who::BoxKeeper,
+                "Type pos-setup and the setup line to choose Square or Clover, then start the Box again.",
             ),
             Self::Disabled(e) => e.words(),
             Self::State(state) => state.words(status),
@@ -682,6 +851,8 @@ pub enum ConsoleAnswer {
     InvitationTaken,
     /// `pos-token` stored the token.
     PosTokenStored,
+    /// `pos-setup` stored the setup; the vendor's word.
+    PosSetupStored(String),
     /// `members`: how many devices the Box serves.
     Members(usize),
     /// `notes` when the Box has kept none.
@@ -725,6 +896,14 @@ impl ConsoleAnswer {
                 "Nothing to do. Run pos to see whether the Box reads the till system.",
             )
             .code("BX-41"),
+            Self::PosSetupStored(vendor) => Words::new(
+                Tone::Good,
+                "Till setup stored",
+                format!("The Box stored the setup for {vendor} and uses it from its next start."),
+                Who::BoxKeeper,
+                "Start the Box again, then type pos-token and the token on the next line.",
+            )
+            .code("BX-49"),
             Self::Members(0) => Words::new(
                 Tone::Info,
                 "No devices served",
@@ -756,7 +935,7 @@ impl ConsoleAnswer {
                 "Command not known",
                 "The Box does not know that command.",
                 Who::BoxKeeper,
-                "Type one of invite, state, pos-token, pos, members, notes or quit.",
+                "Type one of invite, state, pos-setup, pos-token, pos, members, notes or quit.",
             )
             .quoted(Quoted::new("You typed", word)),
             Self::InvitationFileUnreadable { path, kind } => stop(
@@ -918,6 +1097,10 @@ pub enum NoteKind {
     PaidNoticesNotStored,
     /// The POS was not read.
     PosNotRead,
+    /// The Box could not reach the POS or use its answer (BX-44 to BX-49).
+    PosNotReached(HttpsKind),
+    /// The counters on the device list were not taken for the till link.
+    CountersNotTaken,
     /// The POS named no order to close.
     NoOrderToClose,
     /// A close was refused for a sale not paid now.
@@ -973,6 +1156,20 @@ impl NoteKind {
             (Self::PaidNoticesNotStored, rest)
         } else if let Some(rest) = after("the POS was not read: ") {
             (Self::PosNotRead, rest)
+        } else if let Some(rest) = after("the POS was not reached (") {
+            match rest.split_once("): ") {
+                Some((tag, tail)) => match HttpsKind::from_tag(tag) {
+                    Some(kind) => (
+                        Self::PosNotReached(kind),
+                        tail.split_once(": ").map_or(tail, |(_, detail)| detail),
+                    ),
+                    None => (Self::Other, line),
+                },
+                None => (Self::Other, line),
+            }
+        } else if let Some(rest) = after("BX-49: the counters on the device list were not taken: ")
+        {
+            (Self::CountersNotTaken, rest)
         } else if let Some(rest) = after("the POS did not name an order to close: ") {
             (Self::NoOrderToClose, rest)
         } else if let Some(rest) = after("PS-81: an order is closed only") {
@@ -1205,6 +1402,15 @@ impl NoteKind {
                 "Tell the owner: this Box's record of closed orders is full.",
             )
             .code("PS-72"),
+            Self::PosNotReached(kind) => kind.words(&rest),
+            Self::CountersNotTaken => stop(
+                "Counter list not taken",
+                "The Box could not use the owner's list of counters for the till link, so it keeps the one it had.".into(),
+                Who::Owner,
+                "Tell the owner: one till location can serve only a few counters.",
+            )
+            .code("BX-49")
+            .detail(rest),
             Self::Other => Words::new(
                 Tone::Info,
                 "Note from the Box",
@@ -1254,6 +1460,20 @@ pub fn state_lines(status: BoxStatus) -> Vec<String> {
 pub fn pos_token_lines(result: Result<(), BoxError>) -> Vec<String> {
     match result {
         Ok(()) => lines_of(&ConsoleAnswer::PosTokenStored.words()),
+        Err(e) => lines_of(&e.words()),
+    }
+}
+
+/// The answer to `pos-setup`: the words, then the stable line
+/// `pos-setup: <vendor>` when it was taken.
+pub fn pos_setup_lines(result: &Result<PosConfig, PosConfigError>) -> Vec<String> {
+    match result {
+        Ok(config) => {
+            let mut lines =
+                lines_of(&ConsoleAnswer::PosSetupStored(config.vendor.word().to_string()).words());
+            lines.push(format!("pos-setup: {}", config.vendor.word()));
+            lines
+        }
         Err(e) => lines_of(&e.words()),
     }
 }
@@ -1506,14 +1726,43 @@ pub fn all_words() -> Vec<(String, Words)> {
         }
         .words(),
     );
+    add(
+        "PosOpenError::Config and PosConfigError::Damaged",
+        PosOpenError::Config(PosConfigError::Damaged("message is cut short".into())).words(),
+    );
+    add(
+        "PosConfigError::BadWord",
+        PosConfigError::BadWord("colour=red".into()).words(),
+    );
+    add(
+        "PosConfigError::Missing",
+        PosConfigError::Missing("vendor").words(),
+    );
+    add(
+        "PosConfigError::UnknownVendor",
+        PosConfigError::UnknownVendor("stripe".into()).words(),
+    );
+    add(
+        "PosConfigError::BadValue",
+        PosConfigError::BadValue("tenders").words(),
+    );
+    add(
+        "PosConfigError::Io",
+        PosConfigError::Io(io::ErrorKind::PermissionDenied).words(),
+    );
     for (name, e) in [
         ("TenderNames", PosSettingsError::TenderNames),
         ("Currencies", PosSettingsError::Currencies),
         ("Locations", PosSettingsError::Locations),
         ("Timing", PosSettingsError::Timing),
     ] {
+        let also = if name == "TenderNames" {
+            " and PosConfigError::Settings"
+        } else {
+            ""
+        };
         add(
-            &format!("PosOpenError::Settings and PosSettingsError::{name}"),
+            &format!("PosOpenError::Settings and PosSettingsError::{name}{also}"),
             PosOpenError::Settings(e).words(),
         );
     }
@@ -1558,6 +1807,10 @@ pub fn all_words() -> Vec<(String, Words)> {
     let answers = [
         ("InvitationTaken", ConsoleAnswer::InvitationTaken),
         ("PosTokenStored", ConsoleAnswer::PosTokenStored),
+        (
+            "PosSetupStored",
+            ConsoleAnswer::PosSetupStored("square".into()),
+        ),
         ("Members: none", ConsoleAnswer::Members(0)),
         ("Members: some", ConsoleAnswer::Members(3)),
         ("NoNotes", ConsoleAnswer::NoNotes),
@@ -1582,12 +1835,22 @@ pub fn all_words() -> Vec<(String, Words)> {
     for (name, line) in SAMPLE_NOTES {
         add(name, note_words(line));
     }
+    for kind in HttpsKind::ALL {
+        add(
+            &format!("NoteKind::PosNotReached: {}", kind.tag()),
+            note_words(&format!(
+                "the POS was not reached ({}): {}: sample detail",
+                kind.tag(),
+                kind.code()
+            )),
+        );
+    }
     all
 }
 
 /// One stored note for every kind of note, as its writer words it, with the
 /// name of the entry in [`all_words`].
-const SAMPLE_NOTES: [(&str, &str); 29] = [
+const SAMPLE_NOTES: [(&str, &str); 30] = [
     (
         "NoteKind::MemberListNotReplaced",
         "the member list was not replaced: could not write members: permission denied",
@@ -1695,6 +1958,10 @@ const SAMPLE_NOTES: [(&str, &str); 29] = [
     (
         "NoteKind::PosSideOff",
         "the POS side is off: BX-51: pos-notices is damaged (message is cut short): the Box does not run the POS",
+    ),
+    (
+        "NoteKind::CountersNotTaken",
+        "BX-49: the counters on the device list were not taken: PS-14: locations are unique, with each counter in at most one place",
     ),
     (
         "NoteKind::TooManyCloses",
