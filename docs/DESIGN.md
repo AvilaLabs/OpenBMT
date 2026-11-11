@@ -1820,9 +1820,8 @@ Each gets a written protocol before it runs.
   QR. The https payment page is removed (§7).
 - **Q2. Instant on the light check: kept, tighter and labeled.** $10 per sale
   and $50 outstanding with the light check (check line "Light check"); $25
-  and $100
-  with the merchant's own node, only when the counter's light client also saw
-  the payment (§6).
+  and $100 with the merchant's own node, only when the counter's light client
+  also saw the payment (§6).
 - **Q3. Release keys.** The Key app has its own release key, kept offline on a
   device that never builds or publishes. Round 3 adds that it is held by a
   second, independent person (a launch condition, below). Releases are
