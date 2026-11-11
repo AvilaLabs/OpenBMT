@@ -73,7 +73,7 @@ object AppModelTest {
         for ((name, w) in all) ok(SayCheck.problem(w) == null, "words of $name: ${SayCheck.problem(w)}")
         ok(SayCheck.distinctProblem(all) == null, "no two words read the same: ${SayCheck.distinctProblem(all)}")
         ok(AppWords.orbotNotRunning.what == "Tor is on for this shop, but Orbot is not running.", "the Orbot words, as written down")
-        ok(AppWords.orbotNotRunning.next == "Open Orbot and turn it on.", "the Orbot next step")
+        ok(AppWords.orbotNotRunning.next == "Open Orbot and turn it on. If it listens at another address, the manager can change it under Network.", "the Orbot next step")
         ok(AppWords.orbotNotRunning.who == Who.MANAGER, "the manager does it")
         ok(AppWords.pinWrong(4).tone == Tones.STOP && AppWords.pinWrong(4).next.contains("4 seconds"), "a wrong PIN says how long")
         ok(AppWords.waitText(1) == "1 second" && AppWords.waitText(59) == "59 seconds", "short waits")
@@ -256,8 +256,8 @@ object AppModelTest {
         ok(AppWords.pairingForgotten.next.contains("Key app") && AppWords.pairingForgotten.what.contains("forgotten"), "the words say what happened and to start again from the Key app")
 
         // What is checked before the camera opens.
-        fun problem(counter: String = "Front", manager: String = "Mia", pin1: String = "246810", pin2: String = "246810", proxy: String = "127.0.0.1:9050") =
-            FirstStartCheck.problem(counter, manager, pin1, pin2, proxy)
+        fun problem(counter: String = "Front", manager: String = "Mia", pin1: String = "246810", pin2: String = "246810") =
+            FirstStartCheck.problem(counter, manager, pin1, pin2)
         ok(problem() == null, "good entries")
         ok(problem(counter = "") === AppWords.counterNameNotAccepted, "no counter name")
         ok(problem(counter = "x".repeat(33)) === AppWords.counterNameNotAccepted, "a counter name of 33 characters")
@@ -267,7 +267,11 @@ object AppModelTest {
         ok(problem(manager = "") === AppWords.nameNotAccepted, "no manager name")
         ok(problem(pin1 = "12345", pin2 = "12345") === AppWords.pinNotAccepted, "a short PIN")
         ok(problem(pin2 = "246811") === AppWords.pinNotAccepted, "two different PINs")
-        ok(problem(proxy = "orbot") === AppWords.torAddressNotAccepted, "an address that is not host:port")
+        ok(NetworkCheck.problem("orbot") === AppWords.torAddressNotAccepted, "an address that is not host:port")
+        ok(NetworkCheck.problem("127.0.0.1:9050") == null && NetworkCheck.problem("192.168.1.5:9150") == null, "an address that is")
+        ok(AppConfig(AppConfig.DEFAULT_PROXY, "Mia", "Sam", "node.onion").withProxy("10.0.0.2:9150").encode().toString(Charsets.UTF_8) == "proxy: 10.0.0.2:9150\nmanager: Mia\ncashier: Sam\nownnode: node.onion\n", "the Network screen changes the proxy and nothing else")
+        ok(AppWords.orbotNotRunning.next.contains("Network") && AppWords.networkAbout.who == Who.MANAGER, "the Orbot words point to the Network screen")
+        ok(!AppWords.notSetUp.next.contains("Orbot") && !AppWords.torIsOn.next.contains("below"), "the first start no longer asks for Orbot's address")
         ok(FirstStartCheck.wordsLine(listOf("river", "tulip", "anchor", "maple")) == "river   tulip   anchor   maple", "the four words on one line, spaced")
 
         ok(HostPort.valid("127.0.0.1:9050") && HostPort.valid("localhost:1") && HostPort.valid("[::1]:9050") && HostPort.valid("a.b-c.onion:65535"), "host:port")
@@ -584,6 +588,12 @@ object AppModelTest {
         val usd = Money.of("USD")!!
         ok(SaleModel.amountLine(usd, 1234, 25_000) == "12.34 USD, 25,000 sats to send", "the amount line gives both (SC-09)")
         ok(SaleModel.amountLine(usd, null, 1) == "1 sat to send", "an amount in sats alone")
+        ok(SaleModel.amountBig(usd, 1234, 25_000) == "12.34 USD" && SaleModel.amountSmall(1234, 25_000) == "25,000 sats to send", "the band's amount and its line")
+        ok(SaleModel.amountBig(usd, 1234, 25_000) + ", " + SaleModel.amountSmall(1234, 25_000) == SaleModel.amountLine(usd, 1234, 25_000), "the band says what the amount line says")
+        ok(SaleModel.amountBig(usd, null, 1) + " " + SaleModel.amountSmall(null, 1) == SaleModel.amountLine(usd, null, 1), "and in sats alone")
+        ok(SaleModel.isPaid(SaleState.PaidInstant) && SaleModel.isPaid(SaleState.Final) && SaleModel.isPaid(SaleState.PaidLightning) && SaleModel.isPaid(SaleState.Overridden), "paid states")
+        ok(!SaleModel.isPaid(SaleState.NotPaidYet) && !SaleModel.isPaid(SaleState.DoNotHandOver) && !SaleModel.isPaid(SaleState.Waiting) && !SaleModel.isPaid(SaleState.Expired), "unpaid states")
+        ok(SaleState.values().none { SaleModel.isPaid(it) && SaleModel.buttons(it).requote }, "Done and Requote are never both the main action")
         ok(SaleModel.receivedLine(5000, 6000) == "Received 5,000 sats of 6,000 sats", "the received line")
         ok(SaleModel.isEnded(SaleState.Expired) && !SaleModel.isEnded(SaleState.Waiting), "ended sales")
         ok(SaleModel.isEnded(SaleState.PaidLightning), "a sale paid by Lightning is over (CR-109)")

@@ -549,8 +549,10 @@ own; the library judges sales and prices and knows nothing of them.
   price fetch, the app asks the proxy for a SOCKS5 greeting. If the proxy
   does not answer, nothing is sent around it: the node is not started, no
   price is fetched, and the app says "Tor is on for this shop, but Orbot is
-  not running." and "Open Orbot and turn it on." The manager is the one
-  who acts. This is NR-26 applied: the proxy is the caller's. The node
+  not running." and "Open Orbot and turn it on. If it listens at another
+  address, the manager can change it under Network." The Network screen,
+  reached from home and from that screen, holds the proxy's address; it is
+  saved behind the manager's PIN. The manager is the one who acts. This is NR-26 applied: the proxy is the caller's. The node
   enforces it from the verified settings: `start` refuses to start, with
   this rule, when the signed settings have Tor on and the start has no
   proxy. The app's reading of the settings before the start (`pairing_read`)

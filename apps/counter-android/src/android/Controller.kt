@@ -19,10 +19,12 @@ import java.time.ZoneId
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import org.openbmt.app.AnimatedQrView
+import org.openbmt.app.Colour
 import org.openbmt.app.Format
 import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.SayWords
 import org.openbmt.app.ScanFlow
+import org.openbmt.app.SaleBand
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Ui
 import org.openbmt.app.UrScan
@@ -91,7 +93,6 @@ class Controller(private val act: MainActivity) {
     private val progress = PairingProgress()
     private var draftCounterName = "Counter"
     private var draftName = ""
-    private var draftProxy = AppConfig.DEFAULT_PROXY
 
     // What runs.
     @Volatile
@@ -202,7 +203,7 @@ class Controller(private val act: MainActivity) {
         when (val s = ScreenModel.pick(fault, setup, torBlocked, node != null, locked())) {
             is Screen.Fault -> showMessage(s.words, "Try again") { begin() }
             is Screen.FirstStart -> showFirstStart(null)
-            is Screen.TorBlocked -> showMessage(s.words, "Check again") { begin() }
+            is Screen.TorBlocked -> page(listOf(ui.words(s.words), ui.primary("Check again") { begin() }, ui.button("Network") { showNetwork() }))
             is Screen.Starting -> page(listOf(ui.words(AppWords.starting)))
             is Screen.WhoAtTill -> showWho(null)
             is Screen.Home -> showHome()
@@ -455,7 +456,7 @@ class Controller(private val act: MainActivity) {
     }
 
     private fun showMessage(words: SayWords, label: String = "Back", back: () -> Unit) {
-        page(listOf(ui.words(words), ui.button(label) { back() }))
+        page(listOf(ui.words(words), ui.primary(label, WordsModel.buttonColour(words.tone)) { back() }))
     }
 
     private fun <T> async(work: () -> T, done: (Result<T>) -> Unit) {
@@ -485,14 +486,10 @@ class Controller(private val act: MainActivity) {
         val pin2 = pinField(act, "PIN again")
         views.add(pin1)
         views.add(pin2)
-        views.add(label("Address of Orbot (used only when the shop's settings turn Tor on)"))
-        val proxy = ui.field("host:port").also { it.setText(draftProxy) }
-        views.add(proxy)
-        views.add(ui.button("Pair with the Key app") {
+        views.add(ui.primary("Pair with the Key app") {
             draftCounterName = counterName.text.toString().trim()
             draftName = name.text.toString().trim()
-            draftProxy = proxy.text.toString().trim()
-            startPairing(draftCounterName, draftName, pin1.text.toString(), pin2.text.toString(), draftProxy)
+            startPairing(draftCounterName, draftName, pin1.text.toString(), pin2.text.toString())
         })
         page(views)
     }
@@ -501,12 +498,12 @@ class Controller(private val act: MainActivity) {
      * What was typed is checked and kept first (the PIN and the config; the pairing is what completes the
      * setup), then the pairing begins with the camera for the Key app's offer.
      */
-    private fun startPairing(counterName: String, managerName: String, pin1: String, pin2: String, proxy: String) {
-        FirstStartCheck.problem(counterName, managerName, pin1, pin2, proxy)?.let { return showFirstStart(it) }
+    private fun startPairing(counterName: String, managerName: String, pin1: String, pin2: String) {
+        FirstStartCheck.problem(counterName, managerName, pin1, pin2)?.let { return showFirstStart(it) }
         page(listOf(ui.words(AppWords.starting)))
         async({
             pin.set(pin1)
-            configFile.save(AppConfig(proxy, managerName, ""))
+            configFile.save(AppConfig(AppConfig.DEFAULT_PROXY, managerName, ""))
         }) { r ->
             when (val e = r.exceptionOrNull()) {
                 null -> scanOffer()
@@ -521,7 +518,7 @@ class Controller(private val act: MainActivity) {
 
     /** A page with [words] and a Scan button: the camera is asked for only when Scan is tapped (CR-90). */
     private fun scanPage(words: SayWords, scanNow: () -> Unit, cancel: () -> Unit) {
-        page(listOf(ui.words(words), ui.button("Scan") { scanNow() }, ui.button("Cancel") { cancel() }))
+        page(listOf(ui.words(words), ui.primary("Scan") { scanNow() }, ui.button("Cancel") { cancel() }))
     }
 
     private fun failedScan(f: org.openbmt.app.ScanFailure) {
@@ -584,8 +581,8 @@ class Controller(private val act: MainActivity) {
             views.add(ui.words(if (view.animated) UrWords.showingAnimated(Who.MANAGER) else UrWords.showingStill(Who.MANAGER)))
             views.add(view)
         }
-        views.add(ui.button("They match") { theyMatch() })
-        views.add(ui.button("They differ") { theyDiffer() })
+        views.add(ui.primary("They match") { theyMatch() })
+        views.add(ui.danger("They differ") { theyDiffer() })
         page(views)
     }
 
@@ -705,7 +702,7 @@ class Controller(private val act: MainActivity) {
         }
         views.add(label("Price"))
         views.add(priceSlot)
-        views.add(ui.button("New sale") { showNewSale() })
+        views.add(ui.primary("New sale") { showNewSale() })
         views.add(ui.button("Sales") { showSales() })
         views.add(ui.button("Today") { showToday(false) })
         if (cashiers.isEmpty()) {
@@ -733,6 +730,7 @@ class Controller(private val act: MainActivity) {
         }
         views.add(ui.button("Staff") { showStaffEntry() })
         views.add(ui.button("Your own node") { showOwnNode() })
+        views.add(ui.button("Network") { showNetwork() })
         views.add(ui.button("Lightning") { showLightning(null) })
         views.add(ui.button("About") { showAbout() })
         page(views)
@@ -788,7 +786,7 @@ class Controller(private val act: MainActivity) {
         val cfg = config ?: return render()
         val rec = record ?: return render()
         val msg = Slot(act)
-        val address = ui.field("Tor address of your node").also { it.setText(cfg.ownNode) }
+        val address = ui.field("Tor address of your node", mono = true).also { it.setText(cfg.ownNode) }
         val pinInput = pinField(act, "Manager's PIN")
         page(
             listOf(
@@ -798,11 +796,11 @@ class Controller(private val act: MainActivity) {
                 label("Manager's PIN"),
                 pinInput,
                 msg,
-                ui.button("Save") {
+                ui.primary("Save") {
                     val text = address.text.toString().trim()
                     checkPin(pinInput.text.toString(), { saveOwnNode(cfg, rec, text, msg) }, { msg.show(ui.words(it)) })
                 },
-                ui.button("Remove") {
+                ui.danger("Remove") {
                     checkPin(pinInput.text.toString(), { keepOwnNode(cfg, "", AppWords.ownNodeRemoved, msg) }, { msg.show(ui.words(it)) })
                 },
                 ui.button("Back") { showHome() },
@@ -834,6 +832,46 @@ class Controller(private val act: MainActivity) {
         showMessage(done, "Start") { begin() }
     }
 
+    // ---- the network: the address of Orbot (CR-87) -----------------------------------------------
+
+    /** The address Tor is reached at, behind the manager's PIN. Open from home, and from the screen that says Orbot did not answer. */
+    private fun showNetwork() {
+        if (node != null && lockedOut()) return
+        val cfg = config ?: return render()
+        val msg = Slot(act)
+        val address = ui.field("host:port", mono = true).also { it.setText(cfg.proxy) }
+        val pinInput = pinField(act, "Manager's PIN")
+        page(
+            listOf(
+                ui.words(AppWords.networkAbout),
+                label("Address of Orbot"),
+                address,
+                label("Manager's PIN"),
+                pinInput,
+                msg,
+                ui.primary("Save") {
+                    val text = address.text.toString().trim()
+                    val problem = NetworkCheck.problem(text)
+                    if (problem != null) {
+                        msg.show(ui.words(problem))
+                    } else {
+                        checkPin(pinInput.text.toString(), { keepNetwork(cfg, text, msg) }, { msg.show(ui.words(it)) })
+                    }
+                },
+                ui.button("Back") { render() },
+            ),
+        )
+    }
+
+    private fun keepNetwork(cfg: AppConfig, address: String, msg: Slot) {
+        try {
+            configFile.save(cfg.withProxy(address))
+        } catch (e: IOException) {
+            return msg.show(ui.words(AppWords.fileNotSaved(e.message)))
+        }
+        showMessage(AppWords.networkSaved, "Start") { begin() }
+    }
+
     // ---- Lightning through the shop's own node (CR-112 to CR-116) -------------------------------------
 
     /** The connection to the shop's node, behind the manager's PIN: scan or type it, test it, save it sealed, or remove it. */
@@ -842,10 +880,10 @@ class Controller(private val act: MainActivity) {
         if (node == null) return render()
         val msg = Slot(act)
         (notice ?: lightningFault)?.let { msg.show(ui.words(it)) }
-        val code = ui.field("lndconnect:// code", lines = 3).also { it.setText(draftLnCode) }
-        val address = ui.field("host:port").also { it.setText(draftLnAddress) }
-        val rune = ui.field("Rune").also { it.setText(draftLnRune) }
-        val cert = ui.field("Certificate, or its SHA-256 fingerprint", lines = 4).also { it.setText(draftLnCert) }
+        val code = ui.field("lndconnect:// code", lines = 3, mono = true).also { it.setText(draftLnCode) }
+        val address = ui.field("host:port", mono = true).also { it.setText(draftLnAddress) }
+        val rune = ui.field("Rune", mono = true).also { it.setText(draftLnRune) }
+        val cert = ui.field("Certificate, or its SHA-256 fingerprint", lines = 4, mono = true).also { it.setText(draftLnCert) }
         val pinInput = pinField(act, "Manager's PIN")
         fun keep() {
             draftLnCode = code.text.toString()
@@ -869,7 +907,7 @@ class Controller(private val act: MainActivity) {
                         onCancel = { showLightning(null) },
                     )
                 },
-                ui.button("Test and save the LND connection") {
+                ui.primary("Test and save the LND connection") {
                     keep()
                     testLightning(LightningSetup.lnd(draftLnCode), pinInput.text.toString(), msg)
                 },
@@ -884,7 +922,7 @@ class Controller(private val act: MainActivity) {
                 label("Manager's PIN"),
                 pinInput,
                 msg,
-                ui.button("Remove the connection") {
+                ui.danger("Remove the connection") {
                     checkPin(pinInput.text.toString(), { removeLightning(msg) }, { msg.show(ui.words(it)) })
                 },
                 ui.button("Back") { forgetLightningDraft(); showHome() },
@@ -1007,7 +1045,7 @@ class Controller(private val act: MainActivity) {
                 ),
             ),
         )
-        views.add(ui.button("Open the sale") {
+        views.add(ui.primary("Open the sale") {
             if (entry.minor <= 0) msg.show(ui.words(AppWords.amountNeeded)) else openSale(entry.minor) { msg.show(ui.words(it)) }
         })
         views.add(ui.button("Back") { showHome() })
@@ -1052,25 +1090,27 @@ class Controller(private val act: MainActivity) {
         val m = money ?: return render()
         locks.saleScreen(index)
         val views = ArrayList<View>()
+        // The state in large type and the amount at 44 sp fill the top third, so that it reads across the counter.
+        val band = SaleBand(act)
+        views.add(band)
         val msg = Slot(act)
         if (notice != null) msg.show(ui.words(notice))
         views.add(msg)
-        val maxPx = (act.resources.displayMetrics.heightPixels * 0.6f).toInt()
+        val maxPx = (act.resources.displayMetrics.heightPixels * 0.45f).toInt()
         var qr: QrView? = first?.let { QrView(act, it, maxPx) }
         qr?.let { views.add(it) }
-        val amount = ui.text("", 20f, bold = true)
         val received = ui.text("", 16f)
         val state = Slot(act)
         val buttons = Slot(act)
+        val done = Slot(act)
         val lightning = Slot(act)
-        views.add(amount)
         views.add(received)
         views.add(state)
         views.add(lightning)
         views.add(buttons)
         var uri: String? = first?.copyUri
         val slotForQr = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-        if (qr == null) views.add(1, slotForQr)
+        if (qr == null) views.add(2, slotForQr)
         views.add(ui.button("Copy the request") {
             val u = uri
             if (u != null) {
@@ -1079,7 +1119,8 @@ class Controller(private val act: MainActivity) {
             }
         })
         views.add(ui.button("Details and refunds") { showSaleDetails(index) })
-        views.add(ui.button("Done") { showHome() })
+        done.show(ui.button("Done") { showHome() })
+        views.add(done)
         page(views)
         var shown: SaleState? = null
         tick = {
@@ -1097,10 +1138,11 @@ class Controller(private val act: MainActivity) {
                         existing.show(p)
                     }
                 }
-                amount.text = SaleModel.amountLine(m, amounts[index], s.needsSats)
+                val says = WordsModel.of(s.words.say())
+                band.show(says, SaleModel.amountBig(m, amounts[index], s.needsSats), SaleModel.amountSmall(amounts[index], s.needsSats))
                 received.text = SaleModel.receivedLine(s.receivedSats, s.needsSats)
                 state.show(
-                    ui.words(s.words.say()),
+                    ui.wordsBelowBand(says),
                     *listOfNotNull(s.check).map { c -> ui.words(c.say()) }.toTypedArray(),
                     *s.flags.map { f -> ui.words(f.say()) }.toTypedArray(),
                 )
@@ -1116,10 +1158,12 @@ class Controller(private val act: MainActivity) {
                     shown = s.state
                     val b = SaleModel.buttons(s.state)
                     val list = ArrayList<View>()
-                    if (b.requote) list.add(ui.button("Requote") { requote(index, msg) })
-                    if (b.cancel) list.add(ui.button("Cancel the sale") { cancelSale(index, msg) })
+                    if (b.requote) list.add(ui.primary("Requote") { requote(index, msg) })
+                    if (b.cancel) list.add(ui.danger("Cancel the sale") { cancelSale(index, msg) })
                     if (b.override) list.add(ui.button(if (cashiers.isEmpty()) "Accept by hand (manager)" else "Accept by hand") { showOverride(index) })
                     buttons.show(*list.toTypedArray())
+                    // Once the sale is paid, the one thing left to do is to finish.
+                    done.show(if (SaleModel.isPaid(s.state)) ui.primary("Done", Colour.Green) { showHome() } else ui.button("Done") { showHome() })
                 }
             } catch (e: CounterException) {
                 state.show(ui.words(e.sayWords()))
@@ -1219,7 +1263,7 @@ class Controller(private val act: MainActivity) {
             views.add(ui.words(AppWords.overrideAbout))
             val actor = actorBlock(views)
             views.add(msg)
-            views.add(ui.button("Accept this sale") {
+            views.add(ui.primary("Accept this sale") {
                 resolveActor(actor, { who ->
                     try {
                         n.overrideSale(nowSecs(), index, who)
@@ -1238,7 +1282,7 @@ class Controller(private val act: MainActivity) {
                 ui.words(AppWords.managerNeeded),
                 pinInput,
                 msg,
-                ui.button("Accept this sale") {
+                ui.primary("Accept this sale") {
                     checkPin(pinInput.text.toString(), {
                         try {
                             n.overrideSale(nowSecs(), index, Actor(ActorRole.Manager, cfg.manager))
@@ -1298,7 +1342,7 @@ class Controller(private val act: MainActivity) {
                 views.add(ui.words(r.words.say()))
                 val number = r.number
                 if (number != null && (r.state == RefundState.Requested || r.state == RefundState.WaitingForDepth)) {
-                    views.add(ui.button("Withdraw this request") { showWithdraw(index, number) })
+                    views.add(ui.danger("Withdraw this request") { showWithdraw(index, number) })
                 }
             }
             views.add(ui.button("Ask for a refund") { showRefundRequest(index) })
@@ -1330,7 +1374,7 @@ class Controller(private val act: MainActivity) {
         val reason = ui.field("A short reason")
         views.add(reason)
         val actor = actorBlock(views)
-        views.add(ui.button("Ask for the refund") {
+        views.add(ui.primary("Ask for the refund") {
             val text = amount.text.toString()
             val dest = destination.text.toString().trim()
             val why = reason.text.toString().trim()
@@ -1383,7 +1427,7 @@ class Controller(private val act: MainActivity) {
         val reason = ui.field("A short reason")
         views.add(reason)
         val actor = actorBlock(views)
-        views.add(ui.button("Save the cash refund") {
+        views.add(ui.primary("Save the cash refund") {
             val minor = m.parse(amount.text.toString())
             val why = reason.text.toString().trim()
             when {
@@ -1411,7 +1455,7 @@ class Controller(private val act: MainActivity) {
         views.add(msg)
         views.add(ui.text("Withdraw refund request $number of sale ${index + 1}?", 18f, bold = true))
         val actor = actorBlock(views)
-        views.add(ui.button("Withdraw it") {
+        views.add(ui.danger("Withdraw it") {
             resolveActor(actor, { who ->
                 try {
                     n.withdrawRefund(nowSecs(), index, number, who)
@@ -1446,7 +1490,7 @@ class Controller(private val act: MainActivity) {
                 label("PIN"),
                 pinInput,
                 msg,
-                ui.button("Sign in") { signIn(person, pinInput.text.toString(), msg) },
+                ui.primary("Sign in") { signIn(person, pinInput.text.toString(), msg) },
                 ui.button("Back") { showWho(null) },
             ),
         )
@@ -1481,7 +1525,7 @@ class Controller(private val act: MainActivity) {
                 ui.words(AppWords.staffPinNeeded),
                 pinInput,
                 msg,
-                ui.button("Open") { checkPin(pinInput.text.toString(), { showStaff(emptyList()) }, { msg.show(ui.words(it)) }) },
+                ui.primary("Open") { checkPin(pinInput.text.toString(), { showStaff(emptyList()) }, { msg.show(ui.words(it)) }) },
                 ui.button("Back") { showHome() },
             ),
         )
@@ -1499,7 +1543,7 @@ class Controller(private val act: MainActivity) {
         for (name in cashiers) {
             views.add(ui.text(name, 18f, bold = true))
             views.add(ui.button("New PIN for $name") { showCashierPin(name) })
-            views.add(ui.button("Remove $name") { showRemoveCashier(name) })
+            views.add(ui.danger("Remove $name") { showRemoveCashier(name) })
         }
         views.add(label("Add a cashier"))
         val nameField = ui.field("Name of the cashier")
@@ -1510,7 +1554,7 @@ class Controller(private val act: MainActivity) {
         views.add(pin1)
         views.add(pin2)
         views.add(msg)
-        views.add(ui.button("Add the cashier") {
+        views.add(ui.primary("Add the cashier") {
             addCashier(cfg, nameField.text.toString().trim(), pin1.text.toString(), pin2.text.toString(), msg)
         })
         views.add(ui.button("Back") { showHome() })
@@ -1542,7 +1586,7 @@ class Controller(private val act: MainActivity) {
             listOf(
                 ui.text("Remove $name?", 20f, bold = true),
                 msg,
-                ui.button("Remove") { removeCashier(name, msg) },
+                ui.danger("Remove") { removeCashier(name, msg) },
                 ui.button("Back") { showStaff(emptyList()) },
             ),
         )
@@ -1576,7 +1620,7 @@ class Controller(private val act: MainActivity) {
                 pin1,
                 pin2,
                 msg,
-                ui.button("Save the new PIN") { saveCashierPin(name, pin1.text.toString(), pin2.text.toString(), msg) },
+                ui.primary("Save the new PIN") { saveCashierPin(name, pin1.text.toString(), pin2.text.toString(), msg) },
                 ui.button("Back") { showStaff(emptyList()) },
             ),
         )
@@ -1635,7 +1679,7 @@ class Controller(private val act: MainActivity) {
                 views.add(ui.words(AppWords.todayPeopleNeedPin))
                 views.add(pinInput)
                 views.add(msg)
-                views.add(ui.button("Show the lines") {
+                views.add(ui.primary("Show the lines") {
                     checkPin(pinInput.text.toString(), { showToday(true) }, { msg.show(ui.words(it)) })
                 })
             }

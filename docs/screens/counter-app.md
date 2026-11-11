@@ -12,7 +12,7 @@ These are the words of what the app decides itself.
 
 | State | Heading | What happened | What to do next | Who | Code |
 |---|---|---|---|---|---|
-| notSetUp | Not set up yet | This counter has not been paired with the shop yet, so it cannot take a sale. | Type a name, a PIN and the address of Orbot, then tap Pair, and scan the Key app's code with this phone. | a manager |  |
+| notSetUp | Not set up yet | This counter has not been paired with the shop yet, so it cannot take a sale. | Type a name for the counter, the manager's name and a PIN, then tap Pair, and scan the Key app's code with this phone. | a manager |  |
 | pairingSaved | Counter set up | The counter is paired with the shop, and the pairing and the PIN are saved on this phone. | Keep the app open at the counter. It starts looking for the network now. | the cashier |  |
 | pairingScanOffer | Scan the Key app | The Key app shows a code on its Pair a counter screen. This counter reads the shop's keys and network from it. | Open Pair a counter on the Key app, then tap Scan and hold this phone's camera to its code. | a manager |  |
 | pairingCompare | Compare the four words | The Key app shows four words for this pairing, and the same four are below. If they are not the same, someone changed the code on the way. | Check all four words on the Key app, then tap They match, or tap They differ if any word is not the same. | a manager |  |
@@ -22,9 +22,11 @@ These are the words of what the app decides itself.
 | pinNotAccepted | PIN not accepted | A PIN is 6 to 12 digits, and the two entries must be the same, so nothing was saved. | Type a PIN of 6 to 12 digits twice, then save again. | a manager |  |
 | nameNotAccepted | Name not accepted | A name is 1 to 64 characters long, so it was not saved. | Type the name again. | the cashier |  |
 | torAddressNotAccepted | Tor address not accepted | The address of Orbot must be a host, a colon and a port, like 127.0.0.1:9050. | Type the address again. | a manager |  |
-| torIsOn | Tor is on for this shop | The shop's settings send every connection of this counter through Tor, with Orbot. | Check the address of Orbot below, and keep Orbot running. | a manager |  |
+| torIsOn | Tor is on for this shop | The shop's settings send every connection of this counter through Tor, with Orbot. | Keep Orbot running. The manager can check its address under Network. | a manager |  |
 | torIsOff | Tor is off for this shop | The shop's settings do not use Tor, so the price sources and the network can see this shop's address. | Nothing to do here. The owner can switch Tor on in the shop's settings. | the owner |  |
-| orbotNotRunning | Tor is not running | Tor is on for this shop, but Orbot is not running. | Open Orbot and turn it on. | a manager |  |
+| orbotNotRunning | Tor is not running | Tor is on for this shop, but Orbot is not running. | Open Orbot and turn it on. If it listens at another address, the manager can change it under Network. | a manager |  |
+| networkAbout | Network | When the shop's settings turn Tor on, this counter sends everything through Orbot, at the address below. | Change the address only if Orbot listens somewhere else, then type the manager's PIN. | a manager |  |
+| networkSaved | Address saved | The counter will look for Orbot at the new address. | Tap Start to use it now. | a manager |  |
 | ownNodeAbout | Your own node | A node of your own, reached by a Tor address, can check each payment as well as the light check does. | Type its Tor address and the manager's PIN, then save. | a manager |  |
 | ownNodeSaved | Own node saved | The counter will ask your own node about each payment, once it has started again. | Wait a moment while the counter starts again. | a manager |  |
 | ownNodeRemoved | Own node removed | The counter checks payments with the light check only. | Wait a moment while the counter starts again. | a manager |  |

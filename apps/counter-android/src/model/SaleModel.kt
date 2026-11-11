@@ -26,8 +26,21 @@ object SaleModel {
     fun amountLine(money: Money, amountMinor: Long?, needsSats: Long): String =
         if (amountMinor != null) "${money.show(amountMinor)}, ${Format.sats(needsSats)} to send" else "${Format.sats(needsSats)} to send"
 
+    /** The amount at 44 sp in the sale's band: the shop's currency, or the sats to send when the amount is not known. */
+    fun amountBig(money: Money, amountMinor: Long?, needsSats: Long): String =
+        if (amountMinor != null) money.show(amountMinor) else Format.sats(needsSats)
+
+    /** The line under it: what the customer sends, so that [amountBig] and this say what [amountLine] says. */
+    fun amountSmall(amountMinor: Long?, needsSats: Long): String =
+        if (amountMinor != null) "${Format.sats(needsSats)} to send" else "to send"
+
     /** What has arrived of what the sale needs. */
     fun receivedLine(received: Long, needs: Long): String = "Received ${Format.sats(received)} of ${Format.sats(needs)}"
+
+    /** Whether the sale has been paid, so that finishing is the one thing left to do. */
+    fun isPaid(state: SaleState): Boolean =
+        state == SaleState.PaidInstant || state == SaleState.Confirmed || state == SaleState.Final ||
+            state == SaleState.Overridden || state == SaleState.PaidLightning
 
     /** Whether the sale is over for the cashier's list (nothing more will change on its own). */
     fun isEnded(state: SaleState): Boolean =

@@ -74,17 +74,21 @@ class PairingProgress {
 }
 
 /** What is checked on the first screen before the camera opens for the offer. */
+/** The Network screen's check (CR-87): the address of Orbot is a host, a colon and a port. */
+object NetworkCheck {
+    fun problem(address: String): SayWords? = if (HostPort.valid(address)) null else AppWords.torAddressNotAccepted
+}
+
 object FirstStartCheck {
     /**
      * The words of the first thing wrong with what was typed, or null when the counter's name, the
-     * manager's name, the PIN (twice) and the address of Orbot are all fine. The counter's name is
-     * given to the library, which checks it again by its own rule.
+     * manager's name and the PIN (twice) are all fine. The counter's name is given to the library,
+     * which checks it again by its own rule.
      */
-    fun problem(counterName: String, managerName: String, pin1: String, pin2: String, proxy: String): SayWords? = when {
+    fun problem(counterName: String, managerName: String, pin1: String, pin2: String): SayWords? = when {
         !validCounterName(counterName) -> AppWords.counterNameNotAccepted
         !AppConfig.validName(managerName) -> AppWords.nameNotAccepted
         !PinStore.validPin(pin1) || pin1 != pin2 -> AppWords.pinNotAccepted
-        !HostPort.valid(proxy) -> AppWords.torAddressNotAccepted
         else -> null
     }
 

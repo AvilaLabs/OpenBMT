@@ -14,7 +14,8 @@ local test key; release signing is a separate step (see "Signing").
 
 | Screen | What it shows |
 |---|---|
-| First start | The counter's name, the manager's name and PIN, the address of Orbot, and Pair with the Key app. |
+| First start | The counter's name, the manager's name and PIN, and Pair with the Key app. |
+| Network | The address of Orbot (`127.0.0.1:9050` unless changed), saved behind the manager's PIN (CR-87). Reached from home, and from the screen that says Orbot did not answer. |
 | Pairing | Scan the Key app's offer; the counter's own request as a code with its four words and They match / They differ; scan the owner phone's bundle. |
 | Home | Whether Bitcoin is ready, the price and each source's note, the own node's line with Try again (when one is set), the Box's line with Try again (when the pairing holds a relay, CR-136), New sale, Sales, Today, the cashier's name (or who is at the till with Lock), Staff, the Lightning line (only while a connection is saved, CR-116), Your own node, Lightning, About. |
 | Your own node | The counter's own setting, behind the manager's PIN (CR-100): the Tor address of the shop's own node, saved or removed. A home-network address is refused, and Orbot must be on (CR-101, CR-102). It is kept in the app's config file, not in the pairing. |
@@ -33,8 +34,8 @@ states and faults have words written in `src/model/AppWords.kt` under
 `docs/SCREEN-RULES.md`, listed in `docs/screens/counter-app.md`.
 
 Pairing is the camera's (`docs/COUNTER-RULES.md` CR-90 to CR-99, DESIGN
-section 2.9). On the first screen the manager types the counter's name, a PIN
-and the address of Orbot and taps Pair. The app then asks for the camera, only
+section 2.9). On the first screen the manager types the counter's name, the
+manager's name and a PIN and taps Pair. The app then asks for the camera, only
 when Scan is tapped, and reads the Key app's offer (`ur:bytes`, whole or in
 parts) and hands it to the library's `pair_begin`. The library makes the
 counter's own key and a fresh number from the system's random source and
@@ -132,11 +133,12 @@ checks the record again at every start.
   actions need no PIN. An override, and a refund asked for or withdrawn by a
   manager, are made only after the PIN was checked, and name their actor.
 - **Tor (CR-87, NR-26).** When the signed settings have Tor on, the node and
-  every price fetch go through Orbot's SOCKS proxy (`127.0.0.1:9050`, a
-  setting of the first screen). If the proxy does not answer, nothing is sent
-  around it: the node is not started and no price is fetched. The app says "Tor
+  every price fetch go through Orbot's SOCKS proxy (`127.0.0.1:9050` unless
+  the manager changed it on the Network screen, behind the PIN). If the proxy
+  does not answer, nothing is sent around it: the node is not started and no price is fetched. The app says "Tor
   is on for this shop, but Orbot is not running." and "Open Orbot and turn
-  it on."
+  it on. If it listens at another address, the manager can change it under
+  Network."
 - **The price (CR-89, RT-40 to RT-45).** One `HttpsURLConnection` per source
   on a fixed 60-second grid, never because a sale opened; a 64 KiB read limit;
   a 20-second timeout; no cookies, no cache, no redirect, no compression; a

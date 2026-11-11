@@ -28,7 +28,7 @@ object AppWords {
         Tones.INFO, "Not set up yet",
         "This counter has not been paired with the shop yet, so it cannot take a sale.",
         Who.MANAGER,
-        "Type a name, a PIN and the address of Orbot, then tap Pair, and scan the Key app's code with this phone.",
+        "Type a name for the counter, the manager's name and a PIN, then tap Pair, and scan the Key app's code with this phone.",
     )
 
     val pairingSaved = w(
@@ -101,7 +101,7 @@ object AppWords {
         Tones.INFO, "Tor is on for this shop",
         "The shop's settings send every connection of this counter through Tor, with Orbot.",
         Who.MANAGER,
-        "Check the address of Orbot below, and keep Orbot running.",
+        "Keep Orbot running. The manager can check its address under Network.",
     )
 
     val torIsOff = w(
@@ -109,6 +109,22 @@ object AppWords {
         "The shop's settings do not use Tor, so the price sources and the network can see this shop's address.",
         Who.OWNER,
         "Nothing to do here. The owner can switch Tor on in the shop's settings.",
+    )
+
+    // ---- the network (CR-87) -------------------------------------------------------------
+
+    val networkAbout = w(
+        Tones.INFO, "Network",
+        "When the shop's settings turn Tor on, this counter sends everything through Orbot, at the address below.",
+        Who.MANAGER,
+        "Change the address only if Orbot listens somewhere else, then type the manager's PIN.",
+    )
+
+    val networkSaved = w(
+        Tones.GOOD, "Address saved",
+        "The counter will look for Orbot at the new address.",
+        Who.MANAGER,
+        "Tap Start to use it now.",
     )
 
     // ---- the own node (CR-100 to CR-102) ---------------------------------------------------
@@ -198,7 +214,7 @@ object AppWords {
         Tones.STOP, "Tor is not running",
         "Tor is on for this shop, but Orbot is not running.",
         Who.MANAGER,
-        "Open Orbot and turn it on.",
+        "Open Orbot and turn it on. If it listens at another address, the manager can change it under Network.",
     )
 
     // ---- the PIN -------------------------------------------------------------------------
@@ -592,6 +608,8 @@ object AppWords {
         "torIsOn" to torIsOn,
         "torIsOff" to torIsOff,
         "orbotNotRunning" to orbotNotRunning,
+        "networkAbout" to networkAbout,
+        "networkSaved" to networkSaved,
         "ownNodeAbout" to ownNodeAbout,
         "ownNodeSaved" to ownNodeSaved,
         "ownNodeRemoved" to ownNodeRemoved,

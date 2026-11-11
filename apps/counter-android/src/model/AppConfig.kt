@@ -19,6 +19,9 @@ class ConfigFormatException(message: String) : IOException(message)
 class AppConfig(val proxy: String, val manager: String, val cashier: String, val ownNode: String = "") {
     fun withCashier(name: String) = AppConfig(proxy, manager, name, ownNode)
 
+    /** The address of Orbot, from the Network screen (CR-87). */
+    fun withProxy(address: String) = AppConfig(address, manager, cashier, ownNode)
+
     /** The own node's address as the library made it (CR-100), or "" for none. */
     fun withOwnNode(address: String) = AppConfig(proxy, manager, cashier, address)
 
