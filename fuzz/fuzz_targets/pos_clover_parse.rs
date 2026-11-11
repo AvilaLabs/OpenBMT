@@ -60,7 +60,8 @@ fuzz_target!(|data: &[u8]| {
             // A page of exactly the limit has more, a shorter one has not,
             // and the cursor it gives is one the next request takes.
             assert_eq!(page.more, page.orders.len() == limit);
-            Request::new("MERCHANT01", &settings, limit, &page.next).expect("the next cursor reads");
+            Request::new("MERCHANT01", &settings, limit, &page.next)
+                .expect("the next cursor reads");
         }
         Err(ReadRefused::TooLong) => assert!(body.len() > 8 * 1024 * 1024),
         Err(ReadRefused::NotUtf8) => assert!(std::str::from_utf8(body).is_err()),
