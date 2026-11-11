@@ -176,6 +176,14 @@ impl Grid {
     }
 }
 
+/// The function modules of a version (finders, timing, alignment, format
+/// and version areas, the dark module), row by row.
+pub(crate) fn function_modules(version: u8) -> Vec<bool> {
+    let mut g = Grid::new(tables::side(version));
+    g.draw_function_patterns(version);
+    g.func
+}
+
 /// Whether mask `mask` flips the module at column `x`, row `y`.
 pub(crate) fn mask_bit(mask: u8, x: usize, y: usize) -> bool {
     match mask {

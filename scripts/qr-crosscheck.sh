@@ -2,10 +2,16 @@
 # Cross-check of crates/openbmt-qr against ZXing, an independent QR
 # implementation (a test tool: never shipped, not on a list in deps/).
 #
-# The example `crosscheck` prints a deterministic set of cases; the Java
+# Encoder: the example `crosscheck` prints a deterministic set of cases; the Java
 # harness crates/openbmt-qr/crosscheck/QrCross.java encodes each with
 # ZXing and compares the matrices, decodes ours with ZXing, and reports
 # where the mask choice differs. See that file for the details.
+#
+# Reader: crosscheck/QrDecodeCross.java makes images of codes encoded by
+# ZXing (random content, levels, module sizes, turns, a UTF-8 ECI) for our
+# reader, and decodes images made by this encoder (the example
+# `decodecheck`) with ZXing; where both read an image, the data must be the
+# same, and every clean image must be read by both.
 #
 #   scripts/qr-crosscheck.sh
 #
@@ -60,9 +66,20 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/qr-crosscheck.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 "$jdk/bin/javac" -Xlint:all -cp "$jar" -d "$work" \
     crates/openbmt-qr/crosscheck/QrCross.java \
+    crates/openbmt-qr/crosscheck/QrDecodeCross.java \
     crates/openbmt-qr/crosscheck/com/google/zxing/qrcode/encoder/PenaltyAccess.java
 
 cargo run --release --locked --quiet -p openbmt-qr --example crosscheck \
     >"$work/cases.txt"
 echo "cases: $(grep -c '^case ' "$work/cases.txt") ($(wc -c <"$work/cases.txt") bytes)"
 "$jdk/bin/java" -cp "$work:$jar" QrCross <"$work/cases.txt"
+
+# The reader.
+images="$work/images"
+"$jdk/bin/java" -cp "$work:$jar" QrDecodeCross gen "$images" 300
+cargo run --release --locked --quiet -p openbmt-qr --example decodecheck -- \
+    gen "$images" 300
+cargo run --release --locked --quiet -p openbmt-qr --example decodecheck -- \
+    read "$images"
+echo "images: $(ls "$images"/*.pgm | wc -l)"
+"$jdk/bin/java" -cp "$work:$jar" QrDecodeCross check "$images"

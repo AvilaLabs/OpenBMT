@@ -1,5 +1,6 @@
-//! A QR code encoder, ISO/IEC 18004 model 2, with no dependencies
-//! ([rules](../README.md)).
+//! A QR code encoder and reader, ISO/IEC 18004 model 2, with no
+//! dependencies ([rules](../README.md)). The reader is in [`decode_luma`] and
+//! [`decode_luma_strided`]: it takes the gray levels of a camera frame.
 //!
 //! - Versions 1 to 40, levels L, M, Q and H.
 //! - One segment per code: numeric, alphanumeric or byte mode.
@@ -21,12 +22,18 @@
 
 #![forbid(unsafe_code)]
 
+mod binarize;
+mod decode;
+mod finder;
 mod matrix;
+mod readback;
 mod rs;
+mod sample;
 mod tables;
 
 use std::fmt;
 
+pub use decode::{decode_luma, decode_luma_strided, DecodeError, Decoded, MAX_SIDE, MIN_SIDE};
 pub use matrix::{format_bits, version_bits};
 
 /// The four error-correction levels.
@@ -370,3 +377,6 @@ pub(crate) fn segment_bits(mode: Mode, data: &[u8], version: u8, capacity: usize
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod decode_tests;
