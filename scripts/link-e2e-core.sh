@@ -38,6 +38,15 @@
 #      head.
 #   6. A device whose key is not in the members file can neither make a
 #      mailbox, nor put a message, nor fetch.
+#   7. A counter started the way the counter app starts it, through the
+#      `start` call of `openbmt-counter-ffi`, from a pairing record made by
+#      the whole pairing ceremony out of a bundle that carries a Box as its
+#      relay (CR-130, CR-131), talks to its owner through that Box
+#      (`openbmt-box`, paired as `scripts/box-e2e.sh` pairs it): the owner's
+#      heartbeat is taken by the counter and the counter's records and check-in
+#      reach the owner, each through the Box (CR-134 to CR-136). The example
+#      `counter_box_link` of `openbmt-counter-ffi` does the counter and the
+#      owner; this script starts and pairs the Box.
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin (put first on
 # PATH; set CORE_BIN to use another), jq, and cargo unless the four binaries
@@ -47,13 +56,17 @@
 # Environment:
 #   CORE_BIN       directory with bitcoind and bitcoin-cli
 #   DRILL_DIR      scratch directory (default: a new one under ~/.cache/openbmt)
-#   DRILL_PORTS    first of three free ports on 127.0.0.1 (default 18976): RPC
-#                  and peer port of A, and the relay's port
+#   DRILL_PORTS    first of four free ports on 127.0.0.1 (default 18976): RPC
+#                  and peer port of A, the relay's port and the Box's port
 #   DRILL_KEEP=1   keep the scratch directory afterwards
 #   COUNTER_BIN    the `counter_regtest` example binary
 #   OWNER_BIN      the `owner_regtest` example binary
 #   RELAY_BIN      the `relay` example binary of `openbmt-link`
 #   PROBE_BIN      the `link_probe` example binary of `openbmt-courier`
+#   BOX_BIN        the `openbmt-box` binary (step 7)
+#   PAIR_BIN       the `box_pair` example binary of `openbmt-box` (step 7)
+#   BOXLINK_BIN    the `counter_box_link` example binary of
+#                  `openbmt-counter-ffi` (step 7)
 #
 # Everything here is regtest on 127.0.0.1, with keys made from fixed test
 # bytes. No real keys or funds are involved. The processes and the scratch
@@ -67,6 +80,7 @@ P0=${DRILL_PORTS:-18976}
 A_RPC=$P0
 A_P2P=$((P0 + 1))
 RELAY_PORT=$((P0 + 2))
+BOX_PORT=$((P0 + 3))
 mkdir -p "$HOME/.cache/openbmt"
 BASE=${DRILL_DIR:-$(mktemp -d "$HOME/.cache/openbmt/link-e2e-XXXXXX")}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -108,6 +122,7 @@ say "$VERSION"
 mkdir -p "$A_DIR" "$C_DATA" "$O_DATA" "$R_DATA"
 A_PID=
 RELAY_PID=
+BOX_PID=
 declare -A PID LOG FDN COUNT
 PID[c]=; PID[o]=
 FDN[c]=3; FDN[o]=4
@@ -142,6 +157,7 @@ cleanup() {
   stop_pid "${PID[c]:-}"
   stop_pid "${PID[o]:-}"
   stop_pid "$RELAY_PID"
+  stop_pid "$BOX_PID"
   stop_core
   if [ "${DRILL_KEEP:-0}" != 1 ]; then rm -rf -- "$BASE"; fi
 }
@@ -166,6 +182,30 @@ if [ -z "${COUNTER_BIN:-}" ] || [ -z "${OWNER_BIN:-}" ] || [ -z "${RELAY_BIN:-}"
   [ -n "${PROBE_BIN:-}" ] || { build openbmt-courier link_probe; PROBE_BIN="$TARGET/debug/examples/link_probe"; }
 fi
 for bin in COUNTER_BIN OWNER_BIN RELAY_BIN PROBE_BIN; do
+  [ -x "${!bin}" ] || die "no binary at ${!bin} ($bin)"
+done
+if [ -z "${BOX_BIN:-}" ] || [ -z "${PAIR_BIN:-}" ] || [ -z "${BOXLINK_BIN:-}" ]; then
+  say "Build the Box and the counter's link example"
+  if [ -z "${BOX_BIN:-}" ] || [ -z "${PAIR_BIN:-}" ]; then
+    guard=$HOME/.cache/openbmt/guard.sh
+    if [ -x "$guard" ]; then
+      "$guard" env CARGO_TARGET_DIR="$TARGET" cargo build --quiet --locked \
+        --manifest-path "$ROOT/Cargo.toml" -p openbmt-box --bins --example box_pair ||
+        die "the build of the Box failed"
+    else
+      CARGO_TARGET_DIR="$TARGET" cargo build --quiet --locked \
+        --manifest-path "$ROOT/Cargo.toml" -p openbmt-box --bins --example box_pair ||
+        die "the build of the Box failed"
+    fi
+    [ -n "${BOX_BIN:-}" ] || BOX_BIN="$TARGET/debug/openbmt-box"
+    [ -n "${PAIR_BIN:-}" ] || PAIR_BIN="$TARGET/debug/examples/box_pair"
+  fi
+  if [ -z "${BOXLINK_BIN:-}" ]; then
+    build openbmt-counter-ffi counter_box_link
+    BOXLINK_BIN="$TARGET/debug/examples/counter_box_link"
+  fi
+fi
+for bin in BOX_BIN PAIR_BIN BOXLINK_BIN; do
   [ -x "${!bin}" ] || die "no binary at ${!bin} ($bin)"
 done
 
@@ -504,6 +544,52 @@ else
   notrun 6 "the relay is not running, so there was nothing to probe"
 fi
 
+# ---- 7 ---------------------------------------------------------------------------
+
+say "7. A counter started like the app starts it talks to its owner through a Box"
+B7="$BASE/box7"
+K7="$BASE/keyapp7"
+L7="$BASE/counterlink7"
+BOX_LOG="$BASE/box7.log"
+mkdir -p "$B7" "$K7" "$L7"
+INV7=$("$PAIR_BIN" invite "$K7" 2>&1)
+printf '%s\n' "$INV7" >"$BASE/invitation7.txt"
+: >"$BOX_LOG"
+"$BOX_BIN" "$B7" "127.0.0.1:$BOX_PORT" --no-console --invitation-file "$BASE/invitation7.txt" \
+  </dev/null >"$BOX_LOG" 2>&1 &
+BOX_PID=$!
+BOX_UP=
+for _ in $(seq 1 40); do
+  if grep -q '^state: ' "$BOX_LOG"; then BOX_UP=yes; break; fi
+  kill -0 "$BOX_PID" 2>/dev/null || break
+  sleep 0.25
+done
+if [ -n "$BOX_UP" ]; then
+  CLAIM7=$("$PAIR_BIN" claim "$K7" "127.0.0.1:$BOX_PORT" 2>&1)
+  WELCOME7=$("$PAIR_BIN" welcome "$K7" "127.0.0.1:$BOX_PORT" 2>&1)
+  BOX_KEY=$(sed -n 's/^key: //p' "$BOX_LOG" | head -1)
+  note "claim: $(head -1 <<<"$CLAIM7"); welcome: $WELCOME7; Box key $BOX_KEY"
+  if [ "$WELCOME7" = welcomed ] && [ ${#BOX_KEY} = 64 ]; then
+    OUT7=$("$BOXLINK_BIN" "$L7" "127.0.0.1:$BOX_PORT" "$BOX_KEY" "127.0.0.1:$A_P2P" 2>&1)
+    RC7=$?
+    note "$(sed 's/^/counter: /' <<<"$OUT7")"
+    if [ "$RC7" = 0 ] && grep -q '^bundle: version 2' <<<"$OUT7" &&
+      grep -q '^paired: the record holds the relay' <<<"$OUT7" &&
+      grep -q '^owner: heartbeat .* sent through the Box' <<<"$OUT7" &&
+      grep -q '^counter link: ok' <<<"$OUT7"; then
+      pass 7 "a counter paired from a bundle with the Box as its relay, and started through the library's start call, took the owner's heartbeat and sent its records and a check-in to the owner, all through the Box"
+    else
+      bad 7 "the counter's link through the Box did not complete (exit $RC7): $(tail -3 <<<"$OUT7")"
+    fi
+  else
+    bad 7 "the Box was not paired: welcome '$WELCOME7', key '$BOX_KEY'"
+  fi
+else
+  bad 7 "the Box did not start: $(cat "$BOX_LOG")"
+fi
+stop_pid "$BOX_PID"
+BOX_PID=
+
 stop_ex c || note "the counter example did not stop cleanly"
 stop_ex o || note "the owner example did not stop cleanly"
 
@@ -512,7 +598,7 @@ stop_ex o || note "the owner example did not stop cleanly"
 say "Result"
 failed=0
 notrun=0
-for n in 1 2 3 4 5 6; do
+for n in 1 2 3 4 5 6 7; do
   printf '%s  step %s\n' "${RESULT[$n]:-FAIL}" "$n"
   case "${RESULT[$n]:-FAIL}" in
     PASS) ;;
