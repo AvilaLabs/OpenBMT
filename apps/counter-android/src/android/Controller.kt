@@ -14,6 +14,8 @@ import android.widget.TextView
 import java.io.File
 import java.io.IOException
 import java.security.GeneralSecurityException
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import org.openbmt.app.AnimatedQrView
 import org.openbmt.app.Format
 import org.openbmt.app.KeystoreSealer
@@ -29,6 +31,7 @@ import org.openbmt.counter.Actor
 import org.openbmt.counter.ActorRole
 import org.openbmt.counter.CounterException
 import org.openbmt.counter.CounterNode
+import org.openbmt.counter.LnRequest
 import org.openbmt.counter.PairStarted
 import org.openbmt.counter.Pairing
 import org.openbmt.counter.Payment
@@ -48,7 +51,10 @@ import org.openbmt.counter.StartConfig
  * the screen thread; every other call into the library is made on the screen
  * thread, except the start, which runs on a worker thread before the pump
  * begins. The price is fetched by one worker thread for each source on the
- * schedule of RT-40 to RT-45, and the bytes go to the library.
+ * schedule of RT-40 to RT-45, and the bytes go to the library. The shop's own
+ * Lightning node is reached by one more thread, which asks the library for the
+ * next request (CR-112), sends it through [LightningTransport] and gives back
+ * the answer; the test of a new connection runs on that same thread.
  */
 class Controller(private val act: MainActivity) {
     private val ui = Ui(act)
@@ -62,6 +68,14 @@ class Controller(private val act: MainActivity) {
     // What is saved, as read at the last start.
     private var record: ByteArray? = null
     private var config: AppConfig? = null
+    private var lightningRecord: ByteArray? = null
+    private var lightningFault: SayWords? = null
+
+    // What the Lightning screen holds while the camera has the screen.
+    private var draftLnCode = ""
+    private var draftLnAddress = ""
+    private var draftLnRune = ""
+    private var draftLnCert = ""
 
     // What the first screen holds while the pairing runs, and where the pairing has got to (CR-98).
     private val progress = PairingProgress()
@@ -81,6 +95,9 @@ class Controller(private val act: MainActivity) {
     private var pumpFault: SayWords? = null
     private var pumpThread: Thread? = null
     private val workers = ArrayList<Thread>()
+    private var lightningThread: Thread? = null
+    private var transport: LightningTransport? = null
+    private val lightningJobs = LinkedBlockingQueue<Runnable>()
     private val startLock = Any()
 
     // What the open screen redraws as the node reports.
@@ -143,6 +160,17 @@ class Controller(private val act: MainActivity) {
             fault = AppWords.storageUnavailable(e.message)
             return render()
         }
+        // CR-115: the Lightning connection, sealed by its own key; a file that does not read leaves Lightning off, and the Lightning screen says why.
+        lightningFault = null
+        lightningRecord = try {
+            SealedFile(dir, KeystoreSealer(LightningSetup.KEY_ALIAS), LightningSetup.FILE).load()
+        } catch (e: IOException) {
+            lightningFault = AppWords.storageUnavailable(e.message)
+            null
+        } catch (e: GeneralSecurityException) {
+            lightningFault = AppWords.storageUnavailable(e.message)
+            null
+        }
         startNode()
     }
 
@@ -164,6 +192,7 @@ class Controller(private val act: MainActivity) {
         page(listOf(ui.words(AppWords.starting)))
         val rec = record ?: return
         val cfg = config ?: return
+        val lightning = lightningRecord
         val thread = Thread {
             try {
                 val sources = Rates.sources()
@@ -181,7 +210,7 @@ class Controller(private val act: MainActivity) {
                 synchronized(startLock) {
                     if (id != runId) return@Thread
                     nodeDir.mkdirs()
-                    val n = CounterNode.start(StartConfig(nodeDir.path, nowSecs(), rec, gate.proxy, cfg.ownNode.ifEmpty { null }))
+                    val n = CounterNode.start(StartConfig(nodeDir.path, nowSecs(), rec, gate.proxy, cfg.ownNode.ifEmpty { null }, lightning))
                     if (id != runId) {
                         n.close()
                         return@Thread
@@ -255,8 +284,53 @@ class Controller(private val act: MainActivity) {
         pump.isDaemon = true
         pumpThread = pump
         pump.start()
+        startLightning(id, n, gate)
         showHome()
     }
+
+    /**
+     * CR-112, CR-114: the one thread that talks to the shop's node. It runs a queued job (the test of a
+     * new connection) or else asks the library for the next request, sends it and hands back the answer.
+     * Without a connection `ln_next` has nothing, and the thread only waits.
+     */
+    private fun startLightning(id: Int, n: CounterNode, gate: TorGate) {
+        val t = LightningTransport(gate.torOn, config?.proxy ?: AppConfig.DEFAULT_PROXY)
+        transport = t
+        lightningJobs.clear()
+        val worker = Thread {
+            while (runId == id) {
+                try {
+                    val job = lightningJobs.poll(500, TimeUnit.MILLISECONDS)
+                    if (job != null) {
+                        job.run()
+                        continue
+                    }
+                    val request = n.lnNext(nowSecs()) ?: continue
+                    when (val out = t.send(request) { der -> pinned(n, request, der) }) {
+                        is LnOutcome.Answer -> n.lnReply(request.id, out.status.toLong(), out.body)
+                        is LnOutcome.Failed -> n.lnFailed(request.id, out.why)
+                    }
+                } catch (_: InterruptedException) {
+                    return@Thread
+                } catch (_: CounterException) {
+                    // The library keeps its own account of a sale's request that failed (LN-22).
+                } catch (_: LinkageError) {
+                    return@Thread
+                }
+            }
+        }
+        worker.isDaemon = true
+        lightningThread = worker
+        worker.start()
+    }
+
+    /** Whether the library says this is the pinned certificate; a library that cannot say is a no. */
+    private fun pinned(n: CounterNode, request: LnRequest, der: ByteArray): Boolean =
+        try {
+            n.lnPin(request.id, der)
+        } catch (_: CounterException) {
+            false
+        }
 
     private fun onPump(reported: Boolean) {
         val now = System.currentTimeMillis()
@@ -274,6 +348,10 @@ class Controller(private val act: MainActivity) {
         pumpThread = null
         for (w in workers) w.interrupt()
         workers.clear()
+        lightningThread?.interrupt()
+        lightningThread = null
+        transport = null
+        lightningJobs.clear()
         node?.let {
             try {
                 it.stop()
@@ -502,9 +580,12 @@ class Controller(private val act: MainActivity) {
         val health = Slot(act)
         val priceSlot = Slot(act)
         val ownSlot = Slot(act)
+        val lightningSlot = Slot(act)
         val views = ArrayList<View>()
         views.add(label("Is Bitcoin ready?"))
         views.add(health)
+        // CR-116: the Lightning line is there only while a connection is saved.
+        views.add(lightningSlot)
         if (cfg.ownNode.isNotEmpty()) {
             // CR-107: the own node's line, and a way to ask the driver to dial it again.
             views.add(label("Your own node"))
@@ -542,10 +623,12 @@ class Controller(private val act: MainActivity) {
         })
         views.add(saved)
         views.add(ui.button("Your own node") { showOwnNode() })
+        views.add(ui.button("Lightning") { showLightning(null) })
         views.add(ui.button("About") { showAbout() })
         page(views)
         tick = {
             health.show(ui.words(healthWords(n)))
+            lightningWords(n)?.let { lightningSlot.show(label("Lightning"), ui.words(it)) } ?: lightningSlot.show()
             if (cfg.ownNode.isNotEmpty()) ownSlot.show(ui.words(ownNodeWords(n)))
             priceSlot.show(*priceViews())
         }
@@ -561,6 +644,14 @@ class Controller(private val act: MainActivity) {
             e.sayWords()
         }
     }
+
+    /** CR-116: the Lightning line, or null when no connection is saved. */
+    private fun lightningWords(n: CounterNode): SayWords? =
+        try {
+            n.status().lightning?.words?.say()
+        } catch (e: CounterException) {
+            e.sayWords()
+        }
 
     /** CR-107: the own node's health line, or the library's words for why there is none. */
     private fun ownNodeWords(n: CounterNode): SayWords =
@@ -621,6 +712,133 @@ class Controller(private val act: MainActivity) {
             return msg.show(ui.words(AppWords.fileNotSaved(e.message)))
         }
         showMessage(done, "Start") { begin() }
+    }
+
+    // ---- Lightning through the shop's own node (CR-112 to CR-116) -------------------------------------
+
+    /** The connection to the shop's node, behind the manager's PIN: scan or type it, test it, save it sealed, or remove it. */
+    private fun showLightning(notice: SayWords?) {
+        if (node == null) return render()
+        val msg = Slot(act)
+        (notice ?: lightningFault)?.let { msg.show(ui.words(it)) }
+        val code = ui.field("lndconnect:// code", lines = 3).also { it.setText(draftLnCode) }
+        val address = ui.field("host:port").also { it.setText(draftLnAddress) }
+        val rune = ui.field("Rune").also { it.setText(draftLnRune) }
+        val cert = ui.field("Certificate, or its SHA-256 fingerprint", lines = 4).also { it.setText(draftLnCert) }
+        val pinInput = pinField(act, "Manager's PIN")
+        fun keep() {
+            draftLnCode = code.text.toString()
+            draftLnAddress = address.text.toString()
+            draftLnRune = rune.text.toString()
+            draftLnCert = cert.text.toString()
+        }
+        page(
+            listOf(
+                ui.words(AppWords.lightningAbout),
+                ui.words(AppWords.lightningCare),
+                ui.text(if (lightningRecord != null) "A connection is saved on this phone." else "No connection is saved.", 16f),
+                label("LND"),
+                code,
+                ui.button("Scan the code") {
+                    keep()
+                    scan.begin(
+                        show = { v -> tick = null; act.show(v) },
+                        onBytes = { bytes -> draftLnCode = String(bytes, Charsets.UTF_8); showLightning(null) },
+                        onFailed = { f -> showLightning(f.words ?: if (f.off) AppWords.cameraOff else AppWords.cameraNotStarted(f.problem)) },
+                        onCancel = { showLightning(null) },
+                    )
+                },
+                ui.button("Test and save the LND connection") {
+                    keep()
+                    testLightning(LightningSetup.lnd(draftLnCode), pinInput.text.toString(), msg)
+                },
+                label("Core Lightning"),
+                address,
+                rune,
+                cert,
+                ui.button("Test and save the Core Lightning connection") {
+                    keep()
+                    testLightning(LightningSetup.cln(draftLnAddress, draftLnRune, draftLnCert), pinInput.text.toString(), msg)
+                },
+                label("Manager's PIN"),
+                pinInput,
+                msg,
+                ui.button("Remove the connection") {
+                    checkPin(pinInput.text.toString(), { removeLightning(msg) }, { msg.show(ui.words(it)) })
+                },
+                ui.button("Back") { forgetLightningDraft(); showHome() },
+            ),
+        )
+    }
+
+    private fun forgetLightningDraft() {
+        draftLnCode = ""
+        draftLnAddress = ""
+        draftLnRune = ""
+        draftLnCert = ""
+    }
+
+    /**
+     * CR-115: the PIN first, then the test of LN-20 on the Lightning thread against what the shop's
+     * settings name; the connection is sealed and saved only when it passes. A library that says the
+     * owner has not named the node yet gives words, and nothing is tested or saved.
+     */
+    private fun testLightning(input: LnInput?, pinText: String, msg: Slot) {
+        if (input == null) return msg.show(ui.words(AppWords.lightningFieldsNeeded))
+        checkPin(pinText, {
+            val n = node
+            val t = transport
+            if (n == null || t == null) return@checkPin render()
+            val id = runId
+            msg.show(ui.words(AppWords.lightningTesting))
+            lightningJobs.add(Runnable {
+                val result = runCatching {
+                    val first = n.lnSetup(input.kind, input.address, input.secret, input.cert)
+                    val sealed = LightningSetup.drive(
+                        first,
+                        { r -> t.send(r) { der -> pinned(n, r, der) } },
+                        { i, status, body -> n.lnReply(i, status, body) },
+                        { i, why -> n.lnFailed(i, why) },
+                    )
+                    if (sealed != null) SealedFile(dir, KeystoreSealer(LightningSetup.KEY_ALIAS), LightningSetup.FILE).save(sealed)
+                    sealed != null
+                }
+                main.post { if (id == runId) testDone(result, msg) }
+            })
+        }, { msg.show(ui.words(it)) })
+    }
+
+    private fun testDone(result: Result<Boolean>, msg: Slot) {
+        when (val e = result.exceptionOrNull()) {
+            null ->
+                if (result.getOrThrow()) {
+                    forgetLightningDraft()
+                    showMessage(AppWords.lightningSaved, "Start") { begin() }
+                } else {
+                    msg.show(ui.words(AppWords.lightningNotReached))
+                }
+            is CounterException -> msg.show(ui.words(e.sayWords()))
+            is LinkageError -> msg.show(ui.words(AppWords.libraryMissing(e.message)))
+            is IOException -> msg.show(ui.words(AppWords.fileNotSaved(e.message)))
+            is GeneralSecurityException -> msg.show(ui.words(AppWords.storageUnavailable(e.message)))
+            else -> throw e
+        }
+    }
+
+    /** CR-115: the saved connection is deleted at once, and the library stops using it. */
+    private fun removeLightning(msg: Slot) {
+        val n = node ?: return render()
+        val file = File(dir, LightningSetup.FILE)
+        if (file.exists() && !file.delete()) return msg.show(ui.words(AppWords.fileNotSaved("the file could not be deleted")))
+        lightningRecord = null
+        lightningFault = null
+        forgetLightningDraft()
+        try {
+            n.lnRemove()
+        } catch (e: CounterException) {
+            return msg.show(ui.words(e.sayWords()))
+        }
+        showMessage(AppWords.lightningRemoved, "Back") { showHome() }
     }
 
     private fun priceViews(): Array<View> {
@@ -721,9 +939,11 @@ class Controller(private val act: MainActivity) {
         val received = ui.text("", 16f)
         val state = Slot(act)
         val buttons = Slot(act)
+        val lightning = Slot(act)
         views.add(amount)
         views.add(received)
         views.add(state)
+        views.add(lightning)
         views.add(buttons)
         var uri: String? = first?.copyUri
         val slotForQr = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
@@ -761,6 +981,14 @@ class Controller(private val act: MainActivity) {
                     *listOfNotNull(s.check).map { c -> ui.words(c.say()) }.toTypedArray(),
                     *s.flags.map { f -> ui.words(f.say()) }.toTypedArray(),
                 )
+                // CR-113: the line that says Lightning is not available for this sale, or that its code is on the way.
+                val ln = s.lightning
+                val unavailable = ln?.unavailable
+                when {
+                    unavailable != null -> lightning.show(ui.words(unavailable.say()))
+                    ln != null && ln.waiting -> lightning.show(ui.words(AppWords.lightningWaiting))
+                    else -> lightning.show()
+                }
                 if (shown != s.state) {
                     shown = s.state
                     val b = SaleModel.buttons(s.state)
@@ -1054,6 +1282,13 @@ class Controller(private val act: MainActivity) {
                 label("Tor"),
                 ui.text(
                     "When the shop's settings turn Tor on, every connection goes through Orbot on this phone. If Orbot is not running the counter sends nothing and says so.",
+                    16f,
+                ),
+                label("Lightning"),
+                ui.text(
+                    "The manager can give the counter a connection to a Lightning node of the shop's own, with the PIN. The key it holds can only make and look up invoices. " +
+                        "A payment by Lightning is final at once and is kept with its payment number and time. If the node does not answer, the sale shows the on-chain code only. " +
+                        "Running a node means watching its channels, its updates and its backups.",
                     16f,
                 ),
                 label("Your own node"),

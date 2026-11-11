@@ -31,6 +31,7 @@ exactly the input bytes.
 | `pair_request_decode` | `PairRequest::from_bytes` |
 | `counter_bundle_decode` | `CounterBundle::from_bytes`, with re-encode equality |
 | `counter_pairing_record_decode` | `PairingRecord::from_bytes` (the counter's stored pairing record), with re-encode equality |
+| `counter_lightning_record_decode` | `LightningRecord::from_bytes` (the counter's sealed Lightning connection), with re-encode stability |
 | `signed_pairing_decode` | `SignedPairing::from_bytes` |
 | `owner_command_decode` | `SignedCommand::from_bytes` |
 | `owner_pos_setup_decode` | `PosSetup::from_bytes` of `openbmt-owner-node` (the owner's till settings, magic `OBMr`); on success the settings must encode back to exactly those bytes |
@@ -45,7 +46,7 @@ exactly the input bytes.
 | `counter_sale_decode` | `Sale::from_bytes` |
 | `counter_desk_decode` | `Desk::from_bytes` |
 | `counter_event_decode` | `Event::decode` |
-| `counter_ops` | a real counter driven by a script of operations in the input (open, requote, sighting, block, reorg, time, judge, override, cancel, owner command, restart) against a memory store that fails the writes the input chooses; see the target for the invariants it asserts after every operation |
+| `counter_ops` | a real counter driven by a script of operations in the input (open, requote, sighting, block, reorg, time, judge, override, cancel, owner command, a Lightning payment, restart) against a memory store that fails the writes the input chooses; see the target for the invariants it asserts after every operation |
 | `spend_combine` | `openbmt_spend::combine` and `finalize` against the file of one fixed plan; the input is two "signed" files split at the first byte. It must never panic, and no transaction may come out, because nothing in the input is a signature by a wallet key |
 | `books_export_decode` | `Books::from_bundle` (what is read must encode back to the input) and `decode_export_header` (the header must encode back to the input's prefix); a file whose header asks for tiny Argon2 parameters is also given to `open_export` with a fixed passphrase, and must always be refused without a panic |
 | `session_request_decode` | `Request::from_bytes` (the approval session request); on success the value must encode back to exactly the input |

@@ -14,7 +14,7 @@ object SaleModel {
      * has arrived. CR-07: only a sale with nothing received is cancelled.
      * CR-20: a person accepts a sale that is waiting, part paid or not to be
      * handed over. The library still decides each; what it refuses is shown
-     * with its words.
+     * with its words. CR-109: a sale paid by Lightning is final and takes no button.
      */
     fun buttons(state: SaleState): SaleButtons = SaleButtons(
         requote = state == SaleState.NotPaidYet || state == SaleState.PartPaid,
@@ -30,7 +30,8 @@ object SaleModel {
     fun receivedLine(received: Long, needs: Long): String = "Received ${Format.sats(received)} of ${Format.sats(needs)}"
 
     /** Whether the sale is over for the cashier's list (nothing more will change on its own). */
-    fun isEnded(state: SaleState): Boolean = state == SaleState.Expired || state == SaleState.Cancelled
+    fun isEnded(state: SaleState): Boolean =
+        state == SaleState.Expired || state == SaleState.Cancelled || state == SaleState.PaidLightning
 }
 
 /** The shop's currency from the table of price sources: the currency all of them share, or null when they differ or there are none. */

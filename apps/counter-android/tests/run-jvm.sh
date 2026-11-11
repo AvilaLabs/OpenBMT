@@ -3,7 +3,8 @@
 # (and docs/screens/counter-app.md), the PIN store with a fake clock, the
 # pairing steps, the config, the keypad, the QR layout, the price schedule and
 # book with a fake clock and a fake fetcher, the Tor gate and the screen
-# choice; then the tests of the shared code (apps/android-common/tests). No
+# choice, and the Lightning transport against a local HTTPS server with a
+# self-signed certificate (made here with keytool); then the tests of the shared code (apps/android-common/tests). No
 # Android class is used and nothing is fetched.
 #
 # OPENBMT_WRITE_SCREENS=1 writes docs/screens/counter-app.md first.
@@ -36,7 +37,13 @@ trap 'rm -rf "$scratch/jvm-classes"' EXIT
     -classpath "$lib/kotlin-stdlib.jar:$lib/annotations-13.0.jar" \
     -d "$scratch/jvm-classes" \
     "$wrapper/Native.kt" "$wrapper/CounterNode.kt" \
-    "$common"/src/model/*.kt "$app"/src/model/*.kt "$app/tests/AppModelTest.kt"
+    "$common"/src/model/*.kt "$app"/src/model/*.kt "$app/tests/AppModelTest.kt" "$app/tests/LightningTransportTest.kt"
 
 "$JAVA_HOME/bin/java" -Xmx2g -cp "$scratch/jvm-classes:$lib/kotlin-stdlib.jar" \
     org.openbmt.counter.app.AppModelTest "$repo/docs/screens/counter-app.md"
+
+# The transport of CR-114 against a local server: a certificate made for the run.
+"$JAVA_HOME/bin/keytool" -genkeypair -alias t -keyalg EC -groupname secp256r1 -dname "CN=localhost" \
+    -validity 2 -storetype PKCS12 -keystore "$scratch/pin.p12" -storepass changeit -keypass changeit 2>/dev/null
+"$JAVA_HOME/bin/java" -Xmx1g -cp "$scratch/jvm-classes:$lib/kotlin-stdlib.jar" \
+    org.openbmt.counter.app.LightningTransportTest "$scratch/pin.p12"

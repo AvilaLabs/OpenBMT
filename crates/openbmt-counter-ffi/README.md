@@ -105,6 +105,22 @@ The pairing ceremony (`pair_begin`, `pair_match`, `pair_differ`,
 only (CR-91). `pair_finish` returns the pairing record, which holds the
 counter's key: the app seals it and hands it to every `start`.
 
+## Lightning
+
+Ops 50 to 55 carry the shop's own Lightning node (CR-112 to CR-116). The
+library never opens a connection: it hands the app one request at a time
+(`ln_next`, or the first request of a test from `ln_setup`) and takes the
+answer (`ln_reply`) or the news that there was none (`ln_failed`). The app
+sends the request over HTTPS with no redirect, a body of at most 1,000,000
+bytes and the host name unchecked, and asks `ln_pin` whether the certificate
+the node showed is the pinned one before it sends a byte (CR-114). A test
+(LN-20) is run against the node the owner named in the shop's settings; when
+it passes, `ln_reply` gives the record, which the app seals and hands to
+every `start` (`StartConfig.lightning`). `ln_remove` forgets the connection
+at once. A sale's screen carries the Lightning line and, when the invoice
+has passed, the code of LN-18 as its payment; `StateView::PaidLightning` is
+a sale paid by Lightning, final at once.
+
 ## Storage
 
 The node stores in a data folder (the app passes `noBackupFilesDir`). The

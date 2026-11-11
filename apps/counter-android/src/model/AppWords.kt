@@ -134,6 +134,64 @@ object AppWords {
         "Wait a moment while the counter starts again.",
     )
 
+    // ---- Lightning through the shop's own node (CR-112 to CR-116) ---------------------------
+
+    val lightningAbout = w(
+        Tones.INFO, "Lightning through your node",
+        "The counter only asks your node for invoices, so give it a key limited to invoices, from a node that runs a current release.",
+        Who.MANAGER,
+        "Scan or paste the LND code, or fill in the three Core Lightning fields, type the manager's PIN, then test and save.",
+    )
+
+    val lightningCare = w(
+        Tones.INFO, "Running a Lightning node",
+        "A node that takes payments needs channels with room to receive, updates kept current and a backup of its own.",
+        Who.OWNER,
+        "Watch the channel balances, install each update soon after it comes out, and keep a backup of the node.",
+    )
+
+    val lightningTesting = w(
+        Tones.INFO, "Testing the node",
+        "The counter is asking your node for a test invoice and checking that it is yours.",
+        Who.MANAGER,
+        "Wait a moment while the node answers.",
+    )
+
+    val lightningFieldsNeeded = w(
+        Tones.STOP, "Lightning fields needed",
+        "The connection needs its code, or for Core Lightning its address, its key and its certificate.",
+        Who.MANAGER,
+        "Fill them in, then test and save again.",
+    )
+
+    val lightningNotReached = w(
+        Tones.STOP, "Test did not finish",
+        "Your node gave no answer the counter could use, so nothing was saved.",
+        Who.MANAGER,
+        "Check the address and that the node is running, then try again.",
+    )
+
+    val lightningSaved = w(
+        Tones.GOOD, "Lightning saved",
+        "The test passed, and the connection is saved on this phone where only this app can read it.",
+        Who.MANAGER,
+        "Wait a moment while the counter starts again.",
+    )
+
+    val lightningRemoved = w(
+        Tones.INFO, "Lightning removed",
+        "The connection to your node is deleted from this phone, and sales show the on-chain code only.",
+        Who.MANAGER,
+        "Nothing more to do.",
+    )
+
+    val lightningWaiting = w(
+        Tones.INFO, "Lightning code coming",
+        "The counter is asking the shop's node for a Lightning code for this sale.",
+        Who.CASHIER,
+        "Let the customer pay on-chain with the code above, or wait a few seconds.",
+    )
+
     // ---- Tor and Orbot ------------------------------------------------------------------
 
     val orbotNotRunning = w(
@@ -399,6 +457,14 @@ object AppWords {
         "ownNodeAbout" to ownNodeAbout,
         "ownNodeSaved" to ownNodeSaved,
         "ownNodeRemoved" to ownNodeRemoved,
+        "lightningAbout" to lightningAbout,
+        "lightningCare" to lightningCare,
+        "lightningTesting" to lightningTesting,
+        "lightningFieldsNeeded" to lightningFieldsNeeded,
+        "lightningNotReached" to lightningNotReached,
+        "lightningSaved" to lightningSaved,
+        "lightningRemoved" to lightningRemoved,
+        "lightningWaiting" to lightningWaiting,
         "managerNeeded" to managerNeeded,
         "pinWrong" to pinWrong(4),
         "pinLocked" to pinLocked(300),

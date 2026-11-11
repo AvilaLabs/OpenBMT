@@ -16,10 +16,11 @@ local test key; release signing is a separate step (see "Signing").
 |---|---|
 | First start | The counter's name, the manager's name and PIN, the address of Orbot, and Pair with the Key app. |
 | Pairing | Scan the Key app's offer; the counter's own request as a code with its four words and They match / They differ; scan the owner phone's bundle. |
-| Home | Whether Bitcoin is ready, the price and each source's note, the own node's line with Try again (when one is set), New sale, Sales, the cashier's name, Your own node, About. |
+| Home | Whether Bitcoin is ready, the price and each source's note, the own node's line with Try again (when one is set), New sale, Sales, the cashier's name, the Lightning line (only while a connection is saved, CR-116), Your own node, Lightning, About. |
 | Your own node | The counter's own setting, behind the manager's PIN (CR-100): the Tor address of the shop's own node, saved or removed. A home-network address is refused, and Orbot must be on (CR-101, CR-102). It is kept in the app's config file, not in the pairing. |
+| Lightning | The connection to the shop's own Lightning node, behind the manager's PIN (CR-115): LND by scanning or pasting the `lndconnect://` code, Core Lightning by address, rune and certificate (PEM or SHA-256 fingerprint). The test of LN-20 runs against the node the owner named in the shop's settings; only when it passes is the connection sealed with the Keystore and saved in `noBackupFilesDir` (`lightning.obkl`). Remove deletes it at once. One thread sends the library's requests over HTTPS (no redirect, at most 1,000,000 bytes, 20 s to connect through Tor and 10 s directly, 15 s to read), through Orbot when the host ends in `.onion` or Tor is on, with the node's certificate pinned by the library and the host name not checked (CR-114). |
 | New sale | A keypad in the shop's currency. |
-| Sale | The payment code, the amount in currency and in sats, what has arrived, the library's words in the colour of their tone, which check was done (light check, or the own node and the light check, CR-105), Requote, Cancel, Override, Copy. |
+| Sale | The payment code, the amount in currency and in sats, what has arrived, the library's words in the colour of their tone, which check was done (light check, or the own node and the light check, CR-105; or "Lightning, final" for a sale paid by Lightning, CR-109), the on-chain code first and the Lightning code when the invoice has passed (CR-113) or the line that says Lightning is not available for this sale, Requote, Cancel, Override, Copy. |
 | Sales and details | The sales the counter holds, one sale's judgment and its refunds. |
 | Refunds | Ask for a refund, withdraw a request, refund in cash. |
 | About | The version, what is not built, "Not for real funds", the run-while-visible note. |
@@ -144,7 +145,12 @@ checks the manifest. The result is under
 
 - `tests/run-jvm.sh` runs the common model tests, then the counter's model
   tests (PIN store, pairing steps, amount entry, QR layout, price schedule,
-  Tor gate, sale model, screen choice, words). They need no device.
+  Tor gate, sale model, screen choice, words, the Lightning inputs and the
+  steps of a test), then the Lightning transport against a local HTTPS server
+  with a self-signed certificate made by `keytool` (a matching pin sends the
+  request, a different pin is refused before any request byte, a redirect and
+  a body past the limit are refused, `.onion` names go to the proxy
+  unresolved). They need no device.
   `OPENBMT_WRITE_SCREENS=1` rewrites `docs/screens/counter-app.md`.
 - `apps/android-common/tests/qr-jni-test.sh` builds the QR reader for the
   host and reads frames made by the repository's encoder through the same

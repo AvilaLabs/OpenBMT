@@ -12,6 +12,11 @@ import org.openbmt.app.Tones
 import org.openbmt.app.Who
 import org.openbmt.counter.CounterException
 import org.openbmt.counter.CounterNetwork
+import org.openbmt.counter.LnKind
+import org.openbmt.counter.LnMethod
+import org.openbmt.counter.LnRequest
+import org.openbmt.counter.LnStep
+import org.openbmt.counter.LnTransport
 import org.openbmt.counter.Payment
 import org.openbmt.counter.Quoted
 import org.openbmt.counter.Rate
@@ -553,7 +558,7 @@ object AppModelTest {
         ok(b(SaleState.PartPaid).let { it.requote && !it.cancel && it.override }, "part paid: requote and override")
         ok(b(SaleState.Waiting).let { !it.requote && !it.cancel && it.override }, "waiting: override")
         ok(b(SaleState.DoNotHandOver).let { !it.requote && !it.cancel && it.override }, "do not hand over: override")
-        for (s in listOf(SaleState.PaidInstant, SaleState.Confirmed, SaleState.Final, SaleState.Overridden, SaleState.Expired, SaleState.Cancelled, SaleState.NeedsAPerson)) {
+        for (s in listOf(SaleState.PaidInstant, SaleState.Confirmed, SaleState.Final, SaleState.Overridden, SaleState.Expired, SaleState.Cancelled, SaleState.NeedsAPerson, SaleState.PaidLightning)) {
             ok(b(s).let { !it.requote && !it.cancel && !it.override }, "no button for $s")
         }
         val usd = Money.of("USD")!!
@@ -561,8 +566,47 @@ object AppModelTest {
         ok(SaleModel.amountLine(usd, null, 1) == "1 sat to send", "an amount in sats alone")
         ok(SaleModel.receivedLine(5000, 6000) == "Received 5,000 sats of 6,000 sats", "the received line")
         ok(SaleModel.isEnded(SaleState.Expired) && !SaleModel.isEnded(SaleState.Waiting), "ended sales")
+        ok(SaleModel.isEnded(SaleState.PaidLightning), "a sale paid by Lightning is over (CR-109)")
         ok(ShopCurrency.of(listOf(src("a"), src("b")))!!.code == "USD", "the shop's currency is the sources'")
         ok(ShopCurrency.of(listOf(src("a"), RateSource("b", "u", "EUR", "b"))) == null && ShopCurrency.of(emptyList()) == null, "sources in two currencies have none")
+    }
+
+    // ---- Lightning: the inputs and the steps of the test (CR-115) --------------------------------------
+
+    private fun lightningTests() {
+        ok(LightningSetup.lnd("  ") == null && LightningSetup.lnd("") == null, "no LND code")
+        ok(LightningSetup.lnd(" lndconnect://h:1?cert=a&macaroon=b \n")!!.let { it.kind == LnKind.Lnd && it.address == "lndconnect://h:1?cert=a&macaroon=b" && it.secret.isEmpty() && it.cert.isEmpty() }, "an LND code, trimmed")
+        ok(LightningSetup.cln("", "r", "c") == null && LightningSetup.cln("h:1", " ", "c") == null && LightningSetup.cln("h:1", "r", "") == null, "a Core Lightning field left empty")
+        ok(LightningSetup.cln(" h:1 ", " r ", "-----BEGIN CERTIFICATE-----\nAA\n-----END CERTIFICATE-----\n")!!.let { it.kind == LnKind.Cln && it.address == "h:1" && it.secret == "r" && it.cert.startsWith("-----BEGIN") && it.cert.endsWith("-----") }, "Core Lightning fields, trimmed, the PEM kept whole")
+
+        fun req(id: Long) = LnRequest(id, "h:1", LnMethod.Get, "/p", "n", "v", null)
+        val sent = ArrayList<Long>()
+        val replied = ArrayList<Triple<Long, Long, Int>>()
+        val record = byteArrayOf(9, 8)
+        // Two requests, then the record.
+        val got = LightningSetup.drive(
+            req(1),
+            { r -> sent.add(r.id); LnOutcome.Answer(200, ByteArray(3)) },
+            { id, status, body -> replied.add(Triple(id, status, body.size)); if (id == 1L) LnStep(req(2), null) else LnStep(null, record) },
+            { _, _ -> error("no failure here") },
+        )
+        ok(got.contentEquals(record) && sent == listOf(1L, 2L) && replied == listOf(Triple(1L, 200L, 3), Triple(2L, 200L, 3)), "a test of two requests ends with the record")
+        // A request with no answer goes to failed, with the reason, and nothing is saved.
+        var why: LnTransport? = null
+        val none = LightningSetup.drive(req(1), { LnOutcome.Failed(LnTransport.PinRefused) }, { _, _, _ -> error("no answer") }, { id, w -> ok(id == 1L, "the id that failed"); why = w })
+        ok(none == null && why == LnTransport.PinRefused, "a refused pin stops the test, with its reason")
+        // The library may throw from `failed` (the words of why the test stopped): it goes up.
+        var thrown = false
+        try {
+            LightningSetup.drive(req(1), { LnOutcome.Failed(LnTransport.TimedOut) }, { _, _, _ -> error("no answer") }, { _, _ -> throw CounterException("ln", "the words", 4) })
+        } catch (_: CounterException) {
+            thrown = true
+        }
+        ok(thrown, "the words of a stopped test are thrown on")
+        // A reply with neither a record nor a request ends it; a test that never ends is given up.
+        ok(LightningSetup.drive(req(1), { LnOutcome.Answer(200, ByteArray(0)) }, { _, _, _ -> LnStep(null, null) }, { _, _ -> }) == null, "an empty step ends the test")
+        var rounds = 0
+        ok(LightningSetup.drive(req(1), { rounds++; LnOutcome.Answer(200, ByteArray(0)) }, { id, _, _ -> LnStep(req(id + 1), null) }, { _, _ -> }) == null && rounds == LightningSetup.MAX_STEPS, "a test that never ends is given up")
     }
 
     @JvmStatic
@@ -576,6 +620,7 @@ object AppModelTest {
         qrTests()
         priceTests()
         torTests()
+        lightningTests()
         screenTests()
         println("AppModelTest (counter): $count checks passed")
     }

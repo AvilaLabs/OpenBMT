@@ -28,6 +28,14 @@ These are the words of what the app decides itself.
 | ownNodeAbout | Your own node | A node of your own, reached by a Tor address, can check each payment as well as the light check does. | Type its Tor address and the manager's PIN, then save. | a manager |  |
 | ownNodeSaved | Own node saved | The counter will ask your own node about each payment, once it has started again. | Wait a moment while the counter starts again. | a manager |  |
 | ownNodeRemoved | Own node removed | The counter checks payments with the light check only. | Wait a moment while the counter starts again. | a manager |  |
+| lightningAbout | Lightning through your node | The counter only asks your node for invoices, so give it a key limited to invoices, from a node that runs a current release. | Scan or paste the LND code, or fill in the three Core Lightning fields, type the manager's PIN, then test and save. | a manager |  |
+| lightningCare | Running a Lightning node | A node that takes payments needs channels with room to receive, updates kept current and a backup of its own. | Watch the channel balances, install each update soon after it comes out, and keep a backup of the node. | the owner |  |
+| lightningTesting | Testing the node | The counter is asking your node for a test invoice and checking that it is yours. | Wait a moment while the node answers. | a manager |  |
+| lightningFieldsNeeded | Lightning fields needed | The connection needs its code, or for Core Lightning its address, its key and its certificate. | Fill them in, then test and save again. | a manager |  |
+| lightningNotReached | Test did not finish | Your node gave no answer the counter could use, so nothing was saved. | Check the address and that the node is running, then try again. | a manager |  |
+| lightningSaved | Lightning saved | The test passed, and the connection is saved on this phone where only this app can read it. | Wait a moment while the counter starts again. | a manager |  |
+| lightningRemoved | Lightning removed | The connection to your node is deleted from this phone, and sales show the on-chain code only. | Nothing more to do. | a manager |  |
+| lightningWaiting | Lightning code coming | The counter is asking the shop's node for a Lightning code for this sale. | Let the customer pay on-chain with the code above, or wait a few seconds. | the cashier |  |
 | managerNeeded | A manager is needed | This step needs the manager's PIN. | Ask the manager to type the PIN. | a manager |  |
 | pinWrong | Wrong PIN | That PIN is not right, so nothing was done. | Wait 4 seconds, then try again. | a manager |  |
 | pinLocked | PIN locked for now | There were wrong tries in a row, so the PIN is locked for a while. | Wait 5 minutes, then try again. | a manager |  |

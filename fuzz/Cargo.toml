@@ -464,6 +464,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "counter_lightning_record_decode"
+path = "fuzz_targets/counter_lightning_record_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "ceremony_key_text"
 path = "fuzz_targets/ceremony_key_text.rs"
 test = false

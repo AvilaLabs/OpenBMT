@@ -17,11 +17,12 @@ use openbmt_core::batch::{AddressBatch, BatchPolicy, PinnedRoots, SignedBatch};
 use openbmt_core::command::{Action, OwnerCommand, SignedCommand};
 use openbmt_core::identity::Identity;
 use openbmt_core::policy::{CheckMode, Heartbeat};
-use openbmt_core::records::{Chain, Record};
+use openbmt_core::records::Record;
 use openbmt_core::settings::Settings;
 use openbmt_counter::{
-    sale_payment_id, Actor, Amount, CashRefund, Counter, Currency, Event, Facts, OpenFacts,
-    Pairing, Rate, RateSource, RefundAsk, RefundRequest, Report, Role, Slot, State, Store, Stored,
+    sale_payment_id, Actor, Amount, CashRefund, Counter, Currency, Event, Facts, LightningPaid,
+    OpenFacts, Pairing, Rate, RateSource, RefundAsk, RefundRequest, Report, Role, Slot, State,
+    Store, Stored,
 };
 use openbmt_watch::{HeaderChain, Health, PeerAddr, Source, WellFormedBlock};
 
@@ -128,12 +129,6 @@ impl Mem {
                     _ => None,
                 })
                 .collect(),
-            records: Chain::from_records(
-                self.records
-                    .iter()
-                    .map(|b| Record::from_bytes(b).unwrap())
-                    .collect(),
-            ),
         }
     }
 }
@@ -157,6 +152,11 @@ impl Store for Mem {
         self.step()?;
         self.records.push(bytes.to_vec());
         Ok(())
+    }
+
+    fn read_records(&self, from: u64, max: usize) -> Result<Vec<Vec<u8>>, &'static str> {
+        let from = usize::try_from(from).unwrap_or(usize::MAX);
+        Ok(self.records.iter().skip(from).take(max).cloned().collect())
     }
 }
 
@@ -386,6 +386,7 @@ impl Run {
                             && matches!(
                                 e,
                                 Event::PaidAtOnce { .. }
+                                    | Event::PaidByLightning { .. }
                                     | Event::Confirmed { .. }
                                     | Event::Final { .. }
                                     | Event::Override { .. }
@@ -410,7 +411,8 @@ impl Run {
                 }
                 Report::BooksFinal { index, .. } => {
                     assert!(
-                        fresh(&|e| e.index() == *index && matches!(e, Event::Final { .. })),
+                        fresh(&|e| e.index() == *index
+                            && matches!(e, Event::Final { .. } | Event::PaidByLightning { .. })),
                         "BooksFinal for sale {index} without a record"
                     );
                 }
@@ -466,7 +468,13 @@ impl Run {
 
     /// Rebuild the counter from what the store holds.
     fn restart(&mut self) {
-        let loaded = Counter::load(id(3), pairing(), self.settings.clone(), self.mem.stored());
+        let loaded = Counter::load(
+            id(3),
+            pairing(),
+            self.settings.clone(),
+            self.mem.stored(),
+            &self.mem,
+        );
         let counter = match loaded {
             Ok(counter) => counter,
             Err(e) => panic!("the counter's own store did not load: {e:?}"),
@@ -507,7 +515,7 @@ impl Run {
         let failures_before = self.mem.failures;
         let mut cleared = false;
         let mut reports: Vec<Report> = Vec::new();
-        match head % 14 {
+        match head % 15 {
             // Open a sale.
             0 => {
                 let amount = Amount(1 + u64::from(input.word()));
@@ -788,6 +796,35 @@ impl Run {
                     &self.chain,
                     &mut self.mem,
                 );
+            }
+            // The shop's node says a sale was paid over Lightning, for too
+            // little, enough or too much, from a node that may report it
+            // again (CR-109, CR-110).
+            13 => {
+                let (index, _) = self.pick(input.byte());
+                let kind = input.byte();
+                let need = self
+                    .counter
+                    .sale(index)
+                    .map_or(1_000, |s| s.needs_sats().max(1));
+                let amount_msat = match kind % 4 {
+                    0 => need * 1_000,
+                    1 => need * 500,
+                    2 => need * 2_000 + u64::from(kind),
+                    _ => u64::from(input.word()),
+                };
+                let paid = LightningPaid {
+                    payment_hash: [input.byte(); 32],
+                    amount_msat,
+                    settled_at: (kind & 0x10 != 0).then_some(self.now),
+                };
+                let facts = facts(&self.chain, self.now);
+                if let Ok(mut screen) =
+                    self.counter
+                        .lightning_paid(index, paid, &facts, &mut self.mem)
+                {
+                    reports.append(&mut screen.reports);
+                }
             }
             // Restart from the store.
             _ => self.restart(),
