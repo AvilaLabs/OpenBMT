@@ -1678,6 +1678,9 @@ class Controller(private val act: MainActivity) {
     /** Checks [text] as the manager's PIN; a PIN that is wrong or held shakes [field]. */
     private fun checkPin(text: String, field: View?, ok: () -> Unit, failed: (SayWords) -> Unit) {
         async({ pin.check(text) }) { r ->
+            // CR-200: an answer that comes back after the app was hidden unlocks nothing and shows nothing; the try was
+            // counted before it was compared (CR-85), and the person types the PIN again.
+            if (!PinSteps.applies(visible)) return@async
             val e = r.exceptionOrNull()
             if (e != null) {
                 failed(if (e is IOException) AppWords.fileNotSaved(e.message) else AppWords.fault(CounterException("pin", e.javaClass.simpleName, 4)))
@@ -1976,6 +1979,8 @@ class Controller(private val act: MainActivity) {
     /** CR-150: the PIN check of CR-85 for that person, counted and stored before it is compared; a held PIN is not looked at. */
     private fun signIn(person: Actor, text: String, msg: Slot, field: View) {
         async({ if (person.role == ActorRole.Manager) pin.check(text) else staff.check(person.name, text) }) { r ->
+            // CR-200: a sign-in that finished after the app was hidden signs nobody in.
+            if (!PinSteps.applies(visible)) return@async
             val e = r.exceptionOrNull()
             if (e is IOException) return@async msg.show(note(AppWords.fileNotSaved(e.message)))
             if (e != null) throw e

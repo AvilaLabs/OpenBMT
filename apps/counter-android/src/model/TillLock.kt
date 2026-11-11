@@ -3,6 +3,15 @@ package org.openbmt.counter.app
 import org.openbmt.counter.Actor
 
 /**
+ * CR-200: what a PIN step does with its answer. The check runs on a thread of its own, and the answer comes back to
+ * the screen thread later: when the app was hidden meanwhile it unlocks nothing, runs nothing and shows nothing.
+ */
+object PinSteps {
+    /** Whether the answer of a PIN check is acted on: only while the app is shown. */
+    fun applies(visible: Boolean): Boolean = visible
+}
+
+/**
  * Who is at the till (docs/COUNTER-RULES.md CR-147 to CR-150), in memory only:
  * nothing here is written to a file, so an app that was stopped starts with
  * nobody signed in (CR-149). The person signs in with a PIN the app has

@@ -1009,6 +1009,23 @@ object AppModelTest {
         ok(AppWords.todayWaiting.what.contains("accepted") && AppWords.todayWaiting.next.contains("sale ends"), "CR-155: why a sale waits and what happens next")
     }
 
+    // ---- the PIN steps run only while the app is shown (CR-200) -----------------------------------------
+
+    private fun cr200PinStepsTests(appDir: File?) {
+        ok(PinSteps.applies(true) && !PinSteps.applies(false), "CR-200: an answer is acted on only while the app is shown")
+        if (appDir == null) return
+        val controller = File(appDir, "src/android/Controller.kt").readText()
+        ok(controller.contains("private var visible = false"), "the app keeps a flag for being shown")
+        ok(controller.substringAfter("fun visible() {").substringBefore("}").contains("visible = true") && controller.substringAfter("fun hidden() {").substringBefore("}").contains("visible = false"), "the activity's show sets it and its hide clears it")
+        val check = controller.substringAfter("private fun checkPin(").substringBefore("private fun showOverride(")
+        ok(check.indexOf("if (!PinSteps.applies(visible)) return@async") in 0 until check.indexOf("PinResult.Ok -> ok()"), "CR-200: the answer of a check is dropped before ok() can run, hidden")
+        ok(check.indexOf("if (!PinSteps.applies(visible)) return@async") < check.indexOf("failed("), "and before a wrong try or a hold is shown")
+        val signIn = controller.substringAfter("private fun signIn(").substringBefore("// ---- staff")
+        ok(signIn.indexOf("if (!PinSteps.applies(visible)) return@async") in 0 until signIn.indexOf("locks.signIn(person)"), "CR-200: a sign-in that finishes hidden signs nobody in")
+        val rules = File(appDir, "../../docs/COUNTER-RULES.md").readText()
+        ok(rules.contains("- **CR-200.**") && rules.contains("The answer is acted on only while the app is shown (CR-200)."), "CR-200 is in the rules and amends CR-85")
+    }
+
     // ---- the shop's currency and the tips (CR-188, CR-191, CR-192, CR-196, CR-197) ------------------------
 
     private fun cr188TipTests(appDir: File?) {
@@ -1076,6 +1093,7 @@ object AppModelTest {
         cr177ShowingTests()
         cr152DayWindowTests()
         cr153TodayLinesTests()
+        cr200PinStepsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr188TipTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         println("AppModelTest (counter): $count checks passed")
     }

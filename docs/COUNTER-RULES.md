@@ -562,7 +562,7 @@ own; the library judges sales and prices and knows nothing of them.
   for 1 second, then 2, 4, 8 and so on, up to 5 minutes. While it is held
   the PIN is not looked at, and the screen says how long to wait. The count
   is written before the answer is given, so closing the app does not reset
-  it.
+  it. The answer is acted on only while the app is shown (CR-200).
 - **CR-86.** A cashier's action needs no PIN: opening, requoting and
   cancelling a sale, asking for or withdrawing a refund, and a cash refund.
   The actions of CR-21 (an override) and of CR-67 to CR-69 (a refund asked
@@ -1393,3 +1393,12 @@ RT-03, RT-24).
   and each limit's value in the currency's name as its whole units (`$10`
   for a dollar shop, `10 euros`, `10 sats`), so that the key holder sees in
   what the limits are before co-signing.
+- **CR-200.** The steps that check a PIN (CR-85, CR-150) run only while the
+  app is shown. The check runs on a thread of its own and its answer comes
+  back to the screen thread later; when the app was hidden in between, the
+  answer is dropped: nothing is unlocked, the action that waited for the PIN
+  does not run, no sign-in is made and no wrong-PIN words are shown. The try
+  was counted before it was compared, as CR-85 says, so closing the app
+  does not clear it; the person types the PIN again when the app is shown.
+  The app keeps a flag that is set when it is shown and cleared when it is
+  hidden, and no answer is acted on while it is clear.
