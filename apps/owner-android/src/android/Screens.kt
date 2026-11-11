@@ -47,6 +47,7 @@ internal fun Controller.showHome(): Unit = withNode { n ->
     views.add(label("The receipts line"))
     views.add(lines)
     views.add(ui.button("Receipts and merge") { showReceipts() })
+    if (key2Signer) views.add(ui.button("Register the wallet on your signer") { showHardwareRegister { showHome() } })
     views.add(ui.primary("Spend") { showSpend() })
     views.add(ui.button("Open approvals") { showSessions() })
     views.add(ui.button("Waiting to be delivered") { showOutbox() })
@@ -97,6 +98,7 @@ internal fun Controller.showHome(): Unit = withNode { n ->
             out.add(ui.text(OwnerModel.linkLine(link, link?.counters?.size ?: 0), 15f))
             linkFault?.let { out.add(ui.words(it)) }
             out.add(ui.text(OwnerModel.sendsLine(inProgress), 15f))
+            if (key2Signer) out.add(firstAddressView(n))
             lines.show(*out.toTypedArray())
         } catch (e: OwnerException) {
             health.show(ui.words(e.sayWords()))
@@ -185,7 +187,12 @@ internal fun Controller.showSpend(): Unit = withNode { n ->
     views.add(ui.primary("Build the request") {
         when (val f = Forms.feeRate(fee.text.toString())) {
             is Form.Refused -> msg.show(ui.words(f.words))
-            is Form.Ok -> attempt(msg) { n.buildRequest(nowSecs(), f.value) }?.let { showBuilt(it) { showSpend() } }
+            // With key 2 on a hardware signer the spends go to the signer, and the Key app gets the rest (OA-70).
+            is Form.Ok -> if (key2Signer) {
+                attempt(msg) { n.signerBuild(nowSecs(), f.value) }?.let { showSignerSpend(it) { showSpend() } }
+            } else {
+                attempt(msg) { n.buildRequest(nowSecs(), f.value) }?.let { showBuilt(it) { showSpend() } }
+            }
         }
     })
     views.add(msg)

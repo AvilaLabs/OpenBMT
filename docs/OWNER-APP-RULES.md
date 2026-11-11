@@ -606,9 +606,14 @@ signer, whose screen is the second review. Settings, batches and pairings
 still go to the Key app. The library does all of it (`docs/SESSION-RULES.md`,
 AS-90 to AS-99, and the ops 120 to 126 of the node's call); the app's part
 is the screens and the transports, which are the rules of this section.
-Status: the model of these rules (`HardwareModel`, `HardwareWords`) is
-built and tested; the screens, the document picker and the scanner that
-use it are not wired into the activities yet.
+Status: built. The model (`HardwareModel`, `HardwareWords`) and the screens
+(`Hardware.kt`) use the library's ops 120 to 126, the BBQr and UR calls of
+the shared code, the system's document pickers and the camera scan. Whether
+key 2 is a signer is read from a file the ceremony writes from its pairs of
+keys (the setup text has no line for it), so a setup that is pasted has no
+signer screens. The camera scan and the pickers are not yet counted in the
+60 seconds of OA-62 (the review fixes for that are not in this tree: see the
+TODO(OA-60) in `Hardware.kt`).
 
 - **OA-70.** The person picks how a payment reaches the signer, from a
   list that names animated codes of a UR (`crypto-psbt`, in fragments of at

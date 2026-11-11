@@ -1,10 +1,12 @@
 package org.openbmt.owner.app
 
+import org.openbmt.app.CameraWords
 import org.openbmt.app.Format
 import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
 import org.openbmt.app.Who
 import org.openbmt.owner.FirstAddress
+import org.openbmt.owner.PairView
 import org.openbmt.owner.Registration
 
 /** The three ways a hardware signer is given a file and gives one back (OA-70). */
@@ -24,9 +26,9 @@ object HardwareModel {
      * them.
      */
     val transports: List<TransportChoice> = listOf(
-        TransportChoice(Transport.Ur, "Animated codes (UR)", "For example Keystone, Passport, Jade, Krux and SeedSigner."),
-        TransportChoice(Transport.Bbqr, "Animated codes (BBQr)", "For example the Coldcard Q and SeedSigner."),
-        TransportChoice(Transport.File, "A file (.psbt)", "For example the Coldcard Mk4 with a microSD card."),
+        TransportChoice(Transport.Ur, "Moving QR codes (UR)", "For example Keystone, Passport, Jade, Krux and SeedSigner."),
+        TransportChoice(Transport.Bbqr, "Moving QR codes (BBQr)", "For example Coldcard Q and SeedSigner."),
+        TransportChoice(Transport.File, "A file on a memory card", "For example Coldcard Mk4 with a microSD card."),
     )
 
     /** OA-70: the type a UR of a signer file has. */
@@ -39,6 +41,54 @@ object HardwareModel {
     /** OA-70: most characters of a part of a BBQr set, and most bytes of a fragment of a UR, for a screen. */
     const val BBQR_PART_CHARS = 400
     const val UR_FRAGMENT_BYTES = 200
+
+    /** OA-70: the types of UR and the kinds of BBQr that are read back from a signer: a PSBT, or a finished transaction. */
+    val RETURN_UR_TYPES: Set<String> = setOf(UR_PSBT, "psbt")
+    val RETURN_BBQR_KINDS: Set<Char> = setOf(BBQR_PSBT, BBQR_TRANSACTION)
+
+    /** OA-71: the UR type of the descriptor, and of the wallet's text. */
+    const val UR_OUTPUT = "crypto-output"
+    const val UR_TEXT = "bytes"
+
+    /** OA-71: the BBQr kind of the wallet's text. */
+    const val BBQR_TEXT = 'U'
+
+    /** OA-71: the file the wallet's text is saved as is plain text; a PSBT file is bytes. */
+    const val MIME_TEXT = "text/plain"
+    const val MIME_BYTES = "application/octet-stream"
+
+    /**
+     * OA-71: how the wallet's text is shown for the [transport] the person picked: with moving codes of a UR,
+     * one plain code when the library says the text fits one, else `ur:bytes`; with moving codes of a BBQr, a
+     * set of type U; with a file, the `.txt` file. The descriptor is shown as `ur:crypto-output` whatever the
+     * transport (`descriptorWays` lists the other forms the library can make; the screen offers this one).
+     */
+    fun textWay(transport: Transport, r: Registration): RegistrationWay = when (transport) {
+        Transport.Ur -> if (r.textFitsPlainQr) RegistrationWay.PlainCode else RegistrationWay.UrBytes
+        Transport.Bbqr -> RegistrationWay.BbqrText
+        Transport.File -> RegistrationWay.TextFile
+    }
+
+    /** OA-72: whether the pairs of keys the ceremony shows say that key 2 is held on another signer. */
+    fun key2IsSigner(pairs: List<PairView>): Boolean = pairs.any {
+        (it.keyA == 2L && it.holderA == HOLDER_OTHER_SIGNER) || (it.keyB == 2L && it.holderB == HOLDER_OTHER_SIGNER)
+    }
+
+    /** The library's number for a key held on another signer (`CeremonyModel.holder`). */
+    const val HOLDER_OTHER_SIGNER = 3
+
+    /** OA-72: an address in groups of 4 characters, for comparing it character by character. */
+    fun grouped(address: String): String = address.chunked(4).joinToString(" ")
+
+    /**
+     * OA-74: the words of a scan that did not give bytes: those the reading gave, else the camera is off for the
+     * app ([off]), else it did not start ([problem] is the system's text).
+     */
+    fun scanFailure(off: Boolean, problem: String?, say: SayWords?): SayWords =
+        say ?: if (off) CameraWords.off(Who.OWNER) else CameraWords.notStarted(Who.OWNER, problem)
+
+    /** OA-74: the progress of a set of parts read in any order. */
+    fun partsLine(read: Int, of: Int): String = "$read of $of parts read"
 
     /**
      * OA-71: the ways to show the wallet's text file (a Coldcard multisig text), in the order of the screen:
@@ -88,59 +138,66 @@ object HardwareWords {
         SayWords(tone, who, heading, what, next, null, null, null, null)
 
     val chooseTransport = w(
-        Tones.INFO, "How does it reach the signer",
-        "A payment for the signer goes as animated codes, or as a file, and the signer's answer comes back the same way.",
+        Tones.INFO, "Choose how to reach the signer",
+        "The payment goes to the signer as moving codes on this screen or as a file, and the signed payment comes back the same way.",
         Who.OWNER,
-        "Pick the one your signer uses. The list names some signers as examples.",
+        "Pick the one your signer uses. The names under each choice are examples.",
     )
 
     val signerReview = w(
         Tones.INFO, "Check it on the signer",
-        "The signer's screen is the second check: it shows each address, each amount and the fee, and what goes back to the wallet.",
+        "The signer's own screen is the second check. It shows each address, each amount and the fee.",
         Who.OWNER,
-        "Compare every address and amount with this screen, and approve on the signer only if they all match.",
+        "Compare every address and amount with this screen. Approve on the signer only if they all match.",
     )
 
     val registerIntro = w(
         Tones.INFO, "Register the wallet",
-        "A signer must be told this wallet before it will sign for it, or show its addresses.",
+        "A signer signs for a wallet only after it has been shown the wallet.",
         Who.OWNER,
-        "Show the signer the wallet's text, then compare the first address.",
+        "Show the signer this code or file, then check the first address.",
     )
 
     val partsMissing = w(
-        Tones.INFO, "Part of the code is missing",
-        "The animated code is not complete yet; the parts can be scanned in any order.",
+        Tones.INFO, "Keep scanning",
+        "Some parts of the moving code have not been read yet. They can be read in any order.",
         Who.OWNER,
-        "Keep scanning until every part has been read.",
+        "Hold the camera on the signer's screen until every part is read.",
     )
 
     val firstAddressCompare = w(
         Tones.INFO, "Check the first address",
-        "Open the address explorer on the signer and compare its first receive address with the one shown here.",
+        "On the signer, open its address list and find the first receive address.",
         Who.OWNER,
-        "Choose Checked if they match. Do not use the wallet until they do, or choose Skip and do it later.",
+        "Compare it with the address shown here, character by character.",
+    )
+
+    val firstAddressDiffers = w(
+        Tones.STOP, "Do not use this wallet with this signer",
+        "The signer shows a different first address, so it holds a different wallet or was registered wrongly.",
+        Who.OWNER,
+        "Register the wallet again on the signer, then check again. If it still differs, do not take money into this wallet.",
     )
 
     val firstAddressChecked = w(
         Tones.GOOD, "First address checked",
-        "The signer shows the same first address as this phone, so it has the same wallet.",
+        "The signer shows the same first address as this phone, so it holds the same wallet.",
         Who.NOBODY,
         "Nothing to do.",
     )
 
     val firstAddressSkipped = w(
         Tones.INFO, "First address not checked",
-        "The check of the first address was skipped, so nothing yet shows that the signer has the same wallet.",
+        "Nothing yet shows that the signer holds the same wallet as this phone.",
         Who.OWNER,
-        "Do the check from the wallet screen before the shop takes money.",
+        "Check it from the wallet screen before the shop takes money.",
     )
 
     val returnedNeeded = w(
-        Tones.INFO, "Bring the payment back",
-        "Scan the animated code the signer shows, or open the file it saved, after you approved on the signer.",
+        Tones.INFO, "Bring the signed payment back",
+        "The signer has the payment. Its signature has to come back to this phone before the payment can be sent.",
         Who.OWNER,
-        "A finished transaction works too, if the signer finishes it.",
+        "Scan the code the signer shows, or open the file it saved. A payment the signer finished itself works too.",
     )
 
     fun all(): List<Pair<String, SayWords>> = listOf(
@@ -149,6 +206,7 @@ object HardwareWords {
         "hardwareRegisterIntro" to registerIntro,
         "hardwarePartsMissing" to partsMissing,
         "hardwareFirstAddressCompare" to firstAddressCompare,
+        "hardwareFirstAddressDiffers" to firstAddressDiffers,
         "hardwareFirstAddressChecked" to firstAddressChecked,
         "hardwareFirstAddressSkipped" to firstAddressSkipped,
         "hardwareReturnedNeeded" to returnedNeeded,

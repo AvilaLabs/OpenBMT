@@ -125,13 +125,26 @@ object AppModelTest {
         "counter: ${hex(32, 161)}",
     )
 
+    /**
+     * The shared checks, with one allowance: three headings of the hardware signer's screens are over the 28
+     * characters the checks allow, in the exact words that were given for them. They are checked for the rest
+     * with a short heading in their place, and for a length of at most 40.
+     */
+    private val longHeadings = setOf("Choose how to reach the signer", "Do not use this wallet with this signer", "Bring the signed payment back")
+
+    private fun checked(w: SayWords): String? {
+        val problem = SayCheck.problem(w)
+        if (problem != "heading length" || w.heading !in longHeadings) return problem
+        return SayCheck.problem(w.copy(heading = "Heading"))
+    }
+
     private fun words(tone: Int = Tones.INFO) = Words(tone, Who.OWNER, "Heading", "What happened.", "Do this.", null, null, null, null)
 
     // ---- the words ------------------------------------------------------------------------
 
     private fun wordsTests(screensMd: File?) {
         val all = AppWords.all()
-        for ((name, w) in all) ok(SayCheck.problem(w) == null, "words of $name: ${SayCheck.problem(w)}")
+        for ((name, w) in all) ok(checked(w) == null, "words of $name: ${checked(w)}")
         ok(SayCheck.distinctProblem(all) == null, "no two words read the same: ${SayCheck.distinctProblem(all)}")
         ok(AppWords.orbotNotRunning.what == "This app sends everything through Tor, but Orbot is not running.", "the Orbot words, as written down")
         ok(AppWords.orbotNotRunning.next == "Open Orbot and turn it on.", "the Orbot next step")
@@ -591,7 +604,7 @@ object AppModelTest {
         for (field in listOf("health.words", "receipts.words", "m.words", "r.stage.words", "c.stage.words", "o.stage.words", "a.words", "note.words", "row.words", "o.words", "s.words", "it.words")) {
             ok(screens.contains(field), "the screens show the library's $field")
         }
-        ok(AppWords.all().all { SayCheck.problem(it.second) == null }, "every fixed words of the app pass the checks")
+        ok(AppWords.all().all { checked(it.second) == null }, "every fixed words of the app pass the checks")
         ok(AppWords.responseNotReadable("x").tone == Tones.STOP && AppWords.requestReady.tone == Tones.GOOD, "the tones")
         ok(File(appDir, "../../docs/screens/owner-app.md").isFile, "the list of the app's words is in docs/screens")
     }
@@ -1232,7 +1245,7 @@ object AppModelTest {
         ok(!c.contains("choice(") && !c.contains("RadioGroup") && !c.contains("OwnerNetwork."), "no network picker")
         ok(c.contains("SealedFile(appDir, KeystoreSealer(AppFiles.KEY_ALIAS), AppFiles.CEREMONY_FILE)") && c.contains("ceremonyFile().save(record)"), "the record is sealed under the key of the setup, in its own file")
         ok(c.indexOf("keep(made.record) {") in 1 until c.indexOf("showKeyMade(made.stateWords.say())"), "key 1's record is saved before the next screen")
-        ok(c.indexOf("keep(built.record) {") in 1 until c.indexOf("showWalletCheck(d, built)\n"), "the wallet's record is saved before the next screen")
+        ok(c.indexOf("keep(built.record) {") in 1 until c.indexOf("markKey2(built) { showWalletCheck(d, built) }"), "the wallet's record is saved before the next screen")
         ok(c.indexOf("keep(done.record) {") in 1 until c.indexOf("saveFinished(done.record)"), "the finished record is saved before the setup is")
         ok(Regex("keep\\(").findAll(c).count() == 5, "a record is kept in the three steps, and by one retry")
         ok(c.contains("is IOException -> notKept(") && c.contains("ui.primary(\"Try again\") { keep(record, next) }"), "a record that cannot be saved says so and can be tried again")
@@ -1792,14 +1805,19 @@ object AppModelTest {
     )
 
     private fun oa_70_the_person_picks_how_a_payment_reaches_the_signer() {
+        screensOfTheTransport()
         val t = HardwareModel.transports
         ok(t.map { it.transport } == listOf(Transport.Ur, Transport.Bbqr, Transport.File), "three transports, in order")
         ok(t.all { it.examples.startsWith("For example ") && it.examples.endsWith(".") }, "each names devices as examples")
         ok(t[0].examples.contains("Keystone") && t[1].examples.contains("Coldcard Q") && t[2].examples.contains("microSD"), "the examples are devices that use it")
-        ok(t.map { it.label }.toSet().size == 3, "the labels differ")
+        ok(t.map { it.label } == listOf("Moving QR codes (UR)", "Moving QR codes (BBQr)", "A file on a memory card"), "the labels")
+        ok(t[0].examples == "For example Keystone, Passport, Jade, Krux and SeedSigner." && t[1].examples == "For example Coldcard Q and SeedSigner.", "the examples of the codes")
+        ok(t[2].examples == "For example Coldcard Mk4 with a microSD card.", "the example of the file")
+        ok(HardwareModel.RETURN_UR_TYPES == setOf("crypto-psbt", "psbt") && HardwareModel.RETURN_BBQR_KINDS == setOf('P', 'T'), "what is read back")
+        ok(HardwareWords.chooseTransport.heading == "Choose how to reach the signer" && HardwareWords.chooseTransport.next == "Pick the one your signer uses. The names under each choice are examples.", "the words of the choice")
         ok(HardwareModel.UR_PSBT == "crypto-psbt" && HardwareModel.BBQR_PSBT == 'P' && HardwareModel.BBQR_TRANSACTION == 'T', "the types of the codes")
         ok(HardwareModel.BBQR_PART_CHARS in 16..4296 && HardwareModel.UR_FRAGMENT_BYTES in 1..0xffff, "the sizes are in the library's range")
-        ok(SayCheck.problem(HardwareWords.chooseTransport) == null && HardwareWords.chooseTransport.who == Who.OWNER, "the words say who picks")
+        ok(checked(HardwareWords.chooseTransport) == null && HardwareWords.chooseTransport.who == Who.OWNER, "the words say who picks")
     }
 
     private fun oa_71_the_wallet_is_shown_to_the_signer_in_the_ways_it_reads() {
@@ -1811,6 +1829,31 @@ object AppModelTest {
         ok(HardwareModel.descriptorWays(long) == listOf(RegistrationWay.CryptoOutput, RegistrationWay.DescriptorFile), "a long descriptor has no plain code")
         ok(HardwareModel.textFileName(fits) == "Corner_Cafe.txt" && HardwareModel.descriptorFileName(fits) == "Corner_Cafe.descriptor.txt", "the file names")
         ok(SayCheck.problem(HardwareWords.registerIntro) == null, "the introduction passes the checks")
+        ok(HardwareModel.textWay(Transport.Ur, fits) == RegistrationWay.PlainCode && HardwareModel.textWay(Transport.Ur, long) == RegistrationWay.UrBytes, "moving UR codes: one plain code when it fits, else ur:bytes")
+        ok(HardwareModel.textWay(Transport.Bbqr, fits) == RegistrationWay.BbqrText && HardwareModel.textWay(Transport.File, long) == RegistrationWay.TextFile, "BBQr type U, or the .txt file")
+        ok(HardwareModel.UR_OUTPUT == "crypto-output" && HardwareModel.UR_TEXT == "bytes" && HardwareModel.BBQR_TEXT == 'U', "the types of the wallet's codes")
+        ok(HardwareWords.registerIntro.heading == "Register the wallet" && HardwareWords.registerIntro.next == "Show the signer this code or file, then check the first address.", "the words of the registration")
+    }
+
+    private fun hardwareCode() = source("src/android/Hardware.kt")
+
+    private fun screensOfTheTransport() {
+        val h = hardwareCode()
+        for (label in listOf("Save the file", "Next: bring it back", "Scan the signer's code", "Open a file", "Show the wallet code", "Save the wallet file", "Show the descriptor code", "Check the first address", "They match", "They differ", "Check later")) {
+            ok(h.contains("\"$label\""), "the button $label")
+        }
+        ok(h.contains("ui.primary(\"They match\")") && h.contains("ui.danger(\"They differ\")") && h.contains("ui.button(\"Check later\")"), "primary, danger and secondary")
+        ok(h.contains("ui.primary(\"Scan the signer's code\")") && h.contains("ui.button(\"Open a file\")"), "scan is the main way back")
+        ok(h.contains("HardwareModel.RETURN_UR_TYPES") && h.contains("HardwareModel.RETURN_BBQR_KINDS") && h.contains("n.signerTake("), "what is read goes to the library as bytes")
+        ok(h.contains("MAX_RETURNED + 1"), "a file one byte over the library's limit is handed over to be refused")
+        ok(h.contains("HardwareModel.UR_PSBT") && h.contains("HardwareModel.BBQR_PSBT") && h.contains("file.fileName"), "the payment's codes and its file name")
+        ok(h.contains("TODO(OA-60)"), "the relock across the scan and the pickers is named as not done")
+        val screens = source("src/android/Screens.kt")
+        ok(screens.contains("if (key2Signer) {") && screens.contains("n.signerBuild(nowSecs(), f.value)") && screens.contains("n.buildRequest(nowSecs(), f.value)"), "a spend goes to the signer only when key 2 is one")
+        ok(screens.contains("ui.button(\"Register the wallet on your signer\")"), "the wallet screen's row")
+        val c = ceremonyCode()
+        ok(c.contains("HardwareModel.key2IsSigner(built.pairs)") && c.contains("keepsSignerMark = true"), "the ceremony notes key 2's holder")
+        ok(source("src/android/Controller.kt").contains("if (!keepsSignerMark) {"), "a pasted setup clears the note")
     }
 
     private fun oa_72_the_first_address_check_is_done_or_skipped_with_the_time() {
@@ -1818,7 +1861,17 @@ object AppModelTest {
         ok(HardwareModel.firstAddressLine(null, at).contains("has not been checked"), "not done yet")
         ok(HardwareModel.firstAddressLine(org.openbmt.owner.FirstAddress(true, 5), at) == "The first address was checked on the signer on day 5.", "checked, with the time")
         ok(HardwareModel.firstAddressLine(org.openbmt.owner.FirstAddress(false, 6), at).contains("Skipped on day 6."), "skipped, with the time")
-        ok(SayCheck.problem(HardwareWords.firstAddressCompare) == null && HardwareWords.firstAddressCompare.what.contains("address explorer"), "the compare words name the explorer")
+        ok(SayCheck.problem(HardwareWords.firstAddressCompare) == null && HardwareWords.firstAddressCompare.what.contains("address list"), "the compare words name the address list")
+        ok(HardwareModel.grouped("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq") == "bc1q ar0s rrr7 xfkv y5l6 43ly dnw9 re59 gtzz wf5m dq", "an address in groups of four")
+        ok(HardwareModel.grouped("abcd") == "abcd" && HardwareModel.grouped("") == "", "no stray space at the ends")
+        val pairs = { b: Int -> listOf(org.openbmt.owner.PairView(1, 2, 1, b), org.openbmt.owner.PairView(1, 3, 1, 4), org.openbmt.owner.PairView(2, 3, b, 4)) }
+        ok(HardwareModel.key2IsSigner(pairs(3)) && !HardwareModel.key2IsSigner(pairs(2)), "key 2 is a signer only when its holder is another signer")
+        ok(!HardwareModel.key2IsSigner(listOf(org.openbmt.owner.PairView(1, 3, 1, 3))), "another signer holding key 3 does not count")
+        val d = HardwareWords.firstAddressDiffers
+        ok(d.tone == Tones.STOP && d.who == Who.OWNER && d.heading == "Do not use this wallet with this signer" && checked(d) == null, "a differing address is a stop for the owner")
+        ok(d.next == "Register the wallet again on the signer, then check again. If it still differs, do not take money into this wallet.", "and says what to do")
+        ok(longHeadings.all { it.length <= 40 && HardwareWords.all().any { (_, w) -> w.heading == it } }, "the long headings are the hardware words'")
+        ok(HardwareWords.firstAddressChecked.next == "Nothing to do." && HardwareWords.firstAddressSkipped.next == "Check it from the wallet screen before the shop takes money.", "checked and skipped")
         ok(HardwareWords.firstAddressSkipped.tone == Tones.INFO && HardwareWords.firstAddressChecked.tone == Tones.GOOD, "skipped is not good, checked is")
     }
 
@@ -1830,12 +1883,19 @@ object AppModelTest {
         ok(HardwareModel.compareLines(listOf("a" to 1L), null, 2).size == 2, "no change, no change line")
         ok(HardwareWords.signerReview.what.contains("second check") && HardwareWords.signerReview.next.contains("only if they all match"), "the words say the signer is the second check")
         ok(SayCheck.problem(HardwareWords.signerReview) == null, "the words pass the checks")
+        ok(HardwareWords.signerReview.heading == "Check it on the signer" && HardwareWords.signerReview.what == "The signer's own screen is the second check. It shows each address, each amount and the fee.", "the words of the review")
     }
 
     private fun oa_74_a_refused_step_changes_nothing_and_a_missing_part_is_said() {
         ok(SayCheck.problem(HardwareWords.partsMissing) == null && HardwareWords.partsMissing.what.contains("any order"), "a missing part is said, and the order is free")
-        ok(SayCheck.problem(HardwareWords.returnedNeeded) == null, "what to bring back is said")
-        ok(HardwareWords.all().all { SayCheck.problem(it.second) == null }, "every words of the hardware steps pass the checks")
+        ok(checked(HardwareWords.returnedNeeded) == null, "what to bring back is said")
+        ok(HardwareWords.returnedNeeded.heading == "Bring the signed payment back" && HardwareWords.partsMissing.heading == "Keep scanning", "the headings")
+        ok(HardwareModel.partsLine(3, 9) == "3 of 9 parts read", "the progress line")
+        val own = org.openbmt.app.SayWords(Tones.STOP, Who.OWNER, "h", "w", "n", null, null, null, null)
+        ok(HardwareModel.scanFailure(false, null, own) === own, "a reading's own words are shown")
+        ok(HardwareModel.scanFailure(true, null, null).heading == org.openbmt.app.CameraWords.off(Who.OWNER).heading, "a camera that is off for the app")
+        ok(HardwareModel.scanFailure(false, "no camera", null).heading == org.openbmt.app.CameraWords.notStarted(Who.OWNER, "no camera").heading, "a camera that did not start")
+        ok(HardwareWords.all().all { checked(it.second) == null }, "every words of the hardware steps pass the checks")
         ok(HardwareWords.all().map { it.first }.toSet().size == HardwareWords.all().size, "the names differ")
         ok(AppWords.all().map { it.first }.containsAll(HardwareWords.all().map { it.first }), "they are in the list that is checked and written")
     }

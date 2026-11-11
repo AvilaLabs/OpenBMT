@@ -99,6 +99,12 @@ class Controller(internal val act: MainActivity) {
     private var posThread: Thread? = null
     private val startLock = Any()
 
+    // A hardware signer as key 2 (OA-70 to OA-74, `Hardware.kt`): whether the saved setup has one, read at each start,
+    // and the record of the first address check, read once from its file.
+    internal var key2Signer = false
+    internal var firstAddress: org.openbmt.owner.FirstAddress? = null
+    internal var firstAddressRead = false
+
     // What the open screen redraws as the node reports.
     internal var tick: (() -> Unit)? = null
     private var lastTick = 0L
@@ -184,6 +190,8 @@ class Controller(internal val act: MainActivity) {
             return render()
         }
         if (!setupStatus.complete) return showFirstStart(null)
+        key2Signer = File(dir, AppFiles.KEY2_SIGNER_FILE).exists()
+        firstAddressRead = false
         // A ceremony record left behind by a save that did not finish deleting it: the setup is saved, so it goes (OA-29).
         File(dir, AppFiles.CEREMONY_FILE).delete()
         // Unlocked within the last minute: the setup is in memory, and the node starts from it. Otherwise the stored
@@ -477,6 +485,7 @@ class Controller(internal val act: MainActivity) {
         working: SayWords = AppWords.starting,
         afterSaved: () -> Unit = {},
         backWords: SayWords = AppWords.setupTextNeeded,
+        keepsSignerMark: Boolean = false,
     ) {
         try {
             OwnerSetup.parse(text)
@@ -490,6 +499,11 @@ class Controller(internal val act: MainActivity) {
             async({
                 // The setup first, then the config: the config is the last thing a finished setup adds.
                 SealedFile(dir, KeystoreSealer(AppFiles.KEY_ALIAS), AppFiles.SETUP_FILE).save(locked)
+                // A setup that does not come from the ceremony says nothing of key 2: no signer is assumed (OA-72).
+                if (!keepsSignerMark) {
+                    File(dir, AppFiles.KEY2_SIGNER_FILE).delete()
+                    File(dir, AppFiles.FIRST_ADDRESS_FILE).delete()
+                }
                 configFile.save(AppConfig(proxy))
                 afterSaved()
             }) { r ->
@@ -601,17 +615,43 @@ class Controller(internal val act: MainActivity) {
 
     /** Asks the system for a file name and writes [bytes] to it; [done] gets the words of what happened. */
     internal fun saveFile(name: String, bytes: ByteArray, cancelled: () -> Unit, done: (SayWords) -> Unit) {
+        saveBytes(name, bytes, "application/octet-stream", cancelled, { done(AppWords.requestSaved(name)) }, done)
+    }
+
+    /** As [saveFile], with the type of the file, and [saved] and [failed] apart: the caller says what a save means. */
+    internal fun saveBytes(
+        name: String,
+        bytes: ByteArray,
+        mime: String,
+        cancelled: () -> Unit,
+        saved: () -> Unit,
+        failed: (SayWords) -> Unit,
+    ) {
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-            .setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, name)
+            .setType(mime).putExtra(Intent.EXTRA_TITLE, name)
         openPicker(intent, cancelled) { uri ->
             try {
                 val out = act.contentResolver.openOutputStream(uri, "wt") ?: throw IOException("the file could not be opened")
                 out.use { it.write(bytes) }
-                done(AppWords.requestSaved(name))
+                saved()
             } catch (e: IOException) {
-                done(AppWords.fileNotSaved(e.message))
+                failed(AppWords.fileNotSaved(e.message))
             } catch (e: SecurityException) {
-                done(AppWords.fileNotSaved(e.message))
+                failed(AppWords.fileNotSaved(e.message))
+            }
+        }
+    }
+
+    /** Asks the system for a file and gives at most [limit] bytes of it; a longer file gives [limit] bytes, for the caller to refuse. */
+    internal fun pickBytes(limit: Int, cancelled: () -> Unit, onBytes: (ByteArray) -> Unit, failed: (SayWords) -> Unit) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+        openPicker(intent, cancelled) { uri ->
+            try {
+                onBytes(readBytes(uri, limit))
+            } catch (e: IOException) {
+                failed(AppWords.fileNotRead(e.message))
+            } catch (e: SecurityException) {
+                failed(AppWords.fileNotRead(e.message))
             }
         }
     }

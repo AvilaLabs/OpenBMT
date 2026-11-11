@@ -64,6 +64,15 @@ object AppFiles {
     /** The sealed read-only token of the till (OA-16). */
     const val POS_TOKEN_FILE = "pos-token.obks"
 
+    /**
+     * Present when key 2 of the saved setup is held on a hardware signer, as the ceremony's pairs of keys said
+     * (OA-72). It holds no secret. The setup text has no line for it, so a setup that is pasted has none.
+     */
+    const val KEY2_SIGNER_FILE = "key2-signer.txt"
+
+    /** The record of the first address check (AS-99), as the library framed it. It holds no secret. */
+    const val FIRST_ADDRESS_FILE = "first-address.obm0"
+
     /** The node's own folder, inside the app's `noBackupFilesDir`. */
     const val NODE_DIR = "node"
 }

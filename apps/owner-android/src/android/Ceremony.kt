@@ -5,6 +5,7 @@ import java.io.File
 import java.io.IOException
 import java.security.GeneralSecurityException
 import org.openbmt.app.AnimatedQrView
+import org.openbmt.app.DurableFile
 import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.SayWords
 import org.openbmt.app.SealedFile
@@ -306,7 +307,7 @@ private fun Controller.buildWallet(d: CeremonyDraft) {
             keep(built.record) {
                 d.record = built.record
                 d.built = built
-                showWalletCheck(d, built)
+                markKey2(built) { showWalletCheck(d, built) }
             }
         } catch (e: OwnerException) {
             showBuildRefused(d, e.sayWords())
@@ -314,6 +315,23 @@ private fun Controller.buildWallet(d: CeremonyDraft) {
             showBuildRefused(d, AppWords.libraryMissing(e.message))
         }
     }
+}
+
+/**
+ * Notes in a file of its own whether the pairs of keys say that key 2 is held on a hardware signer, before the
+ * wallet is shown (OA-72); a wallet whose key 2 is in the Key app removes it. A file that cannot be written is
+ * said, with a way to try again.
+ */
+private fun Controller.markKey2(built: WalletBuiltView, next: () -> Unit) {
+    val file = File(appDir, AppFiles.KEY2_SIGNER_FILE)
+    try {
+        if (HardwareModel.key2IsSigner(built.pairs)) DurableFile.write(appDir, file, "1\n".toByteArray()) else file.delete()
+        File(appDir, AppFiles.FIRST_ADDRESS_FILE).delete()
+    } catch (e: IOException) {
+        page(listOf(ui.words(AppWords.fileNotSaved(e.message)), ui.primary("Try again") { markKey2(built, next) }, ui.button("Back") { begin() }))
+        return
+    }
+    next()
 }
 
 /** The wallet was refused: the words, and the way back to the step that can change it. */
@@ -445,6 +463,7 @@ private fun Controller.saveFinished(record: ByteArray, message: SayWords? = null
                 working = AppWords.ceremonyFinishing,
                 afterSaved = { File(appDir, AppFiles.CEREMONY_FILE).delete() },
                 backWords = AppWords.ceremonySaveNext,
+                keepsSignerMark = true,
             )
         },
     )
