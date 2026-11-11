@@ -622,7 +622,7 @@ impl KeyApp {
         self.run(|inner| wallet_view(&inner.ready()?.approver))
     }
 
-    /// The pair offer (`OBMO`) for the owner phone to read: the Key app's
+    /// The pair offer (`OBMO`) for the counter to scan: the Key app's
     /// own side of the pairing check (`docs/DESIGN.md` §2.9).
     pub fn pair_offer_bytes(&self) -> Result<Vec<u8>, KeyError> {
         self.run(|inner| {

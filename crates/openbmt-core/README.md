@@ -90,7 +90,7 @@ batch, record or setting is.
   high-water mark, `OBMC` counter batches, `OBME` exposure, `OBMP` pause
   tracker, `OBMK` the Key app's signer state (written by `openbmt-signer`,
   which uses the public `Reader` and `start` helpers), `OBMO` pair offer,
-  `OBMJ` pair request, `OBMD` signed pairing. The payload of a
+  `OBMJ` pair request, `OBMD` signed pairing, `OBMs` counter bundle. The payload of a
   signed batch, record or signed settings starts with the exact bytes that
   are hashed and signed, followed by the signatures.
   Decoding is strict: wrong magic, an unknown version, missing or trailing

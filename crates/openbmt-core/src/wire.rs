@@ -13,7 +13,7 @@
 //! settings), `OBMH` (high-water mark), `OBMC` (counter batches), `OBME`
 //! (exposure), `OBMP` (pause tracker) and `OBMK` (the Key app's signer
 //! state, written by the `openbmt-signer` crate), `OBMO` (pair offer), `OBMJ`
-//! (pair request), `OBMD` (signed pairing), `OBMX` (owner command), `OBMV` (a
+//! (pair request), `OBMD` (signed pairing), `OBMs` (counter bundle), `OBMX` (owner command), `OBMV` (a
 //! sale watch, written by the `openbmt-watch` crate), `OBMG` (the counter's
 //! own state, "desk") and `OBML` (a stored sale), the last two written by the
 //! `openbmt-counter` crate, and `OBMT` (the owner's signed watcher

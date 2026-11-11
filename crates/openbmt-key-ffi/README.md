@@ -81,7 +81,7 @@ writes it again). Op numbers are never reused.
 | 16 | `device_root_words` | app | the same as four words |
 | 17 | `accept_wallet` | app | pin wallet and owner root; returns the wallet view |
 | 18 | `wallet_view` | app | checksum words, three keys, first address |
-| 19 | `pair_offer_bytes` | app | the `OBMO` pair offer for the owner phone |
+| 19 | `pair_offer_bytes` | app | the `OBMO` pair offer for the counter to scan |
 | 20 | `check_kit` | app | the scanned description against the Key app's own |
 | 30 | `open_session` | app | check a request and open the session; returns its handle |
 | 31 | `session_id` | session | the session's ID |
