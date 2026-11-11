@@ -244,8 +244,10 @@ impl DriverPort for Handle {
     }
 }
 
-/// The function that answers the health question (WR-50 to WR-53).
-pub type HealthFn = Box<dyn Fn(&HealthInput<'_>) -> Health>;
+/// The function that answers the health question (WR-50 to WR-53). It is
+/// `Send`, so that an app can keep the node behind a lock and call it from
+/// more than one thread.
+pub type HealthFn = Box<dyn Fn(&HealthInput<'_>) -> Health + Send>;
 
 /// What a node is started with.
 pub struct NodeConfig {
@@ -264,7 +266,7 @@ pub struct NodeConfig {
     /// checked height.
     pub driver: DriverConfig,
     /// The node's clock. The driver has its own, the system's.
-    pub clock: Box<dyn Clock>,
+    pub clock: Box<dyn Clock + Send>,
     /// The health rules. [`check_health`] unless a check against a node with
     /// fewer peers than the rules ask for puts something else here.
     pub health: HealthFn,
@@ -298,7 +300,7 @@ pub struct Node<P: DriverPort = Handle> {
     port: P,
     store: DirStore,
     view: ChainView,
-    clock: Box<dyn Clock>,
+    clock: Box<dyn Clock + Send>,
     health_fn: HealthFn,
     health: Option<Health>,
     settings: Settings,

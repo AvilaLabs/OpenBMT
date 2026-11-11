@@ -117,7 +117,7 @@ fn healthy() -> Health {
 fn start_with_rule(
     dir: &Path,
     time: &Arc<AtomicU64>,
-    rule: impl Fn(&openbmt_watch::HealthInput<'_>) -> Health + 'static,
+    rule: impl Fn(&openbmt_watch::HealthInput<'_>) -> Health + Send + 'static,
 ) -> Rig {
     let mut config = OwnerConfig::new(dir, id(1), DriverConfig::new(Network::Regtest, 0));
     config.clock = Box::new(TestClock(time.clone()));
