@@ -1063,7 +1063,7 @@ impl Counter {
     pub fn open_by<S: Store>(
         &mut self,
         amount: Amount,
-        _currency: Currency,
+        currency: Currency,
         rate: Rate,
         source: &RateSource,
         facts: OpenFacts,
@@ -1109,7 +1109,7 @@ impl Counter {
         &mut self,
         amount: Amount,
         tip: Amount,
-        currency: Currency,
+        _currency: Currency,
         rate: Rate,
         source: &RateSource,
         facts: OpenFacts,
