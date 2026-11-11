@@ -1,5 +1,5 @@
-//! The currency a shop prices in (`docs/COUNTER-RULES.md`, CR-187 to
-//! CR-193): one of a fixed list, or Bitcoin Standard, which prices in
+//! The currency a shop prices in (`docs/COUNTER-RULES.md`, CR-193 to
+//! CR-199): one of a fixed list, or Bitcoin Standard, which prices in
 //! satoshis and needs no price. The settings hold it; the rates, the
 //! counter and the apps read it from here.
 

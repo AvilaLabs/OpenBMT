@@ -53,7 +53,7 @@ bytes and a time the caller gives it and returns a price or a refusal.
   | `bitstamp` | `https://www.bitstamp.net/api/v2/ticker/btcusd/` | Last |
   | `gemini` | `https://api.gemini.com/v1/pubticker/btcusd` | Last |
 
-  Bitcoin Standard (prices in satoshis, CR-187) has no table: no source is
+  Bitcoin Standard (prices in satoshis, CR-193) has no table: no source is
   asked for it.
 
 - **RT-02.** An id is a label under CR-57 (1 to 32 bytes of `a-z`, `0-9`,
@@ -61,11 +61,11 @@ bytes and a time the caller gives it and returns a price or a refusal.
   sources of one currency, so the label of a combined rate (RT-35) says
   which sources were used. A source that is not for dollars has its currency
   at the end of its id (`kraken-eur`).
-- **RT-03.** Each source has a currency, one of the fixed list of CR-187
+- **RT-03.** Each source has a currency, one of the fixed list of CR-193
   (USD, EUR, GBP, JPY, AUD, INR, KRW, IDR, SGD). A reply that names another
   currency is refused (RT-17), and a set of samples in more than one
   currency is refused (RT-38). The shop's currency is in its signed settings
-  (CR-187); the app fetches the sources of that currency only (RT-40). An
+  (CR-193); the app fetches the sources of that currency only (RT-40). An
   amount is in the minor units of its currency, by ISO 4217: yen and won
   have none (the amount is whole yen or won) and the others have hundredths.
   Every place that read a price in cents reads it in the minor unit of the
@@ -302,7 +302,7 @@ arbitrary bytes to `parse_response`.
   and the median is not a market price. Fees, spread and the exchange's
   own last trade are what the sources report.
 - **No counter in another currency than the shop's.** A shop has one
-  currency (CR-187); a counter that prices in another is not here.
+  currency (CR-193); a counter that prices in another is not here.
 - **No history.** Nothing keeps the samples after a call. The record of a
   quote holds the label and the time, not the sources' own prices.
 - **No dropping of a bad source.** A source that is always refused stays in
