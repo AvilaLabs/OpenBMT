@@ -174,9 +174,9 @@ safety.
    kit** and compares the whole wallet description with its own, byte for
    byte (§5.4). The owner checks off "stored safely".
 7. **Connect the counter and the POS, then run a test sale.** The counter
-   scans the Key app, then shows its own pairing QR, and the Key app scans
-   that. Both screens then show the same four session words, and the owner
-   confirms on both (§2.9).
+   scans the Key app's offer, then shows its own pairing QR, which the owner
+   phone carries to the Key app. Both screens then show the same four session
+   words, and the owner confirms on both (§2.9).
    The owner phone gets its own read-only sign-in to the POS (§5.3). If the
    owner wants, a **practice mode on signet** runs the test sale with no real
    money first. Then a $1 sale paid from any wallet shows up in the POS as
@@ -451,14 +451,20 @@ Rules:
   the owner phone's and the Key app's. The ceremony has two scans and one
   comparison:
   1. **The counter scans the Key app.** The Key app's "Pair a counter" screen
-     shows both roots and the wallet's ID. The counter reads them from that
-     screen and fixes them. The owner phone does not supply the roots and
-     does not name the counter.
-  2. **The Key app scans the counter.** Only after it has fixed the roots,
-     the counter makes a fresh random number. Its pairing QR carries its own
-     identity key, its name, the number, and a hash of the roots and wallet
-     ID it was given. The Key app compares that hash with its own roots and
-     wallet ID, in full, and refuses if they differ.
+     shows both roots, the wallet's ID and the network. The counter reads
+     them from that screen and fixes them. The owner phone does not supply
+     the roots or the network and does not name the counter. Nothing that
+     moves money reaches the counter from anywhere else: the network comes
+     only from the offer, and the smallest batch the counter takes is its own
+     number.
+  2. **The Key app reads the counter's own signed request.** Only after it
+     has fixed the roots, the counter makes a fresh random number. Its pairing
+     QR carries its own identity key, its name, the number, a hash of the
+     roots, wallet ID and network it was given, and its signature. The owner
+     phone scans the counter's QR and carries it unchanged inside the approval
+     session. The Key app compares it in full with its own offer, refuses if
+     they differ, and shows the four words. The owner phone cannot change the
+     request without the words differing.
   3. **Both screens show four session words.** They come from the roots, the
      wallet ID, the counter's key and the fresh number together (§5.4). The
      Key app shows "Pair counter X" with the words. The owner approves there
@@ -1660,7 +1666,7 @@ review (A, W, U, P), the round-3 check (R3-1 to R3-10) or the round-4 check
 | Allowlist poisoning; no ceiling on allowlisted destinations | R3-4 | Funds to attacker | Enrolled only by scanning the deposit QR with the Key app's camera, label typed there, active after 24 hours on the Key app's clock; satoshi ceilings also on allowlisted destinations | §5.4, §11 |
 | Dollar ceilings on an offline Key app; restore mode; fee measured on value sent | R3-5 | Ceilings meaningless or bypassed | All ceilings in satoshis set on the Key app, per transaction, per day and per week; dollars labeled "from the owner phone"; restore-and-sign enforces ceilings; fee ceiling on total input with a hard bound | §5.4 |
 | Key 2 is a hardware wallet: batches, settings and pairings need only key 1 | R3-6 | Owner phone alone loosens limits | Key app as an approver on a spare device (identity key only); without it, the screen says these rest on the owner phone plus spot checks | §5.4, §2.10 |
-| Counter named by the owner phone at pairing; Box has no pinned identity | R3-7 | Fake counter or Box accepted | Counter shows its own pairing QR, the Key app scans it; four session words on both screens (R4-1); Box key on the two-root-signed device list | §2.9, §5.1 |
+| Counter named by the owner phone at pairing; Box has no pinned identity | R3-7 | Fake counter or Box accepted | Counter reads the Key app's offer (roots, wallet ID, network) and shows its own signed pairing QR, which the owner phone carries to the Key app inside the approval session; four session words on both screens (R4-1); Box key on the two-root-signed device list | §2.9, §5.1 |
 | Key app claims it cannot back: sale records, wipe, environment checks, anti-exfil | R3-7 | Overclaim | Stated as owner-phone assertions and promises of the software itself; anti-exfil needs host-verified entropy [verify protocol] | §5.4 |
 | Box or host: faked heartbeat; exposure release unspecified; shared total with no coordinator | R3-8 | Instant exposure unbounded or hidden | Heartbeat only from the owner phone with a pinned key; release only at first confirmation or by owner action; per-counter signed slice of the budget; hosted-Box orders without a counter signature never fulfilled automatically | §5.1, §5.3, §6 |
 | Cashier overrides | R3-9 | Exposure grows past the budget | Overrides blocked when the exposure total is full; daily override cap per cashier | §2.6, §2.9, §6 |
@@ -1855,7 +1861,8 @@ Each gets a written protocol before it runs.
   ceiling and allowlisted destinations. New destinations are enrolled by direct
   scan on the Key app and wait 24 hours on its clock (§5.4).
 - The Key app is an approver when key 2 is a hardware wallet (§5.4).
-- Pairing is scanned by the Key app from the counter; the Box key is on the
+- Pairing is the counter's own signed request, carried unchanged to the Key
+  app; the Box key is on the
   signed device list; the heartbeat comes only from the owner phone (§2.9,
   §5.1).
 - Exposure is released at first confirmation or by the owner; each counter has

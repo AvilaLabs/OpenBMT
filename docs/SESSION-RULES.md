@@ -168,9 +168,9 @@ last settings it co-signed, and the last 256 session IDs it finished.
 - **AS-28.** The line of a `Pairing` item shows the counter's name, its key
   in full and the four session words, and the checks of
   `openbmt_core::pairing::check_request` against the Key app's own offer
-  (the pinned owner root, its own root and its wallet ID): the binding in
-  full, the name rule, that the counter is neither root, and the counter's
-  signature. The version the Key app signs is the larger of the owner
+  (the pinned owner root, its own root, its wallet ID and its network): the
+  binding in full, the name rule, that the counter is neither root, and the
+  counter's signature. The version the Key app signs is the larger of the owner
   phone's claim (AS-10) and the version of the last settings it co-signed.
 - **AS-29.** The line of a `HealthCheck` item shows the number. It can
   always be approved.
