@@ -341,6 +341,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-bbqr"
+version = "0.1.0"
+dependencies = [
+ "openbmt-core",
+]
+
+[[package]]
 name = "openbmt-books"
 version = "0.1.0"
 dependencies = [
