@@ -24,9 +24,22 @@ const CODE_SOURCES: [&str; 9] = [
     include_str!("../hash.rs"),
 ];
 
-/// Rules this crate does not test, each with the reason. Empty: every rule
-/// has a test.
-const NOT_HERE: [(&str, &str); 0] = [];
+/// Rules this crate does not test, each with the reason. The others are
+/// tested here.
+const NOT_HERE: [(&str, &str); 3] = [
+    (
+        "UR-20",
+        "the apps' call is in openbmt-qr-jni, which tests it",
+    ),
+    (
+        "UR-21",
+        "the apps' call is in openbmt-qr-jni, which tests it",
+    ),
+    (
+        "UR-22",
+        "the apps' call is in openbmt-qr-jni, which tests it",
+    ),
+];
 
 fn defined() -> BTreeSet<String> {
     RULES
@@ -43,8 +56,8 @@ fn sources() -> String {
 #[test]
 fn the_rules_file_defines_its_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 19, "{ids:?}");
-    assert!(ids.contains("UR-01") && ids.contains("UR-19"));
+    assert_eq!(ids.len(), 22, "{ids:?}");
+    assert!(ids.contains("UR-01") && ids.contains("UR-22"));
 }
 
 #[test]

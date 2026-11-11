@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# The QR reader library for Android (both apps): the shared library for aarch64 and
-# x86_64, API level 26, linked with the NDK's clang, and a check of what it
-# exports.
+# The QR library for Android (both apps): the QR reader and the QR drawing
+# and UR sequences, as the shared library for aarch64 and x86_64, API level
+# 26, linked with the NDK's clang, and a check of what it exports.
 #
 # The .so files stay in the target directory and are not committed. The
-# check uses the NDK's own llvm-readelf: the only exported symbol whose name
-# starts with Java_ must be the one entry point of the library.
+# check uses the NDK's own llvm-readelf: the exported symbols whose names
+# start with Java_ must be exactly the two entry points of the library.
 #
 # Every cargo call runs under the memory guard. Prints one PASS, FAIL or
 # NOT RUN line for each target. Nothing is downloaded except the Rust
@@ -26,7 +26,7 @@ scratch="$HOME/.cache/openbmt/qrjni"
 ndk="${ANDROID_NDK_HOME:-$HOME/Android/Sdk/ndk/26.3.11579264}"
 bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
 api=26
-entry="Java_org_openbmt_common_QrNative_decode"
+entries="Java_org_openbmt_common_QrNative_decode Java_org_openbmt_common_UrNative_call"
 
 mkdir -p "$scratch"
 cd "$root" || exit 2
@@ -60,13 +60,16 @@ android() { # rust-triple clang-triple
         return
     fi
     local so="$target_dir/$triple/release/libopenbmt_qr_jni.so"
-    local size defined java
+    local size defined java e missing=0
     size="$(stat -c %s "$so")"
     # Defined (not UND) dynamic symbols: the name is the last column.
     defined="$("$bin/llvm-readelf" --dyn-syms "$so" | awk '$7 != "UND" && $8 != "" {print $8}')"
     java="$(printf '%s\n' "$defined" | grep -c '^Java_')"
-    if [ "$java" -eq 1 ] && printf '%s\n' "$defined" | grep -qx "$entry"; then
-        report PASS "android $triple" "$so, $size bytes, exports $entry only"
+    for e in $entries; do
+        printf '%s\n' "$defined" | grep -qx "$e" || missing=1
+    done
+    if [ "$java" -eq 2 ] && [ "$missing" -eq 0 ]; then
+        report PASS "android $triple" "$so, $size bytes, exports exactly the two entry points"
         printf '%s\n' "$defined" | sed 's/^/    exported: /'
     else
         report FAIL "android $triple" "$so, $size bytes, $java Java_ symbols"

@@ -548,6 +548,7 @@ name = "openbmt-qr-jni"
 version = "0.1.0"
 dependencies = [
  "openbmt-qr",
+ "openbmt-ur",
 ]
 
 [[package]]

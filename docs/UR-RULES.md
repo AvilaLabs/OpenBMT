@@ -116,6 +116,32 @@ and gives bytes and text. The app draws the codes and words the progress.
   bytes must start with `psbt` and `0xff`, on the way out and on the way in.
   Other types are refused by `ur_to_psbt`.
 
+## 6. The call the apps make
+
+The Android apps reach the library through one framed call
+(`crates/openbmt-qr-jni`, `UrNative.call`): draw a text as a QR code, cut a
+message into the parts of a UR, and read the parts of a UR back.
+
+- **UR-20.** The apps send and read two types. `ur:bytes` carries OpenBMT's
+  own framed objects (a request to the Key app, its answer, a pairing
+  text). `ur:crypto-psbt` carries a plain PSBT to or from another wallet,
+  and nothing else. The call encodes only these two types, and gives back
+  the message of a finished UR only when its type is one of these or
+  `psbt`; any other type is refused.
+- **UR-21.** The call takes one framed request: the four bytes `OBMo`, the
+  version byte 1, an operation byte, the fields of the operation and
+  nothing after them, with every length exactly the bytes that follow. A
+  request of any other shape (another magic, version or operation, a cut,
+  an extra byte, a length that claims more or less than is there, a level
+  outside 0 to 3, a request over 4 MiB) is refused with this rule. The
+  reply is framed too: `OBMp`, the version byte, a status byte, then the
+  body, or for a refusal the rule code as five bytes of text.
+- **UR-22.** The call keeps at most four decoders open at a time. A handle
+  is given once and never again in the life of the process. A handle that
+  is not open, a fifth decoder, and a result asked for before the message
+  is complete are refused with this rule. Each decoder holds no more than
+  UR-02, UR-03, UR-11 and UR-16 allow.
+
 ## What these rules do not do
 
 - **No check that the PSBT is valid.** Only the five-byte magic is looked
@@ -128,9 +154,11 @@ and gives bytes and text. The app draws the codes and words the progress.
   helpers here. The CBOR is a byte-string head and nothing else: a type
   whose payload is a map, a tag or a nested structure is returned as the
   bytes it came in, and is not read.
-- **No frame counts or timing.** How many parts fit one code at what
-  scanning distance, and how fast to show them, are for the app (DESIGN.md
-  E8, still to be measured).
+- **No frame counts or timing in the library.** How many parts fit one
+  code at what scanning distance, and how fast to show them, are for the
+  app (DESIGN.md E8). The apps use fragments of at most 230 bytes, so that
+  every part draws as a QR code of version 12 or less at level L, and show
+  five parts a second; both are still to be measured on a device.
 - **No picture.** The codes are drawn by `openbmt-qr` and read by the
   camera code; this crate sees text only.
 - **Not every sender's variants.** A sender that writes a longer-than-needed

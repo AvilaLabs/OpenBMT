@@ -1,6 +1,6 @@
 [package]
 name = "openbmt-qr-jni"
-description = "The QR reader of openbmt-qr as one JNI function the Android apps call with the Y plane of a camera frame"
+description = "The QR reader of openbmt-qr and the QR drawing and UR sequences of openbmt-ur as two JNI functions for the Android apps"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,7 +10,9 @@ publish.workspace = true
 [lib]
 crate-type = ["lib", "cdylib"]
 
-# The reader and nothing else. The JNI table is declared by hand in
-# `src/jni.rs`, so no crate of the JNI types is needed.
+# The reader, the encoder and the UR sequences of this workspace and nothing
+# else. The JNI table is declared by hand in `src/jni.rs`, so no crate of the
+# JNI types is needed.
 [dependencies]
 openbmt-qr = { path = "../openbmt-qr" }
+openbmt-ur = { path = "../openbmt-ur" }

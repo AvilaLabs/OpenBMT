@@ -1,13 +1,16 @@
-//! The JNI glue: the one exported symbol of the library and the only
+//! The JNI glue: the two exported symbols of the library and the only
 //! `unsafe` of the crate.
 //!
 //! ```text
 //! Java_org_openbmt_common_QrNative_decode(env, class, width: jint,
 //!     height: jint, stride: jint, luma: jbyteArray) -> jbyteArray
+//! Java_org_openbmt_common_UrNative_call(env, class, request: jbyteArray)
+//!     -> jbyteArray
 //! ```
 //!
-//! It copies the frame out of the Java array, runs [`reply`](crate::reply)
-//! and returns the framed reply as a new Java array. It is written by hand
+//! Each copies its array out of Java, runs [`reply`](crate::reply) or
+//! [`call`](crate::call::call) and returns the framed reply as a new Java
+//! array. It is written by hand
 //! like the counter's glue: the function table is read slot by slot (the
 //! slot numbers are those of the JNI specification, checked by a test
 //! against a fake table), so no crate of the JNI types is used.
@@ -25,6 +28,7 @@ use std::ffi::c_void;
 use std::panic::AssertUnwindSafe;
 use std::ptr::null_mut;
 
+use crate::call::{call, MAX_CALL};
 use crate::{bad_call, reply, MAX_FRAME};
 
 type JInt = i32;
@@ -176,8 +180,50 @@ fn entry(env: Env, width: JInt, height: JInt, stride: JInt, luma: JByteArray) ->
     answer(&response)
 }
 
-/// The one exported function of the library: `QrNative.decode` of
-/// `org.openbmt.common`. See the module documentation.
+/// The request of [`call`](crate::call::call) as a new reply array. A null
+/// or oversized array is answered with the reply to an empty request, which
+/// is a refusal for framing.
+fn entry_call(env: Env, request: JByteArray) -> JByteArray {
+    let answer = |bytes: &[u8]| env.new_bytes(bytes).unwrap_or(null_mut());
+    if request.is_null() {
+        return answer(&call(&[]));
+    }
+    let Some(len) = env.array_length(request) else {
+        return answer(&call(&[]));
+    };
+    if len > MAX_CALL {
+        return answer(&call(&[]));
+    }
+    let bytes = env.read_bytes(request, len);
+    if env.threw() {
+        return null_mut();
+    }
+    let Some(mut bytes) = bytes else {
+        return answer(&call(&[]));
+    };
+    let response = call(&bytes);
+    // Nothing of the request is kept.
+    bytes.fill(0);
+    std::hint::black_box(&mut bytes);
+    answer(&response)
+}
+
+/// The second exported function: `UrNative.call` of `org.openbmt.common`.
+/// See the module documentation and [`call`](crate::call).
+#[no_mangle]
+pub extern "system" fn Java_org_openbmt_common_UrNative_call(
+    env: RawEnv,
+    _class: JClass,
+    request: JByteArray,
+) -> JByteArray {
+    let Some(env) = Env::new(env) else {
+        return null_mut();
+    };
+    std::panic::catch_unwind(AssertUnwindSafe(|| entry_call(env, request))).unwrap_or(null_mut())
+}
+
+/// The first exported function: `QrNative.decode` of `org.openbmt.common`.
+/// See the module documentation.
 #[no_mangle]
 pub extern "system" fn Java_org_openbmt_common_QrNative_decode(
     env: RawEnv,
@@ -465,6 +511,90 @@ mod tests {
             rig.table[slot] = std::ptr::null();
             let (env, _cell) = rig.env();
             let out = Java_org_openbmt_common_QrNative_decode(env, null_mut(), 64, 64, 64, array);
+            assert!(out.is_null() || !rig.read(out).is_empty(), "slot {slot}");
+            rig.table[slot] = saved;
+        }
+    }
+
+    fn call_request(op: u8, rest: &[u8]) -> Vec<u8> {
+        let mut v = crate::call::REQUEST_MAGIC.to_vec();
+        v.push(crate::call::VERSION);
+        v.push(op);
+        v.extend_from_slice(rest);
+        v
+    }
+
+    #[test]
+    fn qr_jni_call_goes_through_the_table() {
+        let mut rig = Rig::new();
+        // Draw a text: side 21 for "HI" at level L.
+        let mut rest = vec![0u8];
+        rest.extend_from_slice(&2u32.to_be_bytes());
+        rest.extend_from_slice(b"HI");
+        let array = rig.array(&call_request(crate::call::OP_QR_ENCODE, &rest));
+        let (env, _cell) = rig.env();
+        let out = Java_org_openbmt_common_UrNative_call(env, null_mut(), array);
+        assert!(!out.is_null());
+        let reply = rig.read(out);
+        assert_eq!(&reply[..4], &crate::call::REPLY_MAGIC);
+        assert_eq!(reply[5], crate::call::OK);
+        assert_eq!(u16::from_be_bytes([reply[6], reply[7]]), 21);
+        // The request array was zeroed after the call.
+        FAKE.with(|f| {
+            let f = f.borrow();
+            // The copy made by the glue is zeroed, not the Java array; the
+            // Java array is the caller's own and is left as it was.
+            assert!(f.arrays[index_of(array)].iter().any(|&b| b != 0));
+        });
+    }
+
+    #[test]
+    fn qr_jni_call_refuses_a_null_array_and_survives_a_null_env() {
+        let mut rig = Rig::new();
+        let (env, _cell) = rig.env();
+        let out = Java_org_openbmt_common_UrNative_call(env, null_mut(), null_mut());
+        let reply = rig.read(out);
+        assert_eq!(&reply[6..], crate::call::BAD_FRAMING.as_bytes());
+        assert!(
+            Java_org_openbmt_common_UrNative_call(null_mut(), null_mut(), null_mut()).is_null()
+        );
+        let mut null_table: *const Table = std::ptr::null();
+        let raw: RawEnv = &mut null_table;
+        assert!(Java_org_openbmt_common_UrNative_call(raw, null_mut(), null_mut()).is_null());
+    }
+
+    #[test]
+    fn qr_jni_call_a_read_that_throws_is_cleared_and_gives_null() {
+        let mut rig = Rig::new();
+        let array = rig.array(&call_request(crate::call::OP_DECODER_NEW, &[]));
+        FAKE.with(|f| f.borrow_mut().region_throws = true);
+        let (env, _cell) = rig.env();
+        assert!(Java_org_openbmt_common_UrNative_call(env, null_mut(), array).is_null());
+        FAKE.with(|f| {
+            let f = f.borrow();
+            assert_eq!(f.clears, 1);
+            assert!(!f.pending);
+        });
+    }
+
+    #[test]
+    fn qr_jni_call_out_of_memory_and_a_bare_table_give_null() {
+        let mut rig = Rig::new();
+        let array = rig.array(&call_request(crate::call::OP_DECODER_NEW, &[]));
+        FAKE.with(|f| f.borrow_mut().new_array_fails = true);
+        let (env, _cell) = rig.env();
+        assert!(Java_org_openbmt_common_UrNative_call(env, null_mut(), array).is_null());
+        FAKE.with(|f| f.borrow_mut().new_array_fails = false);
+        for slot in [
+            GET_ARRAY_LENGTH,
+            NEW_BYTE_ARRAY,
+            GET_BYTE_ARRAY_REGION,
+            EXCEPTION_CHECK,
+        ] {
+            let saved = rig.table[slot];
+            rig.table[slot] = std::ptr::null();
+            let (env, _cell) = rig.env();
+            let out = Java_org_openbmt_common_UrNative_call(env, null_mut(), array);
             assert!(out.is_null() || !rig.read(out).is_empty(), "slot {slot}");
             rig.table[slot] = saved;
         }

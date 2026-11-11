@@ -1,19 +1,26 @@
-//! The QR reader of `openbmt-qr` for the Android apps: one function that
-//! takes the Y plane of a camera frame and answers with a framed reply.
+//! The QR reader of `openbmt-qr` and the QR drawing and UR sequences of
+//! `openbmt-ur` for the Android apps, as two exported functions.
 //!
-//! Reply framing, the same for every call:
+//! The first takes the Y plane of a camera frame and answers with a framed
+//! reply. Its reply framing:
 //!
 //! - byte 0 is [`DECODED`] (0), then the bytes of the code, or
 //! - byte 0 is [`REFUSED`] (1), then the rule code of the reader's refusal
 //!   as ASCII text, for example `QR-12` when the frame holds no code.
 //!
-//! [`reply`] is safe code and is what the tests run. `src/jni.rs` is the
-//! one exported symbol, `Java_org_openbmt_common_QrNative_decode`, and the
-//! only `unsafe` of the crate.
+//! [`reply`] is safe code and is what the tests run. The second takes one
+//! framed request and answers with one framed reply: drawing a text as a QR
+//! code, cutting a message into the parts of a UR, and reading the parts of
+//! a UR back; see [`call`]. `src/jni.rs` holds the two exported symbols,
+//! `Java_org_openbmt_common_QrNative_decode` and
+//! `Java_org_openbmt_common_UrNative_call`, and is the only `unsafe` of the
+//! crate.
 //!
-//! The library keeps nothing between calls: no global state, no file, no
-//! network, no thread of its own. The frame is copied out of the Java
-//! array, read, and the copy is zeroed before the call returns.
+//! The reader keeps nothing between calls. The second call keeps one thing:
+//! the table of at most four open UR decoders, each with the bounds of
+//! `openbmt-ur`. There is no file, no network and no thread of its own. A
+//! frame or a request is copied out of the Java array, used, and the copy is
+//! zeroed before the call returns.
 
 // The one `unsafe` of this crate is the JNI glue in `jni.rs`.
 #![deny(unsafe_code)]
@@ -28,6 +35,7 @@
     )
 )]
 
+pub mod call;
 mod jni;
 
 use openbmt_qr::decode_luma_strided;
@@ -90,5 +98,7 @@ pub(crate) fn bad_call() -> Vec<u8> {
     refused(BAD_FRAME)
 }
 
+#[cfg(test)]
+mod call_tests;
 #[cfg(test)]
 mod tests;
