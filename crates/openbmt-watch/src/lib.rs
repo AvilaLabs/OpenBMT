@@ -51,7 +51,9 @@ pub use fees::{block_fee_sample, FeeError, FeeHistory, FeeSample};
 pub use headers::{Accepted, HeaderStore};
 pub use health::{check_health, Health, HealthInput, Peer, PeerTransport, Problem};
 pub use netgroup::{host_group, network_group, NetGroup, PeerAddr};
-pub use own_node::{check_own_node, OwnNodeHealth, OwnNodeInput, OwnNodeLink, OwnNodeProblem};
+pub use own_node::{
+    check_own_node, OwnNodeHealth, OwnNodeInput, OwnNodeLink, OwnNodeProblem, OwnNodeTracker,
+};
 pub use proof::{verify_box_proof, ProvenPayment};
 pub use refusal::Refusal;
 pub use sale::{SaleStatus, SaleWatch, Sighted, Source};
@@ -100,8 +102,13 @@ pub const BEHIND_BLOCKS: u32 = 2;
 pub const MAX_BEHIND_SECS: u64 = 600;
 /// WR-53: seconds the clock may be behind the tip's header time.
 pub const MAX_CLOCK_BEHIND_SECS: u64 = 7_200;
-/// WR-63: blocks the counter's tip may be above the own node's best height
-/// before the node counts as behind.
-pub const OWN_NODE_BEHIND_BLOCKS: u32 = 1;
+/// WR-63: blocks the counter's tip may be above the own node's best height,
+/// for at most `OWN_NODE_LAG_SECS`, before the node counts as behind. A new
+/// block reaches the counter's peers before it reaches the own node, so one
+/// block of lag is normal for a moment; without this the shown check would
+/// flip to the light check and back at every block.
+pub const OWN_NODE_LAG_BLOCKS: u32 = 1;
+/// WR-63: seconds the own node may stay `OWN_NODE_LAG_BLOCKS` behind.
+pub const OWN_NODE_LAG_SECS: u64 = 300;
 /// WR-63: seconds the own node may be silent while connected.
 pub const OWN_NODE_SILENT_SECS: u64 = 600;

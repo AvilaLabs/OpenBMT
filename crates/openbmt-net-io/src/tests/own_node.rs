@@ -590,10 +590,10 @@ fn nr_102_the_state_carries_the_nodes_height_and_the_own_node_is_not_a_peer() {
     assert_eq!(input.best_height, Some(123));
     assert_eq!(input.last_heard, Some(T0));
     // The watcher's rules read it: ahead of a counter at 0, usable.
-    let health = check_own_node(Some(&input), 0, T0 + 1);
+    let health = check_own_node(Some(&input), 0, T0 + 1, None);
     assert!(health.usable, "{health:?}");
     // Behind a counter at 125: not usable, and says by how much.
-    let health = check_own_node(Some(&input), 125, T0 + 1);
+    let health = check_own_node(Some(&input), 125, T0 + 1, None);
     assert_eq!(health.problem, Some(OwnNodeProblem::Behind { blocks: 2 }));
     // The `Peers` event never holds it.
     let peers = wait_for(&handle, 3, |e| matches!(e, AppEvent::Peers(..)));

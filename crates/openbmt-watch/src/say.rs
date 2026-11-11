@@ -124,7 +124,11 @@ impl OwnNodeProblem {
             Self::Behind { blocks } => Words::new(
                 Tone::Info,
                 "Your node is behind",
-                format!("Your node is {blocks} blocks behind this counter, so the counter checks payments with its light check only."),
+                if blocks == 1 {
+                    "Your node has been a block behind this counter for more than five minutes, so the counter checks payments with its light check only.".to_string()
+                } else {
+                    format!("Your node is {blocks} blocks behind this counter, so the counter checks payments with its light check only.")
+                },
                 Who::Owner,
                 "Wait for your node to catch up, or check that it is running.",
             ),
@@ -499,6 +503,7 @@ fn own_node_words() -> Vec<(&'static str, Words)> {
         ("Unreachable", OwnNodeProblem::Unreachable { since: 1 }),
         ("Refused", OwnNodeProblem::Refused { since: 1 }),
         ("Silent", OwnNodeProblem::Silent { since: 1 }),
+        ("BehindOne", OwnNodeProblem::Behind { blocks: 1 }),
         ("Behind", OwnNodeProblem::Behind { blocks: 3 }),
         ("TipUnknown", OwnNodeProblem::TipUnknown),
     ];
@@ -524,6 +529,7 @@ pub fn own_node_problem_name(p: OwnNodeProblem) -> &'static str {
         OwnNodeProblem::Unreachable { .. } => "Unreachable",
         OwnNodeProblem::Refused { .. } => "Refused",
         OwnNodeProblem::Silent { .. } => "Silent",
+        OwnNodeProblem::Behind { blocks: 1 } => "BehindOne",
         OwnNodeProblem::Behind { .. } => "Behind",
         OwnNodeProblem::TipUnknown => "TipUnknown",
     }

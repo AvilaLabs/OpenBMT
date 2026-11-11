@@ -173,7 +173,7 @@ fn own_node_core_regtest() {
         seen.drain(&handle);
     }
     assert_eq!(seen.tip, height, "the counter's tip");
-    let health = check_own_node(Some(&state), seen.tip, now());
+    let health = check_own_node(Some(&state), seen.tip, now(), None);
     println!("   health {health:?}");
     assert!(health.usable, "{health:?}");
     assert_eq!(health.own_height, Some(height));
@@ -225,7 +225,7 @@ fn own_node_core_regtest() {
     }
     assert!(watch.own_node_saw(txid));
     let chain = openbmt_watch::HeaderStore::new(Network::Regtest).unwrap();
-    let health = check_own_node(Some(&state), seen.tip, now());
+    let health = check_own_node(Some(&state), seen.tip, now(), None);
     let status = watch.status_with_own_node(&chain, now(), &health);
     println!(
         "   mode {:?}, own node saw it: {}, counted: {}",
@@ -261,7 +261,7 @@ fn own_node_core_regtest() {
         unreachable!()
     };
     assert!(since >= before.saturating_sub(1), "down since {since}");
-    let health = check_own_node(Some(&down), seen.tip, now());
+    let health = check_own_node(Some(&down), seen.tip, now(), None);
     assert_eq!(health.problem, Some(OwnNodeProblem::Unreachable { since }));
     let status = watch.status_with_own_node(&chain, now(), &health);
     println!(

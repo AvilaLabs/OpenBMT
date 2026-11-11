@@ -13,7 +13,7 @@
 //! saw (WR-62). When it is down or behind, the counter falls back to the
 //! light check and says why (WR-63, WR-64).
 
-use crate::{OWN_NODE_BEHIND_BLOCKS, OWN_NODE_SILENT_SECS};
+use crate::{OWN_NODE_LAG_BLOCKS, OWN_NODE_LAG_SECS, OWN_NODE_SILENT_SECS};
 
 /// How the driver's connection to the own node stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,8 +66,8 @@ pub enum OwnNodeProblem {
         /// When it was last heard, in seconds.
         since: u64,
     },
-    /// Connected, but the counter's tip is more than 1 block above the
-    /// node's best height.
+    /// Connected, but the counter's tip is 2 or more blocks above the
+    /// node's best height, or 1 block above it for more than 5 minutes.
     Behind {
         /// How many blocks the node is behind the counter.
         blocks: u32,
@@ -117,16 +117,59 @@ impl OwnNodeHealth {
     }
 }
 
+/// Remembers since when the own node has been one block behind, which
+/// [`check_own_node`] needs (WR-63). The app keeps one and calls
+/// [`OwnNodeTracker::check`] each time it checks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OwnNodeTracker {
+    one_behind_since: Option<u64>,
+}
+
+impl OwnNodeTracker {
+    /// A tracker that has seen nothing.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// [`check_own_node`], with the time the lag began kept between calls.
+    /// Catching up, or leaving the connected state, starts the count over.
+    pub fn check(
+        &mut self,
+        input: Option<&OwnNodeInput>,
+        tip_height: u32,
+        now: u64,
+    ) -> OwnNodeHealth {
+        let lag = input.is_some_and(|i| {
+            i.link == OwnNodeLink::Connected
+                && i.best_height
+                    .is_some_and(|b| tip_height.saturating_sub(b) == OWN_NODE_LAG_BLOCKS)
+        });
+        if lag {
+            self.one_behind_since.get_or_insert(now);
+        } else {
+            self.one_behind_since = None;
+        }
+        check_own_node(input, tip_height, now, self.one_behind_since)
+    }
+}
+
 /// WR-63: whether the own node can be used as a second check right now.
-/// `input` is `None` when the owner has set no own node.
-pub fn check_own_node(input: Option<&OwnNodeInput>, tip_height: u32, now: u64) -> OwnNodeHealth {
+/// `input` is `None` when the owner has set no own node. `one_behind_since`
+/// is when the node was first seen exactly one block behind, without a break;
+/// [`OwnNodeTracker`] keeps it. With `None`, one block behind passes.
+pub fn check_own_node(
+    input: Option<&OwnNodeInput>,
+    tip_height: u32,
+    now: u64,
+    one_behind_since: Option<u64>,
+) -> OwnNodeHealth {
     let Some(input) = input else {
         return OwnNodeHealth::not_configured();
     };
     let problem = match input.link {
         OwnNodeLink::Refused { since } => Some(OwnNodeProblem::Refused { since }),
         OwnNodeLink::Down { since } => Some(OwnNodeProblem::Unreachable { since }),
-        OwnNodeLink::Connected => connected_problem(input, tip_height, now),
+        OwnNodeLink::Connected => connected_problem(input, tip_height, now, one_behind_since),
     };
     OwnNodeHealth {
         configured: true,
@@ -138,7 +181,12 @@ pub fn check_own_node(input: Option<&OwnNodeInput>, tip_height: u32, now: u64) -
     }
 }
 
-fn connected_problem(input: &OwnNodeInput, tip_height: u32, now: u64) -> Option<OwnNodeProblem> {
+fn connected_problem(
+    input: &OwnNodeInput,
+    tip_height: u32,
+    now: u64,
+    one_behind_since: Option<u64>,
+) -> Option<OwnNodeProblem> {
     let (Some(best), Some(heard)) = (input.best_height, input.last_heard) else {
         return Some(OwnNodeProblem::TipUnknown);
     };
@@ -146,5 +194,7 @@ fn connected_problem(input: &OwnNodeInput, tip_height: u32, now: u64) -> Option<
         return Some(OwnNodeProblem::Silent { since: heard });
     }
     let behind = tip_height.saturating_sub(best);
-    (behind > OWN_NODE_BEHIND_BLOCKS).then_some(OwnNodeProblem::Behind { blocks: behind })
+    let lagging = behind == OWN_NODE_LAG_BLOCKS
+        && one_behind_since.is_some_and(|t| now.saturating_sub(t) > OWN_NODE_LAG_SECS);
+    (behind > OWN_NODE_LAG_BLOCKS || lagging).then_some(OwnNodeProblem::Behind { blocks: behind })
 }

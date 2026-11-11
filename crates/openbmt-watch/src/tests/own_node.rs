@@ -7,7 +7,7 @@ use openbmt_core::say::check;
 use super::kit::*;
 use crate::{
     check_health, check_own_node, HealthInput, OwnNodeHealth, OwnNodeInput, OwnNodeLink,
-    OwnNodeProblem, Peer, PeerAddr, PeerTransport, SaleStatus, SaleWatch, Source,
+    OwnNodeProblem, OwnNodeTracker, Peer, PeerAddr, PeerTransport, SaleStatus, SaleWatch, Source,
 };
 
 const NOW: u64 = 1_000_000;
@@ -45,7 +45,7 @@ fn connected(best: u32, heard: u64) -> OwnNodeInput {
 }
 
 fn healthy() -> OwnNodeHealth {
-    let h = check_own_node(Some(&connected(TIP, NOW)), TIP, NOW);
+    let h = check_own_node(Some(&connected(TIP, NOW)), TIP, NOW, None);
     assert!(h.usable);
     h
 }
@@ -56,7 +56,7 @@ fn down() -> OwnNodeHealth {
         best_height: None,
         last_heard: None,
     };
-    let h = check_own_node(Some(&input), TIP, NOW);
+    let h = check_own_node(Some(&input), TIP, NOW, None);
     assert!(!h.usable);
     h
 }
@@ -203,7 +203,7 @@ fn wr_62_the_light_check_alone_and_the_box_are_as_before() {
 
 #[test]
 fn wr_63_each_rule_at_its_edge() {
-    let at = |input: OwnNodeInput| check_own_node(Some(&input), TIP, NOW);
+    let at = |input: OwnNodeInput| check_own_node(Some(&input), TIP, NOW, None);
     // Connected, current and heard a moment ago.
     assert_eq!(at(connected(TIP, NOW)).problem, None);
     // Ahead of the counter is no problem; one block behind is none either.
@@ -247,7 +247,7 @@ fn wr_63_no_connection_and_a_refused_node_are_unusable() {
         best_height: Some(TIP),
         last_heard: Some(NOW),
     };
-    let h = check_own_node(Some(&refused), TIP, NOW);
+    let h = check_own_node(Some(&refused), TIP, NOW, None);
     assert_eq!(h.problem, Some(OwnNodeProblem::Refused { since: NOW - 5 }));
     assert!(!h.usable);
     assert_eq!(h.own_height, Some(TIP));
@@ -257,7 +257,7 @@ fn wr_63_no_connection_and_a_refused_node_are_unusable() {
 
 #[test]
 fn wr_63_no_own_node_set_is_not_a_problem() {
-    let h = check_own_node(None, TIP, NOW);
+    let h = check_own_node(None, TIP, NOW, None);
     assert_eq!(h, OwnNodeHealth::not_configured());
     assert!(!h.configured && !h.usable && h.problem.is_none());
     assert!(h.words().is_none());
@@ -271,11 +271,11 @@ fn wr_64_a_report_while_the_node_is_unusable_falls_back_to_the_light_check() {
     for (own, why) in [
         (down(), "unreachable"),
         (
-            check_own_node(Some(&connected(TIP - 4, NOW)), TIP, NOW),
+            check_own_node(Some(&connected(TIP - 4, NOW)), TIP, NOW, None),
             "behind",
         ),
         (
-            check_own_node(Some(&connected(TIP, NOW - 700)), TIP, NOW),
+            check_own_node(Some(&connected(TIP, NOW - 700)), TIP, NOW, None),
             "silent",
         ),
     ] {
@@ -298,6 +298,51 @@ fn wr_64_a_report_while_the_node_is_unusable_falls_back_to_the_light_check() {
     assert_eq!(
         status(&mut w, &healthy()).mode,
         Some(CheckMode::NodeAlsoSeenByLight)
+    );
+}
+
+#[test]
+fn wr_63_one_block_of_lag_is_allowed_for_five_minutes() {
+    let one = connected(TIP - 1, NOW);
+    let mut t = OwnNodeTracker::new();
+    // One block behind for 299 s: still the own node's tier.
+    assert!(t.check(Some(&one), TIP, NOW - 299).usable);
+    assert!(t.check(Some(&one), TIP, NOW - 100).usable);
+    assert!(t.check(Some(&one), TIP, NOW).usable);
+    // Exactly 300 s is not more than 300 s; 301 s falls back, and says so.
+    let mut t = OwnNodeTracker::new();
+    assert!(
+        t.check(Some(&connected(TIP - 1, NOW - 300)), TIP, NOW - 300)
+            .usable
+    );
+    assert!(t.check(Some(&connected(TIP - 1, NOW - 1)), TIP, NOW).usable);
+    let h = t.check(Some(&connected(TIP - 1, NOW)), TIP, NOW + 1);
+    assert_eq!(h.problem, Some(OwnNodeProblem::Behind { blocks: 1 }));
+    assert!(!h.usable);
+    let w = h.words().expect("words");
+    assert_eq!(check(&w), Ok(()));
+    assert!(w.what.contains("a block behind"), "{}", w.what);
+    // Two blocks fall back at once, with no wait.
+    let mut t = OwnNodeTracker::new();
+    let h = t.check(Some(&connected(TIP - 2, NOW)), TIP, NOW);
+    assert_eq!(h.problem, Some(OwnNodeProblem::Behind { blocks: 2 }));
+    // Catching up returns to the own-node tier, and the count starts over.
+    let h = t.check(Some(&connected(TIP, NOW)), TIP, NOW + 10);
+    assert!(h.usable);
+    let h = t.check(Some(&connected(TIP - 1, NOW + 20)), TIP, NOW + 20);
+    assert!(h.usable);
+    let h = t.check(Some(&connected(TIP - 1, NOW + 320)), TIP, NOW + 320);
+    assert!(h.usable, "300 s from the new start is not more than 300 s");
+    // A drop of the link also starts the count over.
+    let down = OwnNodeInput {
+        link: OwnNodeLink::Down { since: NOW + 330 },
+        best_height: Some(TIP - 1),
+        last_heard: Some(NOW),
+    };
+    assert!(!t.check(Some(&down), TIP, NOW + 330).usable);
+    assert!(
+        t.check(Some(&connected(TIP - 1, NOW + 340)), TIP, NOW + 340)
+            .usable
     );
 }
 

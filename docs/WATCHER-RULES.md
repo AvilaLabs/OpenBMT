@@ -305,7 +305,12 @@ library keeps that apart from what the random peers report.
      the driver to try it again (NR-100).
   2. There is no connection to it.
   3. It has been silent for more than 10 minutes.
-  4. The counter's tip is more than 1 block above its best height.
+  4. The counter's tip is 2 or more blocks above its best height, or 1
+     block above it for more than 5 minutes without a break. A new block
+     reaches the counter's peers before it reaches the own node, so one
+     block of lag is normal for a moment; without the 5 minutes the shown
+     check would fall to the light check and back at every block. Catching
+     up starts the count over.
 
   A node that is ahead of the counter is not a problem. The health line for
   the own node says which rule failed, the node's best height, the counter's
@@ -314,7 +319,8 @@ library keeps that apart from what the random peers report.
   and cannot be used, the status has `own_node_saw` true and `own_node_counted`
   false, its mode is the light check's (WR-45), and the own node's health
   line has words that say the counter is checking with its light check and
-  why: not reachable since a time, behind by some blocks, silent since a
+  why: not reachable since a time, behind by blocks or by one block for
+  too long, silent since a
   time, dropped for breaking a rule, or not yet known. Every state of the
   line has words (SC-01) and the rule number is in the small print.
 - **WR-65.** Reports are not stored. A restored sale starts with none, and
