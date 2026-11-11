@@ -948,6 +948,85 @@ object AppWords {
         detailOf(problem),
     )
 
+    // ---- the PIN lock (OA-60 to OA-65) ----------------------------------------------------
+
+    /** A new setup is locked behind a PIN before it is saved, so the PIN comes first. */
+    val choosePin = w(
+        Tones.INFO, "Choose a PIN",
+        "Key 1 on this phone is kept behind a PIN, which the app asks for every time it opens.",
+        Who.OWNER,
+        "Choose at least 6 digits, or a passphrase of at least 8 characters, and do not forget it.",
+    )
+
+    /** A setup saved by an older build has no PIN: it is locked behind one and used as it is. */
+    val upgradePin = w(
+        Tones.INFO, "Set a PIN for key 1",
+        "Key 1 on this phone was saved without a PIN, so anyone who opens the app could use it.",
+        Who.OWNER,
+        "Choose a PIN now; the setup is kept as it is and locked behind it.",
+    )
+
+    /** The first screen of every start and every return after more than a minute away. */
+    val unlockSetup = w(
+        Tones.INFO, "Enter your PIN",
+        "Key 1 on this phone is locked, so the app opens only with the PIN or passphrase.",
+        Who.OWNER,
+        "Type it and tap Unlock. Too many wrong tries wipe key 1 from this phone.",
+    )
+
+    val pinsDiffer = w(
+        Tones.STOP, "The two PINs differ",
+        "The PIN typed the second time is not the same as the first, so nothing was set.",
+        Who.OWNER,
+        "Type the same PIN in both fields, then try again.",
+    )
+
+    val pinChanged = w(
+        Tones.GOOD, "PIN changed",
+        "Key 1 on this phone is now locked behind the new PIN.",
+        Who.NOBODY,
+        "Nothing to do. Use the new PIN from now on.",
+    )
+
+    /** The page is drawn before the slow step: the key from the PIN takes about a second. */
+    val working = w(
+        Tones.INFO, "Working",
+        "The app is working with the PIN, which takes a moment.",
+        Who.NOBODY,
+        "Wait. Do not close the app.",
+    )
+
+    val waitForTry = w(
+        Tones.INFO, "Wait before the next try",
+        "There were too many wrong tries, so the app waits before it takes another.",
+        Who.OWNER,
+        "Wait for the time shown, then type the PIN again.",
+    )
+
+    fun triesNotSaved(problem: String?) = w(
+        Tones.STOP, "Try not counted",
+        "The phone could not keep the count of wrong tries, so the PIN was not tried.",
+        Who.OWNER,
+        "Try again. If it keeps failing, restart the phone and open this app again.",
+        detailOf(problem),
+    )
+
+    /** OA-64: the wipe happened, and what to do next: the kit's move to a new wallet, or the holder of key 2. */
+    val wiped = w(
+        Tones.STOP, "Key 1 wiped from this phone",
+        "This phone's copy of key 1 was wiped after 10 wrong tries. The money is not lost: two of the three keys still exist.",
+        Who.OWNER,
+        "Follow the recovery kit to move to a new wallet, or ask the person who holds key 2.",
+    )
+
+    fun wipeFailed(problem: String?) = w(
+        Tones.STOP, "Wipe not finished",
+        "Key 1 could not be wiped from this phone completely, so the app will try again when it opens.",
+        Who.OWNER,
+        "Close the app and open it again. If it keeps failing, uninstall the app.",
+        detailOf(problem),
+    )
+
     /** SC-12: the list of words as the table of docs/screens/owner-app.md. */
     fun screensMarkdown(): String {
         fun who(n: Int) = when (n) {
@@ -1091,6 +1170,16 @@ object AppWords {
         "storageUnavailable" to storageUnavailable("a problem"),
         "fileNotRead" to fileNotRead("a problem"),
         "fileNotSaved" to fileNotSaved("a problem"),
+        "choosePin" to choosePin,
+        "upgradePin" to upgradePin,
+        "unlockSetup" to unlockSetup,
+        "pinsDiffer" to pinsDiffer,
+        "pinChanged" to pinChanged,
+        "working" to working,
+        "waitForTry" to waitForTry,
+        "triesNotSaved" to triesNotSaved("a problem"),
+        "wiped" to wiped,
+        "wipeFailed" to wipeFailed("a problem"),
         "cameraOff" to CameraWords.off(Who.OWNER),
         "cameraNotStarted" to CameraWords.notStarted(Who.OWNER, "a problem"),
     ) + editFields.map { (id, words) -> "editField_$id" to words } + UrWords.forReading(Who.OWNER)

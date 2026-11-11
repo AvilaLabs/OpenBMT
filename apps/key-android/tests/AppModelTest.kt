@@ -6,6 +6,7 @@ import java.nio.file.Files
 import java.security.MessageDigest
 import org.openbmt.app.Format
 import org.openbmt.app.KeyTextOutcome
+import org.openbmt.app.Relock
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Sealer
 import org.openbmt.app.Sealed
@@ -14,6 +15,9 @@ import org.openbmt.app.StoreFormat
 import org.openbmt.app.StoreFormatException
 import org.openbmt.app.Tones
 import org.openbmt.app.UrWords
+import org.openbmt.app.Tries
+import org.openbmt.app.TriesFile
+import org.openbmt.app.TriesRecord
 import org.openbmt.app.Who
 import org.openbmt.key.HealthDetail
 import org.openbmt.key.Key3View

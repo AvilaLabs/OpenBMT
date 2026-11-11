@@ -5,13 +5,14 @@ The first build of the owner's screen: a real APK that runs the owner node
 screens. It is built with the Android SDK's own tools and no Gradle, no
 AndroidX, no Jetpack Compose and no library beyond the Kotlin standard
 library. The code shared with the Key app and the Counter app is in
-`apps/android-common`; nothing in `apps/android-common`, `apps/counter-android`
-or `apps/key-android` was changed for this app.
+`apps/android-common`. Of the other apps, only the Key app was touched for the
+PIN lock (below): its tries, waits and wipe order moved into
+`apps/android-common/src/model/LockModel.kt`, which both apps use.
 
 **First build. No independent security audit has been done. It has not been
 run on a phone or an emulator. Not for real funds.** The APK is signed with a
 local test key; release signing is a separate step (see "Signing"). The rules
-the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-31).
+the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-35, OA-60 to OA-65).
 
 ## What it does
 
@@ -31,7 +32,9 @@ the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-31).
 | Till | Connect a Square or Clover till with a read-only token, see when it was last read, how many sales matched, and each open alert with its words and an acknowledge button. |
 | Refund notes and Notes | What the node noted about refunds and everything else. |
 | Waiting | What is signed and waits to be delivered, by kind and age (read-only). |
+| Unlock | The first screen of every start and every return after more than a minute away: the PIN or passphrase of key 1 (OA-62). |
 | Settings | The settings the node holds, and "Change settings" (OA-32 to OA-35): six screens of fields, a review of old and new values, and a queued change that goes on through the outbox or the Key app. |
+| Change the PIN | The current PIN, the new one twice; a wrong current PIN counts as a wrong try (OA-61, OA-63). |
 | About | The version, what is not built, "Not for real funds", the run-while-visible note. |
 
 Every state and refusal is shown through the library's `words` where the
@@ -136,8 +139,34 @@ Key 3's public key, up to 8 peers, a relay route (`direct host:port` or
 `src/model/SetupText.kt` documents it, parses it and refuses anything else,
 with the line it stopped at. A line for Key 2 or Key 3's secret is refused:
 the app holds Key 1 and no other secret key (OA-08). The setup is kept sealed
-with an Android Keystore key (AES-256-GCM) in `noBackupFilesDir` and handed
-to the node at each start (OA-01).
+with an Android Keystore key (AES-256-GCM) in `noBackupFilesDir`, locked behind
+a PIN (below), and handed to the node at each start (OA-01).
+
+## The PIN on key 1
+
+The setup file is `OBMx(setup text)` inside the Keystore's seal (OA-60): the
+phone and the PIN are both needed. `openbmt-lock` (`docs/LOCK-RULES.md`) is
+the frame and the cost (Argon2id, 64 MiB, 3 passes, ChaCha20-Poly1305); the
+ops 100 to 103 of `openbmt-owner-ffi` (`OwnerLock` in the binding) lock a text,
+open one, tell a locked setup from a bare one and change the PIN, and store
+nothing. This app stores what they return.
+
+- **Choosing it.** At the end of the ceremony and on the paste path, after the
+  text and the address of Orbot are checked and before the save: the Key
+  app's "Choose a PIN" screen, 6 digits or more or a passphrase of 8
+  characters or more, typed twice (OA-61). A setup saved by an earlier build
+  opens only into "Set a PIN for key 1", then is saved again locked.
+- **Unlocking.** At start, and after more than 60 seconds in the background,
+  before any other screen and before the node starts. A "Working" page is
+  drawn first, because the key from the PIN takes about a second (OA-62).
+- **Tries and the wipe.** `tries.obkt` in the no-backup folder, from the
+  shared `LockModel.kt` (OA-63): waits of 30 seconds, 1, 5 and 15 minutes
+  and 1 hour from the 5th wrong try; the 10th wipes the setup file, the
+  ceremony's file, the Keystore key and then the tries file, and says that
+  the money is not lost because two of the three keys still exist, with the
+  recovery kit and the holder of key 2 as the way on (OA-64). The node's
+  folder, the config and the till's token are not touched.
+- **Changing it.** "Change the PIN" on the home screen.
 
 ## Why `FLAG_SECURE` here and not in the Counter app
 
@@ -207,7 +236,10 @@ release key.
 
 ## Not checked without a device
 
-Everything that needs a running Android: that the library loads and starts,
+Everything that needs a running Android: how long the unlock takes on a phone
+(about a quarter of a second on a laptop; the cost is 64 MiB and 3 passes), the
+wipe through the real Keystore, the setup file of an earlier build opening into
+the PIN step, that the library loads and starts,
 the key ceremony against a real Key app on a second phone (scanning its answer
 and key 2, showing it the setup, resuming after the app was closed),
 how the screens look and lay out, the keyboard types of the fields, the file

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.View
 import android.widget.EditText
 import android.widget.TextView
@@ -16,9 +17,12 @@ import java.security.GeneralSecurityException
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import org.openbmt.app.KeystoreSealer
+import org.openbmt.app.Relock
 import org.openbmt.app.SayWords
 import org.openbmt.app.ScanFlow
 import org.openbmt.app.SealedFile
+import org.openbmt.app.Tries
+import org.openbmt.app.TriesFile
 import org.openbmt.app.Ui
 import org.openbmt.app.UrScan
 import org.openbmt.owner.OwnerException
@@ -52,6 +56,13 @@ class Controller(internal val act: MainActivity) {
     internal var setup: OwnerSetup? = null
     internal var config: AppConfig? = null
 
+    // The count of wrong PINs, in the same folder as the setup (OA-63); when the app was last hidden, on the clock that
+    // counts since the phone started (OA-62); and the countdown of the unlock screen while it is on show.
+    internal val tries by lazy { TriesFile(dir) }
+    internal var pausedAt: Long? = null
+    internal var ticker: Runnable? = null
+    private val relockTimer = Runnable { if (!visible) lockNow() }
+
     // What the owner has typed in the settings editor, in memory only (OA-34).
     internal var settingsDraft = SettingsDraft()
 
@@ -66,7 +77,7 @@ class Controller(internal val act: MainActivity) {
     @Volatile
     private var runId = 0
     private var visible = false
-    private var fault: SayWords? = null
+    internal var fault: SayWords? = null
     private var torBlocked: SayWords? = null
     internal var node: OwnerNode? = null
     internal var pumpFault: SayWords? = null
@@ -100,15 +111,24 @@ class Controller(internal val act: MainActivity) {
 
     fun visible() {
         visible = true
+        main.removeCallbacks(relockTimer)
         if (pickerOpen || scan.asking) return
+        // OA-62: after more than 60 seconds away the setup is locked again, and the start asks for the PIN.
+        if (setup != null && Relock.needed(pausedAt, SystemClock.elapsedRealtime())) lockNow()
         begin()
     }
 
     fun hidden() {
+        val wasVisible = visible
         visible = false
         if (pickerOpen || scan.asking) return
         scan.stop()
+        stopTicker()
         stopNode()
+        if (wasVisible) {
+            pausedAt = SystemClock.elapsedRealtime()
+            main.postDelayed(relockTimer, Relock.AFTER_MS + 1_000)
+        }
     }
 
     internal fun begin() {
@@ -116,6 +136,8 @@ class Controller(internal val act: MainActivity) {
         torBlocked = null
         ceremony = null
         stopNode()
+        // A wipe that was begun and not finished is finished first (OA-64).
+        if (tries.read(nowSecs()).wrong >= Tries.WIPE_AT) return wipe()
         val setupStatus = try {
             config = configFile.load()
             SetupStatus(File(dir, AppFiles.SETUP_FILE).exists(), config != null)
@@ -126,24 +148,13 @@ class Controller(internal val act: MainActivity) {
         if (!setupStatus.complete) return showFirstStart(null)
         // A ceremony record left behind by a save that did not finish deleting it: the setup is saved, so it goes (OA-29).
         File(dir, AppFiles.CEREMONY_FILE).delete()
-        try {
-            val text = SealedFile(dir, KeystoreSealer(AppFiles.KEY_ALIAS), AppFiles.SETUP_FILE).load()
-                ?: throw IOException("the setup is missing")
-            setup = OwnerSetup.parse(String(text, Charsets.UTF_8))
-        } catch (e: SetupFormatException) {
-            fault = AppWords.setupNotReadable(e.message)
-            return render()
-        } catch (e: IOException) {
-            fault = AppWords.storageUnavailable(e.message)
-            return render()
-        } catch (e: GeneralSecurityException) {
-            fault = AppWords.storageUnavailable(e.message)
-            return render()
-        }
-        startNode()
+        // Unlocked within the last minute: the setup is in memory, and the node starts from it. Otherwise the stored
+        // setup is read and the PIN is asked for before anything else (OA-62, `Lock.kt`).
+        if (setup != null) return startNode()
+        openStored()
     }
 
-    private fun render() {
+    internal fun render() {
         val status = SetupStatus(File(dir, AppFiles.SETUP_FILE).exists(), config != null)
         when (val s = ScreenModel.pick(fault, status, torBlocked, node != null)) {
             is Screen.Fault -> showMessage(s.words, "Try again") { begin() }
@@ -156,7 +167,7 @@ class Controller(internal val act: MainActivity) {
 
     // ---- running the node ----------------------------------------------------------------------------
 
-    private fun startNode() {
+    internal fun startNode() {
         val id = ++runId
         page(listOf(ui.words(AppWords.starting)))
         val s = setup ?: return
@@ -416,9 +427,10 @@ class Controller(internal val act: MainActivity) {
     }
 
     /**
-     * Saves a setup text as the paste path and the ceremony both do: the text is checked for its shape, the setup
-     * is sealed and saved, then the config, which is the last thing a finished setup adds. [onRefused] shows
-     * what could not be done; [afterSaved] runs once both are saved.
+     * Saves a setup text as the paste path and the ceremony both do: the text is checked for its shape, a PIN is
+     * chosen and the library locks the text under it (OA-61), the locked setup is sealed and saved, then the config,
+     * which is the last thing a finished setup adds. [onRefused] shows what could not be done, and [backWords] are
+     * its words when the owner goes back from the PIN; [afterSaved] runs once both are saved.
      */
     internal fun saveSetup(
         text: String,
@@ -426,6 +438,7 @@ class Controller(internal val act: MainActivity) {
         onRefused: (SayWords) -> Unit,
         working: SayWords = AppWords.starting,
         afterSaved: () -> Unit = {},
+        backWords: SayWords = AppWords.setupTextNeeded,
     ) {
         try {
             OwnerSetup.parse(text)
@@ -433,24 +446,30 @@ class Controller(internal val act: MainActivity) {
             return onRefused(AppWords.setupNotReadable(e.message))
         }
         if (!HostPort.valid(proxy)) return onRefused(AppWords.torAddressNotAccepted)
-        page(listOf(ui.words(working)))
-        async({
-            // The setup first, then the config: the config is the last thing a finished setup adds.
-            SealedFile(dir, KeystoreSealer(AppFiles.KEY_ALIAS), AppFiles.SETUP_FILE).save(text.toByteArray(Charsets.UTF_8))
-            configFile.save(AppConfig(proxy))
-            afterSaved()
-        }) { r ->
-            when (val e = r.exceptionOrNull()) {
-                null -> {
-                    // The text held secrets: nothing of it stays in the app's memory or on the clipboard (OA-01).
-                    draftText = ""
-                    ceremony = null
-                    act.getSystemService(ClipboardManager::class.java)?.clearPrimaryClip()
-                    showMessage(AppWords.setupSaved, "Start") { begin() }
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        askNewPin(bytes, false, null, { bytes.fill(0); onRefused(backWords) }) { locked ->
+            page(listOf(ui.words(working)))
+            async({
+                // The setup first, then the config: the config is the last thing a finished setup adds.
+                SealedFile(dir, KeystoreSealer(AppFiles.KEY_ALIAS), AppFiles.SETUP_FILE).save(locked)
+                configFile.save(AppConfig(proxy))
+                afterSaved()
+            }) { r ->
+                bytes.fill(0)
+                when (val e = r.exceptionOrNull()) {
+                    null -> {
+                        // The text held secrets: nothing of it stays in the app's memory or on the clipboard (OA-01).
+                        // It was just typed behind the PIN, so the start that follows does not ask for it again.
+                        draftText = ""
+                        ceremony = null
+                        setup = try { OwnerSetup.parse(text) } catch (_: SetupFormatException) { null }
+                        act.getSystemService(ClipboardManager::class.java)?.clearPrimaryClip()
+                        showMessage(AppWords.setupSaved, "Start") { begin() }
+                    }
+                    is IOException -> onRefused(AppWords.fileNotSaved(e.message))
+                    is GeneralSecurityException -> onRefused(AppWords.storageUnavailable(e.message))
+                    else -> throw e
                 }
-                is IOException -> onRefused(AppWords.fileNotSaved(e.message))
-                is GeneralSecurityException -> onRefused(AppWords.storageUnavailable(e.message))
-                else -> throw e
             }
         }
     }

@@ -1,18 +1,18 @@
-package org.openbmt.key.app
+package org.openbmt.app
 
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import org.openbmt.app.DurableFile
 
-/** The count of wrong PINs and the time of the last one, in seconds since 1970 (SR-75). */
+/** The count of wrong PINs and the time of the last one, in seconds since 1970 (SR-75, OA-63). */
 data class TriesRecord(val wrong: Int, val lastWrongAt: Long)
 
 /**
- * The pure parts of the PIN lock around the library (docs/SIGNER-RULES.md SR-75 to SR-77): how many wrong
- * tries are allowed, how long the app makes the person wait, and when the app locks itself again. The
- * library checks the PIN; the counting belongs to the app. No Android class is used, so the JVM test runs it.
+ * The pure parts of the PIN lock around the library, shared by the Key app and the owner app
+ * (docs/SIGNER-RULES.md SR-75 to SR-77, docs/OWNER-APP-RULES.md OA-62 to OA-64): how many wrong tries are
+ * allowed, how long the app makes the person wait, and when the app locks itself again. The library checks
+ * the PIN; the counting belongs to the app. No Android class is used, so the JVM test runs it.
  */
 object Tries {
     /** The 10th wrong try wipes the key from this phone (SR-76). */
@@ -145,16 +145,17 @@ internal fun deleteOrThrow(file: File) {
 }
 
 /**
- * SR-76: the wipe. The sealed state file goes first, then the Keystore key ([deleteKey]), then the file of
- * tries, so that a wipe that stops half way is finished at the next start (the tries file still says 10). Any
- * failure throws [IOException] and the later steps are not taken.
+ * SR-76, OA-64: the wipe. The sealed files of the app ([files], in this order, each with its temporary file)
+ * go first, then the Keystore key ([deleteKey]), then the file of tries, so that a wipe that stops half way
+ * is finished at the next start (the tries file still says 10). Any failure throws [IOException] and the
+ * later steps are not taken. Which files an app lists is the app's own rule.
  */
-object Wipe {
-    const val STATE_FILE = "state.obks"
-
-    fun run(dir: File, tries: TriesFile, deleteKey: () -> Unit) {
-        deleteOrThrow(File(dir, "$STATE_FILE.tmp"))
-        deleteOrThrow(File(dir, STATE_FILE))
+object WipeOrder {
+    fun run(dir: File, files: List<String>, tries: TriesFile, deleteKey: () -> Unit) {
+        for (name in files) {
+            deleteOrThrow(File(dir, "$name.tmp"))
+            deleteOrThrow(File(dir, name))
+        }
         try {
             deleteKey()
         } catch (e: IOException) {

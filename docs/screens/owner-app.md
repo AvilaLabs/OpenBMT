@@ -122,6 +122,16 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | storageUnavailable | Phone storage not usable | The phone's protected storage did not start, so the saved setup was not opened. | Restart the phone and open this app again. If it happens again, stop and do not spend. | the owner |  |
 | fileNotRead | File not read | The file could not be opened or read, so nothing was done. | Pick the file again, or paste the text instead. | the owner |  |
 | fileNotSaved | Not saved | The app could not write to this phone's storage, so nothing was saved. | Try again. If it happens again, free some space on the phone. | the owner |  |
+| choosePin | Choose a PIN | Key 1 on this phone is kept behind a PIN, which the app asks for every time it opens. | Choose at least 6 digits, or a passphrase of at least 8 characters, and do not forget it. | the owner |  |
+| upgradePin | Set a PIN for key 1 | Key 1 on this phone was saved without a PIN, so anyone who opens the app could use it. | Choose a PIN now; the setup is kept as it is and locked behind it. | the owner |  |
+| unlockSetup | Enter your PIN | Key 1 on this phone is locked, so the app opens only with the PIN or passphrase. | Type it and tap Unlock. Too many wrong tries wipe key 1 from this phone. | the owner |  |
+| pinsDiffer | The two PINs differ | The PIN typed the second time is not the same as the first, so nothing was set. | Type the same PIN in both fields, then try again. | the owner |  |
+| pinChanged | PIN changed | Key 1 on this phone is now locked behind the new PIN. | Nothing to do. Use the new PIN from now on. | nobody |  |
+| working | Working | The app is working with the PIN, which takes a moment. | Wait. Do not close the app. | nobody |  |
+| waitForTry | Wait before the next try | There were too many wrong tries, so the app waits before it takes another. | Wait for the time shown, then type the PIN again. | the owner |  |
+| triesNotSaved | Try not counted | The phone could not keep the count of wrong tries, so the PIN was not tried. | Try again. If it keeps failing, restart the phone and open this app again. | the owner |  |
+| wiped | Key 1 wiped from this phone | This phone's copy of key 1 was wiped after 10 wrong tries. The money is not lost: two of the three keys still exist. | Follow the recovery kit to move to a new wallet, or ask the person who holds key 2. | the owner |  |
+| wipeFailed | Wipe not finished | Key 1 could not be wiped from this phone completely, so the app will try again when it opens. | Close the app and open it again. If it keeps failing, uninstall the app. | the owner |  |
 | cameraOff | Camera is off for this app | This app is not allowed to use the camera, so it cannot scan a code. | Allow the camera for this app in the phone's settings, or paste the text or choose a file instead. | the owner |  |
 | cameraNotStarted | Camera did not start | The camera could not be opened, so nothing was scanned. | Close any other app that uses the camera and try again, or paste the text or choose a file instead. | the owner |  |
 | editField_light_per_sale | Light check: one sale | The largest sale accepted as instant when only a light check has seen the payment. | Whole dollars. 0 turns it off. | the owner |  |

@@ -1,6 +1,6 @@
 # Code shared by the Android apps
 
-The Key app and the counter app are built from their own sources plus the
+The Key app, the owner app and the counter app are built from their own sources plus the
 files here. Plain `android.widget` and the Kotlin standard library only: no
 Gradle, no AndroidX. `src/model/` has no Android class, so the JVM tests run
 it; `src/android/` needs the framework.
@@ -9,6 +9,7 @@ it; `src/android/` needs the framework.
 |---|---|
 | `src/model/WordsModel.kt`, `SayCheck.kt` | The words of a screen as text, and the checks of `docs/SCREEN-RULES.md` as far as text can be checked |
 | `src/model/Format.kt`, `DurableFile.kt`, `SealedFile.kt` | Text helpers, the durable write, the sealed file |
+| `src/model/LockModel.kt` | The PIN lock's pure parts for the Key app and the owner app: the table of waits and the 10-try wipe count (`Tries`), the strict file of wrong tries (`TriesFile`), the wipe order over an app's own files (`WipeOrder`) and the 60-second rule (`Relock`); `docs/SIGNER-RULES.md` SR-75 to SR-77, `docs/OWNER-APP-RULES.md` OA-62 to OA-64 |
 | `src/model/QrModel.kt`, `QrNative.kt` | The camera scan's pure parts and the binding of the QR reader |
 | `src/model/UrNative.kt`, `UrCall.kt` | The binding of the UR call and its framing in Kotlin (UR-21), read strictly |
 | `src/model/AnimatedQr.kt` | The numbers of the animated code, the frame timing and layout, the codes drawn once each |

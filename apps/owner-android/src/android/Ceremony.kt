@@ -444,6 +444,7 @@ private fun Controller.saveFinished(record: ByteArray, message: SayWords? = null
                 onRefused = { w -> saveFinished(record, w) },
                 working = AppWords.ceremonyFinishing,
                 afterSaved = { File(appDir, AppFiles.CEREMONY_FILE).delete() },
+                backWords = AppWords.ceremonySaveNext,
             )
         },
     )

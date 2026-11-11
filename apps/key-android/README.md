@@ -88,10 +88,12 @@ identity (`acceptWallet`, op 17) is gone from the app; the library op stays.
 ## The PIN lock and the cash-out addresses
 
 The library keeps the stored state in a locked frame (SR-71 to SR-73). The
-app's own part is SR-74 to SR-79: `src/model/LockModel.kt` holds the count of
-wrong tries (`Tries`, `TriesFile`), the wait table, the wipe order (`Wipe`) and
-the 60-second rule (`Relock`); `src/android/KeyWipe.kt` deletes the Keystore
-key; `Controller.kt` shows the screens.
+app's own part is SR-74 to SR-79: `apps/android-common/src/model/LockModel.kt`
+(shared with the owner app) holds the count of wrong tries (`Tries`,
+`TriesFile`), the wait table, the wipe order (`WipeOrder`) and the 60-second
+rule (`Relock`); `src/model/KeyWipeOrder.kt` names the Key app's one file for
+the wipe; `src/android/KeyWipe.kt` deletes the Keystore key; `Controller.kt`
+shows the screens.
 
 - **Unlock.** At start, and after more than 60 seconds in the background, the
   unlock screen comes before any other. A "Working" page is drawn first,

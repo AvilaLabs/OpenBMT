@@ -419,8 +419,62 @@ object CommonModelTest {
         ok(!UrText.startsWithUr("u".toByteArray()) && !UrText.startsWithUr("BITCOIN:".toByteArray()) && !UrText.startsWithUr(" ur:".toByteArray()), "others do not")
     }
 
+    /** The lock model both apps use (LockModel.kt): the tries table and file, the wipe order over a list of files, the relock rule. */
+    private fun lockModelTests() {
+        val waits = listOf(0L, 0, 0, 0, 0, 30, 60, 300, 900, 3600)
+        for ((n, w) in waits.withIndex()) ok(Tries.waitSeconds(n) == w, "$n wrong tries wait $w s")
+        ok(Tries.WIPE_AT == 10 && Tries.WARN_FROM == 5, "the wipe and the warning counts")
+        val t0 = 1_000_000L
+        for (n in 1..9) {
+            val c = Tries.check(TriesRecord(n, t0), t0)
+            ok(c.waitLeft == waits[n] && !c.wipe, "right after $n wrong: wait ${waits[n]}")
+        }
+        ok(Tries.check(TriesRecord(10, t0), t0).wipe, "10 wrong tries wipe")
+        ok(Tries.check(TriesRecord(6, t0), t0 - 500).record == TriesRecord(6, t0 - 500), "a clock behind restarts the wait from now")
+        ok(Tries.before(TriesRecord(3, 5), 99) == TriesRecord(4, 99) && Tries.afterRight() == TriesRecord(0, 0), "one more before, none after")
+        ok(Relock.needed(null, 5) && !Relock.needed(1000, 61_000) && Relock.needed(1000, 61_001) && Relock.needed(1000, 500), "the 60-second rule")
+        val dir = Files.createTempDirectory("lock-model").toFile()
+        try {
+            val tries = TriesFile(dir)
+            ok(tries.read(5) == TriesRecord(0, 0) && !tries.exists(), "no file: no wrong tries")
+            tries.write(TriesRecord(7, 1234))
+            ok(tries.read(5) == TriesRecord(7, 1234) && File(dir, TriesFile.NAME).length() == 17L, "the record is read back in 17 bytes")
+            for (bad in listOf(ByteArray(16), ByteArray(18), ByteArray(17))) {
+                File(dir, TriesFile.NAME).writeBytes(bad)
+                ok(tries.read(77) == TriesRecord(9, 77), "a file that is not exact counts as 9 wrong tries just now")
+            }
+            // The wipe order over two files: the files first, in the order given, then the key, then the tries.
+            fun setUp() {
+                File(dir, "one.obks").writeBytes(byteArrayOf(1))
+                File(dir, "two.obks").writeBytes(byteArrayOf(2))
+                File(dir, "one.obks.tmp").writeBytes(byteArrayOf(3))
+                tries.write(TriesRecord(10, 5))
+            }
+            setUp()
+            val seen = ArrayList<String>()
+            WipeOrder.run(dir, listOf("one.obks", "two.obks"), tries) {
+                seen.add("key")
+                ok(!File(dir, "one.obks").exists() && !File(dir, "two.obks").exists() && !File(dir, "one.obks.tmp").exists() && tries.exists(), "the files go before the key, the tries file after")
+            }
+            ok(seen == listOf("key") && !tries.exists(), "all of it is gone")
+            // Nothing there is no trouble, and a key that stays leaves the count at 10.
+            WipeOrder.run(dir, listOf("one.obks"), tries) { }
+            setUp()
+            var threw = false
+            try {
+                WipeOrder.run(dir, listOf("one.obks", "two.obks"), tries) { throw IOException("still there") }
+            } catch (_: IOException) {
+                threw = true
+            }
+            ok(threw && tries.read(0).wrong == 10, "a key that stays throws and the count stays at 10")
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
+        lockModelTests()
         checkerTests()
         wordsModelTests()
         formatTests()

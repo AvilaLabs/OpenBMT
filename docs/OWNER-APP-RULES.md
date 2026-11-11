@@ -22,7 +22,8 @@ run on a phone. Not for real funds.**
 ## 1. What the app holds and what it shows
 
 - **OA-01.** The owner's secret and Key 1's account key (the two secrets
-  of the setup text) are kept in one file, sealed with AES-256-GCM under a
+  of the setup text) are kept in one file, locked behind a PIN (OA-60) and
+  sealed with AES-256-GCM under a
   key of the Android Keystore that never leaves it, in the app's
   `noBackupFilesDir`, written by atomic steps (new file, sync, rename, sync
   of the folder). Nothing of the setup text is kept in any other file,
@@ -408,8 +409,9 @@ so. It builds no settings bytes and signs nothing.
 - **They do not audit the setup text.** The text holds two secrets in plain
   lines until it is sealed. A text from the ceremony on this phone never
   leaves the app before it is sealed; where a pasted text comes from, how it
-  was carried and when it is deleted are the owner's. Key 1 has no PIN and
-  no passphrase, and the ceremony shows no words of key 1.
+  was carried and when it is deleted are the owner's. The ceremony shows no
+  words of key 1. The record of a ceremony that is not finished (OA-26) is
+  sealed by the Keystore only: the PIN is chosen at the end (OA-61).
 - **They do not make a spend safe.** The Key app's own rules and the
   approval (`docs/SIGNER-RULES.md`, `docs/SESSION-RULES.md`) decide what is
   signed. This app builds the request and carries the response; a request
@@ -433,3 +435,65 @@ so. It builds no settings bytes and signs nothing.
 - **They do not say the app has been run.** Every check here is on the
   desktop JVM, on the manifest of a built APK, or on the source. What needs
   a phone is listed in `apps/owner-android/README.md`.
+
+## 10. The PIN on key 1
+
+Key 1 on the owner phone is kept the way the Key app keeps its key
+(`docs/DESIGN.md` §5.4, "Phone key rules"; `docs/SIGNER-RULES.md` SR-71 to
+SR-77). The frame, the cost and the PIN rules are in `openbmt-lock`
+(`docs/LOCK-RULES.md`); the counting of wrong tries, the waits, the wipe order
+and the 60-second rule are the shared `LockModel.kt` of
+`apps/android-common`, which the Key app uses as well.
+
+- **OA-60.** The setup file is `OBMx(setup text)`, sealed by the Keystore as
+  OA-01 says: the phone and the PIN are both needed. The library locks a
+  text under a PIN, opens a locked one and changes the PIN in one call
+  (ops 100 to 103: whether stored bytes are a locked setup, lock, unlock,
+  change the PIN), all through `openbmt-lock`, and stores nothing: the app
+  stores what the call returns, and replaces the file only when the call
+  returned. The setup text is read at each start and checked for its shape
+  (OA-11); it is in memory only while the node starts, and the bytes it was
+  read into are overwritten. The parsed setup is held while the app runs and
+  for the minute after it goes to the background (OA-62), and dropped then.
+- **OA-61.** The PIN is chosen before the setup is first saved: at the end of
+  the ceremony and on the paste path, after the text and the address of
+  Orbot are checked and before the save, on the screen the Key app uses
+  ("Choose a PIN": 6 digits or more, or a passphrase of 8 characters or
+  more, typed twice, `pin-weak` and `pin-long` from the library). A setup
+  saved before the lock existed (the bare sealed text) opens only into "Set
+  a PIN for key 1", is checked for its shape first, and is saved again
+  locked. The home screen offers "Change the PIN": it asks for
+  the current PIN, a wrong one counts as a try (OA-63), and the file is
+  replaced only when the library's call returned.
+- **OA-62.** At start, and after the app has been in the background for more
+  than 60 seconds on the clock that counts since the phone started (a clock
+  that went back counts as more), the unlock screen comes before any other
+  and before the node starts, and no call of the node is made until it is
+  open. A "Working" page is drawn before the library is asked, because the
+  key from the PIN takes about a second (OA-12). A wrong PIN is refused with
+  the rule `pin-wrong` and changes nothing; a file that is cut or damaged
+  is refused with the rule `OBMx`, in the library's words.
+- **OA-63.** Wrong PINs are counted in a small file of their own, `tries.obkt`
+  in the app's `noBackupFilesDir`, as SR-75 says: the count plus one is
+  written before each try and 0 after a right PIN; a refusal that is not
+  `pin-wrong` gives the step back; from 5 wrong tries the waits are 30
+  seconds, 1 minute, 5 minutes, 15 minutes and 1 hour; from the 5th the
+  screen says how many tries are left; a clock behind the last wrong try
+  restarts the wait; a file that is not exact counts as 9 wrong tries. The
+  code is the same file as the Key app's, not a copy.
+- **OA-64.** The 10th wrong try wipes key 1 from this phone, in this order:
+  the setup file, the ceremony's file if there is one, the Keystore key
+  that seals them, then the tries file. A wipe that stops half way is
+  finished at the next start (the tries file still says 10). The screen
+  says that this phone's copy of key 1 was wiped after 10 wrong tries, that
+  the money is not lost because two of the three keys still exist, and the
+  next step: follow the recovery kit to move to a new wallet
+  (`docs/DESIGN.md` §5.4, "Key 1 replacement is a move to a new wallet"), or
+  ask the person who holds key 2. The node's own folder, the config and the
+  till's token are not touched.
+- **OA-65.** The setup file, the ceremony's file and the tries file are in
+  the app's `noBackupFilesDir`, and the manifest and both rule files
+  exclude every domain from cloud backup and from device transfer (OA-02),
+  so that a file restored without the Keystore key, which never comes
+  back, is never the thing that is lost. The wrapping key is not bound to
+  biometrics or to the lock screen.

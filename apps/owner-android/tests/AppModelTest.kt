@@ -15,10 +15,15 @@ import org.openbmt.app.SayCheck
 import org.openbmt.app.SayWords
 import org.openbmt.app.Sealed
 import org.openbmt.app.SealedFile
+import org.openbmt.app.Relock
 import org.openbmt.app.Sealer
 import org.openbmt.app.Tones
+import org.openbmt.app.Tries
+import org.openbmt.app.TriesFile
+import org.openbmt.app.TriesRecord
 import org.openbmt.app.UrWords
 import org.openbmt.app.Who
+import org.openbmt.app.WipeOrder
 import org.openbmt.owner.Alert
 import org.openbmt.owner.AlertKind
 import org.openbmt.owner.CashAmount
@@ -592,7 +597,7 @@ object AppModelTest {
         val save = controller.substringAfter("SealedFile(dir, KeystoreSealer(AppFiles.KEY_ALIAS), AppFiles.SETUP_FILE).save(")
         ok(save.indexOf("configFile.save(") > 0, "the config is written after the setup")
         ok(controller.contains("AppWords.storageUnavailable(e.message)") && controller.contains("AppWords.setupNotReadable(e.message)"), "a file that does not read is a fault with words")
-        ok(controller.contains("OwnerSetup.parse(String(text, Charsets.UTF_8))"), "the setup is parsed at every start")
+        ok(source("src/android/Lock.kt").contains("OwnerSetup.parse(String(text, Charsets.UTF_8))"), "the setup is parsed at every start (OA-60)")
     }
 
     private fun oa_12_four_threads_touch_the_node() {
@@ -1439,6 +1444,201 @@ object AppModelTest {
         ok(!ceremonyCode().contains("made.words"), "key 1's words are never shown")
     }
 
+    // ---- the PIN on key 1 (OA-60 to OA-65) ------------------------------------------------------------------
+
+    private fun lockSource(): String = source("src/android/Lock.kt")
+
+    /** The Keystore's stand-in: AES-GCM under a key of the test's own, as in oa_01. */
+    private fun aesSealer(key: ByteArray): Sealer = object : Sealer {
+        override fun seal(plain: ByteArray, aad: ByteArray): Sealed {
+            val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+            cipher.updateAAD(aad)
+            return Sealed(iv, cipher.doFinal(plain))
+        }
+
+        override fun open(sealed: Sealed, aad: ByteArray): ByteArray {
+            try {
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, sealed.iv))
+                cipher.updateAAD(aad)
+                return cipher.doFinal(sealed.ciphertext)
+            } catch (e: java.security.GeneralSecurityException) {
+                throw IOException("does not decrypt", e)
+            }
+        }
+    }
+
+    private fun oa_60_the_setup_is_locked_behind_a_pin_inside_the_keystores_seal() {
+        val lock = lockSource()
+        val controller = source("src/android/Controller.kt")
+        // The library locks, opens and changes; the app stores what a call returned.
+        for (call in listOf("OwnerLock.isLocked(stored)", "OwnerLock.unlock(stored, pin)", "OwnerLock.lock(pin, text)", "OwnerLock.changePin(stored, old, new)")) {
+            ok(lock.contains(call), "the app makes the call $call")
+        }
+        ok(lock.contains("setupFile().save(OwnerLock.changePin(stored, old, new))"), "the file is replaced only with what the change returned")
+        ok(controller.contains("AppFiles.SETUP_FILE).save(locked)"), "the setup file holds the locked bytes, not the text")
+        ok(!controller.contains("SETUP_FILE).save(text"), "the bare text is never saved")
+        ok(lock.contains("text.fill(0)") && controller.contains("bytes.fill(0)"), "the bytes of the text are overwritten after use")
+        ok(lock.contains("AppFiles.KEY_ALIAS"), "the Keystore's seal is the one of OA-01")
+        // A locked frame goes through the Keystore's seal like any bytes, and nothing of it reads as text.
+        val dir = tempDir()
+        try {
+            val key = ByteArray(32).also { SecureRandom().nextBytes(it) }
+            val sealer = aesSealer(key)
+            val file = SealedFile(dir, sealer, AppFiles.SETUP_FILE)
+            val locked = "OBMx".toByteArray() + ByteArray(80) { (it * 7).toByte() }
+            file.save(locked)
+            ok(file.load()!!.contentEquals(locked), "the locked bytes come back as they went in")
+            val onDisk = File(dir, AppFiles.SETUP_FILE).readBytes()
+            ok(onDisk.copyOfRange(0, 4).contentEquals("OBKS".toByteArray()) && !String(onDisk, Charsets.ISO_8859_1).contains("OBMx"), "the file is the Keystore's seal around the frame")
+        } finally {
+            dir.deleteRecursively()
+        }
+        ok(source("../../crates/openbmt-owner-ffi/bindings/kotlin/org/openbmt/owner/OwnerNode.kt").contains("object OwnerLock"), "the binding has the four calls")
+    }
+
+    private fun oa_61_a_pin_is_chosen_before_the_first_save_and_an_older_setup_gets_one() {
+        val controller = source("src/android/Controller.kt")
+        val lock = lockSource()
+        val save = controller.substringAfter("internal fun saveSetup(")
+        ok(save.indexOf("askNewPin(") in 1 until save.indexOf("AppFiles.SETUP_FILE).save(locked)"), "the PIN is asked for before the save")
+        ok(save.indexOf("OwnerSetup.parse(text)") in 1 until save.indexOf("askNewPin("), "the text is checked for its shape first")
+        ok(source("src/android/Ceremony.kt").contains("backWords = AppWords.ceremonySaveNext"), "the ceremony goes through the same helper")
+        ok(controller.contains("saveSetup(draftText, draftProxy.trim()"), "and so does the paste path")
+        ok(SetupLock.gate(0, false) == Gate.SetPin && SetupLock.gate(3, false) == Gate.SetPin, "a bare setup opens only into set-a-PIN")
+        ok(lock.contains("Gate.SetPin -> showUpgrade(stored)"), "the start shows the step that sets a PIN")
+        val upgrade = lock.substringAfter("private fun Controller.showUpgrade(")
+        ok(upgrade.indexOf("readSetup(stored.copyOf())") in 0 until upgrade.indexOf("askNewPin("), "a bare text that is not a setup is a fault, not a PIN")
+        ok(upgrade.indexOf("askNewPin(") in 0 until upgrade.indexOf("setupFile().save(locked)"), "the older setup is locked, then saved again")
+        for (label in listOf("PIN: 6 digits or more", "Passphrase: 8 characters or more", "The same PIN again", "Set the PIN")) ok(lock.contains(label), "the screen says $label")
+        ok(lock.contains("TYPE_NUMBER_VARIATION_PASSWORD") && lock.contains("TYPE_TEXT_FLAG_NO_SUGGESTIONS"), "the fields hide the letters and take no suggestions")
+        ok(lock.contains("first.setText(\"\")") && lock.contains("again.setText(\"\")"), "the typed PIN is cleared from the fields")
+        ok(AppWords.choosePin.heading == "Choose a PIN" && AppWords.upgradePin.heading == "Set a PIN for key 1", "the words of the two screens")
+        ok(AppWords.choosePin.next.contains("6 digits") && AppWords.choosePin.next.contains("8 characters"), "the words say the rule")
+        ok(source("src/android/Screens.kt").contains("ui.button(\"Change the PIN\") { showChangePin(null) }"), "the home screen offers the change of PIN")
+        ok(lock.contains("triedPin({ showChangePin(it) }"), "a wrong current PIN counts like a try")
+    }
+
+    private fun oa_62_the_unlock_comes_first_at_start_and_after_a_minute_away() {
+        val controller = source("src/android/Controller.kt")
+        val lock = lockSource()
+        ok(SetupLock.gate(0, true) == Gate.Unlock && SetupLock.gate(9, true) == Gate.Unlock, "a locked setup asks for the PIN")
+        val begin = controller.substringAfter("internal fun begin() {").substringBefore("internal fun render()")
+        ok(begin.contains("openStored()"), "the stored setup is opened by the PIN step")
+        ok(begin.indexOf("if (setup != null) return startNode()") in 1 until begin.indexOf("openStored()"), "the node starts from memory only while it is unlocked")
+        ok(!lock.contains("startNode()"), "nothing in the lock screens starts the node but begin")
+        val visible = controller.substringAfter("fun visible() {").substringBefore("fun hidden()")
+        ok(visible.contains("Relock.needed(pausedAt, SystemClock.elapsedRealtime())") && visible.indexOf("lockNow()") < visible.indexOf("begin()"), "more than a minute away drops the setup before the start")
+        val hidden = controller.substringAfter("fun hidden() {").substringBefore("internal fun begin()")
+        ok(hidden.contains("pausedAt = SystemClock.elapsedRealtime()") && hidden.contains("relockTimer"), "the time away is kept on the clock that counts since the phone started, and a timer drops the setup")
+        ok(!Relock.needed(1000, 1000 + 60_000) && Relock.needed(1000, 1000 + 60_001) && Relock.needed(null, 5) && Relock.needed(1000, 500), "the 60-second rule")
+        val slow = lock.substringAfter("private fun Controller.slow(").substringBefore("// ---- the start")
+        ok(slow.indexOf("AppWords.working") in 0 until slow.indexOf("postDelayed"), "the working page is drawn before the library is asked")
+        ok(lock.contains("slow {") && AppWords.working.heading == "Working", "and the slow steps use it")
+        ok(lock.contains("e.rule == RULE_PIN_WRONG") && lock.contains("\"pin-wrong\""), "a wrong PIN is told by its rule")
+        ok(AppWords.unlockSetup.heading == "Enter your PIN", "the unlock words")
+    }
+
+    private fun oa_63_wrong_tries_are_counted_in_the_shared_file_before_each_try() {
+        val waits = listOf(0L, 0, 0, 0, 0, 30, 60, 300, 900, 3600)
+        for ((n, w) in waits.withIndex()) ok(Tries.waitSeconds(n) == w, "$n wrong tries wait $w s")
+        ok(Tries.check(TriesRecord(10, 5), 5).wipe && !Tries.check(TriesRecord(9, 5), 5).wipe, "the 10th wipes")
+        ok(Tries.showsTriesLeft(5) && !Tries.showsTriesLeft(4), "tries left are said from the 5th")
+        val lock = lockSource()
+        val tried = lock.substringAfter("private fun Controller.triedPin(").substringBefore("// ---- the wipe")
+        ok(tried.indexOf("tries.write(before)") in 1 until tried.indexOf("op()"), "the count plus one is written before the try")
+        ok(tried.contains("Tries.afterRight()") && tried.contains("giveBack()"), "a right PIN clears the count and another refusal gives the step back")
+        ok(tried.contains("before.wrong >= Tries.WIPE_AT"), "the 10th wrong try wipes")
+        ok(source("src/android/Controller.kt").contains("TriesFile(dir)"), "the file is the shared TriesFile, in the app's folder")
+        ok(!File(appDir, "src/model").listFiles()!!.any { it.readText().contains("object Tries") || it.readText().contains("class TriesFile") }, "the owner app has no copy of the tries code")
+        val dir = tempDir()
+        try {
+            val f = TriesFile(dir)
+            ok(f.read(5) == TriesRecord(0, 0), "no file: no wrong tries")
+            f.write(TriesRecord(7, 1234))
+            ok(f.read(5) == TriesRecord(7, 1234) && File(dir, TriesFile.NAME).length() == 17L, "the record is read back, in 17 bytes")
+            File(dir, TriesFile.NAME).writeBytes(ByteArray(16))
+            ok(f.read(77) == TriesRecord(9, 77), "a file that is not exact counts as 9 wrong tries just now")
+        } finally {
+            dir.deleteRecursively()
+        }
+        ok(AppWords.waitForTry.heading == "Wait before the next try" && AppWords.triesNotSaved("x").heading == "Try not counted", "the words of the waits")
+    }
+
+    private fun oa_64_the_tenth_wrong_try_wipes_key_1_in_order() {
+        ok(SetupLock.WIPE_FILES == listOf(AppFiles.SETUP_FILE, AppFiles.CEREMONY_FILE), "the setup, then the ceremony's file")
+        ok(SetupLock.gate(10, true) == Gate.Wipe && SetupLock.gate(10, false) == Gate.Wipe && SetupLock.gate(9, true) == Gate.Unlock, "10 wrong tries wipe, whatever the file")
+        val dir = tempDir()
+        try {
+            val setup = File(dir, AppFiles.SETUP_FILE)
+            val ceremony = File(dir, AppFiles.CEREMONY_FILE)
+            val tries = TriesFile(dir)
+            fun setUp() {
+                setup.writeBytes(byteArrayOf(1, 2, 3))
+                ceremony.writeBytes(byteArrayOf(4, 5, 6))
+                File(dir, AppFiles.SETUP_FILE + ".tmp").writeBytes(byteArrayOf(7))
+                tries.write(TriesRecord(10, 5))
+            }
+            setUp()
+            val seen = ArrayList<String>()
+            WipeOrder.run(dir, SetupLock.WIPE_FILES, tries) {
+                seen.add("key")
+                ok(!setup.exists() && !ceremony.exists() && tries.exists(), "both files go before the key, the tries file after")
+            }
+            ok(seen == listOf("key") && !tries.exists() && !File(dir, AppFiles.SETUP_FILE + ".tmp").exists(), "all of it is gone")
+            // A ceremony file that is not there is no trouble.
+            tries.write(TriesRecord(10, 5))
+            setup.writeBytes(byteArrayOf(1))
+            WipeOrder.run(dir, SetupLock.WIPE_FILES, tries) { }
+            ok(!setup.exists() && !tries.exists(), "a wipe without a ceremony file")
+            // A key that stays leaves the tries file, so the next start wipes again.
+            setUp()
+            try {
+                WipeOrder.run(dir, SetupLock.WIPE_FILES, tries) { throw IOException("still there") }
+                ok(false, "a key that stays throws")
+            } catch (_: IOException) {
+            }
+            ok(!setup.exists() && !ceremony.exists() && tries.read(0).wrong == 10 && Tries.check(tries.read(0), 0).wipe, "a wipe that stops leaves the count at 10")
+        } finally {
+            dir.deleteRecursively()
+        }
+        val lock = lockSource()
+        ok(lock.contains("WipeOrder.run(appDir, SetupLock.WIPE_FILES, tries) { OwnerWipe.deleteKey() }"), "the screens wipe through the shared order")
+        ok(source("src/android/OwnerWipe.kt").contains("deleteEntry(AppFiles.KEY_ALIAS)"), "the Keystore key of the setup is deleted")
+        ok(source("src/android/Controller.kt").contains("if (tries.read(nowSecs()).wrong >= Tries.WIPE_AT) return wipe()"), "a wipe that stopped is finished at the next start")
+        val w = AppWords.wiped
+        ok(w.heading == "Key 1 wiped from this phone" && w.what.contains("copy of key 1 was wiped after 10 wrong tries"), "the wiped words say what happened")
+        ok(w.what.contains("not lost") && w.what.contains("two of the three keys still exist"), "and that the money is not lost")
+        ok(w.next.contains("recovery kit") && w.next.contains("move to a new wallet") && w.next.contains("key 2"), "and the two ways on, as the design has them")
+        ok(SayCheck.problem(w) == null && SayCheck.problem(AppWords.wipeFailed("x")) == null, "the words of the wipe pass the words check")
+    }
+
+    private fun oa_65_the_lock_files_stay_out_of_backups() {
+        ok(AppFiles.SETUP_FILE == "setup.obks" && AppFiles.CEREMONY_FILE == "ceremony.obks" && TriesFile.NAME == "tries.obkt", "the three files have their names")
+        val manifest = source("AndroidManifest.xml")
+        ok(manifest.contains("android:allowBackup=\"false\""), "cloud backup is off in the manifest")
+        ok(manifest.contains("@xml/backup_rules") && manifest.contains("@xml/data_extraction_rules"), "both rule files are named")
+        val domains = listOf("root", "file", "database", "sharedpref", "external")
+        for (name in listOf("backup_rules", "data_extraction_rules")) {
+            val xml = source("res/xml/$name.xml")
+            val withoutComments = xml.replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), "")
+            val parts = if (name == "backup_rules") 1 else 2
+            for (d in domains) {
+                val n = Regex("<exclude domain=\"$d\" />").findAll(withoutComments).count()
+                ok(n == parts, "$name excludes $d $parts time(s)")
+            }
+            ok(!withoutComments.contains("<include"), "$name includes nothing")
+        }
+        val controller = source("src/android/Controller.kt")
+        ok(controller.contains("private val dir: File = act.noBackupFilesDir") && controller.contains("TriesFile(dir)"), "the tries file is in the no-backup folder")
+        for (name in listOf("src/android/Controller.kt", "src/android/Lock.kt", "src/android/Ceremony.kt")) {
+            ok(!Regex("[^a-zA-Z]filesDir").containsMatchIn(source(name)), "$name never uses the plain files folder")
+        }
+        ok(!lockSource().contains("setUserAuthenticationRequired") && !source("../android-common/src/android/Keystore.kt").contains("setUserAuthenticationRequired"), "the wrapping key is not bound to biometrics or the lock screen")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
@@ -1456,7 +1656,7 @@ object AppModelTest {
         ok(ids.size == ids.toSet().size, "one test for each number")
         if (rulesMd == null) return
         val rules = Regex("^- \\*\\*OA-(\\d\\d)\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
-        ok(rules == (1..rules.size).map { "%02d".format(it) }, "the rules are numbered from 01 without a gap: $rules")
+        ok(rules.first() == "01" && rules == rules.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")
         }

@@ -60,6 +60,7 @@ internal fun Controller.showHome(): Unit = withNode { n ->
     views.add(ui.button("Refund notes") { showRefundNotes() })
     views.add(ui.button("Notes") { showNotes() })
     views.add(ui.button("Settings") { showSettings() })
+    views.add(ui.button("Change the PIN") { showChangePin(null) })
     views.add(ui.button("About") { showAbout() })
     page(views)
     tick = {
