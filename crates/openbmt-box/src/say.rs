@@ -769,9 +769,9 @@ impl ConsoleAnswer {
             .detail(plain(&format!("{path}: {kind}"))),
             Self::BadArguments => stop(
                 "Wrong arguments",
-                "The Box needs a data folder and an address to listen on, and may take an invitation file.".into(),
+                "The Box needs a data folder and an address to listen on, and may take an invitation file and --no-console.".into(),
                 Who::BoxKeeper,
-                "Type openbmt-box, the data folder, the address and port, and if wanted --invitation-file and a file.",
+                "Type the data folder and the address; add --invitation-file and a file, or --no-console to run as a service.",
             ),
             Self::BadAddress(text) => stop(
                 "Address not understood",
