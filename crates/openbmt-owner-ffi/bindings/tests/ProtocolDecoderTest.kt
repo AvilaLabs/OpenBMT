@@ -137,6 +137,11 @@ object ProtocolDecoderTest {
         val bundle = decodeResponse(bundleFrame()).counterBundle()
         check(bundle.code.size == 3 && bundle.withBatch && bundle.words.heading == "Words")
         rejects("a bundle flag") { decodeResponse(bundleFrame(flag = 2)).counterBundle() }
+        // CR-132: the relay for counters is the frame's bytes, nothing else.
+        decodeResponse(header(0, Writer().bytes(byteArrayOf(9, 8)).toByteArray())).let { r ->
+            check(r.bytes().contentEquals(byteArrayOf(9, 8)))
+            r.end()
+        }
 
         val outbox = decodeResponse(outboxFrame()).let { r -> r.list { r.outboxRow() } }
         check(outbox.size == 1 && outbox[0].kind == OutboxKind.Batch && outbox[0].id == 8L)

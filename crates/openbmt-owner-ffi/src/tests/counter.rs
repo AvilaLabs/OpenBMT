@@ -8,14 +8,20 @@
 // wire's rows; the tests read them as they are.
 #![allow(clippy::result_large_err, clippy::type_complexity)]
 
+use std::net::SocketAddr;
+
 use bitcoin::Network;
 use openbmt_approver::{Approver, Choice};
+use openbmt_core::bundle::CounterBundle;
+use openbmt_core::identity::Identity;
 use openbmt_core::pairing::PairOffer;
+use openbmt_core::relay::{RelayHint, RelayRoute, SignedRelayHint};
 use openbmt_counter_node::{batch_policy, Ceremony, BATCH_MIN_COUNT};
 
 use super::kit::*;
 use super::screen::check_wire_words;
 use super::wire::{Rd, Words, W};
+use crate::{LinkConfig, RouteView};
 
 const OUTCOME_DELIVERED: u8 = 0;
 
@@ -484,4 +490,128 @@ fn as_60_a_response_for_another_session_is_refused() {
     take(&one, h1, T0 + 60, &response1).expect("taken");
     Rd::ok(&one.call(2, h1, &[])).pump();
     Rd::ok(&other.call(2, h2, &[])).pump();
+}
+
+/// Start a node whose link has this route, with the relay's key 0x41, and
+/// bring a counter to the point where its code can be shown.
+fn paired_with_link(route: Option<RouteView>) -> (Rig, u64, Scanned, Ceremony) {
+    let rig = Rig::new();
+    let mut config = start_config(rig.dir().to_str().expect("UTF-8"));
+    config.link = route.map(|route| LinkConfig {
+        route,
+        relay_key: id(0x41).device_id().to_bytes().to_vec(),
+        counters: vec![counter_bytes()],
+        heartbeat_every_secs: 0,
+        check_in_grace_secs: 0,
+    });
+    let handle = Rd::ok(&rig.call(1, 0, &W::new().start(&config).0)).u64();
+    let (ceremony, request, _) = begin(0x32, &offer_for(NET), T0);
+    let scanned = scan(&rig, handle, &request).expect("scanned");
+    confirm(&rig, handle, T0 + 20, scanned.pairing, 1_000).expect("confirmed");
+    ready(&rig, handle);
+    let session_request = build(&rig, handle, T0 + 30);
+    let (_, response) = approve(&mut key_app(), &session_request, T0 + 40);
+    take(&rig, handle, T0 + 50, &response).expect("taken");
+    (rig, handle, scanned, ceremony)
+}
+
+const ONION_NAME: &str = "a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad";
+
+fn hint(route: RelayRoute) -> RelayHint {
+    RelayHint::new(route, id(0x41).device_id().to_bytes()).expect("a hint")
+}
+
+#[test]
+fn cr_130_the_code_carries_the_relay_of_the_owner_s_link() {
+    let addr: SocketAddr = "192.168.1.20:48333".parse().unwrap();
+    let (rig, handle, scanned, mut ceremony) = paired_with_link(Some(RouteView::Direct {
+        addr: addr.to_string(),
+    }));
+    let (code, _) = bundle(&rig, handle, &scanned.counter).expect("a bundle");
+    // The code is of the version that holds a relay, and holds this one.
+    assert_eq!(code[4], 2);
+    let decoded = CounterBundle::from_bytes(&code).expect("a bundle");
+    assert_eq!(decoded.relay, Some(hint(RelayRoute::Direct(addr))));
+    // The counter keeps it with its pairing (CR-131).
+    ceremony.confirm(T0 + 60).expect("they match");
+    let record = ceremony
+        .finish(&code, &batch_policy(), T0 + 70)
+        .expect("the counter takes it");
+    assert_eq!(record.relay, Some(hint(RelayRoute::Direct(addr))));
+    Rd::ok(&rig.call(2, handle, &[])).pump();
+}
+
+#[test]
+fn cr_130_an_onion_link_gives_the_name_without_its_ending_and_the_owner_s_proxy_stays_out() {
+    let (rig, handle, scanned, _) = paired_with_link(Some(RouteView::Onion {
+        proxy: "127.0.0.1:9050".to_string(),
+        host: format!("{ONION_NAME}.onion"),
+        port: 48333,
+    }));
+    let (code, _) = bundle(&rig, handle, &scanned.counter).expect("a bundle");
+    let decoded = CounterBundle::from_bytes(&code).expect("a bundle");
+    assert_eq!(
+        decoded.relay,
+        Some(hint(RelayRoute::Onion {
+            name: ONION_NAME.to_string(),
+            port: 48333
+        }))
+    );
+    Rd::ok(&rig.call(2, handle, &[])).pump();
+}
+
+#[test]
+fn cr_130_a_link_with_no_relay_a_counter_can_reach_gives_the_old_code() {
+    // No link; and an onion name that is not a version 3 name.
+    let (rig, handle, scanned, _) = paired_with_link(None);
+    let (code, _) = bundle(&rig, handle, &scanned.counter).expect("a bundle");
+    assert_eq!(code[4], 1);
+    assert_eq!(CounterBundle::from_bytes(&code).unwrap().relay, None);
+    Rd::ok(&rig.call(2, handle, &[])).pump();
+
+    let (rig, handle, scanned, _) = paired_with_link(Some(RouteView::Onion {
+        proxy: "127.0.0.1:9050".to_string(),
+        host: "short.onion".to_string(),
+        port: 48333,
+    }));
+    let (code, _) = bundle(&rig, handle, &scanned.counter).expect("a bundle");
+    assert_eq!(code[4], 1);
+    // And there is nothing to sign for a counter paired before the Box.
+    let fault = Rd::error(&rig.call(95, handle, &[])).expect("a refusal");
+    assert_eq!((fault.status, fault.rule.as_str()), (3, "relay-none"));
+    words(&fault.words);
+    Rd::ok(&rig.call(2, handle, &[])).pump();
+}
+
+#[test]
+fn cr_132_the_relay_for_counters_is_signed_by_the_owner_and_the_counter_takes_it() {
+    let addr: SocketAddr = "192.168.1.20:48333".parse().unwrap();
+    let (rig, handle, _, _) = paired_with_link(Some(RouteView::Direct {
+        addr: addr.to_string(),
+    }));
+    let response = rig.call(95, handle, &[]);
+    let mut r = Rd::ok(&response);
+    let frame = r.bytes();
+    r.done();
+    let signed = SignedRelayHint::from_bytes(&frame).expect("a frame");
+    assert_eq!(signed.hint, hint(RelayRoute::Direct(addr)));
+    let owner = Identity::from_secret_bytes(&OWNER_SECRET).unwrap();
+    assert!(signed.verify(&owner.device_id()));
+    // It is the same frame on a second call, and it is the Key app's key
+    // that does not verify it.
+    assert_eq!(Rd::ok(&rig.call(95, handle, &[])).bytes(), frame);
+    assert!(!signed.verify(&id(0x22).device_id()));
+    // A counter that was paired before the shop had a Box, and so pinned
+    // this owner and holds no relay, takes it.
+    let (old, old_handle, scanned, mut ceremony) = paired_with_link(None);
+    let (code, _) = bundle(&old, old_handle, &scanned.counter).expect("a bundle");
+    ceremony.confirm(T0 + 60).expect("they match");
+    let mut record = ceremony
+        .finish(&code, &batch_policy(), T0 + 70)
+        .expect("the counter takes it");
+    assert!(record.relay.is_none());
+    record = record.with_relay(&signed).expect("taken");
+    assert_eq!(record.relay, Some(hint(RelayRoute::Direct(addr))));
+    Rd::ok(&old.call(2, old_handle, &[])).pump();
+    Rd::ok(&rig.call(2, handle, &[])).pump();
 }

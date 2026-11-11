@@ -1012,7 +1012,7 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
     /** CR-136: the link as the screen shows it, or null when the pairing has no relay. */
     fun linkState(): Link? {
         val r = call(OP_LINK_STATE, handle)
-        return r.option { linkView() }.also { r.end() }
+        return r.option { r.linkView() }.also { r.end() }
     }
 
     /** CR-107: ask the driver to dial the own node again ("Try again"). */

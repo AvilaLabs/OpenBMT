@@ -110,6 +110,7 @@ ops run on another; it waits for at most 250 ms.
  92 counters_waiting handle node  args () -> list<WaitingCounterView>
  93 counter_bundle   handle node  args list<u8> -> CounterBundleView
  94 counter_delivered handle node  args list<u8> -> ()
+ 95 counter_relay    handle node  args () -> list<u8>
 ```
 
 ## Types

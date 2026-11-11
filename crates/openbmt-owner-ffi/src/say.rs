@@ -317,6 +317,14 @@ const RULES: &[Entry] = &[
         "Build a new approval if payments still wait in the queue.",
     ),
     (
+        "relay-none",
+        Kind::State,
+        "No Box code to give",
+        "The link to the counters has no relay that a counter can reach, so there is no code to give a counter.",
+        Who::Owner,
+        "Set the Box's address in the owner app's settings, then start it again.",
+    ),
+    (
         "node-limit",
         Kind::State,
         "Owner node already open",

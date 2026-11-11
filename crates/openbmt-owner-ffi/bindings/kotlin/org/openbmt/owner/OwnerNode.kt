@@ -110,6 +110,7 @@ private const val OP_COUNTER_CONFIRM = 91
 private const val OP_COUNTERS_WAITING = 92
 private const val OP_COUNTER_BUNDLE = 93
 private const val OP_COUNTER_DELIVERED = 94
+private const val OP_COUNTER_RELAY = 95
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -1524,6 +1525,16 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     /** The counter shows that it is paired: what waited for it is marked delivered. */
     fun counterDelivered(counter: ByteArray) =
         callUnit(OP_COUNTER_DELIVERED, handle) { it.bytes(counter) }
+
+    /**
+     * CR-132: the owner's signed relay for counters, made from the link's settings, for a counter
+     * that was paired before the shop had a Box (the counter takes it with its own `takeRelay`).
+     * Refused, with its words, when the link has no relay a counter can reach.
+     */
+    fun counterRelay(): ByteArray {
+        val r = call(OP_COUNTER_RELAY, handle)
+        return r.bytes().also { r.end() }
+    }
 
     /** The link to the counters: the alerts and what each counter's copy holds. */
     fun linkState(): LinkState {

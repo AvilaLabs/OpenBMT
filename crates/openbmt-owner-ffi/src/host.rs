@@ -42,6 +42,7 @@ use openbmt_core::batch::{BatchBuilder, BatchPolicy, SignedBatch};
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pairing::PAIRING_WINDOW_SECS;
 use openbmt_core::records::DeviceList;
+use openbmt_core::relay::{RelayHint, RelayRoute, SignedRelayHint};
 use openbmt_core::settings::{Limit, SignedSettings};
 use openbmt_core::wallet::WalletDescription;
 use openbmt_counter_node::{DriverPort, BATCH_MIN_COUNT};
@@ -180,6 +181,9 @@ impl Clock for AppClock {
 struct State {
     node: OwnerNode<Port>,
     link: Option<OwnerLink>,
+    /// CR-133: what the counters are told of the relay, signed by the owner,
+    /// when the link has one the counters can use.
+    relay: Option<SignedRelayHint>,
     intake: RefundIntake,
     pos: OwnerPos,
     key1: SignerState,
@@ -482,6 +486,21 @@ fn route_of(route: &RouteView) -> Result<Route, AppError> {
     })
 }
 
+/// CR-133: the relay as a counter reaches it, from the owner's link
+/// settings. The owner's proxy is not part of it: a counter uses its own. A
+/// route that cannot be written as a hint (an address that is not an
+/// address, a name that is not a version 3 onion name) gives none.
+fn relay_hint(cfg: &LinkConfig) -> Option<RelayHint> {
+    let route = match &cfg.route {
+        RouteView::Direct { addr } => RelayRoute::Direct(addr.parse().ok()?),
+        RouteView::Onion { host, port, .. } => RelayRoute::Onion {
+            name: host.strip_suffix(".onion")?.to_string(),
+            port: u16::try_from(*port).ok()?,
+        },
+    };
+    RelayHint::new(route, <[u8; 32]>::try_from(cfg.relay_key.as_slice()).ok()?).ok()
+}
+
 /// The link to the counters, made as the regtest command of the owner node
 /// makes it: the courier on the data folder, a device list of the owner and
 /// the counters.
@@ -600,6 +619,8 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
             .map_err(|e| refused_by("start-key1", format!("registering Key 1: {e}")))?,
             Err(e) => return Err(store_by("owner-files", format!("{KEY1_FILE}: {e}"))),
         };
+        let owner_identity = Identity::from_secret_bytes(&secret)
+            .map_err(|e| refused_by("start-secret", format!("the owner secret: {e}")))?;
         let link = req
             .link
             .as_ref()
@@ -610,13 +631,19 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
                 start_link(cfg, &dir, identity, owner)
             })
             .transpose()?;
+        let relay = req
+            .link
+            .as_ref()
+            .and_then(relay_hint)
+            .map(|hint| SignedRelayHint::sign(hint, &owner_identity));
         let intake = RefundIntake::open(&dir).map_err(|e| store_by("start-intake", e))?;
-        Ok((key1, link, intake))
+        Ok((key1, link, relay, intake))
     })();
     match rest {
-        Ok((key1, link, intake)) => Ok(State {
+        Ok((key1, link, relay, intake)) => Ok(State {
             node,
             link,
+            relay,
             intake,
             pos: OwnerPos::open(&dir),
             key1,
@@ -1320,11 +1347,32 @@ impl Entry {
                 .owner()
                 .counter_bundle(&counter)
                 .map_err(|r| queue_error(&OwnerError::Refused(r)))?;
+            // CR-130: the bundle carries the relay of the owner's link.
+            let said = words(made.words());
+            let bundle = made
+                .bundle
+                .with_relay(st.relay.as_ref().map(|s| s.hint.clone()));
             Ok(CounterBundleView {
-                code: made.bundle.to_bytes(),
+                code: bundle.to_bytes(),
                 with_batch: made.parts.batch.is_some(),
-                words: words(made.words()),
+                words: said,
             })
+        })
+    }
+
+    /// CR-132: the owner's signed relay for counters, made from the link's
+    /// settings, for a counter that was paired before the shop had a Box.
+    pub(crate) fn counter_relay(&self) -> Result<Vec<u8>, AppError> {
+        self.run(None, move |st| {
+            st.relay
+                .as_ref()
+                .map(SignedRelayHint::to_bytes)
+                .ok_or_else(|| {
+                    wrong_state(
+                        "relay-none",
+                        "the link has no relay a counter can use, so there is no code to make",
+                    )
+                })
         })
     }
 

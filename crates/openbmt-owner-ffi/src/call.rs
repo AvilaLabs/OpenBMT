@@ -55,6 +55,9 @@
 //! - 90 to 94: adding a counter (`docs/SESSION-RULES.md`, AS-69 to AS-73):
 //!   read the counter's request, confirm the settings and first batch, the
 //!   counters waiting for their code, the code, and that the counter took it.
+//!   The code carries the relay of the owner's link (CR-130). 95 `counter_relay`
+//!   is the owner's signed relay for counters (CR-132), for a counter that
+//!   was paired before the shop had a Box.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -461,6 +464,7 @@ fn build_ops() -> Vec<Op> {
         op(94, "counter_delivered", Node, |c, counter: Vec<u8>| {
             c.entry()?.counter_delivered(counter)
         }),
+        op(95, "counter_relay", Node, |c, ()| c.entry()?.counter_relay()),
     ]
 }
 
