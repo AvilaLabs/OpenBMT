@@ -276,6 +276,12 @@ impl LndCredential {
         &self.endpoint
     }
 
+    /// The bytes of the macaroon, for the one place that keeps the credential
+    /// sealed. A secret: never in a log or a screen.
+    pub fn macaroon(&self) -> &[u8] {
+        &self.macaroon
+    }
+
     /// The value of the `Grpc-Metadata-macaroon` header: the macaroon in hex
     /// (LN-07).
     pub(crate) fn header_value(&self) -> String {
@@ -315,6 +321,12 @@ impl ClnCredential {
     /// Where the node is.
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
+    }
+
+    /// The rune, for the one place that keeps the credential sealed. A
+    /// secret: never in a log or a screen.
+    pub fn rune(&self) -> &str {
+        &self.rune
     }
 
     /// The value of the `Rune` header (LN-10).

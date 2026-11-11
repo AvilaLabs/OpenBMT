@@ -15,7 +15,9 @@
 //!    owner, through a relay (`docs/LINK-RULES.md` section 6).
 //! 5. [`notices`]: [`NoticeOutbox`], the paid notices the link sends to a
 //!    Box (`docs/BOX-RULES.md` section 4).
-//! 6. [`ownnode`]: the counter's own-node setting (CR-100 to CR-102), read
+//! 6. [`lightning`]: the driver of the shop's own Lightning node (CR-112 to
+//!    CR-116).
+//! 7. [`ownnode`]: the counter's own-node setting (CR-100 to CR-102), read
 //!    from the text a manager typed.
 //!
 //! The rules the node follows are `docs/COUNTER-RULES.md` and, for what the
@@ -40,6 +42,7 @@
 
 pub mod chainview;
 pub mod dirstore;
+pub mod lightning;
 pub mod link;
 pub mod node;
 pub mod notices;
@@ -52,6 +55,10 @@ mod tests;
 
 pub use chainview::ChainView;
 pub use dirstore::{DirStore, DirStoreError, Loaded, TornTail};
+pub use lightning::{
+    Lightning, LightningOff, LightningRecord, LightningStatus, LnEvent, LnRequest, LnTransport,
+    SaleLightning, SetupRefused, SetupStep, MAGIC_LIGHTNING_RECORD,
+};
 pub use link::{CounterLink, CounterLinkConfig, LinkState};
 pub use node::{
     DriverPort, HealthFn, HeartbeatNotTaken, HeartbeatTaken, Launch, Node, NodeConfig, StartError,

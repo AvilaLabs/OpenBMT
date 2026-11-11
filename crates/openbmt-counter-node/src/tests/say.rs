@@ -167,3 +167,25 @@ fn cr_91_a_lost_pairing_says_to_start_again_from_the_key_app() {
     assert!(w.next.contains("Start again from the Key app"));
     assert_eq!(check(&w), Ok(()));
 }
+
+#[test]
+fn sc_01_every_lightning_state_has_words_for_the_right_person() {
+    use crate::{LightningOff, LnTransport, SetupRefused};
+    let all = all_words();
+    let has = |name: String| all.iter().any(|(n, _)| *n == name);
+    for t in LnTransport::ALL {
+        assert!(has(format!("LnTransport::{}", t.name())), "{}", t.name());
+        assert_eq!(t.words().who, Who::Owner);
+        assert_eq!(t.sale_words().who, Who::Cashier);
+        assert_eq!(check(&t.sale_words()), Ok(()));
+    }
+    for off in LightningOff::ALL {
+        assert!(has(format!("LightningOff::{}", off.name())));
+        assert_eq!(off.words().who, Who::Owner);
+    }
+    for name in ["Ready", "Unavailable", "NotReached", "KeyRefused"] {
+        assert!(has(format!("Lightning::{name}")), "{name}");
+    }
+    assert!(has("SetupRefused::NotNamed".to_string()));
+    assert_eq!(SetupRefused::NotNamed.rule(), "CR-115");
+}

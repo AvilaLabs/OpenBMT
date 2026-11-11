@@ -87,7 +87,8 @@ pub(crate) fn unbase64(s: &str, alphabet: Alphabet) -> Option<Vec<u8>> {
 }
 
 /// Base64 with padding, for the replies of the tests.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
+#[allow(clippy::indexing_slicing)]
 pub(crate) fn base64(bytes: &[u8], alphabet: Alphabet) -> String {
     let table: &[u8; 64] = match alphabet {
         Alphabet::Standard => b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",

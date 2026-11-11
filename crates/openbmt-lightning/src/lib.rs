@@ -58,6 +58,11 @@ pub mod request;
 pub mod say;
 mod text;
 
+/// Recorded replies and an invoice writer for tests, here and in the crates
+/// that drive this one. Only with the `testing` feature.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
+
 #[cfg(test)]
 mod tests;
 

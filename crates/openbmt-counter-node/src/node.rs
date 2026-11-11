@@ -111,10 +111,11 @@ use openbmt_core::settings::Settings;
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
     Actor, Amount, BlockError, CancelRefused, CashRefund, CommandRefused, Counter, Currency, Facts,
-    HeartbeatRefused, HeartbeatView, JudgeError, LoadError, OpenFacts, OpenRefused, Opened,
-    Overridden, Pairing, Quote, Rate, RateSource, RefundRefused, RefundRequest, RefundView, Report,
-    RequoteRefused, Screen, SightingError, StoreFault, WithdrawRefused,
+    HeartbeatRefused, HeartbeatView, JudgeError, LightningPaid, LoadError, OpenFacts, OpenRefused,
+    Opened, Overridden, Pairing, Quote, Rate, RateSource, RefundRefused, RefundRequest, RefundView,
+    Report, RequoteRefused, Screen, SightingError, StoreFault, WithdrawRefused,
 };
+use openbmt_lightning::{CertPin, Credential, Reply};
 use openbmt_net_io::{
     AppEvent, Clock, DirLock, Driver, DriverConfig, EventReceiver, FileStorage, Handle, Key,
     OsRandomness, OwnNodeEvent, Storage, SystemClock,
@@ -126,6 +127,10 @@ use openbmt_watch::{
 
 use crate::chainview::ChainView;
 use crate::dirstore::{DirStore, DirStoreError};
+use crate::lightning::{
+    Lightning, LightningStatus, LnEvent, LnRequest, LnTransport, SaleLightning, SetupRefused,
+    SetupStep,
+};
 use crate::notices::NodeRecords;
 
 /// Most transactions the node keeps for later announcements.
@@ -306,6 +311,9 @@ pub struct NodeConfig {
     /// The health rules. [`check_health`] unless a check against a node with
     /// fewer peers than the rules ask for puts something else here.
     pub health: HealthFn,
+    /// The saved Lightning connection, as the app sealed it (CR-115), if
+    /// there is one. Not part of the settings and never sent anywhere.
+    pub lightning: Option<Vec<u8>>,
 }
 
 impl NodeConfig {
@@ -326,6 +334,7 @@ impl NodeConfig {
             driver,
             clock: Box::new(SystemClock),
             health: Box::new(check_health),
+            lightning: None,
         }
     }
 }
@@ -362,6 +371,10 @@ pub struct Node<P: DriverPort = Handle> {
     /// CR-82: a settle is wanted as soon as the minute allows: the owner's
     /// first mark of this run came, or the last call left sales to settle.
     settle_wanted: bool,
+    /// CR-112 to CR-116: the driver of the shop's own Lightning node.
+    ln: Lightning,
+    /// What a Lightning payment reported, for the next pump.
+    ln_reports: Vec<Report>,
     /// NR-79. Last, so that it is released after the driver has stopped.
     _lock: DirLock,
 }
@@ -395,6 +408,7 @@ impl<P: DriverPort> Node<P> {
             mut driver,
             clock,
             health,
+            lightning,
         } = config;
         // NR-79: before anything in the directory is read.
         let lock = DirLock::acquire(&dir).map_err(|e| StartError::Locked(e.to_string()))?;
@@ -459,6 +473,18 @@ impl<P: DriverPort> Node<P> {
         driver.watch_from = watch_from;
         let own_configured = driver.own_node.is_some();
         let started_at = clock.now();
+        let counter_id: [u8; 4] = counter
+            .device_id()
+            .to_bytes()
+            .first_chunk::<4>()
+            .copied()
+            .unwrap_or_default();
+        let ln = Lightning::new(
+            driver.network,
+            counter_id,
+            settings.lightning_node,
+            lightning.as_deref(),
+        );
 
         let port = spawn(Launch {
             driver,
@@ -492,8 +518,23 @@ impl<P: DriverPort> Node<P> {
             stopped: false,
             last_settle: None,
             settle_wanted: false,
+            ln,
+            ln_reports: Vec::new(),
             _lock: lock,
         };
+        // CR-112: a sale that was open at the last stop asks for an invoice
+        // again; Core Lightning answers with the invoice it made, if it did.
+        let live: Vec<(u32, u64)> = node
+            .known
+            .iter()
+            .filter_map(|i| node.counter.sale(*i))
+            .filter(|s| s.is_live())
+            .map(|s| (s.index(), s.needs_sats()))
+            .collect();
+        for (index, sats) in live {
+            node.ln.sale_opened(index, sats, started_at);
+        }
+        node.take_ln_notes();
         node.update_all_blocks();
         // WR-65: the sales are restored, so the own node is asked about
         // their unconfirmed payments.
@@ -620,6 +661,12 @@ impl<P: DriverPort> Node<P> {
         self.stopped
     }
 
+    fn take_ln_notes(&mut self) {
+        for line in self.ln.take_notes() {
+            self.note(line);
+        }
+    }
+
     fn note(&mut self, line: String) {
         if self.notes.len() >= NOTE_LOG {
             self.notes.pop_front();
@@ -660,6 +707,8 @@ impl<P: DriverPort> Node<P> {
             self.update_all_blocks();
         }
         self.settle_when_due();
+        reports.append(&mut self.ln_reports);
+        self.take_ln_notes();
         reports
     }
 
@@ -1071,6 +1120,8 @@ impl<P: DriverPort> Node<P> {
             .open(amount, currency, rate, source, facts, &mut self.store)?;
         self.known.insert(opened.index);
         self.port.watch_script(opened.script.clone());
+        self.ln
+            .sale_opened(opened.index, opened.needs_sats, self.clock.now());
         Ok(opened)
     }
 
@@ -1090,6 +1141,139 @@ impl<P: DriverPort> Node<P> {
             .judge_with_own_node(index, &facts, &own, &mut self.store)
     }
 
+    /// CR-113: what the screen of a sale shows of Lightning.
+    pub fn lightning_sale(&mut self, index: u32) -> SaleLightning {
+        let now = self.clock.now();
+        let live = self.counter.sale(index).is_some_and(|s| s.is_live());
+        if !live {
+            return SaleLightning::Off;
+        }
+        let view = self.ln.sale_view(index, now);
+        self.take_ln_notes();
+        view
+    }
+
+    /// CR-116: the Lightning line of the status, when a credential is saved.
+    pub fn lightning_status(&self) -> Option<LightningStatus> {
+        self.ln.status()
+    }
+
+    /// Whether sales get a Lightning code now.
+    pub fn lightning_on(&self) -> bool {
+        self.ln.is_on()
+    }
+
+    /// CR-115: remove the Lightning connection at once.
+    pub fn lightning_remove(&mut self) {
+        self.ln.remove();
+    }
+
+    /// CR-115: begin the test of a connection. Nothing is tested or kept if
+    /// the signed settings name no node.
+    pub fn lightning_setup(&mut self, credential: Credential) -> Result<LnRequest, SetupRefused> {
+        let now = self.clock.now();
+        self.ln.setup_begin(credential, now)
+    }
+
+    /// CR-112: the next request for the node to send, if one is due.
+    pub fn lightning_next(&mut self) -> Option<LnRequest> {
+        let now = self.clock.now();
+        let counter = &self.counter;
+        let request = self
+            .ln
+            .next(now, |i| counter.sale(i).is_some_and(|s| s.is_live()));
+        self.take_ln_notes();
+        request
+    }
+
+    /// CR-114: the certificate the node must show for this request.
+    pub fn lightning_pin(&self, id: u64) -> Option<&CertPin> {
+        self.ln.pin_for(id)
+    }
+
+    /// CR-115: the answer to a setup request.
+    pub fn lightning_setup_answer(
+        &mut self,
+        id: u64,
+        reply: &Reply,
+    ) -> Result<SetupStep, SetupRefused> {
+        let now = self.clock.now();
+        let step = self.ln.setup_answer(id, reply)?;
+        if let SetupStep::Done(_) = step {
+            // The credential is in use: the open sales ask for invoices.
+            let live: Vec<(u32, u64)> = self
+                .known
+                .iter()
+                .filter_map(|i| self.counter.sale(*i))
+                .filter(|s| s.is_live())
+                .map(|s| (s.index(), s.needs_sats()))
+                .collect();
+            for (index, sats) in live {
+                self.ln.sale_opened(index, sats, now);
+            }
+        }
+        Ok(step)
+    }
+
+    /// CR-115: a setup request got no answer.
+    pub fn lightning_setup_failed(&mut self, id: u64, why: LnTransport) -> SetupRefused {
+        self.ln.setup_failed(id, why)
+    }
+
+    /// CR-112: the answer to the request the node handed out. A payment
+    /// the node reports is judged by the counter (CR-109), and what that
+    /// reports comes back with the next pump.
+    pub fn lightning_reply(&mut self, id: u64, reply: &Reply) {
+        if let LnEvent::Paid { index, facts } = self.ln.reply(id, reply) {
+            self.lightning_paid(index, facts);
+        }
+        self.take_ln_notes();
+    }
+
+    /// CR-114: the request got no answer.
+    pub fn lightning_failed(&mut self, id: u64, why: LnTransport) {
+        let now = self.clock.now();
+        self.ln.failed(id, why, now);
+        self.take_ln_notes();
+    }
+
+    fn lightning_paid(&mut self, index: u32, facts: openbmt_lightning::PaidFacts) {
+        let now = self.clock.now();
+        let heartbeat = self.counter.heartbeat_for_policy(now);
+        let judged = Facts {
+            chain: &self.view,
+            health: self.health.unwrap_or(NO_ANSWER_YET),
+            heartbeat,
+            remote_order: false,
+            now,
+        };
+        let paid = LightningPaid {
+            payment_hash: facts.payment_hash,
+            amount_msat: facts.amount_received_msat,
+            settled_at: facts.settled_at,
+        };
+        match self
+            .counter
+            .lightning_paid(index, paid, &judged, &mut self.store)
+        {
+            Ok(screen) => {
+                self.ln_reports.extend(screen.reports);
+                self.ln.paid(index);
+            }
+            Err(e) => {
+                self.note(format!(
+                    "sale {index}: a Lightning payment was not taken: {e}"
+                ));
+                // A payment the counter will not take now (the sale is over,
+                // or was paid another way) is not asked about again; a
+                // failure to write is, because the node still has it.
+                if !matches!(e, openbmt_counter::LightningRefused::Store(_)) {
+                    self.ln.paid(index);
+                }
+            }
+        }
+    }
+
     /// Give a sale a new quote (CR-05).
     pub fn requote(
         &mut self,
@@ -1098,14 +1282,21 @@ impl<P: DriverPort> Node<P> {
         source: &RateSource,
     ) -> Result<Quote, RequoteRefused<DirStoreError>> {
         let now = self.clock.now();
-        self.counter
-            .requote(index, rate, source, now, &self.view, &mut self.store)
+        let quote = self
+            .counter
+            .requote(index, rate, source, now, &self.view, &mut self.store)?;
+        // CR-112: a new quote asks for a new invoice.
+        let sats = self.counter.sale(index).map_or(0, |s| s.needs_sats());
+        self.ln.sale_requoted(index, sats, now);
+        Ok(quote)
     }
 
     /// The cashier cancels a sale with nothing received (CR-07).
     pub fn cancel(&mut self, index: u32) -> Result<(), CancelRefused<DirStoreError>> {
         let now = self.clock.now();
-        self.counter.cancel(index, now, &mut self.store)
+        self.counter.cancel(index, now, &mut self.store)?;
+        self.ln.sale_closed(index);
+        Ok(())
     }
 
     /// A person accepts a sale (CR-20 to CR-22). The caller has checked the

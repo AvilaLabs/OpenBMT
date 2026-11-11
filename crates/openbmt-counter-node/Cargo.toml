@@ -18,3 +18,9 @@ openbmt-courier = { path = "../openbmt-courier" }
 openbmt-link = { path = "../openbmt-link" }
 # For the paid notices a counter sends to a Box (BX-40).
 openbmt-pos = { path = "../openbmt-pos" }
+# The shop's own Lightning node (CR-112 to CR-116).
+openbmt-lightning = { path = "../openbmt-lightning" }
+
+[dev-dependencies]
+# The recorded replies and the invoice writer of the tests.
+openbmt-lightning = { path = "../openbmt-lightning", features = ["testing"] }

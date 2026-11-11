@@ -409,6 +409,7 @@ dependencies = [
  "openbmt-core",
  "openbmt-counter",
  "openbmt-courier",
+ "openbmt-lightning",
  "openbmt-link",
  "openbmt-net-io",
  "openbmt-pos",

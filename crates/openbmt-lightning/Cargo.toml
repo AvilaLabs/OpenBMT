@@ -17,3 +17,8 @@ publish.workspace = true
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std", "secp-recovery"] }
 openbmt-core = { path = "../openbmt-core" }
 openbmt-json = { path = "../openbmt-json" }
+
+# Recorded replies and an invoice writer, for the tests of the crates that drive
+# this one. Never on in a build of the app.
+[features]
+testing = []

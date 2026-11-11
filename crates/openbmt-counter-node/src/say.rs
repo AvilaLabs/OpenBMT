@@ -385,6 +385,8 @@ pub fn all_words() -> Vec<(String, Words)> {
             StartError::Dir(e).words(),
         ));
     }
+    // CR-112 to CR-116: the words of the Lightning driver.
+    all.extend(crate::lightning::all_words());
     for (name, e) in crate::ownnode::every_setting_refusal() {
         all.push((format!("OwnNodeSettingRefused::{name}"), e.words()));
     }
