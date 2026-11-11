@@ -1784,6 +1784,62 @@ object AppModelTest {
         ok(md.contains("| boxPaired |") && md.contains("| boxForgotten |"), "the list of the app's words has them")
     }
 
+    // ---- a hardware signer as key 2 (OA-70 to OA-74) ------------------------------------------------------------
+
+    private fun registrationOf(textFits: Boolean, descriptorFits: Boolean) = org.openbmt.owner.Registration(
+        "Corner Cafe", "Name: Corner Cafe\n", "wsh(sortedmulti(2,a,b,c))#aaaaaaaa", "wsh(sortedmulti(2,a,b,c))#bbbbbbbb",
+        "wsh(sortedmulti(2,a,b,c))#cccccccc", ByteArray(4), "bc1qfirst", textFits, descriptorFits,
+    )
+
+    private fun oa_70_the_person_picks_how_a_payment_reaches_the_signer() {
+        val t = HardwareModel.transports
+        ok(t.map { it.transport } == listOf(Transport.Ur, Transport.Bbqr, Transport.File), "three transports, in order")
+        ok(t.all { it.examples.startsWith("For example ") && it.examples.endsWith(".") }, "each names devices as examples")
+        ok(t[0].examples.contains("Keystone") && t[1].examples.contains("Coldcard Q") && t[2].examples.contains("microSD"), "the examples are devices that use it")
+        ok(t.map { it.label }.toSet().size == 3, "the labels differ")
+        ok(HardwareModel.UR_PSBT == "crypto-psbt" && HardwareModel.BBQR_PSBT == 'P' && HardwareModel.BBQR_TRANSACTION == 'T', "the types of the codes")
+        ok(HardwareModel.BBQR_PART_CHARS in 16..4296 && HardwareModel.UR_FRAGMENT_BYTES in 1..0xffff, "the sizes are in the library's range")
+        ok(SayCheck.problem(HardwareWords.chooseTransport) == null && HardwareWords.chooseTransport.who == Who.OWNER, "the words say who picks")
+    }
+
+    private fun oa_71_the_wallet_is_shown_to_the_signer_in_the_ways_it_reads() {
+        val fits = registrationOf(true, true)
+        val long = registrationOf(false, false)
+        ok(HardwareModel.textWays(fits) == listOf(RegistrationWay.PlainCode, RegistrationWay.UrBytes, RegistrationWay.BbqrText, RegistrationWay.TextFile), "a text that fits is offered as one code first")
+        ok(HardwareModel.textWays(long) == listOf(RegistrationWay.UrBytes, RegistrationWay.BbqrText, RegistrationWay.TextFile), "a long text has no plain code")
+        ok(HardwareModel.descriptorWays(fits) == listOf(RegistrationWay.DescriptorCode, RegistrationWay.CryptoOutput, RegistrationWay.DescriptorFile), "the descriptor as a code, a crypto-output and a file")
+        ok(HardwareModel.descriptorWays(long) == listOf(RegistrationWay.CryptoOutput, RegistrationWay.DescriptorFile), "a long descriptor has no plain code")
+        ok(HardwareModel.textFileName(fits) == "Corner_Cafe.txt" && HardwareModel.descriptorFileName(fits) == "Corner_Cafe.descriptor.txt", "the file names")
+        ok(SayCheck.problem(HardwareWords.registerIntro) == null, "the introduction passes the checks")
+    }
+
+    private fun oa_72_the_first_address_check_is_done_or_skipped_with_the_time() {
+        val at = { t: Long -> "day $t" }
+        ok(HardwareModel.firstAddressLine(null, at).contains("has not been checked"), "not done yet")
+        ok(HardwareModel.firstAddressLine(org.openbmt.owner.FirstAddress(true, 5), at) == "The first address was checked on the signer on day 5.", "checked, with the time")
+        ok(HardwareModel.firstAddressLine(org.openbmt.owner.FirstAddress(false, 6), at).contains("Skipped on day 6."), "skipped, with the time")
+        ok(SayCheck.problem(HardwareWords.firstAddressCompare) == null && HardwareWords.firstAddressCompare.what.contains("address explorer"), "the compare words name the explorer")
+        ok(HardwareWords.firstAddressSkipped.tone == Tones.INFO && HardwareWords.firstAddressChecked.tone == Tones.GOOD, "skipped is not good, checked is")
+    }
+
+    private fun oa_73_the_owner_compares_every_line_with_the_signers_screen() {
+        val lines = HardwareModel.compareLines(listOf("bcrt1qpay" to 40_000L), "bcrt1qchange" to 150_000L, 473)
+        ok(lines.size == 3 && lines[0].startsWith("Pay ") && lines[0].endsWith(" to bcrt1qpay"), "each payment with its address: $lines")
+        ok(lines[1].startsWith("Change ") && lines[1].endsWith(" at bcrt1qchange"), "the change back to the wallet")
+        ok(lines[2].startsWith("Fee "), "the fee")
+        ok(HardwareModel.compareLines(listOf("a" to 1L), null, 2).size == 2, "no change, no change line")
+        ok(HardwareWords.signerReview.what.contains("second check") && HardwareWords.signerReview.next.contains("only if they all match"), "the words say the signer is the second check")
+        ok(SayCheck.problem(HardwareWords.signerReview) == null, "the words pass the checks")
+    }
+
+    private fun oa_74_a_refused_step_changes_nothing_and_a_missing_part_is_said() {
+        ok(SayCheck.problem(HardwareWords.partsMissing) == null && HardwareWords.partsMissing.what.contains("any order"), "a missing part is said, and the order is free")
+        ok(SayCheck.problem(HardwareWords.returnedNeeded) == null, "what to bring back is said")
+        ok(HardwareWords.all().all { SayCheck.problem(it.second) == null }, "every words of the hardware steps pass the checks")
+        ok(HardwareWords.all().map { it.first }.toSet().size == HardwareWords.all().size, "the names differ")
+        ok(AppWords.all().map { it.first }.containsAll(HardwareWords.all().map { it.first }), "they are in the list that is checked and written")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
@@ -1804,8 +1860,9 @@ object AppModelTest {
         if (rulesMd == null) return
         val rules = Regex("^- \\*\\*OA-(\\d\\d)\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules == rules.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
-        // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-89 for more.
-        val numbered = (1..35) + (40..48) + (60..65) + (90..90)
+        // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-89 for more.
+        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (90..90)
+
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")

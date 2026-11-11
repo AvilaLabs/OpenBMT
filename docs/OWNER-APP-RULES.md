@@ -597,3 +597,46 @@ and the 60-second rule are the shared `LockModel.kt` of
   or the camera is open, while the app is out of view, or while a key ceremony
   is in progress, whose screens are not drawn from state. What the app does on
   leaving and coming back is decided by OA-62, as before.
+## 12. A hardware signer as key 2
+
+When key 2 is a hardware signer (`Holder::OtherSigner` of the ceremony), the
+payments of the wallet (refunds, cash-outs, speed-ups) do not go to the Key
+app: the phone reviews and signs them with key 1 and hands them to the
+signer, whose screen is the second review. Settings, batches and pairings
+still go to the Key app. The library does all of it (`docs/SESSION-RULES.md`,
+AS-90 to AS-99, and the ops 120 to 126 of the node's call); the app's part
+is the screens and the transports, which are the rules of this section.
+Status: the model of these rules (`HardwareModel`, `HardwareWords`) is
+built and tested; the screens, the document picker and the scanner that
+use it are not wired into the activities yet.
+
+- **OA-70.** The person picks how a payment reaches the signer, from a
+  list that names animated codes of a UR (`crypto-psbt`, in fragments of at
+  most 200 bytes), animated codes of a BBQr (type P, in parts of at most 400
+  characters) and a file (`<name>.psbt`, made with `ACTION_CREATE_DOCUMENT`
+  and opened with `ACTION_OPEN_DOCUMENT`), each with devices that use it
+  as examples. No choice is made for them. What comes back is read the same
+  way, from a UR (`crypto-psbt` or `psbt`), a BBQr (type P or T, in any
+  order) or a file, and is given to the library as bytes, which accepts a
+  binary, base64 or hexadecimal PSBT or a finished transaction (AS-93).
+- **OA-71.** The wallet is shown to the signer right after the ceremony
+  and from the wallet screen ("Register the wallet on your signer"): the
+  Coldcard multisig text as one plain-text code when the library says it
+  fits, else as animated `ur:bytes`, BBQr type U or a `<name>.txt` file;
+  and the descriptor (the form with `/0/*`, which is also the form of the
+  UR) as one plain-text code when it fits, as `ur:crypto-output` or as a
+  file. The person picks the way.
+- **OA-72.** After the registration the screen asks the person to compare
+  the first receive address with the signer's address explorer. Checked or
+  skipped is stored with the time (the record of AS-99) and the wallet
+  screen shows which, and when. A skipped check stays visible until it is
+  done.
+- **OA-73.** Before a payment is handed to the signer the screen lists, in
+  the library's words, what the signer will show and what to compare: each
+  address and amount, the change back to the wallet and the fee. The words
+  say that approving on the signer is the second review, and that the
+  payment must not be approved there unless every line matches.
+- **OA-74.** A step that was refused by the library shows the library's own
+  words (different payment came back; this signer did not sign; the file is
+  not readable) and nothing else changes. A code that is not complete says
+  that a part is missing and keeps reading, in any order.
