@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use bitcoin::absolute::LockTime;
@@ -20,7 +20,7 @@ use openbmt_core::batch::{AddressBatch, BatchPolicy, PinnedRoots, SignedBatch};
 use openbmt_core::identity::Identity;
 use openbmt_core::settings::Settings;
 use openbmt_counter::{Amount, Currency, Pairing, Rate, RateSource};
-use openbmt_net_io::{AppEvent, Clock, DriverConfig, EventReceiver};
+use openbmt_net_io::{AppEvent, Clock, DriverConfig, EventReceiver, OwnNode, OwnNodeEvent};
 use openbmt_watch::{HeaderStore, Health, PeerAddr};
 
 use crate::{DriverPort, Launch, Node, NodeConfig};
@@ -303,11 +303,16 @@ pub struct Calls {
     pub watched: Vec<ScriptBuf>,
     pub all_blocks: Vec<bool>,
     pub shutdown: bool,
+    /// The transactions the node asked the own node about, in order.
+    pub asked: Vec<Txid>,
+    /// How many times the node asked to dial the own node again.
+    pub retried: u32,
 }
 
 /// A driver port whose events the test sends.
 pub struct FakePort {
     rx: EventReceiver,
+    own_rx: Receiver<OwnNodeEvent>,
     calls: Arc<Mutex<Calls>>,
 }
 
@@ -327,6 +332,18 @@ impl DriverPort for FakePort {
     fn shutdown(&mut self) {
         self.calls.lock().unwrap().shutdown = true;
     }
+
+    fn own_node_events(&self) -> Option<&Receiver<OwnNodeEvent>> {
+        Some(&self.own_rx)
+    }
+
+    fn ask_own_node(&self, txid: Txid) {
+        self.calls.lock().unwrap().asked.push(txid);
+    }
+
+    fn retry_own_node(&self) {
+        self.calls.lock().unwrap().retried += 1;
+    }
 }
 
 /// A clock the test sets.
@@ -343,6 +360,7 @@ impl Clock for TestClock {
 pub struct Rig {
     pub node: Node<FakePort>,
     pub events: Sender<AppEvent>,
+    pub own: Sender<OwnNodeEvent>,
     pub calls: Arc<Mutex<Calls>>,
     pub time: Arc<AtomicU64>,
     pub launch: Launch,
@@ -353,6 +371,14 @@ impl Rig {
     pub fn feed(&mut self, events: Vec<AppEvent>) -> Vec<openbmt_counter::Report> {
         for event in events {
             self.events.send(event).unwrap();
+        }
+        self.node.pump(std::time::Duration::ZERO)
+    }
+
+    /// Send own-node events and let the node take them.
+    pub fn feed_own(&mut self, events: Vec<OwnNodeEvent>) -> Vec<openbmt_counter::Report> {
+        for event in events {
+            self.own.send(event).unwrap();
         }
         self.node.pump(std::time::Duration::ZERO)
     }
@@ -398,6 +424,7 @@ pub fn start_at(dir: &Path, time: Arc<AtomicU64>) -> Rig {
 /// the configuration's clock reads.
 pub fn start_with(config: NodeConfig, time: Arc<AtomicU64>) -> Rig {
     let (events, rx) = channel();
+    let (own, own_rx) = channel();
     let calls = Arc::new(Mutex::new(Calls::default()));
     let seen: Arc<Mutex<Option<Launch>>> = Arc::new(Mutex::new(None));
     let port_calls = calls.clone();
@@ -406,6 +433,7 @@ pub fn start_with(config: NodeConfig, time: Arc<AtomicU64>) -> Rig {
         *seen_launch.lock().unwrap() = Some(launch);
         Ok(FakePort {
             rx: rx.into(),
+            own_rx,
             calls: port_calls,
         })
     })
@@ -414,8 +442,49 @@ pub fn start_with(config: NodeConfig, time: Arc<AtomicU64>) -> Rig {
     Rig {
         node,
         events,
+        own,
         calls,
         time,
         launch,
     }
+}
+
+/// A Tor v3 name (the key is 32 bytes of 7).
+pub const OWN_NAME: &str = "a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad.onion";
+
+/// The own node of the tests, at the usual regtest port.
+pub fn own_node() -> OwnNode {
+    OwnNode::onion(OWN_NAME, 18_444).unwrap()
+}
+
+/// A node configuration as [`config`], with an own node and a Tor proxy.
+pub fn config_with_own_node(dir: &Path, time: &Arc<AtomicU64>) -> NodeConfig {
+    let mut config = config(dir, time);
+    config.driver.proxy = Some("127.0.0.1:9050".parse().unwrap());
+    config.driver.own_node = Some(own_node());
+    config
+}
+
+/// Start a node with an own node on a fake driver over `dir`.
+pub fn start_with_own_node(dir: &Path) -> Rig {
+    let time = Arc::new(AtomicU64::new(T0));
+    start_with(config_with_own_node(dir, &time), time)
+}
+
+/// An own-node state: connected, at this height, heard at `heard`.
+pub fn own_connected(height: u32, heard: u64) -> OwnNodeEvent {
+    OwnNodeEvent::State(openbmt_watch::OwnNodeInput {
+        link: openbmt_watch::OwnNodeLink::Connected,
+        best_height: Some(height),
+        last_heard: Some(heard),
+    })
+}
+
+/// An own-node state: not connected since `since`.
+pub fn own_down(since: u64) -> OwnNodeEvent {
+    OwnNodeEvent::State(openbmt_watch::OwnNodeInput {
+        link: openbmt_watch::OwnNodeLink::Down { since },
+        best_height: None,
+        last_heard: None,
+    })
 }

@@ -24,6 +24,14 @@
 //!   looked at, and is the `watch_from` of the next start.
 //! - `Note`: kept in a bounded log.
 //!
+//! - Own-node events (CR-103): `Has(txid)` is given to the sales that know
+//!   the transaction (WR-61); a `State` is kept, the own node's health line
+//!   is worked out again with the tracker (WR-63) and the sales that have a
+//!   payment are judged again when it changed. The node asks the own node
+//!   about the unconfirmed payments of live sales when it starts (the sales
+//!   are restored then), when the own node connects and after each sighting
+//!   that a sale took (WR-65).
+//!
 //! After the events, every live sale that an event touched is judged, and
 //! what the judging reports is returned by [`Node::pump`]. Reports from the
 //! `judge`, `override_sale` and the other calls of the node come back in
@@ -89,7 +97,7 @@
 use std::collections::{BTreeSet, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use bitcoin::consensus::deserialize;
@@ -109,10 +117,11 @@ use openbmt_counter::{
 };
 use openbmt_net_io::{
     AppEvent, Clock, DirLock, Driver, DriverConfig, EventReceiver, FileStorage, Handle, Key,
-    OsRandomness, Storage, SystemClock,
+    OsRandomness, OwnNodeEvent, Storage, SystemClock,
 };
 use openbmt_watch::{
-    check_health, HeaderChain, HeaderStore, Health, HealthInput, PeerAddr, Source, WellFormedBlock,
+    check_health, HeaderChain, HeaderStore, Health, HealthInput, OwnNodeHealth, OwnNodeInput,
+    OwnNodeLink, OwnNodeTracker, PeerAddr, Source, WellFormedBlock,
 };
 
 use crate::chainview::ChainView;
@@ -130,6 +139,11 @@ pub const SETTLE_MIN_GAP_SECS: u64 = 60;
 /// Most events one call of [`Node::pump`] takes, so that a driver that never
 /// stops sending cannot keep the call from returning.
 pub const MAX_EVENTS_PER_PUMP: usize = 4096;
+/// Most own-node events one call of [`Node::pump`] takes.
+pub const MAX_OWN_EVENTS_PER_PUMP: usize = 512;
+/// CR-103: most transactions the node asks the own node about in one go
+/// (the driver remembers 256, NR-101).
+pub const MAX_OWN_ASKS: usize = 256;
 
 /// The answer before the first `Peers` event: the check is not working.
 const NO_ANSWER_YET: Health = Health {
@@ -225,6 +239,15 @@ pub trait DriverPort {
     fn set_all_blocks(&self, on: bool);
     /// Stop.
     fn shutdown(&mut self);
+    /// NR-103: what the own node says, on its own channel. `None` for a
+    /// driver that has no such channel.
+    fn own_node_events(&self) -> Option<&Receiver<OwnNodeEvent>> {
+        None
+    }
+    /// NR-101: ask the own node whether it holds this transaction.
+    fn ask_own_node(&self, _txid: Txid) {}
+    /// NR-100: dial the own node again after it broke a rule.
+    fn retry_own_node(&self) {}
 }
 
 impl DriverPort for Handle {
@@ -242,6 +265,18 @@ impl DriverPort for Handle {
 
     fn shutdown(&mut self) {
         Handle::shutdown(self);
+    }
+
+    fn own_node_events(&self) -> Option<&Receiver<OwnNodeEvent>> {
+        Some(Handle::own_node_events(self))
+    }
+
+    fn ask_own_node(&self, txid: Txid) {
+        Handle::ask_own_node(self, txid);
+    }
+
+    fn retry_own_node(&self) {
+        Handle::retry_own_node(self);
     }
 }
 
@@ -305,6 +340,15 @@ pub struct Node<P: DriverPort = Handle> {
     health_fn: HealthFn,
     health: Option<Health>,
     settings: Settings,
+    /// CR-103: the driver was started with an own node.
+    own_configured: bool,
+    /// What the driver last said about the own node (NR-102), or, before it
+    /// has said anything, that there has been no connection since the start.
+    own_input: Option<OwnNodeInput>,
+    /// WR-63: since when the own node has been one block behind.
+    own_tracker: OwnNodeTracker,
+    /// The health line of the own node as last worked out.
+    own_health: OwnNodeHealth,
     /// The sales the node knows of, live or not.
     known: BTreeSet<u32>,
     cache: VecDeque<(Txid, Vec<u8>)>,
@@ -413,6 +457,8 @@ impl<P: DriverPort> Node<P> {
             store.put_checked(watch_from).map_err(StartError::Checked)?;
         }
         driver.watch_from = watch_from;
+        let own_configured = driver.own_node.is_some();
+        let started_at = clock.now();
 
         let port = spawn(Launch {
             driver,
@@ -429,6 +475,14 @@ impl<P: DriverPort> Node<P> {
             health_fn: health,
             health: None,
             settings,
+            own_configured,
+            own_input: own_configured.then_some(OwnNodeInput {
+                link: OwnNodeLink::Down { since: started_at },
+                best_height: None,
+                last_heard: None,
+            }),
+            own_tracker: OwnNodeTracker::new(),
+            own_health: OwnNodeHealth::not_configured(),
             known,
             cache: VecDeque::new(),
             notes,
@@ -441,6 +495,10 @@ impl<P: DriverPort> Node<P> {
             _lock: lock,
         };
         node.update_all_blocks();
+        // WR-65: the sales are restored, so the own node is asked about
+        // their unconfirmed payments.
+        node.own_health_now();
+        node.ask_own_node_about_sales();
         Ok(node)
     }
 
@@ -500,6 +558,25 @@ impl<P: DriverPort> Node<P> {
         self.health
     }
 
+    /// CR-107: the health line of the own node, worked out now (WR-63).
+    /// `OwnNodeHealth::not_configured()` when the driver has no own node.
+    pub fn own_node_health(&mut self) -> OwnNodeHealth {
+        self.own_health_now()
+    }
+
+    /// CR-103: whether the driver was started with an own node.
+    pub fn own_node_configured(&self) -> bool {
+        self.own_configured
+    }
+
+    /// CR-107: dial the own node again after it was dropped for breaking a
+    /// rule of the peer protocol (NR-100). Without effect when it was not.
+    pub fn retry_own_node(&self) {
+        if self.own_configured {
+            self.port.retry_own_node();
+        }
+    }
+
     /// The height up to which every block has been checked and written down.
     pub fn checked_height(&self) -> u32 {
         self.checked
@@ -557,6 +634,7 @@ impl<P: DriverPort> Node<P> {
             };
             self.apply(event, &mut touched, &mut reports);
         }
+        self.take_own_events(&mut touched);
         // Whether a block must be downloaded in full depends on the sales'
         // payments and the chain, and those change only with an event.
         let changed = !touched.is_empty();
@@ -680,6 +758,7 @@ impl<P: DriverPort> Node<P> {
             AppEvent::Sighting { tx, from } => {
                 if self.offer(&tx, &from, touched, reports) {
                     self.remember(&tx);
+                    self.ask_own_node_about(&tx);
                 }
             }
             AppEvent::AlsoAnnounced { txid, from } => {
@@ -700,6 +779,95 @@ impl<P: DriverPort> Node<P> {
             // The counter never broadcasts (NR-55), and never asks for a
             // block by its hash (NR-47).
             AppEvent::TxRelayed { .. } | AppEvent::TxState { .. } | AppEvent::FeeBlock { .. } => {}
+        }
+    }
+
+    // CR-103: the own node.
+
+    /// WR-63: the own node's health line now, with the counter's tip and
+    /// the node's clock.
+    fn own_health_now(&mut self) -> OwnNodeHealth {
+        if !self.own_configured {
+            return OwnNodeHealth::not_configured();
+        }
+        let now = self.clock.now();
+        let tip = self.view.tip_height();
+        let health = self.own_tracker.check(self.own_input.as_ref(), tip, now);
+        self.own_health = health;
+        health
+    }
+
+    fn take_own_events(&mut self, touched: &mut BTreeSet<u32>) {
+        let mut events = Vec::new();
+        if let Some(rx) = self.port.own_node_events() {
+            while events.len() < MAX_OWN_EVENTS_PER_PUMP {
+                match rx.try_recv() {
+                    Ok(event) => events.push(event),
+                    Err(_) => break,
+                }
+            }
+        }
+        for event in events {
+            match event {
+                // WR-61: a report for a transaction no sale knows records
+                // nothing; the node is asked again after the light client's
+                // sighting.
+                OwnNodeEvent::Has(txid) => touched.extend(self.counter.own_node_saw(txid)),
+                OwnNodeEvent::State(input) => self.own_state(input, touched),
+            }
+        }
+    }
+
+    fn own_state(&mut self, input: OwnNodeInput, touched: &mut BTreeSet<u32>) {
+        let was_connected = self
+            .own_input
+            .is_some_and(|i| i.link == OwnNodeLink::Connected);
+        let before = self.own_health;
+        self.own_input = Some(input);
+        let after = self.own_health_now();
+        if input.link == OwnNodeLink::Connected && !was_connected {
+            self.ask_own_node_about_sales();
+        }
+        if before.usable != after.usable || before.problem != after.problem {
+            touched.extend(self.sales_with_payments());
+        }
+    }
+
+    /// WR-65: ask the own node about every unconfirmed payment of the live
+    /// sales, at most [`MAX_OWN_ASKS`], the newest sales first.
+    fn ask_own_node_about_sales(&mut self) {
+        if !self.own_configured {
+            return;
+        }
+        let depth = u32::from(self.settings.min_confirmations).max(1);
+        let now = self.clock.now();
+        let mut asked = 0;
+        for index in self.known.iter().rev() {
+            let Some(sale) = self.counter.sale(*index).filter(|s| s.is_live()) else {
+                continue;
+            };
+            let mut watch = sale.watch().clone();
+            if watch.status(&self.view, now).min_confirmations >= depth {
+                continue;
+            }
+            for tx in sale.watch().transactions() {
+                if asked >= MAX_OWN_ASKS {
+                    return;
+                }
+                self.port.ask_own_node(tx.compute_txid());
+                asked += 1;
+            }
+        }
+    }
+
+    /// WR-65: ask the own node about a transaction a sale has just taken
+    /// from the light client.
+    fn ask_own_node_about(&self, tx: &[u8]) {
+        if !self.own_configured {
+            return;
+        }
+        if let Ok(parsed) = deserialize::<Transaction>(tx) {
+            self.port.ask_own_node(parsed.compute_txid());
         }
     }
 
@@ -902,6 +1070,7 @@ impl<P: DriverPort> Node<P> {
     /// in the returned screen, once.
     pub fn judge(&mut self, index: u32) -> Result<Screen, JudgeError<DirStoreError>> {
         let now = self.clock.now();
+        let own = self.own_health_now();
         let facts = Facts {
             chain: &self.view,
             health: self.health.unwrap_or(NO_ANSWER_YET),
@@ -909,7 +1078,8 @@ impl<P: DriverPort> Node<P> {
             remote_order: false,
             now,
         };
-        self.counter.judge(index, &facts, &mut self.store)
+        self.counter
+            .judge_with_own_node(index, &facts, &own, &mut self.store)
     }
 
     /// Give a sale a new quote (CR-05).
@@ -934,6 +1104,7 @@ impl<P: DriverPort> Node<P> {
     /// PIN.
     pub fn override_sale(&mut self, index: u32, actor: Actor) -> Overridden<DirStoreError> {
         let now = self.clock.now();
+        let own = self.own_health_now();
         let facts = Facts {
             chain: &self.view,
             health: self.health.unwrap_or(NO_ANSWER_YET),
@@ -942,7 +1113,7 @@ impl<P: DriverPort> Node<P> {
             now,
         };
         self.counter
-            .override_sale(index, actor, &facts, &mut self.store)
+            .override_sale_with_own_node(index, actor, &facts, &own, &mut self.store)
     }
 
     /// A person asks for a refund of a sale (CR-60 to CR-69). The request is

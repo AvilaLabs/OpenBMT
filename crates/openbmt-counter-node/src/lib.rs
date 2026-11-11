@@ -15,6 +15,8 @@
 //!    owner, through a relay (`docs/LINK-RULES.md` section 6).
 //! 5. [`notices`]: [`NoticeOutbox`], the paid notices the link sends to a
 //!    Box (`docs/BOX-RULES.md` section 4).
+//! 6. [`ownnode`]: the counter's own-node setting (CR-100 to CR-102), read
+//!    from the text a manager typed.
 //!
 //! The rules the node follows are `docs/COUNTER-RULES.md` and, for what the
 //! driver does, `docs/NETWORK-RULES.md` (NR-44, NR-53, NR-75 above all). The
@@ -41,6 +43,7 @@ pub mod dirstore;
 pub mod link;
 pub mod node;
 pub mod notices;
+pub mod ownnode;
 pub mod paired;
 pub mod say;
 
@@ -52,9 +55,13 @@ pub use dirstore::{DirStore, DirStoreError, Loaded, TornTail};
 pub use link::{CounterLink, CounterLinkConfig, LinkState};
 pub use node::{
     DriverPort, HealthFn, HeartbeatNotTaken, HeartbeatTaken, Launch, Node, NodeConfig, StartError,
-    MAX_EVENTS_PER_PUMP, NOTE_LOG, SETTLE_EVERY_SECS, SETTLE_MIN_GAP_SECS, TX_CACHE,
+    MAX_EVENTS_PER_PUMP, MAX_OWN_ASKS, MAX_OWN_EVENTS_PER_PUMP, NOTE_LOG, SETTLE_EVERY_SECS,
+    SETTLE_MIN_GAP_SECS, TX_CACHE,
 };
 pub use notices::{NodeRecords, NoticeOutbox, NoticeStoreError, RecordSource};
+pub use ownnode::{
+    default_port, every_setting_refusal, own_node_setting, OwnNodeSetting, OwnNodeSettingRefused,
+};
 pub use paired::{
     batch_policy, Ceremony, PairRefused, PairingRecord, Started, BATCH_MIN_COUNT,
     MAGIC_PAIRING_RECORD,

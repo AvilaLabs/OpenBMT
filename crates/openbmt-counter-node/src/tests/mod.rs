@@ -7,6 +7,8 @@ mod kit;
 mod link;
 mod node;
 mod notices;
+mod own_node;
+mod ownnode;
 mod paired;
 mod records;
 mod say;

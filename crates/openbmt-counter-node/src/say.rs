@@ -385,6 +385,9 @@ pub fn all_words() -> Vec<(String, Words)> {
             StartError::Dir(e).words(),
         ));
     }
+    for (name, e) in crate::ownnode::every_setting_refusal() {
+        all.push((format!("OwnNodeSettingRefused::{name}"), e.words()));
+    }
     let starts = [
         (
             "Locked",
