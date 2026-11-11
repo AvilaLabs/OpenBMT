@@ -60,6 +60,9 @@ pub enum Role {
     Counter,
     /// The Box.
     Box,
+    /// The owner phone's background watcher, with the watch key the signed
+    /// settings name (LK-74). It sends heartbeats and nothing else.
+    Watch,
 }
 
 /// What a message is (LK-08). The byte is signed but not encrypted.
@@ -126,11 +129,10 @@ impl Kind {
     /// Whether a device in role `from` may send this kind to a device in
     /// role `to` (the table of LK-08).
     pub fn allowed(self, from: Role, to: Role) -> bool {
-        use Role::{Box as TheBox, Counter, Owner};
+        use Role::{Box as TheBox, Counter, Owner, Watch};
         match self {
-            Kind::Heartbeat | Kind::Command | Kind::Batch | Kind::RecordsReceived => {
-                from == Owner && to == Counter
-            }
+            Kind::Heartbeat => (from == Owner || from == Watch) && to == Counter,
+            Kind::Command | Kind::Batch | Kind::RecordsReceived => from == Owner && to == Counter,
             Kind::Settings | Kind::DeviceList => from == Owner && (to == Counter || to == TheBox),
             Kind::CheckIn | Kind::Records => from == Counter && to == Owner,
             Kind::PaidNotice => from == Counter && to == TheBox,

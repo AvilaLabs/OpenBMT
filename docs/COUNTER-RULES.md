@@ -226,8 +226,9 @@ check says it is working. The counter takes it with
 from the owner's device to the counter is not part of these rules.
 
 - **CR-50.** Instant acceptance needs a heartbeat that the counter
-  verified: signed by the owner root pinned at pairing, naming this
-  counter, with a number above the last one taken. A heartbeat that fails
+  verified: signed by the owner root pinned at pairing, or by the watch key
+  of the settings in force (CR-185, CR-186), naming this counter, with a
+  number above the last one taken. A heartbeat that fails
   any of these is refused and changes nothing.
 - **CR-51.** The age of a heartbeat is the counter's time minus the
   heartbeat's own time, and it must be within the signed setting
@@ -249,7 +250,8 @@ from the owner's device to the counter is not part of these rules.
   the store fails, it does not count and its number is not used up. After a
   restart the counter has no verified heartbeat until a new one comes, and
   the stored number refuses replays.
-- **CR-55.** Nothing but an owner-signed heartbeat counts: not the Box's
+- **CR-55.** Nothing but an owner-signed heartbeat, or one signed by the
+  watch key of the settings in force (CR-186), counts: not the Box's
   "paid" notice, and not a signature of the approver root.
 - **CR-56.** The heartbeat is a claim by the same software family on another
   device. It guards against a dead or cut-off owner watcher, not against a
@@ -1158,3 +1160,28 @@ counter the record that shows it.
   readers of sale events take no meaning from a record of this body. A
   `Setting` record of CR-163 has a body of 37 bytes and this one has 41, and
   both are read strictly, so a body is read as at most one of the two.
+
+## 17. The watch key
+
+The owner phone can keep following the chain and telling the counters so
+while its owner app is closed (`docs/OWNER-APP-RULES.md`, OA-80 to OA-89).
+That watcher holds no key of the owner: not the owner root, not Key 1. It
+signs with a key of its own that the signed settings name.
+
+- **CR-185.** The settings carry an optional watch key: 0, or 1 and then 32
+  bytes, after the Lightning node. It is a public key of its own, never on the
+  device list and never a counter or a Box (`validate` refuses it), and no
+  wallet or identity key is derived from it or into it. Naming it or changing
+  it loosens (instant sales go on on the word of a key that is not the owner
+  root), so it needs the Key app's signature like any loosening; removing it
+  tightens. It reaches the counters in the settings, by the link (LK-64 to
+  LK-66), and no counter is paired again for it.
+- **CR-186.** A heartbeat is taken if it is signed by the owner root, or by
+  the watch key of the settings in force under the tag
+  `OpenBMT/watch-heartbeat/v1`, which no owner-root signature uses. The frame
+  is the same, and the counter tries the root and then the key. The checks of
+  CR-50 to CR-54 are unchanged, and the numbers are one line: a heartbeat of
+  either signer uses up numbers for both. With no key named, or after the
+  settings remove it, a heartbeat signed by it is refused and changes
+  nothing. A watch-key signature on anything but a heartbeat is not read: the
+  link takes the watch key's messages only as heartbeats (LK-74).

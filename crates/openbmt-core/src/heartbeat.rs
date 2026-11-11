@@ -73,7 +73,7 @@ impl fmt::Display for HeartbeatError {
                     "heartbeat number {got} is not above the last one, {last}"
                 )
             }
-            Self::OwnerSignatureInvalid => write!(f, "heartbeat is not signed by the owner or the shop's watch key"),
+            Self::OwnerSignatureInvalid => write!(f, "heartbeat is not signed by the owner"),
         }
     }
 }
@@ -482,7 +482,7 @@ mod tests {
         );
         assert_eq!(
             HeartbeatError::OwnerSignatureInvalid.to_string(),
-            "heartbeat is not signed by the owner or the shop's watch key"
+            "heartbeat is not signed by the owner"
         );
     }
 }

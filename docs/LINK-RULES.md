@@ -70,7 +70,7 @@ what arrives as if it came from an enemy.
 
   | Kind | From | To |
   |---|---|---|
-  | Heartbeat | owner | counter |
+  | Heartbeat | owner, watcher | counter |
   | Command | owner | counter |
   | Settings | owner | counter, Box |
   | Batch | owner | counter |
@@ -81,8 +81,9 @@ what arrives as if it came from an enemy.
   | Paid notice | counter | Box |
   | POS notice | Box | counter, owner |
 
-  A kind from a sender whose role may not send it is refused. An unknown
-  kind is refused.
+  The watcher is the owner phone's background watcher (LK-74). It sends
+  heartbeats and nothing else. A kind from a sender whose role may not send
+  it is refused. An unknown kind is refused.
 - **LK-09.** The link gives no authority. A sealed command is still
   checked as a command, a sealed batch as a batch, with their own
   signatures and numbers. A message from the Box is a hint and never a

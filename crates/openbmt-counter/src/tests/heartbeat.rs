@@ -476,3 +476,74 @@ fn cr_55_a_heartbeat_signed_by_the_approver_does_not_count() {
     assert!(w.take(&mixed).is_err());
     assert_eq!(w.judge_own(index).state, State::Waiting);
 }
+
+// CR-186: the watch key of the settings in force.
+
+fn watch() -> openbmt_core::identity::Identity {
+    id(30)
+}
+
+fn naming_the_watch_key(w: &mut World) {
+    let mut s = w.c.settings().clone();
+    s.watch_key = Some(watch().device_id());
+    w.c.set_settings(s);
+}
+
+#[test]
+fn cr_186_a_heartbeat_signed_by_the_named_watch_key_counts() {
+    let mut w = world();
+    let index = w.seen_paid();
+    let signed = hb(1, w.now).sign_watch(&watch());
+    // not named yet: refused, and nothing is written
+    let written = w.m.log.len();
+    let err = w.take(&signed).unwrap_err();
+    assert_eq!(
+        err,
+        HeartbeatRefused::Refused(HeartbeatError::OwnerSignatureInvalid)
+    );
+    assert_eq!(w.m.log.len(), written);
+    naming_the_watch_key(&mut w);
+    assert_eq!(
+        w.take(&signed),
+        Ok(HeartbeatView::Verified { sent_at: w.now })
+    );
+    assert_eq!(w.judge_own(index).state, State::PaidInstant);
+    // The number line is shared with the owner root's heartbeats.
+    let err = w.take(&from_owner(hb(1, w.now))).unwrap_err();
+    assert!(matches!(
+        err,
+        HeartbeatRefused::Refused(HeartbeatError::Stale { last: 1, got: 1 })
+    ));
+    assert_eq!(
+        w.take(&from_owner(hb(2, w.now))),
+        Ok(HeartbeatView::Verified { sent_at: w.now })
+    );
+}
+
+#[test]
+fn cr_186_removing_the_watch_key_ends_its_heartbeats() {
+    let mut w = world();
+    naming_the_watch_key(&mut w);
+    assert!(w.take(&hb(1, w.now).sign_watch(&watch())).is_ok());
+    let mut s = w.c.settings().clone();
+    s.watch_key = None;
+    w.c.set_settings(s);
+    let err = w.take(&hb(2, w.now).sign_watch(&watch())).unwrap_err();
+    assert_eq!(
+        err,
+        HeartbeatRefused::Refused(HeartbeatError::OwnerSignatureInvalid)
+    );
+}
+
+#[test]
+fn cr_186_another_key_and_another_tag_do_not_count() {
+    let mut w = world();
+    naming_the_watch_key(&mut w);
+    // another key under the watch tag
+    assert!(w.take(&hb(1, w.now).sign_watch(&id(31))).is_err());
+    // the named key under the owner's tag
+    let wrong_tag = hb(1, w.now).sign(&watch());
+    assert!(w.take(&wrong_tag).is_err());
+    assert_eq!(w.c.heartbeat_view(), None);
+    assert_eq!(w.c.desk().last_heartbeat_seq(), 0);
+}

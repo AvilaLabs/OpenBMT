@@ -366,6 +366,7 @@ impl<R: Post> CounterLink<R> {
             node.restart_needed(),
             node.removed(),
         );
+        self.follow_watch_key(node.settings().watch_key);
         let mut out = Outgoing {
             active: true,
             reached: polled.reached,
@@ -392,6 +393,27 @@ impl<R: Post> CounterLink<R> {
         self.courier.end();
         if !reached {
             self.next_relay_at = now.saturating_add(self.cfg.retry_secs);
+        }
+    }
+
+    /// LK-74: the courier's table lists the watch key the settings in force
+    /// name, as a watcher, and no other. A key the settings no longer name
+    /// is dropped from the table, so its messages are refused (LK-05).
+    fn follow_watch_key(&mut self, named: Option<DeviceId>) {
+        let stale: Vec<DeviceId> = self
+            .courier
+            .peers()
+            .iter()
+            .filter(|(d, role)| **role == Role::Watch && Some(**d) != named)
+            .map(|(d, _)| *d)
+            .collect();
+        for d in stale {
+            self.courier.remove_peer(&d);
+        }
+        if let Some(key) = named {
+            if self.courier.peers().get(&key).is_none() {
+                self.courier.set_peer(key, Role::Watch);
+            }
         }
     }
 

@@ -529,9 +529,10 @@ fn lk_07_padding_that_is_not_zero_or_not_minimal_is_refused() {
 
 #[test]
 fn lk_08_the_table_of_kinds() {
-    use Role::{Box as B, Counter as C, Owner as O};
-    let table: [(Kind, Role, Role); 13] = [
+    use Role::{Box as B, Counter as C, Owner as O, Watch as W};
+    let table: [(Kind, Role, Role); 14] = [
         (Kind::Heartbeat, O, C),
+        (Kind::Heartbeat, W, C),
         (Kind::Command, O, C),
         (Kind::Settings, O, C),
         (Kind::Settings, O, B),
@@ -546,8 +547,8 @@ fn lk_08_the_table_of_kinds() {
         (Kind::PosNotice, B, O),
     ];
     for kind in Kind::ALL {
-        for from in [O, C, B] {
-            for to in [O, C, B] {
+        for from in [O, C, B, W] {
+            for to in [O, C, B, W] {
                 let want = table.contains(&(kind, from, to));
                 assert_eq!(kind.allowed(from, to), want, "{kind:?} {from:?} {to:?}");
             }

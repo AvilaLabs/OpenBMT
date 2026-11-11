@@ -31,7 +31,7 @@ const TEST_SOURCES: [&str; 19] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 56] = [
+const NOT_HERE: [(&str, &str); 57] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -240,6 +240,11 @@ const NOT_HERE: [(&str, &str); 56] = [
          `openbmt-counter-ffi` and the app's JVM tests",
     ),
     (
+        "CR-185",
+        "the settings field is `openbmt_core::settings`'s; tested in `openbmt-core` \
+         (`cr_185_*` in `settings.rs`)",
+    ),
+    (
         "CR-166",
         "the device list message is dropped by the link; tested in `openbmt-counter-node` \
          (`tests/link.rs`)",
@@ -331,9 +336,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_one_hundred_and_thirty_one_rules() {
+fn the_rules_file_defines_one_hundred_and_thirty_three_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 131);
+    assert_eq!(ids.len(), 133);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -358,6 +363,8 @@ fn the_rules_file_defines_one_hundred_and_thirty_one_rules() {
             && ids.contains("CR-167")
             && ids.contains("CR-169")
             && ids.contains("CR-178")
+            && ids.contains("CR-185")
+            && ids.contains("CR-186")
     );
 }
 

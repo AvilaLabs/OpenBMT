@@ -2745,7 +2745,8 @@ impl Counter {
     // CR-50 to CR-56: the owner's heartbeat.
 
     /// CR-50: take a heartbeat the owner signed. It is checked against the
-    /// pinned owner root, this counter and the last number taken, and then
+    /// pinned owner root and the watch key of the settings in force (CR-186),
+    /// this counter and the last number taken, and then
     /// judged against the counter's own header chain and clock (CR-51 to
     /// CR-53). Nothing but this call makes a heartbeat count (CR-55).
     ///
@@ -2766,6 +2767,7 @@ impl Counter {
         let hb = signed
             .verify(
                 &self.roots,
+                self.settings.watch_key.as_ref(),
                 &self.identity.device_id(),
                 self.desk.last_heartbeat_seq(),
             )
