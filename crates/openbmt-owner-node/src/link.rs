@@ -246,6 +246,11 @@ impl<R: Post> OwnerLink<R> {
         &self.counters
     }
 
+    /// The signed device list the copies are checked against.
+    pub fn devices(&self) -> &DeviceList {
+        &self.devices
+    }
+
     /// The owner's copy of a counter's chain.
     pub fn copy(&self, counter: &DeviceId) -> Option<&CounterCopy> {
         self.copies.get(counter)

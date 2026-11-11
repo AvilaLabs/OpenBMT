@@ -23,6 +23,7 @@ mod facts;
 mod link;
 mod live;
 mod node;
+mod pos;
 mod pos_notice;
 mod refunds;
 mod say;

@@ -21,6 +21,11 @@
 //! (`docs/LINK-RULES.md` section 6), and [`copy`] keeps the owner's verified
 //! copy of each counter's records, which the counters send back the same way.
 //!
+//! The [`pos`] module is the owner's own matching of the till's orders to
+//! the counters' sales (`docs/OWNER-COINS-RULES.md`, OC-30 to OC-37): the
+//! app sends the requests and hands the answers in, and the sales come from
+//! the verified copies of the counters' records.
+//!
 //! The view of the chain is the counter node's [`ChainView`], and the driver
 //! is reached through the counter node's [`DriverPort`], so that the two
 //! nodes read the chain the same way. This crate therefore depends on
@@ -51,6 +56,7 @@ pub mod facts;
 pub mod link;
 pub mod live;
 pub mod node;
+pub mod pos;
 pub mod receipts;
 pub mod refunds;
 pub mod say;
@@ -72,6 +78,10 @@ pub use live::{
 pub use node::{
     NodeError, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState, BROADCAST_DIR, COINS_FILE,
     NO_TOR, QUEUE_FILE, TAKE_JOURNAL_FILE,
+};
+pub use pos::{
+    counter_facts, OwnerPos, PosMethod, PosPolled, PosRefused, PosRequest, PosSetup, PosVendor, PosView,
+    POS_LEDGER_FILE, POS_SETUP_FILE,
 };
 pub use receipts::{MergeOffer, MergeRefused, ReceiptsLine, FEE_FILE, MERGE_MIN_COINS};
 pub use refunds::{

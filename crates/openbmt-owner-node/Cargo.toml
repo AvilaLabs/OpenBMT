@@ -19,6 +19,8 @@ openbmt-courier = { path = "../openbmt-courier" }
 openbmt-link = { path = "../openbmt-link" }
 # For the Box's POS notices (BX-42).
 openbmt-pos = { path = "../openbmt-pos" }
+# The readers of the till's replies, for the owner's own matching (OC-33).
+openbmt-pos-readers = { path = "../openbmt-pos-readers" }
 # The refund requests in a counter's records, and the owner's queue they go to.
 openbmt-counter = { path = "../openbmt-counter" }
 openbmt-owner = { path = "../openbmt-owner" }

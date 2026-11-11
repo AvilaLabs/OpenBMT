@@ -215,6 +215,15 @@ fn sc_01_every_listed_variant_is_present() {
         "Alert::TipIsOld",
         "Alert::HeadersBehind",
         "Alert::ClockMismatch",
+        "PosRefused::NotSetUp",
+        "PosRefused::NoCounters",
+        "PosRefused::TooSoon",
+        "PosRefused::NothingAsked",
+        "PosRefused::SignInRefused",
+        "PosRefused::RateLimited",
+        "PosRefused::Unavailable",
+        "PosRefused::Store",
+        "PosRefused::Corrupt",
     ];
     for name in wanted {
         assert!(

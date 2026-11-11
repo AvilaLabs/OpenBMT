@@ -515,6 +515,7 @@ dependencies = [
  "openbmt-net-io",
  "openbmt-owner",
  "openbmt-pos",
+ "openbmt-pos-readers",
  "openbmt-session",
  "openbmt-signer",
  "openbmt-spend",
