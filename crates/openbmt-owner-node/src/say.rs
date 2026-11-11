@@ -9,7 +9,7 @@ use openbmt_watch::Problem;
 
 use crate::coins::{ApplyError, PendingError, ReceiptState, ViewState};
 use crate::facts::FactsRefused;
-use crate::link::{SettingsNotCarried, SettingsWaiting};
+use crate::link::{BatchesWaiting, SettingsNotCarried, SettingsWaiting};
 use crate::live::DeepLine;
 use crate::node::{NodeError, SendRefused, SendState};
 use crate::pos::PosRefused;
@@ -55,6 +55,36 @@ impl Alert {
             Self::ClockMismatch => Words::new(Tone::Stop, "Clock needs attention", "The device clock is behind the newest block the watcher knows about.", Who::Owner, "Set the device clock to the correct time, then restart the owner app.").code("WR-53"),
         }
     }
+}
+
+impl BatchesWaiting {
+    /// The line for a counter whose new addresses wait to be held (LK-73).
+    /// The counter is named by the screen, which has its name.
+    pub fn words(&self) -> Words {
+        Words::new(
+            Tone::Info,
+            "New addresses on their way",
+            "This counter's new addresses were sent and its records do not show it has them yet.",
+            Who::Nobody,
+            "Nothing to do. The phone sends them again by itself until the counter has them.",
+        )
+        .code("LK-73")
+        .at(self.since)
+    }
+}
+
+/// The alert for a counter that has not taken its new addresses for a day
+/// (LK-73). `since` is when the oldest batch was first sent.
+pub fn batch_undelivered_words(since: u64) -> Words {
+    Words::new(
+        Tone::Stop,
+        "New addresses not taken",
+        "The new addresses sent to this counter more than a day ago are not in its records, so it may run out of Bitcoin addresses.",
+        Who::Owner,
+        "Check that the counter is on and linked. The phone keeps sending the addresses.",
+    )
+    .code("LK-73")
+    .at(since)
 }
 
 impl From<Problem> for Alert {
@@ -932,6 +962,18 @@ pub fn all_words() -> Vec<(String, Words)> {
     ] {
         add(&format!("PosRefused::{name}"), error.words());
     }
+    if let Ok(identity) = openbmt_core::identity::Identity::from_secret_bytes(&[1; 32]) {
+        add(
+            "BatchesWaiting",
+            BatchesWaiting {
+                counter: identity.device_id(),
+                batches: 1,
+                since: 1_700_000_000,
+            }
+            .words(),
+        );
+    }
+    add("BatchUndelivered", batch_undelivered_words(1_700_000_000));
     for (name, alert) in [
         ("NoHealthAnswer", Alert::NoHealthAnswer),
         ("Stopped", Alert::Stopped),

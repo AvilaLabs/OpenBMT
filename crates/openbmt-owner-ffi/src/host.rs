@@ -89,13 +89,13 @@ use crate::pos_views::{
 use crate::say::{counter_words, link_alert_words, words_for};
 use crate::settings_edit::{preview_view, to_edit, SettingsEditArgs, SettingsPreviewView};
 use crate::views::{
-    AlertKind, AlertView, BatchArgs, BuiltView, CashAmountView, CashOutArgs, CashOutRow, ClearArgs,
-    CounterShareView, CounterView, DeepRequestView, DeliverView, EntryKindView, EntryRow,
-    HaltedView, HealthView, LimitView, LinkConfig, LinkStepView, LinkView, MergeOfferView,
-    NoteKindView, OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind, OutcomeView,
-    PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView,
-    RefundRow, RouteView, SendKind, SendRow, SettingsHeldView, SettingsQueuedView, SkippedView,
-    StageKind, StageView, StartConfig, StatusView, TakenView, ViewKind, WordsView,
+    AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView, CashOutArgs,
+    CashOutRow, ClearArgs, CounterShareView, CounterView, DeepRequestView, DeliverView,
+    EntryKindView, EntryRow, HaltedView, HealthView, LimitView, LinkConfig, LinkStepView, LinkView,
+    MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind,
+    OutcomeView, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs,
+    RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView, SettingsQueuedView,
+    SkippedView, StageKind, StageView, StartConfig, StatusView, TakenView, ViewKind, WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -1625,7 +1625,7 @@ impl Entry {
                                 continue;
                             }
                         };
-                        if let Err(e) = link.send_batch(&batch.batch.counter, &batch) {
+                        if let Err(e) = link.send_batch(&batch.batch.counter, &batch, now) {
                             view.notes
                                 .push(format!("batch {id} was not handed to the link: {e}"));
                             continue;
@@ -1701,6 +1701,9 @@ impl Entry {
                             (AlertKind::MissedCheckIn, counter, *last_at)
                         }
                         Alert::Diverged { counter, seq } => (AlertKind::Diverged, counter, *seq),
+                        Alert::BatchUndelivered { counter, since } => {
+                            (AlertKind::BatchUndelivered, counter, *since)
+                        }
                     };
                     AlertView {
                         kind,
@@ -1730,11 +1733,23 @@ impl Entry {
                     })
                 })
                 .collect();
+            let batches = link
+                .counters()
+                .iter()
+                .filter_map(|c| link.batches_waiting(c))
+                .map(|w| BatchWaitingView {
+                    counter: w.counter.to_bytes().to_vec(),
+                    batches: u32::try_from(w.batches).unwrap_or(u32::MAX),
+                    since: w.since,
+                    words: words(w.words()),
+                })
+                .collect();
             Ok(LinkView {
                 reachable: link.courier().reachable(),
                 refused: link.courier().refused(),
                 alerts,
                 counters,
+                batches,
             })
         })
     }
@@ -1754,6 +1769,10 @@ impl Entry {
                 AlertKind::Diverged => Alert::Diverged {
                     counter,
                     seq: a.value,
+                },
+                AlertKind::BatchUndelivered => Alert::BatchUndelivered {
+                    counter,
+                    since: a.value,
                 },
             };
             if !link.alerts().contains(&alert) {

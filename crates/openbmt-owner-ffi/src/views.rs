@@ -353,11 +353,15 @@ pub enum AlertKind {
     MissedCheckIn,
     /// The counter's chain and the owner's copy differ.
     Diverged,
+    /// A batch of addresses has waited a day for the counter to hold it
+    /// (LK-73).
+    BatchUndelivered,
 }
 
 wire_unit_enum!(AlertKind {
     MissedCheckIn = 0,
-    Diverged = 1
+    Diverged = 1,
+    BatchUndelivered = 2
 });
 
 /// The arguments of `clear_alert`: the alert as `link_state` showed it.
@@ -367,7 +371,8 @@ pub struct ClearArgs {
     pub kind: AlertKind,
     /// The counter, 32 bytes.
     pub counter: Vec<u8>,
-    /// The time of the last check-in, or the number of the record.
+    /// The time of the last check-in, the number of the record, or the time
+    /// the oldest batch was first sent.
     pub value: u64,
 }
 
@@ -1056,6 +1061,26 @@ wire_record!(CounterView {
     words
 });
 
+/// New addresses that wait for a counter to hold them (LK-70, LK-73).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchWaitingView {
+    /// The counter, 32 bytes.
+    pub counter: Vec<u8>,
+    /// How many batches wait.
+    pub batches: u32,
+    /// When the oldest was first sent.
+    pub since: u64,
+    /// What the owner is told.
+    pub words: WordsView,
+}
+
+wire_record!(BatchWaitingView {
+    counter,
+    batches,
+    since,
+    words
+});
+
 /// The link to the counters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkView {
@@ -1067,13 +1092,16 @@ pub struct LinkView {
     pub alerts: Vec<AlertView>,
     /// Each counter on the list.
     pub counters: Vec<CounterView>,
+    /// The counters whose new addresses wait to be held.
+    pub batches: Vec<BatchWaitingView>,
 }
 
 wire_record!(LinkView {
     reachable,
     refused,
     alerts,
-    counters
+    counters,
+    batches
 });
 
 /// What a line of the refund requests' list is about.

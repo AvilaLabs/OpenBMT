@@ -402,6 +402,7 @@ impl<'a> Rd<'a> {
                     r.words(),
                 )
             }),
+            batches: self.list(|r| (r.bytes(), r.u32(), r.u64(), r.words())),
         }
     }
 }
@@ -468,4 +469,5 @@ pub struct Link {
         Option<u64>,
         Words,
     )>,
+    pub batches: Vec<(Vec<u8>, u32, u64, Words)>,
 }

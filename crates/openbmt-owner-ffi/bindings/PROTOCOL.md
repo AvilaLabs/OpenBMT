@@ -140,7 +140,7 @@ CashAmountView: enum, a tag byte, then: Sats(sats: u64) | All
 CashOutArgs: record: address: string, amount: CashAmountView, label: string
 BatchArgs: record: counter: list<u8>, start: u32, count: u32
 AlertKind: enum, one tag byte
-    tags MissedCheckIn=0 Diverged=1
+    tags MissedCheckIn=0 Diverged=1 BatchUndelivered=2
 ClearArgs: record: kind: AlertKind, counter: list<u8>, value: u64
 Words: record: tone: u8, who: u8, heading: str16, what: str16, next: str16, code: option<str16>, at: option<u64>, quoted: option<(str16, str16)>, detail: option<str16>; a str16 is a u16 length and UTF-8
 Key1Args: record: network: OwnerNetwork, show_words: bool
@@ -194,7 +194,8 @@ SettingsPreviewView: record: version: u32, changes: list<SettingChangeView>, nee
 DeliverView: record: sent: u32, waiting: u32, notes: list<string>
 AlertView: record: kind: AlertKind, counter: list<u8>, value: u64, words: Words
 CounterView: record: counter: list<u8>, records: u64, head: list<u8>, check_in_seq: option<u64>, check_in_held: option<bool>, last_check_in_at: option<u64>, words: Words
-LinkView: record: reachable: bool, refused: u64, alerts: list<AlertView>, counters: list<CounterView>
+BatchWaitingView: record: counter: list<u8>, batches: u32, since: u64, words: Words
+LinkView: record: reachable: bool, refused: u64, alerts: list<AlertView>, counters: list<CounterView>, batches: list<BatchWaitingView>
 NoteKindView: enum, one tag byte
     tags Refused=0 WithdrawalNotApplied=1 Interrupted=2 ClaimedMoreThanSeen=3
 RefundNoteView: record: index: u32, counter: list<u8>, seq: u64, number: u64, sale: u32, kind: NoteKindView, withdrawn: bool, words: Words

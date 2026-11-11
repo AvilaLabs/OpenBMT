@@ -560,6 +560,7 @@ pub(crate) fn link_alert_words(alert: &openbmt_owner_node::Alert) -> Words {
         )
         .code("LK-59")
         .detail(format!("record {seq}")),
+        Alert::BatchUndelivered { since, .. } => openbmt_owner_node::say::batch_undelivered_words(*since),
     }
 }
 
@@ -631,6 +632,13 @@ pub fn all_words() -> Vec<(String, Words)> {
         out.push((
             "alert-diverged".to_string(),
             link_alert_words(&Alert::Diverged { counter, seq: 3 }),
+        ));
+        out.push((
+            "alert-batch-undelivered".to_string(),
+            link_alert_words(&Alert::BatchUndelivered {
+                counter,
+                since: 1_700_000_000,
+            }),
         ));
     }
     out.push(("counter-none".to_string(), counter_words(None, None, None)));

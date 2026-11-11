@@ -106,14 +106,14 @@ use crate::settings_edit::{
 };
 use crate::setup_lock::{self, PinChangeArgs};
 use crate::views::{
-    put_words, AlertKind, AlertView, BatchArgs, BuiltView, CashAmountView, CashOutArgs, CashOutRow,
-    ClearArgs, CounterShareView, CounterView, DeepRequestView, DeliverView, EntryKindView,
-    EntryRow, HaltedView, HealthView, LimitView, LinkConfig, LinkStepView, LinkView,
-    MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind,
-    OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView,
-    RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView,
-    SettingsQueuedView, SkippedView, StageKind, StageView, StartConfig, StatusView, TakenView,
-    ViewKind, WordsView,
+    put_words, AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView,
+    CashOutArgs, CashOutRow, ClearArgs, CounterShareView, CounterView, DeepRequestView,
+    DeliverView, EntryKindView, EntryRow, HaltedView, HealthView, LimitView, LinkConfig,
+    LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind,
+    OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund,
+    ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind,
+    SendRow, SettingsHeldView, SettingsQueuedView, SkippedView, StageKind, StageView, StartConfig,
+    StatusView, TakenView, ViewKind, WordsView,
 };
 
 /// The first four bytes of a request.
@@ -700,6 +700,7 @@ fn definitions() -> Vec<TypeDef> {
         DeliverView::define(),
         AlertView::define(),
         CounterView::define(),
+        BatchWaitingView::define(),
         LinkView::define(),
         NoteKindView::define(),
         RefundNoteView::define(),

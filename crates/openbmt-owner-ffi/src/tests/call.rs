@@ -662,6 +662,12 @@ fn the_link_is_stepped_its_batches_delivered_and_its_state_read() {
     assert_eq!((c.0.clone(), c.1), (counter_bytes(), 0));
     assert_eq!(c.2.len(), 32);
     check_wire_words(&c.6).expect("words");
+    // What was delivered waits for the counter to hold it (LK-70, LK-73).
+    assert_eq!(link.batches.len(), usize::from(approved > 0));
+    for b in &link.batches {
+        assert_eq!((b.0.clone(), b.1), (counter_bytes(), approved));
+        check_wire_words(&b.3).expect("words");
+    }
     // An alert that is not raised cannot be cleared.
     let f = fault(&rig.call(51, handle, &W::new().u8(0).bytes(&counter_bytes()).u64(1).0));
     assert_eq!((f.status, f.rule.as_str()), (1, "alert-unknown"));

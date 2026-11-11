@@ -92,11 +92,12 @@ pub use settings_edit::{
 };
 pub use setup_lock::PinChangeArgs;
 pub use views::{
-    AlertKind, AlertView, BatchArgs, BuiltView, CashAmountView, CashOutArgs, CashOutRow, ClearArgs,
-    CounterShareView, CounterView, DeepRequestView, DeliverView, EntryKindView, EntryRow,
-    HaltedView, HealthView, LimitView, LinkConfig, LinkStepView, LinkView, MergeOfferView,
-    NoteKindView, OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind, OutcomeView,
-    OwnerNetwork, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs,
-    RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView, SettingsQueuedView,
-    SkippedView, StageKind, StageView, StartConfig, StatusView, TakenView, ViewKind, WordsView,
+    AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView, CashOutArgs,
+    CashOutRow, ClearArgs, CounterShareView, CounterView, DeepRequestView, DeliverView,
+    EntryKindView, EntryRow, HaltedView, HealthView, LimitView, LinkConfig, LinkStepView, LinkView,
+    MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind,
+    OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView,
+    RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView,
+    SettingsQueuedView, SkippedView, StageKind, StageView, StartConfig, StatusView, TakenView,
+    ViewKind, WordsView,
 };

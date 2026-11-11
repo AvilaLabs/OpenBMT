@@ -139,6 +139,7 @@ private const val TAG_LIGHTNING_ACTION_REMOVE = 1
 private const val TAG_LIGHTNING_ACTION_SET = 2
 private const val TAG_ALERT_KIND_MISSED_CHECK_IN = 0
 private const val TAG_ALERT_KIND_DIVERGED = 1
+private const val TAG_ALERT_KIND_BATCH_UNDELIVERED = 2
 private const val TAG_VIEW_KIND_READY = 0
 private const val TAG_VIEW_KIND_RESCANNING = 1
 private const val TAG_VIEW_KIND_DEEP_REORG = 2
@@ -268,7 +269,7 @@ class CashOutArgs(val address: String, val amount: CashAmount, val label: String
 
 class BatchArgs(val counter: ByteArray, val start: Long, val count: Long)
 
-enum class AlertKind { MissedCheckIn, Diverged }
+enum class AlertKind { MissedCheckIn, Diverged, BatchUndelivered }
 
 /** An alert as [OwnerNode.linkState] showed it. */
 class ClearArgs(val kind: AlertKind, val counter: ByteArray, val value: Long)
@@ -396,11 +397,20 @@ class CounterState(
     val words: Words,
 )
 
+/** New addresses that wait for a counter to hold them (LK-70, LK-73). */
+class BatchWaiting(
+    val counter: ByteArray,
+    val batches: Long,
+    val since: Long,
+    val words: Words,
+)
+
 class LinkState(
     val reachable: Boolean,
     val refused: Long,
     val alerts: List<Alert>,
     val counters: List<CounterState>,
+    val batches: List<BatchWaiting>,
 )
 
 enum class NoteKind { Refused, WithdrawalNotApplied, Interrupted, ClaimedMoreThanSeen }
@@ -942,6 +952,7 @@ private fun Writer.alertKind(v: AlertKind): Writer =
         when (v) {
             AlertKind.MissedCheckIn -> TAG_ALERT_KIND_MISSED_CHECK_IN
             AlertKind.Diverged -> TAG_ALERT_KIND_DIVERGED
+            AlertKind.BatchUndelivered -> TAG_ALERT_KIND_BATCH_UNDELIVERED
         },
     )
 
@@ -949,6 +960,7 @@ private fun Reader.alertKind(): AlertKind =
     when (u8()) {
         TAG_ALERT_KIND_MISSED_CHECK_IN -> AlertKind.MissedCheckIn
         TAG_ALERT_KIND_DIVERGED -> AlertKind.Diverged
+        TAG_ALERT_KIND_BATCH_UNDELIVERED -> AlertKind.BatchUndelivered
         else -> tag("AlertKind")
     }
 
@@ -1181,8 +1193,10 @@ private fun Reader.counterState(): CounterState =
         bytes(), u64(), bytes(), option { u64() }, option { bool() }, option { u64() }, words(),
     )
 
+private fun Reader.batchWaiting(): BatchWaiting = BatchWaiting(bytes(), u32(), u64(), words())
+
 internal fun Reader.linkState(): LinkState =
-    LinkState(bool(), u64(), list { alert() }, list { counterState() })
+    LinkState(bool(), u64(), list { alert() }, list { counterState() }, list { batchWaiting() })
 
 private fun Reader.refundNote(): RefundNote =
     RefundNote(u32(), bytes(), u64(), u64(), u32(), noteKind(), bool(), words())
