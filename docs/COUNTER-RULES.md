@@ -553,7 +553,7 @@ own; the library judges sales and prices and knows nothing of them.
   who acts. This is NR-26 applied: the proxy is the caller's. The node
   enforces it from the verified settings: `start` refuses to start, with
   this rule, when the signed settings have Tor on and the start has no
-  proxy. The app's reading of the settings before the start (`settings_read`)
+  proxy. The app's reading of the settings before the start (`pairing_read`)
   is for display only and is not trusted.
 - **CR-88.** The node runs only while the app is on the screen. It starts
   when the activity becomes visible and is stopped, cleanly, when it stops

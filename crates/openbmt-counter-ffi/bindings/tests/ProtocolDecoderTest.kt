@@ -6,8 +6,7 @@ import java.io.ByteArrayOutputStream
 object ProtocolDecoderTest {
     /** The `start` request of [sampleConfig], as the Rust test of the same name writes it. */
     private const val START_FRAME_HEX =
-        "4f424d6d01010000000000000000000100000064030100000000000000010000000101000000020100000003" +
-            "010000000405000000010000000600010100000070010000000100000061"
+        "4f424d6d0101000000000000000000010000006401000000000000000100000002010100000070"
 
     /** The `rate_parse` and `rate_combine` requests, as the Rust test of the same name writes them. */
     private const val RATE_PARSE_HEX =
@@ -120,17 +119,9 @@ object ProtocolDecoderTest {
         val config =
             StartConfig(
                 dir = "d",
-                network = CounterNetwork.Regtest,
                 now = 1,
-                identitySecret = byteArrayOf(1),
-                ownerRoot = byteArrayOf(2),
-                approverRoot = byteArrayOf(3),
-                walletChecksum = byteArrayOf(4),
-                batchMinCount = 5,
-                settings = byteArrayOf(6),
-                firstBatch = null,
+                record = byteArrayOf(2),
                 proxy = "p",
-                fixedPeers = listOf("a"),
             )
         check(hex(startFrame(config)) == START_FRAME_HEX) { hex(startFrame(config)) }
     }

@@ -3,7 +3,10 @@
 use openbmt_core::pairing::PairError;
 use openbmt_core::say::{check, check_distinct, Tone, Who};
 
-use crate::say::{all_words, every_pair_error, program_words, screens_markdown, PairStep};
+use crate::paired::PairRefused;
+use crate::say::{
+    all_words, every_pair_error, every_pair_refused, program_words, screens_markdown, PairStep,
+};
 
 /// The name of a pairing error, by an exhaustive match: a new variant does
 /// not compile until it is named here, and the test then wants its words.
@@ -12,6 +15,7 @@ fn pair_error_name(e: &PairError) -> &'static str {
         PairError::SameRoot => "SameRoot",
         PairError::CounterIsRoot => "CounterIsRoot",
         PairError::InvalidName => "InvalidName",
+        PairError::UnsupportedNetwork => "UnsupportedNetwork",
         PairError::Decode(_) => "Decode",
         PairError::BindingMismatch => "BindingMismatch",
         PairError::RequestSignatureInvalid => "RequestSignatureInvalid",
@@ -29,6 +33,24 @@ fn pair_error_name(e: &PairError) -> &'static str {
     }
 }
 
+/// The same for the refusals of the pairing steps. `Pair` carries a pairing
+/// error, whose words are listed under `PairError`.
+fn pair_refused_name(e: &PairRefused) -> &'static str {
+    match e {
+        PairRefused::NoCeremony => "NoCeremony",
+        PairRefused::NoRandomness => "NoRandomness",
+        PairRefused::Pair(_) => "Pair",
+        PairRefused::Bundle(_) => "Bundle",
+        PairRefused::Settings(_) => "Settings",
+        PairRefused::SettingsOld { .. } => "SettingsOld",
+        PairRefused::NotOnDevices => "NotOnDevices",
+        PairRefused::NotOnCounters => "NotOnCounters",
+        PairRefused::Batch(_) => "Batch",
+        PairRefused::Record(_) => "Record",
+        PairRefused::RecordKey => "RecordKey",
+    }
+}
+
 #[test]
 fn sc_12_every_word_keeps_the_rules() {
     assert_eq!(check_distinct(&all_words()), Ok(()));
@@ -40,7 +62,7 @@ fn sc_01_no_variant_is_missing() {
     let all = all_words();
     let has = |name: String| all.iter().any(|(n, _)| *n == name);
     let pair = every_pair_error();
-    assert_eq!(pair.len(), 17);
+    assert_eq!(pair.len(), 18);
     for (name, e) in &pair {
         assert_eq!(pair_error_name(e), *name);
         assert!(has(format!("PairError::{name}")));
@@ -48,6 +70,17 @@ fn sc_01_no_variant_is_missing() {
     for step in PairStep::ALL {
         assert!(has(format!("PairStep::{}", step.name())));
     }
+    // Every refusal of a pairing step has words, except the one that wraps
+    // a pairing error, which has the words of that error with its rule.
+    let refused = every_pair_refused();
+    assert_eq!(refused.len(), 10);
+    for (name, e) in &refused {
+        assert_eq!(pair_refused_name(e), *name);
+        assert!(has(format!("PairRefused::{name}")));
+    }
+    let wrapped = PairRefused::Pair(PairError::Expired);
+    assert_eq!(pair_refused_name(&wrapped), "Pair");
+    assert_eq!(wrapped.words().code, Some("CR-92"));
     for name in [
         "Locked",
         "Headers",
@@ -115,4 +148,22 @@ fn sc_12_the_list_keeps_its_lines_short_outside_the_table() {
             assert!(line.chars().count() <= 80, "{line}");
         }
     }
+}
+
+#[test]
+fn cr_92_they_differ_says_what_happened_and_how_to_start_again() {
+    let w = PairStep::Differ.words();
+    assert_eq!(w.tone, Tone::Stop);
+    assert_eq!(w.who, Who::Owner);
+    assert!(w.what.contains("forgot its key"));
+    assert!(w.next.contains("Start again from the Key app"));
+    assert_eq!(check(&w), Ok(()));
+}
+
+#[test]
+fn cr_91_a_lost_pairing_says_to_start_again_from_the_key_app() {
+    let w = PairRefused::NoCeremony.words();
+    assert!(w.what.contains("restarted"));
+    assert!(w.next.contains("Start again from the Key app"));
+    assert_eq!(check(&w), Ok(()));
 }

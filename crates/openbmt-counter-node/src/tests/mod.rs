@@ -7,6 +7,7 @@ mod kit;
 mod link;
 mod node;
 mod notices;
+mod paired;
 mod records;
 mod say;
 mod settle;

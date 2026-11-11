@@ -69,7 +69,12 @@ text in `text`.
 | 40 | rate sources | none | the table: id, URL, currency, initial |
 | 41 | rate parse | source id, reply bytes, fetched at | a sample, or the refusal with its words |
 | 42 | rate combine | samples, now | the rate, label and time for `open`, or the refusal with its words |
-| 43 | settings read | signed settings | version, Tor on, customer Wi-Fi, smallest sale |
+| 43 | pairing read | pairing record | network, then version, Tor on, customer Wi-Fi, smallest sale |
+| 44 | pair begin | offer, name, now | request bytes, four words |
+| 45 | pair match | now | nothing |
+| 46 | pair differ | none | the words of the ended ceremony |
+| 47 | pair cancel | none | nothing |
+| 48 | pair finish | now, bundle | pairing record |
 
 ## Threads
 
@@ -85,15 +90,20 @@ loop.
 
 ## Price and settings
 
-Ops 40 to 43 work on no node (handle 0). The app fetches the price itself
+Ops 40 to 48 work on no node (handle 0). The app fetches the price itself
 on the schedule of `docs/RATE-RULES.md` (RT-40 to RT-45) and hands the
 bytes to `rate_parse`; `rate_combine` makes the samples into the rate that
 `open` takes, so no JSON is read in the app. A refusal of either is an
-error response whose words are those of `openbmt-rates`. `settings_read`
-reads the shop's signed settings before `start` so that the app can tell
-whether Tor is on, for display only; it does not verify them. `start`
-verifies them and refuses to start when they have Tor on and the start has
-no proxy (CR-87).
+error response whose words are those of `openbmt-rates`. `pairing_read`
+reads the saved pairing record before `start` so that the app can tell the
+network and whether Tor is on, for display only; it does not verify it.
+`start` verifies it and refuses to start when the settings have Tor on and
+the start has no proxy (CR-87).
+
+The pairing ceremony (`pair_begin`, `pair_match`, `pair_differ`,
+`pair_cancel`, `pair_finish`) keeps one ceremony in the library, in memory
+only (CR-91). `pair_finish` returns the pairing record, which holds the
+counter's key: the app seals it and hands it to every `start`.
 
 ## Storage
 

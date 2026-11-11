@@ -3,7 +3,6 @@
 //! itself) with the encodings of [`codec`](crate::codec) and describes
 //! itself for `bindings/PROTOCOL.md`.
 
-use bitcoin::Network;
 use openbmt_core::say::Words;
 use openbmt_counter::{RefundState, Report, Role, State};
 
@@ -13,6 +12,7 @@ use crate::codec::{
 };
 use crate::error::CounterError;
 use crate::pay::Payment;
+use crate::shop::SettingsView;
 use crate::say::{tone_byte, who_byte};
 
 // ---- requests -------------------------------------------------------------------
@@ -36,17 +36,6 @@ wire_unit_enum!(CounterNetwork {
     Signet = 2,
     Regtest = 3
 });
-
-impl CounterNetwork {
-    pub(crate) fn network(self) -> Network {
-        match self {
-            Self::Mainnet => Network::Bitcoin,
-            Self::Testnet => Network::Testnet,
-            Self::Signet => Network::Signet,
-            Self::Regtest => Network::Regtest,
-        }
-    }
-}
 
 /// Who acts at the counter. The app has checked the person's PIN.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,67 +79,78 @@ pub struct ActorView {
 wire_record!(ActorView { role, name });
 wire_record_get!(ActorView { role, name });
 
-/// What `start` is given. The identity, the roots, the wallet check, the
-/// signed settings and the first batch are what the counter was paired with
-/// (`docs/PAIRING-RULES.md`); the app keeps them and hands them over at each
-/// start.
+/// What `start` is given: the counter's pairing record as the app kept it,
+/// and what is not part of pairing (`docs/COUNTER-RULES.md`, CR-97).
+///
+/// The record (`PairingRecord::to_bytes`, magic `OBMt`) holds the identity
+/// secret, the roots, the wallet, the network, the settings, the first batch
+/// and the peers; `pair_finish` made it and the app keeps it sealed. The
+/// network, the roots and the smallest batch are not fields of this request:
+/// the first two are in the record and the last is the counter's own
+/// (CR-96).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartConfig {
     /// The data folder, the app's own (`noBackupFilesDir`).
     pub dir: String,
-    /// The network.
-    pub network: CounterNetwork,
     /// The time now, in seconds since 1970.
     pub now: u64,
-    /// The counter's identity secret, 32 bytes.
-    pub identity_secret: Vec<u8>,
-    /// The owner's root, 32 bytes.
-    pub owner_root: Vec<u8>,
-    /// The Key app's root, 32 bytes.
-    pub approver_root: Vec<u8>,
-    /// The checksum of the wallet description, 32 bytes.
-    pub wallet_checksum: Vec<u8>,
-    /// The fewest addresses a batch may hold.
-    pub batch_min_count: u32,
-    /// The shop's signed settings (`SignedSettings::to_bytes`).
-    pub settings: Vec<u8>,
-    /// The first signed batch (`SignedBatch::to_bytes`), taken only when the
-    /// data folder holds none yet.
-    pub first_batch: Option<Vec<u8>>,
+    /// The pairing record, as `pair_finish` returned it.
+    pub record: Vec<u8>,
     /// The SOCKS5 proxy of Tor, `host:port`, or none.
     pub proxy: Option<String>,
-    /// Peers to connect to first, `host:port`.
-    pub fixed_peers: Vec<String>,
 }
 
 wire_record!(StartConfig {
     dir,
-    network,
     now,
-    identity_secret,
-    owner_root,
-    approver_root,
-    wallet_checksum,
-    batch_min_count,
-    settings,
-    first_batch,
-    proxy,
-    fixed_peers
+    record,
+    proxy
 });
 wire_record_get!(StartConfig {
     dir,
-    network,
     now,
-    identity_secret,
-    owner_root,
-    approver_root,
-    wallet_checksum,
-    batch_min_count,
-    settings,
-    first_batch,
-    proxy,
-    fixed_peers
+    record,
+    proxy
 });
+
+/// The arguments of `pair_begin`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairBeginArgs {
+    /// The Key app's offer, as scanned (`OBMO`).
+    pub offer: Vec<u8>,
+    /// The name the counter gives itself.
+    pub name: String,
+    /// The time now, in seconds since 1970.
+    pub now: u64,
+}
+
+wire_record!(PairBeginArgs { offer, name, now });
+wire_record_get!(PairBeginArgs { offer, name, now });
+
+/// What `pair_begin` returns: the counter's request to show as a code, and
+/// the four words to show beside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairStartedView {
+    /// The request (`OBMJ`) for the owner's phone to scan.
+    pub request: Vec<u8>,
+    /// The four session words.
+    pub words: Vec<String>,
+}
+
+wire_record!(PairStartedView { request, words });
+
+/// What `pairing_read` returns about a saved pairing record, for display
+/// before the node starts. The record is read and its signatures are not
+/// checked here: `start` checks them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairingView {
+    /// The network the counter was paired on.
+    pub network: CounterNetwork,
+    /// The shop's settings in the record.
+    pub settings: SettingsView,
+}
+
+wire_record!(PairingView { network, settings });
 
 /// The arguments of `open`.
 #[derive(Debug, Clone, PartialEq, Eq)]

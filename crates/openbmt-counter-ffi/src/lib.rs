@@ -19,16 +19,22 @@
 //! - [`rates`] converts the price of bitcoin: the table of sources, the
 //!   reading of one reply and one rate made from samples. The app fetches
 //!   (`docs/RATE-RULES.md`, RT-40 to RT-45); the library decides.
-//! - [`shop`] reads the shop's signed settings before the node starts (Tor
-//!   on or off, the smallest sale); `start` checks the signatures.
+//! - [`shop`] reads the pairing record before the node starts (the network,
+//!   Tor on or off, the smallest sale); `start` checks the signatures.
+//! - The pairing ceremony (`pair_begin`, `pair_match`, `pair_differ`,
+//!   `pair_cancel`, `pair_finish`) runs in the [`Registry`]: one ceremony
+//!   at a time, in memory only, with the counter's key and number drawn from
+//!   the system's random source here (CR-91 to CR-96). `pair_finish` returns
+//!   the pairing record the app keeps and hands back at every `start`.
 //! - Errors are one enum, [`CounterError`], with a `rule`, a `text` and the
 //!   `Words` of what a person is shown. A panic in any call is caught,
 //!   becomes `CounterError::Internal` and poisons the node.
 //!
 //! The data folder is the app's own (`noBackupFilesDir`). It holds the
 //! counter's records and sales, so keeping it out of backups and device
-//! transfer, and protecting the identity secret the app hands over at
-//! every start, are the app's job and are not done here. The folder's lock
+//! transfer, and sealing the pairing record (it holds the identity secret)
+//! that the app hands over at every start, are the app's job and are not
+//! done here. The folder's lock
 //! (NR-79) applies as for any other start of the node.
 //!
 //! This crate has had internal review only. No independent security audit
@@ -54,6 +60,7 @@ mod error;
 pub mod host;
 #[cfg(any(target_os = "android", feature = "jni"))]
 mod jni;
+mod pair;
 pub mod pay;
 pub mod rates;
 mod say;
@@ -75,7 +82,7 @@ pub use say::{all_words, words_for};
 pub use shop::SettingsView;
 pub use views::{
     ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome, OpenArgs,
-    OpenedView, OverrideArgs, PumpView, RefundArgs, RefundAskView, RefundRow, RefundStateView,
-    ReportView, RequoteArgs, ScreenView, StartConfig, StateView, StatusView, WithdrawArgs,
-    WordsView,
+    OpenedView, OverrideArgs, PairBeginArgs, PairStartedView, PairingView, PumpView, RefundArgs,
+    RefundAskView, RefundRow, RefundStateView, ReportView, RequoteArgs, ScreenView, StartConfig,
+    StateView, StatusView, WithdrawArgs, WordsView,
 };

@@ -5,6 +5,8 @@ use bitcoin::hashes::Hash;
 use bitcoin::{Address, Network};
 use openbmt_core::command::{Action, OwnerCommand, SignedCommand};
 use openbmt_core::heartbeat::WatcherHeartbeat;
+use openbmt_core::settings::{Settings, SignedSettings};
+use openbmt_counter_node::PairingRecord;
 
 use super::kit::*;
 use super::wire::{frame, Fault, Rd, Report, W};
@@ -93,54 +95,61 @@ fn unit_pump(response: &[u8]) {
 }
 
 #[test]
-fn start_refuses_what_the_pairing_does_not_hold() {
+fn start_refuses_what_the_pairing_record_does_not_hold() {
     let rig = Rig::new();
-    let dir = rig.dir();
-    let base = start_config(dir.to_str().expect("UTF-8"));
+    let dir_path = rig.dir();
+    let dir = dir_path.to_str().expect("UTF-8");
+    let base = start_config(dir);
+    let with = |record: PairingRecord| {
+        let mut c = base.clone();
+        c.record = record.to_bytes();
+        c
+    };
     let mut cases: Vec<(&str, crate::StartConfig)> = Vec::new();
     let mut c = base.clone();
     c.dir = String::new();
     cases.push(("start-dir", c));
+    // A record that does not read: junk, and a secret that is not a key.
     let mut c = base.clone();
-    c.identity_secret = vec![3; 31];
-    cases.push(("start-identity", c));
+    c.record = vec![1, 2, 3];
+    cases.push(("CR-97", c));
     let mut c = base.clone();
-    c.identity_secret = vec![0; 32];
-    cases.push(("start-identity", c));
-    let mut c = base.clone();
-    c.owner_root = vec![1; 5];
-    cases.push(("start-roots", c));
-    let mut c = base.clone();
-    c.approver_root = c.owner_root.clone();
-    cases.push(("start-roots", c));
-    let mut c = base.clone();
-    c.wallet_checksum = vec![9; 31];
-    cases.push(("start-wallet", c));
-    let mut c = base.clone();
-    c.settings = vec![1, 2, 3];
-    cases.push(("start-settings", c));
-    let mut c = base.clone();
-    c.first_batch = Some(vec![1, 2, 3]);
-    cases.push(("start-batch", c));
-    let mut c = base.clone();
+    c.record[5..37].fill(0);
+    cases.push(("CR-97", c));
+    // Settings signed by the owner alone are loosening and need both.
+    let mut signed = signed_settings();
+    signed.approver_sig = None;
+    cases.push(("CR-94", with(record_with(signed))));
+    // Settings that are not newer than the pairing's floor.
+    let mut r = record();
+    r.settings_floor = r.settings.settings.version;
+    cases.push(("CR-94", with(r)));
+    // Settings that do not list this counter.
+    let mut s = Settings::defaults(1_000);
+    s.version = 1;
+    s.devices.insert(id(4).device_id());
+    s.counters.insert(id(4).device_id(), 10_000);
+    let other = SignedSettings {
+        owner_sig: s.sign(&id(1)),
+        approver_sig: Some(s.sign(&id(2))),
+        settings: s,
+    };
+    cases.push(("CR-95", with(record_with(other))));
+    // A first batch for another counter.
+    let mut r = record();
+    if let Some(b) = r.first_batch.as_mut() {
+        b.batch.counter = id(4).device_id();
+    }
+    cases.push(("CR-96", with(r)));
+    let mut c = base;
     c.proxy = Some("not an address".to_string());
     cases.push(("start-proxy", c));
-    let mut c = base;
-    c.fixed_peers = vec!["127.0.0.1:8333".to_string(), "nope".to_string()];
-    cases.push(("start-peer", c));
     for (rule, config) in cases {
         let response = rig.call(1, 0, &W::new().start(&config).0);
         let f = fault(&response);
         assert_eq!((f.status, f.rule.as_str()), (1, rule), "{f:?}");
         assert!(!f.words.heading.is_empty());
     }
-    // Settings signed by the owner alone are loosening and need both.
-    let mut c = start_config(dir.to_str().expect("UTF-8"));
-    let mut signed = signed_settings();
-    signed.approver_sig = None;
-    c.settings = signed.to_bytes();
-    let f = fault(&rig.call(1, 0, &W::new().start(&c).0));
-    assert_eq!(f.rule, "start-settings");
     // None of that left a node behind.
     rig.arm();
     assert_eq!(rig.start(), 1);
@@ -155,7 +164,7 @@ fn cr_87_the_node_does_not_start_with_tor_on_and_no_proxy() {
     tor.owner_sig = tor.settings.sign(&id(1));
     tor.approver_sig = Some(tor.settings.sign(&id(2)));
     let mut c = start_config(dir.to_str().expect("UTF-8"));
-    c.settings = tor.to_bytes();
+    c.record = record_with(tor).to_bytes();
     // Tor on, no proxy: refused, with the rule in its Display.
     let f = fault(&rig.call(1, 0, &W::new().start(&c).0));
     assert_eq!((f.status, f.rule.as_str()), (1, "CR-87"), "{f:?}");

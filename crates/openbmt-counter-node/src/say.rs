@@ -10,9 +10,11 @@
 
 use openbmt_core::pairing::PairError;
 use openbmt_core::say::{Tone, Who, Words};
+use openbmt_core::settings::SettingsError;
 
 use crate::dirstore::DirStoreError;
 use crate::node::{HeartbeatNotTaken, StartError};
+use crate::paired::PairRefused;
 
 impl DirStoreError {
     /// What the owner is told about a file of the counter's data folder.
@@ -129,6 +131,11 @@ pub fn pair_error_words(e: &PairError) -> Words {
             "The counter's name must be 1 to 32 characters of plain text, so pairing stopped.",
             "Choose another name and pair again.",
         ),
+        PairError::UnsupportedNetwork => stop(
+            "Network not supported",
+            "The Key app's offer names a bitcoin network that a counter cannot be paired on, so pairing stopped.",
+            "Use a Key app set up on the main network, a test network or regtest, then pair again.",
+        ),
         PairError::Decode(inner) => stop(
             "Pairing code unreadable",
             "The scanned pairing code could not be read, so pairing stopped.",
@@ -204,35 +211,40 @@ pub fn pair_error_words(e: &PairError) -> Words {
 }
 
 /// The steps of pairing, as the counter's screen tells the owner (the
-/// ceremony in `openbmt_core::pairing`).
+/// ceremony in `openbmt_core::pairing`, CR-91 to CR-99).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PairStep {
     /// The Key app shows an offer and the counter scans it.
     ScanOffer,
-    /// The counter shows its request.
-    ShowRequest,
-    /// Both screens show four words to compare.
+    /// The counter shows its code and four words, and waits for the person
+    /// to compare them with the Key app's.
     CompareWords,
+    /// The person said the words match; the counter scans the owner's phone.
+    ScanOwner,
     /// The counter has taken the signed pairing.
     Paired,
+    /// The person said the words differ; the counter forgot the pairing.
+    Differ,
 }
 
 impl PairStep {
     /// Every step.
-    pub const ALL: [PairStep; 4] = [
+    pub const ALL: [PairStep; 5] = [
         Self::ScanOffer,
-        Self::ShowRequest,
         Self::CompareWords,
+        Self::ScanOwner,
         Self::Paired,
+        Self::Differ,
     ];
 
     /// The name of the step.
     pub fn name(&self) -> &'static str {
         match self {
             Self::ScanOffer => "ScanOffer",
-            Self::ShowRequest => "ShowRequest",
             Self::CompareWords => "CompareWords",
+            Self::ScanOwner => "ScanOwner",
             Self::Paired => "Paired",
+            Self::Differ => "Differ",
         }
     }
 
@@ -242,30 +254,106 @@ impl PairStep {
             Self::ScanOffer => Words::new(
                 Tone::Info,
                 "Scan the Key app's code",
-                "The counter is waiting for the offer that the Key app shows.",
+                "The counter is waiting for the offer that the Key app shows on its Pair a counter screen.",
                 Who::Owner,
                 "Hold the counter's camera to the Key app's screen.",
-            ),
-            Self::ShowRequest => Words::new(
-                Tone::Info,
-                "Show this counter's code",
-                "The counter shows its request for the Key app to scan.",
-                Who::Owner,
-                "Scan the counter's code with the Key app.",
             ),
             Self::CompareWords => Words::new(
                 Tone::Info,
                 "Compare the four words",
-                "The counter and the Key app each show four words.",
+                "The counter shows a code and four words. The owner's phone carries the code to the Key app, which shows four words too.",
                 Who::Owner,
-                "If both show the same four words, tap They match here and approve in the Key app.",
+                "Scan this code with the owner's phone. If the Key app shows the same four words, tap They match here.",
+            ),
+            Self::ScanOwner => Words::new(
+                Tone::Info,
+                "Scan the owner's phone",
+                "The words match. The counter waits for the code the owner's phone shows once the Key app has approved.",
+                Who::Owner,
+                "Hold the counter's camera to the owner's phone and keep it there until the code is read.",
             ),
             Self::Paired => Words::new(
                 Tone::Good,
                 "Counter is paired",
-                "The counter took the pairing signed by the Key app and the owner's phone.",
+                "The counter took the pairing signed by the Key app and the owner's phone, and the shop's settings.",
                 Who::Nobody,
-                "Nothing to do. The counter is ready for the owner's first batch of addresses.",
+                "Nothing to do. If no addresses came with it, the owner's phone sends them next.",
+            ),
+            Self::Differ => Words::new(
+                Tone::Stop,
+                "Words differ: stopped",
+                "The four words did not match, so the counter forgot its key and its number and did not pair. Someone may have changed the code on the way.",
+                Who::Owner,
+                "Do not approve it on the Key app. Start again from the Key app: open Pair a counter and scan its code.",
+            )
+            .code("CR-92"),
+        }
+    }
+}
+
+impl PairRefused {
+    /// What the owner is told when a step of pairing, or a saved pairing, is
+    /// not accepted. Nothing was paired.
+    pub fn words(&self) -> Words {
+        let again = "Start again from the Key app: open Pair a counter and scan its code.";
+        let stop = |heading: &str, what: &str, next: &str| {
+            Words::new(Tone::Ended, heading, what, Who::Owner, next).code(self.rule())
+        };
+        match self {
+            Self::NoCeremony => stop(
+                "No pairing in progress",
+                "The counter has no pairing under way. It may have been closed, restarted or used up, which forgets a pairing that was not finished.",
+                again,
+            ),
+            Self::NoRandomness => stop(
+                "Counter could not make a key",
+                "The phone gave the counter no random numbers it can trust, so it did not make a key and pairing did not start.",
+                "Try again. If it fails again, restart the phone and then pair from the Key app.",
+            ),
+            Self::Pair(e) => pair_error_words(e).code(self.rule()),
+            Self::Bundle(e) => stop(
+                "Owner code not readable",
+                "The code from the owner's phone is not what the counter expects to finish pairing, so pairing is not finished.",
+                "Show the code on the owner's phone again and scan it again.",
+            )
+            .detail(e.to_string()),
+            Self::Settings(e) => stop(
+                "Settings not signed",
+                "The shop's settings that came with the pairing are not signed by both the owner's phone and the Key app, so pairing stopped.",
+                again,
+            )
+            .detail(e.to_string()),
+            Self::SettingsOld { .. } => stop(
+                "Settings are too old",
+                "The shop's settings that came with the pairing are older than the pairing itself, so pairing stopped.",
+                again,
+            ),
+            Self::NotOnDevices => stop(
+                "Counter not in settings",
+                "The shop's settings do not list this counter, so pairing stopped.",
+                "Have the owner's phone add this counter to the settings, then start again from the Key app.",
+            ),
+            Self::NotOnCounters => stop(
+                "Counter has no share",
+                "The shop's settings list this counter as a device but not among the counters that take payments, so pairing stopped.",
+                "Have the owner's phone give this counter a share in the settings, then start again from the Key app.",
+            ),
+            Self::Batch(e) => stop(
+                "First addresses refused",
+                "The first batch of addresses does not fit this counter or this wallet, or is smaller than a counter takes, so pairing stopped.",
+                "Have the owner's phone send a batch made for this counter, then start again from the Key app.",
+            )
+            .detail(e.to_string()),
+            Self::Record(e) => stop(
+                "Saved pairing not readable",
+                "The pairing this counter saved does not read back, so the counter did not start.",
+                "Restore the counter from its backup, or pair it again from the Key app.",
+            )
+            .detail(e.to_string()),
+            Self::RecordKey => stop(
+                "Saved pairing has no key",
+                "The pairing this counter saved holds a secret that is not a key, so the counter did not start.",
+                "Restore the counter from its backup, or pair it again from the Key app.",
             ),
         }
     }
@@ -334,7 +422,39 @@ pub fn all_words() -> Vec<(String, Words)> {
     for step in PairStep::ALL {
         all.push((format!("PairStep::{}", step.name()), step.words()));
     }
+    for (name, e) in every_pair_refused() {
+        all.push((format!("PairRefused::{name}"), e.words()));
+    }
     all
+}
+
+/// One value of every refusal of the pairing steps, with its name. The
+/// `Pair` variant carries a pairing error, whose words are listed with the
+/// pairing errors.
+pub fn every_pair_refused() -> Vec<(&'static str, PairRefused)> {
+    use openbmt_core::batch::BatchError;
+    use openbmt_core::wire::DecodeError;
+    vec![
+        ("NoCeremony", PairRefused::NoCeremony),
+        ("NoRandomness", PairRefused::NoRandomness),
+        ("Bundle", PairRefused::Bundle(DecodeError::Truncated)),
+        (
+            "Settings",
+            PairRefused::Settings(SettingsError::ApproverRequired),
+        ),
+        (
+            "SettingsOld",
+            PairRefused::SettingsOld { floor: 4, got: 4 },
+        ),
+        ("NotOnDevices", PairRefused::NotOnDevices),
+        ("NotOnCounters", PairRefused::NotOnCounters),
+        (
+            "Batch",
+            PairRefused::Batch(BatchError::CountTooSmall { min: 1_000, got: 3 }),
+        ),
+        ("Record", PairRefused::Record(DecodeError::Truncated)),
+        ("RecordKey", PairRefused::RecordKey),
+    ]
 }
 
 /// One value of every pairing error, with its name.
@@ -344,6 +464,7 @@ pub fn every_pair_error() -> Vec<(&'static str, PairError)> {
         ("SameRoot", PairError::SameRoot),
         ("CounterIsRoot", PairError::CounterIsRoot),
         ("InvalidName", PairError::InvalidName),
+        ("UnsupportedNetwork", PairError::UnsupportedNetwork),
         ("Decode", PairError::Decode(DecodeError::Truncated)),
         ("BindingMismatch", PairError::BindingMismatch),
         (

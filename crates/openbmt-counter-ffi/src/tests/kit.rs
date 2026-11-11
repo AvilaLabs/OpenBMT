@@ -18,16 +18,16 @@ use bitcoin::{
     Amount as Sats, Block, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence,
     Transaction, TxIn, TxMerkleNode, TxOut, Txid, WScriptHash, Witness,
 };
-use openbmt_core::batch::{AddressBatch, SignedBatch};
+use openbmt_core::batch::{AddressBatch, PinnedRoots, SignedBatch};
 use openbmt_core::identity::Identity;
 use openbmt_core::settings::{Settings, SignedSettings};
-use openbmt_counter_node::DriverPort;
+use openbmt_counter_node::{DriverPort, PairingRecord};
 use openbmt_net_io::{AppEvent, EventReceiver};
 use openbmt_watch::{HeaderStore, Peer, PeerAddr, PeerTransport};
 
 use crate::host::Port;
 use crate::tests::wire::{frame, W};
-use crate::{dispatch, CounterNetwork, Registry, StartConfig};
+use crate::{dispatch, Registry, StartConfig};
 
 /// The first moment of the app's clock.
 pub const T0: u64 = 1_700_000_000;
@@ -71,6 +71,7 @@ pub fn batch(start: u32, count: u32) -> SignedBatch {
 /// floor on sales, and customers who cannot join the Wi-Fi.
 pub fn signed_settings() -> SignedSettings {
     let mut s = Settings::defaults(1_000);
+    s.version = 1;
     s.customer_wifi = false;
     s.min_sale_sats = 0;
     s.devices.insert(id(3).device_id());
@@ -82,21 +83,33 @@ pub fn signed_settings() -> SignedSettings {
     }
 }
 
+/// The pairing record of the test counter (identity 3) on regtest, with
+/// these settings and no peers: what `pair_finish` returns, built by hand.
+pub fn record_with(settings: SignedSettings) -> PairingRecord {
+    PairingRecord {
+        identity_secret: [3; 32],
+        roots: PinnedRoots::new(id(1).device_id(), id(2).device_id()).expect("roots"),
+        wallet: [9; 32],
+        network: Network::Regtest,
+        settings_floor: 0,
+        settings,
+        first_batch: Some(batch(0, 10)),
+        peers: Vec::new(),
+    }
+}
+
+/// The record of the test counter.
+pub fn record() -> PairingRecord {
+    record_with(signed_settings())
+}
+
 /// What the app hands `start`, for a data folder.
 pub fn start_config(dir: &str) -> StartConfig {
     StartConfig {
         dir: dir.to_string(),
-        network: CounterNetwork::Regtest,
         now: T0,
-        identity_secret: vec![3; 32],
-        owner_root: id(1).device_id().to_bytes().to_vec(),
-        approver_root: id(2).device_id().to_bytes().to_vec(),
-        wallet_checksum: vec![9; 32],
-        batch_min_count: 1,
-        settings: signed_settings().to_bytes(),
-        first_batch: Some(batch(0, 10).to_bytes()),
+        record: record().to_bytes(),
         proxy: None,
-        fixed_peers: Vec::new(),
     }
 }
 

@@ -26,16 +26,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bitcoin::{Network, ScriptBuf};
-use openbmt_core::batch::{PinnedRoots, SignedBatch};
+use openbmt_core::batch::{BatchPolicy, SignedBatch};
 use openbmt_core::command::SignedCommand;
-use openbmt_core::identity::{DeviceId, Identity};
-use openbmt_core::settings::SignedSettings;
 use openbmt_counter::{
-    refund_destination, Actor, Amount, CashRefund, Currency, Pairing, Rate, RateSource, RefundAsk,
+    refund_destination, Actor, Amount, CashRefund, Currency, Rate, RateSource, RefundAsk,
     RefundRequest, Report, Screen,
 };
 use openbmt_counter_node::{
-    DriverPort, HeartbeatNotTaken, Launch, Node, NodeConfig, StartError, NOTE_LOG,
+    DriverPort, HeartbeatNotTaken, Launch, Node, NodeConfig, PairRefused, PairingRecord,
+    StartError, NOTE_LOG,
 };
 use openbmt_net_io::{
     Clock, Driver, DriverConfig, EventReceiver, FileStorage, OsRandomness, SystemClock,
@@ -43,6 +42,7 @@ use openbmt_net_io::{
 use openbmt_watch::HeaderChain;
 
 use crate::error::{from_rule, internal, poisoned, refused_by, CounterError, Kind};
+use crate::pair::refused;
 use crate::pay::{payment_for, Payment};
 use crate::say::words_for;
 use crate::views::{
@@ -129,15 +129,6 @@ fn reports(list: Vec<Report>) -> Vec<ReportView> {
     list.into_iter().map(ReportView).collect()
 }
 
-fn bytes32(what: &str, rule: &str, bytes: &[u8]) -> Result<[u8; 32], CounterError> {
-    <[u8; 32]>::try_from(bytes).map_err(|_| {
-        refused_by(
-            rule,
-            format!("{what} is not 32 bytes, it is {}", bytes.len()),
-        )
-    })
-}
-
 fn actor(a: ActorView) -> Actor {
     Actor {
         role: a.role.role(),
@@ -189,48 +180,29 @@ struct Checked {
     network: Network,
 }
 
-fn check_start(req: StartConfig, clock: &Arc<AtomicU64>) -> Result<Checked, CounterError> {
+fn check_start(
+    req: StartConfig,
+    policy: BatchPolicy,
+    clock: &Arc<AtomicU64>,
+) -> Result<Checked, CounterError> {
     if req.dir.is_empty() {
         return Err(refused_by("start-dir", "the data folder is empty"));
     }
-    let secret = bytes32(
-        "the identity secret",
-        "start-identity",
-        &req.identity_secret,
-    )?;
-    let identity = Identity::from_secret_bytes(&secret)
-        .map_err(|e| refused_by("start-identity", format!("the identity secret: {e}")))?;
-    let owner = DeviceId::from_bytes(&bytes32("the owner root", "start-roots", &req.owner_root)?)
-        .map_err(|e| refused_by("start-roots", format!("the owner root: {e}")))?;
-    let approver = DeviceId::from_bytes(&bytes32(
-        "the Key app root",
-        "start-roots",
-        &req.approver_root,
-    )?)
-    .map_err(|e| refused_by("start-roots", format!("the Key app root: {e}")))?;
-    let roots = PinnedRoots::new(owner, approver)
-        .map_err(|e| refused_by("start-roots", format!("the roots: {e}")))?;
-    let wallet_checksum = bytes32("the wallet check", "start-wallet", &req.wallet_checksum)?;
-    let signed = SignedSettings::from_bytes(&req.settings)
-        .map_err(|e| refused_by("start-settings", format!("the settings: {e}")))?;
-    signed
-        .verify(&roots, None)
-        .map_err(|e| refused_by("start-settings", format!("the settings: {e}")))?;
+    let record = PairingRecord::from_bytes(&req.record)
+        .map_err(|e| refused(PairRefused::Record(e)))?;
+    // CR-94 to CR-96 again, on what was kept: the settings' signatures, the
+    // lists, the version and the first batch.
+    record.check(&policy).map_err(refused)?;
+    let identity = record.identity().map_err(refused)?;
     // CR-87: with Tor on in the verified settings, the node never starts
     // without the proxy, whatever the app's own reading of the settings said.
-    if signed.settings.tor_on && req.proxy.is_none() {
+    if record.settings.settings.tor_on && req.proxy.is_none() {
         return Err(refused_by(
             "CR-87",
             "CR-87: the settings have Tor on and the start has no proxy",
         ));
     }
-    let first_batch = req
-        .first_batch
-        .as_deref()
-        .map(SignedBatch::from_bytes)
-        .transpose()
-        .map_err(|e| refused_by("start-batch", format!("the first batch: {e}")))?;
-    let network = req.network.network();
+    let network = record.network;
     let mut driver = DriverConfig::new(network, 0);
     driver.proxy = req
         .proxy
@@ -238,32 +210,39 @@ fn check_start(req: StartConfig, clock: &Arc<AtomicU64>) -> Result<Checked, Coun
         .map(str::parse)
         .transpose()
         .map_err(|e| refused_by("start-proxy", format!("the proxy address: {e}")))?;
-    for peer in &req.fixed_peers {
+    // CR-99: the peers are hints; a bad one is dropped by the record's own
+    // reading, so none is left here that does not parse.
+    for peer in &record.peers {
         driver
             .fixed_peers
             .push(peer.parse().map_err(|e| {
                 refused_by("start-peer", format!("the peer address {peer:?}: {e}"))
             })?);
     }
-    let pairing = Pairing {
-        roots,
-        wallet_checksum,
-        batch_policy: openbmt_core::batch::BatchPolicy {
-            min_count: req.batch_min_count,
-        },
-    };
+    let mut pairing = record.pairing();
+    pairing.batch_policy = policy;
     clock.fetch_max(req.now, Ordering::SeqCst);
-    let mut config = NodeConfig::new(req.dir, identity, pairing, signed.settings, driver);
-    config.first_batch = first_batch;
+    let mut config = NodeConfig::new(
+        req.dir,
+        identity,
+        pairing,
+        record.settings.settings.clone(),
+        driver,
+    );
+    config.first_batch = record.first_batch.clone();
     config.clock = Box::new(AppClock(Arc::clone(clock)));
     Ok(Checked { config, network })
 }
 
 impl Entry {
     /// Start a node from the app's request.
-    pub(crate) fn start(req: StartConfig, spawn: Spawn) -> Result<Self, CounterError> {
+    pub(crate) fn start(
+        req: StartConfig,
+        spawn: Spawn,
+        policy: BatchPolicy,
+    ) -> Result<Self, CounterError> {
         let clock = Arc::new(AtomicU64::new(0));
-        let Checked { config, network } = check_start(req, &clock)?;
+        let Checked { config, network } = check_start(req, policy, &clock)?;
         let node = Node::start_with(config, spawn).map_err(|e| start_error(&e))?;
         Ok(Self {
             inner: Mutex::new(Inner {

@@ -78,7 +78,12 @@ private const val OP_NOTES = 31
 private const val OP_RATE_SOURCES = 40
 private const val OP_RATE_PARSE = 41
 private const val OP_RATE_COMBINE = 42
-private const val OP_SETTINGS_READ = 43
+private const val OP_PAIRING_READ = 43
+private const val OP_PAIR_BEGIN = 44
+private const val OP_PAIR_MATCH = 45
+private const val OP_PAIR_DIFFER = 46
+private const val OP_PAIR_CANCEL = 47
+private const val OP_PAIR_FINISH = 48
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -126,25 +131,24 @@ enum class ActorRole { Cashier, Manager }
 class Actor(val role: ActorRole, val name: String)
 
 /**
- * What [CounterNode.start] is given. The identity secret, the two roots, the
- * wallet check, the signed settings and the first batch are what the counter
- * was paired with; the app keeps them and hands them over at each start.
- * [dir] is the app's own folder (`noBackupFilesDir`).
+ * What [CounterNode.start] is given. [record] is the pairing record that
+ * [Pairing.finish] returned (the identity secret, the two roots, the wallet
+ * check, the network, the signed settings, the first batch and the peers);
+ * the app keeps it sealed and hands it over at each start. [dir] is the
+ * app's own folder (`noBackupFilesDir`).
  */
 class StartConfig(
     val dir: String,
-    val network: CounterNetwork,
     val now: Long,
-    val identitySecret: ByteArray,
-    val ownerRoot: ByteArray,
-    val approverRoot: ByteArray,
-    val walletChecksum: ByteArray,
-    val batchMinCount: Long,
-    val settings: ByteArray,
-    val firstBatch: ByteArray?,
+    val record: ByteArray,
     val proxy: String?,
-    val fixedPeers: List<String>,
 )
+
+/** What [Pairing.begin] returns: the request to show as a code, and the four words. */
+class PairStarted(val request: ByteArray, val words: List<String>)
+
+/** What the app needs from a saved pairing record before the node runs. */
+class PairingInfo(val network: CounterNetwork, val settings: ShopSettings)
 
 /** How a refund is asked for. */
 sealed class RefundAsk {
@@ -435,15 +439,14 @@ internal class Reader(private val data: ByteArray) {
     fun fail(what: String): Nothing = bad(what)
 }
 
-private fun Writer.network(v: CounterNetwork): Writer =
-    u8(
-        when (v) {
-            CounterNetwork.Mainnet -> TAG_COUNTER_NETWORK_MAINNET
-            CounterNetwork.Testnet -> TAG_COUNTER_NETWORK_TESTNET
-            CounterNetwork.Signet -> TAG_COUNTER_NETWORK_SIGNET
-            CounterNetwork.Regtest -> TAG_COUNTER_NETWORK_REGTEST
-        },
-    )
+private fun Reader.network(): CounterNetwork =
+    when (u8()) {
+        TAG_COUNTER_NETWORK_MAINNET -> CounterNetwork.Mainnet
+        TAG_COUNTER_NETWORK_TESTNET -> CounterNetwork.Testnet
+        TAG_COUNTER_NETWORK_SIGNET -> CounterNetwork.Signet
+        TAG_COUNTER_NETWORK_REGTEST -> CounterNetwork.Regtest
+        else -> tag("CounterNetwork")
+    }
 
 private fun Writer.actor(v: Actor): Writer =
     u8(
@@ -464,10 +467,7 @@ private fun Writer.refundAsk(v: RefundAsk): Writer {
 }
 
 private fun Writer.start(c: StartConfig): Writer =
-    string(c.dir).network(c.network).u64(c.now).bytes(c.identitySecret).bytes(c.ownerRoot)
-        .bytes(c.approverRoot).bytes(c.walletChecksum).u32(c.batchMinCount).bytes(c.settings)
-        .option(c.firstBatch) { bytes(it) }.option(c.proxy) { string(it) }
-        .list(c.fixedPeers) { string(it) }
+    string(c.dir).u64(c.now).bytes(c.record).option(c.proxy) { string(it) }
 
 private fun Reader.saleState(): SaleState =
     when (u8()) {
@@ -645,9 +645,47 @@ object Rates {
  * the same bytes.
  */
 object Shop {
-    fun settings(bytes: ByteArray): ShopSettings {
-        val r = decodeResponse(send(requestFrame(OP_SETTINGS_READ, 0) { it.bytes(bytes) }))
-        return r.shopSettings().also { r.end() }
+    fun pairing(record: ByteArray): PairingInfo {
+        val r = decodeResponse(send(requestFrame(OP_PAIRING_READ, 0) { it.bytes(record) }))
+        return PairingInfo(r.network(), r.shopSettings()).also { r.end() }
+    }
+}
+
+/**
+ * The pairing ceremony of the counter (CR-91 to CR-96). It works on no node
+ * and lives in the library, in memory only: [begin] takes the Key app's offer
+ * and returns the counter's request and the four words; the person compares
+ * the words and calls [match] or [differ]; [finish] takes the owner phone's
+ * bundle and returns the pairing record the app keeps sealed. A refusal is a
+ * [CounterException] with its words.
+ */
+object Pairing {
+    /** Begin from the offer's bytes; [now] is the app's clock. */
+    fun begin(offer: ByteArray, name: String, now: Long): PairStarted {
+        val r = decodeResponse(send(requestFrame(OP_PAIR_BEGIN, 0) { it.bytes(offer).string(name).u64(now) }))
+        return PairStarted(r.bytes(), r.strings()).also { r.end() }
+    }
+
+    /** The person says the words match. */
+    fun match(now: Long) {
+        callUnit(OP_PAIR_MATCH, 0) { it.u64(now) }
+    }
+
+    /** The person says the words differ: the ceremony is forgotten; these are the words to show. */
+    fun differ(): Words {
+        val r = call(OP_PAIR_DIFFER, 0)
+        return r.words().also { r.end() }
+    }
+
+    /** The person leaves: the ceremony is forgotten. */
+    fun cancel() {
+        callUnit(OP_PAIR_CANCEL, 0)
+    }
+
+    /** Finish with the owner phone's bundle; returns the pairing record. */
+    fun finish(now: Long, bundle: ByteArray): ByteArray {
+        val r = decodeResponse(send(requestFrame(OP_PAIR_FINISH, 0) { it.u64(now).bytes(bundle) }))
+        return r.bytes().also { r.end() }
     }
 }
 

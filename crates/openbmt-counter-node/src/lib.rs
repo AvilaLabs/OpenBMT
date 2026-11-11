@@ -41,6 +41,7 @@ pub mod dirstore;
 pub mod link;
 pub mod node;
 pub mod notices;
+pub mod paired;
 pub mod say;
 
 #[cfg(test)]
@@ -54,3 +55,7 @@ pub use node::{
     MAX_EVENTS_PER_PUMP, NOTE_LOG, SETTLE_EVERY_SECS, SETTLE_MIN_GAP_SECS, TX_CACHE,
 };
 pub use notices::{NodeRecords, NoticeOutbox, NoticeStoreError, RecordSource};
+pub use paired::{
+    batch_policy, Ceremony, PairRefused, PairingRecord, Started, BATCH_MIN_COUNT,
+    MAGIC_PAIRING_RECORD,
+};

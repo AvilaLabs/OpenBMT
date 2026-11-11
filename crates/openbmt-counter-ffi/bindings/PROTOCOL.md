@@ -78,7 +78,12 @@ ops run on another; it waits for at most 250 ms.
  40 rate_sources     handle zero  args () -> list<RateSourceView>
  41 rate_parse       handle zero  args RateParseArgs -> SampleView
  42 rate_combine     handle zero  args RateCombineArgs -> RateView
- 43 settings_read    handle zero  args list<u8> -> SettingsView
+ 43 pairing_read     handle zero  args list<u8> -> PairingView
+ 44 pair_begin       handle zero  args PairBeginArgs -> PairStartedView
+ 45 pair_match       handle zero  args u64 -> ()
+ 46 pair_differ      handle zero  args () -> Words
+ 47 pair_cancel      handle zero  args () -> ()
+ 48 pair_finish      handle zero  args (u64, list<u8>) -> list<u8>
 ```
 
 ## Types
@@ -89,7 +94,10 @@ CounterNetwork: enum, one tag byte
 ActorRole: enum, one tag byte
     tags Cashier=0 Manager=1
 ActorView: record: role: ActorRole, name: string
-StartConfig: record: dir: string, network: CounterNetwork, now: u64, identity_secret: list<u8>, owner_root: list<u8>, approver_root: list<u8>, wallet_checksum: list<u8>, batch_min_count: u32, settings: list<u8>, first_batch: option<list<u8>>, proxy: option<string>, fixed_peers: list<string>
+StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>
+PairBeginArgs: record: offer: list<u8>, name: string, now: u64
+PairStartedView: record: request: list<u8>, words: list<string>
+PairingView: record: network: CounterNetwork, settings: SettingsView
 OpenArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64
 RequoteArgs: record: now: u64, index: u32, rate: u64, source_label: string, source_fetched_at: u64
 OverrideArgs: record: now: u64, index: u32, actor: ActorView

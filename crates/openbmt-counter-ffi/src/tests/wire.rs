@@ -1,7 +1,7 @@
 //! A request writer and a response reader written separately from the
 //! encoder under test: the field order is written out again here.
 
-use crate::{CounterNetwork, StartConfig};
+use crate::StartConfig;
 
 /// Writes the fields of a request.
 #[derive(Default)]
@@ -55,29 +55,10 @@ impl W {
 
     /// The fields of `start`, in the order of the protocol.
     pub fn start(self, c: &StartConfig) -> Self {
-        let network = match c.network {
-            CounterNetwork::Mainnet => 0,
-            CounterNetwork::Testnet => 1,
-            CounterNetwork::Signet => 2,
-            CounterNetwork::Regtest => 3,
-        };
-        let mut w = self
-            .string(&c.dir)
-            .u8(network)
+        self.string(&c.dir)
             .u64(c.now)
-            .bytes(&c.identity_secret)
-            .bytes(&c.owner_root)
-            .bytes(&c.approver_root)
-            .bytes(&c.wallet_checksum)
-            .u32(c.batch_min_count)
-            .bytes(&c.settings)
-            .opt_bytes(c.first_batch.as_deref())
+            .bytes(&c.record)
             .opt_string(c.proxy.as_deref())
-            .u32(u32::try_from(c.fixed_peers.len()).expect("fits"));
-        for p in &c.fixed_peers {
-            w = w.string(p);
-        }
-        w
     }
 
     /// The fields of `open`.

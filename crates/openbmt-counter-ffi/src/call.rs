@@ -37,10 +37,12 @@
 //!   (`heartbeat`, `command`, `check_in`, `add_batch`).
 //! - 30 `status`, 31 `notes`.
 //! - 40 to 42 the price of bitcoin (`rate_sources`, `rate_parse`,
-//!   `rate_combine`) and 43 `settings_read`, which work on no node
-//!   (handle 0). `settings_read` is for display only: it does not verify
-//!   the settings, and `start` itself refuses a verified Tor-on setting
-//!   without a proxy (CR-87).
+//!   `rate_combine`), 43 `pairing_read` and 44 to 48 the pairing ceremony
+//!   (`pair_begin`, `pair_match`, `pair_differ`, `pair_cancel`,
+//!   `pair_finish`), which work on no node (handle 0). `pairing_read` is for
+//!   display only: it does not verify the record, and `start` itself
+//!   refuses a verified Tor-on setting without a proxy (CR-87). The
+//!   ceremony lives in the registry, one at a time and in memory only.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -54,6 +56,8 @@ use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
+use openbmt_counter_node::Ceremony;
+
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::error::{internal, refused_by, wrong_state, CounterError};
 use crate::host::{real_spawn, Entry, Spawn};
@@ -63,12 +67,12 @@ use crate::rates::{
     RateView, SampleView,
 };
 use crate::say::{TONES, WHOS};
-use crate::shop::{settings_read, SettingsView};
+use crate::shop::{pairing_read, SettingsView};
 use crate::views::{
     put_words, ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome,
-    OpenArgs, OpenedView, OverrideArgs, PumpView, RefundArgs, RefundAskView, RefundRow,
-    RefundStateView, ReportView, RequoteArgs, ScreenView, StartConfig, StateView, StatusView,
-    WithdrawArgs, WordsView,
+    OpenArgs, OpenedView, OverrideArgs, PairBeginArgs, PairStartedView, PairingView, PumpView,
+    RefundArgs, RefundAskView, RefundRow, RefundStateView, ReportView, RequoteArgs, ScreenView,
+    StartConfig, StateView, StatusView, WithdrawArgs, WordsView,
 };
 
 /// The first four bytes of a request.
@@ -114,9 +118,15 @@ struct RegState {
 /// reference; a platform binding keeps one in a static.
 pub struct Registry {
     state: Mutex<RegState>,
+    /// The pairing ceremony under way, if any (CR-91). Memory only.
+    pub(crate) ceremony: Mutex<Option<Ceremony>>,
     /// The way the next node starts its driver, in tests.
     #[cfg(test)]
     pub(crate) spawner: Mutex<Option<Spawn>>,
+    /// The smallest batch in tests: 1, so that small batches can be made.
+    /// `None` is the counter's own rule (CR-96).
+    #[cfg(test)]
+    pub(crate) batch_min: Mutex<Option<u32>>,
 }
 
 impl Default for Registry {
@@ -133,8 +143,11 @@ impl Registry {
                 next: 1,
                 nodes: BTreeMap::new(),
             }),
+            ceremony: Mutex::new(None),
             #[cfg(test)]
             spawner: Mutex::new(None),
+            #[cfg(test)]
+            batch_min: Mutex::new(Some(1)),
         }
     }
 
@@ -169,7 +182,7 @@ impl Registry {
 
     fn start(&self, config: StartConfig) -> Result<u64, CounterError> {
         self.check_room()?;
-        let entry = Arc::new(Entry::start(config, self.spawn())?);
+        let entry = Arc::new(Entry::start(config, self.spawn(), self.batch_policy())?);
         let mut state = self.lock();
         if state.nodes.len() >= MAX_NODES {
             drop(state);
@@ -354,8 +367,15 @@ fn build_ops() -> Vec<Op> {
         op(42, "rate_combine", Zero, |_, a: RateCombineArgs| {
             rate_combine(a)
         }),
-        op(43, "settings_read", Zero, |_, bytes: Vec<u8>| {
-            settings_read(bytes)
+        op(43, "pairing_read", Zero, |_, bytes: Vec<u8>| pairing_read(bytes)),
+        op(44, "pair_begin", Zero, |c, a: PairBeginArgs| {
+            c.registry.pair_begin(a)
+        }),
+        op(45, "pair_match", Zero, |c, now: u64| c.registry.pair_match(now)),
+        op(46, "pair_differ", Zero, |c, ()| c.registry.pair_differ()),
+        op(47, "pair_cancel", Zero, |c, ()| c.registry.pair_cancel()),
+        op(48, "pair_finish", Zero, |c, (now, bundle): (u64, Vec<u8>)| {
+            c.registry.pair_finish(now, &bundle)
         }),
     ]
 }
@@ -487,6 +507,9 @@ fn definitions() -> Vec<TypeDef> {
         ActorRole::define(),
         ActorView::define(),
         StartConfig::define(),
+        PairBeginArgs::define(),
+        PairStartedView::define(),
+        PairingView::define(),
         OpenArgs::define(),
         RequoteArgs::define(),
         OverrideArgs::define(),

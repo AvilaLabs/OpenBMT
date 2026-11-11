@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use super::wire::{frame, W};
 use crate::call::{enum_tags, ops};
 use crate::say::{TONES, WHOS};
-use crate::{CounterNetwork, StartConfig};
+use crate::StartConfig;
 
 fn bindings(file: &str) -> PathBuf {
     std::path::PathBuf::from(
@@ -242,24 +242,15 @@ fn the_kotlin_wrapper_takes_no_lock_so_that_pump_and_the_screen_can_run_together
 }
 
 const START_FRAME_HEX: &str =
-    "4f424d6d01010000000000000000000100000064030100000000000000010000000101000000020100000003\
-010000000405000000010000000600010100000070010000000100000061";
+    "4f424d6d0101000000000000000000010000006401000000000000000100000002010100000070";
 
 #[test]
 fn the_start_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
     let sample = StartConfig {
         dir: "d".to_string(),
-        network: CounterNetwork::Regtest,
         now: 1,
-        identity_secret: vec![1],
-        owner_root: vec![2],
-        approver_root: vec![3],
-        wallet_checksum: vec![4],
-        batch_min_count: 5,
-        settings: vec![6],
-        first_batch: None,
+        record: vec![2],
         proxy: Some("p".to_string()),
-        fixed_peers: vec!["a".to_string()],
     };
     let bytes = frame(1, 0, &W::new().start(&sample).0);
     let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
