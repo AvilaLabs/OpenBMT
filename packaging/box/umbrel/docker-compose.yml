@@ -1,6 +1,13 @@
-# The Box speaks its own framing over raw TCP, not HTTP, so there is no
-# app_proxy: the port is published on the host as it is.
+# The app opens to the Box's status page (a plain HTTP page the Box serves
+# itself, BX-54 to BX-61), behind Umbrel's login. The shop's devices do not
+# use it: they reach the Box's own framing over raw TCP on 8986, which is
+# published on the host as it is.
 services:
+  app_proxy:
+    environment:
+      APP_HOST: openbmt-box_server_1
+      APP_PORT: 8987
+
   server:
     image: openbmt-box:0.1.0
     restart: on-failure
@@ -11,9 +18,15 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    # An invitation is given as a file under /data (BX-12). The Box reads it
-    # once and deletes it; with no file it says so in its log and runs on.
-    command: ["--invitation-file", "/data/invitation.txt"]
+    # The status page listens inside the container only; app_proxy reaches it
+    # and nothing publishes it. An invitation is given on the page, or as a
+    # file under /data (BX-12); the Box reads the file once and deletes it,
+    # and with no file it runs on.
+    command:
+      - "--status-page"
+      - "0.0.0.0:8987"
+      - "--invitation-file"
+      - "/data/invitation.txt"
     ports:
       - "8986:8986/tcp"
     volumes:

@@ -47,6 +47,14 @@ invitation (BX-12) is given as a file: put it in the volume and start the
 container with the extra arguments `--invitation-file /data/invitation.txt`.
 The Box reads the file once and deletes it.
 
+The Box can also serve a status page: the extra arguments
+`--status-page 0.0.0.0:8987` turn it on (it is off by default; BX-54 to
+BX-61) and the port is published like the Box's own, for example
+`-p 192.168.1.20:8987:8987`. The page is plain HTTP with no login of its own,
+so on a mini PC publish it on the LAN address only, as the compose file does
+for the relay, and do not leave it on a network others use. The compose file
+for a mini PC does not turn it on.
+
 The Box installs no signal handler, so `docker stop` ends it by the default
 action of SIGTERM. That loses nothing: every file the Box writes is replaced
 whole, and a log's torn tail is cut at the next start (BX-50, BX-52; the
@@ -79,16 +87,32 @@ What works: the files follow the current umbrel-apps rules for the manifest
 (field order, `storage` with `dataRoot: data`, empty `defaultUsername` and
 `defaultPassword`, a first-run note at the top of the description) and the
 compose file (data under `${APP_DATA_DIR}/data` with a committed
-`data/.gitkeep`, the Box run as uid 1000 with an init, a raw TCP port
-mapping).
+`data/.gitkeep`, the Box run as uid 1000 with an init).
 
-The Box has no web page, so there is no `app_proxy`: the compose file maps
-the Box's port as `8986:8986/tcp` on the host, and the devices connect to
-it directly. An invitation is given by saving it as `invitation.txt` in the
-app's data folder (`app-data/openbmt-box/data` under the Umbrel's data
-root) and restarting the app; the compose file passes
-`--invitation-file /data/invitation.txt` to the Box. With no such file the
-Box says so in its log and runs on.
+The app opens to a page. The Box serves its own status page (BX-54 to
+BX-61, `--status-page 0.0.0.0:8987`, passed by the compose file) and the
+compose file has an `app_proxy` that routes the manifest's `port: 8987` to
+it (`APP_HOST: openbmt-box_server_1`, `APP_PORT: 8987`). Umbrel's login is
+left on. The page says whether the Box is waiting for an invitation, has one
+open, is paired (with the shop's four short words) or is turned off, each
+with what it means and what to do next; it gives the address the shop's
+devices use (the host the visitor typed and port 8986), the version and how
+many devices are on the list; and while the Box waits it has a box for the
+invitation. The compose file also still maps the Box's raw port as
+`8986:8986/tcp` on the host, and the devices connect to that directly: they
+do not go through the proxy or the login. An invitation can still be given
+as the file `invitation.txt` in the app's data folder
+(`app-data/openbmt-box/data`), read at the next start.
+
+How the port was chosen. The manifest `port` must be unique across the App
+Store, and `8987` is the port the page listens on inside the container. The
+umbrel-apps tree (`getumbrel/umbrel-apps`, commit `3a08738`, read on
+2026-11-11 as a tarball of its `umbrel-app.yml` and `docker-compose.yml`
+files, 399 apps) has no manifest with `port: 8987` or `8986`, no compose
+file that publishes either, and no `APP_PORT` of either; its manifest ports
+near these are 8985, 8989 and 8980. The check is a read of that tree at one
+commit: another app may take the port before this one is submitted, so it is
+repeated then.
 
 To try it, copy `umbrel/` into a community app store or an umbrel-apps
 checkout as a folder named `openbmt-box`, with an image named in
@@ -96,37 +120,52 @@ checkout as a folder named `openbmt-box`, with an image named in
 
 Not yet tested on an Umbrel device: that the app installs, starts and keeps
 its data, that uid 1000 can write the data folder, that restarts and updates
-keep the key, and that the manifest passes the umbrel-apps linter. Two things
-stand between these files and the official App Store, which they are not
-submitted to:
+keep the key, that the manifest passes the umbrel-apps linter, that the
+page opens through Umbrel's proxy with its login (and that the proxy passes
+the `Host` and `Origin` headers as the browser sent them, which the page's
+cross-site check (BX-58) needs: a proxy that rewrites `Host` makes the page
+refuse the invitation form with words), and that the form takes an
+invitation there. The page itself, its headers, its refusals and its
+invitation form are tested on the loopback (the Box's tests and
+`scripts/box-e2e.sh`, step 17).
 
-- The App Store requires an app to open to a web page (a status or setup
-  page). The Box has none. The package needs one, served behind `app_proxy`
-  on a manifest `port` other than 8986, that shows the Box's state and its
-  address and takes the invitation, so that nobody needs a shell on the
+What now meets the App Store's rule that an app opens to a useful page, and
+what does not yet:
+
+- Met in the files: the app opens to a status and setup page that shows the
+  Box's state and address and takes the invitation, behind `app_proxy` on a
+  manifest `port` other than 8986, so that nobody needs a shell on the
   Umbrel.
-- The image line is `openbmt-box:0.1.0`, a local name. The App Store needs a
-  published image for linux/amd64 and linux/arm64, pinned as
+- Release time: the image line is `openbmt-box:0.1.0`, a local name. The App
+  Store needs a published image for linux/amd64 and linux/arm64, pinned as
   `registry/repo:version@sha256:<index digest>`. No image is published; that
   is done when a release is made.
-
-`submission` in the manifest is empty because nothing is submitted.
+- Not done: the gallery and the icon, which the Umbrel team adds; the
+  manifest `submission`, which is empty because nothing is submitted.
 
 ## Start9
 
 What works: a StartOS 0.4 package in `startos/` (start-sdk 4.1.0): the
 manifest with an image built from the Box's Dockerfile for x86_64 and
-aarch64, one raw TCP interface, the daemon with a listening health check,
-the data volume and its backup, and the action "Enter invitation". It
-typechecks, and CI typechecks it on every push.
+aarch64, two interfaces (the Box's raw TCP port and a `ui` interface for
+its status page), the daemon with a listening health check for each, the
+data volume and its backup, and the action "Enter invitation". The Box is
+started with
+`--status-page [::]:8987` and StartOS serves that port as the interface
+"Status page" over HTTP and HTTPS on the addresses the user enables. It
+typechecks, and CI typechecks it on every push. Both ways to give the
+invitation work: the page, and the action.
 
 To try the checks, from `startos/`: `npm ci`, `npx tsc --noEmit`. To build
 and install the package, see `startos/README.md`; that needs Docker and
 `start-cli`.
 
 Not yet tested on a StartOS device: that the package builds and installs,
-volume ownership under the idmap, IPv6 and IPv4 clients, the invitation
-action, backup and restore, and stopping the service. The list is in
+volume ownership under the idmap, IPv6 and IPv4 clients, that the "Status
+page" interface opens in the browser and that StartOS passes the `Host` and
+`Origin` headers on (the page's cross-site check, BX-58, needs them), the
+invitation page and the invitation action, backup and restore, and stopping
+the service. The list is in
 `startos/README.md`. No image is published and nothing is submitted to
 Start9's registry.
 

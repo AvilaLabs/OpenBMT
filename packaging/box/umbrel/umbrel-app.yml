@@ -7,12 +7,13 @@ name: OpenBMT Box
 version: "0.1.0"
 tagline: The shop's own small server for taking bitcoin at the counter
 description: >-
-  First run: the Box has no web page and no login. It is paired from the Key
-  app. Make an invitation in the Key app, save its 30 characters as the file
-  invitation.txt in this app's data folder, restart the app, and then enter
-  the Box's address (this Umbrel's address and port 8986) in the owner's
-  phone. The Box reads the file once and deletes it; the invitation is good
-  for 30 minutes.
+  First run: open the app. Its page shows whether the Box is paired. Make an
+  invitation in the Key app (30 characters, good for 30 minutes), type it in
+  the box on the page, and then enter the Box's address, which the page
+  shows (this Umbrel's address and port 8986), in the owner's phone. The page
+  is behind Umbrel's login; the shop's devices do not use it, they connect to
+  port 8986 directly. An invitation can also be saved as the file
+  invitation.txt in this app's data folder before the app starts.
 
 
   The OpenBMT Box is the relay between a shop's devices and the place where
@@ -27,7 +28,7 @@ website: https://github.com/AvilaLabs/OpenBMT
 repo: https://github.com/AvilaLabs/OpenBMT
 support: https://github.com/AvilaLabs/OpenBMT/issues
 
-port: 8986
+port: 8987
 gallery: []
 path: ""
 

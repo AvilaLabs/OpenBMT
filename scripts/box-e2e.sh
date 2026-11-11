@@ -72,9 +72,18 @@
 #      argument, environment or log; with a curl path that is not there the
 #      Box's notes say curl is not installed on this Box (BX-44 to BX-49).
 #
+#  17. A Box started with --status-page: GET / answers with the security
+#      headers and words that say it is waiting for an invitation; another
+#      path is 404 and another method 405; a wrong invitation posted from the
+#      page's own origin is refused with words; a right one posted with a
+#      foreign Origin, or with none, is refused and changes nothing; the
+#      right one from the page's own origin is taken, the Key app side claims
+#      and welcomes it, and the page then says paired, with no invitation on
+#      it (BX-54 to BX-61).
+#
 # Environment:
 #   DRILL_DIR      scratch directory (default: a new one under ~/.cache/openbmt)
-#   DRILL_PORTS    first of two free ports on 127.0.0.1 (default 18986)
+#   DRILL_PORTS    first of three free ports on 127.0.0.1 (default 18986)
 #   DRILL_KEEP=1   keep the scratch directory afterwards
 #   BOX_BIN        the `openbmt-box` binary
 #   PAIR_BIN       the `box_pair` example binary
@@ -89,6 +98,7 @@ set -uo pipefail
 P0=${DRILL_PORTS:-18986}
 PORT1=$P0
 PORT2=$((P0 + 1))
+PORT3=$((P0 + 2))
 mkdir -p "$HOME/.cache/openbmt"
 BASE=${DRILL_DIR:-$(mktemp -d "$HOME/.cache/openbmt/box-e2e-XXXXXX")}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -141,6 +151,7 @@ cleanup() {
   exec 3>&- 4>&- 2>/dev/null || true
   stop_pid "${PID[1]:-}"
   stop_pid "${PID[2]:-}"
+  stop_pid "${PG_PID:-}"
   if [ "${DRILL_KEEP:-0}" != 1 ]; then rm -rf -- "$BASE"; fi
 }
 trap cleanup EXIT
@@ -783,12 +794,82 @@ else
 fi
 stop_box 2
 
+# ---- 17 --------------------------------------------------------------------------
+
+say "17. The status page: its words and headers, a wrong invitation, a foreign origin"
+B7="$BASE/box7"
+K7="$BASE/keyapp7"
+mkdir -p "$B7" "$K7"
+A7="127.0.0.1:$PORT2"
+PAGE7="127.0.0.1:$PORT3"
+PG_LOG="$BASE/box-7.log"
+PG_PID=
+PG_BAD=
+: >"$PG_LOG"
+"$BOX_BIN" "$B7" "$A7" --no-console --status-page "$PAGE7" </dev/null >"$PG_LOG" 2>&1 &
+PG_PID=$!
+for _ in $(seq 1 40); do
+  grep -q '^state: ' "$PG_LOG" && break
+  kill -0 "$PG_PID" 2>/dev/null || break
+  sleep 0.25
+done
+grep -q "^status page: $PAGE7\$" "$PG_LOG" || PG_BAD="$PG_BAD; the Box did not say its page address: $(cat "$PG_LOG")"
+# The page, with its headers.
+PG_GET=$(curl -s --max-time 10 -D "$BASE/pg-head" -o "$BASE/pg-body" -w '%{http_code}' "http://$PAGE7/")
+[ "$PG_GET" = 200 ] || PG_BAD="$PG_BAD; GET / gave $PG_GET"
+for h in "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'" \
+  'X-Content-Type-Options: nosniff' 'Referrer-Policy: no-referrer' 'Cache-Control: no-store' 'Connection: close'; do
+  grep -qiF -- "$h" "$BASE/pg-head" || PG_BAD="$PG_BAD; header missing: $h"
+done
+grep -q 'Waiting for an invitation' "$BASE/pg-body" || PG_BAD="$PG_BAD; the page does not say the Box is waiting"
+grep -q 'Next:' "$BASE/pg-body" || PG_BAD="$PG_BAD; the page does not say what to do next"
+grep -q "127.0.0.1:${A7##*:}" "$BASE/pg-body" || PG_BAD="$PG_BAD; the page does not give the relay address"
+if grep -qiE '<script|src=|https?://' "$BASE/pg-body"; then PG_BAD="$PG_BAD; the page is not self-contained"; fi
+# Another path and another method are refused with the status alone.
+PG_404=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' "http://$PAGE7/nothing")
+PG_405=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' -X DELETE "http://$PAGE7/")
+[ "$PG_404" = 404 ] && [ "$PG_405" = 405 ] || PG_BAD="$PG_BAD; other path $PG_404, other method $PG_405"
+# A wrong invitation, from the page's own origin: refused with words.
+INV7=$(pair invite "$K7")
+WRONG7="${INV7%?}$([ "${INV7: -1}" = 0 ] && echo 1 || echo 0)"
+PG_WRONG=$(curl -s --max-time 10 -o "$BASE/pg-wrong" -w '%{http_code}' -H "Origin: http://$PAGE7" \
+  --data-urlencode "invitation=$WRONG7" "http://$PAGE7/invitation")
+[ "$PG_WRONG" = 422 ] && grep -q 'Invitation not read' "$BASE/pg-wrong" || PG_BAD="$PG_BAD; wrong invitation: status $PG_WRONG"
+grep -q 'Waiting for an invitation' "$BASE/pg-wrong" || PG_BAD="$PG_BAD; the Box is not waiting after a wrong invitation"
+# A right invitation from a foreign origin, and with no origin at all: refused.
+PG_FOREIGN=$(curl -s --max-time 10 -o "$BASE/pg-foreign" -w '%{http_code}' -H 'Origin: http://evil.example' \
+  --data-urlencode "invitation=$INV7" "http://$PAGE7/invitation")
+PG_NONE=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' --data-urlencode "invitation=$INV7" "http://$PAGE7/invitation")
+[ "$PG_FOREIGN" = 403 ] && [ "$PG_NONE" = 403 ] && grep -q 'Not sent from this page' "$BASE/pg-foreign" ||
+  PG_BAD="$PG_BAD; foreign origin $PG_FOREIGN, no origin $PG_NONE"
+curl -s --max-time 10 "http://$PAGE7/" | grep -q 'Waiting for an invitation' || PG_BAD="$PG_BAD; a refused post changed the state"
+# The right invitation from the page's own origin is taken; the Key app side
+# then claims and welcomes, and the page says paired.
+PG_RIGHT=$(curl -s --max-time 10 -o "$BASE/pg-right" -w '%{http_code}' -H "Origin: http://$PAGE7" \
+  --data-urlencode "invitation=$INV7" "http://$PAGE7/invitation")
+[ "$PG_RIGHT" = 200 ] && grep -q 'Invitation open' "$BASE/pg-right" || PG_BAD="$PG_BAD; right invitation: status $PG_RIGHT"
+CLAIM7=$(pair claim "$K7" "$A7")
+WELCOME7=$(pair welcome "$K7" "$A7")
+grep -q '^claim verified' <<<"$CLAIM7" && [ "$WELCOME7" = welcomed ] || PG_BAD="$PG_BAD; claim: $CLAIM7; welcome: $WELCOME7"
+curl -s --max-time 10 "http://$PAGE7/" >"$BASE/pg-paired"
+grep -q '<h2>Paired</h2>' "$BASE/pg-paired" || PG_BAD="$PG_BAD; the page does not say paired"
+if grep -qF -- "$INV7" "$BASE/pg-paired" "$BASE/pg-right"; then PG_BAD="$PG_BAD; the invitation is on a page"; fi
+note "GET $PG_GET; other path $PG_404; other method $PG_405; wrong invitation $PG_WRONG; foreign origin $PG_FOREIGN; no origin $PG_NONE; right invitation $PG_RIGHT"
+if [ -z "$PG_BAD" ]; then
+  pass 17 "a Box started with --status-page answered GET / with the security headers and words that say it is waiting for an invitation and what to do next; another path was 404 and another method 405; a wrong invitation was refused with words (422), a right one from a foreign origin or with no origin was refused (403) and changed nothing; the right one from the page's own origin was taken, the Key app side claimed and welcomed it, and the page then said paired with no invitation on it"
+else
+  bad 17 "${PG_BAD#; }"
+fi
+kill -9 "$PG_PID" 2>/dev/null
+wait "$PG_PID" 2>/dev/null
+PG_PID=
+
 # ---- result ----------------------------------------------------------------------
 
 say "Result"
 failed=0
 notrun=0
-for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
+for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17; do
   printf '%s  step %s\n' "${RESULT[$n]:-FAIL}" "$n"
   case "${RESULT[$n]:-FAIL}" in
     PASS) ;;

@@ -425,3 +425,10 @@ path = "fuzz_targets/qr_jni_call.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "box_status_request"
+path = "fuzz_targets/box_status_request.rs"
+test = false
+doc = false
+bench = false

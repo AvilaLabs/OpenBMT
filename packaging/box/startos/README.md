@@ -18,9 +18,9 @@ Box's Dockerfile from this folder.
   aarch64. No image is published anywhere. An aarch64 image built on an
   x86_64 machine runs the Rust build under emulation and takes a long time.
 - **Entry.** The image's entrypoint is not used. The daemon's command is
-  `openbmt-box /data [::]:8986 --no-console`, run as the image's user
-  (uid 1000), with `--invitation-file /data/invitation.txt` added when that
-  file is in the volume.
+  `openbmt-box /data [::]:8986 --status-page [::]:8987 --no-console`, run as
+  the image's user (uid 1000), with `--invitation-file /data/invitation.txt`
+  added when that file is in the volume.
 - **IPv6.** A raw TCP binding on StartOS reaches the container in the
   client's own address family, so the Box listens on `[::]:8986`. On Linux
   that also accepts IPv4 (BOX-RULES BX-53, with its tests).
@@ -38,14 +38,20 @@ Box's Dockerfile from this folder.
   the same directory with the same key. The other tests in that file do the
   same with SIGKILL.
 - **Invitation.** The Key app makes the invitation; the Box only takes it.
-  The action "Enter invitation" takes the 30 characters, writes
+  It can be typed in the status page, or given by the action. The action
+  "Enter invitation" takes the 30 characters, writes
   `invitation.txt` in the volume and restarts the Box, which reads the file
   once and deletes it (BX-12). The file is read at start with `once()`, so
   the Box's own delete of it does not restart the service.
-- **Interface.** One raw TCP interface, `box`, on port 8986: no proxy, no TLS
-  wrapper, `secure` with `ssl: false`. The Box's link seals and authenticates
-  its messages itself. StartOS shows its LAN addresses; a Tor address exists
-  only if the user installs Tor and adds one.
+- **Interfaces.** Two. `box` is a raw TCP interface on port 8986: no proxy,
+  no TLS wrapper, `secure` with `ssl: false`. The Box's link seals and
+  authenticates its messages itself. `page` is a `ui` interface for the
+  Box's own status page (port 8987, protocol `http`, BX-54 to BX-61): StartOS
+  serves it over HTTP and HTTPS on the addresses the user enables, and it
+  opens from the service's page. It shows the Box's state in words and, while
+  the Box waits, takes the invitation. StartOS shows the LAN addresses of
+  both; a Tor address exists only if the user installs Tor and adds one. A
+  second health check, "Status page", watches port 8987.
 - **Backups.** The whole volume. StartOS stops the service for a backup.
 - **Dependencies.** None. A Bitcoin Core dependency comes with the Box's own
   node.
@@ -89,6 +95,11 @@ package: no Docker and no `start-cli` were available where it was written.
 - That the `.s9pk` builds and installs.
 - That the idmap makes `/data` writable by the Box on a real StartOS volume.
 - That an IPv6 and an IPv4 client both reach the Box through the interface.
+- That the "Status page" interface opens in a browser, on its LAN address and
+  over HTTPS, and that StartOS passes the `Host` and `Origin` headers on as
+  the browser sent them (the page refuses a form post whose `Origin` does not
+  name its `Host`, BX-58, and says so in words if a proxy changes one).
+- That the page takes an invitation and the Key app pairs the Box with it.
 - That the "Enter invitation" action restarts the Box and the Box takes the
   invitation.
 - That a backup and a restore bring the Box back with its key.

@@ -1,6 +1,6 @@
 import { i18n } from './i18n'
 import { sdk } from './sdk'
-import { boxPort } from './utils'
+import { boxPort, pagePort } from './utils'
 
 export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
   const boxMulti = sdk.MultiHost.of(effects, 'box-multi')
@@ -27,5 +27,24 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
     query: {},
   })
 
-  return [await boxOrigin.export([box])]
+  // The Box's status page (BX-54 to BX-61): plain HTTP inside, served by
+  // StartOS over HTTP and HTTPS on the addresses the user enables. It shows
+  // the Box's state and takes the invitation.
+  const pageMulti = sdk.MultiHost.of(effects, 'page-multi')
+  const pageOrigin = await pageMulti.bindPort(pagePort, {
+    protocol: 'http',
+  })
+  const page = sdk.createInterface(effects, {
+    name: i18n('Status page'),
+    id: 'page',
+    description: i18n("The Box's state, and a box to type the invitation in"),
+    type: 'ui',
+    masked: false,
+    schemeOverride: null,
+    username: null,
+    path: '',
+    query: {},
+  })
+
+  return [await boxOrigin.export([box]), await pageOrigin.export([page])]
 })

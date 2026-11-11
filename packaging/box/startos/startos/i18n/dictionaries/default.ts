@@ -10,6 +10,10 @@ const dict = {
   // interfaces.ts
   'Box address': 4,
   "The address the shop's devices give the Box as its relay": 5,
+  'Status page': 11,
+  'The status page is up': 13,
+  'The status page is not up': 14,
+  "The Box's state, and a box to type the invitation in": 12,
 
   // actions/enterInvitation.ts
   Invitation: 6,
