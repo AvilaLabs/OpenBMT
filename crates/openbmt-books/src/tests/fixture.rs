@@ -41,6 +41,7 @@ pub fn opened(index: u32, at: u64, cents: u64) -> Event {
         needs_sats: 4_321_987,
         minor_per_btc: 4_281_700,
         source: source("fixture-rate", at),
+        by: None,
     }
 }
 
@@ -144,6 +145,7 @@ pub fn rich_events() -> Vec<Event> {
         Event::Cancelled {
             index: 2,
             at: FEB_1_0100 + 20,
+            by: None,
         },
         // 3: expired, then a late payment.
         opened(3, FEB_1_0100, 900),

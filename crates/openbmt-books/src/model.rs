@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use openbmt_core::identity::{tagged_hash, DeviceId};
-use openbmt_counter::{Currency, RateSource, Role};
+use openbmt_counter::{Currency, RateSource, Role, StaffChange};
 
 use crate::value::Value;
 
@@ -188,6 +188,21 @@ pub struct OverrideNote {
     pub name: String,
     /// The amount put at risk.
     pub sats: u64,
+}
+
+/// BK-35: a change to the cashiers of a counter, as its record says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaffNote {
+    /// The counter that wrote the record.
+    pub counter: DeviceId,
+    /// When, in Unix seconds (UTC).
+    pub at: u64,
+    /// Added or removed.
+    pub change: StaffChange,
+    /// The cashier's name, as the counter wrote it.
+    pub name: String,
+    /// The manager who made the change, as the counter wrote it.
+    pub by: String,
 }
 
 /// BK-06: overpaid or underpaid, as far as the events tell.

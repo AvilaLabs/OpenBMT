@@ -110,10 +110,11 @@ use openbmt_core::records::Record;
 use openbmt_core::settings::Settings;
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
-    Actor, Amount, BlockError, CancelRefused, CashRefund, CommandRefused, Counter, Currency, Facts,
-    HeartbeatRefused, HeartbeatView, JudgeError, LightningPaid, LoadError, OpenFacts, OpenRefused,
-    Opened, Overridden, Pairing, Quote, Rate, RateSource, RefundRefused, RefundRequest, RefundView,
-    Report, RequoteRefused, Screen, SightingError, StoreFault, WithdrawRefused,
+    Actor, Amount, BlockError, CancelRefused, CashRefund, CommandRefused, Counter, Currency,
+    DayTotals, Facts, HeartbeatRefused, HeartbeatView, JudgeError, LightningPaid, LoadError,
+    OpenFacts, OpenRefused, Opened, Overridden, Pairing, Quote, Rate, RateSource, RefundRefused,
+    RefundRequest, RefundView, Report, RequoteRefused, Screen, SightingError, StaffEvent,
+    StaffRefused, StoreFault, TotalsRefused, WithdrawRefused,
 };
 use openbmt_lightning::{CertPin, Credential, Reply};
 use openbmt_net_io::{
@@ -1110,14 +1111,27 @@ impl<P: DriverPort> Node<P> {
         rate: Rate,
         source: &RateSource,
     ) -> Result<Opened, OpenRefused<DirStoreError>> {
+        self.open_by(amount, currency, rate, source, None)
+    }
+
+    /// [`Node::open`], naming the person at the till who opens the sale
+    /// (CR-151).
+    pub fn open_by(
+        &mut self,
+        amount: Amount,
+        currency: Currency,
+        rate: Rate,
+        source: &RateSource,
+        by: Option<&Actor>,
+    ) -> Result<Opened, OpenRefused<DirStoreError>> {
         let facts = OpenFacts {
             health: self.health.unwrap_or(NO_ANSWER_YET),
             rescan_pending: false,
             now: self.clock.now(),
         };
-        let opened = self
-            .counter
-            .open(amount, currency, rate, source, facts, &mut self.store)?;
+        let opened =
+            self.counter
+                .open_by(amount, currency, rate, source, facts, by, &mut self.store)?;
         self.known.insert(opened.index);
         self.port.watch_script(opened.script.clone());
         self.ln
@@ -1298,8 +1312,18 @@ impl<P: DriverPort> Node<P> {
 
     /// The cashier cancels a sale with nothing received (CR-07).
     pub fn cancel(&mut self, index: u32) -> Result<(), CancelRefused<DirStoreError>> {
+        self.cancel_by(index, None)
+    }
+
+    /// [`Node::cancel`], naming the person at the till who cancels the sale
+    /// (CR-151).
+    pub fn cancel_by(
+        &mut self,
+        index: u32,
+        by: Option<&Actor>,
+    ) -> Result<(), CancelRefused<DirStoreError>> {
         let now = self.clock.now();
-        self.counter.cancel(index, now, &mut self.store)?;
+        self.counter.cancel_by(index, now, by, &mut self.store)?;
         self.ln.sale_closed(index);
         Ok(())
     }
@@ -1410,6 +1434,25 @@ impl<P: DriverPort> Node<P> {
     /// sends to the owner (LK-57).
     pub fn check_in(&mut self) -> Result<Record, StoreFault<DirStoreError>> {
         self.counter.check_in(&mut self.store)
+    }
+
+    /// CR-143: write a change to the cashiers as a record, through the same
+    /// stored path as the others. The record reaches the owner with them.
+    pub fn record_staff(
+        &mut self,
+        event: &StaffEvent,
+    ) -> Result<Record, StaffRefused<DirStoreError>> {
+        self.counter.record_staff(event, &mut self.store)
+    }
+
+    /// CR-152: the totals of the day `[from, to)` from the counter's records.
+    pub fn day_totals(
+        &self,
+        from: u64,
+        to: u64,
+        people: bool,
+    ) -> Result<DayTotals, TotalsRefused<DirStoreError>> {
+        self.counter.day_totals(from, to, people, &self.store)
     }
 
     /// Take a new signed batch of addresses.

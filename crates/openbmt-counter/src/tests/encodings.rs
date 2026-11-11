@@ -24,7 +24,15 @@ fn assert_strict<T>(
     }
     let mut longer = valid.to_vec();
     longer.push(0);
-    assert_eq!(decode(&longer).err(), Some(DecodeError::TrailingBytes));
+    // A byte after the fixed fields of a sale or a cancel starts the person at
+    // the till (CR-151), and a zero is not a role: refused either way.
+    assert!(
+        matches!(
+            decode(&longer).err(),
+            Some(DecodeError::TrailingBytes | DecodeError::NonCanonical(_))
+        ),
+        "a byte left over was accepted"
+    );
     let mut m = valid.to_vec();
     for i in 0..m.len() {
         for bit in 0..8 {
@@ -78,6 +86,7 @@ fn every_event() -> Vec<Event> {
             needs_sats: 5_000,
             minor_per_btc: 10_000_000,
             source: RateSource::new("regtest-fixed", T0 - 3).unwrap(),
+            by: None,
         },
         Event::Expired {
             index: 4,
@@ -86,6 +95,7 @@ fn every_event() -> Vec<Event> {
         Event::Cancelled {
             index: 4,
             at: T0 + 10,
+            by: None,
         },
         Event::PaidAtOnce {
             index: 4,

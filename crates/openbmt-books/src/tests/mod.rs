@@ -11,4 +11,5 @@ mod real;
 mod records;
 mod sale;
 mod sealed;
+mod staff;
 mod totals;

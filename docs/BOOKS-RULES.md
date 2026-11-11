@@ -27,10 +27,11 @@ Nothing here says what a merchant owes. It writes down what the records say.
   names the counter and, for a bad chain, the record.
 - **BK-02.** Only records written by the counter itself are read, and of
   those only the kinds that hold sale events: sale, payment, override and
-  conflict, refund. A check-in, a setting or a pairing record holds no money
-  and is passed over. The refund kind holds three events (COUNTER-RULES
-  CR-60 to CR-71): a request, a withdrawal and a refund paid in cash. A
-  request and a withdrawal are asks to the owner, not money: they are read,
+  conflict, refund. A check-in or a setting holds no money and is passed over.
+  A pairing record holds a change to the cashiers and is read (BK-35). The
+  refund kind holds three events (COUNTER-RULES CR-60 to CR-71): a request, a
+  withdrawal and a refund paid in cash. A request and a withdrawal are asks to
+  the owner, not money: they are read,
   checked as every event is, and are not a disposal. A refund that was paid
   is a disposal the caller gives (BK-12); the counter does not learn of it.
 - **BK-03.** Each event is decoded with the counter's own decoder
@@ -256,7 +257,29 @@ has no transaction. The record is `PaidByLightning`.
   asked for, a later quote may ask for more or for less, and the counter took
   the payment as paid in full. Overpaid is read as for any sale.
 
-## 9. What these rules do not do
+## 9. Changes to the cashiers
+
+The counter app keeps a list of cashiers and writes a record for each cashier
+added or removed (`docs/COUNTER-RULES.md`, CR-143, CR-144). The record is of
+kind pairing, and no PIN or hash is in it.
+
+- **BK-35.** A record of kind pairing written by the counter is read with the
+  counter's own decoder (`openbmt_counter::StaffEvent`), strictly, as every
+  event is (BK-03): a body that does not decode, a tag that is not one of the
+  two and a time that is not a date from 1970 to the end of the year 9999
+  refuse the build, naming the counter and the record.
+- **BK-36.** The books keep the changes in the order of each counter's chain,
+  with the counter, the time, whether the cashier was added or removed, the
+  cashier's name and the manager's name as the counter wrote them
+  (`Books::staff_changes`). They are not sales: they are in no total, no CSV
+  line, no high-water mark and not in the encrypted bundle, which is as it was.
+- **BK-37.** Each change is shown to the owner with words
+  (`StaffNote::words`): that a manager added or removed a cashier on the
+  counter the owner named, the time for the owner's own clock, and the two
+  names quoted as text from the counter and never part of a sentence
+  (`docs/SCREEN-RULES.md`, SC-08).
+
+## 10. What these rules do not do
 
 - **No tax advice, and US rules only.** The export writes down what the records
   say. Whether a sale is income, which value counts, and what a disposal

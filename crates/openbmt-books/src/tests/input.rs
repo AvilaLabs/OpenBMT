@@ -82,9 +82,6 @@ fn bk_02_only_the_counters_own_event_records_are_read() {
     kit.chain
         .append(&kit.counter, RecordKind::Setting, vec![0xff; 5])
         .expect("appended");
-    kit.chain
-        .append(&kit.counter, RecordKind::Pairing, vec![0xff; 5])
-        .expect("appended");
     kit.chain.append_check_in(&kit.counter);
     // A sale-kind record of another device is not the counter's.
     kit.chain

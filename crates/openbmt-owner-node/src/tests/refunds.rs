@@ -177,6 +177,7 @@ fn opened(index: u32) -> Event {
         needs_sats: 5_000,
         minor_per_btc: 10_000_000,
         source: RateSource::new("test-fixed", T0).unwrap(),
+        by: None,
     }
 }
 

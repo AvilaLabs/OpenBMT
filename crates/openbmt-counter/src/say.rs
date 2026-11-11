@@ -29,7 +29,7 @@ use crate::refund::{RefundState, RefundView};
 use crate::refusal::{
     BlockError, CancelRefused, CommandRefused, DestinationRefused, HeartbeatRefused, JudgeError,
     LightningRefused, LoadError, OpenRefused, OverrideRefused, RefundRefused, RequoteRefused,
-    SightingError, WithdrawRefused,
+    SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
 };
 use crate::screen::{Color, Next, Screen, State, Why};
 use crate::store::StoreFault;
@@ -522,6 +522,13 @@ impl<E: Display> OpenRefused<E> {
                 "Take another kind of payment and tell the owner: a payment code was used twice.",
                 "CR-02",
             ),
+            Self::BadName => refused(
+                "Sale not opened",
+                "The name of the person at the till must be plain text of 1 to 64 characters, so the sale was not opened.",
+                Who::Cashier,
+                "Sign in again, or ask a manager to rename the cashier.",
+                "CR-61",
+            ),
             Self::AddressNotStored(fault) => store_failed(
                 fault,
                 "Payment code not saved",
@@ -714,6 +721,13 @@ impl<E: Display> CancelRefused<E> {
                 Who::Cashier,
                 "If the customer should get it back, start a refund on this sale.",
                 "CR-07",
+            ),
+            Self::BadName => refused(
+                "Sale not cancelled",
+                "The name of the person at the till must be plain text of 1 to 64 characters, so the sale was not cancelled.",
+                Who::Cashier,
+                "Sign in again, or ask a manager to rename the cashier.",
+                "CR-61",
             ),
             Self::Store(fault) => store_failed(
                 fault,
@@ -1390,6 +1404,75 @@ impl<E: Display> WithdrawRefused<E> {
     }
 }
 
+impl<E: Display> StaffRefused<E> {
+    /// What the manager is told when a change to the cashiers was not
+    /// written down for the owner (CR-143).
+    pub fn words(&self) -> Words {
+        match self {
+            Self::BadName(which) => refused(
+                "Name not usable",
+                format!("The {which} must be plain text of 1 to 64 characters, so the change was not written down."),
+                Who::Manager,
+                "Type the name again.",
+                "CR-143",
+            ),
+            Self::Store(fault) => store_failed(
+                fault,
+                "Change not written down",
+                "the change to the cashiers was not written down for the owner",
+                Tone::Ended,
+                Who::Manager,
+                RETRY_NEXT,
+            ),
+        }
+    }
+}
+
+impl<E: Display> TotalsRefused<E> {
+    /// What the cashier is told when the day's totals could not be counted
+    /// (CR-152, CR-153).
+    pub fn words(&self) -> Words {
+        match self {
+            Self::BadWindow => refused(
+                "Day not counted",
+                "The start of the day is not before its end, so nothing was counted.",
+                Who::Cashier,
+                "Close the app and open it again. If it happens again, tell the owner: the phone's clock is wrong.",
+                "CR-152",
+            ),
+            Self::MixedCurrencies => refused(
+                "Two currencies today",
+                "Today's sales are in two currencies, and the totals cannot add them together.",
+                Who::Cashier,
+                "Tell the owner. The owner's phone has the full books.",
+                "CR-153",
+            ),
+            Self::Overflow => refused(
+                "Day too large to count",
+                "A sum of today's sales is too large to count, so nothing is shown.",
+                Who::Cashier,
+                "Tell the owner. The owner's phone has the full books.",
+                "CR-153",
+            ),
+            Self::TooManyRecords => refused(
+                "Too many records today",
+                "Today needs more of the counter's records than one count can read, so nothing is shown.",
+                Who::Cashier,
+                "Tell the owner. The owner's phone has the full books.",
+                "CR-152",
+            ),
+            Self::Store(fault) => store_failed(
+                fault,
+                "Totals not read",
+                "today's totals could not be counted",
+                Tone::Ended,
+                Who::Cashier,
+                RETRY_NEXT,
+            ),
+        }
+    }
+}
+
 /// The words for a refund state; `asked` is the amount when the state has
 /// one.
 fn refund_state_words(state: RefundState, asked: Option<u64>) -> Words {
@@ -1766,6 +1849,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("RateLimited", OpenRefused::RateLimited),
         ("NoAddress", OpenRefused::NoAddress),
         ("AddressInUse", OpenRefused::AddressInUse),
+        ("BadName", OpenRefused::BadName),
         ("AddressNotStored", OpenRefused::AddressNotStored(w())),
         ("Store", OpenRefused::Store(w())),
         ("Store/Record", OpenRefused::Store(record_fault())),
@@ -1820,6 +1904,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("UnknownSale", CancelRefused::UnknownSale(3)),
         ("AlreadyEnded", CancelRefused::AlreadyEnded),
         ("MoneyArrived", CancelRefused::MoneyArrived),
+        ("BadName", CancelRefused::BadName),
         ("Store", CancelRefused::Store(w())),
     ];
     for (name, r) in cancel {
@@ -2049,6 +2134,23 @@ pub fn all_words() -> Vec<(String, Words)> {
     ];
     for (name, r) in withdraw {
         all.push((format!("WithdrawRefused::{name}"), r.words()));
+    }
+    let staff: Vec<(&str, StaffRefused<String>)> = vec![
+        ("BadName", StaffRefused::BadName("cashier's name")),
+        ("Store", StaffRefused::Store(w())),
+    ];
+    for (name, r) in staff {
+        all.push((format!("StaffRefused::{name}"), r.words()));
+    }
+    let totals: Vec<(&str, TotalsRefused<String>)> = vec![
+        ("BadWindow", TotalsRefused::BadWindow),
+        ("MixedCurrencies", TotalsRefused::MixedCurrencies),
+        ("Overflow", TotalsRefused::Overflow),
+        ("TooManyRecords", TotalsRefused::TooManyRecords),
+        ("Store", TotalsRefused::Store(w())),
+    ];
+    for (name, r) in totals {
+        all.push((format!("TotalsRefused::{name}"), r.words()));
     }
     for state in ALL_REFUND_STATES {
         all.push((

@@ -39,11 +39,13 @@ use crate::refund::{
 use crate::refusal::{
     BlockError, CancelRefused, CommandRefused, HeartbeatRefused, JudgeError, LightningRefused,
     LoadError, OpenRefused, OverrideRefused, RefundRefused, RequoteRefused, SightingError,
-    WithdrawRefused,
+    StaffRefused, TotalsRefused, WithdrawRefused,
 };
 use crate::sale::{End, LightningPaid, OverrideMark, PosState, Sale};
 use crate::screen::{Next, Report, Screen, State, Why};
+use crate::staff::StaffEvent;
 use crate::store::{Slot, Store, StoreFault};
+use crate::totals::{fold_day, record_time, DayTotals, TOTALS_BLOCK, TOTALS_MAX_RECORDS};
 use crate::{
     DUST_SATS, EXPIRY_SECS, MAX_LATE_PAYMENTS, MAX_QUOTES, MAX_SETTLE_PER_CALL, SETTLE_SECS,
     STUCK_SECS,
@@ -414,7 +416,7 @@ impl Counter {
                     LoadError::RecordsUnread(format!("record {}: {e}", check.len()))
                 })?;
                 check.push(&record).map_err(LoadError::Records)?;
-                if record.kind != RecordKind::CheckIn {
+                if !matches!(record.kind, RecordKind::CheckIn | RecordKind::Pairing) {
                     if let Ok(event) = Event::decode(&record.body) {
                         let at = last.get(&event.index()).map_or(0, |(_, at)| *at);
                         last.insert(event.index(), (record.seq, at.max(event.at())));
@@ -581,6 +583,77 @@ impl Counter {
         store: &S,
     ) -> Result<Option<[u8; 32]>, StoreFault<S::Error>> {
         self.records.hash_at(store, &self.device_id(), n)
+    }
+
+    /// CR-143: write a change to the cashiers the counter keeps as a record.
+    /// Names are checked first; the record goes through the same stored path
+    /// as every other (CR-40), and on an error the chain is unchanged.
+    pub fn record_staff<S: Store>(
+        &mut self,
+        event: &StaffEvent,
+        store: &mut S,
+    ) -> Result<Record, StaffRefused<S::Error>> {
+        if !refund_text_ok(&event.name) {
+            return Err(StaffRefused::BadName("cashier's name"));
+        }
+        if !refund_text_ok(&event.by) {
+            return Err(StaffRefused::BadName("manager's name"));
+        }
+        self.append_record(store, event.kind(), event.encode())
+            .map_err(StaffRefused::Store)
+    }
+
+    /// CR-152 to CR-155: the totals of the day `[from, to)` (seconds since
+    /// 1970, on the caller's clock and zone), counted from the counter's own
+    /// records. They are read from the newest back, a block at a time, until
+    /// a block holds events and none is from `from` on; a day that needs more
+    /// than [`TOTALS_MAX_RECORDS`] records is refused. `people` asks for the
+    /// lines per person.
+    pub fn day_totals<S: Store>(
+        &self,
+        from: u64,
+        to: u64,
+        people: bool,
+        store: &S,
+    ) -> Result<DayTotals, TotalsRefused<S::Error>> {
+        self.day_totals_within(from, to, people, TOTALS_MAX_RECORDS, store)
+    }
+
+    /// [`Counter::day_totals`] with the most records one count reads given.
+    pub(crate) fn day_totals_within<S: Store>(
+        &self,
+        from: u64,
+        to: u64,
+        people: bool,
+        most: u64,
+        store: &S,
+    ) -> Result<DayTotals, TotalsRefused<S::Error>> {
+        if to <= from {
+            return Err(TotalsRefused::BadWindow);
+        }
+        let mut blocks: Vec<Vec<Record>> = Vec::new();
+        let mut end = self.records.len();
+        let mut read = 0u64;
+        while end > 0 {
+            let start = end.saturating_sub(TOTALS_BLOCK);
+            let len = usize::try_from(end - start).unwrap_or(usize::MAX);
+            let block = self
+                .records_from(start, len, store)
+                .map_err(TotalsRefused::Store)?;
+            read += end - start;
+            let times: Vec<u64> = block.iter().filter_map(record_time).collect();
+            let older = !times.is_empty() && times.iter().all(|t| *t < from);
+            blocks.push(block);
+            end = start;
+            if older {
+                break;
+            }
+            if read >= most && end > 0 {
+                return Err(TotalsRefused::TooManyRecords);
+            }
+        }
+        let records = blocks.iter().rev().flat_map(|b| b.iter());
+        Ok(fold_day(records, from, to, people)?)
     }
 
     /// Append a check-in to the records (`docs/DESIGN.md` §2.9): a signed
@@ -870,6 +943,26 @@ impl Counter {
         facts: OpenFacts,
         store: &mut S,
     ) -> Result<Opened, OpenRefused<S::Error>> {
+        self.open_by(amount, currency, rate, source, facts, None, store)
+    }
+
+    /// [`Counter::open`], naming the person at the till who opens the sale
+    /// (CR-151): the record `Opened` carries the role and the name. A name
+    /// that is not a label (CR-61) is refused before anything is written.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_by<S: Store>(
+        &mut self,
+        amount: Amount,
+        currency: Currency,
+        rate: Rate,
+        source: &RateSource,
+        facts: OpenFacts,
+        by: Option<&Actor>,
+        store: &mut S,
+    ) -> Result<Opened, OpenRefused<S::Error>> {
+        if by.is_some_and(|a| !refund_text_ok(&a.name)) {
+            return Err(OpenRefused::BadName);
+        }
         let now = facts.now;
         if facts.rescan_pending {
             return Err(OpenRefused::RescanPending);
@@ -942,6 +1035,7 @@ impl Counter {
             needs_sats,
             minor_per_btc: rate.minor_per_btc(),
             source: source.clone(),
+            by: by.map(|a| (a.role, a.name.clone())),
         };
         self.write_event(store, &event)
             .map_err(OpenRefused::Store)?;
@@ -1041,6 +1135,21 @@ impl Counter {
         now: u64,
         store: &mut S,
     ) -> Result<(), CancelRefused<S::Error>> {
+        self.cancel_by(index, now, None, store)
+    }
+
+    /// [`Counter::cancel`], naming the person at the till who cancels the
+    /// sale (CR-151).
+    pub fn cancel_by<S: Store>(
+        &mut self,
+        index: u32,
+        now: u64,
+        by: Option<&Actor>,
+        store: &mut S,
+    ) -> Result<(), CancelRefused<S::Error>> {
+        if by.is_some_and(|a| !refund_text_ok(&a.name)) {
+            return Err(CancelRefused::BadName);
+        }
         let mut sale = self
             .sales
             .get(&index)
@@ -1057,7 +1166,11 @@ impl Counter {
             return Err(CancelRefused::MoneyArrived);
         }
         sale.ended = Some((End::Cancelled, now));
-        let event = Event::Cancelled { index, at: now };
+        let event = Event::Cancelled {
+            index,
+            at: now,
+            by: by.map(|a| (a.role, a.name.clone())),
+        };
         self.finish(store, sale, &[event])
             .map_err(CancelRefused::Store)
     }

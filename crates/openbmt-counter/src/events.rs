@@ -55,6 +55,9 @@ pub enum Event {
         minor_per_btc: u64,
         /// Where the first quote's rate came from (CR-57).
         source: RateSource,
+        /// Who opened the sale, when the caller named a person (CR-151). A
+        /// record from before the till lock has none.
+        by: Option<(Role, String)>,
     },
     /// The sale was given a new quote (CR-59; kind `Sale`). Written by
     /// `Counter::requote` before the sale is stored: a stop between the two
@@ -85,6 +88,8 @@ pub enum Event {
         index: u32,
         /// When.
         at: u64,
+        /// Who cancelled the sale, when the caller named a person (CR-151).
+        by: Option<(Role, String)>,
     },
     /// The sale was accepted at once (CR-13; kind `Payment`).
     PaidAtOnce {
@@ -377,6 +382,27 @@ fn read_text(r: &mut Reader<'_>, what: &'static str) -> Result<String, DecodeErr
     Ok(text)
 }
 
+/// The person who did a step, written after the fixed fields only when there
+/// is one (CR-151): nothing, or role (u8) and name.
+fn write_by(out: &mut Vec<u8>, by: &Option<(Role, String)>) {
+    if let Some((role, name)) = by {
+        write_person(out, *role, name);
+    }
+}
+
+/// The person who did a step, if the body goes on past its fixed fields. A
+/// body that ends there has none.
+fn read_by(r: &mut Reader<'_>) -> Result<Option<(Role, String)>, DecodeError> {
+    let role = match r.u8() {
+        Ok(b) => b,
+        Err(DecodeError::Truncated) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let role = Role::from_u8(role).ok_or(DecodeError::NonCanonical("a role is not known"))?;
+    let name = read_text(r, "a name is not a label")?;
+    Ok(Some((role, name)))
+}
+
 fn read_person(r: &mut Reader<'_>) -> Result<(Role, String), DecodeError> {
     let role = Role::from_u8(r.u8()?).ok_or(DecodeError::NonCanonical("a role is not known"))?;
     let name = read_text(r, "a name is not a label")?;
@@ -478,7 +504,7 @@ impl Event {
             Self::Opened { index, at, .. } => (TAG_OPENED, *index, *at),
             Self::Requoted { index, at, .. } => (TAG_REQUOTED, *index, *at),
             Self::Expired { index, at } => (TAG_EXPIRED, *index, *at),
-            Self::Cancelled { index, at } => (TAG_CANCELLED, *index, *at),
+            Self::Cancelled { index, at, .. } => (TAG_CANCELLED, *index, *at),
             Self::PaidAtOnce { index, at, .. } => (TAG_PAID_AT_ONCE, *index, *at),
             Self::Confirmed { index, at, .. } => (TAG_CONFIRMED, *index, *at),
             Self::Final { index, at, .. } => (TAG_FINAL, *index, *at),
@@ -510,6 +536,7 @@ impl Event {
                 needs_sats,
                 minor_per_btc,
                 source,
+                by,
                 ..
             } => {
                 out.extend_from_slice(&amount.0.to_le_bytes());
@@ -517,7 +544,9 @@ impl Event {
                 out.extend_from_slice(&needs_sats.to_le_bytes());
                 out.extend_from_slice(&minor_per_btc.to_le_bytes());
                 write_source(&mut out, source);
+                write_by(&mut out, by);
             }
+            Self::Cancelled { by, .. } => write_by(&mut out, by),
             Self::Requoted {
                 needs_sats,
                 minor_per_btc,
@@ -648,7 +677,6 @@ impl Event {
                 out.extend_from_slice(&sats.to_le_bytes());
             }
             Self::Expired { .. }
-            | Self::Cancelled { .. }
             | Self::Replaced { .. }
             | Self::Reopened { .. }
             | Self::PosPaid { .. }
@@ -673,6 +701,7 @@ impl Event {
                 needs_sats: r.u64_le()?,
                 minor_per_btc: r.u64_le()?,
                 source: read_source(&mut r)?,
+                by: read_by(&mut r)?,
             },
             TAG_REQUOTED => Self::Requoted {
                 index,
@@ -682,7 +711,11 @@ impl Event {
                 source: read_source(&mut r)?,
             },
             TAG_EXPIRED => Self::Expired { index, at },
-            TAG_CANCELLED => Self::Cancelled { index, at },
+            TAG_CANCELLED => Self::Cancelled {
+                index,
+                at,
+                by: read_by(&mut r)?,
+            },
             TAG_PAID_AT_ONCE => Self::PaidAtOnce {
                 index,
                 at,

@@ -906,3 +906,134 @@ and the screen line are the app's.
   worked. When it did not it says so in words, with the time the failures
   began, and whether the Box refused the counter or could not be reached;
   Try again calls the Box at once. The words follow `docs/SCREEN-RULES.md`.
+
+## 14. Cashiers, the till lock and the day's totals
+
+These rules give the counter a list of cashiers who sign in by name and PIN,
+and one screen of the day's totals (`docs/DESIGN.md` §2.2, §2.5, §2.9). The
+list, the PINs and the lock are the app's (`apps/counter-android`); the
+records and the totals are the library's (`crates/openbmt-counter`,
+`crates/openbmt-counter-ffi`), and the owner reads the records with
+`crates/openbmt-books` (BK-35 to BK-37).
+
+- **CR-140.** The counter keeps a list of at most 30 cashiers, local to the
+  app, in one file of the app's `noBackupFilesDir`. The file is written in the
+  order of CR-40 (a new file, a sync, a rename, a sync of the folder) and its
+  first line is a version line. It is read whole and refused whole when any
+  line is not in the exact form the app writes, when two names are the same
+  ignoring case, when a name is the manager's, when a count or a time is not
+  in canonical form or when there are more than 30 lines; the app then shows
+  its fault screen and nobody is signed in. The file is left out of cloud
+  backup and device transfer, like the PIN and the pairing, and the manifest
+  and the data extraction rules say so.
+- **CR-141.** A cashier has a name and a PIN. A name is 1 to 24 characters
+  with no control character and no space at either end, is not the manager's
+  name and is not another cashier's, ignoring case. A PIN is 4 to 8 digits. It
+  is kept as the manager's PIN is (CR-84): PBKDF2-HMAC-SHA256 with 600,000
+  iterations and a random 16-byte salt, written with the entry, never in a
+  record, a log or a screen. Each cashier has a count of wrong tries and a hold
+  of their own, as CR-85 says, so one cashier's wrong tries never hold
+  another's PIN.
+- **CR-142.** The manager's PIN opens the screen "Staff". There the manager
+  adds a cashier (the manager types the name, and the new cashier types the PIN
+  twice), removes a cashier, and sets a new PIN for one (the cashier types it
+  twice). A change is written to the file first and then to the library as a
+  record (CR-143); a change that the file cannot take changes nothing, and a
+  record that the library cannot write is reported with words, and the app
+  says the owner was not told. A new PIN for a cashier clears that cashier's
+  count and hold, and is not a record.
+- **CR-143.** The library writes one record for each cashier added and each
+  cashier removed: a record of kind `Pairing`, which no sale, payment,
+  refund or override reader takes, with a body of the tag (32 added, 33
+  removed), the time (u64 LE), the cashier's name and the manager's name, each
+  a length (u8) and the text. The names are labels (CR-61). No PIN, hash, salt
+  or count is in a record, and a new PIN is not a record. The decoder is
+  strict: a tag that is not one of the two, a name that is not a label and any
+  byte left over are refused, and a decoded body encodes to the input. The
+  call is `Counter::record_staff`, behind the op `staff_record` of the app's
+  call protocol. The record goes through the stored path of CR-40, and on an
+  error the chain is unchanged. A record of this kind is no sale event: the
+  counter's load skips it, as it does a check-in.
+- **CR-144.** The owner's library reads the record strictly, as it reads every
+  event, and shows each change in the records and the books with words
+  (BK-35 to BK-37).
+- **CR-145.** Adding cashiers on the counter is not a loosening
+  (`docs/DESIGN.md` §2.9). A cashier is held to the per-sale limit and the
+  daily override cap of the signed settings (CR-21), and the shop's exposure
+  total (CR-20) bounds every override of every person together, so another
+  cashier adds no room. The roles table lists managers, not cashiers, as what
+  the owner adds; the owner learns of each cashier from the record (CR-143)
+  and not from a signed setting.
+- **CR-146.** With no cashier listed the app behaves as it did before this
+  section: the first start's cashier name is the actor and nobody signs in.
+  The first cashier added turns the till lock on; removing the last turns it
+  off. The change takes effect at once, and a person signed in when the lock
+  turns off is forgotten.
+- **CR-147.** While cashiers are listed, the first screen after the node
+  starts, and the first after a lock, is "Who is at the till?": the cashiers'
+  names and the manager's. A name, then that person's PIN, opens home. Home
+  shows "At the till: <name>" and a Lock button. Nothing else of the app is
+  reached before a person has signed in, and a wrong PIN signs nobody in.
+- **CR-148.** Sales, cancels, refunds asked for and withdrawn, and cash refunds
+  name the signed-in person as the actor: a sale and a cancel in the record
+  (CR-151), a refund as CR-61 says. A cashier's override uses the signed-in
+  cashier and asks for no second PIN. The manager option of an override or of
+  a refund still needs the manager's PIN (CR-86), whoever is signed in. A
+  manager signed in with the PIN acts as the manager in the actions that CR-86
+  lets a cashier make, without typing it again; the sign-in is the PIN check.
+- **CR-149.** The app locks when the person taps Lock, and when it was out of
+  view for more than 5 minutes. It never locks while a sale's screen is open:
+  the lock waits until that screen closes and then happens. Who is signed in
+  is held in memory only: an app that was stopped starts locked, and a sign-in
+  is never written to a file.
+- **CR-150.** A PIN that CR-85 holds is not looked at, on the sign-in screen
+  as everywhere, and the screen says how long to wait. A sign-in is a PIN
+  check of CR-85 for that person, counted and stored before it is compared.
+- **CR-151.** The records `Opened` and `Cancelled` carry the person at the till
+  who opened or cancelled the sale, when the caller names one: the role (u8)
+  and the name, after the fixed fields. A record without them reads as before,
+  has none and encodes to the same bytes, so a chain written earlier is read
+  and checked as before. A name that is not a label (CR-61) refuses the call
+  before anything is written. The calls are `Counter::open_by` and
+  `Counter::cancel_by`; `open` and `cancel` name no one.
+- **CR-152.** The op `day_totals` counts the counter's own record log between
+  two times the app gives, the start of the day (counted) and its end (not),
+  from the phone's clock and time zone: local midnight to now. The library has
+  no clock and no zone. It reads the records from the newest back, 256 at a
+  time, until a block holds events and none is from the start on, and then
+  folds what it read, oldest first. A day that needs more than 20,000 records
+  is refused with words, and never counted in part. A day that ends before it
+  starts is refused. The lines per person are in the answer only when the call
+  asks for them.
+- **CR-153.** What a day counts. A sale counts on the day it was opened, with
+  its state as of the newest record. Paid: the records show it accepted at
+  once, confirmed, final, accepted by a person or paid over Lightning (CR-30),
+  and not replaced or reopened since; with its amount in the shop's currency
+  as it was when the sale opened, its satoshis (those received, or at risk for
+  one accepted at once or by a person, or the Lightning amount rounded down)
+  and a split into on the chain and over Lightning. Waiting: opened, not paid,
+  not ended and not stopped, with the satoshis it asks for at its last quote;
+  a payment that has arrived and was not yet accepted or confirmed is in no
+  record, so such a sale is counted as waiting. Stopped: replaced or reopened
+  and not paid since, which is not a wait (CR-12). Ended: cancelled or
+  expired. Overrides, refunds asked for (not withdrawn ones; withdrawn ones are
+  counted apart) and cash refunds count on the day of their own record, with
+  the satoshis put at risk or asked for and, for a cash refund, its amount.
+  Sales in two currencies are refused, as are sums that do not fit, with
+  words.
+- **CR-154.** A cashier sees the totals of CR-153 without a PIN. The lines per
+  person (sales opened, overrides, refunds asked for and cash refunds, by the
+  role and the name the record carries; sales whose record names no one are
+  counted apart) are asked for from the library, and shown, only after the
+  manager's PIN. At most 64 persons are named; the others are counted as left
+  out.
+- **CR-155.** The screen "Today" says what each total is, says why a sale
+  waits and what happens next (`docs/DESIGN.md` §2.6), shows no wallet balance,
+  and says that the owner's phone has the full books and the export. Its words
+  follow `docs/SCREEN-RULES.md`.
+- **CR-156.** These rules do not make the list of cashiers an authority. A PIN
+  on a phone stops a casual hand and nobody else: it does not stop a person who
+  holds the unlocked phone and the manager's PIN, or who takes the phone's
+  storage apart. The list is not in the signed settings, is not backed up and
+  is not on the owner's phone; a phone that is lost or reset loses it, and
+  the owner's records still name every cashier who was added or removed.

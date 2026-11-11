@@ -24,7 +24,9 @@
 //! 7. [`refusal`]: the refusals, each naming its rule.
 //! 8. [`heartbeat`]: the judgment of the owner's heartbeat (CR-51 to CR-53).
 //! 9. [`refund`]: the cashier's side of a refund (CR-60 to CR-74).
-//! 10. [`counter`]: the [`Counter`] itself.
+//! 10. [`staff`]: the record of a change to the cashiers (CR-143).
+//! 11. [`totals`]: the day's totals from the records (CR-152).
+//! 12. [`counter`]: the [`Counter`] itself.
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.
@@ -52,7 +54,9 @@ pub mod refusal;
 pub mod sale;
 pub mod say;
 pub mod screen;
+pub mod staff;
 pub mod store;
+pub mod totals;
 
 #[cfg(test)]
 mod tests;
@@ -76,11 +80,13 @@ pub use refund::{
 pub use refusal::{
     BlockError, CancelRefused, CommandRefused, DestinationRefused, HeartbeatRefused, JudgeError,
     LightningRefused, LoadError, OpenRefused, OverrideRefused, RefundRefused, RequoteRefused,
-    SightingError, WithdrawRefused,
+    SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
 };
 pub use sale::{End, LightningPaid, OverrideMark, PosState, Sale, Segment};
 pub use screen::{Color, Next, Report, Screen, State, Why};
+pub use staff::{StaffChange, StaffEvent};
 pub use store::{Slot, Store, StoreFault};
+pub use totals::{DayTotals, PersonLine, Tally, TotalsError, MAX_PEOPLE};
 
 /// CR-04: most new addresses handed out in one hour **[to tune]**.
 pub const MAX_ADDRESSES_PER_HOUR: usize = 120;

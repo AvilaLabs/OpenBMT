@@ -5,13 +5,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use openbmt_core::identity::DeviceId;
 use openbmt_core::records::{Chain, DeviceList, RecordKind};
-use openbmt_counter::{Currency, Event};
+use openbmt_counter::{Currency, Event, StaffEvent};
 
 use crate::date::{Date, MAX_OFFSET_MINUTES, MAX_UNIX, MIN_OFFSET_MINUTES};
 use crate::error::BooksError;
 use crate::model::{
     CashReturn, Counting, Disposal, DisposalKind, LatePayment, LightningPayment, OverrideNote,
     Payment, PaymentList, PaymentMode, PosFacts, PosMark, Sale, SaleId, SaleKey, SaleState,
+    StaffNote,
 };
 use crate::value::{UnknownField, Value};
 
@@ -49,6 +50,7 @@ pub struct Books {
     pub(crate) disposals: Vec<Disposal>,
     pub(crate) returns: Vec<CashReturn>,
     pub(crate) high_water: BTreeMap<DeviceId, Option<u32>>,
+    pub(crate) staff: Vec<StaffNote>,
 }
 
 fn check_time(at: u64) -> Result<(), BooksError> {
@@ -372,7 +374,29 @@ impl Books {
                     | RecordKind::Override
                     | RecordKind::Conflict
                     | RecordKind::Refund => {}
-                    RecordKind::Setting | RecordKind::Pairing | RecordKind::CheckIn => continue,
+                    RecordKind::Pairing => {
+                        // BK-35: a change to the cashiers, read strictly.
+                        let change = StaffEvent::decode(&record.body).map_err(|error| {
+                            BooksError::BadEvent {
+                                counter: *counter,
+                                seq: record.seq,
+                                error,
+                            }
+                        })?;
+                        check_time(change.at)?;
+                        if books.staff.len() >= MAX_LINES {
+                            return Err(BooksError::TooMany);
+                        }
+                        books.staff.push(StaffNote {
+                            counter: *counter,
+                            at: change.at,
+                            change: change.change,
+                            name: change.name,
+                            by: change.by,
+                        });
+                        continue;
+                    }
+                    RecordKind::Setting | RecordKind::CheckIn => continue,
                 }
                 let event = Event::decode(&record.body).map_err(|error| BooksError::BadEvent {
                     counter: *counter,
@@ -538,6 +562,13 @@ impl Books {
     /// for a counter with no events.
     pub fn high_water(&self) -> &BTreeMap<DeviceId, Option<u32>> {
         &self.high_water
+    }
+
+    /// BK-36: the changes to the cashiers the counters' records carry, in
+    /// the order of each counter's chain (counters in the order they were
+    /// given).
+    pub fn staff_changes(&self) -> &[StaffNote] {
+        &self.staff
     }
 
     /// One sale.

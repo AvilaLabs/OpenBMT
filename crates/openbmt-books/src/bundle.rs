@@ -513,6 +513,7 @@ impl Books {
             disposals: Vec::new(),
             returns: Vec::new(),
             high_water,
+            staff: Vec::new(),
         };
         books
             .with_disposals(disposals)

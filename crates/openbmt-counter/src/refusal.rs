@@ -56,6 +56,8 @@ pub enum OpenRefused<E> {
     NoAddress,
     /// CR-02: the address the batches handed out is already used by a sale.
     AddressInUse,
+    /// CR-61: the name of the person who opens the sale is not a label.
+    BadName,
     /// CR-03: the next index could not be stored, so no address was handed
     /// out.
     AddressNotStored(StoreFault<E>),
@@ -75,6 +77,7 @@ impl<E> OpenRefused<E> {
             Self::StaleRate { .. } => "CR-58",
             Self::RateLimited => "CR-04",
             Self::NoAddress | Self::AddressInUse => "CR-02",
+            Self::BadName => "CR-61",
             Self::AddressNotStored(_) => "CR-03",
             Self::Store(_) => "CR-40",
         }
@@ -115,6 +118,10 @@ impl<E: fmt::Display> fmt::Display for OpenRefused<E> {
             ),
             Self::NoAddress => write!(f, "no address is left; do not offer Bitcoin"),
             Self::AddressInUse => write!(f, "the address is already used by another sale"),
+            Self::BadName => write!(
+                f,
+                "the name of the person is not a label of 1 to 64 characters with no control character"
+            ),
             Self::AddressNotStored(e) => write!(
                 f,
                 "the next address was not stored, so none was handed out: {e}"
@@ -246,6 +253,8 @@ pub enum CancelRefused<E> {
     /// CR-07: something has arrived for the sale. Money on a cancelled sale
     /// is a matter for the refund flow, not for cancelling.
     MoneyArrived,
+    /// CR-61: the name of the person who cancels is not a label.
+    BadName,
     /// CR-40: a write failed.
     Store(StoreFault<E>),
 }
@@ -256,6 +265,7 @@ impl<E> CancelRefused<E> {
         match self {
             Self::UnknownSale(_) => "CR-11",
             Self::AlreadyEnded | Self::MoneyArrived => "CR-07",
+            Self::BadName => "CR-61",
             Self::Store(_) => "CR-40",
         }
     }
@@ -271,6 +281,10 @@ impl<E: fmt::Display> fmt::Display for CancelRefused<E> {
                 f,
                 "something has arrived for this sale; it cannot be cancelled, \
                  money on it is for the refund flow"
+            ),
+            Self::BadName => write!(
+                f,
+                "the name of the person is not a label of 1 to 64 characters with no control character"
             ),
             Self::Store(e) => write!(f, "{e}"),
         }
@@ -846,3 +860,89 @@ impl<E: fmt::Display> fmt::Display for WithdrawRefused<E> {
 }
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for WithdrawRefused<E> {}
+
+/// Why a change to the cashiers was not written down (CR-143).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StaffRefused<E> {
+    /// CR-143: a name is not a label.
+    BadName(&'static str),
+    /// CR-40: the record could not be written.
+    Store(StoreFault<E>),
+}
+
+impl<E> StaffRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::BadName(_) => "CR-143",
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for StaffRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::BadName(which) => write!(
+                f,
+                "the {which} is not a label of 1 to 64 characters with no control character"
+            ),
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for StaffRefused<E> {}
+
+/// Why the day's totals were not counted (CR-152, CR-153).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TotalsRefused<E> {
+    /// CR-152: the day ends before it starts, or is empty.
+    BadWindow,
+    /// CR-153: the sales of the day are in two currencies.
+    MixedCurrencies,
+    /// CR-153: a sum does not fit.
+    Overflow,
+    /// CR-152: the day needs more records than one count reads.
+    TooManyRecords,
+    /// CR-81: the records could not be read back.
+    Store(StoreFault<E>),
+}
+
+impl<E> TotalsRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::BadWindow | Self::TooManyRecords => "CR-152",
+            Self::MixedCurrencies | Self::Overflow => "CR-153",
+            Self::Store(_) => "CR-81",
+        }
+    }
+}
+
+impl<E> From<crate::totals::TotalsError> for TotalsRefused<E> {
+    fn from(e: crate::totals::TotalsError) -> Self {
+        match e {
+            crate::totals::TotalsError::BadWindow => Self::BadWindow,
+            crate::totals::TotalsError::MixedCurrencies => Self::MixedCurrencies,
+            crate::totals::TotalsError::Overflow => Self::Overflow,
+            crate::totals::TotalsError::TooManyRecords => Self::TooManyRecords,
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for TotalsRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::BadWindow => write!(f, "the day ends before it starts"),
+            Self::MixedCurrencies => write!(f, "the sales of the day are in two currencies"),
+            Self::Overflow => write!(f, "a sum of the day does not fit"),
+            Self::TooManyRecords => write!(f, "the day needs more records than one count reads"),
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for TotalsRefused<E> {}

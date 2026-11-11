@@ -17,6 +17,7 @@ fn opened(index: u32, at: u64, cents: u64) -> Event {
         needs_sats: 1,
         minor_per_btc: 1,
         source: RateSource::new("test-fixed", at).unwrap(),
+        by: None,
     }
 }
 

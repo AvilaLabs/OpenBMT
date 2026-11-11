@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 15] = [
+const TEST_SOURCES: [&str; 17] = [
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
     include_str!("lightning.rs"),
@@ -18,8 +18,10 @@ const TEST_SOURCES: [&str; 15] = [
     include_str!("refunds.rs"),
     include_str!("reports.rs"),
     include_str!("settle.rs"),
+    include_str!("staff.rs"),
     include_str!("states.rs"),
     include_str!("storage.rs"),
+    include_str!("totals.rs"),
     include_str!("valuation.rs"),
     include_str!("kit.rs"),
 ];
@@ -27,7 +29,7 @@ const TEST_SOURCES: [&str; 15] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 37] = [
+const NOT_HERE: [(&str, &str); 50] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -220,6 +222,66 @@ const NOT_HERE: [(&str, &str); 37] = [
         "the link line is the node's words and the app's screen; tested in \
          `openbmt-counter-node`, `openbmt-counter-ffi` and the app's JVM tests",
     ),
+    (
+        "CR-140",
+        "the list of cashiers and its file are the Android app's; its tests are the app's JVM \
+         tests (`apps/counter-android`), and the manifest and the extraction rules are checked \
+         there",
+    ),
+    (
+        "CR-141",
+        "a cashier's name and PIN are kept by the Android app; its tests are the app's JVM tests",
+    ),
+    (
+        "CR-142",
+        "the Staff screen is the Android app's; the record it asks for is tested here (CR-143) \
+         and its steps in the app's JVM tests",
+    ),
+    (
+        "CR-144",
+        "the owner's reading of the record is `openbmt-books`'s (BK-35 to BK-37); tested there",
+    ),
+    (
+        "CR-145",
+        "it states that adding cashiers loosens nothing: the limits it names are CR-20 and \
+         CR-21, tested above; there is nothing more to enforce or to test",
+    ),
+    (
+        "CR-146",
+        "the till lock turning on and off with the list is the Android app's; its tests are the \
+         app's JVM tests",
+    ),
+    (
+        "CR-147",
+        "the sign-in screen is the Android app's; its tests are the app's JVM tests",
+    ),
+    (
+        "CR-148",
+        "who is named as the actor is the Android app's; the library keeps the name it is \
+         given (CR-151, CR-61); the app's JVM tests cover the choice",
+    ),
+    (
+        "CR-149",
+        "when the app locks is the Android app's; its tests are the app's JVM tests, and the \
+         use of the activity's visibility needs a device to test",
+    ),
+    (
+        "CR-150",
+        "the hold on a PIN is the Android app's (CR-85); its tests are the app's JVM tests",
+    ),
+    (
+        "CR-154",
+        "which totals need the manager's PIN is the Android app's; the library gives the lines \
+         only when asked (CR-153); its tests are the app's JVM tests",
+    ),
+    (
+        "CR-155",
+        "the Today screen and its words are the Android app's; its tests are the app's JVM tests",
+    ),
+    (
+        "CR-156",
+        "it states what the cashier list does not do; there is nothing to enforce or to test",
+    ),
 ];
 
 /// The rule number at the start of `rest` (what follows `CR-`): every digit,
@@ -238,9 +300,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_one_hundred_and_two_rules() {
+fn the_rules_file_defines_one_hundred_and_nineteen_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 102);
+    assert_eq!(ids.len(), 119);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -258,6 +320,8 @@ fn the_rules_file_defines_one_hundred_and_two_rules() {
             && ids.contains("CR-116")
             && ids.contains("CR-130")
             && ids.contains("CR-136")
+            && ids.contains("CR-140")
+            && ids.contains("CR-156")
     );
 }
 

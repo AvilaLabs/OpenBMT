@@ -387,6 +387,7 @@ fn bx_40_a_queue_over_its_bound_drops_the_oldest_and_says_so() {
             needs_sats: 1,
             minor_per_btc: 1,
             source: RateSource::new("test-fixed", T0).unwrap(),
+            by: None,
         };
         chain.append(&me, e.kind(), e.encode()).unwrap();
     }

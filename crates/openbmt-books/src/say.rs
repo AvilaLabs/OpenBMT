@@ -9,10 +9,12 @@
 //! and times go in the details.
 
 use openbmt_core::records::ChainError;
-use openbmt_core::say::{Tone, Who, Words};
+use openbmt_core::say::{Quoted, Tone, Who, Words};
 use openbmt_core::wire::DecodeError;
+use openbmt_counter::StaffChange;
 
 use crate::error::{BooksError, ExportError, OpenError, SealError};
+use crate::model::StaffNote;
 
 /// Which export the owner asked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -298,6 +300,37 @@ fn sample_device() -> Option<openbmt_core::identity::DeviceId> {
     openbmt_core::identity::DeviceId::from_bytes(&bytes).ok()
 }
 
+impl StaffNote {
+    /// BK-37: what the owner is told of a change to the cashiers. The names
+    /// are text from the counter, so they are quoted and never part of the
+    /// sentences (SC-08); `counter` is the name the owner gave the counter.
+    pub fn words(&self, counter: &str) -> Words {
+        let (heading, what) = match self.change {
+            StaffChange::Added => (
+                "Cashier added",
+                format!("A manager added a cashier on the counter \"{counter}\"."),
+            ),
+            StaffChange::Removed => (
+                "Cashier removed",
+                format!("A manager removed a cashier on the counter \"{counter}\"."),
+            ),
+        };
+        Words::new(
+            Tone::Info,
+            heading,
+            what,
+            Who::Nobody,
+            "Nothing to do. If you did not expect this change, ask the manager of the counter.",
+        )
+        .at(self.at)
+        .quoted(Quoted::new(
+            "The cashier and the manager, as the counter wrote them",
+            &format!("{} (by {})", self.name, self.by),
+        ))
+        .code("BK-37")
+    }
+}
+
 /// SC-12: the words of every refusal of this crate, with at least one value
 /// for every variant and every variant inside it. Built by hand so that a new
 /// variant is noticed. The counter is called "Corner".
@@ -442,12 +475,36 @@ pub fn all_words() -> Vec<(String, Words)> {
     all
 }
 
+/// SC-12: the words of a change to the cashiers (BK-37), one for each kind of
+/// change. The counter is called "Corner".
+pub fn staff_words() -> Vec<(String, Words)> {
+    let Some(counter) = sample_device() else {
+        return Vec::new();
+    };
+    [
+        ("Added", StaffChange::Added),
+        ("Removed", StaffChange::Removed),
+    ]
+    .into_iter()
+    .map(|(n, change)| {
+        let note = StaffNote {
+            counter,
+            at: 1_700_000_000,
+            change,
+            name: "Ann".to_string(),
+            by: "Max".to_string(),
+        };
+        (format!("StaffNote::{n}"), note.words("Corner"))
+    })
+    .collect()
+}
+
 /// SC-12: the rows of this crate's words in the one table of
 /// `docs/screens/owner.md`, one line each, in the order of [`all_words`].
 pub fn screens_markdown() -> String {
     let cell = |t: &str| t.replace('|', "/");
     let mut out = String::new();
-    for (name, w) in all_words() {
+    for (name, w) in all_words().into_iter().chain(staff_words()) {
         out.push_str(&format!(
             "| books: {name} | {} | {} | {} | {:?} | {} |\n",
             cell(&w.heading),

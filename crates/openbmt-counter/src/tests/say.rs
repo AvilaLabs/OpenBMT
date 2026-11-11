@@ -93,6 +93,8 @@ fn sc_01_no_variant_is_missing() {
         "DestinationRefused::",
         "RefundRefused::",
         "WithdrawRefused::",
+        "StaffRefused::",
+        "TotalsRefused::",
     ] {
         assert!(all.iter().any(|(n, _)| n.starts_with(prefix)), "{prefix}");
     }

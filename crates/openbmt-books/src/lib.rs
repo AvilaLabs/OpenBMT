@@ -62,7 +62,7 @@ pub use fsio::write_whole;
 pub use model::{
     Basis, CashReturn, Counting, Disposal, DisposalKind, LatePayment, LightningPayment,
     OverrideNote, Payment, PaymentList, PaymentMode, PosFacts, PosMark, Sale, SaleId, SaleKey,
-    SaleState, Settlement,
+    SaleState, Settlement, StaffNote,
 };
 pub use money::{format_minor, minor_digits};
 pub use sealed::{
