@@ -15,7 +15,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PROGRAMS="openbmt-signer openbmt-counter-node openbmt-owner-node openbmt-box \
-openbmt-books openbmt-key-ffi"
+openbmt-books openbmt-key-ffi openbmt-qr"
 write=0
 [ "${1:-}" = "--write" ] && write=1
 fail=0
@@ -30,7 +30,17 @@ externals() {
 
 for p in $PROGRAMS; do
     list="deps/$p.txt"
-    now="$(externals "$p")"
+    now="$(externals "$p" || true)"
+    # A program with no external packages at all has an empty list.
+    if [ -z "$now" ] && [ -f "$list" ] && [ ! -s "$list" ] &&
+        cargo tree --locked --offline -p "$p" -e normal,build >/dev/null 2>&1; then
+        if [ "$write" = 1 ]; then
+            echo "WROTE $list (0 packages)"
+        else
+            echo "PASS  $p: 0 external packages, as listed"
+        fi
+        continue
+    fi
     if [ -z "$now" ]; then
         echo "FAIL  $p: no packages found (is the name right?)"
         fail=1

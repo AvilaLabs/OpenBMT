@@ -52,6 +52,7 @@ exactly the input bytes.
 | `courier_records_decode` | `decode_records`, the content of a Records message; on success each record encoded again behind its length must give the input back |
 | `box_claim_decode` | `Claim::from_bytes` and `Welcome::from_bytes` (each must encode back to the input) and `Invitation::from_text` on UTF-8 input (one that reads must read back from its own text to the same invitation) |
 | `box_notice_decode` | `PaidNotice::from_bytes` (a notice that reads is the pinned 141 bytes and encodes back to the input) and `PosNotice::from_bytes` (encodes back to the input); checking a signature and writing the text of a notice never panic |
+| `qr_encode` | `openbmt_qr` on arbitrary bytes: the first byte gives the level and how to encode (bytes, text, or a forced version and mask from the next two bytes, which may be out of range); it must never panic, refuse a bad version or mask only with those errors, and a code that is made must have the level asked for, every module readable (and none outside the square dark), and the format bits in both copies in the matrix equal to those of its level and mask |
 
 ## Running
 

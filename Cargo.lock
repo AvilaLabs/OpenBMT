@@ -493,6 +493,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-qr"
+version = "0.1.0"
+
+[[package]]
 name = "openbmt-session"
 version = "0.1.0"
 dependencies = [

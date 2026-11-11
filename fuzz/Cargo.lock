@@ -417,6 +417,7 @@ dependencies = [
  "openbmt-owner",
  "openbmt-owner-node",
  "openbmt-pos",
+ "openbmt-qr",
  "openbmt-session",
  "openbmt-signer",
  "openbmt-spend",
@@ -535,6 +536,10 @@ dependencies = [
  "openbmt-core",
  "openbmt-counter",
 ]
+
+[[package]]
+name = "openbmt-qr"
+version = "0.1.0"
 
 [[package]]
 name = "openbmt-session"

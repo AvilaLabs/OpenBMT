@@ -17,6 +17,7 @@ for each program that ships. The lists themselves are in `deps/`.
 | Box | `deps/openbmt-box.txt` | 38 |
 | Books export | `deps/openbmt-books.txt` | 42 |
 | Key app library | `deps/openbmt-key-ffi.txt` | 20 |
+| QR code encoder | `deps/openbmt-qr.txt` | 0 |
 
 Where they come from:
 
@@ -33,6 +34,12 @@ Where they come from:
   holds a signing key and has the smallest set of all: the base plus
   this one crate. Its binding to the app is written by hand, in place of
   a binding generator that brought in about 40 packages.
+
+- **The QR code encoder, none.** `openbmt-qr` has no dependencies of its
+  own, not even for tests. The counter, the owner and the Key apps show
+  codes, and a QR library would have been a new package in each list; the
+  encoder is about a thousand lines in the repository, checked against
+  ZXing (below) bit for bit.
 
 Two implementations of ChaCha20-Poly1305 are in the counter: RustCrypto's
 for sealed messages and rust-bitcoin's inside `bip324`. Using the second
@@ -89,6 +96,21 @@ own and is not in `deps/`; its Rust part is the `openbmt-key-ffi` list above.
   rights and are trusted as the Rust toolchain is.
 - **Signing key.** The build makes a throwaway test key with `keytool`. It is
   never committed and is not the release key.
+
+## Test tools
+
+Tools that check the code and are never part of a program or its lists.
+They run on the builder's machine and follow rules 2 and 3 where they
+apply: pinned, from the publisher's registry, checked against a digest.
+
+- **ZXing core 3.5.3** (`com.google.zxing:core`, Apache License 2.0), a
+  Java QR code library used only by `scripts/qr-crosscheck.sh` as an
+  independent implementation: it encodes the same inputs and decodes the
+  codes of `openbmt-qr`. The jar comes from Maven Central, is checked
+  against the `.sha1` published beside it, and the script refuses a jar
+  whose SHA-256 is not
+  `8d8064c1636fdaef7189dd9055c7d59950a8940a12f2293956446ec3c109fd82`.
+  The harness is run with JDK 21 (`javac`, `java`; no Maven or Gradle).
 
 ## What this does not do
 
