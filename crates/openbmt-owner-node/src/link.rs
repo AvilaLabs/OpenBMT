@@ -1,4 +1,4 @@
-//! The owner's end of the link (LK-55, LK-58 to LK-63).
+//! The owner's end of the link (LK-55, LK-58 to LK-63, LK-70 to LK-73).
 //!
 //! [`OwnerLink`] owns a [`Courier`], one [`CounterCopy`] for each counter on
 //! the list, and the alerts the app reads. It is driven by the app loop next
@@ -14,7 +14,11 @@
 //! 3. tells each counter whose records it took what it now holds, once
 //!    (LK-55, LK-60);
 //! 4. every `heartbeat_every_secs`, asks the watcher for a heartbeat for each
-//!    counter and sends it (LK-61).
+//!    counter and sends it (LK-61);
+//! 5. looks in each copy for the records that say a counter holds a batch the
+//!    owner sent, drops those batches from the pending list and sends the
+//!    rest again, at most once in `batch_resend_secs` for each counter
+//!    (LK-70 to LK-73).
 //!
 //! Where the rules are silent:
 //!
@@ -41,6 +45,12 @@
 //!   took the message for it. A version is sent to a device again after
 //!   [`OwnerLinkConfig::settings_resend_secs`], so that a device that is off
 //!   does not fill its mailbox with copies.
+//! - A batch is kept from the moment it is sent. Its first send is made
+//!   there and then; the time it was sent is not stored, so after a restart
+//!   the first step sends the pending batches again. A batch for a counter
+//!   that is not on the list is sent (and refused by the courier) and not
+//!   kept. A pending list that cannot be saved is noted, and the batch is
+//!   still sent once.
 //! - A POS notice (BX-42) is taken only from a key the table holds as a Box,
 //!   with the Box's own signature and a number above the last from that Box.
 //!   It is kept, the newest [`MAX_BOX_REPORTS`], as the Box's report and is
@@ -55,8 +65,9 @@ use openbmt_core::batch::PinnedRoots;
 use openbmt_core::batch::SignedBatch;
 use openbmt_core::command::SignedCommand;
 use openbmt_core::identity::DeviceId;
-use openbmt_core::records::{DeviceList, Record};
+use openbmt_core::records::{DeviceList, Record, RecordKind};
 use openbmt_core::settings::{Settings, SettingsError, SignedSettings};
+use openbmt_counter::BatchHeld;
 use openbmt_counter_node::DriverPort;
 use openbmt_courier::{
     decode_records, received_content, Courier, Post, Received, RelayPost, SendError,
@@ -64,6 +75,7 @@ use openbmt_courier::{
 use openbmt_link::{Kind, Role};
 use openbmt_pos::PosNotice;
 
+use crate::batch_outbox::{BatchOutbox, BatchOutboxError, PendingBatch};
 use crate::copy::{CheckInTaken, CopyError, CounterCopy, Stop};
 use crate::watcher::OwnerWatcher;
 
@@ -75,6 +87,13 @@ pub const MAX_BOX_REPORTS: usize = 256;
 
 /// Most settings the link carries at once (LK-64).
 pub const MAX_CARRIED_SETTINGS: usize = 16;
+
+/// A batch the counter has not shown as held is sent again after this many
+/// seconds (LK-71).
+pub const BATCH_RESEND_SECS: u64 = 120;
+
+/// Seconds a batch may wait before the owner is told (LK-73): 24 hours.
+pub const BATCH_ALERT_SECS: u64 = 24 * 60 * 60;
 
 /// One thing the Box reported (BX-42): shown as the Box's, never as the
 /// owner's own finding.
@@ -103,6 +122,11 @@ pub struct OwnerLinkConfig {
     /// Seconds before settings that a device does not yet show it holds are
     /// sent to it again (LK-64).
     pub settings_resend_secs: u64,
+    /// Fewest seconds between two sends of the pending batches of a counter
+    /// (LK-71).
+    pub batch_resend_secs: u64,
+    /// Seconds a batch may wait before the alert (LK-73).
+    pub batch_alert_secs: u64,
 }
 
 impl Default for OwnerLinkConfig {
@@ -113,6 +137,8 @@ impl Default for OwnerLinkConfig {
             poll_secs: 1,
             retry_secs: 5,
             settings_resend_secs: 120,
+            batch_resend_secs: BATCH_RESEND_SECS,
+            batch_alert_secs: BATCH_ALERT_SECS,
         }
     }
 }
@@ -136,6 +162,25 @@ pub enum Alert {
         /// The number of the record.
         seq: u64,
     },
+    /// A batch of addresses has waited for the counter to hold it for the
+    /// alert time (LK-73).
+    BatchUndelivered {
+        /// The counter.
+        counter: DeviceId,
+        /// When the oldest batch that waits was first sent.
+        since: u64,
+    },
+}
+
+/// The batches of addresses that wait for one counter to hold them (LK-70).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchesWaiting {
+    /// The counter.
+    pub counter: DeviceId,
+    /// How many batches wait.
+    pub batches: usize,
+    /// When the oldest was first sent.
+    pub since: u64,
 }
 
 /// What the link says about one counter, for a screen or a log.
@@ -165,6 +210,8 @@ pub enum OwnerLinkError {
         /// What is wrong.
         error: CopyError,
     },
+    /// The file of batches that wait could not be opened (LK-72).
+    Batches(BatchOutboxError),
 }
 
 impl std::fmt::Display for OwnerLinkError {
@@ -173,6 +220,7 @@ impl std::fmt::Display for OwnerLinkError {
             Self::Copy { counter, error } => {
                 write!(f, "the copy of the chain of {counter:?}: {error}")
             }
+            Self::Batches(error) => write!(f, "{error}"),
         }
     }
 }
@@ -237,6 +285,14 @@ struct Carried {
     targets: BTreeMap<DeviceId, Role>,
 }
 
+/// The batches a counter's records show it holds, and how many of its records
+/// were looked at to find them (LK-70).
+#[derive(Debug, Default)]
+struct HeldBatches {
+    looked_at: u64,
+    batches: BTreeSet<BatchHeld>,
+}
+
 /// The owner's end of the link. See the module docs.
 pub struct OwnerLink<R: Post = RelayPost> {
     courier: Courier<R>,
@@ -264,6 +320,13 @@ pub struct OwnerLink<R: Post = RelayPost> {
     settings_sent: BTreeMap<(DeviceId, u32), u64>,
     /// LK-65: the Boxes the relay took each version for.
     boxes_sent: BTreeSet<(DeviceId, u32)>,
+    /// LK-70, LK-72: the batches sent and not yet shown as held.
+    batches: BatchOutbox,
+    /// LK-70: what each copy shows as held, read from the records the link
+    /// has looked at.
+    held: BTreeMap<DeviceId, HeldBatches>,
+    /// LK-71: when the pending batches of a counter were last sent.
+    batches_sent_at: BTreeMap<DeviceId, u64>,
 }
 
 impl<R: Post> OwnerLink<R> {
@@ -298,6 +361,7 @@ impl<R: Post> OwnerLink<R> {
             }
             copies.insert(*counter, copy);
         }
+        let batches = BatchOutbox::open(&root).map_err(OwnerLinkError::Batches)?;
         Ok(Self {
             courier,
             root,
@@ -318,6 +382,9 @@ impl<R: Post> OwnerLink<R> {
             last_targets: BTreeMap::new(),
             settings_sent: BTreeMap::new(),
             boxes_sent: BTreeSet::new(),
+            batches,
+            held: BTreeMap::new(),
+            batches_sent_at: BTreeMap::new(),
         })
     }
 
@@ -424,9 +491,49 @@ impl<R: Post> OwnerLink<R> {
         self.send_now(counter, Kind::Command, &command.to_bytes())
     }
 
-    /// Send a signed batch of addresses to a counter (LK-61).
-    pub fn send_batch(&mut self, counter: &DeviceId, batch: &SignedBatch) -> Result<(), SendError> {
-        self.send_now(counter, Kind::Batch, &batch.to_bytes())
+    /// What the link says about the batches that wait for a counter, or
+    /// `None` when none wait (LK-70).
+    pub fn batches_waiting(&self, counter: &DeviceId) -> Option<BatchesWaiting> {
+        let mut mine = self
+            .batches
+            .items()
+            .iter()
+            .filter(|p| p.counter == *counter);
+        let first = mine.next()?;
+        let (batches, since) = mine.fold((1, first.queued_at), |(n, at), p| {
+            (n + 1, at.min(p.queued_at))
+        });
+        Some(BatchesWaiting {
+            counter: *counter,
+            batches,
+            since,
+        })
+    }
+
+    /// Send a signed batch of addresses to a counter (LK-61), and keep it
+    /// until the counter's records show it held (LK-70). `now` is the time of
+    /// the first send; the link sends the batch again by itself (LK-71).
+    pub fn send_batch(
+        &mut self,
+        counter: &DeviceId,
+        batch: &SignedBatch,
+        now: u64,
+    ) -> Result<(), SendError> {
+        if self.copies.contains_key(counter) {
+            let kept = self.batches.push(PendingBatch {
+                counter: *counter,
+                batch: batch.clone(),
+                queued_at: now,
+            });
+            if let Err(e) = kept {
+                self.note(format!(
+                    "the batch for {counter:?} could not be kept for sending again: {e}"
+                ));
+            }
+        }
+        self.send_now(counter, Kind::Batch, &batch.to_bytes())?;
+        self.batches_sent_at.insert(*counter, now);
+        Ok(())
     }
 
     fn send_now(&mut self, to: &DeviceId, kind: Kind, content: &[u8]) -> Result<(), SendError> {
@@ -653,6 +760,7 @@ impl<R: Post> OwnerLink<R> {
     pub fn step<P: DriverPort>(&mut self, watcher: &mut OwnerWatcher<P>, now: u64) {
         let started = *self.started_at.get_or_insert(now);
         self.check_missed(now, started);
+        self.settle_batches(now);
         if now < self.next_relay_at {
             return;
         }
@@ -673,6 +781,11 @@ impl<R: Post> OwnerLink<R> {
         self.check_missed(now, started);
         if reached {
             reached = self.reply(&reply_due);
+        }
+        if reached {
+            // Taking records may have shown a batch held.
+            self.settle_batches(now);
+            reached = self.resend_batches(now);
         }
         if reached {
             reached = self.heartbeats(watcher, now);
@@ -704,6 +817,102 @@ impl<R: Post> OwnerLink<R> {
                 self.raise(Alert::MissedCheckIn { counter, last_at });
             }
         }
+    }
+
+    /// LK-70, LK-73: drop the pending batches the copies show as held or
+    /// passed, and raise or clear the alert for the ones that wait too long.
+    fn settle_batches(&mut self, now: u64) {
+        if self.batches.is_empty() && self.held.is_empty() {
+            self.alerts
+                .retain(|a| !matches!(a, Alert::BatchUndelivered { .. }));
+            return;
+        }
+        for counter in self.counters.clone() {
+            let Some(copy) = self.copies.get(&counter) else {
+                continue;
+            };
+            let seen = self.held.entry(counter).or_default();
+            let from = usize::try_from(seen.looked_at).unwrap_or(usize::MAX);
+            for record in copy.records().iter().skip(from) {
+                if record.kind == RecordKind::Setting {
+                    if let Ok(b) = BatchHeld::decode(&record.body) {
+                        seen.batches.insert(b);
+                    }
+                }
+            }
+            seen.looked_at = copy.len();
+        }
+        let held = &self.held;
+        let dropped = self.batches.retain(|p| {
+            let Some(seen) = held.get(&p.counter) else {
+                return true;
+            };
+            let Some(mine) = BatchHeld::of(&p.batch) else {
+                return false;
+            };
+            let shown = seen.batches.contains(&mine);
+            let passed = seen.batches.iter().any(|b| b.start >= mine.end);
+            !(shown || passed)
+        });
+        match dropped {
+            Ok(_) => {}
+            Err(e) => self.note(format!("the pending batches could not be saved: {e}")),
+        }
+        let late: Vec<(DeviceId, u64)> = self
+            .counters
+            .iter()
+            .filter_map(|c| self.batches_waiting(c))
+            .filter(|w| now.saturating_sub(w.since) >= self.cfg.batch_alert_secs)
+            .map(|w| (w.counter, w.since))
+            .collect();
+        self.alerts.retain(|a| match a {
+            Alert::BatchUndelivered { counter, since } => late.contains(&(*counter, *since)),
+            _ => true,
+        });
+        for (counter, since) in late {
+            self.raise(Alert::BatchUndelivered { counter, since });
+        }
+    }
+
+    /// LK-71: send the batches that still wait to each counter, oldest range
+    /// first, at most once in `batch_resend_secs` for each counter. `false`
+    /// if the relay could not be reached.
+    fn resend_batches(&mut self, now: u64) -> bool {
+        for counter in self.counters.clone() {
+            let due = self
+                .batches_sent_at
+                .get(&counter)
+                .is_none_or(|at| now >= at.saturating_add(self.cfg.batch_resend_secs));
+            if !due {
+                continue;
+            }
+            let mine: Vec<SignedBatch> = self
+                .batches
+                .items()
+                .iter()
+                .filter(|p| p.counter == counter)
+                .map(|p| p.batch.clone())
+                .collect();
+            if mine.is_empty() {
+                continue;
+            }
+            self.batches_sent_at.insert(counter, now);
+            for batch in mine {
+                match self.courier.send(&counter, Kind::Batch, &batch.to_bytes()) {
+                    Ok(()) => {}
+                    Err(e) if e.is_retryable() => {
+                        // Tried again at the next step.
+                        self.batches_sent_at.remove(&counter);
+                        return false;
+                    }
+                    Err(e) => {
+                        self.note(format!("a batch for {counter:?} was not sent again: {e}"));
+                        break;
+                    }
+                }
+            }
+        }
+        true
     }
 
     fn route(&mut self, message: Received, now: u64, reply_due: &mut BTreeSet<DeviceId>) {

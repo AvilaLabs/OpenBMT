@@ -49,6 +49,7 @@
     )
 )]
 
+pub mod batch_outbox;
 pub mod coins;
 pub mod copy;
 pub mod deep;
@@ -66,11 +67,13 @@ pub mod watcher;
 #[cfg(test)]
 mod tests;
 
+pub use batch_outbox::{BatchOutbox, BatchOutboxError, PendingBatch, MAX_PENDING_BATCHES};
 pub use copy::{CheckInTaken, CopyError, CounterCopy, Stop, Taken};
 pub use facts::{verified_facts, FactsRefused};
 pub use link::{
-    Alert, BoxReport, CounterState, OwnerLink, OwnerLinkConfig, OwnerLinkError, SettingsNotCarried,
-    SettingsWaiting, MAX_BOX_REPORTS, MAX_CARRIED_SETTINGS,
+    Alert, BatchesWaiting, BoxReport, CounterState, OwnerLink, OwnerLinkConfig, OwnerLinkError,
+    SettingsNotCarried, SettingsWaiting, BATCH_ALERT_SECS, BATCH_RESEND_SECS, MAX_BOX_REPORTS,
+    MAX_CARRIED_SETTINGS,
 };
 pub use live::{
     DeepLine, Spans, WatchLimits, DEEP_CHECK_SECS, DEEP_RETRY_SECS, DEEP_STALL_SECS,

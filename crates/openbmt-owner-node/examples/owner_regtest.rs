@@ -4,7 +4,8 @@
 //!
 //! ```text
 //! owner_regtest <data dir> <node address> [--regtest-single-peer]
-//!     [--relay <address> --relay-key <hex> [--heartbeat-every <seconds>]]
+//!     [--relay <address> --relay-key <hex> [--heartbeat-every <seconds>]
+//!     [--batch-resend <seconds>]]
 //! ```
 //!
 //! `scripts/instant-e2e-core.sh` uses this together with the counter example
@@ -51,6 +52,11 @@
 //!   the counter. `owner` (the default) is the real one. `approver` is signed
 //!   with the Key app's key, and `other-counter` names another counter, both
 //!   to check that the counter refuses them. All three use up a number.
+//! - `sendbatch <start>`: sign a batch of 20 addresses from `<start>` for the
+//!   counter and hand it to the link, which keeps it and sends it again until
+//!   the counter's records show it held (LK-70, LK-71). The owner's queue is
+//!   not used: the batch goes straight to the link.
+//! - `batches`
 //! - `pump <seconds>`
 //! - `health`
 //! - `groups`
@@ -70,6 +76,8 @@
 //! - `health used=<healthy|unhealthy> real=<ok|problem> peers=<n>`
 //! - `groups peers=<n> groups=<n> filter_groups=<n>`
 //! - `status tip=<h> hash=<hex> seq=<n>`
+//! - `batches counter=<hex> waiting=<n> since=<secs|none>`: the batches that
+//!   wait for the counter to hold them
 //! - `linkstate alerts=<n> refused=<n> reachable=<bool>`: the number of alerts
 //!   now raised, the messages the courier refused, and whether the last call
 //!   to the relay worked
@@ -104,7 +112,7 @@ use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::{Address, Network};
-use openbmt_core::batch::{BatchBuilder, BatchPolicy};
+use openbmt_core::batch::{BatchBuilder, BatchPolicy, SignedBatch};
 use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::records::DeviceList;
@@ -120,7 +128,7 @@ use openbmt_owner_node::{
 use openbmt_watch::{check_health, network_group, HeaderChain, Health, HealthInput};
 
 const USAGE: &str = "usage: owner_regtest <data dir> <node address> [--regtest-single-peer] \
-                     [--relay <address> --relay-key <hex> [--heartbeat-every <seconds>]]";
+                     [--relay <address> --relay-key <hex> [--heartbeat-every <seconds>]\n                     [--batch-resend <seconds>]]";
 
 /// TEST ONLY, NEVER USE: the secret bytes of the identities.
 const OWNER_SECRET: [u8; 32] = [0x11; 32];
@@ -231,6 +239,7 @@ fn start_link(
     addr: SocketAddr,
     relay_key: DeviceId,
     heartbeat_every: Option<u64>,
+    batch_resend: Option<u64>,
 ) -> Result<OwnerLink, String> {
     let counter = identity(&COUNTER_SECRET)?.device_id();
     let owner = identity(&OWNER_SECRET)?.device_id();
@@ -258,6 +267,9 @@ fn start_link(
     let mut config = OwnerLinkConfig::default();
     if let Some(secs) = heartbeat_every {
         config.heartbeat_every_secs = secs;
+    }
+    if let Some(secs) = batch_resend {
+        config.batch_resend_secs = secs;
     }
     OwnerLink::new(
         courier,
@@ -299,8 +311,9 @@ fn variant(
 
 fn command(
     node: &mut OwnerNode,
-    link: Option<&OwnerLink>,
+    mut link: Option<&mut OwnerLink>,
     intake: &RefundIntake,
+    wallet: &WalletDescription,
     line: &str,
     seen: &Arc<Mutex<Seen>>,
 ) -> Result<bool, String> {
@@ -374,8 +387,45 @@ fn command(
                 node.watcher().last_seq()
             ));
         }
+        Some("sendbatch") => {
+            let link = link
+                .as_deref_mut()
+                .ok_or("the link is not started: give --relay and --relay-key")?;
+            let start: u32 = words
+                .next()
+                .and_then(|w| w.parse().ok())
+                .ok_or("sendbatch needs the first index")?;
+            let batch = BatchBuilder::new(BatchPolicy {
+                min_count: ADDRESSES,
+            })
+            .derive(wallet, counter, start, ADDRESSES)
+            .map_err(|e| e.to_string())?;
+            let signed = SignedBatch {
+                owner_sig: batch.sign(&identity(&OWNER_SECRET)?),
+                approver_sig: batch.sign(&identity(&APPROVER_SECRET)?),
+                batch,
+            };
+            match link.send_batch(&counter, &signed, now_secs()) {
+                Ok(()) => say(format!("sendbatch start={start} sent")),
+                Err(e) => say(format!("sendbatch start={start} not-sent {e}")),
+            }
+        }
+        Some("batches") => {
+            let link = link
+                .as_deref()
+                .ok_or("the link is not started: give --relay and --relay-key")?;
+            let waiting = link.batches_waiting(&counter);
+            say(format!(
+                "batches counter={} waiting={} since={}",
+                hex(&counter.to_bytes()),
+                waiting.as_ref().map_or(0, |w| w.batches),
+                waiting.map_or("none".to_string(), |w| w.since.to_string()),
+            ));
+        }
         Some("linkstate") => {
-            let link = link.ok_or("the link is not started: give --relay and --relay-key")?;
+            let link = link
+                .as_deref()
+                .ok_or("the link is not started: give --relay and --relay-key")?;
             say(format!(
                 "linkstate alerts={} refused={} reachable={}",
                 link.alerts().len(),
@@ -384,7 +434,9 @@ fn command(
             ));
         }
         Some("copies") => {
-            let link = link.ok_or("the link is not started: give --relay and --relay-key")?;
+            let link = link
+                .as_deref()
+                .ok_or("the link is not started: give --relay and --relay-key")?;
             for counter in link.counters() {
                 let state = link.state(counter).ok_or("no copy of that counter")?;
                 say(format!(
@@ -465,6 +517,7 @@ fn run(args: &[String]) -> Result<(), String> {
     let mut relay: Option<SocketAddr> = None;
     let mut relay_key: Option<DeviceId> = None;
     let mut heartbeat_every: Option<u64> = None;
+    let mut batch_resend: Option<u64> = None;
     let mut rest = Vec::new();
     let mut args = args.iter();
     while let Some(arg) = args.next() {
@@ -479,6 +532,9 @@ fn run(args: &[String]) -> Result<(), String> {
                 .try_into()
                 .map_err(|_| "the relay key is not 32 bytes".to_string())?;
             relay_key = Some(DeviceId::from_bytes(&bytes).map_err(|e| format!("relay key: {e}"))?);
+        } else if arg == "--batch-resend" {
+            let secs = args.next().ok_or(USAGE)?;
+            batch_resend = Some(secs.parse().map_err(|_| format!("seconds: {secs}"))?);
         } else if arg == "--heartbeat-every" {
             let secs = args.next().ok_or(USAGE)?;
             heartbeat_every = Some(secs.parse().map_err(|_| format!("seconds: {secs}"))?);
@@ -555,7 +611,7 @@ fn run(args: &[String]) -> Result<(), String> {
         hex(&node.watcher().device_id().to_bytes())
     ));
     let mut link = match (relay, relay_key) {
-        (Some(addr), Some(key)) => Some(start_link(dir, addr, key, heartbeat_every)?),
+        (Some(addr), Some(key)) => Some(start_link(dir, addr, key, heartbeat_every, batch_resend)?),
         _ => None,
     };
     let mut alerts_shown = 0usize;
@@ -579,7 +635,14 @@ fn run(args: &[String]) -> Result<(), String> {
     loop {
         match input.try_recv() {
             Ok(line) => {
-                match command(&mut node, link.as_ref(), &intake, line.trim(), &seen) {
+                match command(
+                    &mut node,
+                    link.as_mut(),
+                    &intake,
+                    &wallet,
+                    line.trim(),
+                    &seen,
+                ) {
                     Ok(true) => {}
                     Ok(false) => break,
                     Err(e) => say(format!("error {e}")),

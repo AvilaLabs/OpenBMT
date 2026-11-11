@@ -11,7 +11,7 @@ use openbmt_core::batch::{AddressBatch, BatchPolicy, SignedBatch};
 use openbmt_core::command::{Action, OwnerCommand, SignedCommand};
 use openbmt_core::records::{Chain, DeviceList, Record, RecordKind, GENESIS};
 use openbmt_core::settings::{Change, SettingNote, Settings, SettingsError, SignedSettings};
-use openbmt_counter::Pairing;
+use openbmt_counter::{BatchHeld, Pairing};
 use openbmt_counter_node::{CounterLink, CounterLinkConfig, Node, NodeConfig};
 use openbmt_courier::{
     decode_received, records_content, Courier, FirstStart, MemoryPost, MemoryRelay, Received,
@@ -663,7 +663,7 @@ fn lk_61_a_heartbeat_goes_to_each_counter_every_twenty_seconds() {
 fn lk_61_a_command_and_a_batch_are_sent_when_asked() {
     let mut w = world();
     w.link.send_command(&counter(), &command(4)).unwrap();
-    w.link.send_batch(&counter(), &batch()).unwrap();
+    w.link.send_batch(&counter(), &batch(), T0).unwrap();
     let got = w.counter_gets();
     assert_eq!(got.len(), 2);
     assert_eq!(got[0].kind, Kind::Command);
@@ -1302,4 +1302,308 @@ fn lk_67_the_link_talks_to_the_counters_of_the_settings_and_drops_a_removed_one_
     b.w.link.settings_done(5);
     assert_eq!(b.w.link.counters(), [counter()]);
     assert!(b.w.link.copy(&second).is_none());
+}
+
+// Section 6, batches that wait to be held (LK-70 to LK-73).
+
+/// A batch of two addresses from `start` for the test counter.
+fn batch_at(start: u32) -> SignedBatch {
+    let batch = AddressBatch {
+        wallet_checksum: [9; 32],
+        counter: counter(),
+        start,
+        count: 2,
+        scripts: (0..2u8)
+            .map(|n| {
+                ScriptBuf::new_p2wsh(&WScriptHash::from_byte_array(
+                    [(start as u8) * 2 + n + 1; 32],
+                ))
+            })
+            .collect(),
+    };
+    SignedBatch {
+        owner_sig: batch.sign(&id(1)),
+        approver_sig: batch.sign(&id(2)),
+        batch,
+    }
+}
+
+/// The counter's chain with one record that says it holds each of `batches`.
+fn chain_holding(batches: &[&SignedBatch]) -> Chain {
+    let mut chain = Chain::new();
+    for b in batches {
+        let held = BatchHeld::of(b).unwrap();
+        chain.append(&id(3), held.kind(), held.encode()).unwrap();
+    }
+    chain
+}
+
+fn batch_messages(got: &[Received]) -> Vec<SignedBatch> {
+    got.iter()
+        .filter(|r| r.kind == Kind::Batch)
+        .map(|r| SignedBatch::from_bytes(&r.content).unwrap())
+        .collect()
+}
+
+fn batch_alerts(link: &OwnerLink<MemoryPost>) -> Vec<Alert> {
+    link.alerts()
+        .iter()
+        .filter(|a| matches!(a, Alert::BatchUndelivered { .. }))
+        .cloned()
+        .collect()
+}
+
+fn restart_error(w: &World) -> Option<crate::OwnerLinkError> {
+    OwnerLink::new(
+        courier(
+            &w.relay,
+            id(1),
+            Role::Owner,
+            (counter(), Role::Counter),
+            &w.dir,
+            FirstStart::No,
+        ),
+        w.dir.path(),
+        devices(),
+        vec![counter()],
+        config(),
+    )
+    .err()
+}
+
+#[test]
+fn lk_70_a_batch_is_kept_until_the_copy_shows_the_counter_holds_it() {
+    let mut w = world();
+    let b = batch_at(0);
+    w.link.send_batch(&counter(), &b, T0).unwrap();
+    let waiting = w.link.batches_waiting(&counter()).unwrap();
+    assert_eq!((waiting.batches, waiting.since), (1, T0));
+    // Records that say nothing about it leave it pending.
+    let mut c = chain(3, 1);
+    w.send_records(c.records());
+    w.step(T0 + 1);
+    assert!(w.link.batches_waiting(&counter()).is_some());
+    // A record for the same range with another digest drops nothing.
+    let mut other = batch_at(0);
+    other.batch.scripts.reverse();
+    let wrong = BatchHeld::of(&other).unwrap();
+    c.append(&id(3), wrong.kind(), wrong.encode()).unwrap();
+    w.send_records(&c.records()[3..]);
+    w.step(T0 + 2);
+    assert_eq!(w.copy().len(), 4);
+    assert!(w.link.batches_waiting(&counter()).is_some());
+    // The record of this batch drops it.
+    let held = BatchHeld::of(&b).unwrap();
+    c.append(&id(3), held.kind(), held.encode()).unwrap();
+    w.send_records(&c.records()[4..]);
+    w.step(T0 + 3);
+    assert!(w.link.batches_waiting(&counter()).is_none());
+    assert!(w.link.alerts().is_empty());
+    // Nothing is sent again.
+    w.counter_gets();
+    w.step(T0 + 1000);
+    assert!(batch_messages(&w.counter_gets()).is_empty());
+}
+
+#[test]
+fn lk_70_a_batch_the_counter_has_passed_is_dropped() {
+    let mut w = world();
+    let (first, second) = (batch_at(0), batch_at(2));
+    w.link.send_batch(&counter(), &first, T0).unwrap();
+    w.link.send_batch(&counter(), &second, T0).unwrap();
+    assert_eq!(w.link.batches_waiting(&counter()).unwrap().batches, 2);
+    // The counter holds the later one only.
+    w.send_records(chain_holding(&[&second]).records());
+    w.step(T0 + 1);
+    let waiting = w.link.batches_waiting(&counter());
+    assert!(waiting.is_none(), "{waiting:?}");
+    // A batch that is later than the one held stays.
+    let mut w = world();
+    w.link.send_batch(&counter(), &batch_at(4), T0).unwrap();
+    w.send_records(chain_holding(&[&first]).records());
+    w.step(T0 + 1);
+    assert_eq!(w.link.batches_waiting(&counter()).unwrap().batches, 1);
+}
+
+#[test]
+fn lk_71_a_pending_batch_is_sent_again_once_in_a_hundred_and_twenty_seconds() {
+    let mut w = world();
+    let b = batch_at(0);
+    w.link.send_batch(&counter(), &b, T0).unwrap();
+    assert_eq!(batch_messages(&w.counter_gets()), vec![b.clone()]);
+    for dt in [1, 60, 119] {
+        w.step(T0 + dt);
+        assert!(batch_messages(&w.counter_gets()).is_empty(), "at +{dt}");
+    }
+    w.step(T0 + 120);
+    assert_eq!(batch_messages(&w.counter_gets()), vec![b.clone()]);
+    // Once, not at every step, and again after the next 120 seconds.
+    w.step(T0 + 121);
+    w.step(T0 + 239);
+    assert!(batch_messages(&w.counter_gets()).is_empty());
+    w.step(T0 + 240);
+    assert_eq!(batch_messages(&w.counter_gets()), vec![b]);
+}
+
+#[test]
+fn lk_71_the_pending_batches_of_a_counter_go_in_the_order_of_their_ranges() {
+    let mut w = world();
+    let (a, b, c) = (batch_at(0), batch_at(2), batch_at(4));
+    // Handed over out of order.
+    for x in [&c, &a, &b] {
+        w.link.send_batch(&counter(), x, T0).unwrap();
+    }
+    w.counter_gets();
+    w.step(T0 + 120);
+    assert_eq!(batch_messages(&w.counter_gets()), vec![a, b, c]);
+}
+
+#[test]
+fn lk_71_a_send_that_did_not_reach_the_relay_is_tried_again_at_the_next_step() {
+    let mut w = world();
+    let b = batch_at(0);
+    w.relay.set_down(true);
+    let err = w.link.send_batch(&counter(), &b, T0).unwrap_err();
+    assert!(err.is_retryable());
+    assert!(w.link.batches_waiting(&counter()).is_some());
+    w.step(T0 + 1);
+    w.relay.set_down(false);
+    w.step(T0 + 2);
+    assert_eq!(batch_messages(&w.counter_gets()), vec![b]);
+    // A relay that is down when the resend is due does not use up the turn.
+    w.relay.set_down(true);
+    w.step(T0 + 122);
+    w.relay.set_down(false);
+    w.step(T0 + 123);
+    assert_eq!(batch_messages(&w.counter_gets()).len(), 1);
+}
+
+#[test]
+fn lk_72_the_pending_batches_survive_a_restart_and_read_back_strictly() {
+    let mut w = world();
+    let (a, b) = (batch_at(0), batch_at(2));
+    w.link.send_batch(&counter(), &b, T0 + 5).unwrap();
+    w.link.send_batch(&counter(), &a, T0).unwrap();
+    let file = w.dir.path().join(crate::batch_outbox::BATCH_OUTBOX_FILE);
+    let bytes = fs::read(&file).unwrap();
+    assert_eq!(&bytes[..5], b"OBM0\x01");
+    let waiting = w.link.batches_waiting(&counter()).unwrap();
+    assert_eq!((waiting.batches, waiting.since), (2, T0));
+    // A link started again on the same directory has them, with the times.
+    let mut again = owner_link(&w.relay, &w.dir, FirstStart::No);
+    assert_eq!(again.batches_waiting(&counter()), Some(waiting));
+    // The first step after the start sends them, oldest range first.
+    w.counter_gets();
+    again.step(&mut w.rig.watcher, T0 + 10);
+    assert_eq!(batch_messages(&w.counter_gets()), vec![a, b]);
+    drop(again);
+    // A file that is cut anywhere, or has a byte left over, refuses the
+    // start.
+    for n in 0..bytes.len() {
+        fs::write(&file, &bytes[..n]).unwrap();
+        assert!(restart_error(&w).is_some(), "cut at {n}");
+    }
+    let mut longer = bytes.clone();
+    longer.push(0);
+    fs::write(&file, &longer).unwrap();
+    let err = restart_error(&w).unwrap();
+    assert!(err.to_string().contains("LK-72"), "{err}");
+    // The bytes as they were read back.
+    fs::write(&file, &bytes).unwrap();
+    assert!(restart_error(&w).is_none());
+}
+
+#[test]
+fn lk_72_a_batch_for_a_device_that_is_not_a_counter_is_not_kept() {
+    let mut w = world();
+    let other = id(8).device_id();
+    assert!(w.link.send_batch(&other, &batch_at(0), T0).is_err());
+    assert!(w.link.batches_waiting(&other).is_none());
+    assert!(!w
+        .dir
+        .path()
+        .join(crate::batch_outbox::BATCH_OUTBOX_FILE)
+        .exists());
+}
+
+#[test]
+fn lk_73_a_batch_that_waits_a_day_raises_one_alert_that_clears_when_it_is_held() {
+    let mut w = world();
+    let b = batch_at(0);
+    w.link.send_batch(&counter(), &b, T0).unwrap();
+    let day = 24 * 60 * 60;
+    w.step(T0 + day - 1);
+    assert!(batch_alerts(&w.link).is_empty());
+    w.step(T0 + day);
+    let alert = Alert::BatchUndelivered {
+        counter: counter(),
+        since: T0,
+    };
+    assert_eq!(batch_alerts(&w.link), vec![alert]);
+    // Once, not on every step.
+    w.step(T0 + day + 1);
+    w.step(T0 + day + 500);
+    assert_eq!(batch_alerts(&w.link).len(), 1);
+    // The counter shows it holds the batch: the alert goes.
+    w.send_records(chain_holding(&[&b]).records());
+    w.step(T0 + day + 501);
+    assert!(batch_alerts(&w.link).is_empty());
+}
+
+#[test]
+fn lk_73_the_alert_is_raised_though_the_relay_is_down() {
+    let mut w = world();
+    w.link.send_batch(&counter(), &batch_at(0), T0).unwrap();
+    w.relay.set_down(true);
+    w.step(T0 + 24 * 60 * 60);
+    assert_eq!(batch_alerts(&w.link).len(), 1);
+}
+
+#[test]
+fn lk_70_a_counter_node_that_missed_the_first_message_holds_the_batch_after_the_resend() {
+    let relay = MemoryRelay::new(id(99), &[owner(), counter()]).unwrap();
+    let (node_dir, link_dir, owner_dir, watcher_dir) =
+        (Dir::new(), Dir::new(), Dir::new(), Dir::new());
+    let (mut node, _events) = counter_node(&node_dir);
+    let mut counter_side = counter_link(&relay, &link_dir, FirstStart::Yes, 4_000);
+    let mut owner_side = owner_link(&relay, &owner_dir, FirstStart::Yes);
+    let mut rig = start(watcher_dir.path());
+    owner_side.courier_mut().poll().unwrap();
+    let b = batch_at(0);
+    let empty = node.counter().batches().to_bytes();
+    // The relay is down when the batch is handed over: the counter never has
+    // the first message.
+    relay.set_down(true);
+    assert!(owner_side.send_batch(&counter(), &b, T0).is_err());
+    relay.set_down(false);
+    for now in T0..T0 + 600 {
+        counter_side.step(&mut node, now);
+        owner_side.step(&mut rig.watcher, now);
+    }
+    assert!(owner_side.batches_waiting(&counter()).is_none());
+    assert!(owner_side.alerts().is_empty());
+    assert_ne!(node.counter().batches().to_bytes(), empty);
+    // The counter's records show it once, and the owner's copy is the same.
+    let ours = node.records_from(0, usize::MAX).unwrap();
+    let held = BatchHeld::of(&b).unwrap();
+    let showing = |records: &[Record]| {
+        records
+            .iter()
+            .filter(|r| r.kind == RecordKind::Setting && r.body == held.encode())
+            .count()
+    };
+    assert_eq!(showing(&ours), 1);
+    assert_eq!(
+        owner_side.copy(&counter()).unwrap().records(),
+        ours.as_slice()
+    );
+    // The owner hands the same batch over again: nothing changes.
+    owner_side.send_batch(&counter(), &b, T0 + 700).unwrap();
+    for now in T0 + 700..T0 + 900 {
+        counter_side.step(&mut node, now);
+        owner_side.step(&mut rig.watcher, now);
+    }
+    let after = node.records_from(0, usize::MAX).unwrap();
+    assert_eq!(showing(&after), 1, "no second record");
+    assert!(owner_side.batches_waiting(&counter()).is_none());
 }

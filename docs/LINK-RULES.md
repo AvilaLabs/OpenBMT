@@ -343,6 +343,46 @@ over is still checked by the rules of the thing it carries.
   them only while the owner holds no settings; the first settings replace
   them.
 
+The next four rules are about address batches, which the owner keeps and
+sends again (the settings above have their own outbox, and the two are not
+merged).
+
+- **LK-70.** The owner keeps each batch of addresses it sends to a counter
+  until the owner's copy of that counter's chain shows that the counter holds
+  it: a record of the counter's own, of kind `Setting`, that names the batch's
+  range and the digest of its signed bytes (CR-167). The owner looks for
+  those records in each copy at every step, as the copy grows. A batch is
+  dropped from the pending list when its record is in the copy, or when the
+  copy shows a later batch held (one that starts at or after the end of this
+  one), because the counter has gone past it. A record with the range of a
+  pending batch and another digest drops nothing.
+- **LK-71.** A batch that is still pending is sent again by the link, as a
+  message of kind Batch like the first, at most once in 120 seconds for each
+  counter, at the step after the time is up. The pending batches of one
+  counter go in one round, in the order of their first index. The first send
+  is made when the batch is handed over and counts as the first of the 120
+  seconds; a send that did not reach the relay is tried again at the next
+  step. After a start the first step sends what is pending. The counter takes
+  a batch it already holds as nothing (CR-168), so a send that was not needed
+  does no harm.
+- **LK-72.** The pending batches are kept in one file in the owner node's
+  directory, `link-batches`, with the time each was first sent. The file is
+  written whole (a temporary file, a flush, a rename, a flush of the
+  directory) before the first send of a batch and after any change, and read
+  back at the start. It is framed with the magic `OBM0` and version 1,
+  holds at most 64 batches, and is in the order of the counter's bytes and the
+  first index of the batch. A file that is cut, has a byte left over, has an
+  entry out of order or twice, has a batch that does not decode, or does not
+  encode to the bytes it was read from, refuses the start of the link.
+- **LK-73.** A batch that has waited 24 hours raises an alert for its counter,
+  naming the time of the oldest pending batch. The alert is raised once and
+  clears itself when no batch for that counter has waited that long. While a
+  batch waits, the owner app says so for that counter: its addresses are on
+  their way, and nothing needs doing because the phone sends them again by
+  itself. After 24 hours it says that the counter has not taken its new
+  addresses and that the owner should check that it is on and linked. The
+  words follow `docs/SCREEN-RULES.md`.
+
 The two kinds that involve the Box are carried the same way. A counter sends
 a Paid notice to each Box on its device list when a sale changes state, and
 the Box sends a POS notice to the owner. The contents, how they are numbered

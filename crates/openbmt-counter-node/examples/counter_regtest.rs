@@ -82,6 +82,7 @@
 //! - `limits`: the signed limits of the two checks
 //! - `hbstate`
 //! - `linkstate`
+//! - `batches`
 //! - `pump <seconds>`
 //! - `health`
 //! - `groups`
@@ -107,6 +108,9 @@
 //!   `heartbeat refused <rule and reason>`
 //! - `hbstate view=<none|Verified|NotVerified> policy_verified=<bool>
 //!   policy_age=<secs> last_seq=<n>`
+//! - `batches remaining=<n> records=<n> ranges=<a-b,...|none>`: the addresses
+//!   the counter still has, and the records that say it took a batch (CR-167)
+//!   with the range of each, in the order the records are in
 //! - `linkstate owner_records=<n> owner_head=<hex> last_check_in_at=<secs|none>
 //!   refused=<n> marks_ignored=<n> record_messages_sent=<n> heartbeats_taken=<n>
 //!   node_refusals=<n> reachable=<bool> chain_records=<n> chain_head=<hex>`: the
@@ -138,11 +142,12 @@ use bitcoin::{Address, Network, ScriptBuf, Txid};
 use openbmt_core::batch::{BatchBuilder, BatchPolicy, PinnedRoots, SignedBatch};
 use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
+use openbmt_core::records::RecordKind;
 use openbmt_core::settings::Settings;
 use openbmt_core::wallet::{KeySlot, WalletDescription};
 use openbmt_counter::{
-    refund_destination, Actor, Amount, Currency, HeartbeatView, Pairing, Rate, RateSource,
-    RefundAsk, RefundRequest, Report, Role as CashierRole,
+    refund_destination, Actor, Amount, BatchHeld, Currency, HeartbeatView, Pairing, Rate,
+    RateSource, RefundAsk, RefundRequest, Report, Role as CashierRole,
 };
 use openbmt_counter_node::{
     CounterLink, CounterLinkConfig, DriverPort, Node, NodeConfig, MAX_OWN_ASKS,
@@ -680,6 +685,27 @@ fn command<P: DriverPort>(
                 state.relay_reachable,
                 chain_len,
                 hex(&chain_head),
+            ));
+        }
+        Some("batches") => {
+            let records = node
+                .records_from(0, usize::MAX)
+                .map_err(|e| e.to_string())?;
+            let ranges: Vec<String> = records
+                .iter()
+                .filter(|r| r.kind == RecordKind::Setting)
+                .filter_map(|r| BatchHeld::decode(&r.body).ok())
+                .map(|b| format!("{}-{}", b.start, b.end))
+                .collect();
+            say(format!(
+                "batches remaining={} records={} ranges={}",
+                node.counter().batches().remaining(),
+                ranges.len(),
+                if ranges.is_empty() {
+                    "none".to_string()
+                } else {
+                    ranges.join(",")
+                }
             ));
         }
         Some("pump") => {
