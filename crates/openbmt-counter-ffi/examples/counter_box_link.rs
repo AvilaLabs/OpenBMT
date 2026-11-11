@@ -240,7 +240,7 @@ fn run(dir: PathBuf, box_addr: SocketAddr, box_key: DeviceId, peer: &str) -> Res
     );
     fields.extend_from_slice(&now().to_le_bytes());
     put_bytes(&mut fields, &record.to_bytes());
-    fields.extend_from_slice(&[0, 0, 0]);
+    fields.extend_from_slice(&[0, 0, 0, 0]);
     let response = dispatch(&registry, &request(OP_START, 0, &fields));
     let handle = u64::from_le_bytes(
         payload(&response)?

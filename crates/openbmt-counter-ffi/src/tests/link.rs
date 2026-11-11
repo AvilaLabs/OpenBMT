@@ -23,7 +23,7 @@ use crate::StartConfig;
 const OP_PUMP: u16 = 10;
 const OP_LINK_STEP: u16 = 24;
 const OP_LINK_STATE: u16 = 25;
-const OP_TAKE_RELAY: u16 = 50;
+const OP_TAKE_RELAY: u16 = 56;
 
 const ONION: &str = "a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad";
 
@@ -87,6 +87,7 @@ fn config_for(rig: &Rig, relay: Option<RelayHint>, link_proxy: Option<&str>) -> 
         record: record.to_bytes(),
         proxy: None,
         own_node: None,
+        lightning: None,
         link_proxy: link_proxy.map(str::to_string),
     }
 }

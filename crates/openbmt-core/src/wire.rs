@@ -84,7 +84,7 @@ pub const MAGIC_BOX_CLAIM: [u8; 4] = *b"OBM5";
 pub const MAGIC_BOX_WELCOME: [u8; 4] = *b"OBMM";
 /// Magic of a [`SignedRelayHint`](crate::relay::SignedRelayHint), the relay
 /// for counters (CR-132).
-pub const MAGIC_RELAY_FOR_COUNTERS: [u8; 4] = *b"OBMy";
+pub const MAGIC_RELAY_FOR_COUNTERS: [u8; 4] = *b"OBMz";
 
 /// Why bytes were not accepted as a message.
 #[derive(Debug, Clone, PartialEq, Eq)]

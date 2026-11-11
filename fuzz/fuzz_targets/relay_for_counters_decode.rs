@@ -20,7 +20,7 @@ fn check(data: &[u8]) {
 fuzz_target!(|data: &[u8]| {
     check(data);
     // The same bytes behind the frame header.
-    let mut framed = b"OBMy".to_vec();
+    let mut framed = b"OBMz".to_vec();
     framed.push(1);
     framed.extend_from_slice(data);
     check(&framed);

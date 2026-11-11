@@ -64,6 +64,7 @@ fn config(rig: &Rig, node: Option<[u8; 33]>, saved: Option<Vec<u8>>) -> StartCon
         proxy: None,
         own_node: None,
         lightning: saved,
+        link_proxy: None,
     }
 }
 

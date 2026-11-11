@@ -873,7 +873,7 @@ and the screen line are the app's.
   `finish` keeps the relay of the bundle it took.
 - **CR-132.** The owner can hand a counter that was paired before the shop
   had a Box its relay by itself: the relay as a frame of its own
-  (`OBMy`, version 1), signed by the owner root over the relay. The counter
+  (`OBMz`, version 1), signed by the owner root over the relay. The counter
   takes it only if the signature is by the owner root it pinned at pairing;
   a frame that is not read, or is signed by anyone else, is refused with
   words and changes nothing. The call returns the new record for the app

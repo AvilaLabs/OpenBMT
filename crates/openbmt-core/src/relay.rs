@@ -25,7 +25,7 @@
 //! The wire form of the signed hint:
 //!
 //! ```text
-//! "OBMy" | 1 | hint | owner signature (64)
+//! "OBMz" | 1 | hint | owner signature (64)
 //! ```
 //!
 //! The owner signs the hint's bytes under its own tag. A counter checks the
@@ -364,7 +364,7 @@ mod tests {
     fn cr_132_the_frame_is_strict_and_has_its_own_magic() {
         for hint in [direct(), onion()] {
             let bytes = signed(hint).to_bytes();
-            assert_eq!(&bytes[..5], b"OBMy\x01");
+            assert_eq!(&bytes[..5], b"OBMz\x01");
             assert_strict_decoding(
                 &bytes,
                 SignedRelayHint::from_bytes,

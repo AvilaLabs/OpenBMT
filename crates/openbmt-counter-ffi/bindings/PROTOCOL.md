@@ -73,6 +73,8 @@ ops run on another; it waits for at most 250 ms.
  21 command          handle node  args (u64, list<u8>) -> ()
  22 check_in         handle node  args u64 -> list<u8>
  23 add_batch        handle node  args (u64, list<u8>) -> ()
+ 24 link_step        handle node  args (u64, bool) -> LinkStepView
+ 25 link_state       handle node  args () -> option<LinkView>
  30 status           handle node  args () -> StatusView
  31 notes            handle node  args () -> list<string>
  32 own_node_retry   handle node  args () -> ()
@@ -92,6 +94,7 @@ ops run on another; it waits for at most 250 ms.
  53 ln_pin           handle node  args (u64, list<u8>) -> bool
  54 ln_next          handle node  args u64 -> option<LnRequestView>
  55 ln_remove        handle node  args () -> ()
+ 56 take_relay       handle zero  args (list<u8>, list<u8>) -> list<u8>
 ```
 
 ## Types
@@ -102,11 +105,15 @@ CounterNetwork: enum, one tag byte
 ActorRole: enum, one tag byte
     tags Cashier=0 Manager=1
 ActorView: record: role: ActorRole, name: string
-StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>, lightning: option<list<u8>>
+StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>, lightning: option<list<u8>>, link_proxy: option<string>
 OwnNodeCheckArgs: record: text: string, network: CounterNetwork, tor: bool
 PairBeginArgs: record: offer: list<u8>, name: string, now: u64
 PairStartedView: record: request: list<u8>, words: list<string>
-PairingView: record: network: CounterNetwork, settings: SettingsView
+PairingView: record: network: CounterNetwork, settings: SettingsView, relay: RelayKind
+RelayKind: enum, one tag byte
+    tags None=0 Direct=1 Onion=2
+LinkView: record: words: Words, connected: bool, since: option<u64>, refused: bool, heartbeats_taken: u64, owner_records: u64, last_check_in_at: option<u64>
+LinkStepView: record: link: LinkView, notes: list<string>
 OpenArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64
 RequoteArgs: record: now: u64, index: u32, rate: u64, source_label: string, source_fetched_at: u64
 OverrideArgs: record: now: u64, index: u32, actor: ActorView
