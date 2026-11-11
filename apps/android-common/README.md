@@ -16,7 +16,10 @@ it; `src/android/` needs the framework.
 | `src/model/UrReading.kt`, `UrWords.kt` | One reading of a sequence of parts, and its words |
 | `src/android/QrScanner.kt`, `ScanFlow.kt` | The camera, and the scan page with the permission asked only when Scan is tapped |
 | `src/android/AnimatedQrView.kt` | A plain `View` that shows a message as a still code or as parts that change |
-| `src/android/Keystore.kt`, `Ui.kt` | Keystore sealing, and the screens' widgets |
+| `src/android/Keystore.kt`, `Ui.kt` | Keystore sealing, and the screens' widgets: the bar, the page with its footer, the four ways the words are shown and the blocks (rows, facts, chips, the keypad, the camera frame) |
+| `src/android/Icons.kt` | The icons, drawn as paths in code |
+| `src/android/Feedback.kt`, `src/model/FeedbackModel.kt` | Sounds, haptics and motion: `Feedback`, `HoldButton` (hold to approve) and `LogoSnapView`; the levels, the shake and the timings are in the model and are tested on the JVM |
+| `res/raw/`, `res/drawable-nodpi/` | The five sounds (credit in `res/raw/README.md`), the logo and the four pieces of the logo's snap |
 
 ## Animated codes
 
