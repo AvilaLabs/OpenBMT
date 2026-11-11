@@ -6,11 +6,12 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 12] = [
+const TEST_SOURCES: [&str; 13] = [
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
     include_str!("open.rs"),
     include_str!("overrides.rs"),
+    include_str!("recordlog.rs"),
     include_str!("records.rs"),
     include_str!("refunds.rs"),
     include_str!("reports.rs"),
@@ -22,8 +23,9 @@ const TEST_SOURCES: [&str; 12] = [
 ];
 
 /// Rules this crate does not test, each with the reason. The counter
-/// implements every rule except the ones that only state a limit.
-const NOT_HERE: [(&str, &str); 5] = [
+/// implements every rule except the ones that only state a limit and the
+/// ones that belong to the app it is built into.
+const NOT_HERE: [(&str, &str); 10] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -35,10 +37,6 @@ const NOT_HERE: [(&str, &str); 5] = [
          destination, learn whether a refund was paid); there is nothing to enforce or to test",
     ),
     (
-        "CR-81",
-        "it is marked not built: the records stay in memory, and there is nothing to test yet",
-    ),
-    (
         "CR-82",
         "it is the node's rule, when `Counter::settle` is called; its tests are in \
          `openbmt-counter-node`",
@@ -47,6 +45,33 @@ const NOT_HERE: [(&str, &str); 5] = [
         "CR-83",
         "the payment request is made where the counter is put in an app, from the sale's script \
          and its satoshis; it is tested in openbmt-counter-ffi",
+    ),
+    (
+        "CR-84",
+        "the manager's PIN is kept by the Android app; its tests are the app's JVM tests \
+         (`apps/counter-android`)",
+    ),
+    (
+        "CR-85",
+        "the PIN check and its delays are the Android app's; its tests are the app's JVM tests",
+    ),
+    (
+        "CR-86",
+        "which actions ask for the PIN is the Android app's; its tests are the app's JVM tests",
+    ),
+    (
+        "CR-87",
+        "the start without a proxy is refused in openbmt-counter-ffi and tested there; the app's \
+         Tor gate is tested in its JVM tests",
+    ),
+    (
+        "CR-88",
+        "when the node runs is the Android activity's; it needs a device to test",
+    ),
+    (
+        "CR-89",
+        "the app fetches the price; the fetch limits are tested in openbmt-counter-ffi against \
+         openbmt-rates",
     ),
 ];
 
@@ -59,9 +84,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_sixty_two_rules() {
+fn the_rules_file_defines_sixty_eight_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 62);
+    assert_eq!(ids.len(), 68);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -70,6 +95,7 @@ fn the_rules_file_defines_sixty_two_rules() {
             && ids.contains("CR-75")
             && ids.contains("CR-82")
             && ids.contains("CR-83")
+            && ids.contains("CR-89")
     );
 }
 
