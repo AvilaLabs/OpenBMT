@@ -145,12 +145,14 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
     for needle in [
         "Opened(u32(), u64(), u64(), u64(), u64(), payment())",
         "Payment(string(), string(), string(), u32(), bytes())",
-        "saleState(), words(), list { words() }, u64(), u64(), bool(), bool(), bool(), bool(),",
+        "saleState(), words(), list { words() }, option { words() }, u64(), u64(), bool(), bool(),",
+        "bool(), bool(),",
         "reports(), option { payment() },",
         "Pump(reports(), strings(), bool())",
         "u32(), option { u64() }, u64(), option { u64() }, refundState(), role(), string(), u64(),",
         "HeartbeatOutcome(bool(), option { u64() }, words(), reports())",
-        "u32(), u32(), option { Health(bool(), bool(), words()) }, u32s(), u64(), bool(),",
+        "u32(), u32(), option { Health(bool(), bool(), words()) },",
+        "option { OwnNodeStatus(bool(), words()) }, u32s(), u64(), bool(),",
         "Report.BooksFinal(u32(), u64(), string(), u64())",
         "RateSource(string(), string(), string(), string())",
         "Sample(string(), u64(), u64())",
@@ -166,8 +168,11 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "Payment: record: address: string, uri: string, copy_uri: string, qr_size: u32, qr_bits: list<u8>",
         "PumpView: record: reports: list<ReportView>, notes: list<string>, stopped: bool",
         "HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, reports: list<ReportView>",
-        "StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool",
+        "StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, own_node: option<OwnNodeView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool",
         "HealthView: record: healthy: bool, behind: bool, words: Words",
+        "OwnNodeView: record: usable: bool, words: Words",
+        "OwnNodeCheckArgs: record: text: string, network: CounterNetwork, tor: bool",
+        "StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>",
         "RateSourceView: record: id: string, url: string, currency: string, initial: string",
         "RateParseArgs: record: source: string, response: list<u8>, fetched_at: u64",
         "SampleView: record: source: string, fetched_at: u64, minor_per_btc: u64",
@@ -178,9 +183,9 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         assert!(protocol.contains(line), "{line}");
     }
     assert!(protocol.contains(
-        "ScreenView: record: state: StateView, words: Words, flags: list<Words>, received_sats: u64, \
-         needs_sats: u64, stuck: bool, late: bool, reopened: bool, conflict_seen: bool, \
-         reports: list<ReportView>, payment: option<Payment>"
+        "ScreenView: record: state: StateView, words: Words, flags: list<Words>, check: option<Words>, \
+         received_sats: u64, needs_sats: u64, stuck: bool, late: bool, reopened: bool, \
+         conflict_seen: bool, reports: list<ReportView>, payment: option<Payment>"
     ));
     assert!(protocol.contains(
         "RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: option<u64>, \
@@ -242,7 +247,7 @@ fn the_kotlin_wrapper_takes_no_lock_so_that_pump_and_the_screen_can_run_together
 }
 
 const START_FRAME_HEX: &str =
-    "4f424d6d0101000000000000000000010000006401000000000000000100000002010100000070";
+    "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f";
 
 #[test]
 fn the_start_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
@@ -251,6 +256,7 @@ fn the_start_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
         now: 1,
         record: vec![2],
         proxy: Some("p".to_string()),
+        own_node: Some("o".to_string()),
     };
     let bytes = frame(1, 0, &W::new().start(&sample).0);
     let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();

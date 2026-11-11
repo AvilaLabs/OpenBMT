@@ -75,6 +75,7 @@ private const val OP_CHECK_IN = 22
 private const val OP_ADD_BATCH = 23
 private const val OP_STATUS = 30
 private const val OP_NOTES = 31
+private const val OP_OWN_NODE_RETRY = 32
 private const val OP_RATE_SOURCES = 40
 private const val OP_RATE_PARSE = 41
 private const val OP_RATE_COMBINE = 42
@@ -84,6 +85,7 @@ private const val OP_PAIR_MATCH = 45
 private const val OP_PAIR_DIFFER = 46
 private const val OP_PAIR_CANCEL = 47
 private const val OP_PAIR_FINISH = 48
+private const val OP_OWN_NODE_CHECK = 49
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -135,13 +137,17 @@ class Actor(val role: ActorRole, val name: String)
  * [Pairing.finish] returned (the identity secret, the two roots, the wallet
  * check, the network, the signed settings, the first batch and the peers);
  * the app keeps it sealed and hands it over at each start. [dir] is the
- * app's own folder (`noBackupFilesDir`).
+ * app's own folder (`noBackupFilesDir`). [ownNode] is the own node's address
+ * as [OwnNodeSetting.check] made it, or null (CR-100): an address that is
+ * refused, or that comes with no [proxy], starts the node without an own node
+ * and the status says why.
  */
 class StartConfig(
     val dir: String,
     val now: Long,
     val record: ByteArray,
     val proxy: String?,
+    val ownNode: String? = null,
 )
 
 /** What [Pairing.begin] returns: the request to show as a code, and the four words. */
@@ -217,6 +223,8 @@ class Screen(
     val state: SaleState,
     val words: Words,
     val flags: List<Words>,
+    /** CR-105: which check was done, for a payment that waits; null otherwise. */
+    val check: Words?,
     val receivedSats: Long,
     val needsSats: Long,
     val stuck: Boolean,
@@ -250,10 +258,15 @@ class HeartbeatOutcome(
 
 class Health(val healthy: Boolean, val behind: Boolean, val words: Words)
 
+/** CR-107: the own node's health line. [usable] says it can be used as a second check now. */
+class OwnNodeStatus(val usable: Boolean, val words: Words)
+
 class Status(
     val checkedHeight: Long,
     val tipHeight: Long,
     val health: Health?,
+    /** Null when no own node is set. */
+    val ownNode: OwnNodeStatus?,
     val sales: List<Long>,
     val refusedBelowMinimum: Long,
     val stopped: Boolean,
@@ -468,6 +481,17 @@ private fun Writer.refundAsk(v: RefundAsk): Writer {
 
 private fun Writer.start(c: StartConfig): Writer =
     string(c.dir).u64(c.now).bytes(c.record).option(c.proxy) { string(it) }
+        .option(c.ownNode) { string(it) }
+
+private fun Writer.network(v: CounterNetwork): Writer =
+    u8(
+        when (v) {
+            CounterNetwork.Mainnet -> TAG_COUNTER_NETWORK_MAINNET
+            CounterNetwork.Testnet -> TAG_COUNTER_NETWORK_TESTNET
+            CounterNetwork.Signet -> TAG_COUNTER_NETWORK_SIGNET
+            CounterNetwork.Regtest -> TAG_COUNTER_NETWORK_REGTEST
+        },
+    )
 
 private fun Reader.saleState(): SaleState =
     when (u8()) {
@@ -526,8 +550,8 @@ internal fun Reader.opened(): Opened =
 
 internal fun Reader.screen(): Screen =
     Screen(
-        saleState(), words(), list { words() }, u64(), u64(), bool(), bool(), bool(), bool(),
-        reports(), option { payment() },
+        saleState(), words(), list { words() }, option { words() }, u64(), u64(), bool(), bool(),
+        bool(), bool(), reports(), option { payment() },
     )
 
 internal fun Reader.pump(): Pump = Pump(reports(), strings(), bool())
@@ -549,9 +573,10 @@ internal fun Reader.rate(): Rate = Rate(u64(), string(), u64())
 private fun Reader.heartbeatOutcome(): HeartbeatOutcome =
     HeartbeatOutcome(bool(), option { u64() }, words(), reports())
 
-private fun Reader.statusView(): Status =
+internal fun Reader.statusView(): Status =
     Status(
-        u32(), u32(), option { Health(bool(), bool(), words()) }, u32s(), u64(), bool(),
+        u32(), u32(), option { Health(bool(), bool(), words()) },
+        option { OwnNodeStatus(bool(), words()) }, u32s(), u64(), bool(),
     )
 
 // ---- the call ----------------------------------------------------------------------------
@@ -648,6 +673,23 @@ object Shop {
     fun pairing(record: ByteArray): PairingInfo {
         val r = decodeResponse(send(requestFrame(OP_PAIRING_READ, 0) { it.bytes(record) }))
         return PairingInfo(r.network(), r.shopSettings()).also { r.end() }
+    }
+}
+
+/**
+ * The own node's address (CR-100 to CR-102). It works on no node: [check]
+ * reads what a manager typed and returns the canonical text the app keeps
+ * and hands to [StartConfig.ownNode]; a refusal is a [CounterException] with
+ * its words (a home-network address, a name that is not a Tor address, a
+ * port that is not one, or no Tor: "turn on Orbot first").
+ */
+object OwnNodeSetting {
+    /** [text] as typed, on [network], with [tor] saying whether the counter has a Tor proxy. */
+    fun check(text: String, network: CounterNetwork, tor: Boolean): String {
+        val r = decodeResponse(
+            send(requestFrame(OP_OWN_NODE_CHECK, 0) { it.string(text).network(network).u8(if (tor) 1 else 0) }),
+        )
+        return r.string().also { r.end() }
     }
 }
 
@@ -823,6 +865,9 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
         val r = call(OP_STATUS, handle)
         return r.statusView().also { r.end() }
     }
+
+    /** CR-107: ask the driver to dial the own node again ("Try again"). */
+    fun ownNodeRetry() = callUnit(OP_OWN_NODE_RETRY, handle)
 
     /** The lines the node and the driver logged since the last call. */
     fun notes(): List<String> {

@@ -6,6 +6,7 @@ mod e2e;
 pub(crate) mod kit;
 mod kotlin;
 mod lock;
+mod own_node;
 mod pairing;
 mod pay;
 mod protocol;

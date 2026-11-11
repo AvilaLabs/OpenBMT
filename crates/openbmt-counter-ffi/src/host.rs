@@ -25,19 +25,23 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use bitcoin::{Network, ScriptBuf};
+use std::sync::mpsc::Receiver;
+
+use bitcoin::{Network, ScriptBuf, Txid};
 use openbmt_core::batch::{BatchPolicy, SignedBatch};
 use openbmt_core::command::SignedCommand;
 use openbmt_counter::{
     refund_destination, Actor, Amount, CashRefund, Currency, Rate, RateSource, RefundAsk,
     RefundRequest, Report, Screen,
 };
+use openbmt_counter_node::own_node_setting;
 use openbmt_counter_node::{
     DriverPort, HeartbeatNotTaken, Launch, Node, NodeConfig, PairRefused, PairingRecord,
     StartError, NOTE_LOG,
 };
 use openbmt_net_io::{
-    Clock, Driver, DriverConfig, EventReceiver, FileStorage, OsRandomness, SystemClock,
+    Clock, Driver, DriverConfig, EventReceiver, FileStorage, OsRandomness, OwnNodeEvent,
+    SystemClock,
 };
 use openbmt_watch::HeaderChain;
 
@@ -47,8 +51,8 @@ use crate::pay::{payment_for, Payment};
 use crate::say::words_for;
 use crate::views::{
     ActorView, CashArgs, HealthView, HeartbeatOutcome, OpenArgs, OpenedView, OverrideArgs,
-    PumpView, RefundArgs, RefundAskView, RefundRow, ReportView, RequoteArgs, ScreenView,
-    StartConfig, StatusView, WithdrawArgs, WordsView,
+    OwnNodeView, PumpView, RefundArgs, RefundAskView, RefundRow, ReportView, RequoteArgs,
+    ScreenView, StartConfig, StatusView, WithdrawArgs, WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -76,6 +80,18 @@ impl DriverPort for Port {
 
     fn shutdown(&mut self) {
         self.0.shutdown();
+    }
+
+    fn own_node_events(&self) -> Option<&Receiver<OwnNodeEvent>> {
+        self.0.own_node_events()
+    }
+
+    fn ask_own_node(&self, txid: Txid) {
+        self.0.ask_own_node(txid);
+    }
+
+    fn retry_own_node(&self) {
+        self.0.retry_own_node();
     }
 }
 
@@ -116,6 +132,7 @@ pub struct Entry {
     poisoned: AtomicBool,
     network: Network,
     clock: Arc<AtomicU64>,
+    own_refused: Option<WordsView>,
 }
 
 fn unknown_handle() -> CounterError {
@@ -178,6 +195,9 @@ fn start_error(e: &StartError) -> CounterError {
 struct Checked {
     config: NodeConfig,
     network: Network,
+    /// CR-100, CR-102: why the own node was not used, when the start was
+    /// given one and it was refused.
+    own_refused: Option<WordsView>,
 }
 
 fn check_start(
@@ -219,6 +239,16 @@ fn check_start(
                 refused_by("start-peer", format!("the peer address {peer:?}: {e}"))
             })?);
     }
+    // CR-100 to CR-102: an own node that is refused, or that has no proxy,
+    // leaves the node without one and the status says why; the start itself
+    // does not fail for a hint.
+    let mut own_refused = None;
+    if let Some(text) = req.own_node.as_deref() {
+        match own_node_setting(text, record.network, req.proxy.is_some()) {
+            Ok(setting) => driver.own_node = Some(setting.node),
+            Err(e) => own_refused = Some(WordsView(e.words())),
+        }
+    }
     let mut pairing = record.pairing();
     pairing.batch_policy = policy;
     clock.fetch_max(req.now, Ordering::SeqCst);
@@ -231,7 +261,11 @@ fn check_start(
     );
     config.first_batch = record.first_batch.clone();
     config.clock = Box::new(AppClock(Arc::clone(clock)));
-    Ok(Checked { config, network })
+    Ok(Checked {
+        config,
+        network,
+        own_refused,
+    })
 }
 
 impl Entry {
@@ -242,7 +276,11 @@ impl Entry {
         policy: BatchPolicy,
     ) -> Result<Self, CounterError> {
         let clock = Arc::new(AtomicU64::new(0));
-        let Checked { config, network } = check_start(req, policy, &clock)?;
+        let Checked {
+            config,
+            network,
+            own_refused,
+        } = check_start(req, policy, &clock)?;
         let node = Node::start_with(config, spawn).map_err(|e| start_error(&e))?;
         Ok(Self {
             inner: Mutex::new(Inner {
@@ -252,6 +290,7 @@ impl Entry {
             poisoned: AtomicBool::new(false),
             network,
             clock,
+            own_refused,
         })
     }
 
@@ -386,6 +425,7 @@ impl Entry {
             state: screen.state.into(),
             words: WordsView(screen.words()),
             flags: screen.flag_words().into_iter().map(WordsView).collect(),
+            check: screen.check_words().map(WordsView),
             received_sats: screen.received_sats,
             needs_sats: screen.needs_sats,
             stuck: screen.stuck,
@@ -560,8 +600,27 @@ impl Entry {
         })
     }
 
+    /// CR-107: dial the own node again.
+    pub(crate) fn own_node_retry(&self) -> Result<(), CounterError> {
+        self.run(None, |node, _, _| {
+            node.retry_own_node();
+            Ok(())
+        })
+    }
+
     pub(crate) fn status(&self) -> Result<StatusView, CounterError> {
         self.run(None, |node, _, _| {
+            let own = node.own_node_health();
+            let own_node = match own.words() {
+                Some(words) => Some(OwnNodeView {
+                    usable: own.usable,
+                    words: WordsView(words),
+                }),
+                None => self.own_refused.clone().map(|words| OwnNodeView {
+                    usable: false,
+                    words,
+                }),
+            };
             Ok(StatusView {
                 checked_height: node.checked_height(),
                 tip_height: node.chain().tip_height(),
@@ -570,6 +629,7 @@ impl Entry {
                     behind: h.behind,
                     words: WordsView(h.words()),
                 }),
+                own_node,
                 sales: node.sales().collect(),
                 refused_below_minimum: node.counter().refused_below_minimum(),
                 stopped: node.stopped(),

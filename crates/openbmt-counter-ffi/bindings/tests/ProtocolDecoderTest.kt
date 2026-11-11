@@ -6,7 +6,7 @@ import java.io.ByteArrayOutputStream
 object ProtocolDecoderTest {
     /** The `start` request of [sampleConfig], as the Rust test of the same name writes it. */
     private const val START_FRAME_HEX =
-        "4f424d6d0101000000000000000000010000006401000000000000000100000002010100000070"
+        "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f"
 
     /** The `rate_parse` and `rate_combine` requests, as the Rust test of the same name writes them. */
     private const val RATE_PARSE_HEX =
@@ -95,6 +95,8 @@ object ProtocolDecoderTest {
         // Bits 1, 0, 1, 0: the first column is dark.
         check(payment.module(0, 0) && !payment.module(1, 0) && payment.module(0, 1) && !payment.module(1, 1))
 
+        check(screen.check == null)
+        decodeResponse(screenFrame(check = true)).screen().also { check(it.check?.heading == "Light check") }
         decodeResponse(screenFrame(payment = false)).screen().also { check(it.payment == null) }
         decodeResponse(screenFrame(allReports = true)).screen().also { check(it.reports.size == 7) }
         rejects("a state tag") { decodeResponse(screenFrame(state = 11)).screen() }
@@ -107,6 +109,36 @@ object ProtocolDecoderTest {
 
         val pump = decodeResponse(header(0, Writer().u32(0).u32(1).string("note").u8(1).toByteArray())).pump()
         check(pump.reports.isEmpty() && pump.notes == listOf("note") && pump.stopped)
+        statuses()
+    }
+
+    /** The status with and without the own node's line (CR-107). */
+    private fun statuses() {
+        fun status(own: Boolean, flag: Int = if (own) 1 else 0): ByteArray {
+            val out = ByteArrayOutputStream()
+            out.write(Writer().u32(5).u32(6).toByteArray())
+            out.write(0) // no health answer yet
+            out.write(flag)
+            if (own) {
+                out.write(0) // not usable
+                words(out, 0, 0, "Your node is not reachable".toByteArray(Charsets.UTF_8))
+            }
+            out.write(Writer().u32(1).u32(0).u64(0).u8(0).toByteArray())
+            return header(0, out.toByteArray())
+        }
+        decodeResponse(status(false)).let { r ->
+            val s = r.statusView()
+            r.end()
+            check(s.checkedHeight == 5L && s.tipHeight == 6L && s.health == null && s.ownNode == null)
+            check(s.sales == listOf(0L) && !s.stopped)
+        }
+        decodeResponse(status(true)).let { r ->
+            val s = r.statusView()
+            r.end()
+            val own = s.ownNode ?: error("an own node line")
+            check(!own.usable && own.words.heading == "Your node is not reachable")
+        }
+        rejects("an option flag in the status") { decodeResponse(status(false, flag = 2)).statusView() }
     }
 
     // ---- the requests ----
@@ -122,6 +154,7 @@ object ProtocolDecoderTest {
                 now = 1,
                 record = byteArrayOf(2),
                 proxy = "p",
+                ownNode = "o",
             )
         check(hex(startFrame(config)) == START_FRAME_HEX) { hex(startFrame(config)) }
     }
@@ -205,6 +238,7 @@ object ProtocolDecoderTest {
         bitsLength: Int = 1,
         stuck: Int = 1,
         trailingByte: Boolean = false,
+        check: Boolean = false,
     ): ByteArray {
         val out = ByteArrayOutputStream()
         out.write(state)
@@ -212,6 +246,13 @@ object ProtocolDecoderTest {
         // One extra line.
         out.write(byteArrayOf(1, 0, 0, 0))
         words(out, 0, 2, "Slow".toByteArray(Charsets.UTF_8))
+        // The check line, when asked for.
+        if (check) {
+            out.write(1)
+            words(out, 0, 0, "Light check".toByteArray(Charsets.UTF_8))
+        } else {
+            out.write(0)
+        }
         out.write(Writer().u64(5000).u64(6000).toByteArray())
         out.write(stuck) // stuck
         out.write(0) // late

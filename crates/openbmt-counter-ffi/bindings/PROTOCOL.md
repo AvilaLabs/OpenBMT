@@ -75,6 +75,7 @@ ops run on another; it waits for at most 250 ms.
  23 add_batch        handle node  args (u64, list<u8>) -> ()
  30 status           handle node  args () -> StatusView
  31 notes            handle node  args () -> list<string>
+ 32 own_node_retry   handle node  args () -> ()
  40 rate_sources     handle zero  args () -> list<RateSourceView>
  41 rate_parse       handle zero  args RateParseArgs -> SampleView
  42 rate_combine     handle zero  args RateCombineArgs -> RateView
@@ -84,6 +85,7 @@ ops run on another; it waits for at most 250 ms.
  46 pair_differ      handle zero  args () -> Words
  47 pair_cancel      handle zero  args () -> ()
  48 pair_finish      handle zero  args (u64, list<u8>) -> list<u8>
+ 49 own_node_check   handle zero  args OwnNodeCheckArgs -> string
 ```
 
 ## Types
@@ -94,7 +96,8 @@ CounterNetwork: enum, one tag byte
 ActorRole: enum, one tag byte
     tags Cashier=0 Manager=1
 ActorView: record: role: ActorRole, name: string
-StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>
+StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>
+OwnNodeCheckArgs: record: text: string, network: CounterNetwork, tor: bool
 PairBeginArgs: record: offer: list<u8>, name: string, now: u64
 PairStartedView: record: request: list<u8>, words: list<string>
 PairingView: record: network: CounterNetwork, settings: SettingsView
@@ -115,12 +118,13 @@ ReportView: enum, a tag byte, then: PosPaid(index: u32) | PosUnpaid(index: u32) 
     tags PosPaid=0 PosUnpaid=1 BooksFinal=2 SurplusOwed=3 LatePayment=4 Alarm=5 Dust=6
 Payment: record: address: string, uri: string, copy_uri: string, qr_size: u32, qr_bits: list<u8>
 OpenedView: record: index: u32, needs_sats: u64, quote_rate: u64, quote_from: u64, quote_until: u64, payment: Payment
-ScreenView: record: state: StateView, words: Words, flags: list<Words>, received_sats: u64, needs_sats: u64, stuck: bool, late: bool, reopened: bool, conflict_seen: bool, reports: list<ReportView>, payment: option<Payment>
+ScreenView: record: state: StateView, words: Words, flags: list<Words>, check: option<Words>, received_sats: u64, needs_sats: u64, stuck: bool, late: bool, reopened: bool, conflict_seen: bool, reports: list<ReportView>, payment: option<Payment>
 PumpView: record: reports: list<ReportView>, notes: list<string>, stopped: bool
 RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: option<u64>, state: RefundStateView, by_role: ActorRole, by_name: string, at: u64, words: Words
 HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, reports: list<ReportView>
 HealthView: record: healthy: bool, behind: bool, words: Words
-StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool
+OwnNodeView: record: usable: bool, words: Words
+StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, own_node: option<OwnNodeView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool
 RateSourceView: record: id: string, url: string, currency: string, initial: string
 RateParseArgs: record: source: string, response: list<u8>, fetched_at: u64
 SampleView: record: source: string, fetched_at: u64, minor_per_btc: u64

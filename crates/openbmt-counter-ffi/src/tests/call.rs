@@ -470,6 +470,10 @@ fn status_and_notes_answer_before_and_after_the_network() {
         let checked = r.u32();
         let tip = r.u32();
         let health = r.opt(|r| (r.bool(), r.bool(), r.words()));
+        assert!(
+            r.opt(|r| (r.bool(), r.words())).is_none(),
+            "no own node set"
+        );
         let sales = r.list(Rd::u32);
         let below = r.u64();
         let stopped = r.bool();

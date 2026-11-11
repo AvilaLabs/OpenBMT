@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use bitcoin::absolute::LockTime;
@@ -21,8 +21,8 @@ use bitcoin::{
 use openbmt_core::batch::{AddressBatch, PinnedRoots, SignedBatch};
 use openbmt_core::identity::Identity;
 use openbmt_core::settings::{Settings, SignedSettings};
-use openbmt_counter_node::{DriverPort, PairingRecord};
-use openbmt_net_io::{AppEvent, EventReceiver};
+use openbmt_counter_node::{DriverPort, Launch, PairingRecord};
+use openbmt_net_io::{AppEvent, EventReceiver, OwnNodeEvent};
 use openbmt_watch::{HeaderStore, Peer, PeerAddr, PeerTransport};
 
 use crate::host::Port;
@@ -110,6 +110,7 @@ pub fn start_config(dir: &str) -> StartConfig {
         now: T0,
         record: record().to_bytes(),
         proxy: None,
+        own_node: None,
     }
 }
 
@@ -291,11 +292,14 @@ pub struct Calls {
     pub watched: Vec<ScriptBuf>,
     pub all_blocks: Vec<bool>,
     pub shutdown: bool,
+    pub asked: Vec<Txid>,
+    pub retried: u32,
 }
 
 /// A driver port whose events the test sends.
 pub struct FakePort {
     rx: EventReceiver,
+    own_rx: Receiver<OwnNodeEvent>,
     calls: Arc<Mutex<Calls>>,
 }
 
@@ -315,6 +319,18 @@ impl DriverPort for FakePort {
     fn shutdown(&mut self) {
         self.calls.lock().expect("lock").shutdown = true;
     }
+
+    fn own_node_events(&self) -> Option<&Receiver<OwnNodeEvent>> {
+        Some(&self.own_rx)
+    }
+
+    fn ask_own_node(&self, txid: Txid) {
+        self.calls.lock().expect("lock").asked.push(txid);
+    }
+
+    fn retry_own_node(&self) {
+        self.calls.lock().expect("lock").retried += 1;
+    }
 }
 
 /// A registry whose next start runs on a fake driver, a scratch folder, and
@@ -323,6 +339,8 @@ pub struct Rig {
     registry: Registry,
     scratch: Scratch,
     events: Arc<Mutex<Option<Sender<AppEvent>>>>,
+    own: Arc<Mutex<Option<Sender<OwnNodeEvent>>>>,
+    launch: Arc<Mutex<Option<Launch>>>,
     pub calls: Arc<Mutex<Calls>>,
 }
 
@@ -332,6 +350,8 @@ impl Rig {
             registry: Registry::new(),
             scratch: Scratch::new(),
             events: Arc::new(Mutex::new(None)),
+            own: Arc::new(Mutex::new(None)),
+            launch: Arc::new(Mutex::new(None)),
             calls: Arc::new(Mutex::new(Calls::default())),
         };
         rig.arm();
@@ -341,12 +361,18 @@ impl Rig {
     /// The next start runs on a new fake driver.
     pub fn arm(&self) {
         let events = Arc::clone(&self.events);
+        let own = Arc::clone(&self.own);
+        let seen = Arc::clone(&self.launch);
         let calls = Arc::clone(&self.calls);
-        *self.registry.spawner.lock().expect("lock") = Some(Box::new(move |_launch| {
+        *self.registry.spawner.lock().expect("lock") = Some(Box::new(move |launch| {
             let (tx, rx) = channel();
+            let (own_tx, own_rx) = channel();
             *events.lock().expect("lock") = Some(tx);
+            *own.lock().expect("lock") = Some(own_tx);
+            *seen.lock().expect("lock") = Some(launch);
             Ok(Port(Box::new(FakePort {
                 rx: rx.into(),
+                own_rx,
                 calls,
             })))
         }));
@@ -367,6 +393,24 @@ impl Rig {
         for event in events {
             tx.send(event).expect("sent");
         }
+    }
+
+    /// Send events on the own node's channel.
+    pub fn send_own(&self, events: Vec<OwnNodeEvent>) {
+        let guard = self.own.lock().expect("lock");
+        let tx = guard.as_ref().expect("a started node");
+        for event in events {
+            tx.send(event).expect("sent");
+        }
+    }
+
+    /// What the driver was last started with.
+    pub fn launch(&self) -> Launch {
+        self.launch
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("a started node")
     }
 
     /// One call.

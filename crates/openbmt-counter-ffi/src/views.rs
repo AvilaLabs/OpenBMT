@@ -98,20 +98,41 @@ pub struct StartConfig {
     pub record: Vec<u8>,
     /// The SOCKS5 proxy of Tor, `host:port`, or none.
     pub proxy: Option<String>,
+    /// CR-100: the own node's address as `own_node_check` made it, or none.
+    /// An address that is refused, or that comes with no proxy, starts the
+    /// node without an own node, and the status says so (CR-102).
+    pub own_node: Option<String>,
 }
 
 wire_record!(StartConfig {
     dir,
     now,
     record,
-    proxy
+    proxy,
+    own_node
 });
 wire_record_get!(StartConfig {
     dir,
     now,
     record,
-    proxy
+    proxy,
+    own_node
 });
+
+/// The arguments of `own_node_check`: what a manager typed, the network of
+/// the pairing and whether the counter has a Tor proxy (CR-100 to CR-102).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnNodeCheckArgs {
+    /// The address as typed.
+    pub text: String,
+    /// The network of the pairing, for the usual port.
+    pub network: CounterNetwork,
+    /// The counter has a Tor proxy (CR-87).
+    pub tor: bool,
+}
+
+wire_record!(OwnNodeCheckArgs { text, network, tor });
+wire_record_get!(OwnNodeCheckArgs { text, network, tor });
 
 /// The arguments of `pair_begin`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -682,6 +703,8 @@ pub struct ScreenView {
     pub words: WordsView,
     /// The extra lines for a slow payment (CR-18) and a late one (CR-19).
     pub flags: Vec<WordsView>,
+    /// CR-105: which check was done, for a payment that waits.
+    pub check: Option<WordsView>,
     /// What has arrived.
     pub received_sats: u64,
     /// What the sale needs.
@@ -704,6 +727,7 @@ wire_record!(ScreenView {
     state,
     words,
     flags,
+    check,
     received_sats,
     needs_sats,
     stuck,
@@ -819,6 +843,17 @@ wire_record!(HealthView {
     words
 });
 
+/// The health line of the own node (CR-107).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnNodeView {
+    /// The own node can be used as a second check now (WR-63).
+    pub usable: bool,
+    /// What the owner is told, with the time it was last heard.
+    pub words: WordsView,
+}
+
+wire_record!(OwnNodeView { usable, words });
+
 /// What `status` returns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusView {
@@ -828,6 +863,8 @@ pub struct StatusView {
     pub tip_height: u32,
     /// The last answer of the health rules, once a `Peers` event has come.
     pub health: Option<HealthView>,
+    /// CR-107: the own node's line; none when no own node is set.
+    pub own_node: Option<OwnNodeView>,
     /// The sales the node knows of, lowest first.
     pub sales: Vec<u32>,
     /// CR-75: sales refused for being below the floor since the start.
@@ -840,6 +877,7 @@ wire_record!(StatusView {
     checked_height,
     tip_height,
     health,
+    own_node,
     sales,
     refused_below_minimum,
     stopped

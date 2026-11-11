@@ -122,6 +122,10 @@ fn a_sale_goes_from_open_to_paid_and_survives_a_restart() {
     let _checked = r.u32();
     let tip = r.u32();
     let health = r.opt(|r| (r.bool(), r.bool(), r.words()));
+    assert!(
+        r.opt(|r| (r.bool(), r.words())).is_none(),
+        "no own node set"
+    );
     let sales = r.list(Rd::u32);
     let refused_below = r.u64();
     let stopped = r.bool();

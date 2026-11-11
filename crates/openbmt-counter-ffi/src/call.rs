@@ -35,7 +35,7 @@
 //! - 10 `pump`; 11 to 15 the sale (`open`, `judge`, `requote`, `cancel`,
 //!   `override_sale`); 16 to 19 refunds; 20 to 23 what the owner sends
 //!   (`heartbeat`, `command`, `check_in`, `add_batch`).
-//! - 30 `status`, 31 `notes`.
+//! - 30 `status`, 31 `notes`, 32 `own_node_retry` (CR-107).
 //! - 40 to 42 the price of bitcoin (`rate_sources`, `rate_parse`,
 //!   `rate_combine`), 43 `pairing_read` and 44 to 48 the pairing ceremony
 //!   (`pair_begin`, `pair_match`, `pair_differ`, `pair_cancel`,
@@ -43,6 +43,8 @@
 //!   display only: it does not verify the record, and `start` itself
 //!   refuses a verified Tor-on setting without a proxy (CR-87). The
 //!   ceremony lives in the registry, one at a time and in memory only.
+//! - 49 `own_node_check` reads the own node's address a manager typed
+//!   (CR-100 to CR-102) and works on no node.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -67,12 +69,13 @@ use crate::rates::{
     RateView, SampleView,
 };
 use crate::say::{TONES, WHOS};
-use crate::shop::{pairing_read, SettingsView};
+use crate::shop::{own_node_check, pairing_read, SettingsView};
 use crate::views::{
     put_words, ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome,
-    OpenArgs, OpenedView, OverrideArgs, PairBeginArgs, PairStartedView, PairingView, PumpView,
-    RefundArgs, RefundAskView, RefundRow, RefundStateView, ReportView, RequoteArgs, ScreenView,
-    StartConfig, StateView, StatusView, WithdrawArgs, WordsView,
+    OpenArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView, PairBeginArgs,
+    PairStartedView, PairingView, PumpView, RefundArgs, RefundAskView, RefundRow, RefundStateView,
+    ReportView, RequoteArgs, ScreenView, StartConfig, StateView, StatusView, WithdrawArgs,
+    WordsView,
 };
 
 /// The first four bytes of a request.
@@ -362,6 +365,9 @@ fn build_ops() -> Vec<Op> {
         }),
         op(30, "status", Node, |c, ()| c.entry()?.status()),
         op(31, "notes", Node, |c, ()| c.entry()?.notes()),
+        op(32, "own_node_retry", Node, |c, ()| {
+            c.entry()?.own_node_retry()
+        }),
         op(40, "rate_sources", Zero, |_, ()| Ok(rate_sources())),
         op(41, "rate_parse", Zero, |_, a: RateParseArgs| rate_parse(a)),
         op(42, "rate_combine", Zero, |_, a: RateCombineArgs| {
@@ -384,6 +390,9 @@ fn build_ops() -> Vec<Op> {
             Zero,
             |c, (now, bundle): (u64, Vec<u8>)| c.registry.pair_finish(now, &bundle),
         ),
+        op(49, "own_node_check", Zero, |_, a: OwnNodeCheckArgs| {
+            own_node_check(a)
+        }),
     ]
 }
 
@@ -514,6 +523,7 @@ fn definitions() -> Vec<TypeDef> {
         ActorRole::define(),
         ActorView::define(),
         StartConfig::define(),
+        OwnNodeCheckArgs::define(),
         PairBeginArgs::define(),
         PairStartedView::define(),
         PairingView::define(),
@@ -535,6 +545,7 @@ fn definitions() -> Vec<TypeDef> {
         RefundRow::define(),
         HeartbeatOutcome::define(),
         HealthView::define(),
+        OwnNodeView::define(),
         StatusView::define(),
         RateSourceView::define(),
         RateParseArgs::define(),

@@ -59,6 +59,7 @@ impl W {
             .u64(c.now)
             .bytes(&c.record)
             .opt_string(c.proxy.as_deref())
+            .opt_string(c.own_node.as_deref())
     }
 
     /// The fields of `open`.
@@ -275,6 +276,7 @@ impl<'a> Rd<'a> {
             state: self.u8(),
             words: self.words(),
             flags: self.list(Rd::words),
+            check: self.opt(Rd::words),
             received: self.u64(),
             needs: self.u64(),
             stuck: self.bool(),
@@ -331,6 +333,7 @@ pub struct Screen {
     pub state: u8,
     pub words: Words,
     pub flags: Vec<Words>,
+    pub check: Option<Words>,
     pub received: u64,
     pub needs: u64,
     pub stuck: bool,

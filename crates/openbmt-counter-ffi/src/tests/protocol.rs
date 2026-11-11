@@ -53,6 +53,7 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (23, "add_batch"),
         (30, "status"),
         (31, "notes"),
+        (32, "own_node_retry"),
         (40, "rate_sources"),
         (41, "rate_parse"),
         (42, "rate_combine"),
@@ -62,6 +63,7 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (46, "pair_differ"),
         (47, "pair_cancel"),
         (48, "pair_finish"),
+        (49, "own_node_check"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

@@ -20,7 +20,9 @@
 //!   reading of one reply and one rate made from samples. The app fetches
 //!   (`docs/RATE-RULES.md`, RT-40 to RT-45); the library decides.
 //! - [`shop`] reads the pairing record before the node starts (the network,
-//!   Tor on or off, the smallest sale); `start` checks the signatures.
+//!   Tor on or off, the smallest sale); `start` checks the signatures. It
+//!   also reads the own node's address a manager typed (`own_node_check`,
+//!   CR-100 to CR-102).
 //! - The pairing ceremony (`pair_begin`, `pair_match`, `pair_differ`,
 //!   `pair_cancel`, `pair_finish`) runs in the [`Registry`]: one ceremony
 //!   at a time, in memory only, with the counter's key and number drawn from
@@ -82,7 +84,7 @@ pub use say::{all_words, words_for};
 pub use shop::SettingsView;
 pub use views::{
     ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome, OpenArgs,
-    OpenedView, OverrideArgs, PairBeginArgs, PairStartedView, PairingView, PumpView, RefundArgs,
-    RefundAskView, RefundRow, RefundStateView, ReportView, RequoteArgs, ScreenView, StartConfig,
-    StateView, StatusView, WithdrawArgs, WordsView,
+    OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView, PairBeginArgs, PairStartedView,
+    PairingView, PumpView, RefundArgs, RefundAskView, RefundRow, RefundStateView, ReportView,
+    RequoteArgs, ScreenView, StartConfig, StateView, StatusView, WithdrawArgs, WordsView,
 };
