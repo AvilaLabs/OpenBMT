@@ -1,0 +1,20 @@
+[book]
+title = "OpenBMT Handbook"
+authors = ["Avila Labs"]
+description = "How OpenBMT lets a shop take bitcoin straight into its own wallet, what keeps the money safe, and where that protection stops."
+language = "en"
+src = "docs/handbook"
+
+[build]
+build-dir = "dist/handbook"
+create-missing = false
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/AvilaLabs/OpenBMT"
+edit-url-template = "https://github.com/AvilaLabs/OpenBMT/edit/main/{path}"
+site-url = "/"
+
+[output.html.playground]
+runnable = false

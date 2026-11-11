@@ -11,3 +11,6 @@ apps/key-android/build/
 *.p12
 *.jks
 *.keystore
+
+# mdBook output
+dist/
