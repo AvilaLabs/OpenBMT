@@ -29,6 +29,8 @@ These are the words of what the app decides itself.
 | sourceRefusedStatus | Price source said no | A price source answered with a refusal, so its price is missing this turn. | Nothing to do. The app asks again in a minute. | nobody |  |
 | sourceReplyTooLong | Price reply too long | A price source sent more than the app reads, so its price is missing this turn. | Nothing to do. The app asks again in a minute. | nobody |  |
 | amountNeeded | Amount needed | Type an amount above zero to start a sale. | Press the digits of the amount, then press Open. | the cashier |  |
+| cameraOff | Camera is off for this app | This app is not allowed to use the camera, so it cannot scan a code. | Allow the camera for this app in the phone's settings, or paste the text or choose a file instead. | a manager |  |
+| cameraNotStarted | Camera did not start | The camera could not be opened, so nothing was scanned. | Close any other app that uses the camera and try again, or paste the text or choose a file instead. | a manager |  |
 | notANumber | Check what you typed | The amount is empty or has something other than digits in it. | Type whole numbers only, then try again. | the cashier |  |
 | nameNeeded | Name needed | A refund or an override is written down with the name of the person who asked for it. | Type your name on the home screen, then try again. | the cashier |  |
 | destinationNeeded | Address needed | A refund needs the address the customer wants the money sent to. | Paste the address or the payment request the customer shows, then try again. | the cashier |  |

@@ -25,7 +25,7 @@ const TEST_SOURCES: [&str; 13] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 10] = [
+const NOT_HERE: [(&str, &str); 11] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -73,6 +73,12 @@ const NOT_HERE: [(&str, &str); 10] = [
         "the app fetches the price; the fetch limits are tested in openbmt-counter-ffi against \
          openbmt-rates",
     ),
+    (
+        "CR-90",
+        "the camera is the Android app's; its permission list is checked on the built APK \
+         (`apps/counter-android/tests/check-manifest.sh`) and the scan's pure parts and native \
+         reader are tested in `apps/android-common`; it needs a device to test",
+    ),
 ];
 
 fn defined() -> BTreeSet<String> {
@@ -84,9 +90,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_sixty_eight_rules() {
+fn the_rules_file_defines_sixty_nine_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 68);
+    assert_eq!(ids.len(), 69);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -96,6 +102,7 @@ fn the_rules_file_defines_sixty_eight_rules() {
             && ids.contains("CR-82")
             && ids.contains("CR-83")
             && ids.contains("CR-89")
+            && ids.contains("CR-90")
     );
 }
 

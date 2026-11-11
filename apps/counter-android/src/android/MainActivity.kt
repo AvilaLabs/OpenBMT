@@ -44,6 +44,11 @@ class MainActivity : Activity() {
         controller.picked(requestCode, resultCode, data)
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        controller.permission(requestCode, grantResults)
+    }
+
     /** Shows [page] as the whole content. */
     fun show(page: View) {
         setContentView(page)

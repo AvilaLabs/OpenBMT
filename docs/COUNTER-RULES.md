@@ -566,6 +566,16 @@ own; the library judges sales and prices and knows nothing of them.
   no cache, no redirect, no compression; one fixed generic User-Agent for
   every shop. The reply is given to the library's `rate_parse`, the samples
   to `rate_combine`; the app parses no JSON.
+- **CR-90.** The camera reads the pairing code and nothing else. The
+  permission is asked for only when the manager taps Scan, never at start,
+  and if it is refused or "don't ask again" was chosen the app says so in
+  words and the pairing text can still be pasted or read from a file. The
+  camera is open only while the scan page is on the screen and is released
+  on the first code, on Cancel, when the app is not visible and when the scan
+  fails. Nothing is kept from the frames: a frame is read once, zeroed, and
+  never written to disk, logged or sent anywhere, and the text of the code is
+  handed to the pairing screen like pasted text, to be read by the same
+  parser. The manifest asks for the camera as a feature that is not required.
 
 ## 10. What these rules do not do
 

@@ -1,5 +1,6 @@
 package org.openbmt.counter.app
 
+import org.openbmt.app.CameraWords
 import org.openbmt.app.Format
 import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
@@ -160,6 +161,13 @@ object AppWords {
         Who.CASHIER,
         "Press the digits of the amount, then press Open.",
     )
+
+    // ---- the camera ----------------------------------------------------------------
+
+    /** The camera permission was refused, or "don't ask again" was chosen. */
+    val cameraOff = CameraWords.off(Who.MANAGER)
+
+    fun cameraNotStarted(problem: String?) = CameraWords.notStarted(Who.MANAGER, problem)
 
     val notANumber = w(
         Tones.STOP, "Check what you typed",
@@ -328,6 +336,8 @@ object AppWords {
         "sourceRefusedStatus" to sourceRefusedStatus(503),
         "sourceReplyTooLong" to sourceReplyTooLong,
         "amountNeeded" to amountNeeded,
+        "cameraOff" to cameraOff,
+        "cameraNotStarted" to cameraNotStarted("a problem"),
         "notANumber" to notANumber,
         "nameNeeded" to nameNeeded,
         "destinationNeeded" to destinationNeeded,

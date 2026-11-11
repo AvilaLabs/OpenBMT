@@ -20,6 +20,7 @@ import java.io.IOException
 import java.security.GeneralSecurityException
 import org.openbmt.app.Format
 import org.openbmt.app.KeystoreSealer
+import org.openbmt.app.ScanFlow
 import org.openbmt.app.SayWords
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Ui
@@ -46,6 +47,7 @@ import org.openbmt.counter.Shop
  */
 class Controller(private val act: MainActivity) {
     private val ui = Ui(act)
+    private val scan = ScanFlow(act, ui)
     private val main = Handler(Looper.getMainLooper())
     private val dir: File = act.noBackupFilesDir
     private val nodeDir = File(dir, "node")
@@ -91,13 +93,14 @@ class Controller(private val act: MainActivity) {
 
     fun visible() {
         visible = true
-        if (pickerOpen) return
+        if (pickerOpen || scan.asking) return
         begin()
     }
 
     fun hidden() {
         visible = false
-        if (pickerOpen) return
+        if (pickerOpen || scan.asking) return
+        scan.stop()
         stopNode()
     }
 
@@ -404,7 +407,22 @@ class Controller(private val act: MainActivity) {
                 }
             }
         },
+        object : PairingSource {
+            override val label = "Scan the pairing code"
+
+            override fun begin(onText: (String) -> Unit, onFailed: (SayWords) -> Unit) {
+                scan.begin(
+                    show = { v -> tick = null; act.show(v) },
+                    onBytes = { bytes -> onText(String(bytes, Charsets.UTF_8)) },
+                    onFailed = { f -> onFailed(if (f.off) AppWords.cameraOff else AppWords.cameraNotStarted(f.problem)) },
+                    onCancel = { showFirstStart(null) },
+                )
+            }
+        },
     )
+
+    /** The answer of the system's permission dialog. */
+    fun permission(code: Int, results: IntArray) = scan.permissionResult(code, results)
 
     @Suppress("DEPRECATION")
     private fun openPicker(intent: Intent, done: (Uri) -> Unit) {

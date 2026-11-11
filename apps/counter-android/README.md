@@ -26,11 +26,29 @@ Every refusal of the library is shown through its `words`; the app's own
 states and faults have words written in `src/model/AppWords.kt` under
 `docs/SCREEN-RULES.md`, listed in `docs/screens/counter-app.md`.
 
-Not built yet: reading the pairing code with the camera (pairing is pasted
-text or a file, behind one `PairingSource` interface so a camera can be added
-without other changes), a lock screen of the app's own, a list of cashiers
+The pairing text comes from the field (pasted), from a file, or from the
+pairing code read with the phone's camera: three `PairingSource` choices, the
+second and third behind one interface. See "The camera scan" below.
+
+Not built yet: a lock screen of the app's own, a list of cashiers
 and managers with their own PINs, end-of-day totals and receipts, and changes
 to the shop's settings after pairing.
+
+## The camera scan
+
+Scan reads one QR code with the platform's Camera2 only (no AndroidX, no
+CameraX, no ML Kit, no ZXing at runtime). `apps/android-common`'s `QrScanner`
+takes frames from an `ImageReader` (YUV_420_888, near 1280 by 720), keeps the
+Y plane with its row stride, and gives it to the reader of `crates/openbmt-qr`
+through one JNI function (`crates/openbmt-qr-jni`) on a background thread, at
+most about eight times a second, the latest frame only. The camera is released
+on the first code, on Cancel and when the app is not visible. Nothing is kept
+from a frame: it is zeroed after it is read and never written to disk or sent
+anywhere (CR-90). The scan page has a preview so the manager can aim.
+
+If the permission is refused, or "don't ask again" was chosen, a words page
+says the camera is off for this app, to allow it in the phone's settings or to
+paste the text or choose a file instead, and that a manager does this.
 
 ## Pairing text
 
@@ -44,9 +62,12 @@ pairing is kept sealed with an Android Keystore key (AES-GCM) in
 
 ## Rules the app keeps without a device
 
-- **One permission, INTERNET.** The counter connects to the Bitcoin network
-  and fetches the price. `tests/check-manifest.sh` reads the built APK with
-  `aapt2` and fails the build if the list differs.
+- **Two permissions, INTERNET and CAMERA.** The counter connects to the
+  Bitcoin network and fetches the price (INTERNET). CAMERA is asked for at run
+  time only when the manager taps Scan, to read the pairing code (CR-90); a
+  `uses-feature` for `android.hardware.camera.any` says the camera is not
+  required. `tests/check-manifest.sh` reads the built APK with `aapt2` and
+  fails the build if the list differs from exactly these.
 - **No backup.** `allowBackup="false"`, and `dataExtractionRules` exclude every
   domain, for cloud backup and for device transfer.
 - **No exported component but the launcher activity.** No service, receiver
@@ -90,10 +111,11 @@ scripts/counter-apk-build.sh
 
 Needs a JDK 21, the Android SDK (platform 36, build-tools 36.0.0), the NDK,
 and Kotlin 2.2.20, as for the Key app (`apps/key-android/README.md`). It runs
-the JVM tests, builds the library for `arm64-v8a` and `x86_64` through
-`scripts/counter-ffi-build.sh`, compiles with `-Werror`, dexes, aligns for
-16 KiB pages, signs with a local test key and checks the manifest. The result
-is under `~/.cache/openbmt/target/counterapk/apk`, never in the repository.
+the JVM tests, builds the libraries for `arm64-v8a` and `x86_64` through
+`scripts/counter-ffi-build.sh` and `scripts/qr-jni-build.sh`, compiles with
+`-Werror`, dexes, aligns for 16 KiB pages, signs with a local test key and
+checks the manifest. The result is under
+`~/.cache/openbmt/target/counterapk/apk`, never in the repository.
 
 ## Tests
 
@@ -101,8 +123,11 @@ is under `~/.cache/openbmt/target/counterapk/apk`, never in the repository.
   tests (PIN store, pairing text, amount entry, QR layout, price schedule,
   Tor gate, sale model, screen choice, words). They need no device.
   `OPENBMT_WRITE_SCREENS=1` rewrites `docs/screens/counter-app.md`.
-- `tests/check-manifest.sh APK` checks the permission list (exactly INTERNET),
-  backup, components, SDK levels.
+- `apps/android-common/tests/qr-jni-test.sh` builds the QR reader for the
+  host and reads frames made by the repository's encoder through the same
+  Kotlin calls the scan makes. The build runs it.
+- `tests/check-manifest.sh APK` checks the permission list (exactly INTERNET
+  and CAMERA, the camera not required), backup, components, SDK levels.
 
 ## Signing
 
@@ -114,6 +139,8 @@ release key.
 
 Everything that needs a running Android: that the library loads and starts,
 how the screens look and lay out, the keyboard types of the fields, the file
-picker, the Keystore sealing, the SOCKS probe against a real Orbot, real
-fetches of the sources, the QR code scanned by a wallet, and the node stopping
-cleanly when the app is sent to the background.
+picker, the camera scan (the permission dialog, the preview, reading a code
+from a screen and from paper, releasing the camera), the Keystore sealing, the
+SOCKS probe against a real Orbot, real fetches of the sources, the QR code
+scanned by a wallet, and the node stopping cleanly when the app is sent to the
+background.
