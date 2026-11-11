@@ -422,9 +422,9 @@ impl PairRefused {
             )
             .detail(e.to_string()),
             Self::RelayNotSigned => stop(
-                "Owner code damaged",
-                "The code from the owner's phone was changed or damaged on the way, so pairing stopped.",
-                "Make a new setup code on the owner's phone and scan it again.",
+                "Relay not signed",
+                "The relay in the code from the owner's phone is not signed by that owner, so pairing stopped.",
+                "Start again from the Key app: open Pair a counter and scan its code.",
             ),
             Self::Settings(e) => stop(
                 "Settings not signed",
