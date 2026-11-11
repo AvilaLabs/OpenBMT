@@ -11,6 +11,7 @@ use openbmt_core::say::{Tone, Who, Words};
 
 use crate::fees::FeeError;
 use crate::health::{Health, Problem};
+use crate::own_node::{OwnNodeHealth, OwnNodeProblem};
 use crate::refusal::Refusal;
 
 impl Problem {
@@ -87,6 +88,80 @@ impl Health {
             "Nothing to do.",
         )
         .code("WR-50")
+    }
+}
+
+impl OwnNodeProblem {
+    /// What the owner is told when the own node cannot be used as a second
+    /// check (WR-63). The counter goes on with its light check and the
+    /// words say so, with the time the node was last there as `at`.
+    pub fn words(&self) -> Words {
+        let words = match *self {
+            Self::Unreachable { since } => Words::new(
+                Tone::Info,
+                "Your node is not reachable",
+                "This counter cannot reach your node, so it checks payments with its light check only.",
+                Who::Owner,
+                "Check that your node is running and that Tor works. The counter tries again by itself.",
+            )
+            .at(since),
+            Self::Refused { since } => Words::new(
+                Tone::Info,
+                "Your node was dropped",
+                "Your node sent something this counter does not accept, so it was dropped and the light check is used.",
+                Who::Owner,
+                "Check your node's software, then ask the counter to try your node again.",
+            )
+            .at(since),
+            Self::Silent { since } => Words::new(
+                Tone::Info,
+                "Your node has gone quiet",
+                "Nothing has come from your node for ten minutes, so this counter checks payments with its light check only.",
+                Who::Owner,
+                "Check that your node is running. The counter keeps listening for it.",
+            )
+            .at(since),
+            Self::Behind { blocks } => Words::new(
+                Tone::Info,
+                "Your node is behind",
+                format!("Your node is {blocks} blocks behind this counter, so the counter checks payments with its light check only."),
+                Who::Owner,
+                "Wait for your node to catch up, or check that it is running.",
+            ),
+            Self::TipUnknown => Words::new(
+                Tone::Info,
+                "Your node's progress unknown",
+                "This counter does not yet know how far your node has got, so it uses its light check only.",
+                Who::Nobody,
+                "Nothing to do. The counter asks again when your node next speaks.",
+            ),
+        };
+        words.code(self.rule())
+    }
+}
+
+impl OwnNodeHealth {
+    /// The health line for the own node: what the owner is told about it.
+    /// `None` when no own node is set, so that nothing is shown.
+    pub fn words(&self) -> Option<Words> {
+        if !self.configured {
+            return None;
+        }
+        if let Some(problem) = self.problem {
+            return Some(problem.words());
+        }
+        let mut words = Words::new(
+            Tone::Info,
+            "Your node is checking too",
+            "Your node is connected and up to date, so this counter can use it as a second check.",
+            Who::Nobody,
+            "Nothing to do.",
+        )
+        .code("WR-63");
+        if let Some(heard) = self.last_heard {
+            words = words.at(heard);
+        }
+        Some(words)
     }
 }
 
@@ -365,6 +440,9 @@ pub fn all_words() -> Vec<(String, Words)> {
     for (name, health) in sample_health() {
         all.push((format!("Health::{name}"), health.words()));
     }
+    for (name, words) in own_node_words() {
+        all.push((format!("OwnNode::{name}"), words));
+    }
     for group in RefusalGroup::ALL {
         all.push((format!("RefusalGroup::{}", group.name()), group.words()));
     }
@@ -413,4 +491,40 @@ fn sample_health() -> Vec<(&'static str, Health)> {
             },
         ),
     ]
+}
+
+/// One value of every state of the own node's health line.
+fn own_node_words() -> Vec<(&'static str, Words)> {
+    let problems = [
+        ("Unreachable", OwnNodeProblem::Unreachable { since: 1 }),
+        ("Refused", OwnNodeProblem::Refused { since: 1 }),
+        ("Silent", OwnNodeProblem::Silent { since: 1 }),
+        ("Behind", OwnNodeProblem::Behind { blocks: 3 }),
+        ("TipUnknown", OwnNodeProblem::TipUnknown),
+    ];
+    let mut all: Vec<(&'static str, Words)> = problems
+        .into_iter()
+        .map(|(name, problem)| (name, problem.words()))
+        .collect();
+    let healthy = OwnNodeHealth {
+        configured: true,
+        usable: true,
+        problem: None,
+        own_height: Some(1),
+        our_height: 1,
+        last_heard: Some(1),
+    };
+    all.extend(healthy.words().map(|w| ("Healthy", w)));
+    all
+}
+
+/// The name of an own-node problem, by an exhaustive match.
+pub fn own_node_problem_name(p: OwnNodeProblem) -> &'static str {
+    match p {
+        OwnNodeProblem::Unreachable { .. } => "Unreachable",
+        OwnNodeProblem::Refused { .. } => "Refused",
+        OwnNodeProblem::Silent { .. } => "Silent",
+        OwnNodeProblem::Behind { .. } => "Behind",
+        OwnNodeProblem::TipUnknown => "TipUnknown",
+    }
 }

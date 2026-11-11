@@ -36,10 +36,12 @@ use openbmt_net::book::{BAN_SECS, V2_RETRY_SECS};
 use openbmt_net::manager::Wanted;
 use openbmt_net::onion::{onion_name, parse_onion_name};
 use openbmt_net::{
-    Added, AddressBook, ConnectRefused, Manager, ManagerConfig, OnionDraw, Output, PeerAddress,
-    PeerId, RelayState, Source, TransportChoice, V2Entropy,
+    Added, AddressBook, ConnectRefused, Manager, ManagerConfig, OnionDraw, Output, OwnNode,
+    OwnNodeHost, PeerAddress, PeerId, RelayState, Source, TransportChoice, V2Entropy,
 };
-use openbmt_watch::{host_group, network_group, HeaderStore, Peer, PeerAddr};
+use openbmt_watch::{
+    host_group, network_group, HeaderStore, OwnNodeInput, OwnNodeLink, Peer, PeerAddr,
+};
 
 use crate::dial::{DialError, Net, RESOLVE_SECS};
 use crate::env::{Clock, Key, Randomness, Storage};
@@ -70,6 +72,16 @@ pub const MAX_TOR_LOOKUPS_IN_FLIGHT: usize = 4;
 /// NR-72: seconds a round of Tor lookups may take in all, before the
 /// answers still missing are ignored. Three waves of the longest lookup.
 pub const TOR_ROUND_SECS: u64 = 100;
+/// NR-100: seconds before the own node is dialed again after the first
+/// failure. It doubles with each failure up to [`OWN_BACKOFF_MAX_SECS`].
+pub const OWN_BACKOFF_FIRST_SECS: u64 = 5;
+/// NR-100: the longest wait between two dials of the own node.
+pub const OWN_BACKOFF_MAX_SECS: u64 = 300;
+/// NR-100: seconds a connection to the own node must have been ready for the
+/// next failure to start the wait again from [`OWN_BACKOFF_FIRST_SECS`].
+pub const OWN_STABLE_SECS: u64 = 60;
+/// NR-103: events about the own node waiting for the app.
+pub const OWN_EVENT_CAPACITY: usize = 256;
 /// Bytes one read from a socket may return.
 pub const READ_BUFFER: usize = 65_536;
 /// Messages waiting between the reader threads and the core thread.
@@ -122,6 +134,11 @@ pub struct DriverConfig {
     /// NR-80: try the encrypted transport first. On in the counter; off only
     /// to check the driver against peers that speak the old one alone.
     pub v2: bool,
+    /// NR-98: the merchant's own node, if the owner set one. It is kept
+    /// connected apart from the target number of peers (NR-100), and what it
+    /// reports is told apart from the peers' (NR-101, NR-103). A Tor v3
+    /// address needs `proxy`.
+    pub own_node: Option<OwnNode>,
 }
 
 /// The DNS seed names that Bitcoin Core 32.1 ships for the network
@@ -166,6 +183,7 @@ impl DriverConfig {
             redial_pause_secs: REDIAL_PAUSE_SECS,
             event_bytes: EVENT_BYTES,
             v2: true,
+            own_node: None,
         }
     }
 }
@@ -254,11 +272,26 @@ pub enum AppEvent {
     Stopped,
 }
 
+/// NR-103: what the driver tells the app about the own node, on a channel
+/// of its own (see [`Handle::own_node_events`]) so that it is never mixed
+/// with what the peers report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnNodeEvent {
+    /// NR-101: the own node holds this transaction in its memory pool. It
+    /// announced it, or sent it when asked with [`Handle::ask_own_node`].
+    Has(Txid),
+    /// NR-102: how the own node stands. Sent when the connection or its best
+    /// height changes, and at least every 10 seconds (NR-75).
+    State(OwnNodeInput),
+}
+
 /// Why [`Driver::spawn`] did not start.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartError {
     /// `target_peers` is 0 or more than [`MAX_TARGET_PEERS`].
     TargetPeers(usize),
+    /// NR-98: the own node is a Tor v3 address and no proxy is set.
+    OwnNodeNeedsTor,
     /// The watcher's header store does not take this network.
     Network(String),
     /// The storage could not be read.
@@ -274,6 +307,9 @@ impl fmt::Display for StartError {
                 f,
                 "NR-20: {n} peers is not between 1 and {MAX_TARGET_PEERS}"
             ),
+            Self::OwnNodeNeedsTor => {
+                write!(f, "NR-98: the own node is a Tor address and Tor is not on")
+            }
             Self::Network(e) => write!(f, "the network is not supported: {e}"),
             Self::Storage(e) => write!(f, "the stored data could not be read: {e}"),
             Self::Thread(k) => write!(f, "a thread could not be started: {k}"),
@@ -293,6 +329,8 @@ enum Command {
     Broadcast(Vec<u8>),
     Forget(Txid),
     Rescan(u32),
+    AskOwnNode(Txid),
+    RetryOwnNode,
 }
 
 /// What the threads send the core thread.
@@ -408,6 +446,7 @@ impl From<Receiver<AppEvent>> for EventReceiver {
 #[derive(Debug)]
 pub struct Handle {
     events: EventReceiver,
+    own_events: Receiver<OwnNodeEvent>,
     commands: Sender<Command>,
     wake: SyncSender<Msg>,
     shared: Arc<Shared>,
@@ -418,6 +457,31 @@ impl Handle {
     /// The events, in order. Read them: see the note on [`Handle`].
     pub fn events(&self) -> &EventReceiver {
         &self.events
+    }
+
+    /// NR-103: what the own node says, apart from the events of the peers.
+    /// Nothing is ever sent on it when no own node is set. The core thread
+    /// never waits for it: when it is full a new event is dropped. A dropped
+    /// state comes again within 10 seconds, and a dropped report is asked
+    /// for again with [`Handle::ask_own_node`]; neither is ever taken for a
+    /// "yes".
+    pub fn own_node_events(&self) -> &Receiver<OwnNodeEvent> {
+        &self.own_events
+    }
+
+    /// NR-101: ask the own node whether it holds this transaction in its
+    /// memory pool. The answer is an [`OwnNodeEvent::Has`], if it does. No
+    /// answer means only that it has not said so. Nothing happens when no
+    /// own node is set.
+    pub fn ask_own_node(&self, txid: Txid) {
+        self.command(Command::AskOwnNode(txid));
+    }
+
+    /// NR-100: dial the own node again after it was dropped for breaking a
+    /// rule of the peer protocol, which the driver does not do by itself.
+    /// Without effect when it was not dropped.
+    pub fn retry_own_node(&self) {
+        self.command(Command::RetryOwnNode);
     }
 
     /// NR-41: watch a script. A script that is added after peers are
@@ -551,6 +615,11 @@ impl Driver {
         if config.target_peers == 0 || config.target_peers > MAX_TARGET_PEERS {
             return Err(StartError::TargetPeers(config.target_peers));
         }
+        // NR-98: a Tor v3 address is reached through the proxy or not at all.
+        let own_target = config.own_node.as_ref().map(own_target);
+        if config.proxy.is_none() && own_target.as_ref().is_some_and(|t| onion_key(t).is_some()) {
+            return Err(StartError::OwnNodeNeedsTor);
+        }
         let now = clock.now();
         let mut notes = Vec::new();
         let stored = storage
@@ -601,6 +670,7 @@ impl Driver {
         }
         let (inbound_tx, inbound_rx) = sync_channel(INBOUND_CAPACITY);
         let (events_tx, events_rx) = sync_channel(EVENT_CAPACITY);
+        let (own_tx, own_rx) = sync_channel(OWN_EVENT_CAPACITY);
         let queued = Arc::new(AtomicUsize::new(0));
         let (command_tx, command_rx) = channel();
         let shared = Arc::new(Shared::default());
@@ -619,6 +689,7 @@ impl Driver {
             inbound_rx,
             commands: command_rx,
             events: events_tx,
+            own: OwnState::new(own_target, own_tx, now),
             queued: queued.clone(),
             shared: shared.clone(),
             notes,
@@ -652,6 +723,7 @@ impl Driver {
                 events: events_rx,
                 queued,
             },
+            own_events: own_rx,
             commands: command_tx,
             wake: inbound_tx,
             shared,
@@ -735,6 +807,28 @@ fn default_port(network: Network) -> u16 {
     }
 }
 
+/// NR-100: the wait before the next dial of the own node, and the wait
+/// after that one. `backoff` is the wait of the last failure's successor;
+/// `stable` says the connection that ended had been ready for
+/// [`OWN_STABLE_SECS`].
+pub(crate) fn own_wait(backoff: u64, stable: bool) -> (u64, u64) {
+    let wait = if stable {
+        OWN_BACKOFF_FIRST_SECS
+    } else {
+        backoff
+    };
+    (wait, wait.saturating_mul(2).min(OWN_BACKOFF_MAX_SECS))
+}
+
+/// NR-98: how the own node is dialed: its onion name through the proxy, or,
+/// in a test of the driver on one machine, its socket address.
+fn own_target(node: &OwnNode) -> Target {
+    match node.host() {
+        OwnNodeHost::Onion(name) => Target::Name(name.clone(), node.port()),
+        OwnNodeHost::Clear(addr) => Target::Addr(*addr),
+    }
+}
+
 fn v2_of(ip: IpAddr) -> AddrV2 {
     match ip {
         IpAddr::V4(a) => AddrV2::Ipv4(a),
@@ -744,6 +838,45 @@ fn v2_of(ip: IpAddr) -> AddrV2 {
 
 // ----- the core thread ---------------------------------------------------
 
+/// What the driver keeps about the own node (NR-98 to NR-103).
+struct OwnState {
+    /// Where it is dialed; `None` when no own node is set.
+    target: Option<Target>,
+    events: SyncSender<OwnNodeEvent>,
+    /// Not dialed before this time (NR-100).
+    next_try: u64,
+    /// The wait after the next failure.
+    backoff: u64,
+    /// When the last connection ended, or when the driver started if none
+    /// has been ready yet.
+    down_since: u64,
+    /// NR-100: when it broke a rule; it is not dialed until the app asks.
+    refused_since: Option<u64>,
+    /// What the last state event carried, to see a change.
+    last: Option<(OwnNodeLink, Option<u32>)>,
+    last_sent_at: u64,
+}
+
+impl OwnState {
+    fn new(target: Option<Target>, events: SyncSender<OwnNodeEvent>, now: u64) -> Self {
+        Self {
+            target,
+            events,
+            next_try: now,
+            backoff: OWN_BACKOFF_FIRST_SECS,
+            down_since: now,
+            refused_since: None,
+            last: None,
+            last_sent_at: 0,
+        }
+    }
+
+    /// NR-103: never waits; a full channel drops the event.
+    fn send(&self, event: OwnNodeEvent) {
+        let _ = self.events.try_send(event);
+    }
+}
+
 /// A connection that is open.
 struct Conn {
     /// The core thread's end, for writing.
@@ -752,12 +885,16 @@ struct Conn {
     target: Target,
     /// When the handshake finished.
     ready_at: Option<u64>,
+    /// NR-98: the own node's connection.
+    own: bool,
 }
 
 /// A connection being opened.
 struct Dial {
     target: Target,
     handle: Option<JoinHandle<()>>,
+    /// NR-98: the dial of the own node.
+    own: bool,
 }
 
 /// A round of seed lookups.
@@ -807,6 +944,7 @@ struct Core<S, C, R> {
     inbound_rx: Receiver<Msg>,
     commands: Receiver<Command>,
     events: SyncSender<AppEvent>,
+    own: OwnState,
     /// NR-74: bytes of blocks and transactions handed to `events` that the
     /// app has not taken.
     queued: Arc<AtomicUsize>,
@@ -933,8 +1071,10 @@ where
         self.flush_writes(now);
         self.reap();
         self.expire(now);
+        self.dial_own(now);
         self.dial_more(now);
         self.send_peers(now);
+        self.send_own_state(now);
         self.persist(now);
     }
 
@@ -971,6 +1111,20 @@ where
                     self.last_checked = Some(height);
                     self.emit(AppEvent::RescanStarted(height));
                 }
+                Command::AskOwnNode(txid) => {
+                    if self.own.target.is_some() {
+                        let out = self.manager.ask_own_node(txid);
+                        let now = self.clock.now();
+                        self.handle_outputs(out, now);
+                    }
+                }
+                Command::RetryOwnNode => {
+                    // NR-100: only a node that was dropped for a violation.
+                    if self.own.refused_since.take().is_some() {
+                        self.own.next_try = self.clock.now();
+                        self.own.backoff = OWN_BACKOFF_FIRST_SECS;
+                    }
+                }
             }
         }
     }
@@ -986,13 +1140,11 @@ where
                 }
             }
             Msg::Closed(id) => {
-                if let Some(target) = self.conns.get(&id).map(|c| c.target.clone()) {
+                if let Some(who) = self.who(id) {
                     let out = self.manager.closed(id, now);
                     self.note_v2_refusals(&out);
                     self.remove_conn(id, now, false);
-                    self.emit(AppEvent::Note(format!(
-                        "peer {target} closed the connection"
-                    )));
+                    self.emit(AppEvent::Note(format!("{who} closed the connection")));
                     self.handle_outputs(out, now);
                 }
             }
@@ -1047,20 +1199,26 @@ where
                     misbehaved,
                 } => {
                     // The manager has forgotten the peer already.
-                    let target = self.conns.get(&id).map(|c| c.target.clone());
+                    let who = self.who(id);
+                    let own = self.conns.get(&id).is_some_and(|c| c.own);
                     self.remove_conn(id, now, misbehaved);
-                    if let Some(target) = target {
-                        let mark = if misbehaved {
-                            " (not dialed for 24 h)"
-                        } else {
-                            ""
+                    if let Some(who) = who {
+                        let mark = match (misbehaved, own) {
+                            (true, true) => " (not dialed until asked)",
+                            (true, false) => " (not dialed for 24 h)",
+                            (false, _) => "",
                         };
-                        self.emit(AppEvent::Note(format!(
-                            "peer {target} dropped{mark}: {reason}"
-                        )));
+                        self.emit(AppEvent::Note(format!("{who} dropped{mark}: {reason}")));
                     }
                 }
                 Output::V2NotSpoken { id } => self.note_v2_refused(id),
+                Output::OwnNodeReady { id, .. } => {
+                    if let Some(conn) = self.conns.get_mut(&id) {
+                        conn.ready_at = Some(now);
+                    }
+                    self.emit(AppEvent::Note("the own node is connected".to_string()));
+                }
+                Output::OwnNodeHas { txid } => self.own.send(OwnNodeEvent::Has(txid)),
                 Output::Ready { id, services } => {
                     if let Some(conn) = self.conns.get_mut(&id) {
                         conn.ready_at = Some(now);
@@ -1117,6 +1275,17 @@ where
 
     // ----- connections ---------------------------------------------------
 
+    /// How a note names the connection: the target of a peer, never the
+    /// address of the own node.
+    fn who(&self, id: PeerId) -> Option<String> {
+        let conn = self.conns.get(&id)?;
+        Some(if conn.own {
+            "the own node".to_string()
+        } else {
+            format!("peer {}", conn.target)
+        })
+    }
+
     /// Forget a connection: close the socket, set the pause, and tell the
     /// book. The manager has been told by the caller.
     fn remove_conn(&mut self, id: PeerId, now: u64, misbehaved: bool) {
@@ -1128,6 +1297,10 @@ where
             self.retired.push(reader);
         }
         let v2_refused = self.v2.refused.remove(&id);
+        if conn.own {
+            self.own_connection_ended(&conn, v2_refused, misbehaved, now);
+            return;
+        }
         if v2_refused {
             self.fall_back_to_v1(&conn.target, now);
         } else {
@@ -1145,6 +1318,40 @@ where
                 self.book.failed(&addr, port, now);
             }
         }
+    }
+
+    /// NR-100: the own node's connection ended. The address book and the
+    /// pauses of NR-70 are not touched: the own node has its own wait. A
+    /// protocol violation stops the dialing until the app asks.
+    fn own_connection_ended(&mut self, conn: &Conn, v2_refused: bool, misbehaved: bool, now: u64) {
+        let stable = conn
+            .ready_at
+            .is_some_and(|at| now.saturating_sub(at) >= OWN_STABLE_SECS);
+        if conn.ready_at.is_some() {
+            self.own.down_since = now;
+        }
+        if misbehaved {
+            self.own.refused_since = Some(now);
+            return;
+        }
+        if v2_refused {
+            // NR-81: the old transport at once, and for a day.
+            self.v2
+                .v1_until
+                .insert(conn.target.clone(), now.saturating_add(V2_RETRY_SECS));
+            self.own.next_try = now;
+            return;
+        }
+        self.own_failed(stable, now);
+    }
+
+    /// NR-100: wait before the next dial of the own node: 5 seconds, doubling
+    /// with each failure up to 5 minutes, and from 5 seconds again after a
+    /// connection that stayed ready for a minute.
+    fn own_failed(&mut self, stable: bool, now: u64) {
+        let (wait, next) = own_wait(self.own.backoff, stable);
+        self.own.next_try = now.saturating_add(wait);
+        self.own.backoff = next;
     }
 
     /// NR-81: a peer that did not speak the encrypted transport is tried
@@ -1183,7 +1390,9 @@ where
     /// the address book says so.
     fn transport_for(&mut self, target: &Target, now: u64) -> TransportChoice {
         let remembered = self.v2.v1_until.get(target).is_some_and(|t| *t > now);
-        let book_says_v1 = book_key(target).is_some_and(|(a, p)| !self.book.v2_first(&a, p, now));
+        let own = self.own.target.as_ref() == Some(target);
+        let book_says_v1 =
+            !own && book_key(target).is_some_and(|(a, p)| !self.book.v2_first(&a, p, now));
         if !self.config.v2 || remembered || book_says_v1 || !self.rng.unpredictable() {
             return TransportChoice::V1;
         }
@@ -1205,13 +1414,17 @@ where
             let _ = handle.join();
         }
         match result {
+            Err(e) if dial.own => {
+                self.emit(AppEvent::Note(format!("own node dial failed: {e}")));
+                self.own_failed(false, now);
+            }
             Err(e) => {
                 if onion_key(&dial.target).is_some() {
                     self.emit(AppEvent::Note(format!("onion dial failed: {e}")));
                 }
                 self.dial_failed(&dial.target, now);
             }
-            Ok(stream) => self.adopt(id, dial.target, stream, now),
+            Ok(stream) => self.adopt(id, dial.target, stream, dial.own, now),
         }
     }
 
@@ -1224,14 +1437,23 @@ where
     }
 
     /// A socket is open: give it to the manager, or close it at once.
-    fn adopt(&mut self, id: PeerId, target: Target, stream: TcpStream, now: u64) {
+    fn adopt(&mut self, id: PeerId, target: Target, stream: TcpStream, own: bool, now: u64) {
         let nonce = self.rng.next_u64();
         let transport = self.transport_for(&target, now);
-        if let Err(refused) =
-            self.manager
-                .connected_with(id, peer_addr(&target), nonce, now, transport)
-        {
+        let taken = match (own, &self.config.own_node) {
+            (true, Some(node)) => self
+                .manager
+                .connected_own_node(id, node, nonce, now, transport),
+            _ => self
+                .manager
+                .connected_with(id, peer_addr(&target), nonce, now, transport),
+        };
+        if let Err(refused) = taken {
             let _ = stream.shutdown(Shutdown::Both);
+            if own {
+                self.own_failed(false, now);
+                return;
+            }
             self.pause_target(&target, now);
             if refused == ConnectRefused::LocalGroup && self.noted_local.insert(target.clone()) {
                 self.emit(AppEvent::Note(format!(
@@ -1247,7 +1469,7 @@ where
             .and_then(|()| stream.try_clone());
         let reader_stream = match prepared {
             Ok(s) => s,
-            Err(_) => return self.abandon(id, &target, stream, now),
+            Err(_) => return self.abandon(id, &target, stream, own, now),
         };
         let tx = self.inbound_tx.clone();
         let shared = self.shared.clone();
@@ -1263,18 +1485,23 @@ where
                         reader: Some(reader),
                         target,
                         ready_at: None,
+                        own,
                     },
                 );
             }
-            Err(_) => self.abandon(id, &target, stream, now),
+            Err(_) => self.abandon(id, &target, stream, own, now),
         }
     }
 
     /// A connection the manager took could not be set up.
-    fn abandon(&mut self, id: PeerId, target: &Target, stream: TcpStream, now: u64) {
+    fn abandon(&mut self, id: PeerId, target: &Target, stream: TcpStream, own: bool, now: u64) {
         let _ = stream.shutdown(Shutdown::Both);
         let out = self.manager.closed(id, now);
-        self.dial_failed(target, now);
+        if own {
+            self.own_failed(false, now);
+        } else {
+            self.dial_failed(target, now);
+        }
         self.handle_outputs(out, now);
     }
 
@@ -1336,7 +1563,10 @@ where
 
     fn usable(&self, target: &Target, now: u64) -> bool {
         let waiting = |map: &BTreeMap<Target, u64>| map.get(target).is_some_and(|t| *t > now);
-        !waiting(&self.pause)
+        // NR-99: the own node's address is never dialed as a peer, whether it
+        // came from the book, the anchors or the fixed peers.
+        self.own.target.as_ref() != Some(target)
+            && !waiting(&self.pause)
             && !waiting(&self.banned)
             && !self.conns.values().any(|c| c.target == *target)
             && !self.dialing.values().any(|d| d.target == *target)
@@ -1353,8 +1583,15 @@ where
     /// NR-71: dial while the manager wants peers.
     fn dial_more(&mut self, now: u64) {
         loop {
-            let sockets = self.conns.len().saturating_add(self.dialing.len());
-            if self.dialing.len() >= MAX_DIALS_IN_FLIGHT
+            // The own node takes no place of the target number (NR-100).
+            let dialing = self.dialing.values().filter(|d| !d.own).count();
+            let sockets = self
+                .conns
+                .values()
+                .filter(|c| !c.own)
+                .count()
+                .saturating_add(dialing);
+            if dialing >= MAX_DIALS_IN_FLIGHT
                 || sockets >= self.config.target_peers
                 || sockets >= self.config.target_peers.saturating_add(EXTRA_SOCKETS)
             {
@@ -1364,7 +1601,7 @@ where
                 return;
             };
             // Connections being opened will take their groups.
-            for dial in self.dialing.values() {
+            for dial in self.dialing.values().filter(|d| !d.own) {
                 let addr = peer_addr(&dial.target);
                 wanted.avoid.insert(if self.config.allow_local {
                     host_group(&addr)
@@ -1375,8 +1612,22 @@ where
             let Some(target) = self.next_target(&wanted, now) else {
                 return;
             };
-            self.start_dial(target, now);
+            self.start_dial(target, now, false);
         }
+    }
+
+    /// NR-100: keep the own node connected: dial it when there is no
+    /// connection or dial, the wait of the last failure is over and it was
+    /// not dropped for a violation.
+    fn dial_own(&mut self, now: u64) {
+        let Some(target) = self.own.target.clone() else {
+            return;
+        };
+        let busy = self.conns.values().any(|c| c.own) || self.dialing.values().any(|d| d.own);
+        if busy || self.own.refused_since.is_some() || now < self.own.next_try {
+            return;
+        }
+        self.start_dial(target, now, true);
     }
 
     /// NR-71: the next address to dial. The stored anchors first (NR-24),
@@ -1432,11 +1683,13 @@ where
         if self.config.proxy.is_none() {
             return OnionDraw::Never;
         }
+        // The own node is not one of the peers the cap is for.
         let held = self
             .conns
             .values()
+            .filter(|c| !c.own)
             .map(|c| &c.target)
-            .chain(self.dialing.values().map(|d| &d.target))
+            .chain(self.dialing.values().filter(|d| !d.own).map(|d| &d.target))
             .filter(|t| onion_key(t).is_some())
             .count();
         if held < onion_cap(self.config.target_peers) {
@@ -1505,10 +1758,10 @@ where
         None
     }
 
-    fn start_dial(&mut self, target: Target, now: u64) {
+    fn start_dial(&mut self, target: Target, now: u64, own: bool) {
         let id = PeerId(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
-        if onion_key(&target).is_some() {
+        if onion_key(&target).is_some() && !own {
             self.emit(AppEvent::Note("dialing an onion peer".to_string()));
         }
         let net = self.net.clone();
@@ -1530,9 +1783,11 @@ where
                     Dial {
                         target,
                         handle: Some(handle),
+                        own,
                     },
                 );
             }
+            Err(_) if own => self.own_failed(false, now),
             Err(_) => self.dial_failed(&target, now),
         }
     }
@@ -1790,6 +2045,36 @@ where
         }
     }
 
+    /// NR-102, NR-103: tell the app how the own node stands, when the
+    /// connection or its best height changes and at least every 10 seconds.
+    fn send_own_state(&mut self, now: u64) {
+        if self.own.target.is_none() {
+            return;
+        }
+        let view = self.manager.own_node();
+        let link = if let Some(since) = self.own.refused_since {
+            OwnNodeLink::Refused { since }
+        } else if view.is_some_and(|v| v.ready) {
+            OwnNodeLink::Connected
+        } else {
+            OwnNodeLink::Down {
+                since: self.own.down_since,
+            }
+        };
+        let best_height = view.and_then(|v| v.best_height);
+        let key = (link, best_height);
+        let due = now >= self.own.last_sent_at.saturating_add(PEERS_EVENT_SECS);
+        if due || self.own.last != Some(key) {
+            self.own.last = Some(key);
+            self.own.last_sent_at = now;
+            self.own.send(OwnNodeEvent::State(OwnNodeInput {
+                link,
+                best_height,
+                last_heard: view.and_then(|v| v.last_heard),
+            }));
+        }
+    }
+
     /// NR-73: save the headers when the tip has moved and a minute has
     /// passed; set the anchors and save the book every ten minutes.
     fn persist(&mut self, now: u64) {
@@ -1834,6 +2119,7 @@ where
         let ready: Vec<(AddrV2, u16, u64)> = self
             .conns
             .values()
+            .filter(|c| !c.own)
             .filter_map(|c| {
                 let since = c.ready_at?;
                 let (addr, port) = book_key(&c.target)?;

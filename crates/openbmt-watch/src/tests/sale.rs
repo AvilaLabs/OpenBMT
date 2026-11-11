@@ -186,6 +186,8 @@ fn wr_31_an_empty_watch_has_nothing() {
             secs_since_first_seen: 0,
             unconfirmed_again: false,
             needs_a_person: false,
+            own_node_saw: false,
+            own_node_counted: false,
         }
     );
 }

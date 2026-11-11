@@ -3,24 +3,26 @@
 use crate::Drop;
 
 const RULES: &str = include_str!("../../../../docs/NETWORK-RULES.md");
-const TEST_SOURCES: [&str; 8] = [
+const TEST_SOURCES: [&str; 9] = [
     include_str!("book.rs"),
     include_str!("broadcast.rs"),
     include_str!("events.rs"),
     include_str!("frame.rs"),
     include_str!("manager.rs"),
     include_str!("onion.rs"),
+    include_str!("own_node.rs"),
     include_str!("session.rs"),
     include_str!("v2.rs"),
 ];
 
 /// The rules the crate implements so far. The driver is a later slice.
-const IMPLEMENTED: [&str; 48] = [
+const IMPLEMENTED: [&str; 53] = [
     "NR-01", "NR-02", "NR-03", "NR-04", "NR-05", "NR-11", "NR-12", "NR-13", "NR-14", "NR-20",
     "NR-21", "NR-22", "NR-23", "NR-24", "NR-25", "NR-30", "NR-31", "NR-32", "NR-33", "NR-40",
     "NR-41", "NR-42", "NR-43", "NR-44", "NR-45", "NR-46", "NR-50", "NR-51", "NR-52", "NR-53",
     "NR-54", "NR-55", "NR-80", "NR-81", "NR-82", "NR-83", "NR-84", "NR-85", "NR-86", "NR-87",
-    "NR-88", "NR-89", "NR-90", "NR-92", "NR-93", "NR-94", "NR-95", "NR-97",
+    "NR-88", "NR-89", "NR-90", "NR-92", "NR-93", "NR-94", "NR-95", "NR-97", "NR-98", "NR-99",
+    "NR-100", "NR-101", "NR-102",
 ];
 
 /// Every rule ID that the rules file defines (in bold at the start of a
@@ -29,8 +31,8 @@ fn rule_ids() -> Vec<String> {
     let mut ids = Vec::new();
     for line in RULES.lines() {
         if let Some(rest) = line.trim_start().strip_prefix("- **NR-") {
-            let id: String = rest.chars().take(2).collect();
-            if id.chars().all(|c| c.is_ascii_digit()) {
+            let id: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            if id.len() >= 2 {
                 ids.push(format!("NR-{id}"));
             }
         }

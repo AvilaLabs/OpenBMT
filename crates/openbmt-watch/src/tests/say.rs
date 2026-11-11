@@ -3,8 +3,10 @@
 use openbmt_core::say::{check, check_distinct, Tone, Who};
 use openbmt_core::wire::DecodeError;
 
-use crate::say::{all_words, fee_error_name, problem_name, RefusalGroup, ALL_FEE_ERRORS};
-use crate::{Health, Problem, Refusal};
+use crate::say::{
+    all_words, fee_error_name, own_node_problem_name, problem_name, RefusalGroup, ALL_FEE_ERRORS,
+};
+use crate::{Health, OwnNodeProblem, Problem, Refusal};
 
 /// One value of every watcher refusal.
 fn every_refusal() -> Vec<Refusal> {
@@ -159,4 +161,22 @@ fn sc_01_every_fee_refusal_has_words_with_its_rule() {
         assert!(w.detail.is_some_and(|d| d.contains(e.rule())));
         assert!(!w.what.contains("FE-"));
     }
+}
+
+#[test]
+fn sc_01_every_own_node_state_has_words() {
+    // `own_node_problem_name` is an exhaustive match; this list has to hold
+    // every variant.
+    let all = all_words();
+    for p in [
+        OwnNodeProblem::Unreachable { since: 1 },
+        OwnNodeProblem::Refused { since: 1 },
+        OwnNodeProblem::Silent { since: 1 },
+        OwnNodeProblem::Behind { blocks: 3 },
+        OwnNodeProblem::TipUnknown,
+    ] {
+        let name = format!("OwnNode::{}", own_node_problem_name(p));
+        assert!(all.iter().any(|(n, _)| *n == name), "{name}");
+    }
+    assert!(all.iter().any(|(n, _)| n == "OwnNode::Healthy"));
 }

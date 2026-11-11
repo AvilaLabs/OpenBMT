@@ -21,3 +21,8 @@ openbmt-core = { path = "../openbmt-core" }
 # that the net crate uses.
 [dev-dependencies]
 bip324 = { version = "=0.11.1", default-features = false }
+
+# NR-99: the driver's own tests make an own node at a clear-net address on
+# this machine, for the check against Bitcoin Core on regtest. The feature is
+# off in every build of a program; only this dev-dependency turns it on.
+openbmt-net = { path = "../openbmt-net", features = ["clear-own-node-for-tests"] }

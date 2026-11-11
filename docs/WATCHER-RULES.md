@@ -267,7 +267,64 @@ Instant acceptance needs a check that is working. The library answers
   not trust the local clock (§5.1). A clock that is far ahead looks the
   same as a tip that is old, and is reported under WR-51.
 
-## 7. What these rules do not do
+## 7. The merchant's own node
+
+The merchant may set one own node: a Bitcoin Core node that the counter's
+driver reaches over the peer protocol, at a Tor v3 address that the owner set
+(`docs/NETWORK-RULES.md`, NR-98 to NR-103). It is a second check, not a
+replacement for the light client. This library never sees an address. The
+driver tells it whether the node is connected, how far it has got, when it
+was last heard and which transactions it holds in its memory pool, and the
+library keeps that apart from what the random peers report.
+
+- **WR-60.** The own node is a source of its own kind and never a peer. What
+  it reports is not a sighting: it adds no network group (WR-41), starts no
+  clock (WR-46), changes no amount (WR-31) and has no part in WR-44. It is
+  not in the peers of the health check (WR-50 to WR-52), so its state never
+  turns the light client's health on or off. The library does not check who
+  the node is: the driver names it, and only a connection made to the
+  configured Tor v3 address is named (NR-98, NR-99).
+- **WR-61.** A report from the own node names a transaction it holds. If the
+  sale knows that transaction the report is recorded on it, and
+  `SaleStatus::own_node_saw` is true while the weakest standing unconfirmed
+  payment (WR-45) has been reported. If the sale does not know the
+  transaction nothing is recorded and the call says so; the caller asks the
+  node again when the light client has sighted it (WR-65).
+- **WR-62.** The own-node check mode is `NodeAlsoSeenByLight` through the
+  own node only when all three hold: the own node has reported the
+  transaction (WR-61), the light client has seen it (WR-44), and the own node
+  can be used now (WR-63). The own node alone gives no mode, however many
+  times it reports. The Box's rules (WR-45) are as before; the own node adds
+  a second way to the same mode and never lowers one the Box gave.
+  `SaleStatus::own_node_counted` is true exactly when the own node is what
+  makes the mode.
+- **WR-63.** The own node can be used when it is connected after its
+  handshake, has shown a best height and has been heard from, and none of
+  these fails, checked in this order. **[to tune]**
+  1. The node broke a rule of the peer protocol: unusable until the app asks
+     the driver to try it again (NR-100).
+  2. There is no connection to it.
+  3. It has been silent for more than 10 minutes.
+  4. The counter's tip is more than 1 block above its best height.
+
+  A node that is ahead of the counter is not a problem. The health line for
+  the own node says which rule failed, the node's best height, the counter's
+  tip and when the node was last heard.
+- **WR-64.** A fallback is never silent. When the own node reported a payment
+  and cannot be used, the status has `own_node_saw` true and `own_node_counted`
+  false, its mode is the light check's (WR-45), and the own node's health
+  line has words that say the counter is checking with its light check and
+  why: not reachable since a time, behind by some blocks, silent since a
+  time, dropped for breaking a rule, or not yet known. Every state of the
+  line has words (SC-01) and the rule number is in the small print.
+- **WR-65.** Reports are not stored. A restored sale starts with none, and
+  the sale's stored form is the same bytes with or without them. The counter
+  asks the own node again for every standing unconfirmed payment when it has
+  restored the sale, when the own node connects, and when the light client
+  sights a transaction the own node reported earlier than the sale knew it.
+  Until the node answers, the light check's mode applies.
+
+## 8. What these rules do not do
 
 - **They do not prove that a payment will confirm.** An unconfirmed
   payment can be replaced or never mined, whatever was seen. The limits of

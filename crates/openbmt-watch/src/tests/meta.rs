@@ -2,14 +2,15 @@
 
 use openbmt_core::wire::DecodeError;
 
-use crate::{Problem, Refusal};
+use crate::{OwnNodeProblem, Problem, Refusal};
 
 const RULES: &str = include_str!("../../../../docs/WATCHER-RULES.md");
-const TEST_SOURCES: [&str; 6] = [
+const TEST_SOURCES: [&str; 7] = [
     include_str!("block.rs"),
     include_str!("headers.rs"),
     include_str!("health.rs"),
     include_str!("netgroup.rs"),
+    include_str!("own_node.rs"),
     include_str!("proof.rs"),
     include_str!("sale.rs"),
 ];
@@ -32,8 +33,8 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 35);
-    assert!(ids.contains(&"WR-01".to_string()) && ids.contains(&"WR-53".to_string()));
+    assert_eq!(ids.len(), 41);
+    assert!(ids.contains(&"WR-01".to_string()) && ids.contains(&"WR-65".to_string()));
 }
 
 #[test]
@@ -130,6 +131,20 @@ fn every_problem_names_a_rule_of_the_file() {
         Problem::TipIsOld,
         Problem::HeadersBehind,
         Problem::ClockMismatch,
+    ] {
+        assert!(ids.contains(&p.rule().to_string()), "{p:?}");
+    }
+}
+
+#[test]
+fn every_own_node_problem_names_a_rule_of_the_file() {
+    let ids = rule_ids();
+    for p in [
+        OwnNodeProblem::Unreachable { since: 1 },
+        OwnNodeProblem::Refused { since: 1 },
+        OwnNodeProblem::Silent { since: 1 },
+        OwnNodeProblem::Behind { blocks: 2 },
+        OwnNodeProblem::TipUnknown,
     ] {
         assert!(ids.contains(&p.rule().to_string()), "{p:?}");
     }

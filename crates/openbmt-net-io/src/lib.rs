@@ -34,6 +34,10 @@
 //!   of blocks and transactions. When the app does not read, the driver
 //!   stops reading from the peers (see [`Handle`]).
 //! - A write to a peer that takes more than 3 seconds closes the peer.
+//! - The own node, when one is set (NR-98 to NR-103), is one more socket
+//!   and one more reader thread, apart from the limits above, and its events
+//!   go to a channel of their own that holds 256 and never makes the core
+//!   thread wait.
 //!
 //! The rules the driver decides are NR-70 and on in
 //! `docs/NETWORK-RULES.md`.
@@ -54,7 +58,8 @@ mod tests;
 
 pub use dial::DialError;
 pub use driver::{
-    core_seeds, AppEvent, Driver, DriverConfig, EventReceiver, Handle, StartError, EVENT_BYTES,
+    core_seeds, AppEvent, Driver, DriverConfig, EventReceiver, Handle, OwnNodeEvent, StartError,
+    EVENT_BYTES,
 };
 pub use env::{
     Clock, DirLock, FileStorage, Key, LockError, OsRandomness, Randomness, Storage, SystemClock,
@@ -63,4 +68,6 @@ pub use env::{
 /// Most scripts the network manager can watch for payment checks.
 pub use openbmt_net::manager::MAX_WATCHED_SCRIPTS;
 pub use openbmt_net::RelayState;
+/// The merchant's own node, and why one is refused (NR-98).
+pub use openbmt_net::{OwnNode, OwnNodeHost, OwnNodeRefused};
 pub use socks::{SocksError, Target};

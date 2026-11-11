@@ -40,10 +40,13 @@ use crate::v2::V2Entropy;
 use crate::{Drop, Event, PeerAddress, Request, Session, SessionConfig, MAX_HEADERS};
 
 mod broadcast;
+mod own;
 use broadcast::Held;
 pub use broadcast::{
     BroadcastRefused, RelayState, MAX_BROADCAST_WEIGHT, MAX_HELD, NOT_SEEN_SECS, SEEN_BACK_GROUPS,
 };
+use own::OwnPeer;
+pub use own::{OwnNodeView, MAX_OWN_ANNOUNCED, MAX_OWN_BLOCKS, MAX_OWN_WANTED, OWN_ANSWER_SECS};
 
 /// NR-20: connections the counter keeps, as the caller sets it.
 pub const DEFAULT_TARGET_PEERS: usize = 8;
@@ -142,6 +145,8 @@ pub enum ConnectRefused {
     Full,
     /// NR-80: the randomness for the encrypted transport gives no key.
     BadEntropy,
+    /// NR-98: an own node is connected already; there is one at a time.
+    OwnNodeConnected,
 }
 
 impl fmt::Display for ConnectRefused {
@@ -152,6 +157,7 @@ impl fmt::Display for ConnectRefused {
             Self::LocalGroup => write!(f, "NR-20: the address is local"),
             Self::Full => write!(f, "NR-20: the target number of peers is connected"),
             Self::BadEntropy => write!(f, "NR-80: the randomness gives no key"),
+            Self::OwnNodeConnected => write!(f, "NR-98: an own node is connected already"),
         }
     }
 }
@@ -235,6 +241,22 @@ pub enum Output {
         txid: Txid,
         /// Where the peer was reached.
         from: PeerAddr,
+    },
+    /// NR-100: the own node's handshake is done. Not a peer: it is not in
+    /// the peers of [`Manager::health_peers`].
+    OwnNodeReady {
+        /// The connection.
+        id: PeerId,
+        /// The services it states.
+        services: ServiceFlags,
+        /// Its statement of its best height.
+        height: u32,
+    },
+    /// NR-101: the own node holds this transaction in its memory pool: it
+    /// announced it, or sent it when asked with [`Manager::ask_own_node`].
+    OwnNodeHas {
+        /// The transaction.
+        txid: Txid,
     },
     /// NR-86: how many peers a held transaction was announced to and how
     /// many have asked for it. Sent when either count changes.
@@ -392,6 +414,11 @@ pub struct Manager {
     held: BTreeMap<Txid, Held>,
     /// How many peers were forgotten, so that a pass can see a drop.
     drops: u64,
+    /// NR-98: the own node's session, apart from `peers`.
+    own: Option<OwnPeer>,
+    /// NR-101: transactions the app asked the own node about and that it has
+    /// not yet confirmed.
+    own_wanted: VecDeque<Txid>,
 }
 
 /// The sizes of the collections, for the tests of the bounds.
@@ -434,6 +461,8 @@ impl Manager {
             deferred: Vec::new(),
             held: BTreeMap::new(),
             drops: 0,
+            own: None,
+            own_wanted: VecDeque::new(),
         };
         manager.next_height = manager.floor();
         manager
@@ -541,6 +570,9 @@ impl Manager {
     /// Bytes arrived from this peer. An unknown peer is ignored.
     pub fn received(&mut self, id: PeerId, bytes: &[u8], now: u64) -> Vec<Output> {
         self.now = now;
+        if self.is_own_node(id) {
+            return self.own_received(id, bytes, now);
+        }
         let mut out = std::mem::take(&mut self.deferred);
         let result = match self.peers.get_mut(&id) {
             Some(peer) => peer.session.receive(bytes, now),
@@ -587,6 +619,7 @@ impl Manager {
             self.push_stale(id, Stale::Tx(txid));
             self.note_unanswered(id, &mut out);
         }
+        self.own_tick(now, &mut out);
         self.age_held(now, &mut out);
         self.settle(now, &mut out);
         out
@@ -595,6 +628,9 @@ impl Manager {
     /// The bytes to write to this peer, emptied. Never more than the
     /// session's cap (NR-05).
     pub fn outgoing(&mut self, id: PeerId) -> Vec<u8> {
+        if self.is_own_node(id) {
+            return self.own_outgoing();
+        }
         match self.peers.get_mut(&id) {
             Some(peer) => peer.session.take_outgoing(),
             None => Vec::new(),
@@ -606,6 +642,10 @@ impl Manager {
     pub fn closed(&mut self, id: PeerId, now: u64) -> Vec<Output> {
         self.now = now;
         let mut out = std::mem::take(&mut self.deferred);
+        if self.is_own_node(id) {
+            self.own_closed(id, &mut out);
+            return out;
+        }
         if let Some(peer) = self.peers.remove(&id) {
             // NR-81: a close before any packet authenticated.
             if peer.session.v2_unproven() {

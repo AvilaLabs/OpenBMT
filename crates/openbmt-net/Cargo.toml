@@ -25,3 +25,9 @@ openbmt-watch = { path = "../openbmt-watch" }
 # first version whose key encoding is not a fingerprint. The `std` feature is
 # off, because the randomness comes from the caller.
 bip324 = { version = "=0.11.1", default-features = false }
+
+[features]
+# NR-99: the driver's own tests make an own node at a clear-net address on
+# this machine, to check it against Bitcoin Core on regtest. Off by default;
+# no program enables it, and the driver enables it only for its tests.
+clear-own-node-for-tests = []

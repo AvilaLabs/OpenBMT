@@ -22,6 +22,7 @@
 //!    call it.
 //! 6. [`health`]: whether the check is working.
 //! 7. [`fees`]: a fee rate checked from full blocks (`docs/FEE-RULES.md`).
+//! 8. [`own_node`]: the merchant's own node, kept apart from the peers.
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.
@@ -35,6 +36,7 @@ pub mod fees;
 pub mod headers;
 pub mod health;
 pub mod netgroup;
+pub mod own_node;
 pub mod proof;
 mod refusal;
 pub mod sale;
@@ -49,6 +51,7 @@ pub use fees::{block_fee_sample, FeeError, FeeHistory, FeeSample};
 pub use headers::{Accepted, HeaderStore};
 pub use health::{check_health, Health, HealthInput, Peer, PeerTransport, Problem};
 pub use netgroup::{host_group, network_group, NetGroup, PeerAddr};
+pub use own_node::{check_own_node, OwnNodeHealth, OwnNodeInput, OwnNodeLink, OwnNodeProblem};
 pub use proof::{verify_box_proof, ProvenPayment};
 pub use refusal::Refusal;
 pub use sale::{SaleStatus, SaleWatch, Sighted, Source};
@@ -97,3 +100,8 @@ pub const BEHIND_BLOCKS: u32 = 2;
 pub const MAX_BEHIND_SECS: u64 = 600;
 /// WR-53: seconds the clock may be behind the tip's header time.
 pub const MAX_CLOCK_BEHIND_SECS: u64 = 7_200;
+/// WR-63: blocks the counter's tip may be above the own node's best height
+/// before the node counts as behind.
+pub const OWN_NODE_BEHIND_BLOCKS: u32 = 1;
+/// WR-63: seconds the own node may be silent while connected.
+pub const OWN_NODE_SILENT_SECS: u64 = 600;

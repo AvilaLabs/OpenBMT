@@ -241,6 +241,23 @@ pub enum Behavior {
     /// Like `Honest`, and ask for every transaction announced with `inv`
     /// and keep what comes back.
     Fetches(Vec<Header>),
+    /// A node that serves as the own node: after the handshake it announces
+    /// these txids with `inv` and answers `getdata` for the transactions
+    /// it holds (`notfound` for the others); it claims this height.
+    Node(NodeScript),
+    /// An own node that, after the handshake, sends a block nobody asked
+    /// for.
+    NodeSendsBlock,
+    /// An own node that closes the connection after the handshake.
+    NodeCloses,
+}
+
+/// What a fake own node announces and holds.
+#[derive(Clone, Default)]
+pub struct NodeScript {
+    pub height: u32,
+    pub announce: Vec<Txid>,
+    pub mempool: Vec<Transaction>,
 }
 
 /// The height the fake peer claims in its version message. A peer that
@@ -251,6 +268,7 @@ fn claimed_height(behavior: &Behavior) -> u32 {
         Behavior::Honest(headers) | Behavior::Fetches(headers) => {
             u32::try_from(headers.len()).unwrap()
         }
+        Behavior::Node(script) => script.height,
         _ => PEER_HEIGHT,
     }
 }
@@ -401,6 +419,25 @@ fn serve(
         claimed_height(behavior),
     ))));
     let _ = stream.write_all(&frame(NetworkMessage::Verack));
+    match behavior {
+        Behavior::Node(script) if !script.announce.is_empty() => {
+            let list = script
+                .announce
+                .iter()
+                .map(|t| Inventory::Transaction(*t))
+                .collect();
+            let _ = stream.write_all(&frame(NetworkMessage::Inv(list)));
+        }
+        Behavior::NodeSendsBlock => {
+            let block = blocks(1, 10).remove(0);
+            let _ = stream.write_all(&frame(NetworkMessage::Block(block)));
+        }
+        Behavior::NodeCloses => {
+            thread::sleep(Duration::from_millis(100));
+            return;
+        }
+        _ => {}
+    }
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     let mut garbage_sent = false;
@@ -458,6 +495,27 @@ fn serve(
                     }
                 }
                 "getdata" => {
+                    if let Behavior::Node(script) = behavior {
+                        let asked: Vec<Inventory> = deserialize(&payload).unwrap_or_default();
+                        let mut missing = Vec::new();
+                        for item in asked {
+                            let (Inventory::Transaction(txid)
+                            | Inventory::WitnessTransaction(txid)) = item
+                            else {
+                                continue;
+                            };
+                            match script.mempool.iter().find(|t| t.compute_txid() == txid) {
+                                Some(tx) => {
+                                    let _ =
+                                        stream.write_all(&frame(NetworkMessage::Tx(tx.clone())));
+                                }
+                                None => missing.push(Inventory::WitnessTransaction(txid)),
+                            }
+                        }
+                        if !missing.is_empty() {
+                            let _ = stream.write_all(&frame(NetworkMessage::NotFound(missing)));
+                        }
+                    }
                     if let Behavior::ServeBlocks(blocks) = behavior {
                         let asked: Vec<Inventory> = deserialize(&payload).unwrap_or_default();
                         for item in asked {

@@ -136,7 +136,7 @@ Some choices worth knowing:
 
 ## What it deliberately does not do
 
-These are the limits from section 7 of the rules.
+These are the limits from section 8 of the rules.
 
 - It does not prove that a payment will confirm. An unconfirmed payment can
   be replaced or never mined, whatever was seen.

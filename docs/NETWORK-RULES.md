@@ -514,3 +514,89 @@ This is a path to peers that does not depend on the clear-net exits.
 - **NR-96.** Each dial to an onion peer gives the proxy a fresh random name
   and password, as every other dial does (NR-78): two onion peers, or an
   onion peer and a clear-net peer, are not reached through one circuit.
+
+## 13. Your own node
+
+The merchant may run a Bitcoin Core node of their own (on a Box, Start9,
+Umbrel or at home) and let the counter check payments against it as well
+(`docs/DESIGN.md` §5.1, §6). The counter reaches it over the peer protocol
+like any peer, with the differences below. It is one more check next to the
+light client, never instead of it: the random peers of sections 3 to 6 stay,
+and what the node reports is kept apart from what they report
+(`docs/WATCHER-RULES.md`, WR-60 to WR-65).
+
+- **NR-98.** The own node is one Bitcoin node reached at a Tor v3 address
+  that the owner set: the host name of NR-92 and a port. The address is what
+  authenticates it, because the name of a v3 address is the node's public key
+  and the proxy reaches that key or nothing. The driver's settings take at
+  most one own node, as that name and port. A name that NR-92 does not
+  accept (wrong length, a character outside the alphabet, upper case, a
+  wrong checksum or version), a text that is an IP address or any other
+  kind of name, and port 0 are refused when the settings are made, and the
+  start is refused when the own node is a Tor address and no proxy is set
+  (NR-26). Nothing is looked up: the name goes to the proxy as a name
+  (NR-92). Only one own node is connected at a time.
+- **NR-99.** A LAN, loopback or clear-net address is never the own node, and
+  nothing about a connection to one is labelled or trusted as the own node:
+  an address on the owner's network says nothing about who answers, so a
+  node there is, at most, a fixed peer (NR-70), and is then one of the
+  random peers in every respect. The own node's address is the other way
+  round: it is never dialed as a peer, from the anchors, the fixed peers or
+  the book, so the own node is never also one of the random peers. The label
+  "own node" is given by one thing:
+  an `OwnNode` made from a Tor v3 name. There is one other way to make one,
+  for the driver's check against Bitcoin Core on regtest: a constructor that
+  takes a socket address on this machine. It is compiled only with the cargo
+  feature `clear-own-node-for-tests` of `openbmt-net`, which is off by
+  default, is turned on by no program, and is turned on in the workspace
+  only by the dev-dependency of the driver, so no build of a program holds
+  the constructor and no setting can reach it. A test of the driver reads
+  every `Cargo.toml` and every source file of the workspace and fails if the
+  feature or the constructor is named anywhere else.
+- **NR-100.** The driver dials the own node at the start, before the anchors
+  and the fixed peers, and keeps it connected for as long as it runs. After a
+  failed dial or a closed connection it waits 5 seconds, then 10, doubling up
+  to 5 minutes between two dials, and starts again from 5 seconds when the
+  connection that ended had been ready for a minute. The own node takes no
+  place of the target number of peers (NR-20), no network group, no filter or
+  block work (NR-40 to NR-47) and no pause of NR-70; the address book and the
+  anchors never hold it. It is not dropped for what drops a peer: a request
+  that runs out (NR-42, NR-51), a claim of a height without the headers
+  (NR-33), or a group it shares with a peer (NR-20). It is dropped for the
+  timers of NR-14 and for a protocol violation, and a violation (NR-25: a
+  message that breaks sections 1 and 2, a block, a filter or a transaction
+  that was not asked for) is not retried by itself: the driver reports it
+  with the reason and does not dial the node again until the app calls
+  `retry_own_node`. The app tells the owner (WR-64).
+- **NR-101.** What the own node reports is whether it holds a transaction in
+  its memory pool, and nothing else. It holds it when it announced it with
+  `inv`, or when it sent it after the app asked about it with
+  `ask_own_node` (a `getdata` by txid). The manager remembers the last
+  50,000 transactions it announced and the last 256 the app asked about
+  and has no answer for yet; it asks again at every connection and when the
+  node announces one. A request that is not answered within 30 seconds is
+  let go, and the node is not dropped for it. No answer is not a "no": a
+  node does not serve a transaction it has not yet announced to the counter,
+  so the counter takes only a positive report and says nothing about the
+  rest. A transaction from the own node is never a sighting (NR-53): the
+  manager does not fetch what it announces (NR-51), and the light client's
+  sightings come from the random peers alone.
+- **NR-102.** The own node's tip is the best height it has shown: its
+  statement in `version`, and then every block it announced or sent a header
+  for that the counter's chain holds (a block the chain does not hold yet is
+  remembered, 8 at most, and placed when the chain holds it). The manager
+  also keeps when anything last came from it. The driver passes these, with
+  the state of the connection and when it ended, to the app (NR-103), and the
+  watcher's WR-63 says what they mean. The counter does not ask the node for
+  headers or blocks, and a header it sends is not taken into the counter's
+  chain: the header chain comes from the random peers alone.
+- **NR-103.** The driver tells the app about the own node on a channel of its
+  own, never in the events of the peers: `Has` for a transaction it holds
+  (NR-101), and its state whenever the connection or its best height changes
+  and at least every 10 seconds (NR-75). The own node is not in the peers of
+  that event, so the light client's health (WR-50 to WR-52) never reads it.
+  The channel holds 256 events and the core thread never waits for it: when
+  it is full a new event is dropped. A state comes again within 10 seconds,
+  and a report that was dropped is asked for again; a dropped report is
+  never taken for a "yes", and the counter falls back to the light check
+  while it is missing (WR-64). Without an own node nothing is sent.

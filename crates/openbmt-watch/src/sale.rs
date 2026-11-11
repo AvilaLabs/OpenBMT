@@ -16,6 +16,7 @@ use openbmt_core::wire::{self, DecodeError, Reader};
 
 use crate::chain::{confirmations, HeaderChain};
 use crate::netgroup::{network_group, NetGroup, PeerAddr};
+use crate::own_node::OwnNodeHealth;
 use crate::proof::ProvenPayment;
 use crate::{
     Refusal, MAX_ENTRY_BLOCKS, MAX_ENTRY_GROUPS, MAX_REPLACED_REMEMBERED, MAX_SALE_TRANSACTIONS,
@@ -74,6 +75,15 @@ pub struct SaleStatus {
     pub unconfirmed_again: bool,
     /// WR-34: the sale refused a transaction and needs a person.
     pub needs_a_person: bool,
+    /// WR-61: the own node has reported the standing unconfirmed payment.
+    /// True whether or not the node can be used now (WR-63).
+    pub own_node_saw: bool,
+    /// WR-62: the own node's report is what makes `mode` the own-node
+    /// check: the own node reported it, the node can be used now and the
+    /// light client saw it too. False with `own_node_saw` true means the
+    /// counter fell back to the light check (WR-64); the health line for
+    /// the own node says why.
+    pub own_node_counted: bool,
 }
 
 /// What is known about one transaction of the sale.
@@ -85,6 +95,8 @@ struct Entry {
     paid: u64,
     groups: BTreeSet<NetGroup>,
     by_box: bool,
+    /// WR-61: the own node reported it. Not stored (WR-65).
+    by_own_node: bool,
     /// WR-46.
     first_seen: Option<u64>,
     /// Blocks that held it, whether or not they are still on the chain.
@@ -113,14 +125,15 @@ impl Entry {
         other.input.iter().any(|i| self.spends(&i.previous_output))
     }
 
-    /// WR-44, WR-45.
-    fn mode(&self) -> Option<CheckMode> {
+    /// WR-44, WR-45, WR-62.
+    fn mode(&self, own_usable: bool) -> Option<CheckMode> {
         let seen = self.groups.len() >= SEEN_GROUPS;
-        match (self.by_box, seen) {
-            (true, true) => Some(CheckMode::NodeAlsoSeenByLight),
-            (false, true) => Some(CheckMode::Light),
-            (true, false) => Some(CheckMode::BoxReportsOnly),
-            (false, false) => None,
+        let node = self.by_box || (self.by_own_node && own_usable);
+        match (seen, node, self.by_box) {
+            (true, true, _) => Some(CheckMode::NodeAlsoSeenByLight),
+            (true, false, _) => Some(CheckMode::Light),
+            (false, _, true) => Some(CheckMode::BoxReportsOnly),
+            (false, _, false) => None,
         }
     }
 }
@@ -253,6 +266,23 @@ impl SaleWatch {
         Ok(())
     }
 
+    /// WR-61: the own node reports that it holds this transaction in its
+    /// memory pool. Returns whether the sale knows the transaction; if it does
+    /// not, nothing is recorded, so the caller asks the node again once the
+    /// light client has sighted it (WR-65).
+    ///
+    /// The report is not a sighting: it starts no clock (WR-46), counts in no
+    /// network group (WR-60) and changes no amount (WR-31).
+    pub fn own_node_saw(&mut self, txid: Txid) -> bool {
+        match self.entries.iter_mut().find(|e| e.txid == txid) {
+            Some(entry) => {
+                entry.by_own_node = true;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The last sentence of WR-42: a block on the chain holds `by`, a
     /// transaction that spends `outpoint` and is not one of the sale's
     /// transactions. The conflict flag is set for good. While `block` is on
@@ -306,6 +336,19 @@ impl SaleWatch {
     /// it: it is true for the first status after a confirmed transaction
     /// stopped being confirmed, and false for the next.
     pub fn status<C: HeaderChain + ?Sized>(&mut self, chain: &C, now: u64) -> SaleStatus {
+        self.status_with_own_node(chain, now, &OwnNodeHealth::not_configured())
+    }
+
+    /// As [`SaleWatch::status`], with the health of the own node (WR-62,
+    /// WR-63). The own node's report counts toward the mode only while
+    /// `own.usable` holds; a sale it reported while it was down or behind
+    /// gets the light check's mode, and `own_node_counted` says so.
+    pub fn status_with_own_node<C: HeaderChain + ?Sized>(
+        &mut self,
+        chain: &C,
+        now: u64,
+        own: &OwnNodeHealth,
+    ) -> SaleStatus {
         let confs: Vec<u32> = self
             .entries
             .iter()
@@ -391,12 +434,16 @@ impl SaleWatch {
             .map(|i| &self.entries[i]);
         let (mode, peer_groups, secs_since_first_seen) = match weakest {
             Some(e) => (
-                e.mode(),
+                e.mode(own.usable),
                 e.groups.len(),
                 e.first_seen.map_or(0, |t| now.saturating_sub(t)),
             ),
             None => (None, 0, 0),
         };
+        // WR-61, WR-62.
+        let own_node_saw = weakest.is_some_and(|e| e.by_own_node);
+        let own_node_counted =
+            weakest.is_some_and(|e| e.by_own_node && own.usable && e.groups.len() >= SEEN_GROUPS);
 
         // WR-33.
         let now_confirmed: BTreeSet<Txid> = (0..self.entries.len())
@@ -420,6 +467,8 @@ impl SaleWatch {
             secs_since_first_seen,
             unconfirmed_again,
             needs_a_person: self.needs_a_person,
+            own_node_saw,
+            own_node_counted,
         }
     }
 
@@ -561,6 +610,7 @@ impl SaleWatch {
             paid,
             groups: BTreeSet::new(),
             by_box: false,
+            by_own_node: false,
             first_seen: None,
             blocks: block.into_iter().collect(),
             learned: None,
@@ -701,6 +751,7 @@ impl Entry {
             paid,
             groups,
             by_box,
+            by_own_node: false,
             first_seen,
             blocks,
             learned,
