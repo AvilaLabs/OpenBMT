@@ -27,7 +27,6 @@ import org.openbmt.app.TriesFile
 import org.openbmt.app.Ui
 import org.openbmt.app.UrScan
 import org.openbmt.app.WaitOutcome
-import org.openbmt.app.WordsModel
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.PosReply
@@ -64,6 +63,9 @@ class Controller(internal val act: MainActivity) {
     internal val tries by lazy { TriesFile(dir) }
     internal var pausedAt: Long? = null
     internal var ticker: Runnable? = null
+
+    /** Set when a PIN was refused: the next PIN screen shakes its field once (OA-91). */
+    internal var shake = false
     private val relockTimer = Runnable { if (!visible) lockNow() }
 
     // What the owner has typed in the settings editor, in memory only (OA-34).
@@ -71,6 +73,9 @@ class Controller(internal val act: MainActivity) {
 
     // The key ceremony in progress: held in memory for the screens, and sealed on disk between steps (OA-26).
     internal var ceremony: CeremonyDraft? = null
+
+    /** Whether the logo has clicked together on the new wallet's screen in this ceremony: it does so once (OA-91). */
+    internal var ceremonyLogoShown = false
 
     // What the first screen holds while a file picker is open. Never written anywhere (OA-01).
     private var draftText = ""
@@ -85,6 +90,9 @@ class Controller(internal val act: MainActivity) {
     internal var node: OwnerNode? = null
     internal var pumpFault: SayWords? = null
     internal var linkFault: SayWords? = null
+
+    /** The tint of the network status on home as it was last drawn, so that a change of tone fades (OA-91). */
+    internal var homeTint: Int? = null
 
     // The till (OA-16 to OA-19): its sealed token, how its last read went, and the screen's call for a read now.
     internal val posTokens = PosTokenStore(dir, KeystoreSealer(AppFiles.POS_KEY_ALIAS))
@@ -245,7 +253,7 @@ class Controller(internal val act: MainActivity) {
             is Screen.Fault -> showMessage(s.words, "Try again") { begin() }
             is Screen.FirstStart -> showFirstStart(null)
             is Screen.TorBlocked -> showMessage(s.words, "Check again") { begin() }
-            is Screen.Starting -> page(listOf(ui.words(AppWords.starting)))
+            is Screen.Starting -> waiting(AppWords.starting)
             is Screen.Home -> showHome()
         }
     }
@@ -254,7 +262,7 @@ class Controller(internal val act: MainActivity) {
 
     internal fun startNode() {
         val id = ++runId
-        page(listOf(ui.words(AppWords.starting)))
+        waiting(AppWords.starting)
         val s = setup ?: return
         val cfg = config ?: return
         val thread = Thread {
@@ -441,13 +449,8 @@ class Controller(internal val act: MainActivity) {
 
     // ---- pages -----------------------------------------------------------------------------------------------
 
-    internal fun page(views: List<View>) {
-        tick = null
-        act.show(ui.page(views))
-    }
-
     internal fun showMessage(words: SayWords, label: String = "Back", back: () -> Unit) {
-        page(listOf(ui.words(words), ui.primary(label, WordsModel.buttonColour(words.tone)) { back() }))
+        centre(words, listOf(ui.primary(label) { back() }))
     }
 
     internal fun <T> async(work: () -> T, done: (Result<T>) -> Unit) {
@@ -459,7 +462,7 @@ class Controller(internal val act: MainActivity) {
         t.start()
     }
 
-    internal fun label(text: String): TextView = ui.text(text, 14f, bold = true)
+    internal fun label(text: String): TextView = ui.label(text)
 
     /** The words of a call that refused or could not run, for the screen to show. */
     internal fun refusal(e: Throwable): SayWords = when (e) {
@@ -482,40 +485,42 @@ class Controller(internal val act: MainActivity) {
         if (File(dir, AppFiles.CEREMONY_FILE).exists() && !File(dir, AppFiles.SETUP_FILE).exists()) {
             return showCeremonyResume(message)
         }
-        val views = ArrayList<View>()
-        views.add(ui.words(message ?: AppWords.notSetUp))
-        views.add(ui.primary("Make a new shop wallet") { startCeremony() })
-        views.add(ui.button("Use setup text") { showPasteSetup(null) })
-        page(views)
+        screen(
+            "Owner", emptyList(),
+            listOf(ui.primary("Make a new shop wallet") { startCeremony() }, ui.button("Use setup text") { showPasteSetup(null) }),
+            words = message ?: AppWords.notSetUp, logo = true,
+        )
     }
 
     /** The second choice: setup text of a key ceremony made elsewhere, with the address of Orbot. */
     private fun showPasteSetup(message: SayWords?) {
         val views = ArrayList<View>()
-        views.add(ui.words(message ?: AppWords.setupTextNeeded))
-        views.add(label("Setup text from the key ceremony"))
         val pasted = ui.field("Paste the setup text here", lines = 6, mono = true).also { it.setText(draftText) }
-        views.add(pasted)
+        views.add(ui.labelled("Setup text from the key ceremony", pasted))
         for (source in setupSources()) views.add(ui.button(source.label) {
             draftText = pasted.text.toString()
             source.begin({ text -> draftText = text; showPasteSetup(message) }, { w -> showPasteSetup(w) })
         })
         val proxy = orbotViews(views, draftProxy)
-        views.add(ui.primary("Save and start") {
-            draftProxy = proxy.text.toString()
-            draftText = pasted.text.toString()
-            saveSetup(draftText, draftProxy.trim(), { w -> showPasteSetup(w) })
-        })
-        views.add(ui.button("Back") { draftText = ""; showFirstStart(null) })
-        page(views)
+        screen(
+            "Use setup text", views,
+            listOf(
+                ui.primary("Save and start") {
+                    draftProxy = proxy.text.toString()
+                    draftText = pasted.text.toString()
+                    saveSetup(draftText, draftProxy.trim(), { w -> showPasteSetup(w) })
+                },
+                ui.button("Back") { draftText = ""; showFirstStart(null) },
+            ),
+            back = { draftText = ""; showFirstStart(null) }, words = message ?: AppWords.setupTextNeeded,
+        )
     }
 
     /** The words that everything goes through Tor, and the field for Orbot's address, as the paste screen and the ceremony's last screen show them. */
     internal fun orbotViews(views: MutableList<View>, initial: String): EditText {
         views.add(ui.words(AppWords.torAlwaysOn))
-        views.add(label("Address of Orbot"))
         val proxy = ui.field("host:port", mono = true).also { it.setText(initial) }
-        views.add(proxy)
+        views.add(ui.labelled("Address of Orbot", proxy))
         return proxy
     }
 
@@ -542,7 +547,7 @@ class Controller(internal val act: MainActivity) {
         if (!HostPort.valid(proxy)) return onRefused(AppWords.torAddressNotAccepted)
         val bytes = text.toByteArray(Charsets.UTF_8)
         askNewPin(bytes, false, null, { bytes.fill(0); onRefused(backWords) }) { locked ->
-            page(listOf(ui.words(working)))
+            waiting(working)
             async({
                 // The setup first, then the config: the config is the last thing a finished setup adds.
                 SealedFile(dir, KeystoreSealer(AppFiles.KEY_ALIAS), AppFiles.SETUP_FILE).save(locked)
@@ -637,10 +642,7 @@ class Controller(internal val act: MainActivity) {
                 is SourceResult.Failed -> onFailed(r.words)
             }
             scan.begin(
-                show = { v ->
-                    tick = null
-                    act.show(v)
-                },
+                show = { v -> showScan(v) },
                 onBytes = { give(ScanResult.plain()) },
                 onFailed = { f -> give(ScanResult.failed(f.off, f.problem, f.words)) },
                 onCancel = { give(ScanResult.cancelled()) },

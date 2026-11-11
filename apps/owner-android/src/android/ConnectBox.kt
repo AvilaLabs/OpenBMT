@@ -3,6 +3,7 @@ package org.openbmt.owner.app
 import android.view.View
 import java.io.IOException
 import org.openbmt.app.ButtonKind
+import org.openbmt.app.Feedback
 import org.openbmt.app.SayWords
 import org.openbmt.owner.BoxDelivered
 import org.openbmt.owner.BoxFound
@@ -34,18 +35,18 @@ internal fun Controller.showConnectBox(message: SayWords? = null, prefill: Strin
     }
     val msg = Slot(act)
     val views = ArrayList<View>()
-    views.add(ui.text("Connect your Box", 22f, bold = true))
     message?.let { views.add(ui.words(it)) }
     for (line in ConnectBoxModel.explanation) views.add(ui.text(line, 16f))
-    views.add(label("The Box's address"))
     val address = ui.field("host:port or name.onion:port").also { it.setText(prefill) }
-    views.add(address)
-    views.add(ui.primary("Look for the Box") { lookForBox(n, address.text.toString(), msg) { a, f -> showBoxFound(n, a, f) } })
+    views.add(ui.labelled("The Box's address", address))
     views.add(ui.button("Scan the Box's address") { scanBox() })
     views.add(msg)
     views.addAll(pendingBoxViews(n, Slot(act)) { showConnectBox() })
-    views.add(ui.button("Back") { showHome() })
-    page(views)
+    screen(
+        "Connect your Box", views,
+        listOf(ui.primary("Look for the Box") { lookForBox(n, address.text.toString(), msg) { a, f -> showBoxFound(n, a, f) } }, ui.button("Back") { showHome() }),
+        back = { showHome() },
+    )
 }
 
 /** The address read by the camera as plain text, which is asked for only when the button is pressed. */
@@ -55,10 +56,7 @@ private fun Controller.scanBox() {
         is SourceResult.Failed -> showConnectBox(message = r.words)
     }
     scan.begin(
-        show = { v ->
-            tick = null
-            act.show(v)
-        },
+        show = { v -> showScan(v) },
         onBytes = { give(SourceResult.Bytes(it)) },
         onFailed = { f -> give(ScanResult.failed(f.off, f.problem, f.words)) },
         onCancel = { give(SourceResult.Failed(AppWords.counterScanCancelled)) },
@@ -76,7 +74,7 @@ private fun Controller.lookForBox(n: OwnerNode, text: String, msg: Slot, onFound
         is Form.Ok -> {
             val address = a.value
             val link = ConnectBoxModel.linkFor(address, config?.proxy ?: AppConfig.DEFAULT_PROXY)
-            page(listOf(ui.words(BoxWords.looking)))
+            waiting(BoxWords.looking)
             async({ n.boxFetchClaim(link) }) { r ->
                 val found = r.getOrNull()
                 if (found != null) onFound(address, found) else showConnectBox(refusal(r.exceptionOrNull()!!), address)
@@ -92,26 +90,21 @@ private fun Controller.lookForBox(n: OwnerNode, text: String, msg: Slot, onFound
 private fun Controller.showBoxFound(n: OwnerNode, address: String, found: BoxFound) {
     val msg = Slot(act)
     val views = ArrayList<View>()
-    views.add(ui.text("Box found", 22f, bold = true))
-    views.add(label("The Box's key"))
-    views.add(ui.text(ConnectBoxModel.keyGroups(found.boxKey), 14f, mono = true))
+    views.add(stack(label("The Box's key"), line(ConnectBoxModel.keyGroups(found.boxKey), muted = true, mono = true)))
     val price = if (found.needsRate) {
         views.add(ui.words(BoxWords.priceNeeded))
-        numberField(act, "Dollars for one bitcoin").also { views.add(it) }
+        numberInput("Dollars for one bitcoin").also { views.add(it.view) }.field
     } else {
         null
     }
-    views.add(
-        ui.primary("Queue the Box for the Key app") {
-            when (val f = if (price == null) Form.Ok(0L) else CounterModel.price(price.text.toString())) {
-                is Form.Refused -> msg.show(ui.words(f.words))
-                is Form.Ok -> attempt(msg) { n.boxQueue(found.claim, f.value) }?.let { showBoxQueued(n, address, it) }
-            }
-        },
-    )
     views.add(msg)
-    views.add(ui.button("Back") { showConnectBox(prefill = address) })
-    page(views)
+    val queue = ui.primary("Queue the Box for the Key app") {
+        when (val f = if (price == null) Form.Ok(0L) else CounterModel.price(price.text.toString())) {
+            is Form.Refused -> msg.show(ui.words(f.words))
+            is Form.Ok -> attempt(msg) { n.boxQueue(found.claim, f.value) }?.let { showBoxQueued(n, address, it) }
+        }
+    }
+    screen("Box found", views, listOf(queue, ui.button("Back") { showConnectBox(prefill = address) }), back = { showConnectBox(prefill = address) })
 }
 
 /** The Box's four words, large, and what comes next. The approval is the request and response screens of OA-20 and OA-21. */
@@ -119,15 +112,18 @@ private fun Controller.showBoxQueued(n: OwnerNode, address: String, q: BoxQueued
     boxAddresses[keyHex(q.boxKey)] = address
     val msg = Slot(act)
     val views = ArrayList<View>()
-    views.add(ui.text("Box queued", 22f, bold = true))
-    views.add(ui.text(ConnectBoxModel.wordsLine(q.words), 30f, bold = true))
-    views.add(ui.words(BoxWords.compare))
+    views.add(wordCards(ConnectBoxModel.wordsLine(q.words)))
     views.add(ui.words(BoxWords.queued))
-    views.add(ui.primary("Build the request for the Key app") { showSpend() })
-    views.add(ui.danger("Forget this Box") { forgetBox(n, q.boxKey, msg) { showHome() } })
     views.add(msg)
-    views.add(ui.button("Later") { showHome() })
-    page(views)
+    screen(
+        "Box queued", views,
+        listOf(
+            ui.primary("Build the request for the Key app") { showSpend() },
+            ui.button("Later") { showHome() },
+            ui.danger("Forget this Box") { forgetBox(n, q.boxKey, msg) { showHome() } },
+        ),
+        words = BoxWords.compare,
+    )
 }
 
 /**
@@ -141,15 +137,17 @@ internal fun Controller.pendingBoxViews(n: OwnerNode, msg: Slot, back: () -> Uni
     val views = ArrayList<View>()
     views.add(label("Boxes being added"))
     for (p in rows) {
-        views.add(ui.text(ConnectBoxModel.boxLabel(p.boxKey) + "\n" + ConnectBoxModel.wordsLine(p.words), 14f, mono = true))
+        val box = ArrayList<View>()
+        box.add(ui.text(ConnectBoxModel.boxLabel(p.boxKey) + "\n" + ConnectBoxModel.wordsLine(p.words), 14f, mono = true))
         if (p.welcomeReady) {
             val address = ui.field("host:port or name.onion:port").also { it.setText(boxAddresses[keyHex(p.boxKey)] ?: "") }
-            views.add(address)
-            views.add(ui.primary("Hand over the welcome to ${ConnectBoxModel.boxLabel(p.boxKey)}") { handOver(n, p, address.text.toString(), back) })
+            box.add(address)
+            box.add(ui.primary("Hand over the welcome to ${ConnectBoxModel.boxLabel(p.boxKey)}") { handOver(n, p, address.text.toString(), back) })
         } else {
-            views.add(ui.text("Waiting for the Key app's approval.", 14f))
+            box.add(ui.text("Waiting for the Key app's approval.", 14f, colour = ui.pal.secondary))
         }
-        views.add(ui.danger("Forget ${ConnectBoxModel.boxLabel(p.boxKey)}") { forgetBox(n, p.boxKey, msg, back) })
+        box.add(ui.danger("Forget ${ConnectBoxModel.boxLabel(p.boxKey)}") { forgetBox(n, p.boxKey, msg, back) })
+        views.add(stack(*box.toTypedArray(), gap = 10))
     }
     views.add(msg)
     return views
@@ -173,13 +171,13 @@ private fun Controller.forgetBox(n: OwnerNode, key: ByteArray, msg: Slot, back: 
 private fun Controller.handOver(n: OwnerNode, p: PendingBox, text: String, back: () -> Unit) {
     val address = when (val a = ConnectBoxModel.address(text)) {
         is Form.Refused -> {
-            page(listOf(ui.words(a.words), ui.button("Back") { back() }))
+            centre(a.words, listOf(ui.button("Back") { back() }))
             return
         }
         is Form.Ok -> a.value
     }
     val link = ConnectBoxModel.linkFor(address, config?.proxy ?: AppConfig.DEFAULT_PROXY)
-    page(listOf(ui.words(BoxWords.handing)))
+    waiting(BoxWords.handing)
     async({ n.boxDeliver(link, p.boxKey) }) { r ->
         val delivered = r.getOrNull()
         if (delivered != null) {
@@ -187,13 +185,10 @@ private fun Controller.handOver(n: OwnerNode, p: PendingBox, text: String, back:
             showSaveLink(address, delivered, null)
         } else {
             val words = refusal(r.exceptionOrNull()!!)
-            page(
-                listOf(
-                    ui.words(words),
-                    ui.words(BoxWords.handoverKept),
-                    ui.primary("Try again") { showConnectBox(prefill = address) },
-                    ui.button("Back") { back() },
-                ),
+            centre(
+                words,
+                listOf(ui.primary("Try again") { showConnectBox(prefill = address) }, ui.button("Back") { back() }),
+                extra = listOf(ui.words(BoxWords.handoverKept)),
             )
         }
     }
@@ -211,14 +206,14 @@ private enum class LinkSaved { Saved, NotValid }
  */
 private fun Controller.showSaveLink(address: String, d: BoxDelivered, message: SayWords?) {
     val lines = ConnectBoxModel.linkLines(address, d.boxKey, d.counters)
-    fun notSaved(words: SayWords) = page(
-        listOf(ui.words(words), ui.text(lines.joinToString("\n"), 12f, mono = true), ui.button("Back") { showHome() }),
+    fun notSaved(words: SayWords) = centre(
+        words, listOf(ui.button("Back") { showHome() }),
+        extra = listOf(line(lines.joinToString("\n"), muted = true, mono = true)),
     )
-    val pin = secret("PIN or passphrase", false)
+    val pin = secret("", false)
     val views = ArrayList<View>()
-    views.add(ui.words(message ?: BoxWords.savePin))
-    views.add(pin)
-    views.add(
+    views.add(ui.labelled("PIN or passphrase", pin))
+    val save =
         ui.button("Save the link", ButtonKind.Primary) {
             val typed = pin.text.toString()
             pin.setText("")
@@ -252,8 +247,10 @@ private fun Controller.showSaveLink(address: String, d: BoxDelivered, message: S
                     LinkSaved.NotValid -> notSaved(BoxWords.linkNotSaved)
                 }
             }
-        },
-    )
-    views.add(ui.button("Not now") { notSaved(BoxWords.linkNotSaved) })
-    page(views)
+        }
+    screen("Save the link", views, listOf(save, ui.button("Not now") { notSaved(BoxWords.linkNotSaved) }), words = message ?: BoxWords.savePin)
+    if (shake) {
+        shake = false
+        pin.post { Feedback.shake(pin) }
+    }
 }

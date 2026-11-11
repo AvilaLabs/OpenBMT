@@ -25,16 +25,15 @@ internal fun Controller.showBuilt(built: Built, back: () -> Unit) {
     }
     val msg = Slot(act)
     val views = ArrayList<View>()
-    views.add(ui.text("Request for the Key app", 22f, bold = true))
-    views.add(ui.words(AppWords.requestReady))
     for (s in built.skipped) {
-        views.add(ui.text("Left out of this request: entry ${s.id}", 14f, bold = true))
-        views.add(ui.words(s.words.say()))
+        views.add(stack(ui.text("Left out of this request: entry ${s.id}", 14f, bold = true), ui.words(s.words.say())))
     }
-    views.add(ui.text(ApprovalText.preview(built.request), 12f, mono = true))
+    views.add(line(ApprovalText.preview(built.request), muted = true, mono = true))
+    views.add(msg)
+    val actions = ArrayList<android.widget.Button>()
     val name = ApprovalText.fileName("request", built.sessionId)
     for (action in ExchangeModel.requestActions) {
-        views.add(
+        actions.add(
             ui.button(action.label, if (action == RequestAction.ShowCode) ButtonKind.Primary else ButtonKind.Secondary) {
                 when (action) {
                     RequestAction.ShowCode -> showBuiltCode(built, back)
@@ -50,9 +49,8 @@ internal fun Controller.showBuilt(built: Built, back: () -> Unit) {
             },
         )
     }
-    views.add(msg)
-    views.add(ui.button("Back") { back() })
-    page(views)
+    actions.add(ui.button("Back") { back() })
+    screen("Request for the Key app", views, actions, back = back, words = AppWords.requestReady)
 }
 
 /**
@@ -68,13 +66,10 @@ private fun Controller.showBuiltCode(built: Built, back: () -> Unit) {
     )
     val view = made.view
     val step = ExchangeModel.codeStep(view != null, view?.animated == true)
-    val views = ArrayList<View>()
-    views.add(ui.text("Request for the Key app", 22f, bold = true))
-    views.add(ui.words(step.words))
-    if (view != null) views.add(view)
-    if (step.done) views.add(ui.primary("Done") { showResponse(built, back, ExchangeStep.Response(null)) })
-    views.add(ui.button("Back") { showBuilt(built, back) })
-    page(views)
+    val actions = ArrayList<android.widget.Button>()
+    if (step.done) actions.add(ui.primary("Done") { showResponse(built, back, ExchangeStep.Response(null)) })
+    actions.add(ui.button("Back") { showBuilt(built, back) })
+    codeScreen("Request for the Key app", step.words, view, actions = actions, back = { showBuilt(built, back) })
 }
 
 /** The response: the Key app's code first, then a file, then pasted text. [step] says what the last try said. */
@@ -87,23 +82,26 @@ private fun Controller.showResponse(built: Built, back: () -> Unit, step: Exchan
     val msg = Slot(act)
     step.message?.let { msg.show(ui.words(it)) }
     val views = ArrayList<View>()
-    views.add(ui.text("The Key app's response", 22f, bold = true))
+    val actions = ArrayList<android.widget.Button>()
     val pasted = ui.field("Paste the response text here", lines = 4, mono = true)
     val sources = responseSources({ pasted.text.toString() }, { showResponse(built, back, ExchangeStep.Response(null)) })
     for ((kind, source) in ExchangeModel.responseKinds.zip(sources)) {
-        if (kind == ResponseKind.Pasted) views.add(pasted)
-        views.add(
-            ui.button(source.label, if (kind == ExchangeModel.responseKinds.first()) ButtonKind.Primary else ButtonKind.Secondary) {
-                source.begin({ bytes -> takeResponse(n, bytes, msg) }) { words ->
-                    // A scan has taken the screen: show this one again with the words.
-                    if (source.leavesScreen) showResponse(built, back, ExchangeStep.Response(words)) else msg.show(ui.words(words))
-                }
-            },
-        )
+        val button = ui.button(source.label, if (kind == ExchangeModel.responseKinds.first()) ButtonKind.Primary else ButtonKind.Secondary) {
+            source.begin({ bytes -> takeResponse(n, bytes, msg) }) { words ->
+                // A scan has taken the screen: show this one again with the words.
+                if (source.leavesScreen) showResponse(built, back, ExchangeStep.Response(words)) else msg.show(ui.words(words))
+            }
+        }
+        if (kind == ExchangeModel.responseKinds.first()) {
+            actions.add(button)
+        } else {
+            if (kind == ResponseKind.Pasted) views.add(pasted)
+            views.add(button)
+        }
     }
     views.add(msg)
-    views.add(ui.button("Back to the request") { showBuilt(built, back) })
-    page(views)
+    actions.add(ui.button("Back to the request") { showBuilt(built, back) })
+    screen("The Key app's response", views, actions, back = { showBuilt(built, back) })
 }
 
 private fun Controller.takeResponse(n: OwnerNode, bytes: ByteArray, msg: Slot) {
@@ -119,20 +117,16 @@ private fun Controller.takeResponse(n: OwnerNode, bytes: ByteArray, msg: Slot) {
 /** What taking the response did, item by item, in the library's words. */
 private fun Controller.showTaken(taken: Taken) {
     val views = ArrayList<View>()
-    views.add(ui.text("The Key app's response was taken", 22f, bold = true))
     for (o in taken.outcomes) {
-        views.add(label("Entry ${o.item}"))
-        views.add(ui.words(o.words.say()))
+        views.add(stack(label("Entry ${o.item}"), ui.words(o.words.say())))
     }
     if (taken.sends.isNotEmpty()) views.add(label("Payments"))
     for (s in taken.sends) {
-        views.add(ui.words(s.words.say()))
-        views.add(ui.text("Transaction ${s.txid}", 12f, mono = true))
+        views.add(stack(ui.words(s.words.say()), line("Transaction ${s.txid}", muted = true, mono = true)))
     }
     // A counter whose pairing this response approved waits for its code (OA-24).
     node?.let { n -> views.addAll(waitingCounterViews(n, Slot(act)) { showHome() }) }
     // A Box whose welcome this response approved waits to be handed over (OA-43).
     node?.let { n -> views.addAll(pendingBoxViews(n, Slot(act)) { showHome() }) }
-    views.add(ui.primary("Done") { showHome() })
-    page(views)
+    screen("The Key app's response was taken", views, listOf(ui.primary("Done") { showHome() }))
 }

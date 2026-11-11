@@ -19,17 +19,17 @@ import org.openbmt.owner.SettingsQueued
 internal fun Controller.showWatch(message: SayWords? = null) {
     val on = watchStore.enabled()
     val views = ArrayList<View>()
-    views.add(ui.words(AppWords.watchSetting))
-    views.add(ui.text(AppWords.watchSettingMore, 15f))
+    views.add(para(AppWords.watchSettingMore))
     views.add(ui.text(if (on) "On" else "Off", 16f, bold = true))
     message?.let { views.add(ui.words(it)) }
+    val actions = ArrayList<android.widget.Button>()
     if (on) {
-        views.add(ui.danger("Turn off") { watchTurnOff() })
+        actions.add(ui.danger("Turn off") { watchTurnOff() })
     } else {
-        views.add(ui.primary("Turn on") { watchTurnOn() })
+        actions.add(ui.primary("Turn on") { watchTurnOn() })
     }
-    views.add(ui.button("Back") { showHome() })
-    page(views)
+    actions.add(ui.button("Back") { showHome() })
+    screen(AppWords.watchSetting.heading, views, actions, back = { showHome() }, words = AppWords.watchSetting)
 }
 
 /** Turning on: the notification permission first (OA-83), then the key, the file, the settings change and the service. */
@@ -50,7 +50,7 @@ internal fun Controller.watchPermissionResult(results: IntArray) {
 
 private fun Controller.watchTurnOnGranted() {
     val n = node ?: return begin()
-    page(listOf(ui.words(AppWords.working)))
+    waiting(AppWords.working)
     async({ makeWatchReady(n) }) { r ->
         val e = r.exceptionOrNull()
         if (e != null) return@async showWatch(watchRefusal(e))
@@ -58,8 +58,8 @@ private fun Controller.watchTurnOnGranted() {
         WatchService.start(act)
         when {
             queued == null -> showWatch(null)
-            queued.tightening -> page(listOf(ui.words(AppWords.editQueuedTightening), ui.primary("Done") { showWatch(null) }))
-            else -> page(listOf(ui.words(AppWords.editQueuedLoosening), ui.primary("Build the request for the Key app") { showSpend() }, ui.button("Later") { showWatch(null) }))
+            queued.tightening -> centre(AppWords.editQueuedTightening, listOf(ui.primary("Done") { showWatch(null) }))
+            else -> centre(AppWords.editQueuedLoosening, listOf(ui.primary("Build the request for the Key app") { showSpend() }, ui.button("Later") { showWatch(null) }))
         }
     }
 }
@@ -95,7 +95,7 @@ private fun Controller.makeWatchReady(n: OwnerNode): SettingsQueued? {
 /** Turning off: the service stops, the files go, and when the settings name the key its removal is queued (a tightening). */
 private fun Controller.watchTurnOff() {
     val n = node ?: return begin()
-    page(listOf(ui.words(AppWords.working)))
+    waiting(AppWords.working)
     async({
         WatchService.stop(act)
         watchStore.remove()
@@ -109,7 +109,7 @@ private fun Controller.watchTurnOff() {
         val e = r.exceptionOrNull()
         if (e != null) return@async showWatch(watchRefusal(e))
         if (r.getOrNull() != null) {
-            page(listOf(ui.words(AppWords.editQueuedTightening), ui.button("Waiting to be delivered") { showOutbox() }, ui.primary("Done") { showWatch(null) }))
+            centre(AppWords.editQueuedTightening, listOf(ui.primary("Done") { showWatch(null) }, ui.button("Waiting to be delivered") { showOutbox() }))
         } else {
             showWatch(null)
         }

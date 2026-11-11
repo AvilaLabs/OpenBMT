@@ -1,8 +1,11 @@
 package org.openbmt.owner.app
 
 import android.view.View
+import android.widget.Button
 import org.openbmt.app.Format
+import org.openbmt.app.RowItem
 import org.openbmt.app.SayWords
+import org.openbmt.app.WordsModel
 import org.openbmt.owner.AlertKind
 import org.openbmt.owner.CashAmount
 import org.openbmt.owner.ClearArgs
@@ -16,6 +19,7 @@ import org.openbmt.owner.ViewKind
 // The screens of the owner app. Every call into the library is made here on
 // the screen thread (OA-12); every state and every refusal is shown with the
 // library's words, and the app's own words are only for what it decides itself.
+// The look of every screen is that of OA-91: a bar, a body that scrolls and a footer.
 
 /** The node of the running screens, or the first screen again when there is none. */
 private inline fun Controller.withNode(block: (OwnerNode) -> Unit) {
@@ -34,88 +38,123 @@ internal fun <T> Controller.attempt(slot: Slot, call: () -> T): T? = try {
     null
 }
 
-private fun Controller.backButton(label: String = "Back", to: () -> Unit): View = ui.button(label) { to() }
+private fun Controller.backButton(label: String = "Back", to: () -> Unit): Button = ui.button(label) { to() }
+
+/** A page that holds only the words of a call that refused, with the way back to home. */
+private fun Controller.refusedPage(msg: Slot) {
+    screen("Owner", listOf(msg), listOf(backButton { showHome() }), back = { showHome() }, logo = true)
+}
 
 // ---- home ------------------------------------------------------------------------------------------
 
 internal fun Controller.showHome(): Unit = withNode { n ->
-    val health = Slot(act)
-    val lines = Slot(act)
-    val views = ArrayList<View>()
-    views.add(label("Is Bitcoin ready?"))
-    views.add(health)
-    views.add(label("The receipts line"))
-    views.add(lines)
-    views.add(ui.button("Receipts and merge") { showReceipts() })
-    if (key2Signer) views.add(ui.button("Register the wallet on your signer") { showHardwareRegister { showHome() } })
-    views.add(ui.primary("Spend") { showSpend() })
-    views.add(ui.button("Open approvals") { showSessions() })
-    views.add(ui.button("Waiting to be delivered") { showOutbox() })
-    views.add(ui.button("Refund queue") { showQueue() })
-    views.add(ui.button("Cash out") { showCashOut() })
-    views.add(ui.button("Old addresses") { showOld() })
-    views.add(ui.button("Add a counter") { showAddCounter() })
-    views.add(ui.button("Connect your Box") { showConnectBox() })
-    views.add(ui.button("Link and counters") { showLink() })
-    views.add(ui.button("Till") { showTill() })
-    views.add(ui.button("Alerts") { showAlerts() })
-    views.add(ui.button("Refund notes") { showRefundNotes() })
-    views.add(ui.button("Notes") { showNotes() })
-    views.add(ui.button("Settings") { showSettings() })
-    views.add(ui.button(AppWords.watchSetting.heading) { showWatch() })
-    views.add(ui.button("Change the PIN") { showChangePin(null) })
-    views.add(ui.button("About") { showAbout() })
-    page(views)
+    val content = Slot(act, 14)
+    homeTint = null
+    screen("Owner", listOf(content), listOf(ui.primary("Spend") { showSpend() }), logo = true)
     tick = {
         try {
             val s = n.status()
-            val statusViews = ArrayList<View>()
             val pump = pumpFault
-            if (pump != null) {
-                statusViews.add(ui.words(pump))
-            } else if (s.stopped) {
-                statusViews.add(ui.words(AppWords.stopped))
-            } else {
-                statusViews.add(ui.words(s.health.words.say()))
+            val status: SayWords = when {
+                pump != null -> pump
+                s.stopped -> AppWords.stopped
+                else -> s.health.words.say()
             }
-            s.halted?.let { statusViews.add(ui.words(it.words.say())) }
-            if (s.view != ViewKind.Ready) statusViews.add(ui.words(s.viewWords.say()))
+            val extra = ArrayList<View>()
+            s.halted?.let { extra.add(ui.words(it.words.say())) }
+            if (s.view != ViewKind.Ready) extra.add(ui.words(s.viewWords.say()))
             if (s.view == ViewKind.DeepReorg) {
-                statusViews.add(ui.button("Check again from the first block") { rescan() })
+                extra.add(ui.button("Check again from the first block") { rescan() })
             }
             if (s.recoveryPending) {
-                s.recoveryWords?.let { statusViews.add(ui.words(it.say())) }
-                statusViews.add(ui.button("Finish the approval that was interrupted") { recover() })
+                s.recoveryWords?.let { extra.add(ui.words(it.say())) }
+                extra.add(ui.button("Finish the approval that was interrupted") { recover() })
             }
-            statusViews.add(ui.text("The wallet can spend ${Format.sats(s.balanceSats)}. Checked to block ${s.checkedHeight} of ${s.tipHeight}.", 15f))
-            health.show(*statusViews.toTypedArray())
+            if (key2Signer) extra.add(firstAddressView(n))
+            val balance = OwnerLook.balance(Format.sats(s.balanceSats), s.checkedHeight, s.tipHeight)
+            val hero = heroCard(WordsModel.of(status), balance, extra, homeTint)
+            homeTint = pillTint(hero)
 
-            val receipts = n.receiptsLine()
             val link = if (setup?.link != null) n.linkState() else null
             val inProgress = OwnerModel.sendsInProgress(n.sendStates())
-            val out = ArrayList<View>()
-            out.add(ui.words(receipts.words.say()))
-            out.add(ui.text(OwnerModel.alertsLine(link?.alerts?.size ?: 0), 15f, bold = (link?.alerts?.isNotEmpty() == true)))
-            out.add(ui.text(OwnerModel.linkLine(link, link?.counters?.size ?: 0), 15f))
-            linkFault?.let { out.add(ui.words(it)) }
-            out.add(ui.text(OwnerModel.sendsLine(inProgress), 15f))
-            if (key2Signer) out.add(firstAddressView(n))
-            lines.show(*out.toTypedArray())
+            val views = ArrayList<View>()
+            views.add(hero)
+            // Home has no count of open approvals, of what waits to be delivered or of the refund queue, and it adds no
+            // library call to get one: the card shows a row when a count is given, and none is given today (OA-91).
+            val counts = listOf<Pair<String, Int?>>("Open approvals" to null, "Waiting to be delivered" to null, "Refund queue" to null)
+            val rows = OwnerLook.waitingRows(counts).map { r ->
+                Triple(r.title, r.count, { open(r.title) })
+            }
+            waitingCard(rows)?.let { views.add(it) }
+            val groups = listOf(
+                GroupRow(OwnerIcon.Kind.Money, false, OwnerLook.MONEY, OwnerLook.moneySub(inProgress, OwnerModel.sendsLine(inProgress))) { showMoney() },
+                GroupRow(OwnerIcon.Kind.Devices, false, OwnerLook.DEVICES, OwnerModel.linkLine(link, link?.counters?.size ?: 0)) { showDevices() },
+                GroupRow(OwnerIcon.Kind.Bell, false, OwnerLook.ALERTS, OwnerModel.alertsLine(link?.alerts?.size ?: 0)) { showAlertsAndNotes() },
+                GroupRow(null, true, OwnerLook.SETTINGS, OwnerLook.SETTINGS_SUB) { showSettingsAndPhone() },
+            )
+            views.add(groupCard(groups))
+            linkFault?.let { views.add(ui.words(it)) }
+            content.show(*views.toTypedArray())
         } catch (e: OwnerException) {
-            health.show(ui.words(e.sayWords()))
+            content.show(ui.words(e.sayWords()))
         }
     }
     tick?.invoke()
 }
 
+/** The screen a row of the waiting card opens. */
+private fun Controller.open(title: String) = when (title) {
+    "Open approvals" -> showSessions()
+    "Waiting to be delivered" -> showOutbox()
+    else -> showQueue()
+}
+
+/** A page of the rows of one group of home: each row opens what its button opened. */
+private fun Controller.groupPage(title: String, rows: List<RowItem>) {
+    screen(title, listOf(ui.rows(rows)), back = { showHome() })
+}
+
+private fun Controller.showMoney() {
+    val opens: List<() -> Unit> = listOf(
+        { showReceipts() }, { showCashOut() }, { showOld() }, { showRefundNotes() }, { showSessions() }, { showQueue() }, { showOutbox() },
+    )
+    groupPage(OwnerLook.MONEY, OwnerLook.moneyTitles.zip(opens).map { (title, go) -> RowItem(title) { go() } })
+}
+
+private fun Controller.showDevices() {
+    val rows = ArrayList<RowItem>()
+    rows.add(RowItem("Link and counters") { showLink() })
+    rows.add(RowItem("Add a counter") { showAddCounter() })
+    rows.add(RowItem("Connect your Box") { showConnectBox() })
+    rows.add(RowItem("Till") { showTill() })
+    if (key2Signer) rows.add(RowItem("Register the wallet on your signer") { showHardwareRegister { showHome() } })
+    groupPage(OwnerLook.DEVICES, rows)
+}
+
+private fun Controller.showAlertsAndNotes() {
+    groupPage(OwnerLook.ALERTS, listOf(RowItem("Alerts") { showAlerts() }, RowItem("Notes") { showNotes() }))
+}
+
+private fun Controller.showSettingsAndPhone() {
+    groupPage(
+        OwnerLook.SETTINGS,
+        listOf(
+            RowItem("Settings") { showSettings() },
+            RowItem("Change the PIN") { showChangePin(null) },
+            RowItem("About") { showAbout() },
+            RowItem(AppWords.watchSetting.heading) { showWatch() },
+        ),
+    )
+}
+
 private fun Controller.rescan(): Unit = withNode { n ->
     val msg = Slot(act)
-    if (attempt(msg) { n.rescan() } != null) showHome() else page(listOf(msg, ui.button("Back") { showHome() }))
+    if (attempt(msg) { n.rescan() } != null) showHome() else refusedPage(msg)
 }
 
 private fun Controller.recover(): Unit = withNode { n ->
     val msg = Slot(act)
-    if (attempt(msg) { n.recoverKey1() } != null) showHome() else page(listOf(msg, ui.button("Back") { showHome() }))
+    if (attempt(msg) { n.recoverKey1() } != null) showHome() else refusedPage(msg)
 }
 
 // ---- the receipts line and the merge offer -------------------------------------------------------------
@@ -125,32 +164,29 @@ internal fun Controller.showReceipts(): Unit = withNode { n ->
     val offer = Slot(act)
     val msg = Slot(act)
     val views = ArrayList<View>()
-    views.add(ui.text("Receipts", 22f, bold = true))
     views.add(receipts)
-    views.add(label("The offer to merge coins"))
-    views.add(offer)
+    views.add(stack(label("The offer to merge coins"), offer))
     views.add(msg)
-    views.add(backButton { showHome() })
-    page(views)
+    screen("Receipts", views, listOf(backButton { showHome() }), back = { showHome() })
     tick = {
         try {
             val r = n.receiptsLine()
             val rv = ArrayList<View>()
             rv.add(ui.words(r.words.say()))
             if (r.kind == ReceiptsKind.Known) {
-                rv.add(ui.text("${r.payments} payments held. Spending all of them costs ${Format.sats(r.costSats)} at ${r.ratePerKvb} sats per 1000 virtual bytes.", 15f))
+                rv.add(line("${r.payments} payments held. Spending all of them costs ${Format.sats(r.costSats)} at ${r.ratePerKvb} sats per 1000 virtual bytes.", muted = true))
             }
             receipts.show(*rv.toTypedArray())
             val m = n.mergeOffer()
             if (m == null) {
-                offer.show(ui.text("No merge is offered now.", 15f))
+                offer.show(line("No merge is offered now."))
             } else {
                 offer.show(
                     ui.words(m.words.say()),
-                    ui.text(
+                    line(
                         "Merge ${m.coins} of ${m.of} coins at ${m.ratePerKvb} sats per 1000 virtual bytes. It costs ${Format.sats(m.costSats)} now. " +
                             "Spending them as they are usually costs ${Format.sats(m.usualCostSats)}. The saving is ${Format.sats(m.savingSats)}.",
-                        15f,
+                        muted = true,
                     ),
                     ui.primary("Build the merge request") {
                         attempt(msg) { n.approveMerge(nowSecs()) }?.let { showBuilt(it) { showReceipts() } }
@@ -169,23 +205,20 @@ internal fun Controller.showReceipts(): Unit = withNode { n ->
 internal fun Controller.showSpend(): Unit = withNode { n ->
     val msg = Slot(act)
     val views = ArrayList<View>()
-    views.add(ui.text("Spend", 22f, bold = true))
     views.add(
-        ui.text(
-            "This builds a request for the Key app from what is in the queue. Nothing is signed here, and nothing is sent until the Key app has approved.",
-            15f,
-        ),
+        para("This builds a request for the Key app from what is in the queue. Nothing is signed here, and nothing is sent until the Key app has approved."),
     )
-    views.add(label("Fee rate, satoshis per 1000 virtual bytes"))
-    val fee = numberField(act, "Fee rate")
+    val input = numberInput("Fee rate, satoshis per 1000 virtual bytes", "Fee rate")
+    val fee = input.field
     // The rate the receipts line works at is a starting point, if the node has one.
     try {
         val r = n.receiptsLine()
         if (r.kind == ReceiptsKind.Known && r.ratePerKvb > 0) fee.setText(r.ratePerKvb.toString())
     } catch (_: OwnerException) {
     }
-    views.add(fee)
-    views.add(ui.primary("Build the request") {
+    views.add(input.view)
+    views.add(msg)
+    val build = ui.primary("Build the request") {
         when (val f = Forms.feeRate(fee.text.toString())) {
             is Form.Refused -> msg.show(ui.words(f.words))
             // With key 2 on a hardware signer the spends go to the signer, and the Key app gets the rest (OA-70).
@@ -195,17 +228,14 @@ internal fun Controller.showSpend(): Unit = withNode { n ->
                 attempt(msg) { n.buildRequest(nowSecs(), f.value) }?.let { showBuilt(it) { showSpend() } }
             }
         }
-    })
-    views.add(msg)
-    views.add(backButton { showHome() })
-    page(views)
+    }
+    screen("Spend", views, listOf(build, backButton { showHome() }), back = { showHome() })
 }
 
 // ---- open approvals ---------------------------------------------------------------------------------------
 
 internal fun Controller.showSessions(message: SayWords? = null): Unit = withNode { n ->
     val views = ArrayList<View>()
-    views.add(ui.text("Open approvals", 22f, bold = true))
     message?.let { views.add(ui.words(it)) }
     val msg = Slot(act)
     val ids = attempt(msg) { n.sessions() }
@@ -216,36 +246,30 @@ internal fun Controller.showSessions(message: SayWords? = null): Unit = withNode
     } else {
         for (id in ids) {
             val name = ApprovalText.fileName("approval", id).removeSuffix(".obm")
-            views.add(label(name))
             // A session of spends for the signer is carried on with the signer, not shown as a request for the Key app.
             val signer = if (key2Signer) signerSessionOf(n, id) else HardwareModel.SignerSession.NotSigner
-            if (signer == HardwareModel.SignerSession.NotSigner) {
-                views.add(
-                    ui.button("Show its request again") {
-                        attempt(msg) { n.sessionRequest(id) }?.let { showBuilt(org.openbmt.owner.Built(id, it, emptyList())) { showSessions() } }
-                    },
-                )
+            val show = if (signer == HardwareModel.SignerSession.NotSigner) {
+                ui.button("Show its request again") {
+                    attempt(msg) { n.sessionRequest(id) }?.let { showBuilt(org.openbmt.owner.Built(id, it, emptyList())) { showSessions() } }
+                }
             } else {
-                views.add(ui.button("Continue on the signer") { continueOnSigner(id, signer) { showSessions() } })
+                ui.button("Continue on the signer") { continueOnSigner(id, signer) { showSessions() } }
             }
-            views.add(
-                ui.danger("Abandon it") {
-                    if (attempt(msg) { n.abandonSession(id) } != null) showSessions(AppWords.sessionAbandoned)
-                },
-            )
+            val abandon = ui.danger("Abandon it") {
+                if (attempt(msg) { n.abandonSession(id) } != null) showSessions(AppWords.sessionAbandoned)
+            }
+            views.add(stack(label(name), show, abandon, gap = 10))
         }
         views.add(msg)
     }
-    views.add(backButton { showHome() })
-    page(views)
+    screen("Open approvals", views, listOf(backButton { showHome() }), back = { showHome() })
 }
 
 // ---- the signed objects that wait -------------------------------------------------------------------------
 
 internal fun Controller.showOutbox(): Unit = withNode { n ->
     val views = ArrayList<View>()
-    views.add(ui.text("Waiting to be delivered", 22f, bold = true))
-    views.add(ui.text("Signed by both keys and kept on this phone until they are delivered or confirmed.", 15f))
+    views.add(para("Signed by both keys and kept on this phone until they are delivered or confirmed."))
     val msg = Slot(act)
     val rows = attempt(msg) { n.outbox() }
     // New addresses that the link keeps sending until the counter holds them.
@@ -261,20 +285,29 @@ internal fun Controller.showOutbox(): Unit = withNode { n ->
     } else {
         val now = nowSecs()
         for (b in sent) {
-            views.add(label("New addresses: ${OwnerModel.counterLabel(b.counter)}"))
-            views.add(ui.words(b.words.say()))
-            views.add(ui.text(OwnerModel.batchWaitingLines(b, now).joinToString("\n"), 13f, mono = true))
+            views.add(
+                stack(
+                    label("New addresses: ${OwnerModel.counterLabel(b.counter)}"),
+                    ui.words(b.words.say()),
+                    line(OwnerModel.batchWaitingLines(b, now).joinToString("\n"), muted = true, mono = true),
+                    gap = 10,
+                ),
+            )
         }
         for (row in rows) {
-            views.add(label(OwnerModel.outboxTitle(row)))
-            views.add(ui.words(row.words.say()))
-            views.add(ui.text(OwnerModel.outboxLines(row, now).joinToString("\n"), 13f, mono = true))
+            views.add(
+                stack(
+                    label(OwnerModel.outboxTitle(row)),
+                    ui.words(row.words.say()),
+                    line(OwnerModel.outboxLines(row, now).joinToString("\n"), muted = true, mono = true),
+                    gap = 10,
+                ),
+            )
         }
         views.addAll(waitingCounterViews(n, Slot(act)) { showOutbox() })
         views.addAll(pendingBoxViews(n, Slot(act)) { showOutbox() })
     }
-    views.add(backButton { showHome() })
-    page(views)
+    screen("Waiting to be delivered", views, listOf(backButton { showHome() }), back = { showHome() })
 }
 
 // ---- the queue: refunds, cash-outs and the rest ---------------------------------------------------------------
@@ -300,20 +333,20 @@ private fun Controller.entryButtons(n: OwnerNode, id: Long, stage: Stage, msg: S
 internal fun Controller.showQueue(prefillCounter: ByteArray? = null, prefillSale: Long? = null): Unit = withNode { n ->
     val msg = Slot(act)
     val views = ArrayList<View>()
-    views.add(ui.text("Refund queue", 22f, bold = true))
     val q = attempt(msg) { n.queue() }
     if (q == null) {
         views.add(msg)
-        views.add(backButton { showHome() })
-        return@withNode page(views)
+        return@withNode screen("Refund queue", views, listOf(backButton { showHome() }), back = { showHome() })
     }
     if (q.refunds.isEmpty()) views.add(ui.text("No refund is queued.", 16f))
     for (r in q.refunds) {
-        views.add(label("Refund ${r.id}: ${Format.sats(r.sats)} for sale ${OwnerModel.saleNumber(r.sale)} of ${OwnerModel.counterLabel(r.counter)}"))
-        views.add(ui.text("Asked by ${Format.cleanForeign(r.cashier)}. To ${r.address}", 13f, mono = true))
-        r.receivedSats?.let { views.add(ui.text("The wallet's own view shows ${Format.sats(it)} received for this sale.", 14f)) }
-        views.add(ui.words(r.stage.words.say()))
-        entryButtons(n, r.id, r.stage, msg, { showQueue() }, views)
+        val part = ArrayList<View>()
+        part.add(label("Refund ${r.id}: ${Format.sats(r.sats)} for sale ${OwnerModel.saleNumber(r.sale)} of ${OwnerModel.counterLabel(r.counter)}"))
+        part.add(line("Asked by ${Format.cleanForeign(r.cashier)}. To ${r.address}", muted = true, mono = true))
+        r.receivedSats?.let { part.add(line("The wallet's own view shows ${Format.sats(it)} received for this sale.", muted = true)) }
+        part.add(ui.words(r.stage.words.say()))
+        entryButtons(n, r.id, r.stage, msg, { showQueue() }, part)
+        views.add(stack(*part.toTypedArray(), gap = 10))
     }
     if (q.cashOuts.isNotEmpty() || q.others.isNotEmpty()) views.add(label("Other entries"))
     for (c in q.cashOuts) {
@@ -321,14 +354,18 @@ internal fun Controller.showQueue(prefillCounter: ByteArray? = null, prefillSale
             is CashAmount.Sats -> Format.sats(a.sats)
             is CashAmount.All -> "everything"
         }
-        views.add(ui.text("Cash-out ${c.id}: $amount to ${c.address}", 14f, bold = true))
-        views.add(ui.words(c.stage.words.say()))
-        entryButtons(n, c.id, c.stage, msg, { showQueue() }, views)
+        val part = ArrayList<View>()
+        part.add(ui.text("Cash-out ${c.id}: $amount to ${c.address}", 14f, bold = true))
+        part.add(ui.words(c.stage.words.say()))
+        entryButtons(n, c.id, c.stage, msg, { showQueue() }, part)
+        views.add(stack(*part.toTypedArray(), gap = 10))
     }
     for (o in q.others) {
-        views.add(ui.text(OwnerModel.entryTitle(o.kind, o.id), 14f, bold = true))
-        views.add(ui.words(o.stage.words.say()))
-        entryButtons(n, o.id, o.stage, msg, { showQueue() }, views)
+        val part = ArrayList<View>()
+        part.add(ui.text(OwnerModel.entryTitle(o.kind, o.id), 14f, bold = true))
+        part.add(ui.words(o.stage.words.say()))
+        entryButtons(n, o.id, o.stage, msg, { showQueue() }, part)
+        views.add(stack(*part.toTypedArray(), gap = 10))
     }
     views.add(msg)
 
@@ -345,48 +382,48 @@ internal fun Controller.showQueue(prefillCounter: ByteArray? = null, prefillSale
     } else {
         null
     }
-    val counterField = ui.field("Counter identity, 64 digits", mono = true).also {
+    val counterInput = textInput("Counter identity, 64 digits", mono = true)
+    val counterField = counterInput.field.also {
         if (group == null && prefillCounter != null) it.setText(prefillCounter.joinToString("") { b -> "%02x".format(b) })
     }
-    views.add(counterField)
-    val sale = numberField(act, "Sale number, as the counter shows it").also { f -> prefillSale?.let { f.setText(OwnerModel.saleNumber(it).toString()) } }
-    views.add(sale)
-    val cashier = ui.field("Name of the cashier who asked")
-    views.add(cashier)
-    val address = ui.field("Address the customer wants the money sent to", mono = true)
-    views.add(address)
-    val sats = numberField(act, "Amount in satoshis")
-    views.add(sats)
+    views.add(counterInput.view)
+    val saleInput = numberInput("Sale number, as the counter shows it")
+    val sale = saleInput.field.also { f -> prefillSale?.let { f.setText(OwnerModel.saleNumber(it).toString()) } }
+    views.add(saleInput.view)
+    val cashierInput = textInput("Name of the cashier who asked")
+    val cashier = cashierInput.field
+    views.add(cashierInput.view)
+    val addressInput = textInput("Address the customer wants the money sent to", mono = true)
+    val address = addressInput.field
+    views.add(addressInput.view)
+    val satsInput = numberInput("Amount in satoshis")
+    val sats = satsInput.field
+    views.add(satsInput.view)
     val result = Slot(act)
-    views.add(
-        ui.primary("Queue the refund") {
-            val typed = counterField.text.toString()
-            val counter = if (typed.isNotBlank()) {
-                Forms.counter(typed) ?: byteArrayOf()
-            } else {
-                group?.let { g -> ui.chosen(g).takeIf { it >= 0 }?.let { counters[it] } }
-            }
-            when (val f = Forms.refund(counter, sale.text.toString(), cashier.text.toString(), address.text.toString(), sats.text.toString())) {
-                is Form.Refused -> result.show(ui.words(f.words))
-                is Form.Ok -> attempt(result) { n.queueRefund(nowSecs(), f.value) }?.let {
-                    // What the sale received and whether it is deep enough come from the node's own view of the chain.
-                    showQueueAfterRefund(it.receivedSats, it.reachedRefundDepth)
-                }
-            }
-        },
-    )
     views.add(result)
-    views.add(backButton { showHome() })
-    page(views)
+    val queue = ui.primary("Queue the refund") {
+        val typed = counterField.text.toString()
+        val counter = if (typed.isNotBlank()) {
+            Forms.counter(typed) ?: byteArrayOf()
+        } else {
+            group?.let { g -> ui.chosen(g).takeIf { it >= 0 }?.let { counters[it] } }
+        }
+        when (val f = Forms.refund(counter, sale.text.toString(), cashier.text.toString(), address.text.toString(), sats.text.toString())) {
+            is Form.Refused -> result.show(ui.words(f.words))
+            is Form.Ok -> attempt(result) { n.queueRefund(nowSecs(), f.value) }?.let {
+                // What the sale received and whether it is deep enough come from the node's own view of the chain.
+                showQueueAfterRefund(it.receivedSats, it.reachedRefundDepth)
+            }
+        }
+    }
+    screen("Refund queue", views, listOf(queue, backButton { showHome() }), back = { showHome() })
 }
 
 private fun Controller.showQueueAfterRefund(receivedSats: Long, atDepth: Boolean) {
-    page(
-        listOf(
-            ui.words(if (atDepth) AppWords.refundQueuedAtDepth else AppWords.refundQueuedWaiting),
-            ui.text("The wallet's own view shows ${Format.sats(receivedSats)} received for this sale.", 15f),
-            ui.button("Back to the queue") { showQueue() },
-        ),
+    centre(
+        if (atDepth) AppWords.refundQueuedAtDepth else AppWords.refundQueuedWaiting,
+        listOf(ui.button("Back to the queue") { showQueue() }),
+        extra = listOf(line("The wallet's own view shows ${Format.sats(receivedSats)} received for this sale.")),
     )
 }
 
@@ -395,34 +432,18 @@ private fun Controller.showQueueAfterRefund(receivedSats: Long, atDepth: Boolean
 internal fun Controller.showCashOut(): Unit = withNode { n ->
     val msg = Slot(act)
     val views = ArrayList<View>()
-    views.add(ui.text("Cash out", 22f, bold = true))
-    views.add(
-        ui.text(
-            "Moves the shop's money to an address of yours. It is queued here and paid only after the Key app approves it.",
-            15f,
-        ),
-    )
-    views.add(label("Address"))
-    val address = ui.field("Address", mono = true)
-    views.add(address)
-    views.add(label("How much"))
-    val which = ui.choice(listOf("An amount", "Everything the wallet can spend"))
-    views.add(which)
-    val sats = numberField(act, "Amount in satoshis")
-    views.add(sats)
-    views.add(label("What the Key app shows for this address"))
-    val name = ui.field("Label")
-    views.add(name)
-    views.add(
-        ui.primary("Queue the cash-out") {
-            when (val f = Forms.cashOut(address.text.toString(), ui.chosen(which) == 1, sats.text.toString(), name.text.toString())) {
-                is Form.Refused -> msg.show(ui.words(f.words))
-                is Form.Ok -> if (attempt(msg) { n.cashOut(f.value) } != null) {
-                    page(listOf(ui.words(AppWords.cashOutQueued), ui.button("Back") { showCashOut() }))
-                }
-            }
-        },
-    )
+    views.add(para("Moves the shop's money to an address of yours. It is queued here and paid only after the Key app approves it."))
+    val addressInput = textInput("Address", mono = true)
+    val address = addressInput.field
+    views.add(addressInput.view)
+    val which = ui.chips(listOf("An amount", "Everything the wallet can spend"))
+    views.add(stack(label("How much"), which))
+    val satsInput = numberInput("Amount in satoshis")
+    val sats = satsInput.field
+    views.add(satsInput.view)
+    val nameInput = textInput("What the Key app shows for this address", "Label")
+    val name = nameInput.field
+    views.add(nameInput.view)
     views.add(msg)
     val q = attempt(msg) { n.queue() }
     if (q != null && q.cashOuts.isNotEmpty()) {
@@ -432,13 +453,22 @@ internal fun Controller.showCashOut(): Unit = withNode { n ->
                 is CashAmount.Sats -> Format.sats(a.sats)
                 is CashAmount.All -> "everything"
             }
-            views.add(ui.text("Cash-out ${c.id}: $amount to ${c.address}", 14f, bold = true))
-            views.add(ui.words(c.stage.words.say()))
-            entryButtons(n, c.id, c.stage, msg, { showCashOut() }, views)
+            val part = ArrayList<View>()
+            part.add(ui.text("Cash-out ${c.id}: $amount to ${c.address}", 14f, bold = true))
+            part.add(ui.words(c.stage.words.say()))
+            entryButtons(n, c.id, c.stage, msg, { showCashOut() }, part)
+            views.add(stack(*part.toTypedArray(), gap = 10))
         }
     }
-    views.add(backButton { showHome() })
-    page(views)
+    val queue = ui.primary("Queue the cash-out") {
+        when (val f = Forms.cashOut(address.text.toString(), ui.chosen(which) == 1, sats.text.toString(), name.text.toString())) {
+            is Form.Refused -> msg.show(ui.words(f.words))
+            is Form.Ok -> if (attempt(msg) { n.cashOut(f.value) } != null) {
+                centre(AppWords.cashOutQueued, listOf(ui.button("Back") { showCashOut() }))
+            }
+        }
+    }
+    screen("Cash out", views, listOf(queue, backButton { showHome() }), back = { showHome() })
 }
 
 // ---- old addresses ------------------------------------------------------------------------------------------------
@@ -447,16 +477,12 @@ internal fun Controller.showOld(): Unit = withNode { n ->
     val line = Slot(act)
     val msg = Slot(act)
     val views = ArrayList<View>()
-    views.add(ui.text("Old addresses", 22f, bold = true))
     views.add(line)
-    views.add(
-        ui.primary("Check them now") {
-            attempt(msg) { n.requestDeepCheck(nowSecs()) }?.let { msg.show(ui.words(it.words.say())) }
-        },
-    )
     views.add(msg)
-    views.add(backButton { showHome() })
-    page(views)
+    val check = ui.primary("Check them now") {
+        attempt(msg) { n.requestDeepCheck(nowSecs()) }?.let { msg.show(ui.words(it.words.say())) }
+    }
+    screen("Old addresses", views, listOf(check, backButton { showHome() }), back = { showHome() })
     tick = {
         try {
             val o = n.oldAddresses()
@@ -477,11 +503,7 @@ internal fun Controller.showOld(): Unit = withNode { n ->
 
 internal fun Controller.showLink(): Unit = withNode { n ->
     val body = Slot(act)
-    val views = ArrayList<View>()
-    views.add(ui.text("Link and counters", 22f, bold = true))
-    views.add(body)
-    views.add(backButton { showHome() })
-    page(views)
+    screen("Link and counters", listOf(body), listOf(backButton { showHome() }), back = { showHome() })
     if (setup?.link == null) {
         body.show(ui.words(AppWords.noLink))
         return@withNode
@@ -494,9 +516,14 @@ internal fun Controller.showLink(): Unit = withNode { n ->
             linkFault?.let { out.add(ui.words(it)) }
             val now = nowSecs()
             for (c in l.counters) {
-                out.add(label(OwnerModel.counterLabel(c.counter)))
-                out.add(ui.words(c.words.say()))
-                out.add(ui.text(OwnerModel.counterLines(c, now).joinToString("\n"), 13f, mono = true))
+                out.add(
+                    stack(
+                        label(OwnerModel.counterLabel(c.counter)),
+                        ui.words(c.words.say()),
+                        this.line(OwnerModel.counterLines(c, now).joinToString("\n"), muted = true, mono = true),
+                        gap = 10,
+                    ),
+                )
             }
             body.show(*out.toTypedArray())
         } catch (e: OwnerException) {
@@ -508,7 +535,6 @@ internal fun Controller.showLink(): Unit = withNode { n ->
 
 internal fun Controller.showAlerts(message: SayWords? = null): Unit = withNode { n ->
     val views = ArrayList<View>()
-    views.add(ui.text("Alerts", 22f, bold = true))
     message?.let { views.add(ui.words(it)) }
     val msg = Slot(act)
     if (setup?.link == null) {
@@ -518,33 +544,34 @@ internal fun Controller.showAlerts(message: SayWords? = null): Unit = withNode {
         if (l == null) {
             views.add(msg)
         } else {
-            views.add(ui.text(OwnerModel.alertsLine(l.alerts.size), 16f))
+            views.add(ui.text(OwnerModel.alertsLine(l.alerts.size), 16f, bold = l.alerts.isNotEmpty()))
             for (a in l.alerts) {
                 val kind = when (a.kind) {
                     AlertKind.MissedCheckIn -> "Missed check-in"
                     AlertKind.Diverged -> "Records do not match"
                     AlertKind.BatchUndelivered -> "New addresses not taken"
                 }
-                views.add(label("$kind: ${OwnerModel.counterLabel(a.counter)}"))
-                views.add(ui.words(a.words.say()))
                 views.add(
-                    ui.button("Clear this alert") {
-                        if (attempt(msg) { n.clearAlert(ClearArgs(a.kind, a.counter, a.value)) } != null) showAlerts(AppWords.alertCleared)
-                    },
+                    stack(
+                        label("$kind: ${OwnerModel.counterLabel(a.counter)}"),
+                        ui.words(a.words.say()),
+                        ui.button("Clear this alert") {
+                            if (attempt(msg) { n.clearAlert(ClearArgs(a.kind, a.counter, a.value)) } != null) showAlerts(AppWords.alertCleared)
+                        },
+                        gap = 10,
+                    ),
                 )
             }
             views.add(msg)
         }
     }
-    views.add(backButton { showHome() })
-    page(views)
+    screen("Alerts", views, listOf(backButton { showHome() }), back = { showHome() })
 }
 
 // ---- refund notes and notes ------------------------------------------------------------------------------------------------
 
 internal fun Controller.showRefundNotes(message: SayWords? = null): Unit = withNode { n ->
     val views = ArrayList<View>()
-    views.add(ui.text("Refund notes", 22f, bold = true))
     message?.let { views.add(ui.words(it)) }
     val msg = Slot(act)
     val notes = attempt(msg) { n.refundNotes() }
@@ -554,36 +581,36 @@ internal fun Controller.showRefundNotes(message: SayWords? = null): Unit = withN
         views.add(ui.text("No note about a refund request.", 16f))
     } else {
         for (note in notes) {
-            views.add(label("${OwnerModel.counterLabel(note.counter)}, sale ${OwnerModel.saleNumber(note.sale)}, request ${note.number}"))
-            views.add(ui.words(note.words.say()))
-            views.add(ui.button("Start a refund for this sale") { showQueue(note.counter, note.sale) })
             views.add(
-                ui.button("Dismiss this note") {
-                    if (attempt(msg) { n.dismissRefundNote(note.index) } != null) showRefundNotes(AppWords.noteDismissed)
-                },
+                stack(
+                    label("${OwnerModel.counterLabel(note.counter)}, sale ${OwnerModel.saleNumber(note.sale)}, request ${note.number}"),
+                    ui.words(note.words.say()),
+                    ui.button("Start a refund for this sale") { showQueue(note.counter, note.sale) },
+                    ui.button("Dismiss this note") {
+                        if (attempt(msg) { n.dismissRefundNote(note.index) } != null) showRefundNotes(AppWords.noteDismissed)
+                    },
+                    gap = 10,
+                ),
             )
         }
         views.add(msg)
     }
-    views.add(backButton { showHome() })
-    page(views)
+    screen("Refund notes", views, listOf(backButton { showHome() }), back = { showHome() })
 }
 
 internal fun Controller.showNotes(): Unit = withNode { n ->
     val msg = Slot(act)
     val views = ArrayList<View>()
-    views.add(ui.text("Notes", 22f, bold = true))
-    views.add(ui.text("The lines the node and the link logged since the last time this screen was opened.", 15f))
+    views.add(para("The lines the node and the link logged since the last time this screen was opened."))
     val lines = attempt(msg) { n.notes() }
     if (lines == null) {
         views.add(msg)
     } else if (lines.isEmpty()) {
         views.add(ui.text("No new lines.", 16f))
     } else {
-        views.add(ui.text(lines.joinToString("\n") { Format.cleanForeign(it) }, 13f, mono = true))
+        views.add(line(lines.joinToString("\n") { Format.cleanForeign(it) }, muted = true, mono = true))
     }
-    views.add(backButton { showHome() })
-    page(views)
+    screen("Notes", views, listOf(backButton { showHome() }), back = { showHome() })
 }
 
 // ---- settings and about ---------------------------------------------------------------------------------------------------------
@@ -591,8 +618,6 @@ internal fun Controller.showNotes(): Unit = withNode { n ->
 internal fun Controller.showSettings(): Unit = withNode { n ->
     val msg = Slot(act)
     val views = ArrayList<View>()
-    views.add(ui.text("Settings", 22f, bold = true))
-    views.add(ui.text("What this phone holds as the shop's settings. This is a read-only view: changes go through Change settings.", 15f))
     var failed = false
     val held = try {
         n.settings()
@@ -601,62 +626,49 @@ internal fun Controller.showSettings(): Unit = withNode { n ->
         failed = true
         null
     }
+    var sub: String? = null
     if (failed) {
         views.add(msg)
     } else if (held == null) {
         views.add(ui.words(AppWords.noSettingsYet))
     } else {
-        for ((name, value) in OwnerModel.settingsLines(held)) {
-            views.add(ui.text("$name\n$value", 15f))
-        }
+        sub = OwnerLook.settingsSub(held.version)
+        val (table, rest) = OwnerLook.instantTable(OwnerModel.settingsLines(held))
+        views.add(instantCard(table))
+        val folded = OwnerLook.settingsFolded(rest)
+        if (folded.isNotEmpty()) views.add(foldedCard(folded))
     }
-    views.add(
-        ui.primary("Change settings") {
-            settingsDraft = SettingsDraft()
-            showChangeSettings()
-        },
-    )
-    views.add(backButton { showHome() })
-    page(views)
+    views.add(line("What this phone holds as the shop's settings. This is a read-only view: changes go through Change settings.", muted = true))
+    val change = ui.primary("Change settings") {
+        settingsDraft = SettingsDraft()
+        showChangeSettings()
+    }
+    screen("Settings", views, listOf(change), back = { showHome() }, sub = sub)
 }
 
 internal fun Controller.showAbout() {
-    page(
-        listOf(
-            ui.text("OpenBMT Owner ${Controller.VERSION}", 22f, bold = true),
-            ui.text("Not for real funds. No independent security audit has been done. First build: it has not been run on a phone yet.", 16f, bold = true),
-            label("Keep the app open"),
-            ui.text(
-                "The wallet is followed while this app is on the screen, and it stops when you leave the app or the screen goes off, " +
-                    "unless Watch in the background is on. Then a service keeps following the wallet and tells the counters it is watching, " +
-                    "and Android shows a notification while it runs. It never starts by itself after the phone restarts.",
-                16f,
-            ),
-            label("Keys"),
-            ui.text(
-                "This phone holds Key 1 only. It never holds Key 2 or Key 3, and it never signs a spend by itself: " +
-                    "a spend leaves this app as a request for the Key app, and money moves only after the Key app has approved it.",
-                16f,
-            ),
-            label("Screenshots"),
-            ui.text("Screenshots and screen recordings of this app are blocked, because its screens show balances and addresses.", 16f),
-            label("Tor"),
-            ui.text("Every connection goes through Orbot on this phone. If Orbot is not running the app sends nothing and says so.", 16f),
-            label("The till"),
-            ui.text(
-                "The Till screen reads the shop's orders from Square or Clover with a read-only sign-in that you paste once. " +
-                    "The sign-in is sealed on this phone, is never shown again and can be removed. The orders are read about once a minute, " +
-                    "only while the app is on the screen, through Orbot, and are matched against the counters' sales on this phone. " +
-                    "An alert you acknowledge is marked on this phone only. It has not been tried against a real till account yet.",
-                16f,
-            ),
-            label("Not built yet"),
-            ui.text(
-                "The link to the counters for a wallet made on this phone; " +
-                    "the books; archiving paid entries.",
-                16f,
-            ),
-            ui.button("Back") { showHome() },
-        ),
+    val sections = listOf(
+        "Keep the app open" to
+            "The wallet is followed while this app is on the screen, and it stops when you leave the app or the screen goes off, " +
+            "unless Watch in the background is on. Then a service keeps following the wallet and tells the counters it is watching, " +
+            "and Android shows a notification while it runs. It never starts by itself after the phone restarts.",
+        "Keys" to
+            "This phone holds Key 1 only. It never holds Key 2 or Key 3, and it never signs a spend by itself: " +
+            "a spend leaves this app as a request for the Key app, and money moves only after the Key app has approved it.",
+        "Screenshots" to "Screenshots and screen recordings of this app are blocked, because its screens show balances and addresses.",
+        "Tor" to "Every connection goes through Orbot on this phone. If Orbot is not running the app sends nothing and says so.",
+        "The till" to
+            "The Till screen reads the shop's orders from Square or Clover with a read-only sign-in that you paste once. " +
+            "The sign-in is sealed on this phone, is never shown again and can be removed. The orders are read about once a minute, " +
+            "only while the app is on the screen, through Orbot, and are matched against the counters' sales on this phone. " +
+            "An alert you acknowledge is marked on this phone only. It has not been tried against a real till account yet.",
+        "Not built yet" to
+            "The link to the counters for a wallet made on this phone; " +
+            "the books; archiving paid entries.",
     )
+    val views = ArrayList<View>()
+    views.add(ui.text("OpenBMT Owner ${Controller.VERSION}", 26f, bold = true))
+    views.add(ui.text("Not for real funds. No independent security audit has been done. First build: it has not been run on a phone yet.", 16f, bold = true))
+    for ((title, text) in sections) views.add(stack(label(title), ui.text(text, 16f), gap = 6))
+    screen("About", views, listOf(backButton { showHome() }), back = { showHome() })
 }

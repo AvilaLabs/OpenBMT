@@ -24,12 +24,9 @@ internal fun Controller.showAddCounter(message: SayWords? = null) {
         return
     }
     val views = ArrayList<View>()
-    views.add(ui.text("Add a counter", 22f, bold = true))
     message?.let { views.add(ui.words(it)) }
     for (line in CounterModel.explanation) views.add(ui.text(line, 16f))
-    views.add(ui.primary("Scan the counter's code") { scanCounter() })
-    views.add(ui.button("Back") { showHome() })
-    page(views)
+    screen("Add a counter", views, listOf(ui.primary("Scan the counter's code") { scanCounter() }, ui.button("Back") { showHome() }), back = { showHome() })
 }
 
 /**
@@ -42,10 +39,7 @@ private fun Controller.scanCounter() {
         is SourceResult.Failed -> showAddCounter(r.words)
     }
     scan.begin(
-        show = { v ->
-            tick = null
-            act.show(v)
-        },
+        show = { v -> showScan(v) },
         onBytes = { give(SourceResult.Failed(AppWords.counterNotACode)) },
         onFailed = { f -> give(ScanResult.failed(f.off, f.problem, f.words)) },
         onCancel = { give(SourceResult.Failed(AppWords.counterScanCancelled)) },
@@ -63,7 +57,7 @@ private fun Controller.readCounter(bytes: ByteArray) {
         begin()
         return
     }
-    page(listOf(ui.words(AppWords.counterReading)))
+    waiting(AppWords.counterReading)
     main.post {
         try {
             showCounterCheck(n, n.counterScan(bytes))
@@ -82,52 +76,40 @@ private fun Controller.readCounter(bytes: ByteArray) {
 private fun Controller.showCounterCheck(n: OwnerNode, s: CounterScan) {
     val msg = Slot(act)
     val views = ArrayList<View>()
-    views.add(ui.text("Check the counter", 22f, bold = true))
-    views.add(label("The counter calls itself"))
-    views.add(ui.text(CounterModel.nameOf(s.name), 18f, bold = true))
-    views.add(ui.text(CounterModel.wordsLine(s.sessionWords), 30f, bold = true))
-    views.add(ui.words(AppWords.counterCompare))
+    views.add(stack(label("The counter calls itself"), ui.text(CounterModel.nameOf(s.name), 18f, bold = true)))
+    views.add(wordCards(CounterModel.wordsLine(s.sessionWords)))
     views.add(ui.words(AppWords.sharesNote(s.shares.size)))
-    for (line in CounterModel.shareLines(s.shares)) views.add(ui.text(line, 14f, mono = true))
-    views.add(ui.text(CounterModel.windowLine(s.windowSecs), 15f))
+    views.add(stack(*CounterModel.shareLines(s.shares).map { line(it, muted = true, mono = true) }.toTypedArray(), gap = 4))
+    views.add(line(CounterModel.windowLine(s.windowSecs), muted = true))
     val price = if (s.needsRate) {
         views.add(ui.words(AppWords.counterPriceNeeded))
-        numberField(act, "Dollars for one bitcoin").also { views.add(it) }
+        numberInput("Dollars for one bitcoin").also { views.add(it.view) }.field
     } else {
         null
     }
-    views.add(
-        ui.primary("The four words match") {
-            when (val f = if (price == null) Form.Ok(0L) else CounterModel.price(price.text.toString())) {
-                is Form.Refused -> msg.show(ui.words(f.words))
-                is Form.Ok -> attempt(msg) { n.counterConfirm(nowSecs(), s.pairing, f.value) }?.let { showCounterQueued(it) }
-            }
-        },
-    )
-    views.add(
-        ui.danger("The words differ") {
-            if (attempt(msg) { n.cancel(s.pairing) } != null) {
-                page(listOf(ui.words(AppWords.counterCancelled), ui.button("Back") { showHome() }))
-            }
-        },
-    )
     views.add(msg)
-    views.add(ui.button("Back") { showHome() })
-    page(views)
+    val same = ui.primary("The four words match") {
+        when (val f = if (price == null) Form.Ok(0L) else CounterModel.price(price.text.toString())) {
+            is Form.Refused -> msg.show(ui.words(f.words))
+            is Form.Ok -> attempt(msg) { n.counterConfirm(nowSecs(), s.pairing, f.value) }?.let { showCounterQueued(it) }
+        }
+    }
+    val differ = ui.danger("The words differ") {
+        if (attempt(msg) { n.cancel(s.pairing) } != null) {
+            centre(AppWords.counterCancelled, listOf(ui.button("Back") { showHome() }), title = "Check the counter", back = { showHome() })
+        }
+    }
+    screen("Check the counter", views, listOf(same, ui.button("Back") { showHome() }, differ), back = { showHome() }, words = AppWords.counterCompare)
 }
 
 /** What the node queued: the settings with their shares, and the first batch. The approval comes next. */
 private fun Controller.showCounterQueued(q: CounterQueued) {
     val views = ArrayList<View>()
-    views.add(ui.text("Counter queued", 22f, bold = true))
     views.add(ui.words(q.words.say()))
-    views.add(label("Shares of the instant limit"))
-    for (line in CounterModel.shareLines(q.shares)) views.add(ui.text(line, 14f, mono = true))
-    views.add(ui.text(CounterModel.batchLine(q.batchCount), 15f))
-    views.add(ui.text(CounterModel.nextLine, 15f))
-    views.add(ui.primary("Build the request for the Key app") { showSpend() })
-    views.add(ui.button("Later") { showHome() })
-    page(views)
+    views.add(stack(label("Shares of the instant limit"), *CounterModel.shareLines(q.shares).map { line(it, muted = true, mono = true) }.toTypedArray(), gap = 4))
+    views.add(line(CounterModel.batchLine(q.batchCount)))
+    views.add(line(CounterModel.nextLine, bold = true))
+    screen("Counter queued", views, listOf(ui.primary("Build the request for the Key app") { showSpend() }, ui.button("Later") { showHome() }))
 }
 
 /**
@@ -143,10 +125,10 @@ internal fun Controller.showCounterCode(w: WaitingCounter, back: () -> Unit) {
     val made = try {
         n.counterBundle(w.counter)
     } catch (e: OwnerException) {
-        page(listOf(ui.words(e.sayWords()), ui.button("Back") { back() }))
+        centre(e.sayWords(), listOf(ui.button("Back") { back() }))
         return
     } catch (e: LinkageError) {
-        page(listOf(ui.words(AppWords.libraryMissing(e.message)), ui.button("Back") { back() }))
+        centre(AppWords.libraryMissing(e.message), listOf(ui.button("Back") { back() }))
         return
     }
     val shown = AnimatedQrView.make(
@@ -156,23 +138,19 @@ internal fun Controller.showCounterCode(w: WaitingCounter, back: () -> Unit) {
     val view = shown.view
     val step = CounterModel.codeStep(view != null, made.withBatch, view?.animated == true)
     val msg = Slot(act)
-    val views = ArrayList<View>()
-    views.add(ui.text("Code for ${CounterModel.nameOf(w.name)}", 22f, bold = true))
-    views.add(ui.words(step.words))
-    if (view != null) views.add(view)
+    val actions = ArrayList<android.widget.Button>()
     if (step.done) {
-        views.add(
+        actions.add(
             ui.primary("The counter shows Paired") {
                 if (attempt(msg) { n.counterDelivered(w.counter) } != null) {
-                    page(listOf(ui.words(AppWords.counterDelivered), ui.primary("Done") { showHome() }))
+                    centre(AppWords.counterDelivered, listOf(ui.primary("Done") { showHome() }), title = "Owner")
                 }
             },
         )
     }
-    views.add(ui.button("Show again") { showCounterCode(w, back) })
-    views.add(msg)
-    views.add(ui.button("Back") { back() })
-    page(views)
+    actions.add(ui.button("Show again") { showCounterCode(w, back) })
+    actions.add(ui.button("Back") { back() })
+    codeScreen("Code for ${CounterModel.nameOf(w.name)}", step.words, view, listOf(msg), actions, back = back)
 }
 
 /** The counters whose approved pairing waits to be handed over, each with a button to show its code. Empty when none waits. */
@@ -182,8 +160,12 @@ internal fun Controller.waitingCounterViews(n: OwnerNode, msg: Slot, back: () ->
     val views = ArrayList<View>()
     views.add(label("Counters waiting for their code"))
     for (w in rows) {
-        views.add(ui.text(CounterModel.nameOf(w.name) + "\n" + OwnerModel.counterLabel(w.counter), 14f, mono = true))
-        views.add(ui.button(CounterModel.showCodeLabel(w)) { showCounterCode(w, back) })
+        views.add(
+            stack(
+                ui.text(CounterModel.nameOf(w.name) + "\n" + OwnerModel.counterLabel(w.counter), 14f, mono = true),
+                ui.button(CounterModel.showCodeLabel(w)) { showCounterCode(w, back) },
+            ),
+        )
     }
     return views
 }

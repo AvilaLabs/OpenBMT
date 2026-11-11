@@ -101,6 +101,9 @@ object AppModelTest {
 
     private fun source(path: String): String = File(appDir, path).readText()
 
+    /** How many times [part] is in [text]. */
+    private fun occurs(text: String, part: String): Int = text.split(part).size - 1
+
     private fun hex(n: Int, v: Int) = (0 until n).joinToString("") { "%02x".format((v + it) and 0xff) }
 
     /** A setup text, with the lines of [extra] added and the lines named in [without] left out. */
@@ -600,7 +603,7 @@ object AppModelTest {
     private fun oa_10_every_word_a_person_reads_is_the_librarys_or_checked() {
         // The words of the app are checked in wordsTests; here, that the screens show the library's words and write none of their own.
         val screens = source("src/android/Screens.kt") + source("src/android/Approval.kt")
-        for (field in listOf("health.words", "receipts.words", "m.words", "r.stage.words", "c.stage.words", "o.stage.words", "a.words", "note.words", "row.words", "o.words", "s.words", "it.words")) {
+        for (field in listOf("health.words", "r.words", "m.words", "r.stage.words", "c.stage.words", "o.stage.words", "a.words", "note.words", "row.words", "o.words", "s.words", "it.words")) {
             ok(screens.contains(field), "the screens show the library's $field")
         }
         ok(AppWords.all().all { SayCheck.problem(it.second) == null }, "every fixed words of the app pass the checks")
@@ -921,7 +924,7 @@ object AppModelTest {
         ok(AppWords.posAcknowledged.what.contains("on this phone only") && AppWords.posAcknowledged.what.contains("do not learn"), "and says that it stays on the phone")
         ok(screen.contains("n.posSetup(args)") && screen.indexOf("n.posSetup(args)") < screen.indexOf("sealToken(t, n, rollback = true)"), "the library judges the till before the token is sealed")
         ok(screen.contains("rollback") && screen.contains("n.posRemove()"), "a token that cannot be sealed takes the till off again")
-        ok(source("src/android/Screens.kt").contains("ui.button(\"Till\") { showTill() }"), "the home screen has the button")
+        ok(source("src/android/Screens.kt").contains("RowItem(\"Till\") { showTill() }"), "a group page of home has the row")
         ok(source("src/android/Screens.kt").contains("It has not been tried against a real till account yet."), "the About screen says it has not been tried")
         for (w in listOf(AppWords.posNotConnected, AppWords.posNeedsLink, AppWords.posTokenNotAccepted, AppWords.posConnected, AppWords.posRemoved, AppWords.posAcknowledged, AppWords.posTokenMissing, AppWords.posAddressRefused, AppWords.posPageTooLong, AppWords.posReadCutOff, AppWords.posNotReached("x"))) {
             ok(SayCheck.problem(w) == null && (w.tone != Tones.STOP || w.who != Who.NOBODY), "every till state has words that pass the checks: ${w.heading}")
@@ -987,7 +990,7 @@ object AppModelTest {
         val code = approval.substringAfter("private fun Controller.showBuiltCode(").substringBefore("private fun Controller.showResponse(")
         ok(code.contains("AnimatedQrView.make(") && code.contains("ExchangeModel.WHO, ExchangeModel.TYPE_BYTES, built.request"), "the code is the request, as ur:bytes")
         ok(code.contains("ExchangeModel.codeHeight(act.resources.displayMetrics.heightPixels)"), "at the Key app's size")
-        ok(code.contains("ExchangeModel.codeStep(") && code.contains("if (step.done) views.add(ui.primary(\"Done\")"), "Done only with a code on the screen")
+        ok(code.contains("ExchangeModel.codeStep(") && code.contains("if (step.done) actions.add(ui.primary(\"Done\")"), "Done only with a code on the screen")
         ok(code.contains("showResponse(built, back, ExchangeStep.Response(null))"), "Done leads to the response")
         val key = File(appDir, "../key-android/src/android/Controller.kt")
         if (key.isFile) {
@@ -1081,7 +1084,7 @@ object AppModelTest {
 
     private fun oa_22_a_counter_is_read_by_the_camera_and_judged_by_the_node() {
         val add = source("src/android/AddCounter.kt")
-        ok(source("src/android/Screens.kt").contains("ui.button(\"Add a counter\") { showAddCounter() }"), "adding a counter starts on the home screen")
+        ok(source("src/android/Screens.kt").contains("RowItem(\"Add a counter\") { showAddCounter() }"), "adding a counter starts on the home screen")
         val first = add.substringAfter("internal fun Controller.showAddCounter(").substringBefore("private fun Controller.scanCounter()")
         ok(first.contains("for (line in CounterModel.explanation)") && first.contains("ui.primary(\"Scan the counter's code\") { scanCounter() }"), "the explanation, then the button that opens the camera")
         ok(Regex("scan\\.begin\\(").findAll(add).count() == 1 && !add.contains("requestPermissions"), "the camera is asked for in one place, from that button")
@@ -1089,7 +1092,7 @@ object AppModelTest {
         ok(scan.contains("UrScan(CounterModel.REQUEST_TYPES, ExchangeModel.WHO)") && scan.contains("CounterModel.requestResult(payload)"), "ur:bytes only, and the length is the model's")
         ok(scan.contains("AppWords.counterNotACode") && scan.contains("AppWords.counterScanCancelled") && scan.contains("ScanResult.failed(f.off, f.problem, f.words)"), "every other end of the scan has words")
         val read = add.substringAfter("private fun Controller.readCounter(").substringBefore("private fun Controller.showCounterCheck(")
-        ok(read.contains("AppWords.counterReading") && read.indexOf("page(") < read.indexOf("main.post") && read.indexOf("main.post") < read.indexOf("n.counterScan(bytes)"), "a page says it takes a moment, and is drawn before the call")
+        ok(read.contains("AppWords.counterReading") && read.indexOf("waiting(") < read.indexOf("main.post") && read.indexOf("main.post") < read.indexOf("n.counterScan(bytes)"), "a page says it takes a moment, and is drawn before the call")
         ok(!read.contains("async(") && !read.contains("Thread"), "the call stays on the screen thread")
         ok(read.contains("e.sayWords()"), "a refusal of the node is shown with its words")
         ok(Regex("n\\.counterScan\\(").findAll(add).count() == 1, "one place gives the code to the node")
@@ -1103,7 +1106,7 @@ object AppModelTest {
     private fun oa_23_the_owner_compares_the_words_and_confirms_the_settings_and_batch() {
         val add = source("src/android/AddCounter.kt")
         val check = add.substringAfter("private fun Controller.showCounterCheck(").substringBefore("private fun Controller.showCounterQueued(")
-        ok(check.contains("CounterModel.nameOf(s.name)") && check.contains("CounterModel.wordsLine(s.sessionWords), 30f, bold = true"), "the name, cleaned, and the four words large")
+        ok(check.contains("CounterModel.nameOf(s.name)") && check.contains("wordCards(CounterModel.wordsLine(s.sessionWords))"), "the name, cleaned, and the four words as cards")
         ok(check.contains("AppWords.counterCompare") && check.contains("AppWords.sharesNote(s.shares.size)") && check.contains("CounterModel.shareLines(s.shares)") && check.contains("CounterModel.windowLine(s.windowSecs)"), "the words to compare, the shares and the window")
         ok(check.contains("if (s.needsRate)") && check.contains("CounterModel.price(price.text.toString())") && check.contains("Dollars for one bitcoin"), "a phone with no settings asks for the price of a bitcoin, and the model checks its shape")
         ok(check.indexOf("is Form.Refused -> msg.show(") < check.indexOf("n.counterConfirm("), "nothing is queued before the price is accepted")
@@ -1116,7 +1119,7 @@ object AppModelTest {
         ok(AppWords.counterCompare.what.contains("Key app shows them too"), "the words are compared on the Key app too")
         ok(AppWords.counterPriceNeeded.next.contains("price of one bitcoin in whole dollars") && !check.contains("Satoshis to a dollar"), "the price's words say what to type, and no satoshis are asked for")
         ok(!source("src/android/Screens.kt").contains("changing the shop's settings"), "the About screen no longer lists the settings editor as not built")
-        ok(!source("src/android/Screens.kt").substringAfter("label(\"Not built yet\")").contains("adding a counter"), "and does not say it is not built")
+        ok(!source("src/android/Screens.kt").substringAfter("\"Not built yet\" to").contains("adding a counter"), "and does not say it is not built")
     }
 
     private fun oa_24_the_code_for_the_counter_is_the_bundle_the_node_made() {
@@ -1284,7 +1287,7 @@ object AppModelTest {
         val read = c.substringAfter("private fun Controller.readAnswer(").substringBefore("private fun Controller.showRootCheck(")
         ok(Regex("OwnerCeremony\\.readAnswer\\(").findAll(c).count() == 1 && read.contains("e.sayWords()"), "one place gives the code to the library, and a refusal is shown with its words")
         val root = c.substringAfter("private fun Controller.showRootCheck(").substringBefore("// ---- the third step")
-        ok(root.contains("CeremonyModel.wordsLine(read.keyAppRootWords), 30f, bold = true") && root.contains("AppWords.ceremonyCompareRoot"), "the Key app's identity words, large")
+        ok(root.contains("wordCards(CeremonyModel.wordsLine(read.keyAppRootWords))") && root.contains("AppWords.ceremonyCompareRoot"), "the Key app's identity words, large")
         ok(root.contains("ui.primary(\"The Key app shows the same words\")") && root.contains("ui.danger(\"They differ\")"), "the two answers")
         ok(root.contains("d.answer = null") && root.contains("AppWords.ceremonyRootDiffers"), "a difference throws the answer away, and the words say why")
         ok(root.contains("if (read.key2 == null) showKey2(d, null) else buildWallet(d)"), "key 2 is asked for only when the answer holds none")
@@ -1309,8 +1312,8 @@ object AppModelTest {
     private fun oa_29_the_wallet_is_compared_on_both_phones_before_the_setup_is_finished_and_saved() {
         val c = ceremonyCode()
         val check = c.substringAfter("private fun Controller.showWalletCheck(").substringBefore("// ---- the fifth step")
-        ok(check.contains("CeremonyModel.wordsLine(built.checksumWords), 30f, bold = true") && check.contains("CeremonyModel.fingerprintLines(built.fingerprints)") && check.contains("mono = true"), "the checksum words large and the fingerprints in monospace")
-        ok(check.contains("built.pairsWords.say()") && check.contains("CeremonyModel.pairLines(built.pairs)") && check.contains("ui.text(built.firstReceiveAddress, 14f, mono = true)"), "the pairs words, the pairs and the first address in monospace")
+        ok(check.contains("wordCards(CeremonyModel.wordsLine(built.checksumWords))") && check.contains("CeremonyModel.fingerprintLines(built.fingerprints)") && check.contains("mono = true"), "the checksum words large and the fingerprints in monospace")
+        ok(check.contains("built.pairsWords.say()") && check.contains("CeremonyModel.pairLines(built.pairs)") && check.contains("line(built.firstReceiveAddress, muted = true, mono = true)"), "the pairs words, the pairs and the first address in monospace")
         val code = c.substringAfter("private fun Controller.showSetupCode(").substringBefore("/** The owner says the words differ")
         ok(code.contains("AnimatedQrView.make(") && code.contains("ExchangeModel.WHO, ExchangeModel.TYPE_BYTES, built.walletSetup") && code.contains("ExchangeModel.codeHeight(act.resources.displayMetrics.heightPixels)"), "the setup is shown as ur:bytes, at the size of the other codes")
         ok(code.contains("AppWords.ceremonyCompareSetup") && code.contains("if (step.done) {"), "the words to compare, and the buttons only with a code on the screen")
@@ -1432,9 +1435,9 @@ object AppModelTest {
     private fun oa_30_the_slow_calls_draw_a_page_first_and_every_number_is_the_librarys() {
         val c = ceremonyCode()
         val make = c.substringAfter("internal fun Controller.startCeremony()").substringBefore("/** Key 1 is made:")
-        ok(make.indexOf("page(listOf(ui.words(AppWords.ceremonyMakingKey)))") in 1 until make.indexOf("main.post") && make.indexOf("main.post") < make.indexOf("OwnerCeremony.makeKey1("), "a page says it takes a moment, and is drawn before the call")
+        ok(make.indexOf("waiting(AppWords.ceremonyMakingKey)") in 1 until make.indexOf("main.post") && make.indexOf("main.post") < make.indexOf("OwnerCeremony.makeKey1("), "a page says it takes a moment, and is drawn before the call")
         val build = c.substringAfter("private fun Controller.buildWallet(").substringBefore("/** The wallet was refused")
-        ok(build.indexOf("page(listOf(ui.words(AppWords.ceremonyBuilding)))") in 1 until build.indexOf("main.post") && build.indexOf("main.post") < build.indexOf("OwnerCeremony.buildWallet("), "the same for the wallet")
+        ok(build.indexOf("waiting(AppWords.ceremonyBuilding)") in 1 until build.indexOf("main.post") && build.indexOf("main.post") < build.indexOf("OwnerCeremony.buildWallet("), "the same for the wallet")
         ok(!make.contains("async(") && !build.contains("async(") && !make.contains("Thread") && !build.contains("Thread"), "the calls stay on the screen thread")
         ok(c.contains("OwnerCeremony.defaults(AppConfig.NETWORK)") && c.contains("defaults.batchMinCount") && c.contains("defaults.refundDepth") && c.contains("defaults.birthday"), "the batch minimum, the refund depth and the first block come from the library")
         for (bad in listOf("1000", "1_000", "967", "refundDepth = ", "birthday = ", "BATCH_MIN", "batchMinCount = ")) ok(!c.contains(bad), "Ceremony.kt writes no number of the ceremony: $bad")
@@ -1535,7 +1538,7 @@ object AppModelTest {
         ok(lock.contains("first.setText(\"\")") && lock.contains("again.setText(\"\")"), "the typed PIN is cleared from the fields")
         ok(AppWords.choosePin.heading == "Choose a PIN" && AppWords.upgradePin.heading == "Set a PIN for key 1", "the words of the two screens")
         ok(AppWords.choosePin.next.contains("6 digits") && AppWords.choosePin.next.contains("8 characters"), "the words say the rule")
-        ok(source("src/android/Screens.kt").contains("ui.button(\"Change the PIN\") { showChangePin(null) }"), "the home screen offers the change of PIN")
+        ok(source("src/android/Screens.kt").contains("RowItem(\"Change the PIN\") { showChangePin(null) }"), "the home screen offers the change of PIN")
         ok(lock.contains("triedPin({ showChangePin(it) }"), "a wrong current PIN counts like a try")
     }
 
@@ -1668,7 +1671,7 @@ object AppModelTest {
     private fun connectBox(): String = source("src/android/ConnectBox.kt")
 
     private fun oa_40_the_home_screen_opens_a_screen_that_saves_nothing() {
-        ok(source("src/android/Screens.kt").contains("ui.button(\"Connect your Box\") { showConnectBox() }"), "connecting a Box starts on the home screen")
+        ok(source("src/android/Screens.kt").contains("RowItem(\"Connect your Box\") { showConnectBox() }"), "connecting a Box starts on the home screen")
         val first = connectBox().substringAfter("internal fun Controller.showConnectBox(").substringBefore("private fun Controller.scanBox()")
         ok(first.contains("for (line in ConnectBoxModel.explanation)") && ConnectBoxModel.explanation.size == 2, "two lines of steps")
         ok(first.contains("\"Look for the Box\"") && first.contains("\"Scan the Box's address\""), "the two buttons")
@@ -1692,7 +1695,7 @@ object AppModelTest {
         ok(ConnectBoxModel.linkFor(onion, "127.0.0.1:9050").proxy == "127.0.0.1:9050", "an onion name goes through the proxy")
         ok(ConnectBoxModel.linkFor("192.168.1.20:8080", "127.0.0.1:9050").proxy.isEmpty(), "an address on the network goes directly")
         val look = connectBox().substringAfter("private fun Controller.lookForBox(").substringBefore("private fun Controller.showBoxFound(")
-        ok(look.contains("BoxWords.looking") && look.indexOf("page(") < look.indexOf("async("), "a page says it takes a moment, and is drawn first")
+        ok(look.contains("BoxWords.looking") && look.indexOf("waiting(") < look.indexOf("async("), "a page says it takes a moment, and is drawn first")
         ok(look.contains("async({ n.boxFetchClaim(link) })") && Regex("boxFetchClaim\\(").findAll(connectBox()).count() == 1, "one place fetches, off the screen thread")
         ok(look.contains("refusal(") && look.contains("showConnectBox("), "a refusal is the library's words, on the first screen")
         ok(Regex("scan\\.begin\\(").findAll(connectBox()).count() == 1 && !connectBox().contains("requestPermissions"), "the camera is asked for in one place, from the button")
@@ -1705,7 +1708,7 @@ object AppModelTest {
         ok(found.contains("found.needsRate") && found.contains("CounterModel.price(") && found.contains("BoxWords.priceNeeded"), "a phone with no settings asks for the price")
         ok(found.contains("n.boxQueue(found.claim, f.value)") && Regex("boxQueue\\(").findAll(connectBox()).count() == 1, "one call queues the claim and the settings")
         val queued = connectBox().substringAfter("private fun Controller.showBoxQueued(").substringBefore("internal fun Controller.waitingBoxViews(")
-        ok(queued.contains("ConnectBoxModel.wordsLine(q.words), 30f") && queued.contains("BoxWords.compare") && queued.contains("showSpend()"), "the four words large, to compare, then the request screen")
+        ok(queued.contains("wordCards(ConnectBoxModel.wordsLine(q.words))") && queued.contains("BoxWords.compare") && queued.contains("showSpend()"), "the four words as cards, to compare, then the request screen")
         ok(ConnectBoxModel.wordsLine(listOf("a", "b", "c", "d")) == "a   b   c   d", "the words on one line")
         ok(ConnectBoxModel.keyGroups(ByteArray(32) { it.toByte() }).split(' ').size == 8, "the key is eight groups")
         ok(ConnectBoxModel.boxLabel(byteArrayOf(1, 2, 3, 4, 5)) == "Box 01020304", "a short name")
@@ -1717,7 +1720,7 @@ object AppModelTest {
         ok(wait.contains("n.boxesPending()") && wait.contains("p.welcomeReady") && wait.contains("boxAddresses[") && wait.contains("handOver("), "the list of Boxes being added, each with its address")
         val over = c.substringAfter("private fun Controller.handOver(").substringBefore("/** What saving the link did")
         ok(Regex("boxDeliver\\(").findAll(c).count() == 1 && over.contains("async({ n.boxDeliver(link, p.boxKey) })"), "one call hands it over, off the screen thread")
-        ok(over.contains("BoxWords.handing") && over.indexOf("page(") < over.indexOf("async("), "a page says it takes a moment")
+        ok(over.contains("BoxWords.handing") && over.indexOf("waiting(") < over.indexOf("async("), "a page says it takes a moment")
         ok(over.contains("BoxWords.handoverKept") && over.contains("refusal("), "a refusal is the library's words and the app's: the approval is kept")
         ok(over.indexOf("showSaveLink(") > over.indexOf("boxDeliver(") && over.contains("if (delivered != null)"), "the link is saved only for a Box that took it")
         ok(BoxWords.handoverKept.what.contains("stays queued") && BoxWords.handoverKept.next.contains("new one"), "the words say what is kept and what to do")
@@ -1850,7 +1853,7 @@ object AppModelTest {
         ok(h.contains("TODO(OA-60)"), "the relock across the scan and the pickers is named as not done")
         val screens = source("src/android/Screens.kt")
         ok(screens.contains("if (key2Signer) {") && screens.contains("n.signerBuild(nowSecs(), f.value)") && screens.contains("n.buildRequest(nowSecs(), f.value)"), "a spend goes to the signer only when key 2 is one")
-        ok(screens.contains("ui.button(\"Register the wallet on your signer\")"), "the wallet screen's row")
+        ok(screens.contains("RowItem(\"Register the wallet on your signer\")"), "the wallet screen's row")
         val c = ceremonyCode()
         ok(c.contains("HardwareModel.key2IsSigner(built.pairs)") && c.contains("keepsSignerMark = true"), "the ceremony notes key 2's holder")
         ok(source("src/android/Controller.kt").contains("if (!keepsSignerMark) {"), "a pasted setup clears the note")
@@ -1953,7 +1956,7 @@ object AppModelTest {
         ok(w.next == "Turn it on to keep instant sales working. Android shows a notification while it runs.", "the next step")
         ok(SayCheck.problem(w) == null && SayCheck.problem(AppWords.watchNotificationsOff) == null, "the words pass the checks")
         val screen = source("src/android/WatchScreen.kt")
-        ok(screen.contains("AppWords.watchSetting") && screen.contains("AppWords.watchSettingMore") && source("src/android/Screens.kt").contains("ui.button(AppWords.watchSetting.heading) { showWatch() }"), "the home screen opens it")
+        ok(screen.contains("AppWords.watchSetting") && screen.contains("AppWords.watchSettingMore") && source("src/android/Screens.kt").contains("RowItem(AppWords.watchSetting.heading) { showWatch() }"), "the home screen opens it")
         val controller = source("src/android/Controller.kt")
         ok(controller.contains("watchStore.enabled()") && !controller.contains("setEnabled(true)"), "only the setting's own screen turns it on")
         val order = screen.substringAfter("private fun Controller.makeWatchReady(")
@@ -2097,6 +2100,76 @@ object AppModelTest {
         }
     }
 
+    // ---- the look of the screens (OA-91 to OA-93) -------------------------------------------------------------
+
+    private fun oa_91_every_screen_is_a_page_of_the_shared_look_and_adds_no_word_but_the_group_titles() {
+        val screens = listOf(
+            "Screens.kt", "Controller.kt", "Lock.kt", "Ceremony.kt", "Approval.kt", "Hardware.kt", "AddCounter.kt", "ConnectBox.kt",
+            "SettingsEdit.kt", "WatchScreen.kt", "PosScreen.kt",
+        )
+        for (name in screens) {
+            val src = source("src/android/$name")
+            ok(!src.contains("ui.page(") && !src.contains("page(listOf(") && !src.contains("page(views)"), "$name has no screen of the old look")
+            ok(!src.contains("ui.words(WordsModel") && !src.contains("wordsBelowBand") && !src.contains("SaleBand"), "$name uses no band of the old look")
+            ok(!src.contains("Feedback.outcome") && !src.contains("Sound."), "$name plays no outcome sound")
+        }
+        val ui = source("src/android/OwnerUi.kt")
+        ok(ui.contains("ui.resultPanel(") && ui.contains("ui.working(") && ui.contains("ui.compactWords(") && ui.contains("ui.cameraFrame(") && ui.contains("ui.titleBlock("), "the types of screen are the shared ones")
+        ok(source("src/android/Controller.kt").contains("showScan(v)") && occurs(source("src/android/Ceremony.kt"), "showScan(v)") == 2, "the scanners go through the camera frame")
+        val withSnap = screens.filter { source("src/android/$it").contains("LogoSnapView(") }
+        ok(withSnap == listOf("Ceremony.kt") && occurs(source("src/android/Ceremony.kt"), "LogoSnapView(") == 1, "the logo clicks together in one place, the new wallet's screen: $withSnap")
+        ok(source("src/android/Ceremony.kt").contains("ceremonyLogoShown"), "and once")
+        val shaking = listOf("Lock.kt", "ConnectBox.kt").filter { source("src/android/$it").contains("Feedback.shake(") }
+        ok(shaking == listOf("Lock.kt", "ConnectBox.kt") && occurs(source("src/android/Lock.kt"), "Feedback.shake(") == 1, "a refused PIN shakes its field")
+        val newWords = setOf(OwnerLook.WAITING_TITLE, OwnerLook.MONEY, OwnerLook.DEVICES, OwnerLook.ALERTS, OwnerLook.SETTINGS)
+        ok(newWords == setOf("Open approvals and queues", "Money", "Counters and devices", "Alerts and notes", "Settings and this phone"), "the group titles are as written")
+    }
+
+    private fun oa_92_home_is_one_status_card_one_card_of_four_rows_and_a_card_for_the_counts_it_has() {
+        for (sats in listOf(0L, 1L, 1_204_500L, 12_345_678_901L)) {
+            val b = OwnerLook.balance(Format.sats(sats), 912_345, 912_400)
+            val whole = "The wallet can spend ${Format.sats(sats)}. Checked to block 912345 of 912400."
+            ok(b.sentence() == whole, "the balance sentence is the three parts joined: ${b.sentence()}")
+            ok(b.lead == "The wallet can spend" && b.amount == Format.sats(sats) && b.checked == "Checked to block 912345 of 912400.", "the parts")
+        }
+        ok(OwnerLook.moneyTitles.take(3) == listOf("Receipts and merge", "Cash out", "Old addresses"), "the first three entries of Money")
+        ok(OwnerLook.moneyTitles.last() == "Waiting to be delivered" && OwnerLook.moneyTitles.toSet().size == OwnerLook.moneyTitles.size, "the rest, each once")
+        ok(OwnerLook.moneySub(0, OwnerModel.sendsLine(0)) == "Receipts and merge, Cash out, Old addresses", "no payments line when none is in progress")
+        ok(OwnerLook.moneySub(2, OwnerModel.sendsLine(2)) == "Receipts and merge, Cash out, Old addresses\n2 payments in progress.", "the payments line under the sub")
+        val rows = OwnerLook.waitingRows(listOf("Open approvals" to 1, "Waiting to be delivered" to 0, "Refund queue" to null, "Refund notes" to 3))
+        ok(rows.map { it.title to it.count } == listOf("Open approvals" to 1, "Refund notes" to 3), "a row for a count above zero only")
+        ok(OwnerLook.waitingRows(listOf("Open approvals" to null, "Refund queue" to null)).isEmpty(), "no count, no row")
+        val home = source("src/android/Screens.kt").substringAfter("internal fun Controller.showHome()").substringBefore("/** The screen a row of the waiting card opens. */")
+        for (call in listOf(".sessions()", ".outbox()", ".queue()", ".mergeOffer()", ".receiptsLine()", ".refundNotes()")) ok(!home.contains(call), "home makes no call $call")
+        for (call in listOf(".status()", ".linkState()", ".sendStates()")) ok(home.contains(call), "home keeps its call $call")
+        ok(home.contains("showSpend()") && home.contains("ui.primary(\"Spend\")"), "Spend is the footer's primary")
+    }
+
+    private fun oa_93_settings_cut_the_instant_lines_into_a_table_and_fold_the_rest() {
+        val lines = OwnerModel.settingsLines(sampleSettings())
+        val (table, rest) = OwnerLook.instantTable(lines)
+        ok(table.columns == listOf("Largest instant sale", "Instant total"), "the two columns")
+        ok(table.rows.map { it.first } == listOf("Light check", "Own node", "Box reports"), "a row for each check, its first letter in upper case: ${table.rows}")
+        ok(table.rows.all { it.second == "$7 (7,000 sats)" && it.third == "$7 (7,000 sats)" }, "the values are the lines' own")
+        ok(table.tolerance == ("Underpayment still counted" to "1.05%"), "the tolerance")
+        // The only change to a label is the first letter of the row name: "Box reports" keeps its capital in the line.
+        val back = lines.filter { l -> table.rows.any { (name, perSale, total) -> table.columns.any { c -> l.first.equals("$c, $name", ignoreCase = true) && l.second in listOf(perSale, total) } } }
+        ok(back.size == 6 && table.rows.size * 2 == back.size, "every row cuts back into the two lines it came from: ${back.map { it.first }}")
+        ok(back.all { l -> table.rows.any { r -> l.first.substringAfter(", ").replaceFirstChar { it.uppercase() } == r.first } }, "and only the first letter differs")
+        ok(rest.none { it.first.startsWith("Largest instant sale") || it.first.startsWith("Instant total") }, "the lines of the table are not left in the rest")
+        val folded = OwnerLook.settingsFolded(rest)
+        ok(folded.map { it.first } == listOf("Payments", "Refunds and overrides", "Safety", "Counters' shares", "Lightning node"), "the groups: ${folded.map { it.first }}")
+        val every = folded.flatMap { it.second }
+        val expected = lines.filter { it.first != "Version" && it !in back && it.first != "Underpayment still counted" }
+        ok(every.toSet() == expected.toSet() && every.size == expected.size, "every other line is in a group once, and the version is the bar's")
+        ok(OwnerLook.settingsSub(3) == "Settings version 3", "the sub-line")
+        val withWatch = OwnerLook.settingsFolded(rest + ("Watch in the background" to "on"))
+        ok(withWatch.last() == ("Watch in the background" to listOf("Watch in the background" to "on")), "a line about the watch has its group")
+        ok(OwnerLook.capital("light check") == "Light check" && OwnerLook.capital("") == "", "the first letter")
+        val page = source("src/android/Screens.kt").substringAfter("internal fun Controller.showSettings()").substringBefore("internal fun Controller.showAbout()")
+        ok(page.contains("instantCard(table)") && page.contains("foldedCard(folded)") && page.contains("ui.primary(\"Change settings\")"), "the page has the card, the folds and the footer's primary")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
@@ -2118,7 +2191,7 @@ object AppModelTest {
         val rules = Regex("^- \\*\\*OA-(\\d\\d)\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules == rules.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
         // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-79 for more.
-        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..90)
+        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..93)
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")

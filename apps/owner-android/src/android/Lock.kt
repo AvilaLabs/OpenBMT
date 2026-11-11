@@ -6,6 +6,7 @@ import android.widget.EditText
 import java.io.IOException
 import java.security.GeneralSecurityException
 import org.openbmt.app.ButtonKind
+import org.openbmt.app.Feedback
 import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.SayWords
 import org.openbmt.app.SealedFile
@@ -48,7 +49,7 @@ internal fun Controller.secret(hint: String, numeric: Boolean): EditText = ui.fi
  * about a second, and the person sees that the app is working and not stuck (OA-62, OA-12).
  */
 private fun Controller.slow(block: () -> Unit) {
-    page(listOf(ui.words(AppWords.working)))
+    waiting(AppWords.working)
     main.postDelayed({ block() }, 100)
 }
 
@@ -113,13 +114,15 @@ internal fun Controller.askNewPin(
     back: (() -> Unit)?,
     onLocked: (ByteArray) -> Unit,
 ) {
-    val kind = ui.choice(listOf("PIN: 6 digits or more", "Passphrase: 8 characters or more"))
-    val first = secret("PIN", true)
-    val again = secret("The same PIN again", true)
+    val kind = ui.chips(listOf("PIN: 6 digits or more", "Passphrase: 8 characters or more"))
+    val first = secret("", true)
+    val again = secret("", true)
+    val firstBox = ui.labelled("PIN", first)
+    val againBox = ui.labelled("The same PIN again", again)
     kind.setOnCheckedChangeListener { _, _ ->
         val numeric = ui.chosen(kind) != 1
-        first.hint = if (numeric) "PIN" else "Passphrase"
-        again.hint = if (numeric) "The same PIN again" else "The same passphrase again"
+        ((firstBox as android.view.ViewGroup).getChildAt(0) as android.widget.TextView).text = if (numeric) "PIN" else "Passphrase"
+        ((againBox as android.view.ViewGroup).getChildAt(0) as android.widget.TextView).text = if (numeric) "The same PIN again" else "The same passphrase again"
         for (f in listOf(first, again)) {
             f.setText("")
             f.inputType = if (numeric) {
@@ -132,10 +135,8 @@ internal fun Controller.askNewPin(
     }
     val views = ArrayList<View>()
     message?.let { views.add(ui.words(it)) }
-    views.add(ui.words(if (upgrade) AppWords.upgradePin else AppWords.choosePin))
-    views.addAll(listOf(kind, first, again))
-    views.add(
-        ui.button("Set the PIN", ButtonKind.Primary) {
+    views.addAll(listOf(kind, firstBox, againBox))
+    val set = ui.button("Set the PIN", ButtonKind.Primary) {
             val pin = first.text.toString()
             val same = pin == again.text.toString()
             first.setText("")
@@ -150,10 +151,11 @@ internal fun Controller.askNewPin(
                     showMessage(AppWords.libraryMissing(e.message)) { askNewPin(text, upgrade, null, back, onLocked) }
                 }
             }
-        },
-    )
-    back?.let { views.add(ui.button("Back") { it() }) }
-    page(views)
+        }
+    val actions = ArrayList<android.widget.Button>()
+    actions.add(set)
+    back?.let { actions.add(ui.button("Back") { it() }) }
+    screen("Choose a PIN", views, actions, back = back, words = if (upgrade) AppWords.upgradePin else AppWords.choosePin)
 }
 
 /** A setup saved before the lock existed opens only into this step, then is saved again locked (OA-61). */
@@ -161,7 +163,7 @@ private fun Controller.showUpgrade(stored: ByteArray) {
     // A bare text that is not a setup is a fault with words; no PIN is asked for it.
     if (readSetup(stored.copyOf()) == null) return render()
     askNewPin(stored, true, null, null) { locked ->
-        page(listOf(ui.words(AppWords.working)))
+        waiting(AppWords.working)
         async({ setupFile().save(locked) }) { r ->
             when (val e = r.exceptionOrNull()) {
                 null -> {
@@ -182,7 +184,7 @@ private fun Controller.showUpgrade(stored: ByteArray) {
 /** What the screens say about the wrong tries so far: the tries left, from the 5th wrong one. */
 private fun Controller.triesLines(check: Tries.Check): List<View> {
     val out = ArrayList<View>()
-    if (Tries.showsTriesLeft(check.record.wrong)) out.add(ui.text(Tries.triesLeftText(check.record.wrong), 16f, bold = true))
+    if (Tries.showsTriesLeft(check.record.wrong)) out.add(ui.text(Tries.triesLeftText(check.record.wrong), 16f, bold = true, colour = ui.pal.stop.ink))
     return out
 }
 
@@ -199,7 +201,7 @@ internal fun Controller.showUnlock(stored: ByteArray, message: SayWords?) {
         } catch (_: IOException) {
         }
     }
-    val field = secret("PIN or passphrase", false)
+    val field = secret("", false)
     val countdown = ui.text("", 20f, bold = true)
     val unlock = ui.primary("Unlock") {
         val pin = field.text.toString()
@@ -219,12 +221,11 @@ internal fun Controller.showUnlock(stored: ByteArray, message: SayWords?) {
     }
     update()
     val views = ArrayList<View>()
-    views.add(ui.words(message ?: AppWords.unlockSetup))
     views.addAll(triesLines(check))
     views.add(countdown)
-    views.add(field)
-    views.add(unlock)
-    page(views)
+    views.add(ui.labelled("PIN or passphrase", field))
+    screen("Owner", views, listOf(unlock), words = message ?: AppWords.unlockSetup, logo = true, lead = ui.lock())
+    shakeIfRefused(field)
     if (check.waitLeft > 0) {
         val tick = object : Runnable {
             override fun run() {
@@ -274,7 +275,12 @@ internal fun Controller.triedPin(back: (SayWords?) -> Unit, op: () -> Unit, done
             done()
         } catch (e: OwnerException) {
             if (e.rule == RULE_PIN_WRONG) {
-                if (before.wrong >= Tries.WIPE_AT) wipe() else back(e.sayWords())
+                if (before.wrong >= Tries.WIPE_AT) {
+                    wipe()
+                } else {
+                    shake = true
+                    back(e.sayWords())
+                }
             } else {
                 giveBack()
                 showMessage(e.sayWords()) { back(null) }
@@ -315,9 +321,9 @@ internal fun Controller.wipe() {
     try {
         WipeOrder.run(appDir, SetupLock.WIPE_FILES, tries) { OwnerWipe.deleteKey() }
     } catch (e: IOException) {
-        return page(listOf(ui.words(AppWords.wipeFailed(e.message)), ui.primary("Try again") { begin() }))
+        return centre(AppWords.wipeFailed(e.message), listOf(ui.primary("Try again") { begin() }))
     }
-    page(listOf(ui.words(AppWords.wiped), ui.primary("Continue") { begin() }))
+    centre(AppWords.wiped, listOf(ui.primary("Continue") { begin() }))
 }
 
 // ---- changing the PIN ---------------------------------------------------------------------------------------------------
@@ -327,17 +333,17 @@ internal fun Controller.showChangePin(message: SayWords?) {
     val now = nowSecs()
     val check = Tries.check(tries.read(now), now)
     if (check.wipe) return wipe()
-    val current = secret("Current PIN or passphrase", false)
-    val first = secret("New PIN or passphrase", false)
-    val again = secret("The new one again", false)
+    val current = secret("", false)
+    val first = secret("", false)
+    val again = secret("", false)
     val views = ArrayList<View>()
-    views.add(ui.text("Change the PIN", 20f, bold = true))
     message?.let { views.add(ui.words(it)) }
     views.addAll(triesLines(check))
     if (check.waitLeft > 0) views.add(ui.text("Wait ${Tries.waitText(check.waitLeft)}", 20f, bold = true))
-    views.addAll(listOf(current, first, again))
-    views.add(
-        ui.button("Change the PIN", ButtonKind.Primary) {
+    views.add(ui.labelled("Current PIN or passphrase", current))
+    views.add(ui.labelled("New PIN or passphrase", first))
+    views.add(ui.labelled("The new one again", again))
+    val change = ui.button("Change the PIN", ButtonKind.Primary) {
             val old = current.text.toString()
             val new = first.text.toString()
             val same = new == again.text.toString()
@@ -349,10 +355,16 @@ internal fun Controller.showChangePin(message: SayWords?) {
                 val stored = setupFile().load() ?: throw IOException("the setup is missing")
                 setupFile().save(OwnerLock.changePin(stored, old, new))
             }) { showMessage(AppWords.pinChanged) { begin() } }
-        },
-    )
-    views.add(ui.button("Back") { begin() })
-    page(views)
+        }
+    screen("Change the PIN", views, listOf(change, ui.button("Back") { begin() }), back = { begin() }, lead = ui.lock())
+    shakeIfRefused(current)
+}
+
+/** A PIN that was just refused: the field that was made for the screen shakes once (OA-91). */
+private fun Controller.shakeIfRefused(field: EditText) {
+    if (!shake) return
+    shake = false
+    field.post { Feedback.shake(field) }
 }
 
 private const val RULE_PIN_WRONG = "pin-wrong"

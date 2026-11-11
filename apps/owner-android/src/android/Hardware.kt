@@ -13,7 +13,7 @@ import org.openbmt.app.SayWords
 import org.openbmt.app.UrScan
 import org.openbmt.app.UrWords
 import org.openbmt.app.Who
-import org.openbmt.app.WordsModel
+import org.openbmt.app.RowItem
 import org.openbmt.owner.FirstAddress
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
@@ -39,7 +39,7 @@ internal class SignerRun(val session: ByteArray, val number: Long, val built: or
 
 private val MAX_RETURNED = 4 * 1024 * 1024
 
-private fun Controller.words(w: SayWords): View = ui.words(WordsModel.of(w))
+private fun Controller.words(w: SayWords): View = ui.words(w)
 
 /** The screen thread's view of the first address record, read once from its file. */
 internal fun Controller.firstAddressNow(n: OwnerNode): FirstAddress? {
@@ -61,11 +61,12 @@ internal fun Controller.firstAddressNow(n: OwnerNode): FirstAddress? {
 /** OA-72: the line of the wallet screen about the first address. */
 internal fun Controller.firstAddressView(n: OwnerNode): View {
     val record = firstAddressNow(n)
-    return ui.text(HardwareModel.firstAddressLine(record) { Format.localTime(it) }, 15f, bold = record?.checked != true)
+    return ui.text(HardwareModel.firstAddressLine(record) { Format.localTime(it) }, 14f, bold = record?.checked != true)
 }
 
-private fun Controller.codeView(made: AnimatedQrMade): View =
-    made.view ?: words(made.words ?: UrWords.cannotShow(Who.OWNER))
+/** What goes under a code that could not be made: the words that say so. */
+private fun Controller.codeFallback(made: AnimatedQrMade): List<View> =
+    if (made.view != null) emptyList() else listOf(words(made.words ?: UrWords.cannotShow(Who.OWNER)))
 
 private fun Controller.codeHeight(): Int = ExchangeModel.codeHeight(act.resources.displayMetrics.heightPixels)
 
@@ -73,14 +74,8 @@ private fun Controller.codeHeight(): Int = ExchangeModel.codeHeight(act.resource
 
 /** OA-70: the three ways, each with the devices that use it as examples. The person picks; no choice is made for them. */
 internal fun Controller.showTransportChoice(onPick: (Transport) -> Unit, back: () -> Unit) {
-    val views = ArrayList<View>()
-    views.add(words(HardwareWords.chooseTransport))
-    for (choice in HardwareModel.transports) {
-        views.add(ui.button(choice.label) { onPick(choice.transport) })
-        views.add(ui.text(choice.examples, 14f))
-    }
-    views.add(ui.button("Back") { back() })
-    page(views)
+    val rows = HardwareModel.transports.map { choice -> RowItem(choice.label, choice.examples) { onPick(choice.transport) } }
+    screen("The signer", listOf(ui.rows(rows)), listOf(ui.button("Back") { back() }), back = back, words = HardwareWords.chooseTransport)
 }
 
 // ---- registering the wallet on the signer (OA-71) -----------------------------------------------------------------------
@@ -94,12 +89,12 @@ private fun Controller.showRegisterWallet(transport: Transport, back: () -> Unit
     val n = node ?: return begin()
     val msg = Slot(act)
     // The wallet's name for the signer is made by the library from the shop's name; the app holds none, so it gives none.
-    val r = attempt(msg) { n.signerRegistration("") } ?: return page(listOf(msg, ui.button("Back") { back() }))
+    val r = attempt(msg) { n.signerRegistration("") } ?: return screen("Register the wallet", listOf(msg), listOf(ui.button("Back") { back() }), back = back)
     val way = HardwareModel.textWay(transport, r)
     val views = ArrayList<View>()
-    views.add(words(HardwareWords.registerIntro))
     val label = if (transport == Transport.File) "Save the wallet file" else "Show the wallet code"
-    views.add(
+    val actions = ArrayList<android.widget.Button>()
+    actions.add(
         ui.primary(label) {
             when (way) {
                 RegistrationWay.TextFile -> saveBytes(
@@ -112,12 +107,12 @@ private fun Controller.showRegisterWallet(transport: Transport, back: () -> Unit
             }
         },
     )
-    views.add(ui.button("Show the descriptor code") { showDescriptorCode(transport, r, back) })
-    views.add(ui.button("Check the first address") { showFirstAddress(transport, r, back) })
+    actions.add(ui.button("Show the descriptor code") { showDescriptorCode(transport, r, back) })
+    actions.add(ui.button("Check the first address") { showFirstAddress(transport, r, back) })
+    actions.add(ui.button("Back") { back() })
     shown?.let { views.add(it) }
     views.add(msg)
-    views.add(ui.button("Back") { back() })
-    page(views)
+    screen("Register the wallet", views, actions, back = back, words = HardwareWords.registerIntro)
 }
 
 /** The wallet's text as one plain code, `ur:bytes`, or a BBQr set of type U. */
@@ -130,13 +125,19 @@ private fun Controller.showWalletCode(transport: Transport, r: Registration, way
             AnimatedQrView.makeBbqr(act, Who.OWNER, HardwareModel.BBQR_TEXT, text, height, HardwareModel.BBQR_PART_CHARS)
         else -> AnimatedQrView.make(act, Who.OWNER, HardwareModel.UR_TEXT, text, height, HardwareModel.UR_FRAGMENT_BYTES)
     }
-    page(listOf(words(HardwareWords.registerIntro), codeView(made), ui.button("Back") { showRegisterWallet(transport, back) }))
+    codeScreen(
+        "Show the wallet code", HardwareWords.registerIntro, made.view, codeFallback(made),
+        listOf(ui.button("Back") { showRegisterWallet(transport, back) }), back = { showRegisterWallet(transport, back) },
+    )
 }
 
 /** The descriptor of the receive addresses as `ur:crypto-output`. */
 private fun Controller.showDescriptorCode(transport: Transport, r: Registration, back: () -> Unit) {
     val made = AnimatedQrView.make(act, Who.OWNER, HardwareModel.UR_OUTPUT, r.outputCbor, codeHeight(), HardwareModel.UR_FRAGMENT_BYTES)
-    page(listOf(words(HardwareWords.registerIntro), codeView(made), ui.button("Back") { showRegisterWallet(transport, back) }))
+    codeScreen(
+        "Show the descriptor code", HardwareWords.registerIntro, made.view, codeFallback(made),
+        listOf(ui.button("Back") { showRegisterWallet(transport, back) }), back = { showRegisterWallet(transport, back) },
+    )
 }
 
 // ---- the first address (OA-72) -------------------------------------------------------------------------------------------------
@@ -145,18 +146,20 @@ private fun Controller.showFirstAddress(transport: Transport, r: Registration, b
     val n = node ?: return begin()
     val msg = Slot(act)
     val views = ArrayList<View>()
-    views.add(words(HardwareWords.firstAddressCompare))
-    views.add(ui.text(HardwareModel.grouped(r.firstAddress), 26f, bold = true, mono = true))
-    views.add(ui.primary("They match") { recordFirstAddress(n, true, back, msg) })
-    views.add(
+    views.add(ui.text(HardwareModel.grouped(r.firstAddress), 22f, bold = true, mono = true))
+    views.add(msg)
+    val actions = listOf(
+        ui.primary("They match") { recordFirstAddress(n, true, back, msg) },
+        ui.button("Check later") { recordFirstAddress(n, false, back, msg) },
+        ui.button("Back") { showRegisterWallet(transport, back) },
         ui.danger("They differ") {
-            page(listOf(words(HardwareWords.firstAddressDiffers), ui.button("Back") { showRegisterWallet(transport, back) }))
+            centre(
+                HardwareWords.firstAddressDiffers, listOf(ui.button("Back") { showRegisterWallet(transport, back) }),
+                title = "First address", back = { showRegisterWallet(transport, back) },
+            )
         },
     )
-    views.add(ui.button("Check later") { recordFirstAddress(n, false, back, msg) })
-    views.add(msg)
-    views.add(ui.button("Back") { showRegisterWallet(transport, back) })
-    page(views)
+    screen("First address", views, actions, back = { showRegisterWallet(transport, back) }, words = HardwareWords.firstAddressCompare)
 }
 
 /** Stores the choice as the library's record (op 125), then says what it means. */
@@ -171,7 +174,7 @@ private fun Controller.recordFirstAddress(n: OwnerNode, checked: Boolean, back: 
     firstAddress = FirstAddress(checked, now)
     firstAddressRead = true
     val said = if (checked) HardwareWords.firstAddressChecked else HardwareWords.firstAddressSkipped
-    page(listOf(words(said), ui.primary("Done") { back() }))
+    centre(said, listOf(ui.primary("Done") { back() }), title = "First address")
 }
 
 // ---- a payment on its way to the signer (OA-70, OA-73) -----------------------------------------------------------------------
@@ -218,19 +221,22 @@ private fun Controller.showSignerExport(run: SignerRun, message: List<View> = em
     val n = node ?: return begin()
     val msg = Slot(act)
     val file = attempt(msg) { n.signerExport(nowSecs(), run.session, run.number) }
-        ?: return page(listOf(msg, ui.button("Back") { showTransportChoice({ t -> run.transport = t; showSignerExport(run) }, run.back) }))
+        ?: return screen(
+            "The signer", listOf(msg), listOf(ui.button("Back") { showTransportChoice({ t -> run.transport = t; showSignerExport(run) }, run.back) }),
+            back = { showTransportChoice({ t -> run.transport = t; showSignerExport(run) }, run.back) },
+        )
     val views = ArrayList<View>()
-    views.add(words(HardwareWords.signerReview))
     views.add(ui.text(compareText(file), 14f, mono = true))
     val height = codeHeight()
+    val actions = ArrayList<android.widget.Button>()
+    fun code(made: AnimatedQrMade) {
+        made.view?.let { views.add(ui.codeCard(it)) }
+        views.addAll(codeFallback(made))
+    }
     when (run.transport) {
-        Transport.Ur -> views.add(
-            codeView(AnimatedQrView.make(act, Who.OWNER, HardwareModel.UR_PSBT, file.psbt, height, HardwareModel.UR_FRAGMENT_BYTES)),
-        )
-        Transport.Bbqr -> views.add(
-            codeView(AnimatedQrView.makeBbqr(act, Who.OWNER, HardwareModel.BBQR_PSBT, file.psbt, height, HardwareModel.BBQR_PART_CHARS)),
-        )
-        Transport.File -> views.add(
+        Transport.Ur -> code(AnimatedQrView.make(act, Who.OWNER, HardwareModel.UR_PSBT, file.psbt, height, HardwareModel.UR_FRAGMENT_BYTES))
+        Transport.Bbqr -> code(AnimatedQrView.makeBbqr(act, Who.OWNER, HardwareModel.BBQR_PSBT, file.psbt, height, HardwareModel.BBQR_PART_CHARS))
+        Transport.File -> actions.add(
             ui.primary("Save the file") {
                 saveBytes(
                     file.fileName, file.psbt, HardwareModel.MIME_BYTES,
@@ -243,9 +249,9 @@ private fun Controller.showSignerExport(run: SignerRun, message: List<View> = em
     }
     views.addAll(message)
     views.add(msg)
-    views.add(ui.button("Next: bring it back") { showSignerReturn(run, null) })
-    views.add(ui.button("Back") { showTransportChoice({ t -> run.transport = t; showSignerExport(run) }, run.back) })
-    page(views)
+    actions.add(ui.button("Next: bring it back") { showSignerReturn(run, null) })
+    actions.add(ui.button("Back") { showTransportChoice({ t -> run.transport = t; showSignerExport(run) }, run.back) })
+    screen("The signer", views, actions, back = { showTransportChoice({ t -> run.transport = t; showSignerExport(run) }, run.back) }, words = HardwareWords.signerReview)
 }
 
 /** OA-73: each payment, the change and the fee, one to a line, as the signer's screen shows them. */
@@ -263,8 +269,6 @@ internal fun Controller.showSignerReturn(run: SignerRun, message: SayWords?) {
     val msg = Slot(act)
     message?.let { msg.show(words(it)) }
     val views = ArrayList<View>()
-    views.add(words(HardwareWords.returnedNeeded))
-    views.add(ui.primary("Scan the signer's code") { scanReturned(n, run) })
     views.add(
         ui.button("Open a file") {
             // The library reads a binary or base64 PSBT, a hex or binary transaction and refuses what is over 4 MiB.
@@ -274,8 +278,11 @@ internal fun Controller.showSignerReturn(run: SignerRun, message: SayWords?) {
         },
     )
     views.add(msg)
-    views.add(ui.button("Back") { showSignerExport(run) })
-    page(views)
+    screen(
+        "The signer", views,
+        listOf(ui.primary("Scan the signer's code") { scanReturned(n, run) }, ui.button("Back") { showSignerExport(run) }),
+        back = { showSignerExport(run) }, words = HardwareWords.returnedNeeded,
+    )
 }
 
 /**
@@ -286,10 +293,7 @@ internal fun Controller.showSignerReturn(run: SignerRun, message: SayWords?) {
 private fun Controller.scanReturned(n: OwnerNode, run: SignerRun) {
     val parts = PartsProgress(HardwareWords.partsMissing) { read, of -> HardwareModel.partsLine(read, of) }
     scan.begin(
-        show = { v ->
-            tick = null
-            act.show(v)
-        },
+        show = { v -> showScan(v) },
         onBytes = { bytes -> takeReturned(n, run, bytes) },
         onFailed = { f -> showSignerReturn(run, HardwareModel.scanFailure(f.off, f.problem, f.words)) },
         onCancel = { showSignerReturn(run, null) },
@@ -314,8 +318,7 @@ private fun Controller.takeReturned(n: OwnerNode, run: SignerRun, bytes: ByteArr
 private fun Controller.showSignerTaken(n: OwnerNode, run: SignerRun, taken: SignerTaken) {
     val views = ArrayList<View>()
     for (s in taken.sends) {
-        views.add(ui.words(s.words.say()))
-        views.add(ui.text("Transaction ${s.txid}", 12f, mono = true))
+        views.add(stack(ui.words(s.words.say()), line("Transaction ${s.txid}", muted = true, mono = true)))
     }
     // A session with another payment still in it goes on with that one; otherwise the Key app's request follows.
     val more = try {
@@ -323,11 +326,9 @@ private fun Controller.showSignerTaken(n: OwnerNode, run: SignerRun, taken: Sign
     } catch (_: OwnerException) {
         false
     }
-    views.add(
-        ui.primary("Done") {
-            if (more) showSignerExport(SignerRun(run.session, run.number + 1, run.built, run.back).also { it.transport = run.transport })
-            else run.built?.let { showBuilt(it, run.back) } ?: run.back()
-        },
-    )
-    page(views)
+    val done = ui.primary("Done") {
+        if (more) showSignerExport(SignerRun(run.session, run.number + 1, run.built, run.back).also { it.transport = run.transport })
+        else run.built?.let { showBuilt(it, run.back) } ?: run.back()
+    }
+    screen("The signer", views, listOf(done))
 }

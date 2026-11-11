@@ -6,6 +6,7 @@ import android.view.View
 import android.widget.EditText
 import android.widget.RadioGroup
 import org.openbmt.app.ButtonKind
+import org.openbmt.app.RowItem
 import org.openbmt.app.SayWords
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
@@ -42,26 +43,23 @@ private inline fun Controller.withHeld(back: (SayWords?) -> Unit, block: (OwnerN
 
 /** The first screen of the editor: one button for each group, then Review. [message] is what the last step said. */
 internal fun Controller.showChangeSettings(message: SayWords? = null) {
-    withHeld({ w -> page(listOf(ui.text("Change settings", 22f, bold = true), ui.words(w ?: AppWords.noSettingsYet), ui.primary("Back") { showSettings() })) }) { _, held ->
+    withHeld({ w -> screen("Change settings", emptyList(), listOf(ui.primary("Back") { showSettings() }), back = { showSettings() }, words = w ?: AppWords.noSettingsYet) }) { _, held ->
         val views = ArrayList<View>()
-        views.add(ui.text("Change settings", 22f, bold = true))
-        views.add(ui.text("Settings version ${held.version}", 14f))
-        views.add(ui.words(AppWords.editIntro))
         message?.let { views.add(ui.words(it)) }
-        for (g in SettingsEditModel.groups) {
-            views.add(ui.button(g.words.heading) { showEditGroup(g) })
-        }
-        views.add(ui.button(AppWords.editGroupShares.heading) { showEditShares() })
-        views.add(ui.button(AppWords.editGroupLightning.heading) { showEditLightning() })
-        views.add(ui.primary("Review") { showEditReview() })
-        views.add(
+        val rows = ArrayList<RowItem>()
+        for (g in SettingsEditModel.groups) rows.add(RowItem(g.words.heading) { showEditGroup(g) })
+        rows.add(RowItem(AppWords.editGroupShares.heading) { showEditShares() })
+        rows.add(RowItem(AppWords.editGroupLightning.heading) { showEditLightning() })
+        views.add(ui.rows(rows))
+        val actions = listOf(
+            ui.primary("Review") { showEditReview() },
+            ui.button("Back") { showSettings() },
             ui.danger("Start over") {
                 settingsDraft = SettingsDraft()
                 showChangeSettings()
             },
         )
-        views.add(ui.button("Back") { showSettings() })
-        page(views)
+        screen("Change settings", views, actions, back = { showSettings() }, sub = OwnerLook.settingsSub(held.version), words = AppWords.editIntro)
     }
 }
 
@@ -73,29 +71,29 @@ private fun Controller.showEditGroup(group: EditGroup) {
     withHeld({ w -> showChangeSettings(w) }) { _, held ->
         val msg = Slot(act)
         val views = ArrayList<View>()
-        views.add(ui.text(group.words.heading, 22f, bold = true))
-        views.add(ui.words(group.words))
         val inputs = ArrayList<FieldInput>()
         for (f in group.fields) {
-            views.add(label(f.label))
-            views.add(ui.text(f.words.what, 15f))
-            views.add(ui.text("Now: ${SettingsEditModel.now(f, held)}", 15f, bold = true))
+            val part = ArrayList<View>()
+            part.add(label(f.label))
+            part.add(para(f.words.what))
+            part.add(ui.text("Now: ${SettingsEditModel.now(f, held)}", 15f, bold = true))
             val typed = settingsDraft.typed[f.id]
             if (f.kind == FieldKind.Switch) {
                 val on = (typed ?: f.read(held).toString()) == "1"
                 val options = if (f.id == "customer_wifi") listOf("Yes or unsure", "No") else listOf("On", "Off")
-                val choice = ui.choice(options, if (on) 0 else 1)
-                views.add(choice)
+                val choice = ui.chips(options, if (on) 0 else 1)
+                part.add(choice)
                 inputs.add(FieldInput(f, null, choice))
             } else {
                 val field = ui.field(f.words.next)
                 field.setText(typed ?: SettingsEditModel.input(f, held))
-                views.add(field)
-                views.add(ui.text(f.words.next, 13f))
+                part.add(field)
+                part.add(line(f.words.next, muted = true))
                 inputs.add(FieldInput(f, field, null))
             }
+            views.add(stack(*part.toTypedArray(), gap = 6))
         }
-        views.add(
+        val done =
             ui.button("Done", ButtonKind.Primary) {
                 val keep = LinkedHashMap<String, String?>()
                 for (i in inputs) {
@@ -120,11 +118,9 @@ private fun Controller.showEditGroup(group: EditGroup) {
                     if (text == null) settingsDraft.typed.remove(id) else settingsDraft.typed[id] = text
                 }
                 showChangeSettings()
-            },
-        )
+            }
         views.add(msg)
-        views.add(ui.button("Back") { showChangeSettings() })
-        page(views)
+        screen(group.words.heading, views, listOf(done, ui.button("Back") { showChangeSettings() }), back = { showChangeSettings() }, words = group.words)
     }
 }
 
@@ -133,12 +129,9 @@ private fun Controller.showEditShares() {
     withHeld({ w -> showChangeSettings(w) }) { _, held ->
         val msg = Slot(act)
         val views = ArrayList<View>()
-        views.add(ui.text(AppWords.editGroupShares.heading, 22f, bold = true))
-        views.add(ui.words(AppWords.editGroupShares))
         if (held.counters.isEmpty()) {
             views.add(ui.words(AppWords.editNoCounters))
-            views.add(ui.button("Back") { showChangeSettings() })
-            page(views)
+            screen(AppWords.editGroupShares.heading, views, listOf(ui.button("Back") { showChangeSettings() }), back = { showChangeSettings() }, words = AppWords.editGroupShares)
             return@withHeld
         }
         val total = ui.text("", 15f, bold = true)
@@ -147,7 +140,6 @@ private fun Controller.showEditShares() {
             total.text = SettingsEditModel.sharesLine(inputs.map { it.second.text.toString() })
         }
         for (s in held.counters) {
-            views.add(label(SettingsEditModel.shareNow(s)))
             val field = ui.field("Percent")
             field.setText(settingsDraft.shares[SettingsEditModel.counterKey(s.counter)] ?: SettingsEditModel.percentInput(s.bps))
             field.addTextChangedListener(
@@ -159,12 +151,12 @@ private fun Controller.showEditShares() {
                     override fun afterTextChanged(s: Editable?) = refresh()
                 },
             )
-            views.add(field)
+            views.add(ui.labelled(SettingsEditModel.shareNow(s), field))
             inputs.add(s.counter to field)
         }
         views.add(total)
         refresh()
-        views.add(
+        val done =
             ui.button("Done", ButtonKind.Primary) {
                 val keep = LinkedHashMap<String, String?>()
                 for ((counter, field) in inputs) {
@@ -180,11 +172,9 @@ private fun Controller.showEditShares() {
                     if (text == null) settingsDraft.shares.remove(id) else settingsDraft.shares[id] = text
                 }
                 showChangeSettings()
-            },
-        )
+            }
         views.add(msg)
-        views.add(ui.button("Back") { showChangeSettings() })
-        page(views)
+        screen(AppWords.editGroupShares.heading, views, listOf(done, ui.button("Back") { showChangeSettings() }), back = { showChangeSettings() }, words = AppWords.editGroupShares)
     }
 }
 
@@ -193,17 +183,16 @@ private fun Controller.showEditLightning(prefill: String? = null, message: SayWo
     withHeld({ w -> showChangeSettings(w) }) { _, held ->
         val msg = Slot(act)
         val views = ArrayList<View>()
-        views.add(ui.text(AppWords.editGroupLightning.heading, 22f, bold = true))
-        views.add(ui.words(AppWords.editGroupLightning))
         views.add(ui.words(AppWords.editLightningNote))
         message?.let { views.add(ui.words(it)) }
-        views.add(label("Now"))
-        views.add(ui.text(SettingsEditModel.nodeNow(held), 13f, mono = true))
+        views.add(stack(label("Now"), line(SettingsEditModel.nodeNow(held), muted = true, mono = true)))
         val field = ui.field("Node key or address", lines = 3, mono = true)
         field.setText(prefill ?: if (settingsDraft.node == NodeChoice.Set) settingsDraft.nodeText else "")
         views.add(field)
         views.add(ui.button("Scan a code") { scanNode() })
-        views.add(
+        views.add(msg)
+        val actions = ArrayList<android.widget.Button>()
+        actions.add(
             ui.primary("Use this") {
                 when (val t = SettingsEditModel.nodeText(field.text.toString())) {
                     is Form.Refused -> msg.show(ui.words(t.words))
@@ -215,8 +204,16 @@ private fun Controller.showEditLightning(prefill: String? = null, message: SayWo
                 }
             },
         )
+        actions.add(
+            ui.button("Keep it as it is") {
+                settingsDraft.node = NodeChoice.Keep
+                settingsDraft.nodeText = ""
+                showChangeSettings()
+            },
+        )
+        actions.add(ui.button("Back") { showChangeSettings() })
         if (held.lightningNode != null) {
-            views.add(
+            actions.add(
                 ui.danger("Remove the node") {
                     settingsDraft.node = NodeChoice.Remove
                     settingsDraft.nodeText = ""
@@ -224,16 +221,7 @@ private fun Controller.showEditLightning(prefill: String? = null, message: SayWo
                 },
             )
         }
-        views.add(
-            ui.button("Keep it as it is") {
-                settingsDraft.node = NodeChoice.Keep
-                settingsDraft.nodeText = ""
-                showChangeSettings()
-            },
-        )
-        views.add(msg)
-        views.add(ui.button("Back") { showChangeSettings() })
-        page(views)
+        screen(AppWords.editGroupLightning.heading, views, actions, back = { showChangeSettings() }, words = AppWords.editGroupLightning)
     }
 }
 
@@ -247,10 +235,7 @@ private fun Controller.scanNode() {
         is SourceResult.Failed -> showEditLightning(message = r.words)
     }
     scan.begin(
-        show = { v ->
-            tick = null
-            act.show(v)
-        },
+        show = { v -> showScan(v) },
         onBytes = { give(SourceResult.Bytes(it)) },
         onFailed = { f -> give(ScanResult.failed(f.off, f.problem, f.words)) },
         onCancel = { give(SourceResult.Failed(AppWords.counterScanCancelled)) },
@@ -281,40 +266,36 @@ internal fun Controller.showEditReview() {
         }
         val msg = Slot(act)
         val views = ArrayList<View>()
-        views.add(ui.text("Review the change", 22f, bold = true))
-        views.add(ui.words(SettingsEditModel.reviewWords(p)))
+        val actions = ArrayList<android.widget.Button>()
         if (!p.nothingChanged) {
             val keyApp = SettingsEditModel.needKeyApp(p)
             if (keyApp.isNotEmpty()) {
-                views.add(label("Needs the Key app"))
-                for (line in keyApp) views.add(ui.text(line, 15f))
+                views.add(stack(label("Needs the Key app"), *keyApp.map { ui.text(it, 15f) }.toTypedArray(), gap = 6))
             }
             val delivered = SettingsEditModel.whenDelivered(p)
             if (delivered.isNotEmpty()) {
-                views.add(label("Takes effect when delivered"))
-                for (line in delivered) views.add(ui.text(line, 15f))
+                views.add(stack(label("Takes effect when delivered"), *delivered.map { ui.text(it, 15f) }.toTypedArray(), gap = 6))
             }
             SettingsEditModel.reviewShares(p)?.let { views.add(ui.text(it, 15f)) }
-            views.add(
+            actions.add(
                 ui.button("Queue the change", ButtonKind.Primary) {
                     val q = attempt(msg) { n.queueSettings(p.settings) } ?: return@button
                     settingsDraft = SettingsDraft()
                     if (q.tightening) {
-                        page(listOf(ui.words(AppWords.editQueuedTightening), ui.button("Waiting to be delivered") { showOutbox() }, ui.primary("Done") { showHome() }))
+                        centre(AppWords.editQueuedTightening, listOf(ui.primary("Done") { showHome() }, ui.button("Waiting to be delivered") { showOutbox() }))
                     } else {
-                        page(listOf(ui.words(AppWords.editQueuedLoosening), ui.primary("Build the request for the Key app") { showSpend() }, ui.button("Later") { showHome() }))
+                        centre(AppWords.editQueuedLoosening, listOf(ui.primary("Build the request for the Key app") { showSpend() }, ui.button("Later") { showHome() }))
                     }
                 },
             )
         }
         views.add(msg)
-        views.add(
-            ui.button("Back") {
-                settingsDraft.price = ""
-                showChangeSettings()
-            },
-        )
-        page(views)
+        val backToEdit = {
+            settingsDraft.price = ""
+            showChangeSettings()
+        }
+        actions.add(ui.button("Back") { backToEdit() })
+        screen("Review the change", views, actions, back = { backToEdit() }, words = SettingsEditModel.reviewWords(p))
     }
 }
 
@@ -326,23 +307,16 @@ internal fun Controller.showEditReview() {
 private fun Controller.showEditPrice(words: SayWords) {
     settingsDraft.price = ""
     val msg = Slot(act)
-    val field = numberField(act, "Dollars for one bitcoin")
-    page(
-        listOf(
-            ui.text("Today's price", 22f, bold = true),
-            ui.words(words),
-            field,
-            ui.primary("Review again") {
-                when (val r = CounterModel.price(field.text.toString())) {
-                    is Form.Refused -> msg.show(ui.words(r.words))
-                    is Form.Ok -> {
-                        settingsDraft.price = field.text.toString()
-                        showEditReview()
-                    }
-                }
-            },
-            msg,
-            ui.button("Back") { showChangeSettings() },
-        ),
-    )
+    val input = numberInput("Dollars for one bitcoin")
+    val field = input.field
+    val review = ui.primary("Review again") {
+        when (val r = CounterModel.price(field.text.toString())) {
+            is Form.Refused -> msg.show(ui.words(r.words))
+            is Form.Ok -> {
+                settingsDraft.price = field.text.toString()
+                showEditReview()
+            }
+        }
+    }
+    screen("Today's price", listOf(input.view, msg), listOf(review, ui.button("Back") { showChangeSettings() }), back = { showChangeSettings() }, words = words)
 }

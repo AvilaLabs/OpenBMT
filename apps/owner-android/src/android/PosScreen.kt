@@ -14,7 +14,7 @@ import org.openbmt.owner.OwnerException
 // (`Controller.kt`, OA-12). The sign-in is typed into a field once, sealed
 // and wiped from the field; it is never put on the screen again.
 
-private fun Controller.back(to: () -> Unit = { showHome() }): View = ui.button("Back") { to() }
+private fun Controller.back(to: () -> Unit = { showHome() }): android.widget.Button = ui.button("Back") { to() }
 
 /** Takes the typed sign-in out of memory: the field is emptied and the clipboard it may have come from is cleared (OA-16). */
 private fun Controller.forget(field: android.widget.EditText) {
@@ -24,36 +24,31 @@ private fun Controller.forget(field: android.widget.EditText) {
 
 internal fun Controller.showTill(message: SayWords? = null): Unit = withTillNode { n ->
     val views = ArrayList<View>()
-    views.add(ui.text("Till", 22f, bold = true))
     message?.let { views.add(ui.words(it)) }
     if (setup?.link == null) {
         views.add(ui.words(AppWords.posNeedsLink))
-        views.add(back())
-        return@withTillNode page(views)
+        return@withTillNode screen("Till", views, listOf(back()), back = { showHome() })
     }
     val msg = Slot(act)
     val state = attempt(msg) { n.posState() }
     if (state == null) {
         views.add(msg)
-        views.add(back())
-        return@withTillNode page(views)
+        return@withTillNode screen("Till", views, listOf(back()), back = { showHome() })
     }
     posConnected = state.setup != null
     val till = state.setup
     if (till == null) {
         views.add(ui.words(AppWords.posNotConnected))
-        views.addAll(connectForm(n, msg))
+        val form = connectForm(n, msg)
+        views.addAll(form.views)
         views.add(msg)
-        views.add(back())
-        return@withTillNode page(views)
+        return@withTillNode screen("Till", views, listOf(ui.button("Connect the till", ButtonKind.Primary) { form.connect() }, back()), back = { showHome() })
     }
-    views.add(ui.text(PosLines.till(till), 14f))
+    views.add(line(PosLines.till(till), muted = true))
     val body = Slot(act)
     views.add(body)
-    views.add(ui.primary("Read the till now") { readTillNow() })
-    views.add(label("Replace the sign-in"))
-    val token = secretField(act, "New read-only sign-in")
-    views.add(token)
+    val token = secretField(act, "")
+    views.add(ui.labelled("Replace the sign-in", token))
     views.add(
         ui.button("Seal the new sign-in") {
             when (val t = PosForms.token(token.text.toString())) {
@@ -65,7 +60,7 @@ internal fun Controller.showTill(message: SayWords? = null): Unit = withTillNode
             }
         },
     )
-    views.add(
+    val takeOff =
         ui.danger("Take the till off") {
             if (attempt(msg) { n.posRemove() } != null) {
                 posConnected = false
@@ -78,11 +73,9 @@ internal fun Controller.showTill(message: SayWords? = null): Unit = withTillNode
                     }
                 }
             }
-        },
-    )
+        }
     views.add(msg)
-    views.add(back())
-    page(views)
+    screen("Till", views, listOf(ui.primary("Read the till now") { readTillNow() }, back(), takeOff), back = { showHome() })
     tick = {
         try {
             val s = n.posState()
@@ -92,11 +85,14 @@ internal fun Controller.showTill(message: SayWords? = null): Unit = withTillNode
             out.add(ui.text(PosLines.lastRead(nowSecs(), s.lastPollAt), 15f))
             out.add(ui.text(PosLines.counts(s), 15f, bold = s.openAlerts.isNotEmpty()))
             for (a in s.openAlerts) {
-                out.add(ui.words(a.words.say()))
                 out.add(
-                    ui.button("Acknowledge this alert") {
-                        if (attempt(msg) { n.posAcknowledge(nowSecs(), a.key) } != null) showTill(AppWords.posAcknowledged)
-                    },
+                    stack(
+                        ui.words(a.words.say()),
+                        ui.button("Acknowledge this alert") {
+                            if (attempt(msg) { n.posAcknowledge(nowSecs(), a.key) } != null) showTill(AppWords.posAcknowledged)
+                        },
+                        gap = 10,
+                    ),
                 )
             }
             body.show(*out.toTypedArray())
@@ -114,39 +110,37 @@ private inline fun Controller.withTillNode(block: (OwnerNode) -> Unit) {
 }
 
 /** The fields that connect a till, and the button. The library judges what was typed; the sign-in is only checked for its shape. */
-private fun Controller.connectForm(n: OwnerNode, msg: Slot): List<View> {
+private fun Controller.connectForm(n: OwnerNode, msg: Slot): TillForm {
     val views = ArrayList<View>()
-    views.add(label("Vendor"))
-    val vendor = ui.choice(listOf("Square", "Clover"))
-    views.add(vendor)
-    views.add(label("Location"))
+    val vendor = ui.chips(listOf("Square", "Clover"))
+    views.add(stack(label("Vendor"), vendor))
     val location = ui.field("Square location id, or Clover merchant id")
-    views.add(location)
-    views.add(label("Names of the Bitcoin tender, one per line"))
+    views.add(ui.labelled("Location", location))
     val tenders = ui.field("Bitcoin", lines = 3).also { it.setText("Bitcoin") }
-    views.add(tenders)
-    views.add(label("Currencies the shop sells in"))
+    views.add(ui.labelled("Names of the Bitcoin tender, one per line", tenders))
     val currencies = ui.field("USD").also { it.setText("USD") }
-    views.add(currencies)
-    views.add(label("Read-only sign-in"))
-    views.add(ui.text("Make it in the till's system with read access to orders and payments only. It is pasted once and not shown again.", 14f))
-    val token = secretField(act, "Read-only sign-in")
-    views.add(token)
-    views.add(
-        ui.button("Connect the till", ButtonKind.Primary) {
-            val t = when (val f = PosForms.token(token.text.toString())) {
-                is Form.Refused -> return@button msg.show(ui.words(f.words))
-                is Form.Ok -> f.value
-            }
+    views.add(ui.labelled("Currencies the shop sells in", currencies))
+    val token = secretField(act, "")
+    views.add(stack(ui.labelled("Read-only sign-in", token), line("Make it in the till's system with read access to orders and payments only. It is pasted once and not shown again.", muted = true), gap = 8))
+    val connect = {
+        val t = when (val f = PosForms.token(token.text.toString())) {
+            is Form.Refused -> msg.show(ui.words(f.words)).let { null }
+            is Form.Ok -> f.value
+        }
+        if (t != null) {
             val args = PosForms.setup(ui.chosen(vendor), location.text.toString(), tenders.text.toString(), currencies.text.toString())
             // The library judges the settings first, so that a refused till seals nothing.
-            if (attempt(msg) { n.posSetup(args) } == null) return@button
-            forget(token)
-            sealToken(t, n, rollback = true)
-        },
-    )
-    return views
+            if (attempt(msg) { n.posSetup(args) } != null) {
+                forget(token)
+                sealToken(t, n, rollback = true)
+            }
+        }
+    }
+    return TillForm(views, connect)
 }
+
+/** The fields that connect a till and what the footer's button does with them. */
+private class TillForm(val views: List<View>, val connect: () -> Unit)
 
 /** Seals the token in its own file, off the screen thread; if it cannot be kept, a till just connected is taken off again. */
 private fun Controller.sealToken(token: String, n: OwnerNode, rollback: Boolean) {
