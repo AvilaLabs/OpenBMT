@@ -48,6 +48,7 @@
 )]
 
 mod call;
+mod ceremony;
 mod codec;
 mod error;
 pub mod host;
@@ -63,6 +64,10 @@ mod tests;
 pub use call::{
     dispatch, error_response, protocol_description, Registry, MAX_NODES, REQUEST_MAGIC,
     RESPONSE_MAGIC, VERSION,
+};
+pub use ceremony::{
+    AnswerView, BuildArgs, FinishArgs, FinishedView, Key1Args, Key1Made, PairView, PartView,
+    SetupFields, SetupStageView, WalletBuiltView,
 };
 pub use error::{AppError, Kind};
 pub use host::{Entry, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};

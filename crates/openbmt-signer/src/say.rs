@@ -483,6 +483,9 @@ pub fn words_for_text(text: &str) -> Option<Words> {
     if let Some(r) = fixed.into_iter().find(|r| r.to_string() == text) {
         return Some(r.words());
     }
+    if let Some(r) = crate::CeremonyRefusal::from_text(text) {
+        return Some(r.words());
+    }
     text.strip_prefix("SR-60: ")
         .map(|rest| wallet_words_for_text(rest).code("SR-60"))
 }
@@ -685,6 +688,14 @@ pub fn all_words() -> Vec<(String, Words)> {
             RegisterError::Wallet(e).words(),
         ));
     }
+    for r in crate::ALL_REFUSALS {
+        all.push((format!("CeremonyRefusal::{r:?}"), r.words()));
+    }
+    all.push(("Ceremony::Key3Taken".to_string(), crate::key3_taken_words()));
+    all.push((
+        "Ceremony::AnswerReady".to_string(),
+        crate::answer_ready_words(),
+    ));
     all.push((
         "AllowlistEntry::Waiting".to_string(),
         waiting_address_words(1_700_086_400),

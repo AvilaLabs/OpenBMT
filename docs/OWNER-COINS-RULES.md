@@ -399,6 +399,47 @@ the reply (OA-16 to OA-19).
   `docs/SCREEN-RULES.md`: what happened, why, and what to do next, with no
   rule numbers.
 
+## 9. Setting up the owner's phone
+
+The owner's phone makes key 1, reads the Key app's public answer, and builds
+the 2-of-3 wallet from the three public keys (`docs/DESIGN.md` §2.1 steps 4
+and 5). It hands the Key app the wallet setup to check, and starts its node
+from the same wallet once the owner has compared the checksum words and
+fingerprints. The Key app's side is SR-64 to SR-69 in
+`docs/SIGNER-RULES.md`; the code is `openbmt-owner` (`ceremony`) and ops 80
+to 85 of `openbmt-owner-ffi`. OC-38 and OC-39 are not used.
+
+- **OC-40.** Key 1 is made from 64 random bytes the caller passes, on the
+  BIP 48 path `m/48'/coin'/0'/2'` (coin 0 on mainnet, 1 otherwise). The
+  owner's root is a separate secret from the same bytes. The twelve
+  recovery words are shown only when the owner asks for them. The setup
+  between steps is a strict frame `OBMu` (version 1): read back with no
+  byte left over, every length checked, and refused if writing it again
+  would give other bytes. It holds secrets: the app seals it, and the debug
+  form of the setup shows none of them.
+- **OC-41.** The wallet is `wsh(sortedmulti(2,...))` with key 1, key 2 and
+  key 3 in their slots. Key 2 comes from the Key app's answer, or from
+  text, never both. Key 3 is the one in the answer. The wallet is refused
+  if the network of the answer differs from key 1's, if the Key app's root
+  is the owner's, if two of the keys are the same, or if any key is not at
+  the account path of its slot.
+- **OC-42.** The setup for the Key app is a strict frame `OBMt` (version 1)
+  with the network, the canonical wallet description, the owner's root and
+  the batch minimum. The description must be the canonical form.
+- **OC-43.** The owner is shown the checksum words, the fingerprints of the
+  three keys, and each pair of keys with who holds each. The Key app shows
+  the same words and fingerprints; the owner compares them.
+- **OC-44.** The record reads back at every stage and nothing else does. A
+  record whose parts do not belong together (a key not at its path, a
+  description that does not hold the keys, a stage that does not fit the
+  fields) is refused.
+- **OC-45.** The setup finishes only from a built wallet, with a refund
+  depth of at most 100 confirmations and a birthday. The finished record
+  gives the values the node starts from: the descriptor, the network, the
+  roots, the batch minimum, the refund depth and the birthday.
+- **OC-46.** Every stage and every refusal has words that pass the checks
+  of `docs/SCREEN-RULES.md`, with no rule numbers.
+
 ## What these rules do not say
 
 - **They do not watch an address set aside all the time.** A payment to one

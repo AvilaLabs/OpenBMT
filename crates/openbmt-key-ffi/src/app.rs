@@ -185,7 +185,7 @@ impl Define for SetupState {
 /// The states of the Key app.
 pub(crate) enum Phase {
     Empty,
-    Identity(Material),
+    Identity(Box<Material>),
     Ready(Box<ReadyState>),
 }
 
@@ -238,10 +238,15 @@ impl Inner {
         }
     }
 
-    fn material(&self) -> Option<&Material> {
+    /// Key 3 as stored, to keep when the key made here is made again.
+    fn key3_kept(&self) -> Option<openbmt_signer::KeyPart> {
+        self.material().and_then(|m| m.key3.clone())
+    }
+
+    pub(crate) fn material(&self) -> Option<&Material> {
         match &self.phase {
             Phase::Empty => None,
-            Phase::Identity(m) => Some(m),
+            Phase::Identity(m) => Some(&**m),
             Phase::Ready(r) => Some(&r.material),
         }
     }
@@ -327,7 +332,7 @@ impl KeyApp {
                     text: format!("OBM7: the stored state is not readable: {e}"),
                 })?;
                 match decoded.wallet {
-                    None => Phase::Identity(decoded.material),
+                    None => Phase::Identity(Box::new(decoded.material)),
                     Some((wallet, snapshot)) => {
                         let description =
                             WalletDescription::parse(&wallet.description, wallet.network)
@@ -373,7 +378,7 @@ fn wipe_source(source: EntropySource) {
     }
 }
 
-fn parse_xpub(text: &str) -> Result<Xpub, KeyError> {
+pub(crate) fn parse_xpub(text: &str) -> Result<Xpub, KeyError> {
     text.parse::<Xpub>()
         .map_err(|e| refused_by("xpub", format!("not an extended public key: {e}")))
 }
@@ -430,13 +435,15 @@ impl KeyApp {
                     "the wallet is accepted already; key 2 cannot be made again",
                 ));
             }
-            let (material, words) = make_material(&inner.store, Some((&source, network.into())))?;
+            let (mut material, words) =
+                make_material(&inner.store, Some((&source, network.into())))?;
+            material.key3 = inner.key3_kept();
             inner
                 .store
                 .save(envelope::encode(&material, None))
                 .map_err(|e| store_failed(&e))?;
             inner.set_words(words);
-            inner.phase = Phase::Identity(material);
+            inner.phase = Phase::Identity(Box::new(material));
             Ok(())
         });
         wipe_source(source);
@@ -455,13 +462,14 @@ impl KeyApp {
                     "the wallet is accepted already; the identity cannot be made again",
                 ));
             }
-            let (material, _) = make_material(&inner.store, None)?;
+            let (mut material, _) = make_material(&inner.store, None)?;
+            material.key3 = inner.key3_kept();
             inner
                 .store
                 .save(envelope::encode(&material, None))
                 .map_err(|e| store_failed(&e))?;
             inner.set_words(None);
-            inner.phase = Phase::Identity(material);
+            inner.phase = Phase::Identity(Box::new(material));
             Ok(())
         })
     }
@@ -536,6 +544,16 @@ impl KeyApp {
     /// slot holds exactly this key (and key 3's holds key 3's); the state
     /// is stored before this returns.
     pub fn accept_wallet(&self, setup: WalletSetup) -> Result<WalletView, KeyError> {
+        self.accept(setup, false)
+    }
+
+    /// The body of `accept_wallet`. With `ceremony` set, key 3 must have
+    /// been taken before (SR-67).
+    pub(crate) fn accept(
+        &self,
+        setup: WalletSetup,
+        ceremony: bool,
+    ) -> Result<WalletView, KeyError> {
         self.run(|inner| {
             inner.no_session()?;
             let material = match &inner.phase {
@@ -577,8 +595,14 @@ impl KeyApp {
                 policy,
             )
             .map_err(refused)?;
+            let key3 = crate::ceremony::key3_for_accept(
+                material,
+                &description,
+                network,
+                setup.key3_xpub.as_deref(),
+                ceremony,
+            )?;
             if let Some(k) = &material.key2 {
-                let key3 = setup.key3_xpub.as_deref().map(parse_xpub).transpose()?;
                 let xpub = Xpub::from_priv(&Secp256k1::new(), &k.account);
                 let state = SignerState::register(
                     description.canonical_string(),
@@ -608,7 +632,7 @@ impl KeyApp {
                 return Err(internal("the phase changed during setup"));
             };
             inner.phase = Phase::Ready(Box::new(ReadyState {
-                material,
+                material: *material,
                 wallet: part,
                 approver,
             }));

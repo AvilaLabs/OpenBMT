@@ -272,6 +272,9 @@ fn sc_01_no_variant_is_missing() {
         wanted.push(outcome_name(&o).to_string());
     }
     wanted.extend(SKIPPED.iter().map(|(n, _)| format!("Skipped::{n}")));
+    // The ceremony's own list is checked against its variants in
+    // `ceremony::tests`.
+    wanted.extend(crate::ceremony::all_words().into_iter().map(|(n, _)| n));
     for name in &wanted {
         assert!(names.contains(name), "{name} has no words");
     }

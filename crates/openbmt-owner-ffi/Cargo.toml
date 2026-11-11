@@ -36,3 +36,5 @@ jni-sys = "=0.3.0"
 [dev-dependencies]
 # The Key app, in process, for the end-to-end test of an approval.
 openbmt-approver = { path = "../openbmt-approver" }
+# The Key app, for the end-to-end test of the key ceremony.
+openbmt-key-ffi = { path = "../openbmt-key-ffi" }

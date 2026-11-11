@@ -39,6 +39,7 @@
 )]
 
 mod build;
+pub mod ceremony;
 mod codec;
 mod error;
 mod follow;

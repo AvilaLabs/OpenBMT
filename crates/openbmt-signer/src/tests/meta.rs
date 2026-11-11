@@ -4,8 +4,9 @@ use crate::{Ceiling, ChangeRefusal, Refusal, RegisterError};
 use openbmt_core::wallet::WalletError;
 
 const RULES: &str = include_str!("../../../../docs/SIGNER-RULES.md");
-const TEST_SOURCES: [&str; 11] = [
+const TEST_SOURCES: [&str; 12] = [
     include_str!("batch.rs"),
+    include_str!("ceremony.rs"),
     include_str!("ceilings.rs"),
     include_str!("hostile.rs"),
     include_str!("inputs.rs"),
@@ -36,7 +37,7 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 47);
+    assert_eq!(ids.len(), 53);
     assert!(ids.contains(&"SR-01".to_string()) && ids.contains(&"SR-70".to_string()));
 }
 
@@ -186,6 +187,10 @@ fn every_refusal_names_a_rule_of_the_file_and_says_so_in_words() {
         ChangeRefusal::ReceiveMarkTooHigh,
     ];
     for r in changes {
+        assert!(ids.contains(&r.rule().to_string()), "{r:?}");
+        assert!(r.to_string().starts_with(r.rule()));
+    }
+    for r in crate::ALL_REFUSALS {
         assert!(ids.contains(&r.rule().to_string()), "{r:?}");
         assert!(r.to_string().starts_with(r.rule()));
     }

@@ -285,6 +285,48 @@ bytes each, with the hash-type byte).
 - **SR-63.** A registered wallet is never replaced. A different wallet is a
   new setup with empty state ("Move to a new wallet").
 
+The key ceremony (`docs/DESIGN.md` §2.1, steps 2, 4 and 5) passes three
+public things between the devices: key 3 to the Key app, the Key app's answer
+to the owner phone, and the wallet setup back to the Key app. They are read in
+`openbmt-signer` (`ceremony.rs`); the Key app keeps key 3 and does the checks
+of the setup (`openbmt-key-ffi`). The owner phone's own rules for the same
+steps are OC-40 to OC-46 in `docs/OWNER-COINS-RULES.md`.
+
+- **SR-64.** Key 3 reaches the Key app only as text with its origin:
+  `[<8 hex digits>/48h/<coin>h/0h/2h]<key>`, where `<coin>` is 0 on mainnet
+  and 1 on the other networks, `'` may stand for `h`, and the key is an
+  `xpub` or `tpub`, or the multisig P2WSH `Zpub` or `Vpub`, which is read as
+  the plain form of the same key. Surrounding white space is ignored and
+  nothing else is. Refused: a key without its origin (a bare key with a
+  fingerprint typed beside it is not an origin), an origin of another form or
+  path, text that is not a key or is longer than 256 characters, a key that
+  is not at the account level (depth 4, last step 2h), and a secret key, which
+  is never echoed.
+- **SR-65.** A single-signature form (`ypub`, `zpub`, `upub`, `vpub`) is
+  refused, and so is a multisig form of another script type (`Ypub`,
+  `Upub`). The words say that the key is for a wallet that one key spends from,
+  and which export to choose instead: the one for a shared wallet of native
+  segwit type.
+- **SR-66.** Key 3 is for the same kind of network (main, or test) as key 2,
+  or, on a device with no key 2, as the wallet. Key 3 is not key 2: neither
+  its account key nor its master fingerprint is key 2's.
+- **SR-67.** The Key app keeps key 3 in its stored state as soon as it is
+  taken, before any wallet exists; taking another key 3 replaces it. A wallet
+  is accepted only if exactly one of its keys is key 3 in full (account key,
+  fingerprint and path), and, on a device that holds key 2, that key is another
+  slot (SR-61, SR-62). When key 3 is stored, a key 3 given with the wallet must
+  be the same key. The wallet setup of the ceremony is refused when no key 3
+  has been taken.
+- **SR-68.** The Key app's answer (`OBMs`) and the wallet setup (`OBMt`) are
+  strict frames: the magic, version 1, the exact length, flags 0 or 1,
+  defined network bytes, keys at the account level for the network's kind, an
+  answer whose keys differ, and a setup whose description is the canonical text
+  of a valid wallet. Bytes decode only if writing the value again gives the
+  same bytes.
+- **SR-69.** The Key app's answer holds only public values: the network, key
+  2's fingerprint and account public key (not on a device with no key 2), key
+  3's as stored, and the Key app's own root. No secret is in it.
+
 ## 10. Other things the Key app co-signs
 
 Address batches follow `openbmt-core` (`Approver::check_and_cosign`), in

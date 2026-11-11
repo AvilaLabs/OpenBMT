@@ -39,6 +39,8 @@
 //!   `decide`, `finish`, `cancel`).
 //! - 40 to 48: the Key app's own screens.
 //! - 60 to 65: free functions (entropy progress, word picker, deposit code).
+//! - 80 to 83: the key ceremony (`take_key3`, `key3_view`, `public_answer`,
+//!   `accept_wallet_setup`; `docs/SIGNER-RULES.md` SR-64 to SR-69).
 //!
 //! The handle field names what the op works on: an app handle (from `open`)
 //! or a session handle (from `open_session`), or must be 0. Handles start at
@@ -58,6 +60,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
 use openbmt_core::say::Words;
 
 use crate::app::{Key2Public, KeyApp, SetupState, SlotView, WalletSetup, WalletView};
+use crate::ceremony::Key3View;
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::deposit::{parse_deposit_code, DepositCode};
 use crate::error::{internal, refused_by, wrong_state, KeyError};
@@ -484,6 +487,14 @@ fn build_ops() -> Vec<Op> {
             Zero,
             |_, (text, network): (String, KeyNetwork)| parse_deposit_code(text, network),
         ),
+        op(80, "take_key3", App, |c, text: String| {
+            c.app()?.take_key3(text)
+        }),
+        op(81, "key3_view", App, |c, ()| c.app()?.key3_view()),
+        op(82, "public_answer", App, |c, ()| c.app()?.public_answer()),
+        op(83, "accept_wallet_setup", App, |c, bytes: Vec<u8>| {
+            c.app()?.accept_wallet_setup(bytes)
+        }),
     ]
 }
 
@@ -655,6 +666,7 @@ fn definitions() -> Vec<TypeDef> {
         EntropySource::define(),
         SetupState::define(),
         Key2Public::define(),
+        Key3View::define(),
         SlotView::define(),
         WalletSetup::define(),
         WalletView::define(),

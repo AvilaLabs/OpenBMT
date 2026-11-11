@@ -75,6 +75,12 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (73, "pos_request"),
         (74, "pos_reply"),
         (75, "pos_acknowledge"),
+        (80, "ceremony_make_key1"),
+        (81, "ceremony_read_answer"),
+        (82, "ceremony_build_wallet"),
+        (83, "ceremony_finish"),
+        (84, "ceremony_open"),
+        (85, "ceremony_stage"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

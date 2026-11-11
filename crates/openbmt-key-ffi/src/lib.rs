@@ -51,6 +51,7 @@
 
 mod app;
 mod call;
+mod ceremony;
 mod codec;
 mod deposit;
 pub mod envelope;
@@ -71,6 +72,7 @@ mod tests;
 
 pub use app::{Key2Public, KeyApp, SetupState, SlotView, WalletSetup, WalletView};
 pub use call::{dispatch, error_response, protocol_description, Registry, MAX_APPS};
+pub use ceremony::{answer_words, key3_waiting_words, Key3View};
 pub use deposit::{parse_deposit_code, DepositCode};
 pub use error::{KeyError, StoreError};
 pub use keys::{

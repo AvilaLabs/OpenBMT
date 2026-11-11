@@ -2,6 +2,7 @@
 //! `dispatch`, on a node whose drivers the test feeds by hand.
 
 mod call;
+mod ceremony;
 mod e2e;
 pub(crate) mod kit;
 mod kotlin;

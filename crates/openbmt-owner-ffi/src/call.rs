@@ -41,6 +41,10 @@
 //! - 40 to 46: the queue (refunds, cash-outs, batches, settings).
 //! - 50 to 53: the link and the refund requests from the counters.
 //! - 60 to 63: notes, a fresh check, recovery, archiving.
+//! - 80 to 85: the key ceremony on this phone (`docs/DESIGN.md` §2.1 steps 4
+//!   and 5, `docs/OWNER-COINS-RULES.md` OC-40 to OC-46): make key 1, read the
+//!   Key app's answer, build the wallet, confirm, open the finished setup,
+//!   and where the setup is. They work on no node.
 //! - 70 to 75: the till (`docs/OWNER-COINS-RULES.md`, OC-30 to OC-37): what
 //!   it shows, its settings, taking them off, the next request, the till's
 //!   answer, acknowledging an alert. The app sends the request and hands
@@ -58,6 +62,10 @@ use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
+use crate::ceremony::{
+    self, AnswerView, BuildArgs, FinishArgs, FinishedView, Key1Args, Key1Made, PairView, PartView,
+    SetupFields, SetupStageView, WalletBuiltView,
+};
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::error::{internal, refused_by, wrong_state, AppError};
 use crate::host::{real_spawn, Entry, Spawn};
@@ -399,6 +407,24 @@ fn build_ops() -> Vec<Op> {
         op(75, "pos_acknowledge", Node, |c, a: PosAckArgs| {
             c.entry()?.pos_acknowledge(a)
         }),
+        op(80, "ceremony_make_key1", Zero, |_, a: Key1Args| {
+            ceremony::make_key1(a)
+        }),
+        op(81, "ceremony_read_answer", Zero, |_, bytes: Vec<u8>| {
+            ceremony::read_answer(bytes)
+        }),
+        op(82, "ceremony_build_wallet", Zero, |_, a: BuildArgs| {
+            ceremony::build_wallet(a)
+        }),
+        op(83, "ceremony_finish", Zero, |_, a: FinishArgs| {
+            ceremony::finish(a)
+        }),
+        op(84, "ceremony_open", Zero, |_, record: Vec<u8>| {
+            ceremony::open(record)
+        }),
+        op(85, "ceremony_stage", Zero, |_, record: Vec<u8>| {
+            ceremony::stage(record)
+        }),
     ]
 }
 
@@ -536,6 +562,17 @@ fn definitions() -> Vec<TypeDef> {
         AlertKind::define(),
         ClearArgs::define(),
         WordsView::define(),
+        Key1Args::define(),
+        PartView::define(),
+        Key1Made::define(),
+        AnswerView::define(),
+        BuildArgs::define(),
+        PairView::define(),
+        WalletBuiltView::define(),
+        FinishArgs::define(),
+        FinishedView::define(),
+        SetupFields::define(),
+        SetupStageView::define(),
         PumpView::define(),
         LinkStepView::define(),
         ViewKind::define(),

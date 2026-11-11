@@ -1048,6 +1048,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         ItemOutcome::Returned("The amount does not match the receipt".to_string()).words(),
     );
     add("ItemOutcome::Healthy", ItemOutcome::Healthy.words());
+    all.extend(crate::ceremony::all_words());
     all
 }
 

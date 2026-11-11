@@ -4,6 +4,7 @@
 
 mod batch;
 mod ceilings;
+mod ceremony;
 mod hostile;
 mod inputs;
 mod kit;

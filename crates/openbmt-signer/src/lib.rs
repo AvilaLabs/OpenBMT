@@ -27,6 +27,7 @@
 #![deny(missing_docs)]
 
 mod analysis;
+mod ceremony;
 mod crypto;
 mod refusal;
 mod review;
@@ -38,6 +39,11 @@ mod state;
 #[cfg(test)]
 mod tests;
 
+pub use ceremony::{
+    answer_ready_words, check_key3, check_key3_in_wallet, key3_taken_words, CeremonyRefusal,
+    KeyAnswer, KeyPart, WalletSetupBytes, ALL_REFUSALS, MAGIC_KEY_ANSWER, MAGIC_WALLET_SETUP,
+    MAX_KEY_TEXT, MAX_SETUP_DESCRIPTION,
+};
 pub use refusal::{Ceiling, ChangeError, ChangeRefusal, Refusal, RegisterError, SignError};
 pub use review::{OutputKind, Remaining, Review, ReviewedOutput};
 pub use say::{

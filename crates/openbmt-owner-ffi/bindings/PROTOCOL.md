@@ -97,6 +97,12 @@ ops run on another; it waits for at most 250 ms.
  73 pos_request      handle node  args u64 -> PosRequestView
  74 pos_reply        handle node  args PosReplyArgs -> PosReplyView
  75 pos_acknowledge  handle node  args PosAckArgs -> ()
+ 80 ceremony_make_key1 handle zero  args Key1Args -> Key1Made
+ 81 ceremony_read_answer handle zero  args list<u8> -> AnswerView
+ 82 ceremony_build_wallet handle zero  args BuildArgs -> WalletBuiltView
+ 83 ceremony_finish  handle zero  args FinishArgs -> FinishedView
+ 84 ceremony_open    handle zero  args list<u8> -> SetupFields
+ 85 ceremony_stage   handle zero  args list<u8> -> SetupStageView
 ```
 
 ## Types
@@ -117,6 +123,17 @@ AlertKind: enum, one tag byte
     tags MissedCheckIn=0 Diverged=1
 ClearArgs: record: kind: AlertKind, counter: list<u8>, value: u64
 Words: record: tone: u8, who: u8, heading: str16, what: str16, next: str16, code: option<str16>, at: option<u64>, quoted: option<(str16, str16)>, detail: option<str16>; a str16 is a u16 length and UTF-8
+Key1Args: record: network: OwnerNetwork, show_words: bool
+PartView: record: fingerprint: string, origin_path: string, account_xpub: string
+Key1Made: record: record: list<u8>, key1: PartView, owner_root: list<u8>, owner_root_words: list<string>, words: option<list<string>>, state_words: Words
+AnswerView: record: network: OwnerNetwork, key2: option<PartView>, key3: PartView, key_app_root: list<u8>, key_app_root_words: list<string>
+BuildArgs: record: record: list<u8>, answer: list<u8>, key2_text: option<string>, batch_min_count: u32
+PairView: record: key_a: u32, key_b: u32, holder_a: u8, holder_b: u8
+WalletBuiltView: record: record: list<u8>, wallet_setup: list<u8>, description: string, checksum_words: list<string>, fingerprints: list<string>, first_receive_address: string, pairs: list<PairView>, pairs_words: Words, state_words: Words
+FinishArgs: record: record: list<u8>, refund_depth: u32, birthday: u32
+FinishedView: record: record: list<u8>, state_words: Words
+SetupFields: record: network: OwnerNetwork, owner_secret: list<u8>, approver_root: list<u8>, wallet: string, key1_account: list<u8>, key3_xpub: option<string>, batch_min_count: u32, refund_depth: u32, birthday: u32
+SetupStageView: record: stage: u8, words: Words
 PumpView: record: notes: list<string>, stopped: bool
 LinkStepView: record: notes: list<string>, queued: u64, refused: u64, withdrawn: u64, held: u64, waiting: option<Words>, stopped_early: option<string>, reached: bool
 ViewKind: enum, one tag byte

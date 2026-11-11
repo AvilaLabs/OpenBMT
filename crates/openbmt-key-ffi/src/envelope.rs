@@ -1,16 +1,19 @@
 //! `OBM7`: what the Key app hands to `KeyStore::save`.
 //!
 //! ```text
-//! "OBM7" | 1 | identity secret (32)
+//! "OBM7" | 1 or 2 | identity secret (32)
 //!   | key 2 flag u8, then if 1:
 //!       network u8 | master fingerprint (4) | account key, BIP32 form (78)
+//!   | version 2 only: key 3, public: master fingerprint (4) | account key (78)
 //!   | wallet flag u8, then if 1:
 //!       network u8 | description u32 length and text (UTF-8)
 //!       | owner root (32) | batch minimum u32 LE
 //!       | approver snapshot u32 length and `OBM3` bytes
 //! ```
 //!
-//! The networks are 0 mainnet, 1 testnet, 2 signet, 3 regtest, as in the
+//! The version is 1 until key 3 has been taken (SR-67) and 2 from then on:
+//! a stored state without key 3 is written exactly as before. The networks
+//! are 0 mainnet, 1 testnet, 2 signet, 3 regtest, as in the
 //! signer's snapshot. Decoding is strict: it succeeds only for bytes that
 //! `encode` would have produced. It only parses; the wallet, the owner and
 //! the snapshot are checked by the crates that own them when the Key app is
@@ -20,6 +23,7 @@ use bitcoin::bip32::{ChildNumber, Fingerprint, Xpriv};
 use bitcoin::Network;
 use openbmt_core::identity::DeviceId;
 use openbmt_core::wire::{self, DecodeError, Reader};
+use openbmt_signer::KeyPart;
 
 /// The magic of the envelope.
 pub const MAGIC_KEY_APP: [u8; 4] = *b"OBM7";
@@ -81,6 +85,8 @@ impl Drop for Key2 {
 pub(crate) struct Material {
     pub identity: Secret32,
     pub key2: Option<Key2>,
+    /// Key 3's public parts, once taken (SR-67).
+    pub key3: Option<KeyPart>,
 }
 
 /// What the Key app was given when the wallet was accepted.
@@ -123,7 +129,22 @@ fn network_from(byte: u8) -> Result<Network, DecodeError> {
 /// The bytes of the envelope. `None` for the wallet part is a Key app that
 /// has an identity and no wallet yet.
 pub(crate) fn encode(material: &Material, wallet: Option<(&WalletPart, &[u8])>) -> Vec<u8> {
+    encode_with(material, material.key3.as_ref(), wallet)
+}
+
+/// The bytes of the envelope with `key3` in place of the material's own, so
+/// that a new key 3 is stored before it replaces the old one.
+pub(crate) fn encode_with(
+    material: &Material,
+    key3: Option<&KeyPart>,
+    wallet: Option<(&WalletPart, &[u8])>,
+) -> Vec<u8> {
     let mut out = wire::start(&MAGIC_KEY_APP, 512);
+    if key3.is_some() {
+        if let Some(version) = out.get_mut(4) {
+            *version = 2;
+        }
+    }
     out.extend_from_slice(material.identity.bytes());
     match &material.key2 {
         Some(k) => {
@@ -133,6 +154,11 @@ pub(crate) fn encode(material: &Material, wallet: Option<(&WalletPart, &[u8])>) 
             out.extend_from_slice(&k.account.encode());
         }
         None => out.push(0),
+    }
+    if let Some(k) = key3 {
+        let (fingerprint, raw) = k.to_raw();
+        out.extend_from_slice(&fingerprint);
+        out.extend_from_slice(&raw);
     }
     match wallet {
         Some((w, snapshot)) => {
@@ -152,7 +178,14 @@ pub(crate) fn encode(material: &Material, wallet: Option<(&WalletPart, &[u8])>) 
 
 /// Read an envelope, strictly.
 pub(crate) fn decode(bytes: &[u8]) -> Result<Decoded, DecodeError> {
-    let mut r = Reader::framed(bytes, &MAGIC_KEY_APP)?;
+    let mut r = Reader::new(bytes);
+    if r.take(4)? != MAGIC_KEY_APP {
+        return Err(DecodeError::BadMagic);
+    }
+    let version = match r.u8()? {
+        v @ (1 | 2) => v,
+        v => return Err(DecodeError::UnsupportedVersion(v)),
+    };
     let identity = Secret32::new(r.array::<32>()?);
     let key2 = if r.flag()? {
         let network = network_from(r.u8()?)?;
@@ -177,7 +210,33 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Decoded, DecodeError> {
     } else {
         None
     };
-    let material = Material { identity, key2 };
+    let key3 = if version == 2 {
+        let fingerprint = r.array::<4>()?;
+        let raw = r.array::<78>()?;
+        let k = KeyPart::from_raw(fingerprint, &raw)
+            .ok_or(DecodeError::NonCanonical("key 3 is not in its one form"))?;
+        if let Some(k2) = &key2 {
+            if k.kind() != bitcoin::NetworkKind::from(k2.network) {
+                return Err(DecodeError::NonCanonical("key 3 is for another network"));
+            }
+            let secp = bitcoin::secp256k1::Secp256k1::new();
+            let two = KeyPart {
+                fingerprint: k2.master_fingerprint,
+                xpub: bitcoin::bip32::Xpub::from_priv(&secp, &k2.account),
+            };
+            if two.same_as(&k) {
+                return Err(DecodeError::NonCanonical("key 3 is key 2"));
+            }
+        }
+        Some(k)
+    } else {
+        None
+    };
+    let material = Material {
+        identity,
+        key2,
+        key3,
+    };
     let wallet = if r.flag()? {
         let network = network_from(r.u8()?)?;
         if let Some(k) = &material.key2 {
