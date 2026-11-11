@@ -12,13 +12,13 @@ These are the words of what the app decides itself.
 
 | State | Heading | What happened | What to do next | Who | Code |
 |---|---|---|---|---|---|
-| notSetUp | Not set up yet | This counter has not been paired with the shop yet, so it cannot take a sale. | Type a name for the counter, the manager's name and a PIN, then tap Pair, and scan the Key app's code with this phone. | a manager |  |
+| notSetUp | Not set up yet | This counter has not been paired with the shop yet, so it cannot take a sale. | Type a name for the counter, the manager's name and a PIN. Then tap Pair with the Key app and scan its code with this phone. | a manager |  |
 | pairingSaved | Counter set up | The counter is paired with the shop, and the pairing and the PIN are saved on this phone. | Keep the app open at the counter. It starts looking for the network now. | the cashier |  |
 | pairingScanOffer | Scan the Key app | The Key app shows a code on its Pair a counter screen. This counter reads the shop's keys and network from it. | Open Pair a counter on the Key app, then tap Scan and hold this phone's camera to its code. | a manager |  |
 | pairingCompare | Compare the four words | The Key app shows four words for this pairing, and the same four are below. If they are not the same, someone changed the code on the way. | Check all four words on the Key app, then tap They match, or tap They differ if any word is not the same. | a manager |  |
 | pairingScanBundle | Scan the owner's phone | The four words matched. The owner's phone now shows the code that finishes the pairing. | On the owner's phone open the counter's code, then tap Scan and hold this phone's camera to it. | a manager |  |
 | pairingForgotten | Pairing not finished | The app was closed or left before the pairing was finished, so it was forgotten and nothing was saved. | Start again from the Key app: open Pair a counter, then tap Pair on this counter and scan its code. | a manager |  |
-| counterNameNotAccepted | Counter name not accepted | The name of this counter is 1 to 32 characters long, so it was not used. | Type a shorter name for this counter, then tap Pair again. | a manager |  |
+| counterNameNotAccepted | Counter name not accepted | The name of this counter is 1 to 32 characters long, so it was not used. | Type a shorter name for this counter, then tap Pair with the Key app again. | a manager |  |
 | pinNotAccepted | PIN not accepted | A PIN is 6 to 12 digits, and the two entries must be the same, so nothing was saved. | Type a PIN of 6 to 12 digits twice, then save again. | a manager |  |
 | nameNotAccepted | Name not accepted | A name is 1 to 64 characters long, so it was not saved. | Type the name again. | the cashier |  |
 | torAddressNotAccepted | Tor address not accepted | The address of Orbot must be a host, a colon and a port, like 127.0.0.1:9050. | Type the address again. | a manager |  |

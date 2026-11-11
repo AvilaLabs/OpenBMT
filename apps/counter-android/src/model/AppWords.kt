@@ -28,7 +28,7 @@ object AppWords {
         Tones.INFO, "Not set up yet",
         "This counter has not been paired with the shop yet, so it cannot take a sale.",
         Who.MANAGER,
-        "Type a name for the counter, the manager's name and a PIN, then tap Pair, and scan the Key app's code with this phone.",
+        "Type a name for the counter, the manager's name and a PIN. Then tap Pair with the Key app and scan its code with this phone.",
     )
 
     val pairingSaved = w(
@@ -80,7 +80,7 @@ object AppWords {
         Tones.STOP, "Counter name not accepted",
         "The name of this counter is 1 to 32 characters long, so it was not used.",
         Who.MANAGER,
-        "Type a shorter name for this counter, then tap Pair again.",
+        "Type a shorter name for this counter, then tap Pair with the Key app again.",
     )
 
     val nameNotAccepted = w(
