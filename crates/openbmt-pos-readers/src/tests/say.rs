@@ -26,6 +26,7 @@ fn every_read_variant_has_a_value(r: &ReadRefused) -> bool {
         | ReadRefused::Missing(_)
         | ReadRefused::WrongType(_)
         | ReadRefused::UnknownValue(_)
+        | ReadRefused::UnknownResult(_)
         | ReadRefused::OutOfRange(_)
         | ReadRefused::BadTime(_)
         | ReadRefused::BadCurrency(_)

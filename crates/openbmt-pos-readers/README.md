@@ -19,9 +19,11 @@ of that file (PS-90 to PS-99).
   (PS-10): a Square `OTHER` tender is named by its note or its payment's
   source, a Clover tender by its label.
 - A missing field, a wrong type, a number out of range, a time that is not
-  strictly RFC 3339 (or Clover's milliseconds) and a state the reader does not
-  know are each a refusal with a rule code. Fields it does not need are
-  ignored. Bounds: 8 MiB, 64 levels, 500 orders a page, 16 tenders an order.
+  strictly RFC 3339 (or Clover's milliseconds) are each a refusal with a rule
+  code. A state, type or result the reader does not know is refused only where
+  it can change a Bitcoin tender or an order that carries one; elsewhere the
+  tender is read as "Other" or left out and the page goes on. Fields it does
+  not need are ignored. Bounds: 8 MiB, 64 levels, 500 orders a page, 16 tenders an order.
 - `say` gives every refusal its words (`docs/screens/pos-readers.md`).
 
 There is no network, no clock and no sign-in: the caller sends the request

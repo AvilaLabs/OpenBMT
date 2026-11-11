@@ -85,7 +85,7 @@ pub const MAX_TEXT_BYTES: usize = 64;
 /// PS-02: most tenders on one order.
 pub const MAX_TENDERS: usize = 16;
 /// PS-72: longest POS cursor, in bytes.
-pub const MAX_CURSOR_BYTES: usize = 256;
+pub const MAX_CURSOR_BYTES: usize = 1_024;
 /// PS-80: most orders on one page.
 pub const MAX_PAGE_ORDERS: usize = 500;
 /// PS-80: most pages one sync pulls.

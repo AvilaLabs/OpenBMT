@@ -5,7 +5,7 @@ use openbmt_pos::{
 };
 
 use crate::clover::{percent_encode, Request, MAX_MERCHANT_BYTES};
-use crate::{cursor_at, ReadRefused, RequestRefused};
+use crate::{cursor_at, ReadRefused, RequestRefused, Shown};
 
 use super::{settings, text, usd, MERCHANT};
 
@@ -16,7 +16,13 @@ const EMPTY: &[u8] = include_bytes!("../../tests/fixtures/clover_orders_empty.js
 const SINCE: u64 = 1_794_319_000;
 
 fn request(limit: usize) -> Request {
-    Request::new(MERCHANT, limit, &cursor_at(SINCE).expect("a cursor")).expect("a request")
+    Request::new(
+        MERCHANT,
+        &settings(),
+        limit,
+        &cursor_at(SINCE).expect("a cursor"),
+    )
+    .expect("a request")
 }
 
 fn id(s: &str) -> Id {
@@ -50,12 +56,12 @@ fn ps_97_the_query_asks_for_orders_modified_since_the_cursor_oldest_first() {
 #[test]
 fn ps_97_the_offset_comes_from_the_cursor() {
     let c = Cursor::new(b"1794319000|1000".to_vec()).expect("a cursor");
-    let q = Request::new(MERCHANT, 250, &c)
+    let q = Request::new(MERCHANT, &settings(), 250, &c)
         .expect("a request")
         .path_and_query();
     assert!(q.contains("&limit=250&offset=1000&"), "{q}");
     assert!(q.contains("filter=modifiedTime%3E%3D1794319000000&"), "{q}");
-    let start = Request::new(MERCHANT, 1, &Cursor::start()).expect("a request");
+    let start = Request::new(MERCHANT, &settings(), 1, &Cursor::start()).expect("a request");
     assert!(start
         .path_and_query()
         .contains("filter=modifiedTime%3E%3D0&"));
@@ -110,22 +116,22 @@ fn ps_97_a_request_needs_a_merchant_a_page_size_and_a_cursor_in_form() {
         &"A".repeat(MAX_MERCHANT_BYTES + 1),
     ] {
         assert_eq!(
-            Request::new(bad, 10, &start),
+            Request::new(bad, &settings(), 10, &start),
             Err(RequestRefused::BadMerchant),
             "{bad:?}"
         );
     }
-    assert!(Request::new(&"A".repeat(MAX_MERCHANT_BYTES), 10, &start).is_ok());
+    assert!(Request::new(&"A".repeat(MAX_MERCHANT_BYTES), &settings(), 10, &start).is_ok());
     for limit in [0, MAX_PAGE_ORDERS + 1] {
         assert_eq!(
-            Request::new(MERCHANT, limit, &start),
+            Request::new(MERCHANT, &settings(), limit, &start),
             Err(RequestRefused::BadLimit)
         );
     }
     for bad in [&b"5|"[..], b"5|x", b"5|01", b"5|-1", b"x", b"5|1 "] {
         let c = Cursor::new(bad.to_vec()).expect("short");
         assert_eq!(
-            Request::new(MERCHANT, 10, &c),
+            Request::new(MERCHANT, &settings(), 10, &c),
             Err(RequestRefused::BadCursor),
             "{bad:?}"
         );
@@ -241,10 +247,55 @@ fn ps_98_a_payment_that_is_not_money_taken_and_not_a_void_is_left_out() {
     for unknown in ["", "success", "SETTLED", "REFUNDED"] {
         assert_eq!(
             one(unknown),
-            Err(ReadRefused::UnknownValue("payments[].result")),
+            Err(ReadRefused::UnknownResult(Shown::new(unknown))),
             "{unknown}"
         );
     }
+}
+
+#[test]
+fn ps_91_an_unknown_result_on_a_cash_payment_is_left_out_and_on_a_bitcoin_payment_refuses() {
+    let order = |label: &str, result: &str, refund: bool| {
+        let refunds = if refund {
+            r#","refunds":[{"payment":{"id":"P1"},"amount":5}]"#
+        } else {
+            ""
+        };
+        let body = format!(
+            r#"{{"elements":[{{"id":"C1","currency":"USD","total":100,"paymentState":"PAID",
+            "createdTime":1794319200000,"modifiedTime":1794319260000,
+            "payments":[{{"id":"P1","tender":{{"label":"{label}"}},"amount":100,
+            "result":"{result}","createdTime":1794319230000}},
+            {{"id":"P2","tender":{{"label":"Bitcoin"}},"amount":100,
+            "result":"SUCCESS","createdTime":1794319231000}}]{refunds}}}]}}"#
+        );
+        request(500).parse(body.as_bytes())
+    };
+    // Cash with a result the reader does not know: left out; the Bitcoin
+    // payment beside it is still read; a refund of the cash one is ignored.
+    for refund in [false, true] {
+        let page = order("Cash", "SETTLED", refund).expect("reads");
+        let tenders = &page.orders[0].tenders;
+        assert_eq!(tenders.len(), 1);
+        assert_eq!(tenders[0].id, id("P2"));
+    }
+    // The same result on a Bitcoin payment, whatever its spelling of the
+    // name, refuses and names the result.
+    for label in ["Bitcoin", " BITCOIN "] {
+        assert_eq!(
+            order(label, "SETTLED", false),
+            Err(ReadRefused::UnknownResult(Shown::new("SETTLED"))),
+            "{label}"
+        );
+    }
+    let Err(e) = order("Bitcoin", "SETTLED", false) else {
+        panic!("refused")
+    };
+    assert_eq!(e.rule(), "PS-91");
+    assert!(e.to_string().contains("SETTLED"));
+    let w = e.words();
+    assert_eq!(w.quoted.map(|q| q.text), Some("SETTLED".to_string()));
+    assert!(!w.what.contains("SETTLED"));
 }
 
 #[test]
@@ -253,7 +304,7 @@ fn ps_98_a_page_shorter_than_the_limit_is_the_last_and_a_full_one_has_more() {
     let page = request(3).parse(ORDERS).expect("reads");
     assert!(page.more);
     assert_eq!(page.next.as_bytes(), b"1794319000|3");
-    let r2 = Request::new(MERCHANT, 3, &page.next).expect("a request");
+    let r2 = Request::new(MERCHANT, &settings(), 3, &page.next).expect("a request");
     assert!(r2.path_and_query().contains("&limit=3&offset=3&"));
     // The next page adds its length to the offset.
     let again = r2.parse(ORDERS).expect("reads");
@@ -314,13 +365,32 @@ fn ps_98_every_payment_state_of_an_order_is_read_and_another_is_refused() {
     ] {
         assert_eq!(state_of(s), Ok(want), "{s}");
     }
+}
+
+#[test]
+fn ps_91_an_unknown_payment_state_leaves_out_an_order_with_no_bitcoin_tender() {
+    let with = |state: &str, label: &str| {
+        let body = format!(
+            r#"{{"elements":[{{"id":"C1","currency":"USD","total":100,"paymentState":"{state}",
+            "createdTime":1794319200000,"modifiedTime":1794319260000,
+            "payments":[{{"id":"P1","tender":{{"label":"{label}"}},"amount":100,
+            "result":"SUCCESS","createdTime":1794319230000}}]}}]}}"#
+        );
+        request(500).parse(body.as_bytes())
+    };
     for bad in ["", "paid", "VOIDED", "DELETED"] {
+        // A cash order: left out, and the page goes on.
+        let page = with(bad, "Cash").expect("reads");
+        assert!(page.orders.is_empty(), "{bad}");
+        assert!(!page.more);
+        // An order with a Bitcoin tender: refused.
         assert_eq!(
-            state_of(bad),
+            with(bad, "Bitcoin"),
             Err(ReadRefused::UnknownValue("elements[].paymentState")),
             "{bad}"
         );
     }
+    assert_eq!(with("PAID", "Cash").expect("reads").orders.len(), 1);
 }
 
 #[test]

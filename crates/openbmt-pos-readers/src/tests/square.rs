@@ -375,13 +375,91 @@ fn ps_96_every_documented_tender_type_is_read_and_another_is_refused() {
     ] {
         assert_eq!(kind_of(k), Ok((OrderState::Open, TenderKind::Other)), "{k}");
     }
+    // A type that is not on the list is an "Other" tender, never Bitcoin.
     for k in ["", "cash", "Card", "CRYPTO", "BITCOIN"] {
-        assert_eq!(
-            kind_of(k),
-            Err(ReadRefused::UnknownValue("orders[].tenders[].type")),
-            "{k}"
-        );
+        assert_eq!(kind_of(k), Ok((OrderState::Open, TenderKind::Other)), "{k}");
     }
+}
+
+#[test]
+fn ps_91_an_unknown_tender_type_beside_a_bitcoin_tender_reads_fine() {
+    let body = br#"{"orders":[{"id":"O1","location_id":"LOCSQ1","state":"COMPLETED",
+        "created_at":"2026-11-10T14:00:00Z","updated_at":"2026-11-10T14:01:00Z",
+        "total_money":{"amount":300,"currency":"USD"},
+        "tenders":[
+        {"id":"T1","type":"OTHER","created_at":"2026-11-10T14:00:30Z","note":"Bitcoin",
+         "amount_money":{"amount":100,"currency":"USD"}},
+        {"id":"T2","type":"CRYPTO_FUTURE","created_at":"2026-11-10T14:00:31Z",
+         "amount_money":{"amount":200,"currency":"USD"}}]}]}"#;
+    let page = request().parse(body, None).expect("reads");
+    let o = order(&page, "O1");
+    assert_eq!(o.tenders.len(), 2);
+    let unknown = tender(o, "T2");
+    assert_eq!(
+        (unknown.kind, unknown.name.as_str()),
+        (TenderKind::Other, "Other (CRYPTO_FUTURE)")
+    );
+    let s = settings();
+    assert!(s.is_bitcoin(tender(o, "T1")));
+    assert!(!s.is_bitcoin(unknown));
+    // The text of the type is bounded and has no control character.
+    let long = body.iter().copied().collect::<Vec<u8>>();
+    let long = String::from_utf8(long)
+        .expect("text")
+        .replace("CRYPTO_FUTURE", &format!("{}\\n", "X".repeat(100)));
+    let page = request().parse(long.as_bytes(), None).expect("reads");
+    let name = tender(order(&page, "O1"), "T2").name.as_str().to_string();
+    assert!(name.len() <= 64 && name.starts_with("Other (XXX") && !name.contains('\n'));
+}
+
+#[test]
+fn ps_91_an_unknown_status_matters_only_to_a_bitcoin_tender() {
+    let r = request();
+    // The status of the payment of the Bitcoin tender: refused.
+    let btc = br#"{"payments":[{"id":"PAYD01","status":"PAUSED",
+        "external_details":{"source":"Bitcoin"}}]}"#;
+    assert_eq!(
+        r.parse(LAST, Some(btc)),
+        Err(ReadRefused::UnknownValue("payments[].status"))
+    );
+    // The status of the payment of the check: the tender is read as paid.
+    let check = br#"{"payments":[{"id":"PAYD01","status":"COMPLETED",
+        "external_details":{"source":"Bitcoin"}},{"id":"PAYD03","status":"PAUSED"}]}"#;
+    let page = r.parse(LAST, Some(check)).expect("reads");
+    let t = tender(order(&page, "SQORDER0004"), "TENDERD03");
+    assert_eq!(t.state, TenderState::Paid);
+    // An order state that is not known: left out when no Bitcoin tender.
+    let cash = br#"{"orders":[{"id":"O1","location_id":"LOCSQ1","state":"ON_HOLD",
+        "created_at":"2026-11-10T14:00:00Z","updated_at":"2026-11-10T14:01:00Z",
+        "total_money":{"amount":100,"currency":"USD"},
+        "tenders":[{"id":"T1","type":"CASH","created_at":"2026-11-10T14:00:30Z",
+        "amount_money":{"amount":100,"currency":"USD"}}]}]}"#;
+    let page = r.parse(cash, None).expect("reads");
+    assert!(page.orders.is_empty());
+    let btc_order = String::from_utf8(cash.to_vec())
+        .expect("text")
+        .replace(r#""type":"CASH""#, r#""type":"OTHER","note":"Bitcoin""#);
+    assert_eq!(
+        r.parse(btc_order.as_bytes(), None),
+        Err(ReadRefused::UnknownValue("orders[].state"))
+    );
+    // A refund status that is not known: ignored for cash, refused for Bitcoin.
+    let refund = |note: &str| {
+        let body = format!(
+            r#"{{"orders":[{{"id":"O1","location_id":"LOCSQ1","state":"COMPLETED",
+            "created_at":"2026-11-10T14:00:00Z","updated_at":"2026-11-10T14:01:00Z",
+            "total_money":{{"amount":100,"currency":"USD"}},
+            "tenders":[{{"id":"T1","type":"OTHER","created_at":"2026-11-10T14:00:30Z",
+            "note":"{note}","amount_money":{{"amount":100,"currency":"USD"}}}}],
+            "refunds":[{{"tender_id":"T1","status":"HELD","amount_money":{{"amount":5,"currency":"USD"}}}}]}}]}}"#
+        );
+        r.parse(body.as_bytes(), None)
+    };
+    assert_eq!(refund("cheque").expect("reads").orders.len(), 1);
+    assert_eq!(
+        refund("Bitcoin"),
+        Err(ReadRefused::UnknownValue("orders[].refunds[].status"))
+    );
 }
 
 #[test]
@@ -464,10 +542,6 @@ fn ps_96_refunds_add_up_on_their_tender_and_a_voided_tender_stays_voided() {
 fn ps_96_the_payments_reply_is_read_as_strictly_as_the_orders() {
     let r = request();
     for (payments, want) in [
-        (
-            r#"{"payments":[{"id":"P1","status":"PAUSED"}]}"#,
-            ReadRefused::UnknownValue("payments[].status"),
-        ),
         (
             r#"{"payments":[{"status":"COMPLETED"}]}"#,
             ReadRefused::Missing("payments[].id"),

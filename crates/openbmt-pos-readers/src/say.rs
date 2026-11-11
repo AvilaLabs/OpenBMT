@@ -5,9 +5,9 @@
 //! the sentences say that nothing was changed and that the app tries again
 //! later. The rule number and the name of the field are in the details only.
 
-use openbmt_core::say::{Tone, Who, Words};
+use openbmt_core::say::{Quoted, Tone, Who, Words};
 
-use crate::error::{ReadRefused, RequestRefused};
+use crate::error::{ReadRefused, RequestRefused, Shown};
 
 const TRY_AGAIN: &str = "Nothing was changed. Try again later; if it repeats, stop and report it to the OpenBMT project with the details.";
 
@@ -65,6 +65,10 @@ impl ReadRefused {
                 "Till sent an unknown value",
                 "The till's system sent a state or a kind of payment this app does not know, so none of the orders were used.",
             ),
+            Self::UnknownResult(_) => (
+                "Till payment result unknown",
+                "The till's system gave a Bitcoin payment a result this app does not know, so none of the orders were used.",
+            ),
             Self::OutOfRange(_) => (
                 "Till number out of range",
                 "The till's system sent an amount or a number that is negative, too large or not whole, so none of the orders were used.",
@@ -114,7 +118,13 @@ impl ReadRefused {
                 "The marker the till's system gave for reading on is longer than this app keeps, so the orders were not used.",
             ),
         };
-        stop(heading, what, self.rule(), self.to_string())
+        let words = stop(heading, what, self.rule(), self.to_string());
+        match self {
+            Self::UnknownResult(r) => {
+                words.quoted(Quoted::new("The till's system sent", r.as_str()))
+            }
+            _ => words,
+        }
     }
 }
 
@@ -154,7 +164,7 @@ impl RequestRefused {
 }
 
 /// Every reply refusal, with a field name where it carries one.
-pub const ALL_READ: [ReadRefused; 23] = [
+pub const ALL_READ: [ReadRefused; 24] = [
     ReadRefused::TooLong,
     ReadRefused::TooDeep,
     ReadRefused::TooManyValues,
@@ -166,6 +176,7 @@ pub const ALL_READ: [ReadRefused; 23] = [
     ReadRefused::Missing("orders[].id"),
     ReadRefused::WrongType("orders[].id"),
     ReadRefused::UnknownValue("orders[].state"),
+    ReadRefused::UnknownResult(Shown::sample("SETTLED")),
     ReadRefused::OutOfRange("orders[].total_money"),
     ReadRefused::BadTime("orders[].created_at"),
     ReadRefused::BadCurrency("orders[].total_money"),
@@ -202,6 +213,7 @@ pub fn read_name(r: &ReadRefused) -> &'static str {
         ReadRefused::Missing(_) => "Missing",
         ReadRefused::WrongType(_) => "WrongType",
         ReadRefused::UnknownValue(_) => "UnknownValue",
+        ReadRefused::UnknownResult(_) => "UnknownResult",
         ReadRefused::OutOfRange(_) => "OutOfRange",
         ReadRefused::BadTime(_) => "BadTime",
         ReadRefused::BadCurrency(_) => "BadCurrency",

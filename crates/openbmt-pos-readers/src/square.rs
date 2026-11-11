@@ -134,7 +134,9 @@ impl Request {
         }
         let mut read = Vec::with_capacity(list.len());
         for v in list {
-            read.push(self.read_order(v, &known)?);
+            if let Some(order) = self.read_order(v, &known)? {
+                read.push(order);
+            }
         }
         let more = match opt(&doc, "cursor") {
             Some(v) => {
@@ -157,7 +159,9 @@ impl Request {
         })
     }
 
-    fn read_order(&self, v: &Value, payments: &[Payment]) -> Result<PosOrder, ReadRefused> {
+    /// `None` for an order whose state is not known and that carries no
+    /// Bitcoin tender: it is left out of the page (PS-91).
+    fn read_order(&self, v: &Value, payments: &[Payment]) -> Result<Option<PosOrder>, ReadRefused> {
         let o = object(v, "orders[]")?;
         let order_id = id(
             string(req(o, "id", "orders[].id")?, "orders[].id")?,
@@ -171,10 +175,10 @@ impl Request {
             "orders[].location_id",
         )?;
         let state = match string(req(o, "state", "orders[].state")?, "orders[].state")? {
-            "COMPLETED" => OrderState::Closed,
-            "CANCELED" => OrderState::Voided,
-            "OPEN" | "DRAFT" => OrderState::Open,
-            _ => return Err(ReadRefused::UnknownValue("orders[].state")),
+            "COMPLETED" => Some(OrderState::Closed),
+            "CANCELED" => Some(OrderState::Voided),
+            "OPEN" | "DRAFT" => Some(OrderState::Open),
+            _ => None,
         };
         if let Some(version) = opt(o, "version") {
             let n = amount(version, "orders[].version")?;
@@ -191,7 +195,7 @@ impl Request {
             "orders[].updated_at",
         )?;
         let closed_at = match (state, opt(o, "closed_at")) {
-            (OrderState::Closed, Some(v)) => Some(rfc3339(v, "orders[].closed_at")?),
+            (Some(OrderState::Closed), Some(v)) => Some(rfc3339(v, "orders[].closed_at")?),
             _ => None,
         };
         let (total_minor, order_currency) = money(
@@ -223,9 +227,23 @@ impl Request {
         }
         if let Some(list) = opt(o, "refunds") {
             for r in array(list, "orders[].refunds")? {
-                apply_refund(r, order_currency, &raw_ids, &mut tenders)?;
+                apply_refund(
+                    r,
+                    order_currency,
+                    &raw_ids,
+                    &self.bitcoin_names,
+                    &mut tenders,
+                )?;
             }
         }
+        let Some(state) = state else {
+            // PS-91: a state that is not known matters only to an order that
+            // carries a Bitcoin tender.
+            if tenders.iter().any(|t| is_bitcoin(&self.bitcoin_names, t)) {
+                return Err(ReadRefused::UnknownValue("orders[].state"));
+            }
+            return Ok(None);
+        };
         let order = PosOrder {
             id: order_id,
             location,
@@ -239,7 +257,7 @@ impl Request {
             reference,
         };
         order.validate()?;
-        Ok(order)
+        Ok(Some(order))
     }
 
     fn read_tender<'a>(
@@ -258,11 +276,10 @@ impl Request {
             req(t, "type", "orders[].tenders[].type")?,
             "orders[].tenders[].type",
         )?;
-        let (label, mapped) = TENDER_TYPES
-            .iter()
-            .find(|(k, _, _)| *k == kind)
-            .map(|(_, label, mapped)| (*label, *mapped))
-            .ok_or(ReadRefused::UnknownValue("orders[].tenders[].type"))?;
+        // PS-96: a type that is not on the list is an "Other" tender that is
+        // never a Bitcoin tender, named with the type's text.
+        let known = TENDER_TYPES.iter().find(|(k, _, _)| *k == kind);
+        let mapped = known.map_or(TenderKind::Other, |(_, _, m)| *m);
         let at = rfc3339(
             req(t, "created_at", "orders[].tenders[].created_at")?,
             "orders[].tenders[].created_at",
@@ -300,6 +317,7 @@ impl Request {
         let payment = payments
             .iter()
             .find(|p| p.id == payment_id.unwrap_or(raw_id));
+        let mut bitcoin = false;
         let tender_name = if kind == "OTHER" {
             // PS-96: the note of the tender, or else the source of its
             // payment, names a Bitcoin tender when it is one of the names of
@@ -310,19 +328,29 @@ impl Request {
                 .flatten()
                 .find_map(|c| self.bitcoin_names.iter().find(|n| same_name(c, n)).cloned());
             match named {
-                Some(n) => n,
-                None => name(label, "orders[].tenders[].type")?,
+                Some(n) => {
+                    bitcoin = true;
+                    n
+                }
+                None => name("Other", "orders[].tenders[].type")?,
             }
-        } else {
+        } else if let Some((_, label, _)) = known {
             name(label, "orders[].tenders[].type")?
+        } else {
+            match note(&format!("Other ({kind})")) {
+                Some(n) => n,
+                None => name("Other", "orders[].tenders[].type")?,
+            }
         };
         let reference = note_text
             .and_then(note)
             .or_else(|| payment.and_then(|p| p.note.as_deref()).and_then(note));
-        let state = if payment.is_some_and(|p| p.voided) {
-            TenderState::Voided
-        } else {
-            TenderState::Paid
+        let state = match payment.map(|p| p.voided) {
+            Some(Some(true)) => TenderState::Voided,
+            // PS-91: a payment status that is not known matters only to a
+            // Bitcoin tender.
+            Some(None) if bitcoin => return Err(ReadRefused::UnknownValue("payments[].status")),
+            _ => TenderState::Paid,
         };
         Ok((
             PosTender {
@@ -363,6 +391,7 @@ fn apply_refund(
     v: &Value,
     order_currency: Currency,
     raw_ids: &[&str],
+    names: &[Text],
     tenders: &mut [PosTender],
 ) -> Result<(), ReadRefused> {
     let r = object(v, "orders[].refunds[]")?;
@@ -382,14 +411,24 @@ fn apply_refund(
         return Err(ReadRefused::CurrencyMismatch);
     }
     let counts = match status {
-        "PENDING" | "APPROVED" => true,
-        "REJECTED" | "FAILED" => false,
-        _ => return Err(ReadRefused::UnknownValue("orders[].refunds[].status")),
+        "PENDING" | "APPROVED" => Some(true),
+        "REJECTED" | "FAILED" => Some(false),
+        _ => None,
     };
     let at = raw_ids
         .iter()
         .position(|i| *i == tender_ref)
         .ok_or(ReadRefused::RefundWithoutTender)?;
+    let Some(counts) = counts else {
+        // PS-91: a refund status that is not known matters only to a Bitcoin
+        // tender.
+        let bitcoin = tenders.get(at).is_some_and(|t| is_bitcoin(names, t));
+        return if bitcoin {
+            Err(ReadRefused::UnknownValue("orders[].refunds[].status"))
+        } else {
+            Ok(())
+        };
+    };
     if !counts {
         return Ok(());
     }
@@ -420,7 +459,8 @@ fn apply_refund(
 #[derive(Debug)]
 struct Payment {
     id: String,
-    voided: bool,
+    /// `None` when the status is not known.
+    voided: Option<bool>,
     source: Option<String>,
     note: Option<String>,
 }
@@ -443,9 +483,9 @@ fn read_payments(doc: &Value) -> Result<Vec<Payment>, ReadRefused> {
         let p = object(v, "payments[]")?;
         let pid = string(req(p, "id", "payments[].id")?, "payments[].id")?.to_string();
         let voided = match string(req(p, "status", "payments[].status")?, "payments[].status")? {
-            "APPROVED" | "PENDING" | "COMPLETED" => false,
-            "CANCELED" | "FAILED" => true,
-            _ => return Err(ReadRefused::UnknownValue("payments[].status")),
+            "APPROVED" | "PENDING" | "COMPLETED" => Some(false),
+            "CANCELED" | "FAILED" => Some(true),
+            _ => None,
         };
         let source = match opt(p, "external_details") {
             Some(e) => {
@@ -484,4 +524,10 @@ fn push_json_string(out: &mut String, s: &str) {
         }
     }
     out.push('"');
+}
+
+/// PS-10: whether a tender, as the reader named it, is one of the shop's
+/// Bitcoin tenders.
+fn is_bitcoin(names: &[Text], t: &PosTender) -> bool {
+    names.iter().any(|n| same_name(t.name.as_str(), n))
 }

@@ -22,7 +22,7 @@ fn cl(body: &str) -> Result<Page, ReadRefused> {
 }
 
 fn cl_bytes(body: &[u8]) -> Result<Page, ReadRefused> {
-    clover::Request::new(MERCHANT, 500, &Cursor::start())
+    clover::Request::new(MERCHANT, &settings(), 500, &Cursor::start())
         .expect("a request")
         .parse(body)
 }
@@ -501,7 +501,7 @@ fn ps_91_a_state_or_kind_the_reader_does_not_know_is_a_refusal() {
         let order = changed(CL, "SUCCESS", result);
         assert_eq!(
             cl(&cl_page(&order)),
-            Err(ReadRefused::UnknownValue("payments[].result")),
+            Err(ReadRefused::UnknownResult(crate::Shown::new(result))),
             "{result:?}"
         );
     }
@@ -887,6 +887,6 @@ fn ps_99_the_same_bytes_give_the_same_answer_every_time() {
     let c = cursor_at(1_700_000_000).expect("a cursor");
     let a = square::Request::new(&settings(), 10, &c).expect("a request");
     assert_eq!(a.body(), a.clone().body());
-    let b = clover::Request::new(MERCHANT, 10, &c).expect("a request");
+    let b = clover::Request::new(MERCHANT, &settings(), 10, &c).expect("a request");
     assert_eq!(b.path_and_query(), b.clone().path_and_query());
 }

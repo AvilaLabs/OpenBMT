@@ -7,6 +7,44 @@ use std::fmt;
 use openbmt_json::JsonError;
 use openbmt_pos::{ModelError, PosError};
 
+/// A short piece of text of the vendor's, at most 64 bytes, with each control
+/// character turned into a space: what a refusal quotes (PS-91).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shown {
+    buf: [u8; 64],
+    len: u8,
+}
+
+impl Shown {
+    /// The text, cleaned and cut at a character boundary.
+    pub fn new(s: &str) -> Self {
+        let cleaned = crate::common::note(s);
+        Self::sample(cleaned.as_ref().map_or("", |t| t.as_str()))
+    }
+
+    /// An ASCII text of at most 64 bytes, for the lists of values in tests
+    /// and in `say.rs`; longer text is cut.
+    #[allow(clippy::indexing_slicing)] // the loop stops at the length and at 64
+    pub const fn sample(s: &str) -> Self {
+        let bytes = s.as_bytes();
+        let mut buf = [0u8; 64];
+        let mut i = 0;
+        while i < bytes.len() && i < 64 {
+            buf[i] = bytes[i];
+            i += 1;
+        }
+        Self { buf, len: i as u8 }
+    }
+
+    /// The text.
+    pub fn as_str(&self) -> &str {
+        self.buf
+            .get(..usize::from(self.len))
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .unwrap_or("")
+    }
+}
+
 /// PS-90 to PS-94, PS-96, PS-98: why a reply is refused whole.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadRefused {
@@ -32,6 +70,9 @@ pub enum ReadRefused {
     WrongType(&'static str),
     /// A state, kind or result that the reader does not know (PS-91).
     UnknownValue(&'static str),
+    /// A Bitcoin payment with a result the reader does not know, with the
+    /// text of the result (PS-91, PS-98).
+    UnknownResult(Shown),
     /// A number that is negative, too large or not a whole number (PS-92).
     OutOfRange(&'static str),
     /// A time that is not strictly what the vendor documents (PS-92).
@@ -70,9 +111,11 @@ impl ReadRefused {
             | Self::Malformed
             | Self::TrailingBytes
             | Self::DuplicateKey => "PS-90",
-            Self::ServiceError | Self::Missing(_) | Self::WrongType(_) | Self::UnknownValue(_) => {
-                "PS-91"
-            }
+            Self::ServiceError
+            | Self::Missing(_)
+            | Self::WrongType(_)
+            | Self::UnknownValue(_)
+            | Self::UnknownResult(_) => "PS-91",
             Self::OutOfRange(_) | Self::BadTime(_) => "PS-92",
             Self::BadCurrency(_) | Self::CurrencyMismatch | Self::BadId(_) | Self::BadText(_) => {
                 "PS-93"
@@ -114,6 +157,7 @@ impl ReadRefused {
             Self::Missing(_) => "a field the reader needs is not there",
             Self::WrongType(_) => "a field is not of the documented type",
             Self::UnknownValue(_) => "a field holds a value the reader does not know",
+            Self::UnknownResult(_) => "a Bitcoin payment has a result the reader does not know",
             Self::OutOfRange(_) => "a number is negative, too large or not whole",
             Self::BadTime(_) => "a time is not written as documented",
             Self::BadCurrency(_) => "a currency is not three capital letters",
@@ -133,6 +177,9 @@ impl ReadRefused {
 impl fmt::Display for ReadRefused {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.rule(), self.why())?;
+        if let Self::UnknownResult(r) = self {
+            return write!(f, " ({})", r.as_str());
+        }
         match self.field() {
             Some(field) => write!(f, " ({field})"),
             None => Ok(()),

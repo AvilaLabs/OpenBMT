@@ -49,10 +49,13 @@ bytes and a time the caller gives it and returns a price or a refusal.
 ## 2. Reading a reply
 
 - **RT-10.** At most 64 KiB (`MAX_RESPONSE_BYTES`) of a reply are read. A
-  longer reply is refused from its length, before anything is parsed.
+  longer reply is refused from its length, before anything is parsed. The
+  limit is passed to the JSON reader of `openbmt-json`, which takes it as a
+  parameter (its own default is larger).
 - **RT-11.** Arrays and objects may be nested at most 16 deep
-  (`MAX_DEPTH`). A deeper document is refused as soon as the 17th level
-  opens, so the depth of the reader's own recursion is bounded.
+  (`MAX_DEPTH`), passed to `openbmt-json` in the same way. A deeper document
+  is refused as soon as the 17th level opens, so the depth of the reader's
+  own recursion is bounded.
 - **RT-12.** A reply is UTF-8, all of it. Any other byte sequence is
   refused before parsing, whether or not it is inside a string.
 - **RT-13.** The whole document is parsed with the JSON grammar of RFC 8259,

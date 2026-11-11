@@ -46,4 +46,4 @@ pub mod time;
 mod tests;
 
 pub use common::cursor_at;
-pub use error::{ReadRefused, RequestRefused};
+pub use error::{ReadRefused, RequestRefused, Shown};

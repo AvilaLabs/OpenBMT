@@ -13,15 +13,15 @@
 
 use openbmt_json::Value;
 use openbmt_pos::{
-    Cursor, OrderState, Page, PosOrder, PosTender, TenderKind, TenderState, Text, MAX_PAGE_ORDERS,
-    MAX_TENDERS,
+    Cursor, Id, OrderState, Page, PosOrder, PosTender, Settings, TenderKind, TenderState, Text,
+    MAX_PAGE_ORDERS, MAX_TENDERS,
 };
 
 use crate::common::{
     amount, array, check_limit, currency, id, join_cursor, millis, name, newest, note, object, opt,
-    parse_doc, req, split_cursor, string, whole_text,
+    parse_doc, req, same_name, split_cursor, string, whole_text,
 };
-use crate::error::{ReadRefused, RequestRefused};
+use crate::error::{ReadRefused, RequestRefused, Shown};
 
 /// PS-97: the longest merchant id taken, in bytes.
 pub const MAX_MERCHANT_BYTES: usize = 32;
@@ -66,6 +66,7 @@ pub fn percent_encode(s: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
     merchant: String,
+    bitcoin_names: Vec<Text>,
     limit: usize,
     since: u64,
     offset: u64,
@@ -74,8 +75,14 @@ pub struct Request {
 impl Request {
     /// A request for the orders of `merchant` (the Clover merchant id, which
     /// is also the location text of the settings), at most `limit` a page
-    /// (1 to 500), from the time and the offset the cursor holds.
-    pub fn new(merchant: &str, limit: usize, cursor: &Cursor) -> Result<Self, RequestRefused> {
+    /// (1 to 500), from the time and the offset the cursor holds. The
+    /// settings give the names of the Bitcoin tenders (PS-10).
+    pub fn new(
+        merchant: &str,
+        settings: &Settings,
+        limit: usize,
+        cursor: &Cursor,
+    ) -> Result<Self, RequestRefused> {
         check_limit(limit)?;
         if merchant.is_empty()
             || merchant.len() > MAX_MERCHANT_BYTES
@@ -97,6 +104,7 @@ impl Request {
         };
         Ok(Self {
             merchant: merchant.to_string(),
+            bitcoin_names: settings.bitcoin_tenders.clone(),
             limit,
             since,
             offset,
@@ -133,8 +141,11 @@ impl Request {
         let location = whole_text(&self.merchant, "merchant")?;
         let mut orders = Vec::with_capacity(list.len());
         for v in list {
-            orders.push(read_order(v, &location)?);
+            if let Some(order) = read_order(v, &location, &self.bitcoin_names)? {
+                orders.push(order);
+            }
         }
+        // The page is as long as the reply, though an order may be left out.
         let more = list.len() == self.limit;
         let next = if more {
             let offset = self
@@ -162,7 +173,9 @@ fn list<'a>(o: &'a Value, key: &str, what: &'static str) -> Result<&'a [Value], 
     }
 }
 
-fn read_order(v: &Value, location: &Text) -> Result<PosOrder, ReadRefused> {
+/// `None` for an order whose payment state is not known and that carries no
+/// Bitcoin tender: it is left out of the page (PS-91).
+fn read_order(v: &Value, location: &Text, names: &[Text]) -> Result<Option<PosOrder>, ReadRefused> {
     let o = object(v, "elements[]")?;
     let order_id = id(
         string(req(o, "id", "elements[].id")?, "elements[].id")?,
@@ -182,9 +195,9 @@ fn read_order(v: &Value, location: &Text) -> Result<PosOrder, ReadRefused> {
         req(o, "paymentState", "elements[].paymentState")?,
         "elements[].paymentState",
     )? {
-        "OPEN" | "PARTIALLY_PAID" => OrderState::Open,
-        "PAID" | "PARTIALLY_REFUNDED" | "REFUNDED" | "CREDITED" => OrderState::Closed,
-        _ => return Err(ReadRefused::UnknownValue("elements[].paymentState")),
+        "OPEN" | "PARTIALLY_PAID" => Some(OrderState::Open),
+        "PAID" | "PARTIALLY_REFUNDED" | "REFUNDED" | "CREDITED" => Some(OrderState::Closed),
+        _ => None,
     };
     if let Some(s) = opt(o, "state") {
         string(s, "elements[].state")?;
@@ -206,14 +219,24 @@ fn read_order(v: &Value, location: &Text) -> Result<PosOrder, ReadRefused> {
         return Err(ReadRefused::TooManyTenders);
     }
     let mut tenders = Vec::new();
+    let mut left_out: Vec<Id> = Vec::new();
     for p in payments {
-        if let Some(t) = read_payment(p)? {
-            tenders.push(t);
+        match read_payment(p, names)? {
+            Read::Tender(t) => tenders.push(t),
+            Read::LeftOut(i) => left_out.push(i),
         }
     }
     for r in list(o, "refunds", "elements[].refunds")? {
-        apply_refund(r, &mut tenders)?;
+        apply_refund(r, &left_out, &mut tenders)?;
     }
+    let Some(state) = state else {
+        // PS-91: a state that is not known matters only to an order that
+        // carries a Bitcoin tender.
+        if tenders.iter().any(|t| is_bitcoin(names, &t.name)) {
+            return Err(ReadRefused::UnknownValue("elements[].paymentState"));
+        }
+        return Ok(None);
+    };
     let order = PosOrder {
         id: order_id,
         location: location.clone(),
@@ -227,28 +250,51 @@ fn read_order(v: &Value, location: &Text) -> Result<PosOrder, ReadRefused> {
         reference,
     };
     order.validate()?;
-    Ok(order)
+    Ok(Some(order))
 }
 
-/// PS-98: a payment as a tender. `None` for a payment that is not money
-/// taken and not a void.
-fn read_payment(v: &Value) -> Result<Option<PosTender>, ReadRefused> {
+/// What a payment is.
+enum Read {
+    Tender(PosTender),
+    /// Not money taken and not a void, or a result the reader does not know
+    /// on a payment that is not a Bitcoin tender: left out, with its id.
+    LeftOut(Id),
+}
+
+/// PS-10: whether a label equals a Bitcoin tender name.
+fn is_bitcoin(names: &[Text], label: &Text) -> bool {
+    names.iter().any(|n| same_name(label.as_str(), n))
+}
+
+/// PS-98: a payment as a tender, or left out. A result that is not known
+/// leaves out a payment that is not a Bitcoin tender and refuses the page for
+/// one that is.
+fn read_payment(v: &Value, names: &[Text]) -> Result<Read, ReadRefused> {
     let p = object(v, "payments[]")?;
     let payment_id = id(
         string(req(p, "id", "payments[].id")?, "payments[].id")?,
         "payments[].id",
     )?;
-    let state = match string(req(p, "result", "payments[].result")?, "payments[].result")? {
-        "SUCCESS" => TenderState::Paid,
-        "VOIDED" => TenderState::Voided,
-        r if NOT_A_TENDER.contains(&r) => return Ok(None),
-        _ => return Err(ReadRefused::UnknownValue("payments[].result")),
-    };
+    let result = string(req(p, "result", "payments[].result")?, "payments[].result")?;
     let tender = object(req(p, "tender", "payments[].tender")?, "payments[].tender")?;
     let label = string(
         req(tender, "label", "payments[].tender.label")?,
         "payments[].tender.label",
     )?;
+    let state = match result {
+        "SUCCESS" => TenderState::Paid,
+        "VOIDED" => TenderState::Voided,
+        r if NOT_A_TENDER.contains(&r) => return Ok(Read::LeftOut(payment_id)),
+        r => {
+            let bitcoin =
+                name(label, "payments[].tender.label").is_ok_and(|l| is_bitcoin(names, &l));
+            return if bitcoin {
+                Err(ReadRefused::UnknownResult(Shown::new(r)))
+            } else {
+                Ok(Read::LeftOut(payment_id))
+            };
+        }
+    };
     // Read for their types only: the id of the tender type, its key and the
     // vendor's own id for an outside payment.
     for (obj, key, what) in [
@@ -274,7 +320,7 @@ fn read_payment(v: &Value) -> Result<Option<PosTender>, ReadRefused> {
         Some(n) => note(string(n, "payments[].note")?),
         None => None,
     };
-    Ok(Some(PosTender {
+    Ok(Read::Tender(PosTender {
         id: payment_id,
         kind: TenderKind::Other,
         name: name(label, "payments[].tender.label")?,
@@ -288,7 +334,7 @@ fn read_payment(v: &Value) -> Result<Option<PosTender>, ReadRefused> {
 
 /// PS-98: a refund names its payment and has an amount above zero; it is
 /// summed on that tender, unless the tender is voided. **[verify, E6]**
-fn apply_refund(v: &Value, tenders: &mut [PosTender]) -> Result<(), ReadRefused> {
+fn apply_refund(v: &Value, left_out: &[Id], tenders: &mut [PosTender]) -> Result<(), ReadRefused> {
     let r = object(v, "refunds[]")?;
     let payment = object(req(r, "payment", "refunds[].payment")?, "refunds[].payment")?;
     let payment_id = id(
@@ -301,6 +347,10 @@ fn apply_refund(v: &Value, tenders: &mut [PosTender]) -> Result<(), ReadRefused>
     let refunded = amount(req(r, "amount", "refunds[].amount")?, "refunds[].amount")?;
     if refunded == 0 {
         return Err(ReadRefused::OutOfRange("refunds[].amount"));
+    }
+    // A refund of a payment that was left out has nothing to be added to.
+    if left_out.contains(&payment_id) {
+        return Ok(());
     }
     let tender = tenders
         .iter_mut()

@@ -15,7 +15,7 @@ use crate::settings::Settings;
 use crate::{MAX_CURSOR_BYTES, MAX_PAGES, MAX_PAGE_ORDERS};
 
 /// Where the next poll of a POS starts. Opaque to everything but the
-/// connector that wrote it; at most 256 bytes. The empty cursor is the start.
+/// connector that wrote it; at most 1,024 bytes. The empty cursor is the start.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Cursor(Vec<u8>);
 
@@ -25,7 +25,7 @@ impl Cursor {
         Self::default()
     }
 
-    /// A cursor; refused above 256 bytes.
+    /// A cursor; refused above 1,024 bytes.
     pub fn new(bytes: Vec<u8>) -> Result<Self, ModelError> {
         if bytes.len() > MAX_CURSOR_BYTES {
             Err(ModelError::CursorTooLong)

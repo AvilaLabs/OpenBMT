@@ -261,12 +261,29 @@ fn ps_72_too_many_sales_or_two_facts_for_one_sale_are_refused() {
 }
 
 #[test]
-fn ps_72_a_cursor_is_at_most_256_bytes() {
+fn ps_72_a_cursor_is_at_most_1024_bytes() {
     assert!(Cursor::new(vec![0; MAX_CURSOR_BYTES]).is_ok());
     assert_eq!(
         Cursor::new(vec![0; MAX_CURSOR_BYTES + 1]),
         Err(ModelError::CursorTooLong)
     );
+}
+
+#[test]
+fn ps_72_a_ledger_with_a_cursor_of_1024_bytes_is_stored_and_read_back() {
+    let mut l = Ledger::new();
+    let mut stored: Option<Vec<u8>> = None;
+    let cursor = Cursor::new(vec![7; MAX_CURSOR_BYTES]).unwrap();
+    l.update_stored(&[], cursor.clone(), &[], &settings(), T0, |bytes| {
+        stored = Some(bytes.to_vec());
+        Ok::<(), Infallible>(())
+    })
+    .unwrap();
+    let bytes = stored.unwrap();
+    let back = Ledger::from_bytes(&bytes).unwrap();
+    assert_eq!(back.cursor(), &cursor);
+    assert_eq!(back.to_bytes(), bytes);
+    assert_eq!(MAX_CURSOR_BYTES, 1_024);
 }
 
 fn settled(now: u64) -> (Ledger, SaleFact) {

@@ -264,7 +264,7 @@ both in plain words, since every unknown explains itself (§2.6).
   any truncation, any changed byte, an unknown tag or a bound broken is
   refused, and bytes that are accepted encode back to themselves.
 - **PS-72.** Every size is bounded: 4,096 tracked orders, 16,384 matches,
-  4,096 open and 4,096 acknowledged alerts, 16,384 sales, a cursor of 256
+  4,096 open and 4,096 acknowledged alerts, 16,384 sales, a cursor of 1,024
   bytes. A ledger that would grow past a bound refuses the change, and nothing
   is dropped silently. The refusal is PS-76.
 - **PS-73.** Retirement. An order is retired, with its matches counted into
@@ -332,8 +332,12 @@ point needs a real seller or merchant account before the reader is relied on.
 - **PS-91.** A field a reader needs that is missing, or `null`, or not of the
   type the vendor documents, refuses the reply whole; so does a reply that
   carries a service error (Square's `errors` array that is not empty). A state,
-  kind or result the reader maps and does not know refuses the reply whole;
-  nothing is mapped by guessing. A field the reader does not need is ignored,
+  kind or result the reader maps and does not know is refused only where it
+  can change the reading of a Bitcoin tender or of an order that carries one:
+  there it refuses the reply whole, and where it cannot (a cash payment, an
+  order with no Bitcoin tender) the tender or order is read as the rules of
+  PS-96 and PS-98 say, or left out, and the page goes on. Nothing is mapped by
+  guessing. A field the reader does not need is ignored,
   and so is a field the vendor adds later, whatever it holds. An optional
   field the reader reads is checked when it is there.
 - **PS-92.** An amount is a whole number of the currency's smallest unit from
@@ -356,7 +360,7 @@ point needs a real seller or merchant account before the reader is relied on.
 - **PS-94.** The bounds of PS-01, PS-02 and PS-80 hold for what is read: a
   page of more than 500 orders, an order with more than 16 tenders, two
   tenders with one id, refunds of a tender larger than its amount and tip, a
-  refund that names no tender of its order and a cursor above 256 bytes each
+  refund that names no tender of its order and a cursor above 1,024 bytes each
   refuse the page whole. A page size is 1 to 500. A cursor is the time in
   whole seconds from which orders are read (decimal, no leading zero, not
   after the year 9999), then, only while a page has more, a bar and the
@@ -383,16 +387,24 @@ point needs a real seller or merchant account before the reader is relied on.
   `tip_money`, `note` and `payment_id`. The types are `CARD`,
   `THIRD_PARTY_CARD` (card), `CASH` (cash) and `SQUARE_GIFT_CARD`,
   `BANK_ACCOUNT`, `WALLET`, `BUY_NOW_PAY_LATER`, `SQUARE_ACCOUNT`, `NO_SALE`,
-  `OTHER` (other); another is refused. Which tenders are Bitcoin stays PS-10:
+  `OTHER` (other); another type is kept as a tender of kind other named
+  "Other (" and the type's text, cut to 64 bytes with control characters
+  turned to spaces, and ")", and is never a Bitcoin tender. Which tenders are
+  Bitcoin stays PS-10:
   a tender of type `OTHER` whose `note`, or whose payment's
   `external_details.source`, equals a name of the settings (PS-10's
   comparison) is given that name, and any other is named "Other". The
   payment comes from a ListPayments reply the caller may hand in with the
   orders: its `status` `CANCELED` or `FAILED` makes the tender voided, and
-  `APPROVED`, `PENDING` and `COMPLETED` do not; another is refused. A tender's
+  `APPROVED`, `PENDING` and `COMPLETED` do not; another status leaves the tender
+  paid, and refuses the reply only if the tender is a Bitcoin tender. A tender's
   reference is its `note`, else its payment's. A refund names its tender
   (`tender_id`) and counts while its `status` is `PENDING` or `APPROVED`; it
-  does not while `REJECTED` or `FAILED`; another is refused. The refunds that
+  does not while `REJECTED` or `FAILED`; another status is ignored, and refuses
+  the reply only if the tender is a Bitcoin tender. A state the
+  reader does not know on an order (not `OPEN`, `DRAFT`, `COMPLETED` or
+  `CANCELED`) leaves the order out of the page unless it carries a Bitcoin
+  tender, when it refuses the reply. The refunds that
   count are added up on the tender (a refund of nothing is refused) and a tender
   that is voided stays voided. The next cursor keeps the time and takes
   Square's marker when there is one; when there is none it takes the newest
@@ -414,7 +426,9 @@ point needs a real seller or merchant account before the reader is relied on.
 - **PS-98.** The Clover reply is `elements`, which is required. An order has
   an `id`, a `currency`, a `total`, a `paymentState` (`OPEN` and
   `PARTIALLY_PAID` are open; `PAID`, `PARTIALLY_REFUNDED`, `REFUNDED` and
-  `CREDITED` are closed; another is refused), `createdTime` (opened) and
+  `CREDITED` are closed; another leaves the order out of the page unless it
+  carries a Bitcoin tender, when it refuses the reply), `createdTime` (opened)
+  and
   `modifiedTime`, optionally a `state` (read for its type only) and a `note`
   (the order's reference). Its location is the merchant id. It is never read
   as voided: a void shows on its payments. `payments` and `refunds` are
@@ -426,7 +440,10 @@ point needs a real seller or merchant account before the reader is relied on.
   and `VOIDED` is voided; `FAIL`, `INITIATED`, `VOIDING`, `VOID_FAILED`,
   `AUTH`, `AUTH_COMPLETED`, `DISCOUNT`, `OFFLINE_RETRYING` and `PENDING` are
   not money taken and the payment is left out, so a payment that was paid and
-  is now being voided is seen as gone (PS-45); another is refused. A refund
+  is now being voided is seen as gone (PS-45); another result leaves a payment
+  out too if its tender label is not a Bitcoin tender name (PS-10), and
+  refuses the reply, naming the result text, if it is. A refund of a payment
+  that was left out is ignored. A refund
   names its payment and has an amount above zero; it is added up on that
   tender, which stays voided if it is. A page of exactly the limit has more,
   and the next cursor keeps the time and moves the offset on; a shorter page
