@@ -369,6 +369,9 @@ pub fn words_for_text(text: &str) -> Option<Words> {
     if text == RECEIVE_MARK_REFUSED {
         return Some(refused_words(text));
     }
+    if text == crate::evaluate::LOOK_ALIKE_REFUSED {
+        return Some(look_alike_words());
+    }
     openbmt_signer::words_for_text(text)
 }
 
@@ -409,6 +412,19 @@ pub fn no_key2_words() -> Words {
         "Use the phone that holds key 2.",
     )
     .code("AS-36")
+}
+
+/// AS-39: a settings change adds an identity that starts like one already
+/// listed but is a different one.
+pub fn look_alike_words() -> Words {
+    Words::new(
+        Tone::Stop,
+        "Two identities look alike",
+        "A device, counter or Box in this change has an identity that starts like one already listed but is a different one.",
+        Who::KeyHolder,
+        "Do not approve it, and tell the owner in person.",
+    )
+    .code("AS-39")
 }
 
 /// A batch of addresses that does not start where the Key app expects the
@@ -457,6 +473,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         refused_words(RECEIVE_MARK_REFUSED),
     ));
     all.push(("BatchStep::RangeStart".to_string(), receive_range_words()));
+    all.push(("SettingsStep::LookAlike".to_string(), look_alike_words()));
     all
 }
 

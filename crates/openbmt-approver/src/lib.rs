@@ -47,7 +47,8 @@ pub use line::{
     SettingChange, SettingsLine, SpendLine, SpendReview, StepStatus,
 };
 pub use say::{
-    all_words, no_key2_words, receive_range_words, words_for_text, RECEIVE_MARK_REFUSED,
+    all_words, look_alike_words, no_key2_words, receive_range_words, words_for_text,
+    RECEIVE_MARK_REFUSED,
 };
 pub use session::Session;
 pub use state::{Approver, InvitationView};

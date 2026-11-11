@@ -222,6 +222,13 @@ last settings it co-signed, and the last 256 session IDs it finished.
   the log. Decoding is strict (AS-03). A snapshot for another wallet or
   owner, or one that does not fit whether key 2 is on this device, is
   refused.
+- **AS-39.** A settings line shows each device, counter and Box as the full
+  identity: 64 lower-case hex digits in groups of four, separated by spaces,
+  so that two identities that share their first bytes read differently. The
+  line is also refused, and cannot be approved, when the change adds a device,
+  counter or Box whose first eight bytes equal those of an identity already
+  listed (or of another one the change adds) but which is not the same
+  identity. Its own words say that two identities look alike.
 
 ## 3. The owner phone's side
 

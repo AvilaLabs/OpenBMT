@@ -26,7 +26,7 @@ fn rule_ids() -> Vec<u32> {
     ids
 }
 
-/// The rules of this crate: section 2, AS-20 to AS-38, and the Key app's part
+/// The rules of this crate: section 2, AS-20 to AS-39, and the Key app's part
 /// of adding a Box, AS-80 to AS-82.
 fn own_rules() -> Vec<u32> {
     rule_ids()
@@ -37,7 +37,7 @@ fn own_rules() -> Vec<u32> {
 
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
-    assert_eq!(own_rules().len(), 22);
+    assert_eq!(own_rules().len(), 23);
     assert!(own_rules().contains(&20) && own_rules().contains(&82));
 }
 

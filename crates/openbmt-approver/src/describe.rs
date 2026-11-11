@@ -18,8 +18,16 @@ fn limit(l: &Limit) -> String {
     format!("{} sats (${} from the owner phone)", l.sats, l.display_usd)
 }
 
-fn short(d: &DeviceId) -> String {
-    hex(d.to_bytes().get(..4).unwrap_or(&[]))
+/// An identity in full: 64 lower-case hex digits in groups of four, so that
+/// two identities that share their first bytes still read differently (AS-39).
+pub(crate) fn full(d: &DeviceId) -> String {
+    let digits = hex(&d.to_bytes());
+    let groups: Vec<&str> = digits
+        .as_bytes()
+        .chunks(4)
+        .filter_map(|c| std::str::from_utf8(c).ok())
+        .collect();
+    groups.join(" ")
 }
 
 fn flag(v: bool) -> String {
@@ -66,21 +74,21 @@ pub(crate) fn field_values(s: &Settings) -> Vec<(&'static str, String)> {
     let devices = if s.devices.is_empty() {
         "none".to_string()
     } else {
-        s.devices.iter().map(short).collect::<Vec<_>>().join(", ")
+        s.devices.iter().map(full).collect::<Vec<_>>().join(", ")
     };
     let counters = if s.counters.is_empty() {
         "none".to_string()
     } else {
         s.counters
             .iter()
-            .map(|(d, share)| format!("{} {} bp", short(d), share))
+            .map(|(d, share)| format!("{} {} bp", full(d), share))
             .collect::<Vec<_>>()
             .join(", ")
     };
     let boxes = if s.boxes.is_empty() {
         "none".to_string()
     } else {
-        s.boxes.iter().map(short).collect::<Vec<_>>().join(", ")
+        s.boxes.iter().map(full).collect::<Vec<_>>().join(", ")
     };
     vec![
         ("light_per_sale", limit(&s.light_per_sale)),

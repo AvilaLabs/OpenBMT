@@ -1548,6 +1548,8 @@ class Controller(private val act: MainActivity) {
             for (c in t.claims) receipt.add(ReceiptLine(c, LineStyle.Small))
         }
         if (receipt.isNotEmpty()) views.add(ui.receipt(receipt))
+        // Identities in full, in monospace, wrapped as needed (AS-39).
+        for (identity in t.identities) views.add(ui.text(identity, 13f, mono = true))
         for (q in t.quoted) views.add(ui.quoted("Text from elsewhere, not written by this app. ${q.from}:", "\u201c${q.text}\u201d"))
         t.failure?.let {
             views.add(ui.text("This item cannot be approved. The checks said:", 14f, bold = true, colour = ui.pal.stop.ink))

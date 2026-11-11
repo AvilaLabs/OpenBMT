@@ -31,9 +31,17 @@ class LineText(
     val prominent: String? = null,
     /** What to do with [prominent], or null. */
     val instruction: String? = null,
+    /**
+     * The settings changes that list identities (devices, counters, Boxes), each in full as 64 hex digits
+     * in groups of four (AS-39), to be shown in monospace and wrapped, so that two identities can be compared.
+     */
+    val identities: List<String> = emptyList(),
 )
 
 object LineModel {
+    /** The settings fields whose values are identities, shown in full (AS-39). */
+    val IDENTITY_FIELDS = setOf("devices", "counters", "boxes")
+
     private fun kindName(kind: LineKind) = when (kind) {
         LineKind.Spend -> "Payment"
         LineKind.BatchRefill -> "New addresses for a counter"
@@ -74,6 +82,7 @@ object LineModel {
         val rows = ArrayList<String>()
         val claims = ArrayList<String>()
         val quoted = ArrayList<Quoted>()
+        val identities = ArrayList<String>()
         var title = line.title.ifEmpty { kindName(line.kind) }
         var prominent: String? = null
         var instruction: String? = null
@@ -124,7 +133,8 @@ object LineModel {
                 val s = d.detail
                 rows.add("Version ${s.newVersion}${s.lastVersion?.let { ", after version $it" } ?: ""}.")
                 for (c in s.changes) {
-                    rows.add("${c.field}: ${c.old ?: "not set"} to ${c.new} (${direction(c.direction)}).")
+                    val row = "${c.field}: ${c.old ?: "not set"} to ${c.new} (${direction(c.direction)})."
+                    if (c.field in IDENTITY_FIELDS) identities.add(row) else rows.add(row)
                 }
                 s.overall?.let { rows.add("Overall this change ${direction(it)} the settings.") }
                 for (c in s.checks) rows.add(checkRow(c))
@@ -169,6 +179,7 @@ object LineModel {
             canApprove = line.canApprove,
             prominent = prominent,
             instruction = instruction,
+            identities = identities,
         )
     }
 }

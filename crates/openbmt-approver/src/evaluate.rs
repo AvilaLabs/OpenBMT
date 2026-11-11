@@ -9,8 +9,9 @@ use bitcoin::bip32::Xpriv;
 
 use openbmt_core::batch::{BatchError, CosignError, HighWater};
 use openbmt_core::boxpair::{Claim, Welcome};
+use openbmt_core::identity::DeviceId;
 use openbmt_core::pairing::{check_request, PairOffer};
-use openbmt_core::settings::{changed_fields, Change, SettingsError};
+use openbmt_core::settings::{changed_fields, Change, Settings, SettingsError};
 use openbmt_session::{health_proof, DeclineCode, Item, Label, OutputLabel, Payload, RequestItem};
 use openbmt_signer::{OutputKind, Review, SignError, Signed, SignerState};
 
@@ -349,6 +350,40 @@ const SETTINGS_STEPS: [&str; 3] = [
     "the version is above the last co-signed",
 ];
 
+/// Every identity the settings list: devices, counters and Boxes.
+fn listed_identities(s: &Settings) -> Vec<DeviceId> {
+    s.devices
+        .iter()
+        .chain(s.counters.keys())
+        .chain(s.boxes.iter())
+        .copied()
+        .collect()
+}
+
+/// AS-39: whether the change adds an identity whose first eight bytes are
+/// those of an identity already listed (or of another one it adds) but which
+/// is not the same identity.
+fn adds_look_alike(old: Option<&Settings>, new: &Settings) -> bool {
+    let mut seen = old.map(listed_identities).unwrap_or_default();
+    let before = seen.clone();
+    for id in listed_identities(new) {
+        if before.contains(&id) || seen.contains(&id) {
+            continue;
+        }
+        let bytes = id.to_bytes();
+        let alike = seen.iter().any(|l| l.to_bytes().get(..8) == bytes.get(..8));
+        if alike {
+            return true;
+        }
+        seen.push(id);
+    }
+    false
+}
+
+/// The text of the refusal of AS-39.
+pub(crate) const LOOK_ALIKE_REFUSED: &str =
+    "AS-39: an identity in this change starts like one already listed";
+
 fn eval_settings(
     session: &Session<'_>,
     kept: &mut Kept,
@@ -430,6 +465,9 @@ fn eval_settings(
             Ok(_) => String::new(),
         };
         return blocked(detail, DeclineCode::ChecksFailed, format!("AS-27: {why}"));
+    }
+    if adds_look_alike(baseline.as_ref(), new) {
+        return blocked(detail, DeclineCode::ChecksFailed, LOOK_ALIKE_REFUSED);
     }
     if !apply {
         return Checked {

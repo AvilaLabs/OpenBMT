@@ -22,6 +22,7 @@ import org.openbmt.app.Who
 import org.openbmt.key.BoxClaimDetail
 import org.openbmt.key.CheckStatus
 import org.openbmt.key.CheckView
+import org.openbmt.key.Direction
 import org.openbmt.key.HealthDetail
 import org.openbmt.key.InvitationView
 import org.openbmt.key.Key2TakenView
@@ -34,6 +35,8 @@ import org.openbmt.key.LockStatus
 import org.openbmt.key.PairingDetail
 import org.openbmt.key.Quoted
 import org.openbmt.key.SetupState
+import org.openbmt.key.SettingsDetail
+import org.openbmt.key.SettingChangeView
 import org.openbmt.key.SlotView
 import org.openbmt.key.WalletView
 import org.openbmt.key.Words
@@ -294,6 +297,26 @@ object AppModelTest {
         )
         ok(noWords.prominent == null && noWords.instruction == null && !noWords.canApprove, "no words, no comparison, no approval")
         ok(noWords.rows.any { it.contains("cannot be compared") }, "the words that could not be made are said")
+        // Settings: an identity is shown in full, apart from the rows, to be set in monospace (AS-39).
+        val idOne = "0102 0304 0506 0708 090a 0b0c 0d0e 0f10 1112 1314 1516 1718 191a 1b1c 1d1e 1f20 2122 2324 2526 2728 2930 3132 3334 3536 3738 3940 4142 4344 4546 4748 4950 5152"
+        val settings = LineModel.describe(
+            LineView(
+                2, LineKind.Settings, "Settings", true, null, null,
+                LineDetail.Settings(
+                    SettingsDetail(
+                        3, 2,
+                        listOf(
+                            SettingChangeView("tor_on", "off", "on", Direction.Loosening),
+                            SettingChangeView("devices", "none", idOne, Direction.Loosening),
+                            SettingChangeView("boxes", null, idOne, Direction.Loosening),
+                        ),
+                        Direction.Loosening, emptyList(),
+                    ),
+                ),
+            ),
+        )
+        ok(settings.identities.size == 2 && settings.identities.all { it.contains(idOne) }, "devices and Boxes are shown in full, apart")
+        ok(settings.rows.any { it.startsWith("tor_on:") } && settings.rows.none { it.contains(idOne) }, "other fields stay in the rows, identities do not")
         val other = LineModel.describe(
             LineView(1, LineKind.HealthCheck, "Health", false, null, null, LineDetail.Health(HealthDetail(ByteArray(8)))),
         )

@@ -454,6 +454,106 @@ fn as_27_the_smallest_bitcoin_sale_is_listed_in_sats_with_its_direction() {
     assert_eq!(s.overall, Some(Change::Loosening));
 }
 
+/// An identity that shares the first `keep` bytes of `base` and is another
+/// one: the rest is tried until it is a point on the curve.
+fn sharing_prefix(
+    base: &openbmt_core::identity::DeviceId,
+    keep: usize,
+) -> openbmt_core::identity::DeviceId {
+    let mut bytes = base.to_bytes();
+    for n in 1u32..1000 {
+        for (i, b) in bytes.iter_mut().enumerate().skip(keep) {
+            *b = (n as u8).wrapping_mul(31).wrapping_add(i as u8);
+        }
+        if let Ok(id) = openbmt_core::identity::DeviceId::from_bytes(&bytes) {
+            if id != *base {
+                return id;
+            }
+        }
+    }
+    panic!("no identity found")
+}
+
+#[test]
+fn as_39_identities_that_share_four_bytes_show_distinct_full_text() {
+    let one = counter(1).device_id();
+    let two = sharing_prefix(&one, 4);
+    assert_eq!(one.to_bytes()[..4], two.to_bytes()[..4]);
+    assert_ne!(one, two);
+    let mut a = approver_with_key2();
+    let mut s = settings_with(2, &[1]);
+    s.devices.insert(two);
+    let lines = lines_of(&mut a, vec![settings_item(s)]);
+    let Detail::Settings(d) = &lines[0].detail else {
+        panic!()
+    };
+    let devices = d.changes.iter().find(|c| c.field == "devices").unwrap();
+    let group = |id: &openbmt_core::identity::DeviceId| {
+        let hex: String = id.to_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        hex.as_bytes()
+            .chunks(4)
+            .map(|c| std::str::from_utf8(c).unwrap())
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    assert_eq!(group(&one).len(), 64 + 15);
+    assert!(devices.new.contains(&group(&one)), "{}", devices.new);
+    assert!(devices.new.contains(&group(&two)), "{}", devices.new);
+    assert!(
+        lines[0].can_approve,
+        "four shared bytes alone are not refused"
+    );
+}
+
+#[test]
+fn as_39_an_identity_that_starts_like_a_listed_one_is_refused() {
+    let one = counter(1).device_id();
+    let alike = sharing_prefix(&one, 8);
+    assert_eq!(one.to_bytes()[..8], alike.to_bytes()[..8]);
+    assert_ne!(one, alike);
+    let mut a = approver_with_key2();
+    cosign_settings(&mut a, 200, 2, &[1], &Store::default());
+    // Adding a look-alike of a listed device is refused, as a device and as
+    // a Box.
+    for list in [0, 2] {
+        let mut next = settings_with(3, &[1]);
+        match list {
+            0 => {
+                next.devices.insert(alike);
+            }
+            _ => {
+                // A Box is on the device list too (BX-20).
+                next.devices.insert(alike);
+                next.boxes.insert(alike);
+            }
+        }
+        let lines = lines_of(&mut a, vec![settings_item(next)]);
+        assert!(!lines[0].can_approve, "list {list}");
+        let why = lines[0].failure.clone().expect("a reason");
+        assert_eq!(
+            openbmt_approver::words_for_text(&why),
+            Some(openbmt_approver::look_alike_words())
+        );
+        assert_eq!(
+            openbmt_approver::look_alike_words().heading,
+            "Two identities look alike"
+        );
+    }
+    // The same identity again, and an identity that shares only four bytes,
+    // are not refused.
+    let again = settings_with(3, &[1]);
+    assert!(lines_of(&mut a, vec![settings_item(again)])[0].can_approve);
+    let mut four = settings_with(3, &[1]);
+    four.devices.insert(sharing_prefix(&one, 4));
+    assert!(lines_of(&mut a, vec![settings_item(four)])[0].can_approve);
+    // Two look-alikes added together are refused as well.
+    let mut both = settings_with(3, &[1]);
+    let other = counter(2).device_id();
+    both.devices.insert(other);
+    both.devices.insert(sharing_prefix(&other, 8));
+    assert!(!lines_of(&mut a, vec![settings_item(both)])[0].can_approve);
+}
+
 #[test]
 fn as_27_a_change_that_only_tightens_can_be_approved() {
     let mut a = approver_with_key2();
