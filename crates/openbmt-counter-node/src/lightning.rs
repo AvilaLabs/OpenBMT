@@ -43,7 +43,7 @@ use openbmt_lightning::{
 };
 
 /// The magic of the saved credential (version 1).
-pub const MAGIC_LIGHTNING_RECORD: [u8; 4] = *b"OBMx";
+pub const MAGIC_LIGHTNING_RECORD: [u8; 4] = *b"OBMy";
 /// CR-113: seconds after the quote in which the invoice must have come.
 pub const INVOICE_WINDOW_SECS: u64 = 6;
 /// CR-112: seconds between two lookups of a sale.
