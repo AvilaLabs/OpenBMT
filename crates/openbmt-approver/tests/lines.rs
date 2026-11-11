@@ -362,6 +362,41 @@ fn as_27_a_later_change_shows_old_and_new_and_the_direction_of_each_field() {
 }
 
 #[test]
+fn as_27_the_lightning_node_is_shown_in_full_and_naming_it_loosens() {
+    let secp = bitcoin::secp256k1::Secp256k1::new();
+    let sk = bitcoin::secp256k1::SecretKey::from_slice(&[9; 32]).unwrap();
+    let key = bitcoin::secp256k1::PublicKey::from_secret_key(&secp, &sk).serialize();
+    let key_hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
+    let mut a = approver_with_key2();
+    cosign_settings(&mut a, 200, 2, &[1], &Store::default());
+    let mut named = settings_with(3, &[1]);
+    named.lightning_node = Some(key);
+    let lines = lines_of(&mut a, vec![settings_item(named.clone())]);
+    let Detail::Settings(s) = &lines[0].detail else {
+        panic!()
+    };
+    assert_eq!(s.changes.len(), 1);
+    let c = &s.changes[0];
+    assert_eq!(c.field, "Lightning node");
+    assert_eq!(c.old.as_deref(), Some("no Lightning node"));
+    assert_eq!(c.new, format!("Lightning payments go to node {key_hex}"));
+    assert_eq!(c.direction, Change::Loosening);
+    assert_eq!(s.overall, Some(Change::Loosening));
+    // Once co-signed, taking the node away tightens.
+    let bytes = request_bytes(201, vec![settings_item(named)]);
+    approve_all(&mut a, &bytes, &Store::default());
+    let gone = settings_with(4, &[1]);
+    let lines = lines_of(&mut a, vec![settings_item(gone)]);
+    let Detail::Settings(s) = &lines[0].detail else {
+        panic!()
+    };
+    let c = &s.changes[0];
+    assert_eq!(c.new, "no Lightning node");
+    assert_eq!(c.direction, Change::Tightening);
+    assert_eq!(s.overall, Some(Change::Tightening));
+}
+
+#[test]
 fn as_27_the_smallest_bitcoin_sale_is_listed_in_sats_with_its_direction() {
     let mut a = approver_with_key2();
     cosign_settings(&mut a, 200, 2, &[1], &Store::default());

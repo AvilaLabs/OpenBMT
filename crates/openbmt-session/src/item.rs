@@ -93,6 +93,10 @@ pub struct OutputLabel {
 }
 
 /// An item of a request (AS-06 to AS-11).
+// The signed settings are the large variant. A request holds a handful of
+// items, so boxing them would add an allocation and a change to every place
+// that builds the item for nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Item {
     /// A transaction for the signer to sign (AS-06).

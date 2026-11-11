@@ -42,6 +42,10 @@ pub const MAX_MIN_SALE_SATS: u64 = 2_100_000_000_000_000;
 /// (CR-75). The owner sets one when small receipts cost too much to spend.
 pub const DEFAULT_MIN_SALE_SATS: u64 = 0;
 
+/// Length of a Lightning node's public key: compressed, as in BOLT 11 and in
+/// the node's own `getinfo` (LN-03).
+pub const LIGHTNING_NODE_BYTES: usize = 33;
+
 /// What a device is to the shop, as the signed settings give it (BX-24).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceRole {
@@ -136,6 +140,11 @@ pub struct Settings {
     /// Devices that are Boxes (BX-20). Each is also on the device list, and
     /// none is also a counter.
     pub boxes: BTreeSet<DeviceId>,
+    /// The public key of the shop's own Lightning node, if it has one
+    /// (LN-03). The node decides where Lightning payments go, so the key
+    /// that every invoice must be signed by is part of the signed settings
+    /// and not of a counter's own configuration.
+    pub lightning_node: Option<[u8; LIGHTNING_NODE_BYTES]>,
 }
 
 impl Settings {
@@ -167,6 +176,7 @@ impl Settings {
             devices: BTreeSet::new(),
             counters: BTreeMap::new(),
             boxes: BTreeSet::new(),
+            lightning_node: None,
         }
     }
 
@@ -251,6 +261,13 @@ impl Settings {
                 "BX-20: a key is both a counter and a Box",
             ));
         }
+        if let Some(key) = &self.lightning_node {
+            if bitcoin::secp256k1::PublicKey::from_slice(key).is_err() {
+                return Err(SettingsError::Invalid(
+                    "LN-03: the Lightning node key is not a compressed public key",
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -282,7 +299,8 @@ impl Settings {
     }
 
     /// Canonical bytes: fixed field order, little-endian numbers, devices
-    /// and counters sorted by key.
+    /// and counters sorted by key, and last a flag byte and, when it is 1,
+    /// the 33 bytes of the Lightning node's key (LN-03).
     ///
     /// The two list lengths are written as `u32`. `validate` limits the
     /// device list to [`MAX_DEVICES`] entries, and counters must be devices,
@@ -291,7 +309,7 @@ impl Settings {
     /// panics rather than truncating the length.
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(
-            256 + self.devices.len() * 32 + self.counters.len() * 34 + self.boxes.len() * 32,
+            290 + self.devices.len() * 32 + self.counters.len() * 34 + self.boxes.len() * 32,
         );
         out.extend_from_slice(&self.version.to_le_bytes());
         for l in self.limits() {
@@ -318,6 +336,13 @@ impl Settings {
         for b in &self.boxes {
             out.extend_from_slice(&b.to_bytes());
         }
+        match &self.lightning_node {
+            Some(key) => {
+                out.push(1);
+                out.extend_from_slice(key);
+            }
+            None => out.push(0),
+        }
         out
     }
 
@@ -342,7 +367,6 @@ impl Settings {
         let tor_on = r.flag()?;
         let customer_wifi = r.flag()?;
         let min_sale_sats = r.u64_le()?;
-
         let n = r.count(MAX_DEVICES, 32)?;
         let mut devices = BTreeSet::new();
         let mut last: Option<[u8; 32]> = None;
@@ -382,6 +406,12 @@ impl Settings {
             boxes.insert(key);
         }
 
+        let lightning_node = if r.flag()? {
+            Some(r.array::<LIGHTNING_NODE_BYTES>()?)
+        } else {
+            None
+        };
+
         Ok(Self {
             version,
             light_per_sale,
@@ -404,6 +434,7 @@ impl Settings {
             devices,
             counters,
             boxes,
+            lightning_node,
         })
     }
 
@@ -602,6 +633,15 @@ pub fn changed_fields(old: &Settings, new: &Settings) -> Vec<FieldChange> {
         o.push(FieldChange {
             field: "boxes",
             direction: dir(added),
+        });
+    }
+    // The node decides where Lightning payments go (LN-03). Naming a node, or
+    // another one, sends money somewhere new, like a changed destination, so
+    // it loosens; taking the node away only stops Lightning payments.
+    if old.lightning_node != new.lightning_node {
+        o.push(FieldChange {
+            field: "lightning_node",
+            direction: dir(new.lightning_node.is_some()),
         });
     }
     out
@@ -1261,10 +1301,12 @@ mod tests {
         u.counters.clear();
         assert_ne!(s.hash(), u.hash());
         // tail of the encoding: count u32 LE, then id | share u16 LE, then
-        // the empty Box list (a zero count)
+        // the empty Box list (a zero count) and the flag of no Lightning node
         let enc = s.encode();
-        assert_eq!(&enc[enc.len() - 4..], &0u32.to_le_bytes());
-        let tail = &enc[enc.len() - 42..enc.len() - 4];
+        let end = enc.len() - 1;
+        assert_eq!(enc[end], 0);
+        assert_eq!(&enc[end - 4..end], &0u32.to_le_bytes());
+        let tail = &enc[end - 42..end - 4];
         assert_eq!(&tail[..4], &1u32.to_le_bytes());
         assert_eq!(&tail[4..36], &c.to_bytes());
         assert_eq!(&tail[36..], &1_000u16.to_le_bytes());
@@ -1801,10 +1843,12 @@ mod tests {
         t.boxes.clear();
         assert_ne!(s.encode(), t.encode());
         assert_ne!(s.hash(), t.hash());
-        // The Box list is the last field: a count, then the keys.
+        // The Box list comes last but for the flag of the Lightning node: a
+        // count, then the keys.
         let bytes = s.encode();
-        assert_eq!(&bytes[bytes.len() - 36..bytes.len() - 32], &[1, 0, 0, 0]);
-        assert_eq!(&bytes[bytes.len() - 32..], &boxed.to_bytes());
+        let end = bytes.len() - 1;
+        assert_eq!(&bytes[end - 36..end - 32], &[1, 0, 0, 0]);
+        assert_eq!(&bytes[end - 32..end], &boxed.to_bytes());
         let mut x = base();
         let (a, b) = (identity(82).device_id(), identity(83).device_id());
         x.boxes.extend([a, b]);
@@ -1832,9 +1876,9 @@ mod tests {
         two.devices.extend([a, b]);
         two.boxes.extend([a, b]);
         let good = signed_both(two).to_bytes();
-        // After the Boxes come the owner signature (64) and the flag and
-        // Key app signature (65).
-        let first = good.len() - 129 - 64;
+        // After the Boxes come the flag of the Lightning node (1), the owner
+        // signature (64) and the flag and Key app signature (65).
+        let first = good.len() - 129 - 1 - 64;
         let mut swapped = good.clone();
         let (x, y) = (
             good[first..first + 32].to_vec(),
@@ -1933,5 +1977,131 @@ mod tests {
         assert_eq!(plain.role_of(&owner, &stranger), None);
         // The owner root wins over any other entry.
         assert_eq!(s.role_of(&counter, &counter), Some(DeviceRole::Owner));
+    }
+
+    /// A valid compressed key for a test node, from a one-byte seed.
+    fn node_key(seed: u8) -> [u8; LIGHTNING_NODE_BYTES] {
+        let secp = bitcoin::secp256k1::Secp256k1::new();
+        let sk = bitcoin::secp256k1::SecretKey::from_slice(&[seed; 32]).expect("a key");
+        bitcoin::secp256k1::PublicKey::from_secret_key(&secp, &sk).serialize()
+    }
+
+    #[test]
+    fn ln_03_the_first_settings_name_no_lightning_node() {
+        assert_eq!(Settings::defaults(RATE).lightning_node, None);
+    }
+
+    #[test]
+    fn ln_03_naming_or_changing_the_node_loosens_and_removing_it_tightens() {
+        let old = base();
+        let mut named = old.clone();
+        named.lightning_node = Some(node_key(7));
+        let fields = changed_fields(&old, &named);
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field, "lightning_node");
+        assert_eq!(classify_change(&old, &named), Change::Loosening);
+        assert_eq!(classify_change(&named, &old), Change::Tightening);
+        let mut other = named.clone();
+        other.lightning_node = Some(node_key(8));
+        assert_eq!(classify_change(&named, &other), Change::Loosening);
+        assert_eq!(classify_change(&named, &named), Change::Tightening);
+    }
+
+    #[test]
+    fn ln_03_naming_the_node_needs_the_key_app() {
+        let (o, a, roots) = roots();
+        let old = base();
+        let mut named = next(&old);
+        named.lightning_node = Some(node_key(7));
+        let only_owner = SignedSettings {
+            owner_sig: named.sign(&o),
+            approver_sig: None,
+            settings: named.clone(),
+        };
+        assert_eq!(
+            only_owner.verify(&roots, Some(&old)),
+            Err(SettingsError::ApproverRequired)
+        );
+        let both = SignedSettings {
+            approver_sig: Some(named.sign(&a)),
+            ..only_owner
+        };
+        assert_eq!(both.verify(&roots, Some(&old)), Ok(Change::Loosening));
+        // Taking the node away needs the owner alone.
+        let mut gone = next(&named);
+        gone.lightning_node = None;
+        let removed = SignedSettings {
+            owner_sig: gone.sign(&o),
+            approver_sig: None,
+            settings: gone,
+        };
+        assert_eq!(removed.verify(&roots, Some(&named)), Ok(Change::Tightening));
+    }
+
+    #[test]
+    fn ln_03_the_node_key_is_part_of_the_signed_bytes_and_reads_back() {
+        let s = base();
+        let mut t = s.clone();
+        t.lightning_node = Some(node_key(7));
+        assert_ne!(t.hash(), s.hash());
+        let (o, _a, _roots) = roots();
+        let signed = SignedSettings {
+            owner_sig: t.sign(&o),
+            approver_sig: None,
+            settings: t,
+        };
+        let bytes = signed.to_bytes();
+        let back = SignedSettings::from_bytes(&bytes).expect("reads back");
+        assert_eq!(back, signed);
+        assert_eq!(back.to_bytes(), bytes);
+        // The same settings with no node are 33 bytes shorter.
+        let none = SignedSettings {
+            settings: s,
+            ..signed
+        };
+        assert_eq!(bytes.len(), none.to_bytes().len() + LIGHTNING_NODE_BYTES);
+    }
+
+    #[test]
+    fn ln_03_the_node_key_flag_and_length_are_strict() {
+        let mut t = base();
+        t.lightning_node = Some(node_key(7));
+        let (o, _a, _roots) = roots();
+        let signed = SignedSettings {
+            owner_sig: t.sign(&o),
+            approver_sig: None,
+            settings: t,
+        };
+        let bytes = signed.to_bytes();
+        // The flag byte sits before its 33 bytes, the owner signature and the
+        // approver flag byte.
+        let at = bytes.len() - 1 - 64 - LIGHTNING_NODE_BYTES - 1;
+        let mut bad = bytes.clone();
+        bad[at] = 2;
+        assert_eq!(
+            SignedSettings::from_bytes(&bad),
+            Err(DecodeError::NonCanonical("flag is not 0 or 1"))
+        );
+        // A cut-off key is refused, not read short.
+        assert!(SignedSettings::from_bytes(&bytes[..bytes.len() - 70]).is_err());
+    }
+
+    #[test]
+    fn ln_03_a_node_key_that_is_not_a_compressed_point_is_refused() {
+        let mut s = base();
+        s.lightning_node = Some(node_key(7));
+        assert_eq!(s.validate(), Ok(()));
+        let mut bad_prefix = node_key(7);
+        bad_prefix[0] = 4;
+        let mut off_field = [0xffu8; LIGHTNING_NODE_BYTES];
+        off_field[0] = 3;
+        for key in [bad_prefix, off_field, [0u8; LIGHTNING_NODE_BYTES]] {
+            let mut s = base();
+            s.lightning_node = Some(key);
+            assert!(
+                matches!(s.validate(), Err(SettingsError::Invalid(_))),
+                "{key:?}"
+            );
+        }
     }
 }

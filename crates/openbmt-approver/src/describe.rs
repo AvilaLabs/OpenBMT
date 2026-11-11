@@ -3,7 +3,7 @@
 use std::fmt::Write;
 
 use openbmt_core::identity::DeviceId;
-use openbmt_core::settings::{Limit, Settings};
+use openbmt_core::settings::{Limit, Settings, LIGHTNING_NODE_BYTES};
 
 /// Bytes as lower-case hex.
 pub(crate) fn hex(bytes: &[u8]) -> String {
@@ -31,7 +31,18 @@ fn flag(v: bool) -> String {
 pub(crate) fn shown_name(field: &'static str) -> &'static str {
     match field {
         "min_sale_sats" => "Smallest bitcoin sale",
+        "lightning_node" => "Lightning node",
         other => other,
+    }
+}
+
+/// The line for the shop's Lightning node (LN-03). The key is shown in full:
+/// a short form of a public key can be ground to match, and the key holder
+/// compares this with the node's own id before co-signing.
+fn lightning_node(key: &Option<[u8; LIGHTNING_NODE_BYTES]>) -> String {
+    match key {
+        Some(k) => format!("Lightning payments go to node {}", hex(k)),
+        None => "no Lightning node".to_string(),
     }
 }
 
@@ -95,5 +106,6 @@ pub(crate) fn field_values(s: &Settings) -> Vec<(&'static str, String)> {
         ("devices", devices),
         ("counters", counters),
         ("boxes", boxes),
+        ("lightning_node", lightning_node(&s.lightning_node)),
     ]
 }
