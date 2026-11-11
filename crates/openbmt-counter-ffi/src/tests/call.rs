@@ -147,6 +147,31 @@ fn start_refuses_what_the_pairing_does_not_hold() {
 }
 
 #[test]
+fn cr_87_the_node_does_not_start_with_tor_on_and_no_proxy() {
+    let rig = Rig::new();
+    let dir = rig.dir();
+    let mut tor = signed_settings();
+    tor.settings.tor_on = true;
+    tor.owner_sig = tor.settings.sign(&id(1));
+    tor.approver_sig = Some(tor.settings.sign(&id(2)));
+    let mut c = start_config(dir.to_str().expect("UTF-8"));
+    c.settings = tor.to_bytes();
+    // Tor on, no proxy: refused, with the rule in its Display.
+    let f = fault(&rig.call(1, 0, &W::new().start(&c).0));
+    assert_eq!((f.status, f.rule.as_str()), (1, "CR-87"), "{f:?}");
+    assert!(f.text.contains("CR-87"), "{f:?}");
+    assert!(!f.words.heading.is_empty());
+    // Tor on, proxy given: starts.
+    c.proxy = Some("127.0.0.1:9050".to_string());
+    rig.arm();
+    assert_eq!(rig.start_with(&c), 1);
+    // Tor off, no proxy: starts (the default settings).
+    let rig = Rig::new();
+    rig.arm();
+    assert_eq!(rig.start(), 1);
+}
+
+#[test]
 fn pump_open_judge_requote_and_cancel() {
     let (rig, handle) = ready();
     let opened = open(&rig, handle, FIVE_DOLLARS);

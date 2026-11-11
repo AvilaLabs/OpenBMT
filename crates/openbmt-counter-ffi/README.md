@@ -91,7 +91,9 @@ bytes to `rate_parse`; `rate_combine` makes the samples into the rate that
 `open` takes, so no JSON is read in the app. A refusal of either is an
 error response whose words are those of `openbmt-rates`. `settings_read`
 reads the shop's signed settings before `start` so that the app can tell
-whether Tor is on; it does not verify them, and `start` does.
+whether Tor is on, for display only; it does not verify them. `start`
+verifies them and refuses to start when they have Tor on and the start has
+no proxy (CR-87).
 
 ## Storage
 

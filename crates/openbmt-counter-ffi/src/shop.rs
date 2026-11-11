@@ -1,8 +1,9 @@
 //! A look at the shop's signed settings before the node starts, so that the
 //! app knows whether Tor is on (NR-26) and what the smallest sale is. The
-//! settings are only read here. Their signatures are checked by `start`
-//! (`start-settings`), on the same bytes, so a reading that is wrong cannot
-//! outlive the start.
+//! reading is for display only: the settings are not verified here, and the
+//! app must not rely on it. `start` checks the signatures
+//! (`start-settings`) on the same bytes and itself refuses to start when the
+//! verified settings have Tor on and the start has no proxy (CR-87).
 
 use openbmt_core::settings::SignedSettings;
 

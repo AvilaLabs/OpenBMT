@@ -361,6 +361,12 @@ impl Rig {
         dispatch(&self.registry, &frame(op, handle, fields))
     }
 
+    /// Start the node from this configuration and return its handle.
+    pub fn start_with(&self, config: &StartConfig) -> u64 {
+        let response = self.call(1, 0, &crate::tests::wire::W::new().start(config).0);
+        crate::tests::wire::Rd::ok(&response).u64()
+    }
+
     /// Start the node and return its handle.
     pub fn start(&self) -> u64 {
         let response = dispatch(&self.registry, &start_request(&self.dir()));

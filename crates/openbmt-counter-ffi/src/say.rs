@@ -211,6 +211,14 @@ const RULES: &[Entry] = &[
         "Check the proxy address in the counter app's settings, then start it again.",
     ),
     (
+        "CR-87",
+        Kind::Refused,
+        "Tor needs its proxy",
+        "The shop's settings have Tor on, but the counter was started without the privacy proxy, so it did not start and sent nothing.",
+        Who::Manager,
+        "Open Orbot and turn it on, then start the counter again.",
+    ),
+    (
         "start-peer",
         Kind::Refused,
         "Network peer not usable",

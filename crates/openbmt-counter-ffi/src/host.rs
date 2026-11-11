@@ -216,6 +216,14 @@ fn check_start(req: StartConfig, clock: &Arc<AtomicU64>) -> Result<Checked, Coun
     signed
         .verify(&roots, None)
         .map_err(|e| refused_by("start-settings", format!("the settings: {e}")))?;
+    // CR-87: with Tor on in the verified settings, the node never starts
+    // without the proxy, whatever the app's own reading of the settings said.
+    if signed.settings.tor_on && req.proxy.is_none() {
+        return Err(refused_by(
+            "CR-87",
+            "CR-87: the settings have Tor on and the start has no proxy",
+        ));
+    }
     let first_batch = req
         .first_batch
         .as_deref()

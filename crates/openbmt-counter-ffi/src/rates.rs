@@ -159,8 +159,7 @@ pub(crate) fn rate_combine(args: RateCombineArgs) -> Result<RateView, CounterErr
                 .map_err(|e| from_rule(e.rule(), e, e.words()))?,
         );
     }
-    let (rate, src) =
-        combine(&samples, args.now).map_err(|e| from_rule(e.rule(), e, e.words()))?;
+    let (rate, src) = combine(&samples, args.now).map_err(|e| from_rule(e.rule(), e, e.words()))?;
     Ok(RateView {
         rate: rate.minor_per_btc(),
         source_label: src.label().to_string(),

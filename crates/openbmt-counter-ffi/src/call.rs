@@ -38,7 +38,9 @@
 //! - 30 `status`, 31 `notes`.
 //! - 40 to 42 the price of bitcoin (`rate_sources`, `rate_parse`,
 //!   `rate_combine`) and 43 `settings_read`, which work on no node
-//!   (handle 0).
+//!   (handle 0). `settings_read` is for display only: it does not verify
+//!   the settings, and `start` itself refuses a verified Tor-on setting
+//!   without a proxy (CR-87).
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
