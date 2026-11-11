@@ -395,6 +395,9 @@ class Ui(internal val context: Context) {
             setBackgroundColor(pal.background)
             addView(column)
             isFillViewport = true
+            // A page taller than the screen fades at its lower edge, so it shows there is more below.
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength(px(32))
             clipToPadding = false
             filterTouchesWhenObscured = true
             setOnApplyWindowInsetsListener { _, insets ->
@@ -573,6 +576,9 @@ class Ui(internal val context: Context) {
             ScrollView(context).apply {
                 addView(column)
                 isFillViewport = true
+                // A page taller than the screen fades at its lower edge, so it shows there is more below.
+                isVerticalFadingEdgeEnabled = true
+                setFadingEdgeLength(px(32))
                 clipToPadding = false
                 filterTouchesWhenObscured = true
             }
@@ -823,6 +829,7 @@ class Ui(internal val context: Context) {
         if (options.size > 3) return choice(options, selected)
         return RadioGroup(context).apply {
             orientation = RadioGroup.HORIZONTAL
+            isBaselineAligned = false
             for ((i, label) in options.withIndex()) {
                 addView(
                     PillButton(context, this@Ui).apply {
@@ -830,7 +837,8 @@ class Ui(internal val context: Context) {
                         id = View.generateViewId()
                         isChecked = i == selected
                     },
-                    RadioGroup.LayoutParams(0, px(40), 1f).also {
+                    // The pills share the height of the tallest, which grows when a label takes two lines.
+                    RadioGroup.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).also {
                         it.leftMargin = if (i == 0) 0 else px(4)
                         it.rightMargin = if (i == options.size - 1) 0 else px(4)
                     },
@@ -1210,6 +1218,12 @@ class PinPair(val view: View, val first: EditText, val second: EditText)
 
 /** One option of [Ui.chips]: a pill, filled when it is the chosen one. */
 class PillButton(context: Context, private val ui: Ui) : RadioButton(context) {
+    /**
+     * False while [RadioButton]'s own constructor runs: it calls [setChecked] before this class has set [ui],
+     * so the first restyle waits for [init].
+     */
+    private var built = false
+
     init {
         setButtonDrawable(null)
         gravity = Gravity.CENTER
@@ -1217,14 +1231,15 @@ class PillButton(context: Context, private val ui: Ui) : RadioButton(context) {
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         minHeight = ui.px(40)
         minimumHeight = ui.px(40)
-        setPadding(ui.px(12), 0, ui.px(12), 0)
+        setPadding(ui.px(12), ui.px(8), ui.px(12), ui.px(8))
         filterTouchesWhenObscured = true
+        built = true
         restyle()
     }
 
     override fun setChecked(checked: Boolean) {
         super.setChecked(checked)
-        restyle()
+        if (built) restyle()
     }
 
     private fun restyle() {
