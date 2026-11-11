@@ -67,9 +67,9 @@ without asking a cashier to judge the Bitcoin network during a sale.
 
 OpenBMT is built for receiving and holding bitcoin. Its currency choice
 rests on Bitcoin's monetary rules and the network enforcing them. The
-[bitcoin-only policy](never.md#never-anything-but-bitcoin) explains why
-that also excludes independent currencies such as Bitcoin Cash and
-Litecoin, as well as issuer-controlled tokens.
+[bitcoin-only policy](never.md#never-anything-but-bitcoin) explains that
+choice and why it excludes other independently mined currencies as well as
+issuer-controlled tokens.
 
 <a id="status-words"></a>
 <a id="payment-evidence-and-status"></a>

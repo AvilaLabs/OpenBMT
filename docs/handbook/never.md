@@ -8,8 +8,8 @@ the checkout system.
 ## Never anything but bitcoin
 
 OpenBMT accepts BTC on the Bitcoin network, and bitcoin over the shop's own
-Lightning node. Bitcoin Cash, Litecoin and other currencies are excluded,
-along with stablecoins and tokens on any layer.
+Lightning node. Other currencies, stablecoins and tokens on any layer are
+excluded.
 
 ### Why Bitcoin
 
@@ -27,19 +27,21 @@ issuance rules, independent validation and established use as the strongest
 basis for money. That judgment is why the project builds on this network;
 a supply cap or proof-of-work algorithm alone is not enough.[^network]
 
-### Why that excludes Bitcoin Cash and Litecoin
+<a id="why-that-excludes-bitcoin-cash-and-litecoin"></a>
 
-Bitcoin Cash and Litecoin also use proof of work and public issuance rules.
-They are separate currencies with their own networks. The objection to
-issuer-controlled tokens does not explain their exclusion.[^other-networks]
+### Other monetary networks
+
+Other currencies can also use proof of work, cap their supply and let
+anyone verify issuance without a central issuer. Those properties do not
+make the currencies interchangeable. Each network settles its own asset
+under its own rules.[^other-networks]
 
 Copying Bitcoin's code or specifying another supply cap does not by itself
 reproduce the people choosing to use Bitcoin, the mining work protecting
-its current payments, or their continued agreement on its rules. A chain split
-can
-share the earlier ledger, as Bitcoin Cash does, but the networks settle
-different currencies after the split. Creating those currencies does not
-create more BTC on the Bitcoin ledger.[^forks]
+its current payments, or their continued agreement on its rules. A chain
+split can share the earlier ledger, but the networks follow separate rules
+and settle different currencies after the split. Creating those currencies
+does not create more BTC on the Bitcoin ledger.[^forks]
 
 Independent verification also depends on what it costs to run a node.
 More transaction data has to be downloaded and checked; increasing
@@ -219,14 +221,12 @@ the source, are not built yet.
     explains the role of acceptance and adoption. The judgment about which
     network OpenBMT should use is the project's. Read 2026-11-11.
 
-[^other-networks]: [Bitcoin Cash proof of work](https://documentation.cash/protocol/blockchain/proof-of-work.html)
-    and [Litecoin's explanation](https://litecoin.com/what-is-litecoin)
-    describe their respective networks. See also
-    [Litecoin's proof-of-work reference](https://litecoin.info/docs/key-concepts/proof-of-work).
+[^other-networks]: Examples of independently mined currencies are described
+    in the [Bitcoin Cash protocol documentation](https://documentation.cash/protocol/blockchain/proof-of-work.html)
+    and [Litecoin proof-of-work reference](https://litecoin.info/docs/key-concepts/proof-of-work).
     Read 2026-11-11.
 
-[^forks]: [Bitcoin Cash's history](https://bitcoincash.org/)
-    records its 2017 chain split. The
+[^forks]: The
     [Bitcoin developer guide on consensus changes](https://developer.bitcoin.org/devguide/block_chain.html#consensus-rule-changes)
     explains how incompatible rules can split a chain. The distinction
     between copying software and reproducing a monetary network follows
