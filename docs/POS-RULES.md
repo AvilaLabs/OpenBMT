@@ -372,9 +372,14 @@ point needs a real seller or merchant account before the reader is relied on.
   Square's, and `query` with `filter.state_filter.states` of `COMPLETED` and
   `CANCELED`, `filter.date_time_filter.updated_at.start_at` from the cursor's
   time and `sort` by `UPDATED_AT` ascending. It is the same text for the same
-  input. No location in the settings is refused. **[verify, E5: the path, the
-  inner names `states` and `updated_at`, the largest `limit`, and whether
-  Square accepts a start at the beginning of 1970]**
+  input. No location in the settings is refused. A ListPayments request is
+  a GET of `/v2/payments` with `begin_time` a day before the cursor's time,
+  `location_id` of the first location, `sort_order` of `ASC`, `limit` (1 to
+  100) and `cursor` when the previous payments reply gave one; every value is
+  percent-encoded as in PS-97. **[verify, E5: the path, the inner names
+  `states` and `updated_at`, the largest `limit`, whether Square accepts a
+  start at the beginning of 1970, and the names `begin_time`, `location_id`,
+  `sort_order` and `cursor` of ListPayments]**
 - **PS-96.** The Square reply is `orders` (left out when none were found),
   `cursor` (absent means no more) and `errors`. An order has an `id`, a
   `location_id`, a `state` (`COMPLETED` is closed, `CANCELED` is voided, `OPEN`
@@ -394,8 +399,10 @@ point needs a real seller or merchant account before the reader is relied on.
   a tender of type `OTHER` whose `note`, or whose payment's
   `external_details.source`, equals a name of the settings (PS-10's
   comparison) is given that name, and any other is named "Other". The
-  payment comes from a ListPayments reply the caller may hand in with the
-  orders: its `status` `CANCELED` or `FAILED` makes the tender voided, and
+  payment comes from the ListPayments replies the caller may hand in with
+  the orders (every page of them; a payment on two pages is read once, from
+  the later; the reply's `cursor` says whether there is another page): its
+  `status` `CANCELED` or `FAILED` makes the tender voided, and
   `APPROVED`, `PENDING` and `COMPLETED` do not; another status leaves the tender
   paid, and refuses the reply only if the tender is a Bitcoin tender. A tender's
   reference is its `note`, else its payment's. A refund names its tender

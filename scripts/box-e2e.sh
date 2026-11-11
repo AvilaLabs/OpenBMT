@@ -68,7 +68,7 @@
 #  16. A Box set up for Square with `pos-setup` and a fake curl (a script that
 #      prints a Square reply and a status) named by the curl-path setting: the
 #      sale the counter reported matches the order, the owner is told, curl is
-#      run only for searches, the token is on curl's standard input and in no
+#      run only for searches and ListPayments, the token is on curl's standard input and in no
 #      argument, environment or log; with a curl path that is not there the
 #      Box's notes say curl is not installed on this Box (BX-44 to BX-49).
 #
@@ -698,6 +698,11 @@ echo x >> "\$d/calls"
 for a in "\$@"; do printf '%s\n' "\$a"; done >> "\$d/args"
 /bin/cat >> "\$d/stdin"
 /usr/bin/env > "\$d/env"
+case " \$* " in
+  *"/v2/payments?"*)
+    printf '{"payments":[{"id":"PE2E1","status":"COMPLETED","source_type":"EXTERNAL","external_details":{"type":"OTHER","source":"Bitcoin"}}]}200'
+    exit 0 ;;
+esac
 now=\$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)
 printf '{"orders":[{"id":"SQE2E1","location_id":"LOC16","state":"COMPLETED","created_at":"%s","updated_at":"%s","closed_at":"%s","total_money":{"amount":1250,"currency":"USD"},"tenders":[{"id":"TE2E1","type":"OTHER","created_at":"%s","note":"Bitcoin","amount_money":{"amount":1250,"currency":"USD"},"payment_id":"PE2E1"}]}]}200' "\$now" "\$now" "\$now" "\$now"
 EOF
@@ -739,9 +744,10 @@ CALLS16=$(lines_in "$FC/calls")
 ARGS16=$(cat "$FC/args" 2>/dev/null)
 STDIN16=$(cat "$FC/stdin" 2>/dev/null)
 ENV16=$(cat "$FC/env" 2>/dev/null)
-SEARCHES16=$(grep -c '^https://connect.squareup.com/v2/orders/search$' "$FC/args" 2>/dev/null)
+SEARCHES16=$(grep -c -e '^https://connect.squareup.com/v2/orders/search$' -e '^https://connect.squareup.com/v2/payments?' "$FC/args" 2>/dev/null)
+PAYMENTS16=$(grep -c '^https://connect.squareup.com/v2/payments?' "$FC/args" 2>/dev/null)
 URLS16=$(grep -c '^https://' "$FC/args" 2>/dev/null)
-note "curl was run $CALLS16 times; searches $SEARCHES16 of $URLS16 URLs"
+note "curl was run $CALLS16 times; searches and payments $SEARCHES16 of $URLS16 URLs, payments $PAYMENTS16"
 TOKEN_IN_ARGS=no; grep -q -- "$TOKEN16" <<<"$ARGS16" && TOKEN_IN_ARGS=yes
 TOKEN_IN_ENV=no; grep -q -- "$TOKEN16" <<<"$ENV16" && TOKEN_IN_ENV=yes
 TOKEN_ON_STDIN=no; grep -q -- "Authorization: Bearer $TOKEN16" <<<"$STDIN16" && TOKEN_ON_STDIN=yes
@@ -767,13 +773,13 @@ done
 note "no curl: $NOCURL16"
 if [ "$S16" = paired ] && [ "$WELCOME16" = welcomed ] && [ "$SETUP16" = "pos-setup: square" ] &&
   [ "$MATCHED16" = yes ] && grep -q 'matches sale 1' <<<"$RECV16" && grep -q 'signature good' <<<"$RECV16" &&
-  [ "$CALLS16" -ge 1 ] && [ "$SEARCHES16" = "$URLS16" ] && [ "$URLS16" -ge 1 ] &&
+  [ "$CALLS16" -ge 2 ] && [ "$PAYMENTS16" -ge 1 ] && [ "$SEARCHES16" = "$URLS16" ] && [ "$URLS16" -ge 2 ] &&
   grep -q -- '^--proto$' <<<"$ARGS16" && grep -q -- '^=https$' <<<"$ARGS16" &&
   [ "$TOKEN_IN_ARGS" = no ] && [ "$TOKEN_IN_ENV" = no ] && [ "$TOKEN_ON_STDIN" = yes ] &&
   [ "$TOKEN_IN_LOG" = no ] && [ "$NOCURL16" = yes ]; then
-  pass 16 "a Box set up for Square with a fake curl named by the curl-path setting read the POS $CALLS16 times, each time a search of orders and nothing else, with the token on curl's standard input only; the counter's sale matched the order and the owner was told; with a curl path that is not there the notes said curl is not installed on this Box"
+  pass 16 "a Box set up for Square with a fake curl named by the curl-path setting read the POS with $CALLS16 curl runs, each a search of orders or a ListPayments and nothing else, with the token on curl's standard input only; the counter's sale matched the order and the owner was told; with a curl path that is not there the notes said curl is not installed on this Box"
 else
-  bad 16 "state '$S16'; setup '$SETUP16'; matched $MATCHED16; owner read: $RECV16; curl calls $CALLS16, searches $SEARCHES16 of $URLS16; token in args $TOKEN_IN_ARGS, in env $TOKEN_IN_ENV, on stdin $TOKEN_ON_STDIN, in log $TOKEN_IN_LOG; no curl: $NOCURL16"
+  bad 16 "state '$S16'; setup '$SETUP16'; matched $MATCHED16; owner read: $RECV16; curl calls $CALLS16, reads $SEARCHES16 of $URLS16 (payments $PAYMENTS16); token in args $TOKEN_IN_ARGS, in env $TOKEN_IN_ENV, on stdin $TOKEN_ON_STDIN, in log $TOKEN_IN_LOG; no curl: $NOCURL16"
 fi
 stop_box 2
 

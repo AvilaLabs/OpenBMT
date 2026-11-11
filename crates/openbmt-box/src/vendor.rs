@@ -20,6 +20,10 @@ use crate::pos_config::{PosConfig, PosConfigError, Vendor};
 
 /// Orders asked for in one request (PS-80 allows 500).
 pub const PAGE_LIMIT: usize = 100;
+/// Payments asked for in one ListPayments request (Square's largest).
+pub const PAYMENTS_LIMIT: usize = 100;
+/// Most ListPayments requests for one page of orders.
+pub const MAX_PAYMENT_PAGES: usize = 8;
 /// Seconds between two readings of a vendor's POS, and the least between two
 /// (BX-49).
 pub const VENDOR_POLL_SECS: u64 = 60;
@@ -109,11 +113,50 @@ impl VendorConnector {
         };
         let (request, parse) = self.request(&token, cursor)?;
         let body = self.runner.run(&request)?.into_body()?;
-        let page = match parse {
-            Parse::Square(read) => read.parse(&body, None),
-            Parse::Clover(read) => read.parse(&body),
+        let unreadable =
+            |e: openbmt_pos_readers::ReadRefused| HttpsRefusal::Unreadable(e.to_string());
+        let read = match parse {
+            Parse::Clover(read) => return read.parse(&body).map_err(unreadable),
+            Parse::Square(read) => read,
         };
-        page.map_err(|e| HttpsRefusal::Unreadable(e.to_string()))
+        // A page with no order needs no payments.
+        let first = read.parse(&body, None).map_err(unreadable)?;
+        if first.orders.is_empty() {
+            return Ok(first);
+        }
+        let payments = self.payments(&token, &read)?;
+        let replies: Vec<&[u8]> = payments.iter().map(Vec::as_slice).collect();
+        read.parse_pages(&body, &replies).map_err(unreadable)
+    }
+
+    /// BX-49: the pages of ListPayments for the orders of a Square page, one
+    /// request each through the same runner, at most [`MAX_PAYMENT_PAGES`].
+    fn payments(
+        &mut self,
+        token: &str,
+        read: &square::Request,
+    ) -> Result<Vec<Vec<u8>>, HttpsRefusal> {
+        let mut pages: Vec<Vec<u8>> = Vec::new();
+        let mut marker: Option<String> = None;
+        while pages.len() < MAX_PAYMENT_PAGES {
+            let path = read
+                .payments_path(PAYMENTS_LIMIT, marker.as_deref())
+                .map_err(|e| HttpsRefusal::BadRequest(e.to_string()))?;
+            let mut request = HttpsRequest::new(Method::Get, format!("{}{path}", self.host));
+            request.headers = self.headers(token, false);
+            if self.transport.tor() {
+                request.socks5 = Some(self.socks.clone());
+            }
+            let body = self.runner.run(&request)?.into_body()?;
+            let next = square::Request::payments_next(&body)
+                .map_err(|e| HttpsRefusal::Unreadable(e.to_string()))?;
+            pages.push(body);
+            match next {
+                Some(m) if marker.as_deref() != Some(m.as_str()) => marker = Some(m),
+                _ => break,
+            }
+        }
+        Ok(pages)
     }
 }
 

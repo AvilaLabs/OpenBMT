@@ -8,7 +8,7 @@
 //! no token: that is `pos.token` (BX-41).
 //!
 //! ```text
-//! "OBMo" | 1 | vendor (1) | currency (3)
+//! "OBMq" | 1 | vendor (1) | currency (3)
 //!        | location (u16 length, bytes)
 //!        | tenders (1 count, then each u16 length, bytes)
 //!        | curl path | Tor proxy | host     (each u16 length, bytes; 0 = none)
@@ -31,7 +31,7 @@ use crate::https::{DEFAULT_CURL, DEFAULT_SOCKS, MAX_TEXT_BYTES};
 /// The file, in the Box's data directory.
 pub const POS_CONFIG_FILE: &str = "pos-config";
 
-const MAGIC_POS_CONFIG: [u8; 4] = *b"OBMo";
+const MAGIC_POS_CONFIG: [u8; 4] = *b"OBMq";
 
 /// The vendor's own host for Square.
 pub const SQUARE_HOST: &str = "https://connect.squareup.com";

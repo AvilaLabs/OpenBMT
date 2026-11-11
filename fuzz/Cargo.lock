@@ -390,6 +390,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-box"
+version = "0.1.0"
+dependencies = [
+ "openbmt-core",
+ "openbmt-counter",
+ "openbmt-courier",
+ "openbmt-link",
+ "openbmt-net-io",
+ "openbmt-pos",
+ "openbmt-pos-readers",
+]
+
+[[package]]
 name = "openbmt-core"
 version = "0.1.0"
 dependencies = [
@@ -408,6 +421,7 @@ dependencies = [
  "libfuzzer-sys",
  "openbmt-approver",
  "openbmt-books",
+ "openbmt-box",
  "openbmt-core",
  "openbmt-counter",
  "openbmt-courier",

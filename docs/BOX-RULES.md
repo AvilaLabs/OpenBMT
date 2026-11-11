@@ -195,7 +195,8 @@ screen and not a shared computer.
   status is refused with it named.
 - **BX-49.** The Box reads the POS of the vendor its own `pos-config` names
   (Square or Clover) with the reader of `openbmt-pos-readers` for it:
-  one request for each page, a page at a time, the cursor stored after each
+  one request for each page (and, for Square, the payments of its orders),
+  a page at a time, the cursor stored after each
   page and a page that does not move it refused (PS-74, PS-80). A reading is
   made once a minute at most, a paid notice's wish for one at once
   included. The Box closes no order through the vendor's API: Square is
@@ -434,7 +435,7 @@ These details too leave every rule of section 4 as it is.
 These details too leave every rule of section 4 as it is.
 
 - **The file `pos-config`.** The Box's own file, written whole (BX-50) and
-  read strictly, with the magic `OBMo` and version 1. It holds the vendor
+  read strictly, with the magic `OBMq` and version 1. It holds the vendor
   (1 Square, 2 Clover), the currency, the vendor's location (Square's
   location id, or Clover's merchant id, which is 1 to 32 letters and
   digits), 1 to 8 exact names of the Bitcoin tenders (PS-10) and three
@@ -474,9 +475,17 @@ These details too leave every rule of section 4 as it is.
   commands show. The reading after a 429 is not made before the later of
   the minute and the time the vendor asked for, which is a minute when the
   vendor did not say (curl is not asked for the header).
-- **What is not read.** A Square payment is not asked for, so a Square
-  tender of type `OTHER` is known by its note only, and a payment that was
-  cancelled after the order closed is not seen (PS-96, **[verify, E5]**).
+- **Square payments.** After the search of a page that has orders, the Box
+  asks for the payments of the same orders (ListPayments, a GET, PS-95)
+  through the same runner, the same token, the same caps and the same proxy,
+  one request for each page of payments, at most 8 of 100. It stops at a
+  page with no cursor or one that repeats the cursor it was asked from. The
+  replies are handed to the reader with the orders, so a tender of type
+  `OTHER` is known by its payment's source too and a payment cancelled after
+  the order closed is seen (PS-96, **[verify, E5]**). A page with no order
+  asks for none, and a Clover poll asks for none: Clover's payments come with
+  its orders. A payments request that is refused fails the poll like any
+  other (BX-46 to BX-48).
 
 ## 6. What these rules do not do
 

@@ -1,0 +1,16 @@
+{
+  "payments": [
+    {
+      "id": "PAYD01",
+      "status": "APPROVED",
+      "source_type": "EXTERNAL",
+      "external_details": { "type": "OTHER", "source": "Gift" }
+    },
+    {
+      "id": "PAYD09",
+      "status": "COMPLETED",
+      "source_type": "CARD"
+    }
+  ],
+  "cursor": "PAYCURSOR1=="
+}

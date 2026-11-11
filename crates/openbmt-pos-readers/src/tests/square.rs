@@ -13,6 +13,7 @@ use super::{settings, text, usd, LOC};
 const PAGE1: &[u8] = include_bytes!("../../tests/fixtures/square_orders_page1.json");
 const LAST: &[u8] = include_bytes!("../../tests/fixtures/square_orders_last.json");
 const PAYMENTS: &[u8] = include_bytes!("../../tests/fixtures/square_payments.json");
+const PAYMENTS_PAGE1: &[u8] = include_bytes!("../../tests/fixtures/square_payments_page1.json");
 const EMPTY: &[u8] = include_bytes!("../../tests/fixtures/square_orders_empty.json");
 
 /// 2026-11-10T13:56:40Z, before every order of the fixtures.
@@ -587,4 +588,63 @@ fn ps_96_nothing_here_closes_or_changes_an_order() {
     for word in ["payment", "EXTERNAL", "CRYPTO", "amount_money"] {
         assert!(!body.contains(word), "{word}");
     }
+}
+
+#[test]
+fn ps_95_the_payments_request_is_a_strict_path_with_a_day_of_margin() {
+    let r = request();
+    assert_eq!(
+        r.payments_path(100, None).unwrap(),
+        "/v2/payments?begin_time=2026-11-09T13%3A56%3A40Z&location_id=LOCSQ1\
+         &sort_order=ASC&limit=100"
+    );
+    assert!(r
+        .payments_path(10, Some("a+b/c=="))
+        .unwrap()
+        .ends_with("&limit=10&cursor=a%2Bb%2Fc%3D%3D"));
+    assert_eq!(r.payments_path(10, None), r.payments_path(10, None));
+    for limit in [0, 101, usize::MAX] {
+        assert_eq!(r.payments_path(limit, None), Err(RequestRefused::BadLimit));
+    }
+    for bad in ["", "a b", "a\nb"] {
+        assert_eq!(
+            r.payments_path(10, Some(bad)),
+            Err(RequestRefused::BadCursor),
+            "{bad:?}"
+        );
+    }
+    // A cursor at the start of time does not go below it.
+    let start = Request::new(&settings(), 10, &openbmt_pos::Cursor::start()).unwrap();
+    assert!(start
+        .payments_path(10, None)
+        .unwrap()
+        .contains("begin_time=1970-01-01T00%3A00%3A00Z"));
+}
+
+#[test]
+fn ps_96_the_payments_cursor_says_whether_there_is_another_page() {
+    assert_eq!(
+        Request::payments_next(PAYMENTS_PAGE1),
+        Ok(Some("PAYCURSOR1==".to_string()))
+    );
+    assert_eq!(Request::payments_next(PAYMENTS), Ok(None));
+    assert!(Request::payments_next(br#"{"cursor":""}"#).is_err());
+    assert!(Request::payments_next(br#"{"cursor":"a b"}"#).is_err());
+    assert!(Request::payments_next(br#"{"cursor":5}"#).is_err());
+    assert!(Request::payments_next(b"[]").is_err());
+}
+
+#[test]
+fn ps_96_every_page_of_payments_is_read_and_the_later_page_wins() {
+    let r = request();
+    let one = r.parse(LAST, Some(PAYMENTS)).unwrap();
+    let both = r.parse_pages(LAST, &[PAYMENTS_PAGE1, PAYMENTS]).unwrap();
+    assert_eq!(both, one);
+    let swapped = r.parse_pages(LAST, &[PAYMENTS, PAYMENTS_PAGE1]).unwrap();
+    assert_ne!(swapped, one);
+    assert_eq!(
+        r.parse_pages(LAST, &[]).unwrap(),
+        r.parse(LAST, None).unwrap()
+    );
+    assert!(r.parse_pages(LAST, &[PAYMENTS, b"not json"]).is_err());
 }

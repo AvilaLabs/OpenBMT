@@ -34,6 +34,7 @@ openbmt-ur = { path = "../crates/openbmt-ur" }
 openbmt-qr-jni = { path = "../crates/openbmt-qr-jni" }
 openbmt-json = { path = "../crates/openbmt-json" }
 openbmt-pos-readers = { path = "../crates/openbmt-pos-readers" }
+openbmt-box = { path = "../crates/openbmt-box" }
 # The same exact version as openbmt-key-ffi, for the word list.
 bip39 = { version = "=2.2.2", default-features = false, features = ["std"] }
 
@@ -393,6 +394,13 @@ bench = false
 [[bin]]
 name = "pos_square_parse"
 path = "fuzz_targets/pos_square_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "box_pos_config"
+path = "fuzz_targets/box_pos_config.rs"
 test = false
 doc = false
 bench = false

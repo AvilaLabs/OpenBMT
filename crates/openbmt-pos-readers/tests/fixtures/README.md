@@ -14,6 +14,7 @@ or **[verify, E6]** (Clover) in the rules.
 | `square_orders_page1.json` | A SearchOrders reply with three orders (completed with a cash and an other tender noted "Bitcoin", cancelled, completed with a card and refunds) and a cursor |
 | `square_orders_last.json` | The next reply: one order with three other tenders, no cursor |
 | `square_payments.json` | A ListPayments reply for the payments of the last order: an outside payment with a source, a cancelled one and a check |
+| `square_payments_page1.json` | The first page of a ListPayments reply, with a cursor; its payment `PAYD01` is read again, differently, on the page of `square_payments.json` |
 | `square_orders_empty.json` | A SearchOrders reply with nothing found (no `orders`) |
 | `clover_orders.json` | A reply of the orders of a merchant, with payments and refunds expanded, three orders |
 | `clover_orders_empty.json` | A reply with no elements |

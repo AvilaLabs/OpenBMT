@@ -20,6 +20,7 @@ use openbmt_pos::{
     MAX_PAGE_ORDERS, MAX_TENDERS,
 };
 
+use crate::clover::percent_encode;
 use crate::common::{
     amount, array, check_limit, currency, id, join_cursor, name, newest, note, object, opt,
     parse_doc, req, rfc3339, same_name, split_cursor, string, whole_text,
@@ -32,6 +33,15 @@ const MAX_VERSION: u64 = 2_147_483_647;
 
 /// PS-95: the path of the request, which is a POST. **[verify, E5]**
 pub const SEARCH_PATH: &str = "/v2/orders/search";
+
+/// PS-95: the path of the ListPayments request. **[verify, E5]**
+pub const PAYMENTS_PATH: &str = "/v2/payments";
+
+/// PS-95: the most payments Square returns in a page. **[verify, E5]**
+pub const MAX_PAYMENTS_LIMIT: usize = 100;
+
+/// PS-95: how far before the cursor's time payments are asked for.
+const PAYMENTS_MARGIN_SECS: u64 = 86_400;
 
 /// PS-96: the tender types Square documents or lists, with the name each is
 /// given in the model and whether the type is `OTHER`. **[verify, E5]**
@@ -112,18 +122,81 @@ impl Request {
         out
     }
 
+    /// PS-95: the path and query of a ListPayments request for the payments
+    /// of the same orders: `begin_time` a day before the cursor's time (an
+    /// order is updated after its payments were made), the first location's
+    /// `location_id`, `sort_order` ascending, `limit` (1 to 100) and the
+    /// vendor's `cursor` of the previous payments reply when there is one.
+    pub fn payments_path(
+        &self,
+        limit: usize,
+        payments_cursor: Option<&str>,
+    ) -> Result<String, RequestRefused> {
+        if !(1..=MAX_PAYMENTS_LIMIT).contains(&limit) {
+            return Err(RequestRefused::BadLimit);
+        }
+        let location = self.locations.first().ok_or(RequestRefused::NoLocations)?;
+        let begin = format_rfc3339(self.since.saturating_sub(PAYMENTS_MARGIN_SECS))
+            .ok_or(RequestRefused::BadCursor)?;
+        let mut out = format!(
+            "{PAYMENTS_PATH}?begin_time={}&location_id={}&sort_order=ASC&limit={limit}",
+            percent_encode(&begin),
+            percent_encode(location),
+        );
+        if let Some(c) = payments_cursor {
+            let plain = !c.is_empty() && c.bytes().all(|b| b.is_ascii_graphic());
+            if !plain || c.len() > openbmt_pos::MAX_CURSOR_BYTES {
+                return Err(RequestRefused::BadCursor);
+            }
+            out.push_str("&cursor=");
+            out.push_str(&percent_encode(c));
+        }
+        Ok(out)
+    }
+
+    /// PS-96: the `cursor` of a ListPayments reply: the marker for the next
+    /// page, or `None` when it is the last.
+    pub fn payments_next(reply: &[u8]) -> Result<Option<String>, ReadRefused> {
+        let doc = parse_doc(reply)?;
+        object(&doc, "payments reply")?;
+        no_service_error(&doc)?;
+        match opt(&doc, "cursor") {
+            Some(v) => {
+                let c = string(v, "payments cursor")?;
+                if c.is_empty() || !c.bytes().all(|b| b.is_ascii_graphic()) {
+                    return Err(ReadRefused::OutOfRange("payments cursor"));
+                }
+                Ok(Some(c.to_string()))
+            }
+            None => Ok(None),
+        }
+    }
+
     /// PS-96: read the reply of SearchOrders into a page. `payments` is the
     /// reply of a ListPayments for the same orders, when the caller has one:
     /// it is where a tender's `external_details.source` and a cancelled
     /// payment are found. A page whose cursor is absent has no more.
     pub fn parse(&self, orders: &[u8], payments: Option<&[u8]>) -> Result<Page, ReadRefused> {
+        match payments {
+            Some(body) => self.parse_pages(orders, &[body]),
+            None => self.parse_pages(orders, &[]),
+        }
+    }
+
+    /// PS-96: [`Request::parse`] with the replies of every page of a
+    /// ListPayments, in the order they were read. A payment with the same id
+    /// on two pages is read once, the later page's.
+    pub fn parse_pages(&self, orders: &[u8], payments: &[&[u8]]) -> Result<Page, ReadRefused> {
         let doc = parse_doc(orders)?;
         object(&doc, "reply")?;
         no_service_error(&doc)?;
-        let known = match payments {
-            Some(body) => read_payments(&parse_doc(body)?)?,
-            None => Vec::new(),
-        };
+        let mut known: Vec<Payment> = Vec::new();
+        for body in payments {
+            for p in read_payments(&parse_doc(body)?)? {
+                known.retain(|k| k.id != p.id);
+                known.push(p);
+            }
+        }
         // Square leaves `orders` out when nothing was found.
         let list = match opt(&doc, "orders") {
             Some(v) => array(v, "orders")?,

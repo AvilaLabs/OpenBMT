@@ -32,6 +32,10 @@ const SQUARE_LAST: &str =
     include_str!("../../../openbmt-pos-readers/tests/fixtures/square_orders_last.json");
 const SQUARE_EMPTY: &str =
     include_str!("../../../openbmt-pos-readers/tests/fixtures/square_orders_empty.json");
+const SQUARE_PAYMENTS: &str =
+    include_str!("../../../openbmt-pos-readers/tests/fixtures/square_payments.json");
+const SQUARE_PAYMENTS_PAGE1: &str =
+    include_str!("../../../openbmt-pos-readers/tests/fixtures/square_payments_page1.json");
 const CLOVER_ORDERS: &str =
     include_str!("../../../openbmt-pos-readers/tests/fixtures/clover_orders.json");
 
@@ -132,13 +136,15 @@ fn paid_notices(amount: u64) -> Vec<(DeviceId, Vec<u8>)> {
 fn bx_49_a_square_poll_is_the_post_the_reader_builds_with_the_token_in_a_header() {
     let runner = FakeRunner::default();
     runner.say(200, SQUARE_LAST);
+    runner.say(200, SQUARE_PAYMENTS);
     let (mut c, transport) = connector(&square_config(), &runner);
     transport.set_tor(false);
     let page = c.poll(&Cursor::start()).unwrap();
     assert_eq!(page.orders.len(), 1);
     assert!(!page.more);
     let seen = runner.seen();
-    assert_eq!(seen.len(), 1);
+    // The search, then the payments of its orders.
+    assert_eq!(seen.len(), 2);
     let r = &seen[0];
     assert_eq!(r.method, Method::Post);
     assert_eq!(r.url, "https://connect.squareup.com/v2/orders/search");
@@ -154,8 +160,102 @@ fn bx_49_a_square_poll_is_the_post_the_reader_builds_with_the_token_in_a_header(
         .contains(&("Authorization".into(), "Bearer vendor-token-abc".into())));
     assert!(r.headers.iter().any(|(k, _)| k == "Content-Type"));
     assert_eq!(r.socks5, None);
-    // Nothing but the search: Square is read-only.
+    // Nothing but reads: Square is read-only.
     assert!(!r.url.contains("close") && !r.url.contains("pay"));
+    let p = &seen[1];
+    assert_eq!(p.method, Method::Get);
+    assert_eq!(p.body, None);
+    assert_eq!(p.socks5, None);
+    assert_eq!(
+        p.url,
+        format!(
+            "https://connect.squareup.com{}",
+            want.payments_path(100, None).unwrap()
+        )
+    );
+    assert!(p
+        .headers
+        .contains(&("Authorization".into(), "Bearer vendor-token-abc".into())));
+    // The cancelled payment of the fixture is seen on its tender.
+    assert!(page.orders[0]
+        .tenders
+        .iter()
+        .any(|t| t.state == openbmt_pos::TenderState::Voided));
+}
+
+#[test]
+fn bx_49_the_payments_of_a_square_page_are_read_page_by_page_through_the_same_runner() {
+    let runner = FakeRunner::default();
+    runner.say(200, SQUARE_LAST);
+    runner.say(200, SQUARE_PAYMENTS_PAGE1);
+    runner.say(200, SQUARE_PAYMENTS);
+    let (mut c, _) = connector(&square_config(), &runner);
+    let page = c.poll(&Cursor::start()).unwrap();
+    let seen = runner.seen();
+    assert_eq!(seen.len(), 3);
+    assert!(!seen[1].url.contains("cursor="));
+    assert!(
+        seen[2].url.ends_with("&cursor=PAYCURSOR1%3D%3D"),
+        "{}",
+        seen[2].url
+    );
+    assert!(page.orders[0]
+        .tenders
+        .iter()
+        .any(|t| t.state == openbmt_pos::TenderState::Voided));
+    // A page with no order asks for no payments.
+    let runner = FakeRunner::default();
+    runner.say(200, SQUARE_EMPTY);
+    let (mut c, _) = connector(&square_config(), &runner);
+    c.poll(&Cursor::start()).unwrap();
+    assert_eq!(runner.seen().len(), 1);
+    // A payments reply that repeats its marker is not asked for again.
+    let runner = FakeRunner::default();
+    runner.say(200, SQUARE_LAST);
+    for _ in 0..3 {
+        runner.say(200, SQUARE_PAYMENTS_PAGE1);
+    }
+    let (mut c, _) = connector(&square_config(), &runner);
+    c.poll(&Cursor::start()).unwrap();
+    assert_eq!(runner.seen().len(), 3);
+    // Clover asks for no payments: they are in the orders.
+    let runner = FakeRunner::default();
+    runner.say(200, CLOVER_ORDERS);
+    let (mut c, _) = connector(&clover_config(), &runner);
+    c.poll(&Cursor::start()).unwrap();
+    assert_eq!(runner.seen().len(), 1);
+}
+
+#[test]
+fn bx_49_a_payments_request_that_fails_fails_the_poll_with_its_words() {
+    for (status, heading) in [
+        (401, "Till refused the token"),
+        (429, "Till asks to wait"),
+        (500, "Till system error"),
+    ] {
+        let runner = FakeRunner::default();
+        runner.say(200, SQUARE_LAST);
+        runner.say(status, "{}");
+        let (mut c, transport) = connector(&square_config(), &runner);
+        assert!(c.poll(&Cursor::start()).is_err());
+        let why = transport.take().unwrap();
+        assert_eq!(note_words(&why.note()).heading, heading);
+    }
+    let runner = FakeRunner::default();
+    runner.say(200, SQUARE_LAST);
+    runner.fail(HttpsRefusal::Timeout);
+    let (mut c, transport) = connector(&square_config(), &runner);
+    assert_eq!(c.poll(&Cursor::start()), Err(PosError::Unavailable));
+    assert_eq!(transport.take(), Some(HttpsRefusal::Timeout));
+    let runner = FakeRunner::default();
+    runner.say(200, SQUARE_LAST);
+    runner.say(200, "not json");
+    let (mut c, transport) = connector(&square_config(), &runner);
+    assert!(c.poll(&Cursor::start()).is_err());
+    assert!(matches!(
+        transport.take(),
+        Some(HttpsRefusal::Unreadable(_))
+    ));
 }
 
 #[test]
@@ -251,18 +351,21 @@ fn bx_49_pages_are_read_a_page_at_a_time_and_a_page_that_does_not_move_the_curso
     let runner = FakeRunner::default();
     // Two pages that say there is more, with the same marker.
     runner.say(200, SQUARE_PAGE1);
+    runner.say(200, "{}");
     runner.say(200, SQUARE_PAGE1);
+    runner.say(200, "{}");
     let (mut pos, _) = vendor_pos(&square_config(), &runner, MemFiles::new());
     let notes = pos.tick(TENDER_AT, token());
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(notes[0].starts_with("the POS was not read: "), "{notes:?}");
     assert!(notes[0].contains("does not move on"), "{notes:?}");
     assert!(notes[0].contains("1 pages were kept"), "{notes:?}");
-    // One request for each page, the second from the cursor the first gave.
+    // One search for each page (each followed by its payments), the second
+    // from the cursor the first gave.
     let seen = runner.seen();
-    assert_eq!(seen.len(), 2);
+    assert_eq!(seen.len(), 4);
     assert!(!seen[0].body.as_deref().unwrap().contains("\"cursor\""));
-    assert!(seen[1].body.as_deref().unwrap().contains("\"cursor\""));
+    assert!(seen[2].body.as_deref().unwrap().contains("\"cursor\""));
     // What was kept stays: the cursor moved on from the start.
     assert!(pos.ledger().cursor() != &Cursor::start());
     assert!(pos.state().last_error.is_some());
@@ -360,7 +463,7 @@ fn bx_49_no_order_is_ever_closed_through_the_vendor() {
     .unwrap();
     assert_eq!(c.close(&request), Err(PosError::Unsupported));
     assert!(runner.seen().is_empty());
-    // And a Box with it sends only the search, for a sale reported paid.
+    // And a Box with it sends only reads, for a sale reported paid.
     let runner = FakeRunner::default();
     runner.say(200, SQUARE_LAST);
     let (mut pos, _) = vendor_pos(&square_config(), &runner, MemFiles::new());
@@ -368,10 +471,10 @@ fn bx_49_no_order_is_ever_closed_through_the_vendor() {
     pos.tick(TENDER_AT + 120, token());
     assert!(!pos.state().can_close);
     assert_eq!(pos.state().closes, 0);
-    assert!(runner
-        .seen()
-        .iter()
-        .all(|r| r.url.ends_with("/v2/orders/search")));
+    assert!(runner.seen().iter().all(|r| {
+        (r.method == Method::Post && r.url.ends_with("/v2/orders/search"))
+            || (r.method == Method::Get && r.url.contains("/v2/payments?"))
+    }));
 }
 
 #[test]
@@ -445,7 +548,7 @@ fn bx_49_the_config_is_a_framed_file_read_strictly() {
     config.host = Some("https://api.eu.clover.com".into());
     for c in [square_config(), clover_config(), config] {
         let bytes = c.to_bytes();
-        assert_eq!(&bytes[..4], b"OBMo");
+        assert_eq!(&bytes[..4], b"OBMq");
         assert_eq!(bytes[4], 1);
         assert_eq!(PosConfig::from_bytes(&bytes), Ok(c.clone()));
         // Every cut is refused, and so is a byte more.
@@ -607,7 +710,7 @@ fn bx_49_a_box_with_a_pos_config_reads_that_vendor_and_a_damaged_one_leaves_the_
     // file is left as it is.
     {
         DirFiles::new(&dir.0)
-            .write(POS_CONFIG_FILE, b"OBMo\x01garbage")
+            .write(POS_CONFIG_FILE, b"OBMq\x01garbage")
             .unwrap();
         let r = start(&dir).unwrap();
         assert!(matches!(
@@ -626,7 +729,7 @@ fn bx_49_a_box_with_a_pos_config_reads_that_vendor_and_a_damaged_one_leaves_the_
                 .read(POS_CONFIG_FILE)
                 .unwrap()
                 .unwrap(),
-            b"OBMo\x01garbage"
+            b"OBMq\x01garbage"
         );
     }
 }
