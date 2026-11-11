@@ -424,6 +424,7 @@ dependencies = [
  "openbmt-box",
  "openbmt-core",
  "openbmt-counter",
+ "openbmt-counter-ffi",
  "openbmt-counter-node",
  "openbmt-courier",
  "openbmt-json",
@@ -451,6 +452,21 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "openbmt-core",
+ "openbmt-watch",
+]
+
+[[package]]
+name = "openbmt-counter-ffi"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "jni-sys",
+ "openbmt-core",
+ "openbmt-counter",
+ "openbmt-counter-node",
+ "openbmt-net-io",
+ "openbmt-qr",
+ "openbmt-rates",
  "openbmt-watch",
 ]
 
