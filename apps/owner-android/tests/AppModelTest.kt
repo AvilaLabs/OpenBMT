@@ -10,6 +10,7 @@ import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import org.openbmt.app.Format
+import org.openbmt.app.KeyTextOutcome
 import org.openbmt.app.SayCheck
 import org.openbmt.app.SayWords
 import org.openbmt.app.Sealed
@@ -1267,7 +1268,18 @@ object AppModelTest {
         ok(read.contains("d.key2Text = null"), "a new answer starts with no key 2 text, so both are never passed")
         val key2 = c.substringAfter("private fun Controller.showKey2(").substringBefore("// ---- the fourth step")
         ok(key2.contains("AppWords.ceremonyKey2Needed") && key2.contains("CeremonyModel.key2Text(pasted.text.toString())") && key2.contains("CeremonyModel.key2FromScan(bytes)"), "key 2 by paste or by scan, checked for length only")
-        ok(!key2.contains("UrScan"), "key 2's code is plain text")
+        ok(key2.contains("UrScan(CeremonyModel.KEY2_TYPES, ExchangeModel.WHO)") && key2.contains("CeremonyModel.key2FromMessage(UrCall.native().keyText(type, payload))"), "key 2's key code goes through the library's key text call")
+        ok(CeremonyModel.KEY2_TYPES == setOf("crypto-account", "crypto-hdkey", "bytes"), "the three types")
+        val text = "[a1b2c3d4/48h/0h/0h/2h]xpub6Dummy"
+        val k = CeremonyModel.key2FromMessage(KeyTextOutcome.Key(text))
+        ok(k is Form.Ok && k.value == text, "a key goes on as scanned text does")
+        val dec = CeremonyModel.key2FromMessage(KeyTextOutcome.Declined("UR-23", "Not a key this app takes", "The code holds something else.", "Choose the multisig export."))
+        ok(dec is Form.Refused && dec.words.heading == "Not a key this app takes" && dec.words.code == "UR-23" && dec.words.who == ExchangeModel.WHO, "a declined code shows the library's words")
+        for (o in listOf(KeyTextOutcome.Refused("UR-21"), KeyTextOutcome.Fault)) {
+            val r = CeremonyModel.key2FromMessage(o)
+            ok(r is Form.Refused && r.words.heading == UrWords.readerFailed(ExchangeModel.WHO).heading, "a failed reader shows its words")
+        }
+        ok(AppWords.ceremonyKey2Needed.next.contains("a key code from the other wallet app, or its key as text"), "the key 2 step says which codes work")
         ok(c.contains("BuildArgs(d.record, answer, d.key2Text, defaults.batchMinCount)"), "key 2's text goes to the library as it is")
     }
 

@@ -1,5 +1,7 @@
 package org.openbmt.owner.app
 
+import org.openbmt.app.KeyTextOutcome
+import org.openbmt.app.UrWords
 import org.openbmt.owner.PairView
 
 /** What an unfinished setup offers next, from the stage the library reports for its sealed record. */
@@ -30,6 +32,9 @@ object CeremonyModel {
 
     /** The types of code the scan of the Key app's answer takes: its `ur:bytes` and nothing else. */
     val ANSWER_TYPES: Set<String> = ExchangeModel.RESPONSE_TYPES
+
+    /** The types of UR the scan of key 2 takes besides a plain text code (OA-28). */
+    val KEY2_TYPES: Set<String> = setOf("crypto-account", "crypto-hdkey", "bytes")
 
     /** The four words, written large to compare. */
     fun wordsLine(words: List<String>): String = CounterModel.wordsLine(words)
@@ -69,6 +74,17 @@ object CeremonyModel {
             return Form.Refused(AppWords.ceremonyKey2Text)
         }
         return key2Text(text)
+    }
+
+    /**
+     * Key 2 from what the library made of a finished UR (UR-31): the text goes on as scanned text does, a code that
+     * is not taken as a key shows the library's words, and a request or answer outside the framing shows the words
+     * of a reader that failed. Either way the key 2 screen is where the owner is.
+     */
+    fun key2FromMessage(outcome: KeyTextOutcome): Form<String> = when (outcome) {
+        is KeyTextOutcome.Key -> key2Text(outcome.text)
+        is KeyTextOutcome.Declined -> Form.Refused(UrWords.keyDeclined(ExchangeModel.WHO, outcome))
+        is KeyTextOutcome.Refused, KeyTextOutcome.Fault -> Form.Refused(UrWords.readerFailed(ExchangeModel.WHO))
     }
 
     /** The code for the Key app: with a code made ([made]), of several parts or one, or else the words of why not. */

@@ -350,7 +350,7 @@ object AppWords {
         Tones.INFO, "Key 2 needed",
         "The Key app holds no key 2, so key 2 comes from the device that holds it.",
         Who.OWNER,
-        "Scan its code or paste its text, then continue.",
+        "Scan a key code from the other wallet app, or its key as text, or paste the text, then continue.",
     )
 
     /** The text of key 2 is empty or longer than a key's text can be. */

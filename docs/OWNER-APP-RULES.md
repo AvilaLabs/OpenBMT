@@ -310,8 +310,11 @@ keeps the library's record between two steps and carries the owner's words.
   Key app shows the same words" and "They differ". Differ throws the
   answer away and goes back to the scan, and the words say why. When the
   answer holds no key 2, a screen takes key 2 as text, by a scan of a
-  plain code or pasted, and passes it as `key2_text` (SR-64); when the
-  answer holds key 2 the screen is not shown. Both are never passed
+  plain code, by a scan of a `crypto-account`, `crypto-hdkey` or `bytes`
+  UR (read by the shared `UrScan` and turned to text by the library's key
+  text call, UR-31; a code it declines shows its words and the screen
+  stays) or pasted (text only), and passes it as `key2_text` (SR-64); when
+  the answer holds key 2 the screen is not shown. Both are never passed
   (OC-41). The app checks only the length of the text; the library reads
   the key and refuses what is not one.
 - **OA-29.** The wallet is built with `ceremonyBuildWallet`. The screen

@@ -8,6 +8,7 @@ import org.openbmt.app.AnimatedQrView
 import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.SayWords
 import org.openbmt.app.SealedFile
+import org.openbmt.app.UrCall
 import org.openbmt.app.UrScan
 import org.openbmt.owner.AnswerView
 import org.openbmt.owner.BuildArgs
@@ -229,7 +230,7 @@ private fun Controller.showRootCheck(d: CeremonyDraft, read: AnswerView) {
 
 // ---- the third step: key 2, when the Key app holds none --------------------------------------------------------------
 
-/** Key 2 by scan (plain text) or paste; [message] is what the last try said. Never asked for when the answer holds it (OC-41). */
+/** Key 2 by scan (plain text or a key code) or paste; [message] is what the last try said. Never asked for when the answer holds it (OC-41). */
 private fun Controller.showKey2(d: CeremonyDraft, message: SayWords?) {
     val views = ArrayList<View>()
     views.add(ui.text("Key 2", 22f, bold = true))
@@ -252,7 +253,7 @@ private fun Controller.showKey2(d: CeremonyDraft, message: SayWords?) {
     page(views)
 }
 
-/** Key 2's code is plain text: the bytes of the scan are the text, and the library reads the key. */
+/** Key 2's code is plain text (its bytes are the text) or a UR of a key (read by the library, UR-31); the library reads the key. */
 private fun Controller.scanKey2(d: CeremonyDraft) {
     scan.begin(
         show = { v ->
@@ -273,6 +274,15 @@ private fun Controller.scanKey2(d: CeremonyDraft) {
             showKey2(d, (r as? SourceResult.Failed)?.words ?: AppWords.ceremonyKey2Text)
         },
         onCancel = { showKey2(d, AppWords.ceremonyKey2ScanCancelled) },
+        ur = UrScan(CeremonyModel.KEY2_TYPES, ExchangeModel.WHO) { type, payload ->
+            when (val f = CeremonyModel.key2FromMessage(UrCall.native().keyText(type, payload))) {
+                is Form.Refused -> showKey2(d, f.words)
+                is Form.Ok -> {
+                    d.key2Text = f.value
+                    buildWallet(d)
+                }
+            }
+        },
     )
 }
 

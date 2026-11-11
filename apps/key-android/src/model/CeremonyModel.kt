@@ -3,17 +3,26 @@ package org.openbmt.key.app
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
+import org.openbmt.app.KeyTextOutcome
+import org.openbmt.app.SayWords
+import org.openbmt.app.UrWords
+import org.openbmt.app.Who
 import org.openbmt.key.Key3View
 import org.openbmt.key.KeyException
 import org.openbmt.key.SlotView
 import org.openbmt.key.WalletView
 import org.openbmt.key.Words
 
-/** What reading a key 3 export gave: its text for the library, or the words of why not. */
+/**
+ * What reading a key 3 export gave: its text for the library, the words of why not (back to the key 3
+ * screen), or the words of a code that was read but is not taken as a key (the scan goes on from its page).
+ */
 sealed class Key3Input {
     class Text(val text: String) : Key3Input()
 
     class Refused(val words: Words) : Key3Input()
+
+    class Declined(val words: Words) : Key3Input()
 }
 
 /** What the screen after key 3 is taken shows, as text. */
@@ -61,6 +70,23 @@ object CeremonyModel {
 
     /** Whether [bytes] begin with the frame of the owner phone's wallet setup. */
     fun looksLikeSetup(bytes: ByteArray): Boolean = hasFrame(bytes, SETUP)
+
+    /** The types of UR the key 3 scan takes besides a plain text code (SR-64). */
+    val KEY3_TYPES: Set<String> = setOf("crypto-account", "crypto-hdkey", "bytes")
+
+    /**
+     * Key 3 from what the library made of a finished UR (UR-31): its text goes on as scanned text does, a
+     * code that is not taken as a key shows the library's words and stays on the scan step, and a request
+     * or answer outside the framing shows the words of a reader that failed.
+     */
+    fun readKey3Message(outcome: KeyTextOutcome): Key3Input = when (outcome) {
+        is KeyTextOutcome.Key -> Key3Input.Text(outcome.text)
+        is KeyTextOutcome.Declined -> Key3Input.Declined(sayToWords(UrWords.keyDeclined(Who.KEY_HOLDER, outcome)))
+        is KeyTextOutcome.Refused, KeyTextOutcome.Fault -> Key3Input.Refused(sayToWords(UrWords.readerFailed(Who.KEY_HOLDER)))
+    }
+
+    private fun sayToWords(say: SayWords): Words =
+        Words(say.tone, say.who, say.heading, say.what, say.next, say.code, null, null, say.detail)
 
     /** Key 3 from the bytes of a scanned code: plain text goes on, a `ur:` code and bytes that are not text do not. */
     fun readKey3Code(bytes: ByteArray): Key3Input {

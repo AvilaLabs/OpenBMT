@@ -53,7 +53,7 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | ceremonyScanCancelled | Key app scan cancelled | No code was read, so no answer was taken from the Key app. | Scan the Key app's code again when you are ready. | the owner |  |
 | ceremonyCompareRoot | Compare the Key app's words | Check that the Key app shows these same four words as its own. | If they match, say so below. If they differ, say so and the answer is thrown away. | the owner |  |
 | ceremonyRootDiffers | Answer thrown away | The four words differ, so this answer may not come from the Key app you hold, and it was thrown away. | Scan again on the Key app you hold. If the words still differ, choose Start again. | the owner |  |
-| ceremonyKey2Needed | Key 2 needed | The Key app holds no key 2, so key 2 comes from the device that holds it. | Scan its code or paste its text, then continue. | the owner |  |
+| ceremonyKey2Needed | Key 2 needed | The Key app holds no key 2, so key 2 comes from the device that holds it. | Scan a key code from the other wallet app, or its key as text, or paste the text, then continue. | the owner |  |
 | ceremonyKey2Text | Key 2 text not accepted | The text for key 2 is empty, is not text, or is longer than a key's text can be, so nothing was used. | Copy it again from the device that holds key 2, then try again. | the owner |  |
 | ceremonyKey2ScanCancelled | Key 2 scan cancelled | No code was read, so key 2 was not taken. | Scan its code again, or paste its text instead. | the owner |  |
 | ceremonyBuilding | Building the wallet | The wallet is being built from the three keys, which takes a moment. | Wait on this screen. | the owner |  |

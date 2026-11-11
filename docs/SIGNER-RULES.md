@@ -301,7 +301,13 @@ steps are OC-40 to OC-46 in `docs/OWNER-COINS-RULES.md`.
   fingerprint typed beside it is not an origin), an origin of another form or
   path, text that is not a key or is longer than 256 characters, a key that
   is not at the account level (depth 4, last step 2h), and a secret key, which
-  is never echoed.
+  is never echoed. In the Key app the scan of key 3 takes, besides a plain
+  text code, a `crypto-account`, `crypto-hdkey` or `bytes` UR (one part or
+  several, read by the shared `UrScan`). A finished UR goes through the
+  library's key text call (UR-31): the text it gives is taken exactly as
+  scanned text is, a code it declines shows its words and the scan step
+  stays, and a refusal of the call or no answer shows the words of a reader
+  that failed. Pasting takes text only; pasted `ur:` text is refused.
 - **SR-65.** A single-signature form (`ypub`, `zpub`, `upub`, `vpub`) is
   refused, and so is a multisig form of another script type (`Ypub`,
   `Upub`). The words say that the key is for a wallet that one key spends from,

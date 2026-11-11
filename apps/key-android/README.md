@@ -16,7 +16,7 @@ local test key; release signing is a separate step (see "Signing").
 | Refusal | Full-screen words when USB or wireless debugging or an accessibility service is on. Nothing else is offered. |
 | First start | Make key 2 from the device, dice (hashed or skew-corrected), coin flips or typed words, or be an approver only. |
 | The words | The new key's words, once. |
-| Key 3 | Key 3 is made in another publisher's wallet or on a hardware wallet; Scan key 3 (a plain text code) or paste its text, then its fingerprint to check against the other wallet. |
+| Key 3 | Key 3 is made in another publisher's wallet or on a hardware wallet; Scan key 3 (a plain text code or a key code) or paste its text, then its fingerprint to check against the other wallet. |
 | Give the owner phone these keys | The public answer as a code that changes, then Scan the owner phone's wallet. |
 | Check the wallet | The four check words and the three fingerprints, large, to compare with the owner phone and the counter; They match leads to the home screen. |
 | Home | Requests, the wallet and its check words, the kit check, the limits. |
@@ -53,10 +53,11 @@ after the identity is made on an approver-only device:
 1. **Key 3.** The screen says in plain words that key 3 is made alone, in
    another publisher's wallet or on a hardware wallet, with its words written
    separately; the terms of the export (xpub, multisig, path) are only under
-   "Advanced". Scan key 3 opens the camera and reads a plain text code
-   (`takeKey3`, op 80); a `ur:` code is refused with words that say this kind
-   of code is not read yet and to export key 3 as text, because the reading of
-   CBOR UR exports is not built. Pasting is the fallback. The result shows key
+   "Advanced". Scan key 3 opens the camera and reads a plain text code, or a
+   `crypto-account`, `crypto-hdkey` or `bytes` UR (one part or several), which
+   the library turns to the same text (`UrCall.keyText`); the text goes to
+   `takeKey3` (op 80). A code that is read but is not a key this app takes
+   shows the library's words and the scan stays. Pasting takes text only. The result shows key
    3's fingerprint in two groups of four, to check against the other wallet's
    screen: "They match" goes on, "They differ" says to export it again.
    Single-signature exports, another network, key 2 itself and a bad origin
@@ -171,7 +172,7 @@ person can aim.
 - Scan fills the field next to it (the wallet text of the printed kit) with
   the text of the code, or, on the home screen, opens a request from the bytes
   of the code, as a request file would. On the key 3 screen it reads a plain
-  text code, and on the wallet screen a `ur:bytes` code (one part or a code
+  text code or a key UR, and on the wallet screen a `ur:bytes` code (one part or a code
   that changes), and hands the bytes to the library.
 - The camera permission is asked for only when Scan is tapped. If it is
   refused, or "don't ask again" was chosen, a words page says the camera is

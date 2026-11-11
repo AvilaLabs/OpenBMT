@@ -5,6 +5,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.security.MessageDigest
 import org.openbmt.app.Format
+import org.openbmt.app.KeyTextOutcome
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Sealer
 import org.openbmt.app.Sealed
@@ -12,6 +13,7 @@ import org.openbmt.app.SayCheck
 import org.openbmt.app.StoreFormat
 import org.openbmt.app.StoreFormatException
 import org.openbmt.app.Tones
+import org.openbmt.app.UrWords
 import org.openbmt.app.Who
 import org.openbmt.key.HealthDetail
 import org.openbmt.key.Key3View
@@ -313,11 +315,11 @@ object AppModelTest {
         ok(withSpace is Key3Input.Text && withSpace.text == "  \n$text\n", "the library trims, the app does not change the text")
         for (ur in listOf("ur:crypto-account/abc", "UR:CRYPTO-ACCOUNT/ABC", "  ur:bytes/1-3/xyz")) {
             val r = CeremonyModel.readKey3Code(ur.toByteArray())
-            ok(r is Key3Input.Refused && r.words == AppWords.key3UrNotRead, "a ur: code is refused with its words: $ur")
+            ok(r is Key3Input.Refused && r.words == AppWords.key3UrNotRead, "a ur: code that reached the plain path is refused with its words: $ur")
             val t = CeremonyModel.readKey3Text(ur)
             ok(t is Key3Input.Refused && t.words == AppWords.key3UrNotRead, "pasted ur: text is refused the same way: $ur")
         }
-        ok(AppWords.key3UrNotRead.what.contains("not read yet") && AppWords.key3UrNotRead.next.contains("as text"), "the ur: words say to export as text")
+        ok(AppWords.key3UrNotRead.what.contains("only when it is scanned") && AppWords.key3UrNotRead.next.contains("as text"), "the ur: words say a key code is scanned and a paste is text")
         val binary = CeremonyModel.readKey3Code(byteArrayOf(0x00, 0xff.toByte(), 0xfe.toByte(), 0x80.toByte()))
         ok(binary is Key3Input.Refused && binary.words == AppWords.key3NotText, "bytes that are not text are refused")
         val empty = CeremonyModel.readKey3Text("")
@@ -338,6 +340,23 @@ object AppModelTest {
         ok(AppWords.Text.ADVANCED == "Advanced" && AppWords.Text.SCAN_KEY3 == "Scan key 3", "the button words")
         ok(AppWords.key3Needed.next.contains("alone") && AppWords.key3Needed.what.contains("another publisher"), "key 3 is made alone, elsewhere")
         ok(AppWords.key3Mismatch.tone == Tones.STOP && AppWords.key3Taken.tone == Tones.GOOD, "mismatch is a stop, taken is done")
+    }
+
+    private fun sr_64_key_3_by_a_key_code() {
+        ok(CeremonyModel.KEY3_TYPES == setOf("crypto-account", "crypto-hdkey", "bytes"), "the key 3 scan takes these three types")
+        val text = "[a1b2c3d4/48h/0h/0h/2h]xpub6Dummy"
+        val key = CeremonyModel.readKey3Message(KeyTextOutcome.Key(text))
+        ok(key is Key3Input.Text && key.text == text, "a key goes to the library as scanned text does")
+        val declined = KeyTextOutcome.Declined("UR-23", "Not a key this app takes", "The code holds something else.", "Choose the multisig export.")
+        val d = CeremonyModel.readKey3Message(declined)
+        ok(d is Key3Input.Declined && d.words.heading == "Not a key this app takes" && d.words.code == "UR-23" && d.words.tone == Tones.STOP, "a declined code shows the library's words and stays on the scan")
+        ok(d is Key3Input.Declined && d.words.who == Who.KEY_HOLDER, "the words are for the one holding the Key app")
+        val refused = CeremonyModel.readKey3Message(KeyTextOutcome.Refused("UR-21"))
+        ok(refused is Key3Input.Refused && refused.words.heading == UrWords.readerFailed(Who.KEY_HOLDER).heading, "a refused request shows the reader's words and goes back to key 3")
+        val fault = CeremonyModel.readKey3Message(KeyTextOutcome.Fault)
+        ok(fault is Key3Input.Refused && fault.words.heading == UrWords.readerFailed(Who.KEY_HOLDER).heading, "no answer shows the same words")
+        ok(CeremonyModel.readKey3Text("ur:crypto-hdkey/abc") is Key3Input.Refused, "paste stays text only")
+        ok(AppWords.key3Needed.next.contains("a key code from the other wallet app, or its key as text"), "the scan step says which codes work")
     }
 
     private fun answerTests() {
@@ -545,6 +564,7 @@ object AppModelTest {
         lineTests()
         pairOfferTests()
         key3Tests()
+        sr_64_key_3_by_a_key_code()
         answerTests()
         walletTests()
         refusalTests()

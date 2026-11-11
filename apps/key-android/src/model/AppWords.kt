@@ -265,15 +265,15 @@ object AppWords {
         Tones.INFO, "Key 3, the recovery key",
         "Key 3 is made on its own in another publisher's wallet or on a hardware wallet, never in this app.",
         Who.KEY_HOLDER,
-        "Do that step alone, write its words on separate paper, then scan key 3 here.",
+        "Do that step alone, write its words on separate paper, then scan key 3 here: a key code from the other wallet app, or its key as text.",
     )
 
-    /** A `ur:` code was scanned or pasted for key 3: that kind of code is not read yet. */
+    /** A `ur:` text was pasted for key 3: only the camera reads that kind of code. */
     val key3UrNotRead = w(
-        Tones.INFO, "Code not read yet",
-        "This kind of code is not read yet, so nothing was taken.",
+        Tones.INFO, "Code is read by the camera",
+        "A key code is read only when it is scanned, not from pasted text, so nothing was taken.",
         Who.KEY_HOLDER,
-        "Export key 3 as text in the other wallet, then scan that code or paste the text.",
+        "Scan the key code, or paste the key as text.",
     )
 
     val key3NotText = w(
@@ -347,7 +347,7 @@ object AppWords {
         const val ADVANCED_KEY3 =
             "The other wallet must export the account key (xpub) of a multisig P2WSH wallet at m/48'/coin'/0'/2' " +
                 "with its origin, as [fingerprint/path]key. A single-signature export is refused. " +
-                "A plain text code is read; a ur: code is not read yet."
+                "A plain text code is read, and so is a ur: code of type crypto-account, crypto-hdkey or bytes. Pasting takes text only."
     }
 
     val flipsNotReadable = w(

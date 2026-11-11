@@ -22,6 +22,7 @@ import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.ScanFlow
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Ui
+import org.openbmt.app.UrCall
 import org.openbmt.app.UrScan
 import org.openbmt.app.UrText
 import org.openbmt.app.UrWords
@@ -749,7 +750,7 @@ class Controller(private val act: MainActivity) {
     }
 
     /**
-     * Step 2: key 3 comes from another wallet, by a plain text code or by paste. [back] is where Back goes
+     * Step 2: key 3 comes from another wallet, by a plain text code, a key code (a UR, SR-64) or by paste. [back] is where Back goes
      * when key 3 is already held and is being changed; with none, the screen has no Back.
      */
     private fun showKey3(back: (() -> Unit)?) {
@@ -771,6 +772,9 @@ class Controller(private val act: MainActivity) {
                 onBytes = { bytes -> allowed { takeKey3(CeremonyModel.readKey3Code(bytes), back) } },
                 onFailed = { showMessage(cameraWords(it)) { showKey3(back) } },
                 onCancel = { showKey3(back) },
+                ur = UrScan(CeremonyModel.KEY3_TYPES, Who.KEY_HOLDER) { type, payload ->
+                    allowed { takeKey3(CeremonyModel.readKey3Message(UrCall.native().keyText(type, payload)), back) }
+                },
             )
         }
     }
@@ -779,6 +783,7 @@ class Controller(private val act: MainActivity) {
         val a = app ?: return
         when (input) {
             is Key3Input.Refused -> showMessage(input.words) { showKey3(back) }
+            is Key3Input.Declined -> showMessage(input.words) { scanKey3(back) }
             is Key3Input.Text -> attempt({ showKey3(back) }) { a.takeKey3(input.text) }?.let { showKey3Taken(it) }
         }
     }
