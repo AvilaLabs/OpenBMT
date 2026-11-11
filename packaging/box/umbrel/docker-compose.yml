@@ -1,14 +1,8 @@
-# Umbrel app compose file. Every line marked "verify" is to be checked on an
-# Umbrel device; see packaging/box/README.md.
-version: "3.7"
+# The Box speaks its own framing over raw TCP, not HTTP, so there is no
+# app_proxy: the port is published on the host as it is.
 services:
-  app_proxy:
-    # verify: the proxy's variables, and that the Box's TCP relay passes it
-    environment:
-      APP_HOST: openbmt-box_server_1
-      APP_PORT: 8986
   server:
-    image: openbmt-box:0.1.0 # verify: a published image pinned by digest
+    image: openbmt-box:0.1.0
     restart: on-failure
     init: true
     user: "1000:1000"
@@ -17,5 +11,10 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # An invitation is given as a file under /data (BX-12). The Box reads it
+    # once and deletes it; with no file it says so in its log and runs on.
+    command: ["--invitation-file", "/data/invitation.txt"]
+    ports:
+      - "8986:8986/tcp"
     volumes:
-      - ${APP_DATA_DIR}/data:/data # verify: owner of this directory is uid 1000
+      - ${APP_DATA_DIR}/data:/data
