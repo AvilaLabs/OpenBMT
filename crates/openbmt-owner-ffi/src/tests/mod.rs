@@ -12,5 +12,6 @@ mod pos;
 mod protocol;
 mod screen;
 mod settings;
+mod setup_lock;
 mod strict;
 pub(crate) mod wire;

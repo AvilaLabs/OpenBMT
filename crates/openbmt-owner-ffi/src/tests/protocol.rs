@@ -89,6 +89,10 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (93, "counter_bundle"),
         (94, "counter_delivered"),
         (95, "counter_relay"),
+        (100, "setup_lock_form"),
+        (101, "setup_lock"),
+        (102, "setup_unlock"),
+        (103, "setup_change_pin"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

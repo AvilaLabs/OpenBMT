@@ -10,6 +10,9 @@ publish.workspace = true
 [lib]
 crate-type = ["lib", "cdylib", "staticlib"]
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+
 [features]
 # The JNI entry point, compiled for every target so that the host can test
 # it; on Android it is always compiled.
@@ -23,6 +26,7 @@ openbmt-core = { path = "../openbmt-core" }
 openbmt-counter-node = { path = "../openbmt-counter-node" }
 openbmt-courier = { path = "../openbmt-courier" }
 openbmt-link = { path = "../openbmt-link" }
+openbmt-lock = { path = "../openbmt-lock" }
 openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-owner = { path = "../openbmt-owner" }
 openbmt-owner-node = { path = "../openbmt-owner-node" }

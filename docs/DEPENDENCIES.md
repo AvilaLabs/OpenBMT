@@ -18,7 +18,7 @@ for each program that ships. The lists themselves are in `deps/`.
 | Books export | `deps/openbmt-books.txt` | 42 |
 | Key app library | `deps/openbmt-key-ffi.txt` | 43 |
 | Counter app library | `deps/openbmt-counter-ffi.txt` | 39 |
-| Owner app library | `deps/openbmt-owner-ffi.txt` | 39 |
+| Owner app library | `deps/openbmt-owner-ffi.txt` | 46 |
 | QR code encoder | `deps/openbmt-qr.txt` | 0 |
 | Price sources | `deps/openbmt-rates.txt` | 19 |
 
@@ -36,13 +36,20 @@ Where they come from:
   Java native interface, with no dependencies of its own, and the PIN lock
   of the stored state (SR-71): Argon2 and ChaCha20-Poly1305, the same
   versions and features as the books export, with 21 helpers between
-  them, all of which are in the lock file already. Its binding to the
+  them, all of which are in the lock file already. They come in through
+  `openbmt-lock` (`docs/LOCK-RULES.md`), the workspace crate that holds the
+  lock and that the owner app library uses as well. Its binding to the
   app is written by hand, in place of a binding generator that brought
   in about 40 packages.
 - **The counter app library, the same 1 more.** The counter's list and
   `jni-sys`, bound the same way by hand. It adds nothing else.
-- **The owner app library, the same 1 more.** The owner's list and
-  `jni-sys`, bound the same way by hand. It adds nothing else.
+- **The owner app library, 8 more.** The owner's list and `jni-sys`, bound
+  the same way by hand, and the PIN lock on key 1 (OA-60): `openbmt-lock`
+  brings Argon2 and its 6 helpers that the Key app library already lists
+  (`argon2`, `base64ct`, `blake2`, `block-buffer`, `digest`, `password-hash`,
+  `rand_core`); ChaCha20-Poly1305 was in the list for the link. Every one
+  of them is in the lock file already, at the same version: this adds no
+  package to it.
 
 - **The QR code encoder, none.** `openbmt-qr` has no dependencies of its
   own, not even for tests. The counter, the owner and the Key apps show

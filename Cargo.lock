@@ -520,6 +520,7 @@ dependencies = [
  "openbmt-courier",
  "openbmt-key-ffi",
  "openbmt-link",
+ "openbmt-lock",
  "openbmt-net-io",
  "openbmt-owner",
  "openbmt-owner-node",

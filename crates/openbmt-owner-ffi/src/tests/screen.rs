@@ -124,6 +124,7 @@ fn every_rule_string_the_source_makes_has_words_of_its_own() {
         "host.rs",
         "jni.rs",
         "settings_edit.rs",
+        "setup_lock.rs",
         "views.rs",
     ] {
         let text = std::fs::read_to_string(dir.join(name)).expect("readable");

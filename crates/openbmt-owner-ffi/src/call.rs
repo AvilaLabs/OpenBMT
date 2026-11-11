@@ -52,6 +52,10 @@
 //!   it shows, its settings, taking them off, the next request, the till's
 //!   answer, acknowledging an alert. The app sends the request and hands
 //!   back the answer; the node parses and matches.
+//! - 100 to 103: the lock on the setup text the app stores
+//!   (`docs/LOCK-RULES.md`, `docs/OWNER-APP-RULES.md` OA-60 to OA-62):
+//!   whether stored bytes are a locked setup, lock a text under a PIN, open
+//!   it, change the PIN. They work on no node and store nothing.
 //! - 90 to 94: adding a counter (`docs/SESSION-RULES.md`, AS-69 to AS-73):
 //!   read the counter's request, confirm the settings and first batch, the
 //!   counters waiting for their code, the code, and that the counter took it.
@@ -89,6 +93,7 @@ use crate::say::{TONES, WHOS};
 use crate::settings_edit::{
     LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,
 };
+use crate::setup_lock::{self, PinChangeArgs};
 use crate::views::{
     put_words, AlertKind, AlertView, BatchArgs, BuiltView, CashAmountView, CashOutArgs, CashOutRow,
     ClearArgs, CounterShareView, CounterView, DeepRequestView, DeliverView, EntryKindView,
@@ -467,6 +472,18 @@ fn build_ops() -> Vec<Op> {
         op(95, "counter_relay", Node, |c, ()| {
             c.entry()?.counter_relay()
         }),
+        op(100, "setup_lock_form", Zero, |_, bytes: Vec<u8>| {
+            setup_lock::form(bytes)
+        }),
+        op(101, "setup_lock", Zero, |_, a: (String, Vec<u8>)| {
+            setup_lock::lock_text(a)
+        }),
+        op(102, "setup_unlock", Zero, |_, a: (Vec<u8>, String)| {
+            setup_lock::unlock_text(a)
+        }),
+        op(103, "setup_change_pin", Zero, |_, a: PinChangeArgs| {
+            setup_lock::change_pin(a)
+        }),
     ]
 }
 
@@ -676,6 +693,7 @@ fn definitions() -> Vec<TypeDef> {
         CounterQueuedView::define(),
         WaitingCounterView::define(),
         CounterBundleView::define(),
+        PinChangeArgs::define(),
     ]
 }
 

@@ -47,6 +47,7 @@ object ProtocolDecoderTest {
         requests()
         ceremonyFrames()
         ceremonyThroughTheLibrary()
+        setupLockThroughTheLibrary()
         println("ProtocolDecoderTest: ok")
     }
 
@@ -248,6 +249,39 @@ object ProtocolDecoderTest {
         check(e.status == 1 && e.rule.startsWith(prefix)) { "$label: status ${e.status}, rule ${e.rule}" }
         check(e.words != null && e.words!!.heading.isNotEmpty() && e.words!!.next.isNotEmpty()) { "$label: no words" }
         return e
+    }
+
+    /**
+     * The lock on the setup text through the real library, at the real cost (Argon2id, 64 MiB, 3 passes): a text
+     * is locked, told from a bare one, opened, and its PIN changed, and each refusal has its rule and its words.
+     * The time of one lock or unlock is printed.
+     */
+    private fun setupLockThroughTheLibrary() {
+        val text = "owner_secret=00112233\nkey1_account=44556677\n".toByteArray()
+        check(!OwnerLock.isLocked(text) && !OwnerLock.isLocked(ByteArray(0)))
+        val started = System.nanoTime()
+        val locked = OwnerLock.lock("482913", text)
+        val lockMs = (System.nanoTime() - started) / 1_000_000
+        check(OwnerLock.isLocked(locked) && String(locked, Charsets.ISO_8859_1).startsWith("OBMx"))
+        check(!String(locked, Charsets.ISO_8859_1).contains("owner_secret"))
+        val opened = System.nanoTime()
+        check(OwnerLock.unlock(locked, "482913").contentEquals(text))
+        val unlockMs = (System.nanoTime() - opened) / 1_000_000
+        println("ProtocolDecoderTest: lock $lockMs ms, unlock $unlockMs ms")
+        check(!OwnerLock.lock("482913", text).contentEquals(locked)) { "a new salt and a new nonce each time" }
+        val moved = OwnerLock.changePin(locked, "482913", "a longer passphrase")
+        check(OwnerLock.unlock(moved, "a longer passphrase").contentEquals(text))
+        refusedBy("the old PIN after a change", "pin-wrong") { OwnerLock.unlock(moved, "482913") }
+        check(OwnerLock.unlock(locked, "482913").contentEquals(text)) { "the old frame is as it was" }
+        refusedBy("a wrong PIN", "pin-wrong") { OwnerLock.unlock(locked, "482914") }
+        refusedBy("a wrong current PIN", "pin-wrong") { OwnerLock.changePin(locked, "482914", "654321") }
+        refusedBy("a weak PIN", "pin-weak") { OwnerLock.lock("12345", text) }
+        refusedBy("a weak new PIN", "pin-weak") { OwnerLock.changePin(locked, "482913", "123") }
+        refusedBy("a PIN that is too long", "pin-long") { OwnerLock.lock("9".repeat(129), text) }
+        refusedBy("a cut frame", "OBMx") { OwnerLock.unlock(locked.copyOf(locked.size - 1), "482913") }
+        refusedBy("a bare text", "OBMx") { OwnerLock.unlock(text, "482913") }
+        val flipped = locked.copyOf().also { it[it.size - 1] = (it[it.size - 1].toInt() xor 1).toByte() }
+        refusedBy("a changed ciphertext", "pin-wrong") { OwnerLock.unlock(flipped, "482913") }
     }
 
     /**

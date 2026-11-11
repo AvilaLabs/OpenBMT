@@ -111,6 +111,10 @@ private const val OP_COUNTERS_WAITING = 92
 private const val OP_COUNTER_BUNDLE = 93
 private const val OP_COUNTER_DELIVERED = 94
 private const val OP_COUNTER_RELAY = 95
+private const val OP_SETUP_LOCK_FORM = 100
+private const val OP_SETUP_LOCK = 101
+private const val OP_SETUP_UNLOCK = 102
+private const val OP_SETUP_CHANGE_PIN = 103
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -1649,5 +1653,37 @@ object OwnerCeremony {
     fun defaults(network: OwnerNetwork): CeremonyDefaults {
         val r = call(OP_CEREMONY_DEFAULTS, 0) { it.network(network) }
         return r.ceremonyDefaults().also { r.end() }
+    }
+}
+
+/**
+ * The lock on the setup text the app stores (`docs/OWNER-APP-RULES.md` OA-60 to OA-62, `docs/LOCK-RULES.md`).
+ * The setup text holds the owner's secret and key 1's account key: the app stores the bytes these calls
+ * return (inside the Keystore's seal) and keeps no PIN. No node runs while they are called, so they name no
+ * handle. Opening takes about a second (Argon2id): the app draws a page first.
+ */
+object OwnerLock {
+    /** Whether stored bytes are a locked setup. A setup saved before the lock existed is the bare text. */
+    fun isLocked(stored: ByteArray): Boolean {
+        val r = call(OP_SETUP_LOCK_FORM, 0) { it.bytes(stored) }
+        return r.bool().also { r.end() }
+    }
+
+    /** The setup text locked under [pin]: 6 digits or more, or a passphrase of 8 characters or more. */
+    fun lock(pin: String, text: ByteArray): ByteArray {
+        val r = call(OP_SETUP_LOCK, 0) { it.string(pin).bytes(text) }
+        return r.bytes().also { r.end() }
+    }
+
+    /** The setup text inside [locked]. A wrong PIN is refused with the rule `pin-wrong` and changes nothing. */
+    fun unlock(locked: ByteArray, pin: String): ByteArray {
+        val r = call(OP_SETUP_UNLOCK, 0) { it.bytes(locked).string(pin) }
+        return r.bytes().also { r.end() }
+    }
+
+    /** [locked] under a new PIN, in one call; the current PIN is needed. */
+    fun changePin(locked: ByteArray, current: String, new: String): ByteArray {
+        val r = call(OP_SETUP_CHANGE_PIN, 0) { it.bytes(locked).string(current).string(new) }
+        return r.bytes().also { r.end() }
     }
 }

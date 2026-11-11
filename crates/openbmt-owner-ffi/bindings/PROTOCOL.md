@@ -111,6 +111,10 @@ ops run on another; it waits for at most 250 ms.
  93 counter_bundle   handle node  args list<u8> -> CounterBundleView
  94 counter_delivered handle node  args list<u8> -> ()
  95 counter_relay    handle node  args () -> list<u8>
+100 setup_lock_form  handle zero  args list<u8> -> bool
+101 setup_lock       handle zero  args (string, list<u8>) -> list<u8>
+102 setup_unlock     handle zero  args (list<u8>, string) -> list<u8>
+103 setup_change_pin handle zero  args PinChangeArgs -> list<u8>
 ```
 
 ## Types
@@ -217,4 +221,5 @@ CounterConfirmArgs: record: pairing: u32, usd_per_btc: u64
 CounterQueuedView: record: settings: u32, version: u32, batch: u32, batch_count: u32, shares: list<CounterShareView>, words: Words
 WaitingCounterView: record: counter: list<u8>, name: string
 CounterBundleView: record: code: list<u8>, with_batch: bool, words: Words
+PinChangeArgs: record: locked: list<u8>, current: string, new: string
 ```

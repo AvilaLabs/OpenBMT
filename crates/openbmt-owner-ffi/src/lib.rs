@@ -58,6 +58,7 @@ mod jni;
 mod pos_views;
 mod say;
 mod settings_edit;
+mod setup_lock;
 mod views;
 
 #[cfg(test)]
@@ -84,6 +85,7 @@ pub use say::{all_words, words_for};
 pub use settings_edit::{
     LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,
 };
+pub use setup_lock::PinChangeArgs;
 pub use views::{
     AlertKind, AlertView, BatchArgs, BuiltView, CashAmountView, CashOutArgs, CashOutRow, ClearArgs,
     CounterShareView, CounterView, DeepRequestView, DeliverView, EntryKindView, EntryRow,
