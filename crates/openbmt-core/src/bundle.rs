@@ -14,12 +14,19 @@
 //! Wire form (strict, see [`crate::wire`]):
 //!
 //! ```text
-//! "OBMs" | 1
+//! "OBMs" | 1 or 2
 //!   | pairing len u16 | signed pairing ("OBMD")
 //!   | settings len u32 | signed settings ("OBMS")
 //!   | batch len u32 (0 for none) | signed batch ("OBMB")
 //!   | peer count u8 | per peer: len u8 | "host:port" (ascending, no repeats)
+//!   | version 2 only: relay hint ([`crate::relay`])
 //! ```
+//!
+//! Version 2 is the version with a relay (CR-130): a bundle with no relay is
+//! written as version 1, byte for byte as before, and a version 2 bundle
+//! always has one. The relay is where the counter reaches the owner through
+//! the shop's Box or relay; it adds no authority (`docs/LINK-RULES.md`,
+//! LK-09).
 //!
 //! Decoding only parses. The counter's own checks of the pairing, the
 //! settings and the batch are in the counter crate.
@@ -29,6 +36,7 @@ use std::net::SocketAddr;
 
 use crate::batch::SignedBatch;
 use crate::pairing::SignedPairing;
+use crate::relay::RelayHint;
 use crate::settings::SignedSettings;
 use crate::wire::{self, DecodeError, Reader};
 
@@ -88,7 +96,7 @@ pub fn peer_is_valid(text: &str) -> bool {
             .is_ok_and(|addr| addr.port() != 0 && addr.to_string() == text)
 }
 
-/// The pairing, the settings, the first batch and the peers.
+/// The pairing, the settings, the first batch, the peers and the relay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CounterBundle {
     /// The pairing both roots signed.
@@ -99,6 +107,9 @@ pub struct CounterBundle {
     pub first_batch: Option<SignedBatch>,
     /// Peers to try first, in ascending order with no repeats.
     pub peers: Vec<String>,
+    /// The relay the counter reaches the owner through, if the shop has one
+    /// (CR-130).
+    pub relay: Option<RelayHint>,
 }
 
 impl CounterBundle {
@@ -123,7 +134,14 @@ impl CounterBundle {
             settings,
             first_batch,
             peers,
+            relay: None,
         })
+    }
+
+    /// The same bundle with this relay (or none).
+    pub fn with_relay(mut self, relay: Option<RelayHint>) -> Self {
+        self.relay = relay;
+        self
     }
 
     /// Wire form: see the module docs. Call it on a bundle that came from
@@ -139,8 +157,13 @@ impl CounterBundle {
             .unwrap_or_default();
         let mut out = wire::start(
             &wire::MAGIC_COUNTER_BUNDLE,
-            pairing.len() + settings.len() + batch.len() + 16 + self.peers.len() * 24,
+            pairing.len() + settings.len() + batch.len() + 16 + self.peers.len() * 24 + 100,
         );
+        if self.relay.is_some() {
+            if let Some(version) = out.get_mut(4) {
+                *version = 2;
+            }
+        }
         out.extend_from_slice(
             &u16::try_from(pairing.len())
                 .unwrap_or(u16::MAX)
@@ -156,15 +179,19 @@ impl CounterBundle {
             out.push(u8::try_from(p.len()).unwrap_or(u8::MAX));
             out.extend_from_slice(p.as_bytes());
         }
+        if let Some(relay) = &self.relay {
+            relay.put(&mut out);
+        }
         out
     }
 
     /// Parse the wire form strictly. Every length is checked against its
     /// limit and against the bytes present before anything is read; each
     /// part is decoded by its own strict decoder; peers must be valid, in
-    /// ascending order and without repeats.
+    /// ascending order and without repeats. Version 1 has no relay and
+    /// version 2 has one at the end.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut r = Reader::framed(bytes, &wire::MAGIC_COUNTER_BUNDLE)?;
+        let (mut r, version) = Reader::framed_up_to(bytes, &wire::MAGIC_COUNTER_BUNDLE, 2)?;
         let n = usize::from(r.u16_le()?);
         if n > MAX_PAIRING_BYTES {
             return Err(DecodeError::TooLarge);
@@ -197,12 +224,18 @@ impl CounterBundle {
             }
             peers.push(text.to_owned());
         }
+        let relay = if version >= 2 {
+            Some(RelayHint::read(&mut r)?)
+        } else {
+            None
+        };
         r.finish()?;
         Ok(Self {
             pairing,
             settings,
             first_batch,
             peers,
+            relay,
         })
     }
 }
@@ -216,6 +249,7 @@ mod tests {
     use super::*;
     use crate::batch::{Approver, BatchBuilder, BatchPolicy, HighWater};
     use crate::pairing::{owner_cosign, CounterPairing, PairOffer};
+    use crate::relay::RelayRoute;
     use crate::settings::Settings;
     use crate::testutil::{assert_strict_decoding, identity, wallet};
 
@@ -324,6 +358,18 @@ mod tests {
     }
 
     #[test]
+    fn a_relay_stays_with_a_bare_bundle_too() {
+        let bare = CounterBundle::new(signed_pairing(), signed_settings(), None, vec![])
+            .unwrap()
+            .with_relay(Some(relay()));
+        assert_strict_decoding(
+            &bare.to_bytes(),
+            CounterBundle::from_bytes,
+            CounterBundle::to_bytes,
+        );
+    }
+
+    #[test]
     fn wrong_magic_and_version_are_refused() {
         let bytes = bundle().to_bytes();
         let mut m = bytes.clone();
@@ -332,11 +378,73 @@ mod tests {
             CounterBundle::from_bytes(&m).unwrap_err(),
             DecodeError::BadMagic
         );
-        let mut v = bytes;
-        v[4] = 2;
+        for version in [0u8, 3, 255] {
+            let mut v = bytes.clone();
+            v[4] = version;
+            assert_eq!(
+                CounterBundle::from_bytes(&v).unwrap_err(),
+                DecodeError::UnsupportedVersion(version)
+            );
+        }
+    }
+
+    fn relay() -> RelayHint {
+        RelayHint::new(
+            RelayRoute::Direct("192.168.1.20:48333".parse().unwrap()),
+            identity(40).device_id().to_bytes(),
+        )
+        .unwrap()
+    }
+
+    fn onion_relay() -> RelayHint {
+        RelayHint::new(
+            RelayRoute::Onion {
+                name: "a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad".to_string(),
+                port: 48333,
+            },
+            identity(40).device_id().to_bytes(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn cr_130_a_bundle_with_a_relay_is_version_2_and_reads_back() {
+        for hint in [relay(), onion_relay()] {
+            let with = bundle().with_relay(Some(hint.clone()));
+            let bytes = with.to_bytes();
+            assert_eq!(&bytes[..5], b"OBMs\x02");
+            let back = CounterBundle::from_bytes(&bytes).unwrap();
+            assert_eq!(back.relay, Some(hint));
+            assert_eq!(back, with);
+            assert_eq!(back.to_bytes(), bytes);
+            assert_strict_decoding(&bytes, CounterBundle::from_bytes, CounterBundle::to_bytes);
+        }
+        // Without a relay the bundle is the bytes of version 1, as before.
+        assert_eq!(&bundle().to_bytes()[..5], b"OBMs\x01");
+        assert_eq!(bundle().relay, None);
         assert_eq!(
-            CounterBundle::from_bytes(&v).unwrap_err(),
-            DecodeError::UnsupportedVersion(2)
+            bundle().with_relay(Some(relay())).with_relay(None).to_bytes(),
+            bundle().to_bytes()
+        );
+    }
+
+    #[test]
+    fn cr_130_version_1_reads_with_no_relay_and_version_2_needs_one() {
+        let v1 = bundle().to_bytes();
+        assert_eq!(CounterBundle::from_bytes(&v1).unwrap().relay, None);
+        // Version 2 with nothing after the peers is cut short, and a version
+        // 1 with a relay after the peers has bytes left over.
+        let mut v2_bare = v1.clone();
+        v2_bare[4] = 2;
+        assert_eq!(
+            CounterBundle::from_bytes(&v2_bare).unwrap_err(),
+            DecodeError::Truncated
+        );
+        let mut v1_with = bundle().with_relay(Some(relay())).to_bytes();
+        v1_with[4] = 1;
+        assert_eq!(
+            CounterBundle::from_bytes(&v1_with).unwrap_err(),
+            DecodeError::TrailingBytes
         );
     }
 

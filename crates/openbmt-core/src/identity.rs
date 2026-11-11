@@ -40,6 +40,8 @@ pub const TAG_PAIR_SESSION: &str = "OpenBMT/pair-session/v1";
 pub const TAG_COMMAND: &str = "OpenBMT/command/v1";
 /// Tag for the owner's signed watcher heartbeat to a counter.
 pub const TAG_HEARTBEAT: &str = "OpenBMT/heartbeat/v1";
+/// Tag for the owner's signed relay for counters.
+pub const TAG_RELAY_HINT: &str = "OpenBMT/relay-hint/v1";
 /// Tag for the on-screen identity fingerprint words.
 pub const TAG_FINGERPRINT: &str = "OpenBMT/fingerprint/v1";
 /// Tag for the owner's signature on an approval session request.

@@ -19,6 +19,7 @@ pub mod identity;
 pub mod pairing;
 pub mod policy;
 pub mod records;
+pub mod relay;
 pub mod say;
 pub mod say_policy;
 pub mod settings;

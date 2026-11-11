@@ -82,6 +82,9 @@ pub const MAGIC_COUNTER_SALE: [u8; 4] = *b"OBML";
 pub const MAGIC_BOX_CLAIM: [u8; 4] = *b"OBM5";
 /// Magic of the welcome a Box takes (BX-15).
 pub const MAGIC_BOX_WELCOME: [u8; 4] = *b"OBMM";
+/// Magic of a [`SignedRelayHint`](crate::relay::SignedRelayHint), the relay
+/// for counters (CR-132).
+pub const MAGIC_RELAY_FOR_COUNTERS: [u8; 4] = *b"OBMy";
 
 /// Why bytes were not accepted as a message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,6 +170,24 @@ impl<'a> Reader<'a> {
         }
         match r.u8()? {
             VERSION => Ok(r),
+            v => Err(DecodeError::UnsupportedVersion(v)),
+        }
+    }
+
+    /// Start reading `buf` and check its magic and that its version is one
+    /// of `1..=latest`. Returns the reader and the version, for a frame that
+    /// has grown: the older versions still read.
+    pub fn framed_up_to(
+        buf: &'a [u8],
+        magic: &[u8; 4],
+        latest: u8,
+    ) -> Result<(Self, u8), DecodeError> {
+        let mut r = Self { buf };
+        if r.take(4)? != magic {
+            return Err(DecodeError::BadMagic);
+        }
+        match r.u8()? {
+            v @ 1.. if v <= latest => Ok((r, v)),
             v => Err(DecodeError::UnsupportedVersion(v)),
         }
     }
