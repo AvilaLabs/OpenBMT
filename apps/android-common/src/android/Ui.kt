@@ -35,6 +35,7 @@ fun isNight(c: Configuration): Boolean =
  * new palette (the theme's was read when the window was made), the bars stay transparent, and the decor is asked
  * for its insets once more. The caller draws its current screen again, whose page sets the bar icons.
  */
+@Suppress("DEPRECATION")
 fun Activity.applyNight() {
     val pal = Palette.of(isNight(resources.configuration))
     window.setBackgroundDrawable(ColorDrawable(pal.background))
