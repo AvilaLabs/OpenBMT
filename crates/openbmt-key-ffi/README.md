@@ -39,7 +39,8 @@ stores state before anything is returned. The rule IDs pass through in
   count in `jni.rs` and refuses it anywhere else.
 - `bindings/kotlin/org/openbmt/key/` holds `Native.kt` (the `external`
   declaration and the `KeyStore` interface) and `KeyApp.kt` (a typed wrapper,
-  one method for each op, the key ceremony's ops 80 to 83 included). No JNA, no generated code, no Kotlin library.
+  one method for each op, the key ceremony's ops 80 to 85 included). No JNA,
+  no generated code, no Kotlin library.
 
 The Cargo feature `jni` (on by default) compiles `jni.rs` on every target so
 that the host can test it against a fake `JNIEnv`; on Android it is always
@@ -181,7 +182,8 @@ given network and of a kind the signer's allowlist takes. The text is at most
 
 ### The `OBM7` envelope
 
-`OBM7`, version 1 (2 with key 3, 3 with a pending wallet setup), strict decode (`src/envelope.rs`): the identity secret;
+`OBM7`, version 1 (2 with key 3, 3 with a pending wallet setup), strict
+decode (`src/envelope.rs`): the identity secret;
 key 2's network, master fingerprint and account key if this device holds
 key 2; and, once the wallet is accepted, the network, the canonical wallet
 description, the owner root, the batch minimum and the approver snapshot
