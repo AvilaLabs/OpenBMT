@@ -23,8 +23,13 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | counterNotAccepted | Counter identity not read | A counter's identity is exactly 64 digits and letters from a to f. | Type the identity again, or choose the counter from the list. | the owner |  |
 | responseNeeded | Response needed | The Key app's response is needed to finish the approval. | Paste the response or choose its file, then press the button again. | the owner |  |
 | responseNotReadable | Response text not read | The text is not in the form this app reads, so the Key app's response was not used. | Copy the response again from the Key app, or choose its file instead. | the owner |  |
-| requestReady | Request ready | The request for the Key app is ready, and nothing has been signed yet. | Copy it or save it as a file, give it to the Key app, then bring back its response. | the owner |  |
+| requestReady | Request ready | The request for the Key app is ready, and nothing has been signed yet. | Show it as a code, or save it as a file or copy it as text, give it to the Key app, then bring back its response. | the owner |  |
 | requestCopied | Request copied | The request is copied as text, written in lower case. | Paste it where the Key app can read it. | the owner |  |
+| requestCodeAnimated | Request shown as a code | The request is on the screen as a code that changes, one part after another. | On the Key app, choose Scan and point it at this code until it has read every part. Then press Done. | the owner |  |
+| requestCodeStill | Request shown as one code | The request is on the screen as one code that does not change. | On the Key app, choose Scan and point it at this code. Then press Done. | the owner |  |
+| requestCodeNotMade | No code could be made | The request could not be turned into a code, so nothing is shown. | Go back and save the request as a file, or copy it as text, instead. | the owner |  |
+| scanCancelled | Scan cancelled | No code was read, so nothing was taken from the Key app. | Scan the Key app's code again, or choose its file or paste its text instead. | the owner |  |
+| scanNotAResponse | Not the Key app's code | The code read is not one the Key app shows for a response, so nothing was used. | On the Key app, show the answer as a code, and scan that one. | the owner |  |
 | requestSaved | Request saved | The request is saved as a file. | Carry the file to the Key app and open it there. | the owner |  |
 | refundQueuedAtDepth | Refund queued | The refund is in the queue, and the sale is deep enough to be refunded. | Bring this phone and the Key app together and start an approval. | the owner |  |
 | refundQueuedWaiting | Refund queued, sale new | The refund is in the queue, but the sale is not deep enough yet to be refunded. | Wait for more blocks. The refund can be approved when the sale is deep enough. | the owner |  |
@@ -54,3 +59,11 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | storageUnavailable | Phone storage not usable | The phone's protected storage did not start, so the saved setup was not opened. | Restart the phone and open this app again. If it happens again, stop and do not spend. | the owner |  |
 | fileNotRead | File not read | The file could not be opened or read, so nothing was done. | Pick the file again, or paste the text instead. | the owner |  |
 | fileNotSaved | Not saved | The app could not write to this phone's storage, so nothing was saved. | Try again. If it happens again, free some space on the phone. | the owner |  |
+| cameraOff | Camera is off for this app | This app is not allowed to use the camera, so it cannot scan a code. | Allow the camera for this app in the phone's settings, or paste the text or choose a file instead. | the owner |  |
+| cameraNotStarted | Camera did not start | The camera could not be opened, so nothing was scanned. | Close any other app that uses the camera and try again, or paste the text or choose a file instead. | the owner |  |
+| UrWords.reading | Reading the animated code | Reading the animated code: 3 of about 9 parts. | Keep the phone pointed at the code until it is done. | the owner |  |
+| UrWords.restarted | Code did not add up | The parts read did not fit together, so reading starts again. | Keep the phone pointed at the code. It reads from the first part again. | the owner |  |
+| UrWords.otherCode | Another code is in view | The code in view is not part of the one being read, so it is skipped. | Point the phone at the first code again, or cancel and start over. | the owner |  |
+| UrWords.wrongKind | Not the code expected | This code carries something this step does not take, so nothing was used. | Cancel, then ask for the right code again, or use a file instead. | the owner |  |
+| UrWords.contentRefused | Code content not usable | The code was read in full, but what it holds is not in a form this step takes. | Ask for the code to be shown again, or use a file instead. | the owner |  |
+| UrWords.readerFailed | Code reader failed | The part of this app that reads codes gave no usable answer, so nothing was read. | Close the app and open it again. If it happens again, use a file. | the owner |  |

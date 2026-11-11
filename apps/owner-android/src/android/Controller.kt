@@ -16,8 +16,10 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.SayWords
+import org.openbmt.app.ScanFlow
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Ui
+import org.openbmt.app.UrScan
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.PosReply
@@ -37,6 +39,7 @@ import org.openbmt.owner.PosRequest
 class Controller(internal val act: MainActivity) {
     internal val ui = Ui(act)
     internal val main = Handler(Looper.getMainLooper())
+    internal val scan = ScanFlow(act, ui)
     private val dir: File = act.noBackupFilesDir
     private val nodeDir = File(dir, AppFiles.NODE_DIR)
     private val configFile = ConfigFile(dir)
@@ -87,13 +90,14 @@ class Controller(internal val act: MainActivity) {
 
     fun visible() {
         visible = true
-        if (pickerOpen) return
+        if (pickerOpen || scan.asking) return
         begin()
     }
 
     fun hidden() {
         visible = false
-        if (pickerOpen) return
+        if (pickerOpen || scan.asking) return
+        scan.stop()
         stopNode()
     }
 
@@ -424,9 +428,9 @@ class Controller(internal val act: MainActivity) {
 
     // ---- files -----------------------------------------------------------------------------------------------------
 
-    /** The sources of the Key app's response: the pasted text, and a file. A camera will be another. */
+    /** The sources of the Key app's response, in the order of [ExchangeModel.responseKinds]: the Key app's code, a file, the pasted text. */
     internal fun responseSources(pasted: () -> String, cancelled: () -> Unit): List<ResponseSource> = listOf(
-        PastedResponse(pasted),
+        scanSource(),
         object : ResponseSource {
             override val label = "Choose the response file"
 
@@ -448,7 +452,38 @@ class Controller(internal val act: MainActivity) {
                 }
             }
         },
+        PastedResponse(pasted),
     )
+
+    /**
+     * The Key app's code, read by the camera. The camera is asked for only when this button is pressed
+     * (the permission dialog comes from [ScanFlow.begin]). The bytes of a complete `ur:bytes` code go on
+     * as the other sources' bytes do; every other end of the scan is words ([ScanResult]).
+     */
+    private fun scanSource(): ResponseSource = object : ResponseSource {
+        override val label = "Scan the Key app's code"
+        override val leavesScreen = true
+
+        override fun begin(onBytes: (ByteArray) -> Unit, onFailed: (SayWords) -> Unit) {
+            fun give(r: SourceResult) = when (r) {
+                is SourceResult.Bytes -> onBytes(r.bytes)
+                is SourceResult.Failed -> onFailed(r.words)
+            }
+            scan.begin(
+                show = { v ->
+                    tick = null
+                    act.show(v)
+                },
+                onBytes = { give(ScanResult.plain()) },
+                onFailed = { f -> give(ScanResult.failed(f.off, f.problem, f.words)) },
+                onCancel = { give(ScanResult.cancelled()) },
+                ur = UrScan(ExchangeModel.RESPONSE_TYPES, ExchangeModel.WHO) { _, payload -> give(ScanResult.message(payload)) },
+            )
+        }
+    }
+
+    /** The answer of the system's permission dialog. */
+    internal fun permission(code: Int, results: IntArray) = scan.permissionResult(code, results)
 
     /** Asks the system for a file name and writes [bytes] to it; [done] gets the words of what happened. */
     internal fun saveFile(name: String, bytes: ByteArray, cancelled: () -> Unit, done: (SayWords) -> Unit) {

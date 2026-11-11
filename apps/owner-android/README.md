@@ -11,7 +11,7 @@ or `apps/key-android` was changed for this app.
 **First build. No independent security audit has been done. It has not been
 run on a phone or an emulator. Not for real funds.** The APK is signed with a
 local test key; release signing is a separate step (see "Signing"). The rules
-the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-19).
+the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-21).
 
 ## What it does
 
@@ -20,7 +20,7 @@ the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-19).
 | First start | The setup text (pasted or from a file) and the address of Orbot. |
 | Home | The receipts line, the number of alerts, the link state, the payments in progress. |
 | Receipts line | What the node counts as received, and the offer to merge. |
-| Spend | Builds the request for the Key app, shows it as text or saves it as a file, takes the response by paste or file. |
+| Spend | Builds the request for the Key app, shows it as a code, saves it as a file or copies it as text, takes the response by camera, file or paste. |
 | Sessions | The approval sessions the node holds. |
 | Refund queue | Queue a refund from a sale with the facts the node verified, cancel, requeue. |
 | Cash out | Queue a cash-out of an amount or of everything. |
@@ -39,10 +39,24 @@ library has them. The app's own states and faults have words written in
 `docs/screens/owner-app.md`.
 
 Not built yet: the key ceremony (the setup text is made by hand, see below),
-reading the Key app's response with the camera (it is pasted text or a file,
-behind one `ResponseSource` interface so a camera can be added without other
-changes; CAMERA is declared and unused), queuing a pairing, and any change to
-the settings (the settings view is read-only).
+queuing a pairing, and any change to the settings (the settings view is
+read-only).
+
+## The approval by camera and screen
+
+The request screen offers "Show as code" first: the request as `ur:bytes`
+parts in the shared `AnimatedQrView`, drawn as the Key app draws its answer,
+with the words "On the Key app, choose Scan and point it at this code".
+Saving the request as a file and copying it as text stay below it, and Done
+leads to the response. The response screen offers "Scan the Key app's code"
+first (the shared `ScanFlow` and `UrReading`, multi-part `ur:bytes`, with the
+parts read shown), then a file, then pasted text. All three give bytes to the
+same place and the library judges them (OA-07, OA-13, OA-21). A wrong type of
+code, a code that is not a UR, a cancelled scan, a denied camera permission
+and a camera that did not start each have words. The camera is asked for only
+when the scan button is tapped. The pure parts are in
+`src/model/ExchangeModel.kt`.
+Scanning and showing have not been tried on a phone.
 
 ## The till
 
@@ -99,8 +113,8 @@ scan the code from it.
 
 ## Rules the app keeps without a device
 
-- **Two permissions, INTERNET and CAMERA.** CAMERA is not used by this build;
-  the camera is a feature that is not required. `tests/check-manifest.sh`
+- **Two permissions, INTERNET and CAMERA.** CAMERA is asked for only when
+  the scan button is tapped; the camera is a feature that is not required. `tests/check-manifest.sh`
   reads the built APK with `aapt2` and fails the build if anything differs.
 - **No backup**, no exported component but the launcher, no service, receiver
   or provider, cleartext off, not debuggable.

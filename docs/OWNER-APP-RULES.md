@@ -35,11 +35,12 @@ run on a phone. Not for real funds.**
   cloud backup and for device transfer.
 - **OA-03.** The manifest asks for exactly two permissions, INTERNET and
   CAMERA, and declares the camera as a feature that is not required. CAMERA
-  is declared for reading the Key app's response from a code; this build has
-  no camera code. It has one activity, which is exported and is the
-  launcher, and no service, receiver or provider. Cleartext traffic is off
-  and the app is not debuggable. `apps/owner-android/tests/check-manifest.sh`
-  reads the built APK and fails the build if any of this differs.
+  is declared for reading the Key app's response from a code, and is asked
+  for only when the owner taps a scan button (OA-21). It has one activity,
+  which is exported and is the launcher, and no service, receiver or
+  provider. Cleartext traffic is off and the app is not debuggable.
+  `apps/owner-android/tests/check-manifest.sh` reads the built APK and fails
+  the build if any of this differs.
 - **OA-04.** Every window of the app has `FLAG_SECURE`, set before any
   content is shown, so that no screenshot, screen recording or picture in
   the list of recent apps carries a balance, an address or a request. (The
@@ -112,10 +113,10 @@ run on a phone. Not for real funds.**
   bytes the library made. As a file it is those bytes. As text it is hex
   digits in lower case, 64 to a line, and reading the text back gives the
   same bytes. The Key app's response comes from a source behind one
-  interface, today the pasted text and a file (a camera will be another),
-  and is at most 1,000,000 bytes; a longer one is refused before the library
-  sees it. A response is taken only when the owner presses the button of its
-  source.
+  interface, the Key app's code read by the camera (OA-21), a file or the
+  pasted text, and is at most 1,000,000 bytes; a longer one is refused
+  before the library sees it. A response is taken only when the owner
+  presses the button of its source.
 - **OA-14.** The settings view and the list of what waits to be delivered
   show what the node holds, in a fixed order, and change nothing. The
   node keeps no time for a signed object other than an address batch, and
@@ -180,7 +181,35 @@ connection that is not Bitcoin's.
   library's words, which say the token was refused and how to make a new
   read-only one, and the screen offers to replace the token.
 
-## 5. What these rules do not do
+## 5. The approval by camera and screen
+
+- **OA-20.** The request screen offers to show the request as a code
+  first, then to save it as a file and to copy it as text, then to go on to
+  the response. The code is the request, exactly the bytes of OA-13, as
+  `ur:bytes` parts drawn by the shared `AnimatedQrView` (one still code when
+  they fit one part, otherwise a code that changes), at most 60% of the
+  screen's height, the same type and sizing the Key app uses for its answer.
+  While the code is on the screen the words say what to do next ("On the
+  Key app, choose Scan and point it at this code"), and Done, offered only
+  with a code on the screen, leads to the response. If no code can be made
+  the words say so and say to save the file or copy the text instead.
+- **OA-21.** The response screen offers the Key app's code first, then a
+  file, then the pasted text. The scan is the shared `ScanFlow` with
+  `UrReading`: it reads `ur:bytes` parts, shows the parts read so far, and
+  takes no other type. A complete code gives its payload as bytes to the
+  same place a file and the pasted text give theirs, longer than the most
+  of OA-13 refused first, and the library judges them (OA-07), so a code of
+  another app's object is refused by the library with its words. The camera
+  is asked for only when the owner taps the scan button, never at start or
+  when a screen opens. A wrong type of code, a code of another kind, a
+  scan that is cancelled, a camera that is off for the app and a camera
+  that did not start each have words that say what happened and what to do;
+  the reading's and the camera's words are the shared ones. After any of
+  them the response screen is shown again with the words, and the file and
+  the pasted text are still offered. A scan is stopped when the app leaves
+  the screen. The app keeps no frame and no code.
+
+## 6. What these rules do not do
 
 - **They do not protect a phone that is already lost to someone else.**
   A phone that is unlocked, rooted or running a hostile keyboard or
@@ -202,6 +231,10 @@ connection that is not Bitcoin's.
 - **They do not say the till reads work.** The shape of Square's and
   Clover's answers is from their published documentation and fixtures, not
   from a real account (`docs/POS-RULES.md`).
+- **They do not say the camera and the screen work.** The code drawn for the
+  Key app and the scan of its code are the shared pieces, checked on the
+  desktop; no phone has scanned a code of this app or shown one to the Key
+  app yet.
 - **They do not say the app has been run.** Every check here is on the
   desktop JVM, on the manifest of a built APK, or on the source. What needs
   a phone is listed in `apps/owner-android/README.md`.

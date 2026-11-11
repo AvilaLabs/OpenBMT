@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Two permissions: INTERNET (the node connects to the Bitcoin network and
      the link's relay, through Orbot) and CAMERA (for reading the Key app's
-     response from a code; no camera code is in this build, and a phone
-     without a camera can still install the app). Nothing else is asked for:
+     response from a code, asked for only when the scan button is tapped; a
+     phone without a camera can still install the app). Nothing else is asked for:
      no notifications, no foreground service. tests/check-manifest.sh fails
      the build if the list differs, or if anything but the launcher activity
      is exported. -->

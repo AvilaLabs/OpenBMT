@@ -1,8 +1,10 @@
 package org.openbmt.owner.app
 
+import org.openbmt.app.CameraWords
 import org.openbmt.app.Format
 import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
+import org.openbmt.app.UrWords
 import org.openbmt.app.Who
 import org.openbmt.owner.OwnerException
 
@@ -108,13 +110,55 @@ object AppWords {
         detailOf(problem),
     )
 
+    // ---- the approval as a code -------------------------------------------------------------
+
+    /** The request is on the screen as a code that changes. */
+    val requestCodeAnimated = w(
+        Tones.INFO, "Request shown as a code",
+        "The request is on the screen as a code that changes, one part after another.",
+        Who.OWNER,
+        "On the Key app, choose Scan and point it at this code until it has read every part. Then press Done.",
+    )
+
+    /** The request is on the screen as one code. */
+    val requestCodeStill = w(
+        Tones.INFO, "Request shown as one code",
+        "The request is on the screen as one code that does not change.",
+        Who.OWNER,
+        "On the Key app, choose Scan and point it at this code. Then press Done.",
+    )
+
+    /** No code could be made of the request. */
+    val requestCodeNotMade = w(
+        Tones.STOP, "No code could be made",
+        "The request could not be turned into a code, so nothing is shown.",
+        Who.OWNER,
+        "Go back and save the request as a file, or copy it as text, instead.",
+    )
+
+    /** A scan ended with no code read: cancelled, or the permission dialog was dismissed. */
+    val scanCancelled = w(
+        Tones.INFO, "Scan cancelled",
+        "No code was read, so nothing was taken from the Key app.",
+        Who.OWNER,
+        "Scan the Key app's code again, or choose its file or paste its text instead.",
+    )
+
+    /** A single code was read where the response is a code that changes. */
+    val scanNotAResponse = w(
+        Tones.STOP, "Not the Key app's code",
+        "The code read is not one the Key app shows for a response, so nothing was used.",
+        Who.OWNER,
+        "On the Key app, show the answer as a code, and scan that one.",
+    )
+
     // ---- what was done --------------------------------------------------------------------
 
     val requestReady = w(
         Tones.GOOD, "Request ready",
         "The request for the Key app is ready, and nothing has been signed yet.",
         Who.OWNER,
-        "Copy it or save it as a file, give it to the Key app, then bring back its response.",
+        "Show it as a code, or save it as a file or copy it as text, give it to the Key app, then bring back its response.",
     )
 
     val requestCopied = w(
@@ -389,6 +433,11 @@ object AppWords {
         "responseNotReadable" to responseNotReadable("a problem"),
         "requestReady" to requestReady,
         "requestCopied" to requestCopied,
+        "requestCodeAnimated" to requestCodeAnimated,
+        "requestCodeStill" to requestCodeStill,
+        "requestCodeNotMade" to requestCodeNotMade,
+        "scanCancelled" to scanCancelled,
+        "scanNotAResponse" to scanNotAResponse,
         "requestSaved" to requestSaved("request.obm"),
         "refundQueuedAtDepth" to refundQueuedAtDepth,
         "refundQueuedWaiting" to refundQueuedWaiting,
@@ -418,5 +467,7 @@ object AppWords {
         "storageUnavailable" to storageUnavailable("a problem"),
         "fileNotRead" to fileNotRead("a problem"),
         "fileNotSaved" to fileNotSaved("a problem"),
-    )
+        "cameraOff" to CameraWords.off(Who.OWNER),
+        "cameraNotStarted" to CameraWords.notStarted(Who.OWNER, "a problem"),
+    ) + UrWords.forReading(Who.OWNER)
 }

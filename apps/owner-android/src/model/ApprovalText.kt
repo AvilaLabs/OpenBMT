@@ -51,9 +51,9 @@ object ApprovalText {
 }
 
 /**
- * Where the Key app's response comes from. Pasted text and a file picked from
- * the phone are the sources today; a camera that reads a code will be another
- * source behind the same two calls, and nothing else of the app changes.
+ * Where the Key app's response comes from. The Key app's code read by the
+ * camera, a file picked from the phone and pasted text are the sources, all
+ * behind the same two calls: each gives bytes and the library judges them.
  * [begin] gives the bytes to [onBytes], or the words of why there are none
  * to [onFailed]; it may do either later, on the screen thread. Every source
  * gives bytes no longer than [ApprovalText.MAX_BYTES].
@@ -61,6 +61,9 @@ object ApprovalText {
 interface ResponseSource {
     /** What the button for this source says. */
     val label: String
+
+    /** Whether [begin] takes the person off the screen that offered it, so a failure has to show that screen again. */
+    val leavesScreen: Boolean get() = false
 
     fun begin(onBytes: (ByteArray) -> Unit, onFailed: (SayWords) -> Unit)
 }

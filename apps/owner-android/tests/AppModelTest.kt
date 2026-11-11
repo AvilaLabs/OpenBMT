@@ -16,6 +16,7 @@ import org.openbmt.app.Sealed
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Sealer
 import org.openbmt.app.Tones
+import org.openbmt.app.UrWords
 import org.openbmt.app.Who
 import org.openbmt.owner.Alert
 import org.openbmt.owner.AlertKind
@@ -616,8 +617,9 @@ object AppModelTest {
         ok(controller.contains("ApprovalText.MAX_BYTES + 1") && controller.contains("bytes.size > ApprovalText.MAX_BYTES"), "a file longer than the most is refused before the library sees it")
         ok(controller.contains("PastedResponse(pasted)"), "the pasted text is one source")
         ok(controller.contains("override val label = \"Choose the response file\""), "a file is another")
+        ok(controller.contains("override val label = \"Scan the Key app's code\""), "the camera is a third")
         val approval = source("src/android/Approval.kt")
-        ok(approval.contains("for (source in responseSources(") && approval.contains("source.begin({ bytes -> takeResponse(n, bytes, msg) }"), "the response is taken through the sources, from a press")
+        ok(approval.contains("responseSources(") && approval.contains("source.begin({ bytes -> takeResponse(n, bytes, msg) })"), "the response is taken through the sources, from a press")
         ok(approval.contains("ApprovalText.encode(built.request)") && approval.contains("saveFile(name, built.request"), "the text and the file are of the request as it is")
         ok(Regex("n\\.take\\(").findAll(approval).count() == 1, "one place takes a response")
         var failed: SayWords? = null
@@ -891,6 +893,94 @@ object AppModelTest {
         }
     }
 
+    // ---- the approval by camera and screen (OA-20, OA-21) -----------------------------------------------------
+
+    private fun exchangeTests() {
+        ok(ExchangeModel.requestActions.map { it.label } == listOf("Show as code", "Save the request as a file", "Copy the request as text", "Bring back the response"), "the request screen offers the code first")
+        ok(ExchangeModel.responseKinds == listOf(ResponseKind.Scan, ResponseKind.File, ResponseKind.Pasted), "the response screen offers the camera first")
+        ok(ExchangeModel.TYPE_BYTES == "bytes" && ExchangeModel.RESPONSE_TYPES == setOf("bytes") && ExchangeModel.WHO == Who.OWNER, "ur:bytes, and the owner does the next step")
+        ok(ExchangeModel.codeHeight(2000) == 1200 && ExchangeModel.codeHeight(0) == 0, "the code is 60% of the screen's height")
+        val still = ExchangeModel.codeStep(made = true, animated = false)
+        val moving = ExchangeModel.codeStep(made = true, animated = true)
+        val none = ExchangeModel.codeStep(made = false, animated = true)
+        ok(still.shown && still.done && still.words === AppWords.requestCodeStill, "one still code: Done is offered")
+        ok(moving.shown && moving.done && moving.words === AppWords.requestCodeAnimated, "a code that changes: Done is offered")
+        ok(!none.shown && !none.done && none.words === AppWords.requestCodeNotMade, "no code: no Done, and the words say what to do")
+        for (w in listOf(still.words, moving.words)) {
+            ok(w.next.contains("On the Key app, choose Scan and point it at this code"), "the words say what to do next: ${w.next}")
+            ok(w.who == Who.OWNER && w.tone == Tones.INFO, "the owner, as information")
+        }
+        ok(none.words.tone == Tones.STOP && none.words.next.contains("file") && none.words.next.contains("text"), "no code says to use a file or text")
+        ok(ExchangeStep.Response(null).message == null && ExchangeStep.Response(AppWords.scanCancelled).message === AppWords.scanCancelled, "the response screen holds what the last try said")
+
+        val bytes = ByteArray(40) { it.toByte() }
+        val given = ScanResult.message(bytes)
+        ok(given is SourceResult.Bytes && given.bytes.contentEquals(bytes), "a complete code gives its payload as it is")
+        ok(ScanResult.message(ByteArray(ApprovalText.MAX_BYTES)) is SourceResult.Bytes, "the most is accepted")
+        val long = ScanResult.message(ByteArray(ApprovalText.MAX_BYTES + 1))
+        ok(long is SourceResult.Failed && long.words.heading == "Response text not read" && SayCheck.problem(long.words) == null, "a longer payload is refused before the library sees it")
+        val plain = ScanResult.plain()
+        ok(plain is SourceResult.Failed && plain.words === AppWords.scanNotAResponse, "a plain code is not the Key app's")
+        val cancelled = ScanResult.cancelled()
+        ok(cancelled is SourceResult.Failed && cancelled.words === AppWords.scanCancelled, "a cancelled scan says so")
+        val off = ScanResult.failed(off = true, problem = null, say = null)
+        ok(off is SourceResult.Failed && off.words.heading == "Camera is off for this app" && off.words.who == Who.OWNER, "a denied permission says the camera is off")
+        val notStarted = ScanResult.failed(off = false, problem = "no camera", say = null)
+        ok(notStarted is SourceResult.Failed && notStarted.words.heading == "Camera did not start" && notStarted.words.detail == "no camera", "a camera that did not start says so, with the system's text")
+        val wrong = UrWords.wrongKind(Who.OWNER)
+        val said = ScanResult.failed(off = false, problem = null, say = wrong)
+        ok(said is SourceResult.Failed && said.words === wrong, "the reading's own words win: a wrong type of code")
+        val ofOther = ScanResult.failed(off = true, problem = null, say = UrWords.contentRefused(Who.OWNER))
+        ok(ofOther is SourceResult.Failed && ofOther.words.heading == "Code content not usable", "and so a content that was refused")
+        for (r in listOf(plain, cancelled, off, notStarted, said, long)) {
+            val w = (r as SourceResult.Failed).words
+            ok(SayCheck.problem(w) == null && w.next.isNotEmpty() && w.what.isNotEmpty(), "every end of a scan has checked words that say what to do: ${w.heading}")
+        }
+        val headings = AppWords.all().map { it.second.heading }
+        ok(listOf("Camera is off for this app", "Camera did not start", "Reading the animated code", "Not the code expected", "Code content not usable", "Code reader failed").all { it in headings }, "the shared words are in the list of the app's words")
+        ok(object : ResponseSource {
+            override val label = "x"
+            override fun begin(onBytes: (ByteArray) -> Unit, onFailed: (SayWords) -> Unit) {}
+        }.leavesScreen == false, "a source stays on its screen unless it says it leaves")
+    }
+
+    private fun oa_20_the_request_is_shown_as_a_code_first() {
+        val approval = source("src/android/Approval.kt")
+        val screen = approval.substringAfter("internal fun Controller.showBuilt(").substringBefore("private fun Controller.showBuiltCode(")
+        ok(screen.contains("for (action in ExchangeModel.requestActions)") && screen.contains("RequestAction.ShowCode -> showBuiltCode(built, back)"), "the request screen offers the buttons of the model, in its order")
+        ok(screen.contains("ApprovalText.encode(built.request)") && screen.contains("saveFile(name, built.request"), "the file and the text are the request as it is")
+        val code = approval.substringAfter("private fun Controller.showBuiltCode(").substringBefore("private fun Controller.showResponse(")
+        ok(code.contains("AnimatedQrView.make(") && code.contains("ExchangeModel.WHO, ExchangeModel.TYPE_BYTES, built.request"), "the code is the request, as ur:bytes")
+        ok(code.contains("ExchangeModel.codeHeight(act.resources.displayMetrics.heightPixels)"), "at the Key app's size")
+        ok(code.contains("ExchangeModel.codeStep(") && code.contains("if (step.done) views.add(ui.button(\"Done\")"), "Done only with a code on the screen")
+        ok(code.contains("showResponse(built, back, ExchangeStep.Response(null))"), "Done leads to the response")
+        val key = File(appDir, "../key-android/src/android/Controller.kt")
+        if (key.isFile) {
+            val k = key.readText()
+            ok(k.contains("const val TYPE_BYTES = \"bytes\"") && k.contains("heightPixels * ${ExchangeModel.CODE_HEIGHT_SHARE})"), "the Key app draws its answer with the same type and share of the screen")
+        }
+        ok(ApprovalText.fileName("request", ByteArray(32)).endsWith(".obm"), "a file is still offered")
+    }
+
+    private fun oa_21_the_response_is_scanned_from_the_key_apps_code_and_judged_in_rust() {
+        val approval = source("src/android/Approval.kt")
+        val response = approval.substringAfter("private fun Controller.showResponse(").substringBefore("private fun Controller.takeResponse(")
+        ok(response.contains("ExchangeModel.responseKinds.zip(sources)") && response.contains("source.leavesScreen"), "the sources are offered in the model's order, and a scan comes back to this screen with its words")
+        ok(Regex("n\\.take\\(").findAll(approval).count() == 1 && approval.contains("takeResponse(n, bytes, msg)"), "every source's bytes go to the one place that takes a response")
+        val controller = source("src/android/Controller.kt")
+        val scan = controller.substringAfter("private fun scanSource()").substringBefore("internal fun permission(")
+        ok(scan.contains("scan.begin(") && scan.contains("UrScan(ExchangeModel.RESPONSE_TYPES, ExchangeModel.WHO)"), "ScanFlow reads ur:bytes parts for the owner")
+        ok(scan.contains("ScanResult.message(payload)") && scan.contains("ScanResult.plain()") && scan.contains("ScanResult.cancelled()") && scan.contains("ScanResult.failed(f.off, f.problem, f.words)"), "every end of the scan goes through the model")
+        ok(!scan.contains("n.take(") && !scan.contains(".take("), "the scan judges nothing itself")
+        ok(Regex("scan\\.begin\\(").findAll(controller).count() == 1 && !controller.contains("requestPermissions"), "the camera is asked for in one place, from the scan button")
+        ok(!source("src/android/MainActivity.kt").substringAfter("override fun onCreate").substringBefore("override fun onStart").contains("ermission"), "nothing asks for the camera when the app opens")
+        ok(source("src/android/MainActivity.kt").contains("controller.permission(requestCode, grantResults)"), "the permission's answer goes to the scan")
+        val hidden = controller.substringAfter("fun hidden()").substringBefore("internal fun begin()")
+        ok(hidden.contains("scan.asking") && hidden.contains("scan.stop()"), "a scan stops when the app leaves the screen, but not for its own permission dialog")
+        val build = source("build.sh")
+        ok(build.contains("qr-jni-build.sh") && build.contains("libopenbmt_qr_jni.so"), "the build carries the QR library the camera and the code use")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
@@ -915,7 +1005,7 @@ object AppModelTest {
         for (id in ids) ok(id in rules, "oa_${id}_... tests a rule that is in docs/OWNER-APP-RULES.md")
         for (line in rulesMd.readLines()) ok(line.length <= 80 || line.startsWith("|"), "a line of the rules is at most 80 characters: ${line.take(40)}")
         val text = rulesMd.readText()
-        ok(text.contains("## 5. What these rules do not do"), "the rules say what they do not do")
+        ok(text.contains("## 6. What these rules do not do"), "the rules say what they do not do")
         ok(text.lines().any { it.startsWith("Status:") }, "the status line")
     }
 
@@ -932,6 +1022,7 @@ object AppModelTest {
         screenTests()
         modelTests()
         formTests()
+        exchangeTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")
     }

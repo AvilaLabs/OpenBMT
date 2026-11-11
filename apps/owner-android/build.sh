@@ -89,20 +89,25 @@ if [ "${OWNERAPK_SKIP_RUST:-0}" != 1 ]; then
     export CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS="-C link-arg=-Wl,-z,max-page-size=16384"
     ANDROID_NDK_HOME="$ndk" OPENBMT_OWNER_TARGET="$cargo_target" "$repo/scripts/owner-ffi-build.sh" | tee "$out/ffi-build.log"
     grep -q -E '^(FAIL|NOT RUN)' "$out/ffi-build.log" && die "the Rust library did not build"
+    # The QR reader and drawing both apps use for the camera and the screen (the same target directory, the same page size).
+    ANDROID_NDK_HOME="$ndk" OPENBMT_QRJNI_TARGET="$cargo_target" "$repo/scripts/qr-jni-build.sh" | tee "$out/qr-jni-build.log"
+    grep -q -E '^(FAIL|NOT RUN)' "$out/qr-jni-build.log" && die "the QR reader library did not build"
 fi
 strip="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
 readelf="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
 for pair in "${abis[@]}"; do
     abi="${pair%%:*}"
     triple="${pair##*:}"
-    so="$cargo_target/$triple/release/libopenbmt_owner_ffi.so"
-    [ -f "$so" ] || die "no library for $abi at $so"
     mkdir -p "$out/stage/lib/$abi"
-    cp "$so" "$out/stage/lib/$abi/"
-    "$strip" --strip-unneeded "$out/stage/lib/$abi/libopenbmt_owner_ffi.so"
-    align="$("$readelf" -l "$out/stage/lib/$abi/libopenbmt_owner_ffi.so" | awk '$1 == "LOAD" {print $NF}' | sort -u | tr '\n' ' ')"
-    echo "$abi: $(stat -c %s "$out/stage/lib/$abi/libopenbmt_owner_ffi.so") bytes stripped, LOAD alignment: $align"
-    case "$align" in *0x4000*) ;; *) echo "note: $abi segments are not aligned to 16 KiB" ;; esac
+    for lib in libopenbmt_owner_ffi.so libopenbmt_qr_jni.so; do
+        so="$cargo_target/$triple/release/$lib"
+        [ -f "$so" ] || die "no library $lib for $abi at $so"
+        cp "$so" "$out/stage/lib/$abi/"
+        "$strip" --strip-unneeded "$out/stage/lib/$abi/$lib"
+        align="$("$readelf" -l "$out/stage/lib/$abi/$lib" | awk '$1 == "LOAD" {print $NF}' | sort -u | tr '\n' ' ')"
+        echo "$abi $lib: $(stat -c %s "$out/stage/lib/$abi/$lib") bytes stripped, LOAD alignment: $align"
+        case "$align" in *0x4000*) ;; *) echo "note: $abi $lib segments are not aligned to 16 KiB" ;; esac
+    done
 done
 
 # ---- resources --------------------------------------------------------------------------

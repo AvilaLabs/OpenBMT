@@ -611,7 +611,7 @@ internal fun Controller.showAbout() {
             ),
             label("Not built yet"),
             ui.text(
-                "The key ceremony (setup is pasted text or a file); reading the Key app's response with the camera, and showing a request as a code; " +
+                "The key ceremony (setup is pasted text or a file); " +
                     "changing the shop's settings; adding a counter; the books; archiving paid entries.",
                 16f,
             ),
