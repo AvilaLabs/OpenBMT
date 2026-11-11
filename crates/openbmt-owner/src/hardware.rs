@@ -168,7 +168,7 @@ impl HardwareRefusal {
             .detail(why.clone()),
             Self::NotExported => stop(
                 "Nothing sent to the signer",
-                "This payment was not signed on this phone and handed to the signer yet.",
+                "This payment has not been signed on this phone and given to the signer yet.",
                 Who::Owner,
                 "Nothing was changed. Hand the payment to the signer first.",
             )
@@ -183,9 +183,9 @@ impl HardwareRefusal {
             .detail((*why).to_string()),
             Self::DifferentTransaction => stop(
                 "Another payment came back",
-                "What came back is another transaction than the one given to the signer.",
+                "What came back is a different payment from the one given to the signer.",
                 Who::Owner,
-                "Nothing was changed. Do not send it. Sign the payment shown here on the signer and bring that back.",
+                "Nothing was changed. Do not send it. Sign the payment shown here on the signer, and bring that back.",
             )
             .code("AS-94"),
             Self::NotSigned(why) => stop(
@@ -198,7 +198,7 @@ impl HardwareRefusal {
             .detail(why.clone()),
             Self::Finished(why) => stop(
                 "The payment failed a check",
-                "The finished payment is not exactly the one that was frozen, or its signatures do not verify.",
+                "The finished payment is not exactly the one approved on this phone, or its signatures do not check out.",
                 Who::Owner,
                 "Nothing was changed and nothing was sent. Sign again on the signer and bring that back.",
             )
@@ -208,7 +208,7 @@ impl HardwareRefusal {
                 "Too many items are waiting",
                 "Too many finished items wait to be sent, so this one was not taken.",
                 Who::Owner,
-                "Nothing was changed. Send or hand on the waiting items, then bring this back.",
+                "Nothing was changed. Send the waiting items first, then bring this back.",
             )
             .code("AS-96"),
             Self::Registration(why) => stop(
@@ -239,7 +239,7 @@ pub fn compare_words() -> Words {
         "Check it on the signer",
         "The signer shows each address, each amount and the fee; compare every one with this screen.",
         Who::Owner,
-        "Approve on the signer only if they all match. It checks the change address itself.",
+        "Approve on the signer only if they all match. The signer checks the change address against the registered wallet itself.",
     )
     .code("AS-92")
 }
