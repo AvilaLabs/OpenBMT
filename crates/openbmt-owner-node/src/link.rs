@@ -662,10 +662,17 @@ impl<R: Post> OwnerLink<R> {
             self.copies.remove(&counter);
             self.last_check_in_at.remove(&counter);
             self.alerts.retain(|a| match a {
-                Alert::MissedCheckIn { counter: c, .. } | Alert::Diverged { counter: c, .. } => {
-                    *c != counter
-                }
+                Alert::MissedCheckIn { counter: c, .. }
+                | Alert::Diverged { counter: c, .. }
+                | Alert::BatchUndelivered { counter: c, .. } => *c != counter,
             });
+            // Batches for a counter that is no longer on the link are not
+            // sent again (LK-67, LK-70).
+            self.held.remove(&counter);
+            self.batches_sent_at.remove(&counter);
+            if let Err(e) = self.batches.retain(|p| p.counter != counter) {
+                self.note(format!("the pending batches could not be saved: {e}"));
+            }
         }
     }
 
