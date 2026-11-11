@@ -90,12 +90,11 @@ use crate::shop::{own_node_check, pairing_read, SettingsView};
 use crate::views::{
     put_words, ActorRole, ActorView, CancelArgs, CashArgs, CounterNetwork, DayTotalsArgs,
     DayTotalsView, HealthView, HeartbeatOutcome, LightningSaleView, LightningStatusView,
-    LinkStepView, LinkView, LnFailArgs, LnKind, LnMethod, LnReplyArgs, LnRequestView,
-    LnSetupArgs, LnStepView, LnTransportView, OpenArgs, OpenedView, OverrideArgs,
-    OwnNodeCheckArgs, OwnNodeView, PairBeginArgs, PairStartedView, PairingView, PersonLineView,
-    PumpView, RefundArgs, RefundAskView, RefundRow, RefundStateView, RelayKind, ReportView,
-    RequoteArgs, ScreenView, StaffArgs, StartConfig, StateView, StatusView, TallyView,
-    WithdrawArgs, WordsView,
+    LinkStepView, LinkView, LnFailArgs, LnKind, LnMethod, LnReplyArgs, LnRequestView, LnSetupArgs,
+    LnStepView, LnTransportView, OpenArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView,
+    PairBeginArgs, PairStartedView, PairingView, PersonLineView, PumpView, RefundArgs,
+    RefundAskView, RefundRow, RefundStateView, RelayKind, ReportView, RequoteArgs, ScreenView,
+    StaffArgs, StartConfig, StateView, StatusView, TallyView, WithdrawArgs, WordsView,
 };
 
 /// The first four bytes of a request.

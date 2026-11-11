@@ -32,7 +32,7 @@ fn open_by(rig: &Rig, handle: u64, name: &str) -> u32 {
         11,
         handle,
         &W::new()
-            .open_by(T0, FIVE_DOLLARS, "USD", RATE, "test-fixed", false, name)
+            .open_by(T0, FIVE_DOLLARS, "USD", RATE, "test-fixed", name)
             .0,
     );
     let mut r = Rd::ok(&response);
@@ -70,11 +70,7 @@ fn cr_143_a_staff_change_is_a_record_and_a_refusal_writes_nothing() {
     );
     assert!(Rd::error(&response).is_some());
     // No node, no record.
-    let response = rig.call(
-        57,
-        0,
-        &W::new().u64(T0).u8(1).string("Ann").string("Max").0,
-    );
+    let response = rig.call(57, 0, &W::new().u64(T0).u8(1).string("Ann").string("Max").0);
     assert!(Rd::error(&response).is_some());
 }
 
@@ -87,7 +83,10 @@ fn cr_151_a_sale_and_a_cancel_name_the_person_at_the_till() {
     assert_eq!(day.unnamed_sales, 0);
     assert_eq!(day.people.len(), 1);
     let line = &day.people[0];
-    assert_eq!((line.manager, line.name.as_str(), line.sales), (false, "Ann", 1));
+    assert_eq!(
+        (line.manager, line.name.as_str(), line.sales),
+        (false, "Ann", 1)
+    );
     // A bad name is refused and the cancel names the person.
     let response = rig.call(
         14,

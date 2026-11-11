@@ -54,11 +54,11 @@ use crate::pay::{payment_for, payment_with_invoice, Payment};
 use crate::relay::{LinkPlan, LinkSlot, LEASE_WAIT};
 use crate::say::words_for;
 use crate::views::{
-    ActorView, CancelArgs, CashArgs, DayTotalsArgs, DayTotalsView, HealthView, HeartbeatOutcome, LightningSaleView, LightningStatusView,
-    LinkStepView, LinkView, LnFailArgs, LnKind, LnReplyArgs, LnRequestView, LnSetupArgs,
-    LnStepView, OpenArgs, OpenedView, OverrideArgs, OwnNodeView, PumpView, RefundArgs,
-    RefundAskView, RefundRow, ReportView, RequoteArgs, ScreenView, StaffArgs, StartConfig, StatusView,
-    WithdrawArgs, WordsView,
+    ActorView, CancelArgs, CashArgs, DayTotalsArgs, DayTotalsView, HealthView, HeartbeatOutcome,
+    LightningSaleView, LightningStatusView, LinkStepView, LinkView, LnFailArgs, LnKind,
+    LnReplyArgs, LnRequestView, LnSetupArgs, LnStepView, OpenArgs, OpenedView, OverrideArgs,
+    OwnNodeView, PumpView, RefundArgs, RefundAskView, RefundRow, ReportView, RequoteArgs,
+    ScreenView, StaffArgs, StartConfig, StatusView, WithdrawArgs, WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -450,13 +450,7 @@ impl Entry {
         let by = a.actor.map(actor);
         self.run(Some(a.now), |node, _, network| {
             let opened = node
-                .open_by(
-                    Amount(a.amount_minor),
-                    currency,
-                    rate,
-                    &source,
-                    by.as_ref(),
-                )
+                .open_by(Amount(a.amount_minor), currency, rate, &source, by.as_ref())
                 .map_err(|e| from_rule(e.rule(), &e, e.words()))?;
             let payment = payment_for(&opened.script, network, opened.needs_sats)?;
             Ok(OpenedView {

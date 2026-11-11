@@ -75,7 +75,7 @@ impl W {
             .u8(0)
     }
 
-    /// The fields of `open` with the person at the till (CR-151).
+    /// The fields of `open` with a cashier at the till (CR-151).
     pub fn open_by(
         self,
         now: u64,
@@ -83,7 +83,6 @@ impl W {
         currency: &str,
         rate: u64,
         label: &str,
-        manager: bool,
         name: &str,
     ) -> Self {
         self.u64(now)
@@ -93,7 +92,7 @@ impl W {
             .string(label)
             .u64(now)
             .u8(1)
-            .actor(manager, name)
+            .actor(false, name)
     }
 
     /// The fields of `cancel`, with no person at the till.
