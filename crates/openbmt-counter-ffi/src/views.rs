@@ -250,6 +250,61 @@ wire_record_get!(OpenArgs {
     actor
 });
 
+/// The arguments of `open_with_tip` (CR-189): those of `open` with the tip
+/// the customer chose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenTipArgs {
+    /// The time now.
+    pub now: u64,
+    /// The amount of the sale itself in minor units of the currency.
+    pub amount_minor: u64,
+    /// The tip in minor units of the currency, 0 for none.
+    pub tip_minor: u64,
+    /// The currency, three capital letters.
+    pub currency: String,
+    /// The rate, minor units per bitcoin.
+    pub rate: u64,
+    /// Where the rate came from.
+    pub source_label: String,
+    /// When the rate was fetched.
+    pub source_fetched_at: u64,
+    /// The person at the till who opens the sale, when one is signed in
+    /// (CR-148, CR-151).
+    pub actor: Option<ActorView>,
+}
+
+wire_record!(OpenTipArgs {
+    now,
+    amount_minor,
+    tip_minor,
+    currency,
+    rate,
+    source_label,
+    source_fetched_at,
+    actor
+});
+wire_record_get!(OpenTipArgs {
+    now,
+    amount_minor,
+    tip_minor,
+    currency,
+    rate,
+    source_label,
+    source_fetched_at,
+    actor
+});
+
+/// A tip the counter offers for a sale (CR-188).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TipChoiceView {
+    /// The suggested percent.
+    pub percent: u8,
+    /// What it comes to, in minor units of the shop's currency.
+    pub tip_minor: u64,
+}
+
+wire_record!(TipChoiceView { percent, tip_minor });
+
 /// The arguments of `cancel`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CancelArgs {
@@ -872,6 +927,9 @@ pub struct RefundRow {
     pub asked: u64,
     /// The amount in minor units, when given that way.
     pub value_minor: Option<u64>,
+    /// How much of the refund is the tip, in minor units of the shop's
+    /// currency (CR-192).
+    pub tip_minor: u64,
     /// The state.
     pub state: RefundStateView,
     /// The role of who asked.
@@ -889,6 +947,7 @@ wire_record!(RefundRow {
     number,
     asked,
     value_minor,
+    tip_minor,
     state,
     by_role,
     by_name,
@@ -903,6 +962,7 @@ impl RefundRow {
             number: v.number,
             asked: v.asked,
             value_minor: v.value_minor,
+            tip_minor: v.tip_minor,
             state: v.state.into(),
             by_role: ActorRole::of(v.by.role),
             by_name: v.by.name.clone(),
@@ -1292,6 +1352,9 @@ pub struct PersonLineView {
     pub refunds: u32,
     /// Cash refunds this person gave.
     pub cash_refunds: u32,
+    /// The tips of the paid sales this person opened, in minor units
+    /// (CR-191).
+    pub tips_minor: u64,
 }
 
 wire_record!(PersonLineView {
@@ -1300,8 +1363,20 @@ wire_record!(PersonLineView {
     sales,
     overrides,
     refunds,
-    cash_refunds
+    cash_refunds,
+    tips_minor
 });
+
+/// The tips of the paid sales of a day (CR-191).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TipTallyView {
+    /// How many paid sales carried a tip.
+    pub count: u32,
+    /// The sum of those tips in minor units of the shop's currency.
+    pub minor: u64,
+}
+
+wire_record!(TipTallyView { count, minor });
 
 /// The totals of one day (CR-153).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1332,6 +1407,8 @@ pub struct DayTotalsView {
     pub refunds_withdrawn: u32,
     /// Cash refunds.
     pub cash_refunds: TallyView,
+    /// The tips of the paid sales (CR-191).
+    pub tips: TipTallyView,
     /// Sales whose record names no one.
     pub unnamed_sales: u32,
     /// The lines per person, when asked for.
@@ -1354,6 +1431,7 @@ wire_record!(DayTotalsView {
     refunds,
     refunds_withdrawn,
     cash_refunds,
+    tips,
     unnamed_sales,
     people,
     people_left_out
@@ -1375,6 +1453,10 @@ impl DayTotalsView {
             refunds: t.refunds.into(),
             refunds_withdrawn: t.refunds_withdrawn,
             cash_refunds: t.cash_refunds.into(),
+            tips: TipTallyView {
+                count: t.tips.count,
+                minor: t.tips.minor,
+            },
             unnamed_sales: t.unnamed_sales,
             people: t
                 .people
@@ -1386,6 +1468,7 @@ impl DayTotalsView {
                     overrides: p.overrides,
                     refunds: p.refunds,
                     cash_refunds: p.cash_refunds,
+                    tips_minor: p.tips_minor,
                 })
                 .collect(),
             people_left_out: t.people_left_out,

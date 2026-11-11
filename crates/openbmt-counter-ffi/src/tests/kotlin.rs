@@ -149,7 +149,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "bool(), bool(),",
         "reports(), option { payment() },",
         "Pump(reports(), strings(), bool())",
-        "u32(), option { u64() }, u64(), option { u64() }, refundState(), role(), string(), u64(),",
+        "u32(), option { u64() }, u64(), option { u64() }, u64(), refundState(), role(), string(), u64(),",
         "HeartbeatOutcome(bool(), option { u64() }, words(), reports())",
         "u32(), u32(), option { Health(bool(), bool(), words()) },",
         "option { OwnNodeStatus(bool(), words()) }, u32s(), u64(), bool(),",
@@ -161,7 +161,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "RateSource(string(), string(), string(), string())",
         "Sample(string(), u64(), u64())",
         "Rate(u64(), string(), u64())",
-        "ShopSettings(u32(), bool(), bool(), u64(), string())",
+        "ShopSettings(u32(), bool(), bool(), u64(), string(), bool(), bytes().map { it.toInt() and 0xff })",
         "words(), bool(), option { u64() }, bool(), u64(), u64(), option { u64() },",
         "u32(), bool(), option { words() },",
         "LinkStep(linkView(), strings())",
@@ -193,7 +193,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "SampleView: record: source: string, fetched_at: u64, minor_per_btc: u64",
         "RateCombineArgs: record: samples: list<SampleView>, now: u64",
         "RateView: record: rate: u64, source_label: string, source_fetched_at: u64",
-        "SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, currency: string",
+        "SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, currency: string, tips_on: bool, tip_percents: list<u8>",
     ] {
         assert!(protocol.contains(line), "{line}");
     }
@@ -204,7 +204,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
          lightning: option<LightningSaleView>"
     ));
     assert!(protocol.contains(
-        "RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: option<u64>, \
+        "RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: option<u64>, tip_minor: u64, \
          state: RefundStateView, by_role: ActorRole, by_name: string, at: u64, words: Words"
     ));
 }

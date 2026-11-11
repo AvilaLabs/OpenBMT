@@ -136,6 +136,7 @@ pub struct Day {
     pub refunds: (u32, u64, u64),
     pub refunds_withdrawn: u32,
     pub cash_refunds: (u32, u64, u64),
+    pub tips: (u32, u64),
     pub unnamed_sales: u32,
     pub people: Vec<Person>,
     pub people_left_out: u32,
@@ -150,6 +151,7 @@ pub struct Person {
     pub overrides: u32,
     pub refunds: u32,
     pub cash_refunds: u32,
+    pub tips_minor: u64,
 }
 
 /// The words of a response, read back.
@@ -352,6 +354,7 @@ impl<'a> Rd<'a> {
             refunds: self.tally(),
             refunds_withdrawn: self.u32(),
             cash_refunds: self.tally(),
+            tips: (self.u32(), self.u64()),
             unnamed_sales: self.u32(),
             people: self.list(|r| Person {
                 manager: r.bool_role(),
@@ -360,6 +363,7 @@ impl<'a> Rd<'a> {
                 overrides: r.u32(),
                 refunds: r.u32(),
                 cash_refunds: r.u32(),
+                tips_minor: r.u64(),
             }),
             people_left_out: self.u32(),
         }

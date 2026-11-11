@@ -97,6 +97,8 @@ private const val OP_LN_REMOVE = 55
 private const val OP_TAKE_RELAY = 56
 private const val OP_STAFF_RECORD = 57
 private const val OP_DAY_TOTALS = 58
+private const val OP_TIP_CHOICES = 59
+private const val OP_OPEN_WITH_TIP = 60
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -230,7 +232,15 @@ class PersonLine(
     val overrides: Long,
     val refunds: Long,
     val cashRefunds: Long,
+    /** The tips of the paid sales this person opened, in minor units (CR-191). */
+    val tipsMinor: Long = 0,
 )
+
+/** The tips of the paid sales of a day: how many carried one, and their sum in minor units (CR-191). */
+class TipTally(val count: Long, val minor: Long)
+
+/** A tip the counter offers for a sale: a suggested percent and what it comes to in minor units (CR-188). */
+class TipChoice(val percent: Int, val tipMinor: Long)
 
 /** The totals of one day from the counter's own records (CR-153). */
 class DayTotals(
@@ -247,6 +257,7 @@ class DayTotals(
     val refunds: Tally,
     val refundsWithdrawn: Long,
     val cashRefunds: Tally,
+    val tips: TipTally,
     val unnamedSales: Long,
     val people: List<PersonLine>,
     val peopleLeftOut: Long,
@@ -345,6 +356,8 @@ class RefundRow(
     val number: Long?,
     val askedSats: Long,
     val valueMinor: Long?,
+    /** How much of the refund is the tip, in minor units of the shop's currency (CR-192). */
+    val tipMinor: Long,
     val state: RefundState,
     val byRole: ActorRole,
     val byName: String,
@@ -415,7 +428,7 @@ data class Sample(val source: String, val fetchedAt: Long, val minorPerBtc: Long
 /**
  * What the app needs from the shop's settings before the node runs. [currency] is the shop's currency
  * (CR-193): three capital letters, or "SAT" for Bitcoin Standard, where an amount is satoshis and no
- * price is asked (CR-197).
+ * price is asked (CR-197). [tipsOn] and [tipPercents] are the tips the counters ask for (CR-187).
  */
 class ShopSettings(
     val version: Long,
@@ -423,6 +436,8 @@ class ShopSettings(
     val customerWifi: Boolean,
     val minSaleSats: Long,
     val currency: String = "USD",
+    val tipsOn: Boolean = false,
+    val tipPercents: List<Int> = listOf(10, 15, 20),
 )
 
 /** The rate a sale is opened with, and its source as the counter takes it (CR-57). */
@@ -657,12 +672,12 @@ private fun Reader.saleState(): SaleState =
 private fun Reader.tally(): Tally = Tally(u32(), u64(), u64())
 
 private fun Reader.personLine(): PersonLine =
-    PersonLine(role(), string(), u32(), u32(), u32(), u32())
+    PersonLine(role(), string(), u32(), u32(), u32(), u32(), u64())
 
 internal fun Reader.dayTotals(): DayTotals =
     DayTotals(
         u64(), u64(), option { string() }, tally(), tally(), tally(), tally(), u32(), u32(),
-        tally(), tally(), u32(), tally(), u32(), list { personLine() }, u32(),
+        tally(), tally(), u32(), tally(), TipTally(u32(), u64()), u32(), list { personLine() }, u32(),
     )
 
 private fun Reader.refundState(): RefundState =
@@ -728,7 +743,7 @@ internal fun Reader.pump(): Pump = Pump(reports(), strings(), bool())
 
 private fun Reader.refundRow(): RefundRow =
     RefundRow(
-        u32(), option { u64() }, u64(), option { u64() }, refundState(), role(), string(), u64(),
+        u32(), option { u64() }, u64(), option { u64() }, u64(), refundState(), role(), string(), u64(),
         words(),
     )
 
@@ -736,7 +751,7 @@ internal fun Reader.rateSource(): RateSource = RateSource(string(), string(), st
 
 internal fun Reader.sample(): Sample = Sample(string(), u64(), u64())
 
-internal fun Reader.shopSettings(): ShopSettings = ShopSettings(u32(), bool(), bool(), u64(), string())
+internal fun Reader.shopSettings(): ShopSettings = ShopSettings(u32(), bool(), bool(), u64(), string(), bool(), bytes().map { it.toInt() and 0xff })
 
 internal fun Reader.rate(): Rate = Rate(u64(), string(), u64())
 
@@ -979,6 +994,34 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
         val r =
             call(OP_OPEN, handle) {
                 it.u64(now).u64(amountMinor).string(currency).u64(rate).string(sourceLabel)
+                    .u64(sourceFetchedAt).option(actor) { a -> it.actor(a) }
+            }
+        return r.opened().also { r.end() }
+    }
+
+    /** The tips the settings offer for a sale of [amountMinor], one for each suggested percent; none when tips are off (CR-188). */
+    fun tipChoices(amountMinor: Long): List<TipChoice> {
+        val r = call(OP_TIP_CHOICES, handle) { it.u64(amountMinor) }
+        return r.list { TipChoice(r.u8(), r.u64()) }.also { r.end() }
+    }
+
+    /**
+     * Open a sale with a tip (CR-189, CR-190): the payment is for [amountMinor] and [tipMinor] together. A tip above
+     * the sale is a [CounterException] with its words.
+     */
+    fun openWithTip(
+        now: Long,
+        amountMinor: Long,
+        tipMinor: Long,
+        currency: String,
+        rate: Long,
+        sourceLabel: String,
+        sourceFetchedAt: Long,
+        actor: Actor? = null,
+    ): Opened {
+        val r =
+            call(OP_OPEN_WITH_TIP, handle) {
+                it.u64(now).u64(amountMinor).u64(tipMinor).string(currency).u64(rate).string(sourceLabel)
                     .u64(sourceFetchedAt).option(actor) { a -> it.actor(a) }
             }
         return r.opened().also { r.end() }

@@ -1254,14 +1254,35 @@ impl<P: DriverPort> Node<P> {
         source: &RateSource,
         by: Option<&Actor>,
     ) -> Result<Opened, OpenRefused<DirStoreError>> {
+        self.open_with_tip(amount, Amount(0), currency, rate, source, by)
+    }
+
+    /// [`Node::open_by`] for a sale with a tip (CR-189, CR-190): the code is
+    /// for the amount and the tip together.
+    pub fn open_with_tip(
+        &mut self,
+        amount: Amount,
+        tip: Amount,
+        currency: Currency,
+        rate: Rate,
+        source: &RateSource,
+        by: Option<&Actor>,
+    ) -> Result<Opened, OpenRefused<DirStoreError>> {
         let facts = OpenFacts {
             health: self.health.unwrap_or(NO_ANSWER_YET),
             rescan_pending: false,
             now: self.clock.now(),
         };
-        let opened =
-            self.counter
-                .open_by(amount, currency, rate, source, facts, by, &mut self.store)?;
+        let opened = self.counter.open_with_tip(
+            amount,
+            tip,
+            currency,
+            rate,
+            source,
+            facts,
+            by,
+            &mut self.store,
+        )?;
         self.known.insert(opened.index);
         self.port.watch_script(opened.script.clone());
         self.ln

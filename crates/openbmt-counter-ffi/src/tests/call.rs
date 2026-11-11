@@ -330,6 +330,8 @@ fn refunds_are_asked_listed_withdrawn_and_paid_in_cash() {
             let number = r.opt(Rd::u64);
             let asked = r.u64();
             let value = r.opt(Rd::u64);
+            // A sale with no tip says 0 (CR-192).
+            assert_eq!(r.u64(), 0);
             let state = r.u8();
             let role = r.u8();
             let name = r.string();

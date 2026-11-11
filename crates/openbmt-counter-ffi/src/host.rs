@@ -56,9 +56,10 @@ use crate::say::words_for;
 use crate::views::{
     ActorView, CancelArgs, CashArgs, DayTotalsArgs, DayTotalsView, HealthView, HeartbeatOutcome,
     LightningSaleView, LightningStatusView, LinkStepView, LinkView, LnFailArgs, LnKind,
-    LnReplyArgs, LnRequestView, LnSetupArgs, LnStepView, OpenArgs, OpenedView, OverrideArgs,
-    OwnNodeView, PumpView, RefundArgs, RefundAskView, RefundRow, ReportView, RequoteArgs,
-    ScreenView, StaffArgs, StartConfig, StatusView, WithdrawArgs, WordsView,
+    LnReplyArgs, LnRequestView, LnSetupArgs, LnStepView, OpenArgs, OpenTipArgs, OpenedView,
+    OverrideArgs, OwnNodeView, PumpView, RefundArgs, RefundAskView, RefundRow, ReportView,
+    RequoteArgs, ScreenView, StaffArgs, StartConfig, StatusView, TipChoiceView, WithdrawArgs,
+    WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -449,6 +450,46 @@ impl Entry {
     }
 
     pub(crate) fn open(&self, a: OpenArgs) -> Result<OpenedView, CounterError> {
+        self.open_tipped(
+            OpenTipArgs {
+                now: a.now,
+                amount_minor: a.amount_minor,
+                tip_minor: 0,
+                currency: a.currency,
+                rate: a.rate,
+                source_label: a.source_label,
+                source_fetched_at: a.source_fetched_at,
+                actor: a.actor,
+            },
+            false,
+        )
+    }
+
+    /// CR-189, CR-190: a sale with a tip, for the amount and the tip together.
+    pub(crate) fn open_with_tip(&self, a: OpenTipArgs) -> Result<OpenedView, CounterError> {
+        self.open_tipped(a, true)
+    }
+
+    /// CR-188: the tips offered for a sale of `amount_minor`; none when the
+    /// settings do not ask for a tip.
+    pub(crate) fn tip_choices(
+        &self,
+        amount_minor: u64,
+    ) -> Result<Vec<TipChoiceView>, CounterError> {
+        self.run(None, |node, _, _| {
+            Ok(node
+                .counter()
+                .tip_choices(Amount(amount_minor))
+                .into_iter()
+                .map(|c| TipChoiceView {
+                    percent: c.percent,
+                    tip_minor: c.tip.0,
+                })
+                .collect())
+        })
+    }
+
+    fn open_tipped(&self, a: OpenTipArgs, tipped: bool) -> Result<OpenedView, CounterError> {
         let code: [u8; 3] = a
             .currency
             .as_bytes()
@@ -473,9 +514,19 @@ impl Entry {
             } else {
                 rate_and_source(a.rate, &a.source_label, a.source_fetched_at)?
             };
-            let opened = node
-                .open_by(Amount(a.amount_minor), currency, rate, &source, by.as_ref())
-                .map_err(|e| from_rule(e.rule(), &e, e.words()))?;
+            let opened = if tipped {
+                node.open_with_tip(
+                    Amount(a.amount_minor),
+                    Amount(a.tip_minor),
+                    currency,
+                    rate,
+                    &source,
+                    by.as_ref(),
+                )
+            } else {
+                node.open_by(Amount(a.amount_minor), currency, rate, &source, by.as_ref())
+            }
+            .map_err(|e| from_rule(e.rule(), &e, e.words()))?;
             let payment = payment_for(&opened.script, network, opened.needs_sats)?;
             Ok(OpenedView {
                 index: opened.index,

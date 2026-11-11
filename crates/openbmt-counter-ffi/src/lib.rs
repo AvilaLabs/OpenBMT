@@ -89,8 +89,8 @@ pub use say::{all_words, words_for};
 pub use shop::SettingsView;
 pub use views::{
     ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome, LinkStepView,
-    LinkView, OpenArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView, PairBeginArgs,
-    PairStartedView, PairingView, PumpView, RefundArgs, RefundAskView, RefundRow, RefundStateView,
-    RelayKind, ReportView, RequoteArgs, ScreenView, StartConfig, StateView, StatusView,
-    WithdrawArgs, WordsView,
+    LinkView, OpenArgs, OpenTipArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView,
+    PairBeginArgs, PairStartedView, PairingView, PumpView, RefundArgs, RefundAskView, RefundRow,
+    RefundStateView, RelayKind, ReportView, RequoteArgs, ScreenView, StartConfig, StateView,
+    StatusView, TipChoiceView, TipTallyView, WithdrawArgs, WordsView,
 };

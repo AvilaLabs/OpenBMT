@@ -61,6 +61,9 @@
 //! - 57 `staff_record` writes a change to the cashiers as a record (CR-143)
 //!   and 58 `day_totals` counts a day from the counter's own records
 //!   (CR-152). `open` and `cancel` take the person at the till (CR-151).
+//! - 59 `tip_choices` gives the tips the settings offer for an amount and
+//!   60 `open_with_tip` opens a sale for the amount and the tip chosen
+//!   (CR-188 to CR-190).
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -91,10 +94,11 @@ use crate::views::{
     put_words, ActorRole, ActorView, CancelArgs, CashArgs, CounterNetwork, DayTotalsArgs,
     DayTotalsView, HealthView, HeartbeatOutcome, LightningSaleView, LightningStatusView,
     LinkStepView, LinkView, LnFailArgs, LnKind, LnMethod, LnReplyArgs, LnRequestView, LnSetupArgs,
-    LnStepView, LnTransportView, OpenArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView,
-    PairBeginArgs, PairStartedView, PairingView, PersonLineView, PumpView, RefundArgs,
+    LnStepView, LnTransportView, OpenArgs, OpenTipArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs,
+    OwnNodeView, PairBeginArgs, PairStartedView, PairingView, PersonLineView, PumpView, RefundArgs,
     RefundAskView, RefundRow, RefundStateView, RelayKind, ReportView, RequoteArgs, ScreenView,
-    StaffArgs, StartConfig, StateView, StatusView, TallyView, WithdrawArgs, WordsView,
+    StaffArgs, StartConfig, StateView, StatusView, TallyView, TipChoiceView, TipTallyView,
+    WithdrawArgs, WordsView,
 };
 
 /// The first four bytes of a request.
@@ -443,6 +447,12 @@ fn build_ops() -> Vec<Op> {
         op(58, "day_totals", Node, |c, a: DayTotalsArgs| {
             c.entry()?.day_totals(a)
         }),
+        op(59, "tip_choices", Node, |c, amount_minor: u64| {
+            c.entry()?.tip_choices(amount_minor)
+        }),
+        op(60, "open_with_tip", Node, |c, a: OpenTipArgs| {
+            c.entry()?.open_with_tip(a)
+        }),
     ]
 }
 
@@ -581,6 +591,9 @@ fn definitions() -> Vec<TypeDef> {
         LinkView::define(),
         LinkStepView::define(),
         OpenArgs::define(),
+        OpenTipArgs::define(),
+        TipChoiceView::define(),
+        TipTallyView::define(),
         CancelArgs::define(),
         StaffArgs::define(),
         DayTotalsArgs::define(),

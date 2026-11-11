@@ -64,8 +64,9 @@ object ProtocolDecoderTest {
         tally(w, 2, 0, 5_000)
         w.u32(1)
         tally(w, 1, 500, 6_000)
+        w.u32(2).u64(300)
         w.u32(2)
-        w.u32(1).u8(role).string("Ann").u32(4).u32(1).u32(0).u32(1)
+        w.u32(1).u8(role).string("Ann").u32(4).u32(1).u32(0).u32(1).u64(150)
         w.u32(3)
         if (trailing) w.u8(0)
         return header(0, w.toByteArray())
@@ -80,6 +81,7 @@ object ProtocolDecoderTest {
         check(day.refundsWithdrawn == 1L && day.cashRefunds.minor == 500L && day.unnamedSales == 2L)
         check(day.people.size == 1 && day.people[0].role == ActorRole.Manager && day.people[0].name == "Ann")
         check(day.people[0].sales == 4L && day.people[0].cashRefunds == 1L && day.peopleLeftOut == 3L)
+        check(day.tips.count == 2L && day.tips.minor == 300L && day.people[0].tipsMinor == 150L)
         check(decodeResponse(dayFrame(role = 0, currency = false)).let { r -> r.dayTotals().also { r.end() } }.currency == null)
         rejects("a role that is not known in a person's line") { decodeResponse(dayFrame(role = 2)).dayTotals() }
         rejects("trailing bytes after the totals") { decodeResponse(dayFrame(trailing = true)).let { it.dayTotals(); it.end() } }
@@ -102,11 +104,12 @@ object ProtocolDecoderTest {
         val rate = decodeResponse(header(0, Writer().u64(7_355_218).string("med.kc").u64(5).toByteArray()))
             .let { r -> r.rate().also { r.end() } }
         check(rate.rate == 7_355_218L && rate.sourceLabel == "med.kc" && rate.sourceFetchedAt == 5L)
-        val shop = decodeResponse(header(0, Writer().u32(3).u8(1).u8(0).u64(26_000).string("EUR").toByteArray()))
+        val shop = decodeResponse(header(0, Writer().u32(3).u8(1).u8(0).u64(26_000).string("EUR").u8(1).bytes(byteArrayOf(5, 18)).toByteArray()))
             .let { r -> r.shopSettings().also { r.end() } }
         check(shop.version == 3L && shop.torOn && !shop.customerWifi && shop.minSaleSats == 26_000L && shop.currency == "EUR")
+        check(shop.tipsOn && shop.tipPercents == listOf(5, 18))
         rejects("a bool in the settings") {
-            decodeResponse(header(0, Writer().u32(3).u8(2).u8(0).u64(1).string("USD").toByteArray())).shopSettings()
+            decodeResponse(header(0, Writer().u32(3).u8(2).u8(0).u64(1).string("USD").u8(0).bytes(byteArrayOf()).toByteArray())).shopSettings()
         }
         rejects("trailing bytes in a rate") {
             decodeResponse(header(0, Writer().u64(1).string("a").u64(5).u8(0).toByteArray())).let { it.rate(); it.end() }
@@ -204,7 +207,7 @@ object ProtocolDecoderTest {
             check(s.notes == listOf("a note"))
         }
         // The pairing view ends with the kind of relay; a tag that is not defined is refused.
-        fun relay(tag: Int) = Writer().u8(3).u32(1).u8(0).u8(0).u64(0).string("USD").u8(tag).toByteArray()
+        fun relay(tag: Int) = Writer().u8(3).u32(1).u8(0).u8(0).u64(0).string("USD").u8(0).bytes(byteArrayOf(10, 15, 20)).u8(tag).toByteArray()
         decodeResponse(header(0, relay(2))).let { r ->
             r.u8()
             r.shopSettings()

@@ -97,6 +97,8 @@ ops run on another; it waits for at most 250 ms.
  56 take_relay       handle zero  args (list<u8>, list<u8>) -> list<u8>
  57 staff_record     handle node  args StaffArgs -> ()
  58 day_totals       handle node  args DayTotalsArgs -> DayTotalsView
+ 59 tip_choices      handle node  args u64 -> list<TipChoiceView>
+ 60 open_with_tip    handle node  args OpenTipArgs -> OpenedView
 ```
 
 ## Types
@@ -117,12 +119,15 @@ RelayKind: enum, one tag byte
 LinkView: record: words: Words, connected: bool, since: option<u64>, refused: bool, heartbeats_taken: u64, owner_records: u64, last_check_in_at: option<u64>, settings_version: u32, restart_needed: bool, settings_line: option<Words>
 LinkStepView: record: link: LinkView, notes: list<string>
 OpenArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>
+OpenTipArgs: record: now: u64, amount_minor: u64, tip_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>
+TipChoiceView: record: percent: u8, tip_minor: u64
+TipTallyView: record: count: u32, minor: u64
 CancelArgs: record: now: u64, index: u32, actor: option<ActorView>
 StaffArgs: record: now: u64, added: bool, name: string, by: string
 DayTotalsArgs: record: from: u64, to: u64, people: bool
 TallyView: record: count: u32, minor: u64, sats: u64
-PersonLineView: record: role: ActorRole, name: string, sales: u32, overrides: u32, refunds: u32, cash_refunds: u32
-DayTotalsView: record: from: u64, to: u64, currency: option<string>, paid: TallyView, on_chain: TallyView, lightning: TallyView, waiting: TallyView, stopped: u32, ended: u32, overrides: TallyView, refunds: TallyView, refunds_withdrawn: u32, cash_refunds: TallyView, unnamed_sales: u32, people: list<PersonLineView>, people_left_out: u32
+PersonLineView: record: role: ActorRole, name: string, sales: u32, overrides: u32, refunds: u32, cash_refunds: u32, tips_minor: u64
+DayTotalsView: record: from: u64, to: u64, currency: option<string>, paid: TallyView, on_chain: TallyView, lightning: TallyView, waiting: TallyView, stopped: u32, ended: u32, overrides: TallyView, refunds: TallyView, refunds_withdrawn: u32, cash_refunds: TallyView, tips: TipTallyView, unnamed_sales: u32, people: list<PersonLineView>, people_left_out: u32
 RequoteArgs: record: now: u64, index: u32, rate: u64, source_label: string, source_fetched_at: u64
 OverrideArgs: record: now: u64, index: u32, actor: ActorView
 RefundAskView: enum, a tag byte, then: Sats(sats: u64) | Value(minor: u64, rate: u64, source_label: string, source_fetched_at: u64)
@@ -141,7 +146,7 @@ Payment: record: address: string, uri: string, copy_uri: string, qr_size: u32, q
 OpenedView: record: index: u32, needs_sats: u64, quote_rate: u64, quote_from: u64, quote_until: u64, payment: Payment
 ScreenView: record: state: StateView, words: Words, flags: list<Words>, check: option<Words>, received_sats: u64, needs_sats: u64, stuck: bool, late: bool, reopened: bool, conflict_seen: bool, reports: list<ReportView>, payment: option<Payment>, lightning: option<LightningSaleView>
 PumpView: record: reports: list<ReportView>, notes: list<string>, stopped: bool
-RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: option<u64>, state: RefundStateView, by_role: ActorRole, by_name: string, at: u64, words: Words
+RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: option<u64>, tip_minor: u64, state: RefundStateView, by_role: ActorRole, by_name: string, at: u64, words: Words
 HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, reports: list<ReportView>
 HealthView: record: healthy: bool, behind: bool, words: Words
 OwnNodeView: record: usable: bool, words: Words
@@ -151,7 +156,7 @@ RateParseArgs: record: source: string, response: list<u8>, fetched_at: u64
 SampleView: record: source: string, fetched_at: u64, minor_per_btc: u64
 RateCombineArgs: record: samples: list<SampleView>, now: u64
 RateView: record: rate: u64, source_label: string, source_fetched_at: u64
-SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, currency: string
+SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, currency: string, tips_on: bool, tip_percents: list<u8>
 LnKind: enum, one tag byte
     tags Lnd=0 Cln=1
 LnSetupArgs: record: kind: LnKind, address: string, secret: string, cert: string

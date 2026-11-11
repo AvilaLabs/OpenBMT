@@ -30,6 +30,11 @@ pub struct SettingsView {
     /// `SAT` for Bitcoin Standard, where an amount is satoshis and no price
     /// is asked (CR-197).
     pub currency: String,
+    /// Whether the counters ask the customer for a tip (CR-187).
+    pub tips_on: bool,
+    /// The suggested tips, in whole percent, in the order the settings give
+    /// them (CR-187).
+    pub tip_percents: Vec<u8>,
 }
 
 wire_record!(SettingsView {
@@ -37,7 +42,9 @@ wire_record!(SettingsView {
     tor_on,
     customer_wifi,
     min_sale_sats,
-    currency
+    currency,
+    tips_on,
+    tip_percents
 });
 
 /// The pairing record in `bytes` (`PairingRecord::to_bytes`), read and not
@@ -76,6 +83,8 @@ pub(crate) fn pairing_read(bytes: Vec<u8>, dir: &str) -> Result<PairingView, Cou
             customer_wifi: s.customer_wifi,
             min_sale_sats: s.min_sale_sats,
             currency: s.currency.code().to_string(),
+            tips_on: s.tips_on,
+            tip_percents: s.tip_percents.clone(),
         },
         relay,
     })

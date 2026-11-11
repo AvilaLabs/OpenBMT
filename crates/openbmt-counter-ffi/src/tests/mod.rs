@@ -17,4 +17,5 @@ mod rates;
 mod screen;
 mod staff;
 mod strict;
+mod tips;
 pub(crate) mod wire;

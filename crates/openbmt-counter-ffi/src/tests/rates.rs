@@ -173,6 +173,8 @@ fn nr_26_the_pairing_is_read_before_the_node_starts() {
     assert_eq!((r.u32(), r.bool(), r.bool(), r.u64()), (1, false, false, 0));
     // The shop prices in dollars (CR-193).
     assert_eq!(r.string(), "USD");
+    // Tips are off, with the first percents (CR-187).
+    assert_eq!((r.bool(), r.bytes()), (false, vec![10, 15, 20]));
     // The record holds no relay.
     assert_eq!(r.u8(), 0);
     r.done();
@@ -191,6 +193,7 @@ fn nr_26_the_pairing_is_read_before_the_node_starts() {
         (1, true, false, 26_000)
     );
     assert_eq!(r.string(), "USD");
+    assert_eq!((r.bool(), r.bytes()), (false, vec![10, 15, 20]));
     assert_eq!(r.u8(), 0);
     r.done();
 }
