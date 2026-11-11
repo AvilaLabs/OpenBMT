@@ -1418,9 +1418,11 @@ fn nr_47_a_block_asked_for_by_hash_comes_as_a_fee_block_and_no_other() {
     assert_eq!(stored_headers(&storage).tip().0, 2);
     // A hash that is on no chain is told.
     handle.fetch_block(bitcoin::BlockHash::from_byte_array([7; 32]));
-    let seen = wait_for(&handle, 10, |e| {
-        matches!(e, AppEvent::Note(t) if t.contains("not on the best chain"))
-    });
+    let seen = wait_for(
+        &handle,
+        10,
+        |e| matches!(e, AppEvent::Note(t) if t.contains("not on the best chain")),
+    );
     assert!(seen.is_some());
     handle.shutdown();
 }

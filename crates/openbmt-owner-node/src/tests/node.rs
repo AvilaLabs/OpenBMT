@@ -24,6 +24,8 @@ use openbmt_owner::{Delivery, SaleFacts, SaleKey, Stage};
 use openbmt_signer::SignerState;
 use openbmt_spend::Coin;
 
+mod receipts;
+
 use super::coins::{mine, tx_from};
 use super::{id, Dir};
 use crate::coins::{CoinView, ViewState};
@@ -179,6 +181,9 @@ impl OwnerPort for FakePort {
     }
     fn set_fetch_transactions(&self, on: bool) {
         self.say(format!("fetch {on}"));
+    }
+    fn fetch_block(&self, hash: BlockHash) {
+        self.say(format!("fetch-block {hash}"));
     }
 }
 

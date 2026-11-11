@@ -40,6 +40,18 @@
 #      three nodes and two empty blocks take its place: one block leaves the
 #      chain. The node's coins equal `listunspent` with 0 confirmations
 #      counted.
+#   9. The line about receipts and the offer to merge (FE-20, OC-16 to
+#      OC-21). Fourteen payments at 20 satoshis per virtual byte, each in a
+#      block of its own, and then 150 blocks, put a high-fee stretch of the
+#      chain out of the node's last 144 blocks. Then the wallet is paid 12
+#      times at 1 satoshi per virtual byte, each payment in a block of its
+#      own: the last 144 blocks are cheap against the weeks before, so the
+#      history is low. The node took the samples itself, from the blocks it
+#      downloaded in full and from the blocks it asked for (NR-47). The
+#      line's count equals Core's `listunspent`, the offer is made, and the
+#      merge is approved, signed in the Key app and by key 1, and sent. Core
+#      then shows one coin, and the fee Core reports for the merge equals the
+#      cost the line named, to the satoshi.
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin (the
 # directory is put first on PATH; set CORE_BIN to use another), jq, and
@@ -482,12 +494,91 @@ if [ -n "$TX3" ]; then
 fi
 done_step 8 "after one block left the chain the coin view equals Core's"
 
+# ---- 9 ----------------------------------------------------------------------
+
+say "9. The line about receipts, the offer, and the merge"
+await_synced 60
+mine 7
+await_send "$TX3" "done" 60
+# Wallet payments at a chosen fee rate (satoshis per virtual byte), one per
+# block. The receive indexes cycle through six addresses.
+pay_wallet() { # count fee_rate
+  local i addr
+  for i in $(seq 1 "$1"); do
+    cmd "receive $((i % 6))" >/dev/null
+    addr=$(sed -nE 's/^receive [0-9]+ (.*)$/\1/p' <<<"$LAST")
+    a -named -rpcwallet=miner sendtoaddress address="$addr" amount=0.0005 fee_rate="$2" >/dev/null ||
+      return 1
+    mine 1 || return 1
+  done
+}
+pay_wallet 14 20
+chk 9 "fourteen high-fee payments were made" [ $? = 0 ]
+mine 150
+pay_wallet 12 1
+chk 9 "twelve low-fee payments were made" [ $? = 0 ]
+mine 6
+if await_synced 180; then
+  node_coins
+  ours=$OURS
+  theirs=$(core_coins 1)
+  chk 9 "the node's coins equal listunspent before the merge" same "$ours" "$theirs"
+  COUNT=$(wc -l <<<"$theirs")
+  SUM_BEFORE=$(awk '{ s += $2 } END { print s }' <<<"$theirs")
+  cmd fees
+  note "$(grep '^fees' <<<"$LAST")"
+  rated=$(sed -nE 's/^fees samples=[0-9]+ rated=([0-9]+) .*$/\1/p' <<<"$LAST")
+  chk 9 "the node took at least 20 rated samples by itself" [ "${rated:-0}" -ge 20 ]
+  chk 9 "the history says the recent rate is low" grep -q ' low=Some(true)$' <<<"$LAST"
+  cmd line
+  note "$(grep '^line' <<<"$LAST")"
+  LINE_N=$(sed -nE 's/^line payments=([0-9]+) .*$/\1/p' <<<"$LAST")
+  LINE_COST=$(sed -nE 's/^line payments=[0-9]+ cost=([0-9]+) .*$/\1/p' <<<"$LAST")
+  chk 9 "the line counts every coin Core lists ($COUNT)" [ "$LINE_N" = "$COUNT" ]
+  chk 9 "the line names a cost" [ "${LINE_COST:-0}" -gt 0 ]
+  cmd offer
+  note "$(grep '^offer' <<<"$LAST")"
+  OFFER_COST=$(sed -nE 's/^offer coins=[0-9]+ of=[0-9]+ rate=[0-9]+ cost=([0-9]+) .*$/\1/p' <<<"$LAST")
+  chk 9 "the offer is made, for the same cost as the line" [ "$OFFER_COST" = "$LINE_COST" ]
+  cmd "merge" 90
+  TXM=$(spent_txid)
+  note "$(grep -E '^(merge|spent|refused|error|outcome)' <<<"$LAST" | head -6)"
+  chk 9 "the merge came out as one transaction" [ -n "$TXM" ]
+  if [ -n "$TXM" ]; then
+    for _ in $(seq 1 60); do mempools_hold "$TXM" && break; sleep 1; done
+    chk 9 "all three mempools hold the merge" mempools_hold "$TXM"
+    entry=$(a getmempoolentry "$TXM")
+    FEE=$(jq -r '.fees.base * 100000000 | round' <<<"$entry")
+    VSIZE=$(jq -r '.vsize' <<<"$entry")
+    note "merge: vsize $VSIZE, fee $FEE sats, the line said $LINE_COST"
+    chk 9 "the fee of the merge equals the cost the line named" [ "$FEE" = "$LINE_COST" ]
+    mine 1
+    await_synced 90
+    node_coins
+    ours=$OURS
+    theirs=$(core_coins 1)
+    note "node: $(tr '\n' ';' <<<"$ours")"
+    note "core: $(tr '\n' ';' <<<"$theirs")"
+    chk 9 "the coins equal listunspent" same "$ours" "$theirs"
+    chk 9 "there is one coin" [ "$(wc -l <<<"$theirs")" = 1 ]
+    SUM_AFTER=$(awk '{ s += $2 } END { print s }' <<<"$theirs")
+    chk 9 "no value was lost but the fee" [ $((SUM_BEFORE - SUM_AFTER)) = "$LINE_COST" ]
+    cmd line
+    note "$(grep '^line' <<<"$LAST")"
+    chk 9 "the line now counts one payment" grep -q '^line payments=1 ' <<<"$LAST"
+  fi
+else
+  note "status: $LAST"
+  BAD[9]=1
+fi
+done_step 9 "the line and the offer matched Core, and the merge cost what the line said"
+
 # ---- table ------------------------------------------------------------------
 
 stop_example || true
 say "Summary"
 FAILED=0
-for n in 1 2 3 4 5 6 7 8; do
+for n in 1 2 3 4 5 6 7 8 9; do
   printf '%s  step %s: %s\n' "${RESULT[$n]:-MISSING}" "$n" "${MESSAGE[$n]:-}"
   [ "${RESULT[$n]:-}" = PASS ] || FAILED=1
 done

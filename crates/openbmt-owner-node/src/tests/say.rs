@@ -3,6 +3,7 @@ use openbmt_core::say::{check, check_distinct};
 use crate::coins::{ApplyError, PendingError, ReceiptState, ViewState};
 use crate::facts::FactsRefused;
 use crate::node::{NodeError, SendRefused, SendState};
+use crate::receipts::{MergeOffer, MergeRefused, ReceiptsLine};
 use crate::refunds::NoteKind;
 use crate::say::{all_words, screens_markdown, Alert};
 use crate::watcher::OwnerStartError;
@@ -113,6 +114,26 @@ fn alert_name(value: Alert) -> String {
     .to_string()
 }
 
+fn line_name(value: ReceiptsLine) -> String {
+    match value {
+        ReceiptsLine::NotReady => "ReceiptsLine::NotReady",
+        ReceiptsLine::NoCoins => "ReceiptsLine::NoCoins",
+        ReceiptsLine::FeeUnknown { .. } => "ReceiptsLine::FeeUnknown",
+        ReceiptsLine::Known { .. } => "ReceiptsLine::Known",
+    }
+    .to_string()
+}
+
+fn merge_refused_name(value: MergeRefused) -> String {
+    match value {
+        MergeRefused::NoOffer => "MergeRefused::NoOffer".to_string(),
+        MergeRefused::OtherPaymentsWaiting => "MergeRefused::OtherPaymentsWaiting".to_string(),
+        MergeRefused::NotBuilt(_) => "MergeRefused::NotBuilt".to_string(),
+        // The words of the node's own refusal.
+        MergeRefused::Node(error) => node_name(error),
+    }
+}
+
 fn send_refusal_name(value: SendRefused) -> String {
     match value {
         SendRefused::Malformed => "SendRefused::Malformed",
@@ -160,6 +181,15 @@ fn sc_01_every_listed_variant_is_present() {
         "NoteKind::ClaimedMoreThanSeen",
         "SendRefused::Malformed",
         "SendRefused::NoTor",
+        "ReceiptsLine::NotReady",
+        "ReceiptsLine::NoCoins",
+        "ReceiptsLine::FeeUnknown",
+        "ReceiptsLine::Known",
+        "MergeOffer::All",
+        "MergeOffer::Part",
+        "MergeRefused::NoOffer",
+        "MergeRefused::OtherPaymentsWaiting",
+        "MergeRefused::NotBuilt",
         "OwnerStartError::Locked",
         "OwnerStartError::Dir",
         "OwnerStartError::Headers",
@@ -249,6 +279,18 @@ fn sc_01_every_listed_variant_is_present() {
         alert_name(Alert::ClockMismatch),
         send_refusal_name(SendRefused::Malformed),
         send_refusal_name(SendRefused::NoTor),
+        line_name(ReceiptsLine::NotReady),
+        line_name(ReceiptsLine::NoCoins),
+        line_name(ReceiptsLine::FeeUnknown { payments: 1 }),
+        line_name(ReceiptsLine::Known {
+            payments: 1,
+            cost_sats: 1,
+            rate_per_kvb: 1_000,
+        }),
+        merge_refused_name(MergeRefused::NoOffer),
+        merge_refused_name(MergeRefused::OtherPaymentsWaiting),
+        merge_refused_name(MergeRefused::NotBuilt(String::new())),
+        merge_refused_name(MergeRefused::Node(NodeError::KeyRecoveryRequired)),
     ] {
         assert!(names.iter().any(|found| found == &name), "missing {name}");
     }
@@ -309,6 +351,51 @@ fn sc_12_generated_screen_catalog_is_current() {
     } else {
         assert_eq!(std::fs::read_to_string(path).unwrap_or_default(), expected,
             "docs/screens/owner-node.md is out of date: run the owner-node tests with OPENBMT_WRITE_SCREENS=1");
+    }
+}
+
+#[test]
+fn oc_19_the_offer_says_the_cost_now_the_usual_cost_and_the_privacy_cost() {
+    let offer = MergeOffer {
+        coins: 12,
+        of: 12,
+        rate_per_kvb: 1_000,
+        cost_sats: 1_896,
+        usual_cost_sats: 4_740,
+    };
+    let words = offer.words();
+    assert!(words.what.contains("1,896 sats"), "{}", words.what);
+    assert!(words.what.contains("4,740 sats"), "{}", words.what);
+    assert!(words.what.contains("12 payments"), "{}", words.what);
+    assert!(words.next.contains("one wallet"), "{}", words.next);
+    let part = MergeOffer {
+        coins: 400,
+        of: 1_000,
+        ..offer
+    }
+    .words();
+    assert!(
+        part.what.contains("400 of your 1,000 payments"),
+        "{}",
+        part.what
+    );
+    // The refusal that wraps the node's own has the node's words.
+    assert_eq!(
+        MergeRefused::Node(NodeError::KeyRecoveryRequired).words(),
+        NodeError::KeyRecoveryRequired.words()
+    );
+}
+
+#[test]
+fn oc_18_the_receipts_screens_use_payments_and_merge_not_the_program_s_names() {
+    for (name, words) in all_words()
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("ReceiptsLine::") || name.starts_with("MergeOffer"))
+    {
+        let text = format!("{} {} {}", words.heading, words.what, words.next).to_lowercase();
+        for banned in ["utxo", "output", "consolidat", "coin"] {
+            assert!(!text.contains(banned), "{name} says {banned}: {text}");
+        }
     }
 }
 

@@ -26,6 +26,11 @@
 //! - `refund <sale> <sats> <address>`: queue a refund
 //! - `spend <rate>`: build a session at `rate` satoshis per 1000 virtual
 //!   bytes, have the Key app approve it, take the response
+//! - `line`: the line about receipts (OC-16 to OC-18)
+//! - `offer`: the offer to merge, when there is one (OC-19)
+//! - `fees`: the fee history: samples, rated samples, recent and usual rate
+//! - `merge`: approve the offer (OC-20), have the Key app approve the session
+//!   and take the response, as `spend` does
 //! - `conflict <sale> <sats> <address> <rate>`: print a second transaction
 //!   that spends the same coins as the next `spend` (the node is unchanged)
 //! - `coins`, `states`, `relay <txid>`, `status`, `rescan`, `pump <seconds>`,
@@ -40,6 +45,9 @@
 //! - `send <txid> <state> <text>` for each transaction followed, `entry
 //!   <id> <stage>` for each refund, and `queue outbox=<n> sessions=<n>`
 //! - `relay <txid> asked=<n> fetched=<n>`
+//! - `line payments=<n> cost=<sats> rate=<per kvb>` or `line <state>`, `offer
+//!   coins=<n> of=<n> rate=<n> cost=<sats> usual=<sats>` or `offer none`, and
+//!   `fees samples=<n> rated=<n> recent=<n> usual=<n> low=<bool>`
 //! - `spent txid=<txid>`, `refused <text>`
 //! - `status tip=<h> checked=<h> view=<text>`
 //! - `note <text>`, `stopped`
@@ -63,9 +71,9 @@ use openbmt_core::batch::{BatchBuilder, BatchPolicy};
 use openbmt_core::identity::Identity;
 use openbmt_core::wallet::{KeySlot, WalletDescription};
 use openbmt_net_io::DriverConfig;
-use openbmt_owner::{Delivery, Owner, SaleFacts, SaleKey};
+use openbmt_owner::{Built, Delivery, Owner, SaleFacts, SaleKey};
 use openbmt_owner_node::watcher::write_file;
-use openbmt_owner_node::{OwnerConfig, OwnerNode, OwnerParts, SendState};
+use openbmt_owner_node::{OwnerConfig, OwnerNode, OwnerParts, ReceiptsLine, SendState};
 use openbmt_signer::SignerState;
 use openbmt_watch::HeaderChain;
 
@@ -215,6 +223,63 @@ fn notes(node: &mut OwnerNode) {
     }
 }
 
+/// Have the Key app (key 2) approve a built session, take its response with
+/// key 1 and print what came out. `before` is the outbox length before the
+/// build.
+fn sign_and_take(
+    node: &mut OwnerNode,
+    keys: &mut Keys,
+    dir: &Path,
+    built: &Built,
+    before: usize,
+) -> Result<(), String> {
+    let response = {
+        let mut session = keys
+            .approver
+            .open(&built.request, now_secs())
+            .map_err(|e| e.to_string())?;
+        let items: Vec<u32> = session.lines().iter().map(|l| l.item).collect();
+        for item in items {
+            let Some(l) = session.lines().into_iter().find(|l| l.item == item) else {
+                continue;
+            };
+            let choice = if l.can_approve {
+                Choice::Approve
+            } else {
+                Choice::Decline("not here".to_string())
+            };
+            session.decide(item, choice).map_err(|e| e.to_string())?;
+        }
+        session
+            .finish(|b| write_file(dir, APPROVER_FILE, b))
+            .map_err(|e| e.to_string())?
+    };
+    let account1 = keys.account1;
+    let persist = |b: &[u8]| write_file(dir, KEY1_FILE, b);
+    match node.take(&response, &mut keys.key1, &account1, now_secs(), persist) {
+        Ok(taken) => {
+            for (item, outcome) in &taken.outcomes {
+                say(format!("outcome {item} {outcome:?}"));
+            }
+            let new: Vec<Txid> = node
+                .owner()
+                .outbox()
+                .iter()
+                .filter_map(|d| match &d.what {
+                    Delivery::Transaction { txid, .. } => Some(*txid),
+                    _ => None,
+                })
+                .skip(before)
+                .collect();
+            for txid in new {
+                say(format!("spent txid={txid}"));
+            }
+        }
+        Err(e) => say(format!("refused {e}")),
+    }
+    Ok(())
+}
+
 /// Run one command. `Ok(false)` is `quit`.
 fn command(node: &mut OwnerNode, keys: &mut Keys, dir: &Path, line: &str) -> Result<bool, String> {
     let mut words = line.split_whitespace();
@@ -279,47 +344,47 @@ fn command(node: &mut OwnerNode, keys: &mut Keys, dir: &Path, line: &str) -> Res
             for skipped in &built.skipped {
                 say(format!("skipped {} {}", skipped.id, skipped.reason));
             }
-            let response = {
-                let mut session = keys
-                    .approver
-                    .open(&built.request, now_secs())
-                    .map_err(|e| e.to_string())?;
-                let items: Vec<u32> = session.lines().iter().map(|l| l.item).collect();
-                for item in items {
-                    let Some(l) = session.lines().into_iter().find(|l| l.item == item) else {
-                        continue;
-                    };
-                    let choice = if l.can_approve {
-                        Choice::Approve
-                    } else {
-                        Choice::Decline("not here".to_string())
-                    };
-                    session.decide(item, choice).map_err(|e| e.to_string())?;
-                }
-                session
-                    .finish(|b| write_file(dir, APPROVER_FILE, b))
-                    .map_err(|e| e.to_string())?
-            };
-            let account1 = keys.account1;
-            let persist = |b: &[u8]| write_file(dir, KEY1_FILE, b);
-            match node.take(&response, &mut keys.key1, &account1, now_secs(), persist) {
-                Ok(taken) => {
-                    for (item, outcome) in &taken.outcomes {
-                        say(format!("outcome {item} {outcome:?}"));
-                    }
-                    let new: Vec<Txid> = node
-                        .owner()
-                        .outbox()
-                        .iter()
-                        .filter_map(|d| match &d.what {
-                            Delivery::Transaction { txid, .. } => Some(*txid),
-                            _ => None,
-                        })
-                        .skip(before)
-                        .collect();
-                    for txid in new {
-                        say(format!("spent txid={txid}"));
-                    }
+            sign_and_take(node, keys, dir, &built, before)?;
+        }
+        Some("line") => match node.receipts_line() {
+            ReceiptsLine::Known {
+                payments,
+                cost_sats,
+                rate_per_kvb,
+            } => say(format!(
+                "line payments={payments} cost={cost_sats} rate={rate_per_kvb}"
+            )),
+            other => say(format!("line {other:?}")),
+        },
+        Some("offer") => match node.merge_offer() {
+            Some(o) => say(format!(
+                "offer coins={} of={} rate={} cost={} usual={}",
+                o.coins, o.of, o.rate_per_kvb, o.cost_sats, o.usual_cost_sats
+            )),
+            None => say("offer none"),
+        },
+        Some("fees") => {
+            let tip = node.watcher().chain().tip_height();
+            let h = node.fee_history();
+            let rated = h
+                .samples()
+                .iter()
+                .filter(|s| s.rate_milli.is_some())
+                .count();
+            say(format!(
+                "fees samples={} rated={rated} recent={:?} usual={:?} low={:?}",
+                h.samples().len(),
+                h.recent_rate(tip),
+                h.usual_rate(tip),
+                h.is_low(tip)
+            ));
+        }
+        Some("merge") => {
+            let before = node.owner().outbox().len();
+            match node.approve_merge(now_secs()) {
+                Ok(built) => {
+                    say(format!("merge built skipped={}", built.skipped.len()));
+                    sign_and_take(node, keys, dir, &built, before)?;
                 }
                 Err(e) => say(format!("refused {e}")),
             }

@@ -1405,8 +1405,13 @@ after a wave of attacks, which showed how fragile that is.
   104 vB when it is spent. In a fee spike a small receipt can cost more to spend
   than it is worth.
 - **The app shows the projected spend cost.** In Owner mode, the books and
-  cash-out screens show "Spending your current receipts would cost about $X at
-  today's fees".
+  cash-out screens show one line: how many separate payments the wallet
+  holds and what spending all of them would cost at the fee of the last
+  blocks ("Spending your current receipts would cost about X at the fee of
+  recent blocks"). The fee is the median of the blocks the owner's device
+  has checked itself, not "today's" fee from a service, and the cost is in
+  sats: the owner device has no exchange rate at hand, so the shop's
+  currency is added only where one is (see below).
 - **Consolidate when cheap.** When fees are low, the app suggests merging small
   receipts into fewer outputs. This is a suggestion, never automatic. It
   merges receipts, so it also has a privacy cost (§11).
@@ -1433,7 +1438,35 @@ after a wave of attacks, which showed how fragile that is.
   fee of the last blocks, and, when that fee is low against the last
   weeks, an offer to merge them now with its cost. Approving it is an
   ordinary two-key approval. The fee comes from the blocks the owner's
-  own device has checked, never from a service. Not built.
+  own device has checked, never from a service. **Built** in the owner
+  node (`crates/openbmt-owner-node/src/receipts.rs`; rules in
+  `docs/OWNER-COINS-RULES.md` OC-16 to OC-21 and `docs/FEE-RULES.md`
+  FE-20):
+  - The device takes a fee sample from every block it downloads in full and
+    has checked, and, when it has none in the last 24 checked blocks, asks
+    one peer for the newest checked block by its hash, with no filter
+    (`docs/NETWORK-RULES.md` NR-47): about 9 MB a day at most. The history
+    of 512 samples is kept in a file of the node's folder.
+  - The line counts every unspent payment of the wallet, receive and change,
+    and prices spending all of them with the spend crate's own size model
+    for one transaction of that many inputs and one output, at the median
+    fee of the last 144 blocks, never below 1 sat per virtual byte. It has
+    its own words when the wallet is still catching up, holds nothing, or
+    has no fee yet. The cost is in sats; the shop's currency waits for a
+    rate on this device.
+  - The offer to merge shows with the line when the recent fee is at or
+    below the lowest quarter of the last 4,032 blocks, the wallet holds at
+    least 10 payments **[to tune]**, and merging now costs less than at the
+    usual (median) fee of those blocks. Its words give both costs and say
+    that a merge shows on the blockchain that the payments are one wallet's
+    (§11). Approving queues one cash-out of every payment it takes in to the
+    wallet's next change address and builds the session for the Key app: the
+    owner then takes the two-key session as for any spend, and nothing is
+    signed or sent before it. It is refused while a refund or cash-out is
+    waiting.
+  - One merge takes in at most 400 payments and 4 MiB of previous
+    transactions, oldest first; a larger wallet is merged in rounds, and the
+    offer comes again for the rest.
 - **Shops with many small sales.** On-chain bitcoin suits sales of tens
   of dollars and up. For a shop of small tickets the fitting tool is the
   merchant's own Lightning node (§8), which makes no receipt per sale.

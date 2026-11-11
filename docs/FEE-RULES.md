@@ -5,7 +5,9 @@ implements it. Each rule has an ID so that a test can name the rule it
 proves. The rules serve the line about receipts in `docs/DESIGN.md` §9
 ("What the owner is shown about receipts"): the fee of the last blocks
 comes from blocks the owner's own device has checked, never from a service.
-The wiring into the owner device is not built.
+The owner device takes the samples as FE-20 says (`crates/openbmt-owner-node`,
+`receipts.rs`), and the line and the offer that use them are in
+`docs/OWNER-COINS-RULES.md`, OC-16 to OC-21.
 
 The idea. The transactions of a block do not give their fees, because an
 input's value is in an earlier transaction that the device does not hold.
@@ -86,14 +88,48 @@ the stored form.
   height.
 - **FE-16.** A history is changed only by these methods, and a decoded
   history is checked as a whole before it replaces anything.
+- **FE-17.** `usual_rate(tip)` is the median `rate_milli` of the samples
+  whose height is in the last 4,032 blocks, the window of FE-14, with the
+  lower of the two middle values for an even count. It is none when fewer
+  than 20 such samples have a rate. It is the "usual fee" that the owner's
+  offer to merge compares with (OC-19).
 
 ## 3. Taking samples
 
-- **FE-20.** **[not built]** The owner's device takes a sample from every
-  block it already downloads in full. When it has downloaded none in the
-  last 24 blocks, it fetches one more full block. At about 1.5 MB a block
-  that is about 9 MB a day. With one sample every 24 blocks, the windows
-  of FE-13 and FE-14 hold about 6 and 168 samples.
+- **FE-20.** The owner's device takes a sample from every block it
+  already downloads in full. When it has downloaded none in the last 24
+  blocks, it fetches one more full block. At about 1.5 MB a block that is
+  about 9 MB a day. With one sample every 24 blocks, the windows of FE-13
+  and FE-14 hold about 6 and 168 samples. **Built** in
+  `crates/openbmt-owner-node/src/receipts.rs`, as follows.
+  - A sample is taken from a block that the driver hands over as one the
+    coin view reads and that the view has applied (so the watcher's checks,
+    WR-20 to WR-22, have passed and the block is on the best chain), and
+    from a block that the driver hands over as asked for by hash
+    (`docs/NETWORK-RULES.md`, NR-47), which the node checks on its own the
+    same way. The height is the block's place on the best chain. A block
+    that gives no sample is told as a note (FE-30), and stops nothing.
+  - The history is kept in `fee-history.bin` in the node's directory, in the
+    stored form of FE-12. It is written whole to a temporary file, flushed
+    and renamed, and the node's copy changes only after that has worked:
+    when the file cannot be written the history is as it was, and a note
+    says so. It is written only when a sample changed it.
+  - At the start the file is read strictly (FE-12). A file that is missing
+    gives an empty history. A file that is cut, changed, too large (over
+    64 KiB) or unreadable gives an empty history and a note, and is not a
+    stop; the next sample replaces it. Samples of blocks that the stored
+    chain no longer holds at their height are dropped at the start, with
+    a note.
+  - After a checked block, when the newest checked block is within the
+    4,032 blocks that FE-14 reads, no one is outstanding, and the node holds
+    no sample in the last 24 checked blocks (an empty history holds none),
+    the node asks the driver for that block by hash. At most one request
+    is outstanding. It ends when the block arrives, when the block leaves
+    the chain, or when 24 more blocks have been checked without it, and
+    then the newest checked block is asked for in its place. A block more
+    than 4,032 below the tip is never asked for: no window reads it.
+  - A reorganization calls `forget_from` with the height above the fork, and
+    the history is stored again.
 
 ## 4. What the owner is told
 
@@ -121,5 +157,6 @@ the stored form.
   offer to merge receipts only when `is_low` says so.
 - **They do not know the clock.** The windows are counted in blocks. A
   slow stretch of the chain spans more days than a fast one.
-- **They do not fetch anything.** Which blocks are downloaded, and when, is
-  FE-20, and it is not built.
+- **They do not fetch anything.** The functions of this library fetch
+  nothing. Which blocks are downloaded, and when, is FE-20, built in the
+  owner node.

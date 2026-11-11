@@ -1,6 +1,7 @@
 # Owner coin view rules: which coins the wallet holds
 
-Status: specification for `crates/openbmt-owner-node/src/coins.rs` and
+Status: specification for `crates/openbmt-owner-node/src/coins.rs`,
+`crates/openbmt-owner-node/src/receipts.rs` and
 `crates/openbmt-owner/src/state.rs`. Each
 rule has an ID so that a test can name the rule it proves (`oc_NN_*`).
 
@@ -141,6 +142,70 @@ amount.
   is tried again on the next run, with no time limit, until the view is ready.
   Requests after it wait with it, so the order of a counter's records holds.
 
+## 6. The line about receipts, and the offer to merge them
+
+The owner is shown one line about what the wallet's payments would cost to
+spend, and now and then an offer to merge them into one. Both rest on the
+owner's own checked view and on the fee samples of blocks the device has
+checked (`docs/FEE-RULES.md`, FE-20), and on nothing a service says. Screens
+say "payments" and "merge", never "coin", "output" or "consolidate". The
+code is in `crates/openbmt-owner-node/src/receipts.rs`.
+
+- **OC-16.** The line counts every unspent coin of the wallet, receive and
+  change alike: each costs one input when it is spent. The count is the
+  coins that the view offers to a spend (OC-01 to OC-04, and the owner's own
+  pending change at 0 confirmations), so it follows a receipt, a spend and a
+  reorganization as the view does.
+- **OC-17.** The cost is what spending all of them to one output would cost
+  at the rate of `FeeHistory::recent_rate` (FE-13), not a number of coins
+  times a constant. It is worked out with the spend crate's own size model
+  for a consolidation of that many inputs and one output (`docs/SPEND-RULES.md`,
+  SP-38), so it is the fee the planner gives that spend, to the satoshi: no
+  signing and no coin is needed. More coins than one transaction takes
+  (SP-39) are counted as several consolidations. The rate is at least 1
+  satoshi per virtual byte (1,000 per 1,000), the lowest that nodes relay by
+  default: a block whose fees average less than that does not make a
+  cheaper spend. The amount is in sats with separators (SC-09). The owner
+  device has no exchange rate at hand, so the shop's currency is not used.
+- **OC-18.** The line has four states, each with its own words (SC-01,
+  SC-07): the view is not ready (it is not ready, or has not checked every
+  block up to the tip, as OC-14 says for a sale's facts); the wallet holds
+  no coin; the wallet holds coins and fewer than 3 blocks of the last 144
+  give a fee yet (FE-13); and the line itself, the count and the cost.
+- **OC-19.** The offer to merge is shown with the line when all three
+  hold: `FeeHistory::is_low` says the recent fee is low (FE-14, which needs
+  its own minimum of history); the wallet holds at least `MERGE_MIN_COINS`
+  coins that a spend may use, 10 **[to tune]** (a coin with fewer
+  confirmations than the owner's queue asks for is not one of them); and
+  merging now costs less than the same merge at `FeeHistory::usual_rate`
+  (FE-17), so that the saving is above zero. The words give the cost now and
+  the cost at the usual fee, and say plainly that a merge shows on the
+  blockchain that these payments belong to one wallet (`docs/DESIGN.md` §11).
+  The offer is a suggestion and is never taken by itself.
+- **OC-20.** Approving the offer queues one cash-out of every coin the merge
+  takes in (the amount "all") to the wallet's next change address, and
+  builds a session for the Key app from it at the rate that the offer
+  stated, through the same path any spend takes (`OwnerNode::build_request`
+  with the queue's cash-out of AS-57). It is then an ordinary two-key
+  session: the Key app shows it as a move inside the wallet, and key 1 signs
+  it when the owner takes the response (`OwnerNode::take`). Nothing is
+  signed or sent by the approval itself, and no new signing path exists. The
+  merge is refused, and the queue is as it was but for the number the entry
+  used, when the offer does not hold at that moment, when a refund or a
+  cash-out is queued or in a session (the merge would take the same coins
+  and the change address would no longer be the one in the entry), or when
+  the session cannot take it (the session that came out without it is given
+  up and the entry is cancelled). A merge entry is queued and built in one
+  call, so it does not wait in the queue for a change address that has moved.
+- **OC-21.** One merge takes in at most `MAX_CONSOLIDATION_INPUTS` (SP-39)
+  coins, and at most 4 MiB of the previous transactions that every input
+  carries (half of the signer's 8 MiB file, `docs/SIGNER-RULES.md`), oldest
+  first (SP-11); the first coin is always taken. A wallet that holds more
+  gets the rest merged by another offer once this merge has been taken: the
+  new coin and the coins left make the next count. The words of the offer
+  then say "400 of your 1,000 payments", and its cost is that of the merge
+  it builds.
+
 ## What these rules do not say
 
 - **They do not prove the wallet holds the coins on the network.** A
@@ -153,3 +218,11 @@ amount.
   reason. A payment that arrives after the sale closed raises the limit.
 - **They do not say a broadcast transaction arrived.** That is
   `docs/NETWORK-RULES.md`, NR-86 to NR-91.
+- **They do not keep a given-up merge from coming back.** If the owner gives
+  up the session of a merge (AS-66), its entry returns to the queue with the
+  change address it was made for. That address is still the wallet's own, but
+  the Key app then shows it as a payment to an address, not as a move
+  inside the wallet. The owner cancels such an entry (AS-54).
+- **They do not give the fee a transaction pays.** The line is a guide. The
+  owner sets the rate of a spend when the session is built, and the fee of a
+  merge is the one the offer stated only at the rate it names.

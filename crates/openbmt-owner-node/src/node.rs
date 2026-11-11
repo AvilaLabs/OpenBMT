@@ -56,7 +56,7 @@ use std::time::{Duration, Instant};
 use bitcoin::bip32::Xpriv;
 use bitcoin::bip32::Xpub;
 use bitcoin::consensus::deserialize;
-use bitcoin::{Network, OutPoint, ScriptBuf, Transaction, Txid};
+use bitcoin::{BlockHash, Network, OutPoint, ScriptBuf, Transaction, Txid};
 use openbmt_core::batch::BatchPolicy;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::wallet::{Keychain, WalletDescription};
@@ -67,11 +67,12 @@ use openbmt_net_io::{
 };
 use openbmt_owner::{Built, Delivery, Options, Owner, OwnerError, Stage, Taken};
 use openbmt_signer::SignerState;
-use openbmt_watch::{HeaderChain, Refusal, WellFormedBlock};
+use openbmt_watch::{FeeHistory, HeaderChain, Refusal, WellFormedBlock};
 
 use crate::coins::{
     ApplyError, CoinView, PendingError, ScriptSet, ViewState, GAP, INDEX_LIMIT, UNDO_BLOCKS,
 };
+use crate::receipts::read_fee_history;
 use crate::take_journal::{TakeJournal, MAX_JOURNAL_BYTES};
 use crate::watcher::{write_file, OwnerConfig, OwnerStartError, OwnerWatcher};
 
@@ -104,6 +105,9 @@ pub trait OwnerPort: DriverPort {
     fn rescan_from(&self, height: u32);
     /// Whether to fetch the transactions that peers announce.
     fn set_fetch_transactions(&self, on: bool);
+    /// NR-47: download this block of the best chain, whatever the filters
+    /// say. It comes back as [`AppEvent::FeeBlock`].
+    fn fetch_block(&self, hash: BlockHash);
 }
 
 impl OwnerPort for Handle {
@@ -121,6 +125,10 @@ impl OwnerPort for Handle {
 
     fn set_fetch_transactions(&self, on: bool) {
         Handle::set_fetch_transactions(self, on);
+    }
+
+    fn fetch_block(&self, hash: BlockHash) {
+        Handle::fetch_block(self, hash);
     }
 }
 
@@ -409,29 +417,34 @@ fn marks_of(owner: &Owner, view: &CoinView) -> (u32, u32) {
 
 /// The owner node. See the module docs.
 pub struct OwnerNode<P: OwnerPort = Handle> {
-    watcher: OwnerWatcher<P>,
+    pub(crate) watcher: OwnerWatcher<P>,
     /// The second driver, behind the proxy.
     sender: Option<OwnerWatcher<P>>,
     without_tor: bool,
-    owner: Owner,
-    view: CoinView,
+    pub(crate) owner: Owner,
+    pub(crate) view: CoinView,
     scripts: ScriptSet,
-    wallet: WalletDescription,
-    dir: PathBuf,
+    pub(crate) wallet: WalletDescription,
+    pub(crate) dir: PathBuf,
     refund_depth: u32,
     random: Box<dyn Randomness>,
     states: BTreeMap<Txid, SendState>,
     relays: BTreeMap<Txid, (usize, usize)>,
-    halted: Option<String>,
+    pub(crate) halted: Option<String>,
     /// A watch-range limit is returned directly to queue/build callers too.
     watch_limit: Option<NodeError>,
     /// A runtime rescan command is queued, but its ordered start marker has
     /// not yet reached this node. Ignore old `Checked` events until then.
-    awaiting_rescan: u32,
+    pub(crate) awaiting_rescan: u32,
     take_journal: Option<TakeJournal>,
     owner_secret: [u8; 32],
     approver: DeviceId,
     policy: BatchPolicy,
+    /// FE-20: the fee samples of the blocks this node has checked.
+    pub(crate) fees: FeeHistory,
+    /// FE-20: the block asked for by hash to take a sample from, with its
+    /// height, until it arrives, leaves the chain or is given up.
+    pub(crate) fee_request: Option<(BlockHash, u32)>,
 }
 
 impl OwnerNode<Handle> {
@@ -491,6 +504,9 @@ impl<P: OwnerPort> OwnerNode<P> {
             Err(e) if e.kind() == io::ErrorKind::NotFound => CoinView::new(birthday),
             Err(e) => return Err(NodeError::Files(format!("{COINS_FILE}: {e}"))),
         };
+        // FE-20: a fee history that does not read back is a note and an
+        // empty history, never a stop.
+        let (fees, fee_note) = read_fee_history(&dir);
         let take_journal = read_take_journal(&dir).map_err(NodeError::Files)?;
         let queue_bytes = if let Some(journal) = &take_journal {
             Ok(journal.queue.clone())
@@ -570,7 +586,13 @@ impl<P: OwnerPort> OwnerNode<P> {
             owner_secret,
             approver,
             policy,
+            fees,
+            fee_request: None,
         };
+        if let Some(line) = fee_note {
+            node.note(line);
+        }
+        node.prune_fee_samples();
         if node.take_journal.is_none() {
             node.reconcile();
         } else {
@@ -829,7 +851,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         self.relays.get(txid).copied()
     }
 
-    fn note(&mut self, line: String) {
+    pub(crate) fn note(&mut self, line: String) {
         self.watcher.note(line);
     }
 
@@ -926,6 +948,18 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// the view holds. The view must be ready and have checked every block up
     /// to the tip, or nothing is built.
     pub fn build_request(&mut self, fee_rate: u64, now: u64) -> Result<Built, NodeError> {
+        self.build_request_from(fee_rate, now, |coins| coins)
+    }
+
+    /// [`OwnerNode::build_request`] over the coins that `pick` keeps of the
+    /// ones the view offers. The merge of OC-20 hands in fewer coins than
+    /// the wallet holds when they do not fit one transaction.
+    pub(crate) fn build_request_from(
+        &mut self,
+        fee_rate: u64,
+        now: u64,
+        pick: impl FnOnce(Vec<openbmt_spend::Coin>) -> Vec<openbmt_spend::Coin>,
+    ) -> Result<Built, NodeError> {
         let commit = TAKE_JOURNAL_LOCK
             .lock()
             .map_err(|_| NodeError::Files("take journal lock is poisoned".to_string()))?;
@@ -948,7 +982,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 self.view.checked()
             )));
         }
-        let coins = self.view.coins(tip);
+        let coins = pick(self.view.coins(tip));
         let mut random = [0u8; 96];
         for chunk in random.chunks_mut(8) {
             let word = self.random.next_u64().to_le_bytes();
@@ -1336,6 +1370,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         match event {
             AppEvent::Chain { left, .. } if !left.is_empty() => self.left_the_chain(left),
             AppEvent::Block { hash, bytes } => self.block(hash, bytes),
+            AppEvent::FeeBlock { hash, bytes } => self.fee_block(hash, bytes),
             AppEvent::Checked(height) => self.checked(*height),
             AppEvent::RescanStarted(_) => {
                 self.awaiting_rescan = self.awaiting_rescan.saturating_sub(1)
@@ -1391,6 +1426,8 @@ impl<P: OwnerPort> OwnerNode<P> {
                 },
                 |h| h.saturating_sub(1),
             );
+        // FE-20: the samples of the blocks that left go with them.
+        self.forget_fee_samples_from(fork.saturating_add(1), left);
         let dir = self.dir.clone();
         match self
             .view
@@ -1465,6 +1502,9 @@ impl<P: OwnerPort> OwnerNode<P> {
                 write_file(&dir, COINS_FILE, b)
             }) {
             Ok(effect) => {
+                // FE-20: a block downloaded in full and checked gives a
+                // fee sample.
+                self.take_fee_sample(hash, bytes);
                 for txid in effect.confirmed {
                     self.note(format!("{txid} is in block {hash}"));
                 }
@@ -1501,6 +1541,9 @@ impl<P: OwnerPort> OwnerNode<P> {
                 self.stop(format!("the coin view could not be stored: {e}"));
             }
         }
+        // FE-20: when the node is at the tip and has taken no sample in the
+        // last 24 checked blocks, it asks for one more full block.
+        self.ask_for_fee_block(height);
     }
 }
 

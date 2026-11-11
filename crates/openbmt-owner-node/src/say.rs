@@ -10,6 +10,7 @@ use openbmt_watch::Problem;
 use crate::coins::{ApplyError, PendingError, ReceiptState, ViewState};
 use crate::facts::FactsRefused;
 use crate::node::{NodeError, SendRefused, SendState};
+use crate::receipts::{MergeOffer, MergeRefused, ReceiptsLine};
 use crate::refunds::{NoteKind, RefundNote};
 use crate::watcher::OwnerStartError;
 
@@ -201,6 +202,143 @@ impl SendState {
             Self::Done => Words::new(Tone::Good, "Payment depth reached", "The payment reached the chosen number of blocks in the owner's light check.", Who::Nobody, "Nothing to do."),
             Self::Replaced => Words::new(Tone::Ended, "Payment replaced", "Another payment spent the same coins, so this payment will not complete.", Who::Owner, "Review the returned entries and decide whether to sign them again."),
             Self::Unresolved => Words::new(Tone::Stop, "Payment needs a fresh check", "The saved view cannot tell whether this payment completed or was replaced.", Who::Owner, "Start a fresh check from the wallet's first block."),
+        }
+    }
+}
+
+/// A count with separators: "1,200" (SC-09).
+fn grouped(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// "1 separate payment", "12 separate payments".
+fn separate_payments(n: usize) -> String {
+    if n == 1 {
+        "1 separate payment".to_string()
+    } else {
+        format!("{} separate payments", grouped(n))
+    }
+}
+
+impl ReceiptsLine {
+    /// OC-18: the words of the line about receipts. The shop's currency is
+    /// not at hand on this device, so the cost is in sats (SC-09).
+    pub fn words(self) -> Words {
+        match self {
+            Self::NotReady => Words::new(
+                Tone::Info,
+                "Payments not counted yet",
+                "The wallet is still catching up with the chain, so its payments cannot be counted yet.",
+                Who::Nobody,
+                "Nothing to do. The count appears once the wallet has caught up.",
+            )
+            .code("OC-18"),
+            Self::NoCoins => Words::new(
+                Tone::Info,
+                "No payments to spend",
+                "The wallet holds no payments at the moment.",
+                Who::Nobody,
+                "Nothing to do. This line shows the cost again after a payment arrives.",
+            )
+            .code("OC-18"),
+            Self::FeeUnknown { payments } => Words::new(
+                Tone::Info,
+                "Spending cost not known yet",
+                format!(
+                    "The wallet holds {}. The fee of recent blocks is not known yet, so no cost is shown.",
+                    separate_payments(payments)
+                ),
+                Who::Nobody,
+                "Nothing to do. The cost shows once the owner app has looked at enough recent blocks.",
+            )
+            .code("OC-18"),
+            Self::Known {
+                payments,
+                cost_sats,
+                ..
+            } => Words::new(
+                Tone::Info,
+                "Cost of spending payments",
+                format!(
+                    "The wallet holds {}. Spending all of them now would cost about {}.",
+                    separate_payments(payments),
+                    openbmt_core::say::sats(cost_sats)
+                ),
+                Who::Nobody,
+                "Nothing to do. This is a guide, and the fee is fixed when a payment is made.",
+            )
+            .code("OC-18"),
+        }
+    }
+}
+
+impl MergeOffer {
+    /// OC-19: the words of the offer to merge. They give the cost now and
+    /// at the usual fee, and say that a merge shows on the chain that the
+    /// payments belong to one wallet.
+    pub fn words(&self) -> Words {
+        let which = if self.coins == self.of {
+            format!("your {} payments", grouped(self.coins))
+        } else {
+            format!(
+                "{} of your {} payments",
+                grouped(self.coins),
+                grouped(self.of)
+            )
+        };
+        Words::new(
+            Tone::Info,
+            "Merge payments now?",
+            format!(
+                "Merging {which} into one costs about {} now, against about {} at the usual fee.",
+                openbmt_core::say::sats(self.cost_sats),
+                openbmt_core::say::sats(self.usual_cost_sats)
+            ),
+            Who::Owner,
+            "Merging shows on the blockchain that these payments belong to one wallet. Approve it only if that is fine.",
+        )
+        .code("OC-19")
+    }
+}
+
+impl MergeRefused {
+    /// OC-19, OC-20: the words for a merge that was not built.
+    pub fn words(&self) -> Words {
+        match self {
+            Self::NoOffer => Words::new(
+                Tone::Ended,
+                "No merge to offer",
+                "Merging is not on offer now, so nothing was built.",
+                Who::Nobody,
+                "Nothing to do. The offer shows again when fees are low and enough payments wait.",
+            )
+            .code("OC-19"),
+            Self::OtherPaymentsWaiting => Words::new(
+                Tone::Info,
+                "Other payments are waiting",
+                "A refund or a cash-out is waiting for the Key app, and a merge would take the same payments.",
+                Who::Owner,
+                "Finish or cancel the waiting payments, then approve the merge again.",
+            )
+            .code("OC-20"),
+            Self::NotBuilt(why) => Words::new(
+                Tone::Stop,
+                "Merge not built",
+                "The merge could not be put in a session for the Key app, and the queue is as it was.",
+                Who::Owner,
+                "Try again later. If this returns, tell the OpenBMT project and include the Details text.",
+            )
+            .code("OC-20")
+            .detail(openbmt_core::say::clean_foreign(why)),
+            Self::Node(error) => error.words(),
         }
     }
 }
@@ -456,6 +594,45 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("ClaimedMoreThanSeen", NoteKind::ClaimedMoreThanSeen),
     ] {
         add(&format!("NoteKind::{name}"), kind.words());
+    }
+    let offer = MergeOffer {
+        coins: 12,
+        of: 12,
+        rate_per_kvb: 1_000,
+        cost_sats: 1_600,
+        usual_cost_sats: 4_000,
+    };
+    for (name, line) in [
+        ("NotReady", ReceiptsLine::NotReady),
+        ("NoCoins", ReceiptsLine::NoCoins),
+        ("FeeUnknown", ReceiptsLine::FeeUnknown { payments: 12 }),
+        (
+            "Known",
+            ReceiptsLine::Known {
+                payments: 12,
+                cost_sats: 4_000,
+                rate_per_kvb: 2_500,
+            },
+        ),
+    ] {
+        add(&format!("ReceiptsLine::{name}"), line.words());
+    }
+    add("MergeOffer::All", offer.words());
+    add(
+        "MergeOffer::Part",
+        MergeOffer {
+            coins: 400,
+            of: 1_000,
+            ..offer
+        }
+        .words(),
+    );
+    for (name, why) in [
+        ("NoOffer", MergeRefused::NoOffer),
+        ("OtherPaymentsWaiting", MergeRefused::OtherPaymentsWaiting),
+        ("NotBuilt", MergeRefused::NotBuilt(String::new())),
+    ] {
+        add(&format!("MergeRefused::{name}"), why.words());
     }
     add("SendRefused::Malformed", SendRefused::Malformed.words());
     add("SendRefused::NoTor", SendRefused::NoTor.words());

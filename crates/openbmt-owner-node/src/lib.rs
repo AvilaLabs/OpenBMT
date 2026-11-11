@@ -49,6 +49,7 @@ pub mod copy;
 pub mod facts;
 pub mod link;
 pub mod node;
+pub mod receipts;
 pub mod refunds;
 pub mod say;
 mod take_journal;
@@ -66,6 +67,7 @@ pub use node::{
     NodeError, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState, BROADCAST_DIR, COINS_FILE,
     NO_TOR, QUEUE_FILE, TAKE_JOURNAL_FILE,
 };
+pub use receipts::{MergeOffer, MergeRefused, ReceiptsLine, FEE_FILE, MERGE_MIN_COINS};
 pub use refunds::{
     Applied, CashRefundSeen, Evidence, IntakeError, NoteKind, RefundIntake, RefundNote, Stopped,
 };
