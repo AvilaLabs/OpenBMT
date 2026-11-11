@@ -16,7 +16,7 @@ local test key; release signing is a separate step (see "Signing").
 |---|---|
 | First start | The counter's name, the manager's name and PIN, the address of Orbot, and Pair with the Key app. |
 | Pairing | Scan the Key app's offer; the counter's own request as a code with its four words and They match / They differ; scan the owner phone's bundle. |
-| Home | Whether Bitcoin is ready, the price and each source's note, the own node's line with Try again (when one is set), New sale, Sales, the cashier's name, the Lightning line (only while a connection is saved, CR-116), Your own node, Lightning, About. |
+| Home | Whether Bitcoin is ready, the price and each source's note, the own node's line with Try again (when one is set), the Box's line with Try again (when the pairing holds a relay, CR-136), New sale, Sales, the cashier's name, the Lightning line (only while a connection is saved, CR-116), Your own node, Lightning, About. |
 | Your own node | The counter's own setting, behind the manager's PIN (CR-100): the Tor address of the shop's own node, saved or removed. A home-network address is refused, and Orbot must be on (CR-101, CR-102). It is kept in the app's config file, not in the pairing. |
 | Lightning | The connection to the shop's own Lightning node, behind the manager's PIN (CR-115): LND by scanning or pasting the `lndconnect://` code, Core Lightning by address, rune and certificate (PEM or SHA-256 fingerprint). The test of LN-20 runs against the node the owner named in the shop's settings; only when it passes is the connection sealed with the Keystore and saved in `noBackupFilesDir` (`lightning.obkl`). Remove deletes it at once. One thread sends the library's requests over HTTPS (no redirect, at most 1,000,000 bytes, 20 s to connect through Tor and 10 s directly, 15 s to read), through Orbot when the host ends in `.onion` or Tor is on, with the node's certificate pinned by the library and the host name not checked (CR-114). |
 | New sale | A keypad in the shop's currency. |
@@ -126,6 +126,12 @@ checks the record again at every start.
   reports to the screen thread. Every other call into the library is made on
   the screen thread, except the start, which runs before the pump begins, and
   the PIN's PBKDF2, which runs off the screen thread.
+- **The link to the owner.** Only when the pairing holds a relay (CR-130,
+  CR-131), one more thread calls `link_step` every 5 seconds (CR-135). An
+  onion relay goes through Orbot, whose address is handed to the library only
+  when it answers; a direct relay goes direct, unless the shop's Tor setting
+  is on, when it goes through the proxy (CR-134). Try again on the home
+  screen calls `link_step` at once, on a thread of its own.
 
 ## Build
 

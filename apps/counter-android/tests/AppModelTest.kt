@@ -485,6 +485,21 @@ object AppModelTest {
         ok(fetcher.asked.size == askedBefore, "a quote never fetches")
     }
 
+    // ---- the link to the owner (CR-134, CR-135) -----------------------------------------------------------------
+
+    private fun linkTests() {
+        var asked = 0
+        var answer = true
+        val probe = SocksProbe { _, _ -> asked++; answer }
+        ok(LinkProxy.EVERY_MS == 5000L, "the link's turn is every 5 seconds")
+        ok(LinkProxy.pick(false, false, "127.0.0.1:9050", probe) == null && asked == 0, "an address on the local network needs no proxy and none is asked")
+        ok(LinkProxy.pick(true, true, "127.0.0.1:9050", probe) == null && asked == 0, "Tor on: the node's proxy is the library's, nothing more is given")
+        ok(LinkProxy.pick(true, false, "127.0.0.1:9050", probe) == "127.0.0.1:9050" && asked == 1, "an onion relay with Tor off gets Orbot's address when Orbot answers")
+        answer = false
+        ok(LinkProxy.pick(true, false, "127.0.0.1:9050", probe) == null, "Orbot does not answer: no proxy, and the library says Orbot is needed")
+        ok(LinkProxy.pick(true, false, "nonsense", probe) == null, "an address that is not an address gives none")
+    }
+
     // ---- Tor ------------------------------------------------------------------------------------------------------
 
     private fun torTests() {
@@ -619,6 +634,7 @@ object AppModelTest {
         amountTests()
         qrTests()
         priceTests()
+        linkTests()
         torTests()
         lightningTests()
         screenTests()

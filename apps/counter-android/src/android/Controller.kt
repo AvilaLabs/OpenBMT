@@ -39,6 +39,7 @@ import org.openbmt.counter.RateSource
 import org.openbmt.counter.Rates
 import org.openbmt.counter.RefundAsk
 import org.openbmt.counter.RefundState
+import org.openbmt.counter.RelayKind
 import org.openbmt.counter.SaleState
 import org.openbmt.counter.Shop
 import org.openbmt.counter.OwnNodeSetting
@@ -48,7 +49,9 @@ import org.openbmt.counter.StartConfig
  * The screens and what they do. The node runs while the activity is visible:
  * [visible] starts it and [hidden] stops it, releasing its folder. One
  * background thread pumps the node (`pump(250)`) and posts what it reports to
- * the screen thread; every other call into the library is made on the screen
+ * the screen thread; when the pairing holds a relay (CR-130, CR-131) one more thread takes a turn of the
+ * link to the owner every five seconds (CR-135) and a line on the home screen says how it is going
+ * (CR-136); every other call into the library is made on the screen
  * thread, except the start, which runs on a worker thread before the pump
  * begins. The price is fetched by one worker thread for each source on the
  * schedule of RT-40 to RT-45, and the bytes go to the library. The shop's own
@@ -94,6 +97,7 @@ class Controller(private val act: MainActivity) {
     private var book: PriceBook? = null
     private var pumpFault: SayWords? = null
     private var pumpThread: Thread? = null
+    private var linkThread: Thread? = null
     private val workers = ArrayList<Thread>()
     private var lightningThread: Thread? = null
     private var transport: LightningTransport? = null
@@ -197,7 +201,8 @@ class Controller(private val act: MainActivity) {
             try {
                 val sources = Rates.sources()
                 // For display only: the library checks the record again at the start (CR-97).
-                val gate = TorGate(Shop.pairing(rec).settings.torOn, cfg.proxy)
+                val pairing = Shop.pairing(rec)
+                val gate = TorGate(pairing.settings.torOn, cfg.proxy)
                 if (!gate.available()) {
                     main.post {
                         if (id == runId) {
@@ -210,7 +215,11 @@ class Controller(private val act: MainActivity) {
                 synchronized(startLock) {
                     if (id != runId) return@Thread
                     nodeDir.mkdirs()
-                    val n = CounterNode.start(StartConfig(nodeDir.path, nowSecs(), rec, gate.proxy, cfg.ownNode.ifEmpty { null }, lightning))
+                    // CR-134: an onion relay with Tor off in the settings goes through Orbot, when it answers.
+                    val linkProxy = LinkProxy.pick(pairing.relay == RelayKind.Onion, pairing.settings.torOn, cfg.proxy, Socks5Probe())
+                    val n = CounterNode.start(
+                        StartConfig(nodeDir.path, nowSecs(), rec, gate.proxy, cfg.ownNode.ifEmpty { null }, lightning, linkProxy),
+                    )
                     if (id != runId) {
                         n.close()
                         return@Thread
@@ -285,8 +294,41 @@ class Controller(private val act: MainActivity) {
         pumpThread = pump
         pump.start()
         startLightning(id, n, gate)
+        // CR-135: one thread for the link, only when the pairing holds a relay.
+        if (hasLink(n)) {
+            val link = Thread {
+                while (runId == id) {
+                    try {
+                        n.linkStep(nowSecs())
+                    } catch (_: CounterException) {
+                        break
+                    }
+                    main.post { if (id == runId) tick?.invoke() }
+                    var waited = 0L
+                    while (runId == id && waited < LinkProxy.EVERY_MS) {
+                        try {
+                            Thread.sleep(250)
+                        } catch (_: InterruptedException) {
+                            return@Thread
+                        }
+                        waited += 250
+                    }
+                }
+            }
+            link.isDaemon = true
+            linkThread = link
+            link.start()
+        }
         showHome()
     }
+
+    /** CR-136: whether the counter has a link to the owner, which is when its pairing holds a relay. */
+    private fun hasLink(n: CounterNode): Boolean =
+        try {
+            n.linkState() != null
+        } catch (_: CounterException) {
+            false
+        }
 
     /**
      * CR-112, CR-114: the one thread that talks to the shop's node. It runs a queued job (the test of a
@@ -346,6 +388,11 @@ class Controller(private val act: MainActivity) {
         tick = null
         pumpThread?.let { try { it.join(1500) } catch (_: InterruptedException) { } }
         pumpThread = null
+        linkThread?.let {
+            it.interrupt()
+            try { it.join(1500) } catch (_: InterruptedException) { }
+        }
+        linkThread = null
         for (w in workers) w.interrupt()
         workers.clear()
         lightningThread?.interrupt()
@@ -581,6 +628,8 @@ class Controller(private val act: MainActivity) {
         val priceSlot = Slot(act)
         val ownSlot = Slot(act)
         val lightningSlot = Slot(act)
+        val linkSlot = Slot(act)
+        val linked = hasLink(n)
         val views = ArrayList<View>()
         views.add(label("Is Bitcoin ready?"))
         views.add(health)
@@ -595,6 +644,17 @@ class Controller(private val act: MainActivity) {
                     n.ownNodeRetry()
                 } catch (e: CounterException) {
                     ownSlot.show(ui.words(e.sayWords()))
+                }
+            })
+        }
+        if (linked) {
+            // CR-136: the link to the owner, and a way to call the Box now.
+            views.add(label("The Box"))
+            views.add(linkSlot)
+            views.add(ui.button("Try again") {
+                async({ n.linkStep(nowSecs(), true) }) { r ->
+                    r.exceptionOrNull()?.let { if (it is CounterException) linkSlot.show(ui.words(it.sayWords())) }
+                    if (r.isSuccess) tick?.invoke()
                 }
             })
         }
@@ -630,6 +690,7 @@ class Controller(private val act: MainActivity) {
             health.show(ui.words(healthWords(n)))
             lightningWords(n)?.let { lightningSlot.show(label("Lightning"), ui.words(it)) } ?: lightningSlot.show()
             if (cfg.ownNode.isNotEmpty()) ownSlot.show(ui.words(ownNodeWords(n)))
+            if (linked) linkSlot.show(ui.words(linkWords(n)))
             priceSlot.show(*priceViews())
         }
         tick?.invoke()
@@ -649,6 +710,14 @@ class Controller(private val act: MainActivity) {
     private fun lightningWords(n: CounterNode): SayWords? =
         try {
             n.status().lightning?.words?.say()
+        } catch (e: CounterException) {
+            e.sayWords()
+        }
+
+    /** CR-136: the link's line, from the library's words. */
+    private fun linkWords(n: CounterNode): SayWords =
+        try {
+            n.linkState()?.words?.say() ?: AppWords.starting
         } catch (e: CounterException) {
             e.sayWords()
         }
