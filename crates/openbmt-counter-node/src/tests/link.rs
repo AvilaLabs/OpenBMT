@@ -62,6 +62,10 @@ fn courier(
 }
 
 fn world(cfg: CounterLinkConfig) -> World {
+    world_with(cfg, true)
+}
+
+fn world_with(cfg: CounterLinkConfig, owner_mailbox_first: bool) -> World {
     let relay = MemoryRelay::new(id(99), &[owner(), counter()]).unwrap();
     let node_dir = Scratch::new();
     let link_dir = Scratch::new();
@@ -85,8 +89,11 @@ fn world(cfg: CounterLinkConfig) -> World {
         (counter(), Role::Counter),
         &owner_dir,
     );
-    // Both mailboxes exist before anyone sends.
-    owner_side.poll().unwrap();
+    // Both mailboxes exist before anyone sends, unless the test asks for
+    // the owner's to be made later.
+    if owner_mailbox_first {
+        owner_side.poll().unwrap();
+    }
     link.courier_mut().poll().unwrap();
     World {
         rig,
@@ -441,6 +448,29 @@ fn lk_57_check_ins_are_at_most_one_a_minute_and_only_when_something_changed_or_t
     assert_eq!(count(&mut w), 0);
     w.step(T0 + 660 + 600);
     assert_eq!(count(&mut w), 1);
+}
+
+#[test]
+fn lk_57_a_check_in_refused_before_the_owner_s_mailbox_exists_is_sent_again_as_the_same_record() {
+    let mut cfg = config();
+    cfg.retry_secs = 5;
+    let mut w = world_with(cfg, false);
+    // The owner's mailbox is not made yet: the relay refuses the check-in.
+    w.step(T0);
+    assert_eq!(w.records().len(), 1);
+    let first = w.records()[0].clone();
+    // The owner's first poll makes its mailbox; nothing has reached it.
+    assert!(of_kind(&w.owner_gets(), Kind::CheckIn).is_empty());
+    // The next step sends the same record again, and writes no new one.
+    w.step(T0 + 5);
+    let got = w.owner_gets();
+    let check_ins = of_kind(&got, Kind::CheckIn);
+    assert_eq!(check_ins.len(), 1);
+    assert_eq!(Record::from_bytes(&check_ins[0].content).unwrap(), first);
+    assert_eq!(w.records(), vec![first]);
+    // Delivered once: not sent again.
+    w.step(T0 + 10);
+    assert!(of_kind(&w.owner_gets(), Kind::CheckIn).is_empty());
 }
 
 #[test]

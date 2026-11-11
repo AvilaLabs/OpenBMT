@@ -126,6 +126,9 @@ pub struct CounterLink<R: Post = RelayPost> {
     last_send_at: Option<u64>,
     last_check_in_at: Option<u64>,
     len_after_check_in: u64,
+    /// LK-57: the check-in record that did not reach the relay, sent again
+    /// at each step until it does or a newer check-in replaces it.
+    unsent_check_in: Option<Vec<u8>>,
     next_relay_at: u64,
     too_long_noted: bool,
     marks_ignored: u64,
@@ -149,6 +152,7 @@ impl<R: Post> CounterLink<R> {
             last_send_at: None,
             last_check_in_at: None,
             len_after_check_in: 0,
+            unsent_check_in: None,
             next_relay_at: 0,
             too_long_noted: false,
             marks_ignored: 0,
@@ -351,25 +355,34 @@ impl<R: Post> CounterLink<R> {
                         || now >= at.saturating_add(self.cfg.check_in_max_secs))
             }
         };
-        if !due {
-            return true;
-        }
-        // Whatever comes of it, not again before the minimum has passed.
-        self.last_check_in_at = Some(now);
-        let record = match node.check_in() {
-            Ok(record) => record,
-            Err(e) => {
-                self.note(format!("the check-in was not written: {e}"));
-                return true;
+        if due {
+            // Whatever comes of it, no new check-in before the minimum has
+            // passed.
+            self.last_check_in_at = Some(now);
+            match node.check_in() {
+                Ok(record) => {
+                    self.len_after_check_in = node.counter().records().len();
+                    // A newer check-in replaces one that was never delivered.
+                    self.unsent_check_in = Some(record.to_bytes());
+                }
+                Err(e) => {
+                    self.note(format!("the check-in was not written: {e}"));
+                }
             }
+        }
+        // A check-in that did not reach the relay is sent again, the same
+        // record, until it does: no new record is written for it.
+        let Some(bytes) = self.unsent_check_in.take() else {
+            return true;
         };
-        self.len_after_check_in = node.counter().records().len();
-        match self
-            .courier
-            .send(&self.owner, Kind::CheckIn, &record.to_bytes())
-        {
+        match self.courier.send(&self.owner, Kind::CheckIn, &bytes) {
             Ok(()) => true,
-            Err(e) => self.send_failed(&e, "the check-in"),
+            Err(e) => {
+                if e.is_retryable() {
+                    self.unsent_check_in = Some(bytes);
+                }
+                self.send_failed(&e, "the check-in")
+            }
         }
     }
 

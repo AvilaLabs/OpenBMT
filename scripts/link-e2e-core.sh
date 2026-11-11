@@ -410,6 +410,12 @@ fi
 # ---- 3 ---------------------------------------------------------------------------
 
 say "3. A check-in arrived and matches"
+# The check-in comes as a record and as a message of kind Check-in (LK-57);
+# the owner may hold the record before its next poll takes the message.
+for _ in $(seq 1 60); do
+  read_states && [ -n "$CI_SEQ" ] && [ "$CI_SEQ" != none ] && break
+  sleep 0.5
+done
 xcmd c linkstate
 LS3=$(grep '^linkstate ' <<<"$LAST")
 xcmd o linkstate

@@ -263,7 +263,10 @@ over is still checked by the rules of the thing it carries.
   intervals, the shortest time between check-ins when the chain has
   changed and the longest when it has not; both are 15 minutes by default.
   The check-in is part of the chain, so it reaches the owner in the
-  records as well.
+  records as well. A check-in message that does not reach the relay, or
+  that the relay refuses because the owner's mailbox is not made yet, is
+  sent again at each later step, the same record, until it gets through
+  or a newer check-in takes its place. No record is written for a resend.
 - **LK-58.** The owner keeps a copy of each counter's chain. It takes a
   record into the copy only if its author is on the signed device list, the
   signature is valid, its number is the copy's length and its `prev` is the
