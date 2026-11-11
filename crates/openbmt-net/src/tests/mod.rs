@@ -4,6 +4,7 @@
 mod book;
 mod broadcast;
 mod events;
+mod fee_block;
 mod frame;
 mod kit;
 mod manager;

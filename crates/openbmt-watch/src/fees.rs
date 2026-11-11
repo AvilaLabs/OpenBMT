@@ -254,6 +254,17 @@ impl FeeHistory {
         Some(recent <= quartile)
     }
 
+    /// FE-17: the usual rate, the median rate of the last 4,032 blocks, in
+    /// thousandths of a satoshi per virtual byte. None with fewer than 20
+    /// samples with a rate in that window.
+    pub fn usual_rate(&self, tip: u32) -> Option<u64> {
+        let rates = self.rates(tip, LOW_WINDOW_BLOCKS);
+        if rates.len() < MIN_WINDOW_SAMPLES {
+            return None;
+        }
+        rates.get((rates.len() - 1) / 2).copied()
+    }
+
     /// FE-12: the stored form.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = wire::start(&MAGIC_FEE_HISTORY, 4 + self.samples.len() * 55);

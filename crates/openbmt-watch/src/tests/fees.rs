@@ -336,6 +336,27 @@ fn fe_14_is_low_is_at_or_below_the_quartile() {
 }
 
 #[test]
+fn fe_17_the_usual_rate_is_the_lower_median_of_the_long_window() {
+    // 17 old rates 200..=216 and three of 100: sorted, the lower of the
+    // two middle values of the 20 is the tenth, 206.
+    let h = window(6_000, 100);
+    assert_eq!(h.usual_rate(TIP), Some(206));
+    // Dropping the lowest-height sample leaves 19: no answer.
+    let mut short = FeeHistory::new();
+    for s in h.samples().iter().skip(1) {
+        short.insert(*s);
+    }
+    assert_eq!(short.usual_rate(TIP), None);
+    // The window is 4,032 blocks, as for is_low.
+    assert_eq!(window(5_969, 100).usual_rate(TIP), Some(206));
+    assert_eq!(window(5_968, 100).usual_rate(TIP), None);
+    // A sample without a rate does not count.
+    let mut padded = short.clone();
+    padded.insert(sample(6_500, None));
+    assert_eq!(padded.usual_rate(TIP), None);
+}
+
+#[test]
 fn fe_14_the_window_is_4032_blocks() {
     // 5,969 is TIP - 4,031: inside.
     assert_eq!(window(5_969, 100).is_low(TIP), Some(true));

@@ -453,6 +453,51 @@ pub fn receipt_spend_cost_sats(sat_per_vb_milli: u64) -> u64 {
     u64::try_from(cost.div_ceil(1000)).unwrap_or(u64::MAX)
 }
 
+/// SP-39: most coins one consolidation takes. A transaction of this many
+/// inputs weighs about 167,000 units, well inside the 400,000 of SP-33,
+/// and leaves most of the signer's PSBT bytes for the previous
+/// transactions each input carries.
+pub const MAX_CONSOLIDATION_INPUTS: usize = 400;
+
+/// The script length of the one output of a consolidation: the wallet's
+/// P2WSH change script.
+const CONSOLIDATION_SCRIPT_BYTES: usize = 34;
+
+/// SP-38: the weight and the virtual size of a consolidation (SP-24) of
+/// `inputs` coins: that many inputs and one output to the wallet's change
+/// script, signed with the longest signatures (SP-30). `None` for no input
+/// or on overflow. The size is the one [`plan`] counts for the same shape.
+pub fn consolidation_size(inputs: usize) -> Option<(u64, u64)> {
+    if inputs == 0 {
+        return None;
+    }
+    let inputs = u64::try_from(inputs).ok()?;
+    let weight = shape_weight(inputs, &[CONSOLIDATION_SCRIPT_BYTES])?;
+    Some((weight, weight.div_ceil(4)))
+}
+
+/// SP-38, SP-39: what spending `coins` coins to one output costs in
+/// satoshis at `rate` satoshis per 1000 virtual bytes: the fee [`plan`]
+/// gives a `send_all` of that many coins. More than
+/// [`MAX_CONSOLIDATION_INPUTS`] coins are counted as consecutive
+/// consolidations of that many, and one of the rest. `None` for no coin or
+/// on overflow.
+pub fn consolidation_cost_sats(coins: usize, rate: u64) -> Option<u64> {
+    if coins == 0 {
+        return None;
+    }
+    let mut left = coins;
+    let mut total: u64 = 0;
+    while left > 0 {
+        let take = left.min(MAX_CONSOLIDATION_INPUTS);
+        let (_, vsize) = consolidation_size(take)?;
+        let fee = vsize.checked_mul(rate)?.div_ceil(1000);
+        total = total.checked_add(fee)?;
+        left -= take;
+    }
+    Some(total)
+}
+
 /// The fee for `inputs` coins and outputs with scripts of `lens` bytes at
 /// `rate` satoshis per 1000 virtual bytes: `(weight, vsize, fee)`.
 fn costs(inputs: usize, lens: &[usize], rate: u64) -> Result<(u64, u64, u64), PlanError> {

@@ -1390,6 +1390,41 @@ fn nr_73_a_second_block_at_the_same_tip_does_not_save_the_headers_again() {
     handle.shutdown();
 }
 
+#[test]
+fn nr_47_a_block_asked_for_by_hash_comes_as_a_fee_block_and_no_other() {
+    let chain_blocks = blocks(2, 100);
+    let hash = chain_blocks[1].block_hash();
+    let peer = FakePeer::start(Behavior::ServeBlocks(chain_blocks));
+    let storage = MemStorage::default();
+    // Nothing is watched: no block is fetched by itself.
+    let mut handle = start_system(config(&peer, 30), &storage);
+    wait_for(&handle, 10, tip_is(2)).expect("the headers did not arrive");
+    settle();
+    while let Ok(event) = handle.events().try_recv() {
+        assert!(!matches!(event, AppEvent::Block { .. }), "{event:?}");
+    }
+    handle.fetch_block(hash);
+    let seen = wait_for(&handle, 10, |e| matches!(e, AppEvent::FeeBlock { .. }))
+        .expect("no fee block reached the app");
+    match seen.last() {
+        Some(AppEvent::FeeBlock { hash: got, bytes }) => {
+            assert_eq!(*got, hash);
+            assert!(!bytes.is_empty());
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(seen.iter().all(|e| !is_block(e)));
+    // The headers were stored before the app had the block (NR-73).
+    assert_eq!(stored_headers(&storage).tip().0, 2);
+    // A hash that is on no chain is told.
+    handle.fetch_block(bitcoin::BlockHash::from_byte_array([7; 32]));
+    let seen = wait_for(&handle, 10, |e| {
+        matches!(e, AppEvent::Note(t) if t.contains("not on the best chain"))
+    });
+    assert!(seen.is_some());
+    handle.shutdown();
+}
+
 // ----- NR-73: when the files are saved ------------------------------------
 
 #[test]

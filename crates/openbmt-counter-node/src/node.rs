@@ -654,8 +654,9 @@ impl<P: DriverPort> Node<P> {
             AppEvent::RescanStarted(_) => {}
             AppEvent::Note(line) => self.note(line),
             AppEvent::Stopped => self.stopped = true,
-            // The counter never broadcasts (NR-55).
-            AppEvent::TxRelayed { .. } | AppEvent::TxState { .. } => {}
+            // The counter never broadcasts (NR-55), and never asks for a
+            // block by its hash (NR-47).
+            AppEvent::TxRelayed { .. } | AppEvent::TxState { .. } | AppEvent::FeeBlock { .. } => {}
         }
     }
 

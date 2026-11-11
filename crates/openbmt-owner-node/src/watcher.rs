@@ -362,6 +362,7 @@ impl<P: DriverPort> OwnerWatcher<P> {
             AppEvent::Sighting { .. }
             | AppEvent::AlsoAnnounced { .. }
             | AppEvent::Block { .. }
+            | AppEvent::FeeBlock { .. }
             | AppEvent::TxRelayed { .. }
             | AppEvent::TxState { .. }
             | AppEvent::Checked(_)

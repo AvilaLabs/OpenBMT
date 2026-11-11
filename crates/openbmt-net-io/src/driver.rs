@@ -188,6 +188,16 @@ pub enum AppEvent {
         /// The block as the peer sent it.
         bytes: Vec<u8>,
     },
+    /// NR-47: the block asked for with [`Handle::fetch_block`]. It passed
+    /// the watcher's checks on its own and is on the best chain. It is not
+    /// a block the coin view reads: no filter matched it, and the app uses
+    /// it for its own purpose only.
+    FeeBlock {
+        /// The block's hash.
+        hash: BlockHash,
+        /// The block as the peer sent it.
+        bytes: Vec<u8>,
+    },
     /// NR-53: a fetched transaction and where the peers that announced it
     /// were reached.
     Sighting {
@@ -277,6 +287,7 @@ impl std::error::Error for StartError {}
 enum Command {
     WatchScript(ScriptBuf),
     AllBlocks(bool),
+    FetchBlock(BlockHash),
     FetchTransactions(bool),
     Broadcast(Vec<u8>),
     Forget(Txid),
@@ -418,6 +429,14 @@ impl Handle {
     /// NR-44: while on, every new block is downloaded in full.
     pub fn set_all_blocks(&self, on: bool) {
         self.command(Command::AllBlocks(on));
+    }
+
+    /// NR-47: download one block of the best chain by its hash, whatever
+    /// the filters say. It comes back as [`AppEvent::FeeBlock`]. One such
+    /// block is in work at a time: asking for another gives up the first. A
+    /// hash that is not on the best chain is told as a [`AppEvent::Note`].
+    pub fn fetch_block(&self, hash: BlockHash) {
+        self.command(Command::FetchBlock(hash));
     }
 
     /// NR-51, NR-52: whether announced transactions are fetched.
@@ -923,6 +942,13 @@ where
                     }
                 }
                 Command::AllBlocks(on) => self.manager.set_all_blocks(on),
+                Command::FetchBlock(hash) => {
+                    if !self.manager.fetch_block(hash) {
+                        self.emit(AppEvent::Note(format!(
+                            "block {hash} is not on the best chain; it was not asked for"
+                        )));
+                    }
+                }
                 Command::FetchTransactions(on) => self.manager.set_fetch_transactions(on),
                 Command::Broadcast(tx) => {
                     if let Err(e) = self.manager.broadcast(&tx) {
@@ -1047,6 +1073,13 @@ where
                         self.save_headers(now);
                     }
                     self.emit(AppEvent::Block { hash, bytes });
+                }
+                Output::FeeBlock { hash, bytes } => {
+                    // NR-73 as for a block: the headers are stored first.
+                    if self.manager.chain().tip().1 != self.tip_saved {
+                        self.save_headers(now);
+                    }
+                    self.emit(AppEvent::FeeBlock { hash, bytes });
                 }
                 Output::Sighting { tx, from } => self.emit(AppEvent::Sighting { tx, from }),
                 Output::AlsoAnnounced { txid, from } => {

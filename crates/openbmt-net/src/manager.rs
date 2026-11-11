@@ -210,6 +210,16 @@ pub enum Output {
         /// The block as the peer sent it.
         bytes: Vec<u8>,
     },
+    /// NR-47: the block the app asked for with [`Manager::fetch_block`]. It
+    /// passed the watcher's checks on its own and is on the best chain. It
+    /// is for the app's own use (a fee sample), not for the coin view: no
+    /// filter matched it.
+    FeeBlock {
+        /// The block's hash.
+        hash: BlockHash,
+        /// The block as the peer sent it.
+        bytes: Vec<u8>,
+    },
     /// NR-53: a fetched transaction and every peer that has announced it so
     /// far. The manager keeps no transaction bytes.
     Sighting {
@@ -364,6 +374,8 @@ pub struct Manager {
     scripts: BTreeSet<ScriptBuf>,
     all_blocks: bool,
     fetch_transactions: bool,
+    /// NR-47: the one block the app asked for by hash, and not yet given.
+    fee_work: Option<BlockWork>,
     /// The latest time the caller passed in.
     now: u64,
     /// The next height of the best chain that no work has been made for.
@@ -411,6 +423,7 @@ impl Manager {
             scripts: BTreeSet::new(),
             all_blocks: false,
             fetch_transactions: true,
+            fee_work: None,
             now: 0,
             next_height: 0,
             work: BTreeMap::new(),
@@ -641,6 +654,34 @@ impl Manager {
     pub fn set_all_blocks(&mut self, on: bool) {
         self.all_blocks = on;
         self.settle_now();
+    }
+
+    /// NR-47: download one block of the best chain by its hash, whatever the
+    /// filters say. It comes back as [`Output::FeeBlock`]. Only one such
+    /// block is in work at a time: a request for another hash gives up the
+    /// one in work (a late answer to it is tolerated), and a request for the
+    /// same hash changes nothing. False when the hash is not on the best
+    /// chain.
+    pub fn fetch_block(&mut self, hash: BlockHash) -> bool {
+        let Some(height) = self.store.height_of(&hash) else {
+            return false;
+        };
+        if self.fee_work.as_ref().is_some_and(|w| w.hash == hash) {
+            return true;
+        }
+        if let Some(mut old) = self.fee_work.take() {
+            self.abandon_fetch(&mut old);
+        }
+        let mut item = BlockWork::new(height, hash);
+        item.stage = Stage::Fetch;
+        self.fee_work = Some(item);
+        self.settle_now();
+        true
+    }
+
+    /// NR-47: whether a block asked for by hash is still in work.
+    pub fn fetching_block(&self) -> bool {
+        self.fee_work.is_some()
     }
 
     /// NR-51, NR-52: whether announced transactions are fetched. On by
@@ -1102,6 +1143,16 @@ impl Manager {
                 self.abandon_fetch(&mut item);
             }
         }
+        // NR-47: a block asked for by hash that left is given up.
+        if self
+            .fee_work
+            .as_ref()
+            .is_some_and(|w| w.height > fork || left.contains(&w.hash))
+        {
+            if let Some(mut item) = self.fee_work.take() {
+                self.abandon_fetch(&mut item);
+            }
+        }
         self.next_height = self
             .next_height
             .min(fork.saturating_add(1))
@@ -1149,6 +1200,29 @@ impl Manager {
             if !progressed {
                 break;
             }
+        }
+        self.advance_fee_block(now, out);
+    }
+
+    /// NR-47: move the block asked for by hash on. It is fetched as any
+    /// block is (NR-45), with no filters first.
+    fn advance_fee_block(&mut self, now: u64, out: &mut Vec<Output>) {
+        let Some(mut item) = self.fee_work.take() else {
+            return;
+        };
+        if self.store.height_of(&item.hash) != Some(item.height) {
+            self.abandon_fetch(&mut item);
+            return;
+        }
+        item.failed.retain(|id| self.peers.contains_key(id));
+        if item
+            .fetch_peer
+            .is_some_and(|id| !self.peers.contains_key(&id))
+        {
+            item.fetch_peer = None;
+        }
+        if self.advance_fetch(&mut item, now, out) {
+            self.fee_work = Some(item);
         }
     }
 
@@ -1398,6 +1472,15 @@ impl Manager {
             .get(..80)
             .and_then(|raw| deserialize::<Header>(raw).ok())
             .map(|header| header.block_hash());
+        if let Some(hash) = hash {
+            if self
+                .fee_work
+                .as_ref()
+                .is_some_and(|w| w.fetch_peer == Some(id) && w.hash == hash)
+            {
+                return self.on_fee_block(id, bytes, out);
+            }
+        }
         let asked = hash.and_then(|hash| {
             self.work
                 .iter()
@@ -1413,6 +1496,7 @@ impl Manager {
             let other = self
                 .work
                 .values()
+                .chain(self.fee_work.iter())
                 .any(|w| w.stage == Stage::Fetch && w.fetch_peer == Some(id));
             let reason = if other {
                 "NR-25: a block other than the one asked for"
@@ -1465,6 +1549,37 @@ impl Manager {
             }
         }
         out.push(Output::Block {
+            hash: item.hash,
+            bytes,
+        });
+    }
+
+    /// NR-47: the block asked for by hash arrived from the peer asked.
+    fn on_fee_block(&mut self, id: PeerId, bytes: Vec<u8>, out: &mut Vec<Output>) {
+        let Some(mut item) = self.fee_work.take() else {
+            return;
+        };
+        self.answered(id);
+        match WellFormedBlock::parse(&bytes) {
+            Ok(wb) if wb.hash() == item.hash => {}
+            other => {
+                let reason = match other {
+                    Err(e) => format!("NR-25: block refused: {e}"),
+                    Ok(_) => "NR-25: a block other than the one asked for".to_string(),
+                };
+                // Another peer gives it.
+                item.fetch_peer = None;
+                item.failed.insert(id);
+                self.fee_work = Some(item);
+                self.drop_peer(id, reason, true, out);
+                return;
+            }
+        }
+        // WR-01: the block must still be on the best chain.
+        if self.store.height_of(&item.hash) != Some(item.height) {
+            return;
+        }
+        out.push(Output::FeeBlock {
             hash: item.hash,
             bytes,
         });

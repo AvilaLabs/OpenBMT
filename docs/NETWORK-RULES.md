@@ -168,6 +168,23 @@ thin driver that owns the sockets.
   substitute another. At most 8 blocks are in work at once.
 - **NR-46.** When the best chain changes, the blocks that joined are
   treated as new under NR-40 to NR-44.
+- **NR-47.** The app may ask for one block of the best chain by its hash,
+  whatever the filters say: no filter is asked for it, and it is fetched as
+  NR-45 fetches any block (one peer at a time, 60 seconds each, a peer that
+  has shown the block first). It is handed out apart from the blocks of
+  NR-43, as a block the app asked for, after the same checks of the block
+  on its own (WR-20 to WR-22) and only while the chain still holds it
+  (WR-01). It is not part of the checks of NR-40 to NR-46: it moves
+  neither the checked height nor any work item, and a payment in it is not
+  matched against the watched scripts. The owner's device uses it to take a
+  fee sample from a block that matched no filter (`docs/FEE-RULES.md`,
+  FE-20). At most one such block is in work: asking for another hash gives
+  up the first, whose late answer is tolerated like any request given up
+  (the module note on stale requests), and asking for the same hash again
+  changes nothing. A hash that is not on the best chain is refused and told
+  to the app. A block asked for that leaves the chain is given up. The peer
+  that is asked learns that the app was interested in that block, as under
+  NR-61.
 
 ## 6. Unconfirmed transactions
 
