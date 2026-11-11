@@ -3,6 +3,7 @@
 
 mod call;
 mod ceremony;
+mod counter;
 mod e2e;
 pub(crate) mod kit;
 mod kotlin;

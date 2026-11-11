@@ -50,6 +50,7 @@
 mod call;
 mod ceremony;
 mod codec;
+mod counter_views;
 mod error;
 pub mod host;
 #[cfg(any(target_os = "android", feature = "jni"))]
@@ -68,6 +69,9 @@ pub use call::{
 pub use ceremony::{
     AnswerView, BuildArgs, FinishArgs, FinishedView, Key1Args, Key1Made, PairView, PartView,
     SetupFields, SetupStageView, WalletBuiltView,
+};
+pub use counter_views::{
+    CounterBundleView, CounterConfirmArgs, CounterQueuedView, CounterScanView, WaitingCounterView,
 };
 pub use error::{AppError, Kind};
 pub use host::{Entry, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};

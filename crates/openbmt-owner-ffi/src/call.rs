@@ -49,6 +49,9 @@
 //!   it shows, its settings, taking them off, the next request, the till's
 //!   answer, acknowledging an alert. The app sends the request and hands
 //!   back the answer; the node parses and matches.
+//! - 90 to 94: adding a counter (`docs/SESSION-RULES.md`, AS-69 to AS-73):
+//!   read the counter's request, confirm the settings and first batch, the
+//!   counters waiting for their code, the code, and that the counter took it.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -67,6 +70,9 @@ use crate::ceremony::{
     SetupFields, SetupStageView, WalletBuiltView,
 };
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
+use crate::counter_views::{
+    CounterBundleView, CounterConfirmArgs, CounterQueuedView, CounterScanView, WaitingCounterView,
+};
 use crate::error::{internal, refused_by, wrong_state, AppError};
 use crate::host::{real_spawn, Entry, Spawn};
 use crate::pos_views::{
@@ -425,6 +431,24 @@ fn build_ops() -> Vec<Op> {
         op(85, "ceremony_stage", Zero, |_, record: Vec<u8>| {
             ceremony::stage(record)
         }),
+        op(90, "counter_scan", Node, |c, request: Vec<u8>| {
+            c.entry()?.counter_scan(request)
+        }),
+        op(
+            91,
+            "counter_confirm",
+            Node,
+            |c, (now, a): (u64, CounterConfirmArgs)| c.entry()?.counter_confirm(now, a),
+        ),
+        op(92, "counters_waiting", Node, |c, ()| {
+            c.entry()?.counters_waiting()
+        }),
+        op(93, "counter_bundle", Node, |c, counter: Vec<u8>| {
+            c.entry()?.counter_bundle(counter)
+        }),
+        op(94, "counter_delivered", Node, |c, counter: Vec<u8>| {
+            c.entry()?.counter_delivered(counter)
+        }),
     ]
 }
 
@@ -624,6 +648,11 @@ fn definitions() -> Vec<TypeDef> {
         PosAlertView::define(),
         PosReplyView::define(),
         PosStateView::define(),
+        CounterScanView::define(),
+        CounterConfirmArgs::define(),
+        CounterQueuedView::define(),
+        WaitingCounterView::define(),
+        CounterBundleView::define(),
     ]
 }
 

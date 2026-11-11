@@ -97,6 +97,11 @@ private const val OP_POS_REMOVE = 72
 private const val OP_POS_REQUEST = 73
 private const val OP_POS_REPLY = 74
 private const val OP_POS_ACKNOWLEDGE = 75
+private const val OP_COUNTER_SCAN = 90
+private const val OP_COUNTER_CONFIRM = 91
+private const val OP_COUNTERS_WAITING = 92
+private const val OP_COUNTER_BUNDLE = 93
+private const val OP_COUNTER_DELIVERED = 94
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -447,6 +452,40 @@ class OutboxRow(
     val size: Long,
     val words: Words,
 )
+
+/**
+ * A counter's request that was queued: [sessionWords] are the four words the
+ * counter and the Key app show, [needsRate] says the phone holds no settings
+ * yet (confirming then needs a rate), [windowSecs] is how long the counter
+ * waits for its code, and [shares] are the counters' shares once it is added.
+ * [name] is text from the counter.
+ */
+class CounterScan(
+    val pairing: Long,
+    val counter: ByteArray,
+    val name: String,
+    val sessionWords: List<String>,
+    val needsRate: Boolean,
+    val windowSecs: Long,
+    val shares: List<CounterShare>,
+    val words: Words,
+)
+
+/** The settings and the first batch queued for a counter. */
+class CounterQueued(
+    val settings: Long,
+    val version: Long,
+    val batch: Long,
+    val batchCount: Long,
+    val shares: List<CounterShare>,
+    val words: Words,
+)
+
+/** A counter whose finished pairing waits to be handed over. [name] is text from the counter. */
+class WaitingCounter(val counter: ByteArray, val name: String)
+
+/** The code a counter takes: [code] is the bundle to show, [withBatch] says the first addresses are in it. */
+class CounterBundle(val code: ByteArray, val withBatch: Boolean, val words: Words)
 
 enum class PosVendor { Square, Clover }
 
@@ -971,6 +1010,19 @@ private fun Reader.outboxKind(): OutboxKind =
 
 private fun Reader.limit(): Limit = Limit(u64(), u32())
 
+internal fun Reader.counterScan(): CounterScan =
+    CounterScan(
+        u32(), bytes(), string(), strings(), bool(), u32(),
+        list { CounterShare(bytes(), u32()) }, words(),
+    )
+
+internal fun Reader.counterQueued(): CounterQueued =
+    CounterQueued(u32(), u32(), u32(), u32(), list { CounterShare(bytes(), u32()) }, words())
+
+internal fun Reader.waitingCounter(): WaitingCounter = WaitingCounter(bytes(), string())
+
+internal fun Reader.counterBundle(): CounterBundle = CounterBundle(bytes(), bool(), words())
+
 internal fun Reader.settingsHeld(): SettingsHeld =
     SettingsHeld(
         u32(), limit(), limit(), limit(), limit(), limit(), limit(), u32(),
@@ -1206,6 +1258,40 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
         val r = call(OP_QUEUE_SETTINGS, handle) { it.bytes(signedSettings) }
         return r.settingsQueued().also { r.end() }
     }
+
+    /**
+     * Read a counter's request (the bytes of its code) and queue its pairing; the words and the
+     * shares come back for the owner to check before [counterConfirm].
+     */
+    fun counterScan(request: ByteArray): CounterScan {
+        val r = call(OP_COUNTER_SCAN, handle) { it.bytes(request) }
+        return r.counterScan().also { r.end() }
+    }
+
+    /**
+     * Queue the settings that add the counter and its first batch. [satsPerUsd] starts the settings
+     * when the phone holds none, and is ignored when it does.
+     */
+    fun counterConfirm(now: Long, pairing: Long, satsPerUsd: Long): CounterQueued {
+        val r = call(OP_COUNTER_CONFIRM, handle) { it.u64(now).u32(pairing).u64(satsPerUsd) }
+        return r.counterQueued().also { r.end() }
+    }
+
+    /** The counters whose approved pairing waits for the counter to take its code. */
+    fun countersWaiting(): List<WaitingCounter> {
+        val r = call(OP_COUNTERS_WAITING, handle)
+        return r.list { r.waitingCounter() }.also { r.end() }
+    }
+
+    /** The code the counter takes, from what the Key app approved. Nothing is changed. */
+    fun counterBundle(counter: ByteArray): CounterBundle {
+        val r = call(OP_COUNTER_BUNDLE, handle) { it.bytes(counter) }
+        return r.counterBundle().also { r.end() }
+    }
+
+    /** The counter shows that it is paired: what waited for it is marked delivered. */
+    fun counterDelivered(counter: ByteArray) =
+        callUnit(OP_COUNTER_DELIVERED, handle) { it.bytes(counter) }
 
     /** The link to the counters: the alerts and what each counter's copy holds. */
     fun linkState(): LinkState {

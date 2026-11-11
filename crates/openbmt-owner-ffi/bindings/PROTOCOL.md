@@ -103,6 +103,11 @@ ops run on another; it waits for at most 250 ms.
  83 ceremony_finish  handle zero  args FinishArgs -> FinishedView
  84 ceremony_open    handle zero  args list<u8> -> SetupFields
  85 ceremony_stage   handle zero  args list<u8> -> SetupStageView
+ 90 counter_scan     handle node  args list<u8> -> CounterScanView
+ 91 counter_confirm  handle node  args (u64, CounterConfirmArgs) -> CounterQueuedView
+ 92 counters_waiting handle node  args () -> list<WaitingCounterView>
+ 93 counter_bundle   handle node  args list<u8> -> CounterBundleView
+ 94 counter_delivered handle node  args list<u8> -> ()
 ```
 
 ## Types
@@ -198,4 +203,9 @@ PosAckArgs: record: now: u64, key: PosAlertKey
 PosAlertView: record: key: PosAlertKey, raised_at: u64, words: Words
 PosReplyView: record: again: bool, more_left: bool, pages: u32, orders_read: u32, new_matches: u32, new_alerts: list<PosAlertView>, cleared: u32, retired: u64
 PosStateView: record: setup: option<PosSetupView>, last_poll_at: option<u64>, open_alerts: list<PosAlertView>, acknowledged_alerts: u32, tracked_orders: u32, matches: u32, matches_by_order: u32, retired_matches: u64
+CounterScanView: record: pairing: u32, counter: list<u8>, name: string, session_words: list<string>, needs_rate: bool, window_secs: u32, shares: list<CounterShareView>, words: Words
+CounterConfirmArgs: record: pairing: u32, sats_per_usd: u64
+CounterQueuedView: record: settings: u32, version: u32, batch: u32, batch_count: u32, shares: list<CounterShareView>, words: Words
+WaitingCounterView: record: counter: list<u8>, name: string
+CounterBundleView: record: code: list<u8>, with_batch: bool, words: Words
 ```

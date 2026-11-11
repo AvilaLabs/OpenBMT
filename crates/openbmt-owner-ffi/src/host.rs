@@ -40,10 +40,11 @@ use bitcoin::secp256k1::Secp256k1;
 use bitcoin::{Address, BlockHash, Network, ScriptBuf, Txid};
 use openbmt_core::batch::{BatchBuilder, BatchPolicy, SignedBatch};
 use openbmt_core::identity::{DeviceId, Identity};
+use openbmt_core::pairing::PAIRING_WINDOW_SECS;
 use openbmt_core::records::DeviceList;
 use openbmt_core::settings::{Limit, SignedSettings};
 use openbmt_core::wallet::WalletDescription;
-use openbmt_counter_node::DriverPort;
+use openbmt_counter_node::{DriverPort, BATCH_MIN_COUNT};
 use openbmt_courier::{Courier, CourierConfig, FirstStart};
 use openbmt_link::{ClientConfig, Role, Route};
 use openbmt_net_io::{
@@ -68,6 +69,9 @@ use openbmt_owner_node::{
 use openbmt_signer::SignerState;
 use openbmt_watch::HeaderChain;
 
+use crate::counter_views::{
+    CounterBundleView, CounterConfirmArgs, CounterQueuedView, CounterScanView, WaitingCounterView,
+};
 use crate::error::{
     from_words, internal, poisoned, refused_by, rule_in, store_by, wrong_state, AppError, Kind,
 };
@@ -333,6 +337,17 @@ fn pos_key_of(key: &PosAlertKey) -> Result<PosAlertRef, AppError> {
         }),
     };
     Ok(PosAlertRef { kind, subject })
+}
+
+/// The shares of settings, for a screen.
+fn share_views(s: &openbmt_core::settings::Settings) -> Vec<CounterShareView> {
+    s.counters
+        .iter()
+        .map(|(c, bps)| CounterShareView {
+            counter: c.to_bytes().to_vec(),
+            bps: u32::from(*bps),
+        })
+        .collect()
 }
 
 fn count32(n: usize) -> u32 {
@@ -1185,6 +1200,125 @@ impl Entry {
                     signed: Some(signed.to_bytes()),
                 },
             })
+        })
+    }
+
+    /// Read a counter's request (AS-69): queue its pairing and give back its
+    /// name, the four words and the shares the settings that add it would
+    /// give. A phone that holds no settings says so, because the starting
+    /// limits are in dollars and need a rate (AS-70). Nothing else is queued
+    /// until `counter_confirm`.
+    pub(crate) fn counter_scan(&self, request: Vec<u8>) -> Result<CounterScanView, AppError> {
+        self.run(None, move |st| {
+            let write = st.node.queue_writer();
+            let owner = st.node.owner_mut().map_err(|e| node_error(&e))?;
+            let queued = owner
+                .queue_counter_request(&request, &write)
+                .map_err(|e| queue_error(&e))?;
+            let needs_rate = !owner.has_settings_base();
+            // The shares do not depend on the rate; any rate above 0 makes
+            // the preview when the phone holds no settings.
+            let preview = match owner.settings_with_counter(queued.counter, 1) {
+                Ok(s) => s,
+                Err(r) => {
+                    // The request stays queued only when the person can go on.
+                    let _ = owner.cancel(queued.id, &write);
+                    return Err(queue_error(&OwnerError::Refused(r)));
+                }
+            };
+            Ok(CounterScanView {
+                pairing: queued.id,
+                counter: queued.counter.to_bytes().to_vec(),
+                name: queued.name.clone(),
+                session_words: queued.words.iter().map(|w| (*w).to_string()).collect(),
+                needs_rate,
+                window_secs: u32::try_from(PAIRING_WINDOW_SECS).unwrap_or(u32::MAX),
+                shares: share_views(&preview),
+                words: words(queued.words()),
+            })
+        })
+    }
+
+    /// Queue the settings that add the counter and its first batch, in one
+    /// write (AS-70, AS-71). The batch is the counter's own minimum or this
+    /// phone's, whichever is larger.
+    pub(crate) fn counter_confirm(
+        &self,
+        now: u64,
+        a: CounterConfirmArgs,
+    ) -> Result<CounterQueuedView, AppError> {
+        self.run(Some(now), move |st| {
+            let count = st.policy.min_count.max(BATCH_MIN_COUNT);
+            let write = st.node.queue_writer();
+            let queued = st
+                .node
+                .owner_mut()
+                .map_err(|e| node_error(&e))?
+                .queue_counter(a.pairing, a.sats_per_usd, count, now, &write)
+                .map_err(|e| queue_error(&e))?;
+            st.node.refresh_marks();
+            Ok(CounterQueuedView {
+                settings: queued.settings_id,
+                version: queued.settings_version,
+                batch: queued.batch_id,
+                batch_count: count,
+                shares: queued
+                    .shares
+                    .iter()
+                    .map(|(c, bps)| CounterShareView {
+                        counter: c.to_bytes().to_vec(),
+                        bps: u32::from(*bps),
+                    })
+                    .collect(),
+                words: words(queued.words()),
+            })
+        })
+    }
+
+    /// The counters whose finished pairing waits to be handed over (AS-73).
+    pub(crate) fn counters_waiting(&self) -> Result<Vec<WaitingCounterView>, AppError> {
+        self.run(None, |st| {
+            Ok(st
+                .node
+                .owner()
+                .counters_waiting()
+                .into_iter()
+                .map(|w| WaitingCounterView {
+                    counter: w.counter.to_bytes().to_vec(),
+                    name: w.name,
+                })
+                .collect())
+        })
+    }
+
+    /// The code the counter takes (AS-72); nothing is changed.
+    pub(crate) fn counter_bundle(&self, counter: Vec<u8>) -> Result<CounterBundleView, AppError> {
+        let counter = device("the counter's root", "id-length", &counter)?;
+        self.run(None, move |st| {
+            let made = st
+                .node
+                .owner()
+                .counter_bundle(&counter)
+                .map_err(|r| queue_error(&OwnerError::Refused(r)))?;
+            Ok(CounterBundleView {
+                code: made.bundle.to_bytes(),
+                with_batch: made.parts.batch.is_some(),
+                words: words(made.words()),
+            })
+        })
+    }
+
+    /// The counter shows that it is paired: its finished objects are marked
+    /// delivered (AS-73).
+    pub(crate) fn counter_delivered(&self, counter: Vec<u8>) -> Result<(), AppError> {
+        let counter = device("the counter's root", "id-length", &counter)?;
+        self.run(None, move |st| {
+            let write = st.node.queue_writer();
+            st.node
+                .owner_mut()
+                .map_err(|e| node_error(&e))?
+                .mark_counter_delivered(&counter, &write)
+                .map_err(|e| queue_error(&e))
         })
     }
 

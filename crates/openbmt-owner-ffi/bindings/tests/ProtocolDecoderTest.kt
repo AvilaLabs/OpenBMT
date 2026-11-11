@@ -95,6 +95,23 @@ object ProtocolDecoderTest {
         rejects("a settings flag") { decodeResponse(header(0, byteArrayOf(2))).let { r -> r.option { r.settingsHeld() } } }
         rejects("a short settings") { decodeResponse(settingsFrame().copyOf(40)).let { r -> r.option { r.settingsHeld() } } }
 
+        val scan = decodeResponse(counterScanFrame()).counterScan()
+        check(scan.pairing == 4L && scan.counter.size == 32 && scan.name == "Front counter")
+        check(scan.sessionWords == listOf("one", "two", "three", "four") && scan.needsRate)
+        check(scan.windowSecs == 600L && scan.shares.size == 2 && scan.shares[1].bps == 5_000L)
+        check(scan.words.heading == "Words")
+        rejects("a short counter scan") { decodeResponse(counterScanFrame().copyOf(30)).counterScan() }
+        val queuedCounter = decodeResponse(counterQueuedFrame()).counterQueued()
+        check(queuedCounter.settings == 7L && queuedCounter.version == 2L)
+        check(queuedCounter.batch == 8L && queuedCounter.batchCount == 1_000L)
+        check(queuedCounter.shares.size == 1 && queuedCounter.shares[0].bps == 10_000L)
+        val waitingCounters = decodeResponse(waitingFrame()).let { r -> r.list { r.waitingCounter() } }
+        check(waitingCounters.size == 1 && waitingCounters[0].name == "Front counter")
+        check(waitingCounters[0].counter.size == 32)
+        val bundle = decodeResponse(bundleFrame()).counterBundle()
+        check(bundle.code.size == 3 && bundle.withBatch && bundle.words.heading == "Words")
+        rejects("a bundle flag") { decodeResponse(bundleFrame(flag = 2)).counterBundle() }
+
         val outbox = decodeResponse(outboxFrame()).let { r -> r.list { r.outboxRow() } }
         check(outbox.size == 1 && outbox[0].kind == OutboxKind.Batch && outbox[0].id == 8L)
         check(outbox[0].txid == null && outbox[0].counter!!.size == 32 && outbox[0].version == null)
@@ -295,6 +312,33 @@ object ProtocolDecoderTest {
         words(out)
         out.write(Writer().u32(1).bytes(ByteArray(32) { 2 }).u64(5).bytes(ByteArray(32) { 3 }).toByteArray())
         out.write(Writer().u8(1).u64(3).u8(1).u8(1).u8(0).toByteArray())
+        words(out)
+        return header(0, out.toByteArray())
+    }
+
+    private fun counterScanFrame(): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(Writer().u32(4).bytes(ByteArray(32) { 3 }).string("Front counter").toByteArray())
+        out.write(Writer().u32(4).string("one").string("two").string("three").string("four").toByteArray())
+        out.write(Writer().bool(true).u32(600).u32(2).bytes(ByteArray(32) { 3 }).u32(5_000).toByteArray())
+        out.write(Writer().bytes(ByteArray(32) { 4 }).u32(5_000).toByteArray())
+        words(out)
+        return header(0, out.toByteArray())
+    }
+
+    private fun counterQueuedFrame(): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(Writer().u32(7).u32(2).u32(8).u32(1_000).u32(1).bytes(ByteArray(32) { 3 }).u32(10_000).toByteArray())
+        words(out)
+        return header(0, out.toByteArray())
+    }
+
+    private fun waitingFrame(): ByteArray =
+        header(0, Writer().u32(1).bytes(ByteArray(32) { 3 }).string("Front counter").toByteArray())
+
+    private fun bundleFrame(flag: Int = 1): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(Writer().bytes(byteArrayOf(1, 2, 3)).u8(flag).toByteArray())
         words(out)
         return header(0, out.toByteArray())
     }
