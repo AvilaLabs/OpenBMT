@@ -129,8 +129,8 @@ Bitcoin's block reward began at 50 bitcoin and halves every 210,000
 blocks, about four years. Total issuance therefore cannot reach 21 million.
 Bitcoin Core computes this in `GetBlockSubsidy` in `src/validation.cpp`,
 using the interval in `src/kernel/chainparams.cpp`. Full nodes reject blocks
-that pay too much. Changing the schedule for the network would require
-all node operators to choose new rules.
+that pay too much. An operator who keeps the existing rules continues to
+reject excess issuance; publishing different rules cannot force adoption.
 
 This supply schedule does not stabilize the dollar price. Bitcoin has
 risen and fallen sharply. A shop holding receipts bears both directions

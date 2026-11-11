@@ -188,4 +188,4 @@ run against a real node.
 
 The shop must operate the node and manage liquidity, updates and backups.
 OpenBMT does not do that work. Eclair is unsupported (`LN-02`), and
-third-party swap providers are excluded under the purist veto.
+third-party swap providers are excluded from the payment path.

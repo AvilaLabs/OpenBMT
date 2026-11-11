@@ -3,7 +3,7 @@
 [Introduction](introduction.md)
 
 - [Why accept bitcoin](why-bitcoin.md)
-- [Principles](principles.md)
+- [Design choices](principles.md)
 - [What OpenBMT will never do](never.md)
 - [The wallet and its keys](safety.md)
 - [Getting paid](getting-paid.md)

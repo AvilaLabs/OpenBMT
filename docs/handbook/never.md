@@ -1,31 +1,82 @@
 # What OpenBMT will never do
 
 These restrictions apply to future versions as well as the current design.
-They are enforced through the veto described in [Principles](principles.md).
 Some depend on release safeguards that are still unfinished; those limits
-are stated here.
+are stated here. The [design choices](principles.md) explain how they shape
+the checkout system.
 
 ## Never anything but bitcoin
 
-OpenBMT will not support other coins, stablecoins or tokens on any layer.
-That includes tokens on Lightning, Taproot Assets and RGB, federated
-sidechains such as Liquid, and ecash mints such as Cashu or Fedimint. They
-will not be added as trials, optional features or later phases.
+OpenBMT accepts BTC on the Bitcoin network, and bitcoin over the shop's own
+Lightning node. Bitcoin Cash, Litecoin and other currencies are excluded,
+along with stablecoins and tokens on any layer.
 
-The objection is control. Other coins place their rules or supply under an
-issuer, foundation or small group; a token issuer can freeze tokens or
-rewrite their rules. A federation holds the coins behind its sidechain,
-and a mint holds money while issuing claims against it. Bitcoin's rules
-change when node operators choose to run new rules. OpenBMT is intended
-for a shop that wants to hold its own money without those intermediaries.
+### Why Bitcoin
+
+OpenBMT's starting point is money whose supply the holder can verify and
+whose rules do not depend on an issuer's discretion. Bitcoin's issuance
+schedule approaches a limit of 21 million. A full node checks that schedule
+itself and rejects a block that creates too much, even if miners produced
+it. Developers can publish different software, but cannot make a holder's
+node accept different rules.[^validation]
+
+A supply limit is useful only while people enforce it. The currency also
+needs miners doing the work that protects settlement and people willing to
+hold and accept it. OpenBMT regards Bitcoin's record of enforcing its
+issuance rules, independent validation and established use as the strongest
+basis for money. That judgment is why the project builds on this network;
+a supply cap or proof-of-work algorithm alone is not enough.[^network]
+
+### Why that excludes Bitcoin Cash and Litecoin
+
+Bitcoin Cash and Litecoin also use proof of work and public issuance rules.
+They are separate currencies with their own networks. The objection to
+issuer-controlled tokens does not explain their exclusion.[^other-networks]
+
+Copying Bitcoin's code or specifying another supply cap does not by itself
+reproduce the people choosing to use Bitcoin, the mining work protecting
+its current payments, or their continued agreement on its rules. A chain split
+can
+share the earlier ledger, as Bitcoin Cash does, but the networks settle
+different currencies after the split. Creating those currencies does not
+create more BTC on the Bitcoin ledger.[^forks]
+
+Independent verification also depends on what it costs to run a node.
+More transaction data has to be downloaded and checked; increasing
+base-layer capacity can make that work more demanding. OpenBMT favors
+keeping verification practical for the shop.[^verification-cost]
+
+OpenBMT gives greater weight to preserving Bitcoin's monetary rules and
+independent verification than to a different chain's block interval or
+advertised transaction fee. Lower fees alone are not a reason to ask the
+shop to receive another currency. For small purchases, the supported
+alternative is bitcoin through the shop's own Lightning node. For on-chain
+payments, the shop can set a minimum sale and choose how many confirmations
+to wait for.
+
+### Tokens, sidechains and mints
+
+An issuer-controlled token introduces another objection: its issuer may
+retain powers over issuance, redemption or transfers. Those powers create
+a dependence on that issuer, in addition to the reasons for choosing BTC
+over another currency.
+
+The exclusion includes tokens on Lightning, Taproot Assets and RGB. A token
+carried over Bitcoin-related infrastructure is still a different asset.
+Federated sidechains such as Liquid require a federation to hold the coins,
+and ecash mints such as Cashu or Fedimint hold money while issuing claims
+against it. OpenBMT does not accept those claims as payment.
 
 The wallet is native segwit, two of three (`SR-60`). The Key app rejects
 data outputs, non-standard scripts and inputs containing Taproot fields
 (`SR-22`, `SR-06`), and refuses transactions carrying tokens. Lightning
-accepts bitcoin invoices from the shop's own node only (`LN-01`).
+accepts bitcoin invoices from the shop's own node only (`LN-01`). The
+checks follow the currency choice described above.
 
-The design's section 0 excludes these protocols through the veto rather
-than naming each one. New protocols would face the same restriction.
+Bitcoin still has price risk and fees. Choosing it does not establish a
+stable purchasing power or remove the payment risks described in
+[Getting paid](getting-paid.md). The exclusions are not trials or features
+waiting for a later release.
 
 ## Never custody
 
@@ -155,3 +206,35 @@ Dependencies retain their own licences. OpenBMT does not publish the
 phone's operating system or Orbot, the separate app needed for Tor.
 Reproducible builds, which would let someone check a released app against
 the source, are not built yet.
+
+[^validation]: [Bitcoin Core validation](https://bitcoin.org/en/bitcoin-core/features/validation)
+    explains full-node enforcement of the supply limit. The
+    [Bitcoin FAQ](https://bitcoin.org/en/faq)
+    describes voluntary adoption of protocol rules. Read 2026-11-11.
+
+[^network]: The
+    [Bitcoin developer guide](https://developer.bitcoin.org/devguide/block_chain.html)
+    describes independent validation and proof of work. The
+    [Bitcoin FAQ on value](https://bitcoin.org/en/faq)
+    explains the role of acceptance and adoption. The judgment about which
+    network OpenBMT should use is the project's. Read 2026-11-11.
+
+[^other-networks]: [Bitcoin Cash proof of work](https://documentation.cash/protocol/blockchain/proof-of-work.html)
+    and [Litecoin's explanation](https://litecoin.com/what-is-litecoin)
+    describe their respective networks. See also
+    [Litecoin's proof-of-work reference](https://litecoin.info/docs/key-concepts/proof-of-work).
+    Read 2026-11-11.
+
+[^forks]: [Bitcoin Cash's history](https://bitcoincash.org/)
+    records its 2017 chain split. The
+    [Bitcoin developer guide on consensus changes](https://developer.bitcoin.org/devguide/block_chain.html#consensus-rule-changes)
+    explains how incompatible rules can split a chain. The distinction
+    between copying software and reproducing a monetary network follows
+    from those separate rules and participants. Read 2026-11-11.
+
+[^verification-cost]: Bitcoin Core's
+    [capacity discussion](https://bitcoincore.org/en/2015/12/23/capacity-increases-faq/)
+    explains the validation costs involved in increasing capacity and the
+    use of payment channels to reduce on-chain data. Published 2015-12-23;
+    read 2026-11-11. This is a design tradeoff, not a measurement of current
+    node costs.
