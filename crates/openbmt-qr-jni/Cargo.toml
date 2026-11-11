@@ -16,3 +16,4 @@ crate-type = ["lib", "cdylib"]
 [dependencies]
 openbmt-qr = { path = "../openbmt-qr" }
 openbmt-ur = { path = "../openbmt-ur" }
+openbmt-bbqr = { path = "../openbmt-bbqr" }

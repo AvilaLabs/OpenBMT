@@ -123,6 +123,13 @@ ops run on another; it waits for at most 250 ms.
 109 box_own_check    handle zero  args BoxOwnCheckArgs -> BoxOwnCheckView
 110 boxes_pending    handle node  args () -> list<PendingBoxView>
 111 box_forget       handle node  args list<u8> -> ()
+120 signer_registration handle node  args string -> RegistrationView
+121 signer_build     handle node  args (u64, u64) -> SignerBuiltView
+122 signer_export    handle node  args SignerExportArgs -> SignerFileView
+123 signer_file      handle node  args (list<u8>, u32) -> SignerFileView
+124 signer_take      handle node  args SignerTakeArgs -> SignerTakenView
+125 first_address_record handle node  args FirstAddressArgs -> list<u8>
+126 first_address_read handle node  args list<u8> -> FirstAddressView
 ```
 
 ## Types
@@ -242,4 +249,15 @@ BoxDeliveredView: record: box_key: list<u8>, counters: list<list<u8>>, settings_
 BoxOwnInvitationView: record: text: string, expires_at: u64
 BoxOwnCheckArgs: record: invitation: string, claim: list<u8>
 BoxOwnCheckView: record: box_key: list<u8>, words: list<string>
+SignerLineView: record: address: string, sats: u64
+SignerBuiltView: record: built: BuiltView, signer_session: option<list<u8>>
+SignerFileView: record: psbt: list<u8>, txid: list<u8>, file_name: string, payments: list<SignerLineView>, change: option<SignerLineView>, fee: u64, words: Words
+SignerTakenView: record: id: u32, txid: list<u8>, fee: u64, sends: list<SendRow>
+RegistrationView: record: name: string, text_file: string, descriptor_both: string, descriptor_receive: string, descriptor_change: string, output_cbor: list<u8>, first_address: string, text_fits_plain_qr: bool, descriptor_fits_plain_qr: bool
+FirstAddressKind: enum, one tag byte
+    tags Checked=1 Skipped=2
+FirstAddressArgs: record: kind: FirstAddressKind, at: u64
+FirstAddressView: record: kind: FirstAddressKind, at: u64
+SignerExportArgs: record: now: u64, session: list<u8>, number: u32
+SignerTakeArgs: record: now: u64, session: list<u8>, number: u32, returned: list<u8>
 ```

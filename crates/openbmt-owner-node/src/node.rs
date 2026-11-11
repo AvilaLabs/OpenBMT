@@ -1102,6 +1102,28 @@ impl<P: OwnerPort> OwnerNode<P> {
         now: u64,
         pick: impl FnOnce(Vec<openbmt_spend::Coin>) -> Vec<openbmt_spend::Coin>,
     ) -> Result<Built, NodeError> {
+        self.build_with(fee_rate, now, pick, false)
+            .map(|(built, _)| built)
+    }
+
+    /// AS-90: [`OwnerNode::build_request`] for a wallet whose key 2 is a
+    /// hardware signer. The spends are in a session of their own, whose ID
+    /// is returned beside the Key app's request.
+    pub fn build_request_for_signer(
+        &mut self,
+        fee_rate: u64,
+        now: u64,
+    ) -> Result<(Built, Option<[u8; 32]>), NodeError> {
+        self.build_with(fee_rate, now, |coins| coins, true)
+    }
+
+    fn build_with(
+        &mut self,
+        fee_rate: u64,
+        now: u64,
+        pick: impl FnOnce(Vec<openbmt_spend::Coin>) -> Vec<openbmt_spend::Coin>,
+        for_signer: bool,
+    ) -> Result<(Built, Option<[u8; 32]>), NodeError> {
         let commit = TAKE_JOURNAL_LOCK
             .lock()
             .map_err(|_| NodeError::Files("take journal lock is poisoned".to_string()))?;
@@ -1135,11 +1157,28 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
         let change_index = self.view.change_next();
         let dir = self.dir.clone();
-        let built =
-            self.owner
-                .build_request(&coins, fee_rate, change_index, tip, now, &random, |b| {
-                    write_file(&dir, QUEUE_FILE, b)
-                })?;
+        let built = if for_signer {
+            self.owner.build_request_for_signer(
+                &coins,
+                fee_rate,
+                change_index,
+                tip,
+                now,
+                &random,
+                |b| write_file(&dir, QUEUE_FILE, b),
+            )?
+        } else {
+            let built = self.owner.build_request(
+                &coins,
+                fee_rate,
+                change_index,
+                tip,
+                now,
+                &random,
+                |b| write_file(&dir, QUEUE_FILE, b),
+            )?;
+            (built, None)
+        };
         drop(commit);
         self.refresh_marks_checked()?;
         Ok(built)
@@ -1197,6 +1236,79 @@ impl<P: OwnerPort> OwnerNode<P> {
             }
         };
         drop(commit);
+        self.refresh_marks();
+        self.reconcile();
+        Ok(taken)
+    }
+
+    /// AS-91: sign item `number` of the hardware signer's session with key 1
+    /// and make the file for the signer. The queue and key 1's state are
+    /// committed as one unit through the take journal, as for
+    /// [`OwnerNode::take`], and a failed second store requires
+    /// [`OwnerNode::recover_key1`].
+    pub fn export_for_signer(
+        &mut self,
+        session: &[u8; 32],
+        number: u32,
+        key1: &mut SignerState,
+        key1_account: &Xpriv,
+        now: u64,
+        persist_key1: impl FnOnce(&[u8]) -> Result<(), String>,
+    ) -> Result<openbmt_owner::hardware::SignerFile, NodeError> {
+        let commit = TAKE_JOURNAL_LOCK
+            .lock()
+            .map_err(|_| NodeError::Files("take journal lock is poisoned".to_string()))?;
+        self.ready_for_queue_write()?;
+        let dir = self.dir.clone();
+        let mut committed = None;
+        let file =
+            self.owner
+                .export_for_signer(session, number, key1, key1_account, now, |queue, key| {
+                    let journal = TakeJournal {
+                        queue: queue.to_vec(),
+                        key1: key.to_vec(),
+                    };
+                    let bytes = journal.to_bytes()?;
+                    if let Err(error) = write_file(&dir, TAKE_JOURNAL_FILE, &bytes) {
+                        if dir.join(TAKE_JOURNAL_FILE).exists() {
+                            committed = Some(journal);
+                        }
+                        return Err(error);
+                    }
+                    committed = Some(journal);
+                    write_file(&dir, QUEUE_FILE, queue)?;
+                    persist_key1(key)?;
+                    remove_take_journal(&dir)
+                });
+        let file = match file {
+            Ok(file) => file,
+            Err(error) => {
+                if let Some(journal) = committed {
+                    self.take_journal = Some(journal);
+                    self.stop(format!(
+                        "a committed signing file needs key 1 recovery: {error}"
+                    ));
+                    return Err(NodeError::KeyRecoveryRequired);
+                }
+                return Err(error.into());
+            }
+        };
+        drop(commit);
+        Ok(file)
+    }
+
+    /// AS-96: take what the hardware signer returned for item `number` of its
+    /// session. Only the queue changes, so it is stored as any queue change.
+    pub fn take_from_signer(
+        &mut self,
+        session: &[u8; 32],
+        number: u32,
+        returned: &[u8],
+    ) -> Result<openbmt_owner::hardware::SignerTaken, NodeError> {
+        let write = self.queue_writer();
+        let taken = self
+            .owner_mut()?
+            .take_from_signer(session, number, returned, write)?;
         self.refresh_marks();
         self.reconcile();
         Ok(taken)

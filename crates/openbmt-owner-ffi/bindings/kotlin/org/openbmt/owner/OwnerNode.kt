@@ -123,6 +123,13 @@ private const val OP_BOX_OWN_INVITATION = 108
 private const val OP_BOX_OWN_CHECK = 109
 private const val OP_BOXES_PENDING = 110
 private const val OP_BOX_FORGET = 111
+private const val OP_SIGNER_REGISTRATION = 120
+private const val OP_SIGNER_BUILD = 121
+private const val OP_SIGNER_EXPORT = 122
+private const val OP_SIGNER_FILE = 123
+private const val OP_SIGNER_TAKE = 124
+private const val OP_FIRST_ADDRESS_RECORD = 125
+private const val OP_FIRST_ADDRESS_READ = 126
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -171,6 +178,8 @@ private const val TAG_NOTE_KIND_VIEW_REFUSED = 0
 private const val TAG_NOTE_KIND_VIEW_WITHDRAWAL_NOT_APPLIED = 1
 private const val TAG_NOTE_KIND_VIEW_INTERRUPTED = 2
 private const val TAG_NOTE_KIND_VIEW_CLAIMED_MORE_THAN_SEEN = 3
+private const val TAG_FIRST_ADDRESS_KIND_CHECKED = 1
+private const val TAG_FIRST_ADDRESS_KIND_SKIPPED = 2
 private const val TAG_OLD_KIND_NONE = 0
 private const val TAG_OLD_KIND_FIRST_CHECK_WAITING = 1
 private const val TAG_OLD_KIND_MONTHLY = 2
@@ -336,6 +345,42 @@ class Skipped(val id: Long, val reason: String, val words: Words)
 
 /** An approval session built for the Key app: [request] is what it takes. */
 class Built(val sessionId: ByteArray, val request: ByteArray, val skipped: List<Skipped>)
+
+/** One address and amount, as the signer's screen shows it. */
+class SignerLine(val address: String, val sats: Long)
+
+/** The approval for the Key app, and the session of the spends for a hardware signer (null if none). */
+class SignerBuilt(val built: Built, val signerSession: ByteArray?)
+
+/** The file for a hardware signer: the PSBT key 1 signed, and what its screen must show. */
+class SignerFile(
+    val psbt: ByteArray,
+    val txid: ByteArray,
+    val fileName: String,
+    val payments: List<SignerLine>,
+    val change: SignerLine?,
+    val fee: Long,
+    val words: Words,
+)
+
+/** What taking the signer's answer did. */
+class SignerTaken(val id: Long, val txid: ByteArray, val fee: Long, val sends: List<SendRow>)
+
+/** The wallet in the forms a signer takes (AS-97). */
+class Registration(
+    val name: String,
+    val textFile: String,
+    val descriptorBoth: String,
+    val descriptorReceive: String,
+    val descriptorChange: String,
+    val outputCbor: ByteArray,
+    val firstAddress: String,
+    val textFitsPlainQr: Boolean,
+    val descriptorFitsPlainQr: Boolean,
+)
+
+/** The first address check: [checked] is false when it was skipped (AS-99). */
+class FirstAddress(val checked: Boolean, val at: Long)
 
 enum class OutcomeKind { Delivered, Returned, Healthy }
 
@@ -1163,6 +1208,20 @@ private fun Reader.outcome(): Outcome =
 internal fun Reader.taken(): Taken =
     Taken(bytes(), list { outcome() }, list { sendRow() })
 
+private fun Reader.signerLine(): SignerLine = SignerLine(string(), u64())
+
+private fun Reader.signerFile(): SignerFile =
+    SignerFile(
+        bytes(), bytes(), string(), list { signerLine() }, option { signerLine() }, u64(), words(),
+    )
+
+private fun Reader.firstAddressKind(): Boolean =
+    when (val t = u8()) {
+        TAG_FIRST_ADDRESS_KIND_CHECKED -> true
+        TAG_FIRST_ADDRESS_KIND_SKIPPED -> false
+        else -> bad("first address kind $t is not defined")
+    }
+
 private fun Reader.stage(): Stage = Stage(stageKind(), option { string() }, words())
 
 private fun Reader.refundRow(): RefundRow =
@@ -1491,6 +1550,56 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     fun take(now: Long, response: ByteArray): Taken {
         val r = call(OP_TAKE, handle) { it.u64(now).bytes(response) }
         return r.taken().also { r.end() }
+    }
+
+    /** AS-97: the wallet in the forms a hardware signer takes. */
+    fun signerRegistration(shop: String): Registration {
+        val r = call(OP_SIGNER_REGISTRATION, handle) { it.string(shop) }
+        return Registration(
+            r.string(), r.string(), r.string(), r.string(), r.string(), r.bytes(), r.string(),
+            r.bool(), r.bool(),
+        ).also { r.end() }
+    }
+
+    /** AS-90: build the approval for the Key app, with the spends apart for the signer. */
+    fun signerBuild(now: Long, feeRate: Long): SignerBuilt {
+        val r = call(OP_SIGNER_BUILD, handle) { it.u64(now).u64(feeRate) }
+        return SignerBuilt(r.built(), r.option { r.bytes() }).also { r.end() }
+    }
+
+    /** AS-91: sign item [number] of the spends' session with key 1 and make the signer's file. */
+    fun signerExport(now: Long, session: ByteArray, number: Long): SignerFile {
+        val r = call(OP_SIGNER_EXPORT, handle) { it.u64(now).bytes(session).u32(number) }
+        return r.signerFile().also { r.end() }
+    }
+
+    /** AS-92: the signer's file again, as it was made. */
+    fun signerFile(session: ByteArray, number: Long): SignerFile {
+        val r = call(OP_SIGNER_FILE, handle) { it.bytes(session).u32(number) }
+        return r.signerFile().also { r.end() }
+    }
+
+    /** AS-93 to AS-96: take what the signer returned (a PSBT or a finished transaction, as bytes). */
+    fun signerTake(now: Long, session: ByteArray, number: Long, returned: ByteArray): SignerTaken {
+        val r = call(OP_SIGNER_TAKE, handle) {
+            it.u64(now).bytes(session).u32(number).bytes(returned)
+        }
+        return SignerTaken(r.u32(), r.bytes(), r.u64(), r.list { r.sendRow() }).also { r.end() }
+    }
+
+    /** AS-99: the record of the first address check, to store. */
+    fun firstAddressRecord(checked: Boolean, at: Long): ByteArray {
+        val r = call(OP_FIRST_ADDRESS_RECORD, handle) {
+            it.u8(if (checked) TAG_FIRST_ADDRESS_KIND_CHECKED else TAG_FIRST_ADDRESS_KIND_SKIPPED)
+                .u64(at)
+        }
+        return r.bytes().also { r.end() }
+    }
+
+    /** AS-99: read the stored record back. */
+    fun firstAddressRead(record: ByteArray): FirstAddress {
+        val r = call(OP_FIRST_ADDRESS_READ, handle) { it.bytes(record) }
+        return FirstAddress(r.firstAddressKind(), r.u64()).also { r.end() }
     }
 
     /** The open approvals' IDs. */

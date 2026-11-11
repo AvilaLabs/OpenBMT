@@ -73,7 +73,10 @@ fn parse(reply: &[u8]) -> Result<Vec<u8>, String> {
         Some(&REFUSED) => {
             assert_eq!(body.len(), 5, "a rule code is five bytes");
             let code = String::from_utf8(body.to_vec()).expect("ascii");
-            assert!(code.starts_with("UR-") || code.starts_with("QR-"), "{code}");
+            assert!(
+                code.starts_with("UR-") || code.starts_with("QR-") || code.starts_with("BQ-"),
+                "{code}"
+            );
             Err(code)
         }
         Some(&REFUSED_WITH_WORDS) => Err(words_of(reply).0),
@@ -812,4 +815,121 @@ fn ur_31_a_request_that_is_not_framed_or_has_a_bad_type_is_refused() {
         "UR-01"
     );
     assert_eq!(refused(&calls.call(&key_request("", &[1]))), "UR-01");
+}
+
+// ---- the descriptor and the BBQr sets of a hardware signer ---------------------------
+
+fn bbqr_request(kind: u8, max_chars: u16, payload: &[u8]) -> Vec<u8> {
+    let mut v = head(OP_BBQR_ENCODE);
+    v.push(kind);
+    v.extend_from_slice(&max_chars.to_be_bytes());
+    v.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    v.extend_from_slice(payload);
+    v
+}
+
+fn bbqr_parts(body: &[u8]) -> Vec<String> {
+    let count = u32_at(body, 0);
+    let mut at = 4;
+    let mut out = Vec::new();
+    for _ in 0..count {
+        let len = u32_at(body, at);
+        at += 4;
+        out.push(String::from_utf8(body[at..at + len].to_vec()).expect("text"));
+        at += len;
+    }
+    assert_eq!(at, body.len());
+    out
+}
+
+fn joiner(calls: &Calls) -> u32 {
+    let body = parse(&calls.call(&head(OP_BBQR_NEW))).expect("a handle");
+    u32_at(&body, 0) as u32
+}
+
+fn bbqr_add(calls: &Calls, handle: u32, text: &str) -> Result<Vec<u8>, String> {
+    let mut v = head(OP_BBQR_ADD);
+    v.extend_from_slice(&handle.to_be_bytes());
+    v.extend_from_slice(&(text.len() as u32).to_be_bytes());
+    v.extend_from_slice(text.as_bytes());
+    parse(&calls.call(&v))
+}
+
+#[test]
+fn ur_20_a_descriptor_goes_out_as_a_crypto_output() {
+    let calls = Calls::new();
+    let cbor = message(300);
+    let body = parse(&calls.call(&ur_request("crypto-output", 100, &cbor))).expect("ok");
+    let parts = bbqr_parts(&body);
+    assert!(parts.len() > 2);
+    let mut d = Decoder::new();
+    for p in &parts {
+        d.receive(p).expect("part");
+    }
+    assert_eq!(d.result(), Some(("crypto-output".to_string(), cbor)));
+}
+
+#[test]
+fn ur_21_a_bbqr_set_goes_out_and_comes_back_in_any_order() {
+    let calls = Calls::new();
+    let payload = message(900);
+    let body = parse(&calls.call(&bbqr_request(b'P', 300, &payload))).expect("parts");
+    let parts = bbqr_parts(&body);
+    assert!(parts.len() > 2);
+    assert!(parts
+        .iter()
+        .all(|p| p.starts_with("B$2P") && p.len() <= 300));
+    let h = joiner(&calls);
+    for (i, p) in parts.iter().rev().enumerate() {
+        let r = bbqr_add(&calls, h, p).expect("part");
+        assert_eq!(r[0], u8::from(i + 1 == parts.len()));
+        assert_eq!(u32_at(&r, 1), i + 1);
+        assert_eq!(u32_at(&r, 5), parts.len());
+    }
+    // A part twice is the same as once.
+    assert_eq!(bbqr_add(&calls, h, &parts[0]).expect("again")[0], 1);
+    let done = parse(&calls.call(&handle_request(OP_BBQR_RESULT, h))).expect("done");
+    assert_eq!(done[0], b'P');
+    assert_eq!(u32_at(&done, 1), payload.len());
+    assert_eq!(&done[5..], &payload[..]);
+    parse(&calls.call(&handle_request(OP_BBQR_DROP, h))).expect("closed");
+    assert_eq!(
+        refused(&calls.call(&handle_request(OP_BBQR_DROP, h))),
+        BAD_STATE
+    );
+}
+
+#[test]
+fn ur_21_a_bbqr_set_that_is_short_or_of_another_kind_is_refused() {
+    let calls = Calls::new();
+    let body = parse(&calls.call(&bbqr_request(b'T', 200, &message(700)))).expect("parts");
+    let parts = bbqr_parts(&body);
+    let h = joiner(&calls);
+    bbqr_add(&calls, h, &parts[0]).expect("part");
+    // The result before the set is whole: BQ-10, the part missing.
+    assert_eq!(
+        refused(&calls.call(&handle_request(OP_BBQR_RESULT, h))),
+        "BQ-10"
+    );
+    // A kind the reader does not take, and one that is not a kind.
+    let text = parse(&calls.call(&bbqr_request(b'U', 200, b"Name: x"))).expect("parts");
+    let h2 = joiner(&calls);
+    assert_eq!(
+        bbqr_add(&calls, h2, &bbqr_parts(&text)[0]).unwrap_err(),
+        "BQ-03"
+    );
+    assert_eq!(
+        refused(&calls.call(&bbqr_request(b'Q', 200, b"x"))),
+        "BQ-03"
+    );
+    // Text that is not a part.
+    assert_eq!(bbqr_add(&calls, h, "hello").unwrap_err(), "BQ-01");
+    // Four readers at most; a handle that is not open.
+    let _ = (joiner(&calls), joiner(&calls));
+    assert_eq!(refused(&calls.call(&head(OP_BBQR_NEW))), BAD_STATE);
+    assert_eq!(bbqr_add(&calls, 999, &parts[0]).unwrap_err(), BAD_STATE);
+    // Strict framing: bytes after the last field.
+    let mut v = bbqr_request(b'P', 200, b"x");
+    v.push(0);
+    assert_eq!(refused(&calls.call(&v)), BAD_FRAMING);
 }

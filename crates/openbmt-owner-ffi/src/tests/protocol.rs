@@ -101,6 +101,13 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (109, "box_own_check"),
         (110, "boxes_pending"),
         (111, "box_forget"),
+        (120, "signer_registration"),
+        (121, "signer_build"),
+        (122, "signer_export"),
+        (123, "signer_file"),
+        (124, "signer_take"),
+        (125, "first_address_record"),
+        (126, "first_address_read"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

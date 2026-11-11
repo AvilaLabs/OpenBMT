@@ -816,5 +816,67 @@ fn lk_66_settings_wait_in_the_outbox_and_the_row_says_which_devices_lack_them() 
     for row in &after {
         check_wire_words(&row.7).expect("words");
         assert!(row.7.what.contains("1 counter"), "{}", row.7.what);
+
+// ---- a hardware signer as key 2 (AS-90 to AS-99) ------------------------------------
+
+#[test]
+fn as_97_the_wallet_is_written_for_a_signer_and_the_record_of_the_first_address_round_trips() {
+    let (rig, handle) = ready();
+    let response = rig.call(120, handle, &W::new().string("Corner Cafe").0);
+    let mut r = Rd::ok(&response);
+    let name = r.string();
+    let text = r.string();
+    let both = r.string();
+    let receive = r.string();
+    let change = r.string();
+    let cbor = r.bytes();
+    let first = r.string();
+    let (text_fits, descriptor_fits) = (r.bool(), r.bool());
+    r.done();
+    assert_eq!(name, "Corner Cafe");
+    assert!(text.starts_with("Name: Corner Cafe\nPolicy: 2 of 3\n"));
+    assert!(both.contains("<0;1>") && receive.contains("/0/*") && change.contains("/1/*"));
+    assert_eq!(cbor.get(..3), Some(&[0xd9, 0x01, 0x91][..]));
+    assert!(first.starts_with("bcrt1q") || first.starts_with("tb1q") || first.starts_with("bc1q"));
+    assert!(text_fits && descriptor_fits);
+    // The record: 1 is checked, 2 is skipped.
+    let response = rig.call(125, handle, &W::new().u8(2).u64(1_700_000_000).0);
+    let mut r = Rd::ok(&response);
+    let record = r.bytes();
+    r.done();
+    assert_eq!(record.get(..4), Some(&b"OBM0"[..]));
+    let response = rig.call(126, handle, &W::new().bytes(&record).0);
+    let mut r = Rd::ok(&response);
+    assert_eq!((r.u8(), r.u64()), (2, 1_700_000_000));
+    r.done();
+    // A kind that is not defined, and a record that is not framed.
+    assert_eq!(
+        fault(&rig.call(125, handle, &W::new().u8(9).u64(1).0)).status,
+        1
+    );
+    let f = fault(&rig.call(126, handle, &W::new().bytes(&record[..10]).0));
+    assert_eq!((f.status, f.rule.as_str()), (1, "AS-99"));
+}
+
+#[test]
+fn as_91_a_session_that_does_not_exist_is_refused_with_words_by_every_signer_op() {
+    let (rig, handle) = ready();
+    let session = [7u8; 32];
+    let f = fault(&rig.call(122, handle, &W::new().u64(T0).bytes(&session).u32(0).0));
+    assert_eq!(f.status, 1, "{f:?}");
+    let f = fault(&rig.call(123, handle, &W::new().bytes(&session).u32(0).0));
+    assert_eq!((f.status, f.rule.as_str()), (1, "AS-90"));
+    let f = fault(&rig.call(
+        124,
+        handle,
+        &W::new().u64(T0).bytes(&session).u32(0).bytes(b"psbt\xff").0,
+    ));
+    assert_eq!(f.status, 1, "{f:?}");
+    let f = fault(&rig.call(123, handle, &W::new().bytes(&[7; 5]).u32(0).0));
+    assert_eq!(f.rule, "id-length");
+    // The build for a signer is either refused with words or has no spend.
+    let response = rig.call(121, handle, &W::new().u64(T0).u64(1_000).0);
+    if let Some(f) = Rd::error(&response) {
+        check_wire_words(&f.words).expect("words");
     }
 }

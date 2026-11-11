@@ -88,6 +88,10 @@ use crate::pos_views::{
 };
 use crate::say::{counter_words, link_alert_words, words_for};
 use crate::settings_edit::{preview_view, to_edit, SettingsEditArgs, SettingsPreviewView};
+use crate::signer_views::{
+    file_view, record_view, registration_view, taken_view, FirstAddressArgs, FirstAddressView,
+    RegistrationView, SignerBuiltView, SignerFileView, SignerTakenView,
+};
 use crate::views::{
     AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView, CashOutArgs,
     CashOutRow, ClearArgs, CounterShareView, CounterView, DeepRequestView, DeliverView,
@@ -2186,6 +2190,137 @@ impl Entry {
             Ok(())
         })
     }
+}
+
+impl Entry {
+    /// AS-97: the wallet for a hardware signer, under a name made from the
+    /// shop's.
+    pub(crate) fn signer_registration(&self, shop: String) -> Result<RegistrationView, AppError> {
+        self.run(None, move |st| {
+            let wallet = st.node.owner().wallet();
+            let registration = openbmt_owner::hardware::registration(wallet, &shop)
+                .map_err(|e| hardware_error(&e))?;
+            let first =
+                openbmt_owner::hardware::first_address(wallet).map_err(|e| hardware_error(&e))?;
+            Ok(registration_view(registration, first))
+        })
+    }
+
+    /// AS-90: build the session for the Key app and, apart from it, the
+    /// spends for the hardware signer.
+    pub(crate) fn signer_build(
+        &self,
+        now: u64,
+        fee_rate: u64,
+    ) -> Result<SignerBuiltView, AppError> {
+        self.run(Some(now), move |st| {
+            let (built, signer) = st
+                .node
+                .build_request_for_signer(fee_rate, now)
+                .map_err(|e| node_error(&e))?;
+            Ok(SignerBuiltView {
+                built: built_view(built),
+                signer_session: signer.map(|s| s.to_vec()),
+            })
+        })
+    }
+
+    /// AS-91: sign a spend with key 1 and make the file for the signer. Key
+    /// 1's state is written in the same step, as the node's journal asks.
+    pub(crate) fn signer_export(
+        &self,
+        now: u64,
+        session: Vec<u8>,
+        number: u32,
+    ) -> Result<SignerFileView, AppError> {
+        let session = session_id(&session)?;
+        self.run(Some(now), move |st| {
+            let State {
+                node,
+                key1,
+                key1_account,
+                dir,
+                ..
+            } = st;
+            let persist_dir = dir.clone();
+            node.export_for_signer(&session, number, key1, key1_account, now, move |bytes| {
+                write_file(&persist_dir, KEY1_FILE, bytes)
+            })
+            .map(file_view)
+            .map_err(|e| node_error(&e))
+        })
+    }
+
+    /// AS-92: the file for the signer again.
+    pub(crate) fn signer_file(
+        &self,
+        session: Vec<u8>,
+        number: u32,
+    ) -> Result<SignerFileView, AppError> {
+        let session = session_id(&session)?;
+        self.run(None, move |st| {
+            st.node
+                .owner()
+                .signer_file(&session, number)
+                .map(file_view)
+                .map_err(|e| hardware_error(&e))
+        })
+    }
+
+    /// AS-93 to AS-96: take what the signer returned.
+    pub(crate) fn signer_take(
+        &self,
+        now: u64,
+        session: Vec<u8>,
+        number: u32,
+        returned: Vec<u8>,
+    ) -> Result<SignerTakenView, AppError> {
+        let session = session_id(&session)?;
+        self.run(Some(now), move |st| {
+            let taken = st
+                .node
+                .take_from_signer(&session, number, &returned)
+                .map_err(|e| node_error(&e))?;
+            let sends = st
+                .node
+                .send_states()
+                .iter()
+                .map(|(txid, state)| send_row(txid, *state))
+                .collect();
+            Ok(taken_view(&taken, sends))
+        })
+    }
+
+    /// AS-99: the record of the first address check, as the bytes to keep.
+    pub(crate) fn first_address_record(&self, a: FirstAddressArgs) -> Result<Vec<u8>, AppError> {
+        self.run(None, move |st| {
+            Ok(openbmt_owner::hardware::FirstAddressRecord::new(
+                st.node.owner().wallet(),
+                a.kind.into(),
+                a.at,
+            )
+            .to_bytes())
+        })
+    }
+
+    /// AS-99: read the record back.
+    pub(crate) fn first_address_read(&self, bytes: Vec<u8>) -> Result<FirstAddressView, AppError> {
+        self.run(None, move |st| {
+            openbmt_owner::hardware::FirstAddressRecord::from_bytes(
+                st.node.owner().wallet(),
+                &bytes,
+            )
+            .map(|r| record_view(&r))
+            .map_err(|e| hardware_error(&e))
+        })
+    }
+}
+
+/// A refusal of a step with a hardware signer, as the error the app gets.
+fn hardware_error(e: &openbmt_owner::hardware::HardwareRefusal) -> AppError {
+    let text = e.to_string();
+    let rule = rule_in(&text, "signer-refused");
+    from_words(Kind::Refused, rule, text, e.words())
 }
 
 fn outcome_view(item: u32, outcome: &ItemOutcome) -> OutcomeView {

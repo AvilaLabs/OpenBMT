@@ -126,12 +126,19 @@ cosigner key out of a finished UR (section 7).
 - **UR-20.** The apps send and read two types. `ur:bytes` carries OpenBMT's
   own framed objects (a request to the Key app, its answer, a pairing
   text). `ur:crypto-psbt` carries a plain PSBT to or from another wallet,
-  and nothing else. The call encodes only these two types, and gives back
-  the message of a finished UR only when its type is one of these, `psbt`,
-  or one that UR-31 reads a key from; any other type is refused.
+  and nothing else. The call encodes these two types and `ur:crypto-output`
+  (the descriptor of a wallet, UR-32, whose CBOR the owner crate makes),
+  and gives back the message of a finished UR only when its type is one of
+  the first two, `psbt`, or one that UR-31 reads a key from; any other
+  type is refused.
 - **UR-21.** The call takes one framed request: the four bytes `OBMo`, the
-  version byte 1, an operation byte, the fields of the operation and
-  nothing after them, with every length exactly the bytes that follow. A
+  version byte 1, an operation byte (1 to 7 as above, and 8 to 12 for the
+  BBQr sets of `docs/BBQR-RULES.md`: write the parts of a payload, open a
+  reader of sets of type P or T, give it a part, take its result, close
+  it; a reader's refusal is the rule code BQ-01 to BQ-12 of the part's
+  fault, the handles are those of UR-22 and at most four readers are open),
+  the fields of the operation and nothing after them, with every length
+  exactly the bytes that follow. A
   request of any other shape (another magic, version or operation, a cut,
   an extra byte, a length that claims more or less than is there, a level
   outside 0 to 3, a request over 4 MiB) is refused with this rule. The

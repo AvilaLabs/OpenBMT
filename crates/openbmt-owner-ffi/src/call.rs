@@ -52,6 +52,10 @@
 //!   it shows, its settings, taking them off, the next request, the till's
 //!   answer, acknowledging an alert. The app sends the request and hands
 //!   back the answer; the node parses and matches.
+//! - 120 to 126: a hardware signer as key 2 (`docs/SESSION-RULES.md`, AS-90 to
+//!   AS-99): the wallet written for it, the session built with the spends
+//!   apart, the file for the signer, taking what it returns, and the record
+//!   of the first address check.
 //! - 100 to 103: the lock on the setup text the app stores
 //!   (`docs/LOCK-RULES.md`, `docs/OWNER-APP-RULES.md` OA-60 to OA-62):
 //!   whether stored bytes are a locked setup, lock a text under a PIN, open
@@ -105,6 +109,10 @@ use crate::settings_edit::{
     LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,
 };
 use crate::setup_lock::{self, PinChangeArgs};
+use crate::signer_views::{
+    FirstAddressArgs, FirstAddressKind, FirstAddressView, RegistrationView, SignerBuiltView,
+    SignerExportArgs, SignerFileView, SignerLineView, SignerTakeArgs, SignerTakenView,
+};
 use crate::views::{
     put_words, AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView,
     CashOutArgs, CashOutRow, ClearArgs, CounterShareView, CounterView, DeepRequestView,
@@ -519,6 +527,37 @@ fn build_ops() -> Vec<Op> {
         op(111, "box_forget", Node, |c, key: Vec<u8>| {
             c.entry()?.box_forget(key)
         }),
+        op(120, "signer_registration", Node, |c, shop: String| {
+            c.entry()?.signer_registration(shop)
+        }),
+        op(
+            121,
+            "signer_build",
+            Node,
+            |c, (now, fee_rate): (u64, u64)| c.entry()?.signer_build(now, fee_rate),
+        ),
+        op(122, "signer_export", Node, |c, a: SignerExportArgs| {
+            c.entry()?.signer_export(a.now, a.session, a.number)
+        }),
+        op(
+            123,
+            "signer_file",
+            Node,
+            |c, (session, number): (Vec<u8>, u32)| c.entry()?.signer_file(session, number),
+        ),
+        op(124, "signer_take", Node, |c, a: SignerTakeArgs| {
+            c.entry()?
+                .signer_take(a.now, a.session, a.number, a.returned)
+        }),
+        op(
+            125,
+            "first_address_record",
+            Node,
+            |c, a: FirstAddressArgs| c.entry()?.first_address_record(a),
+        ),
+        op(126, "first_address_read", Node, |c, bytes: Vec<u8>| {
+            c.entry()?.first_address_read(bytes)
+        }),
     ]
 }
 
@@ -741,6 +780,16 @@ fn definitions() -> Vec<TypeDef> {
         BoxOwnInvitationView::define(),
         BoxOwnCheckArgs::define(),
         BoxOwnCheckView::define(),
+        SignerLineView::define(),
+        SignerBuiltView::define(),
+        SignerFileView::define(),
+        SignerTakenView::define(),
+        RegistrationView::define(),
+        FirstAddressKind::define(),
+        FirstAddressArgs::define(),
+        FirstAddressView::define(),
+        SignerExportArgs::define(),
+        SignerTakeArgs::define(),
     ]
 }
 

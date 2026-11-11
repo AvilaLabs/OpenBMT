@@ -60,6 +60,7 @@ mod pos_views;
 mod say;
 mod settings_edit;
 mod setup_lock;
+mod signer_views;
 mod views;
 
 #[cfg(test)]

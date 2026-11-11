@@ -40,11 +40,12 @@
 
 use std::sync::{Mutex, PoisonError};
 
+use openbmt_bbqr::{Joiner, Kind};
 use openbmt_qr::{encode_with, Ecc};
 use openbmt_ur::cbor::{decode_bytes, encode_bytes};
 use openbmt_ur::{
-    check_type, psbt_to_ur_parts, ur_to_key_text, ur_to_psbt, Decoder, Encoder, KeyRefusal,
-    MIN_FRAGMENT_LEN, TYPE_CRYPTO_PSBT, TYPE_PSBT,
+    check_type, output_to_ur_parts, psbt_to_ur_parts, ur_to_key_text, ur_to_psbt, Decoder, Encoder,
+    KeyRefusal, MIN_FRAGMENT_LEN, TYPE_CRYPTO_OUTPUT, TYPE_CRYPTO_PSBT, TYPE_PSBT,
 };
 
 /// The first four bytes of a request.
@@ -76,8 +77,31 @@ pub const OP_DECODER_DROP: u8 = 6;
 /// Operation: the cosigner key text in a finished UR (UR-31).
 pub const OP_KEY_TEXT: u8 = 7;
 
+/// Operation: write a payload as the parts of a BBQr set (BQ-01 to BQ-16):
+/// kind `u8` (the ASCII letter P, T, J, C, U, B or X), most characters of a
+/// part `u16`, length `u32`, payload; the answer is the count `u32`, then
+/// each part as a length `u32` and its text.
+pub const OP_BBQR_ENCODE: u8 = 8;
+/// Operation: open a reader of a BBQr set that holds a PSBT (P) or a
+/// transaction (T) and answers with a handle.
+pub const OP_BBQR_NEW: u8 = 9;
+/// Operation: give a reader one part (handle `u32`, length `u32`, text): the
+/// parts come in any order and twice is the same as once; the answer is
+/// complete `u8`, parts held `u32`, parts in the set `u32`.
+pub const OP_BBQR_ADD: u8 = 10;
+/// Operation: the result of a complete set (handle `u32`): kind `u8`, length
+/// `u32`, payload.
+pub const OP_BBQR_RESULT: u8 = 11;
+/// Operation: close a reader of a BBQr set (handle `u32`).
+pub const OP_BBQR_DROP: u8 = 12;
+
 /// The most decoders open at once.
 pub const MAX_DECODERS: usize = 4;
+/// The most BBQr readers open at once.
+pub const MAX_JOINERS: usize = 4;
+
+/// The kinds of BBQr set a reader of the apps takes: what a signer returns.
+const JOIN_KINDS: &[Kind] = &[Kind::Psbt, Kind::Transaction];
 
 /// The longest request, in bytes: the largest text a decoder reads (about
 /// 2.1 million characters) and the largest message an encoder takes (1 MiB)
@@ -209,6 +233,7 @@ pub struct Calls {
 struct Table {
     next: u32,
     open: Vec<(u32, Decoder)>,
+    joiners: Vec<(u32, Joiner)>,
 }
 
 impl Default for Calls {
@@ -224,6 +249,7 @@ impl Calls {
             table: Mutex::new(Table {
                 next: 1,
                 open: Vec::new(),
+                joiners: Vec::new(),
             }),
         }
     }
@@ -283,6 +309,27 @@ impl Calls {
                 let handle = r.u32()?;
                 r.end()?;
                 self.decoder_drop(handle)
+            }
+            OP_BBQR_ENCODE => bbqr_encode(r),
+            OP_BBQR_NEW => {
+                r.end()?;
+                self.joiner_new()
+            }
+            OP_BBQR_ADD => {
+                let handle = r.u32()?;
+                let text = r.sized()?;
+                r.end()?;
+                self.joiner_add(handle, text)
+            }
+            OP_BBQR_RESULT => {
+                let handle = r.u32()?;
+                r.end()?;
+                self.joiner_result(handle)
+            }
+            OP_BBQR_DROP => {
+                let handle = r.u32()?;
+                r.end()?;
+                self.joiner_drop(handle)
             }
             _ => Err(Refusal::of(BAD_FRAMING)),
         }
@@ -352,6 +399,65 @@ impl Calls {
         Ok(out)
     }
 
+    fn joiner_new(&self) -> Done {
+        self.lock(|t| {
+            if t.joiners.len() >= MAX_JOINERS || t.next == u32::MAX {
+                return Err(Refusal::of(BAD_STATE));
+            }
+            let handle = t.next;
+            t.next += 1;
+            t.joiners.push((handle, Joiner::new(JOIN_KINDS)));
+            Ok(handle.to_be_bytes().to_vec())
+        })
+    }
+
+    fn joiner_add(&self, handle: u32, text: &[u8]) -> Done {
+        let text = std::str::from_utf8(text).map_err(|_| Refusal::of("BQ-01"))?;
+        self.lock(|t| {
+            let joiner = t
+                .joiners
+                .iter_mut()
+                .find(|(h, _)| *h == handle)
+                .map(|(_, j)| j)
+                .ok_or_else(|| Refusal::of(BAD_STATE))?;
+            let p = joiner.add(text).map_err(|e| Refusal::of(e.rule()))?;
+            let mut out = Vec::with_capacity(9);
+            out.push(u8::from(p.complete()));
+            push_u32(&mut out, p.have)?;
+            push_u32(&mut out, p.total)?;
+            Ok(out)
+        })
+    }
+
+    fn joiner_result(&self, handle: u32) -> Done {
+        let done = self.lock(|t| {
+            let joiner = t
+                .joiners
+                .iter()
+                .find(|(h, _)| *h == handle)
+                .map(|(_, j)| j)
+                .ok_or_else(|| Refusal::of(BAD_STATE))?;
+            joiner.finish().map_err(|e| Refusal::of(e.rule()))
+        })?;
+        let mut out = Vec::with_capacity(5 + done.bytes.len());
+        out.push(u8::try_from(done.kind.code() as u32).map_err(|_| Refusal::of(BAD_FRAMING))?);
+        push_u32(&mut out, done.bytes.len())?;
+        out.extend_from_slice(&done.bytes);
+        Ok(out)
+    }
+
+    fn joiner_drop(&self, handle: u32) -> Done {
+        self.lock(|t| {
+            let at = t
+                .joiners
+                .iter()
+                .position(|(h, _)| *h == handle)
+                .ok_or_else(|| Refusal::of(BAD_STATE))?;
+            t.joiners.remove(at);
+            Ok(Vec::new())
+        })
+    }
+
     fn decoder_drop(&self, handle: u32) -> Done {
         self.lock(|t| {
             let at = t
@@ -402,6 +508,22 @@ fn qr_encode(mut r: Reader<'_>) -> Done {
     Ok(out)
 }
 
+fn bbqr_encode(mut r: Reader<'_>) -> Done {
+    let kind = Kind::from_code(char::from(r.u8()?)).ok_or_else(|| Refusal::of("BQ-03"))?;
+    let max_chars = usize::from(r.u16()?);
+    let payload = r.sized()?;
+    r.end()?;
+    let parts =
+        openbmt_bbqr::encode(kind, payload, max_chars).map_err(|e| Refusal::of(e.rule()))?;
+    let mut out = Vec::new();
+    push_u32(&mut out, parts.len())?;
+    for part in &parts {
+        push_u32(&mut out, part.len())?;
+        out.extend_from_slice(part.as_bytes());
+    }
+    Ok(out)
+}
+
 fn ur_encode(mut r: Reader<'_>) -> Done {
     let type_len = usize::from(r.u8()?);
     let ur_type = std::str::from_utf8(r.take(type_len)?).map_err(|_| Refusal::of(BAD_FRAMING))?;
@@ -422,6 +544,8 @@ fn ur_encode(mut r: Reader<'_>) -> Done {
             MIN_FRAGMENT_LEN,
         ),
         TYPE_CRYPTO_PSBT => psbt_to_ur_parts(payload, max_fragment),
+        // The CBOR of the descriptor itself (UR-32), made by the owner crate.
+        TYPE_CRYPTO_OUTPUT => output_to_ur_parts(payload, max_fragment),
         _ => return Err(Refusal::of(TYPE_NOT_USED)),
     }
     .map_err(|e| code_of(&e.to_string()))?;
