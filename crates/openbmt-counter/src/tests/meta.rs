@@ -31,7 +31,7 @@ const TEST_SOURCES: [&str; 19] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 54] = [
+const NOT_HERE: [(&str, &str); 56] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -304,6 +304,15 @@ const NOT_HERE: [(&str, &str); 54] = [
         "CR-156",
         "it states what the cashier list does not do; there is nothing to enforce or to test",
     ),
+    (
+        "CR-177",
+        "which screen comes back is the Android app's; its tests are the app's JVM tests",
+    ),
+    (
+        "CR-178",
+        "the redraw after a change of light and dark is the Android app's; the choice of screen \
+         it draws is tested in the app's JVM tests, and the window needs a device to test",
+    ),
 ];
 
 /// The rule number at the start of `rest` (what follows `CR-`): every digit,
@@ -322,9 +331,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_one_hundred_and_twenty_nine_rules() {
+fn the_rules_file_defines_one_hundred_and_thirty_one_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 129);
+    assert_eq!(ids.len(), 131);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -348,6 +357,7 @@ fn the_rules_file_defines_one_hundred_and_twenty_nine_rules() {
             && ids.contains("CR-166")
             && ids.contains("CR-167")
             && ids.contains("CR-169")
+            && ids.contains("CR-178")
     );
 }
 

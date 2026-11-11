@@ -6,6 +6,7 @@ import android.content.res.Configuration
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
+import org.openbmt.app.applyNight
 import org.openbmt.app.isNight
 
 /**
@@ -17,14 +18,16 @@ import org.openbmt.app.isNight
 class MainActivity : Activity() {
     private lateinit var controller: Controller
 
-    /** Night mode when the screens were drawn: they take their colours from it, so a change starts the activity again. */
+    /** Night mode when the screens were drawn: a change draws the current screen again in place, with the activity kept. */
     private var night = false
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (isNight(newConfig) != night) {
-            finish()
-            startActivity(Intent(this, MainActivity::class.java))
+            night = isNight(newConfig)
+            applyNight()
+            controller.redraw()
+            window.decorView.requestApplyInsets()
         }
     }
 

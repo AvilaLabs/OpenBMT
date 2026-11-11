@@ -1787,7 +1787,9 @@ object AppModelTest {
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
-    private val notHere: Map<String, String> = emptyMap()
+    private val notHere: Map<String, String> = mapOf(
+        "OA-90" to "the redraw after a change of light and dark is the activity's and the window's, and needs a device; the screens it draws are those of OA-62",
+    )
 
     private fun ruleTests(rulesMd: File?) {
         val methods = AppModelTest::class.java.declaredMethods.filter { it.name.startsWith("oa_") && !it.name.contains('$') }.sortedBy { it.name }
@@ -1802,8 +1804,8 @@ object AppModelTest {
         if (rulesMd == null) return
         val rules = Regex("^- \\*\\*OA-(\\d\\d)\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules == rules.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
-        // OA-36 to OA-39 are kept for other work, and OA-49 to OA-59 for the next.
-        val numbered = (1..35) + (40..48) + (60..65)
+        // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-89 for more.
+        val numbered = (1..35) + (40..48) + (60..65) + (90..90)
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")

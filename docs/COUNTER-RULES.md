@@ -1047,6 +1047,28 @@ records and the totals are the library's (`crates/openbmt-counter`,
   storage apart. The list is not in the signed settings, is not backed up and
   is not on the owner's phone; a phone that is lost or reset loses it, and
   the owner's records still name every cashier who was added or removed.
+- **CR-177.** The screen comes back. The counter keeps which screen it shows
+  (home, the list of sales, a sale's screens, or another) as a small value,
+  and holds no picture of a screen. When the app leaves the screen and comes
+  back, that screen is drawn again from the library's state at that moment:
+  a sale shows its state as it is now ("Paid", "Do not hand over"), which may
+  have changed while the app was away; another screen gives way to home. At
+  a new start of the app (after the process was ended) the counter asks the
+  library for its sales and opens on the screen of the one sale that is not
+  yet ended, on the list of sales when more than one is not ended, and on home
+  when none is. A sale is ended when it is expired, cancelled, paid by
+  Lightning or paid at depth (final). The till's lock (CR-147) still comes
+  first: a locked till shows "Who is at the till?", and the screen follows the
+  sign-in.
+- **CR-178.** A change of light and dark. A change between light and dark
+  while the app runs does not finish and start the activity. The activity
+  reads the palette of the new mode, sets the window colour, the bar colours
+  and the status-bar icons again, asks for the insets again, and asks the
+  screens to be drawn again in place. A page's padding for the bars is worked
+  out whenever its views are built, so no gap shows above its band. The
+  counter draws its current screen again from state as CR-177 says (a screen
+  that is not a sale, the list or home gives way to home), and a locked till
+  draws "Who is at the till?" again.
 
 ## 15. Taking the owner's settings after pairing
 

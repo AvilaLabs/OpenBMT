@@ -154,6 +154,21 @@ class Controller(internal val act: MainActivity) {
         }
     }
 
+    /**
+     * OA-90: a change between light and dark draws the screen again, in place. With the node up that is the home
+     * screen; locked, the unlock screen (the PIN is still asked for); with no setup saved, the first screen. Nothing
+     * is drawn while a picker or the camera is open, while the app is out of view, or while a key ceremony is in
+     * progress, whose screens are not drawn from state; the next screen is drawn in the new colours.
+     */
+    fun redraw() {
+        if (!visible || pickerOpen || scan.asking || ceremony != null) return
+        when {
+            node != null || setup != null -> render()
+            File(dir, AppFiles.SETUP_FILE).exists() -> openStored()
+            else -> showFirstStart(null)
+        }
+    }
+
     internal fun begin() {
         fault = null
         torBlocked = null

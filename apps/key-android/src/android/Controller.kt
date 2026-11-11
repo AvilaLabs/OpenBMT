@@ -142,6 +142,16 @@ class Controller(private val act: MainActivity) {
         }
     }
 
+    /**
+     * SR-83: a change between light and dark draws the screen again, in place, from the library's state. Nothing is
+     * drawn while the screen is cleared, a picker or the camera is open, or the app has no state; a screen that is
+     * not drawn from state gives way to the one the state names, which asks for the PIN while the app is locked.
+     */
+    fun redraw() {
+        if (cleared || pickerOpen || scan.asking || app == null) return
+        refresh(null)
+    }
+
     fun paused() {
         if (pickerOpen || scan.asking) return
         scan.stop()

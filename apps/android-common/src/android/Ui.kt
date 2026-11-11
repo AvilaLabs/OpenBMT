@@ -7,6 +7,7 @@ import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
@@ -28,6 +29,19 @@ import android.widget.TextView
 /** True when [c] is the phone's night mode. */
 fun isNight(c: Configuration): Boolean =
     (c.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+
+/**
+ * After a change between light and dark with the activity kept: the window's own colour is set again from the
+ * new palette (the theme's was read when the window was made), the bars stay transparent, and the decor is asked
+ * for its insets once more. The caller draws its current screen again, whose page sets the bar icons.
+ */
+fun Activity.applyNight() {
+    val pal = Palette.of(isNight(resources.configuration))
+    window.setBackgroundDrawable(ColorDrawable(pal.background))
+    window.statusBarColor = Color.TRANSPARENT
+    window.navigationBarColor = Color.TRANSPARENT
+    window.decorView.requestApplyInsets()
+}
 
 /**
  * A view that is the first of a page and reaches up under the status bar in its own colour: the page tells
@@ -145,11 +159,11 @@ enum class ButtonKind { Primary, Secondary, Danger }
 class Ui(private val context: Context) {
     private val density = context.resources.displayMetrics.density
 
-    /** True when the phone is in night mode: every colour is chosen from the dark scheme. */
-    val night: Boolean = isNight(context.resources.configuration)
+    /** True when the phone is in night mode: every colour is chosen from the dark scheme. Read each time, so that a change of mode is seen by the next view made. */
+    val night: Boolean get() = isNight(context.resources.configuration)
 
     /** The colours of the phone's current mode. */
-    val pal: Scheme = Palette.of(night)
+    val pal: Scheme get() = Palette.of(night)
 
     fun px(dp: Int): Int = (dp * density).toInt()
 
@@ -341,6 +355,12 @@ class Ui(private val context: Context) {
         val bottomBase = px(24)
         column.setPadding(0, topBase, 0, bottomBase)
         val appearance = edgeToEdge(lead != null)
+        val place = { insets: WindowInsets ->
+            val bars = barInsets(insets)
+            // A first view that reaches under the status bar takes the bar's height itself.
+            column.setPadding(bars[0], if (lead != null) 0 else topBase + bars[1], bars[2], bottomBase + bars[3])
+            lead?.setTopInset(bars[1])
+        }
         return ScrollView(context).apply {
             setBackgroundColor(pal.background)
             addView(column)
@@ -348,10 +368,7 @@ class Ui(private val context: Context) {
             clipToPadding = false
             filterTouchesWhenObscured = true
             setOnApplyWindowInsetsListener { _, insets ->
-                val bars = barInsets(insets)
-                // A first view that reaches under the status bar takes the bar's height itself.
-                column.setPadding(bars[0], if (lead != null) 0 else topBase + bars[1], bars[2], bottomBase + bars[3])
-                lead?.setTopInset(bars[1])
+                place(insets)
                 // The window's own theme sets the icons again as the window comes up; the page has the last word.
                 appearance()
                 insets
@@ -362,6 +379,9 @@ class Ui(private val context: Context) {
                         // An activity started again after a change of night mode needs this said once more.
                         decorUnderBars()
                         appearance()
+                        // A page built after the window had its insets takes them now, not at the next dispatch: the
+                        // padding is recomputed whenever the views are rebuilt, so no gap shows above the band.
+                        v.rootWindowInsets?.let { place(it) }
                         v.requestApplyInsets()
                     }
 

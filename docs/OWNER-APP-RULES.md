@@ -583,3 +583,17 @@ and the 60-second rule are the shared `LockModel.kt` of
   so that a file restored without the Keystore key, which never comes
   back, is never the thing that is lost. The wrapping key is not bound to
   biometrics or to the lock screen.
+
+## 11. A change of light and dark
+
+- **OA-90.** A change between light and dark while the app runs does not
+  finish and start the activity. The activity reads the palette of the new
+  mode, sets the window colour, the bar colours and the status-bar icons
+  again, asks for the insets again, and asks the screens to be drawn again in
+  place. A page's padding for the bars is worked out whenever its views are
+  built, so no gap shows above its band. With the node up the owner app draws
+  the home screen; locked, the unlock screen, which still asks for the PIN;
+  with no setup saved, the first screen. Nothing is drawn while a file picker
+  or the camera is open, while the app is out of view, or while a key ceremony
+  is in progress, whose screens are not drawn from state. What the app does on
+  leaving and coming back is decided by OA-62, as before.

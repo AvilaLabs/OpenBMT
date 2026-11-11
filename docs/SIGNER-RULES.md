@@ -514,3 +514,14 @@ SR-81 and the screens of SR-82 by the Android app.
   spends it too; a session that is stopped without an answer spends nothing
   (AS-82). A line whose four words could not be made says so and has nothing
   to compare.
+- **SR-83. A change of light and dark.** A change between light and dark while
+  the app runs does not finish and start the activity. The activity reads the
+  palette of the new mode, sets the window colour, the bar colours and the
+  status-bar icons again, asks for the insets again, and asks the screens to
+  be drawn again in place. A page's padding for the bars is worked out
+  whenever its views are built, so no gap shows above its band. The Key app
+  draws the screen from the library's state, the same pick as at start: a
+  locked app comes back as the unlock screen, never as a screen that skips the
+  PIN, and a screen that cannot be drawn from state gives way to the one the
+  state names. Nothing is drawn while the screen is cleared, or while a file
+  picker or the camera is open.

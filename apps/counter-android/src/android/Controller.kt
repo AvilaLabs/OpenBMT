@@ -112,6 +112,13 @@ class Controller(private val act: MainActivity) {
     private val lightningJobs = LinkedBlockingQueue<Runnable>()
     private val startLock = Any()
 
+    // Which screen this run shows (CR-177), and the one it was showing when the app left the screen (null in a new process, which asks the library).
+    private var showing: Showing = Showing.Home
+    private var resumeTo: Showing? = null
+
+    // Where the person goes once signed in, when the till was locked on the way to a screen (CR-177).
+    private var afterSignIn: Showing? = null
+
     // What the open screen redraws as the node reports.
     private var tick: (() -> Unit)? = null
 
@@ -140,6 +147,7 @@ class Controller(private val act: MainActivity) {
         visible = false
         if (scan.asking) return
         locks.leftView()
+        if (node != null) resumeTo = showing
         forgetCeremony()
         scan.stop()
         stopNode()
@@ -374,9 +382,44 @@ class Controller(private val act: MainActivity) {
             linkThread = link
             link.start()
         }
-        // CR-149: a person still signed in, who left a sale's screen open, comes back to it; the lock that waited happens when it closes.
-        val back = if (cashiers.isNotEmpty()) locks.reopen() else null
-        if (back != null) showSale(back, null, null) else showHome()
+        // CR-177: the screen this run was showing comes back, drawn from the library's state; a new process opens on the open sale.
+        val screen = Resume.choose(resumeTo) { openSales(n) }
+        resumeTo = null
+        // CR-149: a locked till asks who is at the till first; the lock that waited for a sale's screen happens when it closes.
+        if (locked()) {
+            afterSignIn = screen
+            return showWho(null)
+        }
+        open(screen)
+    }
+
+    /** CR-177: the indexes of the sales the library lists that are not yet ended. A library that cannot say lists none. */
+    private fun openSales(n: CounterNode): List<Long> =
+        try {
+            n.status().sales.filter { Resume.open(n.judge(nowSecs(), it).state) }
+        } catch (e: CounterException) {
+            emptyList()
+        }
+
+    /** Shows [screen] again, drawn fresh from the library's state. */
+    private fun open(screen: Showing) {
+        when (screen) {
+            is Showing.Sale -> showSale(screen.index, null, null)
+            Showing.Sales -> showSales()
+            Showing.Home, Showing.Other -> showHome()
+        }
+    }
+
+    /**
+     * A change between light and dark with the activity kept (CR-178): the screen is drawn again, in place, from
+     * the state. A screen that is not a sale, the list or home is not drawn again from state, and home takes its place;
+     * a locked till asks who is at the till again.
+     */
+    fun redraw() {
+        if (!visible || scan.asking) return
+        if (node == null) return render()
+        if (locked()) return showWho(null)
+        open(showing)
     }
 
     /** CR-164: whether the settings in force need the node started again. */
@@ -478,8 +521,9 @@ class Controller(private val act: MainActivity) {
 
     // ---- pages -----------------------------------------------------------------------------------------------
 
-    private fun page(views: List<View>) {
+    private fun page(views: List<View>, shown: Showing = Showing.Other) {
         tick = null
+        showing = shown
         act.show(ui.page(views))
     }
 
@@ -571,7 +615,7 @@ class Controller(private val act: MainActivity) {
         progress.start()
         scanPage(AppWords.pairingScanOffer, {
             scan.begin(
-                show = { v -> tick = null; act.show(v) },
+                show = { v -> tick = null; showing = Showing.Other; act.show(v) },
                 onBytes = { bytes -> offerRead(bytes) },
                 onFailed = { f -> failedScan(f) },
                 onCancel = { endCeremony(); showFirstStart(null) },
@@ -644,7 +688,7 @@ class Controller(private val act: MainActivity) {
     private fun scanBundle() {
         scanPage(AppWords.pairingScanBundle, {
             scan.begin(
-                show = { v -> tick = null; act.show(v) },
+                show = { v -> tick = null; showing = Showing.Other; act.show(v) },
                 onBytes = { bytes -> bundleRead(bytes) },
                 onFailed = { f -> failedScan(f) },
                 onCancel = { endCeremony(); showFirstStart(null) },
@@ -764,7 +808,7 @@ class Controller(private val act: MainActivity) {
         views.add(ui.button("Network") { showNetwork() })
         views.add(ui.button("Lightning") { showLightning(null) })
         views.add(ui.button("About") { showAbout() })
-        page(views)
+        page(views, Showing.Home)
         tick = {
             health.show(ui.words(healthWords(n)))
             lightningWords(n)?.let { lightningSlot.show(label("Lightning"), ui.words(it)) } ?: lightningSlot.show()
@@ -944,7 +988,7 @@ class Controller(private val act: MainActivity) {
                 ui.button("Scan the code") {
                     keep()
                     scan.begin(
-                        show = { v -> tick = null; act.show(v) },
+                        show = { v -> tick = null; showing = Showing.Other; act.show(v) },
                         onBytes = { bytes -> draftLnCode = String(bytes, Charsets.UTF_8); showLightning(null) },
                         onFailed = { f -> showLightning(f.words ?: if (f.off) AppWords.cameraOff else AppWords.cameraNotStarted(f.problem)) },
                         onCancel = { showLightning(null) },
@@ -1164,7 +1208,7 @@ class Controller(private val act: MainActivity) {
         views.add(ui.button("Details and refunds") { showSaleDetails(index) })
         done.show(ui.button("Done") { showHome() })
         views.add(done)
-        page(views)
+        page(views, Showing.Sale(index))
         var shown: SaleState? = null
         tick = {
             try {
@@ -1317,7 +1361,7 @@ class Controller(private val act: MainActivity) {
                 }, { msg.show(ui.words(it)) })
             })
             views.add(ui.button("Back") { showSale(index, null, null) })
-            return page(views)
+            return page(views, Showing.Sale(index))
         }
         val pinInput = pinField(act, "Manager's PIN")
         page(
@@ -1337,6 +1381,7 @@ class Controller(private val act: MainActivity) {
                 },
                 ui.button("Back") { showSale(index, null, null) },
             ),
+            Showing.Sale(index),
         )
     }
 
@@ -1359,7 +1404,7 @@ class Controller(private val act: MainActivity) {
             views.add(ui.words(e.sayWords()))
         }
         views.add(ui.button("Back") { showHome() })
-        page(views)
+        page(views, Showing.Sales)
     }
 
     private fun showSaleDetails(index: Long, notice: SayWords? = null) {
@@ -1395,7 +1440,7 @@ class Controller(private val act: MainActivity) {
         }
         views.add(ui.button("Back to the sale") { showSale(index, null, null) })
         views.add(ui.button("Back to sales") { showSales() })
-        page(views)
+        page(views, Showing.Sale(index))
     }
 
     private fun showRefundRequest(index: Long) {
@@ -1453,7 +1498,7 @@ class Controller(private val act: MainActivity) {
             }
         })
         views.add(ui.button("Back") { showSaleDetails(index) })
-        page(views)
+        page(views, Showing.Sale(index))
     }
 
     private fun showCashRefund(index: Long) {
@@ -1487,7 +1532,7 @@ class Controller(private val act: MainActivity) {
             }
         })
         views.add(ui.button("Back") { showSaleDetails(index) })
-        page(views)
+        page(views, Showing.Sale(index))
     }
 
     private fun showWithdraw(index: Long, number: Long) {
@@ -1509,7 +1554,7 @@ class Controller(private val act: MainActivity) {
             }, { msg.show(ui.words(it)) })
         })
         views.add(ui.button("Back") { showSaleDetails(index) })
-        page(views)
+        page(views, Showing.Sale(index))
     }
 
     // ---- who is at the till (CR-147 to CR-150) ------------------------------------------------------------------------------
@@ -1548,7 +1593,9 @@ class Controller(private val act: MainActivity) {
             when (val v = r.getOrThrow()) {
                 PinResult.Ok -> {
                     locks.signIn(person)
-                    showHome()
+                    val next = afterSignIn
+                    afterSignIn = null
+                    if (next != null) open(next) else showHome()
                 }
                 is PinResult.Wrong -> msg.show(ui.words(AppWords.signInWrong(v.waitSecs)))
                 is PinResult.Locked -> msg.show(ui.words(AppWords.signInHeld(v.waitSecs)))

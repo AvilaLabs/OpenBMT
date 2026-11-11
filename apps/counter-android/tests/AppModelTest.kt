@@ -864,6 +864,31 @@ object AppModelTest {
         ok(AppWords.whoAtTill.heading == "Who is at the till?", "CR-147: the first screen")
     }
 
+    // ---- the screen kept across leaving the app (CR-177) ---------------------------------------------------------
+
+    private fun cr177ShowingTests() {
+        // Which sales are open: ended ones (expired, cancelled, Lightning, final) are not.
+        val ended = listOf(SaleState.Expired, SaleState.Cancelled, SaleState.PaidLightning, SaleState.Final)
+        ok(ended.none { Resume.open(it) }, "CR-177: an ended sale is not open")
+        ok(SaleState.values().filter { it !in ended }.all { Resume.open(it) }, "CR-177: every other state is open")
+        // A new process asks the library: one open sale opens on it, several on the list, none on home.
+        ok(Resume.atStart(emptyList()) == Showing.Home, "CR-177: no open sale: home")
+        ok(Resume.atStart(listOf(4L)) == Showing.Sale(4), "CR-177: one open sale: its screen")
+        ok(Resume.atStart(listOf(4L, 7L)) == Showing.Sales, "CR-177: several open sales: the list")
+        // The same run remembers its screen across pause and resume, and does not ask the library.
+        var asked = 0
+        val none = { asked++; emptyList<Long>() }
+        ok(Resume.choose(Showing.Sale(2), none) == Showing.Sale(2) && asked == 0, "CR-177: a sale comes back as that sale")
+        ok(Resume.choose(Showing.Sales, none) == Showing.Sales, "CR-177: the list comes back as the list")
+        ok(Resume.choose(Showing.Home, none) == Showing.Home, "CR-177: home comes back as home")
+        ok(Resume.choose(Showing.Other, none) == Showing.Home && asked == 0, "CR-177: another screen gives way to home")
+        ok(Resume.choose(null, { listOf(9L) }) == Showing.Sale(9), "CR-177: a new process takes the open sale")
+        ok(Resume.choose(null, none) == Showing.Home && asked == 1, "CR-177: a new process with no open sale: home")
+        // A locked till still comes first (CR-147): the choice of the screen does not unlock it.
+        val all = SetupStatus(pairing = true, pin = true, config = true)
+        ok(ScreenModel.pick(null, all, null, true, locked = true) is Screen.WhoAtTill, "CR-177: a locked till asks who is at the till before the sale")
+    }
+
     // ---- today (CR-152 to CR-155) -----------------------------------------------------------------
 
     private fun tally(count: Long, minor: Long = 0, sats: Long = 0) = Tally(count, minor, sats)
@@ -932,6 +957,7 @@ object AppModelTest {
         cr140CashierFileTests()
         cr140NoBackupTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr149TillLockTests()
+        cr177ShowingTests()
         cr152DayWindowTests()
         cr153TodayLinesTests()
         println("AppModelTest (counter): $count checks passed")

@@ -537,6 +537,13 @@ object AppModelTest {
         ok(wordsProblem(AppWords.working) == null && wordsProblem(AppWords.wiped) == null, "the words of the lock pass the words check")
     }
 
+    private fun sr_83_a_redraw_is_drawn_from_state_and_never_skips_the_pin() {
+        // A change between light and dark draws the screen again with `refresh`, which picks it from the state: a locked
+        // app can only come back as the unlock screen, whatever was on show, and a wallet that waits is not skipped.
+        ok(ScreenModel.pick(emptyList(), null, SetupState.Locked, null, LockStatus.Locked) is Screen.Unlock, "SR-83: a locked app is redrawn as the unlock screen")
+        ok(ScreenModel.pick(listOf(AppWords.debuggingOn), null, SetupState.Locked, null, LockStatus.Locked) is Screen.Refused, "SR-83: a refusal is redrawn as the refusal")
+    }
+
     private fun sr_78_deposit_code_from_the_camera() {
         ok((CashOut.readCode("bc1qexample".toByteArray()) as DepositInput.Text).text == "bc1qexample", "a bare address goes on")
         ok((CashOut.readCode(" bitcoin:bc1qexample?amount=1\n".toByteArray()) as DepositInput.Text).text == "bitcoin:bc1qexample?amount=1", "a URI goes on, trimmed")
@@ -614,6 +621,7 @@ object AppModelTest {
         sr_76_wipe_order_and_failure()
         sr_77_relock_after_a_minute()
         sr_77_picker_and_permission_waits_count(appDir)
+        sr_83_a_redraw_is_drawn_from_state_and_never_skips_the_pin()
         sr_78_deposit_code_from_the_camera()
         sr_79_list_rows()
         sr_80_the_invitation_is_one_of_six_groups_of_five()

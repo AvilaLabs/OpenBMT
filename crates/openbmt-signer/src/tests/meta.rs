@@ -42,8 +42,8 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 65);
-    assert!(ids.contains(&"SR-01".to_string()) && ids.contains(&"SR-82".to_string()));
+    assert_eq!(ids.len(), 66);
+    assert!(ids.contains(&"SR-01".to_string()) && ids.contains(&"SR-83".to_string()));
 }
 
 #[test]
