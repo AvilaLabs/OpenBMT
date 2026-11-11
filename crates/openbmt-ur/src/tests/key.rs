@@ -12,6 +12,22 @@ use crate::cbor_read::{self, Item, MAX_DEPTH, MAX_ITEMS};
 use crate::point::is_compressed_point;
 use crate::{ur_to_key_text, KeyRefusal, ALL_KEY_REFUSALS, MAX_KEY_CBOR};
 
+/// xprv, tprv, yprv, zprv, uprv, vprv, Yprv, Zprv, Uprv, Vprv (SLIP-0132):
+/// the list of `openbmt-signer`'s key ceremony tests, which cannot be shared
+/// as this crate has no dependency.
+const SLIP_SECRET: [[u8; 4]; 10] = [
+    [0x04, 0x88, 0xAD, 0xE4],
+    [0x04, 0x35, 0x83, 0x94],
+    [0x04, 0x9D, 0x78, 0x78],
+    [0x04, 0xB2, 0x43, 0x0C],
+    [0x04, 0x4A, 0x4E, 0x28],
+    [0x04, 0x5F, 0x18, 0xBC],
+    [0x02, 0x95, 0xB0, 0x05],
+    [0x02, 0xAA, 0x7A, 0x99],
+    [0x02, 0x42, 0x85, 0xB5],
+    [0x02, 0x57, 0x50, 0x48],
+];
+
 // ---- the keys ------------------------------------------------------------
 
 /// m/48'/0'/0'/2' of the master key of seed [3; 32].
@@ -1056,6 +1072,9 @@ fn ur_29_a_coldcard_style_export_is_read() {
     assert_eq!(json_text(&wrap(&json)), Ok(main_text()));
     let json = coldcard("56c4fac3", "m/48'/1h/0'/2h", TEST_TPUB);
     assert_eq!(json_text(&wrap(&json)), Ok(test_text()));
+    // A real Coldcard export writes p2wsh as a Zpub; it is the same key.
+    let json = coldcard("56C4FAC3", "m/48'/0'/0'/2'", MAIN_ZPUB);
+    assert_eq!(json_text(&wrap(&json)), Ok(main_text()));
     // Passport's file, with a firmware version and nested values the
     // reader walks past.
     let json = format!(
@@ -1226,38 +1245,37 @@ fn ur_29_the_path_must_be_the_shared_wallet_path_of_the_network() {
 
 #[test]
 fn ur_29_the_key_must_be_a_plain_public_account_key() {
+    // Zpub and Vpub are read as the plain key, as the key ceremony reads them.
     let json = coldcard("56C4FAC3", "m/48'/0'/0'/2'", MAIN_ZPUB);
-    assert_eq!(
-        json_text(&wrap(&json)),
-        Err(KeyRefusal::JsonSpecialForm),
-        "a Zpub"
-    );
+    assert_eq!(json_text(&wrap(&json)), Ok(main_text()), "a Zpub");
     let vpub = "Vpub5mXykWQxJ7bcJsLbR1k4Vu2FmYEqH9JpeU5E7tZkP7L4LMsjNERAp5CHVeXWK3esYFX7tox5n6dbsZQ9itLFxeEWQ4vM6xjHHjzbUQ7UmBv";
     let json = coldcard("56C4FAC3", "m/48'/1'/0'/2'", vpub);
-    assert_eq!(json_text(&wrap(&json)), Err(KeyRefusal::JsonSpecialForm));
-    // Every special form, by its version bytes.
+    assert_eq!(json_text(&wrap(&json)), Ok(test_text()), "a Vpub");
+    // A Zpub for a test path, a Vpub for a main path: the network must match.
+    let json = coldcard("56C4FAC3", "m/48'/1'/0'/2'", MAIN_ZPUB);
+    assert_eq!(json_text(&wrap(&json)), Err(KeyRefusal::BadPath));
+    let json = coldcard("56C4FAC3", "m/48'/0'/0'/2'", vpub);
+    assert_eq!(json_text(&wrap(&json)), Err(KeyRefusal::BadPath));
+    // Only the four version bytes change.
     let raw = decode_check(MAIN_XPUB).expect("xpub");
+    let zraw = decode_check(MAIN_ZPUB).expect("Zpub");
+    assert_eq!(&zraw[4..], &raw[4..]);
+    // Every other SLIP-0132 public form is refused with its own words.
     for version in [
         [0x04u8, 0x9D, 0x7C, 0xB2],
         [0x04, 0xB2, 0x47, 0x46],
         [0x02, 0x95, 0xB4, 0x3F],
-        [0x02, 0xAA, 0x7E, 0xD3],
         [0x04, 0x4A, 0x52, 0x62],
         [0x04, 0x5F, 0x1C, 0xF6],
         [0x02, 0x42, 0x89, 0xEF],
-        [0x02, 0x57, 0x54, 0x83],
     ] {
         let text = encode_check(&[version.as_slice(), &raw[4..]].concat()).expect("text");
         let json = coldcard("56C4FAC3", "m/48'/0'/0'/2'", &text);
         assert_eq!(json_text(&wrap(&json)), Err(KeyRefusal::JsonSpecialForm));
     }
-    // A secret key, in the plain form and the special ones.
-    for version in [
-        [0x04u8, 0x88, 0xAD, 0xE4],
-        [0x04, 0x35, 0x83, 0x94],
-        [0x04, 0xB2, 0x43, 0x0C],
-        [0x02, 0xAA, 0x7A, 0x99],
-    ] {
+    // A secret key of any of the ten versions of SLIP-0132 (the list of
+    // the key ceremony's tests in openbmt-signer is the same).
+    for version in SLIP_SECRET {
         let text = encode_check(&[version.as_slice(), &raw[4..]].concat()).expect("text");
         let json = coldcard("56C4FAC3", "m/48'/0'/0'/2'", &text);
         assert_eq!(json_text(&wrap(&json)), Err(KeyRefusal::SecretKey));

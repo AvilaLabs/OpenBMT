@@ -201,11 +201,14 @@ export in `bytes`. It takes nothing it cannot rebuild exactly.
   strict JSON, with values read as strings or integers (nested values are
   walked and dropped), no duplicate key at any depth, UTF-8, nothing after
   it. `xfp` is 8 hexadecimal digits, `p2wsh_deriv` is `m/48'/<coin>'/0'/2'`
-  (`'` or `h`) and `p2wsh` is a plain `xpub` or `tpub` for that coin, at
-  depth 4 with child number `2h`, on the curve. A key in a special form
-  (`ypub`, `zpub`, `Ypub`, `Zpub`, `upub`, `vpub`, `Upub`, `Vpub`) is
+  (`'` or `h`) and `p2wsh` is an `xpub` or `tpub`, or a `Zpub` or `Vpub`,
+  for that coin, at depth 4 with child number `2h`, on the curve. A `Zpub`
+  and a `Vpub` are written out as the `xpub` and the `tpub` of the same key
+  (only the four version bytes change), as the key ceremony reads them
+  (SR-64); the network of the key must be the coin of the path. Every other
+  SLIP-0132 public form (`ypub`, `zpub`, `upub`, `vpub`, `Ypub`, `Upub`) is
   refused with words that say to export the plain public key, and a secret
-  key of any form is refused as in UR-26.
+  key of any of the ten secret versions of SLIP-0132 is refused as in UR-26.
 - **UR-30.** Every refusal of UR-23 to UR-29 is one value of `KeyRefusal`
   with its rule in its text and words (a heading, what happened, what to do)
   that pass the checks of `docs/SCREEN-RULES.md`, with no two alike. The
@@ -239,7 +242,7 @@ export in `bytes`. It takes nothing it cannot rebuild exactly.
   came in.
 - **No other key than the first account's.** Only the account 0 key for
   `48h/<coin>h/0h/2h` is taken; a signer that writes another account, a
-  `Zpub` in JSON or a key without its chain code is refused, with words that
+  `zpub` in JSON or a key without its chain code is refused, with words that
   say what to export instead.
 - **No frame counts or timing in the library.** How many parts fit one
   code at what scanning distance, and how fast to show them, are for the

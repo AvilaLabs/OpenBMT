@@ -20,19 +20,22 @@ pub const MAX_KEY_CBOR: usize = 64 * 1024;
 const XPUB: [u8; 4] = [0x04, 0x88, 0xB2, 0x1E];
 /// The version bytes of an extended public key on a test network.
 const TPUB: [u8; 4] = [0x04, 0x35, 0x87, 0xCF];
-/// Version bytes of the other public forms of SLIP 132: ypub, zpub, Ypub,
-/// Zpub, upub, vpub, Upub, Vpub.
-const SLIP_PUBLIC: [[u8; 4]; 8] = [
+/// The multisig P2WSH forms of SLIP-0132, Zpub and Vpub, which are read as
+/// the plain key of the same bytes, as the key ceremony reads them.
+const ZPUB_UPPER: [u8; 4] = [0x02, 0xAA, 0x7E, 0xD3];
+const VPUB_UPPER: [u8; 4] = [0x02, 0x57, 0x54, 0x83];
+/// The other public forms of SLIP-0132: single signature (ypub, zpub, upub,
+/// vpub) and wrapped multisig (Ypub, Upub).
+const OTHER_SLIP_PUBLIC: [[u8; 4]; 6] = [
     [0x04, 0x9D, 0x7C, 0xB2],
     [0x04, 0xB2, 0x47, 0x46],
-    [0x02, 0x95, 0xB4, 0x3F],
-    [0x02, 0xAA, 0x7E, 0xD3],
     [0x04, 0x4A, 0x52, 0x62],
     [0x04, 0x5F, 0x1C, 0xF6],
+    [0x02, 0x95, 0xB4, 0x3F],
     [0x02, 0x42, 0x89, 0xEF],
-    [0x02, 0x57, 0x54, 0x83],
 ];
-/// Version bytes of extended secret keys: xprv, tprv and the SLIP 132 forms.
+/// Version bytes of extended secret keys: xprv, tprv and the secret forms
+/// of SLIP-0132.
 const SECRET: [[u8; 4]; 10] = [
     [0x04, 0x88, 0xAD, 0xE4],
     [0x04, 0x35, 0x83, 0x94],
@@ -573,14 +576,22 @@ fn from_json(json: &[u8]) -> Refused<String> {
     if SECRET.contains(&version) {
         return Err(KeyRefusal::SecretKey);
     }
-    if SLIP_PUBLIC.contains(&version) {
+    if OTHER_SLIP_PUBLIC.contains(&version) {
         return Err(KeyRefusal::JsonSpecialForm);
     }
-    let network = match version {
-        XPUB => 0,
-        TPUB => 1,
+    // Zpub and Vpub are the plain key with other version bytes: only those
+    // four bytes change.
+    let (network, plain) = match version {
+        XPUB => (0, XPUB),
+        TPUB => (1, TPUB),
+        ZPUB_UPPER => (0, XPUB),
+        VPUB_UPPER => (1, TPUB),
         _ => return Err(KeyRefusal::JsonKey),
     };
+    let mut raw = raw;
+    for (dst, src) in raw.iter_mut().zip(plain) {
+        *dst = src;
+    }
     if network != coin {
         return Err(KeyRefusal::BadPath);
     }

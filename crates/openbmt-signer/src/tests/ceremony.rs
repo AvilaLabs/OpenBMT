@@ -102,6 +102,40 @@ fn sr_64_the_multisig_segwit_forms_are_read_as_the_plain_key() {
     assert_eq!(KeyPart::parse(&text), Ok(t));
 }
 
+/// The ten secret versions of SLIP-0132 (the same list is in the tests of
+/// `openbmt-ur`, which reads keys from codes and cannot depend on this
+/// crate): xprv, tprv, yprv, zprv, uprv, vprv, Yprv, Zprv, Uprv, Vprv.
+const SLIP_SECRET: [[u8; 4]; 10] = [
+    [0x04, 0x88, 0xAD, 0xE4],
+    [0x04, 0x35, 0x83, 0x94],
+    [0x04, 0x9D, 0x78, 0x78],
+    [0x04, 0xB2, 0x43, 0x0C],
+    [0x04, 0x4A, 0x4E, 0x28],
+    [0x04, 0x5F, 0x18, 0xBC],
+    [0x02, 0x95, 0xB0, 0x05],
+    [0x02, 0xAA, 0x7A, 0x99],
+    [0x02, 0x42, 0x85, 0xB5],
+    [0x02, 0x57, 0x50, 0x48],
+];
+
+#[test]
+fn sr_64_every_secret_version_of_slip_0132_is_refused_as_a_secret_key() {
+    let k = test_key(3);
+    for version in SLIP_SECRET {
+        // The same 78 bytes with a secret version in front.
+        let text = format!(
+            "[{}/48h/1h/0h/2h]{}",
+            k.fingerprint,
+            reversioned(&k, version)
+        );
+        assert_eq!(
+            KeyPart::parse(&text),
+            Err(CeremonyRefusal::SecretKey),
+            "{version:02x?}"
+        );
+    }
+}
+
 #[test]
 fn sr_64_a_key_without_its_origin_is_refused_and_nothing_is_filled_in() {
     let k = test_key(3);
