@@ -152,11 +152,30 @@ fn bx_01_the_relays_key_is_the_boxs_key_and_it_survives_a_restart() {
 fn bx_02_one_process_uses_a_data_directory_at_a_time() {
     let dir = TempDir::new("lock");
     let (r, clock) = start(&dir);
+    let listing = || {
+        let mut all = Vec::new();
+        let mut todo = vec![dir.path().to_path_buf()];
+        while let Some(d) = todo.pop() {
+            for e in std::fs::read_dir(&d).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    todo.push(p);
+                } else {
+                    all.push((p.clone(), std::fs::read(&p).unwrap()));
+                }
+            }
+        }
+        all.sort();
+        all
+    };
+    let before = listing();
     let second = start_in(&dir, &clock);
     assert!(
         matches!(second, Err(StartFailure::Lock(_))),
         "a second Box on the same directory started"
     );
+    // The refused start read and wrote nothing in the directory.
+    assert_eq!(listing(), before);
     r.stop();
     // Once the first is gone, the directory can be used again.
     assert!(start_in(&dir, &clock).is_ok());

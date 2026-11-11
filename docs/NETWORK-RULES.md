@@ -319,6 +319,11 @@ rules are what it decides where the rules above are silent.
   storage shares the directory with its owner and does not lock it again.
   The system lets go of the lock when the process ends, however it ends,
   so a crash leaves no stale lock and the file holds no process number.
+  The file is made empty if it is missing and is never removed. The lock
+  does not cover a directory on a network file system, where locks may not
+  work, or a directory copied from another: a copy has its own lock file
+  and is not seen as the same directory. A directory is copied only after
+  the program that uses it has stopped.
 
 ## 10. Encrypted transport
 

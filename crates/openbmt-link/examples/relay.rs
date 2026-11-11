@@ -27,7 +27,7 @@ use std::time::Duration;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_link::store::DirStore;
 use openbmt_link::{os_random, Relay, RelayConfig, Server, ServerConfig};
-use openbmt_net_io::SystemClock;
+use openbmt_net_io::{DirLock, SystemClock};
 
 /// The key `--test-identity` uses.
 const TEST_SECRET: [u8; 32] = [99; 32];
@@ -93,7 +93,9 @@ fn run() -> Result<(), String> {
         return Err("usage: relay <data dir> <bind addr> [--test-identity]".into());
     };
     let dir = Path::new(dir.as_str());
-    fs::create_dir_all(dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
+    // NR-79: this process owns the directory until it ends. Taking the lock
+    // makes the directory if it is missing.
+    let _lock = DirLock::acquire(dir).map_err(|e| e.to_string())?;
     let identity = if test {
         Identity::from_secret_bytes(&TEST_SECRET).map_err(|e| e.to_string())?
     } else {

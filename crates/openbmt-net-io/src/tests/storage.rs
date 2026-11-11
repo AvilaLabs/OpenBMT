@@ -136,3 +136,83 @@ fn nr_79_two_directories_do_not_conflict() {
     let _first = DirLock::acquire(&a.0).unwrap();
     let _second = DirLock::acquire(&b.0).unwrap();
 }
+
+/// The directory the child process of the two-process test locks. Not set
+/// in a normal run, where `nr_79_child_holds_the_lock` does nothing.
+const CHILD_DIR: &str = "OPENBMT_NR79_CHILD_DIR";
+
+/// The child half of the two-process test: the parent runs this test in a
+/// new process. It takes the lock, tells the parent by making `ready`, and
+/// holds the lock until it is killed.
+#[test]
+fn nr_79_child_holds_the_lock() {
+    let Some(dir) = std::env::var_os(CHILD_DIR) else {
+        return;
+    };
+    let dir = PathBuf::from(dir);
+    let _lock = DirLock::acquire(&dir).unwrap();
+    fs::write(dir.join("ready"), b"").unwrap();
+    // Bounded, so that a parent that never kills the child cannot leave it
+    // running for good.
+    for _ in 0..600 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+#[test]
+fn nr_79_a_lock_held_by_another_process_is_busy_until_that_process_ends() {
+    let dir = TempDir::new("lock-process");
+    fs::create_dir_all(&dir.0).unwrap();
+    let exe = std::env::current_exe().unwrap();
+    let mut child = std::process::Command::new(exe)
+        .args(["--exact", "tests::storage::nr_79_child_holds_the_lock"])
+        .env(CHILD_DIR, &dir.0)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    // Wait for the child to say it holds the lock.
+    let mut ready = false;
+    for _ in 0..400 {
+        if dir.0.join("ready").exists() {
+            ready = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    if !ready {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("the child did not take the lock");
+    }
+    let held = DirLock::acquire(&dir.0);
+    // The child ends without releasing anything itself: a crash.
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert_eq!(held.unwrap_err(), LockError::Busy(dir.0.clone()));
+    // No stale lock is left behind.
+    let after = DirLock::acquire(&dir.0).unwrap();
+    assert_eq!(after.dir(), dir.0.as_path());
+}
+
+#[test]
+fn nr_79_the_lock_file_is_made_empty_and_other_files_are_not_touched() {
+    let dir = TempDir::new("lock-file");
+    fs::create_dir_all(&dir.0).unwrap();
+    fs::write(dir.0.join("keep"), b"data").unwrap();
+    let lock = DirLock::acquire(&dir.0).unwrap();
+    assert_eq!(fs::read(dir.0.join(LOCK_FILE)).unwrap(), Vec::<u8>::new());
+    assert_eq!(fs::read(dir.0.join("keep")).unwrap(), b"data");
+    let mut names: Vec<_> = fs::read_dir(&dir.0)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["keep", LOCK_FILE]);
+    // A refused second take changes nothing, and the file stays after the
+    // holder goes.
+    assert!(DirLock::acquire(&dir.0).is_err());
+    drop(lock);
+    assert!(dir.0.join(LOCK_FILE).is_file());
+    assert_eq!(fs::read(dir.0.join(LOCK_FILE)).unwrap(), Vec::<u8>::new());
+}

@@ -575,6 +575,15 @@ fn nr_79_a_second_start_on_the_same_directory_fails_before_it_reads_or_spawns() 
     let dir = Scratch::new();
     let first = start(dir.path());
     let before = fs::read(dir.path().join("records.bin")).ok();
+    let names = || {
+        let mut all: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        all.sort();
+        all
+    };
+    let listing = names();
     let time = Arc::new(AtomicU64::new(T0));
     let result = Node::start_with(config(dir.path(), &time), |_| -> Result<FakePort, String> {
         Err("the driver must not start".to_string())
@@ -590,6 +599,8 @@ fn nr_79_a_second_start_on_the_same_directory_fails_before_it_reads_or_spawns() 
     }
     // The first node is as it was.
     assert_eq!(fs::read(dir.path().join("records.bin")).ok(), before);
+    // The refused start made and removed no file.
+    assert_eq!(names(), listing);
     drop(first);
     // Released when the first node is dropped.
     let again = start(dir.path());
