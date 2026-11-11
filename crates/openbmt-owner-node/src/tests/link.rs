@@ -1304,6 +1304,140 @@ fn lk_67_the_link_talks_to_the_counters_of_the_settings_and_drops_a_removed_one_
     assert!(b.w.link.copy(&second).is_none());
 }
 
+/// A link started again on the owner's directory with no counter on it, as
+/// the app starts it before it has looked at its settings.
+fn restarted_without_counters(b: &WithBox) -> OwnerLink<MemoryPost> {
+    OwnerLink::new(
+        courier(
+            &b.w.relay,
+            id(1),
+            Role::Owner,
+            (counter(), Role::Counter),
+            &b.w.dir,
+            FirstStart::No,
+        ),
+        b.w.dir.path(),
+        devices(),
+        Vec::new(),
+        config(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn lk_76_a_restart_still_reaches_the_device_the_settings_remove() {
+    let mut b = with_box();
+    let v1 = listed(1, |_| {});
+    let removal = signed_by_both(listed(2, |s| {
+        s.counters.clear();
+        s.devices.remove(&counter());
+    }));
+    b.w.link
+        .carry_settings(5, &removal, &roots(), Some(&v1), T0)
+        .unwrap();
+    assert!(b
+        .w
+        .link
+        .settings_missing(5)
+        .iter()
+        .any(|(d, _)| *d == counter()));
+    // The app is closed and started again: the settings in force already
+    // name no counter, and the carried settings are handed over with no
+    // settings before them.
+    let file =
+        b.w.dir
+            .path()
+            .join(crate::settings_roster::SETTINGS_ROSTER_FILE);
+    assert_eq!(&fs::read(&file).unwrap()[..5], b"OBM$\x01");
+    let mut again = restarted_without_counters(&b);
+    assert!(again.counters().is_empty());
+    again.follow(&[], &[box_key()]).unwrap();
+    assert_eq!(again.counters(), [counter()]);
+    assert!(again.copy(&counter()).is_some());
+    again
+        .carry_settings(5, &removal, &roots(), None, T0 + 1)
+        .unwrap();
+    // It is not done while the removed counter lacks the settings.
+    let missing = again.settings_missing(5);
+    assert!(missing.iter().any(|(d, _)| *d == counter()), "{missing:?}");
+    // The settings are sent to it again, and it stays until they are done.
+    assert!(!settings_in(&b.w.counter_gets()).is_empty());
+    again.settings_done(5);
+    assert!(again.counters().is_empty());
+    assert!(crate::SettingsRoster::open(b.w.dir.path())
+        .unwrap()
+        .entries()
+        .is_empty());
+}
+
+#[test]
+fn lk_76_a_delivery_the_owner_dropped_lets_its_devices_go() {
+    let mut b = with_box();
+    let v1 = listed(1, |_| {});
+    let removal = signed_by_both(listed(2, |s| {
+        s.counters.clear();
+        s.devices.remove(&counter());
+    }));
+    b.w.link
+        .carry_settings(5, &removal, &roots(), Some(&v1), T0)
+        .unwrap();
+    b.w.link.settings_pending(&[5]);
+    assert_eq!(
+        crate::SettingsRoster::open(b.w.dir.path())
+            .unwrap()
+            .entries()
+            .len(),
+        1
+    );
+    b.w.link.settings_pending(&[]);
+    assert!(crate::SettingsRoster::open(b.w.dir.path())
+        .unwrap()
+        .entries()
+        .is_empty());
+}
+
+#[test]
+fn lk_76_the_roster_file_reads_back_strictly() {
+    use crate::settings_roster::{decode_roster, encode_roster, RosterEntry};
+    let entry = |id: u32, devices: &[(u8, Role)]| RosterEntry {
+        id,
+        version: id + 1,
+        targets: devices
+            .iter()
+            .map(|(n, r)| (self::id(*n).device_id(), *r))
+            .collect(),
+    };
+    let list = vec![
+        entry(3, &[(3, Role::Counter), (4, Role::Box)]),
+        entry(9, &[(5, Role::Counter)]),
+    ];
+    let bytes = encode_roster(&list).unwrap();
+    assert_eq!(decode_roster(&bytes).unwrap(), list);
+    for n in 0..bytes.len() {
+        assert!(decode_roster(&bytes[..n]).is_err(), "cut at {n}");
+    }
+    let mut longer = bytes.clone();
+    longer.push(0);
+    assert!(decode_roster(&longer).is_err());
+    let mut bad_magic = bytes.clone();
+    bad_magic[3] = b'1';
+    assert!(decode_roster(&bad_magic).is_err());
+    let mut bad_version = bytes.clone();
+    bad_version[4] = 2;
+    assert!(decode_roster(&bad_version).is_err());
+    // Entries out of order or twice, and a role that is not held.
+    assert!(encode_roster(&[list[1].clone(), list[0].clone()])
+        .is_some_and(|b| decode_roster(&b).is_err()));
+    assert!(encode_roster(&[list[0].clone(), list[0].clone()])
+        .is_some_and(|b| decode_roster(&b).is_err()));
+    assert!(encode_roster(&[entry(1, &[(3, Role::Owner)])]).is_none());
+    // A role byte that is not 1 or 2.
+    let at = bytes.len() - 1;
+    let mut bad_role = bytes;
+    bad_role[at] = 3;
+    assert!(decode_roster(&bad_role).is_err());
+}
+
 // Section 6, batches that wait to be held (LK-70 to LK-73).
 
 /// A batch of two addresses from `start` for the test counter.

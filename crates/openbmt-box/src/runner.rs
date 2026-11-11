@@ -250,7 +250,7 @@ fn sync_relay(core: &Core, relay: &Relays, clock: &dyn Clock, notes: &Notes) {
     let mut relay = lock(relay);
     let held: Vec<DeviceId> = relay.members().copied().collect();
     if held != members {
-        if let Err(e) = relay.set_members(&members) {
+        if let Err(e) = relay.set_members(&members, now) {
             note(notes, format!("the member list was not replaced: {e}"));
         }
     }

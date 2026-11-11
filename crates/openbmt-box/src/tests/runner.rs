@@ -492,7 +492,11 @@ fn bx_21_new_settings_arrive_as_a_sealed_message_and_take_a_device_off_the_list(
     eventually("the device list changes", || {
         !r.members().contains(&counter2().device_id())
     });
-    // Its mailbox is gone and it is refused.
+    // Its mailbox is leaving (LK-28): one fetch reads it to its end (LK-29),
+    // and then it is gone and the device is refused.
+    assert!(connect(&r)
+        .fetch(&counter2(), 0)
+        .is_ok_and(|got| got.items.is_empty()));
     assert_eq!(
         refused(connect(&r).fetch(&counter2(), 0).unwrap_err()),
         Refusal::NoMailbox

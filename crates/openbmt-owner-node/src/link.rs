@@ -77,6 +77,7 @@ use openbmt_pos::PosNotice;
 
 use crate::batch_outbox::{BatchOutbox, BatchOutboxError, PendingBatch};
 use crate::copy::{CheckInTaken, CopyError, CounterCopy, Stop};
+use crate::settings_roster::{RosterEntry, RosterError, SettingsRoster};
 use crate::watcher::OwnerWatcher;
 
 /// Most lines the link's own notes keep; the oldest goes first.
@@ -212,6 +213,9 @@ pub enum OwnerLinkError {
     },
     /// The file of batches that wait could not be opened (LK-72).
     Batches(BatchOutboxError),
+    /// The file of the devices pending settings are for could not be opened
+    /// (LK-76).
+    Roster(RosterError),
 }
 
 impl std::fmt::Display for OwnerLinkError {
@@ -221,6 +225,7 @@ impl std::fmt::Display for OwnerLinkError {
                 write!(f, "the copy of the chain of {counter:?}: {error}")
             }
             Self::Batches(error) => write!(f, "{error}"),
+            Self::Roster(error) => write!(f, "{error}"),
         }
     }
 }
@@ -322,6 +327,9 @@ pub struct OwnerLink<R: Post = RelayPost> {
     boxes_sent: BTreeSet<(DeviceId, u32)>,
     /// LK-70, LK-72: the batches sent and not yet shown as held.
     batches: BatchOutbox,
+    /// LK-76: the devices each pending settings delivery is for, kept so a
+    /// start after a restart reaches the same ones.
+    roster: SettingsRoster,
     /// LK-70: what each copy shows as held, read from the records the link
     /// has looked at.
     held: BTreeMap<DeviceId, HeldBatches>,
@@ -362,6 +370,7 @@ impl<R: Post> OwnerLink<R> {
             copies.insert(*counter, copy);
         }
         let batches = BatchOutbox::open(&root).map_err(OwnerLinkError::Batches)?;
+        let roster = SettingsRoster::open(&root).map_err(OwnerLinkError::Roster)?;
         Ok(Self {
             courier,
             root,
@@ -383,6 +392,7 @@ impl<R: Post> OwnerLink<R> {
             settings_sent: BTreeMap::new(),
             boxes_sent: BTreeSet::new(),
             batches,
+            roster,
             held: BTreeMap::new(),
             batches_sent_at: BTreeMap::new(),
         })
@@ -577,8 +587,25 @@ impl<R: Post> OwnerLink<R> {
         for (device, role) in lists.into_iter().flatten().flatten() {
             targets.insert(device, role);
         }
+        // The devices a start before this one listed for the same delivery
+        // are still to be reached (LK-76).
+        if let Some(entry) = self.roster.get(id, version) {
+            for (device, role) in &entry.targets {
+                targets.entry(*device).or_insert(*role);
+            }
+        }
         // The owner's own key is never a target.
         targets.remove(&roots.owner);
+        let entry = RosterEntry {
+            id,
+            version,
+            targets: targets.clone(),
+        };
+        if let Err(e) = self.roster.set(entry) {
+            self.note(format!(
+                "the devices settings version {version} are for could not be saved: {e}"
+            ));
+        }
         for (device, role) in &targets {
             self.courier.set_peer(*device, *role);
         }
@@ -607,7 +634,20 @@ impl<R: Post> OwnerLink<R> {
         boxes: &[DeviceId],
     ) -> Result<(), OwnerLinkError> {
         self.wanted = counters.iter().copied().collect();
-        for counter in counters {
+        // The devices pending settings are for (LK-76) are talked to too,
+        // whatever the settings in force name.
+        let mut counters = counters.to_vec();
+        let mut boxes = boxes.to_vec();
+        for (device, role) in self.roster.entries().iter().flat_map(|e| &e.targets) {
+            let list = match role {
+                Role::Counter => &mut counters,
+                _ => &mut boxes,
+            };
+            if !list.contains(device) {
+                list.push(*device);
+            }
+        }
+        for counter in &counters {
             if self.counters.contains(counter) {
                 continue;
             }
@@ -631,7 +671,7 @@ impl<R: Post> OwnerLink<R> {
             self.counters.push(*counter);
             self.courier.set_peer(*counter, Role::Counter);
         }
-        for b in boxes {
+        for b in &boxes {
             self.courier.set_peer(*b, Role::Box);
         }
         self.drop_retired();
@@ -644,12 +684,10 @@ impl<R: Post> OwnerLink<R> {
         let kept: BTreeSet<DeviceId> = self
             .carried
             .iter()
-            .flat_map(|c| {
-                c.targets
-                    .iter()
-                    .filter(|(_, role)| **role == Role::Counter)
-                    .map(|(d, _)| *d)
-            })
+            .flat_map(|c| &c.targets)
+            .chain(self.roster.entries().iter().flat_map(|e| &e.targets))
+            .filter(|(_, role)| **role == Role::Counter)
+            .map(|(d, _)| *d)
             .collect();
         let gone: Vec<DeviceId> = self
             .counters
@@ -703,9 +741,22 @@ impl<R: Post> OwnerLink<R> {
             .map(|c| c.version)
             .collect();
         self.carried.retain(|c| c.id != id);
+        if let Err(e) = self.roster.retain(|e| e.id != id) {
+            self.note(format!("the settings roster could not be saved: {e}"));
+        }
         self.settings_sent.retain(|(_, v), _| !gone.contains(v));
         self.boxes_sent.retain(|(_, v)| !gone.contains(v));
         self.drop_retired();
+    }
+
+    /// LK-76: the owner's outbox holds settings under exactly these numbers.
+    /// The devices kept for any other delivery, which the owner dropped, are
+    /// let go.
+    pub fn settings_pending(&mut self, ids: &[u32]) {
+        match self.roster.retain(|e| ids.contains(&e.id)) {
+            Ok(()) => self.drop_retired(),
+            Err(e) => self.note(format!("the settings roster could not be saved: {e}")),
+        }
     }
 
     /// Whether `device` shows it holds `version` (LK-65). A counter with no

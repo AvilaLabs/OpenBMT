@@ -5,8 +5,8 @@ use std::io::Write;
 
 use super::kit::*;
 use super::relay::{ids, items, msg, Rig};
-use crate::proto::Response;
-use crate::relay::RelayConfig;
+use crate::proto::{Request, Response};
+use crate::relay::{Relay, RelayConfig, LEAVING_SECS};
 use crate::store::{DirStore, Event, MailStore};
 
 fn dir_rig(dir: &TempDir) -> Rig<DirStore> {
@@ -124,12 +124,19 @@ fn lk_41_removing_a_member_removes_the_file_and_other_files_are_left_alone() {
     rig.make(&counter());
     rig.make(&the_box());
     assert!(log_path(&dir).exists());
-    rig.relay.set_members(&[the_box().device_id()]).unwrap();
+    rig.relay
+        .set_members(&[the_box().device_id()], rig.now)
+        .unwrap();
+    // The file stays while the mailbox is leaving (LK-28), and goes with it.
+    assert!(log_path(&dir).exists());
+    rig.now += LEAVING_SECS;
+    rig.ask(Request::Hello { nonce: [1; 32] });
     assert!(!log_path(&dir).exists());
     assert!(dir.0.join("notes.txt").exists());
     let mut store = DirStore::new(&dir.0).unwrap();
     let loaded = store.load().unwrap();
     assert_eq!(loaded.members, vec![the_box().device_id()]);
+    assert!(loaded.leaving.is_empty());
     assert_eq!(loaded.mailboxes.len(), 1);
     // With none stored, there are no members.
     let empty = TempDir::new("nomembers");
@@ -178,14 +185,117 @@ fn lk_41_a_file_left_from_a_removed_member_is_emptied_when_the_member_returns() 
         .copied()
         .filter(|m| *m != counter().device_id())
         .collect();
-    rig.relay.set_members(&without).unwrap();
+    rig.relay.set_members(&without, rig.now).unwrap();
+    rig.now += LEAVING_SECS;
+    rig.ask(Request::Hello { nonce: [1; 32] });
     assert!(!log_path(&dir).exists());
     fs::write(log_path(&dir), &old).unwrap();
     // It returns: the mailbox is empty in memory and on disk.
-    rig.relay.set_members(&members).unwrap();
+    rig.relay.set_members(&members, rig.now).unwrap();
     assert_eq!(rig.make(&counter()), Response::Made);
     assert_eq!(fs::metadata(log_path(&dir)).unwrap().len(), 0);
     drop(rig);
     let mut again = dir_rig(&dir);
     assert!(items(again.fetch(&counter(), 0)).is_empty());
+}
+
+#[test]
+fn lk_42_the_leaving_list_and_its_mailbox_survive_a_restart() {
+    let dir = TempDir::new("leaving");
+    let mut rig = dir_rig(&dir);
+    rig.make(&counter());
+    rig.put(msg(1));
+    let at = rig.now;
+    let members: Vec<_> = rig.relay.members().copied().collect();
+    let without: Vec<_> = members
+        .iter()
+        .copied()
+        .filter(|m| *m != counter().device_id())
+        .collect();
+    rig.relay.set_members(&without, at).unwrap();
+    drop(rig);
+    let mut store = DirStore::new(&dir.0).unwrap();
+    let loaded = store.load().unwrap();
+    assert_eq!(loaded.leaving, vec![(counter().device_id(), at)]);
+    assert_eq!(loaded.mailboxes.len(), 1);
+    // The restarted relay still hands the removed device its message, and
+    // keeps the time it became leaving.
+    let relay = Relay::new(
+        id(99),
+        RelayConfig::default(),
+        DirStore::new(&dir.0).unwrap(),
+    )
+    .unwrap();
+    let mut again = Rig::over(relay);
+    assert_eq!(
+        again
+            .relay
+            .leaving()
+            .map(|(d, t)| (*d, t))
+            .collect::<Vec<_>>(),
+        vec![(counter().device_id(), at)]
+    );
+    assert_eq!(ids(again.fetch(&counter(), 0)), vec![1]);
+    // Read to its end: the file and the list entry are gone.
+    assert!(!log_path(&dir).exists());
+    drop(again);
+    assert!(DirStore::new(&dir.0)
+        .unwrap()
+        .load()
+        .unwrap()
+        .leaving
+        .is_empty());
+}
+
+#[test]
+fn lk_42_a_directory_without_a_leaving_file_has_no_leaving_mailboxes() {
+    let dir = TempDir::new("noleaving");
+    let mut rig = dir_rig(&dir);
+    rig.make(&counter());
+    drop(rig);
+    fs::remove_file(dir.0.join("leaving.set")).unwrap();
+    let loaded = DirStore::new(&dir.0).unwrap().load().unwrap();
+    assert!(loaded.leaving.is_empty());
+    assert_eq!(loaded.mailboxes.len(), 1);
+}
+
+#[test]
+fn lk_42_a_damaged_leaving_file_stops_the_start() {
+    let dir = TempDir::new("badleaving");
+    let mut rig = dir_rig(&dir);
+    rig.make(&counter());
+    let members: Vec<_> = rig.relay.members().copied().collect();
+    let without: Vec<_> = members
+        .iter()
+        .copied()
+        .filter(|m| *m != counter().device_id())
+        .collect();
+    rig.relay.set_members(&without, rig.now).unwrap();
+    drop(rig);
+    let path = dir.0.join("leaving.set");
+    let good = fs::read(&path).unwrap();
+    assert_eq!(good.len(), 40 + 4);
+    for n in 0..good.len() {
+        fs::write(&path, &good[..n]).unwrap();
+        assert!(DirStore::new(&dir.0).unwrap().load().is_err(), "cut at {n}");
+    }
+    let mut flipped = good.clone();
+    flipped[5] ^= 1;
+    fs::write(&path, flipped).unwrap();
+    assert!(DirStore::new(&dir.0).unwrap().load().is_err());
+}
+
+#[test]
+fn lk_42_the_leaving_list_reads_back_to_the_same_bytes() {
+    use crate::store::{decode_leaving, encode_leaving};
+    let list = vec![(counter().device_id(), 5), (owner().device_id(), u64::MAX)];
+    let bytes = encode_leaving(&list);
+    assert_eq!(decode_leaving(&bytes), Some(list));
+    assert_eq!(decode_leaving(&encode_leaving(&[])), Some(Vec::new()));
+    for n in 0..bytes.len() {
+        assert!(decode_leaving(&bytes[..n]).is_none(), "cut at {n}");
+    }
+    let mut longer = bytes;
+    longer.push(0);
+    assert!(decode_leaving(&longer).is_none());
 }

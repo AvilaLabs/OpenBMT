@@ -27,7 +27,7 @@ use std::time::Duration;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_link::store::DirStore;
 use openbmt_link::{os_random, Relay, RelayConfig, Server, ServerConfig};
-use openbmt_net_io::{DirLock, SystemClock};
+use openbmt_net_io::{Clock, DirLock, SystemClock};
 
 /// The key `--test-identity` uses.
 const TEST_SECRET: [u8; 32] = [99; 32];
@@ -106,7 +106,9 @@ fn run() -> Result<(), String> {
     let mut relay =
         Relay::new(identity, RelayConfig::default(), store).map_err(|e| e.to_string())?;
     let members = read_members(dir)?;
-    relay.set_members(&members).map_err(|e| e.to_string())?;
+    relay
+        .set_members(&members, SystemClock.now())
+        .map_err(|e| e.to_string())?;
     let count = relay.members().count();
     let listener =
         TcpListener::bind(bind.as_str()).map_err(|e| format!("cannot bind {bind}: {e}"))?;

@@ -44,7 +44,7 @@ impl MemoryRelay {
     pub fn new(identity: Identity, members: &[DeviceId]) -> Result<Self, String> {
         let mut relay = Relay::new(identity, RelayConfig::default(), MemoryStore::new())
             .map_err(|e| e.to_string())?;
-        relay.set_members(members).map_err(|e| e.to_string())?;
+        relay.set_members(members, 0).map_err(|e| e.to_string())?;
         Ok(Self {
             inner: Arc::new(Mutex::new(Inner {
                 relay,
@@ -89,7 +89,11 @@ impl MemoryRelay {
             .inner
             .lock()
             .map_err(|_| "the relay is broken".to_string())?;
-        inner.relay.set_members(members).map_err(|e| e.to_string())
+        let now = inner.now;
+        inner
+            .relay
+            .set_members(members, now)
+            .map_err(|e| e.to_string())
     }
 
     /// While down, every call fails as an unreachable relay does.

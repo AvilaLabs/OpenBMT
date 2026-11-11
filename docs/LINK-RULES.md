@@ -98,7 +98,8 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
   identity keys of the shop's devices. It takes a sealed message only if
   it is well formed and the signature is valid (LK-04), is at most the
   largest size step plus the header, both the sender and the reader are
-  members, the reader's mailbox exists, and its number is above the
+  members, the reader's mailbox exists (a leaving mailbox does not take
+  messages, LK-28), and its number is above the
   highest the relay has taken from that sender for that reader. The last
   point stops a copy of an old message from pushing new ones out of a
   full mailbox; the relay keeps those numbers in memory only, so after a
@@ -109,11 +110,13 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
 - **LK-21.** A mailbox exists only for a member. It is made the first
   time that member proves it holds the key (LK-23). A relay has at most
   64 members (the most it will hold). Replacing the list stores the new
-  list first, and then the mailboxes of members that are gone are
-  deleted; the merchant clears a relay by replacing the list with an
-  empty one. How the list reaches a Box from the owner (a signed device
-  list) is part of the Box pairing that is still open (section 5); until
-  then it is put there by hand.
+  list first, and then the mailboxes of members that are gone become
+  leaving mailboxes (LK-28) and are deleted as LK-29 says; a member that
+  is added back has its mailbox as a normal one again, with what it held.
+  Replacing the list with an empty one makes every mailbox leaving. How
+  the list reaches a Box from the owner (a signed device list) is part of
+  the Box pairing that is still open (section 5); until then it is put
+  there by hand.
 - **LK-22.** A mailbox holds at most 256 messages and 4 MiB. When full,
   the oldest message goes. A relay promises nothing about delivery.
 - **LK-23.** To fetch or to make a mailbox, the reader signs a fresh
@@ -145,6 +148,23 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
   applies), refused with the claim staying on offer, or refused with the
   claim withdrawn. Every failure of a welcome has the one refusal, so that
   nothing about the invitation leaks.
+
+- **LK-28.** When a device stops being a member, its mailbox is not deleted
+  at once: it becomes a leaving mailbox. It keeps the messages it held and
+  takes no new message from anyone, and it cannot be made again. Its reader
+  can fetch from it, with the same proof of key as for a member (LK-23),
+  and can do nothing else: an acknowledgement is refused as from a device
+  that is not a member. The reason: the settings that remove a device are
+  put in its mailbox together with the Box's own copy, and the Box may
+  apply them first.
+- **LK-29.** A leaving mailbox is deleted when its reader has fetched to its
+  end (a fetch that returns the last message it holds and says no more
+  follow), or 7 days after it became leaving, whichever comes first. The
+  caller of `set_members` and of `handle` gives the time; the relay reads no
+  clock, and it ends the leaving mailboxes that are due when it is given
+  the time with any request. A relay holds at most as many leaving
+  mailboxes as it allows members: the one that has been leaving longest is
+  deleted first.
 
 ## 3. Reaching the relay
 
@@ -179,6 +199,15 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
   paired again; it never starts over from zero by itself.
 - **LK-41.** A relay stores mailboxes as files written whole or as an
   append-only log; a torn write loses at most the message being written.
+- **LK-42.** A relay stores the leaving list beside the member list, in a
+  file `leaving.set` of its own: for each leaving device its key (32 bytes)
+  and the time it became leaving (u64 LE), then the first four bytes of the
+  SHA-256 of those, written whole as the member list is. The leaving list is
+  stored before the member list, so that a crash between the two leaves a
+  device on both lists, which counts as a member, and never a removed member
+  with no mailbox. A directory without the file has no leaving mailboxes. A
+  file that fails its check stops the start, as the member list does. A
+  mailbox file of a device on neither list is removed at the start (LK-41).
 
 ## 5. What these rules do not do
 
@@ -315,22 +344,25 @@ over is still checked by the rules of the thing it carries.
 - **LK-64.** The owner sends signed settings, as messages of kind Settings with
   the bytes of the signed settings as the content, to every counter and Box on
   the device list of the settings and of the settings before them, so that a
-  device the new settings remove gets the settings that remove it. The owner
-  sends them when they are handed to the link and then at the end of each
-  step, to each device that has not shown it holds the version. A device is
-  sent a version again only after 120 seconds. Versions go to a device lowest
-  first, one at a time, so that a counter checks each against the one before.
-  Settings that do not check against the pinned roots, or that lack a
-  signature they need given the settings before them, are not sent, and the
-  link says why in words. The link carries at most 16 settings at once.
+  device the new settings remove gets the settings that remove it (the
+  devices are kept with the delivery, LK-76, so this holds after a
+  restart). The owner sends them when they are handed to the link and then
+  at the end of each step, to each device that has not shown it holds the
+  version. A device is sent a version again only after 120 seconds.
+  Versions go to a device lowest first, one at a time, so that a counter
+  checks each against the one before. Settings that do not check against
+  the pinned roots, or that lack a signature they need given the settings
+  before them, are not sent, and the link says why in words. The link
+  carries at most 16 settings at once.
 - **LK-65.** A counter shows it holds a version by the `Setting` record of its
   chain (CR-162) that the owner's copy of the chain holds. A Box has no such
   record, so a Box counts as holding a version once the relay took the
   message for it.
 - **LK-66.** Settings stay with the link, and in the owner's outbox, until every
-  device they are for holds them. The link says which devices still do not,
-  and the outbox row of the owner's app names them. The link forgets settings
-  when the owner's app takes them out of the outbox.
+  device they are for holds them, the devices that LK-76 keeps included.
+  The link says which devices still do not, and the outbox row of the
+  owner's app names them. The link forgets settings when the owner's app
+  takes them out of the outbox.
 - **LK-67.** The counters and Boxes the owner talks to are the ones in the
   signed settings in force and in the settings waiting to be delivered, not
   a list the owner's app was started with. The link follows the settings
@@ -408,6 +440,24 @@ merged).
   and its lock, so it does not run with the owner node. A relay that answers
   and refuses (the watch key is not a member) is told from one that is down,
   and the link says so.
+
+- **LK-76.** The devices a pending settings delivery is for, the counters
+  and Boxes of the settings and of those before them (LK-64), are kept
+  with the delivery in one file in the owner node's directory,
+  `link-settings-roster`. It is written whole (a temporary file, a flush, a
+  rename, a flush of the directory) when the settings are handed to the
+  link and after any change, and read back at the start. It is framed with
+  the magic `OBM$` and version 1; each entry holds the outbox number, the
+  settings version and the devices with a role byte (1 counter, 2 Box),
+  in order of number and of key, with none twice, at most 16 entries and
+  256 devices each. A file that is cut, has a byte left over, has an entry
+  or device out of order or twice, has a role that is not a counter or a
+  Box, or does not encode to the bytes it was read from, refuses the start
+  of the link. After a start the link talks to those devices and does not
+  count the delivery done while one of them lacks the settings, as if the
+  settings before them had been handed over again. The entry goes when the
+  delivery is done, or when the owner's app says its outbox no longer holds
+  that delivery.
 
 The two kinds that involve the Box are carried the same way. A counter sends
 a Paid notice to each Box on its device list when a sale changes state, and

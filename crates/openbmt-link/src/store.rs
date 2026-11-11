@@ -45,7 +45,10 @@ pub enum Event {
 pub struct Loaded {
     /// The member list.
     pub members: Vec<DeviceId>,
-    /// Each member's mailbox as events.
+    /// The devices whose mailboxes are leaving (LK-28), each with the time
+    /// it became so. A store that never kept any gives none.
+    pub leaving: Vec<(DeviceId, u64)>,
+    /// Each member's and each leaving device's mailbox as events.
     pub mailboxes: Vec<(DeviceId, Vec<Event>)>,
 }
 
@@ -55,14 +58,19 @@ pub trait MailStore {
     /// What a failed call says.
     type Error: Display;
 
-    /// The member list and every member's mailbox with its events, in
-    /// order. A mailbox of a device that is not a member is not returned.
+    /// The member list, the leaving list and the mailbox of every member
+    /// and every leaving device with its events, in order. A mailbox of a
+    /// device on neither list is not returned.
     fn load(&mut self) -> Result<Loaded, Self::Error>;
 
-    /// Replace the member list (LK-21) and remove the mailboxes of every
-    /// device that is not on it. The list is stored before the mailboxes
-    /// go.
-    fn set_members(&mut self, members: &[DeviceId]) -> Result<(), Self::Error>;
+    /// Replace the member list and the leaving list (LK-21, LK-28) and
+    /// remove the mailboxes of every device that is on neither. The lists
+    /// are stored before the mailboxes go.
+    fn set_members(
+        &mut self,
+        members: &[DeviceId],
+        leaving: &[(DeviceId, u64)],
+    ) -> Result<(), Self::Error>;
 
     /// Make an empty mailbox. The relay asks only when it holds none for
     /// that reader, so anything a store still has under that name is left
@@ -85,6 +93,7 @@ pub trait MailStore {
 pub struct MemoryStore {
     boxes: HashMap<DeviceId, Vec<Event>>,
     members: Vec<DeviceId>,
+    leaving: Vec<(DeviceId, u64)>,
     /// Make `create`, `put`, `ack` and `set_members` fail.
     pub fail_writes: bool,
 }
@@ -115,6 +124,10 @@ impl MemoryStore {
         self.boxes.is_empty()
     }
 
+    fn kept(&self, reader: &DeviceId) -> bool {
+        self.members.contains(reader) || self.leaving.iter().any(|(d, _)| d == reader)
+    }
+
     /// What is kept for one reader.
     pub fn events(&self, reader: &DeviceId) -> Vec<Event> {
         self.boxes.get(reader).cloned().unwrap_or_default()
@@ -127,21 +140,29 @@ impl MailStore for MemoryStore {
     fn load(&mut self) -> Result<Loaded, MemoryFailure> {
         Ok(Loaded {
             members: self.members.clone(),
+            leaving: self.leaving.clone(),
             mailboxes: self
                 .boxes
                 .iter()
-                .filter(|(k, _)| self.members.contains(k))
+                .filter(|(k, _)| self.kept(k))
                 .map(|(k, v)| (*k, v.clone()))
                 .collect(),
         })
     }
 
-    fn set_members(&mut self, members: &[DeviceId]) -> Result<(), MemoryFailure> {
+    fn set_members(
+        &mut self,
+        members: &[DeviceId],
+        leaving: &[(DeviceId, u64)],
+    ) -> Result<(), MemoryFailure> {
         if self.fail_writes {
             return Err(MemoryFailure);
         }
         self.members = members.to_vec();
-        self.boxes.retain(|k, _| members.contains(k));
+        self.leaving = leaving.to_vec();
+        let (members, leaving) = (&self.members, &self.leaving);
+        self.boxes
+            .retain(|k, _| members.contains(k) || leaving.iter().any(|(d, _)| d == k));
         Ok(())
     }
 
@@ -187,6 +208,10 @@ const CHECK_LEN: usize = 4;
 const EXT: &str = "mbx";
 /// The file that holds the member list.
 const MEMBERS_FILE: &str = "members.set";
+/// The file that holds the leaving list (LK-42): 40 bytes per device (its
+/// key, then the time it became leaving as u64 LE), then the check. A
+/// directory without it has no leaving mailboxes.
+const LEAVING_FILE: &str = "leaving.set";
 
 /// One log file per mailbox, in a directory.
 #[derive(Debug)]
@@ -276,6 +301,43 @@ fn parse_log(bytes: &[u8]) -> (Vec<Event>, usize) {
     (events, at)
 }
 
+/// The bytes of a leaving list (LK-42): each device's key and the time it
+/// became leaving (u64 LE), then the first four bytes of their SHA-256.
+pub fn encode_leaving(leaving: &[(DeviceId, u64)]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(leaving.len().saturating_mul(40).saturating_add(CHECK_LEN));
+    for (device, at) in leaving {
+        out.extend_from_slice(&device.to_bytes());
+        out.extend_from_slice(&at.to_le_bytes());
+    }
+    let check = sha256::Hash::hash(&out).to_byte_array();
+    out.extend_from_slice(check.get(..CHECK_LEN).unwrap_or(&[]));
+    out
+}
+
+/// Read a leaving list back (LK-42); `None` for bytes that are not one.
+/// What it reads encodes to the same bytes.
+pub fn decode_leaving(bytes: &[u8]) -> Option<Vec<(DeviceId, u64)>> {
+    let split = bytes.len().checked_sub(CHECK_LEN)?;
+    let (body, check) = bytes.split_at(split);
+    let want = sha256::Hash::hash(body).to_byte_array();
+    if want.get(..CHECK_LEN) != Some(check) {
+        return None;
+    }
+    let (entries, rest) = body.as_chunks::<40>();
+    if !rest.is_empty() {
+        return None;
+    }
+    entries
+        .iter()
+        .map(|entry| {
+            let (key, at) = entry.split_at_checked(32)?;
+            let key = <[u8; 32]>::try_from(key).ok()?;
+            let at = <[u8; 8]>::try_from(at).ok()?;
+            Some((DeviceId::from_bytes(&key).ok()?, u64::from_le_bytes(at)))
+        })
+        .collect()
+}
+
 fn hex(bytes: &[u8; 32]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -319,6 +381,31 @@ impl DirStore {
             .collect()
     }
 
+    /// The leaving list, or an empty one if none was ever stored (LK-42). A
+    /// file that fails its check is an error, as for the members.
+    fn read_leaving(&self) -> io::Result<Vec<(DeviceId, u64)>> {
+        let bytes = match fs::read(self.dir.join(LEAVING_FILE)) {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        decode_leaving(&bytes).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "the leaving file is damaged")
+        })
+    }
+
+    /// Write a list file whole: a temporary file, flushed, renamed over the
+    /// old one, and the directory flushed.
+    fn write_list(&self, name: &str, body: Vec<u8>) -> io::Result<()> {
+        let path = self.dir.join(name);
+        let temp = self.dir.join(format!("{name}.tmp"));
+        let mut file = File::create(&temp)?;
+        file.write_all(&body)?;
+        file.sync_all()?;
+        fs::rename(&temp, &path)?;
+        self.sync_dir()
+    }
+
     /// Keep logs in this directory, which is created if it is missing.
     pub fn new(dir: impl Into<PathBuf>) -> io::Result<Self> {
         let dir = dir.into();
@@ -358,6 +445,7 @@ impl MailStore for DirStore {
 
     fn load(&mut self) -> io::Result<Loaded> {
         let members = self.read_members()?;
+        let leaving = self.read_leaving()?;
         let mut out = Vec::new();
         for entry in fs::read_dir(&self.dir)? {
             let path = entry?.path();
@@ -367,7 +455,7 @@ impl MailStore for DirStore {
             let Some(reader) = path.file_stem().and_then(|s| s.to_str()).and_then(unhex) else {
                 continue;
             };
-            if !members.contains(&reader) {
+            if !members.contains(&reader) && !leaving.iter().any(|(d, _)| *d == reader) {
                 // Left behind by a crash between storing a new list and
                 // removing the files; it must not come back if the device
                 // is added again.
@@ -388,6 +476,7 @@ impl MailStore for DirStore {
         }
         Ok(Loaded {
             members,
+            leaving,
             mailboxes: out,
         })
     }
@@ -439,20 +528,18 @@ impl MailStore for DirStore {
         Ok(())
     }
 
-    fn set_members(&mut self, members: &[DeviceId]) -> io::Result<()> {
+    fn set_members(&mut self, members: &[DeviceId], leaving: &[(DeviceId, u64)]) -> io::Result<()> {
+        // The leaving list goes first: a crash between the two files leaves
+        // a leaving device that is still a member, which the relay ignores,
+        // and never a removed member with no mailbox.
+        self.write_list(LEAVING_FILE, encode_leaving(leaving))?;
         let mut body = Vec::with_capacity(members.len().saturating_mul(32));
         for m in members {
             body.extend_from_slice(&m.to_bytes());
         }
         let check = sha256::Hash::hash(&body).to_byte_array();
         body.extend_from_slice(check.get(..CHECK_LEN).unwrap_or(&[]));
-        let path = self.dir.join(MEMBERS_FILE);
-        let temp = self.dir.join(format!("{MEMBERS_FILE}.tmp"));
-        let mut file = File::create(&temp)?;
-        file.write_all(&body)?;
-        file.sync_all()?;
-        fs::rename(&temp, &path)?;
-        self.sync_dir()?;
+        self.write_list(MEMBERS_FILE, body)?;
         for entry in fs::read_dir(&self.dir)? {
             let path = entry?.path();
             if path.extension().and_then(|e| e.to_str()) != Some(EXT) {
@@ -461,7 +548,7 @@ impl MailStore for DirStore {
             let Some(reader) = path.file_stem().and_then(|s| s.to_str()).and_then(unhex) else {
                 continue;
             };
-            if !members.contains(&reader) {
+            if !members.contains(&reader) && !leaving.iter().any(|(d, _)| *d == reader) {
                 // The list is stored, so the change has happened. A file
                 // that will not go is removed at the next start (`load`)
                 // and emptied if the device is added again (`create`).

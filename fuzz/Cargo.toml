@@ -272,6 +272,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "link_leaving_decode"
+path = "fuzz_targets/link_leaving_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "box_claim_decode"
 path = "fuzz_targets/box_claim_decode.rs"
 test = false
@@ -337,6 +344,13 @@ bench = false
 [[bin]]
 name = "owner_queue_decode"
 path = "fuzz_targets/owner_queue_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "owner_settings_roster_decode"
+path = "fuzz_targets/owner_settings_roster_decode.rs"
 test = false
 doc = false
 bench = false

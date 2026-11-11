@@ -34,7 +34,7 @@ fn relay() -> Server {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let mut relay = Relay::new(id(99), RelayConfig::default(), MemoryStore::new()).unwrap();
     relay
-        .set_members(&[id(1).device_id(), id(3).device_id()])
+        .set_members(&[id(1).device_id(), id(3).device_id()], 0)
         .unwrap();
     Server::start(
         listener,
@@ -195,7 +195,7 @@ fn cr_136_a_relay_that_does_not_know_the_counter_is_refused_and_not_unreachable(
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let mut relay = Relay::new(id(99), RelayConfig::default(), MemoryStore::new()).unwrap();
     relay
-        .set_members(&[id(1).device_id(), id(5).device_id()])
+        .set_members(&[id(1).device_id(), id(5).device_id()], 0)
         .unwrap();
     let server = Server::start(
         listener,

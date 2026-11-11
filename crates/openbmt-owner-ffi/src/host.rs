@@ -1708,6 +1708,15 @@ impl Entry {
                 waiting: 0,
                 notes: Vec::new(),
             };
+            // LK-76: devices kept for settings the owner dropped are let go.
+            let pending: Vec<u32> = node
+                .owner()
+                .outbox()
+                .iter()
+                .filter(|d| matches!(d.what, Delivery::Settings(_)))
+                .map(|d| d.id)
+                .collect();
+            link.settings_pending(&pending);
             if let Err(e) = follow_settings(node, link) {
                 view.notes.push(format!("the link's counters: {e}"));
             }

@@ -28,6 +28,8 @@ pub const TAG_FETCH: &str = "OpenBMT/link-fetch/v1";
 pub const TAG_HELLO: &str = "OpenBMT/link-hello/v1";
 /// Seconds a challenge is good for (LK-23).
 pub const CHALLENGE_SECS: u64 = 60;
+/// Seconds a leaving mailbox is kept, 7 days (LK-29).
+pub const LEAVING_SECS: u64 = 7 * 24 * 60 * 60;
 
 /// What a reader's signature on a challenge asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,6 +209,9 @@ pub struct Relay<S: MailStore> {
     cfg: RelayConfig,
     store: S,
     members: BTreeSet<DeviceId>,
+    /// Devices that stopped being members and whose mailboxes are kept to
+    /// be fetched, with the time each became so (LK-28).
+    leaving: BTreeMap<DeviceId, u64>,
     mailboxes: BTreeMap<DeviceId, Mailbox>,
     /// The one challenge each connection may hold, with the time given
     /// (LK-23).
@@ -247,13 +252,20 @@ impl<S: MailStore> Relay<S> {
     pub fn new(identity: Identity, cfg: RelayConfig, mut store: S) -> Result<Self, S::Error> {
         let Loaded {
             members,
+            leaving,
             mailboxes: loaded,
         } = store.load()?;
         let members: BTreeSet<DeviceId> = members.into_iter().collect();
+        // A device on both lists is a member (a crash between the two
+        // writes can leave that).
+        let leaving: BTreeMap<DeviceId, u64> = leaving
+            .into_iter()
+            .filter(|(device, _)| !members.contains(device))
+            .collect();
         let mut mailboxes = BTreeMap::new();
         let mut taken = BTreeMap::new();
         for (reader, events) in loaded {
-            if members.contains(&reader) {
+            if members.contains(&reader) || leaving.contains_key(&reader) {
                 let mailbox = Mailbox::replay(events, &cfg);
                 for (_, sealed) in mailbox.messages() {
                     if let Ok(seen) = inspect(sealed) {
@@ -269,6 +281,7 @@ impl<S: MailStore> Relay<S> {
             cfg,
             store,
             members,
+            leaving,
             mailboxes,
             challenges: BTreeMap::new(),
             taken,
@@ -306,7 +319,7 @@ impl<S: MailStore> Relay<S> {
         self.identity.device_id()
     }
 
-    /// How many mailboxes there are.
+    /// How many mailboxes there are, leaving ones included.
     pub fn mailbox_count(&self) -> usize {
         self.mailboxes.len()
     }
@@ -332,24 +345,88 @@ impl<S: MailStore> Relay<S> {
         self.members.iter()
     }
 
-    /// Replace the member list (LK-20, LK-21). It is stored first; only if
-    /// that works does it take effect, and then the mailboxes of devices
-    /// that are no longer members are gone. An empty list makes the relay
-    /// take nothing.
-    pub fn set_members(&mut self, members: &[DeviceId]) -> Result<(), MembersError<S::Error>> {
+    /// The devices whose mailboxes are leaving, with the time each became
+    /// so (LK-28).
+    pub fn leaving(&self) -> impl Iterator<Item = (&DeviceId, u64)> {
+        self.leaving.iter().map(|(d, at)| (d, *at))
+    }
+
+    /// Replace the member list (LK-20, LK-21). `now` is the time the caller
+    /// gives. The new lists are stored first; only if that works do they
+    /// take effect. The mailbox of a device that is no longer a member is
+    /// not deleted: it becomes leaving (LK-28), and one that is a member
+    /// again is a normal mailbox again. An empty list makes the relay take
+    /// nothing.
+    pub fn set_members(
+        &mut self,
+        members: &[DeviceId],
+        now: u64,
+    ) -> Result<(), MembersError<S::Error>> {
         let list: BTreeSet<DeviceId> = members.iter().copied().collect();
         if list.len() > self.cfg.max_mailboxes {
             return Err(MembersError::TooMany);
         }
-        let ordered: Vec<DeviceId> = list.iter().copied().collect();
+        let mut leaving: BTreeMap<DeviceId, u64> = self
+            .leaving
+            .iter()
+            .filter(|(device, _)| !list.contains(*device))
+            .map(|(device, at)| (*device, *at))
+            .collect();
+        for device in self.mailboxes.keys() {
+            if !list.contains(device) {
+                leaving.entry(*device).or_insert(now);
+            }
+        }
+        self.expire(&mut leaving, now);
+        // At most as many leaving mailboxes as members: the oldest go.
+        while leaving.len() > self.cfg.max_mailboxes {
+            let Some(oldest) = leaving.iter().min_by_key(|(d, at)| (**at, **d)) else {
+                break;
+            };
+            let oldest = *oldest.0;
+            leaving.remove(&oldest);
+        }
+        self.apply(list, leaving)
+    }
+
+    /// Store the two lists and, if that works, make them the relay's and
+    /// delete the mailboxes on neither.
+    fn apply(
+        &mut self,
+        members: BTreeSet<DeviceId>,
+        leaving: BTreeMap<DeviceId, u64>,
+    ) -> Result<(), MembersError<S::Error>> {
+        let ordered: Vec<DeviceId> = members.iter().copied().collect();
+        let gone: Vec<(DeviceId, u64)> = leaving.iter().map(|(d, at)| (*d, *at)).collect();
         self.store
-            .set_members(&ordered)
+            .set_members(&ordered, &gone)
             .map_err(MembersError::Store)?;
-        self.mailboxes.retain(|reader, _| list.contains(reader));
+        self.mailboxes
+            .retain(|reader, _| members.contains(reader) || leaving.contains_key(reader));
         self.taken
-            .retain(|(sender, reader), _| list.contains(sender) && list.contains(reader));
-        self.members = list;
+            .retain(|(sender, reader), _| members.contains(sender) && members.contains(reader));
+        self.members = members;
+        self.leaving = leaving;
         Ok(())
+    }
+
+    /// Take out of `leaving` what has been there for 7 days (LK-29).
+    fn expire(&self, leaving: &mut BTreeMap<DeviceId, u64>, now: u64) {
+        leaving.retain(|_, at| now.saturating_sub(*at) < LEAVING_SECS);
+    }
+
+    /// Delete the leaving mailboxes that are 7 days old, and, when `done`
+    /// names one, that one (LK-29). A store that says no leaves things as
+    /// they are: the next request tries again.
+    fn end_leaving(&mut self, done: Option<&DeviceId>, now: u64) {
+        let mut leaving = self.leaving.clone();
+        self.expire(&mut leaving, now);
+        if let Some(device) = done {
+            leaving.remove(device);
+        }
+        if leaving.len() != self.leaving.len() {
+            let _ = self.apply(self.members.clone(), leaving);
+        }
     }
 
     /// Forget the numbers taken (LK-20), as a restart with empty mailboxes
@@ -372,6 +449,7 @@ impl<S: MailStore> Relay<S> {
         now: u64,
         random: &mut impl FnMut(&mut [u8; 32]) -> Result<(), E>,
     ) -> Response {
+        self.end_leaving(None, now);
         match request {
             Request::Hello { nonce } => {
                 let relay = self.identity.device_id();
@@ -415,7 +493,7 @@ impl<S: MailStore> Relay<S> {
                 now,
             ) {
                 Err(why) => Response::Refused(why),
-                Ok(()) => self.fetch(&reader, cursor),
+                Ok(()) => self.fetch(&reader, cursor, now),
             },
             Request::Ack {
                 reader,
@@ -444,7 +522,7 @@ impl<S: MailStore> Relay<S> {
             }
             WelcomeAnswer::Welcomed(members) => {
                 self.claim = None;
-                match self.set_members(&members) {
+                match self.set_members(&members, now) {
                     Ok(()) => Response::Welcomed,
                     Err(_) => Response::Refused(Refusal::Storage),
                 }
@@ -555,7 +633,7 @@ impl<S: MailStore> Relay<S> {
         Response::Stored { id }
     }
 
-    fn fetch(&mut self, reader: &DeviceId, cursor: u64) -> Response {
+    fn fetch(&mut self, reader: &DeviceId, cursor: u64, now: u64) -> Response {
         let Some(mailbox) = self.mailboxes.get_mut(reader) else {
             return Response::Refused(Refusal::NoMailbox);
         };
@@ -574,10 +652,18 @@ impl<S: MailStore> Relay<S> {
         if let Some((last, _)) = items.last() {
             mailbox.fetched = mailbox.fetched.max(*last);
         }
+        // A leaving mailbox read to its end has done its work (LK-29).
+        if !more && self.leaving.contains_key(reader) {
+            self.end_leaving(Some(reader), now);
+        }
         Response::Messages { items, more }
     }
 
     fn ack(&mut self, reader: &DeviceId, up_to: u64) -> Response {
+        // A leaving mailbox allows a fetch and nothing else (LK-28).
+        if self.leaving.contains_key(reader) {
+            return Response::Refused(Refusal::NotMember);
+        }
         let Some(mailbox) = self.mailboxes.get_mut(reader) else {
             return Response::Refused(Refusal::NoMailbox);
         };

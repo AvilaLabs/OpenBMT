@@ -61,6 +61,7 @@ pub mod pos;
 pub mod receipts;
 pub mod refunds;
 pub mod say;
+pub mod settings_roster;
 mod take_journal;
 pub mod watch;
 pub mod watcher;
@@ -92,6 +93,7 @@ pub use receipts::{MergeOffer, MergeRefused, ReceiptsLine, FEE_FILE, MERGE_MIN_C
 pub use refunds::{
     Applied, CashRefundSeen, Evidence, IntakeError, NoteKind, RefundIntake, RefundNote, Stopped,
 };
+pub use settings_roster::{RosterEntry, RosterError, SettingsRoster};
 pub use watch::{
     WatchConfig, WatchLink, WatchLinkConfig, WatchNode, WatchStartError, WatchState, WATCH_LINK_DIR,
 };

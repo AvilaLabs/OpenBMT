@@ -25,7 +25,7 @@ pub fn start(cfg: ServerConfig) -> Server {
     let mut relay =
         Relay::new(relay_identity(), RelayConfig::default(), MemoryStore::new()).unwrap();
     let members = [owner(), counter(), the_box()].map(|i| i.device_id());
-    relay.set_members(&members).unwrap();
+    relay.set_members(&members, 0).unwrap();
     Server::start(listener, relay, Arc::new(SystemClock), cfg).unwrap()
 }
 

@@ -57,6 +57,8 @@ exactly the input bytes.
 | `session_response_decode` | `Response::from_bytes` (the approval session response); on success the value must encode back to exactly the input |
 | `approver_state_decode` | `Approver::restore` (the Key app's stored state), with and without key 2; on success the snapshot must equal the input |
 | `owner_queue_decode` | `Owner::restore` (the owner phone's stored queue); on success the snapshot must equal the input |
+| `link_leaving_decode` | `decode_leaving`, a relay's stored leaving list (LK-42); on success it must encode back to exactly the input |
+| `owner_settings_roster_decode` | `decode_roster`, the owner node's stored settings roster (LK-76); on success it must encode back to exactly the input |
 | `wallet_parse` | `WalletDescription::parse` for mainnet and testnet on UTF-8 input; on success, parsing the canonical string again must give the same canonical string |
 | `courier_records_decode` | `decode_records`, the content of a Records message; on success each record encoded again behind its length must give the input back |
 | `box_claim_decode` | `Claim::from_bytes` and `Welcome::from_bytes` (each must encode back to the input) and `Invitation::from_text` on UTF-8 input (one that reads must read back from its own text to the same invitation) |

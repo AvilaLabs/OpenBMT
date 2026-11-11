@@ -125,7 +125,9 @@ screen and not a shared computer.
   force, the owner's key and the watch key the settings name, if any
   (CR-185, LK-74), and is replaced when new settings are stored (LK-21).
   Nobody sets it by hand on a paired Box. A device taken off the list, or a
-  watch key the settings no longer name, loses its mailbox at once.
+  watch key the settings no longer name, takes no more messages, and its
+  mailbox is kept to be fetched until it has been or for 7 days (LK-28,
+  LK-29), so that the device learns it was removed.
 - **BX-23.** Settings that no longer list this Box turn it off: the member
   list becomes empty, the POS reading stops and the POS token is erased
   from its storage. It stays pinned to its roots (BX-16).
