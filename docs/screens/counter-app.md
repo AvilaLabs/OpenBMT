@@ -25,6 +25,9 @@ These are the words of what the app decides itself.
 | torIsOn | Tor is on for this shop | The shop's settings send every connection of this counter through Tor, with Orbot. | Check the address of Orbot below, and keep Orbot running. | a manager |  |
 | torIsOff | Tor is off for this shop | The shop's settings do not use Tor, so the price sources and the network can see this shop's address. | Nothing to do here. The owner can switch Tor on in the shop's settings. | the owner |  |
 | orbotNotRunning | Tor is not running | Tor is on for this shop, but Orbot is not running. | Open Orbot and turn it on. | a manager |  |
+| ownNodeAbout | Your own node | A node of your own, reached by a Tor address, can check each payment as well as the light check does. | Type its Tor address and the manager's PIN, then save. | a manager |  |
+| ownNodeSaved | Own node saved | The counter will ask your own node about each payment, once it has started again. | Wait a moment while the counter starts again. | a manager |  |
+| ownNodeRemoved | Own node removed | The counter checks payments with the light check only. | Wait a moment while the counter starts again. | a manager |  |
 | managerNeeded | A manager is needed | This step needs the manager's PIN. | Ask the manager to type the PIN. | a manager |  |
 | pinWrong | Wrong PIN | That PIN is not right, so nothing was done. | Wait 4 seconds, then try again. | a manager |  |
 | pinLocked | PIN locked for now | There were wrong tries in a row, so the PIN is locked for a while. | Wait 5 minutes, then try again. | a manager |  |
