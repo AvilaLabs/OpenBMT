@@ -30,6 +30,7 @@ fn facts_name(value: FactsRefused) -> String {
         FactsRefused::ViewNotReady => "FactsRefused::ViewNotReady",
         // The same words as the full receipt log (OC-13).
         FactsRefused::ReceiptLogFull => "ReceiptState::LogFull",
+        FactsRefused::TooOldForFacts => "FactsRefused::TooOldForFacts",
         FactsRefused::NotThisCountersAddress => "FactsRefused::NotThisCountersAddress",
     }
     .to_string()
@@ -174,6 +175,7 @@ fn sc_01_every_listed_variant_is_present() {
         "ReceiptState::Complete",
         "ReceiptState::LogFull",
         "FactsRefused::ViewNotReady",
+        "FactsRefused::TooOldForFacts",
         "FactsRefused::NotThisCountersAddress",
         "NoteKind::Refused",
         "NoteKind::WithdrawalNotApplied",
@@ -232,6 +234,7 @@ fn sc_01_every_listed_variant_is_present() {
         receipt_name(ReceiptState::LogFull),
         facts_name(FactsRefused::ViewNotReady),
         facts_name(FactsRefused::ReceiptLogFull),
+        facts_name(FactsRefused::TooOldForFacts),
         facts_name(FactsRefused::NotThisCountersAddress),
         note_name(NoteKind::Refused),
         note_name(NoteKind::WithdrawalNotApplied),

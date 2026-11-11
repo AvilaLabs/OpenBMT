@@ -20,6 +20,7 @@ file again.
 | ReceiptState::Complete | Payments are recorded | The wallet keeps a record of every payment it has seen for its addresses. | Nothing to do. New payments are recorded as blocks arrive. | Nobody | OC-13 |
 | ReceiptState::LogFull | Payment record is full | The wallet cannot keep more records of payments, so it cannot say what a sale received. | Report this limit to the OpenBMT project. You can still spend from the wallet. | Owner | OC-13 |
 | FactsRefused::ViewNotReady | Wallet catching up | Waiting for the wallet to catch up with the chain before this refund request is checked. | Nothing to do. The request is checked again by itself. | Nobody | OC-14 |
+| FactsRefused::TooOldForFacts | Sale too old to check | This sale is too old for the wallet to check what was paid. | Decide this refund by hand. | Owner | OC-29 |
 | FactsRefused::NotThisCountersAddress | Address not given out | The counter asked for a refund on an address this wallet never gave to it. | Do not refund this sale. Check this counter. | Owner | OC-14 |
 | NoteKind::Refused | Refund request refused | The queue did not accept a refund request from a counter. | Read the reason in the details, then dismiss the line. | Owner |  |
 | NoteKind::WithdrawalNotApplied | Withdrawal not applied | A counter withdrew a refund request, but the refund is already past the point where it can be removed. | Check the refund and decide whether to go on with it. | Owner |  |

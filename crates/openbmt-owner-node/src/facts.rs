@@ -21,6 +21,10 @@ pub enum FactsRefused {
     /// received. The request waits like one for a view that is not ready,
     /// until the view is reset and rescanned.
     ReceiptLogFull,
+    /// The sale's receive index lost a receipt to pruning (OC-28, OC-29), so
+    /// the wallet cannot check what was paid. The request is refused: the
+    /// owner decides by hand.
+    TooOldForFacts,
     /// The sale's index was never issued to the counter that names it. The
     /// request is refused.
     NotThisCountersAddress,
@@ -45,6 +49,10 @@ impl fmt::Display for FactsRefused {
                 f,
                 "OC-13: the wallet's receipt log is full, so it cannot say what a sale received"
             ),
+            Self::TooOldForFacts => write!(
+                f,
+                "OC-29: the sale is too old for the wallet to check what was paid"
+            ),
             Self::NotThisCountersAddress => write!(
                 f,
                 "OC-14: the owner never gave this counter the address of the sale"
@@ -59,7 +67,8 @@ impl std::error::Error for FactsRefused {}
 ///
 /// The view must be ready and have checked the chain up to `tip`, and its
 /// receipt log must not be full. The sale's index must lie in a range the
-/// owner issued to the sale's counter. The amount received is the sum of the
+/// owner issued to the sale's counter, and must not have lost a receipt to
+/// pruning (OC-29). The amount received is the sum of the
 /// receipts at the index that are in a block at or below `tip`, spent or
 /// not. The sale has reached the refund depth when something was received
 /// and every one of those receipts has at least `refund_depth`
@@ -79,6 +88,9 @@ pub fn verified_facts(
     }
     if owner.counter_of(sale.index) != Some(sale.counter) {
         return Err(FactsRefused::NotThisCountersAddress);
+    }
+    if view.is_pruned(sale.index) {
+        return Err(FactsRefused::TooOldForFacts);
     }
     let mut received: u64 = 0;
     let mut deep = true;

@@ -133,6 +133,14 @@ impl FactsRefused {
             )
             .code("OC-14"),
             Self::ReceiptLogFull => ReceiptState::LogFull.words(),
+            Self::TooOldForFacts => Words::new(
+                Tone::Stop,
+                "Sale too old to check",
+                "This sale is too old for the wallet to check what was paid.",
+                Who::Owner,
+                "Decide this refund by hand.",
+            )
+            .code("OC-29"),
             Self::NotThisCountersAddress => Words::new(
                 Tone::Stop,
                 "Address not given out",
@@ -670,6 +678,7 @@ pub fn all_words() -> Vec<(String, Words)> {
     }
     for (name, why) in [
         ("ViewNotReady", FactsRefused::ViewNotReady),
+        ("TooOldForFacts", FactsRefused::TooOldForFacts),
         (
             "NotThisCountersAddress",
             FactsRefused::NotThisCountersAddress,

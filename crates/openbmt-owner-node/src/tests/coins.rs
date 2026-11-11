@@ -21,7 +21,8 @@ use openbmt_owner::SaleKey;
 use super::counter;
 use crate::coins::{
     ApplyError, CoinView, PendingError, Receipt, ReceiptState, ScriptSet, ViewState, GAP,
-    MAGIC_OWNER_COINS, MAX_PENDING, MAX_RECEIPTS, UNDO_BLOCKS,
+    MAGIC_OWNER_COINS, MAX_PENDING, MAX_PRUNED_RANGES, MAX_RECEIPTS, PRUNE_START, PRUNE_TO,
+    RECEIPT_KEEP_BLOCKS, UNDO_BLOCKS,
 };
 use crate::facts::{verified_facts, FactsRefused};
 
@@ -1082,7 +1083,7 @@ fn oc_13_the_log_is_bounded_and_past_the_bound_it_takes_a_named_state() {
     apply(&mut view, &chain, &b2);
     assert_eq!(view.receipt_count(), MAX_RECEIPTS);
     assert_eq!(view.len(), 2);
-    // A reset and rescan ends it.
+    // A reset drops the receipts and the full state.
     view.reset(ok).unwrap();
     assert_eq!(view.receipt_state(), ReceiptState::Complete);
     assert_eq!(view.receipt_count(), 0);
@@ -1128,7 +1129,7 @@ fn rich_receipts() -> (Vec<u8>, usize, usize) {
     let (view, _) = rich_view();
     let bytes = view.to_bytes();
     assert_eq!(view.receipt_count(), 2);
-    let at = bytes.len() - 5 - 2 * 84;
+    let at = bytes.len() - 4 - 5 - 2 * 84;
     (bytes, at, 84)
 }
 
@@ -1140,7 +1141,10 @@ fn oc_12_the_stored_receipts_are_read_strictly() {
     assert_eq!(back.receipts_at(1).len(), 1);
     // The two entries, and the pieces around them.
     let head = &bytes[..at];
-    let (e0, e1) = (&bytes[at + 5..at + 5 + size], &bytes[at + 5 + size..]);
+    let (e0, e1) = (
+        &bytes[at + 5..at + 5 + size],
+        &bytes[at + 5 + size..bytes.len() - 4],
+    );
     let make = |flag: u8, entries: &[&[u8]]| {
         let mut v = head.to_vec();
         v.push(flag);
@@ -1148,6 +1152,7 @@ fn oc_12_the_stored_receipts_are_read_strictly() {
         for e in entries {
             v.extend_from_slice(e);
         }
+        v.extend_from_slice(&0u32.to_le_bytes());
         v
     };
     assert_eq!(make(0, &[e0, e1]), bytes);
@@ -1188,4 +1193,305 @@ fn oc_12_the_stored_receipts_are_read_strictly() {
             assert_eq!(v.to_bytes(), flipped, "flip at {i}");
         }
     }
+}
+
+// ---- pruning (OC-28, OC-29) -----------------------------------------------
+
+/// A far tip: the best chain has a block at this height, so that receipts at
+/// small heights are old.
+const TALL: u32 = 60_000;
+
+fn tall(chain: &mut Chain) {
+    chain
+        .view
+        .apply(&[(TALL, BlockHash::from_byte_array([0xaa; 32]))], &[]);
+}
+
+/// `n` receipts of coins that are spent (no coin is held for them): index
+/// `first + i`, height `base + i / per`.
+fn bulk(view: &mut CoinView, n: u32, first: u32, base: u32, per: u32) {
+    for i in 0..n {
+        let mut txid = [0xb0; 32];
+        txid[..4].copy_from_slice(&(first + i).to_le_bytes());
+        assert!(view.add_receipt_for_test(Receipt {
+            index: first + i,
+            outpoint: OutPoint::new(Txid::from_byte_array(txid), 0),
+            sats: 1,
+            height: base + i / per,
+            block: BlockHash::from_byte_array([1; 32]),
+        }));
+    }
+}
+
+/// A view with one unspent old receive coin (index 1, block 1) and one
+/// spent old receipt at index 0 (block 1, spent in block 2), then bulk
+/// receipts: `old` old ones from index 2 up and `recent` ones just below the
+/// far tip. Returns the view, the chain and the blocks 1 and 2.
+fn busy_view(old: u32, recent: u32) -> (CoinView, Chain, Block, Block) {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let pay = foreign(1, &[(&script(1), 50_000), (&script(2), 40_000)]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
+    apply(&mut view, &chain, &b1);
+    let spend = tx_from(op(&pay, 0), &[(&script(55), 49_000)]);
+    let b2 = chain.push(std::slice::from_ref(&spend));
+    apply(&mut view, &chain, &b2);
+    tall(&mut chain);
+    bulk(&mut view, old, 2, 5, 100);
+    bulk(&mut view, recent, 1_000_000, TALL - 5, u32::MAX);
+    (view, chain, b1, b2)
+}
+
+fn start() -> u32 {
+    u32::try_from(PRUNE_START).unwrap()
+}
+
+#[test]
+fn oc_28_only_spent_and_old_receipts_leave_oldest_first_down_to_80_percent() {
+    let old = 150_000;
+    let recent = start() - old;
+    let (mut view, _chain, _b1, _b2) = busy_view(old, recent);
+    assert!(view.receipt_count() > PRUNE_START);
+    let before = view.receipt_count();
+    let freed = view.prune_receipts(TALL, ok).unwrap();
+    assert_eq!(view.receipt_count(), PRUNE_TO);
+    assert_eq!(freed, before - PRUNE_TO);
+    assert_eq!(view.receipt_state(), ReceiptState::Complete);
+    // The unspent coin's receipt stays though its block is old.
+    assert_eq!(view.receipts_at(1).len(), 1);
+    assert_eq!(view.len(), 1);
+    // Every recent receipt stays.
+    let kept_recent = (1_000_000..1_000_000 + recent)
+        .filter(|i| !view.receipts_at(*i).is_empty())
+        .count();
+    assert_eq!(kept_recent, recent as usize);
+    // The oldest left first: the receipt in block 1 (index 0) and the first
+    // bulk ones; the newest old ones stay.
+    assert!(view.receipts_at(0).is_empty());
+    assert!(view.receipts_at(2).is_empty());
+    assert!(!view.receipts_at(2 + old - 1).is_empty());
+    // Two ranges: index 0, and the bulk ones from 2 (index 1 lost nothing).
+    assert_eq!(view.pruned_ranges(), 2);
+    assert!(view.is_pruned(0) && view.is_pruned(2));
+    assert!(!view.is_pruned(1), "the unspent coin's index lost nothing");
+    assert!(!view.is_pruned(2 + old - 1));
+    let back = CoinView::from_bytes(&view.to_bytes()).unwrap();
+    assert_eq!(back, view);
+}
+
+#[test]
+fn oc_28_nothing_leaves_below_90_percent() {
+    let (mut view, _chain, _b1, _b2) = busy_view(1_000, 10);
+    assert!(view.receipt_count() <= PRUNE_START);
+    assert_eq!(view.prune_receipts(TALL, ok).unwrap(), 0);
+    assert_eq!(view.pruned_ranges(), 0);
+    assert!(!view.is_pruned(0));
+}
+
+#[test]
+fn oc_28_a_receipt_of_a_recent_block_never_leaves() {
+    // Past 90% with everything recent: only the old spent receipt of block 1
+    // may go.
+    let (mut view, _chain, _b1, _b2) = busy_view(0, start());
+    let before = view.receipt_count();
+    assert_eq!(view.prune_receipts(TALL, ok).unwrap(), 1);
+    assert_eq!(view.receipt_count(), before - 1);
+    assert!(view.is_pruned(0));
+    // A tip that makes every receipt recent frees nothing.
+    let (mut view, _chain, _b1, _b2) = busy_view(0, start());
+    assert_eq!(view.prune_receipts(RECEIPT_KEEP_BLOCKS, ok).unwrap(), 0);
+    assert_eq!(view.pruned_ranges(), 0);
+}
+
+#[test]
+fn oc_28_a_receipt_of_an_unspent_coin_never_leaves() {
+    // The receipt of block 1 at index 1 is old and its coin is held.
+    let (mut view, _chain, _b1, _b2) = busy_view(0, start());
+    view.prune_receipts(TALL, ok).unwrap();
+    assert_eq!(view.receipts_at(1).len(), 1, "unspent, old, kept");
+    assert!(!view.is_pruned(1));
+    assert_eq!(view.len(), 1);
+}
+
+#[test]
+fn oc_28_a_block_applied_prunes_before_it_records_and_stores_once() {
+    let old = 150_000;
+    let (mut view, chain, _b1, _b2) = busy_view(old, start() - old);
+    assert!(view.receipt_count() > PRUNE_START);
+    // The first block is applied again, as a rescan reads blocks twice.
+    let mut writes = 0;
+    view.apply_block(&parsed(&chain.blocks[0]), &chain.view, &scripts(), |_| {
+        writes += 1;
+        Ok::<(), ()>(())
+    })
+    .unwrap();
+    assert_eq!(writes, 1);
+    // The receipt of block 1 at index 0 is seen again: its coin is held
+    // again until block 2, which spends it, is read.
+    assert_eq!(view.receipt_count(), PRUNE_TO + 1);
+    assert!(view.is_pruned(0));
+}
+
+#[test]
+fn oc_13_a_log_at_the_cap_that_cannot_make_room_takes_the_named_state() {
+    // The log is at the cap with recent receipts. Applying a block makes
+    // room for exactly one (the old spent receipt of block 1 goes); the
+    // second does not fit.
+    let (mut view, mut chain, _b1, _b2) = busy_view(0, u32::try_from(MAX_RECEIPTS).unwrap() - 2);
+    assert_eq!(view.receipt_count(), MAX_RECEIPTS);
+    let pay = foreign(7, &[(&script(1), 10), (&script(2), 10)]);
+    let b3 = chain.push(std::slice::from_ref(&pay));
+    apply(&mut view, &chain, &b3);
+    assert_eq!(view.receipt_state(), ReceiptState::LogFull);
+    assert_eq!(view.receipt_count(), MAX_RECEIPTS);
+    assert!(view.ready());
+}
+
+#[test]
+fn oc_29_a_refund_for_a_pruned_index_is_refused_as_too_old_not_answered_with_zero() {
+    let old = 150_000;
+    let (mut view, chain, _b1, _b2) = busy_view(old, start() - old);
+    view.prune_receipts(TALL, ok).unwrap();
+    view.set_checked(chain.height(), ok).unwrap();
+    let owner = super::refunds::new_owner();
+    let sale = |index| SaleKey {
+        counter: counter(),
+        index,
+    };
+    let refused = verified_facts(&view, &owner, sale(0), chain.height(), 1);
+    assert_eq!(refused, Err(FactsRefused::TooOldForFacts));
+    assert!(!FactsRefused::TooOldForFacts.waits());
+    assert_eq!(
+        FactsRefused::TooOldForFacts.to_string(),
+        "OC-29: the sale is too old for the wallet to check what was paid"
+    );
+    let words = FactsRefused::TooOldForFacts.words();
+    assert_eq!(
+        words.what,
+        "This sale is too old for the wallet to check what was paid."
+    );
+    assert_eq!(words.next, "Decide this refund by hand.");
+    // An index that lost nothing is answered, with its receipt.
+    assert_eq!(
+        verified_facts(&view, &owner, sale(1), chain.height(), 1)
+            .unwrap()
+            .received_sats,
+        40_000
+    );
+    // The marker survives a restart.
+    let back = CoinView::from_bytes(&view.to_bytes()).unwrap();
+    assert_eq!(
+        verified_facts(&back, &owner, sale(0), chain.height(), 1),
+        Err(FactsRefused::TooOldForFacts)
+    );
+    // A reset forgets it with the receipts: the rescan finds them again.
+    let mut reset = back;
+    reset.reset(ok).unwrap();
+    assert!(!reset.is_pruned(0));
+    assert_eq!(reset.pruned_ranges(), 0);
+}
+
+#[test]
+fn oc_29_the_marker_is_bounded_and_joins_ranges_the_safe_way() {
+    // Every second index lost a receipt: more separate ranges than the
+    // bound. The list stays at the bound and still covers every index that
+    // lost one.
+    let n = start() + 2_000;
+    let (mut view, _chain, _b1, _b2) = busy_view(0, 0);
+    for i in 0..n {
+        let mut txid = [0xb0; 32];
+        txid[..4].copy_from_slice(&i.to_le_bytes());
+        view.add_receipt_for_test(Receipt {
+            index: 10 + i * 2,
+            outpoint: OutPoint::new(Txid::from_byte_array(txid), 0),
+            sats: 1,
+            height: 5,
+            block: BlockHash::from_byte_array([1; 32]),
+        });
+    }
+    view.prune_receipts(TALL, ok).unwrap();
+    assert!(view.pruned_ranges() <= MAX_PRUNED_RANGES);
+    assert!(view.pruned_ranges() > 1);
+    for i in 0..(n - u32::try_from(PRUNE_TO).unwrap()) {
+        assert!(view.is_pruned(10 + i * 2), "index {}", 10 + i * 2);
+    }
+    assert!(!view.is_pruned(1));
+    let bytes = view.to_bytes();
+    assert_eq!(CoinView::from_bytes(&bytes).unwrap().to_bytes(), bytes);
+}
+
+#[test]
+fn oc_29_the_stored_ranges_are_read_strictly() {
+    let old = 150_000;
+    let (mut view, _chain, _b1, _b2) = busy_view(old, start() - old);
+    view.prune_receipts(TALL, ok).unwrap();
+    let bytes = view.to_bytes();
+    let at = bytes.len() - 4 - 16;
+    assert_eq!(&bytes[at..at + 4], &2u32.to_le_bytes());
+    assert!(CoinView::from_bytes(&bytes).is_ok());
+    let put = |ranges: &[(u32, u32)]| {
+        let mut v = bytes[..at].to_vec();
+        v.extend_from_slice(&u32::try_from(ranges.len()).unwrap().to_le_bytes());
+        for (s, e) in ranges {
+            v.extend_from_slice(&s.to_le_bytes());
+            v.extend_from_slice(&e.to_le_bytes());
+        }
+        v
+    };
+    assert!(CoinView::from_bytes(&put(&[(0, 26_000)])).is_ok());
+    // Start above end, out of range, touching, overlapping, out of order,
+    // too many.
+    assert!(CoinView::from_bytes(&put(&[(5, 4)])).is_err());
+    assert!(CoinView::from_bytes(&put(&[(0, 1 << 31)])).is_err());
+    assert!(CoinView::from_bytes(&put(&[(0, 5), (6, 9)])).is_err());
+    assert!(CoinView::from_bytes(&put(&[(0, 5), (3, 9)])).is_err());
+    assert!(CoinView::from_bytes(&put(&[(10, 12), (0, 5)])).is_err());
+    assert!(CoinView::from_bytes(&put(&[(0, 5), (7, 9)])).is_ok());
+    let many: Vec<(u32, u32)> = (0..=u32::try_from(MAX_PRUNED_RANGES).unwrap())
+        .map(|i| (i * 2, i * 2))
+        .collect();
+    assert!(CoinView::from_bytes(&put(&many)).is_err());
+    // A cut and an extra byte.
+    assert!(CoinView::from_bytes(&bytes[..bytes.len() - 1]).is_err());
+    let mut more = bytes.clone();
+    more.push(0);
+    assert!(CoinView::from_bytes(&more).is_err());
+}
+
+#[test]
+fn oc_28_a_reorganization_that_unspends_a_pruned_receipts_coin_keeps_the_receipt_again() {
+    let old = 150_000;
+    let (mut view, _chain, b1, b2) = busy_view(old, start() - old);
+    view.prune_receipts(TALL, ok).unwrap();
+    assert!(view.receipts_at(0).is_empty(), "pruned while it was spent");
+    // The block that spent it leaves. A reorganization this far from a
+    // receipt this old is not seen in practice; the view still stays whole.
+    view.reorganize(&[b2.block_hash()], 1, ok).unwrap();
+    assert_eq!(view.len(), 2, "the coin is back");
+    let r = view.receipts_at(0);
+    assert_eq!(r.len(), 1, "its receipt is kept again");
+    assert_eq!(r[0].height, 1);
+    assert_eq!(r[0].block, b1.block_hash());
+    assert!(view.is_pruned(0), "the marker stays: the index lost receipts");
+    assert_eq!(view.receipt_state(), ReceiptState::Complete);
+    // The stored form passes its own strict read.
+    let bytes = view.to_bytes();
+    assert_eq!(CoinView::from_bytes(&bytes).unwrap().to_bytes(), bytes);
+}
+
+#[test]
+fn oc_28_the_same_reorganization_into_a_full_log_takes_the_named_state() {
+    let old = 150_000;
+    let (mut view, _chain, _b1, b2) = busy_view(old, start() - old);
+    view.prune_receipts(TALL, ok).unwrap();
+    // Fill the log to the cap with receipts that stay.
+    let room = u32::try_from(MAX_RECEIPTS - view.receipt_count()).unwrap();
+    bulk(&mut view, room, 2_000_000, TALL - 3, u32::MAX);
+    assert_eq!(view.receipt_count(), MAX_RECEIPTS);
+    view.reorganize(&[b2.block_hash()], 1, ok).unwrap();
+    assert_eq!(view.len(), 2, "the coin is back");
+    assert_eq!(view.receipt_state(), ReceiptState::LogFull);
+    assert_eq!(view.receipt_count(), MAX_RECEIPTS);
+    let bytes = view.to_bytes();
+    assert_eq!(CoinView::from_bytes(&bytes).unwrap().to_bytes(), bytes);
 }

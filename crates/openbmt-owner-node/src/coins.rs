@@ -44,10 +44,16 @@
 //! what the owner's own figure of "what a sale received" is made from
 //! (OC-12 to OC-14, `crate::facts`). A reorganization removes the receipts of
 //! the blocks that left with the same undo records as the coins. At most
-//! [`MAX_RECEIPTS`] are kept; past that the view takes the named state
-//! "receipt log full" ([`ReceiptState::LogFull`]): no more receipts are
-//! recorded and no facts are given, while the coins are still tracked and
-//! the owner can still spend.
+//! [`MAX_RECEIPTS`] are kept. A receipt may leave the log (OC-28) when its
+//! coin is spent and its block is more than [`RECEIPT_KEEP_BLOCKS`] below
+//! the tip; the log is pruned, oldest block first, when it passes 90% of the
+//! cap. The receive indices that lost a receipt are kept as a bounded list
+//! of ranges (OC-29), and a refund for one of them is refused as too old
+//! instead of being answered with a wrong zero. When nothing can be pruned
+//! and the cap is reached, the view takes the named state "receipt log
+//! full" ([`ReceiptState::LogFull`]): no more receipts are recorded and no
+//! facts are given, while the coins are still tracked and the owner can
+//! still spend.
 //!
 //! ## What is watched
 //!
@@ -73,7 +79,7 @@
 //! ## The stored form
 //!
 //! `OBMe`, version 1, strict like the other stored forms: sorted lists, no
-//! repeats, every length checked before anything is reserved, every coin
+//! repeats, pruned index ranges sorted and apart, every length checked before anything is reserved, every coin
 //! must be an output of the transaction it carries, and, unless the receipt
 //! log is full, every unspent receive coin has its receipt. The chain position
 //! (`checked`) is in the same bytes as the coins it reflects, so a restart
@@ -102,6 +108,18 @@ pub const UNDO_BLOCKS: u32 = 100;
 pub const MAX_COINS: usize = 20_000;
 /// OC-13: most receipts kept.
 pub const MAX_RECEIPTS: usize = 262_144;
+/// OC-28: pruning starts when more receipts than this are kept (90%).
+pub const PRUNE_START: usize = MAX_RECEIPTS / 10 * 9;
+/// OC-28: pruning frees receipts down to this many (80%).
+pub const PRUNE_TO: usize = MAX_RECEIPTS / 10 * 8;
+/// OC-28: a receipt of a spent coin may leave the log when its block is more
+/// than this many blocks below the tip: 400 days at 144 blocks a day, 57,600
+/// **[to tune]**. It is longer than any refund window a shop is likely to
+/// honour. Block time is not kept per receipt (the header chain gives only
+/// the tip's), so the age is counted in blocks.
+pub const RECEIPT_KEEP_BLOCKS: u32 = 57_600;
+/// OC-29: most ranges of pruned receive indices kept.
+pub const MAX_PRUNED_RANGES: usize = 1024;
 /// Most held transactions kept as pending.
 pub const MAX_PENDING: usize = 64;
 /// The largest transaction a stored coin may carry, in bytes.
@@ -297,6 +315,10 @@ pub struct CoinView {
     receipts: BTreeMap<u32, Vec<Receipt>>,
     receipt_total: usize,
     receipt_log_full: bool,
+    /// OC-29: the receive indices that lost a receipt to pruning, as ranges
+    /// (start to inclusive end), sorted, apart, at most
+    /// [`MAX_PRUNED_RANGES`].
+    pruned: BTreeMap<u32, u32>,
     /// OC-22: receive indices set aside from the live watch.
     released: Spans,
     /// OC-24 to OC-26: the schedule of the deep check.
@@ -337,6 +359,7 @@ impl CoinView {
             receipts: BTreeMap::new(),
             receipt_total: 0,
             receipt_log_full: false,
+            pruned: BTreeMap::new(),
             released: Spans::new(),
             deep: DeepSchedule::default(),
         }
@@ -424,6 +447,20 @@ impl CoinView {
         } else {
             ReceiptState::Complete
         }
+    }
+
+    /// OC-29: whether a receipt at this receive index was pruned, so that
+    /// the receipts kept for it may not be all it received.
+    pub fn is_pruned(&self, index: u32) -> bool {
+        self.pruned
+            .range(..=index)
+            .next_back()
+            .is_some_and(|(_, end)| *end >= index)
+    }
+
+    /// OC-29: how many ranges of pruned indices are kept.
+    pub fn pruned_ranges(&self) -> usize {
+        self.pruned.len()
     }
 
     /// The confirmed coins held, lowest outpoint first.
@@ -802,6 +839,102 @@ impl CoinView {
         self.receipts.clear();
         self.receipt_total = 0;
         self.receipt_log_full = false;
+        self.pruned.clear();
+    }
+
+    /// OC-29: note that a receipt at `index` was pruned. Ranges that touch
+    /// are joined. Past [`MAX_PRUNED_RANGES`] the two ranges with the least
+    /// space between them are joined, so the list is bounded: an index in
+    /// that space is then refused as too old too, which is the safe way to be
+    /// wrong.
+    fn mark_pruned(&mut self, index: u32) {
+        if self.is_pruned(index) {
+            return;
+        }
+        self.pruned.insert(index, index);
+        let mut ranges: Vec<(u32, u32)> = self.pruned.iter().map(|(s, e)| (*s, *e)).collect();
+        // Join ranges that touch.
+        let mut joined: Vec<(u32, u32)> = Vec::with_capacity(ranges.len());
+        for (s, e) in ranges.drain(..) {
+            match joined.last_mut() {
+                Some((_, pe)) if pe.saturating_add(1) >= s => *pe = (*pe).max(e),
+                _ => joined.push((s, e)),
+            }
+        }
+        while joined.len() > MAX_PRUNED_RANGES {
+            let mut best = 0;
+            let mut best_gap = u32::MAX;
+            for (i, pair) in joined.windows(2).enumerate() {
+                let gap = pair[1].0.saturating_sub(pair[0].1);
+                if gap < best_gap {
+                    best_gap = gap;
+                    best = i;
+                }
+            }
+            let Some(next) = joined.get(best + 1).copied() else {
+                break;
+            };
+            if let Some(first) = joined.get_mut(best) {
+                first.1 = next.1;
+            }
+            joined.remove(best + 1);
+        }
+        self.pruned = joined.into_iter().collect();
+    }
+
+    /// OC-28: let go of receipts of spent coins that are more than
+    /// [`RECEIPT_KEEP_BLOCKS`] below `tip`, oldest block first, when more
+    /// than [`PRUNE_START`] are kept, until [`PRUNE_TO`] are. A receipt of a
+    /// coin that is unspent, one that a pending transaction spends included,
+    /// never leaves. Returns how many left. The view changes in memory only;
+    /// the caller stores it.
+    fn prune(&mut self, tip: u32) -> usize {
+        if self.receipt_total <= PRUNE_START {
+            return 0;
+        }
+        let cutoff = tip.saturating_sub(RECEIPT_KEEP_BLOCKS);
+        let mut old: Vec<(u32, u32, OutPoint)> = self
+            .receipts
+            .values()
+            .flatten()
+            .filter(|r| r.height < cutoff && !self.coins.contains_key(&r.outpoint))
+            .map(|r| (r.height, r.index, r.outpoint))
+            .collect();
+        old.sort_unstable();
+        old.truncate(self.receipt_total - PRUNE_TO);
+        for (_, index, outpoint) in &old {
+            let Some(list) = self.receipts.get_mut(index) else {
+                continue;
+            };
+            if let Ok(at) = list.binary_search_by_key(outpoint, |r| r.outpoint) {
+                list.remove(at);
+                self.receipt_total = self.receipt_total.saturating_sub(1);
+            }
+            if list.is_empty() {
+                self.receipts.remove(index);
+            }
+            self.mark_pruned(*index);
+        }
+        old.len()
+    }
+
+    /// OC-28: prune the receipts that may leave and store the result before
+    /// it takes effect. The node calls it when it starts, with the position
+    /// the view reflects; blocks applied later prune by themselves. Returns
+    /// how many receipts left.
+    pub fn prune_receipts<E>(
+        &mut self,
+        tip: u32,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<usize, E> {
+        let mut next = self.clone();
+        let n = next.prune(tip);
+        if n == 0 {
+            return Ok(0);
+        }
+        persist(&encode(&next))?;
+        *self = next;
+        Ok(n)
     }
 
     /// OC-12, OC-13: keep a receipt once. Returns whether the view changed.
@@ -917,7 +1050,8 @@ impl CoinView {
         let hash = block.hash();
         let mut effect = BlockEffect::default();
         let mut height = None;
-        let mut receipts_changed = false;
+        // OC-28: make room before this block's receipts are recorded.
+        let mut receipts_changed = next.prune(chain.tip_height()) > 0;
 
         // The scripts this block pays.
         let hits: BTreeSet<&ScriptBuf> = block
@@ -987,6 +1121,8 @@ impl CoinView {
             }
             spenders.insert(outpoint, by);
         }
+        // OC-28: what this block spent may be what a receipt waited for.
+        receipts_changed |= next.prune(chain.tip_height()) > 0;
         // Held transactions: confirmed if the block spent their inputs in
         // them, replaced if in another transaction.
         let mut confirmed: Vec<PendingTx> = Vec::new();
@@ -1084,6 +1220,20 @@ impl CoinView {
                         continue;
                     };
                     for coin in undo.spent {
+                        // OC-28: the receipt of a coin put back is kept
+                        // again, whether or not it was pruned while the
+                        // coin was spent. The pruned range stays: the
+                        // index may have lost other receipts. A full log
+                        // takes its named state.
+                        if coin.chain == Keychain::Receive {
+                            next.record_receipt(Receipt {
+                                index: coin.index,
+                                outpoint: coin.outpoint,
+                                sats: coin.sats(),
+                                height: coin.height,
+                                block: coin.block,
+                            });
+                        }
                         next.coins.insert(coin.outpoint, coin);
                         effect.restored += 1;
                     }
@@ -1247,6 +1397,12 @@ fn encode(v: &CoinView) -> Vec<u8> {
         out.extend_from_slice(&r.sats.to_le_bytes());
         out.extend_from_slice(&r.height.to_le_bytes());
         out.extend_from_slice(&r.block.to_byte_array());
+    }
+    // OC-29: the pruned index ranges.
+    out.extend_from_slice(&len32(v.pruned.len()).to_le_bytes());
+    for (start, end) in &v.pruned {
+        out.extend_from_slice(&start.to_le_bytes());
+        out.extend_from_slice(&end.to_le_bytes());
     }
     out
 }
@@ -1463,6 +1619,23 @@ fn decode(bytes: &[u8]) -> Result<CoinView, DecodeError> {
             block,
         });
     }
+    let np = r.count(MAX_PRUNED_RANGES, 8)?;
+    let mut pruned = BTreeMap::new();
+    let mut prev_end: Option<u32> = None;
+    for _ in 0..np {
+        let start = r.u32_le()?;
+        let end = r.u32_le()?;
+        if start > end || end >= INDEX_LIMIT {
+            return Err(DecodeError::NonCanonical("pruned range is not valid"));
+        }
+        if prev_end.is_some_and(|p| start <= p.saturating_add(1)) {
+            return Err(DecodeError::NonCanonical(
+                "pruned ranges are not in order and apart",
+            ));
+        }
+        prev_end = Some(end);
+        pruned.insert(start, end);
+    }
     r.finish()?;
     // Unless the log is full, every unspent receive coin has its receipt.
     if !receipt_log_full {
@@ -1491,6 +1664,7 @@ fn decode(bytes: &[u8]) -> Result<CoinView, DecodeError> {
         receipts,
         receipt_total: n,
         receipt_log_full,
+        pruned,
         released,
         deep,
     })

@@ -580,6 +580,11 @@ impl<P: OwnerPort> OwnerNode<P> {
             Err(e) if e.kind() == io::ErrorKind::NotFound => CoinView::new(birthday),
             Err(e) => return Err(NodeError::Files(format!("{COINS_FILE}: {e}"))),
         };
+        // OC-28: a log that is nearly full is pruned before anything else
+        // reads it; the position the view reflects stands for the tip.
+        let position = view.checked();
+        view.prune_receipts(position, |b| write_file(&dir, COINS_FILE, b))
+            .map_err(|e| NodeError::Files(format!("{COINS_FILE}: {e}")))?;
         // FE-20: a fee history that does not read back is a note and an
         // empty history, never a stop.
         let (fees, fee_note) = read_fee_history(&dir);
