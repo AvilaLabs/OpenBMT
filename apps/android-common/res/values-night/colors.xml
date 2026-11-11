@@ -1,19 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Made from Palette.kt (apps/android-common/src/model); tests/PaletteTest.kt checks it. -->
 <resources>
-    <color name="background">#FF121417</color>
-    <color name="surface">#FF1E2327</color>
-    <color name="text">#FFECEFF1</color>
-    <color name="text_secondary">#FFB0BEC5</color>
-    <color name="divider">#FF37474F</color>
-    <color name="good_band">#FF2A7430</color>
-    <color name="good_ink">#FF81C784</color>
+    <color name="background">#FF0E1013</color>
+    <color name="surface">#FF171A1F</color>
+    <color name="text">#FFF2F4F7</color>
+    <color name="text_secondary">#FFA8B0BC</color>
+    <color name="text_hint">#FF8A93A0</color>
+    <color name="divider">#FF262A31</color>
+    <color name="field_line">#FF343A44</color>
+    <color name="chip">#FF22262D</color>
+    <color name="brand">#FFF7931A</color>
+    <color name="on_brand">#FF111317</color>
+    <color name="good_band">#FF1F7A55</color>
+    <color name="good_ink">#FF34C38F</color>
+    <color name="good_tint">#FF10291F</color>
     <color name="info_band">#FF1B5DB0</color>
-    <color name="info_ink">#FF90CAF9</color>
-    <color name="wait_band">#FF4D6772</color>
-    <color name="wait_ink">#FFB0BEC5</color>
+    <color name="info_ink">#FF7FA8FF</color>
+    <color name="info_tint">#FF16233F</color>
+    <color name="wait_band">#FF4D545E</color>
+    <color name="wait_ink">#FFA8B0BC</color>
+    <color name="wait_tint">#FF22262D</color>
     <color name="warn_band">#FF8A5300</color>
     <color name="warn_ink">#FFFFB74D</color>
+    <color name="warn_tint">#FF2A2010</color>
     <color name="stop_band">#FFB71C1C</color>
-    <color name="stop_ink">#FFEF9A9A</color>
+    <color name="stop_ink">#FFFF8A80</color>
+    <color name="stop_tint">#FF3A1513</color>
+    <color name="outcome_paid">#FF0E7350</color>
+    <color name="outcome_paid_sub">#FFDDF3EA</color>
+    <color name="outcome_waiting">#FF1D4AA8</color>
+    <color name="outcome_waiting_sub">#FFDCE7FD</color>
+    <color name="outcome_stop">#FFA9221B</color>
+    <color name="outcome_stop_sub">#FFFDE2E0</color>
+    <color name="outcome_ended">#FF3D434C</color>
+    <color name="outcome_ended_sub">#FFD3D7DE</color>
 </resources>

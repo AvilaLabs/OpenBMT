@@ -23,7 +23,7 @@ trap 'rm -rf "$scratch/common-classes"' EXIT
     -no-stdlib -no-reflect -Werror -jvm-target 1.8 \
     -classpath "$lib/kotlin-stdlib.jar:$lib/annotations-13.0.jar" \
     -d "$scratch/common-classes" \
-    "$common"/src/model/*.kt "$here/CommonModelTest.kt" "$here/PaletteTest.kt"
+    "$common"/src/model/*.kt "$here/CommonModelTest.kt" "$here/PaletteTest.kt" "$here/FeedbackModelTest.kt"
 
 "$JAVA_HOME/bin/java" -Xmx2g -cp "$scratch/common-classes:$lib/kotlin-stdlib.jar" \
     org.openbmt.app.CommonModelTest
@@ -32,3 +32,7 @@ trap 'rm -rf "$scratch/common-classes"' EXIT
 # (OPENBMT_WRITE_COLOURS=1 writes res/values/colors.xml and res/values-night/colors.xml first).
 "$JAVA_HOME/bin/java" -Xmx1g -cp "$scratch/common-classes:$lib/kotlin-stdlib.jar" \
     org.openbmt.app.PaletteTest "$common"
+
+# The sounds, haptics and motion: levels, the outcome's choice, the shake, the hold and the logo's snap.
+"$JAVA_HOME/bin/java" -Xmx1g -cp "$scratch/common-classes:$lib/kotlin-stdlib.jar" \
+    org.openbmt.app.FeedbackModelTest

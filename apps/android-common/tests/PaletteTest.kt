@@ -53,7 +53,29 @@ object PaletteTest {
         }
         ok(Colour.Red.argb == Palette.light.stop.band && Colour.Red.band(true) == Palette.dark.stop.band, "a colour has its light and dark band")
         ok(Type.HEADING == 24f && Type.BODY == 17f && Type.SECONDARY == 14f && Type.AMOUNT == 44f, "the sizes")
+        ok(Space.PAGE_GUTTER == 20 && Space.PAGE_EDGE == 24 && Space.PAGE_BLOCK == 18 && Space.BAR == 64, "the distances of the new page")
         ok(Space.GUTTER == 16 && Space.BLOCK == 12 && Space.TOUCH == 48 && Space.BUTTON == 56, "the distances")
+    }
+
+    /** The new colours: brand, the outcome bands, the tints, and the names the pairs carry. */
+    private fun newColourTests() {
+        ok(Palette.BRAND == 0xFFF7931A.toInt() && Palette.ON_BRAND == 0xFF111317.toInt(), "brand and the text on it")
+        ok(Palette.contrast(Palette.ON_BRAND, Palette.BRAND) >= Palette.MIN_CONTRAST, "on-brand text reads on the brand fill")
+        ok(Palette.outcomes().map { it.first } == listOf("paid", "waiting", "stop", "ended"), "the four outcome bands")
+        ok(Palette.paid.band == 0xFF0E7350.toInt() && Palette.waiting.band == 0xFF1D4AA8.toInt(), "paid and waiting bands")
+        ok(Palette.stopped.band == 0xFFA9221B.toInt() && Palette.ended.band == 0xFF3D434C.toInt(), "stop and ended bands")
+        ok(Palette.paid.sub == 0xFFDDF3EA.toInt() && Palette.ended.sub == 0xFFD3D7DE.toInt(), "the second lines")
+        for (night in listOf(false, true)) {
+            val s = Palette.of(night)
+            for ((name, tone) in Palette.tones(s)) {
+                ok(tone.tint != tone.band && tone.tint != s.background, "the $name tint is its own colour (night=$night)")
+            }
+            val names = Palette.pairs(s).map { it.name }
+            ok(names.contains("good ink on its tint") && names.contains("text on the stop tint"), "the tint pairs are listed")
+            ok(names.contains("white on the paid outcome band") && names.contains("the second line on the ended outcome band"), "the outcome pairs are listed")
+        }
+        ok(Palette.light.info.tint == 0xFFEAF1FE.toInt() && Palette.dark.warn.tint == 0xFF2A2010.toInt(), "tints of the table")
+        ok(Palette.light.fieldLine == 0xFFD5D9E0.toInt() && Palette.dark.chip == 0xFF22262D.toInt(), "field line and chip")
     }
 
     private fun resourceTests(common: File) {
@@ -72,6 +94,7 @@ object PaletteTest {
         contrastTests()
         pressedTests()
         toneTests()
+        newColourTests()
         resourceTests(File(args[0]))
         println("PaletteTest: $count checks passed")
     }
