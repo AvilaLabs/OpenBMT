@@ -39,7 +39,7 @@ be spent. So the words of key 2 and key 3 are written down and stored apart
 from each other. A phone key with an unknown PIN and no written words counts
 as a lost key.
 
-### Two rules about the keys
+### Three rules about the keys
 
 **No single device holds or drives two keys.** "Drive" means making a key sign
 without that key's own device showing and checking the transaction on its own
@@ -92,7 +92,7 @@ the design lists for review.
 
 ## Roles: owner, manager, cashier
 
-Three roles. The software enforces them. They are not an honor system.
+The software enforces three roles. None of them rests on trust in the person.
 
 | Role | Can | Cannot |
 |---|---|---|
@@ -150,7 +150,7 @@ changes rest on the owner phone alone, and the screens say so.
 
 ## The approval session
 
-One habit replaces many chores. The owner phone queues items as they come up
+The owner phone queues items as they come up
 (refunds, cash-outs, address batches, loosening changes, new counter pairings,
 a health check). Nothing moves. When the owner is with key 2, the owner opens
 an **approval session**:

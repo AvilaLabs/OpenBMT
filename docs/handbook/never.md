@@ -1,21 +1,26 @@
 # What OpenBMT will never do
 
-These are the lines the project will not cross. Each section gives the line,
-the reason, what makes it true today, and where it stops. A line is not a
-promise about every possible future build. It is a rule the design applies to
-every change, with the veto described in [Principles](principles.md).
+These are the lines OpenBMT will not cross, now or in any later version. Each
+section gives the line, the reason, what makes it true today, and where it
+stops. Every change to the design and the code is checked against them under
+the veto described in [Principles](principles.md).
 
 Each line was checked against the design and the code. Where a line rests on a
 status that is not yet true, the section says so.
 
 ## Never anything but bitcoin
 
-No other coins. No stablecoins. No tokens of any kind on any layer, which
-includes tokens carried on Lightning, Taproot Assets and RGB. No federated
-sidechains such as Liquid. No ecash mints such as Cashu or Fedimint.
+OpenBMT takes bitcoin and nothing else, and that will not change. No other
+coins. No stablecoins. No tokens of any kind on any layer, which includes
+tokens carried on Lightning, Taproot Assets and RGB. No federated sidechains
+such as Liquid. No ecash mints such as Cashu or Fedimint. A request to add
+one is refused without a trial, an option or a later phase.
 
-**Why.** Each of these puts someone else between the shop and its money. A
-token has an issuer who can freeze it or rewrite its rules. A federated
+**Why.** Every other coin has an issuer, a foundation or a small group that can
+change its rules or its supply. Bitcoin's rules change only when the people
+running nodes choose to run new rules. Each of the others also puts someone
+between the shop and its money. A token has an issuer who can freeze it or
+rewrite its rules. A federated
 sidechain has a federation that holds the coins. An ecash mint holds the
 money and hands out claims on it. Under the veto, anything that lets a third
 party hold, move or freeze the shop's funds is dropped. A shop that wants
@@ -186,16 +191,17 @@ screen that says "final" for one is a screen that lies.
 
 **Rests on.**
 
-- The counter's states are fixed (`CR-10`). A payment taken before a block is
-  "Paid, could still be cancelled", a payment in a block at the shop's depth is
-  "Confirmed", and "Final" is only the refund depth. The books count a sale as
-  money only at "Final" (`CR-31`).
+- The counter's states are fixed (`CR-10`). A payment accepted before a block
+  shows "Paid" with the words "it could still be undone". A payment in a block
+  at the shop's depth is confirmed, and "final" is only the refund depth. The
+  books count a sale as money only at the refund depth (`CR-31`).
 - Each screen carries the check that was done (`CR-105`). The own-node label
   applies only when the own node reported the payment and the counter's light
   client also saw it (`CR-104`).
 
-**Stops at.** "Final" is depth-based. More blocks on top make a reversal
-less likely and never impossible. The book never describes it as zero risk.
+**Stops at.** "Final" means the refund depth, and it is depth-based. More
+blocks on top make a reversal less likely and never impossible. The book never
+describes it as zero risk.
 
 ## Never closed source
 

@@ -3,8 +3,9 @@
 **Address batch.** A signed list of receive addresses for one counter, a
 contiguous range, signed by key 1 and co-signed by the Key app.
 
-**Approval session.** The one habit that moves money or loosens limits: the
-owner phone shows queued items, the Key app checks and signs each.
+**Approval session.** The sitting in which the owner, with key 2, approves
+queued items: the owner phone shows them, the Key app checks and signs each.
+Nothing that moves money or loosens a limit happens outside one.
 
 **Approver.** A Key app that holds an identity key only and no wallet key,
 used when key 2 is a hardware wallet.
@@ -22,8 +23,10 @@ devices, reads the POS. Holds no key.
 **Compact block filter.** A small summary of a block that lets a light client
 tell whether a block might matter to it.
 
-**Confirmation.** A block that holds the payment. "Confirmed" is the shop's
-depth, "Final" the refund depth.
+**Confirmation.** A block that holds the payment. The shop sets two depths:
+the confirmation depth (1 block at first) and the refund depth (6 at first),
+after which a refund can be paid out. The counter shows "Paid" at both, with
+words saying which.
 
 **Counter.** The shop's phone or tablet that shows the sale. Holds no key.
 

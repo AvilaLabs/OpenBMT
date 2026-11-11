@@ -40,22 +40,27 @@ told to take another payment type (`CR-01`).
 
 ## The states a cashier sees
 
-| State | Color | Meaning |
+| Heading on the counter | Color | Meaning |
 |---|---|---|
-| Not paid yet | Blue | Nothing has arrived. Wait. |
-| Paid X of Y | Blue | Less than needed has arrived. Ask for the rest or cancel. |
-| Waiting | Blue | Enough has arrived and waits for a block. The screen says why and what happens next. |
-| Paid, could still be cancelled | Green | Accepted at once within the instant limit. |
-| Confirmed | Green | In a block at the shop's depth. |
-| Final | Green | At the shop's refund depth. |
-| Do not hand over goods | Red | The money is not safe. |
-| Expired, Cancelled | Neutral | Ended with nothing received. |
+| Not paid yet | Blue | Nothing has arrived. |
+| Part paid | Blue | Less than needed has arrived. Ask for the rest or cancel. |
+| Waiting (with the reason, such as "Waiting: over the limit") | Blue | A payment arrived and waits for a block. The screen says why. |
+| Paid (before a block) | Green | Accepted at once within the instant limit. The screen says it could still be undone and which check accepted it. |
+| Accepted by a person | Green | A cashier or manager accepted it by hand (an override). |
+| Paid (in a block) | Green | The payment is in a block at the shop's depth. |
+| Paid (settled) | Green | At the shop's refund depth: a refund can be paid out if asked. |
+| Paid over Lightning | Green | The shop's own node has the money. |
+| Do not hand over | Red | The payment was replaced, its block was dropped, or the counter cannot check. |
 | Needs a person | Red | The sale holds more than the counter can judge. |
+| Expired, Cancelled | Neutral | Ended with nothing received. |
+
+The full list, with every reason and next step, is the counter's screen table
+(`docs/screens/counter.md`), generated from the code.
 
 Every state that is not final shows two texts: why it is in that state, and
-what happens next. Waiting is blue, never alarming. "Final" is reserved for the
-refund depth. The first values are 1 block for "Confirmed" and 6 for "Final",
-and the shop can change them but never below 1 block.
+what happens next. Waiting is blue, never alarming. The shop sets two depths:
+the confirmation depth (1 block at first) and the refund depth (6 at first).
+The shop can change them but never below 1 block.
 
 **Rests on.** `CR-10` to `CR-12`. The state is worked out again from the
 watcher's facts every time it is shown.
@@ -68,11 +73,11 @@ limit the shop can afford to lose.
 
 The first limits, per sale and as the outstanding total for the shop:
 
-| Check | Per sale | Outstanding total | Label |
+| Check | Per sale | Outstanding total | Check line on screen |
 |---|---|---|---|
-| Light check (default) | $10 | $50 | "Paid (light check)" |
-| Own node, also seen by the light client | $25 | $100 | "Paid (your node checked it)" |
-| Box reports it only | $10 | $50 | "Paid (your Box reports it)" |
+| Light check (default) | $10 | $50 | "Light check" |
+| Own node, also seen by the light check | $25 | $100 | "Your node and light check" |
+| Only the Box reports it | $10 | $50 | "Your Box reports it" |
 
 These are first values, marked "to tune", and the shop may set any of them,
 zero included, which turns instant off. They are enforced in satoshis and
@@ -103,7 +108,7 @@ and shows red.
 - The light check cannot see a payment's inputs or fee. It watches for
   conflicting spends and requires distinct network groups. A fake payment
   and a cancelled one cost the shop the same capped amount, so the cap is the
-  protection and the label keeps it honest.
+  protection and the check line says which check was done.
 - A cancel sent privately to a miner is not relayed. It is seen only when the
   block that holds it arrives.
 - The heartbeat is a claim by the same software family on another device. It
@@ -118,10 +123,12 @@ and shows red.
   exists. The limits are first guesses that the shop should size to what it
   can lose.
 
-## Confirmations, "Final", and the red screen
+## Confirmations, the refund depth, and the red screen
 
-A payment confirmed at the shop's depth shows "Confirmed". At the refund depth
-it shows "Final". The books count a sale as money only at "Final" (`CR-31`).
+A payment in a block at the shop's confirmation depth shows "Paid" with "The
+payment is in a block." At the refund depth it shows "Paid" with "The payment
+is settled, so a refund can be paid out if the customer asks." The books count
+a sale as money only at the refund depth (`CR-31`).
 
 The red **"Do not hand over goods"** screen shows when a payment was replaced,
 dropped, or its block was replaced by a reorganization. The wording says what

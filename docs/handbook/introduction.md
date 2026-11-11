@@ -8,9 +8,8 @@ point-of-sale system (POS) the shop already uses.
 > **Status: pre-release. Internal review only. No independent security audit
 > has been done yet. Do not use OpenBMT with real funds.**
 
-That line is not a formality. OpenBMT is about real money, and the book
-says how far the protection goes and where it stops. Every claim in it says
-what it rests on.
+OpenBMT handles real money, so this book says how far each protection goes
+and where it stops, and every claim names what it rests on.
 
 ## What OpenBMT is
 
@@ -18,9 +17,10 @@ The wallet is the shop's. It needs two of three keys to spend, and the shop
 holds all three. No company holds one, and no company can move or freeze the
 money.
 
-The counter screen shows the sale and a QR code, and says what it has checked:
-"Seen by 3 peers", "Paid (light check)" or "Confirmed (your node)". These are
-different things, and the screen keeps them apart.
+The counter screen shows the sale and a QR code, and a line that says what
+checked the payment: "Light check", "Your Box reports it", "Your Box and light
+check" or "Your node and light check". Each names a different source, and the
+screen never merges them.
 
 A small separate app, the Key app, holds the second key. It checks every
 spend, every address batch and every loosening of a safety limit on its own
@@ -59,7 +59,7 @@ The book uses four status words. They are never softened.
 | Word | Meaning |
 |---|---|
 | **Built** | The code exists and its tests have run, on a desktop or against Bitcoin Core on a test network. |
-| **Not run on a phone** | Built into an Android app that has not yet been run on a phone or an emulator. |
+| **Not run on a phone** | Built into an Android app that has been started on an Android emulator but not yet tried on a phone. |
 | **Planned** | Written in the design only. |
 | **Not built yet** | Named so that a reader does not expect it. |
 
@@ -71,7 +71,7 @@ Where things stand:
 | The Key app's signing rules (what it refuses to sign) | Built |
 | The counter's judgment of a sale, and its Bitcoin peer client | Built, checked against Bitcoin Core on a test network |
 | The owner's coin view, refund queue, spending and approval session | Built, checked against Bitcoin Core on a test network |
-| Key app, Counter app and Owner app for Android | First build. Not run on a phone |
+| Key app, Counter app and Owner app for Android | First build. Started on an emulator; not run on a phone |
 | The Box and its packaging (container, Umbrel, StartOS) | Built. The container image is built and smoke-tested; the Umbrel and StartOS packages have not been run on a device |
 | Tap to pay by NFC | Not built yet |
 | Square and Clover order matching (read-only) | Built. Written from vendor documentation, not from a real account |

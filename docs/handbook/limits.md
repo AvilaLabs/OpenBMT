@@ -1,7 +1,7 @@
 # Limits and risks
 
-This chapter says, in plain words, what can still go wrong. It is the most
-important chapter to read before anything else is trusted.
+This chapter says, in plain words, what can still go wrong. Read it before
+trusting anything else in this book.
 
 > **Status: internal review only. No independent security audit has been done.
 > None of the three Android apps has been run on a phone. Do not use OpenBMT
@@ -103,8 +103,10 @@ These are named so that nobody mistakes them for checked facts.
 - **NFC tap (E1, E10).** Not built.
 - **Timings.** Setup time, time to "Seen", battery and bandwidth are not
   measured.
-- **Card fees and other competitor figures.** The design marks every one
-  "to verify" and keeps them off merchant screens until sourced.
+- **Competitor figures in the design.** The design marks each one "to
+  verify" and keeps them off merchant screens until sourced. The card fees
+  in [Why bitcoin](why-bitcoin.md) are quoted from the processors' own pages,
+  read 2026-11-11, and can change at any time.
 
 ## The monthly outside check
 

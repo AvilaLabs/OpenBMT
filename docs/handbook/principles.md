@@ -13,8 +13,8 @@ All three must pass at once.
    match or beat the best product available, custodial ones included.
    Status: this is the target, not a result. Setup time and most speeds have
    not been measured yet, and the design marks them "to measure".
-3. **Purist-approved.** No custody, no trusted server, honest about what is
-   verified, private by default, built on open standards.
+3. **Purist-approved.** No custody, no trusted server, no claim beyond what
+   was checked, private by default, built on open standards.
 
 ### Why a purist objection is a veto
 
@@ -27,7 +27,7 @@ funds, or that gives a third party the shop's keys, its wallet description or
 its addresses. An idea that fails the veto is dropped. It is not kept as an
 option, a slot or a later phase.
 
-The reason is simple. A shop that takes bitcoin to avoid depending on a
+A shop that takes bitcoin to avoid depending on a
 processor gains nothing from a design that quietly adds one back. A single
 exception tends to become the default, so the project does not make one.
 
@@ -37,10 +37,10 @@ trust a signer set and give that set the power to freeze and to see every
 spend. Lightning through a third-party swap provider makes every such sale
 depend on a central service that sees amounts, timing and both sides.
 
-The veto does allow one narrow thing: an optional service that sees only
-metadata, if all three hold. It is not the default. It is labeled at the
-point of choice. It is listed in [Privacy](privacy.md). Nothing like that is
-a default in OpenBMT today.
+The veto allows one narrow exception: an optional service that sees only
+metadata, provided it is never the default, it is labeled where the shop
+chooses it, and it is listed in [Privacy](privacy.md). OpenBMT has no such
+service today.
 
 ### Choice without confusion
 
@@ -76,31 +76,32 @@ Other companies do appear around the edges, and the book says where:
 
 None of them is in the payment path. [Privacy](privacy.md) lists each.
 
-## Honest status words
+## Status words
 
-Two kinds of honesty run through the project.
+OpenBMT states what it checked in two places: on the screens and in the
+documents.
 
-**On the screens.** A payment is labeled with what was actually checked, from
-weakest to strongest:
+On the counter, each payment carries a line naming what saw it:
 
-- "Seen by 3 peers (not verified by this device)"
-- "Paid (your Box reports it)"
-- "Confirmed (light check)"
-- "Confirmed (your node)"
+- "Your Box reports it": only the Box has seen it so far.
+- "Light check": the counter's own check against Bitcoin peers saw it.
+- "Your Box and light check": both saw it.
+- "Your node and light check": the shop's own node and the light check both
+  saw it.
 
-The screen never says "fully verified" unless the shop's own node said so.
-"Final" is reserved for the depth the shop sets for refunds, and even that
-word means "more blocks on top make a reversal less likely", never "zero
+The rules for these lines are CR-105 and the counter's screen table
+(`docs/screens/counter.md`). No screen says "fully verified".
+"Settled" and "final" are reserved for the refund depth the shop sets, and even
+then they mean "more blocks on top make a reversal less likely", never "zero
 risk".
 
-**In the documents.** Every safety claim must be literally true. If it holds
+In the documents, every safety claim must be literally true. If it holds
 only under a condition, the condition is next to it. If something could not
 be checked, the document says "not verified". This book follows the same
 rule, and it uses the four status words from the
 [Introduction](introduction.md).
 
-OpenBMT makes no claim of being proof against attack. The status is:
-internal review only, no independent security audit yet. Four internal design
-reviews have been done.
-They are internal, and the built software still needs tests on devices, an
-outside code review and an audit.
+OpenBMT makes no claim of being proof against attack. The status is internal
+review only: no independent security audit has been done yet. Four internal
+design reviews have been done, and the built software still needs tests on
+devices, an outside code review and an audit.

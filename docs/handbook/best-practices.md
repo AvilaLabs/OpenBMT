@@ -25,7 +25,8 @@ design. Where the software does not yet enforce a rule, the chapter says so.
   stamped, check the steel against the phone, then destroy the paper. Never
   keep paper as a backup.
 - Make key 3 outside OpenBMT software, offline, on a device that holds no
-  other key, or on a hardware wallet. Then factory reset the tablet.
+  other key, or on a hardware wallet. If you used a phone or tablet, factory
+  reset it afterwards.
 - Prefer a hardware signer or another publisher's signer for key 2 until a
   second, independent person holds the Key app's release key. Hardware signers
   are Planned and not yet tried. Before you choose a signer, read its public
@@ -53,7 +54,8 @@ design. Where the software does not yet enforce a rule, the chapter says so.
   service can read what is typed. The Key app refuses to run while one is on.
 - Do not sideload apps onto the owner phone or the Key phone.
 - Leave cloud backup off for the apps. They keep their key files out of backup
-  on purpose, so a restored file would be one that cannot be opened.
+  on purpose: a key file is wrapped with a key that stays in the phone's
+  Keystore, so a copy on another phone could not be opened.
 - Use airplane mode on the spare phone, and no accounts on it.
 
 ## Tor and the shop's own node
@@ -104,9 +106,9 @@ https://btcmaxis.com/bitcoin-information/security.html (read 2026-11-11).
 
 ## Cash-out and what the shop keeps
 
-- If the shop keeps bitcoin, cash out on a regular schedule to storage that
-  the shop's own two keys do not need to reach for every sale. The approval
-  session is the habit for it.
+- If the shop keeps bitcoin, move it on a regular schedule from the shop wallet
+  to long-term storage the shop controls, so the wallet the counters pay into
+  holds only working amounts. Do it in an approval session.
 - Enroll each cash-out destination on the Key app by scanning, and wait the 24
   hours.
 - Merging many small receipts links them on the blockchain. Do it on purpose,
@@ -115,14 +117,15 @@ https://btcmaxis.com/bitcoin-information/security.html (read 2026-11-11).
 ## Staff
 
 - Give each cashier a name and a PIN so records name who acted.
-- Limit managers. The counter has one manager PIN today.
+- The counter has one manager PIN today. Give it only to the person who runs
+  the counter.
 - Remember the counter's cashier list is local to that phone.
 
 ## If a phone is lost
 
-- Owner phone lost: it is one key. The design's answer is
-  "Move to a new wallet", which is not built.
-  Treat it as urgent and follow the recovery kit.
+- Owner phone lost: it is one key of three. The design's answer is "Move to a
+  new wallet", which is not built yet. Treat it as urgent and follow the
+  recovery kit.
 - Spare phone lost: restore key 2 from its words onto a new phone. It is a new
   Key app with first ceilings.
 - Counter lost: remove it in the owner phone and pair a new one.
@@ -130,9 +133,10 @@ https://btcmaxis.com/bitcoin-information/security.html (read 2026-11-11).
 ## Test recovery first
 
 - Test the restore with a small amount, before trusting the wallet with more.
-  Restoring with Bitcoin Core on a test network is run. Sparrow is not.
-  Bitcoin Core and Sparrow are used watch-only there. The keys never go into
-  them. The site above advises newcomers against a node's built-in wallet.
+  A restore with Bitcoin Core on a test network has been run; one with
+  Sparrow has not. Both are used watch-only: the keys never go into them. The
+  site above advises newcomers against keeping keys in a node's built-in
+  wallet.
 - Do the monthly outside check: open the wallet description as watch-only in
   Sparrow or Bitcoin Core and compare receipts with the POS bitcoin-tender
   total.
