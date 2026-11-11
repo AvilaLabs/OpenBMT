@@ -36,6 +36,7 @@ openbmt-qr-jni = { path = "../crates/openbmt-qr-jni" }
 openbmt-json = { path = "../crates/openbmt-json" }
 openbmt-pos-readers = { path = "../crates/openbmt-pos-readers" }
 openbmt-box = { path = "../crates/openbmt-box" }
+openbmt-lightning = { path = "../crates/openbmt-lightning" }
 # The same exact version as openbmt-key-ffi, for the word list.
 bip39 = { version = "=2.2.2", default-features = false, features = ["std"] }
 
@@ -472,6 +473,13 @@ bench = false
 [[bin]]
 name = "owner_setup_record"
 path = "fuzz_targets/owner_setup_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lightning_decode"
+path = "fuzz_targets/lightning_decode.rs"
 test = false
 doc = false
 bench = false

@@ -64,6 +64,7 @@ exactly the input bytes.
 | `qr_jni_call` | The pure-Rust dispatch of the apps' framed call (`openbmt_qr_jni::call`, not the JNI layer): the input as a request, and behind a good head of each operation, to a fresh registry; every reply must be framed and a refusal a five-byte rule code. Then a well-formed `qr_encode` and `ur_encode` from the input must give well-formed replies, and the parts of a full turn fed to a decoder must complete the message |
 | `box_pos_config` | `PosConfig::from_bytes` of `openbmt-box`, the Box's own POS vendor file: it must never panic, bytes that are read must come back out unchanged by `to_bytes`, and what was read must validate and give POS settings |
 | `pos_clover_parse` | The Clover reader: a cursor, a page size and a reply from the input; the query must be ASCII with only unreserved characters and the separators, the same bytes must give the same answer, a page that is read is no longer than the limit, has more exactly when it is as long, and gives a cursor the next request takes |
+| `lightning_decode` | `openbmt-lightning`, by the first byte: a BOLT 11 invoice (`decode`, the same text in lower case reads the same, and an invoice that passes `check` names the amount, the hash and the signer asked for), a Core Lightning rune (`check_rune`), an `lndconnect` address, or a node reply read as the answer to a lookup and to an invoice request on both kinds of node; none may panic, the same bytes give the same answer, and a payment is only paid for at least the amount asked |
 
 ## Running
 

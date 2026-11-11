@@ -1,0 +1,19 @@
+[package]
+name = "openbmt-lightning"
+description = "A counter's own-node Lightning invoices: the text of each request to the merchant's node (LND, Core Lightning), the strict reading of each reply, the check of the BOLT 11 invoice and the BIP 321 code. No network, no clock, no TLS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Path dependencies inside the workspace, and the bitcoin crate at the exact
+# version openbmt-core pins, so the types unify and no package is added. Its
+# `secp-recovery` feature turns on a module of the secp256k1 package that is
+# already in every list: the signature of a BOLT 11 invoice gives the public
+# key of the node that signed it (LN-16). It is the same package, with one more
+# module of its C code.
+[dependencies]
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std", "secp-recovery"] }
+openbmt-core = { path = "../openbmt-core" }
+openbmt-json = { path = "../openbmt-json" }

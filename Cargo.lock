@@ -443,6 +443,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-lightning"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "openbmt-core",
+ "openbmt-json",
+]
+
+[[package]]
 name = "openbmt-link"
 version = "0.1.0"
 dependencies = [

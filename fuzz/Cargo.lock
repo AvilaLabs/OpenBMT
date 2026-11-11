@@ -428,6 +428,7 @@ dependencies = [
  "openbmt-courier",
  "openbmt-json",
  "openbmt-key-ffi",
+ "openbmt-lightning",
  "openbmt-link",
  "openbmt-net",
  "openbmt-owner",
@@ -490,6 +491,15 @@ dependencies = [
  "openbmt-core",
  "openbmt-session",
  "openbmt-signer",
+]
+
+[[package]]
+name = "openbmt-lightning"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "openbmt-core",
+ "openbmt-json",
 ]
 
 [[package]]

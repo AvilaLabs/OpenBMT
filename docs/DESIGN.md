@@ -1417,10 +1417,19 @@ on-chain bitcoin." Shops can offer a bitcoin price that absorbs the network
 fee on small tickets (§9).
 
 **Option: connect your own Lightning node** (decided 2026-11-09).
-A merchant who already runs Lightning (Core Lightning, LND or Eclair on their
-own Box, Start9 or Umbrel) can connect it. The counter then offers a BIP321
+A merchant who already runs Lightning (Core Lightning or LND on their own
+Box, Start9 or Umbrel) can connect it. The counter then offers a BIP321
 code with both on-chain and Lightning, and Lightning payments are final
-instantly at any amount. OpenBMT does not manage the node; the setup screen
+instantly at any amount. Eclair is not supported: it has one password with
+the full power of its API and no restricted credential, so a counter that
+held it would hold a key that can spend (docs/LIGHTNING-RULES.md, LN-02).
+The node decides where Lightning payments go, so its public key is part of
+the signed settings, and naming or changing it needs the Key app's
+co-signature like a changed destination (LN-03). The counter holds only a
+key to the node limited to invoices, which the node software enforces: the
+node must run a current release, and the setup probes the key and makes a
+test invoice that must be signed by the node the settings name (LN-04 to
+LN-20). OpenBMT does not manage the node; the setup screen
 says plainly that running Lightning means watching liquidity, updates and
 backups. The self-managing node was researched and rejected: it cannot be
 hands-off, because receiving consumes inbound liquidity that must keep being
