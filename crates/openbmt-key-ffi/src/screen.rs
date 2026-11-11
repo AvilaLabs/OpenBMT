@@ -178,6 +178,21 @@ fn script_of(address: &str, inner: &mut Inner) -> Result<bitcoin::ScriptBuf, Key
     Ok(checked.script_pubkey())
 }
 
+/// The address in a scanned text: the text itself when it is a bare address,
+/// and the address of the code when it is a `bitcoin:` URI, read as a
+/// deposit code for the wallet's network.
+fn address_of(text: &str, inner: &mut Inner) -> Result<String, KeyError> {
+    let trimmed = text.trim();
+    let is_uri = trimmed
+        .get(..8)
+        .is_some_and(|s| s.eq_ignore_ascii_case("bitcoin:"));
+    if !is_uri {
+        return Ok(trimmed.to_string());
+    }
+    let network = inner.ready()?.wallet.network;
+    Ok(crate::deposit::parse_for(trimmed.to_string(), network)?.address)
+}
+
 /// One change of the signer's state, stored before the Key app takes it.
 fn change_signer(
     inner: &mut Inner,
@@ -254,12 +269,14 @@ impl KeyApp {
         self.run(|inner| Ok(inner.ready()?.approver.receive_mark()))
     }
 
-    /// SR-30: enroll a cash-out destination from the address the Key app's
-    /// own camera scanned, with a label typed on this device. It counts as
-    /// allowlisted after the wait.
-    pub fn enroll_destination(&self, address: String, label: String) -> Result<(), KeyError> {
+    /// SR-30, SR-78: enroll a cash-out destination from the text the Key
+    /// app's own camera scanned (a bare address or a `bitcoin:` URI, of which
+    /// only the address is taken), with a label typed on this device. It
+    /// counts as allowlisted after the wait.
+    pub fn enroll_destination(&self, text: String, label: String) -> Result<(), KeyError> {
         self.run(|inner| {
             let now = inner.store.now();
+            let address = address_of(&text, inner)?;
             let script = script_of(&address, inner)?;
             change_signer(inner, |s| {
                 no_store(s.enroll_destination(script, &label, now, |_| Ok::<(), Infallible>(())))

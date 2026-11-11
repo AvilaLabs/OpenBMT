@@ -92,7 +92,7 @@ writes it again). Op numbers are never reused.
 | 35 | `cancel` | session | release the slot |
 | 40 | `signer_status` | app | ceilings, marks, totals, allowlist |
 | 41 | `receive_mark` | app | the receive mark |
-| 42 | `enroll_destination` | app | enrol an address with a label |
+| 42 | `enroll_destination` | app | enrol a bare address or a `bitcoin:` URI with a label |
 | 43 | `remove_destination` | app | remove one |
 | 44 | `set_ceilings` | app | the two sets of ceilings |
 | 45 | `set_fee_ceilings` | app | the fee ceilings |

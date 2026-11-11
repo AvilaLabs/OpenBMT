@@ -1086,9 +1086,10 @@ class KeyApp private constructor(private val store: KeyStore, private val handle
         return r.u32().also { r.end() }
     }
 
-    fun enrollDestination(address: String, label: String) =
+    /** [text] is a bare address or a `bitcoin:` URI: only its address is taken. */
+    fun enrollDestination(text: String, label: String) =
         callUnit(store, OP_ENROLL_DESTINATION, handle) {
-            it.string(address)
+            it.string(text)
             it.string(label)
         }
 

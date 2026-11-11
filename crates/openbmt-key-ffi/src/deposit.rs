@@ -63,6 +63,11 @@ fn bad(rule: &str, text: &str) -> KeyError {
 /// - The address must be for `network` and of a kind the signer's
 ///   allowlist takes (SR-22, SR-30): P2WPKH, P2WSH, P2TR, P2PKH or P2SH.
 pub fn parse_deposit_code(text: String, network: KeyNetwork) -> Result<DepositCode, KeyError> {
+    parse_for(text, network.into())
+}
+
+/// [`parse_deposit_code`] for a network the signer names.
+pub(crate) fn parse_for(text: String, network: Network) -> Result<DepositCode, KeyError> {
     if text.len() > MAX_BYTES {
         return Err(bad(
             "deposit-too-long",
@@ -87,7 +92,7 @@ pub fn parse_deposit_code(text: String, network: KeyNetwork) -> Result<DepositCo
             None => (rest, None),
         },
     };
-    let address = address_for(address, network.into())?;
+    let address = address_for(address, network)?;
     let mut code = DepositCode {
         address,
         amount_sats: None,
