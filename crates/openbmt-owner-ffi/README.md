@@ -36,6 +36,7 @@ handles are never given out twice.
 | Upkeep | `notes`, `rescan`, `recover_key1`, `archive_paid` |
 | Till | `pos_state`, `pos_setup`, `pos_remove`, `pos_request`, `pos_reply`, `pos_acknowledge` |
 | Key ceremony | `ceremony_make_key1`, `ceremony_read_answer`, `ceremony_build_wallet`, `ceremony_finish`, `ceremony_open`, `ceremony_stage`, `ceremony_defaults` |
+| Background watch | `watch_make_key`, `watch_named`, `watch_settings_preview`, `watch_export`, `watch_start`, `watch_step`, `watch_stop` |
 
 The till ops (`docs/OWNER-COINS-RULES.md`, OC-30 to OC-37) match the shop's
 orders against the counters' sales on the owner's phone. The app does the

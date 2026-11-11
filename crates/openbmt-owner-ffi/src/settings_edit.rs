@@ -227,6 +227,7 @@ pub(crate) fn to_edit(
         min_sale_sats: a.min_sale_sats,
         shares,
         lightning_node,
+        watch_key: None,
     })
 }
 
@@ -407,6 +408,13 @@ fn field_words(
             (
                 node_text(&old.lightning_node),
                 node_text(&new.lightning_node),
+            ),
+        ),
+        "watch_key" => (
+            "Watch in the background",
+            (
+                on_off(old.watch_key.is_some()),
+                on_off(new.watch_key.is_some()),
             ),
         ),
         _ => return None,

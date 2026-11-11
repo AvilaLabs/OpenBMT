@@ -15,4 +15,5 @@ mod screen;
 mod settings;
 mod setup_lock;
 mod strict;
+mod watch;
 pub(crate) mod wire;

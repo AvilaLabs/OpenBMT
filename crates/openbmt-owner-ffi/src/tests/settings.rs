@@ -148,7 +148,7 @@ fn ready() -> (Rig, u64) {
 
 /// A node whose settings in force name the test counter, at 1,000 satoshis
 /// to a dollar.
-fn held() -> (Rig, u64) {
+pub(super) fn held() -> (Rig, u64) {
     let (rig, handle) = ready();
     rig.queue_batch(handle);
     rig.fund(handle, 300_000);

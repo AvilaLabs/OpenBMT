@@ -62,6 +62,7 @@ mod settings_edit;
 mod setup_lock;
 mod signer_views;
 mod views;
+pub mod watch;
 
 #[cfg(test)]
 mod tests;

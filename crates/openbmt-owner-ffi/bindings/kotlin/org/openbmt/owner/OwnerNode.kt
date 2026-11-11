@@ -130,6 +130,13 @@ private const val OP_SIGNER_FILE = 123
 private const val OP_SIGNER_TAKE = 124
 private const val OP_FIRST_ADDRESS_RECORD = 125
 private const val OP_FIRST_ADDRESS_READ = 126
+private const val OP_WATCH_MAKE_KEY = 130
+private const val OP_WATCH_NAMED = 131
+private const val OP_WATCH_SETTINGS_PREVIEW = 132
+private const val OP_WATCH_EXPORT = 133
+private const val OP_WATCH_START = 134
+private const val OP_WATCH_STEP = 135
+private const val OP_WATCH_STOP = 136
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -284,6 +291,13 @@ enum class AlertKind { MissedCheckIn, Diverged, BatchUndelivered }
 class ClearArgs(val kind: AlertKind, val counter: ByteArray, val value: Long)
 
 class Pump(val notes: List<String>, val stopped: Boolean)
+
+/**
+ * One turn of the background watcher: the heartbeats the relay took since it started, whether the last
+ * call to the relay worked, whether the relay answered and refused (the watch key is not one of its
+ * members), and the watcher's own lines.
+ */
+class WatchStep(val sent: Long, val reached: Boolean, val relayRefused: Boolean, val notes: List<String>)
 
 class LinkStep(
     val notes: List<String>,
@@ -1669,6 +1683,31 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
         return r.settingsPreview().also { r.end() }
     }
 
+    /** The watch key the settings in force name (32 bytes), or null when they name none (CR-185). */
+    fun watchNamed(): ByteArray? {
+        val r = call(OP_WATCH_NAMED, handle)
+        return r.option { r.bytes() }.also { r.end() }
+    }
+
+    /**
+     * What naming [key] ([set]) or removing the watch key would do to the settings: the same preview as
+     * [previewSettings], for that one field. Nothing is stored.
+     */
+    fun watchSettingsPreview(set: Boolean, key: ByteArray): SettingsPreview {
+        val r = call(OP_WATCH_SETTINGS_PREVIEW, handle) { it.bool(set).bytes(key) }
+        return r.settingsPreview().also { r.end() }
+    }
+
+    /**
+     * The contents of the watch file for this node, with [secret] (the watch key's secret) in it: the
+     * network, the proxy, the relay and the counters the link follows now. It holds no wallet and no
+     * owner key. The app seals it and keeps it in a file of its own.
+     */
+    fun watchExport(secret: ByteArray): ByteArray {
+        val r = call(OP_WATCH_EXPORT, handle) { it.bytes(secret) }
+        return r.bytes().also { r.end() }
+    }
+
     /**
      * Read a counter's request (the bytes of its code) and queue its pairing; the words and the
      * shares come back for the owner to check before [counterConfirm].
@@ -1821,6 +1860,47 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     /** Acknowledge an open alert, in this phone's own ledger only. */
     fun posAcknowledge(now: Long, key: PosAlertKey) =
         callUnit(OP_POS_ACKNOWLEDGE, handle) { it.u64(now).posAlertKey(key) }
+}
+
+/**
+ * The owner phone's watcher while the app is closed (`docs/OWNER-APP-RULES.md`, OA-80 to OA-89). It is not a
+ * node: it holds no owner secret and no key 1, follows the chain and tells the counters, and every op of a
+ * node refuses its handle. Call [step] in a loop from one background thread (it waits for at most 250 ms).
+ */
+class OwnerWatch private constructor(private val handle: Long) : AutoCloseable {
+    companion object {
+        /** The public key of the watch key whose secret is [secret] (32 random bytes the app drew). */
+        fun makeKey(secret: ByteArray): ByteArray {
+            val r = call(OP_WATCH_MAKE_KEY, 0) { it.bytes(secret) }
+            return r.bytes().also { r.end() }
+        }
+
+        /** Start the watcher from the contents of the watch file. The owner node must not be running. */
+        fun start(file: ByteArray): OwnerWatch {
+            val r = call(OP_WATCH_START, 0) { it.bytes(file) }
+            val handle = r.u64()
+            r.end()
+            return OwnerWatch(handle)
+        }
+    }
+
+    /** Take the network's events for up to [waitMs] (at most 250), then send the heartbeats that are due. */
+    fun step(now: Long, waitMs: Long): WatchStep {
+        val r = call(OP_WATCH_STEP, handle) { it.u64(now).u32(waitMs) }
+        return WatchStep(r.u64(), r.bool(), r.bool(), r.strings()).also { r.end() }
+    }
+
+    /** Stop the watcher and let go of the node's folder. */
+    fun stop() = callUnit(OP_WATCH_STOP, handle)
+
+    /** Stops the watcher. */
+    override fun close() {
+        try {
+            stop()
+        } catch (_: OwnerException) {
+            // Already stopped, or never running.
+        }
+    }
 }
 
 /**

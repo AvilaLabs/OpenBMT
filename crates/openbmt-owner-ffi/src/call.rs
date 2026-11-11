@@ -123,6 +123,7 @@ use crate::views::{
     SendRow, SettingsHeldView, SettingsQueuedView, SkippedView, StageKind, StageView, StartConfig,
     StatusView, TakenView, ViewKind, WordsView,
 };
+use crate::watch::{self, WatchEntry, WatchStart, WatchStepView};
 
 /// The first four bytes of a request.
 pub const REQUEST_MAGIC: [u8; 4] = *b"OBMk";
@@ -147,6 +148,8 @@ pub(crate) enum Handle {
     Zero,
     /// A node handle.
     Node,
+    /// The handle of a background watcher (OA-80).
+    Watch,
 }
 
 impl Handle {
@@ -154,6 +157,7 @@ impl Handle {
         match self {
             Self::Zero => "zero",
             Self::Node => "node",
+            Self::Watch => "watch",
         }
     }
 }
@@ -161,6 +165,7 @@ impl Handle {
 struct RegState {
     next: u64,
     nodes: BTreeMap<u64, Arc<Entry>>,
+    watches: BTreeMap<u64, Arc<WatchEntry>>,
 }
 
 /// The running nodes of a process, by handle. [`dispatch`] takes one by
@@ -185,6 +190,7 @@ impl Registry {
             state: Mutex::new(RegState {
                 next: 1,
                 nodes: BTreeMap::new(),
+                watches: BTreeMap::new(),
             }),
             #[cfg(test)]
             spawner: Mutex::new(None),
@@ -249,10 +255,44 @@ impl Registry {
         Ok(handle)
     }
 
+    /// Start the background watcher (OA-80): at most one, and never with a
+    /// node on the same folder, which its lock refuses.
+    fn start_watch(&self, file: &[u8]) -> Result<u64, AppError> {
+        if !self.lock().watches.is_empty() {
+            return Err(wrong_state(
+                "watch-running",
+                "the watcher is running: stop it before starting another",
+            ));
+        }
+        let entry = Arc::new(WatchEntry::start(file)?);
+        let mut state = self.lock();
+        let handle = state.next;
+        match state.next.checked_add(1) {
+            Some(next) => state.next = next,
+            None => {
+                drop(state);
+                let _ = entry.stop();
+                return Err(wrong_state(
+                    "handles-used",
+                    "every handle of this process is used",
+                ));
+            }
+        }
+        state.watches.insert(handle, entry);
+        Ok(handle)
+    }
+
     /// The entry of a node, for a test.
     #[cfg(test)]
     pub(crate) fn entry_for_test(&self, handle: u64) -> Option<Arc<Entry>> {
         self.lock().nodes.get(&handle).cloned()
+    }
+
+    fn remove_watch(&self, handle: u64) -> Result<Arc<WatchEntry>, AppError> {
+        self.lock()
+            .watches
+            .remove(&handle)
+            .ok_or_else(unknown_handle)
     }
 
     fn remove(&self, handle: u64) -> Result<Arc<Entry>, AppError> {
@@ -264,6 +304,7 @@ impl Registry {
             registry: self,
             handle,
             entry: None,
+            watch: None,
         };
         match kind {
             Handle::Zero => {
@@ -275,9 +316,22 @@ impl Registry {
                 }
             }
             Handle::Node => {
+                let state = self.lock();
+                if state.watches.contains_key(&handle) {
+                    return Err(watch_only());
+                }
                 ctx.entry = Some(
-                    self.lock()
+                    state
                         .nodes
+                        .get(&handle)
+                        .cloned()
+                        .ok_or_else(unknown_handle)?,
+                );
+            }
+            Handle::Watch => {
+                ctx.watch = Some(
+                    self.lock()
+                        .watches
                         .get(&handle)
                         .cloned()
                         .ok_or_else(unknown_handle)?,
@@ -286,6 +340,16 @@ impl Registry {
         }
         Ok(ctx)
     }
+}
+
+/// The refusal of an op of a node on the handle of the background watcher
+/// (OA-80): it signs nothing but heartbeats.
+fn watch_only() -> AppError {
+    wrong_state(
+        "watch-only",
+        "the background watcher only follows the chain and tells the counters; this needs the \
+         owner app",
+    )
 }
 
 fn unknown_handle() -> AppError {
@@ -300,9 +364,16 @@ pub(crate) struct Ctx<'a> {
     registry: &'a Registry,
     handle: u64,
     entry: Option<Arc<Entry>>,
+    watch: Option<Arc<WatchEntry>>,
 }
 
 impl Ctx<'_> {
+    fn watch(&self) -> Result<&Arc<WatchEntry>, AppError> {
+        self.watch
+            .as_ref()
+            .ok_or_else(|| internal("the op has no watcher"))
+    }
+
     fn entry(&self) -> Result<&Arc<Entry>, AppError> {
         self.entry
             .as_ref()
@@ -353,7 +424,7 @@ pub(crate) fn ops() -> &'static [Op] {
 }
 
 fn build_ops() -> Vec<Op> {
-    use Handle::{Node, Zero};
+    use Handle::{Node, Watch, Zero};
     vec![
         op(1, "start", Zero, |c, config: StartConfig| {
             c.registry.start(config)
@@ -558,6 +629,34 @@ fn build_ops() -> Vec<Op> {
         op(126, "first_address_read", Node, |c, bytes: Vec<u8>| {
             c.entry()?.first_address_read(bytes)
         }),
+        op(130, "watch_make_key", Zero, |_, secret: Vec<u8>| {
+            watch::public_key(&secret)
+        }),
+        op(131, "watch_named", Node, |c, ()| c.entry()?.watch_named()),
+        op(
+            132,
+            "watch_settings_preview",
+            Node,
+            |c, (set, key): (bool, Vec<u8>)| c.entry()?.watch_settings_preview(set, key),
+        ),
+        op(133, "watch_export", Node, |c, secret: Vec<u8>| {
+            c.entry()?.watch_export(secret)
+        }),
+        op(134, "watch_start", Zero, |c, file: Vec<u8>| {
+            c.registry.start_watch(&file)
+        }),
+        op(
+            135,
+            "watch_step",
+            Watch,
+            |c, (now, wait_ms): (u64, u32)| -> Result<WatchStepView, AppError> {
+                c.watch()?.step(now, wait_ms)
+            },
+        ),
+        op(136, "watch_stop", Watch, |c, ()| {
+            let entry = c.registry.remove_watch(c.handle)?;
+            entry.stop()
+        }),
     ]
 }
 
@@ -688,6 +787,8 @@ fn definitions() -> Vec<TypeDef> {
         RouteView::define(),
         LinkConfig::define(),
         StartConfig::define(),
+        WatchStart::define(),
+        WatchStepView::define(),
         RefundArgs::define(),
         CashAmountView::define(),
         CashOutArgs::define(),

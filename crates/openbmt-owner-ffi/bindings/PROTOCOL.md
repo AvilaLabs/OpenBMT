@@ -130,6 +130,13 @@ ops run on another; it waits for at most 250 ms.
 124 signer_take      handle node  args SignerTakeArgs -> SignerTakenView
 125 first_address_record handle node  args FirstAddressArgs -> list<u8>
 126 first_address_read handle node  args list<u8> -> FirstAddressView
+130 watch_make_key   handle zero  args list<u8> -> list<u8>
+131 watch_named      handle node  args () -> option<list<u8>>
+132 watch_settings_preview handle node  args (bool, list<u8>) -> SettingsPreviewView
+133 watch_export     handle node  args list<u8> -> list<u8>
+134 watch_start      handle zero  args list<u8> -> u64
+135 watch_step       handle watch args (u64, u32) -> WatchStepView
+136 watch_stop       handle watch args () -> ()
 ```
 
 ## Types
@@ -141,6 +148,8 @@ RouteView: enum, a tag byte, then: Direct(addr: string) | Onion(proxy: string, h
     tags Direct=0 Onion=1
 LinkConfig: record: route: RouteView, relay_key: list<u8>, counters: list<list<u8>>, heartbeat_every_secs: u64, check_in_grace_secs: u64
 StartConfig: record: dir: string, network: OwnerNetwork, now: u64, owner_secret: list<u8>, approver_root: list<u8>, wallet: string, key1_account: list<u8>, key3_xpub: option<string>, batch_min_count: u32, refund_depth: u32, birthday: u32, proxy: option<string>, fixed_peers: list<string>, broadcast_proxy: option<string>, without_tor: bool, link: option<LinkConfig>
+WatchStart: record: dir: string, network: OwnerNetwork, secret: list<u8>, proxy: option<string>, fixed_peers: list<string>, route: RouteView, relay_key: list<u8>, counters: list<list<u8>>, heartbeat_every_secs: u64
+WatchStepView: record: sent: u64, reached: bool, relay_refused: bool, notes: list<string>
 RefundArgs: record: counter: list<u8>, sale: u32, cashier: string, address: string, sats: u64
 CashAmountView: enum, a tag byte, then: Sats(sats: u64) | All
     tags Sats=0 All=1

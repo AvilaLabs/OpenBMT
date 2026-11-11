@@ -127,6 +127,7 @@ fn every_rule_string_the_source_makes_has_words_of_its_own() {
         "settings_edit.rs",
         "setup_lock.rs",
         "views.rs",
+        "watch.rs",
     ] {
         let text = std::fs::read_to_string(dir.join(name)).expect("readable");
         code.push_str(text.split("\n#[cfg(test)]").next().expect("a first part"));

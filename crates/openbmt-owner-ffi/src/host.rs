@@ -54,7 +54,8 @@ use openbmt_net_io::{
 };
 use openbmt_owner::say::EntryKind;
 use openbmt_owner::{
-    CashAmount, Delivery, ItemOutcome, OwnerError, SaleFacts, SaleKey, SettingsQueued, Stage,
+    CashAmount, Delivery, ItemOutcome, OwnerError, SaleFacts, SaleKey, SettingsEdit,
+    SettingsQueued, Stage, WatchEdit,
 };
 use openbmt_owner_node::coins::ViewState;
 use openbmt_owner_node::live::DeepLine;
@@ -97,9 +98,10 @@ use crate::views::{
     CashOutRow, ClearArgs, CounterShareView, CounterView, DeepRequestView, DeliverView,
     EntryKindView, EntryRow, HaltedView, HealthView, LimitView, LinkConfig, LinkStepView, LinkView,
     MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind,
-    OutcomeView, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs,
-    RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView, SettingsQueuedView,
-    SkippedView, StageKind, StageView, StartConfig, StatusView, TakenView, ViewKind, WordsView,
+    OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView,
+    RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView,
+    SettingsQueuedView, SkippedView, StageKind, StageView, StartConfig, StatusView, TakenView,
+    ViewKind, WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -201,6 +203,20 @@ struct State {
     policy: BatchPolicy,
     dir: PathBuf,
     network: Network,
+    /// What the background watcher needs that the node was started with
+    /// (OA-81), and none when the node has no link.
+    watch_base: Option<WatchBase>,
+}
+
+/// The parts of a start that the background watcher takes over: where it
+/// follows the chain from, and how it reaches the counters' relay.
+struct WatchBase {
+    network: OwnerNetwork,
+    proxy: Option<String>,
+    fixed_peers: Vec<String>,
+    route: RouteView,
+    relay_key: Vec<u8>,
+    heartbeat_every_secs: u64,
 }
 
 type Job = Box<dyn FnOnce(&mut Option<State>) + Send>;
@@ -480,7 +496,7 @@ fn built_view(built: openbmt_owner::Built) -> BuiltView {
     }
 }
 
-fn route_of(route: &RouteView) -> Result<Route, AppError> {
+pub(crate) fn route_of(route: &RouteView) -> Result<Route, AppError> {
     let addr = |text: &str| -> Result<SocketAddr, AppError> {
         text.parse()
             .map_err(|e| refused_by("start-link", format!("the address {text:?}: {e}")))
@@ -613,6 +629,14 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
     let approver = device("the Key app root", "start-roots", &req.approver_root)?;
     let wallet = WalletDescription::parse(&req.wallet, network)
         .map_err(|e| refused_by("start-wallet", format!("the wallet: {e}")))?;
+    let watch_base = req.link.as_ref().map(|l| WatchBase {
+        network: req.network,
+        proxy: req.proxy.clone(),
+        fixed_peers: req.fixed_peers.clone(),
+        route: l.route.clone(),
+        relay_key: l.relay_key.clone(),
+        heartbeat_every_secs: l.heartbeat_every_secs,
+    });
     let secp = Secp256k1::new();
     let key1_account = Xpriv::decode(&req.key1_account)
         .map_err(|e| refused_by("start-key1", format!("the account key: {e}")))?;
@@ -707,6 +731,7 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
             policy,
             dir,
             network,
+            watch_base,
         }),
         Err(e) => {
             node.shutdown();
@@ -1306,6 +1331,85 @@ impl Entry {
                 .settings_preview(&edit)
                 .map_err(|r| queue_error(&OwnerError::Refused(r)))?;
             Ok(preview_view(&preview))
+        })
+    }
+
+    /// The watch key the settings in force name, if they name one (CR-185).
+    pub(crate) fn watch_named(&self) -> Result<Option<Vec<u8>>, AppError> {
+        self.run(None, |st| {
+            Ok(st
+                .node
+                .owner()
+                .known_settings()
+                .and_then(|s| s.watch_key)
+                .map(|k| k.to_bytes().to_vec()))
+        })
+    }
+
+    /// What naming `key` (when `set`) or removing the watch key would do to
+    /// the settings (OA-83): the same preview as `settings_preview`, for the
+    /// one field. Nothing is stored.
+    pub(crate) fn watch_settings_preview(
+        &self,
+        set: bool,
+        key: Vec<u8>,
+    ) -> Result<SettingsPreviewView, AppError> {
+        let edit = if set {
+            let key = device("the watch key", "watch-key", &key)?;
+            SettingsEdit {
+                watch_key: Some(WatchEdit::Set(key)),
+                ..SettingsEdit::default()
+            }
+        } else {
+            SettingsEdit {
+                watch_key: Some(WatchEdit::Remove),
+                ..SettingsEdit::default()
+            }
+        };
+        self.run(None, move |st| {
+            let preview = st
+                .node
+                .owner()
+                .settings_preview(&edit)
+                .map_err(|r| queue_error(&OwnerError::Refused(r)))?;
+            Ok(preview_view(&preview))
+        })
+    }
+
+    /// The contents of the watch file for this node (OA-81): the watch key's
+    /// secret the app holds, the network and the proxy the node was started
+    /// with, the relay and the counters the link follows now. Public data
+    /// only besides the secret: no wallet description, no owner secret, no
+    /// key 1. The app writes it, sealed, before the node stops.
+    pub(crate) fn watch_export(&self, secret: Vec<u8>) -> Result<Vec<u8>, AppError> {
+        self.run(None, move |st| {
+            let base = st.watch_base.as_ref().ok_or_else(|| {
+                wrong_state(
+                    "watch-no-link",
+                    "the node has no link to the counters, so there is nothing for a background \
+                     watcher to tell",
+                )
+            })?;
+            let counters = st
+                .link
+                .as_ref()
+                .map(|l| l.counters().iter().map(|c| c.to_bytes().to_vec()).collect())
+                .unwrap_or_default();
+            let start = crate::watch::WatchStart {
+                dir: st.dir.to_string_lossy().into_owned(),
+                network: base.network,
+                secret,
+                proxy: base.proxy.clone(),
+                fixed_peers: base.fixed_peers.clone(),
+                route: base.route.clone(),
+                relay_key: base.relay_key.clone(),
+                counters,
+                heartbeat_every_secs: base.heartbeat_every_secs,
+            };
+            let file = start.to_file();
+            // The file is read back as it will be read at the start.
+            crate::watch::decode_file(&file)?;
+            Ok(file)
         })
     }
 

@@ -108,6 +108,13 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (124, "signer_take"),
         (125, "first_address_record"),
         (126, "first_address_read"),
+        (130, "watch_make_key"),
+        (131, "watch_named"),
+        (132, "watch_settings_preview"),
+        (133, "watch_export"),
+        (134, "watch_start"),
+        (135, "watch_step"),
+        (136, "watch_stop"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);
