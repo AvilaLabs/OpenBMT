@@ -12,13 +12,14 @@ use bitcoin::{Address, Network, ScriptBuf, XOnlyPublicKey};
 use crate::error::Refused;
 use crate::keys::key_agg;
 
-/// The order the two keys went into the aggregate.
+/// The order the two keys went into the aggregate (SW-26): the service
+/// documents one, the service's refund key first and the shop's claim key
+/// second, unsorted. The state file keeps it as a byte, so that a file of a
+/// build that took another order is refused when it is read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyOrder {
     /// The service's refund key first, then the shop's claim key.
     RefundFirst,
-    /// The shop's claim key first, then the service's refund key.
-    ClaimFirst,
 }
 
 impl KeyOrder {
@@ -26,7 +27,6 @@ impl KeyOrder {
     pub fn to_byte(self) -> u8 {
         match self {
             Self::RefundFirst => 0,
-            Self::ClaimFirst => 1,
         }
     }
 
@@ -34,7 +34,6 @@ impl KeyOrder {
     pub fn from_byte(b: u8) -> Option<Self> {
         match b {
             0 => Some(Self::RefundFirst),
-            1 => Some(Self::ClaimFirst),
             _ => None,
         }
     }
@@ -87,7 +86,6 @@ impl SwapTree {
     ) -> Result<Self, Refused> {
         let keys = match order {
             KeyOrder::RefundFirst => [*refund_key, *claim_key],
-            KeyOrder::ClaimFirst => [*claim_key, *refund_key],
         };
         let internal = key_agg(&keys)?;
         let claim = claim_script(claim_key, preimage_hash);

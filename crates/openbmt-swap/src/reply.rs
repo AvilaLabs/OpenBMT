@@ -157,7 +157,7 @@ pub struct Swap {
     pub invoice_expires_at: u64,
     /// The service's refund key.
     pub refund_key: PublicKey,
-    /// The order the keys went into the output key.
+    /// The order the keys went into the output key (always the service's key first).
     pub order: KeyOrder,
     /// The block height after which the service can take the lockup back.
     pub timeout: u32,
@@ -214,15 +214,13 @@ pub fn check(reply: &Reply, expect: &Expect<'_>) -> Result<Swap, Refused> {
     if refund_script(&reply.refund_key, reply.timeout).as_bytes() != reply.refund_leaf.as_slice() {
         return Err(Refused::LeafMismatch("refund"));
     }
-    let mut found = None;
-    for order in [KeyOrder::RefundFirst, KeyOrder::ClaimFirst] {
-        let tree = SwapTree::build(&claim_key, &reply.refund_key, &hash, reply.timeout, order)?;
-        if tree.script_pubkey() == address.script_pubkey() {
-            found = Some((order, tree));
-            break;
-        }
+    // SW-26: the service's refund key first, the shop's claim key second; an
+    // address that matches only the other order is refused.
+    let order = KeyOrder::RefundFirst;
+    let tree = SwapTree::build(&claim_key, &reply.refund_key, &hash, reply.timeout, order)?;
+    if tree.script_pubkey() != address.script_pubkey() {
+        return Err(Refused::WrongLockupAddress);
     }
-    let (order, tree) = found.ok_or(Refused::WrongLockupAddress)?;
     if reply.timeout >= LOCKTIME_THRESHOLD
         || u64::from(reply.timeout) < u64::from(expect.tip_height).saturating_add(MIN_CLAIM_BLOCKS)
     {

@@ -57,20 +57,17 @@ fn sw_26_no_keys_are_refused() {
 #[test]
 fn sw_26_the_order_of_the_keys_changes_the_output() {
     let s = secrets();
-    let build = |o| {
-        SwapTree::build(
-            &s.claim_public(),
-            &service_key(),
-            &s.preimage_hash(),
-            TIMEOUT,
-            o,
-        )
-        .unwrap()
-    };
-    let a = build(KeyOrder::RefundFirst);
-    let b = build(KeyOrder::ClaimFirst);
-    assert_ne!(a.internal_key(), b.internal_key());
-    assert_ne!(a.script_pubkey(), b.script_pubkey());
+    let a = SwapTree::build(
+        &s.claim_public(),
+        &service_key(),
+        &s.preimage_hash(),
+        TIMEOUT,
+        KeyOrder::RefundFirst,
+    )
+    .unwrap();
+    // The aggregate of the other order is another key.
+    let swapped = key_agg(&[s.claim_public(), service_key()]).unwrap();
+    assert_ne!(a.internal_key(), swapped);
     // The output is a version 1 witness program of 32 bytes.
     assert!(a.script_pubkey().is_p2tr());
     assert!(a.address(NET).to_string().starts_with("tb1p"));
@@ -79,10 +76,10 @@ fn sw_26_the_order_of_the_keys_changes_the_output() {
         .to_string()
         .starts_with("bc1p"));
     assert_eq!(
-        KeyOrder::from_byte(KeyOrder::ClaimFirst.to_byte()),
-        Some(KeyOrder::ClaimFirst)
+        KeyOrder::from_byte(KeyOrder::RefundFirst.to_byte()),
+        Some(KeyOrder::RefundFirst)
     );
-    assert_eq!(KeyOrder::from_byte(2), None);
+    assert_eq!(KeyOrder::from_byte(1), None);
 }
 
 #[test]

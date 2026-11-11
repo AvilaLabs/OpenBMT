@@ -163,10 +163,11 @@ fn sw_52_a_file_that_disagrees_with_itself_is_refused() {
         SwapState::decode(&patch(expires, &1u64.to_be_bytes())).unwrap_err(),
         Refused::BadState("invoice expiry")
     );
-    // A key order that gives another address still decodes, as a state for
-    // that tree: the lockup address is derived, not stored.
-    let other = SwapState::decode(&patch(6, &[1])).unwrap();
-    assert_ne!(other.lockup_address().unwrap(), s.lockup_address().unwrap());
+    // The other key order is no longer taken (SW-26): the file is refused.
+    assert_eq!(
+        SwapState::decode(&patch(6, &[1])).unwrap_err(),
+        Refused::BadState("key order")
+    );
 }
 
 #[test]

@@ -87,10 +87,12 @@ order of the rules, so that the refusal names the first that fails.
   of the claim key satisfy. The refund leaf is
   `<refund key, x only> OP_CHECKSIGVERIFY <timeout> OP_CHECKLOCKTIMEVERIFY`.
 - **SW-26.** The output key is the key of BIP 327 for the two keys, tweaked
-  with the tree as BIP 341 says. The keys are taken in either order, because
-  the order the service uses is not settled by its documents; the order that
-  matched is recorded. The lockup address of the reply is exactly the address
-  of that output key on the shop's network, and is for no other network.
+  with the tree as BIP 341 says. The keys are taken in one order only, as the
+  service documents it: the service's refund key first, then the shop's claim
+  key, unsorted. A reply whose address matches only the other order is
+  refused as a wrong lockup address. The lockup address of the reply is
+  exactly the address of that output key on the shop's network, and is for no
+  other network.
 - **SW-27.** The timeout is a block height (below 500,000,000) at least
   `MIN_CLAIM_BLOCKS` above the height of the chain tip the caller gives, so
   that the claim has time to confirm. This floor is for the claim only: it

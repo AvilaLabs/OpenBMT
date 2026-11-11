@@ -72,17 +72,13 @@ pub struct Fx {
 
 impl Fx {
     pub fn good() -> Self {
-        Self::with_order(KeyOrder::RefundFirst)
-    }
-
-    pub fn with_order(order: KeyOrder) -> Self {
         let s = secrets();
         let tree = SwapTree::build(
             &s.claim_public(),
             &service_key(),
             &s.preimage_hash(),
             TIMEOUT,
-            order,
+            KeyOrder::RefundFirst,
         )
         .unwrap();
         Self {

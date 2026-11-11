@@ -389,12 +389,31 @@ fn sw_26_the_address_is_the_one_of_the_rebuilt_output() {
 }
 
 #[test]
-fn sw_26_either_order_of_the_keys_is_taken_and_recorded() {
-    let first = Fx::with_order(KeyOrder::RefundFirst).checked().unwrap();
-    let second = Fx::with_order(KeyOrder::ClaimFirst).checked().unwrap();
-    assert_eq!(first.order, KeyOrder::RefundFirst);
-    assert_eq!(second.order, KeyOrder::ClaimFirst);
-    assert_ne!(first.lockup_address, second.lockup_address);
+fn sw_26_only_the_refund_key_first_order_is_taken() {
+    let swap = Fx::good().checked().unwrap();
+    assert_eq!(swap.order, KeyOrder::RefundFirst);
+    // The same tree with the keys swapped: its address is refused.
+    let s = secrets();
+    let internal = crate::keys::key_agg(&[s.claim_public(), service_key()]).unwrap();
+    let swapped = {
+        let claim = crate::tree::claim_script(&s.claim_public(), &s.preimage_hash());
+        let refund = crate::tree::refund_script(&service_key(), TIMEOUT);
+        let info = bitcoin::taproot::TaprootBuilder::new()
+            .add_leaf(1, claim)
+            .unwrap()
+            .add_leaf(1, refund)
+            .unwrap()
+            .finalize(
+                &bitcoin::secp256k1::Secp256k1::verification_only(),
+                internal,
+            )
+            .unwrap();
+        bitcoin::Address::p2tr_tweaked(info.output_key(), NET)
+    };
+    assert_ne!(swapped.script_pubkey(), swap.lockup_address.script_pubkey());
+    let mut fx = Fx::good();
+    fx.address = q(&swapped.to_string());
+    assert_eq!(fx.checked().unwrap_err(), Refused::WrongLockupAddress);
 }
 
 // SW-27: the timeout
