@@ -1,0 +1,22 @@
+# Umbrel app manifest. Every field marked "verify" is to be checked on an
+# Umbrel device; see packaging/box/README.md.
+manifestVersion: 1
+id: openbmt-box
+category: bitcoin
+name: OpenBMT Box
+version: "0.1.0"
+tagline: The shop's own small server for taking bitcoin at the counter
+description: >-
+  The OpenBMT Box is the relay between a shop's devices and the place where
+  the counters' paid notices are matched to the point-of-sale system. It holds
+  no bitcoin key, derives no address, checks no payment and cannot move funds.
+developer: Avila Labs
+website: https://github.com/AvilaLabs/OpenBMT
+repo: https://github.com/AvilaLabs/OpenBMT
+support: https://github.com/AvilaLabs/OpenBMT/issues
+port: 8986
+gallery: []
+path: ""
+releaseNotes: ""
+submitter: Avila Labs
+submission: ""

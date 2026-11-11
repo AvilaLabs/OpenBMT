@@ -1,0 +1,22 @@
+# Umbrel app compose file. Every line marked "verify" is to be checked on an
+# Umbrel device; see packaging/box/README.md.
+version: "3.7"
+services:
+  app_proxy:
+    # verify: the proxy's variables, and that the Box's TCP relay passes it
+    environment:
+      APP_HOST: openbmt-box_server_1
+      APP_PORT: 8986
+  server:
+    image: openbmt-box:0.1.0 # verify: a published image pinned by digest
+    restart: on-failure
+    stdin_open: true
+    init: true
+    user: "1000:1000"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - ${APP_DATA_DIR}/data:/data # verify: owner of this directory is uid 1000

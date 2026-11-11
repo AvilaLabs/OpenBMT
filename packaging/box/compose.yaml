@@ -1,0 +1,27 @@
+# The Box on a mini PC. From the repository root:
+#   docker build -f packaging/box/Dockerfile -t openbmt-box .
+#   OPENBMT_BOX_LAN_ADDR=192.168.1.20 \
+#     docker compose -f packaging/box/compose.yaml up -d
+services:
+  box:
+    image: openbmt-box
+    restart: unless-stopped
+    # The Box reads its console from standard input; without it open the Box
+    # stops at once. An init delivers the stop signal (the Box has no handler).
+    stdin_open: true
+    init: true
+    ports:
+      # Published on the mini PC's LAN address only, never on all addresses.
+      - "${OPENBMT_BOX_LAN_ADDR:?set OPENBMT_BOX_LAN_ADDR to the mini PC's LAN address}:8986:8986"
+    volumes:
+      - box-data:/data
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 128
+
+volumes:
+  box-data:

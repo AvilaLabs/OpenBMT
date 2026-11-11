@@ -136,3 +136,64 @@ jobs:
           cargo install cargo-audit --locked --version 0.22.2
           cargo audit --deny warnings
           cargo audit --deny warnings --file fuzz/Cargo.lock
+
+  box-image:
+    name: Box container image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Build the image
+        run: docker build -f packaging/box/Dockerfile -t openbmt-box:ci .
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/box-smoke"
+          mkdir -p "$work"
+          # The Box's console is standard input, kept open until "quit".
+          mkfifo "$work/in"
+          exec 9<>"$work/in"
+          docker volume create box-smoke-data
+          docker run --name box-smoke -i --init --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --memory 256m \
+            --health-interval 2s --health-start-period 2s \
+            -v box-smoke-data:/data -p 127.0.0.1:18986:8986 \
+            openbmt-box:ci <&9 >"$work/out" 2>&1 &
+          # It listens.
+          up=0
+          for _ in $(seq 1 30); do
+            if (exec 3<>/dev/tcp/127.0.0.1/18986) 2>/dev/null; then
+              up=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$up" != 1 ]; then cat "$work/out"; exit 1; fi
+          grep -q '^listening: 0.0.0.0:8986$' "$work/out"
+          # It runs as the fixed non-root user.
+          test "$(docker exec box-smoke id -u)" = 1000
+          test "$(docker exec box-smoke id -g)" = 1000
+          # The root file system is read-only; /data is writable.
+          if docker exec box-smoke touch /nope 2>/dev/null; then
+            echo "root file system is writable"
+            exit 1
+          fi
+          docker exec box-smoke touch /data/probe
+          docker exec box-smoke rm /data/probe
+          # The health check passes.
+          for _ in $(seq 1 30); do
+            status="$(docker inspect -f '{{.State.Health.Status}}' box-smoke)"
+            [ "$status" = healthy ] && break
+            sleep 1
+          done
+          test "$status" = healthy
+          # "quit" on its console ends it with exit code 0.
+          echo quit >&9
+          code="$(docker wait box-smoke)"
+          wait
+          cat "$work/out"
+          test "$code" = 0
+          docker rm box-smoke
+          docker volume rm box-smoke-data

@@ -1,0 +1,18 @@
+# The Box image is built from the workspace manifests and crates/ only.
+target/
+**/target/
+.git
+.github
+.gitignore
+.dockerignore
+.cargo
+fuzz/
+apps/
+docs/
+scripts/
+deps/
+packaging/
+**/corpus/
+**/artifacts/
+*.md
+!crates/**/*.md
