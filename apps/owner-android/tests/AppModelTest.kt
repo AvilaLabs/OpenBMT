@@ -2015,7 +2015,7 @@ object AppModelTest {
         ok(screen.contains("Manifest.permission.POST_NOTIFICATIONS") && screen.contains("WatchPermission.mustAsk(Build.VERSION.SDK_INT, granted)"), "asked by the model's rule")
         val result = screen.substringAfter("fun Controller.watchPermissionResult").substringBefore("private fun Controller.watchTurnOnGranted")
         ok(result.contains("else showWatch(WatchPermission.refused)"), "a refusal shows the words and the setting stays off")
-        ok(source("src/android/Controller.kt").contains("if (code == REQUEST_NOTIFY) watchPermissionResult(results)"), "the answer reaches it")
+        ok(source("src/android/Controller.kt").contains("if (code == REQUEST_NOTIFY) return watchPermissionResult(results)"), "the answer reaches it")
         // Naming the key is a change of the settings that the Key app approves, through the existing queue.
         ok(screen.contains("n.queueSettings(p.settings)") && screen.contains("AppWords.editQueuedLoosening") && screen.contains("showSpend()"), "the key is named through the queue and the Key app's approval")
         ok(screen.contains("n.watchSettingsPreview(true, key)"), "from the library's own preview")
