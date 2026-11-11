@@ -419,6 +419,8 @@ fn read_settings(r: &mut Rd<'_>) -> Held {
     let tor = r.bool();
     let _wifi = r.bool();
     let _floor = r.u64();
+    let _tips_on = r.bool();
+    let _tip_percents = r.list(|r| r.u8());
     let devices = r.list(Rd::bytes);
     assert!(devices.iter().all(|d| d.len() == 32));
     let counters = r.list(|r| (r.bytes(), r.u32()));

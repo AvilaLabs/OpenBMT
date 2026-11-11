@@ -80,6 +80,8 @@ impl Edit {
             None => w.u8(0),
             Some(v) => w.u8(1).u64(v),
         };
+        // The tips fields: neither is edited here.
+        w = w.u8(0).u8(0);
         w = w.u32(u32::try_from(self.shares.len()).expect("fits"));
         for (counter, bps) in &self.shares {
             w = w.bytes(counter).u32(*bps);
