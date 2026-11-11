@@ -204,6 +204,86 @@ object AppWords {
         "Nothing to do. They arrive with the first approval that carries settings.",
     )
 
+    // ---- the till ------------------------------------------------------------------------------
+
+    val posNotConnected = w(
+        Tones.INFO, "No till connected",
+        "This phone is not reading any till, so no order is matched against the counters' sales.",
+        Who.OWNER,
+        "Choose the till's vendor, type its location, and paste a read-only sign-in, then connect.",
+    )
+
+    val posNeedsLink = w(
+        Tones.INFO, "Till needs the link",
+        "Matching a till needs the link to the counters, and this phone was set up without a relay.",
+        Who.OWNER,
+        "Nothing to do here. A setup text with a relay adds the link.",
+    )
+
+    val posTokenNotAccepted = w(
+        Tones.STOP, "Sign-in not accepted",
+        "A read-only sign-in is 1 to 512 letters, digits and signs, with no space in it.",
+        Who.OWNER,
+        "Paste it again from the till's system, or make a new one there.",
+    )
+
+    val posConnected = w(
+        Tones.GOOD, "Till connected",
+        "The till is connected, and its sign-in is sealed on this phone and is not shown again.",
+        Who.NOBODY,
+        "Nothing to do. Keep the app open: the till is read about once a minute.",
+    )
+
+    val posRemoved = w(
+        Tones.INFO, "Till taken off",
+        "The till's settings, its sign-in and the matches kept for it are removed from this phone.",
+        Who.NOBODY,
+        "Nothing to do. Connect a till again when you want its orders matched.",
+    )
+
+    val posAcknowledged = w(
+        Tones.INFO, "Alert acknowledged",
+        "The alert is acknowledged on this phone only: the Box and the counters do not learn of it.",
+        Who.NOBODY,
+        "Nothing to do.",
+    )
+
+    val posTokenMissing = w(
+        Tones.STOP, "Sign-in missing",
+        "A till is connected, but this phone holds no sign-in for it, so nothing is read.",
+        Who.OWNER,
+        "Replace the sign-in with a new read-only one from the till's system.",
+    )
+
+    val posAddressRefused = w(
+        Tones.STOP, "Till address refused",
+        "The library asked for an address that is not the till's system, so nothing was sent.",
+        Who.OWNER,
+        "Close the app and open it again. If it happens again, do not rely on the matching.",
+    )
+
+    val posPageTooLong = w(
+        Tones.STOP, "Till answer too long",
+        "The till's system sent an answer longer than 8 megabytes, so it was not read.",
+        Who.OWNER,
+        "Nothing to do now. The next read is in about a minute.",
+    )
+
+    val posReadCutOff = w(
+        Tones.STOP, "Till read cut off",
+        "One read asked for more pages than a read may take, so it was ended.",
+        Who.OWNER,
+        "Nothing to do now. The next read is in about a minute.",
+    )
+
+    fun posNotReached(problem: String?) = w(
+        Tones.STOP, "Till not reached",
+        "The till's system did not answer through Tor, so nothing was read.",
+        Who.OWNER,
+        "Check that Orbot is running and the phone is online. The next read is in about a minute.",
+        detailOf(problem),
+    )
+
     // ---- the node ----------------------------------------------------------------------------
 
     val starting = w(
@@ -320,6 +400,17 @@ object AppWords {
         "noteDismissed" to noteDismissed,
         "noLink" to noLink,
         "noSettingsYet" to noSettingsYet,
+        "posNotConnected" to posNotConnected,
+        "posNeedsLink" to posNeedsLink,
+        "posTokenNotAccepted" to posTokenNotAccepted,
+        "posConnected" to posConnected,
+        "posRemoved" to posRemoved,
+        "posAcknowledged" to posAcknowledged,
+        "posTokenMissing" to posTokenMissing,
+        "posAddressRefused" to posAddressRefused,
+        "posPageTooLong" to posPageTooLong,
+        "posReadCutOff" to posReadCutOff,
+        "posNotReached" to posNotReached("a problem"),
         "starting" to starting,
         "stopped" to stopped,
         "libraryMissing" to libraryMissing("no library"),

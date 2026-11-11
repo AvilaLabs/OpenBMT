@@ -11,7 +11,7 @@ or `apps/key-android` was changed for this app.
 **First build. No independent security audit has been done. It has not been
 run on a phone or an emulator. Not for real funds.** The APK is signed with a
 local test key; release signing is a separate step (see "Signing"). The rules
-the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-15).
+the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-19).
 
 ## What it does
 
@@ -27,6 +27,7 @@ the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-15).
 | Old addresses | The old addresses and a request for a deep check. |
 | Link and counters | The relay, each counter's records, head and last check-in. |
 | Alerts | The node's alerts, with clear. |
+| Till | Connect a Square or Clover till with a read-only token, see when it was last read, how many sales matched, and each open alert with its words and an acknowledge button. |
 | Refund notes and Notes | What the node noted about refunds and everything else. |
 | Waiting | What is signed and waits to be delivered, by kind and age (read-only). |
 | Settings | The settings the node holds, read-only. |
@@ -42,6 +43,37 @@ reading the Key app's response with the camera (it is pasted text or a file,
 behind one `ResponseSource` interface so a camera can be added without other
 changes; CAMERA is declared and unused), queuing a pairing, and any change to
 the settings (the settings view is read-only).
+
+## The till
+
+The Till screen matches the shop's orders against the counters' sales on this
+phone (`docs/OWNER-COINS-RULES.md`, OC-30 to OC-37). The owner node parses
+the vendor's pages and does the matching; the app holds the token and does
+the HTTP (OA-16 to OA-19).
+
+- **Connect.** The vendor (Square or Clover), the location id (Clover: the
+  merchant id), the exact names of the Bitcoin tender, the shop's currencies,
+  and a read-only token pasted once into a hidden field. The token is sealed
+  under its own Keystore key in its own file in `noBackupFilesDir`, is never
+  shown again and can be removed with the till. The settings go to the library
+  first, so a refused till seals nothing.
+- **Reading.** One thread reads the till while the app is on the screen, at
+  most once a minute, through Orbot (nothing is sent if Orbot does not answer),
+  with `HttpsURLConnection`: no redirect, no cache, a fixed User-Agent, 20
+  second timeouts, 8 MiB at most per page, only `connect.squareup.com` and
+  `api.clover.com`. The `Authorization` header is set in
+  `src/android/HttpsPosFetcher.kt` and nowhere else; it is never logged.
+- **Alerts.** Each open alert is shown with the library's words (why, and what
+  to do next). **Acknowledge marks it on this phone only.** No signed command
+  for it exists, so the Box and the counters do not learn of it. The screen and
+  the About screen say so.
+- **A 401 or 403** is shown with the library's words (the token was refused;
+  make a new read-only one in the till's system) and the screen offers to
+  replace the token.
+- **Not checked without a real account.** The vendors' answers are known from
+  their published documentation and the fixtures of `openbmt-pos-readers`
+  only, and the hosts and the paths are marked for verification in
+  `openbmt-owner-node/src/pos.rs`.
 
 ## Setup text
 
@@ -80,7 +112,9 @@ scan the code from it.
 - **The node runs only while visible (OA-06).** There is no service and no
   notification, so the wallet is followed only while the app is open.
 - **Threads (OA-12).** One thread pumps, one thread takes the link's turns
-  (only when there is a link), and the screen thread makes every other call.
+  (only when there is a link), one thread reads the till (only when there is a
+  link, at most once a minute, OA-18), and the screen thread makes every other
+  call.
 
 ## Build
 
@@ -99,7 +133,8 @@ never in the repository.
 
 - `tests/run-jvm.sh` runs the common model tests, then the owner app's model
   tests (words, setup text, config, request and response text, Tor gate,
-  screen choice, forms) and one test for each rule, named `oa_NN_...`. They
+  screen choice, forms, the till's token store, address check, page cap, pace
+  and read loop) and one test for each rule, named `oa_NN_...`. They
   need no device. `OPENBMT_WRITE_SCREENS=1` rewrites
   `docs/screens/owner-app.md`.
 - `tests/check-manifest.sh APK` checks the permission list, backup,
@@ -110,8 +145,9 @@ never in the repository.
 Nothing is copied from the other apps; the owner app compiles
 `apps/android-common` as it is. What is written again here, because it is the
 app's own: the Tor gate and its SOCKS5 probe (`src/model/TorGate.kt`, as the
-Counter app has), the config file, the file picker and the save-as-file
-helper (`src/android`).
+Counter app has), the till's fetcher (`src/android/HttpsPosFetcher.kt`, the
+same shape as the Counter app's `HttpsFetcher`), the config file, the file
+picker and the save-as-file helper (`src/android`).
 
 ## Signing
 
@@ -124,8 +160,12 @@ release key.
 Everything that needs a running Android: that the library loads and starts,
 how the screens look and lay out, the keyboard types of the fields, the file
 picker and the save of a request as a file, the clipboard copy and clear, the
-Keystore sealing, `FLAG_SECURE` in a screenshot and in the list of recent
-apps, the SOCKS probe against a real Orbot, the node following the chain
+Keystore sealing (of the setup and of the till's token), the hidden token
+field and its paste, a read of a real Square or Clover account through Orbot
+(the hosts, the headers a vendor needs such as Square's version, the shape of
+its answers, its rate limits and what a refused token looks like), the till
+thread starting and stopping with the app, `FLAG_SECURE` in a screenshot and
+in the list of recent apps, the SOCKS probe against a real Orbot, the node following the chain
 through Orbot, a link to a real relay and counters, the Key app's response
 round trip with a real Key app, and the node stopping cleanly when the app is
 sent to the background.

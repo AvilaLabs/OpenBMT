@@ -54,6 +54,7 @@ internal fun Controller.showHome(): Unit = withNode { n ->
     views.add(ui.button("Cash out") { showCashOut() })
     views.add(ui.button("Old addresses") { showOld() })
     views.add(ui.button("Link and counters") { showLink() })
+    views.add(ui.button("Till") { showTill() })
     views.add(ui.button("Alerts") { showAlerts() })
     views.add(ui.button("Refund notes") { showRefundNotes() })
     views.add(ui.button("Notes") { showNotes() })
@@ -600,6 +601,14 @@ internal fun Controller.showAbout() {
             ui.text("Screenshots and screen recordings of this app are blocked, because its screens show balances and addresses.", 16f),
             label("Tor"),
             ui.text("Every connection goes through Orbot on this phone. If Orbot is not running the app sends nothing and says so.", 16f),
+            label("The till"),
+            ui.text(
+                "The Till screen reads the shop's orders from Square or Clover with a read-only sign-in that you paste once. " +
+                    "The sign-in is sealed on this phone, is never shown again and can be removed. The orders are read about once a minute, " +
+                    "only while the app is on the screen, through Orbot, and are matched against the counters' sales on this phone. " +
+                    "An alert you acknowledge is marked on this phone only. It has not been tried against a real till account yet.",
+                16f,
+            ),
             label("Not built yet"),
             ui.text(
                 "The key ceremony (setup is pasted text or a file); reading the Key app's response with the camera, and showing a request as a code; " +

@@ -12,21 +12,27 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.security.GeneralSecurityException
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.SayWords
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Ui
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
+import org.openbmt.owner.PosReply
+import org.openbmt.owner.PosRequest
 
 /**
  * The root of the app: what is saved, what runs, and the pages. The node runs
  * while the activity is visible: [visible] starts it and [hidden] stops it,
- * releasing its folder. Three threads touch it (OA-12): the screen thread
+ * releasing its folder. Four threads touch it (OA-12): the screen thread
  * makes every call of the screens; one thread pumps the node (`pump(250)`);
  * one thread takes the turns of the link (`linkStep`, `deliver`) every few
- * seconds when the phone has a link. The start itself runs on a worker thread
- * before either begins. The screens are in `Screens.kt` and `Approval.kt`.
+ * seconds when the phone has a link; one thread reads the till (`posRequest`,
+ * `posReply`) at most once a minute when the phone has a link. The start
+ * itself runs on a worker thread before any of them begins. The screens are
+ * in `Screens.kt`, `PosScreen.kt` and `Approval.kt`.
  */
 class Controller(internal val act: MainActivity) {
     internal val ui = Ui(act)
@@ -52,8 +58,18 @@ class Controller(internal val act: MainActivity) {
     internal var node: OwnerNode? = null
     internal var pumpFault: SayWords? = null
     internal var linkFault: SayWords? = null
+
+    // The till (OA-16 to OA-19): its sealed token, how its last read went, and the screen's call for a read now.
+    internal val posTokens = PosTokenStore(dir, KeystoreSealer(AppFiles.POS_KEY_ALIAS))
+    internal var posFault: SayWords? = null
+    private val posWake = LinkedBlockingQueue<Boolean>()
+
+    /** Whether a till is connected, as the screen thread last saw it. The till thread reads nothing else of the screens. */
+    @Volatile
+    internal var posConnected = false
     private var pumpThread: Thread? = null
     private var linkThread: Thread? = null
+    private var posThread: Thread? = null
     private val startLock = Any()
 
     // What the open screen redraws as the node reports.
@@ -168,6 +184,13 @@ class Controller(internal val act: MainActivity) {
         node = n
         pumpFault = null
         linkFault = null
+        posFault = null
+        posWake.clear()
+        posConnected = try {
+            n.posState().setup != null
+        } catch (_: OwnerException) {
+            false
+        }
         val pump = Thread {
             while (runId == id) {
                 try {
@@ -210,7 +233,58 @@ class Controller(internal val act: MainActivity) {
             linkThread = link
             link.start()
         }
+        if (setup?.link != null) {
+            val gate = TorGate(config?.proxy ?: AppConfig.DEFAULT_PROXY)
+            val link = object : PosLink {
+                override fun request(now: Long): PosRequest = n.posRequest(now)
+
+                override fun reply(now: Long, status: Long, body: ByteArray): PosReply = n.posReply(now, status, body)
+            }
+            val till = Thread {
+                var lastStart: Long? = null
+                while (runId == id) {
+                    // Never more than one read a minute, whoever asks (OA-18).
+                    val wait = PosSchedule.waitMs(lastStart, System.currentTimeMillis())
+                    if (wait > 0 || !posConnected) {
+                        try {
+                            posWake.poll(if (wait > 0) wait else POS_IDLE_MS, TimeUnit.MILLISECONDS)
+                        } catch (_: InterruptedException) {
+                            return@Thread
+                        }
+                        continue
+                    }
+                    lastStart = System.currentTimeMillis()
+                    val outcome = readTill(link, gate)
+                    main.post {
+                        if (id == runId) {
+                            posFault = (outcome as? PosOutcome.Failed)?.words
+                            tick?.invoke()
+                        }
+                    }
+                }
+            }
+            till.isDaemon = true
+            posThread = till
+            till.start()
+        }
         showHome()
+    }
+
+    /** One read of the till, with the token read from its sealed file for this read only (OA-16). */
+    private fun readTill(link: PosLink, gate: TorGate): PosOutcome {
+        val token = try {
+            posTokens.load()
+        } catch (e: IOException) {
+            return PosOutcome.Failed(AppWords.storageUnavailable(e.message))
+        } catch (e: GeneralSecurityException) {
+            return PosOutcome.Failed(AppWords.storageUnavailable(e.message))
+        } ?: return PosOutcome.Failed(AppWords.posTokenMissing)
+        return PosPoll.readOnce(link, HttpsPosFetcher(gate), token) { nowSecs() }
+    }
+
+    /** The screen asks for a read now; it starts at once if the last one began more than a minute ago, and not before (OA-18). */
+    internal fun readTillNow() {
+        posWake.offer(true)
     }
 
     private fun onPump(reported: Boolean) {
@@ -226,8 +300,11 @@ class Controller(internal val act: MainActivity) {
         runId++
         tick = null
         linkThread?.interrupt()
+        posThread?.interrupt()
         linkThread?.let { try { it.join(1500) } catch (_: InterruptedException) { } }
         linkThread = null
+        posThread?.let { try { it.join(1500) } catch (_: InterruptedException) { } }
+        posThread = null
         pumpThread?.let { try { it.join(1500) } catch (_: InterruptedException) { } }
         pumpThread = null
         node?.let {
@@ -439,6 +516,9 @@ class Controller(internal val act: MainActivity) {
         const val VERSION = "0.1.0"
         const val REQUEST_PICK = 1
         const val LINK_EVERY_MS = 5_000L
+
+        /** How long the till thread waits before it looks again at whether a till is connected. */
+        const val POS_IDLE_MS = 5_000L
     }
 }
 

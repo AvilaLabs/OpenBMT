@@ -45,6 +45,12 @@ object AppFiles {
     /** The sealed setup text: the owner's secret and Key 1's account key (OA-01). */
     const val SETUP_FILE = "setup.obks"
 
+    /** The Keystore key that seals the till's token (OA-16). Its own key: removing the till does not touch the setup's. */
+    const val POS_KEY_ALIAS = "openbmt-owner-pos-token-v1"
+
+    /** The sealed read-only token of the till (OA-16). */
+    const val POS_TOKEN_FILE = "pos-token.obks"
+
     /** The node's own folder, inside the app's `noBackupFilesDir`. */
     const val NODE_DIR = "node"
 }

@@ -101,11 +101,13 @@ run on a phone. Not for real funds.**
 
 ## 3. Threads, requests and files
 
-- **OA-12.** Three threads touch the node. One thread calls `pump(250)` in
+- **OA-12.** Four threads touch the node. One thread calls `pump(250)` in
   a loop. One thread, started only when the phone has a link, calls
-  `linkStep` and `deliver` every 5 seconds. The screen thread makes every
+  `linkStep` and `deliver` every 5 seconds. One thread, started only when
+  the phone has a link, makes the two calls of a read of the till
+  (`posRequest` and `posReply`, OA-18). The screen thread makes every
   other call. No other thread calls the library, except the start, which
-  runs on a worker thread before either begins.
+  runs on a worker thread before any of them begins.
 - **OA-13.** A request for the Key app is shown and saved as exactly the
   bytes the library made. As a file it is those bytes. As text it is hex
   digits in lower case, 64 to a line, and reading the text back gives the
@@ -118,11 +120,65 @@ run on a phone. Not for real funds.**
   show what the node holds, in a fixed order, and change nothing. The
   node keeps no time for a signed object other than an address batch, and
   the app says so instead of showing a time it does not have.
-- **OA-15.** The app opens no connection of its own. It has no HTTP
-  client and no socket but the one greeting to the proxy of OA-05; every
+- **OA-15.** The app opens no connection of its own but two. One is the
+  greeting to the proxy of OA-05, the only socket it has. The other is the
+  read of the till (OA-17), made by one class, `HttpsPosFetcher`, through
+  that same proxy. No other file has an HTTP client or a socket; every
   other byte that leaves the phone is the node's.
 
-## 4. What these rules do not do
+## 4. The till
+
+The owner node matches the shop's till against the counters' sales
+(`docs/OWNER-COINS-RULES.md`, OC-30 to OC-37). The node parses and matches;
+the app holds the till's token and does the HTTP, because the node has no
+connection that is not Bitcoin's.
+
+- **OA-16.** The read-only token of the till is pasted once into a hidden
+  field, sealed with AES-256-GCM under its own key of the Android Keystore
+  (not the key of OA-01), and kept in its own file in `noBackupFilesDir`,
+  written by the same atomic steps. The field is emptied and the clipboard
+  is cleared as soon as the token is taken. It is 1 to 512 printable
+  characters with no space, which is the only thing Kotlin checks about it.
+  It is read from the file for one read of the till and by no other code,
+  shown on no screen, and put in no log, no error text and no address. The
+  till's settings are given to the library first, so that a refused till
+  seals nothing; a token that cannot be sealed takes the till off again.
+  Taking the till off removes the library's records of it and the file.
+- **OA-17.** A read of the till sends only what the library asked for: its
+  method, its address and its body, with the token added as an
+  `Authorization` header in Kotlin and nowhere else. The address must be
+  `https://` to `connect.squareup.com` or `api.clover.com`, with a path and
+  no port, login or space; any other is not sent. The connection goes
+  through the SOCKS proxy of OA-05 with the name left to the proxy, and if
+  the proxy does not answer nothing is sent. It follows no redirect, keeps
+  no cookie or cache, asks for no compression, uses the same generic
+  User-Agent as the counter's fetcher, and times out after 20 seconds to
+  connect, 20 seconds for each read and 60 seconds for a page. Only an
+  answer of 200 has its body read, and a page longer than 8 MiB is
+  refused whole. The status and the bytes go back to the library, which
+  parses them and says what a refusal means; the app judges nothing in a
+  page and queues no payment or refund from it.
+- **OA-18.** The till is read only while the app is on the screen, by one
+  thread that starts with the node and ends before it stops, and only when
+  the phone has a link and a till is connected. A read starts at most once
+  in 60 seconds, whoever asks: the thread works out the wait from the start
+  of the last read, a button only wakes it, and the node refuses a read that
+  starts sooner. The next page of a read that is going on is not held
+  back. A read is at most 65 requests. The rate is not a promise of what a
+  vendor allows: a vendor that asks to be read less often is shown its
+  words and read again no sooner than a minute later.
+- **OA-19.** The till screen shows the library's words and the app's own
+  for the app's own states. It shows the vendor and location, when the
+  till was last read (and that it was not, since the app was opened), the
+  number of sales matched and how many of them by order of time, and every
+  open alert with its words (why, and what to do next) and a button to
+  acknowledge it. Acknowledging is a change of this phone's own ledger: no
+  signed command exists for it, none is sent, and the Box and the counters
+  do not learn of it. The screen says so. A 401 or a 403 is shown with the
+  library's words, which say the token was refused and how to make a new
+  read-only one, and the screen offers to replace the token.
+
+## 5. What these rules do not do
 
 - **They do not protect a phone that is already lost to someone else.**
   A phone that is unlocked, rooted or running a hostile keyboard or
@@ -141,6 +197,9 @@ run on a phone. Not for real funds.**
   Bitcoin wallet.
 - **They do not keep the wallet following the chain while the app is
   closed.** OA-06 is the price of having no service.
+- **They do not say the till reads work.** The shape of Square's and
+  Clover's answers is from their published documentation and fixtures, not
+  from a real account (`docs/POS-RULES.md`).
 - **They do not say the app has been run.** Every check here is on the
   desktop JVM, on the manifest of a built APK, or on the source. What needs
   a phone is listed in `apps/owner-android/README.md`.

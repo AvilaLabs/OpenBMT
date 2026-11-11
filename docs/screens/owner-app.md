@@ -36,6 +36,17 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | noteDismissed | Note dismissed | The note about a refund request is removed from the list. | Nothing to do. | nobody |  |
 | noLink | No link to the counters | This phone was set up without a relay, so no counter can report to it. | Nothing to do here. A setup text with a relay adds the link. | the owner |  |
 | noSettingsYet | No settings yet | The phone holds no settings for the shop yet, so there is nothing to show. | Nothing to do. They arrive with the first approval that carries settings. | the owner |  |
+| posNotConnected | No till connected | This phone is not reading any till, so no order is matched against the counters' sales. | Choose the till's vendor, type its location, and paste a read-only sign-in, then connect. | the owner |  |
+| posNeedsLink | Till needs the link | Matching a till needs the link to the counters, and this phone was set up without a relay. | Nothing to do here. A setup text with a relay adds the link. | the owner |  |
+| posTokenNotAccepted | Sign-in not accepted | A read-only sign-in is 1 to 512 letters, digits and signs, with no space in it. | Paste it again from the till's system, or make a new one there. | the owner |  |
+| posConnected | Till connected | The till is connected, and its sign-in is sealed on this phone and is not shown again. | Nothing to do. Keep the app open: the till is read about once a minute. | nobody |  |
+| posRemoved | Till taken off | The till's settings, its sign-in and the matches kept for it are removed from this phone. | Nothing to do. Connect a till again when you want its orders matched. | nobody |  |
+| posAcknowledged | Alert acknowledged | The alert is acknowledged on this phone only: the Box and the counters do not learn of it. | Nothing to do. | nobody |  |
+| posTokenMissing | Sign-in missing | A till is connected, but this phone holds no sign-in for it, so nothing is read. | Replace the sign-in with a new read-only one from the till's system. | the owner |  |
+| posAddressRefused | Till address refused | The library asked for an address that is not the till's system, so nothing was sent. | Close the app and open it again. If it happens again, do not rely on the matching. | the owner |  |
+| posPageTooLong | Till answer too long | The till's system sent an answer longer than 8 megabytes, so it was not read. | Nothing to do now. The next read is in about a minute. | the owner |  |
+| posReadCutOff | Till read cut off | One read asked for more pages than a read may take, so it was ended. | Nothing to do now. The next read is in about a minute. | the owner |  |
+| posNotReached | Till not reached | The till's system did not answer through Tor, so nothing was read. | Check that Orbot is running and the phone is online. The next read is in about a minute. | the owner |  |
 | starting | Starting | The owner node is starting and looking for the network. | Wait a moment. Keep the app open. | nobody |  |
 | stopped | Owner node stopped | The owner node has stopped, so the wallet is no longer followed. | Close the app and open it again. | the owner |  |
 | libraryMissing | The app is incomplete | The part of this app that runs the owner node did not load, so nothing was done. | Do not use this copy. Install the app again from the place you got it. | the owner |  |

@@ -31,6 +31,7 @@ exactly the input bytes.
 | `pair_request_decode` | `PairRequest::from_bytes` |
 | `signed_pairing_decode` | `SignedPairing::from_bytes` |
 | `owner_command_decode` | `SignedCommand::from_bytes` |
+| `owner_pos_setup_decode` | `PosSetup::from_bytes` of `openbmt-owner-node` (the owner's till settings, magic `OBMr`); on success the settings must encode back to exactly those bytes |
 | `watch_sale_decode` | `SaleWatch::from_bytes` |
 | `net_v2_bytes` | a session on the encrypted transport after a good handshake with a fixed responder: the input is the raw stream, or the contents of valid packets (genuine or decoys) that the session decrypts and parses. It must never panic, a drop names its rule, and the bytes waiting never pass the session cap |
 | `net_book_decode` | `AddressBook::from_bytes` |

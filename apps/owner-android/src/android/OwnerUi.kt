@@ -21,6 +21,14 @@ fun numberField(context: Context, hint: String): EditText = EditText(context).ap
     filterTouchesWhenObscured = true
 }
 
+/** A field for a secret pasted once: its text is hidden, with no suggestions and no learning. */
+fun secretField(context: Context, hint: String): EditText = EditText(context).apply {
+    this.hint = hint
+    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+    imeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+    filterTouchesWhenObscured = true
+}
+
 /** A container whose content is replaced as a screen updates, so that a field elsewhere keeps its focus. */
 class Slot(context: Context) : LinearLayout(context) {
     init {

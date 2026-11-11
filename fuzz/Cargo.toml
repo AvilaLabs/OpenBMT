@@ -287,6 +287,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "owner_pos_setup_decode"
+path = "fuzz_targets/owner_pos_setup_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "books_export_decode"
 path = "fuzz_targets/books_export_decode.rs"
 test = false

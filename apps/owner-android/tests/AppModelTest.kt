@@ -29,6 +29,15 @@ import org.openbmt.owner.OutboxKind
 import org.openbmt.owner.OutboxRow
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNetwork
+import org.openbmt.owner.PosAlert
+import org.openbmt.owner.PosAlertKey
+import org.openbmt.owner.PosAlertKind
+import org.openbmt.owner.PosMethod
+import org.openbmt.owner.PosReply
+import org.openbmt.owner.PosRequest
+import org.openbmt.owner.PosState
+import org.openbmt.owner.PosSubject
+import org.openbmt.owner.PosVendor
 import org.openbmt.owner.Quoted
 import org.openbmt.owner.Route
 import org.openbmt.owner.SendKind
@@ -573,7 +582,7 @@ object AppModelTest {
         ok(controller.contains("OwnerSetup.parse(String(text, Charsets.UTF_8))"), "the setup is parsed at every start")
     }
 
-    private fun oa_12_three_threads_touch_the_node() {
+    private fun oa_12_four_threads_touch_the_node() {
         val controller = source("src/android/Controller.kt")
         ok(Regex("n\\.pump\\(").findAll(controller).count() == 1, "one place pumps")
         ok(Regex("n\\.linkStep\\(").findAll(controller).count() == 1 && Regex("n\\.deliver\\(").findAll(controller).count() == 1, "one place takes the link's turns")
@@ -583,11 +592,13 @@ object AppModelTest {
         ok(link.contains("n.linkStep(now)") && link.contains("n.deliver(now)") && link.contains("LINK_EVERY_MS"), "the link thread takes its turns every few seconds")
         ok(controller.contains("if (setup?.link != null)"), "and only when there is a link")
         ok(Controller_LINK_EVERY_MS_is_5_seconds(controller), "every 5 seconds")
-        for (name in listOf("src/android/Screens.kt", "src/android/Approval.kt")) {
+        for (name in listOf("src/android/Screens.kt", "src/android/Approval.kt", "src/android/PosScreen.kt")) {
             val src = source(name)
             ok(!src.contains(".pump(") && !src.contains(".linkStep(") && !src.contains(".deliver(") && !src.contains("Thread"), "$name makes no call of the other threads and starts no thread")
         }
         ok(controller.contains("synchronized(startLock)"), "starts do not overlap")
+        ok(Regex("n\\.posRequest\\(").findAll(controller).count() == 1 && Regex("n\\.posReply\\(").findAll(controller).count() == 1, "one place makes the two calls of a read of the till")
+        ok(controller.contains("val till = Thread {"), "the till has a thread of its own")
     }
 
     private fun Controller_LINK_EVERY_MS_is_5_seconds(controller: String) = controller.contains("LINK_EVERY_MS = 5_000L")
@@ -629,8 +640,8 @@ object AppModelTest {
         ok(AppWords.noSettingsYet.who == Who.OWNER && SayCheck.problem(AppWords.noSettingsYet) == null, "no settings yet has words")
     }
 
-    private fun oa_15_the_app_opens_no_connection_of_its_own() {
-        for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/OwnerUi.kt", "src/android/MainActivity.kt", "src/model/SetupText.kt", "src/model/AppConfig.kt", "src/model/ApprovalText.kt", "src/model/OwnerModel.kt", "src/model/AppWords.kt")) {
+    private fun oa_15_the_app_opens_no_connection_of_its_own_but_the_proxys_and_the_tills() {
+        for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/OwnerUi.kt", "src/android/MainActivity.kt", "src/model/SetupText.kt", "src/model/AppConfig.kt", "src/model/ApprovalText.kt", "src/model/OwnerModel.kt", "src/model/AppWords.kt", "src/android/PosScreen.kt", "src/model/PosModel.kt")) {
             val src = source(name)
             for (bad in listOf("HttpURLConnection", "HttpsURLConnection", "java.net.URL", "URLConnection", "OkHttp", "Socket(", "DatagramSocket", "InetAddress", "WebView", "DownloadManager")) {
                 ok(!src.contains(bad), "$name does not use $bad")
@@ -639,6 +650,230 @@ object AppModelTest {
         val gate = source("src/model/TorGate.kt")
         ok(Regex("Socket\\(").findAll(gate).count() == 1 && gate.contains("write(byteArrayOf(5, 1, 0))"), "the one socket is the greeting to the proxy")
         ok(!gate.contains("URL"), "no URL in the gate")
+        // The till's fetcher is the one other place, and it opens one connection through the proxy of OA-05.
+        val fetcher = source("src/android/HttpsPosFetcher.kt")
+        ok(Regex("openConnection\\(").findAll(fetcher).count() == 1 && fetcher.contains("Proxy.Type.SOCKS"), "the fetcher opens one connection, through the proxy")
+        for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/MainActivity.kt")) {
+            ok(!source(name).contains("openConnection"), "$name opens no connection")
+        }
+    }
+
+    // ---- the till (OA-16 to OA-19) --------------------------------------------------------------------------
+
+    private fun testSealer(): Sealer {
+        val key = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        return object : Sealer {
+            override fun seal(plain: ByteArray, aad: ByteArray): Sealed {
+                val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+                cipher.updateAAD(aad)
+                return Sealed(iv, cipher.doFinal(plain))
+            }
+
+            override fun open(sealed: Sealed, aad: ByteArray): ByteArray {
+                try {
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, sealed.iv))
+                    cipher.updateAAD(aad)
+                    return cipher.doFinal(sealed.ciphertext)
+                } catch (e: java.security.GeneralSecurityException) {
+                    throw IOException("does not decrypt", e)
+                }
+            }
+        }
+    }
+
+    private fun posRequest(url: String = "https://connect.squareup.com/v2/orders/search") = PosRequest(PosMethod.Post, url, ByteArray(0))
+
+    private fun posAlert() = PosAlert(PosAlertKey(PosAlertKind.BitcoinTip, PosSubject.Tender("O", "T")), 5, words())
+
+    private fun posReply(again: Boolean, alerts: Int = 0, moreLeft: Boolean = false) =
+        PosReply(again, moreLeft, 1, 100, 0, List(alerts) { posAlert() }, 0, 0)
+
+    /** A link that answers from a script, and remembers what it was asked. */
+    private class ScriptedLink(private val replies: ArrayDeque<Any>) : PosLink {
+        var requests = 0
+        val answers = ArrayList<Triple<Long, Long, Int>>()
+
+        override fun request(now: Long): PosRequest {
+            requests++
+            return PosRequest(PosMethod.Post, "https://connect.squareup.com/v2/orders/search", ByteArray(0))
+        }
+
+        override fun reply(now: Long, status: Long, body: ByteArray): PosReply {
+            answers.add(Triple(now, status, body.size))
+            return when (val next = replies.removeFirst()) {
+                is OwnerException -> throw next
+                is PosReply -> next
+                else -> throw IllegalStateException("a script of replies")
+            }
+        }
+    }
+
+    private fun oa_16_the_till_token_is_sealed_in_its_own_file_and_never_shown() {
+        ok(PosToken.clean("  EAAAabc-DEF_123.~+/=  ") == "EAAAabc-DEF_123.~+/=", "a token is trimmed")
+        ok(PosToken.clean("") == null && PosToken.clean("   ") == null, "an empty token is refused")
+        ok(PosToken.clean("two words") == null && PosToken.clean("tab\tin") == null && PosToken.clean("new\nline") == null, "a token with a space or a control character is refused")
+        ok(PosToken.clean("a".repeat(512)) != null && PosToken.clean("a".repeat(513)) == null, "at most 512 characters")
+        ok(PosToken.clean("café") == null, "and printable ASCII only")
+        ok((PosForms.token("x y") as? Form.Refused)?.words == AppWords.posTokenNotAccepted, "the form says why")
+        val dir = tempDir()
+        val store = PosTokenStore(dir, testSealer())
+        ok(!store.exists() && store.load() == null, "a phone with no till holds no token")
+        store.save("SECRET-token-123")
+        val onDisk = String(File(dir, AppFiles.POS_TOKEN_FILE).readBytes(), Charsets.ISO_8859_1)
+        ok(!onDisk.contains("SECRET"), "the token is not on the disk in the clear")
+        ok(dir.listFiles()!!.map { it.name } == listOf(AppFiles.POS_TOKEN_FILE), "one file and no temporary file")
+        ok(store.exists() && store.load() == "SECRET-token-123", "it reads back")
+        store.remove()
+        ok(!store.exists() && store.load() == null && dir.listFiles()!!.isEmpty(), "taking the till off removes the file")
+        store.remove()
+        clean(dir)
+        ok(AppFiles.POS_KEY_ALIAS != AppFiles.KEY_ALIAS && AppFiles.POS_TOKEN_FILE != AppFiles.SETUP_FILE, "its own key and its own file")
+        val controller = source("src/android/Controller.kt")
+        ok(controller.contains("PosTokenStore(dir, KeystoreSealer(AppFiles.POS_KEY_ALIAS))") && controller.contains("private val dir: File = act.noBackupFilesDir"), "sealed under its own Keystore key, in the folder that is not backed up")
+        // Read for one read only, by the one place that reads, and never put on a screen or in a log.
+        for (name in listOf("src/android/Screens.kt", "src/android/Approval.kt", "src/android/PosScreen.kt", "src/android/MainActivity.kt", "src/android/OwnerUi.kt")) {
+            ok(!source(name).contains("posTokens.load("), "$name does not read the token")
+        }
+        ok(Regex("posTokens\\.load\\(").findAll(controller).count() == 1, "one place reads the token")
+        val screen = source("src/android/PosScreen.kt")
+        ok(Regex("secretField\\(").findAll(screen).count() == 2 && !screen.contains("ui.field(\"Read-only") && !screen.contains("ui.field(\"New read-only"), "both token fields hide what is typed")
+        ok(source("src/android/OwnerUi.kt").contains("TYPE_TEXT_VARIATION_PASSWORD"), "a secret field is a password field")
+        ok(Regex("forget\\(token\\)").findAll(screen).count() == 2 && screen.contains("clearPrimaryClip()"), "the field and the clipboard are wiped once the token is taken")
+        for (name in listOf("src/android/PosScreen.kt", "src/android/HttpsPosFetcher.kt", "src/model/PosModel.kt", "src/android/Controller.kt")) {
+            val src = source(name)
+            for (bad in listOf("SharedPreferences", "writeText", "writeBytes", "FileOutputStream", "android.util.Log", "Log.d(", "Log.i(", "Log.e(", "println(", "printStackTrace")) {
+                ok(!src.contains(bad), "$name does not use $bad")
+            }
+        }
+        ok(!Regex("ui\\.text\\([^)]*token", RegexOption.IGNORE_CASE).containsMatchIn(screen), "no text on the till screen holds the token")
+        ok(AppWords.posConnected.what.contains("not shown again"), "the words say it is not shown again")
+    }
+
+    private fun oa_17_the_till_is_read_through_tor_from_two_known_systems() {
+        for (good in listOf("https://connect.squareup.com/v2/orders/search", "https://api.clover.com/v3/merchants/ABC123/orders?limit=100&expand=payments")) {
+            ok(PosUrl.allowed(good), "allowed: $good")
+        }
+        for (bad in listOf(
+            "http://connect.squareup.com/v2/orders/search", "https://connect.squareup.com", "https://connect.squareup.com?x=1",
+            "https://connect.squareup.com:444/v2", "https://connect.squareup.com@evil.example/v2", "https://evil.example/v2",
+            "https://connect.squareup.com.evil.example/v2", "https://user:pw@api.clover.com/v3", "https://api.clover.com/v3 x",
+            "https://api.clover.com/v3\n", "https://api.clover.com/é", "ftp://api.clover.com/v3", "", "//api.clover.com/v3",
+        )) {
+            ok(!PosUrl.allowed(bad), "refused: ${bad.take(40)}")
+        }
+        ok(PosLimits.HOSTS == setOf("connect.squareup.com", "api.clover.com"), "two systems and no other")
+        ok(PosLimits.MAX_PAGE_BYTES == 8 * 1024 * 1024, "a page is at most 8 MiB")
+        ok(PosLimits.TIMEOUT_MS == 20_000 && PosLimits.DEADLINE_MS == 60_000L, "the timeouts")
+        ok(readCapped(java.io.ByteArrayInputStream(ByteArray(10)), 10)!!.size == 10, "a page of exactly the most is read")
+        ok(readCapped(java.io.ByteArrayInputStream(ByteArray(11)), 10) == null, "a page of one byte more is refused whole")
+        ok(readCapped(java.io.ByteArrayInputStream(ByteArray(0)), 10)!!.isEmpty(), "an empty page")
+        throws("a page that takes too long") { readCapped(java.io.ByteArrayInputStream(ByteArray(5)), 10) { true } }
+        // The loop of one read, with the library and the network scripted.
+        val fetched = ArrayList<Pair<String, String>>()
+        val link = ScriptedLink(ArrayDeque(listOf(posReply(again = true, alerts = 1), posReply(again = false, alerts = 2))))
+        val done = PosPoll.readOnce(link, { r, t -> fetched.add(r.url to t); PosFetch.Reply(200, ByteArray(7)) }, "TOK", { 42L })
+        ok(done is PosOutcome.Done && done.newAlerts == 3 && !done.moreLeft && link.requests == 2, "two pages, the alerts of both counted")
+        ok(fetched.size == 2 && fetched.all { it.second == "TOK" } && link.answers == listOf(Triple(42L, 200L, 7), Triple(42L, 200L, 7)), "each answer is handed back with its status and its bytes")
+        fun failed(fetch: PosFetch): SayWords? = (PosPoll.readOnce(ScriptedLink(ArrayDeque(listOf(posReply(false)))), { _, _ -> fetch }, "T", { 1L }) as? PosOutcome.Failed)?.words
+        ok(failed(PosFetch.TorMissing) == AppWords.orbotNotRunning, "no Orbot: nothing is read, and it says so")
+        ok(failed(PosFetch.TooLong) == AppWords.posPageTooLong, "a page that is too long")
+        ok(failed(PosFetch.NotReached("SocketTimeoutException")) == AppWords.posNotReached("SocketTimeoutException"), "a till that does not answer")
+        // A refusal of the library, with its own words, ends the read.
+        val refusing = ScriptedLink(ArrayDeque(listOf(OwnerException("OC-33", "the sign-in was refused", 1, words(Tones.STOP)))))
+        val refused = PosPoll.readOnce(refusing, { _, _ -> PosFetch.Reply(401, ByteArray(0)) }, "T", { 1L })
+        ok(refused is PosOutcome.Failed && refused.words.heading == "Heading", "a 401 is shown with the library's words")
+        // An address that is not a till's is never fetched.
+        var asked = false
+        val strange = object : PosLink {
+            override fun request(now: Long) = posRequest("https://evil.example/x")
+
+            override fun reply(now: Long, status: Long, body: ByteArray): PosReply = posReply(false)
+        }
+        val blocked = PosPoll.readOnce(strange, { _, _ -> asked = true; PosFetch.Reply(200, ByteArray(0)) }, "T", { 1L })
+        ok(!asked && blocked is PosOutcome.Failed && blocked.words == AppWords.posAddressRefused, "an address the library should not give is refused")
+        // A library that always wants more is stopped.
+        val endless = object : PosLink {
+            var n = 0
+
+            override fun request(now: Long): PosRequest {
+                n++
+                return posRequest()
+            }
+
+            override fun reply(now: Long, status: Long, body: ByteArray): PosReply = posReply(true)
+        }
+        val cut = PosPoll.readOnce(endless, { _, _ -> PosFetch.Reply(200, ByteArray(0)) }, "T", { 1L })
+        ok(cut is PosOutcome.Failed && cut.words == AppWords.posReadCutOff && endless.n == PosLimits.MAX_STEPS, "a read ends after the most pages")
+        val fetcher = source("src/android/HttpsPosFetcher.kt")
+        ok(fetcher.indexOf("PosUrl.allowed(request.url)") in 1 until fetcher.indexOf("gate.available()") && fetcher.indexOf("gate.available()") in 1 until fetcher.indexOf("openConnection(proxy)"), "the address is checked, then Orbot, before anything is opened")
+        ok(fetcher.contains("Proxy(Proxy.Type.SOCKS, InetSocketAddress(hp.first, hp.second))") && !fetcher.contains("Proxy.NO_PROXY"), "through the SOCKS proxy of Orbot and never around it")
+        ok(Regex("openConnection\\(").findAll(fetcher).count() == 1, "one connection")
+        ok(fetcher.contains("instanceFollowRedirects = false") && fetcher.contains("useCaches = false") && fetcher.contains("\"Accept-Encoding\", \"identity\""), "no redirect, no cache, no compression")
+        ok(fetcher.contains("connectTimeout = PosLimits.TIMEOUT_MS") && fetcher.contains("readTimeout = PosLimits.TIMEOUT_MS") && fetcher.contains("PosLimits.DEADLINE_MS") && fetcher.contains("PosLimits.MAX_PAGE_BYTES"), "timeouts and the cap of a page")
+        ok(fetcher.contains("setRequestProperty(\"Authorization\", \"Bearer \$token\")") && Regex("\\\$token").findAll(fetcher).count() == 1, "the sign-in is set as a header here and used nowhere else")
+        ok(fetcher.contains("e.javaClass.simpleName") && !fetcher.contains("e.message"), "a failure says its kind and never its message")
+        ok(fetcher.contains("if (code == 200)"), "only an answer of 200 has its body read")
+        ok(fetcher.contains("conn.requestMethod = if (request.method == PosMethod.Post) \"POST\" else \"GET\""), "only the method the library asked for")
+        for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/PosScreen.kt", "src/model/PosModel.kt")) {
+            ok(!source(name).contains("Authorization"), "$name sets no header")
+        }
+        val screen = source("src/android/PosScreen.kt")
+        ok(!screen.contains("n.queue") && !screen.contains("n.cashOut") && !screen.contains("n.queueRefund"), "the till screen reads orders and queues no payment and no refund")
+    }
+
+    private fun oa_18_the_till_is_read_while_visible_at_most_once_a_minute() {
+        ok(PosLimits.MIN_POLL_MS == 60_000L, "a minute")
+        ok(PosSchedule.waitMs(null, 5_000) == 0L, "a first read may start at once")
+        ok(PosSchedule.waitMs(1_000, 1_000 + 59_999) == 1L && PosSchedule.waitMs(1_000, 1_000 + 60_000) == 0L && PosSchedule.waitMs(1_000, 500_000) == 0L, "a minute after the start of the last")
+        ok(PosSchedule.waitMs(100_000, 10_000) == 60_000L, "a clock that went back waits no more than a minute")
+        val controller = source("src/android/Controller.kt")
+        ok(Regex("n\\.posRequest\\(").findAll(controller).count() == 1 && Regex("n\\.posReply\\(").findAll(controller).count() == 1, "one place makes the two calls of a read")
+        val till = controller.substringAfter("val till = Thread {").substringBefore("till.isDaemon")
+        ok(till.contains("PosSchedule.waitMs(lastStart, System.currentTimeMillis())") && till.indexOf("PosSchedule.waitMs(") < till.indexOf("readTill(link, gate)"), "the pace is worked out before every read")
+        ok(till.contains("lastStart = System.currentTimeMillis()") && till.contains("posWake.poll(") && till.contains("continue"), "a call for a read now waits out the rest of the minute")
+        ok(till.contains("!posConnected"), "nothing is read when no till is connected")
+        val adopt = controller.substringAfter("private fun adopt(").substringBefore("private fun readTill(")
+        ok(adopt.contains("if (setup?.link != null)") && adopt.contains("posThread = till"), "the thread runs only with a link, and only while the node runs")
+        val stop = controller.substringAfter("private fun stopNode()").substringBefore("// ---- pages")
+        ok(stop.contains("posThread?.interrupt()") && stop.indexOf("posThread?.interrupt()") < stop.indexOf("it.stop()"), "it is ended before the node is stopped")
+        ok(stop.contains("posThread = null"), "and let go of")
+        ok(controller.contains("PosPoll.readOnce(link, HttpsPosFetcher(gate), token)") && controller.contains("TorGate(config?.proxy ?: AppConfig.DEFAULT_PROXY)"), "through Orbot's address")
+        for (name in listOf("src/android/Screens.kt", "src/android/Approval.kt", "src/android/PosScreen.kt")) {
+            val src = source(name)
+            ok(!src.contains(".posRequest(") && !src.contains(".posReply(") && !src.contains("Thread"), "$name makes no call of the till thread and starts no thread")
+        }
+        ok(source("src/android/PosScreen.kt").contains("readTillNow()") && controller.contains("posWake.offer(true)"), "a button asks, and the thread decides")
+        ok(controller.contains("POS_IDLE_MS = 5_000L"), "an idle thread looks again every 5 seconds")
+    }
+
+    private fun oa_19_the_till_screen_shows_what_the_library_says_and_acknowledges_on_the_phone() {
+        val setup = PosForms.setup(1, " MERCH1 ", "Bitcoin\n Lightning ,Bitcoin", "usd EUR, gbp")
+        ok(setup.vendor == PosVendor.Clover && setup.location == "MERCH1", "the vendor and the location as typed, trimmed")
+        ok(setup.tenderNames == listOf("Bitcoin", "Lightning", "Bitcoin") && setup.currencies == listOf("usd", "EUR", "gbp"), "the lists are split and nothing is judged here")
+        ok(PosForms.setup(0, "L", "x", "USD").vendor == PosVendor.Square, "Square is the first choice")
+        ok(PosForms.list(" , \n ").isEmpty(), "empty entries are left out")
+        val state = PosState(setup, 100, listOf(posAlert()), 1, 4, 3, 1, 0)
+        ok(PosLines.lastRead(160, 100) == "Last read 60 seconds ago.", "the time of the last read: ${PosLines.lastRead(160, 100)}")
+        ok(PosLines.lastRead(160, null) == "Not read yet since the app was opened.", "or that there was none")
+        ok(PosLines.counts(state) == "3 sales matched. 1 of them by order of time, not exactly. 1 alert.", "the matches count and the alerts: ${PosLines.counts(state)}")
+        ok(PosLines.counts(PosState(setup, null, emptyList(), 0, 0, 1, 0, 0)) == "1 sale matched. No alerts.", "one match, none by order")
+        ok(PosLines.till(setup) == "Clover, MERCH1. Bitcoin tender: Bitcoin, Lightning, Bitcoin. Currencies: usd, EUR, gbp.", "the till in a line")
+        val screen = source("src/android/PosScreen.kt")
+        ok(screen.contains("n.posState()") && screen.contains("a.words.say()"), "the alerts are shown with the library's words")
+        ok(screen.contains("PosLines.lastRead(nowSecs(), s.lastPollAt)") && screen.contains("PosLines.counts(s)"), "the last read and the matches count")
+        ok(screen.contains("\"Acknowledge this alert\"") && screen.contains("n.posAcknowledge(nowSecs(), a.key)"), "an alert can be acknowledged")
+        ok(!screen.contains("queueSettings") && !screen.contains("signBatch") && !screen.contains("n.clearAlert("), "acknowledging sends no signed command")
+        ok(AppWords.posAcknowledged.what.contains("on this phone only") && AppWords.posAcknowledged.what.contains("do not learn"), "and says that it stays on the phone")
+        ok(screen.contains("n.posSetup(args)") && screen.indexOf("n.posSetup(args)") < screen.indexOf("sealToken(t, n, rollback = true)"), "the library judges the till before the token is sealed")
+        ok(screen.contains("rollback") && screen.contains("n.posRemove()"), "a token that cannot be sealed takes the till off again")
+        ok(source("src/android/Screens.kt").contains("ui.button(\"Till\") { showTill() }"), "the home screen has the button")
+        ok(source("src/android/Screens.kt").contains("It has not been tried against a real till account yet."), "the About screen says it has not been tried")
+        for (w in listOf(AppWords.posNotConnected, AppWords.posNeedsLink, AppWords.posTokenNotAccepted, AppWords.posConnected, AppWords.posRemoved, AppWords.posAcknowledged, AppWords.posTokenMissing, AppWords.posAddressRefused, AppWords.posPageTooLong, AppWords.posReadCutOff, AppWords.posNotReached("x"))) {
+            ok(SayCheck.problem(w) == null && (w.tone != Tones.STOP || w.who != Who.NOBODY), "every till state has words that pass the checks: ${w.heading}")
+        }
     }
 
     // ---- the rules and their tests -----------------------------------------------------------------------------
@@ -665,7 +900,7 @@ object AppModelTest {
         for (id in ids) ok(id in rules, "oa_${id}_... tests a rule that is in docs/OWNER-APP-RULES.md")
         for (line in rulesMd.readLines()) ok(line.length <= 80 || line.startsWith("|"), "a line of the rules is at most 80 characters: ${line.take(40)}")
         val text = rulesMd.readText()
-        ok(text.contains("## 4. What these rules do not do"), "the rules say what they do not do")
+        ok(text.contains("## 5. What these rules do not do"), "the rules say what they do not do")
         ok(text.lines().any { it.startsWith("Status:") }, "the status line")
     }
 
