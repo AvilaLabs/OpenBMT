@@ -59,6 +59,11 @@
 #  13. A sale that was never paid closes no order.
 #  14. An unpaired Box with a token in place gives the connector no token and
 #      reads nothing.
+#  15. A Box run with --no-console (no standard input, an invitation only
+#      from a file), ended by SIGKILL after the invitation, the welcome, the
+#      mailboxes, a message and new settings: every restart finds the same
+#      key and the right state with no error line, a message accepted before
+#      a kill is read after it (BX-52), and SIGTERM ends it with exit 143.
 #
 # Environment:
 #   DRILL_DIR      scratch directory (default: a new one under ~/.cache/openbmt)
@@ -578,12 +583,100 @@ else
 fi
 stop_box 2
 
+# ---- 15 --------------------------------------------------------------------------
+
+say "15. A Box without a console, ended by SIGKILL at several points"
+B5="$BASE/box5"
+K5="$BASE/keyapp5"
+mkdir -p "$B5" "$K5"
+A5="127.0.0.1:$PORT2"
+NC_PID=
+NC_LOG="$BASE/box-5.log"
+NC_BAD=
+# Start the Box with --no-console and no standard input; wait for its state.
+start_nc() { # extra arguments
+  : >"$NC_LOG"
+  "$BOX_BIN" "$B5" "$A5" --no-console "$@" </dev/null >"$NC_LOG" 2>&1 &
+  NC_PID=$!
+  for _ in $(seq 1 40); do
+    grep -q '^state: ' "$NC_LOG" && return 0
+    kill -0 "$NC_PID" 2>/dev/null || return 1
+    sleep 0.25
+  done
+  return 1
+}
+# SIGKILL it at once, as the power going would.
+kill9_nc() {
+  kill -9 "$NC_PID" 2>/dev/null
+  wait "$NC_PID" 2>/dev/null
+  NC_PID=
+}
+# Start again and expect `state` and the same key. A Box that cannot read a
+# file stops with its words on the error stream and prints no state.
+restart_nc() { # expected state, label
+  if ! start_nc; then
+    NC_BAD="$NC_BAD; $2: did not start: $(cat "$NC_LOG")"
+    return 1
+  fi
+  local s k
+  s=$(sed -n 's/^state: //p' "$NC_LOG")
+  k=$(sed -n 's/^key: //p' "$NC_LOG")
+  [ -z "${NC_KEY:-}" ] && NC_KEY=$k
+  if [ "$s" != "$1" ] || [ "$k" != "$NC_KEY" ]; then
+    NC_BAD="$NC_BAD; $2: state '$s' (wanted '$1'), key '$k' (wanted '$NC_KEY'), log: $(cat "$NC_LOG")"
+  fi
+}
+NC_KEY=
+INV5=$(pair invite "$K5")
+printf '%s\n' "$INV5" >"$BASE/invitation5.txt"
+start_nc --invitation-file "$BASE/invitation5.txt" || NC_BAD="$NC_BAD; first start: $(cat "$NC_LOG")"
+NC_KEY=$(sed -n 's/^key: //p' "$NC_LOG")
+note "first start: $(sed -n 's/^state: //p' "$NC_LOG"); invitation file left: $([ -e "$BASE/invitation5.txt" ] && echo yes || echo no)"
+# (a) right after the invitation was stored.
+kill9_nc
+restart_nc "invitation open" "after the invitation"
+CLAIM5=$(pair claim "$K5" "$A5")
+WELCOME5=$(pair welcome "$K5" "$A5")
+# (b) right after the welcome was accepted.
+kill9_nc
+restart_nc paired "after the welcome"
+M5=$(pair mailbox "$K5" "$A5" c1; pair mailbox "$K5" "$A5" owner)
+# (c) right after the mailboxes were made.
+kill9_nc
+restart_nc paired "after the mailboxes"
+SEND5=$(pair send "$K5" "$A5" c1 owner "survives-a-kill")
+# (d) right after a message was accepted.
+kill9_nc
+restart_nc paired "after the message"
+RECV5=$(pair recv "$K5" "$A5" owner)
+# (e) right after new settings were sent (applied or not yet, never torn).
+SET5=$(pair settings "$K5" "$A5" 2 drop-c2)
+kill9_nc
+restart_nc paired "after the settings"
+# (f) and once more, with a kill straight after a start.
+kill9_nc
+restart_nc paired "after a second kill"
+# A stop by SIGTERM, the default action, as `docker stop` gives it.
+kill -TERM "$NC_PID" 2>/dev/null
+wait "$NC_PID" 2>/dev/null
+RC15=$?
+NC_PID=
+restart_nc paired "after SIGTERM"
+note "claim: $CLAIM5 / welcome: $WELCOME5 / mailboxes: $(tr '\n' ' ' <<<"$M5") / send: $SEND5 / recv: $RECV5 / settings: $SET5"
+if [ -z "$NC_BAD" ] && grep -q '^claim verified' <<<"$CLAIM5" && [ "$WELCOME5" = welcomed ] &&
+  grep -q 'message from c1: survives-a-kill' <<<"$RECV5" && [ "$RC15" = 143 ]; then
+  pass 15 "a Box with no console and no standard input, killed with SIGKILL after the invitation, the welcome, the mailboxes, a message and new settings, and once more, started again every time with the same key and the right state, and the message sent before a kill was read after it; SIGTERM ended it with exit 143"
+else
+  bad 15 "exit after SIGTERM $RC15; claim: $CLAIM5; welcome: $WELCOME5; recv: $RECV5; problems: ${NC_BAD:-none}"
+fi
+if [ -n "$NC_PID" ]; then kill9_nc; fi
+
 # ---- result ----------------------------------------------------------------------
 
 say "Result"
 failed=0
 notrun=0
-for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do
+for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   printf '%s  step %s\n' "${RESULT[$n]:-FAIL}" "$n"
   case "${RESULT[$n]:-FAIL}" in
     PASS) ;;

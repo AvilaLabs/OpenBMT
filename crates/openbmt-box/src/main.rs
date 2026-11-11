@@ -1,7 +1,7 @@
 //! The Box as a program.
 //!
 //! ```text
-//! openbmt-box <data dir> <bind addr> [--invitation-file <path>]
+//! openbmt-box <data dir> <bind addr> [--invitation-file <path>] [--no-console]
 //! ```
 //!
 //! It prints its key's four fingerprint words and its key in hex, then the
@@ -12,9 +12,15 @@
 //! `quit`. For the POS (BX-41): `pos-token` reads the POS sign-in from the
 //! next line of standard input and stores it, and `pos` prints the state of
 //! the POS side, never the token. The program runs until the end of standard
-//! input, `quit` or SIGTERM. It holds no vendor's connector, so on its own it
+//! input or `quit`. It holds no vendor's connector, so on its own it
 //! takes the counters' notices no further than the Box's files: a connector
 //! is added by the program that links the library.
+//!
+//! With `--no-console` the Box reads no standard input (a service has none)
+//! and an invitation comes only from `--invitation-file`. It runs until the
+//! process is ended by a signal. It installs no handler: SIGTERM and even
+//! SIGKILL leave nothing half written, because every file is replaced whole
+//! or appended with a tail that is cut at the next start (BX-52).
 
 use std::io::{self, BufRead, Write};
 use std::net::SocketAddr;
@@ -35,7 +41,9 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn usage() -> ExitCode {
-    eprintln!("usage: openbmt-box <data dir> <bind addr> [--invitation-file <path>]");
+    eprintln!(
+        "usage: openbmt-box <data dir> <bind addr> [--invitation-file <path>] [--no-console]"
+    );
     ExitCode::from(2)
 }
 
@@ -70,9 +78,14 @@ fn main() -> ExitCode {
         return bad_arguments();
     };
     let mut invitation_file: Option<PathBuf> = None;
+    let mut no_console = false;
     while let Some(arg) = args.next() {
-        match (arg.as_str(), args.next()) {
-            ("--invitation-file", Some(path)) => invitation_file = Some(PathBuf::from(path)),
+        match arg.as_str() {
+            "--invitation-file" => match args.next() {
+                Some(path) => invitation_file = Some(PathBuf::from(path)),
+                None => return bad_arguments(),
+            },
+            "--no-console" => no_console = true,
             _ => return bad_arguments(),
         }
     }
@@ -115,6 +128,12 @@ fn main() -> ExitCode {
         }
     }
     say_all(state_lines(runner.status()));
+    if no_console {
+        // The runner's threads do the work; this one waits to be ended.
+        loop {
+            std::thread::park();
+        }
+    }
     let mut lines = io::stdin().lock().lines();
     while let Some(line) = lines.next() {
         let Ok(line) = line else { break };

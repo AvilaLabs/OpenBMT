@@ -163,6 +163,12 @@ screen and not a shared computer.
 - **BX-51.** A Box that cannot read its key, its roots or its settings
   does not start as paired and does not make new ones over them: it stops
   and says which file is damaged.
+- **BX-52.** A Box may be ended at any instant, by any signal, SIGKILL
+  included: it installs no handler and needs none. At the next start every
+  file holds either the value from before the write or the one after it, and
+  a temporary file left behind is overwritten by the next write. A Box run
+  as a service (`--no-console`) reads no standard input, takes an invitation
+  only from `--invitation-file` and runs until a signal ends it.
 
 ## 5a. What the code fixes
 

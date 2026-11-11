@@ -31,17 +31,23 @@ From the repository root:
 Or with docker alone:
 
     docker volume create box-data
-    docker run -d -i --init --read-only --cap-drop ALL \
+    docker run -d --init --read-only --cap-drop ALL \
       --security-opt no-new-privileges -v box-data:/data \
       -p 192.168.1.20:8986:8986 openbmt-box
 
-Two things the Box needs from whatever starts it:
+The image starts the Box with `--no-console`: it reads no standard input and
+runs until a signal ends it, so the container needs no terminal. An
+invitation (BX-12) is given as a file: put it in the volume and start the
+container with the extra arguments `--invitation-file /data/invitation.txt`.
+The Box reads the file once and deletes it.
 
-- Standard input open (`-i`, `stdin_open`). The Box reads its console from
-  standard input and stops when it ends. The invitation (BX-12) is typed
-  there: `docker attach <container>`, then `invite <text>`.
-- An init (`--init`, `init: true`). The Box has no handler for SIGTERM, and
-  a process that is the container's first has no default action for it.
+The Box installs no signal handler, so `docker stop` ends it by the default
+action of SIGTERM. That loses nothing: every file the Box writes is replaced
+whole, and a log's torn tail is cut at the next start (BX-50, BX-52; the
+Box's tests kill it with SIGKILL at several points and start it again). The
+Box does need an init (`--init`, `init: true`): a process that is the
+container's first has no default action for SIGTERM. A stopped container
+exits with 143 (128 and 15), not 0.
 
 The address the Box listens on inside the container is `OPENBMT_BOX_BIND`
 (default `0.0.0.0:8986`). The health check is a TCP connect to that port; the
@@ -70,9 +76,9 @@ None of the Umbrel files has been run on an Umbrel device.
 - The `app_proxy` variables (`APP_HOST`, `APP_PORT`) and the container name
   `openbmt-box_server_1`. The proxy speaks HTTP; the Box's port speaks the
   Box's own framing over TCP, so the proxy may not be the way to reach it.
-- `restart: on-failure`, `stdin_open` and `init` under Umbrel's runner, which
-  has no terminal to type the invitation into: `--invitation-file` may be the
-  only way in.
+- `restart: on-failure` and `init` under Umbrel's runner, and how an
+  invitation file reaches `${APP_DATA_DIR}/data` (the Box has no console
+  there).
 - That `${APP_DATA_DIR}/data` can be written by uid 1000.
 - `image: openbmt-box:0.1.0`: a published image, pinned by digest, is needed;
   none is published.

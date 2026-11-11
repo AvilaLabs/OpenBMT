@@ -10,10 +10,11 @@ const ERRORS: [&str; 4] = [
     include_str!("../files.rs"),
     include_str!("../pos.rs"),
 ];
-const TEST_SOURCES: [&str; 3] = [
+const TEST_SOURCES: [&str; 4] = [
     include_str!("state.rs"),
     include_str!("runner.rs"),
     include_str!("pos.rs"),
+    include_str!("../../tests/no_console.rs"),
 ];
 
 /// Rules this crate does not test, each with the reason.
@@ -37,10 +38,10 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_twenty_three_rules() {
+fn the_rules_file_defines_twenty_four_rules() {
     let all = all_rules();
-    assert_eq!(all.len(), 23);
-    assert!(all.contains("BX-01") && all.contains("BX-43") && all.contains("BX-51"));
+    assert_eq!(all.len(), 24);
+    assert!(all.contains("BX-01") && all.contains("BX-43") && all.contains("BX-52"));
 }
 
 #[test]

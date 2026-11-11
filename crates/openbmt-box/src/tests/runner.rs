@@ -638,6 +638,39 @@ fn bx_51_a_paired_box_whose_files_are_damaged_does_not_start() {
 }
 
 #[test]
+fn bx_52_a_temporary_file_left_by_a_killed_write_is_ignored_and_then_replaced() {
+    let dir = TempDir::new("leftover");
+    let (r, clock) = start(&dir);
+    pair_ok(&r);
+    let key = r.device_id();
+    r.stop();
+    // A write cut short leaves a temporary file next to the whole one.
+    for name in ["box.key", "roots", "settings", "link-inbox", "link-outbox"] {
+        std::fs::write(dir.path().join(format!("{name}.tmp")), b"half").unwrap();
+    }
+    let again = start_in(&dir, &clock).unwrap();
+    assert_eq!(again.device_id(), key);
+    assert_eq!(again.status(), BoxStatus::Paired);
+}
+
+#[test]
+fn bx_52_the_files_are_whole_after_pairing_when_nothing_more_is_written() {
+    let dir = TempDir::new("whole");
+    let (r, clock) = start(&dir);
+    pair_ok(&r);
+    let mut before = r.members();
+    // The runner is dropped without stop(): nothing more is written, as
+    // after a kill.
+    drop(r);
+    let again = start_in(&dir, &clock).unwrap();
+    assert_eq!(again.status(), BoxStatus::Paired);
+    let mut after = again.members();
+    before.sort();
+    after.sort();
+    assert_eq!(after, before);
+}
+
+#[test]
 fn bx_50_the_files_of_a_running_box_are_private() {
     use std::os::unix::fs::PermissionsExt;
     let dir = TempDir::new("private");

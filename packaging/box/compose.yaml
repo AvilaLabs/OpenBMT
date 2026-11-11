@@ -6,9 +6,8 @@ services:
   box:
     image: openbmt-box
     restart: unless-stopped
-    # The Box reads its console from standard input; without it open the Box
-    # stops at once. An init delivers the stop signal (the Box has no handler).
-    stdin_open: true
+    # The Box runs without a console (--no-console, set by the image). An
+    # init delivers the stop signal: the Box has no handler of its own.
     init: true
     ports:
       # Published on the mini PC's LAN address only, never on all addresses.

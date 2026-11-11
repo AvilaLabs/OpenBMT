@@ -37,13 +37,14 @@ VOLUME /data
 ENV OPENBMT_BOX_BIND=0.0.0.0:8986
 EXPOSE 8986
 
-# The Box reads its console from standard input and stops when that ends, so
-# the container must be started with standard input open (docker run -i,
-# compose stdin_open). An invitation is typed there, or given with
-# --invitation-file. The Box handles no SIGTERM of its own; start the
-# container with an init (docker run --init, compose init) so that a stop is
-# delivered as it should be.
-ENTRYPOINT ["/bin/sh", "-c", "exec /usr/local/bin/openbmt-box /data \"$OPENBMT_BOX_BIND\" \"$@\"", "openbmt-box"]
+# The Box runs without its console (--no-console): it reads no standard
+# input, so the container needs none open, and an invitation is given with
+# --invitation-file (a path under /data, since the file is read once and
+# deleted). The Box installs no signal handler; a stop is the default action
+# of SIGTERM, which is safe because every file it writes is replaced whole
+# (BX-50, BX-52). Start the container with an init (docker run --init,
+# compose init) so that the stop reaches it.
+ENTRYPOINT ["/bin/sh", "-c", "exec /usr/local/bin/openbmt-box /data \"$OPENBMT_BOX_BIND\" --no-console \"$@\"", "openbmt-box"]
 
 # The Box has no health answer of its own, so the check is a TCP connect to
 # its port, with bash's /dev/tcp (bash is in the slim image).

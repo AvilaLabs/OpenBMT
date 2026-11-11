@@ -10,7 +10,6 @@ services:
   server:
     image: openbmt-box:0.1.0 # verify: a published image pinned by digest
     restart: on-failure
-    stdin_open: true
     init: true
     user: "1000:1000"
     read_only: true

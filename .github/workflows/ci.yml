@@ -150,28 +150,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          work="$RUNNER_TEMP/box-smoke"
-          mkdir -p "$work"
-          # The Box's console is standard input, kept open until "quit".
-          mkfifo "$work/in"
-          exec 9<>"$work/in"
           docker volume create box-smoke-data
-          docker run --name box-smoke -i --init --read-only --cap-drop ALL \
+          docker run -d --name box-smoke --init --read-only --cap-drop ALL \
             --security-opt no-new-privileges --memory 256m \
             --health-interval 2s --health-start-period 2s \
             -v box-smoke-data:/data -p 127.0.0.1:18986:8986 \
-            openbmt-box:ci <&9 >"$work/out" 2>&1 &
+            openbmt-box:ci
+          listening() {
+            for _ in $(seq 1 30); do
+              if (exec 3<>/dev/tcp/127.0.0.1/18986) 2>/dev/null; then
+                return 0
+              fi
+              sleep 1
+            done
+            docker logs box-smoke
+            return 1
+          }
           # It listens.
-          up=0
-          for _ in $(seq 1 30); do
-            if (exec 3<>/dev/tcp/127.0.0.1/18986) 2>/dev/null; then
-              up=1
-              break
-            fi
-            sleep 1
-          done
-          if [ "$up" != 1 ]; then cat "$work/out"; exit 1; fi
-          grep -q '^listening: 0.0.0.0:8986$' "$work/out"
+          listening
+          docker logs box-smoke | grep -q '^listening: 0.0.0.0:8986$'
+          key="$(docker logs box-smoke | sed -n 's/^key: //p')"
+          test -n "$key"
           # It runs as the fixed non-root user.
           test "$(docker exec box-smoke id -u)" = 1000
           test "$(docker exec box-smoke id -g)" = 1000
@@ -189,11 +188,22 @@ jobs:
             sleep 1
           done
           test "$status" = healthy
-          # "quit" on its console ends it with exit code 0.
-          echo quit >&9
-          code="$(docker wait box-smoke)"
-          wait
-          cat "$work/out"
-          test "$code" = 0
+          # A stop is SIGTERM through the init: the Box has no handler, so
+          # it ends with 143 (128 + 15); 0 is accepted too.
+          docker stop box-smoke
+          code="$(docker inspect -f '{{.State.ExitCode}}' box-smoke)"
+          echo "exit code $code"
+          case "$code" in 0|143) ;; *) docker logs box-smoke; exit 1 ;; esac
+          # Started again, it listens with its data intact: the same key
+          # read back from /data, and a second state line with no error
+          # before it (a damaged file would stop the start).
+          docker start box-smoke
+          listening
+          test "$(docker exec box-smoke ls /data | grep -c '^box.key$')" = 1
+          docker logs box-smoke
+          test "$(docker logs box-smoke | grep -c '^state: ')" = 2
+          test "$(docker logs box-smoke | grep -c "^key: $key\$")" = 2
+          test "$(docker inspect -f '{{.State.Running}}' box-smoke)" = true
+          docker stop box-smoke
           docker rm box-smoke
           docker volume rm box-smoke-data
