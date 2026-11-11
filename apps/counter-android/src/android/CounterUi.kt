@@ -39,15 +39,20 @@ fun amountField(context: Context, hint: String): EditText = EditText(context).ap
     Ui(context).style(this)
 }
 
-/** A container whose content is replaced as a screen updates, so that a field elsewhere keeps its focus. */
+/**
+ * A container whose content is replaced as a screen updates, so that a field elsewhere keeps its focus. With
+ * nothing in it, it takes no room (and so no gap between the blocks of a page).
+ */
 class Slot(context: Context) : LinearLayout(context) {
     init {
         orientation = VERTICAL
+        visibility = GONE
     }
 
     fun show(vararg views: View) {
         removeAllViews()
         for (v in views) addView(v)
+        visibility = if (views.isEmpty()) GONE else VISIBLE
     }
 }
 
