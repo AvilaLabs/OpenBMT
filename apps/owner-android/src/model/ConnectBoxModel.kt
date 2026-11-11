@@ -62,12 +62,13 @@ object ConnectBoxModel {
 
     /**
      * [setup] with the link of a paired Box: the lines of a link it held (route, key, counters and the two
-     * intervals) are replaced, and the Box is the relay, with the default intervals. Null when there are no
-     * counters or more than the setup text holds, for a link needs one to [OwnerSetup.MAX_COUNTERS]. The
-     * caller checks the text with [OwnerSetup.parse] before it is saved.
+     * intervals) are replaced, and the Box is the relay, with the default intervals. The counters the settings
+     * name are written as counter lines, up to [OwnerSetup.MAX_COUNTERS]; they are only a start (LK-67), the link
+     * follows the settings, so a link with no counter line is valid. The caller checks the text with
+     * [OwnerSetup.parse] before it is saved.
      */
-    fun withLink(setup: String, address: String, boxKey: ByteArray, counters: List<ByteArray>): String? {
-        if (counters.isEmpty() || counters.size > OwnerSetup.MAX_COUNTERS) return null
+    fun withLink(setup: String, address: String, boxKey: ByteArray, counters: List<ByteArray>): String {
+        val counters = counters.take(OwnerSetup.MAX_COUNTERS)
         val lines = setup.split('\n').let { if (it.last().isEmpty()) it.dropLast(1) else it }.map { it.trimEnd('\r') }
         val kept = lines.filter { l -> LINK_KEYS.none { l.startsWith("$it: ") } }
         return (kept + linkLines(address, boxKey, counters)).joinToString("\n") + "\n"

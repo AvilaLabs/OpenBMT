@@ -1707,27 +1707,30 @@ object AppModelTest {
         val c2 = ByteArray(32) { (0x20 + it).toByte() }
         val onion = "a".repeat(56) + ".onion:8080"
         val base = setupText(extra = listOf("peer: 10.0.0.5:8333"))
-        val direct = ConnectBoxModel.withLink(base, "192.168.1.20:8080", key, listOf(c1, c2))!!
+        val direct = ConnectBoxModel.withLink(base, "192.168.1.20:8080", key, listOf(c1, c2))
         val link = OwnerSetup.parse(direct).link!!
         ok((link.route as RelayRoute.Direct).addr == "192.168.1.20:8080", "the route is the Box's address")
         ok(link.relayKey.contentEquals(key) && link.counters.size == 2 && link.counters[0].contentEquals(c1), "the relay key is the Box's key and the counters are the settings'")
         ok(link.heartbeatEverySecs == 0L && link.checkInGraceSecs == 0L, "the intervals are the defaults")
         ok(OwnerSetup.parse(direct).peers == listOf("10.0.0.5:8333"), "nothing else of the setup changes")
-        val viaOnion = OwnerSetup.parse(ConnectBoxModel.withLink(base, onion, key, listOf(c1))!!).link!!
+        val viaOnion = OwnerSetup.parse(ConnectBoxModel.withLink(base, onion, key, listOf(c1))).link!!
         val route = viaOnion.route as RelayRoute.Onion
         ok(route.host == "a".repeat(56) + ".onion" && route.port == 8080, "an onion route")
         // A link the setup held is replaced, with its intervals.
         val old = setupText(extra = linkLines() + listOf("heartbeat-every: 30", "check-in-grace: 600"))
-        val replaced = OwnerSetup.parse(ConnectBoxModel.withLink(old, "192.168.1.20:8080", key, listOf(c1))!!).link!!
+        val replaced = OwnerSetup.parse(ConnectBoxModel.withLink(old, "192.168.1.20:8080", key, listOf(c1))).link!!
         ok(replaced.counters.size == 1 && replaced.heartbeatEverySecs == 0L && replaced.relayKey.contentEquals(key), "a link already held is replaced")
-        ok(ConnectBoxModel.withLink(base, "192.168.1.20:8080", key, emptyList()) == null, "no counter, no link")
-        ok(ConnectBoxModel.withLink(base, "192.168.1.20:8080", key, List(17) { i -> ByteArray(32) { b -> (i + b).toByte() } }) == null, "more counters than a setup holds, no link")
+        // LK-67: the link follows the settings, so a link needs no counter line.
+        val none = OwnerSetup.parse(ConnectBoxModel.withLink(base, "192.168.1.20:8080", key, emptyList())).link!!
+        ok(none.counters.isEmpty() && none.relayKey.contentEquals(key), "no counter, the link is still saved")
+        val many = OwnerSetup.parse(ConnectBoxModel.withLink(base, "192.168.1.20:8080", key, List(17) { i -> ByteArray(32) { b -> (i + b).toByte() } })).link!!
+        ok(many.counters.size == OwnerSetup.MAX_COUNTERS, "more counters than a setup holds: the first ones are written")
         val save = connectBox().substringAfter("private fun Controller.showSaveLink(")
         ok(save.contains("OwnerLock.unlock(stored, typed)") && save.contains("setupFile().save(OwnerLock.lock(typed, bytes))"), "the setup is opened and locked again with the same PIN")
         ok(save.contains("triedPin(") && !save.contains("SealedFile("), "a wrong PIN counts as a try, and nothing is stored but the locked text")
         ok(save.indexOf("OwnerSetup.parse(edited)") < save.indexOf("setupFile().save("), "the text is checked before it is sealed")
         ok(save.contains("setup = next") && save.contains("showMessage(BoxWords.paired, \"Start the link\") { begin() }"), "the app starts again, which starts the link, with no second PIN")
-        ok(save.contains("BoxWords.pairedNoCounters") && save.contains("BoxWords.linkNotSaved") && save.contains("\"Not now\"") && save.contains("ConnectBoxModel.linkLines("), "when no link is made the lines are shown")
+        ok(save.contains("BoxWords.linkNotSaved") && save.contains("\"Not now\"") && save.contains("ConnectBoxModel.linkLines("), "when no link is made the lines are shown")
         ok(Regex("setupFile\\(\\)\\.save\\(").findAll(connectBox()).count() == 1, "the one thing written is the locked setup")
         ok(source("src/android/Lock.kt").contains("internal fun Controller.triedPin(") && BoxWords.savePin.next.contains("PIN"), "the PIN is asked for through the lock's own count of tries")
         ok(ConnectBoxModel.linkLines("192.168.1.20:8080", key, listOf(c1)).size == 3, "the lines of a link")
@@ -1762,7 +1765,7 @@ object AppModelTest {
 
     private fun oa_48_every_word_of_connecting_a_box_is_checked_and_listed() {
         val all = BoxWords.all()
-        ok(all.size == 12 && all.all { (n, _) -> n.startsWith("box") }, "the words of the Box screens")
+        ok(all.size == 11 && all.all { (n, _) -> n.startsWith("box") }, "the words of the Box screens")
         for ((name, w) in all) {
             ok(w.who == Who.OWNER && SayCheck.problem(w) == null && w.heading.length <= 28 && w.what.length <= 140 && w.next.length <= 140, "words of $name")
         }

@@ -200,7 +200,7 @@ private fun Controller.handOver(n: OwnerNode, p: PendingBox, text: String, back:
 }
 
 /** What saving the link did, for the screen that follows. */
-private enum class LinkSaved { Saved, NoCounters, NotValid }
+private enum class LinkSaved { Saved, NotValid }
 
 /**
  * The Box has taken its welcome. The link to it is saved in the locked setup (OA-44): the PIN is asked for, the
@@ -230,21 +230,17 @@ private fun Controller.showSaveLink(address: String, d: BoxDelivered, message: S
                 val text = OwnerLock.unlock(stored, typed)
                 val edited = ConnectBoxModel.withLink(String(text, Charsets.UTF_8), address, d.boxKey, d.counters)
                 text.fill(0)
-                if (edited == null) {
-                    outcome = LinkSaved.NoCounters
-                } else {
-                    val parsed = try {
-                        OwnerSetup.parse(edited)
-                    } catch (_: SetupFormatException) {
-                        null
-                    }
-                    if (parsed != null) {
-                        val bytes = edited.toByteArray(Charsets.UTF_8)
-                        setupFile().save(OwnerLock.lock(typed, bytes))
-                        bytes.fill(0)
-                        next = parsed
-                        outcome = LinkSaved.Saved
-                    }
+                val parsed = try {
+                    OwnerSetup.parse(edited)
+                } catch (_: SetupFormatException) {
+                    null
+                }
+                if (parsed != null) {
+                    val bytes = edited.toByteArray(Charsets.UTF_8)
+                    setupFile().save(OwnerLock.lock(typed, bytes))
+                    bytes.fill(0)
+                    next = parsed
+                    outcome = LinkSaved.Saved
                 }
             }) {
                 when (outcome) {
@@ -253,7 +249,6 @@ private fun Controller.showSaveLink(address: String, d: BoxDelivered, message: S
                         setup = next
                         showMessage(BoxWords.paired, "Start the link") { begin() }
                     }
-                    LinkSaved.NoCounters -> notSaved(BoxWords.pairedNoCounters)
                     LinkSaved.NotValid -> notSaved(BoxWords.linkNotSaved)
                 }
             }

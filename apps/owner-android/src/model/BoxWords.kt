@@ -80,14 +80,6 @@ object BoxWords {
         "The link starts now. Keep Orbot running if the Box is a .onion address.",
     )
 
-    /** The Box took its welcome but the settings name no counter, so there is no link to save yet. */
-    val pairedNoCounters = w(
-        Tones.INFO, "Box paired, no counters",
-        "The Box took its welcome. A link needs a counter, and the settings name none, so no link was saved.",
-        Who.OWNER,
-        "Add a counter, then add the lines below to the setup text.",
-    )
-
     /** The Box took its welcome but the link could not be saved. */
     val linkNotSaved = w(
         Tones.STOP, "Link not saved",
@@ -121,7 +113,6 @@ object BoxWords {
         "boxHanding" to handing,
         "boxHandoverKept" to handoverKept,
         "boxPaired" to paired,
-        "boxPairedNoCounters" to pairedNoCounters,
         "boxLinkNotSaved" to linkNotSaved,
         "boxSavePin" to savePin,
         "boxForgotten" to forgotten,

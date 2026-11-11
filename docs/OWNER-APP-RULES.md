@@ -446,14 +446,17 @@ the welcome is made by the Key app. OA-36 to OA-39 are kept for other work.
   PIN, the library opens the stored setup with it, the link lines
   (`relay-route`, `relay-key`, `counter`, `heartbeat-every`,
   `check-in-grace`) are replaced by the Box's route, the Box's key as the
-  relay key, the counters the library gave and no intervals (the default
-  ones), the text is checked with the strict reading of the setup text, and
-  the library locks it again under the same PIN and the file is replaced.
+  relay key, the counters the library gave (up to 16) and no intervals (the
+  default ones), the text is checked with the strict reading of the setup
+  text, and the library locks it again under the same PIN and the file is
+  replaced.
   The text is never stored unlocked, and a wrong PIN counts as at the unlock
   screen (OA-63). The app then starts again, which starts the link, with no
-  second PIN. When the settings name no counter, the text cannot be saved,
-  or the owner says "Not now", no link is made and the screen shows the
-  lines to add by hand; the Box is paired either way.
+  second PIN. A link needs no counter line: the link follows the counters
+  of the signed settings (LK-67), and the counter lines written are only a
+  start. When the text cannot be saved, or the owner says "Not now", no
+  link is made and the screen shows the lines to add by hand; the Box is
+  paired either way.
 - **OA-45.** The app builds no claim, welcome or settings bytes and signs
   nothing: they are the library's. What it holds of a Box is the address it
   was found at, in memory only and never written to a file or the clipboard.
