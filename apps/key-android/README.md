@@ -55,8 +55,9 @@ the app's own, and the wipe after wrong tries.
   recent-apps preview. The app opens no dialog (a dialog is another window).
 - **Typed words stay with the app's own field.** Every text field has
   `textNoSuggestions|textVisiblePassword` and
-  `IME_FLAG_NO_PERSONALIZED_LEARNING`, so a keyboard is asked not to suggest, remember or learn what is typed. This
-  asks the keyboard; it does not stop a keyboard that ignores it.
+  `IME_FLAG_NO_PERSONALIZED_LEARNING`, so a keyboard is asked not to
+  suggest, remember or learn what is typed. This asks the keyboard; it does
+  not stop a keyboard that ignores it.
 - **Refuses to run** while `Settings.Global.ADB_ENABLED` or the wireless
   debugging setting is 1, or an accessibility service is on, at start, at each
   return to the app and before each step that changes anything. A setting that

@@ -420,6 +420,7 @@ dependencies = [
  "openbmt-pos",
  "openbmt-pos-readers",
  "openbmt-qr",
+ "openbmt-qr-jni",
  "openbmt-rates",
  "openbmt-session",
  "openbmt-signer",
@@ -558,6 +559,14 @@ dependencies = [
 [[package]]
 name = "openbmt-qr"
 version = "0.1.0"
+
+[[package]]
+name = "openbmt-qr-jni"
+version = "0.1.0"
+dependencies = [
+ "openbmt-qr",
+ "openbmt-ur",
+]
 
 [[package]]
 name = "openbmt-rates"

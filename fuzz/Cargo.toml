@@ -31,6 +31,7 @@ openbmt-key-ffi = { path = "../crates/openbmt-key-ffi" }
 openbmt-qr = { path = "../crates/openbmt-qr" }
 openbmt-rates = { path = "../crates/openbmt-rates" }
 openbmt-ur = { path = "../crates/openbmt-ur" }
+openbmt-qr-jni = { path = "../crates/openbmt-qr-jni" }
 openbmt-json = { path = "../crates/openbmt-json" }
 openbmt-pos-readers = { path = "../crates/openbmt-pos-readers" }
 # The same exact version as openbmt-key-ffi, for the word list.
@@ -399,6 +400,13 @@ bench = false
 [[bin]]
 name = "pos_clover_parse"
 path = "fuzz_targets/pos_clover_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "qr_jni_call"
+path = "fuzz_targets/qr_jni_call.rs"
 test = false
 doc = false
 bench = false
