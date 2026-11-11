@@ -29,6 +29,8 @@ shown with a real merchant yet; see "What OpenBMT has not shown".
 - Square's press release "Square Brings Bitcoin to Main Street" (8
   October 2025) and its help articles 8622 and 8574, read on 2026-11-10
   (section "Square Bitcoin").
+- Square's developer pages "Payments pricing" (section "Orders API fee
+  structure") and "External payments", read on 2026-11-10.
 
 ## Where the keys are
 
@@ -151,12 +153,14 @@ also withdraw it from Square to a wallet of their own, for no fee at
 the standard speed (up to 24 hours), within $15,000 a day and $50,000 a
 week.
 
-A shop can run both. OpenBMT's Square connector (`docs/DESIGN.md`, the
-connector table) records a payment taken by OpenBMT against the Square
-order as an external payment. Where both
-are offered at one register, the cashier's screen has to make plain
-which one the customer is paying through; that is a requirement on the
-connector's words when it is built.
+A shop can run both. With OpenBMT beside Square, the cashier closes the
+Square order with a custom "Bitcoin" tender and OpenBMT reads the orders
+and matches each one to a payment (`docs/DESIGN.md` section 5.6). It does
+not write the payment into Square through Square's Orders API, because
+Square's developer pricing page puts a 1% fee on orders paid there with a
+non-Square payment. Where both are offered at one register, the cashier's
+screen has to make plain which one the customer is paying through; that
+is a requirement on the connector's words when it is built.
 
 ## What OpenBMT has not shown
 

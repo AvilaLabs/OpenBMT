@@ -755,7 +755,7 @@ service or on the local network (§4.1).
   sale goes into a visible queue and is retried. It is never lost and never
   closed in the POS without payment.
 - **The Box posts "paid" only after the counter signs it.** The counter signs
-  the paid record. The Box cannot call PayOrder on its own. On a hosted Box,
+  the paid record. The Box cannot close an order on its own. On a hosted Box,
   an order without a counter signature is never fulfilled automatically.
 - **The owner phone polls the POS itself.** It has its own read-only POS
   sign-in, so its order list does not come from the Box. We say it plainly:
@@ -1193,7 +1193,7 @@ Notes:
 |---|---|---|---|
 | Clover | Custom tender app (TenderConnector) | Yes | Yes |
 | Lightspeed-style gateway | "Other payment method" opens the counter's own flow and returns "paid". This is the pattern BTCPay's Lightspeed plugin uses (TChukwuleta, v1.1.0, 2026-08-19). | Yes | Yes |
-| Square | Counter device beside Square; the Box posts an external CRYPTO payment and calls PayOrder after the counter signs "paid" | Manual tender selection | Yes |
+| Square | Counter device beside Square; the cashier closes the order with a custom "Bitcoin" tender; the Box and the owner read orders only (ORDERS_READ) and match them (`docs/POS-RULES.md`) | Manual tender selection | Manual |
 | Any POS, or no Box | Manual "Bitcoin" payment type; counter device holds the record | Manual | Manual |
 | Cannabis POS (Treez, Cova, Flowhub, Dutchie) | Partner programs with certification | — | — |
 
@@ -1203,6 +1203,29 @@ change the address. The address comes from the counter's signed batch (§5.1).
 
 Cannabis POS integration needs partner agreements; that outreach is out of scope
 for the software. Square bans cannabis sellers and runs its own custodial bitcoin.
+
+**Why Square is read-only (decided 2026-11-10).** Square's developer pricing
+page says that using the Orders API "with a non-Square payments provider"
+costs 1% per transaction; the external-payments page repeats that a fee
+applies when an order is paid there with an external payment (both read on
+2026-11-10). Closing a Square order through the API (an `EXTERNAL` payment
+of type `CRYPTO`, then PayOrder) would put that fee on every bitcoin sale.
+The connector therefore only reads orders, which needs only `ORDERS_READ`,
+and the cashier closes the order in Square with the shop's "Bitcoin" tender.
+The pages do not say whether an order rung up in the Square app and paid
+there with a custom tender is charged; nothing in this design depends on it.
+Forum answers (not Square's documentation) say an order rung up in the
+Square app may not be visible through the API until it is paid; reading
+only closed orders, as the matching does, does not need it to be.
+**[verify both with a real Square seller account, E5]**
+
+**Clover.** A Clover app used in production must be approved by Clover as a
+private app, and Clover's own sign-in for it expires after 30 minutes and
+is renewed; the read-only polling connector needs that approval before a
+shop can use it. The custom tender app (a "Bitcoin" button inside Clover's
+register) runs on the Clover device itself and needs a Clover developer kit
+to test. Clover's app policies may restrict apps that deal in virtual
+currency; their wording could not be read. **[verify, E6]**
 
 ## 6. Acceptance policy
 
