@@ -2,6 +2,7 @@ package org.openbmt.app
 
 import java.io.File
 import java.io.IOException
+import java.nio.ByteBuffer
 import java.nio.file.Files
 
 /**
@@ -96,12 +97,118 @@ object CommonModelTest {
         dir.delete()
     }
 
+    private fun frameSizeTests() {
+        val offered = listOf(1920 to 1080, 1280 to 720, 640 to 480, 4000 to 3000, 1600 to 1200)
+        ok(QrFrames.chooseSize(offered) == 1280 to 720, "1280 by 720 is chosen when offered")
+        ok(QrFrames.chooseSize(listOf(1920 to 1080, 800 to 600, 4000 to 3000)) == 800 to 600, "the nearest in area: 800 by 600 over 1920 by 1080")
+        ok(QrFrames.chooseSize(listOf(960 to 960, 1152 to 800)) == 1152 to 800, "the nearer shape wins a tie in area")
+        ok(QrFrames.chooseSize(listOf(320 to 240, 176 to 144)) == 320 to 240, "only small sizes: the largest")
+        ok(QrFrames.chooseSize(listOf(320 to 240, 640 to 480)) == 640 to 480, "a size with a short side of 480 beats a small one")
+        ok(QrFrames.chooseSize(emptyList()) == null, "nothing offered")
+        ok(QrFrames.chooseSize(listOf(0 to 0, -1 to 5)) == null, "sizes that are not positive")
+        ok(QrFrames.chooseSize(listOf(720 to 1280, 1280 to 720)) == 1280 to 720, "a tie in everything goes to the wider")
+    }
+
+    /** A plane of [h] rows of [rs] bytes where the byte at (x, y) is (y * 16 + x) mod 251. */
+    private fun plane(w: Int, h: Int, rs: Int, ps: Int): ByteBuffer {
+        val size = (h - 1) * rs + (w - 1) * ps + 1
+        val b = ByteArray(size) { 99 }
+        for (y in 0 until h) for (x in 0 until w) b[y * rs + x * ps] = ((y * 16 + x) % 251).toByte()
+        return ByteBuffer.wrap(b)
+    }
+
+    private fun lumaTests() {
+        val w = 20
+        val h = 6
+        val strided = QrFrames.copyLuma(plane(w, h, 32, 1), w, h, 32, 1, false)!!
+        ok(strided.stride == 32 && strided.bytes.size == 5 * 32 + 20, "a strided copy keeps the row stride and cuts the last row")
+        ok((0 until h).all { y -> (0 until w).all { x -> strided.bytes[y * 32 + x] == ((y * 16 + x) % 251).toByte() } }, "strided pixels are where the stride says")
+        val tight = QrFrames.copyLuma(plane(w, h, 32, 1), w, h, 32, 1, true)!!
+        ok(tight.stride == w && tight.bytes.size == w * h, "a tight copy has rows of the width")
+        ok((0 until h).all { y -> (0 until w).all { x -> tight.bytes[y * w + x] == ((y * 16 + x) % 251).toByte() } }, "tight pixels are in order")
+        val spread = QrFrames.copyLuma(plane(w, h, 48, 2), w, h, 48, 2, false)!!
+        ok(spread.stride == w && spread.bytes.size == w * h, "a pixel stride of 2 is gathered into tight rows")
+        ok((0 until h).all { y -> (0 until w).all { x -> spread.bytes[y * w + x] == ((y * 16 + x) % 251).toByte() } }, "gathered pixels are in order")
+        val exact = QrFrames.copyLuma(plane(w, h, w, 1), w, h, w, 1, false)!!
+        ok(exact.stride == w && exact.bytes.size == w * h, "no padding: the plane as it is")
+        val short = ByteBuffer.wrap(ByteArray(5 * 32 + 19))
+        ok(QrFrames.copyLuma(short, w, h, 32, 1, false) == null, "a plane one byte short is refused")
+        ok(QrFrames.copyLuma(plane(w, h, 32, 1), w, h, 10, 1, false) == null, "a row stride under the width is refused")
+        ok(QrFrames.copyLuma(plane(w, h, 32, 1), 0, h, 32, 1, false) == null, "a width of 0 is refused")
+        ok(QrFrames.copyLuma(plane(w, h, 32, 1), w, h, 32, 0, false) == null, "a pixel stride of 0 is refused")
+        val src = plane(w, h, 32, 1)
+        src.position(7)
+        src.limit(100)
+        QrFrames.copyLuma(src, w, h, 32, 1, false)
+        ok(src.position() == 7 && src.limit() == 100, "the plane's position and limit are not changed")
+        val big = QrFrames.copyLuma(ByteBuffer.wrap(ByteArray(1280 * 720)), 1280, 720, 1280, 1, false)!!
+        ok(big.bytes.size == 1280 * 720, "a 1280 by 720 plane")
+    }
+
+    private fun throttleTests() {
+        val t = DecodeThrottle(125)
+        ok(t.admit(1000), "the first frame is read")
+        ok(!t.admit(1050) && !t.admit(1124), "frames within 125 ms are dropped")
+        ok(t.admit(1125), "the next frame after 125 ms is read")
+        ok(!t.admit(1200), "and the gap counts from the last frame read")
+        val steady = DecodeThrottle(125)
+        val taken = (0 until 300).count { steady.admit(it * 33L) }
+        ok(taken in 70..80, "30 frames a second give about 8 reads a second: $taken in 9.9 seconds")
+        val back = DecodeThrottle(125)
+        back.admit(5000)
+        ok(back.admit(100), "a clock that went back is not stuck")
+    }
+
+    private fun replyTests() {
+        val d = QrReply.parse(byteArrayOf(0, 'h'.code.toByte(), 'i'.code.toByte()))
+        ok(d is QrReply.Decoded && String(d.bytes, Charsets.UTF_8) == "hi", "a decoded reply")
+        ok((QrReply.parse(byteArrayOf(0)) as QrReply.Decoded).bytes.isEmpty(), "an empty code")
+        val r = QrReply.parse(byteArrayOf(1) + "QR-12".toByteArray())
+        ok(r is QrReply.Refused && r.code == "QR-12", "a refusal carries its rule code")
+        ok(QrReply.parse(null) is QrReply.Fault, "no answer")
+        ok(QrReply.parse(ByteArray(0)) is QrReply.Fault, "an empty answer")
+        ok(QrReply.parse(byteArrayOf(2, 1)) is QrReply.Fault, "an unknown first byte")
+        ok(QrReply.parse(byteArrayOf(1, 7)) is QrReply.Fault, "a rule code that is not text")
+    }
+
+    private fun urTests() {
+        ok(UrText.isMultiPart("ur:crypto-psbt/1-5/lpadaxcfax"), "a part of a sequence")
+        ok(UrText.isMultiPart("UR:CRYPTO-PSBT/12-30/ABC"), "upper case")
+        ok(UrText.isMultiPart("Ur:bytes/2-3/xyz"), "mixed case")
+        ok(!UrText.isMultiPart("ur:crypto-psbt/hdcxlkdadkc"), "a single-part UR has no sequence")
+        ok(!UrText.isMultiPart("ur:bytes"), "a type only")
+        ok(!UrText.isMultiPart("openbmt-counter-pairing 1\nur:x/1-2/y"), "not at the start")
+        ok(!UrText.isMultiPart("BITCOIN:BC1Q"), "not a UR at all")
+        ok(!UrText.isMultiPart("ur:t/a-b/c"), "the part is not numbers")
+        ok(UrText.isMultiPart("ur:crypto-psbt/1-5/lpad".toByteArray()), "bytes of a part")
+        ok(!UrText.isMultiPart(ByteArray(0)), "no bytes")
+    }
+
+    private fun cameraWordsTests() {
+        for (who in listOf(Who.KEY_HOLDER, Who.MANAGER)) {
+            val off = CameraWords.off(who)
+            ok(SayCheck.problem(off) == null, "the camera-off words pass the checks: ${SayCheck.problem(off)}")
+            ok(off.what.contains("camera") && off.next.contains("settings") && off.next.contains("paste") && off.next.contains("file"), "they say what to do")
+            val no = CameraWords.notStarted(who, "a problem")
+            ok(SayCheck.problem(no) == null, "the camera-not-started words pass: ${SayCheck.problem(no)}")
+            ok(SayCheck.problem(CameraWords.notStarted(who, null)) == null, "and without a detail")
+            ok(SayCheck.distinctProblem(listOf("a" to off, "b" to no)) == null, "the two read differently")
+        }
+        ok(CameraWords.notStarted(Who.KEY_HOLDER, "x".repeat(500)).detail!!.length <= 200, "a long detail is cut")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         checkerTests()
         wordsModelTests()
         formatTests()
         durableTests()
+        frameSizeTests()
+        lumaTests()
+        throttleTests()
+        replyTests()
+        urTests()
+        cameraWordsTests()
         println("CommonModelTest: $count checks passed")
     }
 }
