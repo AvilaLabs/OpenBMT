@@ -57,7 +57,7 @@ fn corpus(handle: u64) -> Vec<Vec<u8>> {
                 .u64(T0)
                 .0,
         ),
-        frame(14, handle, &W::new().u64(T0).u32(1).0),
+        frame(14, handle, &W::new().cancel(T0, 1).0),
         frame(15, handle, &W::new().u64(T0).u32(0).actor(true, "mia").0),
         frame(
             16,

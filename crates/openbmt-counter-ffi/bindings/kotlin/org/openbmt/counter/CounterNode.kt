@@ -95,6 +95,8 @@ private const val OP_LN_PIN = 53
 private const val OP_LN_NEXT = 54
 private const val OP_LN_REMOVE = 55
 private const val OP_TAKE_RELAY = 56
+private const val OP_STAFF_RECORD = 57
+private const val OP_DAY_TOTALS = 58
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -216,6 +218,39 @@ class Payment(
         return (qrBits[(n / 8).toInt()].toInt() and (0x80 shr (n % 8).toInt())) != 0
     }
 }
+
+/** A count with the sums counted: minor units of the shop's currency and satoshis. */
+class Tally(val count: Long, val minor: Long, val sats: Long)
+
+/** What one person did in the day. */
+class PersonLine(
+    val role: ActorRole,
+    val name: String,
+    val sales: Long,
+    val overrides: Long,
+    val refunds: Long,
+    val cashRefunds: Long,
+)
+
+/** The totals of one day from the counter's own records (CR-153). */
+class DayTotals(
+    val from: Long,
+    val to: Long,
+    val currency: String?,
+    val paid: Tally,
+    val onChain: Tally,
+    val lightning: Tally,
+    val waiting: Tally,
+    val stopped: Long,
+    val ended: Long,
+    val overrides: Tally,
+    val refunds: Tally,
+    val refundsWithdrawn: Long,
+    val cashRefunds: Tally,
+    val unnamedSales: Long,
+    val people: List<PersonLine>,
+    val peopleLeftOut: Long,
+)
 
 class Opened(
     val index: Long,
@@ -607,6 +642,17 @@ private fun Reader.saleState(): SaleState =
         else -> tag("StateView")
     }
 
+private fun Reader.tally(): Tally = Tally(u32(), u64(), u64())
+
+private fun Reader.personLine(): PersonLine =
+    PersonLine(role(), string(), u32(), u32(), u32(), u32())
+
+internal fun Reader.dayTotals(): DayTotals =
+    DayTotals(
+        u64(), u64(), option { string() }, tally(), tally(), tally(), tally(), u32(), u32(),
+        tally(), tally(), u32(), tally(), u32(), list { personLine() }, u32(),
+    )
+
 private fun Reader.refundState(): RefundState =
     when (u8()) {
         TAG_REFUND_STATE_VIEW_REQUESTED -> RefundState.Requested
@@ -909,11 +955,12 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
         rate: Long,
         sourceLabel: String,
         sourceFetchedAt: Long,
+        actor: Actor? = null,
     ): Opened {
         val r =
             call(OP_OPEN, handle) {
                 it.u64(now).u64(amountMinor).string(currency).u64(rate).string(sourceLabel)
-                    .u64(sourceFetchedAt)
+                    .u64(sourceFetchedAt).option(actor) { a -> it.actor(a) }
             }
         return r.opened().also { r.end() }
     }
@@ -933,8 +980,21 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
         return r.opened().also { r.end() }
     }
 
-    /** The cashier cancels a sale with nothing received. */
-    fun cancel(now: Long, index: Long) = callUnit(OP_CANCEL, handle) { it.u64(now).u32(index) }
+    /** The person at the till cancels a sale with nothing received. */
+    fun cancel(now: Long, index: Long, actor: Actor? = null) =
+        callUnit(OP_CANCEL, handle) { it.u64(now).u32(index).option(actor) { a -> it.actor(a) } }
+
+    /** Write a change to the cashiers as a record for the owner (CR-143). */
+    fun staffRecord(now: Long, added: Boolean, name: String, by: String) =
+        callUnit(OP_STAFF_RECORD, handle) {
+            it.u64(now).u8(if (added) 1 else 0).string(name).string(by)
+        }
+
+    /** The totals of the day from [from] (counted) to [to] (not counted) (CR-152). */
+    fun dayTotals(from: Long, to: Long, people: Boolean): DayTotals {
+        val r = call(OP_DAY_TOTALS, handle) { it.u64(from).u64(to).u8(if (people) 1 else 0) }
+        return r.dayTotals().also { r.end() }
+    }
 
     /** A person accepts a sale; the app has checked the PIN. */
     fun overrideSale(now: Long, index: Long, actor: Actor): List<Report> {

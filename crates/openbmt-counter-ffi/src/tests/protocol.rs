@@ -73,6 +73,8 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (54, "ln_next"),
         (55, "ln_remove"),
         (56, "take_relay"),
+        (57, "staff_record"),
+        (58, "day_totals"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

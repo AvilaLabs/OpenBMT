@@ -72,6 +72,33 @@ impl W {
             .u64(rate)
             .string(label)
             .u64(now)
+            .u8(0)
+    }
+
+    /// The fields of `open` with the person at the till (CR-151).
+    pub fn open_by(
+        self,
+        now: u64,
+        minor: u64,
+        currency: &str,
+        rate: u64,
+        label: &str,
+        manager: bool,
+        name: &str,
+    ) -> Self {
+        self.u64(now)
+            .u64(minor)
+            .string(currency)
+            .u64(rate)
+            .string(label)
+            .u64(now)
+            .u8(1)
+            .actor(manager, name)
+    }
+
+    /// The fields of `cancel`, with no person at the till.
+    pub fn cancel(self, now: u64, index: u32) -> Self {
+        self.u64(now).u32(index).u8(0)
     }
 }
 
@@ -92,6 +119,38 @@ pub struct Fault {
     pub rule: String,
     pub text: String,
     pub words: Words,
+}
+
+/// The totals of a day, read back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Day {
+    pub from: u64,
+    pub to: u64,
+    pub currency: Option<String>,
+    pub paid: (u32, u64, u64),
+    pub on_chain: (u32, u64, u64),
+    pub lightning: (u32, u64, u64),
+    pub waiting: (u32, u64, u64),
+    pub stopped: u32,
+    pub ended: u32,
+    pub overrides: (u32, u64, u64),
+    pub refunds: (u32, u64, u64),
+    pub refunds_withdrawn: u32,
+    pub cash_refunds: (u32, u64, u64),
+    pub unnamed_sales: u32,
+    pub people: Vec<Person>,
+    pub people_left_out: u32,
+}
+
+/// One person's line of the day, read back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Person {
+    pub manager: bool,
+    pub name: String,
+    pub sales: u32,
+    pub overrides: u32,
+    pub refunds: u32,
+    pub cash_refunds: u32,
 }
 
 /// The words of a response, read back.
@@ -270,6 +329,48 @@ impl<'a> Rd<'a> {
             quote_from: self.u64(),
             quote_until: self.u64(),
             payment: self.payment(),
+        }
+    }
+
+    /// A tally: count, minor units, satoshis.
+    pub fn tally(&mut self) -> (u32, u64, u64) {
+        (self.u32(), self.u64(), self.u64())
+    }
+
+    /// The totals of a day (CR-153), in the order of the protocol.
+    pub fn day_totals(&mut self) -> Day {
+        Day {
+            from: self.u64(),
+            to: self.u64(),
+            currency: self.opt(Rd::string),
+            paid: self.tally(),
+            on_chain: self.tally(),
+            lightning: self.tally(),
+            waiting: self.tally(),
+            stopped: self.u32(),
+            ended: self.u32(),
+            overrides: self.tally(),
+            refunds: self.tally(),
+            refunds_withdrawn: self.u32(),
+            cash_refunds: self.tally(),
+            unnamed_sales: self.u32(),
+            people: self.list(|r| Person {
+                manager: r.bool_role(),
+                name: r.string(),
+                sales: r.u32(),
+                overrides: r.u32(),
+                refunds: r.u32(),
+                cash_refunds: r.u32(),
+            }),
+            people_left_out: self.u32(),
+        }
+    }
+
+    fn bool_role(&mut self) -> bool {
+        match self.u8() {
+            0 => false,
+            1 => true,
+            t => panic!("role tag {t}"),
         }
     }
 

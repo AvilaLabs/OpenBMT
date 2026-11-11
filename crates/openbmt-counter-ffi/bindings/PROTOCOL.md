@@ -63,7 +63,7 @@ ops run on another; it waits for at most 250 ms.
  11 open             handle node  args OpenArgs -> OpenedView
  12 judge            handle node  args (u64, u32) -> ScreenView
  13 requote          handle node  args RequoteArgs -> OpenedView
- 14 cancel           handle node  args (u64, u32) -> ()
+ 14 cancel           handle node  args CancelArgs -> ()
  15 override_sale    handle node  args OverrideArgs -> list<ReportView>
  16 request_refund   handle node  args RefundArgs -> u64
  17 withdraw_refund  handle node  args WithdrawArgs -> ()
@@ -95,6 +95,8 @@ ops run on another; it waits for at most 250 ms.
  54 ln_next          handle node  args u64 -> option<LnRequestView>
  55 ln_remove        handle node  args () -> ()
  56 take_relay       handle zero  args (list<u8>, list<u8>) -> list<u8>
+ 57 staff_record     handle node  args StaffArgs -> ()
+ 58 day_totals       handle node  args DayTotalsArgs -> DayTotalsView
 ```
 
 ## Types
@@ -114,7 +116,13 @@ RelayKind: enum, one tag byte
     tags None=0 Direct=1 Onion=2
 LinkView: record: words: Words, connected: bool, since: option<u64>, refused: bool, heartbeats_taken: u64, owner_records: u64, last_check_in_at: option<u64>
 LinkStepView: record: link: LinkView, notes: list<string>
-OpenArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64
+OpenArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>
+CancelArgs: record: now: u64, index: u32, actor: option<ActorView>
+StaffArgs: record: now: u64, added: bool, name: string, by: string
+DayTotalsArgs: record: from: u64, to: u64, people: bool
+TallyView: record: count: u32, minor: u64, sats: u64
+PersonLineView: record: role: ActorRole, name: string, sales: u32, overrides: u32, refunds: u32, cash_refunds: u32
+DayTotalsView: record: from: u64, to: u64, currency: option<string>, paid: TallyView, on_chain: TallyView, lightning: TallyView, waiting: TallyView, stopped: u32, ended: u32, overrides: TallyView, refunds: TallyView, refunds_withdrawn: u32, cash_refunds: TallyView, unnamed_sales: u32, people: list<PersonLineView>, people_left_out: u32
 RequoteArgs: record: now: u64, index: u32, rate: u64, source_label: string, source_fetched_at: u64
 OverrideArgs: record: now: u64, index: u32, actor: ActorView
 RefundAskView: enum, a tag byte, then: Sats(sats: u64) | Value(minor: u64, rate: u64, source_label: string, source_fetched_at: u64)

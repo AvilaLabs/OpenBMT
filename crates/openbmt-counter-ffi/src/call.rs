@@ -58,6 +58,9 @@
 //!   requests (HTTPS only, CR-114); the library decides everything else.
 //! - 56 `take_relay` takes the owner's signed relay for counters into a
 //!   pairing record (CR-132) and works on no node.
+//! - 57 `staff_record` writes a change to the cashiers as a record (CR-143)
+//!   and 58 `day_totals` counts a day from the counter's own records
+//!   (CR-152). `open` and `cancel` take the person at the till (CR-151).
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -85,12 +88,14 @@ use crate::relay::take_relay;
 use crate::say::{TONES, WHOS};
 use crate::shop::{own_node_check, pairing_read, SettingsView};
 use crate::views::{
-    put_words, ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome,
-    LightningSaleView, LightningStatusView, LinkStepView, LinkView, LnFailArgs, LnKind, LnMethod,
-    LnReplyArgs, LnRequestView, LnSetupArgs, LnStepView, LnTransportView, OpenArgs, OpenedView,
-    OverrideArgs, OwnNodeCheckArgs, OwnNodeView, PairBeginArgs, PairStartedView, PairingView,
+    put_words, ActorRole, ActorView, CancelArgs, CashArgs, CounterNetwork, DayTotalsArgs,
+    DayTotalsView, HealthView, HeartbeatOutcome, LightningSaleView, LightningStatusView,
+    LinkStepView, LinkView, LnFailArgs, LnKind, LnMethod, LnReplyArgs, LnRequestView,
+    LnSetupArgs, LnStepView, LnTransportView, OpenArgs, OpenedView, OverrideArgs,
+    OwnNodeCheckArgs, OwnNodeView, PairBeginArgs, PairStartedView, PairingView, PersonLineView,
     PumpView, RefundArgs, RefundAskView, RefundRow, RefundStateView, RelayKind, ReportView,
-    RequoteArgs, ScreenView, StartConfig, StateView, StatusView, WithdrawArgs, WordsView,
+    RequoteArgs, ScreenView, StaffArgs, StartConfig, StateView, StatusView, TallyView,
+    WithdrawArgs, WordsView,
 };
 
 /// The first four bytes of a request.
@@ -350,9 +355,7 @@ fn build_ops() -> Vec<Op> {
         op(13, "requote", Node, |c, a: RequoteArgs| {
             c.entry()?.requote(a)
         }),
-        op(14, "cancel", Node, |c, (now, index): (u64, u32)| {
-            c.entry()?.cancel(now, index)
-        }),
+        op(14, "cancel", Node, |c, a: CancelArgs| c.entry()?.cancel(a)),
         op(15, "override_sale", Node, |c, a: OverrideArgs| {
             c.entry()?.override_sale(a)
         }),
@@ -432,6 +435,12 @@ fn build_ops() -> Vec<Op> {
             Zero,
             |_, (record, frame): (Vec<u8>, Vec<u8>)| take_relay(&record, &frame),
         ),
+        op(57, "staff_record", Node, |c, a: StaffArgs| {
+            c.entry()?.staff_record(a)
+        }),
+        op(58, "day_totals", Node, |c, a: DayTotalsArgs| {
+            c.entry()?.day_totals(a)
+        }),
     ]
 }
 
@@ -570,6 +579,12 @@ fn definitions() -> Vec<TypeDef> {
         LinkView::define(),
         LinkStepView::define(),
         OpenArgs::define(),
+        CancelArgs::define(),
+        StaffArgs::define(),
+        DayTotalsArgs::define(),
+        TallyView::define(),
+        PersonLineView::define(),
+        DayTotalsView::define(),
         RequoteArgs::define(),
         OverrideArgs::define(),
         RefundAskView::define(),

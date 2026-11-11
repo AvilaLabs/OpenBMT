@@ -32,7 +32,7 @@ use openbmt_core::batch::{BatchPolicy, SignedBatch};
 use openbmt_core::command::SignedCommand;
 use openbmt_counter::{
     refund_destination, Actor, Amount, CashRefund, Currency, Rate, RateSource, RefundAsk,
-    RefundRequest, Report, Screen,
+    RefundRequest, Report, Screen, StaffChange, StaffEvent,
 };
 use openbmt_counter_node::own_node_setting;
 use openbmt_counter_node::{
@@ -54,10 +54,10 @@ use crate::pay::{payment_for, payment_with_invoice, Payment};
 use crate::relay::{LinkPlan, LinkSlot, LEASE_WAIT};
 use crate::say::words_for;
 use crate::views::{
-    ActorView, CashArgs, HealthView, HeartbeatOutcome, LightningSaleView, LightningStatusView,
+    ActorView, CancelArgs, CashArgs, DayTotalsArgs, DayTotalsView, HealthView, HeartbeatOutcome, LightningSaleView, LightningStatusView,
     LinkStepView, LinkView, LnFailArgs, LnKind, LnReplyArgs, LnRequestView, LnSetupArgs,
     LnStepView, OpenArgs, OpenedView, OverrideArgs, OwnNodeView, PumpView, RefundArgs,
-    RefundAskView, RefundRow, ReportView, RequoteArgs, ScreenView, StartConfig, StatusView,
+    RefundAskView, RefundRow, ReportView, RequoteArgs, ScreenView, StaffArgs, StartConfig, StatusView,
     WithdrawArgs, WordsView,
 };
 
@@ -447,9 +447,16 @@ impl Entry {
         let currency = Currency::new(code)
             .ok_or_else(|| refused_by("sale-currency", "a currency is three capital letters"))?;
         let (rate, source) = rate_and_source(a.rate, &a.source_label, a.source_fetched_at)?;
+        let by = a.actor.map(actor);
         self.run(Some(a.now), |node, _, network| {
             let opened = node
-                .open(Amount(a.amount_minor), currency, rate, &source)
+                .open_by(
+                    Amount(a.amount_minor),
+                    currency,
+                    rate,
+                    &source,
+                    by.as_ref(),
+                )
                 .map_err(|e| from_rule(e.rule(), &e, e.words()))?;
             let payment = payment_for(&opened.script, network, opened.needs_sats)?;
             Ok(OpenedView {
@@ -549,9 +556,38 @@ impl Entry {
         })
     }
 
-    pub(crate) fn cancel(&self, now: u64, index: u32) -> Result<(), CounterError> {
-        self.run(Some(now), |node, _, _| {
-            node.cancel(index)
+    pub(crate) fn cancel(&self, a: CancelArgs) -> Result<(), CounterError> {
+        let by = a.actor.map(actor);
+        self.run(Some(a.now), |node, _, _| {
+            node.cancel_by(a.index, by.as_ref())
+                .map_err(|e| from_rule(e.rule(), &e, e.words()))
+        })
+    }
+
+    /// CR-143: a change to the cashiers becomes a record the owner receives.
+    pub(crate) fn staff_record(&self, a: StaffArgs) -> Result<(), CounterError> {
+        let event = StaffEvent {
+            at: a.now,
+            change: if a.added {
+                StaffChange::Added
+            } else {
+                StaffChange::Removed
+            },
+            name: a.name,
+            by: a.by,
+        };
+        self.run(Some(a.now), |node, _, _| {
+            node.record_staff(&event)
+                .map(|_| ())
+                .map_err(|e| from_rule(e.rule(), &e, e.words()))
+        })
+    }
+
+    /// CR-152: the totals of a day from the counter's own records.
+    pub(crate) fn day_totals(&self, a: DayTotalsArgs) -> Result<DayTotalsView, CounterError> {
+        self.run(None, |node, _, _| {
+            node.day_totals(a.from, a.to, a.people)
+                .map(|t| DayTotalsView::of(&t))
                 .map_err(|e| from_rule(e.rule(), &e, e.words()))
         })
     }

@@ -238,11 +238,11 @@ fn pump_open_judge_requote_and_cancel() {
     assert!(!f.words.what.is_empty());
 
     // Cancel a sale with nothing received; it ends as cancelled.
-    unit(&rig.call(14, handle, &W::new().u64(T0).u32(0).0));
+    unit(&rig.call(14, handle, &W::new().cancel(T0, 0).0));
     let screen = judge(&rig, handle, 0);
     assert_eq!(screen.state, 9, "Cancelled");
     assert_eq!(screen.payment, None, "an ended sale shows no code");
-    let f = fault(&rig.call(14, handle, &W::new().u64(T0).u32(0).0));
+    let f = fault(&rig.call(14, handle, &W::new().cancel(T0, 0).0));
     assert_eq!(f.status, 1);
 }
 
@@ -509,7 +509,7 @@ fn status_and_notes_answer_before_and_after_the_network() {
     );
     // Every op that needs a node refuses a handle that is not one.
     for op in [2u16, 10, 12, 30, 31] {
-        let f = fault(&rig.call(op, 99, &W::new().u64(T0).u32(0).0));
+        let f = fault(&rig.call(op, 99, &W::new().cancel(T0, 0).0));
         assert_eq!(f.rule, "handle-unknown", "op {op}");
     }
     let _ = frame(0, 0, &[]);

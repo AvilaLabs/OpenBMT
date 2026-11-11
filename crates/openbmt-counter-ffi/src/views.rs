@@ -4,7 +4,7 @@
 //! itself for `bindings/PROTOCOL.md`.
 
 use openbmt_core::say::Words;
-use openbmt_counter::{RefundState, Report, Role, State};
+use openbmt_counter::{DayTotals, RefundState, Report, Role, State, Tally};
 use openbmt_counter_node::{LnRequest, LnTransport};
 use openbmt_lightning::request::Method;
 
@@ -61,7 +61,7 @@ impl ActorRole {
         }
     }
 
-    fn of(role: Role) -> Self {
+    pub(crate) fn of(role: Role) -> Self {
         match role {
             Role::Cashier => Self::Cashier,
             Role::Manager => Self::Manager,
@@ -226,6 +226,9 @@ pub struct OpenArgs {
     pub source_label: String,
     /// When the rate was fetched.
     pub source_fetched_at: u64,
+    /// The person at the till who opens the sale, when one is signed in
+    /// (CR-148, CR-151).
+    pub actor: Option<ActorView>,
 }
 
 wire_record!(OpenArgs {
@@ -234,7 +237,8 @@ wire_record!(OpenArgs {
     currency,
     rate,
     source_label,
-    source_fetched_at
+    source_fetched_at,
+    actor
 });
 wire_record_get!(OpenArgs {
     now,
@@ -242,8 +246,64 @@ wire_record_get!(OpenArgs {
     currency,
     rate,
     source_label,
-    source_fetched_at
+    source_fetched_at,
+    actor
 });
+
+/// The arguments of `cancel`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CancelArgs {
+    /// The time now.
+    pub now: u64,
+    /// The sale.
+    pub index: u32,
+    /// The person at the till who cancels it, when one is signed in
+    /// (CR-148, CR-151).
+    pub actor: Option<ActorView>,
+}
+
+wire_record!(CancelArgs { now, index, actor });
+wire_record_get!(CancelArgs { now, index, actor });
+
+/// The arguments of `staff_record` (CR-143).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaffArgs {
+    /// The time now.
+    pub now: u64,
+    /// The cashier was added; false when the cashier was removed.
+    pub added: bool,
+    /// The cashier's name.
+    pub name: String,
+    /// The manager who made the change.
+    pub by: String,
+}
+
+wire_record!(StaffArgs {
+    now,
+    added,
+    name,
+    by
+});
+wire_record_get!(StaffArgs {
+    now,
+    added,
+    name,
+    by
+});
+
+/// The arguments of `day_totals` (CR-152).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DayTotalsArgs {
+    /// The start of the day, in seconds since 1970 (counted).
+    pub from: u64,
+    /// The end of the day (not counted).
+    pub to: u64,
+    /// Ask for the lines per person too (CR-154).
+    pub people: bool,
+}
+
+wire_record!(DayTotalsArgs { from, to, people });
+wire_record_get!(DayTotalsArgs { from, to, people });
 
 /// The arguments of `requote`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1179,3 +1239,144 @@ pub struct LnStepView {
 }
 
 wire_record!(LnStepView { next, record });
+
+// ---- the day's totals (CR-152 to CR-154) ----------------------------------
+
+/// A count with the sums counted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TallyView {
+    /// How many.
+    pub count: u32,
+    /// The sum of the amounts in minor units of the shop's currency.
+    pub minor: u64,
+    /// The sum of the satoshis.
+    pub sats: u64,
+}
+
+wire_record!(TallyView { count, minor, sats });
+
+impl From<Tally> for TallyView {
+    fn from(t: Tally) -> Self {
+        Self {
+            count: t.count,
+            minor: t.minor,
+            sats: t.sats,
+        }
+    }
+}
+
+/// What one person did in the day.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersonLineView {
+    /// Cashier or manager.
+    pub role: ActorRole,
+    /// The name.
+    pub name: String,
+    /// Sales this person opened.
+    pub sales: u32,
+    /// Overrides this person made.
+    pub overrides: u32,
+    /// Refunds this person asked for and did not withdraw.
+    pub refunds: u32,
+    /// Cash refunds this person gave.
+    pub cash_refunds: u32,
+}
+
+wire_record!(PersonLineView {
+    role,
+    name,
+    sales,
+    overrides,
+    refunds,
+    cash_refunds
+});
+
+/// The totals of one day (CR-153).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DayTotalsView {
+    /// The start of the day.
+    pub from: u64,
+    /// The end of the day.
+    pub to: u64,
+    /// The currency of the sales, three letters, when there is one.
+    pub currency: Option<String>,
+    /// Sales paid.
+    pub paid: TallyView,
+    /// Of those, paid on the chain.
+    pub on_chain: TallyView,
+    /// Of those, paid over Lightning.
+    pub lightning: TallyView,
+    /// Sales still waiting.
+    pub waiting: TallyView,
+    /// Sales whose payment was replaced or reopened.
+    pub stopped: u32,
+    /// Sales cancelled or expired.
+    pub ended: u32,
+    /// Overrides.
+    pub overrides: TallyView,
+    /// Refunds asked for and not withdrawn.
+    pub refunds: TallyView,
+    /// Refund requests that were withdrawn.
+    pub refunds_withdrawn: u32,
+    /// Cash refunds.
+    pub cash_refunds: TallyView,
+    /// Sales whose record names no one.
+    pub unnamed_sales: u32,
+    /// The lines per person, when asked for.
+    pub people: Vec<PersonLineView>,
+    /// Persons left out of `people`.
+    pub people_left_out: u32,
+}
+
+wire_record!(DayTotalsView {
+    from,
+    to,
+    currency,
+    paid,
+    on_chain,
+    lightning,
+    waiting,
+    stopped,
+    ended,
+    overrides,
+    refunds,
+    refunds_withdrawn,
+    cash_refunds,
+    unnamed_sales,
+    people,
+    people_left_out
+});
+
+impl DayTotalsView {
+    pub(crate) fn of(t: &DayTotals) -> Self {
+        Self {
+            from: t.from,
+            to: t.to,
+            currency: t.currency.map(|c| c.to_string()),
+            paid: t.paid.into(),
+            on_chain: t.on_chain.into(),
+            lightning: t.lightning.into(),
+            waiting: t.waiting.into(),
+            stopped: t.stopped,
+            ended: t.ended,
+            overrides: t.overrides.into(),
+            refunds: t.refunds.into(),
+            refunds_withdrawn: t.refunds_withdrawn,
+            cash_refunds: t.cash_refunds.into(),
+            unnamed_sales: t.unnamed_sales,
+            people: t
+                .people
+                .iter()
+                .map(|p| PersonLineView {
+                    role: ActorRole::of(p.role),
+                    name: p.name.clone(),
+                    sales: p.sales,
+                    overrides: p.overrides,
+                    refunds: p.refunds,
+                    cash_refunds: p.cash_refunds,
+                })
+                .collect(),
+            people_left_out: t.people_left_out,
+        }
+    }
+}

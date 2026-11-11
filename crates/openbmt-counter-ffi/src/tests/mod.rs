@@ -14,5 +14,6 @@ mod pay;
 mod protocol;
 mod rates;
 mod screen;
+mod staff;
 mod strict;
 pub(crate) mod wire;
