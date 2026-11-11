@@ -84,13 +84,20 @@ smaller list is not worth a weaker primitive.
 ## Packaging
 
 The Start9 package of the Box (`packaging/box/startos/`) is written in
-TypeScript against the `@start9labs/start-sdk` npm package. Its npm
-packages are packaging-time only: they are used to typecheck the package and
-to build the package file, they are pinned by `package-lock.json` (the SDK to
-an exact version, everything else by the lockfile's versions and hashes), and
-none of them is ever in the Box binary or in the container image, which is
-built from the Rust workspace alone (`packaging/box/Dockerfile`). They are
-not counted in `deps/` and are not checked by `scripts/deps-check.sh`.
+TypeScript against the `@start9labs/start-sdk` npm package, pinned by
+`package-lock.json` (the SDK to an exact version, everything else by the
+lockfile's versions and hashes). None of these packages is in the Box binary
+or in the container image, which is built from the Rust workspace alone
+(`packaging/box/Dockerfile`).
+
+They are not build-time only, though. The SDK bundles the package's
+TypeScript, with the parts of the SDK it imports, into the JavaScript of the
+`.s9pk` file, and StartOS runs that JavaScript on the shop's server to start,
+stop, configure and back up the Box. So the SDK and the parts of its lockfile
+that end up in that bundle are code that runs at the shop. They are not
+counted in `deps/` and are not checked by `scripts/deps-check.sh` or the Rust
+advisory check; a change of the SDK version is reviewed as a change of
+running code, and its advisories are checked by hand before a release.
 `node_modules/` is not committed. CI installs them with `npm ci`, which
 refuses a lockfile that does not match `package.json`.
 
