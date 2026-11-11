@@ -630,9 +630,10 @@ it.
   or the record can lower it. A batch that does not pass refuses the whole
   bundle.
 - **CR-97.** What a counter keeps after pairing is one framed record
-  (`OBMt`, version 1): the identity secret, the two roots, the wallet check,
-  the network, the settings floor, the signed settings, the first batch and
-  the peers. It is decoded strictly (exact length, no trailing bytes, every
+  (`OBMt`, version 1, or version 2 with a relay, CR-131): the identity
+  secret, the two roots, the wallet check, the network, the settings floor,
+  the signed settings, the first batch, the peers and, in version 2, the
+  relay. It is decoded strictly (exact length, no trailing bytes, every
   part decoded and re-encoded to the same bytes) and holds nothing that was
   not checked. `start` takes the record in place of separate fields, reads
   it and runs CR-94 to CR-96 again on it before anything starts; a record
@@ -842,3 +843,66 @@ counter holds is not, and never leaves the counter.
 - **They do not know who a person is.** The list of managers and their
   PINs is not in the signed settings yet. The caller names the person
   and the role.
+
+## 13. Talking to the owner through the Box
+
+These rules join the counter to the owner through a relay, which is
+normally the Box (`docs/LINK-RULES.md`, LK-30 to LK-63). The relay is a
+hint and adds no authority (LK-09): the owner's key is the root the counter
+pinned at pairing, the relay's key is checked by the relay's own hello
+(LK-32), and a wrong relay only fails to deliver. The encodings are in
+`crates/openbmt-core` (`relay`, `bundle`), the record and the link in
+`crates/openbmt-counter-node` (`paired`, `relaylink`, `link`), the calls in
+`crates/openbmt-counter-ffi` (`link_step`, `link_state`, `take_relay`) and
+`crates/openbmt-owner-ffi` (`counter_bundle`, `counter_relay`). The thread
+and the screen line are the app's.
+
+- **CR-130.** The counter bundle may carry a relay: one route and the relay's
+  key. The route is a literal address and port (not port 0), or a version 3
+  onion name of 56 characters, without `.onion`, and a port. The key is a
+  key. The bundle is version 2 when it carries a relay and version 1 when it
+  does not, byte for byte as before; version 1 reads and has no relay. A
+  version that is not 1 or 2, a route tag that is not defined, a name that
+  is not a name, a port that is 0 and any byte left over are refused. The
+  owner fills the relay from its link's settings when it shows the code;
+  a route that cannot be written as a relay gives a code with none.
+- **CR-131.** The counter keeps the relay with its pairing record. The
+  record (`OBMt`) is version 2 when it holds a relay and version 1 when it
+  does not; version 1 reads and has none. CR-97 applies to both: strict
+  decoding, and every part decoded and encoded again to the same bytes.
+  `finish` keeps the relay of the bundle it took.
+- **CR-132.** The owner can hand a counter that was paired before the shop
+  had a Box its relay by itself: the relay as a frame of its own
+  (`OBMy`, version 1), signed by the owner root over the relay. The counter
+  takes it only if the signature is by the owner root it pinned at pairing;
+  a frame that is not read, or is signed by anyone else, is refused with
+  words and changes nothing. The call returns the new record for the app
+  to keep in place of the old one, and the link starts from it at the next
+  start. The frame has no number and no time: a copy taken again is the
+  same record, and an old copy can only point the counter at a relay that
+  does not deliver (LK-09).
+- **CR-133.** A relay is made only from a key, a route that is read in its
+  canonical spelling, and, for an onion route, a name of 56 characters
+  from `a` to `z` and `2` to `7`. Anything else is refused where the relay
+  is made, with the rule number in the text. The owner's proxy is no part
+  of it: a counter uses its own.
+- **CR-134.** The counter starts its link, and only when its record holds a
+  relay, with the courier of the owner's role table (the owner is the one
+  device it talks to) on its own data folder, and the link's default
+  intervals. A direct route is reached direct, unless the verified settings
+  have Tor on (CR-87), when it is reached through the proxy as an address.
+  An onion route is reached through the proxy, whatever the setting says.
+  With no proxy where one is needed the link does not start and the
+  counter does, and the screen says that Orbot is needed. A second link on
+  the same data folder at once is not started (LK-51).
+- **CR-135.** One turn of the link is called from one thread of the app
+  every 5 seconds, and from the manager's Try again. The relay is called
+  with the counter's lock not held: what a Box that does not answer costs is
+  a turn of the link, never a sale. What the owner's heartbeat made the
+  counter report is held for the next `pump`. With no relay the call is
+  refused and says so.
+- **CR-136.** The home screen shows a line for the link only when the
+  counter has a relay. It says "Connected to the Box" when the last call
+  worked. When it did not it says so in words, with the time the failures
+  began, and whether the Box refused the counter or could not be reached;
+  Try again calls the Box at once. The words follow `docs/SCREEN-RULES.md`.

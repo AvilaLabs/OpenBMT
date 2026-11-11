@@ -27,7 +27,7 @@ const TEST_SOURCES: [&str; 15] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 30] = [
+const NOT_HERE: [(&str, &str); 37] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -180,6 +180,46 @@ const NOT_HERE: [(&str, &str); 30] = [
          the app's; tested in `openbmt-counter-node`, `openbmt-counter-ffi` and the app's JVM \
          tests",
     ),
+    (
+        "CR-130",
+        "the bundle's relay is `openbmt-core`'s encoding and the owner fills it; tested in \
+         `openbmt-core` (`bundle`, `relay`) and `openbmt-owner-ffi`, with the fuzz target \
+         `counter_bundle_decode`",
+    ),
+    (
+        "CR-131",
+        "the relay in the stored record is the node's encoding; tested in \
+         `openbmt-counter-node` (`tests/paired.rs`), with the fuzz target \
+         `counter_pairing_record_decode`",
+    ),
+    (
+        "CR-132",
+        "the signed relay for counters is `openbmt-core`'s frame and the node takes it; tested \
+         in `openbmt-core` (`relay`), `openbmt-counter-node`, `openbmt-counter-ffi` and \
+         `openbmt-owner-ffi`, with the fuzz target `relay_for_counters_decode`",
+    ),
+    (
+        "CR-133",
+        "the relay is made and read in `openbmt-core` (`relay`) and filled by the owner's \
+         calls; tested in `openbmt-core` and `openbmt-owner-ffi`",
+    ),
+    (
+        "CR-134",
+        "the start and the route of the link are the node's and the start's; tested in \
+         `openbmt-counter-node` (`tests/relaylink.rs`), `openbmt-counter-ffi` and \
+         `openbmt-link` (LK-31)",
+    ),
+    (
+        "CR-135",
+        "the turn of the link is the node's and the ffi's; the thread is the app's; tested in \
+         `openbmt-counter-node` (`tests/link.rs`), `openbmt-counter-ffi` and the app's JVM \
+         tests",
+    ),
+    (
+        "CR-136",
+        "the link line is the node's words and the app's screen; tested in \
+         `openbmt-counter-node`, `openbmt-counter-ffi` and the app's JVM tests",
+    ),
 ];
 
 /// The rule number at the start of `rest` (what follows `CR-`): every digit,
@@ -198,9 +238,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_ninety_five_rules() {
+fn the_rules_file_defines_one_hundred_and_two_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 95);
+    assert_eq!(ids.len(), 102);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -216,6 +256,8 @@ fn the_rules_file_defines_ninety_five_rules() {
             && ids.contains("CR-108")
             && ids.contains("CR-109")
             && ids.contains("CR-116")
+            && ids.contains("CR-130")
+            && ids.contains("CR-136")
     );
 }
 
