@@ -87,6 +87,7 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | editIntro | Change the settings | Pick a group, change what you need, then review. Nothing is queued until you press Queue the change. | A change that loosens something needs the Key app. A stricter change does not. | the owner |  |
 | editGroupInstant | Instant sales | How much a counter may accept as paid before the payment is confirmed, for each way it checks. | Whole dollars. 0 turns a limit off. | the owner |  |
 | editGroupPayments | Payments | When a payment counts, how many blocks settle a sale, and the smallest bitcoin sale. | Change what you need, then press Done. | the owner |  |
+| editGroupTips | Tips | Whether the counters ask the customer for a tip, and which tips they suggest. | Turn tips on, and set up to three percents. | the owner |  |
 | editGroupRefunds | Refunds and overrides | How much can be refunded, and how much cashiers and managers may accept against a red screen. | Whole dollars. 0 turns a limit off. | the owner |  |
 | editGroupSafety | Safety | How recent this phone's report must be, and what the shop says about its network. | Change what you need, then press Done. | the owner |  |
 | editGroupShares | Counters' shares | Each counter's share of every instant limit. The shares may add up to 100% at most. | Type each share as a percent with up to two decimals. | the owner |  |
@@ -100,6 +101,7 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | editNodeNeeded | Node key needed | The node's key or address was left empty, so no node was named. | Paste or scan the key or address of the node, or choose Remove the node. | the owner |  |
 | editNoCounters | No counters yet | The settings list no counters, so there are no shares to change. | Add a counter first. Equal shares are made when it is added. | the owner |  |
 | editSharesNotPercent | Share not accepted | A share must be a percent from 0 to 100, with up to two decimals, so nothing was saved. | Type each share again, like 50 or 33.33. | the owner |  |
+| editTipNotRead | Tip not accepted | A suggested tip must be a whole percent from 1 to 50, so nothing was saved. | Type it again, like 15, or leave it empty. | the owner |  |
 | editValueNotReadDollars | Value not accepted | The value for Refunds per day is not a whole number of dollars, so nothing was saved. | Type whole dollars, like 25, or 0 to turn it off. | the owner |  |
 | editValueNotReadPercent | Value not accepted | The value for Underpayment still counted is not a percent, so nothing was saved. | Type a percent with up to two decimals, like 0.5. | the owner |  |
 | editValueNotReadBlocks | Value not accepted | The value for Blocks to settle a sale is not a whole number of blocks, so nothing was saved. | Type a whole number of blocks, like 6. | the owner |  |
@@ -146,6 +148,10 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | editField_min_confirmations | Blocks to settle a sale | How many blocks a payment needs before the sale counts as settled. | A whole number from 1 to 100. | the owner |  |
 | editField_final_confirmations | Blocks until final | How many blocks until a sale is final and a refund may be paid. It is at least the number above. | A whole number from 1 to 100. | the owner |  |
 | editField_min_sale_sats | Smallest bitcoin sale | A bitcoin sale below this is turned away, because a tiny receipt can cost more to spend than it holds. | Whole satoshis. 0 means no smallest sale. | the owner |  |
+| editField_tips_on | Ask for a tip | Whether the counters ask the customer for a tip, and which tips they suggest. | Turn tips on, and set up to three percents. | the owner |  |
+| editField_tip_1 | First tip | Whether the counters ask the customer for a tip, and which tips they suggest. | A percent from 1 to 50, or empty. | the owner |  |
+| editField_tip_2 | Second tip | Whether the counters ask the customer for a tip, and which tips they suggest. | A percent from 1 to 50, or empty. | the owner |  |
+| editField_tip_3 | Third tip | Whether the counters ask the customer for a tip, and which tips they suggest. | A percent from 1 to 50, or empty. | the owner |  |
 | editField_refund_cap | Largest single refund | The most one refund may pay back to a customer. | Whole dollars. 0 turns it off. | the owner |  |
 | editField_refund_daily_cap | Refunds per day | The most that may be refunded in one day, all refunds together. | Whole dollars. 0 turns it off. | the owner |  |
 | editField_cashier_override_daily_cap | Cashier's override per day | The most one cashier may accept against a red screen in a day. | Whole dollars. 0 turns it off. | the owner |  |

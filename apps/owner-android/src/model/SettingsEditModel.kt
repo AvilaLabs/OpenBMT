@@ -147,6 +147,7 @@ object SettingsEditModel {
     fun tipPercent(text: String): Long? {
         val t = text.trim().removeSuffix("%").trim()
         if (t.isEmpty()) return 0L
+        if (t.any { it == ',' || it == '.' }) return null
         return Forms.number(t)?.takeIf { it in 1..50 }
     }
 
