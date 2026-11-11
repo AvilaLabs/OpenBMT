@@ -15,6 +15,14 @@
 #   - writes Hummingbird's parts, in order and with losses, which
 #     `crosscheck read` decodes with openbmt-ur.
 #
+# Then the cosigner keys (UR-23 to UR-30): the harness has Hummingbird's
+# CryptoAccount and CryptoHDKey encode shared-wallet keys in the shapes the
+# signers write (with and without cosigner, with other outputs around, with
+# and without the coin info) and writes, for each, the key text it must give,
+# worked out by the harness itself; `crosscheck keys` reads each with
+# openbmt-ur and compares. A key that Hummingbird marks private, a second
+# account, two keys and two different fingerprints must be refused.
+#
 #   scripts/ur-crosscheck.sh
 #
 # Needs a JDK 21 (javac and java: $JAVA_HOME, else ~/Android/jdk21, else
@@ -88,3 +96,8 @@ echo "cases: $(grep -c '^case ' "$work/cases.txt") ($(wc -c <"$work/cases.txt") 
 "$jdk/bin/java" -cp "$work:$hb:$cbor" UrCross "$work/cases.txt" "$work/theirs.txt"
 cargo run --release --locked --quiet -p openbmt-ur --example crosscheck -- \
     read "$work/cases.txt" "$work/theirs.txt"
+
+# The cosigner keys.
+"$jdk/bin/java" -cp "$work:$hb:$cbor" UrCross keys "$work/keys.txt"
+cargo run --release --locked --quiet -p openbmt-ur --example crosscheck -- \
+    keys "$work/keys.txt"

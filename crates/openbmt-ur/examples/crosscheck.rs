@@ -3,6 +3,7 @@
 //!
 //!   crosscheck gen                      the cases, with openbmt-ur's parts, on stdout
 //!   crosscheck read CASES THEIRS        decode Hummingbird's parts
+//!   crosscheck keys FILE                read the cosigner keys Hummingbird wrote
 //!
 //! `gen` prints, for each of several hundred messages from a fixed seed,
 //! `case <n> <type> <max fragment> <hex of the CBOR payload>`, then `ours
@@ -12,7 +13,7 @@
 //! each group; the type and the bytes must be ours.
 
 use openbmt_ur::cbor::encode_bytes;
-use openbmt_ur::{Decoder, Encoder};
+use openbmt_ur::{ur_to_key_text, Decoder, Encoder};
 
 /// The same small generator everywhere: SplitMix64, seeded.
 struct Rng(u64);
@@ -163,6 +164,38 @@ fn read(cases: &str, theirs: &str) -> bool {
     failures == 0
 }
 
+/// The cosigner keys that Hummingbird's `CryptoAccount` and `CryptoHDKey` wrote:
+/// `key <label> <type> <hex of the CBOR> OK <key text>` or `... REFUSE <rule>`.
+/// openbmt-ur must give the same text, or refuse with that rule.
+fn keys(path: &str) -> bool {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let (mut ok, mut refused, mut failures) = (0, 0, 0);
+    for line in text.lines() {
+        let f: Vec<&str> = line.split(' ').collect();
+        let (label, ur_type, cbor, verdict) = match f.as_slice() {
+            ["key", label, ur_type, cbor, rest @ ..] => (label, ur_type, unhex(cbor), rest),
+            _ => continue,
+        };
+        let got = ur_to_key_text(ur_type, &cbor);
+        match (verdict, got) {
+            (["OK", want], Ok(key)) if key.as_str() == *want => ok += 1,
+            (["REFUSE", rule], Err(e)) if e.rule() == *rule => refused += 1,
+            (want, got) => {
+                println!("FAIL  {label}: wanted {want:?}, got {got:?}");
+                failures += 1;
+            }
+        }
+    }
+    if ok + refused == 0 {
+        println!("FAIL  no keys in {path}");
+        failures += 1;
+    }
+    println!(
+        "Hummingbird's keys read by openbmt-ur: {ok} the same text, {refused} refused as expected"
+    );
+    failures == 0
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args
@@ -179,8 +212,17 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        ["keys", file] => {
+            if keys(file) {
+                println!("PASS  openbmt-ur side (keys)");
+            } else {
+                std::process::exit(1);
+            }
+        }
         _ => {
-            eprintln!("usage: crosscheck gen | crosscheck read CASES THEIRS");
+            eprintln!(
+                "usage: crosscheck gen | crosscheck read CASES THEIRS | crosscheck keys FILE"
+            );
             std::process::exit(2);
         }
     }

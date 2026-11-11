@@ -10,8 +10,8 @@
 //!
 //! [`reply`] is safe code and is what the tests run. The second takes one
 //! framed request and answers with one framed reply: drawing a text as a QR
-//! code, cutting a message into the parts of a UR, and reading the parts of
-//! a UR back; see [`call`]. `src/jni.rs` holds the two exported symbols,
+//! code, cutting a message into the parts of a UR, reading the parts of
+//! a UR back, and reading a cosigner key out of a finished UR; see [`call`]. `src/jni.rs` holds the two exported symbols,
 //! `Java_org_openbmt_common_QrNative_decode` and
 //! `Java_org_openbmt_common_UrNative_call`, and is the only `unsafe` of the
 //! crate.

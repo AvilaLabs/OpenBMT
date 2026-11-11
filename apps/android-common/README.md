@@ -23,8 +23,10 @@ A message too long for one QR code is shown as the parts of a BC-UR sequence
 (`crates/openbmt-ur`, `docs/UR-RULES.md`). The native side is one JNI
 function, `UrNative.call`, of `crates/openbmt-qr-jni`: one framed request in
 and one framed reply out, with the operations "draw a text", "cut a message
-into parts", "open a decoder", "give it a part", "take its message" and
-"drop it". At most four decoders are open at once and a handle is never used
+into parts", "open a decoder", "give it a part", "take its message",
+"drop it" and "read a cosigner key out of a finished code" (`UrCall.keyText`:
+the key as the text the key ceremony takes, or the refusal with its words, as
+`KeyTextOutcome`; `docs/UR-RULES.md`, UR-23 to UR-31). At most four decoders are open at once and a handle is never used
 twice. The Kotlin framing is `UrCall`; a reply that is not exactly what its
 operation gives is a fault, never partly read.
 

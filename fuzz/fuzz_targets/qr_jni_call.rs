@@ -2,12 +2,14 @@
 
 use libfuzzer_sys::fuzz_target;
 use openbmt_qr_jni::call::{
-    Calls, MAX_DECODERS, OK, OP_DECODER_NEW, OP_DECODER_RECEIVE, OP_QR_ENCODE, OP_UR_ENCODE,
-    REFUSED, REPLY_MAGIC, REQUEST_MAGIC, VERSION,
+    Calls, MAX_DECODERS, OK, OP_DECODER_NEW, OP_DECODER_RECEIVE, OP_KEY_TEXT, OP_QR_ENCODE,
+    OP_UR_ENCODE, REFUSED, REFUSED_WITH_WORDS, REPLY_MAGIC, REQUEST_MAGIC, VERSION,
 };
 
 /// A reply is framed: the magic, the version, a status, and for a refusal
-/// exactly a five-byte rule code. True for an ok reply.
+/// exactly a five-byte rule code (for a refusal with words, the code and
+/// three texts of a 16-bit length each and nothing after). True for an ok
+/// reply.
 fn check(reply: &[u8]) -> bool {
     assert_eq!(reply.get(..4), Some(REPLY_MAGIC.as_slice()));
     assert_eq!(reply.get(4), Some(&VERSION));
@@ -17,6 +19,19 @@ fn check(reply: &[u8]) -> bool {
             let code = reply.get(6..).unwrap_or(&[]);
             assert_eq!(code.len(), 5);
             assert!(code.starts_with(b"UR-") || code.starts_with(b"QR-"));
+            false
+        }
+        Some(&REFUSED_WITH_WORDS) => {
+            let body = reply.get(6..).unwrap_or(&[]);
+            assert!(body.starts_with(b"UR-"));
+            let mut rest = body.get(5..).unwrap_or(&[]);
+            for _ in 0..3 {
+                let len = usize::from(u16::from_be_bytes([rest[0], rest[1]]));
+                let (text, after) = rest[2..].split_at(len);
+                assert!(!text.is_empty() && std::str::from_utf8(text).is_ok());
+                rest = after;
+            }
+            assert!(rest.is_empty());
             false
         }
         _ => panic!("status"),
@@ -41,6 +56,20 @@ fuzz_target!(|data: &[u8]| {
         check(&calls.call(&v));
     }
     assert!(calls.open_decoders() <= MAX_DECODERS);
+
+    // A well-formed key_text of each type that is read, and of some that
+    // are not: a key text is the origin and a key.
+    for ty in ["crypto-account", "crypto-hdkey", "bytes", "hdkey", "psbt"] {
+        let mut v = head(OP_KEY_TEXT);
+        v.push(ty.len() as u8);
+        v.extend_from_slice(ty.as_bytes());
+        v.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        v.extend_from_slice(data);
+        let r = calls.call(&v);
+        if check(&r) {
+            assert!(r.get(6..).is_some_and(|k| k.starts_with(b"[")));
+        }
+    }
 
     // A well-formed qr_encode gives a well-formed reply.
     let text: Vec<u8> = data.iter().copied().skip(1).take(300).collect();
