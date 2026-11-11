@@ -91,6 +91,12 @@ private const val OP_NOTES = 60
 private const val OP_RESCAN = 61
 private const val OP_RECOVER_KEY1 = 62
 private const val OP_ARCHIVE_PAID = 63
+private const val OP_POS_STATE = 70
+private const val OP_POS_SETUP = 71
+private const val OP_POS_REMOVE = 72
+private const val OP_POS_REQUEST = 73
+private const val OP_POS_REPLY = 74
+private const val OP_POS_ACKNOWLEDGE = 75
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -144,6 +150,21 @@ private const val TAG_OUTBOX_KIND_TRANSACTION = 0
 private const val TAG_OUTBOX_KIND_BATCH = 1
 private const val TAG_OUTBOX_KIND_SETTINGS = 2
 private const val TAG_OUTBOX_KIND_PAIRING = 3
+private const val TAG_POS_VENDOR_VIEW_SQUARE = 0
+private const val TAG_POS_VENDOR_VIEW_CLOVER = 1
+private const val TAG_POS_METHOD_VIEW_GET = 0
+private const val TAG_POS_METHOD_VIEW_POST = 1
+private const val TAG_POS_ALERT_KIND_TENDER_WITHOUT_PAYMENT = 0
+private const val TAG_POS_ALERT_KIND_CLOSED_BEFORE_PAID = 1
+private const val TAG_POS_ALERT_KIND_PAYMENT_WITHOUT_TENDER = 2
+private const val TAG_POS_ALERT_KIND_AMOUNT_DIFFERS = 3
+private const val TAG_POS_ALERT_KIND_TENDER_ON_UNPAID_SALE = 4
+private const val TAG_POS_ALERT_KIND_VOIDED_AFTER_PAYMENT = 5
+private const val TAG_POS_ALERT_KIND_DUPLICATE_REFERENCE = 6
+private const val TAG_POS_ALERT_KIND_BITCOIN_TIP = 7
+private const val TAG_POS_ALERT_KIND_UNKNOWN_CURRENCY = 8
+private const val TAG_POS_SUBJECT_VIEW_TENDER = 0
+private const val TAG_POS_SUBJECT_VIEW_SALE = 1
 
 // ---- the views ----------------------------------------------------------------------
 //
@@ -427,6 +448,67 @@ class OutboxRow(
     val words: Words,
 )
 
+enum class PosVendor { Square, Clover }
+
+/** The owner's settings for the till: the vendor, its location id, the names of the Bitcoin tender and the shop's currencies. */
+class PosSetup(
+    val vendor: PosVendor,
+    val location: String,
+    val tenderNames: List<String>,
+    val currencies: List<String>,
+)
+
+enum class PosMethod { Get, Post }
+
+/** The request to send to the till: no sign-in in it; the app adds its own. */
+class PosRequest(val method: PosMethod, val url: String, val body: ByteArray)
+
+enum class PosAlertKind {
+    TenderWithoutPayment,
+    ClosedBeforePaid,
+    PaymentWithoutTender,
+    AmountDiffers,
+    TenderOnUnpaidSale,
+    VoidedAfterPayment,
+    DuplicateReference,
+    BitcoinTip,
+    UnknownCurrency,
+}
+
+/** What a till alert is about. */
+sealed class PosSubject {
+    class Tender(val order: String, val tender: String) : PosSubject()
+
+    class Sale(val counter: ByteArray, val index: Long) : PosSubject()
+}
+
+/** An alert's identity, as `posState` showed it. */
+class PosAlertKey(val kind: PosAlertKind, val subject: PosSubject)
+
+class PosAlert(val key: PosAlertKey, val raisedAt: Long, val words: Words)
+
+class PosReply(
+    val again: Boolean,
+    val moreLeft: Boolean,
+    val pages: Long,
+    val ordersRead: Long,
+    val newMatches: Long,
+    val newAlerts: List<PosAlert>,
+    val cleared: Long,
+    val retired: Long,
+)
+
+class PosState(
+    val setup: PosSetup?,
+    val lastPollAt: Long?,
+    val openAlerts: List<PosAlert>,
+    val acknowledgedAlerts: Long,
+    val trackedOrders: Long,
+    val matches: Long,
+    val matchesByOrder: Long,
+    val retiredMatches: Long,
+)
+
 // ---- the encoding ----------------------------------------------------------------------
 
 /** Writes the fields of a request: integers little-endian, lengths as u32. */
@@ -638,6 +720,39 @@ private fun Reader.alertKind(): AlertKind =
         else -> tag("AlertKind")
     }
 
+private fun Writer.posSetup(v: PosSetup): Writer =
+    u8(
+        when (v.vendor) {
+            PosVendor.Square -> TAG_POS_VENDOR_VIEW_SQUARE
+            PosVendor.Clover -> TAG_POS_VENDOR_VIEW_CLOVER
+        },
+    ).string(v.location).list(v.tenderNames) { string(it) }.list(v.currencies) { string(it) }
+
+private fun Writer.posAlertKind(v: PosAlertKind): Writer =
+    u8(
+        when (v) {
+            PosAlertKind.TenderWithoutPayment -> TAG_POS_ALERT_KIND_TENDER_WITHOUT_PAYMENT
+            PosAlertKind.ClosedBeforePaid -> TAG_POS_ALERT_KIND_CLOSED_BEFORE_PAID
+            PosAlertKind.PaymentWithoutTender -> TAG_POS_ALERT_KIND_PAYMENT_WITHOUT_TENDER
+            PosAlertKind.AmountDiffers -> TAG_POS_ALERT_KIND_AMOUNT_DIFFERS
+            PosAlertKind.TenderOnUnpaidSale -> TAG_POS_ALERT_KIND_TENDER_ON_UNPAID_SALE
+            PosAlertKind.VoidedAfterPayment -> TAG_POS_ALERT_KIND_VOIDED_AFTER_PAYMENT
+            PosAlertKind.DuplicateReference -> TAG_POS_ALERT_KIND_DUPLICATE_REFERENCE
+            PosAlertKind.BitcoinTip -> TAG_POS_ALERT_KIND_BITCOIN_TIP
+            PosAlertKind.UnknownCurrency -> TAG_POS_ALERT_KIND_UNKNOWN_CURRENCY
+        },
+    )
+
+private fun Writer.posAlertKey(v: PosAlertKey): Writer {
+    posAlertKind(v.kind)
+    when (val subject = v.subject) {
+        is PosSubject.Tender ->
+            u8(TAG_POS_SUBJECT_VIEW_TENDER).string(subject.order).string(subject.tender)
+        is PosSubject.Sale -> u8(TAG_POS_SUBJECT_VIEW_SALE).bytes(subject.counter).u32(subject.index)
+    }
+    return this
+}
+
 private fun Reader.cashAmount(): CashAmount =
     when (u8()) {
         TAG_CASH_AMOUNT_VIEW_SATS -> CashAmount.Sats(u64())
@@ -720,6 +835,57 @@ private fun Reader.oldKind(): OldKind =
         TAG_OLD_KIND_FAILED -> OldKind.Failed
         else -> tag("OldKind")
     }
+
+private fun Reader.posVendor(): PosVendor =
+    when (u8()) {
+        TAG_POS_VENDOR_VIEW_SQUARE -> PosVendor.Square
+        TAG_POS_VENDOR_VIEW_CLOVER -> PosVendor.Clover
+        else -> tag("PosVendorView")
+    }
+
+private fun Reader.posMethod(): PosMethod =
+    when (u8()) {
+        TAG_POS_METHOD_VIEW_GET -> PosMethod.Get
+        TAG_POS_METHOD_VIEW_POST -> PosMethod.Post
+        else -> tag("PosMethodView")
+    }
+
+private fun Reader.posAlertKind(): PosAlertKind =
+    when (u8()) {
+        TAG_POS_ALERT_KIND_TENDER_WITHOUT_PAYMENT -> PosAlertKind.TenderWithoutPayment
+        TAG_POS_ALERT_KIND_CLOSED_BEFORE_PAID -> PosAlertKind.ClosedBeforePaid
+        TAG_POS_ALERT_KIND_PAYMENT_WITHOUT_TENDER -> PosAlertKind.PaymentWithoutTender
+        TAG_POS_ALERT_KIND_AMOUNT_DIFFERS -> PosAlertKind.AmountDiffers
+        TAG_POS_ALERT_KIND_TENDER_ON_UNPAID_SALE -> PosAlertKind.TenderOnUnpaidSale
+        TAG_POS_ALERT_KIND_VOIDED_AFTER_PAYMENT -> PosAlertKind.VoidedAfterPayment
+        TAG_POS_ALERT_KIND_DUPLICATE_REFERENCE -> PosAlertKind.DuplicateReference
+        TAG_POS_ALERT_KIND_BITCOIN_TIP -> PosAlertKind.BitcoinTip
+        TAG_POS_ALERT_KIND_UNKNOWN_CURRENCY -> PosAlertKind.UnknownCurrency
+        else -> tag("PosAlertKind")
+    }
+
+private fun Reader.posSubject(): PosSubject =
+    when (u8()) {
+        TAG_POS_SUBJECT_VIEW_TENDER -> PosSubject.Tender(string(), string())
+        TAG_POS_SUBJECT_VIEW_SALE -> PosSubject.Sale(bytes(), u32())
+        else -> tag("PosSubjectView")
+    }
+
+private fun Reader.posSetup(): PosSetup = PosSetup(posVendor(), string(), strings(), strings())
+
+private fun Reader.posAlert(): PosAlert =
+    PosAlert(PosAlertKey(posAlertKind(), posSubject()), u64(), words())
+
+internal fun Reader.posRequest(): PosRequest = PosRequest(posMethod(), string(), bytes())
+
+internal fun Reader.posReply(): PosReply =
+    PosReply(bool(), bool(), u32(), u32(), u32(), list { posAlert() }, u32(), u64())
+
+internal fun Reader.posState(): PosState =
+    PosState(
+        option { posSetup() }, option { u64() }, list { posAlert() }, u32(), u32(), u32(), u32(),
+        u64(),
+    )
 
 internal fun Reader.pump(): Pump = Pump(strings(), bool())
 
@@ -1076,4 +1242,32 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
         val r = call(OP_ARCHIVE_PAID, handle)
         return r.u32().also { r.end() }
     }
+
+    /** What the till screen shows: the connection, the open alerts and the counts. */
+    fun posState(): PosState {
+        val r = call(OP_POS_STATE, handle)
+        return r.posState().also { r.end() }
+    }
+
+    /** Connect the till, or change its settings (the sign-in token is the app's, never the library's). */
+    fun posSetup(setup: PosSetup) = callUnit(OP_POS_SETUP, handle) { it.posSetup(setup) }
+
+    /** Take the till off: its settings and everything kept about it are removed. */
+    fun posRemove() = callUnit(OP_POS_REMOVE, handle)
+
+    /** The next request to send to the till; the app adds the sign-in and sends it. */
+    fun posRequest(now: Long): PosRequest {
+        val r = call(OP_POS_REQUEST, handle) { it.u64(now) }
+        return r.posRequest().also { r.end() }
+    }
+
+    /** Hand over the till's answer to the request just made: its status and the body bytes. */
+    fun posReply(now: Long, status: Long, body: ByteArray): PosReply {
+        val r = call(OP_POS_REPLY, handle) { it.u64(now).u32(status).bytes(body) }
+        return r.posReply().also { r.end() }
+    }
+
+    /** Acknowledge an open alert, in this phone's own ledger only. */
+    fun posAcknowledge(now: Long, key: PosAlertKey) =
+        callUnit(OP_POS_ACKNOWLEDGE, handle) { it.u64(now).posAlertKey(key) }
 }

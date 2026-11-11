@@ -325,7 +325,9 @@ fn oc_31_settings_that_break_a_bound_are_refused_with_the_rule_that_says_so() {
             "{bad}"
         );
     }
-    assert!(PosSetup::from_text(PosVendor::Clover, "ABC123", &["B".into()], &["USD".into()]).is_ok());
+    assert!(
+        PosSetup::from_text(PosVendor::Clover, "ABC123", &["B".into()], &["USD".into()]).is_ok()
+    );
 }
 
 #[test]
@@ -334,7 +336,10 @@ fn oc_31_the_settings_are_kept_between_runs_and_a_new_till_starts_an_empty_ledge
     let mut pos = OwnerPos::open(dir.path());
     assert!(pos.setup().is_none());
     assert_eq!(pos.request(NOW, &[counter()]), Err(PosRefused::NotSetUp));
-    assert_eq!(PosRefused::NotSetUp.words().who, openbmt_core::say::Who::Owner);
+    assert_eq!(
+        PosRefused::NotSetUp.words().who,
+        openbmt_core::say::Who::Owner
+    );
     pos.set_setup(square()).unwrap();
     poll(&mut pos, NOW, SQUARE_LAST, no_facts().unwrap()).unwrap();
     assert_eq!(pos.ledger().orders().len(), 1);
@@ -374,14 +379,17 @@ fn oc_31_the_settings_are_kept_between_runs_and_a_new_till_starts_an_empty_ledge
 fn oc_32_a_file_that_does_not_read_back_leaves_the_till_unread_until_it_is_removed() {
     for (file, bytes) in [
         (POS_LEDGER_FILE, b"not a ledger".to_vec()),
-        (POS_SETUP_FILE, b"OBMo\x01".to_vec()),
+        (POS_SETUP_FILE, b"OBMr\x01".to_vec()),
     ] {
         let dir = Dir::new();
         drop(pos_in(&dir, square()));
         fs::write(dir.path().join(file), bytes).unwrap();
         let mut pos = OwnerPos::open(dir.path());
         let err = pos.request(NOW, &[counter()]).unwrap_err();
-        assert!(matches!(&err, PosRefused::Corrupt { file: f, .. } if *f == file), "{err:?}");
+        assert!(
+            matches!(&err, PosRefused::Corrupt { file: f, .. } if *f == file),
+            "{err:?}"
+        );
         assert!(err.to_string().starts_with("OC-32:"));
         assert_eq!(pos.view(), Err(err.clone()));
         assert_eq!(pos.reply(200, b"", NOW, no_facts), Err(err.clone()));
@@ -417,7 +425,9 @@ fn oc_32_a_ledger_that_cannot_be_stored_takes_no_effect() {
     assert_eq!(pos.ledger(), &before);
     assert!(err.words().detail.is_some());
     // The settings too.
-    let err = pos.set_setup(setup(PosVendor::Square, "LOCSQ2")).unwrap_err();
+    let err = pos
+        .set_setup(setup(PosVendor::Square, "LOCSQ2"))
+        .unwrap_err();
     assert!(matches!(err, PosRefused::Store(_)), "{err:?}");
     assert_eq!(pos.setup(), Some(&square()));
 }
@@ -446,7 +456,9 @@ fn oc_33_a_clover_request_is_a_get_with_the_merchant_and_no_body() {
     assert_eq!(r.method, PosMethod::Get);
     assert!(r.body.is_empty());
     assert!(
-        r.url.starts_with(&format!("{CLOVER_HOST}/v3/merchants/MERCHANT1/orders?filter=")),
+        r.url.starts_with(&format!(
+            "{CLOVER_HOST}/v3/merchants/MERCHANT1/orders?filter="
+        )),
         "{}",
         r.url
     );
@@ -575,7 +587,9 @@ fn oc_34_a_read_takes_at_most_64_pages_and_the_next_read_goes_on() {
     // The matching ran once, at the 64th page, and the cursor holds on.
     assert_eq!(sales_asked, 1);
     let r = pos.request(NOW + POS_MIN_POLL_SECS, &[counter()]).unwrap();
-    assert!(String::from_utf8(r.body).unwrap().contains("\"cursor\":\"c64\""));
+    assert!(String::from_utf8(r.body)
+        .unwrap()
+        .contains("\"cursor\":\"c64\""));
 }
 
 #[test]
@@ -583,7 +597,8 @@ fn oc_34_a_page_that_says_more_and_does_not_move_on_ends_the_read() {
     let dir = Dir::new();
     let mut pos = pos_in(&dir, square());
     pos.request(NOW, &[counter()]).unwrap();
-    pos.reply(200, br#"{"orders":[],"cursor":"X"}"#, NOW, no_facts).unwrap();
+    pos.reply(200, br#"{"orders":[],"cursor":"X"}"#, NOW, no_facts)
+        .unwrap();
     pos.request(NOW, &[counter()]).unwrap();
     assert_eq!(
         pos.reply(200, br#"{"orders":[],"cursor":"X"}"#, NOW, no_facts),
@@ -607,14 +622,18 @@ fn oc_35_square_fixtures_and_the_counters_records_give_a_match_and_three_alerts(
     let mut pos = pos_in(&dir, square());
     // Page 1: the order with the Bitcoin tender and its tip.
     pos.request(NOW, &[counter()]).unwrap();
-    let first = pos.reply(200, SQUARE_PAGE1, NOW, || counter_facts(&link)).unwrap();
+    let first = pos
+        .reply(200, SQUARE_PAGE1, NOW, || counter_facts(&link))
+        .unwrap();
     assert!(first.again && first.delta.new_matches.is_empty());
     // The second request carries Square's marker.
     let second = pos.request(NOW, &[counter()]).unwrap();
     assert!(String::from_utf8(second.body)
         .unwrap()
         .contains("PAGE2OPAQUE-cursor_value.1"));
-    let done = pos.reply(200, SQUARE_LAST, NOW, || counter_facts(&link)).unwrap();
+    let done = pos
+        .reply(200, SQUARE_LAST, NOW, || counter_facts(&link))
+        .unwrap();
     assert!(!done.again && !done.more_left);
     assert_eq!((done.pages, done.orders_read), (2, 4));
     // One match, by amount and time, to the first sale.
@@ -650,7 +669,9 @@ fn oc_35_square_fixtures_and_the_counters_records_give_a_match_and_three_alerts(
     let mut pos = again;
     pos.request(NOW + POS_MIN_POLL_SECS, &[counter()]).unwrap();
     let repeat = pos
-        .reply(200, SQUARE_LAST, NOW + POS_MIN_POLL_SECS, || counter_facts(&link))
+        .reply(200, SQUARE_LAST, NOW + POS_MIN_POLL_SECS, || {
+            counter_facts(&link)
+        })
         .unwrap();
     assert!(repeat.delta.new_alerts.is_empty() && repeat.delta.new_matches.is_empty());
     assert_eq!(pos.view().unwrap().open, view.open);
@@ -718,7 +739,11 @@ fn oc_35_a_reference_to_a_sale_of_another_amount_is_an_alert_and_claims_the_sale
 fn oc_35_two_tenders_naming_one_sale_raise_a_duplicate_on_the_later() {
     let sa = RefCode::for_sale(&counter(), 7);
     let body = replace(CLOVER, "K7M2QX", sa.as_str());
-    let body = replace(&body, "\"tipAmount\": 100,", &format!("\"tipAmount\": 100, \"note\": \"{}\",", sa.as_str()));
+    let body = replace(
+        &body,
+        "\"tipAmount\": 100,",
+        &format!("\"tipAmount\": 100, \"note\": \"{}\",", sa.as_str()),
+    );
     let body = replace(&body, "\"amount\": 1900,", "\"amount\": 1100,");
     let body = without_refund(&body);
     let dir = Dir::new();
@@ -813,7 +838,14 @@ fn oc_36_an_alert_is_acknowledged_on_this_phone_and_stays_acknowledged() {
     assert!(again.delta.new_alerts.iter().all(|a| a.key != payment));
     assert_eq!(pos.view().unwrap().summary.acknowledged_alerts, 1);
     // Stored: it is still acknowledged after a restart.
-    assert_eq!(OwnerPos::open(dir.path()).view().unwrap().summary.acknowledged_alerts, 1);
+    assert_eq!(
+        OwnerPos::open(dir.path())
+            .view()
+            .unwrap()
+            .summary
+            .acknowledged_alerts,
+        1
+    );
     // An alert that is not open cannot be acknowledged.
     let err = pos.acknowledge(&payment, NOW + 9).unwrap_err();
     assert_eq!(err, PosRefused::Ledger(openbmt_pos::LedgerError::NotOpen));
@@ -856,7 +888,11 @@ fn oc_37_every_refusal_has_words_and_the_wrapped_ones_have_their_own() {
         assert!(!e.to_string().is_empty());
     }
     assert_eq!(
-        PosRefused::Facts { counter: id, error: FactsError::UnknownSale { index: 1 } }.words(),
+        PosRefused::Facts {
+            counter: id,
+            error: FactsError::UnknownSale { index: 1 }
+        }
+        .words(),
         FactsError::UnknownSale { index: 1 }.words()
     );
 }

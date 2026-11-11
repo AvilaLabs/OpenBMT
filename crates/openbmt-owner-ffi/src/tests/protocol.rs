@@ -65,6 +65,12 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (61, "rescan"),
         (62, "recover_key1"),
         (63, "archive_paid"),
+        (70, "pos_state"),
+        (71, "pos_setup"),
+        (72, "pos_remove"),
+        (73, "pos_request"),
+        (74, "pos_reply"),
+        (75, "pos_acknowledge"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

@@ -167,9 +167,9 @@ fn unknown_ops_bad_handles_and_bad_frames_are_refused() {
     let mut other = frame(20, handle, &[]);
     other[..4].copy_from_slice(b"OBMm");
     assert_eq!(rule(&other), "request-magic");
-    // Over 1 MiB, even when the first bytes are a valid frame.
+    // Over 9 MiB, even when the first bytes are a valid frame.
     let mut big = frame(20, handle, &[]);
-    big.resize((1 << 20) + 1, 0);
+    big.resize((9 << 20) + 1, 0);
     assert_eq!(rule(&big), "request-too-long");
     // A length that says more than there is.
     let lie = frame(32, handle, &W::new().u64(T0).u32(u32::MAX).0);

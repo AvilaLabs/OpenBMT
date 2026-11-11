@@ -27,7 +27,8 @@ used only inside `Words`). `list<T>` is a u32 count and the
 elements; `list<u8>` is the bytes type. `option<T>` is a flag byte 0
 or 1 and then the value. An enum is a tag byte and then the fields of
 its variant. A record is its fields in the order given. A request is
-at most 1048576 bytes, is read completely before anything is done,
+at most 9437184 bytes (9 MiB: the body of a till answer is at
+most 8 MiB), is read completely before anything is done,
 and is refused when bytes are left over.
 
 Times are seconds since 1970. Money is in satoshis. A device
@@ -90,6 +91,12 @@ ops run on another; it waits for at most 250 ms.
  61 rescan           handle node  args () -> ()
  62 recover_key1     handle node  args () -> ()
  63 archive_paid     handle node  args () -> u32
+ 70 pos_state        handle node  args () -> PosStateView
+ 71 pos_setup        handle node  args PosSetupView -> ()
+ 72 pos_remove       handle node  args () -> ()
+ 73 pos_request      handle node  args u64 -> PosRequestView
+ 74 pos_reply        handle node  args PosReplyArgs -> PosReplyView
+ 75 pos_acknowledge  handle node  args PosAckArgs -> ()
 ```
 
 ## Types
@@ -158,4 +165,20 @@ SettingsHeldView: record: version: u32, light_per_sale: LimitView, light_budget:
 OutboxKind: enum, one tag byte
     tags Transaction=0 Batch=1 Settings=2 Pairing=3
 OutboxRow: record: id: u32, kind: OutboxKind, txid: option<string>, counter: option<list<u8>>, version: option<u32>, signed_at: option<u64>, size: u32, words: Words
+PosVendorView: enum, one tag byte
+    tags Square=0 Clover=1
+PosSetupView: record: vendor: PosVendorView, location: string, tender_names: list<string>, currencies: list<string>
+PosMethodView: enum, one tag byte
+    tags Get=0 Post=1
+PosRequestView: record: method: PosMethodView, url: string, body: list<u8>
+PosReplyArgs: record: now: u64, status: u32, body: list<u8>
+PosAlertKind: enum, one tag byte
+    tags TenderWithoutPayment=0 ClosedBeforePaid=1 PaymentWithoutTender=2 AmountDiffers=3 TenderOnUnpaidSale=4 VoidedAfterPayment=5 DuplicateReference=6 BitcoinTip=7 UnknownCurrency=8
+PosSubjectView: enum, a tag byte, then: Tender(order: string, tender: string) | Sale(counter: list<u8>, index: u32)
+    tags Tender=0 Sale=1
+PosAlertKey: record: kind: PosAlertKind, subject: PosSubjectView
+PosAckArgs: record: now: u64, key: PosAlertKey
+PosAlertView: record: key: PosAlertKey, raised_at: u64, words: Words
+PosReplyView: record: again: bool, more_left: bool, pages: u32, orders_read: u32, new_matches: u32, new_alerts: list<PosAlertView>, cleared: u32, retired: u64
+PosStateView: record: setup: option<PosSetupView>, last_poll_at: option<u64>, open_alerts: list<PosAlertView>, acknowledged_alerts: u32, tracked_orders: u32, matches: u32, matches_by_order: u32, retired_matches: u64
 ```

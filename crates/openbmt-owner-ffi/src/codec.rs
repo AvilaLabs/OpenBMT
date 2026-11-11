@@ -15,7 +15,7 @@
 use crate::error::{refused_by, AppError};
 
 /// The most bytes a request may hold.
-pub(crate) const MAX_REQUEST: usize = 1 << 20;
+pub(crate) const MAX_REQUEST: usize = 9 << 20;
 
 fn malformed(text: impl std::fmt::Display) -> AppError {
     refused_by("request-malformed", text)

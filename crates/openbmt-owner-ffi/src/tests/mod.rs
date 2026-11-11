@@ -6,6 +6,7 @@ mod e2e;
 pub(crate) mod kit;
 mod kotlin;
 mod lock;
+mod pos;
 mod protocol;
 mod screen;
 mod strict;

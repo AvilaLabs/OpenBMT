@@ -410,7 +410,7 @@ mod tests {
         let result = entry(&registry, env, array_handle(9_999));
         let bytes = h.read(result).expect("a response");
         assert_eq!(reply(&bytes), (1, "request-length".to_string()));
-        // Over 1 MiB.
+        // Over 9 MiB.
         let big = vec![0u8; MAX_REQUEST + 1];
         let bytes = h.call(&registry, &big).expect("a response");
         assert_eq!(reply(&bytes), (1, "request-too-long".to_string()));

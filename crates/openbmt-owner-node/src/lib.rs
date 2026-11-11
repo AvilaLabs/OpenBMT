@@ -80,8 +80,8 @@ pub use node::{
     NO_TOR, QUEUE_FILE, TAKE_JOURNAL_FILE,
 };
 pub use pos::{
-    counter_facts, OwnerPos, PosMethod, PosPolled, PosRefused, PosRequest, PosSetup, PosVendor, PosView,
-    POS_LEDGER_FILE, POS_SETUP_FILE,
+    counter_facts, OwnerPos, PosMethod, PosPolled, PosRefused, PosRequest, PosSetup, PosVendor,
+    PosView, POS_LEDGER_FILE, POS_SETUP_FILE,
 };
 pub use receipts::{MergeOffer, MergeRefused, ReceiptsLine, FEE_FILE, MERGE_MIN_COINS};
 pub use refunds::{

@@ -357,7 +357,7 @@ the reply (OA-16 to OA-19).
 - **OC-31.** The setup (vendor, one location or merchant id, the names
   that mean Bitcoin, the currencies the owner sells in) is the owner's own
   and is not part of the shop's signed settings, which carry none of it.
-  It is kept in `pos-setup.bin`, in a strict frame with the magic `OBMo`:
+  It is kept in `pos-setup.bin`, in a strict frame with the magic `OBMr`:
   read back with no byte left over, every bound checked, and refused if
   writing it again would give other bytes. One location serves all the
   counters the link holds. A vendor or location that differs from the

@@ -53,6 +53,7 @@ mod error;
 pub mod host;
 #[cfg(any(target_os = "android", feature = "jni"))]
 mod jni;
+mod pos_views;
 mod say;
 mod views;
 
@@ -65,6 +66,10 @@ pub use call::{
 };
 pub use error::{AppError, Kind};
 pub use host::{Entry, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};
+pub use pos_views::{
+    PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
+    PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
+};
 pub use say::{all_words, words_for};
 pub use views::{
     AlertKind, AlertView, BatchArgs, BuiltView, CashAmountView, CashOutArgs, CashOutRow, ClearArgs,

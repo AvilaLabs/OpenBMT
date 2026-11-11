@@ -101,6 +101,26 @@ object ProtocolDecoderTest {
         check(outbox[0].signedAt == 1_700_000_000L && outbox[0].size == 300L && outbox[0].words.heading == "Words")
         rejects("an outbox kind tag") { decodeResponse(outboxFrame(kind = 4)).let { r -> r.list { r.outboxRow() } } }
 
+        val pos = decodeResponse(posStateFrame()).posState()
+        check(pos.setup!!.vendor == PosVendor.Clover && pos.setup!!.location == "MERCH1")
+        check(pos.setup!!.tenderNames == listOf("Bitcoin") && pos.setup!!.currencies == listOf("USD"))
+        check(pos.lastPollAt == 1_700_000_000L && pos.openAlerts.size == 2)
+        val tender = pos.openAlerts[0]
+        check(tender.key.kind == PosAlertKind.BitcoinTip && tender.raisedAt == 5L)
+        check((tender.key.subject as PosSubject.Tender).tender == "T1" && tender.words.heading == "Words")
+        check((pos.openAlerts[1].key.subject as PosSubject.Sale).index == 7L)
+        check(pos.acknowledgedAlerts == 1L && pos.trackedOrders == 4L && pos.matches == 3L)
+        check(pos.matchesByOrder == 1L && pos.retiredMatches == 9L)
+        rejects("a vendor tag") { decodeResponse(posStateFrame(vendor = 2)).posState() }
+        rejects("an alert kind tag") { decodeResponse(posStateFrame(kind = 9)).posState() }
+        rejects("a subject tag") { decodeResponse(posStateFrame(subject = 2)).posState() }
+        val reply = decodeResponse(posReplyFrame()).posReply()
+        check(reply.again && !reply.moreLeft && reply.pages == 2L && reply.ordersRead == 150L)
+        check(reply.newMatches == 1L && reply.newAlerts.isEmpty() && reply.cleared == 3L && reply.retired == 4L)
+        val request = decodeResponse(header(0, Writer().u8(1).string("https://x/y").bytes(byteArrayOf(1, 2)).toByteArray())).posRequest()
+        check(request.method == PosMethod.Post && request.url == "https://x/y" && request.body.size == 2)
+        rejects("a method tag") { decodeResponse(header(0, Writer().u8(2).string("u").bytes(ByteArray(0)).toByteArray())).posRequest() }
+
         val pump = decodeResponse(header(0, Writer().u32(1).string("note").u8(1).toByteArray())).pump()
         check(pump.notes == listOf("note") && pump.stopped)
     }
@@ -113,6 +133,8 @@ object ProtocolDecoderTest {
             hex(frame) == "4f424d6b010a000100000000000000" + "00f1536500000000" + "05000000",
         ) { hex(frame) }
         check(hex(startFrame(sampleConfig())) == START_FRAME_HEX) { hex(startFrame(sampleConfig())) }
+        val reply = requestFrame(74, 1) { it.u64(5).u32(200).bytes(byteArrayOf(9)) }
+        check(hex(reply) == "4f424d6b014a000100000000000000" + "0500000000000000" + "c8000000" + "0100000009") { hex(reply) }
     }
 
     private fun sampleConfig() =
@@ -295,6 +317,21 @@ object ProtocolDecoderTest {
         w.u32(0)
         return header(0, w.toByteArray())
     }
+
+    private fun posStateFrame(vendor: Int = 1, kind: Int = 7, subject: Int = 0): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(Writer().u8(1).u8(vendor).string("MERCH1").u32(1).string("Bitcoin").u32(1).string("USD").toByteArray())
+        out.write(Writer().u8(1).u64(1_700_000_000).u32(2).toByteArray())
+        out.write(Writer().u8(kind).u8(subject).string("O1").string("T1").u64(5).toByteArray())
+        words(out)
+        out.write(Writer().u8(0).u8(1).bytes(ByteArray(32) { 2 }).u32(7).u64(6).toByteArray())
+        words(out)
+        out.write(Writer().u32(1).u32(4).u32(3).u32(1).u64(9).toByteArray())
+        return header(0, out.toByteArray())
+    }
+
+    private fun posReplyFrame(): ByteArray =
+        header(0, Writer().bool(true).bool(false).u32(2).u32(150).u32(1).u32(0).u32(3).u64(4).toByteArray())
 
     private fun outboxFrame(kind: Int = 1): ByteArray {
         val out = ByteArrayOutputStream()

@@ -55,18 +55,25 @@ use openbmt_owner::{
 };
 use openbmt_owner_node::coins::ViewState;
 use openbmt_owner_node::live::DeepLine;
+use openbmt_owner_node::pos::{
+    AlertKind as PosKind, PosAlertRef, PosId, PosSaleKey, PosSubject, TenderKey,
+};
 use openbmt_owner_node::say::Alert as NodeAlert;
 use openbmt_owner_node::watcher::write_file;
 use openbmt_owner_node::{
-    verified_facts, Alert, FactsRefused, MergeRefused, NodeError, OwnerConfig, OwnerLink,
-    OwnerLinkConfig, OwnerNode, OwnerParts, OwnerPort, OwnerStartError, ReceiptsLine, RefundIntake,
-    SendState,
+    counter_facts, verified_facts, Alert, FactsRefused, MergeRefused, NodeError, OwnerConfig,
+    OwnerLink, OwnerLinkConfig, OwnerNode, OwnerParts, OwnerPort, OwnerPos, OwnerStartError,
+    PosMethod, PosRefused, PosSetup, PosVendor, ReceiptsLine, RefundIntake, SendState,
 };
 use openbmt_signer::SignerState;
 use openbmt_watch::HeaderChain;
 
 use crate::error::{
     from_words, internal, poisoned, refused_by, rule_in, store_by, wrong_state, AppError, Kind,
+};
+use crate::pos_views::{
+    PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
+    PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
 };
 use crate::say::{counter_words, link_alert_words, words_for};
 use crate::views::{
@@ -169,6 +176,7 @@ struct State {
     node: OwnerNode<Port>,
     link: Option<OwnerLink>,
     intake: RefundIntake,
+    pos: OwnerPos,
     key1: SignerState,
     key1_account: Xpriv,
     policy: BatchPolicy,
@@ -231,6 +239,104 @@ pub(crate) fn node_error(e: &NodeError) -> AppError {
         NodeError::WatchLimit { .. } => from_words(Kind::Refused, "watch-limit", text, words),
         NodeError::KeyRecoveryRequired => from_words(Kind::State, "key-recovery", text, words),
     }
+}
+
+/// What a refusal of the till is, as the error the app gets (OC-37).
+fn pos_error(e: &PosRefused) -> AppError {
+    let (text, words) = (e.to_string(), e.words());
+    let kind = match e {
+        PosRefused::NotSetUp
+        | PosRefused::NoCounters
+        | PosRefused::TooSoon { .. }
+        | PosRefused::NothingAsked => Kind::State,
+        PosRefused::Store(_) | PosRefused::Corrupt { .. } => Kind::Store,
+        _ => Kind::Refused,
+    };
+    from_words(kind, rule_in(&text, "OC-33"), text, words)
+}
+
+fn pos_vendor(v: PosVendorView) -> PosVendor {
+    match v {
+        PosVendorView::Square => PosVendor::Square,
+        PosVendorView::Clover => PosVendor::Clover,
+    }
+}
+
+fn pos_setup_view(s: &PosSetup) -> PosSetupView {
+    PosSetupView {
+        vendor: match s.vendor {
+            PosVendor::Square => PosVendorView::Square,
+            PosVendor::Clover => PosVendorView::Clover,
+        },
+        location: s.location.as_str().to_string(),
+        tender_names: s
+            .tender_names
+            .iter()
+            .map(|n| n.as_str().to_string())
+            .collect(),
+        currencies: s
+            .currencies
+            .iter()
+            .map(|c| String::from_utf8_lossy(&c.code()).into_owned())
+            .collect(),
+    }
+}
+
+fn pos_key_view(key: &PosAlertRef) -> PosAlertKey {
+    PosAlertKey {
+        kind: match key.kind {
+            PosKind::TenderWithoutPayment => PosAlertKind::TenderWithoutPayment,
+            PosKind::ClosedBeforePaid => PosAlertKind::ClosedBeforePaid,
+            PosKind::PaymentWithoutTender => PosAlertKind::PaymentWithoutTender,
+            PosKind::AmountDiffers => PosAlertKind::AmountDiffers,
+            PosKind::TenderOnUnpaidSale => PosAlertKind::TenderOnUnpaidSale,
+            PosKind::VoidedAfterPayment => PosAlertKind::VoidedAfterPayment,
+            PosKind::DuplicateReference => PosAlertKind::DuplicateReference,
+            PosKind::BitcoinTip => PosAlertKind::BitcoinTip,
+            PosKind::UnknownCurrency => PosAlertKind::UnknownCurrency,
+        },
+        subject: match &key.subject {
+            PosSubject::Tender(t) => PosSubjectView::Tender {
+                order: t.order.as_str().to_string(),
+                tender: t.tender.as_str().to_string(),
+            },
+            PosSubject::Sale(s) => PosSubjectView::Sale {
+                counter: s.counter.to_bytes().to_vec(),
+                index: s.index,
+            },
+        },
+    }
+}
+
+/// The alert an app named, as the matcher keys it. The ids are checked
+/// again here, so that an alert that cannot exist is refused by name.
+fn pos_key_of(key: &PosAlertKey) -> Result<PosAlertRef, AppError> {
+    let kind = match key.kind {
+        PosAlertKind::TenderWithoutPayment => PosKind::TenderWithoutPayment,
+        PosAlertKind::ClosedBeforePaid => PosKind::ClosedBeforePaid,
+        PosAlertKind::PaymentWithoutTender => PosKind::PaymentWithoutTender,
+        PosAlertKind::AmountDiffers => PosKind::AmountDiffers,
+        PosAlertKind::TenderOnUnpaidSale => PosKind::TenderOnUnpaidSale,
+        PosAlertKind::VoidedAfterPayment => PosKind::VoidedAfterPayment,
+        PosAlertKind::DuplicateReference => PosKind::DuplicateReference,
+        PosAlertKind::BitcoinTip => PosKind::BitcoinTip,
+        PosAlertKind::UnknownCurrency => PosKind::UnknownCurrency,
+    };
+    let subject = match &key.subject {
+        PosSubjectView::Tender { order, tender } => PosSubject::Tender(TenderKey {
+            order: PosId::new(order).map_err(|e| pos_error(&PosRefused::Model(e)))?,
+            tender: PosId::new(tender).map_err(|e| pos_error(&PosRefused::Model(e)))?,
+        }),
+        PosSubjectView::Sale { counter, index } => PosSubject::Sale(PosSaleKey {
+            counter: device("the counter's root", "id-length", counter)?,
+            index: *index,
+        }),
+    };
+    Ok(PosAlertRef { kind, subject })
+}
+
+fn count32(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
 }
 
 fn queue_error(e: &OwnerError<String>) -> AppError {
@@ -496,6 +602,7 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
             node,
             link,
             intake,
+            pos: OwnerPos::open(&dir),
             key1,
             key1_account,
             policy,
@@ -1211,6 +1318,107 @@ impl Entry {
             }
             link.clear(&alert);
             Ok(())
+        })
+    }
+
+    pub(crate) fn pos_state(&self) -> Result<PosStateView, AppError> {
+        self.run(None, |st| {
+            let v = st.pos.view().map_err(|e| pos_error(&e))?;
+            Ok(PosStateView {
+                setup: v.setup.as_ref().map(pos_setup_view),
+                last_poll_at: v.last_poll_at,
+                open_alerts: v
+                    .open
+                    .iter()
+                    .map(|a| PosAlertView {
+                        key: pos_key_view(&a.key),
+                        raised_at: a.raised_at,
+                        words: words(a.words.clone()),
+                    })
+                    .collect(),
+                acknowledged_alerts: count32(v.summary.acknowledged_alerts),
+                tracked_orders: count32(v.summary.tracked_orders),
+                matches: count32(v.summary.matches),
+                matches_by_order: count32(v.summary.matches_by_order),
+                retired_matches: v.summary.retired_matches,
+            })
+        })
+    }
+
+    pub(crate) fn pos_setup(&self, a: PosSetupView) -> Result<(), AppError> {
+        self.run(None, move |st| {
+            let setup = PosSetup::from_text(
+                pos_vendor(a.vendor),
+                &a.location,
+                &a.tender_names,
+                &a.currencies,
+            )
+            .map_err(|e| pos_error(&e))?;
+            st.pos.set_setup(setup).map_err(|e| pos_error(&e))
+        })
+    }
+
+    pub(crate) fn pos_remove(&self) -> Result<(), AppError> {
+        self.run(None, |st| st.pos.remove().map_err(|e| pos_error(&e)))
+    }
+
+    pub(crate) fn pos_request(&self, now: u64) -> Result<PosRequestView, AppError> {
+        self.run(Some(now), move |st| {
+            let State { link, pos, .. } = st;
+            let link = link
+                .as_ref()
+                .ok_or_else(|| wrong_state("link-none", "the node was started without a link"))?;
+            let r = pos
+                .request(now, link.counters())
+                .map_err(|e| pos_error(&e))?;
+            Ok(PosRequestView {
+                method: match r.method {
+                    PosMethod::Get => PosMethodView::Get,
+                    PosMethod::Post => PosMethodView::Post,
+                },
+                url: r.url,
+                body: r.body,
+            })
+        })
+    }
+
+    pub(crate) fn pos_reply(&self, a: PosReplyArgs) -> Result<PosReplyView, AppError> {
+        self.run(Some(a.now), move |st| {
+            let State { link, pos, .. } = st;
+            // A status that is not three digits is a status no vendor sends.
+            let status = u16::try_from(a.status).unwrap_or(0);
+            let p = pos
+                .reply(status, &a.body, a.now, || match link.as_ref() {
+                    Some(l) => counter_facts(l),
+                    None => Err(PosRefused::NoCounters),
+                })
+                .map_err(|e| pos_error(&e))?;
+            Ok(PosReplyView {
+                again: p.again,
+                more_left: p.more_left,
+                pages: count32(p.pages),
+                orders_read: count32(p.orders_read),
+                new_matches: count32(p.delta.new_matches.len()),
+                new_alerts: p
+                    .delta
+                    .new_alerts
+                    .iter()
+                    .map(|al| PosAlertView {
+                        key: pos_key_view(&al.key),
+                        raised_at: al.raised_at,
+                        words: words(al.words()),
+                    })
+                    .collect(),
+                cleared: count32(p.delta.cleared.len()),
+                retired: p.delta.retired_matches,
+            })
+        })
+    }
+
+    pub(crate) fn pos_acknowledge(&self, a: PosAckArgs) -> Result<(), AppError> {
+        let key = pos_key_of(&a.key)?;
+        self.run(Some(a.now), move |st| {
+            st.pos.acknowledge(&key, a.now).map_err(|e| pos_error(&e))
         })
     }
 

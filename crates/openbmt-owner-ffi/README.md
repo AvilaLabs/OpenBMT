@@ -19,7 +19,7 @@ rule, the text and the words of the error. `bindings/PROTOCOL.md` lists every
 op and type; a test writes it from the tables the encoder uses and fails
 when the file differs.
 
-A request is at most 1 MiB, is read completely before anything is done, and
+A request is at most 9 MiB, is read completely before anything is done, and
 is refused when bytes are left over. A [`Registry`] holds at most two nodes;
 handles are never given out twice.
 
@@ -34,6 +34,14 @@ handles are never given out twice.
 | Queue | `queue`, `queue_refund`, `cancel`, `requeue`, `cash_out`, `sign_batch`, `queue_settings` |
 | Link | `link_state`, `clear_alert`, `refund_notes`, `dismiss_refund_note` |
 | Upkeep | `notes`, `rescan`, `recover_key1`, `archive_paid` |
+| Till | `pos_state`, `pos_setup`, `pos_remove`, `pos_request`, `pos_reply`, `pos_acknowledge` |
+
+The till ops (`docs/OWNER-COINS-RULES.md`, OC-30 to OC-37) match the shop's
+orders against the counters' sales on the owner's phone. The app does the
+HTTP: `pos_request` gives the request to send (without the sign-in, which is
+the app's), `pos_reply` takes the status and the body of the answer, parses
+it, stores the ledger and says whether another page is wanted. That is why
+a request may be 9 MiB: a till page is at most 8 MiB.
 
 `settings` is the signed settings the node holds as in force, decoded, for a
 read-only view (none until the first settings are taken). `outbox` lists the

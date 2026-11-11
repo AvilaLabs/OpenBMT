@@ -15,7 +15,7 @@
 //!   records ([`counter_facts`]), never from the Box's notices and never from
 //!   what a counter says about itself outside its signed records.
 //! - **What is kept** is the owner's own settings for the till
-//!   ([`PosSetup`], `pos-setup.bin`, `OBMo`) and the ledger of the matcher
+//!   ([`PosSetup`], `pos-setup.bin`, `OBMr`) and the ledger of the matcher
 //!   (`pos-ledger.bin`, `OBMZ`). Each is written whole through the
 //!   watcher's atomic write before it takes effect, and each is read back
 //!   strictly. A file that does not read back leaves the till out of use
@@ -46,7 +46,8 @@ use openbmt_pos::{
 use openbmt_pos_readers::{clover, square, ReadRefused, RequestRefused};
 
 pub use openbmt_pos::{
-    AlertKind, Id as PosId, SaleKey as PosSaleKey, Subject as PosSubject, TenderKey,
+    AlertKey as PosAlertRef, AlertKind, Id as PosId, SaleKey as PosSaleKey, Subject as PosSubject,
+    TenderKey,
 };
 
 use crate::link::OwnerLink;
@@ -57,7 +58,7 @@ pub const POS_SETUP_FILE: &str = "pos-setup.bin";
 /// The matcher's ledger, in the node's folder.
 pub const POS_LEDGER_FILE: &str = "pos-ledger.bin";
 /// Magic of the owner's till settings (OC-31).
-pub const MAGIC_POS_SETUP: [u8; 4] = *b"OBMo";
+pub const MAGIC_POS_SETUP: [u8; 4] = *b"OBMr";
 /// OC-33: orders asked for in one page.
 pub const POS_PAGE_ORDERS: usize = 100;
 /// OC-34: fewest seconds between the starts of two reads of the till.
@@ -194,7 +195,7 @@ impl PosSetup {
         )
     }
 
-    /// The stored form: `OBMo`, version 1, the vendor, the location, the
+    /// The stored form: `OBMr`, version 1, the vendor, the location, the
     /// names and the currencies.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = wire::start(&MAGIC_POS_SETUP, 64);
@@ -220,7 +221,9 @@ impl PosSetup {
         let location = get_text(&mut r)?;
         let n = usize::from(r.u8()?);
         if n == 0 || n > MAX_TENDER_NAMES {
-            return Err(DecodeError::NonCanonical("the tender names are out of bound"));
+            return Err(DecodeError::NonCanonical(
+                "the tender names are out of bound",
+            ));
         }
         let mut names = Vec::with_capacity(n);
         for _ in 0..n {
@@ -233,15 +236,18 @@ impl PosSetup {
         let mut currencies = Vec::with_capacity(n);
         for _ in 0..n {
             currencies.push(
-                Currency::new(r.array::<3>()?)
-                    .ok_or(DecodeError::NonCanonical("a currency is not three capitals"))?,
+                Currency::new(r.array::<3>()?).ok_or(DecodeError::NonCanonical(
+                    "a currency is not three capitals",
+                ))?,
             );
         }
         r.finish()?;
         let setup = Self::new(vendor, location, names, currencies)
             .map_err(|_| DecodeError::NonCanonical("the settings do not hold"))?;
         if setup.to_bytes() != bytes {
-            return Err(DecodeError::NonCanonical("the bytes are not the canonical form"));
+            return Err(DecodeError::NonCanonical(
+                "the bytes are not the canonical form",
+            ));
         }
         Ok(setup)
     }
@@ -341,7 +347,9 @@ impl fmt::Display for PosRefused {
             }
             Self::Unreadable(e) => write!(f, "{e}"),
             Self::Request(e) => write!(f, "{e}"),
-            Self::NoProgress => write!(f, "PS-80: the till says there is more and does not move on"),
+            Self::NoProgress => {
+                write!(f, "PS-80: the till says there is more and does not move on")
+            }
             Self::Setup(e) => write!(f, "{e}"),
             Self::Model(e) => write!(f, "{e}"),
             Self::Ledger(e) => write!(f, "{e}"),
@@ -577,10 +585,12 @@ impl OwnerPos {
 
     fn read_back(&mut self) -> Result<(), PosRefused> {
         if let Some(bytes) = read_bounded(&self.dir, POS_SETUP_FILE)? {
-            self.setup = Some(PosSetup::from_bytes(&bytes).map_err(|e| PosRefused::Corrupt {
-                file: POS_SETUP_FILE,
-                why: e.to_string(),
-            })?);
+            self.setup = Some(
+                PosSetup::from_bytes(&bytes).map_err(|e| PosRefused::Corrupt {
+                    file: POS_SETUP_FILE,
+                    why: e.to_string(),
+                })?,
+            );
         }
         if let Some(bytes) = read_bounded(&self.dir, POS_LEDGER_FILE)? {
             self.ledger = Ledger::from_bytes(&bytes).map_err(|e| PosRefused::Corrupt {
@@ -821,7 +831,12 @@ impl OwnerPos {
         Ok(PosView {
             setup: self.setup.clone(),
             last_poll_at: self.last_poll_at,
-            open: self.ledger.open_alerts().into_iter().map(OpenAlert::of).collect(),
+            open: self
+                .ledger
+                .open_alerts()
+                .into_iter()
+                .map(OpenAlert::of)
+                .collect(),
             summary: self.ledger.summary(),
         })
     }

@@ -23,7 +23,7 @@
 //!
 //! Integers are little-endian; the field encodings are in
 //! [`codec`](crate::codec). The request is read completely before anything
-//! is done, and it is refused when it is longer than 1 MiB, has bytes left
+//! is done, and it is refused when it is longer than 9 MiB, has bytes left
 //! over after the last field, or holds a length, flag or tag that is not
 //! defined. An op number that is not in the table is refused with the rule
 //! `op-unknown`.
@@ -41,6 +41,10 @@
 //! - 40 to 46: the queue (refunds, cash-outs, batches, settings).
 //! - 50 to 53: the link and the refund requests from the counters.
 //! - 60 to 63: notes, a fresh check, recovery, archiving.
+//! - 70 to 75: the till (`docs/OWNER-COINS-RULES.md`, OC-30 to OC-37): what
+//!   it shows, its settings, taking them off, the next request, the till's
+//!   answer, acknowledging an alert. The app sends the request and hands
+//!   back the answer; the node parses and matches.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -57,6 +61,10 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::error::{internal, refused_by, wrong_state, AppError};
 use crate::host::{real_spawn, Entry, Spawn};
+use crate::pos_views::{
+    PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
+    PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
+};
 use crate::say::{TONES, WHOS};
 use crate::views::{
     put_words, AlertKind, AlertView, BatchArgs, BuiltView, CashAmountView, CashOutArgs, CashOutRow,
@@ -377,6 +385,20 @@ fn build_ops() -> Vec<Op> {
         op(61, "rescan", Node, |c, ()| c.entry()?.rescan()),
         op(62, "recover_key1", Node, |c, ()| c.entry()?.recover_key1()),
         op(63, "archive_paid", Node, |c, ()| c.entry()?.archive_paid()),
+        op(70, "pos_state", Node, |c, ()| c.entry()?.pos_state()),
+        op(71, "pos_setup", Node, |c, a: PosSetupView| {
+            c.entry()?.pos_setup(a)
+        }),
+        op(72, "pos_remove", Node, |c, ()| c.entry()?.pos_remove()),
+        op(73, "pos_request", Node, |c, now: u64| {
+            c.entry()?.pos_request(now)
+        }),
+        op(74, "pos_reply", Node, |c, a: PosReplyArgs| {
+            c.entry()?.pos_reply(a)
+        }),
+        op(75, "pos_acknowledge", Node, |c, a: PosAckArgs| {
+            c.entry()?.pos_acknowledge(a)
+        }),
     ]
 }
 
@@ -553,6 +575,18 @@ fn definitions() -> Vec<TypeDef> {
         SettingsHeldView::define(),
         OutboxKind::define(),
         OutboxRow::define(),
+        PosVendorView::define(),
+        PosSetupView::define(),
+        PosMethodView::define(),
+        PosRequestView::define(),
+        PosReplyArgs::define(),
+        PosAlertKind::define(),
+        PosSubjectView::define(),
+        PosAlertKey::define(),
+        PosAckArgs::define(),
+        PosAlertView::define(),
+        PosReplyView::define(),
+        PosStateView::define(),
     ]
 }
 
@@ -613,7 +647,8 @@ pub fn protocol_description() -> String {
          elements; `list<u8>` is the bytes type. `option<T>` is a flag byte 0\n\
          or 1 and then the value. An enum is a tag byte and then the fields of\n\
          its variant. A record is its fields in the order given. A request is\n\
-         at most 1048576 bytes, is read completely before anything is done,\n\
+         at most 9437184 bytes (9 MiB: the body of a till answer is at\n\
+         most 8 MiB), is read completely before anything is done,\n\
          and is refused when bytes are left over.\n\
          \n\
          Times are seconds since 1970. Money is in satoshis. A device\n\
