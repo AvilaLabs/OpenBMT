@@ -52,6 +52,9 @@ class Controller(internal val act: MainActivity) {
     internal var setup: OwnerSetup? = null
     internal var config: AppConfig? = null
 
+    // What the owner has typed in the settings editor, in memory only (OA-34).
+    internal var settingsDraft = SettingsDraft()
+
     // The key ceremony in progress: held in memory for the screens, and sealed on disk between steps (OA-26).
     internal var ceremony: CeremonyDraft? = null
 

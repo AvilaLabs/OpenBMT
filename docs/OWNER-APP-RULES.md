@@ -128,9 +128,12 @@ run on a phone. Not for real funds.**
   it. A response is taken only when the owner presses the button of its
   source.
 - **OA-14.** The settings view and the list of what waits to be delivered
-  show what the node holds, in a fixed order, and change nothing. The
-  node keeps no time for a signed object other than an address batch, and
-  the app says so instead of showing a time it does not have.
+  show what the node holds, in a fixed order, and change nothing: the
+  settings view has no input of its own, and a change of the settings goes
+  through the editor of OA-32 to OA-35. The settings view shows the node's
+  key in full. The node keeps no time for a signed object other than an
+  address batch, and the app says so instead of showing a time it does not
+  have.
 - **OA-15.** The app opens no connection of its own but two. One is the
   greeting to the proxy of OA-05, the only socket it has. The other is the
   read of the till (OA-17), made by one class, `HttpsPosFetcher`, through
@@ -244,7 +247,7 @@ owner's choices.
   four words match" calls the node's `counterConfirm`, which queues the
   settings and the first batch together; "The words differ" takes the queued
   request out. The shares are equal, 1/n each, and the words say that custom
-  shares come later with the settings editor. A phone that holds no settings
+  shares are set in the settings editor. A phone that holds no settings
   asks for the rate in satoshis to a dollar, a whole number above 0, and
   queues nothing without it. Leaving the screen queues no settings.
 - **OA-24.** After the confirmation the approval is the request and
@@ -344,7 +347,51 @@ keeps the library's record between two steps and carries the owner's words.
   (OA-08) and signs nothing (OA-09): what it holds from the ceremony is key
   1 and the owner's secret, as before.
 
-## 8. What these rules do not do
+## 8. Changing the settings
+
+The node applies an edit to the settings it holds, checks it and sorts it
+(`docs/SESSION-RULES.md`, AS-74 to AS-77). The app turns what is typed into an
+edit, shows what the node says it would do, and queues it when the owner says
+so. It builds no settings bytes and signs nothing.
+
+- **OA-32.** The settings view offers "Change settings". The editor is a menu
+  of six screens and a Review: Instant sales, Payments, Refunds and
+  overrides, Safety (the heartbeat, Tor and customer Wi-Fi), Counters'
+  shares, and Lightning node. What is typed is kept in memory only, and only
+  for the fields that differ from what the settings hold; "Start over"
+  forgets it, and a phone that holds no settings says so and offers nothing
+  to change. Nothing is sent to the node until Review.
+- **OA-33.** Each field shows its words from `AppWords` (a heading of at most
+  28 characters and one plain sentence of what it does), what the settings
+  hold now, and a field to type in: whole dollars (0 is off), a percent with
+  up to two decimals, whole blocks, whole minutes, whole satoshis, or a
+  choice of two. Done keeps the screen's fields and refuses with words a text
+  that is not the kind of number its field takes; Back keeps nothing of that
+  screen. Only the shape is judged here (OA-07): ranges, the order of the two
+  depths and the total of the shares are the node's. The shares screen shows
+  the total and what remains while the owner types. The Lightning screen
+  takes a key or an address typed, pasted or scanned (plain text of a code,
+  at the owner's press), or removes the node; it says that naming a node
+  needs the Key app, which shows the key in full, and that Lightning must
+  then be set up on each counter, which holds its own limited key.
+- **OA-34.** Review calls the node's `previewSettings`, which stores nothing,
+  and shows every change as a line with its name, its old value and its new
+  one, those that need the Key app (loosening) apart from those that take
+  effect when delivered (tightening), with the library's own words for a
+  refusal. When the library says a rate is needed the review asks for
+  satoshis to a dollar, a whole number above 0, and asks again. A change
+  that changes nothing is said so and cannot be queued. Only "Queue the
+  change" calls `queueSettings`, with the bytes the preview gave, and then
+  clears what was typed.
+- **OA-35.** After the queue call the owner is taken to the screens that
+  exist: a change that needs the Key app goes to the request screen of
+  OA-20 and its response (OA-21), and a stricter one, which the node signs
+  alone, is listed under what waits to be delivered. The editor has no
+  approval flow of its own. Every state and refusal is shown with the
+  library's words, and the app's own words are in `AppWords`, listed in
+  `docs/screens/owner-app.md`.
+
+## 9. What these rules do not do
 
 - **They do not protect a phone that is already lost to someone else.**
   A phone that is unlocked, rooted or running a hostile keyboard or

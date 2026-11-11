@@ -31,7 +31,7 @@ the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-31).
 | Till | Connect a Square or Clover till with a read-only token, see when it was last read, how many sales matched, and each open alert with its words and an acknowledge button. |
 | Refund notes and Notes | What the node noted about refunds and everything else. |
 | Waiting | What is signed and waits to be delivered, by kind and age (read-only). |
-| Settings | The settings the node holds, read-only. |
+| Settings | The settings the node holds, and "Change settings" (OA-32 to OA-35): six screens of fields, a review of old and new values, and a queued change that goes on through the outbox or the Key app. |
 | About | The version, what is not built, "Not for real funds", the run-while-visible note. |
 
 Every state and refusal is shown through the library's `words` where the
@@ -40,10 +40,9 @@ library has them. The app's own states and faults have words written in
 `docs/screens/owner-app.md`.
 
 Not built yet: a relay link and peers for a wallet made on this phone (the
-setup text it makes has none; a pasted text can carry them, see below), and
-any change to the settings (the settings view is read-only; a counter added
-from the phone gets equal shares of the instant limit, and shares that are not
-equal wait for the settings editor).
+setup text it makes has none; a pasted text can carry them, see below). A
+counter added from the phone gets equal shares of the instant limit; other
+shares are set in Change settings.
 
 ## Making a new shop wallet
 

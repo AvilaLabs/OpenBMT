@@ -194,7 +194,7 @@ object AppWords {
         "On the counter, choose Pair and scan the code it shows.",
     )
 
-    /** The shares of the instant limit once the counter is added: equal, until the settings editor exists. */
+    /** The shares of the instant limit once the counter is added: equal; the settings editor changes them. */
     fun sharesNote(counters: Int) = w(
         Tones.INFO, "Equal shares",
         if (counters <= 1) {
@@ -203,7 +203,7 @@ object AppWords {
             "Each counter's share of the instant limit becomes 1/$counters."
         },
         Who.OWNER,
-        "Custom shares come later, with the settings editor.",
+        "Custom shares are set under Settings, in Change settings.",
     )
 
     /** What the owner does with the four words. */
@@ -570,6 +570,237 @@ object AppWords {
         "Nothing to do. They arrive with the first approval that carries settings.",
     )
 
+    // ---- changing the settings (OA-32 to OA-35) -----------------------------------------------
+
+    /** The first screen of the editor: what the steps are. */
+    val editIntro = w(
+        Tones.INFO, "Change the settings",
+        "Pick a group, change what you need, then review. Nothing is queued until you press Queue the change.",
+        Who.OWNER,
+        "A change that loosens something needs the Key app. A stricter change does not.",
+    )
+
+    val editGroupInstant = w(
+        Tones.INFO, "Instant sales",
+        "How much a counter may accept as paid before the payment is confirmed, for each way it checks.",
+        Who.OWNER,
+        "Whole dollars. 0 turns a limit off.",
+    )
+
+    val editGroupPayments = w(
+        Tones.INFO, "Payments",
+        "When a payment counts, how many blocks settle a sale, and the smallest bitcoin sale.",
+        Who.OWNER,
+        "Change what you need, then press Done.",
+    )
+
+    val editGroupRefunds = w(
+        Tones.INFO, "Refunds and overrides",
+        "How much can be refunded, and how much cashiers and managers may accept against a red screen.",
+        Who.OWNER,
+        "Whole dollars. 0 turns a limit off.",
+    )
+
+    val editGroupSafety = w(
+        Tones.INFO, "Safety",
+        "How recent this phone's report must be, and what the shop says about its network.",
+        Who.OWNER,
+        "Change what you need, then press Done.",
+    )
+
+    val editGroupShares = w(
+        Tones.INFO, "Counters' shares",
+        "Each counter's share of every instant limit. The shares may add up to 100% at most.",
+        Who.OWNER,
+        "Type each share as a percent with up to two decimals.",
+    )
+
+    val editGroupLightning = w(
+        Tones.INFO, "Lightning node",
+        "The shop's own Lightning node: every Lightning payment must be made out to this node's key.",
+        Who.OWNER,
+        "Paste or scan the node's key or address, or remove the node.",
+    )
+
+    /** What naming a node needs. */
+    val editLightningNote = w(
+        Tones.INFO, "Naming a node",
+        "Naming a node needs the Key app, which shows the key in full.",
+        Who.OWNER,
+        "Afterwards, set up Lightning on each counter, which holds its own limited key.",
+    )
+
+    val editNothingChanged = w(
+        Tones.INFO, "Nothing changed",
+        "Every value is what the settings hold now, so there is nothing to queue.",
+        Who.OWNER,
+        "Go back and change a value, or leave the editor.",
+    )
+
+    /** The review: some field loosens. */
+    val editNeedsKeyApp = w(
+        Tones.INFO, "The Key app must approve",
+        "Something here loosens a limit or a check, so the whole change needs the Key app's approval.",
+        Who.OWNER,
+        "Queue the change, then build the request for the Key app.",
+    )
+
+    /** The review: every field tightens. */
+    val editTakesEffect = w(
+        Tones.INFO, "Takes effect when delivered",
+        "Every change here makes things stricter, so this phone signs it alone and no approval is needed.",
+        Who.OWNER,
+        "Queue the change. It takes effect when it is delivered to the counters.",
+    )
+
+    val editQueuedLoosening = w(
+        Tones.GOOD, "Change queued",
+        "The change waits for the Key app's approval. It takes effect after the Key app approves and it is delivered.",
+        Who.OWNER,
+        "Build the request for the Key app, show it there, and bring its response back.",
+    )
+
+    val editQueuedTightening = w(
+        Tones.GOOD, "Change signed",
+        "The change is signed by this phone and waits to be delivered to the counters.",
+        Who.OWNER,
+        "Nothing more is needed. See it under Waiting to be delivered.",
+    )
+
+    /** The Lightning field was used with nothing in it. */
+    val editNodeNeeded = w(
+        Tones.STOP, "Node key needed",
+        "The node's key or address was left empty, so no node was named.",
+        Who.OWNER,
+        "Paste or scan the key or address of the node, or choose Remove the node.",
+    )
+
+    /** There is no counter to give a share to. */
+    val editNoCounters = w(
+        Tones.INFO, "No counters yet",
+        "The settings list no counters, so there are no shares to change.",
+        Who.OWNER,
+        "Add a counter first. Equal shares are made when it is added.",
+    )
+
+    /** A share was not a percent. */
+    val editSharesNotPercent = w(
+        Tones.STOP, "Share not accepted",
+        "A share must be a percent from 0 to 100, with up to two decimals, so nothing was saved.",
+        Who.OWNER,
+        "Type each share again, like 50 or 33.33.",
+    )
+
+    /** What was typed for a field is not the kind of number it takes. */
+    fun editValueNotRead(kind: FieldKind, label: String): SayWords {
+        val (what, next) = when (kind) {
+            FieldKind.Dollars -> "is not a whole number of dollars" to "Type whole dollars, like 25, or 0 to turn it off."
+            FieldKind.Percent -> "is not a percent" to "Type a percent with up to two decimals, like 0.5."
+            FieldKind.Blocks -> "is not a whole number of blocks" to "Type a whole number of blocks, like 6."
+            FieldKind.Minutes -> "is not a whole number of minutes" to "Type whole minutes, like 10."
+            FieldKind.Sats -> "is not a whole number of satoshis" to "Type whole satoshis, like 1000, or 0 for none."
+            FieldKind.Switch -> "was not chosen" to "Choose one of the two answers."
+        }
+        return w(
+            Tones.STOP, "Value not accepted",
+            "The value for ${Format.cleanForeign(label)} $what, so nothing was saved.",
+            Who.OWNER,
+            next,
+        )
+    }
+
+    /** The words of each field the editor changes: the label is the heading, then what it does, then how to type it. */
+    val editFields: List<Pair<String, SayWords>> = listOf(
+        "light_per_sale" to w(
+            Tones.INFO, "Light check: one sale",
+            "The largest sale accepted as instant when only a light check has seen the payment.",
+            Who.OWNER, "Whole dollars. 0 turns it off.",
+        ),
+        "light_budget" to w(
+            Tones.INFO, "Light check: all at once",
+            "The most that may wait for confirmation together across the shop, on a light check.",
+            Who.OWNER, "Whole dollars. 0 turns it off.",
+        ),
+        "node_per_sale" to w(
+            Tones.INFO, "Own node: one sale",
+            "The largest sale accepted as instant when the shop's own node has also seen the payment.",
+            Who.OWNER, "Whole dollars. 0 turns it off.",
+        ),
+        "node_budget" to w(
+            Tones.INFO, "Own node: all at once",
+            "The most that may wait for confirmation together across the shop, with the own node.",
+            Who.OWNER, "Whole dollars. 0 turns it off.",
+        ),
+        "box_per_sale" to w(
+            Tones.INFO, "Box only: one sale",
+            "The largest sale accepted as instant when only a Box reports the payment.",
+            Who.OWNER, "Whole dollars. 0 turns it off.",
+        ),
+        "box_budget" to w(
+            Tones.INFO, "Box only: all at once",
+            "The most that may wait for confirmation together across the shop, on a Box's word.",
+            Who.OWNER, "Whole dollars. 0 turns it off.",
+        ),
+        "underpayment_tolerance_bps" to w(
+            Tones.INFO, "Underpayment still counted",
+            "How far under the price a payment may fall and still count as paid.",
+            Who.OWNER, "A percent with up to two decimals, from 0 to 5.",
+        ),
+        "min_confirmations" to w(
+            Tones.INFO, "Blocks to settle a sale",
+            "How many blocks a payment needs before the sale counts as settled.",
+            Who.OWNER, "A whole number from 1 to 100.",
+        ),
+        "final_confirmations" to w(
+            Tones.INFO, "Blocks until final",
+            "How many blocks until a sale is final and a refund may be paid. It is at least the number above.",
+            Who.OWNER, "A whole number from 1 to 100.",
+        ),
+        "min_sale_sats" to w(
+            Tones.INFO, "Smallest bitcoin sale",
+            "A bitcoin sale below this is turned away, because a tiny receipt can cost more to spend than it holds.",
+            Who.OWNER, "Whole satoshis. 0 means no smallest sale.",
+        ),
+        "refund_cap" to w(
+            Tones.INFO, "Largest single refund",
+            "The most one refund may pay back to a customer.",
+            Who.OWNER, "Whole dollars. 0 turns it off.",
+        ),
+        "refund_daily_cap" to w(
+            Tones.INFO, "Refunds per day",
+            "The most that may be refunded in one day, all refunds together.",
+            Who.OWNER, "Whole dollars. 0 turns it off.",
+        ),
+        "cashier_override_daily_cap" to w(
+            Tones.INFO, "Cashier's override per day",
+            "The most one cashier may accept against a red screen in a day.",
+            Who.OWNER, "Whole dollars. 0 turns it off.",
+        ),
+        "manager_override_ceiling" to w(
+            Tones.INFO, "Manager's override ceiling",
+            "The most a manager may accept against a red screen, over all their overrides.",
+            Who.OWNER, "Whole dollars. 0 turns it off.",
+        ),
+        "heartbeat_max_age_secs" to w(
+            Tones.INFO, "Heartbeat age for instant",
+            "How old this phone's last report may be before counters stop accepting instant sales.",
+            Who.OWNER, "Whole minutes, from 1 to 60.",
+        ),
+        "tor_on" to w(
+            Tones.INFO, "Tor on the counters",
+            "Whether the counters connect through Tor. Turning it off removes that protection.",
+            Who.OWNER, "Choose On or Off.",
+        ),
+        "customer_wifi" to w(
+            Tones.INFO, "Customers can join the Wi-Fi",
+            "Whether customers can join the Wi-Fi a counter is on, or you are not sure. No removes a Tor requirement.",
+            Who.OWNER, "Choose Yes or unsure, or No.",
+        ),
+    )
+
+    fun editField(id: String): SayWords =
+        editFields.firstOrNull { it.first == id }?.second ?: throw IllegalArgumentException("no field $id")
+
     // ---- the till ------------------------------------------------------------------------------
 
     val posNotConnected = w(
@@ -811,6 +1042,28 @@ object AppWords {
         "noteDismissed" to noteDismissed,
         "noLink" to noLink,
         "noSettingsYet" to noSettingsYet,
+        "editIntro" to editIntro,
+        "editGroupInstant" to editGroupInstant,
+        "editGroupPayments" to editGroupPayments,
+        "editGroupRefunds" to editGroupRefunds,
+        "editGroupSafety" to editGroupSafety,
+        "editGroupShares" to editGroupShares,
+        "editGroupLightning" to editGroupLightning,
+        "editLightningNote" to editLightningNote,
+        "editNothingChanged" to editNothingChanged,
+        "editNeedsKeyApp" to editNeedsKeyApp,
+        "editTakesEffect" to editTakesEffect,
+        "editQueuedLoosening" to editQueuedLoosening,
+        "editQueuedTightening" to editQueuedTightening,
+        "editNodeNeeded" to editNodeNeeded,
+        "editNoCounters" to editNoCounters,
+        "editSharesNotPercent" to editSharesNotPercent,
+        "editValueNotReadDollars" to editValueNotRead(FieldKind.Dollars, "Refunds per day"),
+        "editValueNotReadPercent" to editValueNotRead(FieldKind.Percent, "Underpayment still counted"),
+        "editValueNotReadBlocks" to editValueNotRead(FieldKind.Blocks, "Blocks to settle a sale"),
+        "editValueNotReadMinutes" to editValueNotRead(FieldKind.Minutes, "Heartbeat age for instant"),
+        "editValueNotReadSats" to editValueNotRead(FieldKind.Sats, "Smallest bitcoin sale"),
+        "editValueNotReadSwitch" to editValueNotRead(FieldKind.Switch, "Tor on the counters"),
         "posNotConnected" to posNotConnected,
         "posNeedsLink" to posNeedsLink,
         "posTokenNotAccepted" to posTokenNotAccepted,
@@ -831,5 +1084,5 @@ object AppWords {
         "fileNotSaved" to fileNotSaved("a problem"),
         "cameraOff" to CameraWords.off(Who.OWNER),
         "cameraNotStarted" to CameraWords.notStarted(Who.OWNER, "a problem"),
-    ) + UrWords.forReading(Who.OWNER)
+    ) + editFields.map { (id, words) -> "editField_$id" to words } + UrWords.forReading(Who.OWNER)
 }

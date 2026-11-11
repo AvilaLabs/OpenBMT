@@ -560,7 +560,7 @@ internal fun Controller.showSettings(): Unit = withNode { n ->
     val msg = Slot(act)
     val views = ArrayList<View>()
     views.add(ui.text("Settings", 22f, bold = true))
-    views.add(ui.text("What this phone holds as the shop's settings. This is a read-only view: changing the settings is not built yet.", 15f))
+    views.add(ui.text("What this phone holds as the shop's settings. This is a read-only view: changes go through Change settings.", 15f))
     var failed = false
     val held = try {
         n.settings()
@@ -578,6 +578,12 @@ internal fun Controller.showSettings(): Unit = withNode { n ->
             views.add(ui.text("$name\n$value", 15f))
         }
     }
+    views.add(
+        ui.button("Change settings") {
+            settingsDraft = SettingsDraft()
+            showChangeSettings()
+        },
+    )
     views.add(backButton { showHome() })
     page(views)
 }
@@ -614,7 +620,7 @@ internal fun Controller.showAbout() {
             label("Not built yet"),
             ui.text(
                 "The link to the counters for a wallet made on this phone; " +
-                    "changing the shop's settings, with shares of the instant limit that are not equal; the books; archiving paid entries.",
+                    "the books; archiving paid entries.",
                 16f,
             ),
             ui.button("Back") { showHome() },

@@ -459,7 +459,7 @@ enum class LightningAction { Keep, Remove, Set }
  * Dollars are whole dollars and 0 is off; [underpaymentToleranceBps] is in basis points and
  * [heartbeatMaxAgeSecs] in seconds. [lightningText] is read only when [lightning] is Set.
  */
-class SettingsEditArgs(
+data class SettingsEditArgs(
     val satsPerUsd: Long? = null,
     val lightPerSale: Long? = null,
     val lightBudget: Long? = null,

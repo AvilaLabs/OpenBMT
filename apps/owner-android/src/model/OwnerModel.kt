@@ -139,6 +139,7 @@ object OwnerModel {
         "Devices that write records" to s.devices.size.toString(),
         "Counters and their shares" to if (s.counters.isEmpty()) "none" else s.counters.joinToString("; ") { counterLabel(it.counter) + " " + percent(it.bps) },
         "Boxes" to s.boxes.size.toString(),
+        "Lightning node" to SettingsEditModel.nodeNow(s),
     )
 }
 

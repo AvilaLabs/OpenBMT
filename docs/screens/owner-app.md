@@ -34,8 +34,8 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | counterNotACode | Not a counter's code | The code read is not one a counter shows for its request, so nothing was queued. | On the counter, choose Pair and scan the code it shows. | the owner |  |
 | counterScanCancelled | Counter scan cancelled | No code was read, so nothing was queued. | Scan the counter's code again when you are ready. | the owner |  |
 | counterCodeNotRequest | Not a counter's request | The code holds more than a counter's request can, so nothing was queued. | On the counter, choose Pair and scan the code it shows. | the owner |  |
-| sharesNote | Equal shares | Each counter's share of the instant limit becomes 1/2. | Custom shares come later, with the settings editor. | the owner |  |
-| sharesNoteOne | Equal shares | This is the only counter, so its share of the instant limit is all of it. | Custom shares come later, with the settings editor. | the owner |  |
+| sharesNote | Equal shares | Each counter's share of the instant limit becomes 1/2. | Custom shares are set under Settings, in Change settings. | the owner |  |
+| sharesNoteOne | Equal shares | This is the only counter, so its share of the instant limit is all of it. | Custom shares are set under Settings, in Change settings. | the owner |  |
 | counterCompare | Compare the four words | Check that the counter shows these same four words, and that the Key app shows them too. | If they match, say so below. If they differ, say so and nothing is paired. | the owner |  |
 | counterRateNeeded | Rate needed | This phone holds no settings yet, and the starting limits are in dollars, so it needs today's rate. | Type satoshis to a dollar as a whole number above 0, then say the words match. | the owner |  |
 | counterCancelled | Counter not added | The four words did not match, so the counter's request was taken out of the queue. | Start again on the counter, and scan the new code it shows. | the owner |  |
@@ -81,6 +81,28 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | noteDismissed | Note dismissed | The note about a refund request is removed from the list. | Nothing to do. | nobody |  |
 | noLink | No link to the counters | This phone was set up without a relay, so no counter can report to it. | Nothing to do here. A setup text with a relay adds the link. | the owner |  |
 | noSettingsYet | No settings yet | The phone holds no settings for the shop yet, so there is nothing to show. | Nothing to do. They arrive with the first approval that carries settings. | the owner |  |
+| editIntro | Change the settings | Pick a group, change what you need, then review. Nothing is queued until you press Queue the change. | A change that loosens something needs the Key app. A stricter change does not. | the owner |  |
+| editGroupInstant | Instant sales | How much a counter may accept as paid before the payment is confirmed, for each way it checks. | Whole dollars. 0 turns a limit off. | the owner |  |
+| editGroupPayments | Payments | When a payment counts, how many blocks settle a sale, and the smallest bitcoin sale. | Change what you need, then press Done. | the owner |  |
+| editGroupRefunds | Refunds and overrides | How much can be refunded, and how much cashiers and managers may accept against a red screen. | Whole dollars. 0 turns a limit off. | the owner |  |
+| editGroupSafety | Safety | How recent this phone's report must be, and what the shop says about its network. | Change what you need, then press Done. | the owner |  |
+| editGroupShares | Counters' shares | Each counter's share of every instant limit. The shares may add up to 100% at most. | Type each share as a percent with up to two decimals. | the owner |  |
+| editGroupLightning | Lightning node | The shop's own Lightning node: every Lightning payment must be made out to this node's key. | Paste or scan the node's key or address, or remove the node. | the owner |  |
+| editLightningNote | Naming a node | Naming a node needs the Key app, which shows the key in full. | Afterwards, set up Lightning on each counter, which holds its own limited key. | the owner |  |
+| editNothingChanged | Nothing changed | Every value is what the settings hold now, so there is nothing to queue. | Go back and change a value, or leave the editor. | the owner |  |
+| editNeedsKeyApp | The Key app must approve | Something here loosens a limit or a check, so the whole change needs the Key app's approval. | Queue the change, then build the request for the Key app. | the owner |  |
+| editTakesEffect | Takes effect when delivered | Every change here makes things stricter, so this phone signs it alone and no approval is needed. | Queue the change. It takes effect when it is delivered to the counters. | the owner |  |
+| editQueuedLoosening | Change queued | The change waits for the Key app's approval. It takes effect after the Key app approves and it is delivered. | Build the request for the Key app, show it there, and bring its response back. | the owner |  |
+| editQueuedTightening | Change signed | The change is signed by this phone and waits to be delivered to the counters. | Nothing more is needed. See it under Waiting to be delivered. | the owner |  |
+| editNodeNeeded | Node key needed | The node's key or address was left empty, so no node was named. | Paste or scan the key or address of the node, or choose Remove the node. | the owner |  |
+| editNoCounters | No counters yet | The settings list no counters, so there are no shares to change. | Add a counter first. Equal shares are made when it is added. | the owner |  |
+| editSharesNotPercent | Share not accepted | A share must be a percent from 0 to 100, with up to two decimals, so nothing was saved. | Type each share again, like 50 or 33.33. | the owner |  |
+| editValueNotReadDollars | Value not accepted | The value for Refunds per day is not a whole number of dollars, so nothing was saved. | Type whole dollars, like 25, or 0 to turn it off. | the owner |  |
+| editValueNotReadPercent | Value not accepted | The value for Underpayment still counted is not a percent, so nothing was saved. | Type a percent with up to two decimals, like 0.5. | the owner |  |
+| editValueNotReadBlocks | Value not accepted | The value for Blocks to settle a sale is not a whole number of blocks, so nothing was saved. | Type a whole number of blocks, like 6. | the owner |  |
+| editValueNotReadMinutes | Value not accepted | The value for Heartbeat age for instant is not a whole number of minutes, so nothing was saved. | Type whole minutes, like 10. | the owner |  |
+| editValueNotReadSats | Value not accepted | The value for Smallest bitcoin sale is not a whole number of satoshis, so nothing was saved. | Type whole satoshis, like 1000, or 0 for none. | the owner |  |
+| editValueNotReadSwitch | Value not accepted | The value for Tor on the counters was not chosen, so nothing was saved. | Choose one of the two answers. | the owner |  |
 | posNotConnected | No till connected | This phone is not reading any till, so no order is matched against the counters' sales. | Choose the till's vendor, type its location, and paste a read-only sign-in, then connect. | the owner |  |
 | posNeedsLink | Till needs the link | Matching a till needs the link to the counters, and this phone was set up without a relay. | Nothing to do here. A setup text with a relay adds the link. | the owner |  |
 | posTokenNotAccepted | Sign-in not accepted | A read-only sign-in is 1 to 512 letters, digits and signs, with no space in it. | Paste it again from the till's system, or make a new one there. | the owner |  |
@@ -101,6 +123,23 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | fileNotSaved | Not saved | The app could not write to this phone's storage, so nothing was saved. | Try again. If it happens again, free some space on the phone. | the owner |  |
 | cameraOff | Camera is off for this app | This app is not allowed to use the camera, so it cannot scan a code. | Allow the camera for this app in the phone's settings, or paste the text or choose a file instead. | the owner |  |
 | cameraNotStarted | Camera did not start | The camera could not be opened, so nothing was scanned. | Close any other app that uses the camera and try again, or paste the text or choose a file instead. | the owner |  |
+| editField_light_per_sale | Light check: one sale | The largest sale accepted as instant when only a light check has seen the payment. | Whole dollars. 0 turns it off. | the owner |  |
+| editField_light_budget | Light check: all at once | The most that may wait for confirmation together across the shop, on a light check. | Whole dollars. 0 turns it off. | the owner |  |
+| editField_node_per_sale | Own node: one sale | The largest sale accepted as instant when the shop's own node has also seen the payment. | Whole dollars. 0 turns it off. | the owner |  |
+| editField_node_budget | Own node: all at once | The most that may wait for confirmation together across the shop, with the own node. | Whole dollars. 0 turns it off. | the owner |  |
+| editField_box_per_sale | Box only: one sale | The largest sale accepted as instant when only a Box reports the payment. | Whole dollars. 0 turns it off. | the owner |  |
+| editField_box_budget | Box only: all at once | The most that may wait for confirmation together across the shop, on a Box's word. | Whole dollars. 0 turns it off. | the owner |  |
+| editField_underpayment_tolerance_bps | Underpayment still counted | How far under the price a payment may fall and still count as paid. | A percent with up to two decimals, from 0 to 5. | the owner |  |
+| editField_min_confirmations | Blocks to settle a sale | How many blocks a payment needs before the sale counts as settled. | A whole number from 1 to 100. | the owner |  |
+| editField_final_confirmations | Blocks until final | How many blocks until a sale is final and a refund may be paid. It is at least the number above. | A whole number from 1 to 100. | the owner |  |
+| editField_min_sale_sats | Smallest bitcoin sale | A bitcoin sale below this is turned away, because a tiny receipt can cost more to spend than it holds. | Whole satoshis. 0 means no smallest sale. | the owner |  |
+| editField_refund_cap | Largest single refund | The most one refund may pay back to a customer. | Whole dollars. 0 turns it off. | the owner |  |
+| editField_refund_daily_cap | Refunds per day | The most that may be refunded in one day, all refunds together. | Whole dollars. 0 turns it off. | the owner |  |
+| editField_cashier_override_daily_cap | Cashier's override per day | The most one cashier may accept against a red screen in a day. | Whole dollars. 0 turns it off. | the owner |  |
+| editField_manager_override_ceiling | Manager's override ceiling | The most a manager may accept against a red screen, over all their overrides. | Whole dollars. 0 turns it off. | the owner |  |
+| editField_heartbeat_max_age_secs | Heartbeat age for instant | How old this phone's last report may be before counters stop accepting instant sales. | Whole minutes, from 1 to 60. | the owner |  |
+| editField_tor_on | Tor on the counters | Whether the counters connect through Tor. Turning it off removes that protection. | Choose On or Off. | the owner |  |
+| editField_customer_wifi | Customers can join the Wi-Fi | Whether customers can join the Wi-Fi a counter is on, or you are not sure. No removes a Tor requirement. | Choose Yes or unsure, or No. | the owner |  |
 | UrWords.reading | Reading the animated code | Reading the animated code: 3 of about 9 parts. | Keep the phone pointed at the code until it is done. | the owner |  |
 | UrWords.restarted | Code did not add up | The parts read did not fit together, so reading starts again. | Keep the phone pointed at the code. It reads from the first part again. | the owner |  |
 | UrWords.otherCode | Another code is in view | The code in view is not part of the one being read, so it is skipped. | Point the phone at the first code again, or cancel and start over. | the owner |  |

@@ -444,8 +444,10 @@ fn as_77_a_bad_frame_is_refused_and_nothing_is_stored() {
     let mut bytes = Edit::default().bytes();
     bytes.push(0);
     assert!(Rd::error(&rig.call(47, handle, &bytes)).is_some());
-    let mut bad_action = Edit::default();
-    bad_action.lightning = 3;
+    let bad_action = Edit {
+        lightning: 3,
+        ..Edit::default()
+    };
     assert!(Rd::error(&rig.call(47, handle, &bad_action.bytes())).is_some());
     assert_eq!(entries(&rig, handle), 0);
 }

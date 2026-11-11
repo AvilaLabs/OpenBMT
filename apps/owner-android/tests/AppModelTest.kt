@@ -25,6 +25,7 @@ import org.openbmt.owner.CounterShare
 import org.openbmt.owner.CounterState
 import org.openbmt.owner.EntryKind
 import org.openbmt.owner.Limit
+import org.openbmt.owner.LightningAction
 import org.openbmt.owner.LinkState
 import org.openbmt.owner.OutboxKind
 import org.openbmt.owner.OutboxRow
@@ -44,7 +45,10 @@ import org.openbmt.owner.Quoted
 import org.openbmt.owner.Route
 import org.openbmt.owner.SendKind
 import org.openbmt.owner.SendRow
+import org.openbmt.owner.SettingChange
+import org.openbmt.owner.SettingsEditArgs
 import org.openbmt.owner.SettingsHeld
+import org.openbmt.owner.SettingsPreview
 import org.openbmt.owner.SetupFields
 import org.openbmt.owner.WaitingCounter
 import org.openbmt.owner.Words
@@ -318,7 +322,7 @@ object AppModelTest {
         val l = Limit(7000, 7)
         return SettingsHeld(
             3, l, l, l, l, l, l, 105, l, l, l, l, 1, 6, 900, true, false, floor,
-            listOf(ByteArray(32) { 1 }, ByteArray(32) { 2 }), counters, emptyList(),
+            listOf(ByteArray(32) { 1 }, ByteArray(32) { 2 }), counters, emptyList(), null, 1000,
         )
     }
 
@@ -638,12 +642,12 @@ object AppModelTest {
         val screens = source("src/android/Screens.kt")
         val settings = screens.substringAfter("internal fun Controller.showSettings()").substringBefore("internal fun Controller.showAbout()")
         ok(settings.contains("n.settings()") && !settings.contains("ui.field(") && !settings.contains("numberField(") && !settings.contains("n.queue"), "the settings screen reads and has no input")
-        ok(settings.contains("read-only view"), "and says so")
+        ok(settings.contains("read-only view") && settings.contains("Change settings"), "and says so, and leads to Change settings")
         val outbox = screens.substringAfter("internal fun Controller.showOutbox()").substringBefore("// ---- the queue")
         ok(outbox.contains("n.outbox()") && !outbox.contains("ui.field(") && !outbox.contains("n.cancel(") && !outbox.contains("n.requeue("), "the outbox screen reads and changes nothing")
         val s = sampleSettings()
         ok(OwnerModel.settingsLines(s) == OwnerModel.settingsLines(s), "a fixed order")
-        ok(OwnerModel.settingsLines(s).size == 21, "every field of the settings has a line: ${OwnerModel.settingsLines(s).size}")
+        ok(OwnerModel.settingsLines(s).size == 22, "every field of the settings has a line: ${OwnerModel.settingsLines(s).size}")
         val noTime = OwnerModel.outboxLines(OutboxRow(1, OutboxKind.Pairing, null, null, null, null, 10, words()), 5)
         ok(noTime.contains("The node keeps no signing time for this one."), "an object with no time says so")
         ok(AppWords.noSettingsYet.who == Who.OWNER && SayCheck.problem(AppWords.noSettingsYet) == null, "no settings yet has words")
@@ -1042,7 +1046,7 @@ object AppModelTest {
         ok(CounterModel.showCodeLabel(waiting[0]) == "Show the code for Front", "the button names the counter")
 
         val two = AppWords.sharesNote(2)
-        ok(two.what == "Each counter's share of the instant limit becomes 1/2." && two.next.contains("Custom shares come later") && two.next.contains("settings editor"), "the shares are equal, and custom shares come later")
+        ok(two.what == "Each counter's share of the instant limit becomes 1/2." && two.next.contains("Change settings"), "the shares are equal, and custom shares are set in Change settings")
         ok(AppWords.sharesNote(3).what.endsWith("1/3."), "the share follows the number of counters")
         ok(AppWords.sharesNote(1).what.contains("only counter"), "one counter has the whole limit")
         ok(AppWords.counterCompare.what.contains("Check that the counter shows these same four words"), "the owner is told to compare the words")
@@ -1083,10 +1087,10 @@ object AppModelTest {
         val queued = add.substringAfter("private fun Controller.showCounterQueued(").substringBefore("internal fun Controller.showCounterCode(")
         ok(queued.contains("q.words.say()") && queued.contains("CounterModel.shareLines(q.shares)") && queued.contains("CounterModel.batchLine(q.batchCount)"), "what the node queued is shown with its words")
         ok(queued.contains("showSpend()"), "the approval goes on from the spend screen's request")
-        ok(AppWords.sharesNote(2).next == "Custom shares come later, with the settings editor.", "the shares are equal and the words say custom ones come later")
+        ok(AppWords.sharesNote(2).next.contains("Change settings"), "the shares are equal and the words say where custom ones are set")
         ok(AppWords.counterCompare.what.contains("Key app shows them too"), "the words are compared on the Key app too")
         ok(AppWords.counterRateNeeded.next.contains("whole number above 0"), "the rate's words say what to type")
-        ok(source("src/android/Screens.kt").contains("changing the shop's settings, with shares of the instant limit that are not equal"), "the About screen no longer lists adding a counter as not built")
+        ok(!source("src/android/Screens.kt").contains("changing the shop's settings"), "the About screen no longer lists the settings editor as not built")
         ok(!source("src/android/Screens.kt").substringAfter("label(\"Not built yet\")").contains("adding a counter"), "and does not say it is not built")
     }
 
@@ -1292,6 +1296,100 @@ object AppModelTest {
         ok(Regex("File\\(appDir, AppFiles\\.CEREMONY_FILE\\)").findAll(c).count() == 2, "the file is deleted in two places only: after the save, and on a confirmation")
     }
 
+    private fun oa_32_change_settings_is_a_menu_of_six_screens_and_a_review() {
+        val settings = source("src/android/Screens.kt").substringAfter("internal fun Controller.showSettings()").substringBefore("internal fun Controller.showAbout()")
+        ok(settings.contains("\"Change settings\"") && settings.contains("showChangeSettings()"), "the settings view offers Change settings")
+        val e = source("src/android/SettingsEdit.kt")
+        val menu = e.substringAfter("internal fun Controller.showChangeSettings(").substringBefore("internal fun Controller.showEditGroup(")
+        for (w in listOf("editGroupShares.heading", "editGroupLightning.heading", "\"Review\"", "\"Start over\"", "settingsDraft = SettingsDraft()")) ok(menu.contains(w), "the menu has $w")
+        ok(SettingsEditModel.groups.size == 4 && SettingsEditModel.groups.map { it.words.heading } == listOf("Instant sales", "Payments", "Refunds and overrides", "Safety"), "four screens of fields: ${SettingsEditModel.groups.map { it.words.heading }}")
+        ok(AppWords.editGroupShares.heading == "Counters' shares" && AppWords.editGroupLightning.heading == "Lightning node", "the other two")
+        ok(SettingsEditModel.fields.map { it.id }.toSet().size == SettingsEditModel.fields.size && SettingsEditModel.fields.size >= 15, "each field once: ${SettingsEditModel.fields.size}")
+        ok(e.indexOf("n.queueSettings(") > e.indexOf("n.previewSettings("), "nothing is queued before the preview")
+        ok(SettingsDraft().isEmpty, "a new draft is empty")
+        ok(source("src/android/Controller.kt").contains("internal var settingsDraft = SettingsDraft()"), "the draft is in memory only")
+        for (bad in listOf("SharedPreferences", "File(", "SealedFile")) ok(!e.contains(bad) && !source("src/model/SettingsEditModel.kt").contains(bad), "the draft is never written: $bad")
+    }
+
+    private fun oa_33_each_field_shows_its_words_and_value_and_only_the_shape_is_judged_here() {
+        for (f in SettingsEditModel.fields) {
+            val w = f.words
+            ok(w.heading.length <= 28 && w.what.length <= 140 && SayCheck.problem(w) == null, "words of ${f.id}")
+        }
+        val held = sampleSettings()
+        val usd = SettingsEditModel.fields.first { it.kind == FieldKind.Dollars }
+        ok(SettingsEditModel.input(usd, held) == "7", "a field shows what the settings hold: ${SettingsEditModel.input(usd, held)}")
+        ok(SettingsEditModel.dollars("1,250") == 1250L && SettingsEditModel.dollars("$5") == 5L && SettingsEditModel.dollars("0") == 0L, "dollars")
+        ok(SettingsEditModel.dollars("1.5") == null && SettingsEditModel.dollars("") == null && SettingsEditModel.dollars("-3") == null && SettingsEditModel.dollars("abc") == null && SettingsEditModel.dollars("99999999999") == null, "not dollars")
+        ok(SettingsEditModel.percentBps("1.05") == 105L && SettingsEditModel.percentBps("50%") == 5000L && SettingsEditModel.percentBps("33.33") == 3333L && SettingsEditModel.percentBps("0.5") == 50L && SettingsEditModel.percentBps("100") == 10_000L, "percent to basis points")
+        ok(SettingsEditModel.percentBps("0.001") == null && SettingsEditModel.percentBps("101") == null && SettingsEditModel.percentBps("x") == null && SettingsEditModel.percentBps("") == null && SettingsEditModel.percentBps("-1") == null, "not a percent")
+        ok(SettingsEditModel.minutesToSecs("15") == 900L && SettingsEditModel.minutesToSecs("0") == 0L && SettingsEditModel.minutesToSecs("1.5") == null && SettingsEditModel.minutesToSecs("") == null, "minutes to seconds")
+        ok(SettingsEditModel.blocks("6") == 6L && SettingsEditModel.blocks("256") == null && SettingsEditModel.blocks("-1") == null, "blocks")
+        ok(SettingsEditModel.sats("5000") == 5000L && SettingsEditModel.sats("5,000") == 5000L && SettingsEditModel.sats("5.5") == null && SettingsEditModel.sats("") == null, "satoshis")
+        ok(SettingsEditModel.parse(FieldKind.Switch, "1") == 1L && SettingsEditModel.parse(FieldKind.Switch, "0") == 0L && SettingsEditModel.parse(FieldKind.Switch, "yes") == null, "a switch")
+        ok(SettingsEditModel.percentInput(105) == "1.05" && SettingsEditModel.percentInput(1000) == "10" && SettingsEditModel.percentInput(50) == "0.5" && SettingsEditModel.percentText(3333) == "33.33%", "percent from basis points")
+        val key = "02" + "ab".repeat(32)
+        ok(SettingsEditModel.nodeText("  $key  ").let { it is Form.Ok && it.value == key }, "a node key is trimmed")
+        ok(SettingsEditModel.nodeText("$key@host.onion:9735").let { it is Form.Ok && it.value == "$key@host.onion:9735" }, "an address goes through whole; the library takes the key")
+        ok(SettingsEditModel.nodeText("   ") is Form.Refused, "an empty node text is refused with words")
+        ok(SettingsEditModel.nodeText("zz") is Form.Ok, "a text that is not a key is the library's to refuse (OA-07)")
+        ok(SettingsEditModel.nodeNow(held) == "none", "no node")
+        ok(SettingsEditModel.sharesTotalLine(listOf(5000, 4000)) == "Total 90%. Left over: 10%." && SettingsEditModel.sharesTotalLine(listOf(6000, 5000)).contains("Over the whole by 10%"), "the shares' total and remainder")
+        ok(SettingsEditModel.sharesLine(listOf("50", "x")) == "Some share is not a percent yet." && SettingsEditModel.sharesLine(listOf("50", "50")).startsWith("Total 100%"), "the line while typing")
+        val d = SettingsDraft()
+        d.typed[usd.id] = "1.5"
+        ok(SettingsEditModel.args(d, held) is Form.Refused, "a field that is not dollars is refused")
+        val e = source("src/android/SettingsEdit.kt")
+        ok(e.contains("AppWords.editValueNotRead(") && e.contains("AppWords.editSharesNotPercent") && e.contains("TextWatcher"), "the screens refuse with words and show the total as it is typed")
+        for (bad in listOf("Regex", "bech32", "bc1", "secp", "pubkey")) ok(!e.contains(bad), "SettingsEdit.kt judges no key or address: $bad")
+    }
+
+    private fun oa_34_review_calls_the_preview_and_queues_only_on_the_button() {
+        val e = source("src/android/SettingsEdit.kt")
+        val review = e.substringAfter("internal fun Controller.showEditReview(").substringBefore("internal fun Controller.showEditRate(")
+        ok(review.contains("n.previewSettings(args)") && review.indexOf("n.previewSettings(") < review.indexOf("\"Queue the change\""), "the preview comes first")
+        ok(Regex("n\\.queueSettings\\(").findAll(e).count() == 1 && review.contains("n.queueSettings(p.settings)"), "one queue call, with the bytes the preview gave")
+        ok(review.contains("\"Needs the Key app\"") && review.contains("whenDelivered") && review.contains("nothingChanged"), "the two kinds of change are apart and nothing changed is said")
+        ok(review.contains("settingsDraft = SettingsDraft()"), "the draft is cleared after the queue")
+        ok(e.contains("fun Controller.showEditRate("), "a rate is asked for when the library needs one")
+        fun change(f: String, o: String, n: String, loose: Boolean, c: ByteArray? = null) = SettingChange(f, f, c, o, n, loose)
+        val p = SettingsPreview(4, listOf(change("Refund cap", "$50", "$100", true), change("Heartbeat", "15 minutes", "10 minutes", false), change("share", "50%", "60%", false, ByteArray(32) { 1 })), true, false, 6000, null, ByteArray(0))
+        val lines = SettingsEditModel.reviewLines(p)
+        ok(lines[0].text == "Refund cap: $50 → $100" && lines[2].text == "Share of Counter 01010101: 50% → 60%", "old to new: ${lines.map { it.text }}")
+        ok(SettingsEditModel.needKeyApp(p) == listOf("Refund cap: $50 → $100") && SettingsEditModel.whenDelivered(p).size == 2, "loosening apart from tightening")
+        val plain = SettingsPreview(4, listOf(change("Heartbeat", "a", "b", false)), false, false, 0, null, ByteArray(0))
+        ok(SettingsEditModel.reviewWords(p) === AppWords.editNeedsKeyApp && SettingsEditModel.reviewWords(SettingsPreview(4, emptyList(), false, true, 0, null, ByteArray(0))) === AppWords.editNothingChanged, "the words above the review")
+        ok(SettingsEditModel.reviewWords(plain) === AppWords.editTakesEffect, "a stricter change takes effect when delivered")
+        ok(SettingsEditModel.reviewShares(p) == "Total 60%. Left over: 40%." && SettingsEditModel.reviewShares(plain) == null, "the shares line is only for share changes")
+        val held = sampleSettings()
+        val d = SettingsDraft()
+        val usd = SettingsEditModel.fields.first { it.kind == FieldKind.Dollars }
+        d.typed[usd.id] = "9"
+        d.shares[SettingsEditModel.counterKey(ByteArray(32) { 2 })] = "75.5"
+        d.node = NodeChoice.Remove
+        val a = (SettingsEditModel.args(d, held) as Form.Ok).value
+        ok(a.shares.size == 1 && a.shares[0].bps == 7550L && a.lightning == LightningAction.Remove, "the arguments carry the shares and the removal")
+        ok(SettingsEditModel.args(SettingsDraft(), held).let { it is Form.Ok && it.value == SettingsEditArgs() }, "an empty draft is an empty edit")
+        d.rate = "0"
+        ok(SettingsEditModel.args(d, held) is Form.Refused, "a rate of 0 is refused with words")
+    }
+
+    private fun oa_35_after_the_queue_the_existing_screens_take_over() {
+        val e = source("src/android/SettingsEdit.kt")
+        val review = e.substringAfter("internal fun Controller.showEditReview(").substringBefore("internal fun Controller.showEditRate(")
+        ok(review.contains("showOutbox()") && review.contains("showSpend()"), "a stricter change goes to the outbox, a looser one to the request screen")
+        ok(!e.contains("approveMerge") && !e.contains("buildRequest(") && !e.contains(".take(") && !e.contains("signBatch"), "the editor has no approval flow of its own")
+        ok(AppWords.editQueuedLoosening.what.contains("Key app") && AppWords.editQueuedTightening.what.isNotEmpty(), "the words after the queue")
+        ok((AppWords.editLightningNote.what + AppWords.editLightningNote.next).contains("Key app") && (AppWords.editLightningNote.what + AppWords.editLightningNote.next).contains("each counter"), "the Lightning note: the Key app and each counter")
+        for ((name, w) in AppWords.all().filter { it.first.startsWith("edit") }) {
+            ok(w.who == Who.OWNER && SayCheck.problem(w) == null && w.heading.length <= 28 && w.what.length <= 140 && w.next.length <= 140, "words of $name")
+        }
+        ok(AppWords.screensMarkdown().contains("| editIntro |") && File(appDir, "../../docs/screens/owner-app.md").readText().contains("Counters' shares"), "the list of the app's words has them")
+        for (bad in listOf(".signBatch(", "Psbt", "psbt", ".broadcast(", "Transaction(", "key2Secret", "key3Secret", "mnemonic")) {
+            ok(!e.contains(bad) && !source("src/model/SettingsEditModel.kt").contains(bad), "the editor does not hold or call $bad")
+        }
+    }
+
     private fun oa_30_the_slow_calls_draw_a_page_first_and_every_number_is_the_librarys() {
         val c = ceremonyCode()
         val make = c.substringAfter("internal fun Controller.startCeremony()").substringBefore("/** Key 1 is made:")
@@ -1349,7 +1447,7 @@ object AppModelTest {
         for (id in ids) ok(id in rules, "oa_${id}_... tests a rule that is in docs/OWNER-APP-RULES.md")
         for (line in rulesMd.readLines()) ok(line.length <= 80 || line.startsWith("|"), "a line of the rules is at most 80 characters: ${line.take(40)}")
         val text = rulesMd.readText()
-        ok(text.contains("## 8. What these rules do not do"), "the rules say what they do not do")
+        ok(text.contains("## 9. What these rules do not do"), "the rules say what they do not do")
         ok(text.lines().any { it.startsWith("Status:") }, "the status line")
     }
 
