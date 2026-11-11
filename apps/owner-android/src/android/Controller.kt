@@ -8,7 +8,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.View
-import android.widget.EditText
 import android.widget.TextView
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -79,7 +78,6 @@ class Controller(internal val act: MainActivity) {
 
     // What the first screen holds while a file picker is open. Never written anywhere (OA-01).
     private var draftText = ""
-    private var draftProxy = AppConfig.DEFAULT_PROXY
 
     // What runs.
     @Volatile
@@ -173,8 +171,10 @@ class Controller(internal val act: MainActivity) {
         stopTicker()
         val toWatch = handOverContents()
         stopNode()
-        // The node has let go of its folder: the watcher takes the wallet, if the setting is on (OA-84).
+        // The node has let go of its folder: the watcher takes the wallet, if the setting is on (OA-84). The
+        // watcher's own lease on the built-in Tor, taken when its service started, keeps Tor up at the same port.
         if (toWatch) WatchRunner.handOver()
+        releaseTor()
         if (wasVisible) {
             pausedAt = SystemClock.elapsedRealtime()
             main.postDelayed(relockTimer, Relock.AFTER_MS + 1_000)
@@ -254,7 +254,7 @@ class Controller(internal val act: MainActivity) {
         when (val s = ScreenModel.pick(fault, status, torBlocked, node != null)) {
             is Screen.Fault -> showMessage(s.words, "Try again") { begin() }
             is Screen.FirstStart -> showFirstStart(null)
-            is Screen.TorBlocked -> showMessage(s.words, "Check again") { begin() }
+            is Screen.TorBlocked -> showMessage(s.words, if (s.words === AppWords.torFailed) "Try again" else "Check again") { begin() }
             is Screen.Starting -> waiting(AppWords.starting)
             is Screen.Home -> showHome()
         }
@@ -262,31 +262,102 @@ class Controller(internal val act: MainActivity) {
 
     // ---- running the node ----------------------------------------------------------------------------
 
+    // ---- the built-in Tor (OA-97 to OA-100) ---------------------------------------------------------------
+
+    private val torLock = Any()
+    private var torLease: TorLease? = null
+
+    /** The lease on the built-in Tor, taken now if this controller has none or its run has ended. */
+    private fun ensureTor(): TorLease = synchronized(torLock) {
+        torLease?.takeIf { !it.dead } ?: run {
+            torLease?.close()
+            TorRunner.acquire(dir).also { torLease = it }
+        }
+    }
+
+    /** Lets go of the built-in Tor; it shuts down when nothing else (the watcher) holds it (OA-97). */
+    internal fun releaseTor() {
+        val l = synchronized(torLock) { torLease.also { torLease = null } }
+        l?.close()
+    }
+
+    /**
+     * The `host:port` of the proxy everything is sent through now: Orbot's address, or the built-in Tor's port when
+     * it has a circuit. Empty when the built-in Tor is not up, which no probe or fetch accepts (OA-05).
+     */
+    internal fun proxyNow(): String {
+        val cfg = config ?: return AppConfig.DEFAULT_PROXY
+        if (cfg.tor == TorChoice.Orbot) return cfg.proxy
+        val port = synchronized(torLock) { torLease?.port() } ?: return ""
+        return "127.0.0.1:$port"
+    }
+
+    /** True when the app's own Tor has to be up for the next connection. */
+    private val builtIn: Boolean get() = config?.tor == TorChoice.BuiltIn
+
+    /** Turns to the other choice of Tor (OA-99): saved first, and the app starts again with it. */
+    internal fun chooseTor(choice: TorChoice, proxy: String, onRefused: (SayWords) -> Unit) {
+        val old = config ?: return
+        val next = AppConfig(proxy, choice)
+        if (next.tor == old.tor && next.proxy == old.proxy) return begin()
+        async({ configFile.save(next) }) { r ->
+            val e = r.exceptionOrNull()
+            when (e) {
+                null -> {
+                    config = next
+                    // The watcher starts again from the new config, and the old run of Tor is let go of.
+                    WatchService.stop(act)
+                    if (choice == TorChoice.Orbot) releaseTor()
+                    begin()
+                }
+                is IOException -> onRefused(AppWords.fileNotSaved(e.message))
+                else -> throw e
+            }
+        }
+    }
+
     internal fun startNode() {
         // A node is never started while the app is hidden: `hidden()` has already run (OA-62).
         if (!visible) return
         val id = ++runId
-        waiting(AppWords.starting)
         val s = setup ?: return
         val cfg = config ?: return
+        waiting(if (cfg.tor == TorChoice.BuiltIn) AppWords.torStarting else AppWords.starting)
         val thread = Thread {
             try {
-                // No Orbot, no node: nothing is sent around the proxy (OA-05).
-                val gate = TorGate(cfg.proxy)
-                if (!gate.available()) {
-                    main.post {
-                        if (id == runId) {
-                            torBlocked = AppWords.orbotNotRunning
-                            render()
+                // No Tor, no node: nothing is sent around the proxy (OA-05, OA-100).
+                val proxy: String
+                if (cfg.tor == TorChoice.BuiltIn) {
+                    val port = try {
+                        ensureTor().awaitPort(TOR_WAIT_MS)
+                    } catch (_: TorStartException) {
+                        main.post {
+                            if (id == runId) {
+                                torBlocked = AppWords.torFailed
+                                render()
+                            }
                         }
+                        return@Thread
                     }
-                    return@Thread
+                    proxy = "127.0.0.1:$port"
+                } else {
+                    val gate = TorGate(cfg.proxy)
+                    if (!gate.available()) {
+                        main.post {
+                            if (id == runId) {
+                                torBlocked = AppWords.orbotNotRunning
+                                render()
+                            }
+                        }
+                        return@Thread
+                    }
+                    proxy = gate.proxy
                 }
                 synchronized(startLock) {
                     if (id != runId) return@Thread
                     nodeDir.mkdirs()
                     // The secrets are handed over for this start and kept nowhere but in the sealed file (OA-01).
-                    val n = OwnerNode.start(s.startConfig(nodeDir.path, nowSecs(), gate.proxy))
+                    val n = OwnerNode.start(s.startConfig(nodeDir.path, nowSecs(), proxy))
                     if (id != runId) {
                         n.close()
                         return@Thread
@@ -361,7 +432,6 @@ class Controller(internal val act: MainActivity) {
             link.start()
         }
         if (setup?.link != null) {
-            val gate = TorGate(config?.proxy ?: AppConfig.DEFAULT_PROXY)
             val link = object : PosLink {
                 override fun request(now: Long): PosRequest = n.posRequest(now)
 
@@ -381,7 +451,7 @@ class Controller(internal val act: MainActivity) {
                         continue
                     }
                     lastStart = System.currentTimeMillis()
-                    val outcome = readTill(link, gate)
+                    val outcome = readTill(link, TorGate(proxyNow()))
                     main.post {
                         if (id == runId) {
                             posFault = (outcome as? PosOutcome.Failed)?.words
@@ -412,7 +482,10 @@ class Controller(internal val act: MainActivity) {
         } catch (e: GeneralSecurityException) {
             return PosOutcome.Failed(AppWords.storageUnavailable(e.message))
         } ?: return PosOutcome.Failed(AppWords.posTokenMissing)
-        return PosPoll.readOnce(link, HttpsPosFetcher(gate), token) { nowSecs() }
+        val outcome = PosPoll.readOnce(link, HttpsPosFetcher(gate), token) { nowSecs() }
+        // The words that Orbot is not running are not true of the built-in Tor.
+        if (builtIn && outcome is PosOutcome.Failed && outcome.words === AppWords.orbotNotRunning) return PosOutcome.Failed(AppWords.torFailed)
+        return outcome
     }
 
     /** The screen asks for a read now; it starts at once if the last one began more than a minute ago, and not before (OA-18). */
@@ -496,7 +569,7 @@ class Controller(internal val act: MainActivity) {
         )
     }
 
-    /** The second choice: setup text of a key ceremony made elsewhere, with the address of Orbot. */
+    /** The second choice: setup text of a key ceremony made elsewhere. The new setup uses the built-in Tor (OA-99). */
     private fun showPasteSetup(message: SayWords?) {
         val views = ArrayList<View>()
         val pasted = ui.field("Paste the setup text here", lines = 6, mono = true).also { it.setText(draftText) }
@@ -505,27 +578,17 @@ class Controller(internal val act: MainActivity) {
             draftText = pasted.text.toString()
             source.begin({ text -> draftText = text; showPasteSetup(message) }, { w -> showPasteSetup(w) })
         })
-        val proxy = orbotViews(views, draftProxy)
         screen(
             "Use setup text", views,
             listOf(
                 ui.primary("Save and start") {
-                    draftProxy = proxy.text.toString()
                     draftText = pasted.text.toString()
-                    saveSetup(draftText, draftProxy.trim(), { w -> showPasteSetup(w) })
+                    saveSetup(draftText, { w -> showPasteSetup(w) })
                 },
                 ui.button("Back") { draftText = ""; showFirstStart(null) },
             ),
             back = { draftText = ""; showFirstStart(null) }, words = message ?: AppWords.setupTextNeeded,
         )
-    }
-
-    /** The words that everything goes through Tor, and the field for Orbot's address, as the paste screen and the ceremony's last screen show them. */
-    internal fun orbotViews(views: MutableList<View>, initial: String): EditText {
-        views.add(ui.words(AppWords.torAlwaysOn))
-        val proxy = ui.field("host:port", mono = true).also { it.setText(initial) }
-        views.add(ui.labelled("Address of Orbot", proxy))
-        return proxy
     }
 
     /**
@@ -536,7 +599,6 @@ class Controller(internal val act: MainActivity) {
      */
     internal fun saveSetup(
         text: String,
-        proxy: String,
         onRefused: (SayWords) -> Unit,
         working: SayWords = AppWords.starting,
         afterSaved: () -> Unit = {},
@@ -548,7 +610,6 @@ class Controller(internal val act: MainActivity) {
         } catch (e: SetupFormatException) {
             return onRefused(AppWords.setupNotReadable(e.message))
         }
-        if (!HostPort.valid(proxy)) return onRefused(AppWords.torAddressNotAccepted)
         val bytes = text.toByteArray(Charsets.UTF_8)
         askNewPin(bytes, false, null, { bytes.fill(0); onRefused(backWords) }) { locked ->
             waiting(working)
@@ -560,7 +621,7 @@ class Controller(internal val act: MainActivity) {
                     File(dir, AppFiles.KEY2_SIGNER_FILE).delete()
                     File(dir, AppFiles.FIRST_ADDRESS_FILE).delete()
                 }
-                configFile.save(AppConfig(proxy))
+                configFile.save(AppConfig.fresh())
                 afterSaved()
             }) { r ->
                 bytes.fill(0)
@@ -769,6 +830,9 @@ class Controller(internal val act: MainActivity) {
         /** The request code of the notification permission's dialog (OA-83). */
         const val REQUEST_NOTIFY = 8001
         const val LINK_EVERY_MS = 5_000L
+
+        /** How long the app waits for the built-in Tor to have a circuit: a little over the minute the words promise (OA-100). */
+        const val TOR_WAIT_MS = 90_000L
 
         /** How long the till thread waits before it looks again at whether a till is connected. */
         const val POS_IDLE_MS = 5_000L

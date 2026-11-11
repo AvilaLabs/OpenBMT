@@ -18,6 +18,10 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | torAddressNotAccepted | Tor address not accepted | The address of Orbot must be a host, a colon and a port, like 127.0.0.1:9050. | Type the address again. | the owner |  |
 | torAlwaysOn | Everything goes through Tor | This app sends every connection through Tor, with Orbot, and has no way to turn that off. | Check the address of Orbot below, and keep Orbot running. | the owner |  |
 | orbotNotRunning | Tor is not running | This app sends everything through Tor, but Orbot is not running. | Open Orbot and turn it on. | the owner |  |
+| torBuiltIn | Tor | This app runs Tor itself, so Orbot is not needed. | Nothing to do. To use Orbot instead, choose Use Orbot. | nobody |  |
+| torUsesOrbot | Tor through Orbot | This app sends everything through Orbot, which must be installed and running. | Keep Orbot running. To stop needing it, choose Built-in Tor. | the owner |  |
+| torStarting | Starting Tor | This app is connecting to the Tor network, which can take up to a minute. | Wait on this screen. | nobody |  |
+| torFailed | Tor did not start | This app could not connect to the Tor network. | Check that the phone is online, then try again. If it keeps failing, choose Use Orbot. | the owner |  |
 | notANumber | Check what you typed | An amount, a number or a rate is empty or has something other than digits in it. | Type whole numbers only, then try again. | the owner |  |
 | counterNeeded | Counter needed | A refund is asked for on one counter's sale, and no counter is chosen. | Choose the counter, or paste its identity of 64 digits, then try again. | the owner |  |
 | counterNotAccepted | Counter identity not read | A counter's identity is exactly 64 digits and letters from a to f. | Type the identity again, or choose the counter from the list. | the owner |  |

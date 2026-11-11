@@ -143,6 +143,7 @@ private fun Controller.showSettingsAndPhone() {
             RowItem("Change the PIN") { showChangePin(null) },
             RowItem("About") { showAbout() },
             RowItem(AppWords.watchSetting.heading) { showWatch() },
+            RowItem(AppWords.torBuiltIn.heading) { showTor() },
         ),
     )
 }

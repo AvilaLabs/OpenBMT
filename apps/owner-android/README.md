@@ -18,7 +18,7 @@ the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-35, OA-60 to OA-65).
 
 | Screen | What it shows |
 |---|---|
-| First start | "Make a new shop wallet" (the key ceremony with the Key app, OA-26 to OA-31) or "Use setup text" (pasted or from a file, with the address of Orbot). |
+| First start | "Make a new shop wallet" (the key ceremony with the Key app, OA-26 to OA-31) or "Use setup text" (pasted or from a file). |
 | Home | The receipts line, the number of alerts, the link state, the payments in progress. |
 | Receipts line | What the node counts as received, and the offer to merge. |
 | Spend | Builds the request for the Key app, shows it as a code, saves it as a file or copies it as text, takes the response by camera, file or paste. |
@@ -187,11 +187,13 @@ scan the code from it.
 - **No backup**, no exported component but the launcher, one service that is
   not exported (the watch), no receiver or provider, cleartext off, not
   debuggable.
-- **Tor, and no way around it (OA-05).** Peers, sending and an onion link
-  route go through Orbot's SOCKS proxy (`127.0.0.1:9050` unless changed on the
-  first screen). If the proxy does not answer, the node is not started and
-  the app says "This app sends everything through Tor, but Orbot is not
-  running." and "Open Orbot and turn it on."
+- **Tor, and no way around it (OA-05, OA-97 to OA-100).** Peers, sending and an
+  onion link route go through a SOCKS proxy: the app's own Tor (the Tor
+  Project's C Tor, from the native library of `tor-android`, pinned in
+  `docs/DEPENDENCIES.md`; the default of a new setup) or Orbot (`127.0.0.1:9050`
+  unless changed), chosen under Tor in Settings and this phone. A setup from
+  before the choice keeps Orbot. If there is no proxy, the node is not
+  started and the app says so.
 - **The node runs while visible, or the watch is on (OA-06, OA-80 to OA-89).**
   By default there is no service and no notification, so the wallet is
   followed only while the app is open. "Watch in the background" (off by

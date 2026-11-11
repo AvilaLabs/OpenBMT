@@ -73,7 +73,7 @@ private fun Controller.lookForBox(n: OwnerNode, text: String, msg: Slot, onFound
         is Form.Refused -> msg.show(ui.words(a.words))
         is Form.Ok -> {
             val address = a.value
-            val link = ConnectBoxModel.linkFor(address, config?.proxy ?: AppConfig.DEFAULT_PROXY)
+            val link = ConnectBoxModel.linkFor(address, proxyNow())
             waiting(BoxWords.looking)
             async({ n.boxFetchClaim(link) }) { r ->
                 val found = r.getOrNull()
@@ -176,7 +176,7 @@ private fun Controller.handOver(n: OwnerNode, p: PendingBox, text: String, back:
         }
         is Form.Ok -> a.value
     }
-    val link = ConnectBoxModel.linkFor(address, config?.proxy ?: AppConfig.DEFAULT_PROXY)
+    val link = ConnectBoxModel.linkFor(address, proxyNow())
     waiting(BoxWords.handing)
     async({ n.boxDeliver(link, p.boxKey) }) { r ->
         val delivered = r.getOrNull()

@@ -225,11 +225,11 @@ object AppModelTest {
     }
 
     private fun configTests() {
-        val c = AppConfig("127.0.0.1:9050")
-        ok(String(c.encode(), Charsets.UTF_8) == "proxy: 127.0.0.1:9050\n", "the config line")
-        ok(AppConfig.decode(c.encode()).proxy == "127.0.0.1:9050", "the config reads back")
+        val c = AppConfig("127.0.0.1:9050", TorChoice.Orbot)
+        ok(String(c.encode(), Charsets.UTF_8) == "proxy: 127.0.0.1:9050\ntor: orbot\n", "the config lines")
+        ok(AppConfig.decode(c.encode()).proxy == "127.0.0.1:9050" && AppConfig.decode(c.encode()).tor == TorChoice.Orbot, "the config reads back")
         throws("a config without a line end") { AppConfig.decode("proxy: 1.2.3.4:5".toByteArray()) }
-        throws("a config with two lines") { AppConfig.decode("proxy: 1.2.3.4:5\nx: y\n".toByteArray()) }
+        throws("a config with a second line that is not the choice") { AppConfig.decode("proxy: 1.2.3.4:5\nx: y\n".toByteArray()) }
         throws("a config with a bad proxy") { AppConfig.decode("proxy: nowhere\n".toByteArray()) }
         throws("a config of the counter app") { AppConfig.decode("proxy: 1.2.3.4:5\nmanager: a\ncashier: b\n".toByteArray()) }
         throws("a config that is too long") { AppConfig.decode(ByteArray(300) { 'a'.code.toByte() }) }
@@ -560,7 +560,7 @@ object AppModelTest {
                 ok(!src.contains(bad), "$name does not use $bad")
             }
         }
-        ok(Regex("<service").findAll(source("AndroidManifest.xml")).count() == 1, "the one service is the watch's (OA-89)")
+        ok(Regex("<service").findAll(source("AndroidManifest.xml")).count() == 1, "the one service is the watch's (OA-89); the built-in Tor is not a service (OA-97)")
         ok(source("src/android/Screens.kt").contains("unless Watch in the background is on") && source("src/android/Screens.kt").contains("It never starts by itself after the phone restarts"), "the About screen says when the wallet is followed")
         ok(source("README.md").contains("Watch in the background"), "the README says so")
     }
@@ -899,7 +899,7 @@ object AppModelTest {
         val controller = source("src/android/Controller.kt")
         ok(Regex("n\\.posRequest\\(").findAll(controller).count() == 1 && Regex("n\\.posReply\\(").findAll(controller).count() == 1, "one place makes the two calls of a read")
         val till = controller.substringAfter("val till = Thread {").substringBefore("till.isDaemon")
-        ok(till.contains("PosSchedule.waitMs(lastStart, System.currentTimeMillis())") && till.indexOf("PosSchedule.waitMs(") < till.indexOf("readTill(link, gate)"), "the pace is worked out before every read")
+        ok(till.contains("PosSchedule.waitMs(lastStart, System.currentTimeMillis())") && till.indexOf("PosSchedule.waitMs(") < till.indexOf("readTill(link, TorGate(proxyNow()))"), "the pace is worked out before every read")
         ok(till.contains("lastStart = System.currentTimeMillis()") && till.contains("posWake.poll(") && till.contains("continue"), "a call for a read now waits out the rest of the minute")
         ok(till.contains("!posConnected"), "nothing is read when no till is connected")
         val adopt = controller.substringAfter("private fun adopt(").substringBefore("private fun readTill(")
@@ -907,7 +907,7 @@ object AppModelTest {
         val stop = controller.substringAfter("private fun stopNode()").substringBefore("// ---- pages")
         ok(stop.contains("posThread?.interrupt()") && stop.indexOf("posThread?.interrupt()") < stop.indexOf("it.stop()"), "it is ended before the node is stopped")
         ok(stop.contains("posThread = null"), "and let go of")
-        ok(controller.contains("PosPoll.readOnce(link, HttpsPosFetcher(gate), token)") && controller.contains("TorGate(config?.proxy ?: AppConfig.DEFAULT_PROXY)"), "through Orbot's address")
+        ok(controller.contains("PosPoll.readOnce(link, HttpsPosFetcher(gate), token)") && controller.contains("readTill(link, TorGate(proxyNow()))"), "through the proxy in use: Orbot's address or the built-in Tor's port")
         for (name in listOf("src/android/Screens.kt", "src/android/Approval.kt", "src/android/PosScreen.kt")) {
             val src = source(name)
             ok(!src.contains(".posRequest(") && !src.contains(".posReply(") && !src.contains("Thread"), "$name makes no call of the till thread and starts no thread")
@@ -1253,7 +1253,7 @@ object AppModelTest {
         val controller = source("src/android/Controller.kt")
         val first = controller.substringAfter("internal fun showFirstStart(").substringBefore("/** The second choice")
         ok(first.indexOf("ui.primary(\"Make a new shop wallet\") { startCeremony() }") in 1 until first.indexOf("ui.button(\"Use setup text\") { showPasteSetup(null) }"), "a new wallet first, the paste path second")
-        ok(controller.contains("saveSetup(draftText, draftProxy.trim(), { w -> showPasteSetup(w) })"), "the paste path saves as before")
+        ok(controller.contains("saveSetup(draftText, { w -> showPasteSetup(w) })"), "the paste path saves as before")
         val c = ceremonyCode()
         ok(c.contains("Key1Args(AppConfig.NETWORK, showWords = false)"), "the build's network, and key 1 has no words to show")
         ok(!c.contains("choice(") && !c.contains("RadioGroup") && !c.contains("OwnerNetwork."), "no network picker")
@@ -1336,10 +1336,10 @@ object AppModelTest {
         ok(c.contains("OwnerCeremony.finish(FinishArgs(d.record, defaults.refundDepth, defaults.birthday))"), "the library's refund depth and first block")
         val save = c.substringAfter("private fun Controller.saveFinished(").substringBefore("private fun Controller.showSaveFailed(")
         ok(save.indexOf("OwnerCeremony.open(record)") in 1 until save.indexOf("OwnerSetup.format(") + 40 && save.indexOf("saveSetup(") > save.indexOf("OwnerSetup.format("), "the finished record is opened, written as the setup text and saved")
-        ok(save.contains("orbotViews(views, AppConfig.DEFAULT_PROXY)") && save.contains("proxy.text.toString().trim()") && save.contains("afterSaved = { File(appDir, AppFiles.CEREMONY_FILE).delete() }"), "the address of Orbot is asked for, prefilled with the default, and the record deleted after the save")
+        ok(!save.contains("orbotViews") && save.contains("afterSaved = { File(appDir, AppFiles.CEREMONY_FILE).delete() }"), "no address of Orbot is asked for (the new setup uses the built-in Tor, OA-99), and the record is deleted after the save")
         ok(save.indexOf("val save = {") in 1 until save.indexOf("saveSetup(") && !save.contains("\n    saveSetup(") && save.contains("ui.primary(\"Save and start\") { save() }"), "the save runs only from a button the owner presses")
-        ok(source("src/android/Controller.kt").contains("val proxy = orbotViews(views, draftProxy)") && source("src/android/Controller.kt").contains("ui.words(AppWords.torAlwaysOn)") && !c.contains("torAlwaysOn"), "the paste screen and the ceremony share one helper for the Tor words and the field")
-        ok(source("src/android/Controller.kt").contains("if (!HostPort.valid(proxy)) return onRefused(AppWords.torAddressNotAccepted)"), "the address is checked the same way")
+        ok(!source("src/android/Controller.kt").contains("orbotViews") && source("src/android/Controller.kt").contains("configFile.save(AppConfig.fresh())") && !c.contains("torAlwaysOn"), "the paste screen and the ceremony save a setup with the built-in Tor and ask for no address")
+        ok(source("src/android/TorScreen.kt").contains("if (!HostPort.valid(text)) return@primary showTorOrbot(AppWords.torAddressNotAccepted)"), "the address of Orbot is checked where it is asked for")
         val controller = source("src/android/Controller.kt")
         val saveSetup = controller.substringAfter("internal fun saveSetup(").substringBefore("/** The places the setup text")
         ok(saveSetup.indexOf("AppFiles.SETUP_FILE).save(") in 1 until saveSetup.indexOf("configFile.save(") && saveSetup.indexOf("configFile.save(") < saveSetup.indexOf("afterSaved()"), "the setup first, then the config, then the ceremony's record goes")
@@ -1559,7 +1559,7 @@ object AppModelTest {
         ok(save.indexOf("askNewPin(") in 1 until save.indexOf("AppFiles.SETUP_FILE).save(locked)"), "the PIN is asked for before the save")
         ok(save.indexOf("OwnerSetup.parse(text)") in 1 until save.indexOf("askNewPin("), "the text is checked for its shape first")
         ok(source("src/android/Ceremony.kt").contains("backWords = AppWords.ceremonySaveNext"), "the ceremony goes through the same helper")
-        ok(controller.contains("saveSetup(draftText, draftProxy.trim()"), "and so does the paste path")
+        ok(controller.contains("saveSetup(draftText, {"), "and so does the paste path")
         ok(SetupLock.gate(0, false) == Gate.SetPin && SetupLock.gate(3, false) == Gate.SetPin, "a bare setup opens only into set-a-PIN")
         ok(lock.contains("Gate.SetPin -> showUpgrade(stored)"), "the start shows the step that sets a PIN")
         val upgrade = lock.substringAfter("private fun Controller.showUpgrade(")
@@ -2122,7 +2122,7 @@ object AppModelTest {
         ok(WatchSchedule.orbotWaitMs(1_000, 1_000 + 30_000) == 0L && WatchSchedule.orbotWaitMs(1_000, 0) == WatchSchedule.ORBOT_RETRY_MS, "and never longer than that")
         ok(WatchNotice.text(WatchNotice.State.NoOrbot) == "Not watching: Orbot is not answering. Instant sales are off.", "the words")
         val service = source("src/android/WatchService.kt")
-        ok(service.indexOf("TorGate(proxy).available()") in 1 until service.indexOf("OwnerWatch.start(bytes)"), "the gate is asked before the watcher starts")
+        ok(service.indexOf("TorGate(config.proxy).available()") in 1 until service.indexOf("OwnerWatch.start(bytes)"), "the gate is asked before the watcher starts")
         ok(service.contains("WatchNotice.State.NoOrbot") && !service.contains("withoutTor"), "the notification says so, and nothing goes around the proxy")
     }
 
@@ -2320,6 +2320,146 @@ object AppModelTest {
         ok(e.contains("OwnerLook.capital(currency.plural) + \" for one bitcoin\"") && !e.contains("\"Dollars for one bitcoin\""), "the price field names the currency")
     }
 
+    // ---- the built-in Tor (OA-97 to OA-100) -----------------------------------------------------------------------
+
+    private fun reply(text: String): ControlMessage? = ControlReader(java.io.ByteArrayInputStream(text.toByteArray(Charsets.ISO_8859_1))).next()
+
+    private fun oa_97_the_app_runs_tor_itself_and_reads_its_control_socket_strictly() {
+        // Good replies.
+        val okReply = reply("250 OK\r\n")!!
+        ok(okReply.code == 250 && okReply.lines == listOf("OK") && !okReply.isEvent, "a plain success")
+        TorControl.expectOk(okReply)
+        val socks = reply("250-net/listeners/socks=\"127.0.0.1:41233\"\r\n250 OK\r\n")!!
+        ok(TorControl.socksPort(socks) == 41233, "the port of the one SOCKS listener")
+        val phase = reply("250-status/bootstrap-phase=NOTICE BOOTSTRAP PROGRESS=45 TAG=loading_descriptors SUMMARY=\"Loading\"\r\n250 OK\r\n")!!
+        ok(TorControl.bootstrapProgress(phase) == 45, "the progress of the bootstrap")
+        val done = reply("250-status/bootstrap-phase=NOTICE BOOTSTRAP PROGRESS=100 TAG=done SUMMARY=\"Done\"\r\n250 OK\r\n")!!
+        ok(TorControl.bootstrapProgress(done) == 100, "done is 100")
+        val circuit = reply("650 STATUS_CLIENT NOTICE CIRCUIT_ESTABLISHED\r\n")!!
+        ok(circuit.isEvent && TorControl.status(circuit) == TorControl.Status.CircuitEstablished, "the first circuit")
+        val step = TorControl.status(reply("650 STATUS_CLIENT NOTICE BOOTSTRAP PROGRESS=80 TAG=x SUMMARY=\"y\"\r\n")!!)
+        ok(step is TorControl.Status.Bootstrap && step.percent == 80, "a step of the bootstrap")
+        ok(TorControl.status(reply("650 STATUS_CLIENT NOTICE ENOUGH_DIR_INFO\r\n")!!) == TorControl.Status.Other, "another status is nothing to do")
+        // Two messages in a row, and the end of the stream between them.
+        val two = ControlReader(java.io.ByteArrayInputStream("250 OK\r\n650 STATUS_CLIENT NOTICE CIRCUIT_ESTABLISHED\r\n".toByteArray()))
+        ok(two.next() != null && two.next() != null && two.next() == null, "the stream ends cleanly between messages")
+        ok(reply("") == null, "an empty stream is the end")
+        // Error codes are replies, and the commands refuse them.
+        val refused = reply("515 Authentication failed\r\n")!!
+        ok(refused.code == 515, "an error code is read")
+        throws("an error code taken as success") { TorControl.expectOk(refused) }
+        throws("a success whose last line is not OK") { TorControl.expectOk(reply("250 done\r\n")!!) }
+        throws("a SOCKS reply with an error code") { TorControl.socksPort(reply("552 Unrecognized key\r\n")!!) }
+        // Refusals of the shape.
+        throws("a line with no terminator") { reply("250 OK") }
+        throws("a line feed alone") { reply("250 OK\n") }
+        throws("a carriage return alone") { reply("250 OK\rX") }
+        throws("a reply that stops after a dash line") { reply("250-a=b\r\n") }
+        throws("a line longer than the cap") { reply("250 " + "a".repeat(TorControl.MAX_LINE) + "\r\n") }
+        ok(reply("250 " + "a".repeat(TorControl.MAX_LINE - 4) + "\r\n") != null, "a line at the cap is read")
+        throws("a reply of too many lines") { reply("250-a\r\n".repeat(TorControl.MAX_LINES) + "250 OK\r\n") }
+        throws("a data reply") { reply("250+info=\r\nline\r\n.\r\n250 OK\r\n") }
+        throws("a code that changes in a reply") { reply("250-a\r\n251 OK\r\n") }
+        throws("a code that is not digits") { reply("2x0 OK\r\n") }
+        throws("a line that is too short") { reply("250\r\n") }
+        throws("a separator that is not a space or a dash") { reply("250*OK\r\n") }
+        throws("a byte that is not printable ASCII") { reply("250 O\u0001K\r\n") }
+        throws("a byte above ASCII") { reply("250 O\u00e9K\r\n") }
+        // Refusals of the meaning.
+        for (bad in listOf("\"192.168.0.1:9050\"", "\"127.0.0.1:0\"", "\"127.0.0.1:65536\"", "\"127.0.0.1:x\"", "\"127.0.0.1:9050\" \"127.0.0.1:9051\"", "127.0.0.1:9050", "\"\"", "\"127.0.0.1:\"")) {
+            throws("the SOCKS listener $bad") { TorControl.socksPort(reply("250-net/listeners/socks=$bad\r\n250 OK\r\n")!!) }
+        }
+        throws("a reply for another key") { TorControl.socksPort(reply("250-net/listeners/dns=\"127.0.0.1:9050\"\r\n250 OK\r\n")!!) }
+        throws("a bootstrap phase with no progress") { TorControl.bootstrapProgress(reply("250-status/bootstrap-phase=NOTICE BOOTSTRAP\r\n250 OK\r\n")!!) }
+        throws("a progress above 100") { TorControl.bootstrapProgress(reply("250-status/bootstrap-phase=NOTICE BOOTSTRAP PROGRESS=101\r\n250 OK\r\n")!!) }
+        throws("an event that is not a status of the client") { TorControl.status(reply("650 CIRC 1 BUILT\r\n")!!) }
+        throws("an event of several lines") { TorControl.status(reply("650-STATUS_CLIENT NOTICE CIRCUIT_ESTABLISHED\r\n650 OK\r\n")!!) }
+        throws("a reply taken for an event") { TorControl.status(okReply) }
+        // The five commands, and no others.
+        val consts = Regex("const val ([A-Z_]+) = \"([^\"]*)\\\\r\\\\n\"").findAll(source("src/model/TorControl.kt")).map { it.groupValues[2] }.toList()
+        ok(consts == listOf("AUTHENTICATE", "SETEVENTS STATUS_CLIENT", "GETINFO status/bootstrap-phase", "GETINFO net/listeners/socks", "SIGNAL SHUTDOWN"), "the five commands: $consts")
+        val svc = source("src/android/TorService.kt")
+        ok(Regex("\\.write\\(").findAll(svc).count() == 2 && Regex("TorControl\\.[A-Z_]+\\b").findAll(svc).map { it.value }.toSet().containsAll(setOf("TorControl.AUTHENTICATE", "TorControl.SET_EVENTS", "TorControl.GET_SOCKS", "TorControl.GET_BOOTSTRAP", "TorControl.SHUTDOWN")), "the service writes only those commands")
+        val code = svc.lines().filter { l -> l.trimStart().let { !it.startsWith("*") && !it.startsWith("/**") && !it.startsWith("//") } }.joinToString("\n")
+        ok(svc.contains("package org.torproject.jni") && code.contains("class TorService(") && !code.contains(": Service") && !code.contains("androidx") && !code.contains("jtorctl") && !code.contains("sendBroadcast"), "the class has the library's name, is not an Android service and uses neither androidx nor jtorctl")
+        ok(svc.contains("BSD 3-Clause") && svc.contains("github.com/guardianproject/tor-android") && svc.contains("follow"), "the header says whose call order it follows, and its licence")
+        ok(svc.contains("\"--SocksPort\", \"127.0.0.1:auto\""), "one SOCKS listener, at 127.0.0.1, on a port Tor picks")
+        ok(svc.contains("--ControlSocket") && !svc.contains("--ControlPort"), "the control socket is the one the natives give")
+        ok(source("AndroidManifest.xml").let { !it.contains("TorService") }, "the manifest has no entry for it: it is not a component")
+        val controller = source("src/android/Controller.kt")
+        ok(controller.contains("ensureTor().awaitPort(TOR_WAIT_MS)") && controller.indexOf("ensureTor().awaitPort") in 1 until controller.indexOf("OwnerNode.start("), "the node starts only after the built-in Tor has a port")
+        val hidden = controller.substringAfter("fun hidden()").substringBefore("/**\n     * OA-90")
+        ok(hidden.indexOf("stopNode()") in 0 until hidden.indexOf("releaseTor()") && hidden.indexOf("WatchRunner.handOver()") in 0 until hidden.indexOf("releaseTor()"), "Tor is let go of when the app is hidden, after the node and the hand-over")
+        val runner = source("src/android/TorRunner.kt")
+        ok(runner.contains("run.stop()") && runner.contains("run.holders == 0"), "the last lease shuts Tor down")
+        ok(source("src/android/WatchService.kt").contains("torLease = TorRunner.acquire(dir)") && source("src/android/WatchService.kt").contains("l?.close()"), "the watcher holds a lease from its service's start to its end")
+    }
+
+    private fun oa_98_the_built_in_tor_keeps_its_files_in_the_no_backup_folder_and_reads_no_configuration() {
+        val svc = source("src/android/TorService.kt")
+        val runner = source("src/android/TorRunner.kt")
+        ok(AppFiles.TOR_DIR == "tor" && runner.contains("File(dir, AppFiles.TOR_DIR)") && runner.contains("File(torDir, \"data\")") && runner.contains("File(torDir, \"cache\")"), "the folders are under the app's folder")
+        ok(source("src/android/Controller.kt").contains("private val dir: File = act.noBackupFilesDir") && source("src/android/Controller.kt").contains("TorRunner.acquire(dir)"), "and that folder is noBackupFilesDir")
+        ok(source("src/android/WatchService.kt").contains("WatchRunner.begin(noBackupFilesDir)"), "the watcher's is the same folder")
+        ok(runner.contains("setReadable(true, true)") && runner.contains("setWritable(true, true)") && runner.contains("setExecutable(true, true)"), "the folders are the app's alone")
+        ok(!runner.contains("cacheDir") && !runner.contains("getCacheDir") && !svc.contains("getCacheDir") && !runner.contains("filesDir.") , "nothing of Tor is in a cache folder that is not the no-backup folder")
+        val options = Regex("\"(--[A-Za-z-]+)\"").findAll(svc).map { it.groupValues[1] }.toList()
+        ok(options == listOf("--verify-config", "--RunAsDaemon", "--defaults-torrc", "--ignore-missing-torrc", "--CacheDirectory", "--DataDirectory", "--ControlSocket", "--CookieAuthentication", "--SocksPort"), "the options of the command line: $options")
+        ok(svc.contains("\"-f\", torrc.absolutePath") && !svc.contains("FileWriter") && !svc.contains("writeText") && !svc.contains("PrintWriter"), "the files named for configuration are never written, so none is read")
+        ok(svc.contains("socket.delete()"), "a control socket left by an earlier run is removed before Tor starts")
+        val extract = source("AndroidManifest.xml")
+        ok(extract.contains("android:allowBackup=\"false\""), "nothing of it is backed up (OA-02)")
+        val build = source("build.sh")
+        ok(build.contains("tor_aar_sha256=\"28ff2bb6d4d42eabe57183dedd7a97fce77e8ce4b6f5af6fa03993b3ca054edd\"") && build.contains("is not the pinned tor-android 0.4.9.14 AAR"), "the build checks the library's hash and stops on a mismatch")
+        ok(build.contains("jni/\$abi/libtor.so") && Regex("unzip [^\\n]*\"\\\$tor_aar\"").findAll(build).count() == 1, "only libtor.so is taken from the AAR, by one unzip")
+    }
+
+    private fun oa_99_the_owner_chooses_between_the_built_in_tor_and_orbot() {
+        ok(AppConfig.fresh().tor == TorChoice.BuiltIn && AppConfig.fresh().proxy == AppConfig.DEFAULT_PROXY, "a new setup uses the built-in Tor")
+        val legacy = AppConfig.decode("proxy: 10.0.0.2:9150\n".toByteArray())
+        ok(legacy.tor == TorChoice.Orbot && legacy.proxy == "10.0.0.2:9150", "a setup from before the choice keeps Use Orbot, at its address")
+        for (choice in TorChoice.values()) {
+            val c = AppConfig("10.0.0.2:9150", choice)
+            val back = AppConfig.decode(c.encode())
+            ok(back.tor == choice && back.proxy == "10.0.0.2:9150", "the choice ${choice.key} reads back")
+        }
+        ok(AppConfig("127.0.0.1:9050", TorChoice.BuiltIn).with(TorChoice.Orbot).let { it.tor == TorChoice.Orbot && it.proxy == "127.0.0.1:9050" }, "changing the choice keeps the address of Orbot")
+        ok(AppConfig("10.0.0.2:9150", TorChoice.Orbot).with(TorChoice.BuiltIn).proxy == "10.0.0.2:9150", "and going back to Orbot finds it")
+        throws("a choice that is not one of the two") { AppConfig.decode("proxy: 1.2.3.4:5\ntor: off\n".toByteArray()) }
+        throws("a second line that is not the choice") { AppConfig.decode("proxy: 1.2.3.4:5\nmanager: a\n".toByteArray()) }
+        throws("a third line") { AppConfig.decode("proxy: 1.2.3.4:5\ntor: orbot\nx: y\n".toByteArray()) }
+        throws("a choice with no line end") { AppConfig.decode("proxy: 1.2.3.4:5\ntor: orbot".toByteArray()) }
+        ok(TorChoice.values().map { it.label } == listOf("Built-in Tor", "Use Orbot") && TorChoice.fromKey("off") == null, "the two choices have their labels, and there is no third (no way to turn Tor off)")
+        ok(TorChoice.BuiltIn.words === AppWords.torBuiltIn && TorChoice.Orbot.words === AppWords.torUsesOrbot, "each choice has its words")
+        ok(AppWords.torBuiltIn.heading == "Tor" && AppWords.torBuiltIn.what == "This app runs Tor itself, so Orbot is not needed." && AppWords.torBuiltIn.next == "Nothing to do. To use Orbot instead, choose Use Orbot." && AppWords.torBuiltIn.who == Who.NOBODY, "the words of the built-in Tor, as written down")
+        ok(AppWords.torUsesOrbot.heading == "Tor through Orbot" && AppWords.torUsesOrbot.what == "This app sends everything through Orbot, which must be installed and running." && AppWords.torUsesOrbot.next == "Keep Orbot running. To stop needing it, choose Built-in Tor." && AppWords.torUsesOrbot.who == Who.OWNER, "the words of Orbot, as written down")
+        val screens = source("src/android/Screens.kt")
+        ok(screens.substringAfter("private fun Controller.showSettingsAndPhone()").substringBefore("private fun Controller.rescan()").contains("RowItem(AppWords.torBuiltIn.heading) { showTor() }"), "Settings and this phone has the row Tor")
+        val page = source("src/android/TorScreen.kt")
+        ok(page.contains("TorChoice.values()") && page.contains("chooseTor(") && page.contains("words = now.words"), "the page has a button for each choice and the words of the one in use")
+        ok(source("src/android/Controller.kt").indexOf("configFile.save(next)") in 1 until source("src/android/Controller.kt").indexOf("config = next"), "the choice is saved before it is taken up")
+        ok(source("src/android/Controller.kt").contains("val old = config ?: return"), "the choice is changed only on a saved setup")
+        ok(!source("src/android/Controller.kt").contains("withoutTor = true") && !page.contains("withoutTor"), "neither choice sends around Tor")
+    }
+
+    private fun oa_100_when_the_built_in_tor_does_not_start_nothing_is_sent_and_the_app_says_so() {
+        ok(AppWords.torStarting.heading == "Starting Tor" && AppWords.torStarting.what == "This app is connecting to the Tor network, which can take up to a minute." && AppWords.torStarting.next == "Wait on this screen." && AppWords.torStarting.who == Who.NOBODY, "the words while it connects, as written down")
+        ok(AppWords.torFailed.heading == "Tor did not start" && AppWords.torFailed.what == "This app could not connect to the Tor network." && AppWords.torFailed.next == "Check that the phone is online, then try again. If it keeps failing, choose Use Orbot." && AppWords.torFailed.who == Who.OWNER && AppWords.torFailed.tone == Tones.STOP, "the words when it did not, as written down")
+        ok(ScreenModel.pick(null, SetupStatus(true, true), AppWords.torFailed, false).let { it is Screen.TorBlocked && it.words === AppWords.torFailed }, "a failed Tor is a screen of its own, before the node's")
+        ok(ScreenModel.pick(null, SetupStatus(true, true), AppWords.torFailed, true) is Screen.TorBlocked, "and it stays until the owner tries again")
+        val c = source("src/android/Controller.kt")
+        ok(c.contains("waiting(if (cfg.tor == TorChoice.BuiltIn) AppWords.torStarting else AppWords.starting)"), "the screen says it is connecting while it waits")
+        ok(c.contains("torBlocked = AppWords.torFailed") && c.contains("\"Try again\" else \"Check again\""), "a failure shows its words and the button Try again")
+        ok(c.indexOf("torBlocked = AppWords.torFailed") in 1 until c.indexOf("OwnerNode.start("), "the failure comes before the node is started")
+        ok(c.contains("const val TOR_WAIT_MS = 90_000L"), "it waits 90 seconds for a circuit")
+        ok(c.contains("outcome.words === AppWords.orbotNotRunning") && c.contains("PosOutcome.Failed(AppWords.torFailed)"), "a till read that finds no Tor says so in the built-in Tor's words")
+        ok(c.contains("fun proxyNow()") && c.contains("return \"\"") && c.contains("\"127.0.0.1:\$port\""), "with no Tor up there is no proxy address for a fetch to use")
+        val runner = source("src/android/TorRunner.kt")
+        ok(runner.contains("catch (e: LinkageError)") && runner.contains("class TorStartException"), "a library that does not load is a failure to start, with the same words")
+        ok(runner.contains("val run = current?.takeIf { !it.done }"), "a run that has ended is not reused: trying again starts a new one")
+        ok(source("src/android/WatchService.kt").contains("TorChoice.BuiltIn -> torLease?.port() != null"), "the watcher is not started while the built-in Tor has no circuit")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
@@ -2335,13 +2475,13 @@ object AppModelTest {
             m.invoke(AppModelTest)
         }
         ok(methods.size >= 15, "the rules' tests ran: ${methods.size}")
-        val ids = methods.map { it.name.substring(3, 5) }
+        val ids = methods.map { it.name.removePrefix("oa_").substringBefore('_') }
         ok(ids.size == ids.toSet().size, "one test for each number")
         if (rulesMd == null) return
-        val rules = Regex("^- \\*\\*OA-(\\d\\d)\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
-        ok(rules.first() == "01" && rules == rules.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
+        val rules = Regex("^- \\*\\*OA-(\\d{2,3})\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
+        ok(rules.first() == "01" && rules.map { it.toInt() } == rules.map { it.toInt() }.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
         // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-79 for more.
-        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..96)
+        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..100)
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")

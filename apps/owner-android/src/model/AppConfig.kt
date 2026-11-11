@@ -3,21 +3,54 @@ package org.openbmt.owner.app
 import java.io.File
 import java.io.IOException
 import org.openbmt.app.DurableFile
+import org.openbmt.app.SayWords
 import org.openbmt.owner.OwnerNetwork
 
 /** The config file did not have the form this app writes. */
 class ConfigFormatException(message: String) : IOException(message)
 
+/** How the app reaches Tor (OA-99). */
+enum class TorChoice(val key: String) {
+    /** The app runs Tor itself (OA-97). The default of a new setup. */
+    BuiltIn("builtin"),
+
+    /** Everything goes through Orbot at the address of the config. */
+    Orbot("orbot");
+
+    /** The words of this choice, for the page. */
+    val words: SayWords get() = when (this) {
+        BuiltIn -> AppWords.torBuiltIn
+        Orbot -> AppWords.torUsesOrbot
+    }
+
+    /** The label of the button that picks it. */
+    val label: String get() = when (this) {
+        BuiltIn -> "Built-in Tor"
+        Orbot -> "Use Orbot"
+    }
+
+    companion object {
+        fun fromKey(key: String): TorChoice? = values().firstOrNull { it.key == key }
+    }
+}
+
 /**
- * What the owner app keeps besides the sealed setup, in one small text file:
- * the address of Orbot, as the one line `proxy: host:port`, written through
- * [DurableFile]. Nothing in it is secret.
+ * What the owner app keeps besides the sealed setup, in one small text file: the address of Orbot, as the line
+ * `proxy: host:port`, and the choice of Tor, as the line `tor: builtin` or `tor: orbot` (OA-99), written through
+ * [DurableFile]. A file of one line, as earlier builds wrote it, is a setup that uses Orbot at that address.
+ * Nothing in it is secret.
  */
-class AppConfig(val proxy: String) {
-    fun encode(): ByteArray = "proxy: $proxy\n".toByteArray(Charsets.UTF_8)
+class AppConfig(val proxy: String, val tor: TorChoice) {
+    fun encode(): ByteArray = "proxy: $proxy\ntor: ${tor.key}\n".toByteArray(Charsets.UTF_8)
+
+    /** The same config with another choice; the address of Orbot is kept. */
+    fun with(tor: TorChoice): AppConfig = AppConfig(proxy, tor)
 
     companion object {
         const val DEFAULT_PROXY = "127.0.0.1:9050"
+
+        /** What a new setup is saved with (OA-99). */
+        fun fresh(): AppConfig = AppConfig(DEFAULT_PROXY, TorChoice.BuiltIn)
 
         /**
          * The network a wallet made on this phone is for. It is the build's one choice: the app has no
@@ -34,12 +67,16 @@ class AppConfig(val proxy: String) {
             }
             if (!text.endsWith("\n")) throw ConfigFormatException("the config file does not end with a line end")
             val lines = text.dropLast(1).split('\n')
-            if (lines.size != 1) throw ConfigFormatException("the config file does not have 1 line")
+            if (lines.size != 1 && lines.size != 2) throw ConfigFormatException("the config file does not have 1 or 2 lines")
             val prefix = "proxy: "
             if (!lines[0].startsWith(prefix)) throw ConfigFormatException("line 1 is not \"proxy: ...\"")
             val proxy = lines[0].substring(prefix.length)
             if (!HostPort.valid(proxy)) throw ConfigFormatException("the proxy is not host:port")
-            return AppConfig(proxy)
+            if (lines.size == 1) return AppConfig(proxy, TorChoice.Orbot)
+            val torPrefix = "tor: "
+            if (!lines[1].startsWith(torPrefix)) throw ConfigFormatException("line 2 is not \"tor: ...\"")
+            val tor = TorChoice.fromKey(lines[1].substring(torPrefix.length)) ?: throw ConfigFormatException("the choice of Tor is not builtin or orbot")
+            return AppConfig(proxy, tor)
         }
     }
 }
@@ -87,6 +124,9 @@ object AppFiles {
 
     /** The node's own folder, inside the app's `noBackupFilesDir`. */
     const val NODE_DIR = "node"
+
+    /** The folder of the built-in Tor, inside the app's `noBackupFilesDir` (OA-98). */
+    const val TOR_DIR = "tor"
 }
 
 /** The config file of the app's own folder. */

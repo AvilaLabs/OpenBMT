@@ -53,15 +53,18 @@ run on a phone. Not for real funds.**
   the list of recent apps carries a balance, an address or a request. (The
   counter app does not set it, because its customer must see its screen. The
   owner app has no such reader.)
-- **OA-05.** Every connection of the node goes through the SOCKS5 proxy of
-  the app's setting (`127.0.0.1:9050`, Orbot, unless it was changed): its
-  peers, the sending of payments and an onion route of the link. The
-  phone looks up no name. The owner app has no setting that turns this off
-  and the node is never started with `withoutTor`. Before the node starts,
-  the app asks the proxy for a SOCKS5 greeting. If the proxy does not
-  answer, nothing is sent around it: the node is not started, and the app
-  says "This app sends everything through Tor, but Orbot is not running."
-  and "Open Orbot and turn it on." A link route that is a local address
+- **OA-05.** Every connection of the node goes through a SOCKS5 proxy: the
+  app's own Tor (OA-97, the choice "Built-in Tor", which a new setup has) or
+  Orbot at the address of the config (`127.0.0.1:9050` unless it was
+  changed, the choice "Use Orbot", OA-99). Its peers, the sending of payments
+  and an onion route of the link all use it. The phone looks up no name. The
+  owner app has no setting that turns this off and the node is never started
+  with `withoutTor`. Before the node starts, the app has the proxy: the
+  built-in Tor's port once Tor has a circuit (OA-97), or, with Orbot, the
+  answer to a SOCKS5 greeting. If it has none, nothing is sent around it: the
+  node is not started, and the app says so (OA-100 for the built-in Tor; for
+  Orbot "This app sends everything through Tor, but Orbot is not running."
+  and "Open Orbot and turn it on."). A link route that is a local address
   (`direct`) is the owner's choice in the setup text and is not sent
   through Tor.
 - **OA-06.** The node runs while the app is on the screen, and while the
@@ -839,3 +842,61 @@ signs batches, settings and pairings, are never in the service.
   in full, in a group of its own, and shows each limit in the currency's
   name with its satoshis, or with no satoshis for Bitcoin Standard, where
   they are the same number.
+
+## 15. The built-in Tor
+
+- **OA-97.** The app runs the Tor Project's C Tor itself, from the native
+  library of the Guardian Project's `tor-android` (`docs/DEPENDENCIES.md`),
+  in its own process and not as an Android component: the manifest does not
+  change. `TorService` (`src/android/TorService.kt`) makes the same native
+  calls in the same order as the library's own class, whose name it takes
+  because the native functions are bound by it, and says so in its header.
+  Tor has one SOCKS listener, on 127.0.0.1 at a port Tor picks, and its
+  control socket is the one the native code gives. The app reads that socket
+  with a strict reader (`TorControl.kt`): three-digit code, separator, text of
+  printable ASCII, carriage return and line feed, at most 1024 bytes a line
+  and 8 lines a reply, no data reply, a code that does not change inside a
+  reply, and a reply that is not complete is refused. It sends five commands
+  and no others: `AUTHENTICATE`, `SETEVENTS STATUS_CLIENT`, `GETINFO
+  status/bootstrap-phase`, `GETINFO net/listeners/socks`, and `SIGNAL
+  SHUTDOWN` to stop Tor. The proxy is handed to the node when Tor reports its
+  first circuit, as `127.0.0.1:port`. Status goes to the app by a plain
+  callback. One run is shared by every holder of a lease: the screens hold
+  one while the app is on show and let go of it when the app is hidden, and
+  the background watch holds one from its service's start to its end (OA-84),
+  so the port the watcher uses is the one the node had (OA-81). The last
+  lease let go of shuts Tor down.
+- **OA-98.** Tor's data and cache folders are inside the app's
+  `noBackupFilesDir`, in the folder `tor`, made readable, writable and
+  searchable by the app alone; nothing of Tor is backed up or moved (OA-02).
+  The command line has no option but the ones OA-97 needs: no `torrc` is
+  written, so none is read, and no other option is given. A control socket
+  left by an earlier run is deleted before Tor starts. The library file
+  `libtor.so` is taken from the AAR pinned in `docs/DEPENDENCIES.md` and
+  nothing else of it is; the build checks the AAR's SHA-256 and stops if it
+  differs.
+- **OA-99.** Settings and this phone has a row "Tor". It opens a page with
+  two choices, "Built-in Tor" and "Use Orbot", the words of the one in use
+  and no third choice: there is no way to turn Tor off. The choice is kept in
+  the config file as the line `tor: builtin` or `tor: orbot` after the line
+  `proxy:`, which keeps the address of Orbot for either choice. A new setup
+  is saved with "Built-in Tor" and asks for no address. A config of the
+  earlier form, which has only the line `proxy:`, is read as "Use Orbot" at
+  that address and stays so until the owner changes it. "Use Orbot" asks for
+  the address, checked as before. A choice is saved, the watcher is stopped
+  so that it starts again from the new config, and then the app starts again
+  with it. "Built-in Tor" says "Tor", "This app runs Tor itself, so Orbot is
+  not needed." and "Nothing to do. To use Orbot instead, choose Use Orbot."
+  "Use Orbot" says "Tor through Orbot", "This app sends everything through
+  Orbot, which must be installed and running." and "Keep Orbot running. To
+  stop needing it, choose Built-in Tor."
+- **OA-100.** With the built-in Tor the screen says "Starting Tor", "This app
+  is connecting to the Tor network, which can take up to a minute." and "Wait
+  on this screen." while the app waits, for up to 90 seconds, for Tor's first
+  circuit. If Tor stops, does not load or does not connect in time, nothing
+  is sent: the node is not started, and the screen says "Tor did not start",
+  "This app could not connect to the Tor network." and "Check that the phone
+  is online, then try again. If it keeps failing, choose Use Orbot.", with a
+  button "Try again" that starts again, with a new run if the old one ended.
+  A read of the till that finds no Tor says the same. The background watch
+  does not start while the built-in Tor has no circuit.

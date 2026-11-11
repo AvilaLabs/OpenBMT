@@ -106,7 +106,8 @@ class WatchService : Service() {
 /**
  * The thread of the background watch. It runs [OwnerWatch.step] in a loop while the wallet is handed over, and
  * nothing while the app is on screen (the node runs then). Orbot is asked before the watcher starts, and again
- * about every 30 seconds while it does not answer (OA-88). One lock keeps a hand-over, a reclaim and a step from
+ * about every 30 seconds while it does not answer (OA-88); with the built-in Tor, the runner holds a lease on it
+ * from the service's start to its end, so the port is the one the node had (OA-97). One lock keeps a hand-over, a reclaim and a step from
  * running together; a step waits for the network for at most one second, so a reclaim waits for that long.
  */
 object WatchRunner {
@@ -118,11 +119,19 @@ object WatchRunner {
     @Volatile
     private var ended = false
     private var lastOrbotTry: Long? = null
+    private var torLease: TorLease? = null
 
     fun begin(dir: File, onState: (WatchNotice.State) -> Unit) {
         synchronized(lock) {
             if (thread?.isAlive == true) return
             ended = false
+            // Taken here, while the app is on show and the node's Tor is up, so that it is the same run (OA-97).
+            val builtIn = try {
+                ConfigFile(dir).load()?.tor == TorChoice.BuiltIn
+            } catch (_: java.io.IOException) {
+                false
+            }
+            if (builtIn) torLease = TorRunner.acquire(dir)
             val t = Thread { loop(dir, onState) }
             t.isDaemon = true
             thread = t
@@ -152,6 +161,8 @@ object WatchRunner {
             t?.join(1500)
         } catch (_: InterruptedException) {
         }
+        val l = synchronized(lock) { torLease.also { torLease = null } }
+        l?.close()
     }
 
     private fun stopWatch() {
@@ -196,13 +207,19 @@ object WatchRunner {
                 return state
             }
             lastOrbotTry = now
-            val proxy = try {
-                ConfigFile(dir).load()?.proxy
+            val config = try {
+                ConfigFile(dir).load()
             } catch (_: java.io.IOException) {
                 null
             }
-            // No Orbot, no watcher: nothing is sent around the proxy (OA-05, OA-88).
-            if (proxy == null || !TorGate(proxy).available()) return notify(WatchNotice.State.NoOrbot, state, onState)
+            // No Tor, no watcher: nothing is sent around the proxy (OA-05, OA-88). The built-in Tor must be up under
+            // the lease taken at the service's start; the contents the watcher starts from name its port.
+            val up = when (config?.tor) {
+                null -> false
+                TorChoice.Orbot -> TorGate(config.proxy).available()
+                TorChoice.BuiltIn -> torLease?.port() != null
+            }
+            if (!up) return notify(WatchNotice.State.NoOrbot, state, onState)
             try {
                 val bytes = WatchStore(dir, KeystoreSealer(AppFiles.WATCH_KEY_ALIAS)).loadContents() ?: return state
                 watch = OwnerWatch.start(bytes)

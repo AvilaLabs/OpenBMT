@@ -102,6 +102,35 @@ object AppWords {
 
     // ---- Tor and Orbot ------------------------------------------------------------------
 
+    /** The built-in Tor, which is the choice of a new setup (OA-97, OA-99). */
+    val torBuiltIn = w(
+        Tones.INFO, "Tor",
+        "This app runs Tor itself, so Orbot is not needed.",
+        Who.NOBODY,
+        "Nothing to do. To use Orbot instead, choose Use Orbot.",
+    )
+
+    val torUsesOrbot = w(
+        Tones.INFO, "Tor through Orbot",
+        "This app sends everything through Orbot, which must be installed and running.",
+        Who.OWNER,
+        "Keep Orbot running. To stop needing it, choose Built-in Tor.",
+    )
+
+    val torStarting = w(
+        Tones.INFO, "Starting Tor",
+        "This app is connecting to the Tor network, which can take up to a minute.",
+        Who.NOBODY,
+        "Wait on this screen.",
+    )
+
+    val torFailed = w(
+        Tones.STOP, "Tor did not start",
+        "This app could not connect to the Tor network.",
+        Who.OWNER,
+        "Check that the phone is online, then try again. If it keeps failing, choose Use Orbot.",
+    )
+
     val orbotNotRunning = w(
         Tones.STOP, "Tor is not running",
         "This app sends everything through Tor, but Orbot is not running.",
@@ -1171,6 +1200,10 @@ object AppWords {
         "torAddressNotAccepted" to torAddressNotAccepted,
         "torAlwaysOn" to torAlwaysOn,
         "orbotNotRunning" to orbotNotRunning,
+        "torBuiltIn" to torBuiltIn,
+        "torUsesOrbot" to torUsesOrbot,
+        "torStarting" to torStarting,
+        "torFailed" to torFailed,
         "notANumber" to notANumber,
         "counterNeeded" to counterNeeded,
         "counterNotAccepted" to counterNotAccepted,

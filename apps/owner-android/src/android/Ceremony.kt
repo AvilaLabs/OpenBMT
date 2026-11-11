@@ -405,8 +405,7 @@ private fun Controller.showFinishFailed(words: SayWords, d: CeremonyDraft) {
 
 /**
  * Opens the finished record for the values the node starts from, writes them as the setup text the paste path
- * parses, and asks for the address of Orbot as the paste path does, prefilled with the default and checked the
- * same way. [message] is what the last try said. The setup is then saved exactly as the paste path saves it, and
+ * parses. [message] is what the last try said. The setup is then saved exactly as the paste path saves it, and
  * the ceremony's record is deleted only after that (OA-29); the start goes on as after a pasted setup.
  */
 private fun Controller.saveFinished(record: ByteArray, message: SayWords? = null) {
@@ -417,11 +416,9 @@ private fun Controller.saveFinished(record: ByteArray, message: SayWords? = null
     } catch (e: LinkageError) {
         return showSaveFailed(AppWords.libraryMissing(e.message), record)
     }
-    val views = ArrayList<View>()
-    val proxy = orbotViews(views, AppConfig.DEFAULT_PROXY)
     val save = {
         saveSetup(
-            text, proxy.text.toString().trim(),
+            text,
             onRefused = { w -> saveFinished(record, w) },
             working = AppWords.ceremonyFinishing,
             afterSaved = { File(appDir, AppFiles.CEREMONY_FILE).delete() },
@@ -439,7 +436,7 @@ private fun Controller.saveFinished(record: ByteArray, message: SayWords? = null
         actions.add(ui.primary("Save and start") { save() })
     }
     actions.add(ui.button("Start again") { showStartAgain() })
-    screen("Save the setup", views, actions, words = message ?: AppWords.ceremonySaveNext)
+    screen("Save the setup", emptyList(), actions, words = message ?: AppWords.ceremonySaveNext)
 }
 
 private fun Controller.showSaveFailed(words: SayWords, record: ByteArray) {
