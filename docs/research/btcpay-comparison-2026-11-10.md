@@ -1,8 +1,9 @@
-# OpenBMT next to BTCPay Server (2026-11-10)
+# OpenBMT next to BTCPay Server and Square Bitcoin (2026-11-10)
 
 **Question.** BTCPay Server is the established free, self-hosted way for a
 merchant to take bitcoin. What does OpenBMT do differently, and where is
-BTCPay ahead?
+BTCPay ahead? Square's own bitcoin payments, for shops that already run
+Square, are set out at the end ("Square Bitcoin").
 
 **Answer.** The two differ in what they set out to be. BTCPay is a
 general payment server: many coins, Lightning, plugins, an invoice API,
@@ -25,6 +26,9 @@ shown with a real merchant yet; see "What OpenBMT has not shown".
 - BIP 321, status Complete.
 - Spiral's report "The Long Road to Bitcoin Payments" (README of its
   repository, commits of 26 and 27 October 2026).
+- Square's press release "Square Brings Bitcoin to Main Street" (8
+  October 2025) and its help articles 8622 and 8574, read on 2026-11-10
+  (section "Square Bitcoin").
 
 ## Where the keys are
 
@@ -116,6 +120,43 @@ OpenBMT is for the merchant who wants to receive and hold bitcoin.
 - Lightning, an invoice API, online shop plugins, payouts, many
   integrations.
 - A record of handling incidents in public.
+
+## Square Bitcoin
+
+Square (Block, Inc.) offers bitcoin payments inside its own point of
+sale. In a shop that already runs Square it is the obvious alternative
+to OpenBMT, so it is set out here from Square's own pages, read on
+2026-11-10: the press release of 8 October 2025, the help articles
+"Accept and manage bitcoin payments" (8622) and "Manage your bitcoin
+wallet" (8574).
+
+| | Square Bitcoin | OpenBMT |
+|---|---|---|
+| Network | Lightning, by QR code or NFC; on-chain is not named | On-chain only in the first version |
+| Where the bitcoin goes | Square's bitcoin wallet, of which "Square is the custodian", or dollars at once | The merchant's own 2-of-3 multisig |
+| Fee per payment | 0% until 31 December 2026, then 1% | None; the merchant pays the network fee when spending |
+| Limits | $600 a payment, $20,000 a day | Set by the owner's signed settings |
+| Refunds | In dollars, as a gift card | In bitcoin, approved with two keys |
+| Disputes | None for bitcoin payments | None; a bitcoin payment cannot be reversed |
+| Where | Not in New York, U.S. territories or outside the U.S. | No regional setting |
+| Setup | Turned on by default for new U.S. sellers at eligible locations, settled in dollars | A separate app and a key ceremony |
+
+The two answer different merchants. Square suits a shop that wants to
+take bitcoin with nothing to set up and end the day in dollars, or that
+is content for Square to hold the bitcoin. Lightning makes a small sale
+cheap and fast, which on-chain payment does not. OpenBMT is for a shop
+that wants the bitcoin in keys it holds itself, with no company able to
+freeze, hold or lose it. A Square merchant who wants to hold bitcoin can
+also withdraw it from Square to a wallet of their own, for no fee at
+the standard speed (up to 24 hours), within $15,000 a day and $50,000 a
+week.
+
+A shop can run both. OpenBMT's Square connector (`docs/DESIGN.md`, the
+connector table) records a payment taken by OpenBMT against the Square
+order as an external payment. Where both
+are offered at one register, the cashier's screen has to make plain
+which one the customer is paying through; that is a requirement on the
+connector's words when it is built.
 
 ## What OpenBMT has not shown
 
