@@ -403,8 +403,7 @@ fn ps_91_an_unknown_tender_type_beside_a_bitcoin_tender_reads_fine() {
     assert!(s.is_bitcoin(tender(o, "T1")));
     assert!(!s.is_bitcoin(unknown));
     // The text of the type is bounded and has no control character.
-    let long = body.iter().copied().collect::<Vec<u8>>();
-    let long = String::from_utf8(long)
+    let long = String::from_utf8(body.to_vec())
         .expect("text")
         .replace("CRYPTO_FUTURE", &format!("{}\\n", "X".repeat(100)));
     let page = request().parse(long.as_bytes(), None).expect("reads");
