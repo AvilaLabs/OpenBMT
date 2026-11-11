@@ -91,3 +91,10 @@ The full ledger, which does carry them, sits behind a warning.
 Spending many receipts at once links them on the blockchain: anyone who paid
 once, and the exchange, can see that they belong to one wallet. Merging receipts
 has the same effect. The app says so when it offers a merge (design section 9).
+
+## Wallet fingerprints
+
+Wallets leave fingerprints in the transactions they build, and a fingerprint
+can show which wallet software made a transaction. A wallet fingerprint
+detector is listed on
+https://btcmaxis.com/bitcoin-information/privacy.html (read 2026-11-11).

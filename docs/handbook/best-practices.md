@@ -7,11 +7,8 @@ design. Where the software does not yet enforce a rule, the chapter says so.
 > independent security audit has been done. Do not use it with real funds.**
 
 > **Further reading.** For general self-custody practice written from the same
-> purist stance, see https://btcmaxis.com/. This chapter was written without
-> web access, so **none of its sub-pages was read**, no page is linked
-> beyond the front page, and this chapter has **not been checked against them
-> for contradictions**. Link the sub-page that matches each practice, and
-> check the match, before publication.
+> purist stance, see https://btcmaxis.com/. Pages of that site, read
+> 2026-11-11, are linked where they match a practice below.
 
 ## Keys
 
@@ -21,13 +18,20 @@ design. Where the software does not yet enforce a rule, the chapter says so.
   together are as weak as one.
 - Write each set of words on its own, alone, in separate sittings with no
   one watching. Never store key 2's words with key 3's.
-- Put the words on steel. Paper burns, fades and tears. A key whose words
-  are only on paper is marked "backup: temporary".
+- Put the words on steel. Paper burns, fades and tears. The site above says
+  "Paper is not an acceptable form of backup because it is so fragile"
+  (https://btcmaxis.com/bitcoin-information/recommended-wallets.html, read
+  2026-11-11). If the words must be written on paper before the steel is
+  stamped, check the steel against the phone, then destroy the paper. Never
+  keep paper as a backup.
 - Make key 3 outside OpenBMT software, offline, on a device that holds no
   other key, or on a hardware wallet. Then factory reset the tablet.
 - Prefer a hardware signer or another publisher's signer for key 2 until a
   second, independent person holds the Key app's release key. Hardware signers
-  are Planned and not yet tried.
+  are Planned and not yet tried. Before you choose a signer, read its public
+  disclosure history. The "Historic Wallet Failures" list on
+  https://btcmaxis.com/bitcoin-information/recommended-wallets.html (read
+  2026-11-11) collects reported flaws in hardware wallets.
 - Keep the recovery kit with the wallet description, current and dated,
   away from the shop. Printing it is not built yet. Check it by scanning it
   with the Key app.
@@ -64,9 +68,39 @@ design. Where the software does not yet enforce a rule, the chapter says so.
 
 - Size the limit to what the shop can afford to lose, not to what is
   convenient. The default light-check limits are first guesses.
+- To decide how many confirmations a large sale should wait for, use the
+  Bitcoin Confirmation Risk Calculator listed on
+  https://btcmaxis.com/bitcoin-information/security.html (read 2026-11-11).
+  The limit itself stays what the shop can afford to lose.
 - Set it to zero if in doubt. Zero turns instant off, and the sale waits for a
   block.
 - Remember that overrides count toward the exposure total.
+
+## Seed splitting
+
+OpenBMT's position is no. Tools such as Seed XOR and Penlock split one key's
+words into pieces. The two-of-three wallet already spreads control over three
+keys. Splitting one key's words makes more pieces that can be lost, and the
+security page of the site above says "keep it as simple as possible"
+(https://btcmaxis.com/bitcoin-information/security.html, read 2026-11-11).
+
+## If the owner dies or cannot act
+
+Plan this before it is needed. Any two keys spend, so the people who must be
+able to act need to reach two of the three.
+
+- Decide who holds or can reach each key. Keys 1 and 2 are on devices, and key
+  3 is words on steel.
+- Keep the recovery kit where those people can find it. It holds the wallet
+  description, which is what lets another wallet find the money.
+- Leave a sealed letter that says where each key is kept. It does not hold the
+  words themselves.
+- OpenBMT has no company that can step in, reset a key or open the wallet. If
+  two keys cannot be reached, nobody can restore them.
+- Whether a will or a trust should name these people is a matter for a lawyer.
+
+The security page of the site above lists inheritance resources:
+https://btcmaxis.com/bitcoin-information/security.html (read 2026-11-11).
 
 ## Cash-out and what the shop keeps
 
@@ -97,6 +131,8 @@ design. Where the software does not yet enforce a rule, the chapter says so.
 
 - Test the restore with a small amount, before trusting the wallet with more.
   Restoring with Bitcoin Core on a test network is run. Sparrow is not.
+  Bitcoin Core and Sparrow are used watch-only there. The keys never go into
+  them. The site above advises newcomers against a node's built-in wallet.
 - Do the monthly outside check: open the wallet description as watch-only in
   Sparrow or Bitcoin Core and compare receipts with the POS bitcoin-tender
   total.

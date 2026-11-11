@@ -32,7 +32,7 @@ apart, below.
 |---|---|---|---|
 | **Key 1** (owner) | The owner's own Android phone, in the Owner app | The owner | The other two still spend. Move to a new wallet. |
 | **Key 2** (approver) | The Key app on a spare phone you own (the default), or a hardware wallet, or an offline computer | The owner, or a manager | The other two still spend. Move to a new wallet. |
-| **Key 3** (recovery) | Words on paper or steel, away from the shop. Made in another publisher's wallet or on a hardware wallet | The owner, stored apart | The other two still spend. Move to a new wallet. |
+| **Key 3** (recovery) | Words on steel, away from the shop. Made in another publisher's wallet or on a hardware wallet | The owner, stored apart | The other two still spend. Move to a new wallet. |
 
 Losing one key never loses the money. **Losing two does**, because nothing can
 be spent. So the words of key 2 and key 3 are written down and stored apart
