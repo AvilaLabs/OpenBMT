@@ -34,6 +34,7 @@ openbmt-lock = { path = "../crates/openbmt-lock" }
 openbmt-qr = { path = "../crates/openbmt-qr" }
 openbmt-rates = { path = "../crates/openbmt-rates" }
 openbmt-ur = { path = "../crates/openbmt-ur" }
+openbmt-bbqr = { path = "../crates/openbmt-bbqr" }
 openbmt-qr-jni = { path = "../crates/openbmt-qr-jni" }
 openbmt-json = { path = "../crates/openbmt-json" }
 openbmt-pos-readers = { path = "../crates/openbmt-pos-readers" }
@@ -580,6 +581,27 @@ bench = false
 [[bin]]
 name = "owner_lightning_node_text"
 path = "fuzz_targets/owner_lightning_node_text.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bbqr_join"
+path = "fuzz_targets/bbqr_join.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bbqr_inflate"
+path = "fuzz_targets/bbqr_inflate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "owner_take_returned"
+path = "fuzz_targets/owner_take_returned.rs"
 test = false
 doc = false
 bench = false

@@ -380,6 +380,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-bbqr"
+version = "0.1.0"
+
+[[package]]
 name = "openbmt-books"
 version = "0.1.0"
 dependencies = [
@@ -420,6 +424,7 @@ dependencies = [
  "bitcoin",
  "libfuzzer-sys",
  "openbmt-approver",
+ "openbmt-bbqr",
  "openbmt-books",
  "openbmt-box",
  "openbmt-core",
@@ -570,6 +575,7 @@ dependencies = [
  "openbmt-session",
  "openbmt-signer",
  "openbmt-spend",
+ "openbmt-ur",
 ]
 
 [[package]]
@@ -619,6 +625,7 @@ version = "0.1.0"
 name = "openbmt-qr-jni"
 version = "0.1.0"
 dependencies = [
+ "openbmt-bbqr",
  "openbmt-qr",
  "openbmt-ur",
 ]
