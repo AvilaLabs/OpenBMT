@@ -35,6 +35,22 @@ pub const NET: Network = Network::Regtest;
 pub const NOW: u64 = 10_000_000;
 pub const OWNER_SECRET: [u8; 32] = [0x11; 32];
 pub const SMALL_BATCH: u32 = 3;
+/// The PIN of every Key app the tests make (SR-72).
+pub const PIN: &str = "482913";
+
+/// A Key app on a store with nothing in it, with its PIN set.
+pub fn open_new(store: Arc<MemStore>) -> Arc<KeyApp> {
+    let app = KeyApp::open(store).expect("opens empty");
+    app.set_pin(PIN.to_string()).expect("a PIN is set");
+    app
+}
+
+/// A Key app on a store that holds a state, unlocked with the PIN.
+pub fn reopen(store: Arc<MemStore>) -> Arc<KeyApp> {
+    let app = KeyApp::open(store).expect("opens");
+    app.unlock(PIN.to_string()).expect("unlocks");
+    app
+}
 
 // ---- the app's side: an in-memory store ---------------------------------------
 
@@ -65,6 +81,17 @@ impl MemStore {
 
     pub fn saved(&self) -> Option<Vec<u8>> {
         self.state().saved.clone()
+    }
+
+    /// The bytes inside the locked frame that is stored: the `OBM7`
+    /// envelope, opened with the tests' PIN.
+    pub fn plain(&self) -> Option<Vec<u8>> {
+        self.saved().map(|b| {
+            crate::lock::open(&b, PIN)
+                .map_err(|_| "the stored frame opens with the tests' PIN")
+                .expect("opens")
+                .0
+        })
     }
 
     pub fn saves(&self) -> usize {
@@ -220,7 +247,7 @@ pub fn setup_for(wallet: &WalletDescription, key3: &Xpub) -> WalletSetup {
 /// The Key app made from dice and given the wallet: the whole of setup.
 pub fn rig() -> Rig {
     let store = MemStore::new();
-    let app = KeyApp::open(store.clone()).expect("opens empty");
+    let app = open_new(store.clone());
     assert_eq!(app.state().expect("state"), SetupState::Empty);
     app.create_from_entropy(EntropySource::Platform, KeyNetwork::Regtest)
         .expect("a key is made");
@@ -262,6 +289,13 @@ pub fn rig() -> Rig {
 }
 
 // ---- the owner phone's side -------------------------------------------------------
+
+/// The address of `external(n)`, in the tests' network.
+pub fn address(n: u8) -> String {
+    bitcoin::Address::from_script(&external(n), NET)
+        .expect("an address")
+        .to_string()
+}
 
 pub fn external(n: u8) -> ScriptBuf {
     ScriptBuf::new_p2wpkh(&WPubkeyHash::from_byte_array([n; 20]))

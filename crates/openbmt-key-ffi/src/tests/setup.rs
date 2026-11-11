@@ -13,7 +13,7 @@ use crate::{
 #[test]
 fn setup_runs_from_an_empty_store_to_a_wallet() {
     let store = MemStore::new();
-    let app = KeyApp::open(store.clone()).expect("opens empty");
+    let app = open_new(store.clone());
     assert_eq!(app.state().expect("state"), SetupState::Empty);
     assert_eq!(store.saves(), 0);
     // Nothing else works yet, and each refusal says what to do.
@@ -50,7 +50,7 @@ fn setup_runs_from_an_empty_store_to_a_wallet() {
             words_waiting: false
         }
     );
-    let stored = store.saved().expect("stored");
+    let stored = store.plain().expect("stored");
     // The whole phrase is nowhere in the stored bytes.
     let phrase = words.join(" ");
     assert!(!String::from_utf8_lossy(&stored).contains(&phrase));
@@ -121,7 +121,7 @@ fn setup_runs_from_an_empty_store_to_a_wallet() {
 #[test]
 fn key_2_comes_from_the_dice_and_a_fixed_path() {
     let store = MemStore::new();
-    let app = KeyApp::open(store).expect("opens");
+    let app = open_new(store);
     let rolls = rolls();
     app.create_from_entropy(
         EntropySource::DiceHashed {
@@ -157,7 +157,7 @@ fn key_2_comes_from_the_dice_and_a_fixed_path() {
 #[test]
 fn the_other_sources_follow_the_core_functions() {
     let store = MemStore::new();
-    let app = KeyApp::open(store).expect("opens");
+    let app = open_new(store);
     // Coin flips: heads then tails is a 1, tails then heads a 0. 128 bits
     // make 12 words; a short run is refused with the core's own text.
     let heads: Vec<bool> = (0..100).map(|i| i % 4 == 1 || i % 4 == 2).collect();
@@ -222,7 +222,7 @@ fn the_other_sources_follow_the_core_functions() {
 #[test]
 fn making_a_key_again_before_the_wallet_replaces_it() {
     let store = MemStore::new();
-    let app = KeyApp::open(store.clone()).expect("opens");
+    let app = open_new(store.clone());
     app.create_from_entropy(EntropySource::Platform, KeyNetwork::Regtest)
         .expect("a key");
     let first = app.key2_public().expect("asked").expect("key 2");
@@ -232,7 +232,7 @@ fn making_a_key_again_before_the_wallet_replaces_it() {
     assert_ne!(first.account_xpub, second.account_xpub);
     assert_eq!(store.saves(), 2);
     // The stored bytes are the second key.
-    let again = KeyApp::open(store).expect("restarts");
+    let again = reopen(store);
     assert_eq!(again.key2_public().expect("asked").expect("key 2"), second);
     assert_eq!(
         again.state().expect("state"),
@@ -246,7 +246,7 @@ fn making_a_key_again_before_the_wallet_replaces_it() {
 #[test]
 fn a_store_that_fails_during_setup_changes_nothing() {
     let store = MemStore::new();
-    let app = KeyApp::open(store.clone()).expect("opens");
+    let app = open_new(store.clone());
     store.fail_saves(true);
     let err = app
         .create_from_entropy(EntropySource::Platform, KeyNetwork::Regtest)
@@ -279,7 +279,7 @@ fn a_store_that_fails_during_setup_changes_nothing() {
 #[test]
 fn a_wallet_that_does_not_fit_the_key_is_refused_by_the_rule_crates() {
     let store = MemStore::new();
-    let app = KeyApp::open(store).expect("opens");
+    let app = open_new(store);
     app.create_from_entropy(EntropySource::Platform, KeyNetwork::Regtest)
         .expect("a key");
     let (wallet, _, key3) = wallet_with(&app);
@@ -342,7 +342,7 @@ fn a_wallet_that_does_not_fit_the_key_is_refused_by_the_rule_crates() {
 #[test]
 fn the_envelope_is_strict() {
     let rig = rig();
-    let bytes = rig.store.saved().expect("stored");
+    let bytes = rig.store.plain().expect("stored");
     assert_eq!(&bytes[..4], b"OBM7");
     let decoded = envelope::decode(&bytes).expect("decodes");
     let again = envelope::encode(
@@ -384,7 +384,10 @@ fn the_envelope_is_strict() {
 #[test]
 fn stored_bytes_that_are_wrong_are_refused_at_open() {
     let rig = rig();
-    let good = rig.store.saved().expect("stored");
+    // The bytes inside the locked frame: what an older build stored.
+    let (good, _) = crate::lock::open(&rig.store.saved().expect("stored"), PIN)
+        .map_err(|_| ())
+        .expect("the PIN opens it");
 
     // Garbage.
     let store = MemStore::new();
@@ -402,7 +405,7 @@ fn stored_bytes_that_are_wrong_are_refused_at_open() {
     store.set_saved(Some(bad));
     assert!(KeyApp::open(store).is_err());
 
-    // The good bytes open.
+    // The good bytes open, into the step that sets a PIN.
     let store = MemStore::new();
     store.set_saved(Some(good));
     assert!(KeyApp::open(store).is_ok());

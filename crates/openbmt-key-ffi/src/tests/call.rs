@@ -10,9 +10,9 @@ use super::kit::*;
 use super::wire::{frame, Rd, W};
 use crate::say::{tone_byte, who_byte, TONES, WHOS};
 use crate::{
-    coin_bits, dice_bits, dice_face_counts, dispatch, envelope, error_response, parse_deposit_code,
+    coin_bits, dice_bits, dice_face_counts, dispatch, error_response, parse_deposit_code,
     word_is_valid, word_suggestions, CeilingsView, Decision, EntropySource, FeeCeilingsView,
-    KeyApp, KeyError, KeyNetwork, KeyStore, KeyWordCount, KitCheck, LineKind, Registry, SetupState,
+    KeyError, KeyNetwork, KeyStore, KeyWordCount, KitCheck, LineKind, Registry, SetupState,
     StoreError, MAX_APPS,
 };
 use crate::{words_for, Kind};
@@ -54,6 +54,9 @@ const DICE_FACE_COUNTS: u16 = 62;
 const WORD_SUGGESTIONS: u16 = 63;
 const WORD_IS_VALID: u16 = 64;
 const PARSE_DEPOSIT: u16 = 65;
+const LOCK_STATUS: u16 = 90;
+const SET_PIN: u16 = 91;
+const UNLOCK: u16 = 92;
 
 // ---- a client -----------------------------------------------------------------------
 
@@ -223,7 +226,20 @@ impl Client {
         self.err(op, handle, fields).1
     }
 
+    /// An app handle, with its PIN set (nothing is stored yet) or given (a
+    /// state is stored), as the Key app does on every start.
     fn open(&self) -> u64 {
+        let app = self.open_locked();
+        match Rd::new(&self.ok(LOCK_STATUS, app, W::new())).u8() {
+            // Nothing stored, or a state stored by an older build.
+            0 | 1 => drop(self.ok(SET_PIN, app, W::new().string(PIN))),
+            2 => drop(self.ok(UNLOCK, app, W::new().string(PIN))),
+            other => panic!("lock status {other}"),
+        }
+        app
+    }
+
+    fn open_locked(&self) -> u64 {
         Rd::new(&self.ok(OPEN, 0, W::new())).u64()
     }
 }
@@ -262,7 +278,7 @@ fn setup_from_every_source_gives_what_the_api_gives() {
     for source in sources() {
         let c = Client::new(MemStore::new());
         let direct_store = MemStore::new();
-        let direct = KeyApp::open(direct_store.clone()).expect("opens");
+        let direct = open_new(direct_store.clone());
         let app = c.open();
         assert_eq!(state_of(&c, app), SetupState::Empty);
         assert_eq!(c.rule(KEY_WORDS, app, W::new()), "words-shown-once");
@@ -318,7 +334,7 @@ fn a_typed_phrase_that_is_wrong_is_refused_through_the_protocol() {
 fn the_wallet_is_accepted_and_checked_through_the_protocol() {
     let c = Client::new(MemStore::new());
     let direct_store = MemStore::new();
-    let direct = KeyApp::open(direct_store.clone()).expect("opens");
+    let direct = open_new(direct_store.clone());
     let app = c.open();
     c.ok(
         CREATE,
@@ -566,12 +582,6 @@ fn an_approver_only_app_has_no_signer_screen() {
 
 // ---- own screens -----------------------------------------------------------------------
 
-fn address(n: u8) -> String {
-    bitcoin::Address::from_script(&external(n), NET)
-        .expect("an address")
-        .to_string()
-}
-
 #[test]
 fn the_own_screens_work_through_the_protocol() {
     let rig = rig();
@@ -587,7 +597,7 @@ fn the_own_screens_work_through_the_protocol() {
     assert_eq!(after.allowlist.len(), 1);
     assert_eq!(after.allowlist[0].label, "Exchange");
     // The same state, read through the API from the stored bytes.
-    let again = KeyApp::open(rig.store.clone()).expect("restarts");
+    let again = reopen(rig.store.clone());
     assert_eq!(again.signer_status().expect("status"), after);
     assert_eq!(
         c.rule(ENROLL, app, W::new().string(&address(5)).string("Again")),
@@ -631,7 +641,7 @@ fn the_own_screens_work_through_the_protocol() {
     assert_eq!(c.rule(RAISE_RECEIVE, app, W::new().u32(30)), "SR-70");
     // A clock that is not behind changes nothing.
     c.ok(CORRECT_CLOCK, app, W::new());
-    let again = KeyApp::open(rig.store.clone()).expect("restarts");
+    let again = reopen(rig.store.clone());
     assert_eq!(again.signer_status().expect("status"), status(&c));
 }
 
@@ -815,14 +825,8 @@ fn a_panic_becomes_status_4_and_poisons_the_app() {
         ))
     };
     let app = Rd::new(&send(OPEN, 0, W::new()).expect("opens")).u64();
-    let (status, rule, text) = send(
-        CREATE,
-        app,
-        W::new()
-            .source(&EntropySource::Platform)
-            .network(KeyNetwork::Regtest),
-    )
-    .expect_err("the panic is caught");
+    let (status, rule, text) =
+        send(SET_PIN, app, W::new().string(PIN)).expect_err("the panic is caught");
     assert_eq!((status, rule.as_str()), (INTERNAL, "internal"));
     assert_eq!(text, "caught a panic: [redacted]");
     assert!(!text.contains("a panic in random"));
@@ -1157,7 +1161,7 @@ fn world(stored: &[u8], request: &[u8]) -> Client {
 fn every_cut_and_every_flipped_bit_of_a_valid_request_is_handled() {
     let mut rig = rig();
     let request = session_request(&mut rig);
-    let stored = rig.store.saved().expect("stored");
+    let stored = rig.store.plain().expect("stored");
     let (wallet, _, key3) = {
         // The wallet of the rig, for a setup request.
         let public = rig.app.key2_public().expect("asked").expect("key 2");
@@ -1314,7 +1318,7 @@ fn every_cut_and_every_flipped_bit_of_a_valid_request_is_handled() {
                     );
                 }
                 if let Some(saved) = w.store.saved() {
-                    envelope::decode(&saved).expect("the stored bytes always decode");
+                    crate::lock::decode(&saved).expect("the stored bytes always decode");
                 }
                 if reply.is_ok() {
                     w = world(&stored, &request);

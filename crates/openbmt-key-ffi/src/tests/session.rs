@@ -5,7 +5,7 @@ use openbmt_owner::ItemOutcome;
 
 use super::kit::*;
 use crate::{
-    CheckStatus, Decision, KeyApp, KeyError, LineDetail, LineKind, OutputKindView, OwnerLabelKind,
+    CheckStatus, Decision, KeyError, LineDetail, LineKind, OutputKindView, OwnerLabelKind,
     SetupState,
 };
 
@@ -198,7 +198,7 @@ fn a_restart_from_the_stored_bytes_keeps_what_the_session_used_up() {
     let status = rig.app.signer_status().expect("status");
 
     // A new object from the same bytes.
-    let again = KeyApp::open(rig.store.clone()).expect("restarts");
+    let again = reopen(rig.store.clone());
     assert_eq!(
         again.state().expect("state"),
         SetupState::Ready { holds_key2: true }
@@ -318,7 +318,7 @@ fn a_decline_needs_a_reason_and_is_carried_to_the_owner() {
 #[test]
 fn an_approver_only_key_app_declines_a_spend_and_signs_the_rest() {
     let store = MemStore::new();
-    let app = KeyApp::open(store.clone()).expect("opens");
+    let app = open_new(store.clone());
     app.create_approver_only().expect("an identity");
     assert!(app.key2_public().expect("asked").is_none());
     // The wallet's key 2 is on a hardware wallet: a fixed key here.

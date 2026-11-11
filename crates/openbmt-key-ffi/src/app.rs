@@ -13,10 +13,11 @@ use openbmt_core::pairing::PairOffer;
 use openbmt_core::wallet::{Keychain, WalletDescription};
 use openbmt_signer::SignerState;
 
-use crate::codec::{wire_record, wire_record_get, Define, Put, Shaped, TypeDef};
+use crate::codec::{wire_record, wire_record_get, wire_unit_enum, Define, Put, Shaped, TypeDef};
 use crate::envelope::{self, wipe_string, Material, WalletPart};
 use crate::error::{internal, refused, refused_by, store_failed, wrong_state, KeyError};
 use crate::keys::{make_material, EntropySource, KeyNetwork};
+use crate::lock::{self, LockCell, Sealing};
 use crate::store::{Detached, KeyStore};
 
 /// Where the Key app is in its setup (`docs/DESIGN.md` §2.1).
@@ -45,7 +46,33 @@ pub enum SetupState {
         /// Key 2 is on this device.
         holds_key2: bool,
     },
+    /// The stored state is behind a PIN that has not been given yet, or is
+    /// an older state that has no PIN yet (SR-72, SR-73). Nothing else can
+    /// be asked until `lock_status` and then `unlock` or `set_pin` are
+    /// called.
+    Locked,
 }
+
+/// Where the lock of the stored state is (SR-72, SR-73).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockStatus {
+    /// Nothing is stored and no PIN is set: set one before a key is made.
+    NoPin,
+    /// An older state without a PIN is stored: set a PIN, which locks it,
+    /// and then go on.
+    Legacy,
+    /// The state is stored behind a PIN: unlock it.
+    Locked,
+    /// A PIN is set and the state is open.
+    Open,
+}
+
+wire_unit_enum!(LockStatus {
+    NoPin = 0,
+    Legacy = 1,
+    Locked = 2,
+    Open = 3,
+});
 
 /// What the Key app is given when the owner phone has built the wallet
 /// (`docs/DESIGN.md` §2.1 step 5).
@@ -147,6 +174,7 @@ const STATE_EMPTY: u8 = 0;
 const STATE_HAS_IDENTITY: u8 = 1;
 const STATE_READY: u8 = 2;
 const STATE_WALLET_PENDING: u8 = 3;
+const STATE_LOCKED: u8 = 4;
 
 impl Shaped for SetupState {
     fn shape() -> String {
@@ -174,6 +202,7 @@ impl Put for SetupState {
                 out.push(STATE_WALLET_PENDING);
                 holds_key2.put(out);
             }
+            Self::Locked => out.push(STATE_LOCKED),
         }
     }
 }
@@ -183,13 +212,15 @@ impl Define for SetupState {
         TypeDef {
             name: "SetupState",
             body: "enum: Empty | HasIdentity{holds_key2: bool, words_waiting: bool} \
-                   | Ready{holds_key2: bool} | WalletPending{holds_key2: bool}"
+                   | Ready{holds_key2: bool} | WalletPending{holds_key2: bool} \
+                   | Locked"
                 .to_string(),
             tags: vec![
                 ("Empty", STATE_EMPTY),
                 ("HasIdentity", STATE_HAS_IDENTITY),
                 ("Ready", STATE_READY),
                 ("WalletPending", STATE_WALLET_PENDING),
+                ("Locked", STATE_LOCKED),
             ],
         }
     }
@@ -220,9 +251,46 @@ pub(crate) struct ReadyState {
     pub approver: Approver,
 }
 
+/// Bytes that hold secrets, overwritten when dropped.
+pub(crate) struct Wiped(Vec<u8>);
+
+impl Wiped {
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    pub(crate) fn copy_of(other: &Self) -> Self {
+        Self(other.0.clone())
+    }
+}
+
+impl Drop for Wiped {
+    fn drop(&mut self) {
+        self.0.fill(0);
+        std::hint::black_box(&mut self.0);
+    }
+}
+
+/// Whether the stored state has been opened (SR-72, SR-73).
+pub(crate) enum Gate {
+    /// The state is open, or nothing is stored.
+    Open,
+    /// The locked frame as stored, waiting for the PIN.
+    Locked(Vec<u8>),
+    /// An older state without a PIN, waiting for one.
+    Legacy(Wiped),
+}
+
 /// Everything behind the lock.
 pub(crate) struct Inner {
+    /// What the Key app reads and writes through: every write is sealed
+    /// under the PIN's key (SR-71).
     pub store: Arc<dyn KeyStore>,
+    /// The platform's own store.
+    pub raw: Arc<dyn KeyStore>,
+    /// The key of the lock, once the PIN is set or given.
+    pub lock: Arc<LockCell>,
+    pub gate: Gate,
     pub poisoned: bool,
     /// The number of the session that is open, if one is.
     pub session: Option<u64>,
@@ -249,6 +317,36 @@ impl Inner {
                 "session-open",
                 "a session is open: finish or cancel it first",
             )),
+        }
+    }
+
+    /// SR-73: every call but the lock's own is refused until the state is
+    /// open.
+    pub(crate) fn require_open(&self) -> Result<(), KeyError> {
+        match self.gate {
+            Gate::Open => Ok(()),
+            Gate::Locked(_) => Err(wrong_state(
+                "locked",
+                "the Key app is locked: give the PIN first",
+            )),
+            Gate::Legacy(_) => Err(wrong_state(
+                "pin-needed",
+                "the stored key has no PIN yet: set one first",
+            )),
+        }
+    }
+
+    /// SR-72: refused until a PIN is set, so that nothing is stored without
+    /// one.
+    pub(crate) fn pin_set(&self) -> Result<(), KeyError> {
+        let held = self.lock.lock().map(|g| g.is_some()).unwrap_or(false);
+        if held {
+            Ok(())
+        } else {
+            Err(wrong_state(
+                "pin-first",
+                "set a PIN before a key is made: nothing is stored without one",
+            ))
         }
     }
 
@@ -328,6 +426,23 @@ impl KeyApp {
         &self,
         f: impl FnOnce(&mut Inner) -> Result<T, KeyError>,
     ) -> Result<T, KeyError> {
+        self.run_with(true, f)
+    }
+
+    /// [`run`](Self::run) for the calls that work while the state is still
+    /// locked: the setup state and the lock's own calls (SR-73).
+    pub(crate) fn run_locked<T>(
+        &self,
+        f: impl FnOnce(&mut Inner) -> Result<T, KeyError>,
+    ) -> Result<T, KeyError> {
+        self.run_with(false, f)
+    }
+
+    fn run_with<T>(
+        &self,
+        open_only: bool,
+        f: impl FnOnce(&mut Inner) -> Result<T, KeyError>,
+    ) -> Result<T, KeyError> {
         let mut guard = self.inner.lock().map_err(|_| {
             internal("an earlier panic poisoned the Key app: open it again from its stored bytes")
         })?;
@@ -335,6 +450,9 @@ impl KeyApp {
             return Err(internal(
                 "an earlier panic poisoned the Key app: open it again from its stored bytes",
             ));
+        }
+        if open_only {
+            guard.require_open()?;
         }
         match catch_unwind(AssertUnwindSafe(|| f(&mut guard))) {
             Ok(result) => result,
@@ -350,7 +468,8 @@ impl KeyApp {
     /// between two calls.
     pub(crate) fn attach(&self, store: Arc<dyn KeyStore>) {
         if let Ok(mut inner) = self.inner.lock() {
-            inner.store = store;
+            inner.store = Arc::new(Sealing::new(Arc::clone(&store), Arc::clone(&inner.lock)));
+            inner.raw = store;
         }
     }
 
@@ -365,57 +484,29 @@ impl KeyApp {
             rule: "load".to_string(),
             text: format!("could not read the stored state: {e}"),
         })?;
-        let phase = match loaded {
-            None => Phase::Empty,
-            Some(bytes) => {
-                let decoded = envelope::decode(&bytes).map_err(|e| KeyError::Store {
-                    rule: "OBM7".to_string(),
-                    text: format!("OBM7: the stored state is not readable: {e}"),
+        let (phase, gate) = match loaded {
+            None => (Phase::Empty, Gate::Open),
+            Some(bytes) if lock::is_locked(&bytes) => {
+                lock::decode(&bytes).map_err(|e| KeyError::Store {
+                    rule: "OBMx".to_string(),
+                    text: format!("OBMx: the stored state is not readable: {e}"),
                 })?;
-                if let Some(setup) = decoded.pending {
-                    let parsed = crate::ceremony::wallet_setup(&setup)?;
-                    let (wallet, approver) = build_wallet(&decoded.material, parsed, true)?;
-                    return Ok(Inner {
-                        store,
-                        poisoned: false,
-                        session: None,
-                        next_session: 1,
-                        phase: Phase::Pending(Box::new(PendingState {
-                            material: decoded.material,
-                            wallet,
-                            approver,
-                        })),
-                        words: None,
-                    });
-                }
-                match decoded.wallet {
-                    None => Phase::Identity(Box::new(decoded.material)),
-                    Some((wallet, snapshot)) => {
-                        let description =
-                            WalletDescription::parse(&wallet.description, wallet.network)
-                                .map_err(|e| refused_by("OBM7", e))?;
-                        let approver = Approver::restore(
-                            decoded.material.identity.bytes(),
-                            description,
-                            wallet.owner,
-                            BatchPolicy {
-                                min_count: wallet.batch_min_count,
-                            },
-                            decoded.material.key2.as_ref().map(|k| k.account),
-                            &snapshot,
-                        )
-                        .map_err(refused)?;
-                        Phase::Ready(Box::new(ReadyState {
-                            material: decoded.material,
-                            wallet,
-                            approver,
-                        }))
-                    }
-                }
+                (Phase::Empty, Gate::Locked(bytes))
+            }
+            Some(bytes) => {
+                // An older state, with no PIN: read it now so that bytes
+                // that are not a state are refused here, and keep it until
+                // a PIN is set.
+                phase_of(&bytes)?;
+                (Phase::Empty, Gate::Legacy(Wiped(bytes)))
             }
         };
+        let lock = Arc::new(LockCell::default());
         Ok(Inner {
-            store,
+            store: Arc::new(Sealing::new(Arc::clone(&store), Arc::clone(&lock))),
+            raw: store,
+            lock,
+            gate,
             poisoned: false,
             session: None,
             next_session: 1,
@@ -423,6 +514,46 @@ impl KeyApp {
             words: None,
         })
     }
+}
+
+/// The state of the Key app that the `OBM7` bytes describe.
+pub(crate) fn phase_of(bytes: &[u8]) -> Result<Phase, KeyError> {
+    let decoded = envelope::decode(bytes).map_err(|e| KeyError::Store {
+        rule: "OBM7".to_string(),
+        text: format!("OBM7: the stored state is not readable: {e}"),
+    })?;
+    if let Some(setup) = decoded.pending {
+        let parsed = crate::ceremony::wallet_setup(&setup)?;
+        let (wallet, approver) = build_wallet(&decoded.material, parsed, true)?;
+        return Ok(Phase::Pending(Box::new(PendingState {
+            material: decoded.material,
+            wallet,
+            approver,
+        })));
+    }
+    Ok(match decoded.wallet {
+        None => Phase::Identity(Box::new(decoded.material)),
+        Some((wallet, snapshot)) => {
+            let description = WalletDescription::parse(&wallet.description, wallet.network)
+                .map_err(|e| refused_by("OBM7", e))?;
+            let approver = Approver::restore(
+                decoded.material.identity.bytes(),
+                description,
+                wallet.owner,
+                BatchPolicy {
+                    min_count: wallet.batch_min_count,
+                },
+                decoded.material.key2.as_ref().map(|k| k.account),
+                &snapshot,
+            )
+            .map_err(refused)?;
+            Phase::Ready(Box::new(ReadyState {
+                material: decoded.material,
+                wallet,
+                approver,
+            }))
+        }
+    })
 }
 
 fn wipe_source(source: EntropySource) {
@@ -460,7 +591,10 @@ impl KeyApp {
 
     /// Where the Key app is in its setup.
     pub fn state(&self) -> Result<SetupState, KeyError> {
-        self.run(|inner| {
+        self.run_locked(|inner| {
+            if !matches!(inner.gate, Gate::Open) {
+                return Ok(SetupState::Locked);
+            }
             let words_waiting = inner.words.is_some();
             Ok(match &inner.phase {
                 Phase::Empty => SetupState::Empty,
@@ -490,6 +624,7 @@ impl KeyApp {
         let result = self.run(|inner| {
             inner.no_session()?;
             inner.not_pending()?;
+            inner.pin_set()?;
             if matches!(inner.phase, Phase::Ready(_)) {
                 return Err(wrong_state(
                     "wallet-set",
@@ -518,6 +653,7 @@ impl KeyApp {
         self.run(|inner| {
             inner.no_session()?;
             inner.not_pending()?;
+            inner.pin_set()?;
             if matches!(inner.phase, Phase::Ready(_)) {
                 return Err(wrong_state(
                     "wallet-set",

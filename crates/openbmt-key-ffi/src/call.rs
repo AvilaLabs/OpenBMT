@@ -39,6 +39,8 @@
 //!   `decide`, `finish`, `cancel`).
 //! - 40 to 48: the Key app's own screens.
 //! - 60 to 65: free functions (entropy progress, word picker, deposit code).
+//! - 90 to 93: the lock of the stored state (`lock_status`, `set_pin`,
+//!   `unlock`, `change_pin`; `docs/SIGNER-RULES.md` SR-71 to SR-74).
 //! - 80 to 85: the key ceremony (`take_key3`, `key3_view`, `public_answer`,
 //!   `accept_wallet_setup`, `confirm_wallet`, `discard_wallet`;
 //!   `docs/SIGNER-RULES.md` SR-64 to SR-69).
@@ -60,7 +62,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
 
 use openbmt_core::say::Words;
 
-use crate::app::{Key2Public, KeyApp, SetupState, SlotView, WalletSetup, WalletView};
+use crate::app::{Key2Public, KeyApp, LockStatus, SetupState, SlotView, WalletSetup, WalletView};
 use crate::ceremony::Key3View;
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::deposit::{parse_deposit_code, DepositCode};
@@ -498,6 +500,15 @@ fn build_ops() -> Vec<Op> {
         }),
         op(84, "confirm_wallet", App, |c, ()| c.app()?.confirm_wallet()),
         op(85, "discard_wallet", App, |c, ()| c.app()?.discard_wallet()),
+        op(90, "lock_status", App, |c, ()| c.app()?.lock_status()),
+        op(91, "set_pin", App, |c, pin: String| c.app()?.set_pin(pin)),
+        op(92, "unlock", App, |c, pin: String| c.app()?.unlock(pin)),
+        op(
+            93,
+            "change_pin",
+            App,
+            |c, (current, new): (String, String)| c.app()?.change_pin(current, new),
+        ),
     ]
 }
 
@@ -668,6 +679,7 @@ fn definitions() -> Vec<TypeDef> {
         KeyWordCount::define(),
         EntropySource::define(),
         SetupState::define(),
+        LockStatus::define(),
         Key2Public::define(),
         Key3View::define(),
         SlotView::define(),

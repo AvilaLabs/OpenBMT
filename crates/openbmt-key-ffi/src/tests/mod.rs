@@ -7,6 +7,7 @@ mod deposit;
 mod kit;
 mod kit_scan;
 mod kotlin;
+mod lock;
 mod protocol;
 mod screen;
 mod session;

@@ -241,6 +241,8 @@ impl KeyApp {
     /// `confirm_wallet`; `discard_wallet` drops it. The result is what the
     /// comparison screen shows: the four words and the three fingerprints.
     pub fn accept_wallet_setup(&self, bytes: Vec<u8>) -> Result<WalletView, KeyError> {
+        // A locked app refuses before it reads what it was given (SR-73).
+        self.run(|_| Ok(()))?;
         let setup = wallet_setup(&bytes)?;
         self.accept(setup, Some(bytes))
     }

@@ -256,6 +256,10 @@ impl<'a> Rd<'a> {
             2 => SetupState::Ready {
                 holds_key2: self.bool(),
             },
+            3 => SetupState::WalletPending {
+                holds_key2: self.bool(),
+            },
+            4 => SetupState::Locked,
             t => panic!("state tag {t}"),
         }
     }

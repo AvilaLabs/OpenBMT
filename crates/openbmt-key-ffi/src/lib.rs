@@ -19,11 +19,14 @@
 //!   own). A panic in any exported call is caught, becomes
 //!   `KeyError::Internal` and poisons the object.
 //!
-//! What `KeyStore.save` receives is the `OBM7` envelope
-//! ([`envelope`]): it holds the identity secret and, when this device
-//! holds key 2, key 2's account secret. Protecting it at rest (a wrapping
-//! key from the Android Keystore, no backup, no device transfer) is the
-//! app's job and is not done here.
+//! What `KeyStore.save` receives is the `OBMx` locked frame ([`lock`]):
+//! the `OBM7` envelope ([`envelope`]), which holds the identity secret and,
+//! when this device holds key 2, key 2's account secret, sealed under a key
+//! from the key holder's PIN (Argon2id and ChaCha20-Poly1305). A state
+//! stored by an older build is the bare `OBM7` envelope: it opens only into
+//! the step that sets a PIN and wraps it. Wrapping the frame with a key from
+//! the Android Keystore, no backup, no device transfer, and counting the
+//! wrong tries of the PIN, are the app's job and are not done here.
 //!
 //! Secret bytes held by this crate are overwritten when dropped where the
 //! types allow it: the identity secret, key 2's account key, the words and
@@ -60,6 +63,8 @@ mod error;
 mod jni;
 mod keys;
 mod kitcheck;
+pub mod lock;
+mod pin;
 mod say;
 mod screen;
 mod session;
@@ -70,7 +75,7 @@ mod words;
 #[cfg(test)]
 mod tests;
 
-pub use app::{Key2Public, KeyApp, SetupState, SlotView, WalletSetup, WalletView};
+pub use app::{Key2Public, KeyApp, LockStatus, SetupState, SlotView, WalletSetup, WalletView};
 pub use call::{dispatch, error_response, protocol_description, Registry, MAX_APPS};
 pub use ceremony::{answer_words, key3_waiting_words, Key3View};
 pub use deposit::{parse_deposit_code, DepositCode};

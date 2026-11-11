@@ -18,7 +18,7 @@ fn typed(text: &str) -> EntropySource {
 
 fn make(source: EntropySource, network: KeyNetwork) -> (Arc<KeyApp>, Result<(), KeyError>) {
     let store = MemStore::new();
-    let app = KeyApp::open(store).expect("opens empty");
+    let app = open_new(store);
     let r = app.create_from_entropy(source, network);
     (app, r)
 }
@@ -69,7 +69,7 @@ fn the_24_word_vector_is_accepted() {
 #[test]
 fn a_typed_key_goes_through_setup_like_any_other() {
     let store = MemStore::new();
-    let app = KeyApp::open(store.clone()).expect("opens empty");
+    let app = open_new(store.clone());
     app.create_from_entropy(typed(ABANDON_12), KeyNetwork::Regtest)
         .expect("made");
     let (wallet, _, key3) = wallet_with(&app);
@@ -81,7 +81,7 @@ fn a_typed_key_goes_through_setup_like_any_other() {
     assert_eq!(status.receive_mark, 0);
     assert!(status.allowlist.is_empty());
     // The phrase is nowhere in the stored bytes.
-    let stored = store.saved().expect("stored");
+    let stored = store.plain().expect("stored");
     assert!(!String::from_utf8_lossy(&stored).contains("abandon"));
 }
 

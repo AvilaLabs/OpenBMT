@@ -5,7 +5,7 @@ use openbmt_core::wallet::{descriptor_checksum, KeySlot, WalletDescription};
 
 use super::kit::*;
 use crate::kitcheck::compare_kit;
-use crate::{KeyApp, KitCheck};
+use crate::KitCheck;
 
 fn own_text(rig: &Rig) -> String {
     rig.wallet.canonical_string().to_string()
@@ -67,7 +67,7 @@ fn the_check_changes_nothing_and_stores_nothing() {
     assert_eq!(rig.store.saves(), saves);
     assert_eq!(rig.store.saved(), saved);
     assert_eq!(rig.app.wallet_view().expect("view"), snapshot);
-    assert!(!String::from_utf8_lossy(&rig.store.saved().expect("stored")).contains("junk"));
+    assert!(!String::from_utf8_lossy(&rig.store.plain().expect("stored")).contains("junk"));
 }
 
 #[test]
@@ -167,7 +167,7 @@ fn long_input_is_refused_before_anything_else() {
     let e = rig.app.check_kit("a".repeat(9_000)).expect_err("too long");
     assert_eq!(e.rule(), "kit-too-long");
     // Even when the Key app is not ready.
-    let app = KeyApp::open(MemStore::new()).expect("opens");
+    let app = open_new(MemStore::new());
     assert_eq!(
         app.check_kit("a".repeat(8_193))
             .expect_err("too long")
@@ -182,7 +182,7 @@ fn long_input_is_refused_before_anything_else() {
 
 #[test]
 fn only_a_ready_key_app_checks_a_kit() {
-    let app = KeyApp::open(MemStore::new()).expect("opens");
+    let app = open_new(MemStore::new());
     assert_eq!(
         app.check_kit("x".to_string())
             .expect_err("not ready")

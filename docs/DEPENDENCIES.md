@@ -16,7 +16,7 @@ for each program that ships. The lists themselves are in `deps/`.
 | Owner | `deps/openbmt-owner-node.txt` | 38 |
 | Box | `deps/openbmt-box.txt` | 38 |
 | Books export | `deps/openbmt-books.txt` | 42 |
-| Key app library | `deps/openbmt-key-ffi.txt` | 20 |
+| Key app library | `deps/openbmt-key-ffi.txt` | 43 |
 | Counter app library | `deps/openbmt-counter-ffi.txt` | 39 |
 | Owner app library | `deps/openbmt-owner-ffi.txt` | 39 |
 | QR code encoder | `deps/openbmt-qr.txt` | 0 |
@@ -32,11 +32,13 @@ Where they come from:
 - **Encrypted peer connections, 3 more.** The `bip324` crate and its two
   helpers, from the rust-bitcoin project, with no further dependencies.
 - **The books export, 4 more.** Argon2, for the passphrase (BK-24).
-- **The Key app library, 1 more.** `jni-sys`, the declarations of the
-  Java native interface, with no dependencies of its own. The Key app
-  holds a signing key and has the smallest set of all: the base plus
-  this one crate. Its binding to the app is written by hand, in place of
-  a binding generator that brought in about 40 packages.
+- **The Key app library, 24 more.** `jni-sys`, the declarations of the
+  Java native interface, with no dependencies of its own, and the PIN lock
+  of the stored state (SR-71): Argon2 and ChaCha20-Poly1305, the same
+  versions and features as the books export, with 21 helpers between
+  them, all of which are in the lock file already. Its binding to the
+  app is written by hand, in place of a binding generator that brought
+  in about 40 packages.
 - **The counter app library, the same 1 more.** The counter's list and
   `jni-sys`, bound the same way by hand. It adds nothing else.
 - **The owner app library, the same 1 more.** The owner's list and

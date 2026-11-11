@@ -8,12 +8,6 @@ use openbmt_signer::ALLOWLIST_WAIT_SECS;
 use super::kit::*;
 use crate::{CeilingsView, FeeCeilingsView, KeyApp, KeyError, SetupState};
 
-fn address(n: u8) -> String {
-    Address::from_script(&external(n), NET)
-        .expect("an address")
-        .to_string()
-}
-
 #[test]
 fn a_destination_is_enrolled_listed_and_removed_through_the_store() {
     let rig = rig();
@@ -36,7 +30,7 @@ fn a_destination_is_enrolled_listed_and_removed_through_the_store() {
     assert_eq!(status.latest_time_seen, NOW);
 
     // It is kept across a restart.
-    let again = KeyApp::open(rig.store.clone()).expect("restarts");
+    let again = reopen(rig.store.clone());
     assert_eq!(again.signer_status().expect("status"), status);
 
     // The rules refuse a repeat, a bad label and another network, by ID.
@@ -201,7 +195,7 @@ fn ceilings_fee_ceilings_and_marks_are_the_signers_own() {
 #[test]
 fn the_receive_mark_of_an_approver_only_key_app_goes_up_through_the_store() {
     let store = MemStore::new();
-    let app = KeyApp::open(store.clone()).expect("opens");
+    let app = open_new(store.clone());
     app.create_approver_only().expect("identity");
     let (_, s1) = fixed_key(1, 1);
     let (_, s2) = fixed_key(2, 2);
@@ -224,7 +218,7 @@ fn the_receive_mark_of_an_approver_only_key_app_goes_up_through_the_store() {
         app.raise_change_mark(5).expect_err("no signer").rule(),
         "AS-36"
     );
-    let again = KeyApp::open(store).expect("restarts");
+    let again = reopen(store);
     assert_eq!(again.receive_mark().expect("mark"), 12);
     assert_eq!(
         again.state().expect("state"),
@@ -277,7 +271,7 @@ fn a_panic_becomes_an_internal_error_and_poisons_the_object() {
     // Dropping the handle after a poisoning does not panic.
     drop(session);
     // A new object from the stored bytes works.
-    let again = KeyApp::open(rig.store.clone()).expect("opens again");
+    let again = reopen(rig.store.clone());
     assert!(again.state().is_ok());
 }
 

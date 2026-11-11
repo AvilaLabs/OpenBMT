@@ -114,8 +114,29 @@ object ProtocolDecoderTest {
         val pendingState = decodeResponse(okFrame { it.write(3); it.write(1) })
         check(pendingState.setupState() == SetupState.WalletPending(true)) { "wallet pending" }
         pendingState.end()
-        rejects("a state tag that is 4") { decodeResponse(okFrame { it.write(4); it.write(1) }).setupState() }
+        rejects("a state tag that is 5") { decodeResponse(okFrame { it.write(5); it.write(1) }).setupState() }
+        rejects("a state tag that is 4 with a field") {
+            decodeResponse(okFrame { it.write(4); it.write(1) }).let { it.setupState(); it.end() }
+        }
         rejects("a pending state cut short") { decodeResponse(okFrame { it.write(3) }).setupState() }
+
+        // Op 10 while locked (tag 4), and op 90: the lock status.
+        val locked = decodeResponse(okFrame { it.write(4) })
+        check(locked.setupState() == SetupState.Locked) { "locked" }
+        locked.end()
+        val statuses = listOf(LockStatus.NoPin, LockStatus.Legacy, LockStatus.Locked, LockStatus.Open)
+        for ((tag, status) in statuses.withIndex()) {
+            val r = decodeResponse(okFrame { it.write(tag) })
+            check(r.lockStatus() == status) { "lock status $tag" }
+            r.end()
+        }
+        rejects("a lock status tag that is 4") { decodeResponse(okFrame { it.write(4) }).lockStatus() }
+        // Ops 91 and 93 carry their PINs as strings; 90 and 92 answer nothing but the status.
+        check(requestFrame(90, 3).size == 15 && requestFrame(90, 3)[5].toInt() == 90) { "op 90" }
+        val pinRequest = requestFrame(91, 3) { it.string("482913") }
+        check(pinRequest[5].toInt() == 91 && pinRequest.size == 15 + 4 + 6) { "op 91" }
+        val changeRequest = requestFrame(93, 3) { it.string("482913"); it.string("654321") }
+        check(changeRequest[5].toInt() == 93 && changeRequest.size == 15 + 4 + 6 + 4 + 6) { "op 93" }
 
         // Ops 84 and 85 carry no fields; their answer is nothing.
         decodeResponse(okFrame { }).end()

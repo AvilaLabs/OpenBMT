@@ -119,6 +119,8 @@ impl KeyApp {
     /// description is checked; the kit's other fields are not. Allowed in
     /// the Ready state only.
     pub fn check_kit(&self, scanned: String) -> Result<KitCheck, KeyError> {
+        // A locked app refuses before it reads what it was given (SR-73).
+        self.run(|_| Ok(()))?;
         if scanned.len() > MAX_SCANNED_BYTES {
             return Err(refused_by(
                 "kit-too-long",

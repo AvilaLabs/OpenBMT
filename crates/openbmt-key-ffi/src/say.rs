@@ -409,6 +409,46 @@ fn state_words(rule: &str, text: &str) -> Option<Words> {
         )
         .detail(text),
         "empty" => empty_words().detail(text),
+        "locked" => Words::new(
+            Tone::Info,
+            "Unlock first",
+            "This app is locked, so it cannot do that yet.",
+            Who::KeyHolder,
+            "Type the PIN to unlock it, then try again.",
+        )
+        .detail(text),
+        "pin-needed" => Words::new(
+            Tone::Info,
+            "Set a PIN first",
+            "The key on this phone has no PIN yet, so nothing can be done with it yet.",
+            Who::KeyHolder,
+            "Choose a PIN of at least 6 digits, or a passphrase of at least 8 characters.",
+        )
+        .detail(text),
+        "pin-first" => Words::new(
+            Tone::Info,
+            "Choose a PIN first",
+            "The key is kept behind a PIN, so one is needed before the key is made.",
+            Who::KeyHolder,
+            "Choose a PIN, then make the key or type its words.",
+        )
+        .detail(text),
+        "pin-set" => Words::new(
+            Tone::Ended,
+            "PIN already set",
+            "This app has a PIN already, so a new one cannot be set this way.",
+            Who::KeyHolder,
+            "To use another PIN, change it with the current one.",
+        )
+        .detail(text),
+        "not-locked" => Words::new(
+            Tone::Ended,
+            "Already unlocked",
+            "The app is unlocked already, so there is nothing to unlock.",
+            Who::Nobody,
+            "Nothing to do.",
+        )
+        .detail(text),
         "words-shown-once" => Words::new(
             Tone::Ended,
             "Words already shown",
@@ -439,6 +479,49 @@ fn saved_state_words(text: &str) -> Words {
         Tone::Stop,
         "Stored bytes not readable",
         "Nothing was changed, but the bytes this app stored cannot be read.",
+        Who::KeyHolder,
+        SAVED_STATE,
+    )
+    .detail(text)
+}
+
+/// The words of a PIN that was not taken, or was wrong.
+fn pin_words(rule: &str, text: &str) -> Option<Words> {
+    Some(match rule {
+        "pin-wrong" => Words::new(
+            Tone::Stop,
+            "Wrong PIN",
+            "That is not the PIN of this key, and nothing was changed.",
+            Who::KeyHolder,
+            "Check it and try again. Too many wrong tries wipe the key from this phone.",
+        )
+        .detail(text),
+        "pin-weak" => Words::new(
+            Tone::Stop,
+            "PIN too short",
+            "A PIN is at least 6 digits, or a passphrase of at least 8 characters.",
+            Who::KeyHolder,
+            "Choose a longer one.",
+        )
+        .detail(text),
+        "pin-long" => Words::new(
+            Tone::Stop,
+            "PIN too long",
+            "A PIN or a passphrase is at most 128 characters.",
+            Who::KeyHolder,
+            "Choose a shorter one.",
+        )
+        .detail(text),
+        _ => return None,
+    })
+}
+
+/// The locked saved state cannot be read, whatever the PIN.
+fn locked_state_words(text: &str) -> Words {
+    Words::new(
+        Tone::Stop,
+        "Locked bytes not readable",
+        "Nothing was changed, but the locked bytes this app stored are cut or damaged.",
         Who::KeyHolder,
         SAVED_STATE,
     )
@@ -511,6 +594,7 @@ fn store_words(rule: &str, text: &str) -> Option<Words> {
         )
         .code("AS-34"),
         "OBM7" => saved_state_words(text),
+        "OBMx" => locked_state_words(text),
         "random" => Words::new(
             Tone::Stop,
             "Random bytes not usable",
@@ -679,6 +763,7 @@ fn typed_text_words(text: &str) -> Option<Words> {
 pub(crate) fn own_words(kind: Kind, rule: &str, text: &str) -> Option<Words> {
     let words = match kind {
         Kind::Refused => code_words(rule, text)
+            .or_else(|| pin_words(rule, text))
             .or_else(|| typed_words(rule, text))
             .or_else(|| call_words(rule, text))
             .or_else(|| given_words(rule, text))
@@ -778,6 +863,13 @@ impl SetupState {
                 "The wallet is accepted, but this phone does not hold key 2.",
                 Who::Nobody,
                 "Nothing to do for payments here. This app answers other requests only.",
+            ),
+            Self::Locked => Words::new(
+                Tone::Info,
+                "Enter your PIN",
+                "The key on this phone is kept behind a PIN.",
+                Who::KeyHolder,
+                "Type the PIN to unlock the app.",
             ),
             Self::WalletPending { holds_key2: _ } => Words::new(
                 Tone::Info,
@@ -947,6 +1039,7 @@ fn setup_states() -> Vec<(&'static str, SetupState)> {
         ),
         ("Ready(Key2)", SetupState::Ready { holds_key2: true }),
         ("Ready(NoKey2)", SetupState::Ready { holds_key2: false }),
+        ("Locked", SetupState::Locked),
         (
             "WalletPending",
             SetupState::WalletPending { holds_key2: true },
@@ -963,6 +1056,7 @@ fn setup_name(s: &SetupState) -> &'static str {
         SetupState::HasIdentity { .. } => "HasIdentity",
         SetupState::Ready { .. } => "Ready",
         SetupState::WalletPending { .. } => "WalletPending",
+        SetupState::Locked => "Locked",
     }
 }
 
@@ -1058,6 +1152,9 @@ pub(crate) fn samples() -> Vec<(Kind, &'static str, &'static str)> {
         ),
         (Refused, "words-checksum", ""),
         (Refused, "kit-too-long", ""),
+        (Refused, "pin-wrong", ""),
+        (Refused, "pin-weak", ""),
+        (Refused, "pin-long", ""),
         (
             Refused,
             "request-too-long",
@@ -1080,6 +1177,11 @@ pub(crate) fn samples() -> Vec<(Kind, &'static str, &'static str)> {
         (State, "wallet-pending", ""),
         (State, "nothing-pending", ""),
         (State, "words-shown-once", ""),
+        (State, "locked", ""),
+        (State, "pin-needed", ""),
+        (State, "pin-first", ""),
+        (State, "pin-set", ""),
+        (State, "not-locked", ""),
         (State, "handles-used", ""),
         (State, "app-limit", ""),
         (
@@ -1088,6 +1190,7 @@ pub(crate) fn samples() -> Vec<(Kind, &'static str, &'static str)> {
             "AS-34: could not store the new state: disk full",
         ),
         (Store, "OBM7", "OBM7: the stored state is not readable: cut"),
+        (Store, "OBMx", "OBMx: the stored state is not readable: cut"),
         (Store, "random", "the platform gave 3 random bytes, not 32"),
         (Store, "load", "could not read the stored state: locked"),
         (Store, "store", "the app's store object has no usable class"),

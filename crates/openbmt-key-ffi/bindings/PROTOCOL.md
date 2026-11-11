@@ -90,6 +90,10 @@ The handle names the object the op works on: `zero` (the field is 0),
  83 accept_wallet_setup    handle app      args list<u8> -> WalletView
  84 confirm_wallet         handle app      args () -> ()
  85 discard_wallet         handle app      args () -> ()
+ 90 lock_status            handle app      args () -> LockStatus
+ 91 set_pin                handle app      args string -> ()
+ 92 unlock                 handle app      args string -> ()
+ 93 change_pin             handle app      args (string, string) -> ()
 ```
 
 ## Types
@@ -101,8 +105,10 @@ KeyWordCount: enum, one tag byte
     tags Twelve=0 TwentyFour=1
 EntropySource: enum: Platform | DiceHashed{rolls: string} | CoinFlips{heads: list<bool>, words: KeyWordCount} | DiceSkewCorrected{rolls: string, words: KeyWordCount} | TypedWords{words: list<string>}
     tags Platform=0 DiceHashed=1 CoinFlips=2 DiceSkewCorrected=3 TypedWords=4
-SetupState: enum: Empty | HasIdentity{holds_key2: bool, words_waiting: bool} | Ready{holds_key2: bool} | WalletPending{holds_key2: bool}
-    tags Empty=0 HasIdentity=1 Ready=2 WalletPending=3
+SetupState: enum: Empty | HasIdentity{holds_key2: bool, words_waiting: bool} | Ready{holds_key2: bool} | WalletPending{holds_key2: bool} | Locked
+    tags Empty=0 HasIdentity=1 Ready=2 WalletPending=3 Locked=4
+LockStatus: enum, one tag byte
+    tags NoPin=0 Legacy=1 Locked=2 Open=3
 Key2Public: record: network: KeyNetwork, master_fingerprint: string, origin_path: string, account_xpub: string
 Key3View: record: mainnet: bool, master_fingerprint: string, origin_path: string, account_xpub: string
 SlotView: record: index: u32, fingerprint: string, xpub: string

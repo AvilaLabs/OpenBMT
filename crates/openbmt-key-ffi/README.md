@@ -73,7 +73,7 @@ writes it again). Op numbers are never reused.
 | 1 | `open` | none | restore the Key app from `store.load()`; returns the app handle |
 | 2 | `close_app` | app | close it and its session |
 | 3 | `close_session` | session | cancel and close the handle |
-| 10 | `state` | app | `Empty`, `HasIdentity`, `WalletPending`, `Ready` |
+| 10 | `state` | app | `Empty`, `HasIdentity`, `WalletPending`, `Ready`, or `Locked` |
 | 11 | `create_from_entropy` | app | identity and key 2 from a source; stored; the words wait |
 | 12 | `create_approver_only` | app | identity only (key 2 on a hardware wallet) |
 | 13 | `key_words` | app | the words, once, never stored |
@@ -111,6 +111,10 @@ writes it again). Op numbers are never reused.
 | 83 | `accept_wallet_setup` | app | check the owner phone's setup (`OBMw`) and keep it as pending; returns the wallet view |
 | 84 | `confirm_wallet` | app | "they match": the pending wallet becomes the registered wallet |
 | 85 | `discard_wallet` | app | "they differ": drop the pending wallet, back to the state before op 83 |
+| 90 | `lock_status` | app | `NoPin`, `Legacy` (an older state without a PIN), `Locked` or `Open` |
+| 91 | `set_pin` | app | set the PIN before a key is made, or wrap an older state behind one |
+| 92 | `unlock` | app | open the stored state with the PIN; a wrong PIN is `pin-wrong` and changes nothing |
+| 93 | `change_pin` | app | the current PIN and a new one; the stored state is written once |
 
 The ceremony's wallet is accepted in two steps (`docs/SIGNER-RULES.md`
 SR-67). Op 83 runs every check and stores the setup as pending, in an `OBM7`

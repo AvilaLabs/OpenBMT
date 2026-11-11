@@ -799,6 +799,14 @@ mod tests {
         frame(10, app, &[])
     }
 
+    fn set_pin(app: u64) -> Vec<u8> {
+        frame(91, app, &W::new().string("482913").0)
+    }
+
+    fn unlock(app: u64) -> Vec<u8> {
+        frame(92, app, &W::new().string("482913").0)
+    }
+
     #[test]
     fn a_call_goes_through_the_store_and_back() {
         let mut h = Harness::new();
@@ -808,15 +816,22 @@ mod tests {
         assert_eq!(response.get(6..), Some(1u64.to_le_bytes().as_slice()));
         assert_eq!(fake(|f| f.calls.clone()), vec!["load"]);
 
+        // The salt of the PIN's key, nothing stored.
+        let response = h.call(&reg, &set_pin(1)).expect("a response");
+        assert_eq!(reply(&response).0, 0);
+        assert_eq!(fake(|f| f.calls.clone()), vec!["load", "random"]);
+
         let response = h.call(&reg, &create(1)).expect("a response");
         assert_eq!(reply(&response).0, 0);
-        // 32 bytes for the identity and 32 for the words, then the save.
+        // 32 bytes for the identity and 32 for the words, the nonce, then
+        // the save.
         assert_eq!(
             fake(|f| f.calls.clone()),
-            vec!["load", "random", "random", "save"]
+            vec!["load", "random", "random", "random", "random", "save"]
         );
         let stored = fake(|f| f.stored.clone()).expect("stored");
-        envelope::decode(&stored).expect("the envelope decodes");
+        crate::lock::decode(&stored).expect("the locked frame decodes");
+        assert!(envelope::decode(&stored).is_err());
 
         // The state is read back, and a restart from the stored bytes gives
         // the same.
@@ -825,6 +840,11 @@ mod tests {
         assert_eq!(response.get(6..), Some([1u8, 1, 1].as_slice()));
         let again = Registry::new();
         let response = h.call(&again, &open()).expect("a response");
+        assert_eq!(reply(&response).0, 0);
+        // Locked until the PIN is given.
+        let response = h.call(&again, &state(1)).expect("a response");
+        assert_eq!(response.get(6..), Some([4u8].as_slice()));
+        let response = h.call(&again, &unlock(1)).expect("a response");
         assert_eq!(reply(&response).0, 0);
         let response = h.call(&again, &state(1)).expect("a response");
         assert_eq!(response.get(6..), Some([1u8, 1, 0].as_slice()));
@@ -838,7 +858,7 @@ mod tests {
         let reg = Registry::new();
         // Each response is one reference that the caller owns.
         let mut responses = 0;
-        for request in [open(), create(1), state(1)] {
+        for request in [open(), set_pin(1), create(1), state(1)] {
             h.call(&reg, &request).expect("a response");
             responses += 1;
         }
@@ -871,6 +891,7 @@ mod tests {
         let mut h = Harness::new();
         let reg = Registry::new();
         h.call(&reg, &open()).expect("a response");
+        h.call(&reg, &set_pin(1)).expect("a response");
         fake(|f| f.random = Mode::Throw);
         let response = h.call(&reg, &create(1)).expect("a response");
         let (status, rule, text) = reply(&response);
@@ -883,6 +904,7 @@ mod tests {
         let mut h = Harness::new();
         let reg = Registry::new();
         h.call(&reg, &open()).expect("a response");
+        h.call(&reg, &set_pin(1)).expect("a response");
         fake(|f| f.save = Mode::Throw);
         let response = h.call(&reg, &create(1)).expect("a response");
         let (status, rule, text) = reply(&response);
@@ -923,6 +945,7 @@ mod tests {
             let mut h = Harness::new();
             let reg = Registry::new();
             h.call(&reg, &open()).expect("a response");
+            h.call(&reg, &set_pin(1)).expect("a response");
             fake(|f| f.random = mode);
             let (status, rule, _) = reply(&h.call(&reg, &create(1)).expect("a response"));
             assert_eq!(status, 2);

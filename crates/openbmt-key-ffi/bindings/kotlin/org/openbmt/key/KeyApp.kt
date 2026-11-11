@@ -96,6 +96,10 @@ private const val OP_PUBLIC_ANSWER = 82
 private const val OP_ACCEPT_WALLET_SETUP = 83
 private const val OP_CONFIRM_WALLET = 84
 private const val OP_DISCARD_WALLET = 85
+private const val OP_LOCK_STATUS = 90
+private const val OP_SET_PIN = 91
+private const val OP_UNLOCK = 92
+private const val OP_CHANGE_PIN = 93
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -114,6 +118,11 @@ private const val TAG_SETUP_STATE_EMPTY = 0
 private const val TAG_SETUP_STATE_HAS_IDENTITY = 1
 private const val TAG_SETUP_STATE_READY = 2
 private const val TAG_SETUP_STATE_WALLET_PENDING = 3
+private const val TAG_SETUP_STATE_LOCKED = 4
+private const val TAG_LOCK_STATUS_NO_PIN = 0
+private const val TAG_LOCK_STATUS_LEGACY = 1
+private const val TAG_LOCK_STATUS_LOCKED = 2
+private const val TAG_LOCK_STATUS_OPEN = 3
 private const val TAG_KIT_CHECK_SAME = 0
 private const val TAG_KIT_CHECK_DIFFERENT = 1
 private const val TAG_DECISION_APPROVE = 0
@@ -164,6 +173,24 @@ sealed class SetupState {
 
     /** A wallet setup passed every check and is kept, not registered, until confirmed or discarded. */
     data class WalletPending(val holdsKey2: Boolean) : SetupState()
+
+    /** The stored state is behind a PIN that has not been given, or has no PIN yet (SR-72, SR-73). */
+    object Locked : SetupState()
+}
+
+/** Where the lock of the stored state is (SR-72, SR-73). */
+enum class LockStatus {
+    /** Nothing is stored and no PIN is set: set one before a key is made. */
+    NoPin,
+
+    /** An older state without a PIN is stored: set a PIN, which locks it, and go on. */
+    Legacy,
+
+    /** The state is stored behind a PIN: unlock it. */
+    Locked,
+
+    /** A PIN is set and the state is open. */
+    Open,
 }
 
 data class Key2Public(
@@ -592,12 +619,22 @@ private fun Reader.network(): KeyNetwork =
         else -> tag("KeyNetwork")
     }
 
+internal fun Reader.lockStatus(): LockStatus =
+    when (u8()) {
+        TAG_LOCK_STATUS_NO_PIN -> LockStatus.NoPin
+        TAG_LOCK_STATUS_LEGACY -> LockStatus.Legacy
+        TAG_LOCK_STATUS_LOCKED -> LockStatus.Locked
+        TAG_LOCK_STATUS_OPEN -> LockStatus.Open
+        else -> tag("LockStatus")
+    }
+
 internal fun Reader.setupState(): SetupState =
     when (u8()) {
         TAG_SETUP_STATE_EMPTY -> SetupState.Empty
         TAG_SETUP_STATE_HAS_IDENTITY -> SetupState.HasIdentity(bool(), bool())
         TAG_SETUP_STATE_READY -> SetupState.Ready(bool())
         TAG_SETUP_STATE_WALLET_PENDING -> SetupState.WalletPending(bool())
+        TAG_SETUP_STATE_LOCKED -> SetupState.Locked
         else -> tag("SetupState")
     }
 
@@ -916,6 +953,28 @@ class KeyApp private constructor(private val store: KeyStore, private val handle
         val r = call(store, OP_STATE, handle)
         return r.setupState().also { r.end() }
     }
+
+    /** SR-72, SR-73: where the lock is. Works while the app is locked. */
+    fun lockStatus(): LockStatus {
+        val r = call(store, OP_LOCK_STATUS, handle)
+        return r.lockStatus().also { r.end() }
+    }
+
+    /**
+     * SR-72: set the PIN (6 digits or more) or the long passphrase (8 characters or more), before
+     * a key is made, or for an older state, which is then stored again behind it and opened.
+     */
+    fun setPin(pin: String) = callUnit(store, OP_SET_PIN, handle) { it.string(pin) }
+
+    /** SR-73: open the stored state. A wrong PIN is refused with the rule `pin-wrong`. */
+    fun unlock(pin: String) = callUnit(store, OP_UNLOCK, handle) { it.string(pin) }
+
+    /** SR-73: change the PIN; the current one is needed. */
+    fun changePin(current: String, new: String) =
+        callUnit(store, OP_CHANGE_PIN, handle) {
+            it.string(current)
+            it.string(new)
+        }
 
     fun createFromEntropy(source: EntropySource, network: KeyNetwork) =
         callUnit(store, OP_CREATE_FROM_ENTROPY, handle) {
