@@ -27,6 +27,7 @@ import org.openbmt.key.CeilingsView
 import org.openbmt.key.Decision
 import org.openbmt.key.EntropySource
 import org.openbmt.key.FeeCeilingsView
+import org.openbmt.key.Key3View
 import org.openbmt.key.KeyApp
 import org.openbmt.key.KeyException
 import org.openbmt.key.KeyNetwork
@@ -34,7 +35,7 @@ import org.openbmt.key.KeySession
 import org.openbmt.key.KeyWordCount
 import org.openbmt.key.LineView
 import org.openbmt.key.SetupState
-import org.openbmt.key.WalletSetup
+import org.openbmt.key.WalletView
 import org.openbmt.key.Words
 
 /**
@@ -159,16 +160,18 @@ class Controller(private val act: MainActivity) {
     /** Reads the library's state and shows the screen for it. */
     fun refresh(fault: Words? = null) {
         var state: SetupState? = null
+        var key3: Key3View? = null
         var problem = fault
         val a = app
         if (problem == null && a != null && refusals().isEmpty()) {
             try {
                 state = a.state()
+                if (state is SetupState.HasIdentity && !state.wordsWaiting) key3 = a.key3View()
             } catch (e: KeyException) {
                 problem = e.words ?: AppWords.fault(e)
             }
         }
-        render(ScreenModel.pick(refusals(), problem, state), state)
+        render(ScreenModel.pick(refusals(), problem, state, key3), state)
     }
 
     private fun render(screen: Screen, state: SetupState? = null) {
@@ -177,7 +180,8 @@ class Controller(private val act: MainActivity) {
             is Screen.Fault -> act.show(ui.page(listOf(ui.words(screen.words), ui.button("Try again") { start() })))
             is Screen.Setup -> showSetup()
             is Screen.ShowWords -> showKeyWords()
-            is Screen.AcceptWallet -> showAcceptWallet(state ?: SetupState.HasIdentity(screen.holdsKey2, false))
+            is Screen.Key3 -> showKey3(null)
+            is Screen.GiveAnswer -> showAnswer(screen.key3)
             is Screen.Home -> showHome(state ?: SetupState.Ready(screen.holdsKey2))
         }
     }
@@ -361,81 +365,160 @@ class Controller(private val act: MainActivity) {
 
     // ---- the wallet ----------------------------------------------------------------------
 
-    private fun showAcceptWallet(state: SetupState) {
-        val a = app ?: return
-        val details = ArrayList<String>()
-        try {
-            a.key2Public()?.let {
-                details.add("Key 2 on the ${it.network.name.lowercase()} network")
-                details.add("Fingerprint: ${it.masterFingerprint}")
-                details.add("Path: ${it.originPath}")
-                details.add("Account key: ${it.accountXpub}")
-            }
-            details.add("This app's identity as words: ${a.deviceRootWords().joinToString(" ")}")
-        } catch (e: KeyException) {
-            return showMessage(e.words ?: AppWords.fault(e)) { refresh() }
+    // ---- the key ceremony ---------------------------------------------------------------
+
+    /** A button that shows or hides [text] under a fold called Advanced. */
+    private fun advanced(text: String): List<View> {
+        val body = ui.text(text, 13f, mono = true)
+        body.visibility = View.GONE
+        val toggle = ui.button(AppWords.Text.ADVANCED) {
+            body.visibility = if (body.visibility == View.GONE) View.VISIBLE else View.GONE
         }
-        val description = ui.field("The wallet description from the owner's phone", lines = 5)
-        val ownerRoot = ui.field("The owner's identity: 64 letters and digits")
-        val key3 = ui.field("Key 3's account key (optional)")
-        val batch = ui.field("Addresses in a batch (optional)")
+        return listOf(toggle, body)
+    }
+
+    /**
+     * Step 2: key 3 comes from another wallet, by a plain text code or by paste. [back] is where Back goes
+     * when key 3 is already held and is being changed; with none, the screen has no Back.
+     */
+    private fun showKey3(back: (() -> Unit)?) {
+        val paste = ui.field(AppWords.Text.PASTE_KEY3, lines = 3)
+        val views = ArrayList<View>(banner())
+        views.add(ui.words(AppWords.key3Needed))
+        views.addAll(advanced(AppWords.Text.ADVANCED_KEY3))
+        views.add(ui.button(AppWords.Text.SCAN_KEY3) { scanKey3(back) })
+        views.add(paste)
+        views.add(ui.button("Use the pasted text") { allowed { takeKey3(CeremonyModel.readKey3Text(paste.text.toString()), back) } })
+        if (back != null) views.add(ui.button("Back") { back() })
+        act.show(ui.page(views))
+    }
+
+    private fun scanKey3(back: (() -> Unit)?) {
+        allowed {
+            scan.begin(
+                show = { act.show(it) },
+                onBytes = { bytes -> allowed { takeKey3(CeremonyModel.readKey3Code(bytes), back) } },
+                onFailed = { showMessage(cameraWords(it)) { showKey3(back) } },
+                onCancel = { showKey3(back) },
+            )
+        }
+    }
+
+    private fun takeKey3(input: Key3Input, back: (() -> Unit)?) {
+        val a = app ?: return
+        when (input) {
+            is Key3Input.Refused -> showMessage(input.words) { showKey3(back) }
+            is Key3Input.Text -> attempt({ showKey3(back) }) { a.takeKey3(input.text) }?.let { showKey3Taken(it) }
+        }
+    }
+
+    /** The fingerprint of key 3, large, to be checked against the other wallet's screen. */
+    private fun showKey3Taken(v: Key3View) {
+        val c = CeremonyModel.key3Check(v)
+        val views = ArrayList<View>(banner())
+        views.add(ui.words(AppWords.key3Taken))
+        views.add(ui.text(c.fingerprint, 40f, bold = true, mono = true))
+        views.add(ui.text(c.network, 14f))
+        views.addAll(advanced(c.advanced.joinToString("\n")))
+        views.add(ui.button("They match") { showAnswer(v) })
+        views.add(ui.button("They differ") { showMessage(AppWords.key3Mismatch) { showKey3(null) } })
+        act.show(ui.page(views))
+    }
+
+    /** Step 5, first half: the public answer as a code for the owner phone to scan. */
+    private fun showAnswer(key3: Key3View) {
+        allowed {
+            val a = app ?: return@allowed
+            val bytes = attempt({ refresh() }) { a.publicAnswer() } ?: return@allowed
+            val views = ArrayList<View>(banner())
+            views.add(ui.text("Give the owner phone these keys", 22f, bold = true))
+            views.add(ui.words(AppWords.publicAnswerReady))
+            views.add(ui.text(AppWords.Text.ON_OWNER_PHONE, 16f, bold = true))
+            val made = if (CeremonyModel.looksLikeAnswer(bytes)) {
+                val metrics = act.resources.displayMetrics
+                AnimatedQrView.make(act, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.6).toInt())
+            } else {
+                null
+            }
+            val view = made?.view
+            if (view == null) {
+                views.add(ui.words(WordsModel.of(made?.words ?: UrWords.cannotShow(Who.KEY_HOLDER))))
+            } else {
+                views.add(view)
+            }
+            views.add(ui.text("Key 3: ${CeremonyModel.groupFingerprint(key3.masterFingerprint)}", 14f, mono = true))
+            views.add(ui.button("Scan the owner phone's wallet") { showScanWallet(key3) })
+            views.add(ui.button("Use another key 3") { showKey3 { showAnswer(key3) } })
+            act.show(ui.page(views))
+        }
+    }
+
+    /** Step 5, second half: read the owner phone's wallet setup. */
+    private fun showScanWallet(key3: Key3View) {
         act.show(
             ui.page(
                 banner() + listOf(
-                    ui.words(AppWords.state(state)),
-                    ui.text("Give these to the owner's phone", 16f, bold = true),
-                    ui.text(details.joinToString("\n"), 13f, mono = true),
-                    ui.text("Network", 16f, bold = true),
-                    networkChoice(),
-                    description, scanButton("Scan the wallet description", description),
-                    ownerRoot, scanButton("Scan the owner's identity", ownerRoot),
-                    key3, scanButton("Scan key 3's account key", key3),
-                    batch,
-                    ui.button("Accept the wallet") {
-                        allowed {
-                            val root = Format.fromHex(ownerRoot.text.toString())
-                            val count = batch.text.toString().trim().let { if (it.isEmpty()) null else Format.toAmount(it) }
-                            when {
-                                root == null || root.size != 32 -> showMessage(AppWords.identityNotReadable) { showAcceptWallet(state) }
-                                batch.text.toString().isNotBlank() && count == null ->
-                                    showMessage(AppWords.notANumber) { showAcceptWallet(state) }
-                                else -> {
-                                    val setup = WalletSetup(
-                                        description.text.toString(), network, root,
-                                        key3.text.toString().trim().ifEmpty { null }, count,
-                                    )
-                                    attempt({ showAcceptWallet(state) }) { a.acceptWallet(setup) }?.let { showWallet(true) }
-                                }
-                            }
-                        }
-                    },
+                    ui.text("Scan the owner phone's wallet", 22f, bold = true),
+                    ui.words(AppWords.scanOwnerWallet),
+                    ui.button("Scan the wallet code") { scanWallet(key3) },
+                    ui.button("Back") { showAnswer(key3) },
                 ),
             ),
         )
     }
 
-    private fun showWallet(justAccepted: Boolean) {
+    private fun scanWallet(key3: Key3View) {
+        val again = { showScanWallet(key3) }
+        allowed {
+            scan.begin(
+                show = { act.show(it) },
+                onBytes = { bytes -> allowed { acceptSetup(bytes, key3) } },
+                onFailed = { showMessage(cameraWords(it), again) },
+                onCancel = again,
+                ur = UrScan(setOf(TYPE_BYTES), Who.KEY_HOLDER) { _, payload -> allowed { acceptSetup(payload, key3) } },
+            )
+        }
+    }
+
+    /** The library decides: a refusal shows its words, and the swapped key 3 gets plain words first. */
+    private fun acceptSetup(bytes: ByteArray, key3: Key3View) {
         val a = app ?: return
-        val back = { refresh() }
-        val v = attempt(back) { a.walletView() } ?: return
-        val text = StringBuilder()
-        text.append("Check words: ${v.checksumWords.joinToString(" ")}\n\n")
-        text.append("This app's identity: ${v.ownRootWords.joinToString(" ")}\n")
-        text.append("The owner's identity: ${v.ownerRootWords.joinToString(" ")}\n\n")
-        for (s in v.slots) text.append("Key ${s.index + 1}: ${s.fingerprint}\n${s.xpub}\n\n")
-        text.append("First address:\n${v.firstReceiveAddress}")
-        act.show(
-            ui.page(
-                banner() + listOf(
-                    ui.text(
-                        if (justAccepted) "Wallet accepted. Compare the check words with the owner's phone." else "The wallet",
-                        20f, bold = true,
-                    ),
-                    ui.text(text.toString(), 13f, mono = true),
-                    ui.button("Continue") { refresh() },
-                ),
-            ),
-        )
+        val view = try {
+            a.acceptWalletSetup(bytes)
+        } catch (e: KeyException) {
+            val page = CeremonyModel.setupRefusal(e).map { ui.words(it) } + ui.button("Back") { showScanWallet(key3) }
+            return act.show(ui.page(page))
+        } catch (e: LinkageError) {
+            return showMessage(AppWords.libraryMissing(e.message)) { showScanWallet(key3) }
+        }
+        showWallet(view, true)
+    }
+
+    /**
+     * The comparison: the four words and the three fingerprints, large. [fresh] is true right after the wallet
+     * was accepted, when the person says whether they match; later it is only shown.
+     */
+    private fun showWallet(v: WalletView, fresh: Boolean) {
+        val c = CeremonyModel.walletCheck(v)
+        val views = ArrayList<View>(banner())
+        views.add(ui.words(AppWords.checkWallet))
+        views.add(ui.text(c.checkWords, 28f, bold = true))
+        views.add(ui.text(c.fingerprints.joinToString("\n"), 22f, bold = true, mono = true))
+        views.add(ui.text(c.identities.joinToString("\n"), 13f))
+        views.add(ui.text("First address:\n${c.firstAddress}", 13f, mono = true))
+        if (fresh) {
+            views.add(ui.button("They match") { refresh() })
+            views.add(ui.button("They differ") { showMessage(AppWords.walletMismatch) { showWallet(v, true) } })
+        } else {
+            views.add(ui.button("Back") { refresh() })
+        }
+        act.show(ui.page(views))
+    }
+
+    private fun showWalletAgain() {
+        val a = app ?: return
+        val v = attempt({ refresh() }) { a.walletView() } ?: return
+        showWallet(v, false)
     }
 
     private fun showKitCheck() {
@@ -471,7 +554,7 @@ class Controller(private val act: MainActivity) {
             views.add(ui.button("Show the last answer as a code") { showAnswerCode(answerFile.readBytes()) { refresh() } })
         }
         views.add(ui.button("Pair a counter") { showPairOffer() })
-        views.add(ui.button("The wallet and its check words") { showWallet(false) })
+        views.add(ui.button("The wallet and its check words") { showWalletAgain() })
         views.add(ui.button("Check the printed kit") { showKitCheck() })
         views.add(ui.button("Limits and status") { showStatus() })
         views.add(ui.button("About this app") { showAbout() })

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # The tests of the Key app's pure parts, on the desktop JVM: the screen model,
-# the app's own words (against docs/screens/key.md), the line text and the
+# the app's own words (against docs/screens/key.md, and the list in
+# docs/screens/key-app.md, which OPENBMT_WRITE_SCREENS=1 writes first), the
+# key ceremony's pure parts, the line text and the
 # saved-state file, then the tests of the shared code
 # (apps/android-common/tests). No Android class is used.
 #
@@ -35,4 +37,4 @@ trap 'rm -rf "$scratch/jvm-classes"' EXIT
     "$common"/src/model/*.kt "$app"/src/model/*.kt "$app/tests/AppModelTest.kt"
 
 "$JAVA_HOME/bin/java" -Xmx2g -cp "$scratch/jvm-classes:$lib/kotlin-stdlib.jar" \
-    org.openbmt.key.app.AppModelTest "$repo/docs/screens/key.md"
+    org.openbmt.key.app.AppModelTest "$repo/docs/screens/key.md" "$repo/docs/screens/key-app.md"

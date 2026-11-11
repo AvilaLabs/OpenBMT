@@ -16,7 +16,10 @@ local test key; release signing is a separate step (see "Signing").
 | Refusal | Full-screen words when USB or wireless debugging or an accessibility service is on. Nothing else is offered. |
 | First start | Make key 2 from the device, dice (hashed or skew-corrected), coin flips or typed words, or be an approver only. |
 | The words | The new key's words, once. |
-| Wallet | Accept the wallet (pasted description, the owner's identity typed in), the check words, the kit check. |
+| Key 3 | Key 3 is made in another publisher's wallet or on a hardware wallet; Scan key 3 (a plain text code) or paste its text, then its fingerprint to check against the other wallet. |
+| Give the owner phone these keys | The public answer as a code that changes, then Scan the owner phone's wallet. |
+| Check the wallet | The four check words and the three fingerprints, large, to compare with the owner phone and the counter; They match leads to the home screen. |
+| Home | Requests, the wallet and its check words, the kit check, the limits. |
 | Approval session | A request is picked from a file or scanned (one code or a code that changes), its lines are shown one by one, each is approved or declined with a reason, and the answer is saved as a file or shown as a code. |
 | Limits and status | The ceilings, marks, totals and saved addresses, and a form to change the ceilings. |
 
@@ -43,6 +46,38 @@ pairing line reads "Pair counter" with the counter's name in quotation marks,
 the four words as the largest text on the screen, and the instruction to
 compare them with the counter's screen (`LineModel`, tested in
 `tests/AppModelTest.kt`).
+
+The key ceremony (DESIGN section 2.1, steps 2 and 5), after key 2 is made, or
+after the identity is made on an approver-only device:
+
+1. **Key 3.** The screen says in plain words that key 3 is made alone, in
+   another publisher's wallet or on a hardware wallet, with its words written
+   separately; the terms of the export (xpub, multisig, path) are only under
+   "Advanced". Scan key 3 opens the camera and reads a plain text code
+   (`takeKey3`, op 80); a `ur:` code is refused with words that say this kind
+   of code is not read yet and to export key 3 as text, because the reading of
+   CBOR UR exports is not built. Pasting is the fallback. The result shows key
+   3's fingerprint in two groups of four, to check against the other wallet's
+   screen: "They match" goes on, "They differ" says to export it again.
+   Single-signature exports, another network, key 2 itself and a bad origin
+   are refused with the library's words. A later key 3 replaces the first until
+   the wallet is accepted.
+2. **Give the owner phone these keys.** The public answer (`publicAnswer`, op
+   82, `OBMv`) is drawn as `ur:bytes` with `AnimatedQrView`, the same type and
+   size as "Show as code", under "On the owner phone, choose Scan the Key
+   app." Only bytes with the frame of an answer are drawn (`CeremonyModel`).
+3. **Scan the owner phone's wallet.** The camera reads the wallet setup
+   (`ur:bytes`, `OBMw`) and the library accepts it (`acceptWalletSetup`, op
+   83). The comparison screen shows the four check words and the three
+   fingerprints large and says that the owner phone and the counter must show
+   these same words and fingerprints; the two identities as words are under
+   them. "They match" leads home; "They differ" says nothing was signed and
+   to start the wallet step again on the owner phone. A refusal shows the
+   library's words, and when the owner phone's wallet does not hold the key 3
+   scanned here the app says so first, plainly, and that nothing was accepted.
+
+The older path that took a pasted wallet description and a typed owner
+identity (`acceptWallet`, op 17) is gone from the app; the library op stays.
 
 Not built yet: the allowlist enrolment, a lock screen of the app's own, and
 the wipe after wrong tries.
@@ -107,17 +142,19 @@ goes to the background. A frame is zeroed after it is read and is never
 written to a file or sent anywhere. The scan page has a preview so the
 person can aim.
 
-- Scan fills the field next to it (the wallet description, the owner's
-  identity, key 3's account key, the wallet text of the printed kit) with the
-  text of the code, or, on the home screen, opens a request from the bytes of
-  the code, as a request file would.
+- Scan fills the field next to it (the wallet text of the printed kit) with
+  the text of the code, or, on the home screen, opens a request from the bytes
+  of the code, as a request file would. On the key 3 screen it reads a plain
+  text code, and on the wallet screen a `ur:bytes` code (one part or a code
+  that changes), and hands the bytes to the library.
 - The camera permission is asked for only when Scan is tapped. If it is
   refused, or "don't ask again" was chosen, a words page says the camera is
   off for this app, to allow it in the phone's settings or to paste or choose
   a file instead, and that the key holder does this.
 - A code whose text starts with `UR:` or `ur:`, scanned into a text field
-  (the wallet description, an identity, a key), gets words that say the
-  field takes plain text. Only the home screen's Scan reads a UR.
+  (the printed kit's wallet text), gets words that say the field takes plain
+  text. The home screen's Scan and the wallet screen's Scan read a UR; the key
+  3 screen refuses one with its own words.
 
 ## Animated codes
 
@@ -192,7 +229,11 @@ The Kotlin compiler is not part of the repository.
 `tests/AppModelTest.kt` on the desktop JVM and runs the test. No Android class
 is used in `src/model/`: the screen model, the words model, the app's own words
 (checked against the rules of `openbmt_core::say::check` as far as text can be,
-and against the rows of `docs/screens/key.md`), the line text, and the saved
+against the rows of `docs/screens/key.md`, and the list
+`docs/screens/key-app.md`
+that `OPENBMT_WRITE_SCREENS=1` writes), the key ceremony's pure parts (reading
+a key 3 code, the fingerprint and wallet text, the answer's and the setup's
+frames, which refusal gets the app's plain words), the line text, and the saved
 state's file format with a fake cipher. `src/android/` holds everything that
 needs the framework. The tests of the shared code (`apps/android-common/tests`)
 also run the camera scan's pure parts (choosing a frame size, copying a Y
@@ -214,8 +255,17 @@ and kept offline.
 
 ## What is not checked
 
-Nothing here has run on a device. Not checked: that the library loads and
-answers on a phone, the Keystore and StrongBox behaviour, the file pickers,
+Nothing here has run on a device. A phone test of the key ceremony must check:
+that the camera reads key 3 exported as a plain text code from a real
+hardware wallet and from another publisher's wallet, and what each of them
+actually exports; that the answer's code, drawn as `ur:bytes`, is read by the
+owner phone at the chosen size and speed; that the wallet code of the owner
+phone is read part by part; that the fingerprints and words are readable at
+arm's length; that Advanced opens and closes; that leaving the app on any of
+the ceremony screens and coming back lands on the right screen; and that a
+swapped key 3 shows the plain words. Also not checked: that the library
+loads and answers on a phone, the Keystore and StrongBox behaviour, the file
+pickers,
 the camera scan (the permission dialog, the preview and its shape, that a
 code on a screen and on paper is read, how long it takes, the camera being
 released when the app is left), the animated code (that another phone, a

@@ -129,12 +129,97 @@ object AppWords {
         "Type whole numbers of sats only, then try again.",
     )
 
-    val identityNotReadable = w(
-        Tones.STOP, "Owner identity not read",
-        "The owner identity must be 64 letters and digits from 0 to 9 and a to f.",
+    // ---- the key ceremony (DESIGN section 2.1, steps 2 and 5) -----------------------
+
+    /** The screen before key 3 is scanned. The plain words are the only ones the screen shows up front. */
+    val key3Needed = w(
+        Tones.INFO, "Key 3, the recovery key",
+        "Key 3 is made on its own in another publisher's wallet or on a hardware wallet, never in this app.",
         Who.KEY_HOLDER,
-        "Copy it again from the owner's phone, then try again.",
+        "Do that step alone, write its words on separate paper, then scan key 3 here.",
     )
+
+    /** A `ur:` code was scanned or pasted for key 3: that kind of code is not read yet. */
+    val key3UrNotRead = w(
+        Tones.INFO, "Code not read yet",
+        "This kind of code is not read yet, so nothing was taken.",
+        Who.KEY_HOLDER,
+        "Export key 3 as text in the other wallet, then scan that code or paste the text.",
+    )
+
+    val key3NotText = w(
+        Tones.STOP, "Code is not text",
+        "The code holds something other than text, so it cannot be key 3 and nothing was taken.",
+        Who.KEY_HOLDER,
+        "Export key 3 as text in the other wallet, then scan it again, or paste the text.",
+    )
+
+    /** Key 3 is taken: the words of `openbmt_signer::key3_taken_words`, as in docs/screens/key.md. */
+    val key3Taken = Words(
+        Tones.GOOD, Who.KEY_HOLDER, "Key 3 taken",
+        "This app now holds the public part of key 3, and nothing else of it.",
+        "Compare the short code shown here with the one in the other wallet app, then go on.",
+        "SR-67", null, null, null,
+    )
+
+    /** The person says the fingerprints differ. */
+    val key3Mismatch = w(
+        Tones.STOP, "Key 3 does not match",
+        "The fingerprint here is not the one the other wallet shows, so this is not the key 3 that was made.",
+        Who.KEY_HOLDER,
+        "Export key 3 again from the other wallet and scan it again; nothing goes on until they match.",
+    )
+
+    /** The public answer is on the screen: the words of `openbmt_signer::answer_ready_words`. */
+    val publicAnswerReady = Words(
+        Tones.INFO, Who.OWNER, "Answer ready for the owner",
+        "This app shows its public details, which the owner's phone needs to build the wallet.",
+        "Scan the answer with the owner's phone, then wait for the wallet code.",
+        "SR-69", null, null, null,
+    )
+
+    val scanOwnerWallet = w(
+        Tones.INFO, "Scan the owner's wallet",
+        "The owner phone builds the wallet from the keys it scanned, then shows it as a code.",
+        Who.KEY_HOLDER,
+        "Scan that code here, then compare the words and fingerprints it shows.",
+    )
+
+    /** The wallet is accepted and is shown for the comparison with the owner phone. */
+    val checkWallet = w(
+        Tones.INFO, "Check the wallet",
+        "The wallet was read, and its four words and three fingerprints are below.",
+        Who.KEY_HOLDER,
+        "The owner phone and the counter must show these same words and fingerprints.",
+    )
+
+    /** The person says the words or fingerprints differ. */
+    val walletMismatch = w(
+        Tones.STOP, "Wallet words differ",
+        "The words or fingerprints here differ from the owner phone's, so this is not the wallet to use.",
+        Who.KEY_HOLDER,
+        "Nothing was signed. Start the wallet step again on the owner phone before any request is approved.",
+    )
+
+    /** SR-67: the owner phone's wallet does not hold the key 3 that was scanned here. */
+    val walletLacksKey3 = w(
+        Tones.STOP, "Wallet lacks this key 3",
+        "The owner phone's wallet does not hold the key 3 scanned here, so nothing was accepted.",
+        Who.KEY_HOLDER,
+        "Do not go on. Tell the owner in person, then make the wallet again on the owner phone.",
+    )
+
+    /** The lines of the ceremony screens that are not words of a state; none uses a word of the jargon list. */
+    object Text {
+        const val SCAN_KEY3 = "Scan key 3"
+        const val PASTE_KEY3 = "Or paste the text of key 3"
+        const val ON_OWNER_PHONE = "On the owner phone, choose Scan the Key app."
+        const val ADVANCED = "Advanced"
+        const val ADVANCED_KEY3 =
+            "The other wallet must export the account key (xpub) of a multisig P2WSH wallet at m/48'/coin'/0'/2' " +
+                "with its origin, as [fingerprint/path]key. A single-signature export is refused. " +
+                "A plain text code is read; a ur: code is not read yet."
+    }
 
     val flipsNotReadable = w(
         Tones.STOP, "Check the coin flips",
@@ -250,7 +335,38 @@ object AppWords {
         }
     }
 
-    /** Every fixed words of the app, for the test that checks them all. */
+    /** SC-12: the list of words as the table of docs/screens/key-app.md. */
+    fun screensMarkdown(): String {
+        fun who(n: Int) = when (n) {
+            Who.NOBODY -> "nobody"
+            Who.CUSTOMER -> "the customer"
+            Who.CASHIER -> "the cashier"
+            Who.MANAGER -> "a manager"
+            Who.OWNER -> "the owner"
+            Who.KEY_HOLDER -> "the key holder"
+            else -> "the Box keeper"
+        }
+        fun cell(text: String) = text.replace('|', '/')
+        val out = StringBuilder(
+            "# Key app: what the app itself tells a person\n\n" +
+                "Made by `AppWords.screensMarkdown` in\n" +
+                "`apps/key-android/src/model/AppWords.kt`. Do not edit it by hand: run\n" +
+                "`apps/key-android/tests/run-jvm.sh` with the environment variable\n" +
+                "`OPENBMT_WRITE_SCREENS=1` to write it again.\n\n" +
+                "Everything the rules refuse is shown with the words of the library\n" +
+                "(`docs/screens/key.md`, `openbmt-key-ffi`). These are the words of what\n" +
+                "the app decides itself, with the key ceremony screens (`docs/DESIGN.md`\n" +
+                "section 2.1, steps 2 and 5) among them.\n\n" +
+                "| State | Heading | What happened | What to do next | Who | Code |\n" +
+                "|---|---|---|---|---|---|\n",
+        )
+        for ((name, w) in all()) {
+            out.append("| ${cell(name)} | ${cell(w.heading)} | ${cell(w.what)} | ${cell(w.next)} | ${who(w.who)} | ${w.code ?: ""} |\n")
+        }
+        return out.toString()
+    }
+
+    /** Every fixed words of the app, for the test that checks them all and writes the list. */
     fun all(): List<Pair<String, Words>> = listOf(
         "debuggingOn" to debuggingOn,
         "wirelessDebuggingOn" to wirelessDebuggingOn,
@@ -265,10 +381,19 @@ object AppWords {
         "cameraNotStarted" to cameraNotStarted("a problem"),
         "codeNotForField" to codeNotForField,
         "notANumber" to notANumber,
-        "identityNotReadable" to identityNotReadable,
         "flipsNotReadable" to flipsNotReadable,
         "answersReady" to answersReady,
         "pairOffer" to pairOffer,
+        "key3Needed" to key3Needed,
+        "key3UrNotRead" to key3UrNotRead,
+        "key3NotText" to key3NotText,
+        "key3Taken" to key3Taken,
+        "key3Mismatch" to key3Mismatch,
+        "publicAnswerReady" to publicAnswerReady,
+        "scanOwnerWallet" to scanOwnerWallet,
+        "checkWallet" to checkWallet,
+        "walletMismatch" to walletMismatch,
+        "walletLacksKey3" to walletLacksKey3,
         "Empty" to state(SetupState.Empty),
         "HasIdentity(WordsWaiting)" to state(SetupState.HasIdentity(true, true)),
         "HasIdentity(Key2)" to state(SetupState.HasIdentity(true, false)),

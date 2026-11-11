@@ -90,6 +90,10 @@ private const val OP_DICE_FACE_COUNTS = 62
 private const val OP_WORD_SUGGESTIONS = 63
 private const val OP_WORD_IS_VALID = 64
 private const val OP_PARSE_DEPOSIT_CODE = 65
+private const val OP_TAKE_KEY3 = 80
+private const val OP_KEY3_VIEW = 81
+private const val OP_PUBLIC_ANSWER = 82
+private const val OP_ACCEPT_WALLET_SETUP = 83
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -158,6 +162,14 @@ sealed class SetupState {
 
 data class Key2Public(
     val network: KeyNetwork,
+    val masterFingerprint: String,
+    val originPath: String,
+    val accountXpub: String,
+)
+
+/** Key 3's public parts as the Key app keeps them, for the comparison screen. */
+data class Key3View(
+    val mainnet: Boolean,
     val masterFingerprint: String,
     val originPath: String,
     val accountXpub: String,
@@ -585,7 +597,9 @@ private fun Reader.setupState(): SetupState =
 private fun Reader.key2Public(): Key2Public =
     Key2Public(network(), string(), string(), string())
 
-private fun Reader.walletView(): WalletView =
+internal fun Reader.key3View(): Key3View = Key3View(bool(), string(), string(), string())
+
+internal fun Reader.walletView(): WalletView =
     WalletView(
         checksumWords = strings(),
         walletId = bytes(),
@@ -801,10 +815,23 @@ internal fun decodeResponse(response: ByteArray): Reader {
     throw KeyException(rule, text, status, words)
 }
 
-private fun call(store: KeyStore, op: Int, handle: Long, fill: (Writer) -> Unit = {}): Reader {
+/** One request frame: the magic, version 1, the op, the handle and the fields [fill] writes. */
+internal fun requestFrame(op: Int, handle: Long, fill: (Writer) -> Unit = {}): ByteArray {
     val w = Writer().raw(REQUEST_MAGIC).u8(1).u16(op).u64(handle)
     fill(w)
-    val response = synchronized(Native) { Native.call(store, w.toByteArray()) }
+    return w.toByteArray()
+}
+
+/** The request of [KeyApp.takeKey3]. */
+internal fun takeKey3Request(handle: Long, text: String): ByteArray =
+    requestFrame(OP_TAKE_KEY3, handle) { it.string(text) }
+
+/** The request of [KeyApp.acceptWalletSetup]. */
+internal fun acceptWalletSetupRequest(handle: Long, setup: ByteArray): ByteArray =
+    requestFrame(OP_ACCEPT_WALLET_SETUP, handle) { it.bytes(setup) }
+
+private fun call(store: KeyStore, op: Int, handle: Long, fill: (Writer) -> Unit = {}): Reader {
+    val response = synchronized(Native) { Native.call(store, requestFrame(op, handle, fill)) }
         ?: throw KeyException("response-null", "the library gave no response", 4)
     return decodeResponse(response)
 }
@@ -921,6 +948,36 @@ class KeyApp private constructor(private val store: KeyStore, private val handle
                 it.option(setup.key3Xpub) { x -> it.string(x) }
                 it.option(setup.batchMinCount) { n -> it.u32(n) }
             }
+        return r.walletView().also { r.end() }
+    }
+
+    private fun callFrame(request: ByteArray): Reader {
+        val response = synchronized(Native) { Native.call(store, request) }
+            ?: throw KeyException("response-null", "the library gave no response", 4)
+        return decodeResponse(response)
+    }
+
+    /** SR-64 to SR-67: read and keep key 3 from the text another wallet shows. */
+    fun takeKey3(text: String): Key3View {
+        val r = callFrame(takeKey3Request(handle, text))
+        return r.key3View().also { r.end() }
+    }
+
+    /** Key 3 as kept, or null. */
+    fun key3View(): Key3View? {
+        val r = call(store, OP_KEY3_VIEW, handle)
+        return r.option { r.key3View() }.also { r.end() }
+    }
+
+    /** The public answer (`OBMv`) the owner phone scans. */
+    fun publicAnswer(): ByteArray {
+        val r = call(store, OP_PUBLIC_ANSWER, handle)
+        return r.bytes().also { r.end() }
+    }
+
+    /** SR-68, SR-69: accept the owner phone's wallet setup (`OBMw`). */
+    fun acceptWalletSetup(setup: ByteArray): WalletView {
+        val r = callFrame(acceptWalletSetupRequest(handle, setup))
         return r.walletView().also { r.end() }
     }
 

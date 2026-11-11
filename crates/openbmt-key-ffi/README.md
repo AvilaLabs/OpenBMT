@@ -39,7 +39,7 @@ stores state before anything is returned. The rule IDs pass through in
   count in `jni.rs` and refuses it anywhere else.
 - `bindings/kotlin/org/openbmt/key/` holds `Native.kt` (the `external`
   declaration and the `KeyStore` interface) and `KeyApp.kt` (a typed wrapper,
-  one method for each op). No JNA, no generated code, no Kotlin library.
+  one method for each op, the key ceremony's ops 80 to 83 included). No JNA, no generated code, no Kotlin library.
 
 The Cargo feature `jni` (on by default) compiles `jni.rs` on every target so
 that the host can test it against a fake `JNIEnv`; on Android it is always
@@ -255,6 +255,10 @@ scripts/key-ffi-build.sh
   tone and person numbers, malformed UTF-8, truncation and trailing bytes.
   Run it with `bindings/tests/run-jvm.sh` after setting the compiler classpath
   variables described in `bindings/tests/README.md`.
+- The same harness decodes the success frames of ops 80 to 83 (key 3 as
+  kept, key 3 or none, the public answer, the wallet view) with every cut and
+  a changed flag refused, and compares the request frames of `takeKey3` and
+  `acceptWalletSetup` byte for byte.
 - Rust source checks still compare Kotlin `OP_*`, `TAG_*`, `TONE_*` and
   `WHO_*` constants with the Rust tables and keep the response field order in
   sync. `PROTOCOL.md` remains generated from the Rust encoder tables.

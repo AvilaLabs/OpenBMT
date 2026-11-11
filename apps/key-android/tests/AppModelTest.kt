@@ -11,21 +11,27 @@ import org.openbmt.app.Sealed
 import org.openbmt.app.SayCheck
 import org.openbmt.app.StoreFormat
 import org.openbmt.app.StoreFormatException
+import org.openbmt.app.Tones
 import org.openbmt.app.Who
 import org.openbmt.key.HealthDetail
+import org.openbmt.key.Key3View
+import org.openbmt.key.KeyException
 import org.openbmt.key.LineDetail
 import org.openbmt.key.LineKind
 import org.openbmt.key.LineView
 import org.openbmt.key.PairingDetail
 import org.openbmt.key.Quoted
 import org.openbmt.key.SetupState
+import org.openbmt.key.SlotView
+import org.openbmt.key.WalletView
 import org.openbmt.key.Words
 
 /**
  * The tests of the pure parts of the Key app: the screen model, the words
  * model, the words themselves, the line text and the saved-state file. They
  * run on the desktop JVM, where no Android class exists. Run the main with
- * the path of docs/screens/key.md as the one argument.
+ * the path of docs/screens/key.md as the first argument and the path of
+ * docs/screens/key-app.md as the second (OPENBMT_WRITE_SCREENS=1 writes it).
  */
 object AppModelTest {
     private var count = 0
@@ -96,7 +102,7 @@ object AppModelTest {
 
     // ---- tests --------------------------------------------------------------------------
 
-    private fun wordsAreFine(keyMd: File?) {
+    private fun wordsAreFine(keyMd: File?, appMd: File?) {
         val all = AppWords.all()
         for ((name, w) in all) ok(wordsProblem(w) == null, "words of $name: ${wordsProblem(w)}")
         for ((i, a) in all.withIndex()) {
@@ -107,10 +113,21 @@ object AppModelTest {
         ok(AppWords.cameraOff.who == Who.KEY_HOLDER && AppWords.cameraOff.next.contains("settings") && AppWords.cameraOff.next.contains("file"), "the camera-off words say what to do")
         ok(AppWords.codeNotForField.next.contains("paste") && AppWords.codeNotForField.who == Who.KEY_HOLDER, "the words for a UR in a text field say what to do")
         ok(AppWords.urWords().all { it.second.who == Who.KEY_HOLDER } && AppWords.urWords().size == 9, "the animated-code words are the key holder's")
+        val text = AppWords.screensMarkdown()
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1, "one row for each words and the header")
+        ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
+        if (appMd != null) {
+            if (System.getenv("OPENBMT_WRITE_SCREENS") != null) appMd.writeText(text)
+            ok(appMd.isFile && appMd.readText() == text, "docs/screens/key-app.md is what screensMarkdown makes (run with OPENBMT_WRITE_SCREENS=1)")
+        }
         // The setup, check and kit words equal the rows of docs/screens/key.md.
         if (keyMd != null) {
             val rows = keyMd.readLines().filter { it.startsWith("| ") }
-            fun who(n: Int) = if (n == Who.NOBODY) "nobody" else "key holder"
+            fun who(n: Int) = when (n) {
+                Who.NOBODY -> "nobody"
+                Who.OWNER -> "owner"
+                else -> "key holder"
+            }
             for ((name, w) in all.filter { it.first !in notInTheCatalogue }) {
                 val row = "| ${w.heading} | ${w.what} | ${w.next} | ${who(w.who)} |"
                 ok(rows.any { it.contains(row) }, "docs/screens/key.md has the words of $name")
@@ -121,7 +138,9 @@ object AppModelTest {
     // Words the app wrote itself: the library has no row for them.
     private val notInTheCatalogue = AppWords.urWords().map { it.first }.toSet() + setOf(
         "debuggingOn", "wirelessDebuggingOn", "accessibilityOn", "keyInSoftware", "libraryMissing", "fault",
-        "keystoreUnavailable", "fileNotRead", "fileNotSaved", "cameraOff", "cameraNotStarted", "codeNotForField", "notANumber", "identityNotReadable", "flipsNotReadable", "answersReady", "pairOffer",
+        "keystoreUnavailable", "fileNotRead", "fileNotSaved", "cameraOff", "cameraNotStarted", "codeNotForField", "notANumber", "flipsNotReadable", "answersReady", "pairOffer",
+        "key3Needed", "key3UrNotRead", "key3NotText", "key3Mismatch", "scanOwnerWallet", "checkWallet", "walletMismatch",
+        "walletLacksKey3",
     )
 
     private fun guardTests() {
@@ -141,8 +160,13 @@ object AppModelTest {
         ok(ScreenModel.pick(emptyList(), null, null) is Screen.Fault, "no state and no fault is a fault")
         ok(ScreenModel.pick(emptyList(), null, SetupState.Empty) is Screen.Setup, "empty: setup")
         ok(ScreenModel.pick(emptyList(), null, SetupState.HasIdentity(true, true)) is Screen.ShowWords, "words waiting: show them")
-        val accept = ScreenModel.pick(emptyList(), null, SetupState.HasIdentity(false, false))
-        ok(accept is Screen.AcceptWallet && !accept.holdsKey2, "identity only: accept the wallet")
+        val ask = ScreenModel.pick(emptyList(), null, SetupState.HasIdentity(false, false))
+        ok(ask is Screen.Key3 && !ask.holdsKey2, "identity only, no key 3: ask for key 3")
+        val k3 = Key3View(true, "a1b2c3d4", "48h/0h/0h/2h", "xpub-text")
+        val give = ScreenModel.pick(emptyList(), null, SetupState.HasIdentity(true, false), k3)
+        ok(give is Screen.GiveAnswer && give.holdsKey2 && give.key3 == k3, "key 3 held: give the answer")
+        ok(ScreenModel.pick(emptyList(), null, SetupState.HasIdentity(true, true), k3) is Screen.ShowWords, "words waiting come before key 3")
+        ok(ScreenModel.pick(emptyList(), null, SetupState.Ready(true), k3) is Screen.Home, "a wallet accepted: home, key 3 or not")
         val home = ScreenModel.pick(emptyList(), null, SetupState.Ready(true))
         ok(home is Screen.Home && home.holdsKey2, "ready: home")
     }
@@ -268,17 +292,109 @@ object AppModelTest {
         ok(AppWords.pairOffer.next.contains("Scan this with the counter") && AppWords.pairOffer.who == Who.KEY_HOLDER, "the screen says to scan it with the counter")
     }
 
+
+    private fun answerWith(magic: Char, version: Int, extra: Int = 10): ByteArray =
+        ByteArray(5 + extra).also {
+            "OBM$magic".forEachIndexed { i, c -> it[i] = c.code.toByte() }
+            it[4] = version.toByte()
+        }
+
+    private fun key3Tests() {
+        val text = "[a1b2c3d4/48h/0h/0h/2h]xpub6Dummy"
+        val plain = CeremonyModel.readKey3Code(text.toByteArray())
+        ok(plain is Key3Input.Text && plain.text == text, "a plain text code goes to the library as it is")
+        val withSpace = CeremonyModel.readKey3Text("  \n$text\n")
+        ok(withSpace is Key3Input.Text && withSpace.text == "  \n$text\n", "the library trims, the app does not change the text")
+        for (ur in listOf("ur:crypto-account/abc", "UR:CRYPTO-ACCOUNT/ABC", "  ur:bytes/1-3/xyz")) {
+            val r = CeremonyModel.readKey3Code(ur.toByteArray())
+            ok(r is Key3Input.Refused && r.words == AppWords.key3UrNotRead, "a ur: code is refused with its words: $ur")
+            val t = CeremonyModel.readKey3Text(ur)
+            ok(t is Key3Input.Refused && t.words == AppWords.key3UrNotRead, "pasted ur: text is refused the same way: $ur")
+        }
+        ok(AppWords.key3UrNotRead.what.contains("not read yet") && AppWords.key3UrNotRead.next.contains("as text"), "the ur: words say to export as text")
+        val binary = CeremonyModel.readKey3Code(byteArrayOf(0x00, 0xff.toByte(), 0xfe.toByte(), 0x80.toByte()))
+        ok(binary is Key3Input.Refused && binary.words == AppWords.key3NotText, "bytes that are not text are refused")
+        val empty = CeremonyModel.readKey3Text("")
+        ok(empty is Key3Input.Text && empty.text == "", "an empty text is left to the library to refuse")
+        ok(CeremonyModel.groupFingerprint("a1b2c3d4") == "A1B2 C3D4", "the fingerprint is in two groups of four, in capitals")
+        ok(CeremonyModel.groupFingerprint("abc") == "abc", "a fingerprint of another length is shown as it is")
+        val c = CeremonyModel.key3Check(Key3View(false, "00ff00ff", "48h/1h/0h/2h", "tpub-text"))
+        ok(c.fingerprint == "00FF 00FF" && c.network == "A test network", "key 3 on a test network")
+        ok(c.advanced == listOf("Origin path: 48h/1h/0h/2h", "Account key: tpub-text"), "the origin and the account key are for the Advanced fold")
+        ok(CeremonyModel.key3Check(Key3View(true, "00ff00ff", "p", "x")).network == "Main bitcoin network", "key 3 on the main network")
+        // The plain words never name the parts of the key; only the Advanced text does.
+        val plainWords = listOf(AppWords.key3Needed, AppWords.key3UrNotRead, AppWords.key3NotText, AppWords.key3Taken, AppWords.key3Mismatch)
+        for (w in plainWords) {
+            val all = "${w.heading} ${w.what} ${w.next}".lowercase()
+            ok(listOf("xpub", "descriptor", "multisig").none { all.contains(it) }, "no jargon in ${w.heading}")
+        }
+        ok(AppWords.Text.ADVANCED_KEY3.contains("xpub") && AppWords.Text.ADVANCED_KEY3.contains("multisig"), "the Advanced text may name them")
+        ok(AppWords.Text.ADVANCED == "Advanced" && AppWords.Text.SCAN_KEY3 == "Scan key 3", "the button words")
+        ok(AppWords.key3Needed.next.contains("alone") && AppWords.key3Needed.what.contains("another publisher"), "key 3 is made alone, elsewhere")
+        ok(AppWords.key3Mismatch.tone == Tones.STOP && AppWords.key3Taken.tone == Tones.GOOD, "mismatch is a stop, taken is done")
+    }
+
+    private fun answerTests() {
+        ok(CeremonyModel.looksLikeAnswer(answerWith('v', 1)), "an answer has its magic and version")
+        ok(!CeremonyModel.looksLikeAnswer(answerWith('w', 1)) && !CeremonyModel.looksLikeAnswer(answerWith('v', 2)), "another magic or version is not an answer")
+        ok(!CeremonyModel.looksLikeAnswer(answerWith('v', 1, 0)) && !CeremonyModel.looksLikeAnswer(ByteArray(0)), "an empty frame is not an answer")
+        ok(CeremonyModel.looksLikeSetup(answerWith('w', 1)) && !CeremonyModel.looksLikeSetup(answerWith('v', 1)), "a setup has its own magic")
+        ok(AppWords.publicAnswerReady.who == Who.OWNER && AppWords.publicAnswerReady.next.contains("Scan the answer"), "the answer words send the person to the owner phone")
+        ok(AppWords.Text.ON_OWNER_PHONE == "On the owner phone, choose Scan the Key app.", "the line for the owner phone")
+    }
+
+    private fun walletTests() {
+        val view = WalletView(
+            checksumWords = listOf("alpha", "bravo", "charlie", "delta"),
+            walletId = ByteArray(32),
+            slots = listOf(SlotView(0, "11223344", "xpub1"), SlotView(1, "aabbccdd", "xpub2"), SlotView(2, "01020304", "xpub3")),
+            firstReceiveAddress = "bc1qexample",
+            ownRootWords = listOf("one", "two", "three", "four"),
+            ownerRootWords = listOf("five", "six", "seven", "eight"),
+        )
+        val c = CeremonyModel.walletCheck(view)
+        ok(c.checkWords == "alpha   bravo   charlie   delta", "the four words on one line")
+        ok(c.fingerprints == listOf("Key 1: 1122 3344", "Key 2: AABB CCDD", "Key 3: 0102 0304"), "three fingerprints: ${c.fingerprints}")
+        ok(c.identities == listOf("This app's identity: one two three four", "The owner phone's identity: five six seven eight"), "both identities as words")
+        ok(c.firstAddress == "bc1qexample", "the first address")
+        ok(AppWords.checkWallet.next == "The owner phone and the counter must show these same words and fingerprints.", "the comparison sentence")
+        ok(AppWords.walletMismatch.next.contains("Nothing was signed") && AppWords.walletMismatch.next.contains("again on the owner phone"), "they differ: nothing signed, start again")
+        ok(AppWords.walletMismatch.tone == Tones.STOP, "they differ is a stop")
+    }
+
+    private fun refusalTests() {
+        val lib = Words(Tones.STOP, Who.KEY_HOLDER, "Key 3 not in the wallet", "None of the wallet's keys is the key 3 this app was given.", "Do not accept the wallet, and tell the owner in person.", "SR-67", null, null, null)
+        val notInWallet = KeyException("SR-67", "SR-67: no key of the wallet is the key 3 taken", 1, lib)
+        val r = CeremonyModel.setupRefusal(notInWallet)
+        ok(r == listOf(AppWords.walletLacksKey3, lib), "a swapped key 3: the plain words, then the library's")
+        val differs = KeyException("SR-67", "SR-67: the key 3 given is not the key 3 taken", 1, lib)
+        ok(CeremonyModel.setupRefusal(differs) == listOf(AppWords.walletLacksKey3, lib), "the other SR-67 refusal reads the same")
+        ok(CeremonyModel.setupRefusal(KeyException("SR-67", "SR-67: no key of the wallet is the key 3 taken", 1)) == listOf(AppWords.walletLacksKey3), "no library words: the app's alone")
+        val noKey3 = KeyException("SR-67", "SR-67: no key 3 has been taken yet", 1, lib)
+        ok(CeremonyModel.setupRefusal(noKey3) == listOf(lib), "no key 3 taken: only the library's words")
+        val frame = KeyException("SR-68", "SR-68: the setup is cut short", 1, lib)
+        ok(CeremonyModel.setupRefusal(frame) == listOf(lib), "a frame refusal: only the library's words")
+        val bare = CeremonyModel.setupRefusal(KeyException("response-null", "no response", 4))
+        ok(bare.size == 1 && bare[0].heading == AppWords.fault(KeyException("a", "b", 4)).heading, "an error without words shows the app's fault words")
+        ok(AppWords.walletLacksKey3.what.contains("does not hold the key 3 scanned here") && AppWords.walletLacksKey3.what.contains("nothing was accepted"), "the swapped key 3 is said plainly")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
-        val keyMd = args.firstOrNull()?.let { File(it) }
+        val keyMd = args.getOrNull(0)?.let { File(it) }
+        val appMd = args.getOrNull(1)?.let { File(it) }
         if (keyMd != null) ok(keyMd.isFile, "docs/screens/key.md exists at ${keyMd.path}")
-        wordsAreFine(keyMd)
+        wordsAreFine(keyMd, appMd)
         guardTests()
         screenTests()
         formatOfFileTests()
         fileTests()
         lineTests()
         pairOfferTests()
+        key3Tests()
+        answerTests()
+        walletTests()
+        refusalTests()
         println("AppModelTest: $count checks passed")
     }
 }

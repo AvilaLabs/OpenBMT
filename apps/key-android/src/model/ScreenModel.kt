@@ -1,5 +1,6 @@
 package org.openbmt.key.app
 
+import org.openbmt.key.Key3View
 import org.openbmt.key.SetupState
 import org.openbmt.key.Words
 
@@ -17,8 +18,11 @@ sealed class Screen {
     /** The words of the new key, shown once. */
     object ShowWords : Screen()
 
-    /** An identity and maybe key 2, waiting for the wallet to be accepted. */
-    class AcceptWallet(val holdsKey2: Boolean) : Screen()
+    /** An identity and maybe key 2, and no key 3 yet: scan it (DESIGN section 2.1, step 2). */
+    class Key3(val holdsKey2: Boolean) : Screen()
+
+    /** Key 3 is held: show the public answer, then read the owner phone's wallet (step 5). */
+    class GiveAnswer(val holdsKey2: Boolean, val key3: Key3View) : Screen()
 
     /** The wallet is accepted: approve requests, check the kit, see the limits. */
     class Home(val holdsKey2: Boolean) : Screen()
@@ -30,15 +34,21 @@ object ScreenModel {
      * A refusal of the system comes first; then a fault; then the screen
      * of the library's state. A null [state] with no [fault] means the library
      * has not been opened yet, which is a fault of the app and is shown as one.
+     * [key3] is key 3 as the library keeps it, or null; it only matters for an
+     * identity that is waiting for the wallet.
      */
-    fun pick(refusals: List<Words>, fault: Words?, state: SetupState?): Screen = when {
+    fun pick(refusals: List<Words>, fault: Words?, state: SetupState?, key3: Key3View? = null): Screen = when {
         refusals.isNotEmpty() -> Screen.Refused(refusals)
         fault != null -> Screen.Fault(fault)
         state == null -> Screen.Fault(AppWords.libraryMissing(null))
         else -> when (state) {
             is SetupState.Empty -> Screen.Setup
             is SetupState.HasIdentity ->
-                if (state.wordsWaiting) Screen.ShowWords else Screen.AcceptWallet(state.holdsKey2)
+                when {
+                    state.wordsWaiting -> Screen.ShowWords
+                    key3 == null -> Screen.Key3(state.holdsKey2)
+                    else -> Screen.GiveAnswer(state.holdsKey2, key3)
+                }
             is SetupState.Ready -> Screen.Home(state.holdsKey2)
         }
     }
