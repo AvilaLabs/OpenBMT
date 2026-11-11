@@ -107,6 +107,7 @@ fn requested(index: u32, at: u64, number: u64, sats: u64) -> Event {
         waiting_for_depth: false,
         sats,
         ask: openbmt_counter::Ask::Sats,
+        chain_height: None,
     }
 }
 
@@ -159,6 +160,7 @@ fn bk_13_a_cash_refund_record_is_a_return_line() {
             reason: "wrong size".to_string(),
             minor: 25,
             sats: 1_000,
+            chain_height: Some(812_345),
         },
     ]);
     let books = kit.books();

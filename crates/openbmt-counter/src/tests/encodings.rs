@@ -187,6 +187,24 @@ fn every_event() -> Vec<Event> {
             reason: "wrong size".to_string(),
             minor: 20,
             sats: 2_000,
+            chain_height: None,
+        },
+        Event::RefundPaidInCash {
+            index: 4,
+            at: T0 + 161,
+            role: Role::Cashier,
+            name: "ann".to_string(),
+            reason: "wrong size".to_string(),
+            minor: 20,
+            sats: 2_000,
+            chain_height: Some(812_345),
+        },
+        {
+            let mut e = a_request(Ask::Sats);
+            if let Event::RefundRequested { chain_height, .. } = &mut e {
+                *chain_height = Some(812_345);
+            }
+            e
         },
     ]
 }
@@ -204,6 +222,7 @@ fn a_request(ask: Ask) -> Event {
         waiting_for_depth: true,
         sats: 2_000,
         ask,
+        chain_height: None,
     }
 }
 
@@ -352,7 +371,7 @@ fn every_event_is_strict() {
         assert_eq!(Event::decode(&bytes).unwrap(), e);
         assert_strict(&bytes, Event::decode, Event::encode);
     }
-    assert_eq!(every_event().len(), 19);
+    assert_eq!(every_event().len(), 21);
 }
 
 #[test]

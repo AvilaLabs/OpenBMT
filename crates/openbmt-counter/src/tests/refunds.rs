@@ -151,6 +151,7 @@ fn cr_61_a_request_names_what_the_owner_needs() {
             waiting_for_depth: false,
             sats: 1_200,
             ask: Ask::Sats,
+            chain_height: Some(100),
         }
     );
 }
@@ -807,8 +808,10 @@ fn cr_69_a_cashier_over_the_daily_cap_needs_a_manager() {
     assert_eq!(ask(&mut w, i, 40_000, bob), Ok(4));
     // A manager goes on.
     assert_eq!(ask(&mut w, i, 40_000, max()), Ok(5));
-    // The window moves on: a day later the cap is free again.
+    // The window moves on: a day and a day of blocks later the cap is free
+    // again (CR-120).
     w.tick(86_401);
+    w.chain.tip += 144;
     assert_eq!(ask(&mut w, i, 40_000, ann()), Ok(6));
 }
 
@@ -930,6 +933,7 @@ fn cr_71_a_cash_refund_is_a_record_valued_at_the_sales_last_quote() {
             reason: "till refund".to_string(),
             minor: 123,
             sats: 2_460,
+            chain_height: Some(100),
         }
     );
     ask_cash(&mut w, o.index, 1, ann()).unwrap();
@@ -1291,4 +1295,216 @@ fn cr_73_the_sale_with_its_entries_is_stored_with_the_sale() {
     // A sale without a refund is still the old version 1.
     let j = final_sale(&mut w);
     assert_eq!(w.m.slots[&Slot::Sale(j)][4], 1);
+}
+
+// CR-119.
+
+#[test]
+fn cr_119_a_cashier_cannot_give_cash_on_top_of_a_withdrawn_request() {
+    let mut w = World::new();
+    let i = final_sale(&mut w);
+    // 5,000 sats arrived; ann asks for 4,000 and withdraws it. In cash 300
+    // cents are 3,000 sats, so 7,000 of 5,000 if the withdrawn request counts.
+    ask(&mut w, i, 4_000, ann()).unwrap();
+    withdraw(&mut w, i, 1, ann()).unwrap();
+    let err = ask_cash(&mut w, i, 300, ann()).unwrap_err();
+    assert_eq!(
+        err,
+        RefundRefused::WithdrawnMayBePaid {
+            received: 5_000,
+            asked: 4_000,
+            sats: 3_000
+        }
+    );
+    assert_eq!(err.rule(), "CR-119");
+    assert!(err.to_string().starts_with("CR-119: "));
+    // Nothing was written for the refused call.
+    assert_eq!(w.c.refund_views(i).len(), 1);
+    // A cash refund that fits beside the withdrawn request is allowed.
+    assert!(ask_cash(&mut w, i, 40, ann()).is_ok());
+}
+
+#[test]
+fn cr_119_a_manager_gives_cash_when_the_request_was_withdrawn() {
+    let mut w = World::new();
+    let i = final_sale(&mut w);
+    ask(&mut w, i, 4_000, ann()).unwrap();
+    withdraw(&mut w, i, 1, ann()).unwrap();
+    assert!(ask_cash(&mut w, i, 300, max()).is_ok());
+    // And more cash than is left, counting only what is not withdrawn, is
+    // refused as before.
+    let err = ask_cash(&mut w, i, 250, max()).unwrap_err();
+    assert!(matches!(err, RefundRefused::MoreThanReceived { .. }));
+}
+
+#[test]
+fn cr_119_a_new_request_ignores_a_withdrawn_one() {
+    let mut w = World::new();
+    let i = final_sale(&mut w);
+    ask(&mut w, i, 4_000, ann()).unwrap();
+    withdraw(&mut w, i, 1, ann()).unwrap();
+    assert_eq!(ask(&mut w, i, 4_000, ann()), Ok(2));
+    // And a cashier's request that is over what arrived is refused with
+    // the CR-67 words, not these.
+    let err = ask(&mut w, i, 4_000, ann()).unwrap_err();
+    assert!(matches!(err, RefundRefused::MoreThanReceived { .. }));
+}
+
+// CR-120.
+
+/// Ann asks three refunds of 90,000 sats at the start; 270,000 of the
+/// 300,000 sats cap is used.
+fn ann_near_the_cap(w: &mut World) -> u32 {
+    let i = big_sale(w);
+    for n in 1..=3 {
+        assert_eq!(ask(w, i, 90_000, ann()), Ok(n));
+    }
+    i
+}
+
+fn over_the_cap(w: &mut World, i: u32) -> bool {
+    matches!(
+        ask(w, i, 40_000, ann()),
+        Err(RefundRefused::NeedsManagerDaily { .. })
+    )
+}
+
+#[test]
+fn cr_120_an_entry_from_the_last_day_by_the_clock_counts() {
+    let mut w = World::new();
+    let i = ann_near_the_cap(&mut w);
+    // The chain moved on a great deal; the clock did not.
+    w.tick(3_600);
+    w.chain.tip += 500;
+    assert!(over_the_cap(&mut w, i));
+    // The clock past the day and the chain too: free.
+    w.tick(86_400);
+    assert!(!over_the_cap(&mut w, i));
+}
+
+#[test]
+fn cr_120_an_entry_fewer_than_144_blocks_old_counts_whatever_the_clock_says() {
+    let mut w = World::new();
+    let i = ann_near_the_cap(&mut w);
+    // The date was set two days forward.
+    w.tick(2 * 86_400);
+    w.chain.tip += 143;
+    assert!(over_the_cap(&mut w, i));
+    // The entries are 144 blocks old now.
+    w.chain.tip += 1;
+    assert!(!over_the_cap(&mut w, i));
+    // The heights come back from the stored sale after a restart.
+    let mut w = World::new();
+    let i = ann_near_the_cap(&mut w);
+    w.restart();
+    w.tick(2 * 86_400);
+    assert!(over_the_cap(&mut w, i));
+}
+
+#[test]
+fn cr_120_an_entry_timed_after_the_clock_counts() {
+    let mut w = World::new();
+    let i = ann_near_the_cap(&mut w);
+    // The date was set back, and the chain has moved on.
+    w.now -= 3 * 86_400;
+    w.chain.tip += 1_000;
+    assert!(over_the_cap(&mut w, i));
+}
+
+#[test]
+fn cr_120_an_entry_without_a_height_counts_by_the_clock_alone() {
+    use crate::refund::{EntryKind, RefundEntry};
+    let entry = |height| RefundEntry {
+        kind: EntryKind::Cash,
+        number: 0,
+        at: 1_000,
+        role: Role::Cashier,
+        name: "ann".to_string(),
+        sats: 10,
+        value_minor: Some(1),
+        withdrawn: false,
+        height,
+    };
+    let old = 1_000 + 86_400;
+    assert!(!entry(None).counts_for_cap(old, Some(500)));
+    assert!(!entry(Some(100)).counts_for_cap(old, None));
+    assert!(entry(Some(100)).counts_for_cap(old, Some(243)));
+    assert!(!entry(Some(100)).counts_for_cap(old, Some(244)));
+    assert!(entry(None).counts_for_cap(old - 1, None));
+    assert!(entry(None).counts_for_cap(999, None));
+}
+
+#[test]
+fn cr_120_entries_and_records_carry_the_height_and_read_back() {
+    use crate::refund::{EntryKind, RefundEntry};
+    let entry = |kind, height| RefundEntry {
+        kind,
+        number: u64::from(kind == EntryKind::Request),
+        at: 1_000,
+        role: Role::Cashier,
+        name: "ann".to_string(),
+        sats: 10,
+        value_minor: Some(1),
+        withdrawn: false,
+        height,
+    };
+    for kind in [EntryKind::Request, EntryKind::Cash] {
+        let plain = entry(kind, None);
+        let mut a = Vec::new();
+        plain.write(&mut a);
+        // Without a height the bytes are the earlier build's.
+        assert_eq!(a[0], if kind == EntryKind::Request { 1 } else { 2 });
+        let with = entry(kind, Some(812_345));
+        let mut b = Vec::new();
+        with.write(&mut b);
+        assert_eq!(b[0], if kind == EntryKind::Request { 3 } else { 4 });
+        assert_eq!(b.len(), a.len() + 4);
+        for (bytes, want) in [(a, plain), (b, with)] {
+            let mut r = openbmt_core::wire::Reader::new(&bytes);
+            assert_eq!(RefundEntry::read(&mut r).unwrap(), want);
+            r.finish().unwrap();
+        }
+    }
+    // A height of zero is not a height.
+    let mut zero = Vec::new();
+    entry(EntryKind::Cash, Some(1)).write(&mut zero);
+    let n = zero.len();
+    zero[n - 4..].copy_from_slice(&0u32.to_le_bytes());
+    assert!(RefundEntry::read(&mut openbmt_core::wire::Reader::new(&zero)).is_err());
+    // A record without a height keeps its earlier tag; with one it takes
+    // the new tag and four bytes more.
+    let plain = Event::RefundRequested {
+        index: 1,
+        at: 1_000,
+        number: 1,
+        role: Role::Cashier,
+        name: "ann".to_string(),
+        reason: "x".to_string(),
+        destination: dest(),
+        received_sats: 5_000,
+        waiting_for_depth: false,
+        sats: 10,
+        ask: Ask::Sats,
+        chain_height: None,
+    };
+    let mut with = plain.clone();
+    if let Event::RefundRequested { chain_height, .. } = &mut with {
+        *chain_height = Some(7);
+    }
+    let (a, b) = (plain.encode(), with.encode());
+    assert_eq!((a[0], b[0]), (16, 22));
+    assert_eq!(b.len(), a.len() + 4);
+    assert_eq!(Event::decode(&b).unwrap(), with);
+    // The new tag without its height, or with a zero one, is refused.
+    let mut short = b.clone();
+    short.truncate(a.len());
+    assert!(Event::decode(&short).is_err());
+    let mut zero = b;
+    let n = zero.len();
+    zero[n - 4..].copy_from_slice(&0u32.to_le_bytes());
+    assert!(Event::decode(&zero).is_err());
+    // The earlier tag with four bytes more is not read.
+    let mut long = a;
+    long.extend_from_slice(&7u32.to_le_bytes());
+    assert!(Event::decode(&long).is_err());
 }

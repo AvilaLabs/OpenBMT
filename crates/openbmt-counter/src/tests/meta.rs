@@ -340,9 +340,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_one_hundred_and_thirty_five_rules() {
+fn the_rules_file_defines_one_hundred_and_thirty_seven_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 135);
+    assert_eq!(ids.len(), 137);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -371,6 +371,8 @@ fn the_rules_file_defines_one_hundred_and_thirty_five_rules() {
             && ids.contains("CR-178")
             && ids.contains("CR-185")
             && ids.contains("CR-186")
+            && ids.contains("CR-119")
+            && ids.contains("CR-120")
     );
 }
 

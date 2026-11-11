@@ -14,7 +14,7 @@ use bitcoin::{Address, Network, Script, ScriptBuf};
 use openbmt_core::wire::{DecodeError, Reader};
 
 use crate::counter::Actor;
-use crate::desk::Role;
+use crate::desk::{in_override_window, Role};
 use crate::money::{Amount, Rate, RateSource, MAX_SATS, SATS_PER_BTC};
 use crate::refusal::DestinationRefused;
 
@@ -23,6 +23,9 @@ pub const MAX_SCRIPT_BYTES: usize = 34;
 /// CR-67: most refund entries one sale keeps, requests and cash refunds
 /// together.
 pub const MAX_REFUNDS_PER_SALE: usize = 32;
+/// CR-120: how many blocks back a refund still counts toward a cashier's
+/// daily cap, whatever the clock says: a day of blocks.
+pub const CAP_WINDOW_BLOCKS: u32 = 144;
 /// CR-62: the longest text that is read as a refund QR code, in bytes.
 pub const MAX_QR_BYTES: usize = 2_048;
 
@@ -187,7 +190,14 @@ pub(crate) enum EntryKind {
 /// kind u8 (1 request, 2 cash) | number u64 (0 for cash) | at u64
 ///   | role u8 | name_len u8 | name | sats u64
 ///   | value (flag, u64: minor units) | withdrawn flag
+///   | chain height u32 (only kinds 3 and 4)
 /// ```
+///
+/// Kinds 3 (request) and 4 (cash) are kinds 1 and 2 that also hold the chain
+/// height the counter knew when the entry was made (CR-120). An entry whose
+/// height was not known is written as kind 1 or 2, byte for byte as an
+/// earlier build wrote it, and an earlier entry reads back with the height
+/// unknown. A build from before this one refuses a kind 3 or 4.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RefundEntry {
     pub kind: EntryKind,
@@ -200,18 +210,38 @@ pub(crate) struct RefundEntry {
     /// The amount in the shop's currency, when it was given that way.
     pub value_minor: Option<u64>,
     pub withdrawn: bool,
+    /// The chain height the counter knew when the entry was made (CR-120).
+    pub height: Option<u32>,
 }
 
 impl RefundEntry {
     /// Whether the entry counts toward "never more than received" (CR-67).
-    pub fn counts_as_asked(&self) -> bool {
-        !self.withdrawn
+    /// A withdrawn request does not, except for a cash refund a cashier
+    /// gives (CR-70, CR-119): the owner may still pay it.
+    pub fn counts_as_asked(&self, cashier_cash: bool) -> bool {
+        !self.withdrawn || cashier_cash
+    }
+
+    /// Whether the entry counts toward a cashier's daily cap at `now`, with
+    /// the chain at `now_height` (CR-69, CR-120): it is from the last 24
+    /// hours by the clock, or it was made fewer than [`CAP_WINDOW_BLOCKS`]
+    /// blocks ago when both heights are known, or its time is later than the
+    /// clock.
+    pub fn counts_for_cap(&self, now: u64, now_height: Option<u32>) -> bool {
+        in_override_window(self.at, now)
+            || self.at > now
+            || matches!(
+                (self.height, now_height),
+                (Some(then), Some(now_h)) if now_h.saturating_sub(then) < CAP_WINDOW_BLOCKS
+            )
     }
 
     pub fn write(&self, out: &mut Vec<u8>) {
-        out.push(match self.kind {
-            EntryKind::Request => 1,
-            EntryKind::Cash => 2,
+        out.push(match (self.kind, self.height) {
+            (EntryKind::Request, None) => 1,
+            (EntryKind::Cash, None) => 2,
+            (EntryKind::Request, Some(_)) => 3,
+            (EntryKind::Cash, Some(_)) => 4,
         });
         out.extend_from_slice(&self.number.to_le_bytes());
         out.extend_from_slice(&self.at.to_le_bytes());
@@ -221,13 +251,18 @@ impl RefundEntry {
         out.extend_from_slice(&self.sats.to_le_bytes());
         openbmt_core::wire::put_opt_u64(out, self.value_minor);
         out.push(u8::from(self.withdrawn));
+        if let Some(height) = self.height {
+            out.extend_from_slice(&height.to_le_bytes());
+        }
     }
 
     pub fn read(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         let bad = DecodeError::NonCanonical;
-        let kind = match r.u8()? {
-            1 => EntryKind::Request,
-            2 => EntryKind::Cash,
+        let (kind, has_height) = match r.u8()? {
+            1 => (EntryKind::Request, false),
+            2 => (EntryKind::Cash, false),
+            3 => (EntryKind::Request, true),
+            4 => (EntryKind::Cash, true),
             _ => return Err(bad("a refund entry kind is not known")),
         };
         let number = r.u64_le()?;
@@ -243,6 +278,14 @@ impl RefundEntry {
         let sats = r.u64_le()?;
         let value_minor = r.opt_u64()?;
         let withdrawn = r.flag()?;
+        let height = if has_height {
+            match r.u32_le()? {
+                0 => return Err(bad("a chain height is zero")),
+                h => Some(h),
+            }
+        } else {
+            None
+        };
         if sats == 0 || value_minor == Some(0) {
             return Err(bad("a refund entry is for nothing"));
         }
@@ -266,6 +309,7 @@ impl RefundEntry {
             sats,
             value_minor,
             withdrawn,
+            height,
         })
     }
 }

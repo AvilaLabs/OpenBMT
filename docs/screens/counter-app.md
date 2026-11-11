@@ -73,7 +73,7 @@ These are the words of what the app decides itself.
 | reasonNeeded | Reason needed | A refund is written down with the reason for it. | Type a short reason, then try again. | the cashier |  |
 | requestCopied | Request copied | The payment request is copied, written in lower case. | Paste it where the customer can use it. | the cashier |  |
 | refundAsked | Refund asked for | The refund request is saved, and it is paid only after the owner approves it. | Nothing more to do here. Tell the customer the owner pays refunds from the owner's phone. | the cashier |  |
-| refundWithdrawn | Refund withdrawn | The request is withdrawn, and the owner is told it is not wanted. | Nothing to do. If the owner has already paid it, tell the owner. | nobody |  |
+| refundWithdrawn | Refund withdrawn | The withdrawal is sent to the owner. A refund the owner has already started approving may still be paid. | Do not give it in cash until the owner says it was dropped. | the cashier |  |
 | cashRefunded | Cash refund saved | The cash refund from the till is written down, and the bitcoin is kept. | Give the customer the cash. | the cashier |  |
 | starting | Starting | The counter is starting and looking for the network. | Wait a moment. Keep the app open. | nobody |  |
 | stopped | Counter stopped | The counter has stopped, so no sale can be opened. | Close the app and open it again. If it stays stopped, take another kind of payment. | the cashier |  |

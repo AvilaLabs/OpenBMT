@@ -727,6 +727,18 @@ pub enum RefundRefused<E> {
         /// What this one asks, in satoshis.
         sats: u64,
     },
+    /// CR-119: a cashier's cash refund would pass what was received only if
+    /// a withdrawn request is counted, and the owner may still pay that
+    /// request.
+    WithdrawnMayBePaid {
+        /// What was received for the sale, in satoshis.
+        received: u64,
+        /// What the earlier requests (withdrawn ones too) and cash refunds
+        /// ask, in satoshis.
+        asked: u64,
+        /// What this one asks, in satoshis.
+        sats: u64,
+    },
     /// CR-69: a cashier asks for more than the largest single refund; a
     /// manager is needed.
     NeedsManagerSingle {
@@ -763,6 +775,7 @@ impl<E> RefundRefused<E> {
             | Self::TooManyRefunds
             | Self::MoreThanReceived { .. } => "CR-67",
             Self::OwnScript => "CR-68",
+            Self::WithdrawnMayBePaid { .. } => "CR-119",
             Self::NothingReceived => "CR-65",
             Self::NeedsManagerSingle { .. } | Self::NeedsManagerDaily { .. } => "CR-69",
             Self::Store(_) => "CR-40",
@@ -808,6 +821,16 @@ impl<E: fmt::Display> fmt::Display for RefundRefused<E> {
                 f,
                 "{sats} sats on top of {asked} sats already asked is more than the {received} \
                  sats received"
+            ),
+            Self::WithdrawnMayBePaid {
+                received,
+                asked,
+                sats,
+            } => write!(
+                f,
+                "{sats} sats on top of {asked} sats asked, withdrawn requests included, is more \
+                 than the {received} sats received; the owner may still pay a withdrawn \
+                 request, so a cashier cannot give this in cash"
             ),
             Self::NeedsManagerSingle { sats, limit } => write!(
                 f,

@@ -36,6 +36,10 @@ const TAG_REFUND_WITHDRAWN: u8 = 17;
 const TAG_REFUND_PAID_IN_CASH: u8 = 18;
 const TAG_PAID_BY_LIGHTNING: u8 = 19;
 const TAG_LATE_LIGHTNING: u8 = 21;
+// CR-120: the two refund records that carry the chain height. A record
+// without a known height keeps its earlier tag and bytes.
+const TAG_REFUND_REQUESTED_AT_HEIGHT: u8 = 22;
+const TAG_REFUND_PAID_IN_CASH_AT_HEIGHT: u8 = 23;
 
 /// Something that happened to a sale and is written down.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -270,6 +274,9 @@ pub enum Event {
         sats: u64,
         /// How the amount was given (CR-61).
         ask: Ask,
+        /// The chain height the counter knew when it wrote the record
+        /// (CR-120); none when it did not know one.
+        chain_height: Option<u32>,
     },
     /// A request was withdrawn (CR-70; kind `Refund`). The owner honours it
     /// only if the refund is still queued and not in an open session.
@@ -302,7 +309,22 @@ pub enum Event {
         minor: u64,
         /// What that is in satoshis at the sale's last quote, rounded up.
         sats: u64,
+        /// The chain height the counter knew when it wrote the record
+        /// (CR-120); none when it did not know one.
+        chain_height: Option<u32>,
     },
+}
+
+/// CR-120: the chain height at the end of a refund record, read only when
+/// the tag says it is there. A height of zero is not a height.
+fn read_chain_height(r: &mut Reader<'_>, present: bool) -> Result<Option<u32>, DecodeError> {
+    if !present {
+        return Ok(None);
+    }
+    match r.u32_le()? {
+        0 => Err(DecodeError::NonCanonical("a chain height is zero")),
+        h => Ok(Some(h)),
+    }
 }
 
 fn label_byte(l: InstantLabel) -> u8 {
@@ -535,9 +557,35 @@ impl Event {
             Self::Reopened { index, at } => (TAG_REOPENED, *index, *at),
             Self::PosPaid { index, at } => (TAG_POS_PAID, *index, *at),
             Self::PosUnpaid { index, at } => (TAG_POS_UNPAID, *index, *at),
-            Self::RefundRequested { index, at, .. } => (TAG_REFUND_REQUESTED, *index, *at),
+            Self::RefundRequested {
+                index,
+                at,
+                chain_height,
+                ..
+            } => (
+                if chain_height.is_some() {
+                    TAG_REFUND_REQUESTED_AT_HEIGHT
+                } else {
+                    TAG_REFUND_REQUESTED
+                },
+                *index,
+                *at,
+            ),
             Self::RefundWithdrawn { index, at, .. } => (TAG_REFUND_WITHDRAWN, *index, *at),
-            Self::RefundPaidInCash { index, at, .. } => (TAG_REFUND_PAID_IN_CASH, *index, *at),
+            Self::RefundPaidInCash {
+                index,
+                at,
+                chain_height,
+                ..
+            } => (
+                if chain_height.is_some() {
+                    TAG_REFUND_PAID_IN_CASH_AT_HEIGHT
+                } else {
+                    TAG_REFUND_PAID_IN_CASH
+                },
+                *index,
+                *at,
+            ),
         }
     }
 
@@ -658,6 +706,7 @@ impl Event {
                 waiting_for_depth,
                 sats,
                 ask,
+                chain_height,
                 ..
             } => {
                 out.extend_from_slice(&number.to_le_bytes());
@@ -682,6 +731,9 @@ impl Event {
                         write_source(&mut out, source);
                     }
                 }
+                if let Some(height) = chain_height {
+                    out.extend_from_slice(&height.to_le_bytes());
+                }
             }
             Self::RefundWithdrawn {
                 number, role, name, ..
@@ -695,12 +747,16 @@ impl Event {
                 reason,
                 minor,
                 sats,
+                chain_height,
                 ..
             } => {
                 write_person(&mut out, *role, name);
                 write_text(&mut out, reason);
                 out.extend_from_slice(&minor.to_le_bytes());
                 out.extend_from_slice(&sats.to_le_bytes());
+                if let Some(height) = chain_height {
+                    out.extend_from_slice(&height.to_le_bytes());
+                }
             }
             Self::Expired { .. }
             | Self::Replaced { .. }
@@ -867,7 +923,7 @@ impl Event {
             TAG_REOPENED => Self::Reopened { index, at },
             TAG_POS_PAID => Self::PosPaid { index, at },
             TAG_POS_UNPAID => Self::PosUnpaid { index, at },
-            TAG_REFUND_REQUESTED => {
+            TAG_REFUND_REQUESTED | TAG_REFUND_REQUESTED_AT_HEIGHT => {
                 let number = r.u64_le()?;
                 if number == 0 {
                     return Err(DecodeError::NonCanonical("a request number is zero"));
@@ -910,6 +966,8 @@ impl Event {
                     }
                     _ => return Err(DecodeError::NonCanonical("an ask is not known")),
                 };
+                let chain_height =
+                    read_chain_height(&mut r, tag == TAG_REFUND_REQUESTED_AT_HEIGHT)?;
                 Self::RefundRequested {
                     index,
                     at,
@@ -922,6 +980,7 @@ impl Event {
                     waiting_for_depth,
                     sats,
                     ask,
+                    chain_height,
                 }
             }
             TAG_REFUND_WITHDRAWN => {
@@ -938,7 +997,7 @@ impl Event {
                     name,
                 }
             }
-            TAG_REFUND_PAID_IN_CASH => {
+            TAG_REFUND_PAID_IN_CASH | TAG_REFUND_PAID_IN_CASH_AT_HEIGHT => {
                 let (role, name) = read_person(&mut r)?;
                 let reason = read_text(&mut r, "a reason is not a label")?;
                 let minor = r.u64_le()?;
@@ -946,6 +1005,8 @@ impl Event {
                 if minor == 0 || sats == 0 {
                     return Err(DecodeError::NonCanonical("a cash refund is for nothing"));
                 }
+                let chain_height =
+                    read_chain_height(&mut r, tag == TAG_REFUND_PAID_IN_CASH_AT_HEIGHT)?;
                 Self::RefundPaidInCash {
                     index,
                     at,
@@ -954,6 +1015,7 @@ impl Event {
                     reason,
                     minor,
                     sats,
+                    chain_height,
                 }
             }
             _ => return Err(DecodeError::NonCanonical("an event tag is not known")),

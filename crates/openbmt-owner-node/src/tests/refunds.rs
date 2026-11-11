@@ -216,6 +216,7 @@ fn requested(index: u32, number: u64, sats: u64, destination: ScriptBuf, receive
         waiting_for_depth: false,
         sats,
         ask: Ask::Sats,
+        chain_height: None,
     }
 }
 
@@ -238,6 +239,7 @@ fn paid_in_cash(index: u32, minor: u64) -> Event {
         reason: "till".to_string(),
         minor,
         sats: minor * 100,
+        chain_height: None,
     }
 }
 

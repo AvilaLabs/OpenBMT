@@ -337,13 +337,17 @@ has been made).
   counter cannot know whether the owner has taken the request, so the
   withdrawal is a message and not a fact: the owner honours it only if the
   refund is still queued and not in an open session. A withdrawn request no
-  longer counts for CR-67; it still counts for the cap (CR-69). A request
-  that is withdrawn, or does not exist, cannot be withdrawn again.
+  longer counts for CR-67 when a request is asked or a manager gives cash,
+  but it still counts when a cashier gives cash (CR-71, CR-119), and it
+  still counts for the cap (CR-69). A request that is withdrawn, or does
+  not exist, cannot be withdrawn again.
 - **CR-71.** A cash refund from the till (the shop's option, DESIGN §2.4) is
   a record `RefundPaidInCash` with the amount in the shop's currency, the
   cashier and the reason. It is valued at the sale's last quote and counts
   for CR-67, rounded up to a whole satoshi, and for the cashier's cap
-  (CR-69). It asks the owner for nothing: the bitcoin is kept.
+  (CR-69). It asks the owner for nothing: the bitcoin is kept. For CR-67 a
+  cashier's cash refund counts the withdrawn requests too (CR-119); a
+  manager's does not.
 - **CR-72.** For each sale the counter gives a `RefundView` for each entry:
   the sale, what was asked in satoshis, the state (`Requested`,
   `WaitingForDepth`, `Withdrawn` or `PaidInCash`), who asked and when. The
@@ -371,6 +375,28 @@ has been made).
   and the Key app limits refunds to unknown destinations. The counter does
   not learn whether a refund was paid: that would need a message from the
   owner back to the counter, which these rules do not have.
+- **CR-119.** A cashier's cash refund (CR-71) is refused when it would take
+  what is asked for the sale past what was received only if the sale's
+  withdrawn requests are counted as well. The owner may already have the
+  request in an open approval session (CR-70), and would pay it on top of
+  the cash. The refusal says the owner is to be asked whether the request
+  was dropped, and that a manager can then give the cash refund. A manager's
+  cash refund, and a new request (the owner sees both), count the withdrawn
+  requests as CR-67 says. A cash refund that is over what arrived without
+  the withdrawn requests is refused under CR-67 as before.
+- **CR-120.** Each refund entry keeps the chain height the counter's headers
+  were at when the entry was made, when that height is above zero; a record
+  without one reads back as height unknown. An entry counts toward a
+  cashier's daily cap (CR-69) when any of these hold: it is from the last 24
+  hours by the clock; both its height and the chain height now are known and
+  the entry is fewer than 144 blocks old; its time is later than the clock
+  now. So a cashier who moves the phone's date forward does not free the cap
+  until a day of blocks has passed too. The refund records `RefundRequested`
+  and `RefundPaidInCash` take the tags 22 and 23 when they carry the height
+  (a `u32` after the other fields) and keep the tags 16 and 18, and their
+  bytes, when they do not; the sale's refund entry takes the kinds 3 and 4
+  for the same (a `u32` after the withdrawn flag) and keeps the kinds 1 and
+  2. A build from before this one refuses the new tags and kinds.
 
 ## 8. Settling old sales
 

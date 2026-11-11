@@ -1322,6 +1322,13 @@ impl<E: Display> RefundRefused<E> {
                 "Ask for a smaller amount.",
                 "CR-67",
             ),
+            Self::WithdrawnMayBePaid { .. } => refused(
+                "Refund may still be paid",
+                "A withdrawn request for this sale may already be in the owner's approval, so a cash refund on top of it is not allowed.",
+                Who::Cashier,
+                "Ask the owner whether the request was dropped. If it was, a manager can give the cash refund.",
+                "CR-119",
+            ),
             Self::NeedsManagerSingle {
                 sats: amount,
                 limit,
@@ -2108,6 +2115,14 @@ pub fn all_words() -> Vec<(String, Words)> {
         (
             "MoreThanReceived",
             RefundRefused::MoreThanReceived {
+                received: 10_000,
+                asked: 6_000,
+                sats: 5_000,
+            },
+        ),
+        (
+            "WithdrawnMayBePaid",
+            RefundRefused::WithdrawnMayBePaid {
                 received: 10_000,
                 asked: 6_000,
                 sats: 5_000,

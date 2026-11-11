@@ -30,7 +30,7 @@ use openbmt_watch::{
 };
 
 use crate::batch_held::BatchHeld;
-use crate::desk::{in_override_window, valid_name, Desk, OverrideEntry, Role};
+use crate::desk::{valid_name, Desk, OverrideEntry, Role};
 use crate::events::{final_payments, Event};
 use crate::heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
 use crate::money::{sats_for, value_of, Amount, Currency, Quote, Rate, RateSource, MAX_SATS};
@@ -2443,7 +2443,8 @@ impl Counter {
             return Err(RefundRefused::OwnScript);
         }
         let (received, confirmations) = self.refund_facts(&base, now, headers);
-        self.refund_limits(&base, &actor, sats, received, now)?;
+        let height = chain_height(headers);
+        self.refund_limits(&base, &actor, false, sats, received, now, height)?;
         let final_depth = self.final_depth();
         let number = self.desk.last_refund_no().saturating_add(1);
         let mut desk = self.desk.clone();
@@ -2465,6 +2466,7 @@ impl Counter {
             waiting_for_depth: confirmations < final_depth,
             sats,
             ask,
+            chain_height: height,
         };
         let mut sale = base;
         sale.refunds.push(RefundEntry {
@@ -2476,6 +2478,7 @@ impl Counter {
             sats,
             value_minor,
             withdrawn: false,
+            height,
         });
         let done = self.finish(store, sale, &[event]);
         // A record that was written stands even if the sale was not (CR-73).
@@ -2576,7 +2579,8 @@ impl Counter {
             .ok_or(RefundRefused::UnknownSale(index))?;
         let sats = sats_for(minor, rate).ok_or(RefundRefused::AmountTooLarge)?;
         let (received, _) = self.refund_facts(&base, now, headers);
-        self.refund_limits(&base, &actor, sats, received, now)?;
+        let height = chain_height(headers);
+        self.refund_limits(&base, &actor, true, sats, received, now, height)?;
         let event = Event::RefundPaidInCash {
             index,
             at: now,
@@ -2585,6 +2589,7 @@ impl Counter {
             reason,
             minor: minor.0,
             sats,
+            chain_height: height,
         };
         let mut sale = base;
         sale.refunds.push(RefundEntry {
@@ -2596,6 +2601,7 @@ impl Counter {
             sats,
             value_minor: Some(minor.0),
             withdrawn: false,
+            height,
         });
         let done = self.finish(store, sale, &[event]);
         self.adopt_refunds();
@@ -2691,15 +2697,20 @@ impl Counter {
         (received, status.min_confirmations)
     }
 
-    /// CR-65, CR-67, CR-69: the checks that a request and a cash refund
-    /// share, for `sats` more asked on a sale that has `received`.
+    /// CR-65, CR-67, CR-69, CR-119: the checks that a request and a cash
+    /// refund share, for `sats` more asked on a sale that has `received`.
+    /// `cash` says the call is a cash refund; `height` is the chain height
+    /// now, when known (CR-120).
+    #[allow(clippy::too_many_arguments)]
     fn refund_limits<E>(
         &self,
         sale: &Sale,
         actor: &Actor,
+        cash: bool,
         sats: u64,
         received: u64,
         now: u64,
+        height: Option<u32>,
     ) -> Result<(), RefundRefused<E>> {
         if received == 0 {
             return Err(RefundRefused::NothingReceived);
@@ -2707,11 +2718,13 @@ impl Counter {
         if sale.refunds.len() >= MAX_REFUNDS_PER_SALE {
             return Err(RefundRefused::TooManyRefunds);
         }
-        let asked = sale
-            .refunds
-            .iter()
-            .filter(|e| e.counts_as_asked())
-            .fold(0u64, |sum, e| sum.saturating_add(e.sats));
+        let sum = |cashier_cash: bool| {
+            sale.refunds
+                .iter()
+                .filter(|e| e.counts_as_asked(cashier_cash))
+                .fold(0u64, |sum, e| sum.saturating_add(e.sats))
+        };
+        let asked = sum(false);
         if u128::from(asked) + u128::from(sats) > u128::from(received) {
             return Err(RefundRefused::MoreThanReceived {
                 received,
@@ -2719,12 +2732,24 @@ impl Counter {
                 sats,
             });
         }
+        // CR-119: the owner may still pay a withdrawn request, so a cashier's
+        // cash refund counts it too.
+        if cash && actor.role == Role::Cashier {
+            let with_withdrawn = sum(true);
+            if u128::from(with_withdrawn) + u128::from(sats) > u128::from(received) {
+                return Err(RefundRefused::WithdrawnMayBePaid {
+                    received,
+                    asked: with_withdrawn,
+                    sats,
+                });
+            }
+        }
         if actor.role == Role::Cashier {
             let limit = self.settings.refund_cap.sats;
             if sats > limit {
                 return Err(RefundRefused::NeedsManagerSingle { sats, limit });
             }
-            let already = self.refund_total(actor, now);
+            let already = self.refund_total(actor, now, height);
             let cap = self.settings.refund_daily_cap.sats;
             if u128::from(already) + u128::from(sats) > u128::from(cap) {
                 return Err(RefundRefused::NeedsManagerDaily { sats, already, cap });
@@ -2733,15 +2758,16 @@ impl Counter {
         Ok(())
     }
 
-    /// CR-69: what a person has asked for in refunds inside the window
-    /// before `now`, over every sale: requests (withdrawn ones too) and cash
-    /// refunds. The sum saturates.
-    fn refund_total(&self, actor: &Actor, now: u64) -> u64 {
+    /// CR-69, CR-120: what a person has asked for in refunds inside the
+    /// window before `now`, over every sale: requests (withdrawn ones too)
+    /// and cash refunds. The window is a day by the clock, and also a day of
+    /// blocks when the heights are known. The sum saturates.
+    fn refund_total(&self, actor: &Actor, now: u64, height: Option<u32>) -> u64 {
         self.sales
             .values()
             .flat_map(|s| s.refunds.iter())
             .filter(|e| e.role == actor.role && e.name == actor.name)
-            .filter(|e| in_override_window(e.at, now))
+            .filter(|e| e.counts_for_cap(now, height))
             .fold(0u64, |sum, e| sum.saturating_add(e.sats))
     }
 
@@ -2859,6 +2885,12 @@ impl Counter {
     }
 }
 
+/// CR-120: the chain height the counter's headers are at, or none when they
+/// are at the start (height zero) and nothing is known.
+fn chain_height<C: HeaderChain + ?Sized>(headers: &C) -> Option<u32> {
+    Some(headers.tip_height()).filter(|h| *h > 0)
+}
+
 /// CR-73: fold one refund event into what the sales' refund entries are.
 /// Events are taken in record order; a withdrawal belongs to the request of
 /// its number.
@@ -2872,6 +2904,7 @@ fn fold_refund(book: &mut BTreeMap<u32, Vec<RefundEntry>>, highest: &mut u64, ev
             name,
             sats,
             ask,
+            chain_height,
             ..
         } => {
             *highest = (*highest).max(number);
@@ -2887,6 +2920,7 @@ fn fold_refund(book: &mut BTreeMap<u32, Vec<RefundEntry>>, highest: &mut u64, ev
                     Ask::Value { minor, .. } => Some(minor),
                 },
                 withdrawn: false,
+                height: chain_height,
             });
         }
         Event::RefundWithdrawn { index, number, .. } => {
@@ -2906,6 +2940,7 @@ fn fold_refund(book: &mut BTreeMap<u32, Vec<RefundEntry>>, highest: &mut u64, ev
             name,
             minor,
             sats,
+            chain_height,
             ..
         } => book.entry(index).or_default().push(RefundEntry {
             kind: EntryKind::Cash,
@@ -2916,6 +2951,7 @@ fn fold_refund(book: &mut BTreeMap<u32, Vec<RefundEntry>>, highest: &mut u64, ev
             sats,
             value_minor: Some(minor),
             withdrawn: false,
+            height: chain_height,
         }),
         _ => {}
     }

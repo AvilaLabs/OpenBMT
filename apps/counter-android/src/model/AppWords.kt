@@ -491,9 +491,9 @@ object AppWords {
 
     val refundWithdrawn = w(
         Tones.INFO, "Refund withdrawn",
-        "The request is withdrawn, and the owner is told it is not wanted.",
-        Who.NOBODY,
-        "Nothing to do. If the owner has already paid it, tell the owner.",
+        "The withdrawal is sent to the owner. A refund the owner has already started approving may still be paid.",
+        Who.CASHIER,
+        "Do not give it in cash until the owner says it was dropped.",
     )
 
     val cashRefunded = w(
