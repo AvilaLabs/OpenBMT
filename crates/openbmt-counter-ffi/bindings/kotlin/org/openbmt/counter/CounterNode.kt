@@ -380,7 +380,11 @@ class Status(
 /**
  * CR-136: the link to the owner. [words] is the line for the home screen
  * ("Connected to the Box", or why not); [since] is when the Box was first not
- * reachable, while it is not.
+ * reachable, while it is not. [settingsVersion] is the version of the
+ * settings in force; [restartNeeded] is set when the settings changed Tor or
+ * the Lightning node, so the app starts the node again when no sale screen is
+ * open (CR-164); [settingsLine] is what Home says about the settings, if
+ * anything (CR-164, CR-165).
  */
 class Link(
     val words: Words,
@@ -390,6 +394,9 @@ class Link(
     val heartbeatsTaken: Long,
     val ownerRecords: Long,
     val lastCheckInAt: Long?,
+    val settingsVersion: Long,
+    val restartNeeded: Boolean,
+    val settingsLine: Words?,
 )
 
 /** What [CounterNode.linkStep] returns: the link after the step, and what the link logged. */
@@ -729,7 +736,10 @@ internal fun Reader.shopSettings(): ShopSettings = ShopSettings(u32(), bool(), b
 internal fun Reader.rate(): Rate = Rate(u64(), string(), u64())
 
 internal fun Reader.linkView(): Link =
-    Link(words(), bool(), option { u64() }, bool(), u64(), u64(), option { u64() })
+    Link(
+        words(), bool(), option { u64() }, bool(), u64(), u64(), option { u64() },
+        u32(), bool(), option { words() },
+    )
 
 internal fun Reader.linkStepView(): LinkStep = LinkStep(linkView(), strings())
 

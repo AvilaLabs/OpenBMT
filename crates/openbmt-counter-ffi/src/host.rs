@@ -34,10 +34,10 @@ use openbmt_counter::{
     refund_destination, Actor, Amount, CashRefund, Currency, Rate, RateSource, RefundAsk,
     RefundRequest, Report, Screen, StaffChange, StaffEvent,
 };
-use openbmt_counter_node::own_node_setting;
+use openbmt_counter_node::{effective_settings, own_node_setting};
 use openbmt_counter_node::{
-    DriverPort, HeartbeatNotTaken, Launch, Node, NodeConfig, PairRefused, PairingRecord,
-    SaleLightning, SetupStep, StartError, NOTE_LOG,
+    DirStore, DriverPort, HeartbeatNotTaken, Launch, Node, NodeConfig, PairRefused, PairingRecord,
+    SaleLightning, SettingsFault, SetupStep, StartError, NOTE_LOG,
 };
 use openbmt_lightning::{
     CertPin, ClnCredential, Credential, Endpoint, LndCredential, Reply as LnReply,
@@ -189,6 +189,7 @@ fn start_error(e: &StartError) -> CounterError {
         StartError::Dir(_) => ("start-folder", Kind::Store),
         StartError::Headers(_) => ("start-headers", Kind::Refused),
         StartError::Counter(l) => (l.rule(), Kind::Refused),
+        StartError::Settings(f) => (f.rule(), Kind::Refused),
         StartError::FirstBatch(_) => ("start-first-batch", Kind::Refused),
         StartError::Checked(_) => ("start-checked", Kind::Store),
         StartError::Driver(_) => ("start-driver", Kind::Refused),
@@ -235,9 +236,21 @@ fn check_start(
     // lists, the version and the first batch.
     record.check(&policy).map_err(refused)?;
     let identity = record.identity().map_err(refused)?;
+    // CR-163: the settings the owner sent after pairing, from the file, when
+    // they are newer than the pairing's; a file that does not read is a fault.
+    let settings = DirStore::open(&req.dir)
+        .map_err(SettingsFault::Read)
+        .and_then(|store| effective_settings(&store, &record))
+        .map_err(|f| CounterError::Refused {
+            rule: f.rule().to_string(),
+            text: f.to_string(),
+            words: Box::new(f.words()),
+        })?
+        .signed
+        .settings;
     // CR-87: with Tor on in the verified settings, the node never starts
     // without the proxy, whatever the app's own reading of the settings said.
-    if record.settings.settings.tor_on && req.proxy.is_none() {
+    if settings.tor_on && req.proxy.is_none() {
         return Err(refused_by(
             "CR-87",
             "CR-87: the settings have Tor on and the start has no proxy",
@@ -268,7 +281,7 @@ fn check_start(
                 identity: record.identity().map_err(refused)?,
                 owner: record.roots.owner,
                 proxy: driver.proxy.or(proxy),
-                tor_on: record.settings.settings.tor_on,
+                tor_on: settings.tor_on,
                 dir: std::path::PathBuf::from(&req.dir),
             })
         }
@@ -295,13 +308,10 @@ fn check_start(
     let mut pairing = record.pairing();
     pairing.batch_policy = policy;
     clock.fetch_max(req.now, Ordering::SeqCst);
-    let mut config = NodeConfig::new(
-        req.dir,
-        identity,
-        pairing,
-        record.settings.settings.clone(),
-        driver,
-    );
+    let mut config = NodeConfig::new(req.dir, identity, pairing, settings, driver);
+    // CR-162: a counter paired with a relay tells the owner which settings it
+    // holds.
+    config.announce_settings = record.relay.is_some();
     config.first_batch = record.first_batch.clone();
     config.clock = Box::new(AppClock(Arc::clone(clock)));
     // CR-115: the saved Lightning connection, if the app has one.

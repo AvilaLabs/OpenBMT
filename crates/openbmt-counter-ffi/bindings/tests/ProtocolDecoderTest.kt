@@ -180,6 +180,9 @@ object ProtocolDecoderTest {
             out.write(1) // refused
             out.write(Writer().u64(3).u64(7).toByteArray())
             out.write(0) // no check-in yet
+            out.write(Writer().u32(2).toByteArray()) // settings version
+            out.write(0) // no restart needed
+            out.write(0) // no settings line
             return out.toByteArray()
         }
         decodeResponse(header(0, link(true))).let { r ->
@@ -187,6 +190,7 @@ object ProtocolDecoderTest {
             r.end()
             check(l.words.heading == "Box not reachable" && !l.connected && l.since == 1_700_000_000L)
             check(l.refused && l.heartbeatsTaken == 3L && l.ownerRecords == 7L && l.lastCheckInAt == null)
+            check(l.settingsVersion == 2L && !l.restartNeeded && l.settingsLine == null)
         }
         decodeResponse(header(0, link(false))).let { r ->
             check(r.linkView().since == null)

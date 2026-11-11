@@ -405,6 +405,9 @@ impl<'a> Rd<'a> {
             heartbeats_taken: self.u64(),
             owner_records: self.u64(),
             last_check_in_at: self.opt(Rd::u64),
+            settings_version: self.u32(),
+            restart_needed: self.bool(),
+            settings_line: self.opt(Rd::words),
         }
     }
 
@@ -422,6 +425,9 @@ pub struct LinkV {
     pub heartbeats_taken: u64,
     pub owner_records: u64,
     pub last_check_in_at: Option<u64>,
+    pub settings_version: u32,
+    pub restart_needed: bool,
+    pub settings_line: Option<Words>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

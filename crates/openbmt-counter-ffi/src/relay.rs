@@ -25,7 +25,7 @@ use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::relay::{RelayHint, SignedRelayHint};
 use openbmt_counter_node::{
     start_link, CounterLink, LinkLine, LinkNotStarted, LinkState, PairRefused, PairingRecord,
-    RelayRefused,
+    RelayRefused, SettingsLine,
 };
 
 use crate::error::{from_rule, CounterError};
@@ -151,6 +151,11 @@ impl LinkSlot {
             heartbeats_taken: state.map_or(0, |st| st.heartbeats_taken),
             owner_records: state.map_or(0, |st| st.owner_records),
             last_check_in_at: state.and_then(|st| st.last_check_in_at),
+            settings_version: state.map_or(0, |st| st.settings_version),
+            restart_needed: state.is_some_and(|st| st.restart_needed),
+            settings_line: state
+                .and_then(|st| SettingsLine::of(st.removed, st.restart_needed))
+                .map(|line| WordsView(line.words())),
         }
     }
 

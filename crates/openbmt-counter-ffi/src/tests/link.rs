@@ -10,6 +10,7 @@ use bitcoin::hashes::Hash;
 use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::Identity;
 use openbmt_core::relay::{RelayHint, RelayRoute, SignedRelayHint};
+use openbmt_core::settings::SignedSettings;
 use openbmt_courier::{Courier, CourierConfig, FirstStart, Received, RelayPost};
 use openbmt_link::{
     ClientConfig, Kind, MemoryStore, Relay, RelayConfig, Role, Route, Server, ServerConfig,
@@ -322,4 +323,118 @@ fn cr_132_a_relay_not_signed_by_the_pinned_owner_or_not_readable_is_refused() {
     let response = take(&[0, 1, 2], &signed(hint_for(addr), &id(1)));
     let fault = Rd::error(&response).expect("a refusal");
     assert_eq!(fault.rule, "CR-97");
+}
+
+// CR-160 to CR-165 through the calls: settings the owner sends over the link.
+
+fn owner_alone(mut s: openbmt_core::settings::Settings, version: u32) -> Vec<u8> {
+    s.version = version;
+    SignedSettings {
+        owner_sig: s.sign(&id(1)),
+        approver_sig: None,
+        settings: s,
+    }
+    .to_bytes()
+}
+
+fn both_roots(mut s: openbmt_core::settings::Settings, version: u32) -> Vec<u8> {
+    s.version = version;
+    SignedSettings {
+        owner_sig: s.sign(&id(1)),
+        approver_sig: Some(s.sign(&id(2))),
+        settings: s,
+    }
+    .to_bytes()
+}
+
+/// A started counter on a relay, with the owner's courier past its first
+/// poll and one step done.
+fn settled() -> (Server, Courier<RelayPost>, Rig, u64, Scratch) {
+    let server = relay();
+    let owner_dir = Scratch::new();
+    let mut owner = owner_courier(server.local_addr(), &owner_dir);
+    owner.poll().unwrap();
+    let rig = Rig::new();
+    let handle = rig.start_with(&config_for(&rig, Some(hint_for(server.local_addr())), None));
+    rig.send(vec![peers_event()]);
+    pump(&rig, handle);
+    step(&rig, handle, T0, false);
+    (server, owner, rig, handle, owner_dir)
+}
+
+#[test]
+fn cr_160_settings_the_owner_sends_are_applied_and_used_at_the_next_start() {
+    let (server, mut owner, rig, handle, _dir) = settled();
+    let mut tighter = signed_settings().settings;
+    tighter.light_per_sale.sats -= 1;
+    owner
+        .send(&id(3).device_id(), Kind::Settings, &owner_alone(tighter, 2))
+        .unwrap();
+    let (link, notes) = step(&rig, handle, T0 + 5, false);
+    assert_eq!(link.settings_version, 2, "{notes:?}");
+    assert!(!link.restart_needed && link.settings_line.is_none());
+    // The owner is sent the records, with the Setting record among them.
+    let (again, _) = step(&rig, handle, T0 + 10, false);
+    assert!(again.connected);
+    let got = owner.poll().unwrap();
+    assert!(of_kind(&got, Kind::Records) > 0, "{got:?}");
+    // A restart on the same folder uses the saved settings.
+    let _ = rig.call(2, handle, &[]);
+    let handle = rig.start_with(&config_for(&rig, Some(hint_for(server.local_addr())), None));
+    let (link, notes) = step(&rig, handle, T0 + 20, false);
+    assert_eq!(link.settings_version, 2, "{notes:?}");
+}
+
+#[test]
+fn cr_164_settings_that_change_tor_say_a_restart_is_needed_and_the_start_keeps_the_proxy_rule() {
+    let (server, mut owner, rig, handle, _dir) = settled();
+    let mut tor = signed_settings().settings;
+    tor.tor_on = true;
+    owner
+        .send(&id(3).device_id(), Kind::Settings, &owner_alone(tor, 2))
+        .unwrap();
+    let (link, notes) = step(&rig, handle, T0 + 5, false);
+    assert_eq!(link.settings_version, 2, "{notes:?}");
+    assert!(link.restart_needed);
+    let line = link.settings_line.expect("a line for Home");
+    assert_eq!(line.code.as_deref(), Some("CR-164"));
+    super::screen::check_wire_words(&line).expect("words");
+    // The next start has Tor on, so it cannot start without the proxy
+    // (CR-87), whatever the pairing record says.
+    let _ = rig.call(2, handle, &[]);
+    let response = rig.call(
+        1,
+        0,
+        &W::new()
+            .start(&config_for(&rig, Some(hint_for(server.local_addr())), None))
+            .0,
+    );
+    let f = Rd::error(&response).expect("a refusal");
+    assert_eq!(f.rule, "CR-87", "{f:?}");
+}
+
+#[test]
+fn cr_165_settings_that_remove_the_counter_say_so_on_home() {
+    let (server, mut owner, rig, handle, _dir) = settled();
+    let mut gone = signed_settings().settings;
+    gone.counters.clear();
+    gone.devices.remove(&id(3).device_id());
+    owner
+        .send(&id(3).device_id(), Kind::Settings, &both_roots(gone, 2))
+        .unwrap();
+    let (link, notes) = step(&rig, handle, T0 + 5, false);
+    assert_eq!(link.settings_version, 2, "{notes:?}");
+    let line = link.settings_line.expect("a line for Home");
+    assert_eq!(line.code.as_deref(), Some("CR-165"));
+    super::screen::check_wire_words(&line).expect("words");
+}
+
+#[test]
+fn cr_163_a_settings_file_that_does_not_read_stops_the_start_with_words() {
+    let rig = Rig::new();
+    std::fs::write(rig.dir().join("settings.bin"), b"not settings").unwrap();
+    let response = rig.call(1, 0, &W::new().start(&config_for(&rig, None, None)).0);
+    let f = Rd::error(&response).expect("a refusal");
+    assert_eq!(f.rule, "CR-163", "{f:?}");
+    super::screen::check_wire_words(&f.words).expect("words");
 }

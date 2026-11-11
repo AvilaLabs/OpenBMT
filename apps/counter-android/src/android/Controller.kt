@@ -114,6 +114,12 @@ class Controller(private val act: MainActivity) {
 
     // What the open screen redraws as the node reports.
     private var tick: (() -> Unit)? = null
+
+    /** The tick of the Home screen: Home is showing when [tick] is this one (CR-164). */
+    private var homeTick: (() -> Unit)? = null
+
+    /** CR-87: set when the start was refused because the settings the owner sent turned Tor on. */
+    private var torForced = false
     private var lastTick = 0L
 
     // What this run knows of its sales: the amount in the shop's currency of each, by index.
@@ -154,6 +160,7 @@ class Controller(private val act: MainActivity) {
     private fun begin() {
         fault = null
         torBlocked = null
+        torForced = false
         stopNode()
         val setup = try {
             config = configFile.load()
@@ -237,7 +244,8 @@ class Controller(private val act: MainActivity) {
                 val sources = Rates.sources()
                 // For display only: the library checks the record again at the start (CR-97).
                 val pairing = Shop.pairing(rec)
-                val gate = TorGate(pairing.settings.torOn, cfg.proxy)
+                val torOn = pairing.settings.torOn || torForced
+                val gate = TorGate(torOn, cfg.proxy)
                 if (!gate.available()) {
                     main.post {
                         if (id == runId) {
@@ -251,7 +259,7 @@ class Controller(private val act: MainActivity) {
                     if (id != runId) return@Thread
                     nodeDir.mkdirs()
                     // CR-134: an onion relay with Tor off in the settings goes through Orbot, when it answers.
-                    val linkProxy = LinkProxy.pick(pairing.relay == RelayKind.Onion, pairing.settings.torOn, cfg.proxy, Socks5Probe())
+                    val linkProxy = LinkProxy.pick(pairing.relay == RelayKind.Onion, torOn, cfg.proxy, Socks5Probe())
                     val n = CounterNode.start(
                         StartConfig(nodeDir.path, nowSecs(), rec, gate.proxy, cfg.ownNode.ifEmpty { null }, lightning, linkProxy),
                     )
@@ -264,7 +272,16 @@ class Controller(private val act: MainActivity) {
                     }
                 }
             } catch (e: CounterException) {
-                main.post { if (id == runId) { fault = e.sayWords(); render() } }
+                main.post {
+                    if (id != runId) return@post
+                    // CR-87: the settings the owner sent after pairing have Tor on: start again with the proxy.
+                    if (e.rule == "CR-87" && !torForced) {
+                        torForced = true
+                        return@post startNode()
+                    }
+                    fault = e.sayWords()
+                    render()
+                }
             } catch (e: LinkageError) {
                 main.post { if (id == runId) { fault = AppWords.libraryMissing(e.message); render() } }
             }
@@ -339,6 +356,8 @@ class Controller(private val act: MainActivity) {
                         break
                     }
                     main.post { if (id == runId) tick?.invoke() }
+                    // CR-164: new settings that change Tor or the Lightning node take effect when the node starts again, which is done when Home is showing and no sale screen is open.
+                    if (restartNeeded(n)) main.post { if (id == runId && tick != null && tick === homeTick) begin() }
                     var waited = 0L
                     while (runId == id && waited < LinkProxy.EVERY_MS) {
                         try {
@@ -358,6 +377,14 @@ class Controller(private val act: MainActivity) {
         val back = if (cashiers.isNotEmpty()) locks.reopen() else null
         if (back != null) showSale(back, null, null) else showHome()
     }
+
+    /** CR-164: whether the settings in force need the node started again. */
+    private fun restartNeeded(n: CounterNode): Boolean =
+        try {
+            n.linkState()?.restartNeeded == true
+        } catch (_: CounterException) {
+            false
+        }
 
     /** CR-136: whether the counter has a link to the owner, which is when its pairing holds a relay. */
     private fun hasLink(n: CounterNode): Boolean =
@@ -663,6 +690,7 @@ class Controller(private val act: MainActivity) {
         val ownSlot = Slot(act)
         val lightningSlot = Slot(act)
         val linkSlot = Slot(act)
+        val settingsSlot = Slot(act)
         val linked = hasLink(n)
         val views = ArrayList<View>()
         // CR-147: who is at the till, and a way to lock it.
@@ -693,6 +721,8 @@ class Controller(private val act: MainActivity) {
             // CR-136: the link to the owner, and a way to call the Box now.
             views.add(label("The Box"))
             views.add(linkSlot)
+            // CR-164, CR-165: what the owner's settings mean for this counter, when anything.
+            views.add(settingsSlot)
             views.add(ui.button("Try again") {
                 async({ n.linkStep(nowSecs(), true) }) { r ->
                     r.exceptionOrNull()?.let { if (it is CounterException) linkSlot.show(ui.words(it.sayWords())) }
@@ -738,9 +768,13 @@ class Controller(private val act: MainActivity) {
             health.show(ui.words(healthWords(n)))
             lightningWords(n)?.let { lightningSlot.show(label("Lightning"), ui.words(it)) } ?: lightningSlot.show()
             if (cfg.ownNode.isNotEmpty()) ownSlot.show(ui.words(ownNodeWords(n)))
-            if (linked) linkSlot.show(ui.words(linkWords(n)))
+            if (linked) {
+                linkSlot.show(ui.words(linkWords(n)))
+                settingsLine(n)?.let { settingsSlot.show(ui.words(it)) } ?: settingsSlot.show()
+            }
             priceSlot.show(*priceViews())
         }
+        homeTick = tick
         tick?.invoke()
     }
 
@@ -766,6 +800,14 @@ class Controller(private val act: MainActivity) {
     private fun linkWords(n: CounterNode): SayWords =
         try {
             n.linkState()?.words?.say() ?: AppWords.starting
+        } catch (e: CounterException) {
+            e.sayWords()
+        }
+
+    /** CR-164, CR-165: the line about the owner's settings, or null when there is none. */
+    private fun settingsLine(n: CounterNode): SayWords? =
+        try {
+            n.linkState()?.settingsLine?.say()
         } catch (e: CounterException) {
             e.sayWords()
         }

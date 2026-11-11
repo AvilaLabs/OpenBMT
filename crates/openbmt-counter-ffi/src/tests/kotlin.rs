@@ -162,7 +162,8 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "Sample(string(), u64(), u64())",
         "Rate(u64(), string(), u64())",
         "ShopSettings(u32(), bool(), bool(), u64())",
-        "Link(words(), bool(), option { u64() }, bool(), u64(), u64(), option { u64() })",
+        "words(), bool(), option { u64() }, bool(), u64(), u64(), option { u64() },",
+        "u32(), bool(), option { words() },",
         "LinkStep(linkView(), strings())",
         "PairingInfo(r.network(), r.shopSettings(), r.relayKind())",
     ] {
@@ -185,7 +186,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "OwnNodeCheckArgs: record: text: string, network: CounterNetwork, tor: bool",
         "StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>, lightning: option<list<u8>>, link_proxy: option<string>",
         "PairingView: record: network: CounterNetwork, settings: SettingsView, relay: RelayKind",
-        "LinkView: record: words: Words, connected: bool, since: option<u64>, refused: bool, heartbeats_taken: u64, owner_records: u64, last_check_in_at: option<u64>",
+        "LinkView: record: words: Words, connected: bool, since: option<u64>, refused: bool, heartbeats_taken: u64, owner_records: u64, last_check_in_at: option<u64>, settings_version: u32, restart_needed: bool, settings_line: option<Words>",
         "LinkStepView: record: link: LinkView, notes: list<string>",
         "RateSourceView: record: id: string, url: string, currency: string, initial: string",
         "RateParseArgs: record: source: string, response: list<u8>, fetched_at: u64",

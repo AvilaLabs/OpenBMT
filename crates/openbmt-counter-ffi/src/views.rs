@@ -978,6 +978,15 @@ pub struct LinkView {
     pub owner_records: u64,
     /// When the last check-in was made.
     pub last_check_in_at: Option<u64>,
+    /// The version of the settings in force (CR-162); 0 before the first
+    /// step.
+    pub settings_version: u32,
+    /// CR-164: the settings changed Tor or the Lightning node, so the app
+    /// starts the node again when no sale screen is open.
+    pub restart_needed: bool,
+    /// CR-164, CR-165: what Home says about the settings: that the counter
+    /// was removed, or that a restart is coming.
+    pub settings_line: Option<WordsView>,
 }
 
 wire_record!(LinkView {
@@ -987,7 +996,10 @@ wire_record!(LinkView {
     refused,
     heartbeats_taken,
     owner_records,
-    last_check_in_at
+    last_check_in_at,
+    settings_version,
+    restart_needed,
+    settings_line
 });
 
 /// What `link_step` returns: the link as it is after the step, and the

@@ -114,7 +114,7 @@ PairStartedView: record: request: list<u8>, words: list<string>
 PairingView: record: network: CounterNetwork, settings: SettingsView, relay: RelayKind
 RelayKind: enum, one tag byte
     tags None=0 Direct=1 Onion=2
-LinkView: record: words: Words, connected: bool, since: option<u64>, refused: bool, heartbeats_taken: u64, owner_records: u64, last_check_in_at: option<u64>
+LinkView: record: words: Words, connected: bool, since: option<u64>, refused: bool, heartbeats_taken: u64, owner_records: u64, last_check_in_at: option<u64>, settings_version: u32, restart_needed: bool, settings_line: option<Words>
 LinkStepView: record: link: LinkView, notes: list<string>
 OpenArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>
 CancelArgs: record: now: u64, index: u32, actor: option<ActorView>
