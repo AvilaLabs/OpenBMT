@@ -114,7 +114,11 @@ fn sc_03_the_numbers_of_the_prices_stay_out_of_the_sentences() {
 
 #[test]
 fn sc_12_the_list_is_on_disk() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/screens/rates.md");
+    let path = &std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("../../docs/screens/rates.md");
     let want = screens_markdown();
     if std::env::var_os("OPENBMT_WRITE_SCREENS").is_some() {
         if let Some(dir) = std::path::Path::new(path).parent() {

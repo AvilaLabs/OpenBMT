@@ -130,10 +130,11 @@ fn ps_80_a_refused_reply_is_an_unreadable_answer_for_the_connector() {
 
 #[test]
 fn sc_12_the_list_is_on_disk() {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../docs/screens/pos-readers.md"
-    );
+    let path = &std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("../../docs/screens/pos-readers.md");
     let want = screens_markdown();
     if std::env::var_os("OPENBMT_WRITE_SCREENS").is_some() {
         if let Some(dir) = std::path::Path::new(path).parent() {

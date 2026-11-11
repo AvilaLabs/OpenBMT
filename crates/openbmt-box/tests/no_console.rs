@@ -26,6 +26,10 @@ impl Drop for Dir {
     }
 }
 
+// Cargo gives the binary's path only at compile time. It names the target
+// folder of this build, not a source folder, so a reused object cannot point
+// at another checkout.
+#[allow(clippy::disallowed_macros)]
 fn spawn(dir: &Path, stdout: Stdio) -> Child {
     Command::new(env!("CARGO_BIN_EXE_openbmt-box"))
         .arg(dir)

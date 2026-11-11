@@ -1137,7 +1137,7 @@ fn who_name(who: Who) -> &'static str {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     use openbmt_approver::{DecideError, FinishError, RefuseSession, RestoreError, StateError};
     use openbmt_core::say::{check, check_distinct};
@@ -1600,7 +1600,11 @@ mod tests {
     // ---- the list of screens --------------------------------------------------
 
     fn screens_path() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/screens/key.md")
+        std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR")
+                .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+        )
+        .join("../../docs/screens/key.md")
     }
 
     #[test]

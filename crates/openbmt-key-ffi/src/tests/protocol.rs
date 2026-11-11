@@ -2,13 +2,17 @@
 //! into `bindings/PROTOCOL.md`, and compared with the hand-written Kotlin.
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::call::{enum_tags, ops, type_names};
 use crate::protocol_description;
 
 fn bindings() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("bindings")
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("bindings")
 }
 
 #[test]

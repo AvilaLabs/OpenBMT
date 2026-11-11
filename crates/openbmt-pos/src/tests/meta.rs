@@ -177,7 +177,11 @@ fn the_stored_magic_is_used_nowhere_else_in_the_workspace() {
             }
         }
     }
-    let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let crates = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("..");
     let mut hits = Vec::new();
     walk(&crates, &mut hits);
     assert_eq!(hits.len(), 1, "{hits:?}");

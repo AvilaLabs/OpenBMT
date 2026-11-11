@@ -317,7 +317,11 @@ fn the_only_unsafe_is_the_jni_glue_and_it_is_counted() {
     // file may hold the word as code. The glue's own count is pinned: every
     // block is one JNI call or one read of the function table, and adding one
     // means changing the numbers below on purpose.
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let dir = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("src");
     let mut dirs = vec![dir];
     let mut seen = 0;
     while let Some(d) = dirs.pop() {

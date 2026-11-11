@@ -45,7 +45,11 @@ pub fn merged(existing: &str, prefix: &str, rows: &str) -> String {
 /// SC-12: compare the rows of one crate with the file on disk, or, when the
 /// environment has `OPENBMT_WRITE_SCREENS=1`, write them into it.
 pub fn check_or_write(prefix: &str, rows: &str) {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/screens/owner.md");
+    let path = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("../../docs/screens/owner.md");
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
     if std::env::var("OPENBMT_WRITE_SCREENS").is_ok_and(|v| v == "1") {
         if let Some(dir) = path.parent() {

@@ -1,0 +1,6 @@
+# Compile-time paths such as env!("CARGO_MANIFEST_DIR") are baked into the
+# build and are wrong when a compiled object is reused from another checkout
+# of the repository, so tests read their folder at run time instead.
+disallowed-macros = [
+    { path = "std::env", reason = "read CARGO_MANIFEST_DIR at run time with std::env::var_os" },
+]

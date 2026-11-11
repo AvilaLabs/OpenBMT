@@ -437,7 +437,11 @@ fn sc_01_no_variant_is_missing() {
 
 #[test]
 fn sc_12_the_list_is_on_disk() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/screens/box.md");
+    let path = &std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("../../docs/screens/box.md");
     let want = screens_markdown();
     if std::env::var_os("OPENBMT_WRITE_SCREENS").is_some() {
         if let Some(dir) = std::path::Path::new(path).parent() {

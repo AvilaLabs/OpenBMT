@@ -2,7 +2,6 @@
 //! that every rule string has words, and the count of `unsafe`.
 
 use std::collections::BTreeSet;
-use std::path::Path;
 
 use openbmt_core::say::{check, Quoted, Tone, Who, Words};
 
@@ -76,7 +75,11 @@ fn a_rule_string_without_words_gets_the_words_of_its_kind() {
 /// The rule strings that the source passes to `refused_by`, `store_by` and
 /// `wrong_state`.
 fn rules_in_source() -> BTreeSet<String> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let dir = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("src");
     let mut out = BTreeSet::new();
     for entry in std::fs::read_dir(dir).expect("a directory") {
         let path = entry.expect("an entry").path();
@@ -108,7 +111,11 @@ fn every_rule_string_the_source_makes_has_words_of_its_own() {
     }
     // And no rule string of the table is left that nothing makes: each is
     // spelled somewhere in the code outside say.rs.
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let dir = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("src");
     let mut code = String::new();
     for name in [
         "call.rs", "codec.rs", "error.rs", "host.rs", "jni.rs", "views.rs",
@@ -138,7 +145,11 @@ fn the_only_unsafe_is_the_jni_glue_and_it_is_counted() {
     // file may hold the word as code. The glue's own count is pinned: every
     // block is one JNI call or one read of the function table, and adding one
     // means changing the numbers below on purpose.
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let dir = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("src");
     let mut dirs = vec![dir];
     let mut seen = 0;
     while let Some(d) = dirs.pop() {
@@ -190,8 +201,14 @@ fn the_only_unsafe_is_the_jni_glue_and_it_is_counted() {
 #[test]
 fn the_glue_keeps_no_reference_and_no_environment_between_calls() {
     // No global reference, no cached environment, no thread of its own.
-    let glue = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/jni.rs"))
-        .expect("readable");
+    let glue = std::fs::read_to_string(
+        std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR")
+                .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+        )
+        .join("src/jni.rs"),
+    )
+    .expect("readable");
     let glue = glue.split("\n#[cfg(test)]").next().expect("a first part");
     for word in [
         "NewGlobalRef",

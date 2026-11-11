@@ -3,7 +3,7 @@
 //! `bindings/tests/ProtocolDecoderTest.kt`.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::wire::{frame, W};
 use crate::call::{enum_tags, ops};
@@ -11,9 +11,12 @@ use crate::say::{TONES, WHOS};
 use crate::{CounterNetwork, StartConfig};
 
 fn bindings(file: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("bindings")
-        .join(file)
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("bindings")
+    .join(file)
 }
 
 fn read(path: PathBuf) -> String {
@@ -212,7 +215,13 @@ fn the_kotlin_native_declaration_matches_the_exported_symbol() {
     assert!(text.contains("external fun call(request: ByteArray): ByteArray?"));
     // The symbol the JVM looks for: package, class and method of the
     // declaration above (no name has an underscore to escape).
-    let glue = read(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/jni.rs"));
+    let glue = read(
+        std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR")
+                .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+        )
+        .join("src/jni.rs"),
+    );
     assert!(glue.contains("pub extern \"system\" fn Java_org_openbmt_counter_Native_call("));
 }
 
@@ -320,8 +329,11 @@ fn the_price_requests_are_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
 /// The counter app's fetch limits are the library's (RT-40, RT-43, RT-10).
 #[test]
 fn the_counter_app_fetch_limits_are_the_rates_library_ones() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../apps/counter-android/src/model/PriceSchedule.kt");
+    let path = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("../../apps/counter-android/src/model/PriceSchedule.kt");
     let text = read(path);
     let value = |name: &str| -> String {
         let line = text

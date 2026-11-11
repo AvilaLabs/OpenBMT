@@ -3,15 +3,18 @@
 //! `bindings/tests/ProtocolDecoderTest.kt`.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::call::{enum_tags, ops};
 use crate::say::{TONES, WHOS};
 
 fn kotlin(file: &str) -> String {
-    let path: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("bindings/kotlin/org/openbmt/key")
-        .join(file);
+    let path: PathBuf = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("bindings/kotlin/org/openbmt/key")
+    .join(file);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
@@ -153,7 +156,13 @@ fn the_kotlin_native_declaration_matches_the_exported_symbol() {
     }
     // The symbol the JVM looks for: package, class and method of the
     // declaration above (no name has an underscore to escape).
-    let glue = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/jni.rs"))
-        .expect("readable");
+    let glue = std::fs::read_to_string(
+        std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR")
+                .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+        )
+        .join("src/jni.rs"),
+    )
+    .expect("readable");
     assert!(glue.contains("pub extern \"system\" fn Java_org_openbmt_key_Native_call("));
 }

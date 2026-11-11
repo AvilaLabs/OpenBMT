@@ -89,7 +89,11 @@ fn sc_02_every_start_error_says_the_counter_did_not_start() {
 
 #[test]
 fn sc_12_the_list_on_disk_is_current() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/screens/counter.md");
+    let path = &std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("../../docs/screens/counter.md");
     let want = screens_markdown();
     if std::env::var_os("OPENBMT_WRITE_SCREENS").is_some() {
         std::fs::write(path, &want).expect("the list can be written");
