@@ -306,7 +306,7 @@ impl Wire {
     }
 
     /// The encrypted handshake up to the point where the session has sent
-    /// its `version`: `ours` is the session's first 64 bytes; the reply is
+    /// its `version`: the local key is the session's first 64 bytes; the reply is
     /// fed back by the caller. Returns the reply.
     pub fn answer(&mut self, ours: &[u8]) -> Vec<u8> {
         self.peer().answer(ours)

@@ -392,7 +392,7 @@ class Controller(internal val act: MainActivity) {
         val views = ArrayList<View>()
         views.add(ui.words(message ?: AppWords.notSetUp))
         views.add(ui.button("Make a new shop wallet") { startCeremony() })
-        views.add(ui.button("I have setup text") { showPasteSetup(null) })
+        views.add(ui.button("Use setup text") { showPasteSetup(null) })
         page(views)
     }
 

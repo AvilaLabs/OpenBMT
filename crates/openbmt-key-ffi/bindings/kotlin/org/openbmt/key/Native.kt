@@ -19,7 +19,7 @@ interface KeyStore {
     /** Store [bytes]; durable before this returns. Throw on any failure. */
     fun save(bytes: ByteArray)
 
-    /** [n] bytes from the platform's cryptographically secure random source. */
+    /** [n] bytes from the platform's cryptographically strong random source. */
     fun random(n: Int): ByteArray
 
     /** The time now, in seconds since 1970-01-01 UTC. */

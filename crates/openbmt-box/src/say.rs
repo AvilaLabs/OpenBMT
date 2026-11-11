@@ -594,8 +594,8 @@ impl HttpsKind {
                 "Check the Box's internet connection; the Box tries again by itself.",
             ),
             Self::Tls => stop(
-                "Secure connection failed",
-                "The Box could not make a secure connection to the till system, so it read nothing.".into(),
+                "Encrypted connection failed",
+                "The Box could not establish an encrypted connection to the till system, so it read nothing.".into(),
                 Who::BoxKeeper,
                 "Check the Box's clock and its list of trusted certificates; the Box tries again by itself.",
             ),

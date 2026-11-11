@@ -6,7 +6,7 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
   const boxMulti = sdk.MultiHost.of(effects, 'box-multi')
   // Raw TCP, not HTTP: no proxy and no TLS wrapper. The Box's link seals and
   // authenticates its own messages, so the port is published as a plain port
-  // (secure with ssl false) on every address the user enables.
+  // with TLS disabled on every address the user enables.
   const boxOrigin = await boxMulti.bindPort(boxPort, {
     protocol: null,
     addSsl: null,

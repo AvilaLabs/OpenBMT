@@ -10,7 +10,7 @@
 //! <part>` for each of the first max(4 * seqLen, 32) parts (one for a single part),
 //! then `end`. `read` takes the file the Java side wrote from the same
 //! cases (`ordered` and `lossy` parts of Hummingbird's encoder) and decodes
-//! each group; the type and the bytes must be ours.
+//! each group; the type and bytes must match this implementation.
 
 use openbmt_ur::cbor::encode_bytes;
 use openbmt_ur::{ur_to_key_text, Decoder, Encoder};

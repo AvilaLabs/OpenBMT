@@ -42,7 +42,7 @@ To run it again (the build and the run used the debug profile):
 ```
 
 The program only dials out to public peers found through the seeds. The
-driver never relays, so it sends no transaction, address or script of ours.
+driver never relays, so it sends no wallet transaction, address or script.
 No Tor and no proxy were used. No Bitcoin node was started on this machine.
 The runs were made on 2026-11-10 between 08:49 and 09:24 UTC.
 

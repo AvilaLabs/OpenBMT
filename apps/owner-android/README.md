@@ -18,7 +18,7 @@ the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-35, OA-60 to OA-65).
 
 | Screen | What it shows |
 |---|---|
-| First start | "Make a new shop wallet" (the key ceremony with the Key app, OA-26 to OA-31) or "I have setup text" (pasted or from a file, with the address of Orbot). |
+| First start | "Make a new shop wallet" (the key ceremony with the Key app, OA-26 to OA-31) or "Use setup text" (pasted or from a file, with the address of Orbot). |
 | Home | The receipts line, the number of alerts, the link state, the payments in progress. |
 | Receipts line | What the node counts as received, and the offer to merge. |
 | Spend | Builds the request for the Key app, shows it as a code, saves it as a file or copies it as text, takes the response by camera, file or paste. |

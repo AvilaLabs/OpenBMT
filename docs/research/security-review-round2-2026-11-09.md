@@ -292,7 +292,7 @@ chores to one habit (U4).
   contact.
 - **P2. Avila Labs is the single publisher; 14 days is unenforceable
   offline.** Fixes:
-  - The Key app ships only as our own-signed APK and on F-Droid, never on
+  - The Key app ships only as project-signed APK and on F-Droid, never on
     Play.
   - A signed release manifest carries `earliest_install_date`, which Owner
     mode shows ("Key app 1.4 is 9 days old; wait until X").

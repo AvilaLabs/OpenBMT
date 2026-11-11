@@ -80,7 +80,7 @@ impl std::fmt::Debug for Approver {
 
 impl Approver {
     /// A Key app with an empty state. `secret` is the 32 bytes of the
-    /// approver identity from a secure random source. `owner` is the
+    /// approver identity from a cryptographic random source. `owner` is the
     /// pinned owner root. The Key app is an approver only until
     /// [`Approver::attach_signer`] is called.
     pub fn new(

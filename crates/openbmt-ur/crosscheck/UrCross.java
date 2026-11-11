@@ -154,7 +154,7 @@ public class UrCross {
                 break;
             }
         }
-        // 1. Ours into Hummingbird.
+        // 1. Generated frames into Hummingbird.
         Random rnd = new Random(1000 + idx);
         List<String> inOrder = new ArrayList<>();
         for (int i = 0; i < ours.size(); i++) {

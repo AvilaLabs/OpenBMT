@@ -1,121 +1,140 @@
-# OpenBMT: Bitcoin Merchant Terminal
+# OpenBMT
 
-OpenBMT lets a shop take bitcoin at the counter the way it takes a card. The
-money goes straight into the merchant's own wallet, and the sale closes in the
-point-of-sale system the shop already uses.
+[![CI](https://github.com/AvilaLabs/OpenBMT/actions/workflows/ci.yml/badge.svg)](https://github.com/AvilaLabs/OpenBMT/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Status: pre-release.** Headless Rust pieces now cover the counter, owner
-coin view and sending path, approval flow, and POS and books logic. The
-user-facing screen word catalogs are written for the counter, owner, Key app,
-and Box console. These are not finished apps: Android/Kotlin integration,
-packaging, and device testing remain. The documented Bitcoin Core regtest
-results are engineering checks, not a security review. **No independent
-security audit has been done.** Do not use this with real funds.
+**Bitcoin checkout for independent shops, paid directly to the merchant's
+wallet.**
 
-## What it is
+**Pre-release. Do not use with real funds.** The Android apps are early builds
+that have not been tested on a phone or emulator. Release packaging and full
+application integration remain in progress. OpenBMT has had internal design
+reviews; no independent security audit has been completed.
 
-- **The merchant holds every key.** Payments arrive on-chain in a 2-of-3
-  multisig wallet (`wsh(sortedmulti(2,...))`). There is no processor, no
-  custodian and no company server in the payment path.
-- **Tap or scan.** The counter shows a QR code and, on Android, acts as an NFC
-  tag. Any wallet that reads a `bitcoin:` URI can pay.
-- **The counter holds no keys.** It receives batches of addresses that two
-  separate devices have signed, uses each address once, and checks payments
-  itself: over the Bitcoin peer-to-peer network with a light client, or
-  against the merchant's own node.
-- **Honest labels.** The screen always says which check was done. "Seen by 3
-  peers", "Paid (light check)" and "Confirmed (your node)" are different
-  things and are never blurred together.
-- **Closes the sale in the POS.** Connectors post the bitcoin tender back to
-  the POS, so receipts, inventory and reports keep working.
-- **Standard recovery.** The wallet is an ordinary output descriptor, so it
-  can be restored in other wallet software without anything from this
-  project. A restore drill against Bitcoin Core runs on regtest
-  ([scripts/restore-drill-core.sh](scripts/restore-drill-core.sh)); drills
-  against other wallets and hardware signers are part of the test plan.
+## Get started
 
-## The security goal
+- [Try a local Box preview](#try-a-local-box-preview)
+- [See how OpenBMT works](#about-openbmt)
+- [Read the design and current limits](#design-and-scope)
+- [Explore documentation](#documentation)
 
-Once two launch conditions hold, no single compromised OpenBMT component,
-device or person should be able to spend the wallet:
+## About OpenBMT
 
-1. the third key is made outside OpenBMT software, away from the device that
-   holds the second key;
-2. the signer app's release key is held by a second, independent person.
+OpenBMT is an open-source Bitcoin checkout project for shops. A cashier creates
+a sale and shows a payment QR code. The customer pays from a Bitcoin wallet,
+and the merchant controls the wallet keys. The counter reports what it has
+checked about a payment, so an unconfirmed transaction seen by peers is distinct
+from a confirmation checked against the merchant's own node.
 
-Until both hold, the claim does not hold, and the documents and screens say
-so. Losses from accepting unconfirmed payments are bounded by limits the owner
-sets. The full statement, its conditions and the reasoning are in
-[docs/DESIGN.md](docs/DESIGN.md).
+The project includes on-chain payments using a 2-of-3 wallet, an owner app for
+refunds and cash-outs, and a separate app for approving transactions. An
+optional Box relays records between shop devices and reads POS orders. The owner
+app can match Square and Clover orders with counter sales; completing a POS
+checkout automatically is still in progress. Shops can also connect the counter
+to their own LND or Core Lightning node to offer Lightning invoices.
 
-## What is in this repository
+### The four parts
 
-| Path | What |
+| Part | What it does |
 |---|---|
-| [docs/DESIGN.md](docs/DESIGN.md) | The design: flows, architecture, threat table, open questions |
-| [docs/SIGNER-RULES.md](docs/SIGNER-RULES.md) | Every rule under which the Key app refuses to sign |
-| [docs/LOCK-RULES.md](docs/LOCK-RULES.md) | The rules of the PIN lock on a phone's key: the OBMx frame, the cost of the key from the PIN, the PIN's shape (LC-01 to LC-07) |
-| [docs/SPEND-RULES.md](docs/SPEND-RULES.md) | How a transaction is built, joined and finished: coins, change, fee, the PSBT the signer accepts, and the checks on two signatures |
-| [docs/SESSION-RULES.md](docs/SESSION-RULES.md) | The approval session: the file the owner phone and the Key app pass between them, what the Key app checks on every line, what is stored before an answer leaves, and the owner phone's refund queue |
-| [docs/WATCHER-RULES.md](docs/WATCHER-RULES.md) | What the counter believes about a payment, and what each kind of evidence may prove |
-| [docs/RATE-RULES.md](docs/RATE-RULES.md) | How a sale's exchange price is read from two or more public sources and refused when they disagree or are stale, and how the app fetches them |
-| [docs/FEE-RULES.md](docs/FEE-RULES.md) | How the owner's device works out a fee rate from blocks it has checked itself, with no fee service, and what that number does not say |
-| [docs/POS-RULES.md](docs/POS-RULES.md) | How the owner's device matches the POS orders to the counter's sales, and what raises an alert |
-| [docs/UR-RULES.md](docs/UR-RULES.md) | How a PSBT too big for one QR code travels as an animated sequence of codes in the BC-UR format Sparrow and hardware wallets use: the bounds, the text, the fountain code and what the reader refuses (implemented in `crates/openbmt-ur`) |
-| [docs/BOOKS-RULES.md](docs/BOOKS-RULES.md) | How the counters' records become the books: per-sale fields and what stays unknown, the two CSV exports and the encrypted export file |
-| [docs/OWNER-COINS-RULES.md](docs/OWNER-COINS-RULES.md) | How the owner's device learns wallet coins from checked blocks, handles reorganizations, and grows its watch set |
-| [docs/screens/](docs/screens/) | Catalogs of the words shown for each counter, owner, Key app, and Box console screen state |
-| [docs/BOX-RULES.md](docs/BOX-RULES.md) | What the merchant's own server holds, how a Box with no screen is paired, and its part in the relay and the POS side (implemented in `crates/openbmt-box`; no vendor's connector is in it) |
-| [docs/SCREEN-RULES.md](docs/SCREEN-RULES.md) | What a person is told on every screen: one screen for every state, always a next step, no notation of the program, and the test each program runs over all of its words |
-| [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Which outside packages each program is built from, the rules for adding or updating one, and the check that enforces them (`scripts/deps-check.sh`, lists in `deps/`) |
-| [docs/research/](docs/research/) | Research notes, four rounds of internal design review, and the results of the checks against Bitcoin Core |
-| [crates/openbmt-core/](crates/openbmt-core/) | The rules every device must agree on: wallet description, device identity, address batches, signed records, signed settings, instant-acceptance policy |
-| [crates/openbmt-signer/](crates/openbmt-signer/) | The Key app's transaction signer: the rules under which key 2 signs |
-| [crates/openbmt-spend/](crates/openbmt-spend/) | The spend path around the signer ([rules](docs/SPEND-RULES.md)): plan a transaction from the wallet's coins, write it as a PSBT the signer accepts, join two signers' signatures and finish it ([results against Core](docs/research/spend-e2e-core-2026-11-10.md)) |
-| [crates/openbmt-box/](crates/openbmt-box/) | The Box, the merchant's own small server, ([rules](docs/BOX-RULES.md)): its key and storage, pairing by an invitation typed into it, the signed device list it follows, a relay for the shop's sealed messages that it also reads, and the POS side that matches the counters' paid notices to orders. No vendor's connector is in it |
-| [crates/openbmt-books/](crates/openbmt-books/) | The merchant's books ([rules](docs/BOOKS-RULES.md)): the counters' verified records turned into sales lines and end-of-day totals, an accounting CSV that holds only opaque sale IDs, a full ledger behind a warning, and an encrypted export file that reads back. No network and no clock; not tax advice, US rules only |
-| [crates/openbmt-session/](crates/openbmt-session/) | The approval session file ([rules](docs/SESSION-RULES.md)): the request the owner phone hands to the Key app and the response it hands back, in one strict encoding |
-| [crates/openbmt-approver/](crates/openbmt-approver/) | The Key app's side of the approval session: opens a request, shows one line per item, decides each, and stores before it releases |
-| [crates/openbmt-owner/](crates/openbmt-owner/) | The owner phone's side of the approval session: the refund queue, cash-out, batches, settings and pairings, the session it builds and the Key app's answer it takes |
-| [crates/openbmt-lock/](crates/openbmt-lock/) | The PIN lock the Key app and the owner app share: the OBMx locked frame, Argon2id and ChaCha20-Poly1305 at fixed costs and limits, the PIN's shape, lock, unlock and change; the bytes are those the Key app first wrote |
-| [crates/openbmt-key-ffi/](crates/openbmt-key-ffi/) | The Key app's core for Android: one object, a storage trait, flat records for each line of a session, one `dispatch` function over a framed request and a JNI entry point as the only `unsafe`; every rule stays in the crates above. The Kotlin binding and OBM9 decoder harness compile and run on the JVM; Android JNI/device integration remains unchecked |
-| [apps/key-android/](apps/key-android/) | The Key app for Android, first build: plain `android.widget` screens over the library's words (first start, the words once, wallet and kit check, the approval session, limits and status), built into a signed test APK with the SDK's own tools and no Gradle, AndroidX or Compose; the Kotlin standard library is its one runtime library. Not run on a device |
-| [crates/openbmt-watch/](crates/openbmt-watch/) | The counter's payment watcher: merkle proofs, full blocks, peer groups, conflicts, health |
-| [crates/openbmt-net/](crates/openbmt-net/) | The counter's Bitcoin peer client: wire framing, the single-peer session and the manager that runs several peers, checks blocks by filters and fetches announced transactions, with no sockets and no clock |
-| [crates/openbmt-net-io/](crates/openbmt-net-io/) | The counter's network driver: owns the sockets and threads, runs the peer manager and the address book over them, keeps the headers and the address book on disk, and speaks SOCKS5 for Tor |
-| [crates/openbmt-counter/](crates/openbmt-counter/) | The counter's judgment of a sale ([rules](docs/COUNTER-RULES.md)): opening, quotes, the cashier's screens, instant acceptance, overrides, owner commands, and the order of writes to storage |
-| [crates/openbmt-counter-node/](crates/openbmt-counter-node/) | The counter without a screen: the judgment of a sale joined to the network driver and to a directory of files, so that a payment is seen, confirmed, reorganized away and survives a restart ([results against Core](docs/research/counter-e2e-core-2026-11-10.md)) |
-| [crates/openbmt-counter-ffi/](crates/openbmt-counter-ffi/) | The counter node as a library for the counter app for Android: one safe `dispatch` over framed requests (OBMm, OBMn), a registry of handles, every screen with its words, the payment code, and one JNI entry point as the only `unsafe`. The Kotlin binding and decoder harness run on the JVM; Android device integration remains unchecked |
-| [crates/openbmt-owner-ffi/](crates/openbmt-owner-ffi/) | The owner node as a library for the owner app for Android: one safe `dispatch` over framed requests (OBMk, OBMl), a registry of handles, the node on a thread of its own, every state and refusal with its words, and one JNI entry point as the only `unsafe`. The Kotlin binding and decoder harness run on the JVM; Android device integration remains unchecked |
-| [crates/openbmt-owner-node/](crates/openbmt-owner-node/) | The owner's headless watcher and coin view: learns coins from checked blocks, tracks owner spends and reorganizations, and sends approved transactions through the network driver; also provides the signed heartbeat used by instant acceptance ([coin rules](docs/OWNER-COINS-RULES.md); [regtest script](scripts/owner-spend-e2e-core.sh); [live-watch regtest script](scripts/owner-watch-e2e-core.sh); [documented Core results](docs/research/owner-spend-e2e-core-2026-11-10.md); [heartbeat rules](docs/COUNTER-RULES.md), CR-50 to CR-56) |
-| [crates/openbmt-link/](crates/openbmt-link/) | Messages between the shop's own devices ([rules](docs/LINK-RULES.md)): sealed to one device and signed by the sender, the relay that holds them (mailboxes, challenges, limits, files), and a blocking client and server over TCP or a Tor onion service |
-| [crates/openbmt-rates/](crates/openbmt-rates/) | The exchange price ([rules](docs/RATE-RULES.md)): a strict reader for four public price sources and the median of two or more that agree. No network: the app fetches |
-| [crates/openbmt-pos/](crates/openbmt-pos/) | The vendor-neutral POS side ([rules](docs/POS-RULES.md)): the model of POS orders, the reference a cashier types, the matching of every Bitcoin tender to a counter sale, the alerts for what does not match, and the boundary a POS connector fills. No network and no vendor code |
-| [crates/openbmt-ur/](crates/openbmt-ur/) | BC-UR for a PSBT that does not fit one QR code ([rules](docs/UR-RULES.md)): minimal Bytewords, the fountain code, and the `bytes`, `crypto-psbt` and `psbt` types, an encoder of endless parts and a decoder that takes them in any order with losses. No dependencies of any kind; checked against `sha256sum`, `zlib.crc32` and the published vectors |
-| [crates/openbmt-json/](crates/openbmt-json/) | A strict, small JSON reader with no dependencies: bounds on bytes, depth and number of values, no key twice, exact integers. It reads the price replies and the POS replies |
-| [crates/openbmt-pos-readers/](crates/openbmt-pos-readers/) | The readers of two POS vendors' orders ([rules](docs/POS-RULES.md) section 9): the text of a Square SearchOrders request and of a Clover orders request, and the strict reading of each reply into a page of POS orders. No network, no clock and no sign-in; its fixtures are written from the documentation, not captured from an account |
-| [scripts/](scripts/) | Regtest checks against Bitcoin Core, including restore, signer, peer and network-driver flows, counter payment tracking, owner heartbeat, and owner coin view and refund sending ([owner check](scripts/owner-spend-e2e-core.sh); its documented results are in [the research note](docs/research/owner-spend-e2e-core-2026-11-10.md)) |
+| [Counter app](apps/counter-android/) | Creates sales, displays payment codes, and reports the payment evidence it has checked. It holds no wallet signing key. |
+| [Owner app](apps/owner-android/) | Tracks wallet coins, prepares refunds, cash-outs and settings, and reconciles POS orders with counter sales. |
+| [Key app](apps/key-android/) | Reviews and approves signing requests on a separate device. |
+| [Box](packaging/box/) | Optional merchant-run service for device messages and POS order reading. It holds no wallet key. |
 
-Headless components and screen word catalogs are available. Further
-hardening and screen-state coverage precede integration into the Android
-and Box applications and testing on devices. Full application flows still
-need to be completed and checked.
+## Try a local Box preview
 
-## Building
+This starts an unpaired Box on the local computer. It does not create a shop
+wallet or connect a counter. Rust 1.89 or newer is required.
 
-```
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+```bash
+git clone https://github.com/AvilaLabs/OpenBMT.git
+cd OpenBMT
+cargo run --locked -p openbmt-box -- \
+  target/box-preview 127.0.0.1:8986 \
+  --status-page 127.0.0.1:8987
 ```
 
-Rust 1.89 or newer. Dependency versions are pinned exactly and `Cargo.lock`
-is committed.
+Open [http://127.0.0.1:8987](http://127.0.0.1:8987) in a browser on the same
+computer to view the Box status page. The terminal shows the Box's current
+state; type `quit` there to stop it. For container and node packaging options,
+see [Box packaging](packaging/box/README.md).
 
-## Security
+The Android app sources have separate build instructions:
+[Counter](apps/counter-android/README.md),
+[Owner](apps/owner-android/README.md), and
+[Key](apps/key-android/README.md).
 
-See [SECURITY.md](SECURITY.md) for how to report a problem. The reviews under
-`docs/research/` are internal design reviews, not an audit.
+## Payments and records
 
-## License
+- **On-chain checkout:** the counter displays an address from an owner-approved
+  batch. Payment tracking distinguishes peer sightings, light-client checks,
+  and checks against the merchant's own node. See
+  [payment checks](docs/WATCHER-RULES.md) and
+  [counter behavior](docs/COUNTER-RULES.md).
+- **Owner approval:** the owner prepares a spend or refund request; the separate
+  Key app reviews it before the two signatures are joined. See
+  [wallet spending](docs/SPEND-RULES.md), [signing rules](docs/SIGNER-RULES.md),
+  and [approval sessions](docs/SESSION-RULES.md).
+- **Optional Lightning:** the counter can request and monitor invoices through
+  the merchant's own LND or Core Lightning node. Lightning balances follow
+  that node's custody model. See
+  [Lightning support](docs/LIGHTNING-RULES.md).
+- **POS and books:** Square and Clover order readers support matching orders to
+  counter sales and raising discrepancies. They do not yet provide a complete
+  live checkout connector. The books component produces sales records,
+  summaries, and exports. See [POS behavior](docs/POS-RULES.md) and
+  [books and exports](docs/BOOKS-RULES.md).
 
-MIT. See [LICENSE](LICENSE). An Avila Labs project.
+## Current status
+
+Rust components cover the core counter, payment watcher, owner coin view and
+spending path, approval flow, records, and POS order readers. First Android APK
+builds exist for the Counter, Owner, and Key apps; each is signed with a local
+test key and has not been run on a phone or emulator. Full app integration,
+release signing, device testing, and release packaging remain incomplete.
+
+The Box can be run from source and has container packaging. Umbrel and StartOS
+packages still need testing on their target devices.
+Bitcoin Core regtest notes document specific engineering checks, including
+restore and payment flows; those checks do not establish readiness for real
+funds. See [current design and open conditions](docs/DESIGN.md) and the
+[research notes](docs/research/).
+
+## Design and scope
+
+The on-chain wallet requires two of three keys to spend. The design goal is
+that no single compromised device, component or person can spend from it.
+That goal depends on two launch conditions: the third key must be created
+outside OpenBMT software and away from the second key's device, and the Key
+app's release key must be held by an independent person. Both conditions
+remain requirements for launch. See the
+[design and threat model](docs/DESIGN.md) for the conditions,
+payment-acceptance limits, and remaining work.
+
+## Documentation
+
+- [Design and threat model](docs/DESIGN.md)
+- [Payment checks](docs/WATCHER-RULES.md) · [Counter](docs/COUNTER-RULES.md) · [Owner app](docs/OWNER-APP-RULES.md)
+- [Wallet spending](docs/SPEND-RULES.md) · [Signer](docs/SIGNER-RULES.md) · [Approval sessions](docs/SESSION-RULES.md)
+- [Lightning](docs/LIGHTNING-RULES.md) · [POS matching](docs/POS-RULES.md) · [Books and exports](docs/BOOKS-RULES.md)
+- [Box setup and packaging](packaging/box/README.md) · [Screen catalogs](docs/screens/)
+- [Bitcoin Core engineering notes](docs/research/)
+
+## Development
+
+The Rust workspace uses a committed `Cargo.lock` and requires Rust 1.89 or
+newer. Common checks are:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+```
+
+See [dependency rules](docs/DEPENDENCIES.md) before changing dependencies.
+Report vulnerabilities using [SECURITY.md](SECURITY.md).
+
+## Licence
+
+OpenBMT is licensed under the [MIT licence](LICENSE).

@@ -288,14 +288,17 @@ Key app under every signer rule (`docs/SIGNER-RULES.md` SR-39). Not built: the
 kit's other fields in `check_kit` (birthday, generations, import range, fallback
 descriptors), and anti-exfil signing.
 
-Not covered: compiling the Android JNI library for Android, loading the
-library on a device or emulator, and the Android Keystore wrapping.
+Not covered by these library checks: loading the library on a device or
+emulator, and the Android Keystore wrapping. Cross-compilation is checked
+by `scripts/key-ffi-build.sh` as described above.
 
 ## Dependencies
 
 Besides the workspace crates (`openbmt-core`, `openbmt-approver`,
-`openbmt-session`, `openbmt-signer`), the library is built from `bitcoin`
-and `bip39` (the same pins as the signer) and `jni-sys` 0.3.0. `jni-sys`
-0.3.0 has no dependencies of its own; its later releases depend on a macro
-crate and `syn`. The list is `deps/openbmt-key-ffi.txt` (20 packages: the 19
-of the signer plus `jni-sys`); it was 59 while the library used UniFFI.
+`openbmt-session`, `openbmt-signer`, `openbmt-lock`), the library directly
+depends on `bitcoin` 0.32.8, `bip39` 2.2.2 and `jni-sys` 0.3.0. The shared
+lock crate brings in Argon2id and ChaCha20-Poly1305. `jni-sys` 0.3.0 has no
+dependencies of its own; its later releases depend on a macro crate and
+`syn`. The complete external package list is
+[`deps/openbmt-key-ffi.txt`](../../deps/openbmt-key-ffi.txt), checked by
+`scripts/deps-check.sh`.

@@ -214,7 +214,7 @@ impl LnTransport {
                 "Check that the address is the node's own REST address, then try again.",
             ),
             Self::Redirected => (
-                "Node sent us elsewhere",
+                "Node sent a redirect",
                 "The address answered with a redirect, which the counter never follows.",
                 "Use the node's own REST address, not a web page or a proxy in front of it.",
             ),

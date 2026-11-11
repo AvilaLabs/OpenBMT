@@ -264,7 +264,7 @@ fn nr_12_a_user_agent_over_256_bytes_is_dropped() {
 #[test]
 fn nr_13_only_the_handshake_is_sent_before_both_veracks() {
     let mut s = session();
-    // Before the peer's version: ours only.
+    // Before the peer's version: the local version only.
     assert!(matches!(outgoing(&mut s)[..], [NetworkMessage::Version(_)]));
     // A request now is refused.
     let mut early = session();

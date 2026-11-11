@@ -280,7 +280,7 @@ binding, which name no node). The app reads the camera, shows the answers,
 keeps the library's record between two steps and carries the owner's words.
 
 - **OA-26.** The first start offers two buttons: "Make a new shop wallet",
-  first, and "I have setup text", the paste path of OA-01 and OA-11. The
+  first, and "Use setup text", the paste path of OA-01 and OA-11. The
   network is the build's one choice (`AppConfig.NETWORK`): the app has no
   picker, and the library refuses a Key app's answer for another network.
   Key 1 is made with no words to show (`show_words` false, `docs/DESIGN.md`

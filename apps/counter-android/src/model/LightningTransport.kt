@@ -145,7 +145,7 @@ private class PinnedTrust(private val pin: (ByteArray) -> Boolean, private val r
 
     override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?, engine: SSLEngine?) = check(chain)
 
-    // The node is never asked for a certificate of ours, and no client is trusted.
+    // The node is never asked for a certificate belonging to the client, and no client is trusted.
     override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) =
         throw CertificateException("no client is trusted")
 

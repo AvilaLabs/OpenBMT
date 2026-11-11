@@ -602,7 +602,7 @@ class Controller(private val act: MainActivity) {
                         allowed { attempt(back) { a.createFromEntropy(EntropySource.Platform, network) }?.let { refresh() } }
                     },
                     ui.button("Make it with dice or coins") { showThrows() },
-                    ui.button("Type in words I already have") { showTypedWords() },
+                    ui.button("Type in existing words") { showTypedWords() },
                     ui.button("Approver only: no key 2 on this phone") {
                         allowed { attempt(back) { a.createApproverOnly() }?.let { refresh() } }
                     },
@@ -729,7 +729,7 @@ class Controller(private val act: MainActivity) {
                 banner() + listOf(
                     ui.words(AppWords.state(SetupState.HasIdentity(true, true))),
                     shown,
-                    ui.button("I have written them down") {
+                    ui.button("Words written down") {
                         shown.text = ""
                         refresh()
                     },

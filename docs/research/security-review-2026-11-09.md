@@ -24,7 +24,7 @@ W = wallet engineer, P = privacy and purist, L = losses with no thief.
 - **Android Keystore.** Primary docs, fetched by L and backed by a
   second search:
   - a key that needs user authentication is permanently invalidated when the
-    secure lock screen is removed or reset;
+    PIN, pattern or password lock screen is removed or reset;
   - with `setInvalidatedByBiometricEnrollment`, enrolling a new biometric
     also invalidates it;
   - Auto Backup restores app files by default, but never the Keystore key;
@@ -53,7 +53,7 @@ W = wallet engineer, P = privacy and purist, L = losses with no thief.
     bandwidth (E3);
   - Square/Clover OAuth scopes, PayOrder reversal, webhook vs polling;
   - Google's developer-verification dates;
-  - which hardware wallets accept our descriptor;
+  - which hardware wallets accept the project descriptor;
   - Play App Signing being mandatory for new apps.
 
 ## Critical: the whole wallet at risk
@@ -99,7 +99,7 @@ W = wallet engineer, P = privacy and purist, L = losses with no thief.
   - an N-day delay on Owner and Key mode updates.
 - The key chooser says "keep key 2 on different software than key 1" and
   offers Sparrow, Nunchuk or a hardware wallet as that.
-- Offer our own signed APK plus F-Droid next to Play.
+- Offer a project-signed APK plus F-Droid next to Play.
 - Supply chain: lockfiles, `cargo-vet`/`cargo-deny`, Gradle verification,
   Docker images pinned by digest.
 - Cost: invisible in daily use; one manual update per release on the spare
@@ -111,7 +111,7 @@ W = wallet engineer, P = privacy and purist, L = losses with no thief.
 - A malicious PSBT builder (owner phone, Box) can:
   - label an attacker output as "change";
   - lie about input amounts so the signature pays a huge fee
-    (CVE-2020-14199, which applies to the P2WSH we chose);
+    (CVE-2020-14199, which applies to the selected P2WSH);
   - rely on unregistered hardware wallets signing blind.
 
 **Fix.** Written signer rules:
@@ -423,7 +423,7 @@ With an overpayment the loss is not capped by the instant limit.
   lower, labeled cap with network rules (S7).
 - **Q3.** S2's separate signer needs a second release-signing key held
   apart from the main one. That is an operations question for Avila Labs.
-- **Q4.** The hosted "someone runs it for me" option: keep it with honest
+- **Q4.** The hosted "someone else runs the Box" option: keep it with honest
   labeling and owner-phone matching of POS orders (S10).
 
 ## Decisions on Q1-Q4 (2026-11-09)
@@ -448,7 +448,7 @@ With an overpayment the loss is not capped by the instant limit.
   reproducible, published with their hash, never auto-update, and install
   only 14 days after publication. A second maintainer holding that key is the
   later improvement.
-- **Q4 "Someone runs it for me": kept,** labeled honestly ("they can see your
+- **Q4 "Someone else runs the Box": kept,** labeled honestly ("they can see your
   orders and revenue; they never touch your bitcoin"), with the owner phone's
   order matching catching any false "paid".
 

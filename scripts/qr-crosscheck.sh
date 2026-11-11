@@ -4,7 +4,7 @@
 #
 # Encoder: the example `crosscheck` prints a deterministic set of cases; the Java
 # harness crates/openbmt-qr/crosscheck/QrCross.java encodes each with
-# ZXing and compares the matrices, decodes ours with ZXing, and reports
+# ZXing and compares the matrices, decodes the OpenBMT matrix with ZXing, and reports
 # where the mask choice differs. See that file for the details.
 #
 # Reader: crosscheck/QrDecodeCross.java makes images of codes encoded by

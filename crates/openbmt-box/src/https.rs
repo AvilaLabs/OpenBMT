@@ -370,7 +370,7 @@ impl HttpsRefusal {
             Self::Unreachable { code } => {
                 format!("the POS could not be reached (curl exit {code})")
             }
-            Self::Tls { code } => format!("the secure connection failed (curl exit {code})"),
+            Self::Tls { code } => format!("the encrypted connection failed (curl exit {code})"),
             Self::ReplyTooLarge { cap } => format!("the reply is larger than {cap} bytes"),
             Self::CurlFailed { code, text } => match code {
                 Some(code) => format!("curl failed (exit {code}): {text}"),

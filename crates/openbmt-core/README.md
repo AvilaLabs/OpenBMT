@@ -70,8 +70,8 @@ batch, record or setting is.
   sighting is not independent, so a node check there is judged with the Box
   limits and label. It also holds the exposure total, the pause after a
   cancel, and the fee-bump-or-cancel test. A replacement is a fee bump only if
-  the original paid our script something and the replacement pays our script
-  at least as much in total; anything else is a cancel.
+  the original paid the watched script something and the replacement pays
+  that script at least as much in total; anything else is a cancel.
 - **Pairing** (`pairing`). How a counter pins the two roots. The Key app
   shows an offer (both roots and the wallet checksum); the counter fixes
   them, then makes a fresh number and signs a request that carries a hash of
@@ -137,7 +137,8 @@ batch, record or setting is.
 - No clock. Callers pass ages and times in seconds.
 - No private keys for money. It handles public keys only. Identity keys sign
   messages, and they must never be derived from a wallet key. The caller
-  supplies the 32 secret bytes of an identity from a secure random source.
+  supplies the 32 secret bytes of an identity from a cryptographic random
+  source.
 - No storage, no screens, no exchange rates. Dollar amounts come in as a
   sats-per-dollar number from the caller.
 - No transaction building or signing, and no PSBT checks (the Key app's

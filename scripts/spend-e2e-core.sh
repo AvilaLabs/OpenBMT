@@ -348,7 +348,7 @@ ex sign --who 1 --state "$WORK/key1.state" --now "$(now)" --in "$WORK/base2.psbt
 chk 6 "the signer signed as key 1" [ "$?" = 0 ]
 ex sign --who 2 --state "$WORK/key2.state" --now "$(now)" --in "$WORK/base2.psbt" --out "$WORK/s2_2.psbt" >"$WORK/sign2b.txt"
 chk 6 "the signer signed as key 2" [ "$?" = 0 ]
-# Our finalize on keys 1 and 2, and Core's combine and finalize on the same.
+# OpenBMT finalize on keys 1 and 2, and Core's combine and finalize on the same.
 ex plan "${PLAN2_ARGS[@]}" --signed "$WORK/s1_2.psbt" --signed "$WORK/s2_2.psbt" \
   --hex-out "$WORK/tx2_ours.hex" "$DEST2:150000" >"$WORK/fin2a.txt"
 chk 6 "keys 1 and 2: combine and finalize succeeded" [ "$?" = 0 ]

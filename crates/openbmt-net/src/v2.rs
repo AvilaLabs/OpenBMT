@@ -200,7 +200,7 @@ fn initialized(magic: [u8; 4], entropy: &V2Entropy) -> Result<Handshake<Initiali
         .map_err(|_| Drop::V2Crypto)
 }
 
-/// Our 64-byte key and no garbage.
+/// A 64-byte key and no trailing data.
 fn our_key(magic: [u8; 4], entropy: &V2Entropy) -> Result<[u8; KEY_LEN], Drop> {
     let mut out = [0u8; KEY_LEN];
     initialized(magic, entropy)?
@@ -472,7 +472,7 @@ impl Open {
 }
 
 enum Phase {
-    /// Our key is out; the peer's 64 bytes are awaited.
+    /// The local key has been sent; the peer's 64-byte key is awaited.
     Key {
         entropy: V2Entropy,
         buf: Vec<u8>,
@@ -684,7 +684,7 @@ impl Transport {
         }
     }
 
-    /// The encrypted transport. Our key is appended to `out`. Fails when
+    /// The encrypted transport. The local key is appended to `out`. Fails when
     /// the entropy gives no key.
     pub fn v2(magic: Magic, entropy: V2Entropy, out: &mut Vec<u8>) -> Result<Self, Drop> {
         Ok(Self::V2(Box::new(V2::new(magic, entropy, out)?)))

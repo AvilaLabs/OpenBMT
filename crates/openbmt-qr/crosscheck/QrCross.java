@@ -4,13 +4,13 @@
 //
 //   1. encodes the same input with ZXing's Encoder, forcing the same
 //      version, level and mask, and compares the matrix module by module;
-//   2. decodes our matrix with ZXing's QRCodeReader (4-module quiet zone,
+//   2. decodes the generated matrix with ZXing's QRCodeReader (4-module quiet zone,
 //      PURE_BARCODE) and compares the text, or for byte mode the raw byte
-//      segments, with the input, and the level with ours;
+//      segments, with the input, and the level with the generated result;
 //   3. for the cases where the encoder chose the version and the mask:
 //      encodes with ZXing with only the level forced and compares the
 //      version and the mask it picks, then compares the penalty of every
-//      mask (ZXing's MaskUtil, through PenaltyAccess, against ours).
+//      mask (ZXing's MaskUtil, through PenaltyAccess, against the generated result).
 //
 // Steps 1 and 2 must hold for every case: any miss is a failure (exit 1).
 // Step 3 is reported only: where the two choose a different mask the
@@ -140,7 +140,7 @@ public class QrCross {
                 fail(id, "ZXing could not encode: " + e);
             }
 
-            // 2. Decode our matrix.
+            // 2. Decode the generated matrix.
             try {
                 int w = (size + 2 * QUIET) * SCALE;
                 int[] px = new int[w * w];
@@ -186,7 +186,7 @@ public class QrCross {
                         autoVersionDiff++;
                         differences.add("case " + id + ": version ours " + version + ", ZXing " + zv);
                     }
-                    // The mask ZXing picks at our version, and the penalty
+                    // The mask ZXing picks at the generated version, and the penalty
                     // of every mask on each side.
                     QRCode atOurs = zx(content, ec, version, null);
                     int zm = atOurs.getMaskPattern();

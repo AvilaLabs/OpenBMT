@@ -5,7 +5,7 @@
 //! and pairings. It is **never** derived from a wallet key: wallet keys move
 //! money, identity keys only vouch for messages, and keeping them apart means
 //! a stolen identity cannot spend and a stolen wallet key cannot forge
-//! settings. The caller must supply the 32 secret bytes from a secure random
+//! settings. The caller must supply the 32 secret bytes from a cryptographic random
 //! source; this crate has none on purpose.
 //!
 //! All signatures are over BIP340 tagged hashes
@@ -152,7 +152,7 @@ impl fmt::Debug for Identity {
 }
 
 impl Identity {
-    /// Build from 32 secret bytes supplied by a secure random source.
+    /// Build from 32 secret bytes supplied by a cryptographic random source.
     pub fn from_secret_bytes(secret: &[u8; 32]) -> Result<Self, IdentityError> {
         Keypair::from_seckey_slice(secp(), secret)
             .map(|keypair| Self { keypair })

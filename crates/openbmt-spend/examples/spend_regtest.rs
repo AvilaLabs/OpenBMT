@@ -496,7 +496,7 @@ fn cmd_forge(args: &[String]) -> Result<ExitCode, String> {
             input.partial_sigs.insert(*key, *sig);
         }
     }
-    // Our finalize must refuse it.
+    // The finalizer must refuse it.
     match finalize(&k.wallet, &psbt) {
         Ok(_) => return Err("finalize accepted a signature made for another input".to_string()),
         Err(e) => println!("refused {e}"),

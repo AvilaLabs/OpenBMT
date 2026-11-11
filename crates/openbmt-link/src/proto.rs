@@ -242,7 +242,7 @@ pub enum Request {
     },
     /// Give me a challenge to sign (LK-23).
     Challenge,
-    /// Make my mailbox (LK-21).
+    /// Create a mailbox (LK-21).
     MakeMailbox {
         /// The reader.
         reader: DeviceId,

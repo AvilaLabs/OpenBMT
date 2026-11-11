@@ -229,7 +229,7 @@ pub(crate) fn template_weight(tx: &Transaction) -> u64 {
 /// Whether `psbt` has no PSBT version other than 0 and one entry for each
 /// input and output of its transaction.
 pub(crate) fn shape_is_v0(psbt: &Psbt) -> bool {
-    // A transaction with no input or no output is never one of ours, and
+    // A transaction with no input or no output is never part of this wallet, and
     // every per-input check would pass over it without looking at anything.
     psbt.version == 0
         && !psbt.unsigned_tx.input.is_empty()

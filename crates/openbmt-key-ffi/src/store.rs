@@ -48,7 +48,7 @@ pub trait KeyStore: Send + Sync {
     /// the app's old bytes must still be what `load` returns.
     fn save(&self, bytes: Vec<u8>) -> Result<(), StoreError>;
 
-    /// `n` bytes from the platform's cryptographically secure random
+    /// `n` bytes from the platform's cryptographically strong random
     /// source. Fewer or more bytes than asked for are refused.
     fn random(&self, n: u32) -> Result<Vec<u8>, StoreError>;
 

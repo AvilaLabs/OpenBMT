@@ -16,7 +16,7 @@ adoption. Status: undecided. Nothing built.
 - Verdict: sound if the co-signer does not equivocate and never loses state.
   A customer colluding with the co-signer can double-spend.
 
-## Our extensions, after review
+## Extensions, after review
 
 | Extension | Verdict | Fix |
 |---|---|---|

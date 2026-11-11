@@ -51,12 +51,12 @@ in both settings, in two full runs.
 | 8b. Message types arriving over the transport (below) | PASS, over `v2` | PASS, over `v1` |
 | 9. A port that is not a peer (RPC port) | PASS, `dropped NR-14` after 30 s | PASS, same |
 
-Step 2b, from the first run with `-v2transport=1` (the IDs change on every
-connection):
+Step 2b, from the first run with `-v2transport=1`, with labels normalized
+(the IDs change on every connection):
 
 ```
 node: {"transport_protocol_type":"v2","session_id":"8bc1e776e75754e83a58ab460937c518422cb5cc0eb22dee870de2ecd7a519c9"}
-ours: transport v2, session_id 8bc1e776e75754e83a58ab460937c518422cb5cc0eb22dee870de2ecd7a519c9
+local transport: v2, session_id 8bc1e776e75754e83a58ab460937c518422cb5cc0eb22dee870de2ecd7a519c9
 ```
 
 With `-v2transport=0` the node reported `{"transport_protocol_type":"v1",
@@ -107,7 +107,7 @@ with one refusal in each run).
 | Check | What ran |
 | --- | --- |
 | BIP324 vectors, packet encoding and decoding, rekeying, handshake | The `bip324` crate's own unit tests: 21 tests, among them `test_vector_1` to `test_vector_7`, all passing, run in a copy of the crate outside this workspace with `bitcoin 0.32.8` added as a dev-dependency (its tests use `bitcoin::secp256k1::rand`, which the published crate does not declare). Its integration test `round_trips` needs a sibling crate of the upstream repository and was not run. |
-| Our use of the crate | Tests in `crates/openbmt-net/src/tests/v2.rs`: two of our own sessions through `v2.rs` with an in-test responder, bit flips, cuts at every byte boundary, rekey after 224 messages in both directions, decoys, garbage of 0, 1 and 4,095 bytes accepted and 4,096 refused, a v1 `version` as the first bytes (fallback signal), no fallback after the first encrypted packet. |
+| Project use of the crate | Tests in `crates/openbmt-net/src/tests/v2.rs`: two OpenBMT sessions through `v2.rs` with an in-test responder, bit flips, cuts at every byte boundary, rekey after 224 messages in both directions, decoys, garbage of 0, 1 and 4,095 bytes accepted and 4,096 refused, a v1 `version` as the first bytes (fallback signal), no fallback after the first encrypted packet. |
 | Session and manager tests on both transports | The kit is parameterized. 10 session tests and 19 manager tests run again over the encrypted transport. |
 | Driver tests on loopback | `crates/openbmt-net-io/src/tests/v2.rs`: a fake encrypted peer, a peer that closes on the key, a peer that answers with a v1 `version`, endless garbage, a SOCKS5 proxy, and a randomness source that may be guessed. |
 | Core | The two tables above. |
@@ -135,10 +135,10 @@ one of these was seen by both sides:
 | addrv2 (28) | node to counter | 191 | 1 |
 | ping (18) | node to counter | 58 | answered with 1 pong (19) |
 
-The node read our `pong` (19) under its name (`bytesrecv_per_msg`), and it
-answered our `getheaders` (12), `getdata` (11) and `getcfilters` (22) with
-headers, the block and the filter, so it read those IDs the way we wrote
-them. `getaddr`, `version`, `verack`, `sendaddrv2` and `sendheaders`
+The node counted the client's `pong` (19) under its name (`bytesrecv_per_msg`),
+and answered its `getheaders` (12), `getdata` (11) and `getcfilters` (22) with
+headers, the block and the filter. This confirms that the node interpreted
+those message IDs as intended. `getaddr`, `version`, `verack`, `sendaddrv2` and `sendheaders`
 go in the long form (ID 0 and 12 bytes of command), which the node read as
 well. The same step passes over `-v2transport=0` with the old transport, so
 the counts do not depend on the transport.

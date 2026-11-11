@@ -615,7 +615,7 @@ impl PauseTracker {
 /// What a replacement transaction did to the payment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplacementKind {
-    /// Still pays us at least what the original did: only the fee changed.
+    /// Still pays at least the original amount; only the fee changed.
     FeeBump,
     /// Anything else.
     Cancel,

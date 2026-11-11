@@ -1219,7 +1219,7 @@ object AppModelTest {
     private fun oa_26_the_first_start_offers_a_new_wallet_and_seals_the_record_at_each_step() {
         val controller = source("src/android/Controller.kt")
         val first = controller.substringAfter("internal fun showFirstStart(").substringBefore("/** The second choice")
-        ok(first.indexOf("ui.button(\"Make a new shop wallet\") { startCeremony() }") in 1 until first.indexOf("ui.button(\"I have setup text\") { showPasteSetup(null) }"), "a new wallet first, the paste path second")
+        ok(first.indexOf("ui.button(\"Make a new shop wallet\") { startCeremony() }") in 1 until first.indexOf("ui.button(\"Use setup text\") { showPasteSetup(null) }"), "a new wallet first, the paste path second")
         ok(controller.contains("saveSetup(draftText, draftProxy.trim(), { w -> showPasteSetup(w) })"), "the paste path saves as before")
         val c = ceremonyCode()
         ok(c.contains("Key1Args(AppConfig.NETWORK, showWords = false)"), "the build's network, and key 1 has no words to show")

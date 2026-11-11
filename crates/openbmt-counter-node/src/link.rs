@@ -442,7 +442,7 @@ impl<R: Post> CounterLink<R> {
             Ok(Some(_)) => {
                 self.marks_ignored = self.marks_ignored.saturating_add(1);
                 self.note(format!(
-                    "LK-55: the owner's mark of {count} records has a head that is not ours: \
+                    "LK-55: the owner's mark of {count} records has a head outside the counter's records: \
                      ignored"
                 ));
             }

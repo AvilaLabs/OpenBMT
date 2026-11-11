@@ -33,7 +33,7 @@
 //! costing the stretch of [`crate::words`].
 //!
 //! The library has no clock and no randomness. The counter's number must come
-//! from a secure random source and must be new for every ceremony; callers
+//! from a cryptographic random source and must be new for every ceremony; callers
 //! pass the time in seconds.
 //!
 //! Wire forms (all strict, see [`crate::wire`]):
@@ -474,7 +474,7 @@ impl CounterPairing {
     /// Steps 1 and 2 on the counter. Decodes the offer, fixes its roots and
     /// wallet, and builds the signed request.
     ///
-    /// `nonce` must come from the caller's secure random source and must be
+    /// `nonce` must come from the caller's cryptographic random source and must be
     /// new for every ceremony; the scheme rests on nobody knowing it when
     /// the roots were chosen. `now` is the time in seconds.
     pub fn begin(

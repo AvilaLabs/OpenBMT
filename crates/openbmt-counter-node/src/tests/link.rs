@@ -256,7 +256,7 @@ fn lk_55_a_mark_that_fits_the_chain_is_taken_and_one_that_does_not_is_ignored() 
     assert_eq!(w.link.state().owner_records, 0);
     assert_eq!(w.link.state().owner_head, GENESIS);
 
-    // More records than the counter has; a head that is not ours.
+    // More records than the counter has; a head that does not belong to this counter.
     w.mark(5, [1; 32]);
     w.mark(u64::MAX, chain[3].hash());
     w.mark(2, chain[2].hash());

@@ -73,8 +73,9 @@ The image holds the binary, `ca-certificates` and `curl`, and the volume
 BOX-RULES sections 1 and 5 say it keeps: its identity key, the settings in
 force, its members and mailboxes and, if the owner gives it one, its POS
 token. It runs as uid 1000, not root. It holds no shop key and no wallet
-description (BX-04). `curl` is installed for the POS connectors, which reach
-the vendors over HTTPS; the Box does not use it yet.
+description (BX-04). With a POS vendor configured, the Box uses `curl` to
+read Square or Clover orders over HTTPS. These connectors are read-only:
+they do not close orders in either vendor's system.
 
 Whoever has the volume has the Box's key and POS token (BOX-RULES section 6).
 Back the volume up as one would a password file.

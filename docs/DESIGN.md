@@ -1,11 +1,11 @@
 # OpenBMT design (draft 3.2, 2026-11-09, after the round-4 code and design check)
 
-Status: design, with the first code under way. The shared rules crate
-(`crates/openbmt-core`) exists and is tested, and a restore drill against
-Bitcoin Core passes on regtest (`scripts/restore-drill-core.sh`); no app is
-built yet and nothing has been tried on a device. Every claim about another
-system cites a source in §17. **[verify]** marks a claim that still needs a
-primary check or a device test before we depend on it.
+Status: design and threat model. Headless Rust components now implement many
+of these rules, and the Android apps have initial builds; integration and
+device testing remain incomplete. The Bitcoin Core restore drill passes on
+regtest (`scripts/restore-drill-core.sh`). Every claim about another system
+cites a source in §17. **[verify]** marks a claim that still needs a primary
+check or a device test before it can be relied on.
 
 Draft 3.2 applies four security reviews:
 
@@ -43,13 +43,13 @@ checked against all three.
 
 A fourth rule follows from them: **choice without confusion.** Where merchants
 want different things (which keys, how long to wait, which node), they choose.
-Every option offered must be secure and purist-acceptable on its own, so there
+Every option offered must protect funds and remain purist-acceptable on its own, so there
 is no wrong answer. One option is marked as recommended. Choices are asked as
 plain questions, and unsafe combinations are never offered.
 
 A fifth rule: **every security claim in this document must be literally true.**
 No overclaiming. If a claim holds only under a condition, the condition is
-written next to it. If we cannot check something, the screen and the document
+written next to it. If something cannot be checked, the screen and the document
 say "not verified" and say what was checked instead.
 
 These are internal design reviews. No independent security audit has been done
@@ -61,10 +61,10 @@ usability critic who also played the hostile purist), round 3 as a
 single-component check that asked whether any single component or person could
 cause an unbounded loss, and round 4 as a line-by-line check of the first code
 against this document. The merged findings and the decisions are in the four
-files named above. The built software still needs tests, an outside code review
-and an audit before anyone calls it secure.
+files named above. Broader testing, an outside code review and an audit remain
+before stronger claims are made.
 
-**What we claim, restated after round 3.** Once two launch conditions hold, no
+**Claim, restated after round 3.** Once two launch conditions hold, no
 single compromised OpenBMT component, device or person can spend the wallet.
 The conditions are:
 
@@ -78,8 +78,8 @@ owner's reconciliation catches a bad counter, build or Box (§6, §10). Until
 both conditions hold, the claim does not hold, and the documents and screens
 say so.
 
-Where two tests pull apart, we look for a design that satisfies both before we
-accept a trade-off. Trade-offs that remain are listed in §16.
+Where two tests pull apart, the design should satisfy both before accepting a
+trade-off. Remaining trade-offs are listed in §16.
 
 ## 1. What it is
 
@@ -115,13 +115,13 @@ These flows are the spec. The architecture exists to make them true.
 Setup creates keys on purpose, one on each device that will keep it. Key 3's
 secret is never seen by any OpenBMT-published software, or by a device that
 holds another key. It is the only time the owner does this. There are no waiting periods in setup. The
-15-minute limit is a requirement. If a trial breaks it, we cut steps, not
+15-minute limit is a requirement. If a trial breaks it, the steps must be cut, not
 safety.
 
 1. **Install and name the shop.** Business name, currency, logo. The app also
    asks two plain questions:
-   - "How do you take sales?" The answers are "On my own Box", "On a hosted
-     Box" (labeled, §5.3) or "No Box, I tender by hand" (§5.6).
+   - "How do you take sales?" The answers are "On a shop-run Box", "On a hosted
+     Box" (labeled, §5.3) or "No Box, tender by hand" (§5.6).
    - "Can customers join this Wi-Fi?" If yes or unsure, the counter uses
      cellular, or the counter's Tor switch is turned on (§5.1). If no, the
      staff network is fine.
@@ -186,9 +186,9 @@ safety.
 Counts, honestly: 7 steps. Step 2 needs the counter tablet before it is set
 up as the counter, and the tablet's factory reset adds time **[to measure]**.
 Steps 3 to 5 and 7 need the spare phone, the owner phone and the counter
-device in hand, so the owner should have all three before starting. We have
-not timed it; **[to measure]** (E1–E3 phones, then a timed trial). The most
-time goes to writing down words twice, in two sittings.
+device in hand, so the owner should have all three before starting. Setup has
+not been timed; **[to measure]** (E1–E3 phones, then a timed trial). Most time
+goes to writing down words twice, in two sittings.
 
 The words "xpub", "descriptor" and "multisig" never appear on these screens.
 They appear in the recovery kit and under Advanced, for people who want them.
@@ -230,7 +230,7 @@ If the connection is down at the start, the counter does not offer Bitcoin
 | Any other phone | Scan the QR, then confirm (1 scan + 1 confirm) |
 
 Tap is Android-only. iPhones do not open a wallet from a `bitcoin:` tag in the
-background, and we will not send iPhone customers through a web page that a
+background, and iPhone customers will not be sent through a web page that a
 server could change (§7).
 
 - **Optional protection: check before you confirm.** The counter screen shows
@@ -356,7 +356,7 @@ counter cannot always know the cause, so it says what it saw:
   may need to pay again."
 - **Reopened by a reorg:** "A block that confirmed this payment was replaced.
   The payment is back to waiting."
-- **Unknown:** "We saw this payment disappear. We do not know why."
+- **Unknown:** "This payment disappeared. The reason is unknown."
 
 **Stuck state.** If a payment is seen but does not confirm for a long time
 (its fee is too low), the sale shows "Stuck: not confirming". The owner gets a
@@ -395,11 +395,11 @@ payment without knowing, and must understand up front that it can happen.
 - **The honest comparison, shown once at setup.** Card chargebacks can land
   months later **[verify the window before it appears on a screen]**. A
   bitcoin payment that is several blocks deep is, in practice, very hard to
-  reverse. We will not call it final forever. The risk window for instant
+  reverse. It is never called final forever. The risk window for instant
   sales is about 10 minutes and visible. The risk for deeper payments is a
   chain reorganisation, which is rare and which the app also shows (§2.6).
 
-### 2.8 Confusion points we design out
+### 2.8 Confusion points addressed by the design
 
 | # | Confusion | Fix |
 |---|---|---|
@@ -434,7 +434,7 @@ Rules:
     exposure total, a lower depth, a lower rate limit, a larger refund cap, a
     new or widened destination, a new counter, manager or POS connection, a
     longer window, Tor or node checks turned off, and a higher override
-    ceiling. A change we cannot classify counts as loosening.
+    ceiling. A change that cannot be classified counts as loosening.
   - **Tightening** is the opposite (a lower limit, a deeper depth, removing a
     device or manager, a pause). It takes effect at once on the owner phone,
     is signed with key 1, and needs no co-signature.
@@ -543,8 +543,9 @@ measured **[verify, E8]**.
 
 ## 3. Best-in-class scorecard
 
-Targets are what we must reach. "Best today" is the best competitor value we
-found; many competitors publish no numbers, and we will measure our own.
+Targets are the values to reach. "Best today" is the best competitor value
+found; many competitors publish no numbers, and project measurements remain
+to be made.
 Card percentages and dollar fees below are **[verify]** and stay off merchant
 screens until sourced.
 
@@ -567,7 +568,7 @@ screens until sourced.
 
 ## 4. Purist checklist
 
-| Red flag (source) | Our answer |
+| Red flag (source) | Project response |
 |---|---|
 | Sharing an xpub reveals all history (Stacker News 112663) | The wallet description stays on the owner phone, the Key app and the merchant's own Box. The counter gets signed address batches only. No third party receives the description. |
 | Gap-limit exhaustion hides payments (Stacker News 408359) | A shown address is never reused. Each counter has its own contiguous index range. Wide lookahead; late payments still detected; the kit records an explicit import range (§5.4, §5.5) |
@@ -592,10 +593,10 @@ are marked, and none is a default.
 | The shop's ISP or mobile carrier | That the device speaks Bitcoin and when; with Tor, only that it uses Tor | Tor; your own node on your own line |
 | DNS seeds (peer discovery at start) | The IP of a device looking for peers | Tor; peers from your own node **[design]** |
 | Rate sources (price) | That a device fetched the price, and when; no sale or address | Two or more sources on a fixed schedule; fetch over Tor |
-| POS vendor (Square, Clover, other) | Every order, amount and the "Bitcoin" tender; opaque sale IDs only, never an address or transaction ID | "No Box, I tender by hand" still lets the POS see tender type; no way to hide the order from the POS itself |
+| POS vendor (Square, Clover, other) | Every order, amount and the "Bitcoin" tender; opaque sale IDs only, never an address or transaction ID | "No Box, tender by hand" still lets the POS see tender type; no way to hide the order from the POS itself |
 | Push services | With UnifiedPush on your own Box: nothing outside. With the FCM fallback (labeled): that a wake-up happened, and when. No content | Use the Box's UnifiedPush |
 | Box host (optional, hosted) | Orders, amounts and timing: how much the shop sells. Never addresses, transaction IDs or the wallet description | Run the Box yourself |
-| Update channel (our site, F-Droid, GitHub) | The downloader's IP, and which version | Download over Tor; updates are manual |
+| Update channel (the project site, F-Droid, GitHub) | The downloader's IP, and which version | Download over Tor; updates are manual |
 | Customers' phones | The address and amount in the QR for that sale | A fresh address each sale; nothing about other sales |
 | Optional metadata-only services | Whatever the choice screen says at the point of choice | Off by default |
 
@@ -668,7 +669,7 @@ and no TLS certificate company is needed **[design, R5]**.
 - Checks payments itself. The merchant chooses how (settled
   2026-11-09):
   - **Default: light check.** The counter's own light client talks directly to
-    several random Bitcoin peers. It watches for payments to our addresses and
+    several random Bitcoin peers. It watches for payments to the shop addresses and
     for other transactions that spend the same coins (conflict alerts). It
     confirms with compact block filters. The check asks Bitcoin peers, not a
     company server. A light client cannot see the amounts of a payment's
@@ -774,7 +775,7 @@ service or on the local network (§4.1).
   the paid record. The Box cannot close an order on its own. On a hosted Box,
   an order without a counter signature is never fulfilled automatically.
 - **The owner phone polls the POS itself.** It has its own read-only POS
-  sign-in, so its order list does not come from the Box. We say it plainly:
+  sign-in, so its order list does not come from the Box. The interface states:
   **the Box (or a hosted host) holds the POS token and can mark an order
   paid. The owner phone catches it.** The phone matches every bitcoin-tender
   order, including voids and cash re-tenders, to a payment at an address it
@@ -783,7 +784,7 @@ service or on the local network (§4.1).
 - **Revocation.** The owner can revoke the Box's POS connection from the owner
   phone and from the POS vendor's own settings. The setup screen shows both
   paths.
-- **Optional hosted Box (Q4, decided).** "Someone runs it for me" is kept and
+- **Optional hosted Box (Q4, decided).** "Someone else runs the Box" is kept and
   labeled honestly at the point of choice: "They can see your orders and
   revenue. They never touch your bitcoin." It is not the default. It is
   limited to the POS connectors. The host never receives addresses,
@@ -842,7 +843,7 @@ rest on the owner phone plus spot checks.
   transaction file (PSBT).
 - It requires `non_witness_utxo` (the full previous transaction) for **every
   input**. Without it, a signer can be lied to about input amounts and sign a
-  huge hidden fee (CVE-2020-14199, which applies to the P2WSH script we use).
+  huge hidden fee (CVE-2020-14199, which applies to the project P2WSH script).
 - It enforces a **fee ceiling**.
 - Its screen shows four things **separately**: the destination, the amount, the
   fee, and "change back to your wallet". The change line is shown only if the
@@ -902,7 +903,7 @@ rest on the owner phone plus spot checks.
   It is used when moving to a new wallet or onto a new phone.
 - Never auto-updates, and an update is never installed without the owner's
   action. Android enforces only certificate continuity on update, so no
-  installed app can block a bad update of itself. Distribution is our own-signed APK and F-Droid only,
+  installed app can block a bad update of itself. Distribution is project-signed APK and F-Droid only,
   **never Google Play**. A signed release manifest carries an
   `earliest_install_date`, and Owner mode shows it ("Key app 1.4 is 9 days
   old; wait until X"). An **urgent-fix flag**, signed by the release key, lets
@@ -928,7 +929,7 @@ condition is not met (§16).
 | Key | Choices (★ = recommended) | Why each is safe |
 |---|---|---|
 | Key 1 (owner) | ★ Owner's phone, in Owner mode · A hardware wallet · An offline computer (below) | Phone key rules below. A hardware wallet is the stronger choice. |
-| Key 2 (approver) | ★ A spare phone or tablet you own, running the OpenBMT Key app · A manager's phone running the Key app · A hardware wallet (Coldcard, Jade, Passport, Keystone, or a build-it-yourself signer such as SeedSigner, Krux or Specter DIY; others that sign PSBTs, **[verify each, E8]**) · An offline computer running Sparrow or Bitcoin Core (below) · A key card tapped on a different person's phone | A thief has to get past the owner phone **and** the key 2 device. The Key app and hardware wallets show the transaction on their own screens. A **key card has no screen**: it is as safe as the phone it is tapped on, and the app says so. A hardware wallet cannot hold our allowlist or co-sign settings, so loosening uses the block-count fallback (§2.9) and batches the weaker spot check (§5.1). The Key app on a spare device as an approver (identity key only) restores the co-signature for batches, settings and pairings; without it those rest on the owner phone plus spot checks, and the screen says so. Until the Key app's release key has a second holder, a hardware wallet or a different publisher's signer is the recommended choice (Rule 2). |
+| Key 2 (approver) | ★ A spare phone or tablet you own, running the OpenBMT Key app · A manager's phone running the Key app · A hardware wallet (Coldcard, Jade, Passport, Keystone, or a build-it-yourself signer such as SeedSigner, Krux or Specter DIY; others that sign PSBTs, **[verify each, E8]**) · An offline computer running Sparrow or Bitcoin Core (below) · A key card tapped on a different person's phone | A thief has to get past the owner phone **and** the key 2 device. The Key app and hardware wallets show the transaction on their own screens. A **key card has no screen**: it is as safe as the phone it is tapped on, and the app says so. A hardware wallet cannot hold the allowlist or co-sign settings, so loosening uses the block-count fallback (§2.9) and batches the weaker spot check (§5.1). The Key app on a spare device as an approver (identity key only) restores the co-signature for batches, settings and pairings; without it those rest on the owner phone plus spot checks, and the screen says so. Until the Key app's release key has a second holder, a hardware wallet or a different publisher's signer is the recommended choice (Rule 2). |
 | Key 3 (recovery) | ★ Seed words made with a different publisher's wallet app (for example Nunchuk **[verify, E8]**) on the counter tablet before it becomes the counter, in airplane mode, then written on paper or steel and stored away from the shop; the tablet is then factory reset · A hardware wallet in a safe (stronger) · An offline computer, or words made on one (below) · A key card in a safe · A trusted person's device | Used only to recover a lost key. It is made by software that OpenBMT did not publish, on a device that holds no other key, offline. Only its xpub reaches the Key app. |
 
 Notes:
@@ -963,7 +964,7 @@ Notes:
     - a check that the system shows no wireless device at all;
     - an everyday user that is not the administrator;
     - never connected to a network again.
-  - Status: signing our transactions with Bitcoin Core as the second
+  - Status: signing project transactions with Bitcoin Core as the second
     signer, and restoring the wallet in Bitcoin Core from the kit, are
     checked on a test network (docs/research). Sparrow is not yet checked
     **[verify, E8 and E9]**.
@@ -979,8 +980,7 @@ Notes:
   - Every place where OpenBMT software makes a wallet key (key 1 in Owner
     mode, key 2 in the Key app) offers three ways: "Let this device make
     it" (the operating system's random source, 24 words, the default),
-    "Make it yourself" with dice or a coin, and "Type in words I already
-    have".
+    "Make it yourself" with dice or a coin, and "Type in existing words".
   - "Make it yourself" has two methods, and the screen says in one line
     what each is for:
     - **Dice, hashed.** 99 rolls of a six-sided die for 24 words. The
@@ -1329,7 +1329,7 @@ compute its fee rate. So the light-check T1 does these, and only these:
 
 It does not claim to have checked the fee or the inputs. (Asking peers whether
 the parent transactions are in their mempool was dropped: a confirmed parent
-and an invalid one both answer "not found", so it tells us nothing.) With the
+and an invalid one both answer "not found", so it provides no information.) With the
 merchant's own node, the node does check them, and the counter accepts the
 node's answer only with a merkle proof for confirmation (§5.1). The own-node
 label for an unconfirmed payment needs the counter's own light client to have
@@ -1342,7 +1342,7 @@ No public measurement of double-spend rates since full-RBF exists. The best
 older numbers are GAP600's 2022 sample (about 0.26% of 4.3M transactions
 double-spent, mostly ones that signaled replaceability) and Bitrefill's
 pre-full-RBF experience. So T1 ships with low defaults that the shop can raise.
-We should publish our own measurements (E7).
+Project measurements should be published (E7).
 
 ### 6.1 Dropped
 
@@ -1579,13 +1579,13 @@ core feature. **US rules; other countries are not covered.**
   lines for them. A cash refund from the till is recorded as a return.
 - **Form 1099-DA.** Brokers began reporting digital asset sales on Form 1099-DA
   for 2025 **[verify the scope and dates]**. A merchant who sells bitcoin on an
-  exchange may get that form. The exchange reports, not OpenBMT. Our export is
+  exchange may get that form. The exchange reports, not OpenBMT. The export is
   not tax advice.
 
 ## 11. Cash-out
 
 Nothing converts a share of receipts automatically while keys stay cold, and
-we will not have any server do it (legal line, §5.3). Instead:
+no server will do it (legal line, §5.3). Instead:
 
 1. Owner mode prepares a weekly transaction sending the share the owner chose
    to a saved destination and queues it.
@@ -1694,60 +1694,37 @@ review (A, W, U, P), the round-3 check (R3-1 to R3-10) or the round-4 check
 
 ## 13. Stack
 
-Pinned as of 2026-11-09:
+The current implementation uses `bitcoin` 0.32.8 and `miniscript` 12.3.5,
+with handwritten JNI bindings through `jni-sys` 0.3.0. Those and other Rust
+dependencies are pinned in `Cargo.lock`; the current dependency inventory is
+in [DEPENDENCIES.md](DEPENDENCIES.md). The peer client, signer and Android
+bindings are implemented in the listed crates. Other product architecture
+and experiments described in this document remain plans or specifications,
+not shipped features.
 
-- Rust core:
-  - `bdk_wallet = "=3.2.0"`
-  - Our own small peer client (`docs/NETWORK-RULES.md`) in place of a
-    general light-client library (decided 2026-11-10). The watcher has to
-    know which peer reported each transaction and checks every header
-    itself (`docs/WATCHER-RULES.md` §1), so a client that does only that
-    is less code to trust. It gets fuzz and soak tests.
-  - `bitcoin 0.32.x`
-  - A hand-written binding to the apps over `jni-sys = "=0.3.0"`, in
-    place of a binding generator (decided 2026-11-10,
-    `docs/DEPENDENCIES.md`).
-- Android: Kotlin UI, `HostApduService` for the tag, foreground service for
-  the watch.
-- OpenBMT Box: Rust, on Bitcoin Core v32 (pruned) via RPC/ZMQ; packaged for a
-  mini PC image, Start9 and Umbrel. UnifiedPush (or ntfy) runs on it.
-- OpenBMT Key app: Kotlin shell plus a minimal Rust crate set: key handling,
-  PSBT decode and check, BC-UR and QR. No network crates and no network
-  permission. The crate list is short, vendored, and reviewed by hand by
-  someone other than the main app's author. Parsers are fuzzed (§5.4).
-- Batch-signing keys use hardened derivation or a separate key, so a leaked
-  batch-signing key never exposes the wallet.
-- Signed messages between devices (batches, records, settings, pairings) carry
-  BIP340 signatures over a tagged hash that names the message type, so a
-  signature for one kind of message is never valid for another. Each message
-  has exactly one valid byte encoding, with a type marker, a version byte and
-  size limits, and every decoder is fuzzed (round 4, R4-5 and R4-10).
-- Not reused: Avila Node's P2P layer. It drags in a full node's dependencies,
-  and the counter needs far less than a node.
+Signed messages use BIP340 signatures over tagged hashes naming the message
+type. Framed encodings have distinct type markers, versions and bounds;
+decoder fuzz targets are listed in `fuzz/fuzz_targets`.
 
 **Supply chain.**
-- `Cargo.lock` is committed. Builds are reproducible.
-- `cargo-vet` and `cargo-deny` run in CI. A new dependency needs a review.
-- Gradle dependency verification is on.
-- Docker images (the Box) are pinned by digest.
-- The Key app has the smallest crate set we can manage, and each crate is read
-  before it is added.
+
+- `Cargo.lock` is committed.
+- CI runs formatting, Clippy, workspace tests, an MSRV test, Kotlin/JVM
+  binding decoder harnesses, QR and UR cross-checks, dependency list,
+  source and license checks, `cargo audit`, a Box image build and smoke test,
+  and a StartOS package typecheck.
 
 **Distribution.**
-- The OpenBMT app: our own APK, signed with our release key and published with
-  its hash, and F-Droid, alongside Google Play.
-- The Key app: our own-signed APK and F-Droid only, never Play (§5.4).
-- Google's developer verification and Play App Signing could make the release
-  channel a single point of failure. The dates and rules are not yet checked
-  **[verify dates; verify that Play App Signing is mandatory for new apps]**.
-  Because we publish our own signed APK and F-Droid builds, a merchant does not
-  have to rely on Play.
-- The Key app has its own release key, held by a second person (§5.4, Q3).
 
-**No analytics and no crash upload.** The apps send no analytics or crash data
-to anyone. Every contact they make is listed in §4.1. Update checks are manual
-or against the published hash the merchant downloads. A merchant who wants
-crash reports exports a local log and sends it by hand.
+- Release channels for the main app and Key app remain planned. Play and
+  F-Droid publication are release requirements.
+- A second independent holder for the Key app's release key is a launch
+  condition. Until then, the launch security claim does not hold.
+
+**No analytics and no crash upload.** The apps have no analytics or crash-upload
+service. The planned release workflow uses manual updates with published
+hashes and lets a merchant export a local log to share by hand. That release
+workflow remains to be completed.
 
 ## 14. Experiments
 
@@ -1761,8 +1738,8 @@ Each gets a written protocol before it runs.
 | E4 | Can an app on a PAX or Sunmi terminal drive the contactless reader directly? | Hardware purchase |
 | E5 | Square sandbox: external CRYPTO payment closes an order with receipt and inventory. **Also:** can a payment be undone after PayOrder (un-pay)? Polling versus webhooks; OAuth scopes; a read-only sign-in for the owner phone | Square developer account |
 | E6 | Clover sandbox: custom tender button, order close, refund. **Also:** can a payment be undone after PayOrder? Polling versus webhooks; a read-only sign-in | Clover developer account |
-| E7 | Double-spend attempts seen by our mempool watch over weeks, to tune T1 limits | Our node |
-| E8 | Hardware-wallet descriptor registration and signing: does each (Coldcard, Jade, Passport, Keystone) accept our P2WSH 2-of-3 wallet, check change against it, and require `non_witness_utxo`? **Also:** BIP389 `<0;1>` support and the single-path fallback; BC-UR support; PSBT frame counts and the byte cap for QR; the address explorer for owner-picked indexes; USB-C and SD file transport on the Key app | The four wallets |
+| E7 | Double-spend attempts seen by the mempool watch over weeks, to tune T1 limits | Project node |
+| E8 | Hardware-wallet descriptor registration and signing: does each (Coldcard, Jade, Passport, Keystone) accept the project P2WSH 2-of-3 wallet, check change against it, and require `non_witness_utxo`? **Also:** BIP389 `<0;1>` support and the single-path fallback; BC-UR support; PSBT frame counts and the byte cap for QR; the address explorer for owner-picked indexes; USB-C and SD file transport on the Key app | The four wallets |
 | E9 | Restore drill: can a wallet be restored from the recovery kit alone in Sparrow and in Bitcoin Core with a block filter index? Does `<0;1>` import work, or does the fallback? Does the explicit import range find every address? **Bitcoin Core part run on regtest 2026-11-09: pass** (docs/research/restore-drill-core-2026-11-09.md). The Sparrow part and a hardware signer are not yet run. | A laptop, the kit |
 | E10 | Hidden NFC sticker versus emulated tag: can a hidden tag near the counter be detected by the counter's reader mode? What does an Android wallet show when two tags answer? | Two Android phones, sticker tags |
 
@@ -1777,7 +1754,7 @@ Each gets a written protocol before it runs.
 - R6: Clover App Market and Lightspeed gateway approval rules for a bitcoin
   tender.
 - R7: phone key storage. How a secp256k1 key is protected when Android and
-  iOS secure hardware support only other curves; prior art in mobile
+  iOS hardware security support only other curves; prior art in mobile
   multisig wallets (Nunchuk, Bitkey, Blue).
 - R8: **time-locked vault** (miniscript, a Liana-style path): a recovery path
   that opens after a long delay. Stops a thief who reaches two keys from
@@ -1793,12 +1770,12 @@ Each gets a written protocol before it runs.
   2026-11-09: v1 is on-chain only and says so on the screen. Swaps were later
   dropped under the purist veto (§8).
 - **D2. Keys.** Decided 2026-11-09: the merchant chooses, every
-  option is secure and purist-acceptable, and the recommended second key is a
+  option protects funds and is purist-acceptable, and the recommended second key is a
   device the merchant already owns (§5.4). A key card on the owner's own phone
   and a single-key mode are never offered.
 - **D3. Instant limit defaults.** Decided under Q2 (below):
   $10 per sale and $50 outstanding on the light check; $25 and $100 with the
-  merchant's own node. Shop-adjustable, until our own data (E7) says otherwise.
+  merchant's own node. Shop-adjustable, until project data (E7) says otherwise.
 - **D4. Small-refund allowance.** Dropped 2026-11-09 as
   unfeasible.
 - **D5. Hardware and accounts.** Not needed for v1. A PAX or Sunmi terminal
@@ -1822,7 +1799,7 @@ Each gets a written protocol before it runs.
   reproducible, published with their hash, never auto-update, and carry an
   `earliest_install_date` that Owner mode shows (§5.4). This replaces the fixed
   14-day delay.
-- **Q4. "Someone runs it for me": kept,** labeled honestly ("they can see your
+- **Q4. "Someone else runs the Box": kept,** labeled honestly ("they can see your
   orders and revenue; they never touch your bitcoin"), not the default, with the
   owner phone's order matching catching any false "paid" (§5.3).
 
@@ -1966,9 +1943,7 @@ person can spend the wallet holds only when both are met:
 - Lark equivocation bonds (Delving, 2026-08-18):
   https://mirror.b10c.me/delvingbitcoin-org/2026-08-18-improving-the-security-of-lark-oor-channels-with-equivocation-bonds-id2816.html
 - Boltz reverse-swap lifecycle:
-  https://github.com/BoltzExchange/boltz-backend/blob/master/docs/lifecycle.md ·
-  pause:
-  https://cointelegraph.com/news/boltz-pauses-service-after-wave-of-ai-assisted-hacking-attempts
+  https://github.com/BoltzExchange/boltz-backend/blob/master/docs/lifecycle.md
 - Blockstream Swaps: https://blog.blockstream.com/announcing-blockstream-swaps/
 - Stacker News items 112663, 408359, 1586239, 1336584, 93588 (purist critiques)
 - GAP600 2022 double-spend sample:

@@ -49,7 +49,7 @@ thin driver that owns the sockets.
 - **NR-10.** The counter only dials out. It never listens.
 - **NR-11.** The counter's `version` message says as little as it can:
   protocol 70016, no services, the caller's time, both address fields
-  zero, a fresh random nonce, an empty user agent, its own tip height and
+  zero, a fresh random nonce, an empty user agent, the local tip height and
   relay on. It does not ask for compact blocks or address relay to
   itself.
 - **NR-12.** The peer's `version` must come first, be protocol 70016 or

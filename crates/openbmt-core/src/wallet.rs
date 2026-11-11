@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn checksum_agrees_with_miniscript() {
         // Miniscript prints the apostrophe marker, so compare its own
-        // checksum with ours over the text it printed, and the bodies after
+        // checksum against the project value over the printed text, and the bodies after
         // normalising the marker.
         let w = wallet(Network::Testnet);
         let mut all = vec![w.canonical_string().to_string()];

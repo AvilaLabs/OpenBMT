@@ -16,7 +16,7 @@ a counter, a counter's signed "paid" to the Box. Each of those things is
 already signed and checked by its own rules. The link adds three things
 and no more: only the device it is for can read a message, the reader
 knows which device sent it, and a relay in the middle learns as little as
-we can manage.
+possible.
 
 The link is not a source of truth. Every rule elsewhere keeps checking
 what arrives as if it came from an enemy.
