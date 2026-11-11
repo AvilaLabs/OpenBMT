@@ -29,6 +29,8 @@ exactly the input bytes.
 | `net_manager` | the peer manager on regtest with 3 peers, driven by a script of steps in the input: connect, receive bytes (optionally after a good handshake, and optionally framed as a chosen command with a right checksum), tick, close. It must never panic, and the bytes waiting for a peer never pass the session cap |
 | `pair_offer_decode` | `PairOffer::from_bytes` |
 | `pair_request_decode` | `PairRequest::from_bytes` |
+| `counter_bundle_decode` | `CounterBundle::from_bytes`, with re-encode equality |
+| `counter_pairing_record_decode` | `PairingRecord::from_bytes` (the counter's stored pairing record), with re-encode equality |
 | `signed_pairing_decode` | `SignedPairing::from_bytes` |
 | `owner_command_decode` | `SignedCommand::from_bytes` |
 | `owner_pos_setup_decode` | `PosSetup::from_bytes` of `openbmt-owner-node` (the owner's till settings, magic `OBMr`); on success the settings must encode back to exactly those bytes |

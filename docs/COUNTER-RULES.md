@@ -566,18 +566,94 @@ own; the library judges sales and prices and knows nothing of them.
   no cache, no redirect, no compression; one fixed generic User-Agent for
   every shop. The reply is given to the library's `rate_parse`, the samples
   to `rate_combine`; the app parses no JSON.
-- **CR-90.** The camera reads the pairing code and nothing else. The
+- **CR-90.** The camera reads the codes of pairing and nothing else: the
+  Key app's offer and the owner phone's counter bundle (CR-91, CR-92). The
   permission is asked for only when the manager taps Scan, never at start,
   and if it is refused or "don't ask again" was chosen the app says so in
-  words and the pairing text can still be pasted or read from a file. The
-  camera is open only while the scan page is on the screen and is released
-  on the first code, on Cancel, when the app is not visible and when the scan
-  fails. Nothing is kept from the frames: a frame is read once, zeroed, and
-  never written to disk, logged or sent anywhere, and the text of the code is
-  handed to the pairing screen like pasted text, to be read by the same
-  parser. The manifest asks for the camera as a feature that is not required.
+  words and says that pairing needs the camera. The camera is open only
+  while the scan page is on the screen and is released on the first code, on
+  Cancel, when the app is not visible and when the scan fails. Nothing is
+  kept from the frames: a frame is read once, zeroed, and never written to
+  disk, logged or sent anywhere, and the bytes of the code are handed to the
+  pairing call like any other, to be read by the library's strict decoder.
+  The manifest asks for the camera as a feature that is not required.
 
-## 10. What these rules do not do
+## 10. Pairing the counter
+
+These rules implement `docs/DESIGN.md` §2.9 for the counter's side of the
+pairing ceremony. The ceremony, the checks and the stored record are in
+`crates/openbmt-counter-node` (`paired`) and run behind
+`crates/openbmt-counter-ffi` (`pair_begin`, `pair_match`, `pair_differ`,
+`pair_cancel`, `pair_finish`); the screens are the app's (CR-98). The
+Key app shows its offer as a code; the counter scans it, shows its own
+request as a code with four words; the owner phone carries the request in an
+approval session; the Key app shows the words; the person compares them on
+both screens; the owner phone shows a counter bundle and the counter scans
+it.
+
+- **CR-91.** The ceremony begins from the offer's bytes and from nothing
+  else the app supplies but a name and the time. The counter makes its own
+  identity key and a fresh 32-byte number from the system's random source,
+  in the library and never from the app; if that source cannot be
+  trusted to be unpredictable, the call is refused. The ceremony is in
+  memory only: a restart forgets it, and a new `pair_begin`, a refusal, a
+  finish, `pair_differ` and `pair_cancel` each forget it with its key and
+  number. A call with no ceremony is refused with words that say to begin
+  again from the Key app.
+- **CR-92.** A bundle is taken only after the person has said "They match",
+  and only within 10 minutes of the start. "They differ" ends the ceremony,
+  forgets the key and the number, and says in words what happened and to
+  start again from the Key app. A bundle that is not a bundle leaves the
+  ceremony as it was; a bundle for another counter, another try or another
+  wallet, or whose pairing is not signed by both pinned roots, is refused
+  and ends the ceremony. The checks run in this order: the match, the
+  bundle's encoding, the pairing, the settings (CR-94, CR-95), the first
+  batch (CR-96).
+- **CR-93.** The two roots, the wallet check and the network are the
+  offer's and are never taken from the bundle, the app or a setting. The
+  offer names the network in one byte and it is part of what the four words
+  are made from, so an offer for another network gives other words and a
+  request made for it is refused by the Key app.
+- **CR-94.** The settings in the bundle are verified against the two pinned
+  roots with no earlier settings, so both signatures are needed. Their
+  version must be above the pairing's settings floor (the version in force
+  on the Key app when it signed): an equal or lower version is refused.
+  Settings that cannot be read or are not signed as they must be are
+  refused.
+- **CR-95.** This counter must be on the settings' device list and among
+  the settings' counters. Settings that do not name it are refused, and the
+  words say that the owner must add the counter and pair it again.
+- **CR-96.** The first batch, when there is one, goes through the batch path
+  of the library as any batch does: this counter, this wallet, both
+  signatures, no overlap. Its smallest size is the counter's own number
+  (`BATCH_MIN_COUNT`, 1000, the library's default) and nothing in the bundle
+  or the record can lower it. A batch that does not pass refuses the whole
+  bundle.
+- **CR-97.** What a counter keeps after pairing is one framed record
+  (`OBMt`, version 1): the identity secret, the two roots, the wallet check,
+  the network, the settings floor, the signed settings, the first batch and
+  the peers. It is decoded strictly (exact length, no trailing bytes, every
+  part decoded and re-encoded to the same bytes) and holds nothing that was
+  not checked. `start` takes the record in place of separate fields, reads
+  it and runs CR-94 to CR-96 again on it before anything starts; a record
+  that does not read or holds a secret that is not a key is refused. The
+  record holds the counter's key, so the app seals it (CR-98) and its text
+  is never printed: the debug form hides the secret.
+- **CR-98.** The app's pairing screens are the camera's: scan the offer,
+  show the request as a code with its four words and "They match" and "They
+  differ", then scan the bundle. The words are the most prominent thing on
+  the screen. There is no pairing text, no paste and no file. The record
+  that `pair_finish` returns is sealed with the Android Keystore in the
+  app's `noBackupFilesDir` and handed to `start` at every start; the
+  ceremony under way is never kept, and a restart says so in words and
+  starts over.
+- **CR-99.** The peers in the bundle are hints: at most 8, each a literal
+  address and port in its canonical spelling (no names, port not 0), sorted
+  and without repeats, at most 64 bytes each. They only choose whom the
+  counter asks first. Nothing is checked against them and nothing that
+  moves money depends on them.
+
+## 11. What these rules do not do
 
 - **They do not check payments.** Proof of work, proofs, peers and
   conflicts are the watcher's. A wrong fact handed in gives a wrong

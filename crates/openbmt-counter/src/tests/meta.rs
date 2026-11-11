@@ -25,7 +25,7 @@ const TEST_SOURCES: [&str; 13] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 11] = [
+const NOT_HERE: [(&str, &str); 20] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -79,6 +79,52 @@ const NOT_HERE: [(&str, &str); 11] = [
          (`apps/counter-android/tests/check-manifest.sh`) and the scan's pure parts and native \
          reader are tested in `apps/android-common`; it needs a device to test",
     ),
+    (
+        "CR-91",
+        "the ceremony is the node's, behind openbmt-counter-ffi; its tests are in \
+         `openbmt-counter-node` (`tests/paired.rs`) and `openbmt-counter-ffi`",
+    ),
+    (
+        "CR-92",
+        "the match, the window and the bundle checks are the node's; its tests are in \
+         `openbmt-counter-node` and, end to end, in `openbmt-counter-ffi` (`tests/pairing.rs`)",
+    ),
+    (
+        "CR-93",
+        "the offer's roots, wallet and network are fixed in the node's ceremony; tested in \
+         `openbmt-counter-node`, `openbmt-core` and `openbmt-approver`",
+    ),
+    (
+        "CR-94",
+        "the settings checks are made when the node takes the bundle and again at start; \
+         tested in `openbmt-counter-node` and `openbmt-counter-ffi`",
+    ),
+    (
+        "CR-95",
+        "the device and counter lists are checked by the node; tested in \
+         `openbmt-counter-node` and `openbmt-counter-ffi`",
+    ),
+    (
+        "CR-96",
+        "the first batch goes through this crate's `CounterBatches::add` from the node, with \
+         the node's own smallest size; tested in `openbmt-counter-node` and \
+         `openbmt-counter-ffi`",
+    ),
+    (
+        "CR-97",
+        "the stored record is the node's encoding; tested in `openbmt-counter-node`, with its \
+         fuzz target `counter_pairing_record_decode`",
+    ),
+    (
+        "CR-98",
+        "the pairing screens and the sealed record are the Android app's; its tests are the \
+         app's JVM tests (`apps/counter-android`)",
+    ),
+    (
+        "CR-99",
+        "the peers are the bundle's hints and the node's to use; tested in \
+         `openbmt-counter-node` and `openbmt-core` (`bundle`)",
+    ),
 ];
 
 fn defined() -> BTreeSet<String> {
@@ -90,9 +136,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_sixty_nine_rules() {
+fn the_rules_file_defines_seventy_eight_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 69);
+    assert_eq!(ids.len(), 78);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -103,6 +149,7 @@ fn the_rules_file_defines_sixty_nine_rules() {
             && ids.contains("CR-83")
             && ids.contains("CR-89")
             && ids.contains("CR-90")
+            && ids.contains("CR-99")
     );
 }
 

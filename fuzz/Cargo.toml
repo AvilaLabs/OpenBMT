@@ -19,6 +19,7 @@ openbmt-net = { path = "../crates/openbmt-net" }
 # The same exact version as openbmt-net, for the peer's side of the handshake.
 bip324 = { version = "=0.11.1", default-features = false }
 openbmt-counter = { path = "../crates/openbmt-counter" }
+openbmt-counter-node = { path = "../crates/openbmt-counter-node" }
 openbmt-link = { path = "../crates/openbmt-link" }
 openbmt-courier = { path = "../crates/openbmt-courier" }
 openbmt-pos = { path = "../crates/openbmt-pos" }
@@ -429,6 +430,20 @@ bench = false
 [[bin]]
 name = "box_status_request"
 path = "fuzz_targets/box_status_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "counter_bundle_decode"
+path = "fuzz_targets/counter_bundle_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "counter_pairing_record_decode"
+path = "fuzz_targets/counter_pairing_record_decode.rs"
 test = false
 doc = false
 bench = false
