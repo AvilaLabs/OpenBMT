@@ -251,7 +251,10 @@ owner's choices.
   delivered offer "Show the code for" it. The code is `ur:bytes` of the
   bundle `counterBundle` made, drawn by `AnimatedQrView` as in OA-20, with
   the words "Scan this with the counter. It shows Paired when it has taken
-  it." A code without the first addresses says so. If the Key app declined,
+  it." A code in many parts (the first addresses make it about 36 KB) says
+  that taking it takes about a minute and to hold both phones steady; the
+  counter counts the parts it has. A code without the first addresses says
+  so. If the Key app declined,
   nothing waits and the library's words of each entry are shown.
 - **OA-25.** Leaving the code keeps the counter waiting. Only the owner's
   word, the button "The counter shows Paired", calls `counterDelivered` and

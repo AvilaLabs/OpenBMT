@@ -1025,9 +1025,14 @@ object AppModelTest {
         ok(moving.shown && moving.done && moving.words === AppWords.counterCodeAnimated, "a code that changes")
         ok(bare.shown && bare.done && bare.words === AppWords.counterCodeNoBatch, "a code without the first addresses says so")
         ok(!none.shown && !none.done && none.words === AppWords.counterCodeNotMade, "no code: no button that says Paired")
-        for (w in listOf(still.words, moving.words, bare.words)) {
+        for (w in listOf(still.words, bare.words)) {
             ok(w.next == "Scan this with the counter. It shows Paired when it has taken it." && w.who == Who.OWNER && w.tone == Tones.INFO, "the words say what to do next: ${w.next}")
         }
+        ok(
+            moving.words.what.contains("about a minute") && moving.words.next.contains("steady") &&
+                moving.words.next.contains("Paired") && moving.words.who == Who.OWNER && moving.words.tone == Tones.INFO,
+            "a code that changes says how long it takes and to hold steady: ${moving.words.what} ${moving.words.next}",
+        )
         ok(none.words.tone == Tones.STOP && none.words.what.contains("kept"), "no code says what waits is kept")
 
         val waiting = listOf(WaitingCounter(ByteArray(32) { 1 }, "Front"), WaitingCounter(ByteArray(32) { 2 }, "Back"))
@@ -1089,7 +1094,11 @@ object AppModelTest {
         ok(code.contains("n.counterBundle(w.counter)") && code.contains("AnimatedQrView.make(") && code.contains("ExchangeModel.WHO, ExchangeModel.TYPE_BYTES, made.code"), "the code is the bundle, as ur:bytes")
         ok(code.contains("ExchangeModel.codeHeight(act.resources.displayMetrics.heightPixels)"), "at the size of the other codes")
         ok(code.contains("CounterModel.codeStep(view != null, made.withBatch, view?.animated == true)") && code.contains("if (step.done) {"), "the Paired button only with a code on the screen")
-        ok(AppWords.counterCodeAnimated.next == "Scan this with the counter. It shows Paired when it has taken it.", "the words say what to do next")
+        ok(
+            AppWords.counterCodeAnimated.next.startsWith("Scan this with the counter") && AppWords.counterCodeAnimated.next.contains("Paired") &&
+                AppWords.counterCodeAnimated.what.contains("about a minute"),
+            "the words say what to do next and how long it takes",
+        )
         val approval = source("src/android/Approval.kt")
         ok(approval.contains("waitingCounterViews(n, Slot(act)) { showHome() }") && approval.substringAfter("private fun Controller.showTaken(").contains("waitingCounterViews("), "a counter approved by the response offers its code")
         val outbox = source("src/android/Screens.kt").substringAfter("internal fun Controller.showOutbox()").substringBefore("// ---- the queue")

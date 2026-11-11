@@ -233,9 +233,10 @@ object AppWords {
     /** The code for the counter is on the screen with the first addresses in it, and it changes. */
     val counterCodeAnimated = w(
         Tones.INFO, "Code for the counter",
-        "The code for the counter is on the screen, one part after another, with its first addresses in it.",
+        "The code for the counter is on the screen in many parts, with its first addresses. Taking it takes about a minute.",
         Who.OWNER,
-        "Scan this with the counter. It shows Paired when it has taken it.",
+        "Scan this with the counter and hold both phones steady. The counter counts the parts it has and " +
+            "shows Paired when it has them all.",
     )
 
     /** The code for the counter is on the screen as one code. */
