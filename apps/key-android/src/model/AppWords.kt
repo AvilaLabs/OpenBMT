@@ -1,6 +1,8 @@
 package org.openbmt.key.app
 
+import org.openbmt.app.CameraWords
 import org.openbmt.app.Format
+import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
 import org.openbmt.app.Who
 import org.openbmt.key.CheckStatus
@@ -95,6 +97,23 @@ object AppWords {
         Who.KEY_HOLDER,
         "Save the file again, in a place the owner's phone can read.",
         problem?.let { Format.cleanForeign(it) },
+    )
+
+    // ---- the camera ---------------------------------------------------------------
+
+    private fun fromSay(s: SayWords) = Words(s.tone, s.who, s.heading, s.what, s.next, null, null, null, s.detail)
+
+    /** The camera permission was refused, or "don't ask again" was chosen. */
+    val cameraOff = fromSay(CameraWords.off(Who.KEY_HOLDER))
+
+    fun cameraNotStarted(problem: String?) = fromSay(CameraWords.notStarted(Who.KEY_HOLDER, problem))
+
+    /** A scanned code is one part of a series of codes that change on the screen. */
+    val animatedCodes = w(
+        Tones.INFO, "Animated codes not read yet",
+        "This code is one part of a series that changes on the screen, and this app reads one code only.",
+        Who.KEY_HOLDER,
+        "Ask the owner's phone for the text as a file, then choose the file instead of scanning.",
     )
 
     // ---- what was typed --------------------------------------------------------
@@ -228,6 +247,9 @@ object AppWords {
         "keystoreUnavailable" to keystoreUnavailable("a problem"),
         "fileNotRead" to fileNotRead("a problem"),
         "fileNotSaved" to fileNotSaved("a problem"),
+        "cameraOff" to cameraOff,
+        "cameraNotStarted" to cameraNotStarted("a problem"),
+        "animatedCodes" to animatedCodes,
         "notANumber" to notANumber,
         "identityNotReadable" to identityNotReadable,
         "flipsNotReadable" to flipsNotReadable,

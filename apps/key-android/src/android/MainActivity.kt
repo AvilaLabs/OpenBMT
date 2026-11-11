@@ -44,8 +44,18 @@ class MainActivity : Activity() {
         controller.picked(requestCode, resultCode, data)
     }
 
+    /** The page on the screen now, so that a scan can return to it with what was typed on it. */
+    var current: View? = null
+        private set
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        controller.permission(requestCode, grantResults)
+    }
+
     /** Shows [page] as the whole content. */
     fun show(page: View) {
+        current = page
         setContentView(page)
     }
 }

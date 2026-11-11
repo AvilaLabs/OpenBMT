@@ -104,6 +104,8 @@ object AppModelTest {
                 ok(!(a.second.heading == b.second.heading && a.second.what == b.second.what), "${a.first} and ${b.first} read the same")
             }
         }
+        ok(AppWords.cameraOff.who == Who.KEY_HOLDER && AppWords.cameraOff.next.contains("settings") && AppWords.cameraOff.next.contains("file"), "the camera-off words say what to do")
+        ok(AppWords.animatedCodes.next.contains("file") && AppWords.animatedCodes.heading.contains("Animated"), "the animated-code words say to use a file")
         // The setup, check and kit words equal the rows of docs/screens/key.md.
         if (keyMd != null) {
             val rows = keyMd.readLines().filter { it.startsWith("| ") }
@@ -118,7 +120,7 @@ object AppModelTest {
     // Words the app wrote itself: the library has no row for them.
     private val notInTheCatalogue = setOf(
         "debuggingOn", "wirelessDebuggingOn", "accessibilityOn", "keyInSoftware", "libraryMissing", "fault",
-        "keystoreUnavailable", "fileNotRead", "fileNotSaved", "notANumber", "identityNotReadable", "flipsNotReadable", "answersReady",
+        "keystoreUnavailable", "fileNotRead", "fileNotSaved", "cameraOff", "cameraNotStarted", "animatedCodes", "notANumber", "identityNotReadable", "flipsNotReadable", "answersReady",
     )
 
     private fun guardTests() {

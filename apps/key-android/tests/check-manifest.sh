@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks what the built APK's manifest says, with the SDK's own aapt2: no
-# permission of any kind, no network permission or setting, backup and device
+# permission but CAMERA (with the camera feature not required), no network permission or setting, backup and device
 # transfer off, nothing exported but the launcher activity, and no service,
 # receiver or provider. The manifest in the APK is the merged one: no library
 # adds to it.
@@ -20,15 +20,29 @@ tree="$("$aapt2" dump xmltree --file AndroidManifest.xml "$apk" 2>&1)" || { echo
 
 count() { printf '%s\n' "$tree" | grep -c -E "$1"; }
 
-# 1. No permission, no feature that needs one.
-if [ "$(count 'E: uses-permission')" -eq 0 ]; then pass "no uses-permission element"; else fail "a uses-permission element is present"; fi
+# 1. The one permission is CAMERA, and the camera is not required. No network permission.
+declared="$(printf '%s\n' "$tree" | grep -E 'E: uses-permission' | wc -l)"
+if [ "$declared" -eq 1 ]; then pass "exactly one uses-permission element"; else fail "$declared uses-permission elements"; fi
+if printf '%s\n' "$tree" | grep -q 'android.permission.CAMERA'; then pass "the permission is CAMERA"; else fail "CAMERA is not declared"; fi
 if printf '%s\n' "$tree" | grep -q -i -E 'INTERNET|NETWORK_STATE|WIFI_STATE|CHANGE_NETWORK|NEARBY|BLUETOOTH|NFC'; then
     fail "a network-related name is in the manifest"
 else
     pass "no network-related name in the manifest"
 fi
-perms="$("$aapt2" dump permissions "$apk" 2>&1 | grep -v -E '^package:' || true)"
-if [ -z "$perms" ]; then pass "aapt2 dump permissions lists none"; else fail "aapt2 dump permissions lists: $perms"; fi
+perms="$("$aapt2" dump permissions "$apk" 2>&1 | grep -v -E '^package:' | sed -e 's/^ *//' | sort | tr '\n' ' ')"
+if [ "$perms" = "uses-permission: name='android.permission.CAMERA' " ]; then pass "aapt2 dump permissions lists exactly CAMERA"; else fail "aapt2 dump permissions lists: $perms"; fi
+if [ "$(count 'E: uses-feature')" -eq 1 ] && printf '%s\n' "$tree" | grep -q 'android.hardware.camera.any'; then
+    pass "exactly one uses-feature element, android.hardware.camera.any"
+else
+    fail "the uses-feature elements are not exactly android.hardware.camera.any"
+fi
+# aapt2 also lists the camera it implies from the CAMERA permission; that is its own reading
+# for stores, not an element of the manifest (checked above: one uses-feature element).
+if "$aapt2" dump badging "$apk" 2>&1 | grep -q "uses-feature-not-required: name='android.hardware.camera.any'"; then
+    pass "badging lists android.hardware.camera.any as not required"
+else
+    fail "badging does not list android.hardware.camera.any as not required"
+fi
 
 # 2. Backup and data extraction.
 if printf '%s\n' "$tree" | grep -q -E 'allowBackup.*=false'; then pass "allowBackup is false"; else fail "allowBackup is not false"; fi

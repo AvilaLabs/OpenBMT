@@ -27,15 +27,24 @@ tone, the heading, what happened, what to do next, who does it, quoted text
 marked as from elsewhere, and a "Details" fold with the rule, the time and the
 detail.
 
-Not built yet: a camera and QR (so every scan is a paste or a file here), the
-allowlist enrolment, the pairing offer, BC-UR frames, a lock screen of the
-app's own, and the wipe after wrong tries.
+Every place that takes pasted text or a file has a third choice, Scan, which
+reads one QR code with the phone's camera (see "The camera scan" below).
+
+Not built yet: reading a series of animated codes (BC-UR frames; a code that
+is one part of a series gets words that say to use a file), the allowlist
+enrolment, the pairing offer, a lock screen of the app's own, and the wipe
+after wrong tries.
 
 ## Rules the app keeps without a device
 
-- **No permission.** The manifest has no `uses-permission` of any kind, so no
-  network permission either. `tests/check-manifest.sh` reads the built APK's
-  manifest with `aapt2` and fails the build if one appears.
+- **No network permission; only the camera.** The manifest has one
+  `uses-permission`, `CAMERA`, and a `uses-feature` for
+  `android.hardware.camera.any` that is not required. Signing data comes in
+  by QR code, and the camera is no network path: the app has no `INTERNET`
+  permission, so nothing it reads or shows can leave the phone by a network.
+  The permission is asked for at run time, only when the person taps Scan.
+  `tests/check-manifest.sh` reads the built APK's manifest with `aapt2` and
+  fails the build if the list differs from exactly that.
 - **No backup.** `allowBackup="false"`, `fullBackupContent` and
   `dataExtractionRules` exclude every domain, for cloud backup and for device
   transfer.
@@ -59,6 +68,31 @@ app's own, and the wipe after wrong tries.
   file. `load` returns null on a first start and throws on a file that does not
   decrypt, and the app then shows the library's words and writes nothing.
 
+## The camera scan
+
+Scan reads one QR code with the platform's Camera2 only: no AndroidX, no
+CameraX, no ML Kit and no ZXing at runtime. `apps/android-common`'s
+`QrScanner` takes frames from an `ImageReader` (YUV_420_888, near 1280 by
+720), keeps only the Y plane with its row stride, and gives it to the reader
+of `crates/openbmt-qr` through one JNI function (`crates/openbmt-qr-jni`), on
+a background thread, at most about eight times a second, the latest frame
+only. The camera is released on the first code, on Cancel and when the app
+goes to the background. A frame is zeroed after it is read and is never
+written to a file or sent anywhere. The scan page has a preview so the
+person can aim.
+
+- Scan fills the field next to it (the wallet description, the owner's
+  identity, key 3's account key, the wallet text of the printed kit) with the
+  text of the code, or, on the home screen, opens a request from the bytes of
+  the code, as a request file would.
+- The camera permission is asked for only when Scan is tapped. If it is
+  refused, or "don't ask again" was chosen, a words page says the camera is
+  off for this app, to allow it in the phone's settings or to paste or choose
+  a file instead, and that the key holder does this.
+- A code whose text starts with `UR:` or `ur:` and is one part of a series
+  (`ur:type/3-9/...`) gets words that say animated codes are not read yet and
+  to use a file. BC-UR is built separately.
+
 ## Build
 
 ```sh
@@ -66,8 +100,11 @@ scripts/key-apk-build.sh
 ```
 
 The script checks each tool and stops with a message when one is missing, runs
-the JVM tests, builds the Rust library for `aarch64-linux-android` and
-`x86_64-linux-android` (`scripts/key-ffi-build.sh`, then strips them), compiles
+the JVM tests (and the harness test of the camera scan's native reader,
+`apps/android-common/tests/qr-jni-test.sh`), builds the Rust libraries for
+`aarch64-linux-android` and `x86_64-linux-android`
+(`scripts/key-ffi-build.sh` and `scripts/qr-jni-build.sh`, then strips
+them), compiles
 the resources (`aapt2`), the Kotlin (`kotlinc` against `android-36`'s
 `android.jar` and the wrapper in `crates/openbmt-key-ffi/bindings/kotlin`),
 dexes with `d8 --release --min-api 29` together with `kotlin-stdlib.jar`,
@@ -97,7 +134,11 @@ is used in `src/model/`: the screen model, the words model, the app's own words
 (checked against the rules of `openbmt_core::say::check` as far as text can be,
 and against the rows of `docs/screens/key.md`), the line text, and the saved
 state's file format with a fake cipher. `src/android/` holds everything that
-needs the framework.
+needs the framework. The tests of the shared code (`apps/android-common/tests`)
+also run the camera scan's pure parts (choosing a frame size, copying a Y
+plane with its row and pixel stride, the throttle, the reader's reply framing,
+the UR check), and `qr-jni-test.sh` loads the host-built
+`libopenbmt_qr_jni.so` and reads frames made by the repository's encoder.
 
 ## Signing
 
@@ -111,5 +152,8 @@ and kept offline.
 
 Nothing here has run on a device. Not checked: that the library loads and
 answers on a phone, the Keystore and StrongBox behaviour, the file pickers,
-the layout, the keyboard flags, `FLAG_SECURE` in the recent-apps list, and the
-refusal when debugging or an accessibility service is on.
+the camera scan (the permission dialog, the preview and its shape, that a
+code on a screen and on paper is read, how long it takes, the camera being
+released when the app is left), the layout, the keyboard flags, `FLAG_SECURE`
+in the recent-apps list, and the refusal when debugging or an accessibility
+service is on.

@@ -7,14 +7,17 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
+import android.widget.EditText
 import android.view.accessibility.AccessibilityManager
 import java.io.File
 import java.io.IOException
 import org.openbmt.app.Format
 import org.openbmt.app.KeyLevel
 import org.openbmt.app.KeystoreSealer
+import org.openbmt.app.ScanFlow
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Ui
+import org.openbmt.app.UrText
 import org.openbmt.key.CeilingsView
 import org.openbmt.key.Decision
 import org.openbmt.key.EntropySource
@@ -32,11 +35,12 @@ import org.openbmt.key.Words
 /**
  * The screens and what they do. Every call into the library goes through
  * [attempt], which shows the library's own words for a refusal. The screens are
- * small on purpose: this is a first build, with no camera (so no QR), and
- * files, pasted text and typed numbers in place of scans.
+ * small on purpose: this is a first build, and text comes in by paste, by a
+ * file or by scanning one QR code (animated codes are not read yet).
  */
 class Controller(private val act: MainActivity) {
     private val ui = Ui(act)
+    private val scan = ScanFlow(act, ui)
     private var store: PersistentStore? = null
     private var level: KeyLevel? = null
     private var app: KeyApp? = null
@@ -81,7 +85,7 @@ class Controller(private val act: MainActivity) {
     }
 
     fun resumed() {
-        if (pickerOpen) return
+        if (pickerOpen || scan.asking) return
         if (refusals().isNotEmpty()) {
             dropSession()
             refresh(null)
@@ -92,7 +96,8 @@ class Controller(private val act: MainActivity) {
     }
 
     fun paused() {
-        if (pickerOpen) return
+        if (pickerOpen || scan.asking) return
+        scan.stop()
         dropSession()
         pendingAnswer = null
         act.show(View(act))
@@ -100,6 +105,7 @@ class Controller(private val act: MainActivity) {
     }
 
     fun close() {
+        scan.stop()
         dropSession()
         try {
             app?.close()
@@ -376,7 +382,10 @@ class Controller(private val act: MainActivity) {
                     ui.text(details.joinToString("\n"), 13f, mono = true),
                     ui.text("Network", 16f, bold = true),
                     networkChoice(),
-                    description, ownerRoot, key3, batch,
+                    description, scanButton("Scan the wallet description", description),
+                    ownerRoot, scanButton("Scan the owner's identity", ownerRoot),
+                    key3, scanButton("Scan key 3's account key", key3),
+                    batch,
                     ui.button("Accept the wallet") {
                         allowed {
                             val root = Format.fromHex(ownerRoot.text.toString())
@@ -433,6 +442,7 @@ class Controller(private val act: MainActivity) {
                     ui.text("Check the printed kit", 20f, bold = true),
                     ui.text("Paste the wallet text read from the paper. It is compared with this app's own copy.", 14f),
                     input,
+                    scanButton("Scan the wallet code from the paper", input),
                     ui.button("Check") {
                         attempt({ showKitCheck() }) { a.checkKit(input.text.toString()) }?.let {
                             showMessage(AppWords.kit(it)) { refresh() }
@@ -450,6 +460,7 @@ class Controller(private val act: MainActivity) {
         val views = ArrayList<View>(banner())
         views.add(ui.words(AppWords.state(state)))
         views.add(ui.button("Answer a request from the owner's phone") { pickRequest() })
+        views.add(ui.button("Scan a request code from the owner's phone") { scanRequest() })
         if (answerFile.isFile) views.add(ui.button("Save the last answer again") { saveAnswer(answerFile.readBytes()) })
         views.add(ui.button("The wallet and its check words") { showWallet(false) })
         views.add(ui.button("Check the printed kit") { showKitCheck() })
@@ -552,6 +563,53 @@ class Controller(private val act: MainActivity) {
         act.show(ui.page(views))
     }
 
+    // ---- scanning one code ------------------------------------------------------------------------
+
+    /** A button that scans one code into [field]; the page and what is typed on it stay as they are. */
+    private fun scanButton(label: String, field: EditText): View = ui.button(label) {
+        val page = act.current
+        val restore = { if (page != null) act.show(page) else refresh() }
+        allowed {
+            scan.begin(
+                show = { act.show(it) },
+                onBytes = { bytes ->
+                    allowed {
+                        if (UrText.isMultiPart(bytes)) {
+                            showMessage(AppWords.animatedCodes, restore)
+                        } else {
+                            field.setText(String(bytes, Charsets.UTF_8))
+                            restore()
+                        }
+                    }
+                },
+                onFailed = { showMessage(cameraWords(it), restore) },
+                onCancel = restore,
+            )
+        }
+    }
+
+    private fun cameraWords(f: org.openbmt.app.ScanFailure): Words =
+        if (f.off) AppWords.cameraOff else AppWords.cameraNotStarted(f.problem)
+
+    /** The request of the owner's phone, as the bytes of one code. */
+    private fun scanRequest() {
+        allowed {
+            scan.begin(
+                show = { act.show(it) },
+                onBytes = { bytes ->
+                    allowed {
+                        if (UrText.isMultiPart(bytes)) showMessage(AppWords.animatedCodes) { refresh() } else openRequestBytes(bytes)
+                    }
+                },
+                onFailed = { showMessage(cameraWords(it)) { refresh() } },
+                onCancel = { refresh() },
+            )
+        }
+    }
+
+    /** The answer of the system's permission dialog. */
+    fun permission(code: Int, results: IntArray) = scan.permissionResult(code, results)
+
     // ---- the approval session -------------------------------------------------------------------
 
     private fun pickRequest() {
@@ -591,7 +649,6 @@ class Controller(private val act: MainActivity) {
     }
 
     private fun openRequest(uri: Uri) {
-        val a = app ?: return
         val bytes = try {
             readLimited(uri)
         } catch (e: IOException) {
@@ -599,6 +656,12 @@ class Controller(private val act: MainActivity) {
         } catch (e: SecurityException) {
             return showMessage(AppWords.fileNotRead(e.message)) { refresh() }
         }
+        openRequestBytes(bytes)
+    }
+
+    /** The request as bytes, from a file or from a scanned code. */
+    private fun openRequestBytes(bytes: ByteArray) {
+        val a = app ?: return
         dropSession()
         answerFile.delete()
         val s = attempt({ refresh() }) { a.openSession(bytes) } ?: return
