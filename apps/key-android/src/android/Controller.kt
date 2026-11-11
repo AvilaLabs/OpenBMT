@@ -968,7 +968,7 @@ class Controller(private val act: MainActivity) {
             views.add(centred(ui.text(AppWords.Text.ON_OWNER_PHONE, 16f, bold = true)))
             val made = if (CeremonyModel.looksLikeAnswer(bytes)) {
                 val metrics = act.resources.displayMetrics
-                AnimatedQrView.make(dark, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.4).toInt())
+                AnimatedQrView.make(dark, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.6).toInt())
             } else {
                 null
             }
@@ -1133,7 +1133,7 @@ class Controller(private val act: MainActivity) {
                 return@allowed showMessage(AppWords.fault(KeyException("pair-offer", "the library gave bytes that are not an offer", 4)), { refresh() })
             }
             val metrics = act.resources.displayMetrics
-            val made = AnimatedQrView.make(dark, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.4).toInt())
+            val made = AnimatedQrView.make(dark, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.6).toInt())
             val words = model(AppWords.pairOffer)
             val views = ArrayList<View>()
             views.add(ui.compactWords(words))
@@ -1564,7 +1564,7 @@ class Controller(private val act: MainActivity) {
     private fun showAnswerCode(bytes: ByteArray, back: () -> Unit) {
         allowed {
             val metrics = act.resources.displayMetrics
-            val made = AnimatedQrView.make(dark, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.4).toInt())
+            val made = AnimatedQrView.make(dark, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.6).toInt())
             val view = made.view
             val say = if (view == null) {
                 made.words ?: UrWords.cannotShow(Who.KEY_HOLDER)
