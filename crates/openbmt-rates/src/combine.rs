@@ -3,7 +3,7 @@
 use openbmt_counter::money::{Rate, RateSource};
 
 use crate::error::{PriceRefused, RatesRefused};
-use crate::price::{MAX_CENTS_PER_BTC, MIN_CENTS_PER_BTC};
+use crate::price::band;
 use crate::source::{position, Source};
 
 /// RT-33: the most a price used may differ from the median, in hundredths
@@ -31,7 +31,8 @@ impl Sample {
         fetched_at: u64,
         minor_per_btc: u64,
     ) -> Result<Self, PriceRefused> {
-        if !(MIN_CENTS_PER_BTC..=MAX_CENTS_PER_BTC).contains(&minor_per_btc) {
+        let (min, max) = band(source.currency).ok_or(PriceRefused::OutOfBand)?;
+        if !(min..=max).contains(&minor_per_btc) {
             return Err(PriceRefused::OutOfBand);
         }
         Ok(Self {

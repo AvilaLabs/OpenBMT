@@ -45,7 +45,7 @@ fn rt_01_the_table_of_sources_is_handed_to_the_app() {
             (
                 s.id.to_string(),
                 s.url.to_string(),
-                s.currency.to_string(),
+                s.currency.code().to_string(),
                 s.initial.to_string(),
             )
         })

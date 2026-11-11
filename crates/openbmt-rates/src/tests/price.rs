@@ -1,7 +1,13 @@
 //! RT-20 to RT-24: the text of a price.
 
 use crate::price::{MAX_CENTS_PER_BTC, MIN_CENTS_PER_BTC};
-use crate::{parse_price_cents, PriceRefused};
+use crate::{band, parse_price_minor, PriceRefused};
+use openbmt_core::currency::ShopCurrency;
+
+/// A price in dollars, in cents.
+fn parse_price_cents(text: &str) -> Result<u64, PriceRefused> {
+    parse_price_minor(text, ShopCurrency::Usd)
+}
 
 #[test]
 fn rt_20_plain_prices_are_read_exactly() {
@@ -102,4 +108,93 @@ fn rt_20_every_refusal_names_its_rule() {
         assert!(e.to_string().starts_with(e.rule()));
         assert!(e.rule().starts_with("RT-"));
     }
+}
+
+#[test]
+fn rt_24_the_band_of_each_currency_is_the_dollar_band_times_its_factor() {
+    let want = [
+        (ShopCurrency::Usd, 1),
+        (ShopCurrency::Eur, 1),
+        (ShopCurrency::Gbp, 1),
+        (ShopCurrency::Aud, 1),
+        (ShopCurrency::Sgd, 1),
+        (ShopCurrency::Jpy, 100),
+        (ShopCurrency::Inr, 100),
+        (ShopCurrency::Krw, 1_000),
+        (ShopCurrency::Idr, 10_000),
+    ];
+    for (c, factor) in want {
+        assert_eq!(
+            band(c),
+            Some((MIN_CENTS_PER_BTC * factor, MAX_CENTS_PER_BTC * factor)),
+            "{}",
+            c.code()
+        );
+    }
+    assert_eq!(band(ShopCurrency::Sats), None);
+    assert_eq!(
+        parse_price_minor("73550", ShopCurrency::Sats),
+        Err(PriceRefused::OutOfBand)
+    );
+}
+
+#[test]
+fn rt_22_a_currency_without_a_minor_unit_rounds_half_up_to_the_whole_unit() {
+    // Yen and won have no minor unit: the amount is whole yen or won.
+    assert_eq!(
+        parse_price_minor("11868632.4", ShopCurrency::Jpy),
+        Ok(11_868_632)
+    );
+    assert_eq!(
+        parse_price_minor("11868632.5", ShopCurrency::Jpy),
+        Ok(11_868_633)
+    );
+    assert_eq!(
+        parse_price_minor("100674000", ShopCurrency::Krw),
+        Ok(100_674_000)
+    );
+    // Rupiah has two minor digits in ISO 4217: hundredths.
+    assert_eq!(
+        parse_price_minor("1234567890.125", ShopCurrency::Idr),
+        Ok(123_456_789_013)
+    );
+    assert_eq!(
+        parse_price_minor("7442024.5", ShopCurrency::Inr),
+        Ok(744_202_450)
+    );
+}
+
+#[test]
+fn rt_24_a_price_outside_a_currency_band_is_refused_in_that_currency() {
+    // 100 USD is in the band; 100 yen is far under the yen band.
+    assert_eq!(parse_price_minor("100", ShopCurrency::Usd), Ok(10_000));
+    assert_eq!(
+        parse_price_minor("100", ShopCurrency::Jpy),
+        Err(PriceRefused::OutOfBand)
+    );
+    assert_eq!(
+        parse_price_minor("1000000", ShopCurrency::Jpy),
+        Ok(1_000_000)
+    );
+    assert_eq!(
+        parse_price_minor("999999", ShopCurrency::Jpy),
+        Err(PriceRefused::OutOfBand)
+    );
+    assert_eq!(
+        parse_price_minor("1000000000000", ShopCurrency::Jpy),
+        Ok(1_000_000_000_000)
+    );
+    assert_eq!(
+        parse_price_minor("1000000000001", ShopCurrency::Jpy),
+        Err(PriceRefused::OutOfBand)
+    );
+    // Rupiah: 10,000 times the dollar band, in hundredths.
+    assert_eq!(
+        parse_price_minor("1000000", ShopCurrency::Idr),
+        Ok(100_000_000)
+    );
+    assert_eq!(
+        parse_price_minor("999999.99", ShopCurrency::Idr),
+        Err(PriceRefused::OutOfBand)
+    );
 }

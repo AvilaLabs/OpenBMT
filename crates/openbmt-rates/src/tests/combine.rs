@@ -3,7 +3,8 @@
 use openbmt_counter::money::{MAX_RATE_AGE_SECS, MAX_RATE_AHEAD_SECS, MAX_SOURCE_LABEL_BYTES};
 
 use super::src;
-use crate::{combine, label_for, RatesRefused, Sample, SOURCES};
+use crate::{combine, label_for, sources_for, RatesRefused, Sample};
+use openbmt_core::currency::ShopCurrency;
 use openbmt_counter::money::RateSource;
 
 const NOW: u64 = 1_800_000_000;
@@ -217,21 +218,25 @@ fn rt_37_samples_that_are_all_stale_are_too_old() {
 }
 
 #[test]
-fn rt_35_the_label_fits_for_every_subset_of_the_table() {
-    for mask in 1u32..(1 << SOURCES.len()) {
-        let picked: Vec<_> = SOURCES
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| mask & (1 << i) != 0)
-            .map(|(_, s)| s)
-            .collect();
-        let label = label_for(&picked);
-        assert!(label.len() <= MAX_SOURCE_LABEL_BYTES, "{label}");
-        assert!(label.starts_with("med."));
-        assert!(RateSource::new(&label, 0).is_ok(), "{label}");
-        // And the label tells which sources were used.
-        for (i, s) in SOURCES.iter().enumerate() {
-            assert_eq!(label.contains(s.initial), mask & (1 << i) != 0, "{label}");
+fn rt_35_the_label_fits_for_every_subset_of_each_currencys_table() {
+    for currency in ShopCurrency::ALL {
+        let table: Vec<_> = sources_for(currency).collect();
+        for mask in 1u32..(1 << table.len()) {
+            let picked: Vec<_> = table
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| mask & (1 << i) != 0)
+                .map(|(_, s)| *s)
+                .collect();
+            let label = label_for(&picked);
+            assert!(label.len() <= MAX_SOURCE_LABEL_BYTES, "{label}");
+            assert!(label.starts_with("med."));
+            assert!(RateSource::new(&label, 0).is_ok(), "{label}");
+            // And the label tells which sources were used.
+            let letters = label.strip_prefix("med.").expect("prefix");
+            for (i, s) in table.iter().enumerate() {
+                assert_eq!(letters.contains(s.initial), mask & (1 << i) != 0, "{label}");
+            }
         }
     }
 }
@@ -280,20 +285,29 @@ fn rt_24_a_sample_outside_the_band_cannot_be_made() {
 
 #[test]
 fn rt_38_prices_in_two_currencies_are_refused() {
-    use crate::source::{Shape, Source};
-    static EUR: Source = Source {
-        id: "kraken",
-        initial: 'k',
-        url: "https://example.invalid/",
-        currency: "EUR",
-        shape: Shape::Last,
-    };
     let a = Sample::new(src("coinbase"), NOW - 1, 7_355_218).expect("band");
-    let b = Sample::new(&EUR, NOW - 1, 7_355_450).expect("band");
+    let b = Sample::new(src("kraken-eur"), NOW - 1, 7_355_450).expect("band");
     assert_eq!(
         combine(&[a, b], NOW).unwrap_err(),
         RatesRefused::MixedCurrencies
     );
+}
+
+#[test]
+fn rt_30_each_currency_combines_its_own_sources() {
+    // Two yen prices, in whole yen, in the yen band.
+    let got = combine(
+        &[
+            s("kraken-jpy", 5, 11_868_000),
+            s("bitflyer-jpy", 9, 11_870_000),
+        ],
+        NOW,
+    );
+    assert_eq!(rate_of(got), (11_868_000, "med.kf".to_string(), NOW - 9));
+    // A price that fits the yen band is not a dollar price.
+    assert!(Sample::new(src("kraken"), NOW, 11_868_000).is_ok());
+    assert!(Sample::new(src("kraken-jpy"), NOW, 7_355_450).is_ok());
+    assert!(Sample::new(src("kraken-jpy"), NOW, 999_999).is_err());
 }
 
 #[test]

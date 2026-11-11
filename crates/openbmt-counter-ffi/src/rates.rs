@@ -115,7 +115,7 @@ pub(crate) fn rate_sources() -> Vec<RateSourceView> {
         .map(|s| RateSourceView {
             id: s.id.to_string(),
             url: s.url.to_string(),
-            currency: s.currency.to_string(),
+            currency: s.currency.code().to_string(),
             initial: s.initial.to_string(),
         })
         .collect()

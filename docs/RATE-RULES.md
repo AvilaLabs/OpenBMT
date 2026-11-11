@@ -19,11 +19,32 @@ bytes and a time the caller gives it and returns a price or a refusal.
 
 ## 1. The sources
 
-- **RT-01.** The sources are a fixed table compiled into the program. Each
-  has an id, a letter, an HTTPS address, a currency and a shape. Nothing
-  adds, removes or changes a source while the program runs. The table, as
-  checked on 2026-11-11 (the fixtures of RT-15 are real replies of these
-  addresses):
+- **RT-01.** The sources are a fixed table compiled into the program, a
+  table for each currency. Each source has an id, a letter, an HTTPS
+  address, a currency and a shape. Nothing adds, removes or changes a source
+  while the program runs. A currency is in the table only where at least two
+  independent exchanges quote bitcoin in it directly. Coinbase's spot price
+  is used only for the four currencies that have a Coinbase market (USD,
+  EUR, GBP, INR). Swiss francs are not in the table: the second source of
+  that currency is not confirmed. The table, as checked on 2026-11-11 (the
+  fixtures of RT-15 for the four dollar sources are real replies of these
+  addresses; the others are made from the exchanges' documented shapes and
+  are marked so in `tests/fixtures.rs`):
+
+  | currency | sources (id: shape) |
+  |---|---|
+  | USD | `kraken`: Kraken, `coinbase`: Coinbase, `bitstamp`: Last, `gemini`: Last |
+  | EUR | `kraken-eur`, `coinbase-eur`, `bitstamp-eur`, `gemini-eur` |
+  | GBP | `kraken-gbp`, `coinbase-gbp`, `bitstamp-gbp`, `gemini-gbp` |
+  | JPY | `kraken-jpy`, `bitflyer-jpy` (a number) |
+  | AUD | `kraken-aud`, `luno-aud`, `btcmarkets-aud` |
+  | INR | `coinbase-inr`, `wazirx-inr` |
+  | KRW | `upbit-krw` (a number), `bithumb-krw` |
+  | IDR | `luno-idr`, `indodax-idr` |
+  | SGD | `gemini-sgd`, `independentreserve-sgd` (a number) |
+
+  The addresses are those of the table in `source.rs`; each names its
+  currency (RT-17). The dollar sources are:
 
   | id | address | shape |
   |---|---|---|
@@ -32,16 +53,23 @@ bytes and a time the caller gives it and returns a price or a refusal.
   | `bitstamp` | `https://www.bitstamp.net/api/v2/ticker/btcusd/` | Last |
   | `gemini` | `https://api.gemini.com/v1/pubticker/btcusd` | Last |
 
+  Bitcoin Standard (prices in satoshis, CR-187) has no table: no source is
+  asked for it.
+
 - **RT-02.** An id is a label under CR-57 (1 to 32 bytes of `a-z`, `0-9`,
-  `-`, `+`, `.`). Ids are unique in the table, and so are the letters.
-- **RT-03.** Each source has a currency, three upper-case letters. Today
-  every source is USD and only USD is supported. The table's shape allows
-  other currencies later: a source names its own currency, a reply that
-  names another is refused (RT-17), and a set of samples in more than one
-  currency is refused (RT-38). What is missing for a second currency is a
-  table per currency and a choice of which the shop uses; neither is
-  written. The minor unit of every currency now is the hundredth, as for
-  dollars; a currency with another minor unit needs its own band (RT-24).
+  `-`, `+`, `.`). Ids are unique in the table. A letter is unique among the
+  sources of one currency, so the label of a combined rate (RT-35) says
+  which sources were used. A source that is not for dollars has its currency
+  at the end of its id (`kraken-eur`).
+- **RT-03.** Each source has a currency, one of the fixed list of CR-187
+  (USD, EUR, GBP, JPY, AUD, INR, KRW, IDR, SGD). A reply that names another
+  currency is refused (RT-17), and a set of samples in more than one
+  currency is refused (RT-38). The shop's currency is in its signed settings
+  (CR-187); the app fetches the sources of that currency only (RT-40). An
+  amount is in the minor units of its currency, by ISO 4217: yen and won
+  have none (the amount is whole yen or won) and the others have hundredths.
+  Every place that read a price in cents reads it in the minor unit of the
+  source's currency (RT-22), and each currency has its own band (RT-24).
 - **RT-04.** The app's request is plain: a GET, no cookies, no account, no
   key, no user data, and a generic User-Agent. Nothing in a request depends
   on a shop or a sale (RT-41).
@@ -81,10 +109,21 @@ bytes and a time the caller gives it and returns a price or a refusal.
   - Coinbase: `data.amount` is the price, a string; `data.currency` is
     checked (RT-17).
   - Last (Bitstamp and Gemini): the top-level `last` is the price, a string.
+  - Text: the price is a string at a fixed path of keys and first items
+    (Luno `last_trade`, BTC Markets `lastPrice`, WazirX `lastPrice`, Indodax
+    `ticker.last`, Bithumb `data.closing_price`).
+  - Number: the price is a JSON number at a fixed path (bitFlyer `ltp`,
+    Upbit's first item's `trade_price`, Independent Reserve `LastPrice`).
+    It is read from the number's own digits, which are taken from the same
+    bytes after the whole document has been read (RT-13), never as a float.
+    A key spelled with an escape is not matched, so such a reply is refused
+    as missing the field. The digits then follow RT-20: a number with an
+    exponent or a sign is refused.
 
   A field that is missing is refused, and so is one of another kind. A price
-  that is a JSON number and not a string is refused: a number would pass
-  through a float in most readers. The shapes were checked against the real
+  that is a JSON number where the shape says a string is refused: a number
+  would pass through a float in most readers. Where the shape says a number
+  (above) a string is refused too. The shapes were checked against the real
   replies of 2026-11-11 and are as described here, with no difference.
   Bitstamp's real reply holds more fields (`bid`, `ask`,
   `timestamp`) and Gemini's holds a `volume` object with its own `USD` key;
@@ -95,7 +134,12 @@ bytes and a time the caller gives it and returns a price or a refusal.
 - **RT-17.** The currency of a reply, where the shape has one, must be the
   source's currency exactly (`USD`, not `usd` or `USDT`). Where the shape has
   none (Kraken's pair and the addresses of the others name it) the address
-  is the only statement of the currency.
+  is the only statement of the currency. A shape that has a field naming the
+  market (Luno `pair`, BTC Markets `marketId`, WazirX `symbol`, bitFlyer
+  `product_code`, Upbit `market`, Independent Reserve
+  `SecondaryCurrencyCode`) checks it against the market of the address, and a
+  reply for another market is refused as `WrongCurrency`. Bithumb's `status`
+  must be `0000`, and anything else is refused as `SourceError`.
 
 ## 3. The text of a price
 
@@ -107,18 +151,31 @@ bytes and a time the caller gives it and returns a price or a refusal.
 - **RT-21.** At most 8 digits after the dot (`MAX_DECIMALS`). The real
   sources give up to 5.
 - **RT-22.** The price is worked out exactly in integers, with no floating
-  point, and rounded **half up** to a whole cent: 73552.175 is 7355218
-  cents, 73552.174 is 7355217. Truncating would always lean down by up to a
-  cent a bitcoin; half up has no lean. At about 7 million cents the
+  point, and rounded **half up** to a whole minor unit of the source's
+  currency: for dollars 73552.175 is 7355218 cents, 73552.174 is 7355217;
+  for yen 11868632.5 is 11868633. Truncating would always lean down by up to
+  a minor unit a bitcoin; half up has no lean. At about 7 million cents the
   difference between the two is under one part in 7 million.
-- **RT-23.** Zero is refused, and so is a price that rounds to zero cents.
-- **RT-24.** A price outside the band 100 USD to 100,000,000 USD per bitcoin
-  (10,000 to 10,000,000,000 cents, `MIN_CENTS_PER_BTC`,
-  `MAX_CENTS_PER_BTC`) is refused **[to tune]**. The band is a sanity check
-  against a unit mistake or a broken feed, not a forecast; its use is that a
-  price far outside it never reaches the median. A number with so many
-  digits that it overflows is outside the band and is refused without an
-  overflow.
+- **RT-23.** Zero is refused, and so is a price that rounds to zero minor
+  units.
+- **RT-24.** A price outside the band of its currency is refused **[to
+  tune]**. The band of the dollar is 100 USD to 100,000,000 USD per bitcoin
+  (10,000 to 10,000,000,000 cents, `MIN_CENTS_PER_BTC`, `MAX_CENTS_PER_BTC`);
+  the band of another currency is the dollar band, as minor units, times a
+  fixed factor:
+
+  | currency | factor | lowest | highest (minor units per bitcoin) |
+  |---|---|---|---|
+  | USD, EUR, GBP, AUD, SGD | 1 | 10,000 | 10,000,000,000 |
+  | JPY, INR | 100 | 1,000,000 | 1,000,000,000,000 |
+  | KRW | 1,000 | 10,000,000 | 10,000,000,000,000 |
+  | IDR | 10,000 | 100,000,000 | 100,000,000,000,000 |
+
+  The band is a sanity check against a unit mistake or a broken feed, not a
+  forecast; its use is that a price far outside it never reaches the median.
+  A number with so many digits that it overflows is outside the band and is
+  refused without an overflow. A sample is made against the band of its
+  source's currency.
 
 ## 4. Combining prices
 
@@ -179,9 +236,11 @@ cannot be made.
 The library does not fetch. The app follows these rules. The numbers are in
 the library as constants so that the app and the tests read the same ones.
 
-- **RT-40.** Every source is fetched on a fixed interval,
-  `FETCH_INTERVAL_SECS` = 60 seconds **[to tune]**, the same for every shop
-  and every source, whether or not anything is for sale. An interval of 60
+- **RT-40.** Every source of the shop's currency is fetched on a fixed
+  interval, `FETCH_INTERVAL_SECS` = 60 seconds **[to tune]**, the same for
+  every shop and every source, whether or not anything is for sale. The
+  sources of other currencies are not asked, and a shop whose currency is
+  Bitcoin Standard asks none. An interval of 60
   seconds keeps several samples inside the 600 seconds of CR-58 and is light
   on the sources.
 - **RT-41.** Nothing is fetched because a sale opened, a quote ran out or a
@@ -220,9 +279,10 @@ the library as constants so that the app and the tests read the same ones.
 ## 7. Tests
 
 Tests are named after the rule they prove (`rt_22_...`). The real replies of
-the four sources, fetched on 2026-11-11, are in
-`crates/openbmt-rates/tests/fixtures/`; each is read to the cents written
-by hand from the file. The fuzz target `rates_parse` feeds a source and
+the four dollar sources, fetched on 2026-11-11, and replies made from the
+documented shapes of the other sources (marked so in the tests) are in
+`crates/openbmt-rates/tests/fixtures/`; each is read to the minor unit
+written by hand from the file. The fuzz target `rates_parse` feeds a source and
 arbitrary bytes to `parse_response`.
 
 ## 8. What these rules do not do
@@ -241,7 +301,8 @@ arbitrary bytes to `parse_response`.
 - **No check of the number against the world.** The band is a sanity check
   and the median is not a market price. Fees, spread and the exchange's
   own last trade are what the sources report.
-- **No second currency yet.** See RT-03.
+- **No counter in another currency than the shop's.** A shop has one
+  currency (CR-187); a counter that prices in another is not here.
 - **No history.** Nothing keeps the samples after a call. The record of a
   quote holds the label and the time, not the sources' own prices.
 - **No dropping of a bad source.** A source that is always refused stays in

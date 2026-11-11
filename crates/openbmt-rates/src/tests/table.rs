@@ -3,12 +3,13 @@
 use openbmt_counter::money::{RateSource, MAX_SOURCE_LABEL_BYTES};
 
 use super::src;
-use crate::{source, Shape, FETCH_INTERVAL_SECS, FETCH_TIMEOUT_SECS, SOURCES};
+use crate::{source, sources_for, Shape, FETCH_INTERVAL_SECS, FETCH_TIMEOUT_SECS, SOURCES};
+use openbmt_core::currency::ShopCurrency;
 use openbmt_counter::money::MAX_RATE_AGE_SECS;
 
 #[test]
-fn rt_01_the_table_is_the_four_sources() {
-    let ids: Vec<&str> = SOURCES.iter().map(|s| s.id).collect();
+fn rt_01_the_dollar_table_is_the_four_sources() {
+    let ids: Vec<&str> = sources_for(ShopCurrency::Usd).map(|s| s.id).collect();
     assert_eq!(ids, ["kraken", "coinbase", "bitstamp", "gemini"]);
     assert_eq!(
         src("kraken").url,
@@ -42,7 +43,7 @@ fn rt_01_every_address_is_https_with_no_user_data() {
 }
 
 #[test]
-fn rt_02_ids_are_labels_and_ids_and_letters_are_unique() {
+fn rt_02_ids_are_labels_ids_are_unique_and_letters_are_unique_per_currency() {
     for s in &SOURCES {
         assert!(RateSource::new(s.id, 0).is_ok(), "{}", s.id);
         assert!(s.initial.is_ascii_lowercase());
@@ -50,23 +51,91 @@ fn rt_02_ids_are_labels_and_ids_and_letters_are_unique() {
     for (i, a) in SOURCES.iter().enumerate() {
         for b in SOURCES.iter().skip(i + 1) {
             assert_ne!(a.id, b.id);
-            assert_ne!(a.initial, b.initial);
+            if a.currency == b.currency {
+                assert_ne!(a.initial, b.initial, "{} and {}", a.id, b.id);
+            }
         }
     }
 }
 
 #[test]
-fn rt_03_every_source_names_a_currency() {
+fn rt_03_every_source_names_a_currency_its_address_names_too() {
     for s in &SOURCES {
-        assert_eq!(s.currency, "USD", "{}", s.id);
-        assert!(s.currency.len() == 3 && s.currency.bytes().all(|b| b.is_ascii_uppercase()));
+        assert!(!s.currency.is_sats(), "{}", s.id);
+        let code = s.currency.code();
+        assert!(code.len() == 3 && code.bytes().all(|b| b.is_ascii_uppercase()));
+        // The address is the one statement of the currency where the reply
+        // has none (RT-17), so it must say it.
+        assert!(
+            s.url
+                .to_ascii_lowercase()
+                .contains(&code.to_ascii_lowercase()),
+            "{}",
+            s.id
+        );
+        // A source of a currency other than the dollar says so in its label.
+        if s.currency != ShopCurrency::Usd {
+            assert!(
+                s.id.ends_with(&format!("-{}", code.to_ascii_lowercase())),
+                "{}",
+                s.id
+            );
+        }
+    }
+}
+
+#[test]
+fn rt_03_every_currency_but_bitcoin_standard_has_at_least_two_sources() {
+    for c in ShopCurrency::ALL {
+        let n = sources_for(c).count();
+        if c.is_sats() {
+            assert_eq!(n, 0);
+        } else {
+            assert!(n >= crate::MIN_SOURCES, "{}", c.code());
+        }
+    }
+    // The currencies of the table, and how many sources each has.
+    let counts: Vec<(&str, usize)> = ShopCurrency::ALL
+        .iter()
+        .map(|c| (c.code(), sources_for(*c).count()))
+        .collect();
+    assert_eq!(
+        counts,
+        [
+            ("USD", 4),
+            ("EUR", 4),
+            ("GBP", 4),
+            ("JPY", 2),
+            ("AUD", 3),
+            ("INR", 2),
+            ("KRW", 2),
+            ("IDR", 2),
+            ("SGD", 2),
+            ("SAT", 0)
+        ]
+    );
+}
+
+#[test]
+fn rt_03_coinbase_spot_is_used_only_for_the_currencies_with_a_coinbase_market() {
+    for s in SOURCES.iter().filter(|s| s.shape == Shape::Coinbase) {
+        assert!(
+            matches!(
+                s.currency,
+                ShopCurrency::Usd | ShopCurrency::Eur | ShopCurrency::Gbp | ShopCurrency::Inr
+            ),
+            "{}",
+            s.id
+        );
     }
 }
 
 #[test]
 fn rt_35_the_longest_label_fits_with_room_to_spare() {
-    // `med.` and one letter per source.
-    assert!(crate::LABEL_PREFIX.len() + SOURCES.len() <= MAX_SOURCE_LABEL_BYTES);
+    // `med.` and one letter per source of a currency.
+    for c in ShopCurrency::ALL {
+        assert!(crate::LABEL_PREFIX.len() + sources_for(c).count() <= MAX_SOURCE_LABEL_BYTES);
+    }
 }
 
 #[test]

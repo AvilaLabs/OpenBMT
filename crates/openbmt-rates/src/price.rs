@@ -1,22 +1,38 @@
 //! The text of a price into minor units per bitcoin (RT-20 to RT-24).
 
+use openbmt_core::currency::ShopCurrency;
+
 use crate::error::PriceRefused;
 
 /// RT-21: the most digits after the dot.
 pub const MAX_DECIMALS: usize = 8;
-/// RT-24: the lowest price accepted, in cents per bitcoin (100 USD). **[to
-/// tune]**
+/// RT-24: the lowest price accepted in dollars, in cents per bitcoin (100
+/// USD). **[to tune]** The band of another currency is this times a fixed
+/// factor (see [`band`]).
 pub const MIN_CENTS_PER_BTC: u64 = 100 * 100;
-/// RT-24: the highest price accepted, in cents per bitcoin (100,000,000
-/// USD). **[to tune]**
+/// RT-24: the highest price accepted in dollars, in cents per bitcoin
+/// (100,000,000 USD). **[to tune]**
 pub const MAX_CENTS_PER_BTC: u64 = 100_000_000 * 100;
 
-/// A price as the text of a source gives it, in cents per bitcoin: digits,
-/// at most one dot with a digit on each side, no sign, no exponent, no
-/// leading zero but a lone one, at most 8 digits after the dot. The amount
-/// is worked out exactly in integers and rounded half up to a whole cent
-/// (RT-22). Zero and a price outside the band are refused.
-pub fn parse_price_cents(text: &str) -> Result<u64, PriceRefused> {
+/// RT-24: the band of a currency, lowest and highest price in its minor
+/// units per bitcoin: the dollar band times the currency's fixed factor.
+/// `None` for Bitcoin Standard, which has no price.
+pub fn band(currency: ShopCurrency) -> Option<(u64, u64)> {
+    let factor = currency.band_factor()?;
+    Some((
+        MIN_CENTS_PER_BTC.checked_mul(factor)?,
+        MAX_CENTS_PER_BTC.checked_mul(factor)?,
+    ))
+}
+
+/// A price as the text of a source gives it, in minor units of `currency`
+/// per bitcoin: digits, at most one dot with a digit on each side, no sign,
+/// no exponent, no leading zero but a lone one, at most 8 digits after the
+/// dot. The amount is worked out exactly in integers and rounded half up to
+/// a whole minor unit (RT-22). Zero and a price outside the band of the
+/// currency are refused.
+pub fn parse_price_minor(text: &str, currency: ShopCurrency) -> Result<u64, PriceRefused> {
+    let (min, max) = band(currency).ok_or(PriceRefused::OutOfBand)?;
     let bytes = text.as_bytes();
     let first = *bytes.first().ok_or(PriceRefused::Empty)?;
     if matches!(first, b'+' | b'-') {
@@ -45,14 +61,14 @@ pub fn parse_price_cents(text: &str) -> Result<u64, PriceRefused> {
     if fraction.len() > MAX_DECIMALS {
         return Err(PriceRefused::TooManyDecimals);
     }
-    // In units of 10^-8 of a dollar; every step is checked.
+    // In units of 10^-8 of the major unit; every step is checked.
     let mut units: u128 = 0;
     for b in whole.bytes() {
         units = units
             .checked_mul(10)
             .and_then(|u| u.checked_add(u128::from(b - b'0')))
             .ok_or(PriceRefused::OutOfBand)?;
-        if units > u128::from(MAX_CENTS_PER_BTC) {
+        if units > u128::from(max) {
             return Err(PriceRefused::OutOfBand);
         }
     }
@@ -62,14 +78,14 @@ pub fn parse_price_cents(text: &str) -> Result<u64, PriceRefused> {
         units += u128::from(b - b'0') * scale;
         scale /= 10;
     }
-    // RT-22: half up, to cents (10^6 units).
-    let cents =
-        u64::try_from((units + 500_000) / 1_000_000).map_err(|_| PriceRefused::OutOfBand)?;
-    if cents == 0 {
+    // RT-22: half up, to a minor unit (10^(8 - digits) units).
+    let unit = 10u128.pow(8u32.saturating_sub(currency.minor_digits()));
+    let minor = u64::try_from((units + unit / 2) / unit).map_err(|_| PriceRefused::OutOfBand)?;
+    if minor == 0 {
         return Err(PriceRefused::Zero);
     }
-    if !(MIN_CENTS_PER_BTC..=MAX_CENTS_PER_BTC).contains(&cents) {
+    if !(min..=max).contains(&minor) {
         return Err(PriceRefused::OutOfBand);
     }
-    Ok(cents)
+    Ok(minor)
 }
