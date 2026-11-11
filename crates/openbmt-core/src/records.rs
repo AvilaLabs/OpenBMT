@@ -477,14 +477,24 @@ impl Chain {
             return Err(ChainError::BadSignature { seq: check_in.seq });
         }
         check_in.check_in_claim()?;
-        let need = check_in.seq + 1;
+        // No chain holds `u64::MAX + 1` records, so a number at the top of the
+        // range is a chain that is too short, as any number past the end is.
+        let Some(need) = check_in.seq.checked_add(1) else {
+            return Err(ChainError::Truncated {
+                have: self.len(),
+                need: u64::MAX,
+            });
+        };
         if self.len() < need {
             return Err(ChainError::Truncated {
                 have: self.len(),
                 need,
             });
         }
-        if self.records[check_in.seq as usize].hash() != check_in.hash() {
+        let held = usize::try_from(check_in.seq)
+            .ok()
+            .and_then(|i| self.records.get(i));
+        if held.is_none_or(|r| r.hash() != check_in.hash()) {
             return Err(ChainError::Diverged { seq: check_in.seq });
         }
         Ok(())
@@ -898,6 +908,32 @@ mod tests {
         assert_eq!(
             bad.check_against_check_in(&r, &devices()),
             Err(ChainError::BadCheckIn { seq: 0 })
+        );
+    }
+
+    #[test]
+    fn lk_60_a_check_in_numbered_u64_max_is_refused_as_truncated() {
+        let a = identity(1);
+        let c = sample();
+        let mut body = Vec::new();
+        body.extend_from_slice(&c.len().to_le_bytes());
+        body.extend_from_slice(&c.head());
+        let mut r = Record {
+            seq: u64::MAX,
+            prev: c.head(),
+            author: a.device_id(),
+            kind: RecordKind::CheckIn,
+            body,
+            sig: Sig([0; 64]),
+        };
+        r.sig = a.sign_tagged(TAG_RECORD, &r.signing_bytes());
+        assert!(r.signature_ok());
+        assert_eq!(
+            c.check_against_check_in(&r, &devices()),
+            Err(ChainError::Truncated {
+                have: c.len(),
+                need: u64::MAX
+            })
         );
     }
 

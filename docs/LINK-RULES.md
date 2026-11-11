@@ -291,8 +291,9 @@ over is still checked by the rules of the thing it carries.
 - **LK-60.** A check-in from a counter is taken only if it is genuine and the
   copy, when it is long enough, holds it at its place
   (`Chain::check_against_check_in`). The owner keeps the latest one for each
-  counter; one with a lower number than the kept one is ignored. When the
-  kept check-in names records the copy holds differently, that is a
+  counter; one with a lower number than the kept one is ignored. A check-in
+  numbered past the end of the copy, however high, finds the copy too short.
+  When the kept check-in names records the copy holds differently, that is a
   divergence (LK-59). After taking records the owner sends the counter a
   Records received message for them, at most once in a step for each counter.
 - **LK-61.** The owner sends its heartbeat to each counter on its list every
