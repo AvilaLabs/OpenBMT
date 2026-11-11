@@ -269,13 +269,19 @@ object AppModelTest {
     private fun configTests() {
         val c = AppConfig("127.0.0.1:9050", "Mia", "Ann")
         val back = AppConfig.decode(c.encode())
-        ok(back.proxy == "127.0.0.1:9050" && back.manager == "Mia" && back.cashier == "Ann", "round trip")
+        ok(back.proxy == "127.0.0.1:9050" && back.manager == "Mia" && back.cashier == "Ann" && back.ownNode == "", "round trip")
+        val own = c.withOwnNode("a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad.onion:18444")
+        ok(AppConfig.decode(own.encode()).ownNode == own.ownNode && own.withCashier("Bo").ownNode == own.ownNode, "an own node, kept (CR-100)")
+        ok(AppConfig.decode(own.withOwnNode("").encode()).ownNode == "", "an own node, removed")
+        ok(AppConfig.decode("proxy: h:1\nmanager: M\ncashier: \n".toByteArray(Charsets.UTF_8)).ownNode == "", "a three-line file has no own node")
+        ok(String(c.encode(), Charsets.UTF_8).endsWith("cashier: Ann\nownnode: \n"), "the own node line is always written")
+        ok(!AppConfig.validOwnNode("a b") && !AppConfig.validOwnNode("x".repeat(129)) && AppConfig.validOwnNode("") && AppConfig.validOwnNode("x.onion:1"), "own node text")
         ok(AppConfig.decode(c.withCashier("").encode()).cashier == "", "an empty cashier name")
         ok(AppConfig.decode(AppConfig("h:1", "Méa", "").encode()).manager == "Méa", "a name with a letter outside ASCII")
         ok(AppConfig.validName("Ann Lee") && !AppConfig.validName("") && !AppConfig.validName(" Ann") && !AppConfig.validName("A\nB") && !AppConfig.validName("x".repeat(65)), "names")
         ok(AppConfig.validName("x".repeat(64)) && !AppConfig.validName("é".repeat(64).plus("é".repeat(64))), "name lengths")
         val text = String(c.encode(), Charsets.UTF_8)
-        for (bad in listOf("", text.dropLast(1), text + "x: y\n", text.replace("proxy:", "prox:"), text.replace("127.0.0.1:9050", "nope"), text.replace("manager: Mia", "manager: "), "proxy: h:1\nmanager: M\ncashier: \u0007\n")) {
+        for (bad in listOf("", text.dropLast(1), text + "x: y\n", text.replace("ownnode:", "own:"), text.replace("ownnode: ", "ownnode: a b"), text + "ownnode: \n", text.replace("proxy:", "prox:"), text.replace("127.0.0.1:9050", "nope"), text.replace("manager: Mia", "manager: "), "proxy: h:1\nmanager: M\ncashier: \u0007\n")) {
             var failed = false
             try {
                 AppConfig.decode(bad.toByteArray(Charsets.UTF_8))

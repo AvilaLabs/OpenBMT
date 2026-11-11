@@ -38,6 +38,7 @@ import org.openbmt.counter.RefundAsk
 import org.openbmt.counter.RefundState
 import org.openbmt.counter.SaleState
 import org.openbmt.counter.Shop
+import org.openbmt.counter.OwnNodeSetting
 import org.openbmt.counter.StartConfig
 
 /**
@@ -180,7 +181,7 @@ class Controller(private val act: MainActivity) {
                 synchronized(startLock) {
                     if (id != runId) return@Thread
                     nodeDir.mkdirs()
-                    val n = CounterNode.start(StartConfig(nodeDir.path, nowSecs(), rec, gate.proxy))
+                    val n = CounterNode.start(StartConfig(nodeDir.path, nowSecs(), rec, gate.proxy, cfg.ownNode.ifEmpty { null }))
                     if (id != runId) {
                         n.close()
                         return@Thread
@@ -500,9 +501,22 @@ class Controller(private val act: MainActivity) {
         val cfg = config ?: return render()
         val health = Slot(act)
         val priceSlot = Slot(act)
+        val ownSlot = Slot(act)
         val views = ArrayList<View>()
         views.add(label("Is Bitcoin ready?"))
         views.add(health)
+        if (cfg.ownNode.isNotEmpty()) {
+            // CR-107: the own node's line, and a way to ask the driver to dial it again.
+            views.add(label("Your own node"))
+            views.add(ownSlot)
+            views.add(ui.button("Try again") {
+                try {
+                    n.ownNodeRetry()
+                } catch (e: CounterException) {
+                    ownSlot.show(ui.words(e.sayWords()))
+                }
+            })
+        }
         views.add(label("Price"))
         views.add(priceSlot)
         views.add(ui.button("New sale") { showNewSale() })
@@ -527,10 +541,12 @@ class Controller(private val act: MainActivity) {
             }
         })
         views.add(saved)
+        views.add(ui.button("Your own node") { showOwnNode() })
         views.add(ui.button("About") { showAbout() })
         page(views)
         tick = {
             health.show(ui.words(healthWords(n)))
+            if (cfg.ownNode.isNotEmpty()) ownSlot.show(ui.words(ownNodeWords(n)))
             priceSlot.show(*priceViews())
         }
         tick?.invoke()
@@ -544,6 +560,67 @@ class Controller(private val act: MainActivity) {
         } catch (e: CounterException) {
             e.sayWords()
         }
+    }
+
+    /** CR-107: the own node's health line, or the library's words for why there is none. */
+    private fun ownNodeWords(n: CounterNode): SayWords =
+        try {
+            n.status().ownNode?.words?.say() ?: AppWords.starting
+        } catch (e: CounterException) {
+            e.sayWords()
+        }
+
+    // ---- the own node's address (CR-100 to CR-102) ----------------------------------------------------
+
+    /** The counter's own setting, behind the manager's PIN: save an address, or remove it. */
+    private fun showOwnNode() {
+        val cfg = config ?: return render()
+        val rec = record ?: return render()
+        val msg = Slot(act)
+        val address = ui.field("Tor address of your node").also { it.setText(cfg.ownNode) }
+        val pinInput = pinField(act, "Manager's PIN")
+        page(
+            listOf(
+                ui.words(AppWords.ownNodeAbout),
+                label("Tor address of your node"),
+                address,
+                label("Manager's PIN"),
+                pinInput,
+                msg,
+                ui.button("Save") {
+                    val text = address.text.toString().trim()
+                    checkPin(pinInput.text.toString(), { saveOwnNode(cfg, rec, text, msg) }, { msg.show(ui.words(it)) })
+                },
+                ui.button("Remove") {
+                    checkPin(pinInput.text.toString(), { keepOwnNode(cfg, "", AppWords.ownNodeRemoved, msg) }, { msg.show(ui.words(it)) })
+                },
+                ui.button("Back") { showHome() },
+            ),
+        )
+    }
+
+    /** The library reads the address (a home-network address, no Tor and so on are refused with words) and the app keeps what it made. */
+    private fun saveOwnNode(cfg: AppConfig, rec: ByteArray, text: String, msg: Slot) {
+        async({
+            val pairing = Shop.pairing(rec)
+            OwnNodeSetting.check(text, pairing.network, pairing.settings.torOn)
+        }) { r ->
+            when (val e = r.exceptionOrNull()) {
+                null -> keepOwnNode(cfg, r.getOrThrow(), AppWords.ownNodeSaved, msg)
+                is CounterException -> msg.show(ui.words(e.sayWords()))
+                is LinkageError -> msg.show(ui.words(AppWords.libraryMissing(e.message)))
+                else -> throw e
+            }
+        }
+    }
+
+    private fun keepOwnNode(cfg: AppConfig, address: String, done: SayWords, msg: Slot) {
+        try {
+            configFile.save(cfg.withOwnNode(address))
+        } catch (e: IOException) {
+            return msg.show(ui.words(AppWords.fileNotSaved(e.message)))
+        }
+        showMessage(done, "Start") { begin() }
     }
 
     private fun priceViews(): Array<View> {
@@ -679,7 +756,11 @@ class Controller(private val act: MainActivity) {
                 }
                 amount.text = SaleModel.amountLine(m, amounts[index], s.needsSats)
                 received.text = SaleModel.receivedLine(s.receivedSats, s.needsSats)
-                state.show(ui.words(s.words.say()), *s.flags.map { f -> ui.words(f.say()) }.toTypedArray())
+                state.show(
+                    ui.words(s.words.say()),
+                    *listOfNotNull(s.check).map { c -> ui.words(c.say()) }.toTypedArray(),
+                    *s.flags.map { f -> ui.words(f.say()) }.toTypedArray(),
+                )
                 if (shown != s.state) {
                     shown = s.state
                     val b = SaleModel.buttons(s.state)
@@ -815,6 +896,7 @@ class Controller(private val act: MainActivity) {
             views.add(ui.text(SaleModel.amountLine(m, amounts[index], s.needsSats), 18f, bold = true))
             views.add(ui.text(SaleModel.receivedLine(s.receivedSats, s.needsSats), 16f))
             views.add(ui.words(s.words.say()))
+            s.check?.let { views.add(ui.words(it.say())) }
             for (f in s.flags) views.add(ui.words(f.say()))
             views.add(label("Refunds"))
             val rows = n.refunds(index)
@@ -972,6 +1054,13 @@ class Controller(private val act: MainActivity) {
                 label("Tor"),
                 ui.text(
                     "When the shop's settings turn Tor on, every connection goes through Orbot on this phone. If Orbot is not running the counter sends nothing and says so.",
+                    16f,
+                ),
+                label("Your own node"),
+                ui.text(
+                    "The manager can give the counter the Tor address of a node of the shop's own, with the PIN. The counter then asks it about each payment " +
+                        "as well, and a payment both see is held to the higher limits. If the node cannot be reached the sale screen says it used the light check. " +
+                        "A home-network address is refused, and the node needs Tor, so Orbot must be on.",
                     16f,
                 ),
                 ui.button("Back") { showHome() },

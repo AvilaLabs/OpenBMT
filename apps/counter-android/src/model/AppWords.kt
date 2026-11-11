@@ -111,6 +111,29 @@ object AppWords {
         "Nothing to do here. The owner can switch Tor on in the shop's settings.",
     )
 
+    // ---- the own node (CR-100 to CR-102) ---------------------------------------------------
+
+    val ownNodeAbout = w(
+        Tones.INFO, "Your own node",
+        "A node of your own, reached by a Tor address, can check each payment as well as the light check does.",
+        Who.MANAGER,
+        "Type its Tor address and the manager's PIN, then save.",
+    )
+
+    val ownNodeSaved = w(
+        Tones.INFO, "Own node saved",
+        "The counter will ask your own node about each payment, once it has started again.",
+        Who.MANAGER,
+        "Wait a moment while the counter starts again.",
+    )
+
+    val ownNodeRemoved = w(
+        Tones.INFO, "Own node removed",
+        "The counter checks payments with the light check only.",
+        Who.MANAGER,
+        "Wait a moment while the counter starts again.",
+    )
+
     // ---- Tor and Orbot ------------------------------------------------------------------
 
     val orbotNotRunning = w(
@@ -373,6 +396,9 @@ object AppWords {
         "torIsOn" to torIsOn,
         "torIsOff" to torIsOff,
         "orbotNotRunning" to orbotNotRunning,
+        "ownNodeAbout" to ownNodeAbout,
+        "ownNodeSaved" to ownNodeSaved,
+        "ownNodeRemoved" to ownNodeRemoved,
         "managerNeeded" to managerNeeded,
         "pinWrong" to pinWrong(4),
         "pinLocked" to pinLocked(300),
