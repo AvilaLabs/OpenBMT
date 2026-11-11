@@ -13,6 +13,8 @@ reviews; no independent security audit has been completed.
 
 ## Get started
 
+- [Read the handbook](https://openbmt.avilalabs.org/): what OpenBMT does,
+  how the money is kept safe, and where that protection stops
 - [Try a local Box preview](#try-a-local-box-preview)
 - [See how OpenBMT works](#about-openbmt)
 - [Read the design and current limits](#design-and-scope)
@@ -114,6 +116,8 @@ payment-acceptance limits, and remaining work.
 
 ## Documentation
 
+- [Handbook](https://openbmt.avilalabs.org/) (source in [docs/handbook](docs/handbook/);
+  build with `mdbook build`)
 - [Design and threat model](docs/DESIGN.md)
 - [Payment checks](docs/WATCHER-RULES.md) · [Counter](docs/COUNTER-RULES.md) · [Owner app](docs/OWNER-APP-RULES.md)
 - [Wallet spending](docs/SPEND-RULES.md) · [Signer](docs/SIGNER-RULES.md) · [Approval sessions](docs/SESSION-RULES.md)
