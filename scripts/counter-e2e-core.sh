@@ -682,7 +682,7 @@ if [ -n "$S10" ] && core_stop; then
   cmd "own status"
   OWN_STATUS=$(grep '^own ' <<<"$LAST")
   note "$OWN_STATUS"
-  grep -q "^own usable=false heading=" <<<"$OWN_STATUS" || { ok=0; note "the own node's line does not say it is down"; }
+  grep -q "^own usable=false heading=Your node is not reachable " <<<"$OWN_STATUS" || { ok=0; note "the own node's line does not say it is down"; }
   if [ "$ok" = 1 ]; then
     S11=ok
     pass 11 "with Core stopped the own node's line says it is down; sale B says \"Light check, not your node\", sale C waits on the light check"

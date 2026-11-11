@@ -140,6 +140,7 @@ fn every_problem_names_a_rule_of_the_file() {
 fn every_own_node_problem_names_a_rule_of_the_file() {
     let ids = rule_ids();
     for p in [
+        OwnNodeProblem::Connecting { since: 1 },
         OwnNodeProblem::Unreachable { since: 1 },
         OwnNodeProblem::Refused { since: 1 },
         OwnNodeProblem::Silent { since: 1 },

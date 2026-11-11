@@ -203,7 +203,12 @@ fn cr_104_a_report_for_a_transaction_no_sale_knows_is_asked_again_after_the_sigh
 fn cr_104_a_node_that_goes_down_turns_the_sale_back_to_the_light_tier() {
     let dir = Scratch::new();
     let (mut rig, tx) = rig_with_a_seen_sale(&dir);
-    rig.feed_own(vec![OwnNodeEvent::Has(txid(&tx)), own_down(T0 + 10)]);
+    // It was connected once, so a drop is "not reachable" at once (WR-63).
+    rig.feed_own(vec![
+        own_connected(0, T0),
+        OwnNodeEvent::Has(txid(&tx)),
+        own_down(T0 + 10),
+    ]);
     let screen = rig.node.judge(0).unwrap();
     assert_eq!(screen.state, State::Waiting);
     assert_eq!(screen.check_mode, Some(CheckMode::Light));
@@ -245,17 +250,30 @@ fn cr_107_the_health_line_and_try_again() {
     assert!(health.configured && !health.usable);
     assert_eq!(
         health.problem,
+        Some(OwnNodeProblem::Connecting { since: T0 })
+    );
+    assert_eq!(health.words().unwrap().heading, "Connecting to your node");
+    // After 120 s with no connection: not reachable (WR-63).
+    rig.time.store(T0 + 120, Ordering::SeqCst);
+    assert_eq!(
+        rig.node.own_node_health().problem,
         Some(OwnNodeProblem::Unreachable { since: T0 })
     );
-    assert!(health.words().is_some());
+    // Try again starts the 120 s again.
+    rig.node.retry_own_node();
+    assert_eq!(
+        rig.node.own_node_health().problem,
+        Some(OwnNodeProblem::Connecting { since: T0 + 120 })
+    );
+    rig.time.store(T0, Ordering::SeqCst);
     rig.feed_own(vec![own_connected(0, T0)]);
     let health = rig.node.own_node_health();
     assert!(health.usable);
     assert_eq!(health.words().unwrap().heading, "Your node is checking too");
-    // Try again goes to the driver.
-    assert_eq!(rig.calls.lock().unwrap().retried, 0);
-    rig.node.retry_own_node();
+    // Try again goes to the driver (once above, once now).
     assert_eq!(rig.calls.lock().unwrap().retried, 1);
+    rig.node.retry_own_node();
+    assert_eq!(rig.calls.lock().unwrap().retried, 2);
 }
 
 #[test]

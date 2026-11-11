@@ -301,6 +301,90 @@ fn wr_64_a_report_while_the_node_is_unusable_falls_back_to_the_light_check() {
     );
 }
 
+fn link_down(since: u64, last_heard: Option<u64>) -> OwnNodeInput {
+    OwnNodeInput {
+        link: OwnNodeLink::Down { since },
+        best_height: None,
+        last_heard,
+    }
+}
+
+#[test]
+fn wr_63_a_first_connection_is_connecting_for_120_seconds() {
+    let mut t = OwnNodeTracker::new();
+    let start = link_down(NOW, None);
+    let h = t.check(Some(&start), TIP, NOW + 1);
+    assert_eq!(h.problem, Some(OwnNodeProblem::Connecting { since: NOW }));
+    assert!(h.configured && !h.usable);
+    assert_eq!(
+        t.check(Some(&start), TIP, NOW + 119).problem,
+        Some(OwnNodeProblem::Connecting { since: NOW })
+    );
+    let w = h.words().expect("words");
+    assert_eq!(check(&w), Ok(()));
+    assert_eq!(w.heading, "Connecting to your node");
+    assert_eq!(w.code, Some("WR-63"));
+}
+
+#[test]
+fn wr_63_after_120_seconds_with_no_connection_it_is_not_reachable() {
+    let mut t = OwnNodeTracker::new();
+    let start = link_down(NOW, None);
+    assert!(t.check(Some(&start), TIP, NOW).problem.is_some());
+    assert_eq!(
+        t.check(Some(&start), TIP, NOW + 120).problem,
+        Some(OwnNodeProblem::Unreachable { since: NOW })
+    );
+    assert_eq!(
+        t.check(Some(&start), TIP, NOW + 600).problem,
+        Some(OwnNodeProblem::Unreachable { since: NOW })
+    );
+}
+
+#[test]
+fn wr_63_a_drop_after_a_connection_is_not_reachable_at_once() {
+    let mut t = OwnNodeTracker::new();
+    assert!(t.check(Some(&connected(TIP, NOW)), TIP, NOW).usable);
+    let dropped = link_down(NOW + 5, Some(NOW + 4));
+    assert_eq!(
+        t.check(Some(&dropped), TIP, NOW + 5).problem,
+        Some(OwnNodeProblem::Unreachable { since: NOW + 5 })
+    );
+}
+
+#[test]
+fn wr_63_a_retry_starts_a_new_120_second_grace() {
+    let mut t = OwnNodeTracker::new();
+    let start = link_down(NOW, None);
+    assert!(matches!(
+        t.check(Some(&start), TIP, NOW + 200).problem,
+        Some(OwnNodeProblem::Unreachable { .. })
+    ));
+    t.retry(NOW + 300);
+    assert_eq!(
+        t.check(Some(&start), TIP, NOW + 301).problem,
+        Some(OwnNodeProblem::Connecting { since: NOW + 300 })
+    );
+    assert!(matches!(
+        t.check(Some(&start), TIP, NOW + 420).problem,
+        Some(OwnNodeProblem::Unreachable { .. })
+    ));
+}
+
+#[test]
+fn wr_63_a_refused_node_has_no_grace() {
+    let mut t = OwnNodeTracker::new();
+    let refused = OwnNodeInput {
+        link: OwnNodeLink::Refused { since: NOW },
+        best_height: Some(TIP),
+        last_heard: Some(NOW),
+    };
+    assert_eq!(
+        t.check(Some(&refused), TIP, NOW + 1).problem,
+        Some(OwnNodeProblem::Refused { since: NOW })
+    );
+}
+
 #[test]
 fn wr_63_one_block_of_lag_is_allowed_for_five_minutes() {
     let one = connected(TIP - 1, NOW);
@@ -355,6 +439,7 @@ fn wr_64_every_problem_has_words_with_its_time_and_rule() {
     assert!(behind.what.contains("7 blocks behind"));
     assert_eq!(behind.at, None);
     for problem in [
+        OwnNodeProblem::Connecting { since: 1 },
         OwnNodeProblem::Unreachable { since: 1 },
         OwnNodeProblem::Refused { since: 1 },
         OwnNodeProblem::Silent { since: 1 },

@@ -571,8 +571,16 @@ impl<P: DriverPort> Node<P> {
 
     /// CR-107: dial the own node again after it was dropped for breaking a
     /// rule of the peer protocol (NR-100). Without effect when it was not.
-    pub fn retry_own_node(&self) {
+    pub fn retry_own_node(&mut self) {
         if self.own_configured {
+            // WR-63: the way to the node is built again, so "connecting"
+            // holds for another 120 seconds if it is not connected now.
+            if self
+                .own_input
+                .is_none_or(|i| i.link != OwnNodeLink::Connected)
+            {
+                self.own_tracker.retry(self.clock.now());
+            }
             self.port.retry_own_node();
         }
     }

@@ -303,7 +303,13 @@ library keeps that apart from what the random peers report.
   these fails, checked in this order. **[to tune]**
   1. The node broke a rule of the peer protocol: unusable until the app asks
      the driver to try it again (NR-100).
-  2. There is no connection to it.
+  2. There is no connection to it. Until a first connection since the
+     start, the last retry (NR-100) or the new setting, and for less than 120
+     seconds after that moment, the line says the counter is connecting
+     (Tor takes time to build the way to the node), not that the node is not
+     reachable; the counter checks with its light check meanwhile. After 120
+     seconds with no connection, and at once after a connection that was
+     dropped, it says not reachable.
   3. It has been silent for more than 10 minutes.
   4. The counter's tip is 2 or more blocks above its best height, or 1
      block above it for more than 5 minutes without a break. A new block
@@ -319,7 +325,7 @@ library keeps that apart from what the random peers report.
   and cannot be used, the status has `own_node_saw` true and `own_node_counted`
   false, its mode is the light check's (WR-45), and the own node's health
   line has words that say the counter is checking with its light check and
-  why: not reachable since a time, behind by blocks or by one block for
+  why: connecting for the first two minutes, not reachable since a time, behind by blocks or by one block for
   too long, silent since a
   time, dropped for breaking a rule, or not yet known. Every state of the
   line has words (SC-01) and the rule number is in the small print.

@@ -169,6 +169,7 @@ fn sc_01_every_own_node_state_has_words() {
     // every variant.
     let all = all_words();
     for p in [
+        OwnNodeProblem::Connecting { since: 1 },
         OwnNodeProblem::Unreachable { since: 1 },
         OwnNodeProblem::Refused { since: 1 },
         OwnNodeProblem::Silent { since: 1 },

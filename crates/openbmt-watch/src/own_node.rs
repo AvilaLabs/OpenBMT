@@ -13,7 +13,7 @@
 //! saw (WR-62). When it is down or behind, the counter falls back to the
 //! light check and says why (WR-63, WR-64).
 
-use crate::{OWN_NODE_LAG_BLOCKS, OWN_NODE_LAG_SECS, OWN_NODE_SILENT_SECS};
+use crate::{OWN_NODE_CONNECT_SECS, OWN_NODE_LAG_BLOCKS, OWN_NODE_LAG_SECS, OWN_NODE_SILENT_SECS};
 
 /// How the driver's connection to the own node stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +54,13 @@ pub enum OwnNodeProblem {
     /// The node broke a rule of the peer protocol and is not dialed again.
     Refused {
         /// Seconds, on the counter's clock.
+        since: u64,
+    },
+    /// There is no connection yet, and less than 120 seconds have passed
+    /// since the start, the last retry or the new setting, with no
+    /// connection in between: Tor is still building the way to the node.
+    Connecting {
+        /// Seconds, on the counter's clock: when the counting began.
         since: u64,
     },
     /// There is no connection to the node.
@@ -123,6 +130,10 @@ impl OwnNodeHealth {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct OwnNodeTracker {
     one_behind_since: Option<u64>,
+    /// A connection has been seen since the start or the last retry.
+    connected_seen: bool,
+    /// When the grace for the first connection began.
+    connecting_since: Option<u64>,
 }
 
 impl OwnNodeTracker {
@@ -131,8 +142,20 @@ impl OwnNodeTracker {
         Self::default()
     }
 
+    /// WR-63: a new try at the first connection begins now (the app asked
+    /// the driver to dial again, or the setting was saved): the node is
+    /// "connecting" for [`OWN_NODE_CONNECT_SECS`] again.
+    pub fn retry(&mut self, now: u64) {
+        self.connected_seen = false;
+        self.connecting_since = Some(now);
+    }
+
     /// [`check_own_node`], with the time the lag began kept between calls.
     /// Catching up, or leaving the connected state, starts the count over.
+    /// A link that is down and has not been connected since the start (or
+    /// the last [`retry`](Self::retry)) is "connecting" for the first
+    /// [`OWN_NODE_CONNECT_SECS`], then "not reachable"; a drop after a
+    /// connection is "not reachable" at once.
     pub fn check(
         &mut self,
         input: Option<&OwnNodeInput>,
@@ -149,7 +172,18 @@ impl OwnNodeTracker {
         } else {
             self.one_behind_since = None;
         }
-        check_own_node(input, tip_height, now, self.one_behind_since)
+        let mut health = check_own_node(input, tip_height, now, self.one_behind_since);
+        match input.map(|i| i.link) {
+            Some(OwnNodeLink::Connected) => self.connected_seen = true,
+            Some(OwnNodeLink::Down { since }) if !self.connected_seen => {
+                let began = *self.connecting_since.get_or_insert(since);
+                if now.saturating_sub(began) < OWN_NODE_CONNECT_SECS {
+                    health.problem = Some(OwnNodeProblem::Connecting { since: began });
+                }
+            }
+            _ => {}
+        }
+        health
     }
 }
 

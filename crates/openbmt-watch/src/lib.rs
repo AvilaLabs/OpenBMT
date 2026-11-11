@@ -112,3 +112,6 @@ pub const OWN_NODE_LAG_BLOCKS: u32 = 1;
 pub const OWN_NODE_LAG_SECS: u64 = 300;
 /// WR-63: seconds the own node may be silent while connected.
 pub const OWN_NODE_SILENT_SECS: u64 = 600;
+/// WR-63: seconds after a start, a retry or a new setting during which a node
+/// that has not yet been connected is "connecting", not "not reachable".
+pub const OWN_NODE_CONNECT_SECS: u64 = 120;

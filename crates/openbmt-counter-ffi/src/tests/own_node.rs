@@ -123,9 +123,11 @@ fn cr_100_a_start_with_an_own_node_hands_it_to_the_driver() {
     assert_eq!(own.port(), 18_444);
     assert!(own.is_authenticated());
     assert!(launch.driver.proxy.is_some());
-    // Before the driver says anything the own node is not reachable.
+    // Before the driver says anything the own node is connecting, not
+    // "not reachable" (WR-63).
     let (usable, words) = own_line(&rig, handle).expect("a line");
     assert!(!usable);
+    assert_eq!(words.heading, "Connecting to your node");
     assert_eq!(words.code.as_deref(), Some("WR-63"));
     // The driver says it is connected: the line says it is checking too.
     rig.send_own(vec![connected()]);

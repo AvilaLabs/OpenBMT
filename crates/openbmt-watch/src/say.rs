@@ -97,6 +97,14 @@ impl OwnNodeProblem {
     /// words say so, with the time the node was last there as `at`.
     pub fn words(&self) -> Words {
         let words = match *self {
+            Self::Connecting { since } => Words::new(
+                Tone::Info,
+                "Connecting to your node",
+                "This counter is reaching your node over Tor and checks payments with its light check until then.",
+                Who::Nobody,
+                "Nothing to do. It takes up to two minutes.",
+            )
+            .at(since),
             Self::Unreachable { since } => Words::new(
                 Tone::Info,
                 "Your node is not reachable",
@@ -500,6 +508,7 @@ fn sample_health() -> Vec<(&'static str, Health)> {
 /// One value of every state of the own node's health line.
 fn own_node_words() -> Vec<(&'static str, Words)> {
     let problems = [
+        ("Connecting", OwnNodeProblem::Connecting { since: 1 }),
         ("Unreachable", OwnNodeProblem::Unreachable { since: 1 }),
         ("Refused", OwnNodeProblem::Refused { since: 1 }),
         ("Silent", OwnNodeProblem::Silent { since: 1 }),
@@ -526,6 +535,7 @@ fn own_node_words() -> Vec<(&'static str, Words)> {
 /// The name of an own-node problem, by an exhaustive match.
 pub fn own_node_problem_name(p: OwnNodeProblem) -> &'static str {
     match p {
+        OwnNodeProblem::Connecting { .. } => "Connecting",
         OwnNodeProblem::Unreachable { .. } => "Unreachable",
         OwnNodeProblem::Refused { .. } => "Refused",
         OwnNodeProblem::Silent { .. } => "Silent",
