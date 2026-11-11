@@ -2,9 +2,11 @@ package org.openbmt.key.app
 
 import android.app.Activity
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
+import org.openbmt.app.isNight
 
 /**
  * The one activity of the Key app, and the only exported component. Every
@@ -15,8 +17,17 @@ import android.view.WindowManager
 class MainActivity : Activity() {
     private lateinit var controller: Controller
 
+    /** Night mode when the screens were drawn: they take their colours from it, so a change starts the activity again. */
+    private var night = false
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (isNight(newConfig) != night) recreate()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        night = isNight(resources.configuration)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         controller = Controller(this)
         controller.start()

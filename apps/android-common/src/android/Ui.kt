@@ -25,6 +25,10 @@ import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 
+/** True when [c] is the phone's night mode. */
+fun isNight(c: Configuration): Boolean =
+    (c.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+
 /**
  * A view that is the first of a page and reaches up under the status bar in its own colour: the page tells
  * it how tall the bar is, and it adds that to its own top padding.
@@ -142,8 +146,7 @@ class Ui(private val context: Context) {
     private val density = context.resources.displayMetrics.density
 
     /** True when the phone is in night mode: every colour is chosen from the dark scheme. */
-    val night: Boolean =
-        (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    val night: Boolean = isNight(context.resources.configuration)
 
     /** The colours of the phone's current mode. */
     val pal: Scheme = Palette.of(night)
@@ -337,7 +340,8 @@ class Ui(private val context: Context) {
         val topBase = if (lead != null) 0 else px(24)
         val bottomBase = px(24)
         column.setPadding(0, topBase, 0, bottomBase)
-        val root = ScrollView(context).apply {
+        val appearance = edgeToEdge(lead != null)
+        return ScrollView(context).apply {
             setBackgroundColor(pal.background)
             addView(column)
             isFillViewport = true
@@ -345,13 +349,21 @@ class Ui(private val context: Context) {
             filterTouchesWhenObscured = true
             setOnApplyWindowInsetsListener { _, insets ->
                 val bars = barInsets(insets)
-                column.setPadding(bars[0], topBase + bars[1], bars[2], bottomBase + bars[3])
+                // A first view that reaches under the status bar takes the bar's height itself.
+                column.setPadding(bars[0], if (lead != null) 0 else topBase + bars[1], bars[2], bottomBase + bars[3])
                 lead?.setTopInset(bars[1])
+                // The window's own theme sets the icons again as the window comes up; the page has the last word.
+                appearance()
                 insets
             }
+            addOnAttachStateChangeListener(
+                object : View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(v: View) = appearance()
+
+                    override fun onViewDetachedFromWindow(v: View) {}
+                },
+            )
         }
-        edgeToEdge(lead != null)
-        return root
     }
 
     /** The left, top, right and bottom insets of the system bars, the display cutout and the keyboard. */
@@ -373,22 +385,28 @@ class Ui(private val context: Context) {
     /**
      * The window draws behind both bars on every Android version the apps run on (from 15 on the system does
      * it for an app that targets 35 or later), and the bars' icons are dark on the page's light background and
-     * light on a dark one or on a band, whatever the band's tone.
+     * light on a dark one or on a band, whatever the band's tone. Returns what sets the icons: the window's
+     * controller exists only once the page is on the screen, so it is called then.
      */
     @Suppress("DEPRECATION")
-    private fun edgeToEdge(bandOnTop: Boolean) {
-        val act = activity() ?: return
+    private fun edgeToEdge(bandOnTop: Boolean): () -> Unit {
+        val act = activity() ?: return {}
         val lightStatus = !bandOnTop && !night
         val lightNav = !night
         if (Build.VERSION.SDK_INT >= 30) {
             act.window.setDecorFitsSystemWindows(false)
-            val controller = act.window.insetsController ?: return
-            val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            var bits = 0
-            if (lightStatus) bits = bits or WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-            if (lightNav) bits = bits or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            controller.setSystemBarsAppearance(bits, mask)
-        } else {
+            return {
+                val controller = act.window.insetsController
+                if (controller != null) {
+                    val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                    var bits = 0
+                    if (lightStatus) bits = bits or WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                    if (lightNav) bits = bits or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                    controller.setSystemBarsAppearance(bits, mask)
+                }
+            }
+        }
+        return {
             var flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
             if (lightStatus) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
             if (lightNav) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
