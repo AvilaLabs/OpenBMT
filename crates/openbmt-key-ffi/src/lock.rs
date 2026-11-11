@@ -90,10 +90,11 @@ impl KdfParams {
 }
 
 /// What the Key app asks of Argon2: the standard parameters, and small ones
-/// in this crate's own tests so that they run quickly.
-#[cfg(not(test))]
+/// in this crate's own tests and under the fuzzer (`cfg(fuzzing)` is set by
+/// cargo-fuzz only), so that they run quickly. A release build has neither.
+#[cfg(not(any(test, fuzzing)))]
 pub(crate) const COST: KdfParams = KdfParams::STANDARD;
-#[cfg(test)]
+#[cfg(any(test, fuzzing))]
 pub(crate) const COST: KdfParams = KdfParams {
     m_kib: 64,
     t: 1,

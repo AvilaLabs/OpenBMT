@@ -56,6 +56,7 @@ impl KeyStore for Store {
 /// A Key app with key 2 made.
 fn key_app_with_key2() -> Arc<KeyApp> {
     let app = KeyApp::open(Store::new()).expect("opens");
+    app.set_pin("482913".to_string()).expect("a PIN");
     app.create_from_entropy(EntropySource::Platform, KeyNetwork::Regtest)
         .expect("key 2");
     app
@@ -152,6 +153,7 @@ fn oc_41_a_swapped_key_3_is_refused_by_the_key_app() {
     let (_, built) = started(&answer);
     // The same wallet with another key 3: the Key app holds the first.
     let other = KeyApp::open(Store::new()).expect("opens");
+    other.set_pin("482913".to_string()).expect("a PIN");
     other
         .create_from_entropy(EntropySource::Platform, KeyNetwork::Regtest)
         .expect("key 2");
@@ -286,6 +288,7 @@ fn key2_text() -> String {
 fn kotlin_fixtures() -> (Vec<u8>, Vec<u8>) {
     let with = answer_of(&key_app_with_key2());
     let none = KeyApp::open(Store::new()).expect("opens");
+    none.set_pin("482913".to_string()).expect("a PIN");
     none.create_approver_only().expect("approver only");
     (with, answer_of(&none))
 }

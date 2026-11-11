@@ -137,6 +137,10 @@ fn world() -> World {
     let reg = Registry::new();
     let app = u64::from_le_bytes(ok(&reg, &store, 1, 0, &[])[..8].try_into().unwrap());
     assert_eq!(app, 1);
+    // A PIN first: a key is made behind one.
+    let mut pin = Vec::new();
+    bytes_field(&mut pin, b"482913");
+    ok(&reg, &store, 91, app, &pin);
     // Platform entropy, regtest.
     ok(&reg, &store, 11, app, &[0, 3]);
     // Key 2's public parts, to build the wallet from.
@@ -224,7 +228,7 @@ fuzz_target!(|data: &[u8]| {
                     2 => 2,
                     _ => 0,
                 };
-                frame(op % 80, handle, &rest[2..])
+                frame(op % 100, handle, &rest[2..])
             }
             _ => data.to_vec(),
         };

@@ -26,6 +26,23 @@ fn header_with(m: u32, t: u32, p: u32, body: usize) -> Vec<u8> {
     out
 }
 
+/// A build without `cfg(test)` and `cfg(fuzzing)` asks for the standard cost:
+/// the cheap one is only compiled in under those two.
+#[test]
+fn sr_71_a_release_build_uses_the_standard_cost() {
+    let src = include_str!("../lock.rs");
+    let gate =
+        "#[cfg(not(any(test, fuzzing)))]\npub(crate) const COST: KdfParams = KdfParams::STANDARD;";
+    assert!(
+        src.contains(gate),
+        "the standard cost is the one outside test and fuzzing"
+    );
+    assert!(src.contains("#[cfg(any(test, fuzzing))]\npub(crate) const COST"));
+    assert_eq!(src.matches("pub(crate) const COST").count(), 2);
+    assert_eq!(KdfParams::STANDARD.m_kib, 64 * 1024);
+    assert_eq!((KdfParams::STANDARD.t, KdfParams::STANDARD.p), (3, 1));
+}
+
 fn rule(r: Result<impl std::fmt::Debug, KeyError>) -> String {
     r.expect_err("refused").rule().to_string()
 }

@@ -58,6 +58,7 @@ fuzz_target!(|data: &[u8]| {
     let Ok(app) = KeyApp::open(Arc::new(Null)) else {
         panic!("an empty store opens");
     };
+    app.set_pin("482913".to_string()).expect("a PIN");
     let result = app.create_from_entropy(
         EntropySource::TypedWords {
             words: words.clone(),
