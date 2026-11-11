@@ -2,6 +2,8 @@
 //! 4 and 5, `docs/OWNER-COINS-RULES.md` OC-40 to OC-46): ops 80 to 85.
 //!
 //! The ops work on no node: the ceremony happens before the node starts.
+//! Ops 80 to 85 are the steps; op 86 gives the values the last step is
+//! given besides the owner's word.
 //! What is kept between two steps is the sealed record (`OBMu`, see
 //! `openbmt_owner::ceremony`), which the app seals and hands back with each
 //! call. It holds the owner's secret and key 1's account key, and it leaves
@@ -9,8 +11,10 @@
 
 use bitcoin::Network;
 use openbmt_core::say::Words;
+use openbmt_counter_node::BATCH_MIN_COUNT;
 use openbmt_owner::ceremony::{CeremonyError, Holder, OwnerSetup, SetupStage};
 use openbmt_signer::{KeyAnswer, KeyPart};
+use openbmt_watch::headers::MAINNET_CHECKPOINT_HEIGHT;
 
 use crate::codec::{wire_record, wire_record_get};
 use crate::error::{from_words, AppError, Kind};
@@ -289,6 +293,30 @@ pub struct SetupStageView {
 
 wire_record!(SetupStageView { stage, words });
 
+/// The depth at which a payment is done, as the node starts with it
+/// (`OwnerParts::new`): the owner's setup is not asked for it.
+pub const DEFAULT_REFUND_DEPTH: u32 = 6;
+
+/// What `ceremony_defaults` returns: the values `ceremony_build_wallet` and
+/// `ceremony_finish` are given besides the owner's word, as the library
+/// holds them, so that an app copies no number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CeremonyDefaults {
+    /// The fewest addresses a batch may hold: the counter's own minimum.
+    pub batch_min_count: u32,
+    /// Confirmations at which a payment is done.
+    pub refund_depth: u32,
+    /// The wallet's first block on this network: the height of the header
+    /// checkpoint the watch starts from, 0 where it starts at the genesis.
+    pub birthday: u32,
+}
+
+wire_record!(CeremonyDefaults {
+    batch_min_count,
+    refund_depth,
+    birthday
+});
+
 fn refused(e: CeremonyError) -> AppError {
     from_words(Kind::Refused, e.rule(), &e, e.words())
 }
@@ -424,6 +452,18 @@ pub(crate) fn stage(record: Vec<u8>) -> Result<SetupStageView, AppError> {
     Ok(SetupStageView {
         stage: n,
         words: WordsView(words),
+    })
+}
+
+/// Op 86: the defaults of the last two steps on a network.
+pub(crate) fn defaults(network: OwnerNetwork) -> Result<CeremonyDefaults, AppError> {
+    Ok(CeremonyDefaults {
+        batch_min_count: BATCH_MIN_COUNT,
+        refund_depth: DEFAULT_REFUND_DEPTH,
+        birthday: match network.network() {
+            Network::Bitcoin => MAINNET_CHECKPOINT_HEIGHT,
+            _ => 0,
+        },
     })
 }
 

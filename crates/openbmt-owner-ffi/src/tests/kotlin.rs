@@ -55,12 +55,8 @@ fn upper_snake(name: &str) -> String {
 
 #[test]
 fn the_kotlin_op_numbers_are_the_rust_ones() {
-    // Ops 80 to 89 are the key ceremony's. The Kotlin binding does not
-    // have them yet: the app change that calls them adds the constants and
-    // this exemption goes with it.
     let rust: BTreeMap<String, u32> = ops()
         .iter()
-        .filter(|o| !(80..=89).contains(&o.num))
         .map(|o| {
             (
                 format!("OP_{}", o.name.to_ascii_uppercase()),
@@ -183,6 +179,15 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "option { posSetup() }, option { u64() }, list { posAlert() }, u32(), u32(), u32(), u32(),",
         "PosSubject.Tender(string(), string())",
         "PosSubject.Sale(bytes(), u32())",
+        "PartView(string(), string(), string())",
+        "Key1Made(bytes(), partView(), bytes(), strings(), option { strings() }, words())",
+        "AnswerView(network(), option { partView() }, partView(), bytes(), strings())",
+        "bytes(), bytes(), string(), strings(), strings(), string(),",
+        "list { PairView(u32(), u32(), u8(), u8()) }, words(), words(),",
+        "FinishedView(bytes(), words())",
+        "SetupFields(network(), bytes(), bytes(), string(), bytes(), option { string() }, u32(), u32(), u32())",
+        "SetupStageView(u8(), words())",
+        "CeremonyDefaults(u32(), u32(), u32())",
         "OutboxRow(",
         "u32(), outboxKind(), option { string() }, option { bytes() }, option { u32() },",
         "option { u64() }, u32(), words(),",
@@ -201,6 +206,12 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "TakenView: record: session_id: list<u8>, outcomes: list<OutcomeView>, sends: list<SendRow>",
         "StageView: record: kind: StageKind, detail: option<string>, words: Words",
         "QueuedRefund: record: id: u32, received_sats: u64, reached_refund_depth: bool",
+        "PartView: record: fingerprint: string, origin_path: string, account_xpub: string",
+        "Key1Made: record: record: list<u8>, key1: PartView, owner_root: list<u8>, owner_root_words: list<string>, words: option<list<string>>, state_words: Words",
+        "AnswerView: record: network: OwnerNetwork, key2: option<PartView>, key3: PartView, key_app_root: list<u8>, key_app_root_words: list<string>",
+        "FinishedView: record: record: list<u8>, state_words: Words",
+        "CeremonyDefaults: record: batch_min_count: u32, refund_depth: u32, birthday: u32",
+        "SetupStageView: record: stage: u8, words: Words",
         "OldAddressesView: record: kind: OldKind, count: u64, days_ago: u64, next: option<u64>, running: bool, words: option<Words>",
     ] {
         assert!(protocol.contains(line), "{line}");

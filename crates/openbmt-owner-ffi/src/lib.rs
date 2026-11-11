@@ -67,8 +67,8 @@ pub use call::{
     RESPONSE_MAGIC, VERSION,
 };
 pub use ceremony::{
-    AnswerView, BuildArgs, FinishArgs, FinishedView, Key1Args, Key1Made, PairView, PartView,
-    SetupFields, SetupStageView, WalletBuiltView,
+    AnswerView, BuildArgs, CeremonyDefaults, FinishArgs, FinishedView, Key1Args, Key1Made,
+    PairView, PartView, SetupFields, SetupStageView, WalletBuiltView,
 };
 pub use counter_views::{
     CounterBundleView, CounterConfirmArgs, CounterQueuedView, CounterScanView, WaitingCounterView,

@@ -97,6 +97,13 @@ private const val OP_POS_REMOVE = 72
 private const val OP_POS_REQUEST = 73
 private const val OP_POS_REPLY = 74
 private const val OP_POS_ACKNOWLEDGE = 75
+private const val OP_CEREMONY_MAKE_KEY1 = 80
+private const val OP_CEREMONY_READ_ANSWER = 81
+private const val OP_CEREMONY_BUILD_WALLET = 82
+private const val OP_CEREMONY_FINISH = 83
+private const val OP_CEREMONY_OPEN = 84
+private const val OP_CEREMONY_STAGE = 85
+private const val OP_CEREMONY_DEFAULTS = 86
 private const val OP_COUNTER_SCAN = 90
 private const val OP_COUNTER_CONFIRM = 91
 private const val OP_COUNTERS_WAITING = 92
@@ -547,6 +554,85 @@ class PosState(
     val matchesByOrder: Long,
     val retiredMatches: Long,
 )
+
+
+// ---- the key ceremony on this phone (ops 80 to 86, no node) --------------------------------
+
+/** What [OwnerCeremony.makeKey1] is given. By default key 1 has no words to show. */
+class Key1Args(val network: OwnerNetwork, val showWords: Boolean)
+
+/** A key's public parts, for a screen. */
+class PartView(val fingerprint: String, val originPath: String, val accountXpub: String)
+
+/**
+ * Key 1 made. [record] is the sealed record at stage 1: it holds secrets, and the app seals it before
+ * it shows the next screen. [words] are key 1's 24 words, only when asked for.
+ */
+class Key1Made(
+    val record: ByteArray,
+    val key1: PartView,
+    val ownerRoot: ByteArray,
+    val ownerRootWords: List<String>,
+    val words: List<String>?,
+    val stateWords: Words,
+)
+
+/** The Key app's answer, checked. [key2] is null when the Key app holds none. */
+class AnswerView(
+    val network: OwnerNetwork,
+    val key2: PartView?,
+    val key3: PartView,
+    val keyAppRoot: ByteArray,
+    val keyAppRootWords: List<String>,
+)
+
+/** What [OwnerCeremony.buildWallet] is given. [key2Text] only when the answer holds no key 2. */
+class BuildArgs(val record: ByteArray, val answer: ByteArray, val key2Text: String?, val batchMinCount: Long)
+
+/** One pair of keys and who holds each: 1 the owner's phone, 2 the Key app, 3 another signer, 4 another wallet app. */
+class PairView(val keyA: Long, val keyB: Long, val holderA: Int, val holderB: Int)
+
+/**
+ * The wallet built. [record] is the sealed record at stage 2. [walletSetup] is the bytes the Key app takes,
+ * to show as a code. The checksum words, the fingerprints and the first address are for the owner to compare
+ * with the Key app's.
+ */
+class WalletBuiltView(
+    val record: ByteArray,
+    val walletSetup: ByteArray,
+    val description: String,
+    val checksumWords: List<String>,
+    val fingerprints: List<String>,
+    val firstReceiveAddress: String,
+    val pairs: List<PairView>,
+    val pairsWords: Words,
+    val stateWords: Words,
+)
+
+/** What [OwnerCeremony.finish] is given. */
+class FinishArgs(val record: ByteArray, val refundDepth: Long, val birthday: Long)
+
+/** The setup finished: [record] is the sealed record at stage 3. */
+class FinishedView(val record: ByteArray, val stateWords: Words)
+
+/** The values `start` is made from. They hold the owner's secret and key 1's account key. */
+class SetupFields(
+    val network: OwnerNetwork,
+    val ownerSecret: ByteArray,
+    val approverRoot: ByteArray,
+    val wallet: String,
+    val key1Account: ByteArray,
+    val key3Xpub: String?,
+    val batchMinCount: Long,
+    val refundDepth: Long,
+    val birthday: Long,
+)
+
+/** Where the setup is: 1 key 1 made, 2 wallet built and not yet confirmed, 3 finished. */
+class SetupStageView(val stage: Int, val words: Words)
+
+/** The values the last two steps are given besides the owner's word, as the library holds them. */
+class CeremonyDefaults(val batchMinCount: Long, val refundDepth: Long, val birthday: Long)
 
 // ---- the encoding ----------------------------------------------------------------------
 
@@ -1036,6 +1122,39 @@ internal fun Reader.outboxRow(): OutboxRow =
         option { u64() }, u32(), words(),
     )
 
+
+private fun Reader.network(): OwnerNetwork =
+    when (u8()) {
+        TAG_OWNER_NETWORK_MAINNET -> OwnerNetwork.Mainnet
+        TAG_OWNER_NETWORK_TESTNET -> OwnerNetwork.Testnet
+        TAG_OWNER_NETWORK_SIGNET -> OwnerNetwork.Signet
+        TAG_OWNER_NETWORK_REGTEST -> OwnerNetwork.Regtest
+        else -> tag("OwnerNetwork")
+    }
+
+private fun Reader.partView(): PartView = PartView(string(), string(), string())
+
+internal fun Reader.key1Made(): Key1Made =
+    Key1Made(bytes(), partView(), bytes(), strings(), option { strings() }, words())
+
+internal fun Reader.answerView(): AnswerView =
+    AnswerView(network(), option { partView() }, partView(), bytes(), strings())
+
+internal fun Reader.walletBuiltView(): WalletBuiltView =
+    WalletBuiltView(
+        bytes(), bytes(), string(), strings(), strings(), string(),
+        list { PairView(u32(), u32(), u8(), u8()) }, words(), words(),
+    )
+
+internal fun Reader.finishedView(): FinishedView = FinishedView(bytes(), words())
+
+internal fun Reader.setupFields(): SetupFields =
+    SetupFields(network(), bytes(), bytes(), string(), bytes(), option { string() }, u32(), u32(), u32())
+
+internal fun Reader.setupStageView(): SetupStageView = SetupStageView(u8(), words())
+
+internal fun Reader.ceremonyDefaults(): CeremonyDefaults = CeremonyDefaults(u32(), u32(), u32())
+
 // ---- the call ----------------------------------------------------------------------------
 
 private val REQUEST_MAGIC = byteArrayOf('O'.code.toByte(), 'B'.code.toByte(), 'M'.code.toByte(), 'k'.code.toByte())
@@ -1356,4 +1475,55 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     /** Acknowledge an open alert, in this phone's own ledger only. */
     fun posAcknowledge(now: Long, key: PosAlertKey) =
         callUnit(OP_POS_ACKNOWLEDGE, handle) { it.u64(now).posAlertKey(key) }
+}
+
+/**
+ * The owner phone's part of the key ceremony (`docs/OWNER-COINS-RULES.md`, OC-40 to OC-46). No node is
+ * running while it happens, so these calls name no handle. The sealed records the calls return hold secrets:
+ * the app seals each before it shows the next screen and hands it back with the next call.
+ */
+object OwnerCeremony {
+    /** Make key 1 and the owner's root on this phone. Takes a moment: the app draws a page first. */
+    fun makeKey1(args: Key1Args): Key1Made {
+        val r = call(OP_CEREMONY_MAKE_KEY1, 0) { it.network(args.network).bool(args.showWords) }
+        return r.key1Made().also { r.end() }
+    }
+
+    /** Read the Key app's answer (the bytes of its code) and check it. */
+    fun readAnswer(answer: ByteArray): AnswerView {
+        val r = call(OP_CEREMONY_READ_ANSWER, 0) { it.bytes(answer) }
+        return r.answerView().also { r.end() }
+    }
+
+    /** Build the 2-of-3 wallet from key 1, key 2 and key 3. Takes a moment: the app draws a page first. */
+    fun buildWallet(args: BuildArgs): WalletBuiltView {
+        val r = call(OP_CEREMONY_BUILD_WALLET, 0) {
+            it.bytes(args.record).bytes(args.answer).option(args.key2Text) { t -> it.string(t) }.u32(args.batchMinCount)
+        }
+        return r.walletBuiltView().also { r.end() }
+    }
+
+    /** The owner confirmed that the words and fingerprints are the same on both phones. */
+    fun finish(args: FinishArgs): FinishedView {
+        val r = call(OP_CEREMONY_FINISH, 0) { it.bytes(args.record).u32(args.refundDepth).u32(args.birthday) }
+        return r.finishedView().also { r.end() }
+    }
+
+    /** The values `start` is made from, out of a finished record. */
+    fun open(record: ByteArray): SetupFields {
+        val r = call(OP_CEREMONY_OPEN, 0) { it.bytes(record) }
+        return r.setupFields().also { r.end() }
+    }
+
+    /** Where the setup is, from a record. */
+    fun stage(record: ByteArray): SetupStageView {
+        val r = call(OP_CEREMONY_STAGE, 0) { it.bytes(record) }
+        return r.setupStageView().also { r.end() }
+    }
+
+    /** The batch minimum, the refund depth and the first block the last two steps are given, on [network]. */
+    fun defaults(network: OwnerNetwork): CeremonyDefaults {
+        val r = call(OP_CEREMONY_DEFAULTS, 0) { it.network(network) }
+        return r.ceremonyDefaults().also { r.end() }
+    }
 }

@@ -41,10 +41,11 @@
 //! - 40 to 46: the queue (refunds, cash-outs, batches, settings).
 //! - 50 to 53: the link and the refund requests from the counters.
 //! - 60 to 63: notes, a fresh check, recovery, archiving.
-//! - 80 to 85: the key ceremony on this phone (`docs/DESIGN.md` §2.1 steps 4
+//! - 80 to 86: the key ceremony on this phone (`docs/DESIGN.md` §2.1 steps 4
 //!   and 5, `docs/OWNER-COINS-RULES.md` OC-40 to OC-46): make key 1, read the
 //!   Key app's answer, build the wallet, confirm, open the finished setup,
-//!   and where the setup is. They work on no node.
+//!   where the setup is, and the defaults of the last two steps. They work
+//!   on no node.
 //! - 70 to 75: the till (`docs/OWNER-COINS-RULES.md`, OC-30 to OC-37): what
 //!   it shows, its settings, taking them off, the next request, the till's
 //!   answer, acknowledging an alert. The app sends the request and hands
@@ -66,8 +67,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use crate::ceremony::{
-    self, AnswerView, BuildArgs, FinishArgs, FinishedView, Key1Args, Key1Made, PairView, PartView,
-    SetupFields, SetupStageView, WalletBuiltView,
+    self, AnswerView, BuildArgs, CeremonyDefaults, FinishArgs, FinishedView, Key1Args, Key1Made,
+    PairView, PartView, SetupFields, SetupStageView, WalletBuiltView,
 };
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::counter_views::{
@@ -431,6 +432,9 @@ fn build_ops() -> Vec<Op> {
         op(85, "ceremony_stage", Zero, |_, record: Vec<u8>| {
             ceremony::stage(record)
         }),
+        op(86, "ceremony_defaults", Zero, |_, network: OwnerNetwork| {
+            ceremony::defaults(network)
+        }),
         op(90, "counter_scan", Node, |c, request: Vec<u8>| {
             c.entry()?.counter_scan(request)
         }),
@@ -595,6 +599,7 @@ fn definitions() -> Vec<TypeDef> {
         WalletBuiltView::define(),
         FinishArgs::define(),
         FinishedView::define(),
+        CeremonyDefaults::define(),
         SetupFields::define(),
         SetupStageView::define(),
         PumpView::define(),

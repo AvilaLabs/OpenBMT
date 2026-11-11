@@ -4,6 +4,18 @@ import java.io.ByteArrayOutputStream
 
 /** Plain JVM regression harness for the production OBMl decoder and the OBMk encoder; run its main. */
 object ProtocolDecoderTest {
+    /**
+     * The Key app's answers, made by the Key app's own library in a Rust test of this crate
+     * (`oc_41_the_answers_of_the_kotlin_harness_are_the_key_apps` fails when these differ): one that holds
+     * key 2, one that holds none, and the text of a key 2 that comes from elsewhere.
+     */
+    private const val ANSWER_WITH_KEY2 =
+        "4f424d76010301bb11a663043587cf0451fa9cf380000002eb1d10e17bcc89eb6a2c862051d41288b568a66879f6e39518c24c3ada8a5d9303bca1e9d4f32c904d648f4203ec4dae291fa0b072ec932e83224d8fa62b4251fc56c4fac3043587cf04686ae4bf80000002d0b08dc903742e8e907aed44ced618ec55545adf33a8f3cfe444470bb19fe79b0241ea5cb48ecc741308624baf221aa4e3057447056e4fa48749572714abff29f1472bce1f9d73090ee567d69485cf1f4b286ba739a0d98c05fff24761d9d1d5fb"
+    private const val ANSWER_WITHOUT_KEY2 =
+        "4f424d7601010056c4fac3043587cf04686ae4bf80000002d0b08dc903742e8e907aed44ced618ec55545adf33a8f3cfe444470bb19fe79b0241ea5cb48ecc741308624baf221aa4e3057447056e4fa48749572714abff29f1472bce1f9d73090ee567d69485cf1f4b286ba739a0d98c05fff24761d9d1d5fb"
+    private const val KEY2_TEXT =
+        "[8dfc9b34/48h/1h/0h/2h]tpubDEXiq2SVhhqALktxfVFgj3C9M3T2G7xL11iezYg2LJAf245YkNyqp2K9TrvHABDCp2232k34UegU4aKEtUZNigit8EEqoLNe2JKMzMiLwYq"
+
     /** The `start` request of [sampleConfig], as the Rust test of the same name writes it. */
     private const val START_FRAME_HEX =
         "4f424d6b01010000000000000000000100000064030100000000000000010000000101000000020100000077010000000300040000000500000006000000010100000070010000000100000061000101000100000078010000000701000000010000000809000000000000000a00000000000000" +
@@ -33,6 +45,9 @@ object ProtocolDecoderTest {
 
         results()
         requests()
+        ceremonyFrames()
+        ceremonyThroughTheLibrary()
+        println("ProtocolDecoderTest: ok")
     }
 
     // ---- the results ----
@@ -140,6 +155,167 @@ object ProtocolDecoderTest {
 
         val pump = decodeResponse(header(0, Writer().u32(1).string("note").u8(1).toByteArray())).pump()
         check(pump.notes == listOf("note") && pump.stopped)
+    }
+
+
+    // ---- the key ceremony: frames, then the real library ----
+
+    private fun ceremonyFrames() {
+        // The request of make key 1, as the Rust test writes it: network Regtest (3), no words.
+        check(hex(requestFrame(80, 0) { it.u8(3).u8(0) }) == "4f424d6b015000" + "0000000000000000" + "0300") {
+            hex(requestFrame(80, 0) { it.u8(3).u8(0) })
+        }
+        val made = decodeResponse(key1MadeFrame()).key1Made()
+        check(made.record.size == 2 && made.key1.fingerprint == "aabbccdd" && made.key1.originPath == "48h/1h/0h/2h")
+        check(made.ownerRoot.size == 32 && made.ownerRootWords == listOf("one", "two", "three", "four"))
+        check(made.words == null && made.stateWords.heading == "Words")
+        check(decodeResponse(key1MadeFrame(withWords = true)).key1Made().words == listOf("a", "b"))
+        rejects("an option flag of the key 1 words") { decodeResponse(key1MadeFrame(wordsFlag = 2)).key1Made() }
+        val answer = decodeResponse(answerFrame()).answerView()
+        check(answer.network == OwnerNetwork.Signet && answer.key2 == null && answer.key3.fingerprint == "11223344")
+        check(answer.keyAppRoot.size == 32 && answer.keyAppRootWords.size == 4)
+        check(decodeResponse(answerFrame(withKey2 = true)).answerView().key2?.fingerprint == "aabbccdd")
+        rejects("a network tag") { decodeResponse(answerFrame(network = 4)).answerView() }
+        rejects("a short answer") { decodeResponse(answerFrame().copyOf(20)).answerView() }
+        val stage = decodeResponse(header(0, Writer().u8(2).toByteArray() + wordsBytes())).setupStageView()
+        check(stage.stage == 2 && stage.words.heading == "Words")
+        val defaults = decodeResponse(header(0, Writer().u32(1_000).u32(6).u32(967_680).toByteArray())).ceremonyDefaults()
+        check(defaults.batchMinCount == 1_000L && defaults.refundDepth == 6L && defaults.birthday == 967_680L)
+        rejects("trailing bytes in the defaults") {
+            decodeResponse(header(0, Writer().u32(1).u32(2).u32(3).u8(0).toByteArray())).also { it.ceremonyDefaults(); it.end() }
+        }
+    }
+
+    private fun wordsBytes(): ByteArray {
+        val out = ByteArrayOutputStream()
+        words(out)
+        return out.toByteArray()
+    }
+
+    private fun partBytes(fingerprint: String) =
+        Writer().string(fingerprint).string("48h/1h/0h/2h").string("xpubplaceholder").toByteArray()
+
+    private fun key1MadeFrame(withWords: Boolean = false, wordsFlag: Int = if (withWords) 1 else 0): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(Writer().bytes(byteArrayOf(1, 2)).toByteArray())
+        out.write(partBytes("aabbccdd"))
+        out.write(Writer().bytes(ByteArray(32) { 5 }).u32(4).string("one").string("two").string("three").string("four").u8(wordsFlag).toByteArray())
+        if (wordsFlag == 1) out.write(Writer().u32(2).string("a").string("b").toByteArray())
+        words(out)
+        return header(0, out.toByteArray())
+    }
+
+    private fun answerFrame(network: Int = 2, withKey2: Boolean = false): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(Writer().u8(network).toByteArray())
+        if (withKey2) {
+            out.write(Writer().u8(1).toByteArray())
+            out.write(partBytes("aabbccdd"))
+        } else {
+            out.write(Writer().u8(0).toByteArray())
+        }
+        out.write(partBytes("11223344"))
+        out.write(Writer().bytes(ByteArray(32) { 6 }).u32(4).string("w").string("x").string("y").string("z").toByteArray())
+        return header(0, out.toByteArray())
+    }
+
+    private fun unhex(text: String): ByteArray = ByteArray(text.length / 2) { text.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+
+    /** Runs [block], which must be refused by the library with a rule that starts with [prefix] and has words. */
+    private inline fun refusedBy(label: String, prefix: String, block: () -> Unit): OwnerException {
+        val e = try {
+            block()
+            error("accepted: $label")
+        } catch (e: OwnerException) {
+            e
+        }
+        check(e.status == 1 && e.rule.startsWith(prefix)) { "$label: status ${e.status}, rule ${e.rule}" }
+        check(e.words != null && e.words!!.heading.isNotEmpty() && e.words!!.next.isNotEmpty()) { "$label: no words" }
+        return e
+    }
+
+    /**
+     * The whole ceremony through the real library, loaded from java.library.path: the defaults, key 1, the Key
+     * app's answer, the wallet, the stage at each step, the finish, the open, and each kind of refusal. The
+     * sealed records are the library's; this harness only hands them back.
+     */
+    private fun ceremonyThroughTheLibrary() {
+        val regtest = OwnerCeremony.defaults(OwnerNetwork.Regtest)
+        check(regtest.batchMinCount == 1_000L && regtest.refundDepth == 6L && regtest.birthday == 0L)
+        val mainnet = OwnerCeremony.defaults(OwnerNetwork.Mainnet)
+        check(mainnet.batchMinCount == regtest.batchMinCount && mainnet.birthday == 967_680L)
+        check(OwnerCeremony.defaults(OwnerNetwork.Signet).birthday == 0L)
+
+        // Step 1: key 1, with no words to show.
+        val made = OwnerCeremony.makeKey1(Key1Args(OwnerNetwork.Regtest, showWords = false))
+        check(made.words == null && made.record.isNotEmpty() && made.ownerRoot.size == 32)
+        check(made.ownerRootWords.size == 4 && made.key1.fingerprint.length == 8 && made.stateWords.heading.isNotEmpty())
+        val first = OwnerCeremony.stage(made.record)
+        check(first.stage == 1 && first.words.heading.isNotEmpty())
+        // The words only when asked for, 24 of them.
+        val shown = OwnerCeremony.makeKey1(Key1Args(OwnerNetwork.Regtest, showWords = true))
+        check(shown.words?.size == 24)
+
+        // Step 2: the Key app's answer.
+        val answer = unhex(ANSWER_WITH_KEY2)
+        val read = OwnerCeremony.readAnswer(answer)
+        check(read.key2 != null && read.network == OwnerNetwork.Regtest && read.keyAppRoot.size == 32)
+        check(read.keyAppRootWords.size == 4 && read.keyAppRootWords != made.ownerRootWords)
+        val bare = OwnerCeremony.readAnswer(unhex(ANSWER_WITHOUT_KEY2))
+        check(bare.key2 == null && bare.network == OwnerNetwork.Testnet)
+        refusedBy("a cut answer", "SR-") { OwnerCeremony.readAnswer(answer.copyOf(answer.size - 3)) }
+        refusedBy("a code that is not an answer", "SR-") { OwnerCeremony.readAnswer(byteArrayOf(1, 2, 3)) }
+
+        // Step 3: the wallet. Key 2 comes in the answer or as text, never both and never neither.
+        val minCount = regtest.batchMinCount
+        refusedBy("no key 2 at all", "OC-41") {
+            OwnerCeremony.buildWallet(BuildArgs(made.record, unhex(ANSWER_WITHOUT_KEY2), null, minCount))
+        }
+        refusedBy("key 2 twice", "OC-41") {
+            OwnerCeremony.buildWallet(BuildArgs(made.record, answer, KEY2_TEXT, minCount))
+        }
+        refusedBy("a key 2 text that is not a key", "SR-") {
+            OwnerCeremony.buildWallet(BuildArgs(made.record, unhex(ANSWER_WITHOUT_KEY2), "not a key", minCount))
+        }
+        refusedBy("a record that is cut", "OC-44") {
+            OwnerCeremony.buildWallet(BuildArgs(made.record.copyOf(made.record.size - 2), answer, null, minCount))
+        }
+        val mainnetKey = OwnerCeremony.makeKey1(Key1Args(OwnerNetwork.Mainnet, showWords = false))
+        refusedBy("an answer of another network", "") {
+            OwnerCeremony.buildWallet(BuildArgs(mainnetKey.record, answer, null, minCount))
+        }
+        val viaText = OwnerCeremony.buildWallet(BuildArgs(made.record, unhex(ANSWER_WITHOUT_KEY2), KEY2_TEXT, minCount))
+        check(OwnerCeremony.stage(viaText.record).stage == 2 && viaText.walletSetup.isNotEmpty())
+
+        val built = OwnerCeremony.buildWallet(BuildArgs(made.record, answer, null, minCount))
+        check(OwnerCeremony.stage(built.record).stage == 2)
+        check(built.walletSetup.size > 4 && built.walletSetup.copyOf(4).contentEquals("OBMw".toByteArray(Charsets.US_ASCII)))
+        check(built.checksumWords.size == 4 && built.fingerprints.size == 3 && built.fingerprints.all { it.length == 8 })
+        check(built.fingerprints[0] == made.key1.fingerprint && built.fingerprints[1] == read.key2!!.fingerprint)
+        check(built.fingerprints[2] == read.key3.fingerprint && built.description.startsWith("wsh("))
+        check(built.firstReceiveAddress.startsWith("bcrt1") && built.pairs.size == 3)
+        check(built.pairs.all { it.holderA in 1..4 && it.holderB in 1..4 && it.keyA in 1..3 && it.keyB in 1..3 })
+        check(built.pairsWords.heading.isNotEmpty() && built.stateWords.heading.isNotEmpty())
+        // The same inputs make the same wallet, so the Key app shows the same words.
+        val again = OwnerCeremony.buildWallet(BuildArgs(made.record, answer, null, minCount))
+        check(again.checksumWords == built.checksumWords && again.walletSetup.contentEquals(built.walletSetup))
+
+        // Step 4: the owner's word. Nothing opens before it.
+        refusedBy("open before the owner confirms", "OC-45") { OwnerCeremony.open(built.record) }
+        refusedBy("finish at stage 1", "OC-45") { OwnerCeremony.finish(FinishArgs(made.record, 6, 0)) }
+        refusedBy("a refund depth of 0", "OC-45") { OwnerCeremony.finish(FinishArgs(built.record, 0, 0)) }
+        refusedBy("a refund depth of 101", "OC-45") { OwnerCeremony.finish(FinishArgs(built.record, 101, 0)) }
+        refusedBy("a stage of garbage", "OC-44") { OwnerCeremony.stage(byteArrayOf(1, 2, 3)) }
+        val done = OwnerCeremony.finish(FinishArgs(built.record, regtest.refundDepth, regtest.birthday))
+        check(OwnerCeremony.stage(done.record).stage == 3 && done.stateWords.heading.isNotEmpty())
+        refusedBy("finish twice", "OC-45") { OwnerCeremony.finish(FinishArgs(done.record, 6, 0)) }
+
+        // The values the node starts from.
+        val fields = OwnerCeremony.open(done.record)
+        check(fields.network == OwnerNetwork.Regtest && fields.wallet == built.description)
+        check(fields.ownerSecret.size == 32 && fields.approverRoot.contentEquals(read.keyAppRoot))
+        check(fields.key1Account.size == 78 && fields.key3Xpub == read.key3.accountXpub)
+        check(fields.batchMinCount == minCount && fields.refundDepth == 6L && fields.birthday == 0L)
     }
 
     // ---- the requests ----

@@ -234,3 +234,108 @@ fn oc_44_a_cut_answer_or_record_is_refused_by_the_owner_ops() {
     // A record that is not finished gives no start values.
     assert!(open(built.record.clone()).is_err());
 }
+
+#[test]
+fn oc_45_the_defaults_are_the_librarys_own_numbers() {
+    use crate::ceremony::{defaults, DEFAULT_REFUND_DEPTH};
+    use openbmt_counter_node::BATCH_MIN_COUNT;
+    use openbmt_owner_node::OwnerParts;
+    // The refund depth is the one the node starts with.
+    let parts = OwnerParts::new([1; 32], kit().wallet.clone(), counter(), policy()).expect("parts");
+    assert_eq!(DEFAULT_REFUND_DEPTH, parts.refund_depth);
+    for (network, birthday) in [
+        (
+            OwnerNetwork::Mainnet,
+            openbmt_watch::headers::MAINNET_CHECKPOINT_HEIGHT,
+        ),
+        (OwnerNetwork::Testnet, 0),
+        (OwnerNetwork::Signet, 0),
+        (OwnerNetwork::Regtest, 0),
+    ] {
+        let d = defaults(network).expect("defaults");
+        assert_eq!(d.batch_min_count, BATCH_MIN_COUNT);
+        assert_eq!(d.refund_depth, 6);
+        assert_eq!(d.birthday, birthday);
+    }
+    // Through dispatch: the network in, three numbers out.
+    let rig = Rig::new();
+    let response = dispatch(rig.registry(), &frame(86, 0, &W::new().u8(0).0));
+    let mut r = Rd::ok(&response);
+    assert_eq!(r.u32(), BATCH_MIN_COUNT);
+    assert_eq!(r.u32(), 6);
+    assert_eq!(r.u32(), 967_680);
+    // A network that is not defined is refused.
+    let bad = dispatch(rig.registry(), &frame(86, 0, &W::new().u8(9).0));
+    assert_ne!(bad.get(5), Some(&0), "refused");
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Key 2 as text, the way a hardware wallet exports it (SR-64): the kit's second key.
+fn key2_text() -> String {
+    KeyPart {
+        fingerprint: kit().wallet.slots()[1].origin_fingerprint,
+        xpub: kit().xpubs[1],
+    }
+    .origin_text()
+}
+
+/// The Key app's answers the JVM harness of the Kotlin binding uses: one with key 2, one with none.
+fn kotlin_fixtures() -> (Vec<u8>, Vec<u8>) {
+    let with = answer_of(&key_app_with_key2());
+    let none = KeyApp::open(Store::new()).expect("opens");
+    none.create_approver_only().expect("approver only");
+    (with, answer_of(&none))
+}
+
+#[test]
+fn oc_41_the_answers_of_the_kotlin_harness_are_the_key_apps() {
+    let (with, none) = kotlin_fixtures();
+    if std::env::var_os("OPENBMT_PRINT_FIXTURES").is_some() {
+        println!("ANSWER_WITH_KEY2 = {}", hex(&with));
+        println!("ANSWER_WITHOUT_KEY2 = {}", hex(&none));
+        println!("KEY2_TEXT = {}", key2_text());
+    }
+    let path = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("bindings/tests/ProtocolDecoderTest.kt");
+    let harness = std::fs::read_to_string(&path).expect("the harness");
+    for (name, value) in [
+        ("ANSWER_WITH_KEY2", hex(&with)),
+        ("ANSWER_WITHOUT_KEY2", hex(&none)),
+        ("KEY2_TEXT", key2_text()),
+    ] {
+        assert!(
+            harness.contains(&format!("{name} =\n        \"{value}\"")),
+            "{name} in ProtocolDecoderTest.kt is not what the Key app makes: run this test with \
+             OPENBMT_PRINT_FIXTURES=1 and --nocapture"
+        );
+    }
+    // The answer without key 2 builds a wallet only with key 2 as text.
+    let made = make_key1(Key1Args {
+        network: OwnerNetwork::Regtest,
+        show_words: false,
+    })
+    .expect("key 1");
+    let args = |text: Option<String>| BuildArgs {
+        record: made.record.clone(),
+        answer: none.clone(),
+        key2_text: text,
+        batch_min_count: 3,
+    };
+    assert!(build_wallet(args(None)).is_err());
+    build_wallet(args(Some(key2_text()))).expect("key 2 as text");
+    // The answer with key 2 is refused when key 2 comes as text too.
+    let both = BuildArgs {
+        answer: with,
+        ..args(Some(key2_text()))
+    };
+    assert!(build_wallet(both)
+        .expect_err("twice")
+        .to_string()
+        .contains("OC-41"));
+}

@@ -103,6 +103,7 @@ ops run on another; it waits for at most 250 ms.
  83 ceremony_finish  handle zero  args FinishArgs -> FinishedView
  84 ceremony_open    handle zero  args list<u8> -> SetupFields
  85 ceremony_stage   handle zero  args list<u8> -> SetupStageView
+ 86 ceremony_defaults handle zero  args OwnerNetwork -> CeremonyDefaults
  90 counter_scan     handle node  args list<u8> -> CounterScanView
  91 counter_confirm  handle node  args (u64, CounterConfirmArgs) -> CounterQueuedView
  92 counters_waiting handle node  args () -> list<WaitingCounterView>
@@ -137,6 +138,7 @@ PairView: record: key_a: u32, key_b: u32, holder_a: u8, holder_b: u8
 WalletBuiltView: record: record: list<u8>, wallet_setup: list<u8>, description: string, checksum_words: list<string>, fingerprints: list<string>, first_receive_address: string, pairs: list<PairView>, pairs_words: Words, state_words: Words
 FinishArgs: record: record: list<u8>, refund_depth: u32, birthday: u32
 FinishedView: record: record: list<u8>, state_words: Words
+CeremonyDefaults: record: batch_min_count: u32, refund_depth: u32, birthday: u32
 SetupFields: record: network: OwnerNetwork, owner_secret: list<u8>, approver_root: list<u8>, wallet: string, key1_account: list<u8>, key3_xpub: option<string>, batch_min_count: u32, refund_depth: u32, birthday: u32
 SetupStageView: record: stage: u8, words: Words
 PumpView: record: notes: list<string>, stopped: bool
