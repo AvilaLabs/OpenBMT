@@ -551,10 +551,14 @@ and the 60-second rule are the shared `LockModel.kt` of
   than 60 seconds on the clock that counts since the phone started (a clock
   that went back counts as more), the unlock screen comes before any other
   and before the node starts, and no call of the node is made until it is
-  open. A "Working" page is drawn before the library is asked, because the
-  key from the PIN takes about a second (OA-12). A wrong PIN is refused with
-  the rule `pin-wrong` and changes nothing; a file that is cut or damaged
-  is refused with the rule `OBMx`, in the library's words.
+  open. The 60 seconds include the time spent in the system's file picker or
+  permission dialog: a result that comes back (a file picked, the picker
+  cancelled, the permission answered), or a resume, after more than 60
+  seconds drops the result unread and locks the setup the same way. A
+  "Working" page is drawn before the library is asked, because the key from
+  the PIN takes about a second (OA-12). A wrong PIN is refused with the
+  rule `pin-wrong` and changes nothing; a file that is cut or damaged is
+  refused with the rule `OBMx`, in the library's words.
 - **OA-63.** Wrong PINs are counted in a small file of their own, `tries.obkt`
   in the app's `noBackupFilesDir`, as SR-75 says: the count plus one is
   written before each try and 0 after a right PIN; a refusal that is not

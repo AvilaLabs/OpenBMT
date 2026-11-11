@@ -510,6 +510,17 @@ object AppModelTest {
         }
     }
 
+    private fun sr_77_picker_and_permission_waits_count(appDir: File?) {
+        if (appDir == null) return
+        val controller = File(appDir, "src/android/Controller.kt").readText()
+        val resumed = controller.substringAfter("fun resumed() {").substringBefore("fun paused()")
+        ok(resumed.contains("waitedTooLong()") && resumed.contains("return start()"), "a resume after more than a minute in a picker locks")
+        val picked = controller.substringAfter("fun picked(").substringBefore("private fun openRequest(")
+        ok(picked.indexOf("ExternalWait.decide(") in 0 until picked.indexOf("data?.data"), "a picker's result is judged before it is read")
+        val permission = controller.substringAfter("fun permission(").substringBefore("// ---- the approval session")
+        ok(permission.indexOf("waitedTooLong()") in 0 until permission.indexOf("scan.permissionResult"), "a permission answer is judged before it is taken")
+    }
+
     private fun sr_77_relock_after_a_minute() {
         ok(Relock.needed(null, 5), "never paused: locked")
         ok(!Relock.needed(1000, 1000 + 60_000), "60 s exactly is not more than 60 s")
@@ -602,6 +613,7 @@ object AppModelTest {
         sr_75_waits_and_tries_left()
         sr_76_wipe_order_and_failure()
         sr_77_relock_after_a_minute()
+        sr_77_picker_and_permission_waits_count(appDir)
         sr_78_deposit_code_from_the_camera()
         sr_79_list_rows()
         sr_80_the_invitation_is_one_of_six_groups_of_five()

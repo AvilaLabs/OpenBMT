@@ -16,6 +16,7 @@ import android.view.accessibility.AccessibilityManager
 import java.io.File
 import java.io.IOException
 import org.openbmt.app.AnimatedQrView
+import org.openbmt.app.ExternalWait
 import org.openbmt.app.Format
 import org.openbmt.app.KeyLevel
 import org.openbmt.app.KeystoreSealer
@@ -29,6 +30,7 @@ import org.openbmt.app.UrCall
 import org.openbmt.app.UrScan
 import org.openbmt.app.UrText
 import org.openbmt.app.UrWords
+import org.openbmt.app.WaitOutcome
 import org.openbmt.app.Who
 import org.openbmt.app.WordsModel
 import org.openbmt.key.CeilingsView
@@ -66,8 +68,12 @@ class Controller(private val act: MainActivity) {
     /** The network of the next key or wallet; the person picks it on the screens that need it. */
     private var network = KeyNetwork.Mainnet
 
-    /** Set while a system file picker is open: the screen and the session must survive it. */
-    private var pickerOpen = false
+    /**
+     * Set while a system file picker is open (the screen and the session survive it for up to 60 seconds, SR-77):
+     * when it was opened, on the clock that counts since the phone started.
+     */
+    private var pickerSince: Long? = null
+    private val pickerOpen: Boolean get() = pickerSince != null
 
     /** Set when the screen was cleared because the app went to the background. */
     private var cleared = false
@@ -114,8 +120,18 @@ class Controller(private val act: MainActivity) {
         refresh(fault)
     }
 
+    /** SR-77: whether the person has been in a system screen (picker, permission dialog) for more than 60 seconds. */
+    private fun waitedTooLong(): Boolean =
+        ExternalWait.decide(pickerSince ?: scan.askedAt, SystemClock.elapsedRealtime()) == WaitOutcome.Lock
+
     fun resumed() {
-        if (pickerOpen || scan.asking) return
+        if (pickerOpen || scan.asking) {
+            if (!waitedTooLong()) return
+            // The wait counts toward the 60 seconds: the session is dropped and the app locks, as after any relock.
+            pickerSince = null
+            pendingAnswer = null
+            return start()
+        }
         if (refusals().isNotEmpty()) {
             dropSession()
             refresh(null)
@@ -1203,19 +1219,26 @@ class Controller(private val act: MainActivity) {
     }
 
     /** The answer of the system's permission dialog. */
-    fun permission(code: Int, results: IntArray) = scan.permissionResult(code, results)
+    fun permission(code: Int, results: IntArray) {
+        if (scan.asking && waitedTooLong()) {
+            // SR-77: an answer after more than 60 seconds is dropped, and the app locks.
+            pendingAnswer = null
+            return start()
+        }
+        scan.permissionResult(code, results)
+    }
 
     // ---- the approval session -------------------------------------------------------------------
 
     private fun pickRequest() {
-        pickerOpen = true
+        pickerSince = SystemClock.elapsedRealtime()
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
         startPicker(intent, REQUEST_OPEN)
     }
 
     private fun saveAnswer(bytes: ByteArray) {
         pendingAnswer = bytes
-        pickerOpen = true
+        pickerSince = SystemClock.elapsedRealtime()
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType("application/octet-stream")
@@ -1228,13 +1251,20 @@ class Controller(private val act: MainActivity) {
         try {
             act.startActivityForResult(intent, code)
         } catch (e: RuntimeException) {
-            pickerOpen = false
+            pickerSince = null
             showMessage(AppWords.fileNotRead(e.message)) { refresh() }
         }
     }
 
     fun picked(code: Int, result: Int, data: Intent?) {
-        pickerOpen = false
+        // A result with no wait noted was already dealt with by the resume (SR-77).
+        val since = pickerSince ?: return
+        pickerSince = null
+        if (ExternalWait.decide(since, SystemClock.elapsedRealtime()) == WaitOutcome.Lock) {
+            // More than 60 seconds in the picker: the result, picked or cancelled, is dropped unread and the app locks.
+            pendingAnswer = null
+            return start()
+        }
         val uri = data?.data
         if (result != android.app.Activity.RESULT_OK || uri == null) return refresh()
         when (code) {

@@ -420,6 +420,23 @@ object CommonModelTest {
         ok(!UrText.startsWithUr("u".toByteArray()) && !UrText.startsWithUr("BITCOIN:".toByteArray()) && !UrText.startsWithUr(" ur:".toByteArray()), "others do not")
     }
 
+    /** SR-77: the time in a picker or a permission dialog counts toward the 60 seconds. */
+    private fun externalWaits() {
+        val t0 = 5_000_000L
+        ok(ExternalWait.decide(t0, t0 + 59_000) == WaitOutcome.Continue, "a result after 59 s continues")
+        ok(ExternalWait.decide(t0, t0 + 60_000) == WaitOutcome.Continue, "60 s exactly is not more than 60 s")
+        ok(ExternalWait.decide(t0, t0 + 61_000) == WaitOutcome.Lock, "a result after 61 s locks")
+        // A resume at 30 s lets the wait go on, and the result that comes after it at 61 s locks.
+        ok(ExternalWait.decide(t0, t0 + 30_000) == WaitOutcome.Continue, "a resume at 30 s waits for the result")
+        ok(ExternalWait.decide(t0, t0 + 61_000) == WaitOutcome.Lock, "the result that follows that resume at 61 s locks")
+        // A result at 10 s is taken, and the resume that follows has no wait left to decide on.
+        ok(ExternalWait.decide(t0, t0 + 10_000) == WaitOutcome.Continue, "a result at 10 s is taken")
+        // A cancelled picker is a result like any other: past 60 s it locks too.
+        ok(ExternalWait.decide(t0, t0 + 90_000) == WaitOutcome.Lock, "a cancelled picker after 90 s locks")
+        ok(ExternalWait.decide(null, t0) == WaitOutcome.Lock, "no wait noted fails closed")
+        ok(ExternalWait.decide(t0, t0 - 1) == WaitOutcome.Lock, "a clock that went back locks")
+    }
+
     /** The lock model both apps use (LockModel.kt): the tries table and file, the wipe order over a list of files, the relock rule. */
     private fun lockModelTests() {
         val waits = listOf(0L, 0, 0, 0, 0, 30, 60, 300, 900, 3600)
@@ -434,6 +451,7 @@ object CommonModelTest {
         ok(Tries.check(TriesRecord(6, t0), t0 - 500).record == TriesRecord(6, t0 - 500), "a clock behind restarts the wait from now")
         ok(Tries.before(TriesRecord(3, 5), 99) == TriesRecord(4, 99) && Tries.afterRight() == TriesRecord(0, 0), "one more before, none after")
         ok(Relock.needed(null, 5) && !Relock.needed(1000, 61_000) && Relock.needed(1000, 61_001) && Relock.needed(1000, 500), "the 60-second rule")
+        externalWaits()
         val dir = Files.createTempDirectory("lock-model").toFile()
         try {
             val tries = TriesFile(dir)

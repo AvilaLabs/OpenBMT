@@ -16,6 +16,7 @@ import java.io.IOException
 import java.security.GeneralSecurityException
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import org.openbmt.app.ExternalWait
 import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.Relock
 import org.openbmt.app.SayWords
@@ -25,6 +26,7 @@ import org.openbmt.app.Tries
 import org.openbmt.app.TriesFile
 import org.openbmt.app.Ui
 import org.openbmt.app.UrScan
+import org.openbmt.app.WaitOutcome
 import org.openbmt.app.WordsModel
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
@@ -101,8 +103,10 @@ class Controller(internal val act: MainActivity) {
     internal var tick: (() -> Unit)? = null
     private var lastTick = 0L
 
-    // A picker that is open: the node keeps running while the system's file screen is in front.
-    private var pickerOpen = false
+    // A picker that is open, and since when (the clock that counts since the phone started): the node keeps running
+    // while the system's file screen is in front, for up to 60 seconds (OA-62).
+    private var pickerSince: Long? = null
+    private val pickerOpen: Boolean get() = pickerSince != null
     private var pickerDone: ((Uri) -> Unit)? = null
     private var pickerCancel: (() -> Unit)? = null
 
@@ -113,10 +117,28 @@ class Controller(internal val act: MainActivity) {
     fun visible() {
         visible = true
         main.removeCallbacks(relockTimer)
-        if (pickerOpen || scan.asking) return
+        if (pickerOpen || scan.asking) {
+            if (!waitedTooLong()) return
+            // OA-62: the wait counts toward the 60 seconds; the picker or dialog is given up and the setup is locked.
+            endWait()
+            lockNow()
+            return begin()
+        }
         // OA-62: after more than 60 seconds away the setup is locked again, and the start asks for the PIN.
         if (setup != null && Relock.needed(pausedAt, SystemClock.elapsedRealtime())) lockNow()
         begin()
+    }
+
+    /** OA-62: whether the owner has been in a system screen (picker, permission dialog) for more than 60 seconds. */
+    private fun waitedTooLong(): Boolean =
+        ExternalWait.decide(pickerSince ?: scan.askedAt, SystemClock.elapsedRealtime()) == WaitOutcome.Lock
+
+    /** Gives up the picker or permission dialog that was waited on: its result is dropped when it comes. */
+    private fun endWait() {
+        pickerSince = null
+        pickerDone = null
+        pickerCancel = null
+        scan.stop()
     }
 
     fun hidden() {
@@ -552,7 +574,15 @@ class Controller(internal val act: MainActivity) {
     }
 
     /** The answer of the system's permission dialog. */
-    internal fun permission(code: Int, results: IntArray) = scan.permissionResult(code, results)
+    internal fun permission(code: Int, results: IntArray) {
+        if (scan.asking && waitedTooLong()) {
+            // OA-62: an answer after more than 60 seconds is dropped, and the setup is locked.
+            endWait()
+            lockNow()
+            return begin()
+        }
+        scan.permissionResult(code, results)
+    }
 
     /** Asks the system for a file name and writes [bytes] to it; [done] gets the words of what happened. */
     internal fun saveFile(name: String, bytes: ByteArray, cancelled: () -> Unit, done: (SayWords) -> Unit) {
@@ -573,13 +603,13 @@ class Controller(internal val act: MainActivity) {
 
     @Suppress("DEPRECATION")
     private fun openPicker(intent: Intent, cancelled: () -> Unit, done: (Uri) -> Unit) {
-        pickerOpen = true
+        pickerSince = SystemClock.elapsedRealtime()
         pickerDone = done
         pickerCancel = cancelled
         try {
             act.startActivityForResult(intent, REQUEST_PICK)
         } catch (e: RuntimeException) {
-            pickerOpen = false
+            pickerSince = null
             pickerDone = null
             pickerCancel = null
             showMessage(AppWords.fileNotRead(e.message)) { cancelled() }
@@ -588,11 +618,18 @@ class Controller(internal val act: MainActivity) {
 
     fun picked(code: Int, result: Int, data: Intent?) {
         if (code != REQUEST_PICK) return
-        pickerOpen = false
+        // A result with no wait noted was already dealt with by the resume (OA-62).
+        val since = pickerSince ?: return
         val done = pickerDone
         val cancelled = pickerCancel
+        pickerSince = null
         pickerDone = null
         pickerCancel = null
+        if (ExternalWait.decide(since, SystemClock.elapsedRealtime()) == WaitOutcome.Lock) {
+            // More than 60 seconds in the picker: the result, picked or cancelled, is dropped unread and the setup locks.
+            lockNow()
+            return begin()
+        }
         val uri = data?.data
         if (result != android.app.Activity.RESULT_OK || uri == null || done == null) {
             if (cancelled != null) cancelled() else begin()

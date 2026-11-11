@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -34,7 +35,8 @@ class UrScan(val types: Set<String>, val who: Int, val onMessage: (type: String,
  *
  * Every call is on the main thread. A caller that clears its screen when the activity pauses calls [stop]
  * there, and holds back that clearing while [asking] is true, because the system's permission dialog
- * pauses the activity too. [permissionResult] is the activity's `onRequestPermissionsResult`.
+ * pauses the activity too; [askedAt] says since when, for the 60-second relock (SR-77).
+ * [permissionResult] is the activity's `onRequestPermissionsResult`.
  */
 class ScanFlow(private val act: Activity, private val ui: Ui) {
     private val main = Handler(Looper.getMainLooper())
@@ -45,6 +47,10 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
 
     /** True while the system's permission dialog is open. */
     var asking = false
+        private set
+
+    /** When the permission dialog was opened, on the clock that counts since the phone started (SR-77). */
+    var askedAt: Long? = null
         private set
 
     private class Request(
@@ -75,6 +81,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
         }
         pending = request
         asking = true
+        askedAt = SystemClock.elapsedRealtime()
         act.requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA)
     }
 
@@ -82,6 +89,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
     fun permissionResult(code: Int, results: IntArray) {
         if (code != REQUEST_CAMERA) return
         asking = false
+        askedAt = null
         val request = pending ?: return
         pending = null
         when {
@@ -100,6 +108,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
         reading = null
         pending = null
         asking = false
+        askedAt = null
     }
 
     private fun scan(request: Request) {

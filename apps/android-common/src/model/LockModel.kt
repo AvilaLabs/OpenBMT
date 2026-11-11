@@ -82,6 +82,21 @@ object Relock {
     fun needed(pausedAt: Long?, now: Long): Boolean = pausedAt == null || now < pausedAt || now - pausedAt > AFTER_MS
 }
 
+/** What the app does when a system screen it waited on gives its result back, or the app is resumed. */
+enum class WaitOutcome { Continue, Lock }
+
+/**
+ * SR-77: the 60 seconds include the time spent in the system's file picker or permission dialog. The app
+ * notes the monotonic time when it hands over to the system ([waitStart]) and, when the result comes back
+ * (a file picked, the picker cancelled, the permission answered) or the app is resumed, asks here. A
+ * result that comes back after more than 60 seconds is dropped, whatever it was, and the app locks; no
+ * wait noted locks too (it fails closed). The decision does not depend on what the result was.
+ */
+object ExternalWait {
+    fun decide(waitStart: Long?, now: Long): WaitOutcome =
+        if (Relock.needed(waitStart, now)) WaitOutcome.Lock else WaitOutcome.Continue
+}
+
 /**
  * The file of the count of wrong tries (SR-75): `"OBKT" | 1 | wrong u32 LE | last wrong time u64 LE`, in the
  * app's no-backup folder, written through [DurableFile]. Strict: any other length or version is refused.

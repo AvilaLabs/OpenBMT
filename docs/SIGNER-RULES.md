@@ -460,8 +460,14 @@ SR-81 and the screens of SR-82 by the Android app.
   owner.
 - **SR-77. Locked on start and on return.** At start, and after the app has
   been in the background for more than 60 seconds, the app shows the unlock
-  screen before any other. It draws a "working" page before it asks the
-  library to unlock, because the key from the PIN takes about a second.
+  screen before any other. The 60 seconds include the time spent in the
+  system's file picker or permission dialog: the app notes the time when it
+  hands over to the system, and when the result comes back (a file picked,
+  the picker cancelled, the permission answered) or the app is resumed after
+  more than 60 seconds, the result is dropped unread, the session is dropped
+  and the unlock screen comes first, as after any other relock. It draws a
+  "working" page before it asks the library to unlock, because the key from
+  the PIN takes about a second.
 - **SR-78. Cash-out addresses come from the camera.** The call takes the text
   the Key app's camera read and the label typed on the Key app. The text is
   a bare address or a `bitcoin:` URI (BIP 321), and only its address is
