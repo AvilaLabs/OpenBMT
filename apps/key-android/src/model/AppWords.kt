@@ -4,6 +4,7 @@ import org.openbmt.app.CameraWords
 import org.openbmt.app.Format
 import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
+import org.openbmt.app.UrWords
 import org.openbmt.app.Who
 import org.openbmt.key.CheckStatus
 import org.openbmt.key.KeyException
@@ -108,13 +109,16 @@ object AppWords {
 
     fun cameraNotStarted(problem: String?) = fromSay(CameraWords.notStarted(Who.KEY_HOLDER, problem))
 
-    /** A scanned code is one part of a series of codes that change on the screen. */
-    val animatedCodes = w(
-        Tones.INFO, "Animated codes not read yet",
-        "This code is one part of a series that changes on the screen, and this app reads one code only.",
+    /** A scanned code is a UR (a request or an answer), where a field takes plain text. */
+    val codeNotForField = w(
+        Tones.INFO, "Not a text code",
+        "This code is part of a request or an answer, and this field takes plain text.",
         Who.KEY_HOLDER,
-        "Ask the owner's phone for the text as a file, then choose the file instead of scanning.",
+        "Scan the plain text code, or paste the text or choose a file instead.",
     )
+
+    /** The words of reading and showing codes that change, with this app's key holder as the one who acts. */
+    fun urWords(): List<Pair<String, Words>> = UrWords.all(Who.KEY_HOLDER).map { (name, say) -> name to fromSay(say) }
 
     // ---- what was typed --------------------------------------------------------
 
@@ -249,7 +253,7 @@ object AppWords {
         "fileNotSaved" to fileNotSaved("a problem"),
         "cameraOff" to cameraOff,
         "cameraNotStarted" to cameraNotStarted("a problem"),
-        "animatedCodes" to animatedCodes,
+        "codeNotForField" to codeNotForField,
         "notANumber" to notANumber,
         "identityNotReadable" to identityNotReadable,
         "flipsNotReadable" to flipsNotReadable,
@@ -267,5 +271,5 @@ object AppWords {
         "Kit SameCheckWords" to kit(KitCheck.Different(3, true, true)),
         "Kit NotAWallet" to kit(KitCheck.Different(3, false, false)),
         "Kit OtherWallet" to kit(KitCheck.Different(3, false, true)),
-    )
+    ) + urWords()
 }

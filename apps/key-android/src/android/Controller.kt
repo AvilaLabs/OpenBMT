@@ -11,13 +11,18 @@ import android.widget.EditText
 import android.view.accessibility.AccessibilityManager
 import java.io.File
 import java.io.IOException
+import org.openbmt.app.AnimatedQrView
 import org.openbmt.app.Format
 import org.openbmt.app.KeyLevel
 import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.ScanFlow
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Ui
+import org.openbmt.app.UrScan
 import org.openbmt.app.UrText
+import org.openbmt.app.UrWords
+import org.openbmt.app.Who
+import org.openbmt.app.WordsModel
 import org.openbmt.key.CeilingsView
 import org.openbmt.key.Decision
 import org.openbmt.key.EntropySource
@@ -36,7 +41,7 @@ import org.openbmt.key.Words
  * The screens and what they do. Every call into the library goes through
  * [attempt], which shows the library's own words for a refusal. The screens are
  * small on purpose: this is a first build, and text comes in by paste, by a
- * file or by scanning one QR code (animated codes are not read yet).
+ * file or by scanning a QR code (one code, or a code that changes, shown part by part).
  */
 class Controller(private val act: MainActivity) {
     private val ui = Ui(act)
@@ -461,7 +466,10 @@ class Controller(private val act: MainActivity) {
         views.add(ui.words(AppWords.state(state)))
         views.add(ui.button("Answer a request from the owner's phone") { pickRequest() })
         views.add(ui.button("Scan a request code from the owner's phone") { scanRequest() })
-        if (answerFile.isFile) views.add(ui.button("Save the last answer again") { saveAnswer(answerFile.readBytes()) })
+        if (answerFile.isFile) {
+            views.add(ui.button("Save the last answer again") { saveAnswer(answerFile.readBytes()) })
+            views.add(ui.button("Show the last answer as a code") { showAnswerCode(answerFile.readBytes()) { refresh() } })
+        }
         views.add(ui.button("The wallet and its check words") { showWallet(false) })
         views.add(ui.button("Check the printed kit") { showKitCheck() })
         views.add(ui.button("Limits and status") { showStatus() })
@@ -574,8 +582,8 @@ class Controller(private val act: MainActivity) {
                 show = { act.show(it) },
                 onBytes = { bytes ->
                     allowed {
-                        if (UrText.isMultiPart(bytes)) {
-                            showMessage(AppWords.animatedCodes, restore)
+                        if (UrText.startsWithUr(bytes)) {
+                            showMessage(AppWords.codeNotForField, restore)
                         } else {
                             field.setText(String(bytes, Charsets.UTF_8))
                             restore()
@@ -588,21 +596,30 @@ class Controller(private val act: MainActivity) {
         }
     }
 
-    private fun cameraWords(f: org.openbmt.app.ScanFailure): Words =
-        if (f.off) AppWords.cameraOff else AppWords.cameraNotStarted(f.problem)
+    private fun cameraWords(f: org.openbmt.app.ScanFailure): Words {
+        val say = f.words
+        return when {
+            say != null -> Words(say.tone, say.who, say.heading, say.what, say.next, null, null, null, say.detail)
+            f.off -> AppWords.cameraOff
+            else -> AppWords.cameraNotStarted(f.problem)
+        }
+    }
 
-    /** The request of the owner's phone, as the bytes of one code. */
+    /**
+     * The request of the owner's phone: one plain code, or a UR, whole or in parts as a code that changes.
+     * OpenBMT's own request is `ur:bytes`; `ur:crypto-psbt` (a plain PSBT from another wallet) is taken
+     * as well, and the library decides whether it is a request it can answer (docs/UR-RULES.md, UR-20).
+     */
     private fun scanRequest() {
         allowed {
             scan.begin(
                 show = { act.show(it) },
-                onBytes = { bytes ->
-                    allowed {
-                        if (UrText.isMultiPart(bytes)) showMessage(AppWords.animatedCodes) { refresh() } else openRequestBytes(bytes)
-                    }
-                },
+                onBytes = { bytes -> allowed { openRequestBytes(bytes) } },
                 onFailed = { showMessage(cameraWords(it)) { refresh() } },
                 onCancel = { refresh() },
+                ur = UrScan(setOf(TYPE_BYTES, TYPE_CRYPTO_PSBT), Who.KEY_HOLDER) { _, payload ->
+                    allowed { openRequestBytes(payload) }
+                },
             )
         }
     }
@@ -739,18 +756,44 @@ class Controller(private val act: MainActivity) {
             }
             dropSession()
             pendingAnswer = bytes
-            act.show(
-                ui.page(
-                    listOf(
-                        ui.words(AppWords.answersReady),
-                        ui.button("Save the answer file") { saveAnswer(bytes) },
-                        ui.button("Done") {
-                            pendingAnswer = null
-                            refresh()
-                        },
-                    ),
+            showAnswerReady(bytes)
+        }
+    }
+
+    /** The page after the last line: the answer can be saved as a file or shown as a code. */
+    private fun showAnswerReady(bytes: ByteArray) {
+        act.show(
+            ui.page(
+                listOf(
+                    ui.words(AppWords.answersReady),
+                    ui.button("Save the answer file") { saveAnswer(bytes) },
+                    ui.button("Show as code") { showAnswerCode(bytes) { showAnswerReady(bytes) } },
+                    ui.button("Done") {
+                        pendingAnswer = null
+                        refresh()
+                    },
                 ),
-            )
+            ),
+        )
+    }
+
+    /**
+     * The answer as a code on the screen, for the owner's phone to scan: `ur:bytes` parts, one still code
+     * when the answer fits one part, otherwise a code that changes. [back] is where Back goes. If no code
+     * can be made the words say so and to save the file instead.
+     */
+    private fun showAnswerCode(bytes: ByteArray, back: () -> Unit) {
+        allowed {
+            val metrics = act.resources.displayMetrics
+            val made = AnimatedQrView.make(act, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.6).toInt())
+            val view = made.view
+            if (view == null) {
+                val say = made.words ?: UrWords.cannotShow(Who.KEY_HOLDER)
+                act.show(ui.page(listOf(ui.words(WordsModel.of(say)), ui.button("Back") { back() })))
+            } else {
+                val say = if (view.animated) UrWords.showingAnimated(Who.KEY_HOLDER) else UrWords.showingStill(Who.KEY_HOLDER)
+                act.show(ui.page(listOf(ui.words(WordsModel.of(say)), view, ui.button("Back") { back() })))
+            }
         }
     }
 
@@ -774,5 +817,9 @@ class Controller(private val act: MainActivity) {
     private companion object {
         const val REQUEST_OPEN = 1
         const val REQUEST_SAVE = 2
+
+        /** OpenBMT's own framed requests and answers travel as `ur:bytes`; a plain PSBT is `ur:crypto-psbt` (UR-20). */
+        const val TYPE_BYTES = "bytes"
+        const val TYPE_CRYPTO_PSBT = "crypto-psbt"
     }
 }

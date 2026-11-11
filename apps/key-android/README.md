@@ -17,7 +17,7 @@ local test key; release signing is a separate step (see "Signing").
 | First start | Make key 2 from the device, dice (hashed or skew-corrected), coin flips or typed words, or be an approver only. |
 | The words | The new key's words, once. |
 | Wallet | Accept the wallet (pasted description, the owner's identity typed in), the check words, the kit check. |
-| Approval session | A request file is picked, its lines are shown one by one, each is approved or declined with a reason, and the answer file is saved. |
+| Approval session | A request is picked from a file or scanned (one code or a code that changes), its lines are shown one by one, each is approved or declined with a reason, and the answer is saved as a file or shown as a code. |
 | Limits and status | The ceilings, marks, totals and saved addresses, and a form to change the ceilings. |
 
 Every refusal of the library is shown through its `words`; the app's own
@@ -30,10 +30,11 @@ detail.
 Every place that takes pasted text or a file has a third choice, Scan, which
 reads one QR code with the phone's camera (see "The camera scan" below).
 
-Not built yet: reading a series of animated codes (BC-UR frames; a code that
-is one part of a series gets words that say to use a file), the allowlist
-enrolment, the pairing offer, a lock screen of the app's own, and the wipe
-after wrong tries.
+A request can also be read from a code that changes, and the answer can be
+shown as one (see "Animated codes" below).
+
+Not built yet: the allowlist enrolment, the pairing offer, a lock screen of
+the app's own, and the wipe after wrong tries.
 
 ## Rules the app keeps without a device
 
@@ -89,9 +90,43 @@ person can aim.
   refused, or "don't ask again" was chosen, a words page says the camera is
   off for this app, to allow it in the phone's settings or to paste or choose
   a file instead, and that the key holder does this.
-- A code whose text starts with `UR:` or `ur:` and is one part of a series
-  (`ur:type/3-9/...`) gets words that say animated codes are not read yet and
-  to use a file. BC-UR is built separately.
+- A code whose text starts with `UR:` or `ur:`, scanned into a text field
+  (the wallet description, an identity, a key), gets words that say the
+  field takes plain text. Only the home screen's Scan reads a UR.
+
+## Animated codes
+
+A request or an answer can be too long for one QR code, so it travels as a
+BC-UR sequence (`docs/UR-RULES.md`, `crates/openbmt-ur`): the parts of one
+message, shown one after another.
+
+- **Types (UR-20).** OpenBMT's own framed requests and answers travel as
+  `ur:bytes`. `ur:crypto-psbt` is for a plain PSBT to or from another wallet
+  and nothing else. The home screen's Scan takes both types; the library
+  then decides whether the bytes are a request it can answer. Any other type
+  gets the words "Not the code expected".
+- **Reading.** Scan on the home screen opens a request from one plain code,
+  one whole `ur:` code, or a code that changes. After the first `ur:` part
+  the camera stays on, each part goes to one decoder of the library, and the
+  page says "Reading the animated code: N of about M parts" until the
+  message is complete. A part that is misread, or from another code, is
+  skipped. If the parts join to a message that fails its checks, the words
+  say so and reading starts again from the first part. The decoder is
+  dropped when the scan finishes, is cancelled or the app goes to the
+  background. The camera rule and the manifest are those of the camera scan.
+- **Showing.** When the last line has an answer, "Show as code" sits beside
+  "Save the answer file", and the home screen has "Show the last answer as a
+  code" while a saved answer is held. The answer is shown as `ur:bytes`: one
+  still code when it fits one part, otherwise the parts one after another,
+  five a second, round and again, until Back. Each part is drawn with a
+  quiet zone of 4 modules, in upper case for the alphanumeric mode, with at
+  most 230 bytes of the message in a part so that no frame is over QR
+  version 12 at level L (a test of the library draws every part of messages
+  up to 100 KB and asserts it). If no code can be made, the words say to save
+  the file instead.
+
+The 230 bytes and the five parts a second are first guesses, to be tuned on
+a device.
 
 ## Build
 
@@ -137,8 +172,12 @@ state's file format with a fake cipher. `src/android/` holds everything that
 needs the framework. The tests of the shared code (`apps/android-common/tests`)
 also run the camera scan's pure parts (choosing a frame size, copying a Y
 plane with its row and pixel stride, the throttle, the reader's reply framing,
-the UR check), and `qr-jni-test.sh` loads the host-built
-`libopenbmt_qr_jni.so` and reads frames made by the repository's encoder.
+the UR check) and the animated code's pure parts (the framing of the UR call
+with every cut and changed byte of a reply, the frame timing and layout, the
+reading of a sequence step by step, the words), and `qr-jni-test.sh` loads
+the host-built `libopenbmt_qr_jni.so`, reads frames made by the repository's
+encoder, draws every part of sequences for both types and asserts the QR
+version, and reads a shuffled, lossy sequence back to its message.
 
 ## Signing
 
@@ -154,6 +193,9 @@ Nothing here has run on a device. Not checked: that the library loads and
 answers on a phone, the Keystore and StrongBox behaviour, the file pickers,
 the camera scan (the permission dialog, the preview and its shape, that a
 code on a screen and on paper is read, how long it takes, the camera being
-released when the app is left), the layout, the keyboard flags, `FLAG_SECURE`
+released when the app is left), the animated code (that another phone, a
+wallet or a camera reads the parts at five a second and at 230 bytes a
+part, how long a sequence takes, how the parts look on a screen, the camera
+held on a code that changes), the layout, the keyboard flags, `FLAG_SECURE`
 in the recent-apps list, and the refusal when debugging or an accessibility
 service is on.

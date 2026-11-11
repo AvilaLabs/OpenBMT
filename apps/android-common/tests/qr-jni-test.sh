@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# The JVM harness test of the camera scan's native reader: builds
+# The JVM harness tests of the native library: the camera scan's reader and
+# the UR call (animated codes). Builds
 # libopenbmt_qr_jni.so for the host, makes frames with the repository's QR
 # encoder (an example of crates/openbmt-qr-jni, written to the scratch
 # folder, not committed), and reads them through the same Kotlin calls the
-# scan makes (apps/android-common/tests/QrNativeHarness.kt).
+# scan makes (apps/android-common/tests/QrNativeHarness.kt), then runs the UR
+# call through the Kotlin the apps use (tests/UrNativeHarness.kt): the parts
+# of a sequence, the version of every frame, and a reading.
 #
 # Needs JAVA_HOME (JDK 21) and KOTLIN_HOME (the Kotlin 2.2.20 compiler
 # directory). The cargo build and the Kotlin compile run under the memory
@@ -46,11 +49,13 @@ make_frame bytes "openbmt-counter-pairing 1 / ünïcode / with a longer text so 
     -no-stdlib -no-reflect -Werror -jvm-target 1.8 \
     -classpath "$lib/kotlin-stdlib.jar:$lib/annotations-13.0.jar" \
     -d "$scratch/harness-classes" \
-    "$common/src/model/QrModel.kt" "$common/src/model/QrNative.kt" "$common/src/model/Format.kt" \
-    "$common/src/model/WordsModel.kt" "$here/QrNativeHarness.kt"
+    "$common"/src/model/*.kt "$here/QrNativeHarness.kt" "$here/UrNativeHarness.kt"
 
 "$JAVA_HOME/bin/java" -Xmx1g -cp "$scratch/harness-classes:$lib/kotlin-stdlib.jar" \
     org.openbmt.app.QrNativeHarness "$so" \
     "$scratch/plain.bin" "OPENBMT QR 12345" \
     "$scratch/padded.bin" "BITCOIN:BC1QAR0SRRR7XFKVY5L643LYDNW9RE59GTZZWF5MDQ" \
     "$scratch/bytes.bin" "openbmt-counter-pairing 1 / ünïcode / with a longer text so that the version is larger than one: $(printf 'x%.0s' $(seq 1 120))"
+
+"$JAVA_HOME/bin/java" -Xmx1g -cp "$scratch/harness-classes:$lib/kotlin-stdlib.jar" \
+    org.openbmt.app.UrNativeHarness "$so"

@@ -28,7 +28,10 @@ import org.openbmt.common.QrNative
  * and when something fails. A frame is held only while it is read: it is zeroed afterwards, never
  * written to a file and never sent anywhere.
  *
- * [onCode] and [onError] are called once in all, on the main thread, and not at all after [stop].
+ * [onCode] and [onError] are called once in all, on the main thread, and not at all after [stop]. In
+ * [continuous] mode the camera stays open after a code and [onCode] is called for each code read that
+ * differs from the one read just before it, until [stop] or an error; the caller stops it. The parts of
+ * an animated code come this way.
  * The camera permission is the caller's to hold before [start].
  */
 class QrScanner(
@@ -36,6 +39,7 @@ class QrScanner(
     private val main: Handler,
     private val onCode: (ByteArray) -> Unit,
     private val onError: (String) -> Unit,
+    private val continuous: Boolean = false,
 ) {
     private val lock = Any()
     private var session: Session? = null
@@ -106,6 +110,9 @@ class QrScanner(
         private val throttle = DecodeThrottle(125)
         private val closed = AtomicBoolean(false)
         private val finished = AtomicBoolean(false)
+
+        /** The last code given in continuous mode; read and written on the reading thread only. */
+        private var lastCode: ByteArray? = null
         private var camera: CameraDevice? = null
         private var capture: CameraCaptureSession? = null
         private var reader: ImageReader? = null
@@ -212,6 +219,16 @@ class QrScanner(
             }
             when (val parsed = QrReply.parse(reply)) {
                 is QrReply.Decoded -> {
+                    if (continuous) {
+                        // The same code again and again (the part still in view) is given once.
+                        if (closed.get() || finished.get()) return
+                        val last = lastCode
+                        if (last != null && last.contentEquals(parsed.bytes)) return
+                        lastCode = parsed.bytes.copyOf()
+                        val bytes = parsed.bytes
+                        main.post { if (!closed.get()) onCode(bytes) }
+                        return
+                    }
                     if (closed.get() || !finished.compareAndSet(false, true)) return
                     release()
                     main.post { onCode(parsed.bytes) }
@@ -240,6 +257,8 @@ class QrScanner(
             c?.close()
             d?.close()
             handler.post {
+                lastCode?.fill(0)
+                lastCode = null
                 r?.close()
                 thread.quitSafely()
             }

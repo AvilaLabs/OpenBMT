@@ -4,6 +4,7 @@ import org.openbmt.app.CameraWords
 import org.openbmt.app.Format
 import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
+import org.openbmt.app.UrWords
 import org.openbmt.app.Who
 import org.openbmt.counter.CounterException
 
@@ -353,5 +354,5 @@ object AppWords {
         "storageUnavailable" to storageUnavailable("a problem"),
         "fileNotRead" to fileNotRead("a problem"),
         "fileNotSaved" to fileNotSaved("a problem"),
-    )
+    ) + UrWords.forReading(Who.MANAGER)
 }

@@ -126,6 +126,10 @@ object UrText {
         return parts.size >= 3 && sequence.matches(parts[1])
     }
 
+    /** Whether [bytes] start with "ur:" in any case: one part of a UR, or a whole one. */
+    fun startsWithUr(bytes: ByteArray): Boolean =
+        bytes.size >= 3 && bytes.copyOfRange(0, 3).let { String(it, Charsets.ISO_8859_1).equals("ur:", ignoreCase = true) }
+
     fun isMultiPart(bytes: ByteArray): Boolean =
         bytes.size >= 3 && isMultiPart(String(bytes.copyOfRange(0, minOf(bytes.size, 64)), Charsets.ISO_8859_1))
 }

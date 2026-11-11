@@ -30,6 +30,15 @@ The pairing text comes from the field (pasted), from a file, or from the
 pairing code read with the phone's camera: three `PairingSource` choices, the
 second and third behind one interface. See "The camera scan" below.
 
+A pairing text can be longer than one QR code. The scan therefore also takes
+the pairing text as a `ur:bytes` code (BC-UR, `docs/UR-RULES.md`, UR-20), whole
+or as a code that changes on the owner's phone: after the first `ur:` part the
+camera stays on, each part goes to one decoder of the library, and the page
+says "Reading the animated code: N of about M parts" until the text is
+complete. A plain code is read as before. Any other type of UR gets the words
+"Not the code expected". The words of reading are listed in
+`docs/screens/counter-app.md`.
+
 Not built yet: a lock screen of the app's own, a list of cashiers
 and managers with their own PINs, end-of-day totals and receipts, and changes
 to the shop's settings after pairing.
@@ -125,7 +134,8 @@ checks the manifest. The result is under
   `OPENBMT_WRITE_SCREENS=1` rewrites `docs/screens/counter-app.md`.
 - `apps/android-common/tests/qr-jni-test.sh` builds the QR reader for the
   host and reads frames made by the repository's encoder through the same
-  Kotlin calls the scan makes. The build runs it.
+  Kotlin calls the scan makes, then runs the UR call and a reading of a
+  sequence through the Kotlin the apps use. The build runs it.
 - `tests/check-manifest.sh APK` checks the permission list (exactly INTERNET
   and CAMERA, the camera not required), backup, components, SDK levels.
 
@@ -140,7 +150,8 @@ release key.
 Everything that needs a running Android: that the library loads and starts,
 how the screens look and lay out, the keyboard types of the fields, the file
 picker, the camera scan (the permission dialog, the preview, reading a code
-from a screen and from paper, releasing the camera), the Keystore sealing, the
+from a screen and from paper, reading a code that changes at five parts a
+second, releasing the camera), the Keystore sealing, the
 SOCKS probe against a real Orbot, real fetches of the sources, the QR code
 scanned by a wallet, and the node stopping cleanly when the app is sent to the
 background.

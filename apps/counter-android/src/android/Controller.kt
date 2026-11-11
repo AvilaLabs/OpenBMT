@@ -20,10 +20,12 @@ import java.io.IOException
 import java.security.GeneralSecurityException
 import org.openbmt.app.Format
 import org.openbmt.app.KeystoreSealer
-import org.openbmt.app.ScanFlow
 import org.openbmt.app.SayWords
+import org.openbmt.app.ScanFlow
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Ui
+import org.openbmt.app.UrScan
+import org.openbmt.app.Who
 import org.openbmt.counter.Actor
 import org.openbmt.counter.ActorRole
 import org.openbmt.counter.CounterException
@@ -414,8 +416,10 @@ class Controller(private val act: MainActivity) {
                 scan.begin(
                     show = { v -> tick = null; act.show(v) },
                     onBytes = { bytes -> onText(String(bytes, Charsets.UTF_8)) },
-                    onFailed = { f -> onFailed(if (f.off) AppWords.cameraOff else AppWords.cameraNotStarted(f.problem)) },
+                    onFailed = { f -> onFailed(f.words ?: if (f.off) AppWords.cameraOff else AppWords.cameraNotStarted(f.problem)) },
                     onCancel = { showFirstStart(null) },
+                    // The pairing text may be longer than one code: ur:bytes, whole or in parts (UR-20).
+                    ur = UrScan(setOf("bytes"), Who.MANAGER) { _, payload -> onText(String(payload, Charsets.UTF_8)) },
                 )
             }
         },

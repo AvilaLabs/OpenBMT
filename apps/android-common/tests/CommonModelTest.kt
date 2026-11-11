@@ -197,6 +197,178 @@ object CommonModelTest {
         ok(CameraWords.notStarted(Who.KEY_HOLDER, "x".repeat(500)).detail!!.length <= 200, "a long detail is cut")
     }
 
+    // ---- the UR call: framing, frames, reading, words ----------------------------------------------------------
+
+    private fun reply(status: Int, body: ByteArray, magic: ByteArray = UrCall.REPLY_MAGIC, version: Int = UrCall.VERSION) =
+        magic + byteArrayOf(version.toByte(), status.toByte()) + body
+
+    private fun okReply(vararg body: Int) = reply(0, ByteArray(body.size) { body[it].toByte() })
+
+    private fun refusedReply(code: String) = reply(1, code.toByteArray())
+
+    private fun u32(n: Long) = ByteArray(4) { (n shr (24 - 8 * it)).toByte() }
+
+    private fun urCallTests() {
+        // The request is exactly the framing.
+        var seen: ByteArray? = null
+        val call = UrCall { request -> seen = request.copyOf(); okReply(0, 0, 0, 7) }
+        ok(call.newDecoder().let { it is UrOutcome.Ok && it.value == 7L }, "a handle")
+        ok(seen!!.contentEquals(byteArrayOf(0x4f, 0x42, 0x4d, 0x6f, 1, 3)), "a decoder_new request is the magic, the version and the operation")
+        val rec = UrCall { request -> seen = request.copyOf(); okReply(1, 0, 0, 0, 3, 0, 0, 0, 3, 0, 15, 66, 64) }
+        val p = (rec.receive(0x01020304L, "ur:x") as UrOutcome.Ok).value
+        ok(p.complete && p.received == 3 && p.expected == 3 && p.fraction == 1.0, "a progress reply")
+        ok(
+            seen!!.contentEquals(byteArrayOf(0x4f, 0x42, 0x4d, 0x6f, 1, 4, 1, 2, 3, 4, 0, 0, 0, 4, 'u'.code.toByte(), 'r'.code.toByte(), ':'.code.toByte(), 'x'.code.toByte())),
+            "a receive request",
+        )
+        var big: ByteArray? = null
+        UrCall { r -> big = r.copyOf(); null }.urEncode("bytes", ByteArray(300), 230)
+        ok(big!![6].toInt() == 5 && String(big!!, 7, 5) == "bytes" && big!![12].toInt() == 0 && (big!![13].toInt() and 0xff) == 230, "a ur_encode request")
+        ok(big!!.size == 6 + 1 + 5 + 2 + 4 + 300, "and its length")
+        ok(UrCall { null }.newDecoder() is UrOutcome.Fault, "no answer is a fault")
+        ok(UrCall { ByteArray(0) }.newDecoder() is UrOutcome.Fault, "an empty answer is a fault")
+        ok(UrCall { okReply(0, 0, 0, 7) }.qrEncode(ByteArray(1), 4).let { it is UrOutcome.Refused && it.code == "UR-21" }, "a level outside 0 to 3 is not sent")
+        ok(UrCall { throw AssertionError("sent") }.urEncode("x".repeat(256), ByteArray(1), 100) is UrOutcome.Refused, "a type over 255 bytes is not sent")
+        ok(UrCall { throw AssertionError("sent") }.urEncode("bytes", ByteArray(1), 70000) is UrOutcome.Refused, "a fragment over 65535 is not sent")
+
+        // Replies are read strictly: every cut, an extra byte and a changed header byte are faults.
+        val good = okReply(0, 0, 0, 7)
+        for (cut in good.indices) ok(UrCall { good.copyOfRange(0, cut) }.newDecoder() is UrOutcome.Fault, "a reply cut at $cut")
+        ok(UrCall { good + byteArrayOf(0) }.newDecoder() is UrOutcome.Fault, "an extra byte after the body")
+        for (at in 0 until 6) for (bit in 0 until 8) {
+            val flipped = good.copyOf()
+            flipped[at] = (flipped[at].toInt() xor (1 shl bit)).toByte()
+            ok(UrCall { flipped }.newDecoder() is UrOutcome.Fault, "a reply with byte $at bit $bit changed")
+        }
+        ok(UrCall { refusedReply("UR-12") }.newDecoder().let { it is UrOutcome.Refused && it.code == "UR-12" }, "a refusal carries its rule")
+        ok(UrCall { refusedReply("QR-01") }.qrEncode(ByteArray(1), 0).let { it is UrOutcome.Refused && it.code == "QR-01" }, "a QR refusal")
+        for (bad in listOf("UR-1", "UR-123", "ur-12", "XX-12", "UR-1x", "")) {
+            ok(UrCall { refusedReply(bad) }.newDecoder() is UrOutcome.Fault, "a refusal '$bad' is no rule code")
+        }
+        ok(UrCall { reply(0, ByteArray(4), magic = UrCall.REQUEST_MAGIC) }.newDecoder() is UrOutcome.Fault, "a request's magic is not a reply's")
+        ok(UrCall { reply(2, ByteArray(4)) }.newDecoder() is UrOutcome.Fault, "a status that is neither")
+
+        // Each operation's body must be exactly its shape.
+        ok(UrCall { okReply(2, 0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0, 0) }.receive(1, "x") is UrOutcome.Fault, "a complete flag that is not 0 or 1")
+        ok(UrCall { okReply(0, 0, 0, 0, 3, 0, 0, 0, 3, 0, 15, 66, 65) }.receive(1, "x") is UrOutcome.Fault, "a fraction over 1")
+        ok(UrCall { okReply(0, 0, 0, 0, 3, 0, 0, 0, 3, 0, 15, 66) }.receive(1, "x") is UrOutcome.Fault, "a progress that is a byte short")
+        ok(UrCall { okReply(0, 0, 0, 7, 0) }.newDecoder() is UrOutcome.Fault, "a handle with a byte over")
+        ok(UrCall { okReply(0) }.drop(1) is UrOutcome.Fault, "a drop reply with a body")
+        ok(UrCall { okReply() }.drop(1) is UrOutcome.Ok, "a drop reply with none")
+        val msg = byteArrayOf(5) + "bytes".toByteArray() + u32(3) + byteArrayOf(1, 2, 3)
+        val m = (UrCall { reply(0, msg) }.result(1) as UrOutcome.Ok).value
+        ok(m.type == "bytes" && m.payload.contentEquals(byteArrayOf(1, 2, 3)), "a result")
+        ok(UrCall { reply(0, msg + byteArrayOf(9)) }.result(1) is UrOutcome.Fault, "a result with a byte over")
+        ok(UrCall { reply(0, msg.copyOfRange(0, msg.size - 1)) }.result(1) is UrOutcome.Fault, "a result with a byte short")
+        val side = 21
+        val packed = ByteArray((side * side + 7) / 8)
+        val qr = reply(0, byteArrayOf(0, side.toByte()) + packed)
+        ok(UrCall { qr }.qrEncode(ByteArray(1), 0) is UrOutcome.Ok, "a drawn code")
+        ok(UrCall { reply(0, byteArrayOf(0, side.toByte()) + packed + byteArrayOf(0)) }.qrEncode(ByteArray(1), 0) is UrOutcome.Fault, "a code with a byte over")
+        ok(UrCall { reply(0, byteArrayOf(0, 20) + ByteArray(50)) }.qrEncode(ByteArray(1), 0) is UrOutcome.Fault, "a side under 21")
+        val one = "UR:BYTES/AB".toByteArray()
+        val parts = reply(0, u32(1) + u32(one.size.toLong()) + one)
+        ok((UrCall { parts }.urEncode("bytes", ByteArray(1), 100) as UrOutcome.Ok).value == listOf("UR:BYTES/AB"), "one part")
+        ok(UrCall { reply(0, u32(2) + u32(one.size.toLong()) + one) }.urEncode("bytes", ByteArray(1), 100) is UrOutcome.Fault, "a count that claims more parts than there are")
+        ok(UrCall { reply(0, u32(0)) }.urEncode("bytes", ByteArray(1), 100) is UrOutcome.Fault, "no parts")
+        ok(UrCall { reply(0, u32(1) + u32(900) + one) }.urEncode("bytes", ByteArray(1), 100) is UrOutcome.Fault, "a part longer than the reply")
+        val matrix = QrMatrix(21, ByteArray(56).also { it[0] = 0x80.toByte(); it[55] = 0x80.toByte() })
+        ok(matrix.get(0, 0) && !matrix.get(1, 0) && matrix.get(20, 20) && matrix.version == 1, "the packed modules, most significant bit first")
+    }
+
+    private fun animatedQrTests() {
+        ok(AnimatedQr.FPS == 5 && AnimatedQr.QUIET == 4 && AnimatedQr.MAX_FRAGMENT <= 250 && AnimatedQr.MAX_VERSION == 12, "the numbers of the animated code")
+        ok(AnimatedQr.indexAt(0, 8) == 0 && AnimatedQr.indexAt(199, 8) == 0 && AnimatedQr.indexAt(200, 8) == 1, "five frames a second")
+        ok(AnimatedQr.indexAt(1600, 8) == 0 && AnimatedQr.indexAt(1800, 8) == 1, "and round again")
+        ok(AnimatedQr.indexAt(5_000_000, 1) == 0 && AnimatedQr.indexAt(-5, 8) == 0, "a single part, and a clock that went back")
+        ok((0 until 40).map { AnimatedQr.indexAt(it * 200L, 8) } == (0 until 40).map { it % 8 }, "each part in turn")
+        val b = AnimatedQr.box(21, 290, 400)
+        ok(b.cell == 10 && b.left == 0 && b.top == 55 && b.x(0) == 40 && b.y(0) == 95 && b.fits, "a box: whole pixels and the quiet zone of 4")
+        ok(!AnimatedQr.box(21, 28, 28).fits && AnimatedQr.box(21, 29, 29).fits, "a box too small for a cell")
+        ok(AnimatedQr.box(65, 1080, 1920).cell == 1080 / 73, "version 12 on a phone screen")
+        var failed = false
+        try {
+            AnimatedQr.box(0, 10, 10)
+        } catch (_: IllegalArgumentException) {
+            failed = true
+        }
+        ok(failed, "no modules")
+        // The frames call the library once for each part and keep the code.
+        var calls = 0
+        val side = 21
+        val packed = ByteArray((side * side + 7) / 8)
+        val frames = AnimatedFrames(UrCall { calls++; reply(0, byteArrayOf(0, side.toByte()) + packed) }, listOf("UR:BYTES/A", "UR:BYTES/B"))
+        ok(frames.animated && frames.matrix(0) != null && frames.matrix(0) != null && frames.matrix(1) != null && calls == 2, "each part is drawn once: $calls")
+        ok(frames.matrix(2) == null && frames.matrix(-1) == null, "no such part")
+        ok(frames.drawAll() == null && calls == 2, "all drawn")
+        ok(AnimatedFrames(UrCall { null }, listOf("UR:BYTES/A")).let { !it.animated && it.matrix(0) == null && it.drawAll() == 0 }, "a code the library cannot draw")
+    }
+
+    private class Script(private val replies: List<ByteArray?>) {
+        var next = 0
+        val call = UrCall { replies.getOrNull(next++) }
+    }
+
+    private fun progress(complete: Boolean, received: Int, expected: Int) =
+        okReply(if (complete) 1 else 0, 0, 0, 0, received, 0, 0, 0, expected, 0, 0, 0, if (complete) 0 else 1)
+
+    private fun readingTests() {
+        val handle = okReply(0, 0, 0, 1)
+        // A part: the decoder is opened with the first, and progress is shown in words.
+        val s = Script(listOf(handle, progress(false, 2, 9), progress(false, 3, 9)))
+        val r = UrReading(s.call, setOf("bytes"), Who.KEY_HOLDER)
+        ok(!r.started, "nothing open before the first part")
+        val a = r.feed("ur:bytes/2-9/x")
+        ok(a is UrStep.Show && a.words.what == "Reading the animated code: 2 of about 9 parts.", "the progress words")
+        ok(r.started && s.next == 2, "one decoder, opened once")
+        ok(r.feed("ur:bytes/3-9/x") is UrStep.Show && s.next == 3, "the next part reuses it")
+        // Refusals: a restart is told, misreads are skipped, the call's faults stop the scan.
+        val t = Script(listOf(handle, refusedReply("UR-12"), refusedReply("UR-06"), refusedReply("UR-07"), refusedReply("UR-11"), refusedReply("UR-22")))
+        val r2 = UrReading(t.call, setOf("bytes"), Who.MANAGER)
+        val restart = r2.feed("x")
+        ok(restart is UrStep.Show && restart.words.heading == "Code did not add up" && restart.words.tone == Tones.STOP, "UR-12 starts again with words")
+        ok(r2.feed("x") === UrStep.Ignore && r2.feed("x") === UrStep.Ignore && r2.feed("x") === UrStep.Ignore, "misreads are skipped")
+        ok(r2.feed("x").let { it is UrStep.Fail && it.words.heading == "Code reader failed" }, "a fault of the call stops the scan")
+        val strangers = Script(listOf(handle) + List(UrReading.STRANGER_RUN * 2) { refusedReply("UR-10") })
+        val r3 = UrReading(strangers.call, setOf("bytes"), Who.MANAGER)
+        val steps = (1..UrReading.STRANGER_RUN * 2).map { r3.feed("x") }
+        ok(steps.withIndex().all { (i, st) -> ((i + 1) % UrReading.STRANGER_RUN == 0) == (st is UrStep.Show) }, "another stream is told after each run of ${UrReading.STRANGER_RUN}")
+        // A decoder that cannot be opened, a call with no answer.
+        ok(UrReading(Script(listOf(refusedReply("UR-22"))).call, setOf("bytes"), 0).feed("x") is UrStep.Fail, "no decoder")
+        ok(UrReading(Script(listOf(handle, null)).call, setOf("bytes"), 0).feed("x") is UrStep.Fail, "no answer to a part")
+        // Complete: the type decides.
+        fun result(type: String, payload: ByteArray) = reply(0, byteArrayOf(type.length.toByte()) + type.toByteArray() + u32(payload.size.toLong()) + payload)
+        val done = UrReading(Script(listOf(handle, progress(true, 4, 4), result("bytes", byteArrayOf(1, 2)))).call, setOf("bytes", "crypto-psbt"), 0).feed("x")
+        ok(done is UrStep.Done && done.type == "bytes" && done.payload.contentEquals(byteArrayOf(1, 2)), "a finished message")
+        val wrong = UrReading(Script(listOf(handle, progress(true, 4, 4), result("psbt", byteArrayOf(1)))).call, setOf("bytes"), 0).feed("x")
+        ok(wrong is UrStep.Fail && wrong.words.heading == "Not the code expected", "a type that is not taken")
+        val refused = UrReading(Script(listOf(handle, progress(true, 4, 4), refusedReply("UR-20"))).call, setOf("bytes"), 0).feed("x")
+        ok(refused is UrStep.Fail && refused.words.heading == "Not the code expected", "UR-20 is the wrong kind")
+        val bad = UrReading(Script(listOf(handle, progress(true, 4, 4), refusedReply("UR-13"))).call, setOf("bytes"), 0).feed("x")
+        ok(bad is UrStep.Fail && bad.words.heading == "Code content not usable", "content that was refused")
+        // Dropping closes the decoder once.
+        val d = Script(listOf(handle, progress(false, 1, 3), okReply()))
+        val r4 = UrReading(d.call, setOf("bytes"), 0)
+        r4.feed("x")
+        r4.drop()
+        r4.drop()
+        ok(!r4.started && d.next == 3, "dropped once: ${d.next}")
+        UrReading(Script(emptyList()).call, setOf("bytes"), 0).drop()
+    }
+
+    private fun urWordsTests() {
+        for (who in listOf(Who.KEY_HOLDER, Who.MANAGER, Who.OWNER)) {
+            val all = UrWords.all(who)
+            for ((name, w) in all) ok(SayCheck.problem(w) == null, "$name passes the checks: ${SayCheck.problem(w)}")
+            ok(SayCheck.distinctProblem(all) == null, "the words read differently")
+            ok(all.all { it.second.who == who }, "who does the next step")
+        }
+        ok(UrWords.reading(Who.KEY_HOLDER, 3, 9).what == "Reading the animated code: 3 of about 9 parts.", "the progress sentence")
+        ok(UrWords.cannotShow(0).next.contains("file") && UrWords.wrongKind(0).next.contains("file"), "a file is the way round")
+        ok(UrText.startsWithUr("ur:bytes/x".toByteArray()) && UrText.startsWithUr("UR:BYTES".toByteArray()) && UrText.startsWithUr("Ur:".toByteArray()), "a UR starts with ur: in any case")
+        ok(!UrText.startsWithUr("u".toByteArray()) && !UrText.startsWithUr("BITCOIN:".toByteArray()) && !UrText.startsWithUr(" ur:".toByteArray()), "others do not")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         checkerTests()
@@ -209,6 +381,10 @@ object CommonModelTest {
         replyTests()
         urTests()
         cameraWordsTests()
+        urCallTests()
+        animatedQrTests()
+        readingTests()
+        urWordsTests()
         println("CommonModelTest: $count checks passed")
     }
 }
