@@ -561,8 +561,9 @@ fn cr_76_five_thousand_sales_over_simulated_days_keep_memory_bounded() {
     assert!(watched <= bound, "scripts watched: {watched}");
     assert!(indexed <= bound, "records indexed: {indexed}");
     assert!(w.c.held_sales() <= bound);
-    // The records are not bounded (CR-81 is not built): every one is kept.
+    // Every record is kept in the log; memory holds only the newest (CR-81).
     assert!(w.c.records_len() >= 5_000);
+    assert!(w.c.records_in_memory() <= 16_384);
     // And the store holds only what the counter holds.
     let slots =
         w.m.slots
