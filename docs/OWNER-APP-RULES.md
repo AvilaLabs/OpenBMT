@@ -698,8 +698,8 @@ signs batches, settings and pairings, are never in the service.
   it is granted. If it is refused the setting stays off and the screen says
   "Notifications are off", "Android needs to show a notification while the
   phone watches in the background, and notifications are off for this app."
-  and "Allow notifications for OpenBMT in Android's settings, then turn this
-  on again." Naming the watch key in the settings is a loosening
+  and "Allow notifications for OpenBMT Owner in Android's settings, then
+  turn this on again." Naming the watch key in the settings is a loosening
   (CR-185): it is queued with the library's preview and `queue_settings`,
   shows the Key app's approval as any other change (OA-34, OA-35), and
   reaches the counters by settings delivery. The heartbeats count from the

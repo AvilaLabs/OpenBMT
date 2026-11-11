@@ -42,7 +42,7 @@ object AppWords {
         Tones.STOP, "Notifications are off",
         "Android needs to show a notification while the phone watches in the background, and notifications are off for this app.",
         Who.OWNER,
-        "Allow notifications for OpenBMT in Android's settings, then turn this on again.",
+        "Allow notifications for OpenBMT Owner in Android's settings, then turn this on again.",
     )
 
     /** The notification while it runs (OA-82). Not a screen: Android shows these. */

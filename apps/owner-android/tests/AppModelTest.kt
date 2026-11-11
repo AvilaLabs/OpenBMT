@@ -2010,7 +2010,7 @@ object AppModelTest {
         val w = WatchPermission.refused
         ok(w.heading == "Notifications are off", "the heading")
         ok(w.what == "Android needs to show a notification while the phone watches in the background, and notifications are off for this app.", "what happened")
-        ok(w.next == "Allow notifications for OpenBMT in Android's settings, then turn this on again.", "the next step")
+        ok(w.next == "Allow notifications for OpenBMT Owner in Android's settings, then turn this on again.", "the next step")
         val screen = source("src/android/WatchScreen.kt")
         ok(screen.contains("Manifest.permission.POST_NOTIFICATIONS") && screen.contains("WatchPermission.mustAsk(Build.VERSION.SDK_INT, granted)"), "asked by the model's rule")
         val result = screen.substringAfter("fun Controller.watchPermissionResult").substringBefore("private fun Controller.watchTurnOnGranted")
