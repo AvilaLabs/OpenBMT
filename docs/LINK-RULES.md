@@ -369,7 +369,7 @@ merged).
   directory, `link-batches`, with the time each was first sent. The file is
   written whole (a temporary file, a flush, a rename, a flush of the
   directory) before the first send of a batch and after any change, and read
-  back at the start. It is framed with the magic `OBM0` and version 1,
+  back at the start. It is framed with the magic `OBM!` and version 1,
   holds at most 64 batches, and is in the order of the counter's bytes and the
   first index of the batch. A file that is cut, has a byte left over, has an
   entry out of order or twice, has a batch that does not decode, or does not

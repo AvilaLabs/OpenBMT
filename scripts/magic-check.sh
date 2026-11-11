@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Every framed encoding starts with four bytes of its own ("OBM" and one
 # more). This checks that no two constants in the crates share them, so a
-# file or message of one kind can never be read as another.
+# file or message of one kind can never be read as another. All 62 letters
+# and digits after "OBM" are taken: a new one uses printable punctuation.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

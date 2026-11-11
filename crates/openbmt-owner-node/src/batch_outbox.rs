@@ -8,7 +8,7 @@
 //! the order it is written in or that does not re-encode to the same bytes is
 //! refused whole.
 //!
-//! Layout: the magic `OBM0`, the version byte 1, the number of entries (u32
+//! Layout: the magic `OBM!`, the version byte 1, the number of entries (u32
 //! LE), and for each entry the counter (32 bytes), the time it was queued
 //! (u64 LE), the length of the signed batch (u32 LE) and the bytes of
 //! `SignedBatch::to_bytes`. Entries are in the order of the counter's bytes,
@@ -32,7 +32,7 @@ pub const BATCH_OUTBOX_FILE: &str = "link-batches";
 /// Most batches the file holds at once.
 pub const MAX_PENDING_BATCHES: usize = 64;
 
-const MAGIC: [u8; 4] = *b"OBM0";
+const MAGIC: [u8; 4] = *b"OBM!";
 
 /// One batch the owner is still waiting to see held.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1486,7 +1486,7 @@ fn lk_72_the_pending_batches_survive_a_restart_and_read_back_strictly() {
     w.link.send_batch(&counter(), &a, T0).unwrap();
     let file = w.dir.path().join(crate::batch_outbox::BATCH_OUTBOX_FILE);
     let bytes = fs::read(&file).unwrap();
-    assert_eq!(&bytes[..5], b"OBM0\x01");
+    assert_eq!(&bytes[..5], b"OBM!\x01");
     let waiting = w.link.batches_waiting(&counter()).unwrap();
     assert_eq!((waiting.batches, waiting.since), (2, T0));
     // A link started again on the same directory has them, with the times.
