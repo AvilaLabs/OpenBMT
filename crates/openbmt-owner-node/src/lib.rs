@@ -69,8 +69,8 @@ mod tests;
 pub use copy::{CheckInTaken, CopyError, CounterCopy, Stop, Taken};
 pub use facts::{verified_facts, FactsRefused};
 pub use link::{
-    Alert, BoxReport, CounterState, OwnerLink, OwnerLinkConfig, OwnerLinkError,
-    SettingsNotCarried, MAX_BOX_REPORTS, MAX_CARRIED_SETTINGS,
+    Alert, BoxReport, CounterState, OwnerLink, OwnerLinkConfig, OwnerLinkError, SettingsNotCarried,
+    SettingsWaiting, MAX_BOX_REPORTS, MAX_CARRIED_SETTINGS,
 };
 pub use live::{
     DeepLine, Spans, WatchLimits, DEEP_CHECK_SECS, DEEP_RETRY_SECS, DEEP_STALL_SECS,

@@ -9,6 +9,7 @@ use openbmt_watch::Problem;
 
 use crate::coins::{ApplyError, PendingError, ReceiptState, ViewState};
 use crate::facts::FactsRefused;
+use crate::link::{SettingsNotCarried, SettingsWaiting};
 use crate::live::DeepLine;
 use crate::node::{NodeError, SendRefused, SendState};
 use crate::pos::PosRefused;
@@ -376,6 +377,63 @@ fn days_text(days: u64) -> String {
         0 => "today".to_string(),
         1 => "1 day ago".to_string(),
         n => format!("{n} days ago"),
+    }
+}
+
+/// "1 counter", "2 counters".
+fn counted(n: usize, one: &str, many: &str) -> String {
+    if n == 1 {
+        format!("1 {one}")
+    } else {
+        format!("{n} {many}")
+    }
+}
+
+impl SettingsWaiting {
+    /// LK-66: the words of the outbox row of settings that not every device
+    /// holds yet.
+    pub fn words(&self) -> Words {
+        let who = match (self.counters, self.boxes) {
+            (c, 0) => counted(c, "counter", "counters"),
+            (0, b) => counted(b, "Box", "Boxes"),
+            (c, b) => format!(
+                "{} and {}",
+                counted(c, "counter", "counters"),
+                counted(b, "Box", "Boxes")
+            ),
+        };
+        Words::new(
+            Tone::Info,
+            "Settings on their way",
+            format!("The new settings are not yet on {who}."),
+            Who::Nobody,
+            "Nothing to do. The phone sends them again by itself until each device has them.",
+        )
+        .code("LK-66")
+    }
+}
+
+impl SettingsNotCarried {
+    /// LK-64: the words of the outbox row of settings the link did not take.
+    pub fn words(&self) -> Words {
+        match self {
+            Self::Check(e) => Words::new(
+                Tone::Stop,
+                "Settings not sent",
+                "The new settings are not signed as the counters need, so the phone did not send them.",
+                Who::Owner,
+                "Make the change again and approve it on the Key app if it asks.",
+            )
+            .detail(e.to_string()),
+            Self::Full => Words::new(
+                Tone::Info,
+                "Settings wait their turn",
+                "The phone already has as many settings on their way as it carries, so these wait.",
+                Who::Nobody,
+                "Nothing to do. They go out as soon as the earlier ones have arrived.",
+            ),
+        }
+        .code("LK-64")
     }
 }
 
@@ -761,6 +819,50 @@ pub fn all_words() -> Vec<(String, Words)> {
     ] {
         add(&format!("DeepLine::{name}"), line.words());
     }
+    for (name, line) in [
+        (
+            "Counters",
+            SettingsWaiting {
+                counters: 2,
+                boxes: 0,
+            },
+        ),
+        (
+            "OneCounter",
+            SettingsWaiting {
+                counters: 1,
+                boxes: 0,
+            },
+        ),
+        (
+            "Boxes",
+            SettingsWaiting {
+                counters: 0,
+                boxes: 2,
+            },
+        ),
+        (
+            "OneBox",
+            SettingsWaiting {
+                counters: 0,
+                boxes: 1,
+            },
+        ),
+        (
+            "Both",
+            SettingsWaiting {
+                counters: 1,
+                boxes: 1,
+            },
+        ),
+    ] {
+        add(&format!("SettingsWaiting::{name}"), line.words());
+    }
+    add(
+        "SettingsNotCarried::Check",
+        SettingsNotCarried::Check(openbmt_core::settings::SettingsError::ApproverRequired).words(),
+    );
+    add("SettingsNotCarried::Full", SettingsNotCarried::Full.words());
     add("SendRefused::Malformed", SendRefused::Malformed.words());
     add("SendRefused::NoTor", SendRefused::NoTor.words());
     for (name, error) in [

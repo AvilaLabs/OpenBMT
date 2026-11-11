@@ -80,6 +80,6 @@ pub use paired::{
 };
 pub use relaylink::{link_route, start_link, LinkLine, LinkNotStarted};
 pub use settings::{
-    decode_file as decode_settings_file, effective as effective_settings, Effective,
-    SettingsFault, SettingsRefused, MAX_SETTINGS_FILE_BYTES,
+    decode_file as decode_settings_file, effective as effective_settings, Effective, SettingsFault,
+    SettingsRefused, MAX_SETTINGS_FILE_BYTES,
 };

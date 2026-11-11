@@ -222,7 +222,8 @@ const NOT_HERE: [(&str, &str); 54] = [
         "CR-136",
         "the link line is the node's words and the app's screen; tested in \
          `openbmt-counter-node`, `openbmt-counter-ffi` and the app's JVM tests",
-    ),    (
+    ),
+    (
         "CR-161",
         "the settings file is the node's; tested in `openbmt-counter-node` \
          (`tests/settings.rs`), with the fuzz target `counter_settings_file_decode`",

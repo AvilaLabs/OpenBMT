@@ -125,13 +125,23 @@ fn cr_165_settings_that_do_not_list_the_counter_refuse_a_new_sale() {
     assert!(!w.c.is_listed());
     let facts = w.open_facts();
     let err =
-        w.c.open(Amount(500), usd(), rate(), &fresh(facts.now), facts, &mut w.m)
-            .unwrap_err();
+        w.c.open(
+            Amount(500),
+            usd(),
+            rate(),
+            &fresh(facts.now),
+            facts,
+            &mut w.m,
+        )
+        .unwrap_err();
     assert_eq!(err, OpenRefused::Removed);
     assert_eq!(err.rule(), "CR-165");
     let text = err.to_string();
     assert!(text.starts_with("CR-165: "), "{text}");
-    assert!(text.contains("removed from the shop by the owner"), "{text}");
+    assert!(
+        text.contains("removed from the shop by the owner"),
+        "{text}"
+    );
     assert!(text.contains("ask the owner"), "{text}");
     // Nothing was written: no address was handed out.
     assert_eq!(w.m.writes, 0);

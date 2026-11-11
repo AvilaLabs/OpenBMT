@@ -38,12 +38,13 @@ use bitcoin::bip32::{Xpriv, Xpub};
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::{Address, BlockHash, Network, ScriptBuf, Txid};
+use openbmt_core::batch::PinnedRoots;
 use openbmt_core::batch::{BatchBuilder, BatchPolicy, SignedBatch};
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pairing::PAIRING_WINDOW_SECS;
 use openbmt_core::records::DeviceList;
 use openbmt_core::relay::{RelayHint, RelayRoute, SignedRelayHint};
-use openbmt_core::settings::{Limit, SignedSettings};
+use openbmt_core::settings::{Limit, Settings, SignedSettings};
 use openbmt_core::wallet::WalletDescription;
 use openbmt_counter_node::{DriverPort, BATCH_MIN_COUNT};
 use openbmt_courier::{Courier, CourierConfig, FirstStart};
@@ -66,6 +67,7 @@ use openbmt_owner_node::{
     counter_facts, verified_facts, Alert, FactsRefused, MergeRefused, NodeError, OwnerConfig,
     OwnerLink, OwnerLinkConfig, OwnerNode, OwnerParts, OwnerPort, OwnerPos, OwnerStartError,
     PosMethod, PosRefused, PosSetup, PosVendor, ReceiptsLine, RefundIntake, SendState,
+    SettingsWaiting,
 };
 use openbmt_signer::SignerState;
 use openbmt_watch::HeaderChain;
@@ -1555,6 +1557,11 @@ impl Entry {
                 .iter()
                 .map(|d| (d.id, d.what.clone()))
                 .collect();
+            // LK-64: the roots the settings are checked against, and the
+            // settings before the ones looked at, in outbox order.
+            let roots = PinnedRoots::new(node.owner().owner_id(), node.owner().approver_id())
+                .map_err(|e| wrong_state("link-none", &e.to_string()))?;
+            let mut previous: Option<Settings> = None;
             for (id, what) in items {
                 match what {
                     Delivery::Batch(bytes) => {
@@ -1583,9 +1590,43 @@ impl Entry {
                                 .push(format!("batch {id} could not be marked: {e}")),
                         }
                     }
-                    Delivery::Settings(_) | Delivery::Pairing(_) | Delivery::BoxWelcome(_) => {
-                        view.waiting += 1;
+                    Delivery::Settings(bytes) => {
+                        let signed = match SignedSettings::from_bytes(&bytes) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                view.notes
+                                    .push(format!("settings {id} do not read back: {e}"));
+                                continue;
+                            }
+                        };
+                        if let Err(e) =
+                            link.carry_settings(id, &signed, &roots, previous.as_ref(), now)
+                        {
+                            view.notes.push(format!("settings {id}: {e}"));
+                            view.waiting += 1;
+                            continue;
+                        }
+                        previous = Some(signed.settings);
+                        if !link.settings_missing(id).is_empty() {
+                            view.waiting += 1;
+                            continue;
+                        }
+                        let write = node.queue_writer();
+                        match node
+                            .owner_mut()
+                            .map_err(|e| node_error(&e))
+                            .and_then(|o| o.mark_delivered(id, &write).map_err(|e| queue_error(&e)))
+                        {
+                            Ok(()) => {
+                                link.settings_done(id);
+                                view.sent += 1;
+                            }
+                            Err(e) => view
+                                .notes
+                                .push(format!("settings {id} could not be marked: {e}")),
+                        }
                     }
+                    Delivery::Pairing(_) | Delivery::BoxWelcome(_) => view.waiting += 1,
                     Delivery::Transaction { .. } => {}
                 }
             }
@@ -2009,18 +2050,36 @@ impl Entry {
                             words: words(signed(EntryKind::Batch, None)),
                         }
                     }
-                    Delivery::Settings(bytes) => OutboxRow {
-                        id: d.id,
-                        kind: OutboxKind::Settings,
-                        txid: None,
-                        counter: None,
-                        version: SignedSettings::from_bytes(bytes)
-                            .ok()
-                            .map(|s| s.settings.version),
-                        signed_at: None,
-                        size: u32::try_from(bytes.len()).unwrap_or(u32::MAX),
-                        words: words(signed(EntryKind::SettingsChange, None)),
-                    },
+                    Delivery::Settings(bytes) => {
+                        let mut row = OutboxRow {
+                            id: d.id,
+                            kind: OutboxKind::Settings,
+                            txid: None,
+                            counter: None,
+                            version: SignedSettings::from_bytes(bytes)
+                                .ok()
+                                .map(|s| s.settings.version),
+                            signed_at: None,
+                            size: u32::try_from(bytes.len()).unwrap_or(u32::MAX),
+                            words: words(signed(EntryKind::SettingsChange, None)),
+                        };
+                        // LK-66: the row says which devices still lack them.
+                        if let Some(link) = st.link.as_ref() {
+                            let missing = link.settings_missing(d.id);
+                            if !missing.is_empty() {
+                                let mut w = SettingsWaiting::of(&missing).words();
+                                w.detail = Some(
+                                    missing
+                                        .iter()
+                                        .map(|(device, _)| hex(&device.to_bytes()[..4]))
+                                        .collect::<Vec<_>>()
+                                        .join(", "),
+                                );
+                                row.words = words(w);
+                            }
+                        }
+                        row
+                    }
                     Delivery::Pairing(bytes) => OutboxRow {
                         id: d.id,
                         kind: OutboxKind::Pairing,

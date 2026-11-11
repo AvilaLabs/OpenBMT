@@ -444,8 +444,7 @@ pub fn try_start_with(
             own_rx,
             calls: port_calls,
         })
-    })
-    ?;
+    })?;
     let launch = seen.lock().unwrap().take().unwrap();
     Ok(Rig {
         node,

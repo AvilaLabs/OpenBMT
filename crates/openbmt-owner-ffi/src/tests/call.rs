@@ -706,3 +706,89 @@ fn the_proxies_reach_the_drivers() {
     );
     assert!(spawned.iter().all(|s| s.dir.starts_with(rig.dir())));
 }
+
+#[test]
+fn lk_66_settings_wait_in_the_outbox_and_the_row_says_which_devices_lack_them() {
+    let rig = Rig::new();
+    let mut config = start_config(rig.dir().to_str().expect("UTF-8"));
+    config.link = Some(LinkConfig {
+        route: RouteView::Direct {
+            addr: "127.0.0.1:9".to_string(),
+        },
+        relay_key: id(0x41).device_id().to_bytes().to_vec(),
+        counters: vec![counter_bytes()],
+        heartbeat_every_secs: 60,
+        check_in_grace_secs: 3_600,
+    });
+    let response = rig.call(1, 0, &W::new().start(&config).0);
+    let handle = Rd::ok(&response).u64();
+    rig.send(vec![peers_event()]);
+    rig.pump(handle);
+    // First settings that name the counter, approved on the Key app.
+    rig.queue_batch(handle);
+    rig.fund(handle, 300_000);
+    let mut settings = Settings::defaults(1_000);
+    settings.devices.insert(counter());
+    settings.counters.insert(counter(), 10_000);
+    let first = SignedSettings {
+        owner_sig: settings.sign(&id(0x11)),
+        approver_sig: None,
+        settings: settings.clone(),
+    };
+    unit_ok_settings(&rig, handle, &first);
+    let mut app = key_app();
+    approve(&rig, handle, &mut app);
+    // A tightening the owner signs alone goes to the outbox next.
+    settings.version = 2;
+    settings.light_per_sale.sats -= 1;
+    let second = SignedSettings {
+        owner_sig: settings.sign(&id(0x11)),
+        approver_sig: None,
+        settings,
+    };
+    unit_ok_settings(&rig, handle, &second);
+
+    let rows = |rig: &Rig| {
+        let response = rig.call(27, handle, &[]);
+        let mut r = Rd::ok(&response);
+        let rows = r.list(|r| {
+            (
+                r.u32(),
+                r.u8(),
+                r.opt(Rd::string),
+                r.opt(Rd::bytes),
+                r.opt(Rd::u32),
+                r.opt(Rd::u64),
+                r.u32(),
+                r.words(),
+            )
+        });
+        r.done();
+        rows
+    };
+    let deliver = |rig: &Rig| {
+        let response = rig.call(12, handle, &W::new().u64(T0).0);
+        let mut r = Rd::ok(&response);
+        let out = (r.u32(), r.u32(), r.list(Rd::string));
+        r.done();
+        out
+    };
+    let settings_rows: Vec<_> = rows(&rig)
+        .into_iter()
+        .filter(|row| row.4.is_some())
+        .collect();
+    assert!(!settings_rows.is_empty(), "settings wait in the outbox");
+    // The counter has not shown it holds them, so they stay.
+    let (sent, waiting, notes) = deliver(&rig);
+    assert_eq!(sent, 0, "{notes:?}");
+    assert!(waiting >= 1, "{notes:?}");
+    let after: Vec<_> = rows(&rig)
+        .into_iter()
+        .filter(|row| row.4.is_some())
+        .collect();
+    assert_eq!(after.len(), settings_rows.len(), "none left the outbox");
+    for row in &after {
+        check_wire_words(&row.7).expect("words");
+        assert!(row.7.what.contains("1 counter"), "{}", row.7.what);
+    }
+}

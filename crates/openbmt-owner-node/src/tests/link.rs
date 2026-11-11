@@ -994,8 +994,7 @@ struct WithBox {
 
 fn with_box() -> WithBox {
     let relay = MemoryRelay::new(id(99), &[owner(), counter(), box_key()]).unwrap();
-    let (dir, watcher_dir, counter_dir, box_dir) =
-        (Dir::new(), Dir::new(), Dir::new(), Dir::new());
+    let (dir, watcher_dir, counter_dir, box_dir) = (Dir::new(), Dir::new(), Dir::new(), Dir::new());
     let rig = start(watcher_dir.path());
     let owner_courier = courier(
         &relay,

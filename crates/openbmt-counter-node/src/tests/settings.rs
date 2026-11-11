@@ -253,7 +253,10 @@ fn cr_162_a_record_that_failed_is_written_at_the_next_call() {
     let signed = by_owner(next(2, |s| s.light_per_sale.sats -= 1));
     // The settings are taken (they are in force and in the file); only the
     // record is waiting.
-    assert_eq!(rig.node.take_settings(&signed), Ok(Some(Change::Tightening)));
+    assert_eq!(
+        rig.node.take_settings(&signed),
+        Ok(Some(Change::Tightening))
+    );
     assert_eq!(rig.node.counter().settings_recorded(), None);
     assert!(rig
         .node
@@ -397,7 +400,10 @@ fn cr_165_a_counter_the_settings_remove_opens_no_sale_but_settles_the_open_ones(
         s.counters.clear();
         s.devices.remove(&id(3).device_id());
     }));
-    assert_eq!(rig.node.take_settings(&removed), Ok(Some(Change::Tightening)));
+    assert_eq!(
+        rig.node.take_settings(&removed),
+        Ok(Some(Change::Tightening))
+    );
     assert!(rig.node.removed());
     assert_eq!(
         SettingsLine::of(true, true),
@@ -435,6 +441,9 @@ fn cr_166_nothing_builds_a_second_path_for_the_device_list() {
     assert!(before.devices.len() < after.devices.len());
     let dir = Scratch::new();
     let mut rig = start(dir.path());
-    assert_eq!(rig.node.take_settings(&by_both(after.clone())), Ok(Some(Change::Loosening)));
+    assert_eq!(
+        rig.node.take_settings(&by_both(after.clone())),
+        Ok(Some(Change::Loosening))
+    );
     assert_eq!(rig.node.settings().devices, after.devices);
 }

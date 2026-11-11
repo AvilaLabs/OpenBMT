@@ -164,7 +164,9 @@ fn check_file(
     roots: &PinnedRoots,
     floor: &Settings,
 ) -> Result<bool, SettingsFault> {
-    signed.verify_signatures(roots).map_err(SettingsFault::Verify)?;
+    signed
+        .verify_signatures(roots)
+        .map_err(SettingsFault::Verify)?;
     Ok(signed.settings.version > floor.version)
 }
 

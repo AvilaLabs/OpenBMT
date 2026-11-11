@@ -39,6 +39,13 @@ file again.
 | DeepLine::Monthly | Old addresses: monthly check | 1,200 old addresses are checked once a month, not all the time, so a payment to one shows up at the next check. | Nothing to do. The last check was 12 days ago; the next is at the time shown. | Nobody | OC-25 |
 | DeepLine::Checking | Checking old addresses | The wallet is checking 1,200 old addresses for payments that arrived since it last looked. | Nothing to do. A payment that is found is added to the wallet. | Nobody | OC-26 |
 | DeepLine::Failed | Old address check failed | The last check of 1,200 old addresses did not finish, so a payment to one may not show yet. | Nothing to do. The wallet tries again at the time shown. | Nobody | OC-26 |
+| SettingsWaiting::Counters | Settings on their way | The new settings are not yet on 2 counters. | Nothing to do. The phone sends them again by itself until each device has them. | Nobody | LK-66 |
+| SettingsWaiting::OneCounter | Settings on their way | The new settings are not yet on 1 counter. | Nothing to do. The phone sends them again by itself until each device has them. | Nobody | LK-66 |
+| SettingsWaiting::Boxes | Settings on their way | The new settings are not yet on 2 Boxes. | Nothing to do. The phone sends them again by itself until each device has them. | Nobody | LK-66 |
+| SettingsWaiting::OneBox | Settings on their way | The new settings are not yet on 1 Box. | Nothing to do. The phone sends them again by itself until each device has them. | Nobody | LK-66 |
+| SettingsWaiting::Both | Settings on their way | The new settings are not yet on 1 counter and 1 Box. | Nothing to do. The phone sends them again by itself until each device has them. | Nobody | LK-66 |
+| SettingsNotCarried::Check | Settings not sent | The new settings are not signed as the counters need, so the phone did not send them. | Make the change again and approve it on the Key app if it asks. | Owner | LK-64 |
+| SettingsNotCarried::Full | Settings wait their turn | The phone already has as many settings on their way as it carries, so these wait. | Nothing to do. They go out as soon as the earlier ones have arrived. | Nobody | LK-64 |
 | SendRefused::Malformed | Payment could not be sent | The finished payment could not be read as one payment. | Nothing was sent. Tell the OpenBMT project and include the details. | Owner |  |
 | SendRefused::NoTor | Choose how to send | The finished payment is held because sending is not set up. | Set up a proxy for sending, or turn on sending without Tor. | Owner |  |
 | OwnerStartError::Locked | Owner app already open | Another owner app is using this data folder. | Close the other owner app, then try again. | Owner |  |

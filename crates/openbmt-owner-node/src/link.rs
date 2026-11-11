@@ -46,9 +46,9 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
+use openbmt_core::batch::PinnedRoots;
 use openbmt_core::batch::SignedBatch;
 use openbmt_core::command::SignedCommand;
-use openbmt_core::batch::PinnedRoots;
 use openbmt_core::identity::DeviceId;
 use openbmt_core::records::{DeviceList, Record};
 use openbmt_core::settings::{Settings, SettingsError, SignedSettings};
@@ -198,6 +198,27 @@ impl std::fmt::Display for SettingsNotCarried {
 }
 
 impl std::error::Error for SettingsNotCarried {}
+
+/// How many devices still lack settings the link carries (LK-66), for the
+/// outbox row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SettingsWaiting {
+    /// Counters whose copy does not yet show the version.
+    pub counters: usize,
+    /// Boxes the relay has not yet taken the settings for.
+    pub boxes: usize,
+}
+
+impl SettingsWaiting {
+    /// Count what `missing` (from [`OwnerLink::settings_missing`]) holds.
+    pub fn of(missing: &[(DeviceId, Role)]) -> Self {
+        let boxes = missing.iter().filter(|(_, r)| *r == Role::Box).count();
+        Self {
+            counters: missing.len() - boxes,
+            boxes,
+        }
+    }
+}
 
 /// One signed settings the link carries.
 #[derive(Debug, Clone)]

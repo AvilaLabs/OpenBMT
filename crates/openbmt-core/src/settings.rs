@@ -883,7 +883,11 @@ impl SettingNote {
         let change = match r.u8()? {
             0 => Change::Tightening,
             1 => Change::Loosening,
-            _ => return Err(DecodeError::NonCanonical("the kind of change is not 0 or 1")),
+            _ => {
+                return Err(DecodeError::NonCanonical(
+                    "the kind of change is not 0 or 1",
+                ))
+            }
         };
         let hash = r.array()?;
         r.finish()?;
