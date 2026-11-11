@@ -29,6 +29,7 @@ openbmt-owner = { path = "../crates/openbmt-owner" }
 openbmt-owner-node = { path = "../crates/openbmt-owner-node" }
 openbmt-key-ffi = { path = "../crates/openbmt-key-ffi" }
 openbmt-qr = { path = "../crates/openbmt-qr" }
+openbmt-rates = { path = "../crates/openbmt-rates" }
 # The same exact version as openbmt-key-ffi, for the word list.
 bip39 = { version = "=2.2.2", default-features = false, features = ["std"] }
 
@@ -360,6 +361,13 @@ bench = false
 [[bin]]
 name = "qr_encode"
 path = "fuzz_targets/qr_encode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rates_parse"
+path = "fuzz_targets/rates_parse.rs"
 test = false
 doc = false
 bench = false

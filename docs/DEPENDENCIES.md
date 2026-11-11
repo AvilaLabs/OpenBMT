@@ -18,6 +18,7 @@ for each program that ships. The lists themselves are in `deps/`.
 | Books export | `deps/openbmt-books.txt` | 42 |
 | Key app library | `deps/openbmt-key-ffi.txt` | 20 |
 | QR code encoder | `deps/openbmt-qr.txt` | 0 |
+| Price sources | `deps/openbmt-rates.txt` | 19 |
 
 Where they come from:
 
@@ -40,6 +41,13 @@ Where they come from:
   codes, and a QR library would have been a new package in each list; the
   encoder is about a thousand lines in the repository, checked against
   ZXing (below) bit for bit.
+
+- **The price sources, the same 19 as the signer's.** `openbmt-rates` reads
+  the replies of the price sources and combines them into the counter's rate
+  (`docs/RATE-RULES.md`). It depends on `openbmt-core` and `openbmt-counter`
+  by path and adds no package of its own: the JSON reader is about 250 lines
+  in the crate, so that the one place that reads an untrusted reply has no
+  parser from outside, and is fuzzed.
 
 Two implementations of ChaCha20-Poly1305 are in the counter: RustCrypto's
 for sealed messages and rust-bitcoin's inside `bip324`. Using the second

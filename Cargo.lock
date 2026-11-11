@@ -497,6 +497,14 @@ name = "openbmt-qr"
 version = "0.1.0"
 
 [[package]]
+name = "openbmt-rates"
+version = "0.1.0"
+dependencies = [
+ "openbmt-core",
+ "openbmt-counter",
+]
+
+[[package]]
 name = "openbmt-session"
 version = "0.1.0"
 dependencies = [

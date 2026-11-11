@@ -1,0 +1,15 @@
+[package]
+name = "openbmt-rates"
+description = "The price of bitcoin from several sources: a strict reader for each source's reply and the rule that combines them into one rate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Path dependencies inside the workspace only: the counter for the types of
+# a rate and its source, core for the words a person is shown. The reader of
+# the replies is written here, with no JSON library.
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+openbmt-counter = { path = "../openbmt-counter" }
