@@ -41,6 +41,8 @@ pub(crate) fn shown_name(field: &'static str) -> &'static str {
         "min_sale_sats" => "Smallest bitcoin sale",
         "lightning_node" => "Lightning node",
         "watch_key" => "Watch key",
+        "tips_on" => "Ask for a tip",
+        "tip_percents" => "Tips",
         other => other,
     }
 }
@@ -66,6 +68,19 @@ fn watch_key(key: &Option<DeviceId>) -> String {
             hex(&k.to_bytes())
         ),
         None => "no watch key".to_string(),
+    }
+}
+
+/// The line for the suggested tips (CR-187): the percents, or none.
+fn tip_percents(percents: &[u8]) -> String {
+    if percents.is_empty() {
+        "none".to_string()
+    } else {
+        percents
+            .iter()
+            .map(|p| format!("{p}%"))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -131,5 +146,7 @@ pub(crate) fn field_values(s: &Settings) -> Vec<(&'static str, String)> {
         ("boxes", boxes),
         ("lightning_node", lightning_node(&s.lightning_node)),
         ("watch_key", watch_key(&s.watch_key)),
+        ("tips_on", flag(s.tips_on)),
+        ("tip_percents", tip_percents(&s.tip_percents)),
     ]
 }

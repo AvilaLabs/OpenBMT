@@ -42,6 +42,20 @@ pub const MAX_MIN_SALE_SATS: u64 = 2_100_000_000_000_000;
 /// (CR-75). The owner sets one when small receipts cost too much to spend.
 pub const DEFAULT_MIN_SALE_SATS: u64 = 0;
 
+/// Most suggested tips a settings value may carry (CR-187).
+pub const MAX_TIP_PERCENTS: usize = 3;
+/// Smallest suggested tip, in whole percent (CR-187).
+pub const MIN_TIP_PERCENT: u8 = 1;
+/// Largest suggested tip, in whole percent (CR-187).
+pub const MAX_TIP_PERCENT: u8 = 50;
+/// The first suggested tips, in whole percent (CR-187).
+pub const DEFAULT_TIP_PERCENTS: [u8; 3] = [10, 15, 20];
+
+/// The version byte of a settings message that carries the tips block
+/// (CR-187). Settings with tips off and the first percents are written as
+/// version 1, byte for byte what earlier builds wrote.
+const SETTINGS_VERSION_TIPS: u8 = 2;
+
 /// Length of a Lightning node's public key: compressed, as in BOLT 11 and in
 /// the node's own `getinfo` (LN-03).
 pub const LIGHTNING_NODE_BYTES: usize = 33;
@@ -152,6 +166,12 @@ pub struct Settings {
     /// shop: it is not on the device list, is not a counter or a Box, and
     /// signs nothing but heartbeats.
     pub watch_key: Option<DeviceId>,
+    /// The counters ask the customer for a tip (CR-187). Off at first.
+    pub tips_on: bool,
+    /// The tips the counters suggest, in whole percent, 0 to
+    /// [`MAX_TIP_PERCENTS`] of them, each from [`MIN_TIP_PERCENT`] to
+    /// [`MAX_TIP_PERCENT`] (CR-187).
+    pub tip_percents: Vec<u8>,
 }
 
 impl Settings {
@@ -185,7 +205,15 @@ impl Settings {
             boxes: BTreeSet::new(),
             lightning_node: None,
             watch_key: None,
+            tips_on: false,
+            tip_percents: DEFAULT_TIP_PERCENTS.to_vec(),
         }
+    }
+
+    /// Whether the tips block is part of the canonical bytes (CR-187): it is
+    /// when tips are on or the percents are not the first ones.
+    fn has_tips_block(&self) -> bool {
+        self.tips_on || self.tip_percents != DEFAULT_TIP_PERCENTS
     }
 
     /// The shop-wide outstanding instant total for a check mode.
@@ -275,6 +303,16 @@ impl Settings {
                     "LN-03: the Lightning node key is not a compressed public key",
                 ));
             }
+        }
+        if self.tip_percents.len() > MAX_TIP_PERCENTS
+            || self
+                .tip_percents
+                .iter()
+                .any(|p| !(MIN_TIP_PERCENT..=MAX_TIP_PERCENT).contains(p))
+        {
+            return Err(SettingsError::Invalid(
+                "CR-187: a suggested tip is not a whole percent from 1 to 50, or there are more than three",
+            ));
         }
         if let Some(key) = &self.watch_key {
             if self.devices.contains(key)
@@ -368,12 +406,20 @@ impl Settings {
             }
             None => out.push(0),
         }
+        if self.has_tips_block() {
+            out.push(u8::from(self.tips_on));
+            out.push(u8::try_from(self.tip_percents.len()).unwrap_or(u8::MAX));
+            out.extend_from_slice(&self.tip_percents);
+        }
         out
     }
 
     /// Read the bytes written by [`Settings::encode`], field by field. This
-    /// only parses: `validate` is still the caller's to run.
-    fn read(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+    /// only parses: `validate` is still the caller's to run. `version` is
+    /// the version of the frame: from 2 on the tips block follows the watch
+    /// key, and a version 1 message reads as tips off with the first
+    /// percents (CR-187).
+    fn read(r: &mut Reader<'_>, version_byte: u8) -> Result<Self, DecodeError> {
         let version = r.u32_le()?;
         let mut limits = [Limit {
             sats: 0,
@@ -441,6 +487,22 @@ impl Settings {
         } else {
             None
         };
+        let (tips_on, tip_percents) = if version_byte >= SETTINGS_VERSION_TIPS {
+            let on = r.flag()?;
+            let n = usize::from(r.u8()?);
+            if n > MAX_TIP_PERCENTS {
+                return Err(DecodeError::NonCanonical("more than three suggested tips"));
+            }
+            let percents = r.take(n)?.to_vec();
+            if !on && percents == DEFAULT_TIP_PERCENTS {
+                return Err(DecodeError::NonCanonical(
+                    "a tips block holds nothing but the first values",
+                ));
+            }
+            (on, percents)
+        } else {
+            (false, DEFAULT_TIP_PERCENTS.to_vec())
+        };
 
         Ok(Self {
             version,
@@ -466,6 +528,8 @@ impl Settings {
             boxes,
             lightning_node,
             watch_key,
+            tips_on,
+            tip_percents,
         })
     }
 
@@ -684,6 +748,22 @@ pub fn changed_fields(old: &Settings, new: &Settings) -> Vec<FieldChange> {
             direction: dir(new.watch_key.is_some()),
         });
     }
+    // Neither asking for a tip nor changing the suggested percents changes
+    // what a counter accepts or how much is put at risk (CR-187): the tip is
+    // part of the sale's total and every check is made on the total. Both
+    // directions tighten, so the owner phone signs alone.
+    if old.tips_on != new.tips_on {
+        o.push(FieldChange {
+            field: "tips_on",
+            direction: Change::Tightening,
+        });
+    }
+    if old.tip_percents != new.tip_percents {
+        o.push(FieldChange {
+            field: "tip_percents",
+            direction: Change::Tightening,
+        });
+    }
     out
 }
 
@@ -799,7 +879,8 @@ impl SignedSettings {
 }
 
 impl SignedSettings {
-    /// Wire form: `OBMS`, version 1, the bytes of [`Settings::encode`] (the
+    /// Wire form: `OBMS`, version 1 (2 when the settings carry the tips
+    /// block, CR-187), the bytes of [`Settings::encode`] (the
     /// bytes that are hashed and signed), the owner signature, a flag byte
     /// (1 if a Key app signature follows, else 0) and, only when the flag is
     /// 1, the Key app signature. Call it on settings that passed `validate`;
@@ -807,6 +888,11 @@ impl SignedSettings {
     pub fn to_bytes(&self) -> Vec<u8> {
         let body = self.settings.encode();
         let mut out = wire::start(&wire::MAGIC_SIGNED_SETTINGS, body.len() + 129);
+        if self.settings.has_tips_block() {
+            if let Some(byte) = out.get_mut(4) {
+                *byte = SETTINGS_VERSION_TIPS;
+            }
+        }
         out.extend_from_slice(&body);
         out.extend_from_slice(&self.owner_sig.0);
         match &self.approver_sig {
@@ -824,8 +910,9 @@ impl SignedSettings {
     /// not check signatures or run `validate`: call
     /// [`SignedSettings::verify`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut r = Reader::framed(bytes, &wire::MAGIC_SIGNED_SETTINGS)?;
-        let settings = Settings::read(&mut r)?;
+        let (mut r, version) =
+            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, SETTINGS_VERSION_TIPS)?;
+        let settings = Settings::read(&mut r, version)?;
         let owner_sig = r.sig()?;
         let approver_sig = if r.flag()? { Some(r.sig()?) } else { None };
         r.finish()?;
@@ -1804,7 +1891,7 @@ mod tests {
         };
         assert_eq!(edit(3, b'X'), DecodeError::BadMagic);
         assert_eq!(edit(4, 0), DecodeError::UnsupportedVersion(0));
-        assert_eq!(edit(4, 2), DecodeError::UnsupportedVersion(2));
+        assert_eq!(edit(4, 3), DecodeError::UnsupportedVersion(3));
         assert!(matches!(edit(TOR_AT, 2), DecodeError::NonCanonical(_)));
         assert!(matches!(edit(TOR_AT + 1, 2), DecodeError::NonCanonical(_)));
         // The Key app signature flag is the last byte but 64.
@@ -2330,6 +2417,152 @@ mod tests {
                 "{key:?}"
             );
         }
+    }
+
+    #[test]
+    fn cr_187_tips_start_off_with_ten_fifteen_and_twenty_percent() {
+        let s = Settings::defaults(RATE);
+        assert!(!s.tips_on);
+        assert_eq!(s.tip_percents, vec![10, 15, 20]);
+        assert_eq!(s.tip_percents, DEFAULT_TIP_PERCENTS);
+        assert_eq!(s.validate(), Ok(()));
+    }
+
+    #[test]
+    fn cr_187_tips_on_and_the_percents_tighten_in_both_directions() {
+        let old = base();
+        type Edit = (&'static str, fn(&mut Settings));
+        let edits: [Edit; 4] = [
+            ("tips_on", |s| s.tips_on = true),
+            ("tip_percents", |s| s.tip_percents = vec![5, 10]),
+            ("tip_percents", |s| s.tip_percents = Vec::new()),
+            ("tip_percents", |s| s.tip_percents = vec![25, 30, 50]),
+        ];
+        for (name, edit) in edits {
+            let mut new = old.clone();
+            edit(&mut new);
+            let fields = changed_fields(&old, &new);
+            assert_eq!(fields.len(), 1, "{name}");
+            assert_eq!(fields[0].field, name);
+            assert_eq!(classify_change(&old, &new), Change::Tightening, "{name}");
+            assert_eq!(
+                classify_change(&new, &old),
+                Change::Tightening,
+                "{name} back"
+            );
+        }
+        // Both together are still a tightening, and the owner alone signs.
+        let (o, _, roots) = roots();
+        let mut both = next(&old);
+        both.tips_on = true;
+        both.tip_percents = vec![12];
+        let signed = SignedSettings {
+            owner_sig: both.sign(&o),
+            approver_sig: None,
+            settings: both,
+        };
+        assert_eq!(signed.verify(&roots, Some(&old)), Ok(Change::Tightening));
+        // Mixed with a loosening field, the whole change loosens.
+        let mut mixed = old.clone();
+        mixed.tips_on = true;
+        mixed.min_sale_sats -= 1;
+        assert_eq!(classify_change(&old, &mixed), Change::Loosening);
+    }
+
+    #[test]
+    fn cr_187_the_percents_are_whole_percents_from_one_to_fifty_and_at_most_three() {
+        let ok: [Vec<u8>; 4] = [vec![], vec![1], vec![50, 1, 7], vec![10, 15, 20]];
+        for p in ok {
+            let mut s = base();
+            s.tip_percents = p.clone();
+            assert_eq!(s.validate(), Ok(()), "{p:?}");
+        }
+        let bad: [Vec<u8>; 4] = [vec![0], vec![51], vec![10, 15, 20, 25], vec![5, 0, 5]];
+        for p in bad {
+            let mut s = base();
+            s.tip_percents = p.clone();
+            assert!(
+                matches!(s.validate(), Err(SettingsError::Invalid(_))),
+                "{p:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn cr_187_old_settings_read_as_tips_off_and_keep_their_signed_bytes() {
+        // Tips off with the first percents write no block: the message is
+        // version 1 and its hash is the hash of the bytes before the block.
+        let s = wire_settings();
+        let signed = signed_both(s.clone());
+        let bytes = signed.to_bytes();
+        assert_eq!(bytes[4], 1);
+        let body = s.encode();
+        assert_eq!(&bytes[5..5 + body.len()], &body[..]);
+        let back = SignedSettings::from_bytes(&bytes).unwrap();
+        assert!(!back.settings.tips_on);
+        assert_eq!(back.settings.tip_percents, vec![10, 15, 20]);
+        assert_eq!(back.settings, s);
+        let (_, _, roots) = roots();
+        assert_eq!(back.verify(&roots, None), Ok(Change::Loosening));
+    }
+
+    #[test]
+    fn cr_187_the_tips_block_is_written_only_when_it_says_something() {
+        let plain = wire_settings();
+        let mut on = plain.clone();
+        on.tips_on = true;
+        let mut own = plain.clone();
+        own.tip_percents = vec![5, 12];
+        for s in [on, own] {
+            assert_ne!(s.hash(), plain.hash());
+            let bytes = signed_both(s.clone()).to_bytes();
+            assert_eq!(bytes[4], 2);
+            let back = SignedSettings::from_bytes(&bytes).unwrap();
+            assert_eq!(back.settings, s);
+            assert_eq!(back.to_bytes(), bytes);
+            let (_, _, roots) = roots();
+            assert!(back.verify_signatures(&roots).is_ok());
+        }
+        let mut on = plain.clone();
+        on.tips_on = true;
+        let bytes = signed_both(on).to_bytes();
+        let body_end = bytes.len() - 64 - 1 - 64;
+        // The block is a flag, a count and the percents, last in the body.
+        assert_eq!(&bytes[body_end - 5..body_end], &[1, 3, 10, 15, 20][..]);
+        // Every cut inside the block fails.
+        for cut in 1..=5 {
+            let mut short = bytes[..body_end - cut].to_vec();
+            short.extend_from_slice(&bytes[body_end..]);
+            assert!(SignedSettings::from_bytes(&short).is_err(), "{cut}");
+        }
+    }
+
+    #[test]
+    fn cr_187_a_tips_block_that_adds_nothing_or_overruns_is_refused() {
+        let mut s = wire_settings();
+        s.tips_on = true;
+        let bytes = signed_both(s).to_bytes();
+        let body_end = bytes.len() - 64 - 1 - 64;
+        // Tips off and the first percents would have been written as version 1.
+        let mut canon = bytes.clone();
+        canon[body_end - 5] = 0;
+        assert!(SignedSettings::from_bytes(&canon).is_err());
+        // A flag that is not 0 or 1.
+        let mut flag = bytes.clone();
+        flag[body_end - 5] = 2;
+        assert!(SignedSettings::from_bytes(&flag).is_err());
+        // More than three percents.
+        let mut many = bytes.clone();
+        many[body_end - 4] = 4;
+        assert!(SignedSettings::from_bytes(&many).is_err());
+        // A version 1 frame that carries a block has bytes left over.
+        let mut v1 = bytes.clone();
+        v1[4] = 1;
+        assert!(SignedSettings::from_bytes(&v1).is_err());
+        // A version 3 frame is not known.
+        let mut v3 = bytes;
+        v3[4] = 3;
+        assert!(SignedSettings::from_bytes(&v3).is_err());
     }
 
     #[test]
