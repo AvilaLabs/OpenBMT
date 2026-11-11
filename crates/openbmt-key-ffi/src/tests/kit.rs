@@ -234,6 +234,37 @@ pub fn wallet_from_public(public: &Key2Public) -> (WalletDescription, Xpriv, Xpu
     )
 }
 
+/// The key text a signer or another wallet shows for `slot`.
+pub fn origin_text_of(slot: &KeySlot) -> String {
+    openbmt_signer::KeyPart {
+        fingerprint: slot.origin_fingerprint,
+        xpub: slot.xpub,
+    }
+    .origin_text()
+}
+
+/// The `OBMw` bytes the owner phone sends for `wallet`.
+pub fn setup_bytes_for(wallet: &WalletDescription) -> Vec<u8> {
+    openbmt_signer::WalletSetupBytes {
+        network: NET,
+        description: wallet.clone(),
+        owner_root: owner_id(),
+        batch_min_count: SMALL_BATCH,
+    }
+    .to_bytes()
+}
+
+/// A Key app with no key 2 of its own, given the wallet by the ceremony: key
+/// 3 and key 2 taken from their texts, the setup accepted and confirmed.
+pub fn accept_with_no_key_2(app: &crate::KeyApp, wallet: &WalletDescription) {
+    let slot = |i: usize| wallet.slots().get(i).expect("a slot").clone();
+    app.take_key3(origin_text_of(&slot(2))).expect("key 3");
+    app.take_key2(origin_text_of(&slot(1))).expect("key 2");
+    app.accept_wallet_setup(setup_bytes_for(wallet))
+        .expect("accepted");
+    app.confirm_wallet().expect("confirmed");
+}
+
 pub fn setup_for(wallet: &WalletDescription, key3: &Xpub) -> WalletSetup {
     WalletSetup {
         description: wallet.canonical_string().to_string(),

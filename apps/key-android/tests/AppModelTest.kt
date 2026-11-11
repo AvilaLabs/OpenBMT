@@ -155,7 +155,7 @@ object AppModelTest {
     private val notInTheCatalogue = AppWords.urWords().map { it.first }.toSet() + setOf(
         "debuggingOn", "wirelessDebuggingOn", "accessibilityOn", "keyInSoftware", "libraryMissing", "fault",
         "keystoreUnavailable", "fileNotRead", "fileNotSaved", "cameraOff", "cameraNotStarted", "codeNotForField", "notANumber", "flipsNotReadable", "answersReady", "pairOffer", "pairBox", "invitationRunOut", "boxFound",
-        "key3Needed", "key3UrNotRead", "key3NotText", "key3Mismatch", "key2Needed", "key2Taken", "key2Mismatch", "scanOwnerWallet", "checkWallet", "walletMismatch",
+        "key3Needed", "key3UrNotRead", "key3NotText", "key3Mismatch", "key2Needed", "key2NotText", "key2Taken", "key2Mismatch", "scanOwnerWallet", "checkWallet", "walletMismatch",
         "walletLacksKey3", "choosePin", "upgradePin", "pinsDiffer", "pinChanged", "working", "waitForTry",
         "triesNotSaved", "wiped", "wipeFailed", "cashOut", "scanDeposit", "notADepositCode", "nameAddress",
         "checkAddress", "addressAdded", "removeAddress", "addressRemoved",
@@ -315,6 +315,12 @@ object AppModelTest {
                 ),
             ),
         )
+        val lookAlike = Words(Tones.STOP, Who.KEY_HOLDER, "Two identities look alike", "x.", "y.", "AS-39", null, null, null)
+        val worded = LineModel.describe(
+            LineView(2, LineKind.Settings, "Settings", false, "AS-39: raw", null, LineDetail.Health(HealthDetail(ByteArray(8))), lookAlike),
+        )
+        ok(worded.failureWords == lookAlike && worded.failure == "AS-39: raw", "the line keeps the words of its refusal")
+        ok(settings.failureWords == null, "no words, no words")
         ok(settings.identities.size == 2 && settings.identities.all { it.contains(idOne) }, "devices and Boxes are shown in full, apart")
         ok(settings.rows.any { it.startsWith("tor_on:") } && settings.rows.none { it.contains(idOne) }, "other fields stay in the rows, identities do not")
         val other = LineModel.describe(
@@ -385,10 +391,17 @@ object AppModelTest {
         ok(c2.fingerprint == "00FF 00FF" && c2.network == "A test network", "key 2 on a test network")
         ok(c2.advanced == listOf("Origin path: 48h/1h/0h/2h", "Account key: tpub-two"), "key 2's origin and account key are for the Advanced fold")
         ok(CeremonyModel.key2Check(Key2TakenView(true, "00ff00ff", "p", "x")).network == "Main bitcoin network", "key 2 on the main network")
-        for (w in listOf(AppWords.key2Needed, AppWords.key2Taken, AppWords.key2Mismatch)) {
+        for (w in listOf(AppWords.key2Needed, AppWords.key2NotText, AppWords.key2Taken, AppWords.key2Mismatch)) {
             val all = "${w.heading} ${w.what} ${w.next}".lowercase()
             ok(listOf("xpub", "descriptor", "multisig").none { all.contains(it) }, "no jargon in ${w.heading}")
             ok(w.who == Who.KEY_HOLDER, "${w.heading} is for the key holder")
+        }
+        ok(AppWords.Text.SCAN_KEY2 == "Scan key 2", "the key 2 button words")
+        val binary2 = CeremonyModel.readKey2Code(byteArrayOf(0x00, 0xff.toByte(), 0xfe.toByte(), 0x80.toByte()))
+        ok(binary2 is Key3Input.Refused && binary2.words == AppWords.key2NotText, "bytes that are not text are refused with the key 2 words")
+        for (ur in listOf("ur:crypto-hdkey/abc", "UR:bytes/xyz")) {
+            val r = CeremonyModel.readKey2Code(ur.toByteArray())
+            ok(r is Key3Input.Text && r.text == ur, "a ur: text never reaches the paste-only words on the key 2 screen: $ur")
         }
         ok(AppWords.key2Needed.what.contains("not from the owner's phone"), "key 2 is taken from the signer, not the owner phone")
         ok(AppWords.key2Mismatch.tone == Tones.STOP && AppWords.key2Taken.tone == Tones.GOOD, "key 2: mismatch is a stop, taken is done")

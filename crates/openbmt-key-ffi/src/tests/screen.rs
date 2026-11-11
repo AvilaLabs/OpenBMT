@@ -202,8 +202,7 @@ fn the_receive_mark_of_an_approver_only_key_app_goes_up_through_the_store() {
     let (_, s3) = fixed_key(3, 3);
     let wallet =
         openbmt_core::wallet::WalletDescription::new(NET, [s1, s2, s3.clone()]).expect("a wallet");
-    app.accept_wallet(setup_for(&wallet, &s3.xpub))
-        .expect("accepted");
+    accept_with_no_key_2(&app, &wallet);
     assert_eq!(app.receive_mark().expect("mark"), 0);
     let saves = store.saves();
     app.raise_receive_mark(12).expect("raised");

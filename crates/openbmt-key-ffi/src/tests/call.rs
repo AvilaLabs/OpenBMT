@@ -31,6 +31,10 @@ const DEVICE_ROOT: u16 = 15;
 const DEVICE_ROOT_WORDS: u16 = 16;
 const ACCEPT_WALLET: u16 = 17;
 const WALLET_VIEW: u16 = 18;
+const TAKE_KEY3: u16 = 80;
+const ACCEPT_WALLET_SETUP: u16 = 83;
+const CONFIRM_WALLET: u16 = 84;
+const TAKE_KEY2: u16 = 86;
 const PAIR_OFFER: u16 = 19;
 const CHECK_KIT: u16 = 20;
 const OPEN_SESSION: u16 = 30;
@@ -572,11 +576,18 @@ fn an_approver_only_app_has_no_signer_screen() {
     let (_, slot3) = fixed_key(3, 3);
     let wallet = openbmt_core::wallet::WalletDescription::new(NET, [slot1, slot2, slot3.clone()])
         .expect("a wallet");
+    c.ok(TAKE_KEY3, app, W::new().string(&origin_text_of(&slot3)));
     c.ok(
-        ACCEPT_WALLET,
+        TAKE_KEY2,
         app,
-        W::new().setup(&setup_for(&wallet, &slot3.xpub)),
+        W::new().string(&origin_text_of(wallet.slots().get(1).expect("slot 2"))),
     );
+    c.ok(
+        ACCEPT_WALLET_SETUP,
+        app,
+        W::new().bytes(&setup_bytes_for(&wallet)),
+    );
+    c.ok(CONFIRM_WALLET, app, W::new());
     assert_eq!(c.rule(SIGNER_STATUS, app, W::new()), "AS-36");
 }
 

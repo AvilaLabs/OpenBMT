@@ -327,8 +327,7 @@ fn an_approver_only_key_app_declines_a_spend_and_signs_the_rest() {
     let (_, slot3) = fixed_key(3, 3);
     let wallet = openbmt_core::wallet::WalletDescription::new(NET, [slot1, slot2, slot3.clone()])
         .expect("a wallet");
-    app.accept_wallet(setup_for(&wallet, &slot3.xpub))
-        .expect("accepted");
+    accept_with_no_key_2(&app, &wallet);
     assert_eq!(
         app.state().expect("state"),
         SetupState::Ready { holds_key2: false }

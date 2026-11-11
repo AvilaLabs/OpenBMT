@@ -103,6 +103,24 @@ object CeremonyModel {
         return readKey3Text(text)
     }
 
+    /**
+     * Key 2 from the bytes of a scanned code. The key 2 screen has no paste field, so the paste-only refusal of
+     * a `ur:` text ([readKey3Text], [AppWords.key3UrNotRead]) is never used here: text goes to the library as it is,
+     * and a code that is not text shows [AppWords.key2NotText].
+     */
+    fun readKey2Code(bytes: ByteArray): Key3Input {
+        val text = try {
+            Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes))
+                .toString()
+        } catch (_: CharacterCodingException) {
+            return Key3Input.Refused(AppWords.key2NotText)
+        }
+        return Key3Input.Text(text)
+    }
+
     /** Key 3 from pasted or scanned text. Everything else about the text is the library's to refuse. */
     fun readKey3Text(text: String): Key3Input =
         if (text.trimStart().startsWith("ur:", ignoreCase = true)) {

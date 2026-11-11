@@ -966,14 +966,14 @@ class Controller(private val act: MainActivity) {
         val views = ArrayList<View>(banner())
         views.add(ui.titleBlock(words, "Key"))
         views.add(ui.hint(words))
-        put("Key", views, listOf(ui.primary(AppWords.key2Needed.heading) { scanKey2() }), logo = true)
+        put("Key", views, listOf(ui.primary(AppWords.Text.SCAN_KEY2) { scanKey2() }), logo = true)
     }
 
     private fun scanKey2() {
         allowed {
             scan.begin(
                 show = { act.show(scanPage(ui, it)) },
-                onBytes = { bytes -> allowed { takeKey2(CeremonyModel.readKey3Code(bytes)) } },
+                onBytes = { bytes -> allowed { takeKey2(CeremonyModel.readKey2Code(bytes)) } },
                 onFailed = { showMessage(cameraWords(it)) { showKey2() } },
                 onCancel = { showKey2() },
                 ur = UrScan(CeremonyModel.KEY3_TYPES, Who.KEY_HOLDER) { type, payload ->
@@ -1551,9 +1551,14 @@ class Controller(private val act: MainActivity) {
         // Identities in full, in monospace, wrapped as needed (AS-39).
         for (identity in t.identities) views.add(ui.text(identity, 13f, mono = true))
         for (q in t.quoted) views.add(ui.quoted("Text from elsewhere, not written by this app. ${q.from}:", "\u201c${q.text}\u201d"))
-        t.failure?.let {
-            views.add(ui.text("This item cannot be approved. The checks said:", 14f, bold = true, colour = ui.pal.stop.ink))
-            views.add(ui.text(it, 14f))
+        val failureWords = t.failureWords
+        if (failureWords != null) {
+            views.add(ui.notice(model(failureWords)))
+        } else {
+            t.failure?.let {
+                views.add(ui.text("This item cannot be approved. The checks said:", 14f, bold = true, colour = ui.pal.stop.ink))
+                views.add(ui.text(it, 14f))
+            }
         }
         val reason = ui.field("Why you decline (optional)")
         views.add(reason)

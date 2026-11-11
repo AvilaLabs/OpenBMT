@@ -172,6 +172,14 @@ pub(crate) fn key2_part(material: &Material) -> Option<KeyPart> {
     })
 }
 
+/// SR-88: the refusal when no key 2 has been taken from the signer.
+pub(crate) fn key2_missing() -> KeyError {
+    refused_by(
+        RULE_KEY2_MISSING,
+        "SR-88: no key 2 has been taken from the signer yet",
+    )
+}
+
 /// SR-88, SR-89: on a device that holds no key 2 of its own, the wallet of
 /// the ceremony must hold, in slot 2, exactly the key 2 the Key app took
 /// from its signer: the same account key, master fingerprint and origin path.
@@ -185,10 +193,7 @@ pub(crate) fn check_key2_taken(
         return Ok(());
     }
     let Some(taken) = &material.key2_taken else {
-        return Err(refused_by(
-            RULE_KEY2_MISSING,
-            "SR-88: no key 2 has been taken from the signer yet",
-        ));
+        return Err(key2_missing());
     };
     let in_slot_2 = description
         .slots()

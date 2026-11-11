@@ -386,6 +386,8 @@ class LineView(
     val failure: String?,
     val decision: Decision?,
     val detail: LineDetail,
+    /** The words of [failure] when the library has words of its own for it, else null. */
+    val failureWords: Words? = null,
 )
 
 data class CeilingsView(val perTx: Long, val perDay: Long, val perWeek: Long)
@@ -837,6 +839,7 @@ private fun Reader.line(): LineView =
         title = string(),
         canApprove = bool(),
         failure = option { string() },
+        failureWords = option { words() },
         decision = option { decision() },
         detail = lineDetail(),
     )

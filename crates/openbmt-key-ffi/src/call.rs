@@ -708,6 +708,7 @@ fn definitions() -> Vec<TypeDef> {
         KitCheck::define(),
         Decision::define(),
         LineKind::define(),
+        openbmt_core::say::Words::define(),
         LineView::define(),
         LineDetail::define(),
         SpendDetail::define(),

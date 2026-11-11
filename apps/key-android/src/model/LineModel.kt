@@ -9,6 +9,7 @@ import org.openbmt.key.LineView
 import org.openbmt.key.OutputKindView
 import org.openbmt.key.OutputView
 import org.openbmt.key.Quoted
+import org.openbmt.key.Words
 
 /**
  * One line of an approval session as text: what the Key app checked itself
@@ -23,6 +24,8 @@ class LineText(
     val quoted: List<Quoted>,
     /** Why the line cannot be approved, from the rule crates, or null. */
     val failure: String?,
+    /** The library's words for [failure], when it has words of its own (AS-39); shown in place of the raw text. */
+    val failureWords: Words? = null,
     val canApprove: Boolean,
     /**
      * What the screen shows larger than anything else, or null: for a pairing, the four session words
@@ -176,6 +179,7 @@ object LineModel {
             claims = claims,
             quoted = quoted.map { Quoted(it.from, Format.cleanForeign(it.text)) },
             failure = line.failure,
+            failureWords = line.failureWords,
             canApprove = line.canApprove,
             prominent = prominent,
             instruction = instruction,

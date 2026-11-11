@@ -307,6 +307,14 @@ object AppWords {
         "Show key 2 on the signer as a key code or as text, and scan it here.",
     )
 
+    /** The code scanned for key 2 holds something other than text. */
+    val key2NotText = w(
+        Tones.STOP, "Code is not text",
+        "The code holds something other than text, so it cannot be key 2 and nothing was taken.",
+        Who.KEY_HOLDER,
+        "Show key 2 on the signer as text or as a key code, then scan it again.",
+    )
+
     /** Key 2 is taken: its short code is shown to compare with the signer. */
     val key2Taken = w(
         Tones.GOOD, "Key 2 taken",
@@ -365,6 +373,7 @@ object AppWords {
     /** The lines of the ceremony screens that are not words of a state; none uses a word of the jargon list. */
     object Text {
         const val SCAN_KEY3 = "Scan key 3"
+        const val SCAN_KEY2 = "Scan key 2"
         const val PASTE_KEY3 = "Or paste the text of key 3"
         const val ON_OWNER_PHONE = "On the owner phone, choose Scan the Key app."
         const val ADVANCED = "Advanced"
@@ -598,6 +607,7 @@ object AppWords {
         "key3Taken" to key3Taken,
         "key3Mismatch" to key3Mismatch,
         "key2Needed" to key2Needed,
+        "key2NotText" to key2NotText,
         "key2Taken" to key2Taken,
         "key2Mismatch" to key2Mismatch,
         "publicAnswerReady" to publicAnswerReady,

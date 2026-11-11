@@ -126,7 +126,8 @@ Decision: enum: Approve | Decline{reason: string}
     tags Approve=0 Decline=1
 LineKind: enum, one tag byte
     tags Spend=0 BatchRefill=1 Settings=2 Pairing=3 HealthCheck=4 BoxClaim=5
-LineView: record: item: u32, kind: LineKind, title: string, can_approve: bool, failure: option<string>, decision: option<Decision>, detail: LineDetail
+Words: record, as in an error frame: tone: u8, who: u8, heading: string16, what: string16, next: string16, code: option<string16>, at: option<u64>, quoted: option<(string16, string16)>, detail: option<string16>
+LineView: record: item: u32, kind: LineKind, title: string, can_approve: bool, failure: option<string>, failure_words: option<Words>, decision: option<Decision>, detail: LineDetail
 LineDetail: enum: Spend{SpendDetail} | Batch{BatchDetail} | Settings{SettingsDetail} | Pairing{PairingDetail} | Health{HealthDetail} | BoxClaim{BoxClaimDetail}
     tags Spend=0 Batch=1 Settings=2 Pairing=3 Health=4 BoxClaim=5
 SpendDetail: record: review: option<SpendReviewView>, outputs_without_label: list<u32>, labels_without_output: list<u32>, claimed_change_not_proven: list<u32>

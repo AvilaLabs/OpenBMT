@@ -368,7 +368,9 @@ key 2 on their own; the Key app's answer never carries it.
   changed.
 - **SR-88.** On a Key app that holds no key 2, the wallet setup of the
   ceremony is refused, with nothing changed, when no key 2 has been taken. A
-  Key app that holds key 2 itself needs none taken.
+  Key app that holds key 2 itself needs none taken. On a Key app that holds
+  no key 2 the older way of accepting a wallet (`accept_wallet`, op 17) is
+  refused in the same way: the ceremony's accept is the only one there.
 - **SR-89.** On a Key app that holds no key 2, the wallet setup of the
   ceremony is accepted only if slot 2 of the wallet is exactly the key 2
   taken: the same account key, the same master fingerprint and the same

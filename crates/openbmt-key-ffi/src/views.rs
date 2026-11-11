@@ -5,6 +5,7 @@ use openbmt_approver::{
     BatchLine, BoxClaimLine, CheckStep, Choice, Detail, HealthLine, Line, OutputLine, PairingLine,
     SettingChange, SettingsLine, SpendLine, SpendReview, StepStatus,
 };
+use openbmt_core::say::Words;
 use openbmt_core::settings::Change;
 use openbmt_session::{ItemKind, Label};
 use openbmt_signer::{OutputKind, Remaining};
@@ -340,6 +341,32 @@ pub enum LineDetail {
     },
 }
 
+impl Shaped for Words {
+    fn shape() -> String {
+        "Words".to_string()
+    }
+}
+
+/// The words as an error frame carries them (`put_words`).
+impl Put for Words {
+    fn put(&self, out: &mut Vec<u8>) {
+        crate::call::put_words(out, self);
+    }
+}
+
+impl Define for Words {
+    fn define() -> TypeDef {
+        TypeDef {
+            name: "Words",
+            body: "record, as in an error frame: tone: u8, who: u8, heading: string16, \
+                   what: string16, next: string16, code: option<string16>, at: option<u64>, \
+                   quoted: option<(string16, string16)>, detail: option<string16>"
+                .to_string(),
+            tags: Vec::new(),
+        }
+    }
+}
+
 /// One line of the session (AS-23).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineView {
@@ -353,6 +380,9 @@ pub struct LineView {
     pub can_approve: bool,
     /// When it cannot: the failing rule, in the approver's words.
     pub failure: Option<String>,
+    /// The words of that failure, when the approver has words of its own for
+    /// it (AS-39); the screen shows these in place of the raw text.
+    pub failure_words: Option<Words>,
     /// The decision made so far.
     pub decision: Option<Decision>,
     /// What the checks found.
@@ -473,6 +503,7 @@ wire_record!(LineView {
     title,
     can_approve,
     failure,
+    failure_words,
     decision,
     detail,
 });
@@ -836,6 +867,10 @@ pub(crate) fn line_view(line: &Line) -> LineView {
         title: title.to_string(),
         can_approve: line.can_approve,
         failure: line.failure.clone(),
+        failure_words: line
+            .failure
+            .as_deref()
+            .and_then(openbmt_approver::words_for_text),
         decision: line.decision.as_ref().map(Decision::from),
         detail,
     }

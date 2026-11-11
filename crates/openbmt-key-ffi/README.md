@@ -131,7 +131,8 @@ on); op 85 drops it and leaves the Key app as it was before op 83, with key
 2 and key 3 kept. Both are refused with `nothing-pending` when nothing is
 pending. The three refusals of SR-67 have the rule strings `key3-missing`,
 `key3-differs` and `key3-not-in-wallet`. The older `accept_wallet` (op 17)
-registers at once.
+registers at once, except on a Key app with no key 2, where it is refused
+with `key2-missing`.
 
 With key 2 on a hardware signer the Key app holds no key 2, and op 86 takes
 its public part straight from the signer, after key 3 and before the answer

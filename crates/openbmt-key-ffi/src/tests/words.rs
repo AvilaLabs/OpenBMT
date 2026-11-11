@@ -182,3 +182,28 @@ fn the_picker_suggests_and_checks() {
     assert!(!word_is_valid(String::new()));
     assert!(!word_is_valid("abandon about".to_string()));
 }
+
+#[test]
+fn as_39_a_line_refused_for_a_look_alike_carries_its_own_words() {
+    use openbmt_approver::{Detail, HealthLine, Line};
+    use openbmt_session::ItemKind;
+    let line = |failure: Option<&str>| Line {
+        item: 1,
+        kind: ItemKind::Settings,
+        detail: Detail::Health(HealthLine { nonce: [0; 32] }),
+        can_approve: failure.is_none(),
+        failure: failure.map(str::to_string),
+        decision: None,
+    };
+    let alike = crate::views::line_view(&line(Some(
+        "AS-39: an identity in this change starts like one already listed",
+    )));
+    assert_eq!(
+        alike.failure_words,
+        Some(openbmt_approver::look_alike_words())
+    );
+    // A failure the approver has no words for keeps its raw text only.
+    let other = crate::views::line_view(&line(Some("AS-27: settings are not valid: x")));
+    assert!(other.failure.is_some() && other.failure_words.is_none());
+    assert!(crate::views::line_view(&line(None)).failure_words.is_none());
+}

@@ -185,6 +185,46 @@ impl<'a> Rd<'a> {
         String::from_utf8(self.bytes()).expect("UTF-8")
     }
 
+    fn str16(&mut self) -> String {
+        let n = usize::from(u16::from_le_bytes(self.take(2).try_into().expect("2")));
+        String::from_utf8(self.take(n).to_vec()).expect("UTF-8")
+    }
+
+    /// Words as an error frame carries them (no quoted text is expected). The
+    /// rule code is leaked: it is a `&'static str` in `Words`.
+    pub fn words(&mut self) -> openbmt_core::say::Words {
+        let tone_byte = self.u8();
+        let tone = crate::say::TONES
+            .iter()
+            .find(|t| t.2 == tone_byte)
+            .expect("a tone")
+            .0;
+        let who_byte = self.u8();
+        let who = crate::say::WHOS
+            .iter()
+            .find(|w| w.2 == who_byte)
+            .expect("a person")
+            .0;
+        let (heading, what, next) = (self.str16(), self.str16(), self.str16());
+        let code = self
+            .opt(|r| r.str16())
+            .map(|c| &*Box::leak(c.into_boxed_str()));
+        let at = self.opt(Rd::u64);
+        assert_eq!(self.u8(), 0, "no quoted text");
+        let detail = self.opt(|r| r.str16());
+        openbmt_core::say::Words {
+            tone,
+            heading,
+            what,
+            next,
+            who,
+            code,
+            at,
+            quoted: None,
+            detail,
+        }
+    }
+
     pub fn opt<T>(&mut self, f: impl Fn(&mut Self) -> T) -> Option<T> {
         match self.u8() {
             0 => None,
@@ -482,6 +522,7 @@ impl<'a> Rd<'a> {
             title: self.string(),
             can_approve: self.bool(),
             failure: self.opt(Rd::string),
+            failure_words: self.opt(Rd::words),
             decision: self.opt(Rd::decision),
             detail: self.detail(),
         }
@@ -571,6 +612,7 @@ pub fn sample_lines() -> Vec<LineView> {
         title: title.to_string(),
         can_approve: item % 2 == 0,
         failure: (item % 2 == 1).then(|| "AS-24: no".to_string()),
+        failure_words: (item % 4 == 1).then(openbmt_approver::look_alike_words),
         decision,
         detail,
     };

@@ -781,8 +781,12 @@ impl KeyApp {
                     )),
                 };
             let (part, approver) = build_wallet(material, setup, pending.is_some())?;
+            // On a device with no key 2 the only accept is the ceremony's, which
+            // checks slot 2 against the key 2 taken (SR-88, SR-89).
             if pending.is_some() {
                 crate::ceremony::check_key2_taken(material, approver.wallet(), part.network)?;
+            } else if material.key2.is_none() {
+                return Err(crate::ceremony::key2_missing());
             }
             let view = wallet_view(&approver)?;
             let bytes = match &pending {

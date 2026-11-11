@@ -1333,22 +1333,48 @@ fn sr_90_key_2_taken_is_saved_in_a_strict_version_4_and_older_states_read_as_non
 
 #[test]
 fn sr_90_a_wallet_accepted_before_key_2_was_taken_stays_accepted() {
-    let store = MemStore::new();
-    let app = open_new(store.clone());
-    app.create_approver_only().expect("identity");
-    app.take_key3(key3_text()).expect("taken");
-    // The older way: the wallet is given with key 3, and key 2 is not taken.
-    let wallet = wallet_of(&key2_part());
-    app.accept_wallet(setup_for(&wallet, &key3_part().xpub))
+    // A registered wallet as an older Key app stored it: version 2, no key 2
+    // taken. It is made by confirming a ceremony wallet and writing the state
+    // again without the key 2 taken.
+    let (app, store) = approver_with_key3();
+    app.take_key2(key2_text()).expect("taken");
+    app.accept_wallet_setup(setup_bytes(&wallet_of(&key2_part())))
         .expect("accepted");
-    let bytes = store.plain().expect("stored");
-    assert_eq!(&bytes[..5], b"OBM7\x02");
-    let again = reopen(store);
+    app.confirm_wallet().expect("confirmed");
+    let mut decoded = envelope::decode(&store.plain().expect("stored")).expect("decodes");
+    decoded.material.key2_taken = None;
+    let (part, snapshot) = decoded.wallet.expect("a wallet");
+    let old = envelope::encode(&decoded.material, Some((&part, &snapshot)));
+    assert_eq!(&old[..5], b"OBM7\x02");
+    let again = reopen_bytes(&old);
     assert!(matches!(
         again.state().expect("state"),
         SetupState::Ready { holds_key2: false }
     ));
     assert_eq!(again.key2_taken_view().expect("asked"), None);
+}
+
+#[test]
+fn sr_88_the_old_accept_is_refused_on_a_device_with_no_key_2() {
+    let (app, store) = approver_with_key3();
+    app.take_key2(key2_text()).expect("taken");
+    let saves = store.saves();
+    let wallet = wallet_of(&key2_part());
+    // Even with key 2 taken and a wallet that matches, only the ceremony's
+    // accept is allowed here.
+    let err = app
+        .accept_wallet(setup_for(&wallet, &key3_part().xpub))
+        .expect_err("refused");
+    assert_eq!(err.rule(), "key2-missing");
+    assert_eq!(err.words().heading, "Key 2 not taken yet");
+    assert_eq!(store.saves(), saves);
+    assert!(matches!(
+        app.state().expect("state"),
+        SetupState::HasIdentity { .. }
+    ));
+    // The ceremony's accept still works.
+    app.accept_wallet_setup(setup_bytes(&wallet))
+        .expect("accepted");
 }
 
 #[test]
