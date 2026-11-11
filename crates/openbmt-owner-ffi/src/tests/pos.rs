@@ -280,7 +280,10 @@ fn oc_33_a_read_is_a_request_the_app_sends_and_a_reply_it_hands_back() {
     // The screen shows the same alerts, the poll time and the counts.
     let s = state(&rig, handle);
     assert_eq!(s.last_poll_at, Some(later));
-    assert!(s.tracked_orders > 0, "the orders with a Bitcoin tender are tracked");
+    assert!(
+        s.tracked_orders > 0,
+        "the orders with a Bitcoin tender are tracked"
+    );
     assert_eq!(s.open.len(), new_alerts.len());
     for (open, new) in s.open.iter().zip(&new_alerts) {
         assert_eq!((open.kind, &open.subject), (new.kind, &new.subject));
