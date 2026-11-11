@@ -1,0 +1,21 @@
+[package]
+name = "openbmt-swap"
+description = "Lightning receipts through reverse swaps: the request, the check of the service's reply, the lockup, the claim to the shop's own wallet and the state file"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The same exact versions as openbmt-core, so the types unify and no package
+# is added. `miniscript` is here for its script interpreter, which checks the
+# finished claim against the output it spends (SW-43). The BOLT 11 reader is
+# the one of openbmt-lightning (LN-16), and the JSON reader the workspace's.
+[dependencies]
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+miniscript = { version = "=12.3.5", default-features = false, features = ["std"] }
+openbmt-json = { path = "../openbmt-json" }
+openbmt-lightning = { path = "../openbmt-lightning" }
+
+[dev-dependencies]
+openbmt-lightning = { path = "../openbmt-lightning", features = ["testing"] }
