@@ -13,6 +13,8 @@
 //! fetching is a rule for the app (RT-40 to RT-45); its numbers are here so
 //! that the app and the tests read the same ones.
 
+#![forbid(unsafe_code)]
+
 pub mod combine;
 pub mod error;
 pub mod price;

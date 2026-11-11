@@ -13,6 +13,7 @@
 //! No dependencies and no clock, no storage and no screen: the app draws
 //! each part as a QR code and shows how far a scan has come.
 
+#![forbid(unsafe_code)]
 #![cfg_attr(
     not(test),
     deny(
