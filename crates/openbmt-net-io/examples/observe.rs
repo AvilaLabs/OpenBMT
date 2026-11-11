@@ -171,7 +171,6 @@ fn run(args: &[String]) -> Result<(), String> {
     let end = started + Duration::from_secs(seconds);
     let mut kinds: BTreeMap<&str, u64> = BTreeMap::new();
     let mut sightings = 0u64;
-    let mut sighting_ids: BTreeSet<String> = BTreeSet::new();
     let mut blocks: Vec<(f64, u32, BlockHash, usize)> = Vec::new();
     let mut heights: BTreeMap<BlockHash, u32> = BTreeMap::new();
     let mut joins: Vec<(f64, u32, u32, usize)> = Vec::new();
@@ -305,7 +304,6 @@ fn run(args: &[String]) -> Result<(), String> {
                     Err(e) => format!("unreadable({e})"),
                 };
                 println!("{t:.1} sighting {id} from={}", from.len());
-                sighting_ids.insert(id);
             }
             AppEvent::AlsoAnnounced { .. } => {
                 *kinds.entry("also_announced").or_default() += 1;
@@ -380,10 +378,10 @@ fn run(args: &[String]) -> Result<(), String> {
     for (kind, n) in &kinds {
         println!("events {kind}: {n}");
     }
-    println!(
-        "sightings: {sightings} ({} distinct txids)",
-        sighting_ids.len()
-    );
+    // A transaction is handed on as a sighting once (NR-53); later
+    // announcements are `AlsoAnnounced`. The example keeps no set of ids, so
+    // that a long run measures the driver's memory and not its own.
+    println!("sightings: {sightings}");
     println!(
         "peers ready on v2: {} distinct, on v1: {} distinct",
         seen_v2.len(),
