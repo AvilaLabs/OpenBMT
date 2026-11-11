@@ -2,7 +2,8 @@
 
 use bitcoin::hashes::Hash;
 use bitcoin::{ScriptBuf, WScriptHash};
-use openbmt_core::batch::AddressBatch;
+use openbmt_core::batch::{AddressBatch, PinnedRoots};
+use openbmt_core::boxpair::{Claim, Invitation, Welcome};
 use openbmt_core::identity::{DeviceId, Identity, Sig};
 use openbmt_core::pairing::{CounterPairing, PairOffer};
 use openbmt_core::settings::{Settings, SignedSettings};
@@ -134,6 +135,13 @@ fn approved(request: &Request) -> Vec<ItemResult> {
                 },
                 Item::HealthCheck { nonce } => Payload::Health {
                     sig: health_proof(&approver(), &SESSION, i.number, nonce),
+                },
+                Item::BoxClaim { claim } => Payload::BoxWelcome {
+                    welcome: Welcome::make(
+                        &invitation(),
+                        claim,
+                        PinnedRoots::new(owner().device_id(), approver().device_id()).unwrap(),
+                    ),
                 },
             };
             ItemResult {
@@ -948,4 +956,161 @@ fn as_15_arbitrary_bytes_never_panic_the_decoders() {
         }
     }
     let _ = DeviceId::from_bytes(&[0; 32]);
+}
+
+// ---- AS-78, AS-79: adding a Box ------------------------------------------
+
+fn invitation() -> Invitation {
+    Invitation::from_random(&[0x42; 17])
+}
+
+fn claim() -> Claim {
+    Claim::make(&invitation(), id(7).device_id(), [9; 32])
+}
+
+fn box_request() -> Request {
+    Request::new(
+        &owner(),
+        SESSION,
+        WALLET,
+        vec![
+            RequestItem {
+                number: 0,
+                item: settings(),
+            },
+            RequestItem {
+                number: 1,
+                item: Item::BoxClaim { claim: claim() },
+            },
+            RequestItem {
+                number: 2,
+                item: health(),
+            },
+        ],
+    )
+    .unwrap()
+}
+
+#[test]
+fn as_78_a_box_claim_item_holds_the_claim_and_nothing_else() {
+    let q = box_request();
+    let back = Request::from_bytes(q.as_bytes()).unwrap();
+    assert_eq!(back, q);
+    let Item::BoxClaim { claim: got } = &back.item(1).unwrap().item else {
+        panic!("not a box claim")
+    };
+    assert_eq!(*got, claim());
+    assert_eq!(back.item(1).unwrap().item.kind(), ItemKind::BoxClaim);
+    assert_eq!(ItemKind::BoxClaim.byte(), 6);
+    assert_eq!(ItemKind::from_byte(6), Some(ItemKind::BoxClaim));
+    // The claim is not checked here: a claim with a wrong MAC is carried as it
+    // is, for the Key app to refuse.
+    let mut bad = claim();
+    bad.mac[0] ^= 1;
+    let carried = Request::new(
+        &owner(),
+        SESSION,
+        WALLET,
+        vec![RequestItem {
+            number: 0,
+            item: Item::BoxClaim { claim: bad },
+        }],
+    )
+    .unwrap();
+    assert!(Request::from_bytes(carried.as_bytes()).is_ok());
+    // A body that is one byte short, one byte long or another frame is
+    // refused. The body of the item starts after the header (5), the session
+    // ID, the wallet and the owner (96), the count (4), the number (4), the
+    // kind (1) and its length (4).
+    let single = Request::new(
+        &owner(),
+        SESSION,
+        WALLET,
+        vec![RequestItem {
+            number: 0,
+            item: Item::BoxClaim { claim: claim() },
+        }],
+    )
+    .unwrap();
+    let bytes = single.as_bytes().to_vec();
+    let len_at = 5 + 96 + 4 + 4 + 1;
+    let body_at = len_at + 4;
+    let sig_at = bytes.len() - 64;
+    let mut short = bytes.clone();
+    short[len_at..body_at].copy_from_slice(&100u32.to_le_bytes());
+    short.remove(sig_at - 1);
+    assert!(Request::from_bytes(&short).is_err());
+    let mut long = bytes.clone();
+    long[len_at..body_at].copy_from_slice(&102u32.to_le_bytes());
+    long.insert(sig_at, 0);
+    assert!(Request::from_bytes(&long).is_err());
+    let mut frame = bytes.clone();
+    frame[body_at..body_at + 4].copy_from_slice(b"OBMM");
+    assert!(Request::from_bytes(&frame).is_err());
+    let mut version = bytes;
+    version[body_at + 4] = 2;
+    assert!(Request::from_bytes(&version).is_err());
+}
+
+#[test]
+fn as_79_a_box_welcome_answers_a_box_claim_and_only_that() {
+    let q = box_request();
+    let roots = PinnedRoots::new(owner().device_id(), approver().device_id()).unwrap();
+    let welcome = Welcome::make(&invitation(), &claim(), roots);
+    let mut results: Vec<ItemResult> = vec![
+        ItemResult {
+            number: 0,
+            verdict: Verdict::Approved(Payload::Settings { sig: Sig([2; 64]) }),
+        },
+        ItemResult {
+            number: 1,
+            verdict: Verdict::Approved(Payload::BoxWelcome { welcome }),
+        },
+        ItemResult {
+            number: 2,
+            verdict: Verdict::Approved(Payload::Health {
+                sig: health_proof(&approver(), &SESSION, 2, &[6; 32]),
+            }),
+        },
+    ];
+    let r = Response::new(&approver(), SESSION, q.hash(), results.clone()).unwrap();
+    assert_eq!(r.check_against(&q, &approver().device_id()), Ok(()));
+    let back = Response::from_bytes(r.as_bytes()).unwrap();
+    assert_eq!(back, r);
+    assert_eq!(
+        back.results().get(1).map(|x| x.verdict.clone()),
+        Some(Verdict::Approved(Payload::BoxWelcome { welcome }))
+    );
+    assert_eq!(Payload::BoxWelcome { welcome }.kind(), ItemKind::BoxClaim);
+    // A welcome for a settings item, or settings for the claim, do not fit.
+    let swapped = {
+        let mut v = results.clone();
+        v[0].verdict = Verdict::Approved(Payload::BoxWelcome { welcome });
+        v
+    };
+    let r = Response::new(&approver(), SESSION, q.hash(), swapped).unwrap();
+    assert_eq!(
+        r.check_against(&q, &approver().device_id()),
+        Err(BindError::KindMismatch { item: 0 })
+    );
+    results[1].verdict = Verdict::Approved(Payload::Settings { sig: Sig([2; 64]) });
+    let r = Response::new(&approver(), SESSION, q.hash(), results.clone()).unwrap();
+    assert_eq!(
+        r.check_against(&q, &approver().device_id()),
+        Err(BindError::KindMismatch { item: 1 })
+    );
+    // The payload is exactly a welcome: one byte more or fewer is refused.
+    results[1].verdict = Verdict::Approved(Payload::BoxWelcome { welcome });
+    let good = Response::new(&approver(), SESSION, q.hash(), results).unwrap();
+    let bytes = good.as_bytes();
+    let mut longer = bytes.to_vec();
+    // The payload length of result 1 is found by its welcome magic.
+    let at = bytes.windows(4).position(|w| w == b"OBMM").unwrap() - 4;
+    longer[at..at + 4].copy_from_slice(&102u32.to_le_bytes());
+    longer.insert(at + 4 + 101, 0);
+    assert!(Response::from_bytes(&longer).is_err());
+    let mut shorter = bytes.to_vec();
+    shorter[at..at + 4].copy_from_slice(&100u32.to_le_bytes());
+    shorter.remove(at + 4 + 100);
+    assert!(Response::from_bytes(&shorter).is_err());
 }

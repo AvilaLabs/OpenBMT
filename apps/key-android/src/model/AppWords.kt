@@ -367,6 +367,31 @@ object AppWords {
         "Scan this with the counter: open the counter app, tap Pair with the Key app, and hold its camera to this code.",
     )
 
+    // ---- pairing a Box (docs/SIGNER-RULES.md SR-81, SR-82) -----------------------
+
+    /** The invitation on the screen: it is a secret until a Box has taken it or it has run out. */
+    val pairBox = w(
+        Tones.INFO, "Pair a Box",
+        "The code below lets one Box join this shop. It works once and runs out in 30 minutes.",
+        Who.KEY_HOLDER,
+        "Type all 30 characters into the Box's own setup page. Do not type them on a shared computer, and do not send or photograph them.",
+    )
+
+    val invitationRunOut = w(
+        Tones.ENDED, "Invitation run out",
+        "The 30 minutes are over, so a Box can no longer join with that code.",
+        Who.KEY_HOLDER,
+        "Make a new invitation if a Box still has to be paired.",
+    )
+
+    /** The words of the line that shows a Box's claim. */
+    val boxFound = w(
+        Tones.INFO, "Box found",
+        "A Box has asked to join this shop. The four words are made from the Box's key.",
+        Who.KEY_HOLDER,
+        "Approve the settings that add it first. Then approve only if its four words match the Box's own screen, in the same order.",
+    )
+
     // ---- the end of a session ----------------------------------------------------
 
     val answersReady = w(
@@ -523,6 +548,9 @@ object AppWords {
         "flipsNotReadable" to flipsNotReadable,
         "answersReady" to answersReady,
         "pairOffer" to pairOffer,
+        "pairBox" to pairBox,
+        "invitationRunOut" to invitationRunOut,
+        "boxFound" to boxFound,
         "choosePin" to choosePin,
         "upgradePin" to upgradePin,
         "pinsDiffer" to pinsDiffer,

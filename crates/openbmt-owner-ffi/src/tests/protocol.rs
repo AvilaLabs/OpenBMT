@@ -93,6 +93,14 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (101, "setup_lock"),
         (102, "setup_unlock"),
         (103, "setup_change_pin"),
+        (104, "box_fetch_claim"),
+        (105, "box_queue"),
+        (106, "boxes_waiting"),
+        (107, "box_deliver"),
+        (108, "box_own_invitation"),
+        (109, "box_own_check"),
+        (110, "boxes_pending"),
+        (111, "box_forget"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

@@ -2,8 +2,8 @@
 //! approver's own check; nothing is decided here.
 
 use openbmt_approver::{
-    BatchLine, CheckStep, Choice, Detail, HealthLine, Line, OutputLine, PairingLine, SettingChange,
-    SettingsLine, SpendLine, SpendReview, StepStatus,
+    BatchLine, BoxClaimLine, CheckStep, Choice, Detail, HealthLine, Line, OutputLine, PairingLine,
+    SettingChange, SettingsLine, SpendLine, SpendReview, StepStatus,
 };
 use openbmt_core::settings::Change;
 use openbmt_session::{ItemKind, Label};
@@ -27,6 +27,8 @@ pub enum LineKind {
     Pairing,
     /// A health check.
     HealthCheck,
+    /// A Box's claim.
+    BoxClaim,
 }
 
 /// The person's decision on a line (AS-30).
@@ -284,6 +286,18 @@ pub struct PairingDetail {
     pub settings_version_to_sign: u32,
 }
 
+/// The detail of a Box claim line (AS-81).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoxClaimDetail {
+    /// The Box's key, in full.
+    pub box_key: Vec<u8>,
+    /// The four fingerprint words of the Box's key, the words the Box shows
+    /// when it is paired.
+    pub words: Option<Vec<String>>,
+    /// The checks, in their order.
+    pub checks: Vec<CheckView>,
+}
+
 /// The detail of a health check line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HealthDetail {
@@ -319,6 +333,11 @@ pub enum LineDetail {
         /// The detail.
         detail: HealthDetail,
     },
+    /// A Box's claim.
+    BoxClaim {
+        /// The detail.
+        detail: BoxClaimDetail,
+    },
 }
 
 /// One line of the session (AS-23).
@@ -348,6 +367,7 @@ wire_unit_enum!(LineKind {
     Settings = 2,
     Pairing = 3,
     HealthCheck = 4,
+    BoxClaim = 5,
 });
 wire_unit_enum!(CheckStatus {
     Passed = 0,
@@ -440,6 +460,11 @@ wire_record!(PairingDetail {
     session_words,
     claimed_settings_version,
     settings_version_to_sign,
+});
+wire_record!(BoxClaimDetail {
+    box_key,
+    words,
+    checks,
 });
 wire_record!(HealthDetail { nonce });
 wire_record!(LineView {
@@ -540,6 +565,7 @@ const DETAIL_BATCH: u8 = 1;
 const DETAIL_SETTINGS: u8 = 2;
 const DETAIL_PAIRING: u8 = 3;
 const DETAIL_HEALTH: u8 = 4;
+const DETAIL_BOX_CLAIM: u8 = 5;
 
 impl Shaped for LineDetail {
     fn shape() -> String {
@@ -570,6 +596,10 @@ impl Put for LineDetail {
                 out.push(DETAIL_HEALTH);
                 detail.put(out);
             }
+            Self::BoxClaim { detail } => {
+                out.push(DETAIL_BOX_CLAIM);
+                detail.put(out);
+            }
         }
     }
 }
@@ -579,7 +609,8 @@ impl Define for LineDetail {
         TypeDef {
             name: "LineDetail",
             body: "enum: Spend{SpendDetail} | Batch{BatchDetail} | Settings{SettingsDetail} \
-                   | Pairing{PairingDetail} | Health{HealthDetail}"
+                   | Pairing{PairingDetail} | Health{HealthDetail} \
+                   | BoxClaim{BoxClaimDetail}"
                 .to_string(),
             tags: vec![
                 ("Spend", DETAIL_SPEND),
@@ -587,6 +618,7 @@ impl Define for LineDetail {
                 ("Settings", DETAIL_SETTINGS),
                 ("Pairing", DETAIL_PAIRING),
                 ("Health", DETAIL_HEALTH),
+                ("BoxClaim", DETAIL_BOX_CLAIM),
             ],
         }
     }
@@ -762,6 +794,14 @@ fn pairing(p: &PairingLine) -> PairingDetail {
     }
 }
 
+fn box_claim(b: &BoxClaimLine) -> BoxClaimDetail {
+    BoxClaimDetail {
+        box_key: b.box_key.to_bytes().to_vec(),
+        words: b.words.map(|w| w.iter().map(|x| x.to_string()).collect()),
+        checks: checks(&b.checks),
+    }
+}
+
 fn health(h: &HealthLine) -> HealthDetail {
     HealthDetail {
         nonce: h.nonce.to_vec(),
@@ -776,6 +816,7 @@ pub(crate) fn line_view(line: &Line) -> LineView {
         ItemKind::Settings => (LineKind::Settings, "Settings"),
         ItemKind::Pairing => (LineKind::Pairing, "Pairing"),
         ItemKind::HealthCheck => (LineKind::HealthCheck, "Health check"),
+        ItemKind::BoxClaim => (LineKind::BoxClaim, "Box"),
     };
     let detail = match &line.detail {
         Detail::Spend(s) => LineDetail::Spend { detail: spend(s) },
@@ -785,6 +826,9 @@ pub(crate) fn line_view(line: &Line) -> LineView {
         },
         Detail::Pairing(p) => LineDetail::Pairing { detail: pairing(p) },
         Detail::Health(h) => LineDetail::Health { detail: health(h) },
+        Detail::BoxClaim(b) => LineDetail::BoxClaim {
+            detail: box_claim(b),
+        },
     };
     LineView {
         item: line.item,

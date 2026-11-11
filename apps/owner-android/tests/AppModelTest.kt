@@ -1639,6 +1639,137 @@ object AppModelTest {
         ok(!lockSource().contains("setUserAuthenticationRequired") && !source("../android-common/src/android/Keystore.kt").contains("setUserAuthenticationRequired"), "the wrapping key is not bound to biometrics or the lock screen")
     }
 
+    // ---- connecting a Box (OA-40 to OA-48) ---------------------------------------------------------------------
+
+    private fun connectBox(): String = source("src/android/ConnectBox.kt")
+
+    private fun oa_40_the_home_screen_opens_a_screen_that_saves_nothing() {
+        ok(source("src/android/Screens.kt").contains("ui.button(\"Connect your Box\") { showConnectBox() }"), "connecting a Box starts on the home screen")
+        val first = connectBox().substringAfter("internal fun Controller.showConnectBox(").substringBefore("private fun Controller.scanBox()")
+        ok(first.contains("for (line in ConnectBoxModel.explanation)") && ConnectBoxModel.explanation.size == 2, "two lines of steps")
+        ok(first.contains("\"Look for the Box\"") && first.contains("\"Scan the Box's address\""), "the two buttons")
+        ok(first.contains("pendingBoxViews("), "the Boxes being added are listed")
+        ok(!first.contains("SealedFile") && !first.contains("saveSetup"), "the first screen saves nothing")
+        ok(source("src/android/Screens.kt").contains("pendingBoxViews(n, Slot(act)) { showOutbox() }"), "a Box that waits is in the list of what waits to be delivered")
+        ok(source("src/android/Approval.kt").contains("pendingBoxViews(n, Slot(act)) { showHome() }"), "and after a response is taken")
+    }
+
+    private fun oa_41_the_address_is_judged_by_shape_and_the_fetch_runs_off_the_screen_thread() {
+        val onion = "a".repeat(56) + ".onion:8080"
+        for (good in listOf("192.168.1.20:8080", "  192.168.1.20:8080 ", onion.uppercase(), onion)) {
+            ok(ConnectBoxModel.address(good) is Form.Ok, "an address: ${good.trim().take(24)}")
+        }
+        ok((ConnectBoxModel.address("  192.168.1.20:8080 ") as Form.Ok).value == "192.168.1.20:8080", "spaces are dropped")
+        ok((ConnectBoxModel.address(onion.uppercase()) as Form.Ok).value == onion, "capitals are made small")
+        for (bad in listOf("", "192.168.1.20", "box.local", ":80", "a b:80", "host:0", "host:99999", "http://x:80")) {
+            ok(ConnectBoxModel.address(bad) is Form.Refused, "not an address: $bad")
+        }
+        ok(ConnectBoxModel.isOnion(onion) && !ConnectBoxModel.isOnion("192.168.1.20:8080"), "an onion name is told apart")
+        ok(ConnectBoxModel.linkFor(onion, "127.0.0.1:9050").proxy == "127.0.0.1:9050", "an onion name goes through the proxy")
+        ok(ConnectBoxModel.linkFor("192.168.1.20:8080", "127.0.0.1:9050").proxy.isEmpty(), "an address on the network goes directly")
+        val look = connectBox().substringAfter("private fun Controller.lookForBox(").substringBefore("private fun Controller.showBoxFound(")
+        ok(look.contains("BoxWords.looking") && look.indexOf("page(") < look.indexOf("async("), "a page says it takes a moment, and is drawn first")
+        ok(look.contains("async({ n.boxFetchClaim(link) })") && Regex("boxFetchClaim\\(").findAll(connectBox()).count() == 1, "one place fetches, off the screen thread")
+        ok(look.contains("refusal(") && look.contains("showConnectBox("), "a refusal is the library's words, on the first screen")
+        ok(Regex("scan\\.begin\\(").findAll(connectBox()).count() == 1 && !connectBox().contains("requestPermissions"), "the camera is asked for in one place, from the button")
+        ok(BoxWords.addressNotRead.who == Who.OWNER && BoxWords.looking.next.isNotEmpty(), "the words of the address")
+    }
+
+    private fun oa_42_the_claim_and_the_settings_are_queued_together_and_the_four_words_are_shown() {
+        val found = connectBox().substringAfter("private fun Controller.showBoxFound(").substringBefore("private fun Controller.showBoxQueued(")
+        ok(found.contains("ConnectBoxModel.keyGroups(found.boxKey)"), "the Box's key in full")
+        ok(found.contains("found.needsRate") && found.contains("CounterModel.price(") && found.contains("BoxWords.priceNeeded"), "a phone with no settings asks for the price")
+        ok(found.contains("n.boxQueue(found.claim, f.value)") && Regex("boxQueue\\(").findAll(connectBox()).count() == 1, "one call queues the claim and the settings")
+        val queued = connectBox().substringAfter("private fun Controller.showBoxQueued(").substringBefore("internal fun Controller.waitingBoxViews(")
+        ok(queued.contains("ConnectBoxModel.wordsLine(q.words), 30f") && queued.contains("BoxWords.compare") && queued.contains("showSpend()"), "the four words large, to compare, then the request screen")
+        ok(ConnectBoxModel.wordsLine(listOf("a", "b", "c", "d")) == "a   b   c   d", "the words on one line")
+        ok(ConnectBoxModel.keyGroups(ByteArray(32) { it.toByte() }).split(' ').size == 8, "the key is eight groups")
+        ok(ConnectBoxModel.boxLabel(byteArrayOf(1, 2, 3, 4, 5)) == "Box 01020304", "a short name")
+    }
+
+    private fun oa_43_the_welcome_is_handed_over_from_the_list_and_a_refusal_keeps_the_approval() {
+        val c = connectBox()
+        val wait = c.substringAfter("internal fun Controller.pendingBoxViews(").substringBefore("private fun Controller.forgetBox(")
+        ok(wait.contains("n.boxesPending()") && wait.contains("p.welcomeReady") && wait.contains("boxAddresses[") && wait.contains("handOver("), "the list of Boxes being added, each with its address")
+        val over = c.substringAfter("private fun Controller.handOver(").substringBefore("/** What saving the link did")
+        ok(Regex("boxDeliver\\(").findAll(c).count() == 1 && over.contains("async({ n.boxDeliver(link, p.boxKey) })"), "one call hands it over, off the screen thread")
+        ok(over.contains("BoxWords.handing") && over.indexOf("page(") < over.indexOf("async("), "a page says it takes a moment")
+        ok(over.contains("BoxWords.handoverKept") && over.contains("refusal("), "a refusal is the library's words and the app's: the approval is kept")
+        ok(over.indexOf("showSaveLink(") > over.indexOf("boxDeliver(") && over.contains("if (delivered != null)"), "the link is saved only for a Box that took it")
+        ok(BoxWords.handoverKept.what.contains("stays queued") && BoxWords.handoverKept.next.contains("new one"), "the words say what is kept and what to do")
+    }
+
+    private fun oa_44_the_link_is_saved_only_after_the_box_took_its_welcome() {
+        val key = ByteArray(32) { (0x70 + it).toByte() }
+        val c1 = ByteArray(32) { (0x10 + it).toByte() }
+        val c2 = ByteArray(32) { (0x20 + it).toByte() }
+        val onion = "a".repeat(56) + ".onion:8080"
+        val base = setupText(extra = listOf("peer: 10.0.0.5:8333"))
+        val direct = ConnectBoxModel.withLink(base, "192.168.1.20:8080", key, listOf(c1, c2))!!
+        val link = OwnerSetup.parse(direct).link!!
+        ok((link.route as RelayRoute.Direct).addr == "192.168.1.20:8080", "the route is the Box's address")
+        ok(link.relayKey.contentEquals(key) && link.counters.size == 2 && link.counters[0].contentEquals(c1), "the relay key is the Box's key and the counters are the settings'")
+        ok(link.heartbeatEverySecs == 0L && link.checkInGraceSecs == 0L, "the intervals are the defaults")
+        ok(OwnerSetup.parse(direct).peers == listOf("10.0.0.5:8333"), "nothing else of the setup changes")
+        val viaOnion = OwnerSetup.parse(ConnectBoxModel.withLink(base, onion, key, listOf(c1))!!).link!!
+        val route = viaOnion.route as RelayRoute.Onion
+        ok(route.host == "a".repeat(56) + ".onion" && route.port == 8080, "an onion route")
+        // A link the setup held is replaced, with its intervals.
+        val old = setupText(extra = linkLines() + listOf("heartbeat-every: 30", "check-in-grace: 600"))
+        val replaced = OwnerSetup.parse(ConnectBoxModel.withLink(old, "192.168.1.20:8080", key, listOf(c1))!!).link!!
+        ok(replaced.counters.size == 1 && replaced.heartbeatEverySecs == 0L && replaced.relayKey.contentEquals(key), "a link already held is replaced")
+        ok(ConnectBoxModel.withLink(base, "192.168.1.20:8080", key, emptyList()) == null, "no counter, no link")
+        ok(ConnectBoxModel.withLink(base, "192.168.1.20:8080", key, List(17) { i -> ByteArray(32) { b -> (i + b).toByte() } }) == null, "more counters than a setup holds, no link")
+        val save = connectBox().substringAfter("private fun Controller.showSaveLink(")
+        ok(save.contains("OwnerLock.unlock(stored, typed)") && save.contains("setupFile().save(OwnerLock.lock(typed, bytes))"), "the setup is opened and locked again with the same PIN")
+        ok(save.contains("triedPin(") && !save.contains("SealedFile("), "a wrong PIN counts as a try, and nothing is stored but the locked text")
+        ok(save.indexOf("OwnerSetup.parse(edited)") < save.indexOf("setupFile().save("), "the text is checked before it is sealed")
+        ok(save.contains("setup = next") && save.contains("showMessage(BoxWords.paired, \"Start the link\") { begin() }"), "the app starts again, which starts the link, with no second PIN")
+        ok(save.contains("BoxWords.pairedNoCounters") && save.contains("BoxWords.linkNotSaved") && save.contains("\"Not now\"") && save.contains("ConnectBoxModel.linkLines("), "when no link is made the lines are shown")
+        ok(Regex("setupFile\\(\\)\\.save\\(").findAll(connectBox()).count() == 1, "the one thing written is the locked setup")
+        ok(source("src/android/Lock.kt").contains("internal fun Controller.triedPin(") && BoxWords.savePin.next.contains("PIN"), "the PIN is asked for through the lock's own count of tries")
+        ok(ConnectBoxModel.linkLines("192.168.1.20:8080", key, listOf(c1)).size == 3, "the lines of a link")
+    }
+
+    private fun oa_45_the_app_builds_no_bytes_of_the_pairing_and_signs_nothing() {
+        val c = connectBox() + source("src/model/ConnectBoxModel.kt")
+        for (bad in listOf(".signBatch(", "Psbt", "psbt", ".broadcast(", "Transaction(", "key2Secret", "key3Secret", "mnemonic", "SecureRandom", "Clipboard", "copy(")) {
+            ok(!c.contains(bad), "connecting a Box does not hold or call $bad")
+        }
+        ok(connectBox().contains("private val boxAddresses = HashMap<String, String>()"), "the addresses of waiting Boxes are held in memory only")
+        ok(!connectBox().contains("java.io.File") && !connectBox().contains("SealedFile"), "no file is opened here but through the lock")
+    }
+
+    private fun oa_46_without_a_key_app_the_app_does_not_offer_to_pair_a_box() {
+        val c = connectBox() + source("src/android/Screens.kt")
+        ok(!c.contains("Pair without the Key app") && !c.contains("showOwnInvitation") && !c.contains("OwnerBoxes") && !c.contains("ownInvitation") && !c.contains("ownCheck"), "no button and no screen for pairing without the Key app")
+        ok(!source("src/model/BoxWords.kt").contains("ownIntro") && !source("src/model/ConnectBoxModel.kt").contains("spaced"), "and no words for it")
+        ok(File(appDir, "../../docs/OWNER-APP-RULES.md").readText().contains("does not offer to pair a Box without the Key app"), "the rules say so")
+        ok(source("../../crates/openbmt-owner-ffi/bindings/kotlin/org/openbmt/owner/OwnerNode.kt").contains("fun ownCheck("), "the library keeps its calls")
+    }
+
+    private fun oa_47_a_box_that_was_not_delivered_is_forgotten_in_one_step() {
+        val c = connectBox()
+        val list = c.substringAfter("internal fun Controller.pendingBoxViews(").substringBefore("private fun Controller.handOver(")
+        ok(list.contains("ConnectBoxModel.wordsLine(p.words)") && list.contains("\"Forget ${'$'}{ConnectBoxModel.boxLabel(p.boxKey)}\"") && list.contains("forgetBox(n, p.boxKey, msg, back)"), "a Box being added is listed with its four words and a button that forgets it")
+        ok(c.substringAfter("private fun Controller.showBoxQueued(").substringBefore("internal fun Controller.pendingBoxViews(").contains("\"Forget this Box\""), "also on the screen after queuing")
+        val forget = c.substringAfter("private fun Controller.forgetBox(").substringBefore("/**\n * Hands the Box its welcome")
+        ok(Regex("boxForget\\(").findAll(c).count() == 1 && forget.contains("attempt(msg) { n.boxForget(key) }") && forget.contains("BoxWords.forgotten"), "one call forgets, a refusal is the library's words")
+        ok(BoxWords.forgotten.what.contains("not told") && BoxWords.forgotten.next.contains("new invitation"), "the words say what was done and how to add the Box again")
+    }
+
+    private fun oa_48_every_word_of_connecting_a_box_is_checked_and_listed() {
+        val all = BoxWords.all()
+        ok(all.size == 12 && all.all { (n, _) -> n.startsWith("box") }, "the words of the Box screens")
+        for ((name, w) in all) {
+            ok(w.who == Who.OWNER && SayCheck.problem(w) == null && w.heading.length <= 28 && w.what.length <= 140 && w.next.length <= 140, "words of $name")
+        }
+        val names = AppWords.all().map { it.first }
+        ok(all.all { it.first in names }, "they are in the app's list of words")
+        val md = File(appDir, "../../docs/screens/owner-app.md").readText()
+        ok(md.contains("| boxPaired |") && md.contains("| boxForgotten |"), "the list of the app's words has them")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
@@ -1657,6 +1788,9 @@ object AppModelTest {
         if (rulesMd == null) return
         val rules = Regex("^- \\*\\*OA-(\\d\\d)\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules == rules.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
+        // OA-36 to OA-39 are kept for other work, and OA-49 to OA-59 for the next.
+        val numbered = (1..35) + (40..48) + (60..65)
+        ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")
         }

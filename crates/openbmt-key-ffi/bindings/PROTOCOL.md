@@ -78,6 +78,9 @@ The handle names the object the op works on: `zero` (the field is 0),
  46 raise_change_mark      handle app      args u32 -> ()
  47 raise_receive_mark     handle app      args u32 -> ()
  48 correct_clock          handle app      args () -> ()
+ 50 make_invitation        handle app      args () -> InvitationView
+ 51 open_invitation        handle app      args () -> option<InvitationView>
+ 52 cancel_invitation      handle app      args () -> ()
  60 coin_bits              handle zero     args (list<bool>, KeyWordCount) -> BitProgress
  61 dice_bits              handle zero     args (string, KeyWordCount) -> BitProgress
  62 dice_face_counts       handle zero     args string -> list<u32>
@@ -119,10 +122,10 @@ KitCheck: enum: Same | Different{first_difference: u32, same_checksum_words: boo
 Decision: enum: Approve | Decline{reason: string}
     tags Approve=0 Decline=1
 LineKind: enum, one tag byte
-    tags Spend=0 BatchRefill=1 Settings=2 Pairing=3 HealthCheck=4
+    tags Spend=0 BatchRefill=1 Settings=2 Pairing=3 HealthCheck=4 BoxClaim=5
 LineView: record: item: u32, kind: LineKind, title: string, can_approve: bool, failure: option<string>, decision: option<Decision>, detail: LineDetail
-LineDetail: enum: Spend{SpendDetail} | Batch{BatchDetail} | Settings{SettingsDetail} | Pairing{PairingDetail} | Health{HealthDetail}
-    tags Spend=0 Batch=1 Settings=2 Pairing=3 Health=4
+LineDetail: enum: Spend{SpendDetail} | Batch{BatchDetail} | Settings{SettingsDetail} | Pairing{PairingDetail} | Health{HealthDetail} | BoxClaim{BoxClaimDetail}
+    tags Spend=0 Batch=1 Settings=2 Pairing=3 Health=4 BoxClaim=5
 SpendDetail: record: review: option<SpendReviewView>, outputs_without_label: list<u32>, labels_without_output: list<u32>, claimed_change_not_proven: list<u32>
 SpendReviewView: record: outputs: list<OutputView>, change_index: option<u32>, change_sats: option<u64>, moves_coins_inside_wallet: bool, fee_sats: u64, fee_rate_sat_per_vb: u64, input_count: u32, input_total_sats: u64, other_total_sats: u64, allowlisted_total_sats: u64, remaining: CeilingsRemaining, already_counted: bool, clock_behind_by: option<u64>
 OutputView: record: index: u32, address: option<string>, script_hex: string, amount_sats: u64, kind: OutputKindView, owner_phone_label: option<OwnerLabelView>
@@ -142,6 +145,8 @@ Direction: enum, one tag byte
     tags Tightening=0 Loosening=1
 PairingDetail: record: name: string, counter_key: list<u8>, session_words: option<list<string>>, claimed_settings_version: u32, settings_version_to_sign: u32
 HealthDetail: record: nonce: list<u8>
+BoxClaimDetail: record: box_key: list<u8>, words: option<list<string>>, checks: list<CheckView>
+InvitationView: record: text: string, expires_at: u64, secs_left: u64
 SignerStatus: record: ceilings_other: CeilingsView, ceilings_allowlisted: CeilingsView, fee_ceilings: FeeCeilingsView, max_fee_rate_sat_per_vb: u64, max_fee_sats: u64, allowlist_wait_secs: u64, receive_mark: u32, change_mark: u32, latest_time_seen: u64, effective_time_now: u64, other_day: u64, other_week: u64, allowlisted_day: u64, allowlisted_week: u64, spend_log_count: u32, allowlist: list<AllowlistView>
 AllowlistView: record: address: option<string>, script_hex: string, label: string, enrolled_at: u64, active_at: option<u64>
 CeilingsView: record: per_tx: u64, per_day: u64, per_week: u64

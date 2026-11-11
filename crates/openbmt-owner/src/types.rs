@@ -2,6 +2,7 @@
 
 use bitcoin::{OutPoint, ScriptBuf, Txid};
 use openbmt_core::batch::AddressBatch;
+use openbmt_core::boxpair::Claim;
 use openbmt_core::identity::{DeviceId, Sig};
 use openbmt_core::pairing::PairRequest;
 use openbmt_core::settings::SignedSettings;
@@ -209,6 +210,17 @@ pub struct QueuedPairing {
     pub stage: Stage,
 }
 
+/// A Box's claim in the queue (AS-83).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueuedBoxClaim {
+    /// The entry's number.
+    pub id: u32,
+    /// The claim the Box made. The owner phone cannot check its MAC.
+    pub claim: Claim,
+    /// Where it is.
+    pub stage: Stage,
+}
+
 /// What `queue_settings` did (AS-59).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingsQueued {
@@ -256,6 +268,9 @@ pub enum Delivery {
     Settings(Vec<u8>),
     /// A pairing with both signatures (`OBMD`).
     Pairing(Vec<u8>),
+    /// A Box's claim (`OBM5`) and the welcome the Key app made for it
+    /// (`OBMM`), one after the other, 202 bytes (AS-85).
+    BoxWelcome(Vec<u8>),
 }
 
 /// What happened to one item of a session when its response was taken

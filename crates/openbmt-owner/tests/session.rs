@@ -862,7 +862,7 @@ fn as_62_a_batch_settings_and_pairing_are_completed_and_verified() {
                     .unwrap();
                 seen += 1;
             }
-            Delivery::Transaction { .. } => panic!(),
+            Delivery::Transaction { .. } | Delivery::BoxWelcome(_) => panic!(),
         }
     }
     assert_eq!(seen, 3);

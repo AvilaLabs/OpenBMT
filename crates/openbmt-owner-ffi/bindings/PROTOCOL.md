@@ -115,6 +115,14 @@ ops run on another; it waits for at most 250 ms.
 101 setup_lock       handle zero  args (string, list<u8>) -> list<u8>
 102 setup_unlock     handle zero  args (list<u8>, string) -> list<u8>
 103 setup_change_pin handle zero  args PinChangeArgs -> list<u8>
+104 box_fetch_claim  handle node  args BoxLinkArgs -> BoxFoundView
+105 box_queue        handle node  args BoxQueueArgs -> BoxQueuedView
+106 boxes_waiting    handle node  args () -> list<WaitingBoxView>
+107 box_deliver      handle node  args BoxDeliverArgs -> BoxDeliveredView
+108 box_own_invitation handle zero  args u64 -> BoxOwnInvitationView
+109 box_own_check    handle zero  args BoxOwnCheckArgs -> BoxOwnCheckView
+110 boxes_pending    handle node  args () -> list<PendingBoxView>
+111 box_forget       handle node  args list<u8> -> ()
 ```
 
 ## Types
@@ -198,7 +206,7 @@ LimitView: record: sats: u64, display_usd: u32
 CounterShareView: record: counter: list<u8>, bps: u32
 SettingsHeldView: record: version: u32, light_per_sale: LimitView, light_budget: LimitView, node_per_sale: LimitView, node_budget: LimitView, box_per_sale: LimitView, box_budget: LimitView, underpayment_tolerance_bps: u32, refund_cap: LimitView, refund_daily_cap: LimitView, cashier_override_daily_cap: LimitView, manager_override_ceiling: LimitView, min_confirmations: u8, final_confirmations: u8, heartbeat_max_age_secs: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, devices: list<list<u8>>, counters: list<CounterShareView>, boxes: list<list<u8>>, lightning_node: option<list<u8>>
 OutboxKind: enum, one tag byte
-    tags Transaction=0 Batch=1 Settings=2 Pairing=3
+    tags Transaction=0 Batch=1 Settings=2 Pairing=3 BoxWelcome=4
 OutboxRow: record: id: u32, kind: OutboxKind, txid: option<string>, counter: option<list<u8>>, version: option<u32>, signed_at: option<u64>, size: u32, words: Words
 PosVendorView: enum, one tag byte
     tags Square=0 Clover=1
@@ -222,4 +230,15 @@ CounterQueuedView: record: settings: u32, version: u32, batch: u32, batch_count:
 WaitingCounterView: record: counter: list<u8>, name: string
 CounterBundleView: record: code: list<u8>, with_batch: bool, words: Words
 PinChangeArgs: record: locked: list<u8>, current: string, new: string
+BoxLinkArgs: record: address: string, proxy: string
+BoxFoundView: record: claim: list<u8>, box_key: list<u8>, needs_rate: bool
+BoxQueueArgs: record: claim: list<u8>, usd_per_btc: u64
+BoxQueuedView: record: claim_id: u32, settings_id: u32, settings_version: u32, box_key: list<u8>, words: list<string>
+WaitingBoxView: record: box_key: list<u8>
+PendingBoxView: record: box_key: list<u8>, words: list<string>, welcome_ready: bool
+BoxDeliverArgs: record: link: BoxLinkArgs, box_key: list<u8>
+BoxDeliveredView: record: box_key: list<u8>, counters: list<list<u8>>, settings_version: u32
+BoxOwnInvitationView: record: text: string, expires_at: u64
+BoxOwnCheckArgs: record: invitation: string, claim: list<u8>
+BoxOwnCheckView: record: box_key: list<u8>, words: list<string>
 ```

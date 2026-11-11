@@ -47,6 +47,7 @@
     )
 )]
 
+mod boxnet;
 mod call;
 mod ceremony;
 mod codec;
@@ -64,6 +65,10 @@ mod views;
 #[cfg(test)]
 mod tests;
 
+pub use boxnet::{
+    BoxDeliverArgs, BoxDeliveredView, BoxFoundView, BoxLinkArgs, BoxOwnCheckArgs, BoxOwnCheckView,
+    BoxOwnInvitationView, BoxQueueArgs, BoxQueuedView, PendingBoxView, WaitingBoxView,
+};
 pub use call::{
     dispatch, error_response, protocol_description, Registry, MAX_NODES, REQUEST_MAGIC,
     RESPONSE_MAGIC, VERSION,

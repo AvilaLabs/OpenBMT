@@ -6,13 +6,18 @@
 //!   | receive mark u32 LE (used when this device holds no signer)
 //!   | settings flag u8, then u32 length and the `OBMS` bytes if 1
 //!   | log count u16 LE | that many session IDs (32 each), oldest first
+//!   | version 2 only: invitation (17) | expires at u64 LE
 //! ```
+//!
+//! The version is 1 until the Key app holds an open Box invitation (AS-80)
+//! and 2 while it does: a state without one is written exactly as before.
 
 use std::sync::OnceLock;
 
 use bitcoin::bip32::{Xpriv, Xpub};
 use bitcoin::secp256k1::{All, Secp256k1};
 use openbmt_core::batch::{Approver as BatchApprover, BatchPolicy, HighWater, PinnedRoots};
+use openbmt_core::boxpair::{Invitation, INVITATION_RANDOM_LEN, INVITATION_SECS};
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::settings::SignedSettings;
 use openbmt_core::wallet::WalletDescription;
@@ -38,6 +43,25 @@ pub(crate) struct Kept {
     pub high_water: HighWater,
     pub settings: Option<SignedSettings>,
     pub seen: Vec<[u8; 32]>,
+    /// The open Box invitation (AS-80).
+    pub invitation: Option<OpenInvitation>,
+}
+
+/// A Box invitation the Key app made and has not spent (BX-11).
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct OpenInvitation {
+    pub invitation: Invitation,
+    /// When it runs out, in seconds on the Key app's clock.
+    pub expires_at: u64,
+}
+
+/// An invitation the Key app holds, as the screen shows it (AS-80).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvitationView {
+    /// Thirty characters in six groups of five (BX-10).
+    pub text: String,
+    /// When it runs out, in seconds on the Key app's clock.
+    pub expires_at: u64,
 }
 
 impl Kept {
@@ -107,6 +131,7 @@ impl Approver {
                 high_water: HighWater::new(),
                 settings: None,
                 seen: Vec::new(),
+                invitation: None,
             },
         })
     }
@@ -173,6 +198,57 @@ impl Approver {
     /// The finished sessions the Key app remembers, oldest first.
     pub fn seen_sessions(&self) -> &[[u8; 32]] {
         &self.kept.seen
+    }
+
+    /// AS-80: make an invitation from 17 random bytes the caller drew, good
+    /// for 30 minutes from `now` (BX-11), and hand the new state to `persist`
+    /// before it is returned. It replaces any invitation that was open.
+    pub fn make_invitation<E>(
+        &mut self,
+        random: &[u8; INVITATION_RANDOM_LEN],
+        now: u64,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<InvitationView, StateError<E>> {
+        let open = OpenInvitation {
+            invitation: Invitation::from_random(random),
+            expires_at: now.saturating_add(INVITATION_SECS),
+        };
+        let view = InvitationView {
+            text: open.invitation.to_text(),
+            expires_at: open.expires_at,
+        };
+        let mut next = self.kept.clone();
+        next.invitation = Some(open);
+        persist(&self.snapshot_of(&next)).map_err(StateError::Store)?;
+        self.kept = next;
+        Ok(view)
+    }
+
+    /// AS-80: the invitation that is open and has not run out at `now`.
+    pub fn open_invitation(&self, now: u64) -> Option<InvitationView> {
+        self.kept
+            .invitation
+            .as_ref()
+            .filter(|o| now < o.expires_at)
+            .map(|o| InvitationView {
+                text: o.invitation.to_text(),
+                expires_at: o.expires_at,
+            })
+    }
+
+    /// AS-80: forget the open invitation. Nothing is stored when none is held.
+    pub fn cancel_invitation<E>(
+        &mut self,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), StateError<E>> {
+        if self.kept.invitation.is_none() {
+            return Ok(());
+        }
+        let mut next = self.kept.clone();
+        next.invitation = None;
+        persist(&self.snapshot_of(&next)).map_err(StateError::Store)?;
+        self.kept = next;
+        Ok(())
     }
 
     /// AS-20: read a request and check it. Nothing is signed or stored.
@@ -262,6 +338,11 @@ impl Approver {
 
     pub(crate) fn snapshot_of(&self, kept: &Kept) -> Vec<u8> {
         let mut out = wire::start(&MAGIC_APPROVER_STATE, 256);
+        if kept.invitation.is_some() {
+            if let Some(v) = out.get_mut(4) {
+                *v = 2;
+            }
+        }
         out.extend_from_slice(&self.wallet_id);
         out.extend_from_slice(&self.owner.to_bytes());
         match &kept.signer {
@@ -292,6 +373,10 @@ impl Approver {
         for id in &kept.seen {
             out.extend_from_slice(id);
         }
+        if let Some(open) = &kept.invitation {
+            out.extend_from_slice(open.invitation.as_bytes());
+            out.extend_from_slice(&open.expires_at.to_le_bytes());
+        }
         out
     }
 
@@ -307,8 +392,15 @@ impl Approver {
         bytes: &[u8],
     ) -> Result<Self, RestoreError> {
         let mut approver = Self::new(secret, wallet, owner, policy).map_err(RestoreError::Setup)?;
-        let mut r = Reader::framed(bytes, &MAGIC_APPROVER_STATE).map_err(RestoreError::Decode)?;
         let d = RestoreError::Decode;
+        let mut r = Reader::new(bytes);
+        if r.take(4).map_err(d)? != MAGIC_APPROVER_STATE {
+            return Err(d(DecodeError::BadMagic));
+        }
+        let version = match r.u8().map_err(d)? {
+            v @ (1 | 2) => v,
+            v => return Err(d(DecodeError::UnsupportedVersion(v))),
+        };
         if r.array::<32>().map_err(d)? != approver.wallet_id {
             return Err(RestoreError::WrongWallet);
         }
@@ -349,6 +441,19 @@ impl Approver {
             }
             seen.push(id);
         }
+        let invitation = if version == 2 {
+            let raw = r.array::<INVITATION_RANDOM_LEN>().map_err(d)?;
+            if raw.last().is_some_and(|b| b & 0xfc != 0) {
+                return Err(d(DecodeError::NonCanonical("an invitation's spare bits")));
+            }
+            let expires_at = r.u64_le().map_err(d)?;
+            Some(OpenInvitation {
+                invitation: Invitation::from_random(&raw),
+                expires_at,
+            })
+        } else {
+            None
+        };
         r.finish().map_err(d)?;
         if let Some(s) = &settings {
             let roots = approver.roots().ok_or(RestoreError::BadSettings)?;
@@ -371,6 +476,7 @@ impl Approver {
         approver.kept.high_water = HighWater::from_next_index(high_water);
         approver.kept.settings = settings;
         approver.kept.seen = seen;
+        approver.kept.invitation = invitation;
         Ok(approver)
     }
 }

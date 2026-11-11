@@ -400,6 +400,83 @@ so. It builds no settings bytes and signs nothing.
   library's words, and the app's own words are in `AppWords`, listed in
   `docs/screens/owner-app.md`.
 
+### Connecting a Box
+
+The shop's Box is paired with an invitation the Key app makes and the owner
+types into the Box (`docs/SIGNER-RULES.md`, SR-80 to SR-82), a claim the Box
+offers, a welcome the Key app makes, and a link the owner phone keeps to the
+Box afterwards (`docs/SESSION-RULES.md`, AS-78 to AS-87). The app carries the
+owner's choices and shows the answers; the claim is checked by the node and
+the welcome is made by the Key app. OA-36 to OA-39 are kept for other work.
+
+- **OA-40.** The home screen has "Connect your Box". Its first screen says in
+  two lines what the steps are (type the invitation on the Box, type the
+  Box's address here; the Key app approves; this phone hands the Box its
+  welcome), holds a field for the Box's address, and has the buttons "Look
+  for the Box" and "Scan the Box's address". The Boxes being added are
+  listed on it, in the list of what waits to be delivered and after a
+  response is taken (OA-43, OA-47). Nothing is saved by this screen.
+- **OA-41.** The address is `host:port` on the local network or a v3 `.onion`
+  name and a port, typed or read as plain text by the camera at the owner's
+  press. The app judges only its shape (OA-07), drops spaces and capitals,
+  and gives it to the node's `boxFetchClaim`: with the proxy of Orbot for an
+  onion name and with none for an address on the local network. The call
+  waits on the network for up to about a minute, so a page says so first and
+  the call runs off the screen thread. A Box that cannot be reached, a
+  server that is not a Box, a Box with no invitation open and a Box already
+  paired are each the library's own words, shown on the first screen with
+  what was typed kept.
+- **OA-42.** A Box that answered is shown with its key in full. A phone with
+  no settings asks for today's price of one bitcoin in whole dollars (as in
+  OA-23); the node converts it. "Queue the Box for the Key app" calls
+  `boxQueue`, which queues the claim and the settings that add the Box
+  together or neither, and the screen then shows the Box's four words large,
+  to compare with the Box's own screen and the Key app's, and the words of
+  what comes next. The approval is the request and response screens of OA-20
+  and OA-21; nothing here marks a Box approved.
+- **OA-43.** The Box's welcome is handed over from the list of Boxes being
+  added, for a Box whose welcome is ready, with the address the Box was
+  found at already in its field. The call is `boxDeliver`, which takes the
+  welcome out of the queue only when the Box has taken it. When it did not,
+  the screen shows the library's words and the app's words that the approval
+  is kept on this phone, nothing was lost, and what to try; the queued
+  settings stay.
+- **OA-44.** The link to the Box is saved only after the Box took its
+  welcome, and only through the locked setup (OA-60): the app asks for the
+  PIN, the library opens the stored setup with it, the link lines
+  (`relay-route`, `relay-key`, `counter`, `heartbeat-every`,
+  `check-in-grace`) are replaced by the Box's route, the Box's key as the
+  relay key, the counters the library gave and no intervals (the default
+  ones), the text is checked with the strict reading of the setup text, and
+  the library locks it again under the same PIN and the file is replaced.
+  The text is never stored unlocked, and a wrong PIN counts as at the unlock
+  screen (OA-63). The app then starts again, which starts the link, with no
+  second PIN. When the settings name no counter, the text cannot be saved,
+  or the owner says "Not now", no link is made and the screen shows the
+  lines to add by hand; the Box is paired either way.
+- **OA-45.** The app builds no claim, welcome or settings bytes and signs
+  nothing: they are the library's. What it holds of a Box is the address it
+  was found at, in memory only and never written to a file or the clipboard.
+- **OA-46.** The app does not offer to pair a Box without the Key app, until
+  the shop has a way to sign settings without the Key app (`docs/DESIGN.md`
+  §2.9, the fallback, which is not built): without it the settings that add
+  the Box cannot get the signature `SignedSettings::verify` asks for, so the
+  path could not finish. The library keeps its two calls for that path
+  (`box_own_invitation`, `box_own_check`, BX-17) and their tests; the app
+  has no button and no screen for them.
+- **OA-47.** A Box that was not handed its welcome is listed with its four
+  words and "Forget this Box" (also on the screen after queuing). The call
+  is `boxForget`, which takes the queued claim and its settings, and an
+  approved welcome waiting in the queue, out in one step; the Box is not
+  told, and its invitation runs out by itself. A Box in an open session is
+  refused with the library's words until the session is abandoned, and a
+  Box that took its welcome has nothing to forget. The screen after it says
+  how to add the Box again.
+- **OA-48.** Every state and refusal of connecting a Box is shown with the
+  library's words or the app's own in `BoxWords`, a heading of at most 28
+  characters and each line of at most 140, listed in
+  `docs/screens/owner-app.md`.
+
 ## 9. What these rules do not do
 
 - **They do not protect a phone that is already lost to someone else.**

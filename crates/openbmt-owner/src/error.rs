@@ -59,6 +59,25 @@ impl fmt::Display for NodeKeyFault {
     }
 }
 
+/// What the hand-over to a Box still lacks (AS-86).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoxGap {
+    /// No finished welcome of the Box waits: the Key app has not approved
+    /// its claim, or it was handed over already.
+    Welcome,
+    /// No settings signed by both roots list the Box as a Box.
+    Settings,
+}
+
+impl fmt::Display for BoxGap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Welcome => write!(f, "no finished welcome of the Box waits"),
+            Self::Settings => write!(f, "no settings with both signatures list the Box as a Box"),
+        }
+    }
+}
+
 /// Why a call was refused. Nothing was changed and nothing was stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
@@ -135,6 +154,19 @@ pub enum Refusal {
     /// AS-76: the text given as the Lightning node is not a node key or
     /// address.
     LightningNode(NodeKeyFault),
+    /// AS-83: the bytes are not a Box's claim. The text is the decoder's.
+    BoxNotClaim(String),
+    /// AS-83: the claim names the owner phone's or the Key app's own key.
+    BoxIsRoot,
+    /// AS-83: the Box is on the settings held or queued, or its claim is
+    /// queued or its welcome waits already.
+    BoxKnown,
+    /// AS-86: the Box cannot be handed its welcome yet: something it needs
+    /// is not here.
+    BoxNotReady(BoxGap),
+    /// AS-87: no claim of this Box is queued and no welcome of it waits, so
+    /// there is nothing to forget.
+    BoxNothingToForget,
     /// AS-59: settings that do not pass the settings rules.
     SettingsInvalid(String),
     /// AS-59: a version that is not above every version known.
@@ -216,6 +248,18 @@ impl fmt::Display for Refusal {
                 "AS-58: the pairing request was made for another offer: another shop or network"
             ),
             Self::PairingKnown => write!(f, "AS-69: this counter is paired or waiting already"),
+            Self::BoxNotClaim(why) => {
+                write!(f, "AS-83: this is not a Box's claim: {why}")
+            }
+            Self::BoxIsRoot => write!(
+                f,
+                "AS-83: the claim names the key of the owner phone or of the Key app"
+            ),
+            Self::BoxKnown => write!(f, "AS-83: this Box is added or waiting already"),
+            Self::BoxNotReady(gap) => write!(f, "AS-86: {gap}"),
+            Self::BoxNothingToForget => {
+                write!(f, "AS-87: no claim of this Box is queued and no welcome of it waits")
+            }
             Self::NoSettingsRate => write!(
                 f,
                 "AS-70: no settings are held and no bitcoin price was given to start them"

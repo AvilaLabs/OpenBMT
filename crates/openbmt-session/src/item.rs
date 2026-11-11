@@ -1,6 +1,7 @@
 //! The items of a request (AS-06 to AS-11).
 
 use openbmt_core::batch::{AddressBatch, SignedBatch, MAX_COUNT};
+use openbmt_core::boxpair::{Claim, CLAIM_LEN};
 use openbmt_core::identity::{DeviceId, Sig};
 use openbmt_core::pairing::{name_is_valid, PairRequest};
 use openbmt_core::settings::{SignedSettings, MAX_DEVICES};
@@ -23,6 +24,8 @@ pub enum ItemKind {
     Pairing = 4,
     /// A health check (AS-11).
     HealthCheck = 5,
+    /// A Box's claim (AS-78).
+    BoxClaim = 6,
 }
 
 impl ItemKind {
@@ -34,6 +37,7 @@ impl ItemKind {
             3 => Some(Self::Settings),
             4 => Some(Self::Pairing),
             5 => Some(Self::HealthCheck),
+            6 => Some(Self::BoxClaim),
             _ => None,
         }
     }
@@ -130,6 +134,11 @@ pub enum Item {
         /// The number the Key app signs.
         nonce: [u8; 32],
     },
+    /// What a Box answered while it held the Key app's invitation (AS-78).
+    BoxClaim {
+        /// The claim, as the Box made it. Its MAC is the Key app's to check.
+        claim: Claim,
+    },
 }
 
 impl Item {
@@ -141,6 +150,7 @@ impl Item {
             Self::Settings { .. } => ItemKind::Settings,
             Self::Pairing { .. } => ItemKind::Pairing,
             Self::HealthCheck { .. } => ItemKind::HealthCheck,
+            Self::BoxClaim { .. } => ItemKind::BoxClaim,
         }
     }
 }
@@ -252,6 +262,7 @@ pub(crate) fn encode_body(item: &Item) -> Result<Vec<u8>, EncodeError> {
             out.extend_from_slice(&request.to_bytes());
         }
         Item::HealthCheck { nonce } => out.extend_from_slice(nonce),
+        Item::BoxClaim { claim } => out.extend_from_slice(&claim.to_bytes()),
     }
     if out.len() > MAX_SESSION_BYTES {
         return Err(EncodeError::TooLarge);
@@ -353,6 +364,12 @@ pub(crate) fn decode_body(kind: ItemKind, body: &[u8]) -> Result<Item, DecodeErr
             let nonce = r.array::<32>()?;
             r.finish()?;
             Ok(Item::HealthCheck { nonce })
+        }
+        ItemKind::BoxClaim => {
+            let mut r = Reader::new(body);
+            let claim = Claim::from_bytes(r.take(CLAIM_LEN)?)?;
+            r.finish()?;
+            Ok(Item::BoxClaim { claim })
         }
     }
 }

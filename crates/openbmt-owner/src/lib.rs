@@ -41,6 +41,7 @@
     )
 )]
 
+mod boxes;
 mod build;
 pub mod ceremony;
 mod codec;
@@ -53,6 +54,7 @@ mod state;
 mod take;
 mod types;
 
+pub use boxes::{BoxHandover, BoxQueued, BoxRequest, PendingBox, WaitingBox};
 pub use counter::{
     equal_shares, BundleParts, CounterBundleMade, CounterQueued, CounterRequest, WaitingCounter,
 };
@@ -60,12 +62,12 @@ pub use edit::{
     parse_lightning_node, sats_per_usd_at, LightningEdit, SettingsEdit, SettingsPreview,
     MAX_EDIT_CONFIRMATIONS, MAX_USD_PER_BTC, MIN_USD_PER_BTC,
 };
-pub use error::{BundleGap, NodeKeyFault, OwnerError, Refusal, RestoreError, SetupError};
+pub use error::{BoxGap, BundleGap, NodeKeyFault, OwnerError, Refusal, RestoreError, SetupError};
 pub use state::Owner;
 pub use types::{
     Built, CashAmount, CashOut, Deliverable, Delivery, FeePayer, IssuedRange, ItemOutcome, Options,
-    QueuedBatch, QueuedPairing, QueuedSettings, Refund, RefundPacking, SaleFacts, SaleKey,
-    SettingsQueued, Skipped, Stage, Taken,
+    QueuedBatch, QueuedBoxClaim, QueuedPairing, QueuedSettings, Refund, RefundPacking, SaleFacts,
+    SaleKey, SettingsQueued, Skipped, Stage, Taken,
 };
 
 /// AS-65: the magic of the owner phone's stored queue.
@@ -80,6 +82,8 @@ pub const MAX_BATCHES: usize = 16;
 pub const MAX_SETTINGS: usize = 16;
 /// AS-50: most pairings in the queue.
 pub const MAX_PAIRINGS: usize = 16;
+/// AS-50: most Box claims in the queue.
+pub const MAX_BOX_CLAIMS: usize = 4;
 /// AS-50: most sales whose facts are kept.
 pub const MAX_SALES: usize = 1024;
 /// OC-11, AS-50: most address ranges kept as issued.

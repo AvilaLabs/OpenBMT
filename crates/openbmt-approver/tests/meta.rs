@@ -5,7 +5,8 @@ use openbmt_core::identity::IdentityError;
 use openbmt_core::wire::DecodeError;
 
 const RULES: &str = include_str!("../../../docs/SESSION-RULES.md");
-const TEST_SOURCES: [&str; 4] = [
+const TEST_SOURCES: [&str; 5] = [
+    include_str!("box_pairing.rs"),
     include_str!("open.rs"),
     include_str!("lines.rs"),
     include_str!("decide.rs"),
@@ -25,18 +26,19 @@ fn rule_ids() -> Vec<u32> {
     ids
 }
 
-/// The rules of this crate: section 2, AS-20 to AS-38.
+/// The rules of this crate: section 2, AS-20 to AS-38, and the Key app's part
+/// of adding a Box, AS-80 to AS-82.
 fn own_rules() -> Vec<u32> {
     rule_ids()
         .into_iter()
-        .filter(|n| (20..50).contains(n))
+        .filter(|n| (20..50).contains(n) || (80..=82).contains(n))
         .collect()
 }
 
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
-    assert_eq!(own_rules().len(), 19);
-    assert!(own_rules().contains(&20) && own_rules().contains(&38));
+    assert_eq!(own_rules().len(), 22);
+    assert!(own_rules().contains(&20) && own_rules().contains(&82));
 }
 
 #[test]

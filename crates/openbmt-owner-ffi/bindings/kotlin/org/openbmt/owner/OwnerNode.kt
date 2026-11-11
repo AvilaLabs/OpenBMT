@@ -115,6 +115,14 @@ private const val OP_SETUP_LOCK_FORM = 100
 private const val OP_SETUP_LOCK = 101
 private const val OP_SETUP_UNLOCK = 102
 private const val OP_SETUP_CHANGE_PIN = 103
+private const val OP_BOX_FETCH_CLAIM = 104
+private const val OP_BOX_QUEUE = 105
+private const val OP_BOXES_WAITING = 106
+private const val OP_BOX_DELIVER = 107
+private const val OP_BOX_OWN_INVITATION = 108
+private const val OP_BOX_OWN_CHECK = 109
+private const val OP_BOXES_PENDING = 110
+private const val OP_BOX_FORGET = 111
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -171,6 +179,7 @@ private const val TAG_OUTBOX_KIND_TRANSACTION = 0
 private const val TAG_OUTBOX_KIND_BATCH = 1
 private const val TAG_OUTBOX_KIND_SETTINGS = 2
 private const val TAG_OUTBOX_KIND_PAIRING = 3
+private const val TAG_OUTBOX_KIND_BOX_WELCOME = 4
 private const val TAG_POS_VENDOR_VIEW_SQUARE = 0
 private const val TAG_POS_VENDOR_VIEW_CLOVER = 1
 private const val TAG_POS_METHOD_VIEW_GET = 0
@@ -511,7 +520,7 @@ class SettingsPreview(
     val settings: ByteArray,
 )
 
-enum class OutboxKind { Transaction, Batch, Settings, Pairing }
+enum class OutboxKind { Transaction, Batch, Settings, Pairing, BoxWelcome }
 
 /**
  * A signed object that waits to be delivered. [signedAt] is known for a batch
@@ -558,6 +567,36 @@ class CounterQueued(
 
 /** A counter whose finished pairing waits to be handed over. [name] is text from the counter. */
 class WaitingCounter(val counter: ByteArray, val name: String)
+
+/** Where a Box is: `host:port` on the local network, or a v3 `.onion` name and port through [proxy]. */
+class BoxLink(val address: String, val proxy: String)
+
+/** The claim a Box offered. [needsRate] says the phone holds no settings, so queuing needs today's price. */
+class BoxFound(val claim: ByteArray, val boxKey: ByteArray, val needsRate: Boolean)
+
+/** A Box's claim and the settings that add it, queued. [words] are the four words of the Box's key. */
+class BoxQueued(
+    val claimId: Long,
+    val settingsId: Long,
+    val settingsVersion: Long,
+    val boxKey: ByteArray,
+    val words: List<String>,
+)
+
+/** A Box whose welcome the Key app approved and that waits to be handed it. */
+class WaitingBox(val boxKey: ByteArray)
+
+/** A Box with a claim queued or a welcome waiting. [welcomeReady] says the welcome can be handed over; [words] are the four words of its key. */
+class PendingBox(val boxKey: ByteArray, val words: List<String>, val welcomeReady: Boolean)
+
+/** A Box that took its welcome: the link is made for [boxKey] and these [counters]. */
+class BoxDelivered(val boxKey: ByteArray, val counters: List<ByteArray>, val settingsVersion: Long)
+
+/** An invitation this phone made for itself, with no Key app (BX-17). */
+class BoxOwnInvitation(val text: String, val expiresAt: Long)
+
+/** A claim that answers this phone's own invitation. */
+class BoxOwnCheck(val boxKey: ByteArray, val words: List<String>)
 
 /** The code a counter takes: [code] is the bundle to show, [withBatch] says the first addresses are in it. */
 class CounterBundle(val code: ByteArray, val withBatch: Boolean, val words: Words)
@@ -1159,6 +1198,7 @@ private fun Reader.outboxKind(): OutboxKind =
         TAG_OUTBOX_KIND_BATCH -> OutboxKind.Batch
         TAG_OUTBOX_KIND_SETTINGS -> OutboxKind.Settings
         TAG_OUTBOX_KIND_PAIRING -> OutboxKind.Pairing
+        TAG_OUTBOX_KIND_BOX_WELCOME -> OutboxKind.BoxWelcome
         else -> tag("OutboxKind")
     }
 
@@ -1174,6 +1214,16 @@ internal fun Reader.counterQueued(): CounterQueued =
     CounterQueued(u32(), u32(), u32(), u32(), list { CounterShare(bytes(), u32()) }, words())
 
 internal fun Reader.waitingCounter(): WaitingCounter = WaitingCounter(bytes(), string())
+
+internal fun Reader.boxFound(): BoxFound = BoxFound(bytes(), bytes(), bool())
+
+internal fun Reader.boxQueued(): BoxQueued = BoxQueued(u32(), u32(), u32(), bytes(), strings())
+
+internal fun Reader.waitingBox(): WaitingBox = WaitingBox(bytes())
+
+internal fun Reader.pendingBox(): PendingBox = PendingBox(bytes(), strings(), bool())
+
+internal fun Reader.boxDelivered(): BoxDelivered = BoxDelivered(bytes(), list { bytes() }, u32())
 
 internal fun Reader.counterBundle(): CounterBundle = CounterBundle(bytes(), bool(), words())
 
@@ -1540,6 +1590,51 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
         return r.bytes().also { r.end() }
     }
 
+    /**
+     * Ask the Box at [link] for its claim. The call is made off the node's thread and takes up to
+     * about a minute when the Box does not answer.
+     */
+    fun boxFetchClaim(link: BoxLink): BoxFound {
+        val r = call(OP_BOX_FETCH_CLAIM, handle) { it.string(link.address).string(link.proxy) }
+        return r.boxFound().also { r.end() }
+    }
+
+    /**
+     * Queue the Box's claim and the settings that add it. [usdPerBtc] starts the settings when the
+     * phone holds none and is ignored when it does.
+     */
+    fun boxQueue(claim: ByteArray, usdPerBtc: Long): BoxQueued {
+        val r = call(OP_BOX_QUEUE, handle) { it.bytes(claim).u64(usdPerBtc) }
+        return r.boxQueued().also { r.end() }
+    }
+
+    /** The Boxes whose approved welcome waits to be handed over. */
+    fun boxesWaiting(): List<WaitingBox> {
+        val r = call(OP_BOXES_WAITING, handle)
+        return r.list { r.waitingBox() }.also { r.end() }
+    }
+
+    /** The Boxes with a claim queued or a welcome waiting, each once: the ones that can be forgotten. */
+    fun boxesPending(): List<PendingBox> {
+        val r = call(OP_BOXES_PENDING, handle)
+        return r.list { r.pendingBox() }.also { r.end() }
+    }
+
+    /**
+     * Forget a Box that was not handed its welcome: its queued claim and settings leave the queue in
+     * one write. A Box in an open session is refused until the session is abandoned.
+     */
+    fun boxForget(boxKey: ByteArray) = callUnit(OP_BOX_FORGET, handle) { it.bytes(boxKey) }
+
+    /**
+     * Hand the Box its welcome and the settings. Only when the Box took them are they taken out of
+     * the outbox; a refusal changes nothing.
+     */
+    fun boxDeliver(link: BoxLink, boxKey: ByteArray): BoxDelivered {
+        val r = call(OP_BOX_DELIVER, handle) { it.string(link.address).string(link.proxy).bytes(boxKey) }
+        return r.boxDelivered().also { r.end() }
+    }
+
     /** The link to the counters: the alerts and what each counter's copy holds. */
     fun linkState(): LinkState {
         val r = call(OP_LINK_STATE, handle)
@@ -1610,6 +1705,21 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
  * running while it happens, so these calls name no handle. The sealed records the calls return hold secrets:
  * the app seals each before it shows the next screen and hands it back with the next call.
  */
+/** Pairing a Box on this phone alone, with no Key app (BX-17). They work on no node. */
+object OwnerBoxes {
+    /** Make an invitation good for 30 minutes from [now]. The app keeps it in memory only. */
+    fun ownInvitation(now: Long): BoxOwnInvitation {
+        val r = call(OP_BOX_OWN_INVITATION, 0) { it.u64(now) }
+        return BoxOwnInvitation(r.string(), r.u64()).also { r.end() }
+    }
+
+    /** Check a Box's claim against this phone's own invitation. */
+    fun ownCheck(invitation: String, claim: ByteArray): BoxOwnCheck {
+        val r = call(OP_BOX_OWN_CHECK, 0) { it.string(invitation).bytes(claim) }
+        return BoxOwnCheck(r.bytes(), r.strings()).also { r.end() }
+    }
+}
+
 object OwnerCeremony {
     /** Make key 1 and the owner's root on this phone. Takes a moment: the app draws a page first. */
     fun makeKey1(args: Key1Args): Key1Made {

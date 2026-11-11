@@ -97,6 +97,7 @@ object OwnerModel {
         OutboxKind.Batch -> "Address batch ${row.id}"
         OutboxKind.Settings -> "Settings ${row.id}"
         OutboxKind.Pairing -> "Pairing ${row.id}"
+        OutboxKind.BoxWelcome -> "Box welcome ${row.id}"
     }
 
     /** What is known about a waiting object. The node keeps a signing time for a batch only. */

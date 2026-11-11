@@ -285,7 +285,7 @@ impl Owner {
                         first = Some((d.id, b));
                     }
                 }
-                Delivery::Transaction { .. } | Delivery::Pairing(_) => {}
+                Delivery::Transaction { .. } | Delivery::Pairing(_) | Delivery::BoxWelcome(_) => {}
             }
         }
         let (settings_id, settings) = best.ok_or(Refusal::BundleNotReady(BundleGap::Settings))?;

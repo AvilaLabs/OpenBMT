@@ -144,11 +144,28 @@ object ProtocolDecoderTest {
             r.end()
         }
 
+        val boxFound = decodeResponse(header(0, Writer().bytes(byteArrayOf(1, 2, 3)).bytes(ByteArray(32) { 4 }).bool(true).toByteArray())).boxFound()
+        check(boxFound.claim.size == 3 && boxFound.boxKey.size == 32 && boxFound.needsRate)
+        rejects("a short Box claim") { decodeResponse(header(0, Writer().bytes(byteArrayOf(1)).toByteArray())).boxFound() }
+        rejects("a Box rate flag") { decodeResponse(header(0, Writer().bytes(byteArrayOf(1)).bytes(ByteArray(32)).u8(2).toByteArray())).boxFound() }
+        val boxQueued = decodeResponse(
+            header(0, Writer().u32(1).u32(2).u32(3).bytes(ByteArray(32) { 5 }).u32(4).string("a").string("b").string("c").string("d").toByteArray()),
+        ).boxQueued()
+        check(boxQueued.claimId == 1L && boxQueued.settingsId == 2L && boxQueued.settingsVersion == 3L)
+        check(boxQueued.boxKey.size == 32 && boxQueued.words == listOf("a", "b", "c", "d"))
+        val waitingBoxes = decodeResponse(header(0, Writer().u32(1).bytes(ByteArray(32) { 6 }).toByteArray())).let { r -> r.list { r.waitingBox() } }
+        check(waitingBoxes.size == 1 && waitingBoxes[0].boxKey.size == 32)
+        val boxDelivered = decodeResponse(
+            header(0, Writer().bytes(ByteArray(32) { 7 }).u32(2).bytes(ByteArray(32) { 8 }).bytes(ByteArray(32) { 9 }).u32(5).toByteArray()),
+        ).boxDelivered()
+        check(boxDelivered.boxKey.size == 32 && boxDelivered.counters.size == 2 && boxDelivered.settingsVersion == 5L)
+        rejects("a short Box delivery") { decodeResponse(header(0, Writer().bytes(ByteArray(32)).u32(2).bytes(ByteArray(32)).toByteArray())).boxDelivered() }
+
         val outbox = decodeResponse(outboxFrame()).let { r -> r.list { r.outboxRow() } }
         check(outbox.size == 1 && outbox[0].kind == OutboxKind.Batch && outbox[0].id == 8L)
         check(outbox[0].txid == null && outbox[0].counter!!.size == 32 && outbox[0].version == null)
         check(outbox[0].signedAt == 1_700_000_000L && outbox[0].size == 300L && outbox[0].words.heading == "Words")
-        rejects("an outbox kind tag") { decodeResponse(outboxFrame(kind = 4)).let { r -> r.list { r.outboxRow() } } }
+        rejects("an outbox kind tag") { decodeResponse(outboxFrame(kind = 5)).let { r -> r.list { r.outboxRow() } } }
 
         val pos = decodeResponse(posStateFrame()).posState()
         check(pos.setup!!.vendor == PosVendor.Clover && pos.setup!!.location == "MERCH1")

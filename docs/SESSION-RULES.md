@@ -232,11 +232,11 @@ in memory, and nothing is changed if the store fails.
 
 - **AS-50.** Everything is bounded, and a call that would pass a bound is
   refused. At most 256 queued refunds; 16 cash-outs; 16 batches; 16 settings
-  changes; 16 pairings; 1,024 sales' facts; 8 open sessions; 256 finished
-  objects waiting to be delivered; 99 refunds in one transaction; 16
-  transactions in one session; 64 items in one session (AS-04); 256
-  outpoints kept with one refund or cash-out (AS-68); 65,536 issued address
-  ranges (OC-11).
+  changes; 16 pairings; 4 Box claims; 1,024 sales' facts; 8 open sessions;
+  256 finished objects waiting to be delivered; 99 refunds in one
+  transaction; 16 transactions in one session; 64 items in one session
+  (AS-04); 256 outpoints kept with one refund or cash-out (AS-68); 65,536
+  issued address ranges (OC-11).
 - **AS-51.** A refund's destination is a plain on-chain script of a kind the
   signer allows (SR-22: P2WPKH, P2WSH, P2TR, P2PKH or P2SH) and its amount
   is at least the dust limit of that kind (SP-22). The refund QR's own
@@ -515,6 +515,101 @@ the only one that does.
   app; tightening is signed by the owner alone and takes effect when
   delivered. The preview changes and stores nothing, and the settings it
   returns, given to `queue_settings`, are queued as they are.
+
+### Adding a Box
+
+A Box is paired by an invitation (`docs/BOX-RULES.md` BX-10 to BX-17). The
+Key app makes the invitation and the merchant types it into the Box. The
+owner phone then fetches the Box's claim from the Box's address and carries
+it to the Key app in a session, next to the settings that add the Box. The
+file's part is AS-78 and AS-79 (`openbmt-session`), the Key app's AS-80 to
+AS-82 (`openbmt-approver`) and the owner phone's AS-83 to AS-87
+(`openbmt-owner`). No new frame is needed: the claim and the welcome are the
+`OBM5` and `OBMM` frames of `openbmt-core`, carried whole.
+
+- **AS-78.** A `BoxClaim` item (kind 6) holds a Box's claim: the `OBM5`
+  bytes of BX-12, exactly 101 bytes. The file reads them strictly and does
+  not check the MAC, which takes the invitation and is the Key app's to
+  check (AS-81).
+- **AS-79.** The payload of an approved `BoxClaim` is a welcome: the `OBMM`
+  bytes of BX-15, exactly 101 bytes. It answers a `BoxClaim` item and no
+  other kind, and no other payload answers a `BoxClaim` (AS-13).
+- **AS-80.** The Key app holds at most one open Box invitation (BX-11).
+  `make_invitation` takes 17 random bytes from the caller, makes the
+  invitation (BX-10) with an end 30 minutes after the Key app's clock, and
+  hands the new state to `persist` before the text is returned. It replaces
+  an invitation that was open. The state of AS-38 holds it: `OBM3` is
+  version 1 without an invitation, written exactly as before, and version 2
+  with one, which adds the 17 bytes and the end time (u64 LE). Decoding stays
+  strict: unused bits of the invitation must be zero. `open_invitation`
+  gives the text and the end time while the time has not run out.
+  `cancel_invitation` forgets it, and stores nothing when none is held.
+- **AS-81.** The line of a `BoxClaim` item shows the Box's key in full and
+  its four fingerprint words (`DeviceId::fingerprint_words`, the words the
+  Box shows when it is paired), and three checks in this order: an
+  invitation of this Key app is open and has not run out on its clock; the
+  claim's MAC is the one for that invitation (BX-14, constant time); the
+  last settings this Key app co-signed, counting the lines before this one
+  that were approved (AS-32), list the Box's key as a Box (BX-20). The
+  line can be approved only if all three pass, and so the settings line
+  that adds the Box is approved first. A failed line names AS-81 and says
+  to make a new invitation.
+- **AS-82.** Approving the line makes the welcome (BX-15) with the pinned
+  owner root and this Key app's root, and it goes back as the payload of
+  AS-79. A session that holds a `BoxClaim` item spends the open invitation
+  when it is finished, in the same store as the rest of the new state
+  (AS-34), whatever happened to the line: approved, declined, not decided,
+  or failed (BX-11, BX-14). A session that is opened and not finished spends
+  nothing (AS-22).
+- **AS-83.** `queue_box_claim` queues a Box's claim, read strictly. A claim
+  that does not decode is refused as "not a Box's claim". It is refused too
+  when the Box's key is the owner phone's or the Key app's root, when the
+  Box is a device or a Box in the settings held or queued, when a claim for
+  that key is queued or its finished welcome waits in the outbox, and when
+  four claims are queued already (AS-50).
+  The owner phone cannot check a claim and does not try (BX-13). It returns
+  the number of the entry and the four fingerprint words of the Box's key,
+  which the Key app and the Box show too.
+- **AS-84.** `queue_box` queues, for a claim that is queued and not in a
+  session, the settings that add the Box and puts both in one write. The
+  settings are the latest held or queued, with the Box on the device list
+  and in the Boxes, the counters and shares unchanged, and a version one
+  above every version signed so far; with none held or queued they are the
+  starting values at a rate the caller gives, and a rate of 0 is refused
+  (AS-70). They must pass `Settings::validate`, so a ninth Box is refused
+  (BX-20). They are queued under AS-59: adding a Box loosens. In a session
+  the claim comes after the settings. If either is refused, a bound is
+  reached or the store fails, nothing is queued.
+- **AS-85.** `take_response` takes an approved `BoxClaim` result only when
+  the welcome names this owner phone's root and the pinned Key app root,
+  and then keeps the claim and the welcome together in the outbox. A
+  welcome that names other roots, or any declined `BoxClaim`, goes back to
+  the queue as returned, with the reason (AS-63). The owner phone cannot
+  check the welcome's MAC: it never sees the invitation (BX-13). The
+  Box does, when it is handed the welcome (BX-15).
+- **AS-86.** `box_handover` gives, for a Box's key, the welcome and the
+  signed settings to hand the Box: the settings with both signatures that
+  list the key as a Box, the highest version of them. With no finished
+  welcome, or no such settings, it is refused with which of the two is
+  missing, and nothing is changed. `mark_box_delivered` is what the owner
+  phone says once the Box has accepted the welcome (BX-15): the welcome
+  leaves the outbox, and so do the settings when they list no counter,
+  because no other device is waiting for them. With no finished welcome for
+  the key it is refused and nothing changes. A Box that refused the welcome
+  after the Key app approved leaves everything in the outbox as it was. The
+  Box is then unpaired and its invitation is spent (BX-15), so the owner
+  makes a new invitation on the Key app and a new claim is queued.
+- **AS-87.** `forget_box` takes a Box that was not handed its welcome out of
+  the queue in one write: its queued claim, the queued settings that list
+  it, and the welcome and the approved settings that list it waiting in the
+  outbox. With no claim queued and no welcome waiting for the key it is
+  refused and nothing changes; a Box that took its welcome (AS-86) has
+  neither. A claim or settings in an open session are refused until the
+  session is abandoned (AS-54), so a response that may still come back finds
+  what it answers. Forgetting signs nothing and tells the Box nothing: its
+  invitation is spent or runs out by itself. `boxes_pending` lists the
+  Boxes that can be forgotten: each key that has a claim queued or a
+  welcome waiting, once, with whether the welcome is ready to hand over.
 
 ## 4. What these rules do not do
 

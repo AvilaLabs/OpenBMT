@@ -8,6 +8,7 @@ use std::convert::Infallible;
 use bitcoin::bip32::Xpriv;
 
 use openbmt_core::batch::{BatchError, CosignError, HighWater};
+use openbmt_core::boxpair::{Claim, Welcome};
 use openbmt_core::pairing::{check_request, PairOffer};
 use openbmt_core::settings::{changed_fields, Change, SettingsError};
 use openbmt_session::{health_proof, DeclineCode, Item, Label, OutputLabel, Payload, RequestItem};
@@ -15,8 +16,8 @@ use openbmt_signer::{OutputKind, Review, SignError, Signed, SignerState};
 
 use crate::describe::{field_values, hex, shown_name};
 use crate::line::{
-    BatchLine, CheckStep, Detail, HealthLine, OutputLine, PairingLine, SettingChange, SettingsLine,
-    SpendLine, SpendReview, StepStatus,
+    BatchLine, BoxClaimLine, CheckStep, Detail, HealthLine, OutputLine, PairingLine, SettingChange,
+    SettingsLine, SpendLine, SpendReview, StepStatus,
 };
 use crate::session::Session;
 use crate::state::Kept;
@@ -63,6 +64,7 @@ pub(crate) fn eval_item(
             request,
             settings_version,
         } => eval_pairing(session, index, kept, request, *settings_version, apply),
+        Item::BoxClaim { claim } => eval_box_claim(session, index, kept, claim, apply),
         Item::HealthCheck { nonce } => {
             let payload = apply.then(|| Payload::Health {
                 sig: health_proof(
@@ -514,5 +516,84 @@ fn eval_pairing(
             }),
         },
         Err(e) => blocked(detail, DeclineCode::ChecksFailed, format!("AS-28: {e}")),
+    }
+}
+
+// ---- Box claim (AS-81, AS-82) ---------------------------------------------
+
+const CLAIM_STEPS: [&str; 3] = [
+    "an invitation of this app is open and has not run out",
+    "the claim answers that invitation",
+    "the settings that add this Box are approved",
+];
+
+fn eval_box_claim(
+    session: &Session<'_>,
+    index: usize,
+    kept: &mut Kept,
+    claim: &Claim,
+    apply: bool,
+) -> Checked {
+    let a = &*session.approver;
+    // The invitation is spent by the first claim this app looks at with it
+    // (BX-11). `kept` is the copy of this evaluation: the finish keeps it,
+    // the lines and the decisions throw it away (AS-21).
+    let open = kept.invitation.take();
+    let live = open.filter(|o| session.now < o.expires_at);
+    let words = session
+        .words
+        .get(index)
+        .map(|cell| *cell.get_or_init(|| claim.box_key.fingerprint_words()));
+    let line = |failed: Option<usize>| {
+        Detail::BoxClaim(BoxClaimLine {
+            box_key: claim.box_key,
+            words,
+            checks: steps(&CLAIM_STEPS, failed),
+        })
+    };
+    let Some(live) = live else {
+        return blocked(
+            line(Some(0)),
+            DeclineCode::ChecksFailed,
+            "AS-81: no invitation of this app is open: make a new one",
+        );
+    };
+    if !claim.verify(&live.invitation) {
+        return blocked(
+            line(Some(1)),
+            DeclineCode::ChecksFailed,
+            "AS-81: this is not the claim of a Box that holds the invitation: it is spent, make a new one",
+        );
+    }
+    // BX-14: the settings that add the Box are the Key app's own, co-signed
+    // by it, here or earlier, and name the Box's key as a Box (BX-20).
+    let listed = kept
+        .settings
+        .as_ref()
+        .is_some_and(|s| s.approver_sig.is_some() && s.settings.boxes.contains(&claim.box_key));
+    if !listed {
+        return blocked(
+            line(Some(2)),
+            DeclineCode::ChecksFailed,
+            "AS-81: the settings that add this Box are not approved: approve that line first",
+        );
+    }
+    let detail = line(None);
+    if !apply {
+        return Checked {
+            detail,
+            block: None,
+            payload: None,
+        };
+    }
+    let Some(roots) = a.roots() else {
+        return blocked(detail, DeclineCode::ChecksFailed, "AS-82: no roots to pin");
+    };
+    Checked {
+        detail,
+        block: None,
+        payload: Some(Payload::BoxWelcome {
+            welcome: Welcome::make(&live.invitation, claim, roots),
+        }),
     }
 }

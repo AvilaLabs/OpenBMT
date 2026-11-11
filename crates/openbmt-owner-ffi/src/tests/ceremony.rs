@@ -54,7 +54,7 @@ impl KeyStore for Store {
 }
 
 /// A Key app with key 2 made.
-fn key_app_with_key2() -> Arc<KeyApp> {
+pub(super) fn key_app_with_key2() -> Arc<KeyApp> {
     let app = KeyApp::open(Store::new()).expect("opens");
     app.set_pin("482913".to_string()).expect("a PIN");
     app.create_from_entropy(EntropySource::Platform, KeyNetwork::Regtest)
@@ -71,12 +71,14 @@ fn key3() -> KeyPart {
     }
 }
 
-fn answer_of(app: &KeyApp) -> Vec<u8> {
+pub(super) fn answer_of(app: &KeyApp) -> Vec<u8> {
     app.take_key3(key3().origin_text()).expect("key 3 taken");
     app.public_answer().expect("the answer")
 }
 
-fn started(answer: &[u8]) -> (crate::ceremony::Key1Made, crate::ceremony::WalletBuiltView) {
+pub(super) fn started(
+    answer: &[u8],
+) -> (crate::ceremony::Key1Made, crate::ceremony::WalletBuiltView) {
     let made = make_key1(Key1Args {
         network: OwnerNetwork::Regtest,
         show_words: false,

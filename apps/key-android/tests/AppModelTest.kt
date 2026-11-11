@@ -19,7 +19,11 @@ import org.openbmt.app.Tries
 import org.openbmt.app.TriesFile
 import org.openbmt.app.TriesRecord
 import org.openbmt.app.Who
+import org.openbmt.key.BoxClaimDetail
+import org.openbmt.key.CheckStatus
+import org.openbmt.key.CheckView
 import org.openbmt.key.HealthDetail
+import org.openbmt.key.InvitationView
 import org.openbmt.key.Key3View
 import org.openbmt.key.KeyException
 import org.openbmt.key.LineDetail
@@ -146,7 +150,7 @@ object AppModelTest {
     // Words the app wrote itself: the library has no row for them.
     private val notInTheCatalogue = AppWords.urWords().map { it.first }.toSet() + setOf(
         "debuggingOn", "wirelessDebuggingOn", "accessibilityOn", "keyInSoftware", "libraryMissing", "fault",
-        "keystoreUnavailable", "fileNotRead", "fileNotSaved", "cameraOff", "cameraNotStarted", "codeNotForField", "notANumber", "flipsNotReadable", "answersReady", "pairOffer",
+        "keystoreUnavailable", "fileNotRead", "fileNotSaved", "cameraOff", "cameraNotStarted", "codeNotForField", "notANumber", "flipsNotReadable", "answersReady", "pairOffer", "pairBox", "invitationRunOut", "boxFound",
         "key3Needed", "key3UrNotRead", "key3NotText", "key3Mismatch", "scanOwnerWallet", "checkWallet", "walletMismatch",
         "walletLacksKey3", "choosePin", "upgradePin", "pinsDiffer", "pinChanged", "working", "waitForTry",
         "triesNotSaved", "wiped", "wipeFailed", "cashOut", "scanDeposit", "notADepositCode", "nameAddress",
@@ -546,6 +550,53 @@ object AppModelTest {
         ok(noAddress.removable == null && noAddress.address == "6a0102" && noAddress.status == "not active", "a script without an address")
     }
 
+    // ---- pairing a Box (docs/SIGNER-RULES.md SR-80 to SR-82) ----
+
+    private fun sr_80_the_invitation_is_one_of_six_groups_of_five() {
+        val text = "ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567"
+        ok(BoxModel.groups(text) == listOf("ABCDE", "FGHJK", "MNPQR", "STVWX", "YZ012", "34567"), "six groups of five")
+        ok(BoxModel.spaced(text) == "ABCDE   FGHJK   MNPQR   STVWX   YZ012   34567", "the groups stand apart")
+        ok(BoxModel.groups("ABCDE-FGHJK-MNPQR-STVWX-YZ012") == null, "five groups are not an invitation")
+        ok(BoxModel.groups("ABCDE-FGHJK-MNPQR-STVWX-YZ012-3456") == null, "a short group is not an invitation")
+        ok(BoxModel.groups("ABCDE-FGHJK-MNPQR-STVWX-YZ012-3456I") == null, "a letter outside the alphabet is not an invitation")
+        ok(BoxModel.groups("abcde-fghjk-mnpqr-stvwx-yz012-34567") == null, "lower case is not drawn")
+        ok(BoxModel.spaced("junk") == null, "junk is not drawn")
+    }
+
+    private fun sr_81_the_countdown_and_the_run_out() {
+        val inv = InvitationView("ABCDE-FGHJK-MNPQR-STVWX-YZ012-34567", 2_800, 1_800)
+        ok(BoxModel.secsLeft(inv, 1_000) == 1_800L && BoxModel.timeLeft(1_800) == "30:00", "30 minutes at the start")
+        ok(BoxModel.timeLeft(61) == "1:01" && BoxModel.timeLeft(9) == "0:09" && BoxModel.timeLeft(-3) == "0:00", "minutes and seconds")
+        ok(!BoxModel.runOut(inv, 2_799) && BoxModel.runOut(inv, 2_800) && BoxModel.runOut(inv, 9_999), "it runs out at its end and not before")
+        ok(BoxModel.secsLeft(inv, 9_999) == 0L, "no negative time")
+        ok(AppWords.pairBox.what.contains("30 minutes") && AppWords.pairBox.what.contains("once"), "the screen says it works once and for 30 minutes")
+        ok(AppWords.pairBox.next.contains("30 characters") && AppWords.pairBox.next.contains("shared computer"), "the screen warns about a shared computer")
+        ok(AppWords.pairBox.next.contains("Box's own setup"), "the screen says where to type it")
+        ok(AppWords.invitationRunOut.next.contains("new invitation"), "the run-out words say what to do")
+    }
+
+    private fun sr_82_the_box_found_line() {
+        val checks = listOf(CheckView("an invitation of this app is open", CheckStatus.Passed), CheckView("the settings are approved", CheckStatus.Failed))
+        val key = ByteArray(32) { (it + 1).toByte() }
+        val line = LineView(
+            4, LineKind.BoxClaim, "Box", false, "AS-81: the settings that add this Box are not approved: approve that line first", null,
+            LineDetail.BoxClaim(BoxClaimDetail(key, listOf("focus", "hold", "cousin", "dose"), checks)),
+        )
+        val t = LineModel.describe(line)
+        ok(t.title == "Box" || t.title == "Box found", "the title says a Box was found: ${t.title}")
+        ok(t.prominent == "focus   hold   cousin   dose", "the four words are the prominent line: ${t.prominent}")
+        ok(t.instruction!!.contains("four words") && t.instruction!!.contains("same order"), "the instruction says to compare")
+        ok(t.rows.any { it.contains("01020304 05060708") && it.contains("1d1e1f20") }, "the key is shown in full")
+        ok(t.rows.any { it.startsWith("Check not passed:") } && t.rows.any { it.startsWith("Check passed:") }, "each check has its row")
+        ok(!t.canApprove && t.failure!!.startsWith("AS-81"), "a failing claim says why and is not approvable")
+        val noWords = LineModel.describe(
+            LineView(4, LineKind.BoxClaim, "", true, null, null, LineDetail.BoxClaim(BoxClaimDetail(key, null, emptyList()))),
+        )
+        ok(noWords.title == "Box found" && noWords.prominent == null && noWords.rows.any { it.contains("cannot be compared") }, "no words, no comparison")
+        ok(BoxModel.hexGroups(ByteArray(4)) == "00000000", "a short key is one group")
+        ok(AppWords.boxFound.heading == "Box found" && AppWords.boxFound.who == Who.KEY_HOLDER, "the words say Box found")
+    }
+
     private fun lockTests(appDir: File?) {
         sr_74_key_files_stay_out_of_backups(appDir)
         sr_75_waits_and_tries_left()
@@ -553,6 +604,9 @@ object AppModelTest {
         sr_77_relock_after_a_minute()
         sr_78_deposit_code_from_the_camera()
         sr_79_list_rows()
+        sr_80_the_invitation_is_one_of_six_groups_of_five()
+        sr_81_the_countdown_and_the_run_out()
+        sr_82_the_box_found_line()
     }
 
     @JvmStatic

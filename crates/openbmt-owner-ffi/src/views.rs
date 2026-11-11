@@ -1303,13 +1303,16 @@ pub enum OutboxKind {
     Settings,
     /// A pairing.
     Pairing,
+    /// A Box's welcome.
+    BoxWelcome,
 }
 
 wire_unit_enum!(OutboxKind {
     Transaction = 0,
     Batch = 1,
     Settings = 2,
-    Pairing = 3
+    Pairing = 3,
+    BoxWelcome = 4
 });
 
 /// One signed object that waits to be delivered.

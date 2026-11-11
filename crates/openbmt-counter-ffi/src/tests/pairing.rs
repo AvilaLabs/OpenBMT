@@ -199,6 +199,7 @@ impl Phones {
                 }
                 Delivery::Batch(b) => first = Some(SignedBatch::from_bytes(b).unwrap()),
                 Delivery::Transaction { .. } => panic!("no transaction was asked for"),
+                Delivery::BoxWelcome(_) => panic!("no Box was asked for"),
             }
         }
         let bundle = CounterBundle::new(

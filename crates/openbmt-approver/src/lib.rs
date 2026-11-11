@@ -43,14 +43,14 @@ mod state;
 
 pub use error::{DecideError, FinishError, RefuseSession, RestoreError, SetupError, StateError};
 pub use line::{
-    BatchLine, CheckStep, Choice, Detail, HealthLine, Line, OutputLine, PairingLine, SettingChange,
-    SettingsLine, SpendLine, SpendReview, StepStatus,
+    BatchLine, BoxClaimLine, CheckStep, Choice, Detail, HealthLine, Line, OutputLine, PairingLine,
+    SettingChange, SettingsLine, SpendLine, SpendReview, StepStatus,
 };
 pub use say::{
     all_words, no_key2_words, receive_range_words, words_for_text, RECEIVE_MARK_REFUSED,
 };
 pub use session::Session;
-pub use state::Approver;
+pub use state::{Approver, InvitationView};
 
 /// AS-22: how many finished session IDs the Key app remembers.
 pub const MAX_SESSION_LOG: usize = 256;

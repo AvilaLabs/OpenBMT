@@ -161,6 +161,19 @@ pub struct PairingLine {
     pub settings_version_to_sign: u32,
 }
 
+/// The line of a `BoxClaim` item (AS-81).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoxClaimLine {
+    /// The Box's key, in full.
+    pub box_key: DeviceId,
+    /// The four fingerprint words of the Box's key, the words the Box's
+    /// console and status page show when it is paired. They take a moment to
+    /// work out.
+    pub words: Option<[&'static str; 4]>,
+    /// The checks, in their order.
+    pub checks: Vec<CheckStep>,
+}
+
 /// The line of a `HealthCheck` item (AS-29).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HealthLine {
@@ -181,6 +194,8 @@ pub enum Detail {
     Pairing(PairingLine),
     /// A health check.
     Health(HealthLine),
+    /// A Box's claim.
+    BoxClaim(BoxClaimLine),
 }
 
 /// One line of the session, made from the Key app's own checks (AS-23).

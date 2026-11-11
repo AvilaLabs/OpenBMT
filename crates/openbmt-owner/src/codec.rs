@@ -7,7 +7,13 @@
 //!   | known settings: flag, then length u32 and the `OBMS` bytes
 //!   | sales | refunds | cash-outs | batches | settings | pairings
 //!   | open sessions | finished objects | issued ranges
+//!   | version 2 only: Box claims
 //! ```
+//!
+//! The version is 1 until the queue holds anything of a Box (a claim, a
+//! frozen claim or a welcome that waits, AS-83 to AS-85) and 2 from then on:
+//! a queue without one is written exactly as before. Version 2 adds the list
+//! of Box claims at the end: number, the claim's `OBM5` bytes and the stage.
 //!
 //! Every list is a u32 count and then its entries in ascending order of
 //! their key (the issued ranges: counter, start, count and the time the
@@ -22,6 +28,7 @@ use bitcoin::consensus::{deserialize, serialize};
 use bitcoin::hashes::Hash;
 use bitcoin::{OutPoint, ScriptBuf, Transaction, Txid};
 use openbmt_core::batch::{BatchBuilder, SignedBatch};
+use openbmt_core::boxpair::{Claim, CLAIM_LEN};
 use openbmt_core::identity::Sig;
 use openbmt_core::pairing::{check_request, PairOffer, PairRequest};
 use openbmt_core::settings::{SettingsError, SignedSettings};
@@ -33,12 +40,14 @@ use crate::error::{Refusal, RestoreError};
 use crate::state::{outputs_fit, Frozen, OpenSession, Owner, SaleEntry, State};
 use crate::types::{
     CashAmount, CashOut, Deliverable, Delivery, FeePayer, IssuedRange, Options, QueuedBatch,
-    QueuedPairing, QueuedSettings, Refund, RefundPacking, SaleFacts, SaleKey, Stage,
+    QueuedBoxClaim, QueuedPairing, QueuedSettings, Refund, RefundPacking, SaleFacts, SaleKey,
+    Stage,
 };
 use crate::{
-    MAGIC_OWNER_QUEUE, MAX_BATCHES, MAX_CASH_OUTS, MAX_CONFLICT_OUTPOINTS, MAX_ISSUED_RANGES,
-    MAX_ITEMS_PER_SESSION, MAX_OPEN_SESSIONS, MAX_OUTBOX, MAX_PAIRINGS, MAX_REFUNDS,
-    MAX_REFUNDS_PER_TX, MAX_SALES, MAX_SESSION_REQUEST, MAX_SETTINGS, MAX_SNAPSHOT_BYTES,
+    MAGIC_OWNER_QUEUE, MAX_BATCHES, MAX_BOX_CLAIMS, MAX_CASH_OUTS, MAX_CONFLICT_OUTPOINTS,
+    MAX_ISSUED_RANGES, MAX_ITEMS_PER_SESSION, MAX_OPEN_SESSIONS, MAX_OUTBOX, MAX_PAIRINGS,
+    MAX_REFUNDS, MAX_REFUNDS_PER_TX, MAX_SALES, MAX_SESSION_REQUEST, MAX_SETTINGS,
+    MAX_SNAPSHOT_BYTES,
 };
 
 fn bad(why: &'static str) -> DecodeError {
@@ -160,12 +169,37 @@ fn put_frozen(out: &mut Vec<u8>, number: u32, f: &Frozen) {
             out.extend_from_slice(&n.to_le_bytes());
         }
         Frozen::Health => out.push(4),
+        Frozen::BoxClaim(n) => {
+            out.push(5);
+            out.extend_from_slice(&n.to_le_bytes());
+        }
     }
+}
+
+/// Whether the state holds anything of a Box, so that its snapshot is
+/// version 2.
+fn uses_box(st: &State) -> bool {
+    !st.box_claims.is_empty()
+        || st.sessions.iter().any(|s| {
+            s.frozen
+                .iter()
+                .any(|(_, f)| matches!(f, Frozen::BoxClaim(_)))
+        })
+        || st
+            .outbox
+            .iter()
+            .any(|d| matches!(d.what, Delivery::BoxWelcome(_)))
 }
 
 /// AS-65: the snapshot of `state`.
 pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
     let mut out = wire::start(&MAGIC_OWNER_QUEUE, 1024);
+    let with_box = uses_box(st);
+    if with_box {
+        if let Some(v) = out.get_mut(4) {
+            *v = 2;
+        }
+    }
     out.extend_from_slice(&owner.wallet_id);
     out.extend_from_slice(&owner.identity.device_id().to_bytes());
     out.extend_from_slice(&owner.roots.approver.to_bytes());
@@ -299,6 +333,10 @@ pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
                 out.push(3);
                 put_blob(&mut out, b);
             }
+            Delivery::BoxWelcome(b) => {
+                out.push(4);
+                put_blob(&mut out, b);
+            }
         }
     }
     put_u32(&mut out, st.issued.len());
@@ -307,6 +345,14 @@ pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
         out.extend_from_slice(&range.start.to_le_bytes());
         out.extend_from_slice(&range.count.to_le_bytes());
         out.extend_from_slice(&range.signed_at.to_le_bytes());
+    }
+    if with_box {
+        put_u32(&mut out, st.box_claims.len());
+        for c in &st.box_claims {
+            out.extend_from_slice(&c.id.to_le_bytes());
+            put_blob(&mut out, &c.claim.to_bytes());
+            put_stage(&mut out, &c.stage);
+        }
     }
     if out.len() > MAX_SNAPSHOT_BYTES {
         return Err(Refusal::SnapshotTooLarge);
@@ -403,7 +449,7 @@ fn read_opt_id(r: &mut Reader<'_>) -> Result<Option<u32>, DecodeError> {
     }
 }
 
-fn read_frozen(r: &mut Reader<'_>) -> Result<(u32, Frozen), DecodeError> {
+fn read_frozen(r: &mut Reader<'_>, with_box: bool) -> Result<(u32, Frozen), DecodeError> {
     let number = r.u32_le()?;
     let f = match r.u8()? {
         0 => {
@@ -434,6 +480,7 @@ fn read_frozen(r: &mut Reader<'_>) -> Result<(u32, Frozen), DecodeError> {
         2 => Frozen::Settings(r.u32_le()?),
         3 => Frozen::Pairing(r.u32_le()?),
         4 => Frozen::Health,
+        5 if with_box => Frozen::BoxClaim(r.u32_le()?),
         k => return Err(DecodeError::UnknownKind(k)),
     };
     Ok((number, f))
@@ -452,7 +499,15 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
         return Err(RestoreError::Decode(DecodeError::TooLarge));
     }
     let d = RestoreError::Decode;
-    let mut r = Reader::framed(bytes, &MAGIC_OWNER_QUEUE).map_err(d)?;
+    let mut r = Reader::new(bytes);
+    if r.take(4).map_err(d)? != MAGIC_OWNER_QUEUE {
+        return Err(d(DecodeError::BadMagic));
+    }
+    let with_box = match r.u8().map_err(d)? {
+        1 => false,
+        2 => true,
+        v => return Err(d(DecodeError::UnsupportedVersion(v))),
+    };
     if r.array::<32>().map_err(d)? != owner.wallet_id {
         return Err(RestoreError::WrongWallet);
     }
@@ -661,7 +716,7 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
         let m = r.count(MAX_ITEMS_PER_SESSION, 5).map_err(d)?;
         let mut frozen = Vec::with_capacity(m);
         for _ in 0..m {
-            frozen.push(read_frozen(&mut r).map_err(d)?);
+            frozen.push(read_frozen(&mut r, with_box).map_err(d)?);
         }
         st.sessions.push(OpenSession {
             id,
@@ -697,6 +752,13 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
             1 => Delivery::Batch(read_blob(&mut r, 1 << 22).map_err(d)?.to_vec()),
             2 => Delivery::Settings(read_blob(&mut r, 1 << 20).map_err(d)?.to_vec()),
             3 => Delivery::Pairing(read_blob(&mut r, 1 << 12).map_err(d)?.to_vec()),
+            4 if with_box => {
+                let blob = read_blob(&mut r, 2 * CLAIM_LEN).map_err(d)?;
+                if blob.len() != 2 * CLAIM_LEN {
+                    return Err(d(bad("a waiting welcome is not a claim and a welcome")));
+                }
+                Delivery::BoxWelcome(blob.to_vec())
+            }
             k => return Err(d(DecodeError::UnknownKind(k))),
         };
         st.outbox.push(Deliverable { id, what });
@@ -724,6 +786,22 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
         next_free = range.end();
         st.issued.push(range);
     }
+    if with_box {
+        let own = owner.identity.device_id();
+        let n = r.count(MAX_BOX_CLAIMS, 9).map_err(d)?;
+        for _ in 0..n {
+            let id = r.u32_le().map_err(d)?;
+            let blob = read_blob(&mut r, CLAIM_LEN).map_err(d)?;
+            let claim = Claim::from_bytes(blob).map_err(d)?;
+            if claim.box_key == own || claim.box_key == owner.roots.approver {
+                return Err(RestoreError::Inconsistent(
+                    "a queued Box claim names a root of this shop",
+                ));
+            }
+            let stage = read_stage(&mut r).map_err(d)?;
+            st.box_claims.push(QueuedBoxClaim { id, claim, stage });
+        }
+    }
     r.finish().map_err(d)?;
 
     check_consistency(owner, &st)?;
@@ -742,6 +820,7 @@ fn check_consistency(owner: &Owner, st: &State) -> Result<(), RestoreError> {
         && ascending(&st.batches, |r| r.id)
         && ascending(&st.settings, |r| r.id)
         && ascending(&st.pairings, |r| r.id)
+        && ascending(&st.box_claims, |r| r.id)
         && ascending(&st.outbox, |r| r.id))
     {
         return Err(bad("numbers are not in ascending order"));
@@ -756,6 +835,7 @@ fn check_consistency(owner: &Owner, st: &State) -> Result<(), RestoreError> {
         .chain(st.batches.iter().map(|r| r.id))
         .chain(st.settings.iter().map(|r| r.id))
         .chain(st.pairings.iter().map(|r| r.id))
+        .chain(st.box_claims.iter().map(|r| r.id))
         .chain(st.outbox.iter().map(|r| r.id));
     for id in ids {
         if id >= st.next_id || !seen.insert(id) {
@@ -796,7 +876,8 @@ fn check_consistency(owner: &Owner, st: &State) -> Result<(), RestoreError> {
     };
     if !(st.batches.iter().all(|b| plain(&b.stage))
         && st.settings.iter().all(|b| plain(&b.stage))
-        && st.pairings.iter().all(|b| plain(&b.stage)))
+        && st.pairings.iter().all(|b| plain(&b.stage))
+        && st.box_claims.iter().all(|b| plain(&b.stage)))
     {
         return Err(bad(
             "a batch, settings or pairing has a stage it cannot have",
@@ -811,7 +892,8 @@ fn check_consistency(owner: &Owner, st: &State) -> Result<(), RestoreError> {
         .chain(st.cash_outs.iter().map(|r| (r.id, &r.stage)))
         .chain(st.batches.iter().map(|r| (r.id, &r.stage)))
         .chain(st.settings.iter().map(|r| (r.id, &r.stage)))
-        .chain(st.pairings.iter().map(|r| (r.id, &r.stage)));
+        .chain(st.pairings.iter().map(|r| (r.id, &r.stage)))
+        .chain(st.box_claims.iter().map(|r| (r.id, &r.stage)));
     for (id, stage) in stages {
         if let Stage::InSession { session } = stage {
             in_session.insert(id, *session);
@@ -842,6 +924,7 @@ fn check_consistency(owner: &Owner, st: &State) -> Result<(), RestoreError> {
                     | (K::BatchRefill, Frozen::Batch(_))
                     | (K::Settings, Frozen::Settings(_))
                     | (K::Pairing, Frozen::Pairing(_))
+                    | (K::BoxClaim, Frozen::BoxClaim(_))
                     | (K::HealthCheck, Frozen::Health)
             );
             if asked.number != *number || !fits {
@@ -872,7 +955,10 @@ fn check_consistency(owner: &Owner, st: &State) -> Result<(), RestoreError> {
                 Frozen::Spend {
                     refunds, cash_out, ..
                 } => refunds.iter().copied().chain(*cash_out).collect(),
-                Frozen::Batch(n) | Frozen::Settings(n) | Frozen::Pairing(n) => vec![*n],
+                Frozen::Batch(n)
+                | Frozen::Settings(n)
+                | Frozen::Pairing(n)
+                | Frozen::BoxClaim(n) => vec![*n],
                 Frozen::Health => Vec::new(),
             };
             for n in refs {

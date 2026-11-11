@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use bitcoin::{OutPoint, ScriptBuf, Txid};
 use openbmt_core::batch::{AddressBatch, BatchBuilder, BatchPolicy, PinnedRoots};
+use openbmt_core::boxpair::CLAIM_LEN;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pairing::{check_request, PairError, PairOffer, PairRequest, SignedPairing};
 use openbmt_core::settings::{classify_change, Change, Settings, SignedSettings};
@@ -14,8 +15,8 @@ use openbmt_spend::dust_limit;
 use crate::codec;
 use crate::error::{OwnerError, Refusal, RestoreError, SetupError};
 use crate::types::{
-    CashAmount, CashOut, Deliverable, Delivery, IssuedRange, Options, QueuedBatch, QueuedPairing,
-    QueuedSettings, Refund, SaleFacts, SaleKey, SettingsQueued, Stage,
+    CashAmount, CashOut, Deliverable, Delivery, IssuedRange, Options, QueuedBatch, QueuedBoxClaim,
+    QueuedPairing, QueuedSettings, Refund, SaleFacts, SaleKey, SettingsQueued, Stage,
 };
 use crate::{
     MAX_BATCHES, MAX_CASH_OUTS, MAX_ISSUED_RANGES, MAX_PAIRINGS, MAX_REFUNDS, MAX_SALES,
@@ -48,6 +49,7 @@ pub(crate) enum Frozen {
     Batch(u32),
     Settings(u32),
     Pairing(u32),
+    BoxClaim(u32),
     Health,
 }
 
@@ -102,6 +104,7 @@ pub(crate) struct State {
     pub batches: Vec<QueuedBatch>,
     pub settings: Vec<QueuedSettings>,
     pub pairings: Vec<QueuedPairing>,
+    pub box_claims: Vec<QueuedBoxClaim>,
     pub known: Option<SignedSettings>,
     pub sessions: Vec<OpenSession>,
     pub outbox: Vec<Deliverable>,
@@ -121,6 +124,7 @@ impl State {
             batches: Vec::new(),
             settings: Vec::new(),
             pairings: Vec::new(),
+            box_claims: Vec::new(),
             known: None,
             sessions: Vec::new(),
             outbox: Vec::new(),
@@ -214,6 +218,19 @@ impl State {
             })
     }
 
+    /// AS-83: whether the Box is a device or a Box of the settings held or
+    /// queued, has a claim in the queue, or has a finished welcome waiting.
+    pub fn knows_box(&self, key: &DeviceId) -> bool {
+        let listed = |s: &Settings| s.devices.contains(key) || s.boxes.contains(key);
+        self.known.as_ref().is_some_and(|k| listed(&k.settings))
+            || self.settings.iter().any(|q| listed(&q.signed.settings))
+            || self.box_claims.iter().any(|c| c.claim.box_key == *key)
+            || self.outbox.iter().any(|d| match &d.what {
+                Delivery::BoxWelcome(bytes) => waiting_box(bytes).is_some_and(|k| k == *key),
+                _ => false,
+            })
+    }
+
     /// The stage of any queue entry by number.
     pub fn stage_mut(&mut self, id: u32) -> Option<&mut Stage> {
         if let Some(r) = self.refunds.iter_mut().find(|r| r.id == id) {
@@ -230,6 +247,9 @@ impl State {
         }
         if let Some(p) = self.pairings.iter_mut().find(|p| p.id == id) {
             return Some(&mut p.stage);
+        }
+        if let Some(c) = self.box_claims.iter_mut().find(|c| c.id == id) {
+            return Some(&mut c.stage);
         }
         None
     }
@@ -252,7 +272,17 @@ impl State {
         self.batches.retain(|b| b.id != id);
         self.settings.retain(|s| s.id != id);
         self.pairings.retain(|p| p.id != id);
+        self.box_claims.retain(|c| c.id != id);
     }
+}
+
+/// The Box's key in a waiting welcome: the claim's `OBM5` bytes come first
+/// (AS-85).
+pub(crate) fn waiting_box(bytes: &[u8]) -> Option<DeviceId> {
+    let claim = bytes.get(..CLAIM_LEN)?;
+    openbmt_core::boxpair::Claim::from_bytes(claim)
+        .ok()
+        .map(|c| c.box_key)
 }
 
 /// The owner phone: its identity, the wallet, the pinned Key app root and
@@ -400,6 +430,11 @@ impl Owner {
     /// The pairings in the queue.
     pub fn pairings(&self) -> &[QueuedPairing] {
         &self.state.pairings
+    }
+
+    /// The Box claims in the queue (AS-83).
+    pub fn box_claims(&self) -> &[QueuedBoxClaim] {
+        &self.state.box_claims
     }
 
     /// The finished objects waiting to be delivered.
@@ -874,7 +909,10 @@ impl Owner {
                 Frozen::Spend {
                     refunds, cash_out, ..
                 } => refunds.iter().copied().chain(*cash_out).collect(),
-                Frozen::Batch(n) | Frozen::Settings(n) | Frozen::Pairing(n) => vec![*n],
+                Frozen::Batch(n)
+                | Frozen::Settings(n)
+                | Frozen::Pairing(n)
+                | Frozen::BoxClaim(n) => vec![*n],
                 Frozen::Health => Vec::new(),
             };
             for n in ids {

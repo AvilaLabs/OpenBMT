@@ -2,6 +2,7 @@
 //! an in-memory `KeyStore`. The owner crate builds the requests.
 
 mod allowlist;
+mod boxpair;
 mod call;
 mod ceremony;
 mod deposit;

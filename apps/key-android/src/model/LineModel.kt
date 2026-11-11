@@ -40,6 +40,7 @@ object LineModel {
         LineKind.Settings -> "Change of settings"
         LineKind.Pairing -> "Pairing a counter"
         LineKind.HealthCheck -> "Health check"
+        LineKind.BoxClaim -> "Box found"
     }
 
     /** The four words of a pairing on one line, spaced so that each stands apart. */
@@ -143,6 +144,19 @@ object LineModel {
                     rows.add("The four words could not be worked out, so this pairing cannot be compared.")
                 }
                 rows.add("Settings version to sign: ${p.settingsVersionToSign}; the counter claims ${p.claimedSettingsVersion}.")
+            }
+            is LineDetail.BoxClaim -> {
+                val b = d.detail
+                // The Box's key is shown in full: the words are a short way to compare it, not the key.
+                rows.add("The Box's key: ${BoxModel.hexGroups(b.boxKey)}.")
+                for (c in b.checks) rows.add(checkRow(c))
+                val words = b.words
+                if (words != null) {
+                    prominent = wordsLine(words)
+                    instruction = AppWords.boxFound.next
+                } else {
+                    rows.add("The four words could not be worked out, so this Box cannot be compared.")
+                }
             }
             is LineDetail.Health -> rows.add("The counter asks this app to show it is still answering.")
         }

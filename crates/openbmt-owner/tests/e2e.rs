@@ -139,7 +139,7 @@ fn the_whole_story_pairing_settings_batch_refunds_and_a_cash_out() {
                     .unwrap();
             }
             Delivery::Settings(_) => {}
-            Delivery::Transaction { .. } => panic!("no transaction yet"),
+            Delivery::Transaction { .. } | Delivery::BoxWelcome(_) => panic!("not in this test"),
         }
         ok(rig.owner.mark_delivered(d.id, |b| rig.owner_store.put(b)));
     }

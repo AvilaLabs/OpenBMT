@@ -54,6 +54,7 @@ internal fun Controller.showHome(): Unit = withNode { n ->
     views.add(ui.button("Cash out") { showCashOut() })
     views.add(ui.button("Old addresses") { showOld() })
     views.add(ui.button("Add a counter") { showAddCounter() })
+    views.add(ui.button("Connect your Box") { showConnectBox() })
     views.add(ui.button("Link and counters") { showLink() })
     views.add(ui.button("Till") { showTill() })
     views.add(ui.button("Alerts") { showAlerts() })
@@ -245,6 +246,7 @@ internal fun Controller.showOutbox(): Unit = withNode { n ->
             views.add(ui.text(OwnerModel.outboxLines(row, now).joinToString("\n"), 13f, mono = true))
         }
         views.addAll(waitingCounterViews(n, Slot(act)) { showOutbox() })
+        views.addAll(pendingBoxViews(n, Slot(act)) { showOutbox() })
     }
     views.add(backButton { showHome() })
     page(views)

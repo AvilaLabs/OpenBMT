@@ -944,6 +944,7 @@ class Controller(private val act: MainActivity) {
             views.add(ui.button("Show the last answer as a code") { showAnswerCode(answerFile.readBytes()) { refresh() } })
         }
         views.add(ui.button("Pair a counter") { showPairOffer() })
+        views.add(ui.button("Pair a Box") { showPairBox(null) })
         views.add(ui.button("Cash-out addresses") { showCashOut() })
         views.add(ui.button("Change the PIN") { showChangePin(null) })
         views.add(ui.button("The wallet and its check words") { showWalletAgain() })
@@ -977,6 +978,77 @@ class Controller(private val act: MainActivity) {
             }
             views.add(ui.button("Back") { refresh() })
             act.show(ui.page(views))
+        }
+    }
+
+    /**
+     * "Pair a Box" (SR-81): the open invitation as six groups of five characters, large and in a fixed-width
+     * type, with the time left counting down on this phone's clock. The library stores a new invitation before
+     * it is returned; the screen carries FLAG_SECURE like every screen of the app. Leaving the screen or the app
+     * drops it from view; the invitation stays open until it runs out, is cancelled or is used.
+     */
+    private fun showPairBox(message: Words?) {
+        stopTicker()
+        allowed {
+            val a = app ?: return@allowed
+            val held = attempt({ refresh() }) { listOf(a.openInvitation()) } ?: return@allowed
+            val open = held[0]
+            val views = ArrayList<View>(banner())
+            if (open == null) {
+                views.add(ui.text("Pair a Box", 22f, bold = true))
+                message?.let { views.add(ui.words(it)) }
+                views.add(ui.text("A new invitation lasts 30 minutes and works for one Box.", 16f))
+                views.add(
+                    ui.button("Make an invitation") {
+                        allowed { attempt({ showPairBox(null) }) { a.makeInvitation() }?.let { showPairBox(null) } }
+                    },
+                )
+                views.add(ui.button("Back") { refresh() })
+                act.show(ui.page(views))
+                return@allowed
+            }
+            val spaced = BoxModel.spaced(open.text)
+            if (spaced == null) {
+                return@allowed showMessage(AppWords.fault(KeyException("invitation", "the library gave text that is not an invitation", 4)), { refresh() })
+            }
+            views.add(ui.text("Pair a Box", 22f, bold = true))
+            views.add(ui.words(AppWords.pairBox))
+            val groups = BoxModel.groups(open.text) ?: emptyList()
+            views.add(ui.text(groups.take(3).joinToString("   "), 30f, bold = true, mono = true))
+            views.add(ui.text(groups.drop(3).joinToString("   "), 30f, bold = true, mono = true))
+            val left = ui.text("", 18f, bold = true)
+            views.add(left)
+            views.add(
+                ui.button("Cancel this invitation") {
+                    stopTicker()
+                    allowed { attempt({ showPairBox(null) }) { a.cancelInvitation() }?.let { showPairBox(null) } }
+                },
+            )
+            views.add(
+                ui.button("Back") {
+                    stopTicker()
+                    refresh()
+                },
+            )
+            fun update(): Boolean {
+                val now = clock()
+                if (BoxModel.runOut(open, now)) {
+                    stopTicker()
+                    showPairBox(AppWords.invitationRunOut)
+                    return false
+                }
+                left.text = "Time left: ${BoxModel.timeLeft(BoxModel.secsLeft(open, now))}"
+                return true
+            }
+            if (!update()) return@allowed
+            act.show(ui.page(views))
+            val tick = object : Runnable {
+                override fun run() {
+                    if (update()) main.postDelayed(this, 1000) else ticker = null
+                }
+            }
+            ticker = tick
+            main.postDelayed(tick, 1000)
         }
     }
 

@@ -17,7 +17,9 @@ use openbmt_core::wire::DecodeError;
 use openbmt_session::{BindError, EncodeError};
 
 use crate::counter::{CounterBundleMade, CounterQueued, CounterRequest};
-use crate::error::{BundleGap, NodeKeyFault, OwnerError, Refusal, RestoreError, SetupError};
+use crate::error::{
+    BoxGap, BundleGap, NodeKeyFault, OwnerError, Refusal, RestoreError, SetupError,
+};
 use crate::follow::REASON_DROPPED;
 use crate::types::{ItemOutcome, Skipped, Stage};
 
@@ -238,6 +240,11 @@ fn full_words(what: &str) -> Words {
             "Batch queue is full",
             "The queue of address batches is full, so nothing was added.",
             "Finish or cancel some batches, then add this one again.",
+        ),
+        "the Box claim queue" => (
+            "Box queue is full",
+            "The queue of Box claims is full, so nothing was added.",
+            "Finish or cancel some Box claims, then add this one again.",
         ),
         "the pairing queue" => (
             "Pairing queue is full",
@@ -575,6 +582,49 @@ impl Refusal {
                 "Look in the queue and the waiting list; cancel the old pairing there to start again.",
             )
             .code("AS-69"),
+            Self::BoxNotClaim(why) => stop(
+                "Not a Box's claim",
+                "What was read from that address is not the claim of a Box that waits for an invitation, so nothing was queued.",
+                Who::Owner,
+                "Check the address. Type the invitation into the Box first, then connect to it again.",
+            )
+            .code("AS-83")
+            .detail(why.as_str()),
+            Self::BoxIsRoot => stop(
+                "Not a Box",
+                "The address answered with the key of this phone or of the Key app, which a Box never has.",
+                Who::Owner,
+                "Check the address of the Box and try again.",
+            )
+            .code("AS-83"),
+            Self::BoxKnown => stop(
+                "Box already added",
+                "This Box is on the shop's device list, or its claim is queued or its welcome is waiting to be handed over.",
+                Who::Owner,
+                "Look in the queue and the waiting list; cancel the old claim there to start again.",
+            )
+            .code("AS-83"),
+            Self::BoxNotReady(BoxGap::Welcome) => stop(
+                "Box's welcome not ready",
+                "No approved claim of this Box waits here, so there is nothing to hand it yet.",
+                Who::Owner,
+                "Take the Key app's response first. If the Box was handed its welcome already, nothing more is needed.",
+            )
+            .code("AS-86"),
+            Self::BoxNotReady(BoxGap::Settings) => stop(
+                "Box's settings not ready",
+                "The settings that list this Box have not come back approved by the Key app.",
+                Who::Owner,
+                "Take the Key app's response for the approval that holds them, then hand the Box its welcome.",
+            )
+            .code("AS-86"),
+            Self::BoxNothingToForget => stop(
+                "Nothing to forget",
+                "No claim of this Box is queued and no welcome of it waits, so there is nothing to take out of the queue.",
+                Who::Owner,
+                "If the Box took its welcome it is paired already and nothing more is needed.",
+            )
+            .code("AS-87"),
             Self::NoSettingsRate => stop(
                 "A price is needed",
                 "This phone holds no settings for the shop yet, and their limits in dollars need today's price of a bitcoin.",
@@ -1128,6 +1178,22 @@ pub fn all_words() -> Vec<(String, Words)> {
             Refusal::LightningNode(fault).words(),
         );
     }
+    add(
+        "Refusal::BoxNotClaim",
+        Refusal::BoxNotClaim("a sample".to_string()).words(),
+    );
+    add("Refusal::BoxIsRoot", Refusal::BoxIsRoot.words());
+    add("Refusal::BoxKnown", Refusal::BoxKnown.words());
+    add(
+        "Refusal::BoxNothingToForget",
+        Refusal::BoxNothingToForget.words(),
+    );
+    for (n, gap) in [("Welcome", BoxGap::Welcome), ("Settings", BoxGap::Settings)] {
+        add(
+            &format!("Refusal::BoxNotReady/{n}"),
+            Refusal::BoxNotReady(gap).words(),
+        );
+    }
     for (n, gap) in [
         ("Pairing", BundleGap::Pairing),
         ("Settings", BundleGap::Settings),
@@ -1277,11 +1343,12 @@ pub const NODE_KEY_FAULTS: [(&str, NodeKeyFault); 5] = [
 
 /// The things a bound can be about, as the code names them; the last is one
 /// the words do not know.
-pub const FULLS: [&str; 10] = [
+pub const FULLS: [&str; 11] = [
     "the numbering",
     "the refund queue",
     "the cash-out queue",
     "the batch queue",
+    "the Box claim queue",
     "the pairing queue",
     "the settings queue",
     "the list of sales' facts",

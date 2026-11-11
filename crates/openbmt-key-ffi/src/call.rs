@@ -38,6 +38,8 @@
 //! - 30 to 35: one approval session (`open_session`, `session_id`, `lines`,
 //!   `decide`, `finish`, `cancel`).
 //! - 40 to 48: the Key app's own screens.
+//! - 50 to 52: pairing a Box (`make_invitation`, `open_invitation`,
+//!   `cancel_invitation`; `docs/SIGNER-RULES.md` SR-80).
 //! - 60 to 65: free functions (entropy progress, word picker, deposit code).
 //! - 90 to 93: the lock of the stored state (`lock_status`, `set_pin`,
 //!   `unlock`, `change_pin`; `docs/SIGNER-RULES.md` SR-71 to SR-74).
@@ -63,6 +65,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
 use openbmt_core::say::Words;
 
 use crate::app::{Key2Public, KeyApp, LockStatus, SetupState, SlotView, WalletSetup, WalletView};
+use crate::boxinvite::InvitationView;
 use crate::ceremony::Key3View;
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::deposit::{parse_deposit_code, DepositCode};
@@ -76,9 +79,9 @@ use crate::screen::{AllowlistView, CeilingsView, FeeCeilingsView, SignerStatus};
 use crate::session::SessionHandle;
 use crate::store::KeyStore;
 use crate::views::{
-    BatchDetail, CeilingsRemaining, CheckStatus, CheckView, Decision, Direction, HealthDetail,
-    LineDetail, LineKind, LineView, OutputKindView, OutputView, OwnerLabelKind, OwnerLabelView,
-    PairingDetail, SettingChangeView, SettingsDetail, SpendDetail, SpendReviewView,
+    BatchDetail, BoxClaimDetail, CeilingsRemaining, CheckStatus, CheckView, Decision, Direction,
+    HealthDetail, LineDetail, LineKind, LineView, OutputKindView, OutputView, OwnerLabelKind,
+    OwnerLabelView, PairingDetail, SettingChangeView, SettingsDetail, SpendDetail, SpendReviewView,
 };
 use crate::words::{word_is_valid, word_suggestions};
 
@@ -463,6 +466,15 @@ fn build_ops() -> Vec<Op> {
             c.app()?.raise_receive_mark(mark)
         }),
         op(48, "correct_clock", App, |c, ()| c.app()?.correct_clock()),
+        op(50, "make_invitation", App, |c, ()| {
+            c.app()?.make_invitation()
+        }),
+        op(51, "open_invitation", App, |c, ()| {
+            c.app()?.open_invitation()
+        }),
+        op(52, "cancel_invitation", App, |c, ()| {
+            c.app()?.cancel_invitation()
+        }),
         op(
             60,
             "coin_bits",
@@ -705,6 +717,8 @@ fn definitions() -> Vec<TypeDef> {
         Direction::define(),
         PairingDetail::define(),
         HealthDetail::define(),
+        BoxClaimDetail::define(),
+        InvitationView::define(),
         SignerStatus::define(),
         AllowlistView::define(),
         CeilingsView::define(),

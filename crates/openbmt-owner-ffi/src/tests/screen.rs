@@ -118,6 +118,7 @@ fn every_rule_string_the_source_makes_has_words_of_its_own() {
     .join("src");
     let mut code = String::new();
     for name in [
+        "boxnet.rs",
         "call.rs",
         "codec.rs",
         "error.rs",

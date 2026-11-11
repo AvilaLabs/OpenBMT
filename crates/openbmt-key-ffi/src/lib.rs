@@ -53,6 +53,7 @@
 )]
 
 mod app;
+mod boxinvite;
 mod call;
 mod ceremony;
 mod codec;
@@ -76,6 +77,7 @@ mod words;
 mod tests;
 
 pub use app::{Key2Public, KeyApp, LockStatus, SetupState, SlotView, WalletSetup, WalletView};
+pub use boxinvite::InvitationView;
 pub use call::{dispatch, error_response, protocol_description, Registry, MAX_APPS};
 pub use ceremony::{answer_words, key3_waiting_words, Key3View};
 pub use deposit::{parse_deposit_code, DepositCode};
@@ -89,8 +91,8 @@ pub use screen::{AllowlistView, CeilingsView, FeeCeilingsView, SignerStatus};
 pub use session::SessionHandle;
 pub use store::KeyStore;
 pub use views::{
-    BatchDetail, CeilingsRemaining, CheckStatus, CheckView, Decision, Direction, HealthDetail,
-    LineDetail, LineKind, LineView, OutputKindView, OutputView, OwnerLabelKind, OwnerLabelView,
-    PairingDetail, SettingChangeView, SettingsDetail, SpendDetail, SpendReviewView,
+    BatchDetail, BoxClaimDetail, CeilingsRemaining, CheckStatus, CheckView, Decision, Direction,
+    HealthDetail, LineDetail, LineKind, LineView, OutputKindView, OutputView, OwnerLabelKind,
+    OwnerLabelView, PairingDetail, SettingChangeView, SettingsDetail, SpendDetail, SpendReviewView,
 };
 pub use words::{word_is_valid, word_suggestions};

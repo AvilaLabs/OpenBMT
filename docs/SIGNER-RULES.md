@@ -405,6 +405,9 @@ cost and the PIN rules (`docs/LOCK-RULES.md`, LC-01 to LC-07: the owner app
 keeps its key 1 in the same frame); SR-74 to SR-79 by the Android app
 (`apps/key-android`), with the tries, the waits and the wipe of
 `apps/android-common` (`LockModel.kt`), which the owner app uses as well.
+It also pairs a Box (`docs/BOX-RULES.md`, BX-10 to BX-17, and AS-78 to AS-82
+of `docs/SESSION-RULES.md`): SR-80 and SR-82 are kept by `openbmt-key-ffi`,
+SR-81 and the screens of SR-82 by the Android app.
 
 - **SR-71. The locked frame.** What the Key app stores is a frame `OBMx`,
   version 1: the Argon2id parameters (memory in KiB, passes and lanes, each 4
@@ -472,3 +475,36 @@ keeps its key 1 in the same frame); SR-74 to SR-79 by the Android app
   was enrolled, and either "active" or the time left until it is, counted
   from the current time of SR-31. "Remove" asks for a confirmation and takes
   effect at once (SR-30).
+- **SR-80. The invitation.** `make_invitation` makes an invitation (BX-10)
+  from 17 bytes of the platform's random source, stores the state with it and
+  an end 30 minutes after this phone's clock (BX-11), and only then returns it:
+  its 30 characters in six groups of five separated by hyphens, the end in
+  seconds since 1970 and the seconds left. A failed store gives no invitation
+  and changes nothing. One invitation is open at a time: a second call replaces
+  the first. `open_invitation` gives the invitation that is open and has not
+  run out on this phone's clock, or nothing; it is the same after the app is
+  closed and opened again. `cancel_invitation` forgets it, stores first, and
+  is not an error when none is open. All three are refused while a session is
+  open.
+- **SR-81. "Pair a Box".** The home screen has a "Pair a Box" button. With no
+  invitation open the screen offers to make one. With one open it shows the 30
+  characters in two lines of three groups, large and in a fixed-width type,
+  with the words that say it works once and for 30 minutes, to type all 30
+  characters into the Box's own setup page, and not to type them on a shared
+  computer or send or photograph them. The time left counts down each second on
+  this phone's clock. At zero the screen says the invitation has run out and
+  offers a new one. "Cancel this invitation" forgets it. Leaving the screen, or
+  the app going to the background, takes the characters off the screen at once;
+  the invitation stays open until it runs out, is cancelled or is used. The
+  window carries FLAG_SECURE like every screen of the app (SR-74).
+- **SR-82. "Box found".** A session that holds a Box's claim (AS-78) shows its
+  line with the title "Box found": the Box's key in full in groups of eight
+  hexadecimal characters, the four fingerprint words of that key large on one
+  line, and the three checks of AS-81 each with its result. The words say to
+  approve the settings that add the Box first and then to approve only if the
+  four words are the same, in the same order, as on the Box's own screen. A
+  claim that fails a check shows what failed and cannot be approved. Approving
+  makes the welcome and spends the invitation; declining signs nothing and
+  spends it too; a session that is stopped without an answer spends nothing
+  (AS-82). A line whose four words could not be made says so and has nothing
+  to compare.

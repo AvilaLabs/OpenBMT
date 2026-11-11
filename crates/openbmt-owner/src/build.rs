@@ -617,6 +617,23 @@ impl Owner {
                 Frozen::Settings(s.id),
             ));
         }
+        // AS-84: a Box's claim comes after the settings that add the Box.
+        let claims: Vec<_> = next
+            .box_claims
+            .iter()
+            .filter(|c| c.stage == Stage::Queued)
+            .cloned()
+            .collect();
+        for c in claims {
+            if !room(&items) {
+                skipped.push(Skipped {
+                    id: c.id,
+                    reason: full.to_string(),
+                });
+                continue;
+            }
+            items.push((Item::BoxClaim { claim: c.claim }, Frozen::BoxClaim(c.id)));
+        }
         let batches: Vec<_> = next
             .batches
             .iter()
@@ -658,7 +675,10 @@ impl Owner {
                 Frozen::Spend {
                     refunds, cash_out, ..
                 } => refunds.iter().copied().chain(*cash_out).collect(),
-                Frozen::Batch(n) | Frozen::Settings(n) | Frozen::Pairing(n) => vec![*n],
+                Frozen::Batch(n)
+                | Frozen::Settings(n)
+                | Frozen::Pairing(n)
+                | Frozen::BoxClaim(n) => vec![*n],
                 Frozen::Health => Vec::new(),
             };
             for id in ids {

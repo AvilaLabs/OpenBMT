@@ -20,9 +20,13 @@ fn rule_ids() -> Vec<u32> {
     ids
 }
 
-/// The rules of this crate: section 1, AS-01 to AS-15.
+/// The rules of this crate: section 1, AS-01 to AS-15, and the file's part
+/// of adding a Box, AS-78 and AS-79.
 fn own_rules() -> Vec<u32> {
-    rule_ids().into_iter().filter(|n| *n < 20).collect()
+    rule_ids()
+        .into_iter()
+        .filter(|n| *n < 20 || (78..=79).contains(n))
+        .collect()
 }
 
 #[test]
@@ -32,8 +36,8 @@ fn the_rules_file_defines_the_rules_the_tests_name() {
     sorted.sort_unstable();
     sorted.dedup();
     assert_eq!(sorted.len(), ids.len(), "a rule ID is used twice");
-    assert_eq!(own_rules().len(), 15);
-    assert!(own_rules().contains(&1) && own_rules().contains(&15));
+    assert_eq!(own_rules().len(), 17);
+    assert!(own_rules().contains(&1) && own_rules().contains(&79));
 }
 
 #[test]

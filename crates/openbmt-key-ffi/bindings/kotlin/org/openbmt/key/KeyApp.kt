@@ -84,6 +84,9 @@ private const val OP_SET_FEE_CEILINGS = 45
 private const val OP_RAISE_CHANGE_MARK = 46
 private const val OP_RAISE_RECEIVE_MARK = 47
 private const val OP_CORRECT_CLOCK = 48
+private const val OP_MAKE_INVITATION = 50
+private const val OP_OPEN_INVITATION = 51
+private const val OP_CANCEL_INVITATION = 52
 private const val OP_COIN_BITS = 60
 private const val OP_DICE_BITS = 61
 private const val OP_DICE_FACE_COUNTS = 62
@@ -132,11 +135,13 @@ private const val TAG_LINE_KIND_BATCH_REFILL = 1
 private const val TAG_LINE_KIND_SETTINGS = 2
 private const val TAG_LINE_KIND_PAIRING = 3
 private const val TAG_LINE_KIND_HEALTH_CHECK = 4
+private const val TAG_LINE_KIND_BOX_CLAIM = 5
 private const val TAG_LINE_DETAIL_SPEND = 0
 private const val TAG_LINE_DETAIL_BATCH = 1
 private const val TAG_LINE_DETAIL_SETTINGS = 2
 private const val TAG_LINE_DETAIL_PAIRING = 3
 private const val TAG_LINE_DETAIL_HEALTH = 4
+private const val TAG_LINE_DETAIL_BOX_CLAIM = 5
 private const val TAG_OUTPUT_KIND_VIEW_CHANGE = 0
 private const val TAG_OUTPUT_KIND_VIEW_ALLOWLISTED = 1
 private const val TAG_OUTPUT_KIND_VIEW_OTHER = 2
@@ -241,7 +246,7 @@ sealed class Decision {
     data class Decline(val reason: String) : Decision()
 }
 
-enum class LineKind { Spend, BatchRefill, Settings, Pairing, HealthCheck }
+enum class LineKind { Spend, BatchRefill, Settings, Pairing, HealthCheck, BoxClaim }
 
 enum class CheckStatus { Passed, Failed, NotChecked }
 
@@ -344,12 +349,23 @@ class PairingDetail(
 
 class HealthDetail(val nonce: ByteArray)
 
+/** A Box's claim (SR-81): the Box's key, its four words, the checks. */
+class BoxClaimDetail(
+    val boxKey: ByteArray,
+    val words: List<String>?,
+    val checks: List<CheckView>,
+)
+
+/** An invitation the Key app holds (SR-80). */
+class InvitationView(val text: String, val expiresAt: Long, val secsLeft: Long)
+
 sealed class LineDetail {
     class Spend(val detail: SpendDetail) : LineDetail()
     class Batch(val detail: BatchDetail) : LineDetail()
     class Settings(val detail: SettingsDetail) : LineDetail()
     class Pairing(val detail: PairingDetail) : LineDetail()
     class Health(val detail: HealthDetail) : LineDetail()
+    class BoxClaim(val detail: BoxClaimDetail) : LineDetail()
 }
 
 class LineView(
@@ -782,6 +798,14 @@ private fun Reader.lineDetail(): LineDetail =
                 ),
             )
         TAG_LINE_DETAIL_HEALTH -> LineDetail.Health(HealthDetail(bytes()))
+        TAG_LINE_DETAIL_BOX_CLAIM ->
+            LineDetail.BoxClaim(
+                BoxClaimDetail(
+                    boxKey = bytes(),
+                    words = option { strings() },
+                    checks = checks(),
+                ),
+            )
         else -> tag("LineDetail")
     }
 
@@ -795,6 +819,7 @@ private fun Reader.line(): LineView =
                 TAG_LINE_KIND_SETTINGS -> LineKind.Settings
                 TAG_LINE_KIND_PAIRING -> LineKind.Pairing
                 TAG_LINE_KIND_HEALTH_CHECK -> LineKind.HealthCheck
+                TAG_LINE_KIND_BOX_CLAIM -> LineKind.BoxClaim
                 else -> tag("LineKind")
             },
         title = string(),
@@ -803,6 +828,8 @@ private fun Reader.line(): LineView =
         decision = option { decision() },
         detail = lineDetail(),
     )
+
+private fun Reader.invitation(): InvitationView = InvitationView(string(), u64(), u64())
 
 private fun Reader.ceilings(): CeilingsView = CeilingsView(u64(), u64(), u64())
 
@@ -1115,6 +1142,21 @@ class KeyApp private constructor(private val store: KeyStore, private val handle
         callUnit(store, OP_RAISE_RECEIVE_MARK, handle) { it.u32(mark) }
 
     fun correctClock() = callUnit(store, OP_CORRECT_CLOCK, handle)
+
+    /** Make an invitation for a Box, stored before it is returned (SR-80). */
+    fun makeInvitation(): InvitationView {
+        val r = call(store, OP_MAKE_INVITATION, handle)
+        return r.invitation().also { r.end() }
+    }
+
+    /** The invitation that is open and has not run out, or null (SR-80). */
+    fun openInvitation(): InvitationView? {
+        val r = call(store, OP_OPEN_INVITATION, handle)
+        return r.option { r.invitation() }.also { r.end() }
+    }
+
+    /** Forget the open invitation (SR-80). */
+    fun cancelInvitation() = callUnit(store, OP_CANCEL_INVITATION, handle)
 
     /** Close the app and its session. The stored bytes are not touched. */
     override fun close() = callUnit(store, OP_CLOSE_APP, handle)

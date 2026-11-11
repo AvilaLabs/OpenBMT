@@ -130,6 +130,8 @@ private fun Controller.showTaken(taken: Taken) {
     }
     // A counter whose pairing this response approved waits for its code (OA-24).
     node?.let { n -> views.addAll(waitingCounterViews(n, Slot(act)) { showHome() }) }
+    // A Box whose welcome this response approved waits to be handed over (OA-43).
+    node?.let { n -> views.addAll(pendingBoxViews(n, Slot(act)) { showHome() }) }
     views.add(ui.button("Done") { showHome() })
     page(views)
 }

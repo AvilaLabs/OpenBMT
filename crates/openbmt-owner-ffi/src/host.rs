@@ -70,6 +70,10 @@ use openbmt_owner_node::{
 use openbmt_signer::SignerState;
 use openbmt_watch::HeaderChain;
 
+use crate::boxnet::{
+    self, BoxDeliverArgs, BoxDeliveredView, BoxFoundView, BoxLinkArgs, BoxQueueArgs, BoxQueuedView,
+    PendingBoxView, WaitingBoxView,
+};
 use crate::counter_views::{
     CounterBundleView, CounterConfirmArgs, CounterQueuedView, CounterScanView, WaitingCounterView,
 };
@@ -1390,6 +1394,148 @@ impl Entry {
         })
     }
 
+    /// Fetch the claim of the Box at the typed address (OA-41, BX-13). The
+    /// call to the Box is made on the caller's thread, not the node's, so
+    /// the node keeps pumping while it waits; the node is asked only what
+    /// the shop already knows.
+    pub(crate) fn box_fetch_claim(&self, a: BoxLinkArgs) -> Result<BoxFoundView, AppError> {
+        let route = boxnet::route_for(&a.address, &a.proxy)?;
+        let fetched = boxnet::fetch(&route)?;
+        let relay = fetched.relay;
+        let Some(bytes) = fetched.claim.clone() else {
+            let known = self.run(None, move |st| Ok(st.node.owner().knows_box(&relay)))?;
+            return Err(boxnet::no_claim(known));
+        };
+        let claim = boxnet::read_claim(&fetched, &bytes)?;
+        let key = claim.box_key;
+        let (known, needs_rate) = self.run(None, move |st| {
+            let owner = st.node.owner();
+            Ok((owner.knows_box(&key), !owner.has_settings_base()))
+        })?;
+        if known {
+            return Err(boxnet::already_paired());
+        }
+        Ok(BoxFoundView {
+            claim: bytes,
+            box_key: key.to_bytes().to_vec(),
+            needs_rate,
+        })
+    }
+
+    /// Queue the claim and the settings that add its Box, in two writes of
+    /// which the second is undone if it fails (OA-42, AS-83, AS-84).
+    pub(crate) fn box_queue(&self, a: BoxQueueArgs) -> Result<BoxQueuedView, AppError> {
+        self.run(None, move |st| {
+            let write = st.node.queue_writer();
+            let owner = st.node.owner_mut().map_err(|e| node_error(&e))?;
+            let request = owner
+                .queue_box_claim(&a.claim, &write)
+                .map_err(|e| queue_error(&e))?;
+            let queued = match owner.queue_box(request.id, a.usd_per_btc, &write) {
+                Ok(q) => q,
+                Err(e) => {
+                    // The claim stays queued only when the person can go on.
+                    let _ = owner.cancel(request.id, &write);
+                    return Err(queue_error(&e));
+                }
+            };
+            Ok(BoxQueuedView {
+                claim_id: queued.claim_id,
+                settings_id: queued.settings_id,
+                settings_version: queued.settings_version,
+                box_key: request.box_key.to_bytes().to_vec(),
+                words: request.words.iter().map(|w| (*w).to_string()).collect(),
+            })
+        })
+    }
+
+    /// The Boxes whose finished welcome waits to be handed over (OA-43).
+    pub(crate) fn boxes_waiting(&self) -> Result<Vec<WaitingBoxView>, AppError> {
+        self.run(None, |st| {
+            Ok(st
+                .node
+                .owner()
+                .boxes_waiting()
+                .into_iter()
+                .map(|w| WaitingBoxView {
+                    box_key: w.box_key.to_bytes().to_vec(),
+                })
+                .collect())
+        })
+    }
+
+    /// The Boxes that have a claim queued or a welcome waiting, with the
+    /// four words of each (OA-47).
+    pub(crate) fn boxes_pending(&self) -> Result<Vec<PendingBoxView>, AppError> {
+        self.run(None, |st| {
+            Ok(st
+                .node
+                .owner()
+                .boxes_pending()
+                .into_iter()
+                .map(|p| PendingBoxView {
+                    box_key: p.box_key.to_bytes().to_vec(),
+                    words: p
+                        .box_key
+                        .fingerprint_words()
+                        .iter()
+                        .map(|w| (*w).to_string())
+                        .collect(),
+                    welcome_ready: p.welcome_ready,
+                })
+                .collect())
+        })
+    }
+
+    /// Forget a Box that was not handed its welcome: its claim and settings
+    /// leave the queue in one write (OA-47, AS-87).
+    pub(crate) fn box_forget(&self, box_key: Vec<u8>) -> Result<(), AppError> {
+        let key = device("the Box's key", "id-length", &box_key)?;
+        self.run(None, move |st| {
+            let write = st.node.queue_writer();
+            st.node
+                .owner_mut()
+                .map_err(|e| node_error(&e))?
+                .forget_box(&key, &write)
+                .map_err(|e| queue_error(&e))
+        })
+    }
+
+    /// Hand the Box its welcome and the settings that list it, and only
+    /// when it has taken them take them out of the outbox (OA-43, BX-15).
+    /// Nothing is changed when the Box does not take them.
+    pub(crate) fn box_deliver(&self, a: BoxDeliverArgs) -> Result<BoxDeliveredView, AppError> {
+        let key = device("the Box's key", "id-length", &a.box_key)?;
+        let route = boxnet::route_for(&a.link.address, &a.link.proxy)?;
+        let handover = self.run(None, move |st| {
+            st.node
+                .owner()
+                .box_handover(&key)
+                .map_err(|r| queue_error(&OwnerError::Refused(r)))
+        })?;
+        boxnet::send_welcome(&route, &key, &handover.welcome, &handover.settings)?;
+        self.run(None, move |st| {
+            let write = st.node.queue_writer();
+            st.node
+                .owner_mut()
+                .map_err(|e| node_error(&e))?
+                .mark_box_delivered(&key, &write)
+                .map_err(|e| queue_error(&e))
+        })?;
+        let settings_version = SignedSettings::from_bytes(&handover.settings)
+            .map(|s| s.settings.version)
+            .unwrap_or_default();
+        Ok(BoxDeliveredView {
+            box_key: key.to_bytes().to_vec(),
+            counters: handover
+                .counters
+                .iter()
+                .map(|c| c.to_bytes().to_vec())
+                .collect(),
+            settings_version,
+        })
+    }
+
     /// Hand every signed batch in the outbox to the link, and mark it
     /// delivered once the courier holds it.
     pub(crate) fn deliver(&self, now: u64) -> Result<DeliverView, AppError> {
@@ -1437,7 +1583,9 @@ impl Entry {
                                 .push(format!("batch {id} could not be marked: {e}")),
                         }
                     }
-                    Delivery::Settings(_) | Delivery::Pairing(_) => view.waiting += 1,
+                    Delivery::Settings(_) | Delivery::Pairing(_) | Delivery::BoxWelcome(_) => {
+                        view.waiting += 1;
+                    }
                     Delivery::Transaction { .. } => {}
                 }
             }
@@ -1876,6 +2024,16 @@ impl Entry {
                     Delivery::Pairing(bytes) => OutboxRow {
                         id: d.id,
                         kind: OutboxKind::Pairing,
+                        txid: None,
+                        counter: None,
+                        version: None,
+                        signed_at: None,
+                        size: u32::try_from(bytes.len()).unwrap_or(u32::MAX),
+                        words: words(signed(EntryKind::Pairing, None)),
+                    },
+                    Delivery::BoxWelcome(bytes) => OutboxRow {
+                        id: d.id,
+                        kind: OutboxKind::BoxWelcome,
                         txid: None,
                         counter: None,
                         version: None,

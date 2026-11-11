@@ -42,6 +42,9 @@ pub const INVITE_SALT: &[u8] = b"OpenBMT/box-invite/v1";
 pub const LABEL_CLAIM: &[u8] = b"claim";
 /// The HKDF label of the welcome key.
 pub const LABEL_WELCOME: &[u8] = b"welcome";
+/// How long an invitation is good for on the Key app's clock, in seconds
+/// (BX-11).
+pub const INVITATION_SECS: u64 = 30 * 60;
 /// Length of a claim in bytes.
 pub const CLAIM_LEN: usize = 4 + 1 + 32 + 32 + 32;
 /// Length of a welcome in bytes.

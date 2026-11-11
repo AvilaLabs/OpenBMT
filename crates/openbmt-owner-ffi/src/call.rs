@@ -62,6 +62,12 @@
 //!   The code carries the relay of the owner's link (CR-130). 95 `counter_relay`
 //!   is the owner's signed relay for counters (CR-132), for a counter that
 //!   was paired before the shop had a Box.
+//! - 104 to 107: connecting a Box (`docs/OWNER-APP-RULES.md`, OA-40 to OA-48):
+//!   fetch its claim, queue the claim and the settings that add it, the
+//!   Boxes waiting for their welcome, and the welcome itself. 108 and 109
+//!   are the owner phone's own invitation and check when there is no Key
+//!   app (BX-17); they work on no node. 110 lists the Boxes with a claim
+//!   queued or a welcome waiting, and 111 forgets one of them (AS-87).
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -75,6 +81,10 @@ use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
+use crate::boxnet::{
+    self, BoxDeliverArgs, BoxDeliveredView, BoxFoundView, BoxLinkArgs, BoxOwnCheckArgs,
+    BoxOwnCheckView, BoxOwnInvitationView, BoxQueueArgs, BoxQueuedView, PendingBoxView, WaitingBoxView,
+};
 use crate::ceremony::{
     self, AnswerView, BuildArgs, CeremonyDefaults, FinishArgs, FinishedView, Key1Args, Key1Made,
     PairView, PartView, SetupFields, SetupStageView, WalletBuiltView,
@@ -484,6 +494,28 @@ fn build_ops() -> Vec<Op> {
         op(103, "setup_change_pin", Zero, |_, a: PinChangeArgs| {
             setup_lock::change_pin(a)
         }),
+        op(104, "box_fetch_claim", Node, |c, a: BoxLinkArgs| {
+            c.entry()?.box_fetch_claim(a)
+        }),
+        op(105, "box_queue", Node, |c, a: BoxQueueArgs| {
+            c.entry()?.box_queue(a)
+        }),
+        op(106, "boxes_waiting", Node, |c, ()| {
+            c.entry()?.boxes_waiting()
+        }),
+        op(107, "box_deliver", Node, |c, a: BoxDeliverArgs| {
+            c.entry()?.box_deliver(a)
+        }),
+        op(108, "box_own_invitation", Zero, |_, now: u64| {
+            boxnet::own_invitation(now)
+        }),
+        op(109, "box_own_check", Zero, |_, a: BoxOwnCheckArgs| {
+            boxnet::own_check(a)
+        }),
+        op(110, "boxes_pending", Node, |c, ()| c.entry()?.boxes_pending()),
+        op(111, "box_forget", Node, |c, key: Vec<u8>| {
+            c.entry()?.box_forget(key)
+        }),
     ]
 }
 
@@ -694,6 +726,17 @@ fn definitions() -> Vec<TypeDef> {
         WaitingCounterView::define(),
         CounterBundleView::define(),
         PinChangeArgs::define(),
+        BoxLinkArgs::define(),
+        BoxFoundView::define(),
+        BoxQueueArgs::define(),
+        BoxQueuedView::define(),
+        WaitingBoxView::define(),
+        PendingBoxView::define(),
+        BoxDeliverArgs::define(),
+        BoxDeliveredView::define(),
+        BoxOwnInvitationView::define(),
+        BoxOwnCheckArgs::define(),
+        BoxOwnCheckView::define(),
     ]
 }
 

@@ -53,7 +53,9 @@ fn entries(f: &Frozen) -> Vec<u32> {
         Frozen::Spend {
             refunds, cash_out, ..
         } => refunds.iter().copied().chain(*cash_out).collect(),
-        Frozen::Batch(n) | Frozen::Settings(n) | Frozen::Pairing(n) => vec![*n],
+        Frozen::Batch(n) | Frozen::Settings(n) | Frozen::Pairing(n) | Frozen::BoxClaim(n) => {
+            vec![*n]
+        }
         Frozen::Health => Vec::new(),
     }
 }
@@ -282,6 +284,19 @@ impl Owner {
                                 .map_err(|e| format!("AS-62: {e}"))
                         })
                         .map(|signed| Some(Delivery::Pairing(signed.to_bytes())))
+                    }
+                }
+                (Verdict::Approved(Payload::BoxWelcome { welcome }), Item::BoxClaim { claim }) => {
+                    // AS-85: the welcome names this owner phone and the
+                    // pinned Key app, and no other roots.
+                    if welcome.owner != self.identity.device_id()
+                        || welcome.approver != self.roots.approver
+                    {
+                        Err("AS-85: the welcome names other roots than this shop's".to_string())
+                    } else {
+                        let mut both = claim.to_bytes();
+                        both.extend_from_slice(&welcome.to_bytes());
+                        Ok(Some(Delivery::BoxWelcome(both)))
                     }
                 }
                 // `check_against` has made sure the kinds fit.

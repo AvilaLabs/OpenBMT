@@ -99,6 +99,9 @@ writes it again). Op numbers are never reused.
 | 46 | `raise_change_mark` | app | raise the change mark |
 | 47 | `raise_receive_mark` | app | raise the receive mark |
 | 48 | `correct_clock` | app | correct a clock that is behind |
+| 50 | `make_invitation` | app | make and store an invitation for a Box |
+| 51 | `open_invitation` | app | the open invitation, or none |
+| 52 | `cancel_invitation` | app | forget the open invitation |
 | 60 | `coin_bits` | none | progress of the coin flips |
 | 61 | `dice_bits` | none | progress of the dice rolls |
 | 62 | `dice_face_counts` | none | how often each face came up |

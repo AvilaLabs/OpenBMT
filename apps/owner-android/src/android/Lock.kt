@@ -32,7 +32,7 @@ internal fun Controller.lockNow() {
 }
 
 /** A field for a PIN or a passphrase: its letters are hidden, and no keyboard may learn or suggest them. */
-private fun Controller.secret(hint: String, numeric: Boolean): EditText = ui.field(hint).also {
+internal fun Controller.secret(hint: String, numeric: Boolean): EditText = ui.field(hint).also {
     it.inputType = if (numeric) {
         InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
     } else {
@@ -241,7 +241,7 @@ private class SetupNotRead : Exception()
  * succeeds. A refusal that is not a wrong PIN gives the count back; the 10th wrong try wipes. [back] shows
  * the screen the try came from, with the words to show on it. [done] runs when [op] worked.
  */
-private fun Controller.triedPin(back: (SayWords?) -> Unit, op: () -> Unit, done: () -> Unit) {
+internal fun Controller.triedPin(back: (SayWords?) -> Unit, op: () -> Unit, done: () -> Unit) {
     val now = nowSecs()
     val rec = tries.read(now)
     val check = Tries.check(rec, now)

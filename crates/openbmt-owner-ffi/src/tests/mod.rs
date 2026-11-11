@@ -1,6 +1,7 @@
 //! Tests that drive the exported API the way the Android app does, through
 //! `dispatch`, on a node whose drivers the test feeds by hand.
 
+mod box_e2e;
 mod call;
 mod ceremony;
 mod counter;

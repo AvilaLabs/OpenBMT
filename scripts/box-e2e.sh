@@ -71,7 +71,6 @@
 #      run only for searches and ListPayments, the token is on curl's standard input and in no
 #      argument, environment or log; with a curl path that is not there the
 #      Box's notes say curl is not installed on this Box (BX-44 to BX-49).
-#
 #  17. A Box started with --status-page: GET / answers with the security
 #      headers and words that say it is waiting for an invitation; another
 #      path is 404 and another method 405; a wrong invitation posted from the
@@ -80,6 +79,14 @@
 #      right one from the page's own origin is taken, the Key app side claims
 #      and welcomes it, and the page then says paired, with no invitation on
 #      it (BX-54 to BX-61).
+#  18. The phones' libraries pair a real Box process: `openbmt-key-ffi` makes
+#      the invitation, which is typed into the Box's console; `openbmt-owner-ffi`
+#      fetches the claim; the Key app library checks it and welcomes the Box
+#      in an approval session; the owner library hands the Box its welcome,
+#      and the Box goes from unpaired to paired with the words the phones
+#      showed; the owner's link then puts a sealed message through the Box
+#      and fetches it (OA-40 to OA-47). It runs the ignored test
+#      `oa_41_to_oa_43_a_real_box_process_is_paired` of `openbmt-owner-ffi`.
 #
 # Environment:
 #   DRILL_DIR      scratch directory (default: a new one under ~/.cache/openbmt)
@@ -864,12 +871,58 @@ kill -9 "$PG_PID" 2>/dev/null
 wait "$PG_PID" 2>/dev/null
 PG_PID=
 
+# ---- 18 --------------------------------------------------------------------------
+
+say "18. The phones' libraries pair a real Box"
+[ -z "${PID[2]:-}" ] || stop_box 2 || true
+B8="$BASE/box8"
+mkdir -p "$B8"
+RUN=()
+EXTRA=()
+PH_BAD=
+start_box 2 "$B8" "$PORT2" || die "the Box did not start: $(cat "${LOG[2]}")"
+FP8=$(sed -n 's/^fingerprint: //p' "${LOG[2]}")
+KEY8=$(sed -n 's/^key: //p' "${LOG[2]}")
+S8a=$(state_of 2)
+PH_LOG="$BASE/phones.log"
+# The Key app (openbmt-key-ffi) makes the invitation and types it into the
+# Box's console; the owner phone (openbmt-owner-ffi) fetches the claim, the
+# Key app checks it and welcomes the Box in an approval session, the owner
+# phone hands the Box the welcome, and the owner's link passes a sealed
+# message through it. All of that is the ignored test named below.
+phones_test() {
+  local guard=$HOME/.cache/openbmt/guard.sh run=(env CARGO_TARGET_DIR="$TARGET" CARGO_BUILD_JOBS=2
+    OPENBMT_BOX_E2E_ADDR="127.0.0.1:$PORT2" OPENBMT_BOX_E2E_CONSOLE="$BASE/stdin-2"
+    cargo test --quiet --locked --manifest-path "$ROOT/Cargo.toml" -p openbmt-owner-ffi --lib
+    oa_41_to_oa_43_a_real_box_process_is_paired -- --ignored --nocapture)
+  if [ -x "$guard" ]; then "$guard" "${run[@]}"; else "${run[@]}"; fi
+}
+if phones_test >"$PH_LOG" 2>&1; then PH_RC=0; else PH_RC=$?; fi
+note "$(grep '^phones:' "$PH_LOG" | sed 's/^/phones side: /')"
+S8b=$(state_of 2)
+PH_WORDS=$(sed -n 's/^phones: box words: //p' "$PH_LOG")
+PH_KEY=$(sed -n 's/^phones: box key: //p' "$PH_LOG")
+PH_MSG=$(sed -n 's/^phones: message: //p' "$PH_LOG")
+[ "$PH_RC" = 0 ] || PH_BAD="$PH_BAD; the phones' test failed (exit $PH_RC): $(tail -15 "$PH_LOG")"
+[ "$S8a" = unpaired ] || PH_BAD="$PH_BAD; the Box was '$S8a' before"
+[ "$S8b" = paired ] || PH_BAD="$PH_BAD; the Box is '$S8b' after"
+[ -n "$PH_WORDS" ] && [ "$PH_WORDS" = "$FP8" ] || PH_BAD="$PH_BAD; the phones showed '$PH_WORDS' and the Box '$FP8'"
+[ -n "$PH_KEY" ] && [ "$PH_KEY" = "$KEY8" ] || PH_BAD="$PH_BAD; the phones' Box key '$PH_KEY' is not the Box's '$KEY8'"
+[ "$PH_MSG" = "hello through the Box" ] || PH_BAD="$PH_BAD; the sealed message read '$PH_MSG'"
+grep -q '^phones: paired' "$PH_LOG" || PH_BAD="$PH_BAD; the phones did not say paired"
+if [ -z "$PH_BAD" ]; then
+  pass 18 "the Key app library made the invitation and the Box took it; the owner library fetched the claim, the Key app library checked it and welcomed the Box in an approval session, the owner library delivered it, and the Box went from unpaired to paired; both phones showed the Box's words ($FP8); the owner's link then passed a sealed message through it"
+else
+  bad 18 "${PH_BAD#; }"
+fi
+stop_box 2 || true
+
 # ---- result ----------------------------------------------------------------------
 
 say "Result"
 failed=0
 notrun=0
-for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17; do
+for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
   printf '%s  step %s\n' "${RESULT[$n]:-FAIL}" "$n"
   case "${RESULT[$n]:-FAIL}" in
     PASS) ;;

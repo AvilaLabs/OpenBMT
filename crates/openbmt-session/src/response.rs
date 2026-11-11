@@ -12,6 +12,7 @@
 //! The approver signs everything after the version byte and before the
 //! signature, under `OpenBMT/session-response/v1`.
 
+use openbmt_core::boxpair::{Welcome, WELCOME_LEN};
 use openbmt_core::identity::{DeviceId, Identity, Sig, TAG_SESSION_HEALTH, TAG_SESSION_RESPONSE};
 use openbmt_core::wire::{self, DecodeError, Reader};
 
@@ -78,6 +79,11 @@ pub enum Payload {
         /// The signature.
         sig: Sig,
     },
+    /// The welcome for a Box whose claim the Key app accepted (AS-79).
+    BoxWelcome {
+        /// The welcome, with the Key app's MAC.
+        welcome: Welcome,
+    },
 }
 
 impl Payload {
@@ -89,6 +95,7 @@ impl Payload {
             Self::Settings { .. } => ItemKind::Settings,
             Self::Pairing { .. } => ItemKind::Pairing,
             Self::Health { .. } => ItemKind::HealthCheck,
+            Self::BoxWelcome { .. } => ItemKind::BoxClaim,
         }
     }
 
@@ -111,6 +118,7 @@ impl Payload {
                 out.extend_from_slice(&sig.0);
                 Ok(out)
             }
+            Self::BoxWelcome { welcome } => Ok(welcome.to_bytes()),
         }
     }
 
@@ -128,6 +136,9 @@ impl Payload {
             ItemKind::Pairing => Self::Pairing {
                 settings_version: r.u32_le()?,
                 sig: r.sig()?,
+            },
+            ItemKind::BoxClaim => Self::BoxWelcome {
+                welcome: Welcome::from_bytes(r.take(WELCOME_LEN)?)?,
             },
         };
         r.finish()?;

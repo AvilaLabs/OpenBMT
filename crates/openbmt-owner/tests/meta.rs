@@ -7,7 +7,8 @@ use openbmt_owner::{OwnerError, Refusal, RestoreError, SetupError};
 use openbmt_session::{BindError, EncodeError};
 
 const RULES: &str = include_str!("../../../docs/SESSION-RULES.md");
-const TEST_SOURCES: [&str; 6] = [
+const TEST_SOURCES: [&str; 7] = [
+    include_str!("box_pairing.rs"),
     include_str!("counter.rs"),
     include_str!("drop.rs"),
     include_str!("edit.rs"),
@@ -29,15 +30,20 @@ fn rule_ids() -> Vec<u32> {
     ids
 }
 
-/// The rules of this crate: section 3, AS-50 and up.
+/// The rules of this crate: section 3, AS-50 to AS-77, and the owner phone's
+/// part of adding a Box, AS-83 to AS-87.
 fn own_rules() -> Vec<u32> {
-    rule_ids().into_iter().filter(|n| *n >= 50).collect()
+    rule_ids()
+        .into_iter()
+        .filter(|n| (50..78).contains(n) || *n >= 83)
+        .collect()
 }
 
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
-    assert_eq!(own_rules().len(), 28);
+    assert_eq!(own_rules().len(), 33);
     assert!(own_rules().contains(&50) && own_rules().contains(&77));
+    assert!(own_rules().contains(&83) && own_rules().contains(&87));
 }
 
 #[test]
@@ -94,6 +100,12 @@ fn every_error_says_which_rule_in_words() {
         Refusal::EditNeedsRate.to_string(),
         Refusal::PriceOutOfRange.to_string(),
         Refusal::LightningNode(openbmt_owner::NodeKeyFault::NotOnCurve).to_string(),
+        Refusal::BoxNotClaim("x".into()).to_string(),
+        Refusal::BoxIsRoot.to_string(),
+        Refusal::BoxKnown.to_string(),
+        Refusal::BoxNothingToForget.to_string(),
+        Refusal::BoxNotReady(openbmt_owner::BoxGap::Welcome).to_string(),
+        Refusal::BoxNotReady(openbmt_owner::BoxGap::Settings).to_string(),
         Refusal::BundleNotReady(openbmt_owner::BundleGap::Pairing).to_string(),
         Refusal::BundleNotReady(openbmt_owner::BundleGap::Settings).to_string(),
         Refusal::SettingsInvalid("x".into()).to_string(),
