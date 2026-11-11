@@ -35,8 +35,9 @@ run on a phone. Not for real funds.**
   cloud backup and for device transfer.
 - **OA-03.** The manifest asks for exactly two permissions, INTERNET and
   CAMERA, and declares the camera as a feature that is not required. CAMERA
-  is declared for reading the Key app's response from a code, and is asked
-  for only when the owner taps a scan button (OA-21). It has one activity,
+  is declared for reading the Key app's response and a counter's request
+  from a code, and is asked for only when the owner taps a scan button
+  (OA-21, OA-22). It has one activity,
   which is exported and is the launcher, and no service, receiver or
   provider. Cleartext traffic is off and the app is not debuggable.
   `apps/owner-android/tests/check-manifest.sh` reads the built APK and fails
@@ -84,9 +85,12 @@ run on a phone. Not for real funds.**
   cash-out leave the app only as an entry in the node's queue and then as a
   request for the Key app; money moves only after the Key app's response is
   taken by the library (`take`). The app never calls the node's batch
-  signing or its settings queue: the settings view is read-only. It builds
-  no transaction, signs no input and broadcasts nothing but what the node
-  sends after a response was taken.
+  signing or its settings queue itself: the settings view is read-only.
+  The one way a batch and a settings change are queued is the node's
+  `counterConfirm` (OA-23), which the owner presses after comparing the
+  four words and which signs with the owner's key only what the Key app must
+  then approve. It builds no transaction, signs no input and broadcasts
+  nothing but what the node sends after a response was taken.
 - **OA-10.** Every state and every refusal is shown with the library's
   `words` where the library has them. The words of what the app decides
   itself (setting up, Orbot, what was typed, what was copied or saved, its
@@ -110,13 +114,16 @@ run on a phone. Not for real funds.**
   other call. No other thread calls the library, except the start, which
   runs on a worker thread before any of them begins.
 - **OA-13.** A request for the Key app is shown and saved as exactly the
-  bytes the library made. As a file it is those bytes. As text it is hex
-  digits in lower case, 64 to a line, and reading the text back gives the
-  same bytes. The Key app's response comes from a source behind one
-  interface, the Key app's code read by the camera (OA-21), a file or the
-  pasted text, and is at most 1,000,000 bytes; a longer one is refused
-  before the library sees it. A response is taken only when the owner
-  presses the button of its source.
+  bytes the library made. As a code it is `ur:bytes` of those bytes
+  (OA-20). As a file it is those bytes. As text it is hex digits in lower
+  case, 64 to a line, and reading the text back gives the same bytes. The
+  code of a counter's request (OA-22) and the code shown to a counter
+  (OA-24) are likewise exactly the bytes the library read or made. The Key
+  app's response comes from a source behind one interface, the Key app's
+  code read by the camera (OA-21), a file or the pasted text, and is at
+  most 1,000,000 bytes; a longer one is refused before the library sees
+  it. A response is taken only when the owner presses the button of its
+  source.
 - **OA-14.** The settings view and the list of what waits to be delivered
   show what the node holds, in a fixed order, and change nothing. The
   node keeps no time for a signed object other than an address batch, and
@@ -209,7 +216,49 @@ connection that is not Bitcoin's.
   the pasted text are still offered. A scan is stopped when the app leaves
   the screen. The app keeps no frame and no code.
 
-## 6. What these rules do not do
+## 6. Adding a counter
+
+The node judges the request, queues the pairing, the settings and the first
+batch, and makes the code the counter takes (`docs/SESSION-RULES.md`, AS-69
+to AS-73). The app reads the camera, shows the answers and carries the
+owner's choices.
+
+- **OA-22.** Adding a counter starts on the home screen, with two lines of
+  words: scan the counter's code and approve on the Key app, then show the
+  counter a code. The camera is asked for only when the owner taps "Scan the
+  counter's code", and the scan takes `ur:bytes` and no other type, at most
+  1,024 bytes, as exactly the bytes of the counter's code. The bytes go to
+  the node's `counterScan` and nothing else is judged in Kotlin. A code that
+  is not a counter's request, a request for another shop or network, a
+  counter that is paired or queued already, a full queue, a cancelled scan
+  and a camera that is off each have words that say what happened and what
+  to do. Working out the four words takes a moment, so a page says so and is
+  drawn first; the call stays on the screen thread (OA-12).
+- **OA-23.** The owner sees the counter's name (foreign text, cleaned), its
+  four words large, "Check that the counter shows these same four words,
+  and that the Key app shows them too", the shares of the instant limit once
+  it is added, the minutes the counter waits, and two buttons. Only "The
+  four words match" calls the node's `counterConfirm`, which queues the
+  settings and the first batch together; "The words differ" takes the queued
+  request out. The shares are equal, 1/n each, and the words say that custom
+  shares come later with the settings editor. A phone that holds no settings
+  asks for the rate in satoshis to a dollar, a whole number above 0, and
+  queues nothing without it. Leaving the screen queues no settings.
+- **OA-24.** After the confirmation the approval is the request and
+  response screens of OA-20 and OA-21; nothing in the app marks anything as
+  approved. When the response has been taken, a counter whose pairing it
+  approved waits for its code: the screen and the list of what waits to be
+  delivered offer "Show the code for" it. The code is `ur:bytes` of the
+  bundle `counterBundle` made, drawn by `AnimatedQrView` as in OA-20, with
+  the words "Scan this with the counter. It shows Paired when it has taken
+  it." A code without the first addresses says so. If the Key app declined,
+  nothing waits and the library's words of each entry are shown.
+- **OA-25.** Leaving the code keeps the counter waiting. Only the owner's
+  word, the button "The counter shows Paired", calls `counterDelivered` and
+  marks what waited as delivered; "Show again" draws the code again from the
+  node, which changes nothing. The app keeps no copy of the code.
+
+## 7. What these rules do not do
 
 - **They do not protect a phone that is already lost to someone else.**
   A phone that is unlocked, rooted or running a hostile keyboard or
@@ -232,9 +281,11 @@ connection that is not Bitcoin's.
   Clover's answers is from their published documentation and fixtures, not
   from a real account (`docs/POS-RULES.md`).
 - **They do not say the camera and the screen work.** The code drawn for the
-  Key app and the scan of its code are the shared pieces, checked on the
-  desktop; no phone has scanned a code of this app or shown one to the Key
-  app yet.
+  Key app and for a counter, and the scan of the Key app's code and of a
+  counter's, are the shared pieces, checked on the desktop; no phone has
+  scanned a code of this app or shown one to the Key app or a counter yet.
+  The code for a counter holds 1,000 addresses, so it has many parts; how
+  long a scan of it takes is not measured.
 - **They do not say the app has been run.** Every check here is on the
   desktop JVM, on the manifest of a built APK, or on the source. What needs
   a phone is listed in `apps/owner-android/README.md`.

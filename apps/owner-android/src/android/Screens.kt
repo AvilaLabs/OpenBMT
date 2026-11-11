@@ -53,6 +53,7 @@ internal fun Controller.showHome(): Unit = withNode { n ->
     views.add(ui.button("Refund queue") { showQueue() })
     views.add(ui.button("Cash out") { showCashOut() })
     views.add(ui.button("Old addresses") { showOld() })
+    views.add(ui.button("Add a counter") { showAddCounter() })
     views.add(ui.button("Link and counters") { showLink() })
     views.add(ui.button("Till") { showTill() })
     views.add(ui.button("Alerts") { showAlerts() })
@@ -242,6 +243,7 @@ internal fun Controller.showOutbox(): Unit = withNode { n ->
             views.add(ui.words(row.words.say()))
             views.add(ui.text(OwnerModel.outboxLines(row, now).joinToString("\n"), 13f, mono = true))
         }
+        views.addAll(waitingCounterViews(n, Slot(act)) { showOutbox() })
     }
     views.add(backButton { showHome() })
     page(views)
@@ -612,7 +614,7 @@ internal fun Controller.showAbout() {
             label("Not built yet"),
             ui.text(
                 "The key ceremony (setup is pasted text or a file); " +
-                    "changing the shop's settings; adding a counter; the books; archiving paid entries.",
+                    "changing the shop's settings, with shares of the instant limit that are not equal; the books; archiving paid entries.",
                 16f,
             ),
             ui.button("Back") { showHome() },

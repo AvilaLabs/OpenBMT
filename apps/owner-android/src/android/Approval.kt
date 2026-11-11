@@ -128,6 +128,8 @@ private fun Controller.showTaken(taken: Taken) {
         views.add(ui.words(s.words.say()))
         views.add(ui.text("Transaction ${s.txid}", 12f, mono = true))
     }
+    // A counter whose pairing this response approved waits for its code (OA-24).
+    node?.let { n -> views.addAll(waitingCounterViews(n, Slot(act)) { showHome() }) }
     views.add(ui.button("Done") { showHome() })
     page(views)
 }

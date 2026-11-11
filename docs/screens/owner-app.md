@@ -30,6 +30,21 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | requestCodeNotMade | No code could be made | The request could not be turned into a code, so nothing is shown. | Go back and save the request as a file, or copy it as text, instead. | the owner |  |
 | scanCancelled | Scan cancelled | No code was read, so nothing was taken from the Key app. | Scan the Key app's code again, or choose its file or paste its text instead. | the owner |  |
 | scanNotAResponse | Not the Key app's code | The code read is not one the Key app shows for a response, so nothing was used. | On the Key app, show the answer as a code, and scan that one. | the owner |  |
+| counterReading | Reading the counter | The counter's request is being read and its four words worked out, which takes a moment. | Wait on this screen. | the owner |  |
+| counterNotACode | Not a counter's code | The code read is not one a counter shows for its request, so nothing was queued. | On the counter, choose Pair and scan the code it shows. | the owner |  |
+| counterScanCancelled | Counter scan cancelled | No code was read, so nothing was queued. | Scan the counter's code again when you are ready. | the owner |  |
+| counterCodeNotRequest | Not a counter's request | The code holds more than a counter's request can, so nothing was queued. | On the counter, choose Pair and scan the code it shows. | the owner |  |
+| sharesNote | Equal shares | Each counter's share of the instant limit becomes 1/2. | Custom shares come later, with the settings editor. | the owner |  |
+| sharesNoteOne | Equal shares | This is the only counter, so its share of the instant limit is all of it. | Custom shares come later, with the settings editor. | the owner |  |
+| counterCompare | Compare the four words | Check that the counter shows these same four words, and that the Key app shows them too. | If they match, say so below. If they differ, say so and nothing is paired. | the owner |  |
+| counterRateNeeded | Rate needed | This phone holds no settings yet, and the starting limits are in dollars, so it needs today's rate. | Type satoshis to a dollar as a whole number above 0, then say the words match. | the owner |  |
+| counterCancelled | Counter not added | The four words did not match, so the counter's request was taken out of the queue. | Start again on the counter, and scan the new code it shows. | the owner |  |
+| counterNotPaired | Counter not paired | The Key app did not approve this counter, so no code for it was made. | Read the words above, then scan the counter's code again to start over. | the owner |  |
+| counterCodeAnimated | Code for the counter | The code for the counter is on the screen, one part after another, with its first addresses in it. | Scan this with the counter. It shows Paired when it has taken it. | the owner |  |
+| counterCodeStill | Code for the counter | The code for the counter is on the screen as one code that does not change. | Scan this with the counter. It shows Paired when it has taken it. | the owner |  |
+| counterCodeNoBatch | Code without addresses | The first addresses are not in this code, because the link handed them over already. | Scan this with the counter. It shows Paired when it has taken it. | the owner |  |
+| counterCodeNotMade | No code could be made | The code for the counter could not be made, so nothing is shown. What waits for the counter is kept. | Try to show it again. | the owner |  |
+| counterDelivered | Counter paired | The counter shows Paired, so what waited for it is marked delivered. | The counter takes its sales from its first addresses now. | the owner |  |
 | requestSaved | Request saved | The request is saved as a file. | Carry the file to the Key app and open it there. | the owner |  |
 | refundQueuedAtDepth | Refund queued | The refund is in the queue, and the sale is deep enough to be refunded. | Bring this phone and the Key app together and start an approval. | the owner |  |
 | refundQueuedWaiting | Refund queued, sale new | The refund is in the queue, but the sale is not deep enough yet to be refunded. | Wait for more blocks. The refund can be approved when the sale is deep enough. | the owner |  |

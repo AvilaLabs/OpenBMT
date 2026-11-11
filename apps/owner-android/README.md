@@ -25,6 +25,7 @@ the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-21).
 | Refund queue | Queue a refund from a sale with the facts the node verified, cancel, requeue. |
 | Cash out | Queue a cash-out of an amount or of everything. |
 | Old addresses | The old addresses and a request for a deep check. |
+| Add a counter | Scan a counter's code with the camera, compare its four words, queue its settings and first batch, then show it a code. |
 | Link and counters | The relay, each counter's records, head and last check-in. |
 | Alerts | The node's alerts, with clear. |
 | Till | Connect a Square or Clover till with a read-only token, see when it was last read, how many sales matched, and each open alert with its words and an acknowledge button. |
@@ -39,8 +40,25 @@ library has them. The app's own states and faults have words written in
 `docs/screens/owner-app.md`.
 
 Not built yet: the key ceremony (the setup text is made by hand, see below),
-queuing a pairing, and any change to the settings (the settings view is
-read-only).
+and any change to the settings (the settings view is read-only; a counter
+added from the phone gets equal shares of the instant limit, and shares that
+are not equal wait for the settings editor).
+
+## Adding a counter
+
+Home has "Add a counter" (OA-22 to OA-25). It says in two lines what the
+steps are, then opens the camera on the counter's code (`ur:bytes`, one part
+or many). The node reads the request, queues its pairing and gives back the
+counter's name and four words, which the screen shows large with "Check that
+the counter shows these same four words". A phone that holds no settings
+also asks for today's rate in satoshis to a dollar. "The four words match"
+queues the settings (the counter added, equal shares) and the counter's first
+batch in one write; the approval then goes through the request and response
+screens as any other. When the response is taken, the screen offers "Show the
+code for" the counter: the bundle as an animated `ur:bytes` code, with "Scan
+this with the counter. It shows Paired when it has taken it." and a button
+"The counter shows Paired". Leaving keeps the counter waiting, and the list
+of what waits to be delivered offers the same button.
 
 ## The approval by camera and screen
 
@@ -181,5 +199,9 @@ its answers, its rate limits and what a refused token looks like), the till
 thread starting and stopping with the app, `FLAG_SECURE` in a screenshot and
 in the list of recent apps, the SOCKS probe against a real Orbot, the node following the chain
 through Orbot, a link to a real relay and counters, the Key app's response
-round trip with a real Key app, and the node stopping cleanly when the app is
-sent to the background.
+round trip with a real Key app, the scan of a counter's request, how long the
+node takes to work out the four words on a phone, the code for the counter
+(a first batch of 1,000 addresses is about 36 KB, so its animated code has
+many parts, and its scan time is not measured), the same four words on the
+counter, the Key app and this phone, and the node stopping cleanly when the
+app is sent to the background.

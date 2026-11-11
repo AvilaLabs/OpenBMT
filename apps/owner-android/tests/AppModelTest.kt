@@ -44,6 +44,7 @@ import org.openbmt.owner.Route
 import org.openbmt.owner.SendKind
 import org.openbmt.owner.SendRow
 import org.openbmt.owner.SettingsHeld
+import org.openbmt.owner.WaitingCounter
 import org.openbmt.owner.Words
 
 /**
@@ -547,12 +548,16 @@ object AppModelTest {
     }
 
     private fun oa_09_the_app_never_signs_a_spend_by_itself() {
-        for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/OwnerUi.kt", "src/android/MainActivity.kt", "src/model/OwnerModel.kt", "src/model/ApprovalText.kt")) {
+        for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/AddCounter.kt", "src/android/OwnerUi.kt", "src/android/MainActivity.kt", "src/model/OwnerModel.kt", "src/model/CounterModel.kt", "src/model/ApprovalText.kt")) {
             val src = source(name)
             for (bad in listOf(".signBatch(", ".queueSettings(", "SignedSettings", "Psbt", "psbt", "sign(", ".broadcast(", "Transaction(")) {
                 ok(!src.contains(bad), "$name does not call or build $bad")
             }
         }
+        // The one way the app causes a settings change and a batch to be queued is the node's own call that adds a counter.
+        val add = source("src/android/AddCounter.kt")
+        ok(Regex("n\\.counterConfirm\\(").findAll(add).count() == 1 && add.indexOf("ui.button(\"The four words match\")") < add.indexOf("n.counterConfirm("), "the settings and the batch are queued by one call, after the owner says the words match")
+        ok(!source("src/android/Screens.kt").contains("counterConfirm") && !source("src/android/Controller.kt").contains("counterConfirm"), "no other screen calls it")
         val screens = source("src/android/Screens.kt") + source("src/android/Approval.kt")
         ok(screens.contains("n.buildRequest(") && screens.contains("n.approveMerge(") && screens.contains("n.take(") && screens.contains("n.queueRefund(") && screens.contains("n.cashOut("), "the calls that lead to a spend are the queue, the request and the response")
         // The request is shown and saved before anything could be taken, and taking is an explicit press.
@@ -981,6 +986,131 @@ object AppModelTest {
         ok(build.contains("qr-jni-build.sh") && build.contains("libopenbmt_qr_jni.so"), "the build carries the QR library the camera and the code use")
     }
 
+
+    // ---- adding a counter (OA-22 to OA-25) ---------------------------------------------------------------------
+
+    private fun counterTests() {
+        ok(CounterModel.explanation.size == 2, "two lines say what the steps are")
+        ok(CounterModel.explanation[0].contains("Scan the counter's code") && CounterModel.explanation[0].contains("approve on the Key app"), "the first line: scan, then approve")
+        ok(CounterModel.explanation[1].contains("show the counter a code") && CounterModel.explanation[1].contains("Paired"), "the second line: show the counter a code")
+        ok(CounterModel.REQUEST_TYPES == setOf("bytes") && CounterModel.MAX_REQUEST_BYTES == 1_024, "ur:bytes and a small request")
+        ok(CounterModel.wordsLine(listOf("one", "two", "three", "four")) == "one   two   three   four", "the four words in one line")
+        ok(CounterModel.percent(10_000) == "100%" && CounterModel.percent(5_000) == "50%" && CounterModel.percent(3_334) == "33.34%" && CounterModel.percent(3_333) == "33.33%" && CounterModel.percent(500) == "5%" && CounterModel.percent(5) == "0.05%", "a share as a percent")
+        val shares = listOf(CounterShare(ByteArray(32) { 1 }, 5_000), CounterShare(ByteArray(32) { 2 }, 5_000))
+        ok(CounterModel.shareLines(shares) == listOf("Counter 01010101: 50%", "Counter 02020202: 50%"), "a line for each counter's share, in order")
+        ok(CounterModel.nameOf("Front ‮counter") == Format.cleanForeign("Front ‮counter") && !CounterModel.nameOf("Front ‮counter").contains('‮'), "a counter's name is foreign text and is cleaned")
+        ok(CounterModel.nameOf("") == "a counter without a name" && CounterModel.nameOf(" \n ") == "a counter without a name", "a name that cleans to nothing is said so")
+        ok(CounterModel.windowMinutes(600) == 10L && CounterModel.windowMinutes(30) == 1L && CounterModel.windowMinutes(0) == 1L, "the minutes of the window, never zero")
+        ok(CounterModel.windowLine(600).contains("10 minutes") && CounterModel.windowLine(60).contains("1 minute "), "the window in words")
+        ok(CounterModel.batchLine(1_000).contains("1000 addresses"), "the first batch's size")
+        ok(CounterModel.nextLine.contains("approve there") && CounterModel.nextLine.contains("response"), "what comes next")
+
+        val request = ByteArray(120) { it.toByte() }
+        val given = CounterModel.requestResult(request)
+        ok(given is SourceResult.Bytes && given.bytes.contentEquals(request), "a counter's code gives its payload as it is")
+        ok(CounterModel.requestResult(ByteArray(CounterModel.MAX_REQUEST_BYTES)) is SourceResult.Bytes, "the most is accepted")
+        val long = CounterModel.requestResult(ByteArray(CounterModel.MAX_REQUEST_BYTES + 1))
+        ok(long is SourceResult.Failed && long.words === AppWords.counterCodeNotRequest, "a longer code is refused before the library sees it")
+        ok(CounterModel.rate("1000") is Form.Ok && (CounterModel.rate("1,000") as Form.Ok).value == 1_000L, "a rate is a whole number")
+        for (bad in listOf("", "0", "  ", "ten", "-5", "1.5", "1".repeat(19))) {
+            val f = CounterModel.rate(bad)
+            ok(f is Form.Refused && f.words === AppWords.counterRateNeeded, "a rate of '$bad' is refused with words")
+        }
+
+        val still = CounterModel.codeStep(made = true, withBatch = true, animated = false)
+        val moving = CounterModel.codeStep(made = true, withBatch = true, animated = true)
+        val none = CounterModel.codeStep(made = false, withBatch = true, animated = true)
+        val bare = CounterModel.codeStep(made = true, withBatch = false, animated = true)
+        ok(still.shown && still.done && still.words === AppWords.counterCodeStill, "one still code")
+        ok(moving.shown && moving.done && moving.words === AppWords.counterCodeAnimated, "a code that changes")
+        ok(bare.shown && bare.done && bare.words === AppWords.counterCodeNoBatch, "a code without the first addresses says so")
+        ok(!none.shown && !none.done && none.words === AppWords.counterCodeNotMade, "no code: no button that says Paired")
+        for (w in listOf(still.words, moving.words, bare.words)) {
+            ok(w.next == "Scan this with the counter. It shows Paired when it has taken it." && w.who == Who.OWNER && w.tone == Tones.INFO, "the words say what to do next: ${w.next}")
+        }
+        ok(none.words.tone == Tones.STOP && none.words.what.contains("kept"), "no code says what waits is kept")
+
+        val waiting = listOf(WaitingCounter(ByteArray(32) { 1 }, "Front"), WaitingCounter(ByteArray(32) { 2 }, "Back"))
+        ok(CounterModel.waitingFor(waiting, ByteArray(32) { 2 })?.name == "Back" && CounterModel.waitingFor(waiting, ByteArray(32) { 3 }) == null, "a waiting counter is found by its identity")
+        ok(CounterModel.showCodeLabel(waiting[0]) == "Show the code for Front", "the button names the counter")
+
+        val two = AppWords.sharesNote(2)
+        ok(two.what == "Each counter's share of the instant limit becomes 1/2." && two.next.contains("Custom shares come later") && two.next.contains("settings editor"), "the shares are equal, and custom shares come later")
+        ok(AppWords.sharesNote(3).what.endsWith("1/3."), "the share follows the number of counters")
+        ok(AppWords.sharesNote(1).what.contains("only counter"), "one counter has the whole limit")
+        ok(AppWords.counterCompare.what.contains("Check that the counter shows these same four words"), "the owner is told to compare the words")
+        ok(AppWords.counterDelivered.tone == Tones.GOOD && AppWords.counterNotPaired.tone == Tones.STOP, "tones of the ends")
+    }
+
+
+    private fun oa_22_a_counter_is_read_by_the_camera_and_judged_by_the_node() {
+        val add = source("src/android/AddCounter.kt")
+        ok(source("src/android/Screens.kt").contains("ui.button(\"Add a counter\") { showAddCounter() }"), "adding a counter starts on the home screen")
+        val first = add.substringAfter("internal fun Controller.showAddCounter(").substringBefore("private fun Controller.scanCounter()")
+        ok(first.contains("for (line in CounterModel.explanation)") && first.contains("ui.button(\"Scan the counter's code\") { scanCounter() }"), "the explanation, then the button that opens the camera")
+        ok(Regex("scan\\.begin\\(").findAll(add).count() == 1 && !add.contains("requestPermissions"), "the camera is asked for in one place, from that button")
+        val scan = add.substringAfter("private fun Controller.scanCounter()").substringBefore("private fun Controller.readCounter(")
+        ok(scan.contains("UrScan(CounterModel.REQUEST_TYPES, ExchangeModel.WHO)") && scan.contains("CounterModel.requestResult(payload)"), "ur:bytes only, and the length is the model's")
+        ok(scan.contains("AppWords.counterNotACode") && scan.contains("AppWords.counterScanCancelled") && scan.contains("ScanResult.failed(f.off, f.problem, f.words)"), "every other end of the scan has words")
+        val read = add.substringAfter("private fun Controller.readCounter(").substringBefore("private fun Controller.showCounterCheck(")
+        ok(read.contains("AppWords.counterReading") && read.indexOf("page(") < read.indexOf("main.post") && read.indexOf("main.post") < read.indexOf("n.counterScan(bytes)"), "a page says it takes a moment, and is drawn before the call")
+        ok(!read.contains("async(") && !read.contains("Thread"), "the call stays on the screen thread")
+        ok(read.contains("e.sayWords()"), "a refusal of the node is shown with its words")
+        ok(Regex("n\\.counterScan\\(").findAll(add).count() == 1, "one place gives the code to the node")
+        for (w in listOf(AppWords.counterNotACode, AppWords.counterScanCancelled, AppWords.counterCodeNotRequest, AppWords.counterReading)) {
+            ok(w.who == Who.OWNER && SayCheck.problem(w) == null && w.next.isNotEmpty(), "words: ${w.heading}")
+        }
+        ok(AppWords.counterNotACode.next.contains("Pair"), "a code that is not a counter's says what to scan")
+        ok(source("AndroidManifest.xml").contains("android.permission.CAMERA"), "the camera is declared")
+    }
+
+    private fun oa_23_the_owner_compares_the_words_and_confirms_the_settings_and_batch() {
+        val add = source("src/android/AddCounter.kt")
+        val check = add.substringAfter("private fun Controller.showCounterCheck(").substringBefore("private fun Controller.showCounterQueued(")
+        ok(check.contains("CounterModel.nameOf(s.name)") && check.contains("CounterModel.wordsLine(s.sessionWords), 30f, bold = true"), "the name, cleaned, and the four words large")
+        ok(check.contains("AppWords.counterCompare") && check.contains("AppWords.sharesNote(s.shares.size)") && check.contains("CounterModel.shareLines(s.shares)") && check.contains("CounterModel.windowLine(s.windowSecs)"), "the words to compare, the shares and the window")
+        ok(check.contains("if (s.needsRate)") && check.contains("CounterModel.rate(rate.text.toString())"), "a phone with no settings asks for the rate, and the model checks it")
+        ok(check.indexOf("is Form.Refused -> msg.show(") < check.indexOf("n.counterConfirm("), "nothing is queued before the rate is accepted")
+        ok(check.contains("ui.button(\"The four words match\")") && check.contains("ui.button(\"The words differ\")") && check.contains("n.cancel(s.pairing)"), "the two answers; a difference takes the request out")
+        ok(Regex("n\\.counterConfirm\\(").findAll(check).count() == 1 && !check.contains("n.buildRequest("), "only the first answer confirms, and it builds no request")
+        val queued = add.substringAfter("private fun Controller.showCounterQueued(").substringBefore("internal fun Controller.showCounterCode(")
+        ok(queued.contains("q.words.say()") && queued.contains("CounterModel.shareLines(q.shares)") && queued.contains("CounterModel.batchLine(q.batchCount)"), "what the node queued is shown with its words")
+        ok(queued.contains("showSpend()"), "the approval goes on from the spend screen's request")
+        ok(AppWords.sharesNote(2).next == "Custom shares come later, with the settings editor.", "the shares are equal and the words say custom ones come later")
+        ok(AppWords.counterCompare.what.contains("Key app shows them too"), "the words are compared on the Key app too")
+        ok(AppWords.counterRateNeeded.next.contains("whole number above 0"), "the rate's words say what to type")
+        ok(source("src/android/Screens.kt").contains("changing the shop's settings, with shares of the instant limit that are not equal"), "the About screen no longer lists adding a counter as not built")
+        ok(!source("src/android/Screens.kt").substringAfter("label(\"Not built yet\")").contains("adding a counter"), "and does not say it is not built")
+    }
+
+    private fun oa_24_the_code_for_the_counter_is_the_bundle_the_node_made() {
+        val add = source("src/android/AddCounter.kt")
+        val code = add.substringAfter("internal fun Controller.showCounterCode(").substringBefore("internal fun Controller.waitingCounterViews(")
+        ok(code.contains("n.counterBundle(w.counter)") && code.contains("AnimatedQrView.make(") && code.contains("ExchangeModel.WHO, ExchangeModel.TYPE_BYTES, made.code"), "the code is the bundle, as ur:bytes")
+        ok(code.contains("ExchangeModel.codeHeight(act.resources.displayMetrics.heightPixels)"), "at the size of the other codes")
+        ok(code.contains("CounterModel.codeStep(view != null, made.withBatch, view?.animated == true)") && code.contains("if (step.done) {"), "the Paired button only with a code on the screen")
+        ok(AppWords.counterCodeAnimated.next == "Scan this with the counter. It shows Paired when it has taken it.", "the words say what to do next")
+        val approval = source("src/android/Approval.kt")
+        ok(approval.contains("waitingCounterViews(n, Slot(act)) { showHome() }") && approval.substringAfter("private fun Controller.showTaken(").contains("waitingCounterViews("), "a counter approved by the response offers its code")
+        val outbox = source("src/android/Screens.kt").substringAfter("internal fun Controller.showOutbox()").substringBefore("// ---- the queue")
+        ok(outbox.contains("waitingCounterViews(n, Slot(act)) { showOutbox() }"), "the list of what waits offers it too")
+        val rows = add.substringAfter("internal fun Controller.waitingCounterViews(")
+        ok(rows.contains("n.countersWaiting()") && rows.contains("CounterModel.showCodeLabel(w)"), "a button for each waiting counter")
+        ok(!approval.contains("counterDelivered") && !approval.contains("counterBundle"), "taking a response marks nothing and makes no code itself")
+        ok(AppWords.counterNotPaired.what.contains("did not approve") && SayCheck.problem(AppWords.counterNotPaired) == null, "a declined counter has words")
+        ok(AppWords.counterCodeNoBatch.what.contains("first addresses are not in this code"), "a code without the first addresses says so")
+    }
+
+    private fun oa_25_only_the_owners_word_marks_a_counter_delivered() {
+        val add = source("src/android/AddCounter.kt")
+        val code = add.substringAfter("internal fun Controller.showCounterCode(").substringBefore("internal fun Controller.waitingCounterViews(")
+        ok(Regex("n\\.counterDelivered\\(").findAll(add).count() == 1 && code.contains("ui.button(\"The counter shows Paired\")"), "one call, behind the button that says so")
+        ok(code.indexOf("ui.button(\"The counter shows Paired\")") < code.indexOf("n.counterDelivered("), "the call is made by that press")
+        ok(code.contains("ui.button(\"Show again\") { showCounterCode(w, back) }") && code.contains("ui.button(\"Back\") { back() }"), "show again, and leaving keeps it waiting")
+        ok(!code.contains("File(") && !code.contains("writeBytes") && !code.contains("copy("), "the app keeps no copy of the code")
+        ok(AppWords.counterDelivered.what.contains("marked delivered"), "the words say what was done")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
@@ -1005,7 +1135,7 @@ object AppModelTest {
         for (id in ids) ok(id in rules, "oa_${id}_... tests a rule that is in docs/OWNER-APP-RULES.md")
         for (line in rulesMd.readLines()) ok(line.length <= 80 || line.startsWith("|"), "a line of the rules is at most 80 characters: ${line.take(40)}")
         val text = rulesMd.readText()
-        ok(text.contains("## 6. What these rules do not do"), "the rules say what they do not do")
+        ok(text.contains("## 7. What these rules do not do"), "the rules say what they do not do")
         ok(text.lines().any { it.startsWith("Status:") }, "the status line")
     }
 
@@ -1023,6 +1153,7 @@ object AppModelTest {
         modelTests()
         formTests()
         exchangeTests()
+        counterTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")
     }

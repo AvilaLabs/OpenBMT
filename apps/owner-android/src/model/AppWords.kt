@@ -152,6 +152,124 @@ object AppWords {
         "On the Key app, show the answer as a code, and scan that one.",
     )
 
+    // ---- adding a counter -------------------------------------------------------------------
+
+    /** The request of a counter is being read; the four words take a moment to work out. */
+    val counterReading = w(
+        Tones.INFO, "Reading the counter",
+        "The counter's request is being read and its four words worked out, which takes a moment.",
+        Who.OWNER,
+        "Wait on this screen.",
+    )
+
+    /** A single code was read where a counter's request is a code that may change. */
+    val counterNotACode = w(
+        Tones.STOP, "Not a counter's code",
+        "The code read is not one a counter shows for its request, so nothing was queued.",
+        Who.OWNER,
+        "On the counter, choose Pair and scan the code it shows.",
+    )
+
+    /** The scan of a counter's code was cancelled, or its permission dialog was dismissed. */
+    val counterScanCancelled = w(
+        Tones.INFO, "Counter scan cancelled",
+        "No code was read, so nothing was queued.",
+        Who.OWNER,
+        "Scan the counter's code again when you are ready.",
+    )
+
+    /** A complete code that is longer than a counter's request can be. */
+    val counterCodeNotRequest = w(
+        Tones.STOP, "Not a counter's request",
+        "The code holds more than a counter's request can, so nothing was queued.",
+        Who.OWNER,
+        "On the counter, choose Pair and scan the code it shows.",
+    )
+
+    /** The shares of the instant limit once the counter is added: equal, until the settings editor exists. */
+    fun sharesNote(counters: Int) = w(
+        Tones.INFO, "Equal shares",
+        if (counters <= 1) {
+            "This is the only counter, so its share of the instant limit is all of it."
+        } else {
+            "Each counter's share of the instant limit becomes 1/$counters."
+        },
+        Who.OWNER,
+        "Custom shares come later, with the settings editor.",
+    )
+
+    /** What the owner does with the four words. */
+    val counterCompare = w(
+        Tones.INFO, "Compare the four words",
+        "Check that the counter shows these same four words, and that the Key app shows them too.",
+        Who.OWNER,
+        "If they match, say so below. If they differ, say so and nothing is paired.",
+    )
+
+    /** A phone with no settings needs a rate to start them. */
+    val counterRateNeeded = w(
+        Tones.INFO, "Rate needed",
+        "This phone holds no settings yet, and the starting limits are in dollars, so it needs today's rate.",
+        Who.OWNER,
+        "Type satoshis to a dollar as a whole number above 0, then say the words match.",
+    )
+
+    /** The owner said the words differ, and the queued request was taken out. */
+    val counterCancelled = w(
+        Tones.INFO, "Counter not added",
+        "The four words did not match, so the counter's request was taken out of the queue.",
+        Who.OWNER,
+        "Start again on the counter, and scan the new code it shows.",
+    )
+
+    /** The Key app did not approve: nothing waits for the counter. */
+    val counterNotPaired = w(
+        Tones.STOP, "Counter not paired",
+        "The Key app did not approve this counter, so no code for it was made.",
+        Who.OWNER,
+        "Read the words above, then scan the counter's code again to start over.",
+    )
+
+    /** The code for the counter is on the screen with the first addresses in it, and it changes. */
+    val counterCodeAnimated = w(
+        Tones.INFO, "Code for the counter",
+        "The code for the counter is on the screen, one part after another, with its first addresses in it.",
+        Who.OWNER,
+        "Scan this with the counter. It shows Paired when it has taken it.",
+    )
+
+    /** The code for the counter is on the screen as one code. */
+    val counterCodeStill = w(
+        Tones.INFO, "Code for the counter",
+        "The code for the counter is on the screen as one code that does not change.",
+        Who.OWNER,
+        "Scan this with the counter. It shows Paired when it has taken it.",
+    )
+
+    /** The code has no first addresses: they were handed over already. */
+    val counterCodeNoBatch = w(
+        Tones.INFO, "Code without addresses",
+        "The first addresses are not in this code, because the link handed them over already.",
+        Who.OWNER,
+        "Scan this with the counter. It shows Paired when it has taken it.",
+    )
+
+    /** No code could be made of the bundle. */
+    val counterCodeNotMade = w(
+        Tones.STOP, "No code could be made",
+        "The code for the counter could not be made, so nothing is shown. What waits for the counter is kept.",
+        Who.OWNER,
+        "Try to show it again.",
+    )
+
+    /** The owner says the counter shows Paired. */
+    val counterDelivered = w(
+        Tones.GOOD, "Counter paired",
+        "The counter shows Paired, so what waited for it is marked delivered.",
+        Who.OWNER,
+        "The counter takes its sales from its first addresses now.",
+    )
+
     // ---- what was done --------------------------------------------------------------------
 
     val requestReady = w(
@@ -438,6 +556,21 @@ object AppWords {
         "requestCodeNotMade" to requestCodeNotMade,
         "scanCancelled" to scanCancelled,
         "scanNotAResponse" to scanNotAResponse,
+        "counterReading" to counterReading,
+        "counterNotACode" to counterNotACode,
+        "counterScanCancelled" to counterScanCancelled,
+        "counterCodeNotRequest" to counterCodeNotRequest,
+        "sharesNote" to sharesNote(2),
+        "sharesNoteOne" to sharesNote(1),
+        "counterCompare" to counterCompare,
+        "counterRateNeeded" to counterRateNeeded,
+        "counterCancelled" to counterCancelled,
+        "counterNotPaired" to counterNotPaired,
+        "counterCodeAnimated" to counterCodeAnimated,
+        "counterCodeStill" to counterCodeStill,
+        "counterCodeNoBatch" to counterCodeNoBatch,
+        "counterCodeNotMade" to counterCodeNotMade,
+        "counterDelivered" to counterDelivered,
         "requestSaved" to requestSaved("request.obm"),
         "refundQueuedAtDepth" to refundQueuedAtDepth,
         "refundQueuedWaiting" to refundQueuedWaiting,
