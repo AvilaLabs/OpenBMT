@@ -30,6 +30,35 @@ impl fmt::Display for BundleGap {
     }
 }
 
+/// Why the text given as the Lightning node was refused (AS-76).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeKeyFault {
+    /// The text holds something other than hexadecimal digits, or is longer
+    /// than a key, or is empty.
+    NotAKey,
+    /// The key is cut short or abbreviated: fewer than 66 digits, or digits
+    /// with dots in them.
+    ShortForm,
+    /// 66 digits that do not start with 02 or 03, so not a compressed key.
+    NotCompressed,
+    /// 66 digits that start with 02 or 03 and are not a point on the curve.
+    NotOnCurve,
+    /// A node address whose part after the @ is not a host and a port.
+    Address,
+}
+
+impl fmt::Display for NodeKeyFault {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotAKey => write!(f, "it is not a node key"),
+            Self::ShortForm => write!(f, "it is cut short or abbreviated"),
+            Self::NotCompressed => write!(f, "it does not start with 02 or 03"),
+            Self::NotOnCurve => write!(f, "it is not a point on the curve"),
+            Self::Address => write!(f, "what follows the @ is not a host and a port"),
+        }
+    }
+}
+
 /// Why a call was refused. Nothing was changed and nothing was stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
@@ -96,6 +125,14 @@ pub enum Refusal {
     /// AS-72: a counter's bundle cannot be made yet: something it needs is
     /// not here.
     BundleNotReady(BundleGap),
+    /// AS-74: the owner phone holds no settings, held or queued, to change.
+    NoSettingsToChange,
+    /// AS-75: a changed limit in dollars needs a rate and the settings held
+    /// give none to take it from.
+    EditNeedsRate,
+    /// AS-76: the text given as the Lightning node is not a node key or
+    /// address.
+    LightningNode(NodeKeyFault),
     /// AS-59: settings that do not pass the settings rules.
     SettingsInvalid(String),
     /// AS-59: a version that is not above every version known.
@@ -181,6 +218,14 @@ impl fmt::Display for Refusal {
                 f,
                 "AS-70: no settings are held and no rate was given to start them"
             ),
+            Self::NoSettingsToChange => {
+                write!(f, "AS-74: no settings are held or queued to change")
+            }
+            Self::EditNeedsRate => write!(
+                f,
+                "AS-75: a limit in dollars changed and no rate is known to turn it into satoshis"
+            ),
+            Self::LightningNode(why) => write!(f, "AS-76: the Lightning node is refused: {why}"),
             Self::BundleNotReady(gap) => write!(f, "AS-72: the bundle is not ready: {gap}"),
             Self::SettingsInvalid(why) => {
                 write!(f, "AS-59: the settings are refused: {why}")

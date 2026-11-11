@@ -93,7 +93,7 @@ pub fn equal_shares(counters: &BTreeSet<DeviceId>) -> BTreeMap<DeviceId, u16> {
 impl State {
     /// AS-70: the settings with the highest version among the ones held and
     /// the ones queued, whatever their stage.
-    fn latest_settings(&self) -> Option<&Settings> {
+    pub(crate) fn latest_settings(&self) -> Option<&Settings> {
         self.known
             .iter()
             .map(|k| &k.settings)

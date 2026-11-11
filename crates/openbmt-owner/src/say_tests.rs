@@ -76,6 +76,13 @@ fn bind_name(e: &BindError) -> &'static str {
     }
 }
 
+fn known_fault(f: &NodeKeyFault) -> &'static str {
+    NODE_KEY_FAULTS
+        .iter()
+        .find(|(_, k)| k == f)
+        .map_or("unknown", |(n, _)| n)
+}
+
 fn refusal_name(r: &Refusal) -> String {
     let n = match r {
         Refusal::Full(w) => format!("Full/{}", known(&FULLS, w)),
@@ -96,6 +103,9 @@ fn refusal_name(r: &Refusal) -> String {
         Refusal::PairingOtherShop => "PairingOtherShop".to_string(),
         Refusal::PairingKnown => "PairingKnown".to_string(),
         Refusal::NoSettingsRate => "NoSettingsRate".to_string(),
+        Refusal::NoSettingsToChange => "NoSettingsToChange".to_string(),
+        Refusal::EditNeedsRate => "EditNeedsRate".to_string(),
+        Refusal::LightningNode(f) => format!("LightningNode/{}", known_fault(f)),
         Refusal::BundleNotReady(BundleGap::Pairing) => "BundleNotReady/Pairing".to_string(),
         Refusal::BundleNotReady(BundleGap::Settings) => "BundleNotReady/Settings".to_string(),
         Refusal::SettingsInvalid(_) => "SettingsInvalid".to_string(),
@@ -200,6 +210,11 @@ fn sc_01_no_variant_is_missing() {
     refusals.extend(FULLS.iter().copied().map(Refusal::Full));
     refusals.extend(BAD_TEXTS.iter().copied().map(Refusal::BadText));
     refusals.extend(WRONG_STAGES.iter().copied().map(Refusal::WrongStage));
+    refusals.extend(
+        NODE_KEY_FAULTS
+            .iter()
+            .map(|(_, f)| Refusal::LightningNode(*f)),
+    );
     refusals.extend([
         Refusal::DestinationKind,
         Refusal::BelowDust { sats: 1, dust: 2 },
@@ -219,6 +234,8 @@ fn sc_01_no_variant_is_missing() {
         Refusal::PairingOtherShop,
         Refusal::PairingKnown,
         Refusal::NoSettingsRate,
+        Refusal::NoSettingsToChange,
+        Refusal::EditNeedsRate,
         Refusal::BundleNotReady(BundleGap::Pairing),
         Refusal::BundleNotReady(BundleGap::Settings),
         Refusal::SettingsInvalid(String::new()),

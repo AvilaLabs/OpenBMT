@@ -17,7 +17,7 @@ use openbmt_core::wire::DecodeError;
 use openbmt_session::{BindError, EncodeError};
 
 use crate::counter::{CounterBundleMade, CounterQueued, CounterRequest};
-use crate::error::{BundleGap, OwnerError, Refusal, RestoreError, SetupError};
+use crate::error::{BundleGap, NodeKeyFault, OwnerError, Refusal, RestoreError, SetupError};
 use crate::follow::REASON_DROPPED;
 use crate::types::{ItemOutcome, Skipped, Stage};
 
@@ -582,6 +582,50 @@ impl Refusal {
                 "Enter how many satoshis one dollar buys today, then add the counter again.",
             )
             .code("AS-70"),
+            Self::NoSettingsToChange => stop(
+                "No settings to change",
+                "This phone holds no settings for the shop yet, so there is nothing to change.",
+                Who::Owner,
+                "Add a counter first. Its settings are the first ones; then they can be changed here.",
+            )
+            .code("AS-74"),
+            Self::EditNeedsRate => stop(
+                "A rate is needed",
+                "A limit in dollars was changed, and the settings held give no rate to count it in satoshis.",
+                Who::Owner,
+                "Enter how many satoshis one dollar buys today, then review the change again.",
+            )
+            .code("AS-75"),
+            Self::LightningNode(fault) => {
+                let (heading, what, next) = match fault {
+                    NodeKeyFault::NotAKey => (
+                        "Not a node key",
+                        "What was given is not a Lightning node's key, so no node was named.",
+                        "Paste the node's public key from its own app: 66 digits and letters.",
+                    ),
+                    NodeKeyFault::ShortForm => (
+                        "Node key cut short",
+                        "The node key is shorter than 66 digits or has dots in it, so no node was named.",
+                        "Copy the whole key from the node's own app, without dots, and enter it again.",
+                    ),
+                    NodeKeyFault::NotCompressed => (
+                        "Not a compressed key",
+                        "The node key does not start with 02 or 03, so it is not a node's public key.",
+                        "Copy the node's public key, which starts with 02 or 03, and enter it again.",
+                    ),
+                    NodeKeyFault::NotOnCurve => (
+                        "Not a real node key",
+                        "These 66 digits are not a point on the curve that bitcoin keys use, so no node was named.",
+                        "Check each digit against the node's own app, or scan its code again.",
+                    ),
+                    NodeKeyFault::Address => (
+                        "Node address not usable",
+                        "The key before the @ is fine, but what follows it is not a host and a port.",
+                        "Enter the address as the key, an @, the host, a colon and the port, or the key alone.",
+                    ),
+                };
+                stop(heading, what, Who::Owner, next).code("AS-76")
+            }
             Self::BundleNotReady(BundleGap::Pairing) => stop(
                 "Counter's code not ready",
                 "No approved pairing of this counter waits here, so there is nothing to show it yet.",
@@ -1065,6 +1109,17 @@ pub fn all_words() -> Vec<(String, Words)> {
     );
     add("Refusal::PairingKnown", Refusal::PairingKnown.words());
     add("Refusal::NoSettingsRate", Refusal::NoSettingsRate.words());
+    add(
+        "Refusal::NoSettingsToChange",
+        Refusal::NoSettingsToChange.words(),
+    );
+    add("Refusal::EditNeedsRate", Refusal::EditNeedsRate.words());
+    for (n, fault) in NODE_KEY_FAULTS {
+        add(
+            &format!("Refusal::LightningNode/{n}"),
+            Refusal::LightningNode(fault).words(),
+        );
+    }
     for (n, gap) in [
         ("Pairing", BundleGap::Pairing),
         ("Settings", BundleGap::Settings),
@@ -1202,6 +1257,15 @@ pub fn all_words() -> Vec<(String, Words)> {
     all.extend(crate::ceremony::all_words());
     all
 }
+
+/// The ways a Lightning node's text can be refused, as the code names them.
+pub const NODE_KEY_FAULTS: [(&str, NodeKeyFault); 5] = [
+    ("NotAKey", NodeKeyFault::NotAKey),
+    ("ShortForm", NodeKeyFault::ShortForm),
+    ("NotCompressed", NodeKeyFault::NotCompressed),
+    ("NotOnCurve", NodeKeyFault::NotOnCurve),
+    ("Address", NodeKeyFault::Address),
+];
 
 /// The things a bound can be about, as the code names them; the last is one
 /// the words do not know.

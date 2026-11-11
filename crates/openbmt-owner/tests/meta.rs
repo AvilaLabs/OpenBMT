@@ -7,9 +7,10 @@ use openbmt_owner::{OwnerError, Refusal, RestoreError, SetupError};
 use openbmt_session::{BindError, EncodeError};
 
 const RULES: &str = include_str!("../../../docs/SESSION-RULES.md");
-const TEST_SOURCES: [&str; 5] = [
+const TEST_SOURCES: [&str; 6] = [
     include_str!("counter.rs"),
     include_str!("drop.rs"),
+    include_str!("edit.rs"),
     include_str!("queue.rs"),
     include_str!("session.rs"),
     include_str!("property.rs"),
@@ -35,8 +36,8 @@ fn own_rules() -> Vec<u32> {
 
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
-    assert_eq!(own_rules().len(), 24);
-    assert!(own_rules().contains(&50) && own_rules().contains(&73));
+    assert_eq!(own_rules().len(), 28);
+    assert!(own_rules().contains(&50) && own_rules().contains(&77));
 }
 
 #[test]
@@ -89,6 +90,9 @@ fn every_error_says_which_rule_in_words() {
         Refusal::PairingOtherShop.to_string(),
         Refusal::PairingKnown.to_string(),
         Refusal::NoSettingsRate.to_string(),
+        Refusal::NoSettingsToChange.to_string(),
+        Refusal::EditNeedsRate.to_string(),
+        Refusal::LightningNode(openbmt_owner::NodeKeyFault::NotOnCurve).to_string(),
         Refusal::BundleNotReady(openbmt_owner::BundleGap::Pairing).to_string(),
         Refusal::BundleNotReady(openbmt_owner::BundleGap::Settings).to_string(),
         Refusal::SettingsInvalid("x".into()).to_string(),

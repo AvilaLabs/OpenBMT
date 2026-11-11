@@ -469,6 +469,46 @@ items are AS-26 to AS-28.
   because those counters have not been handed them. With no finished pairing
   for the counter it is refused and nothing changes.
 
+### Changing the settings
+
+The owner app's settings editor goes through `settings_preview` and then
+`queue_settings` (AS-59). The preview stores nothing; the queue call is
+the only one that does.
+
+- **AS-74.** `settings_preview` takes an edit in which every field is
+  optional: the six instant limits, the underpayment tolerance (in basis
+  points), the refund cap and daily cap, the cashier's daily override cap, the
+  manager's ceiling, the two confirmation depths, the heartbeat age (in
+  seconds), the Tor switch, customer Wi-Fi, the smallest bitcoin sale, the
+  shares of counters and the Lightning node. A field that is absent is kept.
+  The edit is applied to the latest settings, held or queued (as AS-70), at
+  the version one above every version signed so far. The depths must each be
+  from 1 to 100; the rest is judged by `Settings::validate`. A share is for a
+  key that is already a counter, and the screen of shares sees the total and
+  what remains; that the total is not above the whole budget is for
+  `validate`. With no settings held or queued it is refused.
+- **AS-75.** A limit is edited in whole dollars. The same dollars as now keep
+  the limit as it is, satoshis too, so that an untouched limit never changes
+  with the rate; 0 turns it off; any other amount is made with
+  `Limit::from_usd` at the rate the edit gives, else at the rate of the
+  settings held (satoshis over dollars of the first limit that is on). With
+  neither, a changed limit is refused and says a rate is needed.
+- **AS-76.** The Lightning node is named by text, typed, pasted or scanned
+  (plain text of a code), or removed. The text is a compressed public key of
+  66 hexadecimal digits, or an address `key@host:port` of which only the key
+  is taken, with a port from 1 to 65535. Anything else is refused with its
+  own words: not a key, cut short or abbreviated, not starting with 02 or 03,
+  not a point on the curve, an address whose host and port are not usable.
+  The owner root signs the new key; naming a node loosens, so the Key app
+  must co-sign it (`openbmt_core::settings::changed_fields`).
+- **AS-77.** The preview lists each changed field once, compared with the
+  settings in force (with none in force, those queued), with the field's
+  direction, and the whole change as the queue sorts it: the same answer
+  `queue_settings` will give for the same settings. Loosening needs the Key
+  app; tightening is signed by the owner alone and takes effect when
+  delivered. The preview changes and stores nothing, and the settings it
+  returns, given to `queue_settings`, are queued as they are.
+
 ## 4. What these rules do not do
 
 Stated plainly, because the design promises no overclaiming.
@@ -571,3 +611,14 @@ Each case below takes the reading that moves less money and loosens less.
     counter takes a bundle without one (CR-96), so a batch that was handed
     to the link before the bundle was made does not stop the ceremony, whose
     window is short.
+19. **The rate of an edit is the shop's own** (AS-75). The owner node holds
+    no exchange rate, so a limit changed in dollars is counted at the rate
+    the settings already use, or at one the caller gives. A limit left alone
+    keeps its satoshis, so the dollar amount shown beside it may be as old as
+    the rate it was made at; the owner is asked for a rate only when the
+    settings give none.
+20. **Pasted node text is judged, not repaired** (AS-76). Spaces around the
+    text are dropped and capitals are read; a key with dots, a short key or
+    an address with no port is refused and the owner enters it again,
+    because guessing the rest of a key would name a node the owner did not
+    mean.

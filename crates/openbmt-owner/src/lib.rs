@@ -1,6 +1,6 @@
 //! The OpenBMT owner phone's side of the approval session.
 //!
-//! The rules are in `docs/SESSION-RULES.md`, section 3 (AS-50 to AS-73);
+//! The rules are in `docs/SESSION-RULES.md`, section 3 (AS-50 to AS-77);
 //! the refusals and the tests name the rule they belong to. The library has
 //! no network, no clock of its own, no randomness of its own and no screen.
 //! The caller passes the time in seconds, the random bytes, the coins and
@@ -45,6 +45,7 @@ mod build;
 pub mod ceremony;
 mod codec;
 mod counter;
+mod edit;
 mod error;
 mod follow;
 pub mod say;
@@ -55,7 +56,10 @@ mod types;
 pub use counter::{
     equal_shares, BundleParts, CounterBundleMade, CounterQueued, CounterRequest, WaitingCounter,
 };
-pub use error::{BundleGap, OwnerError, Refusal, RestoreError, SetupError};
+pub use edit::{
+    parse_lightning_node, LightningEdit, SettingsEdit, SettingsPreview, MAX_EDIT_CONFIRMATIONS,
+};
+pub use error::{BundleGap, NodeKeyFault, OwnerError, Refusal, RestoreError, SetupError};
 pub use state::Owner;
 pub use types::{
     Built, CashAmount, CashOut, Deliverable, Delivery, FeePayer, IssuedRange, ItemOutcome, Options,
