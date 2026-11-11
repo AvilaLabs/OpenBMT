@@ -115,3 +115,32 @@ fn bx_52_a_box_killed_during_its_first_start_never_leaves_a_damaged_key() {
     assert_eq!(again, key);
     kill(child);
 }
+
+#[test]
+fn bx_52_a_box_without_a_console_ends_at_sigterm_and_starts_again_with_its_key() {
+    use std::os::unix::process::ExitStatusExt;
+    let dir = Dir::new("term");
+    let (mut child, key, _) = start(&dir.0);
+    // SIGTERM by the system's kill program, which is what a service
+    // manager's stop sends. The Box has no handler, so the default action
+    // ends it, by that signal and in good time.
+    let sent = Command::new("kill")
+        .arg("-TERM")
+        .arg(child.id().to_string())
+        .status()
+        .unwrap();
+    assert!(sent.success());
+    let until = std::time::Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(std::time::Instant::now() < until, "the Box did not stop");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(status.signal(), Some(15));
+    let (child, again, state) = start(&dir.0);
+    assert_eq!(again, key, "the key changed");
+    assert_eq!(state.trim(), "unpaired");
+    kill(child);
+}

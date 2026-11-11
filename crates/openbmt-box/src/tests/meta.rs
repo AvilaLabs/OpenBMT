@@ -43,10 +43,10 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_thirty_rules() {
+fn the_rules_file_defines_thirty_one_rules() {
     let all = all_rules();
-    assert_eq!(all.len(), 30);
-    assert!(all.contains("BX-01") && all.contains("BX-43") && all.contains("BX-52"));
+    assert_eq!(all.len(), 31);
+    assert!(all.contains("BX-01") && all.contains("BX-43") && all.contains("BX-53"));
 }
 
 #[test]

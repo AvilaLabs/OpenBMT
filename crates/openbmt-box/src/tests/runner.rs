@@ -926,3 +926,71 @@ fn bx_41_settings_that_drop_the_box_stop_the_pos_and_erase_the_token() {
     assert!(!dir.path().join(POS_TOKEN_FILE).exists());
     assert_eq!(conn.probe().tokens.last(), Some(&None));
 }
+
+fn start_on(dir: &TempDir, bind: &str) -> BoxRunner {
+    BoxRunner::start(
+        dir.path(),
+        bind.parse::<SocketAddr>().unwrap(),
+        TestClock::new(NOW) as Arc<dyn Clock + Send + Sync>,
+        ServerConfig::default(),
+    )
+    .unwrap()
+}
+
+/// A whole handshake with the Box at `addr`, not only a connect.
+fn handshake(r: &BoxRunner, addr: SocketAddr) {
+    Client::connect(
+        &Route::Direct(addr),
+        Some(&r.device_id()),
+        &ClientConfig::default(),
+    )
+    .unwrap();
+}
+
+fn bindv6only() -> bool {
+    std::fs::read_to_string("/proc/sys/net/ipv6/bindv6only")
+        .map(|s| s.trim() == "1")
+        .unwrap_or(false)
+}
+
+#[test]
+fn bx_53_a_box_bound_to_the_ipv6_loopback_answers_over_ipv6() {
+    let dir = TempDir::new("v6lo");
+    let r = start_on(&dir, "[::1]:0");
+    assert!(r.local_addr().is_ipv6());
+    handshake(&r, r.local_addr());
+}
+
+#[test]
+fn bx_53_a_box_bound_to_the_ipv6_any_address_answers_over_ipv6() {
+    let dir = TempDir::new("v6any");
+    let r = start_on(&dir, "[::]:0");
+    assert!(r.local_addr().is_ipv6());
+    let port = r.local_addr().port();
+    handshake(&r, SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], port)));
+}
+
+#[test]
+fn bx_53_a_box_bound_to_the_ipv6_any_address_answers_over_ipv4_unless_the_host_says_otherwise() {
+    // Linux makes `[::]` dual-stack unless net.ipv6.bindv6only is 1; the Box
+    // does not change that, so the test follows the host's setting.
+    let dir = TempDir::new("v6dual");
+    let r = start_on(&dir, "[::]:0");
+    let v4 = SocketAddr::from(([127, 0, 0, 1], r.local_addr().port()));
+    if bindv6only() {
+        assert!(std::net::TcpStream::connect(v4).is_err());
+    } else {
+        handshake(&r, v4);
+    }
+}
+
+#[test]
+fn bx_53_a_box_bound_to_the_ipv4_any_address_still_answers() {
+    let dir = TempDir::new("v4any");
+    let r = start_on(&dir, "0.0.0.0:0");
+    assert!(r.local_addr().is_ipv4());
+    handshake(
+        &r,
+        SocketAddr::from(([127, 0, 0, 1], r.local_addr().port())),
+    );
+}

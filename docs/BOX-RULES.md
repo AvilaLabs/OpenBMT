@@ -216,6 +216,14 @@ screen and not a shared computer.
   a temporary file left behind is overwritten by the next write. A Box run
   as a service (`--no-console`) reads no standard input, takes an invitation
   only from `--invitation-file` and runs until a signal ends it.
+- **BX-53.** The Box listens on the address it is given, IPv4 or IPv6, and
+  accepts what that address allows. `0.0.0.0:8986` accepts IPv4 only.
+  `[::]:8986` is the IPv6 any-address: on Linux it also accepts IPv4
+  connections, as IPv4-mapped addresses, unless the host sets
+  `net.ipv6.bindv6only` to 1, in which case it accepts IPv6 only. The Box
+  does not change that setting. A host that reaches the Box by IPv6 (a
+  StartOS raw TCP interface lists IPv6 addresses) needs `[::]` or an IPv6
+  address in the bind.
 
 ## 5a. What the code fixes
 
