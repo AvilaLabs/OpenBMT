@@ -239,6 +239,30 @@ object UrNativeHarness {
         ok(seen.map { it.second.heading }.toSet().size >= 4, "the refusals read differently")
     }
 
+    private fun bbqrTests(call: UrCall) {
+        val payload = psbt(900)
+        val parts = value(call.bbqrEncode('P', payload, 300), "the parts of a BBQr set")
+        ok(parts.size > 2 && parts.all { it.startsWith("B\$2P") && it.length <= 300 }, "a BBQr set of base32 parts of type P")
+        val h = value(call.newJoiner(), "a reader")
+        for ((i, p) in parts.reversed().withIndex()) {
+            val progress = value(call.joinerAdd(h, p), "part $i")
+            ok(progress.have == i + 1 && progress.total == parts.size && progress.complete == (i + 1 == parts.size), "progress at part $i")
+        }
+        val message = value(call.joinerResult(h), "the set's message")
+        ok(message.kind == 'P' && message.payload.contentEquals(payload), "the set reads back in the reverse order")
+        value(call.joinerDrop(h), "close the reader")
+        ok(refusal(call.joinerDrop(h)) == UrCall.BAD_STATE, "a reader that is closed")
+        val h2 = value(call.newJoiner(), "a second reader")
+        value(call.joinerAdd(h2, parts[0]), "one part")
+        ok(refusal(call.joinerResult(h2)) == "BQ-10", "a set that is short names the part missing")
+        ok(refusal(call.joinerAdd(h2, "hello")) == "BQ-01", "text that is not a part")
+        ok(refusal(call.bbqrEncode('Q', payload, 300)) == "BQ-03", "a kind that is not defined")
+        value(call.joinerDrop(h2), "close the second reader")
+        // A descriptor goes out as a crypto-output.
+        val out = value(call.urEncode("crypto-output", message(300), 100), "the parts of a crypto-output")
+        ok(out.size > 2 && out.all { it.startsWith("UR:CRYPTO-OUTPUT/") }, "a crypto-output of several parts")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         System.load(File(args[0]).absolutePath)
@@ -250,6 +274,7 @@ object UrNativeHarness {
         handleTests(call)
         framingTests(call)
         keyTests(call)
+        bbqrTests(call)
         println("UrNativeHarness: $count checks passed")
     }
 }

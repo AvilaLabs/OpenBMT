@@ -52,6 +52,12 @@ class UrProgress(val complete: Boolean, val received: Int, val expected: Int, va
 /** A finished message: the [type] of the UR and its [payload]. */
 class UrMessage(val type: String, val payload: ByteArray)
 
+/** How far a reader of a BBQr set has come: parts [have] of [total], in any order. */
+class BbqrProgress(val complete: Boolean, val have: Int, val total: Int)
+
+/** A finished BBQr set: its [kind] (the letter P for a PSBT, T for a transaction) and its [payload]. */
+class BbqrMessage(val kind: Char, val payload: ByteArray)
+
 /**
  * The framing of the library's second call, in pure Kotlin (the Rust side is `crates/openbmt-qr-jni/src/
  * call.rs`). Requests are the bytes `OBMo`, the version 1, an operation and its fields, big-endian, with
@@ -77,7 +83,8 @@ class UrCall(private val transport: (ByteArray) -> ByteArray?) {
     }
 
     /**
-     * The parts of [payload] as UR text of [type] (`bytes` or `crypto-psbt`), in upper case: one part
+     * The parts of [payload] as UR text of [type] (`bytes`, `crypto-psbt`, or `crypto-output`, whose payload
+     * is the descriptor's CBOR), in upper case: one part
      * when it fits [maxFragment] bytes, otherwise two turns of the sequence (twice its length).
      */
     fun urEncode(type: String, payload: ByteArray, maxFragment: Int): UrOutcome<List<String>> {
@@ -221,6 +228,68 @@ class UrCall(private val transport: (ByteArray) -> ByteArray?) {
         }
     }
 
+    /**
+     * The parts of [payload] as a BBQr set of [kind] (P, T, U, J, C, B or X), each at most [maxChars]
+     * characters (16 to 4296). A set is shown round and round; the order does not matter to a reader.
+     */
+    fun bbqrEncode(kind: Char, payload: ByteArray, maxChars: Int): UrOutcome<List<String>> {
+        if (kind.code > 0x7f || maxChars !in 0..0xffff) return UrOutcome.Refused(BAD_FRAMING)
+        val out = head(OP_BBQR_ENCODE)
+        out.write(kind.code)
+        out.write(maxChars shr 8)
+        out.write(maxChars and 0xff)
+        sized(out, payload)
+        return run(out) { body ->
+            if (body.size < 4) return@run null
+            val count = u32(body, 0)
+            if (count < 1 || count > MAX_PARTS) return@run null
+            val parts = ArrayList<String>(count.toInt())
+            var at = 4
+            for (i in 0 until count.toInt()) {
+                if (at + 4 > body.size) return@run null
+                val len = u32(body, at)
+                at += 4
+                if (len > body.size - at) return@run null
+                parts.add(String(body, at, len.toInt(), Charsets.US_ASCII))
+                at += len.toInt()
+            }
+            if (at != body.size) null else parts
+        }
+    }
+
+    /** Opens a reader of a BBQr set of a PSBT or a transaction; the handle is never given twice. */
+    fun newJoiner(): UrOutcome<Long> = run(head(OP_BBQR_NEW)) { body -> if (body.size == 4) u32(body, 0) else null }
+
+    /** Gives the reader the text of one scanned part. */
+    fun joinerAdd(handle: Long, text: String): UrOutcome<BbqrProgress> {
+        val out = head(OP_BBQR_ADD)
+        u32(out, handle)
+        sized(out, text.toByteArray(Charsets.UTF_8))
+        return run(out) { body ->
+            if (body.size != 9 || (body[0].toInt() != 0 && body[0].toInt() != 1)) return@run null
+            BbqrProgress(body[0].toInt() == 1, u32(body, 1).toInt(), u32(body, 5).toInt())
+        }
+    }
+
+    /** The message of a complete set. */
+    fun joinerResult(handle: Long): UrOutcome<BbqrMessage> {
+        val out = head(OP_BBQR_RESULT)
+        u32(out, handle)
+        return run(out) { body ->
+            if (body.size < 5) return@run null
+            val len = u32(body, 1)
+            if (len != (body.size - 5).toLong()) return@run null
+            BbqrMessage((body[0].toInt() and 0x7f).toChar(), body.copyOfRange(5, body.size))
+        }
+    }
+
+    /** Closes a reader of a BBQr set. */
+    fun joinerDrop(handle: Long): UrOutcome<Unit> {
+        val out = head(OP_BBQR_DROP)
+        u32(out, handle)
+        return run(out) { body -> if (body.isEmpty()) Unit else null }
+    }
+
     /** Closes a decoder; whatever it held is gone. */
     fun drop(handle: Long): UrOutcome<Unit> {
         val out = head(OP_DECODER_DROP)
@@ -293,6 +362,11 @@ class UrCall(private val transport: (ByteArray) -> ByteArray?) {
         const val OP_DECODER_RESULT = 5
         const val OP_DECODER_DROP = 6
         const val OP_KEY_TEXT = 7
+        const val OP_BBQR_ENCODE = 8
+        const val OP_BBQR_NEW = 9
+        const val OP_BBQR_ADD = 10
+        const val OP_BBQR_RESULT = 11
+        const val OP_BBQR_DROP = 12
 
         /** The rule codes of the call itself. */
         const val TYPE_NOT_USED = "UR-20"
@@ -304,7 +378,7 @@ class UrCall(private val transport: (ByteArray) -> ByteArray?) {
 
         /** The longest key text: the origin and an extended key of at most 112 characters. */
         private const val MAX_KEY_TEXT = 160
-        private val RULE_CODE = Regex("^(UR|QR)-[0-9]{2}$")
+        private val RULE_CODE = Regex("^(UR|QR|BQ)-[0-9]{2}$")
 
         /** The call through the library; [org.openbmt.common.QrNative.load] must have loaded it. */
         fun native(): UrCall = UrCall { UrNative.call(it) }

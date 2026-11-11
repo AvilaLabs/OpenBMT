@@ -1216,10 +1216,10 @@ private fun Reader.signerFile(): SignerFile =
     )
 
 private fun Reader.firstAddressKind(): Boolean =
-    when (val t = u8()) {
+    when (u8()) {
         TAG_FIRST_ADDRESS_KIND_CHECKED -> true
         TAG_FIRST_ADDRESS_KIND_SKIPPED -> false
-        else -> bad("first address kind $t is not defined")
+        else -> tag("FirstAddressKind")
     }
 
 private fun Reader.stage(): Stage = Stage(stageKind(), option { string() }, words())
