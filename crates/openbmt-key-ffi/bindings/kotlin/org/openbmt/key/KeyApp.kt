@@ -99,6 +99,8 @@ private const val OP_PUBLIC_ANSWER = 82
 private const val OP_ACCEPT_WALLET_SETUP = 83
 private const val OP_CONFIRM_WALLET = 84
 private const val OP_DISCARD_WALLET = 85
+private const val OP_TAKE_KEY2 = 86
+private const val OP_KEY2_TAKEN_VIEW = 87
 private const val OP_LOCK_STATUS = 90
 private const val OP_SET_PIN = 91
 private const val OP_UNLOCK = 92
@@ -207,6 +209,14 @@ data class Key2Public(
 
 /** Key 3's public parts as the Key app keeps them, for the comparison screen. */
 data class Key3View(
+    val mainnet: Boolean,
+    val masterFingerprint: String,
+    val originPath: String,
+    val accountXpub: String,
+)
+
+/** Key 2's public parts as the Key app took them from its hardware signer, for the comparison screen. */
+data class Key2TakenView(
     val mainnet: Boolean,
     val masterFingerprint: String,
     val originPath: String,
@@ -659,6 +669,8 @@ private fun Reader.key2Public(): Key2Public =
 
 internal fun Reader.key3View(): Key3View = Key3View(bool(), string(), string(), string())
 
+internal fun Reader.key2TakenView(): Key2TakenView = Key2TakenView(bool(), string(), string(), string())
+
 internal fun Reader.walletView(): WalletView =
     WalletView(
         checksumWords = strings(),
@@ -897,6 +909,10 @@ internal fun requestFrame(op: Int, handle: Long, fill: (Writer) -> Unit = {}): B
 internal fun takeKey3Request(handle: Long, text: String): ByteArray =
     requestFrame(OP_TAKE_KEY3, handle) { it.string(text) }
 
+/** The request of [KeyApp.takeKey2]. */
+internal fun takeKey2Request(handle: Long, text: String): ByteArray =
+    requestFrame(OP_TAKE_KEY2, handle) { it.string(text) }
+
 /** The request of [KeyApp.acceptWalletSetup]. */
 internal fun acceptWalletSetupRequest(handle: Long, setup: ByteArray): ByteArray =
     requestFrame(OP_ACCEPT_WALLET_SETUP, handle) { it.bytes(setup) }
@@ -1060,6 +1076,18 @@ class KeyApp private constructor(private val store: KeyStore, private val handle
     fun key3View(): Key3View? {
         val r = call(store, OP_KEY3_VIEW, handle)
         return r.option { r.key3View() }.also { r.end() }
+    }
+
+    /** SR-84 to SR-87: read and keep key 2 from the text its hardware signer shows (no key 2 held here). */
+    fun takeKey2(text: String): Key2TakenView {
+        val r = callFrame(takeKey2Request(handle, text))
+        return r.key2TakenView().also { r.end() }
+    }
+
+    /** Key 2 as taken from its signer, or null. */
+    fun key2TakenView(): Key2TakenView? {
+        val r = call(store, OP_KEY2_TAKEN_VIEW, handle)
+        return r.option { r.key2TakenView() }.also { r.end() }
     }
 
     /** The public answer (`OBMv`) the owner phone scans. */

@@ -47,6 +47,7 @@ import org.openbmt.key.CeilingsView
 import org.openbmt.key.Decision
 import org.openbmt.key.EntropySource
 import org.openbmt.key.FeeCeilingsView
+import org.openbmt.key.Key2TakenView
 import org.openbmt.key.Key3View
 import org.openbmt.key.KeyApp
 import org.openbmt.key.KeyException
@@ -223,19 +224,23 @@ class Controller(private val act: MainActivity) {
     fun refresh(fault: Words? = null) {
         var state: SetupState? = null
         var key3: Key3View? = null
+        var key2Taken: Key2TakenView? = null
         var lock: LockStatus? = null
         var problem = fault
         val a = app
         if (problem == null && a != null && refusals().isEmpty()) {
             try {
                 state = a.state()
-                if (state is SetupState.HasIdentity && !state.wordsWaiting) key3 = a.key3View()
+                if (state is SetupState.HasIdentity && !state.wordsWaiting) {
+                    key3 = a.key3View()
+                    if (!state.holdsKey2) key2Taken = a.key2TakenView()
+                }
                 if (state is SetupState.Empty || state is SetupState.Locked) lock = a.lockStatus()
             } catch (e: KeyException) {
                 problem = e.words ?: AppWords.fault(e)
             }
         }
-        render(ScreenModel.pick(refusals(), problem, state, key3, lock), state)
+        render(ScreenModel.pick(refusals(), problem, state, key3, lock, key2Taken), state)
     }
 
     private fun render(screen: Screen, state: SetupState? = null) {
@@ -248,6 +253,7 @@ class Controller(private val act: MainActivity) {
             is Screen.Setup -> showSetup()
             is Screen.ShowWords -> showKeyWords()
             is Screen.Key3 -> showKey3(null)
+            is Screen.Key2 -> showKey2()
             is Screen.GiveAnswer -> showAnswer(screen.key3)
             is Screen.ComparePending -> showPending()
             is Screen.Home -> showHome(state ?: SetupState.Ready(screen.holdsKey2))
@@ -945,8 +951,63 @@ class Controller(private val act: MainActivity) {
             "Scan key 3",
             views,
             listOf(
-                ui.primary("They match") { showAnswer(v) },
+                ui.primary("They match") { refresh() },
                 ui.danger("They differ") { showMessage(AppWords.key3Mismatch) { showKey3(null) } },
+            ),
+        )
+    }
+
+    /**
+     * Step 2, for a Key app with no key 2 of its own: key 2 comes from its hardware signer, by a key code or
+     * as text, before any wallet exists (SR-84). The owner phone takes key 2 from the signer on its own.
+     */
+    private fun showKey2() {
+        val words = model(AppWords.key2Needed)
+        val views = ArrayList<View>(banner())
+        views.add(ui.titleBlock(words, "Key"))
+        views.add(ui.hint(words))
+        put("Key", views, listOf(ui.primary(AppWords.key2Needed.heading) { scanKey2() }), logo = true)
+    }
+
+    private fun scanKey2() {
+        allowed {
+            scan.begin(
+                show = { act.show(scanPage(ui, it)) },
+                onBytes = { bytes -> allowed { takeKey2(CeremonyModel.readKey3Code(bytes)) } },
+                onFailed = { showMessage(cameraWords(it)) { showKey2() } },
+                onCancel = { showKey2() },
+                ur = UrScan(CeremonyModel.KEY3_TYPES, Who.KEY_HOLDER) { type, payload ->
+                    allowed { takeKey2(CeremonyModel.readKey3Message(UrCall.native().keyText(type, payload))) }
+                },
+            )
+        }
+    }
+
+    private fun takeKey2(input: Key3Input) {
+        val a = app ?: return
+        when (input) {
+            is Key3Input.Refused -> showMessage(input.words) { showKey2() }
+            is Key3Input.Declined -> showMessage(input.words) { scanKey2() }
+            is Key3Input.Text -> attempt({ showKey2() }) { a.takeKey2(input.text) }?.let { showKey2Taken(it) }
+        }
+    }
+
+    /** The fingerprint of key 2, large, to be checked against the signer's own screen. */
+    private fun showKey2Taken(v: Key2TakenView) {
+        val c = CeremonyModel.key2Check(v)
+        val words = model(AppWords.key2Taken)
+        val views = ArrayList<View>(banner())
+        views.add(ui.titleBlock(words, "Key"))
+        views.add(centred(ui.text(c.fingerprint, 40f, bold = true, mono = true)))
+        views.add(centred(ui.text(c.network, 13f, colour = ui.pal.secondary)))
+        views.addAll(advanced(c.advanced.joinToString("\n")))
+        views.add(ui.hint(words))
+        put(
+            "Key",
+            views,
+            listOf(
+                ui.primary("They match") { refresh() },
+                ui.danger("They differ") { showMessage(AppWords.key2Mismatch) { showKey2() } },
             ),
         )
     }

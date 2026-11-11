@@ -299,6 +299,30 @@ object AppWords {
         "Export key 3 again from the other wallet and scan it again; nothing goes on until they match.",
     )
 
+    /** The screen before key 2 is scanned, on a Key app that holds no key 2 (SR-84). */
+    val key2Needed = w(
+        Tones.INFO, "Key 2, from your signer",
+        "Key 2 is on your hardware signer, so this app takes its public part straight from the signer, not from the owner's phone.",
+        Who.KEY_HOLDER,
+        "Show key 2 on the signer as a key code or as text, and scan it here.",
+    )
+
+    /** Key 2 is taken: its short code is shown to compare with the signer. */
+    val key2Taken = w(
+        Tones.GOOD, "Key 2 taken",
+        "This app now holds the public part of key 2, and nothing else of it.",
+        Who.KEY_HOLDER,
+        "Compare the short code shown here with the one on the signer, then go on.",
+    )
+
+    /** The person says the fingerprints differ. */
+    val key2Mismatch = w(
+        Tones.STOP, "Key 2 does not match",
+        "The fingerprint here is not the one the signer shows, so this is not the key 2 on the signer.",
+        Who.KEY_HOLDER,
+        "Show key 2 on the signer again and scan it again; nothing goes on until they match.",
+    )
+
     /** The public answer is on the screen: the words of `openbmt_signer::answer_ready_words`. */
     val publicAnswerReady = Words(
         Tones.INFO, Who.OWNER, "Answer ready for the owner",
@@ -573,6 +597,9 @@ object AppWords {
         "key3NotText" to key3NotText,
         "key3Taken" to key3Taken,
         "key3Mismatch" to key3Mismatch,
+        "key2Needed" to key2Needed,
+        "key2Taken" to key2Taken,
+        "key2Mismatch" to key2Mismatch,
         "publicAnswerReady" to publicAnswerReady,
         "scanOwnerWallet" to scanOwnerWallet,
         "checkWallet" to checkWallet,

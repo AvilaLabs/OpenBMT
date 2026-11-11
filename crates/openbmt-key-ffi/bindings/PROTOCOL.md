@@ -93,6 +93,8 @@ The handle names the object the op works on: `zero` (the field is 0),
  83 accept_wallet_setup    handle app      args list<u8> -> WalletView
  84 confirm_wallet         handle app      args () -> ()
  85 discard_wallet         handle app      args () -> ()
+ 86 take_key2              handle app      args string -> Key2TakenView
+ 87 key2_taken_view        handle app      args () -> option<Key2TakenView>
  90 lock_status            handle app      args () -> LockStatus
  91 set_pin                handle app      args string -> ()
  92 unlock                 handle app      args string -> ()
@@ -114,6 +116,7 @@ LockStatus: enum, one tag byte
     tags NoPin=0 Legacy=1 Locked=2 Open=3
 Key2Public: record: network: KeyNetwork, master_fingerprint: string, origin_path: string, account_xpub: string
 Key3View: record: mainnet: bool, master_fingerprint: string, origin_path: string, account_xpub: string
+Key2TakenView: record: mainnet: bool, master_fingerprint: string, origin_path: string, account_xpub: string
 SlotView: record: index: u32, fingerprint: string, xpub: string
 WalletSetup: record: description: string, network: KeyNetwork, owner_root: list<u8>, key3_xpub: option<string>, batch_min_count: option<u32>
 WalletView: record: checksum_words: list<string>, wallet_id: list<u8>, slots: list<SlotView>, first_receive_address: string, own_root_words: list<string>, owner_root_words: list<string>

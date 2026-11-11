@@ -43,9 +43,10 @@
 //! - 60 to 65: free functions (entropy progress, word picker, deposit code).
 //! - 90 to 93: the lock of the stored state (`lock_status`, `set_pin`,
 //!   `unlock`, `change_pin`; `docs/SIGNER-RULES.md` SR-71 to SR-74).
-//! - 80 to 85: the key ceremony (`take_key3`, `key3_view`, `public_answer`,
-//!   `accept_wallet_setup`, `confirm_wallet`, `discard_wallet`;
-//!   `docs/SIGNER-RULES.md` SR-64 to SR-69).
+//! - 80 to 87: the key ceremony (`take_key3`, `key3_view`, `public_answer`,
+//!   `accept_wallet_setup`, `confirm_wallet`, `discard_wallet`, `take_key2`,
+//!   `key2_taken_view`; `docs/SIGNER-RULES.md` SR-64 to SR-69, SR-84 to
+//!   SR-90).
 //!
 //! The handle field names what the op works on: an app handle (from `open`)
 //! or a session handle (from `open_session`), or must be 0. Handles start at
@@ -66,7 +67,7 @@ use openbmt_core::say::Words;
 
 use crate::app::{Key2Public, KeyApp, LockStatus, SetupState, SlotView, WalletSetup, WalletView};
 use crate::boxinvite::InvitationView;
-use crate::ceremony::Key3View;
+use crate::ceremony::{Key2TakenView, Key3View};
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::deposit::{parse_deposit_code, DepositCode};
 use crate::error::{internal, refused_by, wrong_state, KeyError};
@@ -512,6 +513,12 @@ fn build_ops() -> Vec<Op> {
         }),
         op(84, "confirm_wallet", App, |c, ()| c.app()?.confirm_wallet()),
         op(85, "discard_wallet", App, |c, ()| c.app()?.discard_wallet()),
+        op(86, "take_key2", App, |c, text: String| {
+            c.app()?.take_key2(text)
+        }),
+        op(87, "key2_taken_view", App, |c, ()| {
+            c.app()?.key2_taken_view()
+        }),
         op(90, "lock_status", App, |c, ()| c.app()?.lock_status()),
         op(91, "set_pin", App, |c, pin: String| c.app()?.set_pin(pin)),
         op(92, "unlock", App, |c, pin: String| c.app()?.unlock(pin)),
@@ -694,6 +701,7 @@ fn definitions() -> Vec<TypeDef> {
         LockStatus::define(),
         Key2Public::define(),
         Key3View::define(),
+        Key2TakenView::define(),
         SlotView::define(),
         WalletSetup::define(),
         WalletView::define(),

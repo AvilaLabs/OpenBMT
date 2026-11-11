@@ -24,6 +24,7 @@ import org.openbmt.key.CheckStatus
 import org.openbmt.key.CheckView
 import org.openbmt.key.HealthDetail
 import org.openbmt.key.InvitationView
+import org.openbmt.key.Key2TakenView
 import org.openbmt.key.Key3View
 import org.openbmt.key.KeyException
 import org.openbmt.key.LineDetail
@@ -151,7 +152,7 @@ object AppModelTest {
     private val notInTheCatalogue = AppWords.urWords().map { it.first }.toSet() + setOf(
         "debuggingOn", "wirelessDebuggingOn", "accessibilityOn", "keyInSoftware", "libraryMissing", "fault",
         "keystoreUnavailable", "fileNotRead", "fileNotSaved", "cameraOff", "cameraNotStarted", "codeNotForField", "notANumber", "flipsNotReadable", "answersReady", "pairOffer", "pairBox", "invitationRunOut", "boxFound",
-        "key3Needed", "key3UrNotRead", "key3NotText", "key3Mismatch", "scanOwnerWallet", "checkWallet", "walletMismatch",
+        "key3Needed", "key3UrNotRead", "key3NotText", "key3Mismatch", "key2Needed", "key2Taken", "key2Mismatch", "scanOwnerWallet", "checkWallet", "walletMismatch",
         "walletLacksKey3", "choosePin", "upgradePin", "pinsDiffer", "pinChanged", "working", "waitForTry",
         "triesNotSaved", "wiped", "wipeFailed", "cashOut", "scanDeposit", "notADepositCode", "nameAddress",
         "checkAddress", "addressAdded", "removeAddress", "addressRemoved",
@@ -179,6 +180,14 @@ object AppModelTest {
         val k3 = Key3View(true, "a1b2c3d4", "48h/0h/0h/2h", "xpub-text")
         val give = ScreenModel.pick(emptyList(), null, SetupState.HasIdentity(true, false), k3)
         ok(give is Screen.GiveAnswer && give.holdsKey2 && give.key3 == k3, "key 3 held: give the answer")
+        // No key 2 here: key 2 is scanned from the signer after key 3 and before the answer (SR-84).
+        val k2 = Key2TakenView(true, "00ff00ff", "48h/0h/0h/2h", "xpub-two")
+        val scan2 = ScreenModel.pick(emptyList(), null, SetupState.HasIdentity(false, false), k3)
+        ok(scan2 is Screen.Key2 && scan2.key3 == k3, "no key 2 held and none taken: scan key 2 from the signer")
+        val answer2 = ScreenModel.pick(emptyList(), null, SetupState.HasIdentity(false, false), k3, null, k2)
+        ok(answer2 is Screen.GiveAnswer && !answer2.holdsKey2, "key 2 taken: give the answer")
+        ok(ScreenModel.pick(emptyList(), null, SetupState.HasIdentity(false, false), null, null, k2) is Screen.Key3, "key 3 comes before key 2")
+        ok(ScreenModel.pick(emptyList(), null, SetupState.HasIdentity(true, false), k3, null, null) is Screen.GiveAnswer, "key 2 held here: no key 2 step")
         ok(ScreenModel.pick(emptyList(), null, SetupState.HasIdentity(true, true), k3) is Screen.ShowWords, "words waiting come before key 3")
         ok(ScreenModel.pick(emptyList(), null, SetupState.Ready(true), k3) is Screen.Home, "a wallet accepted: home, key 3 or not")
         val pending = ScreenModel.pick(emptyList(), null, SetupState.WalletPending(true), k3)
@@ -348,6 +357,18 @@ object AppModelTest {
         ok(AppWords.Text.ADVANCED == "Advanced" && AppWords.Text.SCAN_KEY3 == "Scan key 3", "the button words")
         ok(AppWords.key3Needed.next.contains("alone") && AppWords.key3Needed.what.contains("another publisher"), "key 3 is made alone, elsewhere")
         ok(AppWords.key3Mismatch.tone == Tones.STOP && AppWords.key3Taken.tone == Tones.GOOD, "mismatch is a stop, taken is done")
+        // Key 2, from the signer (SR-84).
+        val c2 = CeremonyModel.key2Check(Key2TakenView(false, "00ff00ff", "48h/1h/0h/2h", "tpub-two"))
+        ok(c2.fingerprint == "00FF 00FF" && c2.network == "A test network", "key 2 on a test network")
+        ok(c2.advanced == listOf("Origin path: 48h/1h/0h/2h", "Account key: tpub-two"), "key 2's origin and account key are for the Advanced fold")
+        ok(CeremonyModel.key2Check(Key2TakenView(true, "00ff00ff", "p", "x")).network == "Main bitcoin network", "key 2 on the main network")
+        for (w in listOf(AppWords.key2Needed, AppWords.key2Taken, AppWords.key2Mismatch)) {
+            val all = "${w.heading} ${w.what} ${w.next}".lowercase()
+            ok(listOf("xpub", "descriptor", "multisig").none { all.contains(it) }, "no jargon in ${w.heading}")
+            ok(w.who == Who.KEY_HOLDER, "${w.heading} is for the key holder")
+        }
+        ok(AppWords.key2Needed.what.contains("not from the owner's phone"), "key 2 is taken from the signer, not the owner phone")
+        ok(AppWords.key2Mismatch.tone == Tones.STOP && AppWords.key2Taken.tone == Tones.GOOD, "key 2: mismatch is a stop, taken is done")
     }
 
     private fun sr_64_key_3_by_a_key_code() {

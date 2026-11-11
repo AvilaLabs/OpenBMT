@@ -1,5 +1,6 @@
 package org.openbmt.key.app
 
+import org.openbmt.key.Key2TakenView
 import org.openbmt.key.Key3View
 import org.openbmt.key.LockStatus
 import org.openbmt.key.SetupState
@@ -34,6 +35,9 @@ sealed class Screen {
     /** An identity and maybe key 2, and no key 3 yet: scan it (DESIGN section 2.1, step 2). */
     class Key3(val holdsKey2: Boolean) : Screen()
 
+    /** Key 3 is held and key 2 is on a hardware signer: scan key 2 from it (SR-84). */
+    class Key2(val key3: Key3View) : Screen()
+
     /** Key 3 is held: show the public answer, then read the owner phone's wallet (step 5). */
     class GiveAnswer(val holdsKey2: Boolean, val key3: Key3View) : Screen()
 
@@ -51,7 +55,8 @@ object ScreenModel {
      * of the library's state. A null [state] with no [fault] means the library
      * has not been opened yet, which is a fault of the app and is shown as one.
      * [key3] is key 3 as the library keeps it, or null; it only matters for an
-     * identity that is waiting for the wallet. [lock] is where the lock is; it only matters while the state is
+     * identity that is waiting for the wallet. [key2Taken] is key 2 as taken from its signer, or null; it only
+     * matters for an identity that holds no key 2. [lock] is where the lock is; it only matters while the state is
      * empty (a PIN comes before the first key) or locked.
      */
     fun pick(
@@ -60,6 +65,7 @@ object ScreenModel {
         state: SetupState?,
         key3: Key3View? = null,
         lock: LockStatus? = null,
+        key2Taken: Key2TakenView? = null,
     ): Screen = when {
         refusals.isNotEmpty() -> Screen.Refused(refusals)
         fault != null -> Screen.Fault(fault)
@@ -71,6 +77,7 @@ object ScreenModel {
                 when {
                     state.wordsWaiting -> Screen.ShowWords
                     key3 == null -> Screen.Key3(state.holdsKey2)
+                    !state.holdsKey2 && key2Taken == null -> Screen.Key2(key3)
                     else -> Screen.GiveAnswer(state.holdsKey2, key3)
                 }
             is SetupState.WalletPending -> Screen.ComparePending(state.holdsKey2)

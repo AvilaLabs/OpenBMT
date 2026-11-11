@@ -381,6 +381,12 @@ impl Inner {
         self.material().and_then(|m| m.key3.clone())
     }
 
+    /// Key 2 as taken from its signer, to keep when the identity is made
+    /// again with no key 2 of its own (SR-84).
+    fn key2_taken_kept(&self) -> Option<openbmt_signer::KeyPart> {
+        self.material().and_then(|m| m.key2_taken.clone())
+    }
+
     pub(crate) fn material(&self) -> Option<&Material> {
         match &self.phase {
             Phase::Empty => None,
@@ -662,6 +668,7 @@ impl KeyApp {
             }
             let (mut material, _) = make_material(&inner.store, None)?;
             material.key3 = inner.key3_kept();
+            material.key2_taken = inner.key2_taken_kept();
             inner
                 .store
                 .save(envelope::encode(&material, None))
@@ -774,6 +781,9 @@ impl KeyApp {
                     )),
                 };
             let (part, approver) = build_wallet(material, setup, pending.is_some())?;
+            if pending.is_some() {
+                crate::ceremony::check_key2_taken(material, approver.wallet(), part.network)?;
+            }
             let view = wallet_view(&approver)?;
             let bytes = match &pending {
                 Some(setup_bytes) => envelope::encode_pending(material, setup_bytes),

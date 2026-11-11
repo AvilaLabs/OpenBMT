@@ -356,6 +356,7 @@ pub(crate) fn make_material(
                     identity,
                     key2: Some(key2),
                     key3: None,
+                    key2_taken: None,
                 },
                 Some(words).filter(|w| !w.is_empty()),
             ))
@@ -365,6 +366,7 @@ pub(crate) fn make_material(
                 identity,
                 key2: None,
                 key3: None,
+                key2_taken: None,
             },
             None,
         )),

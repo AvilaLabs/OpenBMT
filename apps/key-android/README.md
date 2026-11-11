@@ -17,6 +17,7 @@ local test key; release signing is a separate step (see "Signing").
 | First start | Make key 2 from the device, dice (hashed or skew-corrected), coin flips or typed words, or be an approver only. |
 | The words | The new key's words, once. |
 | Key 3 | Key 3 is made in another publisher's wallet or on a hardware wallet; Scan key 3 (a plain text code or a key code) or paste its text, then its fingerprint to check against the other wallet. |
+| Key 2, from your signer | Only on a Key app with no key 2 of its own: scan key 2 from the hardware signer (a plain text code or a key code), then its fingerprint to check against the signer. |
 | Give the owner phone these keys | The public answer as a code that changes, then Scan the owner phone's wallet. |
 | Check the wallet | The four check words and the three fingerprints, large, to compare with the owner phone and the counter; They match leads to the home screen. |
 | Home | Requests, the wallet and its check words, the kit check, the limits. |
@@ -63,11 +64,20 @@ after the identity is made on an approver-only device:
    Single-signature exports, another network, key 2 itself and a bad origin
    are refused with the library's words. A later key 3 replaces the first until
    the wallet is accepted.
-2. **Give the owner phone these keys.** The public answer (`publicAnswer`, op
+2. **Key 2, from the signer.** Only when this app holds no key 2 (it is on a
+   hardware signer), right after key 3 is taken and before the answer. The
+   screen reads like the key 3 screen and takes the same codes (`takeKey2`, op
+   86); the result shows key 2's fingerprint in two groups of four, to check
+   against the signer ("They match" goes on, "They differ" says to scan it
+   again). A secret key, key 3 again and a key for another kind of network are
+   refused with the library's words. The answer never carries key 2: the owner
+   phone takes it from the signer itself, and the Key app refuses the wallet
+   unless its second slot is exactly the key 2 taken here (SR-84 to SR-90).
+3. **Give the owner phone these keys.** The public answer (`publicAnswer`, op
    82, `OBMv`) is drawn as `ur:bytes` with `AnimatedQrView`, the same type and
    size as "Show as code", under "On the owner phone, choose Scan the Key
    app." Only bytes with the frame of an answer are drawn (`CeremonyModel`).
-3. **Scan the owner phone's wallet.** The camera reads the wallet setup
+4. **Scan the owner phone's wallet.** The camera reads the wallet setup
    (`ur:bytes`, `OBMw`) and the library checks it and keeps it as pending
    (`acceptWalletSetup`, op 83): it is not the registered wallet yet, nothing
    is signed and no pairing is offered, and a restart reopens on the

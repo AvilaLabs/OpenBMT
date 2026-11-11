@@ -1,6 +1,7 @@
 //! The Key app's part of the key ceremony (`docs/DESIGN.md` §2.1 steps 2
-//! and 5, `docs/SIGNER-RULES.md` SR-64 to SR-69): taking key 3, the public
-//! answer for the owner phone and accepting the wallet setup. The checks
+//! and 5, `docs/SIGNER-RULES.md` SR-64 to SR-69, SR-84 to SR-90): taking key
+//! 3, taking key 2 from its signer, the public answer for the owner phone and
+//! accepting the wallet setup. The checks
 //! are in `openbmt-signer` (`ceremony.rs`) and `accept_wallet`; this file
 //! holds the Key app's state around them.
 
@@ -58,6 +59,39 @@ impl Key3View {
     }
 }
 
+/// Key 2's public parts as the Key app took them from its hardware signer
+/// (SR-84), for the screen that compares them with the signer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Key2TakenView {
+    /// The kind of network the key is for: `true` for mainnet, `false` for
+    /// the test networks.
+    pub mainnet: bool,
+    /// The master fingerprint, 8 hex characters.
+    pub master_fingerprint: String,
+    /// The origin path of the account key, for example `48h/1h/0h/2h`.
+    pub origin_path: String,
+    /// The account-level extended public key, in its plain form.
+    pub account_xpub: String,
+}
+
+wire_record!(Key2TakenView {
+    mainnet,
+    master_fingerprint,
+    origin_path,
+    account_xpub,
+});
+
+impl Key2TakenView {
+    fn new(k: &KeyPart) -> Self {
+        Self {
+            mainnet: k.kind() == NetworkKind::Main,
+            master_fingerprint: k.fingerprint.to_string(),
+            origin_path: k.origin_path(),
+            account_xpub: k.xpub.to_string(),
+        }
+    }
+}
+
 /// The words of the Key app's public answer, once it is ready to show.
 pub fn answer_words() -> Words {
     openbmt_signer::answer_ready_words()
@@ -82,6 +116,18 @@ pub const RULE_KEY3_MISSING: &str = "key3-missing";
 pub const RULE_KEY3_DIFFERS: &str = "key3-differs";
 /// See [`RULE_KEY3_MISSING`].
 pub const RULE_KEY3_NOT_IN_WALLET: &str = "key3-not-in-wallet";
+
+/// The rule strings of the refusals of taking key 2 from its signer and of
+/// checking the wallet against it (SR-85 to SR-89): a secret key, the same
+/// key as key 3, no key 2 taken, and a second key of the wallet that is not
+/// the key 2 taken.
+pub const RULE_KEY2_SECRET: &str = "key2-secret";
+/// See [`RULE_KEY2_SECRET`].
+pub const RULE_KEY2_IS_KEY3: &str = "key2-is-key3";
+/// See [`RULE_KEY2_SECRET`].
+pub const RULE_KEY2_MISSING: &str = "key2-missing";
+/// See [`RULE_KEY2_SECRET`].
+pub const RULE_KEY2_NOT_IN_WALLET: &str = "key2-not-in-wallet";
 
 /// A refusal of the ceremony. The three refusals of SR-67 carry their own
 /// rule strings, so that the app matches on the kind and not on the text;
@@ -124,6 +170,38 @@ pub(crate) fn key2_part(material: &Material) -> Option<KeyPart> {
         fingerprint: k.master_fingerprint,
         xpub: Xpub::from_priv(&Secp256k1::new(), &k.account),
     })
+}
+
+/// SR-88, SR-89: on a device that holds no key 2 of its own, the wallet of
+/// the ceremony must hold, in slot 2, exactly the key 2 the Key app took
+/// from its signer: the same account key, master fingerprint and origin path.
+/// Nothing else is accepted, and no key 2 taken is a refusal.
+pub(crate) fn check_key2_taken(
+    material: &Material,
+    description: &WalletDescription,
+    network: Network,
+) -> Result<(), KeyError> {
+    if material.key2.is_some() {
+        return Ok(());
+    }
+    let Some(taken) = &material.key2_taken else {
+        return Err(refused_by(
+            RULE_KEY2_MISSING,
+            "SR-88: no key 2 has been taken from the signer yet",
+        ));
+    };
+    let in_slot_2 = description
+        .slots()
+        .iter()
+        .any(|s| s.index == 2 && taken.is_slot(s, network));
+    if in_slot_2 {
+        Ok(())
+    } else {
+        Err(refused_by(
+            RULE_KEY2_NOT_IN_WALLET,
+            "SR-89: the wallet's second key is not the key 2 taken from the signer",
+        ))
+    }
 }
 
 /// SR-66, SR-67: the key 3 the wallet is checked against, from what the
@@ -180,6 +258,15 @@ impl KeyApp {
             let key3 = KeyPart::parse(&text).map_err(refused)?;
             if let Some(k) = &material.key2 {
                 check_key3(&key3, key2_part(material).as_ref(), k.network).map_err(refused)?;
+            } else if let Some(t) = &material.key2_taken {
+                // A key 3 that is the key 2 taken, or for another kind of
+                // network, is refused as it is against a key 2 held.
+                let network = if t.kind() == NetworkKind::Main {
+                    Network::Bitcoin
+                } else {
+                    Network::Testnet
+                };
+                check_key3(&key3, Some(t), network).map_err(refused)?;
             }
             inner
                 .store
@@ -190,6 +277,83 @@ impl KeyApp {
                 m.key3 = Some(key3);
             }
             Ok(view)
+        })
+    }
+
+    /// SR-84 to SR-87, `docs/DESIGN.md` §2.1 step 2: on a device that holds
+    /// no key 2, take key 2's public part from the text its hardware signer
+    /// shows, read as key 3's text is (SR-64, SR-65), and keep it with the
+    /// Key app's state before any wallet exists. A later key 2 replaces it,
+    /// until the wallet is accepted. Key 3 is taken first. A secret key, key
+    /// 3 again and a key for another kind of network than key 3's are
+    /// refused, and nothing is changed when the text is refused.
+    pub fn take_key2(&self, text: String) -> Result<Key2TakenView, KeyError> {
+        self.run(|inner| {
+            inner.no_session()?;
+            let material =
+                match &inner.phase {
+                    Phase::Identity(m) => m,
+                    Phase::Empty => {
+                        return Err(wrong_state(
+                            "empty",
+                            "make the Key app's key first (create_approver_only)",
+                        ))
+                    }
+                    Phase::Ready(_) => {
+                        return Err(wrong_state("wallet-set", "the wallet is accepted already"))
+                    }
+                    Phase::Pending(_) => return Err(wrong_state(
+                        "wallet-pending",
+                        "a wallet is waiting for the key holder: confirm it or discard it first",
+                    )),
+                };
+            if material.key2.is_some() {
+                return Err(wrong_state(
+                    "key2-held",
+                    "this app holds key 2 itself, so it takes none from a signer",
+                ));
+            }
+            let Some(key3) = &material.key3 else {
+                return Err(ceremony_refused(CeremonyRefusal::NoKey3));
+            };
+            let key2 = match KeyPart::parse(&text) {
+                Ok(k) => k,
+                Err(CeremonyRefusal::SecretKey) => {
+                    return Err(refused_by(
+                        RULE_KEY2_SECRET,
+                        "SR-85: the text for key 2 is an extended secret key",
+                    ))
+                }
+                Err(other) => return Err(refused(other)),
+            };
+            if key2.kind() != key3.kind() {
+                return Err(refused(CeremonyRefusal::NetworkDiffers));
+            }
+            if key2.same_as(key3) {
+                return Err(refused_by(
+                    RULE_KEY2_IS_KEY3,
+                    "SR-86: the key scanned for key 2 is key 3",
+                ));
+            }
+            inner
+                .store
+                .save(envelope::encode_with_key2(material, &key2))
+                .map_err(|e| store_failed(&e))?;
+            let view = Key2TakenView::new(&key2);
+            if let Phase::Identity(m) = &mut inner.phase {
+                m.key2_taken = Some(key2);
+            }
+            Ok(view)
+        })
+    }
+
+    /// Key 2 as taken from its signer, if it has been taken.
+    pub fn key2_taken_view(&self) -> Result<Option<Key2TakenView>, KeyError> {
+        self.run(|inner| {
+            let Some(material) = inner.material() else {
+                return Err(wrong_state("empty", "no key has been made yet"));
+            };
+            Ok(material.key2_taken.as_ref().map(Key2TakenView::new))
         })
     }
 

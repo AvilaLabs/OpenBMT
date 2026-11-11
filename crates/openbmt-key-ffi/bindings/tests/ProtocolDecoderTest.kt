@@ -79,6 +79,20 @@ object ProtocolDecoderTest {
         some.end()
         rejects("an option flag that is 2") { decodeResponse(okFrame { it.write(2) }).let { x -> x.option { x.key3View() } } }
 
+        // Ops 86 and 87: key 2 taken, the same fields as the key 3 view.
+        val two = decodeResponse(okFrame { key3Body(it) })
+        val tv = two.key2TakenView()
+        two.end()
+        check(tv == Key2TakenView(true, "a1b2c3d4", "48h/0h/0h/2h", "xpub-text")) { "key 2 taken view: $tv" }
+        rejects("a key 2 taken view cut short") { decodeResponse(okFrame { key3Body(it) }.let { it.copyOf(it.size - 1) }).let { it.key2TakenView(); it.end() } }
+        rejects("a key 2 taken view with a bool that is 2") { decodeResponse(okFrame { it.write(2); string32(it, "a"); string32(it, "b"); string32(it, "c") }).key2TakenView() }
+        val twoNone = decodeResponse(okFrame { it.write(0) })
+        check(twoNone.option { twoNone.key2TakenView() } == null) { "key 2 taken absent" }
+        twoNone.end()
+        val take2 = takeKey2Request(7, "abc")
+        check(take2[5].toInt() == 86 && take2.copyOfRange(15, take2.size).contentEquals(byteArrayOf(3, 0, 0, 0, 'a'.code.toByte(), 'b'.code.toByte(), 'c'.code.toByte()))) { "op 86" }
+        check(requestFrame(87, 3).size == 15 && requestFrame(87, 3)[5].toInt() == 87) { "op 87 carries no fields" }
+
         // Op 82: bytes.
         val answer = ByteArray(7) { it.toByte() }
         val a = decodeResponse(okFrame { u32(it, answer.size); it.write(answer) })

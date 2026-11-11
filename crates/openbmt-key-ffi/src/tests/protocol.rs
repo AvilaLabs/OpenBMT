@@ -72,6 +72,8 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (83, "accept_wallet_setup"),
         (84, "confirm_wallet"),
         (85, "discard_wallet"),
+        (86, "take_key2"),
+        (87, "key2_taken_view"),
         (90, "lock_status"),
         (91, "set_pin"),
         (92, "unlock"),

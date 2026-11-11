@@ -79,7 +79,7 @@ mod tests;
 pub use app::{Key2Public, KeyApp, LockStatus, SetupState, SlotView, WalletSetup, WalletView};
 pub use boxinvite::InvitationView;
 pub use call::{dispatch, error_response, protocol_description, Registry, MAX_APPS};
-pub use ceremony::{answer_words, key3_waiting_words, Key3View};
+pub use ceremony::{answer_words, key3_waiting_words, Key2TakenView, Key3View};
 pub use deposit::{parse_deposit_code, DepositCode};
 pub use error::{KeyError, StoreError};
 pub use keys::{

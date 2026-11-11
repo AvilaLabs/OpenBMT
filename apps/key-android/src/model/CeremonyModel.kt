@@ -7,6 +7,7 @@ import org.openbmt.app.KeyTextOutcome
 import org.openbmt.app.SayWords
 import org.openbmt.app.UrWords
 import org.openbmt.app.Who
+import org.openbmt.key.Key2TakenView
 import org.openbmt.key.Key3View
 import org.openbmt.key.KeyException
 import org.openbmt.key.SlotView
@@ -115,6 +116,13 @@ object CeremonyModel {
         if (fingerprint.length == 8) "${fingerprint.substring(0, 4)} ${fingerprint.substring(4)}".uppercase() else fingerprint
 
     fun key3Check(v: Key3View): Key3Check = Key3Check(
+        fingerprint = groupFingerprint(v.masterFingerprint),
+        network = if (v.mainnet) "Main bitcoin network" else "A test network",
+        advanced = listOf("Origin path: ${v.originPath}", "Account key: ${v.accountXpub}"),
+    )
+
+    /** What the screen after key 2 is taken shows: the same lines as for key 3. */
+    fun key2Check(v: Key2TakenView): Key3Check = Key3Check(
         fingerprint = groupFingerprint(v.masterFingerprint),
         network = if (v.mainnet) "Main bitcoin network" else "A test network",
         advanced = listOf("Origin path: ${v.originPath}", "Account key: ${v.accountXpub}"),

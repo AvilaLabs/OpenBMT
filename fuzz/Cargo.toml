@@ -370,6 +370,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "key_state_open"
+path = "fuzz_targets/key_state_open.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "lock_frame_decode"
 path = "fuzz_targets/lock_frame_decode.rs"
 test = false

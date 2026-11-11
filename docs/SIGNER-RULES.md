@@ -344,6 +344,43 @@ steps are OC-40 to OC-46 in `docs/OWNER-COINS-RULES.md`.
   2's fingerprint and account public key (not on a device with no key 2), key
   3's as stored, and the Key app's own root. No secret is in it.
 
+When key 2 is on a hardware signer the Key app holds no key 2, and the owner
+phone would otherwise be the only device that names key 2's slot. So the Key
+app takes key 2's public part from the signer itself, the same way it takes
+key 3 (SR-64 to SR-67), and checks the wallet against it. Both phones take
+key 2 on their own; the Key app's answer never carries it.
+
+- **SR-84.** On a Key app that holds no key 2, key 2 reaches the Key app only
+  as text with its origin, read exactly as key 3's is (SR-64, SR-65), after
+  key 3 is taken and before any wallet exists. It is kept in the Key app's
+  stored state as soon as it is taken; taking another key 2 replaces it until
+  the wallet is accepted. Taking it is refused, with nothing changed, when
+  key 3 is not taken yet, when the Key app holds key 2 itself, and once a
+  wallet is waiting or accepted. The Key app's answer (SR-69) does not carry
+  it.
+- **SR-85.** A secret key given as key 2 is refused with words of its own, and
+  is never echoed. Nothing is changed.
+- **SR-86.** Key 2 is not key 3: neither its account key nor its master
+  fingerprint is key 3's. The same holds the other way round: a key 3 that is
+  the key 2 taken is refused. Nothing is changed.
+- **SR-87.** Key 2 is for the same kind of network (main, or test) as key 3,
+  and a key 3 taken later is for the kind of the key 2 taken. Nothing is
+  changed.
+- **SR-88.** On a Key app that holds no key 2, the wallet setup of the
+  ceremony is refused, with nothing changed, when no key 2 has been taken. A
+  Key app that holds key 2 itself needs none taken.
+- **SR-89.** On a Key app that holds no key 2, the wallet setup of the
+  ceremony is accepted only if slot 2 of the wallet is exactly the key 2
+  taken: the same account key, the same master fingerprint and the same
+  origin path. Any other key in slot 2, or the key 2 taken in another slot, is
+  refused and nothing is accepted.
+- **SR-90.** The key 2 taken is part of the Key app's stored state, in an
+  `OBM7` envelope of version 4; it needs key 3, and it decodes only if key 2
+  is a key at the account level of key 3's kind, is not key 3, and the Key
+  app holds no key 2 of its own. A state of an older version reads as "no key 2 taken", and a
+  wallet accepted before this rule stays accepted: only a new acceptance of a
+  ceremony wallet needs key 2 taken.
+
 ## 10. Other things the Key app co-signs
 
 Address batches follow `openbmt-core` (`Approver::check_and_cosign`), in

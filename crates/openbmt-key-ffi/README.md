@@ -114,6 +114,8 @@ writes it again). Op numbers are never reused.
 | 83 | `accept_wallet_setup` | app | check the owner phone's setup (`OBMw`) and keep it as pending; returns the wallet view |
 | 84 | `confirm_wallet` | app | "they match": the pending wallet becomes the registered wallet |
 | 85 | `discard_wallet` | app | "they differ": drop the pending wallet, back to the state before op 83 |
+| 86 | `take_key2` | app | no key 2 held: read and keep key 2 from the text its hardware signer shows; returns what to compare |
+| 87 | `key2_taken_view` | app | key 2 as taken from its signer, or none |
 | 90 | `lock_status` | app | `NoPin`, `Legacy` (an older state without a PIN), `Locked` or `Open` |
 | 91 | `set_pin` | app | set the PIN before a key is made, or wrap an older state behind one |
 | 92 | `unlock` | app | open the stored state with the PIN; a wrong PIN is `pin-wrong` and changes nothing |
@@ -130,6 +132,15 @@ on); op 85 drops it and leaves the Key app as it was before op 83, with key
 pending. The three refusals of SR-67 have the rule strings `key3-missing`,
 `key3-differs` and `key3-not-in-wallet`. The older `accept_wallet` (op 17)
 registers at once.
+
+With key 2 on a hardware signer the Key app holds no key 2, and op 86 takes
+its public part straight from the signer, after key 3 and before the answer
+(`docs/SIGNER-RULES.md` SR-84 to SR-90). It is kept in an `OBM7` envelope of
+version 4; a state of an older version reads as "no key 2 taken". Op 83 then
+needs it: without it the setup is refused with `key2-missing`, and a wallet
+whose slot 2 is not exactly that key is refused with `key2-not-in-wallet`.
+Op 86 also has the refusals `key2-secret` and `key2-is-key3`. The answer
+(`OBMv`) never carries it.
 
 Opening a session ends the handle of the app's previous session. One call
 runs at a time: a call made while another runs, or from inside a store

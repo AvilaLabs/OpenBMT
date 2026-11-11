@@ -1,10 +1,13 @@
 //! `OBM7`: what the Key app hands to `KeyStore::save`.
 //!
 //! ```text
-//! "OBM7" | 1, 2 or 3 | identity secret (32)
+//! "OBM7" | 1, 2, 3 or 4 | identity secret (32)
 //!   | key 2 flag u8, then if 1:
 //!       network u8 | master fingerprint (4) | account key, BIP32 form (78)
-//!   | version 2 and 3: key 3, public: master fingerprint (4) | account key (78)
+//!   | version 2, 3 and 4: key 3, public: master fingerprint (4) | account key (78)
+//!   | version 4 only: key 2 as taken from its hardware signer, public:
+//!       master fingerprint (4) | account key (78), then the pending flag u8
+//!       and, if 1, the pending wallet setup, `OBMw` bytes, u32 length
 //!   | version 3 only: the pending wallet setup, `OBMw` bytes, u32 length
 //!   | wallet flag u8, then if 1:
 //!       network u8 | description u32 length and text (UTF-8)
@@ -15,7 +18,9 @@
 //! The version is 1 until key 3 has been taken (SR-67) and 2 from then on:
 //! a stored state without key 3 is written exactly as before. Version 3 is
 //! a Key app that holds a wallet setup it has checked but not confirmed
-//! (SR-67): its wallet flag is always 0. The networks
+//! (SR-67): its wallet flag is always 0. Version 4 is a Key app that took
+//! key 2 from its signer (SR-84, SR-90); it needs key 3, and a state of an
+//! older version reads as "no key 2 taken". The networks
 //! are 0 mainnet, 1 testnet, 2 signet, 3 regtest, as in the
 //! signer's snapshot. Decoding is strict: it succeeds only for bytes that
 //! `encode` would have produced. It only parses; the wallet, the owner and
@@ -92,6 +97,9 @@ pub(crate) struct Material {
     pub key2: Option<Key2>,
     /// Key 3's public parts, once taken (SR-67).
     pub key3: Option<KeyPart>,
+    /// Key 2's public parts as taken from its hardware signer (SR-84), on a
+    /// device that holds no key 2 of its own.
+    pub key2_taken: Option<KeyPart>,
 }
 
 /// What the Key app was given when the wallet was accepted.
@@ -140,6 +148,12 @@ pub(crate) fn encode(material: &Material, wallet: Option<(&WalletPart, &[u8])>) 
     encode_with(material, material.key3.as_ref(), wallet)
 }
 
+/// The bytes of the envelope with `key2` in place of the material's own key
+/// 2 taken, so that a new key 2 is stored before it replaces the old one.
+pub(crate) fn encode_with_key2(material: &Material, key2: &KeyPart) -> Vec<u8> {
+    encode_full(material, material.key3.as_ref(), Some(key2), None, None)
+}
+
 /// The bytes of the envelope with `key3` in place of the material's own, so
 /// that a new key 3 is stored before it replaces the old one.
 pub(crate) fn encode_with(
@@ -147,26 +161,34 @@ pub(crate) fn encode_with(
     key3: Option<&KeyPart>,
     wallet: Option<(&WalletPart, &[u8])>,
 ) -> Vec<u8> {
-    encode_full(material, key3, wallet, None)
+    encode_full(material, key3, material.key2_taken.as_ref(), wallet, None)
 }
 
 /// The bytes of the envelope of a Key app that holds a wallet setup it has
 /// checked and that waits for the key holder's confirmation (SR-67).
 pub(crate) fn encode_pending(material: &Material, setup: &[u8]) -> Vec<u8> {
-    encode_full(material, material.key3.as_ref(), None, Some(setup))
+    encode_full(
+        material,
+        material.key3.as_ref(),
+        material.key2_taken.as_ref(),
+        None,
+        Some(setup),
+    )
 }
 
 fn encode_full(
     material: &Material,
     key3: Option<&KeyPart>,
+    key2_taken: Option<&KeyPart>,
     wallet: Option<(&WalletPart, &[u8])>,
     pending: Option<&[u8]>,
 ) -> Vec<u8> {
     let mut out = wire::start(&MAGIC_KEY_APP, 512);
-    let version = match (key3.is_some(), pending.is_some()) {
-        (_, true) => 3,
-        (true, false) => 2,
-        (false, false) => 1,
+    let version = match (key2_taken.is_some(), key3.is_some(), pending.is_some()) {
+        (true, _, _) => 4,
+        (false, _, true) => 3,
+        (false, true, false) => 2,
+        (false, false, false) => 1,
     };
     if let Some(v) = out.get_mut(4) {
         *v = version;
@@ -186,9 +208,25 @@ fn encode_full(
         out.extend_from_slice(&fingerprint);
         out.extend_from_slice(&raw);
     }
-    if let Some(setup) = pending {
-        out.extend_from_slice(&wire::len_u32(setup.len()).to_le_bytes());
-        out.extend_from_slice(setup);
+    match (key2_taken, pending) {
+        (Some(k), _) => {
+            let (fingerprint, raw) = k.to_raw();
+            out.extend_from_slice(&fingerprint);
+            out.extend_from_slice(&raw);
+            match pending {
+                Some(setup) => {
+                    out.push(1);
+                    out.extend_from_slice(&wire::len_u32(setup.len()).to_le_bytes());
+                    out.extend_from_slice(setup);
+                }
+                None => out.push(0),
+            }
+        }
+        (None, Some(setup)) => {
+            out.extend_from_slice(&wire::len_u32(setup.len()).to_le_bytes());
+            out.extend_from_slice(setup);
+        }
+        (None, None) => {}
     }
     match wallet {
         Some((w, snapshot)) => {
@@ -213,7 +251,7 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Decoded, DecodeError> {
         return Err(DecodeError::BadMagic);
     }
     let version = match r.u8()? {
-        v @ (1..=3) => v,
+        v @ (1..=4) => v,
         v => return Err(DecodeError::UnsupportedVersion(v)),
     };
     let identity = Secret32::new(r.array::<32>()?);
@@ -262,12 +300,44 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Decoded, DecodeError> {
     } else {
         None
     };
+    let key2_taken = if version == 4 {
+        let fingerprint = r.array::<4>()?;
+        let raw = r.array::<78>()?;
+        let k = KeyPart::from_raw(fingerprint, &raw).ok_or(DecodeError::NonCanonical(
+            "key 2 taken is not in its one form",
+        ))?;
+        let Some(three) = &key3 else {
+            return Err(DecodeError::NonCanonical("key 2 taken without key 3"));
+        };
+        if key2.is_some() {
+            return Err(DecodeError::NonCanonical(
+                "key 2 taken on a device that holds key 2",
+            ));
+        }
+        if k.kind() != three.kind() {
+            return Err(DecodeError::NonCanonical(
+                "key 2 taken is for another network than key 3",
+            ));
+        }
+        if k.same_as(three) {
+            return Err(DecodeError::NonCanonical("key 2 taken is key 3"));
+        }
+        Some(k)
+    } else {
+        None
+    };
     let material = Material {
         identity,
         key2,
         key3,
+        key2_taken,
     };
-    let pending = if version == 3 {
+    let has_pending = match version {
+        3 => true,
+        4 => r.flag()?,
+        _ => false,
+    };
+    let pending = if has_pending {
         if material.key3.is_none() {
             return Err(DecodeError::NonCanonical("a pending wallet without key 3"));
         }

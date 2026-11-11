@@ -156,8 +156,11 @@ safety.
    default.
 5. **Build and confirm the wallet.** Owner mode combines the three public
    parts into the wallet description and sends it to the Key app by QR. The
-   Key app checks byte for byte that the key 2 and key 3 slots hold the exact
-   xpubs it knows (key 3's came by QR in step 2). A bad owner phone can then corrupt only the key 1 slot.
+   Key app checks byte for byte that the key 2 and key 3 slots hold the
+   exact xpubs it knows. Key 3's came to it by QR in step 2. When key 2 is on
+   a hardware signer, the Key app takes key 2's public part from the signer by
+   QR too, before the wallet exists, so it never learns key 2 from the owner
+   phone. A bad owner phone can then corrupt only the key 1 slot.
    Then **every device shows the same 4-word checksum of the whole wallet
    description and all three fingerprints**, and the owner compares them. The
    words are a check for people; the software on each device compares full

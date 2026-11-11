@@ -545,6 +545,34 @@ fn given_words(rule: &str, text: &str) -> Option<Words> {
             "Do not use this wallet, and tell the owner in person.",
         )
         .detail(text),
+        "key2-secret" => Words::new(
+            Tone::Stop,
+            "That is a secret key",
+            "The text that was scanned is a secret key, which must never leave the signer that holds it.",
+            Who::KeyHolder,
+            "Do not use it. Show only the public key 2 on the signer, then scan that.",
+        ),
+        "key2-is-key3" => Words::new(
+            Tone::Stop,
+            "Key 2 is key 3",
+            "The key scanned for key 2 is the same key as key 3.",
+            Who::KeyHolder,
+            "Do not use it. Scan key 2 from the signer, not from the other wallet app.",
+        ),
+        "key2-missing" => Words::new(
+            Tone::Stop,
+            "Key 2 not taken yet",
+            "This app has not been given key 2 from the signer yet, so it cannot check a wallet.",
+            Who::KeyHolder,
+            "Scan key 2 from the signer first.",
+        ),
+        "key2-not-in-wallet" => Words::new(
+            Tone::Stop,
+            "Key 2 not in the wallet",
+            "The wallet's second key is not the key 2 this app took from the signer.",
+            Who::KeyHolder,
+            "Do not accept the wallet, and tell the owner in person.",
+        ),
         "owner" => retry_input(
             "Owner key not accepted",
             "The owner's key given to this app is not a key it can use.",
@@ -1121,6 +1149,10 @@ pub(crate) fn samples() -> Vec<(Kind, &'static str, &'static str)> {
         (Refused, "deposit-escape", ""),
         (Refused, "xpub", "not an extended public key: bad"),
         (Refused, "network", ""),
+        (Refused, "key2-secret", ""),
+        (Refused, "key2-is-key3", ""),
+        (Refused, "key2-missing", ""),
+        (Refused, "key2-not-in-wallet", ""),
         (Refused, "owner", "the owner root is not 32 bytes"),
         (
             Refused,

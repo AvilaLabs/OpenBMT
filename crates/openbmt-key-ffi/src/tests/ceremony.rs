@@ -1,6 +1,7 @@
 //! The Key app's part of the key ceremony (`docs/SIGNER-RULES.md`, SR-64 to
-//! SR-69): key 3 taken and kept before the wallet, the public answer, and
-//! the wallet setup accepted against the key 3 held.
+//! SR-69, SR-84 to SR-90): key 3 taken and kept before the wallet, key 2
+//! taken from its signer, the public answer, and the wallet setup accepted
+//! against the keys held.
 
 use std::sync::Arc;
 
@@ -9,6 +10,7 @@ use bitcoin::bip32::{Fingerprint, Xpub};
 use bitcoin::Network;
 use openbmt_core::say::check;
 use openbmt_core::wallet::{KeySlot, WalletDescription};
+use openbmt_owner::ceremony::OwnerSetup;
 use openbmt_signer::{CeremonyRefusal, KeyAnswer, KeyPart, WalletSetupBytes};
 
 use super::kit::*;
@@ -38,6 +40,55 @@ fn key3_part() -> KeyPart {
 
 fn key3_text() -> String {
     key3_part().origin_text()
+}
+
+/// The fixed key 2 (seed 2) as its hardware signer shows it.
+fn key2_part() -> KeyPart {
+    part_of(2)
+}
+
+fn part_of(seed: u8) -> KeyPart {
+    let (_, slot) = fixed_key(seed, 2);
+    KeyPart {
+        fingerprint: slot.origin_fingerprint,
+        xpub: slot.xpub,
+    }
+}
+
+fn key2_text() -> String {
+    key2_part().origin_text()
+}
+
+/// A Key app with no key 2 of its own and key 3 taken.
+fn approver_with_key3() -> (Arc<KeyApp>, Arc<MemStore>) {
+    let store = MemStore::new();
+    let app = open_new(store.clone());
+    app.create_approver_only().expect("identity");
+    app.take_key3(key3_text()).expect("key 3 taken");
+    (app, store)
+}
+
+/// A Key app opened on stored bytes with no PIN (an older state), then given
+/// the PIN.
+fn reopen_bytes(plain: &[u8]) -> Arc<KeyApp> {
+    let store = MemStore::new();
+    store.set_saved(Some(plain.to_vec()));
+    let app = KeyApp::open(store).expect("opens");
+    app.set_pin(PIN.to_string()).expect("a PIN");
+    app
+}
+
+/// The wallet of key 1 (seed 1), `key2` and the fixed key 3.
+fn wallet_of(key2: &KeyPart) -> WalletDescription {
+    let (_, slot1) = fixed_key(1, 1);
+    let slot2 = KeySlot {
+        index: 2,
+        origin_fingerprint: key2.fingerprint,
+        origin_path: path(),
+        xpub: key2.xpub,
+    };
+    let (_, slot3) = fixed_key(3, 3);
+    WalletDescription::new(NET, [slot1, slot2, slot3]).expect("a wallet")
 }
 
 fn reversioned(part: &KeyPart, version: [u8; 4]) -> String {
@@ -468,6 +519,7 @@ fn sr_66_the_wallet_must_be_for_the_network_of_key_3_and_key_3_must_not_be_key_2
     let app = open_new(store);
     app.create_approver_only().expect("identity");
     app.take_key3(key3_text()).expect("taken");
+    app.take_key2(key2_text()).expect("key 2 taken");
     let (_, slot1) = fixed_key(1, 1);
     let (_, slot2) = fixed_key(2, 2);
     let (_, slot3) = fixed_key(3, 3);
@@ -934,4 +986,400 @@ fn sr_67_the_pending_envelope_is_strict() {
     bad[at + 5] = 0;
     store3.set_saved(Some(bad));
     assert!(KeyApp::open(store3).is_err());
+}
+
+// ---- key 2 taken from its signer (SR-84 to SR-90) -------------------------------
+
+#[test]
+fn sr_84_key_2_is_taken_from_the_signer_kept_before_the_wallet_and_replaced() {
+    let (app, store) = approver_with_key3();
+    assert_eq!(app.key2_taken_view().expect("asked"), None);
+    let view = app.take_key2(key2_text()).expect("taken");
+    assert!(!view.mainnet);
+    assert_eq!(view.master_fingerprint, key2_part().fingerprint.to_string());
+    assert_eq!(view.origin_path, "48h/1h/0h/2h");
+    assert_eq!(view.account_xpub, key2_part().xpub.to_string());
+    assert_eq!(app.key2_taken_view().expect("asked"), Some(view.clone()));
+    assert_eq!(
+        app.state().expect("state"),
+        SetupState::HasIdentity {
+            holds_key2: false,
+            words_waiting: false
+        }
+    );
+    // It is in the stored state, with key 3 kept, and a restart finds it.
+    let decoded = envelope::decode(&store.plain().expect("stored")).expect("decodes");
+    assert_eq!(decoded.material.key2_taken, Some(key2_part()));
+    assert_eq!(decoded.material.key3, Some(key3_part()));
+    assert!(decoded.material.key2.is_none());
+    let again = reopen(store.clone());
+    assert_eq!(again.key2_taken_view().expect("asked"), Some(view));
+    // Another key 2 replaces it until the wallet is accepted.
+    let other = part_of(5);
+    let view = app.take_key2(other.origin_text()).expect("replaced");
+    assert_eq!(view.account_xpub, other.xpub.to_string());
+    assert_eq!(
+        reopen(store.clone()).key2_taken_view().expect("asked"),
+        Some(view)
+    );
+    // A new identity made with no key 2 keeps it, as key 3 is kept.
+    app.create_approver_only().expect("identity again");
+    assert_eq!(
+        app.key2_taken_view()
+            .expect("asked")
+            .expect("kept")
+            .account_xpub,
+        other.xpub.to_string()
+    );
+    // Key 3 comes first.
+    let bare = MemStore::new();
+    let none = open_new(bare);
+    none.create_approver_only().expect("identity");
+    let err = none.take_key2(key2_text()).expect_err("no key 3");
+    assert_eq!(err.rule(), "key3-missing");
+    // A device that holds key 2 itself takes none from a signer.
+    let (own, _) = fresh();
+    own.take_key3(key3_text()).expect("taken");
+    let err = own.take_key2(key2_text()).expect_err("holds key 2");
+    assert_eq!(err.kind(), Kind::State);
+    assert_eq!(err.rule(), "key2-held");
+    assert_eq!(own.key2_taken_view().expect("asked"), None);
+}
+
+#[test]
+fn sr_84_taking_key_2_is_refused_once_the_wallet_is_waiting_or_accepted() {
+    let (app, store) = approver_with_key3();
+    app.take_key2(key2_text()).expect("taken");
+    let wallet = wallet_of(&key2_part());
+    app.accept_wallet_setup(setup_bytes(&wallet))
+        .expect("accepted");
+    let saves = store.saves();
+    let err = app
+        .take_key2(part_of(5).origin_text())
+        .expect_err("pending");
+    assert_eq!(err.rule(), "wallet-pending");
+    app.confirm_wallet().expect("confirmed");
+    let saves_after = store.saves();
+    assert!(saves_after > saves);
+    let err = app.take_key2(part_of(5).origin_text()).expect_err("ready");
+    assert_eq!(err.rule(), "wallet-set");
+    assert_eq!(store.saves(), saves_after);
+}
+
+#[test]
+fn sr_85_a_secret_key_is_refused_with_words_of_its_own_and_nothing_changes() {
+    let (app, store) = approver_with_key3();
+    let saves = store.saves();
+    let (account, slot) = fixed_key(2, 2);
+    let secret = format!("[{}/48h/1h/0h/2h]{}", slot.origin_fingerprint, account);
+    let err = app.take_key2(secret.clone()).expect_err("refused");
+    assert_eq!(err.kind(), Kind::Refused);
+    assert_eq!(err.rule(), "key2-secret");
+    assert!(err.text().starts_with("SR-85"));
+    assert!(!err.text().contains(&account.to_string()));
+    let words = err.words();
+    assert_eq!(words.heading, "That is a secret key");
+    assert_eq!(check(&words), Ok(()));
+    assert_ne!(words, CeremonyRefusal::SecretKey.words());
+    assert_eq!(store.saves(), saves);
+    assert_eq!(app.key2_taken_view().expect("asked"), None);
+}
+
+#[test]
+fn sr_86_key_2_must_not_be_key_3_and_key_3_must_not_be_the_key_2_taken() {
+    let (app, store) = approver_with_key3();
+    let saves = store.saves();
+    let err = app.take_key2(key3_text()).expect_err("key 3 as key 2");
+    assert_eq!(err.rule(), "key2-is-key3");
+    let words = err.words();
+    assert_eq!(words.heading, "Key 2 is key 3");
+    assert_eq!(check(&words), Ok(()));
+    // The same account key under another fingerprint, and the same
+    // fingerprint with another account key, are the same key too.
+    let (_, three) = fixed_key(3, 2);
+    let (_, other) = fixed_key(9, 2);
+    for part in [
+        KeyPart {
+            fingerprint: other.origin_fingerprint,
+            xpub: three.xpub,
+        },
+        KeyPart {
+            fingerprint: three.origin_fingerprint,
+            xpub: other.xpub,
+        },
+    ] {
+        let err = app.take_key2(part.origin_text()).expect_err("same key");
+        assert_eq!(err.rule(), "key2-is-key3");
+    }
+    assert_eq!(store.saves(), saves);
+    // With key 2 taken, a key 3 that is key 2 is refused, and nothing changes.
+    app.take_key2(key2_text()).expect("taken");
+    let saves = store.saves();
+    let err = app.take_key3(key2_text()).expect_err("key 2 as key 3");
+    assert_eq!(err.text(), CeremonyRefusal::SameAsKey2.to_string());
+    assert_eq!(store.saves(), saves);
+    assert_eq!(
+        app.key3_view().expect("asked").expect("kept").account_xpub,
+        key3_part().xpub.to_string()
+    );
+}
+
+#[test]
+fn sr_87_key_2_must_be_for_the_kind_of_network_of_key_3() {
+    let (app, store) = approver_with_key3();
+    let saves = store.saves();
+    let master = bitcoin::bip32::Xpriv::new_master(Network::Bitcoin, &[2; 32]).expect("master");
+    let account = master
+        .derive_priv(
+            &secp(),
+            &"m/48'/0'/0'/2'"
+                .parse::<bitcoin::bip32::DerivationPath>()
+                .expect("a path"),
+        )
+        .expect("account");
+    let main = KeyPart {
+        fingerprint: master.fingerprint(&secp()),
+        xpub: Xpub::from_priv(&secp(), &account),
+    };
+    let err = app.take_key2(main.origin_text()).expect_err("refused");
+    assert_eq!(err.text(), CeremonyRefusal::NetworkDiffers.to_string());
+    assert_eq!(err.words(), CeremonyRefusal::NetworkDiffers.words());
+    assert_eq!(store.saves(), saves);
+    assert_eq!(app.key2_taken_view().expect("asked"), None);
+    // The other way round: a key 3 of another kind than the key 2 taken.
+    app.take_key2(key2_text()).expect("taken");
+    let err = app.take_key3(main.origin_text()).expect_err("refused");
+    assert_eq!(err.text(), CeremonyRefusal::NetworkDiffers.to_string());
+}
+
+#[test]
+fn sr_88_a_wallet_of_the_ceremony_is_refused_when_no_key_2_was_taken() {
+    let (app, store) = approver_with_key3();
+    let saves = store.saves();
+    let wallet = wallet_of(&key2_part());
+    let err = app
+        .accept_wallet_setup(setup_bytes(&wallet))
+        .expect_err("refused");
+    assert_eq!(err.rule(), "key2-missing");
+    assert_eq!(err.words().heading, "Key 2 not taken yet");
+    assert_eq!(check(&err.words()), Ok(()));
+    assert_eq!(store.saves(), saves);
+    assert!(matches!(
+        app.state().expect("state"),
+        SetupState::HasIdentity { .. }
+    ));
+    // A device that holds key 2 itself needs none taken.
+    let (own, _) = fresh();
+    own.take_key3(key3_text()).expect("taken");
+    own.accept_wallet_setup(setup_bytes(&wallet_for(&own, &key3_part())))
+        .expect("accepted");
+}
+
+#[test]
+fn sr_89_slot_2_of_the_wallet_must_be_exactly_the_key_2_taken() {
+    let (app, store) = approver_with_key3();
+    app.take_key2(key2_text()).expect("taken");
+    let saves = store.saves();
+    let real = key2_part();
+    let other = part_of(9);
+    let wrong_parts = [
+        // Another key altogether.
+        other.clone(),
+        // The right account key under another fingerprint.
+        KeyPart {
+            fingerprint: other.fingerprint,
+            xpub: real.xpub,
+        },
+        // The right fingerprint with another account key.
+        KeyPart {
+            fingerprint: real.fingerprint,
+            xpub: other.xpub,
+        },
+    ];
+    for part in wrong_parts {
+        let err = app
+            .accept_wallet_setup(setup_bytes(&wallet_of(&part)))
+            .expect_err("refused");
+        assert_eq!(err.kind(), Kind::Refused);
+        assert_eq!(err.rule(), "key2-not-in-wallet");
+        assert_eq!(err.words().heading, "Key 2 not in the wallet");
+        assert_eq!(check(&err.words()), Ok(()));
+        assert_eq!(store.saves(), saves);
+    }
+    // The key 2 taken in slot 1 or 3 is not in slot 2.
+    let (_, slot1) = fixed_key(1, 1);
+    let (_, slot3) = fixed_key(3, 3);
+    let moved = WalletDescription::new(
+        NET,
+        [
+            KeySlot {
+                index: 1,
+                origin_fingerprint: real.fingerprint,
+                origin_path: path(),
+                xpub: real.xpub,
+            },
+            KeySlot { index: 2, ..slot1 },
+            slot3,
+        ],
+    )
+    .expect("a wallet");
+    let err = app
+        .accept_wallet_setup(setup_bytes(&moved))
+        .expect_err("refused");
+    assert_eq!(err.rule(), "key2-not-in-wallet");
+    assert_eq!(store.saves(), saves);
+    // The wallet with the key 2 taken is accepted afterwards.
+    app.accept_wallet_setup(setup_bytes(&wallet_of(&real)))
+        .expect("accepted");
+}
+
+#[test]
+fn sr_89_an_owner_phone_that_puts_its_own_key_in_slot_2_is_refused() {
+    // The attack: key 2 is on a hardware signer, the Key app answers with
+    // key 3 only, and a bad owner phone takes "key 2" from text of its own.
+    let (app, store) = approver_with_key3();
+    app.take_key2(key2_text()).expect("taken from the signer");
+    let answer = KeyAnswer::from_bytes(&app.public_answer().expect("answer")).expect("reads");
+    assert!(answer.key2.is_none(), "the answer carries no key 2");
+    let (owner, _) = OwnerSetup::make_key1(&[7; 64], Network::Regtest, false).expect("key 1");
+    let saves = store.saves();
+    // The bad phone: its own key in slot 2, the real key 3.
+    let built = owner
+        .build_wallet(&answer, Some(&part_of(9).origin_text()), SMALL_BATCH)
+        .expect("a wallet the owner phone accepts");
+    let err = app
+        .accept_wallet_setup(built.for_key_app.to_bytes())
+        .expect_err("the Key app refuses");
+    assert_eq!(err.rule(), "key2-not-in-wallet");
+    assert_eq!(store.saves(), saves);
+    assert!(matches!(
+        app.state().expect("state"),
+        SetupState::HasIdentity { .. }
+    ));
+    // The real key 2 in slot 2 is accepted.
+    let built = owner
+        .build_wallet(&answer, Some(&key2_text()), SMALL_BATCH)
+        .expect("a wallet");
+    app.accept_wallet_setup(built.for_key_app.to_bytes())
+        .expect("accepted");
+    assert!(matches!(
+        app.state().expect("state"),
+        SetupState::WalletPending { holds_key2: false }
+    ));
+}
+
+#[test]
+fn sr_69_the_answer_still_carries_no_key_2_after_key_2_is_taken() {
+    let (app, _) = approver_with_key3();
+    app.take_key2(key2_text()).expect("taken");
+    let bytes = app.public_answer().expect("answer");
+    let answer = KeyAnswer::from_bytes(&bytes).expect("reads");
+    assert!(answer.key2.is_none());
+    assert_eq!(answer.key3, key3_part());
+    let two = key2_part().xpub.encode();
+    assert!(!bytes.windows(two.len()).any(|w| w == two));
+}
+
+#[test]
+fn sr_90_key_2_taken_is_saved_in_a_strict_version_4_and_older_states_read_as_none_taken() {
+    let (app, store) = approver_with_key3();
+    // Before key 2 is taken the state is written as before: version 2.
+    let old = store.plain().expect("stored");
+    assert_eq!(&old[..5], b"OBM7\x02");
+    app.take_key2(key2_text()).expect("taken");
+    let bytes = store.plain().expect("stored");
+    assert_eq!(&bytes[..5], b"OBM7\x04");
+    let decoded = envelope::decode(&bytes).expect("decodes");
+    assert_eq!(decoded.material.key2_taken, Some(key2_part()));
+    assert!(decoded.pending.is_none() && decoded.wallet.is_none());
+    assert_eq!(envelope::encode(&decoded.material, None), bytes);
+    for cut in 0..bytes.len() {
+        assert!(envelope::decode(&bytes[..cut]).is_err(), "cut at {cut}");
+    }
+    let mut longer = bytes.clone();
+    longer.push(0);
+    assert!(envelope::decode(&longer).is_err());
+    // Key 2 as key 3, or for another kind of network, is refused.
+    let at = 5 + 32 + 1 + 82;
+    let mut same = bytes.clone();
+    let key3_bytes = bytes[at - 82..at].to_vec();
+    same[at..at + 82].copy_from_slice(&key3_bytes);
+    assert!(envelope::decode(&same).is_err());
+    let mut flagged = bytes.clone();
+    flagged[at + 82] = 2;
+    assert!(envelope::decode(&flagged).is_err());
+    // A version-4 state on a device that holds key 2 is refused.
+    let (holder, holder_store) = fresh();
+    holder.take_key3(key3_text()).expect("taken");
+    let mut v4 = holder_store.plain().expect("stored");
+    v4[4] = 4;
+    assert!(envelope::decode(&v4).is_err());
+    // The old version reads as "no key 2 taken", and a wallet of the
+    // ceremony is refused until one is taken.
+    let older = reopen_bytes(&old);
+    assert_eq!(older.key2_taken_view().expect("asked"), None);
+    assert_eq!(
+        older
+            .accept_wallet_setup(setup_bytes(&wallet_of(&key2_part())))
+            .expect_err("refused")
+            .rule(),
+        "key2-missing"
+    );
+    older.take_key2(key2_text()).expect("taken");
+    older
+        .accept_wallet_setup(setup_bytes(&wallet_of(&key2_part())))
+        .expect("accepted");
+}
+
+#[test]
+fn sr_90_a_wallet_accepted_before_key_2_was_taken_stays_accepted() {
+    let store = MemStore::new();
+    let app = open_new(store.clone());
+    app.create_approver_only().expect("identity");
+    app.take_key3(key3_text()).expect("taken");
+    // The older way: the wallet is given with key 3, and key 2 is not taken.
+    let wallet = wallet_of(&key2_part());
+    app.accept_wallet(setup_for(&wallet, &key3_part().xpub))
+        .expect("accepted");
+    let bytes = store.plain().expect("stored");
+    assert_eq!(&bytes[..5], b"OBM7\x02");
+    let again = reopen(store);
+    assert!(matches!(
+        again.state().expect("state"),
+        SetupState::Ready { holds_key2: false }
+    ));
+    assert_eq!(again.key2_taken_view().expect("asked"), None);
+}
+
+#[test]
+fn sr_90_a_pending_wallet_and_key_2_taken_come_back_after_a_restart() {
+    let (app, store) = approver_with_key3();
+    app.take_key2(key2_text()).expect("taken");
+    let wallet = wallet_of(&key2_part());
+    app.accept_wallet_setup(setup_bytes(&wallet))
+        .expect("accepted");
+    let bytes = store.plain().expect("stored");
+    assert_eq!(&bytes[..5], b"OBM7\x04");
+    let decoded = envelope::decode(&bytes).expect("decodes");
+    assert_eq!(decoded.pending, Some(setup_bytes(&wallet)));
+    assert_eq!(
+        envelope::encode_pending(&decoded.material, &setup_bytes(&wallet)),
+        bytes
+    );
+    for cut in 0..bytes.len() {
+        assert!(envelope::decode(&bytes[..cut]).is_err(), "cut at {cut}");
+    }
+    let again = reopen(store.clone());
+    assert!(matches!(
+        again.state().expect("state"),
+        SetupState::WalletPending { holds_key2: false }
+    ));
+    again.confirm_wallet().expect("confirmed");
+    let done = envelope::decode(&store.plain().expect("stored")).expect("decodes");
+    assert_eq!(done.material.key2_taken, Some(key2_part()));
+    assert!(done.wallet.is_some() && done.pending.is_none());
+    assert!(matches!(
+        reopen(store).state().expect("state"),
+        SetupState::Ready { holds_key2: false }
+    ));
 }
