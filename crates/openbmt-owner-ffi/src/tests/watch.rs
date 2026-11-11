@@ -274,8 +274,10 @@ fn a_file_that_is_not_a_watch_file_does_not_start_a_watcher() {
 #[test]
 fn the_kotlin_binding_has_the_watcher() {
     let text = std::fs::read_to_string(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("bindings/kotlin/org/openbmt/owner/OwnerNode.kt"),
+        std::path::PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        )
+        .join("bindings/kotlin/org/openbmt/owner/OwnerNode.kt"),
     )
     .expect("the binding");
     for needle in [
