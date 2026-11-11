@@ -48,7 +48,8 @@ merchant types it into the Box.
 - **BX-12.** The merchant gives the invitation to the Box through the
   Box's own setup (a settings field of the host system, a file read once at
   start, or the console). The Box keeps it for 30 minutes on its own clock
-  and forgets it when it is used, when the time is up, or when another is
+  and forgets it when it is used, when the time is up (or when its clock
+  reads earlier than the moment it was entered), or when another is
   entered. While it holds one, the Box answers the relay request "claim"
   with:
 
@@ -254,7 +255,9 @@ These are details the rules above leave open. None of them changes a rule.
   so a mailbox, a fetch, an acknowledgement and a sealed message are all
   refused, and the member list is empty.
 - **Time (BX-12).** An invitation is good while fewer than 1,800 seconds have
-  passed since it was entered, on the Box's clock. It is kept in
+  passed since it was entered, on the Box's clock. One whose entry time is
+  later than the Box's clock is expired and removed, the same as one past
+  1,800 seconds (a clock that went back cannot lengthen it). It is kept in
   `invitation`, so a restart does not extend it. A damaged `invitation` file
   is forgotten, and so is one found on a paired Box.
 - **Order of the writes (BX-15, BX-50).** The welcome writes `settings`,

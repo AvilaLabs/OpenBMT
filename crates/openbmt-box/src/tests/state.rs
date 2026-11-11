@@ -206,6 +206,25 @@ fn bx_12_the_invitation_runs_out_after_thirty_minutes_on_the_boxs_clock() {
 }
 
 #[test]
+fn bx_12_a_clock_behind_the_entry_time_expires_the_invitation() {
+    let mut core = fresh_core();
+    enter(&mut core, &invitation(5), 0x31);
+    assert!(core.claim(NOW).is_some());
+    let mut core = reopen(core).unwrap();
+    assert_eq!(core.claim(NOW - 86_400), None);
+    assert!(core.files().read(INVITATION_FILE).unwrap().is_none());
+    // It stays gone when the clock comes forward again.
+    assert_eq!(core.claim(NOW + 1), None);
+    // One second behind is refused too, and so is a reload.
+    let mut core = fresh_core();
+    enter(&mut core, &invitation(5), 0x31);
+    let mut core = reopen(core).unwrap();
+    assert_eq!(core.status(NOW - 1), BoxStatus::Unpaired);
+    let mut core = reopen(core).unwrap();
+    assert_eq!(core.claim(NOW), None);
+}
+
+#[test]
 fn bx_12_a_new_invitation_replaces_the_old_one_with_a_new_nonce() {
     let mut core = fresh_core();
     let (first, second) = (invitation(5), invitation(6));

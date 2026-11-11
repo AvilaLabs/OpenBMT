@@ -423,7 +423,12 @@ impl<F: BoxFiles> BoxCore<F> {
     }
 
     fn expired(open: &OpenInvitation, now: u64) -> bool {
-        now.saturating_sub(open.entered_at) >= INVITE_SECS
+        // A clock behind the entry time cannot be trusted to measure the
+        // 30 minutes, so that invitation is expired too (fail closed).
+        match now.checked_sub(open.entered_at) {
+            Some(elapsed) => elapsed >= INVITE_SECS,
+            None => true,
+        }
     }
 
     /// Forget an invitation that ran out (BX-12).
