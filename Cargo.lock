@@ -420,6 +420,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-json"
+version = "0.1.0"
+
+[[package]]
 name = "openbmt-key-ffi"
 version = "0.1.0"
 dependencies = [
@@ -526,6 +530,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-pos-readers"
+version = "0.1.0"
+dependencies = [
+ "openbmt-core",
+ "openbmt-counter",
+ "openbmt-json",
+ "openbmt-pos",
+]
+
+[[package]]
 name = "openbmt-qr"
 version = "0.1.0"
 
@@ -542,6 +556,7 @@ version = "0.1.0"
 dependencies = [
  "openbmt-core",
  "openbmt-counter",
+ "openbmt-json",
 ]
 
 [[package]]

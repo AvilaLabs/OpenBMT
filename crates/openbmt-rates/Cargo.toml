@@ -8,8 +8,9 @@ rust-version.workspace = true
 publish.workspace = true
 
 # Path dependencies inside the workspace only: the counter for the types of
-# a rate and its source, core for the words a person is shown. The reader of
-# the replies is written here, with no JSON library.
+# a rate and its source, core for the words a person is shown, and the JSON
+# reader of the workspace (no external library).
 [dependencies]
 openbmt-core = { path = "../openbmt-core" }
 openbmt-counter = { path = "../openbmt-counter" }
+openbmt-json = { path = "../openbmt-json" }

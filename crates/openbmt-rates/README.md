@@ -5,8 +5,8 @@ the replies itself over Tor with the platform's HTTPS; this library reads
 them and decides. The rules are in `docs/RATE-RULES.md` (RT-01 to RT-51).
 
 - `parse_response(source, bytes)` reads one source's reply into cents per
-  bitcoin, or refuses it: at most 64 KiB, at most 16 deep, UTF-8, a strict
-  JSON reader of its own, no key twice, no bytes after the document, the
+  bitcoin, or refuses it: at most 64 KiB, at most 16 deep, UTF-8, the strict
+  JSON reader of `openbmt-json`, no key twice, no bytes after the document, the
   price as exact decimal text rounded half up to the cent and inside a
   band.
 - `combine(samples, now)` makes the samples of two or more sources into the

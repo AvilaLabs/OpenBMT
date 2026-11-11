@@ -1,8 +1,10 @@
 //! RT-10 to RT-17: the reading of a reply.
 
 use super::src;
-use crate::json::{parse_document, Value, MAX_DEPTH, MAX_RESPONSE_BYTES};
+use crate::source::parse_document;
 use crate::{parse_response, ParseRefused, PriceRefused};
+use crate::{MAX_DEPTH, MAX_RESPONSE_BYTES};
+use openbmt_json::Value;
 
 fn last(body: &str) -> Result<u64, ParseRefused> {
     parse_response(src("bitstamp"), body.as_bytes())

@@ -1,62 +1,26 @@
-//! A strict, small JSON reader (RT-10 to RT-14).
-//!
-//! It reads the whole document so that a malformed one is refused, keeps the
-//! values in a tree, and the code that follows looks up the few fields it
-//! wants. Input is bounded before it is read, and so is the depth, so the
-//! work and the memory are bounded by [`MAX_RESPONSE_BYTES`].
+//! The reader: the grammar of RFC 8259, checked whole.
 
-use crate::error::ParseRefused;
+use crate::{JsonError, Limits, Value};
 
-/// RT-10: the most bytes of a reply that are read.
-pub const MAX_RESPONSE_BYTES: usize = 64 * 1024;
-/// RT-11: the most levels of arrays and objects inside one another.
-pub const MAX_DEPTH: usize = 16;
-
-/// A value of the document. Numbers, true, false and null are checked and
-/// then not kept: no field the rules read is one of them.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Value {
-    /// A number, true, false or null.
-    Other,
-    /// A string, with its escapes resolved.
-    Str(String),
-    /// An array.
-    Arr(Vec<Value>),
-    /// An object; no key is in it twice (RT-14).
-    Obj(Vec<(String, Value)>),
-}
-
-impl Value {
-    /// The value of a key, when this is an object that has it.
-    pub(crate) fn get(&self, key: &str) -> Option<&Value> {
-        match self {
-            Value::Obj(items) => items.iter().find(|(k, _)| k == key).map(|(_, v)| v),
-            _ => None,
-        }
-    }
-
-    /// The text, when this is a string.
-    pub(crate) fn as_str(&self) -> Option<&str> {
-        match self {
-            Value::Str(s) => Some(s),
-            _ => None,
-        }
-    }
-}
-
-/// Reads a whole document: RT-10 to RT-14.
-pub(crate) fn parse_document(bytes: &[u8]) -> Result<Value, ParseRefused> {
-    if bytes.len() > MAX_RESPONSE_BYTES {
-        return Err(ParseRefused::TooLong);
+/// Read a whole document, within `limits`. The length is checked first, then
+/// that the bytes are UTF-8, then the document, then that nothing follows it.
+pub fn parse(bytes: &[u8], limits: &Limits) -> Result<Value, JsonError> {
+    if bytes.len() > limits.max_bytes {
+        return Err(JsonError::TooLong);
     }
     if std::str::from_utf8(bytes).is_err() {
-        return Err(ParseRefused::NotUtf8);
+        return Err(JsonError::NotUtf8);
     }
-    let mut reader = Reader { bytes, pos: 0 };
+    let mut reader = Reader {
+        bytes,
+        pos: 0,
+        values: 0,
+        limits: *limits,
+    };
     let value = reader.value(0)?;
     reader.skip_space();
     if reader.pos != bytes.len() {
-        return Err(ParseRefused::TrailingBytes);
+        return Err(JsonError::TrailingBytes);
     }
     Ok(value)
 }
@@ -64,6 +28,8 @@ pub(crate) fn parse_document(bytes: &[u8]) -> Result<Value, ParseRefused> {
 struct Reader<'a> {
     bytes: &'a [u8],
     pos: usize,
+    values: usize,
+    limits: Limits,
 }
 
 impl Reader<'_> {
@@ -77,42 +43,46 @@ impl Reader<'_> {
         }
     }
 
-    fn expect(&mut self, byte: u8) -> Result<(), ParseRefused> {
+    fn expect(&mut self, byte: u8) -> Result<(), JsonError> {
         if self.peek() == Some(byte) {
             self.pos += 1;
             Ok(())
         } else {
-            Err(ParseRefused::Malformed)
+            Err(JsonError::Malformed)
         }
     }
 
-    fn word(&mut self, word: &[u8]) -> Result<Value, ParseRefused> {
+    fn word(&mut self, word: &[u8], value: Value) -> Result<Value, JsonError> {
         let end = self.pos + word.len();
         if self.bytes.get(self.pos..end) == Some(word) {
             self.pos = end;
-            Ok(Value::Other)
+            Ok(value)
         } else {
-            Err(ParseRefused::Malformed)
+            Err(JsonError::Malformed)
         }
     }
 
-    fn value(&mut self, depth: usize) -> Result<Value, ParseRefused> {
+    fn value(&mut self, depth: usize) -> Result<Value, JsonError> {
         self.skip_space();
+        self.values += 1;
+        if self.values > self.limits.max_values {
+            return Err(JsonError::TooManyValues);
+        }
         match self.peek() {
             Some(b'{') => self.object(depth + 1),
             Some(b'[') => self.array(depth + 1),
             Some(b'"') => self.string().map(Value::Str),
-            Some(b't') => self.word(b"true"),
-            Some(b'f') => self.word(b"false"),
-            Some(b'n') => self.word(b"null"),
+            Some(b't') => self.word(b"true", Value::Bool(true)),
+            Some(b'f') => self.word(b"false", Value::Bool(false)),
+            Some(b'n') => self.word(b"null", Value::Null),
             Some(b'-' | b'0'..=b'9') => self.number(),
-            _ => Err(ParseRefused::Malformed),
+            _ => Err(JsonError::Malformed),
         }
     }
 
-    fn array(&mut self, depth: usize) -> Result<Value, ParseRefused> {
-        if depth > MAX_DEPTH {
-            return Err(ParseRefused::TooDeep);
+    fn array(&mut self, depth: usize) -> Result<Value, JsonError> {
+        if depth > self.limits.max_depth {
+            return Err(JsonError::TooDeep);
         }
         self.expect(b'[')?;
         let mut items = Vec::new();
@@ -130,14 +100,14 @@ impl Reader<'_> {
                     self.pos += 1;
                     return Ok(Value::Arr(items));
                 }
-                _ => return Err(ParseRefused::Malformed),
+                _ => return Err(JsonError::Malformed),
             }
         }
     }
 
-    fn object(&mut self, depth: usize) -> Result<Value, ParseRefused> {
-        if depth > MAX_DEPTH {
-            return Err(ParseRefused::TooDeep);
+    fn object(&mut self, depth: usize) -> Result<Value, JsonError> {
+        if depth > self.limits.max_depth {
+            return Err(JsonError::TooDeep);
         }
         self.expect(b'{')?;
         let mut items: Vec<(String, Value)> = Vec::new();
@@ -160,44 +130,41 @@ impl Reader<'_> {
                     self.pos += 1;
                     break;
                 }
-                _ => return Err(ParseRefused::Malformed),
+                _ => return Err(JsonError::Malformed),
             }
         }
-        // RT-14: a key twice in one object, however it was spelled.
+        // A key twice in one object, however it was spelled.
         let mut keys: Vec<&str> = items.iter().map(|(k, _)| k.as_str()).collect();
         keys.sort_unstable();
         if keys.windows(2).any(|w| w.first() == w.get(1)) {
-            return Err(ParseRefused::DuplicateKey);
+            return Err(JsonError::DuplicateKey);
         }
         Ok(Value::Obj(items))
     }
 
-    fn hex4(&mut self) -> Result<u32, ParseRefused> {
+    fn hex4(&mut self) -> Result<u32, JsonError> {
         let end = self.pos + 4;
-        let digits = self
-            .bytes
-            .get(self.pos..end)
-            .ok_or(ParseRefused::Malformed)?;
+        let digits = self.bytes.get(self.pos..end).ok_or(JsonError::Malformed)?;
         let mut v = 0u32;
         for d in digits {
-            let n = char::from(*d).to_digit(16).ok_or(ParseRefused::Malformed)?;
+            let n = char::from(*d).to_digit(16).ok_or(JsonError::Malformed)?;
             v = v * 16 + n;
         }
         self.pos = end;
         Ok(v)
     }
 
-    fn string(&mut self) -> Result<String, ParseRefused> {
+    fn string(&mut self) -> Result<String, JsonError> {
         self.expect(b'"')?;
         let mut out: Vec<u8> = Vec::new();
         loop {
-            let b = self.peek().ok_or(ParseRefused::Malformed)?;
+            let b = self.peek().ok_or(JsonError::Malformed)?;
             self.pos += 1;
             match b {
                 b'"' => break,
-                0x00..=0x1f => return Err(ParseRefused::Malformed),
+                0x00..=0x1f => return Err(JsonError::Malformed),
                 b'\\' => {
-                    let e = self.peek().ok_or(ParseRefused::Malformed)?;
+                    let e = self.peek().ok_or(JsonError::Malformed)?;
                     self.pos += 1;
                     let c = match e {
                         b'"' => '"',
@@ -209,7 +176,7 @@ impl Reader<'_> {
                         b'r' => '\r',
                         b't' => '\t',
                         b'u' => self.unicode()?,
-                        _ => return Err(ParseRefused::Malformed),
+                        _ => return Err(JsonError::Malformed),
                     };
                     let mut buf = [0u8; 4];
                     out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
@@ -217,25 +184,25 @@ impl Reader<'_> {
                 _ => out.push(b),
             }
         }
-        String::from_utf8(out).map_err(|_| ParseRefused::NotUtf8)
+        String::from_utf8(out).map_err(|_| JsonError::NotUtf8)
     }
 
     /// The character of a `\u` escape, with the four digits still to read;
     /// a high surrogate must be followed by a low one, and a low one alone
     /// is refused.
-    fn unicode(&mut self) -> Result<char, ParseRefused> {
+    fn unicode(&mut self) -> Result<char, JsonError> {
         let first = self.hex4()?;
         if (0xd800..0xdc00).contains(&first) {
             self.expect(b'\\')?;
             self.expect(b'u')?;
             let second = self.hex4()?;
             if !(0xdc00..0xe000).contains(&second) {
-                return Err(ParseRefused::Malformed);
+                return Err(JsonError::Malformed);
             }
             let c = 0x10000 + ((first - 0xd800) << 10) + (second - 0xdc00);
-            return char::from_u32(c).ok_or(ParseRefused::Malformed);
+            return char::from_u32(c).ok_or(JsonError::Malformed);
         }
-        char::from_u32(first).ok_or(ParseRefused::Malformed)
+        char::from_u32(first).ok_or(JsonError::Malformed)
     }
 
     fn digits(&mut self) -> usize {
@@ -246,8 +213,11 @@ impl Reader<'_> {
         self.pos - start
     }
 
-    /// The JSON number grammar; the value is not kept.
-    fn number(&mut self) -> Result<Value, ParseRefused> {
+    /// The JSON number grammar. An integer that fits is kept; any other
+    /// number is checked and its value is not kept.
+    fn number(&mut self) -> Result<Value, JsonError> {
+        let start = self.pos;
+        let mut integer = true;
         if self.peek() == Some(b'-') {
             self.pos += 1;
         }
@@ -256,23 +226,42 @@ impl Reader<'_> {
             Some(b'1'..=b'9') => {
                 self.digits();
             }
-            _ => return Err(ParseRefused::Malformed),
+            _ => return Err(JsonError::Malformed),
         }
         if self.peek() == Some(b'.') {
+            integer = false;
             self.pos += 1;
             if self.digits() == 0 {
-                return Err(ParseRefused::Malformed);
+                return Err(JsonError::Malformed);
             }
         }
         if matches!(self.peek(), Some(b'e' | b'E')) {
+            integer = false;
             self.pos += 1;
             if matches!(self.peek(), Some(b'+' | b'-')) {
                 self.pos += 1;
             }
             if self.digits() == 0 {
-                return Err(ParseRefused::Malformed);
+                return Err(JsonError::Malformed);
             }
         }
-        Ok(Value::Other)
+        if !integer {
+            return Ok(Value::Number);
+        }
+        let text = self
+            .bytes
+            .get(start..self.pos)
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .ok_or(JsonError::Malformed)?;
+        if text == "-0" {
+            return Ok(Value::Number);
+        }
+        if let Ok(i) = text.parse::<i64>() {
+            Ok(Value::Int(i))
+        } else if let Ok(u) = text.parse::<u64>() {
+            Ok(Value::UInt(u))
+        } else {
+            Ok(Value::Number)
+        }
     }
 }

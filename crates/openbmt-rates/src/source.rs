@@ -1,8 +1,8 @@
 //! The sources of a price and the reading of their replies (RT-01 to RT-17).
 
 use crate::error::ParseRefused;
-use crate::json::{parse_document, Value};
 use crate::price::parse_price_cents;
+use openbmt_json::{JsonError, Limits, Value};
 
 /// Where a source keeps its price in the reply (RT-15).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +78,25 @@ pub(crate) fn position(source: &Source) -> usize {
         .iter()
         .position(|s| s.id == source.id)
         .unwrap_or(SOURCES.len())
+}
+
+/// RT-10 to RT-14: a whole document, within the bounds of a reply.
+pub(crate) fn parse_document(bytes: &[u8]) -> Result<Value, ParseRefused> {
+    let limits = Limits {
+        max_bytes: crate::MAX_RESPONSE_BYTES,
+        max_depth: crate::MAX_DEPTH,
+        max_values: Limits::DEFAULT.max_values,
+    };
+    openbmt_json::parse(bytes, &limits).map_err(|e| match e {
+        JsonError::TooLong => ParseRefused::TooLong,
+        JsonError::TooDeep => ParseRefused::TooDeep,
+        // At most 64 KiB, so at most 32,768 values: not reachable.
+        JsonError::TooManyValues => ParseRefused::TooLong,
+        JsonError::NotUtf8 => ParseRefused::NotUtf8,
+        JsonError::Malformed => ParseRefused::Malformed,
+        JsonError::TrailingBytes => ParseRefused::TrailingBytes,
+        JsonError::DuplicateKey => ParseRefused::DuplicateKey,
+    })
 }
 
 fn field<'a>(value: &'a Value, key: &str) -> Result<&'a Value, ParseRefused> {

@@ -15,16 +15,19 @@
 
 pub mod combine;
 pub mod error;
-pub mod json;
 pub mod price;
 pub mod say;
 pub mod source;
 
 pub use combine::{combine, label_for, Sample, LABEL_PREFIX, MAX_SPREAD_BPS, MIN_SOURCES};
 pub use error::{ParseRefused, PriceRefused, RatesRefused};
-pub use json::{MAX_DEPTH, MAX_RESPONSE_BYTES};
 pub use price::{parse_price_cents, MAX_CENTS_PER_BTC, MAX_DECIMALS, MIN_CENTS_PER_BTC};
 pub use source::{parse_response, source, Shape, Source, SOURCES};
+
+/// RT-10: the most bytes of a reply that are read.
+pub const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+/// RT-11: the most levels of arrays and objects inside one another.
+pub const MAX_DEPTH: usize = 16;
 
 /// RT-40: the seconds between two fetches of one source. **[to tune]**
 pub const FETCH_INTERVAL_SECS: u64 = 60;
