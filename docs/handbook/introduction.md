@@ -20,7 +20,8 @@ exchange you choose.
 > security audit. Do not use it with real funds.**
 
 You can use this handbook to evaluate the design. OpenBMT is not ready to
-put into service with paying customers. Its Android apps have started on an
+put into service with paying customers. The apps run on Android phones and
+tablets only; there is no version for iPhone or iPad. They have started on an
 emulator, a computer that simulates a phone, but have not been tried on a
 physical phone. Setup instructions are still being written. The
 [status page](status.md) distinguishes working code, tests and unfinished

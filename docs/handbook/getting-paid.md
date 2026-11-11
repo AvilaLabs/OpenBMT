@@ -117,8 +117,9 @@ explained in
 modes and the exact conditions are listed in the
 [payment reference](payment-reference.md#instant-limits).
 
-In today's apps, instant acceptance also needs the Owner app, running on
-the owner's phone, and the Counter app open and linked. The initial setup
+In today's apps, instant acceptance also needs the Counter app open and
+linked, and the Owner app watching the wallet: open on the owner's phone, or
+closed with Watch in the background turned on. The initial setup
 leaves it off until the owner answers
 the customer-network question. It is not an unattended default.
 

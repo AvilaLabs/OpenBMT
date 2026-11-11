@@ -93,9 +93,12 @@ than restoring the money automatically.
 
 ## Devices and supporting software must keep working
 
-Today's Owner and Counter apps run only while open. Instant acceptance
-needs them linked, and Tor needs Orbot running. A closed app or broken
-connection can stop the intended payment flow. The counter must stay
+The Owner app keeps watching the wallet while it is closed only when the
+owner turns on Watch in the background, and a notification shows while it
+runs. Android may still stop it while the phone sleeps; instant sales then
+wait for blocks. The Counter app runs only while open. Instant acceptance
+needs the counter linked, and Tor needs Orbot running. A closed counter or a
+broken connection can stop the intended payment flow. The counter must stay
 open and powered. Some phones provide only software protection for stored
 keys; the apps report that condition.
 

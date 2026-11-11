@@ -223,8 +223,9 @@ all its checks. The separate release key, independent holder,
 reproducible builds and independent rebuilder intended to address that
 risk are not in place yet.
 
-Weekly or monthly approval reminders are not built. The Owner app runs
-only while open and does not send notifications.
+Weekly or monthly approval reminders are not built. Closed, the Owner app
+shows only the notification of Watch in the background, when that is on. It
+sends no other notifications.
 
 ## Address batches
 

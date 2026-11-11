@@ -211,11 +211,12 @@ itself. A cashier PIN on the counter deters casual access only.
 
 ### Phone and hardware risks
 
-The apps run only while open. The Owner app does not follow the chain
-when closed, and the counter must stay open and plugged in. The Owner and
-Counter apps need Orbot, a separate Android app, to use Tor. Some phones
-offer a software-only Keystore; the app reports this on screen. The design
-assumes the phone is not already
+The Counter app runs only while open, and the counter must stay open and
+plugged in. The Owner app follows the chain while closed only with Watch in
+the background turned on, and Android may stop that while the phone sleeps.
+The Owner and Counter apps need Orbot, a separate Android app, to use Tor.
+Some phones offer a software-only Keystore; the app reports this on screen.
+The design assumes the phone is not already
 controlled by an attacker.
 
 Android versions may handle wallet opening from an NFC tag differently.
