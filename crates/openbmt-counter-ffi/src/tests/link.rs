@@ -415,7 +415,7 @@ fn cr_164_settings_that_change_tor_say_a_restart_is_needed_and_the_start_keeps_t
 
 #[test]
 fn cr_165_settings_that_remove_the_counter_say_so_on_home() {
-    let (server, mut owner, rig, handle, _dir) = settled();
+    let (_server, mut owner, rig, handle, _dir) = settled();
     let mut gone = signed_settings().settings;
     gone.counters.clear();
     gone.devices.remove(&id(3).device_id());
