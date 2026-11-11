@@ -1,16 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Two permissions: INTERNET (the node connects to the Bitcoin network and
-     the link's relay, through Orbot) and CAMERA (for reading the Key app's
+<!-- Five permissions: INTERNET (the node connects to the Bitcoin network and
+     the link's relay, through Orbot); CAMERA (for reading the Key app's
      response from a code, asked for only when the scan button is tapped; a
-     phone without a camera can still install the app). Nothing else is asked for:
-     no notifications, no foreground service. tests/check-manifest.sh fails
-     the build if the list differs, or if anything but the launcher activity
-     is exported. -->
+     phone without a camera can still install the app); and, for "Watch in the
+     background" (OA-80 to OA-89), FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE
+     and POST_NOTIFICATIONS (asked for only when the setting is turned on, on
+     Android 13 and later). One service, not exported, no receiver, no boot
+     start. Nothing else is asked for. tests/check-manifest.sh fails the build
+     if the list differs, or if anything but the launcher activity is exported. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.openbmt.owner.app">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-feature
         android:name="android.hardware.camera.any"
@@ -36,5 +41,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name="org.openbmt.owner.app.WatchService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Follows the shop's own wallet and tells the shop's counters it is watching" />
+        </service>
     </application>
 </manifest>

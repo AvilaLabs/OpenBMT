@@ -178,18 +178,28 @@ scan the code from it.
 
 ## Rules the app keeps without a device
 
-- **Two permissions, INTERNET and CAMERA.** CAMERA is asked for only when
-  the scan button is tapped; the camera is a feature that is not required. `tests/check-manifest.sh`
+- **Five permissions.** INTERNET, CAMERA, and for "Watch in the background"
+  FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE and POST_NOTIFICATIONS
+  (OA-89). CAMERA is asked for only when the scan button is tapped; the camera
+  is a feature that is not required; the notification permission is asked for
+  only when the setting is turned on. `tests/check-manifest.sh`
   reads the built APK with `aapt2` and fails the build if anything differs.
-- **No backup**, no exported component but the launcher, no service, receiver
-  or provider, cleartext off, not debuggable.
+- **No backup**, no exported component but the launcher, one service that is
+  not exported (the watch), no receiver or provider, cleartext off, not
+  debuggable.
 - **Tor, and no way around it (OA-05).** Peers, sending and an onion link
   route go through Orbot's SOCKS proxy (`127.0.0.1:9050` unless changed on the
   first screen). If the proxy does not answer, the node is not started and
   the app says "This app sends everything through Tor, but Orbot is not
   running." and "Open Orbot and turn it on."
-- **The node runs only while visible (OA-06).** There is no service and no
-  notification, so the wallet is followed only while the app is open.
+- **The node runs while visible, or the watch is on (OA-06, OA-80 to OA-89).**
+  By default there is no service and no notification, so the wallet is
+  followed only while the app is open. "Watch in the background" (off by
+  default) keeps a foreground service with a notification running while the
+  app is closed: a watcher that follows the wallet and sends heartbeats under
+  a watch key of its own, so instant sales keep working. It holds no wallet
+  secret and no owner key, signs nothing but heartbeats, never starts after a
+  reboot, and takes no wake lock or alarm.
 - **Threads (OA-12).** One thread pumps, one thread takes the link's turns
   (only when there is a link), one thread reads the till (only when there is a
   link, at most once a minute, OA-18), and the screen thread makes every other

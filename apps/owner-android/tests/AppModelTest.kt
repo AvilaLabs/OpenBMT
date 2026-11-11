@@ -457,18 +457,28 @@ object AppModelTest {
         ok(!old.contains("<include") && old.contains("<exclude domain=\"file\""), "the old rules include nothing")
     }
 
-    private fun oa_03_the_manifest_asks_for_two_permissions_and_exports_one_activity() {
+    private fun oa_03_the_manifest_asks_for_five_permissions_and_exports_one_activity() {
         val manifest = source("AndroidManifest.xml")
         val permissions = Regex("<uses-permission android:name=\"([^\"]+)\"").findAll(manifest).map { it.groupValues[1] }.toList()
-        ok(permissions == listOf("android.permission.INTERNET", "android.permission.CAMERA"), "the permissions: $permissions")
+        ok(
+            permissions == listOf(
+                "android.permission.INTERNET",
+                "android.permission.CAMERA",
+                "android.permission.FOREGROUND_SERVICE",
+                "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+                "android.permission.POST_NOTIFICATIONS",
+            ),
+            "the permissions: $permissions",
+        )
         ok(manifest.contains("android:name=\"android.hardware.camera.any\"") && manifest.contains("android:required=\"false\""), "the camera is a feature that is not required")
         ok(Regex("<uses-feature").findAll(manifest).count() == 1, "one feature")
         ok(Regex("<activity").findAll(manifest).count() == 1 && manifest.contains("android:exported=\"true\"") && manifest.contains("android.intent.category.LAUNCHER"), "one exported launcher activity")
-        for (kind in listOf("<service", "<receiver", "<provider", "<activity-alias")) ok(!manifest.contains(kind), "no $kind")
+        ok(Regex("<service").findAll(manifest).count() == 1, "one service (OA-89)")
+        for (kind in listOf("<receiver", "<provider", "<activity-alias")) ok(!manifest.contains(kind), "no $kind")
         ok(manifest.contains("android:usesCleartextTraffic=\"false\"") && !manifest.contains("debuggable"), "cleartext off, not debuggable")
         ok(manifest.contains("package=\"org.openbmt.owner.app\""), "the package")
         val check = source("tests/check-manifest.sh")
-        ok(check.contains("-eq 2 ]") && check.contains("camera.any") && check.contains("minSdkVersion:'29'") && check.contains("targetSdkVersion:'36'"), "the script checks the APK for the same")
+        ok(check.contains("-eq 5 ]") && check.contains("camera.any") && check.contains("minSdkVersion:'29'") && check.contains("targetSdkVersion:'36'"), "the script checks the APK for the same")
         val build = source("build.sh")
         ok(build.contains("min_sdk=29") && build.contains("target_sdk=36") && build.contains("arm64-v8a:aarch64-linux-android") && build.contains("x86_64:x86_64-linux-android"), "the build's levels and ABIs")
     }
@@ -519,7 +529,7 @@ object AppModelTest {
         ok(AppWords.orbotNotRunning.what == "This app sends everything through Tor, but Orbot is not running." && AppWords.orbotNotRunning.next == "Open Orbot and turn it on.", "the words say so")
     }
 
-    private fun oa_06_the_node_runs_only_while_the_app_is_visible() {
+    private fun oa_06_the_node_runs_while_the_app_is_visible_or_the_background_watch_is_on() {
         val activity = source("src/android/MainActivity.kt")
         ok(activity.substringAfter("override fun onStart").substringBefore("override fun onStop").contains("controller.visible()"), "onStart starts")
         ok(activity.substringAfter("override fun onStop").substringBefore("override fun onDestroy").contains("controller.hidden()"), "onStop stops")
@@ -528,14 +538,16 @@ object AppModelTest {
         val stop = controller.substringAfter("private fun stopNode()").substringBefore("// ---- pages")
         ok(stop.indexOf("linkThread") in 0 until stop.indexOf("it.stop()") && stop.indexOf("pumpThread") in 0 until stop.indexOf("it.stop()"), "the threads end before the node stops")
         ok(stop.contains("runId++"), "the loops are told to end")
-        for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/MainActivity.kt", "src/android/OwnerUi.kt", "AndroidManifest.xml")) {
+        // Only the watch's own files use the service, the notification and the manager of them.
+        for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/MainActivity.kt", "src/android/OwnerUi.kt")) {
             val src = source(name)
-            for (bad in listOf("startForeground", "NotificationManager", "NotificationChannel", "JobScheduler", "WorkManager", "AlarmManager", "WakeLock", "startService", "<service")) {
+            for (bad in listOf("startForeground", "NotificationManager", "NotificationChannel", "JobScheduler", "WorkManager", "AlarmManager", "WakeLock", "startService")) {
                 ok(!src.contains(bad), "$name does not use $bad")
             }
         }
-        ok(source("src/android/Screens.kt").contains("There is no service in the background and no notification"), "the About screen says so")
-        ok(source("README.md").contains("no service"), "the README says so")
+        ok(Regex("<service").findAll(source("AndroidManifest.xml")).count() == 1, "the one service is the watch's (OA-89)")
+        ok(source("src/android/Screens.kt").contains("unless Watch in the background is on") && source("src/android/Screens.kt").contains("It never starts by itself after the phone restarts"), "the About screen says when the wallet is followed")
+        ok(source("README.md").contains("Watch in the background"), "the README says so")
     }
 
     private fun oa_07_what_has_a_meaning_is_judged_in_rust() {
@@ -1897,6 +1909,194 @@ object AppModelTest {
         ok(AppWords.all().map { it.first }.containsAll(HardwareWords.all().map { it.first }), "they are in the list that is checked and written")
     }
 
+    // ---- watching in the background (OA-80 to OA-89) --------------------------------------------------------------
+
+    /** The Keystore's stand-in: AES-GCM under a key of the test's own. */
+    private fun aesSealer(): Sealer {
+        val key = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        return object : Sealer {
+            override fun seal(plain: ByteArray, aad: ByteArray): Sealed {
+                val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+                cipher.updateAAD(aad)
+                return Sealed(iv, cipher.doFinal(plain))
+            }
+
+            override fun open(sealed: Sealed, aad: ByteArray): ByteArray {
+                try {
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, sealed.iv))
+                    cipher.updateAAD(aad)
+                    return cipher.doFinal(sealed.ciphertext)
+                } catch (e: java.security.GeneralSecurityException) {
+                    throw IOException("does not decrypt", e)
+                }
+            }
+        }
+    }
+
+    private fun oa_80_the_setting_is_off_until_it_is_turned_on_and_has_its_words() {
+        val dir = tempDir()
+        val store = WatchStore(dir, aesSealer())
+        ok(!store.enabled() && !store.hasKey(), "off by default, with no key")
+        store.setEnabled(true)
+        ok(store.enabled() && File(dir, AppFiles.WATCH_ON_FILE).exists(), "the marker file is the setting")
+        store.setEnabled(true)
+        store.setEnabled(false)
+        ok(!store.enabled(), "and off again")
+        clean(dir)
+        val w = AppWords.watchSetting
+        ok(w.heading == "Watch in the background", "the heading")
+        ok(w.what == "The phone keeps following the shop's wallet while the app is closed, and tells the counters it is watching.", "what it does")
+        ok(AppWords.watchSettingMore == "Without this, instant sales stop about ten minutes after you close the app.", "and the rest of it")
+        ok(w.next == "Turn it on to keep instant sales working. Android shows a notification while it runs.", "the next step")
+        ok(SayCheck.problem(w) == null && SayCheck.problem(AppWords.watchNotificationsOff) == null, "the words pass the checks")
+        val screen = source("src/android/WatchScreen.kt")
+        ok(screen.contains("AppWords.watchSetting") && screen.contains("AppWords.watchSettingMore") && source("src/android/Screens.kt").contains("ui.button(AppWords.watchSetting.heading) { showWatch() }"), "the home screen opens it")
+        val controller = source("src/android/Controller.kt")
+        ok(controller.contains("watchStore.enabled()") && !controller.contains("setEnabled(true)"), "only the setting's own screen turns it on")
+        val order = screen.substringAfter("private fun Controller.makeWatchReady(")
+        ok(order.indexOf("watchStore.saveSecret(") < order.indexOf("n.watchSettingsPreview(true") && order.indexOf("n.watchExport(") < order.indexOf("watchStore.setEnabled(true)"), "the key and the contents come before the marker, so a failure leaves it off")
+        ok(screen.contains("is java.io.IOException -> AppWords.fileNotSaved") && screen.contains("showWatch(watchRefusal(e))"), "a failure is words")
+    }
+
+    private fun oa_81_the_watch_key_is_random_sealed_on_its_own_and_holds_no_wallet() {
+        val dir = tempDir()
+        val store = WatchStore(dir, aesSealer())
+        val made = WatchSecret.draw(SecureRandom()) { it.copyOf() }!!
+        val again = WatchSecret.draw(SecureRandom()) { it.copyOf() }!!
+        ok(made.first.size == 32 && !made.first.contentEquals(again.first), "32 random bytes, a new draw each time")
+        var refused = 0
+        ok(WatchSecret.draw(SecureRandom()) { refused++; throw org.openbmt.owner.OwnerException("watch-key", "no", 4) } == null && refused == 3, "a secret the library refuses is drawn again, three times")
+        store.saveSecret(made.first)
+        store.saveContents(byteArrayOf(1, 2, 3, 4))
+        ok(store.hasKey() && store.loadSecret()!!.contentEquals(made.first) && store.loadContents()!!.contentEquals(byteArrayOf(1, 2, 3, 4)), "both read back")
+        ok(dir.listFiles()!!.map { it.name }.sorted() == listOf(AppFiles.WATCH_FILE, AppFiles.WATCH_SECRET_FILE).sorted(), "two files, and no temporary file")
+        val onDisk = String(File(dir, AppFiles.WATCH_SECRET_FILE).readBytes(), Charsets.ISO_8859_1)
+        ok(!onDisk.contains(String(made.first, Charsets.ISO_8859_1)), "the secret is not on the disk in the clear")
+        store.setEnabled(true)
+        store.remove()
+        ok(!store.enabled() && !store.hasKey() && dir.listFiles()!!.isEmpty(), "removing leaves nothing")
+        clean(dir)
+        ok(AppFiles.WATCH_KEY_ALIAS == "openbmt-owner-watch-v1" && AppFiles.WATCH_KEY_ALIAS != AppFiles.KEY_ALIAS && AppFiles.WATCH_KEY_ALIAS != AppFiles.POS_KEY_ALIAS, "a Keystore key of its own")
+        val model = source("src/model/WatchModel.kt")
+        ok(model.contains("SecureRandom") && model.contains("random.nextBytes(secret)"), "drawn from the random source")
+        for (bad in listOf("digest", "Mac.", "pbkdf", "SETUP_FILE", "KEY_ALIAS,", "ownerSecret", "key1")) ok(!model.contains(bad), "the watch key is derived from nothing: no $bad")
+        val lock = source("src/model/SetupLock.kt")
+        ok(!lock.contains("WATCH"), "the wipe order of OA-64 is as it was")
+        ok(source("src/android/Lock.kt").contains("watchStore.remove()"), "the wipe removes the watch files")
+        ok(source("src/model/AppConfig.kt").contains("no PIN"), "the files say they ask for no PIN")
+    }
+
+    private fun oa_82_the_service_is_foreground_special_use_with_an_ongoing_notification() {
+        val service = source("src/android/WatchService.kt")
+        ok(service.contains("FOREGROUND_SERVICE_TYPE_SPECIAL_USE") && service.contains("startForeground("), "a foreground service of type specialUse")
+        ok(service.contains("setOngoing(true)"), "an ongoing notification")
+        ok(service.contains("AppWords.watchNotificationTitle") && service.contains("WatchNotice.text(state)") && service.contains("AppWords.watchNotificationStop"), "its title, text and action are the app's words")
+        ok(service.contains("return START_NOT_STICKY") && !service.contains("START_STICKY") && !service.contains("START_REDELIVER"), "never sticky")
+        ok(AppWords.watchNotificationTitle == "Watching the shop" && AppWords.watchNotificationText == "Instant sales stay on while this runs." && AppWords.watchNotificationStop == "Stop", "the notification's words")
+        ok(WatchNotice.text(WatchNotice.State.Watching) == "Instant sales stay on while this runs.", "the text while it runs")
+        val controller = source("src/android/Controller.kt")
+        val adopt = controller.substringAfter("private fun adopt(").substringBefore("val pump")
+        ok(adopt.contains("watchStore.enabled()") && adopt.contains("WatchService.start(act)"), "it is started while the app is on the screen, when the setting is on")
+        ok(service.contains("fun start(context: Context)") && !service.contains("BOOT_COMPLETED") && !source("AndroidManifest.xml").contains("BOOT_COMPLETED"), "nothing starts it after a boot")
+    }
+
+    private fun oa_83_the_notification_permission_is_asked_and_a_refusal_leaves_it_off() {
+        ok(!WatchPermission.mustAsk(32, false) && !WatchPermission.mustAsk(29, false), "not asked before Android 13")
+        ok(WatchPermission.mustAsk(33, false) && WatchPermission.mustAsk(36, false), "asked from Android 13")
+        ok(!WatchPermission.mustAsk(34, true), "not asked again when it is granted")
+        val w = WatchPermission.refused
+        ok(w.heading == "Notifications are off", "the heading")
+        ok(w.what == "Android needs to show a notification while the phone watches in the background, and notifications are off for this app.", "what happened")
+        ok(w.next == "Allow notifications for OpenBMT in Android's settings, then turn this on again.", "the next step")
+        val screen = source("src/android/WatchScreen.kt")
+        ok(screen.contains("Manifest.permission.POST_NOTIFICATIONS") && screen.contains("WatchPermission.mustAsk(Build.VERSION.SDK_INT, granted)"), "asked by the model's rule")
+        val result = screen.substringAfter("fun Controller.watchPermissionResult").substringBefore("private fun Controller.watchTurnOnGranted")
+        ok(result.contains("else showWatch(WatchPermission.refused)"), "a refusal shows the words and the setting stays off")
+        ok(source("src/android/Controller.kt").contains("if (code == REQUEST_NOTIFY) watchPermissionResult(results)"), "the answer reaches it")
+        // Naming the key is a change of the settings that the Key app approves, through the existing queue.
+        ok(screen.contains("n.queueSettings(p.settings)") && screen.contains("AppWords.editQueuedLoosening") && screen.contains("showSpend()"), "the key is named through the queue and the Key app's approval")
+        ok(screen.contains("n.watchSettingsPreview(true, key)"), "from the library's own preview")
+    }
+
+    private fun oa_84_the_node_and_the_watcher_never_run_together() {
+        val controller = source("src/android/Controller.kt")
+        val hidden = controller.substringAfter("fun hidden()").substringBefore("internal fun begin()")
+        ok(hidden.indexOf("handOverContents()") in 0 until hidden.indexOf("stopNode()") && hidden.indexOf("stopNode()") < hidden.indexOf("WatchRunner.handOver()"), "the contents are written, the node stops, then the watcher takes over")
+        val visible = controller.substringAfter("fun visible()").substringBefore("fun hidden()")
+        ok(visible.indexOf("WatchRunner.reclaim()") in 0 until visible.indexOf("begin()"), "the watcher lets go before the node starts")
+        ok(controller.contains("n.watchExport(secret)") && controller.contains("secret.fill(0)"), "the export is made from the secret read for it only")
+        val service = source("src/android/WatchService.kt")
+        ok(service.contains("private val lock = Any()") && service.contains("fun reclaim() = synchronized(lock)") && service.contains("synchronized(lock) {"), "a step, a hand-over and a reclaim are one at a time")
+        ok(SetupLock.gate(0, true) == Gate.Unlock, "the lock still governs the screens")
+        ok(!service.contains("SETUP_FILE") && !service.contains("AppFiles.KEY_ALIAS") && !service.contains("unlock"), "the service asks for no PIN and holds no setup")
+    }
+
+    private fun oa_85_stop_and_turning_it_off_end_the_watch_and_remove_the_key_from_the_settings() {
+        val service = source("src/android/WatchService.kt")
+        val stop = service.substringAfter("private fun turnOff()").substringBefore("private fun show(")
+        ok(service.contains("ACTION_STOP") && stop.contains("setEnabled(false)") && stop.contains("WatchRunner.end()") && stop.contains("stopSelf()"), "Stop turns the setting off and ends the service")
+        ok(service.contains("addAction("), "the notification has the action")
+        val screen = source("src/android/WatchScreen.kt")
+        val off = screen.substringAfter("private fun Controller.watchTurnOff()").substringBefore("private fun Controller.watchRefusal")
+        ok(off.indexOf("WatchService.stop(act)") in 0 until off.indexOf("watchStore.remove()") && off.indexOf("watchStore.remove()") < off.indexOf("n.watchSettingsPreview(false"), "the service stops, the files go, then the removal is queued")
+        ok(off.contains("AppWords.editQueuedTightening"), "a tightening, in the words of one")
+    }
+
+    private fun oa_86_the_watcher_signs_heartbeats_and_nothing_else() {
+        val files = listOf("src/android/WatchService.kt", "src/android/WatchScreen.kt", "src/model/WatchModel.kt")
+        val service = source("src/android/WatchService.kt")
+        ok(service.contains("OwnerWatch.start(bytes)") && !service.contains("OwnerNode.start("), "the service starts the watcher, not a node")
+        for (name in files) {
+            val src = source(name)
+            for (bad in listOf("signBatch", "counterConfirm", "counterScan", "approveMerge", ".take(", "buildRequest", "recoverKey1", "queueRefund", "cashOut", "OwnerSetup", "SETUP_FILE", "ownerSecret")) {
+                ok(!src.contains(bad), "$name does not use $bad")
+            }
+        }
+        ok(!service.contains("queueSettings") && !service.contains("watchSettingsPreview"), "the service changes no settings")
+        val screen = source("src/android/WatchScreen.kt")
+        ok(Regex("\\.queueSettings\\(p\\.settings\\)").findAll(screen).count() == 2 && !screen.contains("SignedSettings"), "the screen queues the bytes of a preview and builds none")
+        ok(screen.contains("{ watchTurnOn() }") && screen.contains("{ watchTurnOff() }"), "on a press")
+    }
+
+    private fun oa_87_the_watcher_takes_no_wake_lock_and_no_alarm_and_keeps_the_links_pace() {
+        ok(WatchSchedule.STEP_WAIT_MS == 1000L && WatchSchedule.IDLE_MS == 500L, "a step waits at most 1000 milliseconds")
+        for (name in listOf("src/android/WatchService.kt", "src/android/WatchScreen.kt", "src/model/WatchModel.kt", "src/android/Controller.kt")) {
+            val src = source(name)
+            for (bad in listOf("WakeLock", "PowerManager", "AlarmManager", "JobScheduler", "WorkManager", "setExact", "REQUEST_IGNORE_BATTERY", "setAlarmClock")) ok(!src.contains(bad), "$name does not use $bad")
+        }
+        val manifest = source("AndroidManifest.xml")
+        ok(!manifest.contains("WAKE_LOCK") && !manifest.contains("ALARM") && !manifest.contains("BATTERY"), "no permission for them")
+        ok(source("src/android/WatchService.kt").contains("WatchSchedule.STEP_WAIT_MS"), "the loop's wait is the schedule's")
+    }
+
+    private fun oa_88_the_watcher_asks_the_proxy_first_and_says_when_it_does_not_answer() {
+        ok(WatchSchedule.orbotWaitMs(null, 1_000) == 0L, "the first ask is at once")
+        ok(WatchSchedule.orbotWaitMs(1_000, 1_000 + 10_000) == 20_000L, "then every 30 seconds")
+        ok(WatchSchedule.orbotWaitMs(1_000, 1_000 + 30_000) == 0L && WatchSchedule.orbotWaitMs(1_000, 0) == WatchSchedule.ORBOT_RETRY_MS, "and never longer than that")
+        ok(WatchNotice.text(WatchNotice.State.NoOrbot) == "Not watching: Orbot is not answering. Instant sales are off.", "the words")
+        val service = source("src/android/WatchService.kt")
+        ok(service.indexOf("TorGate(proxy).available()") in 1 until service.indexOf("OwnerWatch.start(bytes)"), "the gate is asked before the watcher starts")
+        ok(service.contains("WatchNotice.State.NoOrbot") && !service.contains("withoutTor"), "the notification says so, and nothing goes around the proxy")
+    }
+
+    private fun oa_89_the_manifest_has_the_three_permissions_and_the_one_service_of_the_watch() {
+        val manifest = source("AndroidManifest.xml")
+        val service = manifest.substringAfter("<service").substringBefore("</service>")
+        ok(service.contains("android:name=\"org.openbmt.owner.app.WatchService\"") && service.contains("android:exported=\"false\"") && service.contains("android:foregroundServiceType=\"specialUse\""), "the service, not exported, of type specialUse")
+        ok(service.contains("android:name=\"android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE\"") && service.contains("android:value=\"Follows the shop's own wallet and tells the shop's counters it is watching\""), "and its use")
+        ok(Regex("<property").findAll(manifest).count() == 1 && !manifest.substring(manifest.indexOf("<service")).contains("<intent-filter"), "one property, and the service has no filter")
+        for (bad in listOf("BOOT_COMPLETED", "<receiver", "<provider", "<activity-alias", "WAKE_LOCK", "SCHEDULE_EXACT_ALARM", "USE_EXACT_ALARM")) ok(!manifest.contains(bad), "no $bad")
+        val check = source("tests/check-manifest.sh")
+        ok(check.contains("foregroundServiceType.*0x40000000") && check.contains("PROPERTY_SPECIAL_USE_FGS_SUBTYPE") && check.contains("-eq 5 ]") && check.contains("for kind in receiver provider activity-alias"), "the script checks the built APK for all of it")
+        for (other in listOf("../key-android/AndroidManifest.xml", "../counter-android/AndroidManifest.xml")) {
+            val m = source(other)
+            ok(!m.contains("<service") && !m.contains("FOREGROUND_SERVICE") && !m.contains("POST_NOTIFICATIONS"), "$other is not changed")
+        }
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
@@ -1917,9 +2117,8 @@ object AppModelTest {
         if (rulesMd == null) return
         val rules = Regex("^- \\*\\*OA-(\\d\\d)\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules == rules.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
-        // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-89 for more.
-        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (90..90)
-
+        // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-79 for more.
+        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..90)
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")

@@ -73,6 +73,18 @@ object AppFiles {
     /** The record of the first address check (AS-99), as the library framed it. It holds no secret. */
     const val FIRST_ADDRESS_FILE = "first-address.obm0"
 
+    /** The Keystore key that seals the watch files (OA-81). Its own key, no PIN: the background watch opens them. */
+    const val WATCH_KEY_ALIAS = "openbmt-owner-watch-v1"
+
+    /** The sealed secret of the watch key: 32 random bytes, drawn on this phone and derived from nothing (OA-81). */
+    const val WATCH_SECRET_FILE = "watch-key.obks"
+
+    /** The sealed contents the background watcher starts from: network, proxy, relay, counters and the secret; no wallet, no owner key (OA-81). */
+    const val WATCH_FILE = "watch.obks"
+
+    /** Its presence is the setting "Watch in the background" being on (OA-80). */
+    const val WATCH_ON_FILE = "watch-on"
+
     /** The node's own folder, inside the app's `noBackupFilesDir`. */
     const val NODE_DIR = "node"
 }

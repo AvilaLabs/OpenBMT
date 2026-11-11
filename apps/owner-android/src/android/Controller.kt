@@ -89,6 +89,9 @@ class Controller(internal val act: MainActivity) {
     // The till (OA-16 to OA-19): its sealed token, how its last read went, and the screen's call for a read now.
     internal val posTokens = PosTokenStore(dir, KeystoreSealer(AppFiles.POS_KEY_ALIAS))
     internal var posFault: SayWords? = null
+
+    // The background watch (OA-80 to OA-89): its two sealed files and its on-marker.
+    internal val watchStore = WatchStore(dir, KeystoreSealer(AppFiles.WATCH_KEY_ALIAS))
     private val posWake = LinkedBlockingQueue<Boolean>()
 
     /** Whether a till is connected, as the screen thread last saw it. The till thread reads nothing else of the screens. */
@@ -126,6 +129,8 @@ class Controller(internal val act: MainActivity) {
     fun visible() {
         visible = true
         main.removeCallbacks(relockTimer)
+        // The watcher lets go of the node's folder before the node starts (OA-84).
+        WatchRunner.reclaim()
         if (pickerOpen || scan.asking) {
             if (!waitedTooLong()) return
             // OA-62: the wait counts toward the 60 seconds; the picker or dialog is given up and the setup is locked.
@@ -156,7 +161,10 @@ class Controller(internal val act: MainActivity) {
         if (pickerOpen || scan.asking) return
         scan.stop()
         stopTicker()
+        val toWatch = handOverContents()
         stopNode()
+        // The node has let go of its folder: the watcher takes the wallet, if the setting is on (OA-84).
+        if (toWatch) WatchRunner.handOver()
         if (wasVisible) {
             pausedAt = SystemClock.elapsedRealtime()
             main.postDelayed(relockTimer, Relock.AFTER_MS + 1_000)
@@ -175,6 +183,34 @@ class Controller(internal val act: MainActivity) {
             node != null || setup != null -> render()
             File(dir, AppFiles.SETUP_FILE).exists() -> openStored()
             else -> showFirstStart(null)
+        }
+    }
+
+    /**
+     * With the setting on and the node running, writes what the watcher starts from (the counters it follows now,
+     * with the watch key's secret) and says so. Nothing else of the node goes to the watcher (OA-81).
+     */
+    private fun handOverContents(): Boolean {
+        val n = node ?: return false
+        if (!watchStore.enabled()) return false
+        val secret = try {
+            watchStore.loadSecret()
+        } catch (_: IOException) {
+            null
+        } catch (_: GeneralSecurityException) {
+            null
+        } ?: return false
+        return try {
+            watchStore.saveContents(n.watchExport(secret))
+            true
+        } catch (_: OwnerException) {
+            false
+        } catch (_: IOException) {
+            false
+        } catch (_: GeneralSecurityException) {
+            false
+        } finally {
+            secret.fill(0)
         }
     }
 
@@ -259,6 +295,8 @@ class Controller(internal val act: MainActivity) {
 
     private fun adopt(id: Int, n: OwnerNode) {
         node = n
+        // The service is started while the app is on screen, which Android allows; it waits for the hand-over (OA-82).
+        if (watchStore.enabled()) WatchService.start(act)
         pumpFault = null
         linkFault = null
         posFault = null
@@ -613,6 +651,7 @@ class Controller(internal val act: MainActivity) {
 
     /** The answer of the system's permission dialog. */
     internal fun permission(code: Int, results: IntArray) {
+        if (code == REQUEST_NOTIFY) return watchPermissionResult(results)
         if (scan.asking && waitedTooLong()) {
             // OA-62: an answer after more than 60 seconds is dropped, and the setup is locked.
             endWait()
@@ -720,6 +759,9 @@ class Controller(internal val act: MainActivity) {
     companion object {
         const val VERSION = "0.1.0"
         const val REQUEST_PICK = 1
+
+        /** The request code of the notification permission's dialog (OA-83). */
+        const val REQUEST_NOTIFY = 8001
         const val LINK_EVERY_MS = 5_000L
 
         /** How long the till thread waits before it looks again at whether a till is connected. */

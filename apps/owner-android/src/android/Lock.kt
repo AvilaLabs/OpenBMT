@@ -305,6 +305,13 @@ internal fun Controller.triedPin(back: (SayWords?) -> Unit, op: () -> Unit, done
 internal fun Controller.wipe() {
     stopTicker()
     lockNow()
+    // The watch key and what the watcher follows go with the setup (OA-86).
+    WatchService.stop(act)
+    try {
+        watchStore.remove()
+    } catch (_: IOException) {
+        // The Keystore key of the files is not the setup's; a file that stays is sealed and is deleted at the next try.
+    }
     try {
         WipeOrder.run(appDir, SetupLock.WIPE_FILES, tries) { OwnerWipe.deleteKey() }
     } catch (e: IOException) {

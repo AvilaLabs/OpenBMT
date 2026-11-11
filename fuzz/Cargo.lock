@@ -439,6 +439,7 @@ dependencies = [
  "openbmt-lock",
  "openbmt-net",
  "openbmt-owner",
+ "openbmt-owner-ffi",
  "openbmt-owner-node",
  "openbmt-pos",
  "openbmt-pos-readers",
@@ -576,6 +577,24 @@ dependencies = [
  "openbmt-signer",
  "openbmt-spend",
  "openbmt-ur",
+]
+
+[[package]]
+name = "openbmt-owner-ffi"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "jni-sys",
+ "openbmt-core",
+ "openbmt-counter-node",
+ "openbmt-courier",
+ "openbmt-link",
+ "openbmt-lock",
+ "openbmt-net-io",
+ "openbmt-owner",
+ "openbmt-owner-node",
+ "openbmt-signer",
+ "openbmt-watch",
 ]
 
 [[package]]

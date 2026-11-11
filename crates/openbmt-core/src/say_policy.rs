@@ -106,7 +106,7 @@ impl OffReason {
                 "Waiting: no word from phone",
                 "The owner's phone has not confirmed that it is watching, so this sale waits for a block.",
                 Who::Cashier,
-                "Wait for a block, in about ten minutes. Tell the owner: the phone check-in is missing.",
+                "Wait for a block, in about ten minutes. Tell the owner: open the owner app, or turn on Watch in the background on the owner's phone.",
             )
             .code("CR-52"),
             Self::SharedWifiNeedsTor => Words::new(

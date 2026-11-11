@@ -62,6 +62,7 @@ internal fun Controller.showHome(): Unit = withNode { n ->
     views.add(ui.button("Refund notes") { showRefundNotes() })
     views.add(ui.button("Notes") { showNotes() })
     views.add(ui.button("Settings") { showSettings() })
+    views.add(ui.button(AppWords.watchSetting.heading) { showWatch() })
     views.add(ui.button("Change the PIN") { showChangePin(null) })
     views.add(ui.button("About") { showAbout() })
     page(views)
@@ -626,8 +627,9 @@ internal fun Controller.showAbout() {
             ui.text("Not for real funds. No independent security audit has been done. First build: it has not been run on a phone yet.", 16f, bold = true),
             label("Keep the app open"),
             ui.text(
-                "The wallet is followed only while this app is on the screen, and it stops when you leave the app or the screen goes off. " +
-                    "There is no service in the background and no notification in this version.",
+                "The wallet is followed while this app is on the screen, and it stops when you leave the app or the screen goes off, " +
+                    "unless Watch in the background is on. Then a service keeps following the wallet and tells the counters it is watching, " +
+                    "and Android shows a notification while it runs. It never starts by itself after the phone restarts.",
                 16f,
             ),
             label("Keys"),

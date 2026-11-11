@@ -28,6 +28,7 @@ openbmt-books = { path = "../crates/openbmt-books" }
 openbmt-session = { path = "../crates/openbmt-session" }
 openbmt-approver = { path = "../crates/openbmt-approver" }
 openbmt-owner = { path = "../crates/openbmt-owner" }
+openbmt-owner-ffi = { path = "../crates/openbmt-owner-ffi" }
 openbmt-owner-node = { path = "../crates/openbmt-owner-node" }
 openbmt-key-ffi = { path = "../crates/openbmt-key-ffi" }
 openbmt-lock = { path = "../crates/openbmt-lock" }
@@ -203,6 +204,13 @@ bench = false
 [[bin]]
 name = "owner_command_decode"
 path = "fuzz_targets/owner_command_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "owner_watch_file_decode"
+path = "fuzz_targets/owner_watch_file_decode.rs"
 test = false
 doc = false
 bench = false

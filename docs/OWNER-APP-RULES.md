@@ -36,14 +36,16 @@ run on a phone. Not for real funds.**
 - **OA-02.** Nothing is backed up and nothing moves to another phone:
   `allowBackup` is false, and the extraction rules exclude every domain for
   cloud backup and for device transfer.
-- **OA-03.** The manifest asks for exactly two permissions, INTERNET and
-  CAMERA, and declares the camera as a feature that is not required. CAMERA
-  is declared for reading the Key app's response, a counter's request and,
-  in a key ceremony, the Key app's answer and key 2 from a code, and is
-  asked for only when the owner taps a scan button (OA-21, OA-22, OA-28).
-  It has one activity, which is exported and is the launcher, and no
-  service, receiver or provider. Cleartext traffic is off and the app is not
-  debuggable.
+- **OA-03.** The manifest asks for exactly five permissions: INTERNET,
+  CAMERA, FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE and
+  POST_NOTIFICATIONS, and declares the camera as a feature that is not
+  required. CAMERA is declared for reading the Key app's response, a
+  counter's request and, in a key ceremony, the Key app's answer and key 2
+  from a code, and is asked for only when the owner taps a scan button
+  (OA-21, OA-22, OA-28). The other three are for the background watch and
+  are covered by OA-89. It has one activity, which is exported and is the
+  launcher, one service that is not exported (OA-82), and no receiver or
+  provider. Cleartext traffic is off and the app is not debuggable.
   `apps/owner-android/tests/check-manifest.sh` reads the built APK and fails
   the build if any of this differs.
 - **OA-04.** Every window of the app has `FLAG_SECURE`, set before any
@@ -62,12 +64,15 @@ run on a phone. Not for real funds.**
   and "Open Orbot and turn it on." A link route that is a local address
   (`direct`) is the owner's choice in the setup text and is not sent
   through Tor.
-- **OA-06.** The node runs only while the app is on the screen. It starts
-  when the activity becomes visible, and is stopped, cleanly, when it stops
-  being visible, so that it lets go of its folder; the pump thread and the
-  link thread end first. The app has no service and no notification, so the
-  wallet is followed only while the app is open. The About screen and the
-  README say so.
+- **OA-06.** The node runs while the app is on the screen, and while the
+  background watch is on (OA-80 to OA-89). It starts when the activity
+  becomes visible, and is stopped, cleanly, when it stops being visible, so
+  that it lets go of its folder; the pump thread and the link thread end
+  first. With the background watch off (the default), the app has no
+  service and no notification, so the wallet is followed only while the app
+  is open. With it on, a watcher that is not the node follows the wallet
+  and tells the counters it is watching, and the node does not run (OA-84).
+  The About screen and the README say so.
 
 ## 2. What the app does with what it is given
 
@@ -501,7 +506,14 @@ the welcome is made by the Key app. OA-36 to OA-39 are kept for other work.
   address from peers and the relay; the traffic is still the traffic of a
   Bitcoin wallet.
 - **They do not keep the wallet following the chain while the app is
-  closed.** OA-06 is the price of having no service.
+  closed, unless the owner turns on "Watch in the background".** Off is the
+  default, and OA-06 is then the price of having no service. The watcher
+  of OA-80 to OA-89 follows the chain and sends heartbeats; it scans no
+  wallet script, so a coin that arrives while only the watcher runs is found
+  when the app is opened and its node scans. It reads nothing the counters
+  send to the owner (records, check-ins, refund requests): those are sealed
+  to the owner's key, which the watcher does not hold, and they wait for the
+  owner app.
 - **They do not say the till reads work.** The shape of Square's and
   Clover's answers is from their published documentation and fixtures, not
   from a real account (`docs/POS-RULES.md`).
@@ -636,7 +648,105 @@ for that are not in this tree: see the TODO(OA-60) in `Hardware.kt`).
   not readable) and nothing else changes. A code that is not complete says
   that a part is missing and keeps reading, in any order.
 
-## 12. A change of light and dark
+## 12. Watching in the background
+
+Instant sales need a heartbeat from the owner's phone no older than
+`heartbeat_max_age_secs` (CR-50 to CR-53). Without this section the
+heartbeats stop a few minutes after the owner closes the app. The setting
+below keeps them going, with a key that does nothing else: the watch key
+(CR-185, CR-186, LK-74, LK-75). Key 1 and the owner's identity key, which
+signs batches, settings and pairings, are never in the service.
+
+- **OA-80.** "Watch in the background" is a setting of the owner app and is
+  off by default. Its row has the heading "Watch in the background", what
+  it does ("The phone keeps following the shop's wallet while the app is
+  closed, and tells the counters it is watching." and "Without this,
+  instant sales stop about ten minutes after you close the app.") and the
+  next step ("Turn it on to keep instant sales working. Android shows a
+  notification while it runs."). It is on while the marker file
+  `watch-on` is in the app's `noBackupFilesDir`, and nothing else says so.
+  Turning it on makes the watch key (OA-81), writes the contents of the
+  watcher, puts the key in the settings to be approved (OA-83) and starts
+  the service; every step that fails leaves it off, with words.
+- **OA-81.** The watch key is 32 random bytes drawn on this phone with
+  `SecureRandom`, never derived from a wallet, a seed or an identity key.
+  Its secret is in its own file `watch-key.obks`, and what the watcher
+  starts from in `watch.obks` (the network, the address of Orbot, the
+  relay and how to reach it, the counters' roots, the folder, the secret and
+  the heartbeat pace), each sealed with the Keystore key
+  `openbmt-owner-watch-v1`, which is a key of its own and asks for no PIN.
+  The contents hold no wallet, no key 1 and no owner key. They do reveal the
+  shop's counters and its relay to someone who can read the app's storage
+  without the PIN and use the phone's Keystore, as the till's token
+  (OA-16) reveals the till; they do not reveal a wallet description. The
+  contents are read at the start of the library's watcher, which refuses
+  anything that is not exactly what the library wrote (magic `OBM#`,
+  version 1, at most 16 KiB, at most 64 counters and 16 first peers, every
+  key a key, nothing left over, and the bytes encode again to the same
+  bytes). The wipe of OA-64 deletes both files and the marker.
+- **OA-82.** The service is a foreground service of type `specialUse` with
+  a notification that cannot be swiped away: the title "Watching the shop",
+  the text "Instant sales stay on while this runs." and one action,
+  "Stop". It is started while the app is on the screen, when the setting is
+  on, so that Android allows it, and it does nothing until the app is
+  hidden and the wallet is handed over (OA-84). It returns
+  `START_NOT_STICKY`, so Android does not start it again after it is
+  stopped, and the app has no boot receiver, so it does not start by
+  itself after the phone restarts: the owner opens the app once.
+- **OA-83.** Turning the setting on asks for the notification permission
+  on Android 13 and later, and not on earlier versions, and not again when
+  it is granted. If it is refused the setting stays off and the screen says
+  "Notifications are off", "Android needs to show a notification while the
+  phone watches in the background, and notifications are off for this app."
+  and "Allow notifications for OpenBMT in Android's settings, then turn this
+  on again." Naming the watch key in the settings is a loosening
+  (CR-185): it is queued with the library's preview and `queue_settings`,
+  shows the Key app's approval as any other change (OA-34, OA-35), and
+  reaches the counters by settings delivery. The heartbeats count from the
+  counters' next settings.
+- **OA-84.** The node and the watcher never run together: the node has to
+  let go of its folder first. When the app is hidden, the node writes the
+  contents of OA-81 as it is then (its counters), stops, and the service
+  starts the watcher; when the app is shown, the watcher stops and has let
+  go of the folder before the node starts. The PIN lock and relock
+  (OA-60 to OA-65) govern the screens only: the watcher asks for no PIN and
+  holds no setup.
+- **OA-85.** "Stop" on the notification turns the setting off: the marker
+  goes, the watcher stops and the service ends. Turning the setting off in
+  the app does the same, deletes both files, and queues the removal of the
+  watch key in the settings, which is a tightening (CR-185). After "Stop" the
+  settings still name the key until the app is opened and the setting is
+  turned off there; heartbeats under it do no harm while it is named, and
+  the key's secret is still in its file.
+- **OA-86.** The watcher signs a heartbeat and nothing else: it holds the
+  watch key, which the counters accept for heartbeats only (CR-186, LK-08).
+  It never signs a spend, a batch, the settings or a pairing, holds no owner
+  secret and no key 1, and every op of a node refuses its handle with "Open
+  the owner app to do this." It reads no message that a counter sends to the
+  owner, which the watch key cannot open (LK-75).
+- **OA-87.** The watcher keeps the link's existing pace: a heartbeat to each
+  counter every 20 seconds (5 seconds before a try again after a failure),
+  and a turn of the library's loop that waits at most 1000 milliseconds for
+  the network. It takes no wake lock and sets no alarm and no job, and the
+  service asks for no battery exemption. Android may stop it with the phone
+  asleep; then the heartbeats stop and the counters wait for blocks.
+- **OA-88.** Everything goes through the proxy of OA-05. Before the watcher
+  starts, and again about every 30 seconds while the proxy does not answer,
+  the app asks it for a SOCKS5 greeting; if it does not answer the watcher is
+  not started and the notification says "Not watching: Orbot is not
+  answering. Instant sales are off." It goes back to "Instant sales stay on
+  while this runs." when the proxy answers and the watcher has started.
+- **OA-89.** The manifest has the three additions of OA-03 and one
+  `<service>` with `android:foregroundServiceType="specialUse"`,
+  `android:exported="false"` and the property
+  `android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE` with the value "Follows the
+  shop's own wallet and tells the shop's counters it is watching". There is
+  no `BOOT_COMPLETED`, no receiver, no provider, no activity alias, no
+  wake-lock permission and no alarm permission; the Key app's and the
+  counter app's manifests do not change. `tests/check-manifest.sh` checks
+  all of it on the built APK.
+
+## 13. A change of light and dark
 
 - **OA-90.** A change between light and dark while the app runs does not
   finish and start the activity. The activity reads the palette of the new

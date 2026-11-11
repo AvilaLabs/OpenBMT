@@ -71,6 +71,8 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | ceremonyThrownAway | Started over | The keys made so far were thrown away, and nothing was paid to them. | Make a new shop wallet again, or use setup text you already have. | the owner |  |
 | ceremonyRecordNotRead | Setup record not read | The record of the unfinished setup could not be read, so nothing was done. | Choose Start again and make the wallet again. Nothing has been paid to it. | the owner |  |
 | setupTextNeeded | Setup text needed | This phone takes the setup text of a key ceremony made elsewhere, pasted or from a file. | Paste the setup text, or choose its file, then save. | the owner |  |
+| watchSetting | Watch in the background | The phone keeps following the shop's wallet while the app is closed, and tells the counters it is watching. | Turn it on to keep instant sales working. Android shows a notification while it runs. | the owner |  |
+| watchNotificationsOff | Notifications are off | Android needs to show a notification while the phone watches in the background, and notifications are off for this app. | Allow notifications for OpenBMT in Android's settings, then turn this on again. | the owner |  |
 | requestSaved | Request saved | The request is saved as a file. | Carry the file to the Key app and open it there. | the owner |  |
 | refundQueuedAtDepth | Refund queued | The refund is in the queue, and the sale is deep enough to be refunded. | Bring this phone and the Key app together and start an approval. | the owner |  |
 | refundQueuedWaiting | Refund queued, sale new | The refund is in the queue, but the sale is not deep enough yet to be refunded. | Wait for more blocks. The refund can be approved when the sale is deep enough. | the owner |  |
@@ -178,3 +180,16 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | hardwareFirstAddressSkipped | First address not checked | Nothing yet shows that the signer holds the same wallet as this phone. | Check it from the wallet screen before the shop takes money. | the owner |  |
 | hardwareReturnedNeeded | Bring the payment back | The signer has the payment. Its signature has to come back to this phone before the payment can be sent. | Scan the code the signer shows, or open the file it saved. A payment the signer finished itself works too. | the owner |  |
 | hardwareFileSaved | File saved | The payment for the signer is in the file named below. | Put the file on the signer's memory card and sign it there. Then bring the signed file back. | the owner |  |
+
+What Android shows for the background watch, which is not a screen of the app:
+
+- Rest of the setting's text:
+  Without this, instant sales stop about ten minutes after you close the app.
+- Notification title:
+  Watching the shop
+- Notification text:
+  Instant sales stay on while this runs.
+- Notification action:
+  Stop
+- Notification when Orbot does not answer:
+  Not watching: Orbot is not answering. Instant sales are off.

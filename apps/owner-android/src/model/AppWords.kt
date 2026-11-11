@@ -25,6 +25,34 @@ object AppWords {
 
     private fun detailOf(problem: String?): String? = problem?.let { Format.cleanForeign(it) }?.takeIf { it.isNotEmpty() }
 
+    // ---- watching in the background (OA-80 to OA-89) ------------------------------------------
+
+    /** The setting's row. The second sentence of what it does is [watchSettingMore]: the words check keeps `what` to 140 characters. */
+    val watchSetting = w(
+        Tones.INFO, "Watch in the background",
+        "The phone keeps following the shop's wallet while the app is closed, and tells the counters it is watching.",
+        Who.OWNER,
+        "Turn it on to keep instant sales working. Android shows a notification while it runs.",
+    )
+
+    /** The rest of what the setting does, shown under [watchSetting]. */
+    const val watchSettingMore = "Without this, instant sales stop about ten minutes after you close the app."
+
+    val watchNotificationsOff = w(
+        Tones.STOP, "Notifications are off",
+        "Android needs to show a notification while the phone watches in the background, and notifications are off for this app.",
+        Who.OWNER,
+        "Allow notifications for OpenBMT in Android's settings, then turn this on again.",
+    )
+
+    /** The notification while it runs (OA-82). Not a screen: Android shows these. */
+    const val watchNotificationTitle = "Watching the shop"
+    const val watchNotificationText = "Instant sales stay on while this runs."
+    const val watchNotificationStop = "Stop"
+
+    /** The notification when Orbot does not answer (OA-88). */
+    const val watchNotificationNoOrbot = "Not watching: Orbot is not answering. Instant sales are off."
+
     // ---- setting up ------------------------------------------------------------------
 
     val notSetUp = w(
@@ -1055,6 +1083,14 @@ object AppWords {
         for ((name, w) in all()) {
             out.append("| ${cell(name)} | ${cell(w.heading)} | ${cell(w.what)} | ${cell(w.next)} | ${who(w.who)} | ${w.code ?: ""} |\n")
         }
+        out.append(
+            "\nWhat Android shows for the background watch, which is not a screen of the app:\n\n" +
+                "- Rest of the setting's text:\n  $watchSettingMore\n" +
+                "- Notification title:\n  $watchNotificationTitle\n" +
+                "- Notification text:\n  $watchNotificationText\n" +
+                "- Notification action:\n  $watchNotificationStop\n" +
+                "- Notification when Orbot does not answer:\n  $watchNotificationNoOrbot\n",
+        )
         return out.toString()
     }
 
@@ -1119,6 +1155,8 @@ object AppWords {
         "ceremonyThrownAway" to ceremonyThrownAway,
         "ceremonyRecordNotRead" to ceremonyRecordNotRead("a problem"),
         "setupTextNeeded" to setupTextNeeded,
+        "watchSetting" to watchSetting,
+        "watchNotificationsOff" to watchNotificationsOff,
         "requestSaved" to requestSaved("request.obm"),
         "refundQueuedAtDepth" to refundQueuedAtDepth,
         "refundQueuedWaiting" to refundQueuedWaiting,
