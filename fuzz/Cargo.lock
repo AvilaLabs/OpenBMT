@@ -449,6 +449,7 @@ dependencies = [
  "openbmt-session",
  "openbmt-signer",
  "openbmt-spend",
+ "openbmt-swap",
  "openbmt-ur",
  "openbmt-watch",
 ]
@@ -680,6 +681,16 @@ dependencies = [
  "bitcoin",
  "openbmt-core",
  "openbmt-signer",
+]
+
+[[package]]
+name = "openbmt-swap"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "miniscript",
+ "openbmt-json",
+ "openbmt-lightning",
 ]
 
 [[package]]
