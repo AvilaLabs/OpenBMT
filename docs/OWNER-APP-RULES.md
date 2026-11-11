@@ -585,20 +585,7 @@ and the 60-second rule are the shared `LockModel.kt` of
   back, is never the thing that is lost. The wrapping key is not bound to
   biometrics or to the lock screen.
 
-## 11. A change of light and dark
-
-- **OA-90.** A change between light and dark while the app runs does not
-  finish and start the activity. The activity reads the palette of the new
-  mode, sets the window colour, the bar colours and the status-bar icons
-  again, asks for the insets again, and asks the screens to be drawn again in
-  place. A page's padding for the bars is worked out whenever its views are
-  built, so no gap shows above its band. With the node up the owner app draws
-  the home screen; locked, the unlock screen, which still asks for the PIN;
-  with no setup saved, the first screen. Nothing is drawn while a file picker
-  or the camera is open, while the app is out of view, or while a key ceremony
-  is in progress, whose screens are not drawn from state. What the app does on
-  leaving and coming back is decided by OA-62, as before.
-## 12. A hardware signer as key 2
+## 11. A hardware signer as key 2
 
 When key 2 is a hardware signer (`Holder::OtherSigner` of the ceremony), the
 payments of the wallet (refunds, cash-outs, speed-ups) do not go to the Key
@@ -648,3 +635,17 @@ for that are not in this tree: see the TODO(OA-60) in `Hardware.kt`).
   words (different payment came back; this signer did not sign; the file is
   not readable) and nothing else changes. A code that is not complete says
   that a part is missing and keeps reading, in any order.
+
+## 12. A change of light and dark
+
+- **OA-90.** A change between light and dark while the app runs does not
+  finish and start the activity. The activity reads the palette of the new
+  mode, sets the window colour, the bar colours and the status-bar icons
+  again, asks for the insets again, and asks the screens to be drawn again in
+  place. A page's padding for the bars is worked out whenever its views are
+  built, so no gap shows above its band. With the node up the owner app draws
+  the home screen; locked, the unlock screen, which still asks for the PIN;
+  with no setup saved, the first screen. Nothing is drawn while a file picker
+  or the camera is open, while the app is out of view, or while a key ceremony
+  is in progress, whose screens are not drawn from state. What the app does on
+  leaving and coming back is decided by OA-62, as before.
