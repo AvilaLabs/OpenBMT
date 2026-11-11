@@ -110,11 +110,11 @@ use openbmt_core::records::Record;
 use openbmt_core::settings::{Change, SettingNote, Settings, SignedSettings, LIGHTNING_NODE_BYTES};
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
-    Actor, Amount, BlockError, CancelRefused, CashRefund, CommandRefused, Counter, Currency,
-    DayTotals, Facts, HeartbeatRefused, HeartbeatView, JudgeError, LightningPaid, LoadError,
-    OpenFacts, OpenRefused, Opened, Overridden, Pairing, Quote, Rate, RateSource, RefundRefused,
-    RefundRequest, RefundView, Report, RequoteRefused, Screen, SightingError, StaffEvent,
-    StaffRefused, StoreFault, TotalsRefused, WithdrawRefused,
+    Actor, Amount, BatchTakeRefused, BlockError, CancelRefused, CashRefund, CommandRefused,
+    Counter, Currency, DayTotals, Facts, HeartbeatRefused, HeartbeatView, JudgeError,
+    LightningPaid, LoadError, OpenFacts, OpenRefused, Opened, Overridden, Pairing, Quote, Rate,
+    RateSource, RefundRefused, RefundRequest, RefundView, Report, RequoteRefused, Screen,
+    SightingError, StaffEvent, StaffRefused, StoreFault, TotalsRefused, WithdrawRefused,
 };
 use openbmt_lightning::{CertPin, Credential, Reply};
 use openbmt_net_io::{
@@ -1576,9 +1576,14 @@ impl<P: DriverPort> Node<P> {
         self.counter.day_totals(from, to, people, &self.store)
     }
 
-    /// Take a new signed batch of addresses.
-    pub fn add_batch(&mut self, signed: SignedBatch) -> Result<(), AddError<DirStoreError>> {
-        self.counter.add_batch(signed, &mut self.store)
+    /// Take a new signed batch of addresses and write the record that says
+    /// it is held (CR-167). A batch already held is taken as nothing
+    /// (CR-168).
+    pub fn add_batch(
+        &mut self,
+        signed: SignedBatch,
+    ) -> Result<(), BatchTakeRefused<DirStoreError>> {
+        self.counter.take_batch(signed, &mut self.store)
     }
 
     /// Stop the driver, then take the events it left in the channel. The

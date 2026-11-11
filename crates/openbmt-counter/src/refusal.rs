@@ -8,6 +8,7 @@
 
 use std::fmt;
 
+use openbmt_core::batch::AddError;
 use openbmt_core::command::CommandError;
 use openbmt_core::heartbeat::HeartbeatError;
 use openbmt_core::records::ChainError;
@@ -954,3 +955,37 @@ impl<E: fmt::Display> fmt::Display for TotalsRefused<E> {
 }
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for TotalsRefused<E> {}
+
+/// Why a batch of addresses was not taken (CR-167, CR-168).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BatchTakeRefused<E> {
+    /// The batch failed a check, or the batches could not be stored. The
+    /// batches are as they were; a record may have been written first, which
+    /// a second try of the same batch does not repeat (CR-168).
+    Add(AddError<E>),
+    /// CR-40: the record that says the batch is held could not be written.
+    /// Nothing changed.
+    Record(StoreFault<E>),
+}
+
+impl<E> BatchTakeRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::Add(_) => "CR-168",
+            Self::Record(_) => "CR-167",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for BatchTakeRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::Add(e) => write!(f, "{e}"),
+            Self::Record(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for BatchTakeRefused<E> {}

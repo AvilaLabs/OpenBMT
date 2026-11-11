@@ -1,6 +1,7 @@
 //! Tests. Each test is named for the rule it proves (`cr_NN_...`), and each
 //! refusal test checks the exact refusal and the rule it names.
 
+mod batch_held;
 mod encodings;
 mod heartbeat;
 mod kit;

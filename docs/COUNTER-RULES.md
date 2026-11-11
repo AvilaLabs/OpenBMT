@@ -1105,3 +1105,34 @@ in `crates/openbmt-counter-node` (`settings`, `node`, `link`), the record in
   records still go to the owner. Home says so in words.
 - **CR-166.** A message of kind Device list is noted and dropped. The device
   list travels inside the settings, and nothing sends it separately.
+
+## 16. Telling the owner that a batch is held
+
+The owner sends each batch of addresses again until the counter's own
+records show that the counter holds it (LK-70 to LK-73). These rules give the
+counter the record that shows it.
+
+- **CR-167.** When the counter takes a signed batch of addresses from the
+  owner (`Counter::take_batch`, which the node's `add_batch` calls), it
+  writes one record that says so. The record is of kind `Setting`, and its
+  body is one tag byte (34), the first index of the batch (u32 LE), the first
+  index after it (u32 LE) and a 32-byte digest, the SHA-256 of the
+  text `OpenBMT/batch-held/v1` and the signed batch's wire bytes, so that it
+  covers the range and both signatures. The order is that of CR-40: the batch is
+  checked first, as a copy of the batches would take it and with nothing
+  stored; the record is then written; the batches are stored last. Only a
+  batch that would be taken is recorded. The first batch of a pairing, which
+  the node adds at its start, is not taken this way and has no record.
+- **CR-168.** A batch the counter already holds, with the same range and the
+  same digest, is taken as nothing: no change, no second record and no
+  refusal. If the record exists but the batches do not hold the range (the
+  store failed after the record), the batch is stored again and no second
+  record is written. A batch that overlaps a held range and is not the same
+  is refused as before (`OverlapsExisting`). The digests are read from the
+  records when the counter starts, so a restart changes none of this.
+- **CR-169.** The body of CR-167 is read strictly: a tag other than 34, a cut
+  body, a byte left over and an end not above the start are refused, and
+  re-encoding a decoded body gives the input. The books, the totals and the
+  readers of sale events take no meaning from a record of this body. A
+  `Setting` record of CR-163 has a body of 37 bytes and this one has 41, and
+  both are read strictly, so a body is read as at most one of the two.

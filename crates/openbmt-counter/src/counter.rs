@@ -13,7 +13,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use bitcoin::consensus::deserialize;
 use bitcoin::hashes::Hash;
 use bitcoin::{ScriptBuf, Transaction, Txid};
-use openbmt_core::batch::{AddError, BatchPolicy, CounterBatches, PinnedRoots, SignedBatch};
+use openbmt_core::batch::{
+    AddError, BatchError, BatchPolicy, CounterBatches, PinnedRoots, SignedBatch,
+};
 use openbmt_core::command::{Action, SignedCommand};
 use openbmt_core::heartbeat::SignedHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
@@ -27,6 +29,7 @@ use openbmt_watch::{
     HeaderChain, Health, OwnNodeHealth, Refusal, Sighted, Source, WellFormedBlock,
 };
 
+use crate::batch_held::BatchHeld;
 use crate::desk::{in_override_window, valid_name, Desk, OverrideEntry, Role};
 use crate::events::{final_payments, Event};
 use crate::heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
@@ -37,9 +40,9 @@ use crate::refund::{
     RefundRequest, RefundState, RefundView, MAX_REFUNDS_PER_SALE,
 };
 use crate::refusal::{
-    BlockError, CancelRefused, CommandRefused, HeartbeatRefused, JudgeError, LightningRefused,
-    LoadError, OpenRefused, OverrideRefused, RefundRefused, RequoteRefused, SightingError,
-    StaffRefused, TotalsRefused, WithdrawRefused,
+    BatchTakeRefused, BlockError, CancelRefused, CommandRefused, HeartbeatRefused, JudgeError,
+    LightningRefused, LoadError, OpenRefused, OverrideRefused, RefundRefused, RequoteRefused,
+    SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
 };
 use crate::sale::{End, LightningPaid, OverrideMark, PosState, Sale};
 use crate::screen::{Next, Report, Screen, State, Why};
@@ -279,6 +282,10 @@ pub struct Counter {
     /// CR-162: the highest settings version named by a `Setting` record in
     /// the counter's own chain. Built from the records at start.
     settings_recorded: Option<u32>,
+    /// CR-167, CR-168: the batches the counter's records say it took, each
+    /// range (first index, first index after) with its digest. Built from the
+    /// records at start.
+    held_batches: BTreeMap<(u32, u32), [u8; 32]>,
 }
 
 impl Counter {
@@ -314,6 +321,7 @@ impl Counter {
             owner_mark: None,
             last_record: BTreeMap::new(),
             settings_recorded: None,
+            held_batches: BTreeMap::new(),
         }
     }
 
@@ -356,9 +364,10 @@ impl Counter {
         if let Some(bytes) = stored.desk {
             counter.desk = Desk::from_bytes(bytes).map_err(LoadError::Desk)?;
         }
-        let (log, last, book, highest, setting) = Self::read_chain(me, store)?;
+        let (log, last, book, highest, setting, held) = Self::read_chain(me, store)?;
         counter.records = log;
         counter.settings_recorded = setting;
+        counter.held_batches = held;
         for (slot_index, bytes) in stored.sales {
             match Sale::from_bytes(bytes) {
                 Ok(sale) if sale.index == slot_index => counter.install(sale),
@@ -398,6 +407,7 @@ impl Counter {
             BTreeMap<u32, Vec<RefundEntry>>,
             u64,
             Option<u32>,
+            BTreeMap<(u32, u32), [u8; 32]>,
         ),
         LoadError,
     >
@@ -411,6 +421,7 @@ impl Counter {
         let mut book: BTreeMap<u32, Vec<RefundEntry>> = BTreeMap::new();
         let mut highest = 0u64;
         let mut setting: Option<u32> = None;
+        let mut held: BTreeMap<(u32, u32), [u8; 32]> = BTreeMap::new();
         let keep = usize::try_from(MAX_UNSENT_IN_MEMORY).unwrap_or(usize::MAX);
         loop {
             let chunk = store
@@ -427,8 +438,13 @@ impl Counter {
                 if record.kind == RecordKind::Setting {
                     // CR-162: a `Setting` record names the settings the
                     // counter took; one that does not read names none.
+                    // CR-167: or a batch the counter took. The two bodies
+                    // differ in length (37 and 41 bytes) and both readers
+                    // are strict, so a body reads as at most one of them.
                     if let Ok(note) = SettingNote::from_body(&record.body) {
                         setting = setting.max(Some(note.version));
+                    } else if let Ok(batch) = BatchHeld::decode(&record.body) {
+                        held.insert((batch.start, batch.end), batch.digest);
                     }
                 } else if !matches!(record.kind, RecordKind::CheckIn | RecordKind::Pairing) {
                     if let Ok(event) = Event::decode(&record.body) {
@@ -446,7 +462,7 @@ impl Counter {
             }
         }
         let log = RecordLog::from_parts(check.len(), check.head(), tail);
-        Ok((log, last, book, highest, setting))
+        Ok((log, last, book, highest, setting, held))
     }
 
     /// CR-75: how many sales this counter has refused for being below the
@@ -505,6 +521,42 @@ impl Counter {
     ) -> Result<(), AddError<S::Error>> {
         self.batches
             .add(signed, |bytes| store.put(Slot::Batches, bytes))
+    }
+
+    /// CR-167, CR-168: take a batch the owner sent, and say so in a record.
+    /// A batch the records already show as taken (the same range and digest)
+    /// is taken as nothing, and writes no second record. Otherwise the batch
+    /// is checked as a copy of the batches would take it, with nothing
+    /// stored; the record is written (CR-40: before the counter acts on the
+    /// batch); and the batches are stored last. If that last write fails the
+    /// record stays, the batches are as they were, and a second try of the
+    /// same batch stores it without a second record.
+    pub fn take_batch<S: Store>(
+        &mut self,
+        signed: SignedBatch,
+        store: &mut S,
+    ) -> Result<(), BatchTakeRefused<S::Error>> {
+        let held = BatchHeld::of(&signed);
+        let recorded =
+            held.is_some_and(|h| self.held_batches.get(&(h.start, h.end)) == Some(&h.digest));
+        // A copy takes the batch first, so that a batch that would be
+        // refused is not written down as held. A batch the copy finds
+        // overlapping, and that the records show as taken, is the batch
+        // itself again.
+        let mut probe = self.batches.clone();
+        match probe.add(signed.clone(), |_| Ok::<(), S::Error>(())) {
+            Err(AddError::Refused(BatchError::OverlapsExisting)) if recorded => return Ok(()),
+            Err(e) => return Err(BatchTakeRefused::Add(e)),
+            Ok(()) => {}
+        }
+        if let (false, Some(h)) = (recorded, held) {
+            self.append_record(store, h.kind(), h.encode())
+                .map_err(BatchTakeRefused::Record)?;
+            self.held_batches.insert((h.start, h.end), h.digest);
+        }
+        self.batches
+            .add(signed, |bytes| store.put(Slot::Batches, bytes))
+            .map_err(BatchTakeRefused::Add)
     }
 
     // Getters.

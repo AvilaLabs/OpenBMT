@@ -717,9 +717,14 @@ impl Entry {
             .map_err(|e| refused_by("batch-bytes", format!("not a batch: {e}")))?;
         self.run(Some(now), |node, _, _| {
             node.add_batch(signed).map_err(|e| match e {
-                openbmt_core::batch::AddError::Refused(r) => refused_by("batch-refused", r),
-                openbmt_core::batch::AddError::Persist(p) => {
-                    from_rule("CR-40", p, words_for(Kind::Store, "CR-40"))
+                openbmt_counter::BatchTakeRefused::Add(openbmt_core::batch::AddError::Refused(
+                    r,
+                )) => refused_by("batch-refused", r),
+                openbmt_counter::BatchTakeRefused::Add(openbmt_core::batch::AddError::Persist(
+                    p,
+                )) => from_rule("CR-40", p, words_for(Kind::Store, "CR-40")),
+                openbmt_counter::BatchTakeRefused::Record(f) => {
+                    from_rule("CR-40", f, words_for(Kind::Store, "CR-40"))
                 }
             })
         })

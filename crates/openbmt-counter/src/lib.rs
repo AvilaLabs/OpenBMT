@@ -43,6 +43,7 @@
     )
 )]
 
+pub mod batch_held;
 pub mod counter;
 pub mod desk;
 pub mod events;
@@ -61,6 +62,7 @@ pub mod totals;
 #[cfg(test)]
 mod tests;
 
+pub use batch_held::{batch_digest, BatchHeld};
 pub use counter::{
     sale_payment_id, Actor, BlockEffect, BlockTaken, Counter, Facts, OpenFacts, Opened, Overridden,
     Pairing, Settled, Sightings, Stored,
@@ -78,9 +80,9 @@ pub use refund::{
     MAX_REFUNDS_PER_SALE,
 };
 pub use refusal::{
-    BlockError, CancelRefused, CommandRefused, DestinationRefused, HeartbeatRefused, JudgeError,
-    LightningRefused, LoadError, OpenRefused, OverrideRefused, RefundRefused, RequoteRefused,
-    SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
+    BatchTakeRefused, BlockError, CancelRefused, CommandRefused, DestinationRefused,
+    HeartbeatRefused, JudgeError, LightningRefused, LoadError, OpenRefused, OverrideRefused,
+    RefundRefused, RequoteRefused, SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
 };
 pub use sale::{End, LightningPaid, OverrideMark, PosState, Sale, Segment};
 pub use screen::{Color, Next, Report, Screen, State, Why};
