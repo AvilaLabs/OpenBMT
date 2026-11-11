@@ -470,11 +470,39 @@ class Controller(private val act: MainActivity) {
             views.add(ui.button("Save the last answer again") { saveAnswer(answerFile.readBytes()) })
             views.add(ui.button("Show the last answer as a code") { showAnswerCode(answerFile.readBytes()) { refresh() } })
         }
+        views.add(ui.button("Pair a counter") { showPairOffer() })
         views.add(ui.button("The wallet and its check words") { showWallet(false) })
         views.add(ui.button("Check the printed kit") { showKitCheck() })
         views.add(ui.button("Limits and status") { showStatus() })
         views.add(ui.button("About this app") { showAbout() })
         act.show(ui.page(views))
+    }
+
+    /**
+     * "Pair a counter": the offer as a `ur:bytes` code for the counter to scan. It is reached from the home
+     * screen, which is shown only once the wallet is accepted (the library makes no offer before).
+     */
+    private fun showPairOffer() {
+        allowed {
+            val a = app ?: return@allowed
+            val bytes = attempt({ refresh() }) { a.pairOfferBytes() } ?: return@allowed
+            if (!PairOfferModel.looksLikeOffer(bytes)) {
+                return@allowed showMessage(AppWords.fault(KeyException("pair-offer", "the library gave bytes that are not an offer", 4)), { refresh() })
+            }
+            val metrics = act.resources.displayMetrics
+            val made = AnimatedQrView.make(act, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.6).toInt())
+            val view = made.view
+            val views = ArrayList<View>()
+            views.add(ui.text("Scan this with the counter", 22f, bold = true))
+            views.add(ui.words(AppWords.pairOffer))
+            if (view == null) {
+                views.add(ui.words(WordsModel.of(made.words ?: UrWords.cannotShow(Who.KEY_HOLDER))))
+            } else {
+                views.add(view)
+            }
+            views.add(ui.button("Back") { refresh() })
+            act.show(ui.page(views))
+        }
     }
 
     private fun showAbout() {
@@ -711,6 +739,8 @@ class Controller(private val act: MainActivity) {
         val views = ArrayList<View>()
         views.add(ui.text("Item ${index + 1} of ${lines.size}", 14f))
         views.add(ui.text(t.title, 22f, bold = true))
+        t.prominent?.let { views.add(ui.text(it, 34f, bold = true)) }
+        t.instruction?.let { views.add(ui.text(it, 16f, bold = true)) }
         if (t.rows.isNotEmpty()) views.add(ui.text(t.rows.joinToString("\n\n"), 16f))
         if (t.claims.isNotEmpty()) {
             views.add(ui.text("The owner's phone says this. This app cannot check it:", 14f, bold = true))

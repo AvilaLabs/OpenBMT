@@ -121,7 +121,7 @@ object AppModelTest {
     // Words the app wrote itself: the library has no row for them.
     private val notInTheCatalogue = AppWords.urWords().map { it.first }.toSet() + setOf(
         "debuggingOn", "wirelessDebuggingOn", "accessibilityOn", "keyInSoftware", "libraryMissing", "fault",
-        "keystoreUnavailable", "fileNotRead", "fileNotSaved", "cameraOff", "cameraNotStarted", "codeNotForField", "notANumber", "identityNotReadable", "flipsNotReadable", "answersReady",
+        "keystoreUnavailable", "fileNotRead", "fileNotSaved", "cameraOff", "cameraNotStarted", "codeNotForField", "notANumber", "identityNotReadable", "flipsNotReadable", "answersReady", "pairOffer",
     )
 
     private fun guardTests() {
@@ -233,14 +233,39 @@ object AppModelTest {
             LineDetail.Pairing(PairingDetail(hostile, ByteArray(32), listOf("one", "two", "three", "four"), 4, 5)),
         )
         val t = LineModel.describe(line)
-        ok(t.title == "Pairing a counter", "a title when the library gives none")
+        ok(t.title.startsWith("Pair counter \u201c") && t.title.endsWith("\u201d"), "the title is Pair counter and the name in quotation marks: ${t.title}")
+        ok(!t.title.contains('‮') && !t.title.contains('\u0000') && t.title.length <= 100, "the name in the title is clean and short")
         ok(t.quoted.size == 1 && t.quoted[0].text.length <= 64 && !t.quoted[0].text.contains('‮'), "the counter's name is quoted and clean")
         ok(t.rows.none { it.contains("Shop") }, "the name is in no row")
-        ok(t.rows.any { it.contains("one two three four") }, "the session words are shown")
+        ok(t.prominent == "one   two   three   four", "the four words are the prominent line: ${t.prominent}")
+        ok(t.rows.none { it.contains("one") }, "the words are not repeated in a row")
+        ok(t.instruction!!.contains("four words") && t.instruction!!.contains("counter's screen"), "the instruction says to compare with the counter")
+        val noWords = LineModel.describe(
+            LineView(3, LineKind.Pairing, "Pairing", false, "AS-28 failed", null, LineDetail.Pairing(PairingDetail("Front", ByteArray(32), null, 4, 5))),
+        )
+        ok(noWords.prominent == null && noWords.instruction == null && !noWords.canApprove, "no words, no comparison, no approval")
+        ok(noWords.rows.any { it.contains("cannot be compared") }, "the words that could not be made are said")
+        val other = LineModel.describe(
+            LineView(1, LineKind.HealthCheck, "Health", false, null, null, LineDetail.Health(HealthDetail(ByteArray(8)))),
+        )
+        ok(other.prominent == null && other.instruction == null, "only a pairing has a prominent line")
         val health = LineModel.describe(
             LineView(1, LineKind.HealthCheck, "Health", false, "SR-xx failed", null, LineDetail.Health(HealthDetail(ByteArray(8)))),
         )
         ok(!health.canApprove && health.failure == "SR-xx failed" && health.title == "Health", "a failing line says why")
+    }
+
+    private fun pairOfferTests() {
+        val good = ByteArray(PairOfferModel.LENGTH)
+        "OBMO".forEachIndexed { i, c -> good[i] = c.code.toByte() }
+        good[4] = 1
+        ok(PairOfferModel.looksLikeOffer(good), "an offer has the frame and the length")
+        ok(PairOfferModel.LENGTH == 102, "an offer is 102 bytes")
+        ok(!PairOfferModel.looksLikeOffer(good.copyOf(101)) && !PairOfferModel.looksLikeOffer(good + 0), "another length is not an offer")
+        ok(!PairOfferModel.looksLikeOffer(good.copyOf().also { it[0] = 'X'.code.toByte() }), "another magic is not an offer")
+        ok(!PairOfferModel.looksLikeOffer(good.copyOf().also { it[4] = 2 }), "another version is not an offer")
+        ok(!PairOfferModel.looksLikeOffer(ByteArray(0)), "nothing is not an offer")
+        ok(AppWords.pairOffer.next.contains("Scan this with the counter") && AppWords.pairOffer.who == Who.KEY_HOLDER, "the screen says to scan it with the counter")
     }
 
     @JvmStatic
@@ -253,6 +278,7 @@ object AppModelTest {
         formatOfFileTests()
         fileTests()
         lineTests()
+        pairOfferTests()
         println("AppModelTest: $count checks passed")
     }
 }

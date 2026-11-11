@@ -24,6 +24,13 @@ class LineText(
     /** Why the line cannot be approved, from the rule crates, or null. */
     val failure: String?,
     val canApprove: Boolean,
+    /**
+     * What the screen shows larger than anything else, or null: for a pairing, the four session words
+     * on one line, to compare with the counter's screen.
+     */
+    val prominent: String? = null,
+    /** What to do with [prominent], or null. */
+    val instruction: String? = null,
 )
 
 object LineModel {
@@ -34,6 +41,9 @@ object LineModel {
         LineKind.Pairing -> "Pairing a counter"
         LineKind.HealthCheck -> "Health check"
     }
+
+    /** The four words of a pairing on one line, spaced so that each stands apart. */
+    fun wordsLine(words: List<String>): String = words.joinToString("   ")
 
     private fun direction(d: Direction) = if (d == Direction.Loosening) "loosens" else "tightens"
 
@@ -63,6 +73,9 @@ object LineModel {
         val rows = ArrayList<String>()
         val claims = ArrayList<String>()
         val quoted = ArrayList<Quoted>()
+        var title = line.title.ifEmpty { kindName(line.kind) }
+        var prominent: String? = null
+        var instruction: String? = null
         when (val d = line.detail) {
             is LineDetail.Spend -> {
                 val r = d.detail.review
@@ -117,19 +130,31 @@ object LineModel {
             }
             is LineDetail.Pairing -> {
                 val p = d.detail
+                // The name was typed on another device: it is cut and cleaned (SC-08) and shown in quotation
+                // marks, and again below as text from elsewhere.
+                title = "Pair counter \u201c${Format.cleanForeign(p.name)}\u201d"
                 quoted.add(Quoted("The name the counter gives itself", p.name))
-                p.sessionWords?.let { rows.add("Words to compare with the counter: ${it.joinToString(" ")}.") }
+                val words = p.sessionWords
+                if (words != null) {
+                    prominent = wordsLine(words)
+                    instruction = "Compare these four words with the four on the counter's screen. " +
+                        "Approve only if all four are the same, in the same order."
+                } else {
+                    rows.add("The four words could not be worked out, so this pairing cannot be compared.")
+                }
                 rows.add("Settings version to sign: ${p.settingsVersionToSign}; the counter claims ${p.claimedSettingsVersion}.")
             }
             is LineDetail.Health -> rows.add("The counter asks this app to show it is still answering.")
         }
         return LineText(
-            title = line.title.ifEmpty { kindName(line.kind) },
+            title = title,
             rows = rows,
             claims = claims,
             quoted = quoted.map { Quoted(it.from, Format.cleanForeign(it.text)) },
             failure = line.failure,
             canApprove = line.canApprove,
+            prominent = prominent,
+            instruction = instruction,
         )
     }
 }

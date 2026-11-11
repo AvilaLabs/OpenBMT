@@ -143,6 +143,16 @@ object AppWords {
         "Remove any other letter or digit, then try again.",
     )
 
+    // ---- pairing a counter -------------------------------------------------------
+
+    /** The offer on the screen: nothing in it is secret. */
+    val pairOffer = w(
+        Tones.INFO, "Pair a counter",
+        "The code below names this shop's two keys, its wallet and its network, for a counter to read.",
+        Who.KEY_HOLDER,
+        "Scan this with the counter: open the counter app, tap Pair with the Key app, and hold its camera to this code.",
+    )
+
     // ---- the end of a session ----------------------------------------------------
 
     val answersReady = w(
@@ -258,6 +268,7 @@ object AppWords {
         "identityNotReadable" to identityNotReadable,
         "flipsNotReadable" to flipsNotReadable,
         "answersReady" to answersReady,
+        "pairOffer" to pairOffer,
         "Empty" to state(SetupState.Empty),
         "HasIdentity(WordsWaiting)" to state(SetupState.HasIdentity(true, true)),
         "HasIdentity(Key2)" to state(SetupState.HasIdentity(true, false)),

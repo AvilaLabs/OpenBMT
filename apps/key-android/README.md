@@ -33,8 +33,19 @@ reads one QR code with the phone's camera (see "The camera scan" below).
 A request can also be read from a code that changes, and the answer can be
 shown as one (see "Animated codes" below).
 
-Not built yet: the allowlist enrolment, the pairing offer, a lock screen of
-the app's own, and the wipe after wrong tries.
+Pair a counter: from the home screen (reached once the wallet is accepted) the
+app shows its pairing offer as a `ur:bytes` code (`pairOfferBytes`), headed
+"Scan this with the counter". The offer names the owner phone's key, this
+app's key, the wallet's ID and the network, and holds nothing secret. The
+counter reads it, makes its own signed request and shows four words; the
+owner phone carries that request in an approval session, and the Key app's
+pairing line reads "Pair counter" with the counter's name in quotation marks,
+the four words as the largest text on the screen, and the instruction to
+compare them with the counter's screen (`LineModel`, tested in
+`tests/AppModelTest.kt`).
+
+Not built yet: the allowlist enrolment, a lock screen of the app's own, and
+the wipe after wrong tries.
 
 ## Rules the app keeps without a device
 
@@ -69,6 +80,19 @@ the app's own, and the wipe after wrong tries.
   temporary file in `noBackupFilesDir`, is synced, then renamed over the real
   file. `load` returns null on a first start and throws on a file that does not
   decrypt, and the app then shows the library's words and writes nothing.
+- **The pairing offer holds nothing secret and is drawn only from the
+  library.** "Pair a counter" shows the bytes of `pairOfferBytes` as a code
+  and nothing else: they are drawn only when they have the length and the
+  frame of an offer (`PairOfferModel`), and the screen is reachable only from
+  the home screen, which exists once the wallet is accepted. The code names
+  the roots, the wallet's ID and the network; it carries no seed, no key
+  material and no setting.
+- **The pairing line puts the four words first.** The line of a pairing item
+  is headed "Pair counter" with the counter's name, cleaned and in quotation
+  marks (the name was typed on another device, SC-08), shows the four words
+  as the largest text on the screen and says to compare all four with the
+  counter's screen before approving. A pairing whose words could not be
+  worked out says so and cannot be approved.
 
 ## The camera scan
 
