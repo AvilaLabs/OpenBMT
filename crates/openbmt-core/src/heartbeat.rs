@@ -12,6 +12,12 @@
 //! names agrees with the counter's own header chain, and how old it is, are
 //! judged by the counter (`docs/COUNTER-RULES.md`, CR-50 to CR-56).
 //!
+//! The owner phone may also run a watcher while its owner app is closed. That
+//! watcher holds no owner key: it signs with a watch key of its own, whose
+//! public key the signed settings name (`Settings::watch_key`), under a
+//! tag of its own ([`TAG_WATCH_HEARTBEAT`]). The frame is the same; the
+//! counter tries the owner root and then the named watch key.
+//!
 //! The sequence number stops an old heartbeat from being played again. The
 //! counter stores the last number it took and passes it to
 //! [`SignedHeartbeat::verify`], which refuses any heartbeat that is not
@@ -24,7 +30,7 @@
 use std::fmt;
 
 use crate::batch::PinnedRoots;
-use crate::identity::{DeviceId, Identity, Sig, TAG_HEARTBEAT};
+use crate::identity::{DeviceId, Identity, Sig, TAG_HEARTBEAT, TAG_WATCH_HEARTBEAT};
 use crate::wire::{self, DecodeError, Reader};
 
 /// What the owner's watcher says about itself.
@@ -52,7 +58,8 @@ pub enum HeartbeatError {
     /// The number is not above the last one taken: an old heartbeat played
     /// again, or one that was already taken.
     Stale { last: u64, got: u64 },
-    /// The signature is not the owner root's over this heartbeat.
+    /// The signature is neither the owner root's nor the watch key's named
+    /// in the settings in force, over this heartbeat.
     OwnerSignatureInvalid,
 }
 
@@ -66,7 +73,7 @@ impl fmt::Display for HeartbeatError {
                     "heartbeat number {got} is not above the last one, {last}"
                 )
             }
-            Self::OwnerSignatureInvalid => write!(f, "heartbeat is not signed by the owner"),
+            Self::OwnerSignatureInvalid => write!(f, "heartbeat is not signed by the owner or the shop's watch key"),
         }
     }
 }
@@ -106,6 +113,14 @@ impl WatcherHeartbeat {
             heartbeat: *self,
         }
     }
+
+    /// Sign with the shop's watch key, under the tag of its own.
+    pub fn sign_watch(&self, watch: &Identity) -> SignedHeartbeat {
+        SignedHeartbeat {
+            owner_sig: watch.sign_tagged(TAG_WATCH_HEARTBEAT, &self.encode()),
+            heartbeat: *self,
+        }
+    }
 }
 
 /// A heartbeat and the owner's signature on it.
@@ -113,17 +128,20 @@ impl WatcherHeartbeat {
 pub struct SignedHeartbeat {
     /// The heartbeat.
     pub heartbeat: WatcherHeartbeat,
-    /// The owner root's signature over [`WatcherHeartbeat::encode`].
+    /// The signature over [`WatcherHeartbeat::encode`]: the owner root's, or
+    /// the watch key's under its own tag. Which one is decided by checking.
     pub owner_sig: Sig,
 }
 
 impl SignedHeartbeat {
     /// Check the heartbeat is for `counter`, is numbered above `last_seq`,
-    /// and is signed by the owner root. Checked in that order. On success
+    /// and is signed by the owner root or by `watch`, the watch key the
+    /// settings in force name, if any. Checked in that order. On success
     /// the heartbeat is handed back.
     pub fn verify(
         &self,
         roots: &PinnedRoots,
+        watch: Option<&DeviceId>,
         counter: &DeviceId,
         last_seq: u64,
     ) -> Result<&WatcherHeartbeat, HeartbeatError> {
@@ -136,10 +154,14 @@ impl SignedHeartbeat {
                 got: self.heartbeat.seq,
             });
         }
-        if !roots
+        let body = self.heartbeat.encode();
+        let by_owner = roots
             .owner
-            .verify_tagged(TAG_HEARTBEAT, &self.heartbeat.encode(), &self.owner_sig)
-        {
+            .verify_tagged(TAG_HEARTBEAT, &body, &self.owner_sig);
+        let by_watch = watch.is_some_and(|w| {
+            w.verify_tagged(TAG_WATCH_HEARTBEAT, &body, &self.owner_sig)
+        });
+        if !by_owner && !by_watch {
             return Err(HeartbeatError::OwnerSignatureInvalid);
         }
         Ok(&self.heartbeat)
@@ -206,7 +228,7 @@ mod tests {
                 ..heartbeat(5)
             };
             let s = hb.sign(&identity(1));
-            assert_eq!(s.verify(&roots(), &counter(), 4), Ok(&hb));
+            assert_eq!(s.verify(&roots(), None, &counter(), 4), Ok(&hb));
             let bytes = s.to_bytes();
             assert_eq!(&bytes[..5], b"OBMT\x01");
             assert_eq!(bytes.len(), 154);
@@ -231,7 +253,7 @@ mod tests {
     #[test]
     fn a_heartbeat_for_another_counter_is_refused() {
         assert_eq!(
-            signed(5).verify(&roots(), &identity(11).device_id(), 0),
+            signed(5).verify(&roots(), None, &identity(11).device_id(), 0),
             Err(HeartbeatError::WrongCounter)
         );
     }
@@ -240,16 +262,16 @@ mod tests {
     fn the_number_must_be_above_the_last_one() {
         let s = signed(5);
         assert_eq!(
-            s.verify(&roots(), &counter(), 5),
+            s.verify(&roots(), None, &counter(), 5),
             Err(HeartbeatError::Stale { last: 5, got: 5 })
         );
         assert_eq!(
-            s.verify(&roots(), &counter(), 9),
+            s.verify(&roots(), None, &counter(), 9),
             Err(HeartbeatError::Stale { last: 9, got: 5 })
         );
-        assert!(s.verify(&roots(), &counter(), 4).is_ok());
+        assert!(s.verify(&roots(), None, &counter(), 4).is_ok());
         assert_eq!(
-            signed(0).verify(&roots(), &counter(), 0),
+            signed(0).verify(&roots(), None, &counter(), 0),
             Err(HeartbeatError::Stale { last: 0, got: 0 })
         );
     }
@@ -260,7 +282,7 @@ mod tests {
         for who in [2u8, 3, 10] {
             let s = hb.sign(&identity(who));
             assert_eq!(
-                s.verify(&roots(), &counter(), 0),
+                s.verify(&roots(), None, &counter(), 0),
                 Err(HeartbeatError::OwnerSignatureInvalid),
                 "signer {who}"
             );
@@ -275,7 +297,7 @@ mod tests {
             owner_sig: a.sign(&identity(1)).owner_sig,
         };
         assert_eq!(
-            s.verify(&roots(), &counter(), 0),
+            s.verify(&roots(), None, &counter(), 0),
             Err(HeartbeatError::OwnerSignatureInvalid)
         );
         // the command tag over the same bytes is not a heartbeat
@@ -284,7 +306,7 @@ mod tests {
             owner_sig: identity(1).sign_tagged(crate::identity::TAG_COMMAND, &a.encode()),
         };
         assert_eq!(
-            other_tag.verify(&roots(), &counter(), 0),
+            other_tag.verify(&roots(), None, &counter(), 0),
             Err(HeartbeatError::OwnerSignatureInvalid)
         );
     }
@@ -295,15 +317,15 @@ mod tests {
         s.owner_sig = Sig([0; 64]);
         let other = identity(11).device_id();
         assert_eq!(
-            s.verify(&roots(), &other, 9),
+            s.verify(&roots(), None, &other, 9),
             Err(HeartbeatError::WrongCounter)
         );
         assert_eq!(
-            s.verify(&roots(), &counter(), 9),
+            s.verify(&roots(), None, &counter(), 9),
             Err(HeartbeatError::Stale { last: 9, got: 5 })
         );
         assert_eq!(
-            s.verify(&roots(), &counter(), 1),
+            s.verify(&roots(), None, &counter(), 1),
             Err(HeartbeatError::OwnerSignatureInvalid)
         );
     }
@@ -378,7 +400,7 @@ mod tests {
         let bytes = signed(5).to_bytes();
         assert!(SignedHeartbeat::from_bytes(&bytes)
             .unwrap()
-            .verify(&roots(), &counter(), 4)
+            .verify(&roots(), None, &counter(), 4)
             .is_ok());
         for i in 0..bytes.len() {
             for bit in 0..8 {
@@ -386,12 +408,66 @@ mod tests {
                 m[i] ^= 1 << bit;
                 if let Ok(s) = SignedHeartbeat::from_bytes(&m) {
                     assert!(
-                        s.verify(&roots(), &counter(), 4).is_err(),
+                        s.verify(&roots(), None, &counter(), 4).is_err(),
                         "byte {i} bit {bit}"
                     );
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_watch_key_heartbeat_counts_only_when_the_settings_name_the_key() {
+        let watch = identity(20);
+        let hb = heartbeat(5);
+        let s = hb.sign_watch(&watch);
+        let named = watch.device_id();
+        assert_eq!(s.verify(&roots(), Some(&named), &counter(), 4), Ok(&hb));
+        // the same bytes survive the wire form
+        let back = SignedHeartbeat::from_bytes(&s.to_bytes()).unwrap();
+        assert_eq!(back.verify(&roots(), Some(&named), &counter(), 4), Ok(&hb));
+        // no key named, or another key named: refused
+        assert_eq!(
+            s.verify(&roots(), None, &counter(), 4),
+            Err(HeartbeatError::OwnerSignatureInvalid)
+        );
+        let other = identity(21).device_id();
+        assert_eq!(
+            s.verify(&roots(), Some(&other), &counter(), 4),
+            Err(HeartbeatError::OwnerSignatureInvalid)
+        );
+        // numbers are shared: the owner's and the watch key's use one line
+        assert_eq!(
+            s.verify(&roots(), Some(&named), &counter(), 5),
+            Err(HeartbeatError::Stale { last: 5, got: 5 })
+        );
+    }
+
+    #[test]
+    fn a_watch_signature_is_not_an_owner_signature_and_the_reverse() {
+        let watch = identity(20);
+        let named = watch.device_id();
+        let hb = heartbeat(5);
+        // the watch key signing under the owner's heartbeat tag
+        let wrong_tag = SignedHeartbeat {
+            heartbeat: hb,
+            owner_sig: watch.sign_tagged(TAG_HEARTBEAT, &hb.encode()),
+        };
+        assert_eq!(
+            wrong_tag.verify(&roots(), Some(&named), &counter(), 0),
+            Err(HeartbeatError::OwnerSignatureInvalid)
+        );
+        // the owner root signing under the watch tag
+        let owner_as_watch = SignedHeartbeat {
+            heartbeat: hb,
+            owner_sig: identity(1).sign_tagged(TAG_WATCH_HEARTBEAT, &hb.encode()),
+        };
+        assert_eq!(
+            owner_as_watch.verify(&roots(), Some(&named), &counter(), 0),
+            Err(HeartbeatError::OwnerSignatureInvalid)
+        );
+        // the tags differ
+        assert_ne!(TAG_HEARTBEAT, TAG_WATCH_HEARTBEAT);
     }
 
     #[test]
@@ -406,7 +482,7 @@ mod tests {
         );
         assert_eq!(
             HeartbeatError::OwnerSignatureInvalid.to_string(),
-            "heartbeat is not signed by the owner"
+            "heartbeat is not signed by the owner or the shop's watch key"
         );
     }
 }

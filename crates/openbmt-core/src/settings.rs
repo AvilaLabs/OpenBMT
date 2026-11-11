@@ -145,6 +145,13 @@ pub struct Settings {
     /// that every invoice must be signed by is part of the signed settings
     /// and not of a counter's own configuration.
     pub lightning_node: Option<[u8; LIGHTNING_NODE_BYTES]>,
+    /// The public key of the watch key the owner phone's background watcher
+    /// signs heartbeats with (CR-50, CR-55), if the owner turned that on. A
+    /// counter takes a heartbeat signed by it, under its own tag, as it
+    /// takes one signed by the owner root. It is never a device of the
+    /// shop: it is not on the device list, is not a counter or a Box, and
+    /// signs nothing but heartbeats.
+    pub watch_key: Option<DeviceId>,
 }
 
 impl Settings {
@@ -177,6 +184,7 @@ impl Settings {
             counters: BTreeMap::new(),
             boxes: BTreeSet::new(),
             lightning_node: None,
+            watch_key: None,
         }
     }
 
@@ -268,6 +276,16 @@ impl Settings {
                 ));
             }
         }
+        if let Some(key) = &self.watch_key {
+            if self.devices.contains(key)
+                || self.counters.contains_key(key)
+                || self.boxes.contains(key)
+            {
+                return Err(SettingsError::Invalid(
+                    "CR-50: the watch key is also a device of the shop",
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -309,7 +327,7 @@ impl Settings {
     /// panics rather than truncating the length.
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(
-            290 + self.devices.len() * 32 + self.counters.len() * 34 + self.boxes.len() * 32,
+            323 + self.devices.len() * 32 + self.counters.len() * 34 + self.boxes.len() * 32,
         );
         out.extend_from_slice(&self.version.to_le_bytes());
         for l in self.limits() {
@@ -340,6 +358,13 @@ impl Settings {
             Some(key) => {
                 out.push(1);
                 out.extend_from_slice(key);
+            }
+            None => out.push(0),
+        }
+        match &self.watch_key {
+            Some(key) => {
+                out.push(1);
+                out.extend_from_slice(&key.to_bytes());
             }
             None => out.push(0),
         }
@@ -411,6 +436,11 @@ impl Settings {
         } else {
             None
         };
+        let watch_key = if r.flag()? {
+            Some(r.device_id()?)
+        } else {
+            None
+        };
 
         Ok(Self {
             version,
@@ -435,6 +465,7 @@ impl Settings {
             counters,
             boxes,
             lightning_node,
+            watch_key,
         })
     }
 
@@ -642,6 +673,15 @@ pub fn changed_fields(old: &Settings, new: &Settings) -> Vec<FieldChange> {
         o.push(FieldChange {
             field: "lightning_node",
             direction: dir(new.lightning_node.is_some()),
+        });
+    }
+    // Naming a watch key, or another one, lets instant sales go on on the
+    // word of a key that is not the owner root, so it loosens; taking the key
+    // away only stops that.
+    if old.watch_key != new.watch_key {
+        o.push(FieldChange {
+            field: "watch_key",
+            direction: dir(new.watch_key.is_some()),
         });
     }
     out
@@ -1377,9 +1417,10 @@ mod tests {
         u.counters.clear();
         assert_ne!(s.hash(), u.hash());
         // tail of the encoding: count u32 LE, then id | share u16 LE, then
-        // the empty Box list (a zero count) and the flag of no Lightning node
+        // the empty Box list (a zero count) and the flags of no Lightning node
+        // and no watch key
         let enc = s.encode();
-        let end = enc.len() - 1;
+        let end = enc.len() - 2;
         assert_eq!(enc[end], 0);
         assert_eq!(&enc[end - 4..end], &0u32.to_le_bytes());
         let tail = &enc[end - 42..end - 4];
@@ -1919,10 +1960,10 @@ mod tests {
         t.boxes.clear();
         assert_ne!(s.encode(), t.encode());
         assert_ne!(s.hash(), t.hash());
-        // The Box list comes last but for the flag of the Lightning node: a
-        // count, then the keys.
+        // The Box list comes last but for the flags of the Lightning node and
+        // the watch key: a count, then the keys.
         let bytes = s.encode();
-        let end = bytes.len() - 1;
+        let end = bytes.len() - 2;
         assert_eq!(&bytes[end - 36..end - 32], &[1, 0, 0, 0]);
         assert_eq!(&bytes[end - 32..end], &boxed.to_bytes());
         let mut x = base();
@@ -1952,9 +1993,10 @@ mod tests {
         two.devices.extend([a, b]);
         two.boxes.extend([a, b]);
         let good = signed_both(two).to_bytes();
-        // After the Boxes come the flag of the Lightning node (1), the owner
-        // signature (64) and the flag and Key app signature (65).
-        let first = good.len() - 129 - 1 - 64;
+        // After the Boxes come the flags of the Lightning node and the watch
+        // key (2), the owner signature (64) and the flag and Key app
+        // signature (65).
+        let first = good.len() - 129 - 2 - 64;
         let mut swapped = good.clone();
         let (x, y) = (
             good[first..first + 32].to_vec(),
@@ -2063,6 +2105,115 @@ mod tests {
     }
 
     #[test]
+    fn cr_185_the_first_settings_name_no_watch_key() {
+        assert_eq!(Settings::defaults(RATE).watch_key, None);
+    }
+
+    #[test]
+    fn cr_185_naming_or_changing_the_watch_key_loosens_and_removing_it_tightens() {
+        let old = base();
+        let mut named = old.clone();
+        named.watch_key = Some(identity(90).device_id());
+        let fields = changed_fields(&old, &named);
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field, "watch_key");
+        assert_eq!(classify_change(&old, &named), Change::Loosening);
+        assert_eq!(classify_change(&named, &old), Change::Tightening);
+        let mut other = named.clone();
+        other.watch_key = Some(identity(91).device_id());
+        assert_eq!(classify_change(&named, &other), Change::Loosening);
+        assert_eq!(classify_change(&named, &named), Change::Tightening);
+    }
+
+    #[test]
+    fn cr_185_naming_the_watch_key_needs_the_key_app_and_removing_it_does_not() {
+        let (o, a, roots) = roots();
+        let old = base();
+        let mut named = next(&old);
+        named.watch_key = Some(identity(90).device_id());
+        let only_owner = SignedSettings {
+            owner_sig: named.sign(&o),
+            approver_sig: None,
+            settings: named.clone(),
+        };
+        assert_eq!(
+            only_owner.verify(&roots, Some(&old)),
+            Err(SettingsError::ApproverRequired)
+        );
+        let both = SignedSettings {
+            approver_sig: Some(named.sign(&a)),
+            ..only_owner
+        };
+        assert_eq!(both.verify(&roots, Some(&old)), Ok(Change::Loosening));
+        let mut gone = next(&named);
+        gone.watch_key = None;
+        let removed = SignedSettings {
+            owner_sig: gone.sign(&o),
+            approver_sig: None,
+            settings: gone,
+        };
+        assert_eq!(removed.verify(&roots, Some(&named)), Ok(Change::Tightening));
+    }
+
+    #[test]
+    fn cr_185_the_watch_key_is_signed_reads_back_and_is_never_a_device() {
+        let s = base();
+        let mut t = s.clone();
+        t.watch_key = Some(identity(90).device_id());
+        assert_ne!(t.hash(), s.hash());
+        let (o, _a, _roots) = roots();
+        let signed = SignedSettings {
+            owner_sig: t.sign(&o),
+            approver_sig: None,
+            settings: t.clone(),
+        };
+        let bytes = signed.to_bytes();
+        let back = SignedSettings::from_bytes(&bytes).expect("reads back");
+        assert_eq!(back, signed);
+        assert_eq!(back.to_bytes(), bytes);
+        let none = SignedSettings {
+            settings: s,
+            ..signed
+        };
+        assert_eq!(bytes.len(), none.to_bytes().len() + 32);
+        // A watch key that is also a device, a counter or a Box is refused.
+        let key = identity(90).device_id();
+        let mut as_device = t.clone();
+        as_device.devices.insert(key);
+        assert!(as_device.validate().is_err());
+        let mut as_box = t.clone();
+        as_box.devices.insert(key);
+        as_box.boxes.insert(key);
+        assert!(as_box.validate().is_err());
+        assert!(t.validate().is_ok());
+    }
+
+    #[test]
+    fn cr_185_the_watch_key_flag_is_strict() {
+        let mut t = base();
+        t.watch_key = Some(identity(90).device_id());
+        let (o, _a, _roots) = roots();
+        let signed = SignedSettings {
+            owner_sig: t.sign(&o),
+            approver_sig: None,
+            settings: t,
+        };
+        let bytes = signed.to_bytes();
+        // The flag byte sits before the key, the owner signature and the
+        // approver flag byte.
+        let at = bytes.len() - 1 - 64 - 32 - 1;
+        let mut bad = bytes.clone();
+        bad[at] = 2;
+        assert_eq!(
+            SignedSettings::from_bytes(&bad),
+            Err(DecodeError::NonCanonical("flag is not 0 or 1"))
+        );
+        let mut cut = bytes.clone();
+        cut.truncate(at + 1 + 31);
+        assert!(SignedSettings::from_bytes(&cut).is_err());
+    }
+
+    #[test]
     fn ln_03_the_first_settings_name_no_lightning_node() {
         assert_eq!(Settings::defaults(RATE).lightning_node, None);
     }
@@ -2149,9 +2300,9 @@ mod tests {
             settings: t,
         };
         let bytes = signed.to_bytes();
-        // The flag byte sits before its 33 bytes, the owner signature and the
-        // approver flag byte.
-        let at = bytes.len() - 1 - 64 - LIGHTNING_NODE_BYTES - 1;
+        // The flag byte sits before its 33 bytes, the watch key flag, the
+        // owner signature and the approver flag byte.
+        let at = bytes.len() - 1 - 64 - 1 - LIGHTNING_NODE_BYTES - 1;
         let mut bad = bytes.clone();
         bad[at] = 2;
         assert_eq!(
@@ -2159,7 +2310,7 @@ mod tests {
             Err(DecodeError::NonCanonical("flag is not 0 or 1"))
         );
         // A cut-off key is refused, not read short.
-        assert!(SignedSettings::from_bytes(&bytes[..bytes.len() - 70]).is_err());
+        assert!(SignedSettings::from_bytes(&bytes[..bytes.len() - 71]).is_err());
     }
 
     #[test]
