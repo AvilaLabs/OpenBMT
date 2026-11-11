@@ -16,6 +16,7 @@ use crate::dirstore::DirStoreError;
 use crate::node::{HeartbeatNotTaken, StartError};
 use crate::paired::{PairRefused, RelayRefused};
 use crate::relaylink::LinkLine;
+use crate::settings::{SettingsFault, SettingsLine, SettingsRefused};
 
 impl DirStoreError {
     /// What the owner is told about a file of the counter's data folder.
@@ -81,6 +82,7 @@ impl StartError {
                 "Check that the data folder has room and may be written to, then start again. See Details.",
             )
             .detail(e.to_string()),
+            Self::Settings(e) => e.words(),
             Self::Driver(e) => Words::new(
                 Tone::Stop,
                 "Network part did not start",
@@ -89,6 +91,107 @@ impl StartError {
                 "Check the counter's internet connection and start it again. See Details.",
             )
             .detail(e.clone()),
+        }
+    }
+}
+
+impl SettingsRefused {
+    /// What the owner is told when settings the owner sent were not taken
+    /// (CR-160, CR-161). Nothing was changed.
+    pub fn words(&self) -> Words {
+        match self {
+            Self::Bytes(e) => Words::new(
+                Tone::Ended,
+                "Settings not readable",
+                "What was sent as the shop's settings is not settings, so nothing was changed.",
+                Who::Owner,
+                "Nothing to do. The owner's phone sends them again by itself.",
+            )
+            .detail(e.to_string()),
+            Self::Verify(e) => Words::new(
+                Tone::Ended,
+                "Settings refused",
+                "The settings the owner sent are not signed as this counter needs, or do not go past the ones it has, so nothing was changed.",
+                Who::Owner,
+                "Check on the owner's phone that the change was approved on the Key app, then send it again.",
+            )
+            .detail(e.to_string()),
+            Self::Store(e) => Words::new(
+                Tone::Ended,
+                "Settings not saved",
+                "The counter could not write the owner's new settings to its data folder, so it kept the old ones.",
+                Who::Owner,
+                "Check that the data folder has room and may be written to. The owner's phone sends them again by itself.",
+            )
+            .detail(e.to_string()),
+        }
+        .code(self.rule())
+    }
+}
+
+impl SettingsFault {
+    /// What the owner is told when the counter will not start for what it
+    /// holds of the settings (CR-163).
+    pub fn words(&self) -> Words {
+        let restore = "Put the counter's data folder back from a copy made after the last settings change, or pair the counter again from the Key app.";
+        match self {
+            Self::Read(e) => Words::new(
+                Tone::Stop,
+                "Saved settings not read",
+                "The counter could not read the settings it saved from the owner, so it did not start.",
+                Who::Owner,
+                "Check that the data folder may be read, then start again. If it stays, restore it from a copy.",
+            )
+            .detail(e.to_string()),
+            Self::Decode(e) => Words::new(
+                Tone::Stop,
+                "Saved settings unreadable",
+                "The settings the counter saved from the owner do not read back, so it did not start.",
+                Who::Owner,
+                restore,
+            )
+            .detail(e.to_string()),
+            Self::Verify(e) => Words::new(
+                Tone::Stop,
+                "Saved settings not valid",
+                "The settings the counter saved from the owner are not signed as they must be, so it did not start.",
+                Who::Owner,
+                restore,
+            )
+            .detail(e.to_string()),
+            Self::Rolled { .. } => Words::new(
+                Tone::Stop,
+                "Saved settings are old",
+                "The counter's records show newer settings than the ones it saved, so it did not start rather than use old limits.",
+                Who::Owner,
+                restore,
+            )
+            .detail(self.to_string()),
+        }
+        .code(self.rule())
+    }
+}
+
+impl SettingsLine {
+    /// What Home says about the settings (CR-164, CR-165).
+    pub fn words(&self) -> Words {
+        match self {
+            Self::Removed => Words::new(
+                Tone::Stop,
+                "Counter removed",
+                "The owner removed this counter from the shop. It cannot start a sale, but sales already open can finish.",
+                Who::Manager,
+                "Ask the owner. To use this counter again the owner must add it and pair it again.",
+            )
+            .code("CR-165"),
+            Self::RestartNeeded => Words::new(
+                Tone::Info,
+                "Restart for settings",
+                "The owner changed Tor or the Lightning node, which only take effect when the counter starts again.",
+                Who::Nobody,
+                "Nothing to do. The counter starts again by itself when no sale screen is open.",
+            )
+            .code("CR-164"),
         }
     }
 }
@@ -551,7 +654,63 @@ pub fn all_words() -> Vec<(String, Words)> {
     for (name, e) in every_relay_refused() {
         all.push((format!("RelayRefused::{name}"), e.words()));
     }
+    for (name, e) in every_settings_refused() {
+        all.push((format!("SettingsRefused::{name}"), e.words()));
+    }
+    for (name, e) in every_settings_fault() {
+        all.push((format!("SettingsFault::{name}"), e.words()));
+    }
+    for line in [SettingsLine::Removed, SettingsLine::RestartNeeded] {
+        all.push((format!("SettingsLine::{line:?}"), line.words()));
+    }
     all
+}
+
+/// One value of every refusal of settings from the owner, with its name.
+pub fn every_settings_refused() -> Vec<(&'static str, SettingsRefused)> {
+    use openbmt_core::wire::DecodeError;
+    vec![
+        ("Bytes", SettingsRefused::Bytes(DecodeError::Truncated)),
+        (
+            "Verify",
+            SettingsRefused::Verify(SettingsError::ApproverRequired),
+        ),
+        (
+            "Store",
+            SettingsRefused::Store(DirStoreError::Io {
+                file: "settings.bin".to_string(),
+                op: "write",
+                kind: std::io::ErrorKind::PermissionDenied,
+            }),
+        ),
+    ]
+}
+
+/// One value of every fault of the settings a start reads, with its name.
+pub fn every_settings_fault() -> Vec<(&'static str, SettingsFault)> {
+    use openbmt_core::wire::DecodeError;
+    vec![
+        (
+            "Read",
+            SettingsFault::Read(DirStoreError::Io {
+                file: "settings.bin".to_string(),
+                op: "read",
+                kind: std::io::ErrorKind::PermissionDenied,
+            }),
+        ),
+        ("Decode", SettingsFault::Decode(DecodeError::Truncated)),
+        (
+            "Verify",
+            SettingsFault::Verify(SettingsError::OwnerSignatureInvalid),
+        ),
+        (
+            "Rolled",
+            SettingsFault::Rolled {
+                in_force: 3,
+                recorded: 5,
+            },
+        ),
+    ]
 }
 
 /// One value of every refusal of the pairing steps, with its name. The

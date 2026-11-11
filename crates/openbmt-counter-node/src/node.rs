@@ -102,12 +102,12 @@ use std::time::{Duration, Instant};
 
 use bitcoin::consensus::deserialize;
 use bitcoin::{BlockHash, ScriptBuf, Transaction, Txid};
-use openbmt_core::batch::{AddError, SignedBatch};
+use openbmt_core::batch::{AddError, PinnedRoots, SignedBatch};
 use openbmt_core::command::SignedCommand;
 use openbmt_core::heartbeat::SignedHeartbeat;
 use openbmt_core::identity::Identity;
 use openbmt_core::records::Record;
-use openbmt_core::settings::Settings;
+use openbmt_core::settings::{Change, SettingNote, Settings, SignedSettings, LIGHTNING_NODE_BYTES};
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
     Actor, Amount, BlockError, CancelRefused, CashRefund, CommandRefused, Counter, Currency,
@@ -133,6 +133,7 @@ use crate::lightning::{
     SetupStep,
 };
 use crate::notices::NodeRecords;
+use crate::settings::{check_not_rolled, SettingsFault, SettingsRefused};
 
 /// Most transactions the node keeps for later announcements.
 pub const TX_CACHE: usize = 256;
@@ -174,6 +175,9 @@ pub enum StartError {
     FirstBatch(String),
     /// The checked height could not be written.
     Checked(DirStoreError),
+    /// The settings the counter would use do not agree with its own records
+    /// (CR-163).
+    Settings(SettingsFault),
     /// The driver did not start.
     Driver(String),
 }
@@ -187,6 +191,7 @@ impl fmt::Display for StartError {
             Self::Counter(e) => write!(f, "the stored counter: {e}"),
             Self::FirstBatch(e) => write!(f, "the first batch of addresses: {e}"),
             Self::Checked(e) => write!(f, "the checked height: {e}"),
+            Self::Settings(e) => write!(f, "{e}"),
             Self::Driver(e) => write!(f, "the driver: {e}"),
         }
     }
@@ -315,6 +320,10 @@ pub struct NodeConfig {
     /// The saved Lightning connection, as the app sealed it (CR-115), if
     /// there is one. Not part of the settings and never sent anywhere.
     pub lightning: Option<Vec<u8>>,
+    /// CR-162: the counter talks to the owner through a link, so the first
+    /// start after pairing records the settings it was paired with, as the
+    /// owner looks for that record. Off unless the app has a link.
+    pub announce_settings: bool,
 }
 
 impl NodeConfig {
@@ -336,6 +345,7 @@ impl NodeConfig {
             clock: Box::new(SystemClock),
             health: Box::new(check_health),
             lightning: None,
+            announce_settings: false,
         }
     }
 }
@@ -350,6 +360,13 @@ pub struct Node<P: DriverPort = Handle> {
     health_fn: HealthFn,
     health: Option<Health>,
     settings: Settings,
+    /// CR-160: the two roots the counter pinned at pairing.
+    roots: PinnedRoots,
+    /// CR-164: what the node was started with that settings can change: the
+    /// Tor switch and the Lightning node.
+    started_with: (bool, Option<[u8; LIGHTNING_NODE_BYTES]>),
+    /// CR-162: the settings in force have no `Setting` record yet.
+    setting_unrecorded: Option<SettingNote>,
     /// CR-103: the driver was started with an own node.
     own_configured: bool,
     /// What the driver last said about the own node (NR-102), or, before it
@@ -410,6 +427,7 @@ impl<P: DriverPort> Node<P> {
             clock,
             health,
             lightning,
+            announce_settings,
         } = config;
         // NR-79: before anything in the directory is read.
         let lock = DirLock::acquire(&dir).map_err(|e| StartError::Locked(e.to_string()))?;
@@ -447,9 +465,23 @@ impl<P: DriverPort> Node<P> {
         };
         let view = ChainView::from_store(&headers);
 
+        let roots = pairing.roots;
         let mut counter =
             Counter::load(identity, pairing, settings.clone(), loaded.stored(), &store)
                 .map_err(StartError::Counter)?;
+        // CR-163: settings below what the counter's own records name are an
+        // old copy of the file.
+        check_not_rolled(settings.version, counter.settings_recorded())
+            .map_err(StartError::Settings)?;
+        // CR-162: the settings in force are recorded; the first start after
+        // pairing records the pairing's.
+        let setting_unrecorded = (announce_settings
+            && counter.settings_recorded() < Some(settings.version))
+        .then(|| SettingNote {
+            version: settings.version,
+            change: Change::Loosening,
+            hash: settings.hash(),
+        });
         if loaded.batches.is_none() {
             if let Some(batch) = first_batch {
                 counter
@@ -501,7 +533,10 @@ impl<P: DriverPort> Node<P> {
             clock,
             health_fn: health,
             health: None,
+            started_with: (settings.tor_on, settings.lightning_node),
             settings,
+            roots,
+            setting_unrecorded,
             own_configured,
             own_input: own_configured.then_some(OwnNodeInput {
                 link: OwnNodeLink::Down { since: started_at },
@@ -537,6 +572,7 @@ impl<P: DriverPort> Node<P> {
         }
         node.take_ln_notes();
         node.update_all_blocks();
+        node.retry_setting_record();
         // WR-65: the sales are restored, so the own node is asked about
         // their unconfirmed payments.
         node.own_health_now();
@@ -675,6 +711,90 @@ impl<P: DriverPort> Node<P> {
         self.notes.push_back(line);
     }
 
+    // CR-160 to CR-166: the owner's settings.
+
+    /// The settings in force.
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
+    /// CR-164: whether the settings in force change what the node was
+    /// started with (the Tor switch or the Lightning node), so that the app
+    /// must start the node again before they take effect.
+    pub fn restart_needed(&self) -> bool {
+        (self.settings.tor_on, self.settings.lightning_node) != self.started_with
+    }
+
+    /// CR-165: whether the settings in force no longer list this counter.
+    pub fn removed(&self) -> bool {
+        !self.counter.is_listed()
+    }
+
+    /// CR-160 to CR-162: take signed settings the owner sent. Older or equal
+    /// versions are dropped (`Ok(None)`); the owner sends again until it sees
+    /// the counter's record. Newer ones are checked against the pinned roots
+    /// and the settings in force, written to the settings file and only then
+    /// used, and then recorded. On an error nothing changed.
+    pub fn take_settings(
+        &mut self,
+        signed: &SignedSettings,
+    ) -> Result<Option<Change>, SettingsRefused> {
+        if signed.settings.version <= self.settings.version {
+            return Ok(None);
+        }
+        let change = signed
+            .verify(&self.roots, Some(&self.settings))
+            .map_err(SettingsRefused::Verify)?;
+        self.store
+            .put_settings(&signed.to_bytes())
+            .map_err(SettingsRefused::Store)?;
+        let before = self.restart_needed();
+        self.counter.set_settings(signed.settings.clone());
+        self.settings = signed.settings.clone();
+        self.setting_unrecorded = Some(SettingNote {
+            version: signed.settings.version,
+            change,
+            hash: signed.settings.hash(),
+        });
+        self.note(format!(
+            "CR-160: settings version {} taken ({})",
+            signed.settings.version,
+            match change {
+                Change::Tightening => "a tightening",
+                Change::Loosening => "a loosening",
+            }
+        ));
+        if self.removed() {
+            self.note("CR-165: the settings no longer list this counter".to_string());
+        }
+        if !before && self.restart_needed() {
+            self.note("CR-164: the settings change Tor or Lightning: restart needed".to_string());
+        }
+        self.retry_setting_record();
+        Ok(Some(change))
+    }
+
+    /// CR-162: write the `Setting` record the settings in force are waiting
+    /// for, if one is. A failure is a note, once, and the record is tried
+    /// again at the next call.
+    pub fn retry_setting_record(&mut self) {
+        let Some(note) = self.setting_unrecorded else {
+            return;
+        };
+        match self.counter.record_setting(note, &mut self.store) {
+            Ok(_) => self.setting_unrecorded = None,
+            Err(e) => {
+                let line = format!(
+                    "CR-162: the record of settings version {} was not written: {e}",
+                    note.version
+                );
+                if self.notes.back() != Some(&line) {
+                    self.note(line);
+                }
+            }
+        }
+    }
+
     // What arrives.
 
     /// Take the driver's events for up to `wait`, apply each, then judge
@@ -708,6 +828,7 @@ impl<P: DriverPort> Node<P> {
             self.update_all_blocks();
         }
         self.settle_when_due();
+        self.retry_setting_record();
         reports.append(&mut self.ln_reports);
         self.take_ln_notes();
         reports

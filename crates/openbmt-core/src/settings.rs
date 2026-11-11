@@ -740,6 +740,25 @@ impl SignedSettings {
 }
 
 impl SignedSettings {
+    /// Check the signatures that are there and the values, without a change
+    /// from other settings: the owner's signature, the Key app's if present,
+    /// and `validate`. For settings kept after they were checked as a change
+    /// (a counter's settings file).
+    pub fn verify_signatures(&self, roots: &PinnedRoots) -> Result<(), SettingsError> {
+        let h = self.settings.hash();
+        if !roots.owner.verify_digest(&h, &self.owner_sig) {
+            return Err(SettingsError::OwnerSignatureInvalid);
+        }
+        if let Some(sig) = &self.approver_sig {
+            if !roots.approver.verify_digest(&h, sig) {
+                return Err(SettingsError::ApproverSignatureInvalid);
+            }
+        }
+        self.settings.validate()
+    }
+}
+
+impl SignedSettings {
     /// Wire form: `OBMS`, version 1, the bytes of [`Settings::encode`] (the
     /// bytes that are hashed and signed), the owner signature, a flag byte
     /// (1 if a Key app signature follows, else 0) and, only when the flag is
@@ -820,6 +839,59 @@ impl SettingsStore {
         let change = signed.verify(&self.roots, self.current())?;
         self.current = Some(signed);
         Ok(change)
+    }
+}
+
+/// Length of the body of a `Setting` record: the version, the kind of change
+/// and the hash of the settings.
+pub const SETTING_NOTE_LEN: usize = 37;
+
+/// What a counter writes in a `Setting` record when it takes settings
+/// (`docs/COUNTER-RULES.md`, CR-163): the version, whether the change
+/// loosened or tightened, and the hash of the settings, so that the owner's
+/// copy of the counter's chain shows which settings the counter holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SettingNote {
+    /// The version of the settings taken.
+    pub version: u32,
+    /// How the change moved risk. The first settings a counter holds, and a
+    /// change that cannot be sorted, are loosening.
+    pub change: Change,
+    /// [`Settings::hash`] of the settings taken.
+    pub hash: [u8; 32],
+}
+
+impl SettingNote {
+    /// The record body: the version (4 bytes little endian), 0 for a
+    /// tightening or 1 for a loosening, and the 32-byte hash.
+    pub fn to_body(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(SETTING_NOTE_LEN);
+        out.extend_from_slice(&self.version.to_le_bytes());
+        out.push(match self.change {
+            Change::Tightening => 0,
+            Change::Loosening => 1,
+        });
+        out.extend_from_slice(&self.hash);
+        out
+    }
+
+    /// Parse a record body strictly: exactly [`SETTING_NOTE_LEN`] bytes and a
+    /// kind of change that is 0 or 1.
+    pub fn from_body(body: &[u8]) -> Result<Self, DecodeError> {
+        let mut r = Reader::new(body);
+        let version = r.u32_le()?;
+        let change = match r.u8()? {
+            0 => Change::Tightening,
+            1 => Change::Loosening,
+            _ => return Err(DecodeError::NonCanonical("the kind of change is not 0 or 1")),
+        };
+        let hash = r.array()?;
+        r.finish()?;
+        Ok(Self {
+            version,
+            change,
+            hash,
+        })
     }
 }
 
@@ -2103,5 +2175,29 @@ mod tests {
                 "{key:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_setting_note_reads_back_and_refuses_anything_else() {
+        for change in [Change::Tightening, Change::Loosening] {
+            let note = SettingNote {
+                version: 7,
+                change,
+                hash: base().hash(),
+            };
+            let body = note.to_body();
+            assert_eq!(body.len(), SETTING_NOTE_LEN);
+            assert_eq!(SettingNote::from_body(&body), Ok(note));
+            // Cut short, a byte too many and a kind of change that is not 0
+            // or 1 are all refused.
+            assert!(SettingNote::from_body(&body[..body.len() - 1]).is_err());
+            let mut long = body.clone();
+            long.push(0);
+            assert!(SettingNote::from_body(&long).is_err());
+            let mut odd = body;
+            odd[4] = 2;
+            assert!(SettingNote::from_body(&odd).is_err());
+        }
+        assert!(SettingNote::from_body(&[]).is_err());
     }
 }

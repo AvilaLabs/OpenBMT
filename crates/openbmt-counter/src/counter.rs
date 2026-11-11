@@ -22,7 +22,7 @@ use openbmt_core::policy::{
     Heartbeat, Inputs, InstantPolicy, PauseStatus, PauseTracker, PaymentId,
 };
 use openbmt_core::records::{DeviceList, Record, RecordKind, Verifier};
-use openbmt_core::settings::Settings;
+use openbmt_core::settings::{SettingNote, Settings};
 use openbmt_watch::{
     HeaderChain, Health, OwnNodeHealth, Refusal, Sighted, Source, WellFormedBlock,
 };
@@ -276,6 +276,9 @@ pub struct Counter {
     /// CR-76: for each sale the counter holds, the number and the time of the
     /// newest record that names it. Built from the records at start.
     last_record: BTreeMap<u32, (u64, u64)>,
+    /// CR-162: the highest settings version named by a `Setting` record in
+    /// the counter's own chain. Built from the records at start.
+    settings_recorded: Option<u32>,
 }
 
 impl Counter {
@@ -310,6 +313,7 @@ impl Counter {
             refused_below_minimum: 0,
             owner_mark: None,
             last_record: BTreeMap::new(),
+            settings_recorded: None,
         }
     }
 
@@ -352,8 +356,9 @@ impl Counter {
         if let Some(bytes) = stored.desk {
             counter.desk = Desk::from_bytes(bytes).map_err(LoadError::Desk)?;
         }
-        let (log, last, book, highest) = Self::read_chain(me, store)?;
+        let (log, last, book, highest, setting) = Self::read_chain(me, store)?;
         counter.records = log;
+        counter.settings_recorded = setting;
         for (slot_index, bytes) in stored.sales {
             match Sale::from_bytes(bytes) {
                 Ok(sale) if sale.index == slot_index => counter.install(sale),
@@ -380,7 +385,8 @@ impl Counter {
     /// CR-42, CR-81: read the whole record log in order, check it as a chain
     /// signed by this counter, and keep only its newest records. Returns the
     /// log, the newest record naming each sale, the refund entries of each
-    /// sale and the highest refund number.
+    /// sale, the highest refund number and the highest settings version a
+    /// `Setting` record names.
     #[allow(clippy::type_complexity)]
     fn read_chain<S: Store>(
         me: DeviceId,
@@ -391,6 +397,7 @@ impl Counter {
             BTreeMap<u32, (u64, u64)>,
             BTreeMap<u32, Vec<RefundEntry>>,
             u64,
+            Option<u32>,
         ),
         LoadError,
     >
@@ -403,6 +410,7 @@ impl Counter {
         let mut last: BTreeMap<u32, (u64, u64)> = BTreeMap::new();
         let mut book: BTreeMap<u32, Vec<RefundEntry>> = BTreeMap::new();
         let mut highest = 0u64;
+        let mut setting: Option<u32> = None;
         let keep = usize::try_from(MAX_UNSENT_IN_MEMORY).unwrap_or(usize::MAX);
         loop {
             let chunk = store
@@ -416,7 +424,13 @@ impl Counter {
                     LoadError::RecordsUnread(format!("record {}: {e}", check.len()))
                 })?;
                 check.push(&record).map_err(LoadError::Records)?;
-                if !matches!(record.kind, RecordKind::CheckIn | RecordKind::Pairing) {
+                if record.kind == RecordKind::Setting {
+                    // CR-162: a `Setting` record names the settings the
+                    // counter took; one that does not read names none.
+                    if let Ok(note) = SettingNote::from_body(&record.body) {
+                        setting = setting.max(Some(note.version));
+                    }
+                } else if !matches!(record.kind, RecordKind::CheckIn | RecordKind::Pairing) {
                     if let Ok(event) = Event::decode(&record.body) {
                         let at = last.get(&event.index()).map_or(0, |(_, at)| *at);
                         last.insert(event.index(), (record.seq, at.max(event.at())));
@@ -432,7 +446,7 @@ impl Counter {
             }
         }
         let log = RecordLog::from_parts(check.len(), check.head(), tail);
-        Ok((log, last, book, highest))
+        Ok((log, last, book, highest, setting))
     }
 
     /// CR-75: how many sales this counter has refused for being below the
@@ -441,9 +455,45 @@ impl Counter {
         self.refused_below_minimum
     }
 
-    /// New settings, already checked by the caller.
+    /// New settings, already checked by the caller. A sale that is already
+    /// open keeps the underpayment tolerance it was opened with (CR-160);
+    /// everything else the counter reads from the settings is read again at
+    /// the next call that needs it.
     pub fn set_settings(&mut self, settings: Settings) {
         self.settings = settings;
+    }
+
+    /// The settings in force.
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
+    /// CR-165: whether the settings in force still list this counter, on the
+    /// device list and among the counters. After settings that remove it no
+    /// new sale is opened.
+    pub fn is_listed(&self) -> bool {
+        let me = self.identity.device_id();
+        self.settings.devices.contains(&me) && self.settings.counters.contains_key(&me)
+    }
+
+    /// CR-162: the highest settings version a `Setting` record of the
+    /// counter's own chain names, or `None` when none does.
+    pub fn settings_recorded(&self) -> Option<u32> {
+        self.settings_recorded
+    }
+
+    /// CR-162: append a `Setting` record that names settings the counter has
+    /// taken: the version, whether the change loosened or tightened, and the
+    /// hash. It goes through the same stored path as every other record
+    /// (CR-40); on an error the chain is unchanged. Returns the record.
+    pub fn record_setting<S: Store>(
+        &mut self,
+        note: SettingNote,
+        store: &mut S,
+    ) -> Result<Record, StoreFault<S::Error>> {
+        let record = self.append_record(store, RecordKind::Setting, note.to_body())?;
+        self.settings_recorded = self.settings_recorded.max(Some(note.version));
+        Ok(record)
     }
 
     /// Take a new signed batch of addresses. The batches as they will be are
@@ -964,6 +1014,9 @@ impl Counter {
             return Err(OpenRefused::BadName);
         }
         let now = facts.now;
+        if !self.is_listed() {
+            return Err(OpenRefused::Removed);
+        }
         if facts.rescan_pending {
             return Err(OpenRefused::RescanPending);
         }

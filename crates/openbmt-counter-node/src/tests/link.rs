@@ -7,6 +7,7 @@ use openbmt_core::command::{Action, OwnerCommand, SignedCommand};
 use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::records::{Record, RecordKind, GENESIS};
+use openbmt_core::settings::{Settings, SignedSettings};
 use openbmt_courier::{
     decode_records, head_at, received_content, Courier, FirstStart, MemoryPost, MemoryRelay,
     Received,
@@ -224,17 +225,17 @@ fn lk_63_what_the_node_refuses_or_cannot_decode_is_noted_and_the_step_goes_on() 
     w.step(T0);
     // The last message is still taken.
     assert_eq!(w.link.state().heartbeats_taken, 1);
-    assert_eq!(w.link.state().node_refusals, 4);
+    // The three that do not decode, the heartbeat and the command of
+    // another signer are the node's to refuse; the junk settings do not read.
+    assert_eq!(w.link.state().node_refusals, 5);
     assert_eq!(w.rig.node.counter().desk().last_command_seq(), 0);
     let notes = w.notes();
     assert_eq!(
-        notes
-            .iter()
-            .filter(|n| n.contains("not handled yet"))
-            .count(),
-        2,
+        notes.iter().filter(|n| n.contains("CR-166")).count(),
+        1,
         "{notes:?}"
     );
+    assert!(notes.iter().any(|n| n.contains("CR-160")));
     assert!(notes.iter().any(|n| n.contains("heartbeat")));
     assert!(notes.iter().any(|n| n.contains("command not taken")));
     // And the link still works afterwards.
@@ -733,4 +734,66 @@ fn cr_136_a_relay_that_answers_and_refuses_is_told_from_one_that_is_down() {
     link.step(&mut rig.node, T0 + 1);
     assert!(!link.state().relay_refused);
     assert!(!link.state().relay_reachable);
+}
+
+fn signed_settings(version: u32, f: impl FnOnce(&mut Settings)) -> SignedSettings {
+    let mut s = settings();
+    s.version = version;
+    f(&mut s);
+    SignedSettings {
+        owner_sig: s.sign(&id(1)),
+        approver_sig: None,
+        settings: s,
+    }
+}
+
+#[test]
+fn cr_160_settings_come_through_the_relay_and_the_record_goes_back() {
+    let mut w = world(config());
+    let tor = signed_settings(2, |s| {
+        s.light_per_sale.sats -= 1;
+        s.tor_on = true;
+    });
+    w.send(Kind::Settings, &tor.to_bytes());
+    w.step(T0);
+    assert_eq!(w.rig.node.settings(), &tor.settings);
+    let state = w.link.state();
+    assert_eq!(state.settings_version, 2);
+    assert!(state.restart_needed);
+    assert!(!state.removed);
+    assert!(w.rig.node.notes().any(|n| n.contains("CR-164")));
+    // The record reaches the owner with the records.
+    w.step(T0 + 1);
+    let got = w.owner_gets();
+    let settings_records: Vec<Record> = carried(&got)
+        .into_iter()
+        .filter(|r| r.kind == RecordKind::Setting)
+        .collect();
+    assert_eq!(settings_records.len(), 1);
+    // Sent again, the same version is dropped without a refusal or a note.
+    w.send(Kind::Settings, &tor.to_bytes());
+    w.step(T0 + 2);
+    assert_eq!(w.link.state().node_refusals, 0);
+    assert!(w.notes().iter().all(|n| !n.contains("CR-160")));
+    // A change the counter refuses is counted and noted, and changes nothing.
+    let looser = signed_settings(3, |s| s.light_per_sale.sats += 10);
+    w.send(Kind::Settings, &looser.to_bytes());
+    w.step(T0 + 3);
+    assert_eq!(w.link.state().node_refusals, 1);
+    assert_eq!(w.rig.node.settings().version, 2);
+}
+
+#[test]
+fn cr_166_a_device_list_message_is_dropped_with_a_note_that_says_why() {
+    let mut w = world(config());
+    w.send(Kind::DeviceList, b"list");
+    w.step(T0);
+    let notes = w.notes();
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("CR-166") && n.contains("inside the settings")),
+        "{notes:?}"
+    );
+    assert_eq!(w.link.state().node_refusals, 0);
 }

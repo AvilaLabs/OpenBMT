@@ -436,6 +436,13 @@ impl<E: Display> OpenRefused<E> {
     /// What the cashier is told when a sale cannot be started.
     pub fn words(&self) -> Words {
         match self {
+            Self::Removed => refused(
+                "This counter was removed",
+                "The owner removed this counter from the shop, so it cannot start a sale.",
+                Who::Cashier,
+                "Take another kind of payment. Ask the owner: this counter is no longer on the shop's list.",
+                "CR-165",
+            ),
             Self::RescanPending => refused(
                 "Bitcoin not ready yet",
                 "The counter is still looking back over the network for payments, so it cannot start a bitcoin sale.",
@@ -1827,6 +1834,7 @@ pub fn all_words() -> Vec<(String, Words)> {
 
     let w = write_fault;
     let open: Vec<(&str, OpenRefused<String>)> = vec![
+        ("Removed", OpenRefused::Removed),
         ("RescanPending", OpenRefused::RescanPending),
         ("Unhealthy", OpenRefused::Unhealthy(Some(Problem::TipIsOld))),
         ("ZeroAmount", OpenRefused::ZeroAmount),

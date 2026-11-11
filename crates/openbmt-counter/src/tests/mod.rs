@@ -14,6 +14,7 @@ mod records;
 mod refunds;
 mod reports;
 mod say;
+mod settings;
 mod settle;
 mod staff;
 mod states;

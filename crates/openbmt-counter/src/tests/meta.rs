@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 17] = [
+const TEST_SOURCES: [&str; 18] = [
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
     include_str!("lightning.rs"),
@@ -17,6 +17,7 @@ const TEST_SOURCES: [&str; 17] = [
     include_str!("records.rs"),
     include_str!("refunds.rs"),
     include_str!("reports.rs"),
+    include_str!("settings.rs"),
     include_str!("settle.rs"),
     include_str!("staff.rs"),
     include_str!("states.rs"),
@@ -29,7 +30,7 @@ const TEST_SOURCES: [&str; 17] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 50] = [
+const NOT_HERE: [(&str, &str); 54] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -221,6 +222,25 @@ const NOT_HERE: [(&str, &str); 50] = [
         "CR-136",
         "the link line is the node's words and the app's screen; tested in \
          `openbmt-counter-node`, `openbmt-counter-ffi` and the app's JVM tests",
+    ),    (
+        "CR-161",
+        "the settings file is the node's; tested in `openbmt-counter-node` \
+         (`tests/settings.rs`), with the fuzz target `counter_settings_file_decode`",
+    ),
+    (
+        "CR-163",
+        "the start reads the record and the file; tested in `openbmt-counter-node` and \
+         `openbmt-counter-ffi`",
+    ),
+    (
+        "CR-164",
+        "the restart is the node's state and the app's act; tested in `openbmt-counter-node`, \
+         `openbmt-counter-ffi` and the app's JVM tests",
+    ),
+    (
+        "CR-166",
+        "the device list message is dropped by the link; tested in `openbmt-counter-node` \
+         (`tests/link.rs`)",
     ),
     (
         "CR-140",
@@ -300,9 +320,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_one_hundred_and_nineteen_rules() {
+fn the_rules_file_defines_one_hundred_and_twenty_six_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 119);
+    assert_eq!(ids.len(), 126);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -322,6 +342,8 @@ fn the_rules_file_defines_one_hundred_and_nineteen_rules() {
             && ids.contains("CR-136")
             && ids.contains("CR-140")
             && ids.contains("CR-156")
+            && ids.contains("CR-160")
+            && ids.contains("CR-166")
     );
 }
 

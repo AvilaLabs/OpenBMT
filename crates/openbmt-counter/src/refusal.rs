@@ -20,6 +20,9 @@ use crate::store::StoreFault;
 /// Why a sale was not opened (CR-01 to CR-04, CR-09, CR-17, CR-75).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenRefused<E> {
+    /// CR-165: the settings in force do not list this counter: the owner
+    /// removed it from the shop.
+    Removed,
     /// CR-09: a rescan is pending after a restore or a reset.
     RescanPending,
     /// CR-01: the check is not healthy; the problem is named when known.
@@ -69,6 +72,7 @@ impl<E> OpenRefused<E> {
     /// The rule the refusal belongs to.
     pub fn rule(&self) -> &'static str {
         match self {
+            Self::Removed => "CR-165",
             Self::RescanPending => "CR-09",
             Self::Unhealthy(_) => "CR-01",
             Self::ZeroAmount | Self::AmountTooLarge => "CR-05",
@@ -88,6 +92,10 @@ impl<E: fmt::Display> fmt::Display for OpenRefused<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: ", self.rule())?;
         match self {
+            Self::Removed => write!(
+                f,
+                "this counter was removed from the shop by the owner; ask the owner"
+            ),
             Self::RescanPending => write!(
                 f,
                 "a rescan is pending; do not offer Bitcoin, use another payment type"

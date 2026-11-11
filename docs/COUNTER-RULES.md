@@ -1040,3 +1040,61 @@ records and the totals are the library's (`crates/openbmt-counter`,
   storage apart. The list is not in the signed settings, is not backed up and
   is not on the owner's phone; a phone that is lost or reset loses it, and
   the owner's records still name every cashier who was added or removed.
+
+## 15. Taking the owner's settings after pairing
+
+These rules join the counter to the settings the owner signs after pairing
+(`docs/DESIGN.md` §2.9). They arrive through the link as messages of kind
+Settings (`docs/LINK-RULES.md`, LK-64 to LK-66). The checks and the file are
+in `crates/openbmt-counter-node` (`settings`, `node`, `link`), the record in
+`crates/openbmt-counter`, and the start in `crates/openbmt-counter-ffi`.
+
+- **CR-160.** A message of kind Settings is read as the `OBMS` frame of
+  `openbmt_core::settings` (strict: exact length, at most 64 KiB, and the
+  bytes encode again to the same bytes) and checked with
+  `SignedSettings::verify` against the two pinned roots and the settings in
+  force: the owner's signature, valid values, a version above the one in
+  force, and the Key app's signature when the change loosens. A version that
+  is not above the one in force is dropped without a refusal: the owner
+  sends again until it sees the counter's record (CR-162). Any other failure
+  changes nothing and gives a note with the rule and words. Once taken, every
+  limit, depth, tolerance and cap is read from the new settings by the next
+  call that needs it. A sale already open keeps the underpayment tolerance
+  it was opened with, the one value a sale stores; the depths and caps are
+  read again each time the sale is judged or a person acts on it.
+- **CR-161.** The newest settings taken are kept in one file of the node's
+  folder, `settings.bin`: the `OBMS` frame and nothing else, written whole
+  (temporary file, flush, rename, flush the folder, as CR-40) before the
+  settings are used. If the write fails the settings are refused and nothing
+  changes.
+- **CR-162.** When settings are in force the counter writes a `Setting`
+  record: the version (4 bytes little endian), 0 for a tightening or 1 for a
+  loosening, and the 32-byte hash of the settings (37 bytes). The owner's
+  copy of the counter's chain shows which version the counter holds by it. A
+  record that cannot be written is noted and tried again at each turn of the
+  link and of `pump`. A counter that has a link writes one at its first start
+  for the settings of its pairing, marked loosening, and again at any start
+  where the settings in force have none. A record body is never read as a
+  sale event.
+- **CR-163.** At start the node reads the settings of the pairing record and
+  the settings file and uses the newer. The file must be signed by the owner
+  root, and by the Key app root if it carries that signature, be valid and
+  have a version above the record's; one that does not read, or does not
+  check, is a fault and the counter does not start. It does not fall back to
+  the record, whose settings may be looser. A file that is not above the
+  record's is left as it is, noted, and the record's settings are used. The
+  start also refuses settings of a version below the highest one a `Setting`
+  record of the counter's own chain names (an old copy of the file put back,
+  or the file gone).
+- **CR-164.** Settings that change what the node was started with, the Tor
+  switch and the Lightning node, take effect when the node starts again. The
+  link's state says a restart is needed, and Home says so in words. The app
+  starts the node again at the next moment no sale screen is open, and CR-87
+  then applies as at any start.
+- **CR-165.** Settings that do not list this counter, on the device list and
+  among the counters, are taken and kept. No new sale is opened: the refusal
+  says the counter was removed from the shop by the owner and to ask the
+  owner. Sales already open are judged and settled as before, and the
+  records still go to the owner. Home says so in words.
+- **CR-166.** A message of kind Device list is noted and dropped. The device
+  list travels inside the settings, and nothing sends it separately.

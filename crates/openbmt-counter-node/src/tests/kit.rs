@@ -423,6 +423,14 @@ pub fn start_at(dir: &Path, time: Arc<AtomicU64>) -> Rig {
 /// Start a node from a configuration on a fake driver. `time` is the number
 /// the configuration's clock reads.
 pub fn start_with(config: NodeConfig, time: Arc<AtomicU64>) -> Rig {
+    try_start_with(config, time).unwrap()
+}
+
+/// [`start_with`] that gives the error of a start that is refused.
+pub fn try_start_with(
+    config: NodeConfig,
+    time: Arc<AtomicU64>,
+) -> Result<Rig, crate::node::StartError> {
     let (events, rx) = channel();
     let (own, own_rx) = channel();
     let calls = Arc::new(Mutex::new(Calls::default()));
@@ -437,16 +445,16 @@ pub fn start_with(config: NodeConfig, time: Arc<AtomicU64>) -> Rig {
             calls: port_calls,
         })
     })
-    .unwrap();
+    ?;
     let launch = seen.lock().unwrap().take().unwrap();
-    Rig {
+    Ok(Rig {
         node,
         events,
         own,
         calls,
         time,
         launch,
-    }
+    })
 }
 
 /// A Tor v3 name (the key is 32 bytes of 7).

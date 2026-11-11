@@ -13,7 +13,11 @@
 //! - Batch: decoded as a `SignedBatch` and given to `Node::add_batch`.
 //! - Records received: the owner's mark (LK-55), which is also given to the
 //!   node as the mark that settling goes by (CR-76).
-//! - Settings and device lists: noted as not handled yet, and dropped.
+//! - Settings: decoded as the `OBMS` frame and given to `Node::take_settings`
+//!   (CR-160 to CR-162). A version that is not above the one in force is
+//!   dropped without a word.
+//! - Device lists: noted and dropped. The device list travels inside the
+//!   settings (CR-166).
 //! - POS notices from a Box: opened and dropped with a note.
 //!
 //! A refusal by the node, or a content that does not decode, is noted and the
@@ -52,6 +56,7 @@ use openbmt_link::{ClientError, Kind, Role};
 
 use crate::node::{DriverPort, Node};
 use crate::notices::{NoticeOutbox, NoticeStoreError};
+use crate::settings::decode_file;
 
 /// Most lines the link's own notes keep; the oldest goes first.
 pub const NOTE_LOG: usize = 64;
@@ -121,6 +126,14 @@ pub struct LinkState {
     /// answered: the counter is not a member of it. False when the relay
     /// could not be reached, and after a call that worked.
     pub relay_refused: bool,
+    /// The version of the settings in force, as the node had them at the
+    /// last step.
+    pub settings_version: u32,
+    /// CR-164: the settings change what the node was started with, so it
+    /// must be started again.
+    pub restart_needed: bool,
+    /// CR-165: the settings no longer list this counter.
+    pub removed: bool,
 }
 
 /// What the first part of a step brought: see [`CounterLink::poll_step`].
@@ -170,6 +183,9 @@ pub struct CounterLink<R: Post = RelayPost> {
     /// The last line about a failed read of the records (CR-81), so that a
     /// fault that lasts is noted once, not at each step.
     read_noted: Option<String>,
+    /// What the node said about its settings at the last step: the version,
+    /// whether a restart is needed and whether the counter was removed.
+    settings: (u32, bool, bool),
 }
 
 impl<R: Post> CounterLink<R> {
@@ -196,6 +212,7 @@ impl<R: Post> CounterLink<R> {
             notices: None,
             notice_noted: None,
             read_noted: None,
+            settings: (0, false, false),
         }
     }
 
@@ -243,6 +260,9 @@ impl<R: Post> CounterLink<R> {
             node_refusals: self.node_refusals,
             relay_reachable: self.courier.reachable(),
             relay_refused: self.relay_refused,
+            settings_version: self.settings.0,
+            restart_needed: self.settings.1,
+            removed: self.settings.2,
         }
     }
 
@@ -339,6 +359,13 @@ impl<R: Post> CounterLink<R> {
         for message in polled.received {
             self.route(node, message, &mut reports);
         }
+        // CR-162: a record that did not get written is tried again.
+        node.retry_setting_record();
+        self.settings = (
+            node.settings().version,
+            node.restart_needed(),
+            node.removed(),
+        );
         let mut out = Outgoing {
             active: true,
             reached: polled.reached,
@@ -399,12 +426,28 @@ impl<R: Post> CounterLink<R> {
                 Err(e) => self.refused_by_node(format!("batch does not decode: {e}")),
             },
             Kind::RecordsReceived => self.take_mark(node, &message.content),
-            Kind::Settings => self.note("settings from the owner: not handled yet".to_string()),
-            Kind::DeviceList => {
-                self.note("a device list from the owner: not handled yet".to_string())
-            }
+            Kind::Settings => self.take_settings(node, &message.content),
+            Kind::DeviceList => self.note(
+                "CR-166: a device list from the owner: it travels inside the settings, so it is \
+                 dropped"
+                    .to_string(),
+            ),
             Kind::PosNotice => self.note("a POS notice from the Box: dropped".to_string()),
             other => self.note(format!("a {other:?} message: not handled yet")),
+        }
+    }
+
+    /// CR-160: settings from the owner.
+    fn take_settings<P: DriverPort>(&mut self, node: &mut Node<P>, content: &[u8]) {
+        let signed = match decode_file(content) {
+            Ok(signed) => signed,
+            Err(e) => {
+                self.refused_by_node(format!("CR-160: the owner's settings do not read: {e}"));
+                return;
+            }
+        };
+        if let Err(e) = node.take_settings(&signed) {
+            self.refused_by_node(e.to_string());
         }
     }
 

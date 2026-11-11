@@ -25,7 +25,9 @@
 //! [`INDEX_STRIDE`] records.
 //!
 //! One more small file holds the height up to which every block has been
-//! checked (NR-75), written whole like a slot.
+//! checked (NR-75), written whole like a slot. Another holds the newest
+//! signed settings the counter took from the owner (CR-161), also written
+//! whole.
 
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
@@ -45,6 +47,8 @@ pub const INDEX_STRIDE: u64 = 64;
 
 const RECORDS_FILE: &str = "records.bin";
 const CHECKED_FILE: &str = "checked.bin";
+/// The file of the newest signed settings the counter took (CR-161).
+pub const SETTINGS_FILE: &str = "settings.bin";
 
 /// Why a file operation or a read failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,6 +242,18 @@ impl DirStore {
     /// Replace the stored height up to which every block has been checked.
     pub fn put_checked(&mut self, height: u32) -> Result<(), DirStoreError> {
         self.write_whole(CHECKED_FILE, &height.to_le_bytes())
+    }
+
+    /// CR-161: replace the stored signed settings, written whole. On an
+    /// error the old file is as it was.
+    pub fn put_settings(&mut self, bytes: &[u8]) -> Result<(), DirStoreError> {
+        self.write_whole(SETTINGS_FILE, bytes)
+    }
+
+    /// CR-161: the stored signed settings, or `None` when the counter has
+    /// taken none from the owner. The bytes are not read here.
+    pub fn settings_file(&self) -> Result<Option<Vec<u8>>, DirStoreError> {
+        self.read(SETTINGS_FILE)
     }
 
     /// Read everything back. A cut-short last record is cut off the file

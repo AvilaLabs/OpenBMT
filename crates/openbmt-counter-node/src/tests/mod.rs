@@ -14,4 +14,5 @@ mod paired;
 mod records;
 mod relaylink;
 mod say;
+mod settings;
 mod settle;

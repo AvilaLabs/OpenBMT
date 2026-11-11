@@ -19,6 +19,9 @@
 //!    CR-116).
 //! 7. [`ownnode`]: the counter's own-node setting (CR-100 to CR-102), read
 //!    from the text a manager typed.
+//! 8. [`settings`]: the settings the owner sends after pairing, the file the
+//!    counter keeps them in and what a start does with it (CR-160 to
+//!    CR-166).
 //!
 //! The rules the node follows are `docs/COUNTER-RULES.md` and, for what the
 //! driver does, `docs/NETWORK-RULES.md` (NR-44, NR-53, NR-75 above all). The
@@ -50,12 +53,13 @@ pub mod ownnode;
 pub mod paired;
 pub mod relaylink;
 pub mod say;
+pub mod settings;
 
 #[cfg(test)]
 mod tests;
 
 pub use chainview::ChainView;
-pub use dirstore::{DirStore, DirStoreError, Loaded, TornTail};
+pub use dirstore::{DirStore, DirStoreError, Loaded, TornTail, SETTINGS_FILE};
 pub use lightning::{
     Lightning, LightningOff, LightningRecord, LightningStatus, LnEvent, LnRequest, LnTransport,
     SaleLightning, SetupRefused, SetupStep, MAGIC_LIGHTNING_RECORD,
@@ -75,3 +79,7 @@ pub use paired::{
     MAGIC_PAIRING_RECORD,
 };
 pub use relaylink::{link_route, start_link, LinkLine, LinkNotStarted};
+pub use settings::{
+    decode_file as decode_settings_file, effective as effective_settings, Effective,
+    SettingsFault, SettingsRefused, MAX_SETTINGS_FILE_BYTES,
+};
