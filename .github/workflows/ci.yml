@@ -173,7 +173,6 @@ jobs:
           }
           # It listens.
           listening 1
-          docker logs box-smoke | grep -q '^listening: 0.0.0.0:8986$'
           key="$(docker logs box-smoke | sed -n 's/^key: //p')"
           test -n "$key"
           # It runs as the fixed non-root user.
