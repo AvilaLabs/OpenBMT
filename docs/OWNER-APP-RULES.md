@@ -571,6 +571,11 @@ and the 60-second rule are the shared `LockModel.kt` of
   the PIN takes about a second (OA-12). A wrong PIN is refused with the
   rule `pin-wrong` and changes nothing; a file that is cut or damaged is
   refused with the rule `OBMx`, in the library's words.
+  The work posted after a tap (the try of the PIN, the lock of a new PIN)
+  runs only while the app is visible: if the app was hidden meanwhile it
+  does nothing, no PIN is tried, nothing is unlocked and the count of wrong
+  tries is given back. The start of the node refuses while the app is
+  hidden, and relocking also stops a node that runs.
 - **OA-63.** Wrong PINs are counted in a small file of their own, `tries.obkt`
   in the app's `noBackupFilesDir`, as SR-75 says: the count plus one is
   written before each try and 0 after a right PIN; a refusal that is not

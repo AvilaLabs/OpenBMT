@@ -84,7 +84,8 @@ class Controller(internal val act: MainActivity) {
     // What runs.
     @Volatile
     private var runId = 0
-    private var visible = false
+    internal var visible = false
+        private set
     internal var fault: SayWords? = null
     private var torBlocked: SayWords? = null
     internal var node: OwnerNode? = null
@@ -261,6 +262,8 @@ class Controller(internal val act: MainActivity) {
     // ---- running the node ----------------------------------------------------------------------------
 
     internal fun startNode() {
+        // A node is never started while the app is hidden: `hidden()` has already run (OA-62).
+        if (!visible) return
         val id = ++runId
         waiting(AppWords.starting)
         val s = setup ?: return
@@ -425,7 +428,7 @@ class Controller(internal val act: MainActivity) {
     }
 
     /** Stops the pump and the link thread, then the node, which lets go of its folder (OA-06). */
-    private fun stopNode() {
+    internal fun stopNode() {
         runId++
         tick = null
         linkThread?.interrupt()

@@ -1565,6 +1565,15 @@ object AppModelTest {
         ok(lock.contains("slow {") && AppWords.working.heading == "Working", "and the slow steps use it")
         ok(lock.contains("e.rule == RULE_PIN_WRONG") && lock.contains("\"pin-wrong\""), "a wrong PIN is told by its rule")
         ok(AppWords.unlockSetup.heading == "Enter your PIN", "the unlock words")
+        // A tap, then the app is hidden before the delayed work: no try, no unlock and no node follow.
+        ok(!SetupLock.runsDelayed(false) && SetupLock.runsDelayed(true), "the delayed work runs only while the app is visible")
+        ok(slow.contains("if (SetupLock.runsDelayed(visible)) block() else skipped()"), "the delayed block is guarded by the visible flag")
+        val triedPin = lock.substringAfter("internal fun Controller.triedPin(").substringBefore("// ---- the wipe")
+        ok(triedPin.contains("slow(skipped = { giveBack() })"), "a try that was not run is given back and not counted")
+        ok(triedPin.indexOf("op()") > triedPin.indexOf("slow(skipped"), "the PIN is tried only inside the guarded block")
+        ok(controller.substringAfter("internal fun startNode() {").substringBefore("val id = ++runId").contains("if (!visible) return"), "the node does not start while hidden")
+        ok(controller.contains("internal var visible = false\n        private set") && hidden.contains("visible = false"), "the same flag is set by hidden()")
+        ok(lock.substringAfter("internal fun Controller.lockNow() {").substringBefore("}").contains("stopNode()"), "relocking stops a running node")
     }
 
     private fun oa_63_wrong_tries_are_counted_in_the_shared_file_before_each_try() {

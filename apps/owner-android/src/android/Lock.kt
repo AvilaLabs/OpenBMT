@@ -28,9 +28,13 @@ internal fun Controller.stopTicker() {
     ticker = null
 }
 
-/** The parsed setup and the text it was made from are dropped: the next start asks for the PIN (OA-62). */
+/**
+ * The parsed setup and the text it was made from are dropped: the next start asks for the PIN (OA-62). A node
+ * that runs stops too, so that the relock leaves nothing running whatever the order of events.
+ */
 internal fun Controller.lockNow() {
     setup = null
+    stopNode()
 }
 
 /** A field for a PIN or a passphrase: its letters are hidden, and no keyboard may learn or suggest them. */
@@ -46,11 +50,13 @@ internal fun Controller.secret(hint: String, numeric: Boolean): EditText = ui.fi
 
 /**
  * The page is drawn first, then [block] runs a moment later on the screen thread: the key from the PIN takes
- * about a second, and the person sees that the app is working and not stuck (OA-62, OA-12).
+ * about a second, and the person sees that the app is working and not stuck (OA-62, OA-12). When the app has
+ * been hidden meanwhile, [block] does not run and [skipped] does: nothing is tried or unlocked, and the return
+ * to the app shows the unlock screen again (OA-62).
  */
-private fun Controller.slow(block: () -> Unit) {
+private fun Controller.slow(skipped: () -> Unit = {}, block: () -> Unit) {
     waiting(AppWords.working)
-    main.postDelayed({ block() }, 100)
+    main.postDelayed({ if (SetupLock.runsDelayed(visible)) block() else skipped() }, 100)
 }
 
 // ---- the start ---------------------------------------------------------------------------------------------
@@ -258,13 +264,14 @@ internal fun Controller.triedPin(back: (SayWords?) -> Unit, op: () -> Unit, done
     } catch (e: IOException) {
         return showMessage(AppWords.triesNotSaved(e.message)) { back(null) }
     }
-    slow {
-        fun giveBack() {
-            try {
-                tries.write(check.record)
-            } catch (_: IOException) {
-            }
+    fun giveBack() {
+        try {
+            tries.write(check.record)
+        } catch (_: IOException) {
         }
+    }
+    // A try that was not run is not a wrong try: the count is given back.
+    slow(skipped = { giveBack() }) {
         try {
             op()
             try {

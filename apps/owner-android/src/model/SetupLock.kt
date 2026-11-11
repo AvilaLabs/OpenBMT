@@ -27,6 +27,9 @@ object SetupLock {
         else -> Gate.SetPin
     }
 
+    /** OA-62: the work posted by a PIN step runs only while the app is visible; hidden, it does nothing. */
+    fun runsDelayed(visible: Boolean): Boolean = visible
+
     /**
      * OA-64: what the wipe deletes from the app's folder, in this order, before the Keystore key and then the
      * file of tries: the setup, the record of a ceremony that is not finished (which holds key 1 too), the note that key 2
