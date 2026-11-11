@@ -759,3 +759,45 @@ signs batches, settings and pairings, are never in the service.
   or the camera is open, while the app is out of view, or while a key ceremony
   is in progress, whose screens are not drawn from state. What the app does on
   leaving and coming back is decided by OA-62, as before.
+
+## 14. The look of the screens
+
+- **OA-91.** Every screen is a page of the shared look: a bar at the top, a
+  body that scrolls, and the buttons in a footer that stays. A message, a
+  result, a refusal and a state are one panel (`resultPanel`); a screen that
+  only waits has the ring (`working`); a screen of a code has the words above
+  the code in its card; a scanner has a black bar and the frame over the
+  preview; every other screen has its words under the bar, as a heading
+  that differs from the bar's title, and the next step under the content.
+  The words of every screen are the app's own, as the lists in
+  `docs/screens` and the strings of the screens give them: place, size,
+  colour and motion change, no word does. A sentence may be cut where it
+  ends. The only words this look adds are the group titles of home ("Open
+  approvals and queues", "Money", "Counters and devices", "Alerts and
+  notes", "Settings and this phone") and the group titles of the settings
+  page. The owner app plays no outcome sound: it has the ticks and the click
+  of a scan, the shake of a refused PIN on the unlock screen and the screen
+  that changes the PIN, the fade where the status card of home changes
+  tone, and the logo that clicks together once over "The new wallet", the
+  first time that screen shows in a ceremony.
+- **OA-92.** Home has the network status as a pill with its dot and heading
+  in the tone's colours, the balance sentence cut at its full stop ("The
+  wallet can spend", the amount, "Checked to block ... of ..."), and under
+  the amount the words and buttons of recovery and rescan and, with key 2 on
+  a signer, the first-address line, all in one card. When the status is not
+  good its what and next show under the pill. Under the card is one card of
+  four rows (Money, Counters and devices, Alerts and notes, Settings and this
+  phone), each with its sub-line and each opening a page of its buttons as
+  rows. "Spend" is the footer's primary. A card for what waits has a row for
+  open approvals, what waits to be delivered and the refund queue only for a
+  count that home already has and that is above zero; home adds no call into
+  the library to get one, and a row with no count is listed under its group.
+- **OA-93.** The settings page has the version as the bar's sub-line. The
+  six lines of the instant limits ("Largest instant sale, light check" and
+  the rest) are cut at their comma into a table whose rows are the checks
+  with their first letter in upper case, and whose columns are the first
+  halves; "Underpayment still counted" follows as a key and a value. Every
+  other line is in a folded group (Payments, Refunds and overrides, Safety,
+  Counters' shares, Lightning node, and Watch in the background when it has
+  a line) that opens as key and value lines. The read-only sentence is a
+  footnote and "Change settings" is the footer's primary.
