@@ -16,7 +16,7 @@ use openbmt_link::{
 use openbmt_net_io::Clock;
 
 use super::kit::*;
-use crate::runner::{BoxRunner, StartFailure};
+use crate::runner::{invitation_text, BoxRunner, StartFailure};
 use crate::state::{BoxError, BoxStatus, POS_TOKEN_FILE};
 
 pub struct TestClock(AtomicU64);
@@ -254,6 +254,13 @@ fn bx_12_the_claim_goes_out_on_the_wire_and_runs_out_after_thirty_minutes() {
         connect(&r).claim() == Err(ClientError::Refused(Refusal::NoClaim))
     });
     assert_eq!(r.status(), BoxStatus::Unpaired);
+}
+
+#[test]
+fn bx_12_the_invitation_file_gives_its_first_line_trimmed() {
+    assert_eq!(invitation_text("  ABC DEF \nsecond line\n"), "ABC DEF");
+    assert_eq!(invitation_text("\r\nABC"), "");
+    assert_eq!(invitation_text(""), "");
 }
 
 #[test]

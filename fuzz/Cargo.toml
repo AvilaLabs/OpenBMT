@@ -520,3 +520,59 @@ path = "fuzz_targets/counter_link_dispatch.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "courier_received_decode"
+path = "fuzz_targets/courier_received_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "onion_name_parse"
+path = "fuzz_targets/onion_name_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "owner_take_response"
+path = "fuzz_targets/owner_take_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "box_take_welcome"
+path = "fuzz_targets/box_take_welcome.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "box_take_settings"
+path = "fuzz_targets/box_take_settings.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "box_invitation_file"
+path = "fuzz_targets/box_invitation_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lightning_replies"
+path = "fuzz_targets/lightning_replies.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "owner_lightning_node_text"
+path = "fuzz_targets/owner_lightning_node_text.rs"
+test = false
+doc = false
+bench = false

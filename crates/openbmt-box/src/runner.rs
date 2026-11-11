@@ -855,5 +855,11 @@ fn vendor_setup(dir: &Path) -> Result<Option<PosSetup>, PosOpenError> {
 pub fn read_invitation_file(path: &Path) -> io::Result<String> {
     let text = fs::read_to_string(path)?;
     fs::remove_file(path)?;
-    Ok(text.lines().next().unwrap_or("").trim().to_string())
+    Ok(invitation_text(&text))
+}
+
+/// The invitation text in the contents of an invitation file: the first
+/// line, trimmed (BX-12).
+pub fn invitation_text(contents: &str) -> String {
+    contents.lines().next().unwrap_or("").trim().to_string()
 }

@@ -61,7 +61,9 @@ pub use pos::{
     BoxPos, PosOpenError, PosSetup, PosState, Reading, LEDGER_FILE, NOTICES_FILE, POLL_SECS,
 };
 pub use pos_config::{PosConfig, PosConfigError, Vendor, POS_CONFIG_FILE};
-pub use runner::{read_invitation_file, BoxRunner, LocalPost, PosView, StartFailure, RELAY_DIR};
+pub use runner::{
+    invitation_text, read_invitation_file, BoxRunner, LocalPost, PosView, StartFailure, RELAY_DIR,
+};
 pub use state::{
     BoxCore, BoxError, BoxStatus, SettingsTaken, INVITATION_FILE, INVITE_SECS, KEY_FILE,
     MAX_MEMBERS, MAX_TOKEN_BYTES, POS_TOKEN_FILE, ROOTS_FILE, SETTINGS_FILE,
