@@ -506,7 +506,10 @@ SR-81 and the screens of SR-82 by the Android app.
   more than 60 seconds, the result is dropped unread, the session is dropped
   and the unlock screen comes first, as after any other relock. It draws a
   "working" page before it asks the library to unlock, because the key from
-  the PIN takes about a second.
+  the PIN takes about a second. The work posted after a tap (the try of the
+  PIN, the lock of a new PIN) runs only while the app is visible: if the app
+  was hidden meanwhile it does nothing, no PIN is tried, nothing is unlocked
+  and the count of wrong tries is given back.
 - **SR-78. Cash-out addresses come from the camera.** The call takes the text
   the Key app's camera read and the label typed on the Key app. The text is
   a bare address or a `bitcoin:` URI (BIP 321), and only its address is

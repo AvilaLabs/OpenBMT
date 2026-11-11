@@ -50,6 +50,9 @@ sealed class Screen {
 
 /** Picks the screen. No Android class is used here, so the JVM test runs it. */
 object ScreenModel {
+    /** SR-77: the work posted by a PIN step runs only while the app is visible; hidden, it does nothing. */
+    fun runsDelayed(visible: Boolean): Boolean = visible
+
     /**
      * A refusal of the system comes first; then a fault; then the screen
      * of the library's state. A null [state] with no [fault] means the library

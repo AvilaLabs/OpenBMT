@@ -35,6 +35,7 @@ import org.openbmt.app.StatusItem
 import org.openbmt.app.Tone
 import org.openbmt.app.Tries
 import org.openbmt.app.TriesFile
+import org.openbmt.app.TriesRecord
 import org.openbmt.app.Ui
 import org.openbmt.app.UrCall
 import org.openbmt.app.UrScan
@@ -74,6 +75,10 @@ class Controller(private val act: MainActivity) {
     private var store: PersistentStore? = null
     private var level: KeyLevel? = null
     private var app: KeyApp? = null
+
+    /** True from the resume to the pause: the work posted by a PIN step runs only then (SR-77). */
+    internal var visible = false
+        private set
     private var session: KeySession? = null
     private var lines: List<LineView> = emptyList()
     private var pendingAnswer: ByteArray? = null
@@ -138,6 +143,7 @@ class Controller(private val act: MainActivity) {
         ExternalWait.decide(pickerSince ?: scan.askedAt, SystemClock.elapsedRealtime()) == WaitOutcome.Lock
 
     fun resumed() {
+        visible = true
         if (pickerOpen || scan.asking) {
             if (!waitedTooLong()) return
             // The wait counts toward the 60 seconds: the session is dropped and the app locks, as after any relock.
@@ -162,6 +168,7 @@ class Controller(private val act: MainActivity) {
     fun redraw() {}
 
     fun paused() {
+        visible = false
         if (pickerOpen || scan.asking) return
         scan.stop()
         stopTicker()
@@ -374,11 +381,13 @@ class Controller(private val act: MainActivity) {
 
     /**
      * The page is drawn first, then [block] runs a moment later on the main thread: the key from the PIN
-     * takes about a second, and the person sees that the app is working and not stuck (SR-77).
+     * takes about a second, and the person sees that the app is working and not stuck (SR-77). When the app has
+     * been hidden meanwhile, [block] does not run and [skipped] does: nothing is tried or unlocked, and the return
+     * to the app shows the unlock screen again (SR-77).
      */
-    private fun slow(block: () -> Unit) {
+    private fun slow(skipped: () -> Unit = {}, block: () -> Unit) {
         put("Key", listOf(ui.working(model(AppWords.working))), logo = true)
-        main.postDelayed({ if (app != null) block() }, 100)
+        main.postDelayed({ if (app != null) { if (ScreenModel.runsDelayed(visible)) block() else skipped() } }, 100)
     }
 
     /** SR-72: a PIN for a new or restored key, or for a key an older build saved without one. */
@@ -498,6 +507,13 @@ class Controller(private val act: MainActivity) {
      * succeeds. A refusal that is not a wrong PIN gives the count back; the 10th wrong try wipes. [back] shows
      * the screen the try came from, with the words to show on it. [done] runs when [op] worked.
      */
+    private fun giveBack(record: TriesRecord) {
+        try {
+            tries.write(record)
+        } catch (_: IOException) {
+        }
+    }
+
     private fun triedPin(back: (Words?) -> Unit, op: () -> Unit, done: () -> Unit) {
         val now = clock()
         val rec = tries.read(now)
@@ -510,7 +526,8 @@ class Controller(private val act: MainActivity) {
         } catch (e: IOException) {
             return showMessage(AppWords.triesNotSaved(e.message)) { back(null) }
         }
-        slow {
+        // A try that was not run is not a wrong try: the count is given back.
+        slow(skipped = { giveBack(check.record) }) {
             try {
                 op()
                 try {
@@ -528,10 +545,7 @@ class Controller(private val act: MainActivity) {
                         back(e.words ?: AppWords.fault(e))
                     }
                 } else {
-                    try {
-                        tries.write(check.record)
-                    } catch (_: IOException) {
-                    }
+                    giveBack(check.record)
                     showMessage(e.words ?: AppWords.fault(e)) { back(null) }
                 }
             } catch (e: LinkageError) {

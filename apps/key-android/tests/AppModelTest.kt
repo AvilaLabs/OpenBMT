@@ -576,6 +576,13 @@ object AppModelTest {
         ok(picked.indexOf("ExternalWait.decide(") in 0 until picked.indexOf("data?.data"), "a picker's result is judged before it is read")
         val permission = controller.substringAfter("fun permission(").substringBefore("// ---- the approval session")
         ok(permission.indexOf("waitedTooLong()") in 0 until permission.indexOf("scan.permissionResult"), "a permission answer is judged before it is taken")
+        // A tap, then the app is hidden before the delayed work: no try and no unlock follow.
+        ok(!ScreenModel.runsDelayed(false) && ScreenModel.runsDelayed(true), "the delayed work runs only while the app is visible")
+        ok(controller.contains("if (ScreenModel.runsDelayed(visible)) block() else skipped()"), "the delayed block is guarded by the visible flag")
+        ok(resumed.contains("visible = true") && controller.substringAfter("fun paused() {").substringBefore("fun close()").contains("visible = false"), "the flag is set by resumed() and paused()")
+        val triedPin = controller.substringAfter("private fun triedPin(").substringBefore("private fun ", missingDelimiterValue = "")
+        ok(triedPin.contains("slow(skipped = { giveBack(check.record) })"), "a try that was not run is given back and not counted")
+        ok(triedPin.indexOf("op()") > triedPin.indexOf("slow(skipped"), "the PIN is tried only inside the guarded block")
     }
 
     private fun sr_77_relock_after_a_minute() {
