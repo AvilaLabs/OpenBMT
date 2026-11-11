@@ -454,6 +454,17 @@ and sales not yet settled wait for the owner's copy to catch up.
   started with (`watched_scripts()`) is then the shorter one. The node keeps
   a line in its log when it settles: the count only, no index and no
   address. A store fault in a settle is a note and changes nothing else.
+- **CR-83.** The payment request the customer scans is the sale's
+  address and what it needs now (CR-08) as a BIP 21 URI. The text of the
+  QR code is `BITCOIN:` and a bech32 address, both in upper case, so that
+  the address is in the alphanumeric set, then `?amount=` and the amount
+  in bitcoin (`amount` stays lower case, as BIP 21 has it). The amount has
+  at most 8 decimals, no trailing zeros and no exponent, and is left out
+  with its `?` when it is zero. An address that is not bech32 is left as
+  it is. The same request in lower case is given for the cashier's
+  "copy". The code is made at error-correction level M in one segment, and
+  is handed to the app as its side length and its modules, most
+  significant bit first, row by row.
 
 ## 9. What these rules do not do
 

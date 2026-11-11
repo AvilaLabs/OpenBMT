@@ -23,7 +23,7 @@ const TEST_SOURCES: [&str; 12] = [
 
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit.
-const NOT_HERE: [(&str, &str); 4] = [
+const NOT_HERE: [(&str, &str); 5] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -43,6 +43,11 @@ const NOT_HERE: [(&str, &str); 4] = [
         "it is the node's rule, when `Counter::settle` is called; its tests are in \
          `openbmt-counter-node`",
     ),
+    (
+        "CR-83",
+        "the payment request is made where the counter is put in an app, from the sale's script \
+         and its satoshis; it is tested in openbmt-counter-ffi",
+    ),
 ];
 
 fn defined() -> BTreeSet<String> {
@@ -54,9 +59,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_sixty_one_rules() {
+fn the_rules_file_defines_sixty_two_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 61);
+    assert_eq!(ids.len(), 62);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -64,6 +69,7 @@ fn the_rules_file_defines_sixty_one_rules() {
             && ids.contains("CR-74")
             && ids.contains("CR-75")
             && ids.contains("CR-82")
+            && ids.contains("CR-83")
     );
 }
 
