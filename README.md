@@ -11,8 +11,8 @@
 wallet.**
 
 **Pre-release. Do not use with real funds.** The Android apps are early builds
-that have not been tested on a phone or emulator. Release packaging and full
-application integration remain in progress. OpenBMT has had internal design
+that run on an Android emulator and have not yet been tested on a phone.
+Release packaging and full application integration remain in progress. OpenBMT has had internal design
 reviews; no independent security audit has been completed.
 
 ## Get started
@@ -97,8 +97,9 @@ The Android app sources have separate build instructions:
 Rust components cover the core counter, payment watcher, owner coin view and
 spending path, approval flow, records, and POS order readers. First Android APK
 builds exist for the Counter, Owner, and Key apps; each is signed with a local
-test key and has not been run on a phone or emulator. Full app integration,
-release signing, device testing, and release packaging remain incomplete.
+test key. They run on an Android emulator, where their screens are checked;
+they have not yet been tested on a phone. Full app integration, release
+signing, device testing, and release packaging remain incomplete.
 
 The Box can be run from source and has container packaging. Umbrel and StartOS
 packages still need testing on their target devices.
