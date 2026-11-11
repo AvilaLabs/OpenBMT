@@ -5,6 +5,7 @@
 //! ```text
 //! counter_regtest <data dir> <node address> [--regtest-single-peer]
 //!     [--heartbeat-max-age <seconds>] [--customers-off-wifi]
+//!     [--regtest-own-node]
 //!     [--relay <address> --relay-key <hex>]
 //! ```
 //!
@@ -50,6 +51,21 @@
 //! say for the same peers is printed by the `health` command. A run with the
 //! switch is not a check of the health rules.
 //!
+//! `--regtest-own-node` stands in for an own node (CR-100 to CR-107), which
+//! the library reaches only through Tor, and which `openbmt-net-io` lets no
+//! other crate reach on a clear-net address (NR-99). The node is started as
+//! if it had an own node (a fixed test onion name in the driver's settings),
+//! and the real driver is started without it. What the own node would say
+//! is said by the script, with the `own` commands below, from what Core
+//! really holds: the script says `own has` only for a transaction that is in
+//! Core's mempool, and `own down` while Core is stopped. Two more stand-ins,
+//! both printed at the start: every payment the driver sees is offered as
+//! seen from three network groups (one local node is one group, and the
+//! counter's own check needs three), and `heartbeat self` makes the owner's
+//! heartbeat from the fixed test owner key (the owner watcher is not run).
+//! A run with the switch is a check of the counter's wiring of the own
+//! node, not of the own node's connection.
+//!
 //! Commands, one per line:
 //!
 //! - `open <minor units> <rate in minor units per bitcoin>`
@@ -58,7 +74,12 @@
 //!   sale, to the address as a customer's wallet would show it
 //!   (`refund_destination`)
 //! - `heartbeat <hex>`: the bytes of a signed heartbeat from the owner's
-//!   watcher (`owner_regtest`), taken by the node
+//!   watcher (`owner_regtest`), taken by the node; `heartbeat self` makes
+//!   one from the fixed test owner key, for the node's own tip
+//! - `own up`, `own down`, `own has <txid>`: what the own node would say
+//!   (`--regtest-own-node` only); `own status` prints the health line and
+//!   how often the node asked
+//! - `limits`: the signed limits of the two checks
 //! - `hbstate`
 //! - `linkstate`
 //! - `pump <seconds>`
@@ -75,7 +96,10 @@
 //! - `descriptor <wallet description>`
 //! - `warning ...` for the single-peer switch
 //! - `opened index=<i> address=<address> sats=<n>` or `refused <text>`
-//! - `sale <i> state=<State> received=<sats> needs=<sats> mode=<mode> why=<text>`
+//! - `sale <i> state=<State> received=<sats> needs=<sats> mode=<mode>
+//!   check=<name|none> own_saw=<bool> own_counted=<bool> why=<text>`
+//! - `own usable=<bool> heading=<text> asked=<n> last_asked=<txid|none>
+//!   retried=<n>` and `limits light_per_sale_usd=<n> node_per_sale_usd=<n>`
 //! - `refund requested index=<i> number=<n>` or `refund refused <rule and
 //!   reason>`
 //! - `report <Kind> index=<i> ...`, once for each report
@@ -102,14 +126,17 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::process::ExitCode;
 use std::str::FromStr;
-use std::sync::mpsc::{channel, TryRecvError};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
 use bitcoin::secp256k1::Secp256k1;
-use bitcoin::{Address, Network};
+use bitcoin::hashes::Hash;
+use bitcoin::{Address, Network, ScriptBuf, Txid};
 use openbmt_core::batch::{BatchBuilder, BatchPolicy, PinnedRoots, SignedBatch};
+use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::settings::Settings;
 use openbmt_core::wallet::{KeySlot, WalletDescription};
@@ -117,16 +144,28 @@ use openbmt_counter::{
     refund_destination, Actor, Amount, Currency, HeartbeatView, Pairing, Rate, RateSource,
     RefundAsk, RefundRequest, Report, Role as CashierRole,
 };
-use openbmt_counter_node::{CounterLink, CounterLinkConfig, Node, NodeConfig};
+use openbmt_counter_node::{
+    CounterLink, CounterLinkConfig, DriverPort, Node, NodeConfig, MAX_OWN_ASKS,
+};
 use openbmt_courier::{Courier, CourierConfig, FirstStart};
 use openbmt_link::{ClientConfig, Role, Route};
-use openbmt_net_io::DriverConfig;
-use openbmt_watch::{check_health, network_group, HeaderChain, Health, HealthInput};
+use openbmt_net_io::{
+    AppEvent, Driver, DriverConfig, EventReceiver, FileStorage, Handle, OsRandomness, OwnNode,
+    OwnNodeEvent, SystemClock,
+};
+use openbmt_watch::{
+    check_health, network_group, HeaderChain, Health, HealthInput, OwnNodeInput, OwnNodeLink,
+    PeerAddr,
+};
 
 const USAGE: &str = "usage: counter_regtest <data dir> <node address> [--regtest-single-peer] \
                      [--heartbeat-max-age <seconds>] [--customers-off-wifi] \
-                     [--relay <address> --relay-key <hex>]";
+                     [--regtest-own-node] [--relay <address> --relay-key <hex>]";
 const ADDRESSES: u32 = 20;
+
+/// TEST ONLY: the name the node is told its own node has (a valid v3 onion
+/// name; nothing is ever dialled at it).
+const OWN_NODE_NAME: &str = "a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad.onion";
 
 /// TEST ONLY, NEVER USE: the secret bytes of the three identities.
 const OWNER_SECRET: [u8; 32] = [0x11; 32];
@@ -167,6 +206,126 @@ fn test_slot(index: u8, seed: &[u8; 32]) -> Result<KeySlot, String> {
 struct Setup {
     wallet: WalletDescription,
     config: NodeConfig,
+    settings: Settings,
+}
+
+/// TEST ONLY: the real driver with the own node's channel fed by hand, and
+/// every payment it sees offered as seen from three network groups. The
+/// events of the driver are taken in `events`, which the node calls between
+/// its own steps.
+struct OwnPort {
+    handle: Handle,
+    events: EventReceiver,
+    forward: Sender<AppEvent>,
+    own: Receiver<OwnNodeEvent>,
+    control: Arc<OwnControl>,
+}
+
+/// What the commands of the example share with the port.
+struct OwnControl {
+    say: Sender<OwnNodeEvent>,
+    asked: Mutex<Vec<Txid>>,
+    retried: AtomicU32,
+}
+
+fn three_groups(event: AppEvent) -> AppEvent {
+    match event {
+        AppEvent::Sighting { tx, .. } => AppEvent::Sighting {
+            tx,
+            from: (20..23)
+                .map(|n| PeerAddr::Ip(format!("{n}.{n}.1.1").parse().expect("an address")))
+                .collect(),
+        },
+        other => other,
+    }
+}
+
+impl DriverPort for OwnPort {
+    fn events(&self) -> &EventReceiver {
+        while let Ok(event) = self.handle.events().try_recv() {
+            let _ = self.forward.send(three_groups(event));
+        }
+        &self.events
+    }
+
+    fn watch_script(&self, script: ScriptBuf) {
+        self.handle.watch_script(script);
+    }
+
+    fn set_all_blocks(&self, on: bool) {
+        self.handle.set_all_blocks(on);
+    }
+
+    fn shutdown(&mut self) {
+        self.handle.shutdown();
+    }
+
+    fn own_node_events(&self) -> Option<&Receiver<OwnNodeEvent>> {
+        Some(&self.own)
+    }
+
+    fn ask_own_node(&self, txid: Txid) {
+        if let Ok(mut asked) = self.control.asked.lock() {
+            if asked.len() < MAX_OWN_ASKS {
+                asked.push(txid);
+            }
+        }
+    }
+
+    fn retry_own_node(&self) {
+        self.control.retried.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+fn start_with_own_port(config: NodeConfig) -> Result<(Node<OwnPort>, Arc<OwnControl>), String> {
+    let (say, own) = channel();
+    let (forward, events) = channel();
+    let control = Arc::new(OwnControl {
+        say,
+        asked: Mutex::new(Vec::new()),
+        retried: AtomicU32::new(0),
+    });
+    let shared = control.clone();
+    let node = Node::start_with(config, move |mut launch| {
+        // The real driver has no own node: it would need Tor.
+        launch.driver.own_node = None;
+        let storage = FileStorage::new(&launch.dir).map_err(|e| e.to_string())?;
+        let random = OsRandomness::new().map_err(|e| e.to_string())?;
+        let handle = Driver::spawn(launch.driver, storage, SystemClock, random, launch.scripts)
+            .map_err(|e| e.to_string())?;
+        Ok(OwnPort {
+            handle,
+            events: events.into(),
+            forward,
+            own,
+            control: shared,
+        })
+    })
+    .map_err(|e| e.to_string())?;
+    Ok((node, control))
+}
+
+/// The next heartbeat number of `heartbeat self`: the clock, then up by one.
+static SELF_HEARTBEAT_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// A heartbeat signed with the fixed test owner key, for the node's own tip.
+fn self_heartbeat<P: DriverPort>(node: &Node<P>) -> Result<Vec<u8>, String> {
+    let (height, hash) = {
+        let chain = node.chain();
+        let height = chain.tip_height();
+        (height, chain.hash_at(height).ok_or("the node has no tip")?)
+    };
+    let seq = now_secs().max(SELF_HEARTBEAT_SEQ.load(Ordering::SeqCst) + 1);
+    SELF_HEARTBEAT_SEQ.store(seq, Ordering::SeqCst);
+    let heartbeat = WatcherHeartbeat {
+        counter: identity(&COUNTER_SECRET)?.device_id(),
+        seq,
+        time: now_secs(),
+        tip_height: height,
+        tip_hash: hash.to_byte_array(),
+        healthy: true,
+    };
+    Ok(heartbeat.sign(&identity(&OWNER_SECRET)?).to_bytes())
 }
 
 fn setup(
@@ -175,6 +334,7 @@ fn setup(
     single_peer: bool,
     heartbeat_max_age: Option<u32>,
     customers_off_wifi: bool,
+    own_node: bool,
     seen: &Arc<Mutex<Seen>>,
 ) -> Result<Setup, String> {
     let owner = identity(&OWNER_SECRET)?;
@@ -220,6 +380,12 @@ fn setup(
     let mut driver = DriverConfig::new(Network::Regtest, 0);
     driver.allow_local = true;
     driver.fixed_peers = vec![peer];
+    if own_node {
+        // The node reads this as an own node being set; the real driver is
+        // started without it (see `OwnPort`).
+        driver.own_node = Some(OwnNode::parse(OWN_NODE_NAME, 18_444).map_err(|e| e.to_string())?);
+    }
+    let shown = settings.clone();
     let mut config = NodeConfig::new(dir, counter, pairing, settings, driver);
     config.first_batch = Some(first_batch);
     let seen = seen.clone();
@@ -253,7 +419,11 @@ fn setup(
             real
         }
     });
-    Ok(Setup { wallet, config })
+    Ok(Setup {
+        wallet,
+        config,
+        settings: shown,
+    })
 }
 
 fn say(line: impl AsRef<str>) {
@@ -285,7 +455,7 @@ fn describe(report: &Report) -> String {
     }
 }
 
-fn show(node: &mut Node, reports: &[Report]) {
+fn show<P: DriverPort>(node: &mut Node<P>, reports: &[Report]) {
     for report in reports {
         say(describe(report));
     }
@@ -319,9 +489,11 @@ fn number<T: FromStr>(word: Option<&str>, what: &str) -> Result<T, String> {
 }
 
 /// Run one command. `Ok(false)` is `quit`.
-fn command(
-    node: &mut Node,
+fn command<P: DriverPort>(
+    node: &mut Node<P>,
     link: Option<&CounterLink>,
+    own: Option<&OwnControl>,
+    settings: &Settings,
     line: &str,
     seen: &Arc<Mutex<Seen>>,
 ) -> Result<bool, String> {
@@ -350,13 +522,22 @@ fn command(
             match node.judge(index) {
                 Ok(screen) => {
                     say(format!(
-                        "sale {index} state={:?} received={} needs={} mode={:?} why={}",
+                        "sale {index} state={:?} received={} needs={} mode={:?} check={} \
+                         own_saw={} own_counted={} why={}",
                         screen.state,
                         screen.received_sats,
                         screen.needs_sats,
                         screen.check_mode,
+                        screen
+                            .check_line()
+                            .map_or("none", openbmt_counter::say::check_line_name),
+                        screen.own_node_saw,
+                        screen.own_node_counted,
                         screen.why_text()
                     ));
+                    if let Some(words) = screen.check_words() {
+                        say(format!("check {}: {}", words.heading, words.what));
+                    }
                     show(node, &screen.reports);
                 }
                 Err(e) => say(format!("error {e}")),
@@ -387,8 +568,62 @@ fn command(
                 Err(e) => say(format!("refund refused {e}")),
             }
         }
+        Some("limits") => say(format!(
+            "limits light_per_sale_usd={} node_per_sale_usd={}",
+            settings.light_per_sale.display_usd, settings.node_per_sale.display_usd
+        )),
+        Some("own") => {
+            let own = own.ok_or("there is no own node: give --regtest-own-node")?;
+            match words.next() {
+                Some("up") => {
+                    let input = OwnNodeInput {
+                        link: OwnNodeLink::Connected,
+                        best_height: Some(node.chain().tip_height()),
+                        last_heard: Some(now_secs()),
+                    };
+                    own.say
+                        .send(OwnNodeEvent::State(input))
+                        .map_err(|_| "the node is gone".to_string())?;
+                }
+                Some("down") => {
+                    let input = OwnNodeInput {
+                        link: OwnNodeLink::Down { since: now_secs() },
+                        best_height: None,
+                        last_heard: None,
+                    };
+                    own.say
+                        .send(OwnNodeEvent::State(input))
+                        .map_err(|_| "the node is gone".to_string())?;
+                }
+                Some("has") => {
+                    let text = words.next().ok_or("the txid is missing")?;
+                    let txid = Txid::from_str(text).map_err(|_| "the txid is not a txid")?;
+                    own.say
+                        .send(OwnNodeEvent::Has(txid))
+                        .map_err(|_| "the node is gone".to_string())?;
+                }
+                Some("status") => {
+                    let health = node.own_node_health();
+                    let heading = health.words().map_or("none".to_string(), |w| w.heading);
+                    let asked = own.asked.lock().map_err(|_| "lock".to_string())?;
+                    say(format!(
+                        "own usable={} heading={} asked={} last_asked={} retried={}",
+                        health.usable, heading,
+                        asked.len(),
+                        asked.last().map_or("none".to_string(), |t| t.to_string()),
+                        own.retried.load(Ordering::SeqCst)
+                    ));
+                }
+                _ => return Err("own: up, down, has <txid> or status".to_string()),
+            }
+        }
         Some("heartbeat") => {
-            let bytes = unhex(words.next())?;
+            let word = words.next();
+            let bytes = if word == Some("self") {
+                self_heartbeat(node)?
+            } else {
+                unhex(word)?
+            };
             match node.heartbeat(&bytes) {
                 Ok(taken) => {
                     match taken.view {
@@ -530,6 +765,7 @@ fn run(args: &[String]) -> Result<(), String> {
     let mut single_peer = false;
     let mut heartbeat_max_age = None;
     let mut customers_off_wifi = false;
+    let mut own_node = false;
     let mut relay: Option<SocketAddr> = None;
     let mut relay_key: Option<DeviceId> = None;
     let mut rest = Vec::new();
@@ -548,6 +784,8 @@ fn run(args: &[String]) -> Result<(), String> {
             single_peer = true;
         } else if arg == "--customers-off-wifi" {
             customers_off_wifi = true;
+        } else if arg == "--regtest-own-node" {
+            own_node = true;
         } else if arg == "--heartbeat-max-age" {
             let secs = args.next().ok_or(USAGE)?;
             heartbeat_max_age = Some(secs.parse().map_err(|_| format!("seconds: {secs}"))?);
@@ -563,12 +801,17 @@ fn run(args: &[String]) -> Result<(), String> {
     }
     let peer: SocketAddr = peer.parse().map_err(|_| format!("node address: {peer}"))?;
     let seen = Arc::new(Mutex::new(Seen::default()));
-    let Setup { wallet, config } = setup(
+    let Setup {
+        wallet,
+        config,
+        settings,
+    } = setup(
         dir,
         peer,
         single_peer,
         heartbeat_max_age,
         customers_off_wifi,
+        own_node,
         &seen,
     )?;
 
@@ -578,7 +821,27 @@ fn run(args: &[String]) -> Result<(), String> {
         say("warning one local node cannot meet WR-50 (3 groups, 2 filter peers):");
         say("warning THIS RUN IS NOT A CHECK OF THE HEALTH RULES");
     }
-    let mut node = Node::start(config).map_err(|e| e.to_string())?;
+    if own_node {
+        say("warning --regtest-own-node: the own node is said by hand (own up, own down, own has),");
+        say("warning every payment is offered as seen from three network groups,");
+        say("warning and heartbeat self is signed with the test owner key");
+        let (node, control) = start_with_own_port(config)?;
+        return serve(node, Some(&control), &settings, relay, relay_key, dir, &seen);
+    }
+    let node = Node::start(config).map_err(|e| e.to_string())?;
+    serve(node, None, &settings, relay, relay_key, dir, &seen)
+}
+
+/// Start the link if asked, then take the commands until `quit`.
+fn serve<P: DriverPort>(
+    mut node: Node<P>,
+    own: Option<&Arc<OwnControl>>,
+    settings: &Settings,
+    relay: Option<SocketAddr>,
+    relay_key: Option<DeviceId>,
+    dir: &str,
+    seen: &Arc<Mutex<Seen>>,
+) -> Result<(), String> {
     say(format!(
         "started checked={} tip={}",
         node.checked_height(),
@@ -607,7 +870,14 @@ fn run(args: &[String]) -> Result<(), String> {
     loop {
         match input.try_recv() {
             Ok(line) => {
-                match command(&mut node, link.as_ref(), line.trim(), &seen) {
+                match command(
+                    &mut node,
+                    link.as_ref(),
+                    own.map(|c| &**c),
+                    settings,
+                    line.trim(),
+                    seen,
+                ) {
                     Ok(true) => {}
                     Ok(false) => break,
                     Err(e) => say(format!("error {e}")),

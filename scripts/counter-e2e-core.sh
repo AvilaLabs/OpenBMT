@@ -42,6 +42,27 @@
 #      back shows the same, and nothing is reported again: the header of
 #      a block is saved before the block is handed to the counter
 #      (NR-73). (Run in the script before step 8.)
+#  10. An own node as a second check (CR-100 to CR-108), with Core as the
+#      own node. A payment of $20, over the light check's $10 and under the
+#      own node's $25, waits on the light check; once the own node has it
+#      too it is accepted at once, and the sale says which check was done
+#      ("Paid (your node checked it)"). A payment of $30 is over both: it
+#      waits, and the line says "Your node and light check".
+#  11. Core is stopped: the own node is down. The $30 sale says "Light
+#      check, not your node" and a $20 payment that the own node had not
+#      reported stays waiting on the light check, each with words.
+#  12. Core is started again: the sales return to the own-node check, and the
+#      $20 payment is accepted once the own node reports it.
+#      STEPS 10 TO 12 ARE A CHECK OF THE COUNTER'S WIRING OF THE OWN NODE,
+#      NOT OF THE OWN NODE'S CONNECTION. The library reaches an own node only
+#      through Tor, and `openbmt-net-io` lets no other crate use its
+#      clear-net test constructor (NR-99), so the example is started with
+#      `--regtest-own-node`: what the own node would say (`own up`,
+#      `own down`, `own has <txid>`) is said by this script, from what Core
+#      really holds (`own has` only for a transaction in Core's mempool, and
+#      `own down` while Core is stopped). Two more stand-ins in the example:
+#      each payment is offered as seen from three network groups, and the
+#      owner's heartbeat is signed with the test owner key (`heartbeat self`).
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin (the
 # directory is put first on PATH; set CORE_BIN to use another), jq, and
@@ -109,6 +130,7 @@ NODE_PID=
 EX_PID=
 EX_LOG=
 EX_N=0
+EX_FLAGS=
 LAST=
 
 cleanup() {
@@ -162,7 +184,8 @@ start_example() { # tag, data dir, [peer]
   rm -f "$FIFO"
   mkfifo "$FIFO"
   exec 3<>"$FIFO"
-  "$NODE_BIN" "$2" "${3:-127.0.0.1:$P2P_PORT}" --regtest-single-peer <&3 >"$EX_LOG" 2>&1 &
+  # shellcheck disable=SC2086
+  "$NODE_BIN" "$2" "${3:-127.0.0.1:$P2P_PORT}" --regtest-single-peer $EX_FLAGS <&3 >"$EX_LOG" 2>&1 &
   EX_PID=$!
 }
 # Send one command and wait for its `done`. LAST holds what it printed.
@@ -246,11 +269,25 @@ inbound_peers() { cli getpeerinfo | jq '[.[] | select(.inbound == true)] | lengt
 
 # ---- Core -----------------------------------------------------------------------
 
-bitcoind -regtest -datadir="$NODE_DIR" -rpcport="$RPC_PORT" \
-  -listen=1 -bind="127.0.0.1:$P2P_PORT" -listenonion=0 -daemonwait \
-  -blockfilterindex=1 -peerblockfilters=1 -txindex=0 \
-  -fallbackfee=0.0001 -dbcache=50 >/dev/null || die "bitcoind did not start"
-NODE_PID=$(cat "$NODE_DIR/regtest/bitcoind.pid")
+core_start() {
+  bitcoind -regtest -datadir="$NODE_DIR" -rpcport="$RPC_PORT" \
+    -listen=1 -bind="127.0.0.1:$P2P_PORT" -listenonion=0 -daemonwait \
+    -blockfilterindex=1 -peerblockfilters=1 -txindex=0 \
+    -fallbackfee=0.0001 -dbcache=50 >/dev/null || return 1
+  NODE_PID=$(cat "$NODE_DIR/regtest/bitcoind.pid")
+}
+# Stop Core for good, as a crash of the machine would not: a clean stop
+# that keeps its mempool on disk.
+core_stop() {
+  cli stop >/dev/null 2>&1 || return 1
+  local i
+  for i in $(seq 1 60); do
+    kill -0 "$NODE_PID" 2>/dev/null || break
+    sleep 0.5
+  done
+  ! kill -0 "$NODE_PID" 2>/dev/null
+}
+core_start || die "bitcoind did not start"
 
 cli -named createwallet wallet_name=miner >/dev/null || die "no miner wallet"
 cli -named createwallet wallet_name=shop disable_private_keys=true blank=true >/dev/null ||
@@ -550,6 +587,140 @@ if await "^started " 20 && await_tip 60; then
 fi
 [ -n "$STEP9" ] || bad 9 "a kill right after a confirmation did not leave the sale Confirmed with one PosPaid and no PosUnpaid"
 
+# ---- 10, 11, 12 ------------------------------------------------------------------
+
+# Open a sale of some cents and pay it from Core. Sets OPEN_INDEX, OPEN_TXID.
+OPEN_INDEX=
+OPEN_TXID=
+open_and_pay() { # cents
+  local o addr sats
+  OPEN_INDEX=
+  OPEN_TXID=
+  cmd "open $1 $SALE_RATE" || return 1
+  o=$(grep '^opened ' <<<"$LAST" || true)
+  note "$o"
+  OPEN_INDEX=$(sed -nE 's/^opened index=([0-9]+) .*/\1/p' <<<"$o")
+  addr=$(sed -nE 's/.* address=([a-z0-9]+) .*/\1/p' <<<"$o")
+  sats=$(sed -nE 's/.* sats=([0-9]+)$/\1/p' <<<"$o")
+  [ -n "$OPEN_INDEX" ] && [ -n "$addr" ] && [ -n "$sats" ] || return 1
+  OPEN_TXID=$(cli -rpcwallet=miner sendtoaddress "$addr" "$(btc "$sats")") || return 1
+}
+# The own node says it has a transaction, but only one that Core really has.
+own_has() { # txid
+  cli getmempoolentry "$1" >/dev/null 2>&1 || return 1
+  cmd "own has $1"
+}
+# One judged line of a sale, in LAST and in SALE_LINE.
+SALE_LINE=
+sale_line() { # index
+  cmd "judge $1" || return 1
+  SALE_LINE=$(grep "^sale $1 " <<<"$LAST" | tail -1)
+}
+
+say "10. Own node and light check: the tier that was checked is the one named"
+EX_FLAGS="--regtest-own-node --customers-off-wifi"
+start_example own "$DATA_DIR"
+S10= S11= S12=
+IDX_A= IDX_B= IDX_C= TX_A= TX_B= TX_C=
+if await "^started " 20 && await_tip 60; then
+  cmd limits
+  LIMITS=$(grep '^limits ' <<<"$LAST")
+  note "$LIMITS"
+  cmd "heartbeat self"
+  note "$(grep '^heartbeat ' <<<"$LAST")"
+  if open_and_pay 2000; then IDX_A=$OPEN_INDEX TX_A=$OPEN_TXID; fi
+  if open_and_pay 3000; then IDX_B=$OPEN_INDEX TX_B=$OPEN_TXID; fi
+  if open_and_pay 2000; then IDX_C=$OPEN_INDEX TX_C=$OPEN_TXID; fi
+  if [ -n "$TX_A" ] && [ -n "$TX_B" ] && [ -n "$TX_C" ] &&
+    await_state "$IDX_A" Waiting 45 && await_state "$IDX_B" Waiting 45 && await_state "$IDX_C" Waiting 45; then
+    # The own node has said nothing yet: the light check, over its $10.
+    sale_line "$IDX_A"
+    note "before the own node says anything: $SALE_LINE"
+    LIGHT_FIRST=0
+    grep -q " mode=Some(Light) check=Light own_saw=false own_counted=false " <<<"$SALE_LINE" && LIGHT_FIRST=1
+    cmd "own up"
+    own_has "$TX_A"
+    own_has "$TX_B"
+    ok=1
+    await_state "$IDX_A" PaidInstant 30 || ok=0
+    sale_line "$IDX_A"
+    note "$SALE_LINE"
+    grep -q " mode=Some(NodeAlsoSeenByLight) " <<<"$SALE_LINE" || { ok=0; note "sale A is not on the own node's check"; }
+    grep -q "Paid (your node checked it)" <<<"$SALE_LINE" || { ok=0; note "sale A is not labelled as the own node's"; }
+    sale_line "$IDX_B"
+    note "$SALE_LINE"
+    grep -q "^sale $IDX_B state=Waiting .* check=YourNodeAndLight own_saw=true own_counted=true " <<<"$SALE_LINE" ||
+      { ok=0; note "sale B (over both limits) is not waiting on the node and the light check"; }
+    grep -q '^check Your node and light check: ' <<<"$LAST" || { ok=0; note "no words for the check of sale B"; }
+    cmd "own status"
+    OWN_STATUS=$(grep '^own ' <<<"$LAST")
+    note "$OWN_STATUS"
+    grep -Eq "^own usable=true .* asked=[1-9]" <<<"$OWN_STATUS" || { ok=0; note "the node did not ask the own node about the payments, or the own node is not usable"; }
+    grep -q "^limits light_per_sale_usd=10 node_per_sale_usd=25\$" <<<"$LIMITS" || { ok=0; note "the limits are not \$10 and \$25"; }
+    [ "$LIGHT_FIRST" = 1 ] || { ok=0; note "sale A did not first show the light check"; }
+    if [ "$ok" = 1 ]; then
+      S10=ok
+      pass 10 "a \$20 payment waited on the light check (limit \$10), was accepted once the own node had it too (limit \$25) as \"Paid (your node checked it)\", mode NodeAlsoSeenByLight; a \$30 payment waited, with \"Your node and light check\"; the node asked the own node"
+    fi
+  fi
+fi
+[ -n "$S10" ] || bad 10 "the own node's check was not shown as expected (see the notes above)"
+
+say "11. Core stopped: the own node is down, the light check is named"
+if [ -n "$S10" ] && core_stop; then
+  cmd "own down"
+  ok=1
+  sale_line "$IDX_B"
+  note "$SALE_LINE"
+  grep -q "^sale $IDX_B state=Waiting .* check=LightOwnNodeUnusable own_saw=true own_counted=false " <<<"$SALE_LINE" ||
+    { ok=0; note "sale B does not say the own node could not be used"; }
+  grep -q '^check Light check, not your node: ' <<<"$LAST" || { ok=0; note "no words for the fallback on sale B"; }
+  sale_line "$IDX_C"
+  note "$SALE_LINE"
+  grep -q "^sale $IDX_C state=Waiting .* mode=Some(Light) check=Light own_saw=false own_counted=false " <<<"$SALE_LINE" ||
+    { ok=0; note "sale C is not waiting on the light check"; }
+  cmd "own status"
+  OWN_STATUS=$(grep '^own ' <<<"$LAST")
+  note "$OWN_STATUS"
+  grep -q "^own usable=false heading=" <<<"$OWN_STATUS" || { ok=0; note "the own node's line does not say it is down"; }
+  if [ "$ok" = 1 ]; then
+    S11=ok
+    pass 11 "with Core stopped the own node's line says it is down; sale B says \"Light check, not your node\", sale C waits on the light check"
+  fi
+fi
+[ -n "$S11" ] || bad 11 "the fallback to the light check was not shown as expected (see the notes above)"
+
+say "12. Core started again: back on the own node's check"
+if [ -n "$S11" ] && core_start; then
+  # The wallets load in the background after a start; load them if they are not.
+  for w in miner shop; do
+    for _ in $(seq 1 40); do
+      cli listwallets 2>/dev/null | jq -e --arg w "$w" 'index($w) != null' >/dev/null && break
+      cli loadwallet "$w" >/dev/null 2>&1
+      sleep 0.5
+    done
+  done
+  cmd "own up"
+  ok=1
+  own_has "$TX_C" || { ok=0; note "Core does not hold the payment of sale C after the restart"; }
+  await_state "$IDX_C" PaidInstant 30 || ok=0
+  sale_line "$IDX_C"
+  note "$SALE_LINE"
+  grep -q " mode=Some(NodeAlsoSeenByLight) " <<<"$SALE_LINE" && grep -q "Paid (your node checked it)" <<<"$SALE_LINE" ||
+    { ok=0; note "sale C is not accepted on the own node's check"; }
+  sale_line "$IDX_B"
+  note "$SALE_LINE"
+  grep -q " check=YourNodeAndLight own_saw=true own_counted=true " <<<"$SALE_LINE" ||
+    { ok=0; note "sale B is not back on the own node's check"; }
+  if [ "$ok" = 1 ]; then
+    S12=ok
+    pass 12 "Core back: sale C accepted as \"Paid (your node checked it)\", sale B is on the node and the light check again"
+  fi
+fi
+[ -n "$S12" ] || bad 12 "the return to the own node's check was not shown as expected (see the notes above)"
+stop_example || note "the own node run did not stop cleanly"
+EX_FLAGS=
+
 # ---- 8 -------------------------------------------------------------------------
 
 say "8. The watch-only wallet sees the first payment"
@@ -570,12 +741,12 @@ fi
 
 say "Result"
 failed=0
-for n in 1 2 3 4 5 6 7 8 9; do
+for n in 1 2 3 4 5 6 7 8 9 10 11 12; do
   printf '%s  step %s\n' "${RESULT[$n]:-FAIL}" "$n"
   [ "${RESULT[$n]:-FAIL}" = PASS ] || failed=1
 done
 if [ "$failed" = 0 ]; then
-  echo "ALL PASS (step 1 is not a check of the health rules)"
+  echo "ALL PASS (step 1 is not a check of the health rules; steps 10 to 12 check the counter's wiring of the own node, not the own node's connection)"
 else
   echo "SOME STEPS FAILED"
   exit 1
