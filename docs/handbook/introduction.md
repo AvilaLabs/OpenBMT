@@ -59,6 +59,8 @@ promises about future costs or losses.
 | Fees, selling the bitcoin and keeping records | [Costs and cashing out](why-bitcoin.md) |
 | Keys, approvals and losing a phone | [Who controls the money](safety.md) |
 | Equipment, owner workload and whether it suits the shop | [Equipment, daily work and fit](fit.md) |
+| Why existing tools do not settle every shop decision | [The missing merchant layer](merchant-gap.md) |
+| What OpenBMT is meant to improve | [What OpenBMT changes](what-openbmt-changes.md) |
 
 <a id="what-is-built-today"></a>
 

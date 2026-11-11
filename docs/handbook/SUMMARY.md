@@ -15,6 +15,8 @@
 
 # Project choices
 
+- [The missing merchant layer](merchant-gap.md)
+- [What OpenBMT changes](what-openbmt-changes.md)
 - [Design choices](principles.md)
 - [Why Bitcoin only](never.md)
 
