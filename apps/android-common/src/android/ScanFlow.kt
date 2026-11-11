@@ -140,12 +140,13 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
         var shown: Any? = null
         val ur = request.ur
         val bbqr = request.bbqr
-        fun progress(key: Any, words: SayWords, line: String?) {
-            if (key == shown) return
+        fun progress(key: Any, words: SayWords, line: String?): Boolean {
+            if (key == shown) return false
             shown = key
             status.removeAllViews()
             status.addView(ui.words(WordsModel.of(words)))
             if (line != null) status.addView(ui.text(line, 16f, bold = true), ui.margins(top = 8))
+            return true
         }
         val onCode: (ByteArray) -> Unit = { bytes ->
             if (mine == generation) {
@@ -157,12 +158,13 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
                         is UrStep.Show -> {
                             val parts = ur.parts
                             if (parts != null && step.expected > 0) {
-                                progress(step.received to step.expected, parts.words, parts.line(step.received, step.expected))
+                                if (progress(step.received to step.expected, parts.words, parts.line(step.received, step.expected))) Feedback.scanPart(status)
                             } else {
                                 progress(step.words, step.words, null)
                             }
                         }
                         is UrStep.Done -> {
+                            Feedback.scanDone(status)
                             stop()
                             ur.onMessage(step.type, step.payload)
                         }
@@ -175,9 +177,12 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
                 } else if (bbqr != null && UrText.startsWithBbqr(bytes)) {
                     val r = joined ?: BbqrReading(UrCall.native(), bbqr.kinds, bbqr.who).also { joining = it }
                     when (val step = r.feed(String(bytes, Charsets.US_ASCII))) {
-                        is BbqrStep.Show -> progress(step.have to step.total, bbqr.parts.words, bbqr.parts.line(step.have, step.total))
+                        is BbqrStep.Show -> {
+                            if (progress(step.have to step.total, bbqr.parts.words, bbqr.parts.line(step.have, step.total))) Feedback.scanPart(status)
+                        }
                         is BbqrStep.Say -> progress(step.words, step.words, null)
                         is BbqrStep.Done -> {
+                            Feedback.scanDone(status)
                             stop()
                             bbqr.onMessage(step.kind, step.payload)
                         }
@@ -189,6 +194,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
                     }
                 } else if (current == null && joined == null) {
                     // A plain code: the scan is over.
+                    Feedback.scanDone(status)
                     stop()
                     request.onBytes(bytes)
                 }

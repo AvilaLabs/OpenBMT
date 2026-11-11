@@ -274,6 +274,9 @@ class Controller(private val act: MainActivity) {
 
     // ---- the PIN lock (SR-71 to SR-77) -------------------------------------------------
 
+    /** The bar of the unlock screen: the heading of its own words. */
+    private val UNLOCK_TITLE = AppWords.state(SetupState.Locked).say().heading
+
     private fun stopTicker() {
         ticker?.let { main.removeCallbacks(it) }
         ticker = null
@@ -368,7 +371,8 @@ class Controller(private val act: MainActivity) {
             } catch (_: IOException) {
             }
         }
-        val field = secret("PIN or passphrase", false)
+        // The label says what the field takes, so the field's own hint stays empty (no copy of the label).
+        val field = secret("", false)
         val countdown = ui.text("", 20f, bold = true)
         val unlock = ui.primary("Unlock") {
             allowed {
@@ -384,13 +388,16 @@ class Controller(private val act: MainActivity) {
             unlock.isEnabled = left <= 0
         }
         update()
-        val views = ArrayList<View>(banner())
-        views.add(ui.words(message ?: AppWords.state(SetupState.Locked)))
+        val words = WordsModel.of((message ?: AppWords.state(SetupState.Locked)).say())
+        val views = ArrayList<View>()
+        if (level == KeyLevel.Software) views.add(ui.notice(WordsModel.of(AppWords.keyInSoftware.say())))
+        views.add(ui.lock())
+        views.add(ui.titleBlock(words, UNLOCK_TITLE))
         views.addAll(triesLines(check))
         views.add(countdown)
-        views.add(field)
-        views.add(unlock)
-        act.show(ui.page(views))
+        views.add(ui.labelled("PIN or passphrase", field))
+        views.add(ui.hint(words))
+        act.show(ui.page(ui.bar(UNLOCK_TITLE), views, listOf(unlock)))
         if (check.waitLeft > 0) {
             val tick = object : Runnable {
                 override fun run() {
