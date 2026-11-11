@@ -359,6 +359,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "key_lock_frame_decode"
+path = "fuzz_targets/key_lock_frame_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "owner_coins_decode"
 path = "fuzz_targets/owner_coins_decode.rs"
 test = false

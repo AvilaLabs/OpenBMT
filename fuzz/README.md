@@ -41,6 +41,7 @@ exactly the input bytes.
 | `key_deposit_code` | `parse_deposit_code` of `openbmt-key-ffi` on UTF-8 input, the first byte choosing the network; it must never panic, refuse only with a `deposit-` or `address` rule, and a code that is read must give an amount in range, a label without control characters, no `req-` or understood name in `ignored`, and an address that reads again as itself |
 | `key_words` | `KeyApp::create_from_entropy` with `TypedWords`, from lines of text or from indices into the English list; it must never panic, refuse only with `words-count`, `words-unknown` or `words-checksum` (and then leave the Key app empty, with no long word echoed), and an accepted phrase must leave no words waiting |
 | `key_dispatch` | `dispatch` of `openbmt-key-ffi` on arbitrary request bytes (or, when the first byte says so, the fields of a frame addressed to a Key app that has its wallet, to an open session, or to no object), against an in-memory store; it must never panic, always answer with a response frame that is not an internal error, and the bytes it stores must always restore a Key app |
+| `key_lock_frame_decode` | `lock::decode` of `openbmt-key-ffi` (the frame the Key app stores its state in, magic `OBMx`), on the input as it is and behind a good magic and version; a frame that is read must have parameters inside the limit, be exactly as long as its header says and encode back to the input |
 | `counter_sale_decode` | `Sale::from_bytes` |
 | `counter_desk_decode` | `Desk::from_bytes` |
 | `counter_event_decode` | `Event::decode` |
