@@ -86,7 +86,7 @@ Choices that are the library's, where the standard leaves room:
   strings of versions 7 to 40, the capacity at every version and level, and
   the four penalty rules on small matrices.
 - `scripts/qr-crosscheck.sh`: encodes the same inputs with ZXing and
-  compares every module, decodes ours with ZXing, and compares mask choice
+  compares every module, decodes each with ZXing, and compares mask choice
   and penalties. Every version at every level with all masks, and random
   inputs in each mode from a fixed seed.
 - `fuzz/fuzz_targets/qr_encode.rs`: any bytes and level.

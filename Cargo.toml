@@ -12,3 +12,7 @@ publish = false
 # Optimize dependencies in test builds so the hashing in `words::stretch` is fast.
 [profile.dev.package."*"]
 opt-level = 2
+
+# The QR reader's round-trip tests draw and read hundreds of codes.
+[profile.dev.package.openbmt-qr]
+opt-level = 2

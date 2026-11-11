@@ -8,8 +8,8 @@
 # where the mask choice differs. See that file for the details.
 #
 # Reader: crosscheck/QrDecodeCross.java makes images of codes encoded by
-# ZXing (random content, levels, module sizes, turns, a UTF-8 ECI) for our
-# reader, and decodes images made by this encoder (the example
+# ZXing (random content, levels, module sizes, turns, a UTF-8 ECI) for the
+# openbmt-qr reader, and decodes images made by this encoder (the example
 # `decodecheck`) with ZXing; where both read an image, the data must be the
 # same, and every clean image must be read by both.
 #

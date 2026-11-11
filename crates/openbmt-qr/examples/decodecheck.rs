@@ -8,7 +8,7 @@
 //! - `decodecheck read DIR` decodes every `.pgm` in DIR and writes
 //!   `NAME.out`: `OK` and the data in hex, or `ERR` and the error text.
 //!
-//! The Java harness makes images of its own codes, and decodes ours.
+//! The Java harness makes images of its own codes, and decodes the ones made by openbmt-qr.
 
 use std::fs;
 use std::path::Path;

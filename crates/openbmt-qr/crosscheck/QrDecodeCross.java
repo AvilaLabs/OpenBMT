@@ -7,11 +7,11 @@
 //                zx_I.pgm with zx_I.txt holding the expected data in hex.
 //   check DIR    after `decodecheck read DIR` has written NAME.out for
 //                every image:
-//                  1. our reader on ZXing's images: the data must be the
+//                  1. the openbmt-qr reader on ZXing's images: the data must be the
 //                     content ("zx" images);
-//                  2. ZXing on our images ("ours_clean"): the data must be
-//                     what we encoded, and ours the same as ZXing's;
-//                  3. the same for our lower-quality images ("ours_hard"),
+//                  2. ZXing on openbmt-qr's images ("ours_clean"): the data must be
+//                     what was encoded, and openbmt-qr's the same as ZXing's;
+//                  3. the same for openbmt-qr's lower-quality images ("ours_hard"),
 //                     reported only: neither reader is required to read
 //                     them, but where both do, they must agree.
 //                Steps 1 and 2 must be complete: any miss is a failure.
@@ -202,7 +202,7 @@ public class QrDecodeCross {
             if (base.startsWith("zx_")) {
                 zxTotal++;
                 if (oursOk) zxOurOk++;
-                else if (failures.size() < 20) failures.add(base + ": ours said " + ours.substring(0, Math.min(60, ours.length())));
+                else if (failures.size() < 20) failures.add(base + ": openbmt-qr said " + ours.substring(0, Math.min(60, ours.length())));
                 continue;
             }
             int[][] img = readPgm(new File(dir, name));
@@ -219,7 +219,7 @@ public class QrDecodeCross {
                 if (zxOk) cleanZxOk++;
                 else if (failures.size() < 20) failures.add(base + ": ZXing " + (zx == null ? "no read" : "different data"));
                 if (oursOk) cleanOurOk++;
-                else if (failures.size() < 20) failures.add(base + ": ours said " + ours.substring(0, Math.min(60, ours.length())));
+                else if (failures.size() < 20) failures.add(base + ": openbmt-qr said " + ours.substring(0, Math.min(60, ours.length())));
                 if (zx != null && oursAny && ours.equals("OK " + hex(zx))) cleanAgree++;
             } else {
                 hardTotal++;
@@ -235,11 +235,11 @@ public class QrDecodeCross {
                 }
             }
         }
-        System.out.println("1 ZXing's images read by ours: " + zxOurOk + "/" + zxTotal);
-        System.out.println("2 our images read by ZXing: " + cleanZxOk + "/" + cleanTotal
-                + ", by ours: " + cleanOurOk + "/" + cleanTotal + ", same data from both: " + cleanAgree + "/" + cleanTotal);
-        System.out.println("3 our lower-quality images: ZXing reads " + hardZx + "/" + hardTotal
-                + ", ours " + hardOurs + "/" + hardTotal + ", both " + hardBoth
+        System.out.println("1 ZXing's images read by openbmt-qr: " + zxOurOk + "/" + zxTotal);
+        System.out.println("2 openbmt-qr images read by ZXing: " + cleanZxOk + "/" + cleanTotal
+                + ", by openbmt-qr: " + cleanOurOk + "/" + cleanTotal + ", same data from both: " + cleanAgree + "/" + cleanTotal);
+        System.out.println("3 openbmt-qr lower-quality images: ZXing reads " + hardZx + "/" + hardTotal
+                + ", openbmt-qr " + hardOurs + "/" + hardTotal + ", both " + hardBoth
                 + ", where both read, same data: " + hardAgree);
         for (String f : failures) System.out.println("FAIL " + f);
         // Where both read a lower-quality image they must agree.
