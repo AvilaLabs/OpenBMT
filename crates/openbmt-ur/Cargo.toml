@@ -1,0 +1,14 @@
+[package]
+name = "openbmt-ur"
+description = "Blockchain Commons Uniform Resources (BC-UR): animated QR sequences for a PSBT, with no dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No dependencies of any kind, not even other crates of the workspace: the
+# hashes, the Bytewords, the fountain code and the CBOR header are written
+# here so that the apps that show or read a sequence of codes add nothing
+# to their package lists.
+[dependencies]

@@ -60,6 +60,7 @@ sets. The full statement, its conditions and the reasoning are in
 | [docs/RATE-RULES.md](docs/RATE-RULES.md) | How a sale's exchange price is read from two or more public sources and refused when they disagree or are stale, and how the app fetches them |
 | [docs/FEE-RULES.md](docs/FEE-RULES.md) | How the owner's device works out a fee rate from blocks it has checked itself, with no fee service, and what that number does not say |
 | [docs/POS-RULES.md](docs/POS-RULES.md) | How the owner's device matches the POS orders to the counter's sales, and what raises an alert |
+| [docs/UR-RULES.md](docs/UR-RULES.md) | How a PSBT too big for one QR code travels as an animated sequence of codes in the BC-UR format Sparrow and hardware wallets use: the bounds, the text, the fountain code and what the reader refuses (implemented in `crates/openbmt-ur`) |
 | [docs/BOOKS-RULES.md](docs/BOOKS-RULES.md) | How the counters' records become the books: per-sale fields and what stays unknown, the two CSV exports and the encrypted export file |
 | [docs/OWNER-COINS-RULES.md](docs/OWNER-COINS-RULES.md) | How the owner's device learns wallet coins from checked blocks, handles reorganizations, and grows its watch set |
 | [docs/screens/](docs/screens/) | Catalogs of the words shown for each counter, owner, Key app, and Box console screen state |
@@ -88,6 +89,7 @@ sets. The full statement, its conditions and the reasoning are in
 | [crates/openbmt-link/](crates/openbmt-link/) | Messages between the shop's own devices ([rules](docs/LINK-RULES.md)): sealed to one device and signed by the sender, the relay that holds them (mailboxes, challenges, limits, files), and a blocking client and server over TCP or a Tor onion service |
 | [crates/openbmt-rates/](crates/openbmt-rates/) | The exchange price ([rules](docs/RATE-RULES.md)): a strict reader for four public price sources and the median of two or more that agree. No network: the app fetches |
 | [crates/openbmt-pos/](crates/openbmt-pos/) | The vendor-neutral POS side ([rules](docs/POS-RULES.md)): the model of POS orders, the reference a cashier types, the matching of every Bitcoin tender to a counter sale, the alerts for what does not match, and the boundary a POS connector fills. No network and no vendor code |
+| [crates/openbmt-ur/](crates/openbmt-ur/) | BC-UR for a PSBT that does not fit one QR code ([rules](docs/UR-RULES.md)): minimal Bytewords, the fountain code, and the `bytes`, `crypto-psbt` and `psbt` types, an encoder of endless parts and a decoder that takes them in any order with losses. No dependencies of any kind; checked against `sha256sum`, `zlib.crc32` and the published vectors |
 | [scripts/](scripts/) | Regtest checks against Bitcoin Core, including restore, signer, peer and network-driver flows, counter payment tracking, owner heartbeat, and owner coin view and refund sending ([owner check](scripts/owner-spend-e2e-core.sh); its documented results are in [the research note](docs/research/owner-spend-e2e-core-2026-11-10.md)) |
 
 Headless components and screen word catalogs are available. Further

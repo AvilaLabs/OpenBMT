@@ -422,6 +422,7 @@ dependencies = [
  "openbmt-session",
  "openbmt-signer",
  "openbmt-spend",
+ "openbmt-ur",
  "openbmt-watch",
 ]
 
@@ -573,6 +574,10 @@ dependencies = [
  "openbmt-core",
  "openbmt-signer",
 ]
+
+[[package]]
+name = "openbmt-ur"
+version = "0.1.0"
 
 [[package]]
 name = "openbmt-watch"

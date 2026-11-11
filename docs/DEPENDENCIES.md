@@ -48,6 +48,12 @@ Where they come from:
   encoder is about a thousand lines in the repository, checked against
   ZXing (below) bit for bit.
 
+- **The BC-UR transport, none.** `openbmt-ur` has no dependencies, not even
+  a workspace crate. SHA-256 and CRC-32 are written in it (about 100 lines,
+  checked against `sha256sum` and Python's `zlib.crc32`), so that the apps
+  that show or read an animated QR add nothing to their lists
+  (`docs/UR-RULES.md`). It is not yet in a shipped program's list.
+
 - **The price sources, the same 19 as the signer's.** `openbmt-rates` reads
   the replies of the price sources and combines them into the counter's rate
   (`docs/RATE-RULES.md`). It depends on `openbmt-core` and `openbmt-counter`
