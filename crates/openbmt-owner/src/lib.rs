@@ -49,6 +49,7 @@ mod counter;
 mod edit;
 mod error;
 mod follow;
+pub mod hardware;
 pub mod say;
 mod state;
 mod take;

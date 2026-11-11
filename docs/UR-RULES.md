@@ -248,6 +248,12 @@ the form SeedSigner, Krux and Sparrow read.
   the wallet; an origin of none or over sixteen steps, and a threshold or
   count out of range, are refused. `output_to_ur_parts` makes the parts.
 
+- **UR-33.** `text_to_ur_parts` writes a non-empty text as a `ur:bytes`
+  whose message is the CBOR byte string of the text's bytes, which is how
+  a signer is given a setup file or a descriptor as animated codes. The
+  reader of this crate returns the type and the message as it does for any
+  type; nothing here reads the text.
+
 ## What these rules do not do
 
 - **No check that the PSBT is valid.** Only the five-byte magic is looked

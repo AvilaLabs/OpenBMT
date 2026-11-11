@@ -80,7 +80,12 @@ impl EntryKind {
     }
 }
 
-fn stop(heading: &str, what: impl Into<String>, who: Who, next: impl Into<String>) -> Words {
+pub(crate) fn stop(
+    heading: &str,
+    what: impl Into<String>,
+    who: Who,
+    next: impl Into<String>,
+) -> Words {
     Words::new(Tone::Stop, heading, what, who, next)
 }
 
@@ -780,6 +785,7 @@ impl Refusal {
                 "Do not use this response. Check that this phone and the Key app are paired for the same wallet.",
             )
             .code("AS-62"),
+            Self::Hardware(h) => h.words(),
         }
     }
 }
@@ -1328,6 +1334,13 @@ pub fn all_words() -> Vec<(String, Words)> {
     for (n, with_batch) in [("WithBatch", true), ("NoBatch", false)] {
         add(&format!("CounterBundle/{n}"), bundle_words(with_batch));
     }
+    for (n, h) in crate::hardware::all_refusals() {
+        add(
+            &format!("Refusal::Hardware/{n}"),
+            Refusal::Hardware(h).words(),
+        );
+    }
+    add("HardwareCompare", crate::hardware::compare_words());
     all.extend(crate::ceremony::all_words());
     all
 }

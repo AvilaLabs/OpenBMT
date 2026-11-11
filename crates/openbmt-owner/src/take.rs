@@ -63,7 +63,7 @@ fn entries(f: &Frozen) -> Vec<u32> {
 /// AS-67: the outputs are exactly the frozen payments, in order, and the
 /// change, if there was one, at the position that was frozen and to the
 /// index that was frozen.
-fn outputs_are_frozen(
+pub(crate) fn outputs_are_frozen(
     owner: &Owner,
     tx: &Transaction,
     payments: &[(ScriptBuf, u64)],

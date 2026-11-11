@@ -188,3 +188,24 @@ fn ur_32_a_threshold_or_a_count_out_of_range_is_refused() {
     deep[0].origin = vec![(1, false); 17];
     assert!(wsh_sortedmulti_cbor(2, &deep).is_err());
 }
+
+#[test]
+fn ur_33_a_text_goes_as_a_byte_string_under_the_type_bytes() {
+    let text = "Name: Shop\nPolicy: 2 of 3\n".repeat(12);
+    let mut e = crate::text_to_ur_parts(&text, 60).expect("parts");
+    assert!(!e.is_single_part());
+    let mut d = Decoder::new();
+    for _ in 0..(e.seq_len() * 3) {
+        if d.receive(&e.next_part_upper()).expect("good").complete {
+            break;
+        }
+    }
+    let (kind, cbor) = d.result().expect("done");
+    assert_eq!(kind, crate::TYPE_BYTES);
+    let item = read(&cbor).expect("strict");
+    assert_eq!(item, Item::Bytes(text.as_bytes()));
+    assert!(matches!(
+        crate::text_to_ur_parts("", 60),
+        Err(UrError::Output(_))
+    ));
+}

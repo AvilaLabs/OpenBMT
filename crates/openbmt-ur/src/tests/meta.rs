@@ -68,8 +68,8 @@ fn sources() -> String {
 #[test]
 fn the_rules_file_defines_its_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 32, "{ids:?}");
-    assert!(ids.contains("UR-01") && ids.contains("UR-32"));
+    assert_eq!(ids.len(), 33, "{ids:?}");
+    assert!(ids.contains("UR-01") && ids.contains("UR-33"));
 }
 
 #[test]

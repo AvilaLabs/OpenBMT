@@ -13,7 +13,9 @@ openbmt-core = { path = "../openbmt-core" }
 openbmt-signer = { path = "../openbmt-signer" }
 openbmt-spend = { path = "../openbmt-spend" }
 openbmt-session = { path = "../openbmt-session" }
+openbmt-ur = { path = "../openbmt-ur" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 openbmt-approver = { path = "../openbmt-approver" }
+openbmt-bbqr = { path = "../openbmt-bbqr" }

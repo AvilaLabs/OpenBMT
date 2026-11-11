@@ -48,7 +48,8 @@ pub use error::UrError;
 pub use fountain::{MAX_FRAGMENT_LEN, MAX_MESSAGE_LEN, MAX_SEQ_LEN, MIN_FRAGMENT_LEN};
 pub use key::{ur_to_key_text, KeyRefusal, KeyText, KeyWords, ALL_KEY_REFUSALS, MAX_KEY_CBOR};
 pub use output::{
-    output_to_ur_parts, wsh_sortedmulti_cbor, OutputKey, MAX_OUTPUT_KEYS, TYPE_CRYPTO_OUTPUT,
+    output_to_ur_parts, text_to_ur_parts, wsh_sortedmulti_cbor, OutputKey, MAX_OUTPUT_KEYS,
+    TYPE_BYTES, TYPE_CRYPTO_OUTPUT,
 };
 pub use psbt::{psbt_to_ur_parts, ur_to_psbt, TYPE_CRYPTO_PSBT, TYPE_PSBT};
 

@@ -139,6 +139,26 @@ pub fn wsh_sortedmulti_cbor(threshold: u8, keys: &[OutputKey]) -> Result<Vec<u8>
     Ok(out)
 }
 
+/// The type of a UR that carries bytes as they are.
+pub const TYPE_BYTES: &str = "bytes";
+
+/// UR-33: an encoder for a text (a multisig setup file, a descriptor) as a
+/// `ur:bytes`, whose message is the text as a CBOR byte string.
+pub fn text_to_ur_parts(
+    text: &str,
+    max_fragment_len: usize,
+) -> Result<crate::encoder::Encoder, UrError> {
+    if text.is_empty() {
+        return Err(UrError::Output("a text of at least one byte"));
+    }
+    crate::encoder::Encoder::new(
+        TYPE_BYTES,
+        &encode_bytes(text.as_bytes()),
+        max_fragment_len,
+        crate::fountain::MIN_FRAGMENT_LEN,
+    )
+}
+
 /// UR-32: an encoder for the CBOR of an output descriptor
 /// ([`wsh_sortedmulti_cbor`]), as a `crypto-output` UR.
 pub fn output_to_ur_parts(

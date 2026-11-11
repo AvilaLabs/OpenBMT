@@ -611,6 +611,76 @@ AS-82 (`openbmt-approver`) and the owner phone's AS-83 to AS-87
   Boxes that can be forgotten: each key that has a claim queued or a
   welcome waiting, once, with whether the welcome is ready to hand over.
 
+### A hardware signer as key 2
+
+A wallet whose key 2 is held on a hardware signer (`Holder::OtherSigner`)
+has no Key app to sign its payments. The owner phone builds the
+payment, signs it with key 1, and hands it to the signer, whose own screen
+is the second review. Settings, batches and pairings still go to the Key
+app, which holds the approver key.
+
+- **AS-90.** `build_request_for_signer` freezes what `build_request` does,
+  with one difference: the spends (refunds and cash-outs) are not in the
+  request for the Key app. They are frozen in a session of their own, whose
+  ID is a tagged hash of the Key app session's ID, stored with the other
+  sessions and never carried to the Key app. The request for the Key app
+  holds the other items and the health check; the entries of the spends
+  wait "in session" with the spend session's ID. With no spend there is no
+  second session. `build_request` is unchanged.
+- **AS-91.** `export_for_signer` takes one item of a spend session. Its
+  unsigned transaction must be the frozen one, with the frozen payments
+  and change (AS-67). Key 1's signer reviews and signs it under its own
+  rules, the file is made as SP-45 says, and the session keeps that file
+  in the item, signed by key 1, in a request the owner signs again, so no
+  new framing is needed. The owner queue and key 1's new state are given
+  to `persist` together and nothing changes unless it stores them. An item
+  exported already gives the same file again and signs nothing.
+- **AS-92.** The file is described for the person: each payment's address
+  and amount, the change, and the fee, to be compared with what the
+  signer's screen shows before it is approved on the signer, whose check of
+  the change address is the second review. The words say so (`compare_words`).
+  `signer_file` gives it again without signing; before an export it refuses.
+- **AS-93.** `read_returned` reads what a signer made from bytes the caller
+  has already taken from a code or a file: a PSBT in binary, base64 or
+  hexadecimal; a transaction in binary or hexadecimal; or a PSBT whose
+  every input is final, which is read as the transaction (SP-48). Anything
+  else, an empty input and one over 4 MiB are refused. The UR
+  (`crypto-psbt`, `psbt`) and BBQr (types P and T) readers belong to the
+  transports.
+- **AS-94.** What came back must hold the unsigned transaction of the file
+  that was given, or, if it is a finished transaction, the same ID. A
+  different one is refused as "a different payment came back" and nothing
+  changes.
+- **AS-95.** A PSBT must carry a signature of key 2 on every input, each
+  verified against the BIP 143 hash (SP-46). A file without them, or with
+  a signature of another key, is refused as "this signer did not sign".
+- **AS-96.** `take_from_signer` joins the signatures with the file that was
+  given, finishes it (SP-60) or takes the finished transaction after the
+  check of SP-62, requires the ID and the frozen outputs (AS-67), and only
+  then moves the item's entries to "signed", adds the transaction to the
+  outbox and ends the session. A refusal or a failed store changes nothing,
+  so the right file can be brought again. Broadcasting follows AS-64.
+- **AS-97.** `registration` writes the wallet for a signer: the multisig
+  text file (`Name` of at most 15 printable characters made from the shop's
+  name, `Policy: 2 of 3`, `Derivation` as BIP 48, `Format: P2WSH`, then one
+  line of an upper-case fingerprint and the plain extended key for each
+  key, with no path after the keys, so that the signer derives both the
+  receive and the change addresses); the descriptor with both chains
+  (`<0;1>`), the descriptor of the receive addresses (`/0/*`) and of the
+  change addresses (`/1/*`), each with its checksum; and the CBOR of a
+  `crypto-output`, which has the receive form `/0/*`.
+- **AS-98.** The text file and the receive descriptor are shown as a
+  plain-text code when they are at most 1500 characters
+  (`text_fits_plain_qr`), else as animated `ur:bytes` (UR-33), BBQr type
+  U, or a `.txt` file; the descriptor is also shown as `ur:crypto-output`.
+  The person picks.
+- **AS-99.** After the registration the owner is asked to compare receive
+  address 0 (`first_address`) with the signer's address explorer. What
+  was done, checked or skipped, with the time, is kept as a record of its
+  own, framed with the magic `OBM0`, the wallet's checksum, one byte of
+  state and the time, and shown on the wallet screen. A record of another
+  wallet, with another magic or length, or an unknown state is refused.
+
 ## 4. What these rules do not do
 
 Stated plainly, because the design promises no overclaiming.

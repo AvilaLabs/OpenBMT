@@ -197,6 +197,8 @@ pub enum Refusal {
     SnapshotTooLarge,
     /// AS-62: the key-1 state is not for this wallet.
     Key1Wallet,
+    /// AS-90 to AS-99: a step with a hardware signer was refused.
+    Hardware(crate::hardware::HardwareRefusal),
 }
 
 impl fmt::Display for Refusal {
@@ -302,6 +304,7 @@ impl fmt::Display for Refusal {
             }
             Self::SnapshotTooLarge => write!(f, "AS-65: the snapshot would be above its bound"),
             Self::Key1Wallet => write!(f, "AS-62: the key-1 state is for another wallet"),
+            Self::Hardware(h) => write!(f, "{h}"),
         }
     }
 }

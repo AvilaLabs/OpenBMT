@@ -127,6 +127,14 @@ fn refusal_name(r: &Refusal) -> String {
         Refusal::UnknownTransaction(_) => "UnknownTransaction".to_string(),
         Refusal::SnapshotTooLarge => "SnapshotTooLarge".to_string(),
         Refusal::Key1Wallet => "Key1Wallet".to_string(),
+        Refusal::Hardware(h) => {
+            let kind = std::mem::discriminant(h);
+            let name = crate::hardware::all_refusals()
+                .into_iter()
+                .find(|(_, v)| std::mem::discriminant(v) == kind)
+                .map_or("unknown", |(n, _)| n);
+            format!("Hardware/{name}")
+        }
     };
     format!("Refusal::{n}")
 }
@@ -327,6 +335,12 @@ fn sc_01_no_variant_is_missing() {
     ] {
         wanted.push(n.to_string());
     }
+    wanted.extend(
+        crate::hardware::all_refusals()
+            .into_iter()
+            .map(|(n, _)| format!("Refusal::Hardware/{n}")),
+    );
+    wanted.push("HardwareCompare".to_string());
     for name in &wanted {
         assert!(names.contains(name), "{name} has no words");
     }
