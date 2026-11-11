@@ -23,6 +23,10 @@ use crate::{MAX_ITEMS_PER_SESSION, MAX_OPEN_SESSIONS, MAX_REFUNDS_PER_TX, MAX_TX
 /// own seed for the change position.
 const TAG_CHANGE_SEED: &str = "OpenBMT/owner-change-seed/v1";
 
+/// AS-90: the tag of the hash that gives the session of the spends meant
+/// for a hardware signer its ID, from the session of the Key app's items.
+const TAG_SIGNER_SESSION: &str = "OpenBMT/owner-signer-session/v1";
+
 /// AS-56: rounds of looking for the fee the shares must cover.
 const FEE_ROUNDS: usize = 8;
 /// AS-56: rounds after which the shares cover the largest fee seen.
@@ -297,11 +301,64 @@ impl Owner {
         random: &[u8; 96],
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<Built, OwnerError<E>> {
+        self.build_inner(
+            coins,
+            fee_rate,
+            change_index,
+            lock_height,
+            now,
+            random,
+            false,
+            persist,
+        )
+        .map(|(built, _)| built)
+    }
+
+    /// AS-90: [`Owner::build_request`] for a wallet whose key 2 is a
+    /// hardware signer. The spends are not in the request for the Key app:
+    /// they are frozen in a session of their own, whose ID is returned
+    /// beside the Key app's, and which is never carried to the Key app. The
+    /// Key app's request holds the other items and the health check.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_request_for_signer<E>(
+        &mut self,
+        coins: &[Coin],
+        fee_rate: u64,
+        change_index: u32,
+        lock_height: u32,
+        now: u64,
+        random: &[u8; 96],
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(Built, Option<[u8; 32]>), OwnerError<E>> {
+        self.build_inner(
+            coins,
+            fee_rate,
+            change_index,
+            lock_height,
+            now,
+            random,
+            true,
+            persist,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_inner<E>(
+        &mut self,
+        coins: &[Coin],
+        fee_rate: u64,
+        change_index: u32,
+        lock_height: u32,
+        now: u64,
+        random: &[u8; 96],
+        for_signer: bool,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(Built, Option<[u8; 32]>), OwnerError<E>> {
         if fee_rate == 0 {
             return Err(Refusal::ZeroFeeRate.into());
         }
         let mut next = self.state.clone();
-        if next.sessions.len() >= MAX_OPEN_SESSIONS {
+        if next.sessions.len() + usize::from(for_signer) >= MAX_OPEN_SESSIONS {
             return Err(Refusal::Full("the list of open sessions").into());
         }
         let (session_id, nonce, change_seed) = thirds(random);
@@ -660,6 +717,20 @@ impl Owner {
         // The health check is last (AS-60).
         items.push((Item::HealthCheck { nonce }, Frozen::Health));
 
+        // AS-90: the spends of a hardware signer's wallet go to a session of
+        // their own.
+        let mut spends: Vec<(Item, Frozen)> = Vec::new();
+        if for_signer {
+            let (own, rest): (Vec<_>, Vec<_>) = items
+                .into_iter()
+                .partition(|(_, f)| matches!(f, Frozen::Spend { .. }));
+            items = rest;
+            spends = own;
+        }
+        let signer_id = tagged_hash(TAG_SIGNER_SESSION, &session_id);
+        if !spends.is_empty() && next.sessions.iter().any(|s| s.id == signer_id) {
+            return Err(Refusal::SessionIdUsed.into());
+        }
         let mut request_items: Vec<RequestItem> = Vec::with_capacity(items.len());
         let mut frozen: Vec<(u32, Frozen)> = Vec::with_capacity(items.len());
         for (n, (item, f)) in items.into_iter().enumerate() {
@@ -669,6 +740,24 @@ impl Owner {
         }
         let request = Request::new(&self.identity, session_id, self.wallet_id, request_items)
             .map_err(Refusal::Encode)?;
+        let mut spend_session: Option<OpenSession> = None;
+        if !spends.is_empty() {
+            let mut spend_request: Vec<RequestItem> = Vec::with_capacity(spends.len());
+            let mut spend_frozen: Vec<(u32, Frozen)> = Vec::with_capacity(spends.len());
+            for (n, (item, f)) in spends.into_iter().enumerate() {
+                let number = u32::try_from(n).unwrap_or(u32::MAX);
+                spend_request.push(RequestItem { number, item });
+                spend_frozen.push((number, f));
+            }
+            let made = Request::new(&self.identity, signer_id, self.wallet_id, spend_request)
+                .map_err(Refusal::Encode)?;
+            spend_session = Some(OpenSession {
+                id: signer_id,
+                created_at: now,
+                request: made.as_bytes().to_vec(),
+                frozen: spend_frozen,
+            });
+        }
 
         for (_, f) in &frozen {
             let ids: Vec<u32> = match f {
@@ -689,6 +778,20 @@ impl Owner {
                 }
             }
         }
+        if let Some(own) = &spend_session {
+            for (_, f) in &own.frozen {
+                if let Frozen::Spend {
+                    refunds, cash_out, ..
+                } = f
+                {
+                    for id in refunds.iter().copied().chain(*cash_out) {
+                        if let Some(stage) = next.stage_mut(id) {
+                            *stage = Stage::InSession { session: own.id };
+                        }
+                    }
+                }
+            }
+        }
         let bytes = request.as_bytes().to_vec();
         next.sessions.push(OpenSession {
             id: session_id,
@@ -696,11 +799,16 @@ impl Owner {
             request: bytes.clone(),
             frozen,
         });
+        let signer_session = spend_session.as_ref().map(|s| s.id);
+        next.sessions.extend(spend_session);
         self.commit(next, persist)?;
-        Ok(Built {
-            session_id,
-            request: bytes,
-            skipped,
-        })
+        Ok((
+            Built {
+                session_id,
+                request: bytes,
+                skipped,
+            },
+            signer_session,
+        ))
     }
 }
