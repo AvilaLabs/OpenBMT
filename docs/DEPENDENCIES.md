@@ -18,6 +18,7 @@ for each program that ships. The lists themselves are in `deps/`.
 | Books export | `deps/openbmt-books.txt` | 42 |
 | Key app library | `deps/openbmt-key-ffi.txt` | 20 |
 | Counter app library | `deps/openbmt-counter-ffi.txt` | 39 |
+| Owner app library | `deps/openbmt-owner-ffi.txt` | 39 |
 | QR code encoder | `deps/openbmt-qr.txt` | 0 |
 | Price sources | `deps/openbmt-rates.txt` | 19 |
 
@@ -37,6 +38,8 @@ Where they come from:
   this one crate. Its binding to the app is written by hand, in place of
   a binding generator that brought in about 40 packages.
 - **The counter app library, the same 1 more.** The counter's list and
+  `jni-sys`, bound the same way by hand. It adds nothing else.
+- **The owner app library, the same 1 more.** The owner's list and
   `jni-sys`, bound the same way by hand. It adds nothing else.
 
 - **The QR code encoder, none.** `openbmt-qr` has no dependencies of its

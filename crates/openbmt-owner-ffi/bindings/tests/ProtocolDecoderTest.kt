@@ -1,0 +1,269 @@
+package org.openbmt.owner
+
+import java.io.ByteArrayOutputStream
+
+/** Plain JVM regression harness for the production OBMl decoder and the OBMk encoder; run its main. */
+object ProtocolDecoderTest {
+    /** The `start` request of [sampleConfig], as the Rust test of the same name writes it. */
+    private const val START_FRAME_HEX =
+        "4f424d6b01010000000000000000000100000064030100000000000000010000000101000000020100000077010000000300040000000500000006000000010100000070010000000100000061000101000100000078010000000701000000010000000809000000000000000a00000000000000" +
+            ""
+
+    @JvmStatic
+    fun main(args: Array<String>) {
+        val success = decodeResponse(header(0))
+        success.end()
+
+        val error = decodeError(errorFrame())
+        check(error.rule == "sample-rule")
+        check(error.text == "sample text")
+        check(error.status == 1)
+        check(error.words?.heading == "Heading")
+        check(error.words?.who == 5)
+
+        rejects("status") { decodeResponse(errorFrame(status = 5)) }
+        rejects("tone") { decodeResponse(errorFrame(tone = 4)) }
+        rejects("person") { decodeResponse(errorFrame(who = 7)) }
+        rejects("UTF-8") { decodeResponse(errorFrame(heading = byteArrayOf(0xff.toByte()))) }
+        rejects("truncation") { decodeResponse(errorFrame().copyOf(errorFrame().size - 1)) }
+        rejects("trailing bytes") { decodeResponse(errorFrame(trailingByte = true)) }
+        rejects("the counter app's magic", "response-magic") {
+            decodeResponse(byteArrayOf('O'.code.toByte(), 'B'.code.toByte(), 'M'.code.toByte(), 'n'.code.toByte(), 1, 0))
+        }
+
+        results()
+        requests()
+    }
+
+    // ---- the results ----
+
+    private fun results() {
+        val status = decodeResponse(statusFrame()).statusView()
+        check(status.view == ViewKind.Ready && status.rescanTo == null)
+        check(status.viewWords.heading == "Words" && status.receiptsWords.who == 4)
+        check(status.checkedHeight == 6L && status.tipHeight == 7L)
+        check(status.halted == null && status.recoveryWords == null)
+        check(status.health.known && status.health.healthy && !status.health.behind)
+        check(status.balanceSats == 300_000L && !status.recoveryPending && !status.stopped)
+        rejects("a view tag") { decodeResponse(statusFrame(view = 3)).statusView() }
+        rejects("a bool") { decodeResponse(statusFrame(stopped = 2)).statusView() }
+        rejects("trailing bytes in a status") {
+            decodeResponse(statusFrame(trailingByte = true)).also { it.statusView(); it.end() }
+        }
+
+        val taken = decodeResponse(takenFrame()).taken()
+        check(taken.sessionId.size == 2)
+        check(taken.outcomes.size == 1 && taken.outcomes[0].kind == OutcomeKind.Delivered)
+        check(taken.outcomes[0].item == 1L && taken.outcomes[0].finished == 3L)
+        check(taken.outcomes[0].reason == null)
+        check(taken.sends.size == 1 && taken.sends[0].txid == "ab12" && taken.sends[0].state == SendKind.Sent)
+        rejects("an outcome tag") { decodeResponse(takenFrame(outcome = 3)).taken() }
+        rejects("a send tag") { decodeResponse(takenFrame(send = 8)).taken() }
+
+        val queue = decodeResponse(queueFrame()).queue()
+        check(queue.refunds.size == 1 && queue.cashOuts.size == 1 && queue.others.size == 1)
+        val refund = queue.refunds[0]
+        check(refund.id == 4L && refund.sale == 0L && refund.sats == 10_000L)
+        check(refund.cashier == "Mia" && refund.address == "bcrt1qaddress")
+        check(refund.stage.kind == StageKind.Signed && refund.stage.detail == "ab12")
+        check(refund.waitingForDepth == false && refund.receivedSats == 300_000L)
+        val cash = queue.cashOuts[0]
+        check(cash.amount is CashAmount.All && cash.label == "till")
+        check(queue.others[0].kind == EntryKind.SettingsChange)
+        rejects("a cash amount tag") { decodeResponse(queueFrame(amountTag = 2)).queue() }
+        rejects("a stage tag") { decodeResponse(queueFrame(stage = 6)).queue() }
+
+        val link = decodeResponse(linkFrame()).linkState()
+        check(link.reachable && link.refused == 2L)
+        check(link.alerts.size == 1 && link.alerts[0].kind == AlertKind.Diverged && link.alerts[0].value == 9L)
+        check(link.counters.size == 1 && link.counters[0].records == 5L)
+        check(link.counters[0].checkInSeq == 3L && link.counters[0].checkInHeld == true)
+        check(link.counters[0].lastCheckInAt == null)
+
+        val old = decodeResponse(oldFrame()).oldAddresses()
+        check(old.kind == OldKind.Monthly && old.count == 12L && old.daysAgo == 3L)
+        check(old.next == 1_700_000_000L && !old.running && old.words?.heading == "Words")
+
+        val pump = decodeResponse(header(0, Writer().u32(1).string("note").u8(1).toByteArray())).pump()
+        check(pump.notes == listOf("note") && pump.stopped)
+    }
+
+    // ---- the requests ----
+
+    private fun requests() {
+        val frame = requestFrame(10, 1) { it.u64(1_700_000_000).u32(5) }
+        check(
+            hex(frame) == "4f424d6b010a000100000000000000" + "00f1536500000000" + "05000000",
+        ) { hex(frame) }
+        check(hex(startFrame(sampleConfig())) == START_FRAME_HEX) { hex(startFrame(sampleConfig())) }
+    }
+
+    private fun sampleConfig() =
+        StartConfig(
+            dir = "d",
+            network = OwnerNetwork.Regtest,
+            now = 1,
+            ownerSecret = byteArrayOf(1),
+            approverRoot = byteArrayOf(2),
+            wallet = "w",
+            key1Account = byteArrayOf(3),
+            key3Xpub = null,
+            batchMinCount = 4,
+            refundDepth = 5,
+            birthday = 6,
+            proxy = "p",
+            fixedPeers = listOf("a"),
+            broadcastProxy = null,
+            withoutTor = true,
+            link = LinkConfig(
+                route = Route.Direct("x"),
+                relayKey = byteArrayOf(7),
+                counters = listOf(byteArrayOf(8)),
+                heartbeatEverySecs = 9,
+                checkInGraceSecs = 10,
+            ),
+        )
+
+    private fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
+
+    // ---- frames ----
+
+    private fun header(status: Int, rest: ByteArray = ByteArray(0)): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(byteArrayOf('O'.code.toByte(), 'B'.code.toByte(), 'M'.code.toByte(), 'l'.code.toByte()))
+        out.write(1)
+        out.write(status)
+        out.write(rest)
+        return out.toByteArray()
+    }
+
+    private fun decodeError(frame: ByteArray): OwnerException = try {
+        decodeResponse(frame)
+        error("expected an OBMl error")
+    } catch (e: OwnerException) {
+        e
+    }
+
+    private inline fun rejects(label: String, rule: String = "response-malformed", block: () -> Unit) {
+        val e = try {
+            block()
+            error("accepted invalid $label")
+        } catch (e: OwnerException) {
+            e
+        }
+        check(e.rule == rule) { "$label: ${e.rule}" }
+    }
+
+    private fun string16(out: ByteArrayOutputStream, bytes: ByteArray) {
+        out.write(bytes.size and 0xff)
+        out.write((bytes.size ushr 8) and 0xff)
+        out.write(bytes)
+    }
+
+    private fun words(
+        out: ByteArrayOutputStream,
+        tone: Int = 0,
+        who: Int = 4,
+        heading: ByteArray = "Words".toByteArray(Charsets.UTF_8),
+    ) {
+        out.write(tone)
+        out.write(who)
+        string16(out, heading)
+        string16(out, "What happened.".toByteArray(Charsets.UTF_8))
+        string16(out, "Try again.".toByteArray(Charsets.UTF_8))
+        out.write(0) // code absent
+        out.write(0) // at absent
+        out.write(0) // quoted absent
+        out.write(0) // detail absent
+    }
+
+    private fun errorFrame(
+        status: Int = 1,
+        tone: Int = 0,
+        who: Int = 5,
+        heading: ByteArray = "Heading".toByteArray(Charsets.UTF_8),
+        trailingByte: Boolean = false,
+    ): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(byteArrayOf('O'.code.toByte(), 'B'.code.toByte(), 'M'.code.toByte(), 'l'.code.toByte()))
+        out.write(1)
+        out.write(status)
+        string16(out, "sample-rule".toByteArray(Charsets.UTF_8))
+        string16(out, "sample text".toByteArray(Charsets.UTF_8))
+        words(out, tone, who, heading)
+        if (trailingByte) out.write(0x55)
+        return out.toByteArray()
+    }
+
+    private fun statusFrame(view: Int = 0, stopped: Int = 0, trailingByte: Boolean = false): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(view)
+        out.write(0) // rescan_to absent
+        words(out)
+        words(out)
+        out.write(Writer().u32(6).u32(7).toByteArray())
+        out.write(0) // halted absent
+        out.write(byteArrayOf(1, 1, 0)) // health: known, healthy, not behind
+        words(out)
+        out.write(Writer().u64(300_000).toByteArray())
+        out.write(0) // recovery pending
+        out.write(0) // recovery words absent
+        out.write(stopped)
+        if (trailingByte) out.write(0x55)
+        return header(0, out.toByteArray())
+    }
+
+    private fun takenFrame(outcome: Int = 0, send: Int = 1): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(Writer().bytes(byteArrayOf(9, 9)).u32(1).u32(1).u8(outcome).u32(3).u8(0).toByteArray())
+        words(out)
+        out.write(Writer().u32(1).string("ab12").u8(send).u32(0).toByteArray())
+        words(out)
+        return header(0, out.toByteArray())
+    }
+
+    private fun stage(out: ByteArrayOutputStream, kind: Int, detail: String?) {
+        out.write(kind)
+        if (detail == null) {
+            out.write(0)
+        } else {
+            out.write(Writer().u8(1).string(detail).toByteArray())
+        }
+        words(out)
+    }
+
+    private fun queueFrame(amountTag: Int = 1, stage: Int = 3): ByteArray {
+        val out = ByteArrayOutputStream()
+        // One refund.
+        out.write(
+            Writer().u32(1).u32(4).bytes(ByteArray(32) { 1 }).u32(0).string("Mia")
+                .string("bcrt1qaddress").u64(10_000).toByteArray(),
+        )
+        stage(out, stage, "ab12")
+        out.write(Writer().u8(1).u8(0).u8(1).u64(300_000).toByteArray())
+        // One cash-out of everything.
+        out.write(Writer().u32(1).u32(5).string("bcrt1qother").u8(amountTag).string("till").toByteArray())
+        stage(out, 0, null)
+        // One settings change.
+        out.write(Writer().u32(1).u32(6).u8(1).toByteArray())
+        stage(out, 0, null)
+        return header(0, out.toByteArray())
+    }
+
+    private fun linkFrame(): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(Writer().u8(1).u64(2).u32(1).u8(1).bytes(ByteArray(32) { 2 }).u64(9).toByteArray())
+        words(out)
+        out.write(Writer().u32(1).bytes(ByteArray(32) { 2 }).u64(5).bytes(ByteArray(32) { 3 }).toByteArray())
+        out.write(Writer().u8(1).u64(3).u8(1).u8(1).u8(0).toByteArray())
+        words(out)
+        return header(0, out.toByteArray())
+    }
+
+    private fun oldFrame(): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(Writer().u8(2).u64(12).u64(3).u8(1).u64(1_700_000_000).u8(0).u8(1).toByteArray())
+        words(out)
+        return header(0, out.toByteArray())
+    }
+}

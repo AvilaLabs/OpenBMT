@@ -75,6 +75,8 @@ jobs:
         run: crates/openbmt-key-ffi/bindings/tests/run-jvm.sh
       - name: Run Counter binding decoder harness
         run: crates/openbmt-counter-ffi/bindings/tests/run-jvm.sh
+      - name: Run Owner binding decoder harness
+        run: crates/openbmt-owner-ffi/bindings/tests/run-jvm.sh
 
   qr-crosscheck:
     name: QR encoder against ZXing

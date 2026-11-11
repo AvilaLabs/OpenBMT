@@ -1,0 +1,38 @@
+[package]
+name = "openbmt-owner-ffi"
+description = "The OpenBMT owner node as a library the owner app for Android calls: one safe dispatch over framed requests, a registry of handles, and every rule left in the existing crates"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[features]
+# The JNI entry point, compiled for every target so that the host can test
+# it; on Android it is always compiled.
+default = ["jni"]
+jni = []
+
+# The same exact versions as the other crates, so the types unify. Every
+# openbmt crate is a path dependency inside this workspace.
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+openbmt-counter-node = { path = "../openbmt-counter-node" }
+openbmt-courier = { path = "../openbmt-courier" }
+openbmt-link = { path = "../openbmt-link" }
+openbmt-net-io = { path = "../openbmt-net-io" }
+openbmt-owner = { path = "../openbmt-owner" }
+openbmt-owner-node = { path = "../openbmt-owner-node" }
+openbmt-signer = { path = "../openbmt-signer" }
+openbmt-watch = { path = "../openbmt-watch" }
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+# The JNI types, nothing else. 0.3.0 has no dependencies of its own; the
+# later releases (0.3.1, 0.4) depend on a macro crate and syn.
+jni-sys = "=0.3.0"
+
+[dev-dependencies]
+# The Key app, in process, for the end-to-end test of an approval.
+openbmt-approver = { path = "../openbmt-approver" }

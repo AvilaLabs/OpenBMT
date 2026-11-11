@@ -478,6 +478,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-owner-ffi"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "jni-sys",
+ "openbmt-approver",
+ "openbmt-core",
+ "openbmt-counter-node",
+ "openbmt-courier",
+ "openbmt-link",
+ "openbmt-net-io",
+ "openbmt-owner",
+ "openbmt-owner-node",
+ "openbmt-signer",
+ "openbmt-watch",
+]
+
+[[package]]
 name = "openbmt-owner-node"
 version = "0.1.0"
 dependencies = [
