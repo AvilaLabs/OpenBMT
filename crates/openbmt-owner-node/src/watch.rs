@@ -38,7 +38,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use openbmt_core::identity::{DeviceId, Identity};
-use openbmt_counter_node::DriverPort;
+use openbmt_counter_node::{DriverPort, HealthFn};
 use openbmt_courier::{Courier, CourierConfig, FirstStart, Post, RelayPost};
 use openbmt_link::{ClientConfig, ClientError, Kind, Role, Route};
 use openbmt_net_io::{DriverConfig, Handle};
@@ -230,6 +230,10 @@ pub struct WatchConfig {
     pub relay: DeviceId,
     /// The link's intervals.
     pub link: WatchLinkConfig,
+    /// The health rules: `None` is the real ones. A check against a node
+    /// with fewer peers than the rules ask for puts something else here, as
+    /// it does in [`OwnerConfig`].
+    pub health: Option<HealthFn>,
 }
 
 /// Why the watcher did not start.
@@ -274,6 +278,7 @@ impl WatchNode<Handle, RelayPost> {
             route,
             relay,
             link,
+            health,
         } = config;
         let key = |_| WatchStartError::Key;
         let courier = start_courier(
@@ -286,6 +291,9 @@ impl WatchNode<Handle, RelayPost> {
         let identity = Identity::from_secret_bytes(&secret).map_err(key)?;
         let mut owner = OwnerConfig::new(&dir, identity, driver);
         owner.watch_key = true;
+        if let Some(health) = health {
+            owner.health = health;
+        }
         let watcher = OwnerWatcher::start_with(owner, |driver, dir| {
             let storage = FileStorage::new(&dir).map_err(|e| e.to_string())?;
             let random = OsRandomness::new().map_err(|e| e.to_string())?;
@@ -345,6 +353,11 @@ impl<P: DriverPort, R: Post> WatchNode<P, R> {
     /// The watcher.
     pub fn watcher(&self) -> &OwnerWatcher<P> {
         &self.watcher
+    }
+
+    /// The watcher, to make a heartbeat by hand in a check.
+    pub fn watcher_mut(&mut self) -> &mut OwnerWatcher<P> {
+        &mut self.watcher
     }
 
     /// The link.

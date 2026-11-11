@@ -122,9 +122,10 @@ screen and not a shared computer.
   a sealed message of kind Settings from the owner (LK-08) or by hand
   through the setup.
 - **BX-22.** The relay's member list is the device list of the settings in
-  force and the owner's key, and is replaced when new settings are stored
-  (LK-21). Nobody sets it by hand on a paired Box. A device taken off the
-  list loses its mailbox at once.
+  force, the owner's key and the watch key the settings name, if any
+  (CR-185, LK-74), and is replaced when new settings are stored (LK-21).
+  Nobody sets it by hand on a paired Box. A device taken off the list, or a
+  watch key the settings no longer name, loses its mailbox at once.
 - **BX-23.** Settings that no longer list this Box turn it off: the member
   list becomes empty, the POS reading stops and the POS token is erased
   from its storage. It stays pinned to its roots (BX-16).

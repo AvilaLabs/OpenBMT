@@ -753,6 +753,28 @@ fn bx_22_the_members_are_the_device_list_and_the_owner_and_follow_the_settings()
 }
 
 #[test]
+fn bx_22_the_watch_key_the_settings_name_is_a_member_until_they_stop_naming_it() {
+    let (mut core, _) = paired_core();
+    let me = core.device_id();
+    let watch = id(0x33).device_id();
+    assert!(!core.members().contains(&watch));
+    // Naming it loosens, so the Key app co-signs.
+    let mut v2 = settings_with(2, &me);
+    v2.watch_key = Some(watch);
+    core.take_settings(&sign_both(v2).to_bytes()).unwrap();
+    assert!(core.members().contains(&watch));
+    assert_eq!(core.members().len(), 5);
+    // It is a member after a restart, as the settings in force say.
+    let mut core = reopen(core).unwrap();
+    assert!(core.members().contains(&watch));
+    // Settings that no longer name it take its mailbox away.
+    let v3 = settings_with(3, &me);
+    core.take_settings(&sign_owner(v3).to_bytes()).unwrap();
+    assert!(!core.members().contains(&watch));
+    assert_eq!(core.members().len(), 4);
+}
+
+#[test]
 fn bx_22_settings_that_come_to_more_members_than_the_relay_holds_are_refused() {
     let (mut core, _) = paired_core();
     let me = core.device_id();

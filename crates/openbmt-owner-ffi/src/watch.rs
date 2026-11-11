@@ -312,6 +312,7 @@ impl WatchEntry {
             route,
             relay,
             link,
+            health: None,
         };
         let (orders_tx, orders_rx) = channel();
         let (ready_tx, ready_rx) = channel();

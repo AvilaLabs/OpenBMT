@@ -64,6 +64,26 @@
 #      shows it and the batch stops waiting. The owner then hands over the
 #      same batch once more, and the counter's records still show it once
 #      (CR-168).
+#  11. The owner names a watch key in the settings (CR-185): signed by the
+#      owner and a test approver, as a loosening must be. The counter takes
+#      them, and names the watch key.
+#  12. The owner stops. Its heartbeat goes stale on the counter.
+#  13. A watch-only owner (`watch_regtest`, `WatchNode`, LK-75: no owner
+#      secret, no wallet, no key 1) starts on the same data directory and
+#      sends heartbeats signed by the watch key through the relay. The counter
+#      takes them, the heartbeat is verified and fresh, and so the owner's
+#      word that instant sales may go on (CR-50 to CR-53) is there with the
+#      owner's own phone stopped (CR-186). The relay lists the watch key as a
+#      member, as the person who runs it does (LK-74).
+#  14. Settings that remove the watch key (a tightening, signed by the owner
+#      alone) are taken. The heartbeats the watcher still sends through the
+#      relay are no longer taken, and a heartbeat signed by the watch key,
+#      handed to the counter by hand, is refused.
+#  Steps 11 and 14 hand the settings to the counter by its `settings` command;
+#  the delivery through the link is step 8, and the Box's part is BX-22.
+#  What step 13 shows of "instant is allowed" is the heartbeat: the sale
+#  itself is not run as an instant one, because the health rules and Tor are
+#  not exercised here (see above).
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin (put first on
 # PATH; set CORE_BIN to use another), jq, and cargo unless the four binaries
@@ -80,6 +100,8 @@
 #   OWNER_BIN      the `owner_regtest` example binary
 #   RELAY_BIN      the `relay` example binary of `openbmt-link`
 #   PROBE_BIN      the `link_probe` example binary of `openbmt-courier`
+#   WATCH_BIN      the `watch_regtest` example binary of `openbmt-owner-node`
+#                  (steps 10 to 13)
 #   BOX_BIN        the `openbmt-box` binary (step 7)
 #   PAIR_BIN       the `box_pair` example binary of `openbmt-box` (step 7)
 #   BOXLINK_BIN    the `counter_box_link` example binary of
@@ -142,9 +164,9 @@ A_PID=
 RELAY_PID=
 BOX_PID=
 declare -A PID LOG FDN COUNT
-PID[c]=; PID[o]=
-FDN[c]=3; FDN[o]=4
-COUNT[c]=0; COUNT[o]=0
+PID[c]=; PID[o]=; PID[w]=
+FDN[c]=3; FDN[o]=4; FDN[w]=5
+COUNT[c]=0; COUNT[o]=0; COUNT[w]=0
 LAST=
 
 stop_pid() { # pid
@@ -171,9 +193,10 @@ stop_core() {
 }
 
 cleanup() {
-  exec 3>&- 4>&- 2>/dev/null || true
+  exec 3>&- 4>&- 5>&- 2>/dev/null || true
   stop_pid "${PID[c]:-}"
   stop_pid "${PID[o]:-}"
+  stop_pid "${PID[w]:-}"
   stop_pid "$RELAY_PID"
   stop_pid "$BOX_PID"
   stop_core
@@ -192,14 +215,15 @@ build() { # package example
       --manifest-path "$ROOT/Cargo.toml" -p "$1" --example "$2" || die "the build of $2 failed"
   fi
 }
-if [ -z "${COUNTER_BIN:-}" ] || [ -z "${OWNER_BIN:-}" ] || [ -z "${RELAY_BIN:-}" ] || [ -z "${PROBE_BIN:-}" ]; then
+if [ -z "${COUNTER_BIN:-}" ] || [ -z "${OWNER_BIN:-}" ] || [ -z "${RELAY_BIN:-}" ] || [ -z "${PROBE_BIN:-}" ] || [ -z "${WATCH_BIN:-}" ]; then
   say "Build the examples"
   [ -n "${COUNTER_BIN:-}" ] || { build openbmt-counter-node counter_regtest; COUNTER_BIN="$TARGET/debug/examples/counter_regtest"; }
   [ -n "${OWNER_BIN:-}" ] || { build openbmt-owner-node owner_regtest; OWNER_BIN="$TARGET/debug/examples/owner_regtest"; }
   [ -n "${RELAY_BIN:-}" ] || { build openbmt-link relay; RELAY_BIN="$TARGET/debug/examples/relay"; }
   [ -n "${PROBE_BIN:-}" ] || { build openbmt-courier link_probe; PROBE_BIN="$TARGET/debug/examples/link_probe"; }
+  [ -n "${WATCH_BIN:-}" ] || { build openbmt-owner-node watch_regtest; WATCH_BIN="$TARGET/debug/examples/watch_regtest"; }
 fi
-for bin in COUNTER_BIN OWNER_BIN RELAY_BIN PROBE_BIN; do
+for bin in COUNTER_BIN OWNER_BIN RELAY_BIN PROBE_BIN WATCH_BIN; do
   [ -x "${!bin}" ] || die "no binary at ${!bin} ($bin)"
 done
 if [ -z "${BOX_BIN:-}" ] || [ -z "${PAIR_BIN:-}" ] || [ -z "${BOXLINK_BIN:-}" ]; then
@@ -229,7 +253,7 @@ done
 
 # ---- helpers for the examples ---------------------------------------------------
 
-# Start an example. `c` is the counter, `o` the owner. Its standard input is
+# Start an example. `c` is the counter, `o` the owner, `w` the watch-only owner. Its standard input is
 # a fifo that stays open on descriptor 3 (counter) or 4 (owner), so that
 # commands can be sent.
 start_ex() { # who data-dir peer-port relay-port relay-key
@@ -239,7 +263,12 @@ start_ex() { # who data-dir peer-port relay-port relay-key
   COUNT[$who]=0
   rm -f "$fifo"
   mkfifo "$fifo"
-  if [ "$who" = c ]; then
+  if [ "$who" = w ]; then
+    exec 5<>"$fifo"
+    "$WATCH_BIN" "$2" "127.0.0.1:$3" --regtest-single-peer --relay "127.0.0.1:$4" \
+      --relay-key "$5" --heartbeat-every "$HB_EVERY" --heartbeat-max-age "$MAX_AGE" \
+      <&5 >"${LOG[w]}" 2>&1 &
+  elif [ "$who" = c ]; then
     exec 3<>"$fifo"
     "$COUNTER_BIN" "$2" "127.0.0.1:$3" --regtest-single-peer --customers-off-wifi \
       --heartbeat-max-age "$MAX_AGE" --relay "127.0.0.1:$4" --relay-key "$5" \
@@ -306,7 +335,7 @@ stop_ex() { # who
   wait "${PID[$who]}"
   local rc=$?
   PID[$who]=
-  if [ "$who" = c ]; then exec 3>&-; else exec 4>&-; fi
+  case "$who" in c) exec 3>&- ;; o) exec 4>&- ;; w) exec 5>&- ;; esac
   return $rc
 }
 # The value of `key=` in a line.
@@ -398,8 +427,10 @@ OWNER_KEY=$("$PROBE_BIN" key 11) || die "no owner key"
 COUNTER_KEY=$("$PROBE_BIN" key 13) || die "no counter key"
 THIRD_KEY=$("$PROBE_BIN" key 15) || die "no third key"
 [ ${#OWNER_KEY} = 64 ] && [ ${#COUNTER_KEY} = 64 ] && [ ${#THIRD_KEY} = 64 ] || die "the keys are not 64 characters"
-printf '%s\n%s\n' "$OWNER_KEY" "$COUNTER_KEY" >"$R_DATA/members"
-note "members: the owner and the counter; the third key ($THIRD_KEY) is not listed"
+WATCH_KEY=$("$PROBE_BIN" key 5a) || die "no watch key"
+[ ${#WATCH_KEY} = 64 ] || die "the watch key is not 64 characters"
+printf '%s\n%s\n%s\n' "$OWNER_KEY" "$COUNTER_KEY" "$WATCH_KEY" >"$R_DATA/members"
+note "members: the owner, the counter and the watch key (LK-74); the third key ($THIRD_KEY) is not listed"
 
 RELAY_LOG="$BASE/relay.log"
 start_relay() {
@@ -695,15 +726,122 @@ else
   fi
 fi
 
+# ---- 11 --------------------------------------------------------------------------
+
+say "11. The owner names a watch key, with the approver's co-signature"
+SET_NAME=$("$WATCH_BIN" --settings 2 name --heartbeat-max-age "$MAX_AGE" | sed -n 's/^settings //p')
+SET_REMOVE=$("$WATCH_BIN" --settings 3 remove --heartbeat-max-age "$MAX_AGE" | sed -n 's/^settings //p')
+if [ -z "$SET_NAME" ] || [ -z "$SET_REMOVE" ]; then
+  bad 11 "the settings could not be made"
+else
+  xcmd c "settings $SET_NAME"
+  note "$(grep '^settings ' <<<"$LAST")"
+  if grep -q "^settings taken version=2 change=Loosening watch_key=$WATCH_KEY\$" <<<"$LAST"; then
+    pass 11 "the settings that name the watch key, signed by the owner and the approver, were taken by the counter as a loosening, and it names $WATCH_KEY"
+  else
+    bad 11 "the counter did not take the settings that name the watch key: $(grep '^settings ' <<<"$LAST")"
+  fi
+fi
+
+# ---- 12 --------------------------------------------------------------------------
+
+say "12. The owner stops"
+if stop_ex o; then OWNER_STOPPED=yes; else OWNER_STOPPED=; fi
+GONE=
+for _ in $(seq 1 $((FRESH + 40))); do
+  read_hb
+  if [ -n "$HB_AGE" ] && [ "$HB_AGE" -gt "$FRESH" ]; then GONE=yes; break; fi
+  sleep 1
+done
+note "heartbeat: verified=$HB_VERIFIED age=$HB_AGE (fresh is under $FRESH)"
+if [ -n "$OWNER_STOPPED" ] && [ -n "$GONE" ]; then
+  pass 12 "the owner example stopped cleanly and the counter's heartbeat aged to $HB_AGE s, past the fresh limit of $FRESH: without the owner, instant sales would stop"
+else
+  bad 12 "owner stopped: ${OWNER_STOPPED:-no}; heartbeat aged past $FRESH s: ${GONE:-no} (age $HB_AGE)"
+fi
+
+# ---- 13 --------------------------------------------------------------------------
+
+say "13. A watch-only owner sends heartbeats; the counter takes them"
+xcmd c linkstate
+TAKEN_BEFORE=$(kv "$(grep '^linkstate ' <<<"$LAST")" heartbeats_taken)
+start_ex w "$O_DATA" "$A_P2P" "$RELAY_PORT" "$RELAY_KEY"
+if xawait w "^started " 60; then
+  FOUND=
+  for _ in $(seq 1 60); do
+    read_hb
+    if [ "$HB_VERIFIED" = true ] && [ -n "$HB_AGE" ] && [ "$HB_AGE" -le "$FRESH" ]; then FOUND=yes; break; fi
+    sleep 1
+  done
+  xcmd c linkstate
+  LS12=$(grep '^linkstate ' <<<"$LAST")
+  TAKEN_AFTER=$(kv "$LS12" heartbeats_taken)
+  xcmd w state
+  WS12=$(grep '^state ' <<<"$LAST")
+  note "hbstate: verified=$HB_VERIFIED age=$HB_AGE"
+  note "counter: heartbeats taken $TAKEN_BEFORE before, $TAKEN_AFTER after"
+  note "watcher: $WS12"
+  if [ -n "$FOUND" ] && [ "${TAKEN_AFTER:-0}" -gt "${TAKEN_BEFORE:-0}" ] &&
+    [ "$(kv "$WS12" reached)" = true ] && [ "$(kv "$WS12" relay_refused)" = false ] &&
+    [ "$(kv "$WS12" sent)" -ge 1 ]; then
+    pass 13 "with the owner example stopped, the watch-only owner sent heartbeats signed by the watch key through the relay; the counter took $((TAKEN_AFTER - TAKEN_BEFORE)) of them, and its heartbeat is verified and $HB_AGE s old, so the owner's word for instant sales is there"
+  else
+    bad 13 "heartbeat fresh and verified: ${FOUND:-no} (age $HB_AGE); taken $TAKEN_BEFORE to $TAKEN_AFTER; watcher: $WS12"
+  fi
+else
+  bad 13 "the watch-only owner did not start: $(tail -3 "${LOG[w]}")"
+fi
+
+# ---- 14 --------------------------------------------------------------------------
+
+say "14. The watch key is removed; its heartbeats are refused"
+if [ -n "${SET_REMOVE:-}" ] && [ -n "${PID[w]}" ]; then
+  xcmd c "linkstate"
+  SEQ_BEFORE=$(kv "$(grep '^linkstate ' <<<"$LAST")" heartbeats_taken)
+  xcmd c "settings $SET_REMOVE"
+  note "$(grep '^settings ' <<<"$LAST")"
+  REMOVED=
+  grep -q "^settings taken version=3 change=Tightening watch_key=none\$" <<<"$LAST" && REMOVED=yes
+  # The watcher goes on sending; the counter must stop taking, and the
+  # heartbeat ages out.
+  xcmd w heartbeat
+  HB_HEX=$(sed -n 's/^heartbeat //p' <<<"$LAST")
+  xcmd c linkstate
+  TAKEN13=$(kv "$(grep '^linkstate ' <<<"$LAST")" heartbeats_taken)
+  STALE13=
+  for _ in $(seq 1 $((FRESH + 40))); do
+    read_hb
+    if [ -n "$HB_AGE" ] && [ "$HB_AGE" -gt "$FRESH" ]; then STALE13=yes; break; fi
+    sleep 1
+  done
+  xcmd c linkstate
+  LS13=$(grep '^linkstate ' <<<"$LAST")
+  note "heartbeats taken at removal: $TAKEN13; later: $(kv "$LS13" heartbeats_taken); refused by the courier: $(kv "$LS13" refused)"
+  xcmd w state
+  note "watcher: $(grep '^state ' <<<"$LAST") (it goes on sending)"
+  xcmd c "heartbeat $HB_HEX"
+  HAND13=$(grep '^heartbeat ' <<<"$LAST")
+  note "by hand: $HAND13"
+  if [ -n "$REMOVED" ] && [ -n "$STALE13" ] && [ -n "$HB_HEX" ] &&
+    [ "$(kv "$LS13" heartbeats_taken)" = "$TAKEN13" ] && grep -q '^heartbeat refused' <<<"$HAND13"; then
+    pass 14 "the settings that remove the watch key were taken as a tightening; the watcher kept sending, but the counter took no more of its heartbeats through the relay (taken stayed at $TAKEN13, the heartbeat aged to $HB_AGE s), and the same key's heartbeat handed over by hand was refused"
+  else
+    bad 14 "removed: ${REMOVED:-no}; heartbeat aged: ${STALE13:-no}; taken $TAKEN13 to $(kv "$LS13" heartbeats_taken); by hand: $HAND13"
+  fi
+else
+  bad 14 "the watcher did not run, so there was nothing to remove"
+fi
+stop_ex w || note "the watch-only owner did not stop cleanly"
+
 stop_ex c || note "the counter example did not stop cleanly"
-stop_ex o || note "the owner example did not stop cleanly"
+[ -z "${PID[o]}" ] || stop_ex o || note "the owner example did not stop cleanly"
 
 # ---- result ----------------------------------------------------------------------
 
 say "Result"
 failed=0
 notrun=0
-for n in 1 2 3 4 5 6 7 8 9 10; do
+for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do
   printf '%s  step %s\n' "${RESULT[$n]:-FAIL}" "$n"
   case "${RESULT[$n]:-FAIL}" in
     PASS) ;;

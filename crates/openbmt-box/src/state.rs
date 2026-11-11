@@ -302,11 +302,12 @@ fn read_invitation(bytes: &[u8]) -> Option<OpenInvitation> {
     })
 }
 
-/// The relay's member list for these settings (BX-22): the device list and
-/// the owner's key.
+/// The relay's member list for these settings (BX-22): the device list, the
+/// owner's key and the watch key the settings name, if any (CR-185).
 fn member_list(settings: &Settings, owner: &DeviceId) -> Vec<DeviceId> {
     let mut all = settings.devices.clone();
     all.insert(*owner);
+    all.extend(settings.watch_key);
     all.into_iter().collect()
 }
 

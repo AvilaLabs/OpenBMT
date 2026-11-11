@@ -80,6 +80,10 @@
 //!   (`--regtest-own-node` only); `own status` prints the health line and
 //!   how often the node asked
 //! - `limits`: the signed limits of the two checks
+//! - `settings <hex>`: signed settings the owner sent, taken as the link
+//!   takes them (CR-160 to CR-162): `settings taken version=<n>
+//!   change=<Tightening|Loosening> watch_key=<hex|none>`, `settings dropped
+//!   ...` or `settings refused <why>`
 //! - `hbstate`
 //! - `linkstate`
 //! - `batches`
@@ -143,7 +147,7 @@ use openbmt_core::batch::{BatchBuilder, BatchPolicy, PinnedRoots, SignedBatch};
 use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::records::RecordKind;
-use openbmt_core::settings::Settings;
+use openbmt_core::settings::{Settings, SignedSettings};
 use openbmt_core::wallet::{KeySlot, WalletDescription};
 use openbmt_counter::{
     refund_destination, Actor, Amount, BatchHeld, Currency, HeartbeatView, Pairing, Rate,
@@ -645,6 +649,21 @@ fn command<P: DriverPort>(
                     show(node, &taken.reports);
                 }
                 Err(e) => say(format!("heartbeat refused {e}")),
+            }
+        }
+        Some("settings") => {
+            let bytes = unhex(words.next())?;
+            let signed = SignedSettings::from_bytes(&bytes).map_err(|e| e.to_string())?;
+            match node.take_settings(&signed) {
+                Ok(Some(change)) => say(format!(
+                    "settings taken version={} change={change:?} watch_key={}",
+                    node.settings().version,
+                    node.settings()
+                        .watch_key
+                        .map_or("none".to_string(), |k| hex(&k.to_bytes()))
+                )),
+                Ok(None) => say("settings dropped: not newer than the ones in force"),
+                Err(e) => say(format!("settings refused {e}")),
             }
         }
         Some("hbstate") => {
