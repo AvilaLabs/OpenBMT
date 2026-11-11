@@ -31,7 +31,15 @@ object AppWords {
         Tones.INFO, "Not set up yet",
         "This phone has not been set up as the shop's owner phone yet.",
         Who.OWNER,
-        "Paste the setup text from the key ceremony, or choose its file, then save.",
+        "Make a new shop wallet with the Key app, or use setup text you already have.",
+    )
+
+    /** The screen of the second choice: setup text from a key ceremony made elsewhere. */
+    val setupTextNeeded = w(
+        Tones.INFO, "Setup text needed",
+        "This phone takes the setup text of a key ceremony made elsewhere, pasted or from a file.",
+        Who.OWNER,
+        "Paste the setup text, or choose its file, then save.",
     )
 
     val setupSaved = w(
@@ -269,6 +277,201 @@ object AppWords {
         "The counter shows Paired, so what waited for it is marked delivered.",
         Who.OWNER,
         "The counter takes its sales from its first addresses now.",
+    )
+
+    // ---- making a new shop wallet ---------------------------------------------------------------
+
+    /** Key 1 is being made; it takes a moment. */
+    val ceremonyMakingKey = w(
+        Tones.INFO, "Making key 1",
+        "Key 1 is being made on this phone, which takes a moment.",
+        Who.OWNER,
+        "Wait on this screen.",
+    )
+
+    /** Key 1 is made and the answer of the Key app is next. */
+    val ceremonyScanNext = w(
+        Tones.INFO, "Scan the Key app",
+        "Open the Key app on the other phone and choose Set up keys.",
+        Who.OWNER,
+        "Press the button below and scan the code it shows.",
+    )
+
+    /** A single code was read where the Key app's answer is a code that may change. */
+    val ceremonyNotAnAnswer = w(
+        Tones.STOP, "Not the Key app's answer",
+        "The code read is not one the Key app shows for its answer, so nothing was used.",
+        Who.OWNER,
+        "On the Key app, choose Set up keys, and scan the code it shows.",
+    )
+
+    /** A complete code that is longer than the Key app's answer can be. */
+    val ceremonyCodeTooLong = w(
+        Tones.STOP, "Code too long for an answer",
+        "The code holds more than the Key app's answer can, so nothing was used.",
+        Who.OWNER,
+        "On the Key app, choose Set up keys, and scan the code it shows.",
+    )
+
+    /** The scan of the Key app's answer was cancelled, or its permission dialog was dismissed. */
+    val ceremonyScanCancelled = w(
+        Tones.INFO, "Key app scan cancelled",
+        "No code was read, so no answer was taken from the Key app.",
+        Who.OWNER,
+        "Scan the Key app's code again when you are ready.",
+    )
+
+    /** What the owner does with the Key app's four words. */
+    val ceremonyCompareRoot = w(
+        Tones.INFO, "Compare the Key app's words",
+        "Check that the Key app shows these same four words as its own.",
+        Who.OWNER,
+        "If they match, say so below. If they differ, say so and the answer is thrown away.",
+    )
+
+    /** The owner said the Key app's words differ, and the answer was thrown away. */
+    val ceremonyRootDiffers = w(
+        Tones.STOP, "Answer thrown away",
+        "The four words differ, so this answer may not come from the Key app you hold, and it was thrown away.",
+        Who.OWNER,
+        "Scan again on the Key app you hold. If the words still differ, choose Start again.",
+    )
+
+    /** The Key app holds no key 2: it comes from the device that does. */
+    val ceremonyKey2Needed = w(
+        Tones.INFO, "Key 2 needed",
+        "The Key app holds no key 2, so key 2 comes from the device that holds it.",
+        Who.OWNER,
+        "Scan its code or paste its text, then continue.",
+    )
+
+    /** The text of key 2 is empty or longer than a key's text can be. */
+    val ceremonyKey2Text = w(
+        Tones.STOP, "Key 2 text not accepted",
+        "The text for key 2 is empty, is not text, or is longer than a key's text can be, so nothing was used.",
+        Who.OWNER,
+        "Copy it again from the device that holds key 2, then try again.",
+    )
+
+    /** The scan of key 2 was cancelled, or its permission dialog was dismissed. */
+    val ceremonyKey2ScanCancelled = w(
+        Tones.INFO, "Key 2 scan cancelled",
+        "No code was read, so key 2 was not taken.",
+        Who.OWNER,
+        "Scan its code again, or paste its text instead.",
+    )
+
+    /** The wallet is being built; it takes a moment. */
+    val ceremonyBuilding = w(
+        Tones.INFO, "Building the wallet",
+        "The wallet is being built from the three keys, which takes a moment.",
+        Who.OWNER,
+        "Wait on this screen.",
+    )
+
+    /** The wallet is built and its words are on the screen. */
+    val ceremonyCheckWallet = w(
+        Tones.INFO, "Check the wallet",
+        "The checksum words and the fingerprints below are the wallet's. The Key app shows the same ones.",
+        Who.OWNER,
+        "Show the Key app its setup next, and compare there.",
+    )
+
+    /** The setup for the Key app is on the screen as a code that changes. */
+    val ceremonyCodeAnimated = w(
+        Tones.INFO, "Setup for the Key app",
+        "The setup for the Key app is on the screen as a code that changes, one part after another.",
+        Who.OWNER,
+        "On the Key app, scan this code until it has read every part, then compare the words.",
+    )
+
+    /** The setup for the Key app is on the screen as one code. */
+    val ceremonyCodeStill = w(
+        Tones.INFO, "Setup for the Key app",
+        "The setup for the Key app is on the screen as one code that does not change.",
+        Who.OWNER,
+        "On the Key app, scan this code, then compare the words.",
+    )
+
+    /** No code could be made of the setup. */
+    val ceremonyCodeNotMade = w(
+        Tones.STOP, "No code could be made",
+        "The setup for the Key app could not be turned into a code, so nothing is shown.",
+        Who.OWNER,
+        "Go back and try to show it again.",
+    )
+
+    /** The owner compares the wallet's words with the Key app's. */
+    val ceremonyCompareSetup = w(
+        Tones.INFO, "Compare with the Key app",
+        "After it takes the setup, the Key app shows the checksum words and the fingerprints.",
+        Who.OWNER,
+        "Check that they are the same as on this phone, then say so below.",
+    )
+
+    /** The owner says the words differ: the wallet is not finished. */
+    val ceremonyWordsDiffer = w(
+        Tones.STOP, "Wallet not finished",
+        "The words differ, so the wallet is not finished, and nothing should be paid to it.",
+        Who.OWNER,
+        "Choose Start again on both phones.",
+    )
+
+    /** The wallet was made on a phone that did not keep the setup for the Key app. */
+    val ceremonyScanAgain = w(
+        Tones.INFO, "Scan the Key app again",
+        "The wallet was built, but the setup for the Key app is not kept on this phone.",
+        Who.OWNER,
+        "Scan the Key app's code again to show the setup again.",
+    )
+
+    /** The owner confirmed, and the setup is being saved. */
+    val ceremonyFinishing = w(
+        Tones.INFO, "Finishing the setup",
+        "The setup is being finished and saved on this phone.",
+        Who.OWNER,
+        "Wait on this screen.",
+    )
+
+    /** A finished setup waits to be saved. */
+    val ceremonySaveNext = w(
+        Tones.INFO, "Save the setup",
+        "The words were confirmed, but the setup was not saved on this phone yet.",
+        Who.OWNER,
+        "Press the button below to save it and start.",
+    )
+
+    /** An unfinished setup was found at the start. */
+    val ceremonyResume = w(
+        Tones.INFO, "Setup in progress",
+        "A new shop wallet was started on this phone and is not finished.",
+        Who.OWNER,
+        "Continue where it stopped, or start again.",
+    )
+
+    /** The record of the unfinished setup does not read. */
+    fun ceremonyRecordNotRead(problem: String?) = w(
+        Tones.STOP, "Setup record not read",
+        "The record of the unfinished setup could not be read, so nothing was done.",
+        Who.OWNER,
+        "Choose Start again and make the wallet again. Nothing has been paid to it.",
+        detailOf(problem),
+    )
+
+    /** The question before the unfinished setup is thrown away. */
+    val ceremonyStartAgain = w(
+        Tones.STOP, "Start again?",
+        "The keys made so far are thrown away, and nothing has been paid to them.",
+        Who.OWNER,
+        "Choose Start again only if the Key app starts again too.",
+    )
+
+    /** The unfinished setup was thrown away. */
+    val ceremonyThrownAway = w(
+        Tones.INFO, "Started over",
+        "The keys made so far were thrown away, and nothing was paid to them.",
+        Who.OWNER,
+        "Make a new shop wallet again, or use setup text you already have.",
     )
 
     // ---- what was done --------------------------------------------------------------------
@@ -572,6 +775,31 @@ object AppWords {
         "counterCodeNoBatch" to counterCodeNoBatch,
         "counterCodeNotMade" to counterCodeNotMade,
         "counterDelivered" to counterDelivered,
+        "ceremonyMakingKey" to ceremonyMakingKey,
+        "ceremonyScanNext" to ceremonyScanNext,
+        "ceremonyNotAnAnswer" to ceremonyNotAnAnswer,
+        "ceremonyCodeTooLong" to ceremonyCodeTooLong,
+        "ceremonyScanCancelled" to ceremonyScanCancelled,
+        "ceremonyCompareRoot" to ceremonyCompareRoot,
+        "ceremonyRootDiffers" to ceremonyRootDiffers,
+        "ceremonyKey2Needed" to ceremonyKey2Needed,
+        "ceremonyKey2Text" to ceremonyKey2Text,
+        "ceremonyKey2ScanCancelled" to ceremonyKey2ScanCancelled,
+        "ceremonyBuilding" to ceremonyBuilding,
+        "ceremonyCheckWallet" to ceremonyCheckWallet,
+        "ceremonyCodeAnimated" to ceremonyCodeAnimated,
+        "ceremonyCodeStill" to ceremonyCodeStill,
+        "ceremonyCodeNotMade" to ceremonyCodeNotMade,
+        "ceremonyCompareSetup" to ceremonyCompareSetup,
+        "ceremonyWordsDiffer" to ceremonyWordsDiffer,
+        "ceremonyScanAgain" to ceremonyScanAgain,
+        "ceremonyFinishing" to ceremonyFinishing,
+        "ceremonySaveNext" to ceremonySaveNext,
+        "ceremonyResume" to ceremonyResume,
+        "ceremonyStartAgain" to ceremonyStartAgain,
+        "ceremonyThrownAway" to ceremonyThrownAway,
+        "ceremonyRecordNotRead" to ceremonyRecordNotRead("a problem"),
+        "setupTextNeeded" to setupTextNeeded,
         "requestSaved" to requestSaved("request.obm"),
         "refundQueuedAtDepth" to refundQueuedAtDepth,
         "refundQueuedWaiting" to refundQueuedWaiting,

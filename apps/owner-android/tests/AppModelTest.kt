@@ -30,6 +30,7 @@ import org.openbmt.owner.OutboxKind
 import org.openbmt.owner.OutboxRow
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNetwork
+import org.openbmt.owner.PairView
 import org.openbmt.owner.PosAlert
 import org.openbmt.owner.PosAlertKey
 import org.openbmt.owner.PosAlertKind
@@ -44,6 +45,7 @@ import org.openbmt.owner.Route
 import org.openbmt.owner.SendKind
 import org.openbmt.owner.SendRow
 import org.openbmt.owner.SettingsHeld
+import org.openbmt.owner.SetupFields
 import org.openbmt.owner.WaitingCounter
 import org.openbmt.owner.Words
 
@@ -1120,6 +1122,206 @@ object AppModelTest {
         ok(AppWords.counterDelivered.what.contains("marked delivered"), "the words say what was done")
     }
 
+    // ---- making a new shop wallet (OA-26 to OA-31) ---------------------------------------------------------------
+
+    private fun fields(network: OwnerNetwork = OwnerNetwork.Regtest, key3: String? = "tpubKEY3") = SetupFields(
+        network = network,
+        ownerSecret = ByteArray(32) { (it + 1).toByte() },
+        approverRoot = ByteArray(32) { (it + 33).toByte() },
+        wallet = "wsh(sortedmulti(2,[a/48h/1h/0h/2h]tpub1/<0;1>/*,[b/48h/1h/0h/2h]tpub2/<0;1>/*,[c/48h/1h/0h/2h]tpub3/<0;1>/*))#abcdefgh",
+        key1Account = ByteArray(78) { (it + 65).toByte() },
+        key3Xpub = key3,
+        batchMinCount = 1_000,
+        refundDepth = 6,
+        birthday = 967_680,
+    )
+
+    private fun ceremonyTests() {
+        // The setup text of a finished ceremony is the text the paste path reads, to the same values.
+        for (network in OwnerNetwork.values()) {
+            for (key3 in listOf("tpubKEY3", null)) {
+                val f = fields(network, key3)
+                val text = OwnerSetup.format(f)
+                val back = OwnerSetup.parse(text)
+                ok(back.network == f.network && back.ownerSecret.contentEquals(f.ownerSecret) && back.approverRoot.contentEquals(f.approverRoot), "the network and the secrets round-trip: $network")
+                ok(back.wallet == f.wallet && back.key1Account.contentEquals(f.key1Account) && back.key3Xpub == f.key3Xpub, "the wallet and the keys round-trip")
+                ok(back.batchMinCount == 1_000L && back.refundDepth == 6L && back.birthday == 967_680L, "the numbers round-trip")
+                ok(back.peers.isEmpty() && back.link == null, "a ceremony makes no peers and no link")
+                ok(text.startsWith(OwnerSetup.HEADER + "\nnetwork: ") && text.endsWith("\n") && text.length < OwnerSetup.MAX_TEXT, "the header first, a line end last")
+                ok(text.contains("key3-xpub: ") == (key3 != null), "Key 3's public key only when there is one")
+                ok(!text.contains("seed") && !text.contains("mnemonic") && !text.contains("key2"), "no other key is in the text")
+            }
+        }
+        ok(OwnerSetup.format(fields(OwnerNetwork.Mainnet)).lines()[1] == "network: mainnet", "the network's name")
+        ok(OwnerSetup.parse(OwnerSetup.format(fields())).startConfig("/d", 1, "127.0.0.1:9050").network == OwnerNetwork.Regtest, "the node starts on the network of the text")
+
+        // The build's one network, and the names of the files.
+        ok(AppConfig.NETWORK == OwnerNetwork.Mainnet, "a wallet made on this phone is for mainnet, the build's one choice")
+        ok(AppFiles.CEREMONY_FILE == "ceremony.obks" && AppFiles.CEREMONY_FILE != AppFiles.SETUP_FILE && AppFiles.CEREMONY_FILE != "config.txt", "the ceremony has a file of its own")
+
+        // What the model writes and decides.
+        ok(CeremonyModel.fingerprintLines(listOf("aabbccdd", "11223344", "55667788")) == listOf("Key 1: aabbccdd", "Key 2: 11223344", "Key 3: 55667788"), "a line for each fingerprint")
+        val pairs = listOf(PairView(1, 2, 1, 2), PairView(1, 3, 1, 3), PairView(2, 3, 2, 3))
+        ok(CeremonyModel.pairLines(pairs)[0] == "Keys 1 and 2: this phone and the Key app" && CeremonyModel.pairLines(pairs).size == 3, "a line for each pair and its holders")
+        ok(listOf(1, 2, 3, 4).map { CeremonyModel.holder(it) } == listOf("this phone", "the Key app", "another signer", "another wallet app"), "the four holders")
+        ok(CeremonyModel.holder(9) == "an unknown holder", "a holder this app does not know is said so")
+        ok(CeremonyModel.wordsLine(listOf("a", "b", "c", "d")) == "a   b   c   d", "the words in one line")
+        ok(CeremonyModel.ANSWER_TYPES == setOf("bytes") && CeremonyModel.MAX_ANSWER_BYTES == 1_024, "ur:bytes and a small answer")
+        val answer = ByteArray(200) { it.toByte() }
+        val given = CeremonyModel.answerResult(answer)
+        ok(given is SourceResult.Bytes && given.bytes.contentEquals(answer), "a code gives its payload as it is")
+        ok(CeremonyModel.answerResult(ByteArray(CeremonyModel.MAX_ANSWER_BYTES)) is SourceResult.Bytes, "the most is accepted")
+        val long = CeremonyModel.answerResult(ByteArray(CeremonyModel.MAX_ANSWER_BYTES + 1))
+        ok(long is SourceResult.Failed && long.words === AppWords.ceremonyCodeTooLong, "a longer code is refused before the library sees it")
+
+        val text = "[8dfc9b34/48h/1h/0h/2h]tpubDEXiq2SVhhqALktxfVFgj3C9M3T2G7xL11iezYg2LJAf245YkNyq"
+        ok((CeremonyModel.key2Text("  $text\n") as Form.Ok).value == text, "key 2's text is trimmed and passed as it is")
+        ok((CeremonyModel.key2FromScan(text.toByteArray()) as Form.Ok).value == text, "a scanned plain code is the text")
+        for (bad in listOf("", "   \n", "x".repeat(CeremonyModel.MAX_KEY2_TEXT + 1))) {
+            val f = CeremonyModel.key2Text(bad)
+            ok(f is Form.Refused && f.words === AppWords.ceremonyKey2Text, "a key 2 text of ${bad.length} characters is refused with words")
+        }
+        ok(CeremonyModel.key2FromScan(byteArrayOf(0xff.toByte(), 0x01)) is Form.Refused, "a code that is not text is not key 2")
+        ok(CeremonyModel.key2Text("x".repeat(CeremonyModel.MAX_KEY2_TEXT)) is Form.Ok, "the longest is accepted")
+
+        val still = CeremonyModel.setupCodeStep(made = true, animated = false)
+        val moving = CeremonyModel.setupCodeStep(made = true, animated = true)
+        val none = CeremonyModel.setupCodeStep(made = false, animated = true)
+        ok(still.shown && still.done && still.words === AppWords.ceremonyCodeStill, "one still code")
+        ok(moving.shown && moving.done && moving.words === AppWords.ceremonyCodeAnimated, "a code that changes")
+        ok(!none.shown && !none.done && none.words === AppWords.ceremonyCodeNotMade, "no code: no button that says the words are the same")
+        ok(CeremonyModel.resumeAction(1) == ResumeAction.ScanAnswer && CeremonyModel.resumeAction(2) == ResumeAction.ScanAnswerAgain && CeremonyModel.resumeAction(3) == ResumeAction.SaveSetup, "the stages and what each offers")
+        ok(CeremonyModel.resumeAction(0) == null && CeremonyModel.resumeAction(4) == null, "a stage this app does not know offers nothing")
+        ok(ResumeAction.values().all { CeremonyModel.resumeWords(it).who == Who.OWNER && SayCheck.problem(CeremonyModel.resumeWords(it)) == null }, "each resume has words")
+
+        ok(AppWords.ceremonyScanNext.what == "Open the Key app on the other phone and choose Set up keys." && AppWords.ceremonyScanNext.next.contains("scan the code it shows"), "the words say what to do on the Key app")
+        ok(AppWords.ceremonyStartAgain.what == "The keys made so far are thrown away, and nothing has been paid to them.", "the confirmation says what is thrown away")
+        ok(AppWords.ceremonyWordsDiffer.what.contains("not finished") && AppWords.ceremonyWordsDiffer.what.contains("nothing should be paid") && AppWords.ceremonyWordsDiffer.next == "Choose Start again on both phones.", "the words that differ say it is not finished")
+        ok(AppWords.ceremonyRootDiffers.what.contains("thrown away") && AppWords.ceremonyRootDiffers.tone == Tones.STOP, "the Key app's words differ: the answer is thrown away, and the words say so")
+        ok(AppWords.ceremonyCompareSetup.what.contains("checksum words") && AppWords.ceremonyCompareSetup.what.contains("fingerprints"), "the owner is told to compare the checksum words and the fingerprints")
+        ok(AppWords.ceremonyRecordNotRead("x").detail == "x" && AppWords.ceremonyRecordNotRead(null).detail == null, "a record that does not read carries the reason")
+        ok(AppWords.notSetUp.next.contains("Make a new shop wallet") && AppWords.setupTextNeeded.next.contains("Paste the setup text"), "the two choices have words")
+    }
+
+    private fun ceremonyCode() = source("src/android/Ceremony.kt")
+
+    private fun oa_26_the_first_start_offers_a_new_wallet_and_seals_the_record_at_each_step() {
+        val controller = source("src/android/Controller.kt")
+        val first = controller.substringAfter("internal fun showFirstStart(").substringBefore("/** The second choice")
+        ok(first.indexOf("ui.button(\"Make a new shop wallet\") { startCeremony() }") in 1 until first.indexOf("ui.button(\"I have setup text\") { showPasteSetup(null) }"), "a new wallet first, the paste path second")
+        ok(controller.contains("saveSetup(draftText, draftProxy.trim(), { w -> showPasteSetup(w) })"), "the paste path saves as before")
+        val c = ceremonyCode()
+        ok(c.contains("Key1Args(AppConfig.NETWORK, showWords = false)"), "the build's network, and key 1 has no words to show")
+        ok(!c.contains("choice(") && !c.contains("RadioGroup") && !c.contains("OwnerNetwork."), "no network picker")
+        ok(c.contains("SealedFile(appDir, KeystoreSealer(AppFiles.KEY_ALIAS), AppFiles.CEREMONY_FILE)") && c.contains("ceremonyFile().save(record)"), "the record is sealed under the key of the setup, in its own file")
+        ok(c.indexOf("keep(made.record) {") in 1 until c.indexOf("showKeyMade(made.stateWords.say())"), "key 1's record is saved before the next screen")
+        ok(c.indexOf("keep(built.record) {") in 1 until c.indexOf("showWalletCheck(d, built)\n"), "the wallet's record is saved before the next screen")
+        ok(c.indexOf("keep(done.record) {") in 1 until c.indexOf("saveFinished(done.record)"), "the finished record is saved before the setup is")
+        ok(Regex("keep\\(").findAll(c).count() == 5, "a record is kept in the three steps, and by one retry")
+        ok(c.contains("is IOException -> notKept(") && c.contains("ui.button(\"Try again\") { keep(record, next) }"), "a record that cannot be saved says so and can be tried again")
+        for (bad in listOf("SharedPreferences", "openFileOutput", "writeText", "writeBytes", "FileOutputStream", "externalCacheDir", "cacheDir", "android.util.Log", "Log.d(", "println(", "printStackTrace", "putExtra")) {
+            ok(!c.contains(bad), "Ceremony.kt does not use $bad")
+        }
+        ok(source("src/model/AppConfig.kt").contains("const val CEREMONY_FILE = \"ceremony.obks\""), "the file's name")
+        ok(source("src/model/AppConfig.kt").contains("val NETWORK: OwnerNetwork = OwnerNetwork.Mainnet"), "one network")
+    }
+
+    private fun oa_27_an_unfinished_ceremony_is_resumed_at_its_stage_or_started_again_after_a_confirmation() {
+        val controller = source("src/android/Controller.kt")
+        val first = controller.substringAfter("internal fun showFirstStart(").substringBefore("/** The second choice")
+        ok(first.contains("File(dir, AppFiles.CEREMONY_FILE).exists() && !File(dir, AppFiles.SETUP_FILE).exists()") && first.contains("showCeremonyResume(message)"), "a record and no setup resumes")
+        val c = ceremonyCode()
+        val resume = c.substringAfter("internal fun Controller.showCeremonyResume(").substringBefore("/** A record that does not read")
+        ok(resume.contains("OwnerCeremony.stage(record)") && resume.contains("at.words.say()") && resume.contains("CeremonyModel.resumeAction(at.stage)"), "the library says the stage, and its words are shown")
+        ok(resume.contains("ResumeAction.ScanAnswer, ResumeAction.ScanAnswerAgain -> scanAnswer()") && resume.contains("ResumeAction.SaveSetup -> saveFinished(record)"), "each stage goes on from there")
+        ok(resume.contains("ui.button(\"Start again\") { showStartAgain() }"), "start again is offered")
+        ok(c.contains("private fun Controller.notReadable(") && c.substringAfter("private fun Controller.notReadable(").substringBefore("/** The confirmation").contains("ui.button(\"Start again\")"), "a record that does not read can only be started again")
+        val confirm = c.substringAfter("internal fun Controller.showStartAgain()").substringBefore("/** Deletes the ceremony's record.")
+        ok(confirm.contains("AppWords.ceremonyStartAgain") && confirm.contains("ui.button(\"Start again\") { throwAway() }") && confirm.contains("ui.button(\"Keep going\") { begin() }"), "the confirmation, and the way to keep going")
+        ok(!confirm.contains(".delete()"), "nothing is deleted before the confirmation")
+        val away = c.substringAfter("private fun Controller.throwAway()").substringBefore("// ---- the second step")
+        ok(away.contains("File(appDir, AppFiles.CEREMONY_FILE)") && Regex("\\.delete\\(\\)").findAll(away).count() == 1 && !away.contains(".SETUP_FILE") && !away.contains("noBackupFilesDir"), "the confirmation deletes the ceremony's file and nothing else")
+        ok(Regex("showStartAgain\\(\\)").findAll(c).count() >= 12, "start again is on every screen of the ceremony")
+        ok(controller.contains("File(dir, AppFiles.CEREMONY_FILE).delete()") && controller.indexOf("File(dir, AppFiles.CEREMONY_FILE).delete()") > controller.indexOf("if (!setupStatus.complete) return showFirstStart(null)"), "a record found beside a saved setup is deleted")
+        ok(controller.contains("ceremony = null\n        stopNode()"), "the start drops what the screens held")
+    }
+
+    private fun oa_28_the_key_apps_answer_is_scanned_its_words_compared_and_key_2_asked_only_when_it_is_missing() {
+        val c = ceremonyCode()
+        val scan = c.substringAfter("private fun Controller.scanAnswer()").substringBefore("/** What the scan or the library said")
+        ok(scan.contains("UrScan(CeremonyModel.ANSWER_TYPES, ExchangeModel.WHO)") && scan.contains("CeremonyModel.answerResult(payload)"), "ur:bytes only, and the length is the model's")
+        ok(scan.contains("AppWords.ceremonyNotAnAnswer") && scan.contains("AppWords.ceremonyScanCancelled") && scan.contains("ScanResult.failed(f.off, f.problem, f.words)"), "every other end of the scan has words")
+        ok(Regex("scan\\.begin\\(").findAll(c).count() == 2 && !c.contains("requestPermissions"), "the camera is asked for in two places, each from a button")
+        val read = c.substringAfter("private fun Controller.readAnswer(").substringBefore("private fun Controller.showRootCheck(")
+        ok(Regex("OwnerCeremony\\.readAnswer\\(").findAll(c).count() == 1 && read.contains("e.sayWords()"), "one place gives the code to the library, and a refusal is shown with its words")
+        val root = c.substringAfter("private fun Controller.showRootCheck(").substringBefore("// ---- the third step")
+        ok(root.contains("CeremonyModel.wordsLine(read.keyAppRootWords), 30f, bold = true") && root.contains("AppWords.ceremonyCompareRoot"), "the Key app's identity words, large")
+        ok(root.contains("ui.button(\"The Key app shows the same words\")") && root.contains("ui.button(\"They differ\")"), "the two answers")
+        ok(root.contains("d.answer = null") && root.contains("AppWords.ceremonyRootDiffers"), "a difference throws the answer away, and the words say why")
+        ok(root.contains("if (read.key2 == null) showKey2(d, null) else buildWallet(d)"), "key 2 is asked for only when the answer holds none")
+        ok(read.contains("d.key2Text = null"), "a new answer starts with no key 2 text, so both are never passed")
+        val key2 = c.substringAfter("private fun Controller.showKey2(").substringBefore("// ---- the fourth step")
+        ok(key2.contains("AppWords.ceremonyKey2Needed") && key2.contains("CeremonyModel.key2Text(pasted.text.toString())") && key2.contains("CeremonyModel.key2FromScan(bytes)"), "key 2 by paste or by scan, checked for length only")
+        ok(!key2.contains("UrScan"), "key 2's code is plain text")
+        ok(c.contains("BuildArgs(d.record, answer, d.key2Text, defaults.batchMinCount)"), "key 2's text goes to the library as it is")
+    }
+
+    private fun oa_29_the_wallet_is_compared_on_both_phones_before_the_setup_is_finished_and_saved() {
+        val c = ceremonyCode()
+        val check = c.substringAfter("private fun Controller.showWalletCheck(").substringBefore("// ---- the fifth step")
+        ok(check.contains("CeremonyModel.wordsLine(built.checksumWords), 30f, bold = true") && check.contains("CeremonyModel.fingerprintLines(built.fingerprints)") && check.contains("mono = true"), "the checksum words large and the fingerprints in monospace")
+        ok(check.contains("built.pairsWords.say()") && check.contains("CeremonyModel.pairLines(built.pairs)") && check.contains("ui.text(built.firstReceiveAddress, 14f, mono = true)"), "the pairs words, the pairs and the first address in monospace")
+        val code = c.substringAfter("private fun Controller.showSetupCode(").substringBefore("/** The owner says the words differ")
+        ok(code.contains("AnimatedQrView.make(") && code.contains("ExchangeModel.WHO, ExchangeModel.TYPE_BYTES, built.walletSetup") && code.contains("ExchangeModel.codeHeight(act.resources.displayMetrics.heightPixels)"), "the setup is shown as ur:bytes, at the size of the other codes")
+        ok(code.contains("AppWords.ceremonyCompareSetup") && code.contains("if (step.done) {"), "the words to compare, and the buttons only with a code on the screen")
+        ok(code.contains("ui.button(\"The Key app shows the same words\") { finishCeremony(d) }") && code.contains("ui.button(\"They differ\") { showWordsDiffer(d, built) }"), "the two answers")
+        ok(Regex("OwnerCeremony\\.finish\\(").findAll(c).count() == 1 && Regex("finishCeremony\\(").findAll(c).count() == 3, "only the owner's word finishes, and the retry after a refusal")
+        val differ = c.substringAfter("private fun Controller.showWordsDiffer(").substringBefore("// ---- the last step")
+        ok(differ.contains("AppWords.ceremonyWordsDiffer") && differ.contains("ui.button(\"Start again\") { showStartAgain() }"), "a difference leads to start again")
+        ok(c.contains("OwnerCeremony.finish(FinishArgs(d.record, defaults.refundDepth, defaults.birthday))"), "the library's refund depth and first block")
+        val save = c.substringAfter("private fun Controller.saveFinished(").substringBefore("private fun Controller.showSaveFailed(")
+        ok(save.indexOf("OwnerCeremony.open(record)") in 1 until save.indexOf("OwnerSetup.format(") + 40 && save.indexOf("saveSetup(") > save.indexOf("OwnerSetup.format("), "the finished record is opened, written as the setup text and saved")
+        ok(save.contains("AppConfig.DEFAULT_PROXY") && save.contains("afterSaved = { File(appDir, AppFiles.CEREMONY_FILE).delete() }"), "the config as the paste path writes it, and the record deleted after")
+        val controller = source("src/android/Controller.kt")
+        val saveSetup = controller.substringAfter("internal fun saveSetup(").substringBefore("/** The places the setup text")
+        ok(saveSetup.indexOf("AppFiles.SETUP_FILE).save(") in 1 until saveSetup.indexOf("configFile.save(") && saveSetup.indexOf("configFile.save(") < saveSetup.indexOf("afterSaved()"), "the setup first, then the config, then the ceremony's record goes")
+        ok(saveSetup.contains("showMessage(AppWords.setupSaved, \"Start\") { begin() }"), "the start goes on as after a pasted setup, through the gate of Orbot")
+        ok(Regex("File\\(appDir, AppFiles\\.CEREMONY_FILE\\)").findAll(c).count() == 2, "the file is deleted in two places only: after the save, and on a confirmation")
+    }
+
+    private fun oa_30_the_slow_calls_draw_a_page_first_and_every_number_is_the_librarys() {
+        val c = ceremonyCode()
+        val make = c.substringAfter("internal fun Controller.startCeremony()").substringBefore("/** Key 1 is made:")
+        ok(make.indexOf("page(listOf(ui.words(AppWords.ceremonyMakingKey)))") in 1 until make.indexOf("main.post") && make.indexOf("main.post") < make.indexOf("OwnerCeremony.makeKey1("), "a page says it takes a moment, and is drawn before the call")
+        val build = c.substringAfter("private fun Controller.buildWallet(").substringBefore("/** The wallet was refused")
+        ok(build.indexOf("page(listOf(ui.words(AppWords.ceremonyBuilding)))") in 1 until build.indexOf("main.post") && build.indexOf("main.post") < build.indexOf("OwnerCeremony.buildWallet("), "the same for the wallet")
+        ok(!make.contains("async(") && !build.contains("async(") && !make.contains("Thread") && !build.contains("Thread"), "the calls stay on the screen thread")
+        ok(c.contains("OwnerCeremony.defaults(AppConfig.NETWORK)") && c.contains("defaults.batchMinCount") && c.contains("defaults.refundDepth") && c.contains("defaults.birthday"), "the batch minimum, the refund depth and the first block come from the library")
+        for (bad in listOf("1000", "1_000", "967", "refundDepth = ", "birthday = ", "BATCH_MIN", "batchMinCount = ")) ok(!c.contains(bad), "Ceremony.kt writes no number of the ceremony: $bad")
+        ok(!c.contains("Regex") && !c.contains("bech32") && !c.contains("bcrt1") && !c.contains("bc1"), "the app reads no address and no key")
+        ok(source("../../crates/openbmt-owner-ffi/bindings/kotlin/org/openbmt/owner/OwnerNode.kt").contains("fun defaults(network: OwnerNetwork): CeremonyDefaults"), "the binding has the op that gives them")
+    }
+
+    private fun oa_31_every_word_of_the_ceremony_is_the_librarys_or_checked_and_no_secret_of_key_2_or_3_is_held() {
+        val c = ceremonyCode()
+        for (field in listOf("made.stateWords.say()", "at.words.say()", "built.pairsWords.say()", "e.sayWords()")) ok(c.contains(field), "the screens show the library's $field")
+        val ceremonyWords = AppWords.all().filter { it.first.startsWith("ceremony") }
+        ok(ceremonyWords.size >= 20, "the ceremony has its words: ${ceremonyWords.size}")
+        for ((name, w) in ceremonyWords) ok(w.who == Who.OWNER && SayCheck.problem(w) == null && w.next.isNotEmpty(), "words of $name")
+        for (w in ceremonyWords.map { it.second }) {
+            ok(w.what.length <= 140 && w.next.length <= 140, "each sentence is at most 140 characters: ${w.heading}")
+        }
+        ok(AppWords.screensMarkdown().contains("| ceremonyStartAgain |") && AppWords.screensMarkdown().contains("| Wallet not finished |"), "the list of the app's words has them")
+        ok(File(appDir, "../../docs/screens/owner-app.md").readText().contains("Wallet not finished"), "and so does docs/screens/owner-app.md")
+        for (name in listOf("src/android/Ceremony.kt", "src/model/CeremonyModel.kt")) {
+            val src = source(name)
+            for (bad in listOf(".signBatch(", ".queueSettings(", "sign(", "Psbt", "psbt", ".broadcast(", "Transaction(", "key2Secret", "key3Secret", "mnemonic", "seed")) {
+                ok(!src.contains(bad), "$name does not call or hold $bad")
+            }
+        }
+        ok(!ceremonyCode().contains("made.words"), "key 1's words are never shown")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
@@ -1144,7 +1346,7 @@ object AppModelTest {
         for (id in ids) ok(id in rules, "oa_${id}_... tests a rule that is in docs/OWNER-APP-RULES.md")
         for (line in rulesMd.readLines()) ok(line.length <= 80 || line.startsWith("|"), "a line of the rules is at most 80 characters: ${line.take(40)}")
         val text = rulesMd.readText()
-        ok(text.contains("## 7. What these rules do not do"), "the rules say what they do not do")
+        ok(text.contains("## 8. What these rules do not do"), "the rules say what they do not do")
         ok(text.lines().any { it.startsWith("Status:") }, "the status line")
     }
 
@@ -1163,6 +1365,7 @@ object AppModelTest {
         formTests()
         exchangeTests()
         counterTests()
+        ceremonyTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")
     }

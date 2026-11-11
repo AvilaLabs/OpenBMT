@@ -41,12 +41,18 @@ class Controller(internal val act: MainActivity) {
     internal val main = Handler(Looper.getMainLooper())
     internal val scan = ScanFlow(act, ui)
     private val dir: File = act.noBackupFilesDir
+
+    /** The app's own folder, for the files of the screens that are in their own file (`Ceremony.kt`). */
+    internal val appDir: File get() = dir
     private val nodeDir = File(dir, AppFiles.NODE_DIR)
     private val configFile = ConfigFile(dir)
 
     // What is saved, as read at the last start.
     internal var setup: OwnerSetup? = null
     internal var config: AppConfig? = null
+
+    // The key ceremony in progress: held in memory for the screens, and sealed on disk between steps (OA-26).
+    internal var ceremony: CeremonyDraft? = null
 
     // What the first screen holds while a file picker is open. Never written anywhere (OA-01).
     private var draftText = ""
@@ -104,6 +110,7 @@ class Controller(internal val act: MainActivity) {
     internal fun begin() {
         fault = null
         torBlocked = null
+        ceremony = null
         stopNode()
         val setupStatus = try {
             config = configFile.load()
@@ -113,6 +120,8 @@ class Controller(internal val act: MainActivity) {
             return render()
         }
         if (!setupStatus.complete) return showFirstStart(null)
+        // A ceremony record left behind by a save that did not finish deleting it: the setup is saved, so it goes (OA-29).
+        File(dir, AppFiles.CEREMONY_FILE).delete()
         try {
             val text = SealedFile(dir, KeystoreSealer(AppFiles.KEY_ALIAS), AppFiles.SETUP_FILE).load()
                 ?: throw IOException("the setup is missing")
@@ -357,15 +366,31 @@ class Controller(internal val act: MainActivity) {
 
     // ---- first start ---------------------------------------------------------------------------------------------
 
-    private fun showFirstStart(message: SayWords?) {
+    /**
+     * The first screen: make a new shop wallet with the Key app, or use setup text. An unfinished ceremony is
+     * resumed instead (OA-27).
+     */
+    internal fun showFirstStart(message: SayWords?) {
+        if (File(dir, AppFiles.CEREMONY_FILE).exists() && !File(dir, AppFiles.SETUP_FILE).exists()) {
+            return showCeremonyResume(message)
+        }
         val views = ArrayList<View>()
         views.add(ui.words(message ?: AppWords.notSetUp))
+        views.add(ui.button("Make a new shop wallet") { startCeremony() })
+        views.add(ui.button("I have setup text") { showPasteSetup(null) })
+        page(views)
+    }
+
+    /** The second choice: setup text of a key ceremony made elsewhere, with the address of Orbot. */
+    private fun showPasteSetup(message: SayWords?) {
+        val views = ArrayList<View>()
+        views.add(ui.words(message ?: AppWords.setupTextNeeded))
         views.add(label("Setup text from the key ceremony"))
         val pasted = ui.field("Paste the setup text here", lines = 6).also { it.setText(draftText) }
         views.add(pasted)
         for (source in setupSources()) views.add(ui.button(source.label) {
             draftText = pasted.text.toString()
-            source.begin({ text -> draftText = text; showFirstStart(message) }, { w -> showFirstStart(w) })
+            source.begin({ text -> draftText = text; showPasteSetup(message) }, { w -> showPasteSetup(w) })
         })
         views.add(ui.words(AppWords.torAlwaysOn))
         views.add(label("Address of Orbot"))
@@ -374,33 +399,47 @@ class Controller(internal val act: MainActivity) {
         views.add(ui.button("Save and start") {
             draftProxy = proxy.text.toString()
             draftText = pasted.text.toString()
-            saveFirstStart(draftText, draftProxy.trim())
+            saveSetup(draftText, draftProxy.trim(), { w -> showPasteSetup(w) })
         })
+        views.add(ui.button("Back") { draftText = ""; showFirstStart(null) })
         page(views)
     }
 
-    private fun saveFirstStart(text: String, proxy: String) {
+    /**
+     * Saves a setup text as the paste path and the ceremony both do: the text is checked for its shape, the setup
+     * is sealed and saved, then the config, which is the last thing a finished setup adds. [onRefused] shows
+     * what could not be done; [afterSaved] runs once both are saved.
+     */
+    internal fun saveSetup(
+        text: String,
+        proxy: String,
+        onRefused: (SayWords) -> Unit,
+        working: SayWords = AppWords.starting,
+        afterSaved: () -> Unit = {},
+    ) {
         try {
             OwnerSetup.parse(text)
         } catch (e: SetupFormatException) {
-            return showFirstStart(AppWords.setupNotReadable(e.message))
+            return onRefused(AppWords.setupNotReadable(e.message))
         }
-        if (!HostPort.valid(proxy)) return showFirstStart(AppWords.torAddressNotAccepted)
-        page(listOf(ui.words(AppWords.starting)))
+        if (!HostPort.valid(proxy)) return onRefused(AppWords.torAddressNotAccepted)
+        page(listOf(ui.words(working)))
         async({
             // The setup first, then the config: the config is the last thing a finished setup adds.
             SealedFile(dir, KeystoreSealer(AppFiles.KEY_ALIAS), AppFiles.SETUP_FILE).save(text.toByteArray(Charsets.UTF_8))
             configFile.save(AppConfig(proxy))
+            afterSaved()
         }) { r ->
             when (val e = r.exceptionOrNull()) {
                 null -> {
                     // The text held secrets: nothing of it stays in the app's memory or on the clipboard (OA-01).
                     draftText = ""
+                    ceremony = null
                     act.getSystemService(ClipboardManager::class.java)?.clearPrimaryClip()
                     showMessage(AppWords.setupSaved, "Start") { begin() }
                 }
-                is IOException -> showFirstStart(AppWords.fileNotSaved(e.message))
-                is GeneralSecurityException -> showFirstStart(AppWords.storageUnavailable(e.message))
+                is IOException -> onRefused(AppWords.fileNotSaved(e.message))
+                is GeneralSecurityException -> onRefused(AppWords.storageUnavailable(e.message))
                 else -> throw e
             }
         }
@@ -413,7 +452,7 @@ class Controller(internal val act: MainActivity) {
 
             override fun begin(onText: (String) -> Unit, onFailed: (SayWords) -> Unit) {
                 val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
-                openPicker(intent, { showFirstStart(null) }) { uri ->
+                openPicker(intent, { showPasteSetup(null) }) { uri ->
                     try {
                         onText(String(readBytes(uri, OwnerSetup.MAX_TEXT * 4 + 1), Charsets.UTF_8))
                     } catch (e: IOException) {

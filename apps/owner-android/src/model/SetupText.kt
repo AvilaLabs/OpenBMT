@@ -4,6 +4,7 @@ import org.openbmt.app.Format
 import org.openbmt.owner.LinkConfig
 import org.openbmt.owner.OwnerNetwork
 import org.openbmt.owner.Route
+import org.openbmt.owner.SetupFields
 import org.openbmt.owner.StartConfig
 
 /** The setup text was not in the form this app reads. [message] says which line and why. */
@@ -29,9 +30,10 @@ class SetupLink(
 
 /**
  * What the owner phone is set up with, as the app keeps it: the fields the
- * node needs at each start (`StartConfig`), read from the setup text the key
- * ceremony makes. No ceremony screen exists yet, so this is the app's own
- * format: plain lines, so that a file and pasted text carry the same text.
+ * node needs at each start (`StartConfig`), read from the setup text. The
+ * key ceremony on this phone makes it with [format]; the text can also be
+ * pasted or read from a file. It is the app's own format: plain lines, so
+ * that a file and pasted text carry the same text.
  *
  * ```
  * openbmt-owner-setup 1
@@ -122,6 +124,33 @@ class OwnerSetup(
             "batch-min-count", "refund-depth", "birthday", "peer", "relay-route", "relay-key",
             "counter", "heartbeat-every", "check-in-grace",
         )
+
+        /**
+         * The setup text of the values the library gives at the end of a key ceremony: the text [parse] reads
+         * and the paste path saves. A ceremony makes no peers and no link, so the text has none.
+         */
+        fun format(f: SetupFields): String {
+            fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
+            val lines = ArrayList<String>()
+            lines.add(HEADER)
+            lines.add(
+                "network: " + when (f.network) {
+                    OwnerNetwork.Mainnet -> "mainnet"
+                    OwnerNetwork.Testnet -> "testnet"
+                    OwnerNetwork.Signet -> "signet"
+                    OwnerNetwork.Regtest -> "regtest"
+                },
+            )
+            lines.add("owner-secret: ${hex(f.ownerSecret)}")
+            lines.add("approver-root: ${hex(f.approverRoot)}")
+            lines.add("wallet: ${f.wallet}")
+            lines.add("key1-account: ${hex(f.key1Account)}")
+            f.key3Xpub?.let { lines.add("key3-xpub: $it") }
+            lines.add("batch-min-count: ${f.batchMinCount}")
+            lines.add("refund-depth: ${f.refundDepth}")
+            lines.add("birthday: ${f.birthday}")
+            return lines.joinToString("\n") + "\n"
+        }
 
         fun parse(text: String): OwnerSetup {
             if (text.length > MAX_TEXT) throw SetupFormatException("the text is longer than $MAX_TEXT characters")

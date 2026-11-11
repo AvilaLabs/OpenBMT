@@ -12,7 +12,7 @@ sealed class Screen {
     /** The app could not read its own state or the library did not load: nothing else is offered but trying again. */
     class Fault(val words: SayWords) : Screen()
 
-    /** Nothing, or not everything, is saved: the setup text and the Tor address are asked for. */
+    /** Nothing, or not everything, is saved: a new wallet is made with the Key app, or setup text and the Tor address are asked for. */
     object FirstStart : Screen()
 
     /** Orbot did not answer: nothing is sent, and the app says so (OA-05). */

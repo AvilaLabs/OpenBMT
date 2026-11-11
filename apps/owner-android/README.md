@@ -11,13 +11,13 @@ or `apps/key-android` was changed for this app.
 **First build. No independent security audit has been done. It has not been
 run on a phone or an emulator. Not for real funds.** The APK is signed with a
 local test key; release signing is a separate step (see "Signing"). The rules
-the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-21).
+the app keeps are in `docs/OWNER-APP-RULES.md` (OA-01 to OA-31).
 
 ## What it does
 
 | Screen | What it shows |
 |---|---|
-| First start | The setup text (pasted or from a file) and the address of Orbot. |
+| First start | "Make a new shop wallet" (the key ceremony with the Key app, OA-26 to OA-31) or "I have setup text" (pasted or from a file, with the address of Orbot). |
 | Home | The receipts line, the number of alerts, the link state, the payments in progress. |
 | Receipts line | What the node counts as received, and the offer to merge. |
 | Spend | Builds the request for the Key app, shows it as a code, saves it as a file or copies it as text, takes the response by camera, file or paste. |
@@ -39,10 +39,28 @@ library has them. The app's own states and faults have words written in
 `src/model/AppWords.kt` under `docs/SCREEN-RULES.md`, listed in
 `docs/screens/owner-app.md`.
 
-Not built yet: the key ceremony (the setup text is made by hand, see below),
-and any change to the settings (the settings view is read-only; a counter
-added from the phone gets equal shares of the instant limit, and shares that
-are not equal wait for the settings editor).
+Not built yet: a relay link and peers for a wallet made on this phone (the
+setup text it makes has none; a pasted text can carry them, see below), and
+any change to the settings (the settings view is read-only; a counter added
+from the phone gets equal shares of the instant limit, and shares that are not
+equal wait for the settings editor).
+
+## Making a new shop wallet
+
+The first start offers "Make a new shop wallet" (OA-26 to OA-31). The steps
+are one screen each: key 1 is made on this phone (no words are shown for it);
+the Key app on the other phone is set up with "Set up keys" and its code is
+scanned (`ur:bytes`); the Key app's four identity words are compared; key 2 is
+scanned or pasted when the Key app holds none; the wallet is built and its
+checksum words, fingerprints, pairs of keys and first address are shown; the
+wallet setup is shown to the Key app as a code, and the owner says whether the
+Key app shows the same words. Then the setup is saved as a pasted one is, and
+the app starts through Orbot. After each step the library's record is sealed
+in `ceremony.obks`; a start that finds it and no setup resumes at the stage the
+library reports, and "Start again" (after a confirmation) deletes it. The
+network is the build's (`AppConfig.NETWORK`, mainnet): there is no picker. The
+batch minimum, the refund depth and the first block come from the library
+(`OwnerCeremony.defaults`).
 
 ## Adding a counter
 
@@ -109,7 +127,8 @@ the HTTP (OA-16 to OA-19).
 
 ## Setup text
 
-The app's own plain-line format, because no ceremony is built yet: a header
+The app's own plain-line format, which the ceremony on this phone also writes
+(`OwnerSetup.format`) and the paste path reads: a header
 `openbmt-owner-setup 1`, then one `key: value` line each for the network, the
 owner's secret, the approver root, the wallet descriptor, Key 1's account key,
 the batch minimum, the refund depth and the wallet birthday, and optionally
@@ -190,6 +209,8 @@ release key.
 ## Not checked without a device
 
 Everything that needs a running Android: that the library loads and starts,
+the key ceremony against a real Key app on a second phone (scanning its answer
+and key 2, showing it the setup, resuming after the app was closed),
 how the screens look and lay out, the keyboard types of the fields, the file
 picker and the save of a request as a file, the clipboard copy and clear, the
 Keystore sealing (of the setup and of the till's token), the hidden token

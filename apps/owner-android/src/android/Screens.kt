@@ -613,7 +613,7 @@ internal fun Controller.showAbout() {
             ),
             label("Not built yet"),
             ui.text(
-                "The key ceremony (setup is pasted text or a file); " +
+                "The link to the counters for a wallet made on this phone; " +
                     "changing the shop's settings, with shares of the instant limit that are not equal; the books; archiving paid entries.",
                 16f,
             ),

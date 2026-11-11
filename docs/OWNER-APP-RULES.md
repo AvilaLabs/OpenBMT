@@ -29,17 +29,20 @@ run on a phone. Not for real funds.**
   preference, cache or log. While the first screen is open the typed text is
   held in memory only, it is dropped when the setup is saved, and the
   clipboard is cleared then. The secrets are handed to the node at each
-  start and by no other way.
+  start and by no other way. While a key ceremony on this phone is not
+  finished, the same secrets are in the sealed record of OA-26, a second
+  file of the same kind that is deleted once the setup is saved.
 - **OA-02.** Nothing is backed up and nothing moves to another phone:
   `allowBackup` is false, and the extraction rules exclude every domain for
   cloud backup and for device transfer.
 - **OA-03.** The manifest asks for exactly two permissions, INTERNET and
   CAMERA, and declares the camera as a feature that is not required. CAMERA
-  is declared for reading the Key app's response and a counter's request
-  from a code, and is asked for only when the owner taps a scan button
-  (OA-21, OA-22). It has one activity,
-  which is exported and is the launcher, and no service, receiver or
-  provider. Cleartext traffic is off and the app is not debuggable.
+  is declared for reading the Key app's response, a counter's request and,
+  in a key ceremony, the Key app's answer and key 2 from a code, and is
+  asked for only when the owner taps a scan button (OA-21, OA-22, OA-28).
+  It has one activity, which is exported and is the launcher, and no
+  service, receiver or provider. Cleartext traffic is off and the app is not
+  debuggable.
   `apps/owner-android/tests/check-manifest.sh` reads the built APK and fails
   the build if any of this differs.
 - **OA-04.** Every window of the app has `FLAG_SECURE`, set before any
@@ -261,15 +264,94 @@ owner's choices.
   marks what waited as delivered; "Show again" draws the code again from the
   node, which changes nothing. The app keeps no copy of the code.
 
-## 7. What these rules do not do
+## 7. Making a new shop wallet
+
+The first start can make the wallet on this phone, with the Key app on a
+second phone (`docs/DESIGN.md` §2.1 steps 4 and 5). The library does every
+step (`docs/OWNER-COINS-RULES.md`, OC-40 to OC-46, and
+`docs/SIGNER-RULES.md`, SR-64 to SR-69, through the ops 80 to 86 of the
+binding, which name no node). The app reads the camera, shows the answers,
+keeps the library's record between two steps and carries the owner's words.
+
+- **OA-26.** The first start offers two buttons: "Make a new shop wallet",
+  first, and "I have setup text", the paste path of OA-01 and OA-11. The
+  network is the build's one choice (`AppConfig.NETWORK`): the app has no
+  picker, and the library refuses a Key app's answer for another network.
+  Key 1 is made with no words to show (`show_words` false, `docs/DESIGN.md`
+  §5.4), and the app shows the library's words of the stage. After every op
+  that returns a record the app seals the record in its own file in
+  `noBackupFilesDir` (`ceremony.obks`, under the Keystore key of OA-01, by
+  the same atomic steps) before it shows the next screen. A record that
+  cannot be saved is said so, with a button to try again, and no next
+  screen. Nothing of the record is kept in any other file, preference,
+  cache or log, and it is held in memory only while the screens of the
+  ceremony are open.
+- **OA-27.** When the start finds the ceremony's file and no setup file,
+  the app asks the library for the stage of the record (`ceremonyStage`)
+  and resumes there, with the library's words of the stage: at stage 1 the
+  scan of the Key app's code, at stage 2 the same scan again (the setup
+  for the Key app is not kept, so the wallet is built again from the
+  answer), at stage 3 the saving of the setup. A record that does not
+  read is said so and only "Start again" goes on. "Start again" is always
+  offered on the screens of the ceremony and goes through a screen that
+  says the keys made so far are thrown away and nothing has been paid to
+  them. Only its confirmation deletes the file, and nothing else on the
+  phone. A ceremony's file that is found beside a saved setup is deleted.
+- **OA-28.** The Key app's answer is read by the shared `UrScan` for
+  `ur:bytes` and no other type, at most 1,024 bytes, as exactly the bytes
+  of the Key app's code (OA-13), and goes to `ceremonyReadAnswer`; the
+  camera is asked for only when the owner taps the scan button. The Key
+  app's identity words (`key_app_root_words`) are shown large, with "The
+  Key app shows the same words" and "They differ". Differ throws the
+  answer away and goes back to the scan, and the words say why. When the
+  answer holds no key 2, a screen takes key 2 as text, by a scan of a
+  plain code or pasted, and passes it as `key2_text` (SR-64); when the
+  answer holds key 2 the screen is not shown. Both are never passed
+  (OC-41). The app checks only the length of the text; the library reads
+  the key and refuses what is not one.
+- **OA-29.** The wallet is built with `ceremonyBuildWallet`. The screen
+  shows the checksum words large, the three fingerprints, the library's
+  words of the pairs of keys with a line for each pair and its holders, and
+  the first receive address in monospace. The wallet setup (`OBMw`,
+  `wallet_setup`) is shown to the Key app as `ur:bytes` parts of the
+  shared `AnimatedQrView` as in OA-20, exactly the bytes the library made,
+  with the words that the Key app shows the same checksum words and
+  fingerprints and that the owner compares them (OC-43). Only the owner's
+  word "The Key app shows the same words" calls `ceremonyFinish`. "They
+  differ" shows a screen that says the wallet is not finished, nothing
+  should be paid to it, and to choose "Start again" on both phones, and
+  leads to the confirmation of OA-27. The finished record is sealed, opened
+  with `ceremonyOpen`, written as the setup text of OA-01 (`OwnerSetup`
+  `format`, which `parse` reads back to the same values) and saved exactly
+  as the paste path saves it: the setup first, then the config with the
+  default address of Orbot. The ceremony's file is deleted only after both
+  are saved, and the start goes on as after a pasted setup, through the
+  gate of OA-05. A wallet made so has no peers and no relay link.
+- **OA-30.** Making key 1 and building the wallet take a moment: a page
+  says so and is drawn first, and the call stays on the screen thread
+  (OA-12). No number of the ceremony is written in Kotlin: the batch
+  minimum, the refund depth and the first block of the network are asked
+  from the library (`ceremonyDefaults`, op 86), which holds the counter's
+  minimum, the node's default depth and the header checkpoint of the watch.
+  The app judges no key, no word list and no wallet.
+- **OA-31.** Every state and every refusal of the ceremony is shown with the
+  library's words where the library has them, and the words of the app's own
+  steps are in `AppWords`, each sentence at most 140 characters, listed in
+  `docs/screens/owner-app.md`. The app holds no secret of key 2 or key 3
+  (OA-08) and signs nothing (OA-09): what it holds from the ceremony is key
+  1 and the owner's secret, as before.
+
+## 8. What these rules do not do
 
 - **They do not protect a phone that is already lost to someone else.**
   A phone that is unlocked, rooted or running a hostile keyboard or
   accessibility service can read what the screen shows and what is typed.
   `FLAG_SECURE` and the sealed file are not a defense against that.
-- **They do not audit the setup text.** The key ceremony is not built. The
-  text holds two secrets in plain lines until it is sealed; where it comes
-  from, how it was carried and when it is deleted are the owner's.
+- **They do not audit the setup text.** The text holds two secrets in plain
+  lines until it is sealed. A text from the ceremony on this phone never
+  leaves the app before it is sealed; where a pasted text comes from, how it
+  was carried and when it is deleted are the owner's. Key 1 has no PIN and
+  no passphrase, and the ceremony shows no words of key 1.
 - **They do not make a spend safe.** The Key app's own rules and the
   approval (`docs/SIGNER-RULES.md`, `docs/SESSION-RULES.md`) decide what is
   signed. This app builds the request and carries the response; a request
@@ -288,7 +370,8 @@ owner's choices.
   counter's, are the shared pieces, checked on the desktop; no phone has
   scanned a code of this app or shown one to the Key app or a counter yet.
   The code for a counter holds 1,000 addresses, so it has many parts; how
-  long a scan of it takes is not measured.
+  long a scan of it takes is not measured. The same holds for the Key app's
+  answer, key 2 and the setup shown to the Key app in the ceremony.
 - **They do not say the app has been run.** Every check here is on the
   desktop JVM, on the manifest of a built APK, or on the source. What needs
   a phone is listed in `apps/owner-android/README.md`.

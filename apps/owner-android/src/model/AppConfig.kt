@@ -3,6 +3,7 @@ package org.openbmt.owner.app
 import java.io.File
 import java.io.IOException
 import org.openbmt.app.DurableFile
+import org.openbmt.owner.OwnerNetwork
 
 /** The config file did not have the form this app writes. */
 class ConfigFormatException(message: String) : IOException(message)
@@ -17,6 +18,12 @@ class AppConfig(val proxy: String) {
 
     companion object {
         const val DEFAULT_PROXY = "127.0.0.1:9050"
+
+        /**
+         * The network a wallet made on this phone is for. It is the build's one choice: the app has no
+         * picker, and the Key app's answer must be for the same network or the library refuses it.
+         */
+        val NETWORK: OwnerNetwork = OwnerNetwork.Mainnet
 
         fun decode(bytes: ByteArray): AppConfig {
             if (bytes.size > 256) throw ConfigFormatException("the config file is longer than 256 bytes")
@@ -44,6 +51,12 @@ object AppFiles {
 
     /** The sealed setup text: the owner's secret and Key 1's account key (OA-01). */
     const val SETUP_FILE = "setup.obks"
+
+    /**
+     * The sealed record of a key ceremony that is not finished (OA-26): key 1's secret and the owner's secret,
+     * sealed under the same Keystore key as the setup. It is deleted once the setup is saved (OA-29).
+     */
+    const val CEREMONY_FILE = "ceremony.obks"
 
     /** The Keystore key that seals the till's token (OA-16). Its own key: removing the till does not touch the setup's. */
     const val POS_KEY_ALIAS = "openbmt-owner-pos-token-v1"

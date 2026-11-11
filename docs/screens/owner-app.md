@@ -12,7 +12,7 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 
 | State | Heading | What happened | What to do next | Who | Code |
 |---|---|---|---|---|---|
-| notSetUp | Not set up yet | This phone has not been set up as the shop's owner phone yet. | Paste the setup text from the key ceremony, or choose its file, then save. | the owner |  |
+| notSetUp | Not set up yet | This phone has not been set up as the shop's owner phone yet. | Make a new shop wallet with the Key app, or use setup text you already have. | the owner |  |
 | setupSaved | Owner phone set up | The setup is saved on this phone, sealed with a key that stays in the phone. | Keep Orbot running and the app open. It starts looking for the network now. | the owner |  |
 | setupNotReadable | Setup text not read | The setup text is not in the form this app reads, so nothing was saved. | Copy the setup text again from the key ceremony, then try again. | the owner |  |
 | torAddressNotAccepted | Tor address not accepted | The address of Orbot must be a host, a colon and a port, like 127.0.0.1:9050. | Type the address again. | the owner |  |
@@ -45,6 +45,31 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | counterCodeNoBatch | Code without addresses | The first addresses are not in this code, because the link handed them over already. | Scan this with the counter. It shows Paired when it has taken it. | the owner |  |
 | counterCodeNotMade | No code could be made | The code for the counter could not be made, so nothing is shown. What waits for the counter is kept. | Try to show it again. | the owner |  |
 | counterDelivered | Counter paired | The counter shows Paired, so what waited for it is marked delivered. | The counter takes its sales from its first addresses now. | the owner |  |
+| ceremonyMakingKey | Making key 1 | Key 1 is being made on this phone, which takes a moment. | Wait on this screen. | the owner |  |
+| ceremonyScanNext | Scan the Key app | Open the Key app on the other phone and choose Set up keys. | Press the button below and scan the code it shows. | the owner |  |
+| ceremonyNotAnAnswer | Not the Key app's answer | The code read is not one the Key app shows for its answer, so nothing was used. | On the Key app, choose Set up keys, and scan the code it shows. | the owner |  |
+| ceremonyCodeTooLong | Code too long for an answer | The code holds more than the Key app's answer can, so nothing was used. | On the Key app, choose Set up keys, and scan the code it shows. | the owner |  |
+| ceremonyScanCancelled | Key app scan cancelled | No code was read, so no answer was taken from the Key app. | Scan the Key app's code again when you are ready. | the owner |  |
+| ceremonyCompareRoot | Compare the Key app's words | Check that the Key app shows these same four words as its own. | If they match, say so below. If they differ, say so and the answer is thrown away. | the owner |  |
+| ceremonyRootDiffers | Answer thrown away | The four words differ, so this answer may not come from the Key app you hold, and it was thrown away. | Scan again on the Key app you hold. If the words still differ, choose Start again. | the owner |  |
+| ceremonyKey2Needed | Key 2 needed | The Key app holds no key 2, so key 2 comes from the device that holds it. | Scan its code or paste its text, then continue. | the owner |  |
+| ceremonyKey2Text | Key 2 text not accepted | The text for key 2 is empty, is not text, or is longer than a key's text can be, so nothing was used. | Copy it again from the device that holds key 2, then try again. | the owner |  |
+| ceremonyKey2ScanCancelled | Key 2 scan cancelled | No code was read, so key 2 was not taken. | Scan its code again, or paste its text instead. | the owner |  |
+| ceremonyBuilding | Building the wallet | The wallet is being built from the three keys, which takes a moment. | Wait on this screen. | the owner |  |
+| ceremonyCheckWallet | Check the wallet | The checksum words and the fingerprints below are the wallet's. The Key app shows the same ones. | Show the Key app its setup next, and compare there. | the owner |  |
+| ceremonyCodeAnimated | Setup for the Key app | The setup for the Key app is on the screen as a code that changes, one part after another. | On the Key app, scan this code until it has read every part, then compare the words. | the owner |  |
+| ceremonyCodeStill | Setup for the Key app | The setup for the Key app is on the screen as one code that does not change. | On the Key app, scan this code, then compare the words. | the owner |  |
+| ceremonyCodeNotMade | No code could be made | The setup for the Key app could not be turned into a code, so nothing is shown. | Go back and try to show it again. | the owner |  |
+| ceremonyCompareSetup | Compare with the Key app | After it takes the setup, the Key app shows the checksum words and the fingerprints. | Check that they are the same as on this phone, then say so below. | the owner |  |
+| ceremonyWordsDiffer | Wallet not finished | The words differ, so the wallet is not finished, and nothing should be paid to it. | Choose Start again on both phones. | the owner |  |
+| ceremonyScanAgain | Scan the Key app again | The wallet was built, but the setup for the Key app is not kept on this phone. | Scan the Key app's code again to show the setup again. | the owner |  |
+| ceremonyFinishing | Finishing the setup | The setup is being finished and saved on this phone. | Wait on this screen. | the owner |  |
+| ceremonySaveNext | Save the setup | The words were confirmed, but the setup was not saved on this phone yet. | Press the button below to save it and start. | the owner |  |
+| ceremonyResume | Setup in progress | A new shop wallet was started on this phone and is not finished. | Continue where it stopped, or start again. | the owner |  |
+| ceremonyStartAgain | Start again? | The keys made so far are thrown away, and nothing has been paid to them. | Choose Start again only if the Key app starts again too. | the owner |  |
+| ceremonyThrownAway | Started over | The keys made so far were thrown away, and nothing was paid to them. | Make a new shop wallet again, or use setup text you already have. | the owner |  |
+| ceremonyRecordNotRead | Setup record not read | The record of the unfinished setup could not be read, so nothing was done. | Choose Start again and make the wallet again. Nothing has been paid to it. | the owner |  |
+| setupTextNeeded | Setup text needed | This phone takes the setup text of a key ceremony made elsewhere, pasted or from a file. | Paste the setup text, or choose its file, then save. | the owner |  |
 | requestSaved | Request saved | The request is saved as a file. | Carry the file to the Key app and open it there. | the owner |  |
 | refundQueuedAtDepth | Refund queued | The refund is in the queue, and the sale is deep enough to be refunded. | Bring this phone and the Key app together and start an approval. | the owner |  |
 | refundQueuedWaiting | Refund queued, sale new | The refund is in the queue, but the sale is not deep enough yet to be refunded. | Wait for more blocks. The refund can be approved when the sale is deep enough. | the owner |  |
