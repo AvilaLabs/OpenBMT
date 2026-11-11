@@ -399,8 +399,12 @@ Stated plainly, because the design promises no overclaiming.
 ## 12. The Key app's lock and its screens
 
 The Key app keeps the library's state behind a PIN, and enrols cash-out
-addresses from its own camera. SR-71 to SR-73 are kept by `openbmt-key-ffi`;
-SR-74 to SR-79 by the Android app (`apps/key-android`).
+addresses from its own camera. SR-71 to SR-73 are kept by `openbmt-key-ffi`,
+which holds the Key app's store and calls `openbmt-lock` for the frame, the
+cost and the PIN rules (`docs/LOCK-RULES.md`, LC-01 to LC-07: the owner app
+keeps its key 1 in the same frame); SR-74 to SR-79 by the Android app
+(`apps/key-android`), with the tries, the waits and the wipe of
+`apps/android-common` (`LockModel.kt`), which the owner app uses as well.
 
 - **SR-71. The locked frame.** What the Key app stores is a frame `OBMx`,
   version 1: the Argon2id parameters (memory in KiB, passes and lanes, each 4
@@ -414,11 +418,12 @@ SR-74 to SR-79 by the Android app (`apps/key-android`).
   refused. Decoding is strict: version 1, the exact length, and only bytes
   that writing the frame again would give. Every write of the state goes
   through the frame. The Android Keystore's seal stays outside it, so that
-  the device and the PIN are both needed.
+  the device and the PIN are both needed. The frame and the cost are LC-01,
+  LC-02 and LC-04.
 - **SR-72. The PIN.** A PIN is at least 6 digits, or a passphrase of at least
   8 characters, and at most 128 characters in either case (`pin-weak`,
-  `pin-long`). It is set before a new or restored key is made, so that the
-  first store is already locked (`pin-first` until then), and it is set once
+  `pin-long`, LC-03). It is set before a new or restored key is made, so that
+  the first store is already locked (`pin-first` until then), and it is set once
   (`pin-set`). A state stored by an older build, with no frame, opens only
   into the step that sets a PIN (`pin-needed`): setting it stores the same
   state behind the PIN, with nothing changed if the store fails, and the

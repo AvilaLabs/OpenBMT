@@ -435,13 +435,12 @@ version = "0.1.0"
 name = "openbmt-key-ffi"
 version = "0.1.0"
 dependencies = [
- "argon2",
  "bip39",
  "bitcoin",
- "chacha20poly1305",
  "jni-sys",
  "openbmt-approver",
  "openbmt-core",
+ "openbmt-lock",
  "openbmt-owner",
  "openbmt-session",
  "openbmt-signer",
@@ -465,6 +464,15 @@ dependencies = [
  "chacha20poly1305",
  "openbmt-core",
  "openbmt-net-io",
+]
+
+[[package]]
+name = "openbmt-lock"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "chacha20poly1305",
+ "openbmt-core",
 ]
 
 [[package]]

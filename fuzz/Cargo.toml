@@ -30,6 +30,7 @@ openbmt-approver = { path = "../crates/openbmt-approver" }
 openbmt-owner = { path = "../crates/openbmt-owner" }
 openbmt-owner-node = { path = "../crates/openbmt-owner-node" }
 openbmt-key-ffi = { path = "../crates/openbmt-key-ffi" }
+openbmt-lock = { path = "../crates/openbmt-lock" }
 openbmt-qr = { path = "../crates/openbmt-qr" }
 openbmt-rates = { path = "../crates/openbmt-rates" }
 openbmt-ur = { path = "../crates/openbmt-ur" }
@@ -360,8 +361,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "key_lock_frame_decode"
-path = "fuzz_targets/key_lock_frame_decode.rs"
+name = "lock_frame_decode"
+path = "fuzz_targets/lock_frame_decode.rs"
 test = false
 doc = false
 bench = false

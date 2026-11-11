@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use openbmt_key_ffi::lock::{decode, KdfParams, HEADER_LEN, MAGIC_LOCKED};
+use openbmt_lock::{decode, KdfParams, HEADER_LEN, MAGIC_LOCKED};
 
 /// The input as it is, and the input behind a good magic and version (so
 /// that mutated bytes reach the parameters, the salt and the length). A

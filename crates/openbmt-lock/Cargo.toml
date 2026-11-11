@@ -1,0 +1,18 @@
+[package]
+name = "openbmt-lock"
+description = "The PIN lock of a phone's key file: the OBMx frame, Argon2id and ChaCha20-Poly1305, and the rules for a PIN, shared by the Key app and the owner app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+
+# The same exact versions and features as openbmt-books and openbmt-key-ffi,
+# which are already in the lock file. No other package is added.
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+argon2 = { version = "=0.5.3", default-features = false, features = ["alloc", "zeroize"] }
+chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
