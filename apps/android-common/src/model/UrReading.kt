@@ -3,7 +3,7 @@ package org.openbmt.app
 /** What one scanned part did to a reading. */
 sealed class UrStep {
     /** Show these words and keep scanning. */
-    class Show(val words: SayWords) : UrStep()
+    class Show(val words: SayWords, val received: Int = 0, val expected: Int = 0) : UrStep()
 
     /** The message is complete and of an accepted type. */
     class Done(val type: String, val payload: ByteArray) : UrStep()
@@ -40,7 +40,7 @@ class UrReading(private val call: UrCall, private val types: Set<String>, privat
             is UrOutcome.Ok -> {
                 strangers = 0
                 val progress = outcome.value
-                if (progress.complete) finish(h) else UrStep.Show(UrWords.reading(who, progress.received, progress.expected))
+                if (progress.complete) finish(h) else UrStep.Show(UrWords.reading(who, progress.received, progress.expected), progress.received, progress.expected)
             }
             is UrOutcome.Refused -> refused(outcome.code)
             is UrOutcome.Fault -> UrStep.Fail(UrWords.readerFailed(who))

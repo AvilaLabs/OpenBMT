@@ -130,6 +130,9 @@ object UrText {
     fun startsWithUr(bytes: ByteArray): Boolean =
         bytes.size >= 3 && bytes.copyOfRange(0, 3).let { String(it, Charsets.ISO_8859_1).equals("ur:", ignoreCase = true) }
 
+    /** Whether [bytes] start with the "B$" that every part of a BBQr set starts with. */
+    fun startsWithBbqr(bytes: ByteArray): Boolean = bytes.size >= 2 && bytes[0] == 'B'.code.toByte() && bytes[1] == '$'.code.toByte()
+
     fun isMultiPart(bytes: ByteArray): Boolean =
         bytes.size >= 3 && isMultiPart(String(bytes.copyOfRange(0, minOf(bytes.size, 64)), Charsets.ISO_8859_1))
 }

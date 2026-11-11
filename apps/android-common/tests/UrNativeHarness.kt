@@ -263,6 +263,64 @@ object UrNativeHarness {
         ok(out.size > 2 && out.all { it.startsWith("UR:CRYPTO-OUTPUT/") }, "a crypto-output of several parts")
     }
 
+    private fun bbqrReadingTests(call: UrCall) {
+        val payload = psbt(900)
+        val parts = value(call.bbqrEncode('P', payload, 300), "the parts")
+        // Any order, with repeats and a misread: the file comes out when every part is read.
+        val reading = BbqrReading(call, setOf('P', 'T'), Who.OWNER)
+        ok(!reading.started, "no joiner before the first part")
+        val order = parts.indices.shuffled(java.util.Random(11)) + listOf(0, 0)
+        var done: BbqrStep.Done? = null
+        val seen = HashSet<Int>()
+        ok(reading.feed("hello") === BbqrStep.Ignore, "text that is not a part is skipped")
+        for (i in order) {
+            when (val step = reading.feed(if (i % 2 == 0) parts[i] else parts[i].lowercase().replaceFirst("b$", "B$"))) {
+                is BbqrStep.Show -> {
+                    seen.add(i)
+                    ok(step.total == parts.size && step.have == seen.size, "progress ${step.have} of ${step.total}")
+                }
+                is BbqrStep.Done -> {
+                    done = step
+                    break
+                }
+                else -> ok(step === BbqrStep.Ignore, "a repeat changes nothing: $step")
+            }
+        }
+        ok(done != null && done.kind == 'P' && done.payload.contentEquals(payload), "the set reads back to the file")
+        reading.drop()
+        ok(!reading.started, "dropped")
+        reading.drop()
+        // A kind the step does not take.
+        val text = value(call.bbqrEncode('U', "Name: Shop\n".toByteArray(), 300), "a text set")
+        val r2 = BbqrReading(call, setOf('P', 'T'), Who.OWNER)
+        // The library's joiner takes only P and T (BQ-03), so a part of another kind is skipped like a misread.
+        ok(r2.feed(text[0]) === BbqrStep.Ignore && r2.started, "a part of a text set is skipped")
+        r2.drop()
+        // A transaction set is taken.
+        val tx = value(call.bbqrEncode('T', message(120), 300), "a transaction set")
+        val r3 = BbqrReading(call, setOf('P', 'T'), Who.OWNER)
+        val d3 = r3.feed(tx[0])
+        ok(d3 is BbqrStep.Done && d3.kind == 'T' && d3.payload.contentEquals(message(120)), "a transaction set of one part")
+        r3.drop()
+        // Parts of another set in a row: skipped, then the person is told.
+        val r4 = BbqrReading(call, setOf('P', 'T'), Who.OWNER)
+        ok(r4.feed(parts[0]) is BbqrStep.Show, "the first set begins")
+        val other = value(call.bbqrEncode('T', psbt(901), 300), "another set")
+        var told = 0
+        for (i in 1..BbqrReading.STRANGER_RUN) {
+            val step = r4.feed(other[1 + i % 2])
+            if (step is BbqrStep.Say) {
+                told++
+                ok(SayCheck.problem(step.words) == null && step.words.heading == "Another code is in view", "the other-code words")
+            } else {
+                ok(step === BbqrStep.Ignore, "another set's part is skipped: $step")
+            }
+        }
+        ok(told == 1, "told once after ${BbqrReading.STRANGER_RUN} in a row: $told")
+        r4.drop()
+        ok(UrText.startsWithBbqr("B\$2P0100".toByteArray()) && !UrText.startsWithBbqr("ur:bytes".toByteArray()) && !UrText.startsWithBbqr(byteArrayOf()), "a part is told by its B$")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         System.load(File(args[0]).absolutePath)
@@ -275,6 +333,7 @@ object UrNativeHarness {
         framingTests(call)
         keyTests(call)
         bbqrTests(call)
+        bbqrReadingTests(call)
         println("UrNativeHarness: $count checks passed")
     }
 }

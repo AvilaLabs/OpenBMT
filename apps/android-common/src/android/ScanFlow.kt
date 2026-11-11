@@ -23,7 +23,25 @@ class ScanFailure(val off: Boolean, val problem: String?, val words: SayWords? =
  * after part, and [onMessage] is called with the type and the payload when it is complete and its type is
  * one of [types]. [who] is the one who does the next step, for the words shown while reading.
  */
-class UrScan(val types: Set<String>, val who: Int, val onMessage: (type: String, payload: ByteArray) -> Unit)
+class UrScan(
+    val types: Set<String>,
+    val who: Int,
+    val parts: PartsProgress? = null,
+    val onMessage: (type: String, payload: ByteArray) -> Unit,
+)
+
+/**
+ * The words and the progress line of a scan of parts that come in any order: [words] are shown while the set
+ * is not complete, and [line] gives the line under them for the parts read and the parts that are expected.
+ */
+class PartsProgress(val words: SayWords, val line: (read: Int, of: Int) -> String)
+
+/**
+ * A scan that also takes a BBQr set: a code whose text starts with "B$" is a part, read in any order with
+ * the joiner of the library, and [onMessage] is called with the kind and the file when every part is read and
+ * the kind is one of [kinds]. [parts] says how far the reading is.
+ */
+class BbqrScan(val kinds: Set<Char>, val who: Int, val parts: PartsProgress, val onMessage: (kind: Char, payload: ByteArray) -> Unit)
 
 /**
  * The scan, from the person's tap to the bytes of a code: asks for the camera permission only now (at
@@ -42,6 +60,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
     private val main = Handler(Looper.getMainLooper())
     private var scanner: QrScanner? = null
     private var reading: UrReading? = null
+    private var joining: BbqrReading? = null
     private var pending: Request? = null
     private var generation = 0
 
@@ -59,12 +78,13 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
         val onFailed: (ScanFailure) -> Unit,
         val onCancel: () -> Unit,
         val ur: UrScan?,
+        val bbqr: BbqrScan?,
     )
 
     /**
      * Starts a scan. [show] puts a page on the screen. Exactly one of [onBytes] (the first code's bytes),
      * [onFailed], [onCancel] and, with [ur], its `onMessage` is called later, unless [stop] comes first.
-     * With [ur], a first code that does not start with "ur:" still goes to [onBytes].
+     * With [ur] or [bbqr], a first code that does not start with "ur:" or "B$" still goes to [onBytes].
      */
     fun begin(
         show: (View) -> Unit,
@@ -72,9 +92,10 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
         onFailed: (ScanFailure) -> Unit,
         onCancel: () -> Unit,
         ur: UrScan? = null,
+        bbqr: BbqrScan? = null,
     ) {
         stop()
-        val request = Request(show, onBytes, onFailed, onCancel, ur)
+        val request = Request(show, onBytes, onFailed, onCancel, ur, bbqr)
         if (act.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             scan(request)
             return
@@ -106,6 +127,8 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
         scanner = null
         reading?.drop()
         reading = null
+        joining?.drop()
+        joining = null
         pending = null
         asking = false
         askedAt = null
@@ -114,22 +137,30 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
     private fun scan(request: Request) {
         val mine = ++generation
         val status = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-        var shown: SayWords? = null
+        var shown: Any? = null
         val ur = request.ur
+        val bbqr = request.bbqr
+        fun progress(key: Any, words: SayWords, line: String?) {
+            if (key == shown) return
+            shown = key
+            status.removeAllViews()
+            status.addView(ui.words(WordsModel.of(words)))
+            if (line != null) status.addView(ui.text(line, 16f, bold = true), ui.margins(top = 8))
+        }
         val onCode: (ByteArray) -> Unit = { bytes ->
             if (mine == generation) {
                 val current = reading
-                if (ur == null || (current == null && !UrText.startsWithUr(bytes))) {
-                    // A plain code: the scan is over.
-                    stop()
-                    request.onBytes(bytes)
-                } else if (UrText.startsWithUr(bytes)) {
+                val joined = joining
+                if (ur != null && UrText.startsWithUr(bytes)) {
                     val r = current ?: UrReading(UrCall.native(), ur.types, ur.who).also { reading = it }
                     when (val step = r.feed(String(bytes, Charsets.UTF_8))) {
-                        is UrStep.Show -> if (step.words != shown) {
-                            shown = step.words
-                            status.removeAllViews()
-                            status.addView(ui.words(WordsModel.of(step.words)))
+                        is UrStep.Show -> {
+                            val parts = ur.parts
+                            if (parts != null && step.expected > 0) {
+                                progress(step.received to step.expected, parts.words, parts.line(step.received, step.expected))
+                            } else {
+                                progress(step.words, step.words, null)
+                            }
                         }
                         is UrStep.Done -> {
                             stop()
@@ -141,6 +172,25 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
                         }
                         is UrStep.Ignore -> {}
                     }
+                } else if (bbqr != null && UrText.startsWithBbqr(bytes)) {
+                    val r = joined ?: BbqrReading(UrCall.native(), bbqr.kinds, bbqr.who).also { joining = it }
+                    when (val step = r.feed(String(bytes, Charsets.US_ASCII))) {
+                        is BbqrStep.Show -> progress(step.have to step.total, bbqr.parts.words, bbqr.parts.line(step.have, step.total))
+                        is BbqrStep.Say -> progress(step.words, step.words, null)
+                        is BbqrStep.Done -> {
+                            stop()
+                            bbqr.onMessage(step.kind, step.payload)
+                        }
+                        is BbqrStep.Fail -> {
+                            stop()
+                            request.onFailed(ScanFailure(false, null, step.words))
+                        }
+                        is BbqrStep.Ignore -> {}
+                    }
+                } else if (current == null && joined == null) {
+                    // A plain code: the scan is over.
+                    stop()
+                    request.onBytes(bytes)
                 }
             }
         }
@@ -152,7 +202,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
                     request.onFailed(ScanFailure(false, text))
                 }
             },
-            ur != null,
+            ur != null || bbqr != null,
         )
         val preview = try {
             s.prepare()
@@ -167,7 +217,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
             filterTouchesWhenObscured = true
         }
         column.addView(ui.text("Scan the code", 20f, bold = true), ui.margins(bottom = 8))
-        val hint = if (ur != null) {
+        val hint = if (ur != null || bbqr != null) {
             "Hold the phone still with the whole code in view. A code that changes is read part by part: keep the phone on it until it is done."
         } else {
             "Hold the phone still with the whole code in view. It is read when it is steady."

@@ -87,13 +87,44 @@ class AnimatedQrView(context: Context, private val frames: AnimatedFrames, priva
          * library cannot draw shows as words now and never as a blank frame later. [who] is the one who does
          * the next step.
          */
-        fun make(context: Context, who: Int, type: String, payload: ByteArray, maxHeightPx: Int): AnimatedQrMade {
+        fun make(
+            context: Context,
+            who: Int,
+            type: String,
+            payload: ByteArray,
+            maxHeightPx: Int,
+            maxFragment: Int = AnimatedQr.MAX_FRAGMENT,
+        ): AnimatedQrMade {
             if (QrNative.load() != null) return AnimatedQrMade(null, UrWords.cannotShow(who))
             val call = UrCall.native()
-            val parts = when (val outcome = AnimatedQr.parts(call, type, payload)) {
+            val parts = when (val outcome = call.urEncode(type, payload, maxFragment)) {
                 is UrOutcome.Ok -> outcome.value
                 else -> return AnimatedQrMade(null, UrWords.cannotShow(who))
             }
+            return drawn(context, who, call, parts, maxHeightPx)
+        }
+
+        /**
+         * The view for [payload] as a BBQr set of [kind] (`P` for a PSBT, `U` for a text), each part at most
+         * [maxChars] characters; a file that fits one part is one still code.
+         */
+        fun makeBbqr(context: Context, who: Int, kind: Char, payload: ByteArray, maxHeightPx: Int, maxChars: Int): AnimatedQrMade {
+            if (QrNative.load() != null) return AnimatedQrMade(null, UrWords.cannotShow(who))
+            val call = UrCall.native()
+            val parts = when (val outcome = call.bbqrEncode(kind, payload, maxChars)) {
+                is UrOutcome.Ok -> outcome.value
+                else -> return AnimatedQrMade(null, UrWords.cannotShow(who))
+            }
+            return drawn(context, who, call, parts, maxHeightPx)
+        }
+
+        /** The view for [text] as one plain code, for a text that fits one (a wallet's text file). */
+        fun makePlain(context: Context, who: Int, text: String, maxHeightPx: Int): AnimatedQrMade {
+            if (QrNative.load() != null) return AnimatedQrMade(null, UrWords.cannotShow(who))
+            return drawn(context, who, UrCall.native(), listOf(text), maxHeightPx)
+        }
+
+        private fun drawn(context: Context, who: Int, call: UrCall, parts: List<String>, maxHeightPx: Int): AnimatedQrMade {
             val frames = AnimatedFrames(call, parts)
             if (frames.drawAll() != null) return AnimatedQrMade(null, UrWords.cannotShow(who))
             return AnimatedQrMade(AnimatedQrView(context, frames, maxHeightPx), null)
