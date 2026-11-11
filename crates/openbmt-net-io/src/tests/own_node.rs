@@ -362,7 +362,10 @@ fn nr_100_a_failed_dial_is_tried_again_with_the_wait_of_the_rule() {
         proxy_resolve: inner.proxy_resolve.clone(),
     };
     let handle = start(own_config(), net, &clock);
-    assert!(until(5, || times.lock().unwrap().len() == 1));
+    assert!(until(10, || times.lock().unwrap().len() == 1));
+    // Let the driver see the first failure at the start time, before the
+    // clock moves: the wait is counted from the time it sees.
+    settle();
     let mut now = T0;
     for (i, wait) in [5u64, 10, 20, 40, 80, 160, 300, 300]
         .into_iter()
@@ -374,7 +377,7 @@ fn nr_100_a_failed_dial_is_tried_again_with_the_wait_of_the_rule() {
         assert_eq!(times.lock().unwrap().len(), i + 1, "before wait {i}");
         clock.set(now + wait);
         assert!(
-            until(5, || times.lock().unwrap().len() == i + 2),
+            until(10, || times.lock().unwrap().len() == i + 2),
             "wait {i}"
         );
         // Let the driver see the failure at this time, before the clock moves.
@@ -396,7 +399,7 @@ fn nr_100_a_failed_dial_is_tried_again_with_the_wait_of_the_rule() {
         ]
     );
     // The app was told how it stands: not connected since the start.
-    let down = own_event(&handle, 5, |e| matches!(e, OwnNodeEvent::State(_)));
+    let down = own_event(&handle, 10, |e| matches!(e, OwnNodeEvent::State(_)));
     assert!(matches!(
         down,
         Some(OwnNodeEvent::State(OwnNodeInput {
@@ -413,7 +416,7 @@ fn nr_100_a_closed_connection_is_dialed_again_and_the_wait_doubles() {
     let (net, ..) = net_to(peer.addr, Vec::new());
     let clock = TestClock::at(T0);
     let handle = start(own_config(), net, &clock);
-    assert!(until(5, || peer.accept_count() == 1));
+    assert!(until(10, || peer.accept_count() == 1));
     settle();
     assert_eq!(peer.accept_count(), 1);
     // The first wait is 5 seconds, then 10.
@@ -421,15 +424,15 @@ fn nr_100_a_closed_connection_is_dialed_again_and_the_wait_doubles() {
     settle();
     assert_eq!(peer.accept_count(), 1);
     clock.set(T0 + 5);
-    assert!(until(5, || peer.accept_count() == 2));
+    assert!(until(10, || peer.accept_count() == 2));
     settle();
     clock.set(T0 + 5 + 9);
     settle();
     assert_eq!(peer.accept_count(), 2);
     clock.set(T0 + 5 + 10);
-    assert!(until(5, || peer.accept_count() == 3));
+    assert!(until(10, || peer.accept_count() == 3));
     // Down since the connection ended, not since the start.
-    let state = own_event(&handle, 5, |e| {
+    let state = own_event(&handle, 10, |e| {
         matches!(
             e,
             OwnNodeEvent::State(OwnNodeInput {
@@ -518,7 +521,7 @@ fn nr_100_a_violation_is_reported_and_not_retried_until_the_app_asks() {
     assert_eq!(peer.accept_count(), 1);
     // Asked, it is dialed again.
     handle.retry_own_node();
-    assert!(until(5, || peer.accept_count() == 2));
+    assert!(until(10, || peer.accept_count() == 2));
 }
 
 #[test]

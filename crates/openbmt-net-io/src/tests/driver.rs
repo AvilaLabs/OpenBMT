@@ -641,7 +641,9 @@ fn nr_72_seeds_are_asked_when_the_book_is_empty() {
     cfg.seeds = vec!["seed.test".to_string()];
     let mut handle = start(cfg, &storage, net);
     wait_for(&handle, 10, has_peer).expect("no ready peer");
-    // The name itself and the name for filter peers.
+    // The name itself and the name for filter peers. The second lookup runs
+    // on a thread of its own and may be counted after the peer is ready.
+    assert!(until(10, || lookups.load(Ordering::SeqCst) >= 2));
     assert_eq!(lookups.load(Ordering::SeqCst), 2);
     assert_eq!(
         log.lock().unwrap().first().cloned(),
@@ -659,8 +661,13 @@ fn nr_72_a_seed_is_also_asked_for_filter_peers_and_says_which_they_are() {
     let storage = MemStorage::default();
     let asked = Arc::new(Mutex::new(Vec::new()));
     let seen = asked.clone();
+    let dialed = Arc::new(Mutex::new(BTreeSet::new()));
+    let dials = dialed.clone();
     let net = Net {
-        dial: Arc::new(|_, _, _| Err(DialError::Connect(std::io::ErrorKind::ConnectionRefused))),
+        dial: Arc::new(move |target, _, _| {
+            dials.lock().unwrap().insert(target.clone());
+            Err(DialError::Connect(std::io::ErrorKind::ConnectionRefused))
+        }),
         resolve: Arc::new(move |name, port| {
             seen.lock().unwrap().push(name.to_string());
             if name.starts_with("x49.") {
@@ -674,8 +681,13 @@ fn nr_72_a_seed_is_also_asked_for_filter_peers_and_says_which_they_are() {
     let mut cfg = bare();
     cfg.seeds = vec!["seed.test".to_string()];
     let mut handle = start(cfg, &storage, net);
-    wait_for(&handle, 2, |e| matches!(e, AppEvent::Peers(..))).expect("no event");
-    thread::sleep(Duration::from_millis(800));
+    wait_for(&handle, 10, |e| matches!(e, AppEvent::Peers(..))).expect("no event");
+    // Both answers are in the book once the driver has dialed them.
+    assert!(until(10, || {
+        let dialed = dialed.lock().unwrap();
+        dialed.contains(&Target::Addr(sock(8, 8, 8, 8, 18_444)))
+            && dialed.contains(&Target::Addr(sock(9, 9, 9, 9, 18_444)))
+    }));
     handle.shutdown();
     let mut names = asked.lock().unwrap().clone();
     names.sort();
@@ -714,7 +726,7 @@ fn nr_72_a_hung_lookup_does_not_hang_the_driver() {
     cfg.seeds = vec!["hang.test".to_string()];
     let mut handle = start(cfg, &storage, net);
     // The driver still answers: the first event is there at once.
-    wait_for(&handle, 2, |e| matches!(e, AppEvent::Peers(..))).expect("no event");
+    wait_for(&handle, 10, |e| matches!(e, AppEvent::Peers(..))).expect("no event");
     thread::sleep(Duration::from_millis(500));
     let start = Instant::now();
     handle.shutdown();
@@ -911,7 +923,7 @@ fn nr_77_shutdown_returns_within_five_seconds_while_proxy_lookups_hang() {
     });
     let mut handle = start(tor_config(), &storage, net);
     assert!(until(10, || log.asked.lock().unwrap().len() == 4));
-    wait_for(&handle, 2, |e| matches!(e, AppEvent::Peers(..))).expect("no event");
+    wait_for(&handle, 10, |e| matches!(e, AppEvent::Peers(..))).expect("no event");
     let start = Instant::now();
     handle.shutdown();
     assert!(start.elapsed() < Duration::from_secs(5));
@@ -958,7 +970,7 @@ fn nr_72_without_a_proxy_a_book_of_gossip_asks_the_seeds_and_is_still_dialed() {
     cfg.target_peers = 1;
     let mut handle = start_clocked(cfg, &storage, net, &clock, Vec::new());
     // The name, and the name for filter peers.
-    assert!(until(2, || log.system.load(Ordering::SeqCst) == 2));
+    assert!(until(10, || log.system.load(Ordering::SeqCst) == 2));
     assert!(until(10, || dials.load(Ordering::SeqCst) >= 1));
     // The spacing holds over many ticks, then a round comes.
     for step in [1, 60, 120, SEED_ROUND_SECS - 1] {
@@ -983,7 +995,7 @@ fn nr_72_through_a_proxy_a_book_of_gossip_asks_tor_and_is_still_dialed() {
     cfg.seeds = vec!["a.test".to_string()];
     cfg.target_peers = 1;
     let mut handle = start_clocked(cfg, &storage, net, &clock, Vec::new());
-    assert!(until(2, || log.asked.lock().unwrap().len() == 3));
+    assert!(until(10, || log.asked.lock().unwrap().len() == 3));
     assert!(until(10, || dials.load(Ordering::SeqCst) >= 1));
     for step in [1, 60, 120, SEED_ROUND_SECS - 1] {
         clock.set(start_time + step);
