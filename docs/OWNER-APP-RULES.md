@@ -323,10 +323,13 @@ keeps the library's record between two steps and carries the owner's words.
   leads to the confirmation of OA-27. The finished record is sealed, opened
   with `ceremonyOpen`, written as the setup text of OA-01 (`OwnerSetup`
   `format`, which `parse` reads back to the same values) and saved exactly
-  as the paste path saves it: the setup first, then the config with the
-  default address of Orbot. The ceremony's file is deleted only after both
-  are saved, and the start goes on as after a pasted setup, through the
-  gate of OA-05. A wallet made so has no peers and no relay link.
+  as the paste path saves it, after the screen that asks for the address
+  of Orbot with the words that everything goes through Tor, prefilled with
+  the default and checked as the paste path checks it (one helper shows
+  both): the setup first, then the config with that address. The
+  ceremony's file is deleted only after both are saved, and the start goes
+  on as after a pasted setup, through the gate of OA-05. A wallet made so
+  has no peers and no relay link.
 - **OA-30.** Making key 1 and building the wallet take a moment: a page
   says so and is drawn first, and the call stays on the screen thread
   (OA-12). No number of the ceremony is written in Kotlin: the batch

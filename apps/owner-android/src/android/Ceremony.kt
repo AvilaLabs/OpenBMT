@@ -411,10 +411,11 @@ private fun Controller.showFinishFailed(words: SayWords, d: CeremonyDraft) {
 
 /**
  * Opens the finished record for the values the node starts from, writes them as the setup text the paste path
- * parses, and saves it exactly as the paste path does. The ceremony's record is deleted only after the setup
- * is saved (OA-29); the start goes on as after a pasted setup.
+ * parses, and asks for the address of Orbot as the paste path does, prefilled with the default and checked the
+ * same way. [message] is what the last try said. The setup is then saved exactly as the paste path saves it, and
+ * the ceremony's record is deleted only after that (OA-29); the start goes on as after a pasted setup.
  */
-private fun Controller.saveFinished(record: ByteArray) {
+private fun Controller.saveFinished(record: ByteArray, message: SayWords? = null) {
     val text = try {
         OwnerSetup.format(OwnerCeremony.open(record))
     } catch (e: OwnerException) {
@@ -422,12 +423,22 @@ private fun Controller.saveFinished(record: ByteArray) {
     } catch (e: LinkageError) {
         return showSaveFailed(AppWords.libraryMissing(e.message), record)
     }
-    saveSetup(
-        text, AppConfig.DEFAULT_PROXY,
-        onRefused = { w -> showSaveFailed(w, record) },
-        working = AppWords.ceremonyFinishing,
-        afterSaved = { File(appDir, AppFiles.CEREMONY_FILE).delete() },
+    val views = ArrayList<View>()
+    views.add(ui.text("Save the setup", 22f, bold = true))
+    views.add(ui.words(message ?: AppWords.ceremonySaveNext))
+    val proxy = orbotViews(views, AppConfig.DEFAULT_PROXY)
+    views.add(
+        ui.button("Save and start") {
+            saveSetup(
+                text, proxy.text.toString().trim(),
+                onRefused = { w -> saveFinished(record, w) },
+                working = AppWords.ceremonyFinishing,
+                afterSaved = { File(appDir, AppFiles.CEREMONY_FILE).delete() },
+            )
+        },
     )
+    views.add(ui.button("Start again") { showStartAgain() })
+    page(views)
 }
 
 private fun Controller.showSaveFailed(words: SayWords, record: ByteArray) {

@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.widget.EditText
 import android.widget.TextView
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -392,10 +393,7 @@ class Controller(internal val act: MainActivity) {
             draftText = pasted.text.toString()
             source.begin({ text -> draftText = text; showPasteSetup(message) }, { w -> showPasteSetup(w) })
         })
-        views.add(ui.words(AppWords.torAlwaysOn))
-        views.add(label("Address of Orbot"))
-        val proxy = ui.field("host:port").also { it.setText(draftProxy) }
-        views.add(proxy)
+        val proxy = orbotViews(views, draftProxy)
         views.add(ui.button("Save and start") {
             draftProxy = proxy.text.toString()
             draftText = pasted.text.toString()
@@ -403,6 +401,15 @@ class Controller(internal val act: MainActivity) {
         })
         views.add(ui.button("Back") { draftText = ""; showFirstStart(null) })
         page(views)
+    }
+
+    /** The words that everything goes through Tor, and the field for Orbot's address, as the paste screen and the ceremony's last screen show them. */
+    internal fun orbotViews(views: MutableList<View>, initial: String): EditText {
+        views.add(ui.words(AppWords.torAlwaysOn))
+        views.add(label("Address of Orbot"))
+        val proxy = ui.field("host:port").also { it.setText(initial) }
+        views.add(proxy)
+        return proxy
     }
 
     /**
