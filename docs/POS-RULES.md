@@ -308,7 +308,141 @@ both in plain words, since every unknown explains itself (§2.6).
 - **PS-82.** This crate holds no vendor code, no network and no sign-in.
   The scripted reader and closer it holds are test doubles.
 
-## 9. What these rules do not do
+## 9. Vendor readers
+
+`crates/openbmt-pos-readers` holds one reader for each of two vendors,
+Square and Clover. Each builds the text of one request for the orders that
+changed since a cursor and reads the reply into a page of PS-80, or refuses
+it whole. It has no network, no clock and no sign-in: the caller sends the
+request with the sign-in it holds, hands the bytes of the reply in and stores
+the page. Square is read-only (`docs/DESIGN.md` section 5.6, decided
+2026-11-10): nothing in its reader names a payment or a change of an order.
+
+The tests read fixtures that were written from the vendors' documentation,
+not captured from a real account. What the documentation did not confirm is
+marked **[verify, E5]** for Square and **[verify, E6]** for Clover: each such
+point needs a real seller or merchant account before the reader is relied on.
+
+- **PS-90.** A reply is read with `openbmt-json`: at most 8 MiB, at most 64
+  levels of arrays and objects, at most 400,000 values, UTF-8 throughout, the
+  grammar of RFC 8259, no key twice in one object (however it is spelled) and
+  no byte after the document. A number is an integer that is exact (no
+  fraction, no exponent, not `-0`) or the reader that needs one refuses it
+  (PS-92). Any breach refuses the reply whole.
+- **PS-91.** A field a reader needs that is missing, or `null`, or not of the
+  type the vendor documents, refuses the reply whole; so does a reply that
+  carries a service error (Square's `errors` array that is not empty). A state,
+  kind or result the reader maps and does not know refuses the reply whole;
+  nothing is mapped by guessing. A field the reader does not need is ignored,
+  and so is a field the vendor adds later, whatever it holds. An optional
+  field the reader reads is checked when it is there.
+- **PS-92.** An amount is a whole number of the currency's smallest unit from
+  0 to 9,223,372,036,854,775,807: a negative or larger one is out of range, and
+  one with a fraction or an exponent, or that is not a number, is of the wrong
+  type. A time is read to whole seconds since 1970 in UTC. Square's is RFC 3339
+  and strict: `YYYY-MM-DDTHH:MM:SS`, optionally a dot and one to nine digits
+  (dropped, not rounded), then `Z` or `+HH:MM` or `-HH:MM`, capitals, a date
+  that exists, no leap second, and not before 1970 or after the year 9999.
+  Clover's is whole milliseconds since 1970, cut to seconds, not after the year
+  9999. **[verify, E6: the unit of Clover's times]**
+- **PS-93.** A currency is three capital letters; a tender or a refund in
+  another currency than its order is refused (the model holds one per order).
+  An id (an order's, a tender's, a payment's) is refused, never cut, unless it
+  is PS-01. A location is refused, never cut, unless it is PS-03. A tender
+  name is cut to 64 bytes at a character boundary (PS-03) and refused if it
+  is then empty or holds a control character. A note typed by a person has
+  each control character turned into a space, the ends trimmed and is cut to
+  64 bytes; nothing left is no note.
+- **PS-94.** The bounds of PS-01, PS-02 and PS-80 hold for what is read: a
+  page of more than 500 orders, an order with more than 16 tenders, two
+  tenders with one id, refunds of a tender larger than its amount and tip, a
+  refund that names no tender of its order and a cursor above 256 bytes each
+  refuse the page whole. A page size is 1 to 500. A cursor is the time in
+  whole seconds from which orders are read (decimal, no leading zero, not
+  after the year 9999), then, only while a page has more, a bar and the
+  vendor's own marker (printable ASCII, no space). The empty cursor is time 0.
+  A cursor that is not in that form is refused.
+- **PS-95.** The Square request is a POST of a JSON body to
+  `/v2/orders/search`: `location_ids` (the location text of the settings,
+  which is Square's location id), `limit`, `cursor` when the cursor holds
+  Square's, and `query` with `filter.state_filter.states` of `COMPLETED` and
+  `CANCELED`, `filter.date_time_filter.updated_at.start_at` from the cursor's
+  time and `sort` by `UPDATED_AT` ascending. It is the same text for the same
+  input. No location in the settings is refused. **[verify, E5: the path, the
+  inner names `states` and `updated_at`, the largest `limit`, and whether
+  Square accepts a start at the beginning of 1970]**
+- **PS-96.** The Square reply is `orders` (left out when none were found),
+  `cursor` (absent means no more) and `errors`. An order has an `id`, a
+  `location_id`, a `state` (`COMPLETED` is closed, `CANCELED` is voided, `OPEN`
+  and `DRAFT` are open), `created_at` (opened), `updated_at` and, when closed,
+  `closed_at` (kept if there), `total_money` and optionally a `version` (an
+  int32, read and checked, not kept), a `ticket_name` or else a
+  `reference_id` (the order's reference note) and `tenders` and `refunds`. A
+  tender has an `id`, a `type`, `created_at`, `amount_money` (which includes
+  the tip, so the model's amount is that less `tip_money`), optionally
+  `tip_money`, `note` and `payment_id`. The types are `CARD`,
+  `THIRD_PARTY_CARD` (card), `CASH` (cash) and `SQUARE_GIFT_CARD`,
+  `BANK_ACCOUNT`, `WALLET`, `BUY_NOW_PAY_LATER`, `SQUARE_ACCOUNT`, `NO_SALE`,
+  `OTHER` (other); another is refused. Which tenders are Bitcoin stays PS-10:
+  a tender of type `OTHER` whose `note`, or whose payment's
+  `external_details.source`, equals a name of the settings (PS-10's
+  comparison) is given that name, and any other is named "Other". The
+  payment comes from a ListPayments reply the caller may hand in with the
+  orders: its `status` `CANCELED` or `FAILED` makes the tender voided, and
+  `APPROVED`, `PENDING` and `COMPLETED` do not; another is refused. A tender's
+  reference is its `note`, else its payment's. A refund names its tender
+  (`tender_id`) and counts while its `status` is `PENDING` or `APPROVED`; it
+  does not while `REJECTED` or `FAILED`; another is refused. The refunds that
+  count are added up on the tender (a refund of nothing is refused) and a tender
+  that is voided stays voided. The next cursor keeps the time and takes
+  Square's marker when there is one; when there is none it takes the newest
+  `updated_at` of the page (never earlier than the time it was read from), so
+  the last order is read again, which PS-75 makes harmless. **[verify, E5:
+  how a Square POS "Other" tender names itself (the documentation does not
+  say), that `amount_money` includes the tip, the full list of tender types,
+  that a cancelled payment is shown by the payments reply, and that an order
+  rung up in the Square app is seen once it is paid]**
+- **PS-97.** The Clover request is a GET of
+  `/v3/merchants/<mId>/orders` with the query `filter` of
+  `modifiedTime>=<milliseconds>` from the cursor's time, `expand` of
+  `payments,payments.tender,refunds`, `limit`, `offset` (from the cursor's
+  marker, else 0) and `orderBy` of `modifiedTime ASC`. Every byte of a value
+  but a letter, a digit, `-`, `.`, `_` and `~` is written as `%` and two
+  capital hex digits. The merchant id is 1 to 32 ASCII letters and digits, or
+  it is refused. **[verify, E6: the operator and unit of the time filter, the
+  `expand` text, the form of `orderBy`, and the largest `limit`]**
+- **PS-98.** The Clover reply is `elements`, which is required. An order has
+  an `id`, a `currency`, a `total`, a `paymentState` (`OPEN` and
+  `PARTIALLY_PAID` are open; `PAID`, `PARTIALLY_REFUNDED`, `REFUNDED` and
+  `CREDITED` are closed; another is refused), `createdTime` (opened) and
+  `modifiedTime`, optionally a `state` (read for its type only) and a `note`
+  (the order's reference). Its location is the merchant id. It is never read
+  as voided: a void shows on its payments. `payments` and `refunds` are
+  an object with `elements` or an array. A payment has an `id` (the model's
+  tender id, since the id of the tender type is the same for every payment of
+  it), a `tender` with a `label` (the name; Bitcoin is PS-10 against it, and
+  the kind is `Other`), an `amount` (without the tip), optionally a
+  `tipAmount` and a `note`, a `result` and `createdTime`. `SUCCESS` is paid
+  and `VOIDED` is voided; `FAIL`, `INITIATED`, `VOIDING`, `VOID_FAILED`,
+  `AUTH`, `AUTH_COMPLETED`, `DISCOUNT`, `OFFLINE_RETRYING` and `PENDING` are
+  not money taken and the payment is left out, so a payment that was paid and
+  is now being voided is seen as gone (PS-45); another is refused. A refund
+  names its payment and has an amount above zero; it is added up on that
+  tender, which stays voided if it is. A page of exactly the limit has more,
+  and the next cursor keeps the time and moves the offset on; a shorter page
+  is the last, and the next cursor takes the newest `modifiedTime` of the page.
+  The documentation gives no flag for the end. **[verify, E6: the end of
+  pages, the time unit, that `amount` is without the tip, the shape of a
+  refund and of an expanded list, that `paymentState` is the state to use, and
+  what a voided order looks like]**
+- **PS-99.** The readers are pure: the same bytes and settings give the same
+  page or the same refusal, and the same input the same request text. The
+  crate depends on workspace crates by path and on nothing else, holds no
+  network, no clock and no sign-in, and reads nothing from a file. A refused
+  reply is reported to a connector as `PosError::BadResponse` and a person is
+  given the words of `say.rs`.
+
+## 10. What these rules do not do
 
 - **They do not check payments.** The counter does (`docs/COUNTER-RULES.md`).
   A wrong fact handed in gives a wrong match.

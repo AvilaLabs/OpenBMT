@@ -411,12 +411,14 @@ dependencies = [
  "openbmt-core",
  "openbmt-counter",
  "openbmt-courier",
+ "openbmt-json",
  "openbmt-key-ffi",
  "openbmt-link",
  "openbmt-net",
  "openbmt-owner",
  "openbmt-owner-node",
  "openbmt-pos",
+ "openbmt-pos-readers",
  "openbmt-qr",
  "openbmt-rates",
  "openbmt-session",
@@ -456,6 +458,10 @@ dependencies = [
  "openbmt-core",
  "openbmt-link",
 ]
+
+[[package]]
+name = "openbmt-json"
+version = "0.1.0"
 
 [[package]]
 name = "openbmt-key-ffi"
@@ -540,6 +546,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-pos-readers"
+version = "0.1.0"
+dependencies = [
+ "openbmt-core",
+ "openbmt-counter",
+ "openbmt-json",
+ "openbmt-pos",
+]
+
+[[package]]
 name = "openbmt-qr"
 version = "0.1.0"
 
@@ -549,6 +565,7 @@ version = "0.1.0"
 dependencies = [
  "openbmt-core",
  "openbmt-counter",
+ "openbmt-json",
 ]
 
 [[package]]

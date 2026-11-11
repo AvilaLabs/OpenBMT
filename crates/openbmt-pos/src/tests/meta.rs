@@ -19,9 +19,51 @@ const TEST_SOURCES: [&str; 7] = [
 ];
 const MORE_TEST_SOURCES: [&str; 2] = [include_str!("storage.rs"), include_str!("kit.rs")];
 
-/// Rules this crate does not test, each with the reason. Empty: the crate
-/// implements every rule.
-const NOT_HERE: [(&str, &str); 0] = [];
+/// Rules this crate does not test, each with the reason: those of section 9
+/// are the vendor readers, which are in `openbmt-pos-readers` and tested there
+/// (its own `tests::meta` ties each to a test).
+const NOT_HERE: [(&str, &str); 10] = [
+    (
+        "PS-90",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+    (
+        "PS-91",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+    (
+        "PS-92",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+    (
+        "PS-93",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+    (
+        "PS-94",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+    (
+        "PS-95",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+    (
+        "PS-96",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+    (
+        "PS-97",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+    (
+        "PS-98",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+    (
+        "PS-99",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+];
 
 fn defined() -> BTreeSet<String> {
     RULES
@@ -38,7 +80,7 @@ fn sources() -> String {
 #[test]
 fn the_rules_file_defines_its_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 55, "{ids:?}");
+    assert_eq!(ids.len(), 65, "{ids:?}");
     assert!(ids.contains("PS-01") && ids.contains("PS-82"));
 }
 

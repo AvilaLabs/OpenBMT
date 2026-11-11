@@ -1,0 +1,89 @@
+{
+  "elements": [
+    {
+      "id": "CLORDER0001",
+      "currency": "USD",
+      "total": 1250,
+      "state": "locked",
+      "paymentState": "PAID",
+      "createdTime": 1794319205123,
+      "modifiedTime": 1794319421900,
+      "note": "btc K7M2QX",
+      "title": "ignored",
+      "lineItems": { "elements": [ { "name": "Coffee", "price": 625 } ] },
+      "payments": {
+        "elements": [
+          {
+            "id": "CLPAY00001",
+            "tender": { "id": "CLTENDERCASH", "label": "Cash", "labelKey": "com.clover.tender.cash" },
+            "amount": 150,
+            "result": "SUCCESS",
+            "createdTime": 1794319420000
+          },
+          {
+            "id": "CLPAY00002",
+            "tender": { "id": "CLTENDERBTC", "label": "Bitcoin" },
+            "amount": 1100,
+            "tipAmount": 0,
+            "result": "SUCCESS",
+            "createdTime": 1794319421000,
+            "note": "line\nbreak K7M2QX",
+            "externalPaymentId": "EXT-0001"
+          },
+          {
+            "id": "CLPAY00003",
+            "tender": { "id": "CLTENDERBTC", "label": "Bitcoin" },
+            "amount": 1100,
+            "result": "PENDING",
+            "createdTime": 1794319410000
+          }
+        ]
+      }
+    },
+    {
+      "id": "CLORDER0002",
+      "currency": "USD",
+      "total": 2000,
+      "paymentState": "PARTIALLY_REFUNDED",
+      "createdTime": 1794319800000,
+      "modifiedTime": 1794319920000,
+      "payments": {
+        "elements": [
+          {
+            "id": "CLPAY00004",
+            "tender": { "id": "CLTENDERBTC", "label": " bitcoin " },
+            "amount": 1900,
+            "tipAmount": 100,
+            "result": "SUCCESS",
+            "createdTime": 1794319850000
+          }
+        ]
+      },
+      "refunds": {
+        "elements": [
+          { "id": "CLREFUND01", "payment": { "id": "CLPAY00004" }, "amount": 500, "createdTime": 1794319900000 }
+        ]
+      }
+    },
+    {
+      "id": "CLORDER0003",
+      "currency": "USD",
+      "total": 700,
+      "state": null,
+      "paymentState": "OPEN",
+      "createdTime": 1794320400000,
+      "modifiedTime": 1794320460999,
+      "payments": {
+        "elements": [
+          {
+            "id": "CLPAY00005",
+            "tender": { "id": "CLTENDERBTC", "label": "Bitcoin" },
+            "amount": 700,
+            "result": "VOIDED",
+            "createdTime": 1794320430000
+          }
+        ]
+      }
+    }
+  ]
+}

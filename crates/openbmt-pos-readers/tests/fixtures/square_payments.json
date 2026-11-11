@@ -1,0 +1,23 @@
+{
+  "payments": [
+    {
+      "id": "PAYD01",
+      "status": "COMPLETED",
+      "source_type": "EXTERNAL",
+      "note": "btc K7M2QX",
+      "external_details": { "type": "OTHER", "source": "Bitcoin" }
+    },
+    {
+      "id": "PAYD02",
+      "status": "CANCELED",
+      "source_type": "EXTERNAL",
+      "external_details": { "type": "OTHER", "source": "Bitcoin" }
+    },
+    {
+      "id": "PAYD03",
+      "status": "COMPLETED",
+      "source_type": "EXTERNAL",
+      "external_details": { "type": "CHECK", "source": "Check" }
+    }
+  ]
+}
