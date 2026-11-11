@@ -35,3 +35,9 @@ The fixtures in `tests/fixtures/` are written from the vendors'
 documentation, not captured from a real account. Every point that needs one
 is marked **[verify, E5]** (Square) or **[verify, E6]** (Clover) in the
 rules. The fuzz targets are `pos_square_parse` and `pos_clover_parse`.
+
+`scripts/square-capture.sh` reads a Square seller account's locations,
+recent orders and payments, read-only, with a token the account's owner
+keeps in a file of their own, and saves the replies outside the repository.
+Those replies are what settles the Square points marked **[verify, E5]**.
+They hold the shop's orders and are never committed.
