@@ -105,6 +105,9 @@ class Controller(internal val act: MainActivity) {
     internal var firstAddress: org.openbmt.owner.FirstAddress? = null
     internal var firstAddressRead = false
 
+    /** Set by the last ceremony screen: the register screen is the first one after the node starts (OA-71). */
+    internal var registerNext = false
+
     // What the open screen redraws as the node reports.
     internal var tick: (() -> Unit)? = null
     private var lastTick = 0L
@@ -341,7 +344,13 @@ class Controller(internal val act: MainActivity) {
             posThread = till
             till.start()
         }
-        showHome()
+        if (registerNext && key2Signer) {
+            registerNext = false
+            showHardwareRegister { showHome() }
+        } else {
+            registerNext = false
+            showHome()
+        }
     }
 
     /** One read of the till, with the token read from its sealed file for this read only (OA-16). */

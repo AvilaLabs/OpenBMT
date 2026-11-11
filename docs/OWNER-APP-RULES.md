@@ -568,12 +568,13 @@ and the 60-second rule are the shared `LockModel.kt` of
   restarts the wait; a file that is not exact counts as 9 wrong tries. The
   code is the same file as the Key app's, not a copy.
 - **OA-64.** The 10th wrong try wipes key 1 from this phone, in this order:
-  the setup file, the ceremony's file if there is one, the Keystore key
-  that seals them, then the tries file. A wipe that stops half way is
-  finished at the next start (the tries file still says 10). The screen
-  says that this phone's copy of key 1 was wiped after 10 wrong tries, that
-  the money is not lost because two of the three keys still exist, and the
-  next step: follow the recovery kit to move to a new wallet
+  the setup file, the ceremony's file if there is one, the note that key 2
+  is a hardware signer and the record of the first address check (OA-72),
+  the Keystore key that seals them, then the tries file. A wipe that stops
+  half way is finished at the next start (the tries file still says 10).
+  The screen says that this phone's copy of key 1 was wiped after 10 wrong
+  tries, that the money is not lost because two of the three keys still exist,
+  and the next step: follow the recovery kit to move to a new wallet
   (`docs/DESIGN.md` §5.4, "Key 1 replacement is a move to a new wallet"), or
   ask the person who holds key 2. The node's own folder, the config and the
   till's token are not touched.
@@ -611,9 +612,11 @@ Status: built. The model (`HardwareModel`, `HardwareWords`) and the screens
 the shared code, the system's document pickers and the camera scan. Whether
 key 2 is a signer is read from a file the ceremony writes from its pairs of
 keys (the setup text has no line for it), so a setup that is pasted has no
-signer screens. The camera scan and the pickers are not yet counted in the
-60 seconds of OA-62 (the review fixes for that are not in this tree: see the
-TODO(OA-60) in `Hardware.kt`).
+signer screens. The ceremony's last screen offers "Register the wallet on
+your signer" as its main button when key 2 is one, and the open approvals
+list a session of spends with "Continue on the signer". The camera scan and
+the pickers are not yet counted in the 60 seconds of OA-62 (the review fixes
+for that are not in this tree: see the TODO(OA-60) in `Hardware.kt`).
 
 - **OA-70.** The person picks how a payment reaches the signer, from a
   list that names animated codes of a UR (`crypto-psbt`, in fragments of at

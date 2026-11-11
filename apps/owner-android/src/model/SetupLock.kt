@@ -29,7 +29,9 @@ object SetupLock {
 
     /**
      * OA-64: what the wipe deletes from the app's folder, in this order, before the Keystore key and then the
-     * file of tries: the setup, and the record of a ceremony that is not finished (which holds key 1 too).
+     * file of tries: the setup, the record of a ceremony that is not finished (which holds key 1 too), the note that key 2
+     * is a hardware signer and the record of the first address check (which shows a wallet address).
      */
-    val WIPE_FILES: List<String> = listOf(AppFiles.SETUP_FILE, AppFiles.CEREMONY_FILE)
+    val WIPE_FILES: List<String> =
+        listOf(AppFiles.SETUP_FILE, AppFiles.CEREMONY_FILE, AppFiles.KEY2_SIGNER_FILE, AppFiles.FIRST_ADDRESS_FILE)
 }

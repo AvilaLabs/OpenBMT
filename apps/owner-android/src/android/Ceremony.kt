@@ -455,18 +455,24 @@ private fun Controller.saveFinished(record: ByteArray, message: SayWords? = null
     views.add(ui.text("Save the setup", 22f, bold = true))
     views.add(ui.words(message ?: AppWords.ceremonySaveNext))
     val proxy = orbotViews(views, AppConfig.DEFAULT_PROXY)
-    views.add(
-        ui.primary("Save and start") {
-            saveSetup(
-                text, proxy.text.toString().trim(),
-                onRefused = { w -> saveFinished(record, w) },
-                working = AppWords.ceremonyFinishing,
-                afterSaved = { File(appDir, AppFiles.CEREMONY_FILE).delete() },
-                backWords = AppWords.ceremonySaveNext,
-                keepsSignerMark = true,
-            )
-        },
-    )
+    val save = {
+        saveSetup(
+            text, proxy.text.toString().trim(),
+            onRefused = { w -> saveFinished(record, w) },
+            working = AppWords.ceremonyFinishing,
+            afterSaved = { File(appDir, AppFiles.CEREMONY_FILE).delete() },
+            backWords = AppWords.ceremonySaveNext,
+            keepsSignerMark = true,
+        )
+    }
+    // OA-71: with key 2 on a signer, the wallet is shown to the signer as soon as the node is running. The
+    // node does not run before the setup is saved, so the same save is made and the register screen follows.
+    if (File(appDir, AppFiles.KEY2_SIGNER_FILE).exists()) {
+        views.add(ui.primary("Register the wallet on your signer") { registerNext = true; save() })
+        views.add(ui.button("Save and start") { registerNext = false; save() })
+    } else {
+        views.add(ui.primary("Save and start") { save() })
+    }
     views.add(ui.button("Start again") { showStartAgain() })
     page(views)
 }

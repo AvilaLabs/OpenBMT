@@ -87,6 +87,24 @@ object HardwareModel {
     fun scanFailure(off: Boolean, problem: String?, say: SayWords?): SayWords =
         say ?: if (off) CameraWords.off(Who.OWNER) else CameraWords.notStarted(Who.OWNER, problem)
 
+    /** What a session of the open approvals is to a wallet whose key 2 is a signer. */
+    enum class SignerSession { Exported, NotExported, NotSigner }
+
+    /** The refusal codes of the library that tell a session of spends from one of the Key app (AS-90, AS-92). */
+    private const val CODE_NOT_A_SIGNER_SPEND = "AS-90"
+    private const val CODE_NOT_EXPORTED = "AS-92"
+
+    /**
+     * OA-70: which kind of session it is, from what asking for its file gave: a file (it was exported), the
+     * refusal of AS-92 (it holds the spends but nothing was given to the signer) or any other refusal (it is
+     * the Key app's).
+     */
+    fun signerSession(gaveFile: Boolean, refusalCode: String?): SignerSession = when {
+        gaveFile -> SignerSession.Exported
+        refusalCode == CODE_NOT_EXPORTED -> SignerSession.NotExported
+        else -> SignerSession.NotSigner
+    }
+
     /** OA-74: the progress of a set of parts read in any order. */
     fun partsLine(read: Int, of: Int): String = "$read of $of parts read"
 
@@ -138,7 +156,7 @@ object HardwareWords {
         SayWords(tone, who, heading, what, next, null, null, null, null)
 
     val chooseTransport = w(
-        Tones.INFO, "Choose how to reach the signer",
+        Tones.INFO, "How to reach the signer",
         "The payment goes to the signer as moving codes on this screen or as a file, and the signed payment comes back the same way.",
         Who.OWNER,
         "Pick the one your signer uses. The names under each choice are examples.",
@@ -173,7 +191,7 @@ object HardwareWords {
     )
 
     val firstAddressDiffers = w(
-        Tones.STOP, "Do not use this wallet with this signer",
+        Tones.STOP, "Do not use with this signer",
         "The signer shows a different first address, so it holds a different wallet or was registered wrongly.",
         Who.OWNER,
         "Register the wallet again on the signer, then check again. If it still differs, do not take money into this wallet.",
@@ -193,8 +211,15 @@ object HardwareWords {
         "Check it from the wallet screen before the shop takes money.",
     )
 
+    val fileSaved = w(
+        Tones.INFO, "File saved",
+        "The payment for the signer is in the file named below.",
+        Who.OWNER,
+        "Put the file on the signer's memory card and sign it there. Then bring the signed file back.",
+    )
+
     val returnedNeeded = w(
-        Tones.INFO, "Bring the signed payment back",
+        Tones.INFO, "Bring the payment back",
         "The signer has the payment. Its signature has to come back to this phone before the payment can be sent.",
         Who.OWNER,
         "Scan the code the signer shows, or open the file it saved. A payment the signer finished itself works too.",
@@ -210,5 +235,6 @@ object HardwareWords {
         "hardwareFirstAddressChecked" to firstAddressChecked,
         "hardwareFirstAddressSkipped" to firstAddressSkipped,
         "hardwareReturnedNeeded" to returnedNeeded,
+        "hardwareFileSaved" to fileSaved,
     )
 }

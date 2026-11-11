@@ -216,11 +216,17 @@ internal fun Controller.showSessions(message: SayWords? = null): Unit = withNode
         for (id in ids) {
             val name = ApprovalText.fileName("approval", id).removeSuffix(".obm")
             views.add(label(name))
-            views.add(
-                ui.button("Show its request again") {
-                    attempt(msg) { n.sessionRequest(id) }?.let { showBuilt(org.openbmt.owner.Built(id, it, emptyList())) { showSessions() } }
-                },
-            )
+            // A session of spends for the signer is carried on with the signer, not shown as a request for the Key app.
+            val signer = if (key2Signer) signerSessionOf(n, id) else HardwareModel.SignerSession.NotSigner
+            if (signer == HardwareModel.SignerSession.NotSigner) {
+                views.add(
+                    ui.button("Show its request again") {
+                        attempt(msg) { n.sessionRequest(id) }?.let { showBuilt(org.openbmt.owner.Built(id, it, emptyList())) { showSessions() } }
+                    },
+                )
+            } else {
+                views.add(ui.button("Continue on the signer") { continueOnSigner(id, signer) { showSessions() } })
+            }
             views.add(
                 ui.danger("Abandon it") {
                     if (attempt(msg) { n.abandonSession(id) } != null) showSessions(AppWords.sessionAbandoned)

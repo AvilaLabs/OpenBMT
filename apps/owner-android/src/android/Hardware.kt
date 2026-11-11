@@ -33,7 +33,7 @@ import org.openbmt.owner.SignerTaken
 // `Controller.visible` and `hidden`.
 
 /** What one payment's way to the signer holds in memory: the spends' session, the item, and where the owner came from. */
-internal class SignerRun(val session: ByteArray, val number: Long, val built: org.openbmt.owner.Built, val back: () -> Unit) {
+internal class SignerRun(val session: ByteArray, val number: Long, val built: org.openbmt.owner.Built?, val back: () -> Unit) {
     var transport: Transport = Transport.Ur
 }
 
@@ -176,6 +176,29 @@ private fun Controller.recordFirstAddress(n: OwnerNode, checked: Boolean, back: 
 
 // ---- a payment on its way to the signer (OA-70, OA-73) -----------------------------------------------------------------------
 
+/** Which kind of session [id] is, asked of the library: its file for item 0 is given, or its refusal says. */
+internal fun Controller.signerSessionOf(n: OwnerNode, id: ByteArray): HardwareModel.SignerSession = try {
+    n.signerFile(id, 0)
+    HardwareModel.signerSession(true, null)
+} catch (e: OwnerException) {
+    HardwareModel.signerSession(false, e.sayWords().code)
+} catch (_: LinkageError) {
+    HardwareModel.signerSession(false, null)
+}
+
+/**
+ * "Continue on the signer" for a session of spends that is open: one that was exported goes to the way back; one
+ * that was not goes to the transport choice and then the payment.
+ */
+internal fun Controller.continueOnSigner(id: ByteArray, state: HardwareModel.SignerSession, back: () -> Unit) {
+    val run = SignerRun(id, 0, null, back)
+    if (state == HardwareModel.SignerSession.Exported) {
+        showSignerReturn(run, null)
+    } else {
+        showTransportChoice({ transport -> run.transport = transport; showSignerExport(run) }, back)
+    }
+}
+
 /**
  * After the owner approved a spend on this phone: when the library made a session of spends for the signer, the
  * way to reach it, then the payment (`showSignerExport`) and its way back. The request for the Key app, which
@@ -191,7 +214,7 @@ internal fun Controller.showSignerSpend(built: SignerBuilt, back: () -> Unit) {
  * The payment's file for the signer, made and signed with key 1 by the library, with what the signer's screen
  * must show; it is given as moving codes or saved as a file. Asking again gives the same file (AS-91).
  */
-private fun Controller.showSignerExport(run: SignerRun, message: View? = null) {
+private fun Controller.showSignerExport(run: SignerRun, message: List<View> = emptyList()) {
     val n = node ?: return begin()
     val msg = Slot(act)
     val file = attempt(msg) { n.signerExport(nowSecs(), run.session, run.number) }
@@ -212,13 +235,13 @@ private fun Controller.showSignerExport(run: SignerRun, message: View? = null) {
                 saveBytes(
                     file.fileName, file.psbt, HardwareModel.MIME_BYTES,
                     { showSignerExport(run) },
-                    { showSignerExport(run, ui.text(file.fileName, 14f, mono = true)) },
+                    { showSignerExport(run, listOf(words(HardwareWords.fileSaved), ui.text(file.fileName, 14f, mono = true))) },
                     { w -> msg.show(words(w)) },
                 )
             },
         )
     }
-    message?.let { views.add(it) }
+    views.addAll(message)
     views.add(msg)
     views.add(ui.button("Next: bring it back") { showSignerReturn(run, null) })
     views.add(ui.button("Back") { showTransportChoice({ t -> run.transport = t; showSignerExport(run) }, run.back) })
@@ -235,7 +258,7 @@ private fun compareText(file: SignerFile): String = HardwareModel.compareLines(
 // ---- bringing the signed payment back (OA-70, OA-74) ------------------------------------------------------------------------
 
 /** The way back: the signer's code by the camera, or a file. [message] is what the last try said, if it said anything. */
-private fun Controller.showSignerReturn(run: SignerRun, message: SayWords?) {
+internal fun Controller.showSignerReturn(run: SignerRun, message: SayWords?) {
     val n = node ?: return begin()
     val msg = Slot(act)
     message?.let { msg.show(words(it)) }
@@ -303,7 +326,7 @@ private fun Controller.showSignerTaken(n: OwnerNode, run: SignerRun, taken: Sign
     views.add(
         ui.primary("Done") {
             if (more) showSignerExport(SignerRun(run.session, run.number + 1, run.built, run.back).also { it.transport = run.transport })
-            else showBuilt(run.built, run.back)
+            else run.built?.let { showBuilt(it, run.back) } ?: run.back()
         },
     )
     page(views)
