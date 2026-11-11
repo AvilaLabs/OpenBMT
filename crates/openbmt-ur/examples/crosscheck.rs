@@ -75,7 +75,11 @@ fn gen() {
             continue;
         };
         println!("case {idx} {ur_type} {max} {}", hex(&payload));
-        let total = if e.is_single_part() { 1 } else { (4 * e.seq_len()).max(32) };
+        let total = if e.is_single_part() {
+            1
+        } else {
+            (4 * e.seq_len()).max(32)
+        };
         for _ in 0..total {
             println!("ours {}", e.next_part());
         }
@@ -161,7 +165,12 @@ fn read(cases: &str, theirs: &str) -> bool {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+    match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
         ["gen"] => gen(),
         ["read", cases, theirs] => {
             if read(cases, theirs) {
