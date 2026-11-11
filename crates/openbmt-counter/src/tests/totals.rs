@@ -278,6 +278,10 @@ fn cr_153_sales_in_two_currencies_are_refused() {
     let mut w = World::new();
     w.now = MIDNIGHT + 5;
     w.open_five();
+    // The shop changes its currency (CR-195) in the middle of the day.
+    let mut s = w.c.settings().clone();
+    s.currency = openbmt_core::currency::ShopCurrency::Eur;
+    w.c.set_settings(s);
     let facts = w.open_facts();
     let eur = Currency::new(*b"EUR").unwrap();
     w.c.open(Amount(500), eur, rate(), &fresh(facts.now), facts, &mut w.m)

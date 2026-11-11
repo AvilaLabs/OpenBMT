@@ -1039,6 +1039,11 @@ impl Counter {
     /// than [`crate::MAX_RATE_AGE_SECS`] before `facts.now`, or more than
     /// [`crate::MAX_RATE_AHEAD_SECS`] after it, is refused (CR-58), with nothing
     /// written.
+    ///
+    /// CR-196: the sale is in the currency of the settings in force, whatever
+    /// `currency` says. With Bitcoin Standard (CR-197) the amount is in
+    /// satoshis, `rate` and `source` are not read, and the sale is quoted at
+    /// the amount and records the source `sats`.
     pub fn open<S: Store>(
         &mut self,
         amount: Amount,
@@ -1058,7 +1063,7 @@ impl Counter {
     pub fn open_by<S: Store>(
         &mut self,
         amount: Amount,
-        currency: Currency,
+        _currency: Currency,
         rate: Rate,
         source: &RateSource,
         facts: OpenFacts,
@@ -1115,6 +1120,11 @@ impl Counter {
             return Err(OpenRefused::BadName);
         }
         let now = facts.now;
+        // CR-196, CR-197: the currency is the settings'; Bitcoin Standard
+        // has no price, so the rate and its source are the satoshi's own.
+        let currency = Currency::of_shop(self.settings.currency);
+        let (rate, source) = self.priced_at(rate, source, now);
+        let source = &source;
         if !self.is_listed() {
             return Err(OpenRefused::Removed);
         }
@@ -1212,6 +1222,17 @@ impl Counter {
         })
     }
 
+    /// CR-197: the rate and its source a price is made with. The caller's,
+    /// except for Bitcoin Standard, which has no price: there the rate is the
+    /// satoshi's own and the source is `sats` at `now`.
+    fn priced_at(&self, rate: Rate, source: &RateSource, now: u64) -> (Rate, RateSource) {
+        if self.settings.currency.is_sats() {
+            (Rate::sats(), RateSource::sats(now))
+        } else {
+            (rate, source.clone())
+        }
+    }
+
     /// CR-05, CR-08: give a sale a new quote. What has arrived is valued at
     /// the quote in force first; then the new quote is added and the rest of
     /// the amount is priced at it. Refused once enough has arrived, once the
@@ -1233,6 +1254,8 @@ impl Counter {
         headers: &C,
         store: &mut S,
     ) -> Result<Quote, RequoteRefused<S::Error>> {
+        let (rate, source) = self.priced_at(rate, source, now);
+        let source = &source;
         let mut sale = self
             .sales
             .get(&index)
@@ -2475,6 +2498,7 @@ impl Counter {
                 rate,
                 source,
             } => {
+                let (rate, source) = self.priced_at(rate, &source, now);
                 if !source.is_fresh_at(now) {
                     return Err(RefundRefused::StaleRate {
                         fetched_at: source.fetched_at(),

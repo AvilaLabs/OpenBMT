@@ -1219,13 +1219,72 @@ wire_record!(DeepRequestView { asked, words });
 
 // ---- what the node holds, read-only -----------------------------------------------
 
+/// What the shop prices in (CR-193). The tags are those of
+/// `CurrencyAction` less its `Keep`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShopCurrencyView {
+    /// US dollar.
+    Usd,
+    /// Euro.
+    Eur,
+    /// Pound sterling.
+    Gbp,
+    /// Japanese yen.
+    Jpy,
+    /// Australian dollar.
+    Aud,
+    /// Indian rupee.
+    Inr,
+    /// South Korean won.
+    Krw,
+    /// Indonesian rupiah.
+    Idr,
+    /// Singapore dollar.
+    Sgd,
+    /// Bitcoin Standard: sats, no price.
+    Sats,
+}
+
+wire_unit_enum!(ShopCurrencyView {
+    Usd = 1,
+    Eur = 2,
+    Gbp = 3,
+    Jpy = 4,
+    Aud = 5,
+    Inr = 6,
+    Krw = 7,
+    Idr = 8,
+    Sgd = 9,
+    Sats = 10
+});
+
+impl ShopCurrencyView {
+    /// The view of a currency.
+    pub(crate) fn of(currency: openbmt_core::currency::ShopCurrency) -> Self {
+        use openbmt_core::currency::ShopCurrency as C;
+        match currency {
+            C::Usd => Self::Usd,
+            C::Eur => Self::Eur,
+            C::Gbp => Self::Gbp,
+            C::Jpy => Self::Jpy,
+            C::Aud => Self::Aud,
+            C::Inr => Self::Inr,
+            C::Krw => Self::Krw,
+            C::Idr => Self::Idr,
+            C::Sgd => Self::Sgd,
+            C::Sats => Self::Sats,
+        }
+    }
+}
+
 /// One limit of the shop's settings: what is enforced, in satoshis, and the
-/// whole dollars it was shown as.
+/// whole units of the shop's currency it was shown as.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LimitView {
     /// The enforced amount, in satoshis.
     pub sats: u64,
-    /// The display amount, in whole dollars.
+    /// The display amount, in whole units of the shop's currency (whole
+    /// dollars for a dollar shop).
     pub display_usd: u32,
 }
 
@@ -1297,6 +1356,8 @@ pub struct SettingsHeldView {
     pub boxes: Vec<Vec<u8>>,
     /// The key of the shop's own Lightning node, 33 bytes, when it names one.
     pub lightning_node: Option<Vec<u8>>,
+    /// What the shop prices in; every limit above is in whole units of it.
+    pub currency: ShopCurrencyView,
 }
 
 wire_record!(SettingsHeldView {
@@ -1323,7 +1384,8 @@ wire_record!(SettingsHeldView {
     devices,
     counters,
     boxes,
-    lightning_node
+    lightning_node,
+    currency
 });
 
 /// The kinds of signed object that wait in the outbox.

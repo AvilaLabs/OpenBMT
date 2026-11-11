@@ -90,7 +90,7 @@ pub use pos_views::{
 };
 pub use say::{all_words, words_for};
 pub use settings_edit::{
-    LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,
+    CurrencyAction, LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,
 };
 pub use setup_lock::PinChangeArgs;
 pub use views::{
@@ -100,6 +100,6 @@ pub use views::{
     MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind,
     OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView,
     RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView,
-    SettingsQueuedView, SkippedView, StageKind, StageView, StartConfig, StatusView, TakenView,
-    ViewKind, WordsView,
+    SettingsQueuedView, ShopCurrencyView, SkippedView, StageKind, StageView, StartConfig,
+    StatusView, TakenView, ViewKind, WordsView,
 };

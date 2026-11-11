@@ -122,7 +122,7 @@ fn as_70_with_no_settings_a_price_is_needed_and_the_first_counter_has_all_of_the
                 rig.owner
                     .queue_counter(queued.id, bad, SMALL_BATCH, NOW, nop)
             ),
-            Refusal::PriceOutOfRange
+            Refusal::PriceOutOfRange(openbmt_core::currency::ShopCurrency::Usd)
         );
     }
     assert_eq!(rig.owner.snapshot().unwrap(), before);

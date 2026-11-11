@@ -1259,13 +1259,15 @@ member's own wallet is not part of these rules.
 
 - **CR-187.** The settings carry `tips_on` and up to three suggested tips, in
   whole percent from 1 to 50 (`validate` refuses anything else). At first tips
-  are off and the percents are 10, 15 and 20. They are written after the watch
-  key as a flag, a count and the percents, and only when tips are on or the
-  percents are not 10, 15 and 20: settings with tips off and the first
-  percents are the bytes every earlier build wrote (message version 1, the
-  same hash), and read as tips off. A message with the block is version 2,
-  and a block that holds nothing but the first values is refused (it would
-  have been written as version 1). Neither turning tips on or off nor
+  are off and the percents are 10, 15 and 20. They are written in the
+  extension block that follows the watch key, after the shop's currency byte
+  (CR-193), as a flag, a count and the percents. The block is written, in a
+  message of version 2, only when tips are on, or the percents are not 10, 15
+  and 20, or the currency is not USD: settings with tips off, the first
+  percents and USD are the bytes every earlier build wrote (message version 1,
+  the same hash), and read as tips off. A message of version 2 whose block
+  holds USD, tips off and the first percents is refused (it would have been
+  written as version 1). Neither turning tips on or off nor
   changing the percents changes what a counter accepts or how much is at
   risk: the tip is part of the sale's total and every check is made on the
   total (CR-189). Both directions are tightenings, so the owner phone signs
@@ -1311,3 +1313,70 @@ member's own wallet is not part of these rules.
   it is tip: the refunds of the sale are counted oldest first against the
   sale's own amount, and what goes past it, up to the tip, is tip. A
   withdrawn request counts for nothing. A sale with no tip says 0.
+
+## 19. The shop's currency
+
+A shop prices in one currency, held in its signed settings, chosen from a
+fixed list: US dollar (USD), euro (EUR), pound sterling (GBP), Japanese yen
+(JPY), Australian dollar (AUD), Indian rupee (INR), South Korean won (KRW),
+Indonesian rupiah (IDR), Singapore dollar (SGD), or Bitcoin Standard, which
+prices in satoshis and uses no price source at all. Every counter of the
+shop prices in it and every limit of the settings is in it. A counter in
+another currency than the shop's is not part of these rules. The sources of
+a price and the band of each currency are in `docs/RATE-RULES.md` (RT-01,
+RT-03, RT-24).
+
+- **CR-193.** The settings carry the shop's currency: one byte, 1 for USD and
+  so on in the order above to 10 for Bitcoin Standard (`SAT` is the code a
+  sale records for it). It is the first part of the extension block that
+  follows the watch key, and the tips block of CR-187 follows it. The block
+  is written, in a message of version 2, only when the currency is not USD or
+  the tips are not off with the first percents: settings of a dollar shop
+  with those tips are written, hashed and signed exactly as before, in the
+  wire form of version 1. A version 1 form reads as USD with tips off. A
+  version 2 form whose currency byte is 0 or above 10, one whose block holds
+  USD, tips off and the first percents (it would have been written as version
+  1), one whose block is cut short or has bytes left over, and a form of any
+  other version are refused. The block is in the bytes that are signed.
+- **CR-194.** Every money value of the settings (the three instant limits
+  and their budgets, the refund limits, the cashier's override cap and the
+  manager's ceiling) is in whole units of the shop's currency, next to the
+  satoshis that counters enforce. For Bitcoin Standard a unit is a satoshi,
+  so a limit's satoshis and its whole units are the same number, and
+  `validate` refuses settings in which they are not.
+- **CR-195.** A change of currency loosens, whatever else it does (every
+  limit becomes another number, which cannot be sorted), so it needs the
+  Key app's signature. The same change must give every money value again in
+  the new currency: a limit that is on and has the same satoshis and the
+  same whole units as in the settings in force is a value carried over from
+  the old currency, and settings that carry one are refused when they
+  replace those in force, naming it. A limit that is off is not a value.
+  The field `currency` is listed by `changed_fields`.
+- **CR-196.** A sale is in the currency of the settings in force: the sale
+  and its `Opened` record carry that currency's code, whatever currency the
+  caller names. The amount is in the minor units of that currency (ISO
+  4217: yen and won have none), and the rate is in minor units per bitcoin.
+  The counter app's library refuses a sale in another currency than the
+  settings' (`sale-currency`).
+- **CR-197.** With Bitcoin Standard the amount typed is satoshis and the
+  quote is the amount: the rate is exactly 100,000,000 minor units (of a
+  satoshi) per bitcoin, no source is asked, and the rate and source the
+  caller gives are not read. The sale records the source `sats`, at the time
+  of the sale, as CR-57's label, and no price. A new quote (CR-05) and the
+  amount of a refund given in the shop's currency (CR-61) are made the same
+  way. The dust line (CR-17) and the smallest bitcoin sale (CR-75) apply to
+  the satoshis as before.
+- **CR-198.** The owner phone changes the currency in the editor of the
+  settings (AS-74 to AS-77) by an edit that names it. The edit must give
+  every limit again, and each is typed in the new currency: a limit left as
+  it is, or one that cannot be told from the old one, is refused with CR-195
+  in the words of the refusal. The satoshis of a limit are its whole units
+  at the price of the new currency the edit gives (AS-75), refused outside
+  that currency's band; for Bitcoin Standard no price is given or asked and
+  the satoshis are the units. The preview says the currency, and that the
+  change needs the Key app.
+- **CR-199.** The Key app's line for a settings item lists the currency as a
+  field, named `Currency`, with the choice written in full (`US dollar (USD)`),
+  and each limit's value in the currency's name as its whole units (`$10`
+  for a dollar shop, `10 euros`, `10 sats`), so that the key holder sees in
+  what the limits are before co-signing.

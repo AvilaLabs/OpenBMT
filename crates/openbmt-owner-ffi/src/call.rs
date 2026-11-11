@@ -106,7 +106,7 @@ use crate::pos_views::{
 };
 use crate::say::{TONES, WHOS};
 use crate::settings_edit::{
-    LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,
+    CurrencyAction, LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,
 };
 use crate::setup_lock::{self, PinChangeArgs};
 use crate::signer_views::{
@@ -120,8 +120,8 @@ use crate::views::{
     LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind,
     OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund,
     ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind,
-    SendRow, SettingsHeldView, SettingsQueuedView, SkippedView, StageKind, StageView, StartConfig,
-    StatusView, TakenView, ViewKind, WordsView,
+    SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView, StageKind,
+    StageView, StartConfig, StatusView, TakenView, ViewKind, WordsView,
 };
 use crate::watch::{self, WatchEntry, WatchStart, WatchStepView};
 
@@ -834,6 +834,8 @@ fn definitions() -> Vec<TypeDef> {
         QueuedRefund::define(),
         SettingsQueuedView::define(),
         LightningAction::define(),
+        CurrencyAction::define(),
+        ShopCurrencyView::define(),
         SettingsEditArgs::define(),
         SettingChangeView::define(),
         SettingsPreviewView::define(),

@@ -4,6 +4,7 @@
 mod common;
 
 use common::*;
+use openbmt_core::currency::ShopCurrency;
 use openbmt_core::settings::{Change, FieldChange, Limit, Settings};
 use openbmt_owner::{
     parse_lightning_node, sats_per_usd_at, LightningEdit, NodeKeyFault, Refusal, SettingsEdit,
@@ -400,7 +401,7 @@ fn as_75_a_changed_limit_without_a_price_is_refused() {
     };
     assert_eq!(
         rig.owner.settings_preview(&edit).unwrap_err(),
-        Refusal::EditNeedsRate
+        Refusal::EditNeedsRate(ShopCurrency::Usd)
     );
     // Turning a limit off, or changing another field, needs no price.
     let off = SettingsEdit {
@@ -433,14 +434,20 @@ fn as_75_the_price_is_turned_into_satoshis_to_a_dollar_rounded_to_the_nearest() 
     assert_eq!(sats_per_usd_at(1_600_000), Ok(63));
     assert_eq!(
         sats_per_usd_at(MIN_USD_PER_BTC - 1),
-        Err(Refusal::PriceOutOfRange)
+        Err(Refusal::PriceOutOfRange(ShopCurrency::Usd))
     );
     assert_eq!(
         sats_per_usd_at(MAX_USD_PER_BTC + 1),
-        Err(Refusal::PriceOutOfRange)
+        Err(Refusal::PriceOutOfRange(ShopCurrency::Usd))
     );
-    assert_eq!(sats_per_usd_at(0), Err(Refusal::PriceOutOfRange));
-    assert_eq!(sats_per_usd_at(u64::MAX), Err(Refusal::PriceOutOfRange));
+    assert_eq!(
+        sats_per_usd_at(0),
+        Err(Refusal::PriceOutOfRange(ShopCurrency::Usd))
+    );
+    assert_eq!(
+        sats_per_usd_at(u64::MAX),
+        Err(Refusal::PriceOutOfRange(ShopCurrency::Usd))
+    );
 }
 
 #[test]
@@ -454,7 +461,7 @@ fn as_75_a_price_outside_the_range_is_refused_and_a_limit_left_alone_keeps_its_s
         };
         assert_eq!(
             rig.owner.settings_preview(&edit).unwrap_err(),
-            Refusal::PriceOutOfRange
+            Refusal::PriceOutOfRange(ShopCurrency::Usd)
         );
     }
     // The same dollars at another price change nothing.
@@ -769,4 +776,281 @@ fn cr_187_a_suggested_tip_outside_one_to_fifty_or_a_fourth_one_is_refused() {
         ..SettingsEdit::default()
     };
     assert!(rig.owner.settings_preview(&edge).is_ok());
+}
+
+// ---- the shop's currency (CR-193 to CR-198) ------------------------------------
+
+/// An edit that gives every limit again, `units` each (10 + the place of the
+/// limit, so that no two are the same), in `currency`.
+fn retype_all(currency: ShopCurrency, price: Option<u64>, units: u32) -> SettingsEdit {
+    SettingsEdit {
+        currency: Some(currency),
+        usd_per_btc: price,
+        light_per_sale: Some(units + 1),
+        light_budget: Some(units + 2),
+        node_per_sale: Some(units + 3),
+        node_budget: Some(units + 4),
+        box_per_sale: Some(units + 5),
+        box_budget: Some(units + 6),
+        refund_cap: Some(units + 7),
+        refund_daily_cap: Some(units + 8),
+        cashier_override_daily_cap: Some(units + 9),
+        manager_override_ceiling: Some(units + 10),
+        ..SettingsEdit::default()
+    }
+}
+
+#[test]
+fn cr_198_a_change_of_currency_given_every_limit_again_is_made_at_the_new_price() {
+    let rig = held(plain);
+    let edit = retype_all(ShopCurrency::Eur, Some(50_000), 100);
+    let preview = rig.owner.settings_preview(&edit).unwrap();
+    assert_eq!(preview.settings.currency, ShopCurrency::Eur);
+    // 101 euros at 50,000 euros a bitcoin: 101 * 100,000,000 / 50,000.
+    assert_eq!(
+        preview.settings.light_per_sale,
+        Limit {
+            sats: 202_000,
+            display_usd: 101
+        }
+    );
+    assert_eq!(preview.price, Some((50_000, 2_000)));
+    // The change is a loosening and names the currency.
+    assert_eq!(preview.change, Change::Loosening);
+    assert!(preview.fields.contains(&FieldChange {
+        field: "currency",
+        direction: Change::Loosening
+    }));
+    // The settings that come out are valid and carry nothing over.
+    assert_eq!(preview.settings.validate(), Ok(()));
+    assert!(
+        openbmt_core::settings::carried_limit_fields(&preview.reference, &preview.settings)
+            .is_empty()
+    );
+}
+
+#[test]
+fn cr_198_a_change_of_currency_that_leaves_a_limit_as_it_is_is_refused() {
+    let rig = held(plain);
+    for missing in 0..10 {
+        let mut edit = retype_all(ShopCurrency::Gbp, Some(80_000), 100);
+        let slots = [
+            &mut edit.light_per_sale,
+            &mut edit.light_budget,
+            &mut edit.node_per_sale,
+            &mut edit.node_budget,
+            &mut edit.box_per_sale,
+            &mut edit.box_budget,
+            &mut edit.refund_cap,
+            &mut edit.refund_daily_cap,
+            &mut edit.cashier_override_daily_cap,
+            &mut edit.manager_override_ceiling,
+        ];
+        for (i, slot) in slots.into_iter().enumerate() {
+            if i == missing {
+                *slot = None;
+            }
+        }
+        match rig.owner.settings_preview(&edit).unwrap_err() {
+            Refusal::SettingsInvalid(why) => assert!(why.starts_with("CR-195"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+    // Only the currency named: every limit is carried.
+    let only = SettingsEdit {
+        currency: Some(ShopCurrency::Gbp),
+        ..SettingsEdit::default()
+    };
+    assert!(matches!(
+        rig.owner.settings_preview(&only).unwrap_err(),
+        Refusal::SettingsInvalid(_)
+    ));
+    // Naming the currency the shop has already is no change.
+    let same = SettingsEdit {
+        currency: Some(ShopCurrency::Usd),
+        ..SettingsEdit::default()
+    };
+    let preview = rig.owner.settings_preview(&same).unwrap();
+    assert!(preview.fields.is_empty());
+}
+
+#[test]
+fn cr_198_a_limit_typed_with_the_same_number_in_the_new_currency_is_a_new_value() {
+    let rig = held(plain);
+    // The light check's largest sale is $10 and the edit types 10 euros.
+    let mut edit = retype_all(ShopCurrency::Eur, Some(98_000), 100);
+    edit.light_per_sale = Some(10);
+    let preview = rig.owner.settings_preview(&edit).unwrap();
+    assert_eq!(preview.settings.light_per_sale.display_usd, 10);
+    // 10 * 100,000,000 / 98,000 = 10,204.08
+    assert_eq!(preview.settings.light_per_sale.sats, 10_204);
+    // At exactly the old rate the pair is the old one: that is a value carried
+    // over, and it is refused (CR-195).
+    edit.usd_per_btc = Some(100_000);
+    assert!(rig.owner.settings_preview(&edit).is_err());
+}
+
+#[test]
+fn cr_198_the_new_currency_needs_its_price_and_takes_it_within_its_band() {
+    let rig = held(plain);
+    assert_eq!(
+        rig.owner
+            .settings_preview(&retype_all(ShopCurrency::Eur, None, 100))
+            .unwrap_err(),
+        Refusal::EditNeedsRate(ShopCurrency::Eur)
+    );
+    for bad in [0, 99, 100_000_001] {
+        assert_eq!(
+            rig.owner
+                .settings_preview(&retype_all(ShopCurrency::Eur, Some(bad), 100))
+                .unwrap_err(),
+            Refusal::PriceOutOfRange(ShopCurrency::Eur),
+            "{bad}"
+        );
+    }
+    // The yen band is far above the dollar band.
+    assert_eq!(
+        openbmt_owner::price_band(ShopCurrency::Usd),
+        Some((MIN_USD_PER_BTC, MAX_USD_PER_BTC))
+    );
+    assert_eq!(
+        openbmt_owner::price_band(ShopCurrency::Jpy),
+        Some((1_000_000, 1_000_000_000_000))
+    );
+    assert_eq!(
+        rig.owner
+            .settings_preview(&retype_all(ShopCurrency::Jpy, Some(100_000), 100))
+            .unwrap_err(),
+        Refusal::PriceOutOfRange(ShopCurrency::Jpy)
+    );
+    assert!(rig
+        .owner
+        .settings_preview(&retype_all(ShopCurrency::Jpy, Some(12_000_000), 100))
+        .is_ok());
+}
+
+#[test]
+fn cr_198_a_currency_whose_unit_is_a_fraction_of_a_satoshi_is_not_rounded_to_nothing() {
+    let rig = held(plain);
+    // A rupiah is worth about 0.08 satoshis at 1,200,000,000 rupiah a bitcoin.
+    let edit = retype_all(ShopCurrency::Idr, Some(1_200_000_000), 1_000_000);
+    let preview = rig.owner.settings_preview(&edit).unwrap();
+    assert_eq!(preview.settings.light_per_sale.display_usd, 1_000_001);
+    // 1,000,001 * 100,000,000 / 1,200,000,000 = 83,333.4
+    assert_eq!(preview.settings.light_per_sale.sats, 83_333);
+    assert_eq!(preview.price, Some((1_200_000_000, 0)));
+    // Yen: a unit is a few satoshis, still worked out from the price.
+    let edit = retype_all(ShopCurrency::Jpy, Some(12_000_000), 1_000);
+    let preview = rig.owner.settings_preview(&edit).unwrap();
+    assert_eq!(preview.settings.light_per_sale.display_usd, 1_001);
+    // 1,001 * 100,000,000 / 12,000,000 = 8,341.7
+    assert_eq!(preview.settings.light_per_sale.sats, 8_342);
+}
+
+#[test]
+fn cr_198_bitcoin_standard_asks_for_no_price_and_a_limit_is_its_own_satoshis() {
+    let rig = held(plain);
+    let edit = retype_all(ShopCurrency::Sats, None, 20_000);
+    let preview = rig.owner.settings_preview(&edit).unwrap();
+    assert_eq!(preview.settings.currency, ShopCurrency::Sats);
+    assert_eq!(
+        preview.settings.light_per_sale,
+        Limit {
+            sats: 20_001,
+            display_usd: 20_001
+        }
+    );
+    assert_eq!(preview.price, None);
+    assert_eq!(preview.change, Change::Loosening);
+    // A price that is given for it is not read, even one outside any band.
+    let priced = retype_all(ShopCurrency::Sats, Some(1), 20_000);
+    assert_eq!(rig.owner.settings_preview(&priced).unwrap(), preview);
+}
+
+#[test]
+fn cr_198_in_a_bitcoin_standard_shop_an_edited_limit_is_its_own_satoshis() {
+    let rig = held(|s| {
+        s.currency = ShopCurrency::Sats;
+        for l in [
+            &mut s.light_per_sale,
+            &mut s.light_budget,
+            &mut s.node_per_sale,
+            &mut s.node_budget,
+            &mut s.box_per_sale,
+            &mut s.box_budget,
+            &mut s.refund_cap,
+            &mut s.refund_daily_cap,
+            &mut s.cashier_override_daily_cap,
+            &mut s.manager_override_ceiling,
+        ] {
+            *l = Limit {
+                sats: 30_000,
+                display_usd: 30_000,
+            };
+        }
+    });
+    let edit = SettingsEdit {
+        light_per_sale: Some(40_000),
+        ..SettingsEdit::default()
+    };
+    let preview = rig.owner.settings_preview(&edit).unwrap();
+    assert_eq!(
+        preview.settings.light_per_sale,
+        Limit {
+            sats: 40_000,
+            display_usd: 40_000
+        }
+    );
+    assert_eq!(preview.price, None);
+    assert_eq!(preview.change, Change::Loosening);
+    // Back to dollars: every limit is given again, at a price.
+    let back = retype_all(ShopCurrency::Usd, Some(100_000), 10);
+    let preview = rig.owner.settings_preview(&back).unwrap();
+    assert_eq!(preview.settings.currency, ShopCurrency::Usd);
+    assert_eq!(preview.settings.light_per_sale, Limit::from_usd(11, 1_000));
+}
+
+#[test]
+fn cr_198_limits_turned_off_in_a_change_of_currency_need_no_price() {
+    let rig = held(plain);
+    let off = SettingsEdit {
+        currency: Some(ShopCurrency::Eur),
+        light_per_sale: Some(0),
+        light_budget: Some(0),
+        node_per_sale: Some(0),
+        node_budget: Some(0),
+        box_per_sale: Some(0),
+        box_budget: Some(0),
+        refund_cap: Some(0),
+        refund_daily_cap: Some(0),
+        cashier_override_daily_cap: Some(0),
+        manager_override_ceiling: Some(0),
+        ..SettingsEdit::default()
+    };
+    let preview = rig.owner.settings_preview(&off).unwrap();
+    assert_eq!(preview.settings.currency, ShopCurrency::Eur);
+    assert_eq!(preview.price, None);
+}
+
+#[test]
+fn cr_198_the_words_of_a_price_refusal_name_the_currency() {
+    for c in [
+        ShopCurrency::Usd,
+        ShopCurrency::Eur,
+        ShopCurrency::Jpy,
+        ShopCurrency::Idr,
+    ] {
+        let need = Refusal::EditNeedsRate(c).words();
+        assert!(need.what.contains(c.plural()), "{}", need.what);
+        assert!(need.next.contains(c.plural()), "{}", need.next);
+        let out = Refusal::PriceOutOfRange(c).words();
+        assert!(out.next.contains(c.plural()), "{}", out.next);
+        let (low, high) = openbmt_owner::price_band(c).unwrap();
+        assert!(out.what.contains(&c.whole_text(low)), "{}", out.what);
+        assert!(out.what.contains(&c.whole_text(high)), "{}", out.what);
+    }
+    assert!(Refusal::PriceOutOfRange(ShopCurrency::Usd)
+        .words()
+        .what
+        .contains("$1,000 to $10,000,000"));
 }

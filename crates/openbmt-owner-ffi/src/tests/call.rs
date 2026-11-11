@@ -401,6 +401,8 @@ struct Held {
     counters: usize,
     boxes: usize,
     node: Option<Vec<u8>>,
+    /// The tag of the shop's currency.
+    currency: u8,
 }
 
 /// `SettingsHeldView`, field by field as the frame writes them.
@@ -426,6 +428,7 @@ fn read_settings(r: &mut Rd<'_>) -> Held {
     let counters = r.list(|r| (r.bytes(), r.u32()));
     let boxes = r.list(Rd::bytes);
     let node = r.opt(Rd::bytes);
+    let currency = r.u8();
     Held {
         version,
         limits,
@@ -436,6 +439,7 @@ fn read_settings(r: &mut Rd<'_>) -> Held {
         counters: counters.len(),
         boxes: boxes.len(),
         node,
+        currency,
     }
 }
 
@@ -492,8 +496,9 @@ fn the_settings_the_node_holds_and_the_outbox_follow_an_approval() {
         (1, 0),
         "one counter share, no Box"
     );
-    // No Lightning node is named.
+    // No Lightning node is named, and the shop prices in dollars (CR-193).
     assert_eq!((held.node), None);
+    assert_eq!(held.currency, 1);
     assert!(queue(&rig, handle).others.is_empty(), "both left the queue");
 
     let response = rig.call(27, handle, &[]);

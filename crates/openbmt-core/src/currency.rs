@@ -148,6 +148,18 @@ impl ShopCurrency {
         }
     }
 
+    /// The band of a price per bitcoin in whole units of the currency: the
+    /// band of `docs/RATE-RULES.md` (RT-24), in minor units, divided by the
+    /// minor unit. `None` for Bitcoin Standard.
+    pub fn band_whole(&self) -> Option<(u64, u64)> {
+        let factor = self.band_factor()?;
+        let unit = 10u64.pow(self.minor_digits());
+        Some((
+            10_000u64.checked_mul(factor)? / unit,
+            10_000_000_000u64.checked_mul(factor)? / unit,
+        ))
+    }
+
     /// A whole number of this currency written for a person: `$1,250` for
     /// dollars (as before), `1,250 euros` for the others, `1,250 sats` for
     /// Bitcoin Standard.
@@ -217,6 +229,28 @@ mod tests {
         assert_eq!(ShopCurrency::Sats.plural(), "sats");
         assert!(ShopCurrency::Sats.is_sats());
         assert!(!ShopCurrency::Usd.is_sats());
+    }
+
+    #[test]
+    fn rt_24_the_band_in_whole_units_follows_the_minor_unit() {
+        assert_eq!(ShopCurrency::Usd.band_whole(), Some((100, 100_000_000)));
+        assert_eq!(
+            ShopCurrency::Jpy.band_whole(),
+            Some((1_000_000, 1_000_000_000_000))
+        );
+        assert_eq!(
+            ShopCurrency::Inr.band_whole(),
+            Some((10_000, 10_000_000_000))
+        );
+        assert_eq!(
+            ShopCurrency::Krw.band_whole(),
+            Some((10_000_000, 10_000_000_000_000))
+        );
+        assert_eq!(
+            ShopCurrency::Idr.band_whole(),
+            Some((1_000_000, 1_000_000_000_000))
+        );
+        assert_eq!(ShopCurrency::Sats.band_whole(), None);
     }
 
     #[test]

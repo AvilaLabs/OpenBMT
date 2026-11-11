@@ -412,12 +412,17 @@ class RateSource(val id: String, val url: String, val currency: String, val init
  */
 data class Sample(val source: String, val fetchedAt: Long, val minorPerBtc: Long)
 
-/** What the app needs from the shop's settings before the node runs. */
+/**
+ * What the app needs from the shop's settings before the node runs. [currency] is the shop's currency
+ * (CR-193): three capital letters, or "SAT" for Bitcoin Standard, where an amount is satoshis and no
+ * price is asked (CR-197).
+ */
 class ShopSettings(
     val version: Long,
     val torOn: Boolean,
     val customerWifi: Boolean,
     val minSaleSats: Long,
+    val currency: String = "USD",
 )
 
 /** The rate a sale is opened with, and its source as the counter takes it (CR-57). */
@@ -731,7 +736,7 @@ internal fun Reader.rateSource(): RateSource = RateSource(string(), string(), st
 
 internal fun Reader.sample(): Sample = Sample(string(), u64(), u64())
 
-internal fun Reader.shopSettings(): ShopSettings = ShopSettings(u32(), bool(), bool(), u64())
+internal fun Reader.shopSettings(): ShopSettings = ShopSettings(u32(), bool(), bool(), u64(), string())
 
 internal fun Reader.rate(): Rate = Rate(u64(), string(), u64())
 

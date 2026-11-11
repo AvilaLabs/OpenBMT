@@ -7,13 +7,16 @@
 //! cannot be sorted is loosening, and a change that mixes both is loosening.
 //!
 //! Each money limit is kept in satoshis, which is what counters enforce, and
-//! in whole display dollars "from the owner phone", which is only a label.
-//! Moving either number up counts as loosening.
+//! in whole display units of the shop's currency "from the owner phone",
+//! which is only a label. Moving either number up counts as loosening. The
+//! shop's currency is part of the settings (CR-193); changing it loosens and
+//! every limit is given again in the new one (CR-195).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::batch::PinnedRoots;
+use crate::currency::ShopCurrency;
 use crate::identity::{tagged_hash, DeviceId, Identity, Sig, TAG_SETTINGS};
 use crate::policy::{self, CheckMode};
 use crate::wire::{self, DecodeError, Reader};
@@ -51,10 +54,11 @@ pub const MAX_TIP_PERCENT: u8 = 50;
 /// The first suggested tips, in whole percent (CR-187).
 pub const DEFAULT_TIP_PERCENTS: [u8; 3] = [10, 15, 20];
 
-/// The version byte of a settings message that carries the tips block
-/// (CR-187). Settings with tips off and the first percents are written as
-/// version 1, byte for byte what earlier builds wrote.
-const SETTINGS_VERSION_TIPS: u8 = 2;
+/// The version byte of a settings message that carries the extension block
+/// (CR-187, CR-193): the shop's currency and then the tips. A dollar shop with
+/// tips off and the first percents is written as version 1, byte for byte what
+/// earlier builds wrote.
+const EXTENSION_VERSION: u8 = 2;
 
 /// Length of a Lightning node's public key: compressed, as in BOLT 11 and in
 /// the node's own `getinfo` (LN-03).
@@ -84,17 +88,21 @@ fn ascending(
     Ok(())
 }
 
-/// A money limit: satoshis (enforced) and whole dollars (shown).
+/// A money limit: satoshis (enforced) and whole units of the shop's
+/// currency (shown). For Bitcoin Standard the two are the same number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limit {
     /// Enforced amount.
     pub sats: u64,
-    /// Display amount, whole dollars.
+    /// Display amount, whole units of the shop's currency (whole dollars
+    /// for a dollar shop; the name is kept from when that was all there
+    /// was).
     pub display_usd: u32,
 }
 
 impl Limit {
-    /// A limit of `usd` whole dollars at `sats_per_usd` (0 turns it off).
+    /// A limit of `usd` whole units of the shop's currency at `sats_per_usd`
+    /// satoshis to a unit (0 turns it off).
     pub fn from_usd(usd: u32, sats_per_usd: u64) -> Self {
         Self {
             sats: u64::from(usd).saturating_mul(sats_per_usd),
@@ -172,10 +180,13 @@ pub struct Settings {
     /// [`MAX_TIP_PERCENTS`] of them, each from [`MIN_TIP_PERCENT`] to
     /// [`MAX_TIP_PERCENT`] (CR-187).
     pub tip_percents: Vec<u8>,
+    /// What the shop prices its sales in, and what every limit above is in
+    /// whole units of (CR-193).
+    pub currency: ShopCurrency,
 }
 
 impl Settings {
-    /// Safe starting values at `sats_per_usd`. Instant limits are the §6
+    /// Safe starting values in dollars at `sats_per_usd`. Instant limits are the §6
     /// defaults. The refund, override, tolerance and heartbeat values are
     /// placeholders **[to tune]**. Customer Wi-Fi starts as "yes" and Tor as
     /// off, so light-check instant stays off until the owner answers.
@@ -207,13 +218,17 @@ impl Settings {
             watch_key: None,
             tips_on: false,
             tip_percents: DEFAULT_TIP_PERCENTS.to_vec(),
+            currency: ShopCurrency::Usd,
         }
     }
 
-    /// Whether the tips block is part of the canonical bytes (CR-187): it is
-    /// when tips are on or the percents are not the first ones.
-    fn has_tips_block(&self) -> bool {
-        self.tips_on || self.tip_percents != DEFAULT_TIP_PERCENTS
+    /// Whether the extension block is part of the canonical bytes (CR-187,
+    /// CR-193): it is when the currency is not USD, tips are on or the
+    /// percents are not the first ones.
+    fn has_extension_block(&self) -> bool {
+        self.currency != ShopCurrency::Usd
+            || self.tips_on
+            || self.tip_percents != DEFAULT_TIP_PERCENTS
     }
 
     /// The shop-wide outstanding instant total for a check mode.
@@ -314,6 +329,16 @@ impl Settings {
                 "CR-187: a suggested tip is not a whole percent from 1 to 50, or there are more than three",
             ));
         }
+        if self.currency.is_sats()
+            && self
+                .limits()
+                .iter()
+                .any(|l| l.sats != u64::from(l.display_usd))
+        {
+            return Err(SettingsError::Invalid(
+                "CR-194: a limit in Bitcoin Standard is not its own satoshis",
+            ));
+        }
         if let Some(key) = &self.watch_key {
             if self.devices.contains(key)
                 || self.counters.contains_key(key)
@@ -365,7 +390,7 @@ impl Settings {
     /// panics rather than truncating the length.
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(
-            323 + self.devices.len() * 32 + self.counters.len() * 34 + self.boxes.len() * 32,
+            329 + self.devices.len() * 32 + self.counters.len() * 34 + self.boxes.len() * 32,
         );
         out.extend_from_slice(&self.version.to_le_bytes());
         for l in self.limits() {
@@ -406,7 +431,11 @@ impl Settings {
             }
             None => out.push(0),
         }
-        if self.has_tips_block() {
+        // CR-193, CR-187: the extension block is the currency byte and then
+        // the tips block. It is left out, and the message is version 1, when
+        // the shop is a dollar shop with tips off and the first percents.
+        if self.has_extension_block() {
+            out.push(self.currency.to_byte());
             out.push(u8::from(self.tips_on));
             out.push(u8::try_from(self.tip_percents.len()).unwrap_or(u8::MAX));
             out.extend_from_slice(&self.tip_percents);
@@ -415,10 +444,10 @@ impl Settings {
     }
 
     /// Read the bytes written by [`Settings::encode`], field by field. This
-    /// only parses: `validate` is still the caller's to run. `version` is
-    /// the version of the frame: from 2 on the tips block follows the watch
-    /// key, and a version 1 message reads as tips off with the first
-    /// percents (CR-187).
+    /// only parses: `validate` is still the caller's to run. `version_byte`
+    /// is the version of the frame: from 2 on the extension block follows
+    /// the watch key, and a version 1 message reads as US dollars with tips
+    /// off and the first percents (CR-187, CR-193).
     fn read(r: &mut Reader<'_>, version_byte: u8) -> Result<Self, DecodeError> {
         let version = r.u32_le()?;
         let mut limits = [Limit {
@@ -487,21 +516,24 @@ impl Settings {
         } else {
             None
         };
-        let (tips_on, tip_percents) = if version_byte >= SETTINGS_VERSION_TIPS {
+        let (currency, tips_on, tip_percents) = if version_byte >= EXTENSION_VERSION {
+            let currency = ShopCurrency::from_byte(r.u8()?).ok_or(DecodeError::NonCanonical(
+                "the currency byte is not a choice",
+            ))?;
             let on = r.flag()?;
             let n = usize::from(r.u8()?);
             if n > MAX_TIP_PERCENTS {
                 return Err(DecodeError::NonCanonical("more than three suggested tips"));
             }
             let percents = r.take(n)?.to_vec();
-            if !on && percents == DEFAULT_TIP_PERCENTS {
+            if currency == ShopCurrency::Usd && !on && percents == DEFAULT_TIP_PERCENTS {
                 return Err(DecodeError::NonCanonical(
-                    "a tips block holds nothing but the first values",
+                    "an extension block holds nothing but the first values",
                 ));
             }
-            (on, percents)
+            (currency, on, percents)
         } else {
-            (false, DEFAULT_TIP_PERCENTS.to_vec())
+            (ShopCurrency::Usd, false, DEFAULT_TIP_PERCENTS.to_vec())
         };
 
         Ok(Self {
@@ -530,6 +562,7 @@ impl Settings {
             watch_key,
             tips_on,
             tip_percents,
+            currency,
         })
     }
 
@@ -627,6 +660,14 @@ fn limit(out: &mut Vec<FieldChange>, field: &'static str, old: &Limit, new: &Lim
 pub fn changed_fields(old: &Settings, new: &Settings) -> Vec<FieldChange> {
     let mut out = Vec::new();
     let o = &mut out;
+    // CR-195: another currency means every limit is another number, which
+    // cannot be sorted, so it loosens.
+    if old.currency != new.currency {
+        o.push(FieldChange {
+            field: "currency",
+            direction: Change::Loosening,
+        });
+    }
     limit(
         o,
         "light_per_sale",
@@ -779,6 +820,45 @@ pub fn classify_change(old: &Settings, new: &Settings) -> Change {
     }
 }
 
+/// CR-195: the fields of a limit that is on and the same, in satoshis and in
+/// whole units, in settings of another currency than `old`. A change of
+/// currency gives every limit again; one that carries a value over from the
+/// old currency is not made.
+pub fn carried_limit_fields(old: &Settings, new: &Settings) -> Vec<&'static str> {
+    if old.currency == new.currency {
+        return Vec::new();
+    }
+    const NAMES: [&str; 10] = [
+        "light_per_sale",
+        "light_budget",
+        "node_per_sale",
+        "node_budget",
+        "box_per_sale",
+        "box_budget",
+        "refund_cap",
+        "refund_daily_cap",
+        "cashier_override_daily_cap",
+        "manager_override_ceiling",
+    ];
+    old.limits()
+        .iter()
+        .zip(new.limits())
+        .zip(NAMES)
+        .filter(|((before, after), _)| before.display_usd != 0 && *before == after)
+        .map(|(_, name)| name)
+        .collect()
+}
+
+fn carried_limits(old: &Settings, new: &Settings) -> Result<(), SettingsError> {
+    if carried_limit_fields(old, new).is_empty() {
+        Ok(())
+    } else {
+        Err(SettingsError::Invalid(
+            "CR-195: a change of currency keeps a limit of the old currency",
+        ))
+    }
+}
+
 /// Why signed settings were refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingsError {
@@ -846,6 +926,9 @@ impl SignedSettings {
                 });
             }
         }
+        if let Some(cur) = current {
+            carried_limits(cur, &self.settings)?;
+        }
         let change = current.map_or(Change::Loosening, |cur| {
             classify_change(cur, &self.settings)
         });
@@ -879,8 +962,9 @@ impl SignedSettings {
 }
 
 impl SignedSettings {
-    /// Wire form: `OBMS`, version 1 (2 when the settings carry the tips
-    /// block, CR-187), the bytes of [`Settings::encode`] (the
+    /// Wire form: `OBMS`, version 1 (2 when the settings carry the extension
+    /// block, the currency and the tips, CR-187 and CR-193), the bytes of
+    /// [`Settings::encode`] (the
     /// bytes that are hashed and signed), the owner signature, a flag byte
     /// (1 if a Key app signature follows, else 0) and, only when the flag is
     /// 1, the Key app signature. Call it on settings that passed `validate`;
@@ -888,9 +972,9 @@ impl SignedSettings {
     pub fn to_bytes(&self) -> Vec<u8> {
         let body = self.settings.encode();
         let mut out = wire::start(&wire::MAGIC_SIGNED_SETTINGS, body.len() + 129);
-        if self.settings.has_tips_block() {
+        if self.settings.has_extension_block() {
             if let Some(byte) = out.get_mut(4) {
-                *byte = SETTINGS_VERSION_TIPS;
+                *byte = EXTENSION_VERSION;
             }
         }
         out.extend_from_slice(&body);
@@ -911,7 +995,7 @@ impl SignedSettings {
     /// [`SignedSettings::verify`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
         let (mut r, version) =
-            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, SETTINGS_VERSION_TIPS)?;
+            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, EXTENSION_VERSION)?;
         let settings = Settings::read(&mut r, version)?;
         let owner_sig = r.sig()?;
         let approver_sig = if r.flag()? { Some(r.sig()?) } else { None };
@@ -2587,5 +2671,386 @@ mod tests {
             assert!(SettingNote::from_body(&odd).is_err());
         }
         assert!(SettingNote::from_body(&[]).is_err());
+    }
+
+    // ---- the shop's currency (CR-193 to CR-195) ----------------------------
+
+    fn signed_by_both(s: &Settings, o: &Identity, a: &Identity) -> SignedSettings {
+        SignedSettings {
+            owner_sig: s.sign(o),
+            approver_sig: Some(s.sign(a)),
+            settings: s.clone(),
+        }
+    }
+
+    /// Every limit given again in `currency`, at `per_unit` satoshis to a
+    /// unit, with different numbers from `base()`.
+    fn retyped(s: &Settings, currency: ShopCurrency, per_unit: u64) -> Settings {
+        let mut n = next(s);
+        n.currency = currency;
+        let mut v = 7;
+        for l in [
+            &mut n.light_per_sale,
+            &mut n.light_budget,
+            &mut n.node_per_sale,
+            &mut n.node_budget,
+            &mut n.box_per_sale,
+            &mut n.box_budget,
+            &mut n.refund_cap,
+            &mut n.refund_daily_cap,
+            &mut n.cashier_override_daily_cap,
+            &mut n.manager_override_ceiling,
+        ] {
+            v += 3;
+            *l = Limit::from_usd(v, per_unit);
+        }
+        n
+    }
+
+    #[test]
+    fn cr_193_a_dollar_shop_is_written_as_it_always_was() {
+        let s = base();
+        assert_eq!(s.currency, ShopCurrency::Usd);
+        let bytes = s.encode();
+        // The currency is the absence of a byte: the last byte is still the
+        // watch key's flag.
+        assert_eq!(bytes.last(), Some(&0));
+        let (o, a, _) = roots();
+        let wire = signed_by_both(&s, &o, &a).to_bytes();
+        assert_eq!(wire.get(4), Some(&1));
+        let back = SignedSettings::from_bytes(&wire).unwrap();
+        assert_eq!(back.settings, s);
+        assert_eq!(back.to_bytes(), wire);
+    }
+
+    #[test]
+    fn cr_193_another_currency_is_wire_version_two_with_its_byte() {
+        let (o, a, _) = roots();
+        for c in ShopCurrency::ALL {
+            let mut s = base();
+            s.currency = c;
+            if c.is_sats() {
+                for l in [&mut s.light_per_sale, &mut s.light_budget] {
+                    *l = Limit {
+                        sats: 5,
+                        display_usd: 5,
+                    };
+                }
+                s.node_per_sale = Limit {
+                    sats: 0,
+                    display_usd: 0,
+                };
+                s.node_budget = s.node_per_sale;
+                s.box_per_sale = s.node_per_sale;
+                s.box_budget = s.node_per_sale;
+                s.refund_cap = s.node_per_sale;
+                s.refund_daily_cap = s.node_per_sale;
+                s.cashier_override_daily_cap = s.node_per_sale;
+                s.manager_override_ceiling = s.node_per_sale;
+            }
+            let signed = signed_by_both(&s, &o, &a);
+            let wire = signed.to_bytes();
+            let want = if c == ShopCurrency::Usd { 1 } else { 2 };
+            assert_eq!(wire.get(4), Some(&want), "{}", c.code());
+            assert_eq!(SignedSettings::from_bytes(&wire).unwrap(), signed);
+            // The currency is in what is signed.
+            let mut other = s.clone();
+            other.currency = if c == ShopCurrency::Eur {
+                ShopCurrency::Gbp
+            } else {
+                ShopCurrency::Eur
+            };
+            assert_ne!(s.hash(), other.hash());
+        }
+    }
+
+    #[test]
+    fn cr_193_version_one_reads_as_usd_and_other_versions_are_refused() {
+        let (o, a, _) = roots();
+        let wire = signed_by_both(&base(), &o, &a).to_bytes();
+        assert_eq!(
+            SignedSettings::from_bytes(&wire).unwrap().settings.currency,
+            ShopCurrency::Usd
+        );
+        let mut v3 = wire.clone();
+        v3[4] = 3;
+        assert_eq!(
+            SignedSettings::from_bytes(&v3),
+            Err(DecodeError::UnsupportedVersion(3))
+        );
+        let mut v0 = wire;
+        v0[4] = 0;
+        assert_eq!(
+            SignedSettings::from_bytes(&v0),
+            Err(DecodeError::UnsupportedVersion(0))
+        );
+    }
+
+    /// The bytes of the signed form: where the body ends, before the owner
+    /// signature, the flag and the Key app signature.
+    fn body_end(wire: &[u8]) -> usize {
+        wire.len() - (64 + 1 + 64)
+    }
+
+    #[test]
+    fn cr_193_a_currency_byte_that_is_not_canonical_is_refused() {
+        let (o, a, _) = roots();
+        let mut s = base();
+        s.currency = ShopCurrency::Eur;
+        let wire = signed_by_both(&s, &o, &a).to_bytes();
+        // The byte opens the extension block: it sits before the tips block
+        // (a flag, a count and three percents) that ends the body.
+        let at = body_end(&wire) - 5 - 1;
+        assert_eq!(wire.get(at), Some(&ShopCurrency::Eur.to_byte()));
+        // USD with the first tips would have been written as version 1.
+        for bad in [0u8, 1, 11, 255] {
+            let mut w = wire.clone();
+            w[at] = bad;
+            assert!(
+                matches!(
+                    SignedSettings::from_bytes(&w),
+                    Err(DecodeError::NonCanonical(_))
+                ),
+                "{bad}"
+            );
+        }
+        // The block left off, and bytes after the end.
+        let mut short = wire.clone();
+        short.drain(at..at + 6);
+        assert!(SignedSettings::from_bytes(&short).is_err());
+        let mut long = wire.clone();
+        long.push(0);
+        assert!(SignedSettings::from_bytes(&long).is_err());
+        assert!(SignedSettings::from_bytes(&wire[..wire.len() - 1]).is_err());
+    }
+
+    #[test]
+    fn cr_187_every_pairing_of_a_currency_and_tips_round_trips_in_its_own_version() {
+        let (o, a, roots) = roots();
+        let mut on = wire_settings();
+        on.tips_on = true;
+        let mut own = wire_settings();
+        own.tip_percents = vec![5, 12];
+        let mut none = wire_settings();
+        none.tip_percents = Vec::new();
+        let tips = [wire_settings(), on, own, none];
+        for currency in [ShopCurrency::Usd, ShopCurrency::Eur, ShopCurrency::Jpy] {
+            for (i, base) in tips.iter().enumerate() {
+                let mut s = base.clone();
+                s.currency = currency;
+                let signed = signed_by_both(&s, &o, &a);
+                let wire = signed.to_bytes();
+                // Only a dollar shop with tips off and the first percents is
+                // version 1.
+                let plain = currency == ShopCurrency::Usd && i == 0;
+                assert_eq!(
+                    wire.get(4),
+                    Some(&if plain { 1 } else { 2 }),
+                    "{currency:?} {i}"
+                );
+                let body = s.encode();
+                if plain {
+                    assert_eq!(body.last(), Some(&0), "the watch key's flag");
+                } else {
+                    // The block: the currency byte, then flag, count, percents.
+                    let n = s.tip_percents.len();
+                    let block = &body[body.len() - (3 + n)..];
+                    assert_eq!(block[0], currency.to_byte(), "{currency:?} {i}");
+                    assert_eq!(block[1], u8::from(s.tips_on));
+                    assert_eq!(usize::from(block[2]), n);
+                    assert_eq!(&block[3..], &s.tip_percents[..]);
+                }
+                let back = SignedSettings::from_bytes(&wire).unwrap();
+                assert_eq!(back, signed, "{currency:?} {i}");
+                assert_eq!(back.to_bytes(), wire);
+                assert!(back.verify_signatures(&roots).is_ok());
+            }
+        }
+        // Tips and the currency are both in what is signed.
+        let mut eur = wire_settings();
+        eur.currency = ShopCurrency::Eur;
+        let mut tips = wire_settings();
+        tips.tips_on = true;
+        assert_ne!(eur.hash(), tips.hash());
+        assert_ne!(eur.hash(), wire_settings().hash());
+        assert_ne!(tips.hash(), wire_settings().hash());
+    }
+
+    #[test]
+    fn cr_187_an_extension_block_that_adds_nothing_or_is_not_the_layout_is_refused() {
+        let (o, a, _) = roots();
+        // A dollar shop with tips off and the first percents in version 2.
+        let mut eur = wire_settings();
+        eur.currency = ShopCurrency::Eur;
+        let wire = signed_by_both(&eur, &o, &a).to_bytes();
+        let at = body_end(&wire) - 6;
+        let mut nothing = wire.clone();
+        nothing[at] = ShopCurrency::Usd.to_byte();
+        assert!(matches!(
+            SignedSettings::from_bytes(&nothing),
+            Err(DecodeError::NonCanonical(_))
+        ));
+        // The same block with tips on is a message of version 2 as it should.
+        let mut usd_tips = wire_settings();
+        usd_tips.tips_on = true;
+        let wire = signed_by_both(&usd_tips, &o, &a).to_bytes();
+        assert_eq!(wire.get(4), Some(&2));
+        assert_eq!(
+            wire.get(body_end(&wire) - 6),
+            Some(&ShopCurrency::Usd.to_byte())
+        );
+        assert!(SignedSettings::from_bytes(&wire).is_ok());
+        // The tips flag that is not 0 or 1, a fourth percent, a count that
+        // overruns the body.
+        let at = body_end(&wire) - 5;
+        let mut flag = wire.clone();
+        flag[at] = 2;
+        assert!(SignedSettings::from_bytes(&flag).is_err());
+        let mut many = wire.clone();
+        many[at + 1] = 4;
+        assert!(SignedSettings::from_bytes(&many).is_err());
+        let mut over = wire.clone();
+        over[at + 1] = 200;
+        assert!(SignedSettings::from_bytes(&over).is_err());
+        // A version 1 message that carries a block has bytes left over, and
+        // version 3 is not known.
+        let mut v1 = wire.clone();
+        v1[4] = 1;
+        assert!(SignedSettings::from_bytes(&v1).is_err());
+        let mut v3 = wire;
+        v3[4] = 3;
+        assert_eq!(
+            SignedSettings::from_bytes(&v3),
+            Err(DecodeError::UnsupportedVersion(3))
+        );
+    }
+
+    #[test]
+    fn cr_194_a_limit_in_bitcoin_standard_is_its_own_satoshis() {
+        let mut s = base();
+        s.currency = ShopCurrency::Sats;
+        assert!(s.validate().is_err(), "dollar limits are not satoshis");
+        let sat = |n| Limit {
+            sats: u64::from(n),
+            display_usd: n,
+        };
+        s.light_per_sale = sat(1_000);
+        s.light_budget = sat(5_000);
+        s.node_per_sale = sat(2_000);
+        s.node_budget = sat(10_000);
+        s.box_per_sale = sat(1_000);
+        s.box_budget = sat(5_000);
+        s.refund_cap = sat(0);
+        s.refund_daily_cap = sat(0);
+        s.cashier_override_daily_cap = sat(0);
+        s.manager_override_ceiling = sat(0);
+        assert_eq!(s.validate(), Ok(()));
+        s.light_budget.sats += 1;
+        assert!(
+            matches!(s.validate(), Err(SettingsError::Invalid(why)) if why.starts_with("CR-194"))
+        );
+    }
+
+    #[test]
+    fn cr_195_a_change_of_currency_loosens_whatever_else_it_does() {
+        let s = base();
+        let mut n = next(&s);
+        n.currency = ShopCurrency::Eur;
+        let fields = changed_fields(&s, &n);
+        assert_eq!(
+            fields,
+            vec![FieldChange {
+                field: "currency",
+                direction: Change::Loosening
+            }]
+        );
+        assert_eq!(classify_change(&s, &n), Change::Loosening);
+        // Even when every limit goes down.
+        let mut down = retyped(&s, ShopCurrency::Eur, 1);
+        down.light_per_sale = Limit {
+            sats: 1,
+            display_usd: 1,
+        };
+        assert_eq!(classify_change(&s, &down), Change::Loosening);
+    }
+
+    #[test]
+    fn cr_195_a_currency_change_needs_the_key_app() {
+        let (o, a, roots) = roots();
+        let s = base();
+        let n = retyped(&s, ShopCurrency::Eur, 1_100);
+        let owner_only = SignedSettings {
+            owner_sig: n.sign(&o),
+            approver_sig: None,
+            settings: n.clone(),
+        };
+        assert_eq!(
+            owner_only.verify(&roots, Some(&s)),
+            Err(SettingsError::ApproverRequired)
+        );
+        assert_eq!(
+            signed_by_both(&n, &o, &a).verify(&roots, Some(&s)),
+            Ok(Change::Loosening)
+        );
+    }
+
+    #[test]
+    fn cr_195_a_change_of_currency_that_carries_a_limit_is_refused() {
+        let (o, a, roots) = roots();
+        let s = base();
+        // Only the currency changes: every limit is carried over.
+        let mut n = next(&s);
+        n.currency = ShopCurrency::Eur;
+        assert_eq!(carried_limit_fields(&s, &n).len(), 10);
+        assert!(matches!(
+            signed_by_both(&n, &o, &a).verify(&roots, Some(&s)),
+            Err(SettingsError::Invalid(why)) if why.starts_with("CR-195")
+        ));
+        // One limit carried, the others given again.
+        let mut one = retyped(&s, ShopCurrency::Eur, 1_100);
+        one.refund_cap = s.refund_cap;
+        assert_eq!(carried_limit_fields(&s, &one), vec!["refund_cap"]);
+        assert!(signed_by_both(&one, &o, &a)
+            .verify(&roots, Some(&s))
+            .is_err());
+        // Every limit given again: taken. A limit turned off is not a carried
+        // value, and neither is one that is off in both.
+        let mut again = retyped(&s, ShopCurrency::Eur, 1_100);
+        again.refund_daily_cap = Limit {
+            sats: 0,
+            display_usd: 0,
+        };
+        assert!(carried_limit_fields(&s, &again).is_empty());
+        assert!(signed_by_both(&again, &o, &a)
+            .verify(&roots, Some(&s))
+            .is_ok());
+        let mut off_both = s.clone();
+        off_both.refund_cap = Limit {
+            sats: 0,
+            display_usd: 0,
+        };
+        let mut moved = retyped(&off_both, ShopCurrency::Eur, 1_100);
+        moved.refund_cap = off_both.refund_cap;
+        assert!(carried_limit_fields(&off_both, &moved).is_empty());
+        // The same currency never counts anything as carried.
+        assert!(carried_limit_fields(&s, &next(&s)).is_empty());
+    }
+
+    #[test]
+    fn cr_195_the_store_takes_a_currency_change_only_with_every_limit_again() {
+        let (o, a, roots) = roots();
+        let mut store = SettingsStore::new(roots);
+        let s1 = base();
+        store.apply(signed_by_both(&s1, &o, &a)).unwrap();
+        let mut carried = next(&s1);
+        carried.currency = ShopCurrency::Jpy;
+        assert!(store.apply(signed_by_both(&carried, &o, &a)).is_err());
+        assert_eq!(store.current(), Some(&s1));
+        let again = retyped(&s1, ShopCurrency::Jpy, 7);
+        assert_eq!(
+            store.apply(signed_by_both(&again, &o, &a)),
+            Ok(Change::Loosening)
+        );
+        assert_eq!(store.current().map(|s| s.currency), Some(ShopCurrency::Jpy));
     }
 }

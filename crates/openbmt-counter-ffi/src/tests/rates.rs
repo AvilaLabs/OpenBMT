@@ -171,6 +171,8 @@ fn nr_26_the_pairing_is_read_before_the_node_starts() {
     // The network tag of regtest, then the settings.
     assert_eq!(r.u8(), 3);
     assert_eq!((r.u32(), r.bool(), r.bool(), r.u64()), (1, false, false, 0));
+    // The shop prices in dollars (CR-193).
+    assert_eq!(r.string(), "USD");
     // The record holds no relay.
     assert_eq!(r.u8(), 0);
     r.done();
@@ -188,6 +190,7 @@ fn nr_26_the_pairing_is_read_before_the_node_starts() {
         (r.u32(), r.bool(), r.bool(), r.u64()),
         (1, true, false, 26_000)
     );
+    assert_eq!(r.string(), "USD");
     assert_eq!(r.u8(), 0);
     r.done();
 }

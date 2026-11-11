@@ -4,9 +4,11 @@
 //! that come out go to [`Owner::queue_settings`] when the owner agrees.
 
 use bitcoin::secp256k1::PublicKey;
+use openbmt_core::currency::ShopCurrency;
 use openbmt_core::identity::DeviceId;
 use openbmt_core::settings::{
-    changed_fields, classify_change, Change, FieldChange, Limit, Settings, LIGHTNING_NODE_BYTES,
+    carried_limit_fields, changed_fields, classify_change, Change, FieldChange, Limit, Settings,
+    LIGHTNING_NODE_BYTES,
 };
 
 use crate::error::{NodeKeyFault, Refusal};
@@ -35,11 +37,19 @@ pub enum WatchEdit {
 }
 
 /// A change of the settings: each field that is `None` (or empty) is kept
-/// as it is (AS-74). Money is in whole dollars, 0 meaning off.
+/// as it is (AS-74). Money is in whole units of the shop's currency, 0
+/// meaning off.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SettingsEdit {
-    /// Today's price of one bitcoin in whole dollars, for the limits this
-    /// edit changes. A changed limit without it is refused (AS-75).
+    /// The shop's currency (CR-193, CR-198): `None` keeps it. A currency
+    /// other than the one held changes it, and then every limit must be
+    /// given again in the new one.
+    pub currency: Option<ShopCurrency>,
+    /// Today's price of one bitcoin in whole units of the shop's currency
+    /// (the new one, when the edit changes it), for the limits this edit
+    /// changes. A changed limit without it is refused (AS-75). Bitcoin
+    /// Standard has no price and ignores it. (The field keeps the name it
+    /// had when dollars were all there was.)
     pub usd_per_btc: Option<u64>,
     /// Light check: largest instant sale.
     pub light_per_sale: Option<u32>,
@@ -105,8 +115,9 @@ pub struct SettingsPreview {
     /// The whole change as the queue sorts it: loosening needs the Key
     /// app's co-signature.
     pub change: Change,
-    /// The price of a bitcoin in dollars and the satoshis to a dollar that
-    /// the changed limits were made at, when any was (AS-75).
+    /// The price of a bitcoin in the shop's currency and the satoshis to a
+    /// unit of it (rounded, for the screen) that the changed limits were
+    /// made at, when any was (AS-75).
     pub price: Option<(u64, u64)>,
 }
 
@@ -115,14 +126,70 @@ pub const MIN_USD_PER_BTC: u64 = 1_000;
 /// Highest price of a bitcoin in dollars that is taken (AS-75).
 pub const MAX_USD_PER_BTC: u64 = 10_000_000;
 
+/// AS-75: the lowest and highest price of a bitcoin that is taken, in whole
+/// units of the currency: $1,000 to $10,000,000 for dollars, and for another
+/// currency the band of its rates (`docs/RATE-RULES.md`, RT-24) in whole
+/// units. `None` for Bitcoin Standard, which takes no price.
+pub fn price_band(currency: ShopCurrency) -> Option<(u64, u64)> {
+    match currency {
+        ShopCurrency::Usd => Some((MIN_USD_PER_BTC, MAX_USD_PER_BTC)),
+        other => other.band_whole(),
+    }
+}
+
 /// AS-75: satoshis to a dollar at a price of `usd_per_btc` dollars for a
 /// bitcoin: 100,000,000 over the price, rounded to the nearest whole number
 /// (a half rounds up). A price outside $1,000 to $10,000,000 is refused.
 pub fn sats_per_usd_at(usd_per_btc: u64) -> Result<u64, Refusal> {
     if !(MIN_USD_PER_BTC..=MAX_USD_PER_BTC).contains(&usd_per_btc) {
-        return Err(Refusal::PriceOutOfRange);
+        return Err(Refusal::PriceOutOfRange(ShopCurrency::Usd));
     }
     Ok((200_000_000 + usd_per_btc) / (2 * usd_per_btc))
+}
+
+/// AS-75: the satoshis to one unit of `currency` at `price` units for a
+/// bitcoin, rounded to the nearest whole number, for the screen. A currency
+/// whose unit is worth under half a satoshi shows 0.
+fn sats_per_unit_at(currency: ShopCurrency, price: u64) -> Result<u64, Refusal> {
+    match currency {
+        ShopCurrency::Usd => sats_per_usd_at(price),
+        ShopCurrency::Sats => Ok(1),
+        other => {
+            let (low, high) = price_band(other).unwrap_or((0, 0));
+            if !(low..=high).contains(&price) {
+                return Err(Refusal::PriceOutOfRange(other));
+            }
+            Ok((200_000_000 + price) / (2 * price))
+        }
+    }
+}
+
+/// How the satoshis of a limit are worked out in an edit (AS-75).
+#[derive(Clone, Copy)]
+enum Pricing {
+    /// Bitcoin Standard: a unit is a satoshi.
+    Sats,
+    /// Dollars: the whole dollars times the satoshis to a dollar, as it has
+    /// always been.
+    PerUnit(u64),
+    /// Another currency: the units over the price, in 128-bit integers and
+    /// rounded to the nearest satoshi (a half rounds up), so that a currency
+    /// whose unit is a fraction of a satoshi is not rounded to nothing.
+    Price(u64),
+}
+
+impl Pricing {
+    fn sats(self, units: u32) -> Option<u64> {
+        match self {
+            Self::Sats => Some(u64::from(units)),
+            Self::PerUnit(rate) => u64::from(units).checked_mul(rate),
+            Self::Price(price) => {
+                let sats =
+                    (u128::from(units) * 100_000_000 + u128::from(price) / 2) / u128::from(price);
+                u64::try_from(sats).ok()
+            }
+        }
+    }
 }
 
 fn hex_val(c: char) -> Option<u8> {
@@ -185,28 +252,32 @@ pub fn parse_lightning_node(text: &str) -> Result<[u8; LIGHTNING_NODE_BYTES], Re
     Ok(bytes)
 }
 
-/// AS-74, AS-75: the limit after an edit of `usd` dollars. The same dollars
-/// keep the limit as it is, satoshis too; 0 turns it off; any other amount
-/// is made at `rate`, satoshis to a dollar from today's price.
+/// AS-74, AS-75: the limit after an edit of `units` whole units of the
+/// shop's currency. The same units keep the limit as it is, satoshis too; 0
+/// turns it off; any other amount is worked out by `pricing` from today's
+/// price. A change of currency (`changing`) keeps nothing: the old limit is
+/// not compared with, and the edit's units are priced afresh.
 fn edited_limit(
     old: &Limit,
-    usd: Option<u32>,
-    rate: Option<u64>,
+    units: Option<u32>,
+    pricing: Option<Pricing>,
+    currency: ShopCurrency,
+    changing: bool,
     used: &mut bool,
 ) -> Result<Limit, Refusal> {
-    match usd {
+    match units {
         None => Ok(*old),
-        Some(u) if u == old.display_usd => Ok(*old),
+        Some(u) if u == old.display_usd && !changing => Ok(*old),
         Some(0) => Ok(Limit {
             sats: 0,
             display_usd: 0,
         }),
         Some(u) => {
-            let rate = rate.ok_or(Refusal::EditNeedsRate)?;
-            let sats = u64::from(u).checked_mul(rate).ok_or_else(|| {
+            let pricing = pricing.ok_or(Refusal::EditNeedsRate(currency))?;
+            let sats = pricing.sats(u).ok_or_else(|| {
                 Refusal::SettingsInvalid("a limit is more satoshis than a number can hold".into())
             })?;
-            *used = true;
+            *used = !matches!(pricing, Pricing::Sats) || *used;
             Ok(Limit {
                 sats,
                 display_usd: u,
@@ -242,36 +313,109 @@ impl Owner {
             .state
             .latest_settings()
             .ok_or(Refusal::NoSettingsToChange)?;
-        let rate = match edit.usd_per_btc {
-            Some(price) => Some(sats_per_usd_at(price)?),
-            None => None,
+        let currency = edit.currency.unwrap_or(base.currency);
+        let changing = currency != base.currency;
+        // AS-75: the price is in the currency the limits will be in. Bitcoin
+        // Standard has none; a price given for it is not read.
+        let (pricing, rate) = match (currency, edit.usd_per_btc) {
+            (ShopCurrency::Sats, _) => (Some(Pricing::Sats), Some(1)),
+            (_, None) => (None, None),
+            (ShopCurrency::Usd, Some(price)) => {
+                let rate = sats_per_usd_at(price)?;
+                (Some(Pricing::PerUnit(rate)), Some(rate))
+            }
+            (c, Some(price)) => (
+                Some(Pricing::Price(price)),
+                Some(sats_per_unit_at(c, price)?),
+            ),
         };
         let mut used = false;
         let mut s = base.clone();
+        s.currency = currency;
         s.version = self
             .state
             .highest_signed_version()
             .checked_add(1)
             .ok_or_else(|| Refusal::SettingsInvalid("no version is left".to_string()))?;
         let u = &mut used;
-        s.light_per_sale = edited_limit(&base.light_per_sale, edit.light_per_sale, rate, u)?;
-        s.light_budget = edited_limit(&base.light_budget, edit.light_budget, rate, u)?;
-        s.node_per_sale = edited_limit(&base.node_per_sale, edit.node_per_sale, rate, u)?;
-        s.node_budget = edited_limit(&base.node_budget, edit.node_budget, rate, u)?;
-        s.box_per_sale = edited_limit(&base.box_per_sale, edit.box_per_sale, rate, u)?;
-        s.box_budget = edited_limit(&base.box_budget, edit.box_budget, rate, u)?;
-        s.refund_cap = edited_limit(&base.refund_cap, edit.refund_cap, rate, u)?;
-        s.refund_daily_cap = edited_limit(&base.refund_daily_cap, edit.refund_daily_cap, rate, u)?;
+        s.light_per_sale = edited_limit(
+            &base.light_per_sale,
+            edit.light_per_sale,
+            pricing,
+            currency,
+            changing,
+            u,
+        )?;
+        s.light_budget = edited_limit(
+            &base.light_budget,
+            edit.light_budget,
+            pricing,
+            currency,
+            changing,
+            u,
+        )?;
+        s.node_per_sale = edited_limit(
+            &base.node_per_sale,
+            edit.node_per_sale,
+            pricing,
+            currency,
+            changing,
+            u,
+        )?;
+        s.node_budget = edited_limit(
+            &base.node_budget,
+            edit.node_budget,
+            pricing,
+            currency,
+            changing,
+            u,
+        )?;
+        s.box_per_sale = edited_limit(
+            &base.box_per_sale,
+            edit.box_per_sale,
+            pricing,
+            currency,
+            changing,
+            u,
+        )?;
+        s.box_budget = edited_limit(
+            &base.box_budget,
+            edit.box_budget,
+            pricing,
+            currency,
+            changing,
+            u,
+        )?;
+        s.refund_cap = edited_limit(
+            &base.refund_cap,
+            edit.refund_cap,
+            pricing,
+            currency,
+            changing,
+            u,
+        )?;
+        s.refund_daily_cap = edited_limit(
+            &base.refund_daily_cap,
+            edit.refund_daily_cap,
+            pricing,
+            currency,
+            changing,
+            u,
+        )?;
         s.cashier_override_daily_cap = edited_limit(
             &base.cashier_override_daily_cap,
             edit.cashier_override_daily_cap,
-            rate,
+            pricing,
+            currency,
+            changing,
             u,
         )?;
         s.manager_override_ceiling = edited_limit(
             &base.manager_override_ceiling,
             edit.manager_override_ceiling,
-            rate,
+            pricing,
+            currency,
+            changing,
             u,
         )?;
         if let Some(v) = edit.underpayment_tolerance_bps {
@@ -333,6 +477,14 @@ impl Owner {
         }
         s.validate()
             .map_err(|e| Refusal::SettingsInvalid(e.to_string()))?;
+        let carried = carried_limit_fields(base, &s);
+        if !carried.is_empty() {
+            return Err(Refusal::SettingsInvalid(format!(
+                "CR-195: a change of currency gives every limit again, and these keep the old \
+                 currency's value: {}",
+                carried.join(", ")
+            )));
+        }
         let known = self.known_settings();
         let reference = known.unwrap_or(base).clone();
         let change = match known {

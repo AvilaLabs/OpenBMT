@@ -161,7 +161,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "RateSource(string(), string(), string(), string())",
         "Sample(string(), u64(), u64())",
         "Rate(u64(), string(), u64())",
-        "ShopSettings(u32(), bool(), bool(), u64())",
+        "ShopSettings(u32(), bool(), bool(), u64(), string())",
         "words(), bool(), option { u64() }, bool(), u64(), u64(), option { u64() },",
         "u32(), bool(), option { words() },",
         "LinkStep(linkView(), strings())",
@@ -193,7 +193,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "SampleView: record: source: string, fetched_at: u64, minor_per_btc: u64",
         "RateCombineArgs: record: samples: list<SampleView>, now: u64",
         "RateView: record: rate: u64, source_label: string, source_fetched_at: u64",
-        "SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64",
+        "SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, currency: string",
     ] {
         assert!(protocol.contains(line), "{line}");
     }

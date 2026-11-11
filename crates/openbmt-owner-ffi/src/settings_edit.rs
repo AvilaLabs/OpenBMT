@@ -6,12 +6,13 @@
 //! blocks, minutes, on and off, and the node's key in full. The values are
 //! written and read like those of [`views`](crate::views).
 
+use openbmt_core::currency::{grouped, ShopCurrency};
 use openbmt_core::settings::{Change, Limit, Settings, SignedSettings, LIGHTNING_NODE_BYTES};
 use openbmt_owner::{LightningEdit, SettingsEdit, SettingsPreview};
 
 use crate::codec::{wire_record, wire_record_get, wire_unit_enum};
 use crate::error::{refused_by, AppError};
-use crate::views::CounterShareView;
+use crate::views::{CounterShareView, ShopCurrencyView};
 
 /// What an edit does to the Lightning node (AS-76).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,13 +31,76 @@ wire_unit_enum!(LightningAction {
     Set = 2
 });
 
+/// What an edit does to the shop's currency (CR-198): keep it, or name one.
+/// The tags of the choices are those of [`ShopCurrencyView`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurrencyAction {
+    /// Keep the currency as it is.
+    Keep,
+    /// US dollar.
+    Usd,
+    /// Euro.
+    Eur,
+    /// Pound sterling.
+    Gbp,
+    /// Japanese yen.
+    Jpy,
+    /// Australian dollar.
+    Aud,
+    /// Indian rupee.
+    Inr,
+    /// South Korean won.
+    Krw,
+    /// Indonesian rupiah.
+    Idr,
+    /// Singapore dollar.
+    Sgd,
+    /// Bitcoin Standard: sats, no price.
+    Sats,
+}
+
+wire_unit_enum!(CurrencyAction {
+    Keep = 0,
+    Usd = 1,
+    Eur = 2,
+    Gbp = 3,
+    Jpy = 4,
+    Aud = 5,
+    Inr = 6,
+    Krw = 7,
+    Idr = 8,
+    Sgd = 9,
+    Sats = 10
+});
+
+impl CurrencyAction {
+    /// The currency named, `None` for keep.
+    pub(crate) fn named(self) -> Option<ShopCurrency> {
+        match self {
+            Self::Keep => None,
+            Self::Usd => Some(ShopCurrency::Usd),
+            Self::Eur => Some(ShopCurrency::Eur),
+            Self::Gbp => Some(ShopCurrency::Gbp),
+            Self::Jpy => Some(ShopCurrency::Jpy),
+            Self::Aud => Some(ShopCurrency::Aud),
+            Self::Inr => Some(ShopCurrency::Inr),
+            Self::Krw => Some(ShopCurrency::Krw),
+            Self::Idr => Some(ShopCurrency::Idr),
+            Self::Sgd => Some(ShopCurrency::Sgd),
+            Self::Sats => Some(ShopCurrency::Sats),
+        }
+    }
+}
+
 /// The arguments of `settings_preview`: every field optional, an absent
-/// field kept (AS-74). Dollars are whole dollars, 0 is off; the tolerance is
-/// in basis points and the heartbeat in seconds.
+/// field kept (AS-74). Money is in whole units of the shop's currency (the
+/// new one, when `currency` names it), 0 is off; the tolerance is in basis
+/// points and the heartbeat in seconds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsEditArgs {
-    /// Today's price of one bitcoin in whole dollars, for the limits
-    /// changed; a changed limit without it is refused (AS-75).
+    /// Today's price of one bitcoin in whole units of the shop's currency,
+    /// for the limits changed; a changed limit without it is refused
+    /// (AS-75). Bitcoin Standard takes none.
     pub usd_per_btc: Option<u64>,
     /// Light check: largest instant sale.
     pub light_per_sale: Option<u32>,
@@ -83,6 +147,9 @@ pub struct SettingsEditArgs {
     pub lightning: LightningAction,
     /// The node's key or address, read only when `lightning` is `Set`.
     pub lightning_text: String,
+    /// The shop's currency (CR-198): `Keep`, or the one to change to, which
+    /// needs every limit again.
+    pub currency: CurrencyAction,
 }
 
 wire_record_get!(SettingsEditArgs {
@@ -108,7 +175,8 @@ wire_record_get!(SettingsEditArgs {
     tip_percents,
     shares,
     lightning,
-    lightning_text
+    lightning_text,
+    currency
 });
 
 wire_record!(SettingsEditArgs {
@@ -134,7 +202,8 @@ wire_record!(SettingsEditArgs {
     tip_percents,
     shares,
     lightning,
-    lightning_text
+    lightning_text,
+    currency
 });
 
 /// One changed field, in the words of a screen (AS-77).
@@ -176,13 +245,16 @@ pub struct SettingsPreviewView {
     pub nothing_changed: bool,
     /// What the counters' shares add up to after the change, in basis points.
     pub shares_total_bps: u32,
-    /// The price of a bitcoin in dollars the changed limits were made at,
-    /// when any limit was changed (AS-75).
+    /// The price of a bitcoin in the shop's currency the changed limits were
+    /// made at, when any limit was changed (AS-75).
     pub usd_per_btc: Option<u64>,
-    /// The satoshis to a dollar that price gives, which the limits use.
+    /// The satoshis to a unit of that currency that price gives, rounded
+    /// (0 when a unit is worth under half a satoshi).
     pub sats_per_usd: Option<u64>,
     /// The settings, as the bytes `queue_settings` takes.
     pub settings: Vec<u8>,
+    /// The shop's currency after the change.
+    pub currency: ShopCurrencyView,
 }
 
 wire_record!(SettingsPreviewView {
@@ -193,7 +265,8 @@ wire_record!(SettingsPreviewView {
     shares_total_bps,
     usd_per_btc,
     sats_per_usd,
-    settings
+    settings,
+    currency
 });
 
 // ---- the edit -----------------------------------------------------------------------
@@ -216,6 +289,7 @@ pub(crate) fn to_edit(
         LightningAction::Set => Some(LightningEdit::Set(a.lightning_text)),
     };
     Ok(SettingsEdit {
+        currency: a.currency.named(),
         usd_per_btc: a.usd_per_btc,
         light_per_sale: a.light_per_sale,
         light_budget: a.light_budget,
@@ -244,36 +318,25 @@ pub(crate) fn to_edit(
 
 // ---- the words of a value -------------------------------------------------------------
 
-/// A number with a comma between thousands.
-fn grouped(n: u64) -> String {
-    let digits = n.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
-}
-
 /// A limit changed at a price (AS-75): `$100 (101,500 sats at $98,500 a
-/// bitcoin)`, the dollars and what they come to in satoshis.
-fn limit_at_price(usd: u32, sats: u64, price: u64) -> String {
+/// bitcoin)`, the units and what they come to in satoshis. In another
+/// currency the name stands where the dollar sign was: `100 euros (101,500
+/// sats at 98,500 euros a bitcoin)`.
+fn limit_at_price(currency: ShopCurrency, units: u32, sats: u64, price: u64) -> String {
     format!(
-        "{} ({} sats at ${} a bitcoin)",
-        dollars(usd),
+        "{} ({} sats at {} a bitcoin)",
+        whole(currency, units),
         grouped(sats),
-        grouped(price)
+        currency.whole_text(price)
     )
 }
 
-/// Whole dollars: `$25`, `$1,250`, or `off` for 0.
-pub(crate) fn dollars(usd: u32) -> String {
-    if usd == 0 {
+/// Whole units of the currency: `$25`, `$1,250`, `25 euros`, or `off` for 0.
+pub(crate) fn whole(currency: ShopCurrency, units: u32) -> String {
+    if units == 0 {
         "off".to_string()
     } else {
-        format!("${}", grouped(u64::from(usd)))
+        currency.whole_text(u64::from(units))
     }
 }
 
@@ -353,18 +416,28 @@ fn field_words(
     price: Option<u64>,
 ) -> Option<(&'static str, String, String)> {
     // A limit that is on and changed was made at the price: say what it is
-    // in satoshis; one that is off, or the same, is just its dollars.
+    // in satoshis; one that is off, or the same, is just its units. After a
+    // change of currency every limit was made again, and so is said at the
+    // price whatever its number.
     let usd = |f: fn(&Settings) -> &Limit| {
         let (before, after) = (f(old), f(new));
+        let changed = after.display_usd != before.display_usd || old.currency != new.currency;
         let new_words = match price {
-            Some(p) if after.display_usd != 0 && after.display_usd != before.display_usd => {
-                limit_at_price(after.display_usd, after.sats, p)
+            Some(p) if after.display_usd != 0 && changed => {
+                limit_at_price(new.currency, after.display_usd, after.sats, p)
             }
-            _ => dollars(after.display_usd),
+            _ => whole(new.currency, after.display_usd),
         };
-        (dollars(before.display_usd), new_words)
+        (whole(old.currency, before.display_usd), new_words)
     };
     let (label, (o, n)): (&'static str, (String, String)) = match name {
+        "currency" => (
+            "Currency",
+            (
+                old.currency.label().to_string(),
+                new.currency.label().to_string(),
+            ),
+        ),
         "light_per_sale" => (
             "Largest instant sale, light check",
             usd(|s| &s.light_per_sale),
@@ -512,5 +585,6 @@ pub(crate) fn preview_view(p: &SettingsPreview) -> SettingsPreviewView {
         usd_per_btc: p.price.map(|(price, _)| price),
         sats_per_usd: p.price.map(|(_, rate)| rate),
         settings: unsigned.to_bytes(),
+        currency: ShopCurrencyView::of(p.settings.currency),
     }
 }

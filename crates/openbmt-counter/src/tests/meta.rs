@@ -6,7 +6,8 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 20] = [
+const TEST_SOURCES: [&str; 21] = [
+    include_str!("currency.rs"),
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
     include_str!("lightning.rs"),
@@ -32,7 +33,7 @@ const TEST_SOURCES: [&str; 20] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 58] = [
+const NOT_HERE: [(&str, &str); 63] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -250,6 +251,30 @@ const NOT_HERE: [(&str, &str); 58] = [
          (`cr_185_*` in `settings.rs`)",
     ),
     (
+        "CR-193",
+        "the currency is `openbmt_core::settings`'s field; tested in `openbmt-core` \
+         (`cr_193_*` in `settings.rs`)",
+    ),
+    (
+        "CR-194",
+        "the check is `Settings::validate`'s; tested in `openbmt-core` (`cr_194_*` in \
+         `settings.rs`)",
+    ),
+    (
+        "CR-195",
+        "the sorting and the carried-limit check are `openbmt_core::settings`'s; tested in \
+         `openbmt-core` (`cr_195_*` in `settings.rs`)",
+    ),
+    (
+        "CR-198",
+        "the edit is the owner library's; tested in `openbmt-owner` (`tests/edit.rs`) and \
+         `openbmt-owner-ffi`",
+    ),
+    (
+        "CR-199",
+        "the line is the Key app's; tested in `openbmt-approver` (`tests/lines.rs`)",
+    ),
+    (
         "CR-166",
         "the device list message is dropped by the link; tested in `openbmt-counter-node` \
          (`tests/link.rs`)",
@@ -341,9 +366,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_one_hundred_and_forty_three_rules() {
+fn the_rules_file_defines_one_hundred_and_fifty_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 143);
+    assert_eq!(ids.len(), 150);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -376,6 +401,8 @@ fn the_rules_file_defines_one_hundred_and_forty_three_rules() {
             && ids.contains("CR-120")
             && ids.contains("CR-187")
             && ids.contains("CR-192")
+            && ids.contains("CR-193")
+            && ids.contains("CR-199")
     );
 }
 

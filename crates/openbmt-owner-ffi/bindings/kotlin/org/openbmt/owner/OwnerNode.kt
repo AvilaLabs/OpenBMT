@@ -151,6 +151,27 @@ private const val TAG_CASH_AMOUNT_VIEW_ALL = 1
 private const val TAG_LIGHTNING_ACTION_KEEP = 0
 private const val TAG_LIGHTNING_ACTION_REMOVE = 1
 private const val TAG_LIGHTNING_ACTION_SET = 2
+private const val TAG_SHOP_CURRENCY_VIEW_USD = 1
+private const val TAG_SHOP_CURRENCY_VIEW_EUR = 2
+private const val TAG_SHOP_CURRENCY_VIEW_GBP = 3
+private const val TAG_SHOP_CURRENCY_VIEW_JPY = 4
+private const val TAG_SHOP_CURRENCY_VIEW_AUD = 5
+private const val TAG_SHOP_CURRENCY_VIEW_INR = 6
+private const val TAG_SHOP_CURRENCY_VIEW_KRW = 7
+private const val TAG_SHOP_CURRENCY_VIEW_IDR = 8
+private const val TAG_SHOP_CURRENCY_VIEW_SGD = 9
+private const val TAG_SHOP_CURRENCY_VIEW_SATS = 10
+private const val TAG_CURRENCY_ACTION_KEEP = 0
+private const val TAG_CURRENCY_ACTION_USD = 1
+private const val TAG_CURRENCY_ACTION_EUR = 2
+private const val TAG_CURRENCY_ACTION_GBP = 3
+private const val TAG_CURRENCY_ACTION_JPY = 4
+private const val TAG_CURRENCY_ACTION_AUD = 5
+private const val TAG_CURRENCY_ACTION_INR = 6
+private const val TAG_CURRENCY_ACTION_KRW = 7
+private const val TAG_CURRENCY_ACTION_IDR = 8
+private const val TAG_CURRENCY_ACTION_SGD = 9
+private const val TAG_CURRENCY_ACTION_SATS = 10
 private const val TAG_ALERT_KIND_MISSED_CHECK_IN = 0
 private const val TAG_ALERT_KIND_DIVERGED = 1
 private const val TAG_ALERT_KIND_BATCH_UNDELIVERED = 2
@@ -499,7 +520,25 @@ class OldAddresses(
 
 class DeepRequest(val asked: Boolean, val words: Words)
 
-/** One limit of the shop's settings: what is enforced, in satoshis, and the whole dollars it was shown as. */
+/**
+ * What the shop prices in (CR-193): one of a fixed list, or Bitcoin Standard, which prices in satoshis and uses no
+ * price source. [label] is the choice as the owner reads it, [plural] its name where a sentence once said "dollars",
+ * and [code] the three letters a sale records ("SAT" for Bitcoin Standard).
+ */
+enum class ShopCurrency(val code: String, val label: String, val plural: String) {
+    Usd("USD", "US dollar (USD)", "dollars"),
+    Eur("EUR", "Euro (EUR)", "euros"),
+    Gbp("GBP", "Pound sterling (GBP)", "pounds"),
+    Jpy("JPY", "Japanese yen (JPY)", "yen"),
+    Aud("AUD", "Australian dollar (AUD)", "Australian dollars"),
+    Inr("INR", "Indian rupee (INR)", "rupees"),
+    Krw("KRW", "South Korean won (KRW)", "won"),
+    Idr("IDR", "Indonesian rupiah (IDR)", "rupiah"),
+    Sgd("SGD", "Singapore dollar (SGD)", "Singapore dollars"),
+    Sats("SAT", "Bitcoin Standard (sats)", "sats"),
+}
+
+/** One limit of the shop's settings: what is enforced, in satoshis, and the whole units of the shop's currency it was shown as. */
 class Limit(val sats: Long, val displayUsd: Long)
 
 /** A counter's share of every budget, in basis points (10,000 is the whole budget). */
@@ -534,6 +573,8 @@ class SettingsHeld(
     val boxes: List<ByteArray>,
     /** The 33-byte key of the shop's own Lightning node, when the settings name one. */
     val lightningNode: ByteArray?,
+    /** What the shop prices in; every limit above is in whole units of it. */
+    val currency: ShopCurrency = ShopCurrency.Usd,
 )
 
 /** What an edit does to the Lightning node. */
@@ -541,11 +582,13 @@ enum class LightningAction { Keep, Remove, Set }
 
 /**
  * A change of the settings for [OwnerNode.previewSettings]: a null field (an empty [shares]) is kept.
- * Dollars are whole dollars and 0 is off; [underpaymentToleranceBps] is in basis points and
- * [heartbeatMaxAgeSecs] in seconds. [lightningText] is read only when [lightning] is Set.
+ * Money is in whole units of the shop's currency (the new one, when [currency] names it) and 0 is off;
+ * [underpaymentToleranceBps] is in basis points and [heartbeatMaxAgeSecs] in seconds. [lightningText] is read only
+ * when [lightning] is Set. A [currency] other than the shop's needs every limit given again; Bitcoin Standard takes
+ * no price.
  */
 data class SettingsEditArgs(
-    /** Today's price of one bitcoin in whole dollars; a changed limit needs it. */
+    /** Today's price of one bitcoin in whole units of the shop's currency; a changed limit needs it. */
     val usdPerBtc: Long? = null,
     val lightPerSale: Long? = null,
     val lightBudget: Long? = null,
@@ -571,6 +614,8 @@ data class SettingsEditArgs(
     val shares: List<CounterShare> = emptyList(),
     val lightning: LightningAction = LightningAction.Keep,
     val lightningText: String = "",
+    /** The currency to change to; null keeps it. */
+    val currency: ShopCurrency? = null,
 )
 
 /** One changed field in the words of a screen; [counter] is set for a counter's share. */
@@ -590,11 +635,13 @@ class SettingsPreview(
     val needsKeyApp: Boolean,
     val nothingChanged: Boolean,
     val sharesTotalBps: Long,
-    /** The price of a bitcoin in dollars the changed limits were made at, when any was. */
+    /** The price of a bitcoin in the shop's currency the changed limits were made at, when any was. */
     val usdPerBtc: Long?,
-    /** The satoshis to a dollar that price gives. */
+    /** The satoshis to a unit of that currency that price gives, rounded. */
     val satsPerUsd: Long?,
     val settings: ByteArray,
+    /** The shop's currency after the change. */
+    val currency: ShopCurrency = ShopCurrency.Usd,
 )
 
 enum class OutboxKind { Transaction, Batch, Settings, Pairing, BoxWelcome }
@@ -1299,6 +1346,39 @@ private fun Reader.outboxKind(): OutboxKind =
 
 private fun Reader.limit(): Limit = Limit(u64(), u32())
 
+private fun Reader.shopCurrency(): ShopCurrency =
+    when (u8()) {
+        TAG_SHOP_CURRENCY_VIEW_USD -> ShopCurrency.Usd
+        TAG_SHOP_CURRENCY_VIEW_EUR -> ShopCurrency.Eur
+        TAG_SHOP_CURRENCY_VIEW_GBP -> ShopCurrency.Gbp
+        TAG_SHOP_CURRENCY_VIEW_JPY -> ShopCurrency.Jpy
+        TAG_SHOP_CURRENCY_VIEW_AUD -> ShopCurrency.Aud
+        TAG_SHOP_CURRENCY_VIEW_INR -> ShopCurrency.Inr
+        TAG_SHOP_CURRENCY_VIEW_KRW -> ShopCurrency.Krw
+        TAG_SHOP_CURRENCY_VIEW_IDR -> ShopCurrency.Idr
+        TAG_SHOP_CURRENCY_VIEW_SGD -> ShopCurrency.Sgd
+        TAG_SHOP_CURRENCY_VIEW_SATS -> ShopCurrency.Sats
+        else -> tag("ShopCurrencyView")
+    }
+
+/** The tag of a choice; the same numbers as [TAG_SHOP_CURRENCY_VIEW_USD] and the rest, 0 for "keep". */
+private fun Writer.currencyAction(v: ShopCurrency?): Writer =
+    u8(
+        when (v) {
+            null -> TAG_CURRENCY_ACTION_KEEP
+            ShopCurrency.Usd -> TAG_CURRENCY_ACTION_USD
+            ShopCurrency.Eur -> TAG_CURRENCY_ACTION_EUR
+            ShopCurrency.Gbp -> TAG_CURRENCY_ACTION_GBP
+            ShopCurrency.Jpy -> TAG_CURRENCY_ACTION_JPY
+            ShopCurrency.Aud -> TAG_CURRENCY_ACTION_AUD
+            ShopCurrency.Inr -> TAG_CURRENCY_ACTION_INR
+            ShopCurrency.Krw -> TAG_CURRENCY_ACTION_KRW
+            ShopCurrency.Idr -> TAG_CURRENCY_ACTION_IDR
+            ShopCurrency.Sgd -> TAG_CURRENCY_ACTION_SGD
+            ShopCurrency.Sats -> TAG_CURRENCY_ACTION_SATS
+        },
+    )
+
 internal fun Reader.counterScan(): CounterScan =
     CounterScan(
         u32(), bytes(), string(), strings(), bool(), u32(),
@@ -1328,7 +1408,7 @@ internal fun Reader.settingsHeld(): SettingsHeld =
         limit(), limit(), limit(), limit(), u8(), u8(), u32(), bool(), bool(), u64(),
         bool(), bytes().map { it.toInt() and 0xff },
         list { bytes() }, list { CounterShare(bytes(), u32()) }, list { bytes() },
-        option { bytes() },
+        option { bytes() }, shopCurrency(),
     )
 
 private fun Reader.settingChange(): SettingChange =
@@ -1337,6 +1417,7 @@ private fun Reader.settingChange(): SettingChange =
 internal fun Reader.settingsPreview(): SettingsPreview =
     SettingsPreview(
         u32(), list { settingChange() }, bool(), bool(), u32(), option { u64() }, option { u64() }, bytes(),
+        shopCurrency(),
     )
 
 private fun Writer.lightningAction(v: LightningAction): Writer =
@@ -1370,7 +1451,7 @@ internal fun Writer.settingsEdit(a: SettingsEditArgs): Writer {
     option(a.tipsOn) { bool(it) }
     option(a.tipPercents) { p -> bytes(ByteArray(p.size) { i -> p[i].toByte() }) }
     list(a.shares) { bytes(it.counter).u32(it.bps) }
-    return lightningAction(a.lightning).string(a.lightningText)
+    return lightningAction(a.lightning).string(a.lightningText).currencyAction(a.currency)
 }
 
 internal fun Reader.outboxRow(): OutboxRow =

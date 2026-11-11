@@ -703,3 +703,67 @@ fn as_29_a_health_check_can_always_be_approved() {
     assert_eq!(h.nonce, [5; 32]);
     assert!(lines[0].can_approve && lines[0].failure.is_none());
 }
+
+#[test]
+fn cr_199_the_currency_is_a_line_and_the_limits_are_in_its_name() {
+    use openbmt_core::currency::ShopCurrency;
+    let mut a = approver_with_key2();
+    cosign_settings(&mut a, 200, 2, &[1], &Store::default());
+    let mut next = settings_with(3, &[1]);
+    next.currency = ShopCurrency::Eur;
+    // Every limit is given again in euros.
+    next.light_per_sale = Limit::from_usd(10, 1_100);
+    next.light_budget = Limit::from_usd(51, 1_100);
+    next.node_per_sale = Limit::from_usd(26, 1_100);
+    next.node_budget = Limit::from_usd(101, 1_100);
+    next.box_per_sale = Limit::from_usd(11, 1_100);
+    next.box_budget = Limit::from_usd(52, 1_100);
+    next.refund_cap = Limit::from_usd(101, 1_100);
+    next.refund_daily_cap = Limit::from_usd(301, 1_100);
+    next.cashier_override_daily_cap = Limit::from_usd(21, 1_100);
+    next.manager_override_ceiling = Limit::from_usd(102, 1_100);
+    let lines = lines_of(&mut a, vec![settings_item(next)]);
+    let Detail::Settings(s) = &lines[0].detail else {
+        panic!()
+    };
+    let currency = s.changes.iter().find(|c| c.field == "Currency").unwrap();
+    assert_eq!(currency.old.as_deref(), Some("US dollar (USD)"));
+    assert_eq!(currency.new, "Euro (EUR)");
+    assert_eq!(currency.direction, Change::Loosening);
+    assert_eq!(s.overall, Some(Change::Loosening));
+    let light = s
+        .changes
+        .iter()
+        .find(|c| c.field == "light_per_sale")
+        .unwrap();
+    assert_eq!(
+        light.old.as_deref(),
+        Some("10000 sats ($10 from the owner phone)")
+    );
+    assert_eq!(light.new, "11000 sats (10 euros from the owner phone)");
+}
+
+#[test]
+fn cr_199_bitcoin_standard_is_shown_with_its_limits_in_sats() {
+    use openbmt_core::currency::ShopCurrency;
+    let mut a = approver_with_key2();
+    cosign_settings(&mut a, 200, 2, &[1], &Store::default());
+    let mut next = settings_with(3, &[1]);
+    next.currency = ShopCurrency::Sats;
+    next.light_per_sale = Limit {
+        sats: 5_000,
+        display_usd: 5_000,
+    };
+    let lines = lines_of(&mut a, vec![settings_item(next)]);
+    let Detail::Settings(s) = &lines[0].detail else {
+        panic!()
+    };
+    let currency = s.changes.iter().find(|c| c.field == "Currency").unwrap();
+    assert_eq!(currency.new, "Bitcoin Standard (sats)");
+    let light = s
+        .changes
+        .iter()
+        .find(|c| c.field == "light_per_sale")
+        .unwrap();
+    assert_eq!(light.new, "5000 sats (5,000 sats from the owner phone)");
+}

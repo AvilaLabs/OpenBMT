@@ -100,8 +100,8 @@ use crate::views::{
     MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind,
     OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView,
     RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView,
-    SettingsQueuedView, SkippedView, StageKind, StageView, StartConfig, StatusView, TakenView,
-    ViewKind, WordsView,
+    SettingsQueuedView, ShopCurrencyView, SkippedView, StageKind, StageView, StartConfig,
+    StatusView, TakenView, ViewKind, WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -2171,6 +2171,7 @@ impl Entry {
                     .collect(),
                 boxes: s.boxes.iter().map(|d| d.to_bytes().to_vec()).collect(),
                 lightning_node: s.lightning_node.map(|k| k.to_vec()),
+                currency: ShopCurrencyView::of(s.currency),
             }))
         })
     }

@@ -1,6 +1,6 @@
 //! A look at the pairing record before the node starts, so that the app
 //! knows the network, whether Tor is on (NR-26) and what the smallest sale
-//! is. The reading is for display only: the record's signatures are not
+//! is and what currency the shop prices in. The reading is for display only: the record's signatures are not
 //! verified here, and the app must not rely on it. `start` checks them
 //! (`CR-94` to `CR-97`) on the same bytes and itself refuses to start when
 //! the verified settings have Tor on and the start has no proxy (CR-87).
@@ -26,13 +26,18 @@ pub struct SettingsView {
     pub customer_wifi: bool,
     /// The smallest bitcoin sale, in satoshis (0 means no floor).
     pub min_sale_sats: u64,
+    /// The currency the shop prices in (CR-193): three capital letters, or
+    /// `SAT` for Bitcoin Standard, where an amount is satoshis and no price
+    /// is asked (CR-197).
+    pub currency: String,
 }
 
 wire_record!(SettingsView {
     version,
     tor_on,
     customer_wifi,
-    min_sale_sats
+    min_sale_sats,
+    currency
 });
 
 /// The pairing record in `bytes` (`PairingRecord::to_bytes`), read and not
@@ -70,6 +75,7 @@ pub(crate) fn pairing_read(bytes: Vec<u8>, dir: &str) -> Result<PairingView, Cou
             tor_on: s.tor_on,
             customer_wifi: s.customer_wifi,
             min_sale_sats: s.min_sale_sats,
+            currency: s.currency.code().to_string(),
         },
         relay,
     })

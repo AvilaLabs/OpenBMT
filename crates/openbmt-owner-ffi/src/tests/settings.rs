@@ -11,7 +11,8 @@ use openbmt_core::settings::{Settings, SignedSettings};
 use super::kit::*;
 use super::screen::check_wire_words;
 use super::wire::{Fault, Rd, W};
-use crate::settings_edit::{dollars, percent};
+use crate::settings_edit::{percent, whole};
+use openbmt_core::currency::ShopCurrency;
 
 const KEY: &str = "0279BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798";
 
@@ -34,6 +35,8 @@ struct Edit {
     shares: Vec<(Vec<u8>, u32)>,
     lightning: u8,
     text: String,
+    /// The tag of the currency to change to; 0 keeps it.
+    currency: u8,
 }
 
 // The ten limits in the order of the frame, with the tolerance after six.
@@ -86,7 +89,7 @@ impl Edit {
         for (counter, bps) in &self.shares {
             w = w.bytes(counter).u32(*bps);
         }
-        w.u8(self.lightning).string(&self.text).0
+        w.u8(self.lightning).string(&self.text).u8(self.currency).0
     }
 }
 
@@ -110,6 +113,7 @@ struct Preview {
     price: Option<u64>,
     rate: Option<u64>,
     settings: Vec<u8>,
+    currency: u8,
 }
 
 fn preview(rig: &Rig, handle: u64, edit: &Edit) -> Result<Preview, Fault> {
@@ -135,6 +139,7 @@ fn preview(rig: &Rig, handle: u64, edit: &Edit) -> Result<Preview, Fault> {
         price: r.opt(Rd::u64),
         rate: r.opt(Rd::u64),
         settings: r.bytes(),
+        currency: r.u8(),
     };
     r.done();
     Ok(p)
@@ -468,10 +473,16 @@ fn as_77_a_bad_frame_is_refused_and_nothing_is_stored() {
 
 #[test]
 fn the_words_of_a_value_are_the_ones_a_person_reads() {
-    assert_eq!(dollars(0), "off");
-    assert_eq!(dollars(25), "$25");
-    assert_eq!(dollars(1_250), "$1,250");
-    assert_eq!(dollars(1_000_000), "$1,000,000");
+    let usd = ShopCurrency::Usd;
+    assert_eq!(whole(usd, 0), "off");
+    assert_eq!(whole(usd, 25), "$25");
+    assert_eq!(whole(usd, 1_250), "$1,250");
+    assert_eq!(whole(usd, 1_000_000), "$1,000,000");
+    // Another currency's name stands where the dollar sign was.
+    assert_eq!(whole(ShopCurrency::Eur, 25), "25 euros");
+    assert_eq!(whole(ShopCurrency::Jpy, 1_250), "1,250 yen");
+    assert_eq!(whole(ShopCurrency::Sats, 21), "21 sats");
+    assert_eq!(whole(ShopCurrency::Sats, 0), "off");
     for (bps, text) in [
         (0, "0%"),
         (1, "0.01%"),
@@ -484,4 +495,96 @@ fn the_words_of_a_value_are_the_ones_a_person_reads() {
     ] {
         assert_eq!(percent(bps), text);
     }
+}
+
+// ---- the shop's currency (CR-198) ----------------------------------------------
+
+/// An edit that gives every limit again in the currency with this tag.
+fn retype(currency: u8, price: Option<u64>, base: u32) -> Edit {
+    let mut edit = Edit {
+        currency,
+        price,
+        ..Edit::default()
+    };
+    for (i, l) in edit.limits.iter_mut().enumerate() {
+        *l = Some(base + u32::try_from(i).expect("fits"));
+    }
+    edit
+}
+
+#[test]
+fn cr_198_a_change_of_currency_is_shown_with_its_limits_in_the_new_currencys_name() {
+    let (rig, handle) = held();
+    let p = preview(&rig, handle, &retype(2, Some(98_500), 100)).expect("a preview");
+    assert_eq!(p.currency, 2);
+    assert!(p.needs_key_app);
+    assert_eq!((p.price, p.rate), (Some(98_500), Some(1_015)));
+    let currency = p.changes.iter().find(|c| c.field == "currency").unwrap();
+    assert_eq!(currency.label, "Currency");
+    assert_eq!(currency.old, "US dollar (USD)");
+    assert_eq!(currency.new, "Euro (EUR)");
+    assert!(currency.loosening);
+    let light = p
+        .changes
+        .iter()
+        .find(|c| c.field == "light_per_sale")
+        .unwrap();
+    // The old value is in dollars, the new in euros, at the price.
+    assert_eq!(light.old, "$10");
+    // 100 * 100,000,000 / 98,500 = 101,522.8
+    assert_eq!(
+        light.new,
+        "100 euros (101,523 sats at 98,500 euros a bitcoin)"
+    );
+    assert_eq!(p.changes.len(), 11);
+}
+
+#[test]
+fn cr_198_bitcoin_standard_is_shown_in_sats_and_asks_no_price() {
+    let (rig, handle) = held();
+    let p = preview(&rig, handle, &retype(10, None, 5_000)).expect("a preview");
+    assert_eq!(p.currency, 10);
+    assert_eq!((p.price, p.rate), (None, None));
+    let currency = p.changes.iter().find(|c| c.field == "currency").unwrap();
+    assert_eq!(currency.new, "Bitcoin Standard (sats)");
+    let light = p
+        .changes
+        .iter()
+        .find(|c| c.field == "light_per_sale")
+        .unwrap();
+    assert_eq!(light.new, "5,000 sats");
+}
+
+#[test]
+fn cr_198_a_change_of_currency_that_carries_a_limit_or_lacks_a_price_is_refused_with_words() {
+    let (rig, handle) = held();
+    // The currency alone: every limit is carried.
+    let only = Edit {
+        currency: 2,
+        ..Edit::default()
+    };
+    let f = preview(&rig, handle, &only).expect_err("refused");
+    assert_eq!((f.status, f.rule.as_str()), (1, "AS-59"), "{f:?}");
+    // Every limit given, and no price.
+    let f = preview(&rig, handle, &retype(2, None, 100)).expect_err("refused");
+    assert_eq!(f.rule, "AS-75");
+    assert!(f.words.what.contains("euros"), "{}", f.words.what);
+    assert!(f.words.next.contains("euros"), "{}", f.words.next);
+    // A price outside the band of the currency.
+    let f = preview(&rig, handle, &retype(4, Some(50_000), 100)).expect_err("refused");
+    assert_eq!(f.rule, "AS-75");
+    assert!(f.words.what.contains("1,000,000 yen"), "{}", f.words.what);
+    // A currency tag that is not one is a bad frame.
+    let bad = Edit {
+        currency: 11,
+        ..Edit::default()
+    };
+    assert!(Rd::error(&rig.call(47, handle, &bad.bytes())).is_some());
+    // The same currency named again changes nothing.
+    let same = Edit {
+        currency: 1,
+        ..Edit::default()
+    };
+    assert!(preview(&rig, handle, &same).unwrap().nothing_changed);
+    assert_eq!(entries(&rig, handle), 0);
 }

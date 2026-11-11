@@ -3,6 +3,7 @@
 use std::fmt;
 
 use bitcoin::Txid;
+use openbmt_core::currency::ShopCurrency;
 use openbmt_core::identity::IdentityError;
 use openbmt_core::wire::DecodeError;
 use openbmt_session::{BindError, EncodeError};
@@ -146,11 +147,13 @@ pub enum Refusal {
     BundleNotReady(BundleGap),
     /// AS-74: the owner phone holds no settings, held or queued, to change.
     NoSettingsToChange,
-    /// AS-75: a changed limit in dollars needs today's price of a bitcoin
-    /// and the edit gave none.
-    EditNeedsRate,
-    /// AS-75: the price of a bitcoin given is outside $1,000 to $10,000,000.
-    PriceOutOfRange,
+    /// AS-75: a changed limit in the shop's currency (the one given) needs
+    /// today's price of a bitcoin and the edit gave none.
+    EditNeedsRate(ShopCurrency),
+    /// AS-75: the price of a bitcoin given, in the currency given, is
+    /// outside the band of that currency ($1,000 to $10,000,000 for
+    /// dollars).
+    PriceOutOfRange(ShopCurrency),
     /// AS-76: the text given as the Lightning node is not a node key or
     /// address.
     LightningNode(NodeKeyFault),
@@ -272,13 +275,15 @@ impl fmt::Display for Refusal {
             Self::NoSettingsToChange => {
                 write!(f, "AS-74: no settings are held or queued to change")
             }
-            Self::EditNeedsRate => write!(
+            Self::EditNeedsRate(c) => write!(
                 f,
-                "AS-75: a limit in dollars changed and no price of a bitcoin was given"
+                "AS-75: a limit in {} changed and no price of a bitcoin was given",
+                c.plural()
             ),
-            Self::PriceOutOfRange => write!(
+            Self::PriceOutOfRange(c) => write!(
                 f,
-                "AS-75: the price of a bitcoin is outside $1,000 to $10,000,000"
+                "AS-75: the price of a bitcoin is outside the band of {}",
+                c.plural()
             ),
             Self::LightningNode(why) => write!(f, "AS-76: the Lightning node is refused: {why}"),
             Self::BundleNotReady(gap) => write!(f, "AS-72: the bundle is not ready: {gap}"),

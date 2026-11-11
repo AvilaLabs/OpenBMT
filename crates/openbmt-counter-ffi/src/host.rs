@@ -456,9 +456,23 @@ impl Entry {
             .map_err(|_| refused_by("sale-currency", "a currency is three letters"))?;
         let currency = Currency::new(code)
             .ok_or_else(|| refused_by("sale-currency", "a currency is three capital letters"))?;
-        let (rate, source) = rate_and_source(a.rate, &a.source_label, a.source_fetched_at)?;
         let by = a.actor.map(actor);
         self.run(Some(a.now), |node, _, network| {
+            // CR-196: a sale is in the currency of the settings in force.
+            let shop = node.settings().currency;
+            if currency != Currency::of_shop(shop) {
+                return Err(refused_by(
+                    "sale-currency",
+                    format!("the shop prices in {}, not {currency}", shop.code()),
+                ));
+            }
+            // CR-197: Bitcoin Standard has no price: the rate and the source
+            // of the call are not read, and need not be valid.
+            let (rate, source) = if shop.is_sats() {
+                (Rate::sats(), RateSource::sats(a.now))
+            } else {
+                rate_and_source(a.rate, &a.source_label, a.source_fetched_at)?
+            };
             let opened = node
                 .open_by(Amount(a.amount_minor), currency, rate, &source, by.as_ref())
                 .map_err(|e| from_rule(e.rule(), &e, e.words()))?;

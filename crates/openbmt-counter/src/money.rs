@@ -6,6 +6,8 @@
 
 use std::fmt;
 
+use openbmt_core::currency::ShopCurrency;
+
 /// Satoshis in one bitcoin.
 pub const SATS_PER_BTC: u64 = 100_000_000;
 /// The most satoshis that can exist.
@@ -20,8 +22,11 @@ pub const MAX_RATE_AGE_SECS: u64 = 600;
 pub const MAX_RATE_AHEAD_SECS: u64 = 60;
 /// CR-57: the longest label of a rate source, in bytes.
 pub const MAX_SOURCE_LABEL_BYTES: usize = 32;
+/// CR-197: the label of the rate of Bitcoin Standard, which has no source.
+pub const SATS_LABEL: &str = "sats";
 
-/// An amount in minor units of the shop's currency (cents, for dollars).
+/// An amount in minor units of the shop's currency (cents, for dollars;
+/// satoshis, for Bitcoin Standard).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Amount(pub u64);
 
@@ -41,6 +46,16 @@ impl Currency {
     /// The three letters.
     pub fn code(&self) -> [u8; 3] {
         self.0
+    }
+
+    /// The currency of a shop's settings (CR-196): its code, `SAT` for
+    /// Bitcoin Standard.
+    pub fn of_shop(currency: ShopCurrency) -> Self {
+        let mut code = *b"SAT";
+        for (to, from) in code.iter_mut().zip(currency.code().bytes()) {
+            *to = from;
+        }
+        Self(code)
     }
 }
 
@@ -67,6 +82,15 @@ impl Rate {
     /// Minor units per bitcoin.
     pub fn minor_per_btc(&self) -> u64 {
         self.minor_per_btc
+    }
+
+    /// CR-197: the rate of Bitcoin Standard, where the minor unit is the
+    /// satoshi: 100,000,000 of them to a bitcoin, so an amount is its own
+    /// satoshis. It is not a price and no source gave it.
+    pub fn sats() -> Self {
+        Self {
+            minor_per_btc: SATS_PER_BTC,
+        }
     }
 }
 
@@ -119,6 +143,15 @@ impl RateSource {
             label: label.to_string(),
             fetched_at,
         })
+    }
+
+    /// CR-197: the source of the rate of Bitcoin Standard: the label `sats`,
+    /// at the time of the sale.
+    pub fn sats(fetched_at: u64) -> Self {
+        Self {
+            label: SATS_LABEL.to_string(),
+            fetched_at,
+        }
     }
 
     /// The label.

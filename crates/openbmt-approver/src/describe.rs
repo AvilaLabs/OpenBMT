@@ -2,6 +2,7 @@
 
 use std::fmt::Write;
 
+use openbmt_core::currency::ShopCurrency;
 use openbmt_core::identity::DeviceId;
 use openbmt_core::settings::{Limit, Settings, LIGHTNING_NODE_BYTES};
 
@@ -14,8 +15,12 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
     out
 }
 
-fn limit(l: &Limit) -> String {
-    format!("{} sats (${} from the owner phone)", l.sats, l.display_usd)
+fn limit(l: &Limit, currency: ShopCurrency) -> String {
+    format!(
+        "{} sats ({} from the owner phone)",
+        l.sats,
+        currency.whole_text(u64::from(l.display_usd))
+    )
 }
 
 /// An identity in full: 64 lower-case hex digits in groups of four, so that
@@ -38,6 +43,7 @@ fn flag(v: bool) -> String {
 /// `changed_fields` gives; the smallest bitcoin sale is named in plain words.
 pub(crate) fn shown_name(field: &'static str) -> &'static str {
     match field {
+        "currency" => "Currency",
         "min_sale_sats" => "Smallest bitcoin sale",
         "lightning_node" => "Lightning node",
         "watch_key" => "Watch key",
@@ -106,25 +112,26 @@ pub(crate) fn field_values(s: &Settings) -> Vec<(&'static str, String)> {
         s.boxes.iter().map(full).collect::<Vec<_>>().join(", ")
     };
     vec![
-        ("light_per_sale", limit(&s.light_per_sale)),
-        ("light_budget", limit(&s.light_budget)),
-        ("node_per_sale", limit(&s.node_per_sale)),
-        ("node_budget", limit(&s.node_budget)),
-        ("box_per_sale", limit(&s.box_per_sale)),
-        ("box_budget", limit(&s.box_budget)),
+        ("currency", s.currency.label().to_string()),
+        ("light_per_sale", limit(&s.light_per_sale, s.currency)),
+        ("light_budget", limit(&s.light_budget, s.currency)),
+        ("node_per_sale", limit(&s.node_per_sale, s.currency)),
+        ("node_budget", limit(&s.node_budget, s.currency)),
+        ("box_per_sale", limit(&s.box_per_sale, s.currency)),
+        ("box_budget", limit(&s.box_budget, s.currency)),
         (
             "underpayment_tolerance_bps",
             format!("{} bp", s.underpayment_tolerance_bps),
         ),
-        ("refund_cap", limit(&s.refund_cap)),
-        ("refund_daily_cap", limit(&s.refund_daily_cap)),
+        ("refund_cap", limit(&s.refund_cap, s.currency)),
+        ("refund_daily_cap", limit(&s.refund_daily_cap, s.currency)),
         (
             "cashier_override_daily_cap",
-            limit(&s.cashier_override_daily_cap),
+            limit(&s.cashier_override_daily_cap, s.currency),
         ),
         (
             "manager_override_ceiling",
-            limit(&s.manager_override_ceiling),
+            limit(&s.manager_override_ceiling, s.currency),
         ),
         (
             "min_confirmations",

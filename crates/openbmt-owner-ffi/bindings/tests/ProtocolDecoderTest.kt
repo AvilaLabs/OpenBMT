@@ -111,6 +111,7 @@ object ProtocolDecoderTest {
         check(held.tipsOn && held.tipPercents == listOf(10, 15, 20))
         check(held.boxes.isEmpty())
         check(held.lightningNode!!.size == 33 && held.lightningNode!![0].toInt() == 2)
+        check(held.currency == ShopCurrency.Jpy && held.currency.code == "JPY" && held.currency.plural == "yen")
         check(decodeResponse(header(0, byteArrayOf(0))).let { r -> r.option { r.settingsHeld() } } == null)
         rejects("a settings flag") { decodeResponse(header(0, byteArrayOf(2))).let { r -> r.option { r.settingsHeld() } } }
         rejects("a short settings") { decodeResponse(settingsFrame().copyOf(40)).let { r -> r.option { r.settingsHeld() } } }
@@ -122,6 +123,9 @@ object ProtocolDecoderTest {
         check(preview.changes[1].counter!!.size == 32 && preview.changes[1].new == "33.33%")
         check(!preview.changes[1].loosening && preview.sharesTotalBps == 8_333L && preview.usdPerBtc == 98_500L && preview.satsPerUsd == 1_015L)
         check(preview.settings.size == 2)
+        check(preview.currency == ShopCurrency.Eur && preview.currency.label == "Euro (EUR)")
+        rejects("a currency tag that is not a choice") { decodeResponse(settingsFrame().also { it[it.size - 1] = 0 }).let { r -> r.option { r.settingsHeld() } } }
+        rejects("a currency tag past the list") { decodeResponse(settingsFrame().also { it[it.size - 1] = 11 }).let { r -> r.option { r.settingsHeld() } } }
         rejects("a preview flag") { decodeResponse(previewFrame(needsKeyApp = 2)).settingsPreview() }
         rejects("a short preview") { decodeResponse(previewFrame().copyOf(30)).settingsPreview() }
 
@@ -616,6 +620,7 @@ object ProtocolDecoderTest {
         w.u32(1).bytes(ByteArray(32) { 2 }).u32(10_000)
         w.u32(0)
         w.u8(1).bytes(ByteArray(33) { if (it == 0) 2 else 7 })
+        w.u8(4)
         return header(0, w.toByteArray())
     }
 
@@ -625,13 +630,13 @@ object ProtocolDecoderTest {
         w.string("refund_cap").string("Largest single refund").u8(0).string("$100").string("$150").bool(true)
         w.string("counters").string("Counter's share").u8(1).bytes(ByteArray(32) { 5 })
             .string("50%").string("33.33%").bool(false)
-        w.u8(needsKeyApp).bool(false).u32(8_333).u8(1).u64(98_500).u8(1).u64(1_015).bytes(byteArrayOf(9, 9))
+        w.u8(needsKeyApp).bool(false).u32(8_333).u8(1).u64(98_500).u8(1).u64(1_015).bytes(byteArrayOf(9, 9)).u8(2)
         return header(0, w.toByteArray())
     }
 
     /** The request `previewSettings` writes for [sampleEdit]; the Rust test of the same name writes it too. */
     private const val EDIT_FRAME_HEX =
-        "4f424d6b012f00010000000000000001e803000000000000010a00000000000132000000000000016400000000000001030000010100000000000000000100000000"
+        "4f424d6b012f00010000000000000001e803000000000000010a0000000000013200000000000001640000000000000103000001010000000000000000010000000000"
 
     private fun sampleEdit() =
         SettingsEditArgs(
