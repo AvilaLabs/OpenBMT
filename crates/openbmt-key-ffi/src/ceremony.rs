@@ -164,7 +164,7 @@ impl KeyApp {
     }
 
     /// SR-68, SR-69, `docs/DESIGN.md` §2.1 step 5: the Key app's public
-    /// answer (`OBMs`) for the owner phone: the network, key 2's public parts
+    /// answer (`OBMv`) for the owner phone: the network, key 2's public parts
     /// (none on a device with no key 2), key 3's as taken, and the Key app's
     /// root. Refused until key 3 is taken.
     pub fn public_answer(&self) -> Result<Vec<u8>, KeyError> {
@@ -193,7 +193,7 @@ impl KeyApp {
         })
     }
 
-    /// SR-67, SR-68: accept the wallet setup (`OBMt`) the owner phone made.
+    /// SR-67, SR-68: accept the wallet setup (`OBMw`) the owner phone made.
     /// The bytes are read strictly and then go through `accept_wallet`
     /// with the key 3 held, so the key 2 and key 3 slots are checked byte
     /// for byte. Refused when no key 3 was taken. The result is what the

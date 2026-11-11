@@ -317,7 +317,7 @@ steps are OC-40 to OC-46 in `docs/OWNER-COINS-RULES.md`.
   slot (SR-61, SR-62). When key 3 is stored, a key 3 given with the wallet must
   be the same key. The wallet setup of the ceremony is refused when no key 3
   has been taken.
-- **SR-68.** The Key app's answer (`OBMs`) and the wallet setup (`OBMt`) are
+- **SR-68.** The Key app's answer (`OBMv`) and the wallet setup (`OBMw`) are
   strict frames: the magic, version 1, the exact length, flags 0 or 1,
   defined network bytes, keys at the account level for the network's kind, an
   answer whose keys differ, and a setup whose description is the canonical text

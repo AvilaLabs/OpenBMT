@@ -423,7 +423,7 @@ to 85 of `openbmt-owner-ffi`. OC-38 and OC-39 are not used.
   if the network of the answer differs from key 1's, if the Key app's root
   is the owner's, if two of the keys are the same, or if any key is not at
   the account path of its slot.
-- **OC-42.** The setup for the Key app is a strict frame `OBMt` (version 1)
+- **OC-42.** The setup for the Key app is a strict frame `OBMw` (version 1)
   with the network, the canonical wallet description, the owner's root and
   the batch minimum. The description must be the canonical form.
 - **OC-43.** The owner is shown the checksum words, the fingerprints of the

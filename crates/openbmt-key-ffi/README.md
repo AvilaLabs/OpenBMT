@@ -106,8 +106,8 @@ writes it again). Op numbers are never reused.
 | 65 | `parse_deposit_code` | none | read an address or BIP21 text; enrols nothing |
 | 80 | `take_key3` | app | read and keep key 3 from text; returns what to compare |
 | 81 | `key3_view` | app | key 3 as kept, or none |
-| 82 | `public_answer` | app | the public answer (`OBMs`) for the owner phone |
-| 83 | `accept_wallet_setup` | app | accept the owner phone's setup (`OBMt`); returns the wallet view |
+| 82 | `public_answer` | app | the public answer (`OBMv`) for the owner phone |
+| 83 | `accept_wallet_setup` | app | accept the owner phone's setup (`OBMw`); returns the wallet view |
 
 Opening a session ends the handle of the app's previous session. One call
 runs at a time: a call made while another runs, or from inside a store

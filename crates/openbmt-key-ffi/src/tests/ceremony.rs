@@ -304,7 +304,7 @@ fn sr_69_the_public_answer_holds_the_public_parts_and_needs_key_3() {
     assert_eq!(err.words(), CeremonyRefusal::NoKey3.words());
     app.take_key3(key3_text()).expect("taken");
     let bytes = app.public_answer().expect("the answer");
-    assert_eq!(&bytes[..5], b"OBMs\x01");
+    assert_eq!(&bytes[..5], b"OBMv\x01");
     let answer = KeyAnswer::from_bytes(&bytes).expect("reads");
     let public = app.key2_public().expect("asked").expect("key 2");
     assert_eq!(answer.network, Network::Regtest);
@@ -567,7 +567,7 @@ fn the_ops_80_to_83_run_the_ceremony_through_the_call_protocol() {
     let (status, body) = call(82, app, W::new());
     assert_eq!(status, 0);
     let answer = Rd::new(&body).bytes();
-    assert_eq!(&answer[..5], b"OBMs\x01");
+    assert_eq!(&answer[..5], b"OBMv\x01");
     let a = KeyAnswer::from_bytes(&answer).expect("reads");
     // The wallet setup goes back through op 83.
     let key2 = a.key2.expect("key 2");

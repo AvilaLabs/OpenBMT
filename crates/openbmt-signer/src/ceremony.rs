@@ -8,14 +8,14 @@
 //! of them.
 //!
 //! ```text
-//! OBMs  the Key app's public answer
-//!   "OBMs" | 1 | network u8
+//! OBMv  the Key app's public answer
+//!   "OBMv" | 1 | network u8
 //!   | key 2 flag u8, then if 1: fingerprint (4) | account key, BIP 32 form (78)
 //!   | key 3: fingerprint (4) | account key (78)
 //!   | the Key app's root (32)
 //!
-//! OBMt  the wallet setup
-//!   "OBMt" | 1 | network u8
+//! OBMw  the wallet setup
+//!   "OBMw" | 1 | network u8
 //!   | description u16 length and text (UTF-8, the canonical form)
 //!   | the owner root (32) | batch minimum u32
 //! ```
@@ -37,9 +37,9 @@ use openbmt_core::wallet::{KeySlot, WalletDescription};
 use openbmt_core::wire::{self, Reader};
 
 /// SR-68: the magic of the Key app's public answer.
-pub const MAGIC_KEY_ANSWER: [u8; 4] = *b"OBMs";
+pub const MAGIC_KEY_ANSWER: [u8; 4] = *b"OBMv";
 /// SR-68: the magic of the wallet setup the owner phone sends.
-pub const MAGIC_WALLET_SETUP: [u8; 4] = *b"OBMt";
+pub const MAGIC_WALLET_SETUP: [u8; 4] = *b"OBMw";
 /// SR-64: the longest key text read.
 pub const MAX_KEY_TEXT: usize = 256;
 /// SR-68: the longest wallet description in a setup.

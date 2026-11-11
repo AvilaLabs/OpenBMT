@@ -308,14 +308,14 @@ fn sr_67_key_3_must_be_one_key_of_the_wallet_in_full() {
 fn sr_68_the_answer_and_the_setup_read_back_and_nothing_else_does() {
     let a = answer();
     let bytes = a.to_bytes();
-    assert_eq!(&bytes[..5], b"OBMs\x01");
+    assert_eq!(&bytes[..5], b"OBMv\x01");
     assert_eq!(KeyAnswer::from_bytes(&bytes), Ok(a.clone()));
     let none = KeyAnswer { key2: None, ..a };
     assert_eq!(KeyAnswer::from_bytes(&none.to_bytes()), Ok(none));
 
     let s = setup();
     let bytes = s.to_bytes();
-    assert_eq!(&bytes[..5], b"OBMt\x01");
+    assert_eq!(&bytes[..5], b"OBMw\x01");
     assert_eq!(WalletSetupBytes::from_bytes(&bytes), Ok(s));
 }
 

@@ -176,7 +176,7 @@ pub struct WalletBuiltView {
     /// The sealed record at stage 2, for the app to seal and keep until the
     /// owner confirms.
     pub record: Vec<u8>,
-    /// The wallet setup (`OBMt`) for the Key app, to show as a code.
+    /// The wallet setup (`OBMw`) for the Key app, to show as a code.
     pub wallet_setup: Vec<u8>,
     /// The wallet description with its checksum, as text.
     pub description: String,
