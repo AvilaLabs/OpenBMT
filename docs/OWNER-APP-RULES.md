@@ -367,15 +367,16 @@ edit, shows what the node says it would do, and queues it when the owner says
 so. It builds no settings bytes and signs nothing.
 
 - **OA-32.** The settings view offers "Change settings". The editor is a menu
-  of six screens and a Review: Instant sales, Payments, Refunds and
-  overrides, Safety (the heartbeat, Tor and customer Wi-Fi), Counters'
+  of seven screens and a Review: Currency, Instant sales, Payments, Refunds
+  and overrides, Safety (the heartbeat, Tor and customer Wi-Fi), Counters'
   shares, and Lightning node. What is typed is kept in memory only, and only
   for the fields that differ from what the settings hold; "Start over"
   forgets it, and a phone that holds no settings says so and offers nothing
   to change. Nothing is sent to the node until Review.
 - **OA-33.** Each field shows its words from `AppWords` (a heading of at most
   28 characters and one plain sentence of what it does), what the settings
-  hold now, and a field to type in: whole dollars (0 is off), a percent with
+  hold now, and a field to type in: whole units of the shop's currency
+  (0 is off), a percent with
   up to two decimals, whole blocks, whole minutes, whole satoshis, or a
   choice of two. Done keeps the screen's fields and refuses with words a text
   that is not the kind of number its field takes; Back keeps nothing of that
@@ -803,10 +804,11 @@ signs batches, settings and pairings, are never in the service.
   the rest) are cut at their comma into a table whose rows are the checks
   with their first letter in upper case, and whose columns are the first
   halves; "Underpayment still counted" follows as a key and a value. Every
-  other line is in a folded group (Payments, Refunds and overrides, Safety,
-  Counters' shares, Lightning node, and Watch in the background when it has
-  a line) that opens as key and value lines. The read-only sentence is a
-  footnote and "Change settings" is the footer's primary.
+  other line is in a folded group (Currency, Payments, Tips, Refunds and
+  overrides, Safety, Counters' shares, Lightning node, and Watch in the
+  background when it has a line) that opens as key and value lines. The
+  read-only sentence is a footnote and "Change settings" is the footer's
+  primary.
 - **OA-94.** Every operation on the till's token file (save, load and
   remove) runs on one single-thread queue that the controller owns, in the
   order it was asked, and no other thread touches the file; the screen
@@ -816,3 +818,24 @@ signs batches, settings and pairings, are never in the service.
   otherwise it does nothing. While a removal is in flight the till page
   shows no actions and no back arrow, and comes back when the removal is
   done. A remove followed by a save leaves the new token.
+- **OA-95.** The Currency screen is the first of the editor. It shows the
+  currency the settings hold and the ten choices as the library names them
+  (`US dollar (USD)` and the rest, ending with `Bitcoin Standard (sats)`),
+  and keeps the choice in memory with what else was typed. A choice other
+  than the one held is a new currency: it forgets every limit typed so far
+  and the price, shows every limit on the Instant sales and Refunds and
+  overrides screens empty, with the words that say every limit is set again
+  (CR-198), and puts the currency into the edit. A limit left empty is not
+  sent, and the library refuses the review naming it; a limit typed is sent
+  even when it is the number the old limit had. Choosing the held currency
+  again leaves no change. Bitcoin Standard asks for no price.
+- **OA-96.** Where the editor's words said dollars, they say the currency
+  the limits are typed in (the new one while it is being changed), by the
+  currency's name in the place of "dollars": the words of the limits and of
+  the two screens that hold them, the words of a value that is not a whole
+  number, the words of a price that is not one, the line "Now:" of a limit,
+  and the label of the price field. Nothing else in those sentences changes.
+  The settings view has a line `Currency` whose value is the choice's name
+  in full, in a group of its own, and shows each limit in the currency's
+  name with its satoshis, or with no satoshis for Bitcoin Standard, where
+  they are the same number.

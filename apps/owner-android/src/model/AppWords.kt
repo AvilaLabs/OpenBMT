@@ -7,6 +7,7 @@ import org.openbmt.app.Tones
 import org.openbmt.app.UrWords
 import org.openbmt.app.Who
 import org.openbmt.owner.OwnerException
+import org.openbmt.owner.ShopCurrency
 
 /**
  * The words of the owner app's own states and refusals (docs/SCREEN-RULES.md).
@@ -251,11 +252,16 @@ object AppWords {
     )
 
     /** The price typed is not a whole number of dollars above 0. */
-    val priceNotRead = w(
+    val priceNotRead = priceNotReadOf(ShopCurrency.Usd)
+
+    /** The same in the currency the price is asked in; the currency's name stands where "dollars" stood. */
+    fun priceNotReadIn(c: ShopCurrency): SayWords = if (c == ShopCurrency.Usd) priceNotRead else priceNotReadOf(c)
+
+    private fun priceNotReadOf(c: ShopCurrency): SayWords = w(
         Tones.STOP, "Price not read",
-        "The price of a bitcoin is a whole number of dollars above 0, so nothing was queued.",
+        "The price of a bitcoin is a whole number of ${c.plural} above 0, so nothing was queued.",
         Who.OWNER,
-        "Type today's price of one bitcoin in whole dollars, like 98500.",
+        "Type today's price of one bitcoin in whole ${c.plural}, like 98500.",
     )
 
     /** The owner said the words differ, and the queued request was taken out. */
@@ -616,11 +622,30 @@ object AppWords {
         "A change that loosens something needs the Key app. A stricter change does not.",
     )
 
-    val editGroupInstant = w(
+    val editGroupCurrency = w(
+        Tones.INFO, "Currency",
+        "The money the counters price sales in, and the limits are set in.",
+        Who.OWNER,
+        "Choose one. Bitcoin Standard prices in sats and uses no price source.",
+    )
+
+    /** Shown while a new currency is chosen: the limits are typed again. */
+    val editCurrencyRetype = w(
+        Tones.INFO, "New currency, new limits",
+        "Every limit is set again in the new currency, so the change shows them empty.",
+        Who.OWNER,
+        "Type each limit in the new currency, then review. The change needs the Key app.",
+    )
+
+    val editGroupInstant = editGroupInstantOf(ShopCurrency.Usd)
+
+    fun editGroupInstantIn(c: ShopCurrency): SayWords = if (c == ShopCurrency.Usd) editGroupInstant else editGroupInstantOf(c)
+
+    private fun editGroupInstantOf(c: ShopCurrency): SayWords = w(
         Tones.INFO, "Instant sales",
         "How much a counter may accept as paid before the payment is confirmed, for each way it checks.",
         Who.OWNER,
-        "Whole dollars. 0 turns a limit off.",
+        "Whole ${c.plural}. 0 turns a limit off.",
     )
 
     val editGroupPayments = w(
@@ -637,11 +662,15 @@ object AppWords {
         "Turn tips on, and set up to three percents.",
     )
 
-    val editGroupRefunds = w(
+    val editGroupRefunds = editGroupRefundsOf(ShopCurrency.Usd)
+
+    fun editGroupRefundsIn(c: ShopCurrency): SayWords = if (c == ShopCurrency.Usd) editGroupRefunds else editGroupRefundsOf(c)
+
+    private fun editGroupRefundsOf(c: ShopCurrency): SayWords = w(
         Tones.INFO, "Refunds and overrides",
         "How much can be refunded, and how much cashiers and managers may accept against a red screen.",
         Who.OWNER,
-        "Whole dollars. 0 turns a limit off.",
+        "Whole ${c.plural}. 0 turns a limit off.",
     )
 
     val editGroupSafety = w(
@@ -743,10 +772,10 @@ object AppWords {
     )
 
     /** What was typed for a field is not the kind of number it takes. */
-    fun editValueNotRead(kind: FieldKind, label: String): SayWords {
+    fun editValueNotRead(kind: FieldKind, label: String, c: ShopCurrency = ShopCurrency.Usd): SayWords {
         if (kind == FieldKind.TipPercent) return editTipNotRead
         val (what, next) = when (kind) {
-            FieldKind.Dollars -> "is not a whole number of dollars" to "Type whole dollars, like 25, or 0 to turn it off."
+            FieldKind.Dollars -> "is not a whole number of ${c.plural}" to "Type whole ${c.plural}, like 25, or 0 to turn it off."
             FieldKind.Percent -> "is not a percent" to "Type a percent with up to two decimals, like 0.5."
             FieldKind.Blocks -> "is not a whole number of blocks" to "Type a whole number of blocks, like 6."
             FieldKind.Minutes -> "is not a whole number of minutes" to "Type whole minutes, like 10."
@@ -763,36 +792,39 @@ object AppWords {
     }
 
     /** The words of each field the editor changes: the label is the heading, then what it does, then how to type it. */
-    val editFields: List<Pair<String, SayWords>> = listOf(
+    val editFields: List<Pair<String, SayWords>> = editFieldsIn(ShopCurrency.Usd)
+
+    /** The fields' words with the currency's name where "dollars" stood. */
+    fun editFieldsIn(c: ShopCurrency): List<Pair<String, SayWords>> = listOf(
         "light_per_sale" to w(
             Tones.INFO, "Light check: one sale",
             "The largest sale accepted as instant when only a light check has seen the payment.",
-            Who.OWNER, "Whole dollars. 0 turns it off.",
+            Who.OWNER, "Whole ${c.plural}. 0 turns it off.",
         ),
         "light_budget" to w(
             Tones.INFO, "Light check: all at once",
             "The most that may wait for confirmation together across the shop, on a light check.",
-            Who.OWNER, "Whole dollars. 0 turns it off.",
+            Who.OWNER, "Whole ${c.plural}. 0 turns it off.",
         ),
         "node_per_sale" to w(
             Tones.INFO, "Own node: one sale",
             "The largest sale accepted as instant when the shop's own node has also seen the payment.",
-            Who.OWNER, "Whole dollars. 0 turns it off.",
+            Who.OWNER, "Whole ${c.plural}. 0 turns it off.",
         ),
         "node_budget" to w(
             Tones.INFO, "Own node: all at once",
             "The most that may wait for confirmation together across the shop, with the own node.",
-            Who.OWNER, "Whole dollars. 0 turns it off.",
+            Who.OWNER, "Whole ${c.plural}. 0 turns it off.",
         ),
         "box_per_sale" to w(
             Tones.INFO, "Box only: one sale",
             "The largest sale accepted as instant when only a Box reports the payment.",
-            Who.OWNER, "Whole dollars. 0 turns it off.",
+            Who.OWNER, "Whole ${c.plural}. 0 turns it off.",
         ),
         "box_budget" to w(
             Tones.INFO, "Box only: all at once",
             "The most that may wait for confirmation together across the shop, on a Box's word.",
-            Who.OWNER, "Whole dollars. 0 turns it off.",
+            Who.OWNER, "Whole ${c.plural}. 0 turns it off.",
         ),
         "underpayment_tolerance_bps" to w(
             Tones.INFO, "Underpayment still counted",
@@ -837,22 +869,22 @@ object AppWords {
         "refund_cap" to w(
             Tones.INFO, "Largest single refund",
             "The most one refund may pay back to a customer.",
-            Who.OWNER, "Whole dollars. 0 turns it off.",
+            Who.OWNER, "Whole ${c.plural}. 0 turns it off.",
         ),
         "refund_daily_cap" to w(
             Tones.INFO, "Refunds per day",
             "The most that may be refunded in one day, all refunds together.",
-            Who.OWNER, "Whole dollars. 0 turns it off.",
+            Who.OWNER, "Whole ${c.plural}. 0 turns it off.",
         ),
         "cashier_override_daily_cap" to w(
             Tones.INFO, "Cashier's override per day",
             "The most one cashier may accept against a red screen in a day.",
-            Who.OWNER, "Whole dollars. 0 turns it off.",
+            Who.OWNER, "Whole ${c.plural}. 0 turns it off.",
         ),
         "manager_override_ceiling" to w(
             Tones.INFO, "Manager's override ceiling",
             "The most a manager may accept against a red screen, over all their overrides.",
-            Who.OWNER, "Whole dollars. 0 turns it off.",
+            Who.OWNER, "Whole ${c.plural}. 0 turns it off.",
         ),
         "heartbeat_max_age_secs" to w(
             Tones.INFO, "Heartbeat age for instant",
@@ -871,8 +903,8 @@ object AppWords {
         ),
     )
 
-    fun editField(id: String): SayWords =
-        editFields.firstOrNull { it.first == id }?.second ?: throw IllegalArgumentException("no field $id")
+    fun editField(id: String, c: ShopCurrency = ShopCurrency.Usd): SayWords =
+        editFieldsIn(c).firstOrNull { it.first == id }?.second ?: throw IllegalArgumentException("no field $id")
 
     // ---- the till ------------------------------------------------------------------------------
 
@@ -1206,6 +1238,8 @@ object AppWords {
         "noLink" to noLink,
         "noSettingsYet" to noSettingsYet,
         "editIntro" to editIntro,
+        "editGroupCurrency" to editGroupCurrency,
+        "editCurrencyRetype" to editCurrencyRetype,
         "editGroupInstant" to editGroupInstant,
         "editGroupPayments" to editGroupPayments,
         "editGroupTips" to editGroupTips,

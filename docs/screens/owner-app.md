@@ -85,6 +85,8 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | noLink | No link to the counters | This phone was set up without a relay, so no counter can report to it. | Nothing to do here. A setup text with a relay adds the link. | the owner |  |
 | noSettingsYet | No settings yet | The phone holds no settings for the shop yet, so there is nothing to show. | Nothing to do. They arrive with the first approval that carries settings. | the owner |  |
 | editIntro | Change the settings | Pick a group, change what you need, then review. Nothing is queued until you press Queue the change. | A change that loosens something needs the Key app. A stricter change does not. | the owner |  |
+| editGroupCurrency | Currency | The money the counters price sales in, and the limits are set in. | Choose one. Bitcoin Standard prices in sats and uses no price source. | the owner |  |
+| editCurrencyRetype | New currency, new limits | Every limit is set again in the new currency, so the change shows them empty. | Type each limit in the new currency, then review. The change needs the Key app. | the owner |  |
 | editGroupInstant | Instant sales | How much a counter may accept as paid before the payment is confirmed, for each way it checks. | Whole dollars. 0 turns a limit off. | the owner |  |
 | editGroupPayments | Payments | When a payment counts, how many blocks settle a sale, and the smallest bitcoin sale. | Change what you need, then press Done. | the owner |  |
 | editGroupTips | Tips | Whether the counters ask the customer for a tip, and which tips they suggest. | Turn tips on, and set up to three percents. | the owner |  |

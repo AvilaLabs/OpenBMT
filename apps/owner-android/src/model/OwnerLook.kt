@@ -94,6 +94,7 @@ object OwnerLook {
 
     /** The folded groups of the settings page: the title and the labels of the lines it holds, in order. */
     val settingsGroups: List<Pair<String, List<String>>> = listOf(
+        "Currency" to listOf("Currency"),
         "Payments" to listOf("Blocks to settle a sale", "Blocks until a refund may be paid", "Smallest sale a counter opens"),
         "Tips" to listOf("Tips"),
         "Refunds and overrides" to listOf("Largest single refund", "Refunds per day", "Cashier's override per day", "Manager's override ceiling"),

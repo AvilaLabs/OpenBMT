@@ -2,6 +2,7 @@ package org.openbmt.owner.app
 
 import org.openbmt.app.Format
 import org.openbmt.owner.CounterShare
+import org.openbmt.owner.ShopCurrency
 import org.openbmt.owner.WaitingCounter
 
 /**
@@ -63,8 +64,8 @@ object CounterModel {
      * limit: a whole number above 0, with a dollar sign and commas allowed. Whether it is a price that makes sense is
      * the library's to say (AS-75, OA-07); the conversion to satoshis is the library's too.
      */
-    fun price(text: String): Form<Long> =
-        SettingsEditModel.dollars(text)?.takeIf { it > 0 }?.let { Form.Ok(it) } ?: Form.Refused(AppWords.priceNotRead)
+    fun price(text: String, currency: ShopCurrency = ShopCurrency.Usd): Form<Long> =
+        SettingsEditModel.dollars(text)?.takeIf { it > 0 }?.let { Form.Ok(it) } ?: Form.Refused(AppWords.priceNotReadIn(currency))
 
     /** The words of the code for the counter: with the first addresses in it or without. */
     fun codeStep(made: Boolean, withBatch: Boolean, animated: Boolean): ExchangeStep.Code = when {

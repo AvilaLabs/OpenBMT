@@ -11,8 +11,9 @@ import org.openbmt.app.SayWords
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.SettingsHeld
+import org.openbmt.owner.ShopCurrency
 
-// Changing the shop's settings (OA-32 to OA-35): from the settings view, "Change settings" opens a menu of six
+// Changing the shop's settings (OA-32 to OA-35): from the settings view, "Change settings" opens a menu of seven
 // screens, each with the fields of one group, then "Review" shows every change. The node judges everything
 // (AS-74 to AS-77): the app turns what was typed into an edit, asks the node what it would do, shows the answer,
 // and only on "Queue the change" calls `queueSettings` with the bytes the node gave. The approval that follows is
@@ -47,7 +48,7 @@ internal fun Controller.showChangeSettings(message: SayWords? = null) {
         val views = ArrayList<View>()
         message?.let { views.add(ui.words(it)) }
         val rows = ArrayList<RowItem>()
-        for (g in SettingsEditModel.groups) rows.add(RowItem(g.words.heading) { showEditGroup(g) })
+        for (g in SettingsEditModel.groups) rows.add(RowItem(g.words.heading) { if (g === SettingsEditModel.currency) showEditCurrency() else showEditGroup(g) })
         rows.add(RowItem(AppWords.editGroupShares.heading) { showEditShares() })
         rows.add(RowItem(AppWords.editGroupLightning.heading) { showEditLightning() })
         views.add(ui.rows(rows))
@@ -72,10 +73,14 @@ private fun Controller.showEditGroup(group: EditGroup) {
         val msg = Slot(act)
         val views = ArrayList<View>()
         val inputs = ArrayList<FieldInput>()
+        // The limits are typed in the currency the change will give the shop (CR-198).
+        val currency = settingsDraft.currency ?: held.currency
+        val changing = settingsDraft.currency != null
+        if (changing && group.fields.any { it.kind == FieldKind.Dollars }) views.add(ui.words(AppWords.editCurrencyRetype))
         for (f in group.fields) {
             val part = ArrayList<View>()
             part.add(label(f.label))
-            part.add(para(f.words.what))
+            part.add(para(f.wordsIn(currency).what))
             part.add(ui.text("Now: ${SettingsEditModel.now(f, held)}", 15f, bold = true))
             val typed = settingsDraft.typed[f.id]
             if (f.kind == FieldKind.Switch) {
@@ -85,10 +90,10 @@ private fun Controller.showEditGroup(group: EditGroup) {
                 part.add(choice)
                 inputs.add(FieldInput(f, null, choice))
             } else {
-                val field = ui.field(f.words.next)
-                field.setText(typed ?: SettingsEditModel.input(f, held))
+                val field = ui.field(f.wordsIn(currency).next)
+                field.setText(typed ?: SettingsEditModel.input(f, held, settingsDraft))
                 part.add(field)
-                part.add(line(f.words.next, muted = true))
+                part.add(line(f.wordsIn(currency).next, muted = true))
                 inputs.add(FieldInput(f, field, null))
             }
             views.add(stack(*part.toTypedArray(), gap = 6))
@@ -107,12 +112,18 @@ private fun Controller.showEditGroup(group: EditGroup) {
                     } else {
                         i.text?.text?.toString()
                     }
+                    // A limit of a new currency left empty is not typed yet: the review names it (CR-198).
+                    if (changing && f.kind == FieldKind.Dollars && text != null && text.isBlank()) {
+                        keep[f.id] = null
+                        continue
+                    }
                     if (text == null || SettingsEditModel.parse(f.kind, text) == null) {
-                        msg.show(ui.words(AppWords.editValueNotRead(f.kind, f.label)))
+                        msg.show(ui.words(AppWords.editValueNotRead(f.kind, f.label, currency)))
                         return@button
                     }
-                    val same = if (f.kind == FieldKind.Switch) text == f.read(held).toString() else text == SettingsEditModel.input(f, held)
-                    keep[f.id] = if (same) null else text
+                    val same = if (f.kind == FieldKind.Switch) text == f.read(held).toString() else text == SettingsEditModel.input(f, held, settingsDraft)
+                    // In a new currency what was typed is always a value, even the number the old limit had.
+                    keep[f.id] = if (same && !(changing && f.kind == FieldKind.Dollars)) null else text
                 }
                 for ((id, text) in keep) {
                     if (text == null) settingsDraft.typed.remove(id) else settingsDraft.typed[id] = text
@@ -120,7 +131,29 @@ private fun Controller.showEditGroup(group: EditGroup) {
                 showChangeSettings()
             }
         views.add(msg)
-        screen(group.words.heading, views, listOf(done, ui.button("Back") { showChangeSettings() }), back = { showChangeSettings() }, words = group.words)
+        screen(group.words.heading, views, listOf(done, ui.button("Back") { showChangeSettings() }), back = { showChangeSettings() }, words = group.wordsIn(currency))
+    }
+}
+
+/**
+ * The currency: what the settings hold now, and the choices. A choice other than the one held is a new currency, and
+ * says that every limit is typed again (CR-198). Done keeps the choice in memory; the library judges the change.
+ */
+private fun Controller.showEditCurrency() {
+    withHeld({ w -> showChangeSettings(w) }) { _, held ->
+        val views = ArrayList<View>()
+        views.add(ui.text("Now: ${held.currency.label}", 15f, bold = true))
+        val choices = ShopCurrency.entries
+        val choice = ui.chips(choices.map { it.label }, choices.indexOf(settingsDraft.currency ?: held.currency))
+        views.add(choice)
+        if (settingsDraft.currency != null) views.add(ui.words(AppWords.editCurrencyRetype))
+        val done =
+            ui.button("Done", ButtonKind.Primary) {
+                val i = ui.chosen(choice)
+                if (i >= 0) settingsDraft.chooseCurrency(choices[i], held.currency)
+                showChangeSettings()
+            }
+        screen(AppWords.editGroupCurrency.heading, views, listOf(done, ui.button("Back") { showChangeSettings() }), back = { showChangeSettings() }, words = AppWords.editGroupCurrency)
     }
 }
 
@@ -258,7 +291,7 @@ internal fun Controller.showEditReview() {
         val p = try {
             n.previewSettings(args)
         } catch (e: OwnerException) {
-            if (e.rule == "AS-75") showEditPrice(e.sayWords()) else showChangeSettings(e.sayWords())
+            if (e.rule == "AS-75") showEditPrice(e.sayWords(), held.currency) else showChangeSettings(e.sayWords())
             return@withHeld
         } catch (e: LinkageError) {
             showChangeSettings(AppWords.libraryMissing(e.message))
@@ -301,16 +334,17 @@ internal fun Controller.showEditReview() {
 
 /**
  * The library said a price is needed, or that the one typed is not one: its words, an empty field for today's price
- * of one bitcoin in whole dollars (never filled in), and the review again. The price is forgotten on the way in and
+ * of one bitcoin in whole units of the shop's currency (never filled in), and the review again. The price is forgotten on the way in and
  * on the way out, so it is typed afresh each time (OA-34).
  */
-private fun Controller.showEditPrice(words: SayWords) {
+private fun Controller.showEditPrice(words: SayWords, held: ShopCurrency) {
     settingsDraft.price = ""
     val msg = Slot(act)
-    val input = numberInput("Dollars for one bitcoin")
+    val currency = settingsDraft.currency ?: held
+    val input = numberInput(OwnerLook.capital(currency.plural) + " for one bitcoin")
     val field = input.field
     val review = ui.primary("Review again") {
-        when (val r = CounterModel.price(field.text.toString())) {
+        when (val r = CounterModel.price(field.text.toString(), currency)) {
             is Form.Refused -> msg.show(ui.words(r.words))
             is Form.Ok -> {
                 settingsDraft.price = field.text.toString()

@@ -57,6 +57,7 @@ import org.openbmt.owner.SettingsEditArgs
 import org.openbmt.owner.SettingsHeld
 import org.openbmt.owner.SettingsPreview
 import org.openbmt.owner.SetupFields
+import org.openbmt.owner.ShopCurrency
 import org.openbmt.owner.WaitingCounter
 import org.openbmt.owner.Words
 
@@ -324,7 +325,11 @@ object AppModelTest {
         val s = sampleSettings()
         val sl = OwnerModel.settingsLines(s)
         ok(sl.map { it.first }.toSet().size == sl.size, "every label once")
-        ok(sl[0] == ("Version" to "3") && sl[1] == ("Largest instant sale, light check" to "$7 (7,000 sats)"), "the first lines: ${sl.take(2)}")
+        ok(sl[0] == ("Version" to "3") && sl[1] == ("Currency" to "US dollar (USD)") && sl[2] == ("Largest instant sale, light check" to "$7 (7,000 sats)"), "the first lines: ${sl.take(3)}")
+        val euro = OwnerModel.settingsLines(sampleSettings(currency = ShopCurrency.Eur)).toMap()
+        ok(euro["Currency"] == "Euro (EUR)" && euro["Largest instant sale, light check"] == "7 euros (7,000 sats)", "a euro shop: the currency and a limit in euros")
+        val sats = OwnerModel.settingsLines(sampleSettings(currency = ShopCurrency.Sats)).toMap()
+        ok(sats["Currency"] == "Bitcoin Standard (sats)" && sats["Refunds per day"] == "7 sats", "a Bitcoin Standard shop: a limit in sats, and its satoshis are not said again")
         val byLabel = sl.toMap()
         ok(byLabel["Underpayment still counted"] == "1.05%" && byLabel["Tor"] == "on" && byLabel["Customers can join the Wi-Fi"] == "no", "percent and switches: $byLabel")
         ok(byLabel["Smallest sale a counter opens"] == "no floor" && byLabel["Boxes"] == "0" && byLabel["Devices that write records"] == "2", "floor, boxes, devices")
@@ -334,11 +339,17 @@ object AppModelTest {
         ok(OwnerModel.settingsLines(sampleSettings(floor = 5000, counters = emptyList())).toMap()["Smallest sale a counter opens"] == "5,000 sats", "a floor")
     }
 
-    private fun sampleSettings(floor: Long = 0, counters: List<CounterShare> = listOf(CounterShare(ByteArray(32) { 2 }, 10_000)), tipsOn: Boolean = false, tipPercents: List<Int> = listOf(10, 15, 20)): SettingsHeld {
+    private fun sampleSettings(
+        floor: Long = 0,
+        counters: List<CounterShare> = listOf(CounterShare(ByteArray(32) { 2 }, 10_000)),
+        tipsOn: Boolean = false,
+        tipPercents: List<Int> = listOf(10, 15, 20),
+        currency: ShopCurrency = ShopCurrency.Usd,
+    ): SettingsHeld {
         val l = Limit(7000, 7)
         return SettingsHeld(
             3, l, l, l, l, l, l, 105, l, l, l, l, 1, 6, 900, true, false, floor,
-            tipsOn, tipPercents, listOf(ByteArray(32) { 1 }, ByteArray(32) { 2 }), counters, emptyList(), null,
+            tipsOn, tipPercents, listOf(ByteArray(32) { 1 }, ByteArray(32) { 2 }), counters, emptyList(), null, currency,
         )
     }
 
@@ -675,7 +686,7 @@ object AppModelTest {
         ok(outbox.contains("n.outbox()") && !outbox.contains("ui.field(") && !outbox.contains("n.cancel(") && !outbox.contains("n.requeue("), "the outbox screen reads and changes nothing")
         val s = sampleSettings()
         ok(OwnerModel.settingsLines(s) == OwnerModel.settingsLines(s), "a fixed order")
-        ok(OwnerModel.settingsLines(s).size == 23, "every field of the settings has a line: ${OwnerModel.settingsLines(s).size}")
+        ok(OwnerModel.settingsLines(s).size == 24, "every field of the settings has a line: ${OwnerModel.settingsLines(s).size}")
         val noTime = OwnerModel.outboxLines(OutboxRow(1, OutboxKind.Pairing, null, null, null, null, 10, words()), 5)
         ok(noTime.contains("The node keeps no signing time for this one."), "an object with no time says so")
         ok(AppWords.noSettingsYet.who == Who.OWNER && SayCheck.problem(AppWords.noSettingsYet) == null, "no settings yet has words")
@@ -1336,13 +1347,13 @@ object AppModelTest {
         ok(Regex("File\\(appDir, AppFiles\\.CEREMONY_FILE\\)").findAll(c).count() == 2, "the file is deleted in two places only: after the save, and on a confirmation")
     }
 
-    private fun oa_32_change_settings_is_a_menu_of_six_screens_and_a_review() {
+    private fun oa_32_change_settings_is_a_menu_of_seven_screens_and_a_review() {
         val settings = source("src/android/Screens.kt").substringAfter("internal fun Controller.showSettings()").substringBefore("internal fun Controller.showAbout()")
         ok(settings.contains("\"Change settings\"") && settings.contains("showChangeSettings()"), "the settings view offers Change settings")
         val e = source("src/android/SettingsEdit.kt")
         val menu = e.substringAfter("internal fun Controller.showChangeSettings(").substringBefore("internal fun Controller.showEditGroup(")
         for (w in listOf("editGroupShares.heading", "editGroupLightning.heading", "\"Review\"", "\"Start over\"", "settingsDraft = SettingsDraft()")) ok(menu.contains(w), "the menu has $w")
-        ok(SettingsEditModel.groups.size == 5 && SettingsEditModel.groups.map { it.words.heading } == listOf("Instant sales", "Payments", "Tips", "Refunds and overrides", "Safety"), "five screens of fields: ${SettingsEditModel.groups.map { it.words.heading }}")
+        ok(SettingsEditModel.groups.size == 6 && SettingsEditModel.groups.map { it.words.heading } == listOf("Currency", "Instant sales", "Payments", "Tips", "Refunds and overrides", "Safety"), "the currency, then five screens of fields: ${SettingsEditModel.groups.map { it.words.heading }}")
         ok(AppWords.editGroupShares.heading == "Counters' shares" && AppWords.editGroupLightning.heading == "Lightning node", "the other two")
         ok(SettingsEditModel.fields.map { it.id }.toSet().size == SettingsEditModel.fields.size && SettingsEditModel.fields.size >= 15, "each field once: ${SettingsEditModel.fields.size}")
         ok(e.indexOf("n.queueSettings(") > e.indexOf("n.previewSettings("), "nothing is queued before the preview")
@@ -2130,7 +2141,7 @@ object AppModelTest {
         }
     }
 
-    // ---- the look of the screens (OA-91 to OA-93) -------------------------------------------------------------
+    // ---- the look of the screens (OA-91 to OA-93), the currency (OA-95, OA-96) -------------------------------------------------------------
 
     private fun oa_91_every_screen_is_a_page_of_the_shared_look_and_adds_no_word_but_the_group_titles() {
         val screens = listOf(
@@ -2188,7 +2199,7 @@ object AppModelTest {
         ok(back.all { l -> table.rows.any { r -> l.first.substringAfter(", ").replaceFirstChar { it.uppercase() } == r.first } }, "and only the first letter differs")
         ok(rest.none { it.first.startsWith("Largest instant sale") || it.first.startsWith("Instant total") }, "the lines of the table are not left in the rest")
         val folded = OwnerLook.settingsFolded(rest)
-        ok(folded.map { it.first } == listOf("Payments", "Tips", "Refunds and overrides", "Safety", "Counters' shares", "Lightning node"), "the groups: ${folded.map { it.first }}")
+        ok(folded.map { it.first } == listOf("Currency", "Payments", "Tips", "Refunds and overrides", "Safety", "Counters' shares", "Lightning node"), "the groups: ${folded.map { it.first }}")
         val every = folded.flatMap { it.second }
         val expected = lines.filter { it.first != "Version" && it !in back && it.first != "Underpayment still counted" }
         ok(every.toSet() == expected.toSet() && every.size == expected.size, "every other line is in a group once, and the version is the bar's")
@@ -2243,6 +2254,72 @@ object AppModelTest {
         ok(source("src/android/Controller.kt").contains("posTokens.load()") && !source("src/android/Controller.kt").contains("PosTokenStore.load"), "the till thread reads through the queue")
     }
 
+    private fun oa_95_the_currency_is_the_first_group_and_a_new_currency_asks_for_every_limit_again() {
+        val e = source("src/android/SettingsEdit.kt")
+        ok(AppWords.editGroupCurrency.heading == "Currency" && SettingsEditModel.groups.first() === SettingsEditModel.currency, "the currency is the first group")
+        ok(AppWords.editGroupCurrency.what == "The money the counters price sales in, and the limits are set in." && AppWords.editGroupCurrency.next == "Choose one. Bitcoin Standard prices in sats and uses no price source.", "the words of the group")
+        ok(AppWords.editCurrencyRetype.heading == "New currency, new limits" && AppWords.editCurrencyRetype.what == "Every limit is set again in the new currency, so the change shows them empty." && AppWords.editCurrencyRetype.next == "Type each limit in the new currency, then review. The change needs the Key app.", "the words of the new currency")
+        ok(AppWords.editCurrencyRetype.who == Who.OWNER && AppWords.editGroupCurrency.who == Who.OWNER, "both are the owner's")
+        ok(ShopCurrency.entries.map { it.label } == listOf("US dollar (USD)", "Euro (EUR)", "Pound sterling (GBP)", "Japanese yen (JPY)", "Australian dollar (AUD)", "Indian rupee (INR)", "South Korean won (KRW)", "Indonesian rupiah (IDR)", "Singapore dollar (SGD)", "Bitcoin Standard (sats)"), "the ten choices in order")
+        ok(e.contains("ShopCurrency.entries") && e.contains("ui.chips(choices.map { it.label }") && e.contains("settingsDraft.chooseCurrency(") && e.contains("AppWords.editCurrencyRetype"), "the screen offers the choices and says every limit is typed again")
+        val held = sampleSettings()
+        val limit = SettingsEditModel.fields.first { it.kind == FieldKind.Dollars }
+        val d = SettingsDraft()
+        ok(d.currency == null && SettingsEditModel.input(limit, held, d) == "7", "a shop that keeps its currency shows its limits")
+        d.typed[limit.id] = "9"
+        d.price = "98500"
+        d.chooseCurrency(ShopCurrency.Usd, held.currency)
+        ok(d.currency == null && d.typed[limit.id] == "9" && d.price == "98500", "choosing the held currency changes nothing")
+        d.chooseCurrency(ShopCurrency.Eur, held.currency)
+        ok(d.currency == ShopCurrency.Eur && d.typed.isEmpty() && d.price.isEmpty() && !d.isEmpty, "a new currency forgets the limits and the price typed in the old one")
+        ok(SettingsEditModel.input(limit, held, d) == "" && SettingsEditModel.now(limit, held) == "$7", "its limits start empty and the line Now: is still the old one")
+        val bps = SettingsEditModel.fields.first { it.kind == FieldKind.Percent }
+        ok(SettingsEditModel.input(bps, held, d) == "1.05", "a field that is not a limit keeps what it held")
+        d.typed[limit.id] = "7"
+        val a = (SettingsEditModel.args(d, held) as Form.Ok).value
+        ok(a.currency == ShopCurrency.Eur && SettingsEditModel.args(SettingsDraft(), held).let { it is Form.Ok && it.value.currency == null }, "the edit names the currency only when it changed")
+        d.price = "98,500"
+        ok((SettingsEditModel.args(d, held) as Form.Ok).value.usdPerBtc == 98_500L, "the price is the one typed")
+        d.price = "x"
+        ok((SettingsEditModel.args(d, held) as Form.Refused).words.what.contains("whole number of euros"), "a price that is not a number says which currency")
+        d.chooseCurrency(ShopCurrency.Usd, held.currency)
+        ok(d.currency == null && d.isEmpty, "choosing the old currency again leaves no change")
+    }
+
+    private fun oa_96_the_editor_names_the_shops_currency_where_it_said_dollars_and_the_settings_show_it() {
+        val usd = AppWords.editFields.toMap()
+        for (c in ShopCurrency.entries) {
+            val here = AppWords.editFieldsIn(c).toMap()
+            for ((id, w) in usd) {
+                val was = listOf(w.heading, w.what, w.next)
+                val now = listOf(here.getValue(id).heading, here.getValue(id).what, here.getValue(id).next)
+                ok(now == was.map { it.replace("Whole dollars", "Whole ${c.plural}") }, "the words of $id differ only where dollars stood: $c")
+                ok(SayCheck.problem(here.getValue(id)) == null, "the words of $id in $c pass the checks")
+            }
+            val pairs = listOf(
+                AppWords.editGroupInstant to AppWords.editGroupInstantIn(c),
+                AppWords.editGroupRefunds to AppWords.editGroupRefundsIn(c),
+            )
+            for ((was, now) in pairs) {
+                ok(now.heading == was.heading && now.what == was.what && now.next == was.next.replace("Whole dollars", "Whole ${c.plural}"), "the group's words differ only where dollars stood: $c")
+            }
+            val bad = AppWords.editValueNotRead(FieldKind.Dollars, "Refunds per day", c)
+            val base = AppWords.editValueNotRead(FieldKind.Dollars, "Refunds per day")
+            ok(bad.what == base.what.replace("dollars", c.plural) && bad.next == base.next.replace("dollars", c.plural) && SayCheck.problem(bad) == null, "the value not read says $c")
+            val price = AppWords.priceNotReadIn(c)
+            ok(price.what == AppWords.priceNotRead.what.replace("dollars", c.plural) && price.next == AppWords.priceNotRead.next.replace("dollars", c.plural) && SayCheck.problem(price) == null, "the price not read says $c")
+        }
+        ok(AppWords.editGroupInstantIn(ShopCurrency.Usd) === AppWords.editGroupInstant && AppWords.priceNotReadIn(ShopCurrency.Usd) === AppWords.priceNotRead, "dollars are the words as before")
+        ok(AppWords.editFieldsIn(ShopCurrency.Sats).toMap().getValue("refund_cap").next == "Whole sats. 0 turns it off.", "Bitcoin Standard: whole sats")
+        ok(AppWords.editFieldsIn(ShopCurrency.Eur).toMap().getValue("refund_cap").next == "Whole euros. 0 turns it off.", "euros: whole euros")
+        val held = sampleSettings(currency = ShopCurrency.Eur)
+        val limit = SettingsEditModel.fields.first { it.kind == FieldKind.Dollars }
+        ok(SettingsEditModel.now(limit, held) == "7 euros" && SettingsEditModel.moneyText(ShopCurrency.Sats, 1250) == "1,250 sats" && SettingsEditModel.moneyText(ShopCurrency.Jpy, 0) == "off", "Now: names the currency")
+        ok(OwnerLook.settingsGroups.first() == ("Currency" to listOf("Currency")) && OwnerModel.settingsLines(held)[1] == ("Currency" to "Euro (EUR)"), "the settings view shows Currency as a key and the choice as its value")
+        val e = source("src/android/SettingsEdit.kt")
+        ok(e.contains("OwnerLook.capital(currency.plural) + \" for one bitcoin\"") && !e.contains("\"Dollars for one bitcoin\""), "the price field names the currency")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
@@ -2264,7 +2341,7 @@ object AppModelTest {
         val rules = Regex("^- \\*\\*OA-(\\d\\d)\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules == rules.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
         // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-79 for more.
-        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..94)
+        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..96)
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")

@@ -14,6 +14,7 @@ import org.openbmt.owner.RefundArgs
 import org.openbmt.owner.SendKind
 import org.openbmt.owner.SendRow
 import org.openbmt.owner.SettingsHeld
+import org.openbmt.owner.ShopCurrency
 import org.openbmt.owner.Limit
 
 /**
@@ -120,24 +121,28 @@ object OwnerModel {
 
     // ---- settings -------------------------------------------------------------------
 
-    private fun limit(l: Limit): String = "$${l.displayUsd} (${Format.sats(l.sats)})"
+    /** A limit in the shop's currency; its satoshis follow, except for Bitcoin Standard, where they are the same number. */
+    private fun limit(l: Limit, c: ShopCurrency): String =
+        if (c == ShopCurrency.Sats) SettingsEditModel.unitsText(c, l.displayUsd)
+        else "${SettingsEditModel.unitsText(c, l.displayUsd)} (${Format.sats(l.sats)})"
 
     private fun percent(bps: Long): String = "${bps / 100}.${(bps % 100).toString().padStart(2, '0')}%"
 
     /** Every line of the settings the node holds, as label and value, in a fixed order. */
     fun settingsLines(s: SettingsHeld): List<Pair<String, String>> = listOf(
         "Version" to s.version.toString(),
-        "Largest instant sale, light check" to limit(s.lightPerSale),
-        "Instant total, light check" to limit(s.lightBudget),
-        "Largest instant sale, own node" to limit(s.nodePerSale),
-        "Instant total, own node" to limit(s.nodeBudget),
-        "Largest instant sale, Box reports" to limit(s.boxPerSale),
-        "Instant total, Box reports" to limit(s.boxBudget),
+        "Currency" to s.currency.label,
+        "Largest instant sale, light check" to limit(s.lightPerSale, s.currency),
+        "Instant total, light check" to limit(s.lightBudget, s.currency),
+        "Largest instant sale, own node" to limit(s.nodePerSale, s.currency),
+        "Instant total, own node" to limit(s.nodeBudget, s.currency),
+        "Largest instant sale, Box reports" to limit(s.boxPerSale, s.currency),
+        "Instant total, Box reports" to limit(s.boxBudget, s.currency),
         "Underpayment still counted" to percent(s.underpaymentToleranceBps),
-        "Largest single refund" to limit(s.refundCap),
-        "Refunds per day" to limit(s.refundDailyCap),
-        "Cashier's override per day" to limit(s.cashierOverrideDailyCap),
-        "Manager's override ceiling" to limit(s.managerOverrideCeiling),
+        "Largest single refund" to limit(s.refundCap, s.currency),
+        "Refunds per day" to limit(s.refundDailyCap, s.currency),
+        "Cashier's override per day" to limit(s.cashierOverrideDailyCap, s.currency),
+        "Manager's override ceiling" to limit(s.managerOverrideCeiling, s.currency),
         "Blocks to settle a sale" to s.minConfirmations.toString(),
         "Blocks until a refund may be paid" to s.finalConfirmations.toString(),
         "Longest heartbeat age for instant" to "${s.heartbeatMaxAgeSecs} seconds",
