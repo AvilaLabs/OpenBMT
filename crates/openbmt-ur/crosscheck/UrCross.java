@@ -200,7 +200,7 @@ public class UrCross {
         }
         System.out.println("cases: " + cases + " (" + single + " single-part)");
         System.out.println("parts compared character for character: " + partsCompared);
-        System.out.println("ours decoded by Hummingbird: in order " + ordered
+        System.out.println("openbmt-ur parts decoded by Hummingbird: in order " + ordered
                 + ", with 30% lost " + lossy);
         System.out.println(failures == 0 ? "PASS  Hummingbird side" : "FAILURES: " + failures);
         if (failures != 0) {
