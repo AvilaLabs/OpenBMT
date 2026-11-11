@@ -296,7 +296,8 @@ in memory, and nothing is changed if the store fails.
   with the owner identity when it is queued and must have a shape that can be
   encoded. The batch's range is recorded as issued in the same write
   (OC-10), and a batch that overlaps an issued range is refused (OC-11). A
-  pairing is the counter's request, decoded strictly. A queued
+  pairing is the counter's request, decoded strictly and checked
+  against the Key app's offer with the wallet's network (AS-69). A queued
   item is put in a session in the order of its kind and then its number.
 - **AS-59.** Settings: `openbmt_core::settings::classify_change` tells a
   change that loosens from one that tightens, against the settings in force
@@ -403,6 +404,71 @@ in memory, and nothing is changed if the store fails.
   reason (SP-13). An entry that keeps outpoints cannot be cancelled: its
   dropped transaction may still confirm.
 
+### Adding a counter
+
+The owner app's "Add a counter" goes through these calls, in this order:
+`queue_counter_request` (AS-58, AS-69), `queue_counter` (AS-70, AS-71), the
+session of AS-61 and AS-62, then `counter_bundle` and
+`mark_counter_delivered` (AS-72, AS-73). They live here because they are
+the queue and the outbox of the owner phone and nothing else: no network, no
+clock, no screen. The counter's own checks of what it is handed are
+`docs/COUNTER-RULES.md` CR-91 to CR-99, and the Key app's lines for the three
+items are AS-26 to AS-28.
+
+- **AS-69.** A counter's request is queued only if it passes AS-58 and the
+  counter is not known. A request that does not decode is refused as "not a
+  counter's request", and one whose binding is not the owner phone's own
+  offer (this owner root, this Key app root, this wallet and its network) as
+  "for another shop or network". A counter is known when its key is on the
+  device list or among the counters of the settings held, when a pairing for
+  it is in the queue, or when a finished pairing for it waits in the outbox.
+  Settings that are only queued do not make it known: the owner phone queues
+  them after the pairing. A known counter is refused and nothing changes.
+  `queue_counter_request` queues the request and also returns the counter's
+  name and the four session words (`openbmt_core::pairing`), which the
+  counter and the Key app show too. The name is text from the counter
+  (SC-08).
+- **AS-70.** The settings that add a counter are made from the settings with
+  the highest version among those held and those queued (any stage), so a
+  counter added before the last one is approved stays in. With none held
+  or queued, they are the starting values at a rate the caller gives, and a
+  rate of 0 is refused. The counter is put on the device list and among the
+  counters; every counter's share becomes the whole budget (10,000 basis
+  points) divided by the number of counters, rounded down, and the counter
+  that comes first by key gets what is left over, so the shares always add
+  up to the whole. The version is one above every version signed so far
+  (AS-59). The settings are queued under AS-59: a new counter always loosens,
+  and settings queued and not in a session are superseded. Custom shares
+  are for the settings editor and are not made here.
+- **AS-71.** `queue_counter` queues the settings of AS-70 and the counter's
+  first batch in one write, for a pairing that is queued and not in a
+  session. The batch is `count` addresses from the first receive index no
+  batch has been given (the receive mark), derived from the wallet, signed
+  and recorded as issued under AS-58 and OC-10, and `count` must be at least
+  the owner phone's own batch minimum. If the pairing is not queued, the
+  settings or the batch are refused, a bound is reached or the store fails,
+  nothing is queued. The caller chooses `count`: the app passes the
+  counter's own minimum (`openbmt_counter_node::BATCH_MIN_COUNT`, which the
+  counter holds the first batch to, CR-96) or the owner phone's minimum if
+  that is larger.
+- **AS-72.** `counter_bundle` makes the counter bundle (`OBMs`) for one
+  counter from the outbox alone: its finished pairing, the settings with
+  both signatures that list the counter on the device list and among the
+  counters and have a version above the pairing's (the highest such), and
+  the counter's first batch, the one that starts earliest, when one waits.
+  No peers are put in. The bundle is made again, byte for byte, as often as
+  it is asked for while the same objects wait, and nothing is changed. With
+  no such pairing or no such settings it is refused with which of the two is
+  missing. A batch that does not wait does not stop the bundle: the counter
+  can be paired without addresses, and the words say so.
+- **AS-73.** `counters_waiting` lists the counters with a finished pairing in
+  the outbox, with the names they gave. `mark_counter_delivered` is what the
+  owner says when the counter shows that it is paired: the pairing and the
+  first batch of the bundle leave the outbox, and so do the settings when the
+  counter is the only one they list. Settings that list other counters stay,
+  because those counters have not been handed them. With no finished pairing
+  for the counter it is refused and nothing changes.
+
 ## 4. What these rules do not do
 
 Stated plainly, because the design promises no overclaiming.
@@ -490,3 +556,18 @@ Each case below takes the reading that moves less money and loosens less.
     passes coins that are not the wallet's real coins, is not caught: with
     the old outpoints gone from the coins passed, the entry is planned
     freely.
+16. **Equal shares when a counter is added** (AS-70). The design gives each
+    counter a signed share and says nothing of how a new one is chosen. Equal
+    shares add up to the whole budget and need no number from the owner; the
+    one-off remainder goes to the first counter by key so that nothing is
+    left unspent or over. Adding a counter lowers the others' shares, which
+    tightens them and loosens the new one, and the Key app sees it as the
+    loosening it is.
+17. **The settings that add a counter stay in the outbox for the others**
+    (AS-73). The settings reach a counter that is already paired over the
+    link, which does not carry settings yet, so the entry is not marked
+    delivered when only the new counter has taken it.
+18. **A counter can be paired without its first batch** (AS-72). The
+    counter takes a bundle without one (CR-96), so a batch that was handed
+    to the link before the bundle was made does not stop the ceremony, whose
+    window is short.

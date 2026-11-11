@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use bitcoin::{OutPoint, ScriptBuf, Txid};
 use openbmt_core::batch::{AddressBatch, BatchBuilder, BatchPolicy, PinnedRoots};
 use openbmt_core::identity::{DeviceId, Identity};
-use openbmt_core::pairing::{check_request, PairOffer, PairRequest};
+use openbmt_core::pairing::{check_request, PairError, PairOffer, PairRequest, SignedPairing};
 use openbmt_core::settings::{classify_change, Change, Settings, SignedSettings};
 use openbmt_core::wallet::WalletDescription;
 use openbmt_session::{label_text_ok, ShopValue};
@@ -198,6 +198,20 @@ impl State {
             .chain(waiting)
             .max()
             .unwrap_or(0)
+    }
+
+    /// AS-69: whether the counter is on a device list of the settings held,
+    /// in the pairing queue, or in a finished pairing that waits.
+    pub fn knows_counter(&self, counter: &DeviceId) -> bool {
+        let listed = |s: &Settings| s.devices.contains(counter) || s.counters.contains_key(counter);
+        self.known.as_ref().is_some_and(|k| listed(&k.settings))
+            || self.pairings.iter().any(|p| p.request.counter == *counter)
+            || self.outbox.iter().any(|d| match &d.what {
+                Delivery::Pairing(bytes) => {
+                    SignedPairing::from_bytes(bytes).is_ok_and(|p| p.entry.counter == *counter)
+                }
+                _ => false,
+            })
     }
 
     /// The stage of any queue entry by number.
@@ -633,15 +647,28 @@ impl Owner {
         now: u64,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<u32, OwnerError<E>> {
+        let mut next = self.state.clone();
+        let id = self.stage_batch(&mut next, batch, now)?;
+        self.commit(next, persist)?;
+        Ok(id)
+    }
+
+    /// AS-58: the work of [`Owner::queue_batch`] on a copy of the state,
+    /// before it is stored.
+    pub(crate) fn stage_batch(
+        &self,
+        next: &mut State,
+        batch: AddressBatch,
+        now: u64,
+    ) -> Result<u32, Refusal> {
         let derived = BatchBuilder::new(self.policy)
             .derive(&self.wallet, batch.counter, batch.start, batch.count)
             .map_err(|_| Refusal::BatchNotDerived)?;
         if derived != batch {
-            return Err(Refusal::BatchNotDerived.into());
+            return Err(Refusal::BatchNotDerived);
         }
-        let mut next = self.state.clone();
         if next.batches.len() >= MAX_BATCHES {
-            return Err(Refusal::Full("the batch queue").into());
+            return Err(Refusal::Full("the batch queue"));
         }
         // OC-10, OC-11: the range is recorded in the same write as the batch.
         next.issue(IssuedRange {
@@ -658,19 +685,21 @@ impl Owner {
             owner_sig,
             stage: Stage::Queued,
         });
-        self.commit(next, persist)?;
         Ok(id)
     }
 
     /// AS-58: queue a counter's pairing request, decoded strictly and
-    /// checked against the Key app's offer.
+    /// checked against the Key app's offer, which is made from this
+    /// owner's root, the Key app's root, the wallet and the wallet's
+    /// network. AS-69: a counter that is paired or waiting already is
+    /// refused.
     pub fn queue_pairing<E>(
         &mut self,
         request_bytes: &[u8],
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<u32, OwnerError<E>> {
         let request = PairRequest::from_bytes(request_bytes)
-            .map_err(|e| Refusal::PairingRequest(e.to_string()))?;
+            .map_err(|e| Refusal::PairingNotRequest(e.to_string()))?;
         let offer = PairOffer::new(
             self.identity.device_id(),
             self.roots.approver,
@@ -678,7 +707,13 @@ impl Owner {
             self.wallet.network(),
         )
         .map_err(|e| Refusal::PairingRequest(e.to_string()))?;
-        check_request(&offer, &request).map_err(|e| Refusal::PairingRequest(e.to_string()))?;
+        check_request(&offer, &request).map_err(|e| match e {
+            PairError::BindingMismatch => Refusal::PairingOtherShop,
+            other => Refusal::PairingRequest(other.to_string()),
+        })?;
+        if self.state.knows_counter(&request.counter) {
+            return Err(Refusal::PairingKnown.into());
+        }
         let mut next = self.state.clone();
         if next.pairings.len() >= MAX_PAIRINGS {
             return Err(Refusal::Full("the pairing queue").into());
@@ -702,17 +737,28 @@ impl Owner {
         settings: Settings,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<SettingsQueued, OwnerError<E>> {
+        let mut next = self.state.clone();
+        let outcome = self.stage_settings(&mut next, settings)?;
+        self.commit(next, persist)?;
+        Ok(outcome)
+    }
+
+    /// AS-59: the work of [`Owner::queue_settings`] on a copy of the state,
+    /// before it is stored.
+    pub(crate) fn stage_settings(
+        &self,
+        next: &mut State,
+        settings: Settings,
+    ) -> Result<SettingsQueued, Refusal> {
         settings
             .validate()
             .map_err(|e| Refusal::SettingsInvalid(e.to_string()))?;
-        let mut next = self.state.clone();
         if let Some(known) = next.highest_version() {
             if settings.version <= known {
                 return Err(Refusal::SettingsVersion {
                     known,
                     got: settings.version,
-                }
-                .into());
+                });
             }
         }
         let owner_sig = settings.sign(&self.identity);
@@ -728,10 +774,10 @@ impl Owner {
         // AS-59: what is queued and not in a session is superseded.
         next.settings
             .retain(|q| !matches!(q.stage, Stage::Queued | Stage::Returned { .. }));
-        let outcome = match change {
+        Ok(match change {
             Change::Loosening => {
                 if next.settings.len() >= MAX_SETTINGS {
-                    return Err(Refusal::Full("the settings queue").into());
+                    return Err(Refusal::Full("the settings queue"));
                 }
                 let id = next.take_id()?;
                 next.settings.push(QueuedSettings {
@@ -743,7 +789,7 @@ impl Owner {
             }
             Change::Tightening => {
                 if next.outbox.len() >= crate::MAX_OUTBOX {
-                    return Err(Refusal::OutboxFull.into());
+                    return Err(Refusal::OutboxFull);
                 }
                 let id = next.take_id()?;
                 next.outbox.push(Deliverable {
@@ -756,9 +802,7 @@ impl Owner {
                     signed: Box::new(signed),
                 }
             }
-        };
-        self.commit(next, persist)?;
-        Ok(outcome)
+        })
     }
 
     // ---- changing a queue entry ---------------------------------------------------

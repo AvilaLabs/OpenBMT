@@ -7,6 +7,29 @@ use openbmt_core::identity::IdentityError;
 use openbmt_core::wire::DecodeError;
 use openbmt_session::{BindError, EncodeError};
 
+/// What a counter's bundle still lacks (AS-72).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BundleGap {
+    /// No finished pairing of the counter waits: the Key app has not
+    /// approved it, or it was delivered already.
+    Pairing,
+    /// No settings signed by both roots list the counter above the
+    /// pairing's version.
+    Settings,
+}
+
+impl fmt::Display for BundleGap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Pairing => write!(f, "no finished pairing of the counter waits"),
+            Self::Settings => write!(
+                f,
+                "no settings with both signatures list the counter above the pairing's version"
+            ),
+        }
+    }
+}
+
 /// Why a call was refused. Nothing was changed and nothing was stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
@@ -55,8 +78,24 @@ pub enum Refusal {
     },
     /// OC-11: the most ranges that are kept as issued are kept already.
     IssuedRangesFull,
-    /// AS-58: a pairing request is not one the Key app's offer accepts.
+    /// AS-58: a pairing request is not one the Key app's offer accepts. The
+    /// text says why.
     PairingRequest(String),
+    /// AS-58: the bytes are not a counter's pairing request. The text is the
+    /// decoder's.
+    PairingNotRequest(String),
+    /// AS-58: the request was made for another shop's offer or another
+    /// network: its binding is not this owner's and Key app's offer.
+    PairingOtherShop,
+    /// AS-69: the counter is on a device list, in the queue or finished and
+    /// waiting already.
+    PairingKnown,
+    /// AS-70: the owner phone holds no settings and was given no rate to
+    /// start them from.
+    NoSettingsRate,
+    /// AS-72: a counter's bundle cannot be made yet: something it needs is
+    /// not here.
+    BundleNotReady(BundleGap),
     /// AS-59: settings that do not pass the settings rules.
     SettingsInvalid(String),
     /// AS-59: a version that is not above every version known.
@@ -130,6 +169,19 @@ impl fmt::Display for Refusal {
             Self::PairingRequest(why) => {
                 write!(f, "AS-58: the pairing request is refused: {why}")
             }
+            Self::PairingNotRequest(why) => {
+                write!(f, "AS-58: this is not a counter's pairing request: {why}")
+            }
+            Self::PairingOtherShop => write!(
+                f,
+                "AS-58: the pairing request was made for another offer: another shop or network"
+            ),
+            Self::PairingKnown => write!(f, "AS-69: this counter is paired or waiting already"),
+            Self::NoSettingsRate => write!(
+                f,
+                "AS-70: no settings are held and no rate was given to start them"
+            ),
+            Self::BundleNotReady(gap) => write!(f, "AS-72: the bundle is not ready: {gap}"),
             Self::SettingsInvalid(why) => {
                 write!(f, "AS-59: the settings are refused: {why}")
             }

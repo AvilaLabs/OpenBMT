@@ -1,6 +1,6 @@
 //! The OpenBMT owner phone's side of the approval session.
 //!
-//! The rules are in `docs/SESSION-RULES.md`, section 3 (AS-50 to AS-68);
+//! The rules are in `docs/SESSION-RULES.md`, section 3 (AS-50 to AS-73);
 //! the refusals and the tests name the rule they belong to. The library has
 //! no network, no clock of its own, no randomness of its own and no screen.
 //! The caller passes the time in seconds, the random bytes, the coins and
@@ -14,6 +14,9 @@
 //! 2. [`Owner::set_sale_facts`], [`Owner::queue_refund`],
 //!    [`Owner::queue_cash_out`], [`Owner::queue_batch`],
 //!    [`Owner::queue_settings`] and [`Owner::queue_pairing`] fill the queue.
+//!    [`Owner::queue_counter_request`] and [`Owner::queue_counter`] do it for
+//!    a counter that is being added, and [`Owner::counter_bundle`] makes what
+//!    the counter takes at the end.
 //! 3. [`Owner::build_request`] freezes what is ready into one session and
 //!    returns the request bytes for the Key app.
 //! 4. [`Owner::take_response`] checks the Key app's answer against the
@@ -41,6 +44,7 @@
 mod build;
 pub mod ceremony;
 mod codec;
+mod counter;
 mod error;
 mod follow;
 pub mod say;
@@ -48,7 +52,10 @@ mod state;
 mod take;
 mod types;
 
-pub use error::{OwnerError, Refusal, RestoreError, SetupError};
+pub use counter::{
+    equal_shares, BundleParts, CounterBundleMade, CounterQueued, CounterRequest, WaitingCounter,
+};
+pub use error::{BundleGap, OwnerError, Refusal, RestoreError, SetupError};
 pub use state::Owner;
 pub use types::{
     Built, CashAmount, CashOut, Deliverable, Delivery, FeePayer, IssuedRange, ItemOutcome, Options,

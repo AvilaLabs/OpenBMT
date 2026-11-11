@@ -92,6 +92,12 @@ fn refusal_name(r: &Refusal) -> String {
         Refusal::BatchOverlaps { .. } => "BatchOverlaps".to_string(),
         Refusal::IssuedRangesFull => "IssuedRangesFull".to_string(),
         Refusal::PairingRequest(_) => "PairingRequest".to_string(),
+        Refusal::PairingNotRequest(_) => "PairingNotRequest".to_string(),
+        Refusal::PairingOtherShop => "PairingOtherShop".to_string(),
+        Refusal::PairingKnown => "PairingKnown".to_string(),
+        Refusal::NoSettingsRate => "NoSettingsRate".to_string(),
+        Refusal::BundleNotReady(BundleGap::Pairing) => "BundleNotReady/Pairing".to_string(),
+        Refusal::BundleNotReady(BundleGap::Settings) => "BundleNotReady/Settings".to_string(),
         Refusal::SettingsInvalid(_) => "SettingsInvalid".to_string(),
         Refusal::SettingsVersion { .. } => "SettingsVersion".to_string(),
         Refusal::ZeroFeeRate => "ZeroFeeRate".to_string(),
@@ -209,6 +215,12 @@ fn sc_01_no_variant_is_missing() {
         Refusal::BatchOverlaps { start: 0, count: 3 },
         Refusal::IssuedRangesFull,
         Refusal::PairingRequest(String::new()),
+        Refusal::PairingNotRequest(String::new()),
+        Refusal::PairingOtherShop,
+        Refusal::PairingKnown,
+        Refusal::NoSettingsRate,
+        Refusal::BundleNotReady(BundleGap::Pairing),
+        Refusal::BundleNotReady(BundleGap::Settings),
         Refusal::SettingsInvalid(String::new()),
         Refusal::SettingsVersion { known: 1, got: 0 },
         Refusal::ZeroFeeRate,
@@ -275,6 +287,15 @@ fn sc_01_no_variant_is_missing() {
     // The ceremony's own list is checked against its variants in
     // `ceremony::tests`.
     wanted.extend(crate::ceremony::all_words().into_iter().map(|(n, _)| n));
+    // The words of adding a counter, which are not refusals.
+    for n in [
+        "CounterRequest",
+        "CounterQueued",
+        "CounterBundle/WithBatch",
+        "CounterBundle/NoBatch",
+    ] {
+        wanted.push(n.to_string());
+    }
     for name in &wanted {
         assert!(names.contains(name), "{name} has no words");
     }

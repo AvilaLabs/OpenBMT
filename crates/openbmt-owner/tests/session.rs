@@ -879,8 +879,10 @@ fn as_62_a_pairing_version_above_what_the_owner_signed_is_returned() {
     let approver = identity(APPROVER_SECRET);
     for (version, ok_version) in [(99u32, false), (1, true)] {
         let mut rig = Rig::new();
-        // The owner has signed settings of version 1, now in force.
-        ok(rig.owner.queue_settings(settings_with(1, &[1]), nop));
+        // The owner has signed settings of version 1, now in force. They
+        // list another counter: one that is listed is paired already
+        // (AS-69).
+        ok(rig.owner.queue_settings(settings_with(1, &[2]), nop));
         rig.round(&[], 0);
         let (_, request) = pair_request(&rig.owner, 1);
         let id = ok(rig.owner.queue_pairing(&request, nop));

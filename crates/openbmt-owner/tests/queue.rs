@@ -340,21 +340,21 @@ fn as_58_a_pairing_request_is_decoded_strictly_and_checked() {
     let mut o = new_owner(Options::default());
     assert!(matches!(
         refused(o.queue_pairing(b"junk", nop)),
-        Refusal::PairingRequest(_)
+        Refusal::PairingNotRequest(_)
     ));
     let (_, mut request) = pair_request(&o, 1);
     request.push(0);
     assert!(matches!(
         refused(o.queue_pairing(&request, nop)),
-        Refusal::PairingRequest(_)
+        Refusal::PairingNotRequest(_)
     ));
     // A request made for another offer does not fit this owner and Key app.
     let other = new_owner_with_approver(identity([0x55; 32]).device_id());
     let (_, request) = pair_request(&other, 1);
-    assert!(matches!(
+    assert_eq!(
         refused(o.queue_pairing(&request, nop)),
-        Refusal::PairingRequest(_)
-    ));
+        Refusal::PairingOtherShop
+    );
     let (_, request) = pair_request(&o, 1);
     let id = ok(o.queue_pairing(&request, nop));
     assert_eq!(queued_pairing_of(&o, id).stage, Stage::Queued);

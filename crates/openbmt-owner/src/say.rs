@@ -11,12 +11,13 @@
 //! where that is not plain.
 
 use bitcoin::Txid;
-use openbmt_core::identity::IdentityError;
+use openbmt_core::identity::{Identity, IdentityError};
 use openbmt_core::say::{Quoted, Tone, Who, Words};
 use openbmt_core::wire::DecodeError;
 use openbmt_session::{BindError, EncodeError};
 
-use crate::error::{OwnerError, Refusal, RestoreError, SetupError};
+use crate::counter::{CounterBundleMade, CounterQueued, CounterRequest};
+use crate::error::{BundleGap, OwnerError, Refusal, RestoreError, SetupError};
 use crate::follow::REASON_DROPPED;
 use crate::types::{ItemOutcome, Skipped, Stage};
 
@@ -552,6 +553,49 @@ impl Refusal {
             )
             .code("AS-58")
             .detail(why.as_str()),
+            Self::PairingNotRequest(why) => stop(
+                "Not a counter's request",
+                "The code that was read is not a request from a counter, so nothing was queued.",
+                Who::Owner,
+                "Scan the code the counter shows after it has read the Key app's offer.",
+            )
+            .code("AS-58")
+            .detail(why.as_str()),
+            Self::PairingOtherShop => stop(
+                "Counter is for another shop",
+                "This counter read another shop's offer, or one for another network, so nothing was queued.",
+                Who::Owner,
+                "Start again on the counter and scan the offer this shop's Key app shows.",
+            )
+            .code("AS-58"),
+            Self::PairingKnown => stop(
+                "Counter already added",
+                "This counter is already paired, or its pairing is waiting in the queue or to be handed over.",
+                Who::Owner,
+                "Look in the queue and the waiting list; cancel the old pairing there to start again.",
+            )
+            .code("AS-69"),
+            Self::NoSettingsRate => stop(
+                "A rate is needed",
+                "This phone holds no settings for the shop yet, and their limits in dollars need today's rate.",
+                Who::Owner,
+                "Enter how many satoshis one dollar buys today, then add the counter again.",
+            )
+            .code("AS-70"),
+            Self::BundleNotReady(BundleGap::Pairing) => stop(
+                "Counter's code not ready",
+                "No approved pairing of this counter waits here, so there is nothing to show it yet.",
+                Who::Owner,
+                "Take the Key app's response first. If the counter was handed its code already, nothing more is needed.",
+            )
+            .code("AS-72"),
+            Self::BundleNotReady(BundleGap::Settings) => stop(
+                "Counter's settings not ready",
+                "The settings that list this counter have not come back approved by the Key app.",
+                Who::Owner,
+                "Take the Key app's response for the approval that holds them, then show the code.",
+            )
+            .code("AS-72"),
             Self::SettingsInvalid(why) => stop(
                 "Settings not accepted",
                 "The new settings do not pass the wallet's rules, so they were not queued.",
@@ -636,6 +680,65 @@ impl Refusal {
             )
             .code("AS-62"),
         }
+    }
+}
+
+impl CounterRequest {
+    /// What the owner is told when a counter's request was queued: the
+    /// counter's name is quoted, and the four words are shown beside these
+    /// words by the caller.
+    pub fn words(&self) -> Words {
+        info(
+            "Check the four words",
+            "The counter's request was read and queued. Nothing is approved yet.",
+            Who::Owner,
+            "Check that the counter shows the same four words. If it does not, cancel the pairing and stop.",
+        )
+        .code("AS-69")
+        .quoted(Quoted::new("The counter calls itself", self.name.as_str()))
+    }
+}
+
+impl CounterQueued {
+    /// What the owner is told when the settings and the first addresses of
+    /// a counter were queued.
+    pub fn words(&self) -> Words {
+        info(
+            "Counter's settings queued",
+            "The settings that add the counter and its first addresses are queued. Nothing is approved yet.",
+            Who::Owner,
+            "Build the approval for the Key app and take it there.",
+        )
+        .code("AS-70")
+    }
+}
+
+/// What the owner is told when a counter's code is ready, with the first
+/// addresses in it or without them.
+pub fn bundle_words(with_batch: bool) -> Words {
+    if with_batch {
+        info(
+            "Counter's code is ready",
+            "The pairing, the settings and the first addresses are signed by both keys.",
+            Who::Owner,
+            "Show the code to the counter. It shows Paired when it has taken it.",
+        )
+        .code("AS-72")
+    } else {
+        info(
+            "Code has no addresses",
+            "The pairing and the settings are signed by both keys, but no addresses for this counter were waiting.",
+            Who::Owner,
+            "Show the code to the counter, then sign a batch of addresses for it once it is paired.",
+        )
+        .code("AS-72")
+    }
+}
+
+impl CounterBundleMade {
+    /// What the owner is told when this counter's code is ready.
+    pub fn words(&self) -> Words {
+        bundle_words(self.parts.batch.is_some())
     }
 }
 
@@ -953,6 +1056,25 @@ pub fn all_words() -> Vec<(String, Words)> {
         Refusal::PairingRequest("a sample".to_string()).words(),
     );
     add(
+        "Refusal::PairingNotRequest",
+        Refusal::PairingNotRequest("a sample".to_string()).words(),
+    );
+    add(
+        "Refusal::PairingOtherShop",
+        Refusal::PairingOtherShop.words(),
+    );
+    add("Refusal::PairingKnown", Refusal::PairingKnown.words());
+    add("Refusal::NoSettingsRate", Refusal::NoSettingsRate.words());
+    for (n, gap) in [
+        ("Pairing", BundleGap::Pairing),
+        ("Settings", BundleGap::Settings),
+    ] {
+        add(
+            &format!("Refusal::BundleNotReady/{n}"),
+            Refusal::BundleNotReady(gap).words(),
+        );
+    }
+    add(
         "Refusal::SettingsInvalid",
         Refusal::SettingsInvalid("a sample".to_string()).words(),
     );
@@ -1048,6 +1170,35 @@ pub fn all_words() -> Vec<(String, Words)> {
         ItemOutcome::Returned("The amount does not match the receipt".to_string()).words(),
     );
     add("ItemOutcome::Healthy", ItemOutcome::Healthy.words());
+
+    let counter = Identity::from_secret_bytes(&[7; 32])
+        .map(|i| i.device_id())
+        .ok();
+    if let Some(counter) = counter {
+        add(
+            "CounterRequest",
+            CounterRequest {
+                id: 1,
+                counter,
+                name: "Front counter".to_string(),
+                words: ["bold", "river", "amber", "lunar"],
+            }
+            .words(),
+        );
+        add(
+            "CounterQueued",
+            CounterQueued {
+                settings_id: 2,
+                settings_version: 2,
+                batch_id: 3,
+                shares: vec![(counter, 10_000)],
+            }
+            .words(),
+        );
+    }
+    for (n, with_batch) in [("WithBatch", true), ("NoBatch", false)] {
+        add(&format!("CounterBundle/{n}"), bundle_words(with_batch));
+    }
     all.extend(crate::ceremony::all_words());
     all
 }
