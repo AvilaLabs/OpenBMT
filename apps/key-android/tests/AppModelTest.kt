@@ -19,12 +19,14 @@ import org.openbmt.key.KeyException
 import org.openbmt.key.LineDetail
 import org.openbmt.key.LineKind
 import org.openbmt.key.LineView
+import org.openbmt.key.LockStatus
 import org.openbmt.key.PairingDetail
 import org.openbmt.key.Quoted
 import org.openbmt.key.SetupState
 import org.openbmt.key.SlotView
 import org.openbmt.key.WalletView
 import org.openbmt.key.Words
+import org.openbmt.key.AllowlistView
 
 /**
  * The tests of the pure parts of the Key app: the screen model, the words
@@ -140,7 +142,9 @@ object AppModelTest {
         "debuggingOn", "wirelessDebuggingOn", "accessibilityOn", "keyInSoftware", "libraryMissing", "fault",
         "keystoreUnavailable", "fileNotRead", "fileNotSaved", "cameraOff", "cameraNotStarted", "codeNotForField", "notANumber", "flipsNotReadable", "answersReady", "pairOffer",
         "key3Needed", "key3UrNotRead", "key3NotText", "key3Mismatch", "scanOwnerWallet", "checkWallet", "walletMismatch",
-        "walletLacksKey3",
+        "walletLacksKey3", "choosePin", "upgradePin", "pinsDiffer", "pinChanged", "working", "waitForTry",
+        "triesNotSaved", "wiped", "wipeFailed", "cashOut", "scanDeposit", "notADepositCode", "nameAddress",
+        "checkAddress", "addressAdded", "removeAddress", "addressRemoved",
     )
 
     private fun guardTests() {
@@ -382,6 +386,152 @@ object AppModelTest {
         ok(AppWords.walletLacksKey3.what.contains("does not hold the key 3 scanned here") && AppWords.walletLacksKey3.what.contains("nothing was accepted"), "the swapped key 3 is said plainly")
     }
 
+    // ---- the PIN lock and the cash-out screens (docs/SIGNER-RULES.md SR-74 to SR-79) ----
+
+    /** SR-74: the key files are in the no-backup folder, and the manifest and both rule files exclude all. */
+    private fun sr_74_key_files_stay_out_of_backups(appDir: File?) {
+        ok(Wipe.STATE_FILE == "state.obks" && TriesFile.NAME == "tries.obkt", "the two key files have their names")
+        if (appDir == null) return
+        val manifest = File(appDir, "AndroidManifest.xml").readText()
+        ok(manifest.contains("android:allowBackup=\"false\""), "cloud backup is off in the manifest")
+        ok(manifest.contains("@xml/backup_rules") && manifest.contains("@xml/data_extraction_rules"), "both rule files are named")
+        val domains = listOf("root", "file", "database", "sharedpref", "external")
+        for (name in listOf("backup_rules", "data_extraction_rules")) {
+            val xml = File(appDir, "res/xml/$name.xml").readText()
+            val withoutComments = xml.replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), "")
+            val parts = if (name == "backup_rules") 1 else 2
+            for (d in domains) {
+                val n = Regex("<exclude domain=\"$d\" />").findAll(withoutComments).count()
+                ok(n == parts, "$name excludes $d $parts time(s)")
+            }
+            ok(!withoutComments.contains("<include"), "$name includes nothing")
+        }
+        val controller = File(appDir, "src/android/Controller.kt").readText()
+        ok(!Regex("[^a-zA-Z]filesDir").containsMatchIn(controller), "the plain files folder is not used")
+        ok(controller.contains("TriesFile(act.noBackupFilesDir)"), "the tries file is in the no-backup folder")
+    }
+
+    private fun sr_75_waits_and_tries_left() {
+        val waits = listOf(0L, 0, 0, 0, 0, 30, 60, 300, 900, 3600)
+        for ((n, w) in waits.withIndex()) ok(Tries.waitSeconds(n) == w, "$n wrong tries wait $w s")
+        val t0 = 1_000_000L
+        for (n in 1..9) {
+            val rec = TriesRecord(n, t0)
+            val c = Tries.check(rec, t0)
+            ok(c.waitLeft == waits[n] && !c.wipe, "right after $n wrong: wait ${waits[n]}")
+            ok(Tries.check(rec, t0 + waits[n]).waitLeft == 0L, "after the wait the try goes on ($n)")
+            ok(Tries.check(rec, t0 + 10).waitLeft == (waits[n] - 10).coerceAtLeast(0), "the wait counts down ($n)")
+        }
+        ok(!Tries.showsTriesLeft(4) && Tries.showsTriesLeft(5), "tries left are said from the 5th wrong try")
+        ok(Tries.triesLeftText(5) == "5 tries left before this key is wiped.", "5 left")
+        ok(Tries.triesLeftText(9) == "1 try left before this key is wiped.", "1 left")
+        ok(Tries.before(TriesRecord(3, 5), 99) == TriesRecord(4, 99), "one more is counted before the try")
+        ok(Tries.afterRight() == TriesRecord(0, 0), "a right PIN clears the count")
+        ok(Tries.waitText(30) == "30 s" && Tries.waitText(260) == "4 min 20 s" && Tries.waitText(3600) == "1 h 0 min", "wait text")
+        // A clock set back restarts the wait.
+        val back = Tries.check(TriesRecord(6, t0), t0 - 500)
+        ok(back.waitLeft == 60L && back.record == TriesRecord(6, t0 - 500), "a clock behind restarts the wait and stores it")
+        ok(Tries.check(TriesRecord(10, t0), t0).wipe, "10 wrong tries wipe")
+        // The file.
+        val dir = tempDir()
+        try {
+            val f = TriesFile(dir)
+            ok(f.read(5) == TriesRecord(0, 0), "no file: no wrong tries")
+            f.write(TriesRecord(7, 1234))
+            ok(f.read(5) == TriesRecord(7, 1234), "the record is read back")
+            val file = File(dir, TriesFile.NAME)
+            val good = file.readBytes()
+            ok(good.size == 17, "17 bytes")
+            for (bad in listOf(good.copyOf(16), good + byteArrayOf(0), good.copyOf().also { it[4] = 2 }, good.copyOf().also { it[0] = 0 })) {
+                file.writeBytes(bad)
+                ok(f.read(77) == TriesRecord(9, 77), "a file that is not exact counts as 9 wrong tries just now")
+            }
+            file.writeBytes(good.copyOf().also { it[8] = 0x80.toByte() })
+            ok(f.read(77) == TriesRecord(9, 77), "a negative count is not read")
+            f.delete()
+            ok(!f.exists(), "deleted")
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    private fun sr_76_wipe_order_and_failure() {
+        val dir = tempDir()
+        try {
+            val state = File(dir, Wipe.STATE_FILE)
+            val tries = TriesFile(dir)
+            fun setUp() {
+                state.writeBytes(byteArrayOf(1, 2, 3))
+                tries.write(TriesRecord(10, 5))
+            }
+            setUp()
+            val seen = ArrayList<String>()
+            Wipe.run(dir, tries) {
+                seen.add("key")
+                ok(!state.exists() && tries.exists(), "the state file goes before the key, the tries file after")
+            }
+            ok(seen == listOf("key") && !state.exists() && !tries.exists(), "all three are gone")
+            // A failing key deletion leaves the tries file, so the next start wipes again.
+            setUp()
+            throwsIo("a key that stays throws") { Wipe.run(dir, tries) { throw IOException("still there") } }
+            ok(!state.exists() && tries.exists() && tries.read(0).wrong == 10, "a wipe that stops leaves the count at 10")
+            ok(Tries.check(tries.read(0), 0).wipe, "and the next start wipes")
+            ok(AppWords.wiped.what.contains("the other two keys still exist") && AppWords.wiped.what.contains("not lost"), "the wiped words")
+            ok(AppWords.wiped.next.contains("24 words"), "the wiped words say what is next")
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    private fun sr_77_relock_after_a_minute() {
+        ok(Relock.needed(null, 5), "never paused: locked")
+        ok(!Relock.needed(1000, 1000 + 60_000), "60 s exactly is not more than 60 s")
+        ok(Relock.needed(1000, 1000 + 60_001), "more than 60 s locks")
+        ok(!Relock.needed(1000, 1500), "a short stay does not lock")
+        ok(Relock.needed(1000, 500), "a clock that went back locks")
+        val st = SetupState.Locked
+        ok(ScreenModel.pick(emptyList(), null, st, null, LockStatus.Locked) is Screen.Unlock, "locked: the unlock screen")
+        ok(ScreenModel.pick(emptyList(), null, st, null, LockStatus.Legacy).let { it is Screen.SetPin && it.upgrade }, "legacy: set a PIN")
+        ok(ScreenModel.pick(emptyList(), null, SetupState.Empty, null, LockStatus.NoPin).let { it is Screen.SetPin && !it.upgrade }, "no PIN yet: choose one first")
+        ok(ScreenModel.pick(emptyList(), null, SetupState.Empty, null, LockStatus.Open) is Screen.Setup, "a PIN set: the setup")
+        ok(ScreenModel.pick(listOf(AppWords.debuggingOn), null, st, null, LockStatus.Locked) is Screen.Refused, "a refusal still comes first")
+        ok(AppWords.working.heading == "Working", "the working page")
+        ok(wordsProblem(AppWords.working) == null && wordsProblem(AppWords.wiped) == null, "the words of the lock pass the words check")
+    }
+
+    private fun sr_78_deposit_code_from_the_camera() {
+        ok((CashOut.readCode("bc1qexample".toByteArray()) as DepositInput.Text).text == "bc1qexample", "a bare address goes on")
+        ok((CashOut.readCode(" bitcoin:bc1qexample?amount=1\n".toByteArray()) as DepositInput.Text).text == "bitcoin:bc1qexample?amount=1", "a URI goes on, trimmed")
+        ok(CashOut.readCode("ur:crypto-psbt/abc".toByteArray()) is DepositInput.Refused, "a ur code is refused")
+        ok(CashOut.readCode("UR:bytes/abc".toByteArray()) is DepositInput.Refused, "a ur code in capitals is refused")
+        ok(CashOut.readCode(byteArrayOf(0xff.toByte(), 0xfe.toByte())) is DepositInput.Refused, "bytes that are not text are refused")
+        ok(CashOut.groupsOfFour("bc1qabcdefghij") == "bc1q abcd efgh ij", "groups of four")
+        ok(wordsProblem(AppWords.checkAddress) == null && AppWords.checkAddress.next.contains("24 hours"), "the check words name the 24 hours")
+        ok(AppWords.scanDeposit.what.contains("cannot be typed or pasted"), "no typing")
+    }
+
+    private fun sr_79_list_rows() {
+        val now = 100_000L
+        val soon = AllowlistView("bc1qabcdefghij", "0014aa", "Exchange", 90_000, now + 3 * 3600 + 5 * 60)
+        val row = CashOut.row(soon, now)
+        ok(row.status == "active in 3h 5m" && row.address == "bc1q abcd efgh ij" && row.removable == "bc1qabcdefghij", "a waiting row")
+        ok(CashOut.row(AllowlistView("bc1qabcdefghij", "0014aa", "E", 1, now), now).status == "active", "an active row")
+        ok(CashOut.row(AllowlistView("bc1qabcdefghij", "0014aa", "E", 1, now - 5), now).status == "active", "an older active row")
+        ok(CashOut.status(now + 1, now) == "active in 0h 1m", "a second left rounds up to a minute")
+        ok(CashOut.status(now + 3599 * 1L + 1, now) == "active in 1h 0m", "an hour exactly")
+        val noAddress = CashOut.row(AllowlistView(null, "6a0102", "Odd", 1, null), now)
+        ok(noAddress.removable == null && noAddress.address == "6a0102" && noAddress.status == "not active", "a script without an address")
+    }
+
+    private fun lockTests(appDir: File?) {
+        sr_74_key_files_stay_out_of_backups(appDir)
+        sr_75_waits_and_tries_left()
+        sr_76_wipe_order_and_failure()
+        sr_77_relock_after_a_minute()
+        sr_78_deposit_code_from_the_camera()
+        sr_79_list_rows()
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val keyMd = args.getOrNull(0)?.let { File(it) }
@@ -398,6 +548,7 @@ object AppModelTest {
         answerTests()
         walletTests()
         refusalTests()
+        lockTests(args.getOrNull(2)?.let { File(it) })
         println("AppModelTest: $count checks passed")
     }
 }

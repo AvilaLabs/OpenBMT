@@ -84,8 +84,29 @@ after the identity is made on an approver-only device:
 The older path that took a pasted wallet description and a typed owner
 identity (`acceptWallet`, op 17) is gone from the app; the library op stays.
 
-Not built yet: the allowlist enrolment, a lock screen of the app's own, and
-the wipe after wrong tries.
+## The PIN lock and the cash-out addresses
+
+The library keeps the stored state in a locked frame (SR-71 to SR-73). The
+app's own part is SR-74 to SR-79: `src/model/LockModel.kt` holds the count of
+wrong tries (`Tries`, `TriesFile`), the wait table, the wipe order (`Wipe`) and
+the 60-second rule (`Relock`); `src/android/KeyWipe.kt` deletes the Keystore
+key; `Controller.kt` shows the screens.
+
+- **Unlock.** At start, and after more than 60 seconds in the background, the
+  unlock screen comes before any other. A "Working" page is drawn first,
+  because the key from the PIN takes about a second.
+- **Tries.** The count is in `tries.obkt` in the no-backup folder, written
+  before each attempt. After 5 wrong tries the wait is 30 seconds, then 1
+  minute, 5 minutes, 15 minutes and 1 hour; the 10th wipes the sealed state
+  file, the Keystore key and the count, and shows the wiped screen. A clock
+  set behind the last wrong try restarts the wait.
+- **Set a PIN.** A new or restored key is made behind a PIN, which is chosen
+  first. A key saved by an older build opens only into this screen.
+- **Cash-out addresses.** The screen lists each address with its label, the
+  time it was added and "active" or the time left, with Remove behind a
+  confirmation. Adding takes the camera's text only (no field), a label, and a
+  confirmation screen with the address in groups of four.
+
 
 ## Rules the app keeps without a device
 
@@ -239,8 +260,9 @@ against the rows of `docs/screens/key.md`, and the list
 that `OPENBMT_WRITE_SCREENS=1` writes), the key ceremony's pure parts (reading
 a key 3 code, the fingerprint and wallet text, the answer's and the setup's
 frames, which refusal gets the app's plain words), the line text, and the saved
-state's file format with a fake cipher. `src/android/` holds everything that
-needs the framework. The tests of the shared code (`apps/android-common/tests`)
+state's file format with a fake cipher, the wrong-tries table and file, the
+wipe order, the 60-second rule, the cash-out rows, and the backup rules.
+`src/android/` holds everything that needs the framework. The tests of the shared code (`apps/android-common/tests`)
 also run the camera scan's pure parts (choosing a frame size, copying a Y
 plane with its row and pixel stride, the throttle, the reader's reply framing,
 the UR check) and the animated code's pure parts (the framing of the UR call
@@ -266,7 +288,11 @@ hardware wallet and from another publisher's wallet, and what each of them
 actually exports; that the answer's code, drawn as `ur:bytes`, is read by the
 owner phone at the chosen size and speed; that the wallet code of the owner
 phone is read part by part; that the fingerprints and words are readable at
-arm's length; that Advanced opens and closes; that leaving the app on any of
+arm's length; that Advanced opens and closes; that the unlock screen shows
+on start and after a minute away, how long the unlock takes, that the
+countdown and the "tries left" line show after the 5th wrong try, that the
+10th wipes and the wiped screen shows, that a scanned deposit code and a
+`bitcoin:` code both read; that leaving the app on any of
 the ceremony screens and coming back lands on the right screen; and that a
 swapped key 3 shows the plain words. Also not checked: that the library
 loads and answers on a phone, the Keystore and StrongBox behaviour, the file

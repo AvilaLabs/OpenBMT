@@ -37,4 +37,4 @@ trap 'rm -rf "$scratch/jvm-classes"' EXIT
     "$common"/src/model/*.kt "$app"/src/model/*.kt "$app/tests/AppModelTest.kt"
 
 "$JAVA_HOME/bin/java" -Xmx2g -cp "$scratch/jvm-classes:$lib/kotlin-stdlib.jar" \
-    org.openbmt.key.app.AppModelTest "$repo/docs/screens/key.md" "$repo/docs/screens/key-app.md"
+    org.openbmt.key.app.AppModelTest "$repo/docs/screens/key.md" "$repo/docs/screens/key-app.md" "$app"

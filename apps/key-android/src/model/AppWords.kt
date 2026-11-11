@@ -129,6 +129,135 @@ object AppWords {
         "Type whole numbers of sats only, then try again.",
     )
 
+    // ---- the PIN lock (SR-71 to SR-77) -----------------------------------------------
+
+    /** A new or restored key is made behind a PIN, so the PIN comes first. */
+    val choosePin = w(
+        Tones.INFO, "Choose a PIN",
+        "The key on this phone is kept behind a PIN, which the app asks for every time it opens.",
+        Who.KEY_HOLDER,
+        "Choose at least 6 digits, or a passphrase of at least 8 characters, and do not forget it.",
+    )
+
+    /** A key saved by an older build has no PIN: it is locked behind one and used as it is. */
+    val upgradePin = w(
+        Tones.INFO, "Set a PIN for this key",
+        "The key on this phone was saved without a PIN, so anyone who opens the app could use it.",
+        Who.KEY_HOLDER,
+        "Choose a PIN now; the key is kept as it is and locked behind it.",
+    )
+
+    val pinsDiffer = w(
+        Tones.STOP, "The two PINs differ",
+        "The PIN typed the second time is not the same as the first, so nothing was set.",
+        Who.KEY_HOLDER,
+        "Type the same PIN in both fields, then try again.",
+    )
+
+    val pinChanged = w(
+        Tones.GOOD, "PIN changed",
+        "The key on this phone is now locked behind the new PIN.",
+        Who.NOBODY,
+        "Nothing to do. Use the new PIN from now on.",
+    )
+
+    /** The page is drawn before the slow step: the key from the PIN takes about a second. */
+    val working = w(
+        Tones.INFO, "Working",
+        "The app is opening the key, which takes a moment.",
+        Who.NOBODY,
+        "Wait. Do not close the app.",
+    )
+
+    val waitForTry = w(
+        Tones.INFO, "Wait before the next try",
+        "There were too many wrong tries, so the app waits before it takes another.",
+        Who.KEY_HOLDER,
+        "Wait for the time shown, then type the PIN again.",
+    )
+
+    fun triesNotSaved(problem: String?) = w(
+        Tones.STOP, "Try not counted",
+        "The phone could not keep the count of wrong tries, so the PIN was not tried.",
+        Who.KEY_HOLDER,
+        "Try again. If it keeps failing, stop and tell the owner in person.",
+        problem?.let { Format.cleanForeign(it) },
+    )
+
+    /** SR-76: the wipe happened, and what to do next. */
+    val wiped = w(
+        Tones.STOP, "Key wiped from this phone",
+        "This phone's copy of key 2 was wiped after 10 wrong tries. The money is not lost: the other two keys still exist.",
+        Who.KEY_HOLDER,
+        "The wallet needs two of three keys. Restore key 2 from its 24 words on this phone, or tell the owner in person.",
+    )
+
+    fun wipeFailed(problem: String?) = w(
+        Tones.STOP, "Wipe not finished",
+        "The key could not be wiped from this phone completely, so the app will try again when it opens.",
+        Who.KEY_HOLDER,
+        "Close the app and open it again. If it keeps failing, uninstall the app.",
+        problem?.let { Format.cleanForeign(it) },
+    )
+
+    // ---- cash-out addresses (SR-78, SR-79) ----------------------------------------------
+
+    val cashOut = w(
+        Tones.INFO, "Cash-out addresses",
+        "Payments to these addresses count against the higher limits, once the 24 hours of waiting are over.",
+        Who.KEY_HOLDER,
+        "Add an address by scanning the deposit code the exchange shows with this phone's camera.",
+    )
+
+    val scanDeposit = w(
+        Tones.INFO, "Scan the deposit code",
+        "Hold this phone's camera to the deposit code the exchange shows. An address cannot be typed or pasted here.",
+        Who.KEY_HOLDER,
+        "Then type a name for it, and check the address on the next screen.",
+    )
+
+    val notADepositCode = w(
+        Tones.STOP, "Not a deposit code",
+        "This code is part of a request or an answer, not a deposit code, so nothing was taken.",
+        Who.KEY_HOLDER,
+        "Scan the deposit code the exchange shows.",
+    )
+
+    val nameAddress = w(
+        Tones.INFO, "Name this address",
+        "Type a name for the address, such as the exchange's name, so you can tell it apart later.",
+        Who.KEY_HOLDER,
+        "Then check the address on the next screen.",
+    )
+
+    val checkAddress = w(
+        Tones.INFO, "Check this address",
+        "Compare every group of four with what the exchange shows. One wrong character sends money to the wrong place.",
+        Who.KEY_HOLDER,
+        "If they all match, add it. It can be used 24 hours from now, by this phone's clock.",
+    )
+
+    val addressAdded = w(
+        Tones.GOOD, "Address added",
+        "The address is saved, and it counts as a cash-out address in 24 hours, by this phone's clock.",
+        Who.NOBODY,
+        "Nothing to do. Addresses can be added or removed here at any time.",
+    )
+
+    val removeAddress = w(
+        Tones.INFO, "Remove this address?",
+        "Removing it takes effect at once: payments to it count as payments to any other address.",
+        Who.KEY_HOLDER,
+        "Remove it only if it is not needed. It can be added again, and then it waits 24 hours.",
+    )
+
+    val addressRemoved = w(
+        Tones.GOOD, "Address removed",
+        "The address is no longer a cash-out address, and the change took effect at once.",
+        Who.NOBODY,
+        "Nothing to do.",
+    )
+
     // ---- the key ceremony (DESIGN section 2.1, steps 2 and 5) -----------------------
 
     /** The screen before key 3 is scanned. The plain words are the only ones the screen shows up front. */
@@ -273,6 +402,10 @@ object AppWords {
                 "Give the owner's phone this app's identity, then accept the wallet it makes.",
             )
         }
+        is SetupState.Locked -> w(
+            Tones.INFO, "Enter your PIN", "The key on this phone is kept behind a PIN.", Who.KEY_HOLDER,
+            "Type the PIN to unlock the app.",
+        )
         is SetupState.WalletPending -> w(
             Tones.INFO, "Wallet waiting for you",
             "The wallet from the owner's phone is held but not registered, so nothing can be signed yet.",
@@ -390,6 +523,23 @@ object AppWords {
         "flipsNotReadable" to flipsNotReadable,
         "answersReady" to answersReady,
         "pairOffer" to pairOffer,
+        "choosePin" to choosePin,
+        "upgradePin" to upgradePin,
+        "pinsDiffer" to pinsDiffer,
+        "pinChanged" to pinChanged,
+        "working" to working,
+        "waitForTry" to waitForTry,
+        "triesNotSaved" to triesNotSaved("a problem"),
+        "wiped" to wiped,
+        "wipeFailed" to wipeFailed("a problem"),
+        "cashOut" to cashOut,
+        "scanDeposit" to scanDeposit,
+        "notADepositCode" to notADepositCode,
+        "nameAddress" to nameAddress,
+        "checkAddress" to checkAddress,
+        "addressAdded" to addressAdded,
+        "removeAddress" to removeAddress,
+        "addressRemoved" to addressRemoved,
         "key3Needed" to key3Needed,
         "key3UrNotRead" to key3UrNotRead,
         "key3NotText" to key3NotText,
@@ -404,6 +554,7 @@ object AppWords {
         "HasIdentity(WordsWaiting)" to state(SetupState.HasIdentity(true, true)),
         "HasIdentity(Key2)" to state(SetupState.HasIdentity(true, false)),
         "HasIdentity(NoKey2)" to state(SetupState.HasIdentity(false, false)),
+        "Locked" to state(SetupState.Locked),
         "WalletPending" to state(SetupState.WalletPending(true)),
         "Ready(Key2)" to state(SetupState.Ready(true)),
         "Ready(NoKey2)" to state(SetupState.Ready(false)),

@@ -17,11 +17,11 @@ first" step. A rule that fails returns a refusal that names the rule. Nothing
 is signed and no state changes.
 
 Some protections belong to the app around this library and are not listed
-here: unlocking the Key app and wiping the key after too many wrong tries,
-refusing to run under root, USB debugging, accessibility services or screen
-overlays, and labeling every figure that came from the owner phone (a dollar
-amount, a sale number) as the owner phone's claim. The library takes no such
-figures at all.
+here: refusing to run under root, USB debugging, accessibility services or
+screen overlays, and labeling every figure that came from the owner phone (a
+dollar amount, a sale number) as the owner phone's claim. The library takes
+no such figures at all. The PIN lock, the wipe after too many wrong tries
+and the enrolment screens are in section 12.
 
 ## 1. What the signer keeps
 
@@ -376,6 +376,9 @@ Stated plainly, because the design promises no overclaiming.
 - **They do not protect the stored state.** The library checks the shape of
   the state it is given, not where it came from. Keeping the state where
   nothing else can write it or put back an older copy is the Key app's job.
+  The PIN lock (section 12) keeps the state unreadable to someone who has
+  the phone and not the PIN; it does not stop that person from putting an
+  older copy of the stored file back.
 - **They are promises of the Key app's software.** A malicious build of the
   Key app keeps none of them. That is what the separate release key, the
   reproducible builds and the second key holder are for (`docs/DESIGN.md`
@@ -386,3 +389,75 @@ Stated plainly, because the design promises no overclaiming.
 - **Anti-exfil signing is not in these rules yet.** RFC 6979 makes the
   signatures reproducible, which lets a second build check them, but it does
   not stop a malicious build from choosing its own nonces.
+
+## 12. The Key app's lock and its screens
+
+The Key app keeps the library's state behind a PIN, and enrols cash-out
+addresses from its own camera. SR-71 to SR-73 are kept by `openbmt-key-ffi`;
+SR-74 to SR-79 by the Android app (`apps/key-android`).
+
+- **SR-71. The locked frame.** What the Key app stores is a frame `OBMx`,
+  version 1: the Argon2id parameters (memory in KiB, passes and lanes, each 4
+  bytes), a 16-byte salt, a 12-byte nonce, the length of the ciphertext, and
+  the ChaCha20-Poly1305 ciphertext of the stored state (`OBM7`), with the
+  whole header as associated data. The parameters are 64 MiB, 3 passes and 1
+  lane. A file that asks for more than 256 MiB, 10 passes or 4 lanes, or for
+  no passes or no lanes, is refused before Argon2 runs. The salt and the
+  nonce come from the platform's random source. Every write has a new nonce,
+  and a write whose nonce would repeat the last one under the same key is
+  refused. Decoding is strict: version 1, the exact length, and only bytes
+  that writing the frame again would give. Every write of the state goes
+  through the frame. The Android Keystore's seal stays outside it, so that
+  the device and the PIN are both needed.
+- **SR-72. The PIN.** A PIN is at least 6 digits, or a passphrase of at least
+  8 characters, and at most 128 characters in either case (`pin-weak`,
+  `pin-long`). It is set before a new or restored key is made, so that the
+  first store is already locked (`pin-first` until then), and it is set once
+  (`pin-set`). A state stored by an older build, with no frame, opens only
+  into the step that sets a PIN (`pin-needed`): setting it stores the same
+  state behind the PIN, with nothing changed if the store fails, and the
+  app goes on.
+- **SR-73. Locked.** While a PIN is waiting, the Key app answers its setup
+  state (locked), its lock status and the unlocking, and refuses every other
+  call with the rule `locked`, before it reads what the call brought. A wrong
+  PIN is refused with the rule `pin-wrong` and changes nothing. A frame whose
+  ciphertext was changed gives the same answer; a frame that is cut,
+  lengthened or of another form is refused as unreadable (`OBMx`). The PIN
+  is changed with the current one, under a new salt, in one rewrite of the
+  stored state.
+- **SR-74. Key files stay out of backups.** The files that hold the key (the
+  stored state and the tries file of SR-75) are in the app's no-backup
+  folder, and the manifest excludes every domain from cloud backup and from
+  device transfer.
+- **SR-75. Wrong tries and waits.** The app counts wrong PINs in a small file
+  of its own: the count, and the time of the last wrong one. It writes the
+  count plus one before each attempt, and 0 after a right PIN. A refusal that
+  is not `pin-wrong` gives the step back. After 1 to 4 wrong tries the next
+  attempt waits for nothing; after 5, 30 seconds; after 6, 1 minute; after 7,
+  5 minutes; after 8, 15 minutes; after 9, 1 hour. From the 5th wrong try
+  the screen says how many tries are left before the key is wiped, and the
+  time left to wait counts down. A clock behind the time of the last wrong
+  try restarts the wait from now, and that time is stored.
+- **SR-76. The wipe.** The 10th wrong try deletes the sealed state file and
+  the Keystore key, then the tries file, and shows that the phone's copy of
+  the key was wiped. It says that the money is not lost, because the wallet
+  needs two of three keys and the other two still exist, and that the next
+  step is to restore the key from its 24 words on this phone, or to tell the
+  owner.
+- **SR-77. Locked on start and on return.** At start, and after the app has
+  been in the background for more than 60 seconds, the app shows the unlock
+  screen before any other. It draws a "working" page before it asks the
+  library to unlock, because the key from the PIN takes about a second.
+- **SR-78. Cash-out addresses come from the camera.** The call takes the text
+  the Key app's camera read and the label typed on the Key app. The text is
+  a bare address or a `bitcoin:` URI (BIP 321), and only its address is
+  taken. Refused, each with its own words: an address of another network, a
+  script kind outside SR-22, a label outside SR-30, a 65th entry and an
+  address already enrolled. The state is stored before the call returns. The
+  screen has no way to paste or type the address; it shows the address in
+  groups of four and says that it becomes usable in 24 hours on this phone's
+  clock.
+- **SR-79. The list.** Each entry shows its label, its address, the time it
+  was enrolled, and either "active" or the time left until it is, counted
+  from the current time of SR-31. "Remove" asks for a confirmation and takes
+  effect at once (SR-30).

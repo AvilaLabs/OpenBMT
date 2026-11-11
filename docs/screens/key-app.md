@@ -28,6 +28,23 @@ section 2.1, steps 2 and 5) among them.
 | flipsNotReadable | Check the coin flips | The flips may hold only H for heads and T for tails. | Remove any other letter or digit, then try again. | the key holder |  |
 | answersReady | Answers ready | Every line has an answer, and the answer file is signed and ready on this phone. | Save the answer file, then take it to the owner's phone. | the key holder |  |
 | pairOffer | Pair a counter | The code below names this shop's two keys, its wallet and its network, for a counter to read. | Scan this with the counter: open the counter app, tap Pair with the Key app, and hold its camera to this code. | the key holder |  |
+| choosePin | Choose a PIN | The key on this phone is kept behind a PIN, which the app asks for every time it opens. | Choose at least 6 digits, or a passphrase of at least 8 characters, and do not forget it. | the key holder |  |
+| upgradePin | Set a PIN for this key | The key on this phone was saved without a PIN, so anyone who opens the app could use it. | Choose a PIN now; the key is kept as it is and locked behind it. | the key holder |  |
+| pinsDiffer | The two PINs differ | The PIN typed the second time is not the same as the first, so nothing was set. | Type the same PIN in both fields, then try again. | the key holder |  |
+| pinChanged | PIN changed | The key on this phone is now locked behind the new PIN. | Nothing to do. Use the new PIN from now on. | nobody |  |
+| working | Working | The app is opening the key, which takes a moment. | Wait. Do not close the app. | nobody |  |
+| waitForTry | Wait before the next try | There were too many wrong tries, so the app waits before it takes another. | Wait for the time shown, then type the PIN again. | the key holder |  |
+| triesNotSaved | Try not counted | The phone could not keep the count of wrong tries, so the PIN was not tried. | Try again. If it keeps failing, stop and tell the owner in person. | the key holder |  |
+| wiped | Key wiped from this phone | This phone's copy of key 2 was wiped after 10 wrong tries. The money is not lost: the other two keys still exist. | The wallet needs two of three keys. Restore key 2 from its 24 words on this phone, or tell the owner in person. | the key holder |  |
+| wipeFailed | Wipe not finished | The key could not be wiped from this phone completely, so the app will try again when it opens. | Close the app and open it again. If it keeps failing, uninstall the app. | the key holder |  |
+| cashOut | Cash-out addresses | Payments to these addresses count against the higher limits, once the 24 hours of waiting are over. | Add an address by scanning the deposit code the exchange shows with this phone's camera. | the key holder |  |
+| scanDeposit | Scan the deposit code | Hold this phone's camera to the deposit code the exchange shows. An address cannot be typed or pasted here. | Then type a name for it, and check the address on the next screen. | the key holder |  |
+| notADepositCode | Not a deposit code | This code is part of a request or an answer, not a deposit code, so nothing was taken. | Scan the deposit code the exchange shows. | the key holder |  |
+| nameAddress | Name this address | Type a name for the address, such as the exchange's name, so you can tell it apart later. | Then check the address on the next screen. | the key holder |  |
+| checkAddress | Check this address | Compare every group of four with what the exchange shows. One wrong character sends money to the wrong place. | If they all match, add it. It can be used 24 hours from now, by this phone's clock. | the key holder |  |
+| addressAdded | Address added | The address is saved, and it counts as a cash-out address in 24 hours, by this phone's clock. | Nothing to do. Addresses can be added or removed here at any time. | nobody |  |
+| removeAddress | Remove this address? | Removing it takes effect at once: payments to it count as payments to any other address. | Remove it only if it is not needed. It can be added again, and then it waits 24 hours. | the key holder |  |
+| addressRemoved | Address removed | The address is no longer a cash-out address, and the change took effect at once. | Nothing to do. | nobody |  |
 | key3Needed | Key 3, the recovery key | Key 3 is made on its own in another publisher's wallet or on a hardware wallet, never in this app. | Do that step alone, write its words on separate paper, then scan key 3 here. | the key holder |  |
 | key3UrNotRead | Code not read yet | This kind of code is not read yet, so nothing was taken. | Export key 3 as text in the other wallet, then scan that code or paste the text. | the key holder |  |
 | key3NotText | Code is not text | The code holds something other than text, so it cannot be key 3 and nothing was taken. | Export key 3 as text in the other wallet, then scan it again, or paste the text. | the key holder |  |
@@ -42,6 +59,7 @@ section 2.1, steps 2 and 5) among them.
 | HasIdentity(WordsWaiting) | Write the words down | The words of this key are ready, and they are shown only once. | Write them on paper now; they cannot be shown again. | the key holder |  |
 | HasIdentity(Key2) | Waiting for the wallet | This app holds key 2 and is waiting for the wallet from the owner's phone. | Give the owner's phone this app's key details, then accept the wallet it makes. | the key holder |  |
 | HasIdentity(NoKey2) | Waiting, without key 2 | This app has its own identity but not key 2, and is waiting for the wallet. | Give the owner's phone this app's identity, then accept the wallet it makes. | the key holder |  |
+| Locked | Enter your PIN | The key on this phone is kept behind a PIN. | Type the PIN to unlock the app. | the key holder |  |
 | WalletPending | Wallet waiting for you | The wallet from the owner's phone is held but not registered, so nothing can be signed yet. | Compare its words and fingerprints with the owner's phone, then confirm or discard it. | the key holder |  |
 | Ready(Key2) | Ready to approve | The wallet is accepted, and this app can answer the owner's requests. | Nothing to do. It waits for a request from the owner's phone. | nobody |  |
 | Ready(NoKey2) | Ready, without key 2 | The wallet is accepted, but this phone does not hold key 2. | Nothing to do for payments here. This app answers other requests only. | nobody |  |

@@ -1,6 +1,7 @@
 package org.openbmt.key.app
 
 import org.openbmt.key.Key3View
+import org.openbmt.key.LockStatus
 import org.openbmt.key.SetupState
 import org.openbmt.key.Words
 
@@ -11,6 +12,18 @@ sealed class Screen {
 
     /** The library or the saved state could not be used; nothing else is offered but trying again. */
     class Fault(val words: Words) : Screen()
+
+    /** The key is behind a PIN: ask for it before any other screen (SR-77). */
+    object Unlock : Screen()
+
+    /**
+     * No PIN yet: choose one. [upgrade] is true for a key saved by an older build, which is locked behind the
+     * PIN and then used as it is; false for a new or restored key, whose first store is already locked (SR-72).
+     */
+    class SetPin(val upgrade: Boolean) : Screen()
+
+    /** The 10th wrong try wiped this phone's copy of the key (SR-76). */
+    object Wiped : Screen()
 
     /** No key yet: make one from dice, coins, typed words or the device, or be an approver only. */
     object Setup : Screen()
@@ -38,14 +51,22 @@ object ScreenModel {
      * of the library's state. A null [state] with no [fault] means the library
      * has not been opened yet, which is a fault of the app and is shown as one.
      * [key3] is key 3 as the library keeps it, or null; it only matters for an
-     * identity that is waiting for the wallet.
+     * identity that is waiting for the wallet. [lock] is where the lock is; it only matters while the state is
+     * empty (a PIN comes before the first key) or locked.
      */
-    fun pick(refusals: List<Words>, fault: Words?, state: SetupState?, key3: Key3View? = null): Screen = when {
+    fun pick(
+        refusals: List<Words>,
+        fault: Words?,
+        state: SetupState?,
+        key3: Key3View? = null,
+        lock: LockStatus? = null,
+    ): Screen = when {
         refusals.isNotEmpty() -> Screen.Refused(refusals)
         fault != null -> Screen.Fault(fault)
         state == null -> Screen.Fault(AppWords.libraryMissing(null))
         else -> when (state) {
-            is SetupState.Empty -> Screen.Setup
+            is SetupState.Empty -> if (lock == LockStatus.NoPin) Screen.SetPin(false) else Screen.Setup
+            is SetupState.Locked -> if (lock == LockStatus.Legacy) Screen.SetPin(true) else Screen.Unlock
             is SetupState.HasIdentity ->
                 when {
                     state.wordsWaiting -> Screen.ShowWords

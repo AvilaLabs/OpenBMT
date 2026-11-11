@@ -3,8 +3,12 @@ package org.openbmt.key.app
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.Editable
+import android.text.InputType
 import android.text.TextWatcher
 import android.view.View
 import android.widget.EditText
@@ -34,6 +38,7 @@ import org.openbmt.key.KeyNetwork
 import org.openbmt.key.KeySession
 import org.openbmt.key.KeyWordCount
 import org.openbmt.key.LineView
+import org.openbmt.key.LockStatus
 import org.openbmt.key.SetupState
 import org.openbmt.key.WalletView
 import org.openbmt.key.Words
@@ -65,12 +70,27 @@ class Controller(private val act: MainActivity) {
 
     private val answerFile: File get() = File(act.noBackupFilesDir, "last-answer.bin")
 
+    /** The count of wrong PINs, in the same folder as the saved state (SR-75). */
+    private val tries by lazy { TriesFile(act.noBackupFilesDir) }
+
+    private val main = Handler(Looper.getMainLooper())
+
+    /** The countdown of the unlock screen, while it is on show. */
+    private var ticker: Runnable? = null
+
+    /** When the app was paused, on the clock that counts since the phone started (SR-77); null when it was not. */
+    private var pausedAt: Long? = null
+
+    private fun clock(): Long = System.currentTimeMillis() / 1000
+
     // ---- start, resume, pause ---------------------------------------------------
 
     fun start() {
         val refusals = refusals()
         if (refusals.isNotEmpty()) return render(ScreenModel.pick(refusals, null, null))
         close()
+        // A wipe that was begun and not finished is finished first (SR-76).
+        if (tries.read(clock()).wrong >= Tries.WIPE_AT) return wipe()
         var fault: Words? = null
         try {
             val sealer = KeystoreSealer()
@@ -97,21 +117,25 @@ class Controller(private val act: MainActivity) {
             refresh(null)
         } else if (cleared || app == null) {
             cleared = false
-            if (app == null) start() else refresh(null)
+            // SR-77: after more than 60 seconds away the app is locked again, whatever was on screen.
+            if (app == null || Relock.needed(pausedAt, SystemClock.elapsedRealtime())) start() else refresh(null)
         }
     }
 
     fun paused() {
         if (pickerOpen || scan.asking) return
         scan.stop()
+        stopTicker()
         dropSession()
         pendingAnswer = null
         act.show(View(act))
         cleared = true
+        pausedAt = SystemClock.elapsedRealtime()
     }
 
     fun close() {
         scan.stop()
+        stopTicker()
         dropSession()
         try {
             app?.close()
@@ -161,23 +185,28 @@ class Controller(private val act: MainActivity) {
     fun refresh(fault: Words? = null) {
         var state: SetupState? = null
         var key3: Key3View? = null
+        var lock: LockStatus? = null
         var problem = fault
         val a = app
         if (problem == null && a != null && refusals().isEmpty()) {
             try {
                 state = a.state()
                 if (state is SetupState.HasIdentity && !state.wordsWaiting) key3 = a.key3View()
+                if (state is SetupState.Empty || state is SetupState.Locked) lock = a.lockStatus()
             } catch (e: KeyException) {
                 problem = e.words ?: AppWords.fault(e)
             }
         }
-        render(ScreenModel.pick(refusals(), problem, state, key3), state)
+        render(ScreenModel.pick(refusals(), problem, state, key3, lock), state)
     }
 
     private fun render(screen: Screen, state: SetupState? = null) {
         when (screen) {
             is Screen.Refused -> act.show(ui.page(screen.words.map { ui.words(it) } + ui.button("Check again") { start() }))
             is Screen.Fault -> act.show(ui.page(listOf(ui.words(screen.words), ui.button("Try again") { start() })))
+            is Screen.Unlock -> showUnlock(null)
+            is Screen.SetPin -> showSetPin(screen.upgrade, null)
+            is Screen.Wiped -> showWiped()
             is Screen.Setup -> showSetup()
             is Screen.ShowWords -> showKeyWords()
             is Screen.Key3 -> showKey3(null)
@@ -211,6 +240,347 @@ class Controller(private val act: MainActivity) {
         val group = ui.choice(names, network.ordinal)
         group.setOnCheckedChangeListener { _, _ -> network = KeyNetwork.values()[ui.chosen(group).coerceAtLeast(0)] }
         return group
+    }
+
+    // ---- the PIN lock (SR-71 to SR-77) -------------------------------------------------
+
+    private fun stopTicker() {
+        ticker?.let { main.removeCallbacks(it) }
+        ticker = null
+    }
+
+    /** A field for a PIN or a passphrase: its letters are hidden, and no keyboard may learn or suggest them. */
+    private fun secret(hint: String, numeric: Boolean): EditText = ui.field(hint).also {
+        it.inputType = if (numeric) {
+            InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        } else {
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+    }
+
+    /**
+     * The page is drawn first, then [block] runs a moment later on the main thread: the key from the PIN
+     * takes about a second, and the person sees that the app is working and not stuck (SR-77).
+     */
+    private fun slow(block: () -> Unit) {
+        act.show(ui.page(listOf(ui.words(AppWords.working))))
+        main.postDelayed({ if (app != null) block() }, 100)
+    }
+
+    /** SR-72: a PIN for a new or restored key, or for a key an older build saved without one. */
+    private fun showSetPin(upgrade: Boolean, message: Words?) {
+        val a = app ?: return
+        val kind = ui.choice(listOf("PIN: 6 digits or more", "Passphrase: 8 characters or more"))
+        val first = secret("PIN", true)
+        val again = secret("The same PIN again", true)
+        kind.setOnCheckedChangeListener { _, _ ->
+            val numeric = ui.chosen(kind) != 1
+            first.hint = if (numeric) "PIN" else "Passphrase"
+            again.hint = if (numeric) "The same PIN again" else "The same passphrase again"
+            for (f in listOf(first, again)) {
+                f.setText("")
+                f.inputType = if (numeric) {
+                    InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+                } else {
+                    InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                }
+            }
+        }
+        val views = ArrayList<View>(banner())
+        message?.let { views.add(ui.words(it)) }
+        views.add(ui.words(if (upgrade) AppWords.upgradePin else AppWords.choosePin))
+        views.addAll(listOf(kind, first, again))
+        views.add(
+            ui.button("Set the PIN") {
+                allowed {
+                    val pin = first.text.toString()
+                    val same = pin == again.text.toString()
+                    first.setText("")
+                    again.setText("")
+                    if (!same) return@allowed showSetPin(upgrade, AppWords.pinsDiffer)
+                    slow {
+                        try {
+                            a.setPin(pin)
+                            refresh()
+                        } catch (e: KeyException) {
+                            showSetPin(upgrade, e.words ?: AppWords.fault(e))
+                        } catch (e: LinkageError) {
+                            showMessage(AppWords.libraryMissing(e.message)) { showSetPin(upgrade, null) }
+                        }
+                    }
+                }
+            },
+        )
+        act.show(ui.page(views))
+    }
+
+    /** What the screens say about the wrong tries so far: the tries left from the 5th, and the wait. */
+    private fun triesLines(check: Tries.Check): List<View> {
+        val out = ArrayList<View>()
+        if (Tries.showsTriesLeft(check.record.wrong)) out.add(ui.text(Tries.triesLeftText(check.record.wrong), 16f, bold = true))
+        return out
+    }
+
+    /** SR-75: the unlock screen, with the wait counted down and the tries left said from the 5th wrong one. */
+    private fun showUnlock(message: Words?) {
+        stopTicker()
+        val a = app ?: return
+        val now = clock()
+        val rec = tries.read(now)
+        val check = Tries.check(rec, now)
+        if (check.wipe) return wipe()
+        if (check.record != rec) {
+            try {
+                tries.write(check.record)
+            } catch (_: IOException) {
+            }
+        }
+        val field = secret("PIN or passphrase", false)
+        val countdown = ui.text("", 20f, bold = true)
+        val unlock = ui.button("Unlock") {
+            allowed {
+                val pin = field.text.toString()
+                field.setText("")
+                if (pin.isNotEmpty()) triedPin({ showUnlock(it) }, { a.unlock(pin) }) { refresh() }
+            }
+        }
+        fun update() {
+            val left = Tries.check(check.record, clock()).waitLeft
+            countdown.text = if (left > 0) "Wait ${Tries.waitText(left)}" else ""
+            countdown.visibility = if (left > 0) View.VISIBLE else View.GONE
+            unlock.isEnabled = left <= 0
+        }
+        update()
+        val views = ArrayList<View>(banner())
+        views.add(ui.words(message ?: AppWords.state(SetupState.Locked)))
+        views.addAll(triesLines(check))
+        views.add(countdown)
+        views.add(field)
+        views.add(unlock)
+        act.show(ui.page(views))
+        if (check.waitLeft > 0) {
+            val tick = object : Runnable {
+                override fun run() {
+                    update()
+                    if (Tries.check(check.record, clock()).waitLeft > 0) main.postDelayed(this, 1000) else ticker = null
+                }
+            }
+            ticker = tick
+            main.postDelayed(tick, 1000)
+        }
+    }
+
+    /**
+     * One try of the PIN, counted as SR-75 says: one more wrong try is written before [op] runs, and 0 after it
+     * succeeds. A refusal that is not a wrong PIN gives the count back; the 10th wrong try wipes. [back] shows
+     * the screen the try came from, with the words to show on it. [done] runs when [op] worked.
+     */
+    private fun triedPin(back: (Words?) -> Unit, op: () -> Unit, done: () -> Unit) {
+        val now = clock()
+        val rec = tries.read(now)
+        val check = Tries.check(rec, now)
+        if (check.wipe) return wipe()
+        if (check.waitLeft > 0) return back(AppWords.waitForTry)
+        val before = Tries.before(check.record, now)
+        try {
+            tries.write(before)
+        } catch (e: IOException) {
+            return showMessage(AppWords.triesNotSaved(e.message)) { back(null) }
+        }
+        slow {
+            try {
+                op()
+                try {
+                    tries.write(Tries.afterRight())
+                } catch (_: IOException) {
+                    // The count stays one too high: the stricter way.
+                }
+                done()
+            } catch (e: KeyException) {
+                if (e.rule == RULE_PIN_WRONG) {
+                    if (before.wrong >= Tries.WIPE_AT) wipe() else back(e.words ?: AppWords.fault(e))
+                } else {
+                    try {
+                        tries.write(check.record)
+                    } catch (_: IOException) {
+                    }
+                    showMessage(e.words ?: AppWords.fault(e)) { back(null) }
+                }
+            } catch (e: LinkageError) {
+                showMessage(AppWords.libraryMissing(e.message)) { back(null) }
+            }
+        }
+    }
+
+    /** SR-76: delete the saved state, the Keystore key and the count, in that order, and say so. */
+    private fun wipe() {
+        close()
+        try {
+            Wipe.run(act.noBackupFilesDir, tries) { KeyWipe.deleteKey() }
+        } catch (e: IOException) {
+            return act.show(ui.page(listOf(ui.words(AppWords.wipeFailed(e.message)), ui.button("Try again") { start() })))
+        }
+        showWiped()
+    }
+
+    private fun showWiped() {
+        act.show(
+            ui.page(
+                listOf(
+                    ui.words(AppWords.wiped),
+                    ui.button("Restore the key from its words") { start() },
+                ),
+            ),
+        )
+    }
+
+    /** Changing the PIN asks for the current one, and a wrong one counts like a wrong try at the unlock screen. */
+    private fun showChangePin(message: Words?) {
+        val a = app ?: return
+        val now = clock()
+        val check = Tries.check(tries.read(now), now)
+        if (check.wipe) return wipe()
+        val current = secret("Current PIN or passphrase", false)
+        val first = secret("New PIN or passphrase", false)
+        val again = secret("The new one again", false)
+        val views = ArrayList<View>(banner())
+        views.add(ui.text("Change the PIN", 20f, bold = true))
+        message?.let { views.add(ui.words(it)) }
+        views.addAll(triesLines(check))
+        if (check.waitLeft > 0) views.add(ui.text("Wait ${Tries.waitText(check.waitLeft)}", 20f, bold = true))
+        views.addAll(listOf(current, first, again))
+        views.add(
+            ui.button("Change the PIN") {
+                allowed {
+                    val old = current.text.toString()
+                    val new = first.text.toString()
+                    val same = new == again.text.toString()
+                    for (f in listOf(current, first, again)) f.setText("")
+                    if (!same) return@allowed showChangePin(AppWords.pinsDiffer)
+                    triedPin({ showChangePin(it) }, { a.changePin(old, new) }) {
+                        showMessage(AppWords.pinChanged) { refresh() }
+                    }
+                }
+            },
+        )
+        views.add(ui.button("Back") { refresh() })
+        act.show(ui.page(views))
+    }
+
+    // ---- cash-out addresses (SR-78, SR-79) ------------------------------------------------
+
+    /** The list of cash-out addresses, each with "Remove", and "Add an address". */
+    private fun showCashOut() {
+        val a = app ?: return
+        val s = attempt({ refresh() }) { a.signerStatus() } ?: return
+        val views = ArrayList<View>(banner())
+        views.add(ui.words(AppWords.cashOut))
+        val rows = s.allowlist.map { CashOut.row(it, s.effectiveTimeNow) }
+        if (rows.isEmpty()) views.add(ui.text("No cash-out addresses yet.", 16f))
+        for (row in rows) {
+            views.add(ui.text(row.label, 18f, bold = true))
+            views.add(ui.text(row.address, 15f, mono = true))
+            views.add(ui.text("Added ${row.enrolled}, ${row.status}", 14f))
+            row.removable?.let { address -> views.add(ui.button("Remove") { showRemoveAddress(row, address) }) }
+        }
+        views.add(ui.button("Add an address") { showScanDeposit() })
+        views.add(ui.button("Back") { refresh() })
+        act.show(ui.page(views))
+    }
+
+    /** SR-78: the address only comes from the camera. There is no field for it. */
+    private fun showScanDeposit() {
+        allowed {
+            val back = { showCashOut() }
+            act.show(
+                ui.page(
+                    listOf(
+                        ui.words(AppWords.scanDeposit),
+                        ui.button("Scan the deposit code") {
+                            allowed {
+                                scan.begin(
+                                    show = { act.show(it) },
+                                    onBytes = { bytes -> allowed { depositScanned(bytes) } },
+                                    onFailed = { showMessage(cameraWords(it), back) },
+                                    onCancel = { showScanDeposit() },
+                                )
+                            }
+                        },
+                        ui.button("Back") { back() },
+                    ),
+                ),
+            )
+        }
+    }
+
+    private fun depositScanned(bytes: ByteArray) {
+        val a = app ?: return
+        when (val input = CashOut.readCode(bytes)) {
+            is DepositInput.Refused -> showMessage(input.words) { showScanDeposit() }
+            is DepositInput.Text -> {
+                // The wallet's network is key 2's; a Key app without key 2 has no allowlist (the library says so).
+                val network = attempt({ showCashOut() }) { a.key2Public()?.network } ?: return showCashOut()
+                val code = attempt({ showScanDeposit() }) { KeyApp.parseDepositCode(store!!, input.text, network) } ?: return
+                showNameAddress(input.text, code.address, "")
+            }
+        }
+    }
+
+    private fun showNameAddress(text: String, address: String, label: String) {
+        val field = ui.field("A name for this address (1 to 64 characters)")
+        field.setText(label)
+        act.show(
+            ui.page(
+                banner() + listOf(
+                    ui.words(AppWords.nameAddress),
+                    ui.text(CashOut.groupsOfFour(address), 16f, mono = true),
+                    field,
+                    ui.button("Next") { showConfirmAddress(text, address, field.text.toString().trim()) },
+                    ui.button("Back") { showCashOut() },
+                ),
+            ),
+        )
+    }
+
+    /** SR-78: the address in groups of four, and that it is usable 24 hours from now by this phone's clock. */
+    private fun showConfirmAddress(text: String, address: String, label: String) {
+        val a = app ?: return
+        act.show(
+            ui.page(
+                banner() + listOf(
+                    ui.words(AppWords.checkAddress),
+                    ui.text(Format.cleanForeign(label), 18f, bold = true),
+                    ui.text(CashOut.groupsOfFour(address), 22f, bold = true, mono = true),
+                    ui.button("Add this address") {
+                        allowed {
+                            attempt({ showNameAddress(text, address, label) }) { a.enrollDestination(text, label) }
+                                ?.let { showMessage(AppWords.addressAdded) { showCashOut() } }
+                        }
+                    },
+                    ui.button("Back") { showNameAddress(text, address, label) },
+                ),
+            ),
+        )
+    }
+
+    private fun showRemoveAddress(row: CashOutRow, address: String) {
+        val a = app ?: return
+        act.show(
+            ui.page(
+                banner() + listOf(
+                    ui.words(AppWords.removeAddress),
+                    ui.text(row.label, 18f, bold = true),
+                    ui.text(row.address, 16f, mono = true),
+                    ui.button("Remove it") {
+                        allowed {
+                            attempt({ showCashOut() }) { a.removeDestination(address) }
+                                ?.let { showMessage(AppWords.addressRemoved) { showCashOut() } }
+                        }
+                    },
+                    ui.button("Back") { showCashOut() },
+                ),
+            ),
+        )
     }
 
     // ---- first start ----------------------------------------------------------------
@@ -566,6 +936,8 @@ class Controller(private val act: MainActivity) {
             views.add(ui.button("Show the last answer as a code") { showAnswerCode(answerFile.readBytes()) { refresh() } })
         }
         views.add(ui.button("Pair a counter") { showPairOffer() })
+        views.add(ui.button("Cash-out addresses") { showCashOut() })
+        views.add(ui.button("Change the PIN") { showChangePin(null) })
         views.add(ui.button("The wallet and its check words") { showWalletAgain() })
         views.add(ui.button("Check the printed kit") { showKitCheck() })
         views.add(ui.button("Limits and status") { showStatus() })
@@ -940,6 +1312,9 @@ class Controller(private val act: MainActivity) {
     }
 
     private companion object {
+        /** The library's rule string for a wrong PIN (SR-73). */
+        const val RULE_PIN_WRONG = "pin-wrong"
+
         const val REQUEST_OPEN = 1
         const val REQUEST_SAVE = 2
 
