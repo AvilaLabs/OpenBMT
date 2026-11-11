@@ -47,7 +47,7 @@ exactly the input bytes.
 | `lock_frame_decode` | `decode` of `openbmt-lock` (the frame the Key app and the owner app lock their key files in, magic `OBMx`), on the input as it is and behind a good magic and version; a frame that is read must have parameters inside the limit, be exactly as long as its header says and encode back to the input |
 | `counter_sale_decode` | `Sale::from_bytes` |
 | `counter_desk_decode` | `Desk::from_bytes` |
-| `counter_event_decode` | `Event::decode` |
+| `counter_event_decode` | `Event::decode` (with the optional person at the till in `Opened` and `Cancelled`, CR-151) and `StaffEvent::decode` (CR-143), each with re-encode equality; a staff body must never read as a sale event |
 | `counter_ops` | a real counter driven by a script of operations in the input (open, requote, sighting, block, reorg, time, judge, override, cancel, owner command, a Lightning payment, restart) against a memory store that fails the writes the input chooses; see the target for the invariants it asserts after every operation |
 | `spend_combine` | `openbmt_spend::combine` and `finalize` against the file of one fixed plan; the input is two "signed" files split at the first byte. It must never panic, and no transaction may come out, because nothing in the input is a signature by a wallet key |
 | `books_export_decode` | `Books::from_bundle` (what is read must encode back to the input) and `decode_export_header` (the header must encode back to the input's prefix); a file whose header asks for tiny Argon2 parameters is also given to `open_export` with a fixed passphrase, and must always be refused without a panic |
