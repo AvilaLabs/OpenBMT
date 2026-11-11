@@ -3,6 +3,9 @@ package org.openbmt.owner.app
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
 import org.openbmt.app.SayWords
 import org.openbmt.app.Sealer
 import org.openbmt.app.SealedFile
@@ -70,6 +73,82 @@ class PosTokenStore(dir: File, sealer: Sealer, name: String = AppFiles.POS_TOKEN
 
     fun remove() {
         if (file.exists() && !file.delete()) throw IOException("the token file could not be removed")
+    }
+}
+
+/**
+ * The one queue of the till's token file (OA-94). Save, load and remove all run
+ * on its single thread, in the order they were asked, and no other thread
+ * touches the file. [post] hands a finished operation's callback to the screen
+ * thread. Whether the file is there is kept in step by the queue, so that the
+ * screen thread never reads the file itself.
+ */
+class PosTokenQueue(private val store: PosTokenStore, private val post: (() -> Unit) -> Unit) {
+    private val worker = Executors.newSingleThreadExecutor { r -> Thread(r).also { it.isDaemon = true } }
+
+    @Volatile
+    private var present = store.exists()
+
+    /** Removals asked and not yet finished; touched on the screen thread only. */
+    private var removing = 0
+
+    fun exists(): Boolean = present
+
+    /** True from the asking of a removal until its callback has run, when the till page offers no action (OA-94). */
+    fun isRemoving(): Boolean = removing > 0
+
+    fun save(token: String, done: (Result<Unit>) -> Unit) = enqueue({ store.save(token); present = true }, done)
+
+    fun remove(done: (Result<Unit>) -> Unit) {
+        removing++
+        enqueue({ store.remove(); present = false }) { r ->
+            removing--
+            done(r)
+        }
+    }
+
+    /** The token, read in its place in the queue; waits for what was asked before it. Throws what the store throws. */
+    fun load(): String? {
+        try {
+            return worker.submit(Callable { store.load() }).get()
+        } catch (e: ExecutionException) {
+            throw e.cause ?: e
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw IOException("the read of the token was interrupted")
+        }
+    }
+
+    private fun enqueue(work: () -> Unit, done: (Result<Unit>) -> Unit) {
+        worker.execute {
+            val r = runCatching(work)
+            post { done(r) }
+        }
+    }
+}
+
+/**
+ * The number of the till screen (OA-94). It goes up whenever the till is taken
+ * off or connected; a callback that started under an older number draws nothing.
+ * Touched on the screen thread only.
+ */
+class TillEpoch {
+    private var number = 0
+
+    /** The number to start an operation under. */
+    fun current(): Int = number
+
+    /** A till was taken off or connected: everything started so far is now stale. */
+    fun advance(): Int {
+        number++
+        return number
+    }
+
+    /** Runs [draw] when [started] is still the number, and says whether it did. */
+    fun draw(started: Int, draw: () -> Unit): Boolean {
+        if (started != number) return false
+        draw()
+        return true
     }
 }
 

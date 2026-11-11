@@ -37,6 +37,10 @@ internal fun Controller.showTill(message: SayWords? = null): Unit = withTillNode
     }
     posConnected = state.setup != null
     val till = state.setup
+    if (posTokens.isRemoving()) {
+        // The sign-in is being removed: no action until it is done (OA-94).
+        return@withTillNode screen("Till", views, emptyList(), back = null)
+    }
     if (till == null) {
         views.add(ui.words(AppWords.posNotConnected))
         val form = connectForm(n, msg)
@@ -65,13 +69,17 @@ internal fun Controller.showTill(message: SayWords? = null): Unit = withTillNode
             if (attempt(msg) { n.posRemove() } != null) {
                 posConnected = false
                 posFault = null
-                async({ posTokens.remove() }) { r ->
-                    when (val e = r.exceptionOrNull()) {
-                        null -> showTill(AppWords.posRemoved)
-                        is IOException -> showTill(AppWords.storageUnavailable(e.message))
-                        else -> throw e
+                val started = tillEpoch.advance()
+                posTokens.remove { r ->
+                    tillEpoch.draw(started) {
+                        when (val e = r.exceptionOrNull()) {
+                            null -> showTill(AppWords.posRemoved)
+                            is IOException -> showTill(AppWords.storageUnavailable(e.message))
+                            else -> throw e
+                        }
                     }
                 }
+                showTill()
             }
         }
     views.add(msg)
@@ -132,6 +140,7 @@ private fun Controller.connectForm(n: OwnerNode, msg: Slot): TillForm {
             // The library judges the settings first, so that a refused till seals nothing.
             if (attempt(msg) { n.posSetup(args) } != null) {
                 forget(token)
+                tillEpoch.advance()
                 sealToken(t, n, rollback = true)
             }
         }
@@ -144,27 +153,30 @@ private class TillForm(val views: List<View>, val connect: () -> Unit)
 
 /** Seals the token in its own file, off the screen thread; if it cannot be kept, a till just connected is taken off again. */
 private fun Controller.sealToken(token: String, n: OwnerNode, rollback: Boolean) {
-    async({ posTokens.save(token) }) { r ->
-        val failed: SayWords? = when (val e = r.exceptionOrNull()) {
-            null -> null
-            is IOException -> AppWords.fileNotSaved(e.message)
-            is GeneralSecurityException -> AppWords.storageUnavailable(e.message)
-            else -> throw e
-        }
-        if (failed == null) {
-            posConnected = true
-            posFault = null
-            readTillNow()
-            showTill(AppWords.posConnected)
-        } else {
-            if (rollback) {
-                try {
-                    n.posRemove()
-                } catch (_: OwnerException) {
-                }
-                posConnected = false
+    val started = tillEpoch.current()
+    posTokens.save(token) { r ->
+        tillEpoch.draw(started) {
+            val failed: SayWords? = when (val e = r.exceptionOrNull()) {
+                null -> null
+                is IOException -> AppWords.fileNotSaved(e.message)
+                is GeneralSecurityException -> AppWords.storageUnavailable(e.message)
+                else -> throw e
             }
-            showTill(failed)
+            if (failed == null) {
+                posConnected = true
+                posFault = null
+                readTillNow()
+                showTill(AppWords.posConnected)
+            } else {
+                if (rollback) {
+                    try {
+                        n.posRemove()
+                    } catch (_: OwnerException) {
+                    }
+                    posConnected = false
+                }
+                showTill(failed)
+            }
         }
     }
 }

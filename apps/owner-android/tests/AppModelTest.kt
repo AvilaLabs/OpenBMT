@@ -2179,6 +2179,49 @@ object AppModelTest {
         ok(page.contains("instantCard(table)") && page.contains("foldedCard(folded)") && page.contains("ui.primary(\"Change settings\")"), "the page has the card, the folds and the footer's primary")
     }
 
+    // ---- the till's token queue (OA-94) -------------------------------------------------------------------------
+
+    private fun oa_94_the_till_token_file_has_one_queue_and_a_stale_callback_draws_nothing() {
+        val dir = tempDir()
+        val posted = java.util.concurrent.LinkedBlockingQueue<() -> Unit>()
+        val queue = PosTokenQueue(PosTokenStore(dir, testSealer())) { posted.put(it) }
+        ok(!queue.exists() && queue.load() == null, "no token at first")
+        // A remove asked, then a save: the order asked is the order done, so the new token stays.
+        val results = ArrayList<String>()
+        queue.save("OLD-token") { }
+        queue.remove { results.add("removed") }
+        queue.save("NEW-token") { results.add("saved") }
+        ok(queue.isRemoving(), "a removal in flight is known to the screen")
+        ok(queue.load() == "NEW-token" && queue.exists(), "a remove then a save leaves the token")
+        repeat(3) { posted.take()() }
+        ok(results == listOf("removed", "saved") && !queue.isRemoving(), "the callbacks come in the order asked: $results")
+        ok(dir.listFiles()!!.map { it.name } == listOf(AppFiles.POS_TOKEN_FILE), "one file")
+        queue.remove { }
+        posted.take()()
+        ok(!queue.exists() && queue.load() == null, "a lone remove removes it")
+        // Many from many threads still run one at a time, and each load sees the last save asked before it.
+        val q = PosTokenQueue(PosTokenStore(dir, testSealer())) { posted.put(it) }
+        for (i in 0 until 20) {
+            q.save("t$i") { }
+            ok(q.load() == "t$i", "load $i follows its save")
+        }
+        repeat(20) { posted.take()() }
+        clean(dir)
+        // A callback draws only under the number it started with.
+        val epoch = TillEpoch()
+        val first = epoch.current()
+        var drawn = 0
+        ok(epoch.draw(first) { drawn++ } && drawn == 1, "a current callback draws")
+        val after = epoch.advance()
+        ok(!epoch.draw(first) { drawn++ } && drawn == 1, "a stale callback does nothing")
+        ok(epoch.draw(after) { drawn++ } && drawn == 2 && after > first, "and the new number draws")
+        val pos = source("src/android/PosScreen.kt")
+        ok(pos.contains("posTokens.remove { r ->") && pos.contains("posTokens.save(token) { r ->") && !pos.contains("async("), "the screen goes through the queue")
+        ok(pos.contains("tillEpoch.advance()") && occurs(pos, "tillEpoch.draw(started)") == 2, "the number goes up and both callbacks are guarded")
+        ok(pos.contains("posTokens.isRemoving()") && source("src/android/Controller.kt").contains("PosTokenQueue(PosTokenStore(dir"), "no actions while the removal runs")
+        ok(source("src/android/Controller.kt").contains("posTokens.load()") && !source("src/android/Controller.kt").contains("PosTokenStore.load"), "the till thread reads through the queue")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
@@ -2200,7 +2243,7 @@ object AppModelTest {
         val rules = Regex("^- \\*\\*OA-(\\d\\d)\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules == rules.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
         // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-79 for more.
-        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..93)
+        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..94)
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")

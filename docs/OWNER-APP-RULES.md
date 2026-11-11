@@ -163,7 +163,8 @@ connection that is not Bitcoin's.
   shown on no screen, and put in no log, no error text and no address. The
   till's settings are given to the library first, so that a refused till
   seals nothing; a token that cannot be sealed takes the till off again.
-  Taking the till off removes the library's records of it and the file.
+  Taking the till off removes the library's records of it and the file;
+  the file is kept in order as OA-94 says.
 - **OA-17.** A read of the till sends only what the library asked for: its
   method, its address and its body, with the token added as an
   `Authorization` header in Kotlin and nowhere else. The address must be
@@ -806,3 +807,12 @@ signs batches, settings and pairings, are never in the service.
   Counters' shares, Lightning node, and Watch in the background when it has
   a line) that opens as key and value lines. The read-only sentence is a
   footnote and "Change settings" is the footer's primary.
+- **OA-94.** Every operation on the till's token file (save, load and
+  remove) runs on one single-thread queue that the controller owns, in the
+  order it was asked, and no other thread touches the file; the screen
+  learns whether the file is there from the queue. Each till screen has a
+  number that goes up whenever the till is taken off or connected, and a
+  callback draws only if the number is still the one it started under;
+  otherwise it does nothing. While a removal is in flight the till page
+  shows no actions and no back arrow, and comes back when the removal is
+  done. A remove followed by a save leaves the new token.

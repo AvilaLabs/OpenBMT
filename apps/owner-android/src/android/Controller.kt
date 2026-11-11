@@ -96,7 +96,8 @@ class Controller(internal val act: MainActivity) {
     internal var homeTint: Int? = null
 
     // The till (OA-16 to OA-19): its sealed token, how its last read went, and the screen's call for a read now.
-    internal val posTokens = PosTokenStore(dir, KeystoreSealer(AppFiles.POS_KEY_ALIAS))
+    internal val posTokens = PosTokenQueue(PosTokenStore(dir, KeystoreSealer(AppFiles.POS_KEY_ALIAS))) { main.post(it) }
+    internal val tillEpoch = TillEpoch()
     internal var posFault: SayWords? = null
 
     // The background watch (OA-80 to OA-89): its two sealed files and its on-marker.
