@@ -7,5 +7,6 @@ mod kit;
 mod link;
 mod node;
 mod notices;
+mod records;
 mod say;
 mod settle;

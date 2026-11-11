@@ -527,6 +527,9 @@ pub enum LoadError {
     Desk(DecodeError),
     /// CR-42: the stored record chain does not verify.
     Records(ChainError),
+    /// CR-42, CR-81: the stored records could not be read, or one does not
+    /// parse. The text says which.
+    RecordsUnread(String),
 }
 
 impl LoadError {
@@ -545,6 +548,7 @@ impl fmt::Display for LoadError {
             Self::Pause(e) => write!(f, "the stored pause state does not read back: {e}"),
             Self::Desk(e) => write!(f, "the stored counter state does not read back: {e}"),
             Self::Records(e) => write!(f, "the stored records do not verify: {e}"),
+            Self::RecordsUnread(e) => write!(f, "the stored records cannot be read: {e}"),
         }
     }
 }

@@ -17,7 +17,7 @@ use bitcoin::{
 use openbmt_core::batch::{AddressBatch, BatchPolicy, PinnedRoots, SignedBatch};
 use openbmt_core::identity::Identity;
 use openbmt_core::policy::Heartbeat;
-use openbmt_core::records::DeviceList;
+use openbmt_core::records::{Chain, DeviceList};
 use openbmt_core::settings::Settings;
 use openbmt_counter::{
     Amount, Counter, Currency, Facts, OpenFacts, Opened, Pairing, Rate, RateSource, Slot, State,
@@ -47,6 +47,9 @@ impl Store for Null {
     }
     fn append_record(&mut self, _bytes: &[u8]) -> Result<(), &'static str> {
         Ok(())
+    }
+    fn read_records(&self, _from: u64, _max: usize) -> Result<Vec<Vec<u8>>, &'static str> {
+        Ok(Vec::new())
     }
 }
 
@@ -357,7 +360,9 @@ fn scene() -> Scene {
 
     let counter = id(3).device_id();
     let devices = DeviceList::new([counter, id(1).device_id()]);
-    let books = Books::from_chains(&devices, &[(counter, r.c.records())]).expect("books");
+    // The counter's records are all in its memory: the store keeps none.
+    let chain = Chain::from_records(r.c.records_from(0, usize::MAX, &Null).expect("records"));
+    let books = Books::from_chains(&devices, &[(counter, &chain)]).expect("books");
     Scene {
         books,
         counter,

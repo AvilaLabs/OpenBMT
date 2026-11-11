@@ -632,9 +632,9 @@ fn a_refund_request_is_a_record_on_the_nodes_chain_and_survives_a_restart() {
         actor: ann.clone(),
         reason: "wrong size".to_string(),
     };
-    let records_before = rig.node.counter().records().len();
+    let records_before = rig.node.records_len();
     assert_eq!(rig.node.request_refund(0, request).unwrap(), 1);
-    assert_eq!(rig.node.counter().records().len(), records_before + 1);
+    assert_eq!(rig.node.records_len(), records_before + 1);
     let views = rig.node.refund_views(0);
     assert_eq!(views.len(), 1);
     assert_eq!(
@@ -665,9 +665,8 @@ fn a_refund_request_is_a_record_on_the_nodes_chain_and_survives_a_restart() {
     // The records are on disk: a restarted node reads the same.
     let kinds: Vec<_> = rig
         .node
-        .counter()
-        .records()
-        .records()
+        .records_from(0, usize::MAX)
+        .unwrap()
         .iter()
         .filter_map(|r| Event::decode(&r.body).ok())
         .filter(|e| e.kind() == openbmt_core::records::RecordKind::Refund)

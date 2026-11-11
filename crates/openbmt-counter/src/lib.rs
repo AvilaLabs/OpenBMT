@@ -46,6 +46,7 @@ pub mod desk;
 pub mod events;
 pub mod heartbeat;
 pub mod money;
+mod recordlog;
 pub mod refund;
 pub mod refusal;
 pub mod sale;
@@ -67,6 +68,7 @@ pub use money::{
     sats_for, value_of, Amount, BadSourceLabel, Currency, Quote, Rate, RateSource,
     MAX_RATE_AGE_SECS, MAX_RATE_AHEAD_SECS, MAX_SOURCE_LABEL_BYTES, QUOTE_SECS,
 };
+pub use recordlog::{KEEP_RECORDS, MAX_READ, MAX_UNSENT_IN_MEMORY};
 pub use refund::{
     refund_destination, Ask, CashRefund, RefundAsk, RefundRequest, RefundState, RefundView,
     MAX_REFUNDS_PER_SALE,

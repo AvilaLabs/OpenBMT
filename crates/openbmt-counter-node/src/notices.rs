@@ -9,7 +9,9 @@
 //! Box refuses a number it has already taken, so a resend is harmless.
 //!
 //! Nothing in here touches the counter's sales or its records: the records
-//! are read, never written.
+//! are read, never written. They are read in order through a
+//! [`RecordSource`], a chunk at a time, so that a chain that is not all in
+//! memory (CR-81) is folded without being held.
 //!
 //! Where the rules are silent:
 //!
@@ -31,8 +33,10 @@ use std::path::{Path, PathBuf};
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::records::{Record, RecordKind};
 use openbmt_core::wire::{self, DecodeError, Reader};
-use openbmt_counter::Event;
+use openbmt_counter::{Counter, Event};
 use openbmt_pos::{NoticeMaker, PaidNotice, PAID_NOTICE_LEN};
+
+use crate::dirstore::DirStore;
 
 /// The file in the link's directory.
 pub const NOTICE_FILE: &str = "notice-outbox";
@@ -40,6 +44,48 @@ pub const NOTICE_FILE: &str = "notice-outbox";
 pub const MAX_QUEUED: usize = 4_096;
 /// Most Boxes the file remembers a send mark for.
 pub const MAX_BOXES: usize = 64;
+/// How many records are read at once when the chain is folded.
+const FOLD_CHUNK: usize = 256;
+
+/// Records that can be read in order, a few at a time.
+pub trait RecordSource {
+    /// How many records there are.
+    fn records_len(&self) -> u64;
+
+    /// Up to `max` records from number `from` on, oldest first. The text of
+    /// the error is noted by the caller.
+    fn read(&self, from: u64, max: usize) -> Result<Vec<Record>, String>;
+}
+
+impl RecordSource for [Record] {
+    fn records_len(&self) -> u64 {
+        self.len() as u64
+    }
+
+    fn read(&self, from: u64, max: usize) -> Result<Vec<Record>, String> {
+        let from = usize::try_from(from).unwrap_or(usize::MAX);
+        Ok(self.iter().skip(from).take(max).cloned().collect())
+    }
+}
+
+/// The records of a node's counter: from its memory, and from the record
+/// file below what memory holds (CR-81).
+pub struct NodeRecords<'a> {
+    pub(crate) counter: &'a Counter,
+    pub(crate) store: &'a DirStore,
+}
+
+impl RecordSource for NodeRecords<'_> {
+    fn records_len(&self) -> u64 {
+        self.counter.records_len()
+    }
+
+    fn read(&self, from: u64, max: usize) -> Result<Vec<Record>, String> {
+        self.counter
+            .records_from(from, max, self.store)
+            .map_err(|e| e.to_string())
+    }
+}
 
 const MAGIC_NOTICE_OUTBOX: [u8; 4] = *b"OBMb";
 
@@ -50,6 +96,8 @@ pub enum NoticeStoreError {
     Corrupt(DecodeError),
     /// The identity is not the one that signs the counter's records.
     NotThisCounter,
+    /// The counter's records could not be read.
+    Records(String),
     /// The file could not be read or written.
     Io {
         /// What was being done.
@@ -67,6 +115,7 @@ impl fmt::Display for NoticeStoreError {
                 f,
                 "BX-40: the notices are signed with a key that is not this counter's"
             ),
+            Self::Records(e) => write!(f, "BX-40: the records could not be read: {e}"),
             Self::Io { op, kind } => write!(f, "BX-40: could not {op} {NOTICE_FILE}: {kind}"),
         }
     }
@@ -200,10 +249,10 @@ impl NoticeOutbox {
     /// Open the file in `dir` (made if there is none) for the counter whose
     /// identity this is, and fold the records the file says were already
     /// turned into notices, so that the next notice is the next change.
-    pub fn open(
+    pub fn open<R: RecordSource + ?Sized>(
         identity: Identity,
         dir: impl Into<PathBuf>,
-        records: &[Record],
+        records: &R,
     ) -> Result<Self, NoticeStoreError> {
         let dir = dir.into();
         let me = identity.device_id();
@@ -217,12 +266,23 @@ impl NoticeOutbox {
         }
         let mut maker = NoticeMaker::new(me);
         let mut undecoded = 0;
-        let upto = usize::try_from(held.scanned)
-            .unwrap_or(usize::MAX)
-            .min(records.len());
-        for record in records.iter().take(upto) {
-            if fold(&mut maker, &me, record).is_err() {
-                undecoded += 1;
+        let upto = held.scanned.min(records.records_len());
+        let mut next = 0u64;
+        while next < upto {
+            let want = usize::try_from(upto - next).unwrap_or(usize::MAX);
+            let chunk = records
+                .read(next, want.min(FOLD_CHUNK))
+                .map_err(NoticeStoreError::Records)?;
+            if chunk.is_empty() {
+                return Err(NoticeStoreError::Records(format!(
+                    "no record {next} though the chain has {upto}"
+                )));
+            }
+            for record in chunk.iter().take(want) {
+                if fold(&mut maker, &me, record).is_err() {
+                    undecoded += 1;
+                }
+                next += 1;
             }
         }
         Ok(Self {
@@ -253,31 +313,52 @@ impl NoticeOutbox {
     /// Fold the records not yet folded, queue the notices they call for and
     /// store the new state before it takes effect. Returns how many notices
     /// were dropped from the queue's front, if it was over the bound.
-    pub fn collect(&mut self, records: &[Record]) -> Result<usize, NoticeStoreError> {
+    pub fn collect<R: RecordSource + ?Sized>(
+        &mut self,
+        records: &R,
+    ) -> Result<usize, NoticeStoreError> {
         let me = self.identity.device_id();
-        let from = usize::try_from(self.held.scanned).unwrap_or(usize::MAX);
-        let Some(fresh) = records.get(from..).filter(|r| !r.is_empty()) else {
+        let len = records.records_len();
+        let from = self.held.scanned;
+        if from >= len {
             return Ok(0);
-        };
+        }
         let mut maker = self.maker.clone();
         let mut held = self.held.clone();
         let mut undecoded = self.undecoded;
-        for record in fresh {
-            match fold(&mut maker, &me, record) {
-                Ok(Some(draft)) => {
-                    let number = held.last_number.saturating_add(1);
-                    if let Some(notice) = PaidNotice::sign(&self.identity, number, &draft) {
-                        held.last_number = number;
-                        held.queue.push(notice);
-                    }
-                }
-                Ok(None) => {}
-                Err(()) => undecoded += 1,
+        let mut next = from;
+        let mut over = 0usize;
+        while next < len {
+            let want = usize::try_from(len - next).unwrap_or(usize::MAX);
+            let chunk = records
+                .read(next, want.min(FOLD_CHUNK))
+                .map_err(NoticeStoreError::Records)?;
+            if chunk.is_empty() {
+                return Err(NoticeStoreError::Records(format!(
+                    "no record {next} though the chain has {len}"
+                )));
             }
+            for record in chunk.iter().take(want) {
+                match fold(&mut maker, &me, record) {
+                    Ok(Some(draft)) => {
+                        let number = held.last_number.saturating_add(1);
+                        if let Some(notice) = PaidNotice::sign(&self.identity, number, &draft) {
+                            held.last_number = number;
+                            held.queue.push(notice);
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(()) => undecoded += 1,
+                }
+                next += 1;
+            }
+            // The queue is cut as it grows, so that a long stretch of
+            // records is not held as notices either.
+            let cut = held.queue.len().saturating_sub(MAX_QUEUED);
+            held.queue.drain(..cut);
+            over += cut;
         }
-        held.scanned = records.len() as u64;
-        let over = held.queue.len().saturating_sub(MAX_QUEUED);
-        held.queue.drain(..over);
+        held.scanned = len;
         write_whole(&self.dir, &held.to_bytes())?;
         self.maker = maker;
         self.held = held;

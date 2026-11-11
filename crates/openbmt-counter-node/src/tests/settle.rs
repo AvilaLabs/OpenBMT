@@ -71,7 +71,7 @@ fn rig_with_ended_sales(dir: &Scratch, n: u32) -> Rig {
 }
 
 fn owner_holds_all(node: &mut Node<FakePort>) {
-    let all = node.counter().records().len();
+    let all = node.records_len();
     node.set_owner_mark(all);
 }
 

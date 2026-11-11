@@ -248,13 +248,19 @@ over is still checked by the rules of the thing it carries.
   none). The counter takes it as the owner's mark only if the number is not
   more than the counter's own length and the head is the hash of its own
   record at that place. Any other is ignored and noted. A valid mark below
-  the last one is taken: the owner may have lost part of its copy.
+  the last one is taken: the owner may have lost part of its copy. The
+  hash at a place below what the counter holds in memory is read from its
+  stored records (CR-81); a read that fails leaves the last mark as it was
+  and is noted.
 - **LK-56.** The counter sends records to the owner when its chain is longer
   than the owner's mark and either some of the records after the mark were
   never sent or 30 seconds have passed since the last send. What it sends
   starts after the mark, oldest first (after what was already sent, when
   nothing is overdue). It sends at most 4 messages in one step. A mark that
-  never moves therefore costs a resend every 30 seconds and no more.
+  never moves therefore costs a resend every 30 seconds and no more. The
+  records it sends come from memory, and from the stored records for the
+  ones below what memory holds (CR-81); a read that fails is noted and the
+  step sends nothing of what it could not read.
 - **LK-57.** The counter checks in by appending a check-in record to its
   own chain (`openbmt_core::records`), through the same stored path as every
   other record, and sending that record as a message of kind Check-in. It

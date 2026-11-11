@@ -112,7 +112,7 @@ impl World {
     }
 
     fn records(&self) -> Vec<Record> {
-        self.rig.node.counter().records().records().to_vec()
+        self.rig.node.records_from(0, usize::MAX).unwrap()
     }
 
     /// Everything the owner's courier takes now.
@@ -478,14 +478,14 @@ fn lk_57_the_node_stores_a_check_in_like_any_record() {
     let mut w = world(config());
     let rec = w.rig.node.check_in().unwrap();
     assert_eq!(rec.seq, 0);
-    assert_eq!(w.rig.node.counter().records().len(), 1);
+    assert_eq!(w.rig.node.records_len(), 1);
     let node_dir = w.node_dir.path().to_path_buf();
-    let head = w.rig.node.counter().records().head();
+    let head = w.rig.node.records_head();
     // A node started again on the same directory reads it back as a chain.
     drop(w.rig);
     let again = start(&node_dir);
-    assert_eq!(again.node.counter().records().len(), 1);
-    assert_eq!(again.node.counter().records().head(), head);
+    assert_eq!(again.node.records_len(), 1);
+    assert_eq!(again.node.records_head(), head);
     drop(w.link_dir);
 }
 
@@ -508,4 +508,146 @@ fn lk_56_a_relay_that_cannot_be_reached_is_tried_again_after_the_pause() {
     w.step(T0 + 10);
     assert!(w.link.state().relay_reachable);
     assert_eq!(carried(&w.owner_gets()), w.records());
+}
+
+/// A world whose counter holds 1,500 records, the owner having taken them
+/// all, so that the first records are below the counter's base (CR-81).
+fn long_world() -> World {
+    let mut cfg = config();
+    // Five of the 190-byte check-in records fit one message.
+    cfg.max_content = 1_000;
+    let mut w = world(cfg);
+    for _ in 0..1_499 {
+        w.rig.node.check_in().unwrap();
+    }
+    w.step(T0);
+    assert_eq!(w.rig.node.records_len(), 1_500);
+    w.mark(1_500, w.rig.node.records_head());
+    w.step(T0 + 1);
+    assert_eq!(w.rig.node.counter().owner_mark(), Some(1_500));
+    assert!(w.rig.node.counter().records_base() >= 400);
+    w.owner_gets();
+    w.notes();
+    w
+}
+
+#[test]
+fn lk_55_a_mark_below_the_base_is_checked_against_the_record_file() {
+    let mut w = long_world();
+    let base = w.rig.node.counter().records_base();
+    let in_memory = w.rig.node.counter().records_in_memory();
+    let h10 = w.rig.node.record_at(9).unwrap().unwrap().hash();
+    assert_eq!(w.rig.node.hash_at(10), Ok(Some(h10)));
+    // A head that is wrong for a place below the base is ignored; a right
+    // one is taken, and so is one at the base itself.
+    w.mark(10, [7; 32]);
+    w.mark(base, [7; 32]);
+    w.step(T0 + 2);
+    assert_eq!(w.link.state().marks_ignored, 2);
+    assert_eq!(w.link.state().owner_records, 1_500);
+    assert_eq!(w.notes().iter().filter(|n| n.contains("LK-55")).count(), 2);
+    w.mark(10, h10);
+    w.step(T0 + 3);
+    assert_eq!(w.link.state().marks_ignored, 2);
+    assert_eq!(
+        (w.link.state().owner_records, w.link.state().owner_head),
+        (10, h10)
+    );
+    assert_eq!(w.rig.node.counter().owner_mark(), Some(10));
+    let below = w.rig.node.record_at(base - 1).unwrap().unwrap().hash();
+    w.mark(base, below);
+    w.step(T0 + 4);
+    assert_eq!(w.link.state().owner_records, base);
+    // Memory did not take the records back.
+    assert_eq!(w.rig.node.counter().records_base(), base);
+    assert_eq!(w.rig.node.counter().records_in_memory(), in_memory);
+}
+
+#[test]
+fn lk_56_a_mark_that_goes_down_below_the_base_resends_from_the_record_file() {
+    let mut w = long_world();
+    let base = w.rig.node.counter().records_base();
+    assert!(base > 10);
+    let h10 = w.rig.node.record_at(9).unwrap().unwrap().hash();
+    w.mark(10, h10);
+    w.step(T0 + 2);
+    assert_eq!(w.link.state().owner_records, 10);
+    // The records the owner was never sent go first, from memory.
+    let seqs: Vec<u64> = carried(&w.owner_gets()).iter().map(|r| r.seq).collect();
+    assert_eq!(seqs, (20..40).collect::<Vec<u64>>());
+    // Thirty seconds after the last send the records after the mark go
+    // again, oldest first, from the file: four messages of five, and the
+    // next step goes on after them.
+    w.step(T0 + 33);
+    let got = w.owner_gets();
+    assert_eq!(of_kind(&got, Kind::Records).len(), 4);
+    let seqs: Vec<u64> = carried(&got).iter().map(|r| r.seq).collect();
+    assert_eq!(seqs, (10..30).collect::<Vec<u64>>());
+    assert_eq!(carried(&got), w.rig.node.records_from(10, 20).unwrap());
+    w.step(T0 + 34);
+    let seqs: Vec<u64> = carried(&w.owner_gets()).iter().map(|r| r.seq).collect();
+    assert_eq!(seqs, (30..50).collect::<Vec<u64>>());
+}
+
+#[test]
+fn cr_81_a_store_fault_below_the_base_is_noted_and_the_step_goes_on() {
+    let mut w = long_world();
+    let h10 = w.rig.node.record_at(9).unwrap().unwrap().hash();
+    let h20 = w.rig.node.record_at(19).unwrap().unwrap().hash();
+    w.mark(10, h10);
+    w.step(T0 + 2);
+    assert_eq!(w.link.state().owner_records, 10);
+    w.owner_gets();
+    w.notes();
+    let (len, head, base, held) = (
+        w.rig.node.records_len(),
+        w.rig.node.records_head(),
+        w.rig.node.counter().records_base(),
+        w.rig.node.counter().records_in_memory(),
+    );
+    // The record file is gone from under the node.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(w.node_dir.path().join("records.bin"))
+        .unwrap()
+        .set_len(0)
+        .unwrap();
+    assert!(w.rig.node.hash_at(20).is_err());
+    w.mark(20, h20);
+    w.send(Kind::Command, &command(&id(1), 2).to_bytes());
+    w.step(T0 + 3);
+    // The mark could not be checked: the last one stands, and it is not
+    // counted as the owner's mistake. The rest of the step was done.
+    assert_eq!(w.link.state().owner_records, 10);
+    assert_eq!(w.link.state().marks_ignored, 0);
+    assert_eq!(w.rig.node.counter().owner_mark(), Some(10));
+    assert_eq!(w.rig.node.counter().desk().last_command_seq(), 2);
+    let notes = w.notes();
+    let checked = notes.iter().filter(|n| n.contains("could not be checked"));
+    assert_eq!(checked.count(), 1, "{notes:?}");
+    // A resend that needs the records below the base is noted once and
+    // sends nothing.
+    let puts = w.relay.puts();
+    w.step(T0 + 40);
+    w.step(T0 + 41);
+    assert_eq!(w.relay.puts(), puts);
+    let notes = w.notes();
+    assert_eq!(
+        notes
+            .iter()
+            .filter(|n| n.contains("could not be read"))
+            .count(),
+        1,
+        "{notes:?}"
+    );
+    // The counter holds what it held.
+    assert_eq!(
+        (
+            w.rig.node.records_len(),
+            w.rig.node.records_head(),
+            w.rig.node.counter().records_base(),
+            w.rig.node.counter().records_in_memory(),
+        ),
+        (len, head, base, held)
+    );
 }

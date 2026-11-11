@@ -854,16 +854,16 @@ fn lk_56_three_hundred_records_reach_the_owner_across_several_messages() {
         rounds += 1;
         let copy = owner_side.copy(&counter()).unwrap();
         // The link's own check-in is a record too.
-        if copy.len() == node.counter().records().len() && rounds > 2 {
+        if copy.len() == node.records_len() && rounds > 2 {
             break;
         }
     }
-    let theirs = node.counter().records();
+    let theirs = node.records_from(0, usize::MAX).unwrap();
     let copy = owner_side.copy(&counter()).unwrap();
-    assert_eq!(copy.len(), theirs.len());
+    assert_eq!(copy.len(), node.records_len());
     assert!(copy.len() >= 301);
-    assert_eq!(copy.head(), theirs.head());
-    assert_eq!(copy.records(), theirs.records());
+    assert_eq!(copy.head(), node.records_head());
+    assert_eq!(copy.records(), theirs.as_slice());
     assert_eq!(records_in_file(copy), copy.records().len());
     // It took several messages: more than one step's four.
     assert!(counter_side.state().record_messages_sent > 8);
@@ -934,7 +934,10 @@ fn lk_58_a_restart_of_both_sides_in_the_middle_goes_on_without_duplicates() {
     assert!(owner_side.alerts().is_empty());
     let notes: Vec<String> = owner_side.take_notes();
     let copy = owner_side.copy(&counter()).unwrap();
-    assert_eq!(copy.records(), node.counter().records().records());
+    assert_eq!(
+        copy.records(),
+        node.records_from(0, usize::MAX).unwrap().as_slice()
+    );
     assert_eq!(records_in_file(copy), copy.records().len());
     assert!(
         !notes.iter().any(|n| n.contains("stopped")),

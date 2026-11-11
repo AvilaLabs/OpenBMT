@@ -8,7 +8,7 @@
 //! any two writes leaves the shop on the safe side (CR-41); each method says
 //! what its order is and why.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use bitcoin::consensus::deserialize;
 use bitcoin::hashes::Hash;
@@ -21,7 +21,7 @@ use openbmt_core::policy::{
     amount_at_risk, evaluate, CheckMode, Decision, Exposure, ExposureError, ExposureWriteError,
     Heartbeat, Inputs, InstantPolicy, PauseStatus, PauseTracker, PaymentId,
 };
-use openbmt_core::records::{AppendError, Chain, DeviceList, Record, RecordKind};
+use openbmt_core::records::{DeviceList, Record, RecordKind, Verifier};
 use openbmt_core::settings::Settings;
 use openbmt_watch::{HeaderChain, Health, Refusal, Sighted, Source, WellFormedBlock};
 
@@ -29,6 +29,7 @@ use crate::desk::{in_override_window, valid_name, Desk, OverrideEntry, Role};
 use crate::events::{final_payments, Event};
 use crate::heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
 use crate::money::{sats_for, Amount, Currency, Quote, Rate, RateSource, MAX_SATS};
+use crate::recordlog::{RecordLog, MAX_UNSENT_IN_MEMORY, READ_CHUNK};
 use crate::refund::{
     dust_limit, refund_text_ok, sats_floor, Ask, CashRefund, EntryKind, RefundAsk, RefundEntry,
     RefundRequest, RefundState, RefundView, MAX_REFUNDS_PER_SALE,
@@ -72,8 +73,6 @@ pub struct Stored<'a> {
     pub desk: Option<&'a [u8]>,
     /// Each sale (`OBML`) with the index of the slot it was in.
     pub sales: Vec<(u32, &'a [u8])>,
-    /// The record log, as read back.
-    pub records: Chain,
 }
 
 /// What a call of [`Counter::settle`] did (CR-77).
@@ -245,7 +244,12 @@ pub struct Counter {
     /// differ from what is stored, so that the stored sale is written again
     /// before the next refund call acts (CR-73).
     refund_unsaved: BTreeSet<u32>,
-    records: Chain,
+    records: RecordLog,
+    /// CR-73: each held sale's refund entries as its records say, kept as
+    /// the records are written so that the history need not be read again.
+    refund_book: BTreeMap<u32, Vec<RefundEntry>>,
+    /// CR-73: the highest refund request number any record holds.
+    highest_refund: u64,
     desk: Desk,
     /// CR-54: what the last heartbeat taken in this run came to. Not stored:
     /// after a restart there is none until a new one comes.
@@ -288,7 +292,9 @@ impl Counter {
             pause_unsaved: false,
             cancel_applied: BTreeSet::new(),
             refund_unsaved: BTreeSet::new(),
-            records: Chain::new(),
+            records: RecordLog::new(),
+            refund_book: BTreeMap::new(),
+            highest_refund: 0,
             desk: Desk::new(),
             heartbeat: None,
             sales: BTreeMap::new(),
@@ -305,13 +311,19 @@ impl Counter {
     /// refuses the start: running without it could hand an address out
     /// twice or forget exposure. A sale that does not read back is kept as
     /// unreadable and shown as `NeedsAPerson`, never as paid. The records
-    /// are verified as a chain signed by this counter.
-    pub fn load(
+    /// are read from `store` in order and verified as a chain signed by this
+    /// counter, one chunk at a time: only the newest are kept in memory
+    /// (CR-81).
+    pub fn load<S: Store>(
         identity: Identity,
         pairing: Pairing,
         settings: Settings,
         stored: Stored<'_>,
-    ) -> Result<Self, LoadError> {
+        store: &S,
+    ) -> Result<Self, LoadError>
+    where
+        S::Error: std::fmt::Display,
+    {
         let me = identity.device_id();
         let mut counter = Self::new(identity, pairing, settings);
         if let Some(bytes) = stored.batches {
@@ -333,11 +345,8 @@ impl Counter {
         if let Some(bytes) = stored.desk {
             counter.desk = Desk::from_bytes(bytes).map_err(LoadError::Desk)?;
         }
-        stored
-            .records
-            .verify(&DeviceList::new([me]))
-            .map_err(LoadError::Records)?;
-        counter.records = stored.records;
+        let (log, last, book, highest) = Self::read_chain(me, store)?;
+        counter.records = log;
         for (slot_index, bytes) in stored.sales {
             match Sale::from_bytes(bytes) {
                 Ok(sale) if sale.index == slot_index => counter.install(sale),
@@ -347,9 +356,76 @@ impl Counter {
             }
         }
         // CR-73: the counter's own records are the truth about refunds.
+        counter.refund_book = book;
+        counter
+            .refund_book
+            .retain(|i, _| counter.sales.contains_key(i));
+        counter.highest_refund = highest;
         counter.adopt_refunds();
-        counter.index_records();
+        // CR-76: the newest record that names each sale the counter holds.
+        counter.last_record = last;
+        counter
+            .last_record
+            .retain(|i, _| counter.sales.contains_key(i));
         Ok(counter)
+    }
+
+    /// CR-42, CR-81: read the whole record log in order, check it as a chain
+    /// signed by this counter, and keep only its newest records. Returns the
+    /// log, the newest record naming each sale, the refund entries of each
+    /// sale and the highest refund number.
+    #[allow(clippy::type_complexity)]
+    fn read_chain<S: Store>(
+        me: DeviceId,
+        store: &S,
+    ) -> Result<
+        (
+            RecordLog,
+            BTreeMap<u32, (u64, u64)>,
+            BTreeMap<u32, Vec<RefundEntry>>,
+            u64,
+        ),
+        LoadError,
+    >
+    where
+        S::Error: std::fmt::Display,
+    {
+        let devices = DeviceList::new([me]);
+        let mut check = Verifier::new(&devices);
+        let mut tail: VecDeque<Record> = VecDeque::new();
+        let mut last: BTreeMap<u32, (u64, u64)> = BTreeMap::new();
+        let mut book: BTreeMap<u32, Vec<RefundEntry>> = BTreeMap::new();
+        let mut highest = 0u64;
+        let keep = usize::try_from(MAX_UNSENT_IN_MEMORY).unwrap_or(usize::MAX);
+        loop {
+            let chunk = store
+                .read_records(check.len(), READ_CHUNK)
+                .map_err(|e| LoadError::RecordsUnread(e.to_string()))?;
+            if chunk.is_empty() {
+                break;
+            }
+            for bytes in chunk {
+                let record = Record::from_bytes(&bytes).map_err(|e| {
+                    LoadError::RecordsUnread(format!("record {}: {e}", check.len()))
+                })?;
+                check.push(&record).map_err(LoadError::Records)?;
+                if record.kind != RecordKind::CheckIn {
+                    if let Ok(event) = Event::decode(&record.body) {
+                        let at = last.get(&event.index()).map_or(0, |(_, at)| *at);
+                        last.insert(event.index(), (record.seq, at.max(event.at())));
+                        if record.kind == RecordKind::Refund {
+                            fold_refund(&mut book, &mut highest, event);
+                        }
+                    }
+                }
+                tail.push_back(record);
+                if tail.len() > keep {
+                    tail.pop_front();
+                }
+            }
+        }
+        let log = RecordLog::from_parts(check.len(), check.head(), tail);
+        Ok((log, last, book, highest))
     }
 
     /// CR-75: how many sales this counter has refused for being below the
@@ -436,6 +512,7 @@ impl Counter {
     /// until a mark has been given.
     pub fn set_owner_mark(&mut self, records_held: u64) {
         self.owner_mark = Some(records_held.min(self.records.len()));
+        self.records.trim(self.owner_mark);
     }
 
     /// The owner's mark as last given, if one was.
@@ -443,9 +520,62 @@ impl Counter {
         self.owner_mark
     }
 
-    /// The records written so far.
-    pub fn records(&self) -> &Chain {
-        &self.records
+    /// CR-81: how many records the counter has written.
+    pub fn records_len(&self) -> u64 {
+        self.records.len()
+    }
+
+    /// CR-81: the hash of the newest record, or `GENESIS` for none.
+    pub fn head(&self) -> [u8; 32] {
+        self.records.head()
+    }
+
+    /// CR-81: the number of the oldest record held in memory. Records below
+    /// it are read from the store.
+    pub fn records_base(&self) -> u64 {
+        self.records.base()
+    }
+
+    /// CR-81: how many records are held in memory.
+    pub fn records_in_memory(&self) -> usize {
+        self.records.in_memory()
+    }
+
+    /// CR-81: the record numbered `n`, from memory or, below the base, from
+    /// the store; `None` when there is no such record yet. A record read
+    /// from the store is checked (CR-42); a read that fails or a record that
+    /// is damaged is a fault and changes nothing.
+    pub fn record_at<S: Store>(
+        &self,
+        n: u64,
+        store: &S,
+    ) -> Result<Option<Record>, StoreFault<S::Error>> {
+        self.records.record_at(store, &self.device_id(), n)
+    }
+
+    /// CR-81: up to `max` records from number `from` on, oldest first, at
+    /// most [`crate::MAX_READ`] in one call. Fewer come back at the end of
+    /// the chain, none past it. Records below the base are read from the
+    /// store and checked, as in [`Counter::record_at`].
+    pub fn records_from<S: Store>(
+        &self,
+        from: u64,
+        max: usize,
+        store: &S,
+    ) -> Result<Vec<Record>, StoreFault<S::Error>> {
+        self.records
+            .records_from(store, &self.device_id(), from, max)
+    }
+
+    /// LK-55: the hash of the record before number `n`: the head when `n` is
+    /// the number of records, `GENESIS` when it is zero, `None` when it is
+    /// above the number of records. Below the base it is read from the store.
+    pub fn hash_at<S: Store>(
+        &self,
+        n: u64,
+        store: &S,
+    ) -> Result<Option<[u8; 32]>, StoreFault<S::Error>> {
+        self.records.hash_at(store, &self.device_id(), n)
     }
 
     /// Append a check-in to the records (`docs/DESIGN.md` §2.9): a signed
@@ -457,15 +587,28 @@ impl Counter {
         let mut body = Vec::with_capacity(40);
         body.extend_from_slice(&self.records.len().to_le_bytes());
         body.extend_from_slice(&self.records.head());
-        match self
+        self.append_record(store, RecordKind::CheckIn, body)
+    }
+
+    /// Sign the next record, hand it to the store and, only if the store
+    /// took it, add it to the chain and let memory shrink to its bound
+    /// (CR-81). On an error the chain is unchanged.
+    fn append_record<S: Store>(
+        &mut self,
+        store: &mut S,
+        kind: RecordKind,
+        body: Vec<u8>,
+    ) -> Result<Record, StoreFault<S::Error>> {
+        let record = self
             .records
-            .append_stored(&self.identity, RecordKind::CheckIn, body, |bytes| {
-                store.append_record(bytes)
-            }) {
-            Ok(record) => Ok(record.clone()),
-            Err(AppendError::Persist(e)) => Err(StoreFault::Write(e)),
-            Err(AppendError::Refused(e)) => Err(StoreFault::Record(e)),
-        }
+            .next(&self.identity, kind, body)
+            .map_err(StoreFault::Record)?;
+        store
+            .append_record(&record.to_bytes())
+            .map_err(StoreFault::Write)?;
+        self.records.push(record.clone());
+        self.records.trim(self.owner_mark);
+        Ok(record)
     }
 
     /// The counter's identity.
@@ -571,6 +714,7 @@ impl Counter {
                 }
             }
             self.last_record.remove(&index);
+            self.refund_book.remove(&index);
             self.cancel_applied.remove(&index);
             self.refund_unsaved.remove(&index);
             count += 1;
@@ -607,23 +751,6 @@ impl Counter {
 
     // Internal helpers.
 
-    /// CR-76: the newest record that names each sale the counter holds.
-    fn index_records(&mut self) {
-        let mut last: BTreeMap<u32, (u64, u64)> = BTreeMap::new();
-        for record in self.records.records() {
-            if record.kind == RecordKind::CheckIn {
-                continue;
-            }
-            let Ok(event) = Event::decode(&record.body) else {
-                continue;
-            };
-            let at = last.get(&event.index()).map_or(0, |(_, at)| *at);
-            last.insert(event.index(), (record.seq, at.max(event.at())));
-        }
-        last.retain(|index, _| self.sales.contains_key(index));
-        self.last_record = last;
-    }
-
     fn install(&mut self, sale: Sale) {
         if !sale.is_live() {
             self.archived.insert(sale.script.clone(), sale.index);
@@ -656,24 +783,21 @@ impl Counter {
         store: &mut S,
         event: &Event,
     ) -> Result<(), StoreFault<S::Error>> {
-        match self
-            .records
-            .append_stored(&self.identity, event.kind(), event.encode(), |bytes| {
-                store.append_record(bytes)
-            }) {
-            Ok(record) => {
-                let seq = record.seq;
-                let at = self
-                    .last_record
-                    .get(&event.index())
-                    .map_or(0, |(_, at)| *at)
-                    .max(event.at());
-                self.last_record.insert(event.index(), (seq, at));
-                Ok(())
-            }
-            Err(AppendError::Persist(e)) => Err(StoreFault::Write(e)),
-            Err(AppendError::Refused(e)) => Err(StoreFault::Record(e)),
+        let record = self.append_record(store, event.kind(), event.encode())?;
+        let at = self
+            .last_record
+            .get(&event.index())
+            .map_or(0, |(_, at)| *at)
+            .max(event.at());
+        self.last_record.insert(event.index(), (record.seq, at));
+        if record.kind == RecordKind::Refund {
+            fold_refund(
+                &mut self.refund_book,
+                &mut self.highest_refund,
+                event.clone(),
+            );
         }
+        Ok(())
     }
 
     /// Write the records, then the sale. A record that is written and a sale
@@ -2027,81 +2151,15 @@ impl Counter {
     /// call acts. Nothing is dropped from the records, so the result is the
     /// same however often it is run.
     fn adopt_refunds(&mut self) {
-        let mut by_sale: BTreeMap<u32, Vec<RefundEntry>> = BTreeMap::new();
-        let mut highest = 0u64;
-        for record in self.records.records() {
-            if record.kind != RecordKind::Refund {
-                continue;
-            }
-            let Ok(event) = Event::decode(&record.body) else {
-                continue;
-            };
-            match event {
-                Event::RefundRequested {
-                    index,
-                    at,
-                    number,
-                    role,
-                    name,
-                    sats,
-                    ask,
-                    ..
-                } => {
-                    highest = highest.max(number);
-                    by_sale.entry(index).or_default().push(RefundEntry {
-                        kind: EntryKind::Request,
-                        number,
-                        at,
-                        role,
-                        name,
-                        sats,
-                        value_minor: match ask {
-                            Ask::Sats => None,
-                            Ask::Value { minor, .. } => Some(minor),
-                        },
-                        withdrawn: false,
-                    });
-                }
-                Event::RefundWithdrawn { index, number, .. } => {
-                    if let Some(entry) = by_sale
-                        .entry(index)
-                        .or_default()
-                        .iter_mut()
-                        .find(|e| e.kind == EntryKind::Request && e.number == number)
-                    {
-                        entry.withdrawn = true;
-                    }
-                }
-                Event::RefundPaidInCash {
-                    index,
-                    at,
-                    role,
-                    name,
-                    minor,
-                    sats,
-                    ..
-                } => by_sale.entry(index).or_default().push(RefundEntry {
-                    kind: EntryKind::Cash,
-                    number: 0,
-                    at,
-                    role,
-                    name,
-                    sats,
-                    value_minor: Some(minor),
-                    withdrawn: false,
-                }),
-                _ => {}
-            }
-        }
         for (index, sale) in &mut self.sales {
-            let entries = by_sale.remove(index).unwrap_or_default();
+            let entries = self.refund_book.get(index).cloned().unwrap_or_default();
             if sale.refunds != entries {
                 sale.refunds = entries;
                 self.refund_unsaved.insert(*index);
             }
         }
-        if highest > self.desk.last_refund_no() {
-            self.desk.set_last_refund_no(highest);
+        if self.highest_refund > self.desk.last_refund_no() {
+            self.desk.set_last_refund_no(self.highest_refund);
         }
     }
 
@@ -2330,5 +2388,67 @@ impl Counter {
                 age_secs: 0,
             },
         }
+    }
+}
+
+/// CR-73: fold one refund event into what the sales' refund entries are.
+/// Events are taken in record order; a withdrawal belongs to the request of
+/// its number.
+fn fold_refund(book: &mut BTreeMap<u32, Vec<RefundEntry>>, highest: &mut u64, event: Event) {
+    match event {
+        Event::RefundRequested {
+            index,
+            at,
+            number,
+            role,
+            name,
+            sats,
+            ask,
+            ..
+        } => {
+            *highest = (*highest).max(number);
+            book.entry(index).or_default().push(RefundEntry {
+                kind: EntryKind::Request,
+                number,
+                at,
+                role,
+                name,
+                sats,
+                value_minor: match ask {
+                    Ask::Sats => None,
+                    Ask::Value { minor, .. } => Some(minor),
+                },
+                withdrawn: false,
+            });
+        }
+        Event::RefundWithdrawn { index, number, .. } => {
+            if let Some(entry) = book
+                .entry(index)
+                .or_default()
+                .iter_mut()
+                .find(|e| e.kind == EntryKind::Request && e.number == number)
+            {
+                entry.withdrawn = true;
+            }
+        }
+        Event::RefundPaidInCash {
+            index,
+            at,
+            role,
+            name,
+            minor,
+            sats,
+            ..
+        } => book.entry(index).or_default().push(RefundEntry {
+            kind: EntryKind::Cash,
+            number: 0,
+            at,
+            role,
+            name,
+            sats,
+            value_minor: Some(minor),
+            withdrawn: false,
+        }),
+        _ => {}
     }
 }

@@ -45,7 +45,7 @@ use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::records::GENESIS;
 use openbmt_counter::Report;
 use openbmt_courier::{
-    decode_received, head_at, records_content, Courier, Post, Received, RelayPost, SendError,
+    decode_received, records_content, Courier, Post, Received, RelayPost, SendError,
 };
 use openbmt_link::seal::MAX_CONTENT_LEN;
 use openbmt_link::{Kind, Role};
@@ -55,6 +55,9 @@ use crate::notices::{NoticeOutbox, NoticeStoreError};
 
 /// Most lines the link's own notes keep; the oldest goes first.
 pub const NOTE_LOG: usize = 64;
+/// How many records are read at once for a message of records (CR-81). A
+/// message takes as many of them as fit.
+const SEND_CHUNK: usize = 512;
 
 /// The intervals and limits of the link (LK-56, LK-57). The defaults are the
 /// ones in the rules.
@@ -138,6 +141,9 @@ pub struct CounterLink<R: Post = RelayPost> {
     notes: VecDeque<String>,
     notices: Option<NoticeOutbox>,
     notice_noted: Option<String>,
+    /// The last line about a failed read of the records (CR-81), so that a
+    /// fault that lasts is noted once, not at each step.
+    read_noted: Option<String>,
 }
 
 impl<R: Post> CounterLink<R> {
@@ -162,6 +168,7 @@ impl<R: Post> CounterLink<R> {
             notes: VecDeque::new(),
             notices: None,
             notice_noted: None,
+            read_noted: None,
         }
     }
 
@@ -177,8 +184,7 @@ impl<R: Post> CounterLink<R> {
         if identity.device_id() != self.courier.device_id() {
             return Err(NoticeStoreError::NotThisCounter);
         }
-        let records = node.counter().records().records();
-        self.notices = Some(NoticeOutbox::open(identity, dir, records)?);
+        self.notices = Some(NoticeOutbox::open(identity, dir, &node.record_source())?);
         Ok(())
     }
 
@@ -320,21 +326,30 @@ impl<R: Post> CounterLink<R> {
                 return;
             }
         };
-        let have = node.counter().records().len();
-        match head_at(node.counter().records().records(), count) {
-            Some(own) if own == head => {
+        let have = node.records_len();
+        // A hash below what memory holds is read from the record file
+        // (CR-81).
+        match node.hash_at(count) {
+            Err(e) => {
+                // Not the owner's fault and not a mark that was wrong: the
+                // last one stands, and the next mark is looked at again.
+                self.note_read(format!(
+                    "LK-55: the owner's mark of {count} records could not be checked: {e}"
+                ));
+            }
+            Ok(Some(own)) if own == head => {
                 self.mark = (count, head);
                 // CR-76: the counter settles only what the owner holds.
                 node.set_owner_mark(count);
             }
-            Some(_) => {
+            Ok(Some(_)) => {
                 self.marks_ignored = self.marks_ignored.saturating_add(1);
                 self.note(format!(
                     "LK-55: the owner's mark of {count} records has a head that is not ours: \
                      ignored"
                 ));
             }
-            None => {
+            Ok(None) => {
                 self.marks_ignored = self.marks_ignored.saturating_add(1);
                 self.note(format!(
                     "LK-55: the owner's mark of {count} records is more than the {have} we have: \
@@ -346,7 +361,7 @@ impl<R: Post> CounterLink<R> {
 
     /// LK-57. `false` if the relay could not be reached.
     fn send_check_in<P: DriverPort>(&mut self, node: &mut Node<P>, now: u64) -> bool {
-        let len = node.counter().records().len();
+        let len = node.records_len();
         let due = match self.last_check_in_at {
             None => true,
             Some(at) => {
@@ -361,7 +376,7 @@ impl<R: Post> CounterLink<R> {
             self.last_check_in_at = Some(now);
             match node.check_in() {
                 Ok(record) => {
-                    self.len_after_check_in = node.counter().records().len();
+                    self.len_after_check_in = node.records_len();
                     // A newer check-in replaces one that was never delivered.
                     self.unsent_check_in = Some(record.to_bytes());
                 }
@@ -388,8 +403,7 @@ impl<R: Post> CounterLink<R> {
 
     /// LK-56. `false` if the relay could not be reached.
     fn send_records<P: DriverPort>(&mut self, node: &Node<P>, now: u64) -> bool {
-        let all = node.counter().records().records();
-        let len = all.len() as u64;
+        let len = node.records_len();
         if len <= self.mark.0 {
             return true;
         }
@@ -402,17 +416,24 @@ impl<R: Post> CounterLink<R> {
             return true;
         }
         let start = if overdue { self.mark.0 } else { base };
-        let Some(mut rest) = usize::try_from(start).ok().and_then(|n| all.get(n..)) else {
-            return true;
-        };
         let mut end = start;
         let mut sent_any = false;
         let mut reached = true;
         for _ in 0..self.cfg.max_messages_per_step {
+            // The records come from memory, and from the record file below
+            // what memory holds (CR-81). A read that fails is a note and the
+            // step goes on: nothing here changes what the counter holds.
+            let rest = match node.records_from(end, SEND_CHUNK) {
+                Ok(rest) => rest,
+                Err(e) => {
+                    self.note_read(format!("the records after {end} could not be read: {e}"));
+                    break;
+                }
+            };
             if rest.is_empty() {
                 break;
             }
-            let (content, count) = records_content(rest, self.cfg.max_content);
+            let (content, count) = records_content(&rest, self.cfg.max_content);
             if count == 0 {
                 if !self.too_long_noted {
                     self.too_long_noted = true;
@@ -427,7 +448,6 @@ impl<R: Post> CounterLink<R> {
                     sent_any = true;
                     self.record_messages_sent = self.record_messages_sent.saturating_add(1);
                     end = end.saturating_add(count as u64);
-                    rest = rest.get(count..).unwrap_or(&[]);
                 }
                 Err(e) => {
                     reached = self.send_failed(&e, "records");
@@ -463,7 +483,7 @@ impl<R: Post> CounterLink<R> {
         let Some(out) = self.notices.as_mut() else {
             return;
         };
-        let line = match out.collect(node.counter().records().records()) {
+        let line = match out.collect(&node.record_source()) {
             Ok(0) => return,
             Ok(dropped) => {
                 format!("BX-40: {dropped} notices were dropped from a queue that was too long")
@@ -471,6 +491,15 @@ impl<R: Post> CounterLink<R> {
             Err(e) => format!("the notices were not queued: {e}"),
         };
         self.note_once(line);
+    }
+
+    /// A line about a failed read of the records is noted once, until
+    /// another one is.
+    fn note_read(&mut self, line: String) {
+        if self.read_noted.as_deref() != Some(line.as_str()) {
+            self.read_noted = Some(line.clone());
+            self.note(line);
+        }
     }
 
     /// A line about the notices is noted once, until another one is.

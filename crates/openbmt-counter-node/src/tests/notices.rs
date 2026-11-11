@@ -217,7 +217,7 @@ fn bx_40_the_notices_give_the_facts_the_counters_own_records_give() {
     w.step();
     let notices = w.notices();
     assert_eq!(notices.len(), 3);
-    let records = w.rig.node.counter().records().records().to_vec();
+    let records = w.rig.node.records_from(0, usize::MAX).unwrap();
     let chain = Chain::from_records(records);
     let from_chain = facts_from_chain(&chain, &DeviceList::new([counter()]), &counter()).unwrap();
     assert_eq!(facts_from_notices(&notices), from_chain);
@@ -237,7 +237,7 @@ fn bx_40_the_counter_never_gives_the_box_its_records() {
     assert!(!got.is_empty());
     assert!(got.iter().all(|r| r.kind == Kind::PaidNotice));
     // And the courier refuses to address a Records message to a Box at all.
-    let records = w.rig.node.counter().records().records().to_vec();
+    let records = w.rig.node.records_from(0, usize::MAX).unwrap();
     let (content, _) = openbmt_courier::records_content(&records, 4_000);
     let err = w
         .link
@@ -273,12 +273,8 @@ fn bx_40_a_notice_the_relay_has_not_taken_is_kept_and_sent_after_a_restart() {
     // Stored before anything was sent: number 1 is in the file.
     assert_eq!(w.link.notices().unwrap().last_number(), 1);
     assert!(w.link_dir.path().join(NOTICE_FILE).exists());
-    let reopened = NoticeOutbox::open(
-        id(3),
-        w.link_dir.path(),
-        w.rig.node.counter().records().records(),
-    )
-    .unwrap();
+    let reopened =
+        NoticeOutbox::open(id(3), w.link_dir.path(), &w.rig.node.record_source()).unwrap();
     assert_eq!(reopened.queue().len(), 1);
     assert_eq!(reopened.queue()[0].number, 1);
 
@@ -394,7 +390,7 @@ fn bx_40_a_queue_over_its_bound_drops_the_oldest_and_says_so() {
         };
         chain.append(&me, e.kind(), e.encode()).unwrap();
     }
-    let mut out = NoticeOutbox::open(id(3), dir.path(), &[]).unwrap();
+    let mut out = NoticeOutbox::open(id(3), dir.path(), &[][..]).unwrap();
     let dropped = out.collect(chain.records()).unwrap();
     assert_eq!(dropped, 4_200 - MAX_QUEUED);
     assert_eq!(out.queue().len(), MAX_QUEUED);

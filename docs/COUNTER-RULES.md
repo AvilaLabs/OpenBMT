@@ -372,9 +372,10 @@ has been made).
 
 ## 8. Settling old sales
 
-The counter watches every address it showed, and keeps every sale and every
-record in memory, so a shop that sells every day would reach the network
-manager's limit on watched scripts (NR-41) and grow without end. The owner's
+The counter watches every address it showed and keeps every sale in memory,
+so a shop that sells every day would reach the network manager's limit on
+watched scripts (NR-41) and grow without end. Its records are bounded
+separately (CR-81). The owner's
 wallet already watches every issued receive index for good and keeps a
 receipt of every payment (OC-07, OC-10 to OC-12), so the counter can let an
 old sale go once the owner holds everything the counter wrote about it.
@@ -440,17 +441,66 @@ and sales not yet settled wait for the owner's copy to catch up.
   and records its receipt, at once or at the next monthly check. A shop
   that wants the counter to flag such a payment must not settle: there is no
   switch for it.
-- **CR-81.** **[not built]** Records at or below the owner's mark that are
-  older than the newest `KEEP_RECORDS` (1,024 **[to tune]**) would leave the
-  counter's memory and stay on disk, the counter keeping the chain's length,
-  its head and the records above a base point; the check of LK-55 and the
-  resends of LK-56 from below the base would read the records back from the
-  store. This is not built. `Counter::records()` hands out the whole chain
-  and the link, the notice outbox and the tests of four crates read it as a
-  slice; the store has no way to read records back; and the load path checks
-  the whole chain from the first record. Changing them is a change of its
-  own, and the sale and address bounds above hold without it. Until it is
-  built, memory still grows by the records (about 200 bytes each).
+- **CR-81.** The counter's records leave its memory. Every record is in the
+  store's record log (`Store::append_record`); the counter keeps the number
+  of records, the hash of the newest (the head) and the records from `base`
+  up, and nothing about the ones below. Records below `base` are read back
+  with `Store::read_records(from, max)` when something asks for them.
+  1. **Where `base` is.** `base` is `len` less what memory holds, and what
+     memory holds is the larger of `KEEP_RECORDS` (1,024 **[to tune]**)
+     and the number of records above the owner's mark (CR-76), but never
+     more than `MAX_UNSENT_IN_MEMORY` (16,384 **[to tune]**). A mark that
+     is not known counts as zero. Records above the mark are what the link
+     sends, so they stay in memory; when the owner has not taken more than
+     `MAX_UNSENT_IN_MEMORY` of them, the newest stay and the older ones are
+     read from the store when they are sent (a send reads at most one
+     message's worth of them at a time). The cap bounds memory at about 3
+     MB for records of the usual size whatever the owner does.
+  2. **When it moves.** `base` is set when a record is written and when
+     `set_owner_mark` is called, and it only goes up: a mark that goes down
+     does not bring records back into memory, they are read.
+  3. **The calls.** `records_len()`, `head()`, `records_base()`,
+     `records_in_memory()`, and, each given the store, `record_at(n)`,
+     `records_from(from, max)` (at most `MAX_READ`, 1,024, records, oldest
+     first, fewer at the end, none past it) and `hash_at(n)` (the hash of
+     record `n - 1`, `GENESIS` for 0, the head for the length, `None` above
+     it). A record or hash from memory needs no read. Nothing hands out
+     the whole chain.
+  4. **What is checked on a read (CR-42).** A record read from the store
+     must parse, be the number asked for, be signed by this counter, follow
+     the record before it in the same read (record 0 follows `GENESIS`),
+     and, when it is the record just below `base`, be the one the first
+     record in memory follows. Otherwise the call returns
+     `StoreFault::Damaged { seq, why }`; a store that cannot answer returns
+     `StoreFault::Read`. Either way nothing in memory changes and the
+     caller goes on.
+  5. **LK-55 and LK-56.** The check of a mark below `base` reads the hash
+     with `hash_at`; a wrong head there is ignored as one above `base` is
+     (LK-55). A mark that goes down below `base` is taken, and the resend
+     of LK-56 reads its records from the store, oldest first, with the
+     same limit of messages in a step. A read that fails in either is a
+     note, once, and the step goes on; the last mark stands and nothing is
+     sent that was not read whole.
+  6. **At start.** `Counter::load` reads the record log from record 0 in
+     chunks of 256, checks each record as `Chain::verify` does (author,
+     signature, number, `prev`, check-in claims; it is `Verifier` in
+     `openbmt_core::records`), and keeps only the newest
+     `MAX_UNSENT_IN_MEMORY`. A log
+     that cannot be read, or has a record that does not parse, refuses the
+     start (`LoadError::RecordsUnread`); one that does not verify refuses
+     it as before (`LoadError::Records`). The same pass builds what the
+     counter needs from the whole history: the newest record that names
+     each sale (CR-76), and the refund entries of each sale and the
+     highest refund number (CR-73). Both are then kept up as records are
+     written, so that no call reads the history again.
+  7. **The record file.** `DirStore` keeps the records in the one file it
+     always did, in the same format, and an index of 8 bytes for each 64
+     records (the offset of every 64th). Its load reads the file once to
+     check the framing, cut a torn tail and make the index; a read seeks to
+     the nearest mark and reads forward. A file that changed after the
+     index was made is an error on read, not a wrong record.
+  A start with 100,000 records took about 11 seconds on the development
+  laptop (debug build, signatures checked) and held 16,384 records.
 - **CR-82.** `openbmt-counter-node` calls `settle` from the node's pump once
   at start, as soon as the owner's mark is known, and then once an hour, and
   never more often than once a minute. The list of scripts the driver is

@@ -44,7 +44,7 @@ fn wide_batch(count: u32) -> SignedBatch {
 
 /// The owner holds every record the counter has.
 fn owner_holds_all(w: &mut World) {
-    let all = w.c.records().len();
+    let all = w.c.records_len();
     w.c.set_owner_mark(all);
 }
 
@@ -174,7 +174,7 @@ fn cr_76_a_sale_with_a_refund_waiting_for_depth_is_not_settled() {
 fn cr_76_a_record_above_the_owner_s_mark_blocks_the_sale() {
     let mut w = World::new();
     let i = ended_sale(&mut w);
-    let all = w.c.records().len();
+    let all = w.c.records_len();
     w.tick(SETTLE_SECS);
     // The owner holds all but the last record, which is the sale's.
     w.c.set_owner_mark(all - 1);
@@ -203,7 +203,7 @@ fn cr_76_a_mark_above_the_chain_is_taken_as_the_length() {
     let mut w = World::new();
     ended_sale(&mut w);
     w.c.set_owner_mark(1_000_000);
-    assert_eq!(w.c.owner_mark(), Some(w.c.records().len()));
+    assert_eq!(w.c.owner_mark(), Some(w.c.records_len()));
 }
 
 #[test]
@@ -326,7 +326,7 @@ fn cr_77_a_mark_that_goes_down_does_not_bring_a_settled_sale_back() {
     assert_eq!(settle(&mut w), 1);
     assert!(w.c.sale(b).is_none());
     // The records are all still here.
-    assert!(w.c.records().len() >= 2);
+    assert!(w.c.records_len() >= 2);
 }
 
 // CR-78 and CR-80.
@@ -562,7 +562,7 @@ fn cr_76_five_thousand_sales_over_simulated_days_keep_memory_bounded() {
     assert!(indexed <= bound, "records indexed: {indexed}");
     assert!(w.c.held_sales() <= bound);
     // The records are not bounded (CR-81 is not built): every one is kept.
-    assert!(w.c.records().len() >= 5_000);
+    assert!(w.c.records_len() >= 5_000);
     // And the store holds only what the counter holds.
     let slots =
         w.m.slots
@@ -593,13 +593,13 @@ fn cr_76_the_records_of_a_settled_sale_are_still_in_the_chain() {
     let mut w = World::new();
     let i = ended_sale(&mut w);
     owner_holds_all(&mut w);
-    let before = w.c.records().len();
+    let before = w.c.records_len();
     w.tick(SETTLE_SECS);
     settle(&mut w);
-    assert_eq!(w.c.records().len(), before);
+    assert_eq!(w.c.records_len(), before);
     let kinds: Vec<_> =
-        w.c.records()
-            .records()
+        w.c.records_from(0, usize::MAX, &w.m)
+            .unwrap()
             .iter()
             .map(|r| (r.kind, Event::decode(&r.body).unwrap().index()))
             .collect();

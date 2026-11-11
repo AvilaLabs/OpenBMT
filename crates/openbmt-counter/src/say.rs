@@ -70,6 +70,8 @@ fn store_failed<E: Display>(
 ) -> Words {
     let how = match fault {
         StoreFault::Write(_) => "could not save it",
+        StoreFault::Read(_) => "could not read its saved records",
+        StoreFault::Damaged { .. } => "found a saved record damaged",
         StoreFault::Record(_) => "could not write its record",
     };
     Words::new(
@@ -950,6 +952,11 @@ impl LoadError {
                 "The counter's saved sale records do not check out, so it did not start and nothing was changed.",
                 e.to_string(),
             ),
+            Self::RecordsUnread(e) => (
+                "Saved records unreadable",
+                "The counter's saved sale records could not be read back, so it did not start and nothing was changed.",
+                e.clone(),
+            ),
         };
         Words::new(
             Tone::Stop,
@@ -1554,6 +1561,17 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("AddressNotStored", OpenRefused::AddressNotStored(w())),
         ("Store", OpenRefused::Store(w())),
         ("Store/Record", OpenRefused::Store(record_fault())),
+        (
+            "Store/Read",
+            OpenRefused::Store(StoreFault::Read("the disk did not answer".to_string())),
+        ),
+        (
+            "Store/Damaged",
+            OpenRefused::Store(StoreFault::Damaged {
+                seq: 7,
+                why: "it is not signed by this counter",
+            }),
+        ),
     ];
     for (name, r) in open {
         all.push((format!("OpenRefused::{name}"), r.words()));
@@ -1729,6 +1747,10 @@ pub fn all_words() -> Vec<(String, Words)> {
         (
             "Records",
             LoadError::Records(openbmt_core::records::ChainError::NotACheckIn),
+        ),
+        (
+            "RecordsUnread",
+            LoadError::RecordsUnread("the disk did not answer".to_string()),
         ),
     ] {
         all.push((format!("LoadError::{name}"), e.words()));

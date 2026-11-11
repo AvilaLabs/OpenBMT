@@ -426,7 +426,7 @@ fn command(
         Some("linkstate") => {
             let link = link.ok_or("the link is not started: give --relay and --relay-key")?;
             let state = link.state();
-            let chain = node.counter().records();
+            let (chain_len, chain_head) = (node.records_len(), node.records_head());
             say(format!(
                 "linkstate owner_records={} owner_head={} last_check_in_at={} refused={} \
                  marks_ignored={} record_messages_sent={} heartbeats_taken={} \
@@ -442,8 +442,8 @@ fn command(
                 state.heartbeats_taken,
                 state.node_refusals,
                 state.relay_reachable,
-                chain.len(),
-                hex(&chain.head()),
+                chain_len,
+                hex(&chain_head),
             ));
         }
         Some("pump") => {

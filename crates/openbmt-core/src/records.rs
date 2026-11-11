@@ -233,6 +233,32 @@ impl Record {
         })
     }
 
+    /// Build and sign the record with number `seq` that follows the record
+    /// whose hash is `prev` ([`GENESIS`] for the first). A holder of only the
+    /// end of a chain uses it where [`Chain::append`] would need the whole
+    /// chain. A body above [`MAX_BODY`] is refused.
+    pub fn build(
+        author: &Identity,
+        seq: u64,
+        prev: [u8; 32],
+        kind: RecordKind,
+        body: Vec<u8>,
+    ) -> Result<Self, ChainError> {
+        if body.len() > MAX_BODY {
+            return Err(ChainError::BodyTooLarge);
+        }
+        let mut rec = Self {
+            seq,
+            prev,
+            author: author.device_id(),
+            kind,
+            body,
+            sig: Sig([0; 64]),
+        };
+        rec.sig = author.sign_tagged(TAG_RECORD, &rec.signing_bytes());
+        Ok(rec)
+    }
+
     /// The record hash: what the next record's `prev` must equal.
     pub fn hash(&self) -> [u8; 32] {
         let mut bytes = self.signing_bytes();
@@ -240,7 +266,8 @@ impl Record {
         tagged_hash(TAG_RECORD_ID, &bytes)
     }
 
-    fn signature_ok(&self) -> bool {
+    /// Whether the signature matches the record and its author.
+    pub fn signature_ok(&self) -> bool {
         self.author
             .verify_tagged(TAG_RECORD, &self.signing_bytes(), &self.sig)
     }
@@ -254,6 +281,73 @@ impl Record {
         let len = u64::from_le_bytes(self.body[..8].try_into().expect("8 bytes"));
         let head: [u8; 32] = self.body[8..].try_into().expect("32 bytes");
         Ok((len, head))
+    }
+}
+
+/// A check of a chain made one record at a time, so that a chain too long to
+/// hold can be checked as it is read. It makes the checks of
+/// [`Chain::verify`], in the same order.
+#[derive(Debug, Clone)]
+pub struct Verifier<'a> {
+    devices: &'a DeviceList,
+    next: u64,
+    prev: [u8; 32],
+}
+
+impl<'a> Verifier<'a> {
+    /// A check that expects record 0 next.
+    pub fn new(devices: &'a DeviceList) -> Self {
+        Self {
+            devices,
+            next: 0,
+            prev: GENESIS,
+        }
+    }
+
+    /// Check the next record. On an error the check is unchanged.
+    pub fn push(&mut self, r: &Record) -> Result<(), ChainError> {
+        if !self.devices.contains(&r.author) {
+            return Err(ChainError::UnknownAuthor { seq: r.seq });
+        }
+        if r.body.len() > MAX_BODY {
+            return Err(ChainError::BodyTooLarge);
+        }
+        if !r.signature_ok() {
+            return Err(ChainError::BadSignature { seq: r.seq });
+        }
+        if r.seq != self.next {
+            return Err(ChainError::SeqMismatch {
+                expected: self.next,
+                found: r.seq,
+            });
+        }
+        if r.prev != self.prev {
+            return Err(ChainError::PrevMismatch { seq: r.seq });
+        }
+        if r.kind == RecordKind::CheckIn {
+            let (len, head) = r.check_in_claim()?;
+            if len != r.seq || head != r.prev {
+                return Err(ChainError::BadCheckIn { seq: r.seq });
+            }
+        }
+        self.prev = r.hash();
+        self.next = self.next.saturating_add(1);
+        Ok(())
+    }
+
+    /// How many records have been checked.
+    pub fn len(&self) -> u64 {
+        self.next
+    }
+
+    /// Whether no record has been checked.
+    pub fn is_empty(&self) -> bool {
+        self.next == 0
+    }
+
+    /// The hash of the last record checked, or [`GENESIS`].
+    pub fn head(&self) -> [u8; 32] {
+        self.prev
     }
 }
 
@@ -302,19 +396,7 @@ impl Chain {
         kind: RecordKind,
         body: Vec<u8>,
     ) -> Result<Record, ChainError> {
-        if body.len() > MAX_BODY {
-            return Err(ChainError::BodyTooLarge);
-        }
-        let mut rec = Record {
-            seq: self.len(),
-            prev: self.head(),
-            author: author.device_id(),
-            kind,
-            body,
-            sig: Sig([0; 64]),
-        };
-        rec.sig = author.sign_tagged(TAG_RECORD, &rec.signing_bytes());
-        Ok(rec)
+        Record::build(author, self.len(), self.head(), kind, body)
     }
 
     /// Add a record built by `next_record` and return it.
@@ -369,33 +451,9 @@ impl Chain {
     /// records. It cannot see records cut off the end: compare with a later
     /// check-in for that ([`Chain::check_against_check_in`]).
     pub fn verify(&self, devices: &DeviceList) -> Result<(), ChainError> {
-        let mut prev = GENESIS;
-        for (i, r) in self.records.iter().enumerate() {
-            if !devices.contains(&r.author) {
-                return Err(ChainError::UnknownAuthor { seq: r.seq });
-            }
-            if r.body.len() > MAX_BODY {
-                return Err(ChainError::BodyTooLarge);
-            }
-            if !r.signature_ok() {
-                return Err(ChainError::BadSignature { seq: r.seq });
-            }
-            if r.seq != i as u64 {
-                return Err(ChainError::SeqMismatch {
-                    expected: i as u64,
-                    found: r.seq,
-                });
-            }
-            if r.prev != prev {
-                return Err(ChainError::PrevMismatch { seq: r.seq });
-            }
-            if r.kind == RecordKind::CheckIn {
-                let (len, head) = r.check_in_claim()?;
-                if len != r.seq || head != r.prev {
-                    return Err(ChainError::BadCheckIn { seq: r.seq });
-                }
-            }
-            prev = r.hash();
+        let mut check = Verifier::new(devices);
+        for r in &self.records {
+            check.push(r)?;
         }
         Ok(())
     }

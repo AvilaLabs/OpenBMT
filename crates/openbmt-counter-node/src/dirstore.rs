@@ -18,20 +18,30 @@
 //! reported is lost. Anything else in the file that does not read back is an
 //! error, and nothing is cut.
 //!
+//! The records are not held in memory (CR-81). The load reads the file once
+//! to check its framing, cut a torn tail and note where every
+//! [`INDEX_STRIDE`]th record starts; [`Store::read_records`] then seeks to
+//! the nearest mark and reads forward. The marks are 8 bytes for every
+//! [`INDEX_STRIDE`] records.
+//!
 //! One more small file holds the height up to which every block has been
 //! checked (NR-75), written whole like a slot.
 
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 
-use openbmt_core::records::{Chain, Record, MAX_BODY};
+use openbmt_core::records::{Record, MAX_BODY};
 use openbmt_counter::{Slot, Store, Stored};
 
 /// The longest record the file takes, in bytes: the largest body, the fixed
 /// fields and the signature, with room to spare.
 pub const MAX_RECORD_BYTES: usize = MAX_BODY + 256;
+
+/// How many records lie between two marks of the record file's index.
+pub const INDEX_STRIDE: u64 = 64;
 
 const RECORDS_FILE: &str = "records.bin";
 const CHECKED_FILE: &str = "checked.bin";
@@ -134,9 +144,10 @@ pub struct Loaded {
     pub desk: Option<Vec<u8>>,
     /// Each sale (`OBML`) with the index of its slot, lowest first.
     pub sales: Vec<(u32, Vec<u8>)>,
-    /// The records, in the order they were written. Each one parses; the
-    /// chain is checked by `Counter::load`.
-    pub records: Vec<Record>,
+    /// How many records the file holds. Each one parses; they are read back
+    /// with `Store::read_records` and the chain is checked by
+    /// `Counter::load`.
+    pub record_count: u64,
     /// A cut-short last record that was cut off, if there was one.
     pub torn: Option<TornTail>,
     /// The height up to which every block has been checked.
@@ -152,7 +163,6 @@ impl Loaded {
             pause: self.pause.as_deref(),
             desk: self.desk.as_deref(),
             sales: self.sales.iter().map(|(i, b)| (*i, b.as_slice())).collect(),
-            records: Chain::from_records(self.records.clone()),
         }
     }
 }
@@ -161,6 +171,18 @@ impl Loaded {
 #[derive(Debug)]
 pub struct DirStore {
     dir: PathBuf,
+    index: Mutex<Option<RecordIndex>>,
+}
+
+/// Where the records are in the record file.
+#[derive(Debug, Clone, Default)]
+struct RecordIndex {
+    /// Whole records in the file.
+    count: u64,
+    /// Bytes they take.
+    end: u64,
+    /// The offset of record `k * INDEX_STRIDE`, for each k.
+    marks: Vec<u64>,
 }
 
 impl DirStore {
@@ -168,7 +190,10 @@ impl DirStore {
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, DirStoreError> {
         let dir = dir.into();
         fs::create_dir_all(&dir).map_err(io_err(&dir.display().to_string(), "create"))?;
-        Ok(Self { dir })
+        Ok(Self {
+            dir,
+            index: Mutex::new(None),
+        })
     }
 
     /// The directory the files are in.
@@ -249,47 +274,96 @@ impl DirStore {
         Ok(loaded)
     }
 
-    fn load_records(&self, loaded: &mut Loaded) -> Result<(), DirStoreError> {
-        let Some(bytes) = self.read(RECORDS_FILE)? else {
-            return Ok(());
+    /// Read the record file once: check that every record is framed and
+    /// parses, cut a torn tail, and note where the records are. Nothing is
+    /// kept but the index.
+    fn scan_records(&self) -> Result<(RecordIndex, Option<TornTail>), DirStoreError> {
+        let file = match File::open(self.path(RECORDS_FILE)) {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                return Ok((RecordIndex::default(), None))
+            }
+            Err(e) => return Err(io_err(RECORDS_FILE, "read")(e)),
         };
-        let mut rest = bytes.as_slice();
-        let mut kept = 0u64;
+        let size = file
+            .metadata()
+            .map_err(io_err(RECORDS_FILE, "measure"))?
+            .len();
+        let mut reader = BufReader::new(file);
+        let mut index = RecordIndex::default();
+        let mut buf: Vec<u8> = Vec::new();
         let mut torn = false;
-        while !rest.is_empty() {
-            let Some((len_bytes, after)) = rest.split_first_chunk::<4>() else {
+        while index.end < size {
+            let left = size - index.end;
+            if left < 4 {
                 torn = true;
                 break;
-            };
-            let len = usize::try_from(u32::from_le_bytes(*len_bytes))
+            }
+            let mut len_bytes = [0u8; 4];
+            reader
+                .read_exact(&mut len_bytes)
+                .map_err(io_err(RECORDS_FILE, "read"))?;
+            let len = usize::try_from(u32::from_le_bytes(len_bytes))
                 .map_err(|_| corrupt(RECORDS_FILE, "a record has an impossible length"))?;
             if len > MAX_RECORD_BYTES {
                 return Err(corrupt(RECORDS_FILE, "a record has an impossible length"));
             }
-            let Some((record, after)) = after.split_at_checked(len) else {
+            if left - 4 < len as u64 {
                 torn = true;
                 break;
-            };
-            let parsed = Record::from_bytes(record)
+            }
+            buf.resize(len, 0);
+            reader
+                .read_exact(&mut buf)
+                .map_err(io_err(RECORDS_FILE, "read"))?;
+            Record::from_bytes(&buf)
                 .map_err(|_| corrupt(RECORDS_FILE, "a record does not read back"))?;
-            loaded.records.push(parsed);
-            kept = kept.saturating_add(4).saturating_add(len as u64);
-            rest = after;
+            if index.count.is_multiple_of(INDEX_STRIDE) {
+                index.marks.push(index.end);
+            }
+            index.count = index.count.saturating_add(1);
+            index.end = index.end.saturating_add(4).saturating_add(len as u64);
         }
+        drop(reader);
+        let mut cut = None;
         if torn {
-            let cut = (bytes.len() as u64).saturating_sub(kept);
             let file = OpenOptions::new()
                 .write(true)
                 .open(self.path(RECORDS_FILE))
                 .map_err(io_err(RECORDS_FILE, "open"))?;
-            file.set_len(kept).map_err(io_err(RECORDS_FILE, "cut"))?;
+            file.set_len(index.end)
+                .map_err(io_err(RECORDS_FILE, "cut"))?;
             file.sync_all().map_err(io_err(RECORDS_FILE, "flush"))?;
-            loaded.torn = Some(TornTail {
-                kept_records: loaded.records.len(),
-                cut_bytes: cut,
+            cut = Some(TornTail {
+                kept_records: usize::try_from(index.count).unwrap_or(usize::MAX),
+                cut_bytes: size.saturating_sub(index.end),
             });
         }
+        Ok((index, cut))
+    }
+
+    fn load_records(&self, loaded: &mut Loaded) -> Result<(), DirStoreError> {
+        let (index, torn) = self.scan_records()?;
+        loaded.record_count = index.count;
+        loaded.torn = torn;
+        *self.index.lock().unwrap_or_else(PoisonError::into_inner) = Some(index);
         Ok(())
+    }
+
+    /// Run `f` on the index, which is made by a scan if the load has not
+    /// made it yet.
+    fn with_index<T>(
+        &self,
+        f: impl FnOnce(&mut RecordIndex) -> Result<T, DirStoreError>,
+    ) -> Result<T, DirStoreError> {
+        let mut guard = self.index.lock().unwrap_or_else(PoisonError::into_inner);
+        if guard.is_none() {
+            *guard = Some(self.scan_records()?.0);
+        }
+        match guard.as_mut() {
+            Some(index) => f(index),
+            None => Err(corrupt(RECORDS_FILE, "it has no index")),
+        }
     }
 }
 
@@ -318,6 +392,8 @@ impl Store for DirStore {
         }
         let path = self.path(RECORDS_FILE);
         let existed = path.exists();
+        // The index first: a scan after the write would count it twice.
+        self.with_index(|_| Ok(()))?;
         let mut file = OpenOptions::new()
             .append(true)
             .create(true)
@@ -338,9 +414,66 @@ impl Store for DirStore {
             let _ = file.set_len(before);
             return Err(io_err(RECORDS_FILE, "append to")(e));
         }
+        self.with_index(|index| {
+            if index.count.is_multiple_of(INDEX_STRIDE) {
+                index.marks.push(index.end);
+            }
+            index.count = index.count.saturating_add(1);
+            index.end = index
+                .end
+                .saturating_add(4)
+                .saturating_add(bytes.len() as u64);
+            Ok(())
+        })?;
         if !existed {
             self.sync_dir()?;
         }
         Ok(())
+    }
+
+    fn read_records(&self, from: u64, max: usize) -> Result<Vec<Vec<u8>>, DirStoreError> {
+        self.with_index(|index| {
+            if from >= index.count || max == 0 {
+                return Ok(Vec::new());
+            }
+            let Some(mark) = usize::try_from(from / INDEX_STRIDE)
+                .ok()
+                .and_then(|k| index.marks.get(k))
+            else {
+                return Err(corrupt(RECORDS_FILE, "it has no mark for the record"));
+            };
+            let mut file =
+                File::open(self.path(RECORDS_FILE)).map_err(io_err(RECORDS_FILE, "open"))?;
+            file.seek(SeekFrom::Start(*mark))
+                .map_err(io_err(RECORDS_FILE, "seek in"))?;
+            let mut reader = BufReader::new(file);
+            let take = u64::try_from(max)
+                .unwrap_or(u64::MAX)
+                .min(index.count - from);
+            let mut out = Vec::new();
+            for n in (from - from % INDEX_STRIDE)..from.saturating_add(take) {
+                let mut len_bytes = [0u8; 4];
+                reader
+                    .read_exact(&mut len_bytes)
+                    .map_err(|_| corrupt(RECORDS_FILE, "it ends early"))?;
+                let len = usize::try_from(u32::from_le_bytes(len_bytes))
+                    .map_err(|_| corrupt(RECORDS_FILE, "a record has an impossible length"))?;
+                if len > MAX_RECORD_BYTES {
+                    return Err(corrupt(RECORDS_FILE, "a record has an impossible length"));
+                }
+                if n < from {
+                    reader
+                        .seek_relative(len as i64)
+                        .map_err(io_err(RECORDS_FILE, "seek in"))?;
+                    continue;
+                }
+                let mut bytes = vec![0u8; len];
+                reader
+                    .read_exact(&mut bytes)
+                    .map_err(|_| corrupt(RECORDS_FILE, "it ends early"))?;
+                out.push(bytes);
+            }
+            Ok(out)
+        })
     }
 }

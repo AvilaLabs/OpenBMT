@@ -171,7 +171,7 @@ fn cr_59_a_new_quote_is_written_and_can_be_replayed() {
     // The chain reads back and a counter started from it holds both quotes.
     let again = w.m.reload();
     assert_eq!(again.sale(o.index).unwrap().quotes().len(), 2);
-    assert_eq!(again.records().len(), w.c.records().len());
+    assert_eq!(again.records_len(), w.c.records_len());
 }
 
 #[test]

@@ -112,7 +112,8 @@ fn cr_60_a_request_is_a_record_of_kind_refund_and_moves_nothing() {
     assert_eq!(w.m.log, ["Desk", "record", "Sale(0)"]);
     assert_eq!(w.c.exposure_outstanding(), before);
     assert_eq!(w.c.watched_scripts(), watched);
-    let record = w.c.records().records().last().unwrap().clone();
+    let last = w.c.records_len() - 1;
+    let record = w.c.record_at(last, &w.m).unwrap().unwrap();
     assert_eq!(record.kind, RecordKind::Refund);
     assert!(matches!(
         Event::decode(&record.body).unwrap(),
@@ -120,7 +121,10 @@ fn cr_60_a_request_is_a_record_of_kind_refund_and_moves_nothing() {
     ));
     // It is on the counter's own signed chain, which the owner verifies.
     let devices = openbmt_core::records::DeviceList::new([id(3).device_id()]);
-    w.c.records().verify(&devices).unwrap();
+    let all = w.c.records_from(0, usize::MAX, &w.m).unwrap();
+    openbmt_core::records::Chain::from_records(all)
+        .verify(&devices)
+        .unwrap();
 }
 
 // CR-61.

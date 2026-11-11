@@ -10,6 +10,7 @@ use openbmt_counter::{Counter, Facts, OpenFacts, Slot, State, Store};
 use openbmt_watch::{HeaderChain, Source};
 
 use super::kit::*;
+use crate::dirstore::INDEX_STRIDE;
 use crate::{DirStore, DirStoreError};
 
 /// Records made and signed by the test counter, as the store is given them.
@@ -69,7 +70,7 @@ fn every_slot_and_the_checked_height_read_back() {
         ]
     );
     assert_eq!(loaded.checked, Some(321));
-    assert!(loaded.records.is_empty() && loaded.torn.is_none());
+    assert!(loaded.record_count == 0 && loaded.torn.is_none());
     // A slot is replaced whole.
     store.put(Slot::Desk, b"a longer desk than before").unwrap();
     store.put(Slot::Desk, b"d").unwrap();
@@ -179,11 +180,80 @@ fn records_are_appended_in_order_and_read_back() {
     }
     let loaded = again.load().unwrap();
     assert!(loaded.torn.is_none());
-    let back: Vec<Vec<u8>> = loaded.records.iter().map(Record::to_bytes).collect();
+    assert_eq!(loaded.record_count, 5);
+    let back = again.read_records(0, 100).unwrap();
     assert_eq!(back, made);
-    Chain::from_records(loaded.records)
-        .verify(&openbmt_core::records::DeviceList::new([id(3).device_id()]))
+    Chain::from_records(
+        back.iter()
+            .map(|b| Record::from_bytes(b).unwrap())
+            .collect(),
+    )
+    .verify(&openbmt_core::records::DeviceList::new([id(3).device_id()]))
+    .unwrap();
+}
+
+#[test]
+fn cr_81_records_read_back_by_number_across_the_marks_of_the_index() {
+    let n = 3 * INDEX_STRIDE as usize + 10;
+    let made = records(n);
+    let dir = Scratch::new();
+    let mut store = DirStore::open(dir.path()).unwrap();
+    for r in &made {
+        store.append_record(r).unwrap();
+    }
+    // The index kept as records were appended, and the one a load makes.
+    let fresh = DirStore::open(dir.path()).unwrap();
+    assert_eq!(fresh.load().unwrap().record_count, n as u64);
+    for s in [&store, &fresh] {
+        for (from, max) in [
+            (0usize, 1usize),
+            (0, 5),
+            (63, 3),
+            (64, 1),
+            (65, 70),
+            (127, 128),
+            (n - 1, 5),
+            (n - 3, 10),
+            (0, n + 50),
+        ] {
+            let got = s.read_records(from as u64, max).unwrap();
+            let end = (from + max).min(n);
+            assert_eq!(got, made[from..end].to_vec(), "from {from} max {max}");
+        }
+        assert!(s.read_records(n as u64, 5).unwrap().is_empty());
+        assert!(s.read_records(u64::MAX, 5).unwrap().is_empty());
+        assert!(s.read_records(0, 0).unwrap().is_empty());
+    }
+    // A store that never loaded finds the records by a scan of its own.
+    let cold = DirStore::open(dir.path()).unwrap();
+    assert_eq!(cold.read_records(70, 2).unwrap(), made[70..72].to_vec());
+}
+
+#[test]
+fn cr_81_a_record_file_cut_after_the_index_was_made_is_an_error_on_read() {
+    let made = records(10);
+    let dir = Scratch::new();
+    let mut store = DirStore::open(dir.path()).unwrap();
+    for r in &made {
+        store.append_record(r).unwrap();
+    }
+    let path = dir.path().join("records.bin");
+    let size = fs::metadata(&path).unwrap().len();
+    OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_len(size - 20)
         .unwrap();
+    assert!(matches!(
+        store.read_records(5, 10).unwrap_err(),
+        DirStoreError::Corrupt { .. }
+    ));
+    fs::remove_file(&path).unwrap();
+    assert!(matches!(
+        store.read_records(0, 1).unwrap_err(),
+        DirStoreError::Io { .. }
+    ));
 }
 
 #[test]
@@ -199,7 +269,7 @@ fn a_torn_last_record_is_cut_off_and_reported() {
         let whole = fs::metadata(dir.path().join("records.bin")).unwrap().len();
         append_raw(dir.path(), &framed(&made[3])[..cut]);
         let loaded = store.load().unwrap();
-        assert_eq!(loaded.records.len(), 3);
+        assert_eq!(loaded.record_count, 3);
         assert_eq!(
             loaded.torn.map(|t| (t.kept_records, t.cut_bytes)),
             Some((3, cut as u64))
@@ -212,7 +282,7 @@ fn a_torn_last_record_is_cut_off_and_reported() {
         store.append_record(&made[3]).unwrap();
         let loaded = store.load().unwrap();
         assert!(loaded.torn.is_none());
-        assert_eq!(loaded.records.len(), 4);
+        assert_eq!(loaded.record_count, 4);
     }
 }
 
@@ -319,11 +389,11 @@ fn a_counter_saved_through_the_store_loads_again_as_it_was() {
     assert_eq!(second.index, 1);
 
     let loaded = DirStore::open(dir.path()).unwrap().load().unwrap();
-    let back = Counter::load(id(3), pairing(), settings(), loaded.stored()).unwrap();
+    let back = Counter::load(id(3), pairing(), settings(), loaded.stored(), &store).unwrap();
     assert_eq!(back.alarm(), c.alarm());
     assert_eq!(back.exposure_outstanding(), c.exposure_outstanding());
     assert_eq!(back.pause_status(T0 + 100), c.pause_status(T0 + 100));
-    assert_eq!(back.records().len(), c.records().len());
+    assert_eq!(back.records_len(), c.records_len());
     assert_eq!(back.batches().remaining(), c.batches().remaining());
     assert_eq!(back.watched_scripts(), c.watched_scripts());
     for index in [0, 1] {

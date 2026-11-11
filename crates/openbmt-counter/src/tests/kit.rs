@@ -16,7 +16,7 @@ use openbmt_core::batch::{AddressBatch, BatchPolicy, PinnedRoots, SignedBatch};
 use openbmt_core::command::{Action, OwnerCommand, SignedCommand};
 use openbmt_core::identity::Identity;
 use openbmt_core::policy::Heartbeat;
-use openbmt_core::records::{Chain, Record};
+use openbmt_core::records::Record;
 use openbmt_core::settings::Settings;
 use openbmt_watch::{HeaderChain, Health, PeerAddr, Problem, Source, WellFormedBlock};
 
@@ -112,6 +112,10 @@ pub struct Mem {
     pub writes: usize,
     pub fail_on: Option<usize>,
     pub fail_all: bool,
+    /// Every read of the record log fails (CR-81).
+    pub fail_reads: bool,
+    /// How many reads of the record log were asked for.
+    pub reads: std::cell::Cell<usize>,
     /// The slot or `record` each write went to, in order.
     pub log: Vec<String>,
 }
@@ -150,18 +154,12 @@ impl Mem {
                     _ => None,
                 })
                 .collect(),
-            records: Chain::from_records(
-                self.records
-                    .iter()
-                    .map(|b| Record::from_bytes(b).unwrap())
-                    .collect(),
-            ),
         }
     }
 
     /// A counter started from what is stored.
     pub fn reload(&self) -> Counter {
-        Counter::load(id(3), pairing(), settings(), self.stored()).unwrap()
+        Counter::load(id(3), pairing(), settings(), self.stored(), self).unwrap()
     }
 
     /// The decoded events of the records written so far.
@@ -192,6 +190,15 @@ impl Store for Mem {
         self.step("record".to_string())?;
         self.records.push(bytes.to_vec());
         Ok(())
+    }
+
+    fn read_records(&self, from: u64, max: usize) -> Result<Vec<Vec<u8>>, &'static str> {
+        self.reads.set(self.reads.get() + 1);
+        if self.fail_reads {
+            return Err("disk unreadable");
+        }
+        let from = usize::try_from(from).unwrap_or(usize::MAX);
+        Ok(self.records.iter().skip(from).take(max).cloned().collect())
     }
 }
 

@@ -7,6 +7,7 @@ mod kit;
 mod meta;
 mod open;
 mod overrides;
+mod recordlog;
 mod records;
 mod refunds;
 mod reports;

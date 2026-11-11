@@ -117,6 +117,7 @@ use openbmt_watch::{
 
 use crate::chainview::ChainView;
 use crate::dirstore::{DirStore, DirStoreError};
+use crate::notices::NodeRecords;
 
 /// Most transactions the node keeps for later announcements.
 pub const TX_CACHE: usize = 256;
@@ -387,8 +388,9 @@ impl<P: DriverPort> Node<P> {
         };
         let view = ChainView::from_store(&headers);
 
-        let mut counter = Counter::load(identity, pairing, settings.clone(), loaded.stored())
-            .map_err(StartError::Counter)?;
+        let mut counter =
+            Counter::load(identity, pairing, settings.clone(), loaded.stored(), &store)
+                .map_err(StartError::Counter)?;
         if loaded.batches.is_none() {
             if let Some(batch) = first_batch {
                 counter
@@ -447,6 +449,45 @@ impl<P: DriverPort> Node<P> {
     /// The counter, for reading (the alarm, the exposure, the sales).
     pub fn counter(&self) -> &Counter {
         &self.counter
+    }
+
+    /// CR-81: how many records the counter has written.
+    pub fn records_len(&self) -> u64 {
+        self.counter.records_len()
+    }
+
+    /// CR-81: the hash of the counter's newest record, or `GENESIS`.
+    pub fn records_head(&self) -> [u8; 32] {
+        self.counter.head()
+    }
+
+    /// CR-81: the record numbered `n`, from memory or the record file.
+    pub fn record_at(&self, n: u64) -> Result<Option<Record>, StoreFault<DirStoreError>> {
+        self.counter.record_at(n, &self.store)
+    }
+
+    /// CR-81: up to `max` records from number `from` on, oldest first.
+    pub fn records_from(
+        &self,
+        from: u64,
+        max: usize,
+    ) -> Result<Vec<Record>, StoreFault<DirStoreError>> {
+        self.counter.records_from(from, max, &self.store)
+    }
+
+    /// LK-55: the hash of the record before number `n` (see
+    /// `Counter::hash_at`).
+    pub fn hash_at(&self, n: u64) -> Result<Option<[u8; 32]>, StoreFault<DirStoreError>> {
+        self.counter.hash_at(n, &self.store)
+    }
+
+    /// The counter's records as a source that can be read in order, for the
+    /// notice outbox.
+    pub fn record_source(&self) -> NodeRecords<'_> {
+        NodeRecords {
+            counter: &self.counter,
+            store: &self.store,
+        }
     }
 
     /// The best header chain as the node knows it.

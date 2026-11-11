@@ -86,8 +86,14 @@ fn cr_40_everything_the_counter_remembers_is_in_the_store_and_reads_back() {
     assert_eq!(w.m.slots[&Slot::Sale(0)], w.c.sale(0).unwrap().to_bytes());
     assert_eq!(w.m.slots[&Slot::Sale(1)], w.c.sale(1).unwrap().to_bytes());
     // The records are a chain signed by the counter.
-    let chain = w.m.stored().records;
+    let chain = Chain::from_records(
+        w.m.records
+            .iter()
+            .map(|b| Record::from_bytes(b).unwrap())
+            .collect(),
+    );
     assert_eq!(chain.len() as usize, w.m.records.len());
+    assert_eq!(w.c.records_len(), chain.len());
     assert_eq!(chain.verify(&DeviceList::new([id(3).device_id()])), Ok(()));
 
     // A counter started from the store judges the same.
@@ -551,7 +557,7 @@ fn cr_42_batches_ledger_pause_and_desk_that_do_not_read_back_refuse_the_start() 
         };
         let cut = m.slots[&slot].len() - 1;
         m.slots.get_mut(&slot).unwrap().truncate(cut);
-        let err = Counter::load(id(3), pairing(), settings(), m.stored()).unwrap_err();
+        let err = Counter::load(id(3), pairing(), settings(), m.stored(), &m).unwrap_err();
         assert_eq!(err.rule(), "CR-42");
         let matches = matches!(
             (&err, want),
@@ -579,7 +585,7 @@ fn cr_42_a_record_chain_that_does_not_verify_refuses_the_start() {
     let n = m.records[0].len();
     m.records[0][n - 70] ^= 1;
     let stored = m.stored();
-    let err = Counter::load(id(3), pairing(), settings(), stored).unwrap_err();
+    let err = Counter::load(id(3), pairing(), settings(), stored, &m).unwrap_err();
     assert!(matches!(err, LoadError::Records(_)), "{err:?}");
     // A chain signed by another device is refused too.
     let mut other = Chain::new();
@@ -595,7 +601,7 @@ fn cr_42_a_record_chain_that_does_not_verify_refuses_the_start() {
         records: other.records().iter().map(Record::to_bytes).collect(),
         ..Mem::default()
     };
-    assert!(Counter::load(id(3), pairing(), settings(), m.stored()).is_err());
+    assert!(Counter::load(id(3), pairing(), settings(), m.stored(), &m).is_err());
 }
 
 #[test]
@@ -628,22 +634,19 @@ fn cr_42_open_refuses_an_address_a_sale_already_holds() {
 #[test]
 fn a_check_in_goes_through_the_stored_path_and_reads_back() {
     let mut w = ready_to_accept();
-    let before = w.c.records().len();
+    let before = w.c.records_len();
     w.m.reset();
     w.m.fail_all = true;
     assert!(w.c.check_in(&mut w.m).is_err());
-    assert_eq!(w.c.records().len(), before, "a failed write adds nothing");
+    assert_eq!(w.c.records_len(), before, "a failed write adds nothing");
     w.m.reset();
     let rec = w.c.check_in(&mut w.m).unwrap();
     assert_eq!(rec.seq, before);
     assert_eq!(rec.check_in_claim().unwrap(), (before, rec.prev));
-    assert_eq!(w.c.records().len(), before + 1);
+    assert_eq!(w.c.records_len(), before + 1);
     // The record was stored before it counted, and the chain reads back.
     assert_eq!(w.m.log, vec!["record".to_string()]);
-    let again = Counter::load(id(3), pairing(), settings(), w.m.stored()).unwrap();
-    assert_eq!(again.records().head(), w.c.records().head());
-    assert!(again
-        .records()
-        .check_against_check_in(&rec, &DeviceList::new([id(3).device_id()]))
-        .is_ok());
+    let again = Counter::load(id(3), pairing(), settings(), w.m.stored(), &w.m).unwrap();
+    assert_eq!(again.head(), w.c.head());
+    assert_eq!(again.record_at(rec.seq, &w.m), Ok(Some(rec)));
 }
