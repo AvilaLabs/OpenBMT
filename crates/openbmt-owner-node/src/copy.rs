@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 
 use openbmt_core::identity::{DeviceId, TAG_RECORD};
 use openbmt_core::records::{Chain, ChainError, DeviceList, Record, RecordKind, GENESIS, MAX_BODY};
+use openbmt_core::settings::SettingNote;
 use openbmt_counter_node::TornTail;
 
 /// The file of the records, in the counter's directory.
@@ -198,6 +199,18 @@ pub struct CounterCopy {
     records: Vec<Record>,
     head: [u8; 32],
     check_in: Option<Record>,
+    /// The highest settings version a `Setting` record of the chain names
+    /// (CR-162): the settings the counter shows it holds.
+    settings_held: Option<u32>,
+}
+
+/// The settings version a record names, if it is a `Setting` record that
+/// reads.
+fn setting_version(record: &Record) -> Option<u32> {
+    if record.kind != RecordKind::Setting {
+        return None;
+    }
+    SettingNote::from_body(&record.body).ok().map(|n| n.version)
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -222,12 +235,14 @@ impl CounterCopy {
             records: Vec::new(),
             head: GENESIS,
             check_in: None,
+            settings_held: None,
         };
         let torn = copy.load_records()?;
         Chain::from_records(copy.records.clone())
             .verify(devices)
             .map_err(CopyError::NotAChain)?;
         copy.head = copy.records.last().map_or(GENESIS, Record::hash);
+        copy.settings_held = copy.records.iter().filter_map(setting_version).max();
         if let Some(bytes) = copy.read(CHECK_IN_FILE)? {
             let record = Record::from_bytes(&bytes).map_err(|_| CopyError::Corrupt {
                 file: CHECK_IN_FILE,
@@ -302,6 +317,13 @@ impl CounterCopy {
             kept_records: self.records.len(),
             cut_bytes: cut,
         }))
+    }
+
+    /// The highest settings version a `Setting` record of the copy names
+    /// (CR-162), which is the version the counter shows it holds; `None`
+    /// when the copy holds none.
+    pub fn settings_held(&self) -> Option<u32> {
+        self.settings_held
     }
 
     /// The counter this is the copy of.
@@ -445,6 +467,7 @@ impl CounterCopy {
                 break;
             }
             self.head = record.hash();
+            self.settings_held = self.settings_held.max(setting_version(&record));
             self.records.push(record);
             taken.appended = taken.appended.saturating_add(1);
         }

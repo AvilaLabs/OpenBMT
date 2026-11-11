@@ -308,9 +308,28 @@ over is still checked by the rules of the thing it carries.
   first, and the owner's own word clears the second.
 - **LK-63.** A message that opened but whose content does not decode, or
   that the node refuses by its own rules, is noted and the step goes on.
-  A kind that the device does not handle yet (settings and device lists to a
-  counter) is noted and dropped. No message makes a step fail, and no
-  message makes a step stop before the rest are looked at.
+  A device list is noted and dropped, because the device list travels inside
+  the settings (CR-166). No message makes a step fail, and no message makes a
+  step stop before the rest are looked at.
+- **LK-64.** The owner sends signed settings, as messages of kind Settings with
+  the bytes of the signed settings as the content, to every counter and Box on
+  the device list of the settings and of the settings before them, so that a
+  device the new settings remove gets the settings that remove it. The owner
+  sends them when they are handed to the link and then at the end of each
+  step, to each device that has not shown it holds the version. A device is
+  sent a version again only after 120 seconds. Versions go to a device lowest
+  first, one at a time, so that a counter checks each against the one before.
+  Settings that do not check against the pinned roots, or that lack a
+  signature they need given the settings before them, are not sent, and the
+  link says why in words. The link carries at most 16 settings at once.
+- **LK-65.** A counter shows it holds a version by the `Setting` record of its
+  chain (CR-162) that the owner's copy of the chain holds. A Box has no such
+  record, so a Box counts as holding a version once the relay took the
+  message for it.
+- **LK-66.** Settings stay with the link, and in the owner's outbox, until every
+  device they are for holds them. The link says which devices still do not,
+  and the outbox row of the owner's app names them. The link forgets settings
+  when the owner's app takes them out of the outbox.
 
 The two kinds that involve the Box are carried the same way. A counter sends
 a Paid notice to each Box on its device list when a sale changes state, and
@@ -319,7 +338,7 @@ and stored, and what the receiver checks are in `docs/BOX-RULES.md` section
 4 and its paragraph "What the code fixes". A counter takes a POS notice, opens
 it and drops it with a note (LK-63).
 
-The intervals in LK-56, LK-57, LK-61 and LK-62 are fields of a configuration
-with these defaults. A step that finds the relay unreachable tries again
-after a pause (5 seconds by default), so that a loop that runs several times
-a second does not wait for a connection each time.
+The intervals in LK-56, LK-57, LK-61, LK-62 and LK-64 are fields of a
+configuration with these defaults. A step that finds the relay unreachable
+tries again after a pause (5 seconds by default), so that a loop that runs
+several times a second does not wait for a connection each time.

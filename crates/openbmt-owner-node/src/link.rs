@@ -27,8 +27,15 @@
 //!   counter runs from the first step.
 //! - A divergence alert stays until [`OwnerLink::clear`] is called. The
 //!   evidence is kept, so a message that shows it again raises it again.
-//! - Nothing is done for the settings and device lists that are not handled
-//!   yet: they are noted and dropped.
+//! - A device list is noted and dropped: it travels inside the settings
+//!   (CR-166).
+//! - Settings the owner signed are carried to the devices on their device list
+//!   (LK-64 to LK-66, [`OwnerLink::carry_settings`]). A counter shows it holds
+//!   a version by the `Setting` record in the owner's copy of its chain. A Box
+//!   has no such record, so a Box counts as holding a version once the relay
+//!   took the message for it. A version is sent to a device again after
+//!   [`OwnerLinkConfig::settings_resend_secs`], so that a device that is off
+//!   does not fill its mailbox with copies.
 //! - A POS notice (BX-42) is taken only from a key the table holds as a Box,
 //!   with the Box's own signature and a number above the last from that Box.
 //!   It is kept, the newest [`MAX_BOX_REPORTS`], as the Box's report and is
@@ -41,8 +48,10 @@ use std::path::{Path, PathBuf};
 
 use openbmt_core::batch::SignedBatch;
 use openbmt_core::command::SignedCommand;
+use openbmt_core::batch::PinnedRoots;
 use openbmt_core::identity::DeviceId;
 use openbmt_core::records::{DeviceList, Record};
+use openbmt_core::settings::{Settings, SettingsError, SignedSettings};
 use openbmt_counter_node::DriverPort;
 use openbmt_courier::{
     decode_records, received_content, Courier, Post, Received, RelayPost, SendError,
@@ -58,6 +67,9 @@ pub const NOTE_LOG: usize = 64;
 
 /// Most reports of the Box the link keeps; the oldest goes first.
 pub const MAX_BOX_REPORTS: usize = 256;
+
+/// Most settings the link carries at once (LK-64).
+pub const MAX_CARRIED_SETTINGS: usize = 16;
 
 /// One thing the Box reported (BX-42): shown as the Box's, never as the
 /// owner's own finding.
@@ -83,6 +95,9 @@ pub struct OwnerLinkConfig {
     pub poll_secs: u64,
     /// Seconds to wait after a failure to reach the relay.
     pub retry_secs: u64,
+    /// Seconds before settings that a device does not yet show it holds are
+    /// sent to it again (LK-64).
+    pub settings_resend_secs: u64,
 }
 
 impl Default for OwnerLinkConfig {
@@ -92,6 +107,7 @@ impl Default for OwnerLinkConfig {
             check_in_grace_secs: 30 * 60,
             poll_secs: 1,
             retry_secs: 5,
+            settings_resend_secs: 120,
         }
     }
 }
@@ -158,6 +174,43 @@ impl std::fmt::Display for OwnerLinkError {
 
 impl std::error::Error for OwnerLinkError {}
 
+/// Why settings were not taken to carry (LK-64). Nothing was changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingsNotCarried {
+    /// LK-64: the settings do not check against the owner's pinned roots, or
+    /// do not follow the settings before them, or lack a signature they
+    /// need.
+    Check(SettingsError),
+    /// LK-64: the link carries as many settings as it takes.
+    Full,
+}
+
+impl std::fmt::Display for SettingsNotCarried {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Check(e) => write!(f, "LK-64: the settings are not sent: {e}"),
+            Self::Full => write!(
+                f,
+                "LK-64: the link carries {MAX_CARRIED_SETTINGS} settings already"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SettingsNotCarried {}
+
+/// One signed settings the link carries.
+#[derive(Debug, Clone)]
+struct Carried {
+    /// The outbox number of the delivery.
+    id: u32,
+    version: u32,
+    bytes: Vec<u8>,
+    /// Who must hold it: the counters and Boxes on its device list, and those
+    /// that the settings before it listed.
+    targets: BTreeMap<DeviceId, Role>,
+}
+
 /// The owner's end of the link. See the module docs.
 pub struct OwnerLink<R: Post = RelayPost> {
     courier: Courier<R>,
@@ -174,6 +227,14 @@ pub struct OwnerLink<R: Post = RelayPost> {
     notes: VecDeque<String>,
     box_reports: VecDeque<BoxReport>,
     box_numbers: BTreeMap<DeviceId, u64>,
+    /// LK-64: the settings carried, lowest version first.
+    carried: Vec<Carried>,
+    /// LK-64: the targets of the settings last carried, for the next ones.
+    last_targets: BTreeMap<DeviceId, Role>,
+    /// LK-64: when each version was last sent to each device.
+    settings_sent: BTreeMap<(DeviceId, u32), u64>,
+    /// LK-65: the Boxes the relay took each version for.
+    boxes_sent: BTreeSet<(DeviceId, u32)>,
 }
 
 impl<R: Post> OwnerLink<R> {
@@ -223,6 +284,10 @@ impl<R: Post> OwnerLink<R> {
             notes,
             box_reports: VecDeque::new(),
             box_numbers: BTreeMap::new(),
+            carried: Vec::new(),
+            last_targets: BTreeMap::new(),
+            settings_sent: BTreeMap::new(),
+            boxes_sent: BTreeSet::new(),
         })
     }
 
@@ -338,6 +403,146 @@ impl<R: Post> OwnerLink<R> {
         self.courier.send(to, kind, content)
     }
 
+    /// LK-64: take signed settings to carry to the devices on their device
+    /// list. The settings are checked first: against `roots` and, when
+    /// `previous` is given, as a change from it (so that settings that lack a
+    /// signature they need are never sent); without `previous` the
+    /// signatures that are there and the values are checked. `id` is the
+    /// number of the outbox delivery. Settings of a version already carried
+    /// are not taken twice. They are sent at once, to the devices that need
+    /// them, and again by [`OwnerLink::step`].
+    pub fn carry_settings(
+        &mut self,
+        id: u32,
+        signed: &SignedSettings,
+        roots: &PinnedRoots,
+        previous: Option<&Settings>,
+        now: u64,
+    ) -> Result<(), SettingsNotCarried> {
+        let version = signed.settings.version;
+        if self.carried.iter().any(|c| c.version == version) {
+            return Ok(());
+        }
+        match previous {
+            Some(previous) => signed.verify(roots, Some(previous)).map(|_| ()),
+            None => signed.verify_signatures(roots),
+        }
+        .map_err(SettingsNotCarried::Check)?;
+        if self.carried.len() >= MAX_CARRIED_SETTINGS {
+            return Err(SettingsNotCarried::Full);
+        }
+        let mut targets = BTreeMap::new();
+        let lists = [
+            previous.map(roles_of),
+            Some(roles_of(&signed.settings)),
+            Some(self.last_targets.clone()),
+        ];
+        for (device, role) in lists.into_iter().flatten().flatten() {
+            targets.insert(device, role);
+        }
+        // The owner's own key is never a target.
+        targets.remove(&roots.owner);
+        for (device, role) in &targets {
+            self.courier.set_peer(*device, *role);
+        }
+        self.last_targets = roles_of(&signed.settings);
+        self.carried.push(Carried {
+            id,
+            version,
+            bytes: signed.to_bytes(),
+            targets,
+        });
+        self.carried.sort_by_key(|c| c.version);
+        self.send_settings(now);
+        Ok(())
+    }
+
+    /// LK-66: the devices that do not yet hold the settings of delivery `id`:
+    /// counters whose copy does not show the version, and Boxes the relay has
+    /// not taken it for. Counters without a copy on this link (added after it
+    /// started) are not waited for. Empty for settings the link does not
+    /// carry.
+    pub fn settings_missing(&self, id: u32) -> Vec<(DeviceId, Role)> {
+        let Some(carried) = self.carried.iter().find(|c| c.id == id) else {
+            return Vec::new();
+        };
+        carried
+            .targets
+            .iter()
+            .filter(|(device, role)| !self.holds(device, **role, carried.version, true))
+            .map(|(device, role)| (*device, *role))
+            .collect()
+    }
+
+    /// LK-66: forget the settings of delivery `id`, after the caller took it
+    /// out of the outbox.
+    pub fn settings_done(&mut self, id: u32) {
+        let gone: Vec<u32> = self
+            .carried
+            .iter()
+            .filter(|c| c.id == id)
+            .map(|c| c.version)
+            .collect();
+        self.carried.retain(|c| c.id != id);
+        self.settings_sent.retain(|(_, v), _| !gone.contains(v));
+        self.boxes_sent.retain(|(_, v)| !gone.contains(v));
+    }
+
+    /// Whether `device` shows it holds `version` (LK-65). A counter with no
+    /// copy on this link counts as holding when `unknown_holds`.
+    fn holds(&self, device: &DeviceId, role: Role, version: u32, unknown_holds: bool) -> bool {
+        match role {
+            Role::Box => self.boxes_sent.contains(&(*device, version)),
+            _ => match self.copies.get(device) {
+                Some(copy) => copy.settings_held() >= Some(version),
+                None => unknown_holds,
+            },
+        }
+    }
+
+    /// LK-64: send each device the lowest carried version above what it shows
+    /// it holds, if it was not sent within the resend time. A counter takes
+    /// the versions in order, so that each is checked against the one before
+    /// it. `false` if the relay could not be reached.
+    fn send_settings(&mut self, now: u64) -> bool {
+        let mut work: Vec<(DeviceId, Role, u32, Vec<u8>)> = Vec::new();
+        let mut seen: BTreeSet<DeviceId> = BTreeSet::new();
+        for c in &self.carried {
+            for (device, role) in &c.targets {
+                if seen.contains(device) || self.holds(device, *role, c.version, false) {
+                    continue;
+                }
+                seen.insert(*device);
+                let due = self
+                    .settings_sent
+                    .get(&(*device, c.version))
+                    .is_none_or(|at| now >= at.saturating_add(self.cfg.settings_resend_secs));
+                if due {
+                    work.push((*device, *role, c.version, c.bytes.clone()));
+                }
+            }
+        }
+        for (device, role, version, bytes) in work {
+            // Stamped before the send: a refusal is not tried every step.
+            self.settings_sent.insert((device, version), now);
+            match self.courier.send(&device, Kind::Settings, &bytes) {
+                Ok(()) => {
+                    if role == Role::Box {
+                        self.boxes_sent.insert((device, version));
+                    }
+                }
+                Err(e) if e.is_retryable() => {
+                    self.settings_sent.remove(&(device, version));
+                    return false;
+                }
+                Err(e) => self.note(format!(
+                    "LK-64: settings version {version} were not sent to {device:?}: {e}"
+                )),
+            }
+        }
+        true
+    }
+
     /// One turn of the link at `now` (seconds).
     pub fn step<P: DriverPort>(&mut self, watcher: &mut OwnerWatcher<P>, now: u64) {
         let started = *self.started_at.get_or_insert(now);
@@ -365,6 +570,9 @@ impl<R: Post> OwnerLink<R> {
         }
         if reached {
             reached = self.heartbeats(watcher, now);
+        }
+        if reached {
+            reached = self.send_settings(now);
         }
         self.courier.end();
         if !reached {
@@ -397,6 +605,10 @@ impl<R: Post> OwnerLink<R> {
             Kind::Records => self.take_records(message.from, &message.content, reply_due),
             Kind::CheckIn => self.take_check_in(message.from, &message.content, now),
             Kind::PosNotice => self.take_pos_notice(&message, now),
+            Kind::DeviceList => self.note(
+                "CR-166: a device list: it travels inside the settings, so it is dropped"
+                    .to_string(),
+            ),
             other => self.note(format!("a {other:?} message: not handled yet")),
         }
     }
@@ -561,4 +773,16 @@ impl<R: Post> OwnerLink<R> {
         }
         true
     }
+}
+
+/// The counters and Boxes a settings value lists, with their roles.
+fn roles_of(settings: &Settings) -> BTreeMap<DeviceId, Role> {
+    let mut out = BTreeMap::new();
+    for counter in settings.counters.keys() {
+        out.insert(*counter, Role::Counter);
+    }
+    for b in &settings.boxes {
+        out.insert(*b, Role::Box);
+    }
+    out
 }

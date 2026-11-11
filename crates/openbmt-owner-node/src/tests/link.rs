@@ -10,7 +10,7 @@ use bitcoin::{Network, ScriptBuf, WScriptHash};
 use openbmt_core::batch::{AddressBatch, BatchPolicy, SignedBatch};
 use openbmt_core::command::{Action, OwnerCommand, SignedCommand};
 use openbmt_core::records::{Chain, DeviceList, Record, RecordKind, GENESIS};
-use openbmt_core::settings::Settings;
+use openbmt_core::settings::{Change, SettingNote, Settings, SettingsError, SignedSettings};
 use openbmt_counter::Pairing;
 use openbmt_counter_node::{CounterLink, CounterLinkConfig, Node, NodeConfig};
 use openbmt_courier::{
@@ -20,7 +20,7 @@ use openbmt_link::{Kind, Role};
 
 use super::*;
 use crate::copy::{CheckInTaken, CopyError, CounterCopy, Stop};
-use crate::{Alert, OwnerLink, OwnerLinkConfig};
+use crate::{Alert, OwnerLink, OwnerLinkConfig, SettingsNotCarried};
 
 fn owner() -> DeviceId {
     id(1).device_id()
@@ -949,4 +949,313 @@ fn lk_58_a_restart_of_both_sides_in_the_middle_goes_on_without_duplicates() {
     assert_eq!(again.records(), copy.records());
     // And the counter's numbers went on rather than starting again.
     assert!(counter_side.courier().outbox().last(&owner()) > 2);
+}
+
+// LK-64 to LK-66: the settings the owner signed travel to the devices.
+
+fn box_key() -> DeviceId {
+    id(5).device_id()
+}
+
+/// Settings of `version` that list the counter and the Box, changed by `f`.
+fn listed(version: u32, f: impl FnOnce(&mut Settings)) -> Settings {
+    let mut s = Settings::defaults(1_000);
+    s.version = version;
+    s.devices.insert(counter());
+    s.devices.insert(box_key());
+    s.counters.insert(counter(), 10_000);
+    s.boxes.insert(box_key());
+    f(&mut s);
+    s
+}
+
+fn signed_by_owner(s: Settings) -> SignedSettings {
+    SignedSettings {
+        owner_sig: s.sign(&id(1)),
+        approver_sig: None,
+        settings: s,
+    }
+}
+
+fn signed_by_both(s: Settings) -> SignedSettings {
+    SignedSettings {
+        owner_sig: s.sign(&id(1)),
+        approver_sig: Some(s.sign(&id(2))),
+        settings: s,
+    }
+}
+
+/// A world with a Box that is a member of the relay and reads its mailbox.
+struct WithBox {
+    w: World,
+    box_side: Courier<MemoryPost>,
+    _box_dir: Dir,
+}
+
+fn with_box() -> WithBox {
+    let relay = MemoryRelay::new(id(99), &[owner(), counter(), box_key()]).unwrap();
+    let (dir, watcher_dir, counter_dir, box_dir) =
+        (Dir::new(), Dir::new(), Dir::new(), Dir::new());
+    let rig = start(watcher_dir.path());
+    let owner_courier = courier(
+        &relay,
+        id(1),
+        Role::Owner,
+        (counter(), Role::Counter),
+        &dir,
+        FirstStart::Yes,
+    );
+    let mut link = OwnerLink::new(
+        owner_courier,
+        dir.path(),
+        devices(),
+        vec![counter()],
+        config(),
+    )
+    .unwrap();
+    let mut counter_side = courier(
+        &relay,
+        id(3),
+        Role::Counter,
+        (owner(), Role::Owner),
+        &counter_dir,
+        FirstStart::Yes,
+    );
+    counter_side.poll().unwrap();
+    let mut box_side = courier(
+        &relay,
+        id(5),
+        Role::Box,
+        (owner(), Role::Owner),
+        &box_dir,
+        FirstStart::Yes,
+    );
+    box_side.poll().unwrap();
+    link.courier_mut().poll().unwrap();
+    WithBox {
+        w: World {
+            rig,
+            link,
+            counter_side,
+            relay,
+            dir,
+            _watcher_dir: watcher_dir,
+            _counter_dir: counter_dir,
+        },
+        box_side,
+        _box_dir: box_dir,
+    }
+}
+
+fn settings_in(got: &[Received]) -> Vec<Vec<u8>> {
+    got.iter()
+        .filter(|r| r.kind == Kind::Settings)
+        .map(|r| r.content.clone())
+        .collect()
+}
+
+/// The counter's chain, which grows by `Setting` records; `sent` is how many
+/// of its records the owner was given.
+struct Shown {
+    chain: Chain,
+    sent: usize,
+}
+
+impl Shown {
+    fn new() -> Self {
+        Self {
+            chain: Chain::new(),
+            sent: 0,
+        }
+    }
+
+    /// The counter writes a `Setting` record for `version` and sends the new
+    /// records to the owner.
+    fn holds(&mut self, w: &mut World, version: u32) {
+        let note = SettingNote {
+            version,
+            change: Change::Tightening,
+            hash: [version as u8; 32],
+        };
+        self.chain
+            .append(&id(3), RecordKind::Setting, note.to_body())
+            .unwrap();
+        self.flush(w);
+    }
+
+    fn flush(&mut self, w: &mut World) {
+        let all = self.chain.records();
+        w.send_records(&all[self.sent..]);
+        self.sent = all.len();
+    }
+}
+
+#[test]
+fn lk_64_settings_go_to_the_counters_and_boxes_on_the_list_once_they_check() {
+    let mut b = with_box();
+    let first = listed(1, |_| {});
+    let tighter = signed_by_owner(listed(2, |s| s.light_per_sale.sats -= 1));
+    b.w.link
+        .carry_settings(7, &tighter, &roots(), Some(&first), T0)
+        .unwrap();
+    // Sent at once, to the counter and to the Box, as the bytes signed.
+    assert_eq!(settings_in(&b.w.counter_gets()), vec![tighter.to_bytes()]);
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![tighter.to_bytes()]
+    );
+    // A loosening without the Key app's signature is never sent.
+    let looser = signed_by_owner(listed(3, |s| s.light_per_sale.sats += 50));
+    let err =
+        b.w.link
+            .carry_settings(8, &looser, &roots(), Some(&tighter.settings), T0)
+            .unwrap_err();
+    assert!(err.to_string().starts_with("LK-64: "), "{err}");
+    assert_eq!(
+        err,
+        SettingsNotCarried::Check(SettingsError::ApproverRequired)
+    );
+    // Nor are settings signed by a key that is not the owner root.
+    let mut forged = signed_by_both(listed(3, |s| s.light_per_sale.sats += 50));
+    forged.owner_sig = forged.settings.sign(&id(9));
+    assert!(b
+        .w
+        .link
+        .carry_settings(9, &forged, &roots(), Some(&tighter.settings), T0)
+        .is_err());
+    // Without the settings before them, the signatures there are checked.
+    assert!(b
+        .w
+        .link
+        .carry_settings(9, &forged, &roots(), None, T0)
+        .is_err());
+    assert!(settings_in(&b.w.counter_gets()).is_empty());
+    assert!(settings_in(&b.box_side.poll().unwrap()).is_empty());
+}
+
+#[test]
+fn lk_64_a_device_takes_the_versions_in_order_and_is_not_sent_one_every_step() {
+    let mut b = with_box();
+    let v1 = listed(1, |_| {});
+    let v2 = signed_by_owner(listed(2, |s| s.light_per_sale.sats -= 1));
+    let v3 = signed_by_both(listed(3, |s| s.light_per_sale.sats += 5));
+    b.w.link
+        .carry_settings(1, &v2, &roots(), Some(&v1), T0)
+        .unwrap();
+    b.w.link
+        .carry_settings(2, &v3, &roots(), Some(&v2.settings), T0)
+        .unwrap();
+    // The counter gets version 2 only; the Box takes each once, in order.
+    assert_eq!(settings_in(&b.w.counter_gets()), vec![v2.to_bytes()]);
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![v2.to_bytes(), v3.to_bytes()]
+    );
+    // Not again within the resend time, however many steps.
+    for t in 1..5 {
+        b.w.step(T0 + t);
+    }
+    assert!(settings_in(&b.w.counter_gets()).is_empty());
+    // After it, the version the counter does not show is sent again.
+    b.w.step(T0 + 130);
+    assert_eq!(settings_in(&b.w.counter_gets()), vec![v2.to_bytes()]);
+    // The counter shows version 2 by its record: version 3 is next.
+    let mut shown = Shown::new();
+    shown.holds(&mut b.w, 2);
+    b.w.step(T0 + 131);
+    assert_eq!(b.w.copy().settings_held(), Some(2));
+    assert_eq!(settings_in(&b.w.counter_gets()), vec![v3.to_bytes()]);
+    // And nothing more once it shows version 3; the Box is not sent again.
+    shown.holds(&mut b.w, 3);
+    b.w.step(T0 + 400);
+    assert!(settings_in(&b.w.counter_gets()).is_empty());
+    assert!(settings_in(&b.box_side.poll().unwrap()).is_empty());
+}
+
+#[test]
+fn lk_64_a_device_the_new_settings_remove_gets_the_settings_that_remove_it() {
+    let mut b = with_box();
+    let v1 = listed(1, |_| {});
+    let removed = signed_by_both(listed(2, |s| {
+        s.counters.clear();
+        s.devices.remove(&counter());
+    }));
+    b.w.link
+        .carry_settings(4, &removed, &roots(), Some(&v1), T0)
+        .unwrap();
+    assert_eq!(settings_in(&b.w.counter_gets()), vec![removed.to_bytes()]);
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![removed.to_bytes()]
+    );
+}
+
+#[test]
+fn lk_65_a_counter_shows_it_holds_a_version_by_its_setting_record_and_a_box_by_the_relay() {
+    let mut b = with_box();
+    let v1 = listed(1, |_| {});
+    let v2 = signed_by_owner(listed(2, |s| s.light_per_sale.sats -= 1));
+    assert!(b.w.link.settings_missing(3).is_empty(), "nothing carried");
+    b.w.link
+        .carry_settings(3, &v2, &roots(), Some(&v1), T0)
+        .unwrap();
+    // The Box is counted once the relay took the message; the counter is
+    // missing until its record is in the copy.
+    assert_eq!(
+        b.w.link.settings_missing(3),
+        vec![(counter(), Role::Counter)]
+    );
+    // A record of another kind does not show it.
+    let mut shown = Shown::new();
+    shown
+        .chain
+        .append(&id(3), RecordKind::Sale, vec![2, 0, 7])
+        .unwrap();
+    shown.flush(&mut b.w);
+    b.w.step(T0 + 1);
+    assert_eq!(b.w.copy().settings_held(), None);
+    assert_eq!(b.w.link.settings_missing(3).len(), 1);
+    shown.holds(&mut b.w, 2);
+    b.w.step(T0 + 2);
+    assert_eq!(b.w.copy().settings_held(), Some(2));
+    assert!(b.w.link.settings_missing(3).is_empty());
+}
+
+#[test]
+fn lk_66_settings_stay_until_every_device_holds_them_and_are_then_forgotten() {
+    let mut b = with_box();
+    let v1 = listed(1, |_| {});
+    let v2 = signed_by_owner(listed(2, |s| s.light_per_sale.sats -= 1));
+    b.w.link
+        .carry_settings(3, &v2, &roots(), Some(&v1), T0)
+        .unwrap();
+    assert!(!b.w.link.settings_missing(3).is_empty());
+    let mut shown = Shown::new();
+    shown.holds(&mut b.w, 2);
+    b.w.step(T0 + 1);
+    assert!(b.w.link.settings_missing(3).is_empty());
+    b.w.link.settings_done(3);
+    assert!(b.w.link.settings_missing(3).is_empty());
+    // Carried again, it is a new delivery: nothing is left of the old one.
+    b.w.link
+        .carry_settings(3, &v2, &roots(), Some(&v1), T0 + 2)
+        .unwrap();
+    assert!(b.w.link.settings_missing(3).is_empty());
+
+    // The link carries only so many settings.
+    let mut b = with_box();
+    let mut previous = listed(1, |_| {});
+    for i in 0..crate::MAX_CARRIED_SETTINGS as u32 {
+        let next = signed_by_owner(listed(2 + i, |s| s.light_per_sale.sats -= 1 + u64::from(i)));
+        b.w.link
+            .carry_settings(i, &next, &roots(), Some(&previous), T0)
+            .unwrap();
+        previous = next.settings;
+    }
+    let over = signed_by_owner(listed(99, |s| s.light_per_sale.sats = 1));
+    assert_eq!(
+        b.w.link
+            .carry_settings(99, &over, &roots(), Some(&previous), T0),
+        Err(SettingsNotCarried::Full)
+    );
 }

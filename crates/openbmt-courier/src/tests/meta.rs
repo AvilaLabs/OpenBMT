@@ -33,10 +33,10 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn section_six_defines_fourteen_rules() {
+fn section_six_defines_seventeen_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 14);
-    assert!(ids.contains("LK-50") && ids.contains("LK-63"));
+    assert_eq!(ids.len(), 17);
+    assert!(ids.contains("LK-50") && ids.contains("LK-66"));
 }
 
 #[test]
