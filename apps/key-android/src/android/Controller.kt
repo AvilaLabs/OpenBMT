@@ -1002,7 +1002,7 @@ class Controller(private val act: MainActivity) {
                 message?.let { views.add(ui.words(it)) }
                 views.add(ui.text("A new invitation lasts 30 minutes and works for one Box.", 16f))
                 views.add(
-                    ui.button("Make an invitation") {
+                    ui.primary("Make an invitation") {
                         allowed { attempt({ showPairBox(null) }) { a.makeInvitation() }?.let { showPairBox(null) } }
                     },
                 )
@@ -1022,7 +1022,7 @@ class Controller(private val act: MainActivity) {
             val left = ui.text("", 18f, bold = true)
             views.add(left)
             views.add(
-                ui.button("Cancel this invitation") {
+                ui.danger("Cancel this invitation") {
                     stopTicker()
                     allowed { attempt({ showPairBox(null) }) { a.cancelInvitation() }?.let { showPairBox(null) } }
                 },

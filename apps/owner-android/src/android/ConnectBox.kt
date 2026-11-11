@@ -2,6 +2,7 @@ package org.openbmt.owner.app
 
 import android.view.View
 import java.io.IOException
+import org.openbmt.app.ButtonKind
 import org.openbmt.app.SayWords
 import org.openbmt.owner.BoxDelivered
 import org.openbmt.owner.BoxFound
@@ -39,7 +40,7 @@ internal fun Controller.showConnectBox(message: SayWords? = null, prefill: Strin
     views.add(label("The Box's address"))
     val address = ui.field("host:port or name.onion:port").also { it.setText(prefill) }
     views.add(address)
-    views.add(ui.button("Look for the Box") { lookForBox(n, address.text.toString(), msg) { a, f -> showBoxFound(n, a, f) } })
+    views.add(ui.primary("Look for the Box") { lookForBox(n, address.text.toString(), msg) { a, f -> showBoxFound(n, a, f) } })
     views.add(ui.button("Scan the Box's address") { scanBox() })
     views.add(msg)
     views.addAll(pendingBoxViews(n, Slot(act)) { showConnectBox() })
@@ -101,7 +102,7 @@ private fun Controller.showBoxFound(n: OwnerNode, address: String, found: BoxFou
         null
     }
     views.add(
-        ui.button("Queue the Box for the Key app") {
+        ui.primary("Queue the Box for the Key app") {
             when (val f = if (price == null) Form.Ok(0L) else CounterModel.price(price.text.toString())) {
                 is Form.Refused -> msg.show(ui.words(f.words))
                 is Form.Ok -> attempt(msg) { n.boxQueue(found.claim, f.value) }?.let { showBoxQueued(n, address, it) }
@@ -122,8 +123,8 @@ private fun Controller.showBoxQueued(n: OwnerNode, address: String, q: BoxQueued
     views.add(ui.text(ConnectBoxModel.wordsLine(q.words), 30f, bold = true))
     views.add(ui.words(BoxWords.compare))
     views.add(ui.words(BoxWords.queued))
-    views.add(ui.button("Build the request for the Key app") { showSpend() })
-    views.add(ui.button("Forget this Box") { forgetBox(n, q.boxKey, msg) { showHome() } })
+    views.add(ui.primary("Build the request for the Key app") { showSpend() })
+    views.add(ui.danger("Forget this Box") { forgetBox(n, q.boxKey, msg) { showHome() } })
     views.add(msg)
     views.add(ui.button("Later") { showHome() })
     page(views)
@@ -144,11 +145,11 @@ internal fun Controller.pendingBoxViews(n: OwnerNode, msg: Slot, back: () -> Uni
         if (p.welcomeReady) {
             val address = ui.field("host:port or name.onion:port").also { it.setText(boxAddresses[keyHex(p.boxKey)] ?: "") }
             views.add(address)
-            views.add(ui.button("Hand over the welcome to ${ConnectBoxModel.boxLabel(p.boxKey)}") { handOver(n, p, address.text.toString(), back) })
+            views.add(ui.primary("Hand over the welcome to ${ConnectBoxModel.boxLabel(p.boxKey)}") { handOver(n, p, address.text.toString(), back) })
         } else {
             views.add(ui.text("Waiting for the Key app's approval.", 14f))
         }
-        views.add(ui.button("Forget ${ConnectBoxModel.boxLabel(p.boxKey)}") { forgetBox(n, p.boxKey, msg, back) })
+        views.add(ui.danger("Forget ${ConnectBoxModel.boxLabel(p.boxKey)}") { forgetBox(n, p.boxKey, msg, back) })
     }
     views.add(msg)
     return views
@@ -190,7 +191,7 @@ private fun Controller.handOver(n: OwnerNode, p: PendingBox, text: String, back:
                 listOf(
                     ui.words(words),
                     ui.words(BoxWords.handoverKept),
-                    ui.button("Try again") { showConnectBox(prefill = address) },
+                    ui.primary("Try again") { showConnectBox(prefill = address) },
                     ui.button("Back") { back() },
                 ),
             )
@@ -218,7 +219,7 @@ private fun Controller.showSaveLink(address: String, d: BoxDelivered, message: S
     views.add(ui.words(message ?: BoxWords.savePin))
     views.add(pin)
     views.add(
-        ui.button("Save the link") {
+        ui.button("Save the link", ButtonKind.Primary) {
             val typed = pin.text.toString()
             pin.setText("")
             if (typed.isEmpty()) return@button
