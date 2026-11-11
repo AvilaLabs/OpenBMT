@@ -7,11 +7,12 @@ use common::*;
 use openbmt_spend::{CoinError, CombineError, FinalizeError, PlanError, PsbtError, Source};
 
 const RULES: &str = include_str!("../../../docs/SPEND-RULES.md");
-const TEST_SOURCES: [&str; 8] = [
+const TEST_SOURCES: [&str; 9] = [
     include_str!("coins.rs"),
     include_str!("choice.rs"),
     include_str!("outputs.rs"),
     include_str!("fee.rs"),
+    include_str!("consolidation.rs"),
     include_str!("psbt.rs"),
     include_str!("combine.rs"),
     include_str!("finalize.rs"),
@@ -36,7 +37,7 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 37);
+    assert_eq!(ids.len(), 39);
     assert!(ids.contains(&"SP-01".to_string()) && ids.contains(&"SP-71".to_string()));
     let mut sorted = ids.clone();
     sorted.sort();

@@ -5,10 +5,7 @@ mod common;
 use bitcoin::absolute::LockTime;
 use bitcoin::transaction::Version;
 use common::*;
-use openbmt_spend::{
-    combine, consolidation_cost_sats, consolidation_size, finalize_plan, plan,
-    receipt_spend_cost_sats, PlanError, MAX_CONSOLIDATION_INPUTS,
-};
+use openbmt_spend::{combine, finalize_plan, plan, receipt_spend_cost_sats, PlanError};
 
 #[test]
 fn sp_30_the_weight_is_the_known_shape() {
