@@ -6,6 +6,7 @@ import org.openbmt.owner.CashAmount
 import org.openbmt.owner.CashOutArgs
 import org.openbmt.owner.CounterState
 import org.openbmt.owner.EntryKind
+import org.openbmt.owner.BatchWaiting
 import org.openbmt.owner.LinkState
 import org.openbmt.owner.OutboxKind
 import org.openbmt.owner.OutboxRow
@@ -110,6 +111,12 @@ object OwnerModel {
         out.add("Size: ${row.size} bytes.")
         return out
     }
+
+    /** New addresses that wait for a counter to hold them: whose, and since when (LK-70). */
+    fun batchWaitingLines(b: BatchWaiting, now: Long): List<String> = listOf(
+        "${counterLabel(b.counter)}: its new addresses are on their way.",
+        "First sent ${Format.localTime(b.since)}, ${ago(now, b.since)}.",
+    )
 
     // ---- settings -------------------------------------------------------------------
 

@@ -26,6 +26,7 @@ import org.openbmt.app.Who
 import org.openbmt.app.WipeOrder
 import org.openbmt.owner.Alert
 import org.openbmt.owner.AlertKind
+import org.openbmt.owner.BatchWaiting
 import org.openbmt.owner.CashAmount
 import org.openbmt.owner.CounterShare
 import org.openbmt.owner.CounterState
@@ -300,14 +301,17 @@ object AppModelTest {
         val lines = OwnerModel.counterLines(counter, 1300)
         ok(lines[0] == "Counter 01010101: 5 records." && lines[1] == "Head: 0202020202020202..." && lines[2] == "Last check-in: number 3, 5 minutes ago, held.", "a counter's lines: $lines")
         ok(OwnerModel.counterLines(CounterState(ByteArray(32), 0, ByteArray(32), null, null, null, words()), 0)[2] == "No check-in has been taken yet.", "a counter that never checked in")
-        val link = LinkState(true, 0, listOf(Alert(AlertKind.Diverged, ByteArray(32), 1, words())), listOf(counter))
+        val link = LinkState(true, 0, listOf(Alert(AlertKind.Diverged, ByteArray(32), 1, words())), listOf(counter), emptyList())
         ok(OwnerModel.linkLine(null, 0) == "No link to the counters.", "no link")
         ok(OwnerModel.linkLine(link, 1) == "The relay is reachable. 1 counter is on the list.", "a link")
-        ok(OwnerModel.linkLine(LinkState(false, 0, emptyList(), emptyList()), 0) == "The relay is not reachable. No counter is on the list.", "a link that does not answer")
+        ok(OwnerModel.linkLine(LinkState(false, 0, emptyList(), emptyList(), emptyList()), 0) == "The relay is not reachable. No counter is on the list.", "a link that does not answer")
 
         val batch = OutboxRow(8, OutboxKind.Batch, null, ByteArray(32) { 1 }, null, 1000, 300, words())
         val bl = OwnerModel.outboxLines(batch, 1300)
         ok(OwnerModel.outboxTitle(batch) == "Address batch 8" && bl[0] == "Counter 01010101" && bl[1].endsWith("5 minutes ago.") && bl[2] == "Size: 300 bytes.", "a batch waits: $bl")
+        val waiting = BatchWaiting(ByteArray(32) { 1 }, 2, 1000, words())
+        val wl = OwnerModel.batchWaitingLines(waiting, 1300)
+        ok(wl[0] == "Counter 01010101: its new addresses are on their way." && wl[1].endsWith("5 minutes ago."), "new addresses wait: $wl")
         val tx = OutboxRow(9, OutboxKind.Transaction, "ab12", null, null, null, 200, words())
         val tl = OwnerModel.outboxLines(tx, 1300)
         ok(tl[0] == "Transaction ab12" && tl[1] == "The node keeps no signing time for this one.", "a payment has no time: $tl")

@@ -234,12 +234,23 @@ internal fun Controller.showOutbox(): Unit = withNode { n ->
     views.add(ui.text("Signed by both keys and kept on this phone until they are delivered or confirmed.", 15f))
     val msg = Slot(act)
     val rows = attempt(msg) { n.outbox() }
+    // New addresses that the link keeps sending until the counter holds them.
+    val sent = try {
+        if (setup?.link != null) n.linkState().batches else emptyList()
+    } catch (_: OwnerException) {
+        emptyList()
+    }
     if (rows == null) {
         views.add(msg)
-    } else if (rows.isEmpty()) {
+    } else if (rows.isEmpty() && sent.isEmpty()) {
         views.add(ui.text("Nothing is waiting.", 16f))
     } else {
         val now = nowSecs()
+        for (b in sent) {
+            views.add(label("New addresses: ${OwnerModel.counterLabel(b.counter)}"))
+            views.add(ui.words(b.words.say()))
+            views.add(ui.text(OwnerModel.batchWaitingLines(b, now).joinToString("\n"), 13f, mono = true))
+        }
         for (row in rows) {
             views.add(label(OwnerModel.outboxTitle(row)))
             views.add(ui.words(row.words.say()))
@@ -495,7 +506,11 @@ internal fun Controller.showAlerts(message: SayWords? = null): Unit = withNode {
         } else {
             views.add(ui.text(OwnerModel.alertsLine(l.alerts.size), 16f))
             for (a in l.alerts) {
-                val kind = if (a.kind == AlertKind.MissedCheckIn) "Missed check-in" else "Records do not match"
+                val kind = when (a.kind) {
+                    AlertKind.MissedCheckIn -> "Missed check-in"
+                    AlertKind.Diverged -> "Records do not match"
+                    AlertKind.BatchUndelivered -> "New addresses not taken"
+                }
                 views.add(label("$kind: ${OwnerModel.counterLabel(a.counter)}"))
                 views.add(ui.words(a.words.say()))
                 views.add(
