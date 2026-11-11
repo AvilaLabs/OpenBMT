@@ -137,6 +137,8 @@ private const val OP_WATCH_EXPORT = 133
 private const val OP_WATCH_START = 134
 private const val OP_WATCH_STEP = 135
 private const val OP_WATCH_STOP = 136
+private const val OP_PRICE_SOURCES = 140
+private const val OP_PRICE_AGREE = 141
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -721,6 +723,15 @@ class BoxOwnInvitation(val text: String, val expiresAt: Long)
 
 /** A claim that answers this phone's own invitation. */
 class BoxOwnCheck(val boxKey: ByteArray, val words: List<String>)
+
+/** One source of the price of a bitcoin: its label and the HTTPS address the app asks (RT-01). */
+class PriceSource(val id: String, val url: String)
+
+/** What one source answered, whole, and when the app had it. */
+class PriceReply(val source: String, val body: ByteArray, val fetchedAt: Long)
+
+/** The price the sources agree on: whole dollars for one bitcoin, rounded half up, the same in minor units, and the label of the sources used. */
+class AgreedPrice(val usdPerBtc: Long, val minorPerBtc: Long, val sourceLabel: String)
 
 /** The code a counter takes: [code] is the bundle to show, [withBatch] says the first addresses are in it. */
 class CounterBundle(val code: ByteArray, val withBatch: Boolean, val words: Words)
@@ -2012,6 +2023,27 @@ object OwnerBoxes {
     fun ownCheck(invitation: String, claim: ByteArray): BoxOwnCheck {
         val r = call(OP_BOX_OWN_CHECK, 0) { it.string(invitation).bytes(claim) }
         return BoxOwnCheck(r.bytes(), r.strings()).also { r.end() }
+    }
+}
+
+/**
+ * The price of a bitcoin for a phone with no settings (`docs/OWNER-APP-RULES.md` OA-101). The app fetches each
+ * source's address through Tor and hands the replies over; the library reads them and agrees on one price, or
+ * refuses with its own words. No node is needed, so these calls name no handle.
+ */
+object OwnerPrice {
+    /** The sources the app fetches, in the library's table. */
+    fun sources(): List<PriceSource> {
+        val r = call(OP_PRICE_SOURCES, 0)
+        return r.list { PriceSource(r.string(), r.string()) }.also { r.end() }
+    }
+
+    /** The price the [replies] agree on at [now]. A source that did not answer has no reply. */
+    fun agree(replies: List<PriceReply>, now: Long): AgreedPrice {
+        val r = call(OP_PRICE_AGREE, 0) { w ->
+            w.list(replies) { w.string(it.source).bytes(it.body).u64(it.fetchedAt) }.u64(now)
+        }
+        return AgreedPrice(r.u64(), r.u64(), r.string()).also { r.end() }
     }
 }
 

@@ -10,6 +10,7 @@ pub(crate) mod kit;
 mod kotlin;
 mod lock;
 mod pos;
+mod price;
 mod protocol;
 mod screen;
 mod settings;

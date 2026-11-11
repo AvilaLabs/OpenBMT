@@ -192,6 +192,8 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "SetupFields(network(), bytes(), bytes(), string(), bytes(), option { string() }, u32(), u32(), u32())",
         "SetupStageView(u8(), words())",
         "CeremonyDefaults(u32(), u32(), u32())",
+        "PriceSource(r.string(), r.string())",
+        "AgreedPrice(r.u64(), r.u64(), r.string())",
         "OutboxRow(",
         "u32(), outboxKind(), option { string() }, option { bytes() }, option { u32() },",
         "option { u64() }, u32(), words(),",
@@ -219,6 +221,10 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "SettingsEditArgs: record: usd_per_btc: option<u64>, light_per_sale: option<u32>, light_budget: option<u32>, node_per_sale: option<u32>, node_budget: option<u32>, box_per_sale: option<u32>, box_budget: option<u32>, underpayment_tolerance_bps: option<u32>, refund_cap: option<u32>, refund_daily_cap: option<u32>, cashier_override_daily_cap: option<u32>, manager_override_ceiling: option<u32>, min_confirmations: option<u8>, final_confirmations: option<u8>, heartbeat_max_age_secs: option<u32>, tor_on: option<bool>, customer_wifi: option<bool>, min_sale_sats: option<u64>, tips_on: option<bool>, tip_percents: option<list<u8>>, shares: list<CounterShareView>, lightning: LightningAction, lightning_text: string, currency: CurrencyAction",
         "SettingChangeView: record: field: string, label: string, counter: option<list<u8>>, old: string, new: string, loosening: bool",
         "SettingsPreviewView: record: version: u32, changes: list<SettingChangeView>, needs_key_app: bool, nothing_changed: bool, shares_total_bps: u32, usd_per_btc: option<u64>, sats_per_usd: option<u64>, settings: list<u8>, currency: ShopCurrencyView",
+        "PriceSourceView: record: id: string, url: string",
+        "PriceReplyView: record: source: string, body: list<u8>, fetched_at: u64",
+        "PriceArgs: record: replies: list<PriceReplyView>, now: u64",
+        "AgreedPriceView: record: usd_per_btc: u64, minor_per_btc: u64, source_label: string",
         "OldAddressesView: record: kind: OldKind, count: u64, days_ago: u64, next: option<u64>, running: bool, words: option<Words>",
     ] {
         assert!(protocol.contains(line), "{line}");

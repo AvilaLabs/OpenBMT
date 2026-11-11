@@ -280,6 +280,22 @@ object AppWords {
         "Type today's price of one bitcoin in whole dollars, then say the words match.",
     )
 
+    /** The phone is asking the price sources for the price, while a phone with no settings waits for it (OA-101). */
+    val counterPriceFetching = w(
+        Tones.INFO, "Getting today's price",
+        "This phone is asking the price sources for the price of one bitcoin, through Tor.",
+        Who.NOBODY,
+        "Wait a moment. If they do not answer, you can type the price.",
+    )
+
+    /** The sources agreed, and the price is in the field (OA-101). */
+    fun counterPriceFetched(price: Long) = w(
+        Tones.INFO, "Today's price",
+        "The price sources give ${PriceModel.dollars(price)} dollars for one bitcoin. The starting limits are worked out from it.",
+        Who.OWNER,
+        "If it looks right, say the words match. To use another price, type it below.",
+    )
+
     /** The price typed is not a whole number of dollars above 0. */
     val priceNotRead = priceNotReadOf(ShopCurrency.Usd)
 
@@ -1224,6 +1240,8 @@ object AppWords {
         "sharesNoteOne" to sharesNote(1),
         "counterCompare" to counterCompare,
         "counterPriceNeeded" to counterPriceNeeded,
+        "counterPriceFetching" to counterPriceFetching,
+        "counterPriceFetched" to counterPriceFetched(98_500),
         "priceNotRead" to priceNotRead,
         "counterCancelled" to counterCancelled,
         "counterNotPaired" to counterNotPaired,

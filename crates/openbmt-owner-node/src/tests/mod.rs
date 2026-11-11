@@ -25,6 +25,7 @@ mod live;
 mod node;
 mod pos;
 mod pos_notice;
+mod price;
 mod refunds;
 mod say;
 

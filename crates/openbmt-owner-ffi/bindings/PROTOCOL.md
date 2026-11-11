@@ -137,6 +137,8 @@ ops run on another; it waits for at most 250 ms.
 134 watch_start      handle zero  args list<u8> -> u64
 135 watch_step       handle watch args (u64, u32) -> WatchStepView
 136 watch_stop       handle watch args () -> ()
+140 price_sources    handle zero  args () -> list<PriceSourceView>
+141 price_agree      handle zero  args PriceArgs -> AgreedPriceView
 ```
 
 ## Types
@@ -273,4 +275,8 @@ FirstAddressArgs: record: kind: FirstAddressKind, at: u64
 FirstAddressView: record: kind: FirstAddressKind, at: u64
 SignerExportArgs: record: now: u64, session: list<u8>, number: u32
 SignerTakeArgs: record: now: u64, session: list<u8>, number: u32, returned: list<u8>
+PriceSourceView: record: id: string, url: string
+PriceReplyView: record: source: string, body: list<u8>, fetched_at: u64
+PriceArgs: record: replies: list<PriceReplyView>, now: u64
+AgreedPriceView: record: usd_per_btc: u64, minor_per_btc: u64, source_label: string
 ```

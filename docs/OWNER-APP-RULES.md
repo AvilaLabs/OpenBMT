@@ -900,3 +900,26 @@ signs batches, settings and pairings, are never in the service.
   button "Try again" that starts again, with a new run if the old one ended.
   A read of the till that finds no Tor says the same. The background watch
   does not start while the built-in Tor has no circuit.
+
+## 16. The price a new shop needs
+
+- **OA-101.** A phone with no settings needs today's price of one bitcoin in
+  whole dollars to work out the starting limits, when a counter is added (OA-23)
+  and when a Box is connected (OA-42). The phone asks for it itself, when the
+  screen opens: it fetches each of the fixed sources of `docs/RATE-RULES.md`
+  (the table the library gives: `OwnerPrice.sources`), through the SOCKS5 proxy
+  of OA-05 with the host name left to the proxy, with the limits of RT-10 and
+  RT-43, and hands every reply it got, stamped with the phone's clock, to
+  `OwnerPrice.agree`. The reading of the replies, the agreement between the
+  sources and every refusal are the rates library's, the same as the counter
+  uses (RT-10 to RT-38); the owner node adds only the rounding of the agreed
+  price to whole dollars, half up. A source that did not answer, a reply the
+  library refuses and a reply that names no source of the table are a missing
+  sample (RT-44). While the sources are asked the screen shows the fetching
+  words. When they agree it shows the fetched words with the price in them and
+  puts the price in the field, unless the owner has already typed one there; the
+  owner can type another price over it, and what is in the field when the owner
+  says the words match is what is used, checked as before. When the sources do
+  not answer, or do not agree, the screen shows the words of OA-23 or OA-42 and
+  the field stays empty. The call works on no node, and the app asks again each
+  time the screen opens: nothing is kept.

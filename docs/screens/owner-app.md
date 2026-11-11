@@ -42,6 +42,8 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | sharesNoteOne | Equal shares | This is the only counter, so its share of the instant limit is all of it. | Custom shares are set under Settings, in Change settings. | the owner |  |
 | counterCompare | Compare the four words | Check that the counter shows these same four words, and that the Key app shows them too. | If they match, say so below. If they differ, say so and nothing is paired. | the owner |  |
 | counterPriceNeeded | Price needed | This phone holds no settings yet, and the starting limits are in dollars, so it needs today's price of a bitcoin. | Type today's price of one bitcoin in whole dollars, then say the words match. | the owner |  |
+| counterPriceFetching | Getting today's price | This phone is asking the price sources for the price of one bitcoin, through Tor. | Wait a moment. If they do not answer, you can type the price. | nobody |  |
+| counterPriceFetched | Today's price | The price sources give 98,500 dollars for one bitcoin. The starting limits are worked out from it. | If it looks right, say the words match. To use another price, type it below. | the owner |  |
 | priceNotRead | Price not read | The price of a bitcoin is a whole number of dollars above 0, so nothing was queued. | Type today's price of one bitcoin in whole dollars, like 98500. | the owner |  |
 | counterCancelled | Counter not added | The four words did not match, so the counter's request was taken out of the queue. | Start again on the counter, and scan the new code it shows. | the owner |  |
 | counterNotPaired | Counter not paired | The Key app did not approve this counter, so no code for it was made. | Read the words above, then scan the counter's code again to start over. | the owner |  |
@@ -168,6 +170,8 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | boxAddressNotRead | Address not read | The Box's address is host:port on your network, or a v3 .onion name and a port, so nothing was tried. | Type it again, for example 192.168.1.20:8080. | the owner |  |
 | boxLooking | Looking for the Box | The phone is asking the Box for its claim, which can take up to a minute. | Wait on this screen. | the owner |  |
 | boxPriceNeeded | Price for the Box | This phone holds no settings yet, and the starting limits are in dollars, so it needs today's price of a bitcoin. | Type today's price of one bitcoin in whole dollars, then queue the Box. | the owner |  |
+| boxPriceFetching | Getting today's price | This phone is asking the price sources for the price of one bitcoin, through Tor. | Wait a moment. If they do not answer, you can type the price. | nobody |  |
+| boxPriceFetched | Today's price | The price sources give 98,500 dollars for one bitcoin. The starting limits are worked out from it. | If it looks right, say the words match. To use another price, type it below. | the owner |  |
 | boxCompare | Compare the four words | The Box shows four words on its own screen. They must be the same as these, and the Key app will show them too. | If they differ, go back. Nothing is paired until the Key app approves. | the owner |  |
 | boxQueued | Box queued | The Box's claim and the settings that add it wait for the Key app. | Build the request for the Key app, approve there, and bring its response back. | the owner |  |
 | boxHanding | Handing over the welcome | The Box is being given its welcome and the settings, which can take up to a minute. | Wait on this screen. | the owner |  |

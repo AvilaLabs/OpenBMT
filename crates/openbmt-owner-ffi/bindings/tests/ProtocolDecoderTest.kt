@@ -48,6 +48,7 @@ object ProtocolDecoderTest {
         ceremonyFrames()
         ceremonyThroughTheLibrary()
         setupLockThroughTheLibrary()
+        priceThroughTheLibrary()
         println("ProtocolDecoderTest: ok")
     }
 
@@ -278,6 +279,26 @@ object ProtocolDecoderTest {
         check(e.status == 1 && e.rule.startsWith(prefix)) { "$label: status ${e.status}, rule ${e.rule}" }
         check(e.words != null && e.words!!.heading.isNotEmpty() && e.words!!.next.isNotEmpty()) { "$label: no words" }
         return e
+    }
+
+    /**
+     * The price of a bitcoin through the real library (OA-101): the table of sources, the price two replies
+     * agree on, and the library's refusals (sources that disagree, too few answers) with their words.
+     */
+    private fun priceThroughTheLibrary() {
+        val sources = OwnerPrice.sources()
+        check(sources.map { it.id } == listOf("kraken", "coinbase", "bitstamp", "gemini")) { "the table: ${sources.map { it.id }}" }
+        check(sources.all { it.url.startsWith("https://") })
+        fun last(source: String, price: String) = PriceReply(source, "{\"last\":\"$price\"}".toByteArray(), 1_700_000_000L)
+        val agreed = OwnerPrice.agree(listOf(last("bitstamp", "98500.50"), last("gemini", "98500.50")), 1_700_000_000L)
+        check(agreed.usdPerBtc == 98_501L && agreed.minorPerBtc == 9_850_050L && agreed.sourceLabel == "med.bg") { "agreed: ${agreed.usdPerBtc} ${agreed.sourceLabel}" }
+        refusedBy("sources that disagree", "RT-33") { OwnerPrice.agree(listOf(last("bitstamp", "98000"), last("gemini", "110000")), 1_700_000_000L) }
+        refusedBy("one source", "RT-31") { OwnerPrice.agree(listOf(last("bitstamp", "98000")), 1_700_000_000L) }
+        refusedBy("no source", "RT-31") { OwnerPrice.agree(emptyList(), 1_700_000_000L) }
+        refusedBy("a reply that is not a price", "RT-31") {
+            OwnerPrice.agree(listOf(PriceReply("bitstamp", "nope".toByteArray(), 1_700_000_000L), last("gemini", "98000")), 1_700_000_000L)
+        }
+        refusedBy("a source that is not in the table", "RT-31") { OwnerPrice.agree(listOf(PriceReply("nowhere", ByteArray(0), 1L)), 1L) }
     }
 
     /**

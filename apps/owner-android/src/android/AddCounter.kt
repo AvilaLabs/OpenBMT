@@ -82,8 +82,11 @@ private fun Controller.showCounterCheck(n: OwnerNode, s: CounterScan) {
     views.add(stack(*CounterModel.shareLines(s.shares).map { line(it, muted = true, mono = true) }.toTypedArray(), gap = 4))
     views.add(line(CounterModel.windowLine(s.windowSecs), muted = true))
     val price = if (s.needsRate) {
-        views.add(ui.words(AppWords.counterPriceNeeded))
-        numberInput("Dollars for one bitcoin").also { views.add(it.view) }.field
+        val note = Slot(act)
+        views.add(note)
+        numberInput("Dollars for one bitcoin").also { views.add(it.view) }.field.also {
+            fillPrice(note, it, AppWords.counterPriceFetching, AppWords::counterPriceFetched, AppWords.counterPriceNeeded)
+        }
     } else {
         null
     }

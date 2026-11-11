@@ -40,6 +40,12 @@ object BoxWords {
         "Type today's price of one bitcoin in whole dollars, then queue the Box.",
     )
 
+    /** The same words as for a counter: the phone is asking the price sources (OA-101). */
+    val priceFetching = AppWords.counterPriceFetching
+
+    /** The same words as for a counter: the sources agreed and the price is in the field (OA-101). */
+    fun priceFetched(price: Long) = AppWords.counterPriceFetched(price)
+
     /** What the owner does with the four words. */
     val compare = w(
         Tones.INFO, "Compare the four words",
@@ -108,6 +114,8 @@ object BoxWords {
         "boxAddressNotRead" to addressNotRead,
         "boxLooking" to looking,
         "boxPriceNeeded" to priceNeeded,
+        "boxPriceFetching" to priceFetching,
+        "boxPriceFetched" to priceFetched(98_500),
         "boxCompare" to compare,
         "boxQueued" to queued,
         "boxHanding" to handing,

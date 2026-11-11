@@ -92,8 +92,11 @@ private fun Controller.showBoxFound(n: OwnerNode, address: String, found: BoxFou
     val views = ArrayList<View>()
     views.add(stack(label("The Box's key"), line(ConnectBoxModel.keyGroups(found.boxKey), muted = true, mono = true)))
     val price = if (found.needsRate) {
-        views.add(ui.words(BoxWords.priceNeeded))
-        numberInput("Dollars for one bitcoin").also { views.add(it.view) }.field
+        val note = Slot(act)
+        views.add(note)
+        numberInput("Dollars for one bitcoin").also { views.add(it.view) }.field.also {
+            fillPrice(note, it, BoxWords.priceFetching, BoxWords::priceFetched, BoxWords.priceNeeded)
+        }
     } else {
         null
     }

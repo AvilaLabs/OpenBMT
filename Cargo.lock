@@ -534,6 +534,7 @@ dependencies = [
  "openbmt-net-io",
  "openbmt-owner",
  "openbmt-owner-node",
+ "openbmt-rates",
  "openbmt-signer",
  "openbmt-watch",
 ]
@@ -554,6 +555,7 @@ dependencies = [
  "openbmt-owner",
  "openbmt-pos",
  "openbmt-pos-readers",
+ "openbmt-rates",
  "openbmt-session",
  "openbmt-signer",
  "openbmt-spend",

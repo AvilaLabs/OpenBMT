@@ -24,6 +24,7 @@ import org.openbmt.app.TriesRecord
 import org.openbmt.app.UrWords
 import org.openbmt.app.Who
 import org.openbmt.app.WipeOrder
+import org.openbmt.owner.AgreedPrice
 import org.openbmt.owner.Alert
 import org.openbmt.owner.AlertKind
 import org.openbmt.owner.BatchWaiting
@@ -48,6 +49,8 @@ import org.openbmt.owner.PosRequest
 import org.openbmt.owner.PosState
 import org.openbmt.owner.PosSubject
 import org.openbmt.owner.PosVendor
+import org.openbmt.owner.PriceReply
+import org.openbmt.owner.PriceSource
 import org.openbmt.owner.Quoted
 import org.openbmt.owner.Route
 import org.openbmt.owner.SendKind
@@ -136,7 +139,10 @@ object AppModelTest {
     private fun wordsTests(screensMd: File?) {
         val all = AppWords.all()
         for ((name, w) in all) ok(SayCheck.problem(w) == null, "words of $name: ${SayCheck.problem(w)}")
-        ok(SayCheck.distinctProblem(all) == null, "no two words read the same: ${SayCheck.distinctProblem(all)}")
+        // The words of a counter and of a Box for the price are the same words under two names (OA-101).
+        val distinct = all.distinctBy { it.second.heading to it.second.what }
+        ok(all.size - distinct.size == 2, "only the price words of the counter and of the Box read the same: ${all.size - distinct.size}")
+        ok(SayCheck.distinctProblem(distinct) == null, "no two words read the same: ${SayCheck.distinctProblem(distinct)}")
         ok(AppWords.orbotNotRunning.what == "This app sends everything through Tor, but Orbot is not running.", "the Orbot words, as written down")
         ok(AppWords.orbotNotRunning.next == "Open Orbot and turn it on.", "the Orbot next step")
         ok(AppWords.orbotNotRunning.who == Who.OWNER, "the owner does it")
@@ -705,7 +711,10 @@ object AppModelTest {
         // The till's fetcher is the one other place, and it opens one connection through the proxy of OA-05.
         val fetcher = source("src/android/HttpsPosFetcher.kt")
         ok(Regex("openConnection\\(").findAll(fetcher).count() == 1 && fetcher.contains("Proxy.Type.SOCKS"), "the fetcher opens one connection, through the proxy")
-        for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/MainActivity.kt")) {
+        // So is the price's fetcher (OA-101): one connection, through the same proxy.
+        val rates = source("src/android/HttpsRateFetcher.kt")
+        ok(Regex("openConnection\\(").findAll(rates).count() == 1 && rates.contains("Proxy.Type.SOCKS") && rates.contains("!gate.available()"), "the price's fetcher opens one connection, through the proxy, and asks the gate first")
+        for (name in listOf("src/android/Controller.kt", "src/android/Screens.kt", "src/android/Approval.kt", "src/android/MainActivity.kt", "src/android/PriceFetch.kt", "src/model/PriceModel.kt")) {
             ok(!source(name).contains("openConnection"), "$name opens no connection")
         }
     }
@@ -1456,7 +1465,7 @@ object AppModelTest {
         ok(AppWords.editQueuedLoosening.what.contains("Key app") && AppWords.editQueuedTightening.what.isNotEmpty(), "the words after the queue")
         ok((AppWords.editLightningNote.what + AppWords.editLightningNote.next).contains("Key app") && (AppWords.editLightningNote.what + AppWords.editLightningNote.next).contains("each counter"), "the Lightning note: the Key app and each counter")
         for ((name, w) in AppWords.all().filter { it.first.startsWith("edit") }) {
-            ok(w.who == Who.OWNER && SayCheck.problem(w) == null && w.heading.length <= 28 && w.what.length <= 140 && w.next.length <= 140, "words of $name")
+            ok((w.who == Who.OWNER || name == "boxPriceFetching") && SayCheck.problem(w) == null && w.heading.length <= 28 && w.what.length <= 140 && w.next.length <= 140, "words of $name")
         }
         ok(AppWords.screensMarkdown().contains("| editIntro |") && File(appDir, "../../docs/screens/owner-app.md").readText().contains("Counters' shares"), "the list of the app's words has them")
         for (bad in listOf(".signBatch(", "Psbt", "psbt", ".broadcast(", "Transaction(", "key2Secret", "key3Secret", "mnemonic")) {
@@ -1831,9 +1840,9 @@ object AppModelTest {
 
     private fun oa_48_every_word_of_connecting_a_box_is_checked_and_listed() {
         val all = BoxWords.all()
-        ok(all.size == 11 && all.all { (n, _) -> n.startsWith("box") }, "the words of the Box screens")
+        ok(all.size == 13 && all.all { (n, _) -> n.startsWith("box") }, "the words of the Box screens")
         for ((name, w) in all) {
-            ok(w.who == Who.OWNER && SayCheck.problem(w) == null && w.heading.length <= 28 && w.what.length <= 140 && w.next.length <= 140, "words of $name")
+            ok((w.who == Who.OWNER || name == "boxPriceFetching") && SayCheck.problem(w) == null && w.heading.length <= 28 && w.what.length <= 140 && w.next.length <= 140, "words of $name")
         }
         val names = AppWords.all().map { it.first }
         ok(all.all { it.first in names }, "they are in the app's list of words")
@@ -2460,6 +2469,54 @@ object AppModelTest {
         ok(source("src/android/WatchService.kt").contains("TorChoice.BuiltIn -> torLease?.port() != null"), "the watcher is not started while the built-in Tor has no circuit")
     }
 
+    // ---- the price of a bitcoin, fetched (OA-101) -----------------------------------------------------------------------
+
+    /** A library that agrees when two replies came, with the price in the replies' body, and refuses otherwise. */
+    private class FakePrice(val ids: List<String>, val refuse: Boolean = false) : PricePort {
+        var got: List<PriceReply> = emptyList()
+        var at = 0L
+
+        override fun sources(): List<PriceSource> = ids.map { PriceSource(it, "https://$it.example/price") }
+
+        override fun agree(replies: List<PriceReply>, now: Long): AgreedPrice {
+            got = replies
+            at = now
+            if (refuse || replies.size < 2) throw OwnerException("RT-31", "too few", 1, words())
+            return AgreedPrice(98_500, 9_850_000, "med.kc")
+        }
+    }
+
+    private fun oa_101_the_price_is_asked_of_the_sources_and_the_owner_can_type_another() {
+        // Fetched: both sources answered, each reply stamped when it arrived, and the price is the library's.
+        val port = FakePrice(listOf("kraken", "coinbase"))
+        val fetched = PriceModel.fetch(port, { RateFetch.Body("{}".toByteArray()) }) { 1_700_000_000L }
+        ok(fetched is PriceOutcome.Fetched && fetched.usd == 98_500L, "the sources agree: the library's price")
+        ok(port.got.map { it.source }.sorted() == listOf("coinbase", "kraken") && port.got.all { it.fetchedAt == 1_700_000_000L } && port.at == 1_700_000_000L, "every reply is handed over, stamped by the phone's clock")
+        ok(PriceModel.fieldText(fetched) == "98500" && (CounterModel.price(PriceModel.fieldText(fetched)) as? Form.Ok)?.value == 98_500L, "the price is in the field as whole dollars, and the field's own check takes it")
+        ok(AppWords.counterPriceFetched(98_500).what.contains("98,500 dollars for one bitcoin"), "the words say the price with its separator")
+        ok(PriceModel.dollars(98_500) == "98,500" && PriceModel.dollars(999) == "999" && PriceModel.dollars(1_234_567) == "1,234,567" && PriceModel.dollars(1_000) == "1,000", "thousands separators")
+        // Refused: the sources do not agree, or no source answered, or the proxy did not answer. The price is typed.
+        val disagree = PriceModel.fetch(FakePrice(listOf("kraken", "coinbase"), refuse = true), { RateFetch.Body("{}".toByteArray()) }) { 1L }
+        ok(disagree is PriceOutcome.Missing && PriceModel.fieldText(disagree) == "", "sources that disagree leave the field empty")
+        val silent = FakePrice(listOf("kraken", "coinbase"))
+        ok(PriceModel.fetch(silent, { RateFetch.NotAnswered }) { 1L } is PriceOutcome.Missing && silent.got.isEmpty(), "sources that did not answer give the library no reply")
+        ok(PriceModel.fetch(FakePrice(listOf("kraken", "coinbase")), { RateFetch.TorMissing }) { 1L } is PriceOutcome.Missing, "a proxy that does not answer leaves the field empty")
+        val broken = PriceModel.fetch(FakePrice(listOf("kraken", "coinbase")), { if (it.id == "kraken") throw IllegalStateException("x") else RateFetch.Body("{}".toByteArray()) }) { 1L }
+        ok(broken is PriceOutcome.Missing, "a fetch that failed is a missing reply, and one reply is not enough")
+        ok(AppWords.counterPriceNeeded.heading == "Price needed" && BoxWords.priceNeeded.heading == "Price for the Box", "the words of a price that must be typed are as they were")
+        // The owner types over the fetched price: what is in the field when they say the words match is what is used.
+        ok((CounterModel.price("101000") as? Form.Ok)?.value == 101_000L && CounterModel.price("") is Form.Refused, "another price typed over it is the one used, and an empty field is refused as before")
+        val helper = source("src/android/PriceFetch.kt")
+        ok(helper.contains("if (field.text.isNullOrBlank()) field.setText(") && helper.contains("async("), "what was typed while the sources were asked is kept, and the call is off the screen thread")
+        ok(helper.indexOf("slot.show(ui.words(fetching))") < helper.indexOf("async(") && helper.contains("slot.show(ui.words(fetched(outcome.usd)))") && helper.contains("slot.show(ui.words(needed))"), "the fetching words first, then the fetched words or the needed words")
+        val add = source("src/android/AddCounter.kt").substringAfter("private fun Controller.showCounterCheck(").substringBefore("private fun Controller.showCounterQueued(")
+        ok(add.contains("fillPrice(note, it, AppWords.counterPriceFetching, AppWords::counterPriceFetched, AppWords.counterPriceNeeded)"), "the counter's screen asks for the price when the phone has no settings")
+        val box = connectBox().substringAfter("private fun Controller.showBoxFound(").substringBefore("private fun Controller.showBoxQueued(")
+        ok(box.contains("fillPrice(note, it, BoxWords.priceFetching, BoxWords::priceFetched, BoxWords.priceNeeded)"), "the Box's screen does the same")
+        ok(AppWords.counterPriceFetching.who == Who.NOBODY && AppWords.counterPriceFetched(1).who == Who.OWNER && BoxWords.priceFetching === AppWords.counterPriceFetching, "the words are the same for a counter and for a Box")
+        ok(!source("src/model/PriceModel.kt").contains("usdPerBtc *") && !source("src/model/PriceModel.kt").contains("/ 100"), "no price is worked out here: the library's dollars are used")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
@@ -2481,7 +2538,7 @@ object AppModelTest {
         val rules = Regex("^- \\*\\*OA-(\\d{2,3})\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules.map { it.toInt() } == rules.map { it.toInt() }.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
         // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-79 for more.
-        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..100)
+        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..101)
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")

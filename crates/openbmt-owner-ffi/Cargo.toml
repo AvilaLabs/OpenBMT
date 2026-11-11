@@ -30,6 +30,8 @@ openbmt-lock = { path = "../openbmt-lock" }
 openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-owner = { path = "../openbmt-owner" }
 openbmt-owner-node = { path = "../openbmt-owner-node" }
+# The table of price sources the app fetches, the same as the counter's.
+openbmt-rates = { path = "../openbmt-rates" }
 openbmt-signer = { path = "../openbmt-signer" }
 openbmt-watch = { path = "../openbmt-watch" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }

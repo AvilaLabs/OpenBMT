@@ -57,6 +57,7 @@ pub mod host;
 #[cfg(any(target_os = "android", feature = "jni"))]
 mod jni;
 mod pos_views;
+mod price;
 mod say;
 mod settings_edit;
 mod setup_lock;
@@ -88,6 +89,7 @@ pub use pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
 };
+pub use price::{AgreedPriceView, PriceArgs, PriceReplyView, PriceSourceView};
 pub use say::{all_words, words_for};
 pub use settings_edit::{
     CurrencyAction, LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,

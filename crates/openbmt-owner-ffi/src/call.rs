@@ -73,6 +73,11 @@
 //!   app (BX-17); they work on no node. 110 lists the Boxes with a claim
 //!   queued or a welcome waiting, and 111 forgets one of them (AS-87).
 //!
+//! - 140 and 141: the price of a bitcoin from the sources
+//!   (`docs/OWNER-APP-RULES.md` OA-101): the table of sources the app fetches
+//!   and the call that takes their replies and gives the price they agree
+//!   on. They work on no node.
+//!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
 //! [`Registry`] holds at most [`MAX_NODES`] nodes.
@@ -104,6 +109,7 @@ use crate::pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
 };
+use crate::price::{self, AgreedPriceView, PriceArgs, PriceReplyView, PriceSourceView};
 use crate::say::{TONES, WHOS};
 use crate::settings_edit::{
     CurrencyAction, LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,
@@ -657,6 +663,8 @@ fn build_ops() -> Vec<Op> {
             let entry = c.registry.remove_watch(c.handle)?;
             entry.stop()
         }),
+        op(140, "price_sources", Zero, |_, ()| Ok(price::sources())),
+        op(141, "price_agree", Zero, |_, a: PriceArgs| price::agree(a)),
     ]
 }
 
@@ -893,6 +901,10 @@ fn definitions() -> Vec<TypeDef> {
         FirstAddressView::define(),
         SignerExportArgs::define(),
         SignerTakeArgs::define(),
+        PriceSourceView::define(),
+        PriceReplyView::define(),
+        PriceArgs::define(),
+        AgreedPriceView::define(),
     ]
 }
 

@@ -29,6 +29,9 @@ openbmt-session = { path = "../openbmt-session" }
 openbmt-spend = { path = "../openbmt-spend" }
 # Key 1's signer, which finishes the owner's own transactions.
 openbmt-signer = { path = "../openbmt-signer" }
+# The sources of the price and the rule that makes one rate of their replies,
+# the same as the counter's (a path dependency; no external package).
+openbmt-rates = { path = "../openbmt-rates" }
 
 [dev-dependencies]
 # The Key app, in process, for the tests that build and take a session.

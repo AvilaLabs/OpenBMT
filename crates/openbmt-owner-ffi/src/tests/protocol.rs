@@ -115,6 +115,8 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (134, "watch_start"),
         (135, "watch_step"),
         (136, "watch_stop"),
+        (140, "price_sources"),
+        (141, "price_agree"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

@@ -26,6 +26,10 @@
 //! app sends the requests and hands the answers in, and the sales come from
 //! the verified copies of the counters' records.
 //!
+//! The [`price`] module is the owner phone's own ask of the price sources
+//! (`docs/OWNER-APP-RULES.md` OA-101, on `docs/RATE-RULES.md`): the app
+//! fetches the replies, the library reads them and agrees on one price.
+//!
 //! The view of the chain is the counter node's [`ChainView`], and the driver
 //! is reached through the counter node's [`DriverPort`], so that the two
 //! nodes read the chain the same way. This crate therefore depends on
@@ -58,6 +62,7 @@ pub mod link;
 pub mod live;
 pub mod node;
 pub mod pos;
+pub mod price;
 pub mod receipts;
 pub mod refunds;
 pub mod say;
@@ -89,6 +94,7 @@ pub use pos::{
     counter_facts, OwnerPos, PosMethod, PosPolled, PosRefused, PosRequest, PosSetup, PosVendor,
     PosView, POS_LEDGER_FILE, POS_SETUP_FILE,
 };
+pub use price::{agreed_price, AgreedPrice, PriceReply};
 pub use receipts::{MergeOffer, MergeRefused, ReceiptsLine, FEE_FILE, MERGE_MIN_COINS};
 pub use refunds::{
     Applied, CashRefundSeen, Evidence, IntakeError, NoteKind, RefundIntake, RefundNote, Stopped,
