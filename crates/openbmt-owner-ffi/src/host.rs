@@ -517,6 +517,10 @@ fn start_link(
     owner: DeviceId,
 ) -> Result<OwnerLink, AppError> {
     let relay = device("the relay key", "start-link", &cfg.relay_key)?;
+    // LK-67: the counters are the ones in the signed settings, which the link
+    // follows (`follow_settings`). The setup text's counter lines are read
+    // and checked, and used only while the owner holds no settings: the
+    // first settings replace them.
     let mut counters = Vec::new();
     for c in &cfg.counters {
         counters.push(device("a counter's root", "start-link", c)?);
@@ -553,6 +557,44 @@ fn start_link(
     let devices = DeviceList::new(std::iter::once(owner).chain(counters.iter().copied()));
     OwnerLink::new(courier, dir, devices, counters, link_cfg)
         .map_err(|e| store_by("start-link-files", e))
+}
+
+/// LK-67: the counters and Boxes of the signed settings in force, and of the
+/// settings waiting in the outbox, are the ones the link talks to. A counter
+/// the settings added is talked to at once; one they removed stays until it
+/// holds the settings that removed it.
+fn follow_settings(
+    node: &OwnerNode<Port>,
+    link: &mut OwnerLink,
+) -> Result<(), openbmt_owner_node::OwnerLinkError> {
+    let mut counters: Vec<DeviceId> = Vec::new();
+    let mut boxes: Vec<DeviceId> = Vec::new();
+    let waiting = node.owner().outbox().iter().filter_map(|d| match &d.what {
+        Delivery::Settings(bytes) => SignedSettings::from_bytes(bytes).ok().map(|s| s.settings),
+        _ => None,
+    });
+    for s in node
+        .owner()
+        .known_settings()
+        .cloned()
+        .into_iter()
+        .chain(waiting)
+    {
+        for c in s.counters.keys() {
+            if !counters.contains(c) {
+                counters.push(*c);
+            }
+        }
+        for b in &s.boxes {
+            if !boxes.contains(b) {
+                boxes.push(*b);
+            }
+        }
+    }
+    if counters.is_empty() && boxes.is_empty() && node.owner().known_settings().is_none() {
+        return Ok(());
+    }
+    link.follow(&counters, &boxes)
 }
 
 /// Everything `start` makes, on the node's thread.
@@ -643,6 +685,10 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
             .and_then(relay_hint)
             .map(|hint| SignedRelayHint::sign(hint, &owner_identity));
         let intake = RefundIntake::open(&dir).map_err(|e| store_by("start-intake", e))?;
+        let mut link = link;
+        if let Some(link) = link.as_mut() {
+            follow_settings(&node, link).map_err(|e| store_by("start-link-files", e))?;
+        }
         Ok((key1, link, relay, intake))
     })();
     match rest {
@@ -844,6 +890,7 @@ impl Entry {
             let link = link
                 .as_mut()
                 .ok_or_else(|| wrong_state("link-none", "the node was started without a link"))?;
+            let followed = follow_settings(node, link);
             link.step(node.watcher_mut(), now);
             let done = node
                 .run_refund_intake(intake, link)
@@ -869,6 +916,9 @@ impl Entry {
                 if view.stopped_early.is_none() {
                     view.stopped_early = applied.stopped.map(|s| s.to_string());
                 }
+            }
+            if let Err(e) = followed {
+                view.notes.push(format!("the link's counters: {e}"));
             }
             view.notes.truncate(openbmt_owner_node::NOTE_LOG);
             Ok(view)
@@ -1551,6 +1601,9 @@ impl Entry {
                 waiting: 0,
                 notes: Vec::new(),
             };
+            if let Err(e) = follow_settings(node, link) {
+                view.notes.push(format!("the link's counters: {e}"));
+            }
             let items: Vec<(u32, Delivery)> = node
                 .owner()
                 .outbox()

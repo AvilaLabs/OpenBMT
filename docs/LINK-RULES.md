@@ -330,6 +330,18 @@ over is still checked by the rules of the thing it carries.
   device they are for holds them. The link says which devices still do not,
   and the outbox row of the owner's app names them. The link forgets settings
   when the owner's app takes them out of the outbox.
+- **LK-67.** The counters and Boxes the owner talks to are the ones in the
+  signed settings in force and in the settings waiting to be delivered, not
+  a list the owner's app was started with. The link follows the settings
+  whenever they change: a counter the settings add gets a copy and its
+  heartbeats at once, and a Box they add is taken as a peer. A counter the
+  settings remove stays on the link while settings carried by it are still
+  for that counter (LK-64, LK-66), so that it gets the settings that removed
+  it, and is dropped when they are done. Its copy stays on disk. A link
+  needs no counter at the start. The counter lines of the owner's setup
+  text, if there are any, are read and checked as keys, and the link uses
+  them only while the owner holds no settings; the first settings replace
+  them.
 
 The two kinds that involve the Box are carried the same way. A counter sends
 a Paid notice to each Box on its device list when a sale changes state, and

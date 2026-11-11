@@ -157,6 +157,13 @@ impl DeviceList {
     pub fn contains(&self, id: &DeviceId) -> bool {
         self.0.contains(id)
     }
+
+    /// This list with the given devices added.
+    pub fn with(&self, extra: impl IntoIterator<Item = DeviceId>) -> Self {
+        let mut devices = self.0.clone();
+        devices.extend(extra);
+        Self(devices)
+    }
 }
 
 /// One signed link.

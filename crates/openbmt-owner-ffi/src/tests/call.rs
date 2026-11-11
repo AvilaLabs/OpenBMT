@@ -716,7 +716,8 @@ fn lk_66_settings_wait_in_the_outbox_and_the_row_says_which_devices_lack_them() 
             addr: "127.0.0.1:9".to_string(),
         },
         relay_key: id(0x41).device_id().to_bytes().to_vec(),
-        counters: vec![counter_bytes()],
+        // LK-67: the counters come from the settings, not from here.
+        counters: vec![],
         heartbeat_every_secs: 60,
         check_in_grace_secs: 3_600,
     });
@@ -778,10 +779,29 @@ fn lk_66_settings_wait_in_the_outbox_and_the_row_says_which_devices_lack_them() 
         .filter(|row| row.4.is_some())
         .collect();
     assert!(!settings_rows.is_empty(), "settings wait in the outbox");
+    // The link has no counter before the settings are looked at, and the
+    // counter the settings name after (LK-67).
+    let counters = |rig: &Rig| {
+        let response = rig.call(50, handle, &[]);
+        let mut r = Rd::ok(&response);
+        let link = r.link();
+        r.done();
+        link.counters.len()
+    };
+    assert_eq!(
+        counters(&rig),
+        0,
+        "no counter before the settings are looked at"
+    );
     // The counter has not shown it holds them, so they stay.
     let (sent, waiting, notes) = deliver(&rig);
     assert_eq!(sent, 0, "{notes:?}");
     assert!(waiting >= 1, "{notes:?}");
+    assert_eq!(
+        counters(&rig),
+        1,
+        "the counter the settings name is on the link"
+    );
     let after: Vec<_> = rows(&rig)
         .into_iter()
         .filter(|row| row.4.is_some())

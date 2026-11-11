@@ -993,7 +993,8 @@ struct WithBox {
 }
 
 fn with_box() -> WithBox {
-    let relay = MemoryRelay::new(id(99), &[owner(), counter(), box_key()]).unwrap();
+    let relay =
+        MemoryRelay::new(id(99), &[owner(), counter(), box_key(), id(7).device_id()]).unwrap();
     let (dir, watcher_dir, counter_dir, box_dir) = (Dir::new(), Dir::new(), Dir::new(), Dir::new());
     let rig = start(watcher_dir.path());
     let owner_courier = courier(
@@ -1257,4 +1258,48 @@ fn lk_66_settings_stay_until_every_device_holds_them_and_are_then_forgotten() {
             .carry_settings(99, &over, &roots(), Some(&previous), T0),
         Err(SettingsNotCarried::Full)
     );
+}
+
+#[test]
+fn lk_67_the_link_talks_to_the_counters_of_the_settings_and_drops_a_removed_one_when_done() {
+    let mut b = with_box();
+    let second = id(7).device_id();
+    // A counter the settings add is talked to at once.
+    b.w.link.follow(&[counter(), second], &[box_key()]).unwrap();
+    assert_eq!(b.w.link.counters(), [counter(), second]);
+    assert!(b.w.link.copy(&second).is_some());
+    // With nothing carried for it, a counter the settings drop is dropped.
+    b.w.link.follow(&[counter()], &[box_key()]).unwrap();
+    assert_eq!(b.w.link.counters(), [counter()]);
+    assert!(b.w.link.copy(&second).is_none());
+
+    // Settings that remove it are sent to it; it stays until they are done.
+    b.w.link.follow(&[counter(), second], &[box_key()]).unwrap();
+    let both = listed(1, |s| {
+        s.devices.insert(second);
+        s.counters.insert(counter(), 5_000);
+        s.counters.insert(second, 5_000);
+    });
+    let removal = signed_by_both(listed(2, |s| {
+        s.counters.insert(counter(), 10_000);
+    }));
+    b.w.link
+        .carry_settings(5, &removal, &roots(), Some(&both), T0)
+        .unwrap();
+    b.w.link.follow(&[counter()], &[box_key()]).unwrap();
+    assert_eq!(b.w.link.counters(), [counter(), second]);
+    assert!(b
+        .w
+        .link
+        .settings_missing(5)
+        .iter()
+        .any(|(d, _)| *d == second));
+    let notes = b.w.notes();
+    assert!(
+        !notes.iter().any(|n| n.contains("were not sent")),
+        "{notes:?}"
+    );
+    b.w.link.settings_done(5);
+    assert_eq!(b.w.link.counters(), [counter()]);
+    assert!(b.w.link.copy(&second).is_none());
 }

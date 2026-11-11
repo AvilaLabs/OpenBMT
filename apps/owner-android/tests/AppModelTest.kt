@@ -176,6 +176,9 @@ object AppModelTest {
         ok(link.route is RelayRoute.Onion && link.counters.size == 2 && link.relayKey.size == 32, "the link")
         ok(link.heartbeatEverySecs == 30L && link.checkInGraceSecs == 600L, "the link's times")
         ok(OwnerSetup.parse(setupText(linkLines("direct 192.168.1.5:9000"))).link!!.route is RelayRoute.Direct, "a direct route")
+        // LK-67: the counters are the ones in the settings, so a link needs no counter line.
+        val noCounters = OwnerSetup.parse(setupText(listOf("relay-route: direct 1.2.3.4:5", "relay-key: ${hex(32, 97)}"))).link
+        ok(noCounters != null && noCounters.counters.isEmpty(), "a link with no counter lines")
 
         // The config of a start.
         val c = full.startConfig("/data/node", 1_700_000_000, "127.0.0.1:9050")
@@ -208,7 +211,6 @@ object AppModelTest {
         throws("more than 8 peers") { OwnerSetup.parse(setupText((1..9).map { "peer: 10.0.0.$it:8333" })) }
         throws("a relay key without a route") { OwnerSetup.parse(setupText(listOf("relay-key: ${hex(32, 97)}"))) }
         throws("a route without a relay key") { OwnerSetup.parse(setupText(listOf("relay-route: direct 1.2.3.4:5"))) }
-        throws("a route without a counter") { OwnerSetup.parse(setupText(listOf("relay-route: direct 1.2.3.4:5", "relay-key: ${hex(32, 97)}"))) }
         throws("a counter without a link") { OwnerSetup.parse(setupText(listOf("counter: ${hex(32, 129)}"))) }
         throws("the same counter twice") { OwnerSetup.parse(setupText(linkLines() + listOf("counter: ${hex(32, 129)}"))) }
         throws("a route of another kind") { OwnerSetup.parse(setupText(linkLines("carrier-pigeon 1.2.3.4:5"))) }

@@ -49,7 +49,7 @@ class SetupLink(
  * peer: <host:port>                                   (optional, up to 8)
  * relay-route: direct <host:port> | onion <name>:<port>   (optional)
  * relay-key: <64 hex digits>                          (with relay-route)
- * counter: <64 hex digits>                            (1 to 16, with relay-route)
+ * counter: <64 hex digits>                            (optional, up to 16, with relay-route; until settings)
  * heartbeat-every: <seconds>                          (optional)
  * check-in-grace: <seconds>                           (optional)
  * ```
@@ -236,7 +236,6 @@ class OwnerSetup(
                 return null
             }
             if (relay == null) throw SetupFormatException("the line \"relay-key\" is missing")
-            if (counters.isEmpty()) throw SetupFormatException("the link needs at least one \"counter\" line")
             val space = route.indexOf(' ')
             if (space <= 0) throw SetupFormatException("relay-route is not \"direct host:port\" or \"onion name:port\"")
             val kind = route.substring(0, space)

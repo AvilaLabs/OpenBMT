@@ -27,6 +27,11 @@
 //!   counter runs from the first step.
 //! - A divergence alert stays until [`OwnerLink::clear`] is called. The
 //!   evidence is kept, so a message that shows it again raises it again.
+//! - The counters and Boxes the link talks to are the ones in the signed
+//!   settings in force, and in the settings waiting to be delivered
+//!   ([`OwnerLink::follow`], LK-67): a counter the settings add is talked to
+//!   at once, and one they remove is kept until it holds the settings that
+//!   removed it, and then dropped.
 //! - A device list is noted and dropped: it travels inside the settings
 //!   (CR-166).
 //! - Settings the owner signed are carried to the devices on their device list
@@ -238,6 +243,9 @@ pub struct OwnerLink<R: Post = RelayPost> {
     root: PathBuf,
     devices: DeviceList,
     counters: Vec<DeviceId>,
+    /// LK-67: the counters the settings name now, which the link keeps
+    /// whatever else it carries.
+    wanted: BTreeSet<DeviceId>,
     copies: BTreeMap<DeviceId, CounterCopy>,
     cfg: OwnerLinkConfig,
     alerts: Vec<Alert>,
@@ -294,6 +302,7 @@ impl<R: Post> OwnerLink<R> {
             courier,
             root,
             devices,
+            wanted: counters.iter().copied().collect(),
             counters,
             copies,
             cfg,
@@ -478,6 +487,81 @@ impl<R: Post> OwnerLink<R> {
         Ok(())
     }
 
+    /// LK-67: make the counters and Boxes the link talks to those the settings
+    /// name: `counters` and `boxes` are the ones in the signed settings in
+    /// force and in the settings waiting to be delivered. A counter not on
+    /// the link yet gets a copy and its heartbeats from now on; a Box is
+    /// taken as a peer. A counter the settings no longer name stays while
+    /// settings carried by the link are still for it (LK-66), and is dropped
+    /// when they are done. The copies of a dropped counter stay on disk.
+    pub fn follow(
+        &mut self,
+        counters: &[DeviceId],
+        boxes: &[DeviceId],
+    ) -> Result<(), OwnerLinkError> {
+        self.wanted = counters.iter().copied().collect();
+        for counter in counters {
+            if self.counters.contains(counter) {
+                continue;
+            }
+            let devices = self.devices.with([*counter]);
+            let (copy, torn) =
+                CounterCopy::open(&self.root, *counter, &devices).map_err(|error| {
+                    OwnerLinkError::Copy {
+                        counter: *counter,
+                        error,
+                    }
+                })?;
+            if let Some(torn) = torn {
+                self.note(format!(
+                    "the copy of {counter:?} ended in a record that was cut short: {} bytes cut \
+                     off, {} records kept",
+                    torn.cut_bytes, torn.kept_records
+                ));
+            }
+            self.devices = devices;
+            self.copies.insert(*counter, copy);
+            self.counters.push(*counter);
+            self.courier.set_peer(*counter, Role::Counter);
+        }
+        for b in boxes {
+            self.courier.set_peer(*b, Role::Box);
+        }
+        self.drop_retired();
+        Ok(())
+    }
+
+    /// LK-67: drop the counters the settings no longer name and that no
+    /// carried settings are for.
+    fn drop_retired(&mut self) {
+        let kept: BTreeSet<DeviceId> = self
+            .carried
+            .iter()
+            .flat_map(|c| {
+                c.targets
+                    .iter()
+                    .filter(|(_, role)| **role == Role::Counter)
+                    .map(|(d, _)| *d)
+            })
+            .collect();
+        let gone: Vec<DeviceId> = self
+            .counters
+            .iter()
+            .filter(|c| !self.wanted.contains(*c) && !kept.contains(*c))
+            .copied()
+            .collect();
+        for counter in gone {
+            self.counters.retain(|c| *c != counter);
+            self.copies.remove(&counter);
+            self.last_check_in_at.remove(&counter);
+            self.alerts.retain(|a| match a {
+                Alert::MissedCheckIn { counter: c, .. } | Alert::Diverged { counter: c, .. } => {
+                    *c != counter
+                }
+            });
+        }
+    }
+
     /// LK-66: the devices that do not yet hold the settings of delivery `id`:
     /// counters whose copy does not show the version, and Boxes the relay has
     /// not taken it for. Counters without a copy on this link (added after it
@@ -507,6 +591,7 @@ impl<R: Post> OwnerLink<R> {
         self.carried.retain(|c| c.id != id);
         self.settings_sent.retain(|(_, v), _| !gone.contains(v));
         self.boxes_sent.retain(|(_, v)| !gone.contains(v));
+        self.drop_retired();
     }
 
     /// Whether `device` shows it holds `version` (LK-65). A counter with no
