@@ -17,10 +17,10 @@ as an investment.** It describes what a merchant can choose and why some do.
 
 ## Cost
 
-A card payment costs the merchant a processing fee set by the processor, in
-the processor's published pricing (for example, the United States pricing pages of Square
-and Stripe **[verify: not read here]**). Most such pricing combines a
-percentage and a fixed amount per transaction.
+A card payment costs the merchant a processing fee set by the processor in
+its published pricing. Read the current pricing page of the processor you use,
+for example the United States pages of Square and Stripe **[verify: not read
+here]**.
 
 An OpenBMT on-chain payment has **no processor fee on receiving**. The customer
 pays the network fee to send. That is not the whole cost: spending each receipt
