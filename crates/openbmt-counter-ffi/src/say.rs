@@ -259,6 +259,14 @@ const RULES: &[Entry] = &[
         "Take another kind of payment and tell the owner. See Details.",
     ),
     (
+        "ln-status",
+        Kind::Refused,
+        "Node answer not usable",
+        "The answer of the Lightning node came with an HTTP status that is not a number the counter takes, so it was thrown away.",
+        Who::Owner,
+        BUG,
+    ),
+    (
         "pay-code",
         Kind::Refused,
         "Payment code not made",

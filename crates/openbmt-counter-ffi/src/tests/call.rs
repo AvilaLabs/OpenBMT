@@ -477,6 +477,10 @@ fn status_and_notes_answer_before_and_after_the_network() {
         let sales = r.list(Rd::u32);
         let below = r.u64();
         let stopped = r.bool();
+        assert!(
+            r.opt(|r| (r.bool(), r.words())).is_none(),
+            "no Lightning credential saved"
+        );
         r.done();
         (checked, tip, health, sales, below, stopped)
     };

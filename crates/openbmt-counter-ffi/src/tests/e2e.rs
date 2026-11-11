@@ -129,6 +129,7 @@ fn a_sale_goes_from_open_to_paid_and_survives_a_restart() {
     let sales = r.list(Rd::u32);
     let refused_below = r.u64();
     let stopped = r.bool();
+    assert!(r.opt(|r| (r.bool(), r.words())).is_none());
     r.done();
     assert_eq!(tip, 1);
     let (healthy, _behind, words) = health.expect("an answer");

@@ -86,6 +86,12 @@ ops run on another; it waits for at most 250 ms.
  47 pair_cancel      handle zero  args () -> ()
  48 pair_finish      handle zero  args (u64, list<u8>) -> list<u8>
  49 own_node_check   handle zero  args OwnNodeCheckArgs -> string
+ 50 ln_setup         handle node  args LnSetupArgs -> LnRequestView
+ 51 ln_reply         handle node  args LnReplyArgs -> LnStepView
+ 52 ln_failed        handle node  args LnFailArgs -> ()
+ 53 ln_pin           handle node  args (u64, list<u8>) -> bool
+ 54 ln_next          handle node  args u64 -> option<LnRequestView>
+ 55 ln_remove        handle node  args () -> ()
 ```
 
 ## Types
@@ -96,7 +102,7 @@ CounterNetwork: enum, one tag byte
 ActorRole: enum, one tag byte
     tags Cashier=0 Manager=1
 ActorView: record: role: ActorRole, name: string
-StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>
+StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>, lightning: option<list<u8>>
 OwnNodeCheckArgs: record: text: string, network: CounterNetwork, tor: bool
 PairBeginArgs: record: offer: list<u8>, name: string, now: u64
 PairStartedView: record: request: list<u8>, words: list<string>
@@ -111,24 +117,37 @@ WithdrawArgs: record: now: u64, index: u32, number: u64, actor: ActorView
 CashArgs: record: now: u64, index: u32, actor: ActorView, minor: u64, reason: string
 Words: record: tone: u8, who: u8, heading: str16, what: str16, next: str16, code: option<str16>, at: option<u64>, quoted: option<(str16, str16)>, detail: option<str16>; a str16 is a u16 length and UTF-8
 StateView: enum, one tag byte
-    tags NotPaidYet=0 PartPaid=1 Waiting=2 PaidInstant=3 Confirmed=4 Final=5 Overridden=6 DoNotHandOver=7 Expired=8 Cancelled=9 NeedsAPerson=10
+    tags NotPaidYet=0 PartPaid=1 Waiting=2 PaidInstant=3 Confirmed=4 Final=5 Overridden=6 DoNotHandOver=7 Expired=8 Cancelled=9 NeedsAPerson=10 PaidLightning=11
 RefundStateView: enum, one tag byte
     tags Requested=0 WaitingForDepth=1 Withdrawn=2 PaidInCash=3
 ReportView: enum, a tag byte, then: PosPaid(index: u32) | PosUnpaid(index: u32) | BooksFinal(index: u32, amount_minor: u64, currency: string, received_sats: u64) | SurplusOwed(index: u32, sats: u64) | LatePayment(index: u32, sats: u64) | Alarm(index: u32) | Dust(index: u32, sats: u64)
     tags PosPaid=0 PosUnpaid=1 BooksFinal=2 SurplusOwed=3 LatePayment=4 Alarm=5 Dust=6
 Payment: record: address: string, uri: string, copy_uri: string, qr_size: u32, qr_bits: list<u8>
 OpenedView: record: index: u32, needs_sats: u64, quote_rate: u64, quote_from: u64, quote_until: u64, payment: Payment
-ScreenView: record: state: StateView, words: Words, flags: list<Words>, check: option<Words>, received_sats: u64, needs_sats: u64, stuck: bool, late: bool, reopened: bool, conflict_seen: bool, reports: list<ReportView>, payment: option<Payment>
+ScreenView: record: state: StateView, words: Words, flags: list<Words>, check: option<Words>, received_sats: u64, needs_sats: u64, stuck: bool, late: bool, reopened: bool, conflict_seen: bool, reports: list<ReportView>, payment: option<Payment>, lightning: option<LightningSaleView>
 PumpView: record: reports: list<ReportView>, notes: list<string>, stopped: bool
 RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: option<u64>, state: RefundStateView, by_role: ActorRole, by_name: string, at: u64, words: Words
 HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, reports: list<ReportView>
 HealthView: record: healthy: bool, behind: bool, words: Words
 OwnNodeView: record: usable: bool, words: Words
-StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, own_node: option<OwnNodeView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool
+StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, own_node: option<OwnNodeView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool, lightning: option<LightningStatusView>
 RateSourceView: record: id: string, url: string, currency: string, initial: string
 RateParseArgs: record: source: string, response: list<u8>, fetched_at: u64
 SampleView: record: source: string, fetched_at: u64, minor_per_btc: u64
 RateCombineArgs: record: samples: list<SampleView>, now: u64
 RateView: record: rate: u64, source_label: string, source_fetched_at: u64
 SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64
+LnKind: enum, one tag byte
+    tags Lnd=0 Cln=1
+LnSetupArgs: record: kind: LnKind, address: string, secret: string, cert: string
+LnMethod: enum, one tag byte
+    tags Get=0 Post=1
+LnRequestView: record: id: u64, host_port: string, method: LnMethod, path: string, header_name: string, header_value: string, body: option<string>
+LnReplyArgs: record: id: u64, status: u32, body: list<u8>
+LnTransportView: enum, one tag byte
+    tags PinRefused=0 Unreachable=1 TimedOut=2 TooBig=3 Redirected=4
+LnFailArgs: record: id: u64, why: LnTransportView
+LnStepView: record: next: option<LnRequestView>, record: option<list<u8>>
+LightningSaleView: record: invoice: bool, waiting: bool, unavailable: option<Words>
+LightningStatusView: record: ready: bool, words: Words
 ```

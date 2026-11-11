@@ -64,6 +64,12 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (47, "pair_cancel"),
         (48, "pair_finish"),
         (49, "own_node_check"),
+        (50, "ln_setup"),
+        (51, "ln_reply"),
+        (52, "ln_failed"),
+        (53, "ln_pin"),
+        (54, "ln_next"),
+        (55, "ln_remove"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

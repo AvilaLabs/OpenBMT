@@ -60,6 +60,7 @@ impl W {
             .bytes(&c.record)
             .opt_string(c.proxy.as_deref())
             .opt_string(c.own_node.as_deref())
+            .opt_bytes(c.lightning.as_deref())
     }
 
     /// The fields of `open`.
@@ -285,6 +286,11 @@ impl<'a> Rd<'a> {
             conflict_seen: self.bool(),
             reports: self.reports(),
             payment: self.opt(Rd::payment),
+            lightning: self.opt(|r| LnSale {
+                invoice: r.bool(),
+                waiting: r.bool(),
+                unavailable: r.opt(Rd::words),
+            }),
         }
     }
 
@@ -342,4 +348,13 @@ pub struct Screen {
     pub conflict_seen: bool,
     pub reports: Vec<Report>,
     pub payment: Option<Payment>,
+    pub lightning: Option<LnSale>,
+}
+
+/// What a screen shows of Lightning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LnSale {
+    pub invoice: bool,
+    pub waiting: bool,
+    pub unavailable: Option<Words>,
 }

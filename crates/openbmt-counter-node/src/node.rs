@@ -1191,6 +1191,11 @@ impl<P: DriverPort> Node<P> {
         self.ln.pin_for(id)
     }
 
+    /// Whether `id` is the number of the setup's request (CR-115).
+    pub fn lightning_is_setup(&self, id: u64) -> bool {
+        self.ln.is_setup(id)
+    }
+
     /// CR-115: the answer to a setup request.
     pub fn lightning_setup_answer(
         &mut self,

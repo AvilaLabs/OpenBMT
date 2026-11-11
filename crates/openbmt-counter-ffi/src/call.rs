@@ -45,6 +45,12 @@
 //!   ceremony lives in the registry, one at a time and in memory only.
 //! - 49 `own_node_check` reads the own node's address a manager typed
 //!   (CR-100 to CR-102) and works on no node.
+//! - 50 to 55 Lightning through the shop's own node (CR-112 to CR-116):
+//!   `ln_setup` begins the test of a connection and `ln_reply` and
+//!   `ln_failed` take the answers to its requests and to the ones `ln_next`
+//!   hands out; `ln_pin` says whether the certificate a node showed is the
+//!   pinned one; `ln_remove` deletes the connection. The app sends the
+//!   requests (HTTPS only, CR-114); the library decides everything else.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -72,10 +78,11 @@ use crate::say::{TONES, WHOS};
 use crate::shop::{own_node_check, pairing_read, SettingsView};
 use crate::views::{
     put_words, ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome,
-    OpenArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView, PairBeginArgs,
-    PairStartedView, PairingView, PumpView, RefundArgs, RefundAskView, RefundRow, RefundStateView,
-    ReportView, RequoteArgs, ScreenView, StartConfig, StateView, StatusView, WithdrawArgs,
-    WordsView,
+    LightningSaleView, LightningStatusView, LnFailArgs, LnKind, LnMethod, LnReplyArgs,
+    LnRequestView, LnSetupArgs, LnStepView, LnTransportView, OpenArgs, OpenedView, OverrideArgs,
+    OwnNodeCheckArgs, OwnNodeView, PairBeginArgs, PairStartedView, PairingView, PumpView,
+    RefundArgs, RefundAskView, RefundRow, RefundStateView, ReportView, RequoteArgs, ScreenView,
+    StartConfig, StateView, StatusView, WithdrawArgs, WordsView,
 };
 
 /// The first four bytes of a request.
@@ -393,6 +400,20 @@ fn build_ops() -> Vec<Op> {
         op(49, "own_node_check", Zero, |_, a: OwnNodeCheckArgs| {
             own_node_check(a)
         }),
+        op(50, "ln_setup", Node, |c, a: LnSetupArgs| {
+            c.entry()?.ln_setup(a)
+        }),
+        op(51, "ln_reply", Node, |c, a: LnReplyArgs| {
+            c.entry()?.ln_reply(a)
+        }),
+        op(52, "ln_failed", Node, |c, a: LnFailArgs| {
+            c.entry()?.ln_failed(a)
+        }),
+        op(53, "ln_pin", Node, |c, (id, der): (u64, Vec<u8>)| {
+            c.entry()?.ln_pin(id, &der)
+        }),
+        op(54, "ln_next", Node, |c, now: u64| c.entry()?.ln_next(now)),
+        op(55, "ln_remove", Node, |c, ()| c.entry()?.ln_remove()),
     ]
 }
 
@@ -553,6 +574,16 @@ fn definitions() -> Vec<TypeDef> {
         RateCombineArgs::define(),
         RateView::define(),
         SettingsView::define(),
+        LnKind::define(),
+        LnSetupArgs::define(),
+        LnMethod::define(),
+        LnRequestView::define(),
+        LnReplyArgs::define(),
+        LnTransportView::define(),
+        LnFailArgs::define(),
+        LnStepView::define(),
+        LightningSaleView::define(),
+        LightningStatusView::define(),
     ]
 }
 

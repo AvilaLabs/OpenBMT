@@ -25,6 +25,8 @@ openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-watch = { path = "../openbmt-watch" }
 openbmt-qr = { path = "../openbmt-qr" }
 openbmt-rates = { path = "../openbmt-rates" }
+# The invoice's code (LN-18) and the credential of the setup.
+openbmt-lightning = { path = "../openbmt-lightning" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 # The JNI types, nothing else. 0.3.0 has no dependencies of its own; the
 # later releases (0.3.1, 0.4) depend on a macro crate and syn.
@@ -35,3 +37,5 @@ jni-sys = "=0.3.0"
 openbmt-approver = { path = "../openbmt-approver" }
 openbmt-owner = { path = "../openbmt-owner" }
 openbmt-signer = { path = "../openbmt-signer" }
+# The recorded replies and the invoice writer of the Lightning tests.
+openbmt-lightning = { path = "../openbmt-lightning", features = ["testing"] }

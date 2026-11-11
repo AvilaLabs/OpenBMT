@@ -50,6 +50,7 @@ fn own_line(rig: &Rig, handle: u64) -> Option<(bool, Words)> {
     let own = r.opt(|r| (r.bool(), r.words()));
     let _ = r.list(Rd::u32);
     let _ = (r.u64(), r.bool());
+    let _ = r.opt(|r| (r.bool(), r.words()));
     r.done();
     own
 }

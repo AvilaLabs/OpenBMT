@@ -5,6 +5,7 @@ mod call;
 mod e2e;
 pub(crate) mod kit;
 mod kotlin;
+mod lightning;
 mod lock;
 mod own_node;
 mod pairing;

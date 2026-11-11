@@ -866,7 +866,8 @@ impl Lightning {
         }
     }
 
-    fn is_setup(&self, id: u64) -> bool {
+    /// Whether `id` is the number of the setup's request.
+    pub fn is_setup(&self, id: u64) -> bool {
         self.setup.as_ref().is_some_and(|s| s.id == id)
     }
 

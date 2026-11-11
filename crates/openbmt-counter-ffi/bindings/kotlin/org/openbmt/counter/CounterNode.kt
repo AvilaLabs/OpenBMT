@@ -86,6 +86,12 @@ private const val OP_PAIR_DIFFER = 46
 private const val OP_PAIR_CANCEL = 47
 private const val OP_PAIR_FINISH = 48
 private const val OP_OWN_NODE_CHECK = 49
+private const val OP_LN_SETUP = 50
+private const val OP_LN_REPLY = 51
+private const val OP_LN_FAILED = 52
+private const val OP_LN_PIN = 53
+private const val OP_LN_NEXT = 54
+private const val OP_LN_REMOVE = 55
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -108,6 +114,16 @@ private const val TAG_STATE_VIEW_DO_NOT_HAND_OVER = 7
 private const val TAG_STATE_VIEW_EXPIRED = 8
 private const val TAG_STATE_VIEW_CANCELLED = 9
 private const val TAG_STATE_VIEW_NEEDS_A_PERSON = 10
+private const val TAG_STATE_VIEW_PAID_LIGHTNING = 11
+private const val TAG_LN_KIND_LND = 0
+private const val TAG_LN_KIND_CLN = 1
+private const val TAG_LN_METHOD_GET = 0
+private const val TAG_LN_METHOD_POST = 1
+private const val TAG_LN_TRANSPORT_VIEW_PIN_REFUSED = 0
+private const val TAG_LN_TRANSPORT_VIEW_UNREACHABLE = 1
+private const val TAG_LN_TRANSPORT_VIEW_TIMED_OUT = 2
+private const val TAG_LN_TRANSPORT_VIEW_TOO_BIG = 3
+private const val TAG_LN_TRANSPORT_VIEW_REDIRECTED = 4
 private const val TAG_REFUND_STATE_VIEW_REQUESTED = 0
 private const val TAG_REFUND_STATE_VIEW_WAITING_FOR_DEPTH = 1
 private const val TAG_REFUND_STATE_VIEW_WITHDRAWN = 2
@@ -140,7 +156,9 @@ class Actor(val role: ActorRole, val name: String)
  * app's own folder (`noBackupFilesDir`). [ownNode] is the own node's address
  * as [OwnNodeSetting.check] made it, or null (CR-100): an address that is
  * refused, or that comes with no [proxy], starts the node without an own node
- * and the status says why.
+ * and the status says why. [lightning] is the saved Lightning connection as
+ * [CounterNode.lnReply] returned it when the test passed, kept sealed by the
+ * app (CR-115), or null.
  */
 class StartConfig(
     val dir: String,
@@ -148,6 +166,7 @@ class StartConfig(
     val record: ByteArray,
     val proxy: String?,
     val ownNode: String? = null,
+    val lightning: ByteArray? = null,
 )
 
 /** What [Pairing.begin] returns: the request to show as a code, and the four words. */
@@ -197,7 +216,7 @@ class Opened(
 
 enum class SaleState {
     NotPaidYet, PartPaid, Waiting, PaidInstant, Confirmed, Final, Overridden,
-    DoNotHandOver, Expired, Cancelled, NeedsAPerson,
+    DoNotHandOver, Expired, Cancelled, NeedsAPerson, PaidLightning,
 }
 
 enum class RefundState { Requested, WaitingForDepth, Withdrawn, PaidInCash }
@@ -232,8 +251,45 @@ class Screen(
     val reopened: Boolean,
     val conflictSeen: Boolean,
     val reports: List<Report>,
+    /** What the customer scans; the code of LN-18 when [lightning] says there is an invoice. */
     val payment: Payment?,
+    /** CR-113: what the sale shows of Lightning; null when Lightning is off. */
+    val lightning: LightningSale?,
 )
+
+/** CR-113: what a sale shows of Lightning. [unavailable] is the one line, with the reason under its details. */
+class LightningSale(val invoice: Boolean, val waiting: Boolean, val unavailable: Words?)
+
+/** CR-116: the Lightning line of the status. */
+class LightningStatus(val ready: Boolean, val words: Words)
+
+/** The kind of node a connection is for (LN-01). */
+enum class LnKind { Lnd, Cln }
+
+enum class LnMethod { Get, Post }
+
+/** Why a request to the node got no answer (CR-114). */
+enum class LnTransport { PinRefused, Unreachable, TimedOut, TooBig, Redirected }
+
+/**
+ * One request for the app to send to the shop's node (CR-114): HTTPS to
+ * [hostPort] only, no redirect, the certificate pinned with
+ * [CounterNode.lnPin]. [headerValue] is a secret: never log it.
+ */
+class LnRequest(
+    val id: Long,
+    val hostPort: String,
+    val method: LnMethod,
+    val path: String,
+    val headerName: String,
+    val headerValue: String,
+    val body: String?,
+) {
+    override fun toString(): String = "LnRequest(id=$id, $method $path)"
+}
+
+/** What an answer to a setup request led to: the next request, or the record to seal. */
+class LnStep(val next: LnRequest?, val record: ByteArray?)
 
 class Pump(val reports: List<Report>, val notes: List<String>, val stopped: Boolean)
 
@@ -270,6 +326,8 @@ class Status(
     val sales: List<Long>,
     val refusedBelowMinimum: Long,
     val stopped: Boolean,
+    /** CR-116: null when no Lightning credential is saved. */
+    val lightning: LightningStatus?,
 )
 
 /** One source of the price table (RT-01): where the app fetches, and what it asks for. */
@@ -481,7 +539,7 @@ private fun Writer.refundAsk(v: RefundAsk): Writer {
 
 private fun Writer.start(c: StartConfig): Writer =
     string(c.dir).u64(c.now).bytes(c.record).option(c.proxy) { string(it) }
-        .option(c.ownNode) { string(it) }
+        .option(c.ownNode) { string(it) }.option(c.lightning) { bytes(it) }
 
 private fun Writer.network(v: CounterNetwork): Writer =
     u8(
@@ -506,6 +564,7 @@ private fun Reader.saleState(): SaleState =
         TAG_STATE_VIEW_EXPIRED -> SaleState.Expired
         TAG_STATE_VIEW_CANCELLED -> SaleState.Cancelled
         TAG_STATE_VIEW_NEEDS_A_PERSON -> SaleState.NeedsAPerson
+        TAG_STATE_VIEW_PAID_LIGHTNING -> SaleState.PaidLightning
         else -> tag("StateView")
     }
 
@@ -551,8 +610,22 @@ internal fun Reader.opened(): Opened =
 internal fun Reader.screen(): Screen =
     Screen(
         saleState(), words(), list { words() }, option { words() }, u64(), u64(), bool(), bool(),
-        bool(), bool(), reports(), option { payment() },
+        bool(), bool(), reports(), option { payment() }, option { lightningSale() },
     )
+
+private fun Reader.lightningSale(): LightningSale = LightningSale(bool(), bool(), option { words() })
+
+private fun Reader.lnMethod(): LnMethod =
+    when (u8()) {
+        TAG_LN_METHOD_GET -> LnMethod.Get
+        TAG_LN_METHOD_POST -> LnMethod.Post
+        else -> tag("LnMethod")
+    }
+
+internal fun Reader.lnRequest(): LnRequest =
+    LnRequest(u64(), string(), lnMethod(), string(), string(), string(), option { string() })
+
+internal fun Reader.lnStep(): LnStep = LnStep(option { lnRequest() }, option { bytes() })
 
 internal fun Reader.pump(): Pump = Pump(reports(), strings(), bool())
 
@@ -577,6 +650,7 @@ internal fun Reader.statusView(): Status =
     Status(
         u32(), u32(), option { Health(bool(), bool(), words()) },
         option { OwnNodeStatus(bool(), words()) }, u32s(), u64(), bool(),
+        option { LightningStatus(bool(), words()) },
     )
 
 // ---- the call ----------------------------------------------------------------------------
@@ -590,6 +664,10 @@ internal fun requestFrame(op: Int, handle: Long, fill: (Writer) -> Unit = {}): B
     fill(w)
     return w.toByteArray()
 }
+
+/** The request frame of `ln_reply`: the answer of the node to request [id]. */
+internal fun lnReplyFrame(handle: Long, id: Long, status: Long, body: ByteArray): ByteArray =
+    requestFrame(OP_LN_REPLY, handle) { it.u64(id).u32(status).bytes(body) }
 
 /** The request frame of `start`. */
 internal fun startFrame(config: StartConfig): ByteArray =
@@ -868,6 +946,67 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
 
     /** CR-107: ask the driver to dial the own node again ("Try again"). */
     fun ownNodeRetry() = callUnit(OP_OWN_NODE_RETRY, handle)
+
+    // ---- Lightning through the shop's own node (CR-112 to CR-116) ----
+
+    /**
+     * Begin the test of a connection a manager scanned or typed (CR-115):
+     * for LND, [address] is the `lndconnect://` text and [secret] and [cert]
+     * are empty; for Core Lightning, [address] is `host:port`, [secret] the
+     * rune and [cert] the certificate as PEM or a SHA-256 fingerprint. Returns
+     * the first request of the test, or throws with the words (among them
+     * that the owner has not named the node yet).
+     */
+    fun lnSetup(kind: LnKind, address: String, secret: String, cert: String): LnRequest {
+        val r = call(OP_LN_SETUP, handle) {
+            it.u8(
+                when (kind) {
+                    LnKind.Lnd -> TAG_LN_KIND_LND
+                    LnKind.Cln -> TAG_LN_KIND_CLN
+                },
+            ).string(address).string(secret).string(cert)
+        }
+        return r.lnRequest().also { r.end() }
+    }
+
+    /**
+     * The answer to a request: the node's own, or a setup's. For a setup
+     * it is the next request or, when the test passed, the record to seal in
+     * `noBackupFilesDir` and hand to [StartConfig.lightning].
+     */
+    fun lnReply(id: Long, status: Long, body: ByteArray): LnStep {
+        val r = decodeResponse(send(lnReplyFrame(handle, id, status, body)))
+        return r.lnStep().also { r.end() }
+    }
+
+    /** The request got no answer. A setup's request throws the words of why the test stopped. */
+    fun lnFailed(id: Long, why: LnTransport) =
+        callUnit(OP_LN_FAILED, handle) {
+            it.u64(id).u8(
+                when (why) {
+                    LnTransport.PinRefused -> TAG_LN_TRANSPORT_VIEW_PIN_REFUSED
+                    LnTransport.Unreachable -> TAG_LN_TRANSPORT_VIEW_UNREACHABLE
+                    LnTransport.TimedOut -> TAG_LN_TRANSPORT_VIEW_TIMED_OUT
+                    LnTransport.TooBig -> TAG_LN_TRANSPORT_VIEW_TOO_BIG
+                    LnTransport.Redirected -> TAG_LN_TRANSPORT_VIEW_REDIRECTED
+                },
+            )
+        }
+
+    /** Whether [der], the certificate the node showed, is the pinned one for request [id] (CR-114). */
+    fun lnPin(id: Long, der: ByteArray): Boolean {
+        val r = call(OP_LN_PIN, handle) { it.u64(id).bytes(der) }
+        return r.bool().also { r.end() }
+    }
+
+    /** The next request for the node to send, or null when none is due (CR-112). */
+    fun lnNext(now: Long): LnRequest? {
+        val r = call(OP_LN_NEXT, handle) { it.u64(now) }
+        return r.option { r.lnRequest() }.also { r.end() }
+    }
+
+    /** Remove the Lightning connection at once (CR-115). */
+    fun lnRemove() = callUnit(OP_LN_REMOVE, handle)
 
     /** The lines the node and the driver logged since the last call. */
     fun notes(): List<String> {

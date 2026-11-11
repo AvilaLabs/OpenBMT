@@ -111,6 +111,7 @@ pub fn start_config(dir: &str) -> StartConfig {
         record: record().to_bytes(),
         proxy: None,
         own_node: None,
+        lightning: None,
     }
 }
 

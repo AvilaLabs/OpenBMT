@@ -6,7 +6,11 @@ import java.io.ByteArrayOutputStream
 object ProtocolDecoderTest {
     /** The `start` request of [sampleConfig], as the Rust test of the same name writes it. */
     private const val START_FRAME_HEX =
-        "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f"
+        "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f010100000003"
+
+    /** The `ln_reply` request for handle 1, as the Rust test of the same name writes it. */
+    private const val LN_REPLY_FRAME_HEX =
+        "4f424d6d01330001000000000000000700000000000000c8000000" + "020000007b7d"
 
     /** The `rate_parse` and `rate_combine` requests, as the Rust test of the same name writes them. */
     private const val RATE_PARSE_HEX =
@@ -95,11 +99,21 @@ object ProtocolDecoderTest {
         // Bits 1, 0, 1, 0: the first column is dark.
         check(payment.module(0, 0) && !payment.module(1, 0) && payment.module(0, 1) && !payment.module(1, 1))
 
-        check(screen.check == null)
+        check(screen.check == null && screen.lightning == null)
+        decodeResponse(screenFrame(lightning = 1)).screen().also {
+            val ln = it.lightning ?: error("a Lightning line")
+            check(ln.invoice && !ln.waiting && ln.unavailable == null)
+        }
+        decodeResponse(screenFrame(lightning = 2)).screen().also {
+            val ln = it.lightning ?: error("a Lightning line")
+            check(!ln.invoice && !ln.waiting && ln.unavailable?.heading == "Not available")
+        }
+        rejects("a bool in the Lightning line") { decodeResponse(screenFrame(lightning = 3)).screen() }
         decodeResponse(screenFrame(check = true)).screen().also { check(it.check?.heading == "Light check") }
         decodeResponse(screenFrame(payment = false)).screen().also { check(it.payment == null) }
         decodeResponse(screenFrame(allReports = true)).screen().also { check(it.reports.size == 7) }
-        rejects("a state tag") { decodeResponse(screenFrame(state = 11)).screen() }
+        rejects("a state tag") { decodeResponse(screenFrame(state = 12)).screen() }
+        decodeResponse(screenFrame(state = 11)).screen().also { check(it.state == SaleState.PaidLightning) }
         rejects("a report tag") { decodeResponse(screenFrame(reportTag = 7)).screen() }
         rejects("the size of the modules") { decodeResponse(screenFrame(bitsLength = 2)).screen() }
         rejects("a bool") { decodeResponse(screenFrame(stuck = 2)).screen() }
@@ -114,7 +128,7 @@ object ProtocolDecoderTest {
 
     /** The status with and without the own node's line (CR-107). */
     private fun statuses() {
-        fun status(own: Boolean, flag: Int = if (own) 1 else 0): ByteArray {
+        fun status(own: Boolean, flag: Int = if (own) 1 else 0, lightning: Boolean = false): ByteArray {
             val out = ByteArrayOutputStream()
             out.write(Writer().u32(5).u32(6).toByteArray())
             out.write(0) // no health answer yet
@@ -124,13 +138,26 @@ object ProtocolDecoderTest {
                 words(out, 0, 0, "Your node is not reachable".toByteArray(Charsets.UTF_8))
             }
             out.write(Writer().u32(1).u32(0).u64(0).u8(0).toByteArray())
+            if (lightning) {
+                out.write(1)
+                out.write(1) // ready
+                words(out, 1, 0, "Lightning ready".toByteArray(Charsets.UTF_8))
+            } else {
+                out.write(0)
+            }
             return header(0, out.toByteArray())
         }
         decodeResponse(status(false)).let { r ->
             val s = r.statusView()
             r.end()
             check(s.checkedHeight == 5L && s.tipHeight == 6L && s.health == null && s.ownNode == null)
-            check(s.sales == listOf(0L) && !s.stopped)
+            check(s.sales == listOf(0L) && !s.stopped && s.lightning == null)
+        }
+        decodeResponse(status(false, lightning = true)).let { r ->
+            val s = r.statusView()
+            r.end()
+            val ln = s.lightning ?: error("a Lightning line")
+            check(ln.ready && ln.words.heading == "Lightning ready")
         }
         decodeResponse(status(true)).let { r ->
             val s = r.statusView()
@@ -155,8 +182,36 @@ object ProtocolDecoderTest {
                 record = byteArrayOf(2),
                 proxy = "p",
                 ownNode = "o",
+                lightning = byteArrayOf(3),
             )
         check(hex(startFrame(config)) == START_FRAME_HEX) { hex(startFrame(config)) }
+        val reply = lnReplyFrame(1, 7, 200, byteArrayOf(0x7b, 0x7d))
+        check(hex(reply) == LN_REPLY_FRAME_HEX) { hex(reply) }
+        lightning()
+    }
+
+    /** The results of the Lightning ops. */
+    private fun lightning() {
+        val request = Writer().u64(9).string("node.local:8080").u8(1).string("/v1/invoices")
+            .string("Rune").string("secret").u8(1).string("{}").toByteArray()
+        decodeResponse(header(0, Writer().u8(1).raw(request).u8(0).toByteArray())).let { r ->
+            val step = r.lnStep()
+            r.end()
+            val next = step.next ?: error("a request")
+            check(next.id == 9L && next.hostPort == "node.local:8080" && next.method == LnMethod.Post)
+            check(next.path == "/v1/invoices" && next.headerName == "Rune" && next.body == "{}")
+            check(!next.toString().contains("secret"))
+            check(step.record == null)
+        }
+        decodeResponse(header(0, Writer().u8(0).u8(1).bytes(byteArrayOf(1, 2, 3)).toByteArray())).let { r ->
+            val step = r.lnStep()
+            r.end()
+            check(step.next == null && step.record!!.contentEquals(byteArrayOf(1, 2, 3)))
+        }
+        rejects("a request method") {
+            val bad = Writer().u64(9).string("h:1").u8(2).string("/").string("n").string("v").u8(0).toByteArray()
+            decodeResponse(header(0, bad)).lnRequest()
+        }
     }
 
     private fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
@@ -239,6 +294,7 @@ object ProtocolDecoderTest {
         stuck: Int = 1,
         trailingByte: Boolean = false,
         check: Boolean = false,
+        lightning: Int = 0,
     ): ByteArray {
         val out = ByteArrayOutputStream()
         out.write(state)
@@ -284,6 +340,15 @@ object ProtocolDecoderTest {
             out.write(p.toByteArray())
         } else {
             out.write(0)
+        }
+        when (lightning) {
+            0 -> out.write(0)
+            1 -> out.write(byteArrayOf(1, 1, 0, 0))
+            2 -> {
+                out.write(byteArrayOf(1, 0, 0, 1))
+                words(out, 2, 2, "Not available".toByteArray(Charsets.UTF_8))
+            }
+            else -> out.write(byteArrayOf(1, 2, 0, 0))
         }
         if (trailingByte) out.write(0x55)
         return header(0, out.toByteArray())

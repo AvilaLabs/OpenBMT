@@ -393,6 +393,7 @@ dependencies = [
  "openbmt-core",
  "openbmt-counter",
  "openbmt-counter-node",
+ "openbmt-lightning",
  "openbmt-net-io",
  "openbmt-owner",
  "openbmt-qr",

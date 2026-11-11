@@ -370,6 +370,20 @@ pub fn cln_listed(
     )
 }
 
+/// The `lndconnect://` text of the credential `lnd()`.
+pub fn lndconnect_text() -> String {
+    format!(
+        "lndconnect://node.local:8080?cert={}&macaroon={}",
+        base64(&der(300, 7), Alphabet::Url).trim_end_matches('='),
+        base64(&macaroon(), Alphabet::Url).trim_end_matches('=')
+    )
+}
+
+/// The SHA-256 fingerprint of the certificate of `pin()`, in hex.
+pub fn pin_fingerprint_hex() -> String {
+    hex(&pin().sha256())
+}
+
 /// The refusal of LND to a call its macaroon does not allow.
 pub fn lnd_denied() -> Reply {
     reply(

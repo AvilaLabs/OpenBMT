@@ -9,6 +9,8 @@
 //! segment.
 
 use bitcoin::{Address, Network, ScriptBuf};
+use openbmt_lightning::bip321::PaymentUri;
+use openbmt_lightning::bolt11::Checked;
 use openbmt_qr::{encode_text, Ecc};
 
 use crate::codec::wire_record;
@@ -69,6 +71,27 @@ pub fn request_texts(address: &str, bech32: bool, sats: u64) -> (String, String)
     (code, copy)
 }
 
+/// CR-113: the code of a sale that has a Lightning invoice that passed the
+/// checks (LN-17): `bitcoin:<address>?amount=<btc>&lightning=<invoice>`
+/// (LN-18), in capitals for the QR code when LN-19 allows. The text for
+/// "copy" is the code as the BIP gives it.
+pub(crate) fn payment_with_invoice(
+    script: &ScriptBuf,
+    network: Network,
+    sats: u64,
+    invoice: &Checked,
+) -> Result<Payment, CounterError> {
+    let address = Address::from_script(script, network)
+        .map_err(|e| refused_by("pay-address", format!("the script has no address: {e}")))?
+        .to_string();
+    let code = PaymentUri::new(&address, network, sats, invoice)
+        .map_err(|e| refused_by(e.rule(), e.to_string()))?;
+    let copy_uri = code.text().to_string();
+    // LN-19: capitals only when the address allows them.
+    let uri = code.qr_text().unwrap_or_else(|_| copy_uri.clone());
+    finish(address, uri, copy_uri)
+}
+
 /// The payment request of the sale whose address is `script`, for `sats`.
 pub(crate) fn payment_for(
     script: &ScriptBuf,
@@ -79,6 +102,11 @@ pub(crate) fn payment_for(
         .map_err(|e| refused_by("pay-address", format!("the script has no address: {e}")))?;
     let address = address.to_string();
     let (uri, copy_uri) = request_texts(&address, script.is_witness_program(), sats);
+    finish(address, uri, copy_uri)
+}
+
+/// The modules of the code the text makes, with the texts.
+fn finish(address: String, uri: String, copy_uri: String) -> Result<Payment, CounterError> {
     let code = encode_text(&uri, Ecc::M)
         .map_err(|e| refused_by("pay-code", format!("the code could not be made: {e}")))?;
     let size = code.size();
