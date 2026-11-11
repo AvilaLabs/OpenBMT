@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 11] = [
+const TEST_SOURCES: [&str; 12] = [
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
     include_str!("open.rs"),
@@ -14,6 +14,7 @@ const TEST_SOURCES: [&str; 11] = [
     include_str!("records.rs"),
     include_str!("refunds.rs"),
     include_str!("reports.rs"),
+    include_str!("settle.rs"),
     include_str!("states.rs"),
     include_str!("storage.rs"),
     include_str!("valuation.rs"),
@@ -22,7 +23,7 @@ const TEST_SOURCES: [&str; 11] = [
 
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit.
-const NOT_HERE: [(&str, &str); 2] = [
+const NOT_HERE: [(&str, &str); 4] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -32,6 +33,15 @@ const NOT_HERE: [(&str, &str); 2] = [
         "CR-74",
         "it states what the refund rules do not do (prove who the customer is, stop a wrong \
          destination, learn whether a refund was paid); there is nothing to enforce or to test",
+    ),
+    (
+        "CR-81",
+        "it is marked not built: the records stay in memory, and there is nothing to test yet",
+    ),
+    (
+        "CR-82",
+        "it is the node's rule, when `Counter::settle` is called; its tests are in \
+         `openbmt-counter-node`",
     ),
 ];
 
@@ -44,15 +54,16 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_fifty_four_rules() {
+fn the_rules_file_defines_sixty_one_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 54);
+    assert_eq!(ids.len(), 61);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
             && ids.contains("CR-56")
             && ids.contains("CR-74")
             && ids.contains("CR-75")
+            && ids.contains("CR-82")
     );
 }
 

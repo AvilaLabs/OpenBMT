@@ -51,6 +51,6 @@ pub use dirstore::{DirStore, DirStoreError, Loaded, TornTail};
 pub use link::{CounterLink, CounterLinkConfig, LinkState};
 pub use node::{
     DriverPort, HealthFn, HeartbeatNotTaken, HeartbeatTaken, Launch, Node, NodeConfig, StartError,
-    MAX_EVENTS_PER_PUMP, NOTE_LOG, TX_CACHE,
+    MAX_EVENTS_PER_PUMP, NOTE_LOG, SETTLE_EVERY_SECS, SETTLE_MIN_GAP_SECS, TX_CACHE,
 };
 pub use notices::{NoticeOutbox, NoticeStoreError};

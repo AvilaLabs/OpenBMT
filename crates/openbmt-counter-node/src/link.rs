@@ -11,7 +11,8 @@
 //!   sales again is returned by `step`.
 //! - Command: decoded as a `SignedCommand` and given to `Node::command`.
 //! - Batch: decoded as a `SignedBatch` and given to `Node::add_batch`.
-//! - Records received: the owner's mark (LK-55).
+//! - Records received: the owner's mark (LK-55), which is also given to the
+//!   node as the mark that settling goes by (CR-76).
 //! - Settings and device lists: noted as not handled yet, and dropped.
 //! - POS notices from a Box: opened and dropped with a note.
 //!
@@ -306,7 +307,7 @@ impl<R: Post> CounterLink<R> {
     }
 
     /// LK-55.
-    fn take_mark<P: DriverPort>(&mut self, node: &Node<P>, content: &[u8]) {
+    fn take_mark<P: DriverPort>(&mut self, node: &mut Node<P>, content: &[u8]) {
         let (count, head) = match decode_received(content) {
             Ok(mark) => mark,
             Err(e) => {
@@ -315,9 +316,13 @@ impl<R: Post> CounterLink<R> {
                 return;
             }
         };
-        let records = node.counter().records().records();
-        match head_at(records, count) {
-            Some(own) if own == head => self.mark = (count, head),
+        let have = node.counter().records().len();
+        match head_at(node.counter().records().records(), count) {
+            Some(own) if own == head => {
+                self.mark = (count, head);
+                // CR-76: the counter settles only what the owner holds.
+                node.set_owner_mark(count);
+            }
             Some(_) => {
                 self.marks_ignored = self.marks_ignored.saturating_add(1);
                 self.note(format!(
@@ -328,9 +333,8 @@ impl<R: Post> CounterLink<R> {
             None => {
                 self.marks_ignored = self.marks_ignored.saturating_add(1);
                 self.note(format!(
-                    "LK-55: the owner's mark of {count} records is more than the {} we have: \
-                     ignored",
-                    records.len()
+                    "LK-55: the owner's mark of {count} records is more than the {have} we have: \
+                     ignored"
                 ));
             }
         }

@@ -6,6 +6,10 @@
 //! leaves the old file as it was. A temporary file that a crash left behind
 //! is never read and is overwritten by the next write.
 //!
+//! A slot is removed (CR-77) by removing its file and flushing the directory.
+//! A slot whose file is gone reads back as empty: a sale that was settled is
+//! simply not loaded.
+//!
 //! The records go to one file that only grows. Each record is written as a
 //! length (four bytes, little endian) and the record's bytes, and the file is
 //! flushed before the write is reported. A crash in the middle of a write can
@@ -294,6 +298,18 @@ impl Store for DirStore {
 
     fn put(&mut self, slot: Slot, bytes: &[u8]) -> Result<(), DirStoreError> {
         self.write_whole(&slot_file(slot), bytes)
+    }
+
+    fn delete(&mut self, slot: Slot) -> Result<(), DirStoreError> {
+        let name = slot_file(slot);
+        for file in [name.clone(), format!("{name}.tmp")] {
+            match fs::remove_file(self.path(&file)) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io_err(&file, "remove")(e)),
+            }
+        }
+        self.sync_dir()
     }
 
     fn append_record(&mut self, bytes: &[u8]) -> Result<(), DirStoreError> {

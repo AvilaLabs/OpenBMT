@@ -11,6 +11,7 @@ mod records;
 mod refunds;
 mod reports;
 mod say;
+mod settle;
 mod states;
 mod storage;
 mod valuation;

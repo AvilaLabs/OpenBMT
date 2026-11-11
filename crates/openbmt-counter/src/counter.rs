@@ -40,7 +40,10 @@ use crate::refusal::{
 use crate::sale::{End, OverrideMark, PosState, Sale};
 use crate::screen::{Next, Report, Screen, State, Why};
 use crate::store::{Slot, Store, StoreFault};
-use crate::{DUST_SATS, EXPIRY_SECS, MAX_LATE_PAYMENTS, MAX_QUOTES, STUCK_SECS};
+use crate::{
+    DUST_SATS, EXPIRY_SECS, MAX_LATE_PAYMENTS, MAX_QUOTES, MAX_SETTLE_PER_CALL, SETTLE_SECS,
+    STUCK_SECS,
+};
 use openbmt_core::policy::{OffReason, WaitReason};
 
 /// What a counter was paired with: the roots it pinned, the wallet it
@@ -71,6 +74,17 @@ pub struct Stored<'a> {
     pub sales: Vec<(u32, &'a [u8])>,
     /// The record log, as read back.
     pub records: Chain,
+}
+
+/// What a call of [`Counter::settle`] did (CR-77).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Settled {
+    /// Sales removed.
+    pub count: usize,
+    /// Addresses that left the counter's watch list (CR-79).
+    pub released: usize,
+    /// More sales are ready to be settled than this call took.
+    pub remaining: bool,
 }
 
 /// What opening a sale needs to know (CR-01, CR-04, CR-09).
@@ -245,6 +259,12 @@ pub struct Counter {
     /// CR-75: sales refused for being below the smallest bitcoin sale since
     /// this counter started. Not stored.
     refused_below_minimum: u64,
+    /// CR-76: how many of this counter's records the owner holds, as the
+    /// link last took it (LK-55). Not stored: after a start there is none.
+    owner_mark: Option<u64>,
+    /// CR-76: for each sale the counter holds, the number and the time of the
+    /// newest record that names it. Built from the records at start.
+    last_record: BTreeMap<u32, (u64, u64)>,
 }
 
 impl Counter {
@@ -275,6 +295,8 @@ impl Counter {
             archived: BTreeMap::new(),
             unreadable: BTreeSet::new(),
             refused_below_minimum: 0,
+            owner_mark: None,
+            last_record: BTreeMap::new(),
         }
     }
 
@@ -326,6 +348,7 @@ impl Counter {
         }
         // CR-73: the counter's own records are the truth about refunds.
         counter.adopt_refunds();
+        counter.index_records();
         Ok(counter)
     }
 
@@ -378,6 +401,18 @@ impl Counter {
         self.sales.get(&index)
     }
 
+    /// How many sales the counter holds in memory, live or ended. A settled
+    /// sale (CR-76) is not counted.
+    pub fn held_sales(&self) -> usize {
+        self.sales.len()
+    }
+
+    /// The sales the counter holds a newest-record entry for (CR-76).
+    #[cfg(test)]
+    pub(crate) fn indexed_sales(&self) -> usize {
+        self.last_record.len()
+    }
+
     /// The indexes of sales whose stored form did not read back (CR-42).
     pub fn unreadable(&self) -> impl Iterator<Item = u32> + '_ {
         self.unreadable.iter().copied()
@@ -392,6 +427,20 @@ impl Counter {
     /// started came to, if one was taken.
     pub fn heartbeat_view(&self) -> Option<HeartbeatView> {
         self.heartbeat
+    }
+
+    /// CR-76: say how many of this counter's records the owner holds (the
+    /// owner's mark, LK-55). The link calls it each time it takes a mark,
+    /// and it replaces the last one, a lower number included. A number above
+    /// the counter's own length is taken as the length. Nothing is settled
+    /// until a mark has been given.
+    pub fn set_owner_mark(&mut self, records_held: u64) {
+        self.owner_mark = Some(records_held.min(self.records.len()));
+    }
+
+    /// The owner's mark as last given, if one was.
+    pub fn owner_mark(&self) -> Option<u64> {
+        self.owner_mark
     }
 
     /// The records written so far.
@@ -429,8 +478,10 @@ impl Counter {
         &self.batches
     }
 
-    /// Every script that must stay watched: the live sales, the archived
-    /// ones (CR-07, CR-19) and everything the batches have shown or retired.
+    /// Every script the counter watches: the live sales, the archived ones
+    /// that are not settled (CR-07, CR-19) and the addresses the batches have
+    /// shown or retired and not released (CR-79). The owner's wallet watches
+    /// every issued address for good (CR-80).
     pub fn watched_scripts(&self) -> Vec<ScriptBuf> {
         let mut all: BTreeSet<ScriptBuf> = self.batches.watched_scripts().iter().cloned().collect();
         all.extend(self.sales.values().map(|s| s.script.clone()));
@@ -438,7 +489,140 @@ impl Counter {
         all.into_iter().collect()
     }
 
+    // CR-76 to CR-80: letting old sales go.
+
+    /// The time a sale last changed, if the counter can say: the later of the
+    /// time it ended and the time of the newest record that names it.
+    fn last_change(&self, sale: &Sale) -> Option<u64> {
+        let ended = sale.ended().map(|(_, at)| at);
+        let recorded = self.last_record.get(&sale.index).map(|(_, at)| *at);
+        ended.max(recorded)
+    }
+
+    /// CR-76: the time a sale last changed if it is settled at `now` given
+    /// the owner's mark, else `None`.
+    fn settled_since(&self, sale: &Sale, mark: u64, now: u64) -> Option<u64> {
+        if sale.is_live() || self.unreadable.contains(&sale.index) {
+            return None;
+        }
+        if sale.exposure_counted && !sale.exposure_released {
+            return None;
+        }
+        let last = self.last_change(sale)?;
+        if last.saturating_add(SETTLE_SECS) > now {
+            return None;
+        }
+        if self.refund_views(sale.index).iter().any(|v| {
+            matches!(
+                v.state,
+                RefundState::Requested | RefundState::WaitingForDepth
+            )
+        }) {
+            return None;
+        }
+        if self
+            .last_record
+            .get(&sale.index)
+            .is_some_and(|(seq, _)| *seq >= mark)
+        {
+            return None;
+        }
+        Some(last)
+    }
+
+    /// CR-76 to CR-79: let go of the sales the owner holds everything about,
+    /// and of the addresses nothing holds any more.
+    ///
+    /// Settles at most [`MAX_SETTLE_PER_CALL`] sales, the one that last
+    /// changed longest ago first. For each, the stored sale is removed and
+    /// then the sale leaves memory, so that a store that refuses leaves the
+    /// sale where it was and the fault is returned. No record is written.
+    /// Then the addresses the batches showed or retired at least
+    /// [`SETTLE_SECS`] ago and that no sale of the counter holds leave the
+    /// watch list; the batches are stored first. With no owner's mark
+    /// ([`Self::set_owner_mark`]) no sale is settled, and while a sale is
+    /// unreadable (CR-42) no address is released. A call that returns an
+    /// error may have settled sales before the fault: they stay settled.
+    pub fn settle<S: Store>(
+        &mut self,
+        store: &mut S,
+        now: u64,
+    ) -> Result<Settled, StoreFault<S::Error>> {
+        let mut ready: Vec<(u64, u32)> = match self.owner_mark {
+            Some(mark) => self
+                .sales
+                .values()
+                .filter_map(|sale| {
+                    self.settled_since(sale, mark, now)
+                        .map(|last| (last, sale.index))
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        ready.sort_unstable();
+        let remaining = ready.len() > MAX_SETTLE_PER_CALL;
+        ready.truncate(MAX_SETTLE_PER_CALL);
+        let mut count = 0;
+        for (_, index) in ready {
+            store.delete(Slot::Sale(index)).map_err(StoreFault::Write)?;
+            if let Some(sale) = self.sales.remove(&index) {
+                if self.archived.get(&sale.script) == Some(&index) {
+                    self.archived.remove(&sale.script);
+                }
+            }
+            self.last_record.remove(&index);
+            self.cancel_applied.remove(&index);
+            self.refund_unsaved.remove(&index);
+            count += 1;
+        }
+        let released = self.release_addresses(store, now)?;
+        Ok(Settled {
+            count,
+            released,
+            remaining,
+        })
+    }
+
+    /// CR-79: take the old addresses no sale holds off the watch list.
+    fn release_addresses<S: Store>(
+        &mut self,
+        store: &mut S,
+        now: u64,
+    ) -> Result<usize, StoreFault<S::Error>> {
+        if !self.unreadable.is_empty() {
+            return Ok(0);
+        }
+        let held: BTreeSet<&ScriptBuf> = self
+            .sales
+            .values()
+            .map(|s| &s.script)
+            .chain(self.archived.keys())
+            .collect();
+        let released = self.batches.release_watched(
+            |script, at| at.saturating_add(SETTLE_SECS) <= now && !held.contains(script),
+            |bytes| store.put(Slot::Batches, bytes),
+        )?;
+        Ok(released)
+    }
+
     // Internal helpers.
+
+    /// CR-76: the newest record that names each sale the counter holds.
+    fn index_records(&mut self) {
+        let mut last: BTreeMap<u32, (u64, u64)> = BTreeMap::new();
+        for record in self.records.records() {
+            if record.kind == RecordKind::CheckIn {
+                continue;
+            }
+            let Ok(event) = Event::decode(&record.body) else {
+                continue;
+            };
+            let at = last.get(&event.index()).map_or(0, |(_, at)| *at);
+            last.insert(event.index(), (record.seq, at.max(event.at())));
+        }
+        last.retain(|index, _| self.sales.contains_key(index));
+        self.last_record = last;
+    }
 
     fn install(&mut self, sale: Sale) {
         if !sale.is_live() {
@@ -477,7 +661,16 @@ impl Counter {
             .append_stored(&self.identity, event.kind(), event.encode(), |bytes| {
                 store.append_record(bytes)
             }) {
-            Ok(_) => Ok(()),
+            Ok(record) => {
+                let seq = record.seq;
+                let at = self
+                    .last_record
+                    .get(&event.index())
+                    .map_or(0, |(_, at)| *at)
+                    .max(event.at());
+                self.last_record.insert(event.index(), (seq, at));
+                Ok(())
+            }
             Err(AppendError::Persist(e)) => Err(StoreFault::Write(e)),
             Err(AppendError::Refused(e)) => Err(StoreFault::Record(e)),
         }
@@ -588,7 +781,7 @@ impl Counter {
 
         let issued = self
             .batches
-            .next_script(|bytes| store.put(Slot::Batches, bytes))
+            .next_script(now, |bytes| store.put(Slot::Batches, bytes))
             .map_err(|e| OpenRefused::AddressNotStored(StoreFault::Write(e)))?;
         let Some((index, script)) = issued else {
             return Err(OpenRefused::NoAddress);

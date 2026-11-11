@@ -58,7 +58,7 @@ mod tests;
 
 pub use counter::{
     sale_payment_id, Actor, BlockEffect, BlockTaken, Counter, Facts, OpenFacts, Opened, Overridden,
-    Pairing, Sightings, Stored,
+    Pairing, Settled, Sightings, Stored,
 };
 pub use desk::{Desk, OverrideEntry, Role};
 pub use events::Event;
@@ -115,3 +115,8 @@ pub const MAX_OVERRIDE_ENTRIES: usize = 1_000;
 /// The longest a stored sale watch may be, in bytes (twenty transactions at
 /// the watcher's size limit, and room for the rest).
 pub const MAX_WATCH_BYTES: usize = 16 * 1024 * 1024;
+/// CR-76, CR-79: seconds a sale or an address must have been quiet before the
+/// counter lets it go: 30 days **[to tune]**.
+pub const SETTLE_SECS: u64 = 30 * 86_400;
+/// CR-77: most sales one call of `Counter::settle` settles.
+pub const MAX_SETTLE_PER_CALL: usize = 256;

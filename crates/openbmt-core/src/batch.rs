@@ -583,7 +583,8 @@ pub struct CounterBatches {
     active: VecDeque<ActiveBatch>,
     ranges: Vec<(u32, u32)>,
     known: HashSet<ScriptBuf>,
-    watched: Vec<ScriptBuf>,
+    /// Each script that was shown or retired, with the time it was.
+    watched: Vec<(ScriptBuf, u64)>,
 }
 
 impl CounterBatches {
@@ -663,14 +664,18 @@ impl CounterBatches {
     /// called. If an index would pass the derivable range (which a verified
     /// batch never does), no script is returned.
     ///
+    /// `now` is the time, in seconds, kept with the script as the time it was
+    /// shown.
+    ///
     /// Each call works on a copy of the state, so its cost grows with the
     /// number of stored scripts, the same as the snapshot it writes.
     pub fn next_script<E>(
         &mut self,
+        now: u64,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<Option<(u32, ScriptBuf)>, E> {
         let mut next = self.clone();
-        let Some(issued) = next.take_next() else {
+        let Some(issued) = next.take_next(now) else {
             return Ok(None);
         };
         persist(&next.to_bytes())?;
@@ -678,7 +683,7 @@ impl CounterBatches {
         Ok(Some(issued))
     }
 
-    fn take_next(&mut self) -> Option<(u32, ScriptBuf)> {
+    fn take_next(&mut self, now: u64) -> Option<(u32, ScriptBuf)> {
         loop {
             let front = self.active.front_mut()?;
             if front.next < front.scripts.len() {
@@ -686,7 +691,7 @@ impl CounterBatches {
                 let i = front.start.checked_add(offset)?;
                 let s = front.scripts[front.next].clone();
                 front.next += 1;
-                self.watched.push(s.clone());
+                self.watched.push((s.clone(), now));
                 return Some((i, s));
             }
             self.active.pop_front();
@@ -701,7 +706,7 @@ impl CounterBatches {
     /// Retire every unused script (after a reset or restore). They are
     /// still watched, but never handed out, and their index range stays
     /// blocked so a fresh batch must cover new indexes. Returns how many
-    /// were retired.
+    /// were retired. `now` is kept with each as the time it was retired.
     ///
     /// The resulting state is serialized ([`Self::to_bytes`]) and given to
     /// `persist`; scripts are retired only if it returns `Ok`, and on an
@@ -710,6 +715,7 @@ impl CounterBatches {
     /// no batch is active, `persist` is not called.
     pub fn retire_unused<E>(
         &mut self,
+        now: u64,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<usize, E> {
         if self.active.is_empty() {
@@ -719,7 +725,8 @@ impl CounterBatches {
         let mut n = 0;
         for b in next.active.drain(..) {
             n += b.scripts.len() - b.next;
-            next.watched.extend(b.scripts.into_iter().skip(b.next));
+            next.watched
+                .extend(b.scripts.into_iter().skip(b.next).map(|s| (s, now)));
         }
         persist(&next.to_bytes())?;
         *self = next;
@@ -732,9 +739,36 @@ impl CounterBatches {
         self.known.contains(script)
     }
 
-    /// Every script that was shown or retired. These stay watched forever.
-    pub fn watched_scripts(&self) -> &[ScriptBuf] {
-        &self.watched
+    /// Every script that was shown or retired and has not been released
+    /// ([`Self::release_watched`]), in the order they were shown or retired.
+    pub fn watched_scripts(&self) -> Vec<ScriptBuf> {
+        self.watched.iter().map(|(s, _)| s.clone()).collect()
+    }
+
+    /// Take scripts off the watched list for which `release` says so. It is
+    /// given each script and the time it was shown or retired. The index of a
+    /// released script stays issued: the ranges are kept, so the index is
+    /// never handed out again and a batch over it is still refused. Returns
+    /// how many were released.
+    ///
+    /// The resulting state is serialized ([`Self::to_bytes`]) and given to
+    /// `persist`; scripts are released only if it returns `Ok`, and on an
+    /// error the state is unchanged. When nothing is released, `persist` is
+    /// not called.
+    pub fn release_watched<E>(
+        &mut self,
+        release: impl Fn(&ScriptBuf, u64) -> bool,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<usize, E> {
+        if !self.watched.iter().any(|(s, at)| release(s, *at)) {
+            return Ok(0);
+        }
+        let mut next = self.clone();
+        next.watched.retain(|(s, at)| !release(s, *at));
+        let released = self.watched.len() - next.watched.len();
+        persist(&next.to_bytes())?;
+        *self = next;
+        Ok(released)
     }
 
     /// Snapshot of everything needed to resume exactly: the issued index
@@ -750,15 +784,19 @@ impl CounterBatches {
     /// OBMC | 1 | counter (32) | wallet checksum (32)
     ///   | n_ranges u32 | (start u32, end u32)*
     ///   | n_active u32 | (start u32, next u32, n u32, n * 34-byte script)*
-    ///   | n_watched u32 | n_watched * 34-byte script
+    ///   | n_watched u32 | n_watched * (34-byte script | at u64)
     /// ```
+    ///
+    /// `at` is the time the script was shown or retired. A script that was
+    /// released ([`Self::release_watched`]) is not in the list.
     pub fn to_bytes(&self) -> Vec<u8> {
         let scripts: usize = self.active.iter().map(|b| b.scripts.len()).sum();
         let mut out = wire::start(
             &wire::MAGIC_COUNTER_BATCHES,
             76 + self.ranges.len() * 8
                 + self.active.len() * 12
-                + (scripts + self.watched.len()) * SCRIPT_LEN,
+                + scripts * SCRIPT_LEN
+                + self.watched.len() * (SCRIPT_LEN + 8),
         );
         out.extend_from_slice(&self.counter.to_bytes());
         out.extend_from_slice(&self.wallet_checksum);
@@ -777,8 +815,9 @@ impl CounterBatches {
             }
         }
         out.extend_from_slice(&wire::len_u32(self.watched.len()).to_le_bytes());
-        for s in &self.watched {
+        for (s, at) in &self.watched {
             out.extend_from_slice(s.as_bytes());
+            out.extend_from_slice(&at.to_le_bytes());
         }
         out
     }
@@ -791,9 +830,12 @@ impl CounterBatches {
     /// invariants the type keeps must hold, else the result is
     /// `NonCanonical`: issued ranges do not overlap, each active batch fills
     /// exactly one issued range in ascending order with its position inside
-    /// it, every script is a P2WSH script, no script appears twice, and the
-    /// scripts already shown from an active batch are exactly the watched
-    /// ones. The result then behaves exactly as the snapshotted state did.
+    /// it, every script is a P2WSH script, no script appears twice, no
+    /// script not yet shown from an active batch is watched, and every watched
+    /// script is one the counter could have shown or retired. A shown script
+    /// of an active batch may be missing from the watched list: it was
+    /// released. The result then behaves exactly as the snapshotted state
+    /// did.
     pub fn from_bytes(
         bytes: &[u8],
         counter: DeviceId,
@@ -861,18 +903,19 @@ impl CounterBatches {
             });
         }
 
-        let n = r.count(usize::MAX, SCRIPT_LEN)?;
+        let n = r.count(usize::MAX, SCRIPT_LEN + 8)?;
         let mut watched = Vec::with_capacity(n);
         for _ in 0..n {
-            watched.push(read_p2wsh(&mut r)?);
+            let script = read_p2wsh(&mut r)?;
+            watched.push((script, r.u64_le()?));
         }
         r.finish()?;
 
         let mut watched_set = HashSet::with_capacity(watched.len());
-        if !watched.iter().all(|s| watched_set.insert(s)) {
+        if !watched.iter().all(|(s, _)| watched_set.insert(s)) {
             return Err(DecodeError::NonCanonical("watched scripts repeat"));
         }
-        let mut known: HashSet<ScriptBuf> = watched.iter().cloned().collect();
+        let mut known: HashSet<ScriptBuf> = watched.iter().map(|(s, _)| s.clone()).collect();
         let mut active_seen = HashSet::new();
         for b in &active {
             for (i, s) in b.scripts.iter().enumerate() {
@@ -880,14 +923,12 @@ impl CounterBatches {
                     return Err(DecodeError::NonCanonical("an active script repeats"));
                 }
                 let shown = i < b.next;
-                if watched_set.contains(s) != shown {
+                if watched_set.contains(s) && !shown {
                     return Err(DecodeError::NonCanonical(
                         "shown scripts do not match the watched scripts",
                     ));
                 }
-                if !shown {
-                    known.insert(s.clone());
-                }
+                known.insert(s.clone());
             }
         }
         let issued: u64 = ranges.iter().map(|&(s, e)| u64::from(e - s)).sum();
@@ -982,14 +1023,14 @@ mod tests {
         }
 
         fn next_ok(&mut self) -> Option<(u32, ScriptBuf)> {
-            match self.next_script(persist_ok) {
+            match self.next_script(100, persist_ok) {
                 Ok(v) => v,
                 Err(never) => match never {},
             }
         }
 
         fn retire_ok(&mut self) -> usize {
-            match self.retire_unused(persist_ok) {
+            match self.retire_unused(200, persist_ok) {
                 Ok(n) => n,
                 Err(never) => match never {},
             }
@@ -1803,7 +1844,7 @@ mod tests {
         let f = fx();
         let mut c = mid_batch(&f);
         let before = c.to_bytes();
-        assert_eq!(c.next_script(persist_fail), Err("disk full"));
+        assert_eq!(c.next_script(0, persist_fail), Err("disk full"));
         assert_eq!(c.to_bytes(), before);
         assert_eq!(c.remaining(), 2);
         // The same script comes out once the store works again.
@@ -1816,7 +1857,7 @@ mod tests {
         let mut c = mid_batch(&f);
         let mut handed = Vec::new();
         let issued = c
-            .next_script(|b: &[u8]| {
+            .next_script(0, |b: &[u8]| {
                 handed = b.to_vec();
                 Ok::<(), Infallible>(())
             })
@@ -1830,10 +1871,10 @@ mod tests {
     fn next_script_skips_the_store_when_nothing_is_left() {
         let f = fx();
         let mut c = counter_state(&f);
-        assert_eq!(c.next_script(persist_fail), Ok(None));
+        assert_eq!(c.next_script(0, persist_fail), Ok(None));
         c.add_ok(signed(&f, 0, 3, &mut HighWater::new())).unwrap();
         while c.next_ok().is_some() {}
-        assert_eq!(c.next_script(persist_fail), Ok(None));
+        assert_eq!(c.next_script(0, persist_fail), Ok(None));
     }
 
     #[test]
@@ -1883,7 +1924,7 @@ mod tests {
         let f = fx();
         let mut c = mid_batch(&f);
         let before = c.to_bytes();
-        assert_eq!(c.retire_unused(persist_fail), Err("disk full"));
+        assert_eq!(c.retire_unused(0, persist_fail), Err("disk full"));
         assert_eq!(c.to_bytes(), before);
         assert_eq!(c.remaining(), 2);
         assert_eq!(c.next_ok().unwrap().0, 4);
@@ -1895,7 +1936,7 @@ mod tests {
         let mut c = mid_batch(&f);
         let mut handed = Vec::new();
         let n = c
-            .retire_unused(|b: &[u8]| {
+            .retire_unused(0, |b: &[u8]| {
                 handed = b.to_vec();
                 Ok::<(), Infallible>(())
             })
@@ -1904,7 +1945,7 @@ mod tests {
         assert_eq!(handed, c.to_bytes());
         assert_eq!(restore(&f, &handed).unwrap().to_bytes(), c.to_bytes());
         // With nothing active there is nothing to store.
-        assert_eq!(c.retire_unused(persist_fail), Ok(0));
+        assert_eq!(c.retire_unused(0, persist_fail), Ok(0));
     }
 
     fn restore(f: &Fx, bytes: &[u8]) -> Result<CounterBatches, DecodeError> {
@@ -1926,7 +1967,8 @@ mod tests {
 
     // Offsets in `mid_batch` bytes: header 69, range count 69, ranges 73..89,
     // active count 89, then the one active batch: start 93, next 97, count
-    // 101, scripts 105..207, watched count 207, watched scripts 211...
+    // 101, scripts 105..207, watched count 207, watched entries 211... of 42
+    // bytes each (script, time).
     const RANGE_1_START_AT: usize = 81;
     const ACTIVE_START_AT: usize = 93;
     const ACTIVE_NEXT_AT: usize = 97;
@@ -2079,7 +2121,7 @@ mod tests {
             DecodeError::NonCanonical("script is not P2WSH")
         );
         assert_eq!(
-            refused(&|b| b.copy_within(WATCHED_AT..WATCHED_AT + 34, WATCHED_AT + 34)),
+            refused(&|b| b.copy_within(WATCHED_AT..WATCHED_AT + 34, WATCHED_AT + 42)),
             DecodeError::NonCanonical("watched scripts repeat")
         );
         // An unused script that is also marked as watched.
@@ -2100,6 +2142,92 @@ mod tests {
         let mut b = good[..105].to_vec();
         b[101..105].copy_from_slice(&(MAX_COUNT + 1).to_le_bytes());
         assert_eq!(restore(&f, &b).err(), Some(DecodeError::TooLarge));
+    }
+
+    #[test]
+    fn released_scripts_leave_the_watched_list_and_keep_their_index() {
+        let f = fx();
+        let mut hw = HighWater::new();
+        let b1 = signed(&f, 0, 5, &mut hw);
+        let mut c = counter_state(&f);
+        c.add_ok(b1.clone()).unwrap();
+        let (_, first) = c.next_ok().unwrap();
+        let (_, second) = c.next_ok().unwrap();
+        assert_eq!(c.retire_ok(), 3);
+        assert_eq!(c.watched_scripts().len(), 5);
+        // The first was shown at 100, the others at 100 and retired at 200.
+        let mut handed = Vec::new();
+        let n = c
+            .release_watched(
+                |s, at| *s == first || at > 150,
+                |b: &[u8]| {
+                    handed = b.to_vec();
+                    Ok::<(), Infallible>(())
+                },
+            )
+            .unwrap();
+        assert_eq!(n, 4);
+        assert_eq!(c.watched_scripts(), vec![second.clone()]);
+        assert_eq!(handed, c.to_bytes());
+        let restored = restore(&f, &handed).unwrap();
+        assert_eq!(restored.watched_scripts(), vec![second]);
+        assert_eq!(restored.to_bytes(), handed);
+        // The index range stays issued, so the batch cannot come back.
+        assert_eq!(c.add_ok(b1).unwrap_err(), BatchError::OverlapsExisting);
+        assert_eq!(c.next_ok(), None);
+        // Nothing to release: nothing is stored.
+        assert_eq!(c.release_watched(|_, _| false, persist_fail), Ok(0));
+        // A failing store leaves the list as it was.
+        assert_eq!(
+            c.release_watched(|_, _| true, persist_fail),
+            Err("disk full")
+        );
+        assert_eq!(c.watched_scripts().len(), 1);
+    }
+
+    #[test]
+    fn a_shown_script_of_an_active_batch_can_be_released_and_restored() {
+        let f = fx();
+        let mut c = mid_batch(&f);
+        let all = c.watched_scripts();
+        assert_eq!(all.len(), 4);
+        let gone = all[0].clone();
+        c.release_watched(|s, _| *s == gone, persist_ok).unwrap();
+        let bytes = c.to_bytes();
+        let mut restored = restore(&f, &bytes).unwrap();
+        assert_eq!(restored.to_bytes(), bytes);
+        assert_eq!(restored.watched_scripts().len(), 3);
+        // The same addresses come next, and the released one is not offered.
+        loop {
+            let (a, b) = (c.next_ok(), restored.next_ok());
+            assert_eq!(a, b);
+            match a {
+                Some((_, s)) => assert_ne!(s, gone),
+                None => break,
+            }
+        }
+    }
+
+    #[test]
+    fn the_times_a_script_was_shown_and_retired_are_stored() {
+        let f = fx();
+        let mut c = counter_state(&f);
+        c.add_ok(signed(&f, 0, 4, &mut HighWater::new())).unwrap();
+        c.next_ok().unwrap();
+        c.retire_ok();
+        let seen = std::cell::RefCell::new(Vec::new());
+        let restored = restore(&f, &c.to_bytes()).unwrap();
+        restored
+            .clone()
+            .release_watched(
+                |_, at| {
+                    seen.borrow_mut().push(at);
+                    false
+                },
+                persist_fail,
+            )
+            .unwrap();
+        assert_eq!(*seen.borrow(), vec![100, 200, 200, 200]);
     }
 
     // Offsets in a signed batch: magic 0..4, version 4, checksum 5..37,

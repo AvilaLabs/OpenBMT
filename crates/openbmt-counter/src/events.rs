@@ -404,6 +404,30 @@ impl Event {
         }
     }
 
+    /// When the event happened, as the record says.
+    pub fn at(&self) -> u64 {
+        match self {
+            Self::Opened { at, .. }
+            | Self::Expired { at, .. }
+            | Self::Cancelled { at, .. }
+            | Self::PaidAtOnce { at, .. }
+            | Self::Confirmed { at, .. }
+            | Self::Final { at, .. }
+            | Self::LatePayment { at, .. }
+            | Self::SurplusOwed { at, .. }
+            | Self::Dust { at, .. }
+            | Self::Requoted { at, .. }
+            | Self::Override { at, .. }
+            | Self::Replaced { at, .. }
+            | Self::Reopened { at, .. }
+            | Self::PosPaid { at, .. }
+            | Self::PosUnpaid { at, .. }
+            | Self::RefundRequested { at, .. }
+            | Self::RefundWithdrawn { at, .. }
+            | Self::RefundPaidInCash { at, .. } => *at,
+        }
+    }
+
     /// The kind of record the event is written as.
     pub fn kind(&self) -> RecordKind {
         match self {

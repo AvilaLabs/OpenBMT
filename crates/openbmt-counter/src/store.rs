@@ -32,6 +32,11 @@ pub trait Store {
     /// Replace the bytes kept in a slot.
     fn put(&mut self, slot: Slot, bytes: &[u8]) -> Result<(), Self::Error>;
 
+    /// Remove what is kept in a slot (CR-77). A slot that holds nothing is
+    /// removed without error. A call that returns `Ok` is durable: after a
+    /// restart the slot reads back as empty.
+    fn delete(&mut self, slot: Slot) -> Result<(), Self::Error>;
+
     /// Add one record (its wire form, `OBMR`) to the end of the record log.
     fn append_record(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
 }

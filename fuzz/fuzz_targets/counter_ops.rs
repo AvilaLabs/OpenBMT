@@ -147,6 +147,12 @@ impl Store for Mem {
         Ok(())
     }
 
+    fn delete(&mut self, slot: Slot) -> Result<(), &'static str> {
+        self.step()?;
+        self.slots.remove(&slot);
+        Ok(())
+    }
+
     fn append_record(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
         self.step()?;
         self.records.push(bytes.to_vec());

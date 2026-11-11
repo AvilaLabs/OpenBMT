@@ -182,6 +182,12 @@ impl Store for Mem {
         Ok(())
     }
 
+    fn delete(&mut self, slot: Slot) -> Result<(), &'static str> {
+        self.step(format!("delete {slot:?}"))?;
+        self.slots.remove(&slot);
+        Ok(())
+    }
+
     fn append_record(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
         self.step("record".to_string())?;
         self.records.push(bytes.to_vec());
@@ -358,9 +364,14 @@ impl World {
     }
 
     pub fn with_addresses(count: u32) -> Self {
+        Self::with_batch(batch(0, count))
+    }
+
+    /// A counter with this batch of addresses.
+    pub fn with_batch(batch: SignedBatch) -> Self {
         let mut c = Counter::new(id(3), pairing(), settings());
         let mut m = Mem::default();
-        c.add_batch(batch(0, count), &mut m).unwrap();
+        c.add_batch(batch, &mut m).unwrap();
         m.reset();
         Self {
             c,

@@ -42,6 +42,9 @@ impl Store for Null {
     fn put(&mut self, _slot: Slot, _bytes: &[u8]) -> Result<(), &'static str> {
         Ok(())
     }
+    fn delete(&mut self, _slot: Slot) -> Result<(), &'static str> {
+        Ok(())
+    }
     fn append_record(&mut self, _bytes: &[u8]) -> Result<(), &'static str> {
         Ok(())
     }

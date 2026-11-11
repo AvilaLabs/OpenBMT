@@ -96,6 +96,29 @@ fn files_that_are_not_slots_are_left_alone() {
 }
 
 #[test]
+fn cr_77_a_slot_is_deleted_whole_and_deleting_what_is_not_there_is_no_error() {
+    let dir = Scratch::new();
+    let mut store = DirStore::open(dir.path()).unwrap();
+    store.put(Slot::Sale(1), b"one").unwrap();
+    store.put(Slot::Sale(2), b"two").unwrap();
+    // A temporary file that a crash left behind goes with it.
+    fs::write(dir.path().join("sale-1.bin.tmp"), b"half").unwrap();
+    store.delete(Slot::Sale(1)).unwrap();
+    store.delete(Slot::Sale(1)).unwrap();
+    store.delete(Slot::Sale(77)).unwrap();
+    assert!(!dir.path().join("sale-1.bin").exists());
+    assert!(!dir.path().join("sale-1.bin.tmp").exists());
+    let loaded = store.load().unwrap();
+    assert_eq!(loaded.sales, vec![(2, b"two".to_vec())]);
+    // The other slots are not touched.
+    store.put(Slot::Desk, b"desk").unwrap();
+    store.delete(Slot::Sale(2)).unwrap();
+    let loaded = store.load().unwrap();
+    assert!(loaded.sales.is_empty());
+    assert_eq!(loaded.desk.as_deref(), Some(&b"desk"[..]));
+}
+
+#[test]
 fn a_failed_write_leaves_the_old_value() {
     let dir = Scratch::new();
     let mut store = DirStore::open(dir.path()).unwrap();

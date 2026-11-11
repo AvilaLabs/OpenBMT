@@ -277,6 +277,27 @@ fn lk_55_a_mark_that_fits_the_chain_is_taken_and_one_that_does_not_is_ignored() 
 }
 
 #[test]
+fn cr_76_a_mark_the_link_takes_is_the_counter_s_owner_mark_and_one_it_ignores_is_not() {
+    let mut w = world(config());
+    for _ in 0..3 {
+        w.rig.node.check_in().unwrap();
+    }
+    w.step(T0);
+    let chain = w.records();
+    assert_eq!(w.rig.node.counter().owner_mark(), None);
+    w.mark(4, [9; 32]);
+    w.step(T0 + 1);
+    assert_eq!(w.rig.node.counter().owner_mark(), None);
+    w.mark(3, chain[2].hash());
+    w.step(T0 + 2);
+    assert_eq!(w.rig.node.counter().owner_mark(), Some(3));
+    // A lower valid mark replaces it (LK-55).
+    w.mark(1, chain[0].hash());
+    w.step(T0 + 3);
+    assert_eq!(w.rig.node.counter().owner_mark(), Some(1));
+}
+
+#[test]
 fn lk_56_a_lost_send_is_sent_again_after_30_seconds_and_not_before() {
     let mut w = world(config());
     w.relay.set_lose_puts(true);

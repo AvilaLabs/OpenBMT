@@ -29,6 +29,17 @@
 //! `judge`, `override_sale` and the other calls of the node come back in
 //! their own results; each report is returned once, by whichever call made it.
 //!
+//! ## Settling old sales
+//!
+//! The link hands the node the owner's mark ([`Node::set_owner_mark`],
+//! LK-55). From then on the pump calls `Counter::settle` (CR-76 to CR-79): at
+//! the first pump after the first mark of the run, then once an hour, sooner
+//! while sales are left to settle, and never twice inside a minute (CR-82).
+//! A settle that did something is one line in the log, with counts only.
+//! The driver keeps the scripts it was given until the next start; the
+//! shorter list is what it is started with then, and the owner's wallet
+//! watches the rest (CR-80).
+//!
 //! ## The checked height
 //!
 //! The driver tells the node how far every block has been checked against the
@@ -111,6 +122,10 @@ use crate::dirstore::{DirStore, DirStoreError};
 pub const TX_CACHE: usize = 256;
 /// Most lines the node's log keeps; the oldest goes first.
 pub const NOTE_LOG: usize = 256;
+/// CR-82: seconds between two settles.
+pub const SETTLE_EVERY_SECS: u64 = 3_600;
+/// CR-82: fewest seconds between two settles, however they were asked for.
+pub const SETTLE_MIN_GAP_SECS: u64 = 60;
 /// Most events one call of [`Node::pump`] takes, so that a driver that never
 /// stops sending cannot keep the call from returning.
 pub const MAX_EVENTS_PER_PUMP: usize = 4096;
@@ -295,6 +310,11 @@ pub struct Node<P: DriverPort = Handle> {
     checked: u32,
     checked_cap: Option<u32>,
     stopped: bool,
+    /// CR-82: when the last settle was tried, by the node's clock.
+    last_settle: Option<u64>,
+    /// CR-82: a settle is wanted as soon as the minute allows: the owner's
+    /// first mark of this run came, or the last call left sales to settle.
+    settle_wanted: bool,
     /// NR-79. Last, so that it is released after the driver has stopped.
     _lock: DirLock,
 }
@@ -412,6 +432,8 @@ impl<P: DriverPort> Node<P> {
             checked: loaded.checked.unwrap_or(watch_from),
             checked_cap: None,
             stopped: false,
+            last_settle: None,
+            settle_wanted: false,
             _lock: lock,
         };
         node.update_all_blocks();
@@ -508,7 +530,50 @@ impl<P: DriverPort> Node<P> {
         if changed {
             self.update_all_blocks();
         }
+        self.settle_when_due();
         reports
+    }
+
+    /// CR-76: the owner's mark, as the link took it (LK-55). The first one of
+    /// this run asks for a settle at the next pump.
+    pub fn set_owner_mark(&mut self, records_held: u64) {
+        if self.counter.owner_mark().is_none() {
+            self.settle_wanted = true;
+        }
+        self.counter.set_owner_mark(records_held);
+    }
+
+    /// CR-82: settle once the owner's mark is known, at the first pump after
+    /// it, then once an hour (sooner while sales are left to settle), and
+    /// never twice inside a minute. What it did is a line in the log: the
+    /// counts only. The driver keeps the scripts it was given until the next
+    /// start; the shorter list is what it is then started with.
+    fn settle_when_due(&mut self) {
+        if self.counter.owner_mark().is_none() {
+            return;
+        }
+        let now = self.clock.now();
+        let gap = |secs: u64| {
+            self.last_settle
+                .is_none_or(|at| now >= at.saturating_add(secs))
+        };
+        if !gap(SETTLE_MIN_GAP_SECS) || !(self.settle_wanted || gap(SETTLE_EVERY_SECS)) {
+            return;
+        }
+        self.last_settle = Some(now);
+        self.settle_wanted = false;
+        match self.counter.settle(&mut self.store, now) {
+            Ok(done) => {
+                self.settle_wanted = done.remaining;
+                if done.count > 0 || done.released > 0 {
+                    self.note(format!(
+                        "CR-77: settled {} sales and released {} addresses",
+                        done.count, done.released
+                    ));
+                }
+            }
+            Err(e) => self.note(format!("CR-77: settling stopped: {e}")),
+        }
     }
 
     fn next_event(&mut self, deadline: Instant) -> Option<AppEvent> {
