@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.png" width="180" alt="OpenBMT logo">
+</p>
+
 # OpenBMT
 
 [![CI](https://github.com/AvilaLabs/OpenBMT/actions/workflows/ci.yml/badge.svg)](https://github.com/AvilaLabs/OpenBMT/actions/workflows/ci.yml)
