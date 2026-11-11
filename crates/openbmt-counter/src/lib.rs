@@ -75,10 +75,10 @@ pub use refund::{
 };
 pub use refusal::{
     BlockError, CancelRefused, CommandRefused, DestinationRefused, HeartbeatRefused, JudgeError,
-    LoadError, OpenRefused, OverrideRefused, RefundRefused, RequoteRefused, SightingError,
-    WithdrawRefused,
+    LightningRefused, LoadError, OpenRefused, OverrideRefused, RefundRefused, RequoteRefused,
+    SightingError, WithdrawRefused,
 };
-pub use sale::{End, OverrideMark, PosState, Sale, Segment};
+pub use sale::{End, LightningPaid, OverrideMark, PosState, Sale, Segment};
 pub use screen::{Color, Next, Report, Screen, State, Why};
 pub use store::{Slot, Store, StoreFault};
 

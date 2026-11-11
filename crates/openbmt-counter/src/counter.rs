@@ -30,17 +30,18 @@ use openbmt_watch::{
 use crate::desk::{in_override_window, valid_name, Desk, OverrideEntry, Role};
 use crate::events::{final_payments, Event};
 use crate::heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
-use crate::money::{sats_for, Amount, Currency, Quote, Rate, RateSource, MAX_SATS};
+use crate::money::{sats_for, value_of, Amount, Currency, Quote, Rate, RateSource, MAX_SATS};
 use crate::recordlog::{RecordLog, MAX_UNSENT_IN_MEMORY, READ_CHUNK};
 use crate::refund::{
     dust_limit, refund_text_ok, sats_floor, Ask, CashRefund, EntryKind, RefundAsk, RefundEntry,
     RefundRequest, RefundState, RefundView, MAX_REFUNDS_PER_SALE,
 };
 use crate::refusal::{
-    BlockError, CancelRefused, CommandRefused, HeartbeatRefused, JudgeError, LoadError,
-    OpenRefused, OverrideRefused, RefundRefused, RequoteRefused, SightingError, WithdrawRefused,
+    BlockError, CancelRefused, CommandRefused, HeartbeatRefused, JudgeError, LightningRefused,
+    LoadError, OpenRefused, OverrideRefused, RefundRefused, RequoteRefused, SightingError,
+    WithdrawRefused,
 };
-use crate::sale::{End, OverrideMark, PosState, Sale};
+use crate::sale::{End, LightningPaid, OverrideMark, PosState, Sale};
 use crate::screen::{Next, Report, Screen, State, Why};
 use crate::store::{Slot, Store, StoreFault};
 use crate::{
@@ -1278,6 +1279,120 @@ impl Counter {
         Ok(out)
     }
 
+    /// CR-109: the shop's own node says the Lightning invoice of a sale was
+    /// paid. The sale is paid and final at once: no instant limit, no
+    /// exposure, no waiting for a block (DESIGN section 8). The sale keeps
+    /// the payment hash, the amount in millisatoshis and the time the node
+    /// says it settled, and the books are told it is final (CR-31).
+    ///
+    /// Refused, with nothing written, for a sale the counter does not hold,
+    /// a sale that ended or is final already, a sale paid another way (it
+    /// was accepted at once or by a person, or enough has arrived on its
+    /// address), and a payment for less than the least any quote of the sale
+    /// asks. Asking again for a sale that is paid over Lightning already
+    /// changes nothing and gives its screen.
+    ///
+    /// What had arrived on the address before is not lost: above the dust
+    /// line it is recorded as owed to the customer (CR-16), as a payment
+    /// beyond what the sale needed is. What arrives there after is a late
+    /// payment (CR-19).
+    ///
+    /// The writes, in this order: the records (`PaidByLightning`, the
+    /// surplus if there is one, `PosPaid`), then the sale. A stop between
+    /// them leaves records for a payment the sale does not show; the node
+    /// reports it again and the step is done again, which is the safe side
+    /// (a report is never made without its record).
+    pub fn lightning_paid<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        paid: LightningPaid,
+        facts: &Facts<'_, C>,
+        store: &mut S,
+    ) -> Result<Screen, LightningRefused<S::Error>> {
+        if self.unreadable.contains(&index) {
+            return Err(LightningRefused::Judge(JudgeError::UnknownSale(index)));
+        }
+        let base = self
+            .sales
+            .get(&index)
+            .cloned()
+            .ok_or(LightningRefused::UnknownSale(index))?;
+        let own = OwnNodeHealth::not_configured();
+        if base.lightning.is_some() {
+            return self
+                .judge_with_own_node(index, facts, &own, store)
+                .map_err(LightningRefused::Judge);
+        }
+        if !base.is_live() {
+            return Err(LightningRefused::SaleClosed);
+        }
+        let now = facts.now;
+        let mut sale = base;
+        let (st, received) = sale.refresh(facts.chain, now, self.depth(), &own);
+        if sale.accepted.is_some()
+            || sale.overridden.is_some()
+            || sale.frozen.is_some()
+            || st.needs_a_person
+        {
+            return Err(LightningRefused::PaidAnotherWay);
+        }
+        let sats = paid.sats();
+        let least = sale
+            .quotes
+            .iter()
+            .filter_map(|q| sats_for(sale.amount, q.rate))
+            .min()
+            .unwrap_or(u64::MAX);
+        if sats == 0 || sats < least {
+            return Err(LightningRefused::TooLittle { sats, least });
+        }
+        let valued = match sale.rate_of(sale.quote_index_at(now)) {
+            Some(rate) => value_of(sats, rate),
+            None => Amount(0),
+        };
+        sale.lightning = Some(paid);
+        sale.books_final = true;
+        let mut events = vec![Event::PaidByLightning {
+            index,
+            at: now,
+            payment_hash: paid.payment_hash,
+            amount_msat: paid.amount_msat,
+            settled_at: paid.settled_at,
+            valued,
+        }];
+        let mut reports = Vec::new();
+        if received > 0 {
+            sale.surplus_reported = received;
+            events.push(Event::SurplusOwed {
+                index,
+                at: now,
+                sats: received,
+            });
+            reports.push(Report::SurplusOwed {
+                index,
+                sats: received,
+            });
+        }
+        if sale.pos != PosState::Paid {
+            sale.pos = PosState::Paid;
+            events.push(Event::PosPaid { index, at: now });
+            reports.push(Report::PosPaid { index });
+        }
+        reports.push(Report::BooksFinal {
+            index,
+            amount: sale.amount,
+            currency: sale.currency,
+            received_sats: sats,
+        });
+        self.finish(store, sale, &events)
+            .map_err(LightningRefused::Store)?;
+        let mut screen = self
+            .judge_with_own_node(index, facts, &own, store)
+            .map_err(LightningRefused::Judge)?;
+        screen.reports = reports;
+        Ok(screen)
+    }
+
     // CR-10 to CR-19: judging a sale.
 
     /// CR-10 to CR-19, CR-30 to CR-32: work out the state of a sale. This is
@@ -1355,6 +1470,18 @@ impl Counter {
         let final_depth = u32::from(self.settings.final_confirmations).max(depth);
         let (st, received) = sale.refresh(facts.chain, now, depth, own);
         let needs = sale.watch.sale_sats();
+
+        // CR-109, CR-110: a sale the shop's node says was paid over
+        // Lightning is paid and final, whatever its address shows: coins
+        // that arrive there are a late payment (CR-19) and nothing else is
+        // judged.
+        if let Some(paid) = sale.lightning {
+            let mut screen = screen_of(State::PaidLightning, Why::PaidByLightning, Next::Nothing);
+            screen.received_sats = paid.sats();
+            screen.needs_sats = paid.sats();
+            screen.late = sale.is_late();
+            return Ok(screen);
+        }
         let confirmed = st.min_confirmations >= depth;
         let is_final = st.min_confirmations >= final_depth;
         let mut events: Vec<Event> = Vec::new();
@@ -2282,6 +2409,10 @@ impl Counter {
         let mut copy = sale.clone();
         let (status, received) =
             copy.refresh(headers, now, self.depth(), &OwnNodeHealth::not_configured());
+        // CR-111: what arrived over Lightning is received and final at once.
+        if let Some(paid) = &sale.lightning {
+            return (received.saturating_add(paid.sats()), u32::MAX);
+        }
         (received, status.min_confirmations)
     }
 

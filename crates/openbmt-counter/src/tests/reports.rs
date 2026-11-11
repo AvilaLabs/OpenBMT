@@ -14,6 +14,7 @@ fn kinds(w: &World) -> Vec<&'static str> {
             Event::PaidAtOnce { .. } => "paid-at-once",
             Event::Confirmed { .. } => "confirmed",
             Event::Final { .. } => "final",
+            Event::PaidByLightning { .. } => "paid-by-lightning",
             Event::LatePayment { .. } => "late",
             Event::SurplusOwed { .. } => "surplus",
             Event::Dust { .. } => "dust",

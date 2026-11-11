@@ -323,10 +323,10 @@ fn the_sale_round_trips_and_refuses_another_magic_or_version() {
     bad[3] = b'X';
     assert_eq!(Sale::from_bytes(&bad).err(), Some(DecodeError::BadMagic));
     let mut bad = good.clone();
-    bad[4] = 3;
+    bad[4] = 4;
     assert_eq!(
         Sale::from_bytes(&bad).err(),
-        Some(DecodeError::UnsupportedVersion(3))
+        Some(DecodeError::UnsupportedVersion(4))
     );
     // A desk is not a sale.
     assert_eq!(

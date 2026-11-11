@@ -279,6 +279,65 @@ impl<E: fmt::Display> fmt::Display for CancelRefused<E> {
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for CancelRefused<E> {}
 
+/// Why a Lightning payment was not taken for a sale (CR-109).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LightningRefused<E> {
+    /// CR-11: the counter has no sale with this index.
+    UnknownSale(u32),
+    /// CR-109: the sale had already ended (expired or cancelled) or was
+    /// final, so nothing is changed. The payment is in the shop's node.
+    SaleClosed,
+    /// CR-109: the sale was paid another way already: accepted at once, by a
+    /// person, or with enough on its address. Nothing is changed.
+    PaidAnotherWay,
+    /// CR-109: the node reports a payment for less than the least any quote
+    /// of the sale asks, or for nothing.
+    TooLittle {
+        /// The whole satoshis the node received.
+        sats: u64,
+        /// The least any quote of the sale asks.
+        least: u64,
+    },
+    /// The sale could not be judged.
+    Judge(JudgeError<E>),
+    /// CR-40: a write failed. The payment is not taken; asking again is safe.
+    Store(StoreFault<E>),
+}
+
+impl<E> LightningRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::UnknownSale(_) => "CR-11",
+            Self::SaleClosed | Self::PaidAnotherWay | Self::TooLittle { .. } => "CR-109",
+            Self::Judge(e) => e.rule(),
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for LightningRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::UnknownSale(i) => write!(f, "there is no sale with index {i}"),
+            Self::SaleClosed => write!(
+                f,
+                "the sale has ended or is final, so a Lightning payment is not added to it"
+            ),
+            Self::PaidAnotherWay => write!(f, "the sale was paid another way already"),
+            Self::TooLittle { sats, least } => write!(
+                f,
+                "the node received {sats} sats and the sale asks at least {least} sats"
+            ),
+            Self::Judge(e) => write!(f, "{e}"),
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for LightningRefused<E> {}
+
 /// Why an override was refused (CR-20 to CR-22).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OverrideRefused<E> {

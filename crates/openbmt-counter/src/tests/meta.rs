@@ -6,9 +6,10 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 14] = [
+const TEST_SOURCES: [&str; 15] = [
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
+    include_str!("lightning.rs"),
     include_str!("open.rs"),
     include_str!("overrides.rs"),
     include_str!("own_node.rs"),
@@ -26,7 +27,7 @@ const TEST_SOURCES: [&str; 14] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 25] = [
+const NOT_HERE: [(&str, &str); 30] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -152,6 +153,33 @@ const NOT_HERE: [(&str, &str); 25] = [
         "the health line and Try again are the node's and the app's; tested in \
          `openbmt-counter-node`, `openbmt-counter-ffi` and the app's JVM tests",
     ),
+    (
+        "CR-112",
+        "what the driver asks the node for, and when, is the node's; tested in \
+         `openbmt-counter-node` (`tests/lightning.rs`)",
+    ),
+    (
+        "CR-113",
+        "the sale code and the line about Lightning are made in `openbmt-counter-node` and \
+         `openbmt-counter-ffi` and shown by the app; tested there and in the app's JVM tests",
+    ),
+    (
+        "CR-114",
+        "the transport is the Android app's; its tests are the app's JVM tests \
+         (`apps/counter-android`)",
+    ),
+    (
+        "CR-115",
+        "the credential is read and tested in `openbmt-counter-node`, kept sealed by the \
+         Android app behind the manager's PIN; tested in `openbmt-counter-node`, \
+         `openbmt-counter-ffi` and the app's JVM tests",
+    ),
+    (
+        "CR-116",
+        "the Lightning health line and the check of the settings' node key are the node's and \
+         the app's; tested in `openbmt-counter-node`, `openbmt-counter-ffi` and the app's JVM \
+         tests",
+    ),
 ];
 
 /// The rule number at the start of `rest` (what follows `CR-`): every digit,
@@ -170,9 +198,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_eighty_seven_rules() {
+fn the_rules_file_defines_ninety_five_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 87);
+    assert_eq!(ids.len(), 95);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -186,6 +214,8 @@ fn the_rules_file_defines_eighty_seven_rules() {
             && ids.contains("CR-99")
             && ids.contains("CR-100")
             && ids.contains("CR-108")
+            && ids.contains("CR-109")
+            && ids.contains("CR-116")
     );
 }
 

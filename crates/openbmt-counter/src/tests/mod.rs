@@ -4,6 +4,7 @@
 mod encodings;
 mod heartbeat;
 mod kit;
+mod lightning;
 mod meta;
 mod open;
 mod overrides;

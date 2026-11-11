@@ -28,8 +28,8 @@ use crate::heartbeat::{HeartbeatView, NotVerified};
 use crate::refund::{RefundState, RefundView};
 use crate::refusal::{
     BlockError, CancelRefused, CommandRefused, DestinationRefused, HeartbeatRefused, JudgeError,
-    LoadError, OpenRefused, OverrideRefused, RefundRefused, RequoteRefused, SightingError,
-    WithdrawRefused,
+    LightningRefused, LoadError, OpenRefused, OverrideRefused, RefundRefused, RequoteRefused,
+    SightingError, WithdrawRefused,
 };
 use crate::screen::{Color, Next, Screen, State, Why};
 use crate::store::StoreFault;
@@ -167,6 +167,14 @@ impl Why {
             )
             .code("CR-14"),
             Self::Instant(label) => label.words(),
+            Self::PaidByLightning => Words::new(
+                Tone::Good,
+                "Paid over Lightning",
+                "The customer paid over Lightning and the shop's node has the money. It is final.",
+                Who::Cashier,
+                "Hand over the goods. A refund is given in cash or on-chain, never over Lightning.",
+            )
+            .code("CR-109"),
             Self::ConfirmedAt(_) => Words::new(
                 Tone::Good,
                 "Paid",
@@ -263,6 +271,9 @@ impl Screen {
     /// that is waiting has one: an accepted sale says it in its own words
     /// (`Why::Instant`), and the sales that wait for nothing say nothing.
     pub fn check_line(&self) -> Option<CheckLine> {
+        if self.state == State::PaidLightning {
+            return Some(CheckLine::LightningFinal);
+        }
         if self.state != State::Waiting {
             return None;
         }
@@ -316,16 +327,21 @@ pub enum CheckLine {
     BoxAndLight,
     /// The Box alone.
     BoxOnly,
+    /// The payment arrived over Lightning, which is final at once
+    /// (CR-109). It is the line of a sale that is paid, not of one that
+    /// waits.
+    LightningFinal,
 }
 
 /// Every [`CheckLine`], for SC-01.
-pub const ALL_CHECK_LINES: [CheckLine; 6] = [
+pub const ALL_CHECK_LINES: [CheckLine; 7] = [
     CheckLine::Light,
     CheckLine::LightOwnNodeUnusable,
     CheckLine::YourNodeAndLight,
     CheckLine::OwnNodeWaitingForLight,
     CheckLine::BoxAndLight,
     CheckLine::BoxOnly,
+    CheckLine::LightningFinal,
 ];
 
 impl CheckLine {
@@ -368,6 +384,12 @@ impl CheckLine {
                 Who::Nobody,
                 "Nothing to do. The counter keeps watching for the light check.",
             ),
+            Self::LightningFinal => (
+                "Lightning, final",
+                "This payment arrived over Lightning, through the shop's node, so no block is needed.",
+                Who::Nobody,
+                "Nothing to do.",
+            ),
         };
         Words::new(Tone::Info, heading, what, who, next).code("CR-105")
     }
@@ -382,6 +404,7 @@ pub fn check_line_name(line: CheckLine) -> &'static str {
         CheckLine::OwnNodeWaitingForLight => "OwnNodeWaitingForLight",
         CheckLine::BoxAndLight => "BoxAndLight",
         CheckLine::BoxOnly => "BoxOnly",
+        CheckLine::LightningFinal => "LightningFinal",
     }
 }
 
@@ -544,6 +567,58 @@ impl<E: Display> JudgeError<E> {
     }
 }
 
+impl<E: Display> LightningRefused<E> {
+    /// What the cashier is told when a Lightning payment was reported for a
+    /// sale and the counter did not add it (CR-109).
+    pub fn words(&self) -> Words {
+        match self {
+            Self::UnknownSale(_) => refused(
+                "Sale not found",
+                "A Lightning payment was reported for a sale this counter does not hold.",
+                Who::Cashier,
+                NOT_FOUND_NEXT,
+                "CR-11",
+            ),
+            Self::SaleClosed => refused(
+                "Lightning payment not added",
+                "The shop's node got a Lightning payment after this sale ended, so the counter did not add it.",
+                Who::Cashier,
+                "Take another kind of payment or give the money back. Tell the owner: a Lightning payment came late.",
+                "CR-109",
+            ),
+            Self::PaidAnotherWay => refused(
+                "Paid twice",
+                "This sale was paid another way and also over Lightning, so the counter kept the first payment.",
+                Who::Cashier,
+                "Tell the owner: this customer paid twice, and the Lightning payment is in the shop's node.",
+                "CR-109",
+            ),
+            Self::TooLittle { .. } => refused(
+                "Lightning payment too small",
+                "The shop's node got less over Lightning than this sale asks, so it was not taken as payment.",
+                Who::Cashier,
+                "Take another kind of payment. Tell the owner: the Lightning payment was too small.",
+                "CR-109",
+            ),
+            Self::Judge(_) => refused(
+                "Lightning payment not added",
+                "The counter could not check this sale just now, so it did not add the Lightning payment.",
+                Who::Cashier,
+                "Do not hand over the goods yet. The counter asks again by itself; tell the owner if this stays.",
+                "CR-109",
+            ),
+            Self::Store(fault) => store_failed(
+                fault,
+                "Lightning payment not saved",
+                "the Lightning payment was not added to the sale",
+                Tone::Stop,
+                Who::Cashier,
+                "Do not hand over the goods yet. The counter asks again by itself; tell the owner if this stays.",
+            ),
+        }
+    }
+}
+
 impl<E: Display> RequoteRefused<E> {
     /// What the cashier is told when a sale cannot be given a new price.
     pub fn words(&self) -> Words {
@@ -670,6 +745,13 @@ fn wrong_state(state: State) -> Words {
             format!("A sale that shows \"{name}\" can be accepted by hand, but the counter would not do it now."),
             Who::Cashier,
             "Try once more. If it fails again, tell the owner.",
+            "CR-20",
+        ),
+        State::PaidLightning => refused(
+            heading,
+            "This sale was paid over Lightning, so nobody needs to accept it.",
+            Who::Nobody,
+            "Nothing to do. The sale screen says when to hand over the goods.",
             "CR-20",
         ),
         State::PaidInstant | State::Confirmed | State::Final | State::Overridden => refused(
@@ -1387,6 +1469,7 @@ pub fn state_name(s: State) -> &'static str {
         State::Confirmed => "Confirmed",
         State::Final => "Final",
         State::Overridden => "Overridden",
+        State::PaidLightning => "PaidLightning",
         State::DoNotHandOver => "DoNotHandOver",
         State::Expired => "Expired",
         State::Cancelled => "Cancelled",
@@ -1407,6 +1490,7 @@ pub fn why_name(w: &Why) -> &'static str {
         Why::Instant(_) => "Instant",
         Why::ConfirmedAt(_) => "ConfirmedAt",
         Why::FinalAt(_) => "FinalAt",
+        Why::PaidByLightning => "PaidByLightning",
         Why::OverriddenBy { .. } => "OverriddenBy",
         Why::Replaced => "Replaced",
         Why::Reopened => "Reopened",
@@ -1547,6 +1631,10 @@ pub fn sample_screens() -> Vec<(String, Screen)> {
                 Why::StoredFormUnreadable,
                 Next::PersonLooks,
             ),
+        ),
+        (
+            "PaidLightning".to_string(),
+            screen(State::PaidLightning, Why::PaidByLightning, Next::Nothing),
         ),
         (
             "Expired".to_string(),
@@ -1736,6 +1824,23 @@ pub fn all_words() -> Vec<(String, Words)> {
     ];
     for (name, r) in cancel {
         all.push((format!("CancelRefused::{name}"), r.words()));
+    }
+    let lightning: Vec<(&str, LightningRefused<String>)> = vec![
+        ("UnknownSale", LightningRefused::UnknownSale(3)),
+        ("SaleClosed", LightningRefused::SaleClosed),
+        ("PaidAnotherWay", LightningRefused::PaidAnotherWay),
+        (
+            "TooLittle",
+            LightningRefused::TooLittle {
+                sats: 900,
+                least: 1_000,
+            },
+        ),
+        ("Judge", LightningRefused::Judge(JudgeError::UnknownSale(3))),
+        ("Store", LightningRefused::Store(w())),
+    ];
+    for (name, r) in lightning {
+        all.push((format!("LightningRefused::{name}"), r.words()));
     }
     let mut overrides: Vec<(String, OverrideRefused<String>)> = vec![
         ("UnknownSale".to_string(), OverrideRefused::UnknownSale(3)),
@@ -1959,7 +2064,7 @@ pub fn all_words() -> Vec<(String, Words)> {
 }
 
 /// Every state, for the samples and for the test of SC-01.
-pub const ALL_STATES: [State; 11] = [
+pub const ALL_STATES: [State; 12] = [
     State::NotPaidYet,
     State::PartPaid,
     State::Waiting,
@@ -1967,6 +2072,7 @@ pub const ALL_STATES: [State; 11] = [
     State::Confirmed,
     State::Final,
     State::Overridden,
+    State::PaidLightning,
     State::DoNotHandOver,
     State::Expired,
     State::Cancelled,

@@ -37,6 +37,8 @@ pub enum State {
     Final,
     /// A person accepted it (green; CR-20).
     Overridden,
+    /// Paid over Lightning, which is final at once (green; CR-109).
+    PaidLightning,
     /// The money is not safe (red).
     DoNotHandOver,
     /// Ended with nothing received (neutral).
@@ -52,7 +54,11 @@ impl State {
     pub fn color(&self) -> Color {
         match self {
             Self::NotPaidYet | Self::PartPaid | Self::Waiting => Color::Blue,
-            Self::PaidInstant | Self::Confirmed | Self::Final | Self::Overridden => Color::Green,
+            Self::PaidInstant
+            | Self::Confirmed
+            | Self::Final
+            | Self::Overridden
+            | Self::PaidLightning => Color::Green,
             Self::DoNotHandOver | Self::NeedsAPerson => Color::Red,
             Self::Expired | Self::Cancelled => Color::Neutral,
         }
@@ -64,7 +70,7 @@ impl State {
             Self::NotPaidYet => "Not paid yet",
             Self::PartPaid => "Part paid",
             Self::Waiting => "Waiting",
-            Self::PaidInstant => "Paid",
+            Self::PaidInstant | Self::PaidLightning => "Paid",
             Self::Confirmed => "Confirmed",
             Self::Final => "Final",
             Self::Overridden => "Accepted by a person",
@@ -79,7 +85,11 @@ impl State {
     pub fn is_paid(&self) -> bool {
         matches!(
             self,
-            Self::PaidInstant | Self::Confirmed | Self::Final | Self::Overridden
+            Self::PaidInstant
+                | Self::Confirmed
+                | Self::Final
+                | Self::Overridden
+                | Self::PaidLightning
         )
     }
 }
@@ -112,6 +122,8 @@ pub enum Why {
     ConfirmedAt(u32),
     /// Final at this depth.
     FinalAt(u32),
+    /// The shop's own node says the Lightning invoice was paid (CR-109).
+    PaidByLightning,
     /// A person accepted it.
     OverriddenBy {
         /// Cashier or manager.
@@ -327,6 +339,7 @@ impl Why {
             Self::Instant(label) => format!("{}. It could still be cancelled.", label.text()),
             Self::ConfirmedAt(depth) => format!("Confirmed ({depth} confirmations)."),
             Self::FinalAt(depth) => format!("Final ({depth} confirmations)."),
+            Self::PaidByLightning => "Paid over Lightning. It is final.".to_string(),
             Self::OverriddenBy { role } => {
                 format!("Accepted by a {}. It is not confirmed.", role.text())
             }

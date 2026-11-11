@@ -24,9 +24,17 @@
 //!   | n_refunds u32 | n_refunds * refund entry   (see `refund::RefundEntry`)
 //! ```
 //!
+//! OBML | 3 | the fields of version 1
+//!   | payment_hash (32) | amount_msat u64 | settled_at (flag, u64)
+//!   | n_refunds u32 | n_refunds * refund entry
+//!
 //! Version 2 is written only for a sale that has a refund entry (CR-61,
 //! CR-73); a sale without one is written as version 1, which is what every
 //! earlier build wrote. A version 2 form with no entry does not read back.
+//! Version 3 is written only for a sale that was paid over Lightning
+//! (CR-109); its refund list may be empty. A sale that was not is written as
+//! before, so every earlier file reads back and every earlier build's file
+//! is unchanged.
 
 use bitcoin::hashes::Hash;
 use bitcoin::{ScriptBuf, Txid};
@@ -46,6 +54,27 @@ use crate::{
 
 /// The version byte of a sale that holds refund entries (CR-73).
 const SALE_VERSION_WITH_REFUNDS: u8 = 2;
+/// The version byte of a sale that was paid over Lightning (CR-109).
+const SALE_VERSION_LIGHTNING: u8 = 3;
+
+/// What the sale keeps of a Lightning payment (CR-109, CR-110): the facts
+/// the node reported when the invoice was settled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LightningPaid {
+    /// The payment hash of the invoice.
+    pub payment_hash: [u8; 32],
+    /// What the node received, in millisatoshis.
+    pub amount_msat: u64,
+    /// When the node says it settled, in seconds since 1970, if it says.
+    pub settled_at: Option<u64>,
+}
+
+impl LightningPaid {
+    /// The whole satoshis received (the millisatoshis rounded down).
+    pub fn sats(&self) -> u64 {
+        self.amount_msat / 1_000
+    }
+}
 
 /// How a sale ended (CR-07).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +150,7 @@ pub struct Sale {
     pub(crate) late: Vec<(Txid, u64)>,
     pub(crate) late_unlisted: bool,
     pub(crate) refunds: Vec<RefundEntry>,
+    pub(crate) lightning: Option<LightningPaid>,
 }
 
 impl Sale {
@@ -164,6 +194,7 @@ impl Sale {
             late: Vec::new(),
             late_unlisted: false,
             refunds: Vec::new(),
+            lightning: None,
         }
     }
 
@@ -242,6 +273,11 @@ impl Sale {
         self.books_final
     }
 
+    /// The Lightning payment that settled the sale, if one did (CR-109).
+    pub fn lightning(&self) -> Option<&LightningPaid> {
+        self.lightning.as_ref()
+    }
+
     /// The exposure for this sale is counted in the ledger.
     pub fn exposure_counted(&self) -> bool {
         self.exposure_counted
@@ -288,7 +324,7 @@ impl Sale {
             .fold(0u64, |sum, s| sum.saturating_add(s.sats))
     }
 
-    fn rate_of(&self, quote: u32) -> Option<Rate> {
+    pub(crate) fn rate_of(&self, quote: u32) -> Option<Rate> {
         let i = usize::try_from(quote).ok()?;
         self.quotes.get(i).map(|q| q.rate)
     }
@@ -508,7 +544,18 @@ impl Sale {
         }
         out.extend_from_slice(&len32(watch.len()).to_le_bytes());
         out.extend_from_slice(&watch);
-        if !self.refunds.is_empty() {
+        if let Some(paid) = &self.lightning {
+            if let Some(byte) = out.get_mut(4) {
+                *byte = SALE_VERSION_LIGHTNING;
+            }
+            out.extend_from_slice(&paid.payment_hash);
+            out.extend_from_slice(&paid.amount_msat.to_le_bytes());
+            wire::put_opt_u64(&mut out, paid.settled_at);
+            out.extend_from_slice(&len32(self.refunds.len()).to_le_bytes());
+            for entry in &self.refunds {
+                entry.write(&mut out);
+            }
+        } else if !self.refunds.is_empty() {
             if let Some(byte) = out.get_mut(4) {
                 *byte = SALE_VERSION_WITH_REFUNDS;
             }
@@ -539,7 +586,10 @@ impl Sale {
             return Err(DecodeError::BadMagic);
         }
         let version = r.u8()?;
-        if version != wire::VERSION && version != SALE_VERSION_WITH_REFUNDS {
+        if version != wire::VERSION
+            && version != SALE_VERSION_WITH_REFUNDS
+            && version != SALE_VERSION_LIGHTNING
+        {
             return Err(DecodeError::UnsupportedVersion(version));
         }
         let index = r.u32_le()?;
@@ -665,9 +715,22 @@ impl Sale {
         }
         let watch = SaleWatch::from_bytes(r.take(watch_len)?)?;
         let mut refunds: Vec<RefundEntry> = Vec::new();
-        if version == SALE_VERSION_WITH_REFUNDS {
+        let mut lightning = None;
+        if version == SALE_VERSION_LIGHTNING {
+            let payment_hash = r.array::<32>()?;
+            let amount_msat = r.u64_le()?;
+            if amount_msat == 0 {
+                return Err(bad("a Lightning payment is for nothing"));
+            }
+            lightning = Some(LightningPaid {
+                payment_hash,
+                amount_msat,
+                settled_at: r.opt_u64()?,
+            });
+        }
+        if version == SALE_VERSION_WITH_REFUNDS || version == SALE_VERSION_LIGHTNING {
             let n = r.count(MAX_REFUNDS_PER_SALE, 28)?;
-            if n == 0 {
+            if n == 0 && version == SALE_VERSION_WITH_REFUNDS {
                 return Err(bad("version 2 holds no refund entry"));
             }
             for _ in 0..n {
@@ -698,6 +761,9 @@ impl Sale {
         if ended.is_some() && (accepted.is_some() || overridden.is_some()) {
             return Err(bad("an accepted sale has ended"));
         }
+        if lightning.is_some() && (ended.is_some() || !books_final) {
+            return Err(bad("a sale paid over Lightning has ended or is not final"));
+        }
         Ok(Self {
             index,
             script,
@@ -724,6 +790,7 @@ impl Sale {
             late,
             late_unlisted,
             refunds,
+            lightning,
         })
     }
 }

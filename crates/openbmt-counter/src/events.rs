@@ -7,7 +7,7 @@
 
 use openbmt_core::policy::{CheckMode, InstantLabel};
 use openbmt_core::records::RecordKind;
-use openbmt_core::wire::{DecodeError, Reader};
+use openbmt_core::wire::{self, DecodeError, Reader};
 
 use bitcoin::ScriptBuf;
 
@@ -34,6 +34,7 @@ const TAG_REQUOTED: u8 = 15;
 const TAG_REFUND_REQUESTED: u8 = 16;
 const TAG_REFUND_WITHDRAWN: u8 = 17;
 const TAG_REFUND_PAID_IN_CASH: u8 = 18;
+const TAG_PAID_BY_LIGHTNING: u8 = 19;
 
 /// Something that happened to a sale and is written down.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,6 +134,24 @@ pub enum Event {
         payments: Vec<([u8; 32], u64)>,
         /// There were more standing transactions than `payments` holds.
         more: bool,
+    },
+    /// The sale was paid over Lightning, to the invoice the shop's own node
+    /// made for it (CR-109; kind `Payment`). A Lightning payment is final at
+    /// once: the books count the sale as money from this record (CR-31).
+    PaidByLightning {
+        /// The receive index.
+        index: u32,
+        /// When the counter learned of it.
+        at: u64,
+        /// The payment hash of the invoice.
+        payment_hash: [u8; 32],
+        /// What the node received, in millisatoshis.
+        amount_msat: u64,
+        /// When the node says it settled, in seconds since 1970, if it says.
+        settled_at: Option<u64>,
+        /// What the satoshis received are worth in the shop's currency, by
+        /// the sale's own quote in force at `at` (CR-06).
+        valued: Amount,
     },
     /// A payment arrived for a sale that had ended (CR-19; kind `Payment`).
     LatePayment {
@@ -389,6 +408,7 @@ impl Event {
             | Self::PaidAtOnce { index, .. }
             | Self::Confirmed { index, .. }
             | Self::Final { index, .. }
+            | Self::PaidByLightning { index, .. }
             | Self::LatePayment { index, .. }
             | Self::SurplusOwed { index, .. }
             | Self::Dust { index, .. }
@@ -413,6 +433,7 @@ impl Event {
             | Self::PaidAtOnce { at, .. }
             | Self::Confirmed { at, .. }
             | Self::Final { at, .. }
+            | Self::PaidByLightning { at, .. }
             | Self::LatePayment { at, .. }
             | Self::SurplusOwed { at, .. }
             | Self::Dust { at, .. }
@@ -438,6 +459,7 @@ impl Event {
             Self::PaidAtOnce { .. }
             | Self::Confirmed { .. }
             | Self::Final { .. }
+            | Self::PaidByLightning { .. }
             | Self::LatePayment { .. }
             | Self::SurplusOwed { .. }
             | Self::Dust { .. }
@@ -460,6 +482,7 @@ impl Event {
             Self::PaidAtOnce { index, at, .. } => (TAG_PAID_AT_ONCE, *index, *at),
             Self::Confirmed { index, at, .. } => (TAG_CONFIRMED, *index, *at),
             Self::Final { index, at, .. } => (TAG_FINAL, *index, *at),
+            Self::PaidByLightning { index, at, .. } => (TAG_PAID_BY_LIGHTNING, *index, *at),
             Self::LatePayment { index, at, .. } => (TAG_LATE_PAYMENT, *index, *at),
             Self::SurplusOwed { index, at, .. } => (TAG_SURPLUS_OWED, *index, *at),
             Self::Dust { index, at, .. } => (TAG_DUST, *index, *at),
@@ -542,6 +565,18 @@ impl Event {
                     out.extend_from_slice(txid);
                     out.extend_from_slice(&sats.to_le_bytes());
                 }
+            }
+            Self::PaidByLightning {
+                payment_hash,
+                amount_msat,
+                settled_at,
+                valued,
+                ..
+            } => {
+                out.extend_from_slice(payment_hash);
+                out.extend_from_slice(&amount_msat.to_le_bytes());
+                wire::put_opt_u64(&mut out, *settled_at);
+                out.extend_from_slice(&valued.0.to_le_bytes());
             }
             Self::LatePayment { txid, sats, .. } => {
                 out.extend_from_slice(txid);
@@ -701,6 +736,23 @@ impl Event {
                     valued,
                     payments,
                     more,
+                }
+            }
+            TAG_PAID_BY_LIGHTNING => {
+                let payment_hash = r.array::<32>()?;
+                let amount_msat = r.u64_le()?;
+                if amount_msat == 0 {
+                    return Err(DecodeError::NonCanonical(
+                        "a Lightning payment is for nothing",
+                    ));
+                }
+                Self::PaidByLightning {
+                    index,
+                    at,
+                    payment_hash,
+                    amount_msat,
+                    settled_at: r.opt_u64()?,
+                    valued: Amount(r.u64_le()?),
                 }
             }
             TAG_LATE_PAYMENT => Self::LatePayment {

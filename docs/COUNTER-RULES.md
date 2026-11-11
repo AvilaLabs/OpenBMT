@@ -722,7 +722,111 @@ limits in the signed settings: these rules only say when the counter uses it.
   own-node tier, whatever any report said, and `judge` is the same call as
   `judge_with_own_node` with `OwnNodeHealth::not_configured()`.
 
-## 12. What these rules do not do
+## 12. Lightning at the counter
+
+These rules join the invoices of the shop's own Lightning node
+(`docs/LIGHTNING-RULES.md`, LN-01 to LN-23; `docs/DESIGN.md` section 8) to
+the counter. The library of that document builds the requests, reads the
+replies and checks the invoice; the driver that asks the node is in
+`crates/openbmt-counter-node` (`lightning`); the judgment of a paid sale is in
+`crates/openbmt-counter`; the transport and the screens are the app's. The
+node's public key is part of the signed settings (LN-03); the credential the
+counter holds is not, and never leaves the counter.
+
+- **CR-109.** A sale is paid over Lightning when the shop's own node says
+  the invoice made for it was settled for at least what a quote of the sale
+  asks (LN-14). `Counter::lightning_paid` takes the node's facts: the
+  payment hash, the amount received in millisatoshis and the time the node
+  says it settled. The sale is then paid and final at once, with no instant
+  limit, no exposure and no wait for a block (DESIGN section 8): it shows
+  `PaidLightning` (green, "Paid over Lightning"), the POS is told it is paid
+  (CR-30), the books are told it is final (CR-31) and the sale is no longer
+  live (`books_final`; it does not expire, cannot be cancelled and takes no
+  new quote). The writes are the records `PaidByLightning` (kind `Payment`),
+  the surplus of CR-111 if there is one and `PosPaid`, then the sale (CR-41).
+  Nothing is written and the call is refused for a sale the counter does not
+  hold, for a sale that has ended or is final (the payment stays in the
+  node, which is the one place that has it), for a sale that was paid
+  another way (accepted at once, accepted by a person, or with enough on its
+  address) and for a payment below the least any quote of the sale asks: the
+  invoice of an earlier quote may be paid after a newer quote asks more or
+  less, and the payment counts if it covers any of them. Asking again for a
+  sale that is paid over Lightning already changes nothing. The cashier's
+  screen says "Lightning, final" as the check line (CR-105) and says that a
+  refund is given in cash or on-chain and never over Lightning.
+- **CR-110.** What the sale keeps of the payment is the payment hash, the
+  amount in millisatoshis and the settle time if the node gave one. They are
+  in the stored sale (`OBML` version 3, written only for a sale paid over
+  Lightning, so every earlier file reads back and every earlier sale is
+  written as before) and in the record `PaidByLightning`, which also holds
+  what the satoshis received are worth in the shop's currency by the quote in
+  force (CR-06). The record is read strictly: a payment for nothing, a byte
+  too few or too many, and a stored form that is not final or has ended do
+  not read. The books carry them (`docs/BOOKS-RULES.md`, BK-32 onward).
+- **CR-111.** The address of a sale that is paid over Lightning stays
+  watched, and the two payments are not mixed. What had arrived on the
+  address before the node's payment, above the dust line, is recorded as
+  owed to the customer (CR-16, `SurplusOwed`). What arrives after is a late
+  payment (CR-19): recorded on the sale, flagged for the owner, shown as "Late
+  payment", and never a change of the sale's state. A refund of a sale paid
+  over Lightning uses the refund paths of section 7: what the node received
+  counts as received and as at the refund depth at once, so a cash refund
+  (CR-71) and an on-chain refund (CR-60) are both open. There is no refund
+  over Lightning: the counter holds no key that can pay.
+- **CR-112.** The driver asks the node for an invoice for each quote of a sale:
+  the amount is the quote's satoshis times 1,000, the lifetime
+  `QUOTE_SECS` (CR-05, LN-13) and the attempt is the next one for that sale
+  and quote (LN-15). A new quote of the same sale (CR-05) asks for a new
+  invoice and drops the old one. While a sale is open, unpaid and its
+  invoice is live, the driver asks the node whether it is paid every 2
+  seconds, at most one request at a time. It stops when the sale is closed
+  (paid, cancelled, expired or final) or the invoice has run out. A node
+  that cannot be reached, or whose reply is refused, is a note in the log
+  and never a state of the sale. The driver holds no clock and no network:
+  it hands out the next request with a number and takes the reply for that
+  number; a reply for any other number is ignored.
+- **CR-113.** The sale shows its on-chain code at once and never waits for
+  Lightning. When the invoice has passed LN-17 against the node key of the
+  signed settings, the code becomes the code of LN-18, in capitals when LN-19
+  allows. If no invoice has come 6 seconds after the quote, or it fails a
+  check, the on-chain code stays and one line says that Lightning is not
+  available for this sale, with the reason under the details (LN-22): the
+  cashier takes another kind of payment if the customer has only Lightning
+  and tells the owner what the details say. A sale opened with no Lightning
+  credential, or while Lightning is off (CR-116), has no such line.
+- **CR-114.** The app talks to the node over HTTPS only, with no redirect, a
+  body of at most 1,000,000 bytes, a connect timeout of 20 seconds through Tor
+  and 10 directly, and a read timeout of 15 seconds. It goes through Orbot's
+  SOCKS proxy, with the name unresolved so that the proxy resolves it, when
+  the host ends in `.onion` or the shop's Tor setting is on (CR-87), and
+  directly otherwise. A home-network host is allowed, because the certificate
+  is pinned and every invoice must be signed by the node key of the settings
+  (LN-12, LN-17). The handshake is accepted only when the library accepts
+  the leaf certificate (`CertPin::accepts`); the host name is not checked and
+  no authority is asked. One worker thread makes the requests the node hands
+  out.
+- **CR-115.** The credential is set on the counter behind the manager's PIN
+  (CR-84 to CR-86): for LND the `lndconnect://` address, scanned or pasted;
+  for Core Lightning the address, the rune and the certificate, one field
+  each. The setup words say that the counter holds a key limited to
+  invoices, that the node must run a current release (LN-04) and that
+  running Lightning means watching liquidity, updates and backups (DESIGN
+  section 8). The connection is tested as LN-20 says, against the node key of
+  the signed settings; if the settings name no node, nothing is tested or
+  saved and the words say that the owner has not named the shop's Lightning
+  node yet. The credential is saved only after the test passes, sealed like
+  the counter's other secrets (CR-98) in the app's `noBackupFilesDir`,
+  and removing it deletes it at once. It is never part of the pairing record
+  or the settings, and is never in a log or a screen.
+- **CR-116.** The counter's status shows a Lightning line only when a
+  credential is saved: "Lightning ready", or why not: the node cannot be
+  reached, it refused the key, or the settings name another node now. The
+  credential is kept with the node key it was tested against. When the signed
+  settings name another node or none, or the saved credential does not read
+  back, Lightning is off, the status says so, and it stays off until the
+  credential is set up again; a sale then has no Lightning line (CR-113).
+
+## 13. What these rules do not do
 
 - **They do not check payments.** Proof of work, proofs, peers and
   conflicts are the watcher's. A wrong fact handed in gives a wrong
@@ -731,7 +835,8 @@ limits in the signed settings: these rules only say when the counter uses it.
   cannot. A payment that never confirms is "stuck" (CR-18); the limits
   of `docs/DESIGN.md` §6 are what protect the shop.
 - **They do not refund.** Surplus and cancelled sales with money on them
-  are recorded for the owner's refund session (§2.4).
+  are recorded for the owner's refund session (§2.4). A sale paid over
+  Lightning is refunded in cash or on-chain, never over Lightning (CR-111).
 - **They do not talk to the POS.** CR-30 says what to report; the
   connector reports it.
 - **They do not know who a person is.** The list of managers and their
