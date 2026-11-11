@@ -88,9 +88,9 @@ pub use rates::{RateCombineArgs, RateParseArgs, RateSourceView, RateView, Sample
 pub use say::{all_words, words_for};
 pub use shop::SettingsView;
 pub use views::{
-    ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome, OpenArgs,
-    LinkStepView, LinkView, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView,
-    PairBeginArgs, PairStartedView, PairingView, PumpView, RefundArgs, RefundAskView, RefundRow,
-    RefundStateView, RelayKind, ReportView, RequoteArgs, ScreenView, StartConfig, StateView,
-    StatusView, WithdrawArgs, WordsView,
+    ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome, LinkStepView,
+    LinkView, OpenArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView, PairBeginArgs,
+    PairStartedView, PairingView, PumpView, RefundArgs, RefundAskView, RefundRow, RefundStateView,
+    RelayKind, ReportView, RequoteArgs, ScreenView, StartConfig, StateView, StatusView,
+    WithdrawArgs, WordsView,
 };

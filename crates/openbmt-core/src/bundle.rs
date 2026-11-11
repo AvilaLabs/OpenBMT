@@ -423,7 +423,10 @@ mod tests {
         assert_eq!(&bundle().to_bytes()[..5], b"OBMs\x01");
         assert_eq!(bundle().relay, None);
         assert_eq!(
-            bundle().with_relay(Some(relay())).with_relay(None).to_bytes(),
+            bundle()
+                .with_relay(Some(relay()))
+                .with_relay(None)
+                .to_bytes(),
             bundle().to_bytes()
         );
     }

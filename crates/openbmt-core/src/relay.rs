@@ -159,7 +159,9 @@ impl RelayHint {
                 let text = std::str::from_utf8(r.take(len)?)
                     .map_err(|_| DecodeError::NonCanonical("the relay address is not UTF-8"))?;
                 if !peer_is_valid(text) {
-                    return Err(DecodeError::NonCanonical("the relay address is not ip:port"));
+                    return Err(DecodeError::NonCanonical(
+                        "the relay address is not ip:port",
+                    ));
                 }
                 let addr = text
                     .parse()
@@ -246,7 +248,11 @@ mod tests {
     }
 
     fn direct() -> RelayHint {
-        RelayHint::new(RelayRoute::Direct("192.168.1.20:48333".parse().unwrap()), key()).unwrap()
+        RelayHint::new(
+            RelayRoute::Direct("192.168.1.20:48333".parse().unwrap()),
+            key(),
+        )
+        .unwrap()
     }
 
     fn onion() -> RelayHint {
@@ -359,12 +365,19 @@ mod tests {
         for hint in [direct(), onion()] {
             let bytes = signed(hint).to_bytes();
             assert_eq!(&bytes[..5], b"OBMy\x01");
-            assert_strict_decoding(&bytes, SignedRelayHint::from_bytes, SignedRelayHint::to_bytes);
+            assert_strict_decoding(
+                &bytes,
+                SignedRelayHint::from_bytes,
+                SignedRelayHint::to_bytes,
+            );
         }
         let bytes = signed(direct()).to_bytes();
         let mut m = bytes.clone();
         m[..4].copy_from_slice(b"OBMs");
-        assert_eq!(SignedRelayHint::from_bytes(&m).unwrap_err(), DecodeError::BadMagic);
+        assert_eq!(
+            SignedRelayHint::from_bytes(&m).unwrap_err(),
+            DecodeError::BadMagic
+        );
         for v in [0u8, 2, 255] {
             let mut m = bytes.clone();
             m[4] = v;

@@ -77,11 +77,11 @@ use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::error::{internal, refused_by, wrong_state, CounterError};
 use crate::host::{real_spawn, Entry, Spawn};
 use crate::pay::Payment;
-use crate::relay::take_relay;
 use crate::rates::{
     rate_combine, rate_parse, rate_sources, RateCombineArgs, RateParseArgs, RateSourceView,
     RateView, SampleView,
 };
+use crate::relay::take_relay;
 use crate::say::{TONES, WHOS};
 use crate::shop::{own_node_check, pairing_read, SettingsView};
 use crate::views::{

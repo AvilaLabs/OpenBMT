@@ -155,7 +155,10 @@ fn unknown_handle() -> CounterError {
 }
 
 fn no_link() -> CounterError {
-    wrong_state("link-none", "the pairing has no relay, so the counter has no link")
+    wrong_state(
+        "link-none",
+        "the pairing has no relay, so the counter has no link",
+    )
 }
 
 fn reports(list: Vec<Report>) -> Vec<ReportView> {

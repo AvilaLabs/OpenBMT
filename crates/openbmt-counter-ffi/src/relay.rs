@@ -192,7 +192,8 @@ impl LinkSlot {
 /// at the next start. Nothing is changed here.
 pub(crate) fn take_relay(record: &[u8], frame: &[u8]) -> Result<Vec<u8>, CounterError> {
     let record = PairingRecord::from_bytes(record).map_err(|e| refused(PairRefused::Record(e)))?;
-    let signed = SignedRelayHint::from_bytes(frame).map_err(|e| relay_refused(RelayRefused::Bytes(e)))?;
+    let signed =
+        SignedRelayHint::from_bytes(frame).map_err(|e| relay_refused(RelayRefused::Bytes(e)))?;
     let next = record.with_relay(&signed).map_err(|e| relay_refused(e))?;
     Ok(next.to_bytes())
 }

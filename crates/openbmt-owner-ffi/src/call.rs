@@ -464,7 +464,9 @@ fn build_ops() -> Vec<Op> {
         op(94, "counter_delivered", Node, |c, counter: Vec<u8>| {
             c.entry()?.counter_delivered(counter)
         }),
-        op(95, "counter_relay", Node, |c, ()| c.entry()?.counter_relay()),
+        op(95, "counter_relay", Node, |c, ()| {
+            c.entry()?.counter_relay()
+        }),
     ]
 }
 

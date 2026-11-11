@@ -105,9 +105,16 @@ fn cr_134_the_link_starts_on_the_data_folder_and_a_later_start_needs_its_files()
     // An onion relay with no proxy starts nothing and makes no file.
     let other = Scratch::new();
     assert_eq!(
-        start_link(other.path(), id(3), id(1).device_id(), &onion(), None, false)
-            .map(|_| ())
-            .unwrap_err(),
+        start_link(
+            other.path(),
+            id(3),
+            id(1).device_id(),
+            &onion(),
+            None,
+            false
+        )
+        .map(|_| ())
+        .unwrap_err(),
         LinkNotStarted::NeedsProxy
     );
     assert!(!other.path().join("link-inbox").exists());

@@ -31,12 +31,17 @@ const ONION: &str = "a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad";
 /// (3); its own key is 99.
 fn relay() -> Server {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let mut relay =
-        Relay::new(id(99), RelayConfig::default(), MemoryStore::new()).unwrap();
+    let mut relay = Relay::new(id(99), RelayConfig::default(), MemoryStore::new()).unwrap();
     relay
         .set_members(&[id(1).device_id(), id(3).device_id()])
         .unwrap();
-    Server::start(listener, relay, Arc::new(SystemClock), ServerConfig::default()).unwrap()
+    Server::start(
+        listener,
+        relay,
+        Arc::new(SystemClock),
+        ServerConfig::default(),
+    )
+    .unwrap()
 }
 
 fn hint_for(addr: SocketAddr) -> RelayHint {
@@ -157,11 +162,7 @@ fn cr_135_a_pairing_with_no_relay_has_no_link_and_says_so() {
     let rig = Rig::new();
     let handle = rig.start_with(&config_for(&rig, None, None));
     assert_eq!(state(&rig, handle), None);
-    let response = rig.call(
-        OP_LINK_STEP,
-        handle,
-        &W::new().u64(T0).u8(0).0,
-    );
+    let response = rig.call(OP_LINK_STEP, handle, &W::new().u64(T0).u8(0).0);
     let fault = Rd::error(&response).expect("a refusal");
     assert_eq!(fault.rule, "link-none");
     assert_eq!(fault.words.heading, "No link to the Box");
@@ -194,8 +195,13 @@ fn cr_136_a_relay_that_does_not_know_the_counter_is_refused_and_not_unreachable(
     relay
         .set_members(&[id(1).device_id(), id(5).device_id()])
         .unwrap();
-    let server =
-        Server::start(listener, relay, Arc::new(SystemClock), ServerConfig::default()).unwrap();
+    let server = Server::start(
+        listener,
+        relay,
+        Arc::new(SystemClock),
+        ServerConfig::default(),
+    )
+    .unwrap();
     let rig = Rig::new();
     let handle = rig.start_with(&config_for(&rig, Some(hint_for(server.local_addr())), None));
     let (link, _) = step(&rig, handle, T0, false);
