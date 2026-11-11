@@ -1,5 +1,6 @@
 package org.openbmt.key.app
 
+import org.openbmt.app.Format
 import org.openbmt.key.CheckView
 import org.openbmt.key.Direction
 import org.openbmt.key.LineDetail

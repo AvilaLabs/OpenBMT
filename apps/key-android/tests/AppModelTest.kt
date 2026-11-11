@@ -4,6 +4,14 @@ import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.security.MessageDigest
+import org.openbmt.app.Format
+import org.openbmt.app.SealedFile
+import org.openbmt.app.Sealer
+import org.openbmt.app.Sealed
+import org.openbmt.app.SayCheck
+import org.openbmt.app.StoreFormat
+import org.openbmt.app.StoreFormatException
+import org.openbmt.app.Who
 import org.openbmt.key.HealthDetail
 import org.openbmt.key.LineDetail
 import org.openbmt.key.LineKind
@@ -37,47 +45,8 @@ object AppModelTest {
         throw AssertionError("FAILED: no error for $what")
     }
 
-    // ---- the checks of openbmt_core::say::check, as far as text can be checked ------
-
-    private val jargon = listOf(
-        "change mark", "receive mark", "dust", "slice", "exposure", "sighash", "p2wsh", "p2wpkh", "p2tr",
-        "p2pkh", "p2sh", "witness", "outpoint", "psbt", "xpub", "descriptor", "mempool", "utxo", "nonce",
-        "hash", "unix", "internal", "panic", "decode",
-    )
-
-    private fun plainProblem(text: String): String? {
-        if (text.any { Character.isISOControl(it) }) return "control character"
-        if (Regex("[A-Z]{2}-[0-9]").containsMatchIn(text)) return "rule number"
-        if (Regex("[0-9a-fA-F]{12,}").findAll(text).any { m -> m.value.any { it.isDigit() } && m.value.any { it.isLetter() } }) {
-            return "long hex"
-        }
-        if (Regex("[0-9]{9,}").containsMatchIn(text)) return "raw number"
-        if (Regex("[A-Za-z0-9]\\(").containsMatchIn(text)) return "call notation"
-        if (listOf("_", "::", "{", "}", "0x").any { text.contains(it) }) return "notation"
-        val lower = text.lowercase()
-        jargon.firstOrNull { lower.contains(it) }?.let { return "jargon $it" }
-        return null
-    }
-
-    private fun sentenceProblem(text: String): String? {
-        if (text.isEmpty() || text.length > 140) return "length"
-        if (!text.endsWith(".") && !text.endsWith("?")) return "no full stop"
-        if (text[0].isLowerCase()) return "small first letter"
-        return plainProblem(text)
-    }
-
     /** SC-12 as far as the app can check it; null when the words pass. */
-    fun wordsProblem(w: Words): String? {
-        if (w.heading.isEmpty() || w.heading.length > 28 || w.heading.endsWith(".")) return "heading length"
-        plainProblem(w.heading)?.let { return "heading: $it" }
-        sentenceProblem(w.what)?.let { return "what: $it" }
-        sentenceProblem(w.next)?.let { return "next: $it" }
-        if (w.what == w.next) return "same sentences"
-        if (w.who !in 0..6 || w.tone !in 0..3) return "tone or who"
-        w.detail?.let { if (it.length > 200 || it.any { c -> Character.isISOControl(c) }) return "detail" }
-        w.quoted?.let { if (it.text != Format.cleanForeign(it.text)) return "quoted not clean" }
-        return null
-    }
+    private fun wordsProblem(w: Words): String? = SayCheck.problem(w.say())
 
     // ---- a fake cipher: not secret, only shaped like AES-GCM (12-byte IV, 16-byte tag) ------
 
@@ -173,36 +142,6 @@ object AppModelTest {
         ok(accept is Screen.AcceptWallet && !accept.holdsKey2, "identity only: accept the wallet")
         val home = ScreenModel.pick(emptyList(), null, SetupState.Ready(true))
         ok(home is Screen.Home && home.holdsKey2, "ready: home")
-    }
-
-    private fun wordsModelTests() {
-        val w = Words(
-            2, 5, "Over the limit", "This is over.", "Pay less.", "SR-35", 1_700_000_000L,
-            Quoted("The cashier wrote", "hello‮\u0007  world\nagain"), "a detail",
-        )
-        val m = WordsModel.of(w) { "T$it" }
-        ok(m.colour == Colour.Red, "stop is red")
-        ok(m.who == "The key holder does this step.", "who as a sentence")
-        ok(m.details == listOf("Rule: SR-35", "Time: T1700000000", "Detail: a detail"), "the fold: ${m.details}")
-        ok(m.quotedText == "“hello world again”", "quoted text cleaned and in quotation marks: ${m.quotedText}")
-        ok(m.quotedLabel!!.contains("elsewhere") && m.quotedLabel!!.contains("The cashier wrote"), "quoted text is marked")
-        ok(!m.heading.contains("hello") && !m.what.contains("hello") && !m.next.contains("hello"), "quoted text is not in the sentences")
-        val plain = WordsModel.of(Words(1, 0, "Done", "It is done.", "Nothing to do.", null, null, null, null))
-        ok(plain.colour == Colour.Green && plain.details.isEmpty() && plain.quotedText == null, "no fold, no quote")
-        ok(WordsModel.colourOf(0) == Colour.Blue && WordsModel.colourOf(3) == Colour.Neutral, "tone colours")
-        val long = Words(0, 0, "H", "W.", "N.", null, null, Quoted("From", "x".repeat(300)), null)
-        ok(WordsModel.of(long).quotedText!!.length == 64 + 2, "quoted text cut at 64 characters")
-    }
-
-    private fun formatTests() {
-        ok(Format.sats(1) == "1 sat" && Format.sats(12345) == "12,345 sats" && Format.sats(0) == "0 sats", "sats")
-        ok(Format.sats(1_000_000) == "1,000,000 sats", "sats with two separators")
-        ok(Format.fromHex("00ff10")!!.contentEquals(byteArrayOf(0, -1, 16)), "hex")
-        ok(Format.fromHex("0") == null && Format.fromHex("zz") == null, "bad hex")
-        ok(Format.toAmount("1,000") == 1000L && Format.toAmount("") == null && Format.toAmount("-1") == null, "amounts")
-        ok(Format.toAmount("1".repeat(19)) == null, "amounts have at most 18 digits")
-        ok(Format.toFlips("HT h,t") == listOf(true, false, true, false) && Format.toFlips("HX") == null, "flips")
-        ok(Format.toRolls("1 2 7 6x") == "126", "rolls")
     }
 
     private fun formatOfFileTests() {
@@ -305,14 +244,9 @@ object AppModelTest {
     fun main(args: Array<String>) {
         val keyMd = args.firstOrNull()?.let { File(it) }
         if (keyMd != null) ok(keyMd.isFile, "docs/screens/key.md exists at ${keyMd.path}")
-        ok(wordsProblem(Words(0, 5, "Bad", "no full stop", "Fine.", null, null, null, null)) != null, "the checker finds a missing full stop")
-        ok(wordsProblem(Words(0, 5, "Bad", "A hash is here.", "Fine.", null, null, null, null)) != null, "the checker finds jargon")
-        ok(wordsProblem(Words(0, 5, "Bad", "Rule SR-35 broke.", "Fine.", null, null, null, null)) != null, "the checker finds a rule number")
         wordsAreFine(keyMd)
         guardTests()
         screenTests()
-        wordsModelTests()
-        formatTests()
         formatOfFileTests()
         fileTests()
         lineTests()

@@ -1,29 +1,13 @@
 package org.openbmt.key.app
 
+import org.openbmt.app.Format
+import org.openbmt.app.Tones
+import org.openbmt.app.Who
 import org.openbmt.key.CheckStatus
 import org.openbmt.key.KeyException
 import org.openbmt.key.KitCheck
 import org.openbmt.key.SetupState
 import org.openbmt.key.Words
-
-/** The numbers of the tone field of [Words] (PROTOCOL.md). */
-object Tones {
-    const val INFO = 0
-    const val GOOD = 1
-    const val STOP = 2
-    const val ENDED = 3
-}
-
-/** The numbers of the who field of [Words] (PROTOCOL.md). */
-object Who {
-    const val NOBODY = 0
-    const val CUSTOMER = 1
-    const val CASHIER = 2
-    const val MANAGER = 3
-    const val OWNER = 4
-    const val KEY_HOLDER = 5
-    const val BOX_KEEPER = 6
-}
 
 /**
  * The words of the app's own states and refusals (docs/SCREEN-RULES.md). The

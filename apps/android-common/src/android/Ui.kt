@@ -1,4 +1,4 @@
-package org.openbmt.key.app
+package org.openbmt.app
 
 import android.content.Context
 import android.graphics.Color
@@ -14,7 +14,6 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
-import org.openbmt.key.Words
 
 /**
  * One `Words` on screen: a coloured band with the heading, the two
@@ -88,7 +87,7 @@ class Ui(private val context: Context) {
         addView(text(quotedText, 16f, mono = true))
     }
 
-    fun words(w: Words): View = WordsView(context, WordsModel.of(w))
+    fun words(model: WordsModel): View = WordsView(context, model)
 
     fun button(label: String, onClick: () -> Unit): Button = Button(context).apply {
         text = label

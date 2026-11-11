@@ -1,4 +1,4 @@
-package org.openbmt.key.app
+package org.openbmt.app
 
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec

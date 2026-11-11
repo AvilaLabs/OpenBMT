@@ -1,6 +1,4 @@
-package org.openbmt.key.app
-
-import org.openbmt.key.Words
+package org.openbmt.app
 
 /** The four colours of docs/SCREEN-RULES.md SC-06. */
 enum class Colour(val argb: Int) {
@@ -9,6 +7,46 @@ enum class Colour(val argb: Int) {
     Red(0xFFC62828.toInt()),
     Neutral(0xFF546E7A.toInt()),
 }
+
+/** The numbers of the tone field of the words (PROTOCOL.md of the libraries). */
+object Tones {
+    const val INFO = 0
+    const val GOOD = 1
+    const val STOP = 2
+    const val ENDED = 3
+}
+
+/** The numbers of the who field of the words (PROTOCOL.md of the libraries). */
+object Who {
+    const val NOBODY = 0
+    const val CUSTOMER = 1
+    const val CASHIER = 2
+    const val MANAGER = 3
+    const val OWNER = 4
+    const val KEY_HOLDER = 5
+    const val BOX_KEEPER = 6
+}
+
+/** Text from another device, with where it came from (SC-08). */
+data class SayQuoted(val from: String, val text: String)
+
+/**
+ * What a person is shown, as the two apps' bindings give it: the fields of
+ * the library's `Words`. Each app's binding has its own `Words` class; each
+ * converts to this one, so the colours, the checks and the views are written
+ * once.
+ */
+data class SayWords(
+    val tone: Int,
+    val who: Int,
+    val heading: String,
+    val what: String,
+    val next: String,
+    val code: String?,
+    val at: Long?,
+    val quoted: SayQuoted?,
+    val detail: String?,
+)
 
 /**
  * What a `WordsView` draws, as text: the colour, the three lines and who, the
@@ -50,7 +88,7 @@ class WordsModel(
         }
 
         /** [clock] turns seconds since 1970 into the person's own time. */
-        fun of(words: Words, clock: (Long) -> String = Format::localTime): WordsModel {
+        fun of(words: SayWords, clock: (Long) -> String = Format::localTime): WordsModel {
             val quoted = words.quoted
             val details = ArrayList<String>()
             words.code?.let { details.add("Rule: $it") }

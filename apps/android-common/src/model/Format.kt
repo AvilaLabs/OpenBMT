@@ -1,4 +1,4 @@
-package org.openbmt.key.app
+package org.openbmt.app
 
 import java.text.SimpleDateFormat
 import java.util.Date

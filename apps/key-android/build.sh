@@ -17,6 +17,7 @@
 #   OPENBMT_GUARD     the memory guard   (default: ~/.cache/openbmt/guard.sh)
 #   KEYAPK_OUT        build directory    (default: ~/.cache/openbmt/target/keyapk/apk)
 #   KEYAPK_SKIP_RUST  set to 1 to reuse the .so files of an earlier run
+#   KEYAPK_CARGO_TARGET  the cargo target directory (default: ~/.cache/openbmt/target/keyapk)
 
 set -euo pipefail
 
@@ -29,7 +30,7 @@ sdk="${ANDROID_SDK:-$HOME/Android/Sdk}"
 ndk="${ANDROID_NDK_HOME:-$sdk/ndk/26.3.11579264}"
 export KOTLIN_HOME="${KOTLIN_HOME:-$cache/tools/kotlinc}"
 out="${KEYAPK_OUT:-$cache/target/keyapk/apk}"
-cargo_target="$cache/target/keyapk"
+cargo_target="${KEYAPK_CARGO_TARGET:-$cache/target/keyapk}"
 keydir="$cache/tmp/keyapk"
 bt="$sdk/build-tools/36.0.0"
 platform="$sdk/platforms/android-36/android.jar"
@@ -37,6 +38,7 @@ stdlib="$KOTLIN_HOME/lib/kotlin-stdlib.jar"
 kotlin_version="2.2.20"
 stdlib_sha256="8836ccffd3585fadda9901244b20d42901d2f3cd581058d8434e2ffabcf3a3e7"
 wrapper="$repo/crates/openbmt-key-ffi/bindings/kotlin/org/openbmt/key"
+common="$repo/apps/android-common"
 min_sdk=29
 target_sdk=36
 abis=("arm64-v8a:aarch64-linux-android" "x86_64:x86_64-linux-android")
@@ -118,7 +120,8 @@ heavy java -Xmx2g -cp "$KOTLIN_HOME/lib/*" org.jetbrains.kotlin.cli.jvm.K2JVMCom
     -no-stdlib -no-reflect -Werror -jvm-target 1.8 \
     -classpath "$platform:$stdlib" \
     -d "$out/classes" \
-    "$wrapper/Native.kt" "$wrapper/KeyApp.kt" "$here"/src/model/*.kt "$here"/src/android/*.kt
+    "$wrapper/Native.kt" "$wrapper/KeyApp.kt" "$common"/src/model/*.kt "$common"/src/android/*.kt \
+    "$here"/src/model/*.kt "$here"/src/android/*.kt
 jar cf "$out/classes.jar" -C "$out/classes" .
 
 # ---- dex --------------------------------------------------------------------------------

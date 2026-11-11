@@ -1,16 +1,8 @@
-package org.openbmt.key.app
+package org.openbmt.app
 
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
-import java.nio.channels.FileChannel
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
-import java.nio.file.StandardOpenOption
-import java.security.SecureRandom
-import org.openbmt.key.KeyStore
 
 /** An encrypted blob: the IV and the ciphertext with its tag. */
 class Sealed(val iv: ByteArray, val ciphertext: ByteArray)
@@ -75,15 +67,13 @@ object StoreFormat {
 }
 
 /**
- * The state file: the library's bytes, sealed, in one file. A save writes a
- * temporary file next to it, syncs it, then renames it over the real one, so
- * a crash leaves the old state or the new one and never a half. [load] gives
- * null on a first start (no file) and throws on a file that does not read or
- * does not decrypt; a leftover temporary file is never read.
+ * The state file: the bytes of an app, sealed, in one file. A save goes
+ * through [DurableFile]. [load] gives null on a first start (no file) and
+ * throws on a file that does not read or does not decrypt; a leftover
+ * temporary file is never read.
  */
 class SealedFile(private val dir: File, private val sealer: Sealer, name: String = "state.obks") {
     private val file = File(dir, name)
-    private val temp = File(dir, "$name.tmp")
 
     fun load(): ByteArray? {
         if (!file.exists()) return null
@@ -92,45 +82,6 @@ class SealedFile(private val dir: File, private val sealer: Sealer, name: String
     }
 
     fun save(bytes: ByteArray) {
-        val blob = StoreFormat.encode(sealer.seal(bytes, StoreFormat.AAD))
-        try {
-            FileOutputStream(temp).use { out ->
-                out.write(blob)
-                out.flush()
-                out.fd.sync()
-            }
-            try {
-                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE)
-            } catch (e: AtomicMoveNotSupportedException) {
-                throw IOException("the file system cannot rename atomically", e)
-            }
-        } catch (e: Throwable) {
-            temp.delete()
-            throw e
-        }
-        syncDirectory()
+        DurableFile.write(dir, file, StoreFormat.encode(sealer.seal(bytes, StoreFormat.AAD)))
     }
-
-    /** Makes the rename itself durable. Not every file system lets a directory be opened; then the rename alone stands. */
-    private fun syncDirectory() {
-        try {
-            FileChannel.open(dir.toPath(), StandardOpenOption.READ).use { it.force(true) }
-        } catch (_: IOException) {
-        }
-    }
-}
-
-/** The library's [KeyStore] over a [SealedFile], the platform's random source and the clock. */
-class PersistentStore(
-    private val file: SealedFile,
-    private val random: SecureRandom = SecureRandom(),
-    private val clock: () -> Long = { System.currentTimeMillis() / 1000 },
-) : KeyStore {
-    override fun load(): ByteArray? = file.load()
-
-    override fun save(bytes: ByteArray) = file.save(bytes)
-
-    override fun random(n: Int): ByteArray = ByteArray(n).also { random.nextBytes(it) }
-
-    override fun now(): Long = clock()
 }

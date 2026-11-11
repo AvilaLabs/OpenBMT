@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The tests of the Key app's pure parts, on the desktop JVM: the screen model,
-# the words model, the app's own words (against docs/screens/key.md), the line
-# text and the saved-state file. No Android class is used.
+# the app's own words (against docs/screens/key.md), the line text and the
+# saved-state file, then the tests of the shared code
+# (apps/android-common/tests). No Android class is used.
 #
 # Needs JAVA_HOME (JDK 21) and KOTLIN_HOME (the Kotlin 2.2.20 compiler
 # directory, with lib/kotlin-compiler.jar and lib/kotlin-stdlib.jar). The
@@ -16,11 +17,14 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 app="$(dirname "$here")"
 repo="$(cd "$app/../.." && pwd)"
+common="$repo/apps/android-common"
 wrapper="$repo/crates/openbmt-key-ffi/bindings/kotlin/org/openbmt/key"
 lib="$KOTLIN_HOME/lib"
 scratch="${1:-$(mktemp -d "${TMPDIR:-$HOME/.cache/openbmt/tmp}/keyapk-jvm.XXXXXX")}"
 mkdir -p "$scratch"
 trap 'rm -rf "$scratch/jvm-classes"' EXIT
+
+"$common/tests/run-jvm.sh" "$scratch/common"
 
 "$JAVA_HOME/bin/java" -Xmx2g -cp "$lib/*" \
     org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
@@ -28,7 +32,7 @@ trap 'rm -rf "$scratch/jvm-classes"' EXIT
     -classpath "$lib/kotlin-stdlib.jar:$lib/annotations-13.0.jar" \
     -d "$scratch/jvm-classes" \
     "$wrapper/Native.kt" "$wrapper/KeyApp.kt" \
-    "$app"/src/model/*.kt "$app/tests/AppModelTest.kt"
+    "$common"/src/model/*.kt "$app"/src/model/*.kt "$app/tests/AppModelTest.kt"
 
 "$JAVA_HOME/bin/java" -Xmx2g -cp "$scratch/jvm-classes:$lib/kotlin-stdlib.jar" \
     org.openbmt.key.app.AppModelTest "$repo/docs/screens/key.md"
