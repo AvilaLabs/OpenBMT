@@ -130,6 +130,23 @@ fn funds(sale: &mut Sale, at: u64) {
     }
 }
 
+/// A payment that arrived after the sale ended (CR-19): the 32 bytes are the
+/// transaction ID, or the payment hash of an invoice paid over Lightning.
+fn late(sale: &mut Sale, at: u64, txid: [u8; 32], sats: u64) -> Result<(), BooksError> {
+    if sale.late_payments.len() >= MAX_PER_SALE {
+        return Err(BooksError::TooMany);
+    }
+    sale.late_payments.push(LatePayment { txid, sats });
+    if matches!(
+        sale.state,
+        SaleState::Open | SaleState::Expired | SaleState::Cancelled | SaleState::LatePayment
+    ) {
+        sale.state = SaleState::LatePayment;
+    }
+    funds(sale, at);
+    Ok(())
+}
+
 /// BK-05: apply one event to its sale.
 fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), BooksError> {
     match event {
@@ -224,25 +241,14 @@ fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), Boo
             });
             funds(sale, *at);
         }
-        Event::LatePayment { at, txid, sats, .. } => {
-            if sale.late_payments.len() >= MAX_PER_SALE {
-                return Err(BooksError::TooMany);
-            }
-            sale.late_payments.push(LatePayment {
-                txid: *txid,
-                sats: *sats,
-            });
-            if matches!(
-                sale.state,
-                SaleState::Open
-                    | SaleState::Expired
-                    | SaleState::Cancelled
-                    | SaleState::LatePayment
-            ) {
-                sale.state = SaleState::LatePayment;
-            }
-            funds(sale, *at);
-        }
+        Event::LatePayment { at, txid, sats, .. } => late(sale, *at, *txid, *sats)?,
+        // The payment hash stands where a transaction ID does.
+        Event::LateLightning {
+            at,
+            payment_hash,
+            amount_msat,
+            ..
+        } => late(sale, *at, *payment_hash, (*amount_msat / 1_000).max(1))?,
         Event::SurplusOwed { sats, .. } => {
             sale.surplus_owed_sats = sale
                 .surplus_owed_sats
@@ -644,6 +650,7 @@ fn event_time(event: &Event) -> Option<u64> {
         | Event::Final { at, .. }
         | Event::PaidByLightning { at, .. }
         | Event::LatePayment { at, .. }
+        | Event::LateLightning { at, .. }
         | Event::SurplusOwed { at, .. }
         | Event::Dust { at, .. }
         | Event::Override { at, .. }

@@ -324,6 +324,31 @@ fn ln_15_error_900_is_a_label_that_is_used_already() {
 }
 
 #[test]
+fn ln_15_after_a_restart_an_invoice_paid_meanwhile_is_taken_up_too() {
+    let ask = ask();
+    let h = hash(1);
+    for status in ["unpaid", "paid"] {
+        let r = listed(ask.label(), 25_000_000, status, "Sale 17", &h);
+        assert_eq!(cln().parse_restored(&r, &ask).unwrap().payment_hash, h);
+    }
+    let expired = listed(ask.label(), 25_000_000, "expired", "Sale 17", &h);
+    let other = listed(ask.label(), 25_000_001, "paid", "Sale 17", &h);
+    for r in [expired, other] {
+        assert_eq!(
+            cln().parse_restored(&r, &ask).unwrap_err(),
+            ReplyRefused::LabelTaken
+        );
+    }
+    assert_eq!(
+        lnd().parse_restored(
+            &listed(ask.label(), 25_000_000, "paid", "Sale 17", &h),
+            &ask
+        ),
+        Err(ReplyRefused::LabelGone)
+    );
+}
+
+#[test]
 fn ln_15_an_invoice_is_taken_up_again_only_if_it_is_this_sales() {
     let ask = ask();
     let h = hash(1);

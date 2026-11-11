@@ -174,12 +174,27 @@ pub(crate) fn parse_lookup(
 /// description and the state `unpaid` all match. The payment hash is the
 /// node's, and `bolt11::check` then proves the invoice is for it.
 pub(crate) fn parse_existing(reply: &Reply, ask: &Ask) -> Result<Created, ReplyRefused> {
+    parse_existing_in(reply, ask, false)
+}
+
+/// [`parse_existing`] for an invoice found again after a restart: the state
+/// `paid` is taken as well, because the customer may have paid it while the
+/// counter was stopped, and the lookup that follows reads the payment.
+pub(crate) fn parse_restored(reply: &Reply, ask: &Ask) -> Result<Created, ReplyRefused> {
+    parse_existing_in(reply, ask, true)
+}
+
+fn parse_existing_in(reply: &Reply, ask: &Ask, paid_too: bool) -> Result<Created, ReplyRefused> {
     let v = success_json(reply)?;
     let inv = only_invoice(&v)?.ok_or(ReplyRefused::LabelGone)?;
     let same = text(inv, "label")? == ask.label()
         && number(inv, "amount_msat")? == ask.amount_msat()
         && text(inv, "description")? == ask.description()
-        && text(inv, "status")? == "unpaid";
+        && match text(inv, "status")? {
+            "unpaid" => true,
+            "paid" => paid_too,
+            _ => false,
+        };
     if !same {
         return Err(ReplyRefused::LabelTaken);
     }

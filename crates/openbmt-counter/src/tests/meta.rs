@@ -31,7 +31,7 @@ const TEST_SOURCES: [&str; 19] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 57] = [
+const NOT_HERE: [(&str, &str); 58] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -185,6 +185,10 @@ const NOT_HERE: [(&str, &str); 57] = [
          tests",
     ),
     (
+        "CR-118",
+        "the bound is the driver's; tested in `openbmt-counter-node` (`tests/lightning.rs`)",
+    ),
+    (
         "CR-130",
         "the bundle's relay is `openbmt-core`'s encoding and the owner fills it; tested in \
          `openbmt-core` (`bundle`, `relay`) and `openbmt-owner-ffi`, with the fuzz target \
@@ -336,9 +340,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_one_hundred_and_thirty_three_rules() {
+fn the_rules_file_defines_one_hundred_and_thirty_five_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 133);
+    assert_eq!(ids.len(), 135);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -354,6 +358,8 @@ fn the_rules_file_defines_one_hundred_and_thirty_three_rules() {
             && ids.contains("CR-108")
             && ids.contains("CR-109")
             && ids.contains("CR-116")
+            && ids.contains("CR-117")
+            && ids.contains("CR-118")
             && ids.contains("CR-130")
             && ids.contains("CR-136")
             && ids.contains("CR-140")

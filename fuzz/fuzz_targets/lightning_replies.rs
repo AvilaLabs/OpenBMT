@@ -94,6 +94,11 @@ fuzz_target!(|data: &[u8]| {
             for credential in creds {
                 let first = credential.parse_existing(&reply, &ask);
                 assert_eq!(first, credential.parse_existing(&reply, &ask));
+                let restored = credential.parse_restored(&reply, &ask);
+                assert_eq!(restored, credential.parse_restored(&reply, &ask));
+                if first.is_ok() {
+                    assert_eq!(first, restored);
+                }
             }
         }
         // The pin: a certificate that is read is the one that it accepts,

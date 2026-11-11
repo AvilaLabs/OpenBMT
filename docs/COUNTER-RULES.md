@@ -755,7 +755,8 @@ counter holds is not, and never leaves the counter.
   another way (accepted at once, accepted by a person, or with enough on its
   address) and for a payment below the least any quote of the sale asks: the
   invoice of an earlier quote may be paid after a newer quote asks more or
-  less, and the payment counts if it covers any of them. Asking again for a
+  less, and the payment counts if it covers any of them (CR-112 keeps those
+  invoices watched). Asking again for a
   sale that is paid over Lightning already changes nothing. The cashier's
   screen says "Lightning, final" as the check line (CR-105) and says that a
   refund is given in cash or on-chain and never over Lightning.
@@ -782,14 +783,30 @@ counter holds is not, and never leaves the counter.
   the amount is the quote's satoshis times 1,000, the lifetime
   `QUOTE_SECS` (CR-05, LN-13) and the attempt is the next one for that sale
   and quote (LN-15). A new quote of the same sale (CR-05) asks for a new
-  invoice and drops the old one. While a sale is open, unpaid and its
-  invoice is live, the driver asks the node whether it is paid every 2
-  seconds, at most one request at a time. It stops when the sale is closed
-  (paid, cancelled, expired or final) or the invoice has run out. A node
-  that cannot be reached, or whose reply is refused, is a note in the log
-  and never a state of the sale. The driver holds no clock and no network:
-  it hands out the next request with a number and takes the reply for that
-  number; a reply for any other number is ignored.
+  invoice and drops nothing: the invoice of an earlier quote is still the
+  shop's node's, and the customer may have scanned it, so the driver keeps
+  every invoice of a sale, each with its own lifetime, until that has run out
+  (`QUOTE_SECS` after the quote, with the grace of the lookups) or the node
+  says it is settled, cancelled or unknown. The invoice of the sale's current
+  quote is looked up every 2 seconds while the sale is open and unpaid. An
+  earlier invoice of an open sale, and every invoice of a sale that is closed
+  (paid, cancelled, expired or final), is looked up every 10 seconds. At most
+  one request is out at a time for the whole driver. A node that cannot be
+  reached, or whose reply is refused, is a note in the log and never a state
+  of the sale. The driver holds no clock and no network: it hands out the
+  next request with a number and takes the reply for that number; a reply for
+  any other number, or for an invoice the driver no longer holds, is ignored.
+  An earlier invoice of an open sale that the node says is settled is a
+  payment of the sale (CR-109); one of a sale that is closed is a late payment
+  (CR-117). When the counter starts again, the driver holds nothing, so for
+  each sale from the counter's records it asks Core Lightning by label (the
+  label carries the sale and the attempt, LN-15, which is the quote's place in
+  the sale) for the invoice of every quote whose lifetime has not run out,
+  for a sale that is open and for one that is over, and watches those that
+  come back, an invoice already paid while the counter was stopped included.
+  The current quote of an open sale asks as it did when the sale began. A
+  label the node does not know is dropped. LND has no labels, so after a
+  restart only the current quote's invoice is made again there.
 - **CR-113.** The sale shows its on-chain code at once and never waits for
   Lightning. When the invoice has passed LN-17 against the node key of the
   signed settings, the code becomes the code of LN-18, in capitals when LN-19
@@ -830,6 +847,27 @@ counter holds is not, and never leaves the counter.
   settings name another node or none, or the saved credential does not read
   back, Lightning is off, the status says so, and it stays off until the
   credential is set up again; a sale then has no Lightning line (CR-113).
+
+- **CR-117.** An invoice of a sale that the node says is settled when the
+  sale is over (cancelled, expired or final) or was paid another way (accepted
+  at once, by a person, or with enough on its address), or when the sale was
+  already paid over Lightning by another invoice, is a late payment, as a
+  payment to the sale's address after it ended is (CR-19): recorded on the
+  sale, flagged for the owner and shown as "Late payment". Nothing else
+  changes. `Counter::lightning_late` writes the record `LateLightning` (kind
+  `Payment`, tag 21: the payment hash and the millisatoshis received, which
+  are not zero), then the sale, then reports `Report::LatePayment` with the
+  whole satoshis received. The sale lists the payment hash where it lists a
+  transaction, with at least one satoshi, so that the stored sale does not
+  change. The invoice that paid the sale, and one recorded already, change
+  nothing. The books list it as a late payment with the hash in place of the
+  transaction ID. A write that fails leaves the invoice in the driver, which
+  asks again.
+- **CR-118.** The driver keeps at most 8 invoices for one sale. A quote past
+  that gets no invoice: the sale keeps its on-chain code and shows the line
+  of CR-113 that Lightning is not available for this sale, with the reason
+  under the details: "this sale has had too many quotes for Lightning". The
+  earlier invoices stay watched (CR-112).
 
 ## 13. What these rules do not do
 

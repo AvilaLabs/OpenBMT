@@ -1393,7 +1393,9 @@ class Controller(private val act: MainActivity) {
         tick = {
             try {
                 val s = n.judge(nowSecs(), index)
-                s.payment?.let { payment = it }
+                // The library gives a code only while the sale is open: with none, the code and the copied request are
+                // cleared, so a sale that ended or has no code never shows an earlier one (CR-112).
+                payment = s.payment
                 val says = WordsModel.of(s.words.say())
                 val extra = ArrayList<WordsModel>()
                 s.check?.let { extra.add(WordsModel.of(it.say())) }

@@ -12,7 +12,7 @@ use openbmt_lightning::testing::{
 use openbmt_lightning::{Ask, Credential, Reply};
 
 use super::kit::*;
-use crate::lightning::{INVOICE_WINDOW_SECS, LOOKUP_EVERY_SECS};
+use crate::lightning::{INVOICE_WINDOW_SECS, LOOKUP_EVERY_SECS, OLD_LOOKUP_EVERY_SECS};
 use crate::{
     LightningOff, LightningRecord, LnTransport, SaleLightning, SetupRefused, SetupStep,
     MAGIC_LIGHTNING_RECORD,
@@ -234,7 +234,7 @@ fn cr_109_a_payment_for_less_than_the_sale_is_not_a_payment() {
 }
 
 #[test]
-fn cr_112_a_new_quote_asks_for_a_new_invoice_and_lets_the_old_one_go() {
+fn cr_112_a_new_quote_asks_for_a_new_invoice() {
     let dir = Scratch::new();
     let c = cln();
     let mut rig = rig(&dir, c.clone());
@@ -258,6 +258,11 @@ fn cr_112_a_new_quote_asks_for_a_new_invoice_and_lets_the_old_one_go() {
     let rate = Rate::new(20_000_000).unwrap();
     rig.node.requote(index, rate, &fresh(T0 + 30)).unwrap();
     assert_eq!(rig.node.lightning_sale(index), SaleLightning::Waiting);
+    // The earlier invoice is asked about first (it is kept, CR-112); then the
+    // new one is asked for.
+    let first = rig.node.lightning_next().expect("a lookup of the old one");
+    assert_ne!(first.request.path, create.request.path);
+    rig.node.lightning_reply(first.id, &waiting(&c, SATS));
     let again = rig.node.lightning_next().expect("a new request");
     let body = again.request.body.unwrap();
     assert!(body.contains("2500000"), "{body}");
@@ -652,7 +657,7 @@ fn cr_112_a_sale_open_at_the_last_stop_asks_again_after_a_restart() {
 }
 
 #[test]
-fn cr_113_a_sale_that_is_cancelled_is_not_followed_any_more() {
+fn cr_113_a_sale_that_is_cancelled_shows_no_code_and_asks_for_no_new_invoice() {
     let dir = Scratch::new();
     let c = lnd();
     let mut rig = rig(&dir, c.clone());
@@ -662,5 +667,328 @@ fn cr_113_a_sale_that_is_cancelled_is_not_followed_any_more() {
         .lightning_reply(create.id, &created_for(&c, index, SATS));
     rig.node.cancel(index).unwrap();
     assert_eq!(rig.node.lightning_sale(index), SaleLightning::Off);
+    // The invoice that was made is watched for a late payment (CR-117), every
+    // ten seconds; nothing new is asked for.
+    let lookup = rig.node.lightning_next().expect("a lookup");
+    assert_ne!(lookup.request.method, create_method());
+    rig.node.lightning_reply(lookup.id, &waiting(&c, SATS));
+    tick(&rig, LOOKUP_EVERY_SECS);
     assert!(rig.node.lightning_next().is_none());
+    // A cancelled sale whose invoice was never made asks for none.
+    let none = open(&mut rig);
+    rig.node.cancel(none).unwrap();
+    tick(&rig, OLD_LOOKUP_EVERY_SECS);
+    assert_eq!(rig.node.lightning_sale(none), SaleLightning::Off);
+    assert!(rig
+        .node
+        .lightning_next()
+        .is_none_or(|r| r.request.method != create_method()));
+}
+
+/// The invoice a node signs for sale `index` asking `sats`, for hash seed
+/// `seed`.
+fn invoice_of(seed: u8, index: u32, sats: u64) -> (String, [u8; 32]) {
+    let h = hash(seed);
+    let mut m = Make::good(h);
+    m.msat = Some(sats * 1_000);
+    m.description = Some(format!("Sale {index}"));
+    (m.write(), h)
+}
+
+fn created_seed(seed: u8, index: u32, sats: u64) -> Reply {
+    let (bolt11, h) = invoice_of(seed, index, sats);
+    lnd_created(&h, &bolt11)
+}
+
+fn settled_seed(seed: u8, asked_sats: u64, got_sats: u64) -> Reply {
+    lnd_lookup(
+        &hash(seed),
+        asked_sats * 1_000,
+        "SETTLED",
+        Some(got_sats * 1_000),
+        Some(T0 + 3),
+    )
+}
+
+fn waiting_seed(seed: u8, sats: u64) -> Reply {
+    lnd_lookup(&hash(seed), sats * 1_000, "OPEN", None, None)
+}
+
+/// A rate at which the sale of five dollars asks `sats` satoshis.
+fn rate_for(sats: u64) -> Rate {
+    Rate::new(50_000_000_000 / sats).unwrap()
+}
+
+/// A sale with its first invoice (hash seed 1, 5,000 satoshis) made.
+fn with_first_invoice(rig: &mut Rig) -> u32 {
+    let index = open(rig);
+    let create = rig.node.lightning_next().unwrap();
+    rig.node
+        .lightning_reply(create.id, &created_seed(1, index, SATS));
+    index
+}
+
+/// Requote `index` to `sats` and have its invoice (hash seed `seed`) made.
+/// `held` are the invoices made so far, as (hash seed, satoshis): a lookup
+/// of one of them that comes first is answered as not paid yet.
+fn requote_with_invoice(rig: &mut Rig, index: u32, seed: u8, sats: u64, held: &[(u8, u64)]) {
+    tick(rig, 1);
+    let source = source_at(&rig.time);
+    rig.node.requote(index, rate_for(sats), &source).unwrap();
+    let credential = lnd();
+    loop {
+        let req = rig.node.lightning_next().expect("a request");
+        if req.request.method == create_method() {
+            rig.node
+                .lightning_reply(req.id, &created_seed(seed, index, sats));
+            return;
+        }
+        let (old, old_sats) = held
+            .iter()
+            .find(|(h, _)| credential.lookup_request(&hash(*h)) == req.request)
+            .expect("a lookup of a held invoice");
+        rig.node
+            .lightning_reply(req.id, &waiting_seed(*old, *old_sats));
+    }
+}
+
+fn create_method() -> openbmt_lightning::Method {
+    let c = lnd();
+    let ask = Ask::sale([0; 4], 0, 0, 1_000, 300).unwrap();
+    c.create_request(&ask).method
+}
+
+#[test]
+fn cr_112_the_invoice_of_an_earlier_quote_is_kept_and_counts_when_paid() {
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, lnd());
+    let index = with_first_invoice(&mut rig);
+    requote_with_invoice(&mut rig, index, 2, 2_500, &[(1, SATS)]);
+    tick(&rig, OLD_LOOKUP_EVERY_SECS);
+    // The invoice the customer scanned first is paid: the sale is paid.
+    let first = rig.node.lightning_next().expect("a lookup");
+    rig.node
+        .lightning_reply(first.id, &settled_seed(1, 5_000, 5_000));
+    let reports = rig.feed(vec![]);
+    assert!(reports.contains(&Report::PosPaid { index }), "{reports:?}");
+    let screen = rig.node.judge(index).unwrap();
+    assert_eq!(screen.state, State::PaidLightning);
+    let ln = rig.node.counter().sale(index).unwrap().lightning().unwrap();
+    assert_eq!(ln.payment_hash, hash(1));
+}
+
+#[test]
+fn cr_112_an_earlier_invoice_is_asked_about_every_ten_seconds() {
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, lnd());
+    let index = with_first_invoice(&mut rig);
+    requote_with_invoice(&mut rig, index, 2, 2_500, &[(1, SATS)]);
+    tick(&rig, OLD_LOOKUP_EVERY_SECS);
+    // Both are due; each answer frees the next request.
+    let old = rig.node.lightning_next().expect("the earlier invoice");
+    rig.node.lightning_reply(old.id, &waiting_seed(1, 5_000));
+    let current = rig.node.lightning_next().expect("the current invoice");
+    assert_ne!(current.request, old.request);
+    rig.node
+        .lightning_reply(current.id, &waiting_seed(2, 2_500));
+    assert!(rig.node.lightning_next().is_none());
+    // Two seconds on, only the current one is due; ten seconds on, both.
+    tick(&rig, LOOKUP_EVERY_SECS);
+    let again = rig.node.lightning_next().expect("the current again");
+    assert_eq!(again.request, current.request);
+    rig.node.lightning_reply(again.id, &waiting_seed(2, 2_500));
+    assert!(rig.node.lightning_next().is_none());
+    tick(&rig, OLD_LOOKUP_EVERY_SECS - LOOKUP_EVERY_SECS - 1);
+    let third = rig.node.lightning_next().expect("the current once more");
+    assert_eq!(third.request, current.request);
+    rig.node.lightning_reply(third.id, &waiting_seed(2, 2_500));
+    tick(&rig, 1);
+    let earlier = rig.node.lightning_next().expect("the earlier one again");
+    assert_eq!(earlier.request, old.request);
+}
+
+#[test]
+fn cr_117_an_invoice_paid_after_a_cancel_is_a_late_payment() {
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, lnd());
+    let index = with_first_invoice(&mut rig);
+    rig.node.cancel(index).unwrap();
+    // The sale is over, and the invoice is still the node's to be paid.
+    assert_eq!(rig.node.lightning_sale(index), SaleLightning::Off);
+    let lookup = rig.node.lightning_next().expect("a lookup");
+    rig.node
+        .lightning_reply(lookup.id, &settled_seed(1, 5_000, 5_000));
+    let reports = rig.feed(vec![]);
+    assert!(
+        reports.contains(&Report::LatePayment { index, sats: 5_000 }),
+        "{reports:?}"
+    );
+    assert!(!reports.contains(&Report::PosPaid { index }));
+    let screen = rig.node.judge(index).unwrap();
+    assert_ne!(screen.state, State::PaidLightning);
+    assert!(screen.late);
+    assert!(screen
+        .flag_words()
+        .iter()
+        .any(|f| f.heading == "Late payment"));
+    // It is recorded once and asked about no more.
+    assert!(rig.node.lightning_next().is_none());
+    assert!(rig.feed(vec![]).is_empty());
+}
+
+#[test]
+fn cr_117_a_second_invoice_settled_after_the_sale_was_paid_is_a_late_payment() {
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, lnd());
+    let index = with_first_invoice(&mut rig);
+    requote_with_invoice(&mut rig, index, 2, 2_500, &[(1, SATS)]);
+    tick(&rig, OLD_LOOKUP_EVERY_SECS);
+    let first = rig.node.lightning_next().expect("a lookup");
+    rig.node
+        .lightning_reply(first.id, &settled_seed(1, 5_000, 5_000));
+    rig.feed(vec![]);
+    assert_eq!(rig.node.judge(index).unwrap().state, State::PaidLightning);
+    // The other invoice was kept: it is asked about, and if it is paid too
+    // that is a late payment.
+    let second = rig.node.lightning_next().expect("the other invoice");
+    rig.node
+        .lightning_reply(second.id, &settled_seed(2, 2_500, 2_500));
+    let reports = rig.feed(vec![]);
+    assert!(
+        reports.contains(&Report::LatePayment { index, sats: 2_500 }),
+        "{reports:?}"
+    );
+    let screen = rig.node.judge(index).unwrap();
+    assert_eq!(screen.state, State::PaidLightning);
+    assert!(screen.late);
+}
+
+#[test]
+fn cr_112_an_answer_for_an_invoice_the_driver_no_longer_holds_is_ignored() {
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, lnd());
+    let index = open(&mut rig);
+    let lost = rig.node.lightning_next().expect("a request");
+    // No invoice came in the window: the quote's invoice is let go when the
+    // sale is requoted.
+    tick(&rig, INVOICE_WINDOW_SECS);
+    assert!(matches!(
+        rig.node.lightning_sale(index),
+        SaleLightning::Unavailable(_)
+    ));
+    let source = source_at(&rig.time);
+    rig.node.requote(index, rate_for(2_500), &source).unwrap();
+    // The invoice of the old quote comes at last: nothing holds it.
+    rig.node
+        .lightning_reply(lost.id, &created_seed(1, index, SATS));
+    assert_eq!(rig.node.lightning_sale(index), SaleLightning::Waiting);
+    let again = rig.node.lightning_next().expect("the new quote's request");
+    assert!(again.request.body.unwrap().contains("2500000"));
+}
+
+#[test]
+fn cr_118_the_ninth_quote_of_a_sale_gets_no_invoice() {
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, lnd());
+    let index = with_first_invoice(&mut rig);
+    let sats = [6_250, 8_000, 10_000, 12_500, 15_625, 20_000, 25_000, 31_250];
+    let mut held = vec![(1u8, SATS)];
+    for (n, s) in sats.iter().take(7).enumerate() {
+        let seed = 2 + u8::try_from(n).unwrap();
+        requote_with_invoice(&mut rig, index, seed, *s, &held);
+        held.push((seed, *s));
+        assert!(matches!(
+            rig.node.lightning_sale(index),
+            SaleLightning::Invoice(_)
+        ));
+    }
+    // Eight invoices are held; the ninth quote gets none.
+    tick(&rig, 1);
+    let source = source_at(&rig.time);
+    rig.node.requote(index, rate_for(31_250), &source).unwrap();
+    let SaleLightning::Unavailable(words) = rig.node.lightning_sale(index) else {
+        panic!("unavailable");
+    };
+    assert_eq!(words.heading, "Lightning not available");
+    assert_eq!(check(&words), Ok(()));
+    assert!(words
+        .detail
+        .unwrap()
+        .contains("too many quotes for Lightning"));
+    // The sale's other invoices are still asked about, and no request makes
+    // a ninth.
+    tick(&rig, OLD_LOOKUP_EVERY_SECS);
+    for _ in 0..8 {
+        let req = rig.node.lightning_next().expect("a lookup");
+        assert_ne!(req.request.method, create_method());
+        rig.node.lightning_failed(req.id, LnTransport::TimedOut);
+    }
+    assert!(rig.node.lightning_next().is_none());
+}
+
+#[test]
+fn cr_112_after_a_restart_the_invoices_of_earlier_quotes_are_found_by_label() {
+    let dir = Scratch::new();
+    let c = cln();
+    let index;
+    {
+        let mut first = rig(&dir, c.clone());
+        index = with_first_invoice_of(&mut first, &c);
+        tick(&first, 1);
+        let source = source_at(&first.time);
+        first.node.requote(index, rate_for(2_500), &source).unwrap();
+        first.node.shutdown();
+    }
+    let mut rig = rig(&dir, c.clone());
+    // The earlier quote's invoice is asked for by its label (attempt 0).
+    let label = |n: u32, msat: u64| {
+        Ask::sale(counter4(), 0, n, msat, 300)
+            .unwrap()
+            .label()
+            .to_string()
+    };
+    let by_label = rig.node.lightning_next().expect("a request by label");
+    assert!(by_label
+        .request
+        .body
+        .as_ref()
+        .unwrap()
+        .contains(&label(0, 5_000_000)));
+    // The customer paid it while the counter was stopped: it is taken up and
+    // the lookup that follows finds the payment.
+    let (bolt11, h) = invoice_of(1, index, SATS);
+    rig.node.lightning_reply(
+        by_label.id,
+        &cln_listed(
+            &label(0, 5_000_000),
+            5_000_000,
+            "paid",
+            "Sale 0",
+            &h,
+            &bolt11,
+        ),
+    );
+    // The earlier invoice is due for a lookup at once.
+    let lookup = rig.node.lightning_next().expect("a lookup");
+    rig.node.lightning_reply(
+        lookup.id,
+        &cln_lookup(&hash(1), 5_000_000, "paid", Some(5_000_000), Some(T0 + 3)),
+    );
+    let reports = rig.feed(vec![]);
+    assert!(reports.contains(&Report::PosPaid { index }), "{reports:?}");
+    assert_eq!(rig.node.judge(index).unwrap().state, State::PaidLightning);
+    // The sale is over: no invoice is asked for its current quote.
+    assert!(rig
+        .node
+        .lightning_next()
+        .is_none_or(|r| r.request.method != create_method()));
+}
+
+/// A sale with its first invoice made, for a Core Lightning credential.
+fn with_first_invoice_of(rig: &mut Rig, c: &Credential) -> u32 {
+    let index = open(rig);
+    let create = rig.node.lightning_next().unwrap();
+    rig.node
+        .lightning_reply(create.id, &created_for(c, index, SATS));
+    index
 }

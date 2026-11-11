@@ -35,6 +35,7 @@ const TAG_REFUND_REQUESTED: u8 = 16;
 const TAG_REFUND_WITHDRAWN: u8 = 17;
 const TAG_REFUND_PAID_IN_CASH: u8 = 18;
 const TAG_PAID_BY_LIGHTNING: u8 = 19;
+const TAG_LATE_LIGHTNING: u8 = 21;
 
 /// Something that happened to a sale and is written down.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,6 +169,19 @@ pub enum Event {
         txid: [u8; 32],
         /// What it pays the sale's script.
         sats: u64,
+    },
+    /// An invoice of a sale that had ended, or was paid another way or over
+    /// Lightning by another invoice, was settled at the shop's node (CR-19,
+    /// CR-117; kind `Payment`).
+    LateLightning {
+        /// The receive index.
+        index: u32,
+        /// When the counter learned of it.
+        at: u64,
+        /// The payment hash of the invoice.
+        payment_hash: [u8; 32],
+        /// What the node received, in millisatoshis.
+        amount_msat: u64,
     },
     /// More arrived than the sale needs (CR-16; kind `Payment`).
     SurplusOwed {
@@ -436,6 +450,7 @@ impl Event {
             | Self::Final { index, .. }
             | Self::PaidByLightning { index, .. }
             | Self::LatePayment { index, .. }
+            | Self::LateLightning { index, .. }
             | Self::SurplusOwed { index, .. }
             | Self::Dust { index, .. }
             | Self::Requoted { index, .. }
@@ -461,6 +476,7 @@ impl Event {
             | Self::Final { at, .. }
             | Self::PaidByLightning { at, .. }
             | Self::LatePayment { at, .. }
+            | Self::LateLightning { at, .. }
             | Self::SurplusOwed { at, .. }
             | Self::Dust { at, .. }
             | Self::Requoted { at, .. }
@@ -487,6 +503,7 @@ impl Event {
             | Self::Final { .. }
             | Self::PaidByLightning { .. }
             | Self::LatePayment { .. }
+            | Self::LateLightning { .. }
             | Self::SurplusOwed { .. }
             | Self::Dust { .. }
             | Self::PosPaid { .. }
@@ -510,6 +527,7 @@ impl Event {
             Self::Final { index, at, .. } => (TAG_FINAL, *index, *at),
             Self::PaidByLightning { index, at, .. } => (TAG_PAID_BY_LIGHTNING, *index, *at),
             Self::LatePayment { index, at, .. } => (TAG_LATE_PAYMENT, *index, *at),
+            Self::LateLightning { index, at, .. } => (TAG_LATE_LIGHTNING, *index, *at),
             Self::SurplusOwed { index, at, .. } => (TAG_SURPLUS_OWED, *index, *at),
             Self::Dust { index, at, .. } => (TAG_DUST, *index, *at),
             Self::Override { index, at, .. } => (TAG_OVERRIDE, *index, *at),
@@ -610,6 +628,14 @@ impl Event {
             Self::LatePayment { txid, sats, .. } => {
                 out.extend_from_slice(txid);
                 out.extend_from_slice(&sats.to_le_bytes());
+            }
+            Self::LateLightning {
+                payment_hash,
+                amount_msat,
+                ..
+            } => {
+                out.extend_from_slice(payment_hash);
+                out.extend_from_slice(&amount_msat.to_le_bytes());
             }
             Self::SurplusOwed { sats, .. } | Self::Dust { sats, .. } => {
                 out.extend_from_slice(&sats.to_le_bytes());
@@ -794,6 +820,21 @@ impl Event {
                 txid: r.array::<32>()?,
                 sats: r.u64_le()?,
             },
+            TAG_LATE_LIGHTNING => {
+                let payment_hash = r.array::<32>()?;
+                let amount_msat = r.u64_le()?;
+                if amount_msat == 0 {
+                    return Err(DecodeError::NonCanonical(
+                        "a late Lightning payment is for nothing",
+                    ));
+                }
+                Self::LateLightning {
+                    index,
+                    at,
+                    payment_hash,
+                    amount_msat,
+                }
+            }
             TAG_SURPLUS_OWED => Self::SurplusOwed {
                 index,
                 at,

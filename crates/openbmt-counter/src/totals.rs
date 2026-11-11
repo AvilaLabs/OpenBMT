@@ -306,6 +306,7 @@ impl Fold {
                 }
             }
             Event::LatePayment { .. }
+            | Event::LateLightning { .. }
             | Event::SurplusOwed { .. }
             | Event::Dust { .. }
             | Event::PosPaid { .. }

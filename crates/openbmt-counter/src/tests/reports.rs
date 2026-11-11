@@ -16,6 +16,7 @@ fn kinds(w: &World) -> Vec<&'static str> {
             Event::Final { .. } => "final",
             Event::PaidByLightning { .. } => "paid-by-lightning",
             Event::LatePayment { .. } => "late",
+            Event::LateLightning { .. } => "late-lightning",
             Event::SurplusOwed { .. } => "surplus",
             Event::Dust { .. } => "dust",
             Event::Override { .. } => "override",
@@ -51,6 +52,8 @@ fn has_record(w: &World, report: &Report) -> bool {
         }),
         Report::LatePayment { index, sats } => events.iter().any(|e| {
             matches!(e, Event::LatePayment { index: i, sats: s, .. } if i == index && s == sats)
+                || matches!(e, Event::LateLightning { index: i, amount_msat, .. }
+                    if i == index && (amount_msat / 1_000).max(1) == *sats)
         }),
         Report::Dust { index, sats } => events.iter().any(|e| {
             matches!(e, Event::Dust { index: i, sats: s, .. } if i == index && s == sats)

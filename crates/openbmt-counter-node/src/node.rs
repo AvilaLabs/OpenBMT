@@ -559,16 +559,25 @@ impl<P: DriverPort> Node<P> {
             _lock: lock,
         };
         // CR-112: a sale that was open at the last stop asks for an invoice
-        // again; Core Lightning answers with the invoice it made, if it did.
-        let live: Vec<(u32, u64)> = node
-            .known
-            .iter()
-            .filter_map(|i| node.counter.sale(*i))
-            .filter(|s| s.is_live())
-            .map(|s| (s.index(), s.needs_sats()))
-            .collect();
-        for (index, sats) in live {
-            node.ln.sale_opened(index, sats, started_at);
+        // again, and the invoices of the quotes of sales open or lately over
+        // are asked for by their labels: Core Lightning answers with the
+        // ones it made.
+        for index in node.known.iter().copied().collect::<Vec<_>>() {
+            let Some(s) = node.counter.sale(index) else {
+                continue;
+            };
+            let quotes: Vec<(u64, u64)> = s
+                .quotes()
+                .iter()
+                .map(|q| {
+                    (
+                        openbmt_counter::sats_for(s.amount(), q.rate).unwrap_or(0),
+                        q.from,
+                    )
+                })
+                .collect();
+            let open = s.is_live();
+            node.ln.sale_restored(index, &quotes, open, started_at);
         }
         node.take_ln_notes();
         node.update_all_blocks();
@@ -1392,23 +1401,54 @@ impl<P: DriverPort> Node<P> {
             amount_msat: facts.amount_received_msat,
             settled_at: facts.settled_at,
         };
-        match self
+        let hash = paid.payment_hash;
+        // CR-117: a sale already paid over Lightning by another invoice.
+        let by_another = self
             .counter
-            .lightning_paid(index, paid, &judged, &mut self.store)
-        {
+            .sale(index)
+            .and_then(|s| s.lightning())
+            .is_some_and(|p| p.payment_hash != hash);
+        let result = if by_another {
+            Err(openbmt_counter::LightningRefused::SaleClosed)
+        } else {
+            self.counter
+                .lightning_paid(index, paid, &judged, &mut self.store)
+        };
+        match result {
             Ok(screen) => {
                 self.ln_reports.extend(screen.reports);
-                self.ln.paid(index);
+                self.ln.paid(index, &hash);
             }
+            // CR-117: the sale is over, or was paid another way: this is a
+            // late payment, recorded and flagged for the owner.
+            Err(
+                openbmt_counter::LightningRefused::SaleClosed
+                | openbmt_counter::LightningRefused::PaidAnotherWay,
+            ) => match self
+                .counter
+                .lightning_late(index, paid, now, &mut self.store)
+            {
+                Ok(reports) => {
+                    self.note(format!(
+                        "sale {index}: a Lightning invoice was paid after the sale was over"
+                    ));
+                    self.ln_reports.extend(reports);
+                    self.ln.settled(index, &hash);
+                }
+                // The node still has it: asked again.
+                Err(e) => self.note(format!(
+                    "sale {index}: a late Lightning payment was not recorded: {e}"
+                )),
+            },
             Err(e) => {
                 self.note(format!(
                     "sale {index}: a Lightning payment was not taken: {e}"
                 ));
-                // A payment the counter will not take now (the sale is over,
-                // or was paid another way) is not asked about again; a
-                // failure to write is, because the node still has it.
+                // A payment the counter will not take now is not asked
+                // about again; a failure to write is, because the node
+                // still has it.
                 if !matches!(e, openbmt_counter::LightningRefused::Store(_)) {
-                    self.ln.paid(index);
+                    self.ln.settled(index, &hash);
                 }
             }
         }

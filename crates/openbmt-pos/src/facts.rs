@@ -292,6 +292,7 @@ fn fold_event(
         | Event::Expired { .. }
         | Event::Cancelled { .. }
         | Event::LatePayment { .. }
+        | Event::LateLightning { .. }
         | Event::SurplusOwed { .. }
         | Event::Dust { .. }
         | Event::RefundRequested { .. }

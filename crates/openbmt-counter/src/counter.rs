@@ -1611,6 +1611,63 @@ impl Counter {
         Ok(screen)
     }
 
+    /// CR-117: the shop's own node says an invoice of a sale was settled
+    /// after the sale ended, or after it was paid another way, or when the sale
+    /// was paid over Lightning by another invoice. It is a late payment
+    /// (CR-19): the record `LateLightning`, then the sale, then a
+    /// [`Report::LatePayment`] in satoshis. Nothing else changes. An invoice
+    /// the sale holds as its own payment, or has recorded already, changes
+    /// nothing and reports nothing, so asking again is safe.
+    ///
+    /// The sale lists the payment hash where it lists a transaction, with the
+    /// whole satoshis (at least one) the node received.
+    pub fn lightning_late<S: Store>(
+        &mut self,
+        index: u32,
+        paid: LightningPaid,
+        now: u64,
+        store: &mut S,
+    ) -> Result<Vec<Report>, LightningRefused<S::Error>> {
+        if self.unreadable.contains(&index) {
+            return Err(LightningRefused::Judge(JudgeError::UnknownSale(index)));
+        }
+        let base = self
+            .sales
+            .get(&index)
+            .ok_or(LightningRefused::UnknownSale(index))?;
+        let id = Txid::from_byte_array(paid.payment_hash);
+        if base
+            .lightning
+            .is_some_and(|p| p.payment_hash == paid.payment_hash)
+            || base.late.iter().any(|(t, _)| *t == id)
+        {
+            return Ok(Vec::new());
+        }
+        if paid.amount_msat == 0 {
+            return Err(LightningRefused::TooLittle { sats: 0, least: 1 });
+        }
+        let sats = paid.sats().max(1);
+        let mut sale = base.clone();
+        if sale.late.len() < MAX_LATE_PAYMENTS {
+            sale.late.push((id, sats));
+        } else if sale.late_unlisted {
+            return Ok(Vec::new());
+        } else {
+            sale.late_unlisted = true;
+        }
+        let event = Event::LateLightning {
+            index,
+            at: now,
+            payment_hash: paid.payment_hash,
+            amount_msat: paid.amount_msat,
+        };
+        self.write_event(store, &event)
+            .map_err(LightningRefused::Store)?;
+        self.put_sale(store, sale)
+            .map_err(LightningRefused::Store)?;
+        Ok(vec![Report::LatePayment { index, sats }])
+    }
+
     // CR-10 to CR-19: judging a sale.
 
     /// CR-10 to CR-19, CR-30 to CR-32: work out the state of a sale. This is

@@ -340,6 +340,7 @@ fn event_at(event: &Event) -> u64 {
         | Event::Final { at, .. }
         | Event::PaidByLightning { at, .. }
         | Event::LatePayment { at, .. }
+        | Event::LateLightning { at, .. }
         | Event::SurplusOwed { at, .. }
         | Event::Dust { at, .. }
         | Event::Override { at, .. }

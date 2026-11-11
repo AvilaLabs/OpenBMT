@@ -13,9 +13,12 @@
 //! - For each open sale, one invoice for the sale's current quote: the
 //!   amount is the quote's satoshis times 1,000 and the lifetime is
 //!   `QUOTE_SECS`. A new quote asks again, with the next attempt, and the
-//!   old invoice is let go (CR-112).
-//! - While the invoice is live and the sale is open, a lookup every
-//!   [`LOOKUP_EVERY_SECS`] seconds.
+//!   earlier invoices are kept while they can still be paid (CR-112), at
+//!   most [`MAX_INVOICES`] for a sale (CR-118).
+//! - While an invoice is live, a lookup: every [`LOOKUP_EVERY_SECS`] seconds
+//!   for the current invoice of an open sale, every
+//!   [`OLD_LOOKUP_EVERY_SECS`] for any other, including every invoice of a
+//!   sale that is over (CR-117).
 //! - If no invoice has passed LN-17 within [`INVOICE_WINDOW_SECS`] seconds, or
 //!   one fails a check, the sale has no Lightning code and says why (CR-113).
 //!
@@ -46,8 +49,13 @@ use openbmt_lightning::{
 pub const MAGIC_LIGHTNING_RECORD: [u8; 4] = *b"OBMy";
 /// CR-113: seconds after the quote in which the invoice must have come.
 pub const INVOICE_WINDOW_SECS: u64 = 6;
-/// CR-112: seconds between two lookups of a sale.
+/// CR-112: seconds between two lookups of the current invoice of an open sale.
 pub const LOOKUP_EVERY_SECS: u64 = 2;
+/// CR-112: seconds between two lookups of an earlier invoice of an open sale,
+/// or of any invoice of a sale that is over.
+pub const OLD_LOOKUP_EVERY_SECS: u64 = 10;
+/// CR-118: most invoices the driver keeps for one sale.
+pub const MAX_INVOICES: usize = 8;
 /// Seconds a lookup goes on after the invoice's lifetime by the counter's
 /// clock, because the node made it a moment after the request was sent.
 pub const LOOKUP_GRACE_SECS: u64 = 10;
@@ -436,17 +444,86 @@ enum Phase {
     Ended,
 }
 
+/// One invoice of a sale: the one asked for one quote.
 #[derive(Debug, Clone)]
-struct SaleLn {
+struct Inv {
     attempt: u32,
-    /// Counts the quotes, so that a late answer for an old one is dropped.
+    /// Label collisions met so far (LN-15).
+    tries: u32,
+    /// Numbers the invoice, so that an answer is matched to it and an answer
+    /// for one that is gone is dropped.
     round: u64,
     sats: u64,
+    /// When the invoice was made, by the quote's clock: its lifetime runs
+    /// from here.
     window_start: u64,
+    /// When it was first asked for: the window of CR-113 runs from here.
+    asked_from: u64,
+    /// Found again by its label after a restart (CR-112): if the node has
+    /// none, there is nothing to ask for in its place.
+    restored: bool,
     ask: Option<Ask>,
     phase: Phase,
     last_lookup: Option<u64>,
     last_failure: Option<LnTransport>,
+}
+
+impl Inv {
+    fn new(attempt: u32, round: u64, sats: u64, now: u64) -> Self {
+        Self {
+            attempt,
+            tries: 0,
+            round,
+            sats,
+            window_start: now,
+            asked_from: now,
+            restored: false,
+            ask: None,
+            phase: Phase::Want { retry_at: now },
+            last_lookup: None,
+            last_failure: None,
+        }
+    }
+
+    /// Whether the invoice is still being made or can still be paid.
+    fn holds(&self) -> bool {
+        !matches!(self.phase, Phase::Unavailable(_) | Phase::Ended)
+    }
+
+    fn has_hash(&self, hash: &[u8; 32]) -> bool {
+        matches!(&self.phase, Phase::Have(c) if c.payment_hash == *hash)
+    }
+}
+
+/// What the driver follows of one sale: its invoices, the last of them for
+/// the current quote (CR-112).
+#[derive(Debug, Clone)]
+struct SaleLn {
+    invs: Vec<Inv>,
+    /// The attempt the next quote asks with.
+    next_attempt: u32,
+    /// The sale is over: its invoices are watched for a late payment only.
+    closed: bool,
+}
+
+impl SaleLn {
+    /// Drop what can no longer matter: an invoice that was not made or ran
+    /// out, except the current one of an open sale, which the screen reads;
+    /// and what is still being made, for a sale that is over.
+    fn tidy(&mut self) {
+        let closed = self.closed;
+        let n = self.invs.len();
+        let mut pos = 0;
+        self.invs.retain(|i| {
+            pos += 1;
+            let current = !closed && pos == n;
+            if closed {
+                matches!(i.phase, Phase::Have(_))
+            } else {
+                current || i.holds()
+            }
+        });
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -666,56 +743,137 @@ impl Lightning {
         if self.active.is_none() {
             return;
         }
-        let round = self.next_round;
-        self.next_round += 1;
+        let round = self.take_round();
         self.sales.insert(
             index,
             SaleLn {
-                attempt: 0,
-                round,
-                sats,
-                window_start: now,
-                ask: None,
-                phase: Phase::Want { retry_at: now },
-                last_lookup: None,
-                last_failure: None,
+                invs: vec![Inv::new(0, round, sats, now)],
+                next_attempt: 1,
+                closed: false,
             },
         );
     }
 
-    /// CR-112: the sale has a new quote: the invoice for the old one is let
-    /// go and a new one is asked for, with the next attempt.
+    /// CR-112: the counter started again with this sale. `quotes` are its
+    /// quotes in order, as (satoshis, the second each began). The label of an
+    /// invoice carries the sale and its attempt, which is the quote's place
+    /// when no label was taken twice, so Core Lightning is asked by label for
+    /// each earlier quote whose invoice can still be paid, and what it has is
+    /// watched. The current quote of an open sale is asked for as at the
+    /// start of the sale, which finds the invoice it made if it made one.
+    /// LND has no labels, so nothing earlier can be found there.
+    pub fn sale_restored(&mut self, index: u32, quotes: &[(u64, u64)], open: bool, now: u64) {
+        let Some(active) = &self.active else {
+            return;
+        };
+        let by_label = matches!(active.record.credential, Credential::Cln(_));
+        let n = quotes.len();
+        let mut invs = Vec::new();
+        for (i, (sats, from)) in quotes.iter().enumerate() {
+            let attempt = u32::try_from(i).unwrap_or(u32::MAX);
+            let round = self.take_round();
+            if open && i + 1 == n {
+                invs.push(Inv::new(attempt, round, *sats, now));
+                continue;
+            }
+            let lives = now
+                < from
+                    .saturating_add(QUOTE_SECS)
+                    .saturating_add(LOOKUP_GRACE_SECS)
+                    .saturating_add(INVOICE_WINDOW_SECS);
+            if !by_label || !lives {
+                continue;
+            }
+            let msat = sats.saturating_mul(1_000);
+            let Ok(ask) = Ask::sale(self.counter, u64::from(index), attempt, msat, expiry_secs())
+            else {
+                continue;
+            };
+            let mut inv = Inv::new(attempt, round, *sats, now);
+            inv.window_start = *from;
+            inv.restored = true;
+            inv.ask = Some(ask);
+            inv.phase = Phase::WantLabel { retry_at: now };
+            invs.push(inv);
+        }
+        let excess = invs.len().saturating_sub(MAX_INVOICES);
+        invs.drain(..excess);
+        if invs.is_empty() {
+            return;
+        }
+        self.sales.insert(
+            index,
+            SaleLn {
+                invs,
+                next_attempt: u32::try_from(n).unwrap_or(u32::MAX),
+                closed: !open,
+            },
+        );
+    }
+
+    fn take_round(&mut self) -> u64 {
+        let round = self.next_round;
+        self.next_round += 1;
+        round
+    }
+
+    /// CR-112: the sale has a new quote: a new invoice is asked for, with the
+    /// next attempt, and the invoices of the earlier quotes are kept while
+    /// they can be paid. Past [`MAX_INVOICES`] the new quote gets none
+    /// (CR-118).
     pub fn sale_requoted(&mut self, index: u32, sats: u64, now: u64) {
         if self.active.is_none() {
             return;
         }
-        let round = self.next_round;
-        self.next_round += 1;
-        let attempt = self.sales.get(&index).map_or(0, |s| s.attempt + 1);
-        self.sales.insert(
-            index,
-            SaleLn {
-                attempt,
-                round,
-                sats,
-                window_start: now,
-                ask: None,
-                phase: Phase::Want { retry_at: now },
-                last_lookup: None,
-                last_failure: None,
-            },
-        );
+        let round = self.take_round();
+        let Some(sale) = self.sales.get_mut(&index) else {
+            self.sales.insert(
+                index,
+                SaleLn {
+                    invs: vec![Inv::new(0, round, sats, now)],
+                    next_attempt: 1,
+                    closed: false,
+                },
+            );
+            return;
+        };
+        if sale.closed {
+            return;
+        }
+        // The one that was current stays only if it holds an invoice.
+        sale.invs.retain(Inv::holds);
+        let attempt = sale.next_attempt;
+        sale.next_attempt = attempt.saturating_add(1);
+        let mut inv = Inv::new(attempt, round, sats, now);
+        if sale.invs.len() >= MAX_INVOICES {
+            inv.phase = Phase::Unavailable(too_many_words());
+        }
+        sale.invs.push(inv);
     }
 
-    /// The sale is over (paid another way, cancelled, expired or final).
+    /// The sale is over (paid another way, cancelled, expired or final): its
+    /// invoices that were made are still watched, because the customer may
+    /// pay one (CR-117).
     pub fn sale_closed(&mut self, index: u32) {
-        self.sales.remove(&index);
+        if let Some(sale) = self.sales.get_mut(&index) {
+            sale.closed = true;
+            sale.tidy();
+            if sale.invs.is_empty() {
+                self.sales.remove(&index);
+            }
+        }
     }
 
     /// What the screen of the sale shows of Lightning (CR-113).
     pub fn sale_view(&mut self, index: u32, now: u64) -> SaleLightning {
         self.settle_windows(now);
-        match self.sales.get(&index).map(|s| &s.phase) {
+        let Some(sale) = self.sales.get(&index) else {
+            return SaleLightning::Off;
+        };
+        if sale.closed {
+            return SaleLightning::Off;
+        }
+        match sale.invs.last().map(|i| &i.phase) {
             None | Some(Phase::Ended) => SaleLightning::Off,
             Some(
                 Phase::Want { .. } | Phase::Asked | Phase::WantLabel { .. } | Phase::AskedLabel,
@@ -729,18 +887,20 @@ impl Lightning {
     /// its quote has none.
     fn settle_windows(&mut self, now: u64) {
         let mut lines = Vec::new();
-        for (index, s) in &mut self.sales {
-            let waiting = matches!(
-                s.phase,
-                Phase::Want { .. } | Phase::Asked | Phase::WantLabel { .. } | Phase::AskedLabel
-            );
-            if waiting && now >= s.window_start.saturating_add(INVOICE_WINDOW_SECS) {
-                let words = match s.last_failure {
-                    Some(t) => t.sale_words(),
-                    None => no_invoice_words("the node did not answer in time"),
-                };
-                lines.push(format!("sale {index}: no Lightning invoice in time"));
-                s.phase = Phase::Unavailable(words);
+        for (index, sale) in &mut self.sales {
+            for s in &mut sale.invs {
+                let waiting = matches!(
+                    s.phase,
+                    Phase::Want { .. } | Phase::Asked | Phase::WantLabel { .. } | Phase::AskedLabel
+                );
+                if waiting && now >= s.asked_from.saturating_add(INVOICE_WINDOW_SECS) {
+                    let words = match s.last_failure {
+                        Some(t) => t.sale_words(),
+                        None => no_invoice_words("the node did not answer in time"),
+                    };
+                    lines.push(format!("sale {index}: no Lightning invoice in time"));
+                    s.phase = Phase::Unavailable(words);
+                }
             }
         }
         for line in lines {
@@ -760,93 +920,47 @@ impl Lightning {
         }
         let credential = self.active.as_ref()?.record.credential.clone();
         let indexes: Vec<u32> = self.sales.keys().copied().collect();
+        let counter = self.counter;
+        let id = self.next_id;
+        let mut found: Option<(Request, Out)> = None;
         for index in indexes {
-            if !live(index) {
-                self.sales.remove(&index);
+            let Some(sale) = self.sales.get_mut(&index) else {
                 continue;
+            };
+            if !sale.closed && !live(index) {
+                sale.closed = true;
             }
-            let counter = self.counter;
-            let id = self.next_id;
-            let Some(s) = self.sales.get_mut(&index) else {
-                continue;
-            };
-            let round = s.round;
-            let (request, what) = match &s.phase {
-                Phase::Want { retry_at } if now >= *retry_at => {
-                    let ask = match &s.ask {
-                        Some(a) => a.clone(),
-                        None => {
-                            let msat = s.sats.saturating_mul(1_000);
-                            match Ask::sale(
-                                counter,
-                                u64::from(index),
-                                s.attempt,
-                                msat,
-                                expiry_secs(),
-                            ) {
-                                Ok(a) => a,
-                                Err(_) => {
-                                    s.phase = Phase::Unavailable(no_invoice_words(
-                                        "the amount cannot be asked of the node",
-                                    ));
-                                    continue;
-                                }
-                            }
-                        }
-                    };
-                    let request = credential.create_request(&ask);
-                    s.ask = Some(ask);
-                    s.phase = Phase::Asked;
-                    (request, Out::Create { index, round })
+            let n = sale.invs.len();
+            for (pos, inv) in sale.invs.iter_mut().enumerate() {
+                let current = !sale.closed && pos + 1 == n;
+                if sale.closed && !matches!(inv.phase, Phase::Have(_)) {
+                    continue;
                 }
-                Phase::WantLabel { retry_at } if now >= *retry_at => {
-                    let Some(request) = s.ask.as_ref().and_then(|a| credential.label_request(a))
-                    else {
-                        s.phase = Phase::Unavailable(no_invoice_words(
-                            "the node has no invoice with the label",
-                        ));
-                        continue;
-                    };
-                    s.phase = Phase::AskedLabel;
-                    (request, Out::Label { index, round })
+                if let Some(due) = due_request(inv, index, counter, &credential, now, current) {
+                    found = Some(due);
+                    break;
                 }
-                Phase::Have(c) => {
-                    let due = s
-                        .last_lookup
-                        .is_none_or(|t| now >= t.saturating_add(LOOKUP_EVERY_SECS));
-                    let lives = now
-                        < s.window_start
-                            .saturating_add(QUOTE_SECS)
-                            .saturating_add(LOOKUP_GRACE_SECS)
-                            .saturating_add(INVOICE_WINDOW_SECS);
-                    if !lives {
-                        s.phase = Phase::Ended;
-                        continue;
-                    }
-                    if !due {
-                        continue;
-                    }
-                    s.last_lookup = Some(now);
-                    (
-                        credential.lookup_request(&c.payment_hash),
-                        Out::Lookup { index, round },
-                    )
-                }
-                _ => continue,
-            };
-            self.next_id = id.saturating_add(1);
-            self.out = Some(Outstanding {
-                id,
-                sent: now,
-                what,
-            });
-            return Some(LnRequest {
-                id,
-                host_port: credential.endpoint().host_port(),
-                request,
-            });
+            }
+            sale.tidy();
+            if sale.invs.is_empty() {
+                self.sales.remove(&index);
+            }
+            if found.is_some() {
+                break;
+            }
         }
-        None
+        let (request, what) = found?;
+        self.next_id = id.saturating_add(1);
+        self.out = Some(Outstanding {
+            id,
+            sent: now,
+            what,
+        });
+        Some(LnRequest {
+            id,
+            host_port: credential.endpoint().host_port(),
+            request,
+        })
     }
 
     /// The certificate the node must show for the request with this number
@@ -912,12 +1026,13 @@ impl Lightning {
             | Out::Label { index, round }
             | Out::Lookup { index, round } => (index, round),
         };
-        let Some(s) = self.sales.get_mut(&index) else {
+        let Some(s) = self
+            .sales
+            .get_mut(&index)
+            .and_then(|sale| sale.invs.iter_mut().find(|i| i.round == round))
+        else {
             return;
         };
-        if s.round != round {
-            return;
-        }
         s.last_failure = Some(why);
         // LN-15: after no answer, the same request is sent again, with the
         // same attempt, while the window lasts.
@@ -959,8 +1074,11 @@ impl Lightning {
         };
         let mut lines = Vec::new();
         let mut event = LnEvent::Nothing;
-        if let Some(s) = self.sales.get_mut(&index) {
-            if s.round == round {
+        if let Some(sale) = self.sales.get_mut(&index) {
+            let SaleLn {
+                invs, next_attempt, ..
+            } = sale;
+            if let Some(s) = invs.iter_mut().find(|i| i.round == round) {
                 match what {
                     Out::Create { .. } if s.phase == Phase::Asked => {
                         let made = credential.parse_create(reply);
@@ -978,15 +1096,27 @@ impl Lightning {
                         }
                     }
                     Out::Label { .. } if s.phase == Phase::AskedLabel => {
-                        let existing = s.ask.as_ref().map(|a| credential.parse_existing(reply, a));
+                        let existing = s.ask.as_ref().map(|a| {
+                            if s.restored {
+                                credential.parse_restored(reply, a)
+                            } else {
+                                credential.parse_existing(reply, a)
+                            }
+                        });
                         match existing {
                             Some(Ok(c)) => judge_created(s, &c, network, node, &mut lines, index),
+                            _ if s.restored => {
+                                // No invoice of this label: nothing was made.
+                                s.phase = Phase::Ended;
+                            }
                             _ => {
                                 // LN-15: the label is not this sale's: the
                                 // next attempt has a new label.
-                                s.attempt += 1;
+                                s.tries += 1;
+                                s.attempt = *next_attempt;
+                                *next_attempt = next_attempt.saturating_add(1);
                                 s.ask = None;
-                                if s.attempt >= MAX_ATTEMPTS {
+                                if s.tries >= MAX_ATTEMPTS {
                                     s.phase = Phase::Unavailable(no_invoice_words(
                                         "the label belongs to another invoice",
                                     ));
@@ -1024,6 +1154,10 @@ impl Lightning {
                     _ => {}
                 }
             }
+            sale.tidy();
+            if sale.invs.is_empty() {
+                self.sales.remove(&index);
+            }
         }
         for line in lines {
             self.note(line);
@@ -1031,16 +1165,107 @@ impl Lightning {
         event
     }
 
-    /// The sale is paid (by the counter's own judgment, CR-109): stop asking.
-    pub fn paid(&mut self, index: u32) {
-        if let Some(s) = self.sales.get_mut(&index) {
-            s.phase = Phase::Ended;
+    /// The sale is paid (by the counter's own judgment, CR-109) by the
+    /// invoice with this payment hash: that invoice is done, the sale is over
+    /// and its other invoices stay watched for a late payment (CR-117).
+    pub fn paid(&mut self, index: u32, payment_hash: &[u8; 32]) {
+        if let Some(sale) = self.sales.get_mut(&index) {
+            sale.invs.retain(|i| !i.has_hash(payment_hash));
+            sale.closed = true;
+            sale.tidy();
+            if sale.invs.is_empty() {
+                self.sales.remove(&index);
+            }
+        }
+    }
+
+    /// The invoice with this payment hash is settled and taken care of (a
+    /// late payment, CR-117, or one the counter will not take): it is not
+    /// asked about again. The sale's other invoices are not touched.
+    pub fn settled(&mut self, index: u32, payment_hash: &[u8; 32]) {
+        if let Some(sale) = self.sales.get_mut(&index) {
+            sale.invs.retain(|i| !i.has_hash(payment_hash));
+            sale.tidy();
+            if sale.invs.is_empty() {
+                self.sales.remove(&index);
+            }
         }
     }
 }
 
+/// The request an invoice has due now, if any, and what it is for.
+fn due_request(
+    inv: &mut Inv,
+    index: u32,
+    counter: [u8; 4],
+    credential: &Credential,
+    now: u64,
+    current: bool,
+) -> Option<(Request, Out)> {
+    let round = inv.round;
+    match &inv.phase {
+        Phase::Want { retry_at } if now >= *retry_at => {
+            let ask = match &inv.ask {
+                Some(a) => a.clone(),
+                None => {
+                    let msat = inv.sats.saturating_mul(1_000);
+                    match Ask::sale(counter, u64::from(index), inv.attempt, msat, expiry_secs()) {
+                        Ok(a) => a,
+                        Err(_) => {
+                            inv.phase = Phase::Unavailable(no_invoice_words(
+                                "the amount cannot be asked of the node",
+                            ));
+                            return None;
+                        }
+                    }
+                }
+            };
+            let request = credential.create_request(&ask);
+            inv.ask = Some(ask);
+            inv.phase = Phase::Asked;
+            Some((request, Out::Create { index, round }))
+        }
+        Phase::WantLabel { retry_at } if now >= *retry_at => {
+            let Some(request) = inv.ask.as_ref().and_then(|a| credential.label_request(a)) else {
+                inv.phase =
+                    Phase::Unavailable(no_invoice_words("the node has no invoice with the label"));
+                return None;
+            };
+            inv.phase = Phase::AskedLabel;
+            Some((request, Out::Label { index, round }))
+        }
+        Phase::Have(c) => {
+            let every = if current {
+                LOOKUP_EVERY_SECS
+            } else {
+                OLD_LOOKUP_EVERY_SECS
+            };
+            let due = inv
+                .last_lookup
+                .is_none_or(|t| now >= t.saturating_add(every));
+            let lives = now
+                < inv
+                    .window_start
+                    .saturating_add(QUOTE_SECS)
+                    .saturating_add(LOOKUP_GRACE_SECS)
+                    .saturating_add(INVOICE_WINDOW_SECS);
+            if !lives {
+                inv.phase = Phase::Ended;
+                return None;
+            }
+            if !due {
+                return None;
+            }
+            let request = credential.lookup_request(&c.payment_hash);
+            inv.last_lookup = Some(now);
+            Some((request, Out::Lookup { index, round }))
+        }
+        _ => None,
+    }
+}
+
 fn judge_created(
-    s: &mut SaleLn,
+    s: &mut Inv,
     created: &Created,
     network: Network,
     node: [u8; 33],
@@ -1090,6 +1315,11 @@ fn rule_code(rule: &'static str) -> &'static str {
 
 fn refused_words(e: &ReplyRefused) -> Words {
     unavailable(&e.words(), e.rule())
+}
+
+/// CR-118: the sale has had too many quotes for Lightning.
+fn too_many_words() -> Words {
+    no_invoice_words("this sale has had too many quotes for Lightning")
 }
 
 fn no_invoice_words(why: &str) -> Words {

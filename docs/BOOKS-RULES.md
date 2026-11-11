@@ -58,7 +58,8 @@ Nothing here says what a merchant owes. It writes down what the records say.
   the first quote and where that rate came from, the satoshis, the rate and
   the rate source of the last quote (the first quote's when the sale was
   never requoted), the time funds were first recorded, the satoshis
-  received (BK-09), the late payments with their transaction IDs, any
+  received (BK-09), the late payments with their transaction IDs (the
+  payment hash, for an invoice settled late over Lightning, CR-117), any
   surplus owed and dust, any override with the person's role and name, and
   what the POS was told. Once the sale is final, the final record adds the
   transactions that paid it with what each paid, the earliest time one of

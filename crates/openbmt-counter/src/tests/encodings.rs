@@ -356,6 +356,25 @@ fn every_event_is_strict() {
 }
 
 #[test]
+fn a_late_lightning_event_is_strict_and_has_these_bytes() {
+    let e = Event::LateLightning {
+        index: 4,
+        at: T0 + 55,
+        payment_hash: [5; 32],
+        amount_msat: 2_000_500,
+    };
+    let bytes = e.encode();
+    assert_eq!(Event::decode(&bytes).unwrap(), e);
+    assert_strict(&bytes, Event::decode, Event::encode);
+    let mut expect = vec![21u8];
+    expect.extend(4u32.to_le_bytes());
+    expect.extend((T0 + 55).to_le_bytes());
+    expect.extend([5u8; 32]);
+    expect.extend(2_000_500u64.to_le_bytes());
+    assert_eq!(bytes, expect);
+}
+
+#[test]
 fn an_event_with_an_unknown_tag_or_field_is_refused() {
     let mut bad = Event::Expired { index: 1, at: 2 }.encode();
     bad[0] = 0;

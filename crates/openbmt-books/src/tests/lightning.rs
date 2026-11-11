@@ -140,6 +140,30 @@ fn bk_32_a_late_payment_on_the_address_is_added_and_listed() {
 }
 
 #[test]
+fn bk_32_an_invoice_paid_late_is_listed_as_a_late_payment_by_its_hash() {
+    let events = vec![
+        opened(0, FEB_1_0100, 2500),
+        Event::Expired {
+            index: 0,
+            at: FEB_1_0100 + 900,
+        },
+        Event::LateLightning {
+            index: 0,
+            at: FEB_2_NOON,
+            payment_hash: [0x5a; 32],
+            amount_msat: 2_500_400,
+        },
+    ];
+    let kit = kit_with(&events);
+    let s = kit.books().sale(&kit.key(0)).expect("sale").clone();
+    assert_eq!(s.state, SaleState::LatePayment);
+    assert_eq!(s.late_payments.len(), 1);
+    assert_eq!(s.late_payments[0].txid, [0x5a; 32]);
+    assert_eq!(s.late_payments[0].sats, 2_500);
+    assert_eq!(s.payment_mode, PaymentMode::OnChain);
+}
+
+#[test]
 fn bk_33_the_bundle_is_version_two_only_with_a_lightning_sale() {
     let kit = mixed();
     let books = kit.books();

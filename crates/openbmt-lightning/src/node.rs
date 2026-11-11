@@ -53,6 +53,16 @@ impl Credential {
         }
     }
 
+    /// [`Credential::parse_existing`] for an invoice looked up by label after
+    /// a restart (CR-112): one that is already paid is taken too, so that
+    /// the lookup that follows finds the payment.
+    pub fn parse_restored(&self, reply: &Reply, ask: &Ask) -> Result<Created, ReplyRefused> {
+        match self {
+            Self::Lnd(_) => Err(ReplyRefused::LabelGone),
+            Self::Cln(_) => cln::parse_restored(reply, ask),
+        }
+    }
+
     /// The request that asks whether the invoice with this payment hash is
     /// paid (LN-07, LN-10).
     pub fn lookup_request(&self, payment_hash: &[u8; 32]) -> Request {

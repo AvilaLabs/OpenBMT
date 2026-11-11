@@ -1,7 +1,7 @@
 //! Section 12: a sale paid over Lightning through the shop's own node
-//! (CR-109 to CR-111). The rules about asking the node for an invoice, the
+//! (CR-109 to CR-111, CR-117). The rules about asking the node for an invoice, the
 //! sale code, the transport, the credential and the health line (CR-112 to
-//! CR-116) belong to the node, the library for the app and the app, and are
+//! CR-116, CR-118) belong to the node, the library for the app and the app, and are
 //! tested there.
 
 use openbmt_core::records::RecordKind;
@@ -384,4 +384,128 @@ fn cr_111_what_arrived_over_lightning_can_be_refunded_in_cash_or_on_chain() {
         .c
         .request_refund(o.index, more, w.now, &w.chain, &mut w.m)
         .is_err());
+}
+
+fn late_paid(hash: u8, msat: u64) -> LightningPaid {
+    LightningPaid {
+        payment_hash: [hash; 32],
+        amount_msat: msat,
+        settled_at: None,
+    }
+}
+
+#[test]
+fn cr_117_an_invoice_settled_after_a_cancel_is_a_late_payment() {
+    let mut w = World::new();
+    let o = w.open_five();
+    w.c.cancel(o.index, w.now, &mut w.m).unwrap();
+    // The counter does not take it as a payment of the sale.
+    assert!(matches!(
+        w.lightning(o.index, paid(5_000_000)),
+        Err(LightningRefused::SaleClosed)
+    ));
+    let reports =
+        w.c.lightning_late(o.index, paid(5_000_000), w.now, &mut w.m)
+            .unwrap();
+    assert_eq!(
+        reports,
+        vec![Report::LatePayment {
+            index: o.index,
+            sats: 5_000
+        }]
+    );
+    assert!(w.m.events().iter().any(|e| matches!(
+        e,
+        Event::LateLightning { index, payment_hash, amount_msat: 5_000_000, .. }
+            if *index == o.index && *payment_hash == [7; 32]
+    )));
+    let screen = w.judge(o.index);
+    assert!(screen.late);
+    assert!(screen
+        .flag_words()
+        .iter()
+        .any(|f| f.heading == "Late payment"));
+    // Asked again, nothing more is written or reported.
+    let before = w.m.events().len();
+    let again =
+        w.c.lightning_late(o.index, paid(5_000_000), w.now, &mut w.m)
+            .unwrap();
+    assert!(again.is_empty());
+    assert_eq!(w.m.events().len(), before);
+    // The stored sale reads back with it, even for less than a satoshi.
+    let dust =
+        w.c.lightning_late(o.index, late_paid(8, 400), w.now, &mut w.m)
+            .unwrap();
+    assert_eq!(
+        dust,
+        vec![Report::LatePayment {
+            index: o.index,
+            sats: 1
+        }]
+    );
+    let sale = w.c.sale(o.index).unwrap();
+    assert_eq!(sale.late_payments().len(), 2);
+    assert_eq!(
+        Sale::from_bytes(&sale.to_bytes())
+            .unwrap()
+            .late_payments()
+            .len(),
+        2
+    );
+    // A sale the counter does not hold is refused.
+    assert!(matches!(
+        w.c.lightning_late(99, paid(5_000_000), w.now, &mut w.m),
+        Err(LightningRefused::UnknownSale(99))
+    ));
+}
+
+#[test]
+fn cr_117_a_second_invoice_of_a_sale_paid_over_lightning_is_late() {
+    let mut w = World::new();
+    let o = w.open_five();
+    w.lightning(o.index, paid(5_000_000)).unwrap();
+    // The invoice that paid the sale is not late.
+    assert!(w
+        .c
+        .lightning_late(o.index, paid(5_000_000), w.now, &mut w.m)
+        .unwrap()
+        .is_empty());
+    let reports =
+        w.c.lightning_late(o.index, late_paid(8, 3_000_000), w.now, &mut w.m)
+            .unwrap();
+    assert_eq!(reports.len(), 1);
+    let screen = w.judge(o.index);
+    assert_eq!(screen.state, State::PaidLightning);
+    assert!(screen.late);
+}
+
+#[test]
+fn cr_117_the_record_of_a_late_lightning_payment_is_strict() {
+    let event = Event::LateLightning {
+        index: 4,
+        at: 1_700_000_000,
+        payment_hash: [9; 32],
+        amount_msat: 25_000_001,
+    };
+    let bytes = event.encode();
+    assert_eq!(Event::decode(&bytes).unwrap(), event);
+    assert_eq!(event.index(), 4);
+    assert_eq!(event.at(), 1_700_000_000);
+    assert_eq!(event.kind(), RecordKind::Payment);
+    for n in 0..bytes.len() {
+        assert!(Event::decode(&bytes[..n]).is_err(), "cut at {n}");
+    }
+    let mut longer = bytes.clone();
+    longer.push(0);
+    assert!(Event::decode(&longer).is_err());
+    let zero = Event::LateLightning {
+        index: 4,
+        at: 1,
+        payment_hash: [9; 32],
+        amount_msat: 0,
+    };
+    assert!(matches!(
+        Event::decode(&zero.encode()),
+        Err(DecodeError::NonCanonical(_))
+    ));
 }
