@@ -12,8 +12,9 @@ wallet.**
 
 **Pre-release. Do not use with real funds.** The Android apps are early builds
 that run on an Android emulator and have not yet been tested on a phone.
-Release packaging and full application integration remain in progress. OpenBMT has had internal design
-reviews; no independent security audit has been completed.
+Release packaging and full application integration remain in progress.
+OpenBMT has had internal design reviews; no independent security audit has
+been completed.
 
 ## Get started
 
