@@ -951,6 +951,40 @@ fn nr_41_the_watched_scripts_are_limited() {
 }
 
 #[test]
+fn nr_97_unwatched_scripts_leave_the_limit_and_the_filter_match() {
+    let mut n = Net::new();
+    let scripts: Vec<ScriptBuf> = (0..100_000u32)
+        .map(|i| {
+            let mut bytes = vec![0x00, 0x14];
+            bytes.extend(i.to_le_bytes());
+            ScriptBuf::from_bytes(bytes)
+        })
+        .collect();
+    for s in &scripts {
+        assert!(n.m.watch_script(s.clone()));
+    }
+    assert!(!n.m.watch_script(script(1)));
+    // Some of them leave, one that was never watched is passed over, and the
+    // room they held is free again.
+    let mut leaving: Vec<ScriptBuf> = scripts.iter().take(10).cloned().collect();
+    leaving.push(script(2));
+    n.m.unwatch_scripts(&leaving);
+    assert_eq!(n.m.sizes().scripts, 100_000 - 10);
+    assert!(n.m.watch_script(script(1)));
+    assert_eq!(n.m.sizes().scripts, 100_000 - 9);
+}
+
+#[test]
+fn nr_97_a_filter_is_matched_only_against_the_scripts_that_are_left() {
+    let mut r = Rig::new(vec![vec![pay(&script(9), 1_000, 1)], vec![]]);
+    assert!(r.n.m.watch_script(script(9)));
+    assert!(r.n.m.watch_script(script(10)));
+    r.n.m.unwatch_scripts(&[script(9)]);
+    r.both_honest(1);
+    assert!(block_requests(&r.n.sent(r.a)).is_empty());
+}
+
+#[test]
 fn nr_41_a_filter_is_matched_against_every_watched_script() {
     // The second script is the one the block pays.
     let mut r = Rig::new(vec![vec![pay(&script(9), 1_000, 1)]]);

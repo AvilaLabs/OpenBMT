@@ -272,6 +272,11 @@ impl<P: DriverPort> OwnerWatcher<P> {
         self.last_seq
     }
 
+    /// The watcher's clock, in seconds.
+    pub fn now(&self) -> u64 {
+        self.clock.now()
+    }
+
     /// The driver, for the commands of the node that owns this watcher.
     pub fn port(&self) -> &P {
         &self.port

@@ -39,6 +39,8 @@ pub struct IssuedRange {
     pub count: u32,
     /// The counter the batch was signed for.
     pub counter: DeviceId,
+    /// The owner's clock, in seconds, when the batch was signed (OC-22).
+    pub signed_at: u64,
 }
 
 impl IssuedRange {

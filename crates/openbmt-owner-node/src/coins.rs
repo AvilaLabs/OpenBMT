@@ -59,6 +59,17 @@
 //! already in flight without rescanning from the birthday. A new view,
 //! [`CoinView::reset`] and the deep reorg state scan from the birthday.
 //!
+//! ## Scripts set aside
+//!
+//! When the wallet's scripts would not fit the live watch, old quiet
+//! receive scripts are set aside (OC-22, OC-23, `crate::live`). The view
+//! keeps their indices as runs ([`Spans`]) and the schedule of the deep
+//! check that looks at them (OC-24 to OC-26): when the last one finished,
+//! when the next is due, whether the last one failed, and the height above
+//! which they have not been checked. They are stored in the same bytes as
+//! the coins, so a restart sees both or neither. The view has no clock: the
+//! caller gives it the times.
+//!
 //! ## The stored form
 //!
 //! `OBMe`, version 1, strict like the other stored forms: sorted lists, no
@@ -78,6 +89,8 @@ use openbmt_core::wallet::Keychain;
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_spend::Coin;
 use openbmt_watch::{HeaderChain, Refusal, WellFormedBlock};
+
+use crate::live::{Spans, MAX_RELEASED_SPANS};
 
 /// The magic of the stored coin view: `OBMe`.
 pub const MAGIC_OWNER_COINS: [u8; 4] = *b"OBMe";
@@ -284,6 +297,26 @@ pub struct CoinView {
     receipts: BTreeMap<u32, Vec<Receipt>>,
     receipt_total: usize,
     receipt_log_full: bool,
+    /// OC-22: receive indices set aside from the live watch.
+    released: Spans,
+    /// OC-24 to OC-26: the schedule of the deep check.
+    deep: DeepSchedule,
+}
+
+/// OC-24 to OC-26: when the scripts that were set aside are checked.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DeepSchedule {
+    /// When the last deep check finished, on the owner's clock; 0 if none
+    /// has.
+    pub last: u64,
+    /// When the next one is due; 0 while nothing is set aside. A time at or
+    /// before the clock's is due now.
+    pub due: u64,
+    /// Whether the last attempt did not finish.
+    pub failed: bool,
+    /// The height above which the scripts set aside have not been checked.
+    /// 0 while nothing is set aside.
+    pub from: u32,
 }
 
 impl CoinView {
@@ -304,6 +337,8 @@ impl CoinView {
             receipts: BTreeMap::new(),
             receipt_total: 0,
             receipt_log_full: false,
+            released: Spans::new(),
+            deep: DeepSchedule::default(),
         }
     }
 
@@ -339,6 +374,26 @@ impl CoinView {
     /// Change indices watched, the same way.
     pub fn change_watch(&self) -> u32 {
         self.change_next.saturating_add(GAP).min(INDEX_LIMIT)
+    }
+
+    /// OC-22: the receive indices set aside from the live watch.
+    pub fn released(&self) -> &Spans {
+        &self.released
+    }
+
+    /// OC-24 to OC-26: the schedule of the deep check.
+    pub fn deep(&self) -> DeepSchedule {
+        self.deep
+    }
+
+    /// OC-22: how many scripts the live watch holds: the receive scripts
+    /// watched that are not set aside, and the change scripts watched.
+    pub fn live_count(&self) -> u64 {
+        let receive = u64::from(self.receive_watch());
+        let aside = self.released.count_below(self.receive_watch());
+        receive
+            .saturating_sub(aside)
+            .saturating_add(u64::from(self.change_watch()))
     }
 
     /// What the view can say about itself.
@@ -519,15 +574,32 @@ impl CoinView {
         through: u32,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<bool, E> {
+        self.watch_plan(receive_next, change_next, through, &[], 0, persist)
+    }
+
+    /// OC-07, OC-22: raise the marks as [`CoinView::raise_marks_and_rescan`]
+    /// does, and in the same write set receive indices aside from the live
+    /// watch. `due` is when the first deep check is due, used only when none
+    /// was set aside before. Setting scripts aside needs no rescan: the
+    /// height above which they have not been checked is the position of the
+    /// view after any rewind, or lower if scripts were set aside before.
+    /// Returns whether anything changed.
+    pub fn watch_plan<E>(
+        &mut self,
+        receive_next: u32,
+        change_next: u32,
+        through: u32,
+        release: &[u32],
+        due: u64,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<bool, E> {
         let receive_next = receive_next.max(self.receive_next).min(INDEX_LIMIT);
         let change_next = change_next.max(self.change_next).min(INDEX_LIMIT);
-        if receive_next == self.receive_next && change_next == self.change_next {
-            return Ok(false);
-        }
+        let marks_grew = receive_next != self.receive_next || change_next != self.change_next;
         let mut next = self.clone();
         next.receive_next = receive_next;
         next.change_next = change_next;
-        if next.state != ViewState::DeepReorg {
+        if marks_grew && next.state != ViewState::DeepReorg {
             let safe = next.checked.saturating_sub(1).max(next.birthday);
             let to = through.max(next.checked);
             next.checked = safe;
@@ -537,6 +609,136 @@ impl CoinView {
                 ViewState::Ready
             };
         }
+        let was_empty = next.released.is_empty();
+        let mut added = false;
+        for index in release {
+            if next.released.runs() >= MAX_RELEASED_SPANS && !next.released.contains(*index) {
+                break;
+            }
+            added |= next.released.insert(*index);
+        }
+        if added {
+            if was_empty {
+                next.deep = DeepSchedule {
+                    last: next.deep.last,
+                    due,
+                    failed: false,
+                    from: next.checked,
+                };
+            } else {
+                next.deep.from = next.deep.from.min(next.checked);
+            }
+        }
+        if !marks_grew && !added {
+            return Ok(false);
+        }
+        persist(&encode(&next))?;
+        *self = next;
+        Ok(true)
+    }
+
+    /// OC-12, OC-22: put receive indices back in the live watch, because a
+    /// payment to them was found. The blocks above `rewind_to` are checked
+    /// again by the live watch, which did not have these scripts while the
+    /// deep check ran: the position goes down to `rewind_to` and the view
+    /// takes the rescanning state up to `through` (or the position it had).
+    /// Returns whether anything changed.
+    pub fn return_to_live<E>(
+        &mut self,
+        indices: &[u32],
+        rewind_to: u32,
+        through: u32,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<bool, E> {
+        let mut next = self.clone();
+        let mut removed = false;
+        for index in indices {
+            removed |= next.released.remove(*index);
+        }
+        if !removed {
+            return Ok(false);
+        }
+        next.normalize_deep();
+        if next.state != ViewState::DeepReorg && rewind_to < next.checked {
+            let safe = rewind_to.max(next.birthday);
+            let to = through.max(next.checked);
+            next.checked = safe;
+            next.state = if to > safe {
+                ViewState::Rescanning { to }
+            } else {
+                ViewState::Ready
+            };
+        }
+        persist(&encode(&next))?;
+        *self = next;
+        Ok(true)
+    }
+
+    /// With nothing set aside there is no schedule.
+    fn normalize_deep(&mut self) {
+        if self.released.is_empty() {
+            self.deep.due = 0;
+            self.deep.failed = false;
+            self.deep.from = 0;
+        }
+    }
+
+    /// OC-24: a deep check has checked every script set aside, up to
+    /// `target`. The next one is due at `next_due`.
+    pub fn deep_finished<E>(
+        &mut self,
+        now: u64,
+        next_due: u64,
+        target: u32,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let mut next = self.clone();
+        next.deep.last = now;
+        next.deep.due = next_due;
+        next.deep.failed = false;
+        next.deep.from = next.deep.from.max(target);
+        next.normalize_deep();
+        if next == *self {
+            return Ok(());
+        }
+        persist(&encode(&next))?;
+        *self = next;
+        Ok(())
+    }
+
+    /// OC-26: a deep check did not finish. It is tried again at `retry_at`.
+    pub fn deep_failed<E>(
+        &mut self,
+        retry_at: u64,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let mut next = self.clone();
+        next.deep.due = retry_at;
+        next.deep.failed = true;
+        next.normalize_deep();
+        if next == *self {
+            return Ok(());
+        }
+        persist(&encode(&next))?;
+        *self = next;
+        Ok(())
+    }
+
+    /// OC-24: the owner asks for a deep check at once. Stored, so that a
+    /// restart before it starts does not lose the request. Returns false
+    /// when nothing is set aside.
+    pub fn deep_request<E>(
+        &mut self,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<bool, E> {
+        if self.released.is_empty() {
+            return Ok(false);
+        }
+        if self.deep.due == 1 {
+            return Ok(true);
+        }
+        let mut next = self.clone();
+        next.deep.due = 1;
         persist(&encode(&next))?;
         *self = next;
         Ok(true)
@@ -551,6 +753,13 @@ impl CoinView {
         next.coins.clear();
         next.undo.clear();
         next.clear_receipts();
+        // The scripts set aside were never part of the scan from the
+        // birthday: a deep check from there is due at once.
+        if !next.released.is_empty() {
+            next.deep.from = next.birthday;
+            next.deep.due = 1;
+            next.deep.failed = false;
+        }
         next.checked = next.birthday;
         next.state = if to > next.birthday {
             ViewState::Rescanning { to }
@@ -912,6 +1121,9 @@ impl CoinView {
             next.state = ViewState::DeepReorg;
         } else {
             next.checked = next.checked.min(fork).max(next.birthday);
+            if !next.released.is_empty() {
+                next.deep.from = next.deep.from.min(next.checked);
+            }
         }
         persist(&encode(&next))?;
         *self = next;
@@ -993,6 +1205,16 @@ fn encode(v: &CoinView) -> Vec<u8> {
         }
         ViewState::DeepReorg => out.extend_from_slice(&[2, 0, 0, 0, 0]),
     }
+    // OC-22, OC-24: the scripts set aside as runs, then the schedule.
+    out.extend_from_slice(&len32(v.released.runs()).to_le_bytes());
+    for (start, end) in v.released.pairs() {
+        out.extend_from_slice(&start.to_le_bytes());
+        out.extend_from_slice(&end.to_le_bytes());
+    }
+    out.extend_from_slice(&v.deep.last.to_le_bytes());
+    out.extend_from_slice(&v.deep.due.to_le_bytes());
+    out.push(u8::from(v.deep.failed));
+    out.extend_from_slice(&v.deep.from.to_le_bytes());
     out.extend_from_slice(&len32(v.coins.len()).to_le_bytes());
     for c in v.coins.values() {
         put_coin(&mut out, c);
@@ -1126,6 +1348,31 @@ fn decode(bytes: &[u8]) -> Result<CoinView, DecodeError> {
             _ => return Err(DecodeError::NonCanonical("state is not canonical")),
         }
     };
+    let n = r.count(MAX_RELEASED_SPANS, 8)?;
+    let mut pairs = Vec::with_capacity(n);
+    for _ in 0..n {
+        let start = r.u32_le()?;
+        let end = r.u32_le()?;
+        pairs.push((start, end));
+    }
+    let released = Spans::from_pairs(&pairs)
+        .ok_or(DecodeError::NonCanonical("set-aside runs are not canonical"))?;
+    let deep = DeepSchedule {
+        last: r.u64_le()?,
+        due: r.u64_le()?,
+        failed: r.flag()?,
+        from: r.u32_le()?,
+    };
+    if released.is_empty() && (deep.due != 0 || deep.failed || deep.from != 0) {
+        return Err(DecodeError::NonCanonical(
+            "a deep check is scheduled with nothing set aside",
+        ));
+    }
+    if !released.is_empty() && deep.due == 0 {
+        return Err(DecodeError::NonCanonical(
+            "scripts are set aside with no deep check due",
+        ));
+    }
     let n = r.count(MAX_COINS, 80)?;
     let mut coins = BTreeMap::new();
     let mut last: Option<OutPoint> = None;
@@ -1243,5 +1490,7 @@ fn decode(bytes: &[u8]) -> Result<CoinView, DecodeError> {
         receipts,
         receipt_total: n,
         receipt_log_full,
+        released,
+        deep,
     })
 }

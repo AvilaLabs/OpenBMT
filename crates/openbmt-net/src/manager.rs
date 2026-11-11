@@ -631,6 +631,15 @@ impl Manager {
         true
     }
 
+    /// NR-97: stop watching scripts. A script that is not watched is passed
+    /// over. A filter checked after this is matched against the scripts that
+    /// are left; work already in progress keeps what it matched.
+    pub fn unwatch_scripts(&mut self, scripts: &[ScriptBuf]) {
+        for script in scripts {
+            self.scripts.remove(script);
+        }
+    }
+
     /// NR-40, NR-41: check the blocks above `height` again, against every
     /// script that is watched now. Work in progress is given up and starts
     /// over from the first block above `height`. For a caller that has

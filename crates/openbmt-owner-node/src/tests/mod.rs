@@ -21,6 +21,7 @@ use crate::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE};
 mod coins;
 mod facts;
 mod link;
+mod live;
 mod node;
 mod pos_notice;
 mod refunds;

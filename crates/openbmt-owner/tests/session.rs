@@ -229,7 +229,7 @@ fn as_50_a_session_holds_at_most_64_items() {
         ok(rig.owner.queue_pairing(&request, nop));
     }
     for i in 0..16 {
-        ok(rig.owner.queue_batch(batch(1, i * 3, 3), nop));
+        ok(rig.owner.queue_batch(batch(1, i * 3, 3), 1_000, nop));
     }
     let built = rig.build(&[], 0);
     // 16 pairings, 16 batches and the health check.
@@ -396,7 +396,7 @@ fn as_57_a_cash_out_that_does_not_fit_stays_queued_with_a_reason() {
 fn as_60_every_session_ends_with_a_health_check_from_the_random_bytes() {
     let mut rig = Rig::new();
     refund(&mut rig.owner, 1, 50_000, 10_000);
-    ok(rig.owner.queue_batch(batch(1, 0, 3), nop));
+    ok(rig.owner.queue_batch(batch(1, 0, 3), 1_000, nop));
     let (_, request) = pair_request(&rig.owner, 1);
     ok(rig.owner.queue_pairing(&request, nop));
     let built = rig.build(&[coin(1, 0, 300_000)], 0);
@@ -823,7 +823,7 @@ fn as_62_key_1_refusing_returns_the_line_with_its_rule() {
 fn as_62_a_batch_settings_and_pairing_are_completed_and_verified() {
     let mut rig = Rig::new();
     ok(rig.owner.queue_settings(settings_with(1, &[1]), nop));
-    ok(rig.owner.queue_batch(batch(1, 0, 3), nop));
+    ok(rig.owner.queue_batch(batch(1, 0, 3), 1_000, nop));
     let (pairing, request) = pair_request(&rig.owner, 1);
     let mut pairing = Some(pairing);
     ok(rig.owner.queue_pairing(&request, nop));
@@ -997,7 +997,7 @@ fn as_63_every_decline_code_comes_back_in_words() {
 fn as_63_a_key_app_without_key_2_returns_every_spend() {
     let mut rig = Rig::with(Options::default(), false);
     let id = refund(&mut rig.owner, 1, 50_000, 10_000);
-    ok(rig.owner.queue_batch(batch(1, 0, 3), nop));
+    ok(rig.owner.queue_batch(batch(1, 0, 3), 1_000, nop));
     ok(rig.owner.queue_settings(settings_with(1, &[1]), nop));
     let built = rig.build(&[coin(1, 0, 300_000)], 0);
     let response = rig.answer_all(&built.request);
@@ -1154,7 +1154,7 @@ fn as_54_a_confirmed_refund_is_paid_counts_and_can_be_archived() {
 #[test]
 fn as_64_finished_objects_wait_until_delivered() {
     let mut rig = Rig::new();
-    ok(rig.owner.queue_batch(batch(1, 0, 3), nop));
+    ok(rig.owner.queue_batch(batch(1, 0, 3), 1_000, nop));
     ok(rig.owner.queue_settings(settings_with(1, &[1]), nop));
     rig.round(&[], 0);
     assert_eq!(rig.owner.outbox().len(), 2);

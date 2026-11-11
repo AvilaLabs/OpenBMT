@@ -10,8 +10,9 @@
 //! ```
 //!
 //! Every list is a u32 count and then its entries in ascending order of
-//! their key (the issued ranges: counter, start and count, ascending by
-//! start and never overlapping, OC-10, OC-11). Decoding is strict (AS-03 in the file's rules, AS-65 here): a
+//! their key (the issued ranges: counter, start, count and the time the
+//! batch was signed, ascending by start and never overlapping, OC-10, OC-11,
+//! OC-22). Decoding is strict (AS-03 in the file's rules, AS-65 here): a
 //! snapshot is accepted only if encoding what it describes gives the same
 //! bytes.
 
@@ -305,6 +306,7 @@ pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
         out.extend_from_slice(&range.counter.to_bytes());
         out.extend_from_slice(&range.start.to_le_bytes());
         out.extend_from_slice(&range.count.to_le_bytes());
+        out.extend_from_slice(&range.signed_at.to_le_bytes());
     }
     if out.len() > MAX_SNAPSHOT_BYTES {
         return Err(Refusal::SnapshotTooLarge);
@@ -699,16 +701,18 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
         st.outbox.push(Deliverable { id, what });
     }
 
-    let n = r.count(MAX_ISSUED_RANGES, 40).map_err(d)?;
+    let n = r.count(MAX_ISSUED_RANGES, 48).map_err(d)?;
     let mut next_free: u64 = 0;
     for _ in 0..n {
         let counter = r.device_id().map_err(d)?;
         let start = r.u32_le().map_err(d)?;
         let count = r.u32_le().map_err(d)?;
+        let signed_at = r.u64_le().map_err(d)?;
         let range = IssuedRange {
             start,
             count,
             counter,
+            signed_at,
         };
         if count == 0 || range.end() > u64::from(u32::MAX) {
             return Err(d(bad("an issued range is empty or past the last index")));

@@ -624,10 +624,13 @@ impl Owner {
     }
 
     /// AS-58: queue a batch. It is signed with the owner identity here and
-    /// must be what the wallet derives for its counter and range.
+    /// must be what the wallet derives for its counter and range. `now` is
+    /// the owner's clock in seconds; it is kept with the issued range
+    /// (OC-22).
     pub fn queue_batch<E>(
         &mut self,
         batch: AddressBatch,
+        now: u64,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<u32, OwnerError<E>> {
         let derived = BatchBuilder::new(self.policy)
@@ -645,6 +648,7 @@ impl Owner {
             start: batch.start,
             count: batch.count,
             counter: batch.counter,
+            signed_at: now,
         })?;
         let id = next.take_id()?;
         let owner_sig = batch.sign(&self.identity);

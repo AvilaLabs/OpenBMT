@@ -11,13 +11,14 @@ use openbmt_owner::{Delivery, IssuedRange, Refusal, RestoreError, MAX_ISSUED_RAN
 /// The bytes of a snapshot with these issued ranges in place of the ones it
 /// holds. The list is the last part of the snapshot.
 fn with_ranges(snapshot: &[u8], held: usize, ranges: &[(DeviceId, u32, u32)]) -> Vec<u8> {
-    let cut = snapshot.len() - 4 - held * 40;
+    let cut = snapshot.len() - 4 - held * 48;
     let mut out = snapshot[..cut].to_vec();
     out.extend_from_slice(&u32::try_from(ranges.len()).unwrap().to_le_bytes());
     for (counter, start, count) in ranges {
         out.extend_from_slice(&counter.to_bytes());
         out.extend_from_slice(&start.to_le_bytes());
         out.extend_from_slice(&count.to_le_bytes());
+        out.extend_from_slice(&1_000u64.to_le_bytes());
     }
     out
 }
@@ -39,7 +40,7 @@ fn oc_10_the_bound_is_the_documented_one() {
 fn oc_10_the_range_is_recorded_in_the_same_write_as_the_batch() {
     let mut o = new_owner(Default::default());
     let store = Store::default();
-    ok(o.queue_batch(batch(1, 0, 3), |b| store.put(b)));
+    ok(o.queue_batch(batch(1, 0, 3), 1_000, |b| store.put(b)));
     // One write holds both the queued batch and its range.
     assert_eq!(store.calls(), 1);
     let stored = restore_owner(&store.last()).unwrap();
@@ -49,14 +50,15 @@ fn oc_10_the_range_is_recorded_in_the_same_write_as_the_batch() {
         &[IssuedRange {
             start: 0,
             count: 3,
-            counter: c1()
+            counter: c1(),
+            signed_at: 1_000
         }]
     );
     // A write that fails records nothing.
     let mut o2 = new_owner(Default::default());
     let failing = Store::default();
     failing.fail_next(true);
-    assert!(o2.queue_batch(batch(1, 0, 3), |b| failing.put(b)).is_err());
+    assert!(o2.queue_batch(batch(1, 0, 3), 1_000, |b| failing.put(b)).is_err());
     assert!(o2.issued_ranges().is_empty());
     assert_eq!(o2.counter_of(0), None);
     assert!(o.counter_of(0).is_some());
@@ -66,7 +68,7 @@ fn oc_10_the_range_is_recorded_in_the_same_write_as_the_batch() {
 fn oc_10_the_range_survives_delivery_and_a_restart() {
     let mut rig = Rig::new();
     ok(rig.owner.queue_settings(settings_with(1, &[1]), nop));
-    ok(rig.owner.queue_batch(batch(1, 0, 3), nop));
+    ok(rig.owner.queue_batch(batch(1, 0, 3), 1_000, nop));
     let built = rig.build(&[], 0);
     let response = rig.answer_all(&built.request);
     ok(rig.take(&response));
@@ -97,7 +99,7 @@ fn oc_10_the_range_survives_delivery_and_a_restart() {
 #[test]
 fn oc_10_a_cancelled_batch_keeps_its_range() {
     let mut o = new_owner(Default::default());
-    let id = ok(o.queue_batch(batch(1, 0, 3), nop));
+    let id = ok(o.queue_batch(batch(1, 0, 3), 1_000, nop));
     ok(o.cancel(id, nop));
     assert!(o.batches().is_empty());
     assert_eq!(o.counter_of(0), Some(c1()));
@@ -107,8 +109,8 @@ fn oc_10_a_cancelled_batch_keeps_its_range() {
 #[test]
 fn oc_10_counter_of_answers_at_the_edges_of_a_range() {
     let mut o = new_owner(Default::default());
-    ok(o.queue_batch(batch(1, 0, 3), nop));
-    ok(o.queue_batch(batch(2, 6, 4), nop));
+    ok(o.queue_batch(batch(1, 0, 3), 1_000, nop));
+    ok(o.queue_batch(batch(2, 6, 4), 1_000, nop));
     assert_eq!(o.counter_of(0), Some(c1()), "first index of a range");
     assert_eq!(o.counter_of(2), Some(c1()), "last index of a range");
     assert_eq!(o.counter_of(3), None, "one past the range");
@@ -119,8 +121,8 @@ fn oc_10_counter_of_answers_at_the_edges_of_a_range() {
     assert_eq!(o.counter_of(u32::MAX), None);
     // The ranges are in order of their start, however they were issued.
     let mut o = new_owner(Default::default());
-    ok(o.queue_batch(batch(2, 6, 4), nop));
-    ok(o.queue_batch(batch(1, 0, 3), nop));
+    ok(o.queue_batch(batch(2, 6, 4), 1_000, nop));
+    ok(o.queue_batch(batch(1, 0, 3), 1_000, nop));
     assert_eq!(o.counter_of(1), Some(c1()));
     assert_eq!(o.counter_of(7), Some(c2()));
     assert_eq!(o.issued_ranges().first().map(|r| r.start), Some(0));
@@ -130,8 +132,8 @@ fn oc_10_counter_of_answers_at_the_edges_of_a_range() {
 fn oc_10_the_receive_mark_stays_after_every_batch_is_delivered() {
     let mut rig = Rig::new();
     ok(rig.owner.queue_settings(settings_with(1, &[1, 2]), nop));
-    ok(rig.owner.queue_batch(batch(1, 0, 3), nop));
-    ok(rig.owner.queue_batch(batch(2, 3, 3), nop));
+    ok(rig.owner.queue_batch(batch(1, 0, 3), 1_000, nop));
+    ok(rig.owner.queue_batch(batch(2, 3, 3), 1_000, nop));
     let built = rig.build(&[], 0);
     let response = rig.answer_all(&built.request);
     ok(rig.take(&response));
@@ -158,13 +160,13 @@ fn oc_10_the_receive_mark_stays_after_every_batch_is_delivered() {
 #[test]
 fn oc_11_a_batch_that_overlaps_an_issued_range_is_refused() {
     let mut o = new_owner(Default::default());
-    ok(o.queue_batch(batch(1, 3, 3), nop));
+    ok(o.queue_batch(batch(1, 3, 3), 1_000, nop));
     let before = o.snapshot().unwrap();
     // Overlapping at the start, at the end, inside, around, and the same
     // range for another counter.
     for (start, count, n) in [(1, 3, 2), (5, 3, 2), (4, 3, 1), (2, 6, 2), (3, 3, 2)] {
         assert_eq!(
-            refused(o.queue_batch(batch(n, start, count), nop)),
+            refused(o.queue_batch(batch(n, start, count), 1_000, nop)),
             Refusal::BatchOverlaps { start, count },
             "{start}+{count}"
         );
@@ -173,8 +175,8 @@ fn oc_11_a_batch_that_overlaps_an_issued_range_is_refused() {
     let text = Refusal::BatchOverlaps { start: 1, count: 3 }.to_string();
     assert!(text.starts_with("OC-11:"), "{text}");
     // Touching ranges do not overlap.
-    ok(o.queue_batch(batch(2, 0, 3), nop));
-    ok(o.queue_batch(batch(2, 6, 3), nop));
+    ok(o.queue_batch(batch(2, 0, 3), 1_000, nop));
+    ok(o.queue_batch(batch(2, 6, 3), 1_000, nop));
     assert_eq!(o.issued_ranges().len(), 3);
 }
 
@@ -188,7 +190,7 @@ fn oc_11_the_range_list_is_bounded_at_65536() {
     let mut o = restore_owner(&full).unwrap();
     assert_eq!(o.issued_ranges().len(), MAX_ISSUED_RANGES);
     assert_eq!(o.receive_mark(), 65_536 * 3);
-    let err = refused(o.queue_batch(batch(1, 65_536 * 3, 3), nop));
+    let err = refused(o.queue_batch(batch(1, 65_536 * 3, 3), 1_000, nop));
     assert_eq!(err, Refusal::IssuedRangesFull);
     assert!(err.to_string().starts_with("OC-11:"));
     assert!(o.batches().is_empty());
@@ -202,7 +204,7 @@ fn oc_11_the_range_list_is_bounded_at_65536() {
 #[test]
 fn oc_10_the_stored_ranges_are_read_strictly() {
     let mut o = new_owner(Default::default());
-    ok(o.queue_batch(batch(1, 0, 3), nop));
+    ok(o.queue_batch(batch(1, 0, 3), 1_000, nop));
     let snap = o.snapshot().unwrap();
     // Cut and trailing byte.
     assert!(restore_owner(&snap[..snap.len() - 1]).is_err());
@@ -238,4 +240,20 @@ fn oc_10_the_stored_ranges_are_read_strictly() {
             assert_eq!(r.snapshot().unwrap(), flipped, "byte {at}");
         }
     }
+}
+
+#[test]
+fn oc_22_the_time_the_batch_was_signed_is_kept_with_its_range() {
+    let mut o = new_owner(Default::default());
+    let store = Store::default();
+    ok(o.queue_batch(batch(1, 0, 3), 5_000, |b| store.put(b)));
+    ok(o.queue_batch(batch(1, 3, 3), 9_000, |b| store.put(b)));
+    let times: Vec<u64> = o.issued_ranges().iter().map(|r| r.signed_at).collect();
+    assert_eq!(times, vec![5_000, 9_000]);
+    // The stored form carries them, and a restart reads them back.
+    let back = restore_owner(&store.last()).unwrap();
+    assert_eq!(back.issued_ranges(), o.issued_ranges());
+    // A snapshot cut inside the time is refused.
+    let bytes = store.last();
+    assert!(restore_owner(&bytes[..bytes.len() - 3]).is_err());
 }

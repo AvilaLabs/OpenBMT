@@ -5,7 +5,12 @@
 //! ```text
 //! owner_spend_regtest <data dir> <peer> [<peer>...] [--birthday <height>]
 //!     [--without-tor] [--proxy <address>] [--refund-depth <n>]
+//!     [--live-bound <n>] [--quiet-secs <n>] [--deep-secs <n>]
 //! ```
+//!
+//! The last three shrink the live watch's numbers (OC-22 to OC-24) so that a
+//! check against a real node can see them at work; the defaults are the
+//! constants of the rules.
 //!
 //! The peers are fixed local nodes. Each is on its own loopback address, so
 //! that the driver counts them as different groups (NR-87). The owner node
@@ -33,6 +38,10 @@
 //!   and take the response, as `spend` does
 //! - `conflict <sale> <sats> <address> <rate>`: print a second transaction
 //!   that spends the same coins as the next `spend` (the node is unchanged)
+//! - `clock <seconds>`: move the node's clock forward, which ages the
+//!   addresses it has issued (test only)
+//! - `deepcheck`: ask for a deep check of the old addresses (OC-24)
+//! - `old`: the line about old addresses (OC-25)
 //! - `coins`, `states`, `relay <txid>`, `status`, `rescan`, `pump <seconds>`,
 //!   `quit`
 //!
@@ -50,6 +59,9 @@
 //!   `fees samples=<n> rated=<n> recent=<n> usual=<n> low=<bool>`
 //! - `spent txid=<txid>`, `refused <text>`
 //! - `status tip=<h> checked=<h> view=<text>`
+//! - `clock offset=<seconds>`, `watch live=<n> aside=<n>`
+//! - `old none`, or `old <state> count=<n> next=<time> days=<n>` where the
+//!   state is `first`, `monthly`, `checking` or `failed`
 //! - `note <text>`, `stopped`
 //!
 //! Every command ends with a line `done <n>`.
@@ -60,6 +72,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::process::ExitCode;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, TryRecvError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -70,16 +83,19 @@ use openbmt_approver::{Approver, Choice};
 use openbmt_core::batch::{BatchBuilder, BatchPolicy};
 use openbmt_core::identity::Identity;
 use openbmt_core::wallet::{KeySlot, WalletDescription};
-use openbmt_net_io::DriverConfig;
+use openbmt_net_io::{Clock, DriverConfig};
 use openbmt_owner::{Built, Delivery, Owner, SaleFacts, SaleKey};
 use openbmt_owner_node::watcher::write_file;
-use openbmt_owner_node::{OwnerConfig, OwnerNode, OwnerParts, ReceiptsLine, SendState};
+use openbmt_owner_node::{
+    DeepLine, OwnerConfig, OwnerNode, OwnerParts, ReceiptsLine, SendState, WatchLimits,
+};
 use openbmt_signer::SignerState;
 use openbmt_watch::HeaderChain;
 
 const USAGE: &str = "usage: owner_spend_regtest <data dir> <peer> [<peer>...] \
                      [--birthday <height>] [--without-tor] [--proxy <address>] \
-                     [--refund-depth <n>]";
+                     [--refund-depth <n>] [--live-bound <n>] [--quiet-secs <n>] \
+                     [--deep-secs <n>]";
 
 /// TEST ONLY, NEVER USE: the secret bytes of the identities.
 const OWNER_SECRET: [u8; 32] = [0x41; 32];
@@ -191,10 +207,23 @@ fn number<T: FromStr>(word: Option<&str>, what: &str) -> Result<T, String> {
         .map_err(|_| format!("{what} is not a number"))
 }
 
+/// Seconds that the `clock` command has added to the node's time.
+static CLOCK_OFFSET: AtomicU64 = AtomicU64::new(0);
+
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
+        .saturating_add(CLOCK_OFFSET.load(Ordering::SeqCst))
+}
+
+/// The node's clock: the system's, moved forward by the `clock` command.
+struct OffsetClock;
+
+impl Clock for OffsetClock {
+    fn now(&self) -> u64 {
+        now_secs()
+    }
 }
 
 fn sale(index: u32) -> Result<SaleKey, String> {
@@ -301,7 +330,7 @@ fn command(node: &mut OwnerNode, keys: &mut Keys, dir: &Path, line: &str) -> Res
             let write = node.queue_writer();
             node.owner_mut()
                 .map_err(|e| e.to_string())?
-                .queue_batch(batch, &write)
+                .queue_batch(batch, now_secs(), &write)
                 .map_err(|e| e.to_string())?;
             node.refresh_marks();
         }
@@ -474,6 +503,43 @@ fn command(node: &mut OwnerNode, keys: &mut Keys, dir: &Path, line: &str) -> Res
                 }
             }
         }
+        Some("clock") => {
+            let secs: u64 = number(words.next(), "the seconds")?;
+            CLOCK_OFFSET.fetch_add(secs, Ordering::SeqCst);
+            say(format!(
+                "clock offset={}",
+                CLOCK_OFFSET.load(Ordering::SeqCst)
+            ));
+        }
+        Some("deepcheck") => {
+            let asked = node.request_deep_check().map_err(|e| e.to_string())?;
+            say(format!("deepcheck asked={asked}"));
+        }
+        Some("old") => match node.old_addresses_line() {
+            None => say("old none"),
+            Some(line) => {
+                let now = now_secs();
+                let (state, count, next) = match line {
+                    DeepLine::FirstCheckWaiting { count, next } => ("first", count, next),
+                    DeepLine::Monthly { count, next, .. } => ("monthly", count, next),
+                    DeepLine::Checking { count } => ("checking", count, 0),
+                    DeepLine::Failed { count, next } => ("failed", count, next),
+                };
+                let days = match line {
+                    DeepLine::Monthly { days_ago, .. } => days_ago,
+                    _ => 0,
+                };
+                say(format!(
+                    "old {state} count={count} next_in={} days={days}",
+                    next.saturating_sub(now)
+                ));
+            }
+        },
+        Some("watch") => say(format!(
+            "watch live={} aside={}",
+            node.view().live_count(),
+            node.view().released().len()
+        )),
         Some("coins") => {
             let mut coins = node.coins();
             coins.sort_by_key(|c| c.outpoint);
@@ -541,6 +607,7 @@ fn run(args: &[String]) -> Result<(), String> {
     let mut without_tor = false;
     let mut proxy: Option<SocketAddr> = None;
     let mut refund_depth = 6u32;
+    let mut limits = WatchLimits::default();
     let mut rest: Vec<&str> = Vec::new();
     let mut args = args.iter();
     while let Some(arg) = args.next() {
@@ -553,6 +620,15 @@ fn run(args: &[String]) -> Result<(), String> {
             }
             "--refund-depth" => {
                 refund_depth = number(args.next().map(String::as_str), "the refund depth")?;
+            }
+            "--live-bound" => {
+                limits.live = number(args.next().map(String::as_str), "the live bound")?;
+            }
+            "--quiet-secs" => {
+                limits.quiet_secs = number(args.next().map(String::as_str), "the quiet time")?;
+            }
+            "--deep-secs" => {
+                limits.deep_secs = number(args.next().map(String::as_str), "the check time")?;
             }
             other => rest.push(other),
         }
@@ -578,6 +654,7 @@ fn run(args: &[String]) -> Result<(), String> {
     config.birthday = birthday;
     config.broadcast_proxy = proxy;
     config.broadcast_without_tor = without_tor;
+    config.clock = Box::new(OffsetClock);
     let mut parts = OwnerParts::new(
         OWNER_SECRET,
         keys.wallet.clone(),
@@ -586,6 +663,7 @@ fn run(args: &[String]) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
     parts.refund_depth = refund_depth;
+    parts.limits = limits;
 
     say(format!("descriptor {}", keys.wallet.canonical_string()));
     let mut node = OwnerNode::start(config, parts).map_err(|e| e.to_string())?;

@@ -6,6 +6,7 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Sender};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -24,11 +25,13 @@ use openbmt_owner::{Delivery, SaleFacts, SaleKey, Stage};
 use openbmt_signer::SignerState;
 use openbmt_spend::Coin;
 
+mod live;
 mod receipts;
 
 use super::coins::{mine, tx_from};
-use super::{id, Dir};
+use super::{id, Dir, TestClock};
 use crate::coins::{CoinView, ViewState};
+use crate::live::WatchLimits;
 use crate::{
     NodeError, OwnerConfig, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState, COINS_FILE,
     NO_TOR,
@@ -169,6 +172,9 @@ impl DriverPort for FakePort {
 }
 
 impl OwnerPort for FakePort {
+    fn unwatch_scripts(&self, scripts: Vec<ScriptBuf>) {
+        self.say(format!("unwatch {}", scripts.len()));
+    }
     fn broadcast(&self, tx: Vec<u8>) {
         let txid = deserialize::<Transaction>(&tx).unwrap().compute_txid();
         self.say(format!("broadcast {txid}"));
@@ -209,6 +215,10 @@ struct Setup {
     proxy: Option<SocketAddr>,
     without_tor: bool,
     refund_depth: u32,
+    /// OC-22 to OC-24: the live watch's numbers.
+    limits: WatchLimits,
+    /// The node's clock, when a test sets it.
+    time: Option<Arc<AtomicU64>>,
 }
 
 impl Default for Setup {
@@ -217,6 +227,8 @@ impl Default for Setup {
             proxy: None,
             without_tor: true,
             refund_depth: 6,
+            limits: WatchLimits::default(),
+            time: None,
         }
     }
 }
@@ -228,6 +240,8 @@ struct Rig {
     sender: Option<Sender<AppEvent>>,
     log: Log,
     spawned: Arc<Mutex<Vec<Spawned>>>,
+    /// The senders of every driver that was started, in order.
+    senders: Arc<Mutex<Vec<Sender<AppEvent>>>>,
     chain: Vec<Block>,
     /// How much of the log has been looked at for scan requests.
     scans_seen: usize,
@@ -244,6 +258,9 @@ fn start_at(dir: &Dir, setup: &Setup, chain: Vec<Block>) -> Result<Rig, NodeErro
     let mut config = OwnerConfig::new(dir.path(), id(0x11), DriverConfig::new(NET, 0));
     config.broadcast_proxy = setup.proxy;
     config.broadcast_without_tor = setup.without_tor;
+    if let Some(time) = &setup.time {
+        config.clock = Box::new(TestClock(time.clone()));
+    }
     config.health = Box::new(|_| openbmt_watch::Health {
         healthy: true,
         problem: None,
@@ -251,11 +268,14 @@ fn start_at(dir: &Dir, setup: &Setup, chain: Vec<Block>) -> Result<Rig, NodeErro
     });
     let mut parts = OwnerParts::new(OWNER_SECRET, kit().wallet.clone(), approver_id(), policy())?;
     parts.refund_depth = setup.refund_depth;
+    parts.limits = setup.limits;
     parts.random = Box::new(Counter(1));
     let (l, s, sn) = (log.clone(), spawned.clone(), senders.clone());
     let node = OwnerNode::start_with(config, parts, move |driver, dir, scripts| {
         let (tx, rx) = channel();
-        let tag = if s.lock().unwrap().is_empty() {
+        let tag = if dir.ends_with("deepcheck") {
+            "deep"
+        } else if s.lock().unwrap().is_empty() {
             "main"
         } else {
             "send"
@@ -282,6 +302,7 @@ fn start_at(dir: &Dir, setup: &Setup, chain: Vec<Block>) -> Result<Rig, NodeErro
         sender,
         log,
         spawned,
+        senders,
         chain,
         scans_seen: 0,
     };
@@ -396,7 +417,7 @@ impl Rig {
         self.node
             .owner_mut()
             .unwrap()
-            .queue_batch(batch(0, 3), &write)
+            .queue_batch(batch(0, 3), 1_000, &write)
             .unwrap();
         self.node.refresh_marks();
         self.node
@@ -756,7 +777,7 @@ fn oc_07_a_fresh_wallet_waits_for_the_ordered_watch_update_without_a_future_heig
     rig.node
         .owner_mut()
         .unwrap()
-        .queue_batch(batch(0, 3), &write)
+        .queue_batch(batch(0, 3), 1_000, &write)
         .unwrap();
     rig.node.refresh_marks();
     assert_eq!(rig.node.state(), ViewState::Ready);
@@ -774,7 +795,7 @@ fn oc_07_a_payment_to_a_new_script_is_found_after_the_bounded_scan() {
     rig.node
         .owner_mut()
         .unwrap()
-        .queue_batch(batch(0, 30), &write)
+        .queue_batch(batch(0, 30), 1_000, &write)
         .unwrap();
     rig.node.refresh_marks();
     assert!(matches!(rig.node.state(), ViewState::Rescanning { .. }));
@@ -816,7 +837,7 @@ fn oc_07_a_restart_between_the_queue_and_the_view_raises_the_marks_before_the_ne
         rig.node
             .owner_mut()
             .unwrap()
-            .queue_batch(batch(0, 30), &write)
+            .queue_batch(batch(0, 30), 1_000, &write)
             .unwrap();
         rig.chain.clone()
     };

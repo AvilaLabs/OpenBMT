@@ -455,6 +455,14 @@ the one place where this crate gives a transaction to the network.
   the transaction, unless the owner has turned on sending without Tor;
   every send then says that the wallet's own connections were used. It
   never falls back to the wallet's connections without saying so.
+- **NR-97.** The driver takes `unwatch_scripts` with a list of scripts: the
+  manager stops watching them, so that they no longer count towards the
+  limit of NR-41. A script that is not watched is passed over. Filters
+  checked after the command are matched against the scripts that are left;
+  work in progress keeps what it matched. An app that wants such a script
+  checked again for the blocks it missed adds it with `watch_script` and
+  asks for a `rescan` (NR-90). The owner's device uses it to keep its watch
+  set within the limit (`docs/OWNER-COINS-RULES.md`, OC-22 to OC-27).
 
 ## 12. Onion peers
 

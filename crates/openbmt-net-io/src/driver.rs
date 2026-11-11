@@ -286,6 +286,7 @@ impl std::error::Error for StartError {}
 /// What the app asks of the core thread.
 enum Command {
     WatchScript(ScriptBuf),
+    UnwatchScripts(Vec<ScriptBuf>),
     AllBlocks(bool),
     FetchBlock(BlockHash),
     FetchTransactions(bool),
@@ -424,6 +425,12 @@ impl Handle {
     /// is added.
     pub fn watch_script(&self, script: ScriptBuf) {
         self.command(Command::WatchScript(script));
+    }
+
+    /// NR-97: stop watching scripts. Blocks checked after the command are
+    /// matched against the scripts that are left.
+    pub fn unwatch_scripts(&self, scripts: Vec<ScriptBuf>) {
+        self.command(Command::UnwatchScripts(scripts));
     }
 
     /// NR-44: while on, every new block is downloaded in full.
@@ -941,6 +948,7 @@ where
                         ));
                     }
                 }
+                Command::UnwatchScripts(scripts) => self.manager.unwatch_scripts(&scripts),
                 Command::AllBlocks(on) => self.manager.set_all_blocks(on),
                 Command::FetchBlock(hash) => {
                     if !self.manager.fetch_block(hash) {

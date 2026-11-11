@@ -46,8 +46,10 @@
 
 pub mod coins;
 pub mod copy;
+pub mod deep;
 pub mod facts;
 pub mod link;
+pub mod live;
 pub mod node;
 pub mod receipts;
 pub mod refunds;
@@ -58,6 +60,10 @@ pub mod watcher;
 #[cfg(test)]
 mod tests;
 
+pub use live::{
+    DeepLine, Spans, WatchLimits, DEEP_CHECK_SECS, DEEP_RETRY_SECS, DEEP_STALL_SECS, OWNER_LIVE_WATCH,
+    QUIET_SECS,
+};
 pub use copy::{CheckInTaken, CopyError, CounterCopy, Stop, Taken};
 pub use facts::{verified_facts, FactsRefused};
 pub use link::{

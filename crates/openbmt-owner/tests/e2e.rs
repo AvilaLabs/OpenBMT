@@ -77,7 +77,7 @@ fn the_whole_story_pairing_settings_batch_refunds_and_a_cash_out() {
         .queue_settings(settings_with(1, &[1]), |b| rig.owner_store.put(b)));
     ok(rig
         .owner
-        .queue_batch(batch(1, 0, 3), |b| rig.owner_store.put(b)));
+        .queue_batch(batch(1, 0, 3), 1_000, |b| rig.owner_store.put(b)));
     let built = rig.build(&[], 0);
     // The Key app's screen: four words for the pairing, which the counter
     // must show as well.

@@ -38,6 +38,17 @@
 //! With the setting, the main driver sends and a note says it is not behind
 //! Tor, each time (NR-91).
 //!
+//! ## The live watch and the deep check
+//!
+//! The driver watches at most `MAX_WATCHED_SCRIPTS` scripts (NR-41). When the
+//! wallet's scripts would pass the live watch's bound, the oldest quiet
+//! receive scripts are set aside (OC-22, OC-23): the driver is told to stop
+//! watching them (NR-97). A deep check looks at them every month and when the
+//! owner asks (OC-24 to OC-27, [`OwnerNode::request_deep_check`]); it runs on
+//! a second driver of its own, in `<dir>/deepcheck`, apart from the one that
+//! watches the wallet, so that the live watch and the coin view's state are
+//! not disturbed while it runs. The code is in `crate::deep`.
+//!
 //! ## Stops
 //!
 //! A block that cannot be applied, or a view that cannot be stored, halts
@@ -72,6 +83,8 @@ use openbmt_watch::{FeeHistory, HeaderChain, Refusal, WellFormedBlock};
 use crate::coins::{
     ApplyError, CoinView, PendingError, ScriptSet, ViewState, GAP, INDEX_LIMIT, UNDO_BLOCKS,
 };
+use crate::deep::{DeepRun, DeepSpawn};
+use crate::live::{plan_release, WatchLimits, REBALANCE_SECS};
 use crate::receipts::read_fee_history;
 use crate::take_journal::{TakeJournal, MAX_JOURNAL_BYTES};
 use crate::watcher::{write_file, OwnerConfig, OwnerStartError, OwnerWatcher};
@@ -101,6 +114,8 @@ pub trait OwnerPort: DriverPort {
     fn broadcast(&self, tx: Vec<u8>);
     /// NR-86: stop holding a transaction.
     fn forget(&self, txid: Txid);
+    /// NR-97: stop watching these scripts.
+    fn unwatch_scripts(&self, scripts: Vec<ScriptBuf>);
     /// NR-90: check the blocks above this height again.
     fn rescan_from(&self, height: u32);
     /// Whether to fetch the transactions that peers announce.
@@ -117,6 +132,10 @@ impl OwnerPort for Handle {
 
     fn forget(&self, txid: Txid) {
         Handle::forget(self, txid);
+    }
+
+    fn unwatch_scripts(&self, scripts: Vec<ScriptBuf>) {
+        Handle::unwatch_scripts(self, scripts);
     }
 
     fn rescan_from(&self, height: u32) {
@@ -315,6 +334,10 @@ pub struct OwnerParts {
     pub refund_depth: u32,
     /// The source of the session's random bytes.
     pub random: Box<dyn Randomness>,
+    /// OC-22 to OC-24: the live watch's bound, the quiet time and the time
+    /// between deep checks. The defaults are the constants of
+    /// [`crate::live`]; a check against a real node shrinks them.
+    pub limits: WatchLimits,
 }
 
 impl OwnerParts {
@@ -334,67 +357,105 @@ impl OwnerParts {
             options: Options::default(),
             refund_depth: 6,
             random: Box::new(random),
+            limits: WatchLimits::default(),
         })
     }
 }
 
-/// Check the total watch range before deriving or persisting any new marks.
-fn watch_script_count(receive: usize, change: usize) -> Result<usize, NodeError> {
-    let Some(needed) = receive.checked_add(change) else {
+/// NR-41, OC-22: the scripts the live watch would hold must fit the
+/// driver's limit: the receive scripts watched (the marks plus the gap)
+/// less the `aside` that are set aside, and the change scripts watched.
+fn ensure_marks_fit_watch_budget(receive: u32, change: u32, aside: u64) -> Result<(), NodeError> {
+    // Match CoinView's receive_watch/change_watch ranges before marks are
+    // persisted.
+    let receive = receive.saturating_add(GAP).min(INDEX_LIMIT);
+    let change = change.saturating_add(GAP).min(INDEX_LIMIT);
+    let needed = u64::from(receive)
+        .saturating_sub(aside)
+        .saturating_add(u64::from(change));
+    if needed > u64::try_from(MAX_WATCHED_SCRIPTS).unwrap_or(u64::MAX) {
         return Err(NodeError::WatchLimit {
-            needed: u64::MAX,
-            limit: MAX_WATCHED_SCRIPTS,
-        });
-    };
-    if needed > MAX_WATCHED_SCRIPTS {
-        return Err(NodeError::WatchLimit {
-            needed: u64::try_from(needed).unwrap_or(u64::MAX),
+            needed,
             limit: MAX_WATCHED_SCRIPTS,
         });
     }
-    Ok(needed)
+    Ok(())
 }
 
-fn ensure_watch_budget(receive: u32, change: u32) -> Result<(), NodeError> {
-    let receive = usize::try_from(receive).map_err(|_| NodeError::WatchLimit {
-        needed: u64::from(receive),
-        limit: MAX_WATCHED_SCRIPTS,
-    })?;
-    let change = usize::try_from(change).map_err(|_| NodeError::WatchLimit {
-        needed: u64::from(change),
-        limit: MAX_WATCHED_SCRIPTS,
-    })?;
-    watch_script_count(receive, change).map(|_| ())
-}
-
-fn ensure_marks_fit_watch_budget(receive: u32, change: u32) -> Result<(), NodeError> {
-    // Match CoinView's receive_watch/change_watch ranges before marks are
-    // persisted.
-    ensure_watch_budget(
-        receive.saturating_add(GAP).min(INDEX_LIMIT),
-        change.saturating_add(GAP).min(INDEX_LIMIT),
-    )
-}
-
-/// The wallet scripts from index 0 up to the marks, within the driver cap.
-fn scripts_for(
-    wallet: &WalletDescription,
-    receive: u32,
-    change: u32,
-) -> Result<ScriptSet, NodeError> {
-    ensure_watch_budget(receive, change)?;
+/// OC-22: the wallet scripts the live watch holds: the receive scripts up to
+/// the marks plus the gap that are not set aside, and the change scripts.
+fn live_scripts(wallet: &WalletDescription, view: &CoinView) -> Result<ScriptSet, NodeError> {
+    ensure_marks_fit_watch_budget(
+        view.receive_next(),
+        view.change_next(),
+        view.released().count_below(view.receive_watch()),
+    )?;
     let mut set = ScriptSet::new();
-    for i in 0..receive {
+    for i in 0..view.receive_watch() {
+        if view.released().contains(i) {
+            continue;
+        }
         if let Ok(script) = wallet.receive_script(i) {
             set.insert(script, (Keychain::Receive, i));
         }
     }
-    for i in 0..change {
+    for i in 0..view.change_watch() {
         if let Ok(script) = wallet.change_script(i) {
             set.insert(script, (Keychain::Change, i));
         }
     }
     Ok(set)
+}
+
+/// The receive indices that hold an unspent coin or a coin of a held
+/// transaction: they stay in the live watch, because a spend must be seen.
+fn held_receive(view: &CoinView) -> std::collections::BTreeSet<u32> {
+    let coins = view
+        .owned()
+        .filter(|c| c.chain == Keychain::Receive)
+        .map(|c| c.index);
+    let pending = view.pending().flat_map(|p| {
+        p.own
+            .iter()
+            .filter(|(_, chain, _)| *chain == Keychain::Receive)
+            .map(|(_, _, index)| *index)
+    });
+    coins.chain(pending).collect()
+}
+
+/// OC-22, OC-23: the receive indices to set aside for these marks, none
+/// when `allow` is false. An error when the live watch would still pass the
+/// driver's limit.
+fn release_plan(
+    owner: &Owner,
+    view: &CoinView,
+    marks: (u32, u32),
+    now: u64,
+    limits: &WatchLimits,
+    allow: bool,
+) -> Result<Vec<u32>, NodeError> {
+    let (receive, change) = marks;
+    let receive_watch = receive.saturating_add(GAP).min(INDEX_LIMIT);
+    let change_watch = change.saturating_add(GAP).min(INDEX_LIMIT);
+    let aside = view.released().count_below(receive_watch);
+    let live = u64::from(receive_watch)
+        .saturating_sub(aside)
+        .saturating_add(u64::from(change_watch));
+    let bound = u64::try_from(limits.live).unwrap_or(u64::MAX);
+    let mut release = Vec::new();
+    if allow && live > bound {
+        release = plan_release(
+            owner.issued_ranges(),
+            view.released(),
+            &held_receive(view),
+            now,
+            limits.quiet_secs,
+            live - bound,
+        );
+    }
+    let added = u64::try_from(release.len()).unwrap_or(u64::MAX);
+    ensure_marks_fit_watch_budget(receive, change, aside.saturating_add(added))?;
+    Ok(release)
 }
 
 /// The marks that follow from what the queue and the view hold.
@@ -423,7 +484,7 @@ pub struct OwnerNode<P: OwnerPort = Handle> {
     without_tor: bool,
     pub(crate) owner: Owner,
     pub(crate) view: CoinView,
-    scripts: ScriptSet,
+    pub(crate) scripts: ScriptSet,
     pub(crate) wallet: WalletDescription,
     pub(crate) dir: PathBuf,
     refund_depth: u32,
@@ -437,7 +498,7 @@ pub struct OwnerNode<P: OwnerPort = Handle> {
     /// not yet reached this node. Ignore old `Checked` events until then.
     pub(crate) awaiting_rescan: u32,
     take_journal: Option<TakeJournal>,
-    owner_secret: [u8; 32],
+    pub(crate) owner_secret: [u8; 32],
     approver: DeviceId,
     policy: BatchPolicy,
     /// FE-20: the fee samples of the blocks this node has checked.
@@ -445,6 +506,17 @@ pub struct OwnerNode<P: OwnerPort = Handle> {
     /// FE-20: the block asked for by hash to take a sample from, with its
     /// height, until it arrives, leaves the chain or is given up.
     pub(crate) fee_request: Option<(BlockHash, u32)>,
+    /// OC-22 to OC-24: the live watch's numbers.
+    pub(crate) limits: WatchLimits,
+    /// The main driver's settings, for the deep check's driver.
+    pub(crate) driver_config: DriverConfig,
+    /// Starts the deep check's driver (OC-24).
+    pub(crate) deep_spawn: DeepSpawn<P>,
+    /// The deep check in progress, if any (OC-24).
+    pub(crate) deep_run: Option<DeepRun<P>>,
+    /// The next time the node looks again for scripts to set aside when none
+    /// could be set aside before.
+    next_rebalance: u64,
 }
 
 impl OwnerNode<Handle> {
@@ -464,7 +536,7 @@ impl<P: OwnerPort> OwnerNode<P> {
     pub fn start_with(
         config: OwnerConfig,
         parts: OwnerParts,
-        mut spawn: impl FnMut(DriverConfig, PathBuf, Vec<ScriptBuf>) -> Result<P, String>,
+        mut spawn: impl FnMut(DriverConfig, PathBuf, Vec<ScriptBuf>) -> Result<P, String> + 'static,
     ) -> Result<Self, NodeError> {
         let OwnerConfig {
             dir,
@@ -485,7 +557,11 @@ impl<P: OwnerPort> OwnerNode<P> {
             options,
             refund_depth,
             random,
+            limits,
         } = parts;
+        limits.check().map_err(NodeError::Config)?;
+        let now = clock.now();
+        let driver_config = driver.clone();
         if refund_depth == 0 || refund_depth > UNDO_BLOCKS {
             return Err(NodeError::Config(format!(
                 "the refund depth must be from 1 to {UNDO_BLOCKS}, not {refund_depth}"
@@ -526,14 +602,30 @@ impl<P: OwnerPort> OwnerNode<P> {
             .map_err(|e| NodeError::Config(format!("the owner key: {e}")))?;
 
         // What the queue handed out that the view does not know of yet.
+        // OC-22: a script set aside that holds a coin (a restart between the
+        // deep check's find and its return to the live watch) goes back.
+        let stuck: Vec<u32> = held_receive(&view)
+            .into_iter()
+            .filter(|i| view.released().contains(*i))
+            .collect();
+        if !stuck.is_empty() {
+            let (from, checked) = (view.deep().from, view.checked());
+            view.return_to_live(&stuck, from, checked, |b| write_file(&dir, COINS_FILE, b))
+                .map_err(NodeError::Files)?;
+        }
         let (receive, change) = marks_of(&owner, &view);
-        ensure_marks_fit_watch_budget(receive, change)?;
+        let release = release_plan(&owner, &view, (receive, change), now, &limits, true)?;
         let old_checked = view.checked();
-        view.raise_marks_and_rescan(receive, change, old_checked, |b| {
-            write_file(&dir, COINS_FILE, b)
-        })
+        view.watch_plan(
+            receive,
+            change,
+            old_checked,
+            &release,
+            now.saturating_add(limits.deep_secs).max(2),
+            |b| write_file(&dir, COINS_FILE, b),
+        )
         .map_err(NodeError::Files)?;
-        let scripts = scripts_for(&wallet, view.receive_watch(), view.change_watch())?;
+        let scripts = live_scripts(&wallet, &view)?;
 
         let main_config = OwnerConfig {
             dir: dir.clone(),
@@ -588,6 +680,11 @@ impl<P: OwnerPort> OwnerNode<P> {
             policy,
             fees,
             fee_request: None,
+            limits,
+            driver_config,
+            deep_spawn: Box::new(spawn),
+            deep_run: None,
+            next_rebalance: now.saturating_add(REBALANCE_SECS),
         };
         if let Some(line) = fee_note {
             node.note(line);
@@ -855,7 +952,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         self.watcher.note(line);
     }
 
-    fn stop(&mut self, line: String) {
+    pub(crate) fn stop(&mut self, line: String) {
         self.note(line.clone());
         if self.halted.is_none() {
             self.halted = Some(line);
@@ -879,31 +976,66 @@ impl<P: OwnerPort> OwnerNode<P> {
             return Err(error.clone());
         }
         let (receive, change) = marks_of(&self.owner, &self.view);
-        if let Err(error) = ensure_marks_fit_watch_budget(receive, change) {
-            self.watch_limit = Some(error.clone());
-            self.stop(error.to_string());
-            return Err(error);
+        let grew = receive > self.view.receive_next() || change > self.view.change_next();
+        let now = self.watcher.now();
+        // OC-22: scripts are set aside when the marks grow, and now and then
+        // as time makes more of them quiet; never while a deep check runs,
+        // which would leave them out of the pass.
+        let allow = self.deep_run.is_none() && (grew || now >= self.next_rebalance);
+        let release = match release_plan(
+            &self.owner,
+            &self.view,
+            (receive, change),
+            now,
+            &self.limits,
+            allow,
+        ) {
+            Ok(release) => release,
+            Err(error) => {
+                self.watch_limit = Some(error.clone());
+                self.stop(error.to_string());
+                return Err(error);
+            }
+        };
+        if allow {
+            self.next_rebalance = now.saturating_add(REBALANCE_SECS);
         }
         let dir = self.dir.clone();
         let tip = self.watcher.chain().tip_height();
+        let due = now.saturating_add(self.limits.deep_secs).max(2);
         match self
             .view
-            .raise_marks_and_rescan(receive, change, tip, |b| write_file(&dir, COINS_FILE, b))
-        {
+            .watch_plan(receive, change, tip, &release, due, |b| {
+                write_file(&dir, COINS_FILE, b)
+            }) {
             Ok(false) => Ok(()),
             Ok(true) => {
-                let new = scripts_for(
-                    &self.wallet,
-                    self.view.receive_watch(),
-                    self.view.change_watch(),
-                )?;
-                for script in new.keys() {
-                    if !self.scripts.contains_key(script) {
-                        self.watcher.port().watch_script(script.clone());
-                    }
+                let new = live_scripts(&self.wallet, &self.view)?;
+                let added: Vec<ScriptBuf> = new
+                    .keys()
+                    .filter(|s| !self.scripts.contains_key(*s))
+                    .cloned()
+                    .collect();
+                let gone: Vec<ScriptBuf> = self
+                    .scripts
+                    .keys()
+                    .filter(|s| !new.contains_key(*s))
+                    .cloned()
+                    .collect();
+                for script in added {
+                    self.watcher.port().watch_script(script);
+                }
+                if !gone.is_empty() {
+                    self.watcher.port().unwatch_scripts(gone);
                 }
                 self.scripts = new;
-                if self.view.state() != ViewState::DeepReorg {
+                if !release.is_empty() {
+                    self.note(format!(
+                        "{} old addresses are checked once a month instead of all the time",
+                        release.len()
+                    ));
+                }
+                if grew && self.view.state() != ViewState::DeepReorg {
                     let from = self.view.checked();
                     self.awaiting_rescan = self.awaiting_rescan.saturating_add(1);
                     self.watcher.port().rescan_from(from);
@@ -931,7 +1063,12 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// restored owner or a person who suspects a missed payment.
     pub fn rescan(&mut self) -> Result<(), NodeError> {
         let (receive, change) = marks_of(&self.owner, &self.view);
-        ensure_marks_fit_watch_budget(receive, change)?;
+        let aside = self
+            .view
+            .released()
+            .count_below(receive.saturating_add(GAP).min(INDEX_LIMIT));
+        ensure_marks_fit_watch_budget(receive, change, aside)?;
+        self.cancel_deep("the wallet is checked again from the start");
         let dir = self.dir.clone();
         self.view
             .reset(|b| write_file(&dir, COINS_FILE, b))
@@ -1355,11 +1492,13 @@ impl<P: OwnerPort> OwnerNode<P> {
             self.sender = Some(sender);
         }
         self.refresh_marks();
+        self.deep_tick();
         self.settle();
     }
 
     /// Stop the drivers.
     pub fn shutdown(&mut self) {
+        self.cancel_deep("the node is stopping");
         if let Some(sender) = &mut self.sender {
             sender.shutdown();
         }
@@ -1413,6 +1552,9 @@ impl<P: OwnerPort> OwnerNode<P> {
     }
 
     fn left_the_chain(&mut self, left: &[bitcoin::BlockHash]) {
+        // OC-24: a deep check that read the chain before it changed starts
+        // again when the view has caught up.
+        self.cancel_deep("the chain changed while it ran");
         self.refresh_marks();
         // The watcher has not applied this event yet, so its view still has
         // the heights of the blocks that left.
@@ -1549,20 +1691,17 @@ impl<P: OwnerPort> OwnerNode<P> {
 
 #[cfg(test)]
 mod watch_budget_tests {
-    use super::{
-        ensure_marks_fit_watch_budget, ensure_watch_budget, watch_script_count, NodeError,
-    };
+    use super::{ensure_marks_fit_watch_budget, NodeError};
     use openbmt_net_io::MAX_WATCHED_SCRIPTS;
 
     #[test]
     fn watch_ranges_fit_exactly_at_the_driver_limit() {
-        assert_eq!(ensure_watch_budget(MAX_WATCHED_SCRIPTS as u32, 0), Ok(()));
         assert_eq!(
-            ensure_marks_fit_watch_budget((MAX_WATCHED_SCRIPTS - 40) as u32, 0),
+            ensure_marks_fit_watch_budget((MAX_WATCHED_SCRIPTS - 40) as u32, 0, 0),
             Ok(())
         );
         assert_eq!(
-            ensure_marks_fit_watch_budget((MAX_WATCHED_SCRIPTS - 39) as u32, 0),
+            ensure_marks_fit_watch_budget((MAX_WATCHED_SCRIPTS - 39) as u32, 0, 0),
             Err(NodeError::WatchLimit {
                 needed: (MAX_WATCHED_SCRIPTS + 1) as u64,
                 limit: MAX_WATCHED_SCRIPTS,
@@ -1571,13 +1710,15 @@ mod watch_budget_tests {
     }
 
     #[test]
-    fn adding_receive_and_change_ranges_checks_overflow() {
+    fn scripts_set_aside_make_room_under_the_limit() {
         assert_eq!(
-            watch_script_count(usize::MAX, 1),
-            Err(NodeError::WatchLimit {
-                needed: u64::MAX,
-                limit: MAX_WATCHED_SCRIPTS,
-            })
+            ensure_marks_fit_watch_budget((MAX_WATCHED_SCRIPTS - 39) as u32, 0, 1),
+            Ok(())
         );
+        assert_eq!(
+            ensure_marks_fit_watch_budget(500_000, 5, 410_000),
+            Ok(())
+        );
+        assert!(ensure_marks_fit_watch_budget(500_000, 5, 399_000).is_err());
     }
 }

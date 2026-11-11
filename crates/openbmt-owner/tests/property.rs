@@ -256,7 +256,7 @@ fn run(seed: u64) {
                 1 => {
                     let _ = rig
                         .owner
-                        .queue_batch(batch(1, batch_start, 3), |b| rig.owner_store.put(b));
+                        .queue_batch(batch(1, batch_start, 3), 1_000, |b| rig.owner_store.put(b));
                     batch_start += 3;
                 }
                 _ => {

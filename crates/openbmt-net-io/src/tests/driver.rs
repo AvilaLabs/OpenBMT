@@ -1655,6 +1655,29 @@ fn nr_90_peers_on_one_machine_are_groups_of_their_own_when_local_peers_are_allow
 }
 
 #[test]
+fn nr_97_an_unwatched_script_is_not_matched_by_a_rescan() {
+    let chain_blocks = blocks(3, 100);
+    let peer = FakePeer::start(Behavior::ServeBlocks(chain_blocks));
+    let storage = MemStorage::default();
+    let mut handle = start_clocked(
+        config(&peer, 30),
+        &storage,
+        Net::system(),
+        &TestClock::at(1_700_000_000),
+        watched(),
+    );
+    wait_for(&handle, 10, |e| matches!(e, AppEvent::Checked(3))).expect("not checked");
+    handle.unwatch_scripts(watched());
+    handle.rescan_from(1);
+    wait_for(&handle, 10, |e| matches!(e, AppEvent::RescanStarted(1)))
+        .expect("the rescan start was not acknowledged");
+    let again = wait_for(&handle, 10, |e| matches!(e, AppEvent::Checked(3)))
+        .expect("the height was not reported again");
+    assert_eq!(again.iter().filter(|e| is_block(e)).count(), 0);
+    handle.shutdown();
+}
+
+#[test]
 fn nr_90_a_rescan_fetches_the_blocks_above_the_height_again() {
     let chain_blocks = blocks(3, 100);
     let peer = FakePeer::start(Behavior::ServeBlocks(chain_blocks));

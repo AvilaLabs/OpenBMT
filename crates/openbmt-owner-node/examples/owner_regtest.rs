@@ -218,7 +218,7 @@ fn issue_addresses(node: &mut OwnerNode, wallet: &WalletDescription) -> Result<(
     let write = node.queue_writer();
     node.owner_mut()
         .map_err(|e| e.to_string())?
-        .queue_batch(batch, &write)
+        .queue_batch(batch, now_secs(), &write)
         .map_err(|e| e.to_string())?;
     node.refresh_marks();
     Ok(())

@@ -9,6 +9,7 @@ use openbmt_watch::Problem;
 
 use crate::coins::{ApplyError, PendingError, ReceiptState, ViewState};
 use crate::facts::FactsRefused;
+use crate::live::DeepLine;
 use crate::node::{NodeError, SendRefused, SendState};
 use crate::receipts::{MergeOffer, MergeRefused, ReceiptsLine};
 use crate::refunds::{NoteKind, RefundNote};
@@ -277,6 +278,95 @@ impl ReceiptsLine {
             )
             .code("OC-18"),
         }
+    }
+}
+
+/// "1 old address is", "12 old addresses are".
+fn old_addresses(n: u64) -> String {
+    let count = usize::try_from(n).unwrap_or(usize::MAX);
+    if count == 1 {
+        "1 old address".to_string()
+    } else {
+        format!("{} old addresses", grouped(count))
+    }
+}
+
+impl DeepLine {
+    /// OC-25: the words of the line about old addresses that are checked
+    /// once a month. The time of the next check goes in `at`; the last one is
+    /// said in whole days, never in seconds (SC-03).
+    pub fn words(self) -> Words {
+        match self {
+            Self::FirstCheckWaiting { count, next } => Words::new(
+                Tone::Info,
+                "Old addresses wait for check",
+                format!(
+                    "{} checked once a month, not all the time, so a payment to one shows up at the next check.",
+                    old_addresses_are(count)
+                ),
+                Who::Nobody,
+                "Nothing to do. No check has run yet; the first is at the time shown.",
+            )
+            .code("OC-25")
+            .at(next),
+            Self::Monthly { count, days_ago, next } => Words::new(
+                Tone::Info,
+                "Old addresses: monthly check",
+                format!(
+                    "{} checked once a month, not all the time, so a payment to one shows up at the next check.",
+                    old_addresses_are(count)
+                ),
+                Who::Nobody,
+                format!(
+                    "Nothing to do. The last check was {}; the next is at the time shown.",
+                    days_text(days_ago)
+                ),
+            )
+            .code("OC-25")
+            .at(next),
+            Self::Checking { count } => Words::new(
+                Tone::Info,
+                "Checking old addresses",
+                format!(
+                    "The wallet is checking {} for payments that arrived since it last looked.",
+                    old_addresses(count)
+                ),
+                Who::Nobody,
+                "Nothing to do. A payment that is found is added to the wallet.",
+            )
+            .code("OC-26"),
+            Self::Failed { count, next } => Words::new(
+                Tone::Info,
+                "Old address check failed",
+                format!(
+                    "The last check of {} did not finish, so a payment to one may not show yet.",
+                    old_addresses(count)
+                ),
+                Who::Nobody,
+                "Nothing to do. The wallet tries again at the time shown.",
+            )
+            .code("OC-26")
+            .at(next),
+        }
+    }
+}
+
+/// "1 old address is", "12 old addresses are", as the start of a sentence.
+fn old_addresses_are(n: u64) -> String {
+    let what = old_addresses(n);
+    if n == 1 {
+        format!("{what} is")
+    } else {
+        format!("{what} are")
+    }
+}
+
+/// "today", "1 day ago", "12 days ago".
+fn days_text(days: u64) -> String {
+    match days {
+        0 => "today".to_string(),
+        1 => "1 day ago".to_string(),
+        n => format!("{n} days ago"),
     }
 }
 
@@ -633,6 +723,33 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("NotBuilt", MergeRefused::NotBuilt(String::new())),
     ] {
         add(&format!("MergeRefused::{name}"), why.words());
+    }
+    for (name, line) in [
+        (
+            "FirstCheckWaiting",
+            DeepLine::FirstCheckWaiting {
+                count: 1_200,
+                next: 1_700_000_000,
+            },
+        ),
+        (
+            "Monthly",
+            DeepLine::Monthly {
+                count: 1_200,
+                days_ago: 12,
+                next: 1_700_000_000,
+            },
+        ),
+        ("Checking", DeepLine::Checking { count: 1_200 }),
+        (
+            "Failed",
+            DeepLine::Failed {
+                count: 1_200,
+                next: 1_700_000_000,
+            },
+        ),
+    ] {
+        add(&format!("DeepLine::{name}"), line.words());
     }
     add("SendRefused::Malformed", SendRefused::Malformed.words());
     add("SendRefused::NoTor", SendRefused::NoTor.words());

@@ -52,10 +52,10 @@ fn as_50_the_cash_out_batch_and_pairing_queues_are_bounded() {
         Refusal::Full(_)
     ));
     for i in 0..16 {
-        ok(o.queue_batch(batch(1, i * 3, 3), nop));
+        ok(o.queue_batch(batch(1, i * 3, 3), 1_000, nop));
     }
     assert!(matches!(
-        refused(o.queue_batch(batch(1, 48, 3), nop)),
+        refused(o.queue_batch(batch(1, 48, 3), 1_000, nop)),
         Refusal::Full(_)
     ));
     for n in 1..=16u8 {
@@ -308,13 +308,13 @@ fn as_58_a_batch_must_be_what_the_wallet_derives() {
     let mut o = new_owner(Options::default());
     let mut b = batch(1, 0, 3);
     b.scripts.swap(0, 1);
-    assert_eq!(refused(o.queue_batch(b, nop)), Refusal::BatchNotDerived);
+    assert_eq!(refused(o.queue_batch(b, 1_000, nop)), Refusal::BatchNotDerived);
     // Fewer than the policy minimum is not derived either.
     assert_eq!(
-        refused(o.queue_batch(batch(1, 0, 3).clone_with_count(2), nop)),
+        refused(o.queue_batch(batch(1, 0, 3).clone_with_count(2), 1_000, nop)),
         Refusal::BatchNotDerived
     );
-    let id = ok(o.queue_batch(batch(1, 0, 3), nop));
+    let id = ok(o.queue_batch(batch(1, 0, 3), 1_000, nop));
     assert_eq!(o.batches().len(), 1);
     assert_eq!(o.batches().first().unwrap().id, id);
 }
@@ -443,7 +443,7 @@ fn rich(rig: &mut Rig) {
     set_facts(o, sale(1), deep(500_000));
     ok(o.queue_refund(sale(1), "Mia", external(1), 40_000, None, nop));
     ok(o.queue_cash_out(external(9), CashAmount::All, "Bank", nop));
-    ok(o.queue_batch(batch(1, 0, 3), nop));
+    ok(o.queue_batch(batch(1, 0, 3), 1_000, nop));
     let (_, request) = pair_request(o, 1);
     ok(o.queue_pairing(&request, nop));
 }
@@ -666,7 +666,7 @@ fn as_65_a_frozen_change_position_that_is_not_the_requests_is_refused() {
 #[test]
 fn as_65_a_queued_batch_without_the_owners_signature_is_refused() {
     let mut o = new_owner(Options::default());
-    ok(o.queue_batch(batch(1, 0, 3), nop));
+    ok(o.queue_batch(batch(1, 0, 3), 1_000, nop));
     let bytes = o.snapshot().unwrap();
     let sig = o.batches()[0].owner_sig.0;
     let at = bytes

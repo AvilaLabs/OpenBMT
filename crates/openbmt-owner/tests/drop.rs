@@ -257,7 +257,7 @@ fn as_54_the_receive_and_change_marks_follow_what_was_handed_out() {
     let mut rig = Rig::new();
     assert_eq!(rig.owner.receive_mark(), 0);
     assert_eq!(rig.owner.change_mark(), 0);
-    ok(rig.owner.queue_batch(batch(1, 0, 3), nop));
+    ok(rig.owner.queue_batch(batch(1, 0, 3), 1_000, nop));
     assert_eq!(rig.owner.receive_mark(), 3);
     refund(&mut rig.owner, 1, 50_000, 10_000);
     let c1 = deep_coin(1, 0, 300_000, 6);
