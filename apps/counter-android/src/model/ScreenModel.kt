@@ -21,6 +21,9 @@ sealed class Screen {
     /** The node is being started. */
     object Starting : Screen()
 
+    /** The node runs, cashiers are listed and nobody is signed in: "Who is at the till?" (CR-147). */
+    object WhoAtTill : Screen()
+
     /** The node runs: the home screen. */
     object Home : Screen()
 }
@@ -28,13 +31,15 @@ sealed class Screen {
 object ScreenModel {
     /**
      * A fault comes first; then an unfinished setup; then Tor without Orbot;
-     * then the node that is not running yet; then home.
+     * then the node that is not running yet; then the till that is locked (the
+     * list of cashiers is not empty and nobody is signed in); then home.
      */
-    fun pick(fault: SayWords?, setup: SetupStatus, torBlocked: SayWords?, running: Boolean): Screen = when {
+    fun pick(fault: SayWords?, setup: SetupStatus, torBlocked: SayWords?, running: Boolean, locked: Boolean = false): Screen = when {
         fault != null -> Screen.Fault(fault)
         !setup.complete -> Screen.FirstStart
         torBlocked != null -> Screen.TorBlocked(torBlocked)
         !running -> Screen.Starting
+        locked -> Screen.WhoAtTill
         else -> Screen.Home
     }
 }

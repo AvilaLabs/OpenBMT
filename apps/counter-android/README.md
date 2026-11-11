@@ -16,13 +16,16 @@ local test key; release signing is a separate step (see "Signing").
 |---|---|
 | First start | The counter's name, the manager's name and PIN, the address of Orbot, and Pair with the Key app. |
 | Pairing | Scan the Key app's offer; the counter's own request as a code with its four words and They match / They differ; scan the owner phone's bundle. |
-| Home | Whether Bitcoin is ready, the price and each source's note, the own node's line with Try again (when one is set), the Box's line with Try again (when the pairing holds a relay, CR-136), New sale, Sales, the cashier's name, the Lightning line (only while a connection is saved, CR-116), Your own node, Lightning, About. |
+| Home | Whether Bitcoin is ready, the price and each source's note, the own node's line with Try again (when one is set), the Box's line with Try again (when the pairing holds a relay, CR-136), New sale, Sales, Today, the cashier's name (or who is at the till with Lock), Staff, the Lightning line (only while a connection is saved, CR-116), Your own node, Lightning, About. |
 | Your own node | The counter's own setting, behind the manager's PIN (CR-100): the Tor address of the shop's own node, saved or removed. A home-network address is refused, and Orbot must be on (CR-101, CR-102). It is kept in the app's config file, not in the pairing. |
 | Lightning | The connection to the shop's own Lightning node, behind the manager's PIN (CR-115): LND by scanning or pasting the `lndconnect://` code, Core Lightning by address, rune and certificate (PEM or SHA-256 fingerprint). The test of LN-20 runs against the node the owner named in the shop's settings; only when it passes is the connection sealed with the Keystore and saved in `noBackupFilesDir` (`lightning.obkl`). Remove deletes it at once. One thread sends the library's requests over HTTPS (no redirect, at most 1,000,000 bytes, 20 s to connect through Tor and 10 s directly, 15 s to read), through Orbot when the host ends in `.onion` or Tor is on, with the node's certificate pinned by the library and the host name not checked (CR-114). |
 | New sale | A keypad in the shop's currency. |
 | Sale | The payment code, the amount in currency and in sats, what has arrived, the library's words in the colour of their tone, which check was done (light check, or the own node and the light check, CR-105; or "Lightning, final" for a sale paid by Lightning, CR-109), the on-chain code first and the Lightning code when the invoice has passed (CR-113) or the line that says Lightning is not available for this sale, Requote, Cancel, Override, Copy. |
 | Sales and details | The sales the counter holds, one sale's judgment and its refunds. |
 | Refunds | Ask for a refund, withdraw a request, refund in cash. |
+| Who is at the till | While cashiers are listed and nobody is signed in (CR-147): the cashiers' names and the manager's, then that person's PIN. |
+| Staff | Behind the manager's PIN (CR-142): the cashiers, add one, remove one, a new PIN for one. |
+| Today | The day's totals from the counter's own records, from midnight to now (CR-152 to CR-155); the lines per person behind the manager's PIN. |
 | About | The version, what is not built, "Not for real funds", the run-while-visible note. |
 
 Every refusal of the library is shown through its `words`; the app's own
@@ -54,8 +57,25 @@ about M parts" until the message is complete. Any other type of UR gets the
 words "Not the code expected". The words of reading are listed in
 `docs/screens/counter-app.md`.
 
-Not built yet: a lock screen of the app's own, a list of cashiers
-and managers with their own PINs, end-of-day totals and receipts, and changes
+Cashiers and the till lock (CR-140 to CR-151). The manager's PIN opens Staff,
+where cashiers are added (the manager types the name, the cashier types a PIN
+of 4 to 8 digits twice), removed, or given a new PIN. The list is
+`StaffStore`: one strict text file in `noBackupFilesDir`, written like the
+PIN and the pairing, at most 30 names, each with its own PBKDF2 entry, wrong
+tries and hold (`PinCheck`, shared with `PinStore`). Each add and remove goes
+to the library's `staff_record` as a record for the owner; a new PIN is not a
+record. With no cashier listed the app is as it was. With one or more, the
+first screen is "Who is at the till?" (`ScreenModel`), home shows who is
+signed in and a Lock button, and `TillLock` holds the sign-in in memory only:
+it locks on Lock and after more than five minutes out of view, never while a
+sale's screen is open. Sales and cancels carry the signed-in name into the
+record (`open` and `cancel` take it), and a cashier's override needs no
+second PIN. Today (`day_totals`, `DayWindow`, `TodayModel`) counts the
+counter's own records from local midnight to now; the lines per person need
+the manager's PIN. `tests/AppModelTest.kt` checks the file, the lock, the
+window, the lines and that the extraction rules leave the list out.
+
+Not built yet: several managers with their own PINs, receipts, and changes
 to the shop's settings after pairing.
 
 ## The camera scan

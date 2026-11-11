@@ -45,6 +45,48 @@ object ProtocolDecoderTest {
         screens()
         requests()
         rates()
+        days()
+    }
+
+    // ---- the day's totals (CR-153) ----
+
+    private fun tally(w: Writer, count: Long, minor: Long, sats: Long): Writer = w.u32(count).u64(minor).u64(sats)
+
+    private fun dayFrame(role: Int = 1, trailing: Boolean = false, currency: Boolean = true): ByteArray {
+        val w = Writer().u64(1_700_000_000).u64(1_700_086_400)
+        if (currency) w.u8(1).string("USD") else w.u8(0)
+        tally(w, 3, 4500, 54_000)
+        tally(w, 2, 3000, 36_000)
+        tally(w, 1, 1500, 18_000)
+        tally(w, 2, 2000, 24_000)
+        w.u32(1).u32(4)
+        tally(w, 1, 0, 12_000)
+        tally(w, 2, 0, 5_000)
+        w.u32(1)
+        tally(w, 1, 500, 6_000)
+        w.u32(2)
+        w.u32(1).u8(role).string("Ann").u32(4).u32(1).u32(0).u32(1)
+        w.u32(3)
+        if (trailing) w.u8(0)
+        return header(0, w.toByteArray())
+    }
+
+    private fun days() {
+        val day = decodeResponse(dayFrame()).let { r -> r.dayTotals().also { r.end() } }
+        check(day.from == 1_700_000_000L && day.to == 1_700_086_400L && day.currency == "USD")
+        check(day.paid.count == 3L && day.paid.minor == 4500L && day.paid.sats == 54_000L)
+        check(day.onChain.count == 2L && day.lightning.count == 1L && day.waiting.sats == 24_000L)
+        check(day.stopped == 1L && day.ended == 4L && day.overrides.sats == 12_000L && day.refunds.count == 2L)
+        check(day.refundsWithdrawn == 1L && day.cashRefunds.minor == 500L && day.unnamedSales == 2L)
+        check(day.people.size == 1 && day.people[0].role == ActorRole.Manager && day.people[0].name == "Ann")
+        check(day.people[0].sales == 4L && day.people[0].cashRefunds == 1L && day.peopleLeftOut == 3L)
+        check(decodeResponse(dayFrame(role = 0, currency = false)).let { r -> r.dayTotals().also { r.end() } }.currency == null)
+        rejects("a role that is not known in a person's line") { decodeResponse(dayFrame(role = 2)).dayTotals() }
+        rejects("trailing bytes after the totals") { decodeResponse(dayFrame(trailing = true)).let { it.dayTotals(); it.end() } }
+        rejects("a cut in the totals") { decodeResponse(dayFrame().copyOf(dayFrame().size - 1)).dayTotals() }
+        // The `cancel` request carries the person at the till as an option: a flag, then the role and the name.
+        val noOne = requestFrame(14, 1) { it.u64(5).u32(2).option<Actor>(null) { } }
+        check(hex(noOne) == "4f424d6d010e000100000000000000" + "0500000000000000" + "02000000" + "00") { hex(noOne) }
     }
 
     // ---- the price ops ----

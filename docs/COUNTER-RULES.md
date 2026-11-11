@@ -968,7 +968,8 @@ records and the totals are the library's (`crates/openbmt-counter`,
   section: the first start's cashier name is the actor and nobody signs in.
   The first cashier added turns the till lock on; removing the last turns it
   off. The change takes effect at once, and a person signed in when the lock
-  turns off is forgotten.
+  turns off is forgotten. The manager who adds the first cashier is signed in,
+  since the manager's PIN has just been checked.
 - **CR-147.** While cashiers are listed, the first screen after the node
   starts, and the first after a lock, is "Who is at the till?": the cashiers'
   names and the manager's. A name, then that person's PIN, opens home. Home

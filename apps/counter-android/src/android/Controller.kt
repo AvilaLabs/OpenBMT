@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -14,6 +15,7 @@ import android.widget.TextView
 import java.io.File
 import java.io.IOException
 import java.security.GeneralSecurityException
+import java.time.ZoneId
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import org.openbmt.app.AnimatedQrView
@@ -67,6 +69,11 @@ class Controller(private val act: MainActivity) {
     private val nodeDir = File(dir, "node")
     private val pin = PinStore(dir, { nowSecs() })
     private val configFile = ConfigFile(dir)
+    private val staff = StaffStore(dir, { nowSecs() }, { config?.manager ?: "" })
+
+    // Who is at the till: in memory only (CR-149), with the list of cashiers as read at the last start.
+    private val locks = TillLock { SystemClock.elapsedRealtime() / 1000 }
+    private var cashiers: List<String> = emptyList()
 
     // What is saved, as read at the last start.
     private var record: ByteArray? = null
@@ -118,12 +125,14 @@ class Controller(private val act: MainActivity) {
     fun visible() {
         visible = true
         if (scan.asking) return
+        locks.backInView()
         begin()
     }
 
     fun hidden() {
         visible = false
         if (scan.asking) return
+        locks.leftView()
         forgetCeremony()
         scan.stop()
         stopNode()
@@ -154,6 +163,16 @@ class Controller(private val act: MainActivity) {
             return render()
         }
         if (!setup.complete) return showFirstStart(if (progress.takeForgotten()) AppWords.pairingForgotten else null)
+        // CR-140: the list of cashiers is read whole or not at all; a file that does not read is a fault, and nobody is signed in.
+        try {
+            cashiers = staff.names()
+        } catch (e: IOException) {
+            cashiers = emptyList()
+            locks.forget()
+            fault = AppWords.cashiersNotRead(e.message)
+            return render()
+        }
+        if (cashiers.isEmpty()) locks.forget()
         try {
             record = SealedFile(dir, KeystoreSealer(KEY_ALIAS), PAIRING_FILE).load()
                 ?: throw IOException("the pairing is missing")
@@ -180,13 +199,28 @@ class Controller(private val act: MainActivity) {
 
     private fun render() {
         val setup = SetupStatus(File(dir, PAIRING_FILE).exists(), pin.isSet(), config != null)
-        when (val s = ScreenModel.pick(fault, setup, torBlocked, node != null)) {
+        when (val s = ScreenModel.pick(fault, setup, torBlocked, node != null, locked())) {
             is Screen.Fault -> showMessage(s.words, "Try again") { begin() }
             is Screen.FirstStart -> showFirstStart(null)
             is Screen.TorBlocked -> showMessage(s.words, "Check again") { begin() }
             is Screen.Starting -> page(listOf(ui.words(AppWords.starting)))
+            is Screen.WhoAtTill -> showWho(null)
             is Screen.Home -> showHome()
         }
+    }
+
+    /** CR-147: cashiers are listed and nobody is signed in. */
+    private fun locked(): Boolean = cashiers.isNotEmpty() && locks.who == null
+
+    /**
+     * CR-147, CR-149: before a screen that is not a sale's, the lock that waited for a sale's screen to close
+     * happens, and a locked till shows "Who is at the till?" instead. True when it did.
+     */
+    private fun lockedOut(): Boolean {
+        locks.saleScreen(null)
+        if (!locked()) return false
+        showWho(null)
+        return true
     }
 
     // ---- running the node ----------------------------------------------------------------------------
@@ -319,7 +353,9 @@ class Controller(private val act: MainActivity) {
             linkThread = link
             link.start()
         }
-        showHome()
+        // CR-149: a person still signed in, who left a sale's screen open, comes back to it; the lock that waited happens when it closes.
+        val back = if (cashiers.isNotEmpty()) locks.reopen() else null
+        if (back != null) showSale(back, null, null) else showHome()
     }
 
     /** CR-136: whether the counter has a link to the owner, which is when its pairing holds a relay. */
@@ -622,6 +658,7 @@ class Controller(private val act: MainActivity) {
     // ---- home ----------------------------------------------------------------------------------------------------------
 
     private fun showHome() {
+        if (lockedOut()) return
         val n = node ?: return render()
         val cfg = config ?: return render()
         val health = Slot(act)
@@ -631,6 +668,14 @@ class Controller(private val act: MainActivity) {
         val linkSlot = Slot(act)
         val linked = hasLink(n)
         val views = ArrayList<View>()
+        // CR-147: who is at the till, and a way to lock it.
+        locks.who?.takeIf { cashiers.isNotEmpty() }?.let { who ->
+            views.add(ui.text("At the till: ${who.name}", 20f, bold = true))
+            views.add(ui.button("Lock") {
+                locks.lock()
+                render()
+            })
+        }
         views.add(label("Is Bitcoin ready?"))
         views.add(health)
         // CR-116: the Lightning line is there only while a connection is saved.
@@ -662,26 +707,31 @@ class Controller(private val act: MainActivity) {
         views.add(priceSlot)
         views.add(ui.button("New sale") { showNewSale() })
         views.add(ui.button("Sales") { showSales() })
-        views.add(label("Cashier"))
-        val name = ui.field("Your name").also { it.setText(cfg.cashier) }
-        views.add(name)
-        val saved = Slot(act)
-        views.add(ui.button("Save my name") {
-            val v = name.text.toString().trim()
-            if (!AppConfig.validName(v)) {
-                saved.show(ui.words(AppWords.nameNotAccepted))
-            } else {
-                try {
-                    val updated = cfg.withCashier(v)
-                    configFile.save(updated)
-                    config = updated
-                    saved.show()
-                } catch (e: IOException) {
-                    saved.show(ui.words(AppWords.fileNotSaved(e.message)))
+        views.add(ui.button("Today") { showToday(false) })
+        if (cashiers.isEmpty()) {
+            // CR-146: with no cashier listed the cashier is the one name of this phone, as before.
+            views.add(label("Cashier"))
+            val name = ui.field("Your name").also { it.setText(cfg.cashier) }
+            views.add(name)
+            val saved = Slot(act)
+            views.add(ui.button("Save my name") {
+                val v = name.text.toString().trim()
+                if (!AppConfig.validName(v)) {
+                    saved.show(ui.words(AppWords.nameNotAccepted))
+                } else {
+                    try {
+                        val updated = cfg.withCashier(v)
+                        configFile.save(updated)
+                        config = updated
+                        saved.show()
+                    } catch (e: IOException) {
+                        saved.show(ui.words(AppWords.fileNotSaved(e.message)))
+                    }
                 }
-            }
-        })
-        views.add(saved)
+            })
+            views.add(saved)
+        }
+        views.add(ui.button("Staff") { showStaffEntry() })
         views.add(ui.button("Your own node") { showOwnNode() })
         views.add(ui.button("Lightning") { showLightning(null) })
         views.add(ui.button("About") { showAbout() })
@@ -734,6 +784,7 @@ class Controller(private val act: MainActivity) {
 
     /** The counter's own setting, behind the manager's PIN: save an address, or remove it. */
     private fun showOwnNode() {
+        if (lockedOut()) return
         val cfg = config ?: return render()
         val rec = record ?: return render()
         val msg = Slot(act)
@@ -787,6 +838,7 @@ class Controller(private val act: MainActivity) {
 
     /** The connection to the shop's node, behind the manager's PIN: scan or type it, test it, save it sealed, or remove it. */
     private fun showLightning(notice: SayWords?) {
+        if (lockedOut()) return
         if (node == null) return render()
         val msg = Slot(act)
         (notice ?: lightningFault)?.let { msg.show(ui.words(it)) }
@@ -930,6 +982,7 @@ class Controller(private val act: MainActivity) {
     // ---- a new sale ------------------------------------------------------------------------------------------------------
 
     private fun showNewSale() {
+        if (lockedOut()) return
         val m = money ?: return render()
         val entry = AmountEntry(m)
         val display = ui.text(entry.show(), 32f, bold = true)
@@ -984,7 +1037,7 @@ class Controller(private val act: MainActivity) {
         val (rate, words) = quote()
         if (rate == null) return refused(words ?: AppWords.stopped)
         try {
-            val o = n.open(nowSecs(), amountMinor, m.code, rate.rate, rate.sourceLabel, rate.sourceFetchedAt)
+            val o = n.open(nowSecs(), amountMinor, m.code, rate.rate, rate.sourceLabel, rate.sourceFetchedAt, atTheTill())
             amounts[o.index] = amountMinor
             showSale(o.index, o.payment, null)
         } catch (e: CounterException) {
@@ -997,6 +1050,7 @@ class Controller(private val act: MainActivity) {
     private fun showSale(index: Long, first: Payment?, notice: SayWords?) {
         val n = node ?: return render()
         val m = money ?: return render()
+        locks.saleScreen(index)
         val views = ArrayList<View>()
         val msg = Slot(act)
         if (notice != null) msg.show(ui.words(notice))
@@ -1064,7 +1118,7 @@ class Controller(private val act: MainActivity) {
                     val list = ArrayList<View>()
                     if (b.requote) list.add(ui.button("Requote") { requote(index, msg) })
                     if (b.cancel) list.add(ui.button("Cancel the sale") { cancelSale(index, msg) })
-                    if (b.override) list.add(ui.button("Accept by hand (manager)") { showOverride(index) })
+                    if (b.override) list.add(ui.button(if (cashiers.isEmpty()) "Accept by hand (manager)" else "Accept by hand") { showOverride(index) })
                     buttons.show(*list.toTypedArray())
                 }
             } catch (e: CounterException) {
@@ -1089,7 +1143,7 @@ class Controller(private val act: MainActivity) {
     private fun cancelSale(index: Long, msg: Slot) {
         val n = node ?: return render()
         try {
-            n.cancel(nowSecs(), index)
+            n.cancel(nowSecs(), index, atTheTill())
             tick?.invoke()
         } catch (e: CounterException) {
             msg.show(ui.words(e.sayWords()))
@@ -1098,21 +1152,39 @@ class Controller(private val act: MainActivity) {
 
     // ---- who acts (CR-21, CR-67 to CR-69) ----------------------------------------------------------------------------------------
 
-    /** The choice of who acts, with the PIN field a manager types into. */
-    private class ActorBlock(val group: RadioGroup, val pin: EditText)
+    /** The choice of who acts, with the PIN field a manager types into; [signedIn] is the person at the till when cashiers are listed (CR-148). */
+    private class ActorBlock(val group: RadioGroup, val pin: EditText, val signedIn: Actor?)
+
+    /** CR-148: who is signed in at the till, when cashiers are listed; otherwise null and the cashier is the phone's one name. */
+    private fun atTheTill(): Actor? = if (cashiers.isNotEmpty()) locks.who else null
 
     private fun actorBlock(views: MutableList<View>): ActorBlock {
+        val who = atTheTill()
         views.add(label("Who is asking"))
+        if (who != null) {
+            // The signed-in person acts without typing a PIN; a cashier may ask a manager instead, with the manager's PIN (CR-86).
+            val cashier = who.role == ActorRole.Cashier
+            val group = ui.choice(if (cashier) listOf("Me, ${who.name}", "Manager (needs the PIN)") else listOf("Me, ${who.name}"))
+            views.add(group)
+            val pinInput = pinField(act, "Manager's PIN")
+            if (cashier) views.add(pinInput)
+            return ActorBlock(group, pinInput, who)
+        }
         val group = ui.choice(listOf("Cashier", "Manager (needs the PIN)"))
         views.add(group)
         val pinInput = pinField(act, "Manager's PIN")
         views.add(pinInput)
-        return ActorBlock(group, pinInput)
+        return ActorBlock(group, pinInput, null)
     }
 
-    /** The person who acts: the cashier by name, or the manager when the PIN is right (CR-21). */
+    /** The person who acts: the signed-in person, or the cashier by name, or the manager when the PIN is right (CR-21, CR-148). */
     private fun resolveActor(block: ActorBlock, done: (Actor) -> Unit, failed: (SayWords) -> Unit) {
         val cfg = config ?: return render()
+        val who = block.signedIn
+        if (who != null) {
+            if (ui.chosen(block.group) != 1) return done(who)
+            return checkPin(block.pin.text.toString(), { done(Actor(ActorRole.Manager, cfg.manager)) }, failed)
+        }
         if (ui.chosen(block.group) != 1) {
             if (cfg.cashier.isEmpty()) return failed(AppWords.nameNeeded)
             return done(Actor(ActorRole.Cashier, cfg.cashier))
@@ -1139,7 +1211,27 @@ class Controller(private val act: MainActivity) {
     private fun showOverride(index: Long) {
         val n = node ?: return render()
         val cfg = config ?: return render()
+        locks.saleScreen(index)
         val msg = Slot(act)
+        if (atTheTill() != null) {
+            // CR-148: a cashier's override is the signed-in cashier's, with no second PIN; the manager's still needs the PIN.
+            val views = ArrayList<View>()
+            views.add(ui.words(AppWords.overrideAbout))
+            val actor = actorBlock(views)
+            views.add(msg)
+            views.add(ui.button("Accept this sale") {
+                resolveActor(actor, { who ->
+                    try {
+                        n.overrideSale(nowSecs(), index, who)
+                        showSale(index, null, null)
+                    } catch (e: CounterException) {
+                        msg.show(ui.words(e.sayWords()))
+                    }
+                }, { msg.show(ui.words(it)) })
+            })
+            views.add(ui.button("Back") { showSale(index, null, null) })
+            return page(views)
+        }
         val pinInput = pinField(act, "Manager's PIN")
         page(
             listOf(
@@ -1164,6 +1256,7 @@ class Controller(private val act: MainActivity) {
     // ---- sales and refunds ------------------------------------------------------------------------------------------------------------
 
     private fun showSales() {
+        if (lockedOut()) return
         val n = node ?: return render()
         val views = ArrayList<View>()
         views.add(label("Sales the counter holds"))
@@ -1185,6 +1278,7 @@ class Controller(private val act: MainActivity) {
     private fun showSaleDetails(index: Long, notice: SayWords? = null) {
         val n = node ?: return render()
         val m = money ?: return render()
+        locks.saleScreen(index)
         val views = ArrayList<View>()
         notice?.let { views.add(ui.words(it)) }
         views.add(label("Sale ${index + 1}"))
@@ -1220,6 +1314,7 @@ class Controller(private val act: MainActivity) {
     private fun showRefundRequest(index: Long) {
         val n = node ?: return render()
         val m = money ?: return render()
+        locks.saleScreen(index)
         val views = ArrayList<View>()
         val msg = Slot(act)
         views.add(msg)
@@ -1277,6 +1372,7 @@ class Controller(private val act: MainActivity) {
     private fun showCashRefund(index: Long) {
         val n = node ?: return render()
         val m = money ?: return render()
+        locks.saleScreen(index)
         val views = ArrayList<View>()
         val msg = Slot(act)
         views.add(msg)
@@ -1309,6 +1405,7 @@ class Controller(private val act: MainActivity) {
 
     private fun showWithdraw(index: Long, number: Long) {
         val n = node ?: return render()
+        locks.saleScreen(index)
         val views = ArrayList<View>()
         val msg = Slot(act)
         views.add(msg)
@@ -1328,9 +1425,231 @@ class Controller(private val act: MainActivity) {
         page(views)
     }
 
+    // ---- who is at the till (CR-147 to CR-150) ------------------------------------------------------------------------------
+
+    /** "Who is at the till?": the cashiers' names and the manager's. */
+    private fun showWho(notice: SayWords?) {
+        val cfg = config ?: return render()
+        val views = ArrayList<View>()
+        views.add(ui.words(notice ?: AppWords.whoAtTill))
+        for (name in cashiers) views.add(ui.button(name) { showSignIn(Actor(ActorRole.Cashier, name)) })
+        views.add(ui.button("${cfg.manager} (manager)") { showSignIn(Actor(ActorRole.Manager, cfg.manager)) })
+        page(views)
+    }
+
+    private fun showSignIn(person: Actor) {
+        val msg = Slot(act)
+        val pinInput = pinField(act, "PIN")
+        page(
+            listOf(
+                ui.text(person.name, 22f, bold = true),
+                label("PIN"),
+                pinInput,
+                msg,
+                ui.button("Sign in") { signIn(person, pinInput.text.toString(), msg) },
+                ui.button("Back") { showWho(null) },
+            ),
+        )
+    }
+
+    /** CR-150: the PIN check of CR-85 for that person, counted and stored before it is compared; a held PIN is not looked at. */
+    private fun signIn(person: Actor, text: String, msg: Slot) {
+        async({ if (person.role == ActorRole.Manager) pin.check(text) else staff.check(person.name, text) }) { r ->
+            val e = r.exceptionOrNull()
+            if (e is IOException) return@async msg.show(ui.words(AppWords.fileNotSaved(e.message)))
+            if (e != null) throw e
+            when (val v = r.getOrThrow()) {
+                PinResult.Ok -> {
+                    locks.signIn(person)
+                    showHome()
+                }
+                is PinResult.Wrong -> msg.show(ui.words(AppWords.signInWrong(v.waitSecs)))
+                is PinResult.Locked -> msg.show(ui.words(AppWords.signInHeld(v.waitSecs)))
+            }
+        }
+    }
+
+    // ---- staff: the cashiers (CR-142) ------------------------------------------------------------------------------------------------
+
+    /** The manager's PIN opens Staff. */
+    private fun showStaffEntry() {
+        if (lockedOut()) return
+        val msg = Slot(act)
+        val pinInput = pinField(act, "Manager's PIN")
+        page(
+            listOf(
+                ui.words(AppWords.staffPinNeeded),
+                pinInput,
+                msg,
+                ui.button("Open") { checkPin(pinInput.text.toString(), { showStaff(emptyList()) }, { msg.show(ui.words(it)) }) },
+                ui.button("Back") { showHome() },
+            ),
+        )
+    }
+
+    private fun showStaff(notices: List<SayWords>) {
+        if (lockedOut()) return
+        val cfg = config ?: return render()
+        if (node == null) return render()
+        val views = ArrayList<View>()
+        views.add(ui.words(AppWords.staffAbout))
+        for (w in notices) views.add(ui.words(w))
+        views.add(label("Cashiers"))
+        if (cashiers.isEmpty()) views.add(ui.text("No cashier is listed, so nobody has to sign in.", 16f))
+        for (name in cashiers) {
+            views.add(ui.text(name, 18f, bold = true))
+            views.add(ui.button("New PIN for $name") { showCashierPin(name) })
+            views.add(ui.button("Remove $name") { showRemoveCashier(name) })
+        }
+        views.add(label("Add a cashier"))
+        val nameField = ui.field("Name of the cashier")
+        val pin1 = pinField(act, "PIN, 4 to 8 digits (the cashier types it)")
+        val pin2 = pinField(act, "PIN again")
+        val msg = Slot(act)
+        views.add(nameField)
+        views.add(pin1)
+        views.add(pin2)
+        views.add(msg)
+        views.add(ui.button("Add the cashier") {
+            addCashier(cfg, nameField.text.toString().trim(), pin1.text.toString(), pin2.text.toString(), msg)
+        })
+        views.add(ui.button("Back") { showHome() })
+        page(views)
+    }
+
+    /** CR-142: the file first, then the record for the owner; the list is changed even when the record cannot be written, and the app says so. */
+    private fun addCashier(cfg: AppConfig, name: String, pin1: String, pin2: String, msg: Slot) {
+        (StaffCheck.nameProblem(name, cashiers, cfg.manager) ?: StaffCheck.pinProblem(pin1, pin2))?.let { return msg.show(ui.words(it)) }
+        msg.show(ui.words(AppWords.starting))
+        async({
+            staff.add(name, pin1)
+            staff.names()
+        }) { r ->
+            val e = r.exceptionOrNull()
+            if (e is IOException) return@async msg.show(ui.words(AppWords.fileNotSaved(e.message)))
+            if (e != null) throw e
+            cashiers = r.getOrThrow()
+            // The manager's PIN opened this screen, so the manager who turned the lock on is the person at the till (CR-146).
+            if (locks.who == null) locks.signIn(Actor(ActorRole.Manager, cfg.manager))
+            recordStaff(true, name, AppWords.cashierAdded)
+        }
+    }
+
+    private fun showRemoveCashier(name: String) {
+        if (lockedOut()) return
+        val msg = Slot(act)
+        page(
+            listOf(
+                ui.text("Remove $name?", 20f, bold = true),
+                msg,
+                ui.button("Remove") { removeCashier(name, msg) },
+                ui.button("Back") { showStaff(emptyList()) },
+            ),
+        )
+    }
+
+    private fun removeCashier(name: String, msg: Slot) {
+        async({
+            staff.remove(name)
+            staff.names()
+        }) { r ->
+            val e = r.exceptionOrNull()
+            if (e is IOException) return@async msg.show(ui.words(AppWords.fileNotSaved(e.message)))
+            if (e != null) throw e
+            cashiers = r.getOrThrow()
+            // CR-146: a person who was removed is signed out, and the last one removed turns the lock off.
+            val who = locks.who
+            if (who != null && who.role == ActorRole.Cashier && who.name == name) locks.lock()
+            if (cashiers.isEmpty()) locks.forget()
+            recordStaff(false, name, AppWords.cashierRemoved)
+        }
+    }
+
+    private fun showCashierPin(name: String) {
+        if (lockedOut()) return
+        val msg = Slot(act)
+        val pin1 = pinField(act, "New PIN, 4 to 8 digits (the cashier types it)")
+        val pin2 = pinField(act, "New PIN again")
+        page(
+            listOf(
+                ui.text("New PIN for $name", 20f, bold = true),
+                pin1,
+                pin2,
+                msg,
+                ui.button("Save the new PIN") { saveCashierPin(name, pin1.text.toString(), pin2.text.toString(), msg) },
+                ui.button("Back") { showStaff(emptyList()) },
+            ),
+        )
+    }
+
+    /** CR-142: a new PIN is not a record; it clears that cashier's count and hold. */
+    private fun saveCashierPin(name: String, pin1: String, pin2: String, msg: Slot) {
+        StaffCheck.pinProblem(pin1, pin2)?.let { return msg.show(ui.words(it)) }
+        msg.show(ui.words(AppWords.starting))
+        async({ staff.setPin(name, pin1) }) { r ->
+            val e = r.exceptionOrNull()
+            if (e is IOException) return@async msg.show(ui.words(AppWords.fileNotSaved(e.message)))
+            if (e != null) throw e
+            showStaff(listOf(AppWords.cashierPinSaved))
+        }
+    }
+
+    /** CR-143: the record of the change goes to the library; when it cannot be written the screen says the owner was not told. */
+    private fun recordStaff(added: Boolean, name: String, done: SayWords) {
+        val n = node ?: return render()
+        val cfg = config ?: return render()
+        try {
+            n.staffRecord(nowSecs(), added, name, cfg.manager)
+            showStaff(listOf(done))
+        } catch (e: CounterException) {
+            showStaff(listOf(AppWords.ownerNotTold, e.sayWords()))
+        }
+    }
+
+    // ---- today (CR-152 to CR-155) ----------------------------------------------------------------------------------------------------
+
+    /** The day's totals from the counter's own records, from local midnight to now; the lines per person only after the manager's PIN. */
+    private fun showToday(people: Boolean) {
+        if (lockedOut()) return
+        val n = node ?: return render()
+        val m = money ?: return render()
+        val now = nowSecs()
+        val from = DayWindow.start(now, ZoneId.systemDefault())
+        val views = ArrayList<View>()
+        views.add(label("Today"))
+        views.add(ui.text("From ${Format.localTime(from)} until now", 14f))
+        try {
+            val t = n.dayTotals(from, DayWindow.end(now), people)
+            views.add(ui.words(AppWords.todayAbout))
+            for (line in TodayModel.lines(t, m)) views.add(ui.text(line, 17f))
+            if (t.waiting.count > 0) views.add(ui.words(AppWords.todayWaiting))
+            if (t.stopped > 0) views.add(ui.words(AppWords.todayStopped))
+            if (people) {
+                views.add(label("Lines per person"))
+                val lines = TodayModel.people(t)
+                if (lines.isEmpty()) views.add(ui.text("Nobody is named in today's records.", 16f))
+                for (line in lines) views.add(ui.text(line, 16f))
+            } else {
+                val msg = Slot(act)
+                val pinInput = pinField(act, "Manager's PIN")
+                views.add(ui.words(AppWords.todayPeopleNeedPin))
+                views.add(pinInput)
+                views.add(msg)
+                views.add(ui.button("Show the lines") {
+                    checkPin(pinInput.text.toString(), { showToday(true) }, { msg.show(ui.words(it)) })
+                })
+            }
+        } catch (e: CounterException) {
+            views.add(ui.words(e.sayWords()))
+        }
+        views.add(ui.button("Back") { showHome() })
+        page(views)
+    }
+
     // ---- about ----------------------------------------------------------------------------------------------------------------------
 
     private fun showAbout() {
+        if (lockedOut()) return
         page(
             listOf(
                 ui.text("OpenBMT Counter $VERSION", 22f, bold = true),
@@ -1343,9 +1662,22 @@ class Controller(private val act: MainActivity) {
                 ),
                 label("Not built yet"),
                 ui.text(
-                    "A lock screen of the app's own; " +
-                        "a list of cashiers and managers with their own PINs (there is one manager PIN for this phone); " +
-                        "end-of-day totals and receipts; changing the shop's settings after pairing.",
+                    "Several managers with their own PINs (there is one manager PIN for this phone); " +
+                        "receipts; changing the shop's settings after pairing.",
+                    16f,
+                ),
+                label("Cashiers and the till"),
+                ui.text(
+                    "The manager can list up to 30 cashiers, each with a name and a PIN, under Staff. Once one is listed the till is locked: a person taps their name and types " +
+                        "their PIN, and sales, cancels and refunds are written down with that name. The app locks when Lock is tapped and after more than five minutes out of view, " +
+                        "never while a sale is open. The list stays on this phone, is not backed up, and the owner is sent a record of each cashier added or removed. " +
+                        "A PIN on a phone stops a casual hand and nobody else.",
+                    16f,
+                ),
+                label("Today"),
+                ui.text(
+                    "Today counts this counter's own records from midnight until now: sales paid, waiting and cancelled, overrides, refunds and cash refunds. " +
+                        "The lines per person need the manager's PIN. The owner's phone has the full books and the export.",
                     16f,
                 ),
                 label("Tor"),

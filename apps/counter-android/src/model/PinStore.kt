@@ -43,6 +43,53 @@ sealed class PinResult {
 /** The file did not have the layout of [PinStore]. */
 class PinFormatException(message: String) : IOException(message)
 
+/** One PIN as it is kept: how it was hashed, the salt, the hash, the wrong tries in a row and the time the PIN is held until. */
+class PinRecord(val iterations: Int, val salt: ByteArray, val hash: ByteArray, val wrong: Long, val heldUntil: Long)
+
+/**
+ * The PIN rules of CR-84 and CR-85 on one [PinRecord], for the manager's PIN
+ * and for each cashier's (CR-141): the hash with a random salt, the count and
+ * the hold of the wrong tries, the compare in constant time.
+ */
+object PinCheck {
+    /** A new record for [pin]: a fresh salt, no wrong tries. */
+    fun make(pin: String, random: SecureRandom, hasher: PinHasher, iterations: Int): PinRecord {
+        val salt = ByteArray(PinStore.SALT_LEN).also { random.nextBytes(it) }
+        val chars = pin.toCharArray()
+        try {
+            return PinRecord(iterations, salt, hasher.hash(chars, salt, iterations), 0, 0)
+        } finally {
+            chars.fill('0')
+        }
+    }
+
+    /**
+     * Checks [pin] against [rec] at [now]. While an earlier wrong try holds the PIN, the answer is
+     * [PinResult.Locked] and the PIN is not compared (the count does not grow). Otherwise the try is
+     * counted and handed to [save] first; a [save] that fails throws and nothing is compared.
+     */
+    fun attempt(rec: PinRecord, pin: String, now: Long, hasher: PinHasher, save: (PinRecord) -> Unit): PinResult {
+        if (now < rec.heldUntil) return PinResult.Locked(rec.heldUntil - now)
+        val wrong = rec.wrong + 1
+        val wait = PinStore.delayFor(wrong)
+        save(PinRecord(rec.iterations, rec.salt, rec.hash, wrong, now + wait))
+        val chars = pin.toCharArray()
+        val same = try {
+            MessageDigest.isEqual(hasher.hash(chars, rec.salt, rec.iterations), rec.hash)
+        } finally {
+            chars.fill('0')
+        }
+        if (!same) return PinResult.Wrong(wait)
+        // A reset that cannot be written leaves the count as it is, which only
+        // makes the next wrong try wait longer.
+        try {
+            save(PinRecord(rec.iterations, rec.salt, rec.hash, 0, 0))
+        } catch (_: IOException) {
+        }
+        return PinResult.Ok
+    }
+}
+
 /**
  * The manager's PIN (docs/COUNTER-RULES.md CR-84 to CR-86): 6 to 12 digits,
  * kept as PBKDF2-HMAC-SHA256 with 600,000 iterations and a random 16-byte
@@ -65,21 +112,12 @@ class PinStore(
 ) {
     private val file = File(dir, name)
 
-    /** The file's content in memory. */
-    private class Record(val iterations: Int, val salt: ByteArray, val hash: ByteArray, val wrong: Long, val heldUntil: Long)
-
     fun isSet(): Boolean = file.exists()
 
     /** Stores a new PIN. The PIN must be [validPin]; any earlier PIN and its count are replaced. */
     fun set(pin: String) {
         require(validPin(pin)) { "a PIN is $MIN_DIGITS to $MAX_DIGITS digits" }
-        val salt = ByteArray(SALT_LEN).also { random.nextBytes(it) }
-        val chars = pin.toCharArray()
-        try {
-            write(Record(iterations, salt, hasher.hash(chars, salt, iterations), 0, 0))
-        } finally {
-            chars.fill('0')
-        }
+        write(PinCheck.make(pin, random, hasher, iterations))
     }
 
     /**
@@ -90,25 +128,7 @@ class PinStore(
      */
     fun check(pin: String): PinResult {
         val rec = read() ?: throw IOException("no PIN is set")
-        val now = clock()
-        if (now < rec.heldUntil) return PinResult.Locked(rec.heldUntil - now)
-        val wrong = rec.wrong + 1
-        val wait = delayFor(wrong)
-        write(Record(rec.iterations, rec.salt, rec.hash, wrong, now + wait))
-        val chars = pin.toCharArray()
-        val same = try {
-            MessageDigest.isEqual(hasher.hash(chars, rec.salt, rec.iterations), rec.hash)
-        } finally {
-            chars.fill('0')
-        }
-        if (!same) return PinResult.Wrong(wait)
-        // A reset that cannot be written leaves the count as it is, which only
-        // makes the next wrong try wait longer.
-        try {
-            write(Record(rec.iterations, rec.salt, rec.hash, 0, 0))
-        } catch (_: IOException) {
-        }
-        return PinResult.Ok
+        return PinCheck.attempt(rec, pin, clock(), hasher) { write(it) }
     }
 
     /** The seconds the PIN is held for, or 0. */
@@ -117,7 +137,7 @@ class PinStore(
         return maxOf(0, rec.heldUntil - clock())
     }
 
-    private fun read(): Record? {
+    private fun read(): PinRecord? {
         if (!file.exists()) return null
         val b = file.readBytes()
         if (b.size != SIZE) throw PinFormatException("the PIN file has a length that is not $SIZE")
@@ -132,10 +152,10 @@ class PinStore(
         val wrong = buf.int.toLong() and 0xffffffffL
         val heldUntil = buf.long
         if (heldUntil < 0) throw PinFormatException("the PIN file has a time out of range")
-        return Record(iter, salt, hash, wrong, heldUntil)
+        return PinRecord(iter, salt, hash, wrong, heldUntil)
     }
 
-    private fun write(r: Record) {
+    private fun write(r: PinRecord) {
         val buf = ByteBuffer.allocate(SIZE).order(ByteOrder.LITTLE_ENDIAN)
         buf.put(MAGIC).put(VERSION.toByte()).putInt(r.iterations).put(r.salt).put(r.hash)
             .putInt(minOf(r.wrong, 0xffffffffL).toInt()).putLong(r.heldUntil)

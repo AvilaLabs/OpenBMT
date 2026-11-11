@@ -39,6 +39,25 @@ These are the words of what the app decides itself.
 | managerNeeded | A manager is needed | This step needs the manager's PIN. | Ask the manager to type the PIN. | a manager |  |
 | pinWrong | Wrong PIN | That PIN is not right, so nothing was done. | Wait 4 seconds, then try again. | a manager |  |
 | pinLocked | PIN locked for now | There were wrong tries in a row, so the PIN is locked for a while. | Wait 5 minutes, then try again. | a manager |  |
+| staffPinNeeded | Manager's PIN needed | The list of cashiers is changed only with the manager's PIN. | Type the manager's PIN, then tap Open. | a manager |  |
+| staffAbout | Staff | Cashiers sign in at the till with their name and PIN. Each one added or removed is written down for the owner. | Add a cashier below, or remove one, or give one a new PIN. | a manager |  |
+| cashierNameNotAccepted | Cashier name not accepted | A cashier's name is 1 to 24 characters long, with no space at either end, so it was not used. | Type another name, then add the cashier again. | a manager |  |
+| cashierNameUsed | Name already used | Another cashier or the manager has that name, whatever the capital letters, so it was not used. | Type a different name, then add the cashier again. | a manager |  |
+| cashiersFull | Cashier list is full | The list holds at most 30 cashiers, so no one more can be added. | Remove a cashier first, then add the new one. | a manager |  |
+| cashierPinNotAccepted | Cashier PIN not accepted | A cashier's PIN is 4 to 8 digits, and the two entries must be the same, so nothing was saved. | Type the PIN twice, then save again. | the cashier |  |
+| cashierAdded | Cashier added | The cashier is on the list, and the owner's phone gets a record of it. | Sign in at the till with the name and the PIN. | the cashier |  |
+| cashierRemoved | Cashier removed | The cashier is off the list and can no longer sign in, and the owner's phone gets a record of it. | Nothing more to do. | nobody |  |
+| cashierPinSaved | New PIN saved | The cashier's new PIN is saved on this phone. Nothing about it is sent to the owner. | Sign in at the till with the new PIN. | the cashier |  |
+| ownerNotTold | Owner not told | The list of cashiers was changed, but the record for the owner could not be written. | Tell the owner in person that the list changed. | a manager |  |
+| cashiersNotRead | Cashier list not read | The list of cashiers could not be read, so nobody can sign in and nothing was done. | Try again. If it happens again, stop and tell the owner in person. | a manager |  |
+| whoAtTill | Who is at the till? | The till is locked, so no sale can be opened until a person signs in. | Tap your name, then type your PIN. | the cashier |  |
+| signInWrong | PIN not right | That PIN is not the one for this name, so nobody was signed in. | Wait 4 seconds, then try again. | the cashier |  |
+| signInHeld | PIN held for now | There were wrong tries in a row on this name, so its PIN is held for a while. | Wait 5 minutes, then try again, or tap Back and pick another name. | the cashier |  |
+| overrideAbout | Accept by hand | Accepting a sale by hand is written down with the name of the person who does it, and the limits apply to each person. | Tap Accept, or choose the manager and type the manager's PIN. | the cashier |  |
+| todayAbout | Today at this counter | These totals are counted from this counter's own records since midnight. No wallet balance is shown here. | The owner's phone has the full books and the export. | the owner |  |
+| todayWaiting | Why sales are waiting | A sale waits until its payment is accepted: it may be unpaid, part paid, or paid and not yet confirmed. | Open the sale from Sales to see which. The count changes once the payment is accepted or the sale ends. | the cashier |  |
+| todayStopped | Sales not to be handed over | A payment for these sales was replaced or reopened, so the goods are not to be handed over. | Open the sale from Sales and follow what it says. | a manager |  |
+| todayPeopleNeedPin | Lines per person | The lines per person show who opened each sale and did each override or refund, so they need the manager's PIN. | Type the manager's PIN, then tap Show the lines. | a manager |  |
 | priceReady | Price ready | Bitcoin is priced at 73,554.18 USD, from 3 price sources. | Nothing to do. The app asks the sources again every minute. | nobody |  |
 | sourceNotAnswered | Price source not reached | A price source did not answer in time, so its price is missing this turn. | Nothing to do. The app asks again in a minute. | nobody |  |
 | sourceRefusedStatus | Price source said no | A price source answered with a refusal, so its price is missing this turn. | Nothing to do. The app asks again in a minute. | nobody |  |

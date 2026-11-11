@@ -224,6 +224,144 @@ object AppWords {
         "Wait ${waitText(waitSecs)}, then try again.",
     )
 
+    // ---- cashiers and the till (CR-140 to CR-151) ------------------------------------------
+
+    val staffPinNeeded = w(
+        Tones.INFO, "Manager's PIN needed",
+        "The list of cashiers is changed only with the manager's PIN.",
+        Who.MANAGER,
+        "Type the manager's PIN, then tap Open.",
+    )
+
+    val staffAbout = w(
+        Tones.INFO, "Staff",
+        "Cashiers sign in at the till with their name and PIN. Each one added or removed is written down for the owner.",
+        Who.MANAGER,
+        "Add a cashier below, or remove one, or give one a new PIN.",
+    )
+
+    val cashierNameNotAccepted = w(
+        Tones.STOP, "Cashier name not accepted",
+        "A cashier's name is 1 to 24 characters long, with no space at either end, so it was not used.",
+        Who.MANAGER,
+        "Type another name, then add the cashier again.",
+    )
+
+    val cashierNameUsed = w(
+        Tones.STOP, "Name already used",
+        "Another cashier or the manager has that name, whatever the capital letters, so it was not used.",
+        Who.MANAGER,
+        "Type a different name, then add the cashier again.",
+    )
+
+    val cashiersFull = w(
+        Tones.STOP, "Cashier list is full",
+        "The list holds at most 30 cashiers, so no one more can be added.",
+        Who.MANAGER,
+        "Remove a cashier first, then add the new one.",
+    )
+
+    val cashierPinNotAccepted = w(
+        Tones.STOP, "Cashier PIN not accepted",
+        "A cashier's PIN is 4 to 8 digits, and the two entries must be the same, so nothing was saved.",
+        Who.CASHIER,
+        "Type the PIN twice, then save again.",
+    )
+
+    val cashierAdded = w(
+        Tones.GOOD, "Cashier added",
+        "The cashier is on the list, and the owner's phone gets a record of it.",
+        Who.CASHIER,
+        "Sign in at the till with the name and the PIN.",
+    )
+
+    val cashierRemoved = w(
+        Tones.INFO, "Cashier removed",
+        "The cashier is off the list and can no longer sign in, and the owner's phone gets a record of it.",
+        Who.NOBODY,
+        "Nothing more to do.",
+    )
+
+    val cashierPinSaved = w(
+        Tones.GOOD, "New PIN saved",
+        "The cashier's new PIN is saved on this phone. Nothing about it is sent to the owner.",
+        Who.CASHIER,
+        "Sign in at the till with the new PIN.",
+    )
+
+    val ownerNotTold = w(
+        Tones.STOP, "Owner not told",
+        "The list of cashiers was changed, but the record for the owner could not be written.",
+        Who.MANAGER,
+        "Tell the owner in person that the list changed.",
+    )
+
+    fun cashiersNotRead(problem: String?) = w(
+        Tones.STOP, "Cashier list not read",
+        "The list of cashiers could not be read, so nobody can sign in and nothing was done.",
+        Who.MANAGER,
+        "Try again. If it happens again, stop and tell the owner in person.",
+        detailOf(problem),
+    )
+
+    val whoAtTill = w(
+        Tones.INFO, "Who is at the till?",
+        "The till is locked, so no sale can be opened until a person signs in.",
+        Who.CASHIER,
+        "Tap your name, then type your PIN.",
+    )
+
+    fun signInWrong(waitSecs: Long) = w(
+        Tones.STOP, "PIN not right",
+        "That PIN is not the one for this name, so nobody was signed in.",
+        Who.CASHIER,
+        "Wait ${waitText(waitSecs)}, then try again.",
+    )
+
+    fun signInHeld(waitSecs: Long) = w(
+        Tones.STOP, "PIN held for now",
+        "There were wrong tries in a row on this name, so its PIN is held for a while.",
+        Who.CASHIER,
+        "Wait ${waitText(waitSecs)}, then try again, or tap Back and pick another name.",
+    )
+
+    val overrideAbout = w(
+        Tones.INFO, "Accept by hand",
+        "Accepting a sale by hand is written down with the name of the person who does it, and the limits apply to each person.",
+        Who.CASHIER,
+        "Tap Accept, or choose the manager and type the manager's PIN.",
+    )
+
+    // ---- today's totals (CR-152 to CR-155) -------------------------------------------------
+
+    val todayAbout = w(
+        Tones.INFO, "Today at this counter",
+        "These totals are counted from this counter's own records since midnight. No wallet balance is shown here.",
+        Who.OWNER,
+        "The owner's phone has the full books and the export.",
+    )
+
+    val todayWaiting = w(
+        Tones.INFO, "Why sales are waiting",
+        "A sale waits until its payment is accepted: it may be unpaid, part paid, or paid and not yet confirmed.",
+        Who.CASHIER,
+        "Open the sale from Sales to see which. The count changes once the payment is accepted or the sale ends.",
+    )
+
+    val todayStopped = w(
+        Tones.STOP, "Sales not to be handed over",
+        "A payment for these sales was replaced or reopened, so the goods are not to be handed over.",
+        Who.MANAGER,
+        "Open the sale from Sales and follow what it says.",
+    )
+
+    val todayPeopleNeedPin = w(
+        Tones.INFO, "Lines per person",
+        "The lines per person show who opened each sale and did each override or refund, so they need the manager's PIN.",
+        Who.MANAGER,
+        "Type the manager's PIN, then tap Show the lines.",
+    )
+
     /** "4 seconds", "2 minutes": the wait of a locked PIN, said to be read. */
     fun waitText(secs: Long): String = when {
         secs <= 1 -> "1 second"
@@ -468,6 +606,25 @@ object AppWords {
         "managerNeeded" to managerNeeded,
         "pinWrong" to pinWrong(4),
         "pinLocked" to pinLocked(300),
+        "staffPinNeeded" to staffPinNeeded,
+        "staffAbout" to staffAbout,
+        "cashierNameNotAccepted" to cashierNameNotAccepted,
+        "cashierNameUsed" to cashierNameUsed,
+        "cashiersFull" to cashiersFull,
+        "cashierPinNotAccepted" to cashierPinNotAccepted,
+        "cashierAdded" to cashierAdded,
+        "cashierRemoved" to cashierRemoved,
+        "cashierPinSaved" to cashierPinSaved,
+        "ownerNotTold" to ownerNotTold,
+        "cashiersNotRead" to cashiersNotRead("a problem"),
+        "whoAtTill" to whoAtTill,
+        "signInWrong" to signInWrong(4),
+        "signInHeld" to signInHeld(300),
+        "overrideAbout" to overrideAbout,
+        "todayAbout" to todayAbout,
+        "todayWaiting" to todayWaiting,
+        "todayStopped" to todayStopped,
+        "todayPeopleNeedPin" to todayPeopleNeedPin,
         "priceReady" to priceReady("73,554.18 USD", 3),
         "sourceNotAnswered" to sourceNotAnswered,
         "sourceRefusedStatus" to sourceRefusedStatus(503),

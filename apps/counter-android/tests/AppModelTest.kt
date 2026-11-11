@@ -10,7 +10,10 @@ import org.openbmt.app.SayCheck
 import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
 import org.openbmt.app.Who
+import org.openbmt.counter.Actor
+import org.openbmt.counter.ActorRole
 import org.openbmt.counter.CounterException
+import org.openbmt.counter.DayTotals
 import org.openbmt.counter.CounterNetwork
 import org.openbmt.counter.LnKind
 import org.openbmt.counter.LnMethod
@@ -18,11 +21,13 @@ import org.openbmt.counter.LnRequest
 import org.openbmt.counter.LnStep
 import org.openbmt.counter.LnTransport
 import org.openbmt.counter.Payment
+import org.openbmt.counter.PersonLine
 import org.openbmt.counter.Quoted
 import org.openbmt.counter.Rate
 import org.openbmt.counter.RateSource
 import org.openbmt.counter.SaleState
 import org.openbmt.counter.Sample
+import org.openbmt.counter.Tally
 import org.openbmt.counter.Words
 
 /**
@@ -624,6 +629,281 @@ object AppModelTest {
         ok(LightningSetup.drive(req(1), { rounds++; LnOutcome.Answer(200, ByteArray(0)) }, { id, _, _ -> LnStep(req(id + 1), null) }, { _, _ -> }) == null && rounds == LightningSetup.MAX_STEPS, "a test that never ends is given up")
     }
 
+    // ---- the cashiers (CR-140, CR-141) -----------------------------------------------------------
+
+    private fun cr141CashierRulesTests() {
+        ok(StaffStore.validName("Ann") && StaffStore.validName("x".repeat(24)) && StaffStore.validName("é".repeat(24)) && StaffStore.validName("Ann Lee"), "CR-141: names of 1 to 24 characters")
+        ok(!StaffStore.validName("") && !StaffStore.validName("x".repeat(25)) && !StaffStore.validName(" Ann") && !StaffStore.validName("Ann ") && !StaffStore.validName("A\nB") && !StaffStore.validName("A\u0007"), "CR-141: names that are not names")
+        ok(StaffStore.validPin("1234") && StaffStore.validPin("12345678"), "CR-141: PINs of 4 and 8 digits")
+        ok(!StaffStore.validPin("123") && !StaffStore.validPin("123456789") && !StaffStore.validPin("12a4") && !StaffStore.validPin("12 4") && !StaffStore.validPin(""), "CR-141: PINs that are not PINs")
+        ok(StaffStore.taken("ANN", listOf("Ann"), "Max") && StaffStore.taken("ann", listOf("Bob", "ANN"), "Max"), "CR-141: unique ignoring case")
+        ok(StaffStore.taken("MAX", emptyList(), "Max") && !StaffStore.taken("Maxine", listOf("Ann"), "Max"), "CR-141: not the manager's name")
+        ok(StaffStore.MAX_CASHIERS == 30 && StaffStore.MAX_NAME == 24, "CR-140: at most 30 cashiers, names of at most 24")
+        ok(StaffCheck.nameProblem("", emptyList(), "Max") === AppWords.cashierNameNotAccepted, "a name that is not a name has its words")
+        ok(StaffCheck.nameProblem("max", emptyList(), "Max") === AppWords.cashierNameUsed && StaffCheck.nameProblem("Ann", listOf("ann"), "Max") === AppWords.cashierNameUsed, "a used name has its words")
+        ok(StaffCheck.nameProblem("Zed", List(30) { "c$it" }, "Max") === AppWords.cashiersFull, "a full list has its words")
+        ok(StaffCheck.nameProblem("Ann", listOf("Bob"), "Max") == null, "a good name")
+        ok(StaffCheck.pinProblem("1234", "1234") == null && StaffCheck.pinProblem("123", "123") === AppWords.cashierPinNotAccepted && StaffCheck.pinProblem("1234", "1235") === AppWords.cashierPinNotAccepted, "the PIN, typed twice")
+    }
+
+    private fun cr140CashierFileTests() {
+        val dir = tempDir()
+        var now = 1_000L
+        val hasher = FakeHasher()
+        fun store() = StaffStore(dir, { now }, { "Max" }, SecureRandom(), hasher, 1000)
+        val file = File(dir, "cashiers.txt")
+        val s = store()
+        ok(s.names().isEmpty() && !file.exists(), "no file is an empty list")
+        s.add("Ann", "1234")
+        s.add("Bob", "87654321")
+        ok(s.names() == listOf("Ann", "Bob"), "CR-140: the cashiers, in the order added")
+        ok(dir.list()!!.sorted() == listOf("cashiers.txt"), "CR-140: the file is written whole and no temporary file is left")
+        val text = file.readText()
+        ok(text.startsWith("openbmt-cashiers 1\n") && text.lines().size == 4 && text.endsWith("\n"), "CR-140: a version line, then one line for each cashier")
+        ok(!text.contains("1234") && !text.contains("87654321"), "CR-141: no PIN is in the file")
+        ok(text.lines()[1].endsWith(" Ann") && text.lines()[2].endsWith(" Bob"), "the name is the rest of the line")
+        ok(text.lines()[1].split(' ').first() == "1000", "the iteration count is written with the entry")
+
+        // Adding is refused for a name that is used, the manager's, a bad name, a bad PIN and a 31st cashier.
+        for ((n, p) in listOf("ann" to "1234", "MAX" to "1234", "" to "1234", "Cy" to "123", "Cy" to "1234567890")) {
+            throws("adding $n with $p") { store().add(n, p) }
+        }
+        ok(store().names() == listOf("Ann", "Bob"), "a refused add changes nothing")
+        for (i in 3..30) store().add("c$i", "1111")
+        ok(store().names().size == 30, "CR-140: 30 cashiers")
+        throws("a 31st cashier") { store().add("one more", "1111") }
+        for (i in 3..30) store().remove("c$i")
+        ok(store().names() == listOf("Ann", "Bob"), "removing keeps the others in order")
+
+        // CR-141: a count and a hold of each cashier's own.
+        ok(store().check("Ann", "1234") == PinResult.Ok, "the right PIN signs in")
+        val wrong = store().check("Ann", "0000")
+        ok(wrong is PinResult.Wrong && wrong.waitSecs == 1L, "a wrong PIN holds that cashier for 1 second")
+        ok(store().check("Ann", "1234") is PinResult.Locked, "CR-150: a held PIN is not looked at, even the right one")
+        ok(store().check("Bob", "87654321") == PinResult.Ok, "CR-141: one cashier's wrong tries never hold another's PIN")
+        ok(store().heldFor("Ann") == 1L && store().heldFor("Bob") == 0L, "the hold is Ann's alone, and it is in the file")
+        now += 1
+        val second = store().check("Ann", "0000")
+        ok(second is PinResult.Wrong && second.waitSecs == 2L, "the next wrong try holds for 2 seconds")
+        now += 2
+        ok(store().check("Ann", "1234") == PinResult.Ok && store().heldFor("Ann") == 0L, "the right PIN clears the count")
+        val before = hasher.calls
+        store().check("Ann", "0000")
+        ok(store().check("Ann", "0000") is PinResult.Locked && hasher.calls == before + 1, "a held try is not compared")
+        now += 1
+        // CR-142: a new PIN clears the count and the hold.
+        store().setPin("Ann", "5555")
+        ok(store().heldFor("Ann") == 0L && store().check("Ann", "1234") is PinResult.Wrong, "a new PIN replaces the old one")
+        now += 1
+        ok(store().check("Ann", "5555") == PinResult.Ok, "and works at once")
+        throws("a new PIN of 3 digits") { store().setPin("Ann", "123") }
+        throws("a check of a cashier who is not listed") { store().check("Zed", "1234") }
+        throws("a removal of a cashier who is not listed") { store().remove("Zed") }
+        throws("a new PIN for a cashier who is not listed") { store().setPin("Zed", "1234") }
+        // The last one removed leaves an empty list, which is the lock turned off (CR-146).
+        store().remove("Ann")
+        store().remove("Bob")
+        ok(store().names().isEmpty() && file.readText() == "openbmt-cashiers 1\n", "CR-146: removing the last leaves a file with the version line only")
+        store().add("Ann", "1234")
+
+        // CR-140: the file is read whole and refused whole when any line is not exact.
+        val good = file.readText()
+        store().add("Bob", "4321")
+        val two = file.readText()
+        val line = good.lines()[1]
+        val fields = line.split(' ', limit = 6)
+        fun refused(content: ByteArray, what: String) {
+            file.writeBytes(content)
+            var failed = false
+            try {
+                store().names()
+            } catch (_: StaffFormatException) {
+                failed = true
+            }
+            ok(failed, "CR-140: refused: $what")
+        }
+        fun refused(content: String, what: String) = refused(content.toByteArray(Charsets.UTF_8), what)
+        file.writeText(two)
+        ok(store().names() == listOf("Ann", "Bob"), "the good file reads")
+        refused("", "an empty file")
+        refused("openbmt-cashiers 1", "a version line with no line end")
+        refused("openbmt-cashiers 2\n", "another version")
+        refused("openbmt-cashiers 1\n$line", "a last line with no line end")
+        refused(good + "\n", "an empty line")
+        refused(good.replace("openbmt-cashiers 1", "openbmt-cashiers  1"), "a version line spaced another way")
+        refused("openbmt-cashiers 1\n" + fields.take(5).joinToString(" ") + "\n", "five fields")
+        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[0] = "01000" }.joinToString(" ") + "\n", "a number with a leading zero")
+        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[0] = "0" }.joinToString(" ") + "\n", "an iteration count of zero")
+        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[0] = "+1000" }.joinToString(" ") + "\n", "a number with a sign")
+        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[1] = it[1].uppercase() }.joinToString(" ") + "\n", "a salt in capital letters")
+        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[1] = it[1].drop(2) }.joinToString(" ") + "\n", "a short salt")
+        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[2] = it[2] + "00" }.joinToString(" ") + "\n", "a long hash")
+        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[3] = "4294967296" }.joinToString(" ") + "\n", "a count past 32 bits")
+        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[4] = "-1" }.joinToString(" ") + "\n", "a negative time")
+        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[4] = "99999999999999999999" }.joinToString(" ") + "\n", "a time past 64 bits")
+        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[5] = "Ann " }.joinToString(" ") + "\n", "a name with a space at the end")
+        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[5] = "A\u0007" }.joinToString(" ") + "\n", "a name with a control character")
+        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[5] = "x".repeat(25) }.joinToString(" ") + "\n", "a name of 25 characters")
+        refused(two + two.lines()[2] .replace("Bob", "BOB") + "\n", "two names that are the same ignoring case")
+        refused(good.replace("Ann", "max"), "the manager's name")
+        refused("openbmt-cashiers 1\n" + (1..31).joinToString("") { fields.toMutableList().also { f -> f[5] = "c$it" }.joinToString(" ") + "\n" }, "31 cashiers")
+        refused(good.toByteArray(Charsets.UTF_8) + byteArrayOf(0xff.toByte(), 0x0a), "bytes that are not UTF-8")
+        refused("openbmt-cashiers 1\n" + "x".repeat(20_000) + "\n", "a file far too long")
+        // The first start of the app reads it the same way: a file that does not read is a fault, never an empty list.
+        file.writeText(two)
+        ok(store().names() == listOf("Ann", "Bob"), "the good file reads again")
+        clean(dir)
+    }
+
+    // ---- the app does not back the list up (CR-140) -----------------------------------------------
+
+    private fun cr140NoBackupTests(appDir: File?) {
+        if (appDir == null) return
+        val rules = File(appDir, "res/xml/data_extraction_rules.xml").readText()
+        fun section(name: String): String {
+            val start = rules.indexOf("<$name>")
+            val end = rules.indexOf("</$name>")
+            ok(start >= 0 && end > start, "the extraction rules have a $name section")
+            return rules.substring(start, end)
+        }
+        for (name in listOf("cloud-backup", "device-transfer")) {
+            val body = section(name)
+            ok(!body.contains("<include"), "CR-140: $name includes nothing")
+            // The list is a file under noBackupFilesDir, which is below the root domain; both domains are excluded.
+            for (domain in listOf("root", "file")) ok(body.contains("<exclude domain=\"$domain\" />"), "CR-140: $name excludes the $domain domain")
+        }
+        val old = File(appDir, "res/xml/backup_rules.xml").readText()
+        ok(!old.contains("<include") && old.contains("<exclude domain=\"root\" />") && old.contains("<exclude domain=\"file\" />"), "CR-140: the rules for older phones include nothing")
+        val manifest = File(appDir, "AndroidManifest.xml").readText()
+        ok(manifest.contains("android:allowBackup=\"false\"") && manifest.contains("android:dataExtractionRules=\"@xml/data_extraction_rules\""), "CR-140: backup is off and the rules are named")
+        // The list is kept in the folder the system leaves out of a backup, as the PIN and the pairing are.
+        val controller = File(appDir, "src/android/Controller.kt").readText()
+        ok(controller.contains("private val dir: File = act.noBackupFilesDir") && controller.contains("StaffStore(dir,"), "CR-140: the app writes the list into noBackupFilesDir")
+        ok(File(appDir, "src/model/TillLock.kt").readText().let { !it.contains("File") && !it.contains("DurableFile") }, "CR-149: the till lock never writes a file")
+    }
+
+    // ---- the till lock (CR-147 to CR-150) -----------------------------------------------------------
+
+    private fun cr149TillLockTests() {
+        var t = 100L
+        val lock = TillLock { t }
+        val ann = Actor(ActorRole.Cashier, "Ann")
+        ok(lock.who == null && TillLock { 0 }.who == null, "CR-149: a stopped app starts with nobody signed in")
+        lock.signIn(ann)
+        ok(lock.who === ann, "a person signs in")
+        lock.backInView()
+        ok(lock.who === ann, "back in view with no time out changes nothing")
+        lock.leftView()
+        t += 300
+        lock.backInView()
+        ok(lock.who === ann, "CR-149: exactly 5 minutes out is not more than 5 minutes")
+        lock.leftView()
+        t += 301
+        lock.backInView()
+        ok(lock.who == null && !lock.waiting, "CR-149: more than 5 minutes out locks")
+        lock.signIn(ann)
+        lock.leftView()
+        t += 200
+        lock.leftView()
+        t += 150
+        lock.backInView()
+        ok(lock.who == null, "a second word of leaving does not start the time again")
+        lock.signIn(ann)
+        lock.lock()
+        ok(lock.who == null, "CR-149: Lock locks")
+        // The lock waits for a sale's screen to close, then happens.
+        lock.signIn(ann)
+        lock.saleScreen(7)
+        lock.leftView()
+        t += 1000
+        lock.backInView()
+        ok(lock.who === ann && lock.waiting && lock.reopen() == 7L, "CR-149: it never locks while a sale's screen is open")
+        lock.saleScreen(8)
+        ok(lock.who === ann && lock.waiting && lock.reopen() == 8L, "another sale's screen is still a sale's screen")
+        lock.saleScreen(null)
+        ok(lock.who == null && !lock.waiting && lock.reopen() == null, "CR-149: when the sale's screen closes the lock happens")
+        // A sale's screen open with no lock due keeps the person, who comes back to it.
+        lock.signIn(ann)
+        lock.saleScreen(3)
+        lock.leftView()
+        t += 10
+        lock.backInView()
+        ok(lock.who === ann && !lock.waiting && lock.reopen() == 3L, "a short time out leaves the person and the sale")
+        lock.saleScreen(null)
+        ok(lock.who === ann, "closing the sale's screen with no lock due changes nothing")
+        // A sign-in ends a wait; forgetting ends everything (CR-146).
+        lock.saleScreen(4)
+        lock.leftView()
+        t += 1000
+        lock.backInView()
+        lock.signIn(Actor(ActorRole.Manager, "Max"))
+        ok(!lock.waiting && lock.who!!.name == "Max", "a new sign-in ends the wait")
+        lock.forget()
+        ok(lock.who == null && lock.reopen() == null && !lock.waiting, "CR-146: forgetting leaves nobody and nothing waiting")
+        lock.saleScreen(9)
+        ok(lock.reopen() == null, "a locked till reopens no sale")
+        // The screen choice (CR-147).
+        val all = SetupStatus(pairing = true, pin = true, config = true)
+        ok(ScreenModel.pick(null, all, null, true, locked = true) is Screen.WhoAtTill, "CR-147: a locked till shows who is at the till")
+        ok(ScreenModel.pick(null, all, null, true, locked = false) is Screen.Home, "an unlocked till shows home")
+        ok(ScreenModel.pick(null, all, null, false, locked = true) is Screen.Starting, "a node that is not running is first")
+        ok(ScreenModel.pick(AppWords.stopped, all, null, true, locked = true) is Screen.Fault, "a fault comes before the lock")
+        ok(ScreenModel.pick(null, all, AppWords.orbotNotRunning, true, locked = true) is Screen.TorBlocked, "Tor without Orbot comes before the lock")
+        ok(ScreenModel.pick(null, all, null, true) is Screen.Home, "no cashier, no lock: as before (CR-146)")
+        ok(AppWords.signInWrong(4).next.contains("4 seconds") && AppWords.signInHeld(300).next.contains("5 minutes"), "CR-150: a held PIN shows the wait")
+        ok(AppWords.whoAtTill.heading == "Who is at the till?", "CR-147: the first screen")
+    }
+
+    // ---- today (CR-152 to CR-155) -----------------------------------------------------------------
+
+    private fun tally(count: Long, minor: Long = 0, sats: Long = 0) = Tally(count, minor, sats)
+
+    private fun cr152DayWindowTests() {
+        val zone = java.time.ZoneId.of("America/New_York")
+        fun at(y: Int, mo: Int, d: Int, h: Int, mi: Int, s: Int) = java.time.ZonedDateTime.of(y, mo, d, h, mi, s, 0, zone).toEpochSecond()
+        val midnight = at(2026, 11, 11, 0, 0, 0)
+        ok(DayWindow.start(at(2026, 11, 11, 15, 30, 5), zone) == midnight, "CR-152: local midnight before now")
+        ok(DayWindow.start(midnight, zone) == midnight, "midnight itself starts the day")
+        ok(DayWindow.start(midnight - 1, zone) == at(2026, 11, 10, 0, 0, 0), "the second before midnight is the day before")
+        ok(DayWindow.start(at(2026, 11, 11, 23, 59, 59), zone) == midnight, "the last second of the day")
+        // A day with the clocks going back is 25 hours long, and the window still starts at its midnight.
+        val change = at(2026, 11, 1, 0, 0, 0)
+        ok(at(2026, 11, 2, 0, 0, 0) - change == 25 * 3600L, "a day with a change of clocks")
+        ok(DayWindow.start(at(2026, 11, 1, 23, 0, 0), zone) == change && DayWindow.start(at(2026, 11, 2, 0, 0, 1), zone) == at(2026, 11, 2, 0, 0, 0), "CR-152: the window follows the phone's time zone across midnight")
+        ok(DayWindow.start(1_700_000_000L, java.time.ZoneOffset.UTC) == 1_699_920_000L, "in UTC")
+        ok(DayWindow.end(500) == 501L, "the end is not counted, so it is one second after now")
+    }
+
+    private fun cr153TodayLinesTests() {
+        val usd = Money.of("USD")!!
+        val t = DayTotals(
+            1_700_000_000L, 1_700_050_000L, "USD", tally(3, 4500, 54_000), tally(2, 3000, 36_000), tally(1, 1500, 18_000),
+            tally(2, 2000, 24_000), 1L, 4L, tally(1, 0, 12_000), tally(2, 0, 5_000), 1L, tally(1, 500, 6_000), 2L,
+            listOf(PersonLine(ActorRole.Cashier, "Ann", 4, 1, 0, 1), PersonLine(ActorRole.Manager, "Ma\u0007x‮", 1, 0, 2, 0)), 3L,
+        )
+        val lines = TodayModel.lines(t, usd)
+        ok(lines[0] == "Sales paid: 3 sales, 45.00 USD, 54,000 sats", "CR-153: paid, with the amount shown at the time and the bitcoin: ${lines[0]}")
+        ok(lines[1] == "On the chain: 2 sales, 30.00 USD, 36,000 sats" && lines[2] == "Over Lightning: 1 sale, 15.00 USD, 18,000 sats", "split on the chain and over Lightning: ${lines[1]} / ${lines[2]}")
+        ok(lines[3] == "Sales still waiting: 2 sales, 20.00 USD, 24,000 sats asked for", "waiting: ${lines[3]}")
+        ok(lines[4] == "Not to be handed over: 1 sale" && lines[5] == "Sales cancelled or expired: 4 sales", "stopped and ended: ${lines[4]} / ${lines[5]}")
+        ok(lines[6] == "Overrides: 1, 12,000 sats at risk", "overrides: ${lines[6]}")
+        ok(lines[7] == "Refunds asked for: 2, 5,000 sats (1 withdrawn)", "refunds: ${lines[7]}")
+        ok(lines[8] == "Cash refunds: 1, 5.00 USD, 6,000 sats", "cash refunds: ${lines[8]}")
+        ok(lines.none { it.contains("balance") }, "CR-155: no wallet balance is shown")
+        val quiet = DayTotals(0, 1, null, tally(0), tally(0), tally(0), tally(0), 0, 0, tally(0), tally(0), 0, tally(0), 0, emptyList(), 0)
+        val none = TodayModel.lines(quiet, usd)
+        ok(none.size == 8 && none.none { it.startsWith("Not to be handed over") } && none[0] == "Sales paid: 0 sales, 0.00 USD, 0 sats" && none[7] == "Cash refunds: 0, 0.00 USD, 0 sats", "a day with nothing in it: $none")
+        ok(TodayModel.lines(quiet, null)[0] == "Sales paid: 0 sales, 0 sats", "with no currency known")
+        val people = TodayModel.people(t)
+        ok(people[0] == "Ann (cashier): 4 sales, 1 override, 0 refunds asked for, 1 cash refund", "CR-154: a person's line: ${people[0]}")
+        ok(people[1] == "Ma x (manager): 1 sale, 0 overrides, 2 refunds asked for, 0 cash refunds", "a name from a record is cleaned: ${people[1]}")
+        ok(people[2] == "Sales with no name in the record: 2" && people[3] == "People left out of this list: 3", "unnamed sales and people left out are counted apart: ${people.drop(2)}")
+        ok(TodayModel.people(quiet).isEmpty(), "no one, no lines")
+        for (w in listOf(AppWords.todayAbout, AppWords.todayWaiting, AppWords.todayStopped, AppWords.todayPeopleNeedPin)) ok(SayCheck.problem(w) == null, "today's words pass the checks: ${SayCheck.problem(w)}")
+        ok(AppWords.todayAbout.what.contains("No wallet balance") && AppWords.todayAbout.next.contains("full books") && AppWords.todayAbout.next.contains("export"), "CR-155: the owner's phone has the full books and the export")
+        ok(AppWords.todayWaiting.what.contains("accepted") && AppWords.todayWaiting.next.contains("sale ends"), "CR-155: why a sale waits and what happens next")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val screensMd = args.firstOrNull()?.let { File(it) }
@@ -638,6 +918,12 @@ object AppModelTest {
         torTests()
         lightningTests()
         screenTests()
+        cr141CashierRulesTests()
+        cr140CashierFileTests()
+        cr140NoBackupTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr149TillLockTests()
+        cr152DayWindowTests()
+        cr153TodayLinesTests()
         println("AppModelTest (counter): $count checks passed")
     }
 }
