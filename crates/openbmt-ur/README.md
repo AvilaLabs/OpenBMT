@@ -77,16 +77,22 @@ length, the message length, the checksum or the fragment length is refused
   covers the degree chooser, the alias sampler and the shuffle), and the
   first part of the 9-part sequence for 256 bytes from `Wolf`, with the
   first 44 characters of its second part. The remaining parts of that
-  sequence are pinned from this code, and are marked so in the tests.
+  sequence are pinned from this code (and equal Hummingbird's, below).
 - **Round trips** with 30% of parts dropped, shuffled and repeated, on
   messages from 300 to 20,000 bytes; both cases of text; a decoder fed
   every prefix and every one-character change of valid parts and random
   text without a panic; and a fuzz target (`fuzz/fuzz_targets/ur_decode.rs`).
 
-Not checked against a second implementation of the fountain code at run
-time, and not checked against a device: no Sparrow or hardware wallet was
-used. Which `crypto-psbt` parts they accept is known from their published
-behaviour only.
+- **Hummingbird 1.7.6** (Sparrow's UR library), test-only, by
+  `scripts/ur-crosscheck.sh` (and the CI job `ur-crosscheck`): 377 messages
+  of 1 byte to 20 KB, types `bytes` and `crypto-psbt`, some PSBT-shaped.
+  The first 2 x seqLen parts of both encoders are equal character for
+  character (40,277 parts); parts of each, in order and with 30% dropped,
+  repeated and shuffled, in both cases of text, decode in the other; single
+  parts both ways. The jars are fetched by URL against pinned SHA-256 into
+  `~/.cache/openbmt/tools/hummingbird/` and never reach the package lists.
+
+Not checked against a device: no hardware wallet was used.
 
 ## Not done
 

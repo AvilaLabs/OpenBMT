@@ -52,7 +52,11 @@ Where they come from:
   a workspace crate. SHA-256 and CRC-32 are written in it (about 100 lines,
   checked against `sha256sum` and Python's `zlib.crc32`), so that the apps
   that show or read an animated QR add nothing to their lists
-  (`docs/UR-RULES.md`). It is not yet in a shipped program's list.
+  (`docs/UR-RULES.md`). It is not yet in a shipped program's list. Sparrow's Hummingbird
+  library (with its one dependency, `cbor`) is a test tool only, as ZXing is
+  for `openbmt-qr`: `scripts/ur-crosscheck.sh` fetches the two jars against
+  pinned SHA-256 values and runs a harness; nothing of it is built into a
+  program or listed in `deps/`.
 
 - **The price sources, the same 19 as the signer's.** `openbmt-rates` reads
   the replies of the price sources and combines them into the counter's rate
@@ -131,6 +135,18 @@ apply: pinned, from the publisher's registry, checked against a digest.
   whose SHA-256 is not
   `8d8064c1636fdaef7189dd9055c7d59950a8940a12f2293956446ec3c109fd82`.
   The harness is run with JDK 21 (`javac`, `java`; no Maven or Gradle).
+- **Hummingbird 1.7.6** (`com.sparrowwallet:hummingbird`) and its one
+  runtime dependency **cbor 0.9** (`co.nstant.in:cbor`), the Java UR
+  library of Sparrow, used only by `scripts/ur-crosscheck.sh` as an
+  independent implementation of BC-UR: it encodes and decodes the same
+  messages as `openbmt-ur`, and the parts are compared. The jars come from
+  Maven Central, are checked against the `.sha1` published beside each, and
+  the script refuses a jar whose SHA-256 is not
+  `b236ede4c0ee1c348fa034d59c0af229a1760a967f36f5513f8c9569b1ec5b71`
+  (Hummingbird) or
+  `5ef465c47e34c6b13f93ece2ff49e94b933d69cf9f172cc4997418303884da73`
+  (cbor). The harness is run with JDK 21. Their licences have not been
+  looked up here; nothing of them is shipped.
 
 ## What this does not do
 

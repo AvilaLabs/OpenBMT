@@ -146,7 +146,8 @@ fn ur_15_the_reference_multipart_sequence_starts_as_published() {
 #[test]
 fn ur_15_the_reference_sequence_pins_from_this_code() {
     // Not published values: taken from this code once the parts above and
-    // the choices of the vector above matched, to catch a later change.
+    // the choices of the vector above matched, to catch a later change
+    // (`scripts/ur-crosscheck.sh` finds them equal to Hummingbird's).
     let mut e = reference_encoder();
     let parts: Vec<String> = (0..4).map(|_| e.next_part()).collect();
     assert_eq!(
