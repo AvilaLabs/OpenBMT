@@ -27,6 +27,7 @@ fun pinField(context: Context, hint: String): EditText = EditText(context).apply
     inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
     imeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or EditorInfo.IME_FLAG_NO_EXTRACT_UI
     filterTouchesWhenObscured = true
+    Ui(context).style(this)
 }
 
 /** A field for a number with an optional point. */
@@ -35,6 +36,7 @@ fun amountField(context: Context, hint: String): EditText = EditText(context).ap
     inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
     imeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or EditorInfo.IME_FLAG_NO_EXTRACT_UI
     filterTouchesWhenObscured = true
+    Ui(context).style(this)
 }
 
 /** A container whose content is replaced as a screen updates, so that a field elsewhere keeps its focus. */

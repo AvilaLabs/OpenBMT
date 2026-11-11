@@ -1,11 +1,18 @@
 package org.openbmt.app
 
-/** The four colours of docs/SCREEN-RULES.md SC-06. */
-enum class Colour(val argb: Int) {
-    Blue(0xFF1565C0.toInt()),
-    Green(0xFF2E7D32.toInt()),
-    Red(0xFFC62828.toInt()),
-    Neutral(0xFF546E7A.toInt()),
+/** The four colours of docs/SCREEN-RULES.md SC-06; [Palette] has the value of each, light and dark. */
+enum class Colour {
+    Blue,
+    Green,
+    Red,
+    Neutral,
+    ;
+
+    /** The band colour in the light scheme. */
+    val argb: Int get() = Palette.light.of(this).band
+
+    /** The band colour for the phone's night mode. */
+    fun band(night: Boolean): Int = Palette.of(night).of(this).band
 }
 
 /** The numbers of the tone field of the words (PROTOCOL.md of the libraries). */
@@ -75,6 +82,12 @@ class WordsModel(
             Tones.STOP -> Colour.Red
             else -> Colour.Neutral
         }
+
+        /**
+         * The colour of a screen's main button: the screen's own tone, except that a stop screen gets the info
+         * blue, so that red stays what stops and what destroys.
+         */
+        fun buttonColour(tone: Int): Colour = colourOf(tone).let { if (it == Colour.Red) Colour.Blue else it }
 
         fun whoText(who: Int): String = when (who) {
             Who.NOBODY -> "Nobody needs to act."

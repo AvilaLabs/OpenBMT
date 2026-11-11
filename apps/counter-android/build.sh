@@ -117,9 +117,11 @@ done
 
 step "resources"
 "$bt/aapt2" compile --dir "$here/res" -o "$out/res.zip"
+# The theme and the colours the three apps share (colors.xml is made from Palette.kt).
+"$bt/aapt2" compile --dir "$common/res" -o "$out/common-res.zip"
 "$bt/aapt2" link -o "$out/base.apk" -I "$platform" --manifest "$here/AndroidManifest.xml" \
     --min-sdk-version "$min_sdk" --target-sdk-version "$target_sdk" \
-    --version-code 1 --version-name 0.1.0 "$out/res.zip"
+    --version-code 1 --version-name 0.1.0 "$out/res.zip" "$out/common-res.zip"
 
 # ---- Kotlin -----------------------------------------------------------------------------
 

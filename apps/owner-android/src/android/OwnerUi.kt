@@ -19,6 +19,7 @@ fun numberField(context: Context, hint: String): EditText = EditText(context).ap
     inputType = InputType.TYPE_CLASS_NUMBER
     imeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or EditorInfo.IME_FLAG_NO_EXTRACT_UI
     filterTouchesWhenObscured = true
+    Ui(context).style(this)
 }
 
 /** A field for a secret pasted once: its text is hidden, with no suggestions and no learning. */
@@ -27,6 +28,7 @@ fun secretField(context: Context, hint: String): EditText = EditText(context).ap
     inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
     imeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or EditorInfo.IME_FLAG_NO_EXTRACT_UI
     filterTouchesWhenObscured = true
+    Ui(context).style(this)
 }
 
 /** A container whose content is replaced as a screen updates, so that a field elsewhere keeps its focus. */

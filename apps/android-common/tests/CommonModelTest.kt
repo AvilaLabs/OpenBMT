@@ -56,6 +56,7 @@ object CommonModelTest {
         val plain = WordsModel.of(SayWords(1, 0, "Done", "It is done.", "Nothing to do.", null, null, null, null))
         ok(plain.colour == Colour.Green && plain.details.isEmpty() && plain.quotedText == null, "no fold, no quote")
         ok(WordsModel.colourOf(0) == Colour.Blue && WordsModel.colourOf(3) == Colour.Neutral, "tone colours")
+        ok(WordsModel.buttonColour(Tones.STOP) == Colour.Blue && WordsModel.buttonColour(Tones.GOOD) == Colour.Green && WordsModel.buttonColour(Tones.INFO) == Colour.Blue, "a stop screen's main button is blue, the others take the tone")
         ok(WordsModel.whoText(Who.MANAGER) == "A manager does this step.", "a manager")
         ok(WordsModel.whoText(Who.CASHIER) == "The cashier does this step.", "a cashier")
         val long = SayWords(0, 0, "H", "W.", "N.", null, null, SayQuoted("From", "x".repeat(300)), null)

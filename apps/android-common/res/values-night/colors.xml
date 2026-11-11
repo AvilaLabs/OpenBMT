@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Made from Palette.kt (apps/android-common/src/model); tests/PaletteTest.kt checks it. -->
+<resources>
+    <color name="background">#FF121417</color>
+    <color name="surface">#FF1E2327</color>
+    <color name="text">#FFECEFF1</color>
+    <color name="text_secondary">#FFB0BEC5</color>
+    <color name="divider">#FF37474F</color>
+    <color name="good_band">#FF2A7430</color>
+    <color name="good_ink">#FF81C784</color>
+    <color name="info_band">#FF1B5DB0</color>
+    <color name="info_ink">#FF90CAF9</color>
+    <color name="wait_band">#FF4D6772</color>
+    <color name="wait_ink">#FFB0BEC5</color>
+    <color name="warn_band">#FF8A5300</color>
+    <color name="warn_ink">#FFFFB74D</color>
+    <color name="stop_band">#FFB71C1C</color>
+    <color name="stop_ink">#FFEF9A9A</color>
+</resources>
