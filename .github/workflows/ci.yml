@@ -156,9 +156,14 @@ jobs:
             --health-interval 2s --health-start-period 2s \
             -v box-smoke-data:/data -p 127.0.0.1:18986:8986 \
             openbmt-box:ci
+          # Docker's port proxy accepts a connection before the Box
+          # listens, so wait for the Box's own line (n of them after n
+          # starts), then connect.
           listening() {
-            for _ in $(seq 1 30); do
-              if (exec 3<>/dev/tcp/127.0.0.1/18986) 2>/dev/null; then
+            local want=$1
+            for _ in $(seq 1 60); do
+              if [ "$(docker logs box-smoke 2>&1 | grep -c '^listening: 0.0.0.0:8986$')" -ge "$want" ] \
+                && (exec 3<>/dev/tcp/127.0.0.1/18986) 2>/dev/null; then
                 return 0
               fi
               sleep 1
@@ -167,7 +172,7 @@ jobs:
             return 1
           }
           # It listens.
-          listening
+          listening 1
           docker logs box-smoke | grep -q '^listening: 0.0.0.0:8986$'
           key="$(docker logs box-smoke | sed -n 's/^key: //p')"
           test -n "$key"
@@ -198,7 +203,7 @@ jobs:
           # read back from /data, and a second state line with no error
           # before it (a damaged file would stop the start).
           docker start box-smoke
-          listening
+          listening 2
           test "$(docker exec box-smoke ls /data | grep -c '^box.key$')" = 1
           docker logs box-smoke
           test "$(docker logs box-smoke | grep -c '^state: ')" = 2
