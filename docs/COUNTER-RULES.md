@@ -679,8 +679,9 @@ limits in the signed settings: these rules only say when the counter uses it.
   library did not accept.
 - **CR-101.** A home-network, loopback or clear-net address is never the own
   node (NR-99). The words say that a home-network address cannot prove which
-  machine answers, and that the counter app has no way to add an ordinary
-  peer: the peers come with the owner's pairing (CR-99).
+  machine answers, and where to find the node's Tor address. The counter
+  app has no way to add an ordinary peer: the peers come with the owner's
+  pairing (CR-99).
 - **CR-102.** The own node needs Tor. When the counter has no Tor proxy
   (CR-87: the signed settings have Tor off), turning the own node on is
   refused with words that say to turn on Orbot first, and a start that has

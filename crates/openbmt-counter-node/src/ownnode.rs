@@ -68,7 +68,7 @@ impl OwnNodeSettingRefused {
             Self::NotTor => (
                 "Not a Tor address",
                 "A home-network address cannot prove which machine answers, so it cannot be your own node.",
-                "Use your node's Tor address, which ends in .onion. This app has no way to add an ordinary peer; those come with the pairing.",
+                "Use your node's Tor address, which ends in .onion. Your node's own app shows it, often under its connection details.",
             ),
             Self::BadName => (
                 "Tor address not accepted",

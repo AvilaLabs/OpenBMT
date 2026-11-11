@@ -75,7 +75,11 @@ fn cr_101_a_home_network_or_clear_net_address_is_refused_with_its_own_words() {
     );
     let words = OwnNodeSettingRefused::NotTor.words();
     assert!(words.what.contains("cannot prove which machine answers"));
-    assert!(words.next.contains("ordinary peer"), "{}", words.next);
+    assert!(
+        words.next.contains(".onion") && !words.next.contains("peer"),
+        "{}",
+        words.next
+    );
     assert_eq!(words.code, Some("CR-101"));
 }
 

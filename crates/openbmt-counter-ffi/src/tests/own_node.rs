@@ -102,7 +102,7 @@ fn cr_101_a_home_network_address_is_refused_with_words() {
         assert_eq!(rule, "CR-101", "{text}");
         assert_eq!(words.heading, "Not a Tor address");
         assert!(words.what.contains("cannot prove which machine answers"));
-        assert!(words.next.contains("ordinary peer"));
+        assert!(words.next.contains(".onion") && !words.next.contains("peer"));
     }
 }
 
