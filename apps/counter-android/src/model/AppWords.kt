@@ -648,6 +648,7 @@ object AppWords {
         "sourceRefusedStatus" to sourceRefusedStatus(503),
         "sourceReplyTooLong" to sourceReplyTooLong,
         "amountNeeded" to amountNeeded,
+        "tipChoose" to WordsOfTips.choose("12.50 USD"),
         "cameraOff" to cameraOff,
         "cameraNotStarted" to cameraNotStarted("a problem"),
         "notANumber" to notANumber,

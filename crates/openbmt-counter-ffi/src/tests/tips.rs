@@ -221,3 +221,36 @@ fn cr_191_cr_192_a_paid_tip_is_in_the_totals_and_in_the_refund_rows() {
     r.done();
     assert_eq!(rows, vec![50]);
 }
+
+/// The counter app's words of the tip step, in `TipWords.kt`, are the
+/// library's (CR-188, CR-191, CR-192).
+#[test]
+fn cr_188_the_app_words_of_the_tips_are_the_librarys() {
+    use openbmt_counter::say::{
+        tip_button_label, tip_choose_words, tips_person_label, TIPS_LINE_LABEL, TIP_NONE_LABEL,
+        TIP_OTHER_LABEL,
+    };
+    let path = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("../../apps/counter-android/src/model/TipWords.kt");
+    let kotlin = std::fs::read_to_string(&path).expect("TipWords.kt");
+    let words = tip_choose_words("$amount");
+    for text in [
+        words.heading.as_str(),
+        words.what.as_str(),
+        words.next.as_str(),
+        words.code.as_deref().expect("a code"),
+        TIPS_LINE_LABEL,
+        TIP_OTHER_LABEL,
+        TIP_NONE_LABEL,
+    ] {
+        assert!(kotlin.contains(&format!("\"{text}\"")), "{text}");
+    }
+    // The templates take the same text as the library's functions make.
+    assert_eq!(tips_person_label("$name"), "Tips taken by $name");
+    assert!(kotlin.contains("\"Tips taken by $name\""));
+    assert_eq!(tip_button_label(7, "$tip"), "7% \u{b7} $tip");
+    assert!(kotlin.contains("\"$percent% \\u00B7 $tip\""));
+}

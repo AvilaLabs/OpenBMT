@@ -65,6 +65,7 @@ These are the words of what the app decides itself.
 | sourceRefusedStatus | Price source said no | A price source answered with a refusal, so its price is missing this turn. | Nothing to do. The app asks again in a minute. | nobody |  |
 | sourceReplyTooLong | Price reply too long | A price source sent more than the app reads, so its price is missing this turn. | Nothing to do. The app asks again in a minute. | nobody |  |
 | amountNeeded | Amount needed | Type an amount above zero to start a sale. | Press the digits of the amount, then press Open. | the cashier |  |
+| tipChoose | Add a tip? | The sale is 12.50 USD. A tip goes to the shop with it. | Choose a tip, or No tip. | the customer | CR-188 |
 | cameraOff | Camera is off for this app | This app is not allowed to use the camera, and pairing needs it to read the codes, so nothing was paired. | Allow the camera for this app in the phone's settings, then start the pairing again. | a manager |  |
 | cameraNotStarted | Camera did not start | The camera could not be opened, so no code was read and nothing was paired. | Close any other app that uses the camera, then start the pairing again. | a manager |  |
 | notANumber | Check what you typed | The amount is empty or has something other than digits in it. | Type whole numbers only, then try again. | the cashier |  |

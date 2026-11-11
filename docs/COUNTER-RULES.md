@@ -1282,6 +1282,12 @@ member's own wallet is not part of these rules.
   suggested tips, types an amount, or chooses no tip, before the code shows;
   the screen is "Add a tip?" with a button for each suggested tip, "Other
   amount" and "No tip". The code is for the amount and the tip together.
+  The counter app shows that screen after the keypad and before the code,
+  only when the library offers tips: one large button for each suggested
+  tip, written "{percent}% · {tip}", then "Other amount" and "No tip", in
+  big type and with nothing else on it, since it faces the customer. "Other
+  amount" opens the keypad for the tip, and a tip above the sale shows the
+  words of CR-190 on that keypad, which stays. A tip of nothing is no tip.
 - **CR-189.** `Counter::open_with_tip` opens a sale with the amount of the
   sale itself and the tip. The sale is for the total: the quote, the
   satoshis it needs, the underpayment tolerance, the valuation of what
@@ -1357,7 +1363,12 @@ RT-03, RT-24).
   caller names. The amount is in the minor units of that currency (ISO
   4217: yen and won have none), and the rate is in minor units per bitcoin.
   The counter app's library refuses a sale in another currency than the
-  settings' (`sale-currency`).
+  settings' (`sale-currency`). The app takes the currency from the settings
+  in force, not from its price sources: its keypad has the currency's
+  minor digits, its words name the currency by its code, its price is the
+  one of the sources of that currency (RT-40), and when the settings in
+  force name another currency than the one it started with, it starts the
+  node again.
 - **CR-197.** With Bitcoin Standard the amount typed is satoshis and the
   quote is the amount: the rate is exactly 100,000,000 minor units (of a
   satoshi) per bitcoin, no source is asked, and the rate and source the
@@ -1365,7 +1376,9 @@ RT-03, RT-24).
   of the sale, as CR-57's label, and no price. A new quote (CR-05) and the
   amount of a refund given in the shop's currency (CR-61) are made the same
   way. The dust line (CR-17) and the smallest bitcoin sale (CR-75) apply to
-  the satoshis as before.
+  the satoshis as before. The counter app's keypad then takes whole satoshis
+  with no point, its amount line and its totals say the sats once, it shows
+  no price line and asks no price source.
 - **CR-198.** The owner phone changes the currency in the editor of the
   settings (AS-74 to AS-77) by an edit that names it. The edit must give
   every limit again, and each is typed in the new currency: a limit left as

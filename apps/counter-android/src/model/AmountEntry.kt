@@ -1,14 +1,19 @@
 package org.openbmt.counter.app
 
+import org.openbmt.app.Format
+
 /**
  * A currency the keypad can write: its code, and how many digits follow the
- * point. The shop's signed settings carry no currency; the counter's price
- * sources are all in one (the table of `openbmt-rates`), so the shop's
- * currency is theirs.
+ * point. It is the shop's currency from the signed settings (CR-193): two
+ * digits for most, none for yen and won (CR-196), and for Bitcoin Standard
+ * (`SAT`, CR-197) the amount is whole satoshis with no point.
  */
 class Money(val code: String, val exponent: Int) {
-    /** [minor] written to be read: "12.34 USD". */
-    fun show(minor: Long): String = "${plain(minor)} $code"
+    /** Bitcoin Standard: the amount is satoshis, and no price is asked (CR-197). */
+    val isSats: Boolean get() = code == SATS
+
+    /** [minor] written to be read: "12.34 USD", "1,500 JPY", and for Bitcoin Standard "7,500 sats". */
+    fun show(minor: Long): String = if (isSats) Format.sats(minor) else "${plain(minor)} $code"
 
     /** [minor] with separators and the point, no code: "1,234.50". */
     fun plain(minor: Long): String {
@@ -40,10 +45,13 @@ class Money(val code: String, val exponent: Int) {
     }
 
     companion object {
-        /** The currencies of the price table. Only USD has sources so far (RT-03). */
+        /** The code a sale records for Bitcoin Standard (CR-193). */
+        const val SATS = "SAT"
+
+        /** The shop's choices (CR-193) with the places after the point of ISO 4217; yen, won and satoshis have none. */
         fun of(code: String): Money? = when (code) {
-            "USD", "EUR", "GBP", "CAD", "AUD", "CHF" -> Money(code, 2)
-            "JPY" -> Money(code, 0)
+            "USD", "EUR", "GBP", "AUD", "INR", "IDR", "SGD" -> Money(code, 2)
+            "JPY", "KRW", SATS -> Money(code, 0)
             else -> null
         }
     }

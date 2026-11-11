@@ -32,7 +32,8 @@ object TodayModel {
         val m = money(t, fallback)
         val parts = ArrayList<String>()
         parts.add(count(n.count, noun))
-        if (m != null) parts.add(m.show(n.minor))
+        // Bitcoin Standard (CR-197): the amount is the sats, which are said once.
+        if (m != null && !m.isSats) parts.add(m.show(n.minor))
         parts.add(Format.sats(n.sats) + verb)
         return parts.joinToString(", ")
     }
@@ -49,27 +50,35 @@ object TodayModel {
         out.add("Overrides: ${group(t.overrides.count)}, ${Format.sats(t.overrides.sats)} at risk")
         val withdrawn = if (t.refundsWithdrawn > 0) " (${group(t.refundsWithdrawn)} withdrawn)" else ""
         out.add("Refunds asked for: ${group(t.refunds.count)}, ${Format.sats(t.refunds.sats)}$withdrawn")
-        val cash = money(t, fallback)?.let { it.show(t.cashRefunds.minor) + ", " }.orEmpty()
+        val cash = money(t, fallback)?.takeIf { !it.isSats }?.let { it.show(t.cashRefunds.minor) + ", " }.orEmpty()
         out.add("Cash refunds: ${group(t.cashRefunds.count)}, $cash${Format.sats(t.cashRefunds.sats)}")
+        // CR-191: the tips of the paid sales, in the shop's currency; the line is there when a tip was taken.
+        val tipMoney = money(t, fallback)
+        if (t.tips.count > 0 && tipMoney != null) out.add("${WordsOfTips.LINE}: ${count(t.tips.count, "sale")}, ${tipMoney.show(t.tips.minor)}")
         return out
     }
 
     /** One person's line cut in three: the cleaned name, the role as the line writes it, and what the person did. */
-    class PersonParts(val name: String, val role: String, val line: String)
+    class PersonParts(val name: String, val role: String, val line: String, val tips: String? = null)
 
-    fun personParts(p: PersonLine): PersonParts = PersonParts(
-        Format.cleanForeign(p.name),
-        if (p.role == ActorRole.Manager) "manager" else "cashier",
-        "${count(p.sales, "sale")}, ${count(p.overrides, "override")}, " +
-            "${count(p.refunds, "refund")} asked for, ${count(p.cashRefunds, "cash refund")}",
-    )
+    /** [money] is the shop's currency for the tips the person took (CR-191); null leaves them out. */
+    fun personParts(p: PersonLine, money: Money? = null): PersonParts {
+        val name = Format.cleanForeign(p.name)
+        return PersonParts(
+            name,
+            if (p.role == ActorRole.Manager) "manager" else "cashier",
+            "${count(p.sales, "sale")}, ${count(p.overrides, "override")}, " +
+                "${count(p.refunds, "refund")} asked for, ${count(p.cashRefunds, "cash refund")}",
+            if (p.tipsMinor > 0 && money != null) "${WordsOfTips.personLabel(name)}: ${money.show(p.tipsMinor)}" else null,
+        )
+    }
 
     /** The lines per person, as the manager sees them (CR-154); names from the records are cleaned (SC-08). */
-    fun people(t: DayTotals): List<String> {
+    fun people(t: DayTotals, money: Money? = null): List<String> {
         val out = ArrayList<String>()
         for (p in t.people) {
-            val parts = personParts(p)
-            out.add("${parts.name} (${parts.role}): ${parts.line}")
+            val parts = personParts(p, money)
+            out.add("${parts.name} (${parts.role}): ${parts.line}" + (parts.tips?.let { "\n$it" } ?: ""))
         }
         if (t.unnamedSales > 0) out.add("Sales with no name in the record: ${group(t.unnamedSales)}")
         if (t.peopleLeftOut > 0) out.add("People left out of this list: ${group(t.peopleLeftOut)}")

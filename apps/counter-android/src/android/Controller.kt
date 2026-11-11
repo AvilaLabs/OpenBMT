@@ -52,6 +52,8 @@ import org.openbmt.counter.RefundState
 import org.openbmt.counter.RelayKind
 import org.openbmt.counter.SaleState
 import org.openbmt.counter.Shop
+import org.openbmt.counter.ShopSettings
+import org.openbmt.counter.TipChoice
 import org.openbmt.counter.OwnNodeSetting
 import org.openbmt.counter.StartConfig
 
@@ -289,7 +291,7 @@ class Controller(private val act: MainActivity) {
                         return@Thread
                     }
                     main.post {
-                        if (id == runId) adopt(id, n, sources, gate) else n.close()
+                        if (id == runId) adopt(id, n, sources, gate, pairing.settings) else n.close()
                     }
                 }
             } catch (e: CounterException) {
@@ -311,18 +313,21 @@ class Controller(private val act: MainActivity) {
         thread.start()
     }
 
-    private fun adopt(id: Int, n: CounterNode, sources: List<RateSource>, gate: TorGate) {
-        val m = ShopCurrency.of(sources)
+    private fun adopt(id: Int, n: CounterNode, allSources: List<RateSource>, gate: TorGate, settings: ShopSettings) {
+        // CR-193: the shop's currency is in its signed settings, and its price comes from the sources of that currency only (RT-40).
+        val m = Money.of(settings.currency)
         if (m == null) {
             n.close()
-            fault = AppWords.fault(CounterException("shop-currency", "the price sources have no one currency", 4))
+            fault = AppWords.fault(CounterException("shop-currency", "the settings name a currency the app cannot write", 4))
             return render()
         }
         node = n
         money = m
         pumpFault = null
+        // CR-197: Bitcoin Standard has no price: no source is asked and there is no book.
+        val sources = ShopPrices.sources(m, allSources)
         val b = PriceBook(LibraryRates, { nowSecs() })
-        book = b
+        book = if (m.isSats) null else b
         val runner = PriceRunner(b, HttpsFetcher(gate))
         val schedule = PriceSchedule(sources.map { it.id }, System.currentTimeMillis())
         for (s in sources) {
@@ -378,7 +383,7 @@ class Controller(private val act: MainActivity) {
                     }
                     main.post { if (id == runId) tick?.invoke() }
                     // CR-164: new settings that change Tor or the Lightning node take effect when the node starts again, which is done when Home is showing and no sale screen is open.
-                    if (restartNeeded(n)) main.post { if (id == runId && tick != null && tick === homeTick) begin() }
+                    if (restartNeeded(n) || currencyChanged()) main.post { if (id == runId && tick != null && tick === homeTick) begin() }
                     var waited = 0L
                     while (runId == id && waited < LinkProxy.EVERY_MS) {
                         try {
@@ -441,6 +446,20 @@ class Controller(private val act: MainActivity) {
         } catch (_: CounterException) {
             false
         }
+
+    /**
+     * CR-195, CR-196: whether the settings now in force name another currency than the one this run prices in. The
+     * node is started again, so that the keypad, the price sources and the words follow the new currency.
+     */
+    private fun currencyChanged(): Boolean {
+        val rec = record ?: return false
+        val code = money?.code ?: return false
+        return try {
+            Shop.pairing(rec, nodeDir.path).settings.currency != code
+        } catch (_: CounterException) {
+            false
+        }
+    }
 
     /** CR-136: whether the counter has a link to the owner, which is when its pairing holds a relay. */
     private fun hasLink(n: CounterNode): Boolean =
@@ -1340,13 +1359,89 @@ class Controller(private val act: MainActivity) {
             msg.show()
         }
         val open = ui.primary("Open the sale") {
-            if (entry.minor <= 0) msg.show(note(AppWords.amountNeeded)) else openSale(entry.minor) { msg.show(note(it)) }
+            if (entry.minor <= 0) msg.show(note(AppWords.amountNeeded)) else chooseTip(entry.minor) { msg.show(note(it)) }
         }
         show(ui.bar("New sale", back = { showHome() }), listOf(centre, pad), listOf(open))
     }
 
+    /**
+     * CR-188: with tips on, the customer chooses a tip after the amount and before the code; with tips off the sale
+     * opens as it always did. The library offers the tips (none when the settings do not ask for one).
+     */
+    private fun chooseTip(amountMinor: Long, refused: (SayWords) -> Unit) {
+        val n = node ?: return render()
+        val choices = try {
+            n.tipChoices(amountMinor)
+        } catch (e: CounterException) {
+            return refused(e.sayWords())
+        }
+        if (choices.isEmpty()) return openSale(amountMinor, 0, refused)
+        showTip(amountMinor, choices)
+    }
+
+    /**
+     * CR-188: the screen the customer sees: one large button for each suggested percent, "Other amount" and "No
+     * tip", with big type and nothing else.
+     */
+    private fun showTip(amountMinor: Long, choices: List<TipChoice>) {
+        if (lockedOut()) return
+        val m = money ?: return render()
+        val model = WordsModel.of(WordsOfTips.choose(m.show(amountMinor)))
+        val failed = { words: SayWords -> showMessage(words, "Back") { showNewSale() } }
+        val body = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(ui.text(model.heading, 34f, bold = true).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 24))
+        body.addView(ui.text(model.what, 20f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 12))
+        body.addView(ui.text(model.next, 20f, medium = true).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 12))
+        val actions = ArrayList<Button>()
+        for (c in choices) {
+            actions.add(big(ui.primary(WordsOfTips.button(c.percent, m.show(c.tipMinor))) { openSale(amountMinor, c.tipMinor, failed) }))
+        }
+        actions.add(big(ui.secondary(WordsOfTips.OTHER) { showTipKeypad(amountMinor) }))
+        actions.add(big(ui.secondary(WordsOfTips.NONE) { openSale(amountMinor, 0, failed) }))
+        show(ui.bar("Counter", logo = true), listOf(body), actions)
+    }
+
+    /** A button of the tip screen: taller and in larger type, for a customer's thumb. */
+    private fun big(button: Button): Button = button.apply {
+        textSize = 22f
+        minHeight = ui.px(76)
+        minimumHeight = ui.px(76)
+    }
+
+    /**
+     * CR-188, CR-190: "Other amount": the keypad for the tip. A tip above the sale is refused by the library, and the
+     * words show here with the keypad kept. A tip of nothing is no tip.
+     */
+    private fun showTipKeypad(amountMinor: Long) {
+        if (lockedOut()) return
+        val m = money ?: return render()
+        val entry = AmountEntry(m)
+        val display = ui.text(entry.show(), 60f, bold = true).also {
+            it.gravity = android.view.Gravity.CENTER
+            it.fontFeatureSettings = "tnum"
+        }
+        val msg = Slot(act)
+        val centre = Centered(act)
+        centre.addView(ui.text(WordsOfTips.OTHER, 14f, colour = ui.pal.secondary, medium = true).also { it.gravity = android.view.Gravity.CENTER }, ui.margins())
+        centre.addView(display, ui.margins(top = 6))
+        centre.addView(msg, ui.margins(top = 12))
+        val pad = ui.amountPad { face ->
+            when (face) {
+                "C" -> entry.clear()
+                "⌫" -> entry.backspace()
+                else -> entry.press(face[0])
+            }
+            display.text = entry.show()
+            msg.show()
+        }
+        val open = ui.primary("Open the sale") { openSale(amountMinor, entry.minor) { msg.show(note(it)) } }
+        show(ui.bar(WordsOfTips.OTHER, back = { chooseTip(amountMinor) { showNewSale() } }), listOf(centre, pad), listOf(open))
+    }
+
     /** The price a sale is quoted at: the newest `combine` of the samples already collected (RT-41), or the words of why there is none. */
     private fun quote(): Pair<org.openbmt.counter.Rate?, SayWords?> {
+        // CR-197: with Bitcoin Standard the library reads no price, so none is asked for and the call carries a blank one.
+        if (money?.isSats == true) return org.openbmt.counter.Rate(0, "", 0) to null
         val b = book ?: return null to AppWords.stopped
         val r = b.rate()
         val e = r.exceptionOrNull()
@@ -1354,14 +1449,20 @@ class Controller(private val act: MainActivity) {
         return r.getOrNull() to null
     }
 
-    private fun openSale(amountMinor: Long, refused: (SayWords) -> Unit) {
+    /** Opens the sale for [amountMinor] and [tipMinor] together (CR-189); a tip of 0 is the sale of `open`. */
+    private fun openSale(amountMinor: Long, tipMinor: Long, refused: (SayWords) -> Unit) {
         val n = node ?: return render()
         val m = money ?: return render()
         val (rate, words) = quote()
         if (rate == null) return refused(words ?: AppWords.stopped)
         try {
-            val o = n.open(nowSecs(), amountMinor, m.code, rate.rate, rate.sourceLabel, rate.sourceFetchedAt, atTheTill())
-            amounts[o.index] = amountMinor
+            val o = if (tipMinor > 0) {
+                n.openWithTip(nowSecs(), amountMinor, tipMinor, m.code, rate.rate, rate.sourceLabel, rate.sourceFetchedAt, atTheTill())
+            } else {
+                n.open(nowSecs(), amountMinor, m.code, rate.rate, rate.sourceLabel, rate.sourceFetchedAt, atTheTill())
+            }
+            // What the screens say of the sale is the total the customer pays: the sale and the tip.
+            amounts[o.index] = amountMinor + tipMinor
             showSale(o.index, o.payment, null)
         } catch (e: CounterException) {
             refused(e.sayWords())
@@ -1426,7 +1527,7 @@ class Controller(private val act: MainActivity) {
                         flash?.let { body.add(note(it)) }
                         val amount = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
                         amount.addView(ui.text(amountBig, 48f, bold = true).also { it.gravity = android.view.Gravity.CENTER; it.fontFeatureSettings = "tnum" }, ui.margins())
-                        amount.addView(ui.text(SaleModel.amountSmall(amounts[index], s.needsSats), 16f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER; it.fontFeatureSettings = "tnum" }, ui.margins(top = 2))
+                        amount.addView(ui.text(SaleModel.amountSmall(m, amounts[index], s.needsSats), 16f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER; it.fontFeatureSettings = "tnum" }, ui.margins(top = 2))
                         amount.addView(ui.text(SaleModel.receivedLine(s.receivedSats, s.needsSats), 14f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER; it.fontFeatureSettings = "tnum" }, ui.margins(top = 2))
                         body.add(amount)
                         payment?.let { p ->
@@ -1665,7 +1766,7 @@ class Controller(private val act: MainActivity) {
             val rows = ArrayList<RowItem>()
             for (i in sales) {
                 val s = n.judge(nowSecs(), i)
-                val amount = amounts[i]?.let { money?.show(it) + ", " }.orEmpty()
+                val amount = amounts[i]?.let { a -> money?.takeIf { !it.isSats }?.let { it.show(a) + ", " } }.orEmpty()
                 rows.add(
                     RowItem(
                         "Sale ${i + 1}: $amount${Format.sats(s.needsSats)}",
@@ -1708,7 +1809,9 @@ class Controller(private val act: MainActivity) {
             if (rows.isEmpty()) views.add(ui.text("No refund was asked for.", 16f))
             for (r in rows) {
                 val by = "${if (r.byRole == ActorRole.Manager) "manager" else "cashier"} ${Format.cleanForeign(r.byName)}"
-                views.add(ui.text("Asked ${Format.sats(r.askedSats)}${r.valueMinor?.let { ", " + m.show(it) } ?: ""} by $by at ${Format.localTime(r.at)}", 14f))
+                views.add(ui.text("Asked ${Format.sats(r.askedSats)}${r.valueMinor?.takeIf { !m.isSats }?.let { ", " + m.show(it) } ?: ""} by $by at ${Format.localTime(r.at)}", 14f))
+                // CR-192: how much of the refund is the tip.
+                if (r.tipMinor > 0) views.add(ui.text(WordsOfTips.refundLine(m.show(r.tipMinor)), 14f))
                 views.add(note(r.words.say()))
                 val number = r.number
                 if (number != null && (r.state == RefundState.Requested || r.state == RefundState.WaitingForDepth)) {
@@ -1733,7 +1836,7 @@ class Controller(private val act: MainActivity) {
         val msg = Slot(act)
         views.add(msg)
         views.add(label("Amount to refund"))
-        val kind = ui.chips(listOf("In ${m.code}", "In sats"))
+        val kind = ui.chips(if (m.isSats) listOf("In sats") else listOf("In ${m.code}", "In sats"))
         views.add(kind)
         val amount = amountField(act, "Amount")
         views.add(amount)
@@ -1748,7 +1851,7 @@ class Controller(private val act: MainActivity) {
             val text = amount.text.toString()
             val dest = destination.text.toString().trim()
             val why = reason.text.toString().trim()
-            val inSats = ui.chosen(kind) == 1
+            val inSats = m.isSats || ui.chosen(kind) == 1
             val sats = Format.toAmount(text)
             val minor = m.parse(text)
             when {
@@ -1789,7 +1892,7 @@ class Controller(private val act: MainActivity) {
         val views = ArrayList<View>()
         val msg = Slot(act)
         views.add(msg)
-        views.add(label("Cash to give back, in ${m.code}"))
+        views.add(label("Cash to give back, in ${if (m.isSats) "sats" else m.code}"))
         val amount = amountField(act, "Amount")
         views.add(amount)
         views.add(label("Reason"))
@@ -2131,7 +2234,7 @@ class Controller(private val act: MainActivity) {
                 orientation = LinearLayout.VERTICAL
                 setPadding(ui.px(16), ui.px(12), ui.px(16), ui.px(12))
             }
-            for (label in listOf("Sales cancelled or expired", "Overrides", "Cash refunds")) {
+            for (label in listOf("Sales cancelled or expired", "Overrides", "Cash refunds", WordsOfTips.LINE)) {
                 val l = line(label) ?: continue
                 val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
                 row.addView(ui.text(l.label, 14f, colour = ui.pal.secondary), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -2148,7 +2251,7 @@ class Controller(private val act: MainActivity) {
                     per.addView(ui.text("Nobody is named in today's records.", 16f).also { it.setPadding(ui.px(16), ui.px(8), ui.px(16), ui.px(14)) }, matchWide())
                 }
                 for (p in t.people) {
-                    val parts = TodayModel.personParts(p)
+                    val parts = TodayModel.personParts(p, m)
                     val row = LinearLayout(act).apply {
                         orientation = LinearLayout.HORIZONTAL
                         gravity = android.view.Gravity.CENTER_VERTICAL
@@ -2163,11 +2266,13 @@ class Controller(private val act: MainActivity) {
                     val head = ui.text("${parts.name} (${parts.role})", 15f, medium = true)
                     col.addView(head)
                     col.addView(ui.text(parts.line, 13f, colour = ui.pal.secondary), ui.margins(top = 2))
+                    // CR-191: the tips this person took.
+                    parts.tips?.let { col.addView(ui.text(it, 13f, colour = ui.pal.secondary), ui.margins(top = 2)) }
                     row.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                     per.addView(ui.line())
                     per.addView(row, matchWide())
                 }
-                for (extra in TodayModel.people(t).drop(t.people.size)) {
+                for (extra in TodayModel.people(t, m).drop(t.people.size)) {
                     per.addView(ui.line())
                     per.addView(ui.text(extra, 14f, colour = ui.pal.secondary).also { it.setPadding(ui.px(16), ui.px(12), ui.px(16), ui.px(12)) }, matchWide())
                 }

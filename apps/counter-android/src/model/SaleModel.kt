@@ -23,21 +23,27 @@ object SaleModel {
         override = state == SaleState.Waiting || state == SaleState.PartPaid || state == SaleState.DoNotHandOver,
     )
 
+    /**
+     * The amount in the shop's currency when the screen has one to show: Bitcoin Standard (CR-197) has none, since
+     * its amount is the sats the customer sends and they are shown once.
+     */
+    private fun shown(money: Money, amountMinor: Long?): Long? = if (money.isSats) null else amountMinor
+
     /** The amount line of the sale (SC-09): the amount in the shop's currency, then what the customer sends in sats. */
     fun amountLine(money: Money, amountMinor: Long?, needsSats: Long): String =
-        if (amountMinor != null) "${money.show(amountMinor)}, ${Format.sats(needsSats)} to send" else "${Format.sats(needsSats)} to send"
+        shown(money, amountMinor)?.let { "${money.show(it)}, ${Format.sats(needsSats)} to send" } ?: "${Format.sats(needsSats)} to send"
 
     /** The amount at 44 sp in the sale's band: the shop's currency, or the sats to send when the amount is not known. */
     fun amountBig(money: Money, amountMinor: Long?, needsSats: Long): String =
-        if (amountMinor != null) money.show(amountMinor) else Format.sats(needsSats)
+        shown(money, amountMinor)?.let { money.show(it) } ?: Format.sats(needsSats)
 
     /** The line under it: what the customer sends, so that [amountBig] and this say what [amountLine] says. */
-    fun amountSmall(amountMinor: Long?, needsSats: Long): String =
-        if (amountMinor != null) "${Format.sats(needsSats)} to send" else "to send"
+    fun amountSmall(money: Money, amountMinor: Long?, needsSats: Long): String =
+        if (shown(money, amountMinor) != null) "${Format.sats(needsSats)} to send" else "to send"
 
     /** The amount line of an outcome screen: the shop's currency and the sats to send, or the sats alone when the amount is not known. */
     fun outcomeLine(money: Money, amountMinor: Long?, needsSats: Long): String =
-        if (amountMinor != null) "${money.show(amountMinor)} \u00B7 ${Format.sats(needsSats)}" else Format.sats(needsSats)
+        shown(money, amountMinor)?.let { "${money.show(it)} \u00B7 ${Format.sats(needsSats)}" } ?: Format.sats(needsSats)
 
     /** What has arrived of what the sale needs. */
     fun receivedLine(received: Long, needs: Long): String = "Received ${Format.sats(received)} of ${Format.sats(needs)}"
@@ -65,12 +71,11 @@ object SaleModel {
         state == SaleState.Expired || state == SaleState.Cancelled || state == SaleState.PaidLightning
 }
 
-/** The shop's currency from the table of price sources: the currency all of them share, or null when they differ or there are none. */
-object ShopCurrency {
-    fun of(sources: List<org.openbmt.counter.RateSource>): Money? {
-        val codes = sources.map { it.currency }.distinct()
-        return if (codes.size == 1) Money.of(codes[0]) else null
-    }
+/** The price sources of the shop's currency (CR-193, RT-40). */
+object ShopPrices {
+    /** The sources of [money]'s currency, in the table's order; none for Bitcoin Standard (CR-197), which asks no price. */
+    fun sources(money: Money, all: List<org.openbmt.counter.RateSource>): List<org.openbmt.counter.RateSource> =
+        if (money.isSats) emptyList() else all.filter { it.currency == money.code }
 }
 
 /**

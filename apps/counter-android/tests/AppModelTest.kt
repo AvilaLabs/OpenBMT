@@ -23,6 +23,7 @@ import org.openbmt.counter.LnStep
 import org.openbmt.counter.LnTransport
 import org.openbmt.counter.Payment
 import org.openbmt.counter.PersonLine
+import org.openbmt.counter.TipTally
 import org.openbmt.counter.Quoted
 import org.openbmt.counter.Rate
 import org.openbmt.counter.RateSource
@@ -345,6 +346,19 @@ object AppModelTest {
         ok(usd.show(0) == "0.00 USD" && usd.show(5) == "0.05 USD" && usd.show(1234) == "12.34 USD", "small amounts")
         ok(usd.show(123456789) == "1,234,567.89 USD" && usd.plain(100) == "1.00", "separators")
         ok(Money.of("JPY")!!.show(1500) == "1,500 JPY" && Money.of("XXX") == null, "currencies")
+        // CR-193, CR-196: the nine currencies and Bitcoin Standard, with the places after the point of ISO 4217.
+        for (code in listOf("USD", "EUR", "GBP", "AUD", "INR", "IDR", "SGD")) ok(Money.of(code)!!.exponent == 2 && !Money.of(code)!!.isSats, "$code has two places")
+        for (code in listOf("JPY", "KRW")) ok(Money.of(code)!!.exponent == 0 && Money.of(code)!!.show(12_345) == "12,345 $code", "$code has none")
+        ok(Money.of("CAD") == null && Money.of("CHF") == null, "a currency that is not a choice of the shop")
+        val sats = Money.of("SAT")!!
+        ok(sats.isSats && sats.exponent == 0 && sats.show(7_500) == "7,500 sats" && sats.show(1) == "1 sat" && sats.parse("7500") == 7_500L && sats.parse("7.5") == null, "Bitcoin Standard: whole sats, no point")
+        val yen = AmountEntry(Money.of("JPY")!!)
+        for (d in "1500") yen.press(d)
+        ok(yen.minor == 1500L && yen.show() == "1,500 JPY", "the keypad of a currency with no minor digits takes whole units")
+        val sat = AmountEntry(sats)
+        ok(sat.show() == "0 sats", "the keypad of Bitcoin Standard starts at no sats")
+        for (d in "7500") sat.press(d)
+        ok(sat.minor == 7_500L && sat.show() == "7,500 sats", "and takes whole sats")
         ok(usd.parse("12.34") == 1234L && usd.parse("12") == 1200L && usd.parse("12.3") == 1230L && usd.parse("1,000.50") == 100050L && usd.parse(".5") == 50L, "typed amounts")
         ok(usd.parse("") == null && usd.parse(".") == null && usd.parse("1.234") == null && usd.parse("1.2.3") == null && usd.parse("-1") == null && usd.parse("a") == null && usd.parse("1".repeat(11)) == null, "amounts that are refused")
         ok(Money.of("JPY")!!.parse("1500") == 1500L && Money.of("JPY")!!.parse("1.5") == null, "an amount in a currency with no decimals")
@@ -607,9 +621,13 @@ object AppModelTest {
         val usd = Money.of("USD")!!
         ok(SaleModel.amountLine(usd, 1234, 25_000) == "12.34 USD, 25,000 sats to send", "the amount line gives both (SC-09)")
         ok(SaleModel.amountLine(usd, null, 1) == "1 sat to send", "an amount in sats alone")
-        ok(SaleModel.amountBig(usd, 1234, 25_000) == "12.34 USD" && SaleModel.amountSmall(1234, 25_000) == "25,000 sats to send", "the band's amount and its line")
-        ok(SaleModel.amountBig(usd, 1234, 25_000) + ", " + SaleModel.amountSmall(1234, 25_000) == SaleModel.amountLine(usd, 1234, 25_000), "the band says what the amount line says")
-        ok(SaleModel.amountBig(usd, null, 1) + " " + SaleModel.amountSmall(null, 1) == SaleModel.amountLine(usd, null, 1), "and in sats alone")
+        ok(SaleModel.amountBig(usd, 1234, 25_000) == "12.34 USD" && SaleModel.amountSmall(usd, 1234, 25_000) == "25,000 sats to send", "the band's amount and its line")
+        ok(SaleModel.amountBig(usd, 1234, 25_000) + ", " + SaleModel.amountSmall(usd, 1234, 25_000) == SaleModel.amountLine(usd, 1234, 25_000), "the band says what the amount line says")
+        ok(SaleModel.amountBig(usd, null, 1) + " " + SaleModel.amountSmall(usd, null, 1) == SaleModel.amountLine(usd, null, 1), "and in sats alone")
+        // CR-197: with Bitcoin Standard the amount is the sats, and they are said once.
+        val bitcoin = Money.of("SAT")!!
+        ok(SaleModel.amountLine(bitcoin, 7_500, 7_500) == "7,500 sats to send" && SaleModel.outcomeLine(bitcoin, 7_500, 7_500) == "7,500 sats", "Bitcoin Standard: the sats once")
+        ok(SaleModel.amountBig(bitcoin, 7_500, 7_500) + " " + SaleModel.amountSmall(bitcoin, 7_500, 7_500) == SaleModel.amountLine(bitcoin, 7_500, 7_500), "and the band says it too")
         ok(SaleModel.isPaid(SaleState.PaidInstant) && SaleModel.isPaid(SaleState.Final) && SaleModel.isPaid(SaleState.PaidLightning) && SaleModel.isPaid(SaleState.Overridden), "paid states")
         ok(!SaleModel.isPaid(SaleState.NotPaidYet) && !SaleModel.isPaid(SaleState.DoNotHandOver) && !SaleModel.isPaid(SaleState.Waiting) && !SaleModel.isPaid(SaleState.Expired), "unpaid states")
         ok(SaleState.values().none { SaleModel.isPaid(it) && SaleModel.buttons(it).requote }, "Done and Requote are never both the main action")
@@ -626,8 +644,9 @@ object AppModelTest {
         ok(plays.first(2, Colour.Green) && plays.first(2, Colour.Red), "another sale plays its own")
         ok((0L..3L).none { plays.first(it, Colour.Blue) || plays.first(it, Colour.Neutral) }, "blue and neutral never play")
         ok(OutcomePlays().let { !it.first(7, Colour.Blue) && it.first(7, Colour.Green) && !it.first(7, Colour.Green) }, "a sale seen waiting first still plays green once")
-        ok(ShopCurrency.of(listOf(src("a"), src("b")))!!.code == "USD", "the shop's currency is the sources'")
-        ok(ShopCurrency.of(listOf(src("a"), RateSource("b", "u", "EUR", "b"))) == null && ShopCurrency.of(emptyList()) == null, "sources in two currencies have none")
+        val table = listOf(src("a"), RateSource("b", "u", "EUR", "b"), RateSource("c", "u", "EUR", "c"), RateSource("d", "u", "JPY", "d"))
+        ok(ShopPrices.sources(Money.of("EUR")!!, table).map { it.id } == listOf("b", "c"), "RT-40: only the sources of the shop's currency are asked")
+        ok(ShopPrices.sources(Money.of("SAT")!!, table).isEmpty() && ShopPrices.sources(Money.of("GBP")!!, table).isEmpty(), "Bitcoin Standard asks no source (CR-197), and a currency with none asks none")
     }
 
     // ---- Lightning: the inputs and the steps of the test (CR-115) --------------------------------------
@@ -942,8 +961,8 @@ object AppModelTest {
         val usd = Money.of("USD")!!
         val t = DayTotals(
             1_700_000_000L, 1_700_050_000L, "USD", tally(3, 4500, 54_000), tally(2, 3000, 36_000), tally(1, 1500, 18_000),
-            tally(2, 2000, 24_000), 1L, 4L, tally(1, 0, 12_000), tally(2, 0, 5_000), 1L, tally(1, 500, 6_000), 2L,
-            listOf(PersonLine(ActorRole.Cashier, "Ann", 4, 1, 0, 1), PersonLine(ActorRole.Manager, "Ma\u0007x‮", 1, 0, 2, 0)), 3L,
+            tally(2, 2000, 24_000), 1L, 4L, tally(1, 0, 12_000), tally(2, 0, 5_000), 1L, tally(1, 500, 6_000), TipTally(2, 300), 2L,
+            listOf(PersonLine(ActorRole.Cashier, "Ann", 4, 1, 0, 1, 150), PersonLine(ActorRole.Manager, "Ma\u0007x‮", 1, 0, 2, 0)), 3L,
         )
         val lines = TodayModel.lines(t, usd)
         ok(lines[0] == "Sales paid: 3 sales, 45.00 USD, 54,000 sats", "CR-153: paid, with the amount shown at the time and the bitcoin: ${lines[0]}")
@@ -953,13 +972,17 @@ object AppModelTest {
         ok(lines[6] == "Overrides: 1, 12,000 sats at risk", "overrides: ${lines[6]}")
         ok(lines[7] == "Refunds asked for: 2, 5,000 sats (1 withdrawn)", "refunds: ${lines[7]}")
         ok(lines[8] == "Cash refunds: 1, 5.00 USD, 6,000 sats", "cash refunds: ${lines[8]}")
+        ok(lines[9] == "Tips: 2 sales, 3.00 USD" && lines.size == 10, "CR-191: the tips of the paid sales, in the shop's currency: ${lines.drop(9)}")
         ok(lines.none { it.contains("balance") }, "CR-155: no wallet balance is shown")
-        val quiet = DayTotals(0, 1, null, tally(0), tally(0), tally(0), tally(0), 0, 0, tally(0), tally(0), 0, tally(0), 0, emptyList(), 0)
+        val quiet = DayTotals(0, 1, null, tally(0), tally(0), tally(0), tally(0), 0, 0, tally(0), tally(0), 0, tally(0), TipTally(0, 0), 0, emptyList(), 0)
         val none = TodayModel.lines(quiet, usd)
         ok(none.size == 8 && none.none { it.startsWith("Not to be handed over") } && none[0] == "Sales paid: 0 sales, 0.00 USD, 0 sats" && none[7] == "Cash refunds: 0, 0.00 USD, 0 sats", "a day with nothing in it: $none")
         ok(TodayModel.lines(quiet, null)[0] == "Sales paid: 0 sales, 0 sats", "with no currency known")
         val people = TodayModel.people(t)
-        ok(people[0] == "Ann (cashier): 4 sales, 1 override, 0 refunds asked for, 1 cash refund", "CR-154: a person's line: ${people[0]}")
+        ok(TodayModel.people(t)[0] == "Ann (cashier): 4 sales, 1 override, 0 refunds asked for, 1 cash refund", "CR-154: a person's line: ${people[0]}")
+        val tipped = TodayModel.people(t, usd)
+        ok(tipped[0] == "Ann (cashier): 4 sales, 1 override, 0 refunds asked for, 1 cash refund\nTips taken by Ann: 1.50 USD" && tipped[1] == people[1], "CR-191: the tips a person took, as the library says: ${tipped[0]}")
+        ok(TodayModel.personParts(t.people[0], usd).tips == "Tips taken by Ann: 1.50 USD" && TodayModel.personParts(t.people[1], usd).tips == null, "a person who took no tip has no tips line")
         ok(people[1] == "Ma x (manager): 1 sale, 0 overrides, 2 refunds asked for, 0 cash refunds", "a name from a record is cleaned: ${people[1]}")
         ok(people[2] == "Sales with no name in the record: 2" && people[3] == "People left out of this list: 3", "unnamed sales and people left out are counted apart: ${people.drop(2)}")
         ok(TodayModel.people(quiet).isEmpty(), "no one, no lines")
@@ -986,6 +1009,52 @@ object AppModelTest {
         ok(AppWords.todayWaiting.what.contains("accepted") && AppWords.todayWaiting.next.contains("sale ends"), "CR-155: why a sale waits and what happens next")
     }
 
+    // ---- the shop's currency and the tips (CR-188, CR-191, CR-192, CR-196, CR-197) ------------------------
+
+    private fun cr188TipTests(appDir: File?) {
+        val m = Money.of("USD")!!
+        val choose = WordsOfTips.choose(m.show(1250))
+        ok(choose.heading == "Add a tip?" && choose.what == "The sale is 12.50 USD. A tip goes to the shop with it." && choose.next == "Choose a tip, or No tip.", "CR-188: the words of the tip step")
+        ok(choose.who == Who.CUSTOMER && choose.code == "CR-188" && SayCheck.problem(choose) == null, "they are for the customer and pass the checks: ${SayCheck.problem(choose)}")
+        ok(WordsOfTips.button(15, m.show(188)) == "15% \u00B7 1.88 USD" && WordsOfTips.OTHER == "Other amount" && WordsOfTips.NONE == "No tip", "CR-188: the buttons")
+        ok(WordsOfTips.LINE == "Tips" && WordsOfTips.personLabel("Ann") == "Tips taken by Ann", "CR-191: the lines of Today")
+        ok(WordsOfTips.refundLine(m.show(50)) == "Of which tip: 0.50 USD", "CR-192: the line of a refund")
+        ok(AppWords.all().any { it.first == "tipChoose" }, "the tip step is in the list of words")
+        // In a currency with no minor digits and in Bitcoin Standard.
+        ok(WordsOfTips.button(10, Money.of("JPY")!!.show(150)) == "10% \u00B7 150 JPY" && WordsOfTips.button(20, Money.of("SAT")!!.show(1_500)) == "20% \u00B7 1,500 sats", "tips in yen and in sats")
+        // Today with Bitcoin Standard: the sats are said once, and the tips are sats too.
+        val sats = Money.of("SAT")!!
+        val t = DayTotals(
+            1, 2, "SAT", tally(2, 9_000, 9_000), tally(2, 9_000, 9_000), tally(0), tally(0), 0L, 0L, tally(0), tally(0), 0L, tally(1, 500, 500), TipTally(1, 900), 0L,
+            listOf(PersonLine(ActorRole.Cashier, "Ann", 2, 0, 0, 1, 900)), 0L,
+        )
+        val lines = TodayModel.lines(t, sats)
+        ok(lines[0] == "Sales paid: 2 sales, 9,000 sats" && lines[7] == "Cash refunds: 1, 500 sats" && lines[8] == "Tips: 1 sale, 900 sats", "Bitcoin Standard: no amount twice: ${lines[0]} / ${lines[7]} / ${lines.getOrNull(8)}")
+        ok(TodayModel.personParts(t.people[0], sats).tips == "Tips taken by Ann: 900 sats", "and the person's tips in sats")
+        ok(TodayModel.lines(t.let { DayTotals(1, 2, "JPY", it.paid, it.onChain, it.lightning, it.waiting, 0, 0, it.overrides, it.refunds, 0, it.cashRefunds, it.tips, 0, emptyList(), 0) }, null)[0] == "Sales paid: 2 sales, 9,000 JPY, 9,000 sats", "a currency with no minor digits shows both")
+        if (appDir == null) return
+        // The screens: a sale goes through the tip step when the library offers tips, and the tip is part of the sale's total.
+        val controller = File(appDir, "src/android/Controller.kt").readText()
+        ok(controller.contains("else chooseTip(entry.minor)"), "CR-188: the keypad goes to the tip step, not straight to the sale")
+        val chooseTip = controller.substringAfter("private fun chooseTip(").substringBefore("private fun showTip(")
+        ok(chooseTip.contains("n.tipChoices(amountMinor)") && chooseTip.contains("if (choices.isEmpty()) return openSale(amountMinor, 0, refused)"), "CR-187, CR-188: with tips off the sale opens at once, as it did")
+        val showTip = controller.substringAfter("private fun showTip(").substringBefore("private fun showTipKeypad(")
+        ok(showTip.contains("WordsOfTips.button(c.percent, m.show(c.tipMinor))") && showTip.contains("WordsOfTips.OTHER") && showTip.contains("WordsOfTips.NONE"), "CR-188: a button for each percent, Other amount and No tip")
+        ok(showTip.indexOf("WordsOfTips.NONE") > showTip.indexOf("WordsOfTips.OTHER") && showTip.contains("ui.secondary(WordsOfTips.NONE) { openSale(amountMinor, 0, failed) }"), "No tip opens the sale with no tip")
+        ok(!showTip.contains("back =") && !showTip.contains("gear ="), "the customer's screen has nothing else on it: no way back or settings")
+        val keypad = controller.substringAfter("private fun showTipKeypad(").substringBefore("// ---- the sale")
+        ok(keypad.contains("openSale(amountMinor, entry.minor) { msg.show(note(it)) }"), "CR-190: a refusal of the tip shows on the keypad, which stays")
+        val openSale = controller.substringAfter("private fun openSale(").substringBefore("// ---- the sale")
+        ok(openSale.contains("n.openWithTip(") && openSale.contains("amounts[o.index] = amountMinor + tipMinor"), "CR-189: the code is for the sale and the tip together")
+        val adopt = controller.substringAfter("private fun adopt(").substringBefore("val runner")
+        ok(adopt.contains("Money.of(settings.currency)") && adopt.contains("ShopPrices.sources(m, allSources)") && adopt.contains("if (m.isSats) null else b"), "CR-193, RT-40, CR-197: the shop's currency from the settings, its sources only, none for Bitcoin Standard")
+        ok(controller.contains("if (money?.isSats == true) return org.openbmt.counter.Rate(0, \"\", 0) to null"), "CR-197: Bitcoin Standard asks no price")
+        ok(controller.contains("r.tipMinor > 0") && controller.contains("WordsOfTips.refundLine(m.show(r.tipMinor))"), "CR-192: a refund's details say how much is the tip")
+        ok(controller.contains("if (restartNeeded(n) || currencyChanged())"), "CR-195: a change of currency starts the node again")
+        val tipWords = File(appDir, "src/model/TipWords.kt").readText()
+        ok(tipWords.contains("Add a tip?") && tipWords.contains("Choose a tip, or No tip.") && !tipWords.contains("sats offered"), "the words file holds the library's words")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val screensMd = args.firstOrNull()?.let { File(it) }
@@ -1007,6 +1076,7 @@ object AppModelTest {
         cr177ShowingTests()
         cr152DayWindowTests()
         cr153TodayLinesTests()
+        cr188TipTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         println("AppModelTest (counter): $count checks passed")
     }
 }
