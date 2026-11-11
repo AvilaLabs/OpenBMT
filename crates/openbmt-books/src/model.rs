@@ -190,6 +190,15 @@ pub struct OverrideNote {
     pub sats: u64,
 }
 
+/// BK-38: the tip a sale carried.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TipNote {
+    /// The tip in minor units of the sale's currency (never 0).
+    pub minor: u64,
+    /// The person at the till when the sale opened, as the counter wrote it.
+    pub by: Option<(Role, String)>,
+}
+
 /// BK-35: a change to the cashiers of a counter, as its record says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaffNote {
@@ -268,8 +277,11 @@ pub struct Sale {
     pub id: SaleId,
     /// When the sale opened, in Unix seconds (UTC).
     pub opened_at: u64,
-    /// The amount in minor units of the currency.
+    /// The amount of the sale itself in minor units of the currency, without
+    /// the tip.
     pub amount_minor: u64,
+    /// BK-38: the tip, when the customer chose one.
+    pub tip: Option<TipNote>,
     /// The currency.
     pub currency: Currency,
     /// The satoshis the first quote asked for.
@@ -327,6 +339,17 @@ pub struct Sale {
 }
 
 impl Sale {
+    /// BK-38: the tip in minor units; 0 when the sale had none.
+    pub fn tip_minor(&self) -> u64 {
+        self.tip.as_ref().map_or(0, |t| t.minor)
+    }
+
+    /// BK-38: the amount and the tip together, in minor units: what the
+    /// sale asked the customer to pay. `None` when the two do not fit.
+    pub fn due_minor(&self) -> Option<u64> {
+        self.amount_minor.checked_add(self.tip_minor())
+    }
+
     /// BK-08: counted, pending or no funds.
     pub fn counting(&self) -> Counting {
         if !self.funds_seen {

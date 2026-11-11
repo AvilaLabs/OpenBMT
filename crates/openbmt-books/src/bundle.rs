@@ -10,7 +10,7 @@ use crate::books::{Books, MAX_COUNTERS, MAX_LINES, MAX_PER_SALE, MAX_SALES};
 use crate::date::MAX_UNIX;
 use crate::model::{
     Basis, CashReturn, Disposal, DisposalKind, LatePayment, LightningPayment, OverrideNote,
-    Payment, PaymentList, PaymentMode, PosMark, Sale, SaleId, SaleKey, SaleState,
+    Payment, PaymentList, PaymentMode, PosMark, Sale, SaleId, SaleKey, SaleState, TipNote,
 };
 use crate::value::{UnknownField, Value};
 
@@ -20,6 +20,10 @@ pub const MAGIC_BUNDLE: [u8; 4] = *b"OBM6";
 /// BK-33: the version of a bundle that holds a sale paid over Lightning.
 /// Version 1 is written when no sale was, and is still read.
 const VERSION_LIGHTNING: u8 = 2;
+
+/// BK-40: the version of a bundle that holds a sale with a tip. Every sale
+/// in it ends with its payment mode (as in version 2) and then its tip.
+const VERSION_TIPS: u8 = 3;
 
 /// Fewest bytes a sale takes (it is 133), for the count check.
 const MIN_SALE: usize = 130;
@@ -216,7 +220,47 @@ fn get_mode(r: &mut Reader<'_>) -> Result<PaymentMode, DecodeError> {
     }
 }
 
-fn put_sale(out: &mut Vec<u8>, s: &Sale, with_mode: bool) {
+fn put_tip(out: &mut Vec<u8>, tip: &Option<TipNote>) {
+    match tip {
+        Some(t) => {
+            out.push(1);
+            out.extend_from_slice(&t.minor.to_le_bytes());
+            match &t.by {
+                Some((role, name)) => {
+                    out.push(1);
+                    out.push(*role as u8);
+                    put_text(out, name);
+                }
+                None => out.push(0),
+            }
+        }
+        None => out.push(0),
+    }
+}
+
+fn get_tip(r: &mut Reader<'_>) -> Result<Option<TipNote>, DecodeError> {
+    if !r.flag()? {
+        return Ok(None);
+    }
+    let minor = r.u64_le()?;
+    if minor == 0 {
+        return Err(DecodeError::NonCanonical("a tip is for nothing"));
+    }
+    let by = if r.flag()? {
+        let role =
+            Role::from_u8(r.u8()?).ok_or(DecodeError::NonCanonical("a role is not known"))?;
+        let name = get_text(r)?;
+        if name.is_empty() || name.len() > MAX_NAME_BYTES {
+            return Err(DecodeError::NonCanonical("a name has a bad length"));
+        }
+        Some((role, name))
+    } else {
+        None
+    };
+    Ok(Some(TipNote { minor, by }))
+}
+
+fn put_sale(out: &mut Vec<u8>, s: &Sale, with_mode: bool, with_tips: bool) {
     put_key(out, &s.key);
     out.extend_from_slice(&s.opened_at.to_le_bytes());
     out.extend_from_slice(&s.amount_minor.to_le_bytes());
@@ -257,9 +301,12 @@ fn put_sale(out: &mut Vec<u8>, s: &Sale, with_mode: bool) {
     if with_mode {
         put_mode(out, &s.payment_mode);
     }
+    if with_tips {
+        put_tip(out, &s.tip);
+    }
 }
 
-fn get_sale(r: &mut Reader<'_>, with_mode: bool) -> Result<Sale, DecodeError> {
+fn get_sale(r: &mut Reader<'_>, with_mode: bool, with_tips: bool) -> Result<Sale, DecodeError> {
     let key = get_key(r)?;
     let opened_at = get_time(r)?;
     let amount_minor = r.u64_le()?;
@@ -332,6 +379,15 @@ fn get_sale(r: &mut Reader<'_>, with_mode: bool) -> Result<Sale, DecodeError> {
     } else {
         PaymentMode::OnChain
     };
+    let tip = if with_tips { get_tip(r)? } else { None };
+    if tip
+        .as_ref()
+        .is_some_and(|t| amount_minor.checked_add(t.minor).is_none())
+    {
+        return Err(DecodeError::NonCanonical(
+            "a sale and its tip add up to more than fits",
+        ));
+    }
     // A Lightning payment is final at once, and is the sale's own payment.
     if payment_mode.lightning().is_some()
         && !(reached_final && own_payment && state == SaleState::Final)
@@ -345,6 +401,7 @@ fn get_sale(r: &mut Reader<'_>, with_mode: bool) -> Result<Sale, DecodeError> {
         id: SaleId::for_sale(&key),
         opened_at,
         amount_minor,
+        tip,
         currency,
         first_quote_sats,
         quote_rate_minor_per_btc,
@@ -414,19 +471,27 @@ impl Books {
         let mut out = wire::start(&MAGIC_BUNDLE, 1024);
         // BK-33: version 2 only when a sale was paid over Lightning, so
         // every other bundle is the one every earlier build wrote.
-        let with_mode = self
-            .sales
-            .iter()
-            .any(|s| s.payment_mode.lightning().is_some());
+        // BK-40: version 3 only when a sale carries a tip, and then it holds
+        // the payment mode of every sale too.
+        let with_tips = self.sales.iter().any(|s| s.tip.is_some());
+        let with_mode = with_tips
+            || self
+                .sales
+                .iter()
+                .any(|s| s.payment_mode.lightning().is_some());
         if with_mode {
             if let Some(byte) = out.get_mut(4) {
-                *byte = VERSION_LIGHTNING;
+                *byte = if with_tips {
+                    VERSION_TIPS
+                } else {
+                    VERSION_LIGHTNING
+                };
             }
         }
         put_marks(&mut out, &self.high_water);
         put_u32(&mut out, self.sales.len());
         for s in &self.sales {
-            put_sale(&mut out, s, with_mode);
+            put_sale(&mut out, s, with_mode, with_tips);
         }
         put_u32(&mut out, self.disposals.len());
         for d in &self.disposals {
@@ -444,21 +509,22 @@ impl Books {
     /// BK-28, BK-30: read a bundle strictly. What it gives encodes back to
     /// the input.
     pub fn from_bundle(bytes: &[u8]) -> Result<Self, DecodeError> {
-        // `Reader::framed` reads only version 1, and this form has two.
+        // `Reader::framed` reads only version 1, and this form has three.
         let mut r = Reader::new(bytes);
         if r.take(4)? != MAGIC_BUNDLE {
             return Err(DecodeError::BadMagic);
         }
-        let with_mode = match r.u8()? {
-            wire::VERSION => false,
-            VERSION_LIGHTNING => true,
+        let (with_mode, with_tips) = match r.u8()? {
+            wire::VERSION => (false, false),
+            VERSION_LIGHTNING => (true, false),
+            VERSION_TIPS => (true, true),
             v => return Err(DecodeError::UnsupportedVersion(v)),
         };
         let high_water = get_marks(&mut r)?;
         let n = r.count(MAX_SALES, MIN_SALE)?;
         let mut sales: Vec<Sale> = Vec::with_capacity(n.min(4096));
         for _ in 0..n {
-            let sale = get_sale(&mut r, with_mode)?;
+            let sale = get_sale(&mut r, with_mode, with_tips)?;
             if sales.last().is_some_and(|p| p.key >= sale.key) {
                 return Err(DecodeError::NonCanonical("sales are not in order"));
             }
@@ -489,9 +555,15 @@ impl Books {
         r.finish()?;
         // A version 2 bundle holds a sale paid over Lightning, or it would
         // have been written as version 1 (the bundle encodes back to itself).
-        if with_mode && !sales.iter().any(|s| s.payment_mode.lightning().is_some()) {
+        if with_mode && !with_tips && !sales.iter().any(|s| s.payment_mode.lightning().is_some()) {
             return Err(DecodeError::NonCanonical(
                 "a version 2 bundle holds no sale paid over Lightning",
+            ));
+        }
+        // A version 3 bundle holds a sale with a tip, for the same reason.
+        if with_tips && !sales.iter().any(|s| s.tip.is_some()) {
+            return Err(DecodeError::NonCanonical(
+                "a version 3 bundle holds no sale with a tip",
             ));
         }
         // The marks must be the ones the sales give.

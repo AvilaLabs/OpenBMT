@@ -12,4 +12,5 @@ mod records;
 mod sale;
 mod sealed;
 mod staff;
+mod tips;
 mod totals;

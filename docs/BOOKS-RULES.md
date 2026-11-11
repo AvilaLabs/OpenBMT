@@ -280,7 +280,36 @@ kind pairing, and no PIN or hash is in it.
   names quoted as text from the counter and never part of a sentence
   (`docs/SCREEN-RULES.md`, SC-08).
 
-## 10. What these rules do not do
+## 10. Tips
+
+A sale can carry a tip, which the customer chose at the counter and paid with
+the sale (`docs/COUNTER-RULES.md`, CR-187 to CR-192).
+
+- **BK-38.** A sale holds its tip when its `Opened` record carries one: the
+  tip in minor units and the person at the till as the counter wrote them. The
+  amount of a sale stays the amount of the sale itself, without the tip. A
+  sale whose record holds no tip, and every record from before tips, has none.
+  The accounting export (BK-17) has one line for a counted sale, and the
+  line is the amount and the tip together, which is what the sale was paid; a
+  sum that does not fit refuses the export (BK-14). The full ledger (BK-19) has
+  the amount as before and a last column, "Tips", with the tip, empty for a
+  sale without one.
+- **BK-39.** The totals of a day (BK-15) have the tips of the sales that
+  received funds on that day: the sum per currency, and the sum per person at
+  the till and currency. A sale whose record names no person is in the sum per
+  currency only. The sums are of tips only: the sum of the amounts is
+  without them. A sum that does not fit is an error (BK-14).
+- **BK-40.** The bundle (BK-28) is version 3 when at least one sale has a tip.
+  Every sale in it then ends with its payment mode, as in version 2 (BK-33),
+  and then its tip: 0, or 1 and the tip in minor units (not 0), and a flag for
+  the person at the till that is followed, when it is 1, by the role and the
+  name. A bundle with no sale with a tip is written as before, in version 1
+  or 2, and both are still read, with no tips. Reading is strict: a tip of
+  nothing, a name that is empty or too long, a role that is not known, an
+  amount and a tip that do not add up inside 64 bits, and a version 3 bundle
+  with no sale with a tip (it would not encode back to itself) are refused.
+
+## 11. What these rules do not do
 
 - **No tax advice, and US rules only.** The export writes down what the records
   say. Whether a sale is income, which value counts, and what a disposal

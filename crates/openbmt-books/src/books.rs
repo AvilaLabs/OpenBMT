@@ -5,14 +5,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use openbmt_core::identity::DeviceId;
 use openbmt_core::records::{Chain, DeviceList, RecordKind};
-use openbmt_counter::{Currency, Event, StaffEvent};
+use openbmt_counter::{Currency, Event, Role, StaffEvent};
 
 use crate::date::{Date, MAX_OFFSET_MINUTES, MAX_UNIX, MIN_OFFSET_MINUTES};
 use crate::error::BooksError;
 use crate::model::{
     CashReturn, Counting, Disposal, DisposalKind, LatePayment, LightningPayment, OverrideNote,
     Payment, PaymentList, PaymentMode, PosFacts, PosMark, Sale, SaleId, SaleKey, SaleState,
-    StaffNote,
+    StaffNote, TipNote,
 };
 use crate::value::{UnknownField, Value};
 
@@ -41,6 +41,14 @@ pub struct DayTotals {
     pub sats: u64,
     /// Sales whose satoshis are unknown, and so are not in `sats`.
     pub sats_unknown_sales: u64,
+    /// BK-39: the sum of the tips of those sales in minor units, per
+    /// currency. Not in `minor`, which holds the amounts of the sales
+    /// themselves.
+    pub tips_minor: BTreeMap<Currency, u64>,
+    /// BK-39: the same tips by the person at the till when each sale
+    /// opened, per currency. A sale whose record names no person is in
+    /// `tips_minor` only.
+    pub tips_by_person: BTreeMap<(Currency, Role, String), u64>,
 }
 
 /// The books.
@@ -65,10 +73,12 @@ fn new_sale(key: SaleKey, event: &Event) -> Option<Sale> {
     let Event::Opened {
         at,
         amount,
+        tip,
         currency,
         needs_sats,
         minor_per_btc,
         source,
+        by,
         ..
     } = event
     else {
@@ -79,6 +89,10 @@ fn new_sale(key: SaleKey, event: &Event) -> Option<Sale> {
         id: SaleId::for_sale(&key),
         opened_at: *at,
         amount_minor: amount.0,
+        tip: (tip.0 > 0).then(|| TipNote {
+            minor: tip.0,
+            by: by.clone(),
+        }),
         currency: *currency,
         first_quote_sats: *needs_sats,
         quote_rate_minor_per_btc: *minor_per_btc,
@@ -616,6 +630,8 @@ impl Books {
                 minor: BTreeMap::new(),
                 sats: 0,
                 sats_unknown_sales: 0,
+                tips_minor: BTreeMap::new(),
+                tips_by_person: BTreeMap::new(),
             });
             t.sales = t.sales.checked_add(1).ok_or(BooksError::Overflow)?;
             if sale.counting() == Counting::Pending {
@@ -625,6 +641,17 @@ impl Books {
             *m = m
                 .checked_add(sale.amount_minor)
                 .ok_or(BooksError::Overflow)?;
+            if let Some(tip) = &sale.tip {
+                let all = t.tips_minor.entry(sale.currency).or_insert(0);
+                *all = all.checked_add(tip.minor).ok_or(BooksError::Overflow)?;
+                if let Some((role, name)) = &tip.by {
+                    let one = t
+                        .tips_by_person
+                        .entry((sale.currency, *role, name.clone()))
+                        .or_insert(0);
+                    *one = one.checked_add(tip.minor).ok_or(BooksError::Overflow)?;
+                }
+            }
             match sale.sats_received {
                 Value::Known(s) => t.sats = t.sats.checked_add(s).ok_or(BooksError::Overflow)?,
                 Value::Unknown(_) => {

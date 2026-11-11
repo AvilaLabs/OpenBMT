@@ -73,7 +73,7 @@ fn bk_32_the_ledger_has_the_mode_the_hash_the_amount_and_the_time() {
         .find(|l| l.starts_with("Type,"))
         .expect("header");
     assert!(header
-        .ends_with("Payment mode,Payment hash,Lightning amount (msat),Lightning settled (UTC)"));
+        .contains("Payment mode,Payment hash,Lightning amount (msat),Lightning settled (UTC)"));
     let rows: Vec<&str> = ledger.lines().filter(|l| l.starts_with("sale,")).collect();
     assert_eq!(rows.len(), 2);
     let hash_hex = "5a".repeat(32);
@@ -85,14 +85,14 @@ fn bk_32_the_ledger_has_the_mode_the_hash_the_amount_and_the_time() {
     assert!(ln.contains(&MSAT.to_string()));
     assert!(
         ln.ends_with(&format!(
-            ",lightning,{hash_hex},{MSAT},2025-02-01T01:00:17Z"
+            ",lightning,{hash_hex},{MSAT},2025-02-01T01:00:17Z,"
         )),
         "{ln}"
     );
     assert!(ln.contains("paid over Lightning"));
     assert!(!ln.contains("the final record names"));
     let chain = rows.iter().find(|r| r.contains("on-chain")).expect("a row");
-    assert!(chain.ends_with(",on-chain,,,"), "{chain}");
+    assert!(chain.ends_with(",on-chain,,,,"), "{chain}");
 }
 
 #[test]
@@ -216,9 +216,9 @@ fn bk_33_a_version_two_bundle_without_a_lightning_sale_is_refused() {
         *b = 0;
     }
     assert!(Books::from_bundle(&bad).is_err());
-    // A version byte that is neither 1 nor 2 is refused.
+    // A version byte that is none of 1, 2 and 3 is refused.
     let mut bad = v1.clone();
-    bad[4] = 3;
+    bad[4] = 4;
     assert!(Books::from_bundle(&bad).is_err());
 }
 

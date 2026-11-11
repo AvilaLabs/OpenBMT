@@ -52,11 +52,13 @@ impl Books {
             let Some(at) = sale.first_funds_at else {
                 continue;
             };
+            // BK-38: the line is what the sale was paid, the amount and the
+            // tip together; the tip is on a line of its own in the ledger.
             lines.push(Line {
                 at,
                 description: format!("Sale {}", sale.id),
                 negative: false,
-                minor: sale.amount_minor,
+                minor: sale.due_minor().ok_or(ExportError::Overflow)?,
                 currency: sale.currency,
             });
         }
@@ -206,7 +208,7 @@ impl Books {
     }
 }
 
-const LEDGER_COLUMNS: [&str; 29] = [
+const LEDGER_COLUMNS: [&str; 30] = [
     "Type",
     "Sale ID",
     "Counter",
@@ -236,6 +238,7 @@ const LEDGER_COLUMNS: [&str; 29] = [
     "Payment hash",
     "Lightning amount (msat)",
     "Lightning settled (UTC)",
+    "Tips",
 ];
 
 fn blank_row() -> Vec<Cell> {
@@ -376,6 +379,13 @@ fn sale_row(sale: &Sale) -> Result<Vec<Cell>, ExportError> {
         if let Some(at) = p.settled_at {
             set(&mut row, 28, time_cell(at)?);
         }
+    }
+    if let Some(tip) = &sale.tip {
+        set(
+            &mut row,
+            29,
+            Cell::Number(format_minor(tip.minor, sale.currency)),
+        );
     }
     let names: Vec<&str> = sale.overrides.iter().map(|o| o.name.as_str()).collect();
     if !names.is_empty() {
