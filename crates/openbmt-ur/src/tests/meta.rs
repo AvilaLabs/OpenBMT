@@ -6,27 +6,33 @@ use std::collections::BTreeSet;
 
 const RULES: &str = include_str!("../../../../docs/UR-RULES.md");
 
-const TEST_SOURCES: [&str; 3] = [
+const TEST_SOURCES: [&str; 4] = [
+    include_str!("key.rs"),
     include_str!("refusals.rs"),
     include_str!("roundtrip.rs"),
     include_str!("vectors.rs"),
 ];
 
-const CODE_SOURCES: [&str; 9] = [
+const CODE_SOURCES: [&str; 14] = [
+    include_str!("../base58.rs"),
     include_str!("../bytewords.rs"),
     include_str!("../cbor.rs"),
+    include_str!("../cbor_read.rs"),
     include_str!("../decoder.rs"),
     include_str!("../encoder.rs"),
     include_str!("../error.rs"),
     include_str!("../fountain.rs"),
+    include_str!("../json_read.rs"),
+    include_str!("../key.rs"),
     include_str!("../lib.rs"),
+    include_str!("../point.rs"),
     include_str!("../psbt.rs"),
     include_str!("../hash.rs"),
 ];
 
 /// Rules this crate does not test, each with the reason. The others are
 /// tested here.
-const NOT_HERE: [(&str, &str); 3] = [
+const NOT_HERE: [(&str, &str); 4] = [
     (
         "UR-20",
         "the apps' call is in openbmt-qr-jni, which tests it",
@@ -37,6 +43,10 @@ const NOT_HERE: [(&str, &str); 3] = [
     ),
     (
         "UR-22",
+        "the apps' call is in openbmt-qr-jni, which tests it",
+    ),
+    (
+        "UR-31",
         "the apps' call is in openbmt-qr-jni, which tests it",
     ),
 ];
@@ -56,8 +66,8 @@ fn sources() -> String {
 #[test]
 fn the_rules_file_defines_its_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 22, "{ids:?}");
-    assert!(ids.contains("UR-01") && ids.contains("UR-22"));
+    assert_eq!(ids.len(), 31, "{ids:?}");
+    assert!(ids.contains("UR-01") && ids.contains("UR-31"));
 }
 
 #[test]

@@ -8,7 +8,12 @@ rust-version.workspace = true
 publish.workspace = true
 
 # No dependencies of any kind, not even other crates of the workspace: the
-# hashes, the Bytewords, the fountain code and the CBOR header are written
-# here so that the apps that show or read a sequence of codes add nothing
-# to their package lists.
+# hashes, the Bytewords, the fountain code, the CBOR reader and the base58
+# are written here so that the apps that show or read a sequence of codes
+# add nothing to their package lists. The words of the refusals are checked
+# against the screen rules with openbmt-core, a development dependency
+# that no program is built with.
 [dependencies]
+
+[dev-dependencies]
+openbmt-core = { path = "../openbmt-core" }

@@ -120,14 +120,15 @@ and gives bytes and text. The app draws the codes and words the progress.
 
 The Android apps reach the library through one framed call
 (`crates/openbmt-qr-jni`, `UrNative.call`): draw a text as a QR code, cut a
-message into the parts of a UR, and read the parts of a UR back.
+message into the parts of a UR, read the parts of a UR back, and read a
+cosigner key out of a finished UR (section 7).
 
 - **UR-20.** The apps send and read two types. `ur:bytes` carries OpenBMT's
   own framed objects (a request to the Key app, its answer, a pairing
   text). `ur:crypto-psbt` carries a plain PSBT to or from another wallet,
   and nothing else. The call encodes only these two types, and gives back
-  the message of a finished UR only when its type is one of these or
-  `psbt`; any other type is refused.
+  the message of a finished UR only when its type is one of these, `psbt`,
+  or one that UR-31 reads a key from; any other type is refused.
 - **UR-21.** The call takes one framed request: the four bytes `OBMo`, the
   version byte 1, an operation byte, the fields of the operation and
   nothing after them, with every length exactly the bytes that follow. A
@@ -135,12 +136,92 @@ message into the parts of a UR, and read the parts of a UR back.
   an extra byte, a length that claims more or less than is there, a level
   outside 0 to 3, a request over 4 MiB) is refused with this rule. The
   reply is framed too: `OBMp`, the version byte, a status byte, then the
-  body, or for a refusal the rule code as five bytes of text.
+  body, or for a refusal the rule code as five bytes of text. The one
+  exception is the key operation of UR-31, whose refusal of the key itself
+  has its own status byte and carries words after the code.
 - **UR-22.** The call keeps at most four decoders open at a time. A handle
   is given once and never again in the life of the process. A handle that
   is not open, a fifth decoder, and a result asked for before the message
   is complete are refused with this rule. Each decoder holds no more than
   UR-02, UR-03, UR-11 and UR-16 allow.
+
+## 7. A cosigner key from a code
+
+A signer that is not an OpenBMT program shows its key for a shared wallet as
+a BC-UR code. `ur_to_key_text` turns it into the one text the key ceremony
+takes (`docs/SIGNER-RULES.md`, SR-64), `[<8 hex>/48h/<coin>h/0h/2h]` and
+the extended public key, so that nothing after it changes. It reads the old
+types (`crypto-account`, `crypto-hdkey`, tags 303 to 311 and 400 to 410),
+which are the ones the signers write, and the JSON of a Coldcard-style
+export in `bytes`. It takes nothing it cannot rebuild exactly.
+
+- **UR-23.** The CBOR is read in a strict subset: unsigned integers, byte
+  strings, text strings that are UTF-8, definite arrays and maps, tags, and
+  the values false and true. A map has unsigned integer keys in strictly
+  ascending order. Everything else is refused: negative integers, floats,
+  null, undefined, indefinite lengths, a head longer than needed, bytes
+  after the item. Arrays and maps nest at most 8 deep, at most 8 tags stand
+  before one item, and a message holds at most 4096 items, so that what is
+  held is bounded by those and not by the length of the message. A message
+  over 64 KiB is refused unread.
+- **UR-24.** The types read are `crypto-account`, `crypto-hdkey` and
+  `bytes`. The newer types (`hdkey`, `account-descriptor`,
+  `output-descriptor`) are refused with words that say the code type is not
+  read and to show the key as text, and any other type is refused as not a
+  key. The tags 303, 304 and 305 and 40303, 40304 and 40305 are the same
+  wherever they stand in a key, as signers mix them; 308 and 40308 are not,
+  and a 40308 is refused. A key or an account may stand in its own tag
+  (303 or 40303, and 311). A layout that is none of these is refused.
+- **UR-25.** In a `crypto-account` (a map of the master fingerprint, key 1,
+  and the array of outputs, key 2) the outputs that are `wsh` over one key
+  are `401(303(key))` and `401(410(303(key)))`, each with or without an
+  outer 308. Exactly one of them must have the origin `48h/<coin>h/0h/2h`.
+  No such key, and more than one, are each refused with their own words.
+  The other outputs (`wpkh`, `sh(wsh)`, `tr`, multisig outputs) are not
+  looked into, but one that is not of the old kind is refused.
+- **UR-26.** The hdkey is a map of keys 2 to 10. Key 2, if there, is false:
+  a key that says it is private is refused and never taken. Key 3 is 33
+  bytes of a compressed public key on the curve, and key 4, the chain code,
+  is 32 bytes and is required. Key 5, if there, is tagged with
+  `{1: 0}` for bitcoin and `{2: 0}` for the main network or `{2: 1}` for a
+  test one; without it the network is the main one. Anything else in key 5
+  is refused.
+- **UR-27.** Key 6 is the origin, tagged, with the path as pairs of an
+  index and a hardened flag. The path must be exactly `48h/<coin>h/0h/2h`
+  with the coin 0 on the main network and 1 on a test one, and the depth, if
+  given, 4. The master fingerprint is key 1 of the account or key 2 of the
+  origin, nonzero; at least one must be there, and if both are, they must be
+  equal.
+- **UR-28.** The key is written as its 78 bytes of BIP 32: the version of
+  `xpub` or `tpub`, depth 4, the parent fingerprint (key 8, nonzero and
+  required), the child number `2h`, the chain code and the key, in
+  Base58Check, after the origin `[<fingerprint>/48h/<coin>h/0h/2h]` in lower
+  case.
+- **UR-29.** A `bytes` code holds a CBOR byte string of JSON: one object in
+  strict JSON, with values read as strings or integers (nested values are
+  walked and dropped), no duplicate key at any depth, UTF-8, nothing after
+  it. `xfp` is 8 hexadecimal digits, `p2wsh_deriv` is `m/48'/<coin>'/0'/2'`
+  (`'` or `h`) and `p2wsh` is a plain `xpub` or `tpub` for that coin, at
+  depth 4 with child number `2h`, on the curve. A key in a special form
+  (`ypub`, `zpub`, `Ypub`, `Zpub`, `upub`, `vpub`, `Upub`, `Vpub`) is
+  refused with words that say to export the plain public key, and a secret
+  key of any form is refused as in UR-26.
+- **UR-30.** Every refusal of UR-23 to UR-29 is one value of `KeyRefusal`
+  with its rule in its text and words (a heading, what happened, what to do)
+  that pass the checks of `docs/SCREEN-RULES.md`, with no two alike. The
+  reader never panics, whatever the type and the bytes. It is fuzzed
+  (`fuzz/fuzz_targets/ur_key_text.rs`) and checked against Hummingbird
+  (`scripts/ur-crosscheck.sh`).
+- **UR-31.** The apps reach it through the framed call (section 6) by one
+  more operation, which takes a type and the message of a finished UR and
+  gives the key text, or the refusal with its rule and its three texts. A
+  finished `crypto-account` or `crypto-hdkey` (and the newer types, so that
+  they can be refused with words) is given back by the call as its CBOR; a
+  `bytes` message is given back as before. A refusal of the key itself has
+  status byte 2, then the rule code as five bytes of text, then three texts
+  (the heading, what happened, what to do), each as a length of two bytes and
+  UTF-8. A request that is not framed, or a type over 64 characters, is
+  refused as in UR-21.
 
 ## What these rules do not do
 
@@ -151,9 +232,15 @@ message into the parts of a UR, and read the parts of a UR back.
   Anyone who sees the codes has the data, and nothing says who showed them.
   Its checksums find a misread, not a forgery.
 - **No other registry types.** Only `bytes`, `crypto-psbt` and `psbt` have
-  helpers here. The CBOR is a byte-string head and nothing else: a type
-  whose payload is a map, a tag or a nested structure is returned as the
-  bytes it came in, and is not read.
+  helpers for their payload here, and section 7 reads a cosigner key out of
+  `crypto-account`, `crypto-hdkey` and a JSON `bytes`. A `crypto-output`, the
+  newer `hdkey`, `account-descriptor` and `output-descriptor`, and the text
+  of BSMS are not read as keys. Other types are returned as the bytes they
+  came in.
+- **No other key than the first account's.** Only the account 0 key for
+  `48h/<coin>h/0h/2h` is taken; a signer that writes another account, a
+  `Zpub` in JSON or a key without its chain code is refused, with words that
+  say what to export instead.
 - **No frame counts or timing in the library.** How many parts fit one
   code at what scanning distance, and how fast to show them, are for the
   app (DESIGN.md E8). The apps use fragments of at most 230 bytes, so that

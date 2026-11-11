@@ -603,6 +603,9 @@ dependencies = [
 [[package]]
 name = "openbmt-ur"
 version = "0.1.0"
+dependencies = [
+ "openbmt-core",
+]
 
 [[package]]
 name = "openbmt-watch"

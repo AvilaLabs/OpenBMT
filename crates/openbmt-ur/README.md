@@ -6,7 +6,8 @@ sequence of codes, in the format Sparrow and hardware wallets read and
 write. The library makes and reads the text of each part; drawing it as a
 QR code (upper case, for the alphanumeric mode) and reading the camera are
 the apps' work, with `openbmt-qr`. It has no dependency, not even another
-crate of this workspace.
+crate of this workspace (the screen checks of the refusals' words use
+`openbmt-core` in the tests only).
 
 The rules, with their codes, are in [docs/UR-RULES.md](../../docs/UR-RULES.md).
 A refusal's text starts with its code.
@@ -42,6 +43,7 @@ if progress.complete {
 | `ur_to_psbt(type, cbor)` | The PSBT of a `crypto-psbt` or `psbt` UR |
 | `cbor::encode_bytes`, `cbor::decode_bytes` | The CBOR byte string of the `bytes` type and of the PSBT types |
 | `bytewords::{encode_minimal, decode_minimal}` | Minimal Bytewords with the CRC-32 |
+| `ur_to_key_text(type, cbor)` | The cosigner key text `[<fingerprint>/48h/<coin>h/0h/2h]<key>` of a `crypto-account`, a `crypto-hdkey` or a JSON `bytes` UR, or a `KeyRefusal` with `words()` (UR-23 to UR-30) |
 
 A message of at most `max_fragment_len` bytes is one part,
 `ur:<type>/<bytewords>`. A longer one is `ur:<type>/<n>-<m>/<bytewords>`

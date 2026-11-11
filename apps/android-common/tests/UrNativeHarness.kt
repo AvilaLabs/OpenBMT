@@ -183,6 +183,62 @@ object UrNativeHarness {
         ok(org.openbmt.common.UrNative.call(ByteArray(0))!!.size == 11, "an empty request")
     }
 
+    private fun hex(s: String) = ByteArray(s.length / 2) { s.substring(2 * it, 2 * it + 2).toInt(16).toByte() }
+
+    private const val KEY_XPUB =
+        "xpub6Ewx2N9hNSArJyF35CUGhaZLuZxQPNmJzWVwmpoV9U7Xu5wqka93nd3zEzokew9MzkNV4u6TCVDkHHR6QHQuYEFaasKzWkrkncXHMXGNdZP"
+
+    /** The cosigner key of a code, through the library: a Keystone-layout account, a JSON export, and the refusals with words. */
+    private fun keyTests(call: UrCall) {
+        val account = hex(
+            "a2011a56c4fac30281d90191d9012fa602f4035821" +
+                "02d44daf959d7b3bf9343e2aea84ea21391ccf306a2765c35859c94cecb870aaea" +
+                "045820f4ef1818131a780976e9dc1f30a4bd39903a9b8bbffad099035c49f886e85aed" +
+                "05d90131a20100020006d90130a301881830f500f500f502f5021a56c4fac3030408" +
+                "1ac07436a2",
+        )
+        val want = "[56c4fac3/48h/0h/0h/2h]$KEY_XPUB"
+        val k = call.keyText("crypto-account", account)
+        ok(k is KeyTextOutcome.Key && k.text == want, "a Keystone account gives the key text")
+        // The JSON of a Coldcard-style export, read from an animated code as the apps read it.
+        val json = "{\"xfp\": \"56C4FAC3\", \"p2wsh_deriv\": \"m/48'/0'/0'/2'\", \"p2wsh\": \"$KEY_XPUB\"}".toByteArray()
+        val parts = value(AnimatedQr.parts(call, "bytes", json), "the parts of the export")
+        val reading = UrReading(call, setOf("bytes"), Who.KEY_HOLDER)
+        var done: UrStep.Done? = null
+        for (p in parts) {
+            val step = reading.feed(p)
+            if (step is UrStep.Done) {
+                done = step
+                break
+            }
+        }
+        reading.drop()
+        ok(done != null && done.type == "bytes", "the export is read from its code")
+        val j = call.keyText(done!!.type, done.payload)
+        ok(j is KeyTextOutcome.Key && j.text == want, "the same key from the JSON")
+        // Refusals come with words that pass the checks.
+        val refused = listOf(
+            Triple("hdkey", account, "UR-24"),
+            Triple("account-descriptor", account, "UR-24"),
+            Triple("crypto-output", account, "UR-24"),
+            Triple("crypto-hdkey", hex("f6"), "UR-23"),
+            Triple("crypto-account", account.copyOfRange(0, 40), "UR-23"),
+            Triple("bytes", "not json".toByteArray(), "UR-29"),
+            Triple("bytes", json.copyOf().also { it[0] = '['.code.toByte() }, "UR-29"),
+        )
+        val seen = ArrayList<Pair<String, SayWords>>()
+        for ((type, payload, rule) in refused) {
+            val d = call.keyText(type, payload)
+            ok(d is KeyTextOutcome.Declined && d.code == rule, "$type is declined with $rule: ${(d as? KeyTextOutcome.Declined)?.code}")
+            val say = UrWords.keyDeclined(Who.KEY_HOLDER, d as KeyTextOutcome.Declined)
+            ok(SayCheck.problem(say) == null, "the words of $type pass: ${SayCheck.problem(say)}")
+            seen.add("keyDeclined.$type.$rule" to say)
+        }
+        val long = call.keyText("x".repeat(65), account.copyOf())
+        ok(long is KeyTextOutcome.Refused && long.code == "UR-01", "a type over 64 characters")
+        ok(seen.map { it.second.heading }.toSet().size >= 4, "the refusals read differently")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         System.load(File(args[0]).absolutePath)
@@ -193,6 +249,7 @@ object UrNativeHarness {
         readingTests(call)
         handleTests(call)
         framingTests(call)
+        keyTests(call)
         println("UrNativeHarness: $count checks passed")
     }
 }

@@ -260,6 +260,7 @@ object CommonModelTest {
         ok(m.type == "bytes" && m.payload.contentEquals(byteArrayOf(1, 2, 3)), "a result")
         ok(UrCall { reply(0, msg + byteArrayOf(9)) }.result(1) is UrOutcome.Fault, "a result with a byte over")
         ok(UrCall { reply(0, msg.copyOfRange(0, msg.size - 1)) }.result(1) is UrOutcome.Fault, "a result with a byte short")
+        keyTextTests()
         val side = 21
         val packed = ByteArray((side * side + 7) / 8)
         val qr = reply(0, byteArrayOf(0, side.toByte()) + packed)
@@ -274,6 +275,55 @@ object CommonModelTest {
         ok(UrCall { reply(0, u32(1) + u32(900) + one) }.urEncode("bytes", ByteArray(1), 100) is UrOutcome.Fault, "a part longer than the reply")
         val matrix = QrMatrix(21, ByteArray(56).also { it[0] = 0x80.toByte(); it[55] = 0x80.toByte() })
         ok(matrix.get(0, 0) && !matrix.get(1, 0) && matrix.get(20, 20) && matrix.version == 1, "the packed modules, most significant bit first")
+    }
+
+    /** The words part of a reply with status 2: the rule code, then three texts of a 16-bit length each. */
+    private fun wordsBody(code: String, vararg texts: String): ByteArray {
+        var out = code.toByteArray()
+        for (t in texts) {
+            val b = t.toByteArray()
+            out += byteArrayOf((b.size shr 8).toByte(), b.size.toByte()) + b
+        }
+        return out
+    }
+
+    private fun keyTextTests() {
+        val text = "[56c4fac3/48h/0h/0h/2h]xpub6Ewx2N9hNSArJyF35CUGhaZLuZxQPNmJzWVwmpoV9U7Xu5wqka93nd3zEzokew9MzkNV4u6TCVDkHHR6QHQuYEFaasKzWkrkncXHMXGNdZP"
+        // The request: the magic, the version, operation 7, the type with its length, the message with its length.
+        var seen: ByteArray? = null
+        val call = UrCall { request -> seen = request.copyOf(); reply(0, text.toByteArray()) }
+        val k = call.keyText("crypto-account", byteArrayOf(1, 2, 3))
+        ok(k is KeyTextOutcome.Key && k.text == text, "the key text")
+        val want = byteArrayOf(0x4f, 0x42, 0x4d, 0x6f, 1, 7, 14) + "crypto-account".toByteArray() + u32(3) + byteArrayOf(1, 2, 3)
+        ok(seen!!.contentEquals(want), "a key_text request is the magic, version, operation, type and message")
+        // For bytes the byte string around the content is put back, in its shortest head.
+        for ((n, head) in listOf(0 to byteArrayOf(0x40), 23 to byteArrayOf(0x57), 24 to byteArrayOf(0x58, 24), 255 to byteArrayOf(0x58, -1), 256 to byteArrayOf(0x59, 1, 0), 65536 to byteArrayOf(0x5a, 0, 1, 0, 0))) {
+            UrCall { request -> seen = request.copyOf(); null }.keyText("bytes", ByteArray(n))
+            val at = 6 + 1 + 5 + 4
+            ok(seen!!.copyOfRange(at, at + head.size).contentEquals(head) && seen!!.size == at + head.size + n, "a byte string of $n bytes has the head of its shortest form")
+        }
+        ok(UrCall { throw AssertionError("sent") }.keyText("x".repeat(256), ByteArray(1)).let { it is KeyTextOutcome.Refused && it.code == UrCall.BAD_FRAMING }, "a type over 255 bytes is not sent")
+        ok(UrCall { throw AssertionError("sent") }.keyText("", ByteArray(1)) is KeyTextOutcome.Refused, "an empty type is not sent")
+
+        // A refusal with words.
+        val words = wordsBody("UR-24", "Not a key code", "This code carries something other than one key, so nothing was taken from it.", "Scan the code that shows the key, or show the key as text and scan that.")
+        val d = UrCall { reply(2, words) }.keyText("crypto-output", ByteArray(1))
+        ok(d is KeyTextOutcome.Declined && d.code == "UR-24" && d.heading == "Not a key code" && d.next.startsWith("Scan"), "a refusal with its words")
+        val say = UrWords.keyDeclined(Who.KEY_HOLDER, d as KeyTextOutcome.Declined)
+        ok(say.tone == Tones.STOP && say.who == Who.KEY_HOLDER && say.code == "UR-24" && SayCheck.problem(say) == null, "the words pass the checks: ${SayCheck.problem(say)}")
+        ok(UrCall { refusedReply("UR-21") }.keyText("bytes", ByteArray(1)).let { it is KeyTextOutcome.Refused && it.code == "UR-21" }, "a framing refusal")
+
+        // Everything else is a fault: every cut and every byte over, a bad code, an empty text.
+        for (cut in words.indices) ok(UrCall { reply(2, words.copyOfRange(0, cut)) }.keyText("bytes", ByteArray(1)) is KeyTextOutcome.Fault, "words cut at $cut")
+        ok(UrCall { reply(2, words + byteArrayOf(0)) }.keyText("bytes", ByteArray(1)) is KeyTextOutcome.Fault, "words with a byte over")
+        ok(UrCall { reply(2, wordsBody("ur-24", "a", "b", "c")) }.keyText("bytes", ByteArray(1)) is KeyTextOutcome.Fault, "words with no rule code")
+        ok(UrCall { reply(2, wordsBody("UR-24", "", "b", "c")) }.keyText("bytes", ByteArray(1)) is KeyTextOutcome.Fault, "words with an empty text")
+        ok(UrCall { reply(3, words) }.keyText("bytes", ByteArray(1)) is KeyTextOutcome.Fault, "a status that is none of the three")
+        ok(UrCall { reply(0, ByteArray(0)) }.keyText("bytes", ByteArray(1)) is KeyTextOutcome.Fault, "an empty key text")
+        ok(UrCall { reply(0, "key\n".toByteArray()) }.keyText("bytes", ByteArray(1)) is KeyTextOutcome.Fault, "a key text with a control character")
+        ok(UrCall { reply(0, ByteArray(161) { 'a'.code.toByte() }) }.keyText("bytes", ByteArray(1)) is KeyTextOutcome.Fault, "a key text that is too long")
+        ok(UrCall { null }.keyText("bytes", ByteArray(1)) is KeyTextOutcome.Fault, "no answer")
+        ok(UrCall { refusedReply("UR-1") }.keyText("bytes", ByteArray(1)) is KeyTextOutcome.Fault, "a refusal that is no rule code")
     }
 
     private fun animatedQrTests() {

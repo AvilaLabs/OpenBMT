@@ -1,6 +1,7 @@
 //! Tests, named after the rule each proves.
 
 mod hash;
+mod key;
 mod meta;
 mod refusals;
 mod roundtrip;

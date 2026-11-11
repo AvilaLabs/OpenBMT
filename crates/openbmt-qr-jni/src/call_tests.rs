@@ -35,6 +35,15 @@ fn ur_request(ur_type: &str, max_fragment: u16, payload: &[u8]) -> Vec<u8> {
     v
 }
 
+fn key_request(ur_type: &str, message: &[u8]) -> Vec<u8> {
+    let mut v = head(OP_KEY_TEXT);
+    v.push(ur_type.len() as u8);
+    v.extend_from_slice(ur_type.as_bytes());
+    v.extend_from_slice(&(message.len() as u32).to_be_bytes());
+    v.extend_from_slice(message);
+    v
+}
+
 fn new_request() -> Vec<u8> {
     head(OP_DECODER_NEW)
 }
@@ -67,8 +76,30 @@ fn parse(reply: &[u8]) -> Result<Vec<u8>, String> {
             assert!(code.starts_with("UR-") || code.starts_with("QR-"), "{code}");
             Err(code)
         }
+        Some(&REFUSED_WITH_WORDS) => Err(words_of(reply).0),
         other => panic!("status {other:?}"),
     }
+}
+
+/// The rule code and the three texts of a reply that has words, with the
+/// framing checked strictly.
+fn words_of(reply: &[u8]) -> (String, [String; 3]) {
+    assert_eq!(reply.get(..4), Some(REPLY_MAGIC.as_slice()));
+    assert_eq!(reply.get(4), Some(&VERSION));
+    assert_eq!(reply.get(5), Some(&REFUSED_WITH_WORDS));
+    let body = reply.get(6..).expect("a body");
+    let code = String::from_utf8(body[..5].to_vec()).expect("ascii");
+    assert!(code.starts_with("UR-"), "{code}");
+    let mut at = 5;
+    let mut texts = Vec::new();
+    for _ in 0..3 {
+        let len = u16::from_be_bytes([body[at], body[at + 1]]) as usize;
+        at += 2;
+        texts.push(String::from_utf8(body[at..at + len].to_vec()).expect("UTF-8"));
+        at += len;
+    }
+    assert_eq!(at, body.len(), "nothing after the third text");
+    (code, texts.try_into().expect("three"))
 }
 
 fn refused(reply: &[u8]) -> String {
@@ -268,7 +299,7 @@ fn ur_20_the_apps_use_bytes_and_crypto_psbt_only() {
     psbt.extend(message(12));
     assert!(parse(&calls.call(&ur_request("bytes", 100, &message(12)))).is_ok());
     assert!(parse(&calls.call(&ur_request("crypto-psbt", 100, &psbt))).is_ok());
-    for other in ["psbt", "foo", "crypto-account", "x"] {
+    for other in ["psbt", "foo", "crypto-account", "crypto-hdkey", "x"] {
         assert_eq!(
             refused(&calls.call(&ur_request(other, 100, &psbt))),
             TYPE_NOT_USED,
@@ -277,7 +308,7 @@ fn ur_20_the_apps_use_bytes_and_crypto_psbt_only() {
     }
     // A finished UR of another type gives no message.
     let h = open(&calls);
-    let text = whole("crypto-account", &encode_bytes(b"abcdef"));
+    let text = whole("crypto-output", &encode_bytes(b"abcdef"));
     parse(&calls.call(&receive_request(h, text.as_bytes()))).expect("complete");
     assert_eq!(
         refused(&calls.call(&handle_request(OP_DECODER_RESULT, h))),
@@ -513,6 +544,10 @@ fn samples() -> Vec<(Vec<u8>, Vec<usize>)> {
         (receive_request(1, b"ur:bytes/x"), vec![10, 11, 12, 13]),
         (handle_request(OP_DECODER_RESULT, 1), vec![]),
         (handle_request(OP_DECODER_DROP, 1), vec![]),
+        (
+            key_request("bytes", &encode_bytes(b"{}")),
+            vec![6, 12, 13, 14, 15],
+        ),
     ]
 }
 
@@ -659,4 +694,122 @@ fn qr_jni_call_a_part_of_230_bytes_fits_version_12_at_level_l() {
             }
         }
     }
+}
+
+// ---- key_text (UR-31) -----------------------------------------------------------
+
+/// The Keystone layout of a P2WSH cosigner export with a key of the
+/// fixed seed [3; 32] at m/48'/0'/0'/2' (also in openbmt-ur's tests).
+fn keystone_account() -> Vec<u8> {
+    let hex = "a2011a56c4fac30281d90191d9012fa602f4035821\
+        02d44daf959d7b3bf9343e2aea84ea21391ccf306a2765c35859c94cecb870aaea\
+        045820f4ef1818131a780976e9dc1f30a4bd39903a9b8bbffad099035c49f886e85aed\
+        05d90131a20100020006d90130a301881830f500f500f502f5021a56c4fac3030408\
+        1ac07436a2";
+    (0..hex.len() / 2)
+        .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).expect("hex"))
+        .collect()
+}
+
+const KEYSTONE_TEXT: &str = "[56c4fac3/48h/0h/0h/2h]xpub6Ewx2N9hNSArJyF35CUGhaZLuZxQPNmJzWVwmpoV9U7Xu5wqka93nd3zEzokew9MzkNV4u6TCVDkHHR6QHQuYEFaasKzWkrkncXHMXGNdZP";
+
+#[test]
+fn ur_31_the_key_text_of_a_finished_ur_comes_back() {
+    let calls = Calls::new();
+    let body = parse(&calls.call(&key_request("crypto-account", &keystone_account())))
+        .expect("the key text");
+    assert_eq!(String::from_utf8(body).expect("ASCII"), KEYSTONE_TEXT);
+    let json = format!(
+        "{{\"xfp\": \"56C4FAC3\", \"p2wsh_deriv\": \"m/48'/0'/0'/2'\", \"p2wsh\": \"{}\"}}",
+        KEYSTONE_TEXT.split_once(']').expect("origin").1
+    );
+    let body = parse(&calls.call(&key_request("bytes", &encode_bytes(json.as_bytes()))))
+        .expect("the key text");
+    assert_eq!(String::from_utf8(body).expect("ASCII"), KEYSTONE_TEXT);
+}
+
+#[test]
+fn ur_31_a_refusal_of_the_key_carries_the_rule_and_the_words() {
+    let calls = Calls::new();
+    for (ur_type, message, rule, heading) in [
+        ("hdkey", keystone_account(), "UR-24", "Code type not read"),
+        (
+            "crypto-output",
+            keystone_account(),
+            "UR-24",
+            "Not a key code",
+        ),
+        ("crypto-hdkey", vec![0xf6], "UR-23", "Key code not readable"),
+        (
+            "bytes",
+            encode_bytes(b"not json"),
+            "UR-29",
+            "Key text not readable",
+        ),
+    ] {
+        let reply = calls.call(&key_request(ur_type, &message));
+        let (code, [h, what, next]) = words_of(&reply);
+        assert_eq!((code.as_str(), h.as_str()), (rule, heading), "{ur_type}");
+        assert!(what.ends_with('.') && next.ends_with('.'));
+        let w = openbmt_ur::ur_to_key_text(ur_type, &message)
+            .expect_err("a refusal")
+            .words();
+        assert_eq!(
+            (h.as_str(), what.as_str(), next.as_str()),
+            (w.heading, w.what, w.next)
+        );
+    }
+}
+
+#[test]
+fn ur_31_the_call_gives_the_cbor_of_the_key_types() {
+    let calls = Calls::new();
+    let cbor = keystone_account();
+    for ur_type in [
+        "crypto-account",
+        "crypto-hdkey",
+        "hdkey",
+        "account-descriptor",
+        "output-descriptor",
+    ] {
+        let text = whole(ur_type, &cbor);
+        let h = open(&calls);
+        parse(&calls.call(&receive_request(h, text.as_bytes()))).expect("complete");
+        let body = parse(&calls.call(&handle_request(OP_DECODER_RESULT, h))).expect("result");
+        assert_eq!(body[0] as usize, ur_type.len());
+        assert_eq!(&body[1..1 + ur_type.len()], ur_type.as_bytes());
+        assert_eq!(&body[5 + ur_type.len()..], cbor.as_slice(), "{ur_type}");
+        calls.call(&handle_request(OP_DECODER_DROP, h));
+    }
+    // A sequence of several parts through a decoder and into key_text.
+    let mut e = Encoder::new("crypto-account", &cbor, 30, 10).expect("encoder");
+    let h = open(&calls);
+    let mut complete = false;
+    for _ in 0..e.seq_len() {
+        let p = parse(&calls.call(&receive_request(h, e.next_part().as_bytes()))).expect("part");
+        complete = p[0] == 1;
+    }
+    assert!(complete);
+    let body = parse(&calls.call(&handle_request(OP_DECODER_RESULT, h))).expect("result");
+    let n = body[0] as usize;
+    let got = &body[5 + n..];
+    let key = parse(&calls.call(&key_request("crypto-account", got))).expect("key");
+    assert_eq!(String::from_utf8(key).expect("ASCII"), KEYSTONE_TEXT);
+}
+
+#[test]
+fn ur_31_a_request_that_is_not_framed_or_has_a_bad_type_is_refused() {
+    let calls = Calls::new();
+    let good = key_request("crypto-account", &keystone_account());
+    for cut in 0..good.len() {
+        assert_eq!(refused(&calls.call(&good[..cut])), BAD_FRAMING, "cut {cut}");
+    }
+    let mut extra = good.clone();
+    extra.push(0);
+    assert_eq!(refused(&calls.call(&extra)), BAD_FRAMING);
+    assert_eq!(
+        refused(&calls.call(&key_request("Crypto-Account", &[1]))),
+        "UR-01"
+    );
+    assert_eq!(refused(&calls.call(&key_request("", &[1]))), "UR-01");
 }

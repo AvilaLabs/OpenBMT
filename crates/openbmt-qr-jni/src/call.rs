@@ -17,9 +17,19 @@
 //! | [`OP_DECODER_RECEIVE`] | handle `u32`, length `u32`, text | complete `u8`, received `u32`, expected `u32`, fraction in millionths `u32` |
 //! | [`OP_DECODER_RESULT`] | handle `u32` | type length `u8`, type, length `u32`, payload |
 //! | [`OP_DECODER_DROP`] | handle `u32` | none |
+//! | [`OP_KEY_TEXT`] | type length `u8`, type, length `u32`, message | the key text, in ASCII |
+//!
+//! A refusal of the key itself (UR-23 to UR-29) is a reply with the status
+//! [`REFUSED_WITH_WORDS`]: the rule code as five bytes, then the heading,
+//! what happened and what to do, each as a length `u16` and UTF-8.
 //!
 //! The payload of `ur_encode` and of a result is the content itself: the
 //! CBOR byte string of the types (UR-13, UR-14) is added and removed here.
+//! A result of a type that `key_text` reads (`crypto-account`,
+//! `crypto-hdkey` and the newer `hdkey`, `account-descriptor` and
+//! `output-descriptor`, so that they can be refused with words) is its CBOR
+//! as it came; `key_text` takes that, and for `bytes` the byte string around
+//! the content.
 //! A multi-part `ur_encode` answers with one full turn of the sequence, twice
 //! its length, so that a screen can show the parts round and round; a whole
 //! message answers with its one part.
@@ -33,8 +43,8 @@ use std::sync::{Mutex, PoisonError};
 use openbmt_qr::{encode_with, Ecc};
 use openbmt_ur::cbor::{decode_bytes, encode_bytes};
 use openbmt_ur::{
-    check_type, psbt_to_ur_parts, ur_to_psbt, Decoder, Encoder, MIN_FRAGMENT_LEN, TYPE_CRYPTO_PSBT,
-    TYPE_PSBT,
+    check_type, psbt_to_ur_parts, ur_to_key_text, ur_to_psbt, Decoder, Encoder, KeyRefusal,
+    MIN_FRAGMENT_LEN, TYPE_CRYPTO_PSBT, TYPE_PSBT,
 };
 
 /// The first four bytes of a request.
@@ -48,6 +58,8 @@ pub const VERSION: u8 = 1;
 pub const OK: u8 = 0;
 /// A reply that holds a rule code.
 pub const REFUSED: u8 = 1;
+/// A reply that holds a rule code and the words for it (`key_text` only).
+pub const REFUSED_WITH_WORDS: u8 = 2;
 
 /// Operation: draw a text as a QR code.
 pub const OP_QR_ENCODE: u8 = 1;
@@ -61,6 +73,8 @@ pub const OP_DECODER_RECEIVE: u8 = 4;
 pub const OP_DECODER_RESULT: u8 = 5;
 /// Operation: close a decoder.
 pub const OP_DECODER_DROP: u8 = 6;
+/// Operation: the cosigner key text in a finished UR (UR-31).
+pub const OP_KEY_TEXT: u8 = 7;
 
 /// The most decoders open at once.
 pub const MAX_DECODERS: usize = 4;
@@ -81,12 +95,18 @@ pub const BAD_STATE: &str = "UR-22";
 /// The type of OpenBMT's own framed objects.
 const TYPE_BYTES: &str = "bytes";
 
-/// A refusal: the rule code to give back.
-struct Refusal(String);
+/// A refusal: the rule code to give back, and the words when there are any.
+struct Refusal {
+    code: String,
+    words: Option<KeyRefusal>,
+}
 
 impl Refusal {
     fn of(code: &str) -> Self {
-        Self(code.to_string())
+        Self {
+            code: code.to_string(),
+            words: None,
+        }
     }
 }
 
@@ -94,11 +114,10 @@ type Done = Result<Vec<u8>, Refusal>;
 
 /// The first word of a library error's text: its rule code.
 fn code_of(text: &str) -> Refusal {
-    Refusal(
+    Refusal::of(
         text.split(|c: char| c == ':' || c.is_whitespace())
             .next()
-            .unwrap_or(BAD_FRAMING)
-            .to_string(),
+            .unwrap_or(BAD_FRAMING),
     )
 }
 
@@ -160,6 +179,19 @@ fn push_u32(out: &mut Vec<u8>, n: usize) -> Result<(), Refusal> {
     Ok(())
 }
 
+/// The rule code of a refusal of the key and its three texts.
+fn with_words(code: &str, why: &KeyRefusal) -> Vec<u8> {
+    let words = why.words();
+    let mut out = code.as_bytes().to_vec();
+    for text in [words.heading, words.what, words.next] {
+        // Each text is a short fixed sentence, far under 64 KiB.
+        let len = u16::try_from(text.len()).unwrap_or(u16::MAX);
+        out.extend_from_slice(&len.to_be_bytes());
+        out.extend_from_slice(text.as_bytes());
+    }
+    out
+}
+
 fn framed(status: u8, body: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(6 + body.len());
     out.extend_from_slice(&REPLY_MAGIC);
@@ -200,7 +232,11 @@ impl Calls {
     pub fn call(&self, request: &[u8]) -> Vec<u8> {
         match self.run(request) {
             Ok(body) => framed(OK, &body),
-            Err(Refusal(code)) => framed(REFUSED, code.as_bytes()),
+            Err(Refusal {
+                code,
+                words: Some(why),
+            }) => framed(REFUSED_WITH_WORDS, &with_words(&code, &why)),
+            Err(Refusal { code, words: None }) => framed(REFUSED, code.as_bytes()),
         }
     }
 
@@ -227,6 +263,7 @@ impl Calls {
         match r.u8()? {
             OP_QR_ENCODE => qr_encode(r),
             OP_UR_ENCODE => ur_encode(r),
+            OP_KEY_TEXT => key_text(r),
             OP_DECODER_NEW => {
                 r.end()?;
                 self.decoder_new()
@@ -296,6 +333,9 @@ impl Calls {
             decoder.result().ok_or_else(|| Refusal::of(BAD_STATE))
         })?;
         let payload = match ur_type.as_str() {
+            // The key types are read by `key_text`, which wants the CBOR.
+            "crypto-account" | "crypto-hdkey" | "hdkey" | "account-descriptor"
+            | "output-descriptor" => cbor,
             TYPE_BYTES => decode_bytes(&cbor)
                 .map_err(|e| code_of(&e.to_string()))?
                 .to_vec(),
@@ -398,6 +438,22 @@ fn ur_encode(mut r: Reader<'_>) -> Done {
         out.extend_from_slice(part.as_bytes());
     }
     Ok(out)
+}
+
+/// UR-31: the key text of a finished UR of a type and its message.
+fn key_text(mut r: Reader<'_>) -> Done {
+    let type_len = usize::from(r.u8()?);
+    let ur_type = std::str::from_utf8(r.take(type_len)?).map_err(|_| Refusal::of(BAD_FRAMING))?;
+    let message = r.sized()?;
+    r.end()?;
+    check_type(ur_type).map_err(|e| code_of(&e.to_string()))?;
+    match ur_to_key_text(ur_type, message) {
+        Ok(key) => Ok(key.into_string().into_bytes()),
+        Err(why) => Err(Refusal {
+            code: why.rule().to_string(),
+            words: Some(why),
+        }),
+    }
 }
 
 /// The table of the exported call: one for the process.

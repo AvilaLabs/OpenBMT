@@ -14,6 +14,25 @@ sealed class UrOutcome<out T> {
     object Fault : UrOutcome<Nothing>()
 }
 
+/**
+ * What the library answered to a request to read a cosigner key out of a finished code (UR-31): the
+ * key as text, a code that was read but is not a key this app takes (with the library's own words), or
+ * a request or answer that is not in the framing.
+ */
+sealed class KeyTextOutcome {
+    /** The key in the form the key ceremony takes: `[<fingerprint>/48h/<coin>h/0h/2h]<key>`. */
+    class Key(val text: String) : KeyTextOutcome()
+
+    /** The code is not taken as a key. [code] is the rule; the three texts are for the person. */
+    class Declined(val code: String, val heading: String, val what: String, val next: String) : KeyTextOutcome()
+
+    /** The request was refused before the code was looked at (a bad type, a bad frame). */
+    class Refused(val code: String) : KeyTextOutcome()
+
+    /** No answer, or one that does not follow the framing. */
+    object Fault : KeyTextOutcome()
+}
+
 /** A QR code as the library draws it: [side] by [side] modules, without the quiet zone. */
 class QrMatrix(val side: Int, private val packed: ByteArray) {
     /** Whether the module in column [x] and row [y] is dark. */
@@ -86,6 +105,89 @@ class UrCall(private val transport: (ByteArray) -> ByteArray?) {
             }
             if (at != body.size) null else parts
         }
+    }
+
+    /**
+     * The cosigner key in a finished code of [type] (`crypto-account`, `crypto-hdkey` or `bytes`): [payload]
+     * is what [result] gave, which for `bytes` is the content (its CBOR byte string is put back here).
+     * The newer types and other types come back as [KeyTextOutcome.Declined] with words.
+     */
+    fun keyText(type: String, payload: ByteArray): KeyTextOutcome {
+        val name = type.toByteArray(Charsets.US_ASCII)
+        if (name.isEmpty() || name.size > 255) return KeyTextOutcome.Refused(BAD_FRAMING)
+        val message = if (type == "bytes") byteString(payload) else payload
+        val out = head(OP_KEY_TEXT)
+        out.write(name.size)
+        out.write(name)
+        sized(out, message)
+        val bytes = out.toByteArray()
+        val reply = try {
+            transport(bytes)
+        } finally {
+            bytes.fill(0)
+        }
+        if (reply == null || reply.size < 6) return KeyTextOutcome.Fault
+        for (i in 0 until 4) if (reply[i] != REPLY_MAGIC[i]) return KeyTextOutcome.Fault
+        if (reply[4].toInt() != VERSION) return KeyTextOutcome.Fault
+        val body = reply.copyOfRange(6, reply.size)
+        return when (reply[5].toInt()) {
+            STATUS_OK -> {
+                if (body.isEmpty() || body.size > MAX_KEY_TEXT || body.any { it < 0x20 || it > 0x7e }) {
+                    KeyTextOutcome.Fault
+                } else {
+                    KeyTextOutcome.Key(String(body, Charsets.US_ASCII))
+                }
+            }
+            STATUS_REFUSED -> {
+                val code = String(body, Charsets.US_ASCII)
+                if (RULE_CODE.matches(code)) KeyTextOutcome.Refused(code) else KeyTextOutcome.Fault
+            }
+            STATUS_REFUSED_WITH_WORDS -> declined(body)
+            else -> KeyTextOutcome.Fault
+        }
+    }
+
+    /** The body of a refusal with words: the rule code, then three texts of a 16-bit length each, exactly. */
+    private fun declined(body: ByteArray): KeyTextOutcome {
+        if (body.size < 5) return KeyTextOutcome.Fault
+        val code = String(body, 0, 5, Charsets.US_ASCII)
+        if (!RULE_CODE.matches(code)) return KeyTextOutcome.Fault
+        var at = 5
+        val texts = ArrayList<String>(3)
+        for (i in 0 until 3) {
+            if (at + 2 > body.size) return KeyTextOutcome.Fault
+            val len = u16(body, at)
+            at += 2
+            if (len == 0 || len > body.size - at) return KeyTextOutcome.Fault
+            texts.add(String(body, at, len, Charsets.UTF_8))
+            at += len
+        }
+        if (at != body.size) return KeyTextOutcome.Fault
+        return KeyTextOutcome.Declined(code, texts[0], texts[1], texts[2])
+    }
+
+    /** [content] as a CBOR byte string: the shortest head, then the bytes. */
+    private fun byteString(content: ByteArray): ByteArray {
+        val out = ByteArrayOutputStream()
+        val n = content.size
+        when {
+            n < 24 -> out.write(0x40 or n)
+            n <= 0xff -> {
+                out.write(0x58)
+                out.write(n)
+            }
+            n <= 0xffff -> {
+                out.write(0x59)
+                out.write(n shr 8)
+                out.write(n and 0xff)
+            }
+            else -> {
+                out.write(0x5a)
+                u32(out, n.toLong())
+            }
+        }
+        out.write(content)
+        return out.toByteArray()
     }
 
     /** Opens a decoder; the handle is a number that is never given twice. */
@@ -183,12 +285,14 @@ class UrCall(private val transport: (ByteArray) -> ByteArray?) {
         const val VERSION = 1
         const val STATUS_OK = 0
         const val STATUS_REFUSED = 1
+        const val STATUS_REFUSED_WITH_WORDS = 2
         const val OP_QR_ENCODE = 1
         const val OP_UR_ENCODE = 2
         const val OP_DECODER_NEW = 3
         const val OP_DECODER_RECEIVE = 4
         const val OP_DECODER_RESULT = 5
         const val OP_DECODER_DROP = 6
+        const val OP_KEY_TEXT = 7
 
         /** The rule codes of the call itself. */
         const val TYPE_NOT_USED = "UR-20"
@@ -197,6 +301,9 @@ class UrCall(private val transport: (ByteArray) -> ByteArray?) {
 
         /** The most parts one reply can hold: two turns of the longest sequence. */
         private const val MAX_PARTS = 20_000L
+
+        /** The longest key text: the origin and an extended key of at most 112 characters. */
+        private const val MAX_KEY_TEXT = 160
         private val RULE_CODE = Regex("^(UR|QR)-[0-9]{2}$")
 
         /** The call through the library; [org.openbmt.common.QrNative.load] must have loaded it. */

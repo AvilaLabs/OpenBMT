@@ -74,6 +74,12 @@ object UrWords {
         null, null, null, null,
     )
 
+    /** A code that was read in full but is not taken as a key: the library's own words, in the colour of a stop. */
+    fun keyDeclined(who: Int, declined: KeyTextOutcome.Declined) = SayWords(
+        Tones.STOP, who, declined.heading, declined.what, declined.next,
+        declined.code, null, null, null,
+    )
+
     /** The words of reading a code that changes, for the tests and the lists of words. */
     fun forReading(who: Int): List<Pair<String, SayWords>> = listOf(
         "UrWords.reading" to reading(who, 3, 9),
