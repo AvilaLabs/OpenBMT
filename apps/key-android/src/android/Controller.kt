@@ -11,18 +11,28 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.View
+import android.widget.Button
 import android.widget.EditText
 import android.view.accessibility.AccessibilityManager
 import java.io.File
 import java.io.IOException
+import org.openbmt.app.AnimatedQrMade
 import org.openbmt.app.AnimatedQrView
+import org.openbmt.app.Colour
+import org.openbmt.app.Feedback
+import org.openbmt.app.HoldButton
 import org.openbmt.app.ExternalWait
 import org.openbmt.app.Format
 import org.openbmt.app.KeyLevel
 import org.openbmt.app.KeystoreSealer
+import org.openbmt.app.LineStyle
+import org.openbmt.app.ReceiptLine
 import org.openbmt.app.Relock
+import org.openbmt.app.RowItem
 import org.openbmt.app.ScanFlow
 import org.openbmt.app.SealedFile
+import org.openbmt.app.StatusItem
+import org.openbmt.app.Tone
 import org.openbmt.app.Tries
 import org.openbmt.app.TriesFile
 import org.openbmt.app.Ui
@@ -56,7 +66,9 @@ import org.openbmt.key.Words
  * file or by scanning a QR code (one code, or a code that changes, shown part by part).
  */
 class Controller(private val act: MainActivity) {
-    private val ui = Ui(act)
+    /** The Key app always draws in the dark scheme, whatever the phone's mode. */
+    private val dark = DarkContext(act)
+    private val ui = Ui(dark)
     private val scan = ScanFlow(act, ui)
     private var store: PersistentStore? = null
     private var level: KeyLevel? = null
@@ -143,14 +155,10 @@ class Controller(private val act: MainActivity) {
     }
 
     /**
-     * SR-83: a change between light and dark draws the screen again, in place, from the library's state. Nothing is
-     * drawn while the screen is cleared, a picker or the camera is open, or the app has no state; a screen that is
-     * not drawn from state gives way to the one the state names, which asks for the PIN while the app is locked.
+     * SR-83: a change between light and dark has nothing to draw: this app is always dark, so the screen on show
+     * is already the one the state names.
      */
-    fun redraw() {
-        if (cleared || pickerOpen || scan.asking || app == null) return
-        refresh(null)
-    }
+    fun redraw() {}
 
     fun paused() {
         if (pickerOpen || scan.asking) return
@@ -232,8 +240,8 @@ class Controller(private val act: MainActivity) {
 
     private fun render(screen: Screen, state: SetupState? = null) {
         when (screen) {
-            is Screen.Refused -> act.show(ui.page(screen.words.map { ui.words(it) } + ui.primary("Check again") { start() }))
-            is Screen.Fault -> act.show(ui.page(listOf(ui.words(screen.words), ui.primary("Try again") { start() })))
+            is Screen.Refused -> showCenter(screen.words, ui.primary("Check again") { start() })
+            is Screen.Fault -> showCenter(listOf(screen.words), ui.primary("Try again") { start() })
             is Screen.Unlock -> showUnlock(null)
             is Screen.SetPin -> showSetPin(screen.upgrade, null)
             is Screen.Wiped -> showWiped()
@@ -245,6 +253,57 @@ class Controller(private val act: MainActivity) {
             is Screen.Home -> showHome(state ?: SetupState.Ready(screen.holdsKey2))
         }
     }
+
+    // ---- the page and its parts -----------------------------------------------------
+
+    private fun model(w: Words): WordsModel = WordsModel.of(w.say())
+
+    /** A screen: the bar, the body that scrolls and the footer. [logo] is the bar of the screens that have no way back. */
+    private fun put(
+        title: String,
+        body: List<View>,
+        actions: List<Button> = emptyList(),
+        back: (() -> Unit)? = null,
+        logo: Boolean = false,
+        tone: Tone? = null,
+    ) {
+        act.show(ui.page(ui.bar(title, back = back, logo = logo), body, actions, tone))
+    }
+
+    /** A screen that is one message: a result, a refusal or an error. A second message is shown as a notice under the first. */
+    private fun showCenter(words: List<Words>, vararg actions: Button, title: String? = null, back: (() -> Unit)? = null) {
+        val first = model(words[0])
+        val body = ArrayList<View>()
+        body.add(ui.resultPanel(first))
+        for (w in words.drop(1)) body.add(ui.notice(model(w)))
+        put(title ?: "Key", body, actions.toList(), back, logo = title == null, tone = ui.pal.of(first.colour))
+    }
+
+    /** A heading that is not the bar's, and the sentence under it, for a screen that has no words of the library. */
+    private fun plain(heading: String, what: String?, barTitle: String): View {
+        val model = WordsModel(Colour.Blue, heading, what ?: "", "", "", null, null, emptyList())
+        if (what != null) return ui.titleBlock(model, barTitle)
+        return ui.titleBlock(model, barTitle).also { v ->
+            // No sentence: the heading alone, or nothing when it is the bar's own.
+            (v as android.view.ViewGroup).removeViewAt(v.childCount - 1)
+            if (heading == barTitle) v.visibility = View.GONE
+        }
+    }
+
+    private fun setLabel(labelled: View, text: String) {
+        ((labelled as android.view.ViewGroup).getChildAt(0) as android.widget.TextView).text = text
+    }
+
+    private fun card(view: View): View = android.widget.LinearLayout(dark).apply {
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(ui.pal.surface)
+            cornerRadius = ui.px(16).toFloat()
+        }
+        setPadding(ui.px(16), ui.px(14), ui.px(16), ui.px(14))
+        addView(view)
+    }
+
+    private fun centred(v: android.widget.TextView): android.widget.TextView = v.also { it.gravity = android.view.Gravity.CENTER }
 
     /** The library call [block], with the library's words on a refusal. [back] shows the screen to return to. */
     private fun <T> attempt(back: () -> Unit, block: () -> T): T? {
@@ -259,15 +318,20 @@ class Controller(private val act: MainActivity) {
     }
 
     private fun showMessage(words: Words, back: () -> Unit) {
-        act.show(ui.page(listOf(ui.words(words), ui.primary("Back", WordsModel.buttonColour(words.say().tone)) { back() })))
+        showCenter(listOf(words), ui.primary("Back") { back() })
+    }
+
+    /** The same, with the heading as the bar's title and a way back from the bar. */
+    private fun showTitled(words: Words, title: String, back: () -> Unit) {
+        showCenter(listOf(words), ui.primary("Back") { back() }, title = title, back = back)
     }
 
     private fun banner(): List<View> =
-        if (level == KeyLevel.Software) listOf(ui.words(AppWords.keyInSoftware)) else emptyList()
+        if (level == KeyLevel.Software) listOf(ui.notice(model(AppWords.keyInSoftware))) else emptyList()
 
     private fun networkChoice(): android.widget.RadioGroup {
         val names = listOf("Main bitcoin network", "Test network", "Signet", "Regtest")
-        val group = ui.choice(names, network.ordinal)
+        val group = ui.chips(names, network.ordinal)
         group.setOnCheckedChangeListener { _, _ -> network = KeyNetwork.values()[ui.chosen(group).coerceAtLeast(0)] }
         return group
     }
@@ -293,25 +357,36 @@ class Controller(private val act: MainActivity) {
         ui.style(it)
     }
 
+    /** Set when the last try was a wrong PIN: the screen that shows it again shakes its field once. */
+    private var wrongPin = false
+
+    private fun shakeIfWrong(field: View) {
+        if (!wrongPin) return
+        wrongPin = false
+        field.post { Feedback.shake(field) }
+    }
+
     /**
      * The page is drawn first, then [block] runs a moment later on the main thread: the key from the PIN
      * takes about a second, and the person sees that the app is working and not stuck (SR-77).
      */
     private fun slow(block: () -> Unit) {
-        act.show(ui.page(listOf(ui.words(AppWords.working))))
+        put("Key", listOf(ui.working(model(AppWords.working))), logo = true)
         main.postDelayed({ if (app != null) block() }, 100)
     }
 
     /** SR-72: a PIN for a new or restored key, or for a key an older build saved without one. */
     private fun showSetPin(upgrade: Boolean, message: Words?) {
         val a = app ?: return
-        val kind = ui.choice(listOf("PIN: 6 digits or more", "Passphrase: 8 characters or more"))
-        val first = secret("PIN", true)
-        val again = secret("The same PIN again", true)
+        val kind = ui.chips(listOf("PIN: 6 digits or more", "Passphrase: 8 characters or more"))
+        val first = secret("", true)
+        val again = secret("", true)
+        val firstBox = ui.labelled("PIN", first)
+        val againBox = ui.labelled("The same PIN again", again)
         kind.setOnCheckedChangeListener { _, _ ->
             val numeric = ui.chosen(kind) != 1
-            first.hint = if (numeric) "PIN" else "Passphrase"
-            again.hint = if (numeric) "The same PIN again" else "The same passphrase again"
+            setLabel(firstBox, if (numeric) "PIN" else "Passphrase")
+            setLabel(againBox, if (numeric) "The same PIN again" else "The same passphrase again")
             for (f in listOf(first, again)) {
                 f.setText("")
                 f.inputType = if (numeric) {
@@ -322,32 +397,33 @@ class Controller(private val act: MainActivity) {
                 ui.style(f)
             }
         }
+        val words = model(if (upgrade) AppWords.upgradePin else AppWords.choosePin)
         val views = ArrayList<View>(banner())
-        message?.let { views.add(ui.words(it)) }
-        views.add(ui.words(if (upgrade) AppWords.upgradePin else AppWords.choosePin))
-        views.addAll(listOf(kind, first, again))
-        views.add(
-            ui.primary("Set the PIN") {
-                allowed {
-                    val pin = first.text.toString()
-                    val same = pin == again.text.toString()
-                    first.setText("")
-                    again.setText("")
-                    if (!same) return@allowed showSetPin(upgrade, AppWords.pinsDiffer)
-                    slow {
-                        try {
-                            a.setPin(pin)
-                            refresh()
-                        } catch (e: KeyException) {
-                            showSetPin(upgrade, e.words ?: AppWords.fault(e))
-                        } catch (e: LinkageError) {
-                            showMessage(AppWords.libraryMissing(e.message)) { showSetPin(upgrade, null) }
-                        }
+        message?.let { views.add(ui.notice(model(it))) }
+        views.add(ui.lock())
+        views.add(ui.titleBlock(words, "Key"))
+        views.addAll(listOf(kind, firstBox, againBox))
+        views.add(ui.hint(words))
+        val set = ui.primary("Set the PIN") {
+            allowed {
+                val pin = first.text.toString()
+                val same = pin == again.text.toString()
+                first.setText("")
+                again.setText("")
+                if (!same) return@allowed showSetPin(upgrade, AppWords.pinsDiffer)
+                slow {
+                    try {
+                        a.setPin(pin)
+                        refresh()
+                    } catch (e: KeyException) {
+                        showSetPin(upgrade, e.words ?: AppWords.fault(e))
+                    } catch (e: LinkageError) {
+                        showMessage(AppWords.libraryMissing(e.message)) { showSetPin(upgrade, null) }
                     }
                 }
-            },
-        )
-        act.show(ui.page(views))
+            }
+        }
+        put("Key", views, listOf(set), logo = true)
     }
 
     /** What the screens say about the wrong tries so far: the tries left from the 5th, and the wait. */
@@ -398,6 +474,7 @@ class Controller(private val act: MainActivity) {
         views.add(ui.labelled("PIN or passphrase", field))
         views.add(ui.hint(words))
         act.show(ui.page(ui.bar(UNLOCK_TITLE), views, listOf(unlock)))
+        shakeIfWrong(field)
         if (check.waitLeft > 0) {
             val tick = object : Runnable {
                 override fun run() {
@@ -438,7 +515,12 @@ class Controller(private val act: MainActivity) {
                 done()
             } catch (e: KeyException) {
                 if (e.rule == RULE_PIN_WRONG) {
-                    if (before.wrong >= Tries.WIPE_AT) wipe() else back(e.words ?: AppWords.fault(e))
+                    if (before.wrong >= Tries.WIPE_AT) {
+                        wipe()
+                    } else {
+                        wrongPin = true
+                        back(e.words ?: AppWords.fault(e))
+                    }
                 } else {
                     try {
                         tries.write(check.record)
@@ -458,20 +540,13 @@ class Controller(private val act: MainActivity) {
         try {
             Wipe.run(act.noBackupFilesDir, tries) { KeyWipe.deleteKey() }
         } catch (e: IOException) {
-            return act.show(ui.page(listOf(ui.words(AppWords.wipeFailed(e.message)), ui.primary("Try again") { start() })))
+            return showCenter(listOf(AppWords.wipeFailed(e.message)), ui.primary("Try again") { start() })
         }
         showWiped()
     }
 
     private fun showWiped() {
-        act.show(
-            ui.page(
-                listOf(
-                    ui.words(AppWords.wiped),
-                    ui.primary("Restore the key from its words") { start() },
-                ),
-            ),
-        )
+        showCenter(listOf(AppWords.wiped), ui.primary("Restore the key from its words") { start() })
     }
 
     /** Changing the PIN asks for the current one, and a wrong one counts like a wrong try at the unlock screen. */
@@ -480,31 +555,32 @@ class Controller(private val act: MainActivity) {
         val now = clock()
         val check = Tries.check(tries.read(now), now)
         if (check.wipe) return wipe()
-        val current = secret("Current PIN or passphrase", false)
-        val first = secret("New PIN or passphrase", false)
-        val again = secret("The new one again", false)
+        val current = secret("", false)
+        val first = secret("", false)
+        val again = secret("", false)
         val views = ArrayList<View>(banner())
-        views.add(ui.text("Change the PIN", 20f, bold = true))
-        message?.let { views.add(ui.words(it)) }
+        views.add(ui.lock())
+        views.add(plain("Change the PIN", null, "Change the PIN"))
+        message?.let { views.add(ui.notice(model(it))) }
         views.addAll(triesLines(check))
         if (check.waitLeft > 0) views.add(ui.text("Wait ${Tries.waitText(check.waitLeft)}", 20f, bold = true))
-        views.addAll(listOf(current, first, again))
-        views.add(
-            ui.primary("Change the PIN") {
-                allowed {
-                    val old = current.text.toString()
-                    val new = first.text.toString()
-                    val same = new == again.text.toString()
-                    for (f in listOf(current, first, again)) f.setText("")
-                    if (!same) return@allowed showChangePin(AppWords.pinsDiffer)
-                    triedPin({ showChangePin(it) }, { a.changePin(old, new) }) {
-                        showMessage(AppWords.pinChanged) { refresh() }
-                    }
+        views.add(ui.labelled("Current PIN or passphrase", current))
+        views.add(ui.labelled("New PIN or passphrase", first))
+        views.add(ui.labelled("The new one again", again))
+        val change = ui.primary("Change the PIN") {
+            allowed {
+                val old = current.text.toString()
+                val new = first.text.toString()
+                val same = new == again.text.toString()
+                for (f in listOf(current, first, again)) f.setText("")
+                if (!same) return@allowed showChangePin(AppWords.pinsDiffer)
+                triedPin({ showChangePin(it) }, { a.changePin(old, new) }) {
+                    showTitled(AppWords.pinChanged, AppWords.pinChanged.say().heading) { refresh() }
                 }
-            },
-        )
-        views.add(ui.button("Back") { refresh() })
-        act.show(ui.page(views))
+            }
+        }
+        put("Change the PIN", views, listOf(change, ui.button("Back") { refresh() }), back = { refresh() })
+        shakeIfWrong(current)
     }
 
     // ---- cash-out addresses (SR-78, SR-79) ------------------------------------------------
@@ -513,42 +589,43 @@ class Controller(private val act: MainActivity) {
     private fun showCashOut() {
         val a = app ?: return
         val s = attempt({ refresh() }) { a.signerStatus() } ?: return
+        val words = model(AppWords.cashOut)
         val views = ArrayList<View>(banner())
-        views.add(ui.words(AppWords.cashOut))
+        views.add(ui.titleBlock(words, "Cash-out addresses"))
         val rows = s.allowlist.map { CashOut.row(it, s.effectiveTimeNow) }
         if (rows.isEmpty()) views.add(ui.text("No cash-out addresses yet.", 16f))
         for (row in rows) {
-            views.add(ui.text(row.label, 18f, bold = true))
-            views.add(ui.text(row.address, 15f, mono = true))
-            views.add(ui.text("Added ${row.enrolled}, ${row.status}", 14f))
-            row.removable?.let { address -> views.add(ui.danger("Remove") { showRemoveAddress(row, address) }) }
+            val item = android.widget.LinearLayout(dark).apply { orientation = android.widget.LinearLayout.VERTICAL }
+            item.addView(ui.text(row.label, 18f, bold = true))
+            item.addView(ui.text(row.address, 13f, mono = true, colour = ui.pal.secondary), ui.margins(top = 4))
+            item.addView(ui.text("Added ${row.enrolled}, ${row.status}", 13f), ui.margins(top = 4))
+            row.removable?.let { address -> item.addView(ui.danger("Remove") { showRemoveAddress(row, address) }, ui.margins(top = 10)) }
+            views.add(card(item))
         }
-        views.add(ui.primary("Add an address") { showScanDeposit() })
-        views.add(ui.button("Back") { refresh() })
-        act.show(ui.page(views))
+        views.add(ui.hint(words))
+        put("Cash-out addresses", views, listOf(ui.primary("Add an address") { showScanDeposit() }, ui.button("Back") { refresh() }), back = { refresh() })
     }
 
     /** SR-78: the address only comes from the camera. There is no field for it. */
     private fun showScanDeposit() {
         allowed {
             val back = { showCashOut() }
-            act.show(
-                ui.page(
-                    listOf(
-                        ui.words(AppWords.scanDeposit),
-                        ui.primary("Scan the deposit code") {
-                            allowed {
-                                scan.begin(
-                                    show = { act.show(it) },
-                                    onBytes = { bytes -> allowed { depositScanned(bytes) } },
-                                    onFailed = { showMessage(cameraWords(it), back) },
-                                    onCancel = { showScanDeposit() },
-                                )
-                            }
-                        },
-                        ui.button("Back") { back() },
-                    ),
-                ),
+            val words = model(AppWords.scanDeposit)
+            val scanDeposit = ui.primary("Scan the deposit code") {
+                allowed {
+                    scan.begin(
+                        show = { act.show(scanPage(ui, it)) },
+                        onBytes = { bytes -> allowed { depositScanned(bytes) } },
+                        onFailed = { showMessage(cameraWords(it), back) },
+                        onCancel = { showScanDeposit() },
+                    )
+                }
+            }
+            put(
+                "Add an address",
+                listOf(ui.titleBlock(words, "Add an address"), ui.hint(words)),
+                listOf(scanDeposit, ui.button("Back") { back() }),
+                back = back,
             )
         }
     }
@@ -569,57 +646,65 @@ class Controller(private val act: MainActivity) {
     private fun showNameAddress(text: String, address: String, label: String) {
         val field = ui.field("A name for this address (1 to 64 characters)")
         field.setText(label)
-        act.show(
-            ui.page(
-                banner() + listOf(
-                    ui.words(AppWords.nameAddress),
-                    ui.text(CashOut.groupsOfFour(address), 16f, mono = true),
-                    field,
-                    ui.primary("Next") { showConfirmAddress(text, address, field.text.toString().trim()) },
-                    ui.button("Back") { showCashOut() },
-                ),
+        val words = model(AppWords.nameAddress)
+        put(
+            "Name this address",
+            banner() + listOf(
+                ui.titleBlock(words, "Name this address"),
+                ui.text(CashOut.groupsOfFour(address), 16f, mono = true, colour = ui.pal.secondary),
+                field,
+                ui.hint(words),
             ),
+            listOf(
+                ui.primary("Next") { showConfirmAddress(text, address, field.text.toString().trim()) },
+                ui.button("Back") { showCashOut() },
+            ),
+            back = { showCashOut() },
         )
     }
 
     /** SR-78: the address in groups of four, and that it is usable 24 hours from now by this phone's clock. */
     private fun showConfirmAddress(text: String, address: String, label: String) {
         val a = app ?: return
-        act.show(
-            ui.page(
-                banner() + listOf(
-                    ui.words(AppWords.checkAddress),
-                    ui.text(Format.cleanForeign(label), 18f, bold = true),
-                    ui.text(CashOut.groupsOfFour(address), 22f, bold = true, mono = true),
-                    ui.primary("Add this address") {
-                        allowed {
-                            attempt({ showNameAddress(text, address, label) }) { a.enrollDestination(text, label) }
-                                ?.let { showMessage(AppWords.addressAdded) { showCashOut() } }
-                        }
-                    },
-                    ui.button("Back") { showNameAddress(text, address, label) },
-                ),
+        val words = model(AppWords.checkAddress)
+        val add = ui.primary("Add this address") {
+            allowed {
+                attempt({ showNameAddress(text, address, label) }) { a.enrollDestination(text, label) }
+                    ?.let { showMessage(AppWords.addressAdded) { showCashOut() } }
+            }
+        }
+        put(
+            "Next",
+            banner() + listOf(
+                ui.titleBlock(words, "Next"),
+                ui.text(Format.cleanForeign(label), 18f, bold = true),
+                ui.text(CashOut.groupsOfFour(address), 22f, bold = true, mono = true),
+                ui.hint(words),
             ),
+            listOf(add, ui.button("Back") { showNameAddress(text, address, label) }),
+            back = { showNameAddress(text, address, label) },
         )
     }
 
     private fun showRemoveAddress(row: CashOutRow, address: String) {
         val a = app ?: return
-        act.show(
-            ui.page(
-                banner() + listOf(
-                    ui.words(AppWords.removeAddress),
-                    ui.text(row.label, 18f, bold = true),
-                    ui.text(row.address, 16f, mono = true),
-                    ui.danger("Remove it") {
-                        allowed {
-                            attempt({ showCashOut() }) { a.removeDestination(address) }
-                                ?.let { showMessage(AppWords.addressRemoved) { showCashOut() } }
-                        }
-                    },
-                    ui.button("Back") { showCashOut() },
-                ),
+        val words = model(AppWords.removeAddress)
+        val remove = ui.danger("Remove it") {
+            allowed {
+                attempt({ showCashOut() }) { a.removeDestination(address) }
+                    ?.let { showMessage(AppWords.addressRemoved) { showCashOut() } }
+            }
+        }
+        put(
+            "Remove",
+            banner() + listOf(
+                ui.titleBlock(words, "Remove"),
+                ui.text(row.label, 18f, bold = true),
+                ui.text(row.address, 16f, mono = true, colour = ui.pal.secondary),
+                ui.hint(words),
             ),
+            listOf(remove, ui.button("Back") { showCashOut() }),
+            back = { showCashOut() },
         )
     }
 
@@ -628,22 +713,26 @@ class Controller(private val act: MainActivity) {
     private fun showSetup() {
         val a = app ?: return
         val back = { refresh() }
-        act.show(
-            ui.page(
-                banner() + listOf(
-                    ui.words(AppWords.state(SetupState.Empty)),
-                    ui.text("Network", 16f, bold = true),
-                    networkChoice(),
-                    ui.button("Let this device make the key") {
-                        allowed { attempt(back) { a.createFromEntropy(EntropySource.Platform, network) }?.let { refresh() } }
-                    },
-                    ui.button("Make it with dice or coins") { showThrows() },
-                    ui.button("Type in existing words") { showTypedWords() },
-                    ui.button("Approver only: no key 2 on this phone") {
-                        allowed { attempt(back) { a.createApproverOnly() }?.let { refresh() } }
-                    },
-                ),
+        val words = model(AppWords.state(SetupState.Empty))
+        val views = ArrayList<View>(banner())
+        views.add(ui.titleBlock(words, "Key"))
+        views.add(ui.label("Network"))
+        views.add(networkChoice())
+        views.add(ui.hint(words))
+        put(
+            "Key",
+            views,
+            listOf(
+                ui.primary("Let this device make the key") {
+                    allowed { attempt(back) { a.createFromEntropy(EntropySource.Platform, network) }?.let { refresh() } }
+                },
+                ui.button("Make it with dice or coins") { showThrows() },
+                ui.button("Type in existing words") { showTypedWords() },
+                ui.button("Approver only: no key 2 on this phone") {
+                    allowed { attempt(back) { a.createApproverOnly() }?.let { refresh() } }
+                },
             ),
+            logo = true,
         )
     }
 
@@ -653,9 +742,9 @@ class Controller(private val act: MainActivity) {
         val method = ui.choice(
             listOf("Dice, hashed (99 rolls, 24 words)", "Dice, skew-corrected", "Coin, skew-corrected"),
         )
-        val count = ui.choice(listOf("24 words", "12 words"))
+        val count = ui.chips(listOf("24 words", "12 words"))
         val input = ui.field("Dice faces 1 to 6, or heads H and tails T", lines = 4)
-        val progress = ui.text("", 14f)
+        val progress = ui.text("", 13f, colour = ui.pal.secondary)
 
         fun words() = if (ui.chosen(count) == 1) KeyWordCount.Twelve else KeyWordCount.TwentyFour
 
@@ -684,40 +773,45 @@ class Controller(private val act: MainActivity) {
         method.setOnCheckedChangeListener { _, _ -> update() }
         count.setOnCheckedChangeListener { _, _ -> update() }
 
-        act.show(
-            ui.page(
-                banner() + listOf(
-                    ui.text("Make the key yourself", 20f, bold = true),
-                    ui.text("Nothing but your throws goes into the key: the same throws give the same words in another tool.", 14f),
-                    method, count, input, progress,
-                    ui.primary("Make the key") {
-                        allowed {
-                            val text = input.text.toString()
-                            val source: EntropySource? = when (ui.chosen(method)) {
-                                0 -> EntropySource.DiceHashed(Format.toRolls(text))
-                                1 -> EntropySource.DiceSkewCorrected(Format.toRolls(text), words())
-                                else -> Format.toFlips(text)?.let { EntropySource.CoinFlips(it, words()) }
-                            }
-                            if (source == null) {
-                                showMessage(AppWords.flipsNotReadable) { showThrows() }
-                            } else {
-                                attempt({ showThrows() }) { a.createFromEntropy(source, network) }?.let {
-                                    input.setText("")
-                                    refresh()
-                                }
+        put(
+            "Make it with dice or coins",
+            banner() + listOf(
+                plain(
+                    "Make the key yourself",
+                    "Nothing but your throws goes into the key: the same throws give the same words in another tool.",
+                    "Make it with dice or coins",
+                ),
+                method, count, input, progress,
+            ),
+            listOf(
+                ui.primary("Make the key") {
+                    allowed {
+                        val text = input.text.toString()
+                        val source: EntropySource? = when (ui.chosen(method)) {
+                            0 -> EntropySource.DiceHashed(Format.toRolls(text))
+                            1 -> EntropySource.DiceSkewCorrected(Format.toRolls(text), words())
+                            else -> Format.toFlips(text)?.let { EntropySource.CoinFlips(it, words()) }
+                        }
+                        if (source == null) {
+                            showMessage(AppWords.flipsNotReadable) { showThrows() }
+                        } else {
+                            attempt({ showThrows() }) { a.createFromEntropy(source, network) }?.let {
+                                input.setText("")
+                                refresh()
                             }
                         }
-                    },
-                    ui.button("Back") { back() },
-                ),
+                    }
+                },
+                ui.button("Back") { back() },
             ),
+            back = back,
         )
     }
 
     private fun showTypedWords() {
         val a = app ?: return
         val input = ui.field("12 or 24 words, with spaces between them", lines = 3)
-        val hint = ui.text("", 14f)
+        val hint = ui.text("", 13f, colour = ui.pal.secondary)
         input.addTextChangedListener(
             object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
@@ -732,45 +826,51 @@ class Controller(private val act: MainActivity) {
                 }
             },
         )
-        act.show(
-            ui.page(
-                banner() + listOf(
-                    ui.text("Type in the words", 20f, bold = true),
-                    ui.text("A key made from typed words is a new key here, with its own limits.", 14f),
-                    ui.text("Network", 16f, bold = true),
-                    networkChoice(),
-                    input, hint,
-                    ui.primary("Use these words") {
-                        allowed {
-                            val words = input.text.toString().trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-                            attempt({ showTypedWords() }) { a.createFromEntropy(EntropySource.TypedWords(words), network) }
-                                ?.let {
-                                    input.setText("")
-                                    refresh()
-                                }
-                        }
-                    },
-                    ui.button("Back") { refresh() },
-                ),
+        put(
+            "Type in existing words",
+            banner() + listOf(
+                plain("Type in the words", "A key made from typed words is a new key here, with its own limits.", "Type in existing words"),
+                ui.label("Network"),
+                networkChoice(),
+                input, hint,
             ),
+            listOf(
+                ui.primary("Use these words") {
+                    allowed {
+                        val words = input.text.toString().trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+                        attempt({ showTypedWords() }) { a.createFromEntropy(EntropySource.TypedWords(words), network) }
+                            ?.let {
+                                input.setText("")
+                                refresh()
+                            }
+                    }
+                },
+                ui.button("Back") { refresh() },
+            ),
+            back = { refresh() },
         )
     }
 
     private fun showKeyWords() {
         val a = app ?: return
         val words = attempt({ refresh() }) { a.keyWords() } ?: return
-        val shown = ui.text(words.withIndex().joinToString("\n") { (i, w) -> "${i + 1}. $w" }, 20f, mono = true)
-        act.show(
-            ui.page(
-                banner() + listOf(
-                    ui.words(AppWords.state(SetupState.HasIdentity(true, true))),
-                    shown,
-                    ui.primary("Words written down") {
-                        shown.text = ""
-                        refresh()
-                    },
-                ),
+        // Four words go through the cards; twelve or more stay a numbered list in one card.
+        val shown = ui.text(ScreenParts.numbered(words), 20f, bold = true, mono = true)
+        val say = model(AppWords.state(SetupState.HasIdentity(true, true)))
+        put(
+            "Key",
+            banner() + listOf(
+                ui.titleBlock(say, "Key"),
+                if (ScreenParts.asCards(words.size)) ui.wordCards(words) else card(shown),
+                ui.hint(say),
             ),
+            listOf(
+                ui.primary("Words written down") {
+                    shown.text = ""
+                    refresh()
+                },
+            ),
+            logo = true,
         )
     }
 
@@ -794,20 +894,24 @@ class Controller(private val act: MainActivity) {
      */
     private fun showKey3(back: (() -> Unit)?) {
         val paste = ui.field(AppWords.Text.PASTE_KEY3, lines = 3, mono = true)
+        val words = model(AppWords.key3Needed)
         val views = ArrayList<View>(banner())
-        views.add(ui.words(AppWords.key3Needed))
+        views.add(ui.titleBlock(words, "Key"))
         views.addAll(advanced(AppWords.Text.ADVANCED_KEY3))
-        views.add(ui.primary(AppWords.Text.SCAN_KEY3) { scanKey3(back) })
         views.add(paste)
-        views.add(ui.button("Use the pasted text") { allowed { takeKey3(CeremonyModel.readKey3Text(paste.text.toString()), back) } })
-        if (back != null) views.add(ui.button("Back") { back() })
-        act.show(ui.page(views))
+        views.add(ui.hint(words))
+        val actions = arrayListOf(
+            ui.primary(AppWords.Text.SCAN_KEY3) { scanKey3(back) },
+            ui.button("Use the pasted text") { allowed { takeKey3(CeremonyModel.readKey3Text(paste.text.toString()), back) } },
+        )
+        if (back != null) actions.add(ui.button("Back") { back() })
+        put("Key", views, actions, logo = true)
     }
 
     private fun scanKey3(back: (() -> Unit)?) {
         allowed {
             scan.begin(
-                show = { act.show(it) },
+                show = { act.show(scanPage(ui, it)) },
                 onBytes = { bytes -> allowed { takeKey3(CeremonyModel.readKey3Code(bytes), back) } },
                 onFailed = { showMessage(cameraWords(it)) { showKey3(back) } },
                 onCancel = { showKey3(back) },
@@ -830,14 +934,27 @@ class Controller(private val act: MainActivity) {
     /** The fingerprint of key 3, large, to be checked against the other wallet's screen. */
     private fun showKey3Taken(v: Key3View) {
         val c = CeremonyModel.key3Check(v)
+        val words = model(AppWords.key3Taken)
         val views = ArrayList<View>(banner())
-        views.add(ui.words(AppWords.key3Taken))
-        views.add(ui.text(c.fingerprint, 40f, bold = true, mono = true))
-        views.add(ui.text(c.network, 14f))
+        views.add(ui.titleBlock(words, "Scan key 3"))
+        views.add(centred(ui.text(c.fingerprint, 40f, bold = true, mono = true)))
+        views.add(centred(ui.text(c.network, 13f, colour = ui.pal.secondary)))
         views.addAll(advanced(c.advanced.joinToString("\n")))
-        views.add(ui.primary("They match") { showAnswer(v) })
-        views.add(ui.danger("They differ") { showMessage(AppWords.key3Mismatch) { showKey3(null) } })
-        act.show(ui.page(views))
+        views.add(ui.hint(words))
+        put(
+            "Scan key 3",
+            views,
+            listOf(
+                ui.primary("They match") { showAnswer(v) },
+                ui.danger("They differ") { showMessage(AppWords.key3Mismatch) { showKey3(null) } },
+            ),
+        )
+    }
+
+    /** A code in a card, or the words that say why it cannot be shown. */
+    private fun codeBlock(made: AnimatedQrMade?): View {
+        val view = made?.view
+        return if (view != null) ui.codeCard(view) else ui.notice(WordsModel.of(made?.words ?: UrWords.cannotShow(Who.KEY_HOLDER)))
     }
 
     /** Step 5, first half: the public answer as a code for the owner phone to scan. */
@@ -845,40 +962,41 @@ class Controller(private val act: MainActivity) {
         allowed {
             val a = app ?: return@allowed
             val bytes = attempt({ refresh() }) { a.publicAnswer() } ?: return@allowed
+            val words = model(AppWords.publicAnswerReady)
             val views = ArrayList<View>(banner())
-            views.add(ui.text("Give the owner phone these keys", 22f, bold = true))
-            views.add(ui.words(AppWords.publicAnswerReady))
-            views.add(ui.text(AppWords.Text.ON_OWNER_PHONE, 16f, bold = true))
+            views.add(ui.compactWords(words))
+            views.add(centred(ui.text(AppWords.Text.ON_OWNER_PHONE, 16f, bold = true)))
             val made = if (CeremonyModel.looksLikeAnswer(bytes)) {
                 val metrics = act.resources.displayMetrics
-                AnimatedQrView.make(act, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.6).toInt())
+                AnimatedQrView.make(dark, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.4).toInt())
             } else {
                 null
             }
-            val view = made?.view
-            if (view == null) {
-                views.add(ui.words(WordsModel.of(made?.words ?: UrWords.cannotShow(Who.KEY_HOLDER))))
-            } else {
-                views.add(view)
-            }
-            views.add(ui.text("Key 3: ${CeremonyModel.groupFingerprint(key3.masterFingerprint)}", 14f, mono = true))
-            views.add(ui.primary("Scan the owner phone's wallet") { showScanWallet(key3) })
-            views.add(ui.button("Use another key 3") { showKey3 { showAnswer(key3) } })
-            act.show(ui.page(views))
+            views.add(codeBlock(made))
+            views.add(centred(ui.text("Key 3: ${CeremonyModel.groupFingerprint(key3.masterFingerprint)}", 13f, mono = true, colour = ui.pal.secondary)))
+            views.add(ui.hint(words))
+            put(
+                "Give the owner phone these keys",
+                views,
+                listOf(
+                    ui.primary("Scan the owner phone's wallet") { showScanWallet(key3) },
+                    ui.button("Use another key 3") { showKey3 { showAnswer(key3) } },
+                ),
+            )
         }
     }
 
     /** Step 5, second half: read the owner phone's wallet setup. */
     private fun showScanWallet(key3: Key3View) {
-        act.show(
-            ui.page(
-                banner() + listOf(
-                    ui.text("Scan the owner phone's wallet", 22f, bold = true),
-                    ui.words(AppWords.scanOwnerWallet),
-                    ui.primary("Scan the wallet code") { scanWallet(key3) },
-                    ui.button("Back") { showAnswer(key3) },
-                ),
+        val words = model(AppWords.scanOwnerWallet)
+        put(
+            "Scan the owner phone's wallet",
+            banner() + listOf(ui.titleBlock(words, "Scan the owner phone's wallet"), ui.hint(words)),
+            listOf(
+                ui.primary("Scan the wallet code") { scanWallet(key3) },
+                ui.button("Back") { showAnswer(key3) },
             ),
+            back = { showAnswer(key3) },
         )
     }
 
@@ -886,7 +1004,7 @@ class Controller(private val act: MainActivity) {
         val again = { showScanWallet(key3) }
         allowed {
             scan.begin(
-                show = { act.show(it) },
+                show = { act.show(scanPage(ui, it)) },
                 onBytes = { bytes -> allowed { acceptSetup(bytes, key3) } },
                 onFailed = { showMessage(cameraWords(it), again) },
                 onCancel = again,
@@ -901,8 +1019,12 @@ class Controller(private val act: MainActivity) {
         val view = try {
             a.acceptWalletSetup(bytes)
         } catch (e: KeyException) {
-            val page = CeremonyModel.setupRefusal(e).map { ui.words(it) } + ui.button("Back") { showScanWallet(key3) }
-            return act.show(ui.page(page))
+            return showCenter(
+                CeremonyModel.setupRefusal(e),
+                ui.button("Back") { showScanWallet(key3) },
+                title = "Scan the wallet code",
+                back = { showScanWallet(key3) },
+            )
         } catch (e: LinkageError) {
             return showMessage(AppWords.libraryMissing(e.message)) { showScanWallet(key3) }
         }
@@ -915,23 +1037,29 @@ class Controller(private val act: MainActivity) {
      */
     private fun showWallet(v: WalletView, fresh: Boolean) {
         val c = CeremonyModel.walletCheck(v)
+        val words = model(AppWords.checkWallet)
+        val barTitle = if (fresh) "Check the wallet" else "The wallet and its check words"
         val views = ArrayList<View>(banner())
-        views.add(ui.words(AppWords.checkWallet))
-        views.add(ui.text(c.checkWords, 28f, bold = true))
-        views.add(ui.text(c.fingerprints.joinToString("\n"), 22f, bold = true, mono = true))
-        views.add(ui.text(c.identities.joinToString("\n"), 13f))
-        views.add(ui.text("First address:\n${c.firstAddress}", 13f, mono = true))
+        views.add(ui.titleBlock(words, barTitle))
+        views.add(ui.wordCards(ScreenParts.words(c.checkWords)))
+        views.add(ui.facts(c.fingerprints.map { ScreenParts.keyValue(it) }))
+        views.add(ui.text(c.identities.joinToString("\n"), 13f, colour = ui.pal.secondary))
+        views.add(ui.text("First address:\n${c.firstAddress}", 13f, mono = true, colour = ui.pal.secondary))
+        views.add(ui.hint(words))
         if (fresh) {
-            views.add(ui.primary("They match") { allowed { attempt({ showWallet(v, true) }) { app?.confirmWallet() }?.let { refresh() } } })
-            views.add(
-                ui.danger("They differ") {
-                    allowed { attempt({ showWallet(v, true) }) { app?.discardWallet() }?.let { showMessage(AppWords.walletMismatch) { refresh() } } }
-                },
+            put(
+                barTitle,
+                views,
+                listOf(
+                    ui.primary("They match") { allowed { attempt({ showWallet(v, true) }) { app?.confirmWallet() }?.let { refresh() } } },
+                    ui.danger("They differ") {
+                        allowed { attempt({ showWallet(v, true) }) { app?.discardWallet() }?.let { showMessage(AppWords.walletMismatch) { refresh() } } }
+                    },
+                ),
             )
         } else {
-            views.add(ui.button("Back") { refresh() })
+            put(barTitle, views, listOf(ui.button("Back") { refresh() }), back = { refresh() })
         }
-        act.show(ui.page(views))
     }
 
     /** The wallet that was checked and is kept, not registered, after a restart or a leave: the comparison again. */
@@ -950,44 +1078,47 @@ class Controller(private val act: MainActivity) {
     private fun showKitCheck() {
         val a = app ?: return
         val input = ui.field("The wallet text from the printed kit", lines = 6, mono = true)
-        act.show(
-            ui.page(
-                listOf(
-                    ui.text("Check the printed kit", 20f, bold = true),
-                    ui.text("Paste the wallet text read from the paper. It is compared with this app's own copy.", 14f),
-                    input,
-                    scanButton("Scan the wallet code from the paper", input),
-                    ui.primary("Check") {
-                        attempt({ showKitCheck() }) { a.checkKit(input.text.toString()) }?.let {
-                            showMessage(AppWords.kit(it)) { refresh() }
-                        }
-                    },
-                    ui.button("Back") { refresh() },
-                ),
+        put(
+            "Check the printed kit",
+            listOf(
+                plain("Check the printed kit", "Paste the wallet text read from the paper. It is compared with this app's own copy.", "Check the printed kit"),
+                input,
             ),
+            listOf(
+                ui.primary("Check") {
+                    attempt({ showKitCheck() }) { a.checkKit(input.text.toString()) }?.let {
+                        showMessage(AppWords.kit(it)) { refresh() }
+                    }
+                },
+                scanButton("Scan the wallet code from the paper", input),
+                ui.button("Back") { refresh() },
+            ),
+            back = { refresh() },
         )
     }
 
     // ---- home ------------------------------------------------------------------------------
 
     private fun showHome(state: SetupState) {
+        val words = model(AppWords.state(state))
         val views = ArrayList<View>(banner())
-        views.add(ui.words(AppWords.state(state)))
-        views.add(ui.primary("Answer a request from the owner's phone") { pickRequest() })
-        views.add(ui.button("Scan a request code from the owner's phone") { scanRequest() })
+        views.add(ui.status(listOf(StatusItem(words.colour, words.heading, "${words.what}\n${words.next}"))))
+        val items = ArrayList<RowItem>()
+        items.add(RowItem("Scan a request code from the owner's phone") { scanRequest() })
         if (answerFile.isFile) {
-            views.add(ui.button("Save the last answer again") { saveAnswer(answerFile.readBytes()) })
-            views.add(ui.button("Show the last answer as a code") { showAnswerCode(answerFile.readBytes()) { refresh() } })
+            items.add(RowItem("Save the last answer again") { saveAnswer(answerFile.readBytes()) })
+            items.add(RowItem("Show the last answer as a code") { showAnswerCode(answerFile.readBytes()) { refresh() } })
         }
-        views.add(ui.button("Pair a counter") { showPairOffer() })
-        views.add(ui.button("Pair a Box") { showPairBox(null) })
-        views.add(ui.button("Cash-out addresses") { showCashOut() })
-        views.add(ui.button("Change the PIN") { showChangePin(null) })
-        views.add(ui.button("The wallet and its check words") { showWalletAgain() })
-        views.add(ui.button("Check the printed kit") { showKitCheck() })
-        views.add(ui.button("Limits and status") { showStatus() })
-        views.add(ui.button("About this app") { showAbout() })
-        act.show(ui.page(views))
+        items.add(RowItem("Pair a counter") { showPairOffer() })
+        items.add(RowItem("Pair a Box") { showPairBox(null) })
+        items.add(RowItem("Cash-out addresses") { showCashOut() })
+        items.add(RowItem("Change the PIN") { showChangePin(null) })
+        items.add(RowItem("The wallet and its check words") { showWalletAgain() })
+        items.add(RowItem("Check the printed kit") { showKitCheck() })
+        items.add(RowItem("Limits and status") { showStatus() })
+        items.add(RowItem("About this app") { showAbout() })
+        views.add(ui.rows(items))
+        put("Key", views, listOf(ui.primary("Answer a request from the owner's phone") { pickRequest() }), logo = true)
     }
 
     /**
@@ -1002,18 +1133,14 @@ class Controller(private val act: MainActivity) {
                 return@allowed showMessage(AppWords.fault(KeyException("pair-offer", "the library gave bytes that are not an offer", 4)), { refresh() })
             }
             val metrics = act.resources.displayMetrics
-            val made = AnimatedQrView.make(act, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.6).toInt())
-            val view = made.view
+            val made = AnimatedQrView.make(dark, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.4).toInt())
+            val words = model(AppWords.pairOffer)
             val views = ArrayList<View>()
-            views.add(ui.text("Scan this with the counter", 22f, bold = true))
-            views.add(ui.words(AppWords.pairOffer))
-            if (view == null) {
-                views.add(ui.words(WordsModel.of(made.words ?: UrWords.cannotShow(Who.KEY_HOLDER))))
-            } else {
-                views.add(view)
-            }
-            views.add(ui.button("Back") { refresh() })
-            act.show(ui.page(views))
+            views.add(ui.compactWords(words))
+            views.add(centred(ui.text("Scan this with the counter", 15f, medium = true)))
+            views.add(codeBlock(made))
+            views.add(ui.hint(words))
+            put("Pair a counter", views, listOf(ui.button("Back") { refresh() }), back = { refresh() })
         }
     }
 
@@ -1031,41 +1158,42 @@ class Controller(private val act: MainActivity) {
             val open = held[0]
             val views = ArrayList<View>(banner())
             if (open == null) {
-                views.add(ui.text("Pair a Box", 22f, bold = true))
-                message?.let { views.add(ui.words(it)) }
+                views.add(plain("Pair a Box", null, "Pair a Box"))
+                message?.let { views.add(ui.notice(model(it))) }
                 views.add(ui.text("A new invitation lasts 30 minutes and works for one Box.", 16f))
-                views.add(
-                    ui.primary("Make an invitation") {
-                        allowed { attempt({ showPairBox(null) }) { a.makeInvitation() }?.let { showPairBox(null) } }
-                    },
+                put(
+                    "Pair a Box",
+                    views,
+                    listOf(
+                        ui.primary("Make an invitation") {
+                            allowed { attempt({ showPairBox(null) }) { a.makeInvitation() }?.let { showPairBox(null) } }
+                        },
+                        ui.button("Back") { refresh() },
+                    ),
+                    back = { refresh() },
                 )
-                views.add(ui.button("Back") { refresh() })
-                act.show(ui.page(views))
                 return@allowed
             }
             val spaced = BoxModel.spaced(open.text)
             if (spaced == null) {
                 return@allowed showMessage(AppWords.fault(KeyException("invitation", "the library gave text that is not an invitation", 4)), { refresh() })
             }
-            views.add(ui.text("Pair a Box", 22f, bold = true))
-            views.add(ui.words(AppWords.pairBox))
+            val words = model(AppWords.pairBox)
+            views.add(ui.titleBlock(words, "Pair a Box"))
             val groups = BoxModel.groups(open.text) ?: emptyList()
-            views.add(ui.text(groups.take(3).joinToString("   "), 30f, bold = true, mono = true))
-            views.add(ui.text(groups.drop(3).joinToString("   "), 30f, bold = true, mono = true))
-            val left = ui.text("", 18f, bold = true)
+            views.add(centred(ui.text(groups.take(3).joinToString("   "), 28f, bold = true, mono = true)))
+            views.add(centred(ui.text(groups.drop(3).joinToString("   "), 28f, bold = true, mono = true)))
+            val left = centred(ui.text("", 18f, bold = true))
             views.add(left)
-            views.add(
-                ui.danger("Cancel this invitation") {
-                    stopTicker()
-                    allowed { attempt({ showPairBox(null) }) { a.cancelInvitation() }?.let { showPairBox(null) } }
-                },
-            )
-            views.add(
-                ui.button("Back") {
-                    stopTicker()
-                    refresh()
-                },
-            )
+            views.add(ui.hint(words))
+            val cancel = ui.danger("Cancel this invitation") {
+                stopTicker()
+                allowed { attempt({ showPairBox(null) }) { a.cancelInvitation() }?.let { showPairBox(null) } }
+            }
+            val leave = {
+                stopTicker()
+                refresh()
+            }
             fun update(): Boolean {
                 val now = clock()
                 if (BoxModel.runOut(open, now)) {
@@ -1077,7 +1205,7 @@ class Controller(private val act: MainActivity) {
                 return true
             }
             if (!update()) return@allowed
-            act.show(ui.page(views))
+            put("Pair a Box", views, listOf(cancel, ui.button("Back") { leave() }), back = leave)
             val tick = object : Runnable {
                 override fun run() {
                     if (update()) main.postDelayed(this, 1000) else ticker = null
@@ -1095,17 +1223,17 @@ class Controller(private val act: MainActivity) {
             KeyLevel.Software -> "The saved key is held by software alone. Tests only."
             null -> "Not known."
         }
-        act.show(
-            ui.page(
-                listOf(
-                    ui.text("About this app", 20f, bold = true),
-                    ui.text("Built by Avila Labs only. No independent party has rebuilt it yet.", 15f),
-                    ui.text("First build: no independent security audit has been done. Not for real funds.", 15f, bold = true),
-                    ui.text(key, 15f),
-                    ui.text("This app asks for no permission, and it has no network access.", 15f),
-                    ui.button("Back") { refresh() },
-                ),
+        put(
+            "About this app",
+            listOf(
+                plain("About this app", null, "About this app"),
+                ui.text("Built by Avila Labs only. No independent party has rebuilt it yet.", 15f),
+                ui.text("First build: no independent security audit has been done. Not for real funds.", 15f, bold = true),
+                ui.text(key, 15f),
+                ui.text("This app asks for no permission, and it has no network access.", 15f),
             ),
+            listOf(ui.button("Back") { refresh() }),
+            back = { refresh() },
         )
     }
 
@@ -1115,31 +1243,40 @@ class Controller(private val act: MainActivity) {
         val a = app ?: return
         val back = { refresh() }
         val s = attempt(back) { a.signerStatus() } ?: return
+        fun ceilings(c: CeilingsView) = ui.facts(
+            listOf("one payment" to Format.sats(c.perTx), "a day" to Format.sats(c.perDay), "a week" to Format.sats(c.perWeek)),
+        )
+        val views = ArrayList<View>()
+        views.add(plain("Limits and status", null, "Limits and status"))
+        views.add(ui.label("To other addresses, most for"))
+        views.add(ceilings(s.ceilingsOther))
+        views.add(ui.label("To saved addresses, most for"))
+        views.add(ceilings(s.ceilingsAllowlisted))
         val t = StringBuilder()
-        t.append("To other addresses, most for\n  one payment: ${Format.sats(s.ceilingsOther.perTx)}\n")
-        t.append("  a day: ${Format.sats(s.ceilingsOther.perDay)}\n  a week: ${Format.sats(s.ceilingsOther.perWeek)}\n")
-        t.append("To saved addresses, most for\n  one payment: ${Format.sats(s.ceilingsAllowlisted.perTx)}\n")
-        t.append("  a day: ${Format.sats(s.ceilingsAllowlisted.perDay)}\n  a week: ${Format.sats(s.ceilingsAllowlisted.perWeek)}\n")
         t.append("Fee limit: ${s.feeCeilings.satPerVb} sats for each byte, or ${Format.sats(s.feeCeilings.absoluteSats)} in all\n")
         t.append("Spent today: ${Format.sats(s.otherDay)} to other, ${Format.sats(s.allowlistedDay)} to saved\n")
         t.append("Spent this week: ${Format.sats(s.otherWeek)} to other, ${Format.sats(s.allowlistedWeek)} to saved\n")
         t.append("Payments recorded: ${s.spendLogCount}\n")
         t.append("Last receive address number seen: ${s.receiveMark}\nLast change address number seen: ${s.changeMark}\n")
-        t.append("Latest time seen: ${Format.localTime(s.latestTimeSeen)}\n\nSaved addresses\n")
-        if (s.allowlist.isEmpty()) t.append("  none\n")
-        for (d in s.allowlist) {
-            t.append("  ${Format.cleanForeign(d.label)}: ${d.address ?: d.scriptHex}\n")
-            t.append("    ${d.activeAt?.let { "active from ${Format.localTime(it)}" } ?: "not active yet"}\n")
+        t.append("Latest time seen: ${Format.localTime(s.latestTimeSeen)}")
+        views.add(ui.text(t.toString(), 13f))
+        views.add(ui.label("Saved addresses"))
+        val saved = StringBuilder()
+        if (s.allowlist.isEmpty()) saved.append("none")
+        for ((i, d) in s.allowlist.withIndex()) {
+            if (i > 0) saved.append("\n")
+            saved.append("${Format.cleanForeign(d.label)}: ${d.address ?: d.scriptHex}\n")
+            saved.append("  ${d.activeAt?.let { "active from ${Format.localTime(it)}" } ?: "not active yet"}")
         }
-        act.show(
-            ui.page(
-                listOf(
-                    ui.text("Limits and status", 20f, bold = true),
-                    ui.text(t.toString(), 13f, mono = true),
-                    ui.button("Change the limits") { showLimitsForm(s.ceilingsOther, s.ceilingsAllowlisted, s.feeCeilings) },
-                    ui.button("Back") { back() },
-                ),
+        views.add(ui.text(saved.toString(), 13f, mono = true))
+        put(
+            "Limits and status",
+            views,
+            listOf(
+                ui.button("Change the limits") { showLimitsForm(s.ceilingsOther, s.ceilingsAllowlisted, s.feeCeilings) },
+                ui.button("Back") { back() },
             ),
+            back = back,
         )
     }
 
@@ -1154,43 +1291,49 @@ class Controller(private val act: MainActivity) {
             other.perTx, other.perDay, other.perWeek, saved.perTx, saved.perDay, saved.perWeek,
             fee.satPerVb, fee.absoluteSats,
         )
-        val fields = names.zip(values).map { (n, v) -> ui.field(n).also { it.setText(v.toString()) } }
+        val fields = names.zip(values).map { (_, v) -> ui.field("").also { it.setText(v.toString()) } }
         val views = ArrayList<View>()
-        views.add(ui.text("Change the limits", 20f, bold = true))
-        views.add(ui.text("Raising a limit is refused when it would loosen one without the owner's phone's answer; the reason is shown.", 14f))
-        for ((n, f) in names.zip(fields)) {
-            views.add(ui.text(n, 13f))
-            views.add(f)
-        }
         views.add(
-            ui.primary("Save the limits") {
-                allowed {
-                    val n = fields.map { Format.toAmount(it.text.toString()) }
-                    if (n.any { it == null }) {
-                        showMessage(AppWords.notANumber) { showStatus() }
-                    } else {
-                        val v = n.map { it!! }
-                        attempt({ showStatus() }) {
-                            a.setCeilings(CeilingsView(v[0], v[1], v[2]), CeilingsView(v[3], v[4], v[5]))
-                            a.setFeeCeilings(FeeCeilingsView(v[6], v[7]))
-                        }?.let { showStatus() }
-                    }
-                }
-            },
+            plain(
+                "Change the limits",
+                "Raising a limit is refused when it would loosen one without the owner's phone's answer; the reason is shown.",
+                "Change the limits",
+            ),
         )
-        views.add(ui.button("Back") { showStatus() })
-        act.show(ui.page(views))
+        for ((n, f) in names.zip(fields)) views.add(ui.labelled(n, f))
+        put(
+            "Change the limits",
+            views,
+            listOf(
+                ui.primary("Save the limits") {
+                    allowed {
+                        val n = fields.map { Format.toAmount(it.text.toString()) }
+                        if (n.any { it == null }) {
+                            showMessage(AppWords.notANumber) { showStatus() }
+                        } else {
+                            val v = n.map { it!! }
+                            attempt({ showStatus() }) {
+                                a.setCeilings(CeilingsView(v[0], v[1], v[2]), CeilingsView(v[3], v[4], v[5]))
+                                a.setFeeCeilings(FeeCeilingsView(v[6], v[7]))
+                            }?.let { showStatus() }
+                        }
+                    }
+                },
+                ui.button("Back") { showStatus() },
+            ),
+            back = { showStatus() },
+        )
     }
 
     // ---- scanning one code ------------------------------------------------------------------------
 
     /** A button that scans one code into [field]; the page and what is typed on it stay as they are. */
-    private fun scanButton(label: String, field: EditText): View = ui.button(label) {
+    private fun scanButton(label: String, field: EditText): Button = ui.button(label) {
         val page = act.current
         val restore = { if (page != null) act.show(page) else refresh() }
         allowed {
             scan.begin(
-                show = { act.show(it) },
+                show = { act.show(scanPage(ui, it)) },
                 onBytes = { bytes ->
                     allowed {
                         if (UrText.startsWithUr(bytes)) {
@@ -1224,7 +1367,7 @@ class Controller(private val act: MainActivity) {
     private fun scanRequest() {
         allowed {
             scan.begin(
-                show = { act.show(it) },
+                show = { act.show(scanPage(ui, it)) },
                 onBytes = { bytes -> allowed { openRequestBytes(bytes) } },
                 onFailed = { showMessage(cameraWords(it)) { refresh() } },
                 onCancel = { refresh() },
@@ -1334,42 +1477,49 @@ class Controller(private val act: MainActivity) {
         val line = lines[index]
         val t = LineModel.describe(line)
         val views = ArrayList<View>()
-        views.add(ui.text("Item ${index + 1} of ${lines.size}", 14f))
-        views.add(ui.text(t.title, 22f, bold = true))
-        t.prominent?.let { views.add(ui.text(it, 34f, bold = true)) }
+        views.add(ui.text(t.title, 26f, bold = true))
+        t.prominent?.let { views.add(ui.wordCards(ScreenParts.words(it))) }
         t.instruction?.let { views.add(ui.text(it, 16f, bold = true)) }
-        if (t.rows.isNotEmpty()) views.add(ui.text(t.rows.joinToString("\n\n"), 16f))
+        val receipt = ArrayList<ReceiptLine>()
+        for (r in t.rows) receipt.add(ReceiptLine(r))
         if (t.claims.isNotEmpty()) {
-            views.add(ui.text("The owner's phone says this. This app cannot check it:", 14f, bold = true))
-            views.add(ui.text(t.claims.joinToString("\n"), 14f))
+            receipt.add(ReceiptLine("The owner's phone says this. This app cannot check it:", LineStyle.Strong))
+            for (c in t.claims) receipt.add(ReceiptLine(c, LineStyle.Small))
         }
-        for (q in t.quoted) views.add(ui.quoted("Text from elsewhere, not written by this app. ${q.from}:", "“${q.text}”"))
+        if (receipt.isNotEmpty()) views.add(ui.receipt(receipt))
+        for (q in t.quoted) views.add(ui.quoted("Text from elsewhere, not written by this app. ${q.from}:", "\u201c${q.text}\u201d"))
         t.failure?.let {
             views.add(ui.text("This item cannot be approved. The checks said:", 14f, bold = true, colour = ui.pal.stop.ink))
             views.add(ui.text(it, 14f))
         }
         val reason = ui.field("Why you decline (optional)")
-        val approve = ui.primary("Approve this item") {
-            allowed { attempt({ showLine(index) }) { s.decide(line.item, Decision.Approve) }?.let { showLine(index + 1) } }
-        }
-        approve.isEnabled = t.canApprove
-        views.add(approve)
         views.add(reason)
-        views.add(
-            ui.danger("Decline this item") {
-                allowed {
-                    val why = reason.text.toString().trim()
-                    attempt({ showLine(index) }) { s.decide(line.item, Decision.Decline(why)) }?.let { showLine(index + 1) }
-                }
-            },
-        )
-        views.add(
-            ui.danger("Stop and answer nothing") {
-                dropSession()
-                refresh()
-            },
-        )
-        act.show(ui.page(views))
+        // Approving is a hold, not a tap; an item that cannot be approved shows the hold without letting it complete.
+        val approve = HoldButton(dark, "Approve this item") {
+            if (t.canApprove) allowed { attempt({ showLine(index) }) { s.decide(line.item, Decision.Approve) }?.let { showLine(index + 1) } }
+        }
+        views.add(if (t.canApprove) approve else unavailable(approve))
+        val decline = ui.danger("Decline this item") {
+            allowed {
+                val why = reason.text.toString().trim()
+                attempt({ showLine(index) }) { s.decide(line.item, Decision.Decline(why)) }?.let { showLine(index + 1) }
+            }
+        }
+        val stop = ui.danger("Stop and answer nothing") {
+            dropSession()
+            refresh()
+        }
+        put("Item ${index + 1} of ${lines.size}", views, listOf(decline, stop))
+    }
+
+    /** [v] shown faded and deaf to touch, and hidden from accessibility actions: the hold of an item that cannot be approved. */
+    private fun unavailable(v: View): View = object : android.widget.FrameLayout(dark) {
+        override fun onInterceptTouchEvent(ev: android.view.MotionEvent): Boolean = true
+    }.also {
+        it.addView(v)
+        it.alpha = 0.4f
+        it.isEnabled = false
+        it.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
     }
 
     private fun finishSession(s: KeySession) {
@@ -1389,18 +1539,20 @@ class Controller(private val act: MainActivity) {
 
     /** The page after the last line: the answer can be saved as a file or shown as a code. */
     private fun showAnswerReady(bytes: ByteArray) {
-        act.show(
-            ui.page(
-                listOf(
-                    ui.words(AppWords.answersReady),
-                    ui.primary("Save the answer file") { saveAnswer(bytes) },
-                    ui.button("Show as code") { showAnswerCode(bytes) { showAnswerReady(bytes) } },
-                    ui.button("Done") {
-                        pendingAnswer = null
-                        refresh()
-                    },
-                ),
+        val words = model(AppWords.answersReady)
+        put(
+            "Key",
+            listOf(ui.resultPanel(words)),
+            listOf(
+                ui.primary("Save the answer file") { saveAnswer(bytes) },
+                ui.button("Show as code") { showAnswerCode(bytes) { showAnswerReady(bytes) } },
+                ui.button("Done") {
+                    pendingAnswer = null
+                    refresh()
+                },
             ),
+            logo = true,
+            tone = ui.pal.of(words.colour),
         )
     }
 
@@ -1412,15 +1564,21 @@ class Controller(private val act: MainActivity) {
     private fun showAnswerCode(bytes: ByteArray, back: () -> Unit) {
         allowed {
             val metrics = act.resources.displayMetrics
-            val made = AnimatedQrView.make(act, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.6).toInt())
+            val made = AnimatedQrView.make(dark, Who.KEY_HOLDER, TYPE_BYTES, bytes, (metrics.heightPixels * 0.4).toInt())
             val view = made.view
-            if (view == null) {
-                val say = made.words ?: UrWords.cannotShow(Who.KEY_HOLDER)
-                act.show(ui.page(listOf(ui.words(WordsModel.of(say)), ui.button("Back") { back() })))
+            val say = if (view == null) {
+                made.words ?: UrWords.cannotShow(Who.KEY_HOLDER)
+            } else if (view.animated) {
+                UrWords.showingAnimated(Who.KEY_HOLDER)
             } else {
-                val say = if (view.animated) UrWords.showingAnimated(Who.KEY_HOLDER) else UrWords.showingStill(Who.KEY_HOLDER)
-                act.show(ui.page(listOf(ui.words(WordsModel.of(say)), view, ui.button("Back") { back() })))
+                UrWords.showingStill(Who.KEY_HOLDER)
             }
+            val words = WordsModel.of(say)
+            val views = ArrayList<View>()
+            views.add(ui.compactWords(words))
+            views.add(codeBlock(made))
+            views.add(ui.hint(words))
+            put("Show as code", views, listOf(ui.button("Back") { back() }), back = back)
         }
     }
 

@@ -6,8 +6,10 @@ import android.content.res.Configuration
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
-import org.openbmt.app.applyNight
-import org.openbmt.app.isNight
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import org.openbmt.app.Feedback
+import org.openbmt.app.Palette
 
 /**
  * The one activity of the Key app, and the only exported component. Every
@@ -18,23 +20,24 @@ import org.openbmt.app.isNight
 class MainActivity : Activity() {
     private lateinit var controller: Controller
 
-    /** Night mode when the screens were drawn: a change draws the current screen again in place, with the activity kept. */
-    private var night = false
-
+    /**
+     * The Key app is always dark, so a change between light and dark has nothing to redraw (SR-83): the window,
+     * the bars' icons and every screen are the dark scheme whatever the phone's mode.
+     */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        if (isNight(newConfig) != night) {
-            night = isNight(newConfig)
-            applyNight()
-            controller.redraw()
-            window.decorView.requestApplyInsets()
-        }
+        controller.redraw()
     }
 
+    @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        night = isNight(resources.configuration)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        window.setBackgroundDrawable(ColorDrawable(Palette.dark.background))
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        // This app plays no sound at all; it keeps the haptics of the hold button, the scan and the wrong PIN.
+        Feedback.soundOn = false
         controller = Controller(this)
         controller.start()
     }

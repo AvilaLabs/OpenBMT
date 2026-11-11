@@ -544,6 +544,20 @@ object AppModelTest {
         ok(ScreenModel.pick(listOf(AppWords.debuggingOn), null, SetupState.Locked, null, LockStatus.Locked) is Screen.Refused, "SR-83: a refusal is redrawn as the refusal")
     }
 
+    /** The cards of the new look take the app's own lines apart and lose nothing. */
+    private fun screenPartsTests() {
+        val four = listOf("alpha", "bravo", "charlie", "delta")
+        ok(ScreenParts.words(LineModel.wordsLine(four)) == four, "the four words of a pairing line become four cards, in order")
+        ok(ScreenParts.words("alpha   bravo \n charlie delta ") == four, "any spacing between the words splits them")
+        ok(ScreenParts.words("   ").isEmpty(), "an empty line has no words")
+        ok(ScreenParts.keyValue("Key 1: ABCD 1234") == ("Key 1" to "ABCD 1234"), "a fingerprint line is a key and its value")
+        ok(ScreenParts.keyValue("no colon here") == ("no colon here" to ""), "a line without a colon is the key alone")
+        val twentyFour = (1..24).map { "w$it" }
+        val list = ScreenParts.numbered(twentyFour)
+        ok(list.lines().size == 24 && list.lines().first() == "1. w1" && list.lines().last() == "24. w24", "recovery words stay a numbered list")
+        ok(ScreenParts.asCards(4) && !ScreenParts.asCards(12) && !ScreenParts.asCards(24) && !ScreenParts.asCards(0), "only groups of four go through cards")
+    }
+
     private fun sr_78_deposit_code_from_the_camera() {
         ok((CashOut.readCode("bc1qexample".toByteArray()) as DepositInput.Text).text == "bc1qexample", "a bare address goes on")
         ok((CashOut.readCode(" bitcoin:bc1qexample?amount=1\n".toByteArray()) as DepositInput.Text).text == "bitcoin:bc1qexample?amount=1", "a URI goes on, trimmed")
@@ -646,6 +660,7 @@ object AppModelTest {
         answerTests()
         walletTests()
         refusalTests()
+        screenPartsTests()
         lockTests(args.getOrNull(2)?.let { File(it) })
         println("AppModelTest: $count checks passed")
     }
