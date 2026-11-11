@@ -31,6 +31,8 @@ fn corpus(handle: u64) -> Vec<Vec<u8>> {
         frame(23, handle, &[]),
         frame(24, handle, &[]),
         frame(25, handle, &W::new().u64(T0).0),
+        frame(26, handle, &[]),
+        frame(27, handle, &[]),
         frame(30, handle, &W::new().u64(T0).u64(1_000).0),
         frame(31, handle, &W::new().u64(T0).0),
         frame(32, handle, &W::new().u64(T0).bytes(&[1, 2, 3]).0),

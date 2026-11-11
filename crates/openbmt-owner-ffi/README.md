@@ -28,12 +28,17 @@ handles are never given out twice.
 | Group | Ops |
 |---|---|
 | Life | `start`, `stop`, `pump`, `link_step`, `deliver` |
-| Lines | `status`, `receipts_line`, `merge_offer`, `send_states` |
+| Lines | `status`, `receipts_line`, `merge_offer`, `send_states`, `settings`, `outbox` |
 | Live watch | `old_addresses`, `request_deep_check` |
 | Approval | `build_request`, `approve_merge`, `take`, `sessions`, `session_request`, `abandon_session` |
 | Queue | `queue`, `queue_refund`, `cancel`, `requeue`, `cash_out`, `sign_batch`, `queue_settings` |
 | Link | `link_state`, `clear_alert`, `refund_notes`, `dismiss_refund_note` |
 | Upkeep | `notes`, `rescan`, `recover_key1`, `archive_paid` |
+
+`settings` is the signed settings the node holds as in force, decoded, for a
+read-only view (none until the first settings are taken). `outbox` lists the
+signed objects that wait, by kind; the node keeps no time for them, so only a
+batch carries `signed_at`, read from the range the phone issued for it.
 
 `queue_refund` takes no amount received from the app: what the sale
 received and whether it is at the refund depth come from the wallet's own

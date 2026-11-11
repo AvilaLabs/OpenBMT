@@ -179,7 +179,9 @@ fn status_and_notes_answer_before_and_after_the_network() {
     r.done();
     assert_eq!(rig.pump(handle), (vec![], false));
     // Every op that needs a node refuses a handle that is not one.
-    for op in [2u16, 20, 21, 22, 23, 24, 33, 40, 50, 52, 60, 61, 62, 63] {
+    for op in [
+        2u16, 20, 21, 22, 23, 24, 26, 27, 33, 40, 50, 52, 60, 61, 62, 63,
+    ] {
         assert_eq!(
             fault(&rig.call(op, 99, &[])).rule,
             "handle-unknown",
@@ -384,6 +386,161 @@ fn settings_the_owner_signs_are_queued_and_a_repeat_is_refused() {
     // The same version again is not newer.
     let f = fault(&rig.call(46, handle, &W::new().bytes(&signed.to_bytes()).0));
     assert_eq!(f.status, 1, "{f:?}");
+}
+
+/// What the test reads back of a `SettingsHeldView`.
+struct Held {
+    version: u32,
+    /// The ten limits in the order the frame writes them, around the
+    /// tolerance.
+    limits: [(u64, u32); 10],
+    tolerance: u32,
+    min_conf: u8,
+    final_conf: u8,
+    tor: bool,
+    counters: usize,
+    boxes: usize,
+}
+
+/// `SettingsHeldView`, field by field as the frame writes them.
+fn read_settings(r: &mut Rd<'_>) -> Held {
+    let version = r.u32();
+    let mut limits = [(0, 0); 10];
+    for slot in limits.iter_mut().take(6) {
+        *slot = (r.u64(), r.u32());
+    }
+    let tolerance = r.u32();
+    for slot in limits.iter_mut().skip(6) {
+        *slot = (r.u64(), r.u32());
+    }
+    let (min_conf, final_conf) = (r.u8(), r.u8());
+    let _heartbeat = r.u32();
+    let tor = r.bool();
+    let _wifi = r.bool();
+    let _floor = r.u64();
+    let devices = r.list(Rd::bytes);
+    assert!(devices.iter().all(|d| d.len() == 32));
+    let counters = r.list(|r| (r.bytes(), r.u32()));
+    let boxes = r.list(Rd::bytes);
+    Held {
+        version,
+        limits,
+        tolerance,
+        min_conf,
+        final_conf,
+        tor,
+        counters: counters.len(),
+        boxes: boxes.len(),
+    }
+}
+
+#[test]
+fn the_settings_the_node_holds_and_the_outbox_follow_an_approval() {
+    let (rig, handle) = ready();
+    // Nothing held and nothing waiting before an approval.
+    let response = rig.call(26, handle, &[]);
+    let mut r = Rd::ok(&response);
+    assert!(r.opt(read_settings).is_none());
+    r.done();
+    let response = rig.call(27, handle, &[]);
+    let mut r = Rd::ok(&response);
+    assert!(r.list(|r| r.bytes()).is_empty());
+    r.done();
+
+    // First settings that name the counter, and a batch for it: both go to
+    // the Key app and come back signed.
+    rig.queue_batch(handle);
+    rig.fund(handle, 300_000);
+    let mut settings = Settings::defaults(1_000);
+    settings.devices.insert(counter());
+    settings.counters.insert(counter(), 10_000);
+    let signed = SignedSettings {
+        owner_sig: settings.sign(&id(0x11)),
+        approver_sig: None,
+        settings: settings.clone(),
+    };
+    unit_ok_settings(&rig, handle, &signed);
+    let mut app = key_app();
+    approve(&rig, handle, &mut app);
+
+    let response = rig.call(26, handle, &[]);
+    let mut r = Rd::ok(&response);
+    let held = r.opt(read_settings).expect("settings are held");
+    r.done();
+    assert_eq!(held.version, settings.version);
+    assert_eq!(
+        held.limits[0],
+        (
+            settings.light_per_sale.sats,
+            settings.light_per_sale.display_usd
+        )
+    );
+    assert_eq!(held.limits[9].0, settings.manager_override_ceiling.sats);
+    assert_eq!(
+        (held.min_conf, held.final_conf),
+        (settings.min_confirmations, settings.final_confirmations)
+    );
+    assert_eq!(held.tolerance, settings.underpayment_tolerance_bps);
+    assert_eq!(held.tor, settings.tor_on);
+    assert_eq!(
+        (held.counters, held.boxes),
+        (1, 0),
+        "one counter share, no Box"
+    );
+    assert!(queue(&rig, handle).others.is_empty(), "both left the queue");
+
+    let response = rig.call(27, handle, &[]);
+    let mut r = Rd::ok(&response);
+    let rows = r.list(|r| {
+        (
+            r.u32(),
+            r.u8(),
+            r.opt(Rd::string),
+            r.opt(Rd::bytes),
+            r.opt(Rd::u32),
+            r.opt(Rd::u64),
+            r.u32(),
+            r.words(),
+        )
+    });
+    r.done();
+    let kinds: Vec<u8> = rows.iter().map(|row| row.1).collect();
+    assert!(kinds.contains(&1), "a batch waits: {kinds:?}");
+    for row in &rows {
+        check_wire_words(&row.7).unwrap_or_else(|why| panic!("{why}: {:?}", row.7));
+        assert!(row.6 > 0, "a size");
+        match row.1 {
+            1 => {
+                assert_eq!(row.3.as_deref(), Some(counter_bytes().as_slice()));
+                assert_eq!(row.5, Some(T0), "the batch's signing time");
+                assert!(row.7.detail.is_none());
+            }
+            2 => {
+                assert_eq!(row.4, Some(settings.version));
+                assert_eq!(row.5, None, "no time is kept for settings");
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Build an approval, let the Key app approve every line it can, take the
+/// answer.
+fn approve(rig: &Rig, handle: u64, app: &mut openbmt_approver::Approver) {
+    let response = rig.call(30, handle, &W::new().u64(T0).u64(1_000).0);
+    let mut r = Rd::ok(&response);
+    let (_, request, _) = r.built();
+    r.done();
+    let answer = answer(app, &request, T0);
+    let response = rig.call(32, handle, &W::new().u64(T0).bytes(&answer).0);
+    Rd::ok(&response).taken();
+}
+
+fn unit_ok_settings(rig: &Rig, handle: u64, signed: &SignedSettings) {
+    let response = rig.call(46, handle, &W::new().bytes(&signed.to_bytes()).0);
+    let mut r = Rd::ok(&response);
+    let _ = (r.bool(), r.u32(), r.opt(Rd::bytes));
+    r.done();
 }
 
 #[test]

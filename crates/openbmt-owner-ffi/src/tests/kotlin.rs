@@ -164,6 +164,14 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "RefundNote(u32(), bytes(), u64(), u64(), u32(), noteKind(), bool(), words())",
         "OldAddresses(oldKind(), u64(), u64(), option { u64() }, bool(), option { words() })",
         "DeepRequest(bool(), words())",
+        "Limit(u64(), u32())",
+        "CounterShare(bytes(), u32())",
+        "u32(), limit(), limit(), limit(), limit(), limit(), limit(), u32(),",
+        "limit(), limit(), limit(), limit(), u8(), u8(), u32(), bool(), bool(), u64(),",
+        "list { bytes() }, list { CounterShare(bytes(), u32()) }, list { bytes() },",
+        "OutboxRow(",
+        "u32(), outboxKind(), option { string() }, option { bytes() }, option { u32() },",
+        "option { u64() }, u32(), words(),",
     ] {
         assert!(text.contains(needle), "{needle}");
     }

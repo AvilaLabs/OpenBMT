@@ -68,6 +68,8 @@ private const val OP_MERGE_OFFER = 22
 private const val OP_SEND_STATES = 23
 private const val OP_OLD_ADDRESSES = 24
 private const val OP_REQUEST_DEEP_CHECK = 25
+private const val OP_SETTINGS = 26
+private const val OP_OUTBOX = 27
 private const val OP_BUILD_REQUEST = 30
 private const val OP_APPROVE_MERGE = 31
 private const val OP_TAKE = 32
@@ -138,6 +140,10 @@ private const val TAG_OLD_KIND_FIRST_CHECK_WAITING = 1
 private const val TAG_OLD_KIND_MONTHLY = 2
 private const val TAG_OLD_KIND_CHECKING = 3
 private const val TAG_OLD_KIND_FAILED = 4
+private const val TAG_OUTBOX_KIND_TRANSACTION = 0
+private const val TAG_OUTBOX_KIND_BATCH = 1
+private const val TAG_OUTBOX_KIND_SETTINGS = 2
+private const val TAG_OUTBOX_KIND_PAIRING = 3
 
 // ---- the views ----------------------------------------------------------------------
 //
@@ -372,6 +378,54 @@ class OldAddresses(
 )
 
 class DeepRequest(val asked: Boolean, val words: Words)
+
+/** One limit of the shop's settings: what is enforced, in satoshis, and the whole dollars it was shown as. */
+class Limit(val sats: Long, val displayUsd: Long)
+
+/** A counter's share of every budget, in basis points (10,000 is the whole budget). */
+class CounterShare(val counter: ByteArray, val bps: Long)
+
+/** The shop's settings the owner phone holds as in force, decoded, for a read-only view. */
+class SettingsHeld(
+    val version: Long,
+    val lightPerSale: Limit,
+    val lightBudget: Limit,
+    val nodePerSale: Limit,
+    val nodeBudget: Limit,
+    val boxPerSale: Limit,
+    val boxBudget: Limit,
+    val underpaymentToleranceBps: Long,
+    val refundCap: Limit,
+    val refundDailyCap: Limit,
+    val cashierOverrideDailyCap: Limit,
+    val managerOverrideCeiling: Limit,
+    val minConfirmations: Int,
+    val finalConfirmations: Int,
+    val heartbeatMaxAgeSecs: Long,
+    val torOn: Boolean,
+    val customerWifi: Boolean,
+    val minSaleSats: Long,
+    val devices: List<ByteArray>,
+    val counters: List<CounterShare>,
+    val boxes: List<ByteArray>,
+)
+
+enum class OutboxKind { Transaction, Batch, Settings, Pairing }
+
+/**
+ * A signed object that waits to be delivered. [signedAt] is known for a batch
+ * only (seconds since 1970); the node keeps no time for the others.
+ */
+class OutboxRow(
+    val id: Long,
+    val kind: OutboxKind,
+    val txid: String?,
+    val counter: ByteArray?,
+    val version: Long?,
+    val signedAt: Long?,
+    val size: Long,
+    val words: Words,
+)
 
 // ---- the encoding ----------------------------------------------------------------------
 
@@ -740,6 +794,30 @@ internal fun Reader.oldAddresses(): OldAddresses =
 
 private fun Reader.deepRequest(): DeepRequest = DeepRequest(bool(), words())
 
+private fun Reader.outboxKind(): OutboxKind =
+    when (u8()) {
+        TAG_OUTBOX_KIND_TRANSACTION -> OutboxKind.Transaction
+        TAG_OUTBOX_KIND_BATCH -> OutboxKind.Batch
+        TAG_OUTBOX_KIND_SETTINGS -> OutboxKind.Settings
+        TAG_OUTBOX_KIND_PAIRING -> OutboxKind.Pairing
+        else -> tag("OutboxKind")
+    }
+
+private fun Reader.limit(): Limit = Limit(u64(), u32())
+
+internal fun Reader.settingsHeld(): SettingsHeld =
+    SettingsHeld(
+        u32(), limit(), limit(), limit(), limit(), limit(), limit(), u32(),
+        limit(), limit(), limit(), limit(), u8(), u8(), u32(), bool(), bool(), u64(),
+        list { bytes() }, list { CounterShare(bytes(), u32()) }, list { bytes() },
+    )
+
+internal fun Reader.outboxRow(): OutboxRow =
+    OutboxRow(
+        u32(), outboxKind(), option { string() }, option { bytes() }, option { u32() },
+        option { u64() }, u32(), words(),
+    )
+
 // ---- the call ----------------------------------------------------------------------------
 
 private val REQUEST_MAGIC = byteArrayOf('O'.code.toByte(), 'B'.code.toByte(), 'M'.code.toByte(), 'k'.code.toByte())
@@ -873,6 +951,18 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     fun requestDeepCheck(now: Long): DeepRequest {
         val r = call(OP_REQUEST_DEEP_CHECK, handle) { it.u64(now) }
         return r.deepRequest().also { r.end() }
+    }
+
+    /** The shop's settings the node holds as in force, or null when it holds none yet. */
+    fun settings(): SettingsHeld? {
+        val r = call(OP_SETTINGS, handle)
+        return r.option { r.settingsHeld() }.also { r.end() }
+    }
+
+    /** The signed objects that wait to be delivered, by kind. */
+    fun outbox(): List<OutboxRow> {
+        val r = call(OP_OUTBOX, handle)
+        return r.list { r.outboxRow() }.also { r.end() }
     }
 
     /** Build an approval for the Key app at [feeRate] satoshis per 1000 virtual bytes. */

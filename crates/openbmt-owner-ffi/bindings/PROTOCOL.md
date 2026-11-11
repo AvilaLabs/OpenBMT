@@ -67,6 +67,8 @@ ops run on another; it waits for at most 250 ms.
  23 send_states      handle node  args () -> list<SendRow>
  24 old_addresses    handle node  args () -> OldAddressesView
  25 request_deep_check handle node  args u64 -> DeepRequestView
+ 26 settings         handle node  args () -> option<SettingsHeldView>
+ 27 outbox           handle node  args () -> list<OutboxRow>
  30 build_request    handle node  args (u64, u64) -> BuiltView
  31 approve_merge    handle node  args u64 -> BuiltView
  32 take             handle node  args (u64, list<u8>) -> TakenView
@@ -150,4 +152,10 @@ OldKind: enum, one tag byte
     tags None=0 FirstCheckWaiting=1 Monthly=2 Checking=3 Failed=4
 OldAddressesView: record: kind: OldKind, count: u64, days_ago: u64, next: option<u64>, running: bool, words: option<Words>
 DeepRequestView: record: asked: bool, words: Words
+LimitView: record: sats: u64, display_usd: u32
+CounterShareView: record: counter: list<u8>, bps: u32
+SettingsHeldView: record: version: u32, light_per_sale: LimitView, light_budget: LimitView, node_per_sale: LimitView, node_budget: LimitView, box_per_sale: LimitView, box_budget: LimitView, underpayment_tolerance_bps: u32, refund_cap: LimitView, refund_daily_cap: LimitView, cashier_override_daily_cap: LimitView, manager_override_ceiling: LimitView, min_confirmations: u8, final_confirmations: u8, heartbeat_max_age_secs: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, devices: list<list<u8>>, counters: list<CounterShareView>, boxes: list<list<u8>>
+OutboxKind: enum, one tag byte
+    tags Transaction=0 Batch=1 Settings=2 Pairing=3
+OutboxRow: record: id: u32, kind: OutboxKind, txid: option<string>, counter: option<list<u8>>, version: option<u32>, signed_at: option<u64>, size: u32, words: Words
 ```

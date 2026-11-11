@@ -1188,3 +1188,156 @@ pub struct DeepRequestView {
 }
 
 wire_record!(DeepRequestView { asked, words });
+
+// ---- what the node holds, read-only -----------------------------------------------
+
+/// One limit of the shop's settings: what is enforced, in satoshis, and the
+/// whole dollars it was shown as.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LimitView {
+    /// The enforced amount, in satoshis.
+    pub sats: u64,
+    /// The display amount, in whole dollars.
+    pub display_usd: u32,
+}
+
+wire_record!(LimitView { sats, display_usd });
+
+/// A counter's share of every budget.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CounterShareView {
+    /// The counter, 32 bytes.
+    pub counter: Vec<u8>,
+    /// Its share, in basis points (10,000 is the whole budget).
+    pub bps: u32,
+}
+
+wire_record!(CounterShareView { counter, bps });
+
+/// The shop's settings that the owner phone holds as in force, decoded: the
+/// fields of `openbmt_core::settings::Settings`, for a read-only view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingsHeldView {
+    /// The version; it goes up with every signed change.
+    pub version: u32,
+    /// Light check: largest instant sale.
+    pub light_per_sale: LimitView,
+    /// Light check: shop-wide outstanding instant total.
+    pub light_budget: LimitView,
+    /// Own node: largest instant sale.
+    pub node_per_sale: LimitView,
+    /// Own node: shop-wide outstanding instant total.
+    pub node_budget: LimitView,
+    /// Box reports only: largest instant sale.
+    pub box_per_sale: LimitView,
+    /// Box reports only: shop-wide outstanding instant total.
+    pub box_budget: LimitView,
+    /// How far under the sale amount a payment may fall and still count, in
+    /// basis points.
+    pub underpayment_tolerance_bps: u32,
+    /// Largest single refund.
+    pub refund_cap: LimitView,
+    /// Largest refunds per day.
+    pub refund_daily_cap: LimitView,
+    /// The cashier's daily override cap.
+    pub cashier_override_daily_cap: LimitView,
+    /// The manager's override ceiling.
+    pub manager_override_ceiling: LimitView,
+    /// Confirmations that settle a sale.
+    pub min_confirmations: u8,
+    /// Confirmations at which a sale is final and a refund may be paid.
+    pub final_confirmations: u8,
+    /// The longest age of the owner phone's heartbeat that still allows an
+    /// instant sale, in seconds.
+    pub heartbeat_max_age_secs: u32,
+    /// Tor is on.
+    pub tor_on: bool,
+    /// Customers can join the Wi-Fi the counter is on, or the owner is unsure.
+    pub customer_wifi: bool,
+    /// The smallest sale a counter opens, in satoshis; 0 is no floor.
+    pub min_sale_sats: u64,
+    /// The devices that may write records, 32 bytes each.
+    pub devices: Vec<Vec<u8>>,
+    /// Each counter's share of every budget.
+    pub counters: Vec<CounterShareView>,
+    /// The devices that are Boxes, 32 bytes each.
+    pub boxes: Vec<Vec<u8>>,
+}
+
+wire_record!(SettingsHeldView {
+    version,
+    light_per_sale,
+    light_budget,
+    node_per_sale,
+    node_budget,
+    box_per_sale,
+    box_budget,
+    underpayment_tolerance_bps,
+    refund_cap,
+    refund_daily_cap,
+    cashier_override_daily_cap,
+    manager_override_ceiling,
+    min_confirmations,
+    final_confirmations,
+    heartbeat_max_age_secs,
+    tor_on,
+    customer_wifi,
+    min_sale_sats,
+    devices,
+    counters,
+    boxes
+});
+
+/// The kinds of signed object that wait in the outbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutboxKind {
+    /// A signed transaction.
+    Transaction,
+    /// A batch of addresses for a counter.
+    Batch,
+    /// Signed settings.
+    Settings,
+    /// A pairing.
+    Pairing,
+}
+
+wire_unit_enum!(OutboxKind {
+    Transaction = 0,
+    Batch = 1,
+    Settings = 2,
+    Pairing = 3
+});
+
+/// One signed object that waits to be delivered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboxRow {
+    /// The object's number.
+    pub id: u32,
+    /// What it is.
+    pub kind: OutboxKind,
+    /// The transaction's ID, for a transaction.
+    pub txid: Option<String>,
+    /// The counter, for a batch that reads back.
+    pub counter: Option<Vec<u8>>,
+    /// The version, for settings that read back.
+    pub version: Option<u32>,
+    /// When the owner phone signed it, in seconds since 1970: known for a
+    /// batch only, from the range the phone issued. The node keeps no time
+    /// for the others.
+    pub signed_at: Option<u64>,
+    /// The size of the object, in bytes.
+    pub size: u32,
+    /// What the owner is told.
+    pub words: WordsView,
+}
+
+wire_record!(OutboxRow {
+    id,
+    kind,
+    txid,
+    counter,
+    version,
+    signed_at,
+    size,
+    words
+});

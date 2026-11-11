@@ -42,6 +42,8 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (23, "send_states"),
         (24, "old_addresses"),
         (25, "request_deep_check"),
+        (26, "settings"),
+        (27, "outbox"),
         (30, "build_request"),
         (31, "approve_merge"),
         (32, "take"),

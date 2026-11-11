@@ -33,9 +33,9 @@
 //!
 //! - 1 `start`, 2 `stop`: a node and its handle.
 //! - 10 `pump`, 11 `link_step`, 12 `deliver`: the work the app's loop does.
-//! - 20 to 25: what the screens show (status, the line about receipts, the
+//! - 20 to 27: what the screens show (status, the line about receipts, the
 //!   offer to merge, the payments followed, the old addresses, the deep
-//!   check).
+//!   check, the settings the node holds, the signed objects that wait).
 //! - 30 to 35: the approval with the Key app (build, take the response, the
 //!   open sessions).
 //! - 40 to 46: the queue (refunds, cash-outs, batches, settings).
@@ -60,12 +60,13 @@ use crate::host::{real_spawn, Entry, Spawn};
 use crate::say::{TONES, WHOS};
 use crate::views::{
     put_words, AlertKind, AlertView, BatchArgs, BuiltView, CashAmountView, CashOutArgs, CashOutRow,
-    ClearArgs, CounterView, DeepRequestView, DeliverView, EntryKindView, EntryRow, HaltedView,
-    HealthView, LinkConfig, LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView,
-    OldKind, OutcomeKind, OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund,
-    ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind,
-    SendRow, SettingsQueuedView, SkippedView, StageKind, StageView, StartConfig, StatusView,
-    TakenView, ViewKind, WordsView,
+    ClearArgs, CounterShareView, CounterView, DeepRequestView, DeliverView, EntryKindView,
+    EntryRow, HaltedView, HealthView, LimitView, LinkConfig, LinkStepView, LinkView,
+    MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind,
+    OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView,
+    RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView,
+    SettingsQueuedView, SkippedView, StageKind, StageView, StartConfig, StatusView, TakenView,
+    ViewKind, WordsView,
 };
 
 /// The first four bytes of a request.
@@ -325,6 +326,8 @@ fn build_ops() -> Vec<Op> {
         op(25, "request_deep_check", Node, |c, now: u64| {
             c.entry()?.request_deep_check(now)
         }),
+        op(26, "settings", Node, |c, ()| c.entry()?.settings()),
+        op(27, "outbox", Node, |c, ()| c.entry()?.outbox()),
         op(
             30,
             "build_request",
@@ -545,6 +548,11 @@ fn definitions() -> Vec<TypeDef> {
         OldKind::define(),
         OldAddressesView::define(),
         DeepRequestView::define(),
+        LimitView::define(),
+        CounterShareView::define(),
+        SettingsHeldView::define(),
+        OutboxKind::define(),
+        OutboxRow::define(),
     ]
 }
 

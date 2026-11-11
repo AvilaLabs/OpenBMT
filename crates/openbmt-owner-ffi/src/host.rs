@@ -35,12 +35,13 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use bitcoin::bip32::{Xpriv, Xpub};
+use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::{Address, BlockHash, Network, ScriptBuf, Txid};
 use openbmt_core::batch::{BatchBuilder, BatchPolicy, SignedBatch};
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::records::DeviceList;
-use openbmt_core::settings::SignedSettings;
+use openbmt_core::settings::{Limit, SignedSettings};
 use openbmt_core::wallet::WalletDescription;
 use openbmt_counter_node::DriverPort;
 use openbmt_courier::{Courier, CourierConfig, FirstStart};
@@ -70,11 +71,12 @@ use crate::error::{
 use crate::say::{counter_words, link_alert_words, words_for};
 use crate::views::{
     AlertKind, AlertView, BatchArgs, BuiltView, CashAmountView, CashOutArgs, CashOutRow, ClearArgs,
-    CounterView, DeepRequestView, DeliverView, EntryKindView, EntryRow, HaltedView, HealthView,
-    LinkConfig, LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView, OldKind,
-    OutcomeKind, OutcomeView, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView,
-    RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsQueuedView,
-    SkippedView, StageKind, StageView, StartConfig, StatusView, TakenView, ViewKind, WordsView,
+    CounterShareView, CounterView, DeepRequestView, DeliverView, EntryKindView, EntryRow,
+    HaltedView, HealthView, LimitView, LinkConfig, LinkStepView, LinkView, MergeOfferView,
+    NoteKindView, OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind, OutcomeView,
+    PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView,
+    RefundRow, RouteView, SendKind, SendRow, SettingsHeldView, SettingsQueuedView, SkippedView,
+    StageKind, StageView, StartConfig, StatusView, TakenView, ViewKind, WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -1339,6 +1341,140 @@ impl Entry {
                 asked,
                 words: WordsView(words),
             })
+        })
+    }
+
+    /// The settings the owner phone holds as in force, decoded; none when it
+    /// holds none yet.
+    pub(crate) fn settings(&self) -> Result<Option<SettingsHeldView>, AppError> {
+        self.run(None, |st| {
+            let limit = |l: &Limit| LimitView {
+                sats: l.sats,
+                display_usd: l.display_usd,
+            };
+            Ok(st.node.owner().known_settings().map(|s| SettingsHeldView {
+                version: s.version,
+                light_per_sale: limit(&s.light_per_sale),
+                light_budget: limit(&s.light_budget),
+                node_per_sale: limit(&s.node_per_sale),
+                node_budget: limit(&s.node_budget),
+                box_per_sale: limit(&s.box_per_sale),
+                box_budget: limit(&s.box_budget),
+                underpayment_tolerance_bps: s.underpayment_tolerance_bps,
+                refund_cap: limit(&s.refund_cap),
+                refund_daily_cap: limit(&s.refund_daily_cap),
+                cashier_override_daily_cap: limit(&s.cashier_override_daily_cap),
+                manager_override_ceiling: limit(&s.manager_override_ceiling),
+                min_confirmations: s.min_confirmations,
+                final_confirmations: s.final_confirmations,
+                heartbeat_max_age_secs: s.heartbeat_max_age_secs,
+                tor_on: s.tor_on,
+                customer_wifi: s.customer_wifi,
+                min_sale_sats: s.min_sale_sats,
+                devices: s.devices.iter().map(|d| d.to_bytes().to_vec()).collect(),
+                counters: s
+                    .counters
+                    .iter()
+                    .map(|(d, bps)| CounterShareView {
+                        counter: d.to_bytes().to_vec(),
+                        bps: u32::from(*bps),
+                    })
+                    .collect(),
+                boxes: s.boxes.iter().map(|d| d.to_bytes().to_vec()).collect(),
+            }))
+        })
+    }
+
+    /// The signed objects that wait in the outbox, by kind. The node keeps
+    /// no time for an object; a batch's signing time is read from the range
+    /// the phone issued for it.
+    pub(crate) fn outbox(&self) -> Result<Vec<OutboxRow>, AppError> {
+        self.run(None, |st| {
+            let owner = st.node.owner();
+            // The words of a signed object that waits. A transaction's ID is
+            // the only detail they carry, and only a transaction has one.
+            let signed = |kind: EntryKind, txid: Option<Txid>| {
+                let mut w = Stage::Signed {
+                    txid: txid.unwrap_or_else(|| Txid::from_byte_array([0; 32])),
+                }
+                .words(kind);
+                if txid.is_none() {
+                    w.detail = None;
+                }
+                w
+            };
+            let rows = owner
+                .outbox()
+                .iter()
+                .map(|d| match &d.what {
+                    Delivery::Transaction {
+                        txid, tx, cash_out, ..
+                    } => OutboxRow {
+                        id: d.id,
+                        kind: OutboxKind::Transaction,
+                        txid: Some(txid.to_string()),
+                        counter: None,
+                        version: None,
+                        signed_at: None,
+                        size: u32::try_from(tx.len()).unwrap_or(u32::MAX),
+                        words: words(signed(
+                            if cash_out.is_some() {
+                                EntryKind::CashOut
+                            } else {
+                                EntryKind::Refund
+                            },
+                            Some(*txid),
+                        )),
+                    },
+                    Delivery::Batch(bytes) => {
+                        let batch = SignedBatch::from_bytes(bytes).ok();
+                        let signed_at = batch.as_ref().and_then(|b| {
+                            owner
+                                .issued_ranges()
+                                .iter()
+                                .find(|r| {
+                                    r.counter == b.batch.counter
+                                        && r.start == b.batch.start
+                                        && r.count == b.batch.count
+                                })
+                                .map(|r| r.signed_at)
+                        });
+                        OutboxRow {
+                            id: d.id,
+                            kind: OutboxKind::Batch,
+                            txid: None,
+                            counter: batch.map(|b| b.batch.counter.to_bytes().to_vec()),
+                            version: None,
+                            signed_at,
+                            size: u32::try_from(bytes.len()).unwrap_or(u32::MAX),
+                            words: words(signed(EntryKind::Batch, None)),
+                        }
+                    }
+                    Delivery::Settings(bytes) => OutboxRow {
+                        id: d.id,
+                        kind: OutboxKind::Settings,
+                        txid: None,
+                        counter: None,
+                        version: SignedSettings::from_bytes(bytes)
+                            .ok()
+                            .map(|s| s.settings.version),
+                        signed_at: None,
+                        size: u32::try_from(bytes.len()).unwrap_or(u32::MAX),
+                        words: words(signed(EntryKind::SettingsChange, None)),
+                    },
+                    Delivery::Pairing(bytes) => OutboxRow {
+                        id: d.id,
+                        kind: OutboxKind::Pairing,
+                        txid: None,
+                        counter: None,
+                        version: None,
+                        signed_at: None,
+                        size: u32::try_from(bytes.len()).unwrap_or(u32::MAX),
+                        words: words(signed(EntryKind::Pairing, None)),
+                    },
+                })
+                .collect();
+            Ok(rows)
         })
     }
 

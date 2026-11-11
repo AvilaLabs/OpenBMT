@@ -68,10 +68,10 @@ pub use host::{Entry, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};
 pub use say::{all_words, words_for};
 pub use views::{
     AlertKind, AlertView, BatchArgs, BuiltView, CashAmountView, CashOutArgs, CashOutRow, ClearArgs,
-    CounterView, DeepRequestView, DeliverView, EntryKindView, EntryRow, HaltedView, HealthView,
-    LinkConfig, LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView, OldKind,
-    OutcomeKind, OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund, ReceiptsKind,
-    ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind, SendRow,
-    SettingsQueuedView, SkippedView, StageKind, StageView, StartConfig, StatusView, TakenView,
-    ViewKind, WordsView,
+    CounterShareView, CounterView, DeepRequestView, DeliverView, EntryKindView, EntryRow,
+    HaltedView, HealthView, LimitView, LinkConfig, LinkStepView, LinkView, MergeOfferView,
+    NoteKindView, OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind, OutcomeView,
+    OwnerNetwork, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs,
+    RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView, SettingsQueuedView,
+    SkippedView, StageKind, StageView, StartConfig, StatusView, TakenView, ViewKind, WordsView,
 };

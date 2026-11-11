@@ -84,6 +84,23 @@ object ProtocolDecoderTest {
         check(old.kind == OldKind.Monthly && old.count == 12L && old.daysAgo == 3L)
         check(old.next == 1_700_000_000L && !old.running && old.words?.heading == "Words")
 
+        val held = decodeResponse(settingsFrame()).let { r -> r.option { r.settingsHeld() } }
+        check(held != null && held.version == 3L && held.lightPerSale.sats == 500L)
+        check(held.lightPerSale.displayUsd == 7L && held.managerOverrideCeiling.sats == 600L)
+        check(held.underpaymentToleranceBps == 100L && held.minConfirmations == 1 && held.finalConfirmations == 6)
+        check(held.heartbeatMaxAgeSecs == 900L && held.torOn && !held.customerWifi && held.minSaleSats == 0L)
+        check(held.devices.size == 1 && held.counters.size == 1 && held.counters[0].bps == 10_000L)
+        check(held.boxes.isEmpty())
+        check(decodeResponse(header(0, byteArrayOf(0))).let { r -> r.option { r.settingsHeld() } } == null)
+        rejects("a settings flag") { decodeResponse(header(0, byteArrayOf(2))).let { r -> r.option { r.settingsHeld() } } }
+        rejects("a short settings") { decodeResponse(settingsFrame().copyOf(40)).let { r -> r.option { r.settingsHeld() } } }
+
+        val outbox = decodeResponse(outboxFrame()).let { r -> r.list { r.outboxRow() } }
+        check(outbox.size == 1 && outbox[0].kind == OutboxKind.Batch && outbox[0].id == 8L)
+        check(outbox[0].txid == null && outbox[0].counter!!.size == 32 && outbox[0].version == null)
+        check(outbox[0].signedAt == 1_700_000_000L && outbox[0].size == 300L && outbox[0].words.heading == "Words")
+        rejects("an outbox kind tag") { decodeResponse(outboxFrame(kind = 4)).let { r -> r.list { r.outboxRow() } } }
+
         val pump = decodeResponse(header(0, Writer().u32(1).string("note").u8(1).toByteArray())).pump()
         check(pump.notes == listOf("note") && pump.stopped)
     }
@@ -263,6 +280,25 @@ object ProtocolDecoderTest {
     private fun oldFrame(): ByteArray {
         val out = ByteArrayOutputStream()
         out.write(Writer().u8(2).u64(12).u64(3).u8(1).u64(1_700_000_000).u8(0).u8(1).toByteArray())
+        words(out)
+        return header(0, out.toByteArray())
+    }
+
+    private fun settingsFrame(): ByteArray {
+        val w = Writer().u8(1).u32(3)
+        for (i in 0 until 6) w.u64(if (i == 0) 500L else 1000L).u32(if (i == 0) 7 else 1)
+        w.u32(100)
+        for (i in 0 until 4) w.u64(if (i == 3) 600L else 1000L).u32(1)
+        w.u8(1).u8(6).u32(900).bool(true).bool(false).u64(0)
+        w.u32(1).bytes(ByteArray(32) { 1 })
+        w.u32(1).bytes(ByteArray(32) { 2 }).u32(10_000)
+        w.u32(0)
+        return header(0, w.toByteArray())
+    }
+
+    private fun outboxFrame(kind: Int = 1): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(Writer().u32(1).u32(8).u8(kind).u8(0).u8(1).bytes(ByteArray(32) { 2 }).u8(0).u8(1).u64(1_700_000_000).u32(300).toByteArray())
         words(out)
         return header(0, out.toByteArray())
     }
