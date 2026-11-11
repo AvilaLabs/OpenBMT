@@ -23,7 +23,9 @@ use openbmt_core::policy::{
 };
 use openbmt_core::records::{DeviceList, Record, RecordKind, Verifier};
 use openbmt_core::settings::Settings;
-use openbmt_watch::{HeaderChain, Health, Refusal, Sighted, Source, WellFormedBlock};
+use openbmt_watch::{
+    HeaderChain, Health, OwnNodeHealth, Refusal, Sighted, Source, WellFormedBlock,
+};
 
 use crate::desk::{in_override_window, valid_name, Desk, OverrideEntry, Role};
 use crate::events::{final_payments, Event};
@@ -208,6 +210,8 @@ fn screen_of(state: State, why: Why, next: Next) -> Screen {
         stuck: false,
         late: false,
         check_mode: None,
+        own_node_saw: false,
+        own_node_counted: false,
         conflict_seen: false,
         reopened: false,
         reports: Vec::new(),
@@ -984,7 +988,7 @@ impl Counter {
             return Err(RequoteRefused::AmountTooLarge);
         };
         let depth = self.depth();
-        sale.refresh(headers, now, depth);
+        sale.refresh(headers, now, depth, &OwnNodeHealth::not_configured());
         if sale.frozen.is_some() {
             return Err(RequoteRefused::AlreadyEnough);
         }
@@ -1009,7 +1013,7 @@ impl Counter {
         }
         let quote = Quote::new(rate, now);
         sale.quotes.push(quote);
-        sale.refresh(headers, now, depth);
+        sale.refresh(headers, now, depth, &OwnNodeHealth::not_configured());
         let event = Event::Requoted {
             index,
             at: now,
@@ -1108,6 +1112,22 @@ impl Counter {
                 .map_err(SightingError::Store)?;
         }
         Ok(out)
+    }
+
+    /// CR-103: the own node reports that it holds `txid` in its memory pool
+    /// (WR-61). Returns the live sales that know the transaction and have
+    /// recorded the report; the report is not a sighting and is kept in
+    /// memory only (WR-65), so nothing is stored and nothing is reported.
+    /// A transaction no sale knows records nothing and returns no sale: the
+    /// caller asks the node again when the light client has sighted it.
+    pub fn own_node_saw(&mut self, txid: Txid) -> Vec<u32> {
+        let mut known = Vec::new();
+        for (index, sale) in self.sales.iter_mut() {
+            if sale.is_live() && sale.watch.own_node_saw(txid) {
+                known.push(*index);
+            }
+        }
+        known
     }
 
     /// What a transaction pays to the scripts of sales that are not live,
@@ -1297,6 +1317,22 @@ impl Counter {
         facts: &Facts<'_, C>,
         store: &mut S,
     ) -> Result<Screen, JudgeError<S::Error>> {
+        self.judge_with_own_node(index, facts, &OwnNodeHealth::not_configured(), store)
+    }
+
+    /// [`Counter::judge`] with the merchant's own node as a second check
+    /// (CR-104). `own` is the health line of the own node as the app's
+    /// tracker gives it now; the sale's status is read with it
+    /// (`SaleWatch::status_with_own_node`), so the own-node tier of the
+    /// instant decision applies only when the status says the own node
+    /// counted. With `OwnNodeHealth::not_configured()` this is `judge`.
+    pub fn judge_with_own_node<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        facts: &Facts<'_, C>,
+        own: &OwnNodeHealth,
+        store: &mut S,
+    ) -> Result<Screen, JudgeError<S::Error>> {
         if self.unreadable.contains(&index) {
             return Ok(screen_of(
                 State::NeedsAPerson,
@@ -1317,7 +1353,7 @@ impl Counter {
         let now = facts.now;
         let depth = self.depth();
         let final_depth = u32::from(self.settings.final_confirmations).max(depth);
-        let (st, received) = sale.refresh(facts.chain, now, depth);
+        let (st, received) = sale.refresh(facts.chain, now, depth, own);
         let needs = sale.watch.sale_sats();
         let confirmed = st.min_confirmations >= depth;
         let is_final = st.min_confirmations >= final_depth;
@@ -1654,6 +1690,8 @@ impl Counter {
             stuck,
             late: sale.is_late(),
             check_mode: st.mode,
+            own_node_saw: st.own_node_saw,
+            own_node_counted: st.own_node_counted,
             conflict_seen: st.conflict_seen,
             reopened: sale.reopened,
             reports: Vec::new(),
@@ -1770,8 +1808,28 @@ impl Counter {
         facts: &Facts<'_, C>,
         store: &mut S,
     ) -> Overridden<S::Error> {
+        self.override_sale_with_own_node(
+            index,
+            actor,
+            facts,
+            &OwnNodeHealth::not_configured(),
+            store,
+        )
+    }
+
+    /// [`Counter::override_sale`] judged with the own node (CR-104): the
+    /// sale is judged first, and a cashier's limit is the one of the check
+    /// that judging found.
+    pub fn override_sale_with_own_node<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        actor: Actor,
+        facts: &Facts<'_, C>,
+        own: &OwnNodeHealth,
+        store: &mut S,
+    ) -> Overridden<S::Error> {
         let mut reports = Vec::new();
-        let result = self.override_inner(index, actor, facts, store, &mut reports);
+        let result = self.override_inner(index, actor, facts, own, store, &mut reports);
         Overridden { reports, result }
     }
 
@@ -1780,13 +1838,14 @@ impl Counter {
         index: u32,
         actor: Actor,
         facts: &Facts<'_, C>,
+        own: &OwnNodeHealth,
         store: &mut S,
         reports: &mut Vec<Report>,
     ) -> Result<(), OverrideRefused<S::Error>> {
         if !valid_name(&actor.name) {
             return Err(OverrideRefused::BadName);
         }
-        let mut screen = match self.judge(index, facts, store) {
+        let mut screen = match self.judge_with_own_node(index, facts, own, store) {
             Ok(screen) => screen,
             Err(JudgeError::UnknownSale(i)) => return Err(OverrideRefused::UnknownSale(i)),
             Err(e) => return Err(OverrideRefused::Judge(e)),
@@ -2221,7 +2280,8 @@ impl Counter {
         headers: &C,
     ) -> (u64, u32) {
         let mut copy = sale.clone();
-        let (status, received) = copy.refresh(headers, now, self.depth());
+        let (status, received) =
+            copy.refresh(headers, now, self.depth(), &OwnNodeHealth::not_configured());
         (received, status.min_confirmations)
     }
 

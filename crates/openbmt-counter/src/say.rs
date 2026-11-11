@@ -18,7 +18,7 @@ use std::fmt::Display;
 
 use openbmt_core::command::CommandError;
 use openbmt_core::heartbeat::HeartbeatError;
-use openbmt_core::policy::{InstantLabel, OffReason, WaitReason};
+use openbmt_core::policy::{CheckMode, InstantLabel, OffReason, WaitReason};
 use openbmt_core::say::{sats, Quoted, Tone, Who, Words};
 use openbmt_watch::say::RefusalGroup;
 use openbmt_watch::Problem;
@@ -259,6 +259,29 @@ impl Screen {
         words
     }
 
+    /// CR-105: which check was done on a payment that waits. Only a sale
+    /// that is waiting has one: an accepted sale says it in its own words
+    /// (`Why::Instant`), and the sales that wait for nothing say nothing.
+    pub fn check_line(&self) -> Option<CheckLine> {
+        if self.state != State::Waiting {
+            return None;
+        }
+        match (self.check_mode, self.own_node_saw, self.own_node_counted) {
+            (Some(CheckMode::Light), true, _) => Some(CheckLine::LightOwnNodeUnusable),
+            (Some(CheckMode::Light), false, _) => Some(CheckLine::Light),
+            (Some(CheckMode::NodeAlsoSeenByLight), _, true) => Some(CheckLine::YourNodeAndLight),
+            (Some(CheckMode::NodeAlsoSeenByLight), _, false) => Some(CheckLine::BoxAndLight),
+            (Some(CheckMode::BoxReportsOnly), _, _) => Some(CheckLine::BoxOnly),
+            (None, true, _) => Some(CheckLine::OwnNodeWaitingForLight),
+            (None, false, _) => None,
+        }
+    }
+
+    /// The words of [`Screen::check_line`], for the line under the state.
+    pub fn check_words(&self) -> Option<Words> {
+        self.check_line().map(|line| line.words())
+    }
+
     /// The extra lines for the flags of the screen: a payment that is stuck
     /// (CR-18) and a late payment (CR-19).
     pub fn flag_words(&self) -> Vec<Words> {
@@ -270,6 +293,95 @@ impl Screen {
             out.push(late_words());
         }
         out
+    }
+}
+
+/// CR-105: which check was done on a payment that waits. The screen always
+/// says it: a fallback from the own node to the light check is a line of its
+/// own and never silent (WR-64).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckLine {
+    /// The light check alone, and the own node has not reported the payment.
+    Light,
+    /// The own node reported the payment and cannot be used now: the light
+    /// check is what counts.
+    LightOwnNodeUnusable,
+    /// The own node reported the payment, can be used, and the light check
+    /// saw it too.
+    YourNodeAndLight,
+    /// The own node reported the payment and the light check has not seen
+    /// it from enough of the network yet.
+    OwnNodeWaitingForLight,
+    /// The Box and the light check.
+    BoxAndLight,
+    /// The Box alone.
+    BoxOnly,
+}
+
+/// Every [`CheckLine`], for SC-01.
+pub const ALL_CHECK_LINES: [CheckLine; 6] = [
+    CheckLine::Light,
+    CheckLine::LightOwnNodeUnusable,
+    CheckLine::YourNodeAndLight,
+    CheckLine::OwnNodeWaitingForLight,
+    CheckLine::BoxAndLight,
+    CheckLine::BoxOnly,
+];
+
+impl CheckLine {
+    /// What the screen says about the check.
+    pub fn words(&self) -> Words {
+        let (heading, what, who, next) = match self {
+            Self::Light => (
+                "Light check",
+                "This payment was seen by the counter's own light check.",
+                Who::Nobody,
+                "Nothing to do.",
+            ),
+            Self::LightOwnNodeUnusable => (
+                "Light check, not your node",
+                "Your node saw this payment but cannot be used just now, so only the light check counted.",
+                Who::Owner,
+                "Nothing to do for this sale. The owner can see why on the counter's status screen.",
+            ),
+            Self::YourNodeAndLight => (
+                "Your node and light check",
+                "Your own node and the counter's light check both saw this payment.",
+                Who::Nobody,
+                "Nothing to do.",
+            ),
+            Self::OwnNodeWaitingForLight => (
+                "Your node saw it",
+                "Your own node holds this payment, and the light check has not seen it from enough of the network yet.",
+                Who::Nobody,
+                "Nothing to do. The counter keeps watching for the light check.",
+            ),
+            Self::BoxAndLight => (
+                "Your Box and light check",
+                "Your Box and the counter's light check both saw this payment.",
+                Who::Nobody,
+                "Nothing to do.",
+            ),
+            Self::BoxOnly => (
+                "Your Box reports it",
+                "Only your Box reported this payment; the light check has not seen it from enough of the network.",
+                Who::Nobody,
+                "Nothing to do. The counter keeps watching for the light check.",
+            ),
+        };
+        Words::new(Tone::Info, heading, what, who, next).code("CR-105")
+    }
+}
+
+/// The name of a check line, by an exhaustive match.
+pub fn check_line_name(line: CheckLine) -> &'static str {
+    match line {
+        CheckLine::Light => "Light",
+        CheckLine::LightOwnNodeUnusable => "LightOwnNodeUnusable",
+        CheckLine::YourNodeAndLight => "YourNodeAndLight",
+        CheckLine::OwnNodeWaitingForLight => "OwnNodeWaitingForLight",
+        CheckLine::BoxAndLight => "BoxAndLight",
+        CheckLine::BoxOnly => "BoxOnly",
     }
 }
 
@@ -1342,6 +1454,8 @@ fn screen(state: State, why: Why, next: Next) -> Screen {
         stuck: false,
         late: false,
         check_mode: None,
+        own_node_saw: false,
+        own_node_counted: false,
         conflict_seen: false,
         reopened: false,
         reports: Vec::new(),
@@ -1530,6 +1644,12 @@ pub fn all_words() -> Vec<(String, Words)> {
     let mut all: Vec<(String, Words)> = Vec::new();
     for (name, s) in sample_screens() {
         all.push((format!("Screen::{name}"), s.words()));
+    }
+    for line in ALL_CHECK_LINES {
+        all.push((
+            format!("CheckLine::{}", check_line_name(line)),
+            line.words(),
+        ));
     }
     all.push(("Screen::stuck".to_string(), stuck_words()));
     all.push(("Screen::late".to_string(), late_words()));

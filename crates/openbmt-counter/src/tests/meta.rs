@@ -6,11 +6,12 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 13] = [
+const TEST_SOURCES: [&str; 14] = [
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
     include_str!("open.rs"),
     include_str!("overrides.rs"),
+    include_str!("own_node.rs"),
     include_str!("recordlog.rs"),
     include_str!("records.rs"),
     include_str!("refunds.rs"),
@@ -25,7 +26,7 @@ const TEST_SOURCES: [&str; 13] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 20] = [
+const NOT_HERE: [(&str, &str); 25] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -125,20 +126,53 @@ const NOT_HERE: [(&str, &str); 20] = [
         "the peers are the bundle's hints and the node's to use; tested in \
          `openbmt-counter-node` and `openbmt-core` (`bundle`)",
     ),
+    (
+        "CR-100",
+        "the address is read and refused in `openbmt-counter-node` (`ownnode`) and kept by the \
+         Android app behind the manager's PIN; tested in `openbmt-counter-node`, \
+         `openbmt-counter-ffi` and the app's JVM tests",
+    ),
+    (
+        "CR-101",
+        "a home-network address is refused where the address is read; tested in \
+         `openbmt-counter-node` (`tests/ownnode.rs`) and `openbmt-counter-ffi`",
+    ),
+    (
+        "CR-102",
+        "the Tor proxy is the start's and the app's; tested in `openbmt-counter-node`, \
+         `openbmt-counter-ffi` and the app's JVM tests",
+    ),
+    (
+        "CR-103",
+        "what the node does with the driver's own-node channel is the node's; tested in \
+         `openbmt-counter-node` (`tests/own_node.rs`)",
+    ),
+    (
+        "CR-107",
+        "the health line and Try again are the node's and the app's; tested in \
+         `openbmt-counter-node`, `openbmt-counter-ffi` and the app's JVM tests",
+    ),
 ];
+
+/// The rule number at the start of `rest` (what follows `CR-`): every digit,
+/// so that `CR-07` and `CR-100` both read.
+fn number(rest: &str) -> String {
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    format!("CR-{digits}")
+}
 
 fn defined() -> BTreeSet<String> {
     RULES
         .lines()
         .filter_map(|l| l.strip_prefix("- **CR-"))
-        .map(|rest| format!("CR-{}", &rest[..2]))
+        .map(number)
         .collect()
 }
 
 #[test]
-fn the_rules_file_defines_seventy_eight_rules() {
+fn the_rules_file_defines_eighty_seven_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 78);
+    assert_eq!(ids.len(), 87);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -150,6 +184,8 @@ fn the_rules_file_defines_seventy_eight_rules() {
             && ids.contains("CR-89")
             && ids.contains("CR-90")
             && ids.contains("CR-99")
+            && ids.contains("CR-100")
+            && ids.contains("CR-108")
     );
 }
 
@@ -183,7 +219,7 @@ fn every_test_names_a_rule_that_exists() {
     let sources: String = TEST_SOURCES.concat();
     for line in sources.lines() {
         if let Some(rest) = line.trim().strip_prefix("fn cr_") {
-            let id = format!("CR-{}", &rest[..2]);
+            let id = number(rest);
             assert!(ids.contains(&id), "test {line} names {id}");
         }
     }
@@ -194,8 +230,8 @@ fn every_refusal_names_a_rule_that_exists() {
     let ids = defined();
     let mut seen = 0;
     for (at, _) in REFUSALS.match_indices("\"CR-") {
-        let id = &REFUSALS[at + 1..at + 6];
-        assert!(ids.contains(id), "refusal names {id}");
+        let id = number(&REFUSALS[at + 4..]);
+        assert!(ids.contains(&id), "refusal names {id}");
         seen += 1;
     }
     assert!(seen > 20, "only {seen} rule names in the refusals");

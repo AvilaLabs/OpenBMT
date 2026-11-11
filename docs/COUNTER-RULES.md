@@ -653,7 +653,75 @@ it.
   counter asks first. Nothing is checked against them and nothing that
   moves money depends on them.
 
-## 11. What these rules do not do
+## 11. The own node as a second check
+
+These rules join the merchant's own node (`docs/NETWORK-RULES.md`, NR-98
+to NR-103; `docs/WATCHER-RULES.md`, WR-60 to WR-65) to the counter. The
+setting is read in `crates/openbmt-counter-node` (`ownnode`) and behind
+`crates/openbmt-counter-ffi` (`own_node_check`, `own_node_retry`); the node
+passes it to the driver and keeps the health line; the judgment is in
+`crates/openbmt-counter`; the screens are the app's. The own-node tier of
+the instant decision already exists in `openbmt_core::policy`, with its own
+limits in the signed settings: these rules only say when the counter uses it.
+
+- **CR-100.** The own node's address is a setting of this counter, not of the
+  shop. It is a hint of where to ask, and what makes the node trusted is the
+  name itself (NR-98). It is set on the counter by the manager's PIN
+  (CR-84 to CR-86; the counter has no other PIN), kept in the app's own
+  folder with the Orbot address and the names, never in the pairing record,
+  and removed with the same PIN. What is kept is one canonical text: a Tor
+  v3 name, a colon and a port. The text typed may have no port, and then
+  the port is the network's usual one (8333, 18444 on regtest, 38333 on
+  signet). A name that is not a Tor v3 name, and a port that is not from 1
+  to 65535, are refused with words, and nothing is kept. A start that is
+  given an address that is refused starts without an own node and says so
+  in the own node's health line; it never starts with an address that the
+  library did not accept.
+- **CR-101.** A home-network, loopback or clear-net address is never the own
+  node (NR-99). The words say that a home-network address cannot prove which
+  machine answers, and that the counter app has no way to add an ordinary
+  peer: the peers come with the owner's pairing (CR-99).
+- **CR-102.** The own node needs Tor. When the counter has no Tor proxy
+  (CR-87: the signed settings have Tor off), turning the own node on is
+  refused with words that say to turn on Orbot first, and a start that has
+  an own node and no proxy starts without it (CR-100).
+- **CR-103.** The node passes the own node to the driver, takes its reports
+  on the channel of its own (NR-103) and keeps one tracker for the health
+  line (WR-63). A report is given to the sales that know the transaction
+  (WR-61). The node asks the own node about the unconfirmed payments of the
+  live sales when it starts, when the own node connects, and after each
+  sighting of the light client that a sale took (WR-65), at most 256 at a
+  time. It never reads the own node's reports as sightings, and it takes no
+  header, block or transaction from it (NR-101, NR-102).
+- **CR-104.** Every sale is judged with the own node's health line
+  (`Counter::judge_with_own_node`, `override_sale_with_own_node`). The
+  instant decision uses the own-node tier, with the limits of the signed
+  settings, only when the sale's status says the own node counted (WR-62):
+  the own node reported the payment, can be used now, and the light client
+  saw it too. Otherwise it uses the light tier, as without an own node. A
+  report is kept in memory only and is not in the stored sale (WR-65).
+- **CR-105.** The screen always says which check was done. A sale that
+  waits shows one line for the check: the light check alone; the light check
+  because the own node saw the payment but cannot be used just now (the
+  fallback of WR-64 is never silent); the own node and the light check;
+  the own node alone, waiting for the light check; the Box and the light
+  check; the Box alone. A sale that was accepted at once says its check in
+  its own words (CR-10, "Paid (your node checked it)").
+- **CR-106.** Every record of a sale accepted at once names the check:
+  the label shown and the mode the limits were taken from (CR-13, CR-32). An
+  acceptance by the own node is recorded as "your node" and the node mode,
+  an acceptance by the light check as "light check" and the light mode.
+- **CR-107.** The counter's status shows the own node's health line
+  (WR-63, WR-64) in words, with the time it was last heard, and a Try again
+  that asks the driver to dial the own node again (NR-100). With no own
+  node set the status shows no line at all. The line is shown on the status
+  screen of the app; the check of a sale is shown on the sale screen
+  (CR-105).
+- **CR-108.** With no own node set nothing changes: no line, no words, no
+  own-node tier, whatever any report said, and `judge` is the same call as
+  `judge_with_own_node` with `OwnNodeHealth::not_configured()`.
+
+## 12. What these rules do not do
 
 - **They do not check payments.** Proof of work, proofs, peers and
   conflicts are the watcher's. A wrong fact handed in gives a wrong

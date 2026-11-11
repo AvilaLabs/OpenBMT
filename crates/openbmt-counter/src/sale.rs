@@ -32,7 +32,9 @@ use bitcoin::hashes::Hash;
 use bitcoin::{ScriptBuf, Txid};
 use openbmt_core::policy::{CheckMode, InstantLabel};
 use openbmt_core::wire::{self, DecodeError, Reader};
-use openbmt_watch::{HeaderChain, SaleStatus, SaleWatch, MAX_SCRIPT_BYTES, MAX_TOLERANCE_BPS};
+use openbmt_watch::{
+    HeaderChain, OwnNodeHealth, SaleStatus, SaleWatch, MAX_SCRIPT_BYTES, MAX_TOLERANCE_BPS,
+};
 
 use crate::desk::{len32, valid_name, Role};
 use crate::events::{label_from_u8, label_to_u8, mode_from_u8, mode_to_u8};
@@ -403,8 +405,9 @@ impl Sale {
         headers: &C,
         now: u64,
         depth: u32,
+        own: &OwnNodeHealth,
     ) -> (SaleStatus, u64) {
-        let first = self.watch.status(headers, now);
+        let first = self.watch.status_with_own_node(headers, now, own);
         let before = self.watch.sale_sats();
         let received = if first.received_sats < DUST_SATS {
             0
@@ -415,7 +418,7 @@ impl Sale {
         let status = if self.watch.sale_sats() == before {
             first
         } else {
-            self.watch.status(headers, now)
+            self.watch.status_with_own_node(headers, now, own)
         };
         if first.unconfirmed_again {
             self.reopened = true;

@@ -7,6 +7,7 @@ mod kit;
 mod meta;
 mod open;
 mod overrides;
+mod own_node;
 mod recordlog;
 mod records;
 mod refunds;

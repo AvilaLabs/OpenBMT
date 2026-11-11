@@ -189,6 +189,13 @@ pub struct Screen {
     pub late: bool,
     /// How the standing unconfirmed payment was checked.
     pub check_mode: Option<CheckMode>,
+    /// CR-105: the own node has reported the standing unconfirmed payment,
+    /// whether or not it can be used now (WR-61).
+    pub own_node_saw: bool,
+    /// CR-105: the own node's report is what makes `check_mode` the own-node
+    /// check (WR-62). False with `own_node_saw` true is the fallback to the
+    /// light check (WR-64).
+    pub own_node_counted: bool,
     /// A conflict has been seen on the sale.
     pub conflict_seen: bool,
     /// A block that confirmed the payment left the chain and it is not
