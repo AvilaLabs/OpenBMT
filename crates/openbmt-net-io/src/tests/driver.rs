@@ -845,6 +845,9 @@ fn nr_72_a_proxy_that_is_not_tor_is_asked_once_noted_once_and_the_seed_name_is_d
             .iter()
             .any(|(t, _)| matches!(t, Target::Name(..)))
     }));
+    // Let the round that made the dial finish its asks before counting them,
+    // so that a slow machine does not count a few asks late.
+    settle();
     let first = log.asked.lock().unwrap().len();
     assert!((1..=3).contains(&first));
     // Rounds would come every five minutes; none does, for as long as the
