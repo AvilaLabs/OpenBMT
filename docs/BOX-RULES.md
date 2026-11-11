@@ -478,8 +478,11 @@ These details too leave every rule of section 4 as it is.
 - **Square payments.** After the search of a page that has orders, the Box
   asks for the payments of the same orders (ListPayments, a GET, PS-95)
   through the same runner, the same token, the same caps and the same proxy,
-  one request for each page of payments, at most 8 of 100. It stops at a
-  page with no cursor or one that repeats the cursor it was asked from. The
+  one request for each page of payments, at most 64 pages of 100. It stops
+  at a page with no cursor or one that repeats the cursor it was asked from.
+  More pages than that fail the poll with a note saying so: a page is never
+  left unread in silence, since a Bitcoin tender's payment could be on it.
+  The
   replies are handed to the reader with the orders, so a tender of type
   `OTHER` is known by its payment's source too and a payment cancelled after
   the order closed is seen (PS-96, **[verify, E5]**). A page with no order

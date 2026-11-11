@@ -23,7 +23,7 @@ pub const PAGE_LIMIT: usize = 100;
 /// Payments asked for in one ListPayments request (Square's largest).
 pub const PAYMENTS_LIMIT: usize = 100;
 /// Most ListPayments requests for one page of orders.
-pub const MAX_PAYMENT_PAGES: usize = 8;
+pub const MAX_PAYMENT_PAGES: usize = 64;
 /// Seconds between two readings of a vendor's POS, and the least between two
 /// (BX-49).
 pub const VENDOR_POLL_SECS: u64 = 60;
@@ -153,10 +153,15 @@ impl VendorConnector {
             pages.push(body);
             match next {
                 Some(m) if marker.as_deref() != Some(m.as_str()) => marker = Some(m),
-                _ => break,
+                _ => return Ok(pages),
             }
         }
-        Ok(pages)
+        // More pages than one poll reads: refused, never a silent cut, since
+        // a Bitcoin tender's payment could be on a page left unread.
+        Err(HttpsRefusal::Unreadable(format!(
+            "BX-49: Square has more than {} payments in the window of one poll; the poll reads at most that many",
+            MAX_PAYMENT_PAGES * PAYMENTS_LIMIT
+        )))
     }
 }
 

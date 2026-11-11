@@ -227,6 +227,27 @@ fn bx_49_the_payments_of_a_square_page_are_read_page_by_page_through_the_same_ru
 }
 
 #[test]
+fn bx_49_more_payment_pages_than_a_poll_reads_fail_the_poll_and_are_never_cut_in_silence() {
+    assert!(SQUARE_PAYMENTS_PAGE1.contains("PAYCURSOR1=="));
+    let runner = FakeRunner::default();
+    runner.say(200, SQUARE_LAST);
+    // Every page names a new cursor, so the pages never end.
+    for n in 0..crate::vendor::MAX_PAYMENT_PAGES {
+        runner.say(
+            200,
+            &SQUARE_PAYMENTS_PAGE1.replace("PAYCURSOR1==", &format!("PAYCURSOR{n}X")),
+        );
+    }
+    let (mut c, transport) = connector(&square_config(), &runner);
+    assert!(c.poll(&Cursor::start()).is_err());
+    assert_eq!(runner.seen().len(), 1 + crate::vendor::MAX_PAYMENT_PAGES);
+    match transport.take() {
+        Some(HttpsRefusal::Unreadable(why)) => assert!(why.starts_with("BX-49"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
 fn bx_49_a_payments_request_that_fails_fails_the_poll_with_its_words() {
     for (status, heading) in [
         (401, "Till refused the token"),
