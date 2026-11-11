@@ -81,7 +81,7 @@ ops run on another; it waits for at most 250 ms.
  40 rate_sources     handle zero  args () -> list<RateSourceView>
  41 rate_parse       handle zero  args RateParseArgs -> SampleView
  42 rate_combine     handle zero  args RateCombineArgs -> RateView
- 43 pairing_read     handle zero  args list<u8> -> PairingView
+ 43 pairing_read     handle zero  args (list<u8>, string) -> PairingView
  44 pair_begin       handle zero  args PairBeginArgs -> PairStartedView
  45 pair_match       handle zero  args u64 -> ()
  46 pair_differ      handle zero  args () -> Words

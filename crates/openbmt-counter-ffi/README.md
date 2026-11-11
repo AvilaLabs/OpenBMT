@@ -95,8 +95,9 @@ on the schedule of `docs/RATE-RULES.md` (RT-40 to RT-45) and hands the
 bytes to `rate_parse`; `rate_combine` makes the samples into the rate that
 `open` takes, so no JSON is read in the app. A refusal of either is an
 error response whose words are those of `openbmt-rates`. `pairing_read`
-reads the saved pairing record before `start` so that the app can tell the
-network and whether Tor is on, for display only; it does not verify it.
+reads the saved pairing record, and the settings file in the data folder it
+is given (CR-163), before `start` so that the app can tell the network and
+whether Tor is on now, for display only; it does not verify the record.
 `start` verifies it and refuses to start when the settings have Tor on and
 the start has no proxy (CR-87).
 

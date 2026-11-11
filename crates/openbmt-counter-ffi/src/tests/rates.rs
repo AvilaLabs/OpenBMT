@@ -162,7 +162,10 @@ fn nr_26_the_pairing_is_read_before_the_node_starts() {
     let mut signed = signed_settings();
     let response = call(
         43,
-        &W::new().bytes(&record_with(signed.clone()).to_bytes()).0,
+        &W::new()
+            .bytes(&record_with(signed.clone()).to_bytes())
+            .string("")
+            .0,
     );
     let mut r = Rd::ok(&response);
     // The network tag of regtest, then the settings.
@@ -175,7 +178,10 @@ fn nr_26_the_pairing_is_read_before_the_node_starts() {
     // here; `start` checks them on the same bytes.
     signed.settings.tor_on = true;
     signed.settings.min_sale_sats = 26_000;
-    let response = call(43, &W::new().bytes(&record_with(signed).to_bytes()).0);
+    let response = call(
+        43,
+        &W::new().bytes(&record_with(signed).to_bytes()).string("").0,
+    );
     let mut r = Rd::ok(&response);
     assert_eq!(r.u8(), 3);
     assert_eq!(
@@ -190,13 +196,13 @@ fn nr_26_the_pairing_is_read_before_the_node_starts() {
 fn a_record_that_is_not_a_record_is_refused_with_words() {
     let bytes = record().to_bytes();
     for cut in [0, 4, bytes.len() / 2, bytes.len() - 1] {
-        let response = call(43, &W::new().bytes(&bytes[..cut]).0);
+        let response = call(43, &W::new().bytes(&bytes[..cut]).string("").0);
         let e = Rd::error(&response).expect("a refusal");
         assert_eq!(e.rule, "CR-97", "cut at {cut}");
         check_wire_words(&e.words).expect("the words pass the rules");
     }
     let mut more = bytes;
     more.push(0);
-    let response = call(43, &W::new().bytes(&more).0);
+    let response = call(43, &W::new().bytes(&more).string("").0);
     assert_eq!(Rd::error(&response).expect("a refusal").rule, "CR-97");
 }

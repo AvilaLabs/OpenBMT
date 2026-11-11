@@ -848,8 +848,12 @@ object Rates {
  * the same bytes.
  */
 object Shop {
-    fun pairing(record: ByteArray): PairingInfo {
-        val r = decodeResponse(send(requestFrame(OP_PAIRING_READ, 0) { it.bytes(record) }))
+    /**
+     * The pairing record read for display. With the counter's data folder [dir] the settings are the ones a
+     * start there would use, which can differ from the record's after the owner changed Tor (CR-163).
+     */
+    fun pairing(record: ByteArray, dir: String = ""): PairingInfo {
+        val r = decodeResponse(send(requestFrame(OP_PAIRING_READ, 0) { it.bytes(record).string(dir) }))
         return PairingInfo(r.network(), r.shopSettings(), r.relayKind()).also { r.end() }
     }
 }

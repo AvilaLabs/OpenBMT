@@ -394,9 +394,12 @@ fn build_ops() -> Vec<Op> {
         op(42, "rate_combine", Zero, |_, a: RateCombineArgs| {
             rate_combine(a)
         }),
-        op(43, "pairing_read", Zero, |_, bytes: Vec<u8>| {
-            pairing_read(bytes)
-        }),
+        op(
+            43,
+            "pairing_read",
+            Zero,
+            |_, (bytes, dir): (Vec<u8>, String)| pairing_read(bytes, &dir),
+        ),
         op(44, "pair_begin", Zero, |c, a: PairBeginArgs| {
             c.registry.pair_begin(a)
         }),

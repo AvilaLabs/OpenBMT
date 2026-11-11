@@ -7,7 +7,9 @@
 
 use bitcoin::Network;
 use openbmt_core::pairing::network_code;
-use openbmt_counter_node::{own_node_setting, PairRefused, PairingRecord};
+use openbmt_counter_node::{
+    effective_settings, own_node_setting, DirStore, PairRefused, PairingRecord,
+};
 
 use crate::codec::wire_record;
 use crate::error::{from_rule, CounterError};
@@ -34,8 +36,13 @@ wire_record!(SettingsView {
 });
 
 /// The pairing record in `bytes` (`PairingRecord::to_bytes`), read and not
-/// verified.
-pub(crate) fn pairing_read(bytes: Vec<u8>) -> Result<PairingView, CounterError> {
+/// verified. With the counter's data folder `dir` (empty for none) the
+/// settings shown are the ones a start there would use: the newer of the
+/// record's and the file the owner's later settings were kept in (CR-163),
+/// so that Tor turned on or off after pairing is known before the start. A
+/// file that does not read leaves the record's settings, and the start
+/// refuses it with words.
+pub(crate) fn pairing_read(bytes: Vec<u8>, dir: &str) -> Result<PairingView, CounterError> {
     let record = PairingRecord::from_bytes(&bytes).map_err(|e| {
         let e = PairRefused::Record(e);
         from_rule(e.rule(), &e, e.words())
@@ -51,7 +58,11 @@ pub(crate) fn pairing_read(bytes: Vec<u8>) -> Result<PairingView, CounterError> 
         Some(openbmt_core::relay::RelayRoute::Direct(_)) => RelayKind::Direct,
         Some(openbmt_core::relay::RelayRoute::Onion { .. }) => RelayKind::Onion,
     };
-    let s = record.settings.settings;
+    let kept = (!dir.is_empty() && std::path::Path::new(dir).join("settings.bin").exists())
+        .then(|| DirStore::open(dir).ok())
+        .flatten()
+        .and_then(|store| effective_settings(&store, &record).ok());
+    let s = kept.map_or_else(|| record.settings.settings.clone(), |e| e.signed.settings);
     Ok(PairingView {
         network,
         settings: SettingsView {

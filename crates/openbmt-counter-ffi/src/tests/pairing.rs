@@ -277,7 +277,7 @@ fn cr_92_the_ceremony_runs_from_the_offer_to_a_node_that_opens_a_sale() {
     let record = finish(&rig, &bundle, T0 + 90).expect("finish");
 
     // The record tells the app the network and the settings before the start.
-    let response = rig.call(43, 0, &W::new().bytes(&record).0);
+    let response = rig.call(43, 0, &W::new().bytes(&record).string("").0);
     let mut r = Rd::ok(&response);
     assert_eq!(r.u8(), TAG_REGTEST);
     assert_eq!((r.u32(), r.bool()), (1, false));

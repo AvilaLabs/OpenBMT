@@ -414,6 +414,30 @@ fn cr_164_settings_that_change_tor_say_a_restart_is_needed_and_the_start_keeps_t
 }
 
 #[test]
+fn cr_163_the_app_reads_tor_from_the_settings_in_force_before_the_start() {
+    let (server, mut owner, rig, handle, _dir) = settled();
+    let dir = rig.dir().to_str().unwrap().to_string();
+    let config = config_for(&rig, Some(hint_for(server.local_addr())), None);
+    let read = |dir: &str| {
+        let response = rig.call(43, 0, &W::new().bytes(&config.record).string(dir).0);
+        let mut r = Rd::ok(&response);
+        let _network = r.u8();
+        (r.u32(), r.bool())
+    };
+    // The record has Tor off and no file has been kept yet.
+    assert_eq!(read(&dir), (1, false));
+    let mut tor = signed_settings().settings;
+    tor.tor_on = true;
+    owner
+        .send(&id(3).device_id(), Kind::Settings, &owner_alone(tor, 2))
+        .unwrap();
+    step(&rig, handle, T0 + 5, false);
+    // The file says Tor is on now; the record alone still says off.
+    assert_eq!(read(&dir), (2, true));
+    assert_eq!(read(""), (1, false));
+}
+
+#[test]
 fn cr_165_settings_that_remove_the_counter_say_so_on_home() {
     let (_server, mut owner, rig, handle, _dir) = settled();
     let mut gone = signed_settings().settings;

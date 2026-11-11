@@ -243,7 +243,8 @@ class Controller(private val act: MainActivity) {
             try {
                 val sources = Rates.sources()
                 // For display only: the library checks the record again at the start (CR-97).
-                val pairing = Shop.pairing(rec)
+                // CR-163: Tor as the settings in force have it, which the owner may have changed since pairing.
+                val pairing = Shop.pairing(rec, nodeDir.path)
                 val torOn = pairing.settings.torOn || torForced
                 val gate = TorGate(torOn, cfg.proxy)
                 if (!gate.available()) {
@@ -853,7 +854,7 @@ class Controller(private val act: MainActivity) {
     /** The library reads the address (a home-network address, no Tor and so on are refused with words) and the app keeps what it made. */
     private fun saveOwnNode(cfg: AppConfig, rec: ByteArray, text: String, msg: Slot) {
         async({
-            val pairing = Shop.pairing(rec)
+            val pairing = Shop.pairing(rec, nodeDir.path)
             OwnNodeSetting.check(text, pairing.network, pairing.settings.torOn)
         }) { r ->
             when (val e = r.exceptionOrNull()) {
