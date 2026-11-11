@@ -136,8 +136,8 @@ public class UrCross {
         for (int i = 0; i < compare; i++) {
             partsCompared++;
             if (!ours.get(i).equals(theirs.get(i))) {
-                fail(label + ": part " + (i + 1) + " differs\n   ours   " + ours.get(i)
-                        + "\n   theirs " + theirs.get(i));
+                fail(label + ": part " + (i + 1) + " differs\n   openbmt-ur  " + ours.get(i)
+                        + "\n   Hummingbird " + theirs.get(i));
                 break;
             }
         }

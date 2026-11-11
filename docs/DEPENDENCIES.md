@@ -52,8 +52,9 @@ Where they come from:
   a workspace crate. SHA-256 and CRC-32 are written in it (about 100 lines,
   checked against `sha256sum` and Python's `zlib.crc32`), so that the apps
   that show or read an animated QR add nothing to their lists
-  (`docs/UR-RULES.md`). It is not yet in a shipped program's list. Sparrow's Hummingbird
-  library (with its one dependency, `cbor`) is a test tool only, as ZXing is
+  (`docs/UR-RULES.md`). It is not yet in a shipped program's list.
+  Sparrow's Hummingbird library (with its one dependency, `cbor`) is a test
+  tool only, as ZXing is
   for `openbmt-qr`: `scripts/ur-crosscheck.sh` fetches the two jars against
   pinned SHA-256 values and runs a harness; nothing of it is built into a
   program or listed in `deps/`.
@@ -145,8 +146,9 @@ apply: pinned, from the publisher's registry, checked against a digest.
   `b236ede4c0ee1c348fa034d59c0af229a1760a967f36f5513f8c9569b1ec5b71`
   (Hummingbird) or
   `5ef465c47e34c6b13f93ece2ff49e94b933d69cf9f172cc4997418303884da73`
-  (cbor). The harness is run with JDK 21. Their licences have not been
-  looked up here; nothing of them is shipped.
+  (cbor). The harness is run with JDK 21. Both are under the Apache
+  License 2.0, as their Maven Central POM files state; nothing of them is
+  shipped.
 
 ## What this does not do
 

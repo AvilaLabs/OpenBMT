@@ -1,7 +1,7 @@
 //! The OpenBMT side of the cross-check against Hummingbird
 //! (`scripts/ur-crosscheck.sh`).
 //!
-//!   crosscheck gen                      the cases, with our parts, on stdout
+//!   crosscheck gen                      the cases, with openbmt-ur's parts, on stdout
 //!   crosscheck read CASES THEIRS        decode Hummingbird's parts
 //!
 //! `gen` prints, for each of several hundred messages from a fixed seed,
