@@ -657,11 +657,11 @@ internal fun Controller.showAbout() {
             "This phone holds Key 1 only. It never holds Key 2 or Key 3, and it never signs a spend by itself: " +
             "a spend leaves this app as a request for the Key app, and money moves only after the Key app has approved it.",
         "Screenshots" to "Screenshots and screen recordings of this app are blocked, because its screens show balances and addresses.",
-        "Tor" to "Every connection goes through Orbot on this phone. If Orbot is not running the app sends nothing and says so.",
+        "Tor" to "Every connection goes through Tor: the app runs Tor itself, or uses Orbot if you choose it. If Tor is not connected the app sends nothing and says so.",
         "The till" to
             "The Till screen reads the shop's orders from Square or Clover with a read-only sign-in that you paste once. " +
             "The sign-in is sealed on this phone, is never shown again and can be removed. The orders are read about once a minute, " +
-            "only while the app is on the screen, through Orbot, and are matched against the counters' sales on this phone. " +
+            "only while the app is on the screen, through Tor, and are matched against the counters' sales on this phone. " +
             "An alert you acknowledge is marked on this phone only. It has not been tried against a real till account yet.",
         "Not built yet" to
             "The link to the counters for a wallet made on this phone; " +

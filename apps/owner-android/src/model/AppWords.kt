@@ -51,8 +51,8 @@ object AppWords {
     const val watchNotificationText = "Instant sales stay on while this runs."
     const val watchNotificationStop = "Stop"
 
-    /** The notification when Orbot does not answer (OA-88). */
-    const val watchNotificationNoOrbot = "Not watching: Orbot is not answering. Instant sales are off."
+    /** The notification when Tor is not connected (OA-88). */
+    const val watchNotificationNoOrbot = "Not watching: Tor is not connected. Instant sales are off."
 
     // ---- setting up ------------------------------------------------------------------
 
@@ -75,7 +75,7 @@ object AppWords {
         Tones.GOOD, "Owner phone set up",
         "The setup is saved on this phone, sealed with a key that stays in the phone.",
         Who.OWNER,
-        "Keep Orbot running and the app open. It starts looking for the network now.",
+        "Keep the app open. It starts looking for the network now.",
     )
 
     fun setupNotReadable(problem: String?) = w(
@@ -1011,7 +1011,7 @@ object AppWords {
         Tones.STOP, "Till not reached",
         "The till's system did not answer through Tor, so nothing was read.",
         Who.OWNER,
-        "Check that Orbot is running and the phone is online. The next read is in about a minute.",
+        "Check that the phone is online and Tor is connected. The next read is in about a minute.",
         detailOf(problem),
     )
 
@@ -1187,7 +1187,7 @@ object AppWords {
                 "- Notification title:\n  $watchNotificationTitle\n" +
                 "- Notification text:\n  $watchNotificationText\n" +
                 "- Notification action:\n  $watchNotificationStop\n" +
-                "- Notification when Orbot does not answer:\n  $watchNotificationNoOrbot\n",
+                "- Notification when Tor is not connected:\n  $watchNotificationNoOrbot\n",
         )
         return out.toString()
     }

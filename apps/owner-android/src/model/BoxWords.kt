@@ -77,7 +77,7 @@ object BoxWords {
         Tones.GOOD, "Box paired",
         "The Box took its welcome and this phone saved the link to it, with the counters the settings name.",
         Who.OWNER,
-        "The link starts now. Keep Orbot running if the Box is a .onion address.",
+        "The link starts now.",
     )
 
     /** The Box took its welcome but the link could not be saved. */

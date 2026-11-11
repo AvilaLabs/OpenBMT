@@ -2120,7 +2120,7 @@ object AppModelTest {
         ok(WatchSchedule.orbotWaitMs(null, 1_000) == 0L, "the first ask is at once")
         ok(WatchSchedule.orbotWaitMs(1_000, 1_000 + 10_000) == 20_000L, "then every 30 seconds")
         ok(WatchSchedule.orbotWaitMs(1_000, 1_000 + 30_000) == 0L && WatchSchedule.orbotWaitMs(1_000, 0) == WatchSchedule.ORBOT_RETRY_MS, "and never longer than that")
-        ok(WatchNotice.text(WatchNotice.State.NoOrbot) == "Not watching: Orbot is not answering. Instant sales are off.", "the words")
+        ok(WatchNotice.text(WatchNotice.State.NoOrbot) == "Not watching: Tor is not connected. Instant sales are off.", "the words")
         val service = source("src/android/WatchService.kt")
         ok(service.indexOf("TorGate(config.proxy).available()") in 1 until service.indexOf("OwnerWatch.start(bytes)"), "the gate is asked before the watcher starts")
         ok(service.contains("WatchNotice.State.NoOrbot") && !service.contains("withoutTor"), "the notification says so, and nothing goes around the proxy")

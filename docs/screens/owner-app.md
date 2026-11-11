@@ -13,7 +13,7 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | State | Heading | What happened | What to do next | Who | Code |
 |---|---|---|---|---|---|
 | notSetUp | Not set up yet | This phone has not been set up as the shop's owner phone yet. | Make a new shop wallet with the Key app, or use setup text you already have. | the owner |  |
-| setupSaved | Owner phone set up | The setup is saved on this phone, sealed with a key that stays in the phone. | Keep Orbot running and the app open. It starts looking for the network now. | the owner |  |
+| setupSaved | Owner phone set up | The setup is saved on this phone, sealed with a key that stays in the phone. | Keep the app open. It starts looking for the network now. | the owner |  |
 | setupNotReadable | Setup text not read | The setup text is not in the form this app reads, so nothing was saved. | Copy the setup text again from the key ceremony, then try again. | the owner |  |
 | torAddressNotAccepted | Tor address not accepted | The address of Orbot must be a host, a colon and a port, like 127.0.0.1:9050. | Type the address again. | the owner |  |
 | torAlwaysOn | Everything goes through Tor | This app sends every connection through Tor, with Orbot, and has no way to turn that off. | Check the address of Orbot below, and keep Orbot running. | the owner |  |
@@ -124,7 +124,7 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | posAddressRefused | Till address refused | The library asked for an address that is not the till's system, so nothing was sent. | Close the app and open it again. If it happens again, do not rely on the matching. | the owner |  |
 | posPageTooLong | Till answer too long | The till's system sent an answer longer than 8 megabytes, so it was not read. | Nothing to do now. The next read is in about a minute. | the owner |  |
 | posReadCutOff | Till read cut off | One read asked for more pages than a read may take, so it was ended. | Nothing to do now. The next read is in about a minute. | the owner |  |
-| posNotReached | Till not reached | The till's system did not answer through Tor, so nothing was read. | Check that Orbot is running and the phone is online. The next read is in about a minute. | the owner |  |
+| posNotReached | Till not reached | The till's system did not answer through Tor, so nothing was read. | Check that the phone is online and Tor is connected. The next read is in about a minute. | the owner |  |
 | starting | Starting | The owner node is starting and looking for the network. | Wait a moment. Keep the app open. | nobody |  |
 | stopped | Owner node stopped | The owner node has stopped, so the wallet is no longer followed. | Close the app and open it again. | the owner |  |
 | libraryMissing | The app is incomplete | The part of this app that runs the owner node did not load, so nothing was done. | Do not use this copy. Install the app again from the place you got it. | the owner |  |
@@ -172,7 +172,7 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | boxQueued | Box queued | The Box's claim and the settings that add it wait for the Key app. | Build the request for the Key app, approve there, and bring its response back. | the owner |  |
 | boxHanding | Handing over the welcome | The Box is being given its welcome and the settings, which can take up to a minute. | Wait on this screen. | the owner |  |
 | boxHandoverKept | The approval is kept | The Key app's approval stays queued on this phone. Nothing was lost and the Box is not paired yet. | Try again here once the Box answers. If the invitation ran out, make a new one on the Key app. | the owner |  |
-| boxPaired | Box paired | The Box took its welcome and this phone saved the link to it, with the counters the settings name. | The link starts now. Keep Orbot running if the Box is a .onion address. | the owner |  |
+| boxPaired | Box paired | The Box took its welcome and this phone saved the link to it, with the counters the settings name. | The link starts now. | the owner |  |
 | boxLinkNotSaved | Link not saved | The Box took its welcome, but this phone could not save the link to it. | Add the lines below to the setup text, then start the app again. | the owner |  |
 | boxSavePin | Save the link | The Box took its welcome. The link to it is saved in the locked setup, so the PIN is needed to open it and lock it again. | Type the PIN of this phone, then save the link. | the owner |  |
 | boxForgotten | Box forgotten | The Box's claim and the settings that add it were taken out of the queue. The Box itself was not told. | To add it again, make a new invitation on the Key app and connect the Box again. | the owner |  |
@@ -203,5 +203,5 @@ What Android shows for the background watch, which is not a screen of the app:
   Instant sales stay on while this runs.
 - Notification action:
   Stop
-- Notification when Orbot does not answer:
-  Not watching: Orbot is not answering. Instant sales are off.
+- Notification when Tor is not connected:
+  Not watching: Tor is not connected. Instant sales are off.
