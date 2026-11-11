@@ -449,11 +449,17 @@ fn a_command_a_check_in_and_a_batch_are_taken() {
         handle,
         &W::new().u64(T0).bytes(&batch(10, 10).to_bytes()).0,
     ));
-    // The same batch again is not the next one.
-    let f = fault(&rig.call(
+    // The same batch again is taken as nothing (CR-168); one that overlaps
+    // it and is not the same is refused.
+    unit(&rig.call(
         23,
         handle,
         &W::new().u64(T0).bytes(&batch(10, 10).to_bytes()).0,
+    ));
+    let f = fault(&rig.call(
+        23,
+        handle,
+        &W::new().u64(T0).bytes(&batch(15, 10).to_bytes()).0,
     ));
     assert_eq!(f.rule, "batch-refused");
     let f = fault(&rig.call(23, handle, &W::new().u64(T0).bytes(&[1]).0));
