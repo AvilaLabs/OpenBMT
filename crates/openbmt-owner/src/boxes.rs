@@ -282,11 +282,9 @@ impl Owner {
             .box_claims
             .iter()
             .any(|c| c.claim.box_key == *box_key);
-        let has_welcome = self
-            .state
-            .outbox
-            .iter()
-            .any(|d| matches!(&d.what, Delivery::BoxWelcome(b) if waiting_box(b) == Some(*box_key)));
+        let has_welcome = self.state.outbox.iter().any(
+            |d| matches!(&d.what, Delivery::BoxWelcome(b) if waiting_box(b) == Some(*box_key)),
+        );
         if !has_claim && !has_welcome {
             return Err(Refusal::BoxNothingToForget.into());
         }

@@ -258,7 +258,10 @@ impl fmt::Display for Refusal {
             Self::BoxKnown => write!(f, "AS-83: this Box is added or waiting already"),
             Self::BoxNotReady(gap) => write!(f, "AS-86: {gap}"),
             Self::BoxNothingToForget => {
-                write!(f, "AS-87: no claim of this Box is queued and no welcome of it waits")
+                write!(
+                    f,
+                    "AS-87: no claim of this Box is queued and no welcome of it waits"
+                )
             }
             Self::NoSettingsRate => write!(
                 f,

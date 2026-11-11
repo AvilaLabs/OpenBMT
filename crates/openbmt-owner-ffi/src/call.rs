@@ -83,7 +83,8 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use crate::boxnet::{
     self, BoxDeliverArgs, BoxDeliveredView, BoxFoundView, BoxLinkArgs, BoxOwnCheckArgs,
-    BoxOwnCheckView, BoxOwnInvitationView, BoxQueueArgs, BoxQueuedView, PendingBoxView, WaitingBoxView,
+    BoxOwnCheckView, BoxOwnInvitationView, BoxQueueArgs, BoxQueuedView, PendingBoxView,
+    WaitingBoxView,
 };
 use crate::ceremony::{
     self, AnswerView, BuildArgs, CeremonyDefaults, FinishArgs, FinishedView, Key1Args, Key1Made,
@@ -512,7 +513,9 @@ fn build_ops() -> Vec<Op> {
         op(109, "box_own_check", Zero, |_, a: BoxOwnCheckArgs| {
             boxnet::own_check(a)
         }),
-        op(110, "boxes_pending", Node, |c, ()| c.entry()?.boxes_pending()),
+        op(110, "boxes_pending", Node, |c, ()| {
+            c.entry()?.boxes_pending()
+        }),
         op(111, "box_forget", Node, |c, key: Vec<u8>| {
             c.entry()?.box_forget(key)
         }),

@@ -176,7 +176,9 @@ fn stage(address: &str, enter: &mut dyn FnMut(&str)) -> Staged {
     // that add the Box.
     let (claim, box_key, needs_rate) = ph.fetch_claim(address);
     assert!(!needs_rate, "settings are queued already");
-    let response = ph.rig.call(105, ph.handle, &W::new().bytes(&claim).u64(0).0);
+    let response = ph
+        .rig
+        .call(105, ph.handle, &W::new().bytes(&claim).u64(0).0);
     let mut r = Rd::ok(&response);
     let (claim_id, settings_id, version) = (r.u32(), r.u32(), r.u32());
     let queued_key = r.bytes();
@@ -546,7 +548,9 @@ fn refused_zero(ph: &Phones, op: u16, fields: &[u8]) -> super::wire::Fault {
 fn oa_47_a_box_that_was_not_delivered_is_listed_and_forgotten() {
     let (runner, dir) = started_box("openbmt-owner-ffi-box-forget");
     let address = runner.local_addr().to_string();
-    let staged = stage(&address, &mut |t| runner.enter_invitation(t).expect("taken"));
+    let staged = stage(&address, &mut |t| {
+        runner.enter_invitation(t).expect("taken")
+    });
     let ph = &staged.ph;
     // The Box is pending with its words and its welcome ready.
     let pending = |ph: &Phones| {
@@ -562,7 +566,10 @@ fn oa_47_a_box_that_was_not_delivered_is_listed_and_forgotten() {
     assert_eq!(rows[0].1, staged.words);
     assert!(rows[0].2);
     // Forgetting takes the claim, the settings and the welcome out at once.
-    Rd::ok(&ph.rig.call(111, ph.handle, &W::new().bytes(&staged.box_key).0));
+    Rd::ok(
+        &ph.rig
+            .call(111, ph.handle, &W::new().bytes(&staged.box_key).0),
+    );
     assert!(pending(ph).is_empty());
     assert!(Rd::ok(&ph.rig.call(106, ph.handle, &[]))
         .list(Rd::bytes)

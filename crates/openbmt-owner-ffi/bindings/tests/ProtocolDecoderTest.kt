@@ -159,6 +159,11 @@ object ProtocolDecoderTest {
             header(0, Writer().bytes(ByteArray(32) { 7 }).u32(2).bytes(ByteArray(32) { 8 }).bytes(ByteArray(32) { 9 }).u32(5).toByteArray()),
         ).boxDelivered()
         check(boxDelivered.boxKey.size == 32 && boxDelivered.counters.size == 2 && boxDelivered.settingsVersion == 5L)
+        val pendingBoxes = decodeResponse(
+            header(0, Writer().u32(1).bytes(ByteArray(32) { 6 }).u32(2).string("a").string("b").u8(1).toByteArray()),
+        ).let { r -> r.list { r.pendingBox() } }
+        check(pendingBoxes.size == 1 && pendingBoxes[0].boxKey.size == 32 && pendingBoxes[0].words == listOf("a", "b") && pendingBoxes[0].welcomeReady)
+        rejects("a pending Box flag") { decodeResponse(header(0, Writer().u32(1).bytes(ByteArray(32)).u32(0).u8(2).toByteArray())).let { r -> r.list { r.pendingBox() } } }
         rejects("a short Box delivery") { decodeResponse(header(0, Writer().bytes(ByteArray(32)).u32(2).bytes(ByteArray(32)).toByteArray())).boxDelivered() }
 
         val outbox = decodeResponse(outboxFrame()).let { r -> r.list { r.outboxRow() } }
