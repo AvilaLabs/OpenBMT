@@ -10,7 +10,7 @@
 //!   <https://github.com/lightningnetwork/lnd/releases>.
 //!
 //! Every 64-bit integer is a text of digits in LND's REST, in a request and
-//! in a reply.
+//! in a reply, and the reader takes no other form.
 
 use openbmt_json::Value;
 
@@ -18,7 +18,9 @@ use crate::connect::Probe;
 use crate::credential::LndCredential;
 use crate::error::ReplyRefused;
 use crate::invoice::{judge_paid, Ask, Created, NotPaid, Payment};
-use crate::request::{get, json_string, number, post, success_json, text, Reply, Request};
+use crate::request::{
+    get, int64_text, json_string, node_code, node_said, post, success_json, text, Reply, Request,
+};
 use crate::text::{hex, unbase64, Alphabet};
 
 /// The header that carries the macaroon, in hex (LN-07).
@@ -49,19 +51,24 @@ pub(crate) fn probes(c: &LndCredential) -> [(&'static str, Request); 2] {
     ]
 }
 
-/// LN-06: judge the reply to a probe. LND answers a call the macaroon does
-/// not allow with the text `permission denied` (`lncli` shows it as `rpc
-/// error: code = Unknown desc = permission denied`), whatever HTTP status the
-/// REST gateway gives it; a call that is allowed is a success.
+/// LN-06: judge the reply to a probe. A call the macaroon does not allow is
+/// answered by exactly HTTP 500 with the JSON error code 2 and the message
+/// `permission denied`: the macaroon checker's `ErrPermissionDenied` leaves
+/// LND as a plain error, which gRPC calls `Unknown` (2) and the gateway's
+/// default handler writes as 500 (sources in LN-06). A call that is allowed
+/// is a success; every other answer proves nothing.
 pub(crate) fn judge_probe(reply: &Reply) -> Probe {
     if reply.is_success() {
         return Probe::Allowed;
     }
-    match crate::request::node_said(reply) {
-        ReplyRefused::NodeSaid { message, .. } if message.starts_with("permission denied") => {
-            Probe::Denied
-        }
-        _ => Probe::Unclear,
+    let message = match node_said(reply) {
+        ReplyRefused::NodeSaid { message, .. } => message,
+        _ => String::new(),
+    };
+    if reply.status == 500 && node_code(reply) == Some(2) && message == "permission denied" {
+        Probe::Denied
+    } else {
+        Probe::Unclear
     }
 }
 
@@ -110,14 +117,23 @@ pub(crate) fn lookup_request(c: &LndCredential, payment_hash: &[u8; 32]) -> Requ
 }
 
 /// LN-14: read the reply to a lookup. Paid only when `state` is `SETTLED`
-/// and `amt_paid_msat` is at least the amount asked.
+/// and `amt_paid_msat` is at least the amount asked. `state` is the name of
+/// the enum value and `amt_paid_msat` a text of digits, because the REST
+/// gateway writes an `int64` as a text; a number there is refused. The
+/// invoice that is not there is the 404 with code 5 and one of the two
+/// messages LND's `LookupInvoice` gives.
 pub(crate) fn parse_lookup(
     reply: &Reply,
     payment_hash: &[u8; 32],
     asked_msat: u64,
 ) -> Result<Payment, ReplyRefused> {
-    if reply.status == 404 {
-        return Ok(Payment::NotPaid(NotPaid::NotFound));
+    if reply.status == 404 && node_code(reply) == Some(5) {
+        if let ReplyRefused::NodeSaid { message, .. } = node_said(reply) {
+            if message == "unable to locate invoice" || message == "there are no existing invoices"
+            {
+                return Ok(Payment::NotPaid(NotPaid::NotFound));
+            }
+        }
     }
     let v = success_json(reply)?;
     if hash_b64(&v, "r_hash")? != *payment_hash {
@@ -126,10 +142,10 @@ pub(crate) fn parse_lookup(
     let state = text(&v, "state")?;
     Ok(match state {
         "SETTLED" => {
-            let received = number(&v, "amt_paid_msat")?;
+            let received = int64_text(&v, "amt_paid_msat")?;
             let settled_at = match v.get("settle_date") {
                 None => None,
-                Some(_) => Some(number(&v, "settle_date")?).filter(|t| *t != 0),
+                Some(_) => Some(int64_text(&v, "settle_date")?).filter(|t| *t != 0),
             };
             judge_paid(*payment_hash, received, settled_at, asked_msat)
         }

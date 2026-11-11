@@ -327,6 +327,16 @@ impl ConnectionRefused {
                 "The node refused a test call, but not in the way that shows the key is limited to invoices.",
                 "Update the node to its current release, then test again. If it repeats, make the key again.",
             ),
+            Self::RuneNotFromNode => (
+                "Rune not from this node",
+                "This rune is not from this node: the node says it is not one it made, so it cannot be used with it.",
+                NEW_RUNE,
+            ),
+            Self::RuneRevoked => (
+                "Rune revoked on the node",
+                "This rune has been revoked on the node, so it no longer works.",
+                NEW_RUNE,
+            ),
             Self::NoInvoice(_) => (
                 "Test invoice not made",
                 "The node did not make the test invoice that shows the connection works.",
@@ -500,6 +510,8 @@ pub fn connection_name(e: &ConnectionRefused) -> &'static str {
         }
         ConnectionRefused::CredentialTooStrong { .. } => "CredentialTooStrong (Core Lightning)",
         ConnectionRefused::ProbeUnclear { .. } => "ProbeUnclear",
+        ConnectionRefused::RuneNotFromNode => "RuneNotFromNode",
+        ConnectionRefused::RuneRevoked => "RuneRevoked",
         ConnectionRefused::NoInvoice(_) => "NoInvoice",
         ConnectionRefused::LabelUsed => "LabelUsed",
         ConnectionRefused::WrongNode => "WrongNode",
@@ -618,6 +630,8 @@ pub fn all_connection() -> Vec<ConnectionRefused> {
             status: 404,
             rule: "LN-06",
         },
+        ConnectionRefused::RuneNotFromNode,
+        ConnectionRefused::RuneRevoked,
         ConnectionRefused::NoInvoice(ReplyRefused::TooLarge),
         ConnectionRefused::LabelUsed,
         ConnectionRefused::WrongNode,

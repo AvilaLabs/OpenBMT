@@ -47,6 +47,10 @@ pub(crate) enum Probe {
     Denied,
     /// The call worked: the credential can do more than invoices.
     Allowed,
+    /// Core Lightning says the rune is not from this node (code 1501).
+    NotFromNode,
+    /// Core Lightning says the rune has been revoked (code 1503).
+    Revoked,
     /// The call failed in another way, so the credential is not known to be
     /// limited.
     Unclear,
@@ -142,6 +146,8 @@ impl ConnectionTest {
         match self.judge(reply) {
             Probe::Denied => {}
             Probe::Allowed => return Err(ConnectionRefused::CredentialTooStrong { call, rule }),
+            Probe::NotFromNode => return Err(ConnectionRefused::RuneNotFromNode),
+            Probe::Revoked => return Err(ConnectionRefused::RuneRevoked),
             Probe::Unclear => {
                 return Err(ConnectionRefused::ProbeUnclear {
                     call,

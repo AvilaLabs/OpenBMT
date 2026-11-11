@@ -112,21 +112,33 @@ pub(crate) fn text<'a>(v: &'a Value, key: &'static str) -> Result<&'a str, Reply
         .ok_or(ReplyRefused::WrongType(key))
 }
 
-/// A whole number written as a JSON number or, as LND writes 64-bit
-/// integers, as a text of digits.
+/// A whole number written as a plain JSON number, as Core Lightning writes
+/// every amount and time (`json_add_u64` in `common/json_stream.c`). A text
+/// is refused.
 pub(crate) fn number(v: &Value, key: &'static str) -> Result<u64, ReplyRefused> {
     let field = v.get(key).ok_or(ReplyRefused::Missing(key))?;
-    if let Some(n) = field.as_u64() {
-        return Ok(n);
-    }
-    match field.as_str() {
-        Some(s) if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) => {
-            s.parse().map_err(|_| ReplyRefused::OutOfRange(key))
-        }
-        Some(_) => Err(ReplyRefused::OutOfRange(key)),
+    match field.as_u64() {
+        Some(n) => Ok(n),
         None if field.as_i64().is_some() => Err(ReplyRefused::OutOfRange(key)),
         None => Err(ReplyRefused::WrongType(key)),
     }
+}
+
+/// A whole number written as a JSON text of digits, as LND's REST writes an
+/// `int64` (the protojson rule). A JSON number is refused.
+pub(crate) fn int64_text(v: &Value, key: &'static str) -> Result<u64, ReplyRefused> {
+    let s = text(v, key)?;
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(ReplyRefused::OutOfRange(key));
+    }
+    s.parse().map_err(|_| ReplyRefused::OutOfRange(key))
+}
+
+/// The `code` of the JSON error a node sends, if the body has one.
+pub(crate) fn node_code(reply: &Reply) -> Option<i64> {
+    json(reply)
+        .ok()
+        .and_then(|v| v.get("code").and_then(Value::as_i64))
 }
 
 /// A 32-byte value written in hex.

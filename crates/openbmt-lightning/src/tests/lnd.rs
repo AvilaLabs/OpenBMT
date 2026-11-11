@@ -128,14 +128,42 @@ fn ln_07_the_lookup_is_the_first_version_by_hash_in_hex() {
 
 #[test]
 fn ln_06_a_macaroon_that_is_refused_with_permission_denied_is_limited() {
-    // As LND answers a call the macaroon does not allow, with the status the
-    // gateway happens to give.
-    for status in [403, 500, 401] {
-        let r = reply(
-            status,
-            "{\"code\":2,\"message\":\"permission denied\",\"details\":[]}",
+    // The exact answer of LND: HTTP 500, code 2 (Unknown), the message of
+    // the macaroon checker.
+    let r = reply(
+        500,
+        "{\"code\":2,\"message\":\"permission denied\",\"details\":[]}",
+    );
+    assert_eq!(node::judge_probe(&r), Probe::Denied);
+    // Without the empty details the code and the message still make it.
+    let r = reply(500, "{\"code\":2,\"message\":\"permission denied\"}");
+    assert_eq!(node::judge_probe(&r), Probe::Denied);
+}
+
+#[test]
+fn ln_06_only_the_exact_answer_is_a_denial() {
+    let body = "{\"code\":2,\"message\":\"permission denied\",\"details\":[]}";
+    // The same body with another status is not the answer LND gives.
+    for status in [400, 401, 403, 404, 502] {
+        assert_eq!(
+            node::judge_probe(&reply(status, body)),
+            Probe::Unclear,
+            "{status}"
         );
-        assert_eq!(node::judge_probe(&r), Probe::Denied, "{status}");
+    }
+    // Another code, or another text, is not either.
+    for body in [
+        "{\"code\":7,\"message\":\"permission denied\",\"details\":[]}",
+        "{\"code\":2,\"message\":\"permission denied: more\"}",
+        "{\"code\":2,\"message\":\"Permission denied\"}",
+        "{\"message\":\"permission denied\"}",
+        "{\"code\":\"2\",\"message\":\"permission denied\"}",
+    ] {
+        assert_eq!(
+            node::judge_probe(&reply(500, body)),
+            Probe::Unclear,
+            "{body}"
+        );
     }
 }
 
@@ -156,6 +184,7 @@ fn ln_06_any_other_failure_proves_nothing() {
             "{\"code\":2,\"message\":\"verification failed: signature mismatch\"}",
         ),
         reply(500, "{\"code\":2,\"message\":\"the permission denied\"}"),
+        reply(403, "{\"code\":2,\"message\":\"permission denied\"}"),
         reply(503, ""),
         reply(500, "not json"),
         reply(500, "{\"message\":5}"),

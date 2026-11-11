@@ -44,7 +44,15 @@ fn ln_08_a_rune_limited_to_the_two_invoice_methods_is_taken() {
         // does not matter.
         "pnamelabel=a\\|b\\&c&method=invoice|method=listinvoices",
         // Comments and the like only narrow.
-        "#remark&method=invoice|method=listinvoices",
+        "note#remark&method=invoice|method=listinvoices",
+        // The unique id of a node's rune, with and without the version of
+        // its master rune, always first.
+        "=0&method=invoice|method=listinvoices",
+        "=18446744073709551615&method=invoice|method=listinvoices",
+        "=7-2&method=invoice|method=listinvoices",
+        "=7-v1.2&method=invoice|method=listinvoices&time<1900000000",
+        // Field names end at the first punctuation other than _ - and .
+        "pname.label-x_y=a&method=invoice|method=listinvoices",
     ] {
         assert_eq!(check_rune(&rune(r)), Ok(()), "{r}");
     }
@@ -99,6 +107,46 @@ fn ln_08_a_restriction_that_can_widen_the_method_is_refused() {
     ] {
         assert_eq!(refused(r), R::RuneMixesMethod, "{r}");
     }
+}
+
+#[test]
+fn ln_08_the_unique_id_is_taken_only_first_and_only_in_its_two_forms() {
+    for r in [
+        // Not the first restriction.
+        "method=invoice|method=listinvoices&=7",
+        "time<1900000000&=7&method=invoice|method=listinvoices",
+        // Beside another alternative.
+        "=7|method=invoice&method=invoice|method=listinvoices",
+        // Not an id: no digits, not digits, an empty version, another
+        // operator.
+        "=&method=invoice|method=listinvoices",
+        "=abc&method=invoice|method=listinvoices",
+        "=7-&method=invoice|method=listinvoices",
+        "=-2&method=invoice|method=listinvoices",
+        "^7&method=invoice|method=listinvoices",
+        "#7&method=invoice|method=listinvoices",
+        // Written twice.
+        "=7&=8&method=invoice|method=listinvoices",
+    ] {
+        assert!(matches!(refused(r), R::RuneSyntax(_)), "{r}");
+    }
+}
+
+#[test]
+fn ln_08_a_field_name_with_punctuation_inside_ends_at_the_punctuation() {
+    // `method.x` is another field than `method`, so it is not a method
+    // restriction, and the rune has none.
+    assert_eq!(
+        refused("method.x=invoice|method.x=listinvoices"),
+        R::RuneLacksMethod
+    );
+    // `method-x` is a field name too, and not an alternative of `method`.
+    assert_eq!(
+        refused("method=invoice|method=listinvoices|method-x=invoice"),
+        R::RuneMixesMethod
+    );
+    // A colon ends the name and is not an operator.
+    assert!(matches!(refused("a:b=c"), R::RuneSyntax(_)));
 }
 
 #[test]

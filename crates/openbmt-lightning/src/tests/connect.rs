@@ -26,7 +26,7 @@ fn denied_lnd() -> Reply {
 fn denied_cln() -> Reply {
     reply(
         401,
-        "{\"code\":1501,\"message\":\"Not authorized: Not permitted: method is not equal to getinfo\"}",
+        "{\"code\":1502,\"message\":\"Not permitted: method is not equal to getinfo\",\"data\":null}",
     )
 }
 
@@ -168,6 +168,27 @@ fn ln_09_a_rune_that_can_read_the_node_or_its_funds_refuses_the_setup() {
     );
     let e = run(&cln(), &[reply(500, "{\"message\":\"busy\"}")]).unwrap_err();
     assert!(matches!(e, C::ProbeUnclear { rule: "LN-09", .. }));
+}
+
+#[test]
+fn ln_09_a_rune_of_another_node_or_a_revoked_one_has_its_own_refusal() {
+    let other = reply(
+        401,
+        "{\"code\":1501,\"message\":\"Not authorized: Not derived from master\",\"data\":null}",
+    );
+    let revoked = reply(
+        401,
+        "{\"code\":1503,\"message\":\"Not authorized: Blacklisted rune\",\"data\":null}",
+    );
+    for (r, want) in [(other, C::RuneNotFromNode), (revoked, C::RuneRevoked)] {
+        // On either probe.
+        assert_eq!(run(&cln(), std::slice::from_ref(&r)).unwrap_err(), want);
+        assert_eq!(run(&cln(), &[denied_cln(), r]).unwrap_err(), want);
+        assert_eq!(want.rule(), "LN-09");
+    }
+    let (a, b) = (C::RuneNotFromNode.words(), C::RuneRevoked.words());
+    assert_eq!(a.heading, "Rune not from this node");
+    assert_eq!(b.heading, "Rune revoked on the node");
 }
 
 #[test]

@@ -6,7 +6,7 @@ use super::*;
 use crate::connect::Probe;
 use crate::error::ReplyRefused;
 use crate::request::Method;
-use crate::{cln as node, CreateOutcome};
+use crate::{cln as node, CreateOutcome, NotPaid, PaidFacts, Payment};
 
 fn body_of(r: &crate::Request) -> Value {
     parse(r.body.as_deref().unwrap().as_bytes(), &Limits::DEFAULT).unwrap()
@@ -98,19 +98,61 @@ fn ln_10_the_payment_is_polled_by_hash_and_waitinvoice_is_not_used() {
 
 #[test]
 fn ln_09_a_rune_that_is_refused_as_not_permitted_is_limited() {
-    for r in [
-        reply(
-            401,
-            "{\"code\":1501,\"message\":\"Not authorized: Not derived from master\"}",
-        ),
-        reply(403, ""),
-        reply(
-            500,
-            "{\"code\":1,\"message\":\"Not permitted: method is not equal to getinfo\"}",
-        ),
-        reply(400, "{\"message\":\"Not authorized: nope\"}"),
+    // The exact answer: HTTP 401, code 1502, the text of `checkrune`.
+    for text in [
+        "Not permitted: method is not equal to invoice",
+        "Not permitted: method does not start with list",
     ] {
-        assert_eq!(node::judge_probe(&r), Probe::Denied, "{r:?}");
+        let r = reply(
+            401,
+            &format!("{{\"code\":1502,\"message\":\"{text}\",\"data\":null}}"),
+        );
+        assert_eq!(node::judge_probe(&r), Probe::Denied, "{text}");
+    }
+}
+
+#[test]
+fn ln_09_only_the_exact_answer_is_a_denial() {
+    let ok = "{\"code\":1502,\"message\":\"Not permitted: method is not equal to invoice\"}";
+    for status in [400, 403, 500] {
+        assert_eq!(
+            node::judge_probe(&reply(status, ok)),
+            Probe::Unclear,
+            "{status}"
+        );
+    }
+    for body in [
+        "{\"code\":1502,\"message\":\"Not permitted\"}",
+        "{\"code\":1502,\"message\":\"not permitted: x\"}",
+        "{\"code\":1502,\"message\":\"Rune is not valid\"}",
+        "{\"code\":1,\"message\":\"Not permitted: x\"}",
+        "{\"message\":\"Not permitted: x\"}",
+    ] {
+        assert_eq!(
+            node::judge_probe(&reply(401, body)),
+            Probe::Unclear,
+            "{body}"
+        );
+    }
+}
+
+#[test]
+fn ln_09_a_rune_from_another_node_or_a_revoked_one_is_never_a_passed_probe() {
+    // Code 1501: the rune is not from this node (or the header is missing).
+    for status in [401, 403] {
+        let r = reply(
+            status,
+            "{\"code\":1501,\"message\":\"Not authorized: Not derived from master\",\"data\":null}",
+        );
+        assert_eq!(node::judge_probe(&r), Probe::NotFromNode, "{status}");
+    }
+    // Code 1503: the rune is blacklisted.
+    for status in [401, 403] {
+        let r = reply(
+            status,
+            "{\"code\":1503,\"message\":\"Not authorized: Blacklisted rune\",\"data\":null}",
+        );
+        assert_eq!(node::judge_probe(&r), Probe::Revoked, "{status}");
     }
 }
 
@@ -161,6 +203,85 @@ fn listed(label: &str, msat: u64, status: &str, description: &str, hash: &[u8; 3
             hex(hash)
         ),
     )
+}
+
+fn item(fields: &str) -> Reply {
+    reply(
+        200,
+        &format!(
+            "{{\"invoices\":[{{\"payment_hash\":\"{}\",\"status\":\"paid\"{fields}}}]}}",
+            hex(&hash(1))
+        ),
+    )
+}
+
+#[test]
+fn ln_14_cln_lists_numbers_as_numbers_and_paid_at_only_for_a_paid_invoice() {
+    let h = hash(1);
+    // The shape of a listinvoices item of a paid invoice.
+    let paid = reply(
+        200,
+        &format!(
+            "{{\"invoices\":[{{\"label\":\"x\",\"description\":\"Sale 17\",\
+             \"payment_hash\":\"{}\",\"status\":\"paid\",\"expires_at\":1700000300,\
+             \"amount_msat\":25000000,\"bolt11\":\"lnbcrt1abc\",\"pay_index\":1,\
+             \"amount_received_msat\":25000000,\"paid_at\":1700000123,\
+             \"payment_preimage\":\"{}\"}}]}}",
+            hex(&h),
+            hex(&hash(9))
+        ),
+    );
+    assert_eq!(
+        cln().parse_lookup(&paid, &h, 25_000_000),
+        Ok(Payment::Paid(PaidFacts {
+            payment_hash: h,
+            amount_received_msat: 25_000_000,
+            settled_at: Some(1_700_000_123)
+        }))
+    );
+    // A text, or a "msat" suffix, where a number is written is refused.
+    for fields in [
+        ",\"amount_msat\":25000000,\"amount_received_msat\":\"25000000\"",
+        ",\"amount_msat\":25000000,\"amount_received_msat\":\"25000000msat\"",
+        ",\"amount_msat\":\"25000000msat\",\"amount_received_msat\":25000000",
+        ",\"amount_msat\":25000000,\"amount_received_msat\":25000000,\"paid_at\":\"1700000123\"",
+    ] {
+        assert!(
+            cln().parse_lookup(&item(fields), &h, 25_000_000).is_err(),
+            "{fields}"
+        );
+    }
+    // An invoice that takes any amount has no amount_msat: refused.
+    for status in ["unpaid", "paid", "expired"] {
+        let body = format!(
+            "{{\"invoices\":[{{\"payment_hash\":\"{}\",\"status\":\"{status}\",\
+             \"amount_received_msat\":25000000}}]}}",
+            hex(&h)
+        );
+        assert_eq!(
+            cln().parse_lookup(&reply(200, &body), &h, 25_000_000),
+            Err(ReplyRefused::Missing("amount_msat")),
+            "{status}"
+        );
+    }
+    // An unpaid invoice has no paid_at and is read.
+    assert_eq!(
+        cln().parse_lookup(
+            &listed("x", 25_000_000, "unpaid", "Sale 17", &h),
+            &h,
+            25_000_000
+        ),
+        Ok(Payment::NotPaid(NotPaid::Waiting))
+    );
+}
+
+#[test]
+fn ln_15_error_900_has_the_text_the_node_gives() {
+    let r = reply(
+        500,
+        "{\"code\":900,\"message\":\"Duplicate label 'obmt-c0ffee01-17-0'\",\"data\":null}",
+    );
+    assert_eq!(cln().parse_create(&r), Ok(CreateOutcome::LabelExists));
 }
 
 #[test]

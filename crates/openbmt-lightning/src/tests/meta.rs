@@ -92,9 +92,10 @@ fn every_rule_the_code_names_exists() {
 
 #[test]
 fn what_no_node_confirmed_is_marked_in_the_rules() {
-    assert!(RULES.contains("[verify, E7]"));
-    assert!(RULES.contains("no node was\nrun"));
-    assert!(RULES.contains("not captured from a running node"));
+    assert!(!RULES.contains("[verify, E7]"));
+    let flat = RULES.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("no node was run"));
+    assert!(flat.contains("not captured from a running node"));
 }
 
 #[test]

@@ -349,7 +349,11 @@ impl Credential {
 // base64url of a 32-byte hash and then the restrictions, written in the
 // clear, joined by `&`. A restriction is alternatives joined by `|`; an
 // alternative is a field name, one operator of `= / ^ $ ~ < > { } # !` and a
-// value, in which `\` escapes `\`, `|` and `&`.
+// value, in which `\` escapes `\`, `|` and `&`. The name ends at the first
+// punctuation other than `_`, `-` and `.`. The rune of a node also starts with
+// the unique id, a restriction with an empty field name, `=<id>`. Read from
+// the source of `ccan/rune` (coding.c, rune.c) and `lightningd/runes.c` at
+// v26.06.10.
 
 const OPERATORS: &str = "=/^$~<>{}#!";
 
@@ -395,7 +399,7 @@ fn unescape(value: &str) -> Result<String, CredentialRefused> {
 
 fn alternative(text: &str) -> Result<Alternative, CredentialRefused> {
     let end = text
-        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .find(|c: char| c.is_ascii_punctuation() && !matches!(c, '_' | '-' | '.'))
         .ok_or(CredentialRefused::RuneSyntax(
             "an alternative without an operator",
         ))?;
@@ -410,6 +414,18 @@ fn alternative(text: &str) -> Result<Alternative, CredentialRefused> {
         op,
         value: unescape(chars.as_str())?,
     })
+}
+
+/// The value of the unique id restriction: the number of the rune, or the
+/// number, a `-` and the version of the node's master rune when it has one.
+fn is_unique_id(value: &str) -> bool {
+    let (id, version) = match value.split_once('-') {
+        Some((id, version)) => (id, Some(version)),
+        None => (value, None),
+    };
+    !id.is_empty()
+        && id.bytes().all(|b| b.is_ascii_digit())
+        && version.is_none_or(|v| !v.is_empty())
 }
 
 /// LN-08: read the restrictions of a rune and refuse it unless it limits the
@@ -436,11 +452,22 @@ pub fn check_rune(rune: &str) -> Result<(), CredentialRefused> {
     let text = std::str::from_utf8(restrictions).map_err(|_| CredentialRefused::RuneNotText)?;
     // What every restriction of the method allows together, if there is one.
     let mut allowed: Option<Vec<String>> = None;
-    for group in split_unescaped(text, '&') {
+    for (index, group) in split_unescaped(text, '&').into_iter().enumerate() {
         let alternatives = split_unescaped(group, '|')
             .into_iter()
             .map(alternative)
             .collect::<Result<Vec<_>, _>>()?;
+        if alternatives.iter().any(|a| a.field.is_empty()) {
+            // The unique id: the first restriction, one alternative.
+            match alternatives.as_slice() {
+                [one] if index == 0 && one.op == '=' && is_unique_id(&one.value) => continue,
+                _ => {
+                    return Err(CredentialRefused::RuneSyntax(
+                        "a unique id that is not the first restriction",
+                    ))
+                }
+            }
+        }
         if !alternatives.iter().any(|a| a.field == "method") {
             continue;
         }

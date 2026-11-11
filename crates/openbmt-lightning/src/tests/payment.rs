@@ -223,13 +223,13 @@ fn ln_14_cln_states_other_than_paid_are_not_paid() {
         200,
         &format!(
             "{{\"invoices\":[{{\"payment_hash\":\"{}\",\"status\":\"paid\",\
-             \"amount_received_msat\":\"25000000msat\"}}]}}",
+             \"amount_msat\":25000000,\"amount_received_msat\":\"25000000msat\"}}]}}",
             hex(&hash(1))
         ),
     );
     assert_eq!(
         lookup(&cln(), &text),
-        Err(ReplyRefused::OutOfRange("amount_received_msat"))
+        Err(ReplyRefused::WrongType("amount_received_msat"))
     );
 }
 
@@ -264,14 +264,79 @@ fn ln_14_a_reply_about_another_payment_or_an_error_is_never_paid() {
             assert!(lookup(&c, &r).is_err(), "{r:?}");
         }
     }
-    // LND answers 404 for an invoice it has not got.
-    assert_eq!(
-        lookup(
-            &lnd(),
-            &reply(404, "{\"code\":5,\"message\":\"unable to locate invoice\"}")
+    // LND answers 404 with the code 5 for an invoice it has not got, in two
+    // texts, and only so.
+    for message in ["unable to locate invoice", "there are no existing invoices"] {
+        assert_eq!(
+            lookup(
+                &lnd(),
+                &reply(
+                    404,
+                    &format!("{{\"code\":5,\"message\":\"{message}\",\"details\":[]}}")
+                )
+            ),
+            Ok(Payment::NotPaid(NotPaid::NotFound)),
+            "{message}"
+        );
+    }
+    for r in [
+        reply(
+            404,
+            "{\"code\":5,\"message\":\"page not found\",\"details\":[]}",
         ),
-        Ok(Payment::NotPaid(NotPaid::NotFound))
+        reply(
+            404,
+            "{\"code\":12,\"message\":\"unable to locate invoice\"}",
+        ),
+        reply(404, ""),
+        reply(500, "{\"code\":5,\"message\":\"unable to locate invoice\"}"),
+        reply(
+            500,
+            "{\"code\":2,\"message\":\"payment hash must be exactly 32 bytes, is instead 3\"}",
+        ),
+    ] {
+        assert!(
+            matches!(lookup(&lnd(), &r), Err(ReplyRefused::NodeSaid { .. })),
+            "{r:?}"
+        );
+    }
+}
+
+#[test]
+fn ln_14_lnd_writes_int64_as_text_and_a_number_there_is_refused() {
+    let h = hash(1);
+    let body = |paid: &str, settled: &str| {
+        reply(
+            200,
+            &format!(
+                "{{\"r_hash\":\"{}\",\"value_msat\":\"25000000\",\"state\":\"SETTLED\",\
+                 \"amt_paid_msat\":{paid},\"settle_date\":{settled}}}",
+                base64(&h, Alphabet::Standard)
+            ),
+        )
+    };
+    assert!(lookup(&lnd(), &body("\"25000000\"", "\"1700000123\"")).is_ok());
+    assert_eq!(
+        lookup(&lnd(), &body("25000000", "\"1700000123\"")),
+        Err(ReplyRefused::WrongType("amt_paid_msat"))
     );
+    assert_eq!(
+        lookup(&lnd(), &body("\"25000000\"", "1700000123")),
+        Err(ReplyRefused::WrongType("settle_date"))
+    );
+    for text in [
+        "\"\"",
+        "\"-1\"",
+        "\"2.5e7\"",
+        "\"25000000msat\"",
+        "\"99999999999999999999\"",
+    ] {
+        assert_eq!(
+            lookup(&lnd(), &body(text, "\"1700000123\"")),
+            Err(ReplyRefused::OutOfRange("amt_paid_msat")),
+            "{text}"
+        );
+    }
 }
 
 #[test]

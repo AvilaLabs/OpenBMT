@@ -26,9 +26,9 @@
 //! counter and is never part of the shop's settings; the node's public key
 //! is (`openbmt_core::settings::Settings::lightning_node`).
 //!
-//! The fixtures of the tests are written from the projects' documents, not
-//! captured from a running node; the points that need a node are marked
-//! **[verify, E7]** in the rules.
+//! The fixtures of the tests are written from the projects' documents and
+//! source code, not captured from a running node; the rules name the source
+//! files the error answers and the replies were read from.
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.

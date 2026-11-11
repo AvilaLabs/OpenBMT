@@ -14,11 +14,14 @@ the pinned certificate (LN-12), and hands the status and the bytes of the
 answer back. A reply that cannot be read is a refusal, never a guess.
 
 **What the facts rest on.** The fixtures of the tests are written from the
-projects' own documents, not captured from a running node, and no node was
-run. Every point that needs a real node to confirm is marked
-**[verify, E7]**. The documents are cited where each fact is used; the pages
-of Core Lightning (docs.corelightning.org) do not show the version they
-describe.
+projects' own documents and source code, not captured from a running node,
+and no node was run. The error answers and the JSON of the replies were read
+from the source at the tags named in section 9 (LND v0.21.6-beta, Core
+Lightning v26.06.10) and from the packages those versions pin; each rule
+names the files it rests on. The bodies of the HTTP errors are derived from
+the code paths, not observed, so a run against real nodes is still to be
+done. The pages of Core Lightning (docs.corelightning.org) do not show the
+version they describe.
 
 ## 1. What is supported
 
@@ -78,12 +81,17 @@ describe.
 - **LN-06.** At connect time two read-only calls that a macaroon limited to
   invoices must be refused are sent: `GET /v1/getinfo` (needs `info:read`) and
   `GET /v1/balance/blockchain` (needs `onchain:read`). Each must be answered
-  with a failure whose message begins `permission denied`, which is what LND
-  answers a call the macaroon does not allow (`lncli` shows `rpc error: code =
-  Unknown desc = permission denied`), whatever HTTP status the gateway puts on
-  it **[verify, E7]**. A success means the macaroon can do more than invoices
-  and the setup is refused with the command of LN-05. Any other failure
-  proves nothing, and the setup is refused too.
+  with exactly HTTP 500, the JSON error code 2 and the message
+  `permission denied`. That is what LND gives a call the macaroon does not
+  allow: the checker's `ErrPermissionDenied` (macaroon-bakery v2.0.1,
+  `bakery/checker.go`, text `permission denied` through errgo v1.0.1
+  `WithCausef`) is returned by LND's interceptor (`rpcperms/interceptor.go`,
+  `macaroons/service.go`) as a plain error, so gRPC makes it code 2
+  (`Unknown`), and the gateway (grpc-gateway v2.16.0, `runtime/errors.go`,
+  with no custom handler in `lnd.go`) writes it as 500. A success means the
+  macaroon can do more than invoices and the setup is refused with the
+  command of LN-05. Any other answer, including a 403 or another text, proves
+  nothing, and the setup is refused too ("probe unclear").
 - **LN-07.** Requests to LND carry the macaroon in hex in the header
   `Grpc-Metadata-macaroon`. An invoice is made with `POST /v1/invoices` and
   the body `{"memo":..,"value_msat":"..","expiry":".."}` (64-bit integers are
@@ -113,16 +121,28 @@ describe.
   the method with another operator or names it together with another field
   is refused whole, because `|` makes the rune as wide as its widest
   alternative. What the `method` restrictions allow together must be exactly
-  `invoice` and `listinvoices`. Other restrictions (time, rate, id, the
-  unique id of the rune) only narrow a rune and are accepted when they are
-  well formed **[verify, E7]** (the form of the unique id is not described on
-  the pages read).
+  `invoice` and `listinvoices`. Other restrictions (time, rate, id) only
+  narrow a rune and are accepted when they are well formed. The grammar is
+  that of `ccan/ccan/rune/coding.c` and `rune.h` (v26.06.10): the name of a
+  field ends at the first punctuation other than `_`, `-` and `.`. The
+  unique id that `createrune` puts first (`lightningd/runes.c`,
+  `ccan/ccan/rune/rune.c unique_id_restr`) is a restriction with an empty
+  field name, `=<id>`, or `=<id>-<version>` when the node's master rune has a
+  version; both forms are accepted, as the first restriction only, and an
+  empty field name anywhere else is refused.
 - **LN-09.** At connect time two read-only calls that a rune limited to
   invoices must be refused are sent: `getinfo` and `listfunds`. Each must be
-  answered with a failure that has the status 401 or 403, or whose message
-  begins `Not permitted` or `Not authorized` **[verify, E7]**. A success
-  refuses the setup with words; any other failure proves nothing and refuses
-  it too. Nothing the crate calls moves money.
+  answered with exactly HTTP 401, the JSON error code 1502 and a message that
+  begins `Not permitted:`: `checkrune` answers `RUNE_NOT_PERMITTED` (1502,
+  `lightningd/runes.c`, `common/jsonrpc_errors.h`) when a restriction fails,
+  and clnrest (`plugins/rest-plugin/src/shared.rs`, `structs.rs`) passes it
+  on as 401. A success refuses the setup with words. The code 1501
+  (`Not authorized`: the rune is not from this node) and the code 1503 (the
+  rune is blacklisted), with the status 401 or 403, are never counted as a
+  passed probe: each refuses the setup with its own words ("This rune is not
+  from this node", "This rune has been revoked on the node"). Any other
+  answer proves nothing and refuses it too. Nothing the crate calls moves
+  money.
 - **LN-10.** Requests to Core Lightning carry the rune in the header `Rune`
   and are `POST https://host:port/v1/<method>` with a JSON body
   (https://docs.corelightning.org/docs/rest). An invoice is made with
@@ -176,12 +196,25 @@ describe.
   paid, with the node's word for it quoted. A reply about another payment
   hash than the one asked is refused. A reply that cannot be read is not a
   payment either. The replies are read with the bounds of `openbmt-json`
-  (256 KiB, 16 levels, 10,000 values); a number may be a JSON number or, as
-  LND writes 64-bit integers, a text of digits **[verify, E7]**.
+  (256 KiB, 16 levels, 10,000 values). The forms are exact. LND
+  (`lnrpc/lightning.proto`, `lightning.swagger.json`, v0.21.6-beta): `state`
+  is the name `OPEN`, `SETTLED`, `CANCELED` or `ACCEPTED`, and
+  `amt_paid_msat` and `settle_date` are JSON texts of digits (protojson
+  writes an `int64` so); a JSON number there is refused. A lookup of an
+  invoice the node does not have is HTTP 404 with the code 5 and the message
+  `unable to locate invoice` or `there are no existing invoices`
+  (`rpcserver.go LookupInvoice`, `invoices/errors.go`), and only that is "not
+  found". Core Lightning (`lightningd/invoice.c`, `common/json_stream.c`,
+  v26.06.10): `amount_msat`, `amount_received_msat` and `paid_at` are plain
+  JSON numbers, a text there is refused; `paid_at` is there only for a paid
+  invoice; `amount_msat` is missing from an invoice that takes any amount,
+  and such an invoice is refused, because every invoice this crate asks for
+  has an amount.
 - **LN-15.** The label of an invoice at Core Lightning is made, not drawn:
   `obmt-<first four bytes of the counter's id in hex>-<sale number>-<attempt>`.
   If a request has no answer (a timeout) the app sends it again, and the
-  node answers error 900 (the label is used) when the first one got through.
+  node answers error 900 (`Duplicate label '<label>'`, `lightningd/invoice.c`)
+  when the first one got through.
   Then the invoice is asked for by label, and it is taken up again only if
   the label, the amount, the description and the state `unpaid` are this
   sale's; its BOLT 11 text then passes LN-17 like any other. If they are not,
@@ -267,6 +300,17 @@ Core Lightning pages (clnrest, invoice, listinvoices, createrune):
   https://docs.corelightning.org/reference/createrune
 Runes (the form of a rune):
   https://github.com/rustyrussell/runes
+Source files read at the tags (LN-06, LN-08, LN-09, LN-14, LN-15):
+  lightningnetwork/lnd v0.21.6-beta: macaroons/service.go,
+    rpcperms/interceptor.go, lnd.go, rpcserver.go, invoices/errors.go,
+    lnrpc/lightning.proto, lnrpc/lightning.swagger.json
+  gopkg.in/macaroon-bakery.v2 v2.0.1 bakery/checker.go, bakery/error.go;
+    gopkg.in/errgo.v1 v1.0.1 errors.go;
+    grpc-ecosystem/grpc-gateway/v2 v2.16.0 runtime/errors.go
+  ElementsProject/lightning v26.06.10: lightningd/runes.c,
+    lightningd/invoice.c, common/jsonrpc_errors.h, common/json_stream.c,
+    ccan/ccan/rune/coding.c, ccan/ccan/rune/rune.c, ccan/ccan/rune/rune.h,
+    plugins/rest-plugin/src/shared.rs, plugins/rest-plugin/src/structs.rs
 LND releases (v0.21.6-beta):
   https://github.com/lightningnetwork/lnd/releases
 LND macaroons page (the stock invoice.macaroon, the header):

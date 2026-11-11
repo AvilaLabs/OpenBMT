@@ -393,6 +393,10 @@ pub enum ConnectionRefused {
         /// The rule of the node software the credential is for.
         rule: &'static str,
     },
+    /// The node says the rune is not one it made, or is missing (LN-09).
+    RuneNotFromNode,
+    /// The node says the rune has been revoked (LN-09).
+    RuneRevoked,
     /// The test invoice was not made (LN-20).
     NoInvoice(ReplyRefused),
     /// The label of the test invoice is already used (LN-20).
@@ -409,6 +413,7 @@ impl ConnectionRefused {
     pub fn rule(&self) -> &'static str {
         match self {
             Self::CredentialTooStrong { rule, .. } | Self::ProbeUnclear { rule, .. } => rule,
+            Self::RuneNotFromNode | Self::RuneRevoked => "LN-09",
             Self::NoInvoice(_) | Self::LabelUsed | Self::WrongNode | Self::BadInvoice(_) => "LN-20",
         }
     }
@@ -427,6 +432,12 @@ impl fmt::Display for ConnectionRefused {
                 "{}: {call} was refused with status {status}, not with the permission error",
                 self.rule()
             ),
+            Self::RuneNotFromNode => write!(
+                f,
+                "{}: the node says the rune is not one of its own",
+                self.rule()
+            ),
+            Self::RuneRevoked => write!(f, "{}: the node says the rune is revoked", self.rule()),
             Self::NoInvoice(e) => write!(f, "{}: no test invoice: {e}", self.rule()),
             Self::LabelUsed => write!(f, "{}: the test invoice's label is used", self.rule()),
             Self::WrongNode => write!(

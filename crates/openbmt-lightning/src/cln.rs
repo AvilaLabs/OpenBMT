@@ -17,7 +17,8 @@ use crate::credential::ClnCredential;
 use crate::error::ReplyRefused;
 use crate::invoice::{judge_paid, Ask, CreateOutcome, Created, NotPaid, Payment};
 use crate::request::{
-    hash_hex, json, json_string, node_said, number, post, success_json, text, Reply, Request,
+    hash_hex, json, json_string, node_code, node_said, number, post, success_json, text, Reply,
+    Request,
 };
 use crate::text::hex;
 use openbmt_json::Value;
@@ -47,9 +48,12 @@ pub(crate) fn probes(c: &ClnCredential) -> [(&'static str, Request); 2] {
 }
 
 /// LN-09: judge the reply to a probe. A call the rune does not allow is
-/// refused with the 401 or 403 status, or with an error text that begins
-/// `Not permitted` or `Not authorized`; a call that is allowed is a success.
-/// Any other failure proves nothing.
+/// answered by HTTP 401 with the JSON error code 1502 and a message that
+/// begins `Not permitted:` (`RUNE_NOT_PERMITTED` of `checkrune`, which
+/// clnrest passes on as 401). The codes 1501 (`Not authorized`: the rune is
+/// not from this node) and 1503 (the rune is blacklisted) are not passes of
+/// the probe but refusals of their own. A call that is allowed is a
+/// success; every other answer proves nothing.
 pub(crate) fn judge_probe(reply: &Reply) -> Probe {
     if reply.is_success() {
         return Probe::Allowed;
@@ -58,13 +62,11 @@ pub(crate) fn judge_probe(reply: &Reply) -> Probe {
         ReplyRefused::NodeSaid { message, .. } => message,
         _ => String::new(),
     };
-    if matches!(reply.status, 401 | 403)
-        || message.starts_with("Not permitted")
-        || message.starts_with("Not authorized")
-    {
-        Probe::Denied
-    } else {
-        Probe::Unclear
+    match (reply.status, node_code(reply)) {
+        (401, Some(1502)) if message.starts_with("Not permitted:") => Probe::Denied,
+        (401 | 403, Some(1501)) => Probe::NotFromNode,
+        (401 | 403, Some(1503)) => Probe::Revoked,
+        _ => Probe::Unclear,
     }
 }
 
@@ -134,7 +136,10 @@ fn only_invoice(v: &Value) -> Result<Option<&Value>, ReplyRefused> {
 }
 
 /// LN-14: read the reply to a lookup by payment hash. Paid only when `status`
-/// is `paid` and `amount_received_msat` is at least the amount asked.
+/// is `paid` and `amount_received_msat` is at least the amount asked. The
+/// amounts and `paid_at` are plain JSON numbers; `paid_at` is there only for
+/// a paid invoice, and `amount_msat` is missing from an invoice that takes
+/// any amount, which is refused.
 pub(crate) fn parse_lookup(
     reply: &Reply,
     payment_hash: &[u8; 32],
@@ -147,6 +152,8 @@ pub(crate) fn parse_lookup(
     if hash_hex(inv, "payment_hash")? != *payment_hash {
         return Err(ReplyRefused::OtherInvoice);
     }
+    // An invoice without an amount is one this crate never asks for.
+    number(inv, "amount_msat")?;
     Ok(match text(inv, "status")? {
         "paid" => {
             let received = number(inv, "amount_received_msat")?;

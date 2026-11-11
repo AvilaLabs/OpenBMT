@@ -82,6 +82,8 @@ fn connection_listed(e: &ConnectionRefused) -> bool {
     match e {
         ConnectionRefused::CredentialTooStrong { .. }
         | ConnectionRefused::ProbeUnclear { .. }
+        | ConnectionRefused::RuneNotFromNode
+        | ConnectionRefused::RuneRevoked
         | ConnectionRefused::NoInvoice(_)
         | ConnectionRefused::LabelUsed
         | ConnectionRefused::WrongNode
