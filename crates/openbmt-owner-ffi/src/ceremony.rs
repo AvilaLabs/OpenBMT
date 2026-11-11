@@ -330,21 +330,6 @@ fn random64_from(path: &str) -> Result<[u8; 64], AppError> {
     Ok(out)
 }
 
-#[cfg(test)]
-mod random_tests {
-    use super::*;
-
-    #[test]
-    fn oc_40_a_failing_random_source_is_refused() {
-        let nothing = random64_from("/nonexistent/random").expect_err("no source");
-        assert!(nothing.to_string().contains("OC-40"), "{nothing}");
-        // A source that ends early gives too few bytes.
-        let short = random64_from("/dev/null").expect_err("short");
-        assert!(short.to_string().contains("OC-40"), "{short}");
-        assert_ne!(random64().expect("urandom"), [0u8; 64]);
-    }
-}
-
 /// Op 80: make key 1 and the owner's root on this phone.
 pub(crate) fn make_key1(a: Key1Args) -> Result<Key1Made, AppError> {
     let mut random = random64()?;
@@ -440,4 +425,19 @@ pub(crate) fn stage(record: Vec<u8>) -> Result<SetupStageView, AppError> {
         stage: n,
         words: WordsView(words),
     })
+}
+
+#[cfg(test)]
+mod random_tests {
+    use super::*;
+
+    #[test]
+    fn oc_40_a_failing_random_source_is_refused() {
+        let nothing = random64_from("/nonexistent/random").expect_err("no source");
+        assert!(nothing.to_string().contains("OC-40"), "{nothing}");
+        // A source that ends early gives too few bytes.
+        let short = random64_from("/dev/null").expect_err("short");
+        assert!(short.to_string().contains("OC-40"), "{short}");
+        assert_ne!(random64().expect("urandom"), [0u8; 64]);
+    }
 }
