@@ -1370,6 +1370,118 @@ fn lk_76_a_restart_still_reaches_the_device_the_settings_remove() {
         .is_empty());
 }
 
+/// A post that takes the Box's copy of the settings as applied at once: as
+/// soon as a message for the Box is put, the relay's member list loses the
+/// counter, as the Box's runner does (BX-22).
+struct BoxAppliesAtOnce {
+    inner: MemoryPost,
+    relay: MemoryRelay,
+    members: Vec<DeviceId>,
+}
+
+impl openbmt_courier::Post for BoxAppliesAtOnce {
+    fn make_mailbox(
+        &mut self,
+        reader: &openbmt_core::identity::Identity,
+    ) -> Result<(), openbmt_link::ClientError> {
+        self.inner.make_mailbox(reader)
+    }
+
+    fn put(&mut self, sealed: &[u8]) -> Result<u64, openbmt_link::ClientError> {
+        let to_box = openbmt_link::seal::inspect(sealed).is_ok_and(|seen| seen.reader == box_key());
+        let id = self.inner.put(sealed)?;
+        if to_box {
+            self.relay.set_members(&self.members).unwrap();
+        }
+        Ok(id)
+    }
+
+    fn fetch(
+        &mut self,
+        reader: &openbmt_core::identity::Identity,
+        cursor: u64,
+    ) -> Result<openbmt_link::Fetched, openbmt_link::ClientError> {
+        self.inner.fetch(reader, cursor)
+    }
+
+    fn ack(
+        &mut self,
+        reader: &openbmt_core::identity::Identity,
+        up_to: u64,
+    ) -> Result<u32, openbmt_link::ClientError> {
+        self.inner.ack(reader, up_to)
+    }
+
+    fn close(&mut self) {
+        self.inner.close();
+    }
+}
+
+#[test]
+fn lk_76_the_removed_device_is_sent_its_copy_before_the_box() {
+    let mut b = with_box();
+    // The owner's link, over a post that lets the Box apply at once.
+    let dir = Dir::new();
+    let post = BoxAppliesAtOnce {
+        inner: b.w.relay.post(),
+        relay: b.w.relay.clone(),
+        members: vec![owner(), box_key()],
+    };
+    let owner_courier = Courier::start_with(
+        post,
+        id(1),
+        Role::Owner,
+        [(counter(), Role::Counter), (box_key(), Role::Box)]
+            .into_iter()
+            .collect(),
+        dir.path(),
+        FirstStart::Yes,
+    )
+    .unwrap();
+    let mut link = OwnerLink::new(
+        owner_courier,
+        dir.path(),
+        devices(),
+        vec![counter()],
+        config(),
+    )
+    .unwrap();
+    // Two counters are removed, so that whatever order the keys fall in, one
+    // of them is ahead of the Box or behind it.
+    let second = id(7).device_id();
+    let second_dir = Dir::new();
+    let mut second_side = courier(
+        &b.w.relay,
+        id(7),
+        Role::Counter,
+        (owner(), Role::Owner),
+        &second_dir,
+        FirstStart::Yes,
+    );
+    second_side.poll().unwrap();
+    let v1 = listed(1, |s| {
+        s.devices.insert(second);
+        s.counters.insert(second, 5_000);
+    });
+    let removal = signed_by_both(listed(2, |s| {
+        s.counters.clear();
+        s.devices.remove(&counter());
+    }));
+    link.carry_settings(5, &removal, &roots(), Some(&v1), T0)
+        .unwrap();
+    // The Box applied at once, and the removed counter was given its copy
+    // before that: it reads it from its leaving mailbox.
+    assert_eq!(settings_in(&b.w.counter_gets()), vec![removal.to_bytes()]);
+    assert_eq!(
+        settings_in(&second_side.poll().unwrap()),
+        vec![removal.to_bytes()]
+    );
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![removal.to_bytes()]
+    );
+}
+
 #[test]
 fn lk_76_a_delivery_the_owner_dropped_lets_its_devices_go() {
     let mut b = with_box();

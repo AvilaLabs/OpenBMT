@@ -288,6 +288,9 @@ struct Carried {
     /// Who must hold it: the counters and Boxes on its device list, and those
     /// that the settings before it listed.
     targets: BTreeMap<DeviceId, Role>,
+    /// The counters and Boxes the settings themselves name; a target not in
+    /// it is a device they remove (LK-76).
+    named: BTreeSet<DeviceId>,
 }
 
 /// The batches a counter's records show it holds, and how many of its records
@@ -615,6 +618,7 @@ impl<R: Post> OwnerLink<R> {
             version,
             bytes: signed.to_bytes(),
             targets,
+            named: roles_of(&signed.settings).into_keys().collect(),
         });
         self.carried.sort_by_key(|c| c.version);
         self.send_settings(now);
@@ -776,7 +780,7 @@ impl<R: Post> OwnerLink<R> {
     /// the versions in order, so that each is checked against the one before
     /// it. `false` if the relay could not be reached.
     fn send_settings(&mut self, now: u64) -> bool {
-        let mut work: Vec<(DeviceId, Role, u32, Vec<u8>)> = Vec::new();
+        let mut work: Vec<(u8, DeviceId, Role, u32, Vec<u8>)> = Vec::new();
         let mut seen: BTreeSet<DeviceId> = BTreeSet::new();
         for c in &self.carried {
             for (device, role) in &c.targets {
@@ -789,11 +793,23 @@ impl<R: Post> OwnerLink<R> {
                     .get(&(*device, c.version))
                     .is_none_or(|at| now >= at.saturating_add(self.cfg.settings_resend_secs));
                 if due {
-                    work.push((*device, *role, c.version, c.bytes.clone()));
+                    // LK-76: the devices the settings remove first, then the
+                    // other counters, and the Box last, so that a Box that
+                    // applies them at once cannot close a mailbox that has
+                    // not been given its copy yet.
+                    let rank = if !c.named.contains(device) {
+                        0
+                    } else if *role == Role::Box {
+                        2
+                    } else {
+                        1
+                    };
+                    work.push((rank, *device, *role, c.version, c.bytes.clone()));
                 }
             }
         }
-        for (device, role, version, bytes) in work {
+        work.sort_by_key(|(rank, ..)| *rank);
+        for (_, device, role, version, bytes) in work {
             // Stamped before the send: a refusal is not tried every step.
             self.settings_sent.insert((device, version), now);
             match self.courier.send(&device, Kind::Settings, &bytes) {

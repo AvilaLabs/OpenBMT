@@ -458,6 +458,12 @@ merged).
   settings before them had been handed over again. The entry goes when the
   delivery is done, or when the owner's app says its outbox no longer holds
   that delivery.
+  In every pass that sends settings, a first send and a retry alike, the
+  copies go to the devices the settings remove first, then to the other
+  counters, and to a Box last. A Box that applies the settings as soon as it
+  has them then cannot close the mailbox of a removed device before that
+  device's copy is in it (LK-28). A send that cannot reach the relay stops
+  the pass, so a Box is not sent a copy before the ones ahead of it.
 
 The two kinds that involve the Box are carried the same way. A counter sends
 a Paid notice to each Box on its device list when a sale changes state, and
