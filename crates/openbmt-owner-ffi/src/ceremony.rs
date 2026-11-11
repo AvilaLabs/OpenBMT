@@ -9,6 +9,8 @@
 //! call. It holds the owner's secret and key 1's account key, and it leaves
 //! the library only in these results.
 
+use std::fmt;
+
 use bitcoin::Network;
 use openbmt_core::say::Words;
 use openbmt_counter_node::BATCH_MIN_COUNT;
@@ -67,7 +69,7 @@ impl PartView {
 }
 
 /// What `ceremony_make_key1` returns.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Key1Made {
     /// The sealed record at stage 1, for the app to seal and keep. It holds
     /// secrets.
@@ -82,6 +84,28 @@ pub struct Key1Made {
     pub words: Option<Vec<String>>,
     /// The words for this stage of the setup.
     pub state_words: WordsView,
+}
+
+impl fmt::Debug for Key1Made {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Key1Made")
+            .field(
+                "record",
+                &format_args!("<{} bytes, not shown>", self.record.len()),
+            )
+            .field("key1", &self.key1)
+            .field("owner_root", &self.owner_root)
+            .field("owner_root_words", &self.owner_root_words)
+            .field(
+                "words",
+                &self
+                    .words
+                    .as_ref()
+                    .map(|w| format!("<{} words, not shown>", w.len())),
+            )
+            .field("state_words", &self.state_words)
+            .finish()
+    }
 }
 
 wire_record!(Key1Made {
@@ -118,7 +142,7 @@ wire_record!(AnswerView {
 });
 
 /// What `ceremony_build_wallet` is given.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct BuildArgs {
     /// The sealed record, stage 1 or 2.
     pub record: Vec<u8>,
@@ -128,6 +152,23 @@ pub struct BuildArgs {
     pub key2_text: Option<String>,
     /// The fewest addresses a batch may hold.
     pub batch_min_count: u32,
+}
+
+impl fmt::Debug for BuildArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BuildArgs")
+            .field(
+                "record",
+                &format_args!("<{} bytes, not shown>", self.record.len()),
+            )
+            .field(
+                "answer",
+                &format_args!("<{} bytes, not shown>", self.answer.len()),
+            )
+            .field("key2_text", &self.key2_text)
+            .field("batch_min_count", &self.batch_min_count)
+            .finish()
+    }
 }
 
 wire_record_get!(BuildArgs {
@@ -175,7 +216,7 @@ fn holder_code(h: Holder) -> u8 {
 }
 
 /// What `ceremony_build_wallet` returns.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct WalletBuiltView {
     /// The sealed record at stage 2, for the app to seal and keep until the
     /// owner confirms.
@@ -198,6 +239,28 @@ pub struct WalletBuiltView {
     pub state_words: WordsView,
 }
 
+impl fmt::Debug for WalletBuiltView {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WalletBuiltView")
+            .field(
+                "record",
+                &format_args!("<{} bytes, not shown>", self.record.len()),
+            )
+            .field(
+                "wallet_setup",
+                &format_args!("<{} bytes>", self.wallet_setup.len()),
+            )
+            .field("description", &self.description)
+            .field("checksum_words", &self.checksum_words)
+            .field("fingerprints", &self.fingerprints)
+            .field("first_receive_address", &self.first_receive_address)
+            .field("pairs", &self.pairs)
+            .field("pairs_words", &self.pairs_words)
+            .field("state_words", &self.state_words)
+            .finish()
+    }
+}
+
 wire_record!(WalletBuiltView {
     record,
     wallet_setup,
@@ -211,7 +274,7 @@ wire_record!(WalletBuiltView {
 });
 
 /// What `ceremony_finish` is given.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct FinishArgs {
     /// The sealed record at stage 2.
     pub record: Vec<u8>,
@@ -219,6 +282,19 @@ pub struct FinishArgs {
     pub refund_depth: u32,
     /// The wallet's first block.
     pub birthday: u32,
+}
+
+impl fmt::Debug for FinishArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FinishArgs")
+            .field(
+                "record",
+                &format_args!("<{} bytes, not shown>", self.record.len()),
+            )
+            .field("refund_depth", &self.refund_depth)
+            .field("birthday", &self.birthday)
+            .finish()
+    }
 }
 
 wire_record_get!(FinishArgs {
@@ -233,12 +309,24 @@ wire_record!(FinishArgs {
 });
 
 /// What `ceremony_finish` returns.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct FinishedView {
     /// The sealed record at stage 3: what the app keeps from now on.
     pub record: Vec<u8>,
     /// The words for this stage of the setup.
     pub state_words: WordsView,
+}
+
+impl fmt::Debug for FinishedView {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FinishedView")
+            .field(
+                "record",
+                &format_args!("<{} bytes, not shown>", self.record.len()),
+            )
+            .field("state_words", &self.state_words)
+            .finish()
+    }
 }
 
 wire_record!(FinishedView {
@@ -248,7 +336,7 @@ wire_record!(FinishedView {
 
 /// The values `start` is made from, as the setup text holds them. They hold
 /// the owner's secret and key 1's account key.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SetupFields {
     /// The network.
     pub network: OwnerNetwork,
@@ -268,6 +356,28 @@ pub struct SetupFields {
     pub refund_depth: u32,
     /// The wallet's first block.
     pub birthday: u32,
+}
+
+impl fmt::Debug for SetupFields {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SetupFields")
+            .field("network", &self.network)
+            .field(
+                "owner_secret",
+                &format_args!("<{} bytes, not shown>", self.owner_secret.len()),
+            )
+            .field("approver_root", &self.approver_root)
+            .field("wallet", &self.wallet)
+            .field(
+                "key1_account",
+                &format_args!("<{} bytes, not shown>", self.key1_account.len()),
+            )
+            .field("key3_xpub", &self.key3_xpub)
+            .field("batch_min_count", &self.batch_min_count)
+            .field("refund_depth", &self.refund_depth)
+            .field("birthday", &self.birthday)
+            .finish()
+    }
 }
 
 wire_record!(SetupFields {
@@ -479,5 +589,73 @@ mod random_tests {
         let short = random64_from("/dev/null").expect_err("short");
         assert!(short.to_string().contains("OC-40"), "{short}");
         assert_ne!(random64().expect("urandom"), [0u8; 64]);
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+    use openbmt_core::say::{Tone, Who};
+
+    fn words() -> WordsView {
+        WordsView(Words::new(
+            Tone::Good,
+            "Heading",
+            "What.",
+            Who::Nobody,
+            "Next.",
+        ))
+    }
+
+    #[test]
+    fn oc_40_the_debug_text_of_a_ceremony_result_shows_no_secret() {
+        let made = Key1Made {
+            record: vec![0xAB; 321],
+            key1: PartView {
+                fingerprint: "deadbeef".to_string(),
+                origin_path: "48h/1h/0h/2h".to_string(),
+                account_xpub: "xpub".to_string(),
+            },
+            owner_root: vec![1; 32],
+            owner_root_words: vec!["one".to_string()],
+            words: Some(vec!["abandon".to_string(); 24]),
+            state_words: words(),
+        };
+        let shown = format!("{made:?}");
+        assert!(shown.contains("<321 bytes, not shown>"), "{shown}");
+        assert!(shown.contains("<24 words, not shown>"), "{shown}");
+        assert!(
+            !shown.contains("abandon") && !shown.contains("171"),
+            "{shown}"
+        );
+
+        let fields = SetupFields {
+            network: OwnerNetwork::Regtest,
+            owner_secret: vec![0x5A; 32],
+            approver_root: vec![2; 32],
+            wallet: "wsh(...)".to_string(),
+            key1_account: vec![0x77; 78],
+            key3_xpub: None,
+            batch_min_count: 3,
+            refund_depth: 6,
+            birthday: 0,
+        };
+        let shown = format!("{fields:?}");
+        assert!(shown.contains("<32 bytes, not shown>"), "{shown}");
+        assert!(shown.contains("<78 bytes, not shown>"), "{shown}");
+        assert!(!shown.contains("90,") && !shown.contains("119,"), "{shown}");
+
+        let record = vec![0xCD; 5];
+        let finished = FinishedView {
+            record: record.clone(),
+            state_words: words(),
+        };
+        assert!(!format!("{finished:?}").contains("205"));
+        let args = FinishArgs {
+            record,
+            refund_depth: 6,
+            birthday: 0,
+        };
+        assert!(!format!("{args:?}").contains("205"));
     }
 }

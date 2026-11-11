@@ -1,5 +1,6 @@
 //! Making the identity and key 2 (`docs/DESIGN.md` §2.1 step 3, §5.4).
 
+use std::fmt;
 use std::sync::Arc;
 
 use bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv};
@@ -63,7 +64,7 @@ impl From<KeyWordCount> for WordCount {
 /// Where key 2's randomness comes from (`docs/DESIGN.md` §5.4). With every
 /// source but `Platform` nothing else is mixed in, so the same throws give
 /// the same words in another tool.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum EntropySource {
     /// "Let this device make it": 32 bytes from the platform's random
     /// source, 24 words.
@@ -96,6 +97,34 @@ pub enum EntropySource {
         /// The words, in order.
         words: Vec<String>,
     },
+}
+
+/// Shows which source it is and how much it holds, never the throws or the
+/// words, which are the key's randomness.
+impl fmt::Debug for EntropySource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Platform => f.write_str("Platform"),
+            Self::DiceHashed { rolls } => f
+                .debug_struct("DiceHashed")
+                .field("rolls", &format_args!("<{} rolls, not shown>", rolls.len()))
+                .finish(),
+            Self::CoinFlips { heads, words } => f
+                .debug_struct("CoinFlips")
+                .field("heads", &format_args!("<{} flips, not shown>", heads.len()))
+                .field("words", words)
+                .finish(),
+            Self::DiceSkewCorrected { rolls, words } => f
+                .debug_struct("DiceSkewCorrected")
+                .field("rolls", &format_args!("<{} rolls, not shown>", rolls.len()))
+                .field("words", words)
+                .finish(),
+            Self::TypedWords { words } => f
+                .debug_struct("TypedWords")
+                .field("words", &format_args!("<{} words, not shown>", words.len()))
+                .finish(),
+        }
+    }
 }
 
 /// How often each die face came up in `rolls`, ones first (the hashed
@@ -362,5 +391,32 @@ mod vector {
             Xpub::from_priv(&secp, &key.account).to_string(),
             "xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf"
         );
+    }
+}
+
+#[cfg(test)]
+mod debug_text {
+    use super::*;
+
+    #[test]
+    fn the_debug_text_of_an_entropy_source_shows_no_throws_or_words() {
+        let dice = EntropySource::DiceHashed {
+            rolls: "3".repeat(120),
+        };
+        let shown = format!("{dice:?}");
+        assert!(shown.contains("<120 rolls, not shown>"), "{shown}");
+        assert!(!shown.contains("333"), "{shown}");
+        let typed = EntropySource::TypedWords {
+            words: vec!["abandon".to_string(); 12],
+        };
+        let shown = format!("{typed:?}");
+        assert!(shown.contains("<12 words, not shown>"), "{shown}");
+        assert!(!shown.contains("abandon"), "{shown}");
+        let coins = EntropySource::CoinFlips {
+            heads: vec![true; 300],
+            words: KeyWordCount::Twelve,
+        };
+        assert!(format!("{coins:?}").contains("<300 flips, not shown>"));
+        assert_eq!(format!("{:?}", EntropySource::Platform), "Platform");
     }
 }
