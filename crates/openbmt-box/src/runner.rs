@@ -47,7 +47,9 @@ use crate::files::{BoxFiles, DirFiles};
 use crate::https::{CurlRunner, Transport};
 use crate::pos::{BoxPos, PosOpenError, PosSetup, PosState};
 use crate::pos_config::{PosConfig, PosConfigError, POS_CONFIG_FILE};
+use crate::say::note_words;
 use crate::state::{BoxCore, BoxError, BoxStatus};
+use crate::status_page::{Entered, PageBackend, PageConfig, PageView, StatusPage};
 use crate::vendor::{VendorConnector, VENDOR_POLL_SECS};
 
 /// The relay's own files (mailboxes, member list) are in this directory of
@@ -253,6 +255,85 @@ fn sync_relay(core: &Core, relay: &Relays, clock: &dyn Clock, notes: &Notes) {
         }
     }
     relay.set_claim(claim);
+}
+
+/// BX-12: give the core an invitation with a new nonce and offer its claim
+/// at once.
+fn enter_into(
+    core: &Core,
+    relay: &Relays,
+    clock: &dyn Clock,
+    notes: &Notes,
+    text: &str,
+) -> Result<(), BoxError> {
+    let mut nonce = [0u8; 32];
+    os_random(&mut nonce).map_err(|_| BoxError::NoRandomness)?;
+    let now = clock.now();
+    lock(core).enter_invitation(text, now, nonce)?;
+    sync_relay(core, relay, clock, notes);
+    Ok(())
+}
+
+/// The Box as the status page reads it (BX-55 to BX-57). It holds the
+/// state's locks only for the moment of one call.
+struct PageHandles {
+    core: Core,
+    relay: Relays,
+    clock: Arc<dyn Clock + Send + Sync>,
+    notes: Notes,
+    relay_port: u16,
+}
+
+impl PageBackend for PageHandles {
+    fn view(&self) -> PageView {
+        let (status, shop, devices) = {
+            let mut core = lock(&self.core);
+            let status = core.status(self.clock.now());
+            let shop = core.roots().map(|r| r.owner.fingerprint_words());
+            (status, shop, core.members().len())
+        };
+        // Only the words of the last note: its detail may carry text from
+        // the system or a vendor.
+        let last_note = lock(&self.notes).back().map(|line| {
+            let mut words = note_words(line);
+            words.detail = None;
+            words.quoted = None;
+            words
+        });
+        PageView {
+            status,
+            version: option_env!("CARGO_PKG_VERSION").unwrap_or("unknown"),
+            relay_port: self.relay_port,
+            devices,
+            shop,
+            last_note,
+        }
+    }
+
+    fn enter_invitation(&self, text: &str) -> Entered {
+        // Looked at and entered under one lock, so that two posts cannot
+        // both find the Box waiting.
+        let mut nonce = [0u8; 32];
+        if os_random(&mut nonce).is_err() {
+            return Entered::Refused(BoxError::NoRandomness);
+        }
+        let now = self.clock.now();
+        let result = {
+            let mut core = lock(&self.core);
+            match core.status(now) {
+                BoxStatus::Unpaired => core.enter_invitation(text, now, nonce),
+                BoxStatus::InvitationOpen => return Entered::Held,
+                BoxStatus::Paired | BoxStatus::TurnedOff => Err(BoxError::AlreadyPaired),
+            }
+        };
+        match result {
+            Ok(()) => {
+                sync_relay(&self.core, &self.relay, &*self.clock, &self.notes);
+                Entered::Taken
+            }
+            Err(e) => Entered::Refused(e),
+        }
+    }
 }
 
 /// What the worker thread owns.
@@ -475,6 +556,7 @@ pub struct BoxRunner {
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
     server: Option<Server>,
+    page: Option<StatusPage>,
     addr: SocketAddr,
     id: DeviceId,
     _dir_lock: DirLock,
@@ -622,6 +704,7 @@ impl BoxRunner {
             stop,
             worker: Some(handle),
             server: Some(server),
+            page: None,
             addr,
             id,
             _dir_lock: dir_lock,
@@ -651,12 +734,28 @@ impl BoxRunner {
     /// Take the invitation a person typed (BX-12) and offer its claim at
     /// once. The nonce is new.
     pub fn enter_invitation(&self, text: &str) -> Result<(), BoxError> {
-        let mut nonce = [0u8; 32];
-        os_random(&mut nonce).map_err(|_| BoxError::NoRandomness)?;
-        let now = self.clock.now();
-        lock(&self.core).enter_invitation(text, now, nonce)?;
-        sync_relay(&self.core, &self.relay, &*self.clock, &self.notes);
-        Ok(())
+        enter_into(&self.core, &self.relay, &*self.clock, &self.notes, text)
+    }
+
+    /// Serve the status page (BX-54) on `bind`; the address it listens on.
+    /// A second call replaces the first page.
+    pub fn serve_status_page(
+        &mut self,
+        bind: SocketAddr,
+        cfg: PageConfig,
+    ) -> Result<SocketAddr, StartFailure> {
+        let listener = TcpListener::bind(bind).map_err(StartFailure::Listen)?;
+        let backend = Arc::new(PageHandles {
+            core: Arc::clone(&self.core),
+            relay: Arc::clone(&self.relay),
+            clock: Arc::clone(&self.clock),
+            notes: Arc::clone(&self.notes),
+            relay_port: self.addr.port(),
+        });
+        let page = StatusPage::start(listener, backend, cfg).map_err(StartFailure::Listen)?;
+        let addr = page.local_addr();
+        self.page = Some(page);
+        Ok(addr)
     }
 
     /// Store the POS token the merchant typed (BX-41). Only a paired Box that
@@ -705,6 +804,9 @@ impl BoxRunner {
         self.stop.store(true, Ordering::SeqCst);
         if let Some(handle) = self.worker.take() {
             let _ = handle.join();
+        }
+        if let Some(page) = self.page.take() {
+            page.stop();
         }
         if let Some(server) = self.server.take() {
             server.stop();

@@ -141,6 +141,61 @@ impl BoxStatus {
     }
 }
 
+impl BoxStatus {
+    /// What the status page tells the person (BX-55). It is the console's
+    /// words, except for a Box that waits for an invitation: the page has a
+    /// box to type it in, where the console has a command.
+    pub fn page_words(self) -> Words {
+        match self {
+            Self::Unpaired => Words::new(
+                Tone::Info,
+                "Waiting for an invitation",
+                "This Box is not paired with a shop and is waiting for an invitation.",
+                Who::BoxKeeper,
+                "Make an invitation in the Key app, then type it in the box below.",
+            )
+            .code("BX-03"),
+            other => other.words(),
+        }
+    }
+}
+
+/// What the status page tells a person that the console does not (BX-57,
+/// BX-58).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageAnswer {
+    /// An invitation was posted while the Box already holds one.
+    InvitationHeld,
+    /// A form was posted from another site, or from none the Box can tell.
+    NotFromThisPage,
+}
+
+impl PageAnswer {
+    /// What a person is told.
+    pub fn words(self) -> Words {
+        match self {
+            Self::InvitationHeld => stop(
+                "Invitation already held",
+                "This Box already holds an invitation that has not run out, so it took no other."
+                    .into(),
+                Who::BoxKeeper,
+                format!(
+                    "Finish pairing from the owner's phone, or wait until the invitation runs out after {} minutes and enter a new one.",
+                    INVITE_SECS / 60
+                ),
+            )
+            .code("BX-57"),
+            Self::NotFromThisPage => stop(
+                "Not sent from this page",
+                "The invitation did not come from this page, so the Box did not take it.".into(),
+                Who::BoxKeeper,
+                "Open this page in the browser again and type the invitation in the box on it.",
+            )
+            .code("BX-58"),
+        }
+    }
+}
+
 /// The one condition behind `BoxStatus::TurnedOff` and
 /// `BoxError::TurnedOff`: settings signed by the owner no longer list this
 /// Box (BX-23). The Box does not keep who sent them.
@@ -948,9 +1003,9 @@ impl ConsoleAnswer {
             .detail(plain(&format!("{path}: {kind}"))),
             Self::BadArguments => stop(
                 "Wrong arguments",
-                "The Box needs a data folder and an address to listen on, and may take an invitation file and --no-console.".into(),
+                "The Box needs a data folder and an address to listen on, and may take an invitation file, a status page address and --no-console.".into(),
                 Who::BoxKeeper,
-                "Type the data folder and the address; add --invitation-file and a file, or --no-console to run as a service.",
+                "Type the data folder and the address, then add --invitation-file, --status-page or --no-console as needed.",
             ),
             Self::BadAddress(text) => stop(
                 "Address not understood",
@@ -1561,6 +1616,18 @@ pub fn all_words() -> Vec<(String, Words)> {
         BoxStatus::InvitationOpen.words(),
     );
     add("BoxStatus::Paired", BoxStatus::Paired.words());
+    add(
+        "BoxStatus::Unpaired on the page",
+        BoxStatus::Unpaired.page_words(),
+    );
+    add(
+        "PageAnswer::InvitationHeld",
+        PageAnswer::InvitationHeld.words(),
+    );
+    add(
+        "PageAnswer::NotFromThisPage",
+        PageAnswer::NotFromThisPage.words(),
+    );
     add(
         "BoxStatus::TurnedOff and BoxError::TurnedOff and NoteKind::TurnedOff",
         BoxStatus::TurnedOff.words(),

@@ -17,7 +17,7 @@ use crate::runner::{PosView, StartFailure};
 use crate::say::{
     all_words, invite_lines, iso_utc, members_lines, note_words, notes_lines, pos_lines,
     pos_token_lines, render, screens_markdown, state_lines, unknown_lines, ConsoleAnswer, NoteKind,
-    NoticeWhy,
+    NoticeWhy, PageAnswer,
 };
 use crate::state::{BoxError, BoxStatus};
 
@@ -419,6 +419,12 @@ fn sc_01_no_variant_is_missing() {
         NoteKind::Other,
     ] {
         need(kind_name(k));
+    }
+    for a in [PageAnswer::InvitationHeld, PageAnswer::NotFromThisPage] {
+        need(match a {
+            PageAnswer::InvitationHeld => "PageAnswer::InvitationHeld",
+            PageAnswer::NotFromThisPage => "PageAnswer::NotFromThisPage",
+        });
     }
     for w in [
         NoticeWhy::DoesNotRead,

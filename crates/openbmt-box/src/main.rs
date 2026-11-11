@@ -1,7 +1,8 @@
 //! The Box as a program.
 //!
 //! ```text
-//! openbmt-box <data dir> <bind addr> [--invitation-file <path>] [--no-console]
+//! openbmt-box <data dir> <bind addr> [--invitation-file <path>]
+//!             [--status-page <addr:port>] [--no-console]
 //! ```
 //!
 //! It prints its key's four fingerprint words and its key in hex, then the
@@ -22,6 +23,10 @@
 //! or `quit`. Without a `pos-setup` it reads no POS and keeps the counters'
 //! notices no further than the Box's files.
 //!
+//! With `--status-page` the Box also serves a web page on that address: its
+//! state in words and a box for the invitation while it waits for one
+//! (BX-54 to BX-61). The page is off without the argument.
+//!
 //! With `--no-console` the Box reads no standard input (a service has none)
 //! and an invitation comes only from `--invitation-file`. It runs until the
 //! process is ended by a signal. It installs no handler: SIGTERM and even
@@ -38,7 +43,7 @@ use openbmt_box::say::{
     invite_lines, members_lines, notes_lines, pos_lines, pos_setup_lines, pos_token_lines, render,
     state_lines, unknown_lines, ConsoleAnswer,
 };
-use openbmt_box::{read_invitation_file, BoxError, BoxRunner, PosConfigError};
+use openbmt_box::{read_invitation_file, BoxError, BoxRunner, PageConfig, PosConfigError};
 use openbmt_link::ServerConfig;
 use openbmt_net_io::SystemClock;
 
@@ -48,7 +53,7 @@ fn hex(bytes: &[u8]) -> String {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage: openbmt-box <data dir> <bind addr> [--invitation-file <path>] [--no-console]"
+        "usage: openbmt-box <data dir> <bind addr> [--invitation-file <path>] [--status-page <addr:port>] [--no-console]"
     );
     ExitCode::from(2)
 }
@@ -84,11 +89,16 @@ fn main() -> ExitCode {
         return bad_arguments();
     };
     let mut invitation_file: Option<PathBuf> = None;
+    let mut status_page: Option<String> = None;
     let mut no_console = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--invitation-file" => match args.next() {
                 Some(path) => invitation_file = Some(PathBuf::from(path)),
+                None => return bad_arguments(),
+            },
+            "--status-page" => match args.next() {
+                Some(addr) => status_page = Some(addr),
                 None => return bad_arguments(),
             },
             "--no-console" => no_console = true,
@@ -99,7 +109,17 @@ fn main() -> ExitCode {
         complain(render(&ConsoleAnswer::BadAddress(bind).words()));
         return usage();
     };
-    let runner = match BoxRunner::start(
+    let page_addr = match status_page {
+        Some(text) => match text.parse::<SocketAddr>() {
+            Ok(addr) => Some(addr),
+            Err(_) => {
+                complain(render(&ConsoleAnswer::BadAddress(text).words()));
+                return usage();
+            }
+        },
+        None => None,
+    };
+    let mut runner = match BoxRunner::start(
         dir,
         bind_addr,
         Arc::new(SystemClock),
@@ -117,6 +137,15 @@ fn main() -> ExitCode {
     ));
     say(&format!("key: {}", hex(&runner.device_id().to_bytes())));
     say(&format!("listening: {}", runner.local_addr()));
+    if let Some(addr) = page_addr {
+        match runner.serve_status_page(addr, PageConfig::default()) {
+            Ok(bound) => say(&format!("status page: {bound}")),
+            Err(e) => {
+                complain(render(&e.words()));
+                return ExitCode::FAILURE;
+            }
+        }
+    }
     if let Some(path) = invitation_file {
         match read_invitation_file(&path) {
             Ok(text) => match runner.enter_invitation(&text) {

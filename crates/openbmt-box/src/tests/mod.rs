@@ -9,4 +9,5 @@ mod pos_kit;
 mod runner;
 mod say;
 mod state;
+mod status_page;
 mod vendor;

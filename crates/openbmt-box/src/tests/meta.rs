@@ -13,12 +13,13 @@ const ERRORS: [&str; 7] = [
     include_str!("../pos_config.rs"),
     include_str!("../vendor.rs"),
 ];
-const TEST_SOURCES: [&str; 6] = [
+const TEST_SOURCES: [&str; 7] = [
     include_str!("state.rs"),
     include_str!("runner.rs"),
     include_str!("pos.rs"),
     include_str!("https.rs"),
     include_str!("vendor.rs"),
+    include_str!("status_page.rs"),
     include_str!("../../tests/no_console.rs"),
 ];
 
@@ -43,10 +44,10 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_thirty_one_rules() {
+fn the_rules_file_defines_thirty_nine_rules() {
     let all = all_rules();
-    assert_eq!(all.len(), 31);
-    assert!(all.contains("BX-01") && all.contains("BX-43") && all.contains("BX-53"));
+    assert_eq!(all.len(), 39);
+    assert!(all.contains("BX-01") && all.contains("BX-43") && all.contains("BX-61"));
 }
 
 #[test]
@@ -72,6 +73,27 @@ fn section_four_has_its_ten_rules_and_each_has_tests() {
         assert!(
             sources.matches(&prefix).count() >= 3,
             "{id} has fewer than three tests"
+        );
+    }
+}
+
+#[test]
+fn section_five_b_has_its_eight_rules_and_each_has_tests() {
+    let start = RULES.find("## 5b.").unwrap();
+    let end = RULES.find("## 6.").unwrap();
+    let section: BTreeSet<String> = RULES[start..end]
+        .lines()
+        .filter_map(|l| l.strip_prefix("- **BX-"))
+        .map(|rest| format!("BX-{}", &rest[..2]))
+        .collect();
+    let expected: BTreeSet<String> = (54..=61).map(|n| format!("BX-{n}")).collect();
+    assert_eq!(section, expected);
+    let sources: String = TEST_SOURCES.concat();
+    for id in &expected {
+        let prefix = format!("fn bx_{}_", &id[3..]);
+        assert!(
+            sources.matches(&prefix).count() >= 2,
+            "{id} has fewer than two tests"
         );
     }
 }

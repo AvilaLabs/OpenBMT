@@ -2,7 +2,7 @@
 
 Status: specification for `crates/openbmt-box`. All sections are
 implemented, section 4 (the POS on the Box, and its way to a vendor over
-curl) included.
+curl) and section 5b (the status page) included.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement `docs/DESIGN.md` §5.3 and close the open item of §16: how a Box,
 which has no screen, is paired.
@@ -215,7 +215,8 @@ screen and not a shared computer.
   file holds either the value from before the write or the one after it, and
   a temporary file left behind is overwritten by the next write. A Box run
   as a service (`--no-console`) reads no standard input, takes an invitation
-  only from `--invitation-file` and runs until a signal ends it.
+  only from `--invitation-file` (or from the status page, BX-57, when that
+  is on) and runs until a signal ends it.
 - **BX-53.** The Box listens on the address it is given, IPv4 or IPv6, and
   accepts what that address allows. `0.0.0.0:8986` accepts IPv4 only.
   `[::]:8986` is the IPv6 any-address: on Linux it also accepts IPv4
@@ -497,6 +498,87 @@ These details too leave every rule of section 4 as it is.
   asks for none, and a Clover poll asks for none: Clover's payments come with
   its orders. A payments request that is refused fails the poll like any
   other (BX-46 to BX-48).
+
+## 5b. The status page
+
+A store that lists the Box on a home server asks that the app open to a page
+in a browser. The Box has none of its own, and an invitation has been a file
+copied in by hand. The Box can serve one small page, off unless it is asked.
+The page is a convenience for the person who runs the Box: it shows what the
+console's `state` shows, and takes the invitation that the file takes. It
+adds no way to do anything else.
+
+- **BX-54.** The page is plain HTTP/1.1 written with the standard library
+  alone, read by a strict reader of its own. A request is its request line
+  and headers (at most 8 KiB, every line ending in CR LF, printable ASCII
+  only, no folded line, none of `Host`, `Origin`, `Referer` or
+  `Content-Length` twice, no `Transfer-Encoding` or `Content-Encoding`) and a
+  body of at most 1 KiB. The version is `HTTP/1.1` and `Host` is present.
+  The only requests answered are `GET /` and `POST /invitation`; the target
+  is matched exactly, with no query. Anything else is answered with the
+  status alone and a fixed short text, no detail: 400 for a request that does
+  not read, 404 for another target, 405 (with `Allow`) for another method on
+  these two, 413 for a head or body over its limit. A `GET` has no body. A
+  `POST` has a `Content-Length` and the type
+  `application/x-www-form-urlencoded`. One request is served for each
+  connection (`Connection: close`). A request that is not whole 5 seconds
+  after the connection was made is answered 400 and closed, and no more than
+  16 connections are served at once; one more is closed at once.
+- **BX-55.** `GET /` answers one self-contained HTML page: no script, no
+  external font, image or style, and a small inline style that suits light and
+  dark and a phone. It shows the Box's state in the words of the console
+  (`say::Words`; SC-01 to SC-12): waiting for an invitation, invitation open,
+  paired (with the shop's four short words) or turned off, each with what it
+  means and what to do next. It also shows the version, the address the
+  devices give the Box as its relay (the host the visitor used and the
+  relay's port), how many devices are on the list the relay serves, and the
+  words for the Box's last note, if any. While the Box waits for an
+  invitation it holds the form that posts one.
+- **BX-56.** Every answer carries `Content-Security-Policy: default-src
+  'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors
+  'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+  no-referrer`, `Cache-Control: no-store` and `Connection: close`, and a
+  `Content-Length` that is the body's.
+- **BX-57.** `POST /invitation` takes the form field `invitation` and gives
+  it to the Box by the path the invitation file takes (BX-10 reading, check
+  characters first; BX-12 holding and claim), and only while the Box is
+  waiting for an invitation. A Box that holds one that has not run out, or
+  is paired, or is turned off, refuses with words and changes nothing. The
+  answer is the page with the outcome in words above the state: taken (the
+  claim is on offer), not read or wrong check characters (422), already
+  held or already paired (409). A body that is not well formed, or has the
+  field twice, is a 400.
+- **BX-58.** A `POST` is refused (403, with words) unless its `Origin`
+  header, or when there is none its `Referer`, names the same host and port
+  as `Host`, compared without regard to case. An `Origin` that is `null`,
+  has a path or user information, or is not `http` or `https`, does not
+  match; with neither header the request is refused.
+- **BX-59.** No page holds a key, an invitation (whole or in part), a POS
+  token, an address of a device, or the Box's own key. The shop is shown by
+  four words derived from its owner root, and the last note by its heading
+  and its two sentences only, never its detail. All text is escaped.
+- **BX-60.** The page runs on its own listener and its own threads. A thread
+  takes the Box's state only after a whole request has been read, and only
+  for the one read or the one entry, so a connection that sends nothing,
+  or sends slowly, uses only the page's own slots. The relay serves, and
+  the Box pairs, while the page is full of slow connections.
+- **BX-61.** The page is off unless the Box is started with `--status-page
+  <addr:port>`, which names where it listens (IPv4 or IPv6, as BX-53). The
+  Box prints `status page: <addr>` when it is serving. An address that is not
+  an address and a port, or that cannot be bound, stops the Box at the
+  start, saying so.
+
+What the code fixes. The shop's four words are those of the owner root's
+fingerprint (the ones the Key app shows for it); they let the keeper tell two
+shops apart and are not the root. The count is of the devices on the relay's
+member list (BX-22), not of connections: the relay's server does not count
+them. The page takes an invitation only from the state `Unpaired`; the
+console's `invite` still replaces one that is open (BX-12), so a page that
+anyone on the network can reach cannot push out the invitation the keeper
+has just entered. The invitation file keeps working beside the page. The
+page is plain HTTP: whoever can read the network between the browser and the
+Box can read the invitation as it is typed, which the Umbrel and StartOS
+hosts answer with their own login and TLS in front of it.
 
 ## 6. What these rules do not do
 

@@ -37,7 +37,7 @@ impl Clock for TestClock {
     }
 }
 
-fn start_in(dir: &TempDir, clock: &Arc<TestClock>) -> Result<BoxRunner, StartFailure> {
+pub(super) fn start_in(dir: &TempDir, clock: &Arc<TestClock>) -> Result<BoxRunner, StartFailure> {
     BoxRunner::start(
         dir.path(),
         "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
@@ -46,13 +46,13 @@ fn start_in(dir: &TempDir, clock: &Arc<TestClock>) -> Result<BoxRunner, StartFai
     )
 }
 
-fn start(dir: &TempDir) -> (BoxRunner, Arc<TestClock>) {
+pub(super) fn start(dir: &TempDir) -> (BoxRunner, Arc<TestClock>) {
     let clock = TestClock::new(NOW);
     let runner = start_in(dir, &clock).unwrap();
     (runner, clock)
 }
 
-fn connect(r: &BoxRunner) -> Client {
+pub(super) fn connect(r: &BoxRunner) -> Client {
     Client::connect(
         &Route::Direct(r.local_addr()),
         Some(&r.device_id()),
@@ -62,7 +62,7 @@ fn connect(r: &BoxRunner) -> Client {
 }
 
 /// Wait up to ten seconds for `ok` to hold.
-fn eventually(what: &str, mut ok: impl FnMut() -> bool) {
+pub(super) fn eventually(what: &str, mut ok: impl FnMut() -> bool) {
     let until = Instant::now() + Duration::from_secs(10);
     while Instant::now() < until {
         if ok() {
@@ -85,7 +85,7 @@ fn pair(r: &BoxRunner, inv: &Invitation, settings: &SignedSettings) -> Result<()
     c.welcome(&welcome.to_bytes(), &settings.to_bytes())
 }
 
-fn pair_ok(r: &BoxRunner) {
+pub(super) fn pair_ok(r: &BoxRunner) {
     let inv = invitation(5);
     let s = sign_both(settings_with(1, &r.device_id()));
     pair(r, &inv, &s).unwrap();
@@ -121,7 +121,7 @@ fn sealed_to(
     seal(from, from_role, to, to_role, n, kind, content, &mut rng).unwrap()
 }
 
-fn mailbox(r: &BoxRunner, who: &Identity) -> Result<(), ClientError> {
+pub(super) fn mailbox(r: &BoxRunner, who: &Identity) -> Result<(), ClientError> {
     connect(r).make_mailbox(who)
 }
 
@@ -460,7 +460,7 @@ fn bx_22_devices_on_the_list_pass_sealed_messages_through_the_box_and_others_can
 
 /// The owner sends settings to the Box as a sealed message; the relay needs
 /// the Box's mailbox first, which the Box makes on its own.
-fn send_settings(r: &BoxRunner, number: u64, settings: &SignedSettings) {
+pub(super) fn send_settings(r: &BoxRunner, number: u64, settings: &SignedSettings) {
     let m = sealed_to(
         &owner(),
         Role::Owner,

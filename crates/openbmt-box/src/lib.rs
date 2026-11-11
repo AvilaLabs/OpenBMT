@@ -18,6 +18,9 @@
 //!   names the vendor, and the vendor's reader behind the connector (BX-44
 //!   to BX-49).
 //!
+//! - [`status_page`]: the optional web page that shows the Box's state and
+//!   takes an invitation, on its own listener (BX-54 to BX-61).
+//!
 //! The Box holds no bitcoin key and cannot move funds (BX-04); what it says
 //! is a hint to the other devices.
 //!
@@ -46,6 +49,7 @@ pub mod pos_config;
 pub mod runner;
 pub mod say;
 pub mod state;
+pub mod status_page;
 pub mod vendor;
 
 #[cfg(test)]
@@ -62,4 +66,5 @@ pub use state::{
     BoxCore, BoxError, BoxStatus, SettingsTaken, INVITATION_FILE, INVITE_SECS, KEY_FILE,
     MAX_MEMBERS, MAX_TOKEN_BYTES, POS_TOKEN_FILE, ROOTS_FILE, SETTINGS_FILE,
 };
+pub use status_page::{PageBackend, PageConfig, PageView, StatusPage};
 pub use vendor::VendorConnector;
