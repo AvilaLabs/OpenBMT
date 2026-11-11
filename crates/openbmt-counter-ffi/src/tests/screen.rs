@@ -116,7 +116,7 @@ fn every_rule_string_the_source_makes_has_words_of_its_own() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut code = String::new();
     for name in [
-        "call.rs", "codec.rs", "error.rs", "host.rs", "jni.rs", "pay.rs",
+        "call.rs", "codec.rs", "error.rs", "host.rs", "jni.rs", "pay.rs", "rates.rs", "shop.rs",
     ] {
         let text = std::fs::read_to_string(dir.join(name)).expect("readable");
         code.push_str(text.split("\n#[cfg(test)]").next().expect("a first part"));

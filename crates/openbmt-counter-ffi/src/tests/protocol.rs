@@ -49,6 +49,10 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (23, "add_batch"),
         (30, "status"),
         (31, "notes"),
+        (40, "rate_sources"),
+        (41, "rate_parse"),
+        (42, "rate_combine"),
+        (43, "settings_read"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

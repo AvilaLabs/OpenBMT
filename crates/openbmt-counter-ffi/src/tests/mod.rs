@@ -8,6 +8,7 @@ mod kotlin;
 mod lock;
 mod pay;
 mod protocol;
+mod rates;
 mod screen;
 mod strict;
 pub(crate) mod wire;

@@ -75,6 +75,10 @@ private const val OP_CHECK_IN = 22
 private const val OP_ADD_BATCH = 23
 private const val OP_STATUS = 30
 private const val OP_NOTES = 31
+private const val OP_RATE_SOURCES = 40
+private const val OP_RATE_PARSE = 41
+private const val OP_RATE_COMBINE = 42
+private const val OP_SETTINGS_READ = 43
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -250,6 +254,27 @@ class Status(
     val refusedBelowMinimum: Long,
     val stopped: Boolean,
 )
+
+/** One source of the price table (RT-01): where the app fetches, and what it asks for. */
+class RateSource(val id: String, val url: String, val currency: String, val initial: String)
+
+/**
+ * One price from one source (RT-45): [fetchedAt] is the app's own clock when
+ * the whole reply had been read, [minorPerBtc] is in minor units of the
+ * source's currency.
+ */
+data class Sample(val source: String, val fetchedAt: Long, val minorPerBtc: Long)
+
+/** What the app needs from the shop's settings before the node runs. */
+class ShopSettings(
+    val version: Long,
+    val torOn: Boolean,
+    val customerWifi: Boolean,
+    val minSaleSats: Long,
+)
+
+/** The rate a sale is opened with, and its source as the counter takes it (CR-57). */
+class Rate(val rate: Long, val sourceLabel: String, val sourceFetchedAt: Long)
 
 // ---- the encoding ----------------------------------------------------------------------
 
@@ -513,6 +538,14 @@ private fun Reader.refundRow(): RefundRow =
         words(),
     )
 
+internal fun Reader.rateSource(): RateSource = RateSource(string(), string(), string(), string())
+
+internal fun Reader.sample(): Sample = Sample(string(), u64(), u64())
+
+internal fun Reader.shopSettings(): ShopSettings = ShopSettings(u32(), bool(), bool(), u64())
+
+internal fun Reader.rate(): Rate = Rate(u64(), string(), u64())
+
 private fun Reader.heartbeatOutcome(): HeartbeatOutcome =
     HeartbeatOutcome(bool(), option { u64() }, words(), reports())
 
@@ -560,15 +593,62 @@ internal fun decodeResponse(response: ByteArray): Reader {
 
 // No lock is taken here: the library is called from the pump thread and the
 // screen thread at the same time, and takes care of that itself.
-private fun call(op: Int, handle: Long, fill: (Writer) -> Unit = {}): Reader {
-    val response = Native.call(requestFrame(op, handle, fill))
-        ?: throw CounterException("response-null", "the library gave no response", 4)
-    return decodeResponse(response)
-}
+private fun send(request: ByteArray): ByteArray =
+    Native.call(request) ?: throw CounterException("response-null", "the library gave no response", 4)
+
+private fun call(op: Int, handle: Long, fill: (Writer) -> Unit = {}): Reader =
+    decodeResponse(send(requestFrame(op, handle, fill)))
 
 /** A call whose result is nothing. */
 private fun callUnit(op: Int, handle: Long, fill: (Writer) -> Unit = {}) {
     call(op, handle, fill).end()
+}
+
+/** The request frame of `rate_parse`. */
+internal fun rateParseFrame(source: String, response: ByteArray, fetchedAt: Long): ByteArray =
+    requestFrame(OP_RATE_PARSE, 0) { it.string(source).bytes(response).u64(fetchedAt) }
+
+/** The request frame of `rate_combine`. */
+internal fun rateCombineFrame(samples: List<Sample>, now: Long): ByteArray =
+    requestFrame(OP_RATE_COMBINE, 0) {
+        it.list(samples) { s -> it.string(s.source).u64(s.fetchedAt).u64(s.minorPerBtc) }.u64(now)
+    }
+
+/**
+ * The price ops work on no node: the app fetches the replies itself on the
+ * schedule of RT-40 to RT-45 and hands the bytes over. A refusal is a
+ * [CounterException] with the words of `openbmt-rates`.
+ */
+object Rates {
+    /** The table of sources (RT-01). */
+    fun sources(): List<RateSource> {
+        val r = call(OP_RATE_SOURCES, 0)
+        return r.list { r.rateSource() }.also { r.end() }
+    }
+
+    /** The price in the reply of the source [source], stamped [fetchedAt] (RT-45). */
+    fun parse(source: String, response: ByteArray, fetchedAt: Long): Sample {
+        val r = decodeResponse(rateParseFrame(source, response, fetchedAt).let(::send))
+        return r.sample().also { r.end() }
+    }
+
+    /** The one rate of the [samples] at [now] (RT-30 to RT-38). */
+    fun combine(samples: List<Sample>, now: Long): Rate {
+        val r = decodeResponse(send(rateCombineFrame(samples, now)))
+        return r.rate().also { r.end() }
+    }
+}
+
+/**
+ * A look at the shop's signed settings before the node starts, to know
+ * whether Tor is on. The settings are read, not verified: `start` verifies
+ * the same bytes.
+ */
+object Shop {
+    fun settings(bytes: ByteArray): ShopSettings {
+        val r = decodeResponse(send(requestFrame(OP_SETTINGS_READ, 0) { it.bytes(bytes) }))
+        return r.shopSettings().also { r.end() }
+    }
 }
 
 /**

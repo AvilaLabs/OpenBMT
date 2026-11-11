@@ -16,6 +16,11 @@
 //!   node and why a screen call never waits longer than a pump slice.
 //! - [`pay`] makes the payment request the customer scans (CR-83): the BIP
 //!   21 URI of a sale and its QR modules from `openbmt-qr`.
+//! - [`rates`] converts the price of bitcoin: the table of sources, the
+//!   reading of one reply and one rate made from samples. The app fetches
+//!   (`docs/RATE-RULES.md`, RT-40 to RT-45); the library decides.
+//! - [`shop`] reads the shop's signed settings before the node starts (Tor
+//!   on or off, the smallest sale); `start` checks the signatures.
 //! - Errors are one enum, [`CounterError`], with a `rule`, a `text` and the
 //!   `Words` of what a person is shown. A panic in any call is caught,
 //!   becomes `CounterError::Internal` and poisons the node.
@@ -50,7 +55,9 @@ pub mod host;
 #[cfg(any(target_os = "android", feature = "jni"))]
 mod jni;
 pub mod pay;
+pub mod rates;
 mod say;
+pub mod shop;
 mod views;
 
 #[cfg(test)]
@@ -63,7 +70,9 @@ pub use call::{
 pub use error::{CounterError, Kind};
 pub use host::{Entry, MAX_WAIT_MS, SLICE_MS};
 pub use pay::{btc_amount, request_texts, Payment};
+pub use rates::{RateCombineArgs, RateParseArgs, RateSourceView, RateView, SampleView};
 pub use say::{all_words, words_for};
+pub use shop::SettingsView;
 pub use views::{
     ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome, OpenArgs,
     OpenedView, OverrideArgs, PumpView, RefundArgs, RefundAskView, RefundRow, RefundStateView,

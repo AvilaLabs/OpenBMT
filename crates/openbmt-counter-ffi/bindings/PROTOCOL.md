@@ -75,6 +75,10 @@ ops run on another; it waits for at most 250 ms.
  23 add_batch        handle node  args (u64, list<u8>) -> ()
  30 status           handle node  args () -> StatusView
  31 notes            handle node  args () -> list<string>
+ 40 rate_sources     handle zero  args () -> list<RateSourceView>
+ 41 rate_parse       handle zero  args RateParseArgs -> SampleView
+ 42 rate_combine     handle zero  args RateCombineArgs -> RateView
+ 43 settings_read    handle zero  args list<u8> -> SettingsView
 ```
 
 ## Types
@@ -109,4 +113,10 @@ RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: opti
 HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, reports: list<ReportView>
 HealthView: record: healthy: bool, behind: bool, words: Words
 StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool
+RateSourceView: record: id: string, url: string, currency: string, initial: string
+RateParseArgs: record: source: string, response: list<u8>, fetched_at: u64
+SampleView: record: source: string, fetched_at: u64, minor_per_btc: u64
+RateCombineArgs: record: samples: list<SampleView>, now: u64
+RateView: record: rate: u64, source_label: string, source_fetched_at: u64
+SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64
 ```

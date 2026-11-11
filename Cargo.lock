@@ -393,6 +393,7 @@ dependencies = [
  "openbmt-counter-node",
  "openbmt-net-io",
  "openbmt-qr",
+ "openbmt-rates",
  "openbmt-watch",
 ]
 

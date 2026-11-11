@@ -149,6 +149,10 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "HeartbeatOutcome(bool(), option { u64() }, words(), reports())",
         "u32(), u32(), option { Health(bool(), bool(), words()) }, u32s(), u64(), bool(),",
         "Report.BooksFinal(u32(), u64(), string(), u64())",
+        "RateSource(string(), string(), string(), string())",
+        "Sample(string(), u64(), u64())",
+        "Rate(u64(), string(), u64())",
+        "ShopSettings(u32(), bool(), bool(), u64())",
     ] {
         assert!(text.contains(needle), "{needle}");
     }
@@ -161,6 +165,12 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, reports: list<ReportView>",
         "StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool",
         "HealthView: record: healthy: bool, behind: bool, words: Words",
+        "RateSourceView: record: id: string, url: string, currency: string, initial: string",
+        "RateParseArgs: record: source: string, response: list<u8>, fetched_at: u64",
+        "SampleView: record: source: string, fetched_at: u64, minor_per_btc: u64",
+        "RateCombineArgs: record: samples: list<SampleView>, now: u64",
+        "RateView: record: rate: u64, source_label: string, source_fetched_at: u64",
+        "SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64",
     ] {
         assert!(protocol.contains(line), "{line}");
     }
@@ -250,11 +260,26 @@ fn the_start_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
     crate::codec::Put::put(&sample, &mut fields);
     assert_eq!(frame(1, 0, &fields), bytes);
     // The Kotlin harness holds the same literal.
+    let kotlin_hex = harness_hex("START_FRAME_HEX");
+    assert_eq!(kotlin_hex, START_FRAME_HEX);
+}
+
+const RATE_PARSE_HEX: &str =
+    "4f424d6d0129000000000000000000060000006b72616b656e020000007b7d0900000000000000";
+const RATE_COMBINE_HEX: &str =
+    "4f424d6d012a00000000000000000002000000060000006b72616b656e01000000000000003a3c70\
+000000000008000000636f696e626173650200000000000000523b7000000000000300000000000000";
+
+/// The pieces of the string constant `name` of the Kotlin harness, joined.
+fn harness_hex(name: &str) -> String {
     let harness = read(bindings("tests/ProtocolDecoderTest.kt"));
-    let kotlin_hex: String = harness
-        .split("START_FRAME_HEX =")
+    harness
+        .split(&format!("const val {name} ="))
         .nth(1)
         .expect("the constant")
+        .split("private const val")
+        .next()
+        .expect("up to the next constant")
         .split("@JvmStatic")
         .next()
         .expect("up to main")
@@ -262,6 +287,32 @@ fn the_start_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
         .enumerate()
         .filter(|(i, _)| i % 2 == 1)
         .map(|(_, s)| s)
-        .collect();
-    assert_eq!(kotlin_hex, START_FRAME_HEX);
+        .collect()
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[test]
+fn the_price_requests_are_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
+    let parse = frame(41, 0, &W::new().string("kraken").bytes(b"{}").u64(9).0);
+    assert_eq!(hex(&parse), RATE_PARSE_HEX);
+    let combine = frame(
+        42,
+        0,
+        &W::new()
+            .u32(2)
+            .string("kraken")
+            .u64(1)
+            .u64(7_355_450)
+            .string("coinbase")
+            .u64(2)
+            .u64(7_355_218)
+            .u64(3)
+            .0,
+    );
+    assert_eq!(hex(&combine), RATE_COMBINE_HEX);
+    assert_eq!(harness_hex("RATE_PARSE_HEX"), RATE_PARSE_HEX);
+    assert_eq!(harness_hex("RATE_COMBINE_HEX"), RATE_COMBINE_HEX);
 }

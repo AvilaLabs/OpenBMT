@@ -9,6 +9,14 @@ object ProtocolDecoderTest {
         "4f424d6d01010000000000000000000100000064030100000000000000010000000101000000020100000003" +
             "010000000405000000010000000600010100000070010000000100000061"
 
+    /** The `rate_parse` and `rate_combine` requests, as the Rust test of the same name writes them. */
+    private const val RATE_PARSE_HEX =
+        "4f424d6d0129000000000000000000060000006b72616b656e020000007b7d0900000000000000"
+    private const val RATE_COMBINE_HEX =
+        "4f424d6d012a00000000000000000002000000060000006b72616b656e01000000000000003a3c70" +
+            "000000000008000000636f696e626173650200000000000000523b70000000000003000000000000" +
+            "00"
+
     @JvmStatic
     fun main(args: Array<String>) {
         val success = decodeResponse(header(0))
@@ -33,6 +41,37 @@ object ProtocolDecoderTest {
 
         screens()
         requests()
+        rates()
+    }
+
+    // ---- the price ops ----
+
+    private fun rates() {
+        val sources = decodeResponse(
+            header(0, Writer().u32(1).string("kraken").string("https://k.example/").string("USD").string("k").toByteArray()),
+        ).let { r -> r.list { r.rateSource() }.also { r.end() } }
+        check(sources.size == 1 && sources[0].id == "kraken" && sources[0].initial == "k" && sources[0].currency == "USD")
+        val sample = decodeResponse(header(0, Writer().string("kraken").u64(9).u64(7_355_450).toByteArray()))
+            .let { r -> r.sample().also { r.end() } }
+        check(sample == Sample("kraken", 9, 7_355_450))
+        val rate = decodeResponse(header(0, Writer().u64(7_355_218).string("med.kc").u64(5).toByteArray()))
+            .let { r -> r.rate().also { r.end() } }
+        check(rate.rate == 7_355_218L && rate.sourceLabel == "med.kc" && rate.sourceFetchedAt == 5L)
+        val shop = decodeResponse(header(0, Writer().u32(3).u8(1).u8(0).u64(26_000).toByteArray()))
+            .let { r -> r.shopSettings().also { r.end() } }
+        check(shop.version == 3L && shop.torOn && !shop.customerWifi && shop.minSaleSats == 26_000L)
+        rejects("a bool in the settings") {
+            decodeResponse(header(0, Writer().u32(3).u8(2).u8(0).u64(1).toByteArray())).shopSettings()
+        }
+        rejects("trailing bytes in a rate") {
+            decodeResponse(header(0, Writer().u64(1).string("a").u64(5).u8(0).toByteArray())).let { it.rate(); it.end() }
+        }
+        check(hex(rateParseFrame("kraken", byteArrayOf(0x7b, 0x7d), 9)) == RATE_PARSE_HEX) { hex(rateParseFrame("kraken", byteArrayOf(0x7b, 0x7d), 9)) }
+        val samples = listOf(Sample("kraken", 1, 7_355_450), Sample("coinbase", 2, 7_355_218))
+        check(hex(rateCombineFrame(samples, 3)) == RATE_COMBINE_HEX) { hex(rateCombineFrame(samples, 3)) }
+        rejects("the refusal of a rate", "RT-37") {
+            throw CounterException("RT-37", "no price is fresh enough")
+        }
     }
 
     // ---- the results ----

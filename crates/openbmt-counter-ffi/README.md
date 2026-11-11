@@ -66,6 +66,10 @@ text in `text`.
 | 23 | add batch | now, signed batch | outcome |
 | 30 | status | none | health, heights, sales, refused below minimum |
 | 31 | notes | none | notes |
+| 40 | rate sources | none | the table: id, URL, currency, initial |
+| 41 | rate parse | source id, reply bytes, fetched at | a sample, or the refusal with its words |
+| 42 | rate combine | samples, now | the rate, label and time for `open`, or the refusal with its words |
+| 43 | settings read | signed settings | version, Tor on, customer Wi-Fi, smallest sale |
 
 ## Threads
 
@@ -78,6 +82,16 @@ call before it. The node's clock is the app's: every call that takes a
 time raises it, and it never goes back. Tests in `src/tests/lock.rs` cover
 the cap, the early return on a report and a sale paid under a live pump
 loop.
+
+## Price and settings
+
+Ops 40 to 43 work on no node (handle 0). The app fetches the price itself
+on the schedule of `docs/RATE-RULES.md` (RT-40 to RT-45) and hands the
+bytes to `rate_parse`; `rate_combine` makes the samples into the rate that
+`open` takes, so no JSON is read in the app. A refusal of either is an
+error response whose words are those of `openbmt-rates`. `settings_read`
+reads the shop's signed settings before `start` so that the app can tell
+whether Tor is on; it does not verify them, and `start` does.
 
 ## Storage
 

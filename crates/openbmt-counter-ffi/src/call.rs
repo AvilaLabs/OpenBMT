@@ -36,6 +36,9 @@
 //!   `override_sale`); 16 to 19 refunds; 20 to 23 what the owner sends
 //!   (`heartbeat`, `command`, `check_in`, `add_batch`).
 //! - 30 `status`, 31 `notes`.
+//! - 40 to 42 the price of bitcoin (`rate_sources`, `rate_parse`,
+//!   `rate_combine`) and 43 `settings_read`, which work on no node
+//!   (handle 0).
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -53,7 +56,12 @@ use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::error::{internal, refused_by, wrong_state, CounterError};
 use crate::host::{real_spawn, Entry, Spawn};
 use crate::pay::Payment;
+use crate::rates::{
+    rate_combine, rate_parse, rate_sources, RateCombineArgs, RateParseArgs, RateSourceView,
+    RateView, SampleView,
+};
 use crate::say::{TONES, WHOS};
+use crate::shop::{settings_read, SettingsView};
 use crate::views::{
     put_words, ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome,
     OpenArgs, OpenedView, OverrideArgs, PumpView, RefundArgs, RefundAskView, RefundRow,
@@ -339,6 +347,14 @@ fn build_ops() -> Vec<Op> {
         }),
         op(30, "status", Node, |c, ()| c.entry()?.status()),
         op(31, "notes", Node, |c, ()| c.entry()?.notes()),
+        op(40, "rate_sources", Zero, |_, ()| Ok(rate_sources())),
+        op(41, "rate_parse", Zero, |_, a: RateParseArgs| rate_parse(a)),
+        op(42, "rate_combine", Zero, |_, a: RateCombineArgs| {
+            rate_combine(a)
+        }),
+        op(43, "settings_read", Zero, |_, bytes: Vec<u8>| {
+            settings_read(bytes)
+        }),
     ]
 }
 
@@ -488,6 +504,12 @@ fn definitions() -> Vec<TypeDef> {
         HeartbeatOutcome::define(),
         HealthView::define(),
         StatusView::define(),
+        RateSourceView::define(),
+        RateParseArgs::define(),
+        SampleView::define(),
+        RateCombineArgs::define(),
+        RateView::define(),
+        SettingsView::define(),
     ]
 }
 

@@ -24,6 +24,7 @@ openbmt-counter-node = { path = "../openbmt-counter-node" }
 openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-watch = { path = "../openbmt-watch" }
 openbmt-qr = { path = "../openbmt-qr" }
+openbmt-rates = { path = "../openbmt-rates" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 # The JNI types, nothing else. 0.3.0 has no dependencies of its own; the
 # later releases (0.3.1, 0.4) depend on a macro crate and syn.

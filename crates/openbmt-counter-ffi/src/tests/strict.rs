@@ -98,6 +98,37 @@ fn corpus(handle: u64) -> Vec<Vec<u8>> {
     ]
 }
 
+/// Valid requests of the ops that work on no node.
+fn price_corpus() -> Vec<Vec<u8>> {
+    vec![
+        frame(43, 0, &W::new().bytes(&signed_settings().to_bytes()).0),
+        frame(40, 0, &[]),
+        frame(
+            41,
+            0,
+            &W::new()
+                .string("kraken")
+                .bytes(br#"{"error":[],"result":{"X":{"c":["73554.50"]}}}"#)
+                .u64(T0)
+                .0,
+        ),
+        frame(
+            42,
+            0,
+            &W::new()
+                .u32(2)
+                .string("kraken")
+                .u64(T0)
+                .u64(7_355_450)
+                .string("coinbase")
+                .u64(T0)
+                .u64(7_355_218)
+                .u64(T0)
+                .0,
+        ),
+    ]
+}
+
 /// No response is a fault of the library, and an error response has words
 /// that pass the rules of SC-12.
 fn assert_framed(response: &[u8], what: &str) -> bool {
@@ -116,6 +147,7 @@ fn assert_framed(response: &[u8], what: &str) -> bool {
 fn every_cut_of_a_valid_request_is_refused() {
     let (rig, handle) = ready();
     let mut all = corpus(handle);
+    all.extend(price_corpus());
     all.push(start_request(&rig.dir()));
     for request in all {
         for n in 0..request.len() {
@@ -139,7 +171,7 @@ fn every_cut_of_a_valid_request_is_refused() {
 #[test]
 fn bytes_left_over_after_the_last_field_are_refused() {
     let (rig, handle) = ready();
-    for mut request in corpus(handle) {
+    for mut request in corpus(handle).into_iter().chain(price_corpus()) {
         request.push(0);
         let response = dispatch(rig.registry(), &request);
         assert!(!assert_framed(&response, "trailing byte"));
@@ -151,7 +183,7 @@ fn bytes_left_over_after_the_last_field_are_refused() {
 #[test]
 fn every_flipped_bit_is_refused_or_handled_without_a_panic() {
     let (rig, handle) = ready();
-    for request in corpus(handle) {
+    for request in corpus(handle).into_iter().chain(price_corpus()) {
         for i in 0..request.len() {
             for bit in 0..8 {
                 let mut flipped = request.clone();
