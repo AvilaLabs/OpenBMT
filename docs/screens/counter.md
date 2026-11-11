@@ -47,6 +47,7 @@ by hand. To write it again, run the test
 | CheckLine::BoxAndLight | Your Box and light check | Your Box and the counter's light check both saw this payment. | Nothing to do. | nobody | CR-105 |
 | CheckLine::BoxOnly | Your Box reports it | Only your Box reported this payment; the light check has not seen it from enough of the network. | Nothing to do. The counter keeps watching for the light check. | nobody | CR-105 |
 | CheckLine::LightningFinal | Lightning, final | This payment arrived over Lightning, through the shop's node, so no block is needed. | Nothing to do. | nobody | CR-105 |
+| Screen::tipChoose | Add a tip? | The sale is $12.50. A tip goes to the shop with it. | Choose a tip, or No tip. | the customer | CR-188 |
 | Screen::stuck | Slow to confirm | The payment was seen a long time ago and is still not in a block. | Tell the owner that this payment is slow; the owner can look at it on the owner's phone. | the cashier | CR-18 |
 | Screen::late | Late payment | A payment arrived after this sale had ended. | Nothing to do. The counter has told the owner, and the customer may be owed a refund. | nobody | CR-19 |
 | OpenRefused::Removed | This counter was removed | The owner removed this counter from the shop, so it cannot start a sale. | Take another kind of payment. Ask the owner: this counter is no longer on the shop's list. | the cashier | CR-165 |
@@ -54,6 +55,7 @@ by hand. To write it again, run the test
 | OpenRefused::Unhealthy | Cannot take bitcoin now | This counter cannot check payments right now. | Take another kind of payment. Tell the owner: the counter cannot check payments. | the cashier | CR-01 |
 | OpenRefused::ZeroAmount | Sale needs an amount | The sale has no amount, so no payment code was made. | Enter the amount and start the sale again. | the cashier | CR-05 |
 | OpenRefused::AmountTooLarge | Sale amount too large | That is more than any real payment could be, so the sale was not started. | Check the amount and enter it again. | the cashier | CR-05 |
+| OpenRefused::TipTooLarge | Tip not accepted | The tip is more than the sale itself, so it was not added. | Type a smaller tip, or choose No tip. | the cashier | CR-190 |
 | OpenRefused::BelowDust | Sale too small for bitcoin | The sale is only 600 sats, too small to be worth sending by bitcoin. | Take another kind of payment. | the cashier | CR-17 |
 | OpenRefused::BelowMinimum | Below the bitcoin minimum | This shop takes bitcoin for sales of 26,000 sats and up. | Take another kind of payment. | the cashier | CR-75 |
 | OpenRefused::StaleRate | Price is too old | The exchange price is too old to start a sale with. | Wait for a new price, or check the internet connection. If it stays old, tell the owner. | the cashier | CR-58 |

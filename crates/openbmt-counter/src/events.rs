@@ -35,6 +35,9 @@ const TAG_REFUND_REQUESTED: u8 = 16;
 const TAG_REFUND_WITHDRAWN: u8 = 17;
 const TAG_REFUND_PAID_IN_CASH: u8 = 18;
 const TAG_PAID_BY_LIGHTNING: u8 = 19;
+/// An `Opened` record of a sale with a tip (CR-189). A sale without one is
+/// written with [`TAG_OPENED`], byte for byte as before.
+const TAG_OPENED_WITH_TIP: u8 = 20;
 const TAG_LATE_LIGHTNING: u8 = 21;
 // CR-120: the two refund records that carry the chain height. A record
 // without a known height keeps its earlier tag and bytes.
@@ -50,8 +53,12 @@ pub enum Event {
         index: u32,
         /// When.
         at: u64,
-        /// The amount in the shop's currency.
+        /// The amount of the sale itself in the shop's currency, without the
+        /// tip.
         amount: Amount,
+        /// The tip the customer chose, in minor units; 0 for none (CR-189).
+        /// The first quote asked for the amount and the tip together.
+        tip: Amount,
         /// The currency.
         currency: Currency,
         /// The satoshis the first quote asked for.
@@ -540,7 +547,15 @@ impl Event {
 
     fn head(&self) -> (u8, u32, u64) {
         match self {
-            Self::Opened { index, at, .. } => (TAG_OPENED, *index, *at),
+            Self::Opened { index, at, tip, .. } => (
+                if tip.0 == 0 {
+                    TAG_OPENED
+                } else {
+                    TAG_OPENED_WITH_TIP
+                },
+                *index,
+                *at,
+            ),
             Self::Requoted { index, at, .. } => (TAG_REQUOTED, *index, *at),
             Self::Expired { index, at } => (TAG_EXPIRED, *index, *at),
             Self::Cancelled { index, at, .. } => (TAG_CANCELLED, *index, *at),
@@ -598,6 +613,7 @@ impl Event {
         match self {
             Self::Opened {
                 amount,
+                tip,
                 currency,
                 needs_sats,
                 minor_per_btc,
@@ -610,6 +626,9 @@ impl Event {
                 out.extend_from_slice(&needs_sats.to_le_bytes());
                 out.extend_from_slice(&minor_per_btc.to_le_bytes());
                 write_source(&mut out, source);
+                if tip.0 != 0 {
+                    out.extend_from_slice(&tip.0.to_le_bytes());
+                }
                 write_by(&mut out, by);
             }
             Self::Cancelled { by, .. } => write_by(&mut out, by),
@@ -774,17 +793,38 @@ impl Event {
         let index = r.u32_le()?;
         let at = r.u64_le()?;
         let event = match tag {
-            TAG_OPENED => Self::Opened {
-                index,
-                at,
-                amount: Amount(r.u64_le()?),
-                currency: Currency::new(r.array::<3>()?)
-                    .ok_or(DecodeError::NonCanonical("a currency code is not valid"))?,
-                needs_sats: r.u64_le()?,
-                minor_per_btc: r.u64_le()?,
-                source: read_source(&mut r)?,
-                by: read_by(&mut r)?,
-            },
+            TAG_OPENED | TAG_OPENED_WITH_TIP => {
+                let amount = Amount(r.u64_le()?);
+                let currency = Currency::new(r.array::<3>()?)
+                    .ok_or(DecodeError::NonCanonical("a currency code is not valid"))?;
+                let needs_sats = r.u64_le()?;
+                let minor_per_btc = r.u64_le()?;
+                let source = read_source(&mut r)?;
+                // A record from before tips, and one of a sale without a
+                // tip, hold none: the tip of 0 (CR-189).
+                let tip = if tag == TAG_OPENED_WITH_TIP {
+                    let tip = r.u64_le()?;
+                    if tip == 0 {
+                        return Err(DecodeError::NonCanonical(
+                            "a record of a sale with a tip holds a tip of nothing",
+                        ));
+                    }
+                    Amount(tip)
+                } else {
+                    Amount(0)
+                };
+                Self::Opened {
+                    index,
+                    at,
+                    amount,
+                    tip,
+                    currency,
+                    needs_sats,
+                    minor_per_btc,
+                    source,
+                    by: read_by(&mut r)?,
+                }
+            }
             TAG_REQUOTED => Self::Requoted {
                 index,
                 at,

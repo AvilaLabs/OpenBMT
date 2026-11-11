@@ -32,9 +32,13 @@
 //! CR-73); a sale without one is written as version 1, which is what every
 //! earlier build wrote. A version 2 form with no entry does not read back.
 //! Version 3 is written only for a sale that was paid over Lightning
-//! (CR-109); its refund list may be empty. A sale that was not is written as
-//! before, so every earlier file reads back and every earlier build's file
-//! is unchanged.
+//! (CR-109); its refund list may be empty. Version 4 is written only for a
+//! sale with a tip (CR-189): the amount of its first field is the whole sum
+//! due, the sale's own amount and the tip, and the tip follows the fields
+//! of version 1, which is how the sale's own amount is told. Its refund list
+//! may be empty and its Lightning flag may be 0. A sale that was not paid
+//! over Lightning and has no tip is written as before, so every earlier file
+//! reads back and every earlier build's file is unchanged.
 
 use bitcoin::hashes::Hash;
 use bitcoin::{ScriptBuf, Txid};
@@ -56,6 +60,8 @@ use crate::{
 const SALE_VERSION_WITH_REFUNDS: u8 = 2;
 /// The version byte of a sale that was paid over Lightning (CR-109).
 const SALE_VERSION_LIGHTNING: u8 = 3;
+/// The version byte of a sale with a tip (CR-189).
+const SALE_VERSION_TIP: u8 = 4;
 
 /// What the sale keeps of a Lightning payment (CR-109, CR-110): the facts
 /// the node reported when the invoice was settled.
@@ -128,7 +134,11 @@ pub struct Sale {
     pub(crate) index: u32,
     pub(crate) script: ScriptBuf,
     pub(crate) opened_at: u64,
+    /// The whole sum due in the shop's currency: the sale's own amount and
+    /// the tip (CR-189). Every check of the payment is made against it.
     pub(crate) amount: Amount,
+    /// The tip within `amount`, 0 when the customer chose none.
+    pub(crate) tip: Amount,
     pub(crate) currency: Currency,
     pub(crate) tolerance_bps: u32,
     pub(crate) quotes: Vec<Quote>,
@@ -162,6 +172,7 @@ impl Sale {
         script: ScriptBuf,
         opened_at: u64,
         amount: Amount,
+        tip: Amount,
         currency: Currency,
         quote: Quote,
         needs_sats: u64,
@@ -174,6 +185,7 @@ impl Sale {
             script,
             opened_at,
             amount,
+            tip,
             currency,
             tolerance_bps,
             quotes: vec![quote],
@@ -213,9 +225,21 @@ impl Sale {
         self.opened_at
     }
 
-    /// The amount in the shop's currency.
+    /// The whole sum due in the shop's currency: the sale's own amount and
+    /// the tip. What the customer pays, and what every check is made against
+    /// (CR-189).
     pub fn amount(&self) -> Amount {
         self.amount
+    }
+
+    /// The tip within [`Sale::amount`], 0 when the customer chose none.
+    pub fn tip(&self) -> Amount {
+        self.tip
+    }
+
+    /// The amount of the sale itself, without the tip.
+    pub fn own_amount(&self) -> Amount {
+        Amount(self.amount.0.saturating_sub(self.tip.0))
     }
 
     /// The currency.
@@ -544,7 +568,25 @@ impl Sale {
         }
         out.extend_from_slice(&len32(watch.len()).to_le_bytes());
         out.extend_from_slice(&watch);
-        if let Some(paid) = &self.lightning {
+        if self.tip.0 > 0 {
+            if let Some(byte) = out.get_mut(4) {
+                *byte = SALE_VERSION_TIP;
+            }
+            out.extend_from_slice(&self.tip.0.to_le_bytes());
+            match &self.lightning {
+                Some(paid) => {
+                    out.push(1);
+                    out.extend_from_slice(&paid.payment_hash);
+                    out.extend_from_slice(&paid.amount_msat.to_le_bytes());
+                    wire::put_opt_u64(&mut out, paid.settled_at);
+                }
+                None => out.push(0),
+            }
+            out.extend_from_slice(&len32(self.refunds.len()).to_le_bytes());
+            for entry in &self.refunds {
+                entry.write(&mut out);
+            }
+        } else if let Some(paid) = &self.lightning {
             if let Some(byte) = out.get_mut(4) {
                 *byte = SALE_VERSION_LIGHTNING;
             }
@@ -589,6 +631,7 @@ impl Sale {
         if version != wire::VERSION
             && version != SALE_VERSION_WITH_REFUNDS
             && version != SALE_VERSION_LIGHTNING
+            && version != SALE_VERSION_TIP
         {
             return Err(DecodeError::UnsupportedVersion(version));
         }
@@ -716,7 +759,16 @@ impl Sale {
         let watch = SaleWatch::from_bytes(r.take(watch_len)?)?;
         let mut refunds: Vec<RefundEntry> = Vec::new();
         let mut lightning = None;
-        if version == SALE_VERSION_LIGHTNING {
+        let mut tip = Amount(0);
+        if version == SALE_VERSION_TIP {
+            tip = Amount(r.u64_le()?);
+            // The tip is part of the sum due, and a tip is never more than
+            // the sale's own amount (CR-190).
+            if tip.0 == 0 || tip.0 > amount.0.saturating_sub(tip.0) {
+                return Err(bad("a sale's tip is nothing or more than the sale itself"));
+            }
+        }
+        if version == SALE_VERSION_LIGHTNING || (version == SALE_VERSION_TIP && r.flag()?) {
             let payment_hash = r.array::<32>()?;
             let amount_msat = r.u64_le()?;
             if amount_msat == 0 {
@@ -728,7 +780,10 @@ impl Sale {
                 settled_at: r.opt_u64()?,
             });
         }
-        if version == SALE_VERSION_WITH_REFUNDS || version == SALE_VERSION_LIGHTNING {
+        if version == SALE_VERSION_WITH_REFUNDS
+            || version == SALE_VERSION_LIGHTNING
+            || version == SALE_VERSION_TIP
+        {
             let n = r.count(MAX_REFUNDS_PER_SALE, 28)?;
             if n == 0 && version == SALE_VERSION_WITH_REFUNDS {
                 return Err(bad("version 2 holds no refund entry"));
@@ -769,6 +824,7 @@ impl Sale {
             script,
             opened_at,
             amount,
+            tip,
             currency,
             tolerance_bps,
             quotes,

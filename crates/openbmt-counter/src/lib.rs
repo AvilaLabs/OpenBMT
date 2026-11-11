@@ -71,8 +71,8 @@ pub use desk::{Desk, OverrideEntry, Role};
 pub use events::Event;
 pub use heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
 pub use money::{
-    sats_for, value_of, Amount, BadSourceLabel, Currency, Quote, Rate, RateSource,
-    MAX_RATE_AGE_SECS, MAX_RATE_AHEAD_SECS, MAX_SOURCE_LABEL_BYTES, QUOTE_SECS,
+    sats_for, tip_for_percent, value_of, Amount, BadSourceLabel, Currency, Quote, Rate, RateSource,
+    TipChoice, MAX_RATE_AGE_SECS, MAX_RATE_AHEAD_SECS, MAX_SOURCE_LABEL_BYTES, QUOTE_SECS,
 };
 pub use recordlog::{KEEP_RECORDS, MAX_READ, MAX_UNSENT_IN_MEMORY};
 pub use refund::{
@@ -88,7 +88,7 @@ pub use sale::{End, LightningPaid, OverrideMark, PosState, Sale, Segment};
 pub use screen::{Color, Next, Report, Screen, State, Why};
 pub use staff::{StaffChange, StaffEvent};
 pub use store::{Slot, Store, StoreFault};
-pub use totals::{DayTotals, PersonLine, Tally, TotalsError, MAX_PEOPLE};
+pub use totals::{DayTotals, PersonLine, Tally, TipTally, TotalsError, MAX_PEOPLE};
 
 /// CR-04: most new addresses handed out in one hour **[to tune]**.
 pub const MAX_ADDRESSES_PER_HOUR: usize = 120;

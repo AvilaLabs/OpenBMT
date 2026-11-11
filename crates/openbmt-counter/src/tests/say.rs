@@ -258,6 +258,7 @@ fn sc_08_the_name_of_who_asked_is_quoted() {
         number: Some(2),
         asked: 5_000,
         value_minor: None,
+        tip_minor: 0,
         state: RefundState::Requested,
         by: Actor {
             role: Role::Manager,

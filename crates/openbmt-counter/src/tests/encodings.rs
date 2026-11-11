@@ -82,6 +82,7 @@ fn every_event() -> Vec<Event> {
             index: 4,
             at: T0,
             amount: Amount(500),
+            tip: Amount(0),
             currency: usd(),
             needs_sats: 5_000,
             minor_per_btc: 10_000_000,
@@ -352,10 +353,10 @@ fn the_sale_round_trips_and_refuses_another_magic_or_version() {
     bad[3] = b'X';
     assert_eq!(Sale::from_bytes(&bad).err(), Some(DecodeError::BadMagic));
     let mut bad = good.clone();
-    bad[4] = 4;
+    bad[4] = 5;
     assert_eq!(
         Sale::from_bytes(&bad).err(),
-        Some(DecodeError::UnsupportedVersion(4))
+        Some(DecodeError::UnsupportedVersion(5))
     );
     // A desk is not a sale.
     assert_eq!(
@@ -860,4 +861,41 @@ fn an_event_keeps_its_index_and_record_kind() {
     assert_eq!(kinds[14], RecordKind::Sale);
     assert!(kinds[15..].iter().all(|k| *k == RecordKind::Refund));
     assert!(every_event().iter().all(|e| e.index() == 4));
+}
+
+#[test]
+fn an_opened_event_with_a_tip_is_strict_and_has_these_bytes() {
+    let event = Event::Opened {
+        index: 4,
+        at: T0,
+        amount: Amount(500),
+        tip: Amount(75),
+        currency: usd(),
+        needs_sats: 5_750,
+        minor_per_btc: 10_000_000,
+        source: RateSource::new("regtest-fixed", T0 - 3).unwrap(),
+        by: None,
+    };
+    let bytes = event.encode();
+    assert_strict(&bytes, Event::decode, Event::encode);
+    // Tag 20, then the fields of the tag 1 record with the tip after the
+    // rate source: the last eight bytes.
+    assert_eq!(bytes[0], 20);
+    assert_eq!(&bytes[bytes.len() - 8..], &75u64.to_le_bytes());
+    // The same sale without a tip is the record of every earlier build.
+    let plain = Event::Opened {
+        index: 4,
+        at: T0,
+        amount: Amount(500),
+        tip: Amount(0),
+        currency: usd(),
+        needs_sats: 5_750,
+        minor_per_btc: 10_000_000,
+        source: RateSource::new("regtest-fixed", T0 - 3).unwrap(),
+        by: None,
+    }
+    .encode();
+    assert_eq!(plain[0], 1);
+    assert_eq!(plain.len() + 8, bytes.len());
+    assert_eq!(plain[1..], bytes[1..bytes.len() - 8]);
 }

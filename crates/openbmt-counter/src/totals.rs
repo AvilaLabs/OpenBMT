@@ -30,11 +30,22 @@ pub const MAX_PEOPLE: usize = 64;
 pub struct Tally {
     /// How many.
     pub count: u32,
-    /// The sum of the sales' amounts in the shop's currency, in minor units,
-    /// as they were when the sales opened.
+    /// The sum of the sales' own amounts in the shop's currency, in minor
+    /// units, as they were when the sales opened: without the tips (CR-191).
     pub minor: u64,
-    /// The sum of the satoshis.
+    /// The sum of the satoshis, which are for the amount and the tip.
     pub sats: u64,
+}
+
+/// The tips of paid sales (CR-191).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TipTally {
+    /// How many paid sales carried a tip.
+    pub count: u32,
+    /// The sum of those tips in the shop's currency, in minor units. They
+    /// are part of what the customers paid and are not in the `minor` of the
+    /// tallies, which hold the sales' own amounts.
+    pub minor: u64,
 }
 
 /// What one person did in the day (CR-154).
@@ -52,6 +63,9 @@ pub struct PersonLine {
     pub refunds: u32,
     /// Cash refunds this person gave in the day.
     pub cash_refunds: u32,
+    /// The tips of the paid sales this person opened, in minor units of the
+    /// shop's currency (CR-191).
+    pub tips_minor: u64,
 }
 
 /// The totals of one day.
@@ -70,6 +84,8 @@ pub struct DayTotals {
     pub on_chain: Tally,
     /// Of those, the ones paid over Lightning.
     pub lightning: Tally,
+    /// The tips of the sales counted in `paid` (CR-191).
+    pub tips: TipTally,
     /// Sales still waiting: not paid, not ended, not stopped. `sats` is what
     /// they ask for, at their last quote.
     pub waiting: Tally,
@@ -133,6 +149,8 @@ enum Paid {
 
 struct SaleFold {
     amount: u64,
+    tip: u64,
+    by: Option<(Role, String)>,
     needs_sats: u64,
     ended: bool,
     stopped: bool,
@@ -141,6 +159,7 @@ struct SaleFold {
 
 #[derive(Default)]
 struct PersonFold {
+    tips_minor: u64,
     sales: u32,
     overrides: u32,
     refunds: u32,
@@ -196,6 +215,7 @@ impl Fold {
             Event::Opened {
                 at,
                 amount,
+                tip,
                 currency,
                 needs_sats,
                 by,
@@ -211,6 +231,8 @@ impl Fold {
                     index,
                     SaleFold {
                         amount: amount.0,
+                        tip: tip.0,
+                        by: by.clone(),
                         needs_sats: *needs_sats,
                         ended: false,
                         stopped: false,
@@ -343,6 +365,23 @@ impl Fold {
                 Paid::No => tally(&mut [&mut t.waiting], s.amount, s.needs_sats)?,
             }
         }
+        // CR-191: the tips of the paid sales, in all and for the person who
+        // opened each sale.
+        let tipped: Vec<(u64, Option<(Role, String)>)> = self
+            .sales
+            .values()
+            .filter(|s| s.tip > 0 && s.paid != Paid::No)
+            .map(|s| (s.tip, s.by.clone()))
+            .collect();
+        for (tip, by) in tipped {
+            t.tips.count = bump(t.tips.count)?;
+            t.tips.minor = add(t.tips.minor, tip)?;
+            if let Some((role, name)) = by {
+                if let Some(p) = self.person(role, &name) {
+                    p.tips_minor = add(p.tips_minor, tip)?;
+                }
+            }
+        }
         let asked = std::mem::take(&mut self.asked);
         for (number, (sats, who)) in asked {
             if self.withdrawn.contains(&number) {
@@ -367,6 +406,7 @@ impl Fold {
                 overrides: p.overrides,
                 refunds: p.refunds,
                 cash_refunds: p.cash_refunds,
+                tips_minor: p.tips_minor,
             })
             .collect();
         t.people_left_out = u32::try_from(self.left_out.len()).unwrap_or(u32::MAX);

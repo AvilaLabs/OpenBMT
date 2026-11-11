@@ -1249,3 +1249,65 @@ signs with a key of its own that the signed settings name.
   settings remove it, a heartbeat signed by it is refused and changes
   nothing. A watch-key signature on anything but a heartbeat is not read: the
   link takes the watch key's messages only as heartbeats (LK-74).
+
+## 18. Tips at the counter
+
+The owner can have the counters ask the customer for a tip. The tip goes to
+the shop's wallet with the sale, in the same payment. Paying it on to staff
+is the owner's business, as with card tips. A tip straight to a staff
+member's own wallet is not part of these rules.
+
+- **CR-187.** The settings carry `tips_on` and up to three suggested tips, in
+  whole percent from 1 to 50 (`validate` refuses anything else). At first tips
+  are off and the percents are 10, 15 and 20. They are written after the watch
+  key as a flag, a count and the percents, and only when tips are on or the
+  percents are not 10, 15 and 20: settings with tips off and the first
+  percents are the bytes every earlier build wrote (message version 1, the
+  same hash), and read as tips off. A message with the block is version 2,
+  and a block that holds nothing but the first values is refused (it would
+  have been written as version 1). Neither turning tips on or off nor
+  changing the percents changes what a counter accepts or how much is at
+  risk: the tip is part of the sale's total and every check is made on the
+  total (CR-189). Both directions are tightenings, so the owner phone signs
+  alone. A change that also loosens something is loosening as ever. The
+  counter offers the percents, in the order the settings give them, when
+  `tips_on` is set (`Counter::tip_choices`), and none when it is not. It
+  does not refuse a tip it is given when tips are off: asking is the
+  caller's to honour.
+- **CR-188.** A suggested tip is its percent of the sale's amount, rounded
+  half up to a whole minor unit of the shop's currency:
+  `floor((amount * percent + 50) / 100)`. The customer chooses one of the
+  suggested tips, types an amount, or chooses no tip, before the code shows;
+  the screen is "Add a tip?" with a button for each suggested tip, "Other
+  amount" and "No tip". The code is for the amount and the tip together.
+- **CR-189.** `Counter::open_with_tip` opens a sale with the amount of the
+  sale itself and the tip. The sale is for the total: the quote, the
+  satoshis it needs, the underpayment tolerance, the valuation of what
+  arrives, the instant limits, the exposure and the refund ceiling (CR-67)
+  are all made against the amount and the tip together, and the smallest
+  bitcoin sale, the dust line and the largest amount (CR-75, CR-17, CR-05)
+  are judged on the total. A sale with no tip is the sale of every earlier
+  build. The record `Opened` carries the two as separate fields and the
+  person at the till (CR-151): a sale with a tip is written with the tag 20,
+  which holds the tip (never 0) after the rate source and before the person,
+  and a sale without one is written with the tag 1, byte for byte as before;
+  the tag 1 reads as a tip of 0 and the tag 20 with a tip of 0 is refused.
+  The stored sale (`OBML`) is version 4 when it has a tip. The report
+  `BooksFinal` gives the sale's own amount, as the POS and the books know
+  it.
+- **CR-190.** A tip above the amount of the sale itself is refused
+  (`OpenRefused::TipTooLarge`), with nothing written. The words are "Tip not
+  accepted": the tip is more than the sale itself, so it was not added; type a
+  smaller tip, or choose No tip.
+- **CR-191.** The day's totals (CR-153) have a line for the tips: how many of
+  the paid sales carried one and their sum, in the shop's currency. A sale
+  counts on the day it opened and is a paid sale as CR-153 says, so a sale
+  that was replaced or is waiting adds no tip. The tallies of CR-153 hold the
+  sales' own amounts, without the tips. The lines per person (CR-154) have
+  the tips of the paid sales that person opened. The screen says "Tips" and,
+  for each person, "Tips taken by {name}".
+- **CR-192.** A refund may ask for up to what was received, which is the
+  amount and the tip (CR-67). The view of a refund (CR-72) says how much of
+  it is tip: the refunds of the sale are counted oldest first against the
+  sale's own amount, and what goes past it, up to the tip, is tip. A
+  withdrawn request counts for nothing. A sale with no tip says 0.

@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 19] = [
+const TEST_SOURCES: [&str; 20] = [
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
     include_str!("lightning.rs"),
@@ -23,6 +23,7 @@ const TEST_SOURCES: [&str; 19] = [
     include_str!("staff.rs"),
     include_str!("states.rs"),
     include_str!("storage.rs"),
+    include_str!("tips.rs"),
     include_str!("totals.rs"),
     include_str!("valuation.rs"),
     include_str!("kit.rs"),
@@ -340,9 +341,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_one_hundred_and_thirty_seven_rules() {
+fn the_rules_file_defines_one_hundred_and_forty_three_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 137);
+    assert_eq!(ids.len(), 143);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -373,6 +374,8 @@ fn the_rules_file_defines_one_hundred_and_thirty_seven_rules() {
             && ids.contains("CR-186")
             && ids.contains("CR-119")
             && ids.contains("CR-120")
+            && ids.contains("CR-187")
+            && ids.contains("CR-192")
     );
 }
 

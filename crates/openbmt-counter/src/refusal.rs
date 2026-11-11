@@ -32,6 +32,8 @@ pub enum OpenRefused<E> {
     ZeroAmount,
     /// CR-05: the amount needs more than 21,000,000 bitcoin at the rate.
     AmountTooLarge,
+    /// CR-190: the tip is more than the sale's own amount.
+    TipTooLarge,
     /// CR-17: the amount needs less than the dust line, so a payment for it
     /// would be dust.
     BelowDust {
@@ -77,6 +79,7 @@ impl<E> OpenRefused<E> {
             Self::RescanPending => "CR-09",
             Self::Unhealthy(_) => "CR-01",
             Self::ZeroAmount | Self::AmountTooLarge => "CR-05",
+            Self::TipTooLarge => "CR-190",
             Self::BelowDust { .. } => "CR-17",
             Self::BelowMinimum { .. } => "CR-75",
             Self::StaleRate { .. } => "CR-58",
@@ -108,6 +111,7 @@ impl<E: fmt::Display> fmt::Display for OpenRefused<E> {
             ),
             Self::ZeroAmount => write!(f, "a sale needs an amount"),
             Self::AmountTooLarge => write!(f, "the amount is more than all the bitcoin there is"),
+            Self::TipTooLarge => write!(f, "the tip is more than the sale itself"),
             Self::BelowDust { needs_sats } => write!(
                 f,
                 "the amount is only {needs_sats} sats, below the dust line; use another payment type"

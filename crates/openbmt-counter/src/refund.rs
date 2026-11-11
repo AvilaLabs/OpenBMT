@@ -354,6 +354,11 @@ pub struct RefundView {
     /// The amount in the shop's currency, in minor units, when it was given
     /// that way (always for a cash refund).
     pub value_minor: Option<u64>,
+    /// How much of the refund is the tip, in minor units of the shop's
+    /// currency (CR-192): what the refunds of the sale, oldest first, ask
+    /// for past the sale's own amount, up to the tip. 0 for a sale without
+    /// a tip and for a withdrawn request.
+    pub tip_minor: u64,
     /// The state.
     pub state: RefundState,
     /// Who asked.

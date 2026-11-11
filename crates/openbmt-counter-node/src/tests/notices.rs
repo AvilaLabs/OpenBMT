@@ -383,6 +383,7 @@ fn bx_40_a_queue_over_its_bound_drops_the_oldest_and_says_so() {
             index,
             at: T0,
             amount: Amount(500),
+            tip: Amount(0),
             currency: usd(),
             needs_sats: 1,
             minor_per_btc: 1,

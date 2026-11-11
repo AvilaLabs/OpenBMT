@@ -432,6 +432,39 @@ pub fn late_words() -> Words {
     .code("CR-19")
 }
 
+/// CR-188: the screen where the customer chooses a tip, before the code
+/// shows. `amount` is the sale's amount as the app writes it in the shop's
+/// currency.
+pub fn tip_choose_words(amount: &str) -> Words {
+    Words::new(
+        Tone::Info,
+        "Add a tip?",
+        format!("The sale is {amount}. A tip goes to the shop with it."),
+        Who::Customer,
+        "Choose a tip, or No tip.",
+    )
+    .code("CR-188")
+}
+
+/// CR-188: the button of a suggested tip: "15% · $1.50". `tip` is the tip as
+/// the app writes it in the shop's currency.
+pub fn tip_button_label(percent: u8, tip: &str) -> String {
+    format!("{percent}% \u{b7} {tip}")
+}
+
+/// CR-188: the button for a tip the customer types.
+pub const TIP_OTHER_LABEL: &str = "Other amount";
+/// CR-188: the button for no tip.
+pub const TIP_NONE_LABEL: &str = "No tip";
+/// CR-191: the line of Today with the total of the tips.
+pub const TIPS_LINE_LABEL: &str = "Tips";
+
+/// CR-191: the line of Today with the tips taken by one person. The name is
+/// text from the counter's own list of cashiers.
+pub fn tips_person_label(name: &str) -> String {
+    format!("Tips taken by {name}")
+}
+
 impl<E: Display> OpenRefused<E> {
     /// What the cashier is told when a sale cannot be started.
     pub fn words(&self) -> Words {
@@ -479,6 +512,13 @@ impl<E: Display> OpenRefused<E> {
                 Who::Cashier,
                 CHECK_AMOUNT_NEXT,
                 "CR-05",
+            ),
+            Self::TipTooLarge => refused(
+                "Tip not accepted",
+                "The tip is more than the sale itself, so it was not added.",
+                Who::Cashier,
+                "Type a smaller tip, or choose No tip.",
+                "CR-190",
             ),
             Self::BelowDust { needs_sats } => refused(
                 "Sale too small for bitcoin",
@@ -1836,6 +1876,7 @@ pub fn all_words() -> Vec<(String, Words)> {
             line.words(),
         ));
     }
+    all.push(("Screen::tipChoose".to_string(), tip_choose_words("$12.50")));
     all.push(("Screen::stuck".to_string(), stuck_words()));
     all.push(("Screen::late".to_string(), late_words()));
 
@@ -1846,6 +1887,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("Unhealthy", OpenRefused::Unhealthy(Some(Problem::TipIsOld))),
         ("ZeroAmount", OpenRefused::ZeroAmount),
         ("AmountTooLarge", OpenRefused::AmountTooLarge),
+        ("TipTooLarge", OpenRefused::TipTooLarge),
         ("BelowDust", OpenRefused::BelowDust { needs_sats: 600 }),
         (
             "BelowMinimum",
@@ -2223,6 +2265,7 @@ fn sample_refund_view(state: RefundState) -> RefundView {
         },
         asked: 5_000,
         value_minor: None,
+        tip_minor: 0,
         state,
         by: crate::counter::Actor {
             role: Role::Cashier,

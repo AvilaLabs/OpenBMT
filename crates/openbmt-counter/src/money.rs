@@ -159,6 +159,25 @@ pub fn value_of(sats: u64, rate: Rate) -> Amount {
     Amount(u64::try_from(minor).unwrap_or(u64::MAX))
 }
 
+/// CR-188: a tip of `percent` whole percent of `amount`, rounded half up to
+/// a whole minor unit: `floor((amount * percent + 50) / 100)`. `None` only
+/// when the product does not fit, which an amount of a real sale never does.
+pub fn tip_for_percent(amount: Amount, percent: u8) -> Option<Amount> {
+    let product = u128::from(amount.0).checked_mul(u128::from(percent))?;
+    let tip = product.checked_add(50)?.checked_div(100)?;
+    u64::try_from(tip).ok().map(Amount)
+}
+
+/// CR-188: one of the tips the counter offers for a sale: a suggested
+/// percent of the settings and what it comes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TipChoice {
+    /// The suggested percent, from the signed settings.
+    pub percent: u8,
+    /// The percent of the sale's amount, rounded half up.
+    pub tip: Amount,
+}
+
 /// A rate and the seconds it is good for (CR-05).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Quote {

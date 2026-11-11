@@ -33,7 +33,10 @@ use crate::batch_held::BatchHeld;
 use crate::desk::{valid_name, Desk, OverrideEntry, Role};
 use crate::events::{final_payments, Event};
 use crate::heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
-use crate::money::{sats_for, value_of, Amount, Currency, Quote, Rate, RateSource, MAX_SATS};
+use crate::money::{
+    sats_for, tip_for_percent, value_of, Amount, Currency, Quote, Rate, RateSource, TipChoice,
+    MAX_SATS,
+};
 use crate::recordlog::{RecordLog, MAX_UNSENT_IN_MEMORY, READ_CHUNK};
 use crate::refund::{
     dust_limit, refund_text_ok, sats_floor, Ask, CashRefund, EntryKind, RefundAsk, RefundEntry,
@@ -1062,6 +1065,52 @@ impl Counter {
         by: Option<&Actor>,
         store: &mut S,
     ) -> Result<Opened, OpenRefused<S::Error>> {
+        self.open_with_tip(amount, Amount(0), currency, rate, source, facts, by, store)
+    }
+
+    /// CR-188: the tips the counter offers for a sale of `amount`: one for
+    /// each percent of the settings, in the order the settings give them.
+    /// Empty when the settings do not ask for a tip. The customer picks one
+    /// of these, types an amount or takes none, and the caller passes the
+    /// tip to [`Counter::open_with_tip`].
+    pub fn tip_choices(&self, amount: Amount) -> Vec<TipChoice> {
+        if !self.settings.tips_on {
+            return Vec::new();
+        }
+        self.settings
+            .tip_percents
+            .iter()
+            .filter_map(|percent| {
+                tip_for_percent(amount, *percent).map(|tip| TipChoice {
+                    percent: *percent,
+                    tip,
+                })
+            })
+            .collect()
+    }
+
+    /// [`Counter::open_by`] for a sale with a tip (CR-189, CR-190): `amount`
+    /// is the sale itself and `tip` what the customer chose to add, 0 for
+    /// none. The code is for the two together: the quote, the underpayment
+    /// tolerance, the instant limits, the exposure and every other check are
+    /// made against the total. The record `Opened` carries the amount and the
+    /// tip as two fields and the person at the till.
+    ///
+    /// A tip above `amount` is refused (CR-190), with nothing written. The
+    /// counter takes the tip it is given: that the settings ask for one is
+    /// the caller's to honour.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_with_tip<S: Store>(
+        &mut self,
+        amount: Amount,
+        tip: Amount,
+        currency: Currency,
+        rate: Rate,
+        source: &RateSource,
+        facts: OpenFacts,
+        by: Option<&Actor>,
+        store: &mut S,
+    ) -> Result<Opened, OpenRefused<S::Error>> {
         if by.is_some_and(|a| !refund_text_ok(&a.name)) {
             return Err(OpenRefused::BadName);
         }
@@ -1078,7 +1127,16 @@ impl Counter {
         if amount.0 == 0 {
             return Err(OpenRefused::ZeroAmount);
         }
-        let needs_sats = sats_for(amount, rate).ok_or(OpenRefused::AmountTooLarge)?;
+        if tip.0 > amount.0 {
+            return Err(OpenRefused::TipTooLarge);
+        }
+        let due = Amount(
+            amount
+                .0
+                .checked_add(tip.0)
+                .ok_or(OpenRefused::AmountTooLarge)?,
+        );
+        let needs_sats = sats_for(due, rate).ok_or(OpenRefused::AmountTooLarge)?;
         if needs_sats < DUST_SATS {
             return Err(OpenRefused::BelowDust { needs_sats });
         }
@@ -1125,7 +1183,8 @@ impl Counter {
             index,
             script.clone(),
             now,
-            amount,
+            due,
+            tip,
             currency,
             quote,
             needs_sats,
@@ -1136,6 +1195,7 @@ impl Counter {
             index,
             at: now,
             amount,
+            tip,
             currency,
             needs_sats,
             minor_per_btc: rate.minor_per_btc(),
@@ -1598,7 +1658,7 @@ impl Counter {
         }
         reports.push(Report::BooksFinal {
             index,
-            amount: sale.amount,
+            amount: sale.own_amount(),
             currency: sale.currency,
             received_sats: sats,
         });
@@ -2043,7 +2103,7 @@ impl Counter {
                 });
                 reports.push(Report::BooksFinal {
                     index,
-                    amount: sale.amount,
+                    amount: sale.own_amount(),
                     currency: sale.currency,
                     received_sats: received,
                 });
@@ -2651,13 +2711,32 @@ impl Counter {
         let Some(sale) = self.sales.get(&index) else {
             return Vec::new();
         };
+        // CR-192: what each entry asks for is counted against the sale's own
+        // amount first; the part that goes past it is the tip, up to the tip
+        // the sale holds. A withdrawn request asks for nothing any more.
+        let rate = sale.quotes.last().map(|q| q.rate);
+        let own = sale.own_amount().0;
+        let tip_within = |cumulative: u64| cumulative.saturating_sub(own).min(sale.tip.0);
+        let mut cumulative = 0u64;
         sale.refunds
             .iter()
-            .map(|e| RefundView {
+            .map(|e| {
+                let value = match (e.value_minor, rate) {
+                    _ if e.withdrawn => 0,
+                    (Some(minor), _) => minor,
+                    (None, Some(rate)) => value_of(e.sats, rate).0,
+                    (None, None) => 0,
+                };
+                let before = tip_within(cumulative);
+                cumulative = cumulative.saturating_add(value);
+                (e, tip_within(cumulative).saturating_sub(before))
+            })
+            .map(|(e, tip_minor)| RefundView {
                 sale: index,
                 number: (e.kind == EntryKind::Request).then_some(e.number),
                 asked: e.sats,
                 value_minor: e.value_minor,
+                tip_minor,
                 state: match e.kind {
                     EntryKind::Cash => RefundState::PaidInCash,
                     EntryKind::Request if e.withdrawn => RefundState::Withdrawn,

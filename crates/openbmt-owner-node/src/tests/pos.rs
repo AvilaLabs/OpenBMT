@@ -158,6 +158,7 @@ fn opened(index: u32, at: u64, cents: u64) -> Event {
         index,
         at,
         amount: Amount(cents),
+        tip: Amount(0),
         currency: usd(),
         needs_sats: 1,
         minor_per_btc: 1,
