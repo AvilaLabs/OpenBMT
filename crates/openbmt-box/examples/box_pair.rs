@@ -9,6 +9,7 @@
 //! box_pair mailbox  <dir> <addr> <name>         make a device's mailbox
 //! box_pair send     <dir> <addr> <from> <to> <text>
 //! box_pair recv     <dir> <addr> <name>
+//! box_pair fetch    <dir> <addr> <name>         read a mailbox without making it or acknowledging (LK-28)
 //! box_pair settings <dir> <addr> <version> <drop-c2 | drop-box>
 //! box_pair key      <dir> <name>                print a device's key in hex
 //! box_pair notice   <dir> <addr> <counter> <index> <opened|paid|unpaid|final> <cents>
@@ -493,6 +494,44 @@ fn run(args: &[String]) -> Result<(), String> {
             if last > 0 {
                 c.ack(&me, last).map_err(|e| refused(&e))?;
             }
+            println!("received {}", got.items.len());
+        }
+        "fetch" => {
+            // LK-28: a removed device reads its leaving mailbox without making one or acknowledging.
+            let name = arg(3)?;
+            let me = identity(name)?;
+            let mut c = connect(arg(2)?, None)?;
+            let got = c.fetch(&me, 0).map_err(|e| refused(&e))?;
+            let known: Vec<(&str, Identity)> = ["owner", "c1", "c2"]
+                .into_iter()
+                .map(|n| identity(n).map(|i| (n, i)))
+                .collect::<Result<_, _>>()?;
+            let mut last = 0;
+            for (id, sealed) in &got.items {
+                let opened = open(
+                    &me,
+                    role_of(name)?,
+                    sealed,
+                    |d| {
+                        known
+                            .iter()
+                            .find(|(_, i)| i.device_id() == *d)
+                            .and_then(|(n, _)| role_of(n).ok())
+                    },
+                    |_| 0,
+                )
+                .map_err(|e| e.to_string())?;
+                let from = known
+                    .iter()
+                    .find(|(_, i)| i.device_id() == opened.sender)
+                    .map_or("?", |(n, _)| *n);
+                println!(
+                    "message from {from}: {}",
+                    String::from_utf8_lossy(&opened.content)
+                );
+                last = *id;
+            }
+            let _ = last;
             println!("received {}", got.items.len());
         }
         "settings" => {

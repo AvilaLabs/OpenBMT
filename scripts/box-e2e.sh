@@ -360,15 +360,20 @@ for _ in $(seq 1 40); do
   if [ -n "$N" ] && [ "$N" -lt "${N_BEFORE:-0}" ]; then GONE=yes; break; fi
   sleep 0.5
 done
-RECV_C2=$(pair recv "$K1" "$A" c2)
+# LK-28, LK-29: c2's mailbox is now leaving. It cannot be made again, c2
+# can still read what it holds, and a read to its end deletes it.
 MB_C2=$(pair mailbox "$K1" "$A" c2)
+LEFT_C2=$([ -e "$B1/relay/$C2KEY.mbx" ] && echo yes || echo no)
+FETCH_C2=$(pair fetch "$K1" "$A" c2)
+AGAIN_C2=$(pair fetch "$K1" "$A" c2)
 note "members before $N_BEFORE, after $N"
-note "c2: $RECV_C2 / $MB_C2"
-if [ -n "$GONE" ] && [ ! -e "$B1/relay/$C2KEY.mbx" ] && grep -q '^refused' <<<"$RECV_C2" &&
-  grep -q '^refused' <<<"$MB_C2" && grep -q 'mailbox made for c1' <<<"$(pair mailbox "$K1" "$A" c1)"; then
-  pass 4 "settings version 2 (c2 off the list) went in as a sealed message; the members fell from $N_BEFORE to $N, c2's mailbox file is gone and c2 is refused; c1 still works"
+note "c2: make: $MB_C2 / leaving file: $LEFT_C2 / fetch: $FETCH_C2 / again: $AGAIN_C2"
+if [ -n "$GONE" ] && grep -q '^refused' <<<"$MB_C2" && [ "$LEFT_C2" = yes ] &&
+  grep -q '^received' <<<"$(tail -1 <<<"$FETCH_C2")" && grep -q '^refused' <<<"$AGAIN_C2" &&
+  [ ! -e "$B1/relay/$C2KEY.mbx" ] && grep -q 'mailbox made for c1' <<<"$(pair mailbox "$K1" "$A" c1)"; then
+  pass 4 "settings version 2 (c2 off the list) went in as a sealed message; the members fell from $N_BEFORE to $N; c2 could not make a mailbox, read its leaving one once, and then it was gone; c1 still works"
 else
-  bad 4 "members $N_BEFORE -> ${N:-?}; mailbox file present: $([ -e "$B1/relay/$C2KEY.mbx" ] && echo yes || echo no); c2: $RECV_C2 / $MB_C2"
+  bad 4 "members $N_BEFORE -> ${N:-?}; c2: make: $MB_C2 / leaving file: $LEFT_C2 / fetch: $FETCH_C2 / again: $AGAIN_C2 / file now: $([ -e "$B1/relay/$C2KEY.mbx" ] && echo yes || echo no)"
 fi
 
 # ---- 5 ---------------------------------------------------------------------------
