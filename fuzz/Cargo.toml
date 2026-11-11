@@ -20,6 +20,7 @@ openbmt-net = { path = "../crates/openbmt-net" }
 bip324 = { version = "=0.11.1", default-features = false }
 openbmt-counter = { path = "../crates/openbmt-counter" }
 openbmt-counter-node = { path = "../crates/openbmt-counter-node" }
+openbmt-counter-ffi = { path = "../crates/openbmt-counter-ffi" }
 openbmt-link = { path = "../crates/openbmt-link" }
 openbmt-courier = { path = "../crates/openbmt-courier" }
 openbmt-pos = { path = "../crates/openbmt-pos" }
@@ -501,6 +502,20 @@ bench = false
 [[bin]]
 name = "lightning_decode"
 path = "fuzz_targets/lightning_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "relay_for_counters_decode"
+path = "fuzz_targets/relay_for_counters_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "counter_link_dispatch"
+path = "fuzz_targets/counter_link_dispatch.rs"
 test = false
 doc = false
 bench = false

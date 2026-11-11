@@ -29,9 +29,11 @@ exactly the input bytes.
 | `net_manager` | the peer manager on regtest with 3 peers, driven by a script of steps in the input: connect, receive bytes (optionally after a good handshake, and optionally framed as a chosen command with a right checksum), tick, close. It must never panic, and the bytes waiting for a peer never pass the session cap |
 | `pair_offer_decode` | `PairOffer::from_bytes` |
 | `pair_request_decode` | `PairRequest::from_bytes` |
-| `counter_bundle_decode` | `CounterBundle::from_bytes`, with re-encode equality |
-| `counter_pairing_record_decode` | `PairingRecord::from_bytes` (the counter's stored pairing record), with re-encode equality |
+| `counter_bundle_decode` | `CounterBundle::from_bytes` (versions 1 and 2, the second with a relay, CR-130), with re-encode equality, on the input as it is and behind each version's frame header; a bundle with a relay must read as version 1 without it |
+| `counter_pairing_record_decode` | `PairingRecord::from_bytes` (the counter's stored pairing record, versions 1 and 2, CR-131), with re-encode equality, on the input as it is and behind each version's frame header |
 | `counter_lightning_record_decode` | `LightningRecord::from_bytes` (the counter's sealed Lightning connection), with re-encode stability |
+| `relay_for_counters_decode` | `SignedRelayHint::from_bytes` (the owner's relay for counters, magic `OBMy`, CR-132), with re-encode equality, on the input as it is and behind the frame header; a hint that decoded must be made again by `RelayHint::new`, and the signature check must not panic |
+| `counter_link_dispatch` | the counter library's calls 24 `link_step`, 25 `link_state` and 56 `take_relay` through `dispatch` with arbitrary fields and a handle no node has, and the input as a whole request; every answer must be a response frame and none may panic |
 | `signed_pairing_decode` | `SignedPairing::from_bytes` |
 | `owner_command_decode` | `SignedCommand::from_bytes` |
 | `owner_pos_setup_decode` | `PosSetup::from_bytes` of `openbmt-owner-node` (the owner's till settings, magic `OBMr`); on success the settings must encode back to exactly those bytes |
