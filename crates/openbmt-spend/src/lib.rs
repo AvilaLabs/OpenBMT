@@ -13,6 +13,10 @@
 //! 4. [`finalize`] (or [`finalize_plan`]) turns two signatures per input
 //!    into a transaction, and checks that transaction again from scratch.
 //!
+//! 5. [`psbt_for_signer`], [`take_signer_signatures`], [`check_finished`]
+//!    and [`transaction_of_final_file`] are the steps for a signer that
+//!    someone else made: the file it is shown and what it returns.
+//!
 //! The final check is this library's own. There is no consensus library
 //! here; Bitcoin Core's `testmempoolaccept` is the independent check (see
 //! `scripts/spend-e2e-core.sh`).
@@ -30,6 +34,7 @@ mod finalize;
 mod plan;
 mod psbt;
 pub mod say;
+mod signer_file;
 
 pub use coin::{Coin, CoinError};
 pub use combine::{combine, CombineError, Source};
@@ -40,3 +45,7 @@ pub use plan::{
     SpendRequest, MAX_CONSOLIDATION_INPUTS,
 };
 pub use psbt::PsbtError;
+pub use signer_file::{
+    check_finished, psbt_for_signer, take_signer_signatures, transaction_of_final_file,
+    SignerFileError,
+};

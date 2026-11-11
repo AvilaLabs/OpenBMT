@@ -4,10 +4,12 @@ mod common;
 
 use bitcoin::OutPoint;
 use common::*;
-use openbmt_spend::{CoinError, CombineError, FinalizeError, PlanError, PsbtError, Source};
+use openbmt_spend::{
+    CoinError, CombineError, FinalizeError, PlanError, PsbtError, SignerFileError, Source,
+};
 
 const RULES: &str = include_str!("../../../docs/SPEND-RULES.md");
-const TEST_SOURCES: [&str; 9] = [
+const TEST_SOURCES: [&str; 10] = [
     include_str!("coins.rs"),
     include_str!("choice.rs"),
     include_str!("outputs.rs"),
@@ -16,6 +18,7 @@ const TEST_SOURCES: [&str; 9] = [
     include_str!("psbt.rs"),
     include_str!("combine.rs"),
     include_str!("finalize.rs"),
+    include_str!("signer_file.rs"),
     include_str!("hostile.rs"),
 ];
 
@@ -37,7 +40,7 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 39);
+    assert_eq!(ids.len(), 43);
     assert!(ids.contains(&"SP-01".to_string()) && ids.contains(&"SP-71".to_string()));
     let mut sorted = ids.clone();
     sorted.sort();
@@ -153,6 +156,16 @@ fn every_error_says_which_rule_in_words() {
         }
         .to_string(),
         PsbtError::Derivation.to_string(),
+        SignerFileError::Input {
+            input: 0,
+            what: "x",
+        }
+        .to_string(),
+        SignerFileError::Output { output: 1 }.to_string(),
+        SignerFileError::SighashType { input: 0 }.to_string(),
+        SignerFileError::DifferentTransaction.to_string(),
+        SignerFileError::NotSigned { input: 0 }.to_string(),
+        SignerFileError::Slot.to_string(),
     ];
     let ids = rule_ids();
     for t in &texts {

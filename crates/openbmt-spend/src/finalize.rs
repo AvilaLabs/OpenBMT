@@ -341,7 +341,11 @@ fn witness_for(
 /// from the steps that built it: the witnesses are read back out of `tx`,
 /// and the signature hashes, scripts and amounts are worked out again from
 /// the file's previous transactions and the wallet. Returns the fee.
-fn audit(wallet: &WalletDescription, psbt: &Psbt, tx: &Transaction) -> Result<u64, FinalizeError> {
+pub(crate) fn audit(
+    wallet: &WalletDescription,
+    psbt: &Psbt,
+    tx: &Transaction,
+) -> Result<u64, FinalizeError> {
     let fail = FinalizeError::FinalCheckFailed;
     let unsigned = &psbt.unsigned_tx;
     // SP-37: any block height; a time is refused.

@@ -191,6 +191,38 @@ out silently.
   signer signs it. Two signers' signatures on it can be combined and
   finished (SP-60).
 
+- **SP-45.** For a signer that someone else made (a hardware wallet that
+  holds key 2), the file of SP-40, with key 1's signature on it if key 1
+  has signed, is written again by `psbt_for_signer` with two additions: the
+  hash type `SIGHASH_ALL` on every input, and the three keys as global
+  extended public keys (BIP 174 type 0x01), each with its master
+  fingerprint and its path (`48'/coin'/0'/2'`). The file is built from the
+  fields it reads and nothing else: unknown and proprietary fields are not
+  copied. Every input is held to the wallet first (the previous transaction
+  hashes to the outpoint; the previous output is the wallet's script at the
+  place the hints name; the witness script is the wallet's; the hints are
+  exactly the three keys; any signature is `SIGHASH_ALL`), and so is every
+  output that carries a witness script or hints (the wallet's change
+  script, with exactly its witness script and keys). The whole previous
+  transaction is always written, because the owner always holds it (SP-01).
+- **SP-46.** What a signer returns is read for two things only: its
+  unsigned transaction and its signatures. The unsigned transaction must
+  equal the one sent (inputs, outputs, amounts, version, lock time); the
+  rest of the file, which signers rewrite in their own ways, is not read.
+  Every signature goes through `combine` (SP-50 to SP-54), so each is
+  verified against its BIP 143 hash. The joined file must hold a signature
+  of the signer's own key (the slot's key at the input's place) on every
+  input, or the signer did not sign it.
+- **SP-47.** A transaction that came back finished is checked by
+  `check_finished` against the file that was sent, with the check of SP-62:
+  the same transaction ID, version, lock time, outputs and sequences, no
+  script signature, and on every input the witness of SP-60 with two
+  signatures that verify. It does not say whose signatures they are.
+- **SP-48.** A returned file whose every input is final is read as the
+  finished transaction it holds (`transaction_of_final_file`) and checked
+  by SP-47; a file with some inputs final and some not, or any script
+  signature, is not read as finished.
+
 ## 6. Combine
 
 `combine(base, signed)` takes the plan's file and the files the signers
