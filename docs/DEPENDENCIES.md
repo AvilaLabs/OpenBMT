@@ -72,6 +72,19 @@ for both would remove about 13 packages. It was looked at and not done:
 its tag comparison is not constant-time and it has had less review, and a
 smaller list is not worth a weaker primitive.
 
+## Packaging
+
+The Start9 package of the Box (`packaging/box/startos/`) is written in
+TypeScript against the `@start9labs/start-sdk` npm package. Its npm
+packages are packaging-time only: they are used to typecheck the package and
+to build the package file, they are pinned by `package-lock.json` (the SDK to
+an exact version, everything else by the lockfile's versions and hashes), and
+none of them is ever in the Box binary or in the container image, which is
+built from the Rust workspace alone (`packaging/box/Dockerfile`). They are
+not counted in `deps/` and are not checked by `scripts/deps-check.sh`.
+`node_modules/` is not committed. CI installs them with `npm ci`, which
+refuses a lockfile that does not match `package.json`.
+
 ## Rules
 
 1. **A new package needs a reason that is written down.** The commit that

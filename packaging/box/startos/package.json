@@ -1,0 +1,16 @@
+{
+  "name": "openbmt-box-startos",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "prettier": "prettier --config node_modules/@start9labs/start-sdk/prettier.config.json --write startos",
+    "prettier:check": "prettier --config node_modules/@start9labs/start-sdk/prettier.config.json --check startos"
+  },
+  "dependencies": {
+    "@start9labs/start-sdk": "4.1.0"
+  },
+  "overrides": {
+    "@start9labs/start-sdk": "$@start9labs/start-sdk"
+  }
+}
