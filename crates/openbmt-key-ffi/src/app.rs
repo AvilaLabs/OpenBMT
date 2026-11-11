@@ -38,6 +38,13 @@ pub enum SetupState {
         /// Key 2 is on this device.
         holds_key2: bool,
     },
+    /// A wallet setup from the owner phone passed every check and is kept,
+    /// not yet registered: the key holder compares its words with the other
+    /// devices and then confirms or discards it (SR-67). Nothing is signed.
+    WalletPending {
+        /// Key 2 is on this device.
+        holds_key2: bool,
+    },
 }
 
 /// What the Key app is given when the owner phone has built the wallet
@@ -139,6 +146,7 @@ wire_record_get!(WalletSetup {
 const STATE_EMPTY: u8 = 0;
 const STATE_HAS_IDENTITY: u8 = 1;
 const STATE_READY: u8 = 2;
+const STATE_WALLET_PENDING: u8 = 3;
 
 impl Shaped for SetupState {
     fn shape() -> String {
@@ -162,6 +170,10 @@ impl Put for SetupState {
                 out.push(STATE_READY);
                 holds_key2.put(out);
             }
+            Self::WalletPending { holds_key2 } => {
+                out.push(STATE_WALLET_PENDING);
+                holds_key2.put(out);
+            }
         }
     }
 }
@@ -171,12 +183,13 @@ impl Define for SetupState {
         TypeDef {
             name: "SetupState",
             body: "enum: Empty | HasIdentity{holds_key2: bool, words_waiting: bool} \
-                   | Ready{holds_key2: bool}"
+                   | Ready{holds_key2: bool} | WalletPending{holds_key2: bool}"
                 .to_string(),
             tags: vec![
                 ("Empty", STATE_EMPTY),
                 ("HasIdentity", STATE_HAS_IDENTITY),
                 ("Ready", STATE_READY),
+                ("WalletPending", STATE_WALLET_PENDING),
             ],
         }
     }
@@ -187,6 +200,17 @@ pub(crate) enum Phase {
     Empty,
     Identity(Box<Material>),
     Ready(Box<ReadyState>),
+    /// A wallet setup that passed every check and waits for confirmation.
+    Pending(Box<PendingState>),
+}
+
+/// A Key app that holds a checked wallet setup it has not registered
+/// (SR-67). The approver is built, so that confirming moves it to
+/// [`ReadyState`] without a check that could fail differently.
+pub(crate) struct PendingState {
+    pub material: Material,
+    pub wallet: WalletPart,
+    pub approver: Approver,
 }
 
 /// A Key app with its wallet accepted.
@@ -228,9 +252,25 @@ impl Inner {
         }
     }
 
+    /// Refused while a wallet waits for confirmation: it is confirmed or
+    /// discarded first (SR-67).
+    pub(crate) fn not_pending(&self) -> Result<(), KeyError> {
+        match &self.phase {
+            Phase::Pending(_) => Err(wrong_state(
+                "wallet-pending",
+                "a wallet is waiting for the key holder: confirm it or discard it first",
+            )),
+            _ => Ok(()),
+        }
+    }
+
     pub(crate) fn ready(&mut self) -> Result<&mut ReadyState, KeyError> {
         match &mut self.phase {
             Phase::Ready(r) => Ok(r),
+            Phase::Pending(_) => Err(wrong_state(
+                "wallet-pending",
+                "a wallet is waiting for the key holder: confirm it or discard it first",
+            )),
             _ => Err(wrong_state(
                 "not-ready",
                 "the Key app has no wallet yet: finish the setup first",
@@ -248,6 +288,7 @@ impl Inner {
             Phase::Empty => None,
             Phase::Identity(m) => Some(&**m),
             Phase::Ready(r) => Some(&r.material),
+            Phase::Pending(p) => Some(&p.material),
         }
     }
 }
@@ -331,6 +372,22 @@ impl KeyApp {
                     rule: "OBM7".to_string(),
                     text: format!("OBM7: the stored state is not readable: {e}"),
                 })?;
+                if let Some(setup) = decoded.pending {
+                    let parsed = crate::ceremony::wallet_setup(&setup)?;
+                    let (wallet, approver) = build_wallet(&decoded.material, parsed, true)?;
+                    return Ok(Inner {
+                        store,
+                        poisoned: false,
+                        session: None,
+                        next_session: 1,
+                        phase: Phase::Pending(Box::new(PendingState {
+                            material: decoded.material,
+                            wallet,
+                            approver,
+                        })),
+                        words: None,
+                    });
+                }
                 match decoded.wallet {
                     None => Phase::Identity(Box::new(decoded.material)),
                     Some((wallet, snapshot)) => {
@@ -414,6 +471,9 @@ impl KeyApp {
                 Phase::Ready(r) => SetupState::Ready {
                     holds_key2: r.material.key2.is_some(),
                 },
+                Phase::Pending(p) => SetupState::WalletPending {
+                    holds_key2: p.material.key2.is_some(),
+                },
             })
         })
     }
@@ -429,6 +489,7 @@ impl KeyApp {
     ) -> Result<(), KeyError> {
         let result = self.run(|inner| {
             inner.no_session()?;
+            inner.not_pending()?;
             if matches!(inner.phase, Phase::Ready(_)) {
                 return Err(wrong_state(
                     "wallet-set",
@@ -456,6 +517,7 @@ impl KeyApp {
     pub fn create_approver_only(&self) -> Result<(), KeyError> {
         self.run(|inner| {
             inner.no_session()?;
+            inner.not_pending()?;
             if matches!(inner.phase, Phase::Ready(_)) {
                 return Err(wrong_state(
                     "wallet-set",
@@ -544,106 +606,127 @@ impl KeyApp {
     /// slot holds exactly this key (and key 3's holds key 3's); the state
     /// is stored before this returns.
     pub fn accept_wallet(&self, setup: WalletSetup) -> Result<WalletView, KeyError> {
-        self.accept(setup, false)
+        self.accept(setup, None)
     }
 
-    /// The body of `accept_wallet`. With `ceremony` set, key 3 must have
-    /// been taken before (SR-67).
+    /// The body of `accept_wallet`. With `pending` set (the `OBMw` bytes of
+    /// the ceremony), key 3 must have been taken before (SR-67) and the
+    /// wallet is kept as pending until it is confirmed (SR-67).
     pub(crate) fn accept(
         &self,
         setup: WalletSetup,
-        ceremony: bool,
+        pending: Option<Vec<u8>>,
     ) -> Result<WalletView, KeyError> {
         self.run(|inner| {
             inner.no_session()?;
-            let material = match &inner.phase {
-                Phase::Identity(m) => m,
-                Phase::Empty => {
-                    return Err(wrong_state(
-                        "empty",
-                        "make the Key app's key first (create_from_entropy)",
-                    ))
-                }
-                Phase::Ready(_) => {
-                    return Err(wrong_state("wallet-set", "the wallet is accepted already"))
-                }
-            };
-            let network: bitcoin::Network = setup.network.into();
-            if let Some(k) = &material.key2 {
-                if k.network != network {
-                    return Err(refused_by(
-                        "network",
-                        "key 2 was made for another network than the wallet's",
-                    ));
-                }
-            }
-            let description = WalletDescription::parse(&setup.description, network)
-                .map_err(|e| refused_by("wallet", e))?;
-            let owner_bytes: [u8; 32] = setup
-                .owner_root
-                .as_slice()
-                .try_into()
-                .map_err(|_| refused_by("owner", "the owner root is not 32 bytes"))?;
-            let owner = DeviceId::from_bytes(&owner_bytes).map_err(|e| refused_by("owner", e))?;
-            let policy = setup
-                .batch_min_count
-                .map_or_else(BatchPolicy::default, |m| BatchPolicy { min_count: m });
-            let mut approver = Approver::new(
-                material.identity.bytes(),
-                description.clone(),
-                owner,
-                policy,
-            )
-            .map_err(refused)?;
-            let key3 = crate::ceremony::key3_for_accept(
-                material,
-                &description,
-                network,
-                setup.key3_xpub.as_deref(),
-                ceremony,
-            )?;
-            if let Some(k) = &material.key2 {
-                let xpub = Xpub::from_priv(&Secp256k1::new(), &k.account);
-                let state = SignerState::register(
-                    description.canonical_string(),
-                    network,
-                    &xpub,
-                    key3.as_ref(),
-                )
-                .map_err(refused)?;
-                approver.attach_signer(state, k.account).map_err(refused)?;
-            }
-            let part = WalletPart {
-                network,
-                description: description.canonical_string().to_string(),
-                owner,
-                batch_min_count: policy.min_count,
-            };
+            inner.not_pending()?;
+            let material =
+                match &inner.phase {
+                    Phase::Identity(m) => m,
+                    Phase::Empty => {
+                        return Err(wrong_state(
+                            "empty",
+                            "make the Key app's key first (create_from_entropy)",
+                        ))
+                    }
+                    Phase::Ready(_) => {
+                        return Err(wrong_state("wallet-set", "the wallet is accepted already"))
+                    }
+                    Phase::Pending(_) => return Err(wrong_state(
+                        "wallet-pending",
+                        "a wallet is waiting for the key holder: confirm it or discard it first",
+                    )),
+                };
+            let (part, approver) = build_wallet(material, setup, pending.is_some())?;
             let view = wallet_view(&approver)?;
-            inner
-                .store
-                .save(envelope::encode(
-                    material,
-                    Some((&part, &approver.snapshot())),
-                ))
-                .map_err(|e| store_failed(&e))?;
+            let bytes = match &pending {
+                Some(setup_bytes) => envelope::encode_pending(material, setup_bytes),
+                None => envelope::encode(material, Some((&part, &approver.snapshot()))),
+            };
+            inner.store.save(bytes).map_err(|e| store_failed(&e))?;
             let Phase::Identity(material) = std::mem::replace(&mut inner.phase, Phase::Empty)
             else {
                 return Err(internal("the phase changed during setup"));
             };
+            inner.phase = match pending {
+                Some(_) => Phase::Pending(Box::new(PendingState {
+                    material: *material,
+                    wallet: part,
+                    approver,
+                })),
+                None => Phase::Ready(Box::new(ReadyState {
+                    material: *material,
+                    wallet: part,
+                    approver,
+                })),
+            };
+            Ok(view)
+        })
+    }
+
+    /// SR-67, `docs/DESIGN.md` §2.1 step 5: the key holder says the words
+    /// and fingerprints match. The pending wallet becomes the registered
+    /// wallet, stored before this returns; SR-63 applies from then on.
+    pub fn confirm_wallet(&self) -> Result<(), KeyError> {
+        self.run(|inner| {
+            inner.no_session()?;
+            let Phase::Pending(p) = &inner.phase else {
+                return Err(nothing_pending());
+            };
+            inner
+                .store
+                .save(envelope::encode(
+                    &p.material,
+                    Some((&p.wallet, &p.approver.snapshot())),
+                ))
+                .map_err(|e| store_failed(&e))?;
+            let Phase::Pending(p) = std::mem::replace(&mut inner.phase, Phase::Empty) else {
+                return Err(internal("the phase changed during setup"));
+            };
+            let PendingState {
+                material,
+                wallet,
+                approver,
+                ..
+            } = *p;
             inner.phase = Phase::Ready(Box::new(ReadyState {
-                material: *material,
-                wallet: part,
+                material,
+                wallet,
                 approver,
             }));
-            Ok(view)
+            Ok(())
+        })
+    }
+
+    /// SR-67: the key holder says the words or fingerprints differ. The
+    /// pending wallet is dropped and the Key app is as it was before the
+    /// wallet setup was accepted, with key 2 and key 3 kept; stored before
+    /// this returns.
+    pub fn discard_wallet(&self) -> Result<(), KeyError> {
+        self.run(|inner| {
+            inner.no_session()?;
+            let Phase::Pending(p) = &inner.phase else {
+                return Err(nothing_pending());
+            };
+            inner
+                .store
+                .save(envelope::encode(&p.material, None))
+                .map_err(|e| store_failed(&e))?;
+            let Phase::Pending(p) = std::mem::replace(&mut inner.phase, Phase::Empty) else {
+                return Err(internal("the phase changed during setup"));
+            };
+            inner.phase = Phase::Identity(Box::new(p.material));
+            Ok(())
         })
     }
 
     /// What the Key app shows of the accepted wallet, to compare with the
     /// other devices and the recovery kit.
     pub fn wallet_view(&self) -> Result<WalletView, KeyError> {
-        self.run(|inner| wallet_view(&inner.ready()?.approver))
+        self.run(|inner| match &inner.phase {
+            Phase::Pending(p) => wallet_view(&p.approver),
+            _ => wallet_view(&inner.ready()?.approver),
+        })
     }
 
     /// The pair offer (`OBMO`) for the counter to scan: the Key app's
@@ -661,6 +744,75 @@ impl KeyApp {
             .map_err(refused)
         })
     }
+}
+
+fn nothing_pending() -> KeyError {
+    wrong_state(
+        "nothing-pending",
+        "no wallet is waiting for confirmation: scan the owner phone's wallet first",
+    )
+}
+
+/// Every check of a wallet setup, and the approver built from it, with the
+/// signer's state attached when this device holds key 2. Nothing is stored
+/// and nothing is changed. With `ceremony` set, key 3 must be held (SR-67).
+pub(crate) fn build_wallet(
+    material: &Material,
+    setup: WalletSetup,
+    ceremony: bool,
+) -> Result<(WalletPart, Approver), KeyError> {
+    let network: bitcoin::Network = setup.network.into();
+    if let Some(k) = &material.key2 {
+        if k.network != network {
+            return Err(refused_by(
+                "network",
+                "key 2 was made for another network than the wallet's",
+            ));
+        }
+    }
+    let description = WalletDescription::parse(&setup.description, network)
+        .map_err(|e| refused_by("wallet", e))?;
+    let owner_bytes: [u8; 32] = setup
+        .owner_root
+        .as_slice()
+        .try_into()
+        .map_err(|_| refused_by("owner", "the owner root is not 32 bytes"))?;
+    let owner = DeviceId::from_bytes(&owner_bytes).map_err(|e| refused_by("owner", e))?;
+    let policy = setup
+        .batch_min_count
+        .map_or_else(BatchPolicy::default, |m| BatchPolicy { min_count: m });
+    let mut approver = Approver::new(
+        material.identity.bytes(),
+        description.clone(),
+        owner,
+        policy,
+    )
+    .map_err(refused)?;
+    let key3 = crate::ceremony::key3_for_accept(
+        material,
+        &description,
+        network,
+        setup.key3_xpub.as_deref(),
+        ceremony,
+    )?;
+    if let Some(k) = &material.key2 {
+        let xpub = Xpub::from_priv(&Secp256k1::new(), &k.account);
+        let state = SignerState::register(
+            description.canonical_string(),
+            network,
+            &xpub,
+            key3.as_ref(),
+        )
+        .map_err(refused)?;
+        approver.attach_signer(state, k.account).map_err(refused)?;
+    }
+    let part = WalletPart {
+        network,
+        description: description.canonical_string().to_string(),
+        owner,
+        batch_min_count: policy.min_count,
+    };
+    Ok((part, approver))
 }
 
 fn wallet_view(approver: &Approver) -> Result<WalletView, KeyError> {

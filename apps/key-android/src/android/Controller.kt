@@ -182,6 +182,7 @@ class Controller(private val act: MainActivity) {
             is Screen.ShowWords -> showKeyWords()
             is Screen.Key3 -> showKey3(null)
             is Screen.GiveAnswer -> showAnswer(screen.key3)
+            is Screen.ComparePending -> showPending()
             is Screen.Home -> showHome(state ?: SetupState.Ready(screen.holdsKey2))
         }
     }
@@ -507,12 +508,23 @@ class Controller(private val act: MainActivity) {
         views.add(ui.text(c.identities.joinToString("\n"), 13f))
         views.add(ui.text("First address:\n${c.firstAddress}", 13f, mono = true))
         if (fresh) {
-            views.add(ui.button("They match") { refresh() })
-            views.add(ui.button("They differ") { showMessage(AppWords.walletMismatch) { showWallet(v, true) } })
+            views.add(ui.button("They match") { allowed { attempt({ showWallet(v, true) }) { app?.confirmWallet() }?.let { refresh() } } })
+            views.add(
+                ui.button("They differ") {
+                    allowed { attempt({ showWallet(v, true) }) { app?.discardWallet() }?.let { showMessage(AppWords.walletMismatch) { refresh() } } }
+                },
+            )
         } else {
             views.add(ui.button("Back") { refresh() })
         }
         act.show(ui.page(views))
+    }
+
+    /** The wallet that was checked and is kept, not registered, after a restart or a leave: the comparison again. */
+    private fun showPending() {
+        val a = app ?: return
+        val v = attempt({ refresh() }) { a.walletView() } ?: return
+        showWallet(v, true)
     }
 
     private fun showWalletAgain() {

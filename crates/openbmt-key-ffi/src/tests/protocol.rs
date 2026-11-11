@@ -67,6 +67,8 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (81, "key3_view"),
         (82, "public_answer"),
         (83, "accept_wallet_setup"),
+        (84, "confirm_wallet"),
+        (85, "discard_wallet"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

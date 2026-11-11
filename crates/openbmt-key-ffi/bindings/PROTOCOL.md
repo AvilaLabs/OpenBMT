@@ -88,6 +88,8 @@ The handle names the object the op works on: `zero` (the field is 0),
  81 key3_view              handle app      args () -> option<Key3View>
  82 public_answer          handle app      args () -> list<u8>
  83 accept_wallet_setup    handle app      args list<u8> -> WalletView
+ 84 confirm_wallet         handle app      args () -> ()
+ 85 discard_wallet         handle app      args () -> ()
 ```
 
 ## Types
@@ -99,8 +101,8 @@ KeyWordCount: enum, one tag byte
     tags Twelve=0 TwentyFour=1
 EntropySource: enum: Platform | DiceHashed{rolls: string} | CoinFlips{heads: list<bool>, words: KeyWordCount} | DiceSkewCorrected{rolls: string, words: KeyWordCount} | TypedWords{words: list<string>}
     tags Platform=0 DiceHashed=1 CoinFlips=2 DiceSkewCorrected=3 TypedWords=4
-SetupState: enum: Empty | HasIdentity{holds_key2: bool, words_waiting: bool} | Ready{holds_key2: bool}
-    tags Empty=0 HasIdentity=1 Ready=2
+SetupState: enum: Empty | HasIdentity{holds_key2: bool, words_waiting: bool} | Ready{holds_key2: bool} | WalletPending{holds_key2: bool}
+    tags Empty=0 HasIdentity=1 Ready=2 WalletPending=3
 Key2Public: record: network: KeyNetwork, master_fingerprint: string, origin_path: string, account_xpub: string
 Key3View: record: mainnet: bool, master_fingerprint: string, origin_path: string, account_xpub: string
 SlotView: record: index: u32, fingerprint: string, xpub: string

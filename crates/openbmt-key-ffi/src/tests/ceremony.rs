@@ -300,7 +300,7 @@ fn sr_67_key_3_is_taken_only_after_the_key_is_made_and_before_the_wallet() {
 fn sr_69_the_public_answer_holds_the_public_parts_and_needs_key_3() {
     let (app, store) = fresh();
     let err = app.public_answer().expect_err("no key 3");
-    assert_eq!(err.rule(), "SR-67");
+    assert_eq!(err.rule(), "key3-missing");
     assert_eq!(err.words(), CeremonyRefusal::NoKey3.words());
     app.take_key3(key3_text()).expect("taken");
     let bytes = app.public_answer().expect("the answer");
@@ -360,6 +360,16 @@ fn sr_67_the_wallet_setup_is_accepted_against_the_key_3_held() {
         view.owner_root_words,
         owner_id().fingerprint_words().map(String::from).to_vec()
     );
+    // SR-67: the wallet is kept, not registered, until it is confirmed.
+    assert_eq!(
+        app.state().expect("state"),
+        SetupState::WalletPending { holds_key2: true }
+    );
+    let decoded = envelope::decode(&store.saved().expect("stored")).expect("decodes");
+    assert_eq!(decoded.material.key3, Some(key3_part()));
+    assert!(decoded.wallet.is_none());
+    assert_eq!(decoded.pending, Some(setup_bytes(&wallet)));
+    app.confirm_wallet().expect("confirmed");
     assert!(matches!(
         app.state().expect("state"),
         SetupState::Ready { holds_key2: true }
@@ -368,6 +378,7 @@ fn sr_67_the_wallet_setup_is_accepted_against_the_key_3_held() {
     let decoded = envelope::decode(&store.saved().expect("stored")).expect("decodes");
     assert_eq!(decoded.material.key3, Some(key3_part()));
     assert!(decoded.wallet.is_some());
+    assert!(decoded.pending.is_none());
     let again = KeyApp::open(store).expect("opens");
     assert_eq!(again.wallet_view().expect("view"), view);
 }
@@ -386,7 +397,7 @@ fn sr_67_a_wallet_with_another_key_3_is_refused_and_nothing_changes() {
     let err = app
         .accept_wallet_setup(setup_bytes(&wallet))
         .expect_err("refused");
-    assert_eq!(err.rule(), "SR-67");
+    assert_eq!(err.rule(), "key3-not-in-wallet");
     assert_eq!(err.text(), CeremonyRefusal::Key3NotInWallet.to_string());
     assert_eq!(err.words(), CeremonyRefusal::Key3NotInWallet.words());
     assert_eq!(store.saves(), saves);
@@ -403,7 +414,7 @@ fn sr_67_a_wallet_with_another_key_3_is_refused_and_nothing_changes() {
     let err = app
         .accept_wallet_setup(setup_bytes(&wallet))
         .expect_err("refused");
-    assert_eq!(err.rule(), "SR-67");
+    assert_eq!(err.rule(), "key3-not-in-wallet");
     // The right wallet is still accepted afterwards.
     let wallet = wallet_for(&app, &key3_part());
     app.accept_wallet_setup(setup_bytes(&wallet))
@@ -417,7 +428,7 @@ fn sr_67_the_ceremony_setup_is_refused_when_no_key_3_was_taken() {
     let err = app
         .accept_wallet_setup(setup_bytes(&wallet))
         .expect_err("refused");
-    assert_eq!(err.rule(), "SR-67");
+    assert_eq!(err.rule(), "key3-missing");
     assert_eq!(err.text(), CeremonyRefusal::NoKey3.to_string());
     assert_eq!(store.saves(), 1, "only the key was stored");
 }
@@ -430,7 +441,7 @@ fn sr_67_a_key_3_given_with_the_wallet_must_be_the_key_3_held() {
     let (_, other) = fixed_key(7, 3);
     let mut setup = setup_for(&wallet, &other.xpub);
     let err = app.accept_wallet(setup.clone()).expect_err("refused");
-    assert_eq!(err.rule(), "SR-67");
+    assert_eq!(err.rule(), "key3-differs");
     assert_eq!(err.text(), CeremonyRefusal::Key3Differs.to_string());
     // The same key, or none, is taken: the key held is the one used.
     setup.key3_xpub = Some(key3_part().xpub.to_string());
@@ -594,7 +605,57 @@ fn the_ops_80_to_83_run_the_ceremony_through_the_call_protocol() {
     assert_eq!(words, wallet.checksum_words().map(String::from).to_vec());
     // A refusal of any of these ops carries the words of the refusal.
     let (status, _) = call(80, app, W::new().string(&key3_text()));
+    assert_eq!(status, 3, "the wallet is pending: a state error");
+    // Op 84 confirms, and then there is nothing to confirm or discard.
+    let (status, body) = call(84, app, W::new());
+    assert_eq!((status, body), (0, vec![]));
+    let (status, _) = call(84, app, W::new());
+    assert_eq!(status, 3);
+    let (status, _) = call(85, app, W::new());
+    assert_eq!(status, 3);
+    let (status, _) = call(80, app, W::new().string(&key3_text()));
     assert_eq!(status, 3, "the wallet is set: a state error");
+}
+
+#[test]
+fn the_op_85_discards_the_pending_wallet_through_the_call_protocol() {
+    let store = MemStore::new();
+    let reg = Registry::new();
+    let call = |op: u16, handle: u64, fields: W| {
+        let response = dispatch(&reg, store.clone(), &frame(op, handle, &fields.0));
+        (response[5], response[6..].to_vec())
+    };
+    let (_, body) = call(1, 0, W::new());
+    let app = Rd::new(&body).u64();
+    call(
+        11,
+        app,
+        W::new()
+            .source(&EntropySource::Platform)
+            .network(KeyNetwork::Regtest),
+    );
+    call(80, app, W::new().string(&key3_text()));
+    let (_, body) = call(82, app, W::new());
+    let a = KeyAnswer::from_bytes(&Rd::new(&body).bytes()).expect("reads");
+    let key2 = a.key2.expect("key 2");
+    let (_, slot1) = fixed_key(1, 1);
+    let slot2 = KeySlot {
+        index: 2,
+        origin_fingerprint: key2.fingerprint,
+        origin_path: path(),
+        xpub: key2.xpub,
+    };
+    let (_, slot3) = fixed_key(3, 3);
+    let wallet = WalletDescription::new(NET, [slot1, slot2, slot3]).expect("a wallet");
+    assert_eq!(call(83, app, W::new().bytes(&setup_bytes(&wallet))).0, 0);
+    let (_, body) = call(10, app, W::new());
+    assert_eq!(body, vec![3, 1], "the wallet is pending, key 2 is held");
+    assert_eq!(call(85, app, W::new()), (0, vec![]));
+    let (_, body) = call(10, app, W::new());
+    assert_eq!(body[..2], [1, 1], "back to an identity that holds key 2");
+    // Key 3 is kept: the answer is still there, and the wallet can be accepted again.
+    assert_eq!(call(82, app, W::new()).0, 0);
+    assert_eq!(call(83, app, W::new().bytes(&setup_bytes(&wallet))).0, 0);
 }
 
 #[test]
@@ -606,4 +667,269 @@ fn every_refusal_of_the_ceremony_has_words_of_its_own_and_not_the_fallback() {
         assert_ne!(words.heading, fallback.heading, "{r:?}");
         assert_eq!(check(&words), Ok(()));
     }
+}
+
+// ---- SR-67: the wallet is kept until the key holder confirms it ------------------------
+
+/// The wallet of key 1 made from `seed`, the app's key 2 and `key3`.
+fn wallet_with_key1(app: &KeyApp, key3: &KeyPart, seed: u8) -> WalletDescription {
+    let public = app.key2_public().expect("asked").expect("key 2");
+    let (_, slot1) = fixed_key(seed, 1);
+    let slot2 = KeySlot {
+        index: 2,
+        origin_fingerprint: public
+            .master_fingerprint
+            .parse::<Fingerprint>()
+            .expect("hex"),
+        origin_path: path(),
+        xpub: public.account_xpub.parse::<Xpub>().expect("an xpub"),
+    };
+    let slot3 = KeySlot {
+        index: 3,
+        origin_fingerprint: key3.fingerprint,
+        origin_path: path(),
+        xpub: key3.xpub,
+    };
+    WalletDescription::new(NET, [slot1, slot2, slot3]).expect("a wallet")
+}
+
+fn pending() -> (
+    Arc<KeyApp>,
+    Arc<MemStore>,
+    crate::WalletView,
+    WalletDescription,
+) {
+    let (app, store) = fresh();
+    app.take_key3(key3_text()).expect("taken");
+    let wallet = wallet_for(&app, &key3_part());
+    let view = app
+        .accept_wallet_setup(setup_bytes(&wallet))
+        .expect("accepted");
+    (app, store, view, wallet)
+}
+
+#[test]
+fn sr_67_a_pending_wallet_co_signs_nothing_and_offers_no_pairing() {
+    let (app, _, _, _) = pending();
+    assert_eq!(
+        app.state().expect("state"),
+        SetupState::WalletPending { holds_key2: true }
+    );
+    for err in [
+        app.open_session(Vec::new()).err().expect("no session"),
+        app.signer_status().expect_err("no status"),
+        app.pair_offer_bytes().expect_err("no pairing"),
+        app.receive_mark().expect_err("no mark"),
+    ] {
+        assert_eq!(err.kind(), Kind::State);
+        assert_eq!(err.rule(), "wallet-pending");
+        assert_eq!(check(&err.words()), Ok(()));
+    }
+    // The comparison can be shown again at any time.
+    assert!(app.wallet_view().is_ok());
+    // Nothing else of the setup moves until the wallet is confirmed or discarded.
+    for err in [
+        app.take_key3(key3_text()).expect_err("no new key 3"),
+        app.create_from_entropy(EntropySource::Platform, KeyNetwork::Regtest)
+            .expect_err("no new key 2"),
+        app.create_approver_only().expect_err("no new identity"),
+        app.accept_wallet_setup(setup_bytes(&wallet_for(&app, &key3_part())))
+            .expect_err("no second wallet"),
+    ] {
+        assert_eq!(err.rule(), "wallet-pending");
+    }
+    // After the confirmation the same calls work.
+    app.confirm_wallet().expect("confirmed");
+    assert!(app.signer_status().is_ok());
+    assert!(app.pair_offer_bytes().is_ok());
+}
+
+#[test]
+fn sr_67_a_confirmed_wallet_is_the_registered_wallet() {
+    let (app, store, view, _) = pending();
+    let before = store.saves();
+    app.confirm_wallet().expect("confirmed");
+    assert_eq!(store.saves(), before + 1, "stored before it returns");
+    assert_eq!(app.wallet_view().expect("view"), view);
+    // SR-63 applies from now on: the wallet cannot be set again.
+    let err = app
+        .accept_wallet_setup(setup_bytes(&wallet_for(&app, &key3_part())))
+        .expect_err("already set");
+    assert_eq!(err.rule(), "wallet-set");
+    let again = KeyApp::open(store).expect("opens");
+    assert_eq!(
+        again.state().expect("state"),
+        SetupState::Ready { holds_key2: true }
+    );
+}
+
+#[test]
+fn sr_67_a_discarded_wallet_leaves_the_state_before_it_and_another_can_be_accepted() {
+    let (app, store, first, _) = pending();
+    let key2 = app.key2_public().expect("asked");
+    app.discard_wallet().expect("discarded");
+    assert!(matches!(
+        app.state().expect("state"),
+        SetupState::HasIdentity {
+            holds_key2: true,
+            ..
+        }
+    ));
+    // Key 2 and key 3 are kept, in memory and in the stored bytes.
+    assert_eq!(app.key2_public().expect("asked"), key2);
+    assert!(app.key3_view().expect("asked").is_some());
+    let bytes = store.saved().expect("stored");
+    assert_eq!(&bytes[..5], b"OBM7\x02");
+    let decoded = envelope::decode(&bytes).expect("decodes");
+    assert!(decoded.wallet.is_none() && decoded.pending.is_none());
+    assert_eq!(decoded.material.key3, Some(key3_part()));
+    // Another wallet is accepted and confirmed; its words are its own.
+    let other = wallet_with_key1(&app, &key3_part(), 5);
+    let second = app
+        .accept_wallet_setup(setup_bytes(&other))
+        .expect("accepted");
+    assert_ne!(second.checksum_words, first.checksum_words);
+    app.confirm_wallet().expect("confirmed");
+    assert_eq!(app.wallet_view().expect("view"), second);
+}
+
+#[test]
+fn sr_67_a_restart_while_pending_reopens_on_the_pending_wallet() {
+    let (app, store, view, _) = pending();
+    drop(app);
+    let again = KeyApp::open(store.clone()).expect("opens");
+    assert_eq!(
+        again.state().expect("state"),
+        SetupState::WalletPending { holds_key2: true }
+    );
+    assert_eq!(again.wallet_view().expect("view"), view);
+    assert!(again.open_session(Vec::new()).is_err());
+    // It is confirmed after the restart, and a second restart finds it registered.
+    again.confirm_wallet().expect("confirmed");
+    let third = KeyApp::open(store.clone()).expect("opens");
+    assert_eq!(
+        third.state().expect("state"),
+        SetupState::Ready { holds_key2: true }
+    );
+    // Or it is discarded after a restart.
+    let (app, store, _, _) = pending();
+    drop(app);
+    let again = KeyApp::open(store.clone()).expect("opens");
+    again.discard_wallet().expect("discarded");
+    let third = KeyApp::open(store).expect("opens");
+    assert!(matches!(
+        third.state().expect("state"),
+        SetupState::HasIdentity { .. }
+    ));
+    assert!(third.key3_view().expect("asked").is_some());
+}
+
+#[test]
+fn sr_67_confirm_and_discard_with_nothing_pending_are_refused() {
+    let store = MemStore::new();
+    let empty = KeyApp::open(store.clone()).expect("opens");
+    assert_eq!(
+        empty.confirm_wallet().expect_err("nothing").rule(),
+        "nothing-pending"
+    );
+    assert_eq!(
+        empty.discard_wallet().expect_err("nothing").rule(),
+        "nothing-pending"
+    );
+    let (app, store) = fresh();
+    app.take_key3(key3_text()).expect("taken");
+    let saves = store.saves();
+    assert_eq!(
+        app.confirm_wallet().expect_err("nothing").rule(),
+        "nothing-pending"
+    );
+    assert_eq!(
+        app.discard_wallet().expect_err("nothing").rule(),
+        "nothing-pending"
+    );
+    assert_eq!(store.saves(), saves, "nothing was stored");
+    let wallet = wallet_for(&app, &key3_part());
+    app.accept_wallet_setup(setup_bytes(&wallet))
+        .expect("accepted");
+    app.confirm_wallet().expect("confirmed");
+    // Registered already: there is nothing pending to confirm again or to discard.
+    assert_eq!(
+        app.confirm_wallet().expect_err("twice").rule(),
+        "nothing-pending"
+    );
+    assert_eq!(
+        app.discard_wallet().expect_err("registered").rule(),
+        "nothing-pending"
+    );
+    assert!(matches!(
+        app.state().expect("state"),
+        SetupState::Ready { .. }
+    ));
+    for e in [
+        app.confirm_wallet().expect_err("x"),
+        app.discard_wallet().expect_err("y"),
+    ] {
+        assert_eq!(check(&e.words()), Ok(()));
+    }
+}
+
+#[test]
+fn sr_67_a_failing_store_changes_nothing_on_confirm_or_discard() {
+    let (app, store, _, _) = pending();
+    store.fail_saves(true);
+    assert_eq!(app.confirm_wallet().expect_err("fails").kind(), Kind::Store);
+    assert_eq!(app.discard_wallet().expect_err("fails").kind(), Kind::Store);
+    assert!(matches!(
+        app.state().expect("state"),
+        SetupState::WalletPending { .. }
+    ));
+    store.fail_saves(false);
+    app.confirm_wallet().expect("confirmed");
+}
+
+#[test]
+fn sr_67_the_pending_envelope_is_strict() {
+    let (_, store, _, wallet) = pending();
+    let bytes = store.saved().expect("stored");
+    assert_eq!(&bytes[..5], b"OBM7\x03");
+    let decoded = envelope::decode(&bytes).expect("decodes");
+    let pending_bytes = decoded.pending.clone().expect("pending");
+    assert_eq!(pending_bytes, setup_bytes(&wallet));
+    assert_eq!(
+        envelope::encode_pending(&decoded.material, &pending_bytes),
+        bytes
+    );
+    for cut in 0..bytes.len() {
+        assert!(envelope::decode(&bytes[..cut]).is_err(), "cut at {cut}");
+    }
+    let mut longer = bytes.clone();
+    longer.push(0);
+    assert!(envelope::decode(&longer).is_err());
+    // A pending wallet and a registered wallet never come together: the wallet flag is the last
+    // byte but one of a pending envelope's tail, and 1 there is refused.
+    let mut both = bytes.clone();
+    let last = both.len() - 1;
+    both[last] = 1;
+    assert!(envelope::decode(&both).is_err());
+    // A version-3 envelope with no key 3 is refused.
+    let mut no_key3 = bytes.clone();
+    no_key3[4] = 3;
+    let (app, store2) = fresh();
+    drop(app);
+    let mut v1 = store2.saved().expect("stored");
+    v1[4] = 3;
+    assert!(envelope::decode(&v1).is_err());
+    no_key3.truncate(5);
+    assert!(envelope::decode(&no_key3).is_err());
+    // A stored pending wallet that the checks no longer accept is not opened.
+    let (_, store3, _, _) = pending();
+    let mut bad = store3.saved().expect("stored");
+    // Flip the network byte of the setup frame (4 bytes of length, then magic, version, network).
+    let at = bad
+        .windows(5)
+        .position(|w| w == b"OBMw\x01")
+        .expect("the setup frame");
+    bad[at + 5] = 0;
+    store3.set_saved(Some(bad));
+    assert!(KeyApp::open(store3).is_err());
 }

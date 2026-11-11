@@ -42,6 +42,11 @@ class WalletCheck(
  * refusal gets which extra words. No Android class is used, so the JVM test runs it.
  */
 object CeremonyModel {
+    /** The rule strings of the library's SR-67 refusals (docs/SIGNER-RULES.md). */
+    const val RULE_KEY3_MISSING = "key3-missing"
+    const val RULE_KEY3_DIFFERS = "key3-differs"
+    const val RULE_KEY3_NOT_IN_WALLET = "key3-not-in-wallet"
+
     /** The magic and the version byte of the Key app's answer (`OBMv`) and of the wallet setup (`OBMw`). */
     private fun frame(last: Char) = byteArrayOf('O'.code.toByte(), 'B'.code.toByte(), 'M'.code.toByte(), last.code.toByte(), 1)
 
@@ -103,13 +108,13 @@ object CeremonyModel {
 
     /**
      * What a refused wallet setup shows: the library's own words, and before them the app's plain words when
-     * the owner phone's wallet does not hold the key 3 taken here (SR-67). Both refusals of that rule have the
-     * same meaning for the person: nothing was accepted and the owner phone's wallet is not this one.
+     * the owner phone's wallet does not hold the key 3 taken here (SR-67). The library tells the kinds apart by
+     * their rule strings; the two that mean "this wallet is not for the key 3 taken" read the same to the person:
+     * nothing was accepted and the owner phone's wallet is not this one.
      */
     fun setupRefusal(e: KeyException): List<Words> {
         val own = e.words
-        val swapped = e.rule == "SR-67" &&
-            (e.text.contains("no key of the wallet is the key 3 taken") || e.text.contains("is not the key 3 taken"))
+        val swapped = e.rule == RULE_KEY3_NOT_IN_WALLET || e.rule == RULE_KEY3_DIFFERS
         return when {
             swapped && own != null -> listOf(AppWords.walletLacksKey3, own)
             swapped -> listOf(AppWords.walletLacksKey3)

@@ -72,7 +72,7 @@ writes it again). Op numbers are never reused.
 | 1 | `open` | none | restore the Key app from `store.load()`; returns the app handle |
 | 2 | `close_app` | app | close it and its session |
 | 3 | `close_session` | session | cancel and close the handle |
-| 10 | `state` | app | `Empty`, `HasIdentity`, `Ready` |
+| 10 | `state` | app | `Empty`, `HasIdentity`, `WalletPending`, `Ready` |
 | 11 | `create_from_entropy` | app | identity and key 2 from a source; stored; the words wait |
 | 12 | `create_approver_only` | app | identity only (key 2 on a hardware wallet) |
 | 13 | `key_words` | app | the words, once, never stored |
@@ -107,7 +107,21 @@ writes it again). Op numbers are never reused.
 | 80 | `take_key3` | app | read and keep key 3 from text; returns what to compare |
 | 81 | `key3_view` | app | key 3 as kept, or none |
 | 82 | `public_answer` | app | the public answer (`OBMv`) for the owner phone |
-| 83 | `accept_wallet_setup` | app | accept the owner phone's setup (`OBMw`); returns the wallet view |
+| 83 | `accept_wallet_setup` | app | check the owner phone's setup (`OBMw`) and keep it as pending; returns the wallet view |
+| 84 | `confirm_wallet` | app | "they match": the pending wallet becomes the registered wallet |
+| 85 | `discard_wallet` | app | "they differ": drop the pending wallet, back to the state before op 83 |
+
+The ceremony's wallet is accepted in two steps (`docs/SIGNER-RULES.md`
+SR-67). Op 83 runs every check and stores the setup as pending, in an `OBM7`
+envelope of version 3 (the `OBMw` bytes, and no wallet), so that a restart
+reopens on the comparison: `state` says `WalletPending`, `wallet_view` shows
+it, and every op that signs, pairs or changes the setup is refused with the
+state rule `wallet-pending`. Op 84 registers it (SR-63 applies from then
+on); op 85 drops it and leaves the Key app as it was before op 83, with key
+2 and key 3 kept. Both are refused with `nothing-pending` when nothing is
+pending. The three refusals of SR-67 have the rule strings `key3-missing`,
+`key3-differs` and `key3-not-in-wallet`. The older `accept_wallet` (op 17)
+registers at once.
 
 Opening a session ends the handle of the app's previous session. One call
 runs at a time: a call made while another runs, or from inside a store
@@ -167,7 +181,7 @@ given network and of a kind the signer's allowlist takes. The text is at most
 
 ### The `OBM7` envelope
 
-`OBM7`, version 1, strict decode (`src/envelope.rs`): the identity secret;
+`OBM7`, version 1 (2 with key 3, 3 with a pending wallet setup), strict decode (`src/envelope.rs`): the identity secret;
 key 2's network, master fingerprint and account key if this device holds
 key 2; and, once the wallet is accepted, the network, the canonical wallet
 description, the owner root, the batch minimum and the approver snapshot

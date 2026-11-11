@@ -110,6 +110,19 @@ object ProtocolDecoderTest {
         rejects("a wallet view cut short") { decodeResponse(wallet.copyOf(wallet.size - 1)).let { it.walletView(); it.end() } }
         rejects("a wallet view with trailing bytes") { decodeResponse(wallet + byteArrayOf(0)).let { it.walletView(); it.end() } }
 
+        // Op 10: the state, with the pending wallet (tag 3).
+        val pendingState = decodeResponse(okFrame { it.write(3); it.write(1) })
+        check(pendingState.setupState() == SetupState.WalletPending(true)) { "wallet pending" }
+        pendingState.end()
+        rejects("a state tag that is 4") { decodeResponse(okFrame { it.write(4); it.write(1) }).setupState() }
+        rejects("a pending state cut short") { decodeResponse(okFrame { it.write(3) }).setupState() }
+
+        // Ops 84 and 85 carry no fields; their answer is nothing.
+        decodeResponse(okFrame { }).end()
+        rejects("an answer to op 84 with trailing bytes") { decodeResponse(okFrame { it.write(0) }).end() }
+        check(requestFrame(84, 3).size == 15 && requestFrame(84, 3)[5].toInt() == 84) { "op 84" }
+        check(requestFrame(85, 3).size == 15 && requestFrame(85, 3)[5].toInt() == 85) { "op 85" }
+
         // The requests: magic, version 1, op, handle, then the fields.
         val take = takeKey3Request(7, "abc")
         check(take.copyOf(5).contentEquals("OBM8".toByteArray(Charsets.US_ASCII) + byteArrayOf(1))) { "request magic and version" }

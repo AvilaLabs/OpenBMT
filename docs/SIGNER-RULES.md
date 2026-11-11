@@ -316,7 +316,18 @@ steps are OC-40 to OC-46 in `docs/OWNER-COINS-RULES.md`.
   fingerprint and path), and, on a device that holds key 2, that key is another
   slot (SR-61, SR-62). When key 3 is stored, a key 3 given with the wallet must
   be the same key. The wallet setup of the ceremony is refused when no key 3
-  has been taken.
+  has been taken. The three refusals of this rule are told apart by their
+  rule strings in the Key app's library, not by their text: `key3-missing`
+  (no key 3 taken), `key3-differs` (the key 3 given is not the one taken) and
+  `key3-not-in-wallet` (no key of the wallet is the key 3 taken: a swapped
+  key 3). A wallet setup of the ceremony that passes every check is kept
+  as pending, not registered: it is stored (so a restart reopens on it) and
+  shown for the key holder to compare with the owner phone and the counter.
+  While it is pending nothing is co-signed, no pairing is offered and no
+  other change of the setup is made. The key holder's "they match" registers
+  it (SR-63 applies from then on); "they differ" drops it and returns the Key
+  app to the state before the setup, with key 2 and key 3 kept. Either is
+  refused, with nothing changed, when no wallet is pending.
 - **SR-68.** The Key app's answer (`OBMv`) and the wallet setup (`OBMw`) are
   strict frames: the magic, version 1, the exact length, flags 0 or 1,
   defined network bytes, keys at the account level for the network's kind, an

@@ -1,10 +1,11 @@
 //! `OBM7`: what the Key app hands to `KeyStore::save`.
 //!
 //! ```text
-//! "OBM7" | 1 or 2 | identity secret (32)
+//! "OBM7" | 1, 2 or 3 | identity secret (32)
 //!   | key 2 flag u8, then if 1:
 //!       network u8 | master fingerprint (4) | account key, BIP32 form (78)
-//!   | version 2 only: key 3, public: master fingerprint (4) | account key (78)
+//!   | version 2 and 3: key 3, public: master fingerprint (4) | account key (78)
+//!   | version 3 only: the pending wallet setup, `OBMw` bytes, u32 length
 //!   | wallet flag u8, then if 1:
 //!       network u8 | description u32 length and text (UTF-8)
 //!       | owner root (32) | batch minimum u32 LE
@@ -12,7 +13,9 @@
 //! ```
 //!
 //! The version is 1 until key 3 has been taken (SR-67) and 2 from then on:
-//! a stored state without key 3 is written exactly as before. The networks
+//! a stored state without key 3 is written exactly as before. Version 3 is
+//! a Key app that holds a wallet setup it has checked but not confirmed
+//! (SR-67): its wallet flag is always 0. The networks
 //! are 0 mainnet, 1 testnet, 2 signet, 3 regtest, as in the
 //! signer's snapshot. Decoding is strict: it succeeds only for bytes that
 //! `encode` would have produced. It only parses; the wallet, the owner and
@@ -30,6 +33,8 @@ pub const MAGIC_KEY_APP: [u8; 4] = *b"OBM7";
 
 /// Longest wallet description text read back.
 const MAX_DESCRIPTION: usize = 4096;
+/// Longest pending wallet setup (`OBMw`) read back.
+const MAX_PENDING: usize = 16 * 1024;
 /// Largest approver snapshot read back (the signer's spend log can be big).
 const MAX_SNAPSHOT: usize = 64 * 1024 * 1024;
 
@@ -104,6 +109,9 @@ pub(crate) struct Decoded {
     pub material: Material,
     /// The wallet and the `OBM3` snapshot, when a wallet was accepted.
     pub wallet: Option<(WalletPart, Vec<u8>)>,
+    /// The wallet setup (`OBMw`) that was checked and is waiting for the
+    /// key holder's confirmation (SR-67). Never with a wallet.
+    pub pending: Option<Vec<u8>>,
 }
 
 pub(crate) fn network_byte(network: Network) -> Option<u8> {
@@ -139,11 +147,29 @@ pub(crate) fn encode_with(
     key3: Option<&KeyPart>,
     wallet: Option<(&WalletPart, &[u8])>,
 ) -> Vec<u8> {
+    encode_full(material, key3, wallet, None)
+}
+
+/// The bytes of the envelope of a Key app that holds a wallet setup it has
+/// checked and that waits for the key holder's confirmation (SR-67).
+pub(crate) fn encode_pending(material: &Material, setup: &[u8]) -> Vec<u8> {
+    encode_full(material, material.key3.as_ref(), None, Some(setup))
+}
+
+fn encode_full(
+    material: &Material,
+    key3: Option<&KeyPart>,
+    wallet: Option<(&WalletPart, &[u8])>,
+    pending: Option<&[u8]>,
+) -> Vec<u8> {
     let mut out = wire::start(&MAGIC_KEY_APP, 512);
-    if key3.is_some() {
-        if let Some(version) = out.get_mut(4) {
-            *version = 2;
-        }
+    let version = match (key3.is_some(), pending.is_some()) {
+        (_, true) => 3,
+        (true, false) => 2,
+        (false, false) => 1,
+    };
+    if let Some(v) = out.get_mut(4) {
+        *v = version;
     }
     out.extend_from_slice(material.identity.bytes());
     match &material.key2 {
@@ -159,6 +185,10 @@ pub(crate) fn encode_with(
         let (fingerprint, raw) = k.to_raw();
         out.extend_from_slice(&fingerprint);
         out.extend_from_slice(&raw);
+    }
+    if let Some(setup) = pending {
+        out.extend_from_slice(&wire::len_u32(setup.len()).to_le_bytes());
+        out.extend_from_slice(setup);
     }
     match wallet {
         Some((w, snapshot)) => {
@@ -183,7 +213,7 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Decoded, DecodeError> {
         return Err(DecodeError::BadMagic);
     }
     let version = match r.u8()? {
-        v @ (1 | 2) => v,
+        v @ (1..=3) => v,
         v => return Err(DecodeError::UnsupportedVersion(v)),
     };
     let identity = Secret32::new(r.array::<32>()?);
@@ -210,7 +240,7 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Decoded, DecodeError> {
     } else {
         None
     };
-    let key3 = if version == 2 {
+    let key3 = if version >= 2 {
         let fingerprint = r.array::<4>()?;
         let raw = r.array::<78>()?;
         let k = KeyPart::from_raw(fingerprint, &raw)
@@ -237,7 +267,22 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Decoded, DecodeError> {
         key2,
         key3,
     };
+    let pending = if version == 3 {
+        if material.key3.is_none() {
+            return Err(DecodeError::NonCanonical("a pending wallet without key 3"));
+        }
+        let n = usize::try_from(r.u32_le()?).map_err(|_| DecodeError::TooLarge)?;
+        if n > MAX_PENDING {
+            return Err(DecodeError::TooLarge);
+        }
+        Some(r.take(n)?.to_vec())
+    } else {
+        None
+    };
     let wallet = if r.flag()? {
+        if pending.is_some() {
+            return Err(DecodeError::NonCanonical("a pending wallet and a wallet"));
+        }
         let network = network_from(r.u8()?)?;
         if let Some(k) = &material.key2 {
             if k.network != network {
@@ -272,5 +317,9 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Decoded, DecodeError> {
         None
     };
     r.finish()?;
-    Ok(Decoded { material, wallet })
+    Ok(Decoded {
+        material,
+        wallet,
+        pending,
+    })
 }

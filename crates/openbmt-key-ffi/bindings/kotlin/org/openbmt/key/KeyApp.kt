@@ -94,6 +94,8 @@ private const val OP_TAKE_KEY3 = 80
 private const val OP_KEY3_VIEW = 81
 private const val OP_PUBLIC_ANSWER = 82
 private const val OP_ACCEPT_WALLET_SETUP = 83
+private const val OP_CONFIRM_WALLET = 84
+private const val OP_DISCARD_WALLET = 85
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -111,6 +113,7 @@ private const val TAG_ENTROPY_SOURCE_TYPED_WORDS = 4
 private const val TAG_SETUP_STATE_EMPTY = 0
 private const val TAG_SETUP_STATE_HAS_IDENTITY = 1
 private const val TAG_SETUP_STATE_READY = 2
+private const val TAG_SETUP_STATE_WALLET_PENDING = 3
 private const val TAG_KIT_CHECK_SAME = 0
 private const val TAG_KIT_CHECK_DIFFERENT = 1
 private const val TAG_DECISION_APPROVE = 0
@@ -158,6 +161,9 @@ sealed class SetupState {
     object Empty : SetupState()
     data class HasIdentity(val holdsKey2: Boolean, val wordsWaiting: Boolean) : SetupState()
     data class Ready(val holdsKey2: Boolean) : SetupState()
+
+    /** A wallet setup passed every check and is kept, not registered, until confirmed or discarded. */
+    data class WalletPending(val holdsKey2: Boolean) : SetupState()
 }
 
 data class Key2Public(
@@ -586,11 +592,12 @@ private fun Reader.network(): KeyNetwork =
         else -> tag("KeyNetwork")
     }
 
-private fun Reader.setupState(): SetupState =
+internal fun Reader.setupState(): SetupState =
     when (u8()) {
         TAG_SETUP_STATE_EMPTY -> SetupState.Empty
         TAG_SETUP_STATE_HAS_IDENTITY -> SetupState.HasIdentity(bool(), bool())
         TAG_SETUP_STATE_READY -> SetupState.Ready(bool())
+        TAG_SETUP_STATE_WALLET_PENDING -> SetupState.WalletPending(bool())
         else -> tag("SetupState")
     }
 
@@ -975,7 +982,13 @@ class KeyApp private constructor(private val store: KeyStore, private val handle
         return r.bytes().also { r.end() }
     }
 
-    /** SR-68, SR-69: accept the owner phone's wallet setup (`OBMw`). */
+    /** SR-67: "they match". The pending wallet becomes the registered wallet. */
+    fun confirmWallet() = callUnit(store, OP_CONFIRM_WALLET, handle)
+
+    /** SR-67: "they differ". The pending wallet is dropped; key 2 and key 3 are kept. */
+    fun discardWallet() = callUnit(store, OP_DISCARD_WALLET, handle)
+
+    /** SR-67, SR-68: check the owner phone's wallet setup (`OBMw`) and keep it as pending. */
     fun acceptWalletSetup(setup: ByteArray): WalletView {
         val r = callFrame(acceptWalletSetupRequest(handle, setup))
         return r.walletView().also { r.end() }

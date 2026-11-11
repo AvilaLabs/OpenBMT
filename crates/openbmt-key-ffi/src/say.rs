@@ -384,6 +384,22 @@ fn state_words(rule: &str, text: &str) -> Option<Words> {
             "Finish the setup first: accept the wallet from the owner's phone.",
         )
         .detail(text),
+        "wallet-pending" => Words::new(
+            Tone::Info,
+            "Wallet not confirmed yet",
+            "A wallet is waiting for the key holder's check, so this cannot be done yet.",
+            Who::KeyHolder,
+            "Confirm that its words match the owner's phone, or discard it, then try again.",
+        )
+        .detail(text),
+        "nothing-pending" => Words::new(
+            Tone::Ended,
+            "No wallet to confirm",
+            "No wallet is waiting for the key holder's check, so there is nothing to confirm or discard.",
+            Who::KeyHolder,
+            "Scan the wallet code on the owner's phone first.",
+        )
+        .detail(text),
         "wallet-set" => Words::new(
             Tone::Ended,
             "Wallet already accepted",
@@ -763,6 +779,13 @@ impl SetupState {
                 Who::Nobody,
                 "Nothing to do for payments here. This app answers other requests only.",
             ),
+            Self::WalletPending { holds_key2: _ } => Words::new(
+                Tone::Info,
+                "Wallet waiting for you",
+                "The wallet from the owner's phone is held but not registered, so nothing can be signed yet.",
+                Who::KeyHolder,
+                "Compare its words and fingerprints with the owner's phone, then confirm or discard it.",
+            ),
         }
     }
 }
@@ -924,6 +947,10 @@ fn setup_states() -> Vec<(&'static str, SetupState)> {
         ),
         ("Ready(Key2)", SetupState::Ready { holds_key2: true }),
         ("Ready(NoKey2)", SetupState::Ready { holds_key2: false }),
+        (
+            "WalletPending",
+            SetupState::WalletPending { holds_key2: true },
+        ),
     ]
 }
 
@@ -935,6 +962,7 @@ fn setup_name(s: &SetupState) -> &'static str {
         SetupState::Empty => "Empty",
         SetupState::HasIdentity { .. } => "HasIdentity",
         SetupState::Ready { .. } => "Ready",
+        SetupState::WalletPending { .. } => "WalletPending",
     }
 }
 
@@ -1049,6 +1077,8 @@ pub(crate) fn samples() -> Vec<(Kind, &'static str, &'static str)> {
         (State, "session-closed", ""),
         (State, "not-ready", ""),
         (State, "wallet-set", ""),
+        (State, "wallet-pending", ""),
+        (State, "nothing-pending", ""),
         (State, "words-shown-once", ""),
         (State, "handles-used", ""),
         (State, "app-limit", ""),

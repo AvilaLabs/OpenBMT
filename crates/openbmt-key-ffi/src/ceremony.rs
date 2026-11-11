@@ -17,7 +17,7 @@ use openbmt_signer::{
 use crate::app::{KeyApp, Phase, WalletSetup, WalletView};
 use crate::codec::wire_record;
 use crate::envelope::{self, Material};
-use crate::error::{internal, refused, store_failed, wrong_state, KeyError};
+use crate::error::{internal, refused, refused_by, store_failed, wrong_state, KeyError};
 use crate::keys::KeyNetwork;
 
 /// Key 3's public parts as the Key app holds them, for the screen that
@@ -74,6 +74,41 @@ pub fn key3_waiting_words() -> Words {
     )
 }
 
+/// The rule strings of the three SR-67 refusals the app tells apart: key 3
+/// not taken, key 3 given with the wallet that is not the one taken, and a
+/// wallet that does not hold the key 3 taken (a swapped key 3).
+pub const RULE_KEY3_MISSING: &str = "key3-missing";
+/// See [`RULE_KEY3_MISSING`].
+pub const RULE_KEY3_DIFFERS: &str = "key3-differs";
+/// See [`RULE_KEY3_MISSING`].
+pub const RULE_KEY3_NOT_IN_WALLET: &str = "key3-not-in-wallet";
+
+/// A refusal of the ceremony. The three refusals of SR-67 carry their own
+/// rule strings, so that the app matches on the kind and not on the text;
+/// the text, and so the words, are the signer's own.
+fn ceremony_refused(r: CeremonyRefusal) -> KeyError {
+    let rule = match r {
+        CeremonyRefusal::NoKey3 => RULE_KEY3_MISSING,
+        CeremonyRefusal::Key3Differs => RULE_KEY3_DIFFERS,
+        CeremonyRefusal::Key3NotInWallet => RULE_KEY3_NOT_IN_WALLET,
+        other => return refused(other),
+    };
+    refused_by(rule, r)
+}
+
+/// The wallet setup of `OBMw` bytes, read strictly, as the call that
+/// accepts a wallet takes it (SR-68).
+pub(crate) fn wallet_setup(bytes: &[u8]) -> Result<WalletSetup, KeyError> {
+    let setup = WalletSetupBytes::from_bytes(bytes).map_err(refused)?;
+    Ok(WalletSetup {
+        description: setup.description.canonical_string().to_string(),
+        network: network_of(setup.network),
+        owner_root: setup.owner_root.to_bytes().to_vec(),
+        key3_xpub: None,
+        batch_min_count: Some(setup.batch_min_count),
+    })
+}
+
 fn network_of(n: Network) -> KeyNetwork {
     match n {
         Network::Bitcoin => KeyNetwork::Mainnet,
@@ -105,15 +140,15 @@ pub(crate) fn key3_for_accept(
     let given = given.map(crate::app::parse_xpub).transpose()?;
     let Some(held) = &material.key3 else {
         return match (given, ceremony) {
-            (_, true) => Err(refused(CeremonyRefusal::NoKey3)),
+            (_, true) => Err(ceremony_refused(CeremonyRefusal::NoKey3)),
             (given, false) => Ok(given),
         };
     };
     if given.is_some_and(|g| g.encode() != held.xpub.encode()) {
-        return Err(refused(CeremonyRefusal::Key3Differs));
+        return Err(ceremony_refused(CeremonyRefusal::Key3Differs));
     }
     check_key3(held, key2_part(material).as_ref(), network).map_err(refused)?;
-    check_key3_in_wallet(held, description).map_err(refused)?;
+    check_key3_in_wallet(held, description).map_err(ceremony_refused)?;
     Ok(Some(held.xpub))
 }
 
@@ -125,18 +160,23 @@ impl KeyApp {
     pub fn take_key3(&self, text: String) -> Result<Key3View, KeyError> {
         self.run(|inner| {
             inner.no_session()?;
-            let material = match &inner.phase {
-                Phase::Identity(m) => m,
-                Phase::Empty => {
-                    return Err(wrong_state(
-                        "empty",
-                        "make the Key app's key first (create_from_entropy)",
-                    ))
-                }
-                Phase::Ready(_) => {
-                    return Err(wrong_state("wallet-set", "the wallet is accepted already"))
-                }
-            };
+            let material =
+                match &inner.phase {
+                    Phase::Identity(m) => m,
+                    Phase::Empty => {
+                        return Err(wrong_state(
+                            "empty",
+                            "make the Key app's key first (create_from_entropy)",
+                        ))
+                    }
+                    Phase::Ready(_) => {
+                        return Err(wrong_state("wallet-set", "the wallet is accepted already"))
+                    }
+                    Phase::Pending(_) => return Err(wrong_state(
+                        "wallet-pending",
+                        "a wallet is waiting for the key holder: confirm it or discard it first",
+                    )),
+                };
             let key3 = KeyPart::parse(&text).map_err(refused)?;
             if let Some(k) = &material.key2 {
                 check_key3(&key3, key2_part(material).as_ref(), k.network).map_err(refused)?;
@@ -173,7 +213,7 @@ impl KeyApp {
                 return Err(wrong_state("empty", "no key has been made yet"));
             };
             let Some(key3) = material.key3.clone() else {
-                return Err(refused(CeremonyRefusal::NoKey3));
+                return Err(ceremony_refused(CeremonyRefusal::NoKey3));
             };
             let network = match (&material.key2, key3.kind()) {
                 (Some(k), _) => k.network,
@@ -193,22 +233,15 @@ impl KeyApp {
         })
     }
 
-    /// SR-67, SR-68: accept the wallet setup (`OBMw`) the owner phone made.
-    /// The bytes are read strictly and then go through `accept_wallet`
-    /// with the key 3 held, so the key 2 and key 3 slots are checked byte
-    /// for byte. Refused when no key 3 was taken. The result is what the
+    /// SR-67, SR-68, SR-67: accept the wallet setup (`OBMw`) the owner phone
+    /// made. The bytes are read strictly and then go through every check of
+    /// `accept_wallet` with the key 3 held, so the key 2 and key 3 slots are
+    /// checked byte for byte. Refused when no key 3 was taken. The wallet is
+    /// kept as pending, across a restart, and is not registered until
+    /// `confirm_wallet`; `discard_wallet` drops it. The result is what the
     /// comparison screen shows: the four words and the three fingerprints.
     pub fn accept_wallet_setup(&self, bytes: Vec<u8>) -> Result<WalletView, KeyError> {
-        let setup = WalletSetupBytes::from_bytes(&bytes).map_err(refused)?;
-        self.accept(
-            WalletSetup {
-                description: setup.description.canonical_string().to_string(),
-                network: network_of(setup.network),
-                owner_root: setup.owner_root.to_bytes().to_vec(),
-                key3_xpub: None,
-                batch_min_count: Some(setup.batch_min_count),
-            },
-            true,
-        )
+        let setup = wallet_setup(&bytes)?;
+        self.accept(setup, Some(bytes))
     }
 }

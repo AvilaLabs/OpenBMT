@@ -67,14 +67,19 @@ after the identity is made on an approver-only device:
    size as "Show as code", under "On the owner phone, choose Scan the Key
    app." Only bytes with the frame of an answer are drawn (`CeremonyModel`).
 3. **Scan the owner phone's wallet.** The camera reads the wallet setup
-   (`ur:bytes`, `OBMw`) and the library accepts it (`acceptWalletSetup`, op
-   83). The comparison screen shows the four check words and the three
+   (`ur:bytes`, `OBMw`) and the library checks it and keeps it as pending
+   (`acceptWalletSetup`, op 83): it is not the registered wallet yet, nothing
+   is signed and no pairing is offered, and a restart reopens on the
+   comparison. The comparison screen shows the four check words and the three
    fingerprints large and says that the owner phone and the counter must show
    these same words and fingerprints; the two identities as words are under
-   them. "They match" leads home; "They differ" says nothing was signed and
-   to start the wallet step again on the owner phone. A refusal shows the
+   them. "They match" registers the wallet (`confirmWallet`, op 84) and leads
+   home; "They differ" drops it (`discardWallet`, op 85; key 2 and key 3 are
+   kept) and says nothing was registered and to check the owner phone and
+   scan its wallet code again. A refusal shows the
    library's words, and when the owner phone's wallet does not hold the key 3
    scanned here the app says so first, plainly, and that nothing was accepted.
+   The app tells that refusal by its rule string, not by the library's text.
 
 The older path that took a pasted wallet description and a typed owner
 identity (`acceptWallet`, op 17) is gone from the app; the library op stays.

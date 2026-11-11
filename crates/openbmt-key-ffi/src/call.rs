@@ -39,8 +39,9 @@
 //!   `decide`, `finish`, `cancel`).
 //! - 40 to 48: the Key app's own screens.
 //! - 60 to 65: free functions (entropy progress, word picker, deposit code).
-//! - 80 to 83: the key ceremony (`take_key3`, `key3_view`, `public_answer`,
-//!   `accept_wallet_setup`; `docs/SIGNER-RULES.md` SR-64 to SR-69).
+//! - 80 to 85: the key ceremony (`take_key3`, `key3_view`, `public_answer`,
+//!   `accept_wallet_setup`, `confirm_wallet`, `discard_wallet`;
+//!   `docs/SIGNER-RULES.md` SR-64 to SR-69).
 //!
 //! The handle field names what the op works on: an app handle (from `open`)
 //! or a session handle (from `open_session`), or must be 0. Handles start at
@@ -495,6 +496,8 @@ fn build_ops() -> Vec<Op> {
         op(83, "accept_wallet_setup", App, |c, bytes: Vec<u8>| {
             c.app()?.accept_wallet_setup(bytes)
         }),
+        op(84, "confirm_wallet", App, |c, ()| c.app()?.confirm_wallet()),
+        op(85, "discard_wallet", App, |c, ()| c.app()?.discard_wallet()),
     ]
 }
 

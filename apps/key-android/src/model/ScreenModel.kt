@@ -24,6 +24,9 @@ sealed class Screen {
     /** Key 3 is held: show the public answer, then read the owner phone's wallet (step 5). */
     class GiveAnswer(val holdsKey2: Boolean, val key3: Key3View) : Screen()
 
+    /** A wallet passed every check and waits for "they match" or "they differ" (SR-67). */
+    class ComparePending(val holdsKey2: Boolean) : Screen()
+
     /** The wallet is accepted: approve requests, check the kit, see the limits. */
     class Home(val holdsKey2: Boolean) : Screen()
 }
@@ -49,6 +52,7 @@ object ScreenModel {
                     key3 == null -> Screen.Key3(state.holdsKey2)
                     else -> Screen.GiveAnswer(state.holdsKey2, key3)
                 }
+            is SetupState.WalletPending -> Screen.ComparePending(state.holdsKey2)
             is SetupState.Ready -> Screen.Home(state.holdsKey2)
         }
     }

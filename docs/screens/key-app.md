@@ -36,12 +36,13 @@ section 2.1, steps 2 and 5) among them.
 | publicAnswerReady | Answer ready for the owner | This app shows its public details, which the owner's phone needs to build the wallet. | Scan the answer with the owner's phone, then wait for the wallet code. | the owner | SR-69 |
 | scanOwnerWallet | Scan the owner's wallet | The owner phone builds the wallet from the keys it scanned, then shows it as a code. | Scan that code here, then compare the words and fingerprints it shows. | the key holder |  |
 | checkWallet | Check the wallet | The wallet was read, and its four words and three fingerprints are below. | The owner phone and the counter must show these same words and fingerprints. | the key holder |  |
-| walletMismatch | Wallet words differ | The words or fingerprints here differ from the owner phone's, so this is not the wallet to use. | Nothing was signed. Start the wallet step again on the owner phone before any request is approved. | the key holder |  |
+| walletMismatch | Wallet words differ | The words or fingerprints here differ from the owner phone's, so this is not the wallet to use. | Nothing was registered. Check the owner phone, then scan its wallet code again. | the key holder |  |
 | walletLacksKey3 | Wallet lacks this key 3 | The owner phone's wallet does not hold the key 3 scanned here, so nothing was accepted. | Do not go on. Tell the owner in person, then make the wallet again on the owner phone. | the key holder |  |
 | Empty | No key yet | This app has no key yet. | Make the key, or type the words of an existing key. | the key holder |  |
 | HasIdentity(WordsWaiting) | Write the words down | The words of this key are ready, and they are shown only once. | Write them on paper now; they cannot be shown again. | the key holder |  |
 | HasIdentity(Key2) | Waiting for the wallet | This app holds key 2 and is waiting for the wallet from the owner's phone. | Give the owner's phone this app's key details, then accept the wallet it makes. | the key holder |  |
 | HasIdentity(NoKey2) | Waiting, without key 2 | This app has its own identity but not key 2, and is waiting for the wallet. | Give the owner's phone this app's identity, then accept the wallet it makes. | the key holder |  |
+| WalletPending | Wallet waiting for you | The wallet from the owner's phone is held but not registered, so nothing can be signed yet. | Compare its words and fingerprints with the owner's phone, then confirm or discard it. | the key holder |  |
 | Ready(Key2) | Ready to approve | The wallet is accepted, and this app can answer the owner's requests. | Nothing to do. It waits for a request from the owner's phone. | nobody |  |
 | Ready(NoKey2) | Ready, without key 2 | The wallet is accepted, but this phone does not hold key 2. | Nothing to do for payments here. This app answers other requests only. | nobody |  |
 | Passed | Check passed | This check of the line passed. | Nothing to do for this check. | nobody |  |

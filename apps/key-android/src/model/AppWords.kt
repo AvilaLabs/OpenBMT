@@ -198,7 +198,7 @@ object AppWords {
         Tones.STOP, "Wallet words differ",
         "The words or fingerprints here differ from the owner phone's, so this is not the wallet to use.",
         Who.KEY_HOLDER,
-        "Nothing was signed. Start the wallet step again on the owner phone before any request is approved.",
+        "Nothing was registered. Check the owner phone, then scan its wallet code again.",
     )
 
     /** SR-67: the owner phone's wallet does not hold the key 3 that was scanned here. */
@@ -273,6 +273,12 @@ object AppWords {
                 "Give the owner's phone this app's identity, then accept the wallet it makes.",
             )
         }
+        is SetupState.WalletPending -> w(
+            Tones.INFO, "Wallet waiting for you",
+            "The wallet from the owner's phone is held but not registered, so nothing can be signed yet.",
+            Who.KEY_HOLDER,
+            "Compare its words and fingerprints with the owner's phone, then confirm or discard it.",
+        )
         is SetupState.Ready ->
             if (s.holdsKey2) {
                 w(
@@ -398,6 +404,7 @@ object AppWords {
         "HasIdentity(WordsWaiting)" to state(SetupState.HasIdentity(true, true)),
         "HasIdentity(Key2)" to state(SetupState.HasIdentity(true, false)),
         "HasIdentity(NoKey2)" to state(SetupState.HasIdentity(false, false)),
+        "WalletPending" to state(SetupState.WalletPending(true)),
         "Ready(Key2)" to state(SetupState.Ready(true)),
         "Ready(NoKey2)" to state(SetupState.Ready(false)),
         "Passed" to check(CheckStatus.Passed),
