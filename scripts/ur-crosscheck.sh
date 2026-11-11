@@ -46,9 +46,9 @@ mkdir -p "$tools"
 fetch() {
     local url="$1" jar="$2" want="$3"
     if [ ! -f "$jar" ]; then
-        curl --fail --silent --show-error --location --retry 3 \
+        curl --fail --silent --show-error --location --retry 6 --retry-max-time 300 \
             --output "$jar.part" "$url"
-        curl --fail --silent --show-error --location --retry 3 \
+        curl --fail --silent --show-error --location --retry 6 --retry-max-time 300 \
             --output "$jar.sha1" "$url.sha1"
         local published actual
         published="$(tr -d ' \n' <"$jar.sha1" | cut -c1-40)"

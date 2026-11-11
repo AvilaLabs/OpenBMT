@@ -31,9 +31,9 @@ jar="$tools/core-3.5.3.jar"
 mkdir -p "$tools"
 
 if [ ! -f "$jar" ]; then
-    curl --fail --silent --show-error --location --retry 3 \
+    curl --fail --silent --show-error --location --retry 6 --retry-max-time 300 \
         --output "$jar.part" "$ZXING_URL"
-    curl --fail --silent --show-error --location --retry 3 \
+    curl --fail --silent --show-error --location --retry 6 --retry-max-time 300 \
         --output "$jar.sha1" "$ZXING_URL.sha1"
     published="$(tr -d ' \n' <"$jar.sha1" | cut -c1-40)"
     actual="$(sha1sum "$jar.part" | cut -d' ' -f1)"
