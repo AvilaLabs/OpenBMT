@@ -54,6 +54,7 @@ sets. The full statement, its conditions and the reasoning are in
 |---|---|
 | [docs/DESIGN.md](docs/DESIGN.md) | The design: flows, architecture, threat table, open questions |
 | [docs/SIGNER-RULES.md](docs/SIGNER-RULES.md) | Every rule under which the Key app refuses to sign |
+| [docs/LOCK-RULES.md](docs/LOCK-RULES.md) | The rules of the PIN lock on a phone's key: the OBMx frame, the cost of the key from the PIN, the PIN's shape (LC-01 to LC-07) |
 | [docs/SPEND-RULES.md](docs/SPEND-RULES.md) | How a transaction is built, joined and finished: coins, change, fee, the PSBT the signer accepts, and the checks on two signatures |
 | [docs/SESSION-RULES.md](docs/SESSION-RULES.md) | The approval session: the file the owner phone and the Key app pass between them, what the Key app checks on every line, what is stored before an answer leaves, and the owner phone's refund queue |
 | [docs/WATCHER-RULES.md](docs/WATCHER-RULES.md) | What the counter believes about a payment, and what each kind of evidence may prove |
@@ -76,6 +77,7 @@ sets. The full statement, its conditions and the reasoning are in
 | [crates/openbmt-session/](crates/openbmt-session/) | The approval session file ([rules](docs/SESSION-RULES.md)): the request the owner phone hands to the Key app and the response it hands back, in one strict encoding |
 | [crates/openbmt-approver/](crates/openbmt-approver/) | The Key app's side of the approval session: opens a request, shows one line per item, decides each, and stores before it releases |
 | [crates/openbmt-owner/](crates/openbmt-owner/) | The owner phone's side of the approval session: the refund queue, cash-out, batches, settings and pairings, the session it builds and the Key app's answer it takes |
+| [crates/openbmt-lock/](crates/openbmt-lock/) | The PIN lock the Key app and the owner app share: the OBMx locked frame, Argon2id and ChaCha20-Poly1305 at fixed costs and limits, the PIN's shape, lock, unlock and change; the bytes are those the Key app first wrote |
 | [crates/openbmt-key-ffi/](crates/openbmt-key-ffi/) | The Key app's core for Android: one object, a storage trait, flat records for each line of a session, one `dispatch` function over a framed request and a JNI entry point as the only `unsafe`; every rule stays in the crates above. The Kotlin binding and OBM9 decoder harness compile and run on the JVM; Android JNI/device integration remains unchecked |
 | [apps/key-android/](apps/key-android/) | The Key app for Android, first build: plain `android.widget` screens over the library's words (first start, the words once, wallet and kit check, the approval session, limits and status), built into a signed test APK with the SDK's own tools and no Gradle, AndroidX or Compose; the Kotlin standard library is its one runtime library. Not run on a device |
 | [crates/openbmt-watch/](crates/openbmt-watch/) | The counter's payment watcher: merkle proofs, full blocks, peer groups, conflicts, health |

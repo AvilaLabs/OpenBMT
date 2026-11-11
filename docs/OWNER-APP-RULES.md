@@ -455,6 +455,8 @@ and the 60-second rule are the shared `LockModel.kt` of
   (OA-11); it is in memory only while the node starts, and the bytes it was
   read into are overwritten. The parsed setup is held while the app runs and
   for the minute after it goes to the background (OA-62), and dropped then.
+  `key1.bin` in the node's folder is Key 1's signer state (its marks and
+  the registered wallet), not the secret, and stays outside the PIN.
 - **OA-61.** The PIN is chosen before the setup is first saved: at the end of
   the ceremony and on the paste path, after the text and the address of
   Orbot are checked and before the save, on the screen the Key app uses
