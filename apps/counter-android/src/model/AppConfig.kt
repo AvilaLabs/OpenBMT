@@ -13,20 +13,32 @@ class ConfigFormatException(message: String) : IOException(message)
  * the address of the shop's own node (CR-100). The lines are
  * `proxy: host:port`, `manager: name`, `cashier: name` and `ownnode: address`
  * (the last two may be empty), one each, in that order, written through
- * [DurableFile]. A file of three lines, from before the own node, reads as
- * one with no own node. Nothing in it is secret.
+ * [DurableFile]. A fifth line, `sounds: off`, is there only while the sounds
+ * are switched off; a file without it has them on. A file of three lines, from
+ * before the own node, reads as one with no own node. Nothing in it is secret.
  */
-class AppConfig(val proxy: String, val manager: String, val cashier: String, val ownNode: String = "") {
-    fun withCashier(name: String) = AppConfig(proxy, manager, name, ownNode)
+class AppConfig(
+    val proxy: String,
+    val manager: String,
+    val cashier: String,
+    val ownNode: String = "",
+    /** Whether the app plays its sounds (the phone's own ringer setting still wins). */
+    val sounds: Boolean = true,
+) {
+    fun withCashier(name: String) = AppConfig(proxy, manager, name, ownNode, sounds)
 
     /** The address of Orbot, from the Network screen (CR-87). */
-    fun withProxy(address: String) = AppConfig(address, manager, cashier, ownNode)
+    fun withProxy(address: String) = AppConfig(address, manager, cashier, ownNode, sounds)
 
     /** The own node's address as the library made it (CR-100), or "" for none. */
-    fun withOwnNode(address: String) = AppConfig(proxy, manager, cashier, address)
+    fun withOwnNode(address: String) = AppConfig(proxy, manager, cashier, address, sounds)
+
+    /** The sounds on or off, from the Sounds screen. */
+    fun withSounds(on: Boolean) = AppConfig(proxy, manager, cashier, ownNode, on)
 
     fun encode(): ByteArray =
-        "proxy: $proxy\nmanager: $manager\ncashier: $cashier\nownnode: $ownNode\n".toByteArray(Charsets.UTF_8)
+        ("proxy: $proxy\nmanager: $manager\ncashier: $cashier\nownnode: $ownNode\n" + if (sounds) "" else "sounds: off\n")
+            .toByteArray(Charsets.UTF_8)
 
     companion object {
         const val DEFAULT_PROXY = "127.0.0.1:9050"
@@ -51,7 +63,7 @@ class AppConfig(val proxy: String, val manager: String, val cashier: String, val
             }
             if (!text.endsWith("\n")) throw ConfigFormatException("the config file does not end with a line end")
             val lines = text.dropLast(1).split('\n')
-            if (lines.size != 3 && lines.size != 4) throw ConfigFormatException("the config file does not have 3 or 4 lines")
+            if (lines.size < 3 || lines.size > 5) throw ConfigFormatException("the config file does not have 3 to 5 lines")
             fun value(i: Int, key: String): String {
                 val prefix = "$key: "
                 val line = lines[i]
@@ -61,12 +73,20 @@ class AppConfig(val proxy: String, val manager: String, val cashier: String, val
             val proxy = value(0, "proxy")
             val manager = value(1, "manager")
             val cashier = value(2, "cashier")
-            val ownNode = if (lines.size == 4) value(3, "ownnode") else ""
+            val ownNode = if (lines.size >= 4) value(3, "ownnode") else ""
+            val sounds = if (lines.size == 5) {
+                when (value(4, "sounds")) {
+                    "off" -> false
+                    else -> throw ConfigFormatException("the sounds line is not \"sounds: off\"")
+                }
+            } else {
+                true
+            }
             if (!HostPort.valid(proxy)) throw ConfigFormatException("the proxy is not host:port")
             if (!validName(manager)) throw ConfigFormatException("the manager's name is not a name")
             if (cashier.isNotEmpty() && !validName(cashier)) throw ConfigFormatException("the cashier's name is not a name")
             if (!validOwnNode(ownNode)) throw ConfigFormatException("the own node's address is not one word")
-            return AppConfig(proxy, manager, cashier, ownNode)
+            return AppConfig(proxy, manager, cashier, ownNode, sounds)
         }
     }
 }

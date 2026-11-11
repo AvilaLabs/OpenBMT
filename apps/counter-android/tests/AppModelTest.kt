@@ -6,6 +6,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.nio.file.Files
 import java.security.SecureRandom
+import org.openbmt.app.Colour
 import org.openbmt.app.SayCheck
 import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
@@ -316,6 +317,24 @@ object AppModelTest {
         ok(file.load() == null, "a first start")
         file.save(c)
         ok(file.load()!!.manager == "Mia" && dir.list()!!.sorted() == listOf("config.txt"), "saved and read")
+        // The sounds choice: on by default, saved next to the cashier's name, read back, and kept by the other changes.
+        ok(c.sounds && back.sounds && AppConfig.decode("proxy: h:1\nmanager: M\ncashier: \n".toByteArray(Charsets.UTF_8)).sounds, "the sounds are on by default")
+        val quietOn = c.withSounds(false)
+        ok(String(quietOn.encode(), Charsets.UTF_8) == "proxy: 127.0.0.1:9050\nmanager: Mia\ncashier: Ann\nownnode: \nsounds: off\n", "the sounds line is written when they are off")
+        ok(String(c.withSounds(true).encode(), Charsets.UTF_8) == String(c.encode(), Charsets.UTF_8), "and not when they are on")
+        file.save(quietOn)
+        ok(!file.load()!!.sounds && file.load()!!.cashier == "Ann", "the choice is saved and read back")
+        ok(!quietOn.withCashier("Bo").sounds && !quietOn.withProxy("h:2").sounds && !quietOn.withOwnNode("x.onion:1").sounds, "a change of another setting keeps the choice")
+        ok(quietOn.withSounds(true).sounds && file.also { it.save(quietOn.withSounds(true)) }.load()!!.sounds, "switched on again")
+        var refused = 0
+        for (bad in listOf("sounds: on", "sound: off", "sounds: ", "sounds: maybe")) {
+            try {
+                AppConfig.decode("proxy: h:1\nmanager: M\ncashier: \nownnode: \n$bad\n".toByteArray(Charsets.UTF_8))
+            } catch (_: ConfigFormatException) {
+                refused++
+            }
+        }
+        ok(refused == 4, "a sounds line that is not \"sounds: off\" is refused")
         clean(dir)
     }
 
@@ -597,6 +616,16 @@ object AppModelTest {
         ok(SaleModel.receivedLine(5000, 6000) == "Received 5,000 sats of 6,000 sats", "the received line")
         ok(SaleModel.isEnded(SaleState.Expired) && !SaleModel.isEnded(SaleState.Waiting), "ended sales")
         ok(SaleModel.isEnded(SaleState.PaidLightning), "a sale paid by Lightning is over (CR-109)")
+        ok(SaleModel.outcomeLine(usd, 2450, 33_309) == "24.50 USD \u00B7 33,309 sats" && SaleModel.outcomeLine(usd, null, 1) == "1 sat", "the amount line of an outcome screen")
+        ok(SaleModel.showsCode(SaleState.NotPaidYet) && SaleModel.showsCode(SaleState.PartPaid) && SaleState.values().filter { SaleModel.showsCode(it) }.size == 2, "only not paid yet and part paid show the code")
+        ok(SaleModel.outcomeHeadingSp("Paid") == 56f && SaleModel.outcomeHeadingSp("Do not hand over") == 44f && SaleModel.outcomeHeadingSp("Accepted by a person") == 40f, "the heading's size")
+        // The outcome sound: once per sale for green, once for red, never for blue or neutral.
+        val plays = OutcomePlays()
+        ok(plays.first(1, Colour.Green) && !plays.first(1, Colour.Green) && !plays.first(1, Colour.Green), "green plays once for a sale")
+        ok(plays.first(1, Colour.Red) && !plays.first(1, Colour.Red), "red plays once for the same sale")
+        ok(plays.first(2, Colour.Green) && plays.first(2, Colour.Red), "another sale plays its own")
+        ok((0L..3L).none { plays.first(it, Colour.Blue) || plays.first(it, Colour.Neutral) }, "blue and neutral never play")
+        ok(OutcomePlays().let { !it.first(7, Colour.Blue) && it.first(7, Colour.Green) && !it.first(7, Colour.Green) }, "a sale seen waiting first still plays green once")
         ok(ShopCurrency.of(listOf(src("a"), src("b")))!!.code == "USD", "the shop's currency is the sources'")
         ok(ShopCurrency.of(listOf(src("a"), RateSource("b", "u", "EUR", "b"))) == null && ShopCurrency.of(emptyList()) == null, "sources in two currencies have none")
     }
@@ -934,6 +963,24 @@ object AppModelTest {
         ok(people[1] == "Ma x (manager): 1 sale, 0 overrides, 2 refunds asked for, 0 cash refunds", "a name from a record is cleaned: ${people[1]}")
         ok(people[2] == "Sales with no name in the record: 2" && people[3] == "People left out of this list: 3", "unnamed sales and people left out are counted apart: ${people.drop(2)}")
         ok(TodayModel.people(quiet).isEmpty(), "no one, no lines")
+        // The lines cut at their colon and commas for the screen keep every word.
+        val allLines = lines + none + TodayModel.lines(quiet, null)
+        for (l in allLines) {
+            val sp = TodayModel.split(l)
+            val parts = sp.parts
+            ok(sp.label + ": " + parts.joinToString(", ") == l, "the cut line joins back to the line: $l")
+            val shown = sp.label + " " + sp.amount + " " + sp.detail.replace(" \u00B7 ", " ")
+            ok(parts.all { p -> shown.contains(p) } || parts.size == 1, "no part is dropped from the hero's three pieces: $l")
+        }
+        val paid = TodayModel.split(lines[0])
+        ok(paid.label == "Sales paid" && paid.amount == "45.00 USD" && paid.detail == "3 sales \u00B7 54,000 sats" && paid.count == "3 sales", "the hero's three pieces: ${paid.label} / ${paid.amount} / ${paid.detail}")
+        val waiting = TodayModel.split(lines[3])
+        ok(waiting.count == "2 sales" && waiting.amount == "20.00 USD" && waiting.parts.last() == "24,000 sats asked for", "the waiting row keeps its sats words: ${waiting.parts}")
+        ok(TodayModel.split(lines[7]).rest == "5,000 sats (1 withdrawn)" && TodayModel.split(lines[5]).value == "4 sales", "refunds and the quiet lines")
+        ok(TodayModel.split(TodayModel.lines(quiet, null)[0]).let { it.amount == "0 sats" && it.detail == "0 sales" }, "a line with no money has the bitcoin as its amount")
+        ok(TodayModel.split("no colon").let { it.label == "no colon" && it.parts.isEmpty() }, "a line without a colon")
+        val person = TodayModel.personParts(t.people[1])
+        ok(person.name == "Ma x" && person.role == "manager" && "${person.name} (${person.role}): ${person.line}" == people[1], "a person's line cut in three says what the line says")
         for (w in listOf(AppWords.todayAbout, AppWords.todayWaiting, AppWords.todayStopped, AppWords.todayPeopleNeedPin)) ok(SayCheck.problem(w) == null, "today's words pass the checks: ${SayCheck.problem(w)}")
         ok(AppWords.todayAbout.what.contains("No wallet balance") && AppWords.todayAbout.next.contains("full books") && AppWords.todayAbout.next.contains("export"), "CR-155: the owner's phone has the full books and the export")
         ok(AppWords.todayWaiting.what.contains("accepted") && AppWords.todayWaiting.next.contains("sale ends"), "CR-155: why a sale waits and what happens next")

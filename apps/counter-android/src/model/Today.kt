@@ -5,6 +5,7 @@ import java.time.ZoneId
 import org.openbmt.app.Format
 import org.openbmt.counter.ActorRole
 import org.openbmt.counter.DayTotals
+import org.openbmt.counter.PersonLine
 import org.openbmt.counter.Tally
 
 /** The window of the day's totals (CR-152): local midnight to now, on the phone's clock and in its time zone. */
@@ -53,18 +54,57 @@ object TodayModel {
         return out
     }
 
+    /** One person's line cut in three: the cleaned name, the role as the line writes it, and what the person did. */
+    class PersonParts(val name: String, val role: String, val line: String)
+
+    fun personParts(p: PersonLine): PersonParts = PersonParts(
+        Format.cleanForeign(p.name),
+        if (p.role == ActorRole.Manager) "manager" else "cashier",
+        "${count(p.sales, "sale")}, ${count(p.overrides, "override")}, " +
+            "${count(p.refunds, "refund")} asked for, ${count(p.cashRefunds, "cash refund")}",
+    )
+
     /** The lines per person, as the manager sees them (CR-154); names from the records are cleaned (SC-08). */
     fun people(t: DayTotals): List<String> {
         val out = ArrayList<String>()
         for (p in t.people) {
-            val role = if (p.role == ActorRole.Manager) "manager" else "cashier"
-            out.add(
-                "${Format.cleanForeign(p.name)} ($role): ${count(p.sales, "sale")}, ${count(p.overrides, "override")}, " +
-                    "${count(p.refunds, "refund")} asked for, ${count(p.cashRefunds, "cash refund")}",
-            )
+            val parts = personParts(p)
+            out.add("${parts.name} (${parts.role}): ${parts.line}")
         }
         if (t.unnamedSales > 0) out.add("Sales with no name in the record: ${group(t.unnamedSales)}")
         if (t.peopleLeftOut > 0) out.add("People left out of this list: ${group(t.peopleLeftOut)}")
         return out
+    }
+
+    /**
+     * A line of [lines] cut at its colon and its commas: the [label] before the colon and the [parts] after it, in
+     * order. No word is changed or dropped; the pieces are only set in other places on the screen.
+     */
+    class Split(val label: String, val parts: List<String>) {
+        /** The first part: the number, as the line writes it ("3 sales"). */
+        val count: String get() = parts.firstOrNull().orEmpty()
+
+        /** The money when the line has it between the number and the bitcoin; else the last part. */
+        val amount: String get() = if (parts.size >= 3) parts[1] else parts.lastOrNull().orEmpty()
+
+        /** What is left of the line once [amount] is taken: the number and the bitcoin, joined with a dot; "" when there is nothing else. */
+        val detail: String
+            get() = when {
+                parts.size >= 3 -> parts[0] + " \u00B7 " + parts.drop(2).joinToString(", ")
+                parts.size == 2 -> parts[0]
+                else -> ""
+            }
+
+        /** Every part after the first, as the line writes them. */
+        val rest: String get() = parts.drop(1).joinToString(", ")
+
+        /** The parts as one text. */
+        val value: String get() = parts.joinToString(", ")
+    }
+
+    fun split(line: String): Split {
+        val at = line.indexOf(": ")
+        if (at < 0) return Split(line, emptyList())
+        return Split(line.substring(0, at), line.substring(at + 2).split(", "))
     }
 }

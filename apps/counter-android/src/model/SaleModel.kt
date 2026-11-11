@@ -1,5 +1,6 @@
 package org.openbmt.counter.app
 
+import org.openbmt.app.Colour
 import org.openbmt.app.Format
 import org.openbmt.counter.SaleState
 
@@ -34,6 +35,10 @@ object SaleModel {
     fun amountSmall(amountMinor: Long?, needsSats: Long): String =
         if (amountMinor != null) "${Format.sats(needsSats)} to send" else "to send"
 
+    /** The amount line of an outcome screen: the shop's currency and the sats to send, or the sats alone when the amount is not known. */
+    fun outcomeLine(money: Money, amountMinor: Long?, needsSats: Long): String =
+        if (amountMinor != null) "${money.show(amountMinor)} \u00B7 ${Format.sats(needsSats)}" else Format.sats(needsSats)
+
     /** What has arrived of what the sale needs. */
     fun receivedLine(received: Long, needs: Long): String = "Received ${Format.sats(received)} of ${Format.sats(needs)}"
 
@@ -41,6 +46,19 @@ object SaleModel {
     fun isPaid(state: SaleState): Boolean =
         state == SaleState.PaidInstant || state == SaleState.Confirmed || state == SaleState.Final ||
             state == SaleState.Overridden || state == SaleState.PaidLightning
+
+    /**
+     * Whether the sale's screen shows the code (not paid yet, and part paid) or is the whole screen in the colour
+     * of the outcome (every other state).
+     */
+    fun showsCode(state: SaleState): Boolean = state == SaleState.NotPaidYet || state == SaleState.PartPaid
+
+    /** The size in sp of the heading of an outcome screen: 56 for a short one such as "Paid", 44 and then 40 for longer ones. */
+    fun outcomeHeadingSp(heading: String): Float = when {
+        heading.length <= 8 -> 56f
+        heading.length <= 16 -> 44f
+        else -> 40f
+    }
 
     /** Whether the sale is over for the cashier's list (nothing more will change on its own). */
     fun isEnded(state: SaleState): Boolean =
@@ -52,5 +70,20 @@ object ShopCurrency {
     fun of(sources: List<org.openbmt.counter.RateSource>): Money? {
         val codes = sources.map { it.currency }.distinct()
         return if (codes.size == 1) Money.of(codes[0]) else null
+    }
+}
+
+/**
+ * Which sales have already played their outcome sound in this run (in memory only): a sale plays the sound of
+ * good once and the sound of stop once, however often its screen is drawn again or visited. Waiting and ended
+ * (blue and neutral) never play.
+ */
+class OutcomePlays {
+    private val played = HashSet<Pair<Long, Colour>>()
+
+    /** True the first time [sale] shows [colour] and the colour plays a sound; false after that, and always for blue and neutral. */
+    fun first(sale: Long, colour: Colour): Boolean {
+        if (colour != Colour.Green && colour != Colour.Red) return false
+        return played.add(sale to colour)
     }
 }
