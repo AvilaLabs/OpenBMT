@@ -154,8 +154,11 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
   relay serves at most 32 connections at once.
 - **LK-31.** The relay is reached on the local network by address and
   port, or through a Tor onion service by name through a SOCKS5 proxy
-  (the driver's own SOCKS code, with a new circuit per connection).
-  Nothing else: no domain name, no certificate.
+  (the driver's own SOCKS code, with a new circuit per connection). A
+  device that sends nothing around its Tor proxy (`docs/COUNTER-RULES.md`,
+  CR-87) reaches an address through the proxy too, given to it as an
+  address and never as a name. Nothing else: no domain name, no
+  certificate.
 - **LK-32.** The relay has an identity key of its own. A device that was
   given that key (through the signed device list) checks the relay's
   signature on its hello and refuses another relay. The relay's key

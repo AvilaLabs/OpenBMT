@@ -20,12 +20,21 @@ use crate::proto::{
 use crate::random::os_random;
 use crate::relay::{hello_message, sign_challenge, Action, TAG_HELLO};
 
-/// How to reach the relay (LK-31). There is no third way: no domain name
+/// How to reach the relay (LK-31). There is no fourth way: no domain name
 /// and no certificate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Route {
     /// An address and port on the local network.
     Direct(SocketAddr),
+    /// An address and port, through a SOCKS5 proxy, for a device that sends
+    /// nothing around its Tor proxy (CR-87). The address is given to the
+    /// proxy as an address, never as a name.
+    Proxied {
+        /// The proxy.
+        proxy: SocketAddr,
+        /// The relay's address.
+        addr: SocketAddr,
+    },
     /// A Tor onion service, by name, through a SOCKS5 proxy. The name is
     /// never resolved here; the proxy does it.
     Onion {
@@ -156,6 +165,20 @@ impl Client {
         let stream = match route {
             Route::Direct(addr) => TcpStream::connect_timeout(addr, cfg.connect)
                 .map_err(|e| ClientError::Connect(e.kind()))?,
+            Route::Proxied { proxy, addr } => {
+                let mut seed = [0u8; 32];
+                os_random(&mut seed).map_err(|_| ClientError::Randomness)?;
+                let mut token = [0u8; 8];
+                token.copy_from_slice(seed.get(..8).ok_or(ClientError::Randomness)?);
+                socks::connect_isolated(
+                    *proxy,
+                    &Target::Addr(*addr),
+                    cfg.connect,
+                    Duration::from_secs(socks::HANDSHAKE_SECS),
+                    Some(u64::from_le_bytes(token)),
+                )
+                .map_err(ClientError::Socks)?
+            }
             Route::Onion { proxy, host, port } => {
                 if !host.ends_with(".onion") || host.len() <= ".onion".len() {
                     return Err(ClientError::NotOnion(host.clone()));

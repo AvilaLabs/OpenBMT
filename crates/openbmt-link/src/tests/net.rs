@@ -262,6 +262,78 @@ fn lk_31_an_onion_service_is_reached_by_name_with_a_new_circuit_each_time() {
     server.stop();
 }
 
+/// A SOCKS5 proxy that is asked for an address, not a name: notes the
+/// address and joins the connection to `target`.
+fn address_proxy(target: SocketAddr) -> (SocketAddr, Arc<Mutex<Vec<SocketAddr>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let log: Arc<Mutex<Vec<SocketAddr>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&log);
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut client) = stream else { continue };
+            let seen = Arc::clone(&seen);
+            thread::spawn(move || {
+                let mut greeting = [0u8; 4];
+                client.read_exact(&mut greeting).unwrap();
+                assert_eq!(greeting, [5, 2, 0, 2]);
+                client.write_all(&[5, 2]).unwrap();
+                let mut auth = [0u8; 35];
+                client.read_exact(&mut auth).unwrap();
+                client.write_all(&[1, 0]).unwrap();
+                let mut head = [0u8; 4];
+                client.read_exact(&mut head).unwrap();
+                // CONNECT to an IPv4 address.
+                assert_eq!(head, [5, 1, 0, 1]);
+                let mut rest = [0u8; 6];
+                client.read_exact(&mut rest).unwrap();
+                let ip = std::net::Ipv4Addr::new(rest[0], rest[1], rest[2], rest[3]);
+                let port = u16::from_be_bytes([rest[4], rest[5]]);
+                seen.lock().unwrap().push(SocketAddr::from((ip, port)));
+                client.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).unwrap();
+                let up = TcpStream::connect(target).unwrap();
+                let (mut client_read, mut up_write) =
+                    (client.try_clone().unwrap(), up.try_clone().unwrap());
+                let t = thread::spawn(move || {
+                    let _ = std::io::copy(&mut client_read, &mut up_write);
+                });
+                let (mut up_read, mut client_write) = (up, client);
+                let _ = std::io::copy(&mut up_read, &mut client_write);
+                let _ = t.join();
+            });
+        }
+    });
+    (addr, log)
+}
+
+#[test]
+fn lk_31_an_address_can_be_reached_through_the_proxy_as_an_address() {
+    let server = start(ServerConfig::default());
+    let (proxy, log) = address_proxy(server.local_addr());
+    // The address the proxy is asked for is the one in the route, not the
+    // server's own: the proxy is what joins them.
+    let asked: SocketAddr = "10.1.2.3:48333".parse().unwrap();
+    let route = Route::Proxied { proxy, addr: asked };
+    let want = relay_identity().device_id();
+    let mut client = Client::connect(&route, Some(&want), &ClientConfig::default()).unwrap();
+    client.make_mailbox(&counter()).unwrap();
+    assert_eq!(log.lock().unwrap().clone(), vec![asked]);
+    // A proxy that is not there is a failure to connect, and nothing is
+    // sent around it.
+    let gone: SocketAddr = "127.0.0.1:9".parse().unwrap();
+    let e = Client::connect(
+        &Route::Proxied {
+            proxy: gone,
+            addr: server.local_addr(),
+        },
+        None,
+        &ClientConfig::default(),
+    )
+    .unwrap_err();
+    assert!(matches!(e, ClientError::Socks(_)), "{e:?}");
+    server.stop();
+}
+
 #[test]
 fn lk_31_only_an_address_or_an_onion_name_is_accepted() {
     let proxy: SocketAddr = "127.0.0.1:9".parse().unwrap();
