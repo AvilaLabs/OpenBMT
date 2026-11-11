@@ -1,8 +1,5 @@
 # Getting paid
 
-This chapter follows one sale, from the counter to the books, and says what
-each screen means and what bounds the risk of each.
-
 > **Status: the counter's judgment of a sale is Built and checked against
 > Bitcoin Core on a test network. The Counter app is a first build and has
 > not been run on a phone.**
@@ -23,17 +20,17 @@ each screen means and what bounds the risk of each.
 customers, but no app has it, and the apps' manifest checks fail the build if
 an NFC permission appears. Today every customer scans.
 
-**Rests on.** `CR-01` to `CR-09` (opening a sale, one new address per sale,
-stored before shown), and the vendor-neutral POS matching in
+`CR-01` to `CR-09` cover opening a sale and storing a new address before it is
+shown. POS matching follows the vendor-neutral rules in
 `docs/POS-RULES.md`. Square and Clover are read-only: the shop's POS closes
 the order, and the owner phone matches every Bitcoin tender to a counter sale.
 Clover's custom tender button and a Lightspeed gateway are **Planned**.
 
-**Stops at.** The amount is the cashier's entry. The matching alerts when the
-POS order and the counter disagree, but it cannot prove goods were handed over
-for a payment (`docs/POS-RULES.md`, section 10). The Square and Clover readers
-were written from vendor documentation and have not been tried against a real
-seller account.
+The amount comes from the cashier's entry. Matching alerts when the POS
+order and counter disagree. It cannot prove that
+goods were handed over for a payment (`docs/POS-RULES.md`, section 10). The
+Square and Clover readers use vendor documentation and have not been tried
+against a real seller account.
 
 If the connection is down, the counter does not offer Bitcoin. The cashier is
 told to take another payment type (`CR-01`).
@@ -62,8 +59,8 @@ what happens next. Waiting is blue, never alarming. The shop sets two depths:
 the confirmation depth (1 block at first) and the refund depth (6 at first).
 The shop can change them but never below 1 block.
 
-**Rests on.** `CR-10` to `CR-12`. The state is worked out again from the
-watcher's facts every time it is shown.
+`CR-10` to `CR-12` define these states. The counter recalculates each state
+from the watcher's facts whenever it displays the sale.
 
 ## What "instant" means, and the limit that bounds it
 
@@ -103,7 +100,7 @@ If a payment is replaced, the counter raises a loud alarm that only the owner
 can clear, saves a signed record of the original payment and its replacement,
 and shows red.
 
-**Stops at.**
+These checks have limits:
 
 - The light check cannot see a payment's inputs or fee. It watches for
   conflicting spends and requires distinct network groups. A fake payment

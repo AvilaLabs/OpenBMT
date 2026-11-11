@@ -1,15 +1,12 @@
 # Limits and risks
 
-This chapter says, in plain words, what can still go wrong. Read it before
-trusting anything else in this book.
-
 > **Status: internal review only. No independent security audit has been done.
 > None of the three Android apps has been run on a phone. Do not use OpenBMT
 > with real funds.**
 
 ## What the protection claims, and when it does not hold
 
-The design's claim is narrow. **Once two launch conditions hold, no single
+The design makes this claim: **once two launch conditions hold, no single
 compromised OpenBMT component, device or person can spend the wallet.**
 
 1. Key 3 is made outside OpenBMT software and away from the key 2 device.
@@ -20,9 +17,10 @@ second holder has not been named. Reproducible builds and an independent
 rebuilder, which the design also requires before launch, are **Not built yet**.
 So **today the claim does not hold**, and the documents and screens say so.
 
-Even when both hold, the claim covers spending the wallet. Sales proceeds and
-goods are protected only up to the stated limits, and until the owner's
-reconciliation catches a bad counter, build or Box.
+Even when both conditions hold, the claim covers spending the wallet.
+Protection for sales proceeds and goods extends only up to the stated
+limits, and depends on the owner's reconciliation to catch a bad counter,
+build or Box.
 
 ## The threat model in plain words
 
@@ -110,18 +108,18 @@ These are named so that nobody mistakes them for checked facts.
 
 ## The monthly outside check
 
-The only check that does not depend on OpenBMT's software is a manual one.
-Once a month the owner opens the kit's wallet description as watch-only in
+The only check independent of OpenBMT's software is manual. Once a month, the
+owner opens the kit's wallet description as watch-only in
 Sparrow or Bitcoin Core and compares the receipts with the POS bitcoin-tender
-total. It takes about five minutes (not measured). It is the only check that
-catches a bad counter or main-app build that shows its own address and says
-Paid. The reminder and the steps in the app are **Planned**.
+total. It takes about five minutes (not measured). This is the only check that
+catches a bad counter or main-app build showing its own address and saying
+Paid. The reminder and app steps are **Planned**.
 
 ## The audit status
 
-Four internal design reviews have been done, from many viewpoints: a remote
+Four internal design reviews have covered these viewpoints: a remote
 thief, insiders, a hostile customer, a wallet engineer, a privacy critic, an
-adversary, a recovery engineer, a single-component check, and a check of the
-first code against the design. They are internal. **They are not an audit.**
+adversary, a recovery engineer, a single-component check, and a comparison of
+the first code with the design. These reviews are internal, not an audit.
 The built software still needs tests on devices, an outside code review and an
 independent audit before anyone should call it safe for real money.

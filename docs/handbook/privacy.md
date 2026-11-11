@@ -1,7 +1,7 @@
 # Privacy
 
-OpenBMT sends no analytics or crash data to anyone. These are the contacts it
-does make, what each party sees, and how to reduce it.
+OpenBMT sends no analytics or crash data. The table lists its network
+contacts, what each party sees, and ways to reduce that exposure.
 
 > **Status: the network behavior below is Built and was checked against
 > Bitcoin Core and, for observation, on test and live networks. The apps have
@@ -50,8 +50,8 @@ Peers also speak an encrypted transport (BIP324) when they offer it, which
 hides what the counter asks from someone who only listens. It does not say who
 the peer is (`NR-62`).
 
-**Stops at.** Tor hides the device's address from peers. It does not hide that
-the traffic belongs to a Bitcoin wallet (`OA` section 9). Onion peers are
+Tor hides the device's address from peers, but not that the traffic belongs to
+a Bitcoin wallet (`OA` section 9). Onion peers are
 grouped coarsely, so two onion peers are not evidence of two operators
 (`docs/NETWORK-RULES.md` section 8).
 

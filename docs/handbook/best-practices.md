@@ -1,7 +1,7 @@
 # Best practices
 
-Practical rules for running a shop on OpenBMT safely. They follow from the
-design. Where the software does not yet enforce a rule, the chapter says so.
+Protect the shop's keys, devices, payments and recovery access. Some of these
+practices are not yet enforced by the software.
 
 > **Status: OpenBMT is pre-release and has had internal review only. No
 > independent security audit has been done. Do not use it with real funds.**
@@ -80,10 +80,10 @@ design. Where the software does not yet enforce a rule, the chapter says so.
 
 ## Seed splitting
 
-OpenBMT's position is no. Tools such as Seed XOR and Penlock split one key's
-words into pieces. The two-of-three wallet already spreads control over three
-keys. Splitting one key's words makes more pieces that can be lost, and the
-security page of the site above says "keep it as simple as possible"
+Do not split one key's words with tools such as Seed XOR or Penlock. The
+two-of-three wallet already spreads control over three keys. Splitting one
+key's words creates more pieces that can be lost. The security page of the
+site above says "keep it as simple as possible"
 (https://btcmaxis.com/bitcoin-information/security.html, read 2026-11-11).
 
 ## If the owner dies or cannot act

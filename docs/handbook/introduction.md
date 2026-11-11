@@ -8,9 +8,6 @@ point-of-sale system (POS) the shop already uses.
 > **Status: pre-release. Internal review only. No independent security audit
 > has been done yet. Do not use OpenBMT with real funds.**
 
-OpenBMT handles real money, so this book says how far each protection goes
-and where it stops, and every claim names what it rests on.
-
 ## What OpenBMT is
 
 The wallet is the shop's. It needs two of three keys to spend, and the shop
@@ -34,27 +31,24 @@ wallet software without anything from this project.
 
 ## Who it is for
 
-The book is written for shop owners and managers first. It uses plain words
-and says "you" for the reader. A technical reader who wants to check the
-claims will find the rule IDs, such as `SR-34` or `CR-15`, next to them.
-These point into the rules documents in the repository's `docs/` folder. A
-rule ID names a rule that a test in the code is named after.
+This handbook is for shop owners and managers. Technical readers can check
+claims against rule IDs
+such as `SR-34` and `CR-15`, which point to rules in the repository's `docs/`
+folder. Tests in the code use those rule IDs as names.
 
 ## What OpenBMT is not
 
-OpenBMT is not a payment processor: no company sits between the customer and
-the shop's wallet. It is not a custodian or a hosted wallet, and nobody holds
-a balance for the shop. It is not an exchange. Turning bitcoin into dollars is
-the shop's own business with an exchange the shop picks. OpenBMT prepares the
-transaction and the shop approves it.
+No company sits between the customer and the shop's wallet, and nobody holds
+a balance for the shop. OpenBMT is not an exchange. The shop chooses and
+works with its own exchange to turn bitcoin into dollars. OpenBMT prepares
+the transaction; the shop approves it.
 
-It is not tax advice. The books export follows United States rules only and
-writes down what the records say. It is also not finished, as the next
-section shows.
+The accounting export follows United States rules only and reports what is
+in the records. It does not provide tax advice.
 
 ## What is built today
 
-The book uses four status words. They are never softened.
+The handbook uses four status words with fixed meanings.
 
 | Word | Meaning |
 |---|---|
@@ -81,14 +75,11 @@ Where things stand:
 | Push wake-ups, a full node on the Box, a hosted Box | Not built yet |
 | Reproducible builds, a second holder of the Key app's release key | Not built yet |
 
-The rest of the book says which of these a statement depends on. The
-chapters on using OpenBMT day to day (setup, the Box, refunds, books,
-cash-out) come in the next part of the book.
+The chapters on setup, the Box, refunds, books and cash-out are still to
+come. Their entries appear under "Using OpenBMT" in the contents.
 
 ## How to read a safety claim
 
-Every claim about safety here has two parts: **Rests on**, which names what
-makes it true, and **Stops at**, which names where it ends. If a claim holds
-only under a condition, the condition is written next to it. If something
-could not be checked, the book says "not verified" and says what was checked
-instead.
+Each safety claim names the checks and conditions it depends on, and
+explains what can still go wrong. "Not verified" means
+a claim has not been checked; the text says what was checked instead.

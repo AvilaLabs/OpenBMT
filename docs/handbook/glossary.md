@@ -3,8 +3,8 @@
 **Address batch.** A signed list of receive addresses for one counter, a
 contiguous range, signed by key 1 and co-signed by the Key app.
 
-**Approval session.** The sitting in which the owner, with key 2, approves
-queued items: the owner phone shows them, the Key app checks and signs each.
+**Approval session.** A session where the owner uses key 2 to approve queued
+items. The owner phone shows them, and the Key app checks and signs each.
 Nothing that moves money or loosens a limit happens outside one.
 
 **Approver.** A Key app that holds an identity key only and no wallet key,
@@ -57,7 +57,8 @@ running a node.
 
 **PSBT.** The standard file for a transaction that is passed between signers.
 
-**Recovery kit.** The one printed page of hints, not secrets, for restoring.
+**Recovery kit.** A printed page of instructions for restoring the wallet. It
+contains no secrets.
 
 **Release key.** The key that signs an app for download. It is not a wallet
 key.

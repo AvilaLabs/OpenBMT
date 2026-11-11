@@ -1,9 +1,9 @@
 # How your money is kept safe
 
-This chapter explains the parts that protect the shop's money: the wallet and
-its three keys, who can do what, how limits are loosened, how a spend is
-approved, how addresses are issued, and what happens when a phone is lost.
-Each section ends with what the protection rests on and where it stops.
+The shop holds all three wallet keys, and any two are needed to spend.
+Keeping them apart protects the wallet if one device is lost or compromised.
+The Key app also checks spends, settings and address batches independently
+of the owner phone.
 
 > **Status: internal review only. No independent security audit has been done.
 > The apps have not been run on a phone. Do not use OpenBMT with real funds.**
@@ -18,13 +18,12 @@ The wallet is written as a standard output descriptor (native segwit,
 `sortedmulti` two of three). Other wallet software can read it, which is what
 makes recovery possible without OpenBMT (see "The recovery kit", below).
 
-**Rests on.** The wallet rules in the shared code (`SR-60`: native segwit
-`sortedmulti`, two of three, three different keys), and a restore drill that
-rebuilt the wallet and found its payments in Bitcoin Core on a test network.
+The shared code enforces native segwit `sortedmulti`, two of three, with
+three different keys (`SR-60`). A restore drill rebuilt the wallet and found
+its payments in Bitcoin Core on a test network.
 
-**Stops at.** A wallet this ordinary also means that two keys held by one
-person or one device are enough to spend. That is why the three keys are kept
-apart, below.
+Two keys held by one person or one device are still enough to spend. Keep the
+three keys apart, as described below.
 
 ## The three keys
 
@@ -34,10 +33,10 @@ apart, below.
 | **Key 2** (approver) | The Key app on a spare phone you own (the default), or a hardware wallet, or an offline computer | The owner, or a manager | The other two still spend. Move to a new wallet. |
 | **Key 3** (recovery) | Words on steel, away from the shop. Made in another publisher's wallet or on a hardware wallet | The owner, stored apart | The other two still spend. Move to a new wallet. |
 
-Losing one key never loses the money. **Losing two does**, because nothing can
-be spent. So the words of key 2 and key 3 are written down and stored apart
-from each other. A phone key with an unknown PIN and no written words counts
-as a lost key.
+Losing one key does not lose the money; the other two can still spend. Losing
+two means nothing can be spent. Write down the words for keys 2 and 3 and store
+them apart. A phone key with an unknown PIN and no written words counts as a
+lost key.
 
 ### Three rules about the keys
 
@@ -59,13 +58,13 @@ wallet is the stronger choice. Only key 3's public key (not its words) is
 given to the Key app, by QR code. The Key app never makes or shows key 3's
 words. The screen says "do this step alone".
 
-**Rests on.** The Key app takes key 3 only as a public key with its origin,
+The Key app accepts key 3 only as a public key with its origin. It
 refuses a secret key, refuses a single-signature form, and refuses a key 3
 that is the same as key 2 (`SR-64` to `SR-67`). The wallet is accepted only if
 exactly one of its keys is the key 3 it took. The Key app also compares its
 own slots byte for byte before anything is registered.
 
-**Stops at.**
+These protections have three limits:
 
 - Until a second, independent person holds the Key app's release key, **one
   publisher signs both apps**. In that case the design recommends a hardware
@@ -92,8 +91,6 @@ the design lists for review.
 
 ## Roles: owner, manager, cashier
 
-The software enforces three roles. None of them rests on trust in the person.
-
 | Role | Can | Cannot |
 |---|---|---|
 | **Owner** | Everything on the owner phone: tighten settings, queue loosening for the approval session, add or remove counters, approve refunds and cash-outs with key 2, see balances and books | Loosen anything without the Key app's co-signature |
@@ -102,12 +99,11 @@ The software enforces three roles. None of them rests on trust in the person.
 
 The counter never shows a wallet balance, and it shows its settings read-only.
 
-**Rests on.** The counter's override and refund limits (`CR-21`, `CR-69`), the
-rule that a cashier's action needs no PIN while a manager's needs the
-manager's PIN (`CR-86`), and the cancel alarm that only the owner can clear
-with a signed command (`CR-14`).
+The counter enforces override and refund limits (`CR-21`, `CR-69`). Cashier
+actions need no PIN, while manager actions need the manager's PIN (`CR-86`).
+Only the owner can clear a cancel alarm, using a signed command (`CR-14`).
 
-**Stops at.**
+The counter's role controls have two limits:
 
 - The counter has **one manager**, whose PIN is 6 to 12 digits, and a local
   list of up to 30 named cashiers with their own 4 to 8 digit PINs. Several
@@ -120,11 +116,11 @@ with a signed command (`CR-14`).
 
 ## Loosening needs the Key app; tightening does not
 
-A change that lets more money leave or be accepted at risk, or removes a check
-or an alert, is **loosening**. Examples: a higher instant limit, a lower
-confirmation depth, a bigger refund cap, a new counter, a new Lightning node.
-A change in the other direction is **tightening**: a lower limit, a deeper
-depth, removing a counter.
+**Loosening** means allowing more money to leave or be accepted at risk, or
+removing a check or alert. Examples include raising the instant limit, lowering
+the confirmation depth, increasing the refund cap, adding a counter, or adding
+a Lightning node. **Tightening** does the opposite: lowering a limit, requiring
+more confirmations, or removing a counter.
 
 - **Tightening** takes effect at once on the owner phone and needs only key 1's
   signature.
@@ -135,14 +131,14 @@ depth, removing a counter.
   signatures.
 - The very first settings count as loosening on every field (`AS-27`).
 
-**Rests on.** `AS-27` (the Key app's settings line), and the counter's check
-that settings carry both signatures and that their version is higher than the
-pairing's floor (`CR-94`). Every device refuses signed settings outside hard
-bounds, whoever signed them: an underpayment tolerance above 5%, fewer than one
-confirmation, a heartbeat shorter than a minute or longer than an hour, or
-counter shares that add up to more than 100%.
+The Key app displays each settings change for approval (`AS-27`). The counter
+checks that settings carry both signatures and that their version is higher
+than the pairing's floor (`CR-94`). Every device refuses signed settings
+outside hard bounds, whoever signed them: an underpayment tolerance above
+5%, fewer than one confirmation, a heartbeat shorter than a minute or longer
+than an hour, or counter shares that add up to more than 100%.
 
-**Stops at.** If key 2 is a hardware wallet that cannot sign settings, the
+If key 2 is a hardware wallet that cannot sign settings, the
 design falls back to a delay counted in blocks on each counter's own header
 chain. That fallback is **Planned**, not built. The Key app on a spare device,
 as an approver, keeps the co-signature in that case. Without it, settings
@@ -150,10 +146,9 @@ changes rest on the owner phone alone, and the screens say so.
 
 ## The approval session
 
-The owner phone queues items as they come up
-(refunds, cash-outs, address batches, loosening changes, new counter pairings,
-a health check). Nothing moves. When the owner is with key 2, the owner opens
-an **approval session**:
+The owner phone queues refunds, cash-outs, address batches, loosening changes,
+new counter pairings, and health checks. Queuing an item does not move money.
+When the owner is with key 2, the owner opens an **approval session**:
 
 1. The owner phone shows the queue as one animated QR code in the BC-UR format
    (the format Sparrow and hardware wallets use), or writes a file to carry on
@@ -163,11 +158,11 @@ an **approval session**:
 3. The Key app shows one QR code back, or writes one file, with its
    signatures. The owner phone adds key 1 and sends the result.
 
-Every dollar figure the Key app shows is labeled as coming from the owner
-phone, because the Key app has no sales records and no price of its own.
+The Key app labels every dollar figure as coming from the owner phone. It has
+no sales records or independent price data.
 
-**Rests on.** The Key app's signing rules, which it applies on its own screen
-to every spend. It refuses to sign unless:
+For every spend, the Key app applies its signing rules on its own screen. It
+refuses to sign unless:
 
 - the transaction file is a plain version-0 PSBT, with the full previous
   transaction for every input, so it cannot be lied to about amounts
@@ -194,7 +189,7 @@ A new cash-out destination is enrolled only on the Key app, by scanning the
 exchange's deposit code with its camera, and becomes usable after 24 hours on
 the Key app's clock (`SR-30`).
 
-**Stops at.**
+The signing checks have these limits:
 
 - The Key app counts signatures, not confirmed spends, so its totals can only
   be too high, never too low (`SR-33`).
@@ -212,12 +207,12 @@ the Key app's clock (`SR-30`).
 
 ## Address batches
 
-The counter never holds the wallet description. It gets **signed batches of
-addresses**, each for its own contiguous range of addresses. The owner phone
-signs a batch with key 1, and the Key app co-signs it after deriving the same
-addresses from its own copy of the wallet. The counter accepts a batch only
-with both signatures, and uses each address once. An empty range means "do not
-offer Bitcoin", never "reuse".
+The counter never holds the wallet description. Instead, it gets **signed
+batches of addresses**, each covering a contiguous range. The owner phone signs
+with key 1. The Key app derives the same addresses from its wallet copy and
+co-signs the batch. The counter accepts it only with both signatures and uses
+each address once. An empty range means "do not offer Bitcoin"; it never means
+"reuse".
 
 - The Key app writes its new highest-signed index to storage before the
   co-signature leaves the device. A crash can waste an index. It can never
@@ -234,10 +229,10 @@ Four words carry 44 bits, so the software never trusts the words alone. It
 compares full hashes, and the words are stretched with about a million rounds
 of hashing (`CR-91` to `CR-98`).
 
-**Stops at.** A stolen counter still leaks its batch's future addresses, which
-reveals what the shop will receive and when, not the shop's keys or money. The
-four words are a check for people, and the rest rests on the software
-comparing the full values.
+A stolen counter leaks its batch's future addresses, revealing what the shop
+will receive and when. It does not reveal the shop's keys or give access to
+the money. The four words help people check the pairing; the software must
+still compare the full values.
 
 ## The instant limit and the exposure total
 
@@ -247,9 +242,9 @@ counter enforces the limits. The limits, the defaults and the rules are in
 [Getting paid](getting-paid.md). They are a **bound on what a failed instant
 sale can cost**, never a promise that none will fail.
 
-The design also calls for a worst-case line on screen: "If every instant sale
-failed you would lose at most $X", where X adds the exposure budget to the
-override ceilings. The screen that adds these up is **Not built yet**.
+The design calls for a worst-case line on screen: "If every instant sale
+failed you would lose at most $X". X is the exposure budget plus the override
+ceilings. The screen that calculates this total is **Not built yet**.
 
 ## When a phone is lost or stolen
 
@@ -279,10 +274,11 @@ ceilings, indexes back at zero, and every signer rule applies as before
 leaks only its address batch. The owner removes it, which is tightening. Its
 pairing record and its manager PIN file are sealed with the Android Keystore.
 
-**Stops at.** A PIN of six digits can be tried a million times by anyone who
-holds the locked file and a computer, at the cost of Argon2 each time. What
-stops that is the Keystore key that wraps the file, which needs the phone, and
-the wipe after ten wrong tries (`LC-07` section "What these rules do not do").
+The PIN and wipe have limits. A six-digit PIN has a million possible values,
+and anyone with the locked file and a computer can try them at the cost of
+Argon2 each time. Those attempts are limited by the Keystore key that wraps
+the file and requires the phone, along with the wipe after ten wrong tries
+(`LC-07` section "What these rules do not do").
 When a phone reports that the Keystore is software only, the app says so. The
 phone's lock and the wipe are promises of the app's software. A rooted phone,
 or one running a hostile keyboard or accessibility service, can read what the
@@ -290,9 +286,9 @@ screen shows and what is typed.
 
 ## The recovery kit
 
-The design puts the recovery information on **one printed page, the recovery
-kit**, which holds hints, not secrets. It holds the full wallet description
-with its checksum, the four checksum words, the first block height, an
+The recovery kit is designed as **one printed page** of recovery information,
+with no secret keys or seed words. It holds the full wallet description with
+its checksum, the four checksum words, the first block height, an
 explicit range of addresses to import, the words "any two of three", where each
 key is and who knows, and restore steps. It is checked by scanning: the Key app
 scans the printed description and compares it byte for byte with its own, and

@@ -1,25 +1,14 @@
 # Why bitcoin, for a merchant
 
-This chapter covers what a shop gains by taking bitcoin, what it costs, and
-what the shop takes on in return. It is not investment advice. OpenBMT does
-not tell anyone to buy or hold bitcoin as an investment, and it makes no
-claim about the price.
-
-A shop that takes bitcoin with OpenBMT gets five things a card processor does
-not give it:
-
-1. It keeps the whole sale. No processor takes a percentage.
-2. A confirmed payment stays paid. There is no chargeback.
-3. The money arrives in the shop's own wallet, and no company can hold it,
-   reserve it or freeze it.
-4. It needs no merchant account, no application and no approval to start.
-5. It is paid in money whose supply no central bank or government can change.
-
-Each is explained below with its source and its limit.
+OpenBMT lets a shop accept bitcoin without a processor or merchant account,
+and payments go to the shop's own wallet. The shop takes responsibility for
+its keys and devices, and for the tax and price risks of holding bitcoin. This
+is not investment advice. OpenBMT does not tell anyone to buy or hold bitcoin
+as an investment, and it makes no claim about the price.
 
 ## You keep the whole sale
 
-A card processor takes a share of every sale. Square's United States pricing,
+Card processors take a share of every sale. Square's United States pricing,
 read 2026-11-11, lists these rates:
 
 | Payment | Rate |
@@ -38,7 +27,7 @@ A $20 sale paid in person on Square's Free plan costs 2.6% of $20 plus 15
 cents: $0.52 + $0.15 = $0.67. A shop that takes 1,000 such sales a month pays
 $670 a month, or $8,040 a year, before any dispute or payout fee.
 
-An on-chain bitcoin payment to an OpenBMT shop carries no processor fee. The
+An on-chain bitcoin payment to an OpenBMT shop has no processor fee. The
 customer pays the network fee to send it. The shop pays a network fee later,
 when it moves the coins (a cash-out or a merge of receipts), and that fee
 depends on the size of the transaction and the fee rate at that moment, not on
@@ -51,7 +40,7 @@ that day. The size is counted by hand from the weight rules in BIP 141. Each
 further receipt spent in the same transaction adds 104.5 virtual bytes (design
 section 9).
 
-The limit: fee rates move with demand. In a fee spike a small receipt can cost
+Fee rates change with demand. In a fee spike a small receipt can cost
 more to spend than it is worth. The shop can set a smallest on-chain sale, or
 take small sales over its own Lightning node, which makes no receipt per sale
 (see [Getting paid](getting-paid.md)). Lightning has routing fees of its own:
@@ -61,11 +50,11 @@ current rates at <https://mempool.space/> before relying on any figure here.
 
 ## A paid sale stays paid
 
-A card payer can dispute a payment through their bank. The Visa Core Rules (24
-October 2026 edition) allow a card-fraud dispute up to 120 calendar days after
-the transaction is processed. For goods or services not received, the limit
-runs from the date the payer expected delivery and ends no later than 540 days
-after the transaction.
+A customer can dispute a card payment through their bank. The Visa Core Rules
+(24 October 2026 edition) allow a card-fraud dispute up to 120 calendar
+days after the transaction is processed. For goods or services not received,
+the limit runs from the date the payer expected delivery and ends no later than
+540 days after the transaction.
 
 The merchant pays for disputes. Stripe charges $15 for each dispute received
 and keeps it even if the merchant wins; countering costs a second $15, which
@@ -79,7 +68,7 @@ any bank. A refund happens only when the shop decides to send one. Each block
 added on top makes a reversal less likely. No number of blocks makes it
 impossible, so OpenBMT never calls a payment final forever.
 
-The limit: an unconfirmed payment can still be replaced by its sender.
+An unconfirmed payment can still be replaced by its sender.
 OpenBMT's instant limit bounds that risk; it does not remove it. Above the
 limit the counter waits for a block. Below it, the shop accepts that for about
 ten minutes a dishonest customer could cancel, and the limit is the most that
@@ -109,18 +98,19 @@ payout to wait for or to hold. No company holds a key to that wallet, so no
 company can freeze it, and OpenBMT has no switch that can stop a shop from
 being paid.
 
-The limit: control comes with responsibility. If the shop loses two of its
-three keys, nobody can restore them. If the owner approves a bad spend, nobody
-can reverse it. [How your money is kept safe](safety.md) and
-[Best practices](best-practices.md) cover how to avoid both.
+The shop is responsible for keeping its keys safe and approving spends. If it
+loses two of its three keys, nobody can restore them. If the owner approves a
+bad spend, nobody can reverse it. See [How your money is kept
+safe](safety.md) and [Best practices](best-practices.md) for ways to avoid
+these losses.
 
 ## No account, no approval
 
-To take cards a shop signs up with a processor, gives its identity and bank
-details, and accepts that processor's terms. The processor decides whether to
-serve the business and can close the account later under those terms.
+To accept cards, a shop signs up with a processor, provides its identity and
+bank details, and accepts the processor's terms. The processor decides if it
+will serve the business and can close the account later under those terms.
 
-To take bitcoin with OpenBMT a shop needs its own phones and, if it wants one,
+To accept bitcoin with OpenBMT, a shop needs its own phones and may also use
 a Box. There is no sign-up, no identity check and no company that has to
 approve the shop or can turn it away (see [What OpenBMT will never
 do](never.md)). The shop's legal duties do not change: tax, licensing and the
@@ -142,7 +132,7 @@ in `GetBlockSubsidy` (`src/validation.cpp`) from the halving interval set in
 when it runs one, refuses a block that pays more. Nobody can change that
 schedule for the network without every node operator choosing new rules.
 
-The limit: a fixed supply is not a stable price. The dollar price of bitcoin
+A fixed supply does not mean a stable price. The dollar price of bitcoin
 has risen and fallen sharply, and a shop that keeps what it receives carries
 that movement in both directions. A shop can cash out on its own schedule
 because the money is in its own wallet. OpenBMT does not convert anything: a
@@ -151,8 +141,8 @@ cash-out is a transaction the owner approves to an exchange the owner chose
 
 ## What the shop takes on
 
-- **Price movement.** Described above. The shop chooses how much to keep and
-  when to cash out.
+- **Price movement.** The shop chooses how much bitcoin to keep and when to
+  cash out.
 - **Taxes.** This is United States information, not advice. Under IRS Notice
   2014-21 (Q&A-3 and Q&A-4), bitcoin received for goods or services is income
   at its fair market value in dollars on the day received, and that value is
@@ -168,9 +158,8 @@ cash-out is a transaction the owner approves to an exchange the owner chose
 - **Fewer customers pay this way.** OpenBMT makes no claim about how many
   customers pay with bitcoin. Today it is fewer than pay with cards, so treat it
   as an additional way to be paid, not a replacement.
-- **Fees on small sales.** Described under "You keep the whole sale". The
-  shop's own Lightning node is the optional answer; it is built at the counter
-  but has not yet been run against a real node.
+- **Fees on small sales.** A shop can use its own Lightning node, which is
+  built at the counter but has not yet been run against a real node.
 - **Your own devices.** The shop runs its phones and, optionally, a Box, and
   keeps them charged, updated and safe.
 - **Pre-release software.** No independent audit has been done. Do not use
@@ -178,9 +167,9 @@ cash-out is a transaction the owner approves to an exchange the owner chose
 
 ## Customers and privacy
 
-A customer who holds bitcoin can pay a shop that takes it. A customer paying
-with a card issued abroad pays a foreign-exchange fee; a bitcoin payment has
-none, and the customer pays the network fee instead.
+Customers who hold bitcoin can pay a shop that accepts it. A customer using a
+card issued abroad pays a foreign-exchange fee. Bitcoin has no such fee, but
+the customer pays the network fee.
 
 A bitcoin payment carries no customer name and no shop bank details. The
 shop's wallet description stays on the shop's own devices, and OpenBMT is
