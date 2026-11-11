@@ -87,6 +87,8 @@ fn setup_runs_from_an_empty_store_to_a_wallet() {
     let offer =
         openbmt_core::pairing::PairOffer::from_bytes(&app.pair_offer_bytes().expect("offer"))
             .expect("decodes");
+    // The network is the wallet's.
+    assert_eq!(offer.network, wallet.network());
     assert_eq!(
         offer.binding(),
         openbmt_core::pairing::PairOffer::new(
@@ -95,7 +97,8 @@ fn setup_runs_from_an_empty_store_to_a_wallet() {
                 &app.device_root().expect("root").try_into().expect("32")
             )
             .expect("root"),
-            wallet.checksum32()
+            wallet.checksum32(),
+            wallet.network()
         )
         .expect("an offer")
         .binding()

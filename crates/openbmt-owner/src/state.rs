@@ -675,6 +675,7 @@ impl Owner {
             self.identity.device_id(),
             self.roots.approver,
             self.wallet_id,
+            self.wallet.network(),
         )
         .map_err(|e| Refusal::PairingRequest(e.to_string()))?;
         check_request(&offer, &request).map_err(|e| Refusal::PairingRequest(e.to_string()))?;

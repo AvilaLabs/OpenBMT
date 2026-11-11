@@ -318,9 +318,13 @@ pub fn pair_request(
     owner: &Owner,
     counter_n: u8,
 ) -> (openbmt_core::pairing::CounterPairing, Vec<u8>) {
-    let offer =
-        openbmt_core::pairing::PairOffer::new(owner.owner_id(), owner.approver_id(), wallet_id())
-            .unwrap();
+    let offer = openbmt_core::pairing::PairOffer::new(
+        owner.owner_id(),
+        owner.approver_id(),
+        wallet_id(),
+        NET,
+    )
+    .unwrap();
     let (pairing, request) = openbmt_core::pairing::CounterPairing::begin(
         &offer.to_bytes(),
         &counter(counter_n),

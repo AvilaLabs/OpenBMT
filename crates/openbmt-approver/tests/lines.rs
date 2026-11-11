@@ -489,6 +489,7 @@ fn as_28_a_request_made_for_other_roots_is_refused() {
         owner().device_id(),
         identity([0x66; 32]).device_id(),
         wallet_id(),
+        NET,
     )
     .unwrap();
     let (_, request) =
@@ -500,6 +501,34 @@ fn as_28_a_request_made_for_other_roots_is_refused() {
     let lines = lines_of(&mut a, vec![item]);
     assert!(!lines[0].can_approve);
     assert!(lines[0].failure.as_ref().unwrap().starts_with("AS-28"));
+    let Detail::Pairing(p) = &lines[0].detail else {
+        panic!()
+    };
+    assert_eq!(p.session_words, None);
+}
+
+#[test]
+fn as_28_a_request_made_for_another_network_is_refused() {
+    // A counter that was shown the same roots and wallet on the main
+    // network binds to another offer than the Key app's regtest one.
+    let mut a = approver_with_key2();
+    let other = PairOffer::new(
+        owner().device_id(),
+        approver_id(),
+        wallet_id(),
+        bitcoin::Network::Bitcoin,
+    )
+    .unwrap();
+    let (_, request) =
+        CounterPairing::begin(&other.to_bytes(), &counter(1), "Counter 1", [1; 32], NOW).unwrap();
+    let item = Item::Pairing {
+        request,
+        settings_version: 1,
+    };
+    let lines = lines_of(&mut a, vec![item]);
+    assert!(!lines[0].can_approve);
+    let why = lines[0].failure.as_ref().unwrap();
+    assert!(why.starts_with("AS-28"), "{why}");
     let Detail::Pairing(p) = &lines[0].detail else {
         panic!()
     };

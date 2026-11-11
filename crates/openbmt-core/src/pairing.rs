@@ -3,22 +3,27 @@
 //! The counter pins two roots, the owner phone's and the Key app's. The
 //! ceremony has two scans and one comparison:
 //!
-//! 1. The Key app shows a [`PairOffer`]: both roots and the wallet's
-//!    checksum. The counter reads it ([`CounterPairing::begin`]) and fixes
-//!    the roots and wallet. Only then does it make a fresh number.
+//! 1. The Key app shows a [`PairOffer`]: both roots, the wallet's checksum
+//!    and the network. The counter reads it ([`CounterPairing::begin`]) and
+//!    fixes the roots, wallet and network. Only then does it make a fresh
+//!    number. The network comes only from the offer: nothing the owner phone
+//!    adds later can move the counter to another one.
 //! 2. The counter shows a [`PairRequest`]: its key, its name, the number and
 //!    a binding hash of the offer it was given, signed with its own key. The
-//!    Key app compares the binding with its own offer in full
-//!    ([`check_request`]).
+//!    owner phone scans that request from the counter and carries it
+//!    unchanged inside the approval session; the Key app compares the
+//!    binding with its own offer in full ([`check_request`]).
 //! 3. Both screens show the same four session words, made from the roots,
-//!    the wallet, the counter's key and the number ([`session_words`]). The
+//!    the wallet, the network, the counter's key and the number
+//!    ([`session_words`]). The
 //!    owner approves on the Key app ([`PendingPairing::approve`]) and taps
 //!    "They match" on the counter.
 //! 4. The Key app signs the [`PairingEntry`], then the owner phone adds its
 //!    signature ([`owner_cosign`]). The counter accepts the result
 //!    ([`CounterPairing::finish`]) only if both signatures check against the
 //!    roots it fixed in step 1 and the entry names its own key, name and
-//!    number.
+//!    number. The entry reaches the counter inside a
+//!    [`CounterBundle`](crate::bundle::CounterBundle).
 //!
 //! What the words protect against: someone who shows the counter a false
 //! offer and relays a request of their own to the Key app has to make the
@@ -35,6 +40,7 @@
 //!
 //! ```text
 //! offer:   "OBMO" | 1 | owner (32) | approver (32) | wallet (32)
+//!            | network u8 (0 main, 1 testnet, 2 signet, 3 regtest)
 //! request: "OBMJ" | 1 | counter (32) | name len u8 | name | nonce (32)
 //!            | binding (32) | sig (64)
 //! signed:  "OBMD" | 1 | wallet (32) | counter (32) | name len u8 | name
@@ -45,6 +51,8 @@
 //! Decoding only parses. Signatures are checked by the explicit steps above.
 
 use std::fmt;
+
+use bitcoin::Network;
 
 use crate::batch::PinnedRoots;
 use crate::identity::{
@@ -71,6 +79,8 @@ pub enum PairError {
     CounterIsRoot,
     /// The name is empty, too long, or holds a control character.
     InvalidName,
+    /// The network is not one a pairing can name (see [`network_code`]).
+    UnsupportedNetwork,
     /// The bytes were not a valid message.
     Decode(DecodeError),
     /// The request was made for other roots or another wallet.
@@ -107,6 +117,7 @@ impl fmt::Display for PairError {
             Self::SameRoot => write!(f, "owner and Key app roots must differ"),
             Self::CounterIsRoot => write!(f, "the counter's key is one of the roots"),
             Self::InvalidName => write!(f, "the counter's name is not allowed"),
+            Self::UnsupportedNetwork => write!(f, "the network is not one a pairing can name"),
             Self::Decode(e) => write!(f, "{e}"),
             Self::BindingMismatch => write!(f, "request was made for other roots or wallet"),
             Self::RequestSignatureInvalid => write!(f, "request signature is not valid"),
@@ -159,6 +170,31 @@ fn read_name(r: &mut Reader<'_>) -> Result<String, DecodeError> {
     Ok(name.to_owned())
 }
 
+/// The one-byte code of a network in an offer: 0 for Bitcoin, 1 for testnet,
+/// 2 for signet and 3 for regtest. Any other network has no code and cannot
+/// be paired.
+pub fn network_code(network: Network) -> Option<u8> {
+    match network {
+        Network::Bitcoin => Some(0),
+        Network::Testnet => Some(1),
+        Network::Signet => Some(2),
+        Network::Regtest => Some(3),
+        _ => None,
+    }
+}
+
+/// The network of an offer's code byte, or `None` for a byte that is not a
+/// code.
+pub fn network_from_code(code: u8) -> Option<Network> {
+    match code {
+        0 => Some(Network::Bitcoin),
+        1 => Some(Network::Testnet),
+        2 => Some(Network::Signet),
+        3 => Some(Network::Regtest),
+        _ => None,
+    }
+}
+
 /// What the Key app's "Pair a counter" screen shows (step 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PairOffer {
@@ -168,47 +204,69 @@ pub struct PairOffer {
     pub approver: DeviceId,
     /// The wallet's checksum (`WalletDescription::checksum32`).
     pub wallet: [u8; 32],
+    /// The network the wallet is on. The counter takes its network from
+    /// here and from nowhere else.
+    pub network: Network,
 }
 
 impl PairOffer {
-    /// An offer for two different roots and a wallet.
-    pub fn new(owner: DeviceId, approver: DeviceId, wallet: [u8; 32]) -> Result<Self, PairError> {
+    /// An offer for two different roots, a wallet and its network.
+    pub fn new(
+        owner: DeviceId,
+        approver: DeviceId,
+        wallet: [u8; 32],
+        network: Network,
+    ) -> Result<Self, PairError> {
         if owner == approver {
             return Err(PairError::SameRoot);
+        }
+        if network_code(network).is_none() {
+            return Err(PairError::UnsupportedNetwork);
         }
         Ok(Self {
             owner,
             approver,
             wallet,
+            network,
         })
     }
 
-    /// The hash of the offer that goes into the counter's request:
-    /// `tagged_hash(TAG_PAIR_OFFER, owner | approver | wallet)`.
-    pub fn binding(&self) -> [u8; 32] {
-        let mut msg = Vec::with_capacity(96);
-        msg.extend_from_slice(&self.owner.to_bytes());
-        msg.extend_from_slice(&self.approver.to_bytes());
-        msg.extend_from_slice(&self.wallet);
-        tagged_hash(TAG_PAIR_OFFER, &msg)
-    }
-
-    /// Wire form: `OBMO`, version 1, owner, Key app, wallet.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = wire::start(&wire::MAGIC_PAIR_OFFER, 96);
+    /// The offer's bytes without the frame: owner, Key app, wallet and the
+    /// network's code. These are what the binding and the session digest
+    /// hash. The network passed [`network_code`] when the offer was made;
+    /// an offer built by hand with another one hashes the code 255.
+    fn body(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(97);
         out.extend_from_slice(&self.owner.to_bytes());
         out.extend_from_slice(&self.approver.to_bytes());
         out.extend_from_slice(&self.wallet);
+        out.push(network_code(self.network).unwrap_or(u8::MAX));
         out
     }
 
-    /// Parse the wire form strictly. Equal roots and invalid keys are
-    /// refused.
+    /// The hash of the offer that goes into the counter's request:
+    /// `tagged_hash(TAG_PAIR_OFFER, owner | approver | wallet | network)`.
+    pub fn binding(&self) -> [u8; 32] {
+        tagged_hash(TAG_PAIR_OFFER, &self.body())
+    }
+
+    /// Wire form: `OBMO`, version 1, owner, Key app, wallet, network code.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let body = self.body();
+        let mut out = wire::start(&wire::MAGIC_PAIR_OFFER, body.len());
+        out.extend_from_slice(&body);
+        out
+    }
+
+    /// Parse the wire form strictly. Equal roots, invalid keys and a network
+    /// code that is not one of [`network_code`]'s are refused.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
         let mut r = Reader::framed(bytes, &wire::MAGIC_PAIR_OFFER)?;
         let owner = r.device_id()?;
         let approver = r.device_id()?;
         let wallet = r.array()?;
+        let network = network_from_code(r.u8()?)
+            .ok_or(DecodeError::NonCanonical("the network code is unknown"))?;
         r.finish()?;
         if owner == approver {
             return Err(DecodeError::NonCanonical(
@@ -219,6 +277,7 @@ impl PairOffer {
             owner,
             approver,
             wallet,
+            network,
         })
     }
 }
@@ -287,13 +346,11 @@ impl PairRequest {
     }
 }
 
-/// The digest behind the session words:
-/// `tagged_hash(TAG_PAIR_SESSION, owner | approver | wallet | counter | nonce)`.
+/// The digest behind the session words: `tagged_hash(TAG_PAIR_SESSION,
+/// owner | approver | wallet | network | counter | nonce)`.
 pub fn session_digest(offer: &PairOffer, counter: &DeviceId, nonce: &[u8; 32]) -> [u8; 32] {
-    let mut msg = Vec::with_capacity(160);
-    msg.extend_from_slice(&offer.owner.to_bytes());
-    msg.extend_from_slice(&offer.approver.to_bytes());
-    msg.extend_from_slice(&offer.wallet);
+    let mut msg = offer.body();
+    msg.reserve(64);
     msg.extend_from_slice(&counter.to_bytes());
     msg.extend_from_slice(nonce);
     tagged_hash(TAG_PAIR_SESSION, &msg)
@@ -406,6 +463,7 @@ impl SignedPairing {
 pub struct CounterPairing {
     roots: PinnedRoots,
     wallet: [u8; 32],
+    network: Network,
     own: DeviceId,
     name: String,
     nonce: [u8; 32],
@@ -450,6 +508,7 @@ impl CounterPairing {
                 approver: offer.approver,
             },
             wallet: offer.wallet,
+            network: offer.network,
             own,
             name: name.to_owned(),
             nonce,
@@ -463,6 +522,7 @@ impl CounterPairing {
             owner: self.roots.owner,
             approver: self.roots.approver,
             wallet: self.wallet,
+            network: self.network,
         }
     }
 
@@ -480,6 +540,21 @@ impl CounterPairing {
     /// The wallet checksum fixed in step 1.
     pub fn wallet(&self) -> [u8; 32] {
         self.wallet
+    }
+
+    /// The network fixed in step 1.
+    pub fn network(&self) -> Network {
+        self.network
+    }
+
+    /// The counter's own key.
+    pub fn counter(&self) -> DeviceId {
+        self.own
+    }
+
+    /// The time, in seconds, the ceremony began.
+    pub fn started_at(&self) -> u64 {
+        self.started_at
     }
 
     /// Step 4 on the counter. `words_confirmed` is whether the owner tapped
@@ -530,6 +605,7 @@ impl CounterPairing {
         Ok(Paired {
             roots: self.roots,
             wallet: self.wallet,
+            network: self.network,
             settings_floor: entry.settings_version,
         })
     }
@@ -540,6 +616,7 @@ impl CounterPairing {
 pub struct Paired {
     roots: PinnedRoots,
     wallet: [u8; 32],
+    network: Network,
     settings_floor: u32,
 }
 
@@ -552,6 +629,11 @@ impl Paired {
     /// The wallet checksum.
     pub fn wallet(&self) -> [u8; 32] {
         self.wallet
+    }
+
+    /// The network of the offer.
+    pub fn network(&self) -> Network {
+        self.network
     }
 
     /// The settings version in the pairing entry. Pass it to
@@ -679,9 +761,10 @@ mod tests {
     use crate::testutil::{assert_strict_decoding, identity};
 
     const T0: u64 = 1_000;
+    const NET: Network = Network::Regtest;
 
     fn offer() -> PairOffer {
-        PairOffer::new(identity(1).device_id(), identity(2).device_id(), [7; 32]).unwrap()
+        PairOffer::new(identity(1).device_id(), identity(2).device_id(), [7; 32], NET).unwrap()
     }
 
     /// A ceremony stopped just before `finish`.
@@ -771,12 +854,15 @@ mod tests {
         let n = [9; 32];
         let base = session_digest(&o, &c, &n);
         assert_eq!(base, session_digest(&o, &c, &n));
-        let other_owner = PairOffer::new(identity(4).device_id(), o.approver, o.wallet).unwrap();
-        let other_approver = PairOffer::new(o.owner, identity(4).device_id(), o.wallet).unwrap();
-        let other_wallet = PairOffer::new(o.owner, o.approver, [8; 32]).unwrap();
+        let other_owner = PairOffer::new(identity(4).device_id(), o.approver, o.wallet, NET).unwrap();
+        let other_approver = PairOffer::new(o.owner, identity(4).device_id(), o.wallet, NET).unwrap();
+        let other_wallet = PairOffer::new(o.owner, o.approver, [8; 32], NET).unwrap();
         assert_ne!(base, session_digest(&other_owner, &c, &n));
         assert_ne!(base, session_digest(&other_approver, &c, &n));
         assert_ne!(base, session_digest(&other_wallet, &c, &n));
+        let other_network =
+            PairOffer::new(o.owner, o.approver, o.wallet, Network::Bitcoin).unwrap();
+        assert_ne!(base, session_digest(&other_network, &c, &n));
         assert_ne!(base, session_digest(&o, &identity(4).device_id(), &n));
         assert_ne!(base, session_digest(&o, &c, &[10; 32]));
     }
@@ -785,7 +871,7 @@ mod tests {
     fn offer_needs_two_different_roots() {
         let a = identity(1).device_id();
         assert_eq!(
-            PairOffer::new(a, a, [0; 32]).unwrap_err(),
+            PairOffer::new(a, a, [0; 32], NET).unwrap_err(),
             PairError::SameRoot
         );
     }
@@ -796,9 +882,10 @@ mod tests {
         let o = identity(1).device_id();
         let a = identity(2).device_id();
         let others = [
-            PairOffer::new(identity(4).device_id(), a, own.wallet).unwrap(),
-            PairOffer::new(o, identity(4).device_id(), own.wallet).unwrap(),
-            PairOffer::new(o, a, [8; 32]).unwrap(),
+            PairOffer::new(identity(4).device_id(), a, own.wallet, NET).unwrap(),
+            PairOffer::new(o, identity(4).device_id(), own.wallet, NET).unwrap(),
+            PairOffer::new(o, a, [8; 32], NET).unwrap(),
+            PairOffer::new(o, a, own.wallet, Network::Bitcoin).unwrap(),
         ];
         for other in others {
             let (_, request) =
@@ -1117,7 +1204,7 @@ mod tests {
     fn offer_wire_form_is_strict() {
         let o = offer();
         let bytes = o.to_bytes();
-        assert_eq!(bytes.len(), 101);
+        assert_eq!(bytes.len(), 102);
         assert_eq!(PairOffer::from_bytes(&bytes).unwrap(), o);
         assert_strict_decoding(&bytes, PairOffer::from_bytes, PairOffer::to_bytes);
         let mut m = bytes.clone();
@@ -1140,12 +1227,62 @@ mod tests {
             DecodeError::NonCanonical(_)
         ));
         // An invalid key is refused.
-        let mut bad = bytes;
+        let mut bad = bytes.clone();
         bad[5..37].fill(0);
         assert_eq!(
             PairOffer::from_bytes(&bad).unwrap_err(),
             DecodeError::InvalidKey
         );
+        // A network code that is not one of the four is refused.
+        for code in [4u8, 5, 255] {
+            let mut other = bytes.clone();
+            other[101] = code;
+            assert!(matches!(
+                PairOffer::from_bytes(&other).unwrap_err(),
+                DecodeError::NonCanonical(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn the_network_is_in_the_offer_the_binding_and_what_the_counter_fixes() {
+        let nets = [
+            (Network::Bitcoin, 0u8),
+            (Network::Testnet, 1),
+            (Network::Signet, 2),
+            (Network::Regtest, 3),
+        ];
+        let o = offer();
+        let mut bindings = Vec::new();
+        for (net, code) in nets {
+            assert_eq!(network_code(net), Some(code));
+            assert_eq!(network_from_code(code), Some(net));
+            let own = PairOffer::new(o.owner, o.approver, o.wallet, net).unwrap();
+            let bytes = own.to_bytes();
+            assert_eq!(bytes[101], code);
+            assert_eq!(PairOffer::from_bytes(&bytes).unwrap().network, net);
+            bindings.push(own.binding());
+            let (counter, _) =
+                CounterPairing::begin(&bytes, &identity(3), "A", [9; 32], T0).unwrap();
+            assert_eq!(counter.network(), net);
+        }
+        bindings.sort();
+        bindings.dedup();
+        assert_eq!(bindings.len(), 4);
+        // Another network has no code, so no offer.
+        assert_eq!(network_code(Network::Testnet4), None);
+        assert_eq!(
+            PairOffer::new(o.owner, o.approver, o.wallet, Network::Testnet4).unwrap_err(),
+            PairError::UnsupportedNetwork
+        );
+    }
+
+    #[test]
+    fn the_paired_counter_keeps_the_network_of_the_offer() {
+        let f = fixture();
+        assert_eq!(f.counter.network(), NET);
+        let paired = f.counter.finish(&f.signed, true, T0).unwrap();
+        assert_eq!(paired.network(), NET);
     }
 
     #[test]

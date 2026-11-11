@@ -85,7 +85,13 @@ fn settings() -> Item {
 }
 
 fn pairing() -> Item {
-    let offer = PairOffer::new(owner().device_id(), approver().device_id(), WALLET).unwrap();
+    let offer = PairOffer::new(
+        owner().device_id(),
+        approver().device_id(),
+        WALLET,
+        bitcoin::Network::Regtest,
+    )
+    .unwrap();
     let (_, request) =
         CounterPairing::begin(&offer.to_bytes(), &id(9), "Counter 1", [3; 32], 100).unwrap();
     Item::Pairing {

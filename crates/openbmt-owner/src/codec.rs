@@ -639,6 +639,7 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
         owner.identity.device_id(),
         owner.roots.approver,
         owner.wallet_id,
+        owner.wallet.network(),
     )
     .map_err(|_| RestoreError::Inconsistent("the pairing offer"))?;
     let n = r.count(MAX_PAIRINGS, 9).map_err(d)?;

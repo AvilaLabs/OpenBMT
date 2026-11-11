@@ -885,7 +885,7 @@ fn as_62_a_pairing_version_above_what_the_owner_signed_is_returned() {
         let (_, request) = pair_request(&rig.owner, 1);
         let id = ok(rig.owner.queue_pairing(&request, nop));
         let built = rig.build(&[], 0);
-        let offer = PairOffer::new(owner_id(), approver_id(), wallet_id()).unwrap();
+        let offer = PairOffer::new(owner_id(), approver_id(), wallet_id(), NET).unwrap();
         let pending = check_request(&offer, &PairRequest::from_bytes(&request).unwrap()).unwrap();
         let (_, sig) = pending.approve(&approver, version).unwrap();
         let results = vec![

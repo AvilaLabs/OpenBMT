@@ -9,6 +9,7 @@
 
 pub mod batch;
 pub mod boxpair;
+pub mod bundle;
 pub mod command;
 pub mod entropy;
 mod hashing;

@@ -467,7 +467,12 @@ fn eval_pairing(
         claimed_settings_version: claimed,
         settings_version_to_sign: to_sign,
     };
-    let offer = match PairOffer::new(a.owner, a.identity.device_id(), a.wallet_id) {
+    let offer = match PairOffer::new(
+        a.owner,
+        a.identity.device_id(),
+        a.wallet_id,
+        a.wallet.network(),
+    ) {
         Ok(o) => o,
         Err(e) => {
             return blocked(

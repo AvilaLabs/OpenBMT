@@ -65,6 +65,8 @@ pub const MAGIC_PAIR_OFFER: [u8; 4] = *b"OBMO";
 pub const MAGIC_PAIR_REQUEST: [u8; 4] = *b"OBMJ";
 /// Magic of a [`SignedPairing`](crate::pairing::SignedPairing).
 pub const MAGIC_SIGNED_PAIRING: [u8; 4] = *b"OBMD";
+/// Magic of a [`CounterBundle`](crate::bundle::CounterBundle).
+pub const MAGIC_COUNTER_BUNDLE: [u8; 4] = *b"OBMs";
 /// Magic of a [`SignedCommand`](crate::command::SignedCommand).
 pub const MAGIC_OWNER_COMMAND: [u8; 4] = *b"OBMX";
 /// Magic of a [`SignedHeartbeat`](crate::heartbeat::SignedHeartbeat).

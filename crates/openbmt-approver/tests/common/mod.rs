@@ -346,7 +346,7 @@ pub fn settings_item(s: Settings) -> Item {
 }
 
 pub fn offer() -> PairOffer {
-    PairOffer::new(owner().device_id(), approver_id(), wallet_id()).unwrap()
+    PairOffer::new(owner().device_id(), approver_id(), wallet_id(), NET).unwrap()
 }
 
 pub fn pairing_item(counter_n: u8, claimed_version: u32) -> (Item, CounterPairing) {

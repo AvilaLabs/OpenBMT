@@ -274,6 +274,7 @@ impl Owner {
                             self.identity.device_id(),
                             self.roots.approver,
                             self.wallet_id,
+                            self.wallet.network(),
                         )
                         .map_err(|e| e.to_string())
                         .and_then(|offer| {
