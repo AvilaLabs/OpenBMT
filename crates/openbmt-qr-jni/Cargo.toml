@@ -1,0 +1,16 @@
+[package]
+name = "openbmt-qr-jni"
+description = "The QR reader of openbmt-qr as one JNI function the Android apps call with the Y plane of a camera frame"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+# The reader and nothing else. The JNI table is declared by hand in
+# `src/jni.rs`, so no crate of the JNI types is needed.
+[dependencies]
+openbmt-qr = { path = "../openbmt-qr" }
