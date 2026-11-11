@@ -39,3 +39,6 @@ openbmt-owner = { path = "../openbmt-owner" }
 openbmt-signer = { path = "../openbmt-signer" }
 # The recorded replies and the invoice writer of the Lightning tests.
 openbmt-lightning = { path = "../openbmt-lightning", features = ["testing"] }
+# The relay and the owner's end of the link, for the tests of the link.
+openbmt-link = { path = "../openbmt-link" }
+openbmt-courier = { path = "../openbmt-courier" }

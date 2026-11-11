@@ -283,6 +283,14 @@ const RULES: &[Entry] = &[
         "Stop one of them, then start the counter again.",
     ),
     (
+        "link-none",
+        Kind::State,
+        "No link to the Box",
+        "This counter was paired without a Box, so it has no link to the owner and nothing was done.",
+        Who::Owner,
+        "Nothing to do now. When the shop has a Box, the owner's phone gives the counter its code.",
+    ),
+    (
         "handles-used",
         Kind::State,
         "Out of numbers",

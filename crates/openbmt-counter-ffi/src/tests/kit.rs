@@ -95,6 +95,7 @@ pub fn record_with(settings: SignedSettings) -> PairingRecord {
         settings,
         first_batch: Some(batch(0, 10)),
         peers: Vec::new(),
+        relay: None,
     }
 }
 
@@ -112,6 +113,7 @@ pub fn start_config(dir: &str) -> StartConfig {
         proxy: None,
         own_node: None,
         lightning: None,
+        link_proxy: None,
     }
 }
 

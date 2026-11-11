@@ -28,6 +28,10 @@
 //!   at a time, in memory only, with the counter's key and number drawn from
 //!   the system's random source here (CR-91 to CR-96). `pair_finish` returns
 //!   the pairing record the app keeps and hands back at every `start`.
+//! - The link to the owner (`link_step`, `link_state`, `take_relay`,
+//!   CR-130 to CR-136) runs on the relay the pairing record holds. The app
+//!   calls `link_step` from a thread of its own; the node is held only while
+//!   the step hands what came to it, never while the relay is called.
 //! - Errors are one enum, [`CounterError`], with a `rule`, a `text` and the
 //!   `Words` of what a person is shown. A panic in any call is caught,
 //!   becomes `CounterError::Internal` and poisons the node.
@@ -65,6 +69,7 @@ mod jni;
 mod pair;
 pub mod pay;
 pub mod rates;
+mod relay;
 mod say;
 pub mod shop;
 mod views;
@@ -84,7 +89,8 @@ pub use say::{all_words, words_for};
 pub use shop::SettingsView;
 pub use views::{
     ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome, OpenArgs,
-    OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView, PairBeginArgs, PairStartedView,
-    PairingView, PumpView, RefundArgs, RefundAskView, RefundRow, RefundStateView, ReportView,
-    RequoteArgs, ScreenView, StartConfig, StateView, StatusView, WithdrawArgs, WordsView,
+    LinkStepView, LinkView, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView,
+    PairBeginArgs, PairStartedView, PairingView, PumpView, RefundArgs, RefundAskView, RefundRow,
+    RefundStateView, RelayKind, ReportView, RequoteArgs, ScreenView, StartConfig, StateView,
+    StatusView, WithdrawArgs, WordsView,
 };

@@ -6,7 +6,7 @@ import java.io.ByteArrayOutputStream
 object ProtocolDecoderTest {
     /** The `start` request of [sampleConfig], as the Rust test of the same name writes it. */
     private const val START_FRAME_HEX =
-        "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f010100000003"
+        "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f01010000000300"
 
     /** The `ln_reply` request for handle 1, as the Rust test of the same name writes it. */
     private const val LN_REPLY_FRAME_HEX =
@@ -124,6 +124,54 @@ object ProtocolDecoderTest {
         val pump = decodeResponse(header(0, Writer().u32(0).u32(1).string("note").u8(1).toByteArray())).pump()
         check(pump.reports.isEmpty() && pump.notes == listOf("note") && pump.stopped)
         statuses()
+        links()
+    }
+
+    /** The link's view, with and without a time (CR-136), and the pairing view with a relay. */
+    private fun links() {
+        fun link(since: Boolean, flag: Int = if (since) 1 else 0): ByteArray {
+            val out = ByteArrayOutputStream()
+            words(out, 0, 0, "Box not reachable".toByteArray(Charsets.UTF_8))
+            out.write(0) // not connected
+            out.write(flag)
+            if (since) out.write(Writer().u64(1_700_000_000).toByteArray())
+            out.write(1) // refused
+            out.write(Writer().u64(3).u64(7).toByteArray())
+            out.write(0) // no check-in yet
+            return out.toByteArray()
+        }
+        decodeResponse(header(0, link(true))).let { r ->
+            val l = r.linkView()
+            r.end()
+            check(l.words.heading == "Box not reachable" && !l.connected && l.since == 1_700_000_000L)
+            check(l.refused && l.heartbeatsTaken == 3L && l.ownerRecords == 7L && l.lastCheckInAt == null)
+        }
+        decodeResponse(header(0, link(false))).let { r ->
+            check(r.linkView().since == null)
+            r.end()
+        }
+        rejects("an option flag in the link") { decodeResponse(header(0, link(false, flag = 2))).linkView() }
+        val step = Writer().u32(1).string("a note").toByteArray()
+        decodeResponse(header(0, link(true) + step)).let { r ->
+            val s = r.linkStepView()
+            r.end()
+            check(s.notes == listOf("a note"))
+        }
+        // The pairing view ends with the kind of relay; a tag that is not defined is refused.
+        fun relay(tag: Int) = Writer().u8(3).u32(1).u8(0).u8(0).u64(0).u8(tag).toByteArray()
+        decodeResponse(header(0, relay(2))).let { r ->
+            r.u8()
+            r.shopSettings()
+            check(r.relayKind() == RelayKind.Onion)
+            r.end()
+        }
+        rejects("a relay kind") {
+            decodeResponse(header(0, relay(3))).let { r ->
+                r.u8()
+                r.shopSettings()
+                r.relayKind()
+            }
+        }
     }
 
     /** The status with and without the own node's line (CR-107). */
@@ -183,6 +231,7 @@ object ProtocolDecoderTest {
                 proxy = "p",
                 ownNode = "o",
                 lightning = byteArrayOf(3),
+                linkProxy = null,
             )
         check(hex(startFrame(config)) == START_FRAME_HEX) { hex(startFrame(config)) }
         val reply = lnReplyFrame(1, 7, 200, byteArrayOf(0x7b, 0x7d))

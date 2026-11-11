@@ -73,6 +73,8 @@ private const val OP_HEARTBEAT = 20
 private const val OP_COMMAND = 21
 private const val OP_CHECK_IN = 22
 private const val OP_ADD_BATCH = 23
+private const val OP_LINK_STEP = 24
+private const val OP_LINK_STATE = 25
 private const val OP_STATUS = 30
 private const val OP_NOTES = 31
 private const val OP_OWN_NODE_RETRY = 32
@@ -92,6 +94,7 @@ private const val OP_LN_FAILED = 52
 private const val OP_LN_PIN = 53
 private const val OP_LN_NEXT = 54
 private const val OP_LN_REMOVE = 55
+private const val OP_TAKE_RELAY = 56
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -99,6 +102,9 @@ private const val TAG_COUNTER_NETWORK_MAINNET = 0
 private const val TAG_COUNTER_NETWORK_TESTNET = 1
 private const val TAG_COUNTER_NETWORK_SIGNET = 2
 private const val TAG_COUNTER_NETWORK_REGTEST = 3
+private const val TAG_RELAY_KIND_NONE = 0
+private const val TAG_RELAY_KIND_DIRECT = 1
+private const val TAG_RELAY_KIND_ONION = 2
 private const val TAG_ACTOR_ROLE_CASHIER = 0
 private const val TAG_ACTOR_ROLE_MANAGER = 1
 private const val TAG_REFUND_ASK_VIEW_SATS = 0
@@ -143,6 +149,9 @@ private const val TAG_REPORT_VIEW_DUST = 6
 
 enum class CounterNetwork { Mainnet, Testnet, Signet, Regtest }
 
+/** What kind of relay a pairing record holds (CR-131): an onion relay needs Orbot. */
+enum class RelayKind { None, Direct, Onion }
+
 /** Who acts at the counter. The app has checked the person's PIN. */
 enum class ActorRole { Cashier, Manager }
 
@@ -158,7 +167,9 @@ class Actor(val role: ActorRole, val name: String)
  * refused, or that comes with no [proxy], starts the node without an own node
  * and the status says why. [lightning] is the saved Lightning connection as
  * [CounterNode.lnReply] returned it when the test passed, kept sealed by the
- * app (CR-115), or null.
+ * app (CR-115), or null. [linkProxy] is Orbot's address for the link to the
+ * owner when the relay is an onion service and the settings have Tor off (CR-134);
+ * give it only when the proxy answers.
  */
 class StartConfig(
     val dir: String,
@@ -167,13 +178,14 @@ class StartConfig(
     val proxy: String?,
     val ownNode: String? = null,
     val lightning: ByteArray? = null,
+    val linkProxy: String? = null,
 )
 
 /** What [Pairing.begin] returns: the request to show as a code, and the four words. */
 class PairStarted(val request: ByteArray, val words: List<String>)
 
 /** What the app needs from a saved pairing record before the node runs. */
-class PairingInfo(val network: CounterNetwork, val settings: ShopSettings)
+class PairingInfo(val network: CounterNetwork, val settings: ShopSettings, val relay: RelayKind)
 
 /** How a refund is asked for. */
 sealed class RefundAsk {
@@ -329,6 +341,24 @@ class Status(
     /** CR-116: null when no Lightning credential is saved. */
     val lightning: LightningStatus?,
 )
+
+/**
+ * CR-136: the link to the owner. [words] is the line for the home screen
+ * ("Connected to the Box", or why not); [since] is when the Box was first not
+ * reachable, while it is not.
+ */
+class Link(
+    val words: Words,
+    val connected: Boolean,
+    val since: Long?,
+    val refused: Boolean,
+    val heartbeatsTaken: Long,
+    val ownerRecords: Long,
+    val lastCheckInAt: Long?,
+)
+
+/** What [CounterNode.linkStep] returns: the link after the step, and what the link logged. */
+class LinkStep(val link: Link, val notes: List<String>)
 
 /** One source of the price table (RT-01): where the app fetches, and what it asks for. */
 class RateSource(val id: String, val url: String, val currency: String, val initial: String)
@@ -539,7 +569,16 @@ private fun Writer.refundAsk(v: RefundAsk): Writer {
 
 private fun Writer.start(c: StartConfig): Writer =
     string(c.dir).u64(c.now).bytes(c.record).option(c.proxy) { string(it) }
-        .option(c.ownNode) { string(it) }.option(c.lightning) { bytes(it) }
+        .option(c.ownNode) { string(it) }.option(c.lightning) { bytes(it) }.option(c.linkProxy) { string(it) }
+
+
+internal fun Reader.relayKind(): RelayKind =
+    when (val t = u8()) {
+        TAG_RELAY_KIND_NONE -> RelayKind.None
+        TAG_RELAY_KIND_DIRECT -> RelayKind.Direct
+        TAG_RELAY_KIND_ONION -> RelayKind.Onion
+        else -> tag("RelayKind $t")
+    }
 
 private fun Writer.network(v: CounterNetwork): Writer =
     u8(
@@ -642,6 +681,11 @@ internal fun Reader.sample(): Sample = Sample(string(), u64(), u64())
 internal fun Reader.shopSettings(): ShopSettings = ShopSettings(u32(), bool(), bool(), u64())
 
 internal fun Reader.rate(): Rate = Rate(u64(), string(), u64())
+
+internal fun Reader.linkView(): Link =
+    Link(words(), bool(), option { u64() }, bool(), u64(), u64(), option { u64() })
+
+internal fun Reader.linkStepView(): LinkStep = LinkStep(linkView(), strings())
 
 private fun Reader.heartbeatOutcome(): HeartbeatOutcome =
     HeartbeatOutcome(bool(), option { u64() }, words(), reports())
@@ -750,7 +794,7 @@ object Rates {
 object Shop {
     fun pairing(record: ByteArray): PairingInfo {
         val r = decodeResponse(send(requestFrame(OP_PAIRING_READ, 0) { it.bytes(record) }))
-        return PairingInfo(r.network(), r.shopSettings()).also { r.end() }
+        return PairingInfo(r.network(), r.shopSettings(), r.relayKind()).also { r.end() }
     }
 }
 
@@ -800,6 +844,16 @@ object Pairing {
     /** The person leaves: the ceremony is forgotten. */
     fun cancel() {
         callUnit(OP_PAIR_CANCEL, 0)
+    }
+
+    /**
+     * CR-132: take the owner's signed relay for counters (the code the owner's phone shows) into
+     * the pairing [record]; returns the new record for the app to keep in place of the old. The
+     * link starts from it at the next start. A refusal is a [CounterException] with its words.
+     */
+    fun takeRelay(record: ByteArray, frame: ByteArray): ByteArray {
+        val r = decodeResponse(send(requestFrame(OP_TAKE_RELAY, 0) { it.bytes(record).bytes(frame) }))
+        return r.bytes().also { r.end() }
     }
 
     /** Finish with the owner phone's bundle; returns the pairing record. */
@@ -942,6 +996,23 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
     fun status(): Status {
         val r = call(OP_STATUS, handle)
         return r.statusView().also { r.end() }
+    }
+
+    /**
+     * CR-135: one turn of the link to the owner; call it from a thread of its own every five
+     * seconds. It may wait for the Box as long as the Box's timeouts say, and it does not hold up
+     * the other calls while it does. With [again], the Box is called now (the manager's Try
+     * again). Refused when the pairing has no relay.
+     */
+    fun linkStep(now: Long, again: Boolean = false): LinkStep {
+        val r = call(OP_LINK_STEP, handle) { it.u64(now).u8(if (again) 1 else 0) }
+        return r.linkStepView().also { r.end() }
+    }
+
+    /** CR-136: the link as the screen shows it, or null when the pairing has no relay. */
+    fun linkState(): Link? {
+        val r = call(OP_LINK_STATE, handle)
+        return r.option { linkView() }.also { r.end() }
     }
 
     /** CR-107: ask the driver to dial the own node again ("Try again"). */

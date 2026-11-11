@@ -108,6 +108,10 @@ pub struct StartConfig {
     /// when the test passed and as the app kept it sealed, or none. It is
     /// not part of the pairing record.
     pub lightning: Option<Vec<u8>>,
+    /// CR-134: the SOCKS5 proxy of Orbot for the link to the owner, when the
+    /// relay is an onion service and the settings have Tor off (with Tor on
+    /// the link uses `proxy`). The app gives it only when the proxy answers.
+    pub link_proxy: Option<String>,
 }
 
 wire_record!(StartConfig {
@@ -116,7 +120,8 @@ wire_record!(StartConfig {
     record,
     proxy,
     own_node,
-    lightning
+    lightning,
+    link_proxy
 });
 wire_record_get!(StartConfig {
     dir,
@@ -124,7 +129,8 @@ wire_record_get!(StartConfig {
     record,
     proxy,
     own_node,
-    lightning
+    lightning,
+    link_proxy
 });
 
 /// The arguments of `own_node_check`: what a manager typed, the network of
@@ -168,6 +174,24 @@ pub struct PairStartedView {
 
 wire_record!(PairStartedView { request, words });
 
+/// What kind of relay a pairing record holds (CR-131), for the app to know
+/// what the link will need before the node starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayKind {
+    /// No relay: the counter has no link.
+    None,
+    /// An address on the local network.
+    Direct,
+    /// An onion service, which needs Orbot.
+    Onion,
+}
+
+wire_unit_enum!(RelayKind {
+    None = 0,
+    Direct = 1,
+    Onion = 2
+});
+
 /// What `pairing_read` returns about a saved pairing record, for display
 /// before the node starts. The record is read and its signatures are not
 /// checked here: `start` checks them.
@@ -177,9 +201,15 @@ pub struct PairingView {
     pub network: CounterNetwork,
     /// The shop's settings in the record.
     pub settings: SettingsView,
+    /// What kind of relay the record holds.
+    pub relay: RelayKind,
 }
 
-wire_record!(PairingView { network, settings });
+wire_record!(PairingView {
+    network,
+    settings,
+    relay
+});
 
 /// The arguments of `open`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -869,6 +899,48 @@ pub struct OwnNodeView {
 }
 
 wire_record!(OwnNodeView { usable, words });
+
+/// The counter's link to the owner through the relay (CR-135, CR-136).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkView {
+    /// The line for the home screen: "Connected to the Box", or why not.
+    pub words: WordsView,
+    /// The last call to the relay worked.
+    pub connected: bool,
+    /// When the relay was first not reachable, while it is not: seconds
+    /// since 1970.
+    pub since: Option<u64>,
+    /// The relay answered and refused this counter.
+    pub refused: bool,
+    /// Heartbeats the node took through the link.
+    pub heartbeats_taken: u64,
+    /// How many of the counter's records the owner says it holds.
+    pub owner_records: u64,
+    /// When the last check-in was made.
+    pub last_check_in_at: Option<u64>,
+}
+
+wire_record!(LinkView {
+    words,
+    connected,
+    since,
+    refused,
+    heartbeats_taken,
+    owner_records,
+    last_check_in_at
+});
+
+/// What `link_step` returns: the link as it is after the step, and the
+/// lines the link logged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkStepView {
+    /// The link now.
+    pub link: LinkView,
+    /// The lines the link and its courier logged during the step.
+    pub notes: Vec<String>,
+}
+
+wire_record!(LinkStepView { link, notes });
 
 /// What `status` returns.
 #[derive(Debug, Clone, PartialEq, Eq)]

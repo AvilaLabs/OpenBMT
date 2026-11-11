@@ -35,6 +35,11 @@
 //! - 10 `pump`; 11 to 15 the sale (`open`, `judge`, `requote`, `cancel`,
 //!   `override_sale`); 16 to 19 refunds; 20 to 23 what the owner sends
 //!   (`heartbeat`, `command`, `check_in`, `add_batch`).
+//! - 24 `link_step` and 25 `link_state`: the link to the owner through the
+//!   relay the pairing holds (CR-135, CR-136). `link_step` is the work the
+//!   app's link thread does, on its own thread: it may wait for the relay
+//!   as long as the relay's timeouts say, and it does not hold up the other
+//!   calls while it does.
 //! - 30 `status`, 31 `notes`, 32 `own_node_retry` (CR-107).
 //! - 40 to 42 the price of bitcoin (`rate_sources`, `rate_parse`,
 //!   `rate_combine`), 43 `pairing_read` and 44 to 48 the pairing ceremony
@@ -51,6 +56,8 @@
 //!   hands out; `ln_pin` says whether the certificate a node showed is the
 //!   pinned one; `ln_remove` deletes the connection. The app sends the
 //!   requests (HTTPS only, CR-114); the library decides everything else.
+//! - 56 `take_relay` takes the owner's signed relay for counters into a
+//!   pairing record (CR-132) and works on no node.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -70,6 +77,7 @@ use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::error::{internal, refused_by, wrong_state, CounterError};
 use crate::host::{real_spawn, Entry, Spawn};
 use crate::pay::Payment;
+use crate::relay::take_relay;
 use crate::rates::{
     rate_combine, rate_parse, rate_sources, RateCombineArgs, RateParseArgs, RateSourceView,
     RateView, SampleView,
@@ -78,11 +86,11 @@ use crate::say::{TONES, WHOS};
 use crate::shop::{own_node_check, pairing_read, SettingsView};
 use crate::views::{
     put_words, ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome,
-    LightningSaleView, LightningStatusView, LnFailArgs, LnKind, LnMethod, LnReplyArgs,
-    LnRequestView, LnSetupArgs, LnStepView, LnTransportView, OpenArgs, OpenedView, OverrideArgs,
-    OwnNodeCheckArgs, OwnNodeView, PairBeginArgs, PairStartedView, PairingView, PumpView,
-    RefundArgs, RefundAskView, RefundRow, RefundStateView, ReportView, RequoteArgs, ScreenView,
-    StartConfig, StateView, StatusView, WithdrawArgs, WordsView,
+    LightningSaleView, LightningStatusView, LinkStepView, LinkView, LnFailArgs, LnKind, LnMethod,
+    LnReplyArgs, LnRequestView, LnSetupArgs, LnStepView, LnTransportView, OpenArgs, OpenedView,
+    OverrideArgs, OwnNodeCheckArgs, OwnNodeView, PairBeginArgs, PairStartedView, PairingView,
+    PumpView, RefundArgs, RefundAskView, RefundRow, RefundStateView, RelayKind, ReportView,
+    RequoteArgs, ScreenView, StartConfig, StateView, StatusView, WithdrawArgs, WordsView,
 };
 
 /// The first four bytes of a request.
@@ -370,6 +378,10 @@ fn build_ops() -> Vec<Op> {
         op(23, "add_batch", Node, |c, (now, bytes): (u64, Vec<u8>)| {
             c.entry()?.add_batch(now, &bytes)
         }),
+        op(24, "link_step", Node, |c, (now, again): (u64, bool)| {
+            c.entry()?.link_step(now, again)
+        }),
+        op(25, "link_state", Node, |c, ()| c.entry()?.link_state()),
         op(30, "status", Node, |c, ()| c.entry()?.status()),
         op(31, "notes", Node, |c, ()| c.entry()?.notes()),
         op(32, "own_node_retry", Node, |c, ()| {
@@ -414,6 +426,12 @@ fn build_ops() -> Vec<Op> {
         }),
         op(54, "ln_next", Node, |c, now: u64| c.entry()?.ln_next(now)),
         op(55, "ln_remove", Node, |c, ()| c.entry()?.ln_remove()),
+        op(
+            56,
+            "take_relay",
+            Zero,
+            |_, (record, frame): (Vec<u8>, Vec<u8>)| take_relay(&record, &frame),
+        ),
     ]
 }
 
@@ -548,6 +566,9 @@ fn definitions() -> Vec<TypeDef> {
         PairBeginArgs::define(),
         PairStartedView::define(),
         PairingView::define(),
+        RelayKind::define(),
+        LinkView::define(),
+        LinkStepView::define(),
         OpenArgs::define(),
         RequoteArgs::define(),
         OverrideArgs::define(),

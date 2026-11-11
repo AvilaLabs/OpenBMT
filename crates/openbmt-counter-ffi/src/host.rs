@@ -48,15 +48,17 @@ use openbmt_net_io::{
 };
 use openbmt_watch::HeaderChain;
 
-use crate::error::{from_rule, internal, poisoned, refused_by, CounterError, Kind};
+use crate::error::{from_rule, internal, poisoned, refused_by, wrong_state, CounterError, Kind};
 use crate::pair::refused;
 use crate::pay::{payment_for, payment_with_invoice, Payment};
+use crate::relay::{LinkPlan, LinkSlot, LEASE_WAIT};
 use crate::say::words_for;
 use crate::views::{
     ActorView, CashArgs, HealthView, HeartbeatOutcome, LightningSaleView, LightningStatusView,
-    LnFailArgs, LnKind, LnReplyArgs, LnRequestView, LnSetupArgs, LnStepView, OpenArgs, OpenedView,
-    OverrideArgs, OwnNodeView, PumpView, RefundArgs, RefundAskView, RefundRow, ReportView,
-    RequoteArgs, ScreenView, StartConfig, StatusView, WithdrawArgs, WordsView,
+    LinkStepView, LinkView, LnFailArgs, LnKind, LnReplyArgs, LnRequestView, LnSetupArgs,
+    LnStepView, OpenArgs, OpenedView, OverrideArgs, OwnNodeView, PumpView, RefundArgs,
+    RefundAskView, RefundRow, ReportView, RequoteArgs, ScreenView, StartConfig, StatusView,
+    WithdrawArgs, WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -137,6 +139,12 @@ pub struct Entry {
     network: Network,
     clock: Arc<AtomicU64>,
     own_refused: Option<WordsView>,
+    /// The link to the owner, when the pairing record holds a relay
+    /// (CR-134).
+    link: Option<LinkSlot>,
+    /// The entry has been stopped: a step of the link that is at the relay
+    /// sends nothing more.
+    closing: AtomicBool,
 }
 
 fn unknown_handle() -> CounterError {
@@ -144,6 +152,10 @@ fn unknown_handle() -> CounterError {
         "handle-unknown",
         "no node has this handle: it was never started or has been stopped",
     )
+}
+
+fn no_link() -> CounterError {
+    wrong_state("link-none", "the pairing has no relay, so the counter has no link")
 }
 
 fn reports(list: Vec<Report>) -> Vec<ReportView> {
@@ -202,6 +214,8 @@ struct Checked {
     /// CR-100, CR-102: why the own node was not used, when the start was
     /// given one and it was refused.
     own_refused: Option<WordsView>,
+    /// CR-134: what the link is made from, when the record holds a relay.
+    link: Option<LinkPlan>,
 }
 
 fn check_start(
@@ -234,6 +248,28 @@ fn check_start(
         .map(str::parse)
         .transpose()
         .map_err(|e| refused_by("start-proxy", format!("the proxy address: {e}")))?;
+    // CR-134: the link goes through the node's proxy when there is one (the
+    // settings have Tor on), and otherwise through Orbot's, which the app
+    // gives only for a relay that needs it.
+    let link = match record.relay.clone() {
+        None => None,
+        Some(hint) => {
+            let proxy = req
+                .link_proxy
+                .as_deref()
+                .map(str::parse)
+                .transpose()
+                .map_err(|e| refused_by("start-proxy", format!("the link's proxy address: {e}")))?;
+            Some(LinkPlan {
+                hint,
+                identity: record.identity().map_err(refused)?,
+                owner: record.roots.owner,
+                proxy: driver.proxy.or(proxy),
+                tor_on: record.settings.settings.tor_on,
+                dir: std::path::PathBuf::from(&req.dir),
+            })
+        }
+    };
     // CR-99: the peers are hints; a bad one is dropped by the record's own
     // reading, so none is left here that does not parse.
     for peer in &record.peers {
@@ -271,6 +307,7 @@ fn check_start(
         config,
         network,
         own_refused,
+        link,
     })
 }
 
@@ -286,8 +323,10 @@ impl Entry {
             config,
             network,
             own_refused,
+            link,
         } = check_start(req, policy, &clock)?;
         let node = Node::start_with(config, spawn).map_err(|e| start_error(&e))?;
+        let link = link.map(|plan| LinkSlot::start(plan, LEASE_WAIT));
         Ok(Self {
             inner: Mutex::new(Inner {
                 node: Some(node),
@@ -297,6 +336,8 @@ impl Entry {
             network,
             clock,
             own_refused,
+            link,
+            closing: AtomicBool::new(false),
         })
     }
 
@@ -329,6 +370,7 @@ impl Entry {
     /// Stop the driver and let go of the data folder. Returns what the
     /// last events reported. The entry takes no call after this.
     pub(crate) fn stop(&self) -> Result<PumpView, CounterError> {
+        self.closing.store(true, Ordering::SeqCst);
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let Inner { node, held } = &mut *guard;
         let mut node = node.take().ok_or_else(unknown_handle)?;
@@ -638,6 +680,54 @@ impl Entry {
                 }
             })
         })
+    }
+
+    /// CR-135: one turn of the link to the owner. With `again`, the relay is
+    /// called now whatever the pause after the last call was (the manager's
+    /// Try again). A step that is under way on another thread is not
+    /// waited for: the link as it is known now is returned.
+    ///
+    /// The node is held only while what came from the relay is handed to it
+    /// and what goes out is decided; the calls to the relay are made with
+    /// no lock of the node held. What a heartbeat made the node report is
+    /// held for the next `pump`, like what an override held.
+    pub(crate) fn link_step(&self, now: u64, again: bool) -> Result<LinkStepView, CounterError> {
+        let slot = self.link.as_ref().ok_or_else(no_link)?;
+        if self.poisoned.load(Ordering::SeqCst) {
+            return Err(poisoned());
+        }
+        let Ok(mut guard) = slot.link.try_lock() else {
+            return Ok(slot.step_view(Vec::new()));
+        };
+        let Some(link) = guard.as_mut() else {
+            return Ok(slot.step_view(Vec::new()));
+        };
+        if self.closing.load(Ordering::SeqCst) {
+            return Err(unknown_handle());
+        }
+        if again {
+            link.retry_now();
+        }
+        let polled = link.poll_step(now);
+        let called = polled.is_some();
+        let out = self.run(Some(now), |node, held, _| {
+            let (reports, out) = link.take_step(node, polled, now);
+            held.extend(reports);
+            Ok(out)
+        })?;
+        link.send_step(out, now);
+        let mut notes = link.take_notes();
+        notes.truncate(NOTE_LOG);
+        if called {
+            slot.update(link.state(), now);
+        }
+        Ok(slot.step_view(notes))
+    }
+
+    /// CR-136: the link as the screen shows it, or none when the counter
+    /// has no relay. It does not wait for a step.
+    pub(crate) fn link_state(&self) -> Result<Option<LinkView>, CounterError> {
+        Ok(self.link.as_ref().map(LinkSlot::view))
     }
 
     /// CR-107: dial the own node again.

@@ -61,6 +61,7 @@ impl W {
             .opt_string(c.proxy.as_deref())
             .opt_string(c.own_node.as_deref())
             .opt_bytes(c.lightning.as_deref())
+            .opt_string(c.link_proxy.as_deref())
     }
 
     /// The fields of `open`.
@@ -294,9 +295,33 @@ impl<'a> Rd<'a> {
         }
     }
 
+    /// The link's view.
+    pub fn link(&mut self) -> LinkV {
+        LinkV {
+            words: self.words(),
+            connected: self.bool(),
+            since: self.opt(Rd::u64),
+            refused: self.bool(),
+            heartbeats_taken: self.u64(),
+            owner_records: self.u64(),
+            last_check_in_at: self.opt(Rd::u64),
+        }
+    }
+
     pub fn pump(&mut self) -> (Vec<Report>, Vec<String>, bool) {
         (self.reports(), self.list(Rd::string), self.bool())
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkV {
+    pub words: Words,
+    pub connected: bool,
+    pub since: Option<u64>,
+    pub refused: bool,
+    pub heartbeats_taken: u64,
+    pub owner_records: u64,
+    pub last_check_in_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

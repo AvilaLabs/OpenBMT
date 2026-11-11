@@ -11,7 +11,7 @@ use openbmt_counter_node::{own_node_setting, PairRefused, PairingRecord};
 
 use crate::codec::wire_record;
 use crate::error::{from_rule, CounterError};
-use crate::views::{CounterNetwork, OwnNodeCheckArgs, PairingView};
+use crate::views::{CounterNetwork, OwnNodeCheckArgs, PairingView, RelayKind};
 
 /// What the app needs from the shop's settings before the node runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +46,11 @@ pub(crate) fn pairing_read(bytes: Vec<u8>) -> Result<PairingView, CounterError> 
         Some(2) => CounterNetwork::Signet,
         _ => CounterNetwork::Regtest,
     };
+    let relay = match record.relay.as_ref().map(|r| &r.route) {
+        None => RelayKind::None,
+        Some(openbmt_core::relay::RelayRoute::Direct(_)) => RelayKind::Direct,
+        Some(openbmt_core::relay::RelayRoute::Onion { .. }) => RelayKind::Onion,
+    };
     let s = record.settings.settings;
     Ok(PairingView {
         network,
@@ -55,6 +60,7 @@ pub(crate) fn pairing_read(bytes: Vec<u8>) -> Result<PairingView, CounterError> 
             customer_wifi: s.customer_wifi,
             min_sale_sats: s.min_sale_sats,
         },
+        relay,
     })
 }
 
