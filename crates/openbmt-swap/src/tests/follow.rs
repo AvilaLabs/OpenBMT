@@ -439,3 +439,52 @@ fn sw_74_the_decoder_is_fuzzed() {
     }
     assert!(accepted > 0);
 }
+
+// SW-46, SW-75
+
+fn claimed_machine() -> (ReverseSwap, Transaction, crate::LockupSeen) {
+    let m = machine();
+    let (m, _) = m
+        .on_lockup(&lockup_tx(99_350), Seen::Block, &ctx())
+        .unwrap();
+    let Stage::Locked(l) = m.stage() else {
+        panic!()
+    };
+    let (m, claim) = m.claim(2_000, &ctx()).unwrap();
+    (m, claim, l)
+}
+
+#[test]
+fn sw_75_the_claim_seen_in_a_block_may_be_an_earlier_one_the_caller_built() {
+    let (m1, first, lockup) = claimed_machine();
+    let (m2, second) = m1.reclaim(&lockup, 4_000, &ctx()).unwrap();
+    assert_ne!(first.compute_txid(), second.compute_txid());
+    assert_eq!(
+        m2.state().phase(),
+        crate::Phase::Claimed(second.compute_txid())
+    );
+    // The first claim is the one mined: it counts when the caller names it.
+    let earlier = [first.compute_txid()];
+    let paid = m2
+        .claim_confirmed_among(first.compute_txid(), &earlier, TIP + 1)
+        .unwrap();
+    assert_eq!(paid.stage(), Stage::Paid { height: TIP + 1 });
+    assert_eq!(
+        paid.state().phase(),
+        crate::Phase::Claimed(first.compute_txid())
+    );
+    // Without naming it, or for a transaction of nobody's, it is refused.
+    assert_eq!(
+        m2.claim_confirmed(first.compute_txid(), TIP + 1)
+            .unwrap_err(),
+        Refused::WrongClaim
+    );
+    let other = Txid::from_byte_array([7; 32]);
+    assert_eq!(
+        m2.claim_confirmed_among(other, &earlier, TIP + 1)
+            .unwrap_err(),
+        Refused::WrongClaim
+    );
+    // The last claim needs no list.
+    assert!(m2.claim_confirmed(second.compute_txid(), TIP + 1).is_ok());
+}

@@ -154,6 +154,13 @@ order of the rules, so that the refusal names the first that fails.
   checked against the vectors of the BIP. Nothing in a claim depends on the
   service's help; the cost is a larger transaction that shows the swap's
   script on chain.
+- **SW-46.** A claim that is not yet in a block can be built again at
+  another fee rate, from the same lockup, to the same address, with the
+  same rules as SW-40 to SW-44. A swap that was not claimed is refused. The
+  new claim's transaction id replaces the one the state holds, so the state
+  names the claim that was sent last. The caller sends it to take the place
+  of the earlier one (it signals replacement) and keeps the lockup, which
+  the machine does not hold after the claim.
 
 ## 6. The state file
 
@@ -230,6 +237,11 @@ order of the rules, so that the refusal names the first that fails.
 - **SW-74.** The decoder of the machine's file is fuzzed (`fuzz/fuzz_targets/`
   `swap_follow_decode.rs`): any bytes give a refusal or a machine that
   encodes back to the same bytes.
+- **SW-75.** When the claim was built again (SW-46), the claim seen in a
+  block may be the last one or any earlier one the caller built and kept:
+  a peer may have mined the earlier one before the replacement reached it.
+  The caller names those transaction ids. Any other transaction is refused,
+  and the state then names the claim that was mined.
 
 ## 9. The bytes of the request and the reply
 

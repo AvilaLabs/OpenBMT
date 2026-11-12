@@ -270,6 +270,18 @@ impl SwapState {
         Ok(next)
     }
 
+    /// SW-46: the state after the claim was built again at another fee
+    /// rate: the same phase, with the transaction id of the new claim. A
+    /// swap that was not claimed is refused.
+    pub fn reclaimed(&self, txid: Txid) -> Result<Self, Refused> {
+        if !matches!(self.phase, Phase::Claimed(_)) {
+            return Err(Refused::NotReady("no claim has been sent"));
+        }
+        let mut next = self.clone();
+        next.phase = Phase::Claimed(txid);
+        Ok(next)
+    }
+
     /// SW-50: the file.
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(256 + self.invoice.len());

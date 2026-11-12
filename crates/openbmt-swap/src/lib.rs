@@ -51,7 +51,7 @@ pub mod status;
 pub mod testing;
 pub mod tree;
 
-pub use claim::build_claim;
+pub use claim::{build_claim, rebuild_claim};
 pub use error::Refused;
 pub use follow::{Ctx, Failure, Next, ReverseSwap, Stage, MAGIC_FOLLOW};
 pub use http::{parse_response, Provider, Response, Setting};

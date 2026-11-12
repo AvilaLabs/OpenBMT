@@ -27,6 +27,32 @@ pub fn build_claim(
     if state.phase() != Phase::Waiting {
         return Err(Refused::AlreadyClaimed);
     }
+    claim_of(state, lockup, fee_rate_per_kvb, tip_height)
+}
+
+/// SW-46: the claim again, at another fee rate, for a swap whose claim was
+/// sent and is not yet in a block. It spends the same lockup output to the
+/// same address and signals replacement, so a peer that holds the earlier
+/// claim replaces it. A swap that was not claimed is refused, and so is a
+/// chain at or past the timeout (SW-44).
+pub fn rebuild_claim(
+    state: &SwapState,
+    lockup: &LockupSeen,
+    fee_rate_per_kvb: u64,
+    tip_height: u32,
+) -> Result<Transaction, Refused> {
+    if !matches!(state.phase(), Phase::Claimed(_)) {
+        return Err(Refused::NotReady("no claim has been sent"));
+    }
+    claim_of(state, lockup, fee_rate_per_kvb, tip_height)
+}
+
+fn claim_of(
+    state: &SwapState,
+    lockup: &LockupSeen,
+    fee_rate_per_kvb: u64,
+    tip_height: u32,
+) -> Result<Transaction, Refused> {
     if tip_height >= state.timeout() {
         return Err(Refused::TooLate);
     }

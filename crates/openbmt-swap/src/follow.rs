@@ -19,7 +19,7 @@
 use bitcoin::hashes::Hash;
 use bitcoin::{OutPoint, Transaction, Txid};
 
-use crate::claim::build_claim;
+use crate::claim::{build_claim, rebuild_claim};
 use crate::error::Refused;
 use crate::lockup::{check_lockup, LockupSeen, Seen};
 use crate::state::{Phase, SwapState};
@@ -297,16 +297,57 @@ impl ReverseSwap {
         ))
     }
 
-    /// SW-72: the caller saw the claim in a block of this height. Only the
-    /// shop's own claim makes the swap paid.
-    pub fn claim_confirmed(&self, txid: Txid, height: u32) -> Result<Self, Refused> {
+    /// SW-46: the claim again, at `fee_rate_per_kvb`, for a claim that was
+    /// sent and is not in a block. Returns the machine, which holds the new
+    /// claim's transaction id, and the transaction. `lockup` is the one the
+    /// claim was built from: the machine does not keep it after the claim.
+    /// The caller keeps the new machine before it hands the transaction to
+    /// the network.
+    pub fn reclaim(
+        &self,
+        lockup: &LockupSeen,
+        fee_rate_per_kvb: u64,
+        ctx: &Ctx,
+    ) -> Result<(Self, Transaction), Refused> {
         if self.stage != Stage::ClaimSent {
             return Err(Refused::NotReady("no claim is waiting"));
         }
-        if self.state.phase() != Phase::Claimed(txid) {
+        let tx = rebuild_claim(&self.state, lockup, fee_rate_per_kvb, ctx.tip_height)?;
+        let state = self.state.reclaimed(tx.compute_txid())?;
+        Ok((self.with_state(state, Stage::ClaimSent), tx))
+    }
+
+    /// SW-72: the caller saw the claim in a block of this height. Only the
+    /// shop's own claim makes the swap paid.
+    pub fn claim_confirmed(&self, txid: Txid, height: u32) -> Result<Self, Refused> {
+        self.claim_confirmed_among(txid, &[], height)
+    }
+
+    /// SW-75: as [`ReverseSwap::claim_confirmed`], when the claim has been
+    /// built again (SW-46): the one seen in a block may be the current claim
+    /// or one of `earlier`, the transaction ids of the claims the caller
+    /// built before and kept. Any other transaction is refused.
+    pub fn claim_confirmed_among(
+        &self,
+        txid: Txid,
+        earlier: &[Txid],
+        height: u32,
+    ) -> Result<Self, Refused> {
+        if self.stage != Stage::ClaimSent {
+            return Err(Refused::NotReady("no claim is waiting"));
+        }
+        let Phase::Claimed(current) = self.state.phase() else {
+            return Err(Refused::WrongClaim);
+        };
+        if txid != current && !earlier.contains(&txid) {
             return Err(Refused::WrongClaim);
         }
-        Ok(self.with(Stage::Paid { height }))
+        let state = self.state.reclaimed(txid)?;
+        Ok(self.with_state(state, Stage::Paid { height }))
+    }
+
+    fn with_state(&self, state: SwapState, stage: Stage) -> Self {
+        Self { state, stage }
     }
 
     /// SW-73: the file.

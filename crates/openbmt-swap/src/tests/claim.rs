@@ -9,7 +9,7 @@ use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, W
 
 use super::fixtures::*;
 use crate::claim::verify_claim;
-use crate::{build_claim, check_lockup, LockupSeen, Refused, Seen, SwapState};
+use crate::{build_claim, check_lockup, rebuild_claim, LockupSeen, Refused, Seen, SwapState};
 
 fn funding(outputs: &[(ScriptBuf, u64)], rbf: bool) -> Transaction {
     Transaction {
@@ -322,4 +322,44 @@ fn sw_53_a_claimed_swap_is_not_claimed_again() {
         build_claim(&claimed, &lockup, 1000, TIP).unwrap_err(),
         Refused::AlreadyClaimed
     );
+}
+
+#[test]
+fn sw_46_a_claim_is_built_again_at_another_rate_with_the_same_rules() {
+    let (first, lockup) = claim(2_000);
+    let waiting = state();
+    // A swap that was not claimed has nothing to build again.
+    assert_eq!(
+        rebuild_claim(&waiting, &lockup, 3_000, TIP)
+            .unwrap_err()
+            .rule(),
+        "SW-71"
+    );
+    let sent = waiting.claimed(first.compute_txid()).unwrap();
+    let second = rebuild_claim(&sent, &lockup, 4_000, TIP).unwrap();
+    assert_ne!(first.compute_txid(), second.compute_txid());
+    // The same input and address, a higher fee, replacement signalled.
+    assert_eq!(
+        first.input[0].previous_output,
+        second.input[0].previous_output
+    );
+    assert_eq!(
+        first.output[0].script_pubkey,
+        second.output[0].script_pubkey
+    );
+    assert!(second.output[0].value < first.output[0].value);
+    assert!(second.is_explicitly_rbf());
+    // The same limits: at the timeout, or a fee above half, it is refused.
+    assert_eq!(
+        rebuild_claim(&sent, &lockup, 4_000, TIMEOUT).unwrap_err(),
+        Refused::TooLate
+    );
+    assert_eq!(
+        rebuild_claim(&sent, &lockup, 4_000_000, TIP).unwrap_err(),
+        Refused::FeeTooHigh
+    );
+    // The state names the claim sent last, and a swap not claimed refuses it.
+    let again = sent.reclaimed(second.compute_txid()).unwrap();
+    assert_eq!(again.phase(), crate::Phase::Claimed(second.compute_txid()));
+    assert!(waiting.reclaimed(second.compute_txid()).is_err());
 }
