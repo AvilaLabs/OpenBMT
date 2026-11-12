@@ -29,7 +29,7 @@ object BooksModel {
      * The library gives no words for the totals of a day, so the line is "{n} sales, {amount}" with the amount in
      * the shop's currency as the library wrote it ([code] is "SAT" for Bitcoin Standard).
      */
-    fun totals(sales: Long, amount: String, code: String): String = "$sales sales, $amount $code"
+    fun totals(sales: Long, amount: String, code: String): String = "$sales ${if (sales == 1L) "sale" else "sales"}, $amount $code"
 
     /** `openbmt-accounting-2026-11.csv`: the kind of file and the month it is for. */
     fun fileName(kind: String, month: String): String = "openbmt-$kind-$month.csv"

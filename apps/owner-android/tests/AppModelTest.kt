@@ -2585,7 +2585,7 @@ object AppModelTest {
         )
         val page = BooksModel.page(b)
         ok(page.rows.map { it.date } == listOf("2026-11-10", "2026-11-09", "2026-10-31"), "the days are in the library's order, newest first")
-        ok(page.rows.map { it.totals } == listOf("3 sales, 45.50 EUR", "1 sales, 7.00 EUR", "12 sales, 1234.00 EUR"), "a day's totals are \"{n} sales, {amount}\" in the shop's currency")
+        ok(page.rows.map { it.totals } == listOf("3 sales, 45.50 EUR", "1 sale, 7.00 EUR", "12 sales, 1234.00 EUR"), "a day's totals are \"{n} sales, {amount}\" in the shop's currency")
         ok(page.empty == null && page.refusal == null, "a page with days has no empty words")
         // Nothing yet: the empty words, and no file to save.
         val none = BooksModel.page(books())
