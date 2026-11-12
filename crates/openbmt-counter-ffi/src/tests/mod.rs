@@ -2,6 +2,7 @@
 //! `dispatch`, on a node whose driver the test feeds by hand.
 
 mod call;
+mod confirm;
 mod currency;
 mod e2e;
 pub(crate) mod kit;
