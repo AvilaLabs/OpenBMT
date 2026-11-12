@@ -691,3 +691,17 @@ path = "fuzz_targets/swap_http_reply.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "approval_wallet_message"
+path = "fuzz_targets/approval_wallet_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "approval_classify"
+path = "fuzz_targets/approval_classify.rs"
+test = false
+doc = false
+bench = false

@@ -27,6 +27,8 @@ exactly the input bytes.
 | `fee_history_decode` | `FeeHistory::from_bytes`; on success the history must encode back to exactly those bytes, and `recent_rate`, `is_low` and `forget_from` must never panic |
 | `watch_block` | `payments_in_block` with a chain that knows every block; the first byte gives the length (modulo 40) of the shop's script, the rest is the block. It must never panic; every payment returned must be after the coinbase, in block order, pay the script and not be 64 bytes long without its witness |
 | `net_manager` | the peer manager on regtest with 3 peers, driven by a script of steps in the input: connect, receive bytes (optionally after a good handshake, and optionally framed as a chosen command with a right checksum), tick, close. It must never panic, and the bytes waiting for a peer never pass the session cap |
+| `approval_wallet_message` | `verify_wallet_message` for an address that is P2WPKH or of a type that must be refused, with the message and the signature (as text, or as bytes written in base64) taken from the input; it must never panic, and nothing the fuzzer makes may pass |
+| `approval_classify` | `classify` on two settings built from a script of field changes; it must never panic, an unchanged pair is Free, a change that only tightens is Free, and a Redirect names a node |
 | `pair_offer_decode` | `PairOffer::from_bytes` |
 | `pair_request_decode` | `PairRequest::from_bytes` |
 | `counter_bundle_decode` | `CounterBundle::from_bytes` (versions 1 and 2, the second with a relay, CR-130), with re-encode equality, on the input as it is and behind each version's frame header; a bundle with a relay must read as version 1 without it |

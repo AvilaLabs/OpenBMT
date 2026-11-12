@@ -27,6 +27,10 @@ Where they come from:
 - **The base, 19.** The `bitcoin` crate family (`bitcoin`, `secp256k1`,
   `miniscript`, `bip39`, hashes, bech32, base58) and what builds the C
   code of `secp256k1` (`cc` and two helpers, build time only).
+  The `secp-recovery` feature of `bitcoin` is on in `openbmt-core`
+  (`docs/APPROVAL-RULES.md`, AP-07): the signature of a message made by a
+  wallet gives the key that signed it. It is one more module of the C code of
+  the same `secp256k1` package, and adds no package to any list.
 - **The link between devices, about 16 more.** ChaCha20-Poly1305 from the
   RustCrypto project, used to seal messages (LK-02).
 - **Encrypted peer connections, 3 more.** The `bip324` crate and its two

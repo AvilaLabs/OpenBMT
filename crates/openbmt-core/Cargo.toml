@@ -11,8 +11,11 @@ publish.workspace = true
 # depends on (bitcoin 0.32.8, miniscript 12.3.5), so the later wallet crate
 # will unify with them. bip39 2.2.2 is bdk_wallet's pin too; it supplies the
 # English wordlist and the test-vector mnemonics. Its `std` feature is left
-# off because it pulls in serde, which nothing here uses.
+# off because it pulls in serde, which nothing here uses. The `secp-recovery`
+# feature of bitcoin turns on a module of the secp256k1 package that is already
+# in every list: a wallet's signed message gives the key that signed it
+# (AP-07). No package is added.
 [dependencies]
-bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std", "secp-recovery"] }
 miniscript = { version = "=12.3.5", default-features = false, features = ["std"] }
 bip39 = { version = "=2.2.2", default-features = false, features = ["alloc"] }
