@@ -1,0 +1,598 @@
+//! The owner phone of a shop with its own wallet (`docs/OWNER-APP-RULES.md`
+//! section 17, OA-105 to OA-114): the shop's state, the allocation book, the
+//! offer, the counter's request, the bundle and the counts. The counter's
+//! side is the core's `OwnCounterPairing`; the counter node is in the
+//! counter crates' tests and the end-to-end test of the counter FFI.
+
+use std::cell::RefCell;
+use std::collections::BTreeSet;
+
+use openbmt_core::identity::Identity;
+use openbmt_core::pairing_own::{OwnCounterPairing, OwnRequest};
+use openbmt_core::pinned_wallet::{PinnedWallet, SignedRange};
+use openbmt_core::say::check;
+use openbmt_owner::own_book::{
+    gap_limit, gap_needs_notice, needs_range, unused_indexes, AllocationBook, BookError,
+    MAX_DEVICES, MAX_RANGES, MAX_WATCHED_INDEXES, RANGE_LEN, TOP_UP_BELOW, WALLET_GAP,
+};
+use openbmt_owner::own_say::{all_own_words, is_placeholder};
+use openbmt_owner::own_shop::{
+    MadeOffer, OwnError, OwnRefusal, OwnRestoreError, OwnShop, MAX_REQUEST_BYTES, OFFER_WINDOW_SECS,
+};
+
+const SINGLE: &str = "wpkh([818bc9b6/84h/0h/0h]xpub6CgURS1GrKZkAoRGBTKYX9FhLgkKnQVZ6vdNBUbiu24xtRJ6RzLKpdg4CqsVyBLzimcJsviP59hSoGJEpTJiXE8bdBLw1qPC1DXRatKehb8/<0;1>/*)#96yh9yhx";
+const MULTI: &str = "wsh(sortedmulti(2,[73c5da0a/48h/0h/0h/2h]xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf/<0;1>/*,[b8688df1/48h/0h/0h/2h]xpub6FQya7zGhR92kacYsNnjreouvnHJMpXYsUXnW6NJJAJRCKsa26TzDy4LdnGhEurr3d6y1J8PJ7EEMKQp74XTqYvmGJNogYXSKDszYHtF8mX/<0;1>/*,[28645006/48h/0h/0h/2h]xpub6DnEBNkSJKBYQmsbhS1sP9cNdtU5c9PLFGCjTJmxicxc13WB8zNNGQazabQpyFAGW5bV9tMko4uBxDxjUKL6dSAcx1tEbgEHtgSqyRsekh6/<0;1>/*))#34zcp4yt";
+const T0: u64 = 1_000_000;
+const USD: u64 = 100_000;
+
+fn id(n: u8) -> Identity {
+    Identity::from_secret_bytes(&[n; 32]).unwrap()
+}
+
+fn shop(text: &str) -> OwnShop {
+    OwnShop::new(id(1), PinnedWallet::from_text(text).unwrap())
+}
+
+/// A store that keeps the last bytes written.
+struct Disk(RefCell<Vec<u8>>);
+
+impl Disk {
+    fn new() -> Self {
+        Self(RefCell::new(Vec::new()))
+    }
+    fn put(&self, bytes: &[u8]) -> Result<(), String> {
+        *self.0.borrow_mut() = bytes.to_vec();
+        Ok(())
+    }
+    fn get(&self) -> Vec<u8> {
+        self.0.borrow().clone()
+    }
+}
+
+/// A counter that read `made` and made its request.
+fn counter_request(made: &MadeOffer, n: u8, name: &str) -> (OwnCounterPairing, OwnRequest) {
+    OwnCounterPairing::begin(made.offer.clone(), &id(n), name, [n; 32], made.made_at + 5).unwrap()
+}
+
+fn refused<T: std::fmt::Debug>(r: Result<T, OwnError<String>>) -> OwnRefusal {
+    match r {
+        Err(OwnError::Refused(e)) => e,
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+fn confirm(
+    shop: &mut OwnShop,
+    disk: &Disk,
+    made: &MadeOffer,
+    request: &OwnRequest,
+    now: u64,
+) -> Result<openbmt_owner::own_shop::Paired, OwnError<String>> {
+    shop.confirm(made, now, &request.to_bytes(), USD, Vec::new(), None, |b| {
+        disk.put(b)
+    })
+}
+
+#[test]
+fn oa_105_the_state_is_stored_before_it_takes_effect_and_reads_back_exactly() {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let failing = s.allocate_desk(|_: &[u8]| Err("disk full".to_string()));
+    assert!(matches!(failing, Err(OwnError::Store(_))));
+    assert_eq!(s.book().ranges_given(), 0, "a failed store changes nothing");
+    s.allocate_desk(|b| disk.put(b)).unwrap();
+    let back =
+        OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &disk.get()).unwrap();
+    assert_eq!(back.to_bytes(), disk.get());
+    assert_eq!(back.book(), s.book());
+}
+
+#[test]
+fn oa_105_a_state_of_another_wallet_or_owner_is_refused_and_every_cut_is_refused() {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    s.allocate_desk(|b| disk.put(b)).unwrap();
+    let bytes = disk.get();
+    let other_wallet = PinnedWallet::from_text(MULTI).unwrap();
+    assert_eq!(
+        OwnShop::restore(id(1), other_wallet, &bytes).unwrap_err(),
+        OwnRestoreError::NotThisShop
+    );
+    assert_eq!(
+        OwnShop::restore(id(2), PinnedWallet::from_text(SINGLE).unwrap(), &bytes).unwrap_err(),
+        OwnRestoreError::NotThisShop
+    );
+    for n in 0..bytes.len() {
+        assert!(
+            OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &bytes[..n]).is_err(),
+            "cut at {n}"
+        );
+    }
+    let mut longer = bytes;
+    longer.push(0);
+    assert!(OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &longer).is_err());
+}
+
+#[test]
+fn oa_106_a_range_holds_a_thousand_indexes_and_starts_where_the_highest_ended() {
+    let mut b = AllocationBook::new();
+    let (a, c) = (id(3).device_id(), id(4).device_id());
+    let r0 = b.allocate(a).unwrap();
+    let r1 = b.allocate(c).unwrap();
+    let r2 = b.allocate(a).unwrap();
+    assert_eq!((r0.start, r0.end), (0, 1_000));
+    assert_eq!((r1.start, r1.end), (1_000, 2_000));
+    assert_eq!((r2.start, r2.end), (2_000, 3_000));
+    assert_eq!(RANGE_LEN, 1_000);
+    assert_eq!(b.ranges_of(&a), vec![r0, r2], "in the order given");
+    assert_eq!(b.ranges_of(&c), vec![r1]);
+    assert_eq!(b.next_start(), 3_000);
+}
+
+#[test]
+fn oa_106_no_index_is_given_twice_also_for_the_desk_and_after_a_counter_is_forgotten() {
+    let mut s = shop(SINGLE);
+    let desk = s.owner_id();
+    let counter = id(3).device_id();
+    let a = s.allocate(counter, |_| Ok::<(), String>(())).unwrap();
+    let d = s.allocate_desk(|_| Ok::<(), String>(())).unwrap();
+    assert_eq!(a.range.end, d.range.start, "the desk takes the next range");
+    assert_eq!(d.range.counter, desk);
+    d.verify(&desk).unwrap();
+    // Forgetting a counter removes nothing from the book: the next range
+    // still starts at the end of the highest one.
+    let c = s
+        .allocate(id(4).device_id(), |_| Ok::<(), String>(()))
+        .unwrap();
+    assert_eq!(c.range.start, d.range.end);
+    let mut seen = BTreeSet::new();
+    for dev in s.book().devices() {
+        for r in s.book().ranges_of(dev) {
+            for i in r.start..r.end {
+                assert!(seen.insert(i), "index {i} given twice");
+            }
+        }
+    }
+    assert_eq!(seen.len(), 3_000);
+}
+
+#[test]
+fn oa_106_the_range_is_stored_before_it_is_signed_and_signed_before_it_is_returned() {
+    let mut s = shop(SINGLE);
+    let seen_before_return = RefCell::new(0u32);
+    let counter = id(3).device_id();
+    let signed = s
+        .allocate(counter, |bytes: &[u8]| {
+            // At the time of the store the book already holds the range.
+            let back = OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), bytes)
+                .map_err(|e| e.to_string())?;
+            *seen_before_return.borrow_mut() = back.book().ranges_given();
+            Ok::<(), String>(())
+        })
+        .unwrap();
+    assert_eq!(*seen_before_return.borrow(), 1);
+    signed.verify(&s.owner_id()).unwrap();
+    assert_eq!(signed.range.counter, counter);
+}
+
+#[test]
+fn oa_106_the_book_ends_below_two_to_the_thirty_first_and_at_what_the_phone_watches() {
+    let mut b = AllocationBook::new();
+    let d = id(3).device_id();
+    for _ in 0..MAX_RANGES {
+        b.allocate(d).unwrap();
+    }
+    assert_eq!(b.next_start(), MAX_WATCHED_INDEXES);
+    assert_eq!(b.allocate(d), Err(BookError::WatchBudget));
+    assert_eq!(
+        b.next_start(),
+        MAX_WATCHED_INDEXES,
+        "a refusal changes nothing"
+    );
+    // Devices are bounded too.
+    let mut b = AllocationBook::new();
+    for n in 0..MAX_DEVICES {
+        let who = id(u8::try_from(n + 3).unwrap()).device_id();
+        b.allocate(who).unwrap();
+    }
+    assert_eq!(
+        b.allocate(id(200).device_id()),
+        Err(BookError::TooManyDevices)
+    );
+}
+
+#[test]
+fn oa_106_the_book_decodes_only_what_it_encodes() {
+    let mut b = AllocationBook::new();
+    for n in [3u8, 4, 3, 5] {
+        b.allocate(id(n).device_id()).unwrap();
+    }
+    let bytes = b.to_bytes();
+    assert_eq!(AllocationBook::from_bytes(&bytes).unwrap(), b);
+    // One device with two ranges: the last u32 is the second start.
+    let mut two = AllocationBook::new();
+    let d = id(3).device_id();
+    two.allocate(d).unwrap();
+    two.allocate(d).unwrap();
+    let good = two.to_bytes();
+    assert_eq!(AllocationBook::from_bytes(&good).unwrap(), two);
+    for bad_start in [2_000u32, 1_001, 0] {
+        let mut bad = good.clone();
+        let n = bad.len();
+        bad[n - 4..].copy_from_slice(&bad_start.to_le_bytes());
+        assert!(AllocationBook::from_bytes(&bad).is_err(), "{bad_start}");
+    }
+    let mut bad_magic = bytes;
+    bad_magic[3] = b'1';
+    assert!(AllocationBook::from_bytes(&bad_magic).is_err());
+}
+
+#[test]
+fn oa_107_every_index_of_every_range_is_watched_from_the_moment_it_is_written() {
+    let mut s = shop(SINGLE);
+    let counter = id(3).device_id();
+    let seen_in_store = RefCell::new(0..0u32);
+    s.allocate(counter, |bytes: &[u8]| {
+        let back = OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), bytes)
+            .map_err(|e| e.to_string())?;
+        *seen_in_store.borrow_mut() = back.book().indexes();
+        Ok::<(), String>(())
+    })
+    .unwrap();
+    assert_eq!(*seen_in_store.borrow(), 0..1_000);
+    s.allocate_desk(|_| Ok::<(), String>(())).unwrap();
+    assert_eq!(s.book().indexes(), 0..2_000);
+    assert_eq!(s.book().device_of(0), Some(counter));
+    assert_eq!(s.book().device_of(1_999), Some(s.owner_id()));
+    assert_eq!(s.book().device_of(2_000), None);
+}
+
+#[test]
+fn oa_108_the_offer_names_the_owner_the_wallet_and_the_version_in_force() {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let made = s.make_offer(T0).unwrap();
+    assert_eq!(made.offer.floor, 0, "no settings, no floor");
+    assert_eq!(made.offer.owner, s.owner_id());
+    assert_eq!(made.offer.wallet, PinnedWallet::from_text(SINGLE).unwrap());
+    assert_eq!(made.ends_at(), T0 + 600);
+    assert_eq!(OFFER_WINDOW_SECS, 600);
+    let (_, request) = counter_request(&made, 3, "Front");
+    let paired = confirm(&mut s, &disk, &made, &request, T0 + 30).unwrap();
+    let next = s.make_offer(T0 + 100).unwrap();
+    assert_eq!(next.offer.floor, paired.settings_version);
+    // The bytes are the frame the counter reads.
+    assert_eq!(next.offer.to_bytes().get(..4), Some(&b"OBM-"[..]));
+}
+
+#[test]
+fn oa_108_after_ten_minutes_the_offer_has_ended() {
+    let s = shop(SINGLE);
+    let made = s.make_offer(T0).unwrap();
+    let (_, request) = counter_request(&made, 3, "Front");
+    assert!(s.read_request(&made, T0 + 600, &request.to_bytes()).is_ok());
+    assert_eq!(
+        refused::<()>(
+            s.read_request(&made, T0 + 601, &request.to_bytes())
+                .map(|_| ())
+                .map_err(OwnError::Refused)
+        ),
+        OwnRefusal::OfferEnded
+    );
+    assert_eq!(
+        s.read_request(&made, T0 - 1, &request.to_bytes())
+            .unwrap_err(),
+        OwnRefusal::ClockWentBack
+    );
+    // An offer of another shop is not this shop's.
+    let other = shop(MULTI).make_offer(T0).unwrap();
+    assert_eq!(
+        s.read_request(&other, T0, &request.to_bytes()).unwrap_err(),
+        OwnRefusal::NotThisShopsOffer
+    );
+}
+
+#[test]
+fn oa_109_a_request_that_reads_gives_the_name_and_the_same_four_words_as_the_counter() {
+    let s = shop(SINGLE);
+    let made = s.make_offer(T0).unwrap();
+    let (counter, request) = counter_request(&made, 3, "Front counter");
+    let read = s.read_request(&made, T0 + 10, &request.to_bytes()).unwrap();
+    assert_eq!(read.name, "Front counter");
+    assert_eq!(read.counter, counter.counter());
+    assert_eq!(read.words, counter.session_words());
+}
+
+#[test]
+fn oa_109_each_refusal_has_its_own_words() {
+    let s = shop(SINGLE);
+    let made = s.make_offer(T0).unwrap();
+    let (_, request) = counter_request(&made, 3, "Front");
+    let good = request.to_bytes();
+    let read = |bytes: &[u8]| s.read_request(&made, T0 + 10, bytes).unwrap_err();
+
+    // Not a request: another frame, empty, and over 1,024 bytes.
+    assert_eq!(read(&[]), OwnRefusal::NotARequest);
+    assert_eq!(read(&made.offer.to_bytes()), OwnRefusal::NotARequest);
+    let mut long = good.clone();
+    long.resize(MAX_REQUEST_BYTES + 1, 0);
+    assert_eq!(read(&long), OwnRefusal::NotARequest);
+
+    // For another offer.
+    let other_made = MadeOffer {
+        offer: shop(MULTI).make_offer(T0).unwrap().offer,
+        made_at: T0,
+    };
+    let (_, other_request) = counter_request(&other_made, 4, "Back");
+    assert_eq!(read(&other_request.to_bytes()), OwnRefusal::OtherOffer);
+
+    // A signature that fails.
+    let mut forged = request.clone();
+    forged.nonce = [9; 32];
+    assert_eq!(read(&forged.to_bytes()), OwnRefusal::BadSignature);
+
+    // The owner's own key.
+    let (_, from_owner) =
+        OwnCounterPairing::begin(made.offer.clone(), &id(7), "Front", [7; 32], T0 + 5).unwrap();
+    let mut own = from_owner;
+    own.counter = s.owner_id();
+    assert_eq!(read(&own.to_bytes()), OwnRefusal::OwnKey);
+
+    // A name that is not plain text: the byte after the name's length.
+    let mut bad_name = good;
+    let at = 4 + 1 + 32 + 1;
+    bad_name[at] = 0x07;
+    assert_eq!(read(&bad_name), OwnRefusal::BadName);
+
+    for r in [
+        OwnRefusal::OfferEnded,
+        OwnRefusal::NotARequest,
+        OwnRefusal::OtherOffer,
+        OwnRefusal::BadSignature,
+        OwnRefusal::OwnKey,
+    ] {
+        assert!(!is_placeholder(&r.words()), "{r:?}");
+    }
+}
+
+#[test]
+fn oa_110_they_match_makes_the_settings_the_range_and_the_pairing_the_counter_takes() {
+    for text in [SINGLE, MULTI] {
+        let disk = Disk::new();
+        let mut s = shop(text);
+        let made = s.make_offer(T0).unwrap();
+        let (counter, request) = counter_request(&made, 3, "Front");
+        let paired = confirm(&mut s, &disk, &made, &request, T0 + 30).unwrap();
+        let bundle = &paired.bundle;
+        // The first settings: the owner's signature only, a version above
+        // the floor, this counter on the list and holding all the shares.
+        assert!(bundle.settings.approver_sig.is_none());
+        assert!(bundle.settings.settings.version > made.offer.floor);
+        assert!(bundle
+            .settings
+            .settings
+            .devices
+            .contains(&counter.counter()));
+        assert_eq!(
+            bundle.settings.settings.counters.get(&counter.counter()),
+            Some(&10_000)
+        );
+        // The first range: the book's first, signed, 1,000 indexes.
+        assert_eq!(
+            (paired.first_range.start, paired.first_range.end),
+            (0, 1_000)
+        );
+        bundle.first_range.verify(&s.owner_id()).unwrap();
+        assert_eq!(bundle.first_range.range, paired.first_range);
+        // The counter takes it.
+        counter
+            .finish(&bundle.pairing, true, T0 + 40)
+            .expect("the counter takes the pairing");
+        // Stored: the book and the waiting bundle.
+        let back =
+            OwnShop::restore(id(1), PinnedWallet::from_text(text).unwrap(), &disk.get()).unwrap();
+        assert_eq!(back.counters_waiting().len(), 1);
+        assert_eq!(back.book().ranges_given(), 1);
+    }
+}
+
+#[test]
+fn oa_110_a_second_counter_is_listed_with_equal_shares_and_a_higher_version() {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let made = s.make_offer(T0).unwrap();
+    let (_, r1) = counter_request(&made, 3, "Front");
+    let first = confirm(&mut s, &disk, &made, &r1, T0 + 30).unwrap();
+    let made2 = s.make_offer(T0 + 100).unwrap();
+    let (_, r2) = counter_request(&made2, 4, "Back");
+    let second = confirm(&mut s, &disk, &made2, &r2, T0 + 130).unwrap();
+    assert!(second.settings_version > first.settings_version);
+    assert_eq!(second.shares.len(), 2);
+    assert_eq!(
+        second
+            .shares
+            .iter()
+            .map(|(_, b)| u32::from(*b))
+            .sum::<u32>(),
+        10_000
+    );
+    // The second counter's first range starts where the first one ended.
+    assert_eq!(second.first_range.start, 1_000);
+}
+
+#[test]
+fn oa_110_a_phone_with_no_settings_needs_a_price_and_allocates_nothing_without_one() {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let made = s.make_offer(T0).unwrap();
+    let (_, request) = counter_request(&made, 3, "Front");
+    let r = s.confirm(
+        &made,
+        T0 + 10,
+        &request.to_bytes(),
+        0,
+        Vec::new(),
+        None,
+        |b| disk.put(b),
+    );
+    assert!(matches!(
+        refused(r),
+        OwnRefusal::Settings(openbmt_owner::Refusal::NoSettingsRate)
+    ));
+    assert_eq!(s.book().ranges_given(), 0);
+    assert!(disk.get().is_empty(), "nothing was stored");
+    assert!(!s.has_settings_base());
+}
+
+#[test]
+fn oa_110_they_differ_and_a_late_or_bad_request_allocate_nothing() {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let made = s.make_offer(T0).unwrap();
+    let (_, request) = counter_request(&made, 3, "Front");
+    // Late.
+    assert_eq!(
+        refused(confirm(&mut s, &disk, &made, &request, T0 + 601)),
+        OwnRefusal::OfferEnded
+    );
+    // Garbled.
+    let r = s.confirm(&made, T0 + 10, &[1, 2, 3], USD, Vec::new(), None, |b| {
+        disk.put(b)
+    });
+    assert_eq!(refused(r), OwnRefusal::NotARequest);
+    assert_eq!(s.book().ranges_given(), 0);
+    assert!(disk.get().is_empty());
+    // "They differ" is the app's: the library holds nothing of the request,
+    // so there is nothing to forget, and a later offer still works.
+    assert!(confirm(&mut s, &disk, &made, &request, T0 + 20).is_ok());
+}
+
+#[test]
+fn oa_110_a_counter_added_already_is_refused_and_allocates_nothing_more() {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let made = s.make_offer(T0).unwrap();
+    let (_, request) = counter_request(&made, 3, "Front");
+    confirm(&mut s, &disk, &made, &request, T0 + 10).unwrap();
+    assert_eq!(
+        refused(confirm(&mut s, &disk, &made, &request, T0 + 20)),
+        OwnRefusal::AlreadyAdded
+    );
+    assert_eq!(s.book().ranges_given(), 1);
+}
+
+#[test]
+fn oa_111_the_bundle_is_shown_again_unchanged_until_the_owner_says_paired() {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let made = s.make_offer(T0).unwrap();
+    let (counter, request) = counter_request(&made, 3, "Front");
+    let paired = confirm(&mut s, &disk, &made, &request, T0 + 10).unwrap();
+    let who = counter.counter();
+    assert_eq!(s.counters_waiting().len(), 1);
+    let again = s.bundle_again(&who).unwrap();
+    assert_eq!(again.to_bytes(), paired.bundle.to_bytes());
+    assert_eq!(
+        s.book().ranges_given(),
+        1,
+        "showing again allocates nothing"
+    );
+    // The stored state shows the same bundle after a restart.
+    let back =
+        OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &disk.get()).unwrap();
+    assert_eq!(
+        back.bundle_again(&who).unwrap().to_bytes(),
+        paired.bundle.to_bytes()
+    );
+    // Only the owner's word marks it paired.
+    s.mark_delivered(&who, |b| disk.put(b)).unwrap();
+    assert!(s.counters_waiting().is_empty());
+    assert_eq!(s.bundle_again(&who).unwrap_err(), OwnRefusal::NoBundle);
+    assert_eq!(
+        refused(s.mark_delivered(&who, |b| disk.put(b))),
+        OwnRefusal::NoBundle
+    );
+    assert_eq!(s.book().ranges_given(), 1);
+}
+
+#[test]
+fn oa_112_the_unused_indexes_are_the_held_ones_that_no_sale_opened() {
+    let opened: BTreeSet<u32> = (0..750).collect();
+    assert_eq!(unused_indexes(&[(0, 1_000)], &opened), 250);
+    // A second held range adds its indexes; an opened index outside the
+    // held ranges counts for nothing.
+    assert_eq!(
+        unused_indexes(&[(0, 1_000), (1_000, 2_000)], &opened),
+        1_250
+    );
+    let stray: BTreeSet<u32> = [5_000].into_iter().collect();
+    assert_eq!(unused_indexes(&[(0, 1_000)], &stray), 1_000);
+    assert_eq!(unused_indexes(&[], &opened), 0);
+}
+
+#[test]
+fn oa_112_a_counter_below_three_hundred_with_no_range_waiting_is_given_the_next() {
+    assert_eq!(TOP_UP_BELOW, 300);
+    assert!(needs_range(299, false));
+    assert!(!needs_range(300, false));
+    assert!(
+        !needs_range(0, true),
+        "at most one range waits for a counter"
+    );
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let made = s.make_offer(T0).unwrap();
+    let (counter, request) = counter_request(&made, 3, "Front");
+    confirm(&mut s, &disk, &made, &request, T0 + 10).unwrap();
+    let top_up = s
+        .allocate_top_up(counter.counter(), |b| disk.put(b))
+        .unwrap();
+    assert_eq!((top_up.range.start, top_up.range.end), (1_000, 2_000));
+    top_up.verify(&s.owner_id()).unwrap();
+    // A counter the book does not know gets none.
+    let stranger = id(9).device_id();
+    assert_eq!(
+        refused(s.allocate_top_up(stranger, |b| disk.put(b))),
+        OwnRefusal::UnknownCounter
+    );
+    let _: SignedRange = top_up;
+}
+
+#[test]
+fn oa_113_the_gap_limit_is_the_longest_run_without_a_payment_plus_one() {
+    let paid = |v: &[u32]| v.iter().copied().collect::<BTreeSet<u32>>();
+    // Nothing given out, nothing needed.
+    assert_eq!(gap_limit(&paid(&[]), None), 0);
+    // Index 0 given out and unpaid: a run of 1.
+    assert_eq!(gap_limit(&paid(&[]), Some(0)), 2);
+    // Paid at once: the wallet needs to look one ahead.
+    assert_eq!(gap_limit(&paid(&[0]), Some(0)), 1);
+    // A run of 4 unpaid before index 5.
+    assert_eq!(gap_limit(&paid(&[0, 5]), Some(5)), 5);
+    // A run of 2 at the end, counted to the highest given out.
+    assert_eq!(gap_limit(&paid(&[0, 1, 2]), Some(4)), 3);
+    // A second counter's first payment at 1,000 with nothing before it.
+    assert_eq!(gap_limit(&paid(&[1_000]), Some(1_000)), 1_001);
+    // It changes as payments arrive.
+    assert_eq!(gap_limit(&paid(&[1_000, 0]), Some(1_000)), 1_000);
+}
+
+#[test]
+fn oa_113_the_wallets_page_says_so_above_twenty() {
+    assert_eq!(WALLET_GAP, 20);
+    assert!(!gap_needs_notice(20));
+    assert!(gap_needs_notice(21));
+}
+
+#[test]
+fn oa_114_every_state_and_refusal_has_words_or_the_placeholder_that_names_its_rule() {
+    let all = all_own_words();
+    assert!(all.len() >= 18);
+    for (name, w) in &all {
+        if is_placeholder(w) {
+            assert!(w.heading.starts_with("WORDS_NEEDED_OA_"), "{name}");
+        } else {
+            assert_eq!(check(w), Ok(()), "{name}");
+        }
+    }
+}
