@@ -2129,7 +2129,8 @@ object AppModelTest {
         ok(OwnSpendModel.itemTitle(ownItem(false, emptyList(), 3), 2, 2) == "Payment 2 of 2: a cash-out", "a cash-out's title")
         ok(OwnSpendModel.itemTitle(ownItem(false, listOf(1, 2), 3), 1, 1) == "Payment 1 of 1: 2 refunds and a cash-out", "a mixed title")
         val c = source("src/android/OwnSpend.kt")
-        ok(c.indexOf("n.ownSpendBuild(") > c.indexOf("OwnSpendModel.compareLines("), "the lines are listed before Prepare freezes anything")
+        ok(c.contains("showOwnCompare(OwnRun(session") && c.indexOf("showOwnCompare(OwnRun(session") < c.indexOf("pickOwnTransport(run) }, ui.button(\"Later\")"), "Prepare freezes, then the lines are listed before the file leaves")
+        ok(c.contains("OwnSpendModel.compareLines(item)") && c.contains("WORDS_NEEDED_OA_115_COMPARE"), "every payment's lines are listed")
         ok(source("src/android/Screens.kt").contains("showOwnSpend()"), "Spend of an own wallet shop opens this screen")
     }
 
@@ -2165,7 +2166,7 @@ object AppModelTest {
         ok(names.all { OwnSpendModel.placeholder(it).heading == it && it.length < 40 }, "a placeholder stands for each part")
         ok(AppWords.all().none { (_, w) -> w.heading.startsWith("WORDS_NEEDED") || w.what.startsWith("WORDS_NEEDED") }, "a placeholder is not in the words that are checked and written")
         val c = source("src/android/OwnSpend.kt")
-        for (n in listOf("OA_115_LIST", "OA_116_TRANSPORT", "OA_116_RETURN", "OA_117_WAITING")) ok(c.contains("WORDS_NEEDED_$n"), "the screen uses WORDS_NEEDED_$n")
+        for (n in listOf("OA_115_LIST", "OA_116_TRANSPORT", "OA_116_RETURN", "OA_117_ABANDON")) ok(c.contains("WORDS_NEEDED_$n"), "the screen uses WORDS_NEEDED_$n")
     }
 
     // ---- watching in the background (OA-80 to OA-89) --------------------------------------------------------------

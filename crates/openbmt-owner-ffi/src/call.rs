@@ -760,7 +760,9 @@ fn build_ops() -> Vec<Op> {
         op(163, "own_spend_abandon", Node, |c, session: Vec<u8>| {
             c.entry()?.own_spend_abandon(session)
         }),
-        op(164, "own_merge", Node, |c, now: u64| c.entry()?.own_merge(now)),
+        op(164, "own_merge", Node, |c, now: u64| {
+            c.entry()?.own_merge(now)
+        }),
     ]
 }
 

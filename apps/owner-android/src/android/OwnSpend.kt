@@ -59,7 +59,7 @@ internal fun Controller.showOwnSpend(picked: List<Long> = emptyList(), message: 
     }
     val actions = ArrayList<android.widget.Button>()
     if (OwnSpendModel.canPrepare(rows, picked)) {
-        actions.add(ui.primary("Prepare") { showOwnCompare(n, picked) })
+        actions.add(ui.primary("Prepare") { prepared(n, msg, picked) { attempt(msg) { n.ownSpendBuild(nowSecs(), ownFeeRate(n), picked) } } })
     }
     if (OwnSpendModel.showMerge(offer, rows)) {
         views.add(words(OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_115_MERGE)))
@@ -90,21 +90,6 @@ internal fun Controller.showOwnSpend(picked: List<Long> = emptyList(), message: 
     screen("Send from your wallet", views, actions, back = { showHome() }, words = OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_115_LIST))
 }
 
-/** The lines of OA-73 for what is picked, before anything is frozen: Prepare is on the next screen's button. */
-private fun Controller.showOwnCompare(n: OwnerNode, picked: List<Long>) {
-    val msg = Slot(act)
-    val views = ArrayList<View>()
-    views.add(words(OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_115_COMPARE)))
-    val rate = ownFeeRate(n)
-    views.add(ui.text("Fee rate ${rate} satoshis per 1000 virtual bytes.", 14f))
-    views.add(msg)
-    val actions = listOf(
-        ui.primary("Prepare") { prepared(n, msg, picked) { attempt(msg) { n.ownSpendBuild(nowSecs(), rate, picked) } } },
-        ui.button("Back") { showOwnSpend(picked) },
-    )
-    screen("Send from your wallet", views, actions, back = { showOwnSpend(picked) })
-}
-
 private fun Controller.ownFeeRate(n: OwnerNode): Long = try {
     val r = n.receiptsLine()
     if (r.kind == org.openbmt.owner.ReceiptsKind.Known && r.ratePerKvb > 0) r.ratePerKvb else 1_000
@@ -121,7 +106,22 @@ private fun Controller.prepared(n: OwnerNode, msg: Slot, picked: List<Long>, bui
         val why = built.skipped.firstOrNull()?.words?.say() ?: OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_115_EMPTY)
         return showOwnSpend(picked, why)
     }
-    showOwnFile(OwnRun(session, built.items.first().number) { showOwnSpend() })
+    showOwnCompare(OwnRun(session, built.items.first().number) { showOwnSpend() }, built.items)
+}
+
+/**
+ * The lines of OA-73 for every payment that was frozen, before any file leaves: the owner compares them with the
+ * wallet's screen after the file is given. Nothing more is frozen here.
+ */
+private fun Controller.showOwnCompare(run: OwnRun, items: List<OwnSpendItem>) {
+    val views = ArrayList<View>()
+    views.add(words(OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_115_COMPARE)))
+    for ((i, item) in items.withIndex()) {
+        views.add(ui.text(OwnSpendModel.itemTitle(item, i + 1, items.size), 15f, bold = true))
+        views.add(ui.text(OwnSpendModel.compareLines(item).joinToString("\n\n"), 14f, mono = true))
+    }
+    val actions = listOf(ui.primary("Next: choose how to send it") { pickOwnTransport(run) }, ui.button("Later") { run.back() })
+    screen("Send from your wallet", views, actions, back = run.back)
 }
 
 // ---- the file for the wallet (OA-115, OA-116) ----------------------------------------------------------------------------

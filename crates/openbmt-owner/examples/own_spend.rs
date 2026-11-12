@@ -445,8 +445,10 @@ fn cmd_forge(args: &[String]) -> Result<ExitCode, String> {
     let a = parse_args(args)?;
     let dir = a.one("dir")?;
     let number = a.number("number")?;
-    let mut psbt = Psbt::deserialize(&fs::read(format!("{dir}/item-{number}.psbt")).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let mut psbt = Psbt::deserialize(
+        &fs::read(format!("{dir}/item-{number}.psbt")).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     let wrong = Xpriv::new_master(Network::Bitcoin, &[0xee; 32]).map_err(|e| e.to_string())?;
     let sk = wrong
         .derive_priv(&secp, &[ChildNumber::Normal { index: 0 }])
@@ -510,7 +512,10 @@ fn cmd_confirmed(args: &[String]) -> Result<ExitCode, String> {
     // The state written reads back and gives the same bytes.
     let bytes = fs::read(&path).map_err(|e| e.to_string())?;
     let back = owner_of(&s, Some(&bytes))?;
-    println!("snapshot-same {}", back.snapshot().map_err(|e| e.to_string())? == bytes);
+    println!(
+        "snapshot-same {}",
+        back.snapshot().map_err(|e| e.to_string())? == bytes
+    );
     Ok(ExitCode::SUCCESS)
 }
 

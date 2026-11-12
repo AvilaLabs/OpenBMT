@@ -273,8 +273,14 @@ mod tests {
         let with_own = owed
             .merged(&[item(OwedKind::ExportedBeaten, 4, 6)])
             .unwrap();
-        assert_eq!(with_own.items().last().map(|o| o.kind), Some(OwedKind::ExportedBeaten));
-        assert_eq!(SettleOwed::from_bytes(&with_own.to_bytes()).unwrap(), with_own);
+        assert_eq!(
+            with_own.items().last().map(|o| o.kind),
+            Some(OwedKind::ExportedBeaten)
+        );
+        assert_eq!(
+            SettleOwed::from_bytes(&with_own.to_bytes()).unwrap(),
+            with_own
+        );
         let empty = SettleOwed::new().to_bytes();
         assert_eq!(SettleOwed::from_bytes(&empty).unwrap(), SettleOwed::new());
     }

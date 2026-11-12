@@ -357,8 +357,7 @@ impl Owner {
             PinnedRoots::new(identity.device_id(), approver).map_err(|_| SetupError::SameRoot)?;
         let wallet_id = wallet.checksum32();
         let no_key_app = matches!(wallet, ImportedWallet::Single(_))
-            || crate::own_shop::own_approver(owner_secret)
-                .is_some_and(|key| key == roots.approver);
+            || crate::own_shop::own_approver(owner_secret).is_some_and(|key| key == roots.approver);
         Ok(Self {
             identity,
             wallet,

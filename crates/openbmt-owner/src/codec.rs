@@ -1005,7 +1005,9 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
             for _ in 0..m {
                 let (number, f) = read_frozen(&mut r, true).map_err(d)?;
                 if !matches!(f, Frozen::Spend { .. }) {
-                    return Err(d(bad("an own-spend session holds an item that is no spend")));
+                    return Err(d(bad(
+                        "an own-spend session holds an item that is no spend",
+                    )));
                 }
                 frozen.push((number, f));
             }

@@ -150,7 +150,8 @@ fn wallet_signs(file: &[u8], keys: &[(Fingerprint, Xpriv)]) -> Psbt {
                 if *mine != fp {
                     continue;
                 }
-                let tail: Vec<ChildNumber> = path.into_iter().rev().take(2).rev().cloned().collect();
+                let tail: Vec<ChildNumber> =
+                    path.into_iter().rev().take(2).rev().cloned().collect();
                 let sk = account.derive_priv(secp(), &tail).unwrap().private_key;
                 assert_eq!(sk.public_key(secp()), pk);
                 let digest = match &input.witness_script {
@@ -159,7 +160,8 @@ fn wallet_signs(file: &[u8], keys: &[(Fingerprint, Xpriv)]) -> Psbt {
                         .unwrap()
                         .to_byte_array(),
                     None => {
-                        let code = ScriptBuf::new_p2wpkh(&PublicKey::new(pk).wpubkey_hash().unwrap());
+                        let code =
+                            ScriptBuf::new_p2wpkh(&PublicKey::new(pk).wpubkey_hash().unwrap());
                         cache
                             .p2wpkh_signature_hash(
                                 i,
@@ -271,7 +273,9 @@ fn own_refusal(r: Refusal) -> OwnSpendRefusal {
     }
 }
 
-fn both_kinds() -> [(&'static str, fn() -> Own); 2] {
+type Maker = fn() -> Own;
+
+fn both_kinds() -> [(&'static str, Maker); 2] {
     [("one key", single), ("2-of-3", multi)]
 }
 
@@ -286,10 +290,10 @@ fn as_100_the_queue_holds_refunds_and_cash_outs_and_the_rules_that_decide_them()
         // AS-52: never more than was received.
         refund(&mut owner, 1, 50_000, 40_000);
         let more = owner.queue_refund(sale(1), "Mia", external(2), 20_000, None, nop);
-        assert!(matches!(
-            refused(more),
-            Refusal::MoreThanReceived { .. }
-        ), "{name}");
+        assert!(
+            matches!(refused(more), Refusal::MoreThanReceived { .. }),
+            "{name}"
+        );
         // AS-51: dust.
         let dust = owner.queue_cash_out(external(3), CashAmount::Sats(10), "x", nop);
         assert!(matches!(refused(dust), Refusal::BelowDust { .. }), "{name}");
@@ -331,10 +335,7 @@ fn as_100_a_shop_with_a_key_app_is_not_an_own_wallet_shop() {
     assert!(!owner.is_own_wallet());
     owner.queue_batch(batch(1, 0, 3), NOW, nop).unwrap();
     let r = owner.build_own_spend(&[], &[1], 1_000, 0, 850_000, NOW, &[1; 32], nop);
-    assert_eq!(
-        refused(r),
-        Refusal::OwnSpend(OwnSpendRefusal::NotOwnWallet)
-    );
+    assert_eq!(refused(r), Refusal::OwnSpend(OwnSpendRefusal::NotOwnWallet));
 }
 
 #[test]
@@ -362,18 +363,13 @@ fn as_100_a_dropped_transaction_asked_for_again_spends_one_of_the_same_coins() {
             .clone();
         assert!(!conflict.is_empty(), "{name}");
         f.owner.requeue(f.refund, nop).unwrap();
-        let again = ok(f.owner.build_own_spend(
-            &coins,
-            &[f.refund],
-            1_000,
-            2,
-            850_000,
-            NOW,
-            &[8; 32],
-            nop,
-        ));
+        let again =
+            ok(f.owner
+                .build_own_spend(&coins, &[f.refund], 1_000, 2, 850_000, NOW, &[8; 32], nop));
         let id = again.session.expect("planned again");
-        let tx = Psbt::deserialize(&ok_file(&mut f.owner, &id)).unwrap().unsigned_tx;
+        let tx = Psbt::deserialize(&ok_file(&mut f.owner, &id))
+            .unwrap()
+            .unsigned_tx;
         let spent: BTreeSet<OutPoint> = tx.input.iter().map(|i| i.previous_output).collect();
         assert!(
             conflict.iter().any(|o| spent.contains(o)),
@@ -409,8 +405,7 @@ fn as_100_a_cash_out_is_its_own_transaction_and_the_outputs_are_frozen() {
 fn as_101_the_picked_spends_are_frozen_into_a_session_of_spends_alone() {
     for (name, kind) in both_kinds() {
         let f = fixture(kind());
-        let request =
-            Request::from_bytes(f.owner.session_request(&f.session).unwrap()).unwrap();
+        let request = Request::from_bytes(f.owner.session_request(&f.session).unwrap()).unwrap();
         // One item for each transaction, no health check, no other item.
         assert!(request
             .items()
@@ -419,9 +414,13 @@ fn as_101_the_picked_spends_are_frozen_into_a_session_of_spends_alone() {
         assert_eq!(request.items().len(), 2, "{name}");
         assert_eq!(f.owner.own_sessions(), vec![f.session]);
         // The entries wait in session with that ID, and nothing is signed.
-        for entry in f.owner.refunds().iter().map(|r| &r.stage).chain(
-            f.owner.cash_outs().iter().map(|c| &c.stage),
-        ) {
+        for entry in f
+            .owner
+            .refunds()
+            .iter()
+            .map(|r| &r.stage)
+            .chain(f.owner.cash_outs().iter().map(|c| &c.stage))
+        {
             assert_eq!(*entry, Stage::InSession { session: f.session }, "{name}");
         }
         assert!(f.owner.outbox().is_empty());
@@ -442,7 +441,15 @@ fn as_101_only_the_picked_entries_are_frozen() {
     let built = ok(owner.build_own_spend(&coins, &[b], 1_000, 0, 850_000, NOW, &[1; 32], nop));
     assert_eq!(built.items.len(), 1);
     assert_eq!(built.items[0].refunds, vec![b]);
-    let stage_of = |id| owner.refunds().iter().find(|r| r.id == id).unwrap().stage.clone();
+    let stage_of = |id| {
+        owner
+            .refunds()
+            .iter()
+            .find(|r| r.id == id)
+            .unwrap()
+            .stage
+            .clone()
+    };
     assert_eq!(stage_of(a), Stage::Queued);
     assert!(matches!(stage_of(b), Stage::InSession { .. }));
 }
@@ -597,7 +604,11 @@ fn as_102_the_same_item_gives_the_same_bytes_every_time_and_stores_once() {
         assert_eq!(f.store.calls(), calls + 1, "{name}: the first call stores");
         let again = file(&mut f, 0);
         assert_eq!(again, first, "{name}");
-        assert_eq!(f.store.calls(), calls + 1, "{name}: the second stores nothing");
+        assert_eq!(
+            f.store.calls(),
+            calls + 1,
+            "{name}: the second stores nothing"
+        );
         // The same bytes after a restart of the phone.
         let mut back = restore(&f.own, &f.store.last()).unwrap();
         assert_eq!(ok(back.own_file(&f.session, 0, nop)), first, "{name}");
@@ -614,7 +625,12 @@ fn as_102_the_file_is_described_for_the_person_and_the_words_say_to_compare() {
             let paid: u64 = file.summary.payments.iter().map(|p| p.sats).sum();
             assert!(paid == 40_000 || paid == 100_000, "{name}: {paid}");
             let psbt = Psbt::deserialize(&file.psbt).unwrap();
-            let outputs: u64 = psbt.unsigned_tx.output.iter().map(|o| o.value.to_sat()).sum();
+            let outputs: u64 = psbt
+                .unsigned_tx
+                .output
+                .iter()
+                .map(|o| o.value.to_sat())
+                .sum();
             let change = file.summary.change.as_ref().map_or(0, |c| c.sats);
             assert_eq!(paid + change, outputs, "{name}");
             assert!(file.summary.fee > 0);
@@ -628,7 +644,9 @@ fn as_102_the_file_is_described_for_the_person_and_the_words_say_to_compare() {
 #[test]
 fn as_102_a_failed_store_does_not_file_the_item() {
     let mut f = fixture(single());
-    let r = f.owner.own_file(&f.session, 0, |_| Err("disk full".to_string()));
+    let r = f
+        .owner
+        .own_file(&f.session, 0, |_| Err("disk full".to_string()));
     assert!(matches!(r, Err(OwnerError::Store(_))));
     assert!(!f.owner.own_items(&f.session).unwrap()[0].filed);
     assert!(f.owner.exported_transactions(None).is_empty());
@@ -704,7 +722,12 @@ fn as_103_a_file_signed_by_the_wrong_key_is_refused_as_the_wallet_did_not_sign()
                     .unwrap()
                     .to_byte_array(),
                 None => cache
-                    .p2wpkh_signature_hash(i, &spent.script_pubkey, spent.value, EcdsaSighashType::All)
+                    .p2wpkh_signature_hash(
+                        i,
+                        &spent.script_pubkey,
+                        spent.value,
+                        EcdsaSighashType::All,
+                    )
                     .unwrap()
                     .to_byte_array(),
             };
@@ -889,9 +912,9 @@ fn as_104_a_failed_store_changes_nothing_and_the_queue_is_stored_before_the_outb
     let first = file(&mut f, 0);
     let signed = wallet_signs(&first.psbt, &f.own.keys);
     let before = f.owner.snapshot().unwrap();
-    let r = f
-        .owner
-        .take_own(&f.session, 0, &signed.serialize(), |_| Err("disk full".to_string()));
+    let r = f.owner.take_own(&f.session, 0, &signed.serialize(), |_| {
+        Err("disk full".to_string())
+    });
     assert!(matches!(r, Err(OwnerError::Store(_))));
     assert_eq!(f.owner.snapshot().unwrap(), before);
     assert!(f.owner.outbox().is_empty());
@@ -947,7 +970,8 @@ fn as_104_a_full_outbox_refuses_and_changes_nothing() {
         taken += picked.len();
         let mut seed = [0u8; 32];
         seed[..4].copy_from_slice(&tag.to_le_bytes());
-        let built = ok(owner.build_own_spend(&coins, &picked, 1_000, tag, 850_000, NOW, &seed, nop));
+        let built =
+            ok(owner.build_own_spend(&coins, &picked, 1_000, tag, 850_000, NOW, &seed, nop));
         let session = built.session.unwrap();
         for item in &built.items {
             let file = ok(owner.own_file(&session, item.number, nop));
@@ -955,13 +979,21 @@ fn as_104_a_full_outbox_refuses_and_changes_nothing() {
             ok(owner.take_own(&session, item.number, &signed.serialize(), nop));
         }
     }
-    let mut cash = |owner: &mut Owner, n: u32| {
+    let cash = |owner: &mut Owner, n: u32| {
         let id = owner
             .queue_cash_out(external(9), CashAmount::Sats(50_000), "Savings", nop)
             .unwrap();
         let coins = [own_coin(&own, 9_000 + n, 9_000 + n, 100_000)];
-        let built =
-            ok(owner.build_own_spend(&coins, &[id], 1_000, 9_000 + n, 850_000, NOW, &[n as u8; 32], nop));
+        let built = ok(owner.build_own_spend(
+            &coins,
+            &[id],
+            1_000,
+            9_000 + n,
+            850_000,
+            NOW,
+            &[n as u8; 32],
+            nop,
+        ));
         let session = built.session.unwrap();
         let file = ok(owner.own_file(&session, 0, nop));
         (session, wallet_signs(&file.psbt, &own.keys).serialize())
@@ -972,10 +1004,7 @@ fn as_104_a_full_outbox_refuses_and_changes_nothing() {
     let (session, signed) = cash(&mut owner, 2);
     let before = owner.snapshot().unwrap();
     let r = owner.take_own(&session, 0, &signed, nop);
-    assert_eq!(
-        refused(r),
-        Refusal::OwnSpend(OwnSpendRefusal::OutboxFull)
-    );
+    assert_eq!(refused(r), Refusal::OwnSpend(OwnSpendRefusal::OutboxFull));
     assert_eq!(owner.snapshot().unwrap(), before);
 }
 
@@ -1241,10 +1270,7 @@ fn as_107_a_key_app_shop_that_holds_an_own_spend_session_is_refused() {
     // same and the snapshot is still refused.
     let (_, bytes) = snapshot_with_sessions(multi);
     let err = restore_owner(&bytes).unwrap_err();
-    assert!(matches!(
-        err,
-        openbmt_owner::RestoreError::WrongApprover
-    ));
+    assert!(matches!(err, openbmt_owner::RestoreError::WrongApprover));
 }
 
 #[test]

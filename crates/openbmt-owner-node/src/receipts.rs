@@ -445,7 +445,10 @@ impl<P: OwnerPort> OwnerNode<P> {
 
     /// Whether the shop's wallet has one key (SP-81), for the sizes of a merge.
     fn single_key(&self) -> bool {
-        matches!(self.wallet, openbmt_core::wallet_single::ImportedWallet::Single(_))
+        matches!(
+            self.wallet,
+            openbmt_core::wallet_single::ImportedWallet::Single(_)
+        )
     }
 
     /// OC-16 to OC-18: the line about receipts.

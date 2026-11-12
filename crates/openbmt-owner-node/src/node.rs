@@ -1568,11 +1568,7 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// transaction is watched: a block that holds it pays its entries, and a
     /// block that spends one of its coins in another transaction gives them
     /// back (OC-52).
-    pub fn own_file(
-        &mut self,
-        session: &[u8; 32],
-        number: u32,
-    ) -> Result<OwnFile, NodeError> {
+    pub fn own_file(&mut self, session: &[u8; 32], number: u32) -> Result<OwnFile, NodeError> {
         let write = self.queue_writer();
         Ok(self.owner_mut()?.own_file(session, number, write)?)
     }

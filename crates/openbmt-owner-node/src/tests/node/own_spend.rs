@@ -26,9 +26,7 @@ fn key() -> (Fingerprint, Xpriv) {
 
 fn wallet() -> ImportedWallet {
     let (fp, account) = key();
-    ImportedWallet::Single(
-        SingleKeyWallet::new(fp, 0, Xpub::from_priv(secp(), &account)).unwrap(),
-    )
+    ImportedWallet::Single(SingleKeyWallet::new(fp, 0, Xpub::from_priv(secp(), &account)).unwrap())
 }
 
 /// What the shop's wallet does with a file: signs every input.
@@ -139,7 +137,9 @@ fn as_103_as_104_a_signed_file_is_taken_and_sent_through_the_outbox() {
     rig.rescan();
     assert_eq!(taken.txid, file.txid);
     assert_eq!(rig.node.owner().outbox().len(), 1);
-    assert!(rig.calls().contains(&format!("main broadcast {}", taken.txid)));
+    assert!(rig
+        .calls()
+        .contains(&format!("main broadcast {}", taken.txid)));
     assert!(rig.node.owner().open_sessions().is_empty());
 }
 
@@ -202,7 +202,10 @@ fn as_104_an_abandoned_own_spend_releases_its_entries() {
     let session = built.session.unwrap();
     rig.node.abandon_session(&session).unwrap();
     assert!(rig.node.owner().open_sessions().is_empty());
-    assert!(matches!(rig.node.owner().cash_outs()[0].stage, Stage::Queued));
+    assert!(matches!(
+        rig.node.owner().cash_outs()[0].stage,
+        Stage::Queued
+    ));
 }
 
 #[test]

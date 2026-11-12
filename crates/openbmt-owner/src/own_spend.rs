@@ -153,9 +153,9 @@ impl OwnSpendRefusal {
     pub fn words(&self) -> Words {
         let words = needed(self.placeholder());
         match self {
-            Self::File(why)
-            | Self::NotSigned(why)
-            | Self::Finished(why) => words.detail(why.clone()),
+            Self::File(why) | Self::NotSigned(why) | Self::Finished(why) => {
+                words.detail(why.clone())
+            }
             Self::Unreadable(why) => words.detail((*why).to_string()),
             _ => words,
         }
@@ -566,8 +566,7 @@ impl Owner {
             return Err(OwnSpendRefusal::NotAnOwnSpend.into());
         };
         let bytes = self.wallet_file(&found.psbt)?;
-        let parsed =
-            Psbt::deserialize(&bytes).map_err(|e| OwnSpendRefusal::File(e.to_string()))?;
+        let parsed = Psbt::deserialize(&bytes).map_err(|e| OwnSpendRefusal::File(e.to_string()))?;
         let summary = self
             .summary(&parsed, payments, *change_position)
             .map_err(|e| OwnSpendRefusal::File(e.to_string()))?;
@@ -642,17 +641,17 @@ impl Owner {
                 if back.unsigned_tx != sent.unsigned_tx {
                     return Err(OwnSpendRefusal::DifferentTransaction.into());
                 }
-                let both = take_own_signatures(&self.wallet, &sent, &back).map_err(|e| match e {
-                    SignerFileError::NotSigned { .. } | SignerFileError::Combine(_) => {
-                        OwnerError::<E>::from(OwnSpendRefusal::NotSigned(e.to_string()))
-                    }
-                    other => finished(other.to_string()),
-                })?;
+                let both =
+                    take_own_signatures(&self.wallet, &sent, &back).map_err(|e| match e {
+                        SignerFileError::NotSigned { .. } | SignerFileError::Combine(_) => {
+                            OwnerError::<E>::from(OwnSpendRefusal::NotSigned(e.to_string()))
+                        }
+                        other => finished(other.to_string()),
+                    })?;
                 // Fewer than two different keys, or a bad one, is a wallet
                 // that did not sign; anything else is a failed check.
-                finalize(&self.wallet, &both).map_err(|e| {
-                    OwnerError::<E>::from(OwnSpendRefusal::NotSigned(e.to_string()))
-                })?
+                finalize(&self.wallet, &both)
+                    .map_err(|e| OwnerError::<E>::from(OwnSpendRefusal::NotSigned(e.to_string())))?
             }
             Returned::Transaction(tx) => {
                 if tx.compute_txid() != *txid {

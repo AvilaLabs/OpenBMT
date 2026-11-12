@@ -2780,7 +2780,9 @@ impl Entry {
                     "no open spend of the wallet has this number",
                 ));
             }
-            st.node.abandon_session(&session).map_err(|e| node_error(&e))
+            st.node
+                .abandon_session(&session)
+                .map_err(|e| node_error(&e))
         })
     }
 

@@ -329,7 +329,10 @@ fn as_101_oa_115_the_views_of_the_own_spend_are_written_in_the_order_the_binding
     assert_eq!(r.list(|r| r.u32()), vec![1, 2]);
     assert_eq!(r.opt(|r| r.u32()), Some(9));
     assert!(r.bool());
-    assert_eq!(r.list(|r| (r.string(), r.u64())), vec![("bc1qx".to_string(), 40_000)]);
+    assert_eq!(
+        r.list(|r| (r.string(), r.u64())),
+        vec![("bc1qx".to_string(), 40_000)]
+    );
     assert_eq!(r.opt(|r| (r.string(), r.u64())), None);
     assert_eq!(r.u64(), 300);
     r.done();
@@ -387,7 +390,10 @@ fn as_101_oa_115_the_views_of_the_own_spend_are_written_in_the_order_the_binding
     }
     .put(&mut bytes);
     let mut r = Rd::new(&bytes);
-    assert_eq!((r.u32(), r.bytes(), r.u64(), r.u32()), (1, vec![5; 32], 9, 0));
+    assert_eq!(
+        (r.u32(), r.bytes(), r.u64(), r.u32()),
+        (1, vec![5; 32], 9, 0)
+    );
     r.done();
 }
 
