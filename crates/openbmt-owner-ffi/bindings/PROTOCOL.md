@@ -203,7 +203,7 @@ ReceiptsKind: enum, one tag byte
 ReceiptsView: record: kind: ReceiptsKind, payments: u64, cost_sats: u64, rate_per_kvb: u64, words: Words
 MergeOfferView: record: coins: u64, of: u64, rate_per_kvb: u64, cost_sats: u64, usual_cost_sats: u64, saving_sats: u64, words: Words
 SendKind: enum, one tag byte
-    tags Waiting=0 Sent=1 SeenBack=2 NotSeen=3 Confirmed=4 Done=5 Replaced=6 Unresolved=7
+    tags Waiting=0 Sent=1 SeenBack=2 NotSeen=3 Confirmed=4 Done=5 Replaced=6 Unresolved=7 HeldByNode=8
 SendRow: record: txid: string, state: SendKind, n: u32, words: Words
 SkippedView: record: id: u32, reason: string, words: Words
 BuiltView: record: session_id: list<u8>, request: list<u8>, skipped: list<SkippedView>

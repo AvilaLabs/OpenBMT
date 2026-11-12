@@ -1124,6 +1124,16 @@ fn nr_86_a_refund_is_signed_held_sent_followed_and_done_at_the_refund_depth() {
         Some(SendState::SeenBack { groups: 2 })
     );
 
+    // NR-112: the shop's own node gives it back too; both are kept.
+    rig.feed(vec![AppEvent::TxState {
+        txid,
+        state: openbmt_net_io::RelayState::SeenBackAndHeldByNode { groups: 2 },
+    }]);
+    assert_eq!(
+        rig.node.send_state(&txid),
+        Some(SendState::HeldByNode { groups: 2 })
+    );
+
     // A block holds it.
     rig.mine(std::slice::from_ref(&tx));
     assert_eq!(

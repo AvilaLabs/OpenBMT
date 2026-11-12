@@ -717,6 +717,8 @@ pub enum SendKind {
     Replaced,
     /// The wallet cannot tell what happened.
     Unresolved,
+    /// Given back by the shop's own node when asked (NR-112).
+    HeldByNode,
 }
 
 wire_unit_enum!(SendKind {
@@ -727,7 +729,8 @@ wire_unit_enum!(SendKind {
     Confirmed = 4,
     Done = 5,
     Replaced = 6,
-    Unresolved = 7
+    Unresolved = 7,
+    HeldByNode = 8
 });
 
 /// One finished payment the node follows.
@@ -737,7 +740,8 @@ pub struct SendRow {
     pub txid: String,
     /// Where it is.
     pub state: SendKind,
-    /// The depth for `Confirmed`, the network groups for `SeenBack`, else 0.
+    /// The depth for `Confirmed`, the network groups for `SeenBack` and
+    /// `HeldByNode`, else 0.
     pub n: u32,
     /// What the owner is told.
     pub words: WordsView,

@@ -468,6 +468,10 @@ fn send_row(txid: &Txid, state: SendState) -> SendRow {
             u32::try_from(groups).unwrap_or(u32::MAX),
         ),
         SendState::NotSeen => (SendKind::NotSeen, 0),
+        SendState::HeldByNode { groups } => (
+            SendKind::HeldByNode,
+            u32::try_from(groups).unwrap_or(u32::MAX),
+        ),
         SendState::Confirmed { depth } => (SendKind::Confirmed, depth),
         SendState::Done => (SendKind::Done, 0),
         SendState::Replaced => (SendKind::Replaced, 0),

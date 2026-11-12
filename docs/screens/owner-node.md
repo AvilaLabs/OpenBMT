@@ -13,6 +13,7 @@ file again.
 | SendState::Sent | Payment sent | The payment was announced to peers and has not yet been seen back. | Nothing to do. Wait for peers to report it or for it to appear in a block. | Nobody |  |
 | SendState::SeenBack | Payment seen by peers | Peers outside the ones asked to send it have reported this payment. | Nothing to do. Wait for it to appear in a block. | Nobody |  |
 | SendState::NotSeen | Payment sent again | Peers did not report the payment back, so it was announced again. | Nothing to do. Wait for peers to report it or for it to appear in a block. | Nobody |  |
+| SendState::HeldByNode | Payment held by your node | The shop's own Bitcoin node accepted this payment and passes it on to its peers. | Nothing to do. Wait for it to appear in a block. | Nobody |  |
 | SendState::Confirmed | Payment in the light check | The payment is in a block found by the owner's light check, but it has not reached the chosen depth. | Nothing to do. Wait for more blocks to arrive. | Nobody |  |
 | SendState::Done | Payment depth reached | The payment reached the chosen number of blocks in the owner's light check. | Nothing to do. | Nobody |  |
 | SendState::Replaced | Payment replaced | Another payment spent the same coins, so this payment will not complete. | Review the returned entries and decide whether to sign them again. | Owner |  |

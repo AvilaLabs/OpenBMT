@@ -211,6 +211,7 @@ private const val TAG_SEND_KIND_CONFIRMED = 4
 private const val TAG_SEND_KIND_DONE = 5
 private const val TAG_SEND_KIND_REPLACED = 6
 private const val TAG_SEND_KIND_UNRESOLVED = 7
+private const val TAG_SEND_KIND_HELD_BY_NODE = 8
 private const val TAG_OUTCOME_KIND_DELIVERED = 0
 private const val TAG_OUTCOME_KIND_RETURNED = 1
 private const val TAG_OUTCOME_KIND_HEALTHY = 2
@@ -401,7 +402,7 @@ class MergeOffer(
     val words: Words,
 )
 
-enum class SendKind { Waiting, Sent, SeenBack, NotSeen, Confirmed, Done, Replaced, Unresolved }
+enum class SendKind { Waiting, Sent, SeenBack, NotSeen, Confirmed, Done, Replaced, Unresolved, HeldByNode }
 
 class SendRow(val txid: String, val state: SendKind, val n: Long, val words: Words)
 
@@ -1258,6 +1259,7 @@ private fun Reader.sendKind(): SendKind =
         TAG_SEND_KIND_DONE -> SendKind.Done
         TAG_SEND_KIND_REPLACED -> SendKind.Replaced
         TAG_SEND_KIND_UNRESOLVED -> SendKind.Unresolved
+        TAG_SEND_KIND_HELD_BY_NODE -> SendKind.HeldByNode
         else -> tag("SendKind")
     }
 

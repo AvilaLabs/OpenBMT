@@ -171,6 +171,14 @@ pub enum SendState {
     },
     /// Not seen back in ten minutes. It was announced to every peer again.
     NotSeen,
+    /// The shop's own node gave it back when asked, so it is in that node's
+    /// pool of unconfirmed transactions (NR-112). Peers that were not asked
+    /// may also have announced it, from this many network groups (0 when
+    /// none have). This is not a confirmation.
+    HeldByNode {
+        /// Distinct groups that announced it back, 0 for none.
+        groups: usize,
+    },
     /// In a checked block, this many blocks deep (the tip counts as 1).
     Confirmed {
         /// Confirmations.
@@ -193,6 +201,13 @@ impl fmt::Display for SendState {
             Self::Sent => write!(f, "sent"),
             Self::SeenBack { groups } => write!(f, "seen back from {groups} network groups"),
             Self::NotSeen => write!(f, "not seen back"),
+            Self::HeldByNode { groups: 0 } => write!(f, "held by the shop's node"),
+            Self::HeldByNode { groups } => {
+                write!(
+                    f,
+                    "held by the shop's node, seen back from {groups} network groups"
+                )
+            }
             Self::Confirmed { depth } => write!(f, "confirmed, {depth} deep"),
             Self::Done => write!(f, "done"),
             Self::Replaced => write!(f, "replaced by another transaction"),
@@ -1739,7 +1754,10 @@ impl<P: OwnerPort> OwnerNode<P> {
             .filter_map(|(txid, state)| {
                 if matches!(
                     state,
-                    SendState::Sent | SendState::SeenBack { .. } | SendState::NotSeen
+                    SendState::Sent
+                        | SendState::SeenBack { .. }
+                        | SendState::NotSeen
+                        | SendState::HeldByNode { .. }
                 ) && !self.owner.outbox().iter().any(|d| {
                     matches!(
                         &d.what,
@@ -2083,12 +2101,21 @@ impl<P: OwnerPort> OwnerNode<P> {
             AppEvent::TxState { txid, state } => {
                 let live = matches!(
                     self.states.get(txid),
-                    Some(SendState::Sent | SendState::SeenBack { .. } | SendState::NotSeen)
+                    Some(
+                        SendState::Sent
+                            | SendState::SeenBack { .. }
+                            | SendState::NotSeen
+                            | SendState::HeldByNode { .. }
+                    )
                 );
                 if live {
                     let mapped = match state {
                         RelayState::Sent => SendState::Sent,
                         RelayState::SeenBack { groups } => SendState::SeenBack { groups: *groups },
+                        RelayState::HeldByNode => SendState::HeldByNode { groups: 0 },
+                        RelayState::SeenBackAndHeldByNode { groups } => {
+                            SendState::HeldByNode { groups: *groups }
+                        }
                         RelayState::NotSeen => {
                             self.note(format!(
                                 "{txid} was not seen back in ten minutes; it was announced to \

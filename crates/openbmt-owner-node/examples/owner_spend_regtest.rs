@@ -239,6 +239,7 @@ fn tag(state: SendState) -> String {
         SendState::Sent => "sent".to_string(),
         SendState::SeenBack { groups } => format!("seenback-{groups}"),
         SendState::NotSeen => "notseen".to_string(),
+        SendState::HeldByNode { groups } => format!("heldbynode-{groups}"),
         SendState::Confirmed { depth } => format!("confirmed-{depth}"),
         SendState::Done => "done".to_string(),
         SendState::Replaced => "replaced".to_string(),
