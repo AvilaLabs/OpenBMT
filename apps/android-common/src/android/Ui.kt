@@ -189,11 +189,13 @@ class Ui(internal val context: Context) {
         mono: Boolean = false,
         colour: Int? = null,
         medium: Boolean = false,
+        serif: Boolean = false,
     ): TextView = TextView(context).apply {
         this.text = text
         textSize = size
         setTextColor(colour ?: pal.text)
         if (medium) typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        if (serif) typeface = if (medium && Build.VERSION.SDK_INT >= 28) Typeface.create(Typeface.SERIF, 500, false) else Typeface.SERIF
         if (bold) setTypeface(typeface, Typeface.BOLD)
         if (mono) typeface = if (bold) Typeface.create(Typeface.MONOSPACE, Typeface.BOLD) else Typeface.MONOSPACE
         filterTouchesWhenObscured = true
@@ -488,8 +490,9 @@ class Ui(internal val context: Context) {
         logo: Boolean = false,
         gear: (() -> Unit)? = null,
         onBlack: Boolean = false,
+        ground: Int? = null,
     ): View {
-        val fill = if (onBlack) Color.BLACK else pal.surface
+        val fill = if (onBlack) Color.BLACK else ground ?: pal.surface
         val ink = if (onBlack) Palette.WHITE else pal.text
         val subInk = if (onBlack) 0xFFD3D7DE.toInt() else pal.secondary
         val bar = BarView(context, onBlack)
@@ -548,17 +551,17 @@ class Ui(internal val context: Context) {
      * A page of the new look: the [bar] fixed at the top, the [body] scrolling under it (a 20 dp gutter, 24 dp at
      * the top and bottom, 18 dp between blocks; a [FullWidth] first block runs edge to edge), and the [actions]
      * fixed at the bottom over a 1 dp divider (14 dp above them, 28 dp plus the navigation bar's height below,
-     * 10 dp between them). With no actions there is no footer. A [tone] tints the bar. [scroll] false lays the
+     * 10 dp between them, or 12 dp side by side when [across]). [ground] replaces the page's and footer's background. With no actions there is no footer. A [tone] tints the bar. [scroll] false lays the
      * body out without a scroll, for the scanner. The insets, the keyboard and the status bar's icons are
      * handled here, as [page] does.
      */
-    fun page(bar: View, body: List<View>, actions: List<Button> = emptyList(), tone: Tone? = null, scroll: Boolean = true): View {
+    fun page(bar: View, body: List<View>, actions: List<Button> = emptyList(), tone: Tone? = null, scroll: Boolean = true, ground: Int? = null, across: Boolean = false): View {
         val barView = bar as? BarView
         val onBlack = barView?.onBlack == true
         if (tone != null && !onBlack) bar.setBackgroundColor(tone.tint)
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(if (onBlack) Color.BLACK else pal.background)
+            setBackgroundColor(if (onBlack) Color.BLACK else ground ?: pal.background)
             filterTouchesWhenObscured = true
         }
         root.addView(bar, lp())
@@ -596,13 +599,17 @@ class Ui(internal val context: Context) {
         if (actions.isNotEmpty()) {
             val f = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setBackgroundColor(pal.surface)
+                setBackgroundColor(ground ?: pal.surface)
                 filterTouchesWhenObscured = true
             }
             f.addView(divider())
-            val buttons = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+            val buttons = LinearLayout(context).apply { orientation = if (across) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
             for ((i, b) in actions.withIndex()) {
-                buttons.addView(b, lp().also { it.topMargin = if (i == 0) 0 else px(10) })
+                if (across) {
+                    buttons.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also { it.leftMargin = if (i == 0) 0 else px(12) })
+                } else {
+                    buttons.addView(b, lp().also { it.topMargin = if (i == 0) 0 else px(10) })
+                }
             }
             f.addView(buttons, lp())
             root.addView(f, lp())

@@ -19,6 +19,8 @@ class OutcomeBand(val band: Int, val sub: Int)
 /** One set of colours: either the light one or the dark one. */
 class Scheme(
     val background: Int,
+    /** The page of the real cases: a warm off-white (dark: a warm near-black) under serif text. */
+    val paper: Int,
     val surface: Int,
     val text: Int,
     val secondary: Int,
@@ -68,6 +70,7 @@ object Palette {
 
     val light = Scheme(
         background = 0xFFF4F5F7.toInt(),
+        paper = 0xFFFBFAF7.toInt(),
         surface = 0xFFFFFFFF.toInt(),
         text = 0xFF111317.toInt(),
         secondary = 0xFF4A505A.toInt(),
@@ -84,6 +87,7 @@ object Palette {
 
     val dark = Scheme(
         background = 0xFF0E1013.toInt(),
+        paper = 0xFF15140F.toInt(),
         surface = 0xFF171A1F.toInt(),
         text = 0xFFF2F4F7.toInt(),
         secondary = 0xFFA8B0BC.toInt(),
@@ -113,6 +117,9 @@ object Palette {
         out.add(ColourPair("secondary text on the background", s.secondary, s.background))
         out.add(ColourPair("secondary text on the surface", s.secondary, s.surface))
         out.add(ColourPair("hint on the surface", s.hint, s.surface))
+        out.add(ColourPair("text on the paper", s.text, s.paper))
+        out.add(ColourPair("secondary text on the paper", s.secondary, s.paper))
+        out.add(ColourPair("hint on the paper", s.hint, s.paper))
         out.add(ColourPair("on-brand text on the brand fill", ON_BRAND, BRAND))
         for ((name, o) in outcomes()) {
             out.add(ColourPair("white on the $name outcome band", WHITE, o.band))
