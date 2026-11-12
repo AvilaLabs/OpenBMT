@@ -573,6 +573,19 @@ mod tests {
             ),
             ("tor stays", Free, Box::new(|s| s.min_sale_sats += 1)),
             ("tips", Free, Box::new(|s| s.tips_on = true)),
+            (
+                "swap provider",
+                Free,
+                Box::new(|s| {
+                    s.swap = Some(crate::settings::SwapProvider {
+                        name: "Pretend".to_string(),
+                        onion: "w2mqd2fcbgiop7oyxoes2ozmdnvgon22oipj7vzh2rquepf7cxauauad.onion"
+                            .to_string(),
+                        path_prefix: "/api".to_string(),
+                        max_sale_sats: 1_000_000,
+                    })
+                }),
+            ),
         ];
         for (name, want, f) in cases {
             let (old, new) = mutated(f);
