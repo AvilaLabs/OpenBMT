@@ -9,7 +9,12 @@
 # Every step stops the script with a message when it fails. Nothing is
 # downloaded. Heavy steps run under the memory guard.
 #
-# Usage: apps/key-android/build.sh
+# With --dev the build is the development copy (SR-91): package org.openbmt.key.dev,
+# label "Key (dev)", a band on every screen and no USB debugging check, in
+# openbmt-key-dev.apk. It is for testing on a phone that is plugged in, is
+# never released, and no CI job or release script passes --dev.
+#
+# Usage: apps/key-android/build.sh [--dev]
 #   JAVA_HOME         a JDK 21           (default: ~/Android/jdk21)
 #   ANDROID_SDK       the SDK            (default: ~/Android/Sdk)
 #   ANDROID_NDK_HOME  the NDK            (default: $ANDROID_SDK/ndk/26.3.11579264)
@@ -20,6 +25,15 @@
 #   KEYAPK_CARGO_TARGET  the cargo target directory (default: ~/.cache/openbmt/target/keyapk)
 
 set -euo pipefail
+
+variant=release
+apkname=openbmt-key.apk
+case "${1:-}" in
+    "") ;;
+    --dev) variant=dev; apkname=openbmt-key-dev.apk ;;
+    *) printf 'build.sh: unknown argument %s (only --dev is known)\n' "$1" >&2; exit 1 ;;
+esac
+[ "$#" -le 1 ] || { printf 'build.sh: too many arguments\n' >&2; exit 1; }
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
@@ -119,9 +133,15 @@ step "resources"
 "$bt/aapt2" compile --dir "$here/res" -o "$out/res.zip"
 # The theme and the colours the three apps share (colors.xml is made from Palette.kt).
 "$bt/aapt2" compile --dir "$common/res" -o "$out/common-res.zip"
+link_extra=()
+if [ "$variant" = dev ]; then
+    # The development copy: its own package (the activity's class name stays the full one) and its own label.
+    "$bt/aapt2" compile --dir "$here/res-dev" -o "$out/dev-res.zip"
+    link_extra=(--rename-manifest-package org.openbmt.key.dev --auto-add-overlay -R "$out/dev-res.zip")
+fi
 "$bt/aapt2" link -o "$out/base.apk" -I "$platform" --manifest "$here/AndroidManifest.xml" \
     --min-sdk-version "$min_sdk" --target-sdk-version "$target_sdk" \
-    --version-code 1 --version-name 0.1.0 "$out/res.zip" "$out/common-res.zip"
+    --version-code 1 --version-name 0.1.0 ${link_extra[@]+"${link_extra[@]}"} "$out/res.zip" "$out/common-res.zip"
 
 # ---- Kotlin -----------------------------------------------------------------------------
 
@@ -131,7 +151,7 @@ heavy java -Xmx2g -cp "$KOTLIN_HOME/lib/*" org.jetbrains.kotlin.cli.jvm.K2JVMCom
     -classpath "$platform:$stdlib" \
     -d "$out/classes" \
     "$wrapper/Native.kt" "$wrapper/KeyApp.kt" "$common"/src/model/*.kt "$common"/src/android/*.kt \
-    "$here"/src/model/*.kt "$here"/src/android/*.kt
+    "$here"/src/model/*.kt "$here"/src/android/*.kt "$here/src/variant/$variant"/*.kt
 jar cf "$out/classes.jar" -C "$out/classes" .
 
 # ---- dex --------------------------------------------------------------------------------
@@ -169,20 +189,20 @@ if [ ! -f "$ks" ]; then
     echo "made a local test key at $ks (not a release key; never committed)"
 fi
 "$bt/apksigner" sign --ks "$ks" --ks-pass "file:$pass_file" --ks-key-alias keyapk-test \
-    --min-sdk-version "$min_sdk" --out "$out/openbmt-key.apk" "$out/aligned.apk"
-"$bt/apksigner" verify --print-certs -v --min-sdk-version "$min_sdk" "$out/openbmt-key.apk" | sed -e 's/^/  /'
-"$bt/zipalign" -c -P 16 4 "$out/openbmt-key.apk" || die "the signed APK is not aligned"
+    --min-sdk-version "$min_sdk" --out "$out/$apkname" "$out/aligned.apk"
+"$bt/apksigner" verify --print-certs -v --min-sdk-version "$min_sdk" "$out/$apkname" | sed -e 's/^/  /'
+"$bt/zipalign" -c -P 16 4 "$out/$apkname" || die "the signed APK is not aligned"
 
 # ---- checks on the result --------------------------------------------------------------------
 
 step "aapt2 dump badging"
-"$bt/aapt2" dump badging "$out/openbmt-key.apk" | tee "$out/badging.txt"
+"$bt/aapt2" dump badging "$out/$apkname" | tee "$out/badging.txt"
 
 step "manifest checks"
-"$here/tests/check-manifest.sh" "$out/openbmt-key.apk" "$bt/aapt2" | tee "$out/manifest-checks.txt"
+"$here/tests/check-manifest.sh" "$out/$apkname" "$bt/aapt2" "$variant" | tee "$out/manifest-checks.txt"
 
 step "result"
-apk="$out/openbmt-key.apk"
+apk="$out/$apkname"
 echo "APK: $apk"
 echo "size: $(stat -c %s "$apk") bytes"
 echo "native libraries in the APK (stored, uncompressed):"

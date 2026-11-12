@@ -3,7 +3,8 @@
 # the app's own words (against docs/screens/key.md, and the list in
 # docs/screens/key-app.md, which OPENBMT_WRITE_SCREENS=1 writes first), the
 # key ceremony's pure parts, the line text and the
-# saved-state file, then the tests of the shared code
+# saved-state file, and the release variant of the development-copy switch
+# (SR-91), then the tests of the shared code
 # (apps/android-common/tests). No Android class is used.
 #
 # Needs JAVA_HOME (JDK 21) and KOTLIN_HOME (the Kotlin 2.2.20 compiler
@@ -34,7 +35,7 @@ trap 'rm -rf "$scratch/jvm-classes"' EXIT
     -classpath "$lib/kotlin-stdlib.jar:$lib/annotations-13.0.jar" \
     -d "$scratch/jvm-classes" \
     "$wrapper/Native.kt" "$wrapper/KeyApp.kt" \
-    "$common"/src/model/*.kt "$app"/src/model/*.kt "$app/tests/AppModelTest.kt"
+    "$common"/src/model/*.kt "$app"/src/model/*.kt "$app"/src/variant/release/*.kt "$app/tests/AppModelTest.kt"
 
 "$JAVA_HOME/bin/java" -Xmx2g -cp "$scratch/jvm-classes:$lib/kotlin-stdlib.jar" \
     org.openbmt.key.app.AppModelTest "$repo/docs/screens/key.md" "$repo/docs/screens/key-app.md" "$app"

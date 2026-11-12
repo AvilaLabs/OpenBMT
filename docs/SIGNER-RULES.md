@@ -567,3 +567,10 @@ SR-81 and the screens of SR-82 by the Android app.
   PIN, and a screen that cannot be drawn from state gives way to the one the
   state names. Nothing is drawn while the screen is cleared, or while a file
   picker or the camera is open.
+- **SR-91. The development copy.** `build.sh --dev` makes a copy of the Key
+  app for testing on a phone with USB debugging on: package
+  `org.openbmt.key.dev`, label "Key (dev)", a band on every screen, and a
+  constant set at build time that skips the USB debugging check alone. It is
+  never released: CI and the release scripts never build it, and the
+  manifest check fails a release APK that has its package or its band. The
+  release build keeps the check.

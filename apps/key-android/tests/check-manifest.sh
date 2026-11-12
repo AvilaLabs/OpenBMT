@@ -5,12 +5,18 @@
 # receiver or provider. The manifest in the APK is the merged one: no library
 # adds to it.
 #
-# Usage: tests/check-manifest.sh APK [AAPT2]
+# A release APK (the default) must also be the plain Key app: the package
+# org.openbmt.key and not one word of the development copy's band (SR-91).
+# With the third argument "dev" the APK must be the development copy instead.
+#
+# Usage: tests/check-manifest.sh APK [AAPT2 [release|dev]]
 
 set -u
 
 apk="${1:?usage: check-manifest.sh APK [AAPT2]}"
 aapt2="${2:-${AAPT2:-aapt2}}"
+variant="${3:-release}"
+band="Development copy. Not for real money."
 fails=0
 
 fail() { printf 'FAIL  %s\n' "$1"; fails=$((fails + 1)); }
@@ -84,6 +90,22 @@ badging="$("$aapt2" dump badging "$apk" 2>&1)"
 for want in "minSdkVersion:'29'" "targetSdkVersion:'36'"; do
     if printf '%s\n' "$badging" | grep -q "$want"; then pass "$want"; else fail "$want missing from badging"; fi
 done
+
+# 5. The development copy is never a release (SR-91).
+pkg="$(printf '%s\n' "$badging" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+in_dex=0
+for d in $(unzip -Z1 "$apk" | grep -E '^classes[0-9]*\.dex$'); do
+    if unzip -p "$apk" "$d" | grep -a -q -F "$band"; then in_dex=1; fi
+done
+if [ "$variant" = dev ]; then
+    if [ "$pkg" = "org.openbmt.key.dev" ]; then pass "the package is org.openbmt.key.dev"; else fail "the development copy's package is $pkg"; fi
+    if printf '%s\n' "$badging" | grep -q "application-label:'Key (dev)'"; then pass "the label is Key (dev)"; else fail "the development copy's label is not Key (dev)"; fi
+    if [ "$in_dex" -eq 1 ]; then pass "the band's words are in the code"; else fail "the band's words are not in the code"; fi
+else
+    if [ "$pkg" = "org.openbmt.key" ]; then pass "the package is org.openbmt.key"; else fail "a release APK has the package $pkg"; fi
+    if [ "$in_dex" -eq 0 ]; then pass "the development copy's band is not in the code"; else fail "a release APK has the development copy's band"; fi
+    if printf '%s\n' "$badging" | grep -q "application-label:'Key (dev)'"; then fail "a release APK is labelled Key (dev)"; else pass "the label is not Key (dev)"; fi
+fi
 
 echo
 if [ "$fails" -eq 0 ]; then echo "manifest checks: all passed"; else echo "manifest checks: $fails failed"; fi

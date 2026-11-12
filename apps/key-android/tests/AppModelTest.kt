@@ -608,6 +608,14 @@ object AppModelTest {
         ok(ScreenModel.pick(listOf(AppWords.debuggingOn), null, SetupState.Locked, null, LockStatus.Locked) is Screen.Refused, "SR-83: a refusal is redrawn as the refusal")
     }
 
+    private fun sr_91_the_release_build_keeps_the_usb_check() {
+        // The tests run on the release variant of DevCopy (src/variant/release): the constant is off, the band has
+        // no words, and USB debugging on is refused. Only build.sh --dev compiles the other variant.
+        ok(!DevCopy.ON && DevCopy.BAND.isEmpty(), "SR-91: the release variant is not a development copy")
+        ok(Guard.refusals(1, 0, 0, 0) == listOf(AppWords.debuggingOn), "SR-91: USB debugging on is refused in the release build")
+        ok(Guard.refusals(1, 1, 1, 0) == listOf(AppWords.debuggingOn, AppWords.wirelessDebuggingOn, AppWords.accessibilityOn), "SR-91: every refusal is kept in the release build")
+    }
+
     /** The cards of the new look take the app's own lines apart and lose nothing. */
     private fun screenPartsTests() {
         val four = listOf("alpha", "bravo", "charlie", "delta")
@@ -700,6 +708,7 @@ object AppModelTest {
         sr_77_relock_after_a_minute()
         sr_77_picker_and_permission_waits_count(appDir)
         sr_83_a_redraw_is_drawn_from_state_and_never_skips_the_pin()
+        sr_91_the_release_build_keeps_the_usb_check()
         sr_78_deposit_code_from_the_camera()
         sr_79_list_rows()
         sr_80_the_invitation_is_one_of_six_groups_of_five()

@@ -4,8 +4,11 @@ import android.app.Activity
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import org.openbmt.app.Feedback
@@ -76,6 +79,31 @@ class MainActivity : Activity() {
     /** Shows [page] as the whole content. */
     fun show(page: View) {
         current = page
-        setContentView(page)
+        setContentView(if (DevCopy.ON) withBand(page) else page)
+    }
+
+    /** The development copy's band above every screen (SR-91), in the stop tone. */
+    @Suppress("DEPRECATION")
+    private fun withBand(page: View): View {
+        val density = resources.displayMetrics.density
+        val tone = Palette.dark.stop
+        val band = TextView(this).apply {
+            text = DevCopy.BAND
+            setTextColor(Palette.WHITE)
+            setBackgroundColor(tone.band)
+            textSize = 14f
+            gravity = Gravity.CENTER
+            val pad = (8 * density).toInt()
+            setPadding(pad, pad, pad, pad)
+            setOnApplyWindowInsetsListener { v, insets ->
+                v.setPadding(pad, pad + insets.systemWindowInsetTop, pad, pad)
+                insets
+            }
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(band, LinearLayout.LayoutParams(-1, -2))
+            addView(page, LinearLayout.LayoutParams(-1, 0, 1f))
+        }
     }
 }
