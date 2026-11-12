@@ -14,6 +14,10 @@ import org.openbmt.app.Tones
 import org.openbmt.app.TorControl
 import org.openbmt.app.Who
 import org.openbmt.counter.Actor
+import org.openbmt.counter.ChangeField
+import org.openbmt.counter.ChangeValue
+import org.openbmt.counter.ChangeValueKind
+import org.openbmt.counter.PendingChange
 import org.openbmt.counter.ActorRole
 import org.openbmt.counter.CounterException
 import org.openbmt.counter.DayTotals
@@ -1309,6 +1313,62 @@ object AppModelTest {
         ok((205..216).all { rules.contains("- **CR-$it.**") }, "CR-205 to CR-216 are in the rules")
     }
 
+    // ---- a change to confirm (CR-239 to CR-244) ------------------------------------------
+
+    private fun cr240ConfirmChangeTests(appDir: File?) {
+        fun v(kind: ChangeValueKind, n: Long, t: String = "") = ChangeValue(kind, n, t)
+        val pending = PendingChange(
+            6, listOf("amber", "birch", "cedar", "dune"),
+            listOf(
+                ChangeField("light_per_sale", v(ChangeValueKind.Units, 100), v(ChangeValueKind.Units, 250)),
+                ChangeField("tor_on", v(ChangeValueKind.Flag, 1), v(ChangeValueKind.Flag, 0)),
+                ChangeField("customer_wifi", v(ChangeValueKind.Flag, 0), v(ChangeValueKind.Flag, 1)),
+                ChangeField("underpayment_tolerance_bps", v(ChangeValueKind.Bps, 50), v(ChangeValueKind.Bps, 125)),
+                ChangeField("min_sale_sats", v(ChangeValueKind.Sats, 1000), v(ChangeValueKind.Sats, 0)),
+                ChangeField("currency", v(ChangeValueKind.Code, 0, "USD"), v(ChangeValueKind.Code, 0, "EUR")),
+            ),
+            1_000, 1_000 + 7 * 86_400, false,
+        )
+        val rows = ConfirmChange.rows(pending)
+        ok(rows[0].field == "Light check: one sale" && rows[0].change == "100 \u2192 250", "CR-240: a field by the owner app's label, now then after")
+        ok(rows[1].field == "Tor on the counters" && rows[1].change == "On \u2192 Off", "CR-240: Tor reads On and Off")
+        ok(rows[2].field == "Customers can join the Wi-Fi" && rows[2].change == "No \u2192 Yes or unsure", "CR-240: the Wi-Fi reads as on the owner app")
+        ok(rows[3].change == "0.50% \u2192 1.25%", "CR-240: a tolerance is a percentage")
+        ok(rows[4].change == "1000 sats \u2192 0 sats", "CR-240: sats")
+        ok(rows[5].field == AppWords.WORDS_NEEDED_CR_240_FIELD && rows[5].change == "USD \u2192 EUR", "CR-240: a field with no label says so and shows its code")
+        ok(ConfirmChange.menuSub(pending) == "From the owner phone, version 6", "CR-240: the menu row's second line")
+        ok(AppWords.CHANGE_BAR == "Change to confirm" && AppWords.CHANGE_CONFIRM == "Confirm with manager PIN" && AppWords.CHANGE_NOT_NOW == "Not now" && AppWords.CHANGE_WORDS_LABEL == "The four words", "CR-240: the page's words are as written down")
+        ok(AppWords.CHANGE_HEADING == "The owner wants to loosen the shop's settings", "CR-240: the page heading")
+        ok(AppWords.changeWaits.what == "A change to the shop's settings waits for a manager to confirm it.", "CR-244: the Home line")
+        ok(AppWords.all().none { it.second.next == AppWords.WORDS_NEEDED_CR_239_HOME_NEXT }, "the line with a missing next step is not in the list of words")
+        ok(AppWords.all().any { it.first == "changeConfirmed" } && AppWords.changeConfirmed.heading == "Change confirmed", "CR-241: the confirmed words are in the list")
+
+        // The PIN first: a wrong or held PIN signs nothing; the right one signs once.
+        val dir = tempDir()
+        var now = 1_000L
+        val store = PinStore(dir, { now }, SecureRandom(), FakeHasher(), 1000)
+        store.set("123456")
+        var signed = 0
+        val sign = { signed++; Words(1, 0, "Change confirmed", "The owner phone sends the change to every counter. It applies once it arrives.", "Nothing to do.", null, null, null, null) }
+        val wrong = ConfirmChange.confirm("000000", store, sign)
+        ok(wrong is ConfirmChange.Outcome.PinRefused && signed == 0, "CR-241: a wrong PIN signs nothing")
+        val held = ConfirmChange.confirm("123456", store, sign)
+        ok(held is ConfirmChange.Outcome.PinRefused && signed == 0, "CR-241: a held PIN signs nothing, even the right one")
+        now += 100
+        val done = ConfirmChange.confirm("123456", store, sign)
+        ok(done is ConfirmChange.Outcome.Confirmed && signed == 1 && done.words.heading == "Change confirmed", "CR-241: the right PIN signs once and says so")
+        val refused = ConfirmChange.confirm("123456", store) { throw CounterException("CR-241", "nothing waits", 4) }
+        ok(refused is ConfirmChange.Outcome.Refused, "CR-241: a refusal of the library is shown")
+        clean(dir)
+        if (appDir != null) {
+            val controller = File(appDir, "src/android/Controller.kt").readText()
+            ok(controller.contains("HomeLine(\"change\", AppWords.changeWaits)") && controller.contains("ConfirmChange.menuSub(p)") && controller.contains("private fun showConfirmChange()"), "CR-244, CR-240: the Home line, the menu row and the page are there")
+            val page = controller.substringAfter("private fun showConfirmChange()").substringBefore("/** CR-146")
+            ok(page.contains("ConfirmChange.confirm(pinInput.text.toString(), pin)") && page.contains("n.confirmChange(nowSecs(), pending.version)"), "CR-241: the page signs only through the PIN check")
+            ok(page.contains("PinSteps.applies(visible)"), "CR-200: an answer that comes back hidden shows nothing")
+        }
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val screensMd = args.firstOrNull()?.let { File(it) }
@@ -1339,6 +1399,7 @@ object AppModelTest {
         cr219SwapTests()
         cr214ShareTests()
         cr213RequestsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr240ConfirmChangeTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         println("AppModelTest (counter): $count checks passed")
     }
 }

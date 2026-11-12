@@ -12,6 +12,7 @@ These are the words of what the app decides itself.
 
 | State | Heading | What happened | What to do next | Who | Code |
 |---|---|---|---|---|---|
+| changeConfirmed | Change confirmed | The owner phone sends the change to every counter. It applies once it arrives. | Nothing to do. | nobody |  |
 | notSetUp | Not set up yet | This counter has not been paired with the shop yet, so it cannot take a sale. | Type a name for the counter, the manager's name and a PIN. Then tap Pair with the Key app and scan its code with this phone. | a manager |  |
 | pairingSaved | Counter set up | The counter is paired with the shop, and the pairing and the PIN are saved on this phone. | Keep the app open at the counter. It starts looking for the network now. | the cashier |  |
 | pairingScanOffer | Scan the Key app | The Key app shows a code on its Pair a counter screen. This counter reads the shop's keys and network from it. | Open Pair a counter on the Key app, then tap Scan and hold this phone's camera to its code. | a manager |  |

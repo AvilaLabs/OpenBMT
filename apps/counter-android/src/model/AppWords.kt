@@ -22,6 +22,34 @@ object AppWords {
 
     private fun detailOf(problem: String?): String? = problem?.let { Format.cleanForeign(it) }?.takeIf { it.isNotEmpty() }
 
+    // ---- a change to the shop's settings to confirm (CR-239 to CR-244) ---------------
+
+    /** The words that are not written yet; they are shown as they are and are not in [all], so the checks do not pass them. */
+    const val WORDS_NEEDED_CR_239_HOME_NEXT = "WORDS_NEEDED_CR_239_HOME_NEXT"
+    const val WORDS_NEEDED_CR_240_FIELD = "WORDS_NEEDED_CR_240_FIELD"
+
+    /** The line on Home while a change waits for a manager. */
+    val changeWaits = w(
+        Tones.INFO, "Change to confirm",
+        "A change to the shop's settings waits for a manager to confirm it.",
+        Who.MANAGER,
+        WORDS_NEEDED_CR_239_HOME_NEXT,
+    )
+
+    val changeConfirmed = w(
+        Tones.GOOD, "Change confirmed",
+        "The owner phone sends the change to every counter. It applies once it arrives.",
+        Who.NOBODY,
+        "Nothing to do.",
+    )
+
+    const val CHANGE_BAR = "Change to confirm"
+    const val CHANGE_HEADING = "The owner wants to loosen the shop's settings"
+    const val CHANGE_TEXT = "Check each change with the owner. Confirm only if the owner phone shows the same four words."
+    const val CHANGE_WORDS_LABEL = "The four words"
+    const val CHANGE_CONFIRM = "Confirm with manager PIN"
+    const val CHANGE_NOT_NOW = "Not now"
+
     // ---- setting up ------------------------------------------------------------------
 
     val notSetUp = w(
@@ -685,6 +713,7 @@ object AppWords {
 
     /** Every fixed words of the app, for the test that checks them all and writes the list. */
     fun all(): List<Pair<String, SayWords>> = listOf(
+        "changeConfirmed" to changeConfirmed,
         "notSetUp" to notSetUp,
         "pairingSaved" to pairingSaved,
         "pairingScanOffer" to pairingScanOffer,

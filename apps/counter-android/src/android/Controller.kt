@@ -47,6 +47,7 @@ import org.openbmt.app.Who
 import org.openbmt.app.WordsModel
 import org.openbmt.counter.Actor
 import org.openbmt.counter.ActorRole
+import org.openbmt.counter.ChangeState
 import org.openbmt.counter.CounterException
 import org.openbmt.counter.CounterNode
 import org.openbmt.counter.LnRequest
@@ -1081,6 +1082,10 @@ class Controller(private val act: MainActivity) {
                 )
                 // CR-164, CR-165: what the owner's settings mean for this counter, when anything.
                 settingsLine(n)?.let { items.add(HomeLine("settings", it)) }
+                // CR-244: a change that waits for a manager, and the words of one that came to nothing.
+                val change = changeState(n)
+                if (change?.pending?.confirmed == false) items.add(HomeLine("change", AppWords.changeWaits))
+                change?.notice?.let { items.add(HomeLine("change-notice", it.say())) }
             }
             priceWords()?.let { items.add(HomeLine("price", it, priceNotes())) }
             val ls = items.joinToString("\u0002") { sig(it.words) + (it.extra ?: "") }
@@ -1151,6 +1156,16 @@ class Controller(private val act: MainActivity) {
             e.sayWords()
         }
 
+    /** CR-240, CR-244: the change that waits for a manager and the words of a change that came to nothing; null when the library has none to say. */
+    private fun changeState(n: CounterNode): ChangeState? =
+        try {
+            n.pendingChange(nowSecs())
+        } catch (e: CounterException) {
+            null
+        } catch (e: LinkageError) {
+            null
+        }
+
     /** CR-107: the own node's health line, or the library's words for why there is none. */
     private fun ownNodeWords(n: CounterNode): SayWords =
         try {
@@ -1167,6 +1182,8 @@ class Controller(private val act: MainActivity) {
         val items = ArrayList<RowItem>()
         // CR-146: with no cashier listed the cashier is the one name of this phone.
         if (cashiers.isEmpty()) items.add(RowItem("Your name", onClick = { showYourName() }))
+        // CR-240: the change from the owner phone that waits, behind the manager's PIN on its own page.
+        node?.let { n -> changeState(n)?.pending?.let { p -> items.add(RowItem(AppWords.CHANGE_BAR, ConfirmChange.menuSub(p), onClick = { showConfirmChange() })) } }
         items.add(RowItem("Staff", onClick = { showStaffEntry() }))
         items.add(RowItem("Your own node", onClick = { showOwnNode() }))
         items.add(RowItem("Network", onClick = { showNetwork() }))
@@ -1176,6 +1193,43 @@ class Controller(private val act: MainActivity) {
         items.add(RowItem("About", onClick = { showAbout() }))
         items.add(RowItem("Sounds", SOUNDS_SENTENCE, onClick = { showSounds() }))
         show(ui.bar("Settings", back = { showHome() }), listOf(ui.rows(items)))
+    }
+
+    // ---- a change to confirm (CR-239 to CR-244) ---------------------------------------------------
+
+    /**
+     * The change the owner phone sent that loosens the shop's settings: each field with the value now and after, the four
+     * words to compare with the owner phone, and the manager's PIN. The PIN is checked before the counter signs anything.
+     */
+    private fun showConfirmChange() {
+        if (lockedOut()) return
+        val n = node ?: return render()
+        val pending = changeState(n)?.pending ?: return showSettings()
+        val msg = Slot(act)
+        val pinInput = pinField(act, "")
+        val views = ArrayList<View>()
+        views.add(ui.text(AppWords.CHANGE_HEADING, 20f, bold = true))
+        views.add(ui.text(AppWords.CHANGE_TEXT, 15f, colour = ui.pal.secondary))
+        views.add(ui.rows(ConfirmChange.rows(pending).map { RowItem(it.field, it.change) }))
+        views.add(label(AppWords.CHANGE_WORDS_LABEL))
+        views.add(ui.wordCards(pending.words))
+        views.add(ui.labelled("Manager's PIN", pinInput))
+        views.add(msg)
+        val confirm = ui.primary(AppWords.CHANGE_CONFIRM) {
+            async({ ConfirmChange.confirm(pinInput.text.toString(), pin) { n.confirmChange(nowSecs(), pending.version) } }) { r ->
+                // CR-200: an answer that comes back after the app was hidden shows nothing.
+                if (!PinSteps.applies(visible)) return@async
+                val e = r.exceptionOrNull()
+                if (e != null) return@async msg.show(note(if (e is IOException) AppWords.fileNotSaved(e.message) else AppWords.fault(CounterException("pin", e.javaClass.simpleName, 4))))
+                when (val o = r.getOrNull()) {
+                    is ConfirmChange.Outcome.Confirmed -> showMessage(o.words, "Back") { showSettings() }
+                    is ConfirmChange.Outcome.PinRefused -> { Feedback.shake(pinInput); msg.show(note(o.words)) }
+                    is ConfirmChange.Outcome.Refused -> msg.show(note(o.words))
+                    null -> Unit
+                }
+            }
+        }
+        show(ui.bar(AppWords.CHANGE_BAR, back = { showSettings() }), views, listOf(confirm, ui.button(AppWords.CHANGE_NOT_NOW) { showSettings() }))
     }
 
     /** CR-146: the cashier's one name, kept in the config file. */
