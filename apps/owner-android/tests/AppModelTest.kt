@@ -20,6 +20,7 @@ import org.openbmt.app.Sealed
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Relock
 import org.openbmt.app.Sealer
+import org.openbmt.app.Space
 import org.openbmt.app.Tones
 import org.openbmt.app.TorControl
 import org.openbmt.app.Tries
@@ -1272,7 +1273,7 @@ object AppModelTest {
     private fun keyMapTests() {
         // The words are the words file's, exactly.
         ok(AppWords.keyMapKey1 == "Key 1" && AppWords.keyMapKey1Where == "This phone" && AppWords.keyMapKey2 == "Key 2" &&
-            AppWords.keyMapKey2Where == "Key app, second phone" && AppWords.keyMapKey3 == "Key 3" && AppWords.keyMapKey3Where == "Words on steel", "the key map's names and places")
+            AppWords.keyMapKey2Where == "Key app" && AppWords.keyMapKey3 == "Key 3" && AppWords.keyMapKey3Where == "On steel", "the key map's names and places")
         ok(AppWords.keyMapMade == "Made" && AppWords.keyMapNext == "Next" && AppWords.keyMapNotYet == "Not yet", "the key map's states")
         ok(AppWords.keyMapRule == "Any 2 of the 3 keys can spend. One alone cannot.", "the key map's rule")
         ok(AppWords.keyMapSpoken == "Key 1, on this phone: {k1}. Key 2, on the Key app: {k2}. Key 3, on steel: {k3}. Any 2 of the 3 keys can spend.", "the spoken description, as written")
@@ -1308,22 +1309,31 @@ object AppModelTest {
         ok(KeyMapModel.spoken(KeyMapModel.allMade) == "Key 1, on this phone: made. Key 2, on the Key app: made. Key 3, on steel: made. Any 2 of the 3 keys can spend.", "spoken, all made")
         ok(!KeyMapModel.spoken(listOf(made, next, not)).contains("{"), "no placeholder is left")
         ok(source("src/android/KeyMap.kt").contains("KeyMapModel.spoken(states)") && source("src/android/KeyMap.kt").contains("contentDescription"), "the view is described by the spoken text")
-        // Colours: key 1 is the waiting band, key 2 the paid band, key 3 the ended band; the dark scheme has its own.
-        ok(KeyMapModel.fill(0, false) == Palette.waiting.band && KeyMapModel.fill(1, false) == Palette.paid.band && KeyMapModel.fill(2, false) == Palette.ended.band, "light: the three bands")
-        ok(KeyMapModel.fill(0, true) == Palette.dark.info.band && KeyMapModel.fill(1, true) == Palette.dark.good.band && KeyMapModel.fill(2, true) == Palette.dark.wait.band, "dark: the dark scheme's bands")
+        // Colours: one blue for the three keys, a grey for a key not reached; the same in each state of every key.
+        ok(KeyMapModel.fill(false) == Palette.waiting.band && KeyMapModel.line(false) == Palette.waiting.band && KeyMapModel.halo(false) == Palette.waiting.sub, "light: the waiting band, as fill and as line, and its tint as the halo")
+        ok(KeyMapModel.fill(true) == Palette.dark.info.band && KeyMapModel.line(true) == Palette.dark.info.ink && KeyMapModel.halo(true) == Palette.dark.info.tint, "dark: the info band as fill, its ink as line, its tint as the halo")
+        ok(KeyMapModel.CIRCLE_DP == 64 && KeyMapModel.RING_DP == 3 && KeyMapModel.LINE_DP == 3, "64 dp circles, a 3 dp ring and a 3 dp line")
         for (night in listOf(false, true)) {
             val s = Palette.of(night)
-            for (i in 0..2) {
-                ok(Palette.contrast(Palette.WHITE, KeyMapModel.fill(i, night)) >= Palette.MIN_CONTRAST, "white on key ${i + 1}'s fill, night $night")
-                ok(Palette.contrast(KeyMapModel.ink(i, night), KeyMapModel.tint(i, night)) >= Palette.MIN_CONTRAST, "next chip's text on its tint, key ${i + 1}, night $night")
-                ok(Palette.contrast(KeyMapModel.ink(i, night), s.surface) >= Palette.MIN_CONTRAST, "next outline and text on the card, key ${i + 1}, night $night")
-                val line = KeyMapModel.notYetLine(i, night)
-                ok(Palette.contrast(line, s.surface) in 1.4..Palette.contrast(KeyMapModel.ink(i, night), s.surface), "the not-yet line is seen but weaker than the key's own colour, key ${i + 1}, night $night")
-            }
-            ok(Palette.contrast(s.secondary, s.surface) >= Palette.MIN_CONTRAST && Palette.contrast(s.secondary, s.chip) >= Palette.MIN_CONTRAST, "the not-yet label and the places read, night $night")
-            ok(Palette.contrast(s.text, s.surface) >= Palette.MIN_CONTRAST, "the key's name reads on its card, night $night")
+            ok(Palette.contrast(Palette.WHITE, KeyMapModel.fill(night)) >= Palette.MIN_CONTRAST, "white key and tick on the made fill, night $night")
+            ok(Palette.contrast(KeyMapModel.line(night), s.background) >= 3.0 && Palette.contrast(KeyMapModel.line(night), s.surface) >= 3.0, "the next key's ring, glyph and the line are seen on the page and on the circle, night $night")
+            val grey = KeyMapModel.greyRing(night)
+            ok(Palette.contrast(grey, s.surface) in 1.4..Palette.contrast(KeyMapModel.line(night), s.surface), "the grey ring is seen but weaker than the blue, night $night")
+            ok(Palette.contrast(KeyMapModel.greyGlyph(night), s.surface) >= Palette.contrast(grey, s.surface), "the grey glyph is no weaker than the grey ring, night $night")
+            ok(Palette.contrast(KeyMapModel.greyLabel(night), s.background) >= Palette.MIN_CONTRAST && Palette.contrast(KeyMapModel.greyLabel(night), s.background) < Palette.contrast(s.secondary, s.background), "the grey labels read on the page, a little weaker than the others, night $night")
+            ok(Palette.contrast(s.secondary, s.background) >= Palette.MIN_CONTRAST && Palette.contrast(s.text, s.background) >= Palette.MIN_CONTRAST, "the where-labels, names and the rule read on the page, night $night")
         }
-        ok(KeyMapModel.STACK_BELOW_DP == 340, "the cards stack below 340 dp")
+        // The drawing: no card, no chip, one colour source, one description; the rule is a line of its own.
+        val view = source("src/android/KeyMap.kt")
+        ok(!view.contains("chip") && !view.contains("GradientDrawable") && !view.contains("tone(") && view.contains("KeyMapModel.fill(night)") && view.contains("IconDrawable(Icon.Tick"), "no chips and no cards; the tick is drawn")
+        ok(!view.contains("keyMapMade") && !view.contains("stateWord"), "the state words are only spoken")
+        ok(src.contains("private fun Controller.keyRule(): View = ui.keyMapRule()") && Regex("after = keyRule\\(\\)").findAll(src).count() == 7, "each of the seven screens with the path puts the rule after its words")
+        ok(view.contains("fun Ui.keyMapRule()") && view.contains("AppWords.keyMapRule") && view.indexOf("AppWords.keyMapRule") > view.indexOf("fun Ui.keyMapRule()"), "the rule is not part of the path")
+        // "Start again" is the quiet button on the screens that show the path.
+        ok(Regex("ui\\.quiet\\(\"Start again\"\\)").findAll(src).count() == 6, "six screens with the path have the quiet Start again")
+        val common = File(appDir, "../android-common/src/android/Ui.kt").readText()
+        ok(common.contains("fun quiet(label: String") && common.contains("ButtonKind.Quiet -> pal.secondary") && common.contains("ButtonKind.Quiet -> setColor(Color.TRANSPARENT)") && common.contains("Space.QUIET") && Space.QUIET == 48, "the quiet button: no fill, no outline, secondary text, 48 dp")
+        ok(Palette.contrast(Palette.light.secondary, Palette.light.background) >= Palette.MIN_CONTRAST && Palette.contrast(Palette.dark.secondary, Palette.dark.background) >= Palette.MIN_CONTRAST, "the quiet button's text reads on the page in both schemes")
     }
 
     private fun ceremonyCode() = source("src/android/Ceremony.kt")
@@ -1357,7 +1367,7 @@ object AppModelTest {
         val resume = c.substringAfter("internal fun Controller.showCeremonyResume(").substringBefore("/** A record that does not read")
         ok(resume.contains("OwnerCeremony.stage(record)") && resume.contains("at.words.say()") && resume.contains("CeremonyModel.resumeAction(at.stage)"), "the library says the stage, and its words are shown")
         ok(resume.contains("ResumeAction.ScanAnswer, ResumeAction.ScanAnswerAgain -> scanAnswer()") && resume.contains("ResumeAction.SaveSetup -> saveFinished(record)"), "each stage goes on from there")
-        ok(resume.contains("ui.button(\"Start again\") { showStartAgain() }"), "start again is offered")
+        ok(resume.contains("ui.quiet(\"Start again\") { showStartAgain() }"), "start again is offered")
         ok(c.contains("private fun Controller.notReadable(") && c.substringAfter("private fun Controller.notReadable(").substringBefore("/** The confirmation").contains("ui.button(\"Start again\")"), "a record that does not read can only be started again")
         val confirm = c.substringAfter("internal fun Controller.showStartAgain()").substringBefore("/** Deletes the ceremony's record.")
         ok(confirm.contains("AppWords.ceremonyStartAgain") && confirm.contains("ui.danger(\"Start again\") { throwAway() }") && confirm.contains("ui.primary(\"Keep going\") { begin() }"), "the confirmation, and the way to keep going")

@@ -170,7 +170,7 @@ internal fun Controller.para(text: String): TextView = ui.text(text, 15f, colour
 /**
  * A page of the new look with a bar of [title] (a back arrow when [back] is given, and [sub] under the title),
  * the [body] scrolling and the [actions] fixed at the bottom. [words] are the screen's own words: its heading
- * (when it is not the bar's title) and what come first (after [lead], when there is one), the next step and who last, and the folds after them.
+ * (when it is not the bar's title) and what come first (after [lead], when there is one), the next step and who last, and the folds after them, then [after].
  */
 internal fun Controller.screen(
     title: String,
@@ -182,6 +182,7 @@ internal fun Controller.screen(
     tone: Tone? = null,
     logo: Boolean = false,
     lead: View? = null,
+    after: View? = null,
 ) {
     val model = words?.let { WordsModel.of(it) }
     val all = ArrayList<View>()
@@ -192,6 +193,7 @@ internal fun Controller.screen(
         all.add(ui.hint(model))
         all.addAll(ui.foldViews(model))
     }
+    if (after != null) all.add(after)
     tick = null
     act.show(ui.page(ui.bar(title, sub, back, logo = logo), all, actions, tone))
 }
@@ -224,6 +226,7 @@ internal fun Controller.codeScreen(
     actions: List<Button> = emptyList(),
     back: (() -> Unit)? = null,
     lead: View? = null,
+    after: View? = null,
 ) {
     val model = WordsModel.of(words)
     val all = ArrayList<View>()
@@ -233,6 +236,7 @@ internal fun Controller.codeScreen(
     all.addAll(below)
     all.add(ui.hint(model))
     all.addAll(ui.foldViews(model))
+    if (after != null) all.add(after)
     tick = null
     act.show(ui.page(ui.bar(title, back = back), all, actions))
 }

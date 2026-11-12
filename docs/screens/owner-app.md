@@ -400,9 +400,9 @@ the state words in lower case:
 | keyMapKey1 | Key 1 |
 | keyMapKey1Where | This phone |
 | keyMapKey2 | Key 2 |
-| keyMapKey2Where | Key app, second phone |
+| keyMapKey2Where | Key app |
 | keyMapKey3 | Key 3 |
-| keyMapKey3Where | Words on steel |
+| keyMapKey3Where | On steel |
 | keyMapMade | Made |
 | keyMapNext | Next |
 | keyMapNotYet | Not yet |

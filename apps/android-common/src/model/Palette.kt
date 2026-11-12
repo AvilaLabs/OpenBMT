@@ -224,6 +224,7 @@ object Space {
     const val BAR = 64
     const val PRIMARY = 56
     const val SECONDARY = 52
+    const val QUIET = 48
     const val BUTTON_RADIUS = 14
     const val FIELD_NEW = 52
 }

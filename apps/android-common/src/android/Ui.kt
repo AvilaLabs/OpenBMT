@@ -162,7 +162,7 @@ private class UiButton(context: Context) : Button(context) {
 }
 
 /** What a button is for: the one main action of a screen, a quieter one, or one that destroys something. */
-enum class ButtonKind { Primary, Secondary, Danger, Good }
+enum class ButtonKind { Primary, Secondary, Danger, Good, Quiet }
 
 /** Plain `android.widget` views made in code, in the colours, sizes and distances of [Palette], [Type] and [Space]. */
 class Ui(internal val context: Context) {
@@ -222,6 +222,7 @@ class Ui(internal val context: Context) {
         ButtonKind.Secondary -> secondary(label, onClick)
         ButtonKind.Danger -> danger(label, onClick)
         ButtonKind.Good -> good(label, onClick)
+        ButtonKind.Quiet -> quiet(label, onClick)
     }
 
     /** A secondary button: outlined. */
@@ -237,6 +238,9 @@ class Ui(internal val context: Context) {
     /** A quieter action: no fill, a 1 dp outline, 52 dp high. */
     fun secondary(label: String, onClick: () -> Unit): Button = styled(label, ButtonKind.Secondary, pal.info, onClick)
 
+    /** The least action: no fill, no outline, the secondary text colour, 48 dp high. */
+    fun quiet(label: String, onClick: () -> Unit): Button = styled(label, ButtonKind.Quiet, pal.info, onClick)
+
     /** An action that wipes, removes, forgets, declines or cancels: outlined in the stop colour. */
     fun danger(label: String, onClick: () -> Unit): Button = styled(label, ButtonKind.Danger, pal.stop, onClick)
 
@@ -249,7 +253,7 @@ class Ui(internal val context: Context) {
         textSize = Type.BODY
         val filled = kind == ButtonKind.Primary || kind == ButtonKind.Good
         setTypeface(Typeface.DEFAULT, if (filled) Typeface.BOLD else Typeface.NORMAL)
-        val height = px(if (filled) Space.PRIMARY else Space.SECONDARY)
+        val height = px(if (filled) Space.PRIMARY else if (kind == ButtonKind.Quiet) Space.QUIET else Space.SECONDARY)
         minHeight = height
         minimumHeight = height
         minWidth = 0
@@ -262,6 +266,7 @@ class Ui(internal val context: Context) {
             ButtonKind.Primary -> Palette.ON_BRAND
             ButtonKind.Good -> Palette.WHITE
             ButtonKind.Secondary -> pal.text
+            ButtonKind.Quiet -> pal.secondary
             ButtonKind.Danger -> tone.ink
         }
         setTextColor(ink)
@@ -274,6 +279,7 @@ class Ui(internal val context: Context) {
                     setColor(Color.TRANSPARENT)
                     setStroke(px(1), pal.fieldLine)
                 }
+                ButtonKind.Quiet -> setColor(Color.TRANSPARENT)
                 ButtonKind.Danger -> {
                     setColor(Color.TRANSPARENT)
                     setStroke(pxf(1.5f), tone.ink)

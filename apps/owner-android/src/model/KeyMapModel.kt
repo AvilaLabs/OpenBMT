@@ -1,21 +1,17 @@
 package org.openbmt.owner.app
 
 import org.openbmt.app.Palette
-import org.openbmt.app.Tone
 
 /** Where one key is in the setup: made, the one to do next, or not yet reached. */
 enum class KeyState { Made, Next, NotYet }
 
 /**
- * What the key map at the top of the key-setup screens shows (KeyMap.kt draws it): the state of each of the three
- * keys at each stage of the ceremony, its words, and its colours, all from the palette. Key 1 is on this phone, key 2
- * on the Key app, key 3 on steel; the library's Key app answer carries key 3's public part (OC-41) and key 2's when
+ * What the key path at the top of the key-setup screens shows (KeyMap.kt draws it): the state of each of the three
+ * keys at each stage of the ceremony, its words, and its colours (one blue for all three keys, a grey for a key not
+ * reached), all from the palette. Key 1 is on this phone, key 2 on the Key app, key 3 on steel; the library's Key app answer carries key 3's public part (OC-41) and key 2's when
  * the Key app holds one. No Android class is used.
  */
 object KeyMapModel {
-    /** Below this width, in dp, the three cards stack one under the other. */
-    const val STACK_BELOW_DP = 340
-
     /** The setup is done as far as keys go: the wallet is built (stage 2) or its words are confirmed (stage 3). */
     val allMade = listOf(KeyState.Made, KeyState.Made, KeyState.Made)
 
@@ -61,40 +57,35 @@ object KeyMapModel {
         return AppWords.keyMapSpoken.replace("{k1}", word(0)).replace("{k2}", word(1)).replace("{k3}", word(2))
     }
 
-    /** The tone of a key in a scheme: key 1 the blue (info), key 2 the green (good), key 3 the grey (wait). */
-    fun tone(key: Int, night: Boolean): Tone {
-        val s = Palette.of(night)
-        return when (key) {
-            0 -> s.info
-            1 -> s.good
-            else -> s.wait
-        }
-    }
+    /** The size of each key's circle, and the width of its ring and of the line that joins it to the next key, in dp. */
+    const val CIRCLE_DP = 64
+    const val RING_DP = 3
+    const val LINE_DP = 3
 
-    /**
-     * The fill of a made key and of its chip, carrying white: the `waiting`, `paid` and `ended` bands in the light
-     * scheme, and the blue, green and grey bands of the dark scheme in the dark one.
-     */
-    fun fill(key: Int, night: Boolean): Int {
-        if (night) return tone(key, true).band
-        return when (key) {
-            0 -> Palette.waiting.band
-            1 -> Palette.paid.band
-            else -> Palette.ended.band
-        }
-    }
+    /** The width of the soft halo round the next key, in dp. */
+    const val HALO_DP = 6
 
-    /** The key's colour as a line or text on a card: an outline of the next key, and the text of its chip. */
-    fun ink(key: Int, night: Boolean): Int = tone(key, night).ink
+    /** The one colour of the three keys as a fill (a made key's circle), carrying white: the `waiting` band, or the dark scheme's info band. */
+    fun fill(night: Boolean): Int = if (night) Palette.dark.info.band else Palette.waiting.band
 
-    /** The soft fill behind the next key's chip. */
-    fun tint(key: Int, night: Boolean): Int = tone(key, night).tint
+    /** The same colour as a line on the page (the next key's ring and glyph, the line after a made key): the band itself in the light scheme, the info ink in the dark one, whose band is too dim against the page. */
+    fun line(night: Boolean): Int = if (night) Palette.dark.info.ink else Palette.waiting.band
 
-    /** The line of a key not reached yet: its ink at [NOT_YET_PART] of its strength over the card. */
-    fun notYetLine(key: Int, night: Boolean): Int = mix(ink(key, night), Palette.of(night).surface, NOT_YET_PART)
+    /** The soft halo of the next key: the band's second-line tint in the light scheme, the info tint in the dark one. */
+    fun halo(night: Boolean): Int = if (night) Palette.dark.info.tint else Palette.waiting.sub
 
-    /** How much of the key's own colour a key not reached yet keeps: low contrast, still seen. */
-    const val NOT_YET_PART = 0.55
+    /** The ring and the line of a key not reached yet: grey, the hint colour at [GREY_RING_PART] over the circle. */
+    fun greyRing(night: Boolean): Int = mix(Palette.of(night).hint, Palette.of(night).surface, GREY_RING_PART)
+
+    /** The key glyph of a key not reached yet: grey, the hint colour at [GREY_GLYPH_PART] over the circle. */
+    fun greyGlyph(night: Boolean): Int = mix(Palette.of(night).hint, Palette.of(night).surface, GREY_GLYPH_PART)
+
+    /** The name and the place of a key not reached yet: grey, halfway between the hint and the secondary colour, which reads on the page. */
+    fun greyLabel(night: Boolean): Int = mix(Palette.of(night).hint, Palette.of(night).secondary, 0.5)
+
+    /** How much of the hint colour the grey ring and the grey glyph keep. */
+    const val GREY_RING_PART = 0.35
+    const val GREY_GLYPH_PART = 0.6
 
     /** [a] and [b] blended opaque, [part] of [a]. */
     fun mix(a: Int, b: Int, part: Double): Int {

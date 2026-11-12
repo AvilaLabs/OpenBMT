@@ -42,6 +42,9 @@ internal class CeremonyDraft(var record: ByteArray, var stage: Int = 1) {
 
 private fun Controller.keyMap(d: CeremonyDraft?): View = ui.keyMap(d?.keyStates() ?: KeyMapModel.allMade)
 
+/** The rule of the keys, a small line after the words of a screen that shows the key path. */
+private fun Controller.keyRule(): View = ui.keyMapRule()
+
 private fun Controller.ceremonyFile() = SealedFile(appDir, KeystoreSealer(AppFiles.KEY_ALIAS), AppFiles.CEREMONY_FILE)
 
 /**
@@ -91,8 +94,8 @@ internal fun Controller.startCeremony() {
 private fun Controller.showKeyMade(stateWords: SayWords) {
     screen(
         "Key 1 is made", listOf(ui.words(AppWords.ceremonyScanNext)),
-        listOf(ui.primary(ResumeAction.ScanAnswer.label) { scanAnswer() }, ui.button("Start again") { showStartAgain() }),
-        words = stateWords, lead = keyMap(ceremony),
+        listOf(ui.primary(ResumeAction.ScanAnswer.label) { scanAnswer() }, ui.quiet("Start again") { showStartAgain() }),
+        words = stateWords, lead = keyMap(ceremony), after = keyRule(),
     )
 }
 
@@ -130,7 +133,7 @@ internal fun Controller.showCeremonyResume(message: SayWords?) {
             ResumeAction.SaveSetup -> saveFinished(record)
         }
     }
-    screen("Setup in progress", views, listOf(go, ui.button("Start again") { showStartAgain() }), words = AppWords.ceremonyResume, lead = keyMap(ceremony))
+    screen("Setup in progress", views, listOf(go, ui.quiet("Start again") { showStartAgain() }), words = AppWords.ceremonyResume, lead = keyMap(ceremony), after = keyRule())
 }
 
 /** A record that does not read: the way out is to start again, which throws it away after a confirmation. */
@@ -213,7 +216,7 @@ private fun Controller.showRootCheck(d: CeremonyDraft, read: AnswerView) {
         d.rootChecked = false
         showAnswerFailed(AppWords.ceremonyRootDiffers)
     }
-    screen("Check the Key app", body, listOf(same, ui.button("Start again") { showStartAgain() }, differ), words = AppWords.ceremonyCompareRoot, lead = keyMap(d))
+    screen("Check the Key app", body, listOf(same, ui.quiet("Start again") { showStartAgain() }, differ), words = AppWords.ceremonyCompareRoot, lead = keyMap(d), after = keyRule())
 }
 
 // ---- the third step: key 2, when the Key app holds none --------------------------------------------------------------
@@ -232,8 +235,8 @@ private fun Controller.showKey2(d: CeremonyDraft, message: SayWords?) {
     }
     screen(
         "Key 2", listOf(pasted, use),
-        listOf(ui.primary("Scan key 2's code") { scanKey2(d) }, ui.button("Start again") { showStartAgain() }),
-        words = message ?: AppWords.ceremonyKey2Needed, lead = keyMap(d),
+        listOf(ui.primary("Scan key 2's code") { scanKey2(d) }, ui.quiet("Start again") { showStartAgain() }),
+        words = message ?: AppWords.ceremonyKey2Needed, lead = keyMap(d), after = keyRule(),
     )
 }
 
@@ -339,8 +342,8 @@ private fun Controller.showWalletCheck(d: CeremonyDraft, built: WalletBuiltView)
     snap?.let { views.add(0, centred(it)) }
     screen(
         "The new wallet", views,
-        listOf(ui.primary("Show the Key app its setup") { showSetupCode(d, built) }, ui.button("Start again") { showStartAgain() }),
-        words = AppWords.ceremonyCheckWallet, lead = keyMap(d),
+        listOf(ui.primary("Show the Key app its setup") { showSetupCode(d, built) }, ui.quiet("Start again") { showStartAgain() }),
+        words = AppWords.ceremonyCheckWallet, lead = keyMap(d), after = keyRule(),
     )
     snap?.post { snap.play() }
 }
@@ -372,7 +375,7 @@ private fun Controller.showSetupCode(d: CeremonyDraft, built: WalletBuiltView) {
         actions.add(ui.button("Show again") { showSetupCode(d, built) })
         actions.add(ui.button("Back") { showWalletCheck(d, built) })
     }
-    codeScreen("Setup for the Key app", step.words, view, below, actions, back = { showWalletCheck(d, built) }, lead = keyMap(d))
+    codeScreen("Setup for the Key app", step.words, view, below, actions, back = { showWalletCheck(d, built) }, lead = keyMap(d), after = keyRule())
 }
 
 /** The owner says the words differ: the wallet is not finished, and only starting again on both phones goes on. */
@@ -444,8 +447,8 @@ private fun Controller.saveFinished(record: ByteArray, message: SayWords? = null
     } else {
         actions.add(ui.primary("Save and start") { save() })
     }
-    actions.add(ui.button("Start again") { showStartAgain() })
-    screen("Save the setup", emptyList(), actions, words = message ?: AppWords.ceremonySaveNext, lead = keyMap(ceremony))
+    actions.add(ui.quiet("Start again") { showStartAgain() })
+    screen("Save the setup", emptyList(), actions, words = message ?: AppWords.ceremonySaveNext, lead = keyMap(ceremony), after = keyRule())
 }
 
 private fun Controller.showSaveFailed(words: SayWords, record: ByteArray) {
