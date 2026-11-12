@@ -540,6 +540,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "confirmed_settings_decode"
+path = "fuzz_targets/confirmed_settings_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "counter_settings_file_decode"
 path = "fuzz_targets/counter_settings_file_decode.rs"
 test = false
