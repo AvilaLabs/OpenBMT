@@ -147,6 +147,7 @@ impl Mem {
             exposure: self.slots.get(&Slot::Exposure).map(Vec::as_slice),
             pause: self.slots.get(&Slot::Pause).map(Vec::as_slice),
             desk: self.slots.get(&Slot::Desk).map(Vec::as_slice),
+            bills: self.slots.get(&Slot::Bills).map(Vec::as_slice),
             sales: self
                 .slots
                 .iter()

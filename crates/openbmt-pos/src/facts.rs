@@ -43,6 +43,12 @@ pub struct SaleFact {
     pub is_final: bool,
     /// The sale's reference (PS-20).
     pub reference: Option<RefCode>,
+    /// The till's own reference for the sale (CR-245): its check or receipt
+    /// number, which the counter was given when the sale opened or later.
+    /// Unlike a note (CR-212) it is given to the reader, because it is the
+    /// till's own number. It is not in a paid notice (BX-40), so a fact built
+    /// from notices has none.
+    pub till_reference: Option<String>,
 }
 
 impl SaleFact {
@@ -64,6 +70,7 @@ impl SaleFact {
             unpaid_after: false,
             is_final: false,
             reference: Some(RefCode::for_sale(&counter, index)),
+            till_reference: None,
         }
     }
 
@@ -174,6 +181,10 @@ impl FactFold {
 
     /// Fold one event. A refused event changes nothing.
     pub fn apply(&mut self, event: &Event) -> Result<(), FactsError> {
+        // The records of a bill name a bill, not a sale (CR-247).
+        if event.bill_number().is_some() {
+            return Ok(());
+        }
         if self.sales.len() >= MAX_SALES && !self.sales.contains_key(&event.index()) {
             return Err(FactsError::TooManySales);
         }
@@ -255,6 +266,12 @@ fn fold_event(
         s.fact.unpaid_after = false;
     };
     match event {
+        // CR-245: the first reference stands.
+        Event::Referenced { reference, .. } => {
+            s.fact
+                .till_reference
+                .get_or_insert_with(|| reference.clone());
+        }
         Event::PaidAtOnce { at, .. } | Event::Override { at, .. } => paid(s, *at),
         Event::Confirmed { at, .. } => {
             paid(s, *at);
@@ -290,6 +307,12 @@ fn fold_event(
         Event::Opened { .. }
         | Event::Requoted { .. }
         | Event::Noted { .. }
+        | Event::BillReferenced { .. }
+        | Event::BillOpened { .. }
+        | Event::BillAmount { .. }
+        | Event::BillPartPaid { .. }
+        | Event::BillEnded { .. }
+        | Event::BillPartSale { .. }
         | Event::Expired { .. }
         | Event::Cancelled { .. }
         | Event::LatePayment { .. }

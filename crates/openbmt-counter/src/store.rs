@@ -21,6 +21,8 @@ pub enum Slot {
     Pause,
     /// The counter's own state (`OBMG`).
     Desk,
+    /// The bills (`OBM[`, CR-253).
+    Bills,
     /// One sale (`OBML`), by its receive index.
     Sale(u32),
     /// One swap of a sale (CR-220), by the sale's receive index and the

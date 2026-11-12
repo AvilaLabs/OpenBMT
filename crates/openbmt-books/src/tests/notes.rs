@@ -42,7 +42,7 @@ fn bk_41_a_sale_holds_its_note_and_the_last_record_stands() {
 }
 
 #[test]
-fn bk_41_the_full_ledger_has_the_note_in_its_last_column() {
+fn bk_41_the_full_ledger_has_the_note_in_the_column_sale_note() {
     let kit = kit_with(&[
         opened(0, FEB_1_0100, 500),
         noted(0, FEB_1_0100, "Tour, 12 May"),
@@ -56,13 +56,16 @@ fn bk_41_the_full_ledger_has_the_note_in_its_last_column() {
         .lines()
         .find(|l| l.starts_with("Type,"))
         .expect("header");
-    assert!(header.ends_with(",Tips,Sale note"), "{header}");
+    assert!(
+        header.contains(",Tips,Sale note,Till reference,"),
+        "{header}"
+    );
     let rows: Vec<&str> = ledger.lines().filter(|l| l.starts_with("sale,")).collect();
     assert_eq!(rows.len(), 3);
     // A comma puts the note in quotes, and a formula is made text (BK-21).
-    assert!(rows[0].ends_with(",\"Tour, 12 May\""), "{}", rows[0]);
-    assert!(rows[1].ends_with(",,"), "{}", rows[1]);
-    assert!(rows[2].ends_with(",'=SUM(A1)"), "{}", rows[2]);
+    assert!(rows[0].contains(",\"Tour, 12 May\","), "{}", rows[0]);
+    assert!(rows[1].ends_with(",,,,,,,"), "{}", rows[1]);
+    assert!(rows[2].contains(",'=SUM(A1),"), "{}", rows[2]);
 }
 
 #[test]

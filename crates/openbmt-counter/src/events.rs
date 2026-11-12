@@ -11,6 +11,7 @@ use openbmt_core::wire::{self, DecodeError, Reader};
 
 use bitcoin::ScriptBuf;
 
+use crate::bills::{reference_ok, BillEnd, BillKind, PartWay};
 use crate::desk::Role;
 use crate::money::{label_is_valid, Amount, Currency, RateSource};
 use crate::refund::{is_payment_script, refund_text_ok, Ask, MAX_SCRIPT_BYTES};
@@ -45,6 +46,16 @@ const TAG_REFUND_REQUESTED_AT_HEIGHT: u8 = 22;
 const TAG_REFUND_PAID_IN_CASH_AT_HEIGHT: u8 = 23;
 /// A note on a sale (CR-206).
 const TAG_NOTED: u8 = 24;
+/// The till's reference on a sale or a bill (CR-245).
+const TAG_REFERENCED: u8 = 25;
+// CR-247: the records of a bill. Their index field holds the bill's number.
+const TAG_BILL_OPENED: u8 = 26;
+const TAG_BILL_AMOUNT: u8 = 27;
+const TAG_BILL_PART_PAID: u8 = 28;
+const TAG_BILL_ENDED: u8 = 29;
+const TAG_BILL_PART_SALE: u8 = 30;
+/// The byte after the text of a reference that is a bill's, not a sale's.
+const REFERENCE_OF_BILL: u8 = 1;
 
 /// Something that happened to a sale and is written down.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,6 +110,80 @@ pub enum Event {
         at: u64,
         /// The note: plain text of 1 to 64 characters.
         note: String,
+    },
+    /// The sale was given the till's reference, when it opened or later
+    /// (CR-245; kind `Sale`).
+    Referenced {
+        /// The receive index.
+        index: u32,
+        /// When.
+        at: u64,
+        /// The reference: 1 to 32 characters of `A-Z a-z 0-9 - _ / # .`.
+        reference: String,
+    },
+    /// A bill was given the till's reference (CR-245; kind `Sale`). Written
+    /// as tag 25 with a byte after the text that says it is a bill's.
+    BillReferenced {
+        /// The bill's number.
+        number: u32,
+        /// When.
+        at: u64,
+        /// The reference.
+        reference: String,
+    },
+    /// A bill or a tab opened (CR-247; kind `Sale`).
+    BillOpened {
+        /// The bill's number.
+        number: u32,
+        /// When.
+        at: u64,
+        /// A bill or a tab.
+        kind: BillKind,
+        /// The amount in the minor units of the shop's currency.
+        amount: Amount,
+        /// The shop's currency.
+        currency: Currency,
+    },
+    /// A tab's amount changed (CR-247, CR-251; kind `Sale`).
+    BillAmount {
+        /// The bill's number.
+        number: u32,
+        /// When.
+        at: u64,
+        /// The new amount.
+        amount: Amount,
+    },
+    /// A part of a bill was paid another way (CR-247; kind `Sale`).
+    BillPartPaid {
+        /// The bill's number.
+        number: u32,
+        /// When.
+        at: u64,
+        /// What the cashier typed.
+        amount: Amount,
+        /// How it was paid.
+        way: PartWay,
+    },
+    /// A bill ended (CR-247; kind `Sale`).
+    BillEnded {
+        /// The bill's number.
+        number: u32,
+        /// When.
+        at: u64,
+        /// How it ended.
+        how: BillEnd,
+        /// What was not paid: the amount of a bill closed short (CR-252),
+        /// otherwise 0.
+        unpaid: Amount,
+    },
+    /// A sale became a part of a bill (CR-247; kind `Sale`).
+    BillPartSale {
+        /// The bill's number.
+        number: u32,
+        /// When.
+        at: u64,
+        /// The sale's receive index.
+        sale: u32,
     },
     /// The sale ended with nothing received (CR-07; kind `Sale`).
     Expired {
@@ -429,6 +514,11 @@ fn write_text(out: &mut Vec<u8>, text: &str) {
     out.extend_from_slice(text.as_bytes());
 }
 
+fn write_reference(out: &mut Vec<u8>, reference: &str) {
+    out.push(u8::try_from(reference.len()).unwrap_or(u8::MAX));
+    out.extend_from_slice(reference.as_bytes());
+}
+
 fn read_text(r: &mut Reader<'_>, what: &'static str) -> Result<String, DecodeError> {
     let len = usize::from(r.u8()?);
     let text = std::str::from_utf8(r.take(len)?)
@@ -483,7 +573,29 @@ pub(crate) fn final_payments(standing: &[([u8; 32], u64)]) -> (Vec<([u8; 32], u6
 }
 
 impl Event {
-    /// The sale this event is about.
+    /// The bill this event is about, for the records of a bill (CR-247).
+    pub fn bill_number(&self) -> Option<u32> {
+        match self {
+            Self::BillReferenced { number, .. }
+            | Self::BillOpened { number, .. }
+            | Self::BillAmount { number, .. }
+            | Self::BillPartPaid { number, .. }
+            | Self::BillEnded { number, .. }
+            | Self::BillPartSale { number, .. } => Some(*number),
+            _ => None,
+        }
+    }
+
+    /// The sale this event is about; none for the record of a bill.
+    pub fn sale_index(&self) -> Option<u32> {
+        match self.bill_number() {
+            Some(_) => None,
+            None => Some(self.index()),
+        }
+    }
+
+    /// The number of the sale, or of the bill for the record of a bill:
+    /// check [`Event::bill_number`] before using it as a sale's index.
     pub fn index(&self) -> u32 {
         match self {
             Self::Opened { index, .. }
@@ -499,6 +611,13 @@ impl Event {
             | Self::Dust { index, .. }
             | Self::Requoted { index, .. }
             | Self::Noted { index, .. }
+            | Self::Referenced { index, .. }
+            | Self::BillReferenced { number: index, .. }
+            | Self::BillOpened { number: index, .. }
+            | Self::BillAmount { number: index, .. }
+            | Self::BillPartPaid { number: index, .. }
+            | Self::BillEnded { number: index, .. }
+            | Self::BillPartSale { number: index, .. }
             | Self::Override { index, .. }
             | Self::Replaced { index, .. }
             | Self::Reopened { index, .. }
@@ -526,6 +645,13 @@ impl Event {
             | Self::Dust { at, .. }
             | Self::Requoted { at, .. }
             | Self::Noted { at, .. }
+            | Self::Referenced { at, .. }
+            | Self::BillReferenced { at, .. }
+            | Self::BillOpened { at, .. }
+            | Self::BillAmount { at, .. }
+            | Self::BillPartPaid { at, .. }
+            | Self::BillEnded { at, .. }
+            | Self::BillPartSale { at, .. }
             | Self::Override { at, .. }
             | Self::Replaced { at, .. }
             | Self::Reopened { at, .. }
@@ -543,6 +669,13 @@ impl Event {
             Self::Opened { .. }
             | Self::Requoted { .. }
             | Self::Noted { .. }
+            | Self::Referenced { .. }
+            | Self::BillReferenced { .. }
+            | Self::BillOpened { .. }
+            | Self::BillAmount { .. }
+            | Self::BillPartPaid { .. }
+            | Self::BillEnded { .. }
+            | Self::BillPartSale { .. }
             | Self::Expired { .. }
             | Self::Cancelled { .. } => RecordKind::Sale,
             Self::PaidAtOnce { .. }
@@ -576,6 +709,13 @@ impl Event {
             ),
             Self::Requoted { index, at, .. } => (TAG_REQUOTED, *index, *at),
             Self::Noted { index, at, .. } => (TAG_NOTED, *index, *at),
+            Self::Referenced { index, at, .. } => (TAG_REFERENCED, *index, *at),
+            Self::BillReferenced { number, at, .. } => (TAG_REFERENCED, *number, *at),
+            Self::BillOpened { number, at, .. } => (TAG_BILL_OPENED, *number, *at),
+            Self::BillAmount { number, at, .. } => (TAG_BILL_AMOUNT, *number, *at),
+            Self::BillPartPaid { number, at, .. } => (TAG_BILL_PART_PAID, *number, *at),
+            Self::BillEnded { number, at, .. } => (TAG_BILL_ENDED, *number, *at),
+            Self::BillPartSale { number, at, .. } => (TAG_BILL_PART_SALE, *number, *at),
             Self::Expired { index, at } => (TAG_EXPIRED, *index, *at),
             Self::Cancelled { index, at, .. } => (TAG_CANCELLED, *index, *at),
             Self::PaidAtOnce { index, at, .. } => (TAG_PAID_AT_ONCE, *index, *at),
@@ -712,6 +852,31 @@ impl Event {
                 out.extend_from_slice(&valued.0.to_le_bytes());
             }
             Self::Noted { note, .. } => write_text(&mut out, note),
+            Self::Referenced { reference, .. } => write_reference(&mut out, reference),
+            Self::BillReferenced { reference, .. } => {
+                write_reference(&mut out, reference);
+                out.push(REFERENCE_OF_BILL);
+            }
+            Self::BillOpened {
+                kind,
+                amount,
+                currency,
+                ..
+            } => {
+                out.push(kind.to_u8());
+                out.extend_from_slice(&amount.0.to_le_bytes());
+                out.extend_from_slice(&currency.code());
+            }
+            Self::BillAmount { amount, .. } => out.extend_from_slice(&amount.0.to_le_bytes()),
+            Self::BillPartPaid { amount, way, .. } => {
+                out.extend_from_slice(&amount.0.to_le_bytes());
+                out.push(way.to_u8());
+            }
+            Self::BillEnded { how, unpaid, .. } => {
+                out.push(how.to_u8());
+                out.extend_from_slice(&unpaid.0.to_le_bytes());
+            }
+            Self::BillPartSale { sale, .. } => out.extend_from_slice(&sale.to_le_bytes()),
             Self::LatePayment { txid, sats, .. } => {
                 out.extend_from_slice(txid);
                 out.extend_from_slice(&sats.to_le_bytes());
@@ -1083,6 +1248,96 @@ impl Event {
                     chain_height,
                 }
             }
+            TAG_REFERENCED => {
+                let len = usize::from(r.u8()?);
+                let reference = std::str::from_utf8(r.take(len)?)
+                    .map_err(|_| DecodeError::NonCanonical("a reference is not text"))?
+                    .to_string();
+                if !reference_ok(&reference) {
+                    return Err(DecodeError::NonCanonical(
+                        "a reference is not 1 to 32 characters of the allowed ones",
+                    ));
+                }
+                match r.u8() {
+                    Ok(REFERENCE_OF_BILL) => Self::BillReferenced {
+                        number: index,
+                        at,
+                        reference,
+                    },
+                    Ok(_) => {
+                        return Err(DecodeError::NonCanonical(
+                            "a reference has a byte after it that is not known",
+                        ))
+                    }
+                    Err(DecodeError::Truncated) => Self::Referenced {
+                        index,
+                        at,
+                        reference,
+                    },
+                    Err(e) => return Err(e),
+                }
+            }
+            TAG_BILL_OPENED => {
+                let kind = BillKind::from_u8(r.u8()?)
+                    .ok_or(DecodeError::NonCanonical("a bill kind is not known"))?;
+                let amount = r.u64_le()?;
+                if amount == 0 {
+                    return Err(DecodeError::NonCanonical("a bill is for nothing"));
+                }
+                Self::BillOpened {
+                    number: index,
+                    at,
+                    kind,
+                    amount: Amount(amount),
+                    currency: Currency::new(r.array::<3>()?)
+                        .ok_or(DecodeError::NonCanonical("a currency code is not valid"))?,
+                }
+            }
+            TAG_BILL_AMOUNT => {
+                let amount = r.u64_le()?;
+                if amount == 0 {
+                    return Err(DecodeError::NonCanonical("a bill is for nothing"));
+                }
+                Self::BillAmount {
+                    number: index,
+                    at,
+                    amount: Amount(amount),
+                }
+            }
+            TAG_BILL_PART_PAID => {
+                let amount = r.u64_le()?;
+                if amount == 0 {
+                    return Err(DecodeError::NonCanonical("a part is for nothing"));
+                }
+                Self::BillPartPaid {
+                    number: index,
+                    at,
+                    amount: Amount(amount),
+                    way: PartWay::from_u8(r.u8()?)
+                        .ok_or(DecodeError::NonCanonical("a way of paying is not known"))?,
+                }
+            }
+            TAG_BILL_ENDED => {
+                let how = BillEnd::from_u8(r.u8()?)
+                    .ok_or(DecodeError::NonCanonical("a bill's end is not known"))?;
+                let unpaid = r.u64_le()?;
+                if (how == BillEnd::ClosedShort) != (unpaid != 0) {
+                    return Err(DecodeError::NonCanonical(
+                        "only a bill closed short holds what was not paid",
+                    ));
+                }
+                Self::BillEnded {
+                    number: index,
+                    at,
+                    how,
+                    unpaid: Amount(unpaid),
+                }
+            }
+            TAG_BILL_PART_SALE => Self::BillPartSale {
+                number: index,
+                at,
+                sale: r.u32_le()?,
+            },
             _ => return Err(DecodeError::NonCanonical("an event tag is not known")),
         };
         r.finish()?;

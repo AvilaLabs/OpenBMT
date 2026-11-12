@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use openbmt_core::identity::{tagged_hash, DeviceId};
-use openbmt_counter::{Currency, RateSource, Role, StaffChange};
+use openbmt_counter::{BillEnd, BillKind, Currency, PartWay, RateSource, Role, StaffChange};
 
 use crate::value::Value;
 
@@ -338,6 +338,18 @@ pub struct Sale {
     pub payment_mode: PaymentMode,
     /// BK-41: the note on the sale, as the counter wrote it.
     pub note: Option<String>,
+    /// BK-43: the till's reference, as the counter wrote it: the first one
+    /// the records name stands.
+    pub till_reference: Option<String>,
+}
+
+impl SaleState {
+    /// BK-44: whether the sale is paid by its own rules: accepted at once,
+    /// confirmed or final. A sale that is open, ended, replaced or reopened is
+    /// not.
+    pub fn is_paid(self) -> bool {
+        matches!(self, Self::PaidAtOnce | Self::Confirmed | Self::Final)
+    }
 }
 
 impl Sale {
@@ -463,5 +475,80 @@ impl PosFacts {
     /// Every sale with a tax amount.
     pub fn iter(&self) -> impl Iterator<Item = (&SaleKey, &u64)> {
         self.tax.iter()
+    }
+}
+
+/// BK-44: which bill: the counter's key and the bill's number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BillKey {
+    /// The counter.
+    pub counter: DeviceId,
+    /// The bill's number.
+    pub number: u32,
+}
+
+/// BK-44: a part of a bill, as its records say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BillPartNote {
+    /// A bitcoin part: the sale (of the bill's own counter).
+    Sale(SaleKey),
+    /// A part paid another way, in the cashier's word: the amount the
+    /// cashier typed, in minor units, and the way.
+    Other {
+        /// The amount in minor units.
+        minor: u64,
+        /// The way.
+        way: PartWay,
+    },
+}
+
+/// BK-44: how a bill ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BillEndNote {
+    /// How.
+    pub how: BillEnd,
+    /// When, in Unix seconds (UTC).
+    pub at: u64,
+    /// What was not paid, for a bill closed short; otherwise 0.
+    pub unpaid_minor: u64,
+}
+
+/// BK-44: one bill or tab, folded from its records.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Bill {
+    /// Which bill.
+    pub key: BillKey,
+    /// When it opened, in Unix seconds (UTC).
+    pub opened_at: u64,
+    /// A bill or a tab.
+    pub kind: BillKind,
+    /// The amount in minor units: for a tab, the last one the records give.
+    pub amount_minor: u64,
+    /// The currency.
+    pub currency: Currency,
+    /// BK-43: the till's reference, the first the records name.
+    pub reference: Option<String>,
+    /// The parts, in the order the records give them.
+    pub parts: Vec<BillPartNote>,
+    /// How it ended, when it did.
+    pub ended: Option<BillEndNote>,
+}
+
+/// BK-44: the word for how a bill stands.
+pub fn bill_state_text(bill: &Bill) -> &'static str {
+    match bill.ended.map(|e| e.how) {
+        None => "open",
+        Some(BillEnd::Settled) => "settled",
+        Some(BillEnd::ClosedShort) => "closed short",
+        Some(BillEnd::Cancelled) => "cancelled",
+    }
+}
+
+/// BK-44: the word for the way a part was paid.
+pub fn way_text(way: PartWay) -> &'static str {
+    match way {
+        PartWay::Cash => "cash",
+        PartWay::Card => "card",
+        PartWay::Other => "other",
     }
 }

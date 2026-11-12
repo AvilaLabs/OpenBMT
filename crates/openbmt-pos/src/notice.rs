@@ -362,6 +362,13 @@ fn event_at(event: &Event) -> u64 {
         Event::Opened { at, .. }
         | Event::Requoted { at, .. }
         | Event::Noted { at, .. }
+        | Event::Referenced { at, .. }
+        | Event::BillReferenced { at, .. }
+        | Event::BillOpened { at, .. }
+        | Event::BillAmount { at, .. }
+        | Event::BillPartPaid { at, .. }
+        | Event::BillEnded { at, .. }
+        | Event::BillPartSale { at, .. }
         | Event::Expired { at, .. }
         | Event::Cancelled { at, .. }
         | Event::PaidAtOnce { at, .. }
@@ -423,6 +430,9 @@ impl NoticeMaker {
     /// the fold refuses is refused here and changes nothing.
     pub fn apply(&mut self, event: &Event) -> Result<Option<NoticeDraft>, FactsError> {
         self.fold.apply(event)?;
+        if event.bill_number().is_some() {
+            return Ok(None);
+        }
         let Some(fact) = self.fold.fact(event.index()) else {
             return Ok(None);
         };

@@ -212,6 +212,15 @@ impl Fold {
     fn apply(&mut self, event: &Event) -> Result<(), TotalsError> {
         let index = event.index();
         match event {
+            // CR-245, CR-247: the till's reference and the records of a bill
+            // are the books' and change no day's total.
+            Event::Referenced { .. }
+            | Event::BillReferenced { .. }
+            | Event::BillOpened { .. }
+            | Event::BillAmount { .. }
+            | Event::BillPartPaid { .. }
+            | Event::BillEnded { .. }
+            | Event::BillPartSale { .. } => {}
             Event::Opened {
                 at,
                 amount,

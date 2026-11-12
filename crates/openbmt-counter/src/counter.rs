@@ -33,6 +33,7 @@ use openbmt_watch::{
 };
 
 use crate::batch_held::BatchHeld;
+use crate::bills::{reference_ok, Bills};
 use crate::confirm_held::ConfirmHeld;
 use crate::desk::{valid_name, Desk, OverrideEntry, Role};
 use crate::events::{final_payments, Event};
@@ -49,9 +50,10 @@ use crate::refund::{
     RefundRequest, RefundState, RefundView, MAX_REFUNDS_PER_SALE,
 };
 use crate::refusal::{
-    BatchTakeRefused, BlockError, CancelRefused, CommandRefused, HeartbeatRefused, JudgeError,
-    LightningRefused, LoadError, NoteRefused, OpenRefused, OverrideRefused, RangeTakeRefused,
-    RefundRefused, RequoteRefused, SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
+    BatchTakeRefused, BillRefused, BlockError, CancelRefused, CommandRefused, HeartbeatRefused,
+    JudgeError, LightningRefused, LoadError, NoteRefused, OpenRefused, OverrideRefused,
+    RangeTakeRefused, RefundRefused, RequoteRefused, SightingError, StaffRefused, TotalsRefused,
+    WithdrawRefused,
 };
 use crate::sale::{End, LightningPaid, OverrideMark, OwnCheck, PosState, RequestDays, Sale};
 use crate::screen::{Next, Report, Screen, State, Why};
@@ -62,6 +64,9 @@ use crate::{
     DUST_SATS, MAX_LATE_PAYMENTS, MAX_QUOTES, MAX_SETTLE_PER_CALL, SETTLE_SECS, STUCK_SECS,
 };
 use openbmt_core::policy::{OffReason, WaitReason};
+
+mod bill_ops;
+pub use bill_ops::BillView;
 
 /// What a counter was paired with: the roots it pinned, the wallet it
 /// belongs to and the rule for the size of a batch.
@@ -89,6 +94,8 @@ pub struct Stored<'a> {
     pub pause: Option<&'a [u8]>,
     /// The desk (`OBMG`).
     pub desk: Option<&'a [u8]>,
+    /// The bills (`OBM[`, CR-253).
+    pub bills: Option<&'a [u8]>,
     /// Each sale (`OBML`) with the index of the slot it was in.
     pub sales: Vec<(u32, &'a [u8])>,
 }
@@ -134,6 +141,8 @@ pub struct Opened {
 pub struct SaleExtras<'a> {
     /// The note: plain text of 1 to 64 characters.
     pub note: Option<&'a str>,
+    /// The till's reference (CR-245): 1 to 32 characters of the allowed ones.
+    pub reference: Option<&'a str>,
     /// Make the sale a request to send that lasts these days.
     pub request: Option<RequestDays>,
 }
@@ -332,6 +341,11 @@ pub struct Counter {
     /// claim is not yet in a block. Such a sale does not expire. Not stored:
     /// the node says it again after a start.
     swap_pending: BTreeSet<u32>,
+    /// CR-253: the bills and the next bill number.
+    bills: Bills,
+    /// CR-245: the till's reference of each held sale, as the records say.
+    /// Built from the records at start.
+    references: BTreeMap<u32, String>,
 }
 
 impl Counter {
@@ -371,6 +385,8 @@ impl Counter {
             held_batches: BTreeMap::new(),
             held_ranges: BTreeMap::new(),
             swap_pending: BTreeSet::new(),
+            bills: Bills::new(),
+            references: BTreeMap::new(),
         }
     }
 
@@ -477,7 +493,12 @@ impl Counter {
         if let Some(bytes) = stored.desk {
             counter.desk = Desk::from_bytes(bytes).map_err(LoadError::Desk)?;
         }
-        let (log, last, book, highest, setting, held, held_ranges) = Self::read_chain(me, store)?;
+        if let Some(bytes) = stored.bills {
+            counter.bills = Bills::from_bytes(bytes).map_err(LoadError::Bills)?;
+        }
+        let (log, last, book, highest, setting, held, held_ranges, references) =
+            Self::read_chain(me, store)?;
+        counter.references = references;
         counter.records = log;
         counter.settings_recorded = setting;
         counter.held_batches = held;
@@ -497,6 +518,9 @@ impl Counter {
             .retain(|i, _| counter.sales.contains_key(i));
         counter.highest_refund = highest;
         counter.adopt_refunds();
+        counter
+            .references
+            .retain(|i, _| counter.sales.contains_key(i));
         // CR-76: the newest record that names each sale the counter holds.
         counter.last_record = last;
         counter
@@ -523,6 +547,7 @@ impl Counter {
             Option<u32>,
             BTreeMap<(u32, u32), [u8; 32]>,
             BTreeMap<(u32, u32), [u8; 32]>,
+            BTreeMap<u32, String>,
         ),
         LoadError,
     >
@@ -538,6 +563,7 @@ impl Counter {
         let mut setting: Option<u32> = None;
         let mut held: BTreeMap<(u32, u32), [u8; 32]> = BTreeMap::new();
         let mut held_ranges: BTreeMap<(u32, u32), [u8; 32]> = BTreeMap::new();
+        let mut references: BTreeMap<u32, String> = BTreeMap::new();
         let keep = usize::try_from(MAX_UNSENT_IN_MEMORY).unwrap_or(usize::MAX);
         loop {
             let chunk = store
@@ -567,8 +593,20 @@ impl Counter {
                     }
                 } else if !matches!(record.kind, RecordKind::CheckIn | RecordKind::Pairing) {
                     if let Ok(event) = Event::decode(&record.body) {
-                        let at = last.get(&event.index()).map_or(0, |(_, at)| *at);
-                        last.insert(event.index(), (record.seq, at.max(event.at())));
+                        // The records of a bill name a bill, not a sale.
+                        if let Some(index) = event.sale_index() {
+                            let at = last.get(&index).map_or(0, |(_, at)| *at);
+                            last.insert(index, (record.seq, at.max(event.at())));
+                        }
+                        if let Event::Referenced {
+                            index, reference, ..
+                        } = &event
+                        {
+                            // CR-245: the first stands.
+                            references
+                                .entry(*index)
+                                .or_insert_with(|| reference.clone());
+                        }
                         if record.kind == RecordKind::Refund {
                             fold_refund(&mut book, &mut highest, event);
                         }
@@ -581,7 +619,16 @@ impl Counter {
             }
         }
         let log = RecordLog::from_parts(check.len(), check.head(), tail);
-        Ok((log, last, book, highest, setting, held, held_ranges))
+        Ok((
+            log,
+            last,
+            book,
+            highest,
+            setting,
+            held,
+            held_ranges,
+            references,
+        ))
     }
 
     /// CR-75: how many sales this counter has refused for being below the
@@ -1094,6 +1141,9 @@ impl Counter {
             Some(mark) => self
                 .sales
                 .values()
+                // CR-249: a sale that is a part of an open bill is still
+                // counted by it, so it stays.
+                .filter(|sale| !self.bills.in_open_bill(sale.index))
                 .filter_map(|sale| {
                     self.settled_since(sale, mark, now)
                         .map(|last| (last, sale.index))
@@ -1113,6 +1163,7 @@ impl Counter {
                 }
             }
             self.last_record.remove(&index);
+            self.references.remove(&index);
             self.refund_book.remove(&index);
             self.cancel_applied.remove(&index);
             self.refund_unsaved.remove(&index);
@@ -1212,12 +1263,14 @@ impl Counter {
         event: &Event,
     ) -> Result<(), StoreFault<S::Error>> {
         let record = self.append_record(store, event.kind(), event.encode())?;
-        let at = self
-            .last_record
-            .get(&event.index())
-            .map_or(0, |(_, at)| *at)
-            .max(event.at());
-        self.last_record.insert(event.index(), (record.seq, at));
+        if let Some(index) = event.sale_index() {
+            let at = self
+                .last_record
+                .get(&index)
+                .map_or(0, |(_, at)| *at)
+                .max(event.at());
+            self.last_record.insert(index, (record.seq, at));
+        }
         if record.kind == RecordKind::Refund {
             fold_refund(
                 &mut self.refund_book,
@@ -1402,6 +1455,9 @@ impl Counter {
         if extras.note.is_some_and(|n| !refund_text_ok(n)) {
             return Err(OpenRefused::BadNote);
         }
+        if extras.reference.is_some_and(|r| !reference_ok(r)) {
+            return Err(OpenRefused::BadReference);
+        }
         let now = facts.now;
         // CR-196, CR-197: the currency is the settings'; Bitcoin Standard
         // has no price, so the rate and its source are the satoshi's own.
@@ -1511,6 +1567,16 @@ impl Counter {
             self.write_event(store, &noted)
                 .map_err(OpenRefused::Store)?;
         }
+        if let Some(reference) = extras.reference {
+            let event = Event::Referenced {
+                index,
+                at: now,
+                reference: reference.to_string(),
+            };
+            self.write_event(store, &event)
+                .map_err(OpenRefused::Store)?;
+            self.references.insert(index, reference.to_string());
+        }
         Ok(Opened {
             index,
             script,
@@ -1553,6 +1619,45 @@ impl Counter {
         };
         self.finish(store, sale, &[event])
             .map_err(NoteRefused::Store)
+    }
+
+    /// CR-245: add the till's reference to a sale that has none. It is 1 to
+    /// 32 characters of `A-Z a-z 0-9 - _ / # .`; a sale takes one, set when
+    /// it opened or added here once. Works on a sale in any state. The
+    /// counter does not read it: the books do.
+    ///
+    /// The write is a `Sale` record "referenced"; nothing else changes. If
+    /// it fails, `Err` is returned and the sale has none.
+    pub fn add_reference<S: Store>(
+        &mut self,
+        index: u32,
+        reference: &str,
+        now: u64,
+        store: &mut S,
+    ) -> Result<(), BillRefused<S::Error>> {
+        if !reference_ok(reference) {
+            return Err(BillRefused::BadReference);
+        }
+        if !self.sales.contains_key(&index) {
+            return Err(BillRefused::UnknownSale(index));
+        }
+        if self.references.contains_key(&index) {
+            return Err(BillRefused::AlreadyReferenced);
+        }
+        let event = Event::Referenced {
+            index,
+            at: now,
+            reference: reference.to_string(),
+        };
+        self.write_event(store, &event)
+            .map_err(BillRefused::Store)?;
+        self.references.insert(index, reference.to_string());
+        Ok(())
+    }
+
+    /// CR-245: the till's reference of a sale, when it has one.
+    pub fn sale_reference(&self, index: u32) -> Option<&str> {
+        self.references.get(&index).map(String::as_str)
     }
 
     /// CR-197: the rate and its source a price is made with. The caller's,
@@ -1967,6 +2072,21 @@ impl Counter {
     /// reports it again and the step is done again, which is the safe side
     /// (a report is never made without its record).
     pub fn lightning_paid<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        paid: LightningPaid,
+        facts: &Facts<'_, C>,
+        store: &mut S,
+    ) -> Result<Screen, LightningRefused<S::Error>> {
+        let screen = self.lightning_paid_sale(index, paid, facts, store)?;
+        // CR-249: a part paid over Lightning may settle its bill.
+        if screen.state.is_paid() && self.bills.bill_of_sale(index).is_some() {
+            let _ = self.bills_follow(facts.now, store);
+        }
+        Ok(screen)
+    }
+
+    fn lightning_paid_sale<C: HeaderChain + ?Sized, S: Store>(
         &mut self,
         index: u32,
         paid: LightningPaid,
@@ -2403,6 +2523,11 @@ impl Counter {
     /// (`SaleWatch::status_with_own_node`), so the own-node tier of the
     /// instant decision applies only when the status says the own node
     /// counted. With `OwnNodeHealth::not_configured()` this is `judge`.
+    ///
+    /// CR-249: a sale that is a part of a bill and is judged paid settles the
+    /// bill when it reaches its amount. A write of that step that fails does
+    /// not fail the judging: the bill is settled by the next call
+    /// ([`Counter::bills_follow`]).
     pub fn judge_with_own_node<C: HeaderChain + ?Sized, S: Store>(
         &mut self,
         index: u32,
@@ -2429,7 +2554,23 @@ impl Counter {
         self.judge_checked(index, facts, &OwnCheck::NodeOnly(*health), store)
     }
 
+    /// The judge of either mode, then CR-249: a sale that is a part of a
+    /// bill and is now paid may settle the bill.
     fn judge_checked<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        facts: &Facts<'_, C>,
+        own: &OwnCheck,
+        store: &mut S,
+    ) -> Result<Screen, JudgeError<S::Error>> {
+        let screen = self.judge_sale(index, facts, own, store)?;
+        if screen.state.is_paid() && self.bills.bill_of_sale(index).is_some() {
+            let _ = self.bills_follow(facts.now, store);
+        }
+        Ok(screen)
+    }
+
+    fn judge_sale<C: HeaderChain + ?Sized, S: Store>(
         &mut self,
         index: u32,
         facts: &Facts<'_, C>,
@@ -2989,6 +3130,9 @@ impl Counter {
     ) -> Overridden<S::Error> {
         let mut reports = Vec::new();
         let result = self.override_inner(index, actor, facts, own, store, &mut reports);
+        if result.is_ok() && self.bills.bill_of_sale(index).is_some() {
+            let _ = self.bills_follow(facts.now, store);
+        }
         Overridden { reports, result }
     }
 

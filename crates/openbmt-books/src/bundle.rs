@@ -1,17 +1,23 @@
 //! The bundle: the books as a framed, strictly read byte string (BK-28).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use openbmt_core::identity::DeviceId;
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_counter::refund::refund_text_ok;
-use openbmt_counter::{Currency, RateSource, Role, MAX_FINAL_PAYMENTS, MAX_NAME_BYTES};
+use openbmt_counter::{
+    reference_ok, BillEnd, BillKind, Currency, PartWay, RateSource, Role, MAX_FINAL_PAYMENTS,
+    MAX_NAME_BYTES,
+};
 
-use crate::books::{Books, MAX_COUNTERS, MAX_LINES, MAX_PER_SALE, MAX_SALES};
+use crate::books::{
+    Books, MAX_BILLS, MAX_BILL_PARTS, MAX_COUNTERS, MAX_LINES, MAX_PER_SALE, MAX_SALES,
+};
 use crate::date::MAX_UNIX;
 use crate::model::{
-    Basis, CashReturn, Disposal, DisposalKind, LatePayment, LightningPayment, OverrideNote,
-    Payment, PaymentList, PaymentMode, PosMark, Sale, SaleId, SaleKey, SaleState, TipNote,
+    Basis, Bill, BillEndNote, BillKey, BillPartNote, CashReturn, Disposal, DisposalKind,
+    LatePayment, LightningPayment, OverrideNote, Payment, PaymentList, PaymentMode, PosMark, Sale,
+    SaleId, SaleKey, SaleState, TipNote,
 };
 use crate::value::{UnknownField, Value};
 
@@ -31,10 +37,18 @@ const VERSION_TIPS: u8 = 3;
 /// its note.
 const VERSION_NOTES: u8 = 4;
 
+/// BK-45: the version of a bundle that holds a sale's reference or a bill.
+/// Every sale in it ends with its payment mode, its tip and its note, as in
+/// version 4, and then its reference; the bills follow the returns.
+const VERSION_BILLS: u8 = 5;
+
 /// Fewest bytes a sale takes (it is 133), for the count check.
 const MIN_SALE: usize = 130;
 const MIN_DISPOSAL: usize = 8 + 1 + 3 + 8 + 2;
 const MIN_RETURN: usize = 8 + 36 + 8;
+/// Fewest bytes a bill takes: counter, number, time, kind, amount, currency,
+/// reference flag, part count and end flag.
+const MIN_BILL: usize = 32 + 4 + 8 + 1 + 8 + 3 + 1 + 1 + 1;
 
 fn put_u32(out: &mut Vec<u8>, n: usize) {
     // Every list is bounded far below the u32 limit when it is built.
@@ -289,7 +303,39 @@ fn get_note(r: &mut Reader<'_>) -> Result<Option<String>, DecodeError> {
     Ok(Some(note))
 }
 
-fn put_sale(out: &mut Vec<u8>, s: &Sale, with_mode: bool, with_tips: bool, with_notes: bool) {
+fn put_reference(out: &mut Vec<u8>, reference: &Option<String>) {
+    match reference {
+        Some(r) => {
+            out.push(1);
+            put_text(out, r);
+        }
+        None => out.push(0),
+    }
+}
+
+fn get_reference(r: &mut Reader<'_>) -> Result<Option<String>, DecodeError> {
+    if !r.flag()? {
+        return Ok(None);
+    }
+    let text = get_text(r)?;
+    if !reference_ok(&text) {
+        return Err(DecodeError::NonCanonical(
+            "a reference is not 1 to 32 characters of the allowed ones",
+        ));
+    }
+    Ok(Some(text))
+}
+
+/// Which optional fields end every sale of a bundle.
+#[derive(Clone, Copy)]
+struct SaleFields {
+    mode: bool,
+    tips: bool,
+    notes: bool,
+    references: bool,
+}
+
+fn put_sale(out: &mut Vec<u8>, s: &Sale, f: SaleFields) {
     put_key(out, &s.key);
     out.extend_from_slice(&s.opened_at.to_le_bytes());
     out.extend_from_slice(&s.amount_minor.to_le_bytes());
@@ -327,23 +373,21 @@ fn put_sale(out: &mut Vec<u8>, s: &Sale, with_mode: bool, with_tips: bool, with_
         out.extend_from_slice(&o.sats.to_le_bytes());
     }
     out.push(s.pos as u8);
-    if with_mode {
+    if f.mode {
         put_mode(out, &s.payment_mode);
     }
-    if with_tips {
+    if f.tips {
         put_tip(out, &s.tip);
     }
-    if with_notes {
+    if f.notes {
         put_note(out, &s.note);
+    }
+    if f.references {
+        put_reference(out, &s.till_reference);
     }
 }
 
-fn get_sale(
-    r: &mut Reader<'_>,
-    with_mode: bool,
-    with_tips: bool,
-    with_notes: bool,
-) -> Result<Sale, DecodeError> {
+fn get_sale(r: &mut Reader<'_>, f: SaleFields) -> Result<Sale, DecodeError> {
     let key = get_key(r)?;
     let opened_at = get_time(r)?;
     let amount_minor = r.u64_le()?;
@@ -411,13 +455,18 @@ fn get_sale(
         2 => PosMark::Unpaid,
         _ => return Err(DecodeError::NonCanonical("a POS mark is not known")),
     };
-    let payment_mode = if with_mode {
+    let payment_mode = if f.mode {
         get_mode(r)?
     } else {
         PaymentMode::OnChain
     };
-    let tip = if with_tips { get_tip(r)? } else { None };
-    let note = if with_notes { get_note(r)? } else { None };
+    let tip = if f.tips { get_tip(r)? } else { None };
+    let note = if f.notes { get_note(r)? } else { None };
+    let till_reference = if f.references {
+        get_reference(r)?
+    } else {
+        None
+    };
     if tip
         .as_ref()
         .is_some_and(|t| amount_minor.checked_add(t.minor).is_none())
@@ -466,6 +515,105 @@ fn get_sale(
         pos,
         payment_mode,
         note,
+        till_reference,
+    })
+}
+
+fn put_bill(out: &mut Vec<u8>, b: &Bill) {
+    out.extend_from_slice(&b.key.counter.to_bytes());
+    out.extend_from_slice(&b.key.number.to_le_bytes());
+    out.extend_from_slice(&b.opened_at.to_le_bytes());
+    out.push(b.kind.to_u8());
+    out.extend_from_slice(&b.amount_minor.to_le_bytes());
+    out.extend_from_slice(&b.currency.code());
+    put_reference(out, &b.reference);
+    out.push(u8::try_from(b.parts.len()).unwrap_or(u8::MAX));
+    for p in &b.parts {
+        match p {
+            BillPartNote::Sale(key) => {
+                out.push(1);
+                out.extend_from_slice(&key.index.to_le_bytes());
+            }
+            BillPartNote::Other { minor, way } => {
+                out.push(2);
+                out.extend_from_slice(&minor.to_le_bytes());
+                out.push(way.to_u8());
+            }
+        }
+    }
+    match b.ended {
+        None => out.push(0),
+        Some(e) => {
+            out.push(e.how.to_u8());
+            out.extend_from_slice(&e.at.to_le_bytes());
+            out.extend_from_slice(&e.unpaid_minor.to_le_bytes());
+        }
+    }
+}
+
+fn get_bill(r: &mut Reader<'_>) -> Result<Bill, DecodeError> {
+    let counter = r.device_id()?;
+    let number = r.u32_le()?;
+    let opened_at = get_time(r)?;
+    let kind =
+        BillKind::from_u8(r.u8()?).ok_or(DecodeError::NonCanonical("a bill kind is not known"))?;
+    let amount_minor = r.u64_le()?;
+    if amount_minor == 0 {
+        return Err(DecodeError::NonCanonical("a bill is for nothing"));
+    }
+    let currency = get_currency(r)?;
+    let reference = get_reference(r)?;
+    let n = usize::from(r.u8()?);
+    if n > MAX_BILL_PARTS {
+        return Err(DecodeError::TooLarge);
+    }
+    let mut parts = Vec::with_capacity(n);
+    for _ in 0..n {
+        match r.u8()? {
+            1 => parts.push(BillPartNote::Sale(SaleKey {
+                counter,
+                index: r.u32_le()?,
+            })),
+            2 => {
+                let minor = r.u64_le()?;
+                if minor == 0 {
+                    return Err(DecodeError::NonCanonical("a part is for nothing"));
+                }
+                let way = PartWay::from_u8(r.u8()?)
+                    .ok_or(DecodeError::NonCanonical("a way of paying is not known"))?;
+                parts.push(BillPartNote::Other { minor, way });
+            }
+            _ => return Err(DecodeError::NonCanonical("a part kind is not known")),
+        }
+    }
+    let ended = match r.u8()? {
+        0 => None,
+        how => {
+            let how = BillEnd::from_u8(how)
+                .ok_or(DecodeError::NonCanonical("a bill's end is not known"))?;
+            let at = get_time(r)?;
+            let unpaid_minor = r.u64_le()?;
+            if (how == BillEnd::ClosedShort) != (unpaid_minor != 0) || unpaid_minor > amount_minor {
+                return Err(DecodeError::NonCanonical(
+                    "only a bill closed short holds what was not paid",
+                ));
+            }
+            Some(BillEndNote {
+                how,
+                at,
+                unpaid_minor,
+            })
+        }
+    };
+    Ok(Bill {
+        key: BillKey { counter, number },
+        opened_at,
+        kind,
+        amount_minor,
+        currency,
+        reference,
+        parts,
+        ended,
     })
 }
 
@@ -514,7 +662,12 @@ impl Books {
         // the payment mode of every sale too. BK-42: version 4 only when a
         // sale carries a note, and then every sale holds its mode, its tip
         // and its note.
-        let with_notes = self.sales.iter().any(|s| s.note.is_some());
+        // BK-45: version 5 when a sale or a bill has a reference or a bill
+        // exists, and then every sale ends with its mode, tip, note and
+        // reference, and the bills follow the returns.
+        let with_bills =
+            !self.bills.is_empty() || self.sales.iter().any(|s| s.till_reference.is_some());
+        let with_notes = with_bills || self.sales.iter().any(|s| s.note.is_some());
         let with_tips = with_notes || self.sales.iter().any(|s| s.tip.is_some());
         let with_mode = with_tips
             || self
@@ -523,7 +676,9 @@ impl Books {
                 .any(|s| s.payment_mode.lightning().is_some());
         if with_mode {
             if let Some(byte) = out.get_mut(4) {
-                *byte = if with_notes {
+                *byte = if with_bills {
+                    VERSION_BILLS
+                } else if with_notes {
                     VERSION_NOTES
                 } else if with_tips {
                     VERSION_TIPS
@@ -534,8 +689,14 @@ impl Books {
         }
         put_marks(&mut out, &self.high_water);
         put_u32(&mut out, self.sales.len());
+        let fields = SaleFields {
+            mode: with_mode,
+            tips: with_tips,
+            notes: with_notes,
+            references: with_bills,
+        };
         for s in &self.sales {
-            put_sale(&mut out, s, with_mode, with_tips, with_notes);
+            put_sale(&mut out, s, fields);
         }
         put_u32(&mut out, self.disposals.len());
         for d in &self.disposals {
@@ -546,6 +707,12 @@ impl Books {
             out.extend_from_slice(&c.at.to_le_bytes());
             put_key(&mut out, &c.sale);
             out.extend_from_slice(&c.minor.to_le_bytes());
+        }
+        if with_bills {
+            put_u32(&mut out, self.bills.len());
+            for b in &self.bills {
+                put_bill(&mut out, b);
+            }
         }
         out
     }
@@ -558,18 +725,25 @@ impl Books {
         if r.take(4)? != MAGIC_BUNDLE {
             return Err(DecodeError::BadMagic);
         }
-        let (with_mode, with_tips, with_notes) = match r.u8()? {
-            wire::VERSION => (false, false, false),
-            VERSION_LIGHTNING => (true, false, false),
-            VERSION_TIPS => (true, true, false),
-            VERSION_NOTES => (true, true, true),
+        let (with_mode, with_tips, with_notes, with_bills) = match r.u8()? {
+            wire::VERSION => (false, false, false, false),
+            VERSION_LIGHTNING => (true, false, false, false),
+            VERSION_TIPS => (true, true, false, false),
+            VERSION_NOTES => (true, true, true, false),
+            VERSION_BILLS => (true, true, true, true),
             v => return Err(DecodeError::UnsupportedVersion(v)),
+        };
+        let fields = SaleFields {
+            mode: with_mode,
+            tips: with_tips,
+            notes: with_notes,
+            references: with_bills,
         };
         let high_water = get_marks(&mut r)?;
         let n = r.count(MAX_SALES, MIN_SALE)?;
         let mut sales: Vec<Sale> = Vec::with_capacity(n.min(4096));
         for _ in 0..n {
-            let sale = get_sale(&mut r, with_mode, with_tips, with_notes)?;
+            let sale = get_sale(&mut r, fields)?;
             if sales.last().is_some_and(|p| p.key >= sale.key) {
                 return Err(DecodeError::NonCanonical("sales are not in order"));
             }
@@ -597,6 +771,18 @@ impl Books {
             }
             returns.push(c);
         }
+        let mut bills: Vec<Bill> = Vec::new();
+        if with_bills {
+            let n = r.count(MAX_BILLS, MIN_BILL)?;
+            bills.reserve(n.min(4096));
+            for _ in 0..n {
+                let b = get_bill(&mut r)?;
+                if bills.last().is_some_and(|p| p.key >= b.key) {
+                    return Err(DecodeError::NonCanonical("bills are not in order"));
+                }
+                bills.push(b);
+            }
+        }
         r.finish()?;
         // A version 2 bundle holds a sale paid over Lightning, or it would
         // have been written as version 1 (the bundle encodes back to itself).
@@ -612,10 +798,38 @@ impl Books {
             ));
         }
         // A version 4 bundle holds a sale with a note, for the same reason.
-        if with_notes && !sales.iter().any(|s| s.note.is_some()) {
+        if with_notes && !with_bills && !sales.iter().any(|s| s.note.is_some()) {
             return Err(DecodeError::NonCanonical(
                 "a version 4 bundle holds no sale with a note",
             ));
+        }
+        // A version 5 bundle holds a reference or a bill, for the same reason.
+        if with_bills && bills.is_empty() && !sales.iter().any(|s| s.till_reference.is_some()) {
+            return Err(DecodeError::NonCanonical(
+                "a version 5 bundle holds no reference and no bill",
+            ));
+        }
+        // A bill's counter is listed, and each part that is a sale names a
+        // sale the bundle holds, in at most one bill.
+        let mut taken: BTreeSet<SaleKey> = BTreeSet::new();
+        for b in &bills {
+            if !high_water.contains_key(&b.key.counter) {
+                return Err(DecodeError::NonCanonical("a bill's counter is not listed"));
+            }
+            for p in &b.parts {
+                if let BillPartNote::Sale(key) = p {
+                    if sales.binary_search_by(|s| s.key.cmp(key)).is_err() {
+                        return Err(DecodeError::NonCanonical(
+                            "a part of a bill is a sale the bundle does not hold",
+                        ));
+                    }
+                    if !taken.insert(*key) {
+                        return Err(DecodeError::NonCanonical(
+                            "a sale is a part of more than one bill",
+                        ));
+                    }
+                }
+            }
         }
         // The marks must be the ones the sales give.
         let mut derived: BTreeMap<DeviceId, Option<u32>> =
@@ -637,6 +851,7 @@ impl Books {
             returns: Vec::new(),
             high_water,
             staff: Vec::new(),
+            bills,
         };
         books
             .with_disposals(disposals)

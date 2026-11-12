@@ -116,6 +116,7 @@ pub fn slot_file(slot: Slot) -> String {
         Slot::Exposure => "exposure.bin".to_string(),
         Slot::Pause => "pause.bin".to_string(),
         Slot::Desk => "desk.bin".to_string(),
+        Slot::Bills => "bills.bin".to_string(),
         Slot::Sale(index) => format!("sale-{index}.bin"),
         Slot::Swap(index, n) => format!("swap-{index}-{n}.bin"),
     }
@@ -173,6 +174,8 @@ pub struct Loaded {
     pub pause: Option<Vec<u8>>,
     /// The counter's own state (`OBMG`).
     pub desk: Option<Vec<u8>>,
+    /// The bills (`OBM[`, CR-253).
+    pub bills: Option<Vec<u8>>,
     /// Each sale (`OBML`) with the index of its slot, lowest first.
     pub sales: Vec<(u32, Vec<u8>)>,
     /// Each swap file (CR-220) with the sale's index and the swap's number,
@@ -197,6 +200,7 @@ impl Loaded {
             exposure: self.exposure.as_deref(),
             pause: self.pause.as_deref(),
             desk: self.desk.as_deref(),
+            bills: self.bills.as_deref(),
             sales: self.sales.iter().map(|(i, b)| (*i, b.as_slice())).collect(),
         }
     }
@@ -393,6 +397,7 @@ impl DirStore {
             exposure: self.read(&slot_file(Slot::Exposure))?,
             pause: self.read(&slot_file(Slot::Pause))?,
             desk: self.read(&slot_file(Slot::Desk))?,
+            bills: self.read(&slot_file(Slot::Bills))?,
             ..Loaded::default()
         };
         if let Some(bytes) = self.read(CHECKED_FILE)? {

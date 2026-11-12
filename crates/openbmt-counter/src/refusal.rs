@@ -67,6 +67,8 @@ pub enum OpenRefused<E> {
     BadName,
     /// CR-206: the note on the sale is not plain text of 1 to 64 characters.
     BadNote,
+    /// CR-245: the till's reference on the sale does not fit.
+    BadReference,
     /// CR-03: the next index could not be stored, so no address was handed
     /// out.
     AddressNotStored(StoreFault<E>),
@@ -90,6 +92,7 @@ impl<E> OpenRefused<E> {
             Self::NoAddress | Self::AddressInUse => "CR-02",
             Self::BadName => "CR-61",
             Self::BadNote => "CR-206",
+            Self::BadReference => "CR-245",
             Self::AddressNotStored(_) => "CR-03",
             Self::Store(_) => "CR-40",
         }
@@ -142,6 +145,10 @@ impl<E: fmt::Display> fmt::Display for OpenRefused<E> {
             Self::BadNote => write!(
                 f,
                 "a note is plain text of 1 to 64 characters with no control character"
+            ),
+            Self::BadReference => write!(
+                f,
+                "a reference is 1 to 32 characters of letters, digits and - _ / # ."
             ),
             Self::AddressNotStored(e) => write!(
                 f,
@@ -308,6 +315,154 @@ impl<E: fmt::Display> fmt::Display for NoteRefused<E> {
 }
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for NoteRefused<E> {}
+
+/// Why a bill, a tab or a reference was refused (CR-245 to CR-253).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BillRefused<E> {
+    /// CR-11: the counter has no sale with this index.
+    UnknownSale(u32),
+    /// CR-246: the counter has no bill with this number.
+    UnknownBill(u32),
+    /// CR-245: the reference is not 1 to 32 characters of the allowed ones.
+    BadReference,
+    /// CR-245: the sale or the bill has a reference already.
+    AlreadyReferenced,
+    /// CR-246: the amount is nothing, or more than the largest amount.
+    BadAmount,
+    /// CR-253: 256 bills are open already.
+    TooManyOpen,
+    /// CR-253: the bill has 32 parts already.
+    TooManyParts,
+    /// CR-246: the bill has ended.
+    NotOpen,
+    /// CR-248: the sale is a part of a bill already (joining is final).
+    SaleInABill(u32),
+    /// CR-248: the sale ended with nothing received, so it cannot be a part.
+    SaleEnded,
+    /// CR-248: the sale is in another currency than the bill.
+    OtherCurrency,
+    /// CR-251: the bill is not a tab, so its amount does not change.
+    NotATab,
+    /// CR-251: a tab's amount is not lowered below what it has received.
+    BelowReceived {
+        /// What the tab has received, in minor units.
+        received: u64,
+    },
+    /// CR-251: a tab is finished only when it has received its amount.
+    NotReached {
+        /// What is left, in minor units.
+        left: u64,
+    },
+    /// CR-251: a bill that is not a tab is settled by what it receives.
+    NotAFinishableBill,
+    /// CR-252: the bill has received its amount, so there is nothing to close
+    /// short.
+    NothingShort,
+    /// CR-252, CR-84: closing short needs the manager's PIN.
+    NeedsManager,
+    /// CR-252: a part counts or is pending, so the bill cannot be cancelled.
+    HasPart,
+    /// CR-250: the bill cannot be split this way.
+    BadSplit(crate::bills::SplitError),
+    /// CR-40: a write failed.
+    Store(StoreFault<E>),
+}
+
+impl<E> BillRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::UnknownSale(_) => "CR-11",
+            Self::UnknownBill(_) | Self::BadAmount | Self::NotOpen => "CR-246",
+            Self::BadReference | Self::AlreadyReferenced => "CR-245",
+            Self::TooManyOpen | Self::TooManyParts => "CR-253",
+            Self::SaleInABill(_) | Self::SaleEnded | Self::OtherCurrency => "CR-248",
+            Self::NotATab | Self::BelowReceived { .. } => "CR-251",
+            Self::NotReached { .. } | Self::NotAFinishableBill => "CR-251",
+            Self::NothingShort | Self::NeedsManager | Self::HasPart => "CR-252",
+            Self::BadSplit(_) => "CR-250",
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for BillRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::UnknownSale(i) => write!(f, "there is no sale with index {i}"),
+            Self::UnknownBill(n) => write!(f, "there is no bill with number {n}"),
+            Self::BadReference => write!(
+                f,
+                "a reference is 1 to 32 characters of letters, digits and - _ / # ."
+            ),
+            Self::AlreadyReferenced => write!(f, "it has a reference already"),
+            Self::BadAmount => write!(f, "a bill is for more than nothing and a limited amount"),
+            Self::TooManyOpen => write!(f, "256 bills are open already"),
+            Self::TooManyParts => write!(f, "the bill has 32 parts already"),
+            Self::NotOpen => write!(f, "the bill has ended"),
+            Self::SaleInABill(n) => write!(f, "the sale is a part of bill {n} already"),
+            Self::SaleEnded => write!(f, "the sale ended with nothing received"),
+            Self::OtherCurrency => write!(f, "the sale is in another currency than the bill"),
+            Self::NotATab => write!(f, "only a tab's amount changes"),
+            Self::BelowReceived { received } => write!(
+                f,
+                "the tab has received {received}, so its amount is not lowered below that"
+            ),
+            Self::NotReached { left } => {
+                write!(f, "the tab has not received its amount: {left} is left")
+            }
+            Self::NotAFinishableBill => write!(f, "only a tab is finished by the cashier"),
+            Self::NothingShort => write!(f, "the bill has received its amount"),
+            Self::NeedsManager => write!(f, "closing short needs the manager's PIN"),
+            Self::HasPart => write!(
+                f,
+                "a part counts or is pending, so the bill cannot be cancelled"
+            ),
+            Self::BadSplit(e) => match e {
+                crate::bills::SplitError::People => {
+                    write!(f, "a bill is split between 2 and 20 people")
+                }
+                crate::bills::SplitError::TooLittle => {
+                    write!(f, "there is too little left to split that way")
+                }
+            },
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for BillRefused<E> {}
+
+/// Why a bitcoin part was not opened for a bill (CR-248).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PartRefused<E> {
+    /// The bill refused the part.
+    Bill(BillRefused<E>),
+    /// The sale was not opened.
+    Open(OpenRefused<E>),
+}
+
+impl<E> PartRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::Bill(e) => e.rule(),
+            Self::Open(e) => e.rule(),
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for PartRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Bill(e) => e.fmt(f),
+            Self::Open(e) => e.fmt(f),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for PartRefused<E> {}
 
 /// Why a sale was not cancelled (CR-07).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -667,6 +822,8 @@ pub enum LoadError {
     /// CR-234: the stored ranges do not read back or do not check against the
     /// owner root and this counter, or the pairing's first range is refused.
     Ranges(DecodeError),
+    /// CR-253: the stored bills do not read back.
+    Bills(DecodeError),
     /// CR-42: the stored record chain does not verify.
     Records(ChainError),
     /// CR-42, CR-81: the stored records could not be read, or one does not
@@ -690,6 +847,7 @@ impl fmt::Display for LoadError {
             Self::Pause(e) => write!(f, "the stored pause state does not read back: {e}"),
             Self::Desk(e) => write!(f, "the stored counter state does not read back: {e}"),
             Self::Ranges(e) => write!(f, "the stored ranges do not read back or check: {e}"),
+            Self::Bills(e) => write!(f, "the stored bills do not read back: {e}"),
             Self::Records(e) => write!(f, "the stored records do not verify: {e}"),
             Self::RecordsUnread(e) => write!(f, "the stored records cannot be read: {e}"),
         }

@@ -1,5 +1,6 @@
 //! Tests. Each test is named for the rule it proves (`bk_NN_...`).
 
+mod bills;
 mod export;
 mod fixture;
 mod hostile;

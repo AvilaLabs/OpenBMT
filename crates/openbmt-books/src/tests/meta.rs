@@ -14,7 +14,8 @@ use crate::{BooksError, ExportError, OpenError, SaleKey, SealError};
 
 const RULES: &str = include_str!("../../../../docs/BOOKS-RULES.md");
 
-const TEST_SOURCES: [&str; 12] = [
+const TEST_SOURCES: [&str; 13] = [
+    include_str!("bills.rs"),
     include_str!("input.rs"),
     include_str!("lightning.rs"),
     include_str!("sale.rs"),
@@ -45,13 +46,13 @@ fn sources() -> String {
 #[test]
 fn the_rules_file_defines_its_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 42, "{ids:?}");
-    assert!(ids.contains("BK-01") && ids.contains("BK-42"));
+    assert_eq!(ids.len(), 48, "{ids:?}");
+    assert!(ids.contains("BK-01") && ids.contains("BK-48"));
     let numbers: Vec<u32> = ids
         .iter()
         .map(|i| i[3..].parse().expect("a number"))
         .collect();
-    assert_eq!(numbers, (1..=42).collect::<Vec<u32>>());
+    assert_eq!(numbers, (1..=48).collect::<Vec<u32>>());
 }
 
 #[test]
@@ -93,6 +94,7 @@ fn every_rule_the_code_names_exists() {
         include_str!("../model.rs"),
         include_str!("../money.rs"),
         include_str!("../sealed.rs"),
+        include_str!("../till.rs"),
         include_str!("../value.rs"),
     ] {
         for (at, _) in file.match_indices("BK-") {

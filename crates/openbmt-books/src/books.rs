@@ -5,14 +5,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use openbmt_core::identity::DeviceId;
 use openbmt_core::records::{Chain, DeviceList, RecordKind};
-use openbmt_counter::{Currency, Event, Role, StaffEvent};
+use openbmt_core::wire::DecodeError;
+use openbmt_counter::{BillKind, Currency, Event, Role, StaffEvent};
 
 use crate::date::{Date, MAX_OFFSET_MINUTES, MAX_UNIX, MIN_OFFSET_MINUTES};
 use crate::error::BooksError;
 use crate::model::{
-    CashReturn, Counting, Disposal, DisposalKind, LatePayment, LightningPayment, OverrideNote,
-    Payment, PaymentList, PaymentMode, PosFacts, PosMark, Sale, SaleId, SaleKey, SaleState,
-    StaffNote, TipNote,
+    Bill, BillEndNote, BillKey, BillPartNote, CashReturn, Counting, Disposal, DisposalKind,
+    LatePayment, LightningPayment, OverrideNote, Payment, PaymentList, PaymentMode, PosFacts,
+    PosMark, Sale, SaleId, SaleKey, SaleState, StaffNote, TipNote,
 };
 use crate::value::{UnknownField, Value};
 
@@ -24,6 +25,10 @@ pub const MAX_SALES: usize = 1_000_000;
 pub const MAX_LINES: usize = 1_000_000;
 /// The most late payments, and the most overrides, on one sale.
 pub const MAX_PER_SALE: usize = 16;
+/// The most bills in one set of books.
+pub const MAX_BILLS: usize = 1_000_000;
+/// BK-44: the most parts one bill has (CR-253).
+pub const MAX_BILL_PARTS: usize = openbmt_counter::MAX_BILL_PARTS;
 
 /// BK-15: the totals of one day, for the end-of-day screen (DESIGN §2.5).
 /// Sales only: there is no wallet balance here.
@@ -59,6 +64,7 @@ pub struct Books {
     pub(crate) returns: Vec<CashReturn>,
     pub(crate) high_water: BTreeMap<DeviceId, Option<u32>>,
     pub(crate) staff: Vec<StaffNote>,
+    pub(crate) bills: Vec<Bill>,
 }
 
 fn check_time(at: u64) -> Result<(), BooksError> {
@@ -119,6 +125,7 @@ fn new_sale(key: SaleKey, event: &Event) -> Option<Sale> {
         pos: PosMark::NotRecorded,
         payment_mode: PaymentMode::OnChain,
         note: None,
+        till_reference: None,
     })
 }
 
@@ -162,6 +169,118 @@ fn late(sale: &mut Sale, at: u64, txid: [u8; 32], sats: u64) -> Result<(), Books
     Ok(())
 }
 
+fn bad_bill(counter: DeviceId, seq: u64, why: &'static str) -> BooksError {
+    BooksError::BadEvent {
+        counter,
+        seq,
+        error: DecodeError::NonCanonical(why),
+    }
+}
+
+/// BK-44: apply one record of a bill. `sales` are the sale indexes the
+/// counter has opened so far, and `taken` the sales that are parts already.
+fn fold_bill(
+    bills: &mut BTreeMap<u32, Bill>,
+    taken: &mut BTreeSet<SaleKey>,
+    sales: &BTreeMap<u32, (Sale, Pending)>,
+    counter: DeviceId,
+    seq: u64,
+    event: &Event,
+) -> Result<(), BooksError> {
+    let Some(number) = event.bill_number() else {
+        return Ok(());
+    };
+    if let Event::BillOpened {
+        at,
+        kind,
+        amount,
+        currency,
+        ..
+    } = event
+    {
+        if bills.contains_key(&number) {
+            return Err(bad_bill(counter, seq, "a bill is opened twice"));
+        }
+        bills.insert(
+            number,
+            Bill {
+                key: BillKey { counter, number },
+                opened_at: *at,
+                kind: *kind,
+                amount_minor: amount.0,
+                currency: *currency,
+                reference: None,
+                parts: Vec::new(),
+                ended: None,
+            },
+        );
+        return Ok(());
+    }
+    let bill = bills
+        .get_mut(&number)
+        .ok_or_else(|| bad_bill(counter, seq, "a record is for a bill that was never opened"))?;
+    if let Event::BillReferenced { reference, .. } = event {
+        // BK-43: the first reference stands.
+        bill.reference.get_or_insert_with(|| reference.clone());
+        return Ok(());
+    }
+    if bill.ended.is_some() {
+        return Err(bad_bill(counter, seq, "a bill changes after it ended"));
+    }
+    match event {
+        Event::BillAmount { amount, .. } => {
+            if bill.kind != BillKind::Tab {
+                return Err(bad_bill(
+                    counter,
+                    seq,
+                    "the amount of a bill that is not a tab changes",
+                ));
+            }
+            bill.amount_minor = amount.0;
+        }
+        Event::BillPartPaid { amount, way, .. } => {
+            if bill.parts.len() >= MAX_BILL_PARTS {
+                return Err(BooksError::TooMany);
+            }
+            bill.parts.push(BillPartNote::Other {
+                minor: amount.0,
+                way: *way,
+            });
+        }
+        Event::BillPartSale { sale, .. } => {
+            let key = SaleKey {
+                counter,
+                index: *sale,
+            };
+            if !sales.contains_key(sale) {
+                return Err(bad_bill(
+                    counter,
+                    seq,
+                    "a part is a sale that was never opened",
+                ));
+            }
+            if !taken.insert(key) {
+                return Err(bad_bill(counter, seq, "a sale is a part of two bills"));
+            }
+            if bill.parts.len() >= MAX_BILL_PARTS {
+                return Err(BooksError::TooMany);
+            }
+            bill.parts.push(BillPartNote::Sale(key));
+        }
+        Event::BillEnded {
+            at, how, unpaid, ..
+        } => {
+            bill.ended = Some(BillEndNote {
+                how: *how,
+                at: *at,
+                unpaid_minor: unpaid.0,
+            });
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// BK-05: apply one event to its sale.
 fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), BooksError> {
     match event {
@@ -180,6 +299,18 @@ fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), Boo
         // BK-41: the note is the owner's; a second record for the same sale
         // is a retry, and the last one stands.
         Event::Noted { note, .. } => sale.note = Some(note.clone()),
+        // BK-43: the counter takes no second reference; if two records name
+        // one sale, the first stands.
+        Event::Referenced { reference, .. } => {
+            sale.till_reference.get_or_insert_with(|| reference.clone());
+        }
+        // The records of a bill are folded by `fold_bill`.
+        Event::BillReferenced { .. }
+        | Event::BillOpened { .. }
+        | Event::BillAmount { .. }
+        | Event::BillPartPaid { .. }
+        | Event::BillEnded { .. }
+        | Event::BillPartSale { .. } => {}
         Event::Expired { .. } => sale.state = SaleState::Expired,
         Event::Cancelled { .. } => sale.state = SaleState::Cancelled,
         Event::PaidAtOnce {
@@ -387,6 +518,8 @@ impl Books {
                 })?;
             let mut folding: BTreeMap<u32, (Sale, Pending)> = BTreeMap::new();
             let mut cash_returns: Vec<CashReturn> = Vec::new();
+            let mut bills: BTreeMap<u32, Bill> = BTreeMap::new();
+            let mut taken: BTreeSet<SaleKey> = BTreeSet::new();
             let mut high: Option<u32> = None;
             for record in chain.records() {
                 if &record.author != counter {
@@ -433,14 +566,25 @@ impl Books {
                         seq: record.seq,
                     });
                 }
+                if let Some(at) = event_time(&event) {
+                    check_time(at)?;
+                }
+                // BK-44: the records of a bill name a bill, not a sale, and
+                // do not move the high-water mark.
+                if event.bill_number().is_some() {
+                    fold_bill(
+                        &mut bills, &mut taken, &folding, *counter, record.seq, &event,
+                    )?;
+                    if books.bills.len().saturating_add(bills.len()) > MAX_BILLS {
+                        return Err(BooksError::TooMany);
+                    }
+                    continue;
+                }
                 let index = event.index();
                 let key = SaleKey {
                     counter: *counter,
                     index,
                 };
-                if let Some(at) = event_time(&event) {
-                    check_time(at)?;
-                }
                 high = Some(high.map_or(index, |h| h.max(index)));
                 if let Some(sale) = new_sale(key, &event) {
                     if folding.contains_key(&index) {
@@ -485,9 +629,11 @@ impl Books {
                 books.sales.push(sale);
             }
             books.returns.append(&mut cash_returns);
+            books.bills.extend(bills.into_values());
             books.high_water.insert(*counter, high);
         }
         books.sales.sort_by_key(|s| s.key);
+        books.bills.sort_by_key(|b| b.key);
         books.returns.sort_by_key(|r| r.at);
         books.check_return_sums()?;
         Ok(books)
@@ -595,6 +741,42 @@ impl Books {
         &self.staff
     }
 
+    /// BK-44: the bills and tabs, in the order of counter and number.
+    pub fn bills(&self) -> &[Bill] {
+        &self.bills
+    }
+
+    /// BK-44: one bill.
+    pub fn bill(&self, key: &BillKey) -> Option<&Bill> {
+        self.bills
+            .binary_search_by(|b| b.key.cmp(key))
+            .ok()
+            .and_then(|i| self.bills.get(i))
+    }
+
+    /// BK-44: what a bill received in bitcoin and what it received another
+    /// way, in minor units. A bitcoin part counts with its sale's own amount,
+    /// without the tip, once the sale is paid by its own rules (accepted,
+    /// confirmed or final). A part paid another way is the cashier's word.
+    pub fn bill_received(&self, bill: &Bill) -> Result<(u64, u64), BooksError> {
+        let (mut bitcoin, mut other) = (0u64, 0u64);
+        for part in &bill.parts {
+            match part {
+                BillPartNote::Sale(key) => {
+                    if let Some(sale) = self.sale(key).filter(|s| s.state.is_paid()) {
+                        bitcoin = bitcoin
+                            .checked_add(sale.amount_minor)
+                            .ok_or(BooksError::Overflow)?;
+                    }
+                }
+                BillPartNote::Other { minor, .. } => {
+                    other = other.checked_add(*minor).ok_or(BooksError::Overflow)?;
+                }
+            }
+        }
+        Ok((bitcoin, other))
+    }
+
     /// One sale.
     pub fn sale(&self, key: &SaleKey) -> Option<&Sale> {
         self.sales
@@ -675,6 +857,13 @@ fn event_time(event: &Event) -> Option<u64> {
         Event::Opened { at, .. }
         | Event::Requoted { at, .. }
         | Event::Noted { at, .. }
+        | Event::Referenced { at, .. }
+        | Event::BillReferenced { at, .. }
+        | Event::BillOpened { at, .. }
+        | Event::BillAmount { at, .. }
+        | Event::BillPartPaid { at, .. }
+        | Event::BillEnded { at, .. }
+        | Event::BillPartSale { at, .. }
         | Event::Expired { at, .. }
         | Event::Cancelled { at, .. }
         | Event::PaidAtOnce { at, .. }

@@ -26,7 +26,8 @@
 //! 9. [`refund`]: the cashier's side of a refund (CR-60 to CR-74).
 //! 10. [`staff`]: the record of a change to the cashiers (CR-143).
 //! 11. [`totals`]: the day's totals from the records (CR-152).
-//! 12. [`counter`]: the [`Counter`] itself.
+//! 12. [`bills`]: bills, tabs and the till's reference (CR-245 to CR-253).
+//! 13. [`counter`]: the [`Counter`] itself.
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.
@@ -44,6 +45,8 @@
 )]
 
 pub mod batch_held;
+pub mod bill_say;
+pub mod bills;
 pub mod confirm_held;
 pub mod counter;
 pub mod desk;
@@ -66,10 +69,15 @@ pub mod totals;
 mod tests;
 
 pub use batch_held::{batch_digest, BatchHeld};
+pub use bills::{
+    reference_ok, split_shares, Bill, BillEnd, BillKind, BillPart, Bills, Ended, PartWay,
+    SplitError, KEEP_ENDED_SECS, MAGIC_BILLS, MAX_BILL_AMOUNT, MAX_BILL_PARTS, MAX_OPEN_BILLS,
+    MAX_REFERENCE_BYTES,
+};
 pub use confirm_held::{ConfirmHeld, CONFIRM_HELD_LEN};
 pub use counter::{
-    sale_payment_id, Actor, BlockEffect, BlockTaken, Counter, Facts, OpenFacts, Opened, Overridden,
-    Pairing, SaleExtras, Settled, Sightings, Stored, SwapPaid,
+    sale_payment_id, Actor, BillView, BlockEffect, BlockTaken, Counter, Facts, OpenFacts, Opened,
+    Overridden, Pairing, SaleExtras, Settled, Sightings, Stored, SwapPaid,
 };
 pub use desk::{Desk, OverrideEntry, Role};
 pub use events::Event;
@@ -86,10 +94,10 @@ pub use refund::{
     MAX_REFUNDS_PER_SALE,
 };
 pub use refusal::{
-    BatchTakeRefused, BlockError, CancelRefused, CommandRefused, DestinationRefused,
+    BatchTakeRefused, BillRefused, BlockError, CancelRefused, CommandRefused, DestinationRefused,
     HeartbeatRefused, JudgeError, LightningRefused, LoadError, NoteRefused, OpenRefused,
-    OverrideRefused, RangeTakeRefused, RefundRefused, RequoteRefused, SightingError, StaffRefused,
-    TotalsRefused, WithdrawRefused,
+    OverrideRefused, PartRefused, RangeTakeRefused, RefundRefused, RequoteRefused, SightingError,
+    StaffRefused, TotalsRefused, WithdrawRefused,
 };
 pub use sale::{End, LightningPaid, OverrideMark, OwnCheck, PosState, RequestDays, Sale, Segment};
 pub use screen::{Color, Next, Report, Screen, State, Why};

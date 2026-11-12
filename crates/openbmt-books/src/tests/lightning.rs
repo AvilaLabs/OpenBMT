@@ -85,14 +85,14 @@ fn bk_32_the_ledger_has_the_mode_the_hash_the_amount_and_the_time() {
     assert!(ln.contains(&MSAT.to_string()));
     assert!(
         ln.ends_with(&format!(
-            ",lightning,{hash_hex},{MSAT},2025-02-01T01:00:17Z,,"
+            ",lightning,{hash_hex},{MSAT},2025-02-01T01:00:17Z,,,,,,,,"
         )),
         "{ln}"
     );
     assert!(ln.contains("paid over Lightning"));
     assert!(!ln.contains("the final record names"));
     let chain = rows.iter().find(|r| r.contains("on-chain")).expect("a row");
-    assert!(chain.ends_with(",on-chain,,,,,"), "{chain}");
+    assert!(chain.ends_with(",on-chain,,,,,,,,,,,"), "{chain}");
 }
 
 #[test]

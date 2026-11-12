@@ -6,7 +6,8 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 25] = [
+const TEST_SOURCES: [&str; 26] = [
+    include_str!("bills.rs"),
     include_str!("currency.rs"),
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
@@ -37,7 +38,7 @@ const TEST_SOURCES: [&str; 25] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 94] = [
+const NOT_HERE: [(&str, &str); 95] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -496,6 +497,11 @@ const NOT_HERE: [(&str, &str); 94] = [
         "CR-244",
         "the words are listed in `openbmt-counter-node`, `openbmt-counter-ffi` and the app (SC-12)",
     ),
+    (
+        "CR-254",
+        "the Paid screen is the Android app's; its tests are the app's JVM tests \
+         (`apps/counter-android`), and the library gives it the reference (`openbmt-counter-ffi`)",
+    ),
 ];
 
 /// The rule number at the start of `rest` (what follows `CR-`): every digit,
@@ -514,9 +520,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_one_hundred_and_sixty_seven_rules() {
+fn the_rules_file_defines_two_hundred_and_six_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 195);
+    assert_eq!(ids.len(), 206);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -557,6 +563,7 @@ fn the_rules_file_defines_one_hundred_and_sixty_seven_rules() {
             && ids.contains("CR-216")
             && ids.contains("CR-217")
             && ids.contains("CR-226")
+            && ids.contains("CR-255")
     );
 }
 

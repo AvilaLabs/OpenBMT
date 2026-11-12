@@ -409,3 +409,44 @@ fn cr_212_a_note_on_a_sale_changes_nothing_the_reader_is_told() {
     ];
     assert_eq!(facts_of(&plain).unwrap(), facts_of(&noted).unwrap());
 }
+
+// CR-245: the till's reference is the till's own number, so the reader is
+// given it with the sale's events; the first one stands.
+#[test]
+fn cr_245_the_till_reference_is_given_to_the_reader_with_the_sale() {
+    let referenced = |at: u64, text: &str| Event::Referenced {
+        index: 0,
+        at,
+        reference: text.to_string(),
+    };
+    let events = [
+        opened(0, 10, 500),
+        referenced(11, "CHK-17"),
+        referenced(12, "CHK-18"),
+        at_once(0, 20),
+        final_(0, 30),
+    ];
+    let f = one(&events);
+    assert_eq!(f.till_reference.as_deref(), Some("CHK-17"));
+    assert!(f.is_paid_now());
+    // A sale with none has none, and the records of a bill change nothing.
+    let plain = [opened(0, 10, 500), at_once(0, 20)];
+    assert_eq!(one(&plain).till_reference, None);
+    let with_bill = [
+        opened(0, 10, 500),
+        Event::BillOpened {
+            number: 0,
+            at: 11,
+            kind: openbmt_counter::BillKind::Bill,
+            amount: Amount(500),
+            currency: usd(),
+        },
+        Event::BillReferenced {
+            number: 0,
+            at: 12,
+            reference: "TAB-1".to_string(),
+        },
+        at_once(0, 20),
+    ];
+    assert_eq!(facts_of(&with_bill).unwrap(), facts_of(&plain).unwrap());
+}

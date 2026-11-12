@@ -23,6 +23,9 @@ use openbmt_core::say::{sats, Quoted, Tone, Who, Words};
 use openbmt_watch::say::RefusalGroup;
 use openbmt_watch::Problem;
 
+use crate::bill_say::{
+    all_bill_words, needed, WORDS_NEEDED_CR_245_BAD, WORDS_NEEDED_CR_253_UNREAD,
+};
 use crate::desk::Role;
 use crate::heartbeat::{HeartbeatView, NotVerified};
 use crate::refund::{RefundState, RefundView};
@@ -589,6 +592,7 @@ impl<E: Display> OpenRefused<E> {
                 "CR-61",
             ),
             Self::BadNote => note_not_read(),
+            Self::BadReference => needed(WORDS_NEEDED_CR_245_BAD).code("CR-245"),
             Self::AddressNotStored(fault) => store_failed(
                 fault,
                 "Payment code not saved",
@@ -1248,6 +1252,11 @@ impl LoadError {
             // CR-234: the saved ranges of a counter that makes its own
             // addresses are the same case as saved batches, and are told the
             // same.
+            Self::Bills(e) => {
+                return needed(WORDS_NEEDED_CR_253_UNREAD)
+                    .code("CR-253")
+                    .detail(e.to_string())
+            }
             Self::Batches(e) | Self::Ranges(e) => (
                 "Saved addresses unreadable",
                 "The counter's saved payment codes do not read back, so it did not start and nothing was changed.",
@@ -2032,6 +2041,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("AddressInUse", OpenRefused::AddressInUse),
         ("BadName", OpenRefused::BadName),
         ("BadNote", OpenRefused::BadNote),
+        ("BadReference", OpenRefused::BadReference),
         ("AddressNotStored", OpenRefused::AddressNotStored(w())),
         ("Store", OpenRefused::Store(w())),
         ("Store/Record", OpenRefused::Store(record_fault())),
@@ -2246,6 +2256,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("Exposure", LoadError::Exposure(DecodeError::Truncated)),
         ("Pause", LoadError::Pause(DecodeError::Truncated)),
         ("Desk", LoadError::Desk(DecodeError::Truncated)),
+        ("Bills", LoadError::Bills(DecodeError::Truncated)),
         (
             "Records",
             LoadError::Records(openbmt_core::records::ChainError::NotACheckIn),
@@ -2375,6 +2386,7 @@ pub fn all_words() -> Vec<(String, Words)> {
     for (name, r) in totals {
         all.push((format!("TotalsRefused::{name}"), r.words()));
     }
+    all.extend(all_bill_words());
     for state in ALL_REFUND_STATES {
         all.push((
             format!("RefundState::{}", refund_state_name(state)),

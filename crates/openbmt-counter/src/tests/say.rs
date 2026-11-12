@@ -4,6 +4,7 @@ use openbmt_core::policy::{OffReason, WaitReason};
 use openbmt_core::say::{check, check_distinct, Quoted, Tone, Who};
 use openbmt_watch::Problem;
 
+use crate::bill_say::is_placeholder;
 use crate::desk::Role;
 use crate::say::{
     all_words, next_name, refund_state_name, sample_screens, state_name, why_name,
@@ -14,7 +15,28 @@ use crate::{Actor, RefundState, RefundView};
 
 #[test]
 fn sc_12_every_word_keeps_the_rules() {
-    assert_eq!(check_distinct(&all_words()), Ok(()));
+    // CR-255: the words of bills are placeholders until they are written;
+    // each is its own name, so they differ from each other and from every
+    // written word.
+    let all = all_words();
+    let (needed, written): (Vec<_>, Vec<_>) = all.into_iter().partition(|(_, w)| is_placeholder(w));
+    assert_eq!(check_distinct(&written), Ok(()));
+    for (name, w) in &needed {
+        assert!(
+            w.heading.chars().count() < 28
+                && w.what.ends_with('.')
+                && w.next.ends_with('.')
+                && w.what != w.next
+                && w.heading.starts_with("WORDS_NEEDED_CR_"),
+            "{name}"
+        );
+    }
+    let mut headings: Vec<&str> = needed.iter().map(|(_, w)| w.heading.as_str()).collect();
+    headings.sort_unstable();
+    headings.dedup();
+    // The same placeholder may stand for the same words under two names
+    // (the refusal of a sale and of a part), never for two rules' words.
+    assert_eq!(headings.len(), 27);
 }
 
 #[test]
