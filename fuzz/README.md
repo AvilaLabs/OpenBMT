@@ -110,7 +110,7 @@ exactly the input bytes.
 | `owner_lightning_node_text` | `parse_lightning_node`; a key that is read is read again from its 66 hex digits, in capitals, and before an address |
 | `lightning_decode` | `openbmt-lightning`, by the first byte: a BOLT 11 invoice (`decode`, the same text in lower case reads the same, and an invoice that passes `check` names the amount, the hash and the signer asked for), a Core Lightning rune (`check_rune`), an `lndconnect` address, or a node reply read as the answer to a lookup and to an invoice request on both kinds of node; none may panic, the same bytes give the same answer, and a payment is only paid for at least the amount asked |
 | `owner_range_outbox_decode` | `RangeOutbox::from_bytes` (the `OBM>` file of ranges waiting to be seen held); on success the list must encode back to exactly those bytes; half of the inputs follow the start of a valid file |
-| `owner_allocation_book_decode` | `AllocationBook::from_bytes` (the `OBM<` book of ranges given to counters); on success the book must encode back to exactly those bytes; half of the inputs follow the start of a valid book |
+| `owner_allocation_book_decode` | `AllocationBook::from_bytes` (the `OBM?` book of ranges given to counters); on success the book must encode back to exactly those bytes; half of the inputs follow the start of a valid book |
 
 ## Running
 

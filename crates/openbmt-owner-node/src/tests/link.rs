@@ -2231,7 +2231,7 @@ fn oa_105_the_shops_state_is_in_its_file_and_a_node_opened_again_reads_it_back()
     let dir = Dir::new();
     let node = paired_node(&dir);
     let bytes = fs::read(dir.path().join(OWN_STATE_FILE)).unwrap();
-    assert_eq!(&bytes[..5], b"OBM=\x01");
+    assert_eq!(&bytes[..5], b"OBM@\x01");
     assert_eq!(node.shop().to_bytes(), bytes);
     let again = OwnNode::open(dir.path(), id(1), PinnedWallet::from_text(SINGLE).unwrap()).unwrap();
     assert_eq!(again.shop().book(), node.shop().book());

@@ -9,7 +9,7 @@
 //! is forgotten later. Nothing is ever removed from the book.
 //!
 //! ```text
-//! book: "OBM<" | 1 | device count u32 LE
+//! book: "OBM?" | 1 | device count u32 LE
 //!         | per device, ascending by key: device (32) | range count u32 LE
 //!           | per range, in the order given: start u32 LE
 //! ```
@@ -27,7 +27,7 @@ use openbmt_core::pinned_wallet::IndexRange;
 use openbmt_core::wire::{self, DecodeError, Reader};
 
 /// The magic of the allocation book.
-pub const MAGIC_ALLOCATION_BOOK: [u8; 4] = *b"OBM<";
+pub const MAGIC_ALLOCATION_BOOK: [u8; 4] = *b"OBM?";
 
 /// OA-106, WL-23: indexes in a range.
 pub const RANGE_LEN: u32 = 1_000;

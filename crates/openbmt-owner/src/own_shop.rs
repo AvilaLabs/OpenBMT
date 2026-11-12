@@ -18,9 +18,9 @@
 //! The snapshot:
 //!
 //! ```text
-//! state: "OBM=" | 1 | owner root (32) | wallet hash (32)
+//! state: "OBM@" | 1 | owner root (32) | wallet hash (32)
 //!          | known settings: flag, then len u32 LE and the `OBMS` bytes
-//!          | book len u32 LE | book ("OBM<")
+//!          | book len u32 LE | book ("OBM?")
 //!          | waiting count u32 LE | per bundle, ascending by counter:
 //!            len u32 LE | bundle ("OBM/")
 //! ```
@@ -47,7 +47,7 @@ use crate::error::Refusal;
 use crate::own_book::{AllocationBook, BookError};
 
 /// OA-105: the magic of the shop's state.
-pub const MAGIC_OWN_STATE: [u8; 4] = *b"OBM=";
+pub const MAGIC_OWN_STATE: [u8; 4] = *b"OBM@";
 
 /// OA-109: the most bytes of a counter's request the phone reads.
 pub const MAX_REQUEST_BYTES: usize = 1_024;
