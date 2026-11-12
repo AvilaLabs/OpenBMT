@@ -138,15 +138,16 @@ private fun Controller.showAlertsAndNotes() {
     groupPage(OwnerLook.ALERTS, listOf(RowItem("Alerts") { showAlerts() }, RowItem("Notes") { showNotes() }))
 }
 
-private fun Controller.showSettingsAndPhone() {
+internal fun Controller.showSettingsAndPhone() {
     groupPage(
         OwnerLook.SETTINGS,
-        listOf(
+        listOfNotNull(
             RowItem("Settings") { showSettings() },
             RowItem("Change the PIN") { showChangePin(null) },
             RowItem("About") { showAbout() },
             RowItem(AppWords.watchSetting.heading) { showWatch() },
             RowItem(AppWords.torBuiltIn.heading) { showTor() },
+            tillStepsRow { showSettingsAndPhone() },
         ),
     )
 }

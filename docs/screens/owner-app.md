@@ -215,3 +215,106 @@ What Android shows for the background watch, which is not a screen of the app:
   Stop
 - Notification when Tor is not connected:
   Not watching: Tor is not connected. Instant sales are off.
+
+The first run: the welcome, the practice shop, the shop, the till and its
+steps, in `FirstRunWords`. `{till}` is the till's name as listed:
+
+| Key | Text |
+|---|---|
+| welcomeTitle | Take bitcoin in your shop. |
+| welcomeText | It goes straight to your own wallet. Nobody holds it for you, and nobody takes a cut of your sales. |
+| welcomeTry | Try it first |
+| welcomeSetup | Set up my shop |
+| welcomeTryNote | A practice shop on this phone. No money, no wallet, nothing to buy. |
+| practiceBanner | PRACTICE. No real money. |
+| practiceIntroTitle | Here is a sale, start to finish |
+| practiceIntroText | You ring it up, the customer scans the code with their bitcoin wallet, and the sale shows Paid. In your shop this runs on the counter, the phone or tablet at the till. |
+| practiceStart | Ring up a sale |
+| practiceAmountTitle | Amount |
+| practiceCharge | Charge |
+| practiceQrTitle | The customer scans this |
+| practiceQrText | In a real sale this code asks for the exact amount in bitcoin, at today's price. This one is not real and cannot be paid. |
+| practicePayButton | Pretend the customer paid |
+| practicePaidTitle | Paid |
+| practicePaidText | The bitcoin went to your wallet. Hand over the goods. |
+| practiceBooksTitle | Your books |
+| practiceBooksText | Every sale is recorded with its amount in your money and in bitcoin, ready for your bookkeeper. |
+| practiceRefundButton | Try a refund |
+| practiceRefundText | A refund is given in cash from the till straight away, or in bitcoin, which you approve later from your own wallet. |
+| practiceRefundDone | Refunded in cash |
+| practiceDoneTitle | That is the whole sale |
+| practiceDoneText | Setting up your shop takes about ten minutes. Making a wallet, if you need one, takes about an hour and can wait. |
+| practiceSetup | Set up my shop |
+| practiceAgain | Try again |
+| practiceDelete | Delete the practice shop |
+| practiceDeleted | Practice shop deleted. |
+| shopTitle | Your shop |
+| shopNameLabel | Shop name |
+| shopNameHint | As customers know it |
+| shopCurrencyLabel | Your money |
+| shopCurrencyNote | Prices are set in this money and shown in bitcoin at the till. |
+| shopNext | Next |
+| tillTitle | How do you take payments now? |
+| tillText | Bitcoin is added to your till as one more way to pay. Nothing else about your till changes. |
+| tillSearch | Search tills |
+| tillNone | No till. I write sales down or use a cash box. |
+| tillOther | Another till |
+| tillNext | Next |
+| tillStepsTitle | Add Bitcoin to {till} |
+| tillStepsIntro | Do this once, on the computer or tablet where you manage {till}. It takes about two minutes. |
+| tillStepsCashier | At the till, the cashier rings up the sale in {till} as usual, takes the bitcoin on the counter, then picks Bitcoin as the payment in {till}. |
+| tillStepsNoFee | {till} does not move the money, so it charges no fee for this payment type. |
+| tillStepsChecked | Steps read on {till}'s own help pages on 11 November 2026. Menus change; if yours looks different, look for "payment types". |
+| tillStepsDone | Done |
+| tillSquare | Square |
+| tillSquareStep1 | In Square Dashboard, open Settings, then Payments, then Payment methods. |
+| tillSquareStep2 | Open Custom payment methods and tap Add payment method. |
+| tillSquareStep3 | Name it Bitcoin. Square may not let you rename it later, so check the spelling. |
+| tillSquareStep4 | Turn on Activate on Point of Sale, then tap Add. |
+| tillSquareCashier | Cashier: Charge, then More, then Custom payment methods, then Bitcoin. |
+| tillSquareReports | Reports: bitcoin sales are under Other in the sales summary. |
+| tillToast | Toast |
+| tillToastStep1 | In Toast Web, open the payment settings and find Other payment options. |
+| tillToastStep2 | Tap Add and name it Bitcoin. |
+| tillToastStep3 | Set Show on POS to Yes, then Save and publish. |
+| tillToastCashier | Cashier: Pay, then Other payments, then Bitcoin. |
+| tillShopify | Shopify POS |
+| tillShopifyStep1 | In the Shopify POS app, open Settings, then Payment settings. |
+| tillShopifyStep2 | Open Custom payment types and tap Add custom payment type. |
+| tillShopifyStep3 | Name it Bitcoin, save, and turn it on. |
+| tillShopifyNote | It is on for every POS device unless you turn it off on one. |
+| tillLoyverse | Loyverse |
+| tillLoyverseStep1 | In Loyverse Back Office, open Settings, then Payment types. |
+| tillLoyverseStep2 | Tap Add payment type, pick Other, and name it Bitcoin. |
+| tillLoyverseStep3 | Choose the stores that take it, then Save. |
+| tillLoyverseReports | Reports: Sales by payment type shows bitcoin on its own line. |
+| tillOdoo | Odoo |
+| tillOdooStep1 | In Odoo, open Point of Sale, then Configuration, then Payment Methods. |
+| tillOdooStep2 | Tap New and name it Bitcoin. |
+| tillOdooStep3 | Pick a journal of its own for it, leave Integration as None, and choose the points of sale that take it. Save. |
+| tillHike | Hike |
+| tillHikeStep1 | In Hike, open Setup, then Payment Types. |
+| tillHikeStep2 | Tap Add Payment Type, name it Bitcoin, choose Custom, and save. |
+| tillHikeStep3 | Under Register Availability, choose the registers that take it. |
+| tillStoreHub | StoreHub |
+| tillStoreHubStep1 | In StoreHub BackOffice, open Settings, then Payment Options. |
+| tillStoreHubStep2 | Tap Add Payment Option, name it Bitcoin, and choose Custom. |
+| tillStoreHubStep3 | Choose the stores and registers, then Save. |
+| tillStoreHubStep4 | On each register, open the menu and tap Sync, twice. |
+| tillStoreHubCashier | Cashier: if Bitcoin is not shown at charge, tap Others. |
+| tillNoneText | The counter keeps every sale with its time, amount and who took it. Your books come from there. |
+| tillOtherText | Most tills let you add your own payment type. In your till's settings, look for "payment types" or "payment methods", add one called Bitcoin, and turn it on for your registers. |
+| tillOtherAsk | If your till has no such setting, the counter still keeps every sale for your books. |
+| moneyTitle | Where should the money go? |
+| moneyText | Bitcoin from your sales goes straight to a wallet you hold. OpenBMT never holds it and never makes your keys. |
+| moneyOwn | Use my own wallet |
+| moneyOwnNote | You already have a wallet and want sales to go there. |
+| moneyMake | Help me make a savings wallet |
+| moneyMakeNote | With a coin and your laptop, offline. About an hour. |
+| moneyLater | Set up the rest now, add the wallet later |
+| moneyLaterNote | The till says "Not taking bitcoin yet" until you do. |
+| moneyNotYet | This part is still being built. For now, setup continues with the test setup. |
+| whyTitle | Why we do it this way |
+| whyText1 | Any app can be hacked, ours included. So your keys never touch one. |
+| whyText2 | You make them yourself, offline, with a coin. After that, nobody can move your bitcoin without your words. Not even us. |
+| whyText3 | The inconvenience happens once. |

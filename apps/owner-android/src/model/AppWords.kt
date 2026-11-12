@@ -1256,6 +1256,13 @@ object AppWords {
                 "- Notification action:\n  $watchNotificationStop\n" +
                 "- Notification when Tor is not connected:\n  $watchNotificationNoOrbot\n",
         )
+        out.append(
+            "\nThe first run: the welcome, the practice shop, the shop, the till and its\n" +
+                "steps, in `FirstRunWords`. `{till}` is the till's name as listed:\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in FirstRunWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         return out.toString()
     }
 

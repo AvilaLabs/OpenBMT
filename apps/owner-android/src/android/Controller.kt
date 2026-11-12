@@ -79,6 +79,16 @@ class Controller(internal val act: MainActivity) {
     /** Whether the logo has clicked together on the new wallet's screen in this ceremony: it does so once (OA-91). */
     internal var ceremonyLogoShown = false
 
+    // The first run (`FirstRun.kt`): its step and entries, the practice shop (in memory only, never saved) and the notice the
+    // welcome shows once after the practice shop is deleted.
+    internal var firstRun: FirstRun? = null
+    internal var practice: Practice? = null
+    internal var welcomeNotice: String? = null
+    internal val shopFile by lazy { ShopFile(dir) }
+
+    /** A key ceremony was begun and not finished: the first screen resumes it instead of the welcome. */
+    internal fun ceremonyPending(): Boolean = File(dir, AppFiles.CEREMONY_FILE).exists() && !File(dir, AppFiles.SETUP_FILE).exists()
+
     // What the first screen holds while a file picker is open. Never written anywhere (OA-01).
     private var draftText = ""
 
@@ -195,7 +205,7 @@ class Controller(internal val act: MainActivity) {
         when {
             node != null || setup != null -> render()
             File(dir, AppFiles.SETUP_FILE).exists() -> openStored()
-            else -> showFirstStart(null)
+            else -> showEntry()
         }
     }
 
@@ -241,7 +251,7 @@ class Controller(internal val act: MainActivity) {
             fault = AppWords.fileNotRead(e.message)
             return render()
         }
-        if (!setupStatus.complete) return showFirstStart(null)
+        if (!setupStatus.complete) return showEntry()
         key2Signer = File(dir, AppFiles.KEY2_SIGNER_FILE).exists()
         firstAddressRead = false
         // A ceremony record left behind by a save that did not finish deleting it: the setup is saved, so it goes (OA-29).
@@ -254,8 +264,9 @@ class Controller(internal val act: MainActivity) {
 
     internal fun render() {
         val status = SetupStatus(File(dir, AppFiles.SETUP_FILE).exists(), config != null)
-        when (val s = ScreenModel.pick(fault, status, torBlocked, node != null)) {
+        when (val s = ScreenModel.pick(fault, status, torBlocked, node != null, ceremonyPending())) {
             is Screen.Fault -> showMessage(s.words, "Try again") { begin() }
+            is Screen.Welcome -> showFirstRun()
             is Screen.FirstStart -> showFirstStart(null)
             is Screen.TorBlocked -> showMessage(s.words, if (s.words === AppWords.torFailed) "Try again" else "Check again") { begin() }
             is Screen.Starting -> waiting(AppWords.starting)

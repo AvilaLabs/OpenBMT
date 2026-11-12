@@ -161,7 +161,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1, "one row for each words and the header")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1, "one row for each words and the header, and for each of the first run's")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -296,8 +296,9 @@ object AppModelTest {
     private fun screenTests() {
         val set = SetupStatus(setup = true, config = true)
         ok(set.complete && !SetupStatus(true, false).complete && !SetupStatus(false, true).complete, "a setup is complete when both are saved")
-        ok(ScreenModel.pick(null, SetupStatus(false, false), null, false) is Screen.FirstStart, "nothing saved: the first screen")
-        ok(ScreenModel.pick(null, SetupStatus(true, false), null, false) is Screen.FirstStart, "half saved: the first screen")
+        ok(ScreenModel.pick(null, SetupStatus(false, false), null, false) is Screen.Welcome, "nothing saved: the welcome")
+        ok(ScreenModel.pick(null, SetupStatus(true, false), null, false) is Screen.Welcome, "half saved: the welcome")
+        ok(ScreenModel.pick(null, SetupStatus(false, false), null, false, resuming = true) is Screen.FirstStart, "a ceremony to resume: the setup")
         ok(ScreenModel.pick(null, set, null, false) is Screen.Starting, "saved, not running: starting")
         ok(ScreenModel.pick(null, set, null, true) is Screen.Home, "running: home")
         ok(ScreenModel.pick(null, set, AppWords.orbotNotRunning, false) is Screen.TorBlocked, "no Orbot: the Tor screen")
@@ -641,7 +642,7 @@ object AppModelTest {
 
     private fun oa_11_a_setup_is_whole_or_it_is_asked_for_again() {
         ok(!SetupStatus(setup = true, config = false).complete && !SetupStatus(setup = false, config = true).complete, "half a setup is not a setup")
-        ok(ScreenModel.pick(null, SetupStatus(true, false), null, false) is Screen.FirstStart, "half a setup asks again")
+        ok(ScreenModel.pick(null, SetupStatus(true, false), null, false) is Screen.Welcome, "half a setup asks again, from the welcome")
         val controller = source("src/android/Controller.kt")
         val save = controller.substringAfter("SealedFile(dir, KeystoreSealer(AppFiles.KEY_ALIAS), AppFiles.SETUP_FILE).save(")
         ok(save.indexOf("configFile.save(") > 0, "the config is written after the setup")
@@ -2654,6 +2655,144 @@ object AppModelTest {
         ok(text.lines().any { it.startsWith("Status:") }, "the status line")
     }
 
+
+    // ---- the first run ----------------------------------------------------------------------------
+
+    private fun firstRunTests() {
+        // The welcome is for a phone with no setup, and only then.
+        val none = SetupStatus(false, false)
+        val done = SetupStatus(true, true)
+        ok(ScreenModel.pick(null, none, null, false) is Screen.Welcome, "no setup: the welcome")
+        ok(ScreenModel.pick(null, done, null, false) is Screen.Starting, "after setup: not the welcome")
+        ok(ScreenModel.pick(null, done, null, true) is Screen.Home, "after setup, running: home")
+        ok(ScreenModel.pick(null, none, null, false, resuming = true) !is Screen.Welcome, "a ceremony to resume skips the welcome")
+
+        // The first run: Welcome, Shop, Till, Money, then Why for the savings wallet only, then the notice.
+        val r = FirstRun(ShopPrefs(), "DE")
+        ok(r.step == FirstRunStep.Welcome && r.currency == ShopCurrency.Eur, "the money is guessed from the locale")
+        r.next(); ok(r.step == FirstRunStep.Shop, "shop")
+        r.name = "Cafe Anna"; r.currency = ShopCurrency.Gbp; r.next(); ok(r.step == FirstRunStep.Till, "till")
+        r.till = Till.Toast; r.query = "to"; r.next(); ok(r.step == FirstRunStep.Money, "money")
+        r.choose(MoneyChoice.Make); ok(r.step == FirstRunStep.Why, "the savings wallet shows the why first")
+        r.next(); ok(r.step == FirstRunStep.NotYet, "then the notice")
+        r.back(); ok(r.step == FirstRunStep.Why, "back from the notice to the why")
+        r.back(); ok(r.step == FirstRunStep.Money, "back to the money")
+        r.back(); r.back()
+        ok(r.step == FirstRunStep.Shop && r.name == "Cafe Anna" && r.currency == ShopCurrency.Gbp, "back to the shop keeps what was entered")
+        r.next()
+        ok(r.till == Till.Toast && r.query == "to", "back to the till keeps the choice and the search")
+        r.next(); r.choose(MoneyChoice.Own); ok(r.step == FirstRunStep.NotYet, "own wallet: the notice directly")
+        r.back(); ok(r.step == FirstRunStep.Money, "back from the notice to the money")
+        r.choose(MoneyChoice.Later); ok(r.step == FirstRunStep.NotYet, "later: the notice directly")
+        r.toWelcome(); r.back(); ok(r.step == FirstRunStep.Welcome, "the welcome has no step before it")
+
+        // The locale guess: the nine of the app, the euro countries, and the dollar for the rest.
+        val guesses = mapOf("US" to ShopCurrency.Usd, "GB" to ShopCurrency.Gbp, "FR" to ShopCurrency.Eur, "JP" to ShopCurrency.Jpy, "AU" to ShopCurrency.Aud,
+            "IN" to ShopCurrency.Inr, "KR" to ShopCurrency.Krw, "ID" to ShopCurrency.Idr, "SG" to ShopCurrency.Sgd, "" to ShopCurrency.Usd, "ZZ" to ShopCurrency.Usd)
+        for ((c, want) in guesses) ok(ShopPrefs.guessCurrency(c) == want, "the money of $c")
+        ok(FirstRun(ShopPrefs(currency = ShopCurrency.Sats), "US").currency == ShopCurrency.Sats, "a saved money wins over the guess")
+
+        // The till search.
+        ok(Till.listed.map { it.title } == listOf("Square", "Toast", "Shopify POS", "Loyverse", "Odoo", "Hike", "StoreHub"), "the seven tills, in order")
+        ok(Till.search("").map { it.key } == Till.listed.map { it.key } + "none" + "other", "no search: all seven, then no till and another till")
+        ok(Till.search("SHOP").map { it.title } == listOf("Shopify POS", FirstRunWords.tillNone, FirstRunWords.tillOther), "a search matches in any case, and None and Other stay")
+        ok(Till.search("zzz").size == 2, "a search with no match still lists No till and Another till")
+        ok(Till.search("o").map { it.title }.containsAll(listOf("Toast", "Loyverse", "Odoo", "StoreHub", "Shopify POS")), "a search matches inside a name")
+
+        // The steps screen, for each of the nine choices.
+        for (t in Till.values()) {
+            val page = TillStepsPage.of(t)
+            ok(page.showsDone && page.lines.isNotEmpty(), "${t.key}: a page with a Done and lines")
+            ok(page.lines.none { it.text.contains("{till}") } && page.title.none { it == '{' }, "${t.key}: every {till} is replaced")
+        }
+        val sq = TillStepsPage.of(Till.Square)
+        ok(sq.title == "Add Bitcoin to Square", "Square's title")
+        ok(sq.lines.first().text == "Do this once, on the computer or tablet where you manage Square. It takes about two minutes.", "Square's intro")
+        ok(sq.lines.filter { it.kind == TillStepsPage.Kind.Step }.map { it.text } == Till.Square.steps.mapIndexed { i, s -> "${i + 1}. $s" } && Till.Square.steps.size == 4, "Square's four numbered steps")
+        ok(sq.lines.any { it.text == FirstRunWords.tillSquareCashier } && sq.lines.any { it.text == FirstRunWords.tillSquareReports }, "Square's cashier and report lines")
+        ok(sq.lines.last().kind == TillStepsPage.Kind.Small && sq.lines.last().text.startsWith("Steps read on Square's own help pages on 11 November 2026."), "the checked line is last and small")
+        ok(sq.lines.any { it.text == "Square does not move the money, so it charges no fee for this payment type." }, "the no-fee line")
+        ok(TillStepsPage.of(Till.StoreHub).lines.count { it.kind == TillStepsPage.Kind.Step } == 4, "StoreHub: four steps")
+        ok(TillStepsPage.of(Till.Toast).lines.count { it.kind == TillStepsPage.Kind.Step } == 3, "Toast: three steps")
+        ok(TillStepsPage.of(Till.Shopify).lines.any { it.text == FirstRunWords.tillShopifyNote }, "Shopify's note")
+        ok(TillStepsPage.of(Till.Loyverse).lines.any { it.text == FirstRunWords.tillLoyverseReports }, "Loyverse's report line")
+        ok(TillStepsPage.of(Till.None).lines.map { it.text } == listOf(FirstRunWords.tillNoneText), "No till shows its own text")
+        ok(TillStepsPage.of(Till.Other).lines.map { it.text } == listOf(FirstRunWords.tillOtherText, FirstRunWords.tillOtherAsk), "Another till shows its own text")
+
+        // What is kept, and where.
+        val dir = tempDir()
+        try {
+            val f = ShopFile(dir)
+            ok(f.load().name == "" && f.load().till == null && !f.load().stepsShown, "nothing kept: an empty shop")
+            f.save(ShopPrefs("Cafe Anna", ShopCurrency.Sats, Till.Hike, false))
+            val back = f.load()
+            ok(back.name == "Cafe Anna" && back.currency == ShopCurrency.Sats && back.till == Till.Hike && !back.stepsShown, "name, money and till come back")
+            f.save(back.with(stepsShown = true))
+            ok(f.load().stepsShown && f.load().till == Till.Hike, "the steps are marked shown")
+            ok(String(f.load().encode()) == "name: Cafe Anna\ncurrency: SAT\ntill: hike\nsteps-shown: yes\n", "the file's form")
+            ok(ShopPrefs.clean("a\nb\u0007c") == "abc", "a name is one clean line")
+            ok(ShopPrefs.clean("x".repeat(100)).length == ShopPrefs.MAX_NAME, "a name is cut at its length")
+            File(dir, AppFiles.SHOP_FILE).writeText("garbage")
+            ok(ShopFile(dir).load().till == null, "a file that is not the shop file is an empty shop")
+            for (bad in listOf("name: a\ncurrency: XXX\ntill: \nsteps-shown: no\n", "name: a\ncurrency: \ntill: nope\nsteps-shown: no\n", "name: a\ncurrency: \ntill: \nsteps-shown: maybe\n")) {
+                throws("a shop file with a value the app does not have") { ShopPrefs.decode(bad.toByteArray()) }
+            }
+        } finally {
+            clean(dir)
+        }
+
+        // The practice shop: the order, the amount, the books, Back, and nothing written.
+        var clock = 1_700_000_000L
+        val p = Practice(ShopCurrency.Eur) { clock }
+        ok(p.step == PracticeStep.Intro, "the practice starts at the intro")
+        ok(!p.back(), "the intro has no step before it")
+        p.next(); ok(p.step == PracticeStep.Amount, "amount")
+        p.next(); ok(p.step == PracticeStep.Amount && !p.canCharge, "Charge needs an amount")
+        p.digit(0); ok(p.digits == "", "no leading zero")
+        for (d in listOf(1, 2, 5)) p.digit(d)
+        ok(p.amount == 125L && p.amountText() == "125 euros", "the amount typed: ${p.amountText()}")
+        p.delete(); p.digit(0); ok(p.amount == 120L, "delete and type again")
+        repeat(10) { p.digit(9) }
+        ok(p.digits.length == Practice.MAX_DIGITS, "the amount has a length limit")
+        p.delete(); repeat(p.digits.length) { p.delete() }
+        for (d in listOf(4, 5, 0)) p.digit(d)
+        p.next(); ok(p.step == PracticeStep.Qr, "the code")
+        p.back(); ok(p.step == PracticeStep.Amount && p.amount == 450L, "back to the amount keeps it")
+        p.next(); clock += 60; p.next(); ok(p.step == PracticeStep.Paid && p.paidAt == clock, "paid at the time of the tap")
+        p.back(); ok(p.step == PracticeStep.Qr, "back from paid to the code")
+        p.next(); p.next(); ok(p.step == PracticeStep.Books, "books")
+        ok(p.booksRow().endsWith("  450 euros  Paid") && p.booksRow().startsWith(Format.localTime(p.paidAt!!)), "the books have one row: time, amount, Paid: ${p.booksRow()}")
+        p.next(); ok(p.step == PracticeStep.Refund && !p.refunded, "refund")
+        p.next(); ok(p.step == PracticeStep.Done && p.refunded, "done, refunded in cash")
+        p.back(); ok(p.step == PracticeStep.Refund && !p.refunded, "back from done un-does the refund")
+        p.next()
+        val again = p.again()
+        ok(again.step == PracticeStep.Amount && again.digits == "" && again.paidAt == null, "try again starts a new sale")
+        ok(Practice.QR_TEXT == "OPENBMT PRACTICE - NOT A PAYMENT", "the code's text is exactly the practice line")
+        ok(Practice(ShopCurrency.Usd) { 0 }.also { it.next(); it.digit(7) }.amountText() == "$7", "the dollar")
+
+        // The practice and the first run write nothing and call nothing of the library: no file, no store, no signer.
+        val model = source("src/model/FirstRunModel.kt")
+        val practiceSource = model.substringAfter("class Practice(").substringBefore("companion object")
+        for (bad in listOf("File(", "DurableFile", "SealedFile", "OwnerNode", "node", "Native", "writeText", "writeBytes", "SharedPreferences", "save(", "sign", "Sign", "send", "Socket", "URL(")) {
+            ok(!practiceSource.contains(bad), "the practice shop reaches nothing outside memory: $bad")
+        }
+        val screens = source("src/android/FirstRun.kt")
+        val practiceScreens = screens.substringAfter("// ---- the practice shop").substringBefore("// ---- your shop")
+        for (bad in listOf("shopFile\\.save", "File\\(", "\\bnode\\b", "\\bn\\.", "withNode", "async", "posTokens", "\\bsetup\\b", "OwnerNode", "ceremony", "writeText", "FileOutputStream", "SharedPreferences")) {
+            ok(!Regex(bad).containsMatchIn(practiceScreens), "the practice screens write and call nothing: $bad")
+        }
+        ok(practiceScreens.contains("FirstRunWords.practiceBanner") && practiceScreens.contains("Practice.QR_TEXT"), "every practice page carries the banner, and the code is the practice line")
+        ok(screens.substringAfter("private fun Controller.practicePage").substringBefore("private fun Controller.showPractice").contains("tone = ui.pal.warn"), "the banner is the tinted bar")
+        ok(source("src/android/Controller.kt").contains("ScreenModel.pick(fault, status, torBlocked, node != null, ceremonyPending())") && source("src/android/Controller.kt").contains("return showEntry()"), "the app opens on the welcome when nothing is saved")
+        ok(source("src/android/AddCounter.kt").contains("afterFirstCounter()") && source("src/android/Screens.kt").contains("tillStepsRow"), "the steps follow the first counter and are in Settings")
+
+        val keys = FirstRunWords.all().map { it.first }
+        ok(keys.size == keys.toSet().size, "every first-run key is used once")
+        ok(FirstRunWords.moneyNotYet == "This part is still being built. For now, setup continues with the test setup.", "the notice, exactly")
+        ok(FirstRunWords.with(FirstRunWords.tillStepsTitle, "Odoo") == "Add Bitcoin to Odoo", "{till} is the till's name")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val screensMd = args.firstOrNull()?.let { File(it) }
@@ -2670,6 +2809,7 @@ object AppModelTest {
         exchangeTests()
         counterTests()
         ceremonyTests()
+        firstRunTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")
     }

@@ -122,6 +122,9 @@ object AppFiles {
     /** Its presence is the setting "Watch in the background" being on (OA-80). */
     const val WATCH_ON_FILE = "watch-on"
 
+    /** The shop's name, money and till, and whether the till steps were shown: the first screens' own file. It holds no secret. */
+    const val SHOP_FILE = "shop.txt"
+
     /** The node's own folder, inside the app's `noBackupFilesDir`. */
     const val NODE_DIR = "node"
 }
