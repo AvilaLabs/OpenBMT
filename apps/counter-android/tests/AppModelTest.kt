@@ -14,6 +14,12 @@ import org.openbmt.app.Tones
 import org.openbmt.app.TorControl
 import org.openbmt.app.Who
 import org.openbmt.counter.Actor
+import org.openbmt.counter.Bill
+import org.openbmt.counter.BillKind
+import org.openbmt.counter.BillPart
+import org.openbmt.counter.BillState
+import org.openbmt.counter.PartWay
+import org.openbmt.counter.SaleInfo
 import org.openbmt.counter.ChangeField
 import org.openbmt.counter.ChangeValue
 import org.openbmt.counter.ChangeValueKind
@@ -1370,6 +1376,95 @@ object AppModelTest {
         }
     }
 
+    // ---- bills, tabs and the till's reference (CR-245 to CR-254) -------------------------------------------
+
+    private fun bill(
+        number: Long = 1,
+        kind: BillKind = BillKind.Bill,
+        amount: Long = 1_000,
+        reference: String? = null,
+        state: BillState = BillState.Open,
+        bitcoin: Long = 0,
+        other: Long = 0,
+        pending: Long = 0,
+        parts: List<BillPart> = emptyList(),
+        unpaid: Long = 0,
+    ) = Bill(
+        number, kind, amount, reference, 100, state, if (state == BillState.Open) 0 else 200, unpaid, bitcoin, other, pending,
+        if (state == BillState.Open) maxOf(0, amount - bitcoin - other) else 0, parts, Words(0, 1, "WORDS_NEEDED_X", "x.", "y.", null, null, null, null),
+    )
+
+    private fun cr245BillsTests(appDir: File?) {
+        val usd = Money("USD", 2)
+        // CR-255: every label is a placeholder named after a rule, and a heading is under 28 characters.
+        val labels = WordsOfBills.all()
+        ok(labels.all { it.startsWith("WORDS_NEEDED_CR_24") || it.startsWith("WORDS_NEEDED_CR_25") }, "CR-255: every label is a placeholder of a rule")
+        ok(labels.all { it.length < 28 }, "CR-255: every label is under 28 characters: ${labels.filter { it.length >= 28 }}")
+        ok(labels.toSet().size == labels.size, "CR-255: no two labels are the same")
+        // CR-246: the state of a bill, and a tab says it is a tab.
+        ok(BillModel.stateLabel(bill()) == WordsOfBills.STATE_OPEN && BillModel.stateLabel(bill(kind = BillKind.Tab)) == WordsOfBills.STATE_TAB, "CR-246: open bill and open tab")
+        ok(BillModel.stateLabel(bill(state = BillState.Settled)) == WordsOfBills.STATE_SETTLED, "CR-246: settled")
+        ok(BillModel.stateLabel(bill(state = BillState.ClosedShort)) == WordsOfBills.STATE_SHORT, "CR-246: closed short")
+        ok(BillModel.stateLabel(bill(state = BillState.Cancelled)) == WordsOfBills.STATE_CANCELLED, "CR-246: cancelled")
+        ok(BillModel.wayLabel(PartWay.Cash) == WordsOfBills.WAYS[0] && BillModel.wayLabel(PartWay.Card) == WordsOfBills.WAYS[1] && BillModel.wayLabel(PartWay.Other) == WordsOfBills.WAYS[2], "CR-247: the ways")
+        // CR-246 to CR-252: the buttons.
+        val fresh = BillModel.buttons(bill())
+        ok(fresh.bitcoinPart && fresh.otherPart && fresh.join && fresh.split && fresh.addReference && fresh.cancel && fresh.closeShort, "CR-252: a new bill takes parts, splits, closes short and is cancelled")
+        ok(!fresh.changeTab && !fresh.finishTab, "CR-251: a bill is not a tab")
+        val tab = BillModel.buttons(bill(kind = BillKind.Tab))
+        ok(tab.changeTab && tab.finishTab, "CR-251: a tab is raised and finished")
+        val part = BillModel.buttons(bill(reference = "T-1", other = 300))
+        ok(!part.cancel && !part.addReference && part.closeShort, "CR-252: a bill with a part that counts is not cancelled; CR-245: a reference is added once")
+        ok(!BillModel.buttons(bill(pending = 1)).cancel, "CR-252: a bill with a part pending is not cancelled")
+        val paidUp = BillModel.buttons(bill(kind = BillKind.Tab, bitcoin = 1_000))
+        ok(!paidUp.split && !paidUp.closeShort && paidUp.finishTab, "CR-251: a tab with nothing left is finished, not split or closed short")
+        for (state in listOf(BillState.Settled, BillState.ClosedShort, BillState.Cancelled)) {
+            val b = BillModel.buttons(bill(state = state))
+            ok(!b.bitcoinPart && !b.otherPart && !b.join && !b.split && !b.addReference && !b.changeTab && !b.finishTab && !b.closeShort && !b.cancel, "CR-246: an ended bill takes nothing ($state)")
+        }
+        // CR-249: the lines.
+        ok(BillModel.listLine(usd, bill(reference = "T-1", other = 400)) == "1 T-1 \u00B7 ${WordsOfBills.STATE_OPEN} \u00B7 ${WordsOfBills.LEFT} 6.00 USD", "CR-246: the list line of an open bill: ${BillModel.listLine(usd, bill(reference = "T-1", other = 400))}")
+        ok(BillModel.listLine(usd, bill(state = BillState.ClosedShort, unpaid = 250)).endsWith("${WordsOfBills.UNPAID} 2.50 USD"), "CR-252: the list line of a bill closed short says what was not paid")
+        val totals = BillModel.totals(usd, bill(bitcoin = 300, other = 200, pending = 2))
+        ok(totals.map { it.value } == listOf("10.00 USD", "5.00 USD", "2", "5.00 USD"), "CR-249: amount, received, pending, left: ${totals.map { it.value }}")
+        ok(BillModel.partLine(usd, BillPart(4, 500, null, true)) == "5 \u00B7 5.00 USD" && BillModel.partLine(usd, BillPart(null, 500, PartWay.Card, true)) == "${WordsOfBills.WAYS[1]} \u00B7 5.00 USD", "CR-247: the line of a part")
+        // CR-250: the split lines are what the library returned; the helper takes 2 to 20 people.
+        ok(BillModel.splitLines(usd, listOf(334, 334, 332)) == listOf("1 \u00B7 3.34 USD", "2 \u00B7 3.34 USD", "3 \u00B7 3.32 USD"), "CR-250: three people share 10.00")
+        ok(!BillModel.peopleOk(1) && BillModel.peopleOk(2) && BillModel.peopleOk(20) && !BillModel.peopleOk(21), "CR-250: 2 to 20 people")
+        // CR-245: a reference fits or does not.
+        ok(BillModel.referenceOk("T-14/1") && BillModel.referenceOk("a".repeat(32)) && !BillModel.referenceOk("") && !BillModel.referenceOk("a".repeat(33)) && !BillModel.referenceOk("no space") && !BillModel.referenceOk("caf\u00E9"), "CR-245: the reference's characters and length")
+        ok(BillModel.referenceFrom("  ") == null && BillModel.referenceFrom(" T-1 ") == "T-1", "CR-245: a reference typed is trimmed, and none is none")
+        // CR-250: a share fills the keypad as if its digits were typed.
+        val entry = AmountEntry(usd)
+        entry.set(334)
+        ok(entry.minor == 334L && entry.show() == "3.34 USD", "CR-250: the keypad starts from a share")
+        entry.press('5')
+        ok(entry.minor == 3345L, "CR-250: more digits follow the share")
+        entry.set(0)
+        ok(entry.minor == 0L, "CR-250: no share leaves the keypad empty")
+        // CR-248: a sale that is in a bill is not offered again.
+        val inBill = bill(parts = listOf(BillPart(3, 500, null, true), BillPart(null, 100, PartWay.Cash, true)))
+        ok(BillModel.joinable(listOf(5, 3, 1), listOf(inBill)) == listOf(5L, 1L), "CR-248: a sale joins one bill only")
+        // CR-254: the Paid screen shows the number and the reference, and the bill when the sale is a part.
+        val plain = SaleInfo(null, 0, 0, false, null, null)
+        ok(BillModel.paidLines(6, plain).map { it.label to it.value } == listOf(WordsOfBills.SALE_NUMBER to "7"), "CR-254: a sale with no reference shows its number only")
+        val referenced = SaleInfo(null, 0, 0, false, "T-14/1", 3)
+        ok(BillModel.paidLines(6, referenced).map { it.label to it.value } == listOf(WordsOfBills.SALE_NUMBER to "7", WordsOfBills.SALE_REFERENCE to "T-14/1", WordsOfBills.SALE_BILL to "3"), "CR-254: the number, the reference and the bill")
+        if (appDir != null) {
+            val controller = File(appDir, "src/android/Controller.kt").readText()
+            for (name in listOf("showBills", "showBill", "showNewBill", "showBillPart", "showOtherPart", "showJoinSale", "showSplit", "showChangeTab", "showCloseShort", "showSaleReference")) {
+                ok(controller.contains("private fun $name("), "CR-246: the screen $name is there")
+            }
+            ok(controller.contains("BillModel.paidLines(index, info)"), "CR-254: the Paid screen reads its lines from the model")
+            val sale = controller.substringAfter("private fun showSale(").substringBefore("private fun requote(")
+            ok(sale.contains("val band = outcomeBand(says.colour)") && sale.substringAfter("val band = outcomeBand(says.colour)").contains("BillModel.paidLines"), "CR-254: the lines are on the outcome screen, which is the Paid screen")
+            val close = controller.substringAfter("private fun showCloseShort(").substringBefore("private fun ")
+            ok(close.contains("resolveActor(") && close.contains("n.closeShort(nowSecs(), number, who)"), "CR-252: close short goes through the PIN check and the library")
+            ok(controller.contains("n.cancelBill(nowSecs(), number)") && controller.contains("n.finishTab(nowSecs(), number)") && controller.contains("n.setTabAmount(nowSecs(), number,"), "CR-251, CR-252: cancel, finish and change go to the library")
+            ok(controller.contains("n.openBillPart(") && controller.contains("n.addOtherPart(") && controller.contains("n.joinSale(") && controller.contains("n.billSplit(number,"), "CR-247, CR-248, CR-250: parts, joining and splitting go to the library")
+        }
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val screensMd = args.firstOrNull()?.let { File(it) }
@@ -1401,6 +1496,7 @@ object AppModelTest {
         cr214ShareTests()
         cr213RequestsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr240ConfirmChangeTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr245BillsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         println("AppModelTest (counter): $count checks passed")
     }
 }

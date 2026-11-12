@@ -79,6 +79,13 @@ class AmountEntry(private val money: Money) {
         digits = ""
     }
 
+    /** Start from [minor] (a share of a bill, CR-250), as if its digits were typed; 0 or less, or more digits than the keypad takes, leaves it empty. */
+    fun set(minor: Long) {
+        digits = ""
+        if (minor <= 0) return
+        for (c in minor.toString()) press(c)
+    }
+
     /** The amount in minor units. */
     val minor: Long get() = if (digits.isEmpty()) 0 else digits.toLong()
 

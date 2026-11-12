@@ -47,6 +47,9 @@ import org.openbmt.app.Who
 import org.openbmt.app.WordsModel
 import org.openbmt.counter.Actor
 import org.openbmt.counter.ActorRole
+import org.openbmt.counter.BillKind
+import org.openbmt.counter.BillState
+import org.openbmt.counter.PartWay
 import org.openbmt.counter.ChangeState
 import org.openbmt.counter.CounterException
 import org.openbmt.counter.CounterNode
@@ -1044,6 +1047,8 @@ class Controller(private val act: MainActivity) {
         pair.addView(ui.tile("Sales", Glyph.List, false) { showSales() }, LinearLayout.LayoutParams(0, ui.px(104), 1f).also { it.rightMargin = ui.px(6) })
         pair.addView(ui.tile("Today", Glyph.Calendar, false) { showToday(false) }, LinearLayout.LayoutParams(0, ui.px(104), 1f).also { it.leftMargin = ui.px(6) })
         tiles.addView(pair, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.topMargin = ui.px(12) })
+        // CR-246: bills and tabs, one tile under the others.
+        tiles.addView(ui.tile(WordsOfBills.BILLS, Glyph.List, false) { showBills() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.px(104)).also { it.topMargin = ui.px(12) })
         show(bar, listOf(health, lines, noteSlot, tiles, requestsSlot), emptyList(), Showing.Home)
         var healthSig: String? = null
         var linesSig: String? = null
@@ -1851,7 +1856,7 @@ class Controller(private val act: MainActivity) {
                 val notForThisSale = ln != null && ln.notForThisSale
                 val sig = listOf(
                     s.state, says.heading, says.what, says.next, s.receivedSats, s.needsSats, payment?.copyUri, flash?.heading,
-                    flash?.what, extra.joinToString("\u0002") { it.heading + it.what + it.next }, notForThisSale,
+                    flash?.what, extra.joinToString("\u0002") { it.heading + it.what + it.next }, notForThisSale, info.reference, info.billNumber,
                 ).joinToString("\u0001")
                 if (sig != lastSig) {
                     lastSig = sig
@@ -1924,6 +1929,20 @@ class Controller(private val act: MainActivity) {
                             },
                             ui.margins(top = 8),
                         )
+                        // CR-254: the sale's number and the till's reference, large enough to copy into the till's payment note.
+                        if (SaleModel.isPaid(s.state)) {
+                            for (line in BillModel.paidLines(index, info)) {
+                                centre.addView(ui.text(line.label, 14f, colour = band.sub, medium = true).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 14))
+                                centre.addView(
+                                    ui.text(line.value, 34f, bold = true, colour = Palette.WHITE).also {
+                                        it.gravity = android.view.Gravity.CENTER
+                                        it.setTextIsSelectable(true)
+                                        it.fontFeatureSettings = "tnum"
+                                    },
+                                    ui.margins(top = 2),
+                                )
+                            }
+                        }
                         centre.addView(ui.text(says.what, 17f, colour = Palette.WHITE).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 28))
                         centre.addView(ui.text(says.next, 17f, bold = true, colour = Palette.WHITE).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 10))
                         val more = ArrayList<WordsModel>(extra)
@@ -2164,6 +2183,14 @@ class Controller(private val act: MainActivity) {
             } else {
                 actions.add(ui.button(WordsOfRequests.ADD_NOTE) { showAddNote(index) })
             }
+            // CR-245: the till's reference of the sale, or a way to add it once.
+            val saleReference = info.reference
+            if (saleReference != null) {
+                views.add(ui.facts(listOf(WordsOfBills.REFERENCE to saleReference)))
+            } else {
+                actions.add(ui.button(WordsOfBills.ADD_REFERENCE) { showSaleReference(index) })
+            }
+            info.billNumber?.let { b -> actions.add(ui.button("${WordsOfBills.SALE_BILL} $b") { showBill(b, null) }) }
             views.add(label("Refunds"))
             val rows = n.refunds(index)
             if (rows.isEmpty()) views.add(ui.text("No refund was asked for.", 16f))
@@ -2770,6 +2797,315 @@ class Controller(private val act: MainActivity) {
             ),
             listOf(ui.button("Back") { showSettings() }),
         )
+    }
+
+    // ---- bills, tabs and the till's reference (CR-245 to CR-254) -----------------------------------------------------------------
+
+    /**
+     * The keypad page of an amount: [heading] says what it is for, [extra] are more fields, [action] is the main
+     * button, and [go] is given the amount and a place to show a refusal. [start] fills the keypad (a share of a bill).
+     */
+    private fun showAmountPad(
+        title: String,
+        sub: String?,
+        heading: String,
+        start: Long,
+        extra: List<View>,
+        action: String,
+        back: () -> Unit,
+        go: (Long, (SayWords) -> Unit) -> Unit,
+    ) {
+        val m = money ?: return render()
+        val entry = AmountEntry(m)
+        entry.set(start)
+        val display = ui.text(entry.show(), 60f, bold = true).also {
+            it.gravity = android.view.Gravity.CENTER
+            it.fontFeatureSettings = "tnum"
+        }
+        val msg = Slot(act)
+        val centre = Centered(act)
+        centre.addView(ui.text(heading, 14f, colour = ui.pal.secondary, medium = true).also { it.gravity = android.view.Gravity.CENTER }, ui.margins())
+        centre.addView(display, ui.margins(top = 6))
+        for (v in extra) centre.addView(v, ui.margins(top = 8))
+        centre.addView(msg, ui.margins(top = 12))
+        val pad = ui.amountPad { face ->
+            when (face) {
+                "C" -> entry.clear()
+                "\u232B" -> entry.backspace()
+                else -> entry.press(face[0])
+            }
+            display.text = entry.show()
+            msg.show()
+        }
+        val confirm = ui.primary(action) {
+            if (entry.minor <= 0) msg.show(note(AppWords.amountNeeded)) else go(entry.minor) { msg.show(note(it)) }
+        }
+        show(ui.bar(title, sub = sub, back = back), listOf(centre, pad), listOf(confirm, ui.button("Back") { back() }))
+    }
+
+    /** CR-246: the bills and tabs the counter holds, open ones and those ended in the last 7 days, and the buttons that open one. */
+    private fun showBills(notice: SayWords? = null) {
+        if (lockedOut()) return
+        val n = node ?: return render()
+        val m = money ?: return render()
+        val views = ArrayList<View>()
+        notice?.let { views.add(note(it)) }
+        try {
+            val bills = n.bills(nowSecs())
+            if (bills.isEmpty()) views.add(ui.text(WordsOfBills.NONE, 16f))
+            val rows = bills.reversed().map { b ->
+                RowItem(BillModel.listLine(m, b), null, if (b.state == BillState.Open) null else Colour.Neutral, onClick = { showBill(b.number, null) })
+            }
+            if (rows.isNotEmpty()) views.add(ui.rows(rows))
+        } catch (e: CounterException) {
+            views.add(note(e.sayWords()))
+        }
+        val actions = listOf(
+            ui.primary(WordsOfBills.NEW_BILL) { showNewBill(BillKind.Bill) },
+            ui.button(WordsOfBills.NEW_TAB) { showNewBill(BillKind.Tab) },
+        )
+        show(ui.bar(WordsOfBills.BILLS, back = { showHome() }), views, actions)
+    }
+
+    /** CR-246, CR-245: open a bill or a tab for an amount, with the till's reference when there is one. */
+    private fun showNewBill(kind: BillKind) {
+        val n = node ?: return render()
+        val reference = ui.field(WordsOfBills.REFERENCE_HINT)
+        showAmountPad(
+            if (kind == BillKind.Tab) WordsOfBills.NEW_TAB else WordsOfBills.NEW_BILL, null, WordsOfBills.AMOUNT, 0,
+            listOf(reference), if (kind == BillKind.Tab) WordsOfBills.NEW_TAB else WordsOfBills.NEW_BILL, { showBills() },
+        ) { minor, refused ->
+            try {
+                val number = n.openBill(nowSecs(), kind, minor, BillModel.referenceFrom(reference.text.toString()))
+                showBill(number, null)
+            } catch (e: CounterException) {
+                refused(e.sayWords())
+            }
+        }
+    }
+
+    /** CR-246 to CR-252: one bill with what it has received, its parts and the buttons that fit its state. */
+    private fun showBill(number: Long, notice: SayWords?) {
+        if (lockedOut()) return
+        val n = node ?: return render()
+        val m = money ?: return render()
+        val views = ArrayList<View>()
+        notice?.let { views.add(note(it)) }
+        val actions = ArrayList<Button>()
+        try {
+            val bill = n.bills(nowSecs()).firstOrNull { it.number == number } ?: return showBills()
+            val b = BillModel.buttons(bill)
+            views.add(note(bill.words.say()))
+            val facts = ArrayList<Pair<String, String>>()
+            bill.reference?.let { facts.add(WordsOfBills.REFERENCE to it) }
+            for (line in BillModel.totals(m, bill)) facts.add(line.label to line.value)
+            views.add(ui.facts(facts))
+            if (bill.parts.isNotEmpty()) {
+                views.add(
+                    ui.rows(
+                        bill.parts.map { part ->
+                            val sale = part.sale
+                            RowItem(BillModel.partLine(m, part), null, if (part.counts) Colour.Green else null, onClick = if (sale != null) ({ showSale(sale, null, null) }) else null)
+                        },
+                    ),
+                )
+            }
+            if (b.bitcoinPart) actions.add(ui.primary(WordsOfBills.PART_BITCOIN) { showBillPart(number, 0) })
+            if (b.otherPart) actions.add(ui.button(WordsOfBills.PART_OTHER) { showOtherPart(number) })
+            if (b.join) actions.add(ui.button(WordsOfBills.JOIN) { showJoinSale(number) })
+            if (b.split) actions.add(ui.button(WordsOfBills.SPLIT) { showSplit(number) })
+            if (b.addReference) actions.add(ui.button(WordsOfBills.ADD_REFERENCE) { showBillReference(number) })
+            if (b.changeTab) actions.add(ui.button(WordsOfBills.CHANGE_TAB) { showChangeTab(number) })
+            if (b.finishTab) {
+                actions.add(
+                    ui.button(WordsOfBills.FINISH_TAB) {
+                        try {
+                            n.finishTab(nowSecs(), number)
+                            showBill(number, null)
+                        } catch (e: CounterException) {
+                            showBill(number, e.sayWords())
+                        }
+                    },
+                )
+            }
+            if (b.closeShort) actions.add(ui.button(WordsOfBills.CLOSE_SHORT) { showCloseShort(number) })
+            if (b.cancel) {
+                actions.add(
+                    ui.danger(WordsOfBills.CANCEL_BILL) {
+                        try {
+                            n.cancelBill(nowSecs(), number)
+                            showBills()
+                        } catch (e: CounterException) {
+                            showBill(number, e.sayWords())
+                        }
+                    },
+                )
+            }
+        } catch (e: CounterException) {
+            views.add(note(e.sayWords()))
+        }
+        actions.add(ui.button("Back") { showBills() })
+        show(ui.bar("${WordsOfBills.BILLS} $number", back = { showBills() }), views, actions)
+    }
+
+    /** CR-248: a bitcoin part: a sale for [start] (or the amount typed) is opened for the bill and shown for the customer to pay. */
+    private fun showBillPart(number: Long, start: Long) {
+        val n = node ?: return render()
+        val reference = ui.field(WordsOfBills.REFERENCE_HINT)
+        showAmountPad(WordsOfBills.PART_BITCOIN, "$number", WordsOfBills.AMOUNT, start, listOf(reference), WordsOfBills.PART_BITCOIN, { showBill(number, null) }) { minor, refused ->
+            val (rate, words) = quote()
+            if (rate == null) return@showAmountPad refused(words ?: AppWords.stopped)
+            try {
+                val o = n.openBillPart(nowSecs(), number, minor, 0, rate.rate, rate.sourceLabel, rate.sourceFetchedAt, atTheTill(), BillModel.referenceFrom(reference.text.toString()))
+                amounts[o.index] = minor
+                showSale(o.index, o.payment, null)
+            } catch (e: CounterException) {
+                refused(e.sayWords())
+            }
+        }
+    }
+
+    /** CR-247: a part paid another way, with the amount and the way the cashier chooses. */
+    private fun showOtherPart(number: Long) {
+        val n = node ?: return render()
+        val ways = ui.chips(WordsOfBills.WAYS)
+        showAmountPad(WordsOfBills.PART_OTHER, "$number", WordsOfBills.AMOUNT, 0, listOf(ways), WordsOfBills.PART_OTHER, { showBill(number, null) }) { minor, refused ->
+            try {
+                n.addOtherPart(nowSecs(), number, minor, PartWay.values()[ui.chosen(ways)])
+                showBill(number, null)
+            } catch (e: CounterException) {
+                refused(e.sayWords())
+            }
+        }
+    }
+
+    /** CR-248: join a sale that is open or paid, such as a paid request, to the bill; the sales that are parts of a bill are not offered. */
+    private fun showJoinSale(number: Long) {
+        val n = node ?: return render()
+        val m = money ?: return render()
+        val views = ArrayList<View>()
+        val msg = Slot(act)
+        views.add(msg)
+        try {
+            val sales = BillModel.joinable(n.status().sales.reversed().take(MAX_LISTED), n.bills(nowSecs()))
+            if (sales.isEmpty()) views.add(ui.text(WordsOfBills.NONE, 16f))
+            views.add(
+                ui.rows(
+                    sales.map { i ->
+                        val s = n.judge(nowSecs(), i)
+                        val amount = amounts[i]?.let { a -> money?.takeIf { !it.isSats }?.let { it.show(a) + ", " } }.orEmpty()
+                        RowItem(
+                            "Sale ${i + 1}: $amount${Format.sats(s.needsSats)}", s.words.heading, WordsModel.colourOf(s.words.tone),
+                            onClick = {
+                                try {
+                                    n.joinSale(nowSecs(), number, i)
+                                    showBill(number, null)
+                                } catch (e: CounterException) {
+                                    msg.show(note(e.sayWords()))
+                                }
+                            },
+                        )
+                    },
+                ),
+            )
+        } catch (e: CounterException) {
+            views.add(note(e.sayWords()))
+        }
+        show(ui.bar(WordsOfBills.JOIN_PICK, sub = m.code, back = { showBill(number, null) }), views, listOf(ui.button("Back") { showBill(number, null) }))
+    }
+
+    /** CR-250: what each of 2 to 20 people pays of what is left; a share is opened as a part when its customer is ready. */
+    private fun showSplit(number: Long) {
+        val n = node ?: return render()
+        val m = money ?: return render()
+        val views = ArrayList<View>()
+        val msg = Slot(act)
+        val shares = Slot(act)
+        views.add(msg)
+        views.add(label(WordsOfBills.PEOPLE))
+        val people = ui.field("2 - ${BillModel.MAX_PEOPLE}")
+        people.inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        views.add(people)
+        views.add(shares)
+        val split = ui.primary(WordsOfBills.SPLIT) {
+            val count = people.text.toString().trim().toIntOrNull()
+            if (count == null || !BillModel.peopleOk(count)) return@primary msg.show(note(AppWords.amountNeeded))
+            try {
+                val list = n.billSplit(number, count)
+                msg.show()
+                shares.show(
+                    label(WordsOfBills.EACH),
+                    ui.rows(list.mapIndexed { i, s -> RowItem(BillModel.splitLines(m, list)[i], null, null, onClick = { showBillPart(number, s) }) }),
+                )
+            } catch (e: CounterException) {
+                msg.show(note(e.sayWords()))
+            }
+        }
+        show(ui.bar(WordsOfBills.SPLIT, back = { showBill(number, null) }), views, listOf(split, ui.button("Back") { showBill(number, null) }))
+    }
+
+    /** CR-251: raise a tab, or lower it to no less than it has received. */
+    private fun showChangeTab(number: Long) {
+        val n = node ?: return render()
+        showAmountPad(WordsOfBills.CHANGE_TAB, "$number", WordsOfBills.AMOUNT, 0, emptyList(), WordsOfBills.CHANGE_TAB, { showBill(number, null) }) { minor, refused ->
+            try {
+                n.setTabAmount(nowSecs(), number, minor)
+                showBill(number, null)
+            } catch (e: CounterException) {
+                refused(e.sayWords())
+            }
+        }
+    }
+
+    /** CR-252: close a bill that has received less than its amount, with the manager's PIN; the library refuses a cashier. */
+    private fun showCloseShort(number: Long) {
+        val n = node ?: return render()
+        val views = ArrayList<View>()
+        val actor = actorBlock(views)
+        val msg = Slot(act)
+        views.add(msg)
+        val close = ui.danger(WordsOfBills.CLOSE_SHORT) {
+            resolveActor(actor, { who ->
+                try {
+                    n.closeShort(nowSecs(), number, who)
+                    showBill(number, null)
+                } catch (e: CounterException) {
+                    msg.show(note(e.sayWords()))
+                }
+            }, { msg.show(note(it)) })
+        }
+        show(ui.bar(WordsOfBills.CLOSE_SHORT, sub = "$number", back = { showBill(number, null) }), views, listOf(close, ui.button("Back") { showBill(number, null) }))
+    }
+
+    /** CR-245: the till's reference of a bill that has none, added once. */
+    private fun showBillReference(number: Long) {
+        val n = node ?: return render()
+        referencePage(number.toString(), { showBill(number, null) }) { text -> n.addBillReference(nowSecs(), number, text) }
+    }
+
+    /** CR-245: the till's reference of a sale that has none, added once. */
+    private fun showSaleReference(index: Long) {
+        val n = node ?: return render()
+        locks.saleScreen(index)
+        referencePage("${index + 1}", { showSaleDetails(index) }) { text -> n.addReference(nowSecs(), index, text) }
+    }
+
+    private fun referencePage(sub: String, back: () -> Unit, save: (String) -> Unit) {
+        val views = ArrayList<View>()
+        val msg = Slot(act)
+        views.add(msg)
+        views.add(label(WordsOfBills.REFERENCE))
+        val field = ui.field(WordsOfBills.REFERENCE_HINT)
+        views.add(field)
+        val add = ui.primary(WordsOfBills.ADD_REFERENCE) {
+            try {
+                save(field.text.toString().trim())
+                back()
+            } catch (e: CounterException) {
+                msg.show(note(e.sayWords()))
+            }
+        }
+        show(ui.bar(WordsOfBills.ADD_REFERENCE, sub = sub, back = back), views, listOf(add, ui.button("Back") { back() }))
     }
 
     companion object {
