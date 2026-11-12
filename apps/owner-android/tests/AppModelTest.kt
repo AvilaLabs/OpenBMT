@@ -2704,6 +2704,18 @@ object AppModelTest {
         r.choose(MoneyChoice.Make); ok(r.step == FirstRunStep.Why, "the savings wallet shows the why first")
         r.next(); ok(r.step == FirstRunStep.Guide && r.guide.step == GuideStep.Need, "then the key maker guide, at its first step")
         r.back(); ok(r.step == FirstRunStep.Why, "back from the first step of the guide to the why")
+        r.openRealCases(); ok(r.step == FirstRunStep.RealCases, "the button on the why screen opens the real cases")
+        r.back(); ok(r.step == FirstRunStep.Why, "back from the real cases to the why screen")
+        val shown = FirstRunWords.all().toMap()
+        ok(shown["whyRealCases"] == "Real cases" && shown["realTitle"] == "When someone else holds the money" &&
+            shown["realCase4Place"] == "India, 2020" && shown["whyText2"]!!.contains("with a coin or a die."), "the real cases words are the ones of the words file")
+        val screensMdText = File(appDir, "../../docs/screens/owner-app.md").readText()
+        for (k in listOf("whyRealCases", "realTitle", "realIntro", "realCase1Place", "realCase1Text", "realCase2Place", "realCase2Text",
+            "realCase3Place", "realCase3Text", "realCase4Place", "realCase4Text", "realOutro", "realMore")) {
+            ok(shown.containsKey(k) && screensMdText.contains("| $k |"), "docs/screens/owner-app.md has $k")
+        }
+        r.next(); r.back()
+        FirstRun(ShopPrefs(), "DE").let { f -> f.openRealCases(); ok(f.step == FirstRunStep.Welcome, "the real cases open from the why screen only") }
         r.next(); r.guide.next(); ok(r.step == FirstRunStep.Guide && r.guide.step == GuideStep.Tails, "the guide goes on by its own steps")
         r.back(); ok(r.step == FirstRunStep.Guide && r.guide.step == GuideStep.Need, "back from step 2 stays in the guide")
         r.back(); r.next(); ok(r.guide.step == GuideStep.Need, "the guide is made new each time it is entered")

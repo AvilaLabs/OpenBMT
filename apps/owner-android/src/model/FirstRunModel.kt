@@ -172,7 +172,7 @@ class ShopFile(private val dir: File, name: String = AppFiles.SHOP_FILE) {
 }
 
 /** The screens of the first run, in the order they come. Back from each is [FirstRun.back]. */
-enum class FirstRunStep { Welcome, Shop, Till, Money, Why, Guide, NotYet }
+enum class FirstRunStep { Welcome, Shop, Till, Money, Why, RealCases, Guide, NotYet }
 
 /** The three choices of where the money goes. */
 enum class MoneyChoice { Own, Make, Later }
@@ -207,9 +207,15 @@ class FirstRun(start: ShopPrefs, locale: String) {
                 guide = KeyGuide()
                 FirstRunStep.Guide
             }
+            FirstRunStep.RealCases -> FirstRunStep.RealCases
             FirstRunStep.Guide -> FirstRunStep.NotYet
             FirstRunStep.NotYet -> FirstRunStep.NotYet
         }
+    }
+
+    /** The real cases, one tap from the why screen; from no other step. Back returns to the why screen. */
+    fun openRealCases() {
+        if (step == FirstRunStep.Why) step = FirstRunStep.RealCases
     }
 
     fun choose(choice: MoneyChoice) {
@@ -225,6 +231,7 @@ class FirstRun(start: ShopPrefs, locale: String) {
             FirstRunStep.Till -> FirstRunStep.Shop
             FirstRunStep.Money -> FirstRunStep.Till
             FirstRunStep.Why -> FirstRunStep.Money
+            FirstRunStep.RealCases -> FirstRunStep.Why
             FirstRunStep.Guide -> if (guide.back()) FirstRunStep.Guide else FirstRunStep.Why
             FirstRunStep.NotYet -> if (money == MoneyChoice.Make) FirstRunStep.Why else FirstRunStep.Money
         }

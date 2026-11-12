@@ -154,9 +154,25 @@ object FirstRunWords {
 
     const val whyTitle = "Why we do it this way"
     const val whyText1 = "Any app can be hacked, ours included. So your keys never touch one."
-    const val whyText2 = "You make them yourself, offline, with a coin. After that, nobody can move your bitcoin without your words. " +
+    const val whyText2 = "You make them yourself, offline, with a coin or a die. After that, nobody can move your bitcoin without your words. " +
         "Not even us."
     const val whyText3 = "The inconvenience happens once."
+    const val whyRealCases = "Real cases"
+
+    // ---- real cases -------------------------------------------------------------------------------
+
+    const val realTitle = "When someone else holds the money"
+    const val realIntro = "Banks and payment companies usually pay on time. Sometimes they hold the money, and the business waits."
+    const val realCase1Place = "Card processors"
+    const val realCase1Text = "Square's and Shopify's terms let them hold back a shop's payouts in a reserve, with no fixed end date."
+    const val realCase2Place = "United States, 2017"
+    const val realCase2Text = "A court approved a \$3.2 million settlement over PayPal holding money in accounts without explanation."
+    const val realCase3Place = "Greece, 2015"
+    const val realCase3Text = "Banks closed for three weeks. Shops needed state approval to pay their suppliers abroad."
+    const val realCase4Place = "India, 2020"
+    const val realCase4Text = "A bank's withdrawals were capped for 13 days, and the payment apps that used it stopped for about a day."
+    const val realOutro = "A payment to your own wallet is held by nobody else. That is also why its backup is yours to keep."
+    const val realMore = "More cases from 11 countries, with their sources, are in the handbook under \"When someone else holds the money\"."
 
     /** The line of a till's name for [t] inside [text]: every `{till}` becomes [t]. */
     fun with(text: String, t: String): String = text.replace("{till}", t)
@@ -197,6 +213,12 @@ object FirstRunWords {
         add("moneyOwnNote", moneyOwnNote); add("moneyMake", moneyMake); add("moneyMakeNote", moneyMakeNote)
         add("moneyLater", moneyLater); add("moneyLaterNote", moneyLaterNote); add("moneyNotYet", moneyNotYet)
         add("whyTitle", whyTitle); add("whyText1", whyText1); add("whyText2", whyText2); add("whyText3", whyText3)
+        add("whyRealCases", whyRealCases); add("realTitle", realTitle); add("realIntro", realIntro)
+        add("realCase1Place", realCase1Place); add("realCase1Text", realCase1Text)
+        add("realCase2Place", realCase2Place); add("realCase2Text", realCase2Text)
+        add("realCase3Place", realCase3Place); add("realCase3Text", realCase3Text)
+        add("realCase4Place", realCase4Place); add("realCase4Text", realCase4Text)
+        add("realOutro", realOutro); add("realMore", realMore)
         out.addAll(KeyGuideWords.all())
         return out
     }

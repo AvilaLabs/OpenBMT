@@ -45,6 +45,7 @@ internal fun Controller.showFirstRun() {
         FirstRunStep.Till -> showTillChoice(r)
         FirstRunStep.Money -> showMoney(r)
         FirstRunStep.Why -> showWhy(r)
+        FirstRunStep.RealCases -> showRealCases(r)
         FirstRunStep.Guide -> showKeyGuide(r)
         FirstRunStep.NotYet -> showNotYet(r)
     }
@@ -261,8 +262,26 @@ private fun Controller.showMoney(r: FirstRun) {
 private fun Controller.showWhy(r: FirstRun) {
     stepScreen(
         FirstRunWords.shopTitle,
-        listOf(ui.whyPicture(), heading(FirstRunWords.whyTitle), para(FirstRunWords.whyText1), para(FirstRunWords.whyText2), para(FirstRunWords.whyText3)),
+        listOf(ui.whyPicture(), heading(FirstRunWords.whyTitle), para(FirstRunWords.whyText1), para(FirstRunWords.whyText2), para(FirstRunWords.whyText3), ui.button(FirstRunWords.whyRealCases) { r.openRealCases(); showFirstRun() }),
         listOf(ui.primary(FirstRunWords.shopNext) { r.next(); showFirstRun() }), { r.back(); showFirstRun() },
+    )
+}
+
+/** Four cases of money held by a bank or a payment company: words only, no link, no picture, no network. */
+private fun Controller.showRealCases(r: FirstRun) {
+    fun case(place: String, text: String): View = stack(line(place, muted = true), ui.text(text, 15f), gap = 4)
+    val back: () -> Unit = { r.back(); showFirstRun() }
+    stepScreen(
+        FirstRunWords.shopTitle,
+        listOf(
+            heading(FirstRunWords.realTitle), para(FirstRunWords.realIntro),
+            case(FirstRunWords.realCase1Place, FirstRunWords.realCase1Text),
+            case(FirstRunWords.realCase2Place, FirstRunWords.realCase2Text),
+            case(FirstRunWords.realCase3Place, FirstRunWords.realCase3Text),
+            case(FirstRunWords.realCase4Place, FirstRunWords.realCase4Text),
+            para(FirstRunWords.realOutro), line(FirstRunWords.realMore, muted = true),
+        ),
+        listOf(ui.button(KeyGuideWords.kgBack) { back() }), back,
     )
 }
 

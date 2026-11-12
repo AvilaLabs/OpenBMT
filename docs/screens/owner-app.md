@@ -316,8 +316,21 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | moneyNotYet | This part is still being built. For now, setup continues with the test setup. |
 | whyTitle | Why we do it this way |
 | whyText1 | Any app can be hacked, ours included. So your keys never touch one. |
-| whyText2 | You make them yourself, offline, with a coin. After that, nobody can move your bitcoin without your words. Not even us. |
+| whyText2 | You make them yourself, offline, with a coin or a die. After that, nobody can move your bitcoin without your words. Not even us. |
 | whyText3 | The inconvenience happens once. |
+| whyRealCases | Real cases |
+| realTitle | When someone else holds the money |
+| realIntro | Banks and payment companies usually pay on time. Sometimes they hold the money, and the business waits. |
+| realCase1Place | Card processors |
+| realCase1Text | Square's and Shopify's terms let them hold back a shop's payouts in a reserve, with no fixed end date. |
+| realCase2Place | United States, 2017 |
+| realCase2Text | A court approved a $3.2 million settlement over PayPal holding money in accounts without explanation. |
+| realCase3Place | Greece, 2015 |
+| realCase3Text | Banks closed for three weeks. Shops needed state approval to pay their suppliers abroad. |
+| realCase4Place | India, 2020 |
+| realCase4Text | A bank's withdrawals were capped for 13 days, and the payment apps that used it stopped for about a day. |
+| realOutro | A payment to your own wallet is held by nobody else. That is also why its backup is yours to keep. |
+| realMore | More cases from 11 countries, with their sources, are in the handbook under "When someone else holds the money". |
 | kgTitle | Make your savings wallet |
 | kgStepBadge | Step {n} of {total} |
 | kgNext | Next |
