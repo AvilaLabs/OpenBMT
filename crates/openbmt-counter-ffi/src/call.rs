@@ -64,6 +64,11 @@
 //! - 59 `tip_choices` gives the tips the settings offer for an amount and
 //!   60 `open_with_tip` opens a sale for the amount and the tip chosen
 //!   (CR-188 to CR-190).
+//! - 61 `open_request` makes a request to send, with a note if given
+//!   (CR-205); 62 `add_note` adds a note to a sale (CR-206); 63 `sale_info`
+//!   says what a sale carries besides its amount, 64 `requests` lists the
+//!   open requests (CR-215) and 65 `request_link` gives the payment link of
+//!   one (CR-214).
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -91,12 +96,13 @@ use crate::relay::take_relay;
 use crate::say::{TONES, WHOS};
 use crate::shop::{own_node_check, pairing_read, SettingsView};
 use crate::views::{
-    put_words, ActorRole, ActorView, CancelArgs, CashArgs, CounterNetwork, DayTotalsArgs,
-    DayTotalsView, HealthView, HeartbeatOutcome, LightningSaleView, LightningStatusView,
-    LinkStepView, LinkView, LnFailArgs, LnKind, LnMethod, LnReplyArgs, LnRequestView, LnSetupArgs,
-    LnStepView, LnTransportView, OpenArgs, OpenTipArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs,
-    OwnNodeView, PairBeginArgs, PairStartedView, PairingView, PersonLineView, PumpView, RefundArgs,
-    RefundAskView, RefundRow, RefundStateView, RelayKind, ReportView, RequoteArgs, ScreenView,
+    put_words, ActorRole, ActorView, AddNoteArgs, CancelArgs, CashArgs, CounterNetwork,
+    DayTotalsArgs, DayTotalsView, HealthView, HeartbeatOutcome, LightningSaleView,
+    LightningStatusView, LinkStepView, LinkView, LnFailArgs, LnKind, LnMethod, LnReplyArgs,
+    LnRequestView, LnSetupArgs, LnStepView, LnTransportView, OpenArgs, OpenRequestArgs,
+    OpenTipArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView, PairBeginArgs,
+    PairStartedView, PairingView, PersonLineView, PumpView, RefundArgs, RefundAskView, RefundRow,
+    RefundStateView, RelayKind, ReportView, RequestRow, RequoteArgs, SaleInfoView, ScreenView,
     StaffArgs, StartConfig, StateView, StatusView, TallyView, TipChoiceView, TipTallyView,
     WithdrawArgs, WordsView,
 };
@@ -453,6 +459,22 @@ fn build_ops() -> Vec<Op> {
         op(60, "open_with_tip", Node, |c, a: OpenTipArgs| {
             c.entry()?.open_with_tip(a)
         }),
+        op(61, "open_request", Node, |c, a: OpenRequestArgs| {
+            c.entry()?.open_request(a)
+        }),
+        op(62, "add_note", Node, |c, a: AddNoteArgs| {
+            c.entry()?.add_note(a)
+        }),
+        op(63, "sale_info", Node, |c, index: u32| {
+            c.entry()?.sale_info(index)
+        }),
+        op(64, "requests", Node, |c, now: u64| c.entry()?.requests(now)),
+        op(
+            65,
+            "request_link",
+            Node,
+            |c, (index, label): (u32, String)| c.entry()?.request_link(index, &label),
+        ),
     ]
 }
 
@@ -592,6 +614,10 @@ fn definitions() -> Vec<TypeDef> {
         LinkStepView::define(),
         OpenArgs::define(),
         OpenTipArgs::define(),
+        OpenRequestArgs::define(),
+        AddNoteArgs::define(),
+        SaleInfoView::define(),
+        RequestRow::define(),
         TipChoiceView::define(),
         TipTallyView::define(),
         CancelArgs::define(),

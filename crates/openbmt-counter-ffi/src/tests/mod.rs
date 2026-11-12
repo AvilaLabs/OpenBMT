@@ -14,6 +14,7 @@ mod pairing;
 mod pay;
 mod protocol;
 mod rates;
+mod requests;
 mod screen;
 mod staff;
 mod strict;

@@ -27,12 +27,12 @@ use std::time::{Duration, Instant};
 
 use std::sync::mpsc::Receiver;
 
-use bitcoin::{Network, ScriptBuf, Txid};
+use bitcoin::{Address, Network, ScriptBuf, Txid};
 use openbmt_core::batch::{BatchPolicy, SignedBatch};
 use openbmt_core::command::SignedCommand;
 use openbmt_counter::{
-    refund_destination, Actor, Amount, CashRefund, Currency, Rate, RateSource, RefundAsk,
-    RefundRequest, Report, Screen, StaffChange, StaffEvent,
+    refund_destination, Actor, Amount, CashRefund, Currency, PosState, Rate, RateSource, RefundAsk,
+    RefundRequest, Report, RequestDays, SaleExtras, Screen, StaffChange, StaffEvent,
 };
 use openbmt_counter_node::{effective_settings, own_node_setting};
 use openbmt_counter_node::{
@@ -50,16 +50,16 @@ use openbmt_watch::HeaderChain;
 
 use crate::error::{from_rule, internal, poisoned, refused_by, wrong_state, CounterError, Kind};
 use crate::pair::refused;
-use crate::pay::{payment_for, payment_with_invoice, Payment};
+use crate::pay::{payment_for, payment_with_invoice, request_link, Payment};
 use crate::relay::{LinkPlan, LinkSlot, LEASE_WAIT};
 use crate::say::words_for;
 use crate::views::{
-    ActorView, CancelArgs, CashArgs, DayTotalsArgs, DayTotalsView, HealthView, HeartbeatOutcome,
-    LightningSaleView, LightningStatusView, LinkStepView, LinkView, LnFailArgs, LnKind,
-    LnReplyArgs, LnRequestView, LnSetupArgs, LnStepView, OpenArgs, OpenTipArgs, OpenedView,
-    OverrideArgs, OwnNodeView, PumpView, RefundArgs, RefundAskView, RefundRow, ReportView,
-    RequoteArgs, ScreenView, StaffArgs, StartConfig, StatusView, TipChoiceView, WithdrawArgs,
-    WordsView,
+    ActorView, AddNoteArgs, CancelArgs, CashArgs, DayTotalsArgs, DayTotalsView, HealthView,
+    HeartbeatOutcome, LightningSaleView, LightningStatusView, LinkStepView, LinkView, LnFailArgs,
+    LnKind, LnReplyArgs, LnRequestView, LnSetupArgs, LnStepView, OpenArgs, OpenRequestArgs,
+    OpenTipArgs, OpenedView, OverrideArgs, OwnNodeView, PumpView, RefundArgs, RefundAskView,
+    RefundRow, ReportView, RequestRow, RequoteArgs, SaleInfoView, ScreenView, StaffArgs,
+    StartConfig, StatusView, TipChoiceView, WithdrawArgs, WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -462,12 +462,100 @@ impl Entry {
                 actor: a.actor,
             },
             false,
+            None,
+            None,
         )
     }
 
     /// CR-189, CR-190: a sale with a tip, for the amount and the tip together.
     pub(crate) fn open_with_tip(&self, a: OpenTipArgs) -> Result<OpenedView, CounterError> {
-        self.open_tipped(a, true)
+        self.open_tipped(a, true, None, None)
+    }
+
+    /// CR-205, CR-206: a request to send, with a note when the cashier wrote
+    /// one. The days are 1, 3 or 7.
+    pub(crate) fn open_request(&self, a: OpenRequestArgs) -> Result<OpenedView, CounterError> {
+        let days = RequestDays::from_days(a.days)
+            .ok_or_else(|| refused_by("CR-205", "a request lasts 1, 3 or 7 days"))?;
+        self.open_tipped(
+            OpenTipArgs {
+                now: a.now,
+                amount_minor: a.amount_minor,
+                tip_minor: 0,
+                currency: a.currency,
+                rate: a.rate,
+                source_label: a.source_label,
+                source_fetched_at: a.source_fetched_at,
+                actor: a.actor,
+            },
+            false,
+            a.note,
+            Some(days),
+        )
+    }
+
+    /// CR-206: add a note to a sale that has none.
+    pub(crate) fn add_note(&self, a: AddNoteArgs) -> Result<(), CounterError> {
+        self.run(Some(a.now), |node, _, _| {
+            node.add_note(a.index, &a.note)
+                .map_err(|e| from_rule(e.rule(), &e, e.words()))
+        })
+    }
+
+    /// CR-206, CR-216: what a sale carries besides its amount.
+    pub(crate) fn sale_info(&self, index: u32) -> Result<SaleInfoView, CounterError> {
+        self.run(None, |node, _, _| {
+            let sale = node.counter().sale(index).ok_or_else(|| {
+                refused_by("handle-unknown", "the node has no sale with this index")
+            })?;
+            Ok(SaleInfoView {
+                note: sale.note().map(str::to_string),
+                request_days: sale.request().map_or(0, RequestDays::days),
+                expires_at: sale.expires_at(),
+            })
+        })
+    }
+
+    /// CR-215: the open requests, newest first: a request that has not ended,
+    /// has not been reported paid and is not past its days with nothing
+    /// received. The stored state is read; nothing is judged.
+    pub(crate) fn requests(&self, now: u64) -> Result<Vec<RequestRow>, CounterError> {
+        self.run(Some(now), |node, _, _| {
+            let mut rows: Vec<RequestRow> = node
+                .sales()
+                .filter_map(|i| node.counter().sale(i))
+                .filter(|s| {
+                    s.is_request()
+                        && s.is_live()
+                        && s.pos() != PosState::Paid
+                        && (s.expires_at() > now || s.watch().transactions().next().is_some())
+                })
+                .map(|s| RequestRow {
+                    index: s.index(),
+                    note: s.note().map(str::to_string),
+                    amount_minor: s.amount().0,
+                    opened_at: s.opened_at(),
+                    expires_at: s.expires_at(),
+                    needs_sats: s.needs_sats(),
+                })
+                .collect();
+            rows.sort_by(|a, b| b.opened_at.cmp(&a.opened_at).then(b.index.cmp(&a.index)));
+            Ok(rows)
+        })
+    }
+
+    /// CR-214: the payment link of a request to send, with the amount and a
+    /// label.
+    pub(crate) fn request_link(&self, index: u32, label: &str) -> Result<String, CounterError> {
+        self.run(None, |node, _, network| {
+            let sale = node.counter().sale(index).ok_or_else(|| {
+                refused_by("handle-unknown", "the node has no sale with this index")
+            })?;
+            let address = Address::from_script(sale.script(), network).map_err(|e| {
+                refused_by("pay-address", format!("the script has no address: {e}"))
+            })?;
+            Ok(request_link(&address.to_string(), sale.needs_sats(), label))
+        })
     }
 
     /// CR-188: the tips offered for a sale of `amount_minor`; none when the
@@ -489,7 +577,13 @@ impl Entry {
         })
     }
 
-    fn open_tipped(&self, a: OpenTipArgs, tipped: bool) -> Result<OpenedView, CounterError> {
+    fn open_tipped(
+        &self,
+        a: OpenTipArgs,
+        tipped: bool,
+        note: Option<String>,
+        request: Option<RequestDays>,
+    ) -> Result<OpenedView, CounterError> {
         let code: [u8; 3] = a
             .currency
             .as_bytes()
@@ -514,7 +608,21 @@ impl Entry {
             } else {
                 rate_and_source(a.rate, &a.source_label, a.source_fetched_at)?
             };
-            let opened = if tipped {
+            let extras = SaleExtras {
+                note: note.as_deref(),
+                request,
+            };
+            let opened = if note.is_some() || request.is_some() {
+                node.open_with_extras(
+                    Amount(a.amount_minor),
+                    Amount(a.tip_minor),
+                    currency,
+                    rate,
+                    &source,
+                    by.as_ref(),
+                    extras,
+                )
+            } else if tipped {
                 node.open_with_tip(
                     Amount(a.amount_minor),
                     Amount(a.tip_minor),

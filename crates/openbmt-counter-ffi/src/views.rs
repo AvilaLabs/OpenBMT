@@ -294,6 +294,112 @@ wire_record_get!(OpenTipArgs {
     actor
 });
 
+/// The arguments of `open_request` (CR-205, CR-206): those of `open` with a
+/// note and the days of the request. A request has no tip.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenRequestArgs {
+    /// The time now.
+    pub now: u64,
+    /// The amount of the request in minor units of the currency.
+    pub amount_minor: u64,
+    /// The currency, three capital letters.
+    pub currency: String,
+    /// The rate, minor units per bitcoin.
+    pub rate: u64,
+    /// Where the rate came from.
+    pub source_label: String,
+    /// When the rate was fetched.
+    pub source_fetched_at: u64,
+    /// The person at the till who makes the request, when one is signed in
+    /// (CR-148, CR-151).
+    pub actor: Option<ActorView>,
+    /// The note, if the cashier wrote one (CR-206).
+    pub note: Option<String>,
+    /// How long the request lasts: 1, 3 or 7 days (CR-205).
+    pub days: u8,
+}
+
+wire_record!(OpenRequestArgs {
+    now,
+    amount_minor,
+    currency,
+    rate,
+    source_label,
+    source_fetched_at,
+    actor,
+    note,
+    days
+});
+wire_record_get!(OpenRequestArgs {
+    now,
+    amount_minor,
+    currency,
+    rate,
+    source_label,
+    source_fetched_at,
+    actor,
+    note,
+    days
+});
+
+/// The arguments of `add_note` (CR-206).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddNoteArgs {
+    /// The time now.
+    pub now: u64,
+    /// The sale.
+    pub index: u32,
+    /// The note.
+    pub note: String,
+}
+
+wire_record!(AddNoteArgs { now, index, note });
+wire_record_get!(AddNoteArgs { now, index, note });
+
+/// What a sale carries besides its amount (CR-205, CR-206).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaleInfoView {
+    /// The note, if the sale has one.
+    pub note: Option<String>,
+    /// The days of a request to send: 1, 3 or 7; 0 for a sale shown at the
+    /// till.
+    pub request_days: u8,
+    /// When a sale with nothing received expires, in seconds since 1970.
+    pub expires_at: u64,
+}
+
+wire_record!(SaleInfoView {
+    note,
+    request_days,
+    expires_at
+});
+
+/// One open request, for the list on Home (CR-215).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestRow {
+    /// The receive index.
+    pub index: u32,
+    /// The note, if the request has one.
+    pub note: Option<String>,
+    /// The amount in minor units of the shop's currency.
+    pub amount_minor: u64,
+    /// When the request was made.
+    pub opened_at: u64,
+    /// When it expires if nothing is received.
+    pub expires_at: u64,
+    /// What it needs, in satoshis.
+    pub needs_sats: u64,
+}
+
+wire_record!(RequestRow {
+    index,
+    note,
+    amount_minor,
+    opened_at,
+    expires_at,
+    needs_sats
+});
+
 /// A tip the counter offers for a sale (CR-188).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TipChoiceView {

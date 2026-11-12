@@ -71,6 +71,25 @@ pub fn request_texts(address: &str, bech32: bool, sats: u64) -> (String, String)
     (code, copy)
 }
 
+/// CR-214: the payment link of a request to send, for the app to share: the
+/// request of CR-83 in lower case, with a `label` (BIP 21) that is the text
+/// percent-encoded. Every byte outside `A-Z a-z 0-9 - . _ ~` is written as
+/// `%` and two hexadecimal digits.
+pub fn request_link(address: &str, sats: u64, label: &str) -> String {
+    let (_, copy) = request_texts(address, false, sats);
+    let mut out = copy;
+    out.push(if sats == 0 { '?' } else { '&' });
+    out.push_str("label=");
+    for b in label.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(b));
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
 /// CR-113: the code of a sale that has a Lightning invoice that passed the
 /// checks (LN-17): `bitcoin:<address>?amount=<btc>&lightning=<invoice>`
 /// (LN-18), in capitals for the QR code when LN-19 allows. The text for

@@ -46,6 +46,58 @@ object ProtocolDecoderTest {
         requests()
         rates()
         days()
+        requestsToSend()
+    }
+
+    // ---- requests to send and notes (CR-205, CR-206, CR-215) ----
+
+    private fun requestsToSend() {
+        // open_request (61): the fields of `open`, then the note and the days.
+        val frame =
+            requestFrame(61, 1) {
+                it.u64(7).u64(500).string("USD").u64(10_000_000).string("src").u64(7).u8(0)
+                    .option("Tour 12 May") { n -> it.string(n) }.u8(3)
+            }
+        check(
+            hex(frame) ==
+                "4f424d6d013d000100000000000000" + "0700000000000000" + "f401000000000000" + "03000000555344" +
+                    "8096980000000000" + "03000000737263" + "0700000000000000" + "00" + "01" +
+                    "0b000000" + "546f7572203132204d6179" + "03",
+        ) { hex(frame) }
+        // add_note (62) and request_link (65).
+        check(hex(requestFrame(62, 1) { it.u64(9).u32(2).string("hi") }).endsWith("0900000000000000" + "02000000" + "02000000" + "6869"))
+        check(hex(requestFrame(65, 1) { it.u32(2).string("l") }).endsWith("02000000" + "01000000" + "6c"))
+        // sale_info (63): a note and the days, and none.
+        decodeResponse(header(0, Writer().u8(1).string("Tour").u8(7).u64(1_700_604_800).toByteArray())).let { r ->
+            val info = r.saleInfo()
+            r.end()
+            check(info.note == "Tour" && info.requestDays == 7 && info.expiresAt == 1_700_604_800L)
+        }
+        decodeResponse(header(0, Writer().u8(0).u8(0).u64(900).toByteArray())).let { r ->
+            val info = r.saleInfo()
+            r.end()
+            check(info.note == null && info.requestDays == 0 && info.expiresAt == 900L)
+        }
+        rejects("a flag that is not 0 or 1 in a sale's info") {
+            decodeResponse(header(0, Writer().u8(2).u8(0).u64(900).toByteArray())).saleInfo()
+        }
+        rejects("a cut in a sale's info") {
+            decodeResponse(header(0, Writer().u8(0).u8(0).toByteArray())).saleInfo()
+        }
+        // requests (64): newest first, as the library lists them.
+        val rows = Writer().u32(2)
+        rows.u32(5).u8(1).string("Tour").u64(500).u64(100).u64(200).u64(5_000)
+        rows.u32(4).u8(0).u64(700).u64(50).u64(60).u64(7_000)
+        decodeResponse(header(0, rows.toByteArray())).let { r ->
+            val list = r.list { r.openRequest() }
+            r.end()
+            check(list.size == 2 && list[0].index == 5L && list[0].note == "Tour" && list[0].needsSats == 5_000L)
+            check(list[1].index == 4L && list[1].note == null && list[1].amountMinor == 700L)
+            check(list[1].openedAt == 50L && list[1].expiresAt == 60L)
+        }
+        rejects("trailing bytes after the requests") {
+            decodeResponse(header(0, Writer().u32(0).u8(0).toByteArray())).let { r -> r.list { r.openRequest() }; r.end() }
+        }
     }
 
     // ---- the day's totals (CR-153) ----

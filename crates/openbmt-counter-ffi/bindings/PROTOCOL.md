@@ -99,6 +99,11 @@ ops run on another; it waits for at most 250 ms.
  58 day_totals       handle node  args DayTotalsArgs -> DayTotalsView
  59 tip_choices      handle node  args u64 -> list<TipChoiceView>
  60 open_with_tip    handle node  args OpenTipArgs -> OpenedView
+ 61 open_request     handle node  args OpenRequestArgs -> OpenedView
+ 62 add_note         handle node  args AddNoteArgs -> ()
+ 63 sale_info        handle node  args u32 -> SaleInfoView
+ 64 requests         handle node  args u64 -> list<RequestRow>
+ 65 request_link     handle node  args (u32, string) -> string
 ```
 
 ## Types
@@ -120,6 +125,10 @@ LinkView: record: words: Words, connected: bool, since: option<u64>, refused: bo
 LinkStepView: record: link: LinkView, notes: list<string>
 OpenArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>
 OpenTipArgs: record: now: u64, amount_minor: u64, tip_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>
+OpenRequestArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>, note: option<string>, days: u8
+AddNoteArgs: record: now: u64, index: u32, note: string
+SaleInfoView: record: note: option<string>, request_days: u8, expires_at: u64
+RequestRow: record: index: u32, note: option<string>, amount_minor: u64, opened_at: u64, expires_at: u64, needs_sats: u64
 TipChoiceView: record: percent: u8, tip_minor: u64
 TipTallyView: record: count: u32, minor: u64
 CancelArgs: record: now: u64, index: u32, actor: option<ActorView>

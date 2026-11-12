@@ -99,6 +99,11 @@ private const val OP_STAFF_RECORD = 57
 private const val OP_DAY_TOTALS = 58
 private const val OP_TIP_CHOICES = 59
 private const val OP_OPEN_WITH_TIP = 60
+private const val OP_OPEN_REQUEST = 61
+private const val OP_ADD_NOTE = 62
+private const val OP_SALE_INFO = 63
+private const val OP_REQUESTS = 64
+private const val OP_REQUEST_LINK = 65
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -241,6 +246,19 @@ class TipTally(val count: Long, val minor: Long)
 
 /** A tip the counter offers for a sale: a suggested percent and what it comes to in minor units (CR-188). */
 class TipChoice(val percent: Int, val tipMinor: Long)
+
+/** What a sale carries besides its amount: its note, and the days of a request to send (0 for a sale shown at the till) (CR-205, CR-206). */
+class SaleInfo(val note: String?, val requestDays: Int, val expiresAt: Long)
+
+/** One open request to send, for the list on Home (CR-215). */
+class OpenRequest(
+    val index: Long,
+    val note: String?,
+    val amountMinor: Long,
+    val openedAt: Long,
+    val expiresAt: Long,
+    val needsSats: Long,
+)
 
 /** The totals of one day from the counter's own records (CR-153). */
 class DayTotals(
@@ -719,6 +737,11 @@ private fun Reader.payment(): Payment = Payment(string(), string(), string(), u3
 internal fun Reader.opened(): Opened =
     Opened(u32(), u64(), u64(), u64(), u64(), payment())
 
+internal fun Reader.saleInfo(): SaleInfo = SaleInfo(option { string() }, u8(), u64())
+
+internal fun Reader.openRequest(): OpenRequest =
+    OpenRequest(u32(), option { string() }, u64(), u64(), u64(), u64())
+
 internal fun Reader.screen(): Screen =
     Screen(
         saleState(), words(), list { words() }, option { words() }, u64(), u64(), bool(), bool(),
@@ -1025,6 +1048,54 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
                     .u64(sourceFetchedAt).option(actor) { a -> it.actor(a) }
             }
         return r.opened().also { r.end() }
+    }
+
+    /**
+     * Make a request to send (CR-205): a sale that lasts [days] (1, 3 or 7) with one quote fixed for all of them, with
+     * the [note] if the cashier wrote one. A note the library refuses is a [CounterException] with its words and no
+     * request is made.
+     */
+    fun openRequest(
+        now: Long,
+        amountMinor: Long,
+        currency: String,
+        rate: Long,
+        sourceLabel: String,
+        sourceFetchedAt: Long,
+        actor: Actor?,
+        note: String?,
+        days: Int,
+    ): Opened {
+        val r =
+            call(OP_OPEN_REQUEST, handle) {
+                it.u64(now).u64(amountMinor).string(currency).u64(rate).string(sourceLabel).u64(sourceFetchedAt)
+                    .option(actor) { a -> it.actor(a) }.option(note) { n -> it.string(n) }.u8(days)
+            }
+        return r.opened().also { r.end() }
+    }
+
+    /** Add a note to a sale that has none (CR-206). */
+    fun addNote(now: Long, index: Long, note: String) {
+        val r = call(OP_ADD_NOTE, handle) { it.u64(now).u32(index).string(note) }
+        r.end()
+    }
+
+    /** The note of a sale, and the days of a request to send (CR-205, CR-206). */
+    fun saleInfo(index: Long): SaleInfo {
+        val r = call(OP_SALE_INFO, handle) { it.u32(index) }
+        return r.saleInfo().also { r.end() }
+    }
+
+    /** The open requests, newest first (CR-215). */
+    fun requests(now: Long): List<OpenRequest> {
+        val r = call(OP_REQUESTS, handle) { it.u64(now) }
+        return r.list { r.openRequest() }.also { r.end() }
+    }
+
+    /** The payment link of a request to send, with its amount and [label] (CR-214). */
+    fun requestLink(index: Long, label: String): String {
+        val r = call(OP_REQUEST_LINK, handle) { it.u32(index).string(label) }
+        return r.string().also { r.end() }
     }
 
     /** Work out the state of a sale now. */

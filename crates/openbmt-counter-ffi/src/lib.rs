@@ -83,14 +83,15 @@ pub use call::{
 };
 pub use error::{CounterError, Kind};
 pub use host::{Entry, MAX_WAIT_MS, SLICE_MS};
-pub use pay::{btc_amount, request_texts, Payment};
+pub use pay::{btc_amount, request_link, request_texts, Payment};
 pub use rates::{RateCombineArgs, RateParseArgs, RateSourceView, RateView, SampleView};
 pub use say::{all_words, words_for};
 pub use shop::SettingsView;
 pub use views::{
-    ActorRole, ActorView, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome, LinkStepView,
-    LinkView, OpenArgs, OpenTipArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView,
-    PairBeginArgs, PairStartedView, PairingView, PumpView, RefundArgs, RefundAskView, RefundRow,
-    RefundStateView, RelayKind, ReportView, RequoteArgs, ScreenView, StartConfig, StateView,
-    StatusView, TipChoiceView, TipTallyView, WithdrawArgs, WordsView,
+    ActorRole, ActorView, AddNoteArgs, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome,
+    LinkStepView, LinkView, OpenArgs, OpenRequestArgs, OpenTipArgs, OpenedView, OverrideArgs,
+    OwnNodeCheckArgs, OwnNodeView, PairBeginArgs, PairStartedView, PairingView, PumpView,
+    RefundArgs, RefundAskView, RefundRow, RefundStateView, RelayKind, ReportView, RequestRow,
+    RequoteArgs, SaleInfoView, ScreenView, StartConfig, StateView, StatusView, TipChoiceView,
+    TipTallyView, WithdrawArgs, WordsView,
 };
