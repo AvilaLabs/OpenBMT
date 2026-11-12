@@ -13,6 +13,7 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.text.InputType
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.SurfaceView
@@ -103,55 +104,35 @@ class Slot(context: Context, private val gapDp: Int = 12) : LinearLayout(context
     }
 }
 
-/** [place] on the left and [end] on the right of one line; when both do not fit, [end] goes under [place], at the left. */
-class PlaceEnd(context: Context, private val place: View, private val end: View, private val gapPx: Int) : ViewGroup(context) {
-    private var wrapped = false
+/**
+ * [content] with a horizontal swipe: left calls [onNext], right [onPrevious]. The swipe is only watched, never taken, so the
+ * page's scrolling and its buttons work as they do; it counts when it is [minPx] long and clearly more sideways than down.
+ */
+class SwipePages(context: Context, content: View, private val minPx: Int, private val onNext: () -> Unit, private val onPrevious: () -> Unit) : FrameLayout(context) {
+    private var downX = 0f
+    private var downY = 0f
+    private var tracking = false
 
     init {
-        addView(place)
-        addView(end)
+        addView(content, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
-    override fun onMeasure(widthSpec: Int, heightSpec: Int) {
-        val width = MeasureSpec.getSize(widthSpec)
-        val any = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
-        place.measure(any, any)
-        end.measure(any, any)
-        wrapped = place.measuredWidth + gapPx + end.measuredWidth > width
-        val height = if (wrapped) {
-            place.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.AT_MOST), any)
-            end.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.AT_MOST), any)
-            place.measuredHeight + gapPx / 2 + end.measuredHeight
-        } else {
-            maxOf(place.measuredHeight, end.measuredHeight)
+    override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { downX = e.x; downY = e.y; tracking = true }
+            MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_CANCEL -> tracking = false
+            MotionEvent.ACTION_UP -> if (tracking) {
+                tracking = false
+                val dx = e.x - downX
+                val dy = e.y - downY
+                if (Math.abs(dx) >= minPx && Math.abs(dx) > 2 * Math.abs(dy)) {
+                    val handled = super.dispatchTouchEvent(e)
+                    if (dx < 0) onNext() else onPrevious()
+                    return handled
+                }
+            }
         }
-        setMeasuredDimension(width, height)
-    }
-
-    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
-        val width = r - l
-        if (wrapped) {
-            place.layout(0, 0, place.measuredWidth, place.measuredHeight)
-            val top = place.measuredHeight + gapPx / 2
-            end.layout(0, top, end.measuredWidth, top + end.measuredHeight)
-        } else {
-            val height = b - t
-            place.layout(0, (height - place.measuredHeight) / 2, place.measuredWidth, (height + place.measuredHeight) / 2)
-            end.layout(width - end.measuredWidth, (height - end.measuredHeight) / 2, width, (height + end.measuredHeight) / 2)
-        }
-    }
-}
-
-/** A small pill with [text] in the ink of the warn tone on its tint, edged with its band: the palette checks that ink only on the tint. */
-internal fun Controller.endChip(text: String): TextView {
-    val warn = ui.pal.warn
-    return ui.text(text, 13f, bold = true, colour = warn.ink).also {
-        it.setPadding(ui.px(10), ui.px(3), ui.px(10), ui.px(3))
-        it.background = GradientDrawable().apply {
-            cornerRadius = ui.px(13).toFloat()
-            setColor(warn.tint)
-            setStroke(ui.px(1), warn.band)
-        }
+        return super.dispatchTouchEvent(e)
     }
 }
 

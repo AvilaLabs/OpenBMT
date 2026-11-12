@@ -1,6 +1,6 @@
 package org.openbmt.owner.app
 
-import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
@@ -15,6 +15,7 @@ import java.io.IOException
 import java.util.Locale
 import org.openbmt.app.AnimatedQrView
 import org.openbmt.app.RowItem
+import org.openbmt.app.Space
 import org.openbmt.app.Type
 import org.openbmt.app.UrWords
 import org.openbmt.app.Who
@@ -277,40 +278,66 @@ private fun Controller.showWhy(r: FirstRun) {
     )
 }
 
-/** Four cases of money held by a bank or a payment company: words only, no link, no picture, no network. */
+/** One page of the real cases: a case, or the page on the owner's own bitcoin. Words only, no link, no picture, no network. */
 private fun Controller.showRealCases(r: FirstRun) {
-    fun case(place: String, end: String, text: String, quote: String, who: String): View {
-        val said = LinearLayout(act).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(ui.px(12), 0, 0, 0)
-            addView(ui.text(quote, Type.BODY).apply { setTypeface(typeface, Typeface.ITALIC) })
-            addView(ui.text(who, Type.SECONDARY, colour = ui.pal.secondary))
-        }
-        val rule = LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL
-            addView(View(act).apply { setBackgroundColor(ui.pal.divider) }, LinearLayout.LayoutParams(ui.px(3), ViewGroup.LayoutParams.MATCH_PARENT))
-            addView(said, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
-        return stack(PlaceEnd(act, line(place, muted = true), endChip(end), ui.px(8)), ui.text(text, 15f), rule, gap = 4)
-            .also { it.contentDescription = "$place. $end. $text $who said: $quote" }
-    }
-    fun part(title: String, text: String): View = stack(ui.text(title, Type.BODY, bold = true), para(text), gap = 6)
+    val page = r.realPage
+    val pal = ui.pal
     val back: () -> Unit = { r.back(); showFirstRun() }
-    stepScreen(
-        FirstRunWords.shopTitle,
-        listOf(
-            heading(FirstRunWords.realTitle), para(FirstRunWords.realIntro),
-            case(FirstRunWords.realCase1Place, FirstRunWords.realCase1End, FirstRunWords.realCase1Text, FirstRunWords.realCase1Quote, FirstRunWords.realCase1Who),
-            case(FirstRunWords.realCase2Place, FirstRunWords.realCase2End, FirstRunWords.realCase2Text, FirstRunWords.realCase2Quote, FirstRunWords.realCase2Who),
-            case(FirstRunWords.realCase3Place, FirstRunWords.realCase3End, FirstRunWords.realCase3Text, FirstRunWords.realCase3Quote, FirstRunWords.realCase3Who),
-            case(FirstRunWords.realCase4Place, FirstRunWords.realCase4End, FirstRunWords.realCase4Text, FirstRunWords.realCase4Quote, FirstRunWords.realCase4Who),
-            part(FirstRunWords.realBitcoinTitle, FirstRunWords.realBitcoinText),
-            part(FirstRunWords.realKeysTitle, FirstRunWords.realKeysText),
-            part(FirstRunWords.realCoinTitle, FirstRunWords.realCoinText),
-            line(FirstRunWords.realMore, muted = true),
-        ),
-        listOf(ui.button(KeyGuideWords.kgBack) { back() }), back,
-    )
+    val next: () -> Unit = { r.realNext(); showFirstRun() }
+    fun serif(text: String, size: Float, spacing: Float, medium: Boolean = false, colour: Int? = null): TextView =
+        ui.text(text, size, medium = medium, serif = true, colour = colour).also { it.setLineSpacing(0f, spacing) }
+    fun sans(text: String, size: Float, colour: Int, spacing: Float = 1f): TextView =
+        ui.text(text, size, colour = colour).also { it.setLineSpacing(0f, spacing) }
+    fun below(v: View, top: Int): View = v.also { it.layoutParams = ui.margins(top = top) }
+    val column = LinearLayout(act).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(ui.px(8), ui.px(0), ui.px(8), 0)
+    }
+    val actions: List<Button>
+    if (page < FirstRun.REAL_PAGES - 1) {
+        val cases = listOf(
+            listOf(FirstRunWords.realCase1Place, FirstRunWords.realCase1Head, FirstRunWords.realCase1Text, FirstRunWords.realCase1Quote, FirstRunWords.realCase1Who),
+            listOf(FirstRunWords.realCase2Place, FirstRunWords.realCase2Head, FirstRunWords.realCase2Text, FirstRunWords.realCase2Quote, FirstRunWords.realCase2Who),
+            listOf(FirstRunWords.realCase3Place, FirstRunWords.realCase3Head, FirstRunWords.realCase3Text, FirstRunWords.realCase3Quote, FirstRunWords.realCase3Who),
+            listOf(FirstRunWords.realCase4Place, FirstRunWords.realCase4Head, FirstRunWords.realCase4Text, FirstRunWords.realCase4Quote, FirstRunWords.realCase4Who),
+        )
+        val (place, head, text, quote, who) = cases[page]
+        val count = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        count.addView(sans(FirstRunWords.count(page + 1, cases.size), 14f, pal.hint), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        for (i in cases.indices) {
+            count.addView(
+                View(act).apply {
+                    background = GradientDrawable().apply { cornerRadius = ui.px(3).toFloat(); setColor(if (i == page) pal.text else pal.fieldLine) }
+                },
+                LinearLayout.LayoutParams(ui.px(if (i == page) 18 else 6), ui.px(6)).also { if (i > 0) it.leftMargin = ui.px(6) },
+            )
+        }
+        column.addView(count, ui.margins(top = 12, bottom = 28))
+        if (page == 0) column.addView(below(sans(FirstRunWords.realIntro, 15.5f, pal.secondary, 1.5f), 0).also { it.layoutParams = ui.margins(bottom = 26) })
+        column.addView(sans(place, 14f, pal.hint), ui.margins(bottom = 10))
+        column.addView(serif(head, 27f, 1.25f, medium = true), ui.margins(bottom = 16))
+        column.addView(sans(text, 15.5f, pal.secondary, 1.55f))
+        column.addView(serif(quote, 23f, 1.3f), ui.margins(top = 30, bottom = 6))
+        column.addView(sans(who, 13.5f, pal.hint))
+        val last = page == cases.size - 1
+        actions = listOf(
+            ui.secondary(KeyGuideWords.kgBack) { back() }.also { it.minHeight = ui.px(Space.PRIMARY); it.minimumHeight = ui.px(Space.PRIMARY) },
+            ui.primary(if (last) FirstRunWords.realToBitcoin else FirstRunWords.realNext) { next() },
+        )
+    } else {
+        column.addView(serif(FirstRunWords.realBitcoinHead, 27f, 1.25f, medium = true), ui.margins(top = 12, bottom = 16))
+        column.addView(sans(FirstRunWords.realBitcoinText, 15.5f, pal.secondary, 1.55f))
+        for ((title, text) in listOf(FirstRunWords.realKeysTitle to FirstRunWords.realKeysText, FirstRunWords.realCoinTitle to FirstRunWords.realCoinText)) {
+            column.addView(serif(title, 20f, 1.25f), ui.margins(top = 28, bottom = 8))
+            column.addView(sans(text, 15.5f, pal.secondary, 1.55f))
+        }
+        column.addView(sans(FirstRunWords.realMore, 13.5f, pal.hint, 1.4f), ui.margins(top = 28))
+        actions = listOf(ui.primary(FirstRunWords.realDone) { r.realDone(); showFirstRun() })
+    }
+    tick = null
+    val screen = ui.page(ui.bar(FirstRunWords.realBar, back = back, ground = pal.paper), listOf(column), actions, ground = pal.paper, across = actions.size > 1)
+    act.show(SwipePages(act, screen, ui.px(80), onNext = { if (page < FirstRun.REAL_PAGES - 1) next() }, onPrevious = back))
+    firstRunBack = back
 }
 
 /** This build has no path of its own for the three choices yet: the existing setup follows. */

@@ -260,9 +260,26 @@ class FirstRun(start: ShopPrefs, locale: String) {
         }
     }
 
-    /** The real cases, one tap from the why screen; from no other step. Back returns to the why screen. */
+    /** The page of the real cases: 0 to 3 are the four cases, [REAL_PAGES] - 1 is the page on the owner's own bitcoin. */
+    var realPage = 0
+        private set
+
+    /** The real cases, one tap from the why screen; from no other step. They open at the first case. */
     fun openRealCases() {
-        if (step == FirstRunStep.Why) step = FirstRunStep.RealCases
+        if (step == FirstRunStep.Why) {
+            step = FirstRunStep.RealCases
+            realPage = 0
+        }
+    }
+
+    /** The next page of the real cases; the last one stays. */
+    fun realNext() {
+        if (step == FirstRunStep.RealCases && realPage < REAL_PAGES - 1) realPage++
+    }
+
+    /** Done on the last page of the real cases: back to the why screen. */
+    fun realDone() {
+        if (step == FirstRunStep.RealCases) step = FirstRunStep.Why
     }
 
     fun choose(choice: MoneyChoice) {
@@ -284,7 +301,12 @@ class FirstRun(start: ShopPrefs, locale: String) {
             FirstRunStep.Money -> FirstRunStep.Till
             FirstRunStep.OwnAdvice -> FirstRunStep.Money
             FirstRunStep.Why -> FirstRunStep.Money
-            FirstRunStep.RealCases -> FirstRunStep.Why
+            FirstRunStep.RealCases -> if (realPage > 0) {
+                realPage--
+                FirstRunStep.RealCases
+            } else {
+                FirstRunStep.Why
+            }
             FirstRunStep.Guide -> if (guide.back()) FirstRunStep.Guide else FirstRunStep.Why
             FirstRunStep.NotYet -> when (money) {
                 MoneyChoice.Make -> FirstRunStep.Why
@@ -297,6 +319,11 @@ class FirstRun(start: ShopPrefs, locale: String) {
     /** Back to the welcome: the owner has chosen Set up my shop again, or left the practice. */
     fun toWelcome() {
         step = FirstRunStep.Welcome
+    }
+
+    companion object {
+        /** The four cases and the page on the owner's own bitcoin. */
+        const val REAL_PAGES = 5
     }
 }
 

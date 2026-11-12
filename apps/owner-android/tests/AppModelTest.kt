@@ -2802,19 +2802,32 @@ object AppModelTest {
         r.next(); ok(r.step == FirstRunStep.Guide && r.guide.step == GuideStep.Need, "then the key maker guide, at its first step")
         r.back(); ok(r.step == FirstRunStep.Why, "back from the first step of the guide to the why")
         r.openRealCases(); ok(r.step == FirstRunStep.RealCases, "the button on the why screen opens the real cases")
-        r.back(); ok(r.step == FirstRunStep.Why, "back from the real cases to the why screen")
+        ok(r.realPage == 0, "the real cases open at the first case")
+        r.realNext(); ok(r.step == FirstRunStep.RealCases && r.realPage == 1, "Next case goes to the second case")
+        r.realNext(); r.realNext(); ok(r.realPage == 3, "the fourth case is page 3")
+        r.realNext(); ok(r.realPage == 4 && FirstRun.REAL_PAGES == 5, "Your own bitcoin is the fifth and last page")
+        r.realNext(); ok(r.realPage == 4, "there is no page after the last")
+        r.back(); ok(r.step == FirstRunStep.RealCases && r.realPage == 3, "back from the last page goes to the fourth case")
+        r.back(); r.back(); r.back(); ok(r.step == FirstRunStep.RealCases && r.realPage == 0, "back goes page by page to the first case")
+        r.back(); ok(r.step == FirstRunStep.Why, "back from the first case returns to the why screen")
+        r.openRealCases(); for (i in 1..4) r.realNext(); r.realDone(); ok(r.step == FirstRunStep.Why, "Done on the last page returns to the why screen")
+        r.openRealCases(); ok(r.realPage == 0, "the real cases open at the first case again")
+        r.back(); r.realNext(); ok(r.step == FirstRunStep.Why && r.realPage == 0, "the pages move only inside the real cases")
         val shown = FirstRunWords.all().toMap()
         ok(shown["whyRealCases"] == "Real cases" && shown["realTitle"] == "When someone else holds the money" &&
-            shown["realCase1Place"] == "Lebanon, since 2019" && shown["realCase4End"] == "18¢ per dollar back" && shown["whyText2"]!!.contains("with a coin or a die."), "the real cases words are the ones of the words file")
+            shown["realCase1Place"] == "Lebanon, since 2019" && shown["realBar"] == "Real cases" && shown["realCase4Head"] == "\$64.9 million in savings. \$11.8 million offered back." && shown["whyText2"]!!.contains("with a coin or a die."), "the real cases words are the ones of the words file")
         ok(listOf(1, 2, 3, 4).map { shown["realCase${it}Place"]!!.substringBefore(",") } == listOf("Lebanon", "Laiki Bank", "TMON and WeMakePrice", "Synapse"), "the four cases come worst first, in the order of the words file")
-        ok(source("src/android/FirstRun.kt").contains("contentDescription = \"\$place. \$end. \$text \$who said: \$quote\""), "each case is spoken as its place, how it ended, its text, who said the quote and the quote")
+        ok(listOf(shown["realCase1Head"], shown["realCase2Head"], shown["realCase3Head"]) == listOf("Six years on, most of their savings are still locked in the banks.", "Of €400,000 taken from one business, about €24,000 came back.", "48,000 sellers have still not been paid for their own sales.") &&
+            shown["realCount"] == "{n} of {total}" && FirstRunWords.count(2, 4) == "2 of 4" && shown["realNext"] == "Next case" && shown["realToBitcoin"] == "Your own bitcoin" &&
+            shown["realBitcoinHead"] == "Your own bitcoin is different" && shown["realDone"] == "Done", "the real cases page words are the approved ones")
+        ok(!shown.keys.any { it.startsWith("realCase") && it.endsWith("End") } && !shown.containsKey("realBitcoinTitle"), "the case-end chips and their words are gone")
         ok(shown["realCase1Quote"] == "\"I got to a point where I was going to sell my kidney…\"" && shown["realCase1Who"] == "A woman in Beirut, for her sister's cancer treatment" &&
             shown["realCase2Quote"] == "\"We can't make any withdrawals, we can't make deposits, pay our suppliers.\"" && shown["realCase2Who"] == "A florist in Nicosia, with the banks shut" &&
             shown["realCase3Quote"] == "\"If the settlement is not done by then, it means bankruptcy.\"" && shown["realCase3Who"] == "A seller of household goods in Seoul" &&
             shown["realCase4Quote"] == "\"[The bank] was only going to pay us \$500 out of that \$280,000.\"" && shown["realCase4Who"] == "A former teacher who had saved for 15 years for a family home", "each real case has its quote and who, exactly")
         val screensMdText = File(appDir, "../../docs/screens/owner-app.md").readText()
-        for (k in listOf("whyRealCases", "realTitle", "realIntro", "realCase1Place", "realCase1End", "realCase1Text", "realCase1Quote", "realCase1Who", "realCase2Place", "realCase2End", "realCase2Text",
-            "realCase3Place", "realCase3End", "realCase3Text", "realCase3Quote", "realCase3Who", "realCase4Place", "realCase4End", "realCase4Text", "realCase4Quote", "realCase4Who", "realBitcoinTitle", "realBitcoinText", "realKeysTitle", "realKeysText", "realCoinTitle", "realCoinText", "realMore")) {
+        for (k in listOf("whyRealCases", "realTitle", "realBar", "realCount", "realNext", "realToBitcoin", "realDone", "realCase1Head", "realCase2Head", "realCase3Head", "realCase4Head", "realIntro", "realCase1Place", "realCase1Text", "realCase1Quote", "realCase1Who", "realCase2Place", "realCase2Text",
+            "realCase3Place", "realCase3Text", "realCase3Quote", "realCase3Who", "realCase4Place", "realCase4Text", "realCase4Quote", "realCase4Who", "realBitcoinHead", "realBitcoinText", "realKeysTitle", "realKeysText", "realCoinTitle", "realCoinText", "realMore")) {
             ok(shown.containsKey(k) && screensMdText.contains("| $k |"), "docs/screens/owner-app.md has $k")
         }
         r.next(); r.back()

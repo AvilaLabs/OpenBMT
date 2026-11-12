@@ -177,28 +177,33 @@ object FirstRunWords {
     // ---- real cases -------------------------------------------------------------------------------
 
     const val realTitle = "When someone else holds the money"
+    const val realBar = "Real cases"
+    const val realCount = "{n} of {total}"
+    const val realNext = "Next case"
+    const val realToBitcoin = "Your own bitcoin"
+    const val realDone = "Done"
+    const val realCase1Head = "Six years on, most of their savings are still locked in the banks."
+    const val realCase2Head = "Of €400,000 taken from one business, about €24,000 came back."
+    const val realCase3Head = "48,000 sellers have still not been paid for their own sales."
+    const val realCase4Head = "\$64.9 million in savings. \$11.8 million offered back."
+    const val realBitcoinHead = "Your own bitcoin is different"
     const val realIntro = "Money in a bank or a payment app is not in your hands. Someone else decides when you can have it. In each case below, people could not get their own money out, through no fault of their own."
     const val realCase1Place = "Lebanon, since 2019"
-    const val realCase1End = "Still locked"
     const val realCase1Text = "In 2019 Lebanon's banks stopped letting people take out their own dollars. Someone with \$100,000 saved could get about \$500 a month, paid in local money worth a third as much or less. Six years later most of it is still locked in the banks, and no law says they will get it back."
     const val realCase1Quote = "\"I got to a point where I was going to sell my kidney…\""
     const val realCase1Who = "A woman in Beirut, for her sister's cancer treatment"
     const val realCase2Place = "Laiki Bank, Cyprus, 2013"
-    const val realCase2End = "6¢ per euro back"
     const val realCase2Text = "Overnight, the government shut Laiki Bank and took every balance above €100,000 to cover the bank's losses. Nobody asked the account holders. A business with €500,000 there kept €100,000. Of the €400,000 taken, about €24,000 came back in six years."
     const val realCase2Quote = "\"We can't make any withdrawals, we can't make deposits, pay our suppliers.\""
     const val realCase2Who = "A florist in Nicosia, with the banks shut"
     const val realCase3Place = "TMON and WeMakePrice, South Korea, 2024"
-    const val realCase3End = "Still unpaid"
     const val realCase3Text = "Two large shopping websites held their sellers' money from every sale, then ran out of cash and stopped paying. About 48,000 sellers were cut off from \$900 million they had already earned, about \$19,000 each. The government's answer was to offer them loans: credit against their own unpaid money."
     const val realCase3Quote = "\"If the settlement is not done by then, it means bankruptcy.\""
     const val realCase3Who = "A seller of household goods in Seoul"
     const val realCase4Place = "Synapse, United States, 2024"
-    const val realCase4End = "18¢ per dollar back"
     const val realCase4Text = "Synapse moved money between finance apps and the banks that held it. When it went bankrupt, accounts were frozen for months. One app's customers had \$64.9 million in their accounts and were offered \$11.8 million back. Deposit insurance did not cover them, because Synapse was not a bank."
     const val realCase4Quote = "\"[The bank] was only going to pay us \$500 out of that \$280,000.\""
     const val realCase4Who = "A former teacher who had saved for 15 years for a family home"
-    const val realBitcoinTitle = "Why your own bitcoin is different"
     const val realBitcoinText = "Bitcoin in your own wallet is not held by a bank or a payment company. Nobody can put a hold on it, close the account or cap your withdrawals, because there is no account. It moves only when your keys sign."
     const val realKeysTitle = "Why the keys need so much care"
     const val realKeysText = "With nobody in the middle, nobody can undo a mistake either. Whoever has your 12 words can spend the money, and if every copy is lost, nobody can give it back. So the words are made where no one can see them, written by hand, and put on steel."
@@ -210,6 +215,8 @@ object FirstRunWords {
     fun with(text: String, t: String): String = text.replace("{till}", t)
 
     /** The spoken description of the money tabs with the chosen tab [tab] named. */
+    fun count(n: Int, total: Int): String = realCount.replace("{n}", n.toString()).replace("{total}", total.toString())
+
     fun withTab(text: String, tab: String): String = text.replace("{tab}", tab)
 
     /** Every key and its text, in the order of the words file, for docs/screens/owner-app.md. */
@@ -253,12 +260,12 @@ object FirstRunWords {
         add("ownAdviceTitle", ownAdviceTitle); add("ownAdviceText", ownAdviceText); add("ownAdviceHot", ownAdviceHot)
         add("ownAdviceMake", ownAdviceMake); add("ownAdviceGo", ownAdviceGo)
         add("whyTitle", whyTitle); add("whyText1", whyText1); add("whyText2", whyText2); add("whyText3", whyText3)
-        add("whyRealCases", whyRealCases); add("realTitle", realTitle); add("realIntro", realIntro)
-        add("realCase1Place", realCase1Place); add("realCase1End", realCase1End); add("realCase1Text", realCase1Text); add("realCase1Quote", realCase1Quote); add("realCase1Who", realCase1Who)
-        add("realCase2Place", realCase2Place); add("realCase2End", realCase2End); add("realCase2Text", realCase2Text); add("realCase2Quote", realCase2Quote); add("realCase2Who", realCase2Who)
-        add("realCase3Place", realCase3Place); add("realCase3End", realCase3End); add("realCase3Text", realCase3Text); add("realCase3Quote", realCase3Quote); add("realCase3Who", realCase3Who)
-        add("realCase4Place", realCase4Place); add("realCase4End", realCase4End); add("realCase4Text", realCase4Text); add("realCase4Quote", realCase4Quote); add("realCase4Who", realCase4Who)
-        add("realBitcoinTitle", realBitcoinTitle); add("realBitcoinText", realBitcoinText); add("realKeysTitle", realKeysTitle); add("realKeysText", realKeysText); add("realCoinTitle", realCoinTitle); add("realCoinText", realCoinText); add("realMore", realMore)
+        add("whyRealCases", whyRealCases); add("realTitle", realTitle); add("realBar", realBar); add("realCount", realCount); add("realNext", realNext); add("realToBitcoin", realToBitcoin); add("realDone", realDone); add("realCase1Head", realCase1Head); add("realCase2Head", realCase2Head); add("realCase3Head", realCase3Head); add("realCase4Head", realCase4Head); add("realIntro", realIntro)
+        add("realCase1Place", realCase1Place); add("realCase1Text", realCase1Text); add("realCase1Quote", realCase1Quote); add("realCase1Who", realCase1Who)
+        add("realCase2Place", realCase2Place); add("realCase2Text", realCase2Text); add("realCase2Quote", realCase2Quote); add("realCase2Who", realCase2Who)
+        add("realCase3Place", realCase3Place); add("realCase3Text", realCase3Text); add("realCase3Quote", realCase3Quote); add("realCase3Who", realCase3Who)
+        add("realCase4Place", realCase4Place); add("realCase4Text", realCase4Text); add("realCase4Quote", realCase4Quote); add("realCase4Who", realCase4Who)
+        add("realBitcoinHead", realBitcoinHead); add("realBitcoinText", realBitcoinText); add("realKeysTitle", realKeysTitle); add("realKeysText", realKeysText); add("realCoinTitle", realCoinTitle); add("realCoinText", realCoinText); add("realMore", realMore)
         out.addAll(KeyGuideWords.all())
         return out
     }
