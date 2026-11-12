@@ -172,7 +172,7 @@ impl Why {
                 "Paid over Lightning",
                 "The customer paid over Lightning and the shop's node has the money. It is final.",
                 Who::Cashier,
-                "Hand over the goods. A refund is given in cash or on-chain, never over Lightning.",
+                "Hand over the goods. A refund for it is given in cash, never over Lightning.",
             )
             .code("CR-109"),
             Self::ConfirmedAt(_) => Words::new(

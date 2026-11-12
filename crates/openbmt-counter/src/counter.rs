@@ -26,7 +26,7 @@ use openbmt_core::policy::{
 use openbmt_core::records::{DeviceList, Record, RecordKind, Verifier};
 use openbmt_core::settings::{SettingNote, Settings};
 use openbmt_watch::{
-    HeaderChain, Health, OwnNodeHealth, Refusal, Sighted, Source, WellFormedBlock,
+    HeaderChain, Health, OwnNodeHealth, Problem, Refusal, Sighted, Source, WellFormedBlock,
 };
 
 use crate::batch_held::BatchHeld;
@@ -1178,7 +1178,9 @@ impl Counter {
         if facts.rescan_pending {
             return Err(OpenRefused::RescanPending);
         }
-        if !facts.health.healthy {
+        // WR-54 turns instant acceptance off and does not stop a sale from
+        // opening: it waits for a confirmation.
+        if !facts.health.healthy && facts.health.problem != Some(Problem::BlocksBehind) {
             return Err(OpenRefused::Unhealthy(facts.health.problem));
         }
         if amount.0 == 0 {

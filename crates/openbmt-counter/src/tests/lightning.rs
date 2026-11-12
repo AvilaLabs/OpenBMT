@@ -194,7 +194,7 @@ fn cr_109_the_screen_says_paid_over_lightning_and_the_check_line_says_final() {
     let words = screen.words();
     assert_eq!(words.tone, openbmt_core::say::Tone::Good);
     assert_eq!(words.heading, "Paid over Lightning");
-    assert!(words.next.contains("cash") && words.next.contains("on-chain"));
+    assert!(words.next.contains("cash") && !words.next.contains("on-chain"));
     let line = screen.check_line().unwrap();
     assert_eq!(line, CheckLine::LightningFinal);
     assert_eq!(check_line_name(line), "LightningFinal");

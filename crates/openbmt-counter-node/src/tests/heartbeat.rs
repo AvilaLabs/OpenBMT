@@ -231,6 +231,37 @@ fn after_a_restart_there_is_no_heartbeat_and_the_old_number_is_refused() {
 // WR-54.
 
 #[test]
+fn wr_54_behind_on_blocks_a_sale_still_opens_and_is_not_accepted_at_once() {
+    let dir = Scratch::new();
+    let mut rig = start(dir.path());
+    let block = mine(genesis(), 1, 1, &[]);
+    rig.feed(vec![Rig::peers(), joined(1, &block)]);
+    rig.time.store(T0 + 16, Ordering::SeqCst);
+    rig.feed(vec![]);
+    assert_eq!(
+        rig.node.health().unwrap().problem,
+        Some(openbmt_watch::Problem::BlocksBehind)
+    );
+    // The sale opens, and a payment seen by three groups waits.
+    rig.node
+        .open(five_dollars(), usd(), rate(), &source_at(&rig.time))
+        .unwrap();
+    let pay: Transaction = spend(1, &[(&script_of(0), 5_000)]);
+    rig.feed(vec![AppEvent::Sighting {
+        tx: bytes(&pay),
+        from: vec![peer(20), peer(21), peer(22)],
+    }]);
+    rig.time.store(T0 + 30, Ordering::SeqCst);
+    let mut h = hb(1, T0 + 30);
+    h.tip_height = 1;
+    h.tip_hash = block.block_hash().to_byte_array();
+    rig.node.heartbeat(&owner_bytes(&h)).unwrap();
+    let screen = rig.node.judge(0).unwrap();
+    assert_ne!(screen.state, State::PaidInstant);
+    assert_eq!(rig.node.counter().exposure_outstanding(), 0);
+}
+
+#[test]
 fn wr_54_headers_ahead_of_the_checked_height_keep_a_sale_from_being_accepted_at_once() {
     let dir = Scratch::new();
     let mut rig = rig_with_a_seen_sale(&dir);

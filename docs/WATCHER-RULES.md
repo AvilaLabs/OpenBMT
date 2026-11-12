@@ -274,7 +274,9 @@ Instant acceptance needs a check that is working. The library answers
   the caller holds the time since when the tip has been above the checked
   height and passes it back with each check. A caller that drops it never
   fails this rule. The problem is named after the rules WR-50 to WR-53, so
-  it is reported only when none of them fails.
+  it is reported only when none of them fails. It turns instant acceptance
+  off and nothing else: a sale still opens (CR-01) and waits for a
+  confirmation.
 
 ## 7. The merchant's own node
 

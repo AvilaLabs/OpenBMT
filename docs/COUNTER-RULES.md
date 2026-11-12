@@ -23,9 +23,11 @@ draws what it is told.
 ## 1. Opening a sale
 
 - **CR-01.** Bitcoin is offered only when the check is healthy (WR-50 to
-  WR-54) at that moment. Otherwise opening is refused and the cashier is
-  told to use another payment type. A clock mismatch (WR-53) refuses
-  opening too: the price lock and the expiry cannot be trusted.
+  WR-54) at that moment, except that being behind on blocks (WR-54) alone does
+  not refuse opening: the sale opens and waits for a confirmation. Otherwise
+  opening is refused and the cashier is told to use another payment type. A
+  clock mismatch (WR-53) refuses opening too: the price lock and the expiry
+  cannot be trusted.
 - **CR-02.** A sale gets the next unused address of the counter's current
   batch, and only that. An empty batch refuses the sale: "do not offer
   Bitcoin". An address is never used for two sales.
@@ -793,7 +795,7 @@ counter holds is not, and never leaves the counter.
   invoices watched). Asking again for a
   sale that is paid over Lightning already changes nothing. The cashier's
   screen says "Lightning, final" as the check line (CR-105) and says that a
-  refund is given in cash or on-chain and never over Lightning.
+  refund for it is given in cash, never over Lightning.
 - **CR-110.** What the sale keeps of the payment is the payment hash, the
   amount in millisatoshis and the settle time if the node gave one. They are
   in the stored sale (`OBML` version 3, written only for a sale paid over

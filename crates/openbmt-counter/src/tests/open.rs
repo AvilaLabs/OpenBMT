@@ -54,6 +54,14 @@ fn cr_01_a_clock_mismatch_refuses_opening_because_the_lock_and_expiry_cannot_be_
 }
 
 #[test]
+fn cr_01_behind_on_blocks_alone_does_not_refuse_opening() {
+    let mut w = World::new();
+    w.health = unhealthy(Problem::BlocksBehind);
+    assert!(try_open(&mut w).is_ok());
+    assert!(w.c.sale(0).is_some());
+}
+
+#[test]
 fn cr_01_an_unhealthy_answer_without_a_named_problem_still_refuses() {
     let mut w = World::new();
     w.health.healthy = false;
