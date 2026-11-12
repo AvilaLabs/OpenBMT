@@ -2,6 +2,12 @@
 
 [Start here](introduction.md)
 
+- [Why](why.md)
+  - [When someone else holds the money](real-cases.md)
+  - [You keep the sale](why-keep-the-sale.md)
+  - [New customers](why-new-customers.md)
+  - [What it asks of you](why-what-it-asks.md)
+
 # Merchant guide
 
 - [Getting started, step by step](getting-started.md)
@@ -10,7 +16,6 @@
 - [A sale at the counter](getting-paid.md)
 - [Costs and cashing out](why-bitcoin.md)
 - [Who controls the money](safety.md)
-- [When someone else holds the money](real-cases.md)
 - [Equipment, daily work and fit](fit.md)
 - [What others can see](privacy.md)
 - [Risks and current limits](limits.md)

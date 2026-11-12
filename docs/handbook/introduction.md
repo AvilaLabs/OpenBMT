@@ -55,6 +55,7 @@ promises about future costs or losses.
 
 | What you want to understand | Chapter |
 |---|---|
+| Why a shop would take bitcoin at all | [Why](why.md) |
 | What you need and the order to set it up | [Getting started, step by step](getting-started.md) |
 | What you receive and how a payment becomes confirmed | [What a bitcoin payment is](bitcoin-basics.md) |
 | What the cashier and customer do | [A sale at the counter](getting-paid.md) |
