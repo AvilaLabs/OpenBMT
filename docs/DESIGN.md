@@ -583,6 +583,25 @@ screens until sourced.
 | Explained states | Rare | Every wait says why and what's next |
 | Check labels | Rare | Every payment says what saw it: the light check, the Box, or the shop's own node with the light check |
 
+**Square's own bitcoin payments (Square seller help and fees pages, read
+2026-11-11).** Square switched bitcoin payments on automatically for
+eligible United States sellers from 30 March 2026; New York sellers are
+excluded. The customer pays a Lightning invoice shown as a QR code. Limits
+are $600 per payment and $20,000 a day. The fee is 0% until 31 December
+2026 and 1% from 1 January 2027; converting card sales into bitcoin is a
+separate 1%. The seller is paid in dollars by default or may keep the
+bitcoin, which Block or an affiliate holds; withdrawing it on-chain is free
+(about 24 hours) or $2 to $3 plus the network fee, within $15,000 a day and
+$50,000 a week. Block's terms let it limit, freeze, delay or reverse
+transactions. Sellers pass Block's identity checks. It is offered in the
+United States only.
+
+So for a Square seller in the United States, Square is the easier way to
+take bitcoin. OpenBMT is for the seller who wants to hold the bitcoin with
+no one able to freeze it, with nothing paid per sale to OpenBMT or the till
+company and no payment limit set by a company, on any till or none, and in
+any country.
+
 ## 4. Purist checklist
 
 | Red flag (source) | Project response |
