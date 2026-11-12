@@ -659,6 +659,25 @@ object AppWords {
         "Nothing to do. Start a new approval when the Key app is at hand.",
     )
 
+    /** The question before an approval that went to a hardware signer is abandoned (AS-89). */
+    val abandonExported = w(
+        Tones.STOP, "Already sent to the signer",
+        "This approval went to the signer, so it may already be signed and could still be sent.",
+        Who.OWNER,
+        "If you abandon it, the payments go back in the queue and a new approval spends the same coins, so only one can ever be paid.",
+    )
+
+    /** The rest of what to do next, shown under [abandonExported]: the words check keeps each sentence to 140 characters. */
+    const val abandonExportedMore = "If the old one is sent, it counts as paid."
+
+    /** An approval that went to a hardware signer was abandoned (AS-89). */
+    val abandonedExported = w(
+        Tones.INFO, "Back in the queue",
+        "The payments are back in the queue. The payment sent to the signer is still watched: if it is sent, it counts as paid.",
+        Who.OWNER,
+        "Start a new approval when you are ready.",
+    )
+
     val alertCleared = w(
         Tones.INFO, "Alert cleared",
         "The alert is cleared from this phone.",
@@ -1320,6 +1339,8 @@ object AppWords {
         "entryCancelled" to entryCancelled,
         "entryRequeued" to entryRequeued,
         "sessionAbandoned" to sessionAbandoned,
+        "abandonExported" to abandonExported,
+        "abandonedExported" to abandonedExported,
         "alertCleared" to alertCleared,
         "noteDismissed" to noteDismissed,
         "noLink" to noLink,

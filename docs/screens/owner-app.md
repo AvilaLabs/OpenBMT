@@ -90,6 +90,8 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | entryCancelled | Entry cancelled | The entry is taken out of the queue. | Nothing to do. | nobody |  |
 | entryRequeued | Entry queued again | The entry that was sent back is in the queue again. | Start an approval when the Key app is at hand. | the owner |  |
 | sessionAbandoned | Approval abandoned | The open approval is closed, and its entries are back in the queue. | Nothing to do. Start a new approval when the Key app is at hand. | nobody |  |
+| abandonExported | Already sent to the signer | This approval went to the signer, so it may already be signed and could still be sent. | If you abandon it, the payments go back in the queue and a new approval spends the same coins, so only one can ever be paid. | the owner |  |
+| abandonedExported | Back in the queue | The payments are back in the queue. The payment sent to the signer is still watched: if it is sent, it counts as paid. | Start a new approval when you are ready. | the owner |  |
 | alertCleared | Alert cleared | The alert is cleared from this phone. | Nothing to do. If the cause is still there, the alert comes back. | nobody |  |
 | noteDismissed | Note dismissed | The note about a refund request is removed from the list. | Nothing to do. | nobody |  |
 | noLink | No link to the counters | This phone was set up without a relay, so no counter can report to it. | Nothing to do here. A setup text with a relay adds the link. | the owner |  |

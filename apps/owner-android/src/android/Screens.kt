@@ -260,13 +260,28 @@ internal fun Controller.showSessions(message: SayWords? = null): Unit = withNode
                 ui.button("Continue on the signer") { continueOnSigner(id, signer) { showSessions() } }
             }
             val abandon = ui.danger("Abandon it") {
-                if (attempt(msg) { n.abandonSession(id) } != null) showSessions(AppWords.sessionAbandoned)
+                // An approval whose file went to the signer may still be signed and sent (AS-89): the owner is asked first.
+                if (signer == HardwareModel.SignerSession.Exported) {
+                    showAbandonExported(id)
+                } else if (attempt(msg) { n.abandonSession(id) } != null) {
+                    showSessions(AppWords.sessionAbandoned)
+                }
             }
             views.add(stack(label(name), show, abandon, gap = 10))
         }
         views.add(msg)
     }
     screen("Open approvals", views, listOf(backButton { showHome() }), back = { showHome() })
+}
+
+/** The question before an exported approval is abandoned: the old transaction is still watched, and counts as paid if it is sent. */
+private fun Controller.showAbandonExported(id: ByteArray): Unit = withNode { n ->
+    val msg = Slot(act)
+    val keep = ui.primary("Keep it") { showSessions() }
+    val abandon = ui.danger("Abandon it") {
+        if (attempt(msg) { n.abandonSession(id) } != null) showSessions(AppWords.abandonedExported)
+    }
+    screen("Abandon this approval?", listOf(para(AppWords.abandonExportedMore), msg), listOf(keep, abandon), back = { showSessions() }, words = AppWords.abandonExported)
 }
 
 // ---- the signed objects that wait -------------------------------------------------------------------------
