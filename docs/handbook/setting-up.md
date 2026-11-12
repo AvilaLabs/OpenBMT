@@ -51,7 +51,7 @@ spend. The first receive address is compared on the wallet's own screen
 before the shop takes a payment. A description that holds a private key or
 recovery words is refused, and the app says that key is now exposed.
 
-**Help me make a savings wallet.** The owner makes a wallet from their own
+**Help me make a cold wallet.** The owner makes a wallet from their own
 coin flips or die rolls, on the computer they already have, with networking
 off. The next section explains how.
 
@@ -63,7 +63,7 @@ app does not keep the wallet yet, and all three choices still continue
 into the older setup with two phones, described in [Who controls the
 money](safety.md).
 
-## Making a savings wallet with a coin or a die
+## Making a cold wallet with a coin or a die
 
 Nothing is bought for this. It needs a computer, two USB sticks, a coin or
 one six-sided die, a pen, a card and about an hour.
