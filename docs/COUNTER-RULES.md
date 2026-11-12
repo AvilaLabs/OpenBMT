@@ -1788,3 +1788,55 @@ a counter paired with the shop's own wallet.
   follows.
 - **CR-238.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`.
+
+## 24. Confirming a change at a counter
+
+A shop that uses its own wallet has no Key app to sign a loosening of its
+settings. Instead, a person at one of the shop's counters confirms it
+(`docs/APPROVAL-RULES.md` §2): the counter shows what the change loosens
+and four words, the owner phone shows the same four words, and a manager's
+PIN signs it. A phone taken from the owner cannot loosen the shop's limits
+on its own. This section is the counter's part. A change that sends payments
+somewhere else (Redirect, AP-01) needs the wallet's own signature and is
+not in this section; it stays refused as CR-236 says.
+
+- **CR-239.** Settings that pass every check of CR-236 except the
+  confirmation of a Loosen change are not refused: they are kept as the
+  counter's one change to confirm, in the node's folder (`confirm.bin`, the
+  `OBMS` frame and nothing else, written as CR-161), and are not in force.
+  Newer such settings replace older ones. They are dropped when settings of
+  the same or a higher version come into force, and seven days after they
+  arrived. A Redirect change is refused as before.
+- **CR-240.** While a change waits, the manager's menu has "Change to
+  confirm". It shows each field the change loosens, with its value now and
+  its value after, from `settings::changed_fields` (AP-01), in the shop's
+  currency where it is an amount; the settings version; and the four words
+  of AP-03 for the settings' hash, large. It has two buttons, "Confirm with
+  manager PIN" and "Not now". Home shows a line that a change waits, for the
+  manager.
+- **CR-241.** "Confirm with manager PIN" asks for the manager's PIN
+  (CR-84). With the right PIN the counter signs the confirmation of AP-04
+  for the settings' hash with its identity key, and writes it as a
+  `Setting` record of its own chain: one tag byte (36), the settings hash
+  (32 bytes) and the signature (64 bytes), 97 bytes. The owner phone reads
+  it from the counter's records, as it reads every record; nothing else
+  carries it. A wrong PIN signs nothing and counts toward CR-84's lockout.
+  The confirmation does not put the settings in force on this counter: they
+  come into force only as CR-242 says, on every counter alike.
+- **CR-242.** A message of kind Settings may carry the frame `OBM<`,
+  version 1: the `OBMS` frame, then the confirming counter's id (32 bytes)
+  and its signature (64 bytes). It is read as strictly as CR-160 reads
+  `OBMS`. The counter takes a Loosen change from it when the signature
+  verifies under AP-04 for these settings' hash and that counter, and the
+  counter is in the settings now in force (AP-05); every other check of
+  CR-160 and CR-236 applies as for `OBMS`. A confirmation from a counter
+  not in force, for another hash or with a bad signature is refused with a
+  note, and nothing changes. `settings.bin` keeps the `OBM<` frame whole,
+  and CR-163 reads either frame at start.
+- **CR-243.** The body of CR-241 is read strictly: a tag other than 36, a
+  cut body or a byte left over is refused, and re-encoding gives the input.
+  The books, the totals and the readers of sale events take no meaning from
+  it. Bodies of 37 (CR-162), 41 (CR-167), 41 with tag 35 (CR-235) and 97
+  bytes are each read as at most one kind.
+- **CR-244.** Every state and refusal of this section has words under
+  `docs/SCREEN-RULES.md`.
