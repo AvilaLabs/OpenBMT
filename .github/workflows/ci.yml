@@ -229,3 +229,28 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npx tsc --noEmit
+
+  keymaker:
+    name: Key maker tests and build
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: tools/keymaker
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.22.1
+      - name: Install the packages pinned by the lockfile
+        run: npm ci --ignore-scripts
+      - name: Tests
+        run: npm test
+      - name: Build the page
+        run: node build.mjs
+      - name: Bundle tests
+        run: node --test test/bundle.test.js
+      - name: Checks that stay local
+        run: |
+          echo "Skipped here: the Electrum cross-check (test/electrum/crosscheck.sh needs Electrum's own files and bwrap) and the browser run (KEYMAKER_BROWSER=1 needs a browser). Both run on the maintainer's machine."
