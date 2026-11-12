@@ -213,8 +213,8 @@ impl Reader<'_> {
         self.pos - start
     }
 
-    /// The JSON number grammar. An integer that fits is kept; any other
-    /// number is checked and its value is not kept.
+    /// The JSON number grammar. An integer that fits is kept as a value; any
+    /// other number is checked and kept as its exact text.
     fn number(&mut self) -> Result<Value, JsonError> {
         let start = self.pos;
         let mut integer = true;
@@ -245,23 +245,20 @@ impl Reader<'_> {
                 return Err(JsonError::Malformed);
             }
         }
-        if !integer {
-            return Ok(Value::Number);
-        }
         let text = self
             .bytes
             .get(start..self.pos)
             .and_then(|b| std::str::from_utf8(b).ok())
             .ok_or(JsonError::Malformed)?;
-        if text == "-0" {
-            return Ok(Value::Number);
+        if !integer || text == "-0" {
+            return Ok(Value::Number(text.to_string()));
         }
         if let Ok(i) = text.parse::<i64>() {
             Ok(Value::Int(i))
         } else if let Ok(u) = text.parse::<u64>() {
             Ok(Value::UInt(u))
         } else {
-            Ok(Value::Number)
+            Ok(Value::Number(text.to_string()))
         }
     }
 }

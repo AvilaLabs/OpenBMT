@@ -12,9 +12,10 @@ pub enum Value {
     /// An integer above `i64::MAX` that fits a `u64`.
     UInt(u64),
     /// A number that has the grammar of one and is not an exact integer that
-    /// fits: a fraction, an exponent, `-0`, or an integer too large. Its
-    /// value is not kept.
-    Number,
+    /// fits: a fraction, an exponent, `-0`, or an integer too large. It
+    /// holds the number's exact text as it appeared in the document, so that
+    /// a reader can turn it into a value without going through a float.
+    Number(String),
     /// A string, with its escapes resolved.
     Str(String),
     /// An array.
@@ -28,6 +29,15 @@ impl Value {
     pub fn get(&self, key: &str) -> Option<&Value> {
         match self {
             Value::Obj(items) => items.iter().find(|(k, _)| k == key).map(|(_, v)| v),
+            _ => None,
+        }
+    }
+
+    /// The exact text of the number, when this is a [`Value::Number`]. An
+    /// exact integer has [`Value::as_i64`] and [`Value::as_u64`] instead.
+    pub fn number_text(&self) -> Option<&str> {
+        match self {
+            Value::Number(t) => Some(t),
             _ => None,
         }
     }

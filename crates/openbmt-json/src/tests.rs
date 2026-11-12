@@ -127,7 +127,7 @@ fn every_kind_of_value_is_read() {
     let a = v.get("a").and_then(Value::as_array).expect("an array");
     assert_eq!(a.len(), 7);
     assert_eq!(a.first(), Some(&Value::Int(1)));
-    assert_eq!(a.get(1), Some(&Value::Number));
+    assert_eq!(a.get(1), Some(&Value::Number("-2.5e+3".to_string())));
     assert_eq!(a.get(3).and_then(Value::as_bool), Some(true));
     assert_eq!(a.get(4).and_then(Value::as_bool), Some(false));
     assert!(a.get(5).is_some_and(Value::is_null));
@@ -161,12 +161,29 @@ fn an_integer_is_exact_or_it_is_not_one() {
     assert_eq!(read("9223372036854775808"), Ok(Value::UInt(1 << 63)));
     assert_eq!(read("18446744073709551615"), Ok(Value::UInt(u64::MAX)));
     // Too large for both: a number with no value.
-    assert_eq!(read("18446744073709551616"), Ok(Value::Number));
-    assert_eq!(read("-9223372036854775809"), Ok(Value::Number));
+    assert_eq!(
+        read("18446744073709551616"),
+        Ok(Value::Number("18446744073709551616".to_string()))
+    );
+    assert_eq!(
+        read("-9223372036854775809"),
+        Ok(Value::Number("-9223372036854775809".to_string()))
+    );
     // A fraction or an exponent is not an integer, whatever it equals.
     for n in ["1.0", "1e2", "1E2", "100e-2", "0.5", "-0", "-0.0"] {
-        assert_eq!(read(n), Ok(Value::Number), "{n}");
+        assert_eq!(read(n), Ok(Value::Number(n.to_string())), "{n}");
     }
+}
+
+#[test]
+fn a_number_keeps_its_exact_text() {
+    let v = read(r#"{"p":0.6,"q":[1.50,2E+2,-0],"i":7}"#).expect("reads");
+    assert_eq!(v.get("p").and_then(Value::number_text), Some("0.6"));
+    let q = v.get("q").and_then(Value::as_array).expect("an array");
+    let texts: Vec<_> = q.iter().map(Value::number_text).collect();
+    assert_eq!(texts, [Some("1.50"), Some("2E+2"), Some("-0")]);
+    // An exact integer is a value, not text.
+    assert_eq!(v.get("i").and_then(Value::number_text), None);
 }
 
 #[test]

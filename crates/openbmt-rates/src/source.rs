@@ -590,7 +590,7 @@ pub fn parse_response(source: &Source, body: &[u8]) -> Result<u64, ParseRefused>
             checked(&doc, &check)?;
             if !matches!(
                 walk(&doc, price)?,
-                Value::Int(_) | Value::UInt(_) | Value::Number
+                Value::Int(_) | Value::UInt(_) | Value::Number(_)
             ) {
                 return Err(ParseRefused::WrongShape);
             }

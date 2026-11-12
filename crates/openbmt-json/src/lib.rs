@@ -7,8 +7,8 @@
 //!
 //! Integers are kept exactly or not at all: a number with no fraction and no
 //! exponent that fits an `i64` (or, above it, a `u64`) is [`Value::Int`] or
-//! [`Value::UInt`]; any other number is [`Value::Number`], which has no
-//! value, so that nothing downstream can use a rounded one.
+//! [`Value::UInt`]; any other number is [`Value::Number`], which keeps only
+//! its exact text, so that nothing downstream can use a rounded one.
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.
