@@ -76,7 +76,7 @@ object ProtocolDecoderTest {
         check(taken.outcomes[0].reason == null)
         check(taken.sends.size == 1 && taken.sends[0].txid == "ab12" && taken.sends[0].state == SendKind.Sent)
         rejects("an outcome tag") { decodeResponse(takenFrame(outcome = 3)).taken() }
-        rejects("a send tag") { decodeResponse(takenFrame(send = 8)).taken() }
+        rejects("a send tag") { decodeResponse(takenFrame(send = 9)).taken() }
 
         val queue = decodeResponse(queueFrame()).queue()
         check(queue.refunds.size == 1 && queue.cashOuts.size == 1 && queue.others.size == 1)
