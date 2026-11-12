@@ -7,7 +7,7 @@
 //! next number u64 | next return id u64
 //! stopped series: count u32, then each series u64, rising
 //! requests: count u32, then each
-//!   number u64 | note (len u8, UTF-8) | amount u64
+//!   number u64 | note (len u16, UTF-8) | amount u64
 //!   | pricing u8 (0 bitcoin, 1 currency) + currency byte for 1
 //!   | made at u64 | made day u32 | due day u32 | address index u32
 //!   | repeat flag, then every u8 (1 week, 2 month, 3 year), series u64,
@@ -35,14 +35,15 @@ use bitcoin::ScriptBuf;
 use openbmt_core::currency::ShopCurrency;
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_counter::money::{value_of, Rate, MAX_SATS};
-use openbmt_counter::refund::{dust_limit, is_payment_script, refund_text_ok, MAX_SCRIPT_BYTES};
+use openbmt_counter::refund::{dust_limit, is_payment_script, MAX_SCRIPT_BYTES};
 
 use crate::book::{RequestBook, MAX_REQUESTS, MAX_RETURNS};
 use crate::date::{Day, MAX_DAY};
 use crate::error::BookError;
 use crate::model::{
-    After, Credit, End, Every, Pricing, Quote, Repeat, Request, Return, ReturnState, MAX_CREDITS,
-    MAX_CURRENCY_UNITS, MAX_DUE_DAYS, MAX_LEAD_DAYS, MAX_OPEN, MAX_QUOTES, QUOTE_HOLD_SECS,
+    note_ok, After, Credit, End, Every, Pricing, Quote, Repeat, Request, Return, ReturnState,
+    MAX_CREDITS, MAX_CURRENCY_UNITS, MAX_DUE_DAYS, MAX_LEAD_DAYS, MAX_OPEN, MAX_QUOTES,
+    QUOTE_HOLD_SECS,
 };
 use crate::returns::MAX_QUEUED_RETURNS;
 
@@ -51,7 +52,7 @@ pub const MAGIC_REQUEST_BOOK: [u8; 4] = *b"OBM=";
 
 /// The fewest bytes a request takes: its fixed fields, an empty note, no
 /// repeat, no end, no quotes and no credits.
-const MIN_REQUEST_BYTES: usize = 49;
+const MIN_REQUEST_BYTES: usize = 50;
 /// The fewest bytes a return takes.
 const MIN_RETURN_BYTES: usize = 35;
 
@@ -205,7 +206,11 @@ impl RequestBook {
 
 fn encode_request(out: &mut Vec<u8>, r: &Request) {
     out.extend_from_slice(&r.number.to_le_bytes());
-    out.push(u8::try_from(r.note.len()).unwrap_or(u8::MAX));
+    out.extend_from_slice(
+        &u16::try_from(r.note.len())
+            .unwrap_or(u16::MAX)
+            .to_le_bytes(),
+    );
     out.extend_from_slice(r.note.as_bytes());
     out.extend_from_slice(&r.amount.to_le_bytes());
     match r.pricing {
@@ -303,11 +308,11 @@ fn day(r: &mut Reader<'_>) -> Result<Day, BookError> {
 
 fn decode_request(r: &mut Reader<'_>) -> Result<Request, BookError> {
     let number = r.u64_le().map_err(corrupt)?;
-    let len = usize::from(r.u8().map_err(corrupt)?);
+    let len = usize::from(r.u16_le().map_err(corrupt)?);
     let note = std::str::from_utf8(r.take(len).map_err(corrupt)?)
         .map_err(|_| BookError::Corrupt("a note is not text"))?
         .to_string();
-    if !refund_text_ok(&note) {
+    if !note_ok(&note) {
         return bad("a note is not 1 to 64 characters of plain text");
     }
     let amount = r.u64_le().map_err(corrupt)?;

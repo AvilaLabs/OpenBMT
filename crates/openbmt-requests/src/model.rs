@@ -16,6 +16,12 @@ pub const MAX_QUOTES: usize = 64;
 pub const MAX_OPEN: usize = 1_000;
 /// RQ-06: most characters of a note.
 pub const MAX_NOTE_CHARS: usize = 64;
+/// RQ-06: whether a note is plain text of 1 to 64 characters with no control
+/// character (the check of CR-206).
+pub fn note_ok(note: &str) -> bool {
+    (1..=MAX_NOTE_CHARS).contains(&note.chars().count()) && !note.chars().any(char::is_control)
+}
+
 /// RQ-08: most units of the shop's currency a request may ask for.
 pub const MAX_CURRENCY_UNITS: u64 = 1_000_000;
 /// RQ-09: most days from the day a request is made to its due date.

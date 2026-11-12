@@ -9,14 +9,13 @@
 
 use openbmt_core::currency::ShopCurrency;
 use openbmt_counter::money::{sats_for, value_of, Amount, Rate, MAX_SATS};
-use openbmt_counter::refund::refund_text_ok;
 
 use crate::date::{day_of, end_of_day, Day, MAX_DAY};
 use crate::error::{CreditRefused, EndRefused, Limit, MakeRefused, ShareRefused};
 use crate::model::Arrival;
 use crate::model::{
-    After, CheckedRate, Credit, End, Every, Pricing, Quote, Repeat, Request, Return, Status,
-    MAX_CREDITS, MAX_CURRENCY_UNITS, MAX_DUE_DAYS, MAX_LEAD_DAYS, MAX_OPEN, MAX_QUOTES,
+    note_ok, After, CheckedRate, Credit, End, Every, Pricing, Quote, Repeat, Request, Return,
+    Status, MAX_CREDITS, MAX_CURRENCY_UNITS, MAX_DUE_DAYS, MAX_LEAD_DAYS, MAX_OPEN, MAX_QUOTES,
     QUOTE_HOLD_SECS,
 };
 
@@ -132,6 +131,15 @@ impl RequestBook {
         self.requests.iter().filter(|r| r.is_open()).count()
     }
 
+    /// RQ-04: the index of every address the book has given to a request,
+    /// by index. The owner phone keeps each in its watch set for good,
+    /// whether the request is paid, cancelled or years old.
+    pub fn address_indexes(&self) -> Vec<u32> {
+        let mut indexes: Vec<u32> = self.requests.iter().map(|r| r.address_index).collect();
+        indexes.sort_unstable();
+        indexes
+    }
+
     /// Whether some request has this address index (RQ-03).
     pub fn index_used(&self, index: u32) -> bool {
         self.requests.iter().any(|r| r.address_index == index)
@@ -152,7 +160,7 @@ impl RequestBook {
         shop: &Shop,
         rate: Option<&CheckedRate>,
     ) -> Result<u64, MakeRefused> {
-        if !refund_text_ok(&new.note) {
+        if !note_ok(&new.note) {
             return Err(MakeRefused::NoteNeeded);
         }
         let pricing = match new.price_in {
