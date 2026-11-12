@@ -24,12 +24,11 @@ use std::time::{Duration, Instant};
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::relay::{RelayHint, SignedRelayHint};
 use openbmt_counter_node::{
-    start_link, CounterLink, LinkLine, LinkNotStarted, LinkState, PairRefused, PairingRecord,
-    RelayRefused, SettingsLine,
+    start_link, CounterLink, LinkLine, LinkNotStarted, LinkState, PairedRecord, RelayRefused,
+    SettingsLine,
 };
 
 use crate::error::{from_rule, CounterError};
-use crate::pair::refused;
 use crate::views::{LinkStepView, LinkView, WordsView};
 
 /// How long a start waits for an earlier link on the same folder to let go.
@@ -196,7 +195,7 @@ impl LinkSlot {
 /// record for the app to keep in place of the old; the link starts from it
 /// at the next start. Nothing is changed here.
 pub(crate) fn take_relay(record: &[u8], frame: &[u8]) -> Result<Vec<u8>, CounterError> {
-    let record = PairingRecord::from_bytes(record).map_err(|e| refused(PairRefused::Record(e)))?;
+    let record = PairedRecord::from_bytes(record).map_err(crate::host::record_refused)?;
     let signed =
         SignedRelayHint::from_bytes(frame).map_err(|e| relay_refused(RelayRefused::Bytes(e)))?;
     let next = record.with_relay(&signed).map_err(relay_refused)?;

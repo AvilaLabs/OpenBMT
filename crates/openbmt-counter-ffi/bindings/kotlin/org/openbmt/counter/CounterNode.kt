@@ -107,6 +107,8 @@ private const val OP_REQUEST_LINK = 65
 private const val OP_SWAP_NEXT = 66
 private const val OP_SWAP_REPLY = 67
 private const val OP_SWAP_FAILED = 68
+private const val OP_PAIR_ADDRESS_SAME = 69
+private const val OP_PAIR_ADDRESS_DIFFERENT = 70
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -117,6 +119,9 @@ private const val TAG_COUNTER_NETWORK_REGTEST = 3
 private const val TAG_RELAY_KIND_NONE = 0
 private const val TAG_RELAY_KIND_DIRECT = 1
 private const val TAG_RELAY_KIND_ONION = 2
+private const val TAG_OWN_WALLET_KIND_NONE = 0
+private const val TAG_OWN_WALLET_KIND_SINGLE_KEY = 1
+private const val TAG_OWN_WALLET_KIND_TWO_OF_THREE = 2
 private const val TAG_ACTOR_ROLE_CASHIER = 0
 private const val TAG_ACTOR_ROLE_MANAGER = 1
 private const val TAG_REFUND_ASK_VIEW_SATS = 0
@@ -164,6 +169,9 @@ enum class CounterNetwork { Mainnet, Testnet, Signet, Regtest }
 /** What kind of relay a pairing record holds (CR-131): an onion relay needs Orbot. */
 enum class RelayKind { None, Direct, Onion }
 
+/** The kind of wallet an offer from the shop's own wallet names (CR-228). */
+enum class OwnWalletKind { None, SingleKey, TwoOfThree }
+
 /** Who acts at the counter. The app has checked the person's PIN. */
 enum class ActorRole { Cashier, Manager }
 
@@ -194,7 +202,13 @@ class StartConfig(
 )
 
 /** What [Pairing.begin] returns: the request to show as a code, and the four words. */
-class PairStarted(val request: ByteArray, val words: List<String>)
+/**
+ * What [Pairing.begin] and [Pairing.addressSame] return. For the Key app's offer: the request and the
+ * four words. For an offer from the shop's own wallet, [Pairing.begin] returns the first address and
+ * the [wallet] kind with no request and no words (CR-228); [Pairing.addressSame] then returns the
+ * request and the words (CR-229) with an empty [address].
+ */
+class PairStarted(val request: ByteArray, val words: List<String>, val address: String, val wallet: OwnWalletKind)
 
 /** What the app needs from a saved pairing record before the node runs. */
 class PairingInfo(val network: CounterNetwork, val settings: ShopSettings, val relay: RelayKind)
@@ -672,6 +686,14 @@ private fun Writer.start(c: StartConfig): Writer =
         .option(c.ownNode) { string(it) }.option(c.lightning) { bytes(it) }.option(c.linkProxy) { string(it) }
 
 
+internal fun Reader.ownWalletKind(): OwnWalletKind =
+    when (val t = u8()) {
+        TAG_OWN_WALLET_KIND_NONE -> OwnWalletKind.None
+        TAG_OWN_WALLET_KIND_SINGLE_KEY -> OwnWalletKind.SingleKey
+        TAG_OWN_WALLET_KIND_TWO_OF_THREE -> OwnWalletKind.TwoOfThree
+        else -> tag("OwnWalletKind $t")
+    }
+
 internal fun Reader.relayKind(): RelayKind =
     when (val t = u8()) {
         TAG_RELAY_KIND_NONE -> RelayKind.None
@@ -953,7 +975,22 @@ object Pairing {
     /** Begin from the offer's bytes; [now] is the app's clock. */
     fun begin(offer: ByteArray, name: String, now: Long): PairStarted {
         val r = decodeResponse(send(requestFrame(OP_PAIR_BEGIN, 0) { it.bytes(offer).string(name).u64(now) }))
-        return PairStarted(r.bytes(), r.strings()).also { r.end() }
+        return PairStarted(r.bytes(), r.strings(), r.string(), r.ownWalletKind()).also { r.end() }
+    }
+
+    /**
+     * CR-229: the person says the address on the counter is the same as the wallet's. Only now does
+     * the counter make its key; returns the request and the four words.
+     */
+    fun addressSame(now: Long, name: String): PairStarted {
+        val r = decodeResponse(send(requestFrame(OP_PAIR_ADDRESS_SAME, 0) { it.u64(now).string(name) }))
+        return PairStarted(r.bytes(), r.strings(), r.string(), r.ownWalletKind()).also { r.end() }
+    }
+
+    /** CR-228: the person says the address is different: the ceremony is forgotten; these are the words to show. */
+    fun addressDifferent(): Words {
+        val r = call(OP_PAIR_ADDRESS_DIFFERENT, 0)
+        return r.words().also { r.end() }
     }
 
     /** The person says the words match. */

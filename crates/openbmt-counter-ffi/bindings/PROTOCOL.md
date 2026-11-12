@@ -107,6 +107,8 @@ ops run on another; it waits for at most 250 ms.
  66 swap_next        handle node  args u64 -> option<SwapRequestView>
  67 swap_reply       handle node  args SwapReplyArgs -> ()
  68 swap_failed      handle node  args u64 -> ()
+ 69 pair_address_same handle zero  args (u64, string) -> PairStartedView
+ 70 pair_address_different handle zero  args () -> Words
 ```
 
 ## Types
@@ -120,10 +122,12 @@ ActorView: record: role: ActorRole, name: string
 StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>, lightning: option<list<u8>>, link_proxy: option<string>
 OwnNodeCheckArgs: record: text: string, network: CounterNetwork, tor: bool
 PairBeginArgs: record: offer: list<u8>, name: string, now: u64
-PairStartedView: record: request: list<u8>, words: list<string>
+PairStartedView: record: request: list<u8>, words: list<string>, address: string, wallet: OwnWalletKind
 PairingView: record: network: CounterNetwork, settings: SettingsView, relay: RelayKind
 RelayKind: enum, one tag byte
     tags None=0 Direct=1 Onion=2
+OwnWalletKind: enum, one tag byte
+    tags None=0 SingleKey=1 TwoOfThree=2
 LinkView: record: words: Words, connected: bool, since: option<u64>, refused: bool, heartbeats_taken: u64, owner_records: u64, last_check_in_at: option<u64>, settings_version: u32, restart_needed: bool, settings_line: option<Words>
 LinkStepView: record: link: LinkView, notes: list<string>
 OpenArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>

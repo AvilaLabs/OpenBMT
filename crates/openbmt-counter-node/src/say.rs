@@ -112,10 +112,10 @@ impl SettingsRefused {
             .detail(e.to_string()),
             Self::Verify(SettingsError::ConfirmationRequired(_)) => Words::new(
                 Tone::Ended,
-                "Needs a counter's OK",
-                "This change raises a limit or moves money somewhere new, and needs a counter to confirm it. The counter keeps its settings.",
+                "Words needed",
+                WORDS_NEEDED_CR_236_CONFIRMATION,
                 Who::Owner,
-                "Make a change that does not raise a limit, or wait for the update that adds confirmation at the counter.",
+                "Words needed for what to do next.",
             ),
             Self::Verify(e) => Words::new(
                 Tone::Ended,
@@ -338,16 +338,21 @@ pub enum PairStep {
     Paired,
     /// The person said the words differ; the counter forgot the pairing.
     Differ,
+    /// The person said the address differs from the wallet's first receive
+    /// address in a pairing with the shop's own wallet (CR-228); the counter
+    /// forgot the pairing before it made a key.
+    AddressDiffers,
 }
 
 impl PairStep {
     /// Every step.
-    pub const ALL: [PairStep; 5] = [
+    pub const ALL: [PairStep; 6] = [
         Self::ScanOffer,
         Self::CompareWords,
         Self::ScanOwner,
         Self::Paired,
         Self::Differ,
+        Self::AddressDiffers,
     ];
 
     /// The name of the step.
@@ -358,6 +363,7 @@ impl PairStep {
             Self::ScanOwner => "ScanOwner",
             Self::Paired => "Paired",
             Self::Differ => "Differ",
+            Self::AddressDiffers => "AddressDiffers",
         }
     }
 
@@ -400,6 +406,14 @@ impl PairStep {
                 "Do not approve it on the Key app. Start again from the Key app: open Pair a counter and scan its code.",
             )
             .code("CR-92"),
+            Self::AddressDiffers => Words::new(
+                Tone::Stop,
+                "Different wallet",
+                "The address on this counter is not your wallet's first address, so the owner phone gave this counter a different wallet. Nothing was saved.",
+                Who::Manager,
+                "Check that the owner phone has your wallet, then start the pairing again from the owner phone.",
+            )
+            .code("CR-228"),
         }
     }
 }
@@ -477,6 +491,11 @@ impl PairRefused {
     }
 }
 
+/// CR-236: the words for a settings change that needs a counter's OK are
+/// still to be written. The text in the design is longer than the rules for
+/// what happened allow.
+pub const WORDS_NEEDED_CR_236_CONFIRMATION: &str =
+    "Words needed: this change needs a counter to confirm it.";
 /// CR-228: the words for a pairing step with no pairing at that step are
 /// still to be written.
 pub const WORDS_NEEDED_CR_228_NO_CEREMONY: &str =

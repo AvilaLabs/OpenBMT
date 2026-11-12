@@ -7,9 +7,7 @@
 
 use bitcoin::Network;
 use openbmt_core::pairing::network_code;
-use openbmt_counter_node::{
-    effective_settings, own_node_setting, DirStore, PairRefused, PairingRecord,
-};
+use openbmt_counter_node::{effective_settings_of, own_node_setting, DirStore, PairedRecord};
 
 use crate::codec::wire_record;
 use crate::error::{from_rule, CounterError};
@@ -55,17 +53,14 @@ wire_record!(SettingsView {
 /// file that does not read leaves the record's settings, and the start
 /// refuses it with words.
 pub(crate) fn pairing_read(bytes: Vec<u8>, dir: &str) -> Result<PairingView, CounterError> {
-    let record = PairingRecord::from_bytes(&bytes).map_err(|e| {
-        let e = PairRefused::Record(e);
-        from_rule(e.rule(), &e, e.words())
-    })?;
-    let network = match network_code(record.network) {
+    let record = PairedRecord::from_bytes(&bytes).map_err(crate::host::record_refused)?;
+    let network = match network_code(record.network()) {
         Some(0) => CounterNetwork::Mainnet,
         Some(1) => CounterNetwork::Testnet,
         Some(2) => CounterNetwork::Signet,
         _ => CounterNetwork::Regtest,
     };
-    let relay = match record.relay.as_ref().map(|r| &r.route) {
+    let relay = match record.relay().map(|r| &r.route) {
         None => RelayKind::None,
         Some(openbmt_core::relay::RelayRoute::Direct(_)) => RelayKind::Direct,
         Some(openbmt_core::relay::RelayRoute::Onion { .. }) => RelayKind::Onion,
@@ -73,8 +68,8 @@ pub(crate) fn pairing_read(bytes: Vec<u8>, dir: &str) -> Result<PairingView, Cou
     let kept = (!dir.is_empty() && std::path::Path::new(dir).join("settings.bin").exists())
         .then(|| DirStore::open(dir).ok())
         .flatten()
-        .and_then(|store| effective_settings(&store, &record).ok());
-    let s = kept.map_or_else(|| record.settings.settings.clone(), |e| e.signed.settings);
+        .and_then(|store| effective_settings_of(&store, &record).ok());
+    let s = kept.map_or_else(|| record.settings().settings.clone(), |e| e.signed.settings);
     Ok(PairingView {
         network,
         settings: SettingsView {

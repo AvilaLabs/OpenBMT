@@ -226,6 +226,9 @@ fn begin(rig: &Rig, offer: &[u8], now: u64) -> Result<(Vec<u8>, Vec<String>), St
     let mut r = Rd::ok(&response);
     let request = r.bytes();
     let words = r.list(|r| r.string());
+    // The Key app's offer has no address and no kind of wallet to check.
+    assert_eq!(r.string(), "");
+    assert_eq!(r.u8(), 0);
     r.done();
     Ok((request, words))
 }

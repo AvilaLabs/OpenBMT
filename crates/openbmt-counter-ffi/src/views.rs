@@ -162,17 +162,49 @@ pub struct PairBeginArgs {
 wire_record!(PairBeginArgs { offer, name, now });
 wire_record_get!(PairBeginArgs { offer, name, now });
 
-/// What `pair_begin` returns: the counter's request to show as a code, and
-/// the four words to show beside it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PairStartedView {
-    /// The request (`OBMJ`) for the owner's phone to scan.
-    pub request: Vec<u8>,
-    /// The four session words.
-    pub words: Vec<String>,
+/// What kind of wallet an offer from the shop's own wallet names (CR-228).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnWalletKind {
+    /// The offer is the Key app's: there is no wallet to check an address of.
+    None,
+    /// One key.
+    SingleKey,
+    /// Two of three keys.
+    TwoOfThree,
 }
 
-wire_record!(PairStartedView { request, words });
+wire_unit_enum!(OwnWalletKind {
+    None = 0,
+    SingleKey = 1,
+    TwoOfThree = 2
+});
+
+/// What `pair_begin` and `pair_address_same` return. For the Key app's offer
+/// `pair_begin` returns the counter's request to show as a code and the four
+/// words to show beside it. For an offer from the shop's own wallet
+/// `pair_begin` returns the first address and the kind of wallet, with no
+/// request and no words (CR-228); `pair_address_same` then returns the
+/// request and the four words (CR-229) and an empty address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairStartedView {
+    /// The request (`OBMJ` or `OBM-`) for the owner's phone to scan. Empty
+    /// until the counter has made one.
+    pub request: Vec<u8>,
+    /// The four session words. Empty until the counter has made a request.
+    pub words: Vec<String>,
+    /// The wallet's first receive address, for an offer from the shop's own
+    /// wallet; empty otherwise.
+    pub address: String,
+    /// The kind of wallet of an own-wallet offer.
+    pub wallet: OwnWalletKind,
+}
+
+wire_record!(PairStartedView {
+    request,
+    words,
+    address,
+    wallet
+});
 
 /// What kind of relay a pairing record holds (CR-131), for the app to know
 /// what the link will need before the node starts.

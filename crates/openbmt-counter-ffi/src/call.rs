@@ -47,7 +47,10 @@
 //!   `pair_finish`), which work on no node (handle 0). `pairing_read` is for
 //!   display only: it does not verify the record, and `start` itself
 //!   refuses a verified Tor-on setting without a proxy (CR-87). The
-//!   ceremony lives in the registry, one at a time and in memory only.
+//!   ceremony lives in the registry, one at a time and in memory only. 69
+//!   `pair_address_same` and 70 `pair_address_different` are the step of a
+//!   pairing with the shop's own wallet between the offer and the request
+//!   (CR-228, CR-229).
 //! - 49 `own_node_check` reads the own node's address a manager typed
 //!   (CR-100 to CR-102) and works on no node.
 //! - 50 to 55 Lightning through the shop's own node (CR-112 to CR-116):
@@ -86,7 +89,7 @@ use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-use openbmt_counter_node::Ceremony;
+use openbmt_counter_node::{Ceremony, OwnCeremony};
 
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::error::{internal, refused_by, wrong_state, CounterError};
@@ -104,11 +107,11 @@ use crate::views::{
     DayTotalsArgs, DayTotalsView, HealthView, HeartbeatOutcome, LightningSaleView,
     LightningStatusView, LinkStepView, LinkView, LnFailArgs, LnKind, LnMethod, LnReplyArgs,
     LnRequestView, LnSetupArgs, LnStepView, LnTransportView, OpenArgs, OpenRequestArgs,
-    OpenTipArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView, PairBeginArgs,
-    PairStartedView, PairingView, PersonLineView, PumpView, RefundArgs, RefundAskView, RefundRow,
-    RefundStateView, RelayKind, ReportView, RequestRow, RequoteArgs, SaleInfoView, ScreenView,
-    StaffArgs, StartConfig, StateView, StatusView, SwapReplyArgs, SwapRequestView, TallyView,
-    TipChoiceView, TipTallyView, WithdrawArgs, WordsView,
+    OpenTipArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView, OwnWalletKind,
+    PairBeginArgs, PairStartedView, PairingView, PersonLineView, PumpView, RefundArgs,
+    RefundAskView, RefundRow, RefundStateView, RelayKind, ReportView, RequestRow, RequoteArgs,
+    SaleInfoView, ScreenView, StaffArgs, StartConfig, StateView, StatusView, SwapReplyArgs,
+    SwapRequestView, TallyView, TipChoiceView, TipTallyView, WithdrawArgs, WordsView,
 };
 
 /// The first four bytes of a request.
@@ -156,6 +159,9 @@ pub struct Registry {
     state: Mutex<RegState>,
     /// The pairing ceremony under way, if any (CR-91). Memory only.
     pub(crate) ceremony: Mutex<Option<Ceremony>>,
+    /// The pairing with the shop's own wallet under way, if any (CR-228).
+    /// Memory only; never alongside a Key app ceremony.
+    pub(crate) own_ceremony: Mutex<Option<OwnCeremony>>,
     /// The way the next node starts its driver, in tests.
     #[cfg(test)]
     pub(crate) spawner: Mutex<Option<Spawn>>,
@@ -180,6 +186,7 @@ impl Registry {
                 nodes: BTreeMap::new(),
             }),
             ceremony: Mutex::new(None),
+            own_ceremony: Mutex::new(None),
             #[cfg(test)]
             spawner: Mutex::new(None),
             #[cfg(test)]
@@ -488,6 +495,15 @@ fn build_ops() -> Vec<Op> {
         op(68, "swap_failed", Node, |c, id: u64| {
             c.entry()?.swap_failed(id)
         }),
+        op(
+            69,
+            "pair_address_same",
+            Zero,
+            |c, (now, name): (u64, String)| c.registry.pair_address_same(now, &name),
+        ),
+        op(70, "pair_address_different", Zero, |c, ()| {
+            c.registry.pair_address_different()
+        }),
     ]
 }
 
@@ -623,6 +639,7 @@ fn definitions() -> Vec<TypeDef> {
         PairStartedView::define(),
         PairingView::define(),
         RelayKind::define(),
+        OwnWalletKind::define(),
         LinkView::define(),
         LinkStepView::define(),
         OpenArgs::define(),

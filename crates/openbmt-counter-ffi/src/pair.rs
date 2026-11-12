@@ -13,16 +13,24 @@
 use std::sync::MutexGuard;
 
 use openbmt_core::batch::BatchPolicy;
-use openbmt_counter_node::{batch_policy, Ceremony, PairRefused};
+use openbmt_core::pinned_wallet::WalletKind;
+use openbmt_core::wire::MAGIC_OWN_OFFER;
+use openbmt_counter_node::{batch_policy, Ceremony, OwnCeremony, OwnPairRefused, PairRefused};
 use openbmt_net_io::{OsRandomness, Randomness};
 
 use crate::call::Registry;
 use crate::error::{from_rule, CounterError};
-use crate::views::{PairBeginArgs, PairStartedView, WordsView};
+use crate::views::{OwnWalletKind, PairBeginArgs, PairStartedView, WordsView};
 
 /// A refusal of a pairing step as the error the app gets, with the words of
 /// the refusal.
 pub(crate) fn refused(e: PairRefused) -> CounterError {
+    from_rule(e.rule(), &e, e.words())
+}
+
+/// A refusal of an own-wallet pairing step as the error the app gets, with
+/// the words of the refusal.
+pub(crate) fn refused_own(e: OwnPairRefused) -> CounterError {
     from_rule(e.rule(), &e, e.words())
 }
 
@@ -61,10 +69,31 @@ impl Registry {
         batch_policy()
     }
 
-    /// CR-91: begin a ceremony from the Key app's offer. A ceremony already
-    /// under way is forgotten first, with its key and number.
+    fn own_ceremony(&self) -> MutexGuard<'_, Option<OwnCeremony>> {
+        self.own_ceremony.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// CR-91, CR-228: begin a ceremony from an offer. An offer of the shop's
+    /// own wallet (`OBM-`) begins a ceremony that has made no key and no
+    /// number and returns the wallet's first address; the Key app's offer
+    /// begins the Key app's. A ceremony already under way, of either kind,
+    /// is forgotten first, with its key and number.
     pub(crate) fn pair_begin(&self, a: PairBeginArgs) -> Result<PairStartedView, CounterError> {
         *self.ceremony() = None;
+        *self.own_ceremony() = None;
+        if a.offer.get(..4) == Some(&MAGIC_OWN_OFFER[..]) {
+            let (ceremony, shown) = OwnCeremony::begin(&a.offer, a.now).map_err(refused_own)?;
+            *self.own_ceremony() = Some(ceremony);
+            return Ok(PairStartedView {
+                request: Vec::new(),
+                words: Vec::new(),
+                address: shown.address,
+                wallet: match shown.kind {
+                    WalletKind::SingleKey => OwnWalletKind::SingleKey,
+                    WalletKind::TwoOfThree => OwnWalletKind::TwoOfThree,
+                },
+            });
+        }
         let (secret, nonce) = draw().map_err(refused)?;
         let (ceremony, started) =
             Ceremony::begin(&a.offer, &a.name, secret, nonce, a.now).map_err(refused)?;
@@ -72,11 +101,64 @@ impl Registry {
         Ok(PairStartedView {
             request: started.request,
             words: started.words.iter().map(|w| (*w).to_string()).collect(),
+            address: String::new(),
+            wallet: OwnWalletKind::None,
         })
+    }
+
+    /// CR-229: the person says the address on the counter is the same as the
+    /// wallet's. Only now does the counter make its key and a number; the
+    /// request and the four words come back. A ceremony that is past its ten
+    /// minutes, or is not waiting at the address, is refused and ended.
+    pub(crate) fn pair_address_same(
+        &self,
+        now: u64,
+        name: &str,
+    ) -> Result<PairStartedView, CounterError> {
+        let mut slot = self.own_ceremony();
+        let Some(c) = slot.as_mut() else {
+            return Err(refused_own(OwnPairRefused::NoCeremony));
+        };
+        let (secret, nonce) = match draw() {
+            Ok(v) => v,
+            Err(_) => {
+                *slot = None;
+                return Err(refused_own(OwnPairRefused::NoRandomness));
+            }
+        };
+        let result = c.address_same(name, secret, nonce, now);
+        if !c.is_open() {
+            *slot = None;
+        }
+        let started = result.map_err(refused_own)?;
+        let wallet = OwnWalletKind::None;
+        Ok(PairStartedView {
+            request: started.request,
+            words: started.words.iter().map(|w| (*w).to_string()).collect(),
+            address: String::new(),
+            wallet,
+        })
+    }
+
+    /// CR-228: the person says the address is different. The ceremony is
+    /// forgotten before any key or number was made, and the words say what
+    /// happened and what to do.
+    pub(crate) fn pair_address_different(&self) -> Result<WordsView, CounterError> {
+        *self.own_ceremony() = None;
+        Ok(WordsView(
+            openbmt_counter_node::say::PairStep::AddressDiffers.words(),
+        ))
     }
 
     /// CR-92: the person says the words match. A refusal ends the ceremony.
     pub(crate) fn pair_match(&self, now: u64) -> Result<(), CounterError> {
+        if let Some(c) = self.own_ceremony().as_mut() {
+            let result = c.confirm(now);
+            if result.is_err() {
+                *self.own_ceremony() = None;
+            }
+            return result.map_err(refused_own);
+        }
         let mut slot = self.ceremony();
         let Some(c) = slot.as_mut() else {
             return Err(refused(PairRefused::NoCeremony));
@@ -92,6 +174,7 @@ impl Registry {
     /// number are forgotten, and the words say what happened and what to do.
     pub(crate) fn pair_differ(&self) -> Result<WordsView, CounterError> {
         *self.ceremony() = None;
+        *self.own_ceremony() = None;
         Ok(WordsView(
             openbmt_counter_node::say::PairStep::Differ.words(),
         ))
@@ -100,6 +183,7 @@ impl Registry {
     /// The person leaves the ceremony: it is forgotten.
     pub(crate) fn pair_cancel(&self) -> Result<(), CounterError> {
         *self.ceremony() = None;
+        *self.own_ceremony() = None;
         Ok(())
     }
 
@@ -108,6 +192,16 @@ impl Registry {
     /// leave the ceremony as it was; any other outcome ends it.
     pub(crate) fn pair_finish(&self, now: u64, bundle: &[u8]) -> Result<Vec<u8>, CounterError> {
         let policy = self.batch_policy();
+        {
+            let mut own = self.own_ceremony();
+            if let Some(c) = own.as_mut() {
+                let result = c.finish(bundle, &policy, now);
+                if !c.is_open() {
+                    *own = None;
+                }
+                return result.map(|record| record.to_bytes()).map_err(refused_own);
+            }
+        }
         let mut slot = self.ceremony();
         let Some(c) = slot.as_mut() else {
             return Err(refused(PairRefused::NoCeremony));

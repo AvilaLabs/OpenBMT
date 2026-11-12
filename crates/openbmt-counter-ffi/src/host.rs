@@ -34,9 +34,9 @@ use openbmt_counter::{
     refund_destination, Actor, Amount, CashRefund, Currency, PosState, Rate, RateSource, RefundAsk,
     RefundRequest, Report, RequestDays, SaleExtras, Screen, StaffChange, StaffEvent,
 };
-use openbmt_counter_node::{effective_settings, own_node_setting};
+use openbmt_counter_node::{effective_settings_of, own_node_setting};
 use openbmt_counter_node::{
-    DirStore, DriverPort, HeartbeatNotTaken, Launch, Node, NodeConfig, PairRefused, PairingRecord,
+    DirStore, DriverPort, HeartbeatNotTaken, Launch, Node, NodeConfig, PairedRecord, RecordRefused,
     SaleLightning, SettingsFault, SetupStep, StartError, NOTE_LOG,
 };
 use openbmt_lightning::{
@@ -224,6 +224,14 @@ struct Checked {
     link: Option<LinkPlan>,
 }
 
+/// A refusal of a saved pairing of either kind as the error the app gets.
+pub(crate) fn record_refused(e: RecordRefused) -> CounterError {
+    match e {
+        RecordRefused::KeyApp(e) => refused(e),
+        RecordRefused::OwnWallet(e) => crate::pair::refused_own(e),
+    }
+}
+
 fn check_start(
     req: StartConfig,
     policy: BatchPolicy,
@@ -232,17 +240,17 @@ fn check_start(
     if req.dir.is_empty() {
         return Err(refused_by("start-dir", "the data folder is empty"));
     }
-    let record =
-        PairingRecord::from_bytes(&req.record).map_err(|e| refused(PairRefused::Record(e)))?;
-    // CR-94 to CR-96 again, on what was kept: the settings' signatures, the
-    // lists, the version and the first batch.
-    record.check(&policy).map_err(refused)?;
-    let identity = record.identity().map_err(refused)?;
+    let record = PairedRecord::from_bytes(&req.record).map_err(record_refused)?;
+    // CR-94 to CR-96 and CR-230 to CR-232 again, on what was kept: the
+    // settings' signatures, the lists, the version and the first batch or
+    // range.
+    record.check(&policy).map_err(record_refused)?;
+    let identity = record.identity().map_err(record_refused)?;
     // CR-163: the settings the owner sent after pairing, from the file, when
     // they are newer than the pairing's; a file that does not read is a fault.
     let settings = DirStore::open(&req.dir)
         .map_err(SettingsFault::Read)
-        .and_then(|store| effective_settings(&store, &record))
+        .and_then(|store| effective_settings_of(&store, &record))
         .map_err(|f| CounterError::Refused {
             rule: f.rule().to_string(),
             text: f.to_string(),
@@ -258,7 +266,7 @@ fn check_start(
             "CR-87: the settings have Tor on and the start has no proxy",
         ));
     }
-    let network = record.network;
+    let network = record.network();
     let mut driver = DriverConfig::new(network, 0);
     driver.proxy = req
         .proxy
@@ -269,7 +277,7 @@ fn check_start(
     // CR-134: the link goes through the node's proxy when there is one (the
     // settings have Tor on), and otherwise through Orbot's, which the app
     // gives only for a relay that needs it.
-    let link = match record.relay.clone() {
+    let link = match record.relay().cloned() {
         None => None,
         Some(hint) => {
             let proxy = req
@@ -280,8 +288,8 @@ fn check_start(
                 .map_err(|e| refused_by("start-proxy", format!("the link's proxy address: {e}")))?;
             Some(LinkPlan {
                 hint,
-                identity: record.identity().map_err(refused)?,
-                owner: record.roots.owner,
+                identity: record.identity().map_err(record_refused)?,
+                owner: record.owner(),
                 proxy: driver.proxy.or(proxy),
                 tor_on: settings.tor_on,
                 dir: std::path::PathBuf::from(&req.dir),
@@ -290,7 +298,7 @@ fn check_start(
     };
     // CR-99: the peers are hints; a bad one is dropped by the record's own
     // reading, so none is left here that does not parse.
-    for peer in &record.peers {
+    for peer in record.peers() {
         driver
             .fixed_peers
             .push(peer.parse().map_err(|e| {
@@ -302,19 +310,30 @@ fn check_start(
     // does not fail for a hint.
     let mut own_refused = None;
     if let Some(text) = req.own_node.as_deref() {
-        match own_node_setting(text, record.network, req.proxy.is_some()) {
+        match own_node_setting(text, record.network(), req.proxy.is_some()) {
             Ok(setting) => driver.own_node = Some(setting.node),
             Err(e) => own_refused = Some(WordsView(e.words())),
         }
     }
-    let mut pairing = record.pairing();
-    pairing.batch_policy = policy;
     clock.fetch_max(req.now, Ordering::SeqCst);
-    let mut config = NodeConfig::new(req.dir, identity, pairing, settings, driver);
+    // CR-234: a counter paired with the shop's own wallet takes ranges and
+    // checks settings under the owner root alone; one paired with the Key app
+    // takes batches.
+    let mut config = match &record {
+        PairedRecord::KeyApp(r) => {
+            let mut pairing = r.pairing();
+            pairing.batch_policy = policy;
+            let mut config = NodeConfig::new(req.dir, identity, pairing, settings, driver);
+            config.first_batch = r.first_batch.clone();
+            config
+        }
+        PairedRecord::OwnWallet(r) => {
+            NodeConfig::new_own(req.dir, identity, r.own_pairing(policy), settings, driver)
+        }
+    };
     // CR-162: a counter paired with a relay tells the owner which settings it
     // holds.
-    config.announce_settings = record.relay.is_some();
-    config.first_batch = record.first_batch.clone();
+    config.announce_settings = record.relay().is_some();
     config.clock = Box::new(AppClock(Arc::clone(clock)));
     // CR-115: the saved Lightning connection, if the app has one.
     config.lightning = req.lightning;
@@ -933,6 +952,11 @@ impl Entry {
                 openbmt_counter::BatchTakeRefused::Record(f) => {
                     from_rule("CR-40", f, words_for(Kind::Store, "CR-40"))
                 }
+                openbmt_counter::BatchTakeRefused::OwnWallet => from_rule(
+                    "CR-235",
+                    "CR-235: the counter makes its own addresses, so a batch was not taken",
+                    openbmt_counter::BatchTakeRefused::<()>::own_wallet_words(),
+                ),
             })
         })
     }
