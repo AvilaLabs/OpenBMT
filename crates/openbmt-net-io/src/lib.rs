@@ -39,6 +39,12 @@
 //!   go to a channel of their own that holds 256 and never makes the core
 //!   thread wait.
 //!
+//! With [`NetMode::NodeOnly`] the own node is the one peer (NR-105 to
+//! NR-111): nothing else is dialed, and the state of the node, with its
+//! faults, goes to the app on the own-node channel as
+//! [`OwnNodeEvent::NodeOnly`]. The caller gives the mode; the driver reads
+//! no settings.
+//!
 //! The rules the driver decides are NR-70 and on in
 //! `docs/NETWORK-RULES.md`.
 //!
@@ -58,8 +64,8 @@ mod tests;
 
 pub use dial::DialError;
 pub use driver::{
-    core_seeds, AppEvent, Driver, DriverConfig, EventReceiver, Handle, OwnNodeEvent, StartError,
-    EVENT_BYTES,
+    core_seeds, AppEvent, Driver, DriverConfig, EventReceiver, Handle, NetMode, OwnNodeEvent,
+    StartError, EVENT_BYTES, FALLBACK_STOP_SECS,
 };
 pub use env::{
     Clock, DirLock, FileStorage, Key, LockError, OsRandomness, Randomness, Storage, SystemClock,

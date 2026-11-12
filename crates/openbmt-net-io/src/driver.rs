@@ -40,7 +40,8 @@ use openbmt_net::{
     OwnNodeHost, PeerAddress, PeerId, RelayState, Source, TransportChoice, V2Entropy,
 };
 use openbmt_watch::{
-    host_group, network_group, HeaderStore, OwnNodeInput, OwnNodeLink, Peer, PeerAddr,
+    host_group, network_group, HeaderChain, HeaderStore, NodeOnlyFault, NodeOnlyInput,
+    NodeOnlyTracker, OwnNodeInput, OwnNodeLink, Peer, PeerAddr,
 };
 
 use crate::dial::{DialError, Net, RESOLVE_SECS};
@@ -80,6 +81,9 @@ pub const OWN_BACKOFF_MAX_SECS: u64 = 300;
 /// NR-100: seconds a connection to the own node must have been ready for the
 /// next failure to start the wait again from [`OWN_BACKOFF_FIRST_SECS`].
 pub const OWN_STABLE_SECS: u64 = 60;
+/// NR-110: seconds the own node must have been usable before the random
+/// peers of the fallback are stopped. **[to tune]**
+pub const FALLBACK_STOP_SECS: u64 = 120;
 /// NR-103: events about the own node waiting for the app.
 pub const OWN_EVENT_CAPACITY: usize = 256;
 /// Bytes one read from a socket may return.
@@ -139,6 +143,29 @@ pub struct DriverConfig {
     /// reports is told apart from the peers' (NR-101, NR-103). A Tor v3
     /// address needs `proxy`.
     pub own_node: Option<OwnNode>,
+    /// NR-105, NR-106: how the driver reaches the network. The caller gives
+    /// it, from the shop's settings. [`NetMode::NodeOnly`] needs `own_node`.
+    pub mode: NetMode,
+}
+
+/// NR-105, NR-106: how the driver reaches the network.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NetMode {
+    /// The random peers of sections 3 to 6, and the own node, if one is set,
+    /// as a second check next to them (NR-98 to NR-104).
+    #[default]
+    Mixed,
+    /// The own node is the only peer (NR-106): no anchors, no fixed peers,
+    /// no address book, no seeds and no onion peers. It serves headers,
+    /// filters, blocks and transactions, and transactions go out to it
+    /// alone (NR-109).
+    NodeOnly {
+        /// NR-110: while the own node cannot be used, start the random
+        /// peers as if the mode were off, and stop them when the node has
+        /// been usable for [`FALLBACK_STOP_SECS`]. Without it, nobody else
+        /// is dialed, ever.
+        light_fallback: bool,
+    },
 }
 
 /// The DNS seed names that Bitcoin Core 32.1 ships for the network
@@ -184,6 +211,7 @@ impl DriverConfig {
             event_bytes: EVENT_BYTES,
             v2: true,
             own_node: None,
+            mode: NetMode::Mixed,
         }
     }
 }
@@ -283,6 +311,15 @@ pub enum OwnNodeEvent {
     /// NR-102: how the own node stands. Sent when the connection or its best
     /// height changes, and at least every 10 seconds (NR-75).
     State(OwnNodeInput),
+    /// NR-103, NR-107, NR-108, NR-110: how the own node stands with
+    /// [`NetMode::NodeOnly`], instead of [`OwnNodeEvent::State`]: the same
+    /// facts, the faults of NR-107 and NR-108 and whether the random peers
+    /// are running. Sent when anything but the time last heard changes, and
+    /// at least every 10 seconds. [`NodeOnlyTracker`] turns it into the
+    /// health line of WR-67.
+    ///
+    /// [`NodeOnlyTracker`]: openbmt_watch::NodeOnlyTracker
+    NodeOnly(NodeOnlyInput),
 }
 
 /// Why [`Driver::spawn`] did not start.
@@ -292,6 +329,8 @@ pub enum StartError {
     TargetPeers(usize),
     /// NR-98: the own node is a Tor v3 address and no proxy is set.
     OwnNodeNeedsTor,
+    /// NR-105: `NetMode::NodeOnly` with no own node.
+    NodeOnlyNeedsOwnNode,
     /// The watcher's header store does not take this network.
     Network(String),
     /// The storage could not be read.
@@ -309,6 +348,9 @@ impl fmt::Display for StartError {
             ),
             Self::OwnNodeNeedsTor => {
                 write!(f, "NR-98: the own node is a Tor address and Tor is not on")
+            }
+            Self::NodeOnlyNeedsOwnNode => {
+                write!(f, "NR-105: node_only is on and no own node is set")
             }
             Self::Network(e) => write!(f, "the network is not supported: {e}"),
             Self::Storage(e) => write!(f, "the stored data could not be read: {e}"),
@@ -620,6 +662,11 @@ impl Driver {
         if config.proxy.is_none() && own_target.as_ref().is_some_and(|t| onion_key(t).is_some()) {
             return Err(StartError::OwnNodeNeedsTor);
         }
+        // NR-105: the mode is on only with an own node.
+        let node_only = matches!(config.mode, NetMode::NodeOnly { .. });
+        if node_only && config.own_node.is_none() {
+            return Err(StartError::NodeOnlyNeedsOwnNode);
+        }
         let now = clock.now();
         let mut notes = Vec::new();
         let stored = storage
@@ -663,6 +710,7 @@ impl Driver {
             },
             store,
         );
+        manager.set_node_only(node_only);
         for script in scripts {
             if !manager.watch_script(script) {
                 notes.push("too many scripts: one was not watched".to_string());
@@ -676,7 +724,12 @@ impl Driver {
         let shared = Arc::new(Shared::default());
         let tip = manager.chain().tip().1;
         let core = Core {
-            initial: initial_targets(&book, config.proxy.is_some()),
+            // NR-106: no anchors in this mode.
+            initial: if node_only {
+                VecDeque::new()
+            } else {
+                initial_targets(&book, config.proxy.is_some())
+            },
             tip_saved: tip,
             config,
             storage,
@@ -855,7 +908,19 @@ struct OwnState {
     /// What the last state event carried, to see a change.
     last: Option<(OwnNodeLink, Option<u32>)>,
     last_sent_at: u64,
+    /// NR-110: WR-63 as the app will judge it, to see when the own node can
+    /// be used.
+    tracker: NodeOnlyTracker,
+    /// NR-110: since when the node has been usable without a break.
+    usable_since: Option<u64>,
+    /// NR-110: the random peers are running.
+    fallback: bool,
+    /// What the last `NodeOnly` event carried, to see a change.
+    last_node_only: Option<NodeOnlyKey>,
 }
+
+/// The parts of a `NodeOnly` event whose change is sent at once.
+type NodeOnlyKey = (OwnNodeLink, Option<u32>, Option<NodeOnlyFault>, bool);
 
 impl OwnState {
     fn new(target: Option<Target>, events: SyncSender<OwnNodeEvent>, now: u64) -> Self {
@@ -868,6 +933,10 @@ impl OwnState {
             refused_since: None,
             last: None,
             last_sent_at: 0,
+            tracker: NodeOnlyTracker::new(),
+            usable_since: None,
+            fallback: false,
+            last_node_only: None,
         }
     }
 
@@ -1124,6 +1193,9 @@ where
                         self.own.next_try = self.clock.now();
                         self.own.backoff = OWN_BACKOFF_FIRST_SECS;
                     }
+                    // WR-63: the first two minutes of a new try are
+                    // "connecting".
+                    self.own.tracker.retry(self.clock.now());
                 }
             }
         }
@@ -1440,7 +1512,16 @@ where
     fn adopt(&mut self, id: PeerId, target: Target, stream: TcpStream, own: bool, now: u64) {
         let nonce = self.rng.next_u64();
         let transport = self.transport_for(&target, now);
+        // NR-106: nobody but the own node is taken while the random peers
+        // are not running.
+        if self.node_only() && !own && !self.own.fallback {
+            let _ = stream.shutdown(Shutdown::Both);
+            return;
+        }
         let taken = match (own, &self.config.own_node) {
+            (true, Some(node)) if self.node_only() => self
+                .manager
+                .connected_node_only(id, node, nonce, now, transport),
             (true, Some(node)) => self
                 .manager
                 .connected_own_node(id, node, nonce, now, transport),
@@ -1580,8 +1661,17 @@ where
             || self.dialing.values().any(|d| is_name(&d.target))
     }
 
-    /// NR-71: dial while the manager wants peers.
+    /// NR-105: `node_only` is on.
+    fn node_only(&self) -> bool {
+        matches!(self.config.mode, NetMode::NodeOnly { .. })
+    }
+
+    /// NR-71: dial while the manager wants peers. With `node_only` on, only
+    /// while the random peers of NR-110 are running.
     fn dial_more(&mut self, now: u64) {
+        if self.node_only() && !self.own.fallback {
+            return;
+        }
         loop {
             // The own node takes no place of the target number (NR-100).
             let dialing = self.dialing.values().filter(|d| !d.own).count();
@@ -2051,6 +2141,9 @@ where
         if self.own.target.is_none() {
             return;
         }
+        if self.node_only() {
+            return self.send_node_only_state(now);
+        }
         let view = self.manager.own_node();
         let link = if let Some(since) = self.own.refused_since {
             OwnNodeLink::Refused { since }
@@ -2075,6 +2168,102 @@ where
         }
     }
 
+    /// NR-103, NR-107, NR-108, NR-110: the own node's state with
+    /// `node_only` on, and the fallback it decides.
+    fn send_node_only_state(&mut self, now: u64) {
+        let Some(view) = self.manager.node_only_view() else {
+            return;
+        };
+        let link = if let Some(since) = self.own.refused_since {
+            OwnNodeLink::Refused { since }
+        } else if view.ready {
+            OwnNodeLink::Connected
+        } else {
+            OwnNodeLink::Down {
+                since: self.own.down_since,
+            }
+        };
+        let fault = match (view.unfit_since, view.lacks) {
+            (Some(since), _) => Some(NodeOnlyFault::MissingFilters { since }),
+            (None, Some((height, since))) => Some(NodeOnlyFault::LacksBlock { height, since }),
+            (None, None) => None,
+        };
+        let light_fallback = matches!(
+            self.config.mode,
+            NetMode::NodeOnly {
+                light_fallback: true
+            }
+        );
+        let mut input = NodeOnlyInput {
+            node: OwnNodeInput {
+                link,
+                best_height: view.best_height,
+                last_heard: view.last_heard,
+            },
+            fault,
+            light_fallback,
+            fallback_running: self.own.fallback,
+        };
+        // NR-110: the same judgement the app will make.
+        let tip = self.manager.chain().tip_height();
+        let health = self.own.tracker.check(Some(&input), tip, now);
+        if light_fallback {
+            self.update_fallback(health.own.usable, now);
+            input.fallback_running = self.own.fallback;
+        }
+        let key = (link, view.best_height, fault, self.own.fallback);
+        let due = now >= self.own.last_sent_at.saturating_add(PEERS_EVENT_SECS);
+        if due || self.own.last_node_only != Some(key) {
+            self.own.last_node_only = Some(key);
+            self.own.last_sent_at = now;
+            self.own.send(OwnNodeEvent::NodeOnly(input));
+        }
+    }
+
+    /// NR-110: start the random peers when the own node cannot be used, and
+    /// stop them when it has been usable for [`FALLBACK_STOP_SECS`]. Neither
+    /// happens without a note.
+    fn update_fallback(&mut self, usable: bool, now: u64) {
+        if !usable {
+            self.own.usable_since = None;
+            if !self.own.fallback {
+                self.own.fallback = true;
+                self.manager.set_node_only_fallback(true);
+                self.initial = initial_targets(&self.book, self.config.proxy.is_some());
+                self.emit(AppEvent::Note(
+                    "the own node cannot be used: checking with other nodes".to_string(),
+                ));
+            }
+            return;
+        }
+        let since = *self.own.usable_since.get_or_insert(now);
+        if self.own.fallback && now.saturating_sub(since) >= FALLBACK_STOP_SECS {
+            self.stop_fallback(now);
+        }
+    }
+
+    /// NR-110: close every connection but the own node's, and dial no more.
+    fn stop_fallback(&mut self, now: u64) {
+        self.own.fallback = false;
+        self.manager.set_node_only_fallback(false);
+        self.initial.clear();
+        self.round = None;
+        let others: Vec<PeerId> = self
+            .conns
+            .iter()
+            .filter(|(_, c)| !c.own)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in others {
+            let out = self.manager.closed(id, now);
+            self.remove_conn(id, now, false);
+            self.handle_outputs(out, now);
+        }
+        self.emit(AppEvent::Note(
+            "the own node can be used again: no other nodes are asked".to_string(),
+        ));
+    }
+
     /// NR-73: save the headers when the tip has moved and a minute has
     /// passed; set the anchors and save the book every ten minutes.
     fn persist(&mut self, now: u64) {
@@ -2084,8 +2273,11 @@ where
         }
         if now >= self.next_anchor_at {
             self.next_anchor_at = now.saturating_add(ANCHOR_SECS);
-            self.set_anchors();
-            self.save_book();
+            // NR-106: with the own node alone, the book is not touched.
+            if !self.node_only() || self.own.fallback {
+                self.set_anchors();
+                self.save_book();
+            }
         }
     }
 
@@ -2135,9 +2327,14 @@ where
     /// Save, close every socket and join the threads.
     fn finish(mut self) {
         let now = self.clock.now();
-        self.set_anchors();
+        let book_touched = !self.node_only() || self.own.fallback;
+        if book_touched {
+            self.set_anchors();
+        }
         self.save_headers(now);
-        self.save_book();
+        if book_touched {
+            self.save_book();
+        }
         for conn in self.conns.values() {
             let _ = conn.stream.shutdown(Shutdown::Both);
         }

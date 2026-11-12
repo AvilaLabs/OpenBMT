@@ -1367,6 +1367,9 @@ impl<P: DriverPort> Node<P> {
                 // sighting.
                 OwnNodeEvent::Has(txid) => touched.extend(self.counter.own_node_saw(txid)),
                 OwnNodeEvent::State(input) => self.own_state(input, touched),
+                // The driver sends this only in the mode of NR-106, which no
+                // app sets yet (the next slice reads it from the settings).
+                OwnNodeEvent::NodeOnly(_) => {}
             }
         }
     }

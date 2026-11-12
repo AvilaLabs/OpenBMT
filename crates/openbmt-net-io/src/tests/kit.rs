@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use bitcoin::bip158::BlockFilter;
 use bitcoin::block::{Block, Header, Version};
 use bitcoin::blockdata::constants::genesis_block;
 use bitcoin::consensus::deserialize;
@@ -16,6 +17,7 @@ use bitcoin::hashes::Hash;
 use bitcoin::p2p::address::Address;
 use bitcoin::p2p::message::NetworkMessage;
 use bitcoin::p2p::message_blockdata::Inventory;
+use bitcoin::p2p::message_filter::{CFilter, GetCFilters};
 use bitcoin::p2p::message_network::VersionMessage;
 use bitcoin::p2p::{Magic, ServiceFlags};
 use bitcoin::transaction::Version as TxVersion;
@@ -177,6 +179,23 @@ pub fn block_on(prev: &Header, tag: u32, pad: usize) -> Block {
     block
 }
 
+/// A block on `prev` whose coinbase pays 1,000 satoshis to this script.
+pub fn block_paying(prev: &Header, tag: u32, to: &ScriptBuf) -> Block {
+    let mut block = block_on(prev, tag, 1);
+    block.txdata[0].output[0].script_pubkey = to.clone();
+    let root = block.compute_merkle_root().unwrap();
+    let mut header = Header {
+        merkle_root: root,
+        nonce: 0,
+        ..block.header
+    };
+    while header.validate_pow(header.target()).is_err() {
+        header.nonce += 1;
+    }
+    block.header = header;
+    block
+}
+
 /// `n` blocks of about `pad` bytes each on top of the genesis block.
 pub fn blocks(n: u32, pad: usize) -> Vec<Block> {
     let mut prev = genesis_block(Network::Regtest).header;
@@ -197,7 +216,7 @@ fn frame(message: NetworkMessage) -> Vec<u8> {
     encode(magic(), &message)
 }
 
-fn version_message(start_height: u32) -> VersionMessage {
+fn version_message(start_height: u32, services: ServiceFlags) -> VersionMessage {
     let silent = Address {
         services: ServiceFlags::NONE,
         address: [0; 8],
@@ -205,7 +224,7 @@ fn version_message(start_height: u32) -> VersionMessage {
     };
     VersionMessage {
         version: 70_016,
-        services: ServiceFlags::NETWORK | ServiceFlags::WITNESS,
+        services,
         timestamp: 1_700_000_000,
         receiver: silent.clone(),
         sender: silent,
@@ -258,6 +277,15 @@ pub struct NodeScript {
     pub height: u32,
     pub announce: Vec<Txid>,
     pub mempool: Vec<Transaction>,
+    /// Advertise compact filters (NODE_COMPACT_FILTERS).
+    pub filters: bool,
+    /// Advertise NODE_NETWORK_LIMITED instead of NODE_NETWORK.
+    pub limited: bool,
+    /// A chain the node serves: its headers at `getheaders`, the filter of
+    /// each block at `getcfilters` and the block at `getdata`, unless it is
+    /// `limited` and the block is more than 288 below its tip. Claims the
+    /// height of the chain when `height` is 0.
+    pub blocks: Vec<Block>,
 }
 
 /// The height the fake peer claims in its version message. A peer that
@@ -268,8 +296,31 @@ fn claimed_height(behavior: &Behavior) -> u32 {
         Behavior::Honest(headers) | Behavior::Fetches(headers) => {
             u32::try_from(headers.len()).unwrap()
         }
+        Behavior::Node(script) if script.height == 0 => {
+            u32::try_from(script.blocks.len()).unwrap_or(0)
+        }
         Behavior::Node(script) => script.height,
         _ => PEER_HEIGHT,
+    }
+}
+
+/// The services the fake peer states.
+fn claimed_services(behavior: &Behavior) -> ServiceFlags {
+    match behavior {
+        Behavior::Node(script) => {
+            let blocks = if script.limited {
+                ServiceFlags::NETWORK_LIMITED
+            } else {
+                ServiceFlags::NETWORK
+            };
+            let filters = if script.filters {
+                ServiceFlags::COMPACT_FILTERS
+            } else {
+                ServiceFlags::NONE
+            };
+            blocks | ServiceFlags::WITNESS | filters
+        }
+        _ => ServiceFlags::NETWORK | ServiceFlags::WITNESS,
     }
 }
 
@@ -417,6 +468,7 @@ fn serve(
     }
     let _ = stream.write_all(&frame(NetworkMessage::Version(version_message(
         claimed_height(behavior),
+        claimed_services(behavior),
     ))));
     let _ = stream.write_all(&frame(NetworkMessage::Verack));
     match behavior {
@@ -477,6 +529,10 @@ fn serve(
                             let headers = blocks.iter().map(|b| b.header).collect();
                             let _ = stream.write_all(&frame(NetworkMessage::Headers(headers)));
                         }
+                        Behavior::Node(script) if !script.blocks.is_empty() => {
+                            let headers = script.blocks.iter().map(|b| b.header).collect();
+                            let _ = stream.write_all(&frame(NetworkMessage::Headers(headers)));
+                        }
                         Behavior::CloseAfterHandshake => return,
                         Behavior::Flood(headers) => {
                             for header in headers {
@@ -494,11 +550,41 @@ fn serve(
                         _ => {}
                     }
                 }
+                "getcfilters" => {
+                    if let Behavior::Node(script) = behavior {
+                        let asked: GetCFilters = deserialize(&payload).unwrap();
+                        if let Some(block) = script
+                            .blocks
+                            .iter()
+                            .find(|b| b.block_hash() == asked.stop_hash)
+                        {
+                            let filter =
+                                BlockFilter::new_script_filter(block, |_| Ok(ScriptBuf::new()))
+                                    .unwrap()
+                                    .content;
+                            let message = NetworkMessage::CFilter(CFilter {
+                                filter_type: 0,
+                                block_hash: asked.stop_hash,
+                                filter,
+                            });
+                            let _ = stream.write_all(&frame(message));
+                        }
+                    }
+                }
                 "getdata" => {
                     if let Behavior::Node(script) = behavior {
                         let asked: Vec<Inventory> = deserialize(&payload).unwrap_or_default();
                         let mut missing = Vec::new();
                         for item in asked {
+                            if let Inventory::Block(hash) | Inventory::WitnessBlock(hash) = item {
+                                if let Some(block) =
+                                    script.blocks.iter().find(|b| b.block_hash() == hash)
+                                {
+                                    let message = NetworkMessage::Block(block.clone());
+                                    let _ = stream.write_all(&frame(message));
+                                }
+                                continue;
+                            }
                             let (Inventory::Transaction(txid)
                             | Inventory::WitnessTransaction(txid)) = item
                             else {

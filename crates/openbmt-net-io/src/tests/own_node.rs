@@ -545,6 +545,7 @@ fn nr_101_an_announced_transaction_and_a_served_one_are_reports() {
         height: 10,
         announce: vec![txid(1)],
         mempool: vec![tx.clone()],
+        ..NodeScript::default()
     };
     let peer = FakePeer::start(Behavior::Node(script));
     let (net, ..) = net_to(peer.addr, Vec::new());
@@ -636,6 +637,7 @@ fn nr_103_a_full_channel_never_holds_the_driver() {
         height: 5,
         announce: announce.clone(),
         mempool: Vec::new(),
+        ..NodeScript::default()
     };
     let peer = FakePeer::start(Behavior::Node(script));
     let (net, ..) = net_to(peer.addr, Vec::new());
