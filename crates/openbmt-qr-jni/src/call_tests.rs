@@ -933,3 +933,125 @@ fn ur_21_a_bbqr_set_that_is_short_or_of_another_kind_is_refused() {
     v.push(0);
     assert_eq!(refused(&calls.call(&v)), BAD_FRAMING);
 }
+
+// ---- the wallet reader ----------------------------------------------------------
+
+const WALLET: &str = "wpkh([818bc9b6/84h/0h/0h]xpub6CgURS1GrKZkAoRGBTKYX9FhLgkKnQVZ6vdNBUbiu24xtRJ6RzLKpdg4CqsVyBLzimcJsviP59hSoGJEpTJiXE8bdBLw1qPC1DXRatKehb8/<0;1>/*)#96yh9yhx";
+
+fn wallet_open(calls: &Calls) -> u32 {
+    let body = parse(&calls.call(&head(OP_WALLET_NEW))).expect("a handle");
+    assert_eq!(body.len(), 4);
+    u32_at(&body, 0) as u32
+}
+
+fn wallet_feed(calls: &Calls, h: u32, text: &str) -> Result<Vec<u8>, String> {
+    let mut v = head(OP_WALLET_RECEIVE);
+    v.extend_from_slice(&h.to_be_bytes());
+    v.extend_from_slice(&(text.len() as u32).to_be_bytes());
+    v.extend_from_slice(text.as_bytes());
+    parse(&calls.call(&v))
+}
+
+#[test]
+fn ur_34_a_descriptor_in_one_part_is_read_as_the_text_of_the_wallet() {
+    let calls = Calls::new();
+    let h = wallet_open(&calls);
+    let text = whole("bytes", &encode_bytes(WALLET.as_bytes()));
+    let progress = wallet_feed(&calls, h, &text).expect("the part reads");
+    assert_eq!(progress[0], 1, "complete");
+    let body = parse(&calls.call(&handle_request(OP_WALLET_RESULT, h))).expect("the wallet");
+    assert_eq!(std::str::from_utf8(&body).unwrap(), WALLET);
+    parse(&calls.call(&handle_request(OP_WALLET_DROP, h))).expect("dropped");
+    assert_eq!(
+        refused(&calls.call(&handle_request(OP_WALLET_RESULT, h))),
+        BAD_STATE
+    );
+}
+
+#[test]
+fn ur_34_a_descriptor_in_many_parts_is_read_when_the_last_part_comes() {
+    let calls = Calls::new();
+    let h = wallet_open(&calls);
+    let mut e = Encoder::new("bytes", &encode_bytes(WALLET.as_bytes()), 30, 10).expect("encoder");
+    let mut complete = false;
+    let mut parts = 0;
+    while !complete && parts < 100 {
+        let progress = wallet_feed(&calls, h, &e.next_part()).expect("a part");
+        complete = progress[0] == 1;
+        parts += 1;
+        if !complete {
+            // Until then a result is the "not enough" refusal, never a partial text.
+            assert_eq!(
+                refused(&calls.call(&handle_request(OP_WALLET_RESULT, h))),
+                "UR-40"
+            );
+        }
+    }
+    assert!(complete && parts > 1, "{parts} parts");
+    let body = parse(&calls.call(&handle_request(OP_WALLET_RESULT, h))).expect("the wallet");
+    assert_eq!(std::str::from_utf8(&body).unwrap(), WALLET);
+}
+
+#[test]
+fn ur_35_a_type_that_is_not_a_wallet_a_secret_and_a_changed_code_are_refused_with_their_rules() {
+    let calls = Calls::new();
+    // A type the wallet reader does not take.
+    let h = wallet_open(&calls);
+    let text = whole("crypto-psbt", &encode_bytes(b"psbt"));
+    assert_eq!(wallet_feed(&calls, h, &text).unwrap_err(), "UR-34");
+    // A part that is not a UR at all.
+    parse(&calls.call(&handle_request(OP_WALLET_DROP, h))).expect("dropped");
+    let h = wallet_open(&calls);
+    let rule = wallet_feed(&calls, h, "hello").unwrap_err();
+    assert!(rule.starts_with("UR-"), "{rule}");
+    // Text that is not UTF-8 is not a UR.
+    let mut v = head(OP_WALLET_RECEIVE);
+    v.extend_from_slice(&h.to_be_bytes());
+    v.extend_from_slice(&2u32.to_be_bytes());
+    v.extend_from_slice(&[0xff, 0xfe]);
+    assert_eq!(refused(&calls.call(&v)), "UR-07");
+    // A descriptor of a key that signs is refused once the message is whole, and
+    // the reader stays refused.
+    parse(&calls.call(&handle_request(OP_WALLET_DROP, h))).expect("dropped");
+    let h = wallet_open(&calls);
+    let secret = "wpkh([818bc9b6/84h/0h/0h]xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi/<0;1>/*)";
+    let text = whole("bytes", &encode_bytes(secret.as_bytes()));
+    let rule = wallet_feed(&calls, h, &text).unwrap_err();
+    assert!(rule.starts_with("UR-3"), "{rule}");
+    assert_eq!(
+        refused(&calls.call(&handle_request(OP_WALLET_RESULT, h))),
+        rule
+    );
+}
+
+#[test]
+fn ur_22_wallet_readers_are_at_most_two_never_reused_and_checked() {
+    let calls = Calls::new();
+    let (a, b) = (wallet_open(&calls), wallet_open(&calls));
+    assert_ne!(a, b);
+    assert_eq!(refused(&calls.call(&head(OP_WALLET_NEW))), BAD_STATE);
+    parse(&calls.call(&handle_request(OP_WALLET_DROP, a))).expect("dropped");
+    let c = wallet_open(&calls);
+    assert!(c != a && c != b);
+    // A decoder's handle is not a wallet reader's, and the other way round.
+    let d = open(&calls);
+    assert_eq!(
+        refused(&calls.call(&handle_request(OP_WALLET_RESULT, d))),
+        BAD_STATE
+    );
+    for stale in [a, 0, 99, u32::MAX] {
+        assert_eq!(
+            wallet_feed(&calls, stale, "ur:bytes/x").unwrap_err(),
+            BAD_STATE
+        );
+        assert_eq!(
+            refused(&calls.call(&handle_request(OP_WALLET_DROP, stale))),
+            BAD_STATE
+        );
+    }
+    // Strict framing: bytes after the last field, and none at all.
+    let mut v = head(OP_WALLET_NEW);
+    v.push(0);
+    assert_eq!(refused(&calls.call(&v)), BAD_FRAMING);
+    assert_eq!(refused(&calls.call(&head(OP_WALLET_RESULT))), BAD_FRAMING);
+}

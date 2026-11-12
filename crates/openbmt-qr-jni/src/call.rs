@@ -18,6 +18,10 @@
 //! | [`OP_DECODER_RESULT`] | handle `u32` | type length `u8`, type, length `u32`, payload |
 //! | [`OP_DECODER_DROP`] | handle `u32` | none |
 //! | [`OP_KEY_TEXT`] | type length `u8`, type, length `u32`, message | the key text, in ASCII |
+//! | [`OP_WALLET_NEW`] | none | handle `u32` |
+//! | [`OP_WALLET_RECEIVE`] | handle `u32`, length `u32`, text | complete `u8`, received `u32`, expected `u32`, fraction in millionths `u32` |
+//! | [`OP_WALLET_RESULT`] | handle `u32` | the wallet's descriptor text, in ASCII |
+//! | [`OP_WALLET_DROP`] | handle `u32` | none |
 //!
 //! A refusal of the key itself (UR-23 to UR-29) is a reply with the status
 //! [`REFUSED_WITH_WORDS`]: the rule code as five bytes, then the heading,
@@ -34,6 +38,13 @@
 //! its length, so that a screen can show the parts round and round; a whole
 //! message answers with its one part.
 //!
+//! The wallet operations read a wallet's animated code with
+//! `openbmt_ur::WalletDecoder` (UR-34 to UR-40): every scanned part is given
+//! to it, whatever its type (`crypto-output`, `crypto-account`, `bytes`), and
+//! a result is the checksummed descriptor text or a refusal with the rule
+//! code of the wallet reader. Nothing but a validated wallet is ever given
+//! back.
+//!
 //! The only state is the table of decoders: at most [`MAX_DECODERS`] at a
 //! time, each with the bounds of `openbmt-ur`, and a handle is never given
 //! twice in the life of the process.
@@ -45,7 +56,7 @@ use openbmt_qr::{encode_with, Ecc};
 use openbmt_ur::cbor::{decode_bytes, encode_bytes};
 use openbmt_ur::{
     check_type, output_to_ur_parts, psbt_to_ur_parts, ur_to_key_text, ur_to_psbt, Decoder, Encoder,
-    KeyRefusal, MIN_FRAGMENT_LEN, TYPE_CRYPTO_OUTPUT, TYPE_CRYPTO_PSBT, TYPE_PSBT,
+    KeyRefusal, WalletDecoder, MIN_FRAGMENT_LEN, TYPE_CRYPTO_OUTPUT, TYPE_CRYPTO_PSBT, TYPE_PSBT,
 };
 
 /// The first four bytes of a request.
@@ -94,11 +105,21 @@ pub const OP_BBQR_ADD: u8 = 10;
 pub const OP_BBQR_RESULT: u8 = 11;
 /// Operation: close a reader of a BBQr set (handle `u32`).
 pub const OP_BBQR_DROP: u8 = 12;
+/// Operation: open a reader of a wallet's animated code.
+pub const OP_WALLET_NEW: u8 = 13;
+/// Operation: give the wallet reader the text of one scanned part.
+pub const OP_WALLET_RECEIVE: u8 = 14;
+/// Operation: the descriptor of a complete wallet reader.
+pub const OP_WALLET_RESULT: u8 = 15;
+/// Operation: close a wallet reader.
+pub const OP_WALLET_DROP: u8 = 16;
 
 /// The most decoders open at once.
 pub const MAX_DECODERS: usize = 4;
 /// The most BBQr readers open at once.
 pub const MAX_JOINERS: usize = 4;
+/// The most wallet readers open at once.
+pub const MAX_WALLET_READERS: usize = 2;
 
 /// The kinds of BBQr set a reader of the apps takes: what a signer returns.
 const JOIN_KINDS: &[Kind] = &[Kind::Psbt, Kind::Transaction];
@@ -234,6 +255,7 @@ struct Table {
     next: u32,
     open: Vec<(u32, Decoder)>,
     joiners: Vec<(u32, Joiner)>,
+    wallets: Vec<(u32, WalletDecoder)>,
 }
 
 impl Default for Calls {
@@ -250,6 +272,7 @@ impl Calls {
                 next: 1,
                 open: Vec::new(),
                 joiners: Vec::new(),
+                wallets: Vec::new(),
             }),
         }
     }
@@ -331,8 +354,86 @@ impl Calls {
                 r.end()?;
                 self.joiner_drop(handle)
             }
+            OP_WALLET_NEW => {
+                r.end()?;
+                self.wallet_new()
+            }
+            OP_WALLET_RECEIVE => {
+                let handle = r.u32()?;
+                let text = r.sized()?;
+                r.end()?;
+                self.wallet_receive(handle, text)
+            }
+            OP_WALLET_RESULT => {
+                let handle = r.u32()?;
+                r.end()?;
+                self.wallet_result(handle)
+            }
+            OP_WALLET_DROP => {
+                let handle = r.u32()?;
+                r.end()?;
+                self.wallet_drop(handle)
+            }
             _ => Err(Refusal::of(BAD_FRAMING)),
         }
+    }
+
+    fn wallet_new(&self) -> Done {
+        self.lock(|t| {
+            if t.wallets.len() >= MAX_WALLET_READERS || t.next == u32::MAX {
+                return Err(Refusal::of(BAD_STATE));
+            }
+            let handle = t.next;
+            t.next += 1;
+            t.wallets.push((handle, WalletDecoder::new()));
+            Ok(handle.to_be_bytes().to_vec())
+        })
+    }
+
+    fn wallet_receive(&self, handle: u32, text: &[u8]) -> Done {
+        let text = std::str::from_utf8(text)
+            .map_err(|_| code_of("UR-07 the text is not the shape of a UR"))?;
+        self.lock(|t| {
+            let reader = t
+                .wallets
+                .iter_mut()
+                .find(|(h, _)| *h == handle)
+                .map(|(_, d)| d)
+                .ok_or_else(|| Refusal::of(BAD_STATE))?;
+            let p = reader.receive(text).map_err(|e| Refusal::of(e.rule()))?;
+            let mut out = Vec::with_capacity(13);
+            out.push(u8::from(p.complete));
+            push_u32(&mut out, p.received_parts)?;
+            push_u32(&mut out, p.expected_parts)?;
+            let millionths = (p.estimated_fraction.clamp(0.0, 1.0) * 1_000_000.0) as u32;
+            out.extend_from_slice(&millionths.to_be_bytes());
+            Ok(out)
+        })
+    }
+
+    fn wallet_result(&self, handle: u32) -> Done {
+        self.lock(|t| {
+            let reader = t
+                .wallets
+                .iter()
+                .find(|(h, _)| *h == handle)
+                .map(|(_, d)| d)
+                .ok_or_else(|| Refusal::of(BAD_STATE))?;
+            let wallet = reader.finish().map_err(|e| Refusal::of(e.rule()))?;
+            Ok(wallet.as_str().as_bytes().to_vec())
+        })
+    }
+
+    fn wallet_drop(&self, handle: u32) -> Done {
+        self.lock(|t| {
+            let at = t
+                .wallets
+                .iter()
+                .position(|(h, _)| *h == handle)
+                .ok_or_else(|| Refusal::of(BAD_STATE))?;
+            t.wallets.remove(at);
+            Ok(Vec::new())
+        })
     }
 
     fn decoder_new(&self) -> Done {
