@@ -9,10 +9,10 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
-import org.openbmt.owner.app.ControlMessage
-import org.openbmt.owner.app.ControlReader
-import org.openbmt.owner.app.TorControl
-import org.openbmt.owner.app.TorControlException
+import org.openbmt.app.ControlMessage
+import org.openbmt.app.ControlReader
+import org.openbmt.app.TorControl
+import org.openbmt.app.TorControlException
 
 /**
  * Runs the Tor Project's C Tor inside the app, with the native library of the Guardian Project's `tor-android`

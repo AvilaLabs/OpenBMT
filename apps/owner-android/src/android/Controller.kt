@@ -21,6 +21,9 @@ import org.openbmt.app.Relock
 import org.openbmt.app.SayWords
 import org.openbmt.app.ScanFlow
 import org.openbmt.app.SealedFile
+import org.openbmt.app.TorLease
+import org.openbmt.app.TorRunner
+import org.openbmt.app.TorStartException
 import org.openbmt.app.Tries
 import org.openbmt.app.TriesFile
 import org.openbmt.app.Ui

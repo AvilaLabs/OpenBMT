@@ -23,6 +23,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 app="$(dirname "$here")"
 repo="$(cd "$app/../.." && pwd)"
 common="$repo/apps/android-common"
+tor_part="$common/tor"
 wrapper="$repo/crates/openbmt-owner-ffi/bindings/kotlin/org/openbmt/owner"
 lib="$KOTLIN_HOME/lib"
 scratch="${1:-$(mktemp -d "${TMPDIR:-$HOME/.cache/openbmt/tmp}/ownerapk-jvm.XXXXXX")}"
@@ -37,7 +38,7 @@ trap 'rm -rf "$scratch/jvm-classes"' EXIT
     -classpath "$lib/kotlin-stdlib.jar:$lib/annotations-13.0.jar" \
     -d "$scratch/jvm-classes" \
     "$wrapper/Native.kt" "$wrapper/OwnerNode.kt" \
-    "$common"/src/model/*.kt "$app"/src/model/*.kt "$app/tests/AppModelTest.kt"
+    "$common"/src/model/*.kt "$tor_part"/src/model/*.kt "$app"/src/model/*.kt "$app/tests/AppModelTest.kt"
 
 "$JAVA_HOME/bin/java" -Xmx2g -cp "$scratch/jvm-classes:$lib/kotlin-stdlib.jar" \
     org.openbmt.owner.app.AppModelTest "$repo/docs/screens/owner-app.md" "$repo/docs/OWNER-APP-RULES.md"

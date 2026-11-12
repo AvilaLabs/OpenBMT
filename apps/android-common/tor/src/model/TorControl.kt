@@ -1,4 +1,4 @@
-package org.openbmt.owner.app
+package org.openbmt.app
 
 import java.io.BufferedInputStream
 import java.io.IOException

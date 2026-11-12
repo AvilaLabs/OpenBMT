@@ -9,6 +9,8 @@ import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import org.openbmt.app.ControlMessage
+import org.openbmt.app.ControlReader
 import org.openbmt.app.Format
 import org.openbmt.app.KeyTextOutcome
 import org.openbmt.app.SayCheck
@@ -18,6 +20,7 @@ import org.openbmt.app.SealedFile
 import org.openbmt.app.Relock
 import org.openbmt.app.Sealer
 import org.openbmt.app.Tones
+import org.openbmt.app.TorControl
 import org.openbmt.app.Tries
 import org.openbmt.app.TriesFile
 import org.openbmt.app.TriesRecord
@@ -104,6 +107,9 @@ object AppModelTest {
     }
 
     private fun source(path: String): String = File(appDir, path).readText()
+
+    /** A file of the Tor part shared with the counter app (`apps/android-common/tor`). */
+    private fun torSource(path: String): String = File(appDir, "../android-common/tor/$path").readText()
 
     /** How many times [part] is in [text]. */
     private fun occurs(text: String, part: String): Int = text.split(part).size - 1
@@ -2385,9 +2391,9 @@ object AppModelTest {
         throws("an event of several lines") { TorControl.status(reply("650-STATUS_CLIENT NOTICE CIRCUIT_ESTABLISHED\r\n650 OK\r\n")!!) }
         throws("a reply taken for an event") { TorControl.status(okReply) }
         // The five commands, and no others.
-        val consts = Regex("const val ([A-Z_]+) = \"([^\"]*)\\\\r\\\\n\"").findAll(source("src/model/TorControl.kt")).map { it.groupValues[2] }.toList()
+        val consts = Regex("const val ([A-Z_]+) = \"([^\"]*)\\\\r\\\\n\"").findAll(torSource("src/model/TorControl.kt")).map { it.groupValues[2] }.toList()
         ok(consts == listOf("AUTHENTICATE", "SETEVENTS STATUS_CLIENT", "GETINFO status/bootstrap-phase", "GETINFO net/listeners/socks", "SIGNAL SHUTDOWN"), "the five commands: $consts")
-        val svc = source("src/android/TorService.kt")
+        val svc = torSource("src/android/TorService.kt")
         ok(Regex("\\.write\\(").findAll(svc).count() == 2 && Regex("TorControl\\.[A-Z_]+\\b").findAll(svc).map { it.value }.toSet().containsAll(setOf("TorControl.AUTHENTICATE", "TorControl.SET_EVENTS", "TorControl.GET_SOCKS", "TorControl.GET_BOOTSTRAP", "TorControl.SHUTDOWN")), "the service writes only those commands")
         val code = svc.lines().filter { l -> l.trimStart().let { !it.startsWith("*") && !it.startsWith("/**") && !it.startsWith("//") } }.joinToString("\n")
         ok(svc.contains("package org.torproject.jni") && code.contains("class TorService(") && !code.contains(": Service") && !code.contains("androidx") && !code.contains("jtorctl") && !code.contains("sendBroadcast"), "the class has the library's name, is not an Android service and uses neither androidx nor jtorctl")
@@ -2399,15 +2405,15 @@ object AppModelTest {
         ok(controller.contains("ensureTor().awaitPort(TOR_WAIT_MS)") && controller.indexOf("ensureTor().awaitPort") in 1 until controller.indexOf("OwnerNode.start("), "the node starts only after the built-in Tor has a port")
         val hidden = controller.substringAfter("fun hidden()").substringBefore("/**\n     * OA-90")
         ok(hidden.indexOf("stopNode()") in 0 until hidden.indexOf("releaseTor()") && hidden.indexOf("WatchRunner.handOver()") in 0 until hidden.indexOf("releaseTor()"), "Tor is let go of when the app is hidden, after the node and the hand-over")
-        val runner = source("src/android/TorRunner.kt")
+        val runner = torSource("src/android/TorRunner.kt")
         ok(runner.contains("run.stop()") && runner.contains("run.holders == 0"), "the last lease shuts Tor down")
         ok(source("src/android/WatchService.kt").contains("torLease = TorRunner.acquire(dir)") && source("src/android/WatchService.kt").contains("l?.close()"), "the watcher holds a lease from its service's start to its end")
     }
 
     private fun oa_98_the_built_in_tor_keeps_its_files_in_the_no_backup_folder_and_reads_no_configuration() {
-        val svc = source("src/android/TorService.kt")
-        val runner = source("src/android/TorRunner.kt")
-        ok(AppFiles.TOR_DIR == "tor" && runner.contains("File(dir, AppFiles.TOR_DIR)") && runner.contains("File(torDir, \"data\")") && runner.contains("File(torDir, \"cache\")"), "the folders are under the app's folder")
+        val svc = torSource("src/android/TorService.kt")
+        val runner = torSource("src/android/TorRunner.kt")
+        ok(runner.contains("const val TOR_DIR = \"tor\"") && runner.contains("File(dir, TOR_DIR)") && runner.contains("File(torDir, \"data\")") && runner.contains("File(torDir, \"cache\")"), "the folders are under the app's folder")
         ok(source("src/android/Controller.kt").contains("private val dir: File = act.noBackupFilesDir") && source("src/android/Controller.kt").contains("TorRunner.acquire(dir)"), "and that folder is noBackupFilesDir")
         ok(source("src/android/WatchService.kt").contains("WatchRunner.begin(noBackupFilesDir)"), "the watcher's is the same folder")
         ok(runner.contains("setReadable(true, true)") && runner.contains("setWritable(true, true)") && runner.contains("setExecutable(true, true)"), "the folders are the app's alone")
@@ -2419,8 +2425,10 @@ object AppModelTest {
         val extract = source("AndroidManifest.xml")
         ok(extract.contains("android:allowBackup=\"false\""), "nothing of it is backed up (OA-02)")
         val build = source("build.sh")
-        ok(build.contains("tor_aar_sha256=\"28ff2bb6d4d42eabe57183dedd7a97fce77e8ce4b6f5af6fa03993b3ca054edd\"") && build.contains("is not the pinned tor-android 0.4.9.14 AAR"), "the build checks the library's hash and stops on a mismatch")
-        ok(build.contains("jni/\$abi/libtor.so") && Regex("unzip [^\\n]*\"\\\$tor_aar\"").findAll(build).count() == 1, "only libtor.so is taken from the AAR, by one unzip")
+        val script = torSource("tor-library.sh")
+        ok(script.contains("aar_sha256=\"28ff2bb6d4d42eabe57183dedd7a97fce77e8ce4b6f5af6fa03993b3ca054edd\"") && script.contains("is not the pinned tor-android 0.4.9.14 AAR"), "the shared script checks the library's hash and stops on a mismatch")
+        ok(build.contains("tor-library.sh\" check") && build.contains("tor-library.sh\" unpack") && !build.contains("unzip -q"), "the build takes libtor.so only through that script, and checks the AAR before anything else is built")
+        ok(script.contains("jni/\$abi/libtor.so") && Regex("unzip [^\\n]*\"\\\$tor_aar\"").findAll(script).count() == 1, "only libtor.so is taken from the AAR, by one unzip")
     }
 
     private fun oa_99_the_owner_chooses_between_the_built_in_tor_and_orbot() {
@@ -2463,7 +2471,7 @@ object AppModelTest {
         ok(c.contains("const val TOR_WAIT_MS = 90_000L"), "it waits 90 seconds for a circuit")
         ok(c.contains("outcome.words === AppWords.orbotNotRunning") && c.contains("PosOutcome.Failed(AppWords.torFailed)"), "a till read that finds no Tor says so in the built-in Tor's words")
         ok(c.contains("fun proxyNow()") && c.contains("return \"\"") && c.contains("\"127.0.0.1:\$port\""), "with no Tor up there is no proxy address for a fetch to use")
-        val runner = source("src/android/TorRunner.kt")
+        val runner = torSource("src/android/TorRunner.kt")
         ok(runner.contains("catch (e: LinkageError)") && runner.contains("class TorStartException"), "a library that does not load is a failure to start, with the same words")
         ok(runner.contains("val run = current?.takeIf { !it.done }"), "a run that has ended is not reused: trying again starts a new one")
         ok(source("src/android/WatchService.kt").contains("TorChoice.BuiltIn -> torLease?.port() != null"), "the watcher is not started while the built-in Tor has no circuit")

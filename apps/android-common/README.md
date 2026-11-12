@@ -1,7 +1,7 @@
 # Code shared by the Android apps
 
 The Key app, the owner app and the counter app are built from their own sources plus the
-files here. Plain `android.widget` and the Kotlin standard library only: no
+files here (`tor/` is for the owner app and the counter app only). Plain `android.widget` and the Kotlin standard library only: no
 Gradle, no AndroidX. `src/model/` has no Android class, so the JVM tests run
 it; `src/android/` needs the framework.
 
@@ -20,6 +20,7 @@ it; `src/android/` needs the framework.
 | `src/android/Icons.kt` | The icons, drawn as paths in code |
 | `src/android/Feedback.kt`, `src/model/FeedbackModel.kt` | Sounds, haptics and motion: `Feedback`, `HoldButton` (hold to approve) and `LogoSnapView`; the levels, the shake and the timings are in the model and are tested on the JVM |
 | `res/raw/`, `res/drawable-nodpi/` | The five sounds (credit in `res/raw/README.md`), the logo and the four pieces of the logo's snap |
+| `tor/` | The built-in Tor, for the owner app and the counter app only (the Key app makes no network connection and compiles none of it, and carries no `libtor.so`): `tor/src/android/TorService.kt` (C Tor, started through the native library of `tor-android`), `TorRunner.kt` (one run shared by leases), `tor/src/model/TorControl.kt` (the strict reader of Tor's control socket; no Android class), and `tor/tor-library.sh` (checks the pinned AAR and unpacks `libtor.so`); `docs/OWNER-APP-RULES.md` OA-97 to OA-100, `docs/COUNTER-RULES.md` CR-201 to CR-204 |
 
 ## Animated codes
 

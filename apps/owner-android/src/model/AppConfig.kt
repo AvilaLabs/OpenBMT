@@ -124,9 +124,6 @@ object AppFiles {
 
     /** The node's own folder, inside the app's `noBackupFilesDir`. */
     const val NODE_DIR = "node"
-
-    /** The folder of the built-in Tor, inside the app's `noBackupFilesDir` (OA-98). */
-    const val TOR_DIR = "tor"
 }
 
 /** The config file of the app's own folder. */

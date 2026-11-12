@@ -13,6 +13,8 @@ import android.os.Build
 import android.os.IBinder
 import java.io.File
 import org.openbmt.app.KeystoreSealer
+import org.openbmt.app.TorLease
+import org.openbmt.app.TorRunner
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerWatch
 

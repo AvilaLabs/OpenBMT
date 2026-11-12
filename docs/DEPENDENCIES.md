@@ -151,10 +151,11 @@ own and is not in `deps/`; its Rust part is the `openbmt-key-ffi` list above.
 - **Signing key.** The build makes a throwaway test key with `keytool`. It is
   never committed and is not the release key.
 
-## The built-in Tor of the Android Owner app
+## The built-in Tor of the Android Owner and Counter apps
 
-The owner app (`apps/owner-android/`) runs the Tor Project's C Tor itself, so
-a shop does not need Orbot (OA-97). It takes one prebuilt file from outside
+The owner app (`apps/owner-android/`) and the counter app
+(`apps/counter-android/`) run the Tor Project's C Tor themselves, so a shop
+does not need Orbot (OA-97, CR-201). They take one prebuilt file from outside
 the Rust lists: the native library of the Guardian Project's `tor-android`.
 
 - **`tor-android` 0.4.9.14** (`info.guardianproject:tor-android`, AAR),
@@ -164,16 +165,19 @@ the Rust lists: the native library of the Guardian Project's `tor-android`.
   (the Guardian Project's Maven repository) and the same bytes on Maven
   Central. SHA-256 of the AAR:
   `28ff2bb6d4d42eabe57183dedd7a97fce77e8ce4b6f5af6fa03993b3ca054edd`.
-  `apps/owner-android/build.sh` refuses any other file and fails the build.
+  `apps/android-common/tor/tor-library.sh`, which both builds call, refuses
+  any other file and fails the build.
 - **Only `libtor.so` is used**, for `arm64-v8a` and `x86_64`, stored in the
   APK like the app's own libraries. The AAR's Java code is not used: its
   `TorService` needs `jtorctl` and AndroidX, which the build does not have
   and the apps do not take. The app has its own class of the same
-  name in `apps/owner-android/src/android/TorService.kt`, because the
+  name in `apps/android-common/tor/src/android/TorService.kt`, because the
   library's native functions are bound by that name; it follows the order
   of native calls of the library's `TorService.java` and says so, with its
   licence, in its header. Its control client is the strict reader in
-  `src/model/TorControl.kt`, which sends five commands and no others.
+  `apps/android-common/tor/src/model/TorControl.kt`, which sends five
+  commands and no others. Both apps compile these files from the one place;
+  the Key app does not.
 - **Why.** The app is a client that must reach Bitcoin peers and a relay
   through Tor; with Orbot, a second app has to be installed, kept running
   and not stopped by Android. A setting keeps Orbot for those who prefer it.
@@ -185,8 +189,9 @@ the Rust lists: the native library of the Guardian Project's `tor-android`.
   The build has not been made reproducible for it.
 - **Where the file lives.** `~/.cache/openbmt/deps/tor-android/`, outside the
   repository, like the Kotlin compiler. `TORANDROID_AAR` names another place.
-- The Key app makes no network connection and takes none of this. The
-  counter app does not take it yet.
+- The Key app makes no network connection and takes none of this: it does
+  not compile the Tor part of `apps/android-common`, and its APK has no
+  `libtor.so`.
 
 ## Test tools
 

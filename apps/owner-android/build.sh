@@ -7,8 +7,9 @@
 # never committed; it is not a release key.
 #
 # The built-in Tor's native library, libtor.so, is taken from the pinned
-# tor-android AAR (docs/DEPENDENCIES.md): its SHA-256 is checked first and a
-# mismatch stops the build. Nothing else of that AAR is used.
+# tor-android AAR (docs/DEPENDENCIES.md) by apps/android-common/tor/tor-library.sh,
+# which the counter app's build calls too: the AAR's SHA-256 is checked first and
+# a mismatch stops the build. Nothing else of that AAR is used.
 #
 # Every step stops the script with a message when it fails. Nothing is
 # downloaded. Heavy steps run under the memory guard.
@@ -41,11 +42,11 @@ bt="$sdk/build-tools/36.0.0"
 platform="$sdk/platforms/android-36/android.jar"
 stdlib="$KOTLIN_HOME/lib/kotlin-stdlib.jar"
 tor_aar="${TORANDROID_AAR:-$cache/deps/tor-android/tor-android-0.4.9.14.aar}"
-tor_aar_sha256="28ff2bb6d4d42eabe57183dedd7a97fce77e8ce4b6f5af6fa03993b3ca054edd"
 kotlin_version="2.2.20"
 stdlib_sha256="8836ccffd3585fadda9901244b20d42901d2f3cd581058d8434e2ffabcf3a3e7"
 wrapper="$repo/crates/openbmt-owner-ffi/bindings/kotlin/org/openbmt/owner"
 common="$repo/apps/android-common"
+tor_part="$common/tor"
 min_sdk=29
 target_sdk=36
 abis=("arm64-v8a:aarch64-linux-android" "x86_64:x86_64-linux-android")
@@ -70,12 +71,10 @@ for t in aapt2 d8 zipalign apksigner; do [ -x "$bt/$t" ] || die "build-tools 36.
 [ -d "$ndk" ] || die "no NDK at $ndk (set ANDROID_NDK_HOME)"
 [ -x "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" ] || die "the NDK has no llvm-strip"
 [ -x "$guard" ] || die "no memory guard at $guard (set OPENBMT_GUARD)"
-[ -f "$tor_aar" ] || die "no tor-android AAR at $tor_aar (set TORANDROID_AAR; see docs/DEPENDENCIES.md)"
-[ "$(sha256sum "$tor_aar" | cut -d' ' -f1)" = "$tor_aar_sha256" ] || die "$tor_aar is not the pinned tor-android 0.4.9.14 AAR (SHA-256 differs)"
 command -v zip >/dev/null || die "zip is needed"
 command -v unzip >/dev/null || die "unzip is needed"
 echo "$jv"
-echo "tor-android 0.4.9.14 AAR, sha256 checked"
+"$tor_part/tor-library.sh" check "$tor_aar"
 echo "kotlin $kotlin_version ($(cat "$KOTLIN_HOME/build.txt")), stdlib sha256 checked"
 echo "aapt2: $("$bt/aapt2" version 2>&1 | head -n 1)"
 echo "d8: $("$bt/d8" --version 2>&1 | head -n 1)"
@@ -119,11 +118,7 @@ for pair in "${abis[@]}"; do
         case "$align" in *0x4000*) ;; *) echo "note: $abi $lib segments are not aligned to 16 KiB" ;; esac
     done
     # The built-in Tor's library, from the checked AAR and nothing else of it.
-    unzip -q -o -j "$tor_aar" "jni/$abi/libtor.so" -d "$out/stage/lib/$abi" || die "the tor-android AAR has no libtor.so for $abi"
-    "$strip" --strip-unneeded "$out/stage/lib/$abi/libtor.so"
-    align="$("$readelf" -l "$out/stage/lib/$abi/libtor.so" | awk '$1 == "LOAD" {print $NF}' | sort -u | tr '\n' ' ')"
-    echo "$abi libtor.so: $(stat -c %s "$out/stage/lib/$abi/libtor.so") bytes stripped, LOAD alignment: $align"
-    case "$align" in *0x4000*) ;; *) echo "note: $abi libtor.so segments are not aligned to 16 KiB" ;; esac
+    "$tor_part/tor-library.sh" unpack "$tor_aar" "$abi" "$out/stage" "$strip" "$readelf" || die "libtor.so for $abi was not made"
 done
 
 # ---- resources --------------------------------------------------------------------------
@@ -144,6 +139,7 @@ heavy java -Xmx2g -cp "$KOTLIN_HOME/lib/*" org.jetbrains.kotlin.cli.jvm.K2JVMCom
     -classpath "$platform:$stdlib" \
     -d "$out/classes" \
     "$wrapper/Native.kt" "$wrapper/OwnerNode.kt" "$common"/src/model/*.kt "$common"/src/android/*.kt \
+    "$tor_part"/src/model/*.kt "$tor_part"/src/android/*.kt \
     "$here"/src/model/*.kt "$here"/src/android/*.kt
 jar cf "$out/classes.jar" -C "$out/classes" .
 

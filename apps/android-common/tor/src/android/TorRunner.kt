@@ -1,4 +1,4 @@
-package org.openbmt.owner.app
+package org.openbmt.app
 
 import java.io.File
 import java.io.IOException
@@ -10,13 +10,16 @@ import org.torproject.jni.TorService
 class TorStartException(message: String) : IOException(message)
 
 /**
- * The built-in Tor of the app (OA-97 to OA-100): one run of [TorService] for the whole process, shared by whoever
+ * The built-in Tor of the owner app and the counter app (OA-97 to OA-100, CR-201 to CR-204): one run of [TorService] for the whole process, shared by whoever
  * holds a [TorLease] on it. The first lease starts it, bound to a SOCKS port that Tor picks on 127.0.0.1, with its
  * folders inside the app's `noBackupFilesDir` (OA-98). The last lease let go of shuts it down. The screens hold a
- * lease while the app is on show, and the background watch holds one while its service runs, so the port stays the
+ * lease while the app is on show, and the owner app's background watch holds one while its service runs, so the port stays the
  * same from the node's start to the watcher's (the watcher starts from the proxy the node had, OA-81).
  */
 object TorRunner {
+    /** The folder of Tor, inside the app's `noBackupFilesDir` (OA-98, CR-202). */
+    const val TOR_DIR = "tor"
+
     private val lock = Any()
     private var current: TorRun? = null
 
@@ -79,7 +82,7 @@ class TorRun internal constructor(private val dir: File) : TorService.Listener {
     }
 
     internal fun begin() {
-        val torDir = File(dir, AppFiles.TOR_DIR)
+        val torDir = File(dir, TOR_DIR)
         val data = File(torDir, "data")
         val cache = File(torDir, "cache")
         try {

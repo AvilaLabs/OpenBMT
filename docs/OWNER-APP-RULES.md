@@ -848,12 +848,12 @@ signs batches, settings and pairings, are never in the service.
 - **OA-97.** The app runs the Tor Project's C Tor itself, from the native
   library of the Guardian Project's `tor-android` (`docs/DEPENDENCIES.md`),
   in its own process and not as an Android component: the manifest does not
-  change. `TorService` (`src/android/TorService.kt`) makes the same native
-  calls in the same order as the library's own class, whose name it takes
+  change. `TorService` (`apps/android-common/tor/src/android/TorService.kt`,
+  shared with the counter app, CR-201) makes the same native calls in the same order as the library's own class, whose name it takes
   because the native functions are bound by it, and says so in its header.
   Tor has one SOCKS listener, on 127.0.0.1 at a port Tor picks, and its
   control socket is the one the native code gives. The app reads that socket
-  with a strict reader (`TorControl.kt`): three-digit code, separator, text of
+  with a strict reader (`apps/android-common/tor/src/model/TorControl.kt`): three-digit code, separator, text of
   printable ASCII, carriage return and line feed, at most 1024 bytes a line
   and 8 lines a reply, no data reply, a code that does not change inside a
   reply, and a reply that is not complete is refused. It sends five commands
@@ -874,7 +874,8 @@ signs batches, settings and pairings, are never in the service.
   left by an earlier run is deleted before Tor starts. The library file
   `libtor.so` is taken from the AAR pinned in `docs/DEPENDENCIES.md` and
   nothing else of it is; the build checks the AAR's SHA-256 and stops if it
-  differs.
+  differs, in the script both the owner and the counter builds call
+  (`apps/android-common/tor/tor-library.sh`).
 - **OA-99.** Settings and this phone has a row "Tor". It opens a page with
   two choices, "Built-in Tor" and "Use Orbot", the words of the one in use
   and no third choice: there is no way to turn Tor off. The choice is kept in
