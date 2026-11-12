@@ -72,6 +72,8 @@ Square and Clover support read-only order matching. The cashier still
 enters the Bitcoin sale and closes the POS order manually. The readers
 have not been tried with a real seller account, so a shop cannot assume
 an existing POS will provide a finished automatic connector.
+Lightspeed, Hike and every other till use the manual Bitcoin payment
+type in the same way.
 
 The counter quotes prices in the shop's currency, chosen at setup. The
 accounting export follows United States rules only.

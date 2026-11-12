@@ -77,7 +77,13 @@ under `docs/POS-RULES.md`. The amount still comes from the cashier's entry.
 Matching can flag a discrepancy but cannot prove that goods were handed
 over for a payment (section 10 of those rules). Both readers were written
 from vendor documentation and have not been tried with real seller
-accounts. A Clover custom tender button and Lightspeed gateway are planned.
+accounts. A Clover custom tender button is planned.
+
+Lightspeed and Hike use the manual Bitcoin payment type: the cashier types
+the amount on the counter and closes the sale in the till as Bitcoin. Their
+built-in payment step runs as a web page that would have to come from a
+server on the internet, and OpenBMT runs no server between a shop and its
+customers.
 
 ## The states a cashier sees
 

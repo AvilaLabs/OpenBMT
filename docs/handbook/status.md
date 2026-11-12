@@ -34,6 +34,7 @@ engineering tests. The current results are not an independent audit.
 | Box and its container, Umbrel and StartOS packages | Built; container image smoke-tested, Umbrel and StartOS packages not run on a device |
 | NFC tap to pay | Not built yet |
 | Square and Clover order matching | Built, read-only; based on vendor documentation, not tested with a real seller account |
+| Lightspeed and Hike | Manual Bitcoin payment type only; no automatic connection planned while it would need a server on the internet |
 | Closing an Odoo sale from the till through the Box | Built; tested in Odoo 18 against a stand-in Box, the counter's side still to be joined |
 | Lightning through the shop's own node | Built at the counter; not run against a real node |
 | Lightning through a swap service the owner names | Built at the counter; tested against a test swap service on a test network, not a real service |
