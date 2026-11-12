@@ -35,21 +35,34 @@ fn fault(heading: &str, what: impl Into<String>) -> Words {
     stop(heading, what, Who::Owner, TELL_SUPPORT)
 }
 
-/// The words of a refusal that only a wallet with one key can meet are not
-/// written yet. Each constant stands in for a heading, a sentence and a
-/// next step; until they are written the screen shows the constant, which
-/// names the rule.
-///
 /// SP-80: a coin, file or transaction of the other kind of wallet.
-pub const WORDS_NEEDED_SP_80: &str = "WORDS NEEDED SP-80";
+fn wrong_kind() -> Words {
+    fault(
+        "Wrong kind of wallet",
+        "A coin or file belongs to a different kind of wallet from the shop's, so it was not used.",
+    )
+    .code("SP-80")
+}
+
 /// SP-84: the key hint of an input does not name the wallet's key for the
 /// script spent.
-pub const WORDS_NEEDED_SP_84: &str = "WORDS NEEDED SP-84";
-/// SP-85: an input of a wallet with one key has no signature by its key.
-pub const WORDS_NEEDED_SP_85: &str = "WORDS NEEDED SP-85";
+fn key_not_spent() -> Words {
+    fault(
+        "Key does not fit the coin",
+        "The file names a key for a coin that is not the key guarding that coin, so the file was not taken.",
+    )
+    .code("SP-84")
+}
 
-fn words_needed(placeholder: &'static str, code: &'static str) -> Words {
-    stop(placeholder, placeholder, Who::Owner, placeholder).code(code)
+/// SP-85: an input of a wallet with one key has no signature by its key.
+fn not_signed() -> Words {
+    stop(
+        "Coin not signed",
+        "A coin in the file has no valid signature from the wallet's key.",
+        Who::Owner,
+        "Sign the file in the shop's wallet again, then bring its answer here.",
+    )
+    .code("SP-85")
 }
 
 /// The place a problem was found, for the details.
@@ -81,8 +94,7 @@ impl CoinError {
             .code("SP-02")
             .detail(format!("coin {outpoint}")),
             Self::WrongKind { outpoint, expected } => {
-                words_needed(WORDS_NEEDED_SP_80, "SP-80")
-                    .detail(format!("coin {outpoint}, expected {expected}"))
+                wrong_kind().detail(format!("coin {outpoint}, expected {expected}"))
             }
         }
     }
@@ -454,10 +466,12 @@ impl CombineError {
             Self::BadSignature { source, input, key } => bad_signature()
                 .code("SP-53")
                 .detail(format!("{}, key {key}", place(*source, *input))),
-            Self::WrongKind { input, expected } => words_needed(WORDS_NEEDED_SP_80, "SP-80")
-                .detail(format!("base file, input {input}, expected {expected}")),
-            Self::KeyNotSpent { input } => words_needed(WORDS_NEEDED_SP_84, "SP-84")
-                .detail(format!("base file, input {input}")),
+            Self::WrongKind { input, expected } => {
+                wrong_kind().detail(format!("base file, input {input}, expected {expected}"))
+            }
+            Self::KeyNotSpent { input } => {
+                key_not_spent().detail(format!("base file, input {input}"))
+            }
             Self::Internal(what) => own_check(what),
         }
     }
@@ -569,10 +583,10 @@ impl FinalizeError {
                 "Do not send it. Start the approval again.",
             )
             .code("SP-64"),
-            Self::WrongKind { input, expected } => words_needed(WORDS_NEEDED_SP_80, "SP-80")
-                .detail(format!("input {input}, expected {expected}")),
-            Self::NoSignature { input } => words_needed(WORDS_NEEDED_SP_85, "SP-85")
-                .detail(format!("input {input}")),
+            Self::WrongKind { input, expected } => {
+                wrong_kind().detail(format!("input {input}, expected {expected}"))
+            }
+            Self::NoSignature { input } => not_signed().detail(format!("input {input}")),
         }
     }
 }
@@ -601,6 +615,14 @@ pub fn all_words() -> Vec<(String, Words)> {
     add(
         "CoinError::ScriptNotInWallet",
         CoinError::ScriptNotInWallet { outpoint }.words(),
+    );
+    add(
+        "CoinError::WrongKind",
+        CoinError::WrongKind {
+            outpoint,
+            expected: crate::WalletKind::Single,
+        }
+        .words(),
     );
 
     let plan: Vec<(&str, PlanError)> = vec![
@@ -771,6 +793,10 @@ pub fn all_words() -> Vec<(String, Words)> {
                 key,
             },
         ),
+        (
+            "CombineError::KeyNotSpent",
+            CombineError::KeyNotSpent { input: 0 },
+        ),
     ];
     for (name, e) in combine {
         add(name, e.words());
@@ -810,6 +836,10 @@ pub fn all_words() -> Vec<(String, Words)> {
             FinalizeError::FinalCheckFailed("a sample check"),
         ),
         ("FinalizeError::NotThePlan", FinalizeError::NotThePlan),
+        (
+            "FinalizeError::NoSignature",
+            FinalizeError::NoSignature { input: 0 },
+        ),
         (
             "FinalizeError::FeeNotThePlan",
             FinalizeError::FeeNotThePlan {

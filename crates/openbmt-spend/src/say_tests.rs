@@ -12,7 +12,6 @@ fn coin_name(e: &CoinError) -> &'static str {
         CoinError::PreviousTransactionMismatch { .. } => "CoinError::PreviousTransactionMismatch",
         CoinError::OutputMissing { .. } => "CoinError::OutputMissing",
         CoinError::ScriptNotInWallet { .. } => "CoinError::ScriptNotInWallet",
-        // Words not written yet (WORDS_NEEDED_SP_80): not in `all_words`.
         CoinError::WrongKind { .. } => "CoinError::WrongKind",
     }
 }
@@ -74,9 +73,8 @@ fn combine_name(e: &CombineError) -> &'static str {
         CombineError::BadSignature { .. } => "CombineError::BadSignature",
         // The same words as a plan's own check.
         CombineError::Internal(_) => "PlanError::Internal",
-        // Words not written yet (WORDS_NEEDED_SP_80, WORDS_NEEDED_SP_84): not
-        // in `all_words`.
-        CombineError::WrongKind { .. } => "CombineError::WrongKind",
+        // The same words as a coin of the other kind.
+        CombineError::WrongKind { .. } => "CoinError::WrongKind",
         CombineError::KeyNotSpent { .. } => "CombineError::KeyNotSpent",
     }
 }
@@ -108,9 +106,7 @@ fn finalize_name(e: &FinalizeError) -> &'static str {
         FinalizeError::LockTimeNotHeight { .. } => "PlanError::LockTimeNotHeight",
         FinalizeError::NotThePlan => "FinalizeError::NotThePlan",
         FinalizeError::FeeNotThePlan { .. } => "FinalizeError::FeeNotThePlan",
-        // Words not written yet (WORDS_NEEDED_SP_80, WORDS_NEEDED_SP_85): not
-        // in `all_words`.
-        FinalizeError::WrongKind { .. } => "FinalizeError::WrongKind",
+        FinalizeError::WrongKind { .. } => "CoinError::WrongKind",
         FinalizeError::NoSignature { .. } => "FinalizeError::NoSignature",
     }
 }
@@ -138,6 +134,10 @@ fn sc_01_no_variant_is_missing() {
         coin_name(&CoinError::PreviousTransactionMismatch { outpoint }),
         coin_name(&CoinError::OutputMissing { outpoint }),
         coin_name(&CoinError::ScriptNotInWallet { outpoint }),
+        coin_name(&CoinError::WrongKind {
+            outpoint,
+            expected: crate::WalletKind::Single,
+        }),
     ];
     let plans = [
         PlanError::Coin(CoinError::OutputMissing { outpoint }),
@@ -220,6 +220,11 @@ fn sc_01_no_variant_is_missing() {
             key,
         },
         CombineError::Internal("x"),
+        CombineError::WrongKind {
+            input: 0,
+            expected: crate::WalletKind::Single,
+        },
+        CombineError::KeyNotSpent { input: 0 },
     ];
     wanted.extend(combines.iter().map(combine_name));
     let finals = [
@@ -247,6 +252,11 @@ fn sc_01_no_variant_is_missing() {
             found: 1,
             planned: 2,
         },
+        FinalizeError::WrongKind {
+            input: 0,
+            expected: crate::WalletKind::Single,
+        },
+        FinalizeError::NoSignature { input: 0 },
     ];
     wanted.extend(finals.iter().map(finalize_name));
     for name in &wanted {
