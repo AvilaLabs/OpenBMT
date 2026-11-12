@@ -1682,3 +1682,109 @@ own, as the driver of section 12 has none.
   settings row "Lightning through a swap provider" (CR-218): a provider, an
   onion address, the largest sale over Lightning, and "Turn on" and "Turn
   off".
+
+## 23. Pairing with the shop's own wallet
+
+A shop that uses its own wallet has no Key app. The owner phone shows the
+offer, carries the request and shows the bundle; the counter pins the
+wallet's description and makes its own receive addresses from it
+(`docs/WALLET-RULES.md` §3). What replaces the Key app's second signature is
+the person at the counter, who compares the counter's first address with
+the wallet's own screen and the four words with the owner phone. The codecs
+and the checks are in `crates/openbmt-core` (`pairing_own`) and
+`crates/openbmt-counter-node` (`paired`); the address book is in
+`crates/openbmt-counter`; the screens are the app's. A counter is paired one
+way or the other for its whole life: the rules of section 10 and of batches
+apply to a counter paired with the Key app, and the rules of this section to
+a counter paired with the shop's own wallet.
+
+- **CR-227.** The owner phone's offer is the frame `OBM-`, version 1: the
+  network in one byte, the owner root, the settings floor (the settings
+  version in force on the owner phone when it made the offer, u32 little
+  endian) and the pinned wallet (`OBM)`, WL-21) whole. It names no Key app.
+  It is decoded strictly (exact length, no trailing bytes, every part
+  decoded and re-encoded to the same bytes) and the pinned wallet must pass
+  WL-21 and WL-22. The network must be the main network, and the one the
+  description is for.
+- **CR-228.** When the offer reads, the counter derives the wallet's first
+  receive address (receive chain, index 0, WL-20) and shows it, with the
+  kind of wallet, before anything else. The person compares it with the
+  first receive address on the wallet's own screen. "Same address" goes on
+  to the request; "Different" ends the ceremony and nothing is kept. The
+  counter makes no key and no number before "Same address".
+- **CR-229.** After "Same address" the counter makes its identity key and a
+  fresh 32-byte number as CR-91 says, and shows its request, the frame
+  `OBM.`, version 1, as a code with four words: the counter's identity, its
+  name, the number, a binding to the offer and the counter's signature over
+  them. The binding and the four words are made from the whole offer under
+  their own tags (`OpenBMT/pair-own-binding/v1`, `OpenBMT/pair-own-session/v1`),
+  so a request or words made for a Key app offer never match an own-wallet
+  offer, nor the reverse. The owner phone shows the same four words. "They
+  match" and "They differ" and the ceremony's life in memory are as CR-91
+  and CR-92 say, and its 10 minutes run from the offer.
+- **CR-230.** The owner phone's bundle is the frame `OBM/`, version 1: the
+  pairing entry (the hash of the pinned wallet, the counter, its name, the
+  number, the settings version) signed by the owner root under the tag
+  `OpenBMT/pairing-own/v1`, the signed settings (`OBMS`), the first signed
+  range (`OBM*`, WL-24), the peers (CR-99) and, if any, the relay (CR-131).
+  It is taken only after "They match" and within the 10 minutes. The checks
+  run in this order: the match, the bundle's encoding, the pairing (this
+  counter, this number, the hash of the offer's pinned wallet, the owner
+  root's signature), the settings (CR-231), the range (CR-232). A bundle
+  that is not a bundle leaves the ceremony as it was; any other refusal ends
+  it.
+- **CR-231.** The settings in the bundle need the owner root's signature
+  only, a version above the offer's settings floor, valid values, and this
+  counter on the device list and among the counters (as CR-95). They are the
+  counter's first settings and not a change from earlier ones, so they need
+  no counter confirmation (`docs/APPROVAL-RULES.md`): the person at this
+  counter has just compared the address and the words.
+- **CR-232.** The first range must be signed by the owner root, name this
+  counter and have a valid shape (WL-23, WL-24, WL-28), and hold at least
+  `BATCH_MIN_COUNT` indexes (1000). Nothing in the bundle or the record can
+  lower that number.
+- **CR-233.** What the counter keeps after pairing is one framed record,
+  `OBM:`, version 1: the identity secret, the owner root, the pinned wallet,
+  the network, the settings floor, the signed pairing, the signed settings,
+  the first signed range, the peers and the relay if any. It is decoded and
+  sealed as CR-97 says, and `start` runs CR-230 to CR-232 again on it, the
+  match and the time aside, before anything starts.
+- **CR-234.** A sale's address is the pinned wallet's receive address at the
+  next index of the counter's range book (WL-20, WL-27). The book is kept in
+  its own slot (`ranges.bin`, frame `OBM;`, version 1: every signed range
+  the counter accepted, in the order it accepted them, and the next index of
+  each), written whole before the address is shown, as CR-03 says. At start
+  every range in the slot is checked again against the owner root and this
+  counter; a slot that does not read or check is a fault and the counter
+  does not start. An empty slot is made from the record's first range. A
+  book that is used up refuses the sale as CR-02 says for an empty batch. The
+  scripts the book handed out are watched as a batch's are.
+- **CR-235.** Later ranges arrive through the link as messages of kind
+  Range, each the `OBM*` frame. A range is taken when it passes CR-232 and
+  overlaps no index the counter has handed out and no range still in use
+  (WL-25, WL-26); otherwise nothing changes and a note gives the rule and
+  words. A range taken is recorded as CR-167 records a batch, in the same
+  order (check, record, store), with tag byte 35 and the digest of the text
+  `OpenBMT/range-held/v1` and the range's wire bytes; a range already held is
+  taken as nothing, as CR-168 says, and the body is read as strictly as
+  CR-169 says. A counter paired with the Key app drops a Range message with a
+  note, and a counter paired with the shop's own wallet drops a Batch
+  message with a note: "This counter makes its own addresses."
+- **CR-236.** Settings after pairing are checked as section 15 says, with
+  the owner root alone in place of the two roots. The class of the change is
+  computed from the settings in force and the new ones
+  (`openbmt_core::approval::classify`, AP-01, AP-02). A Free change is taken
+  with the owner's signature alone. A Loosen or Redirect change is refused:
+  it needs a counter confirmation or a wallet signature
+  (`docs/APPROVAL-RULES.md`), and neither is joined to the settings yet. The
+  note says the change must be confirmed at a counter. The `Setting` record
+  of CR-162 is written as there.
+- **CR-237.** The app's screens are the camera's, as CR-98 says: scan the
+  owner phone's offer, the first-address screen, the request as a code with
+  its four words and "They match" and "They differ", then the bundle. The
+  first-address screen shows the address as the largest thing on it, in
+  groups of four characters, and the kind of wallet beneath it. The same
+  scan reads either kind of offer; the code's frame says which ceremony
+  follows.
+- **CR-238.** Every state and refusal of this section has words under
+  `docs/SCREEN-RULES.md`.

@@ -464,6 +464,12 @@ merged).
   has them then cannot close the mailbox of a removed device before that
   device's copy is in it (LK-28). A send that cannot reach the relay stops
   the pass, so a Box is not sent a copy before the ones ahead of it.
+- **LK-77.** A message of kind Range carries one signed index range (`OBM*`,
+  `docs/WALLET-RULES.md` WL-24) for a counter paired with the shop's own
+  wallet (`docs/COUNTER-RULES.md` CR-235). The owner keeps and sends it again
+  as LK-70 and LK-71 say for a batch, and drops it from the pending list when
+  the copy of the counter's chain holds the counter's record of it (CR-235),
+  or a later range held.
 
 The two kinds that involve the Box are carried the same way. A counter sends
 a Paid notice to each Box on its device list when a sale changes state, and
