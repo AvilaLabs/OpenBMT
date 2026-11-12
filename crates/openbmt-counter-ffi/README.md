@@ -75,6 +75,8 @@ text in `text`.
 | 46 | pair differ | none | the words of the ended ceremony |
 | 47 | pair cancel | none | nothing |
 | 48 | pair finish | now, bundle | pairing record |
+| 71 | pending change | now | the change that waits for a counter's confirmation (version, four words, each field loosened with its value now and after), and the words of one that was dropped or refused |
+| 72 | confirm change | now, version | the words of the confirmation signed and written as a record (CR-241); the app asks after the manager's PIN |
 
 ## Threads
 

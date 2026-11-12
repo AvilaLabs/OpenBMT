@@ -166,6 +166,10 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "u32(), bool(), option { words() },",
         "LinkStep(linkView(), strings())",
         "PairingInfo(r.network(), r.shopSettings(), r.relayKind())",
+        "ChangeState(option { pendingChange() }, option { words() })",
+        "PendingChange(u32(), strings(), list { changeField() }, u64(), u64(), bool())",
+        "ChangeField(string(), changeValue(), changeValue())",
+        "ChangeValue(changeValueKind(), u64(), string())",
     ] {
         assert!(text.contains(needle), "{needle}");
     }
@@ -193,6 +197,10 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "SampleView: record: source: string, fetched_at: u64, minor_per_btc: u64",
         "RateCombineArgs: record: samples: list<SampleView>, now: u64",
         "RateView: record: rate: u64, source_label: string, source_fetched_at: u64",
+        "ChangeValueView: record: kind: ChangeValueKind, number: u64, text: string",
+        "ChangeFieldView: record: field: string, now: ChangeValueView, after: ChangeValueView",
+        "PendingChangeView: record: version: u32, words: list<string>, fields: list<ChangeFieldView>, arrived: u64, expires_at: u64, confirmed: bool",
+        "ChangeStateView: record: pending: option<PendingChangeView>, notice: option<Words>",
         "SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, currency: string, tips_on: bool, tip_percents: list<u8>",
     ] {
         assert!(protocol.contains(line), "{line}");

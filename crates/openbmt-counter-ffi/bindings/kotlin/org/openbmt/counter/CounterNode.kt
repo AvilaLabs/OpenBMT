@@ -109,6 +109,8 @@ private const val OP_SWAP_REPLY = 67
 private const val OP_SWAP_FAILED = 68
 private const val OP_PAIR_ADDRESS_SAME = 69
 private const val OP_PAIR_ADDRESS_DIFFERENT = 70
+private const val OP_PENDING_CHANGE = 71
+private const val OP_CONFIRM_CHANGE = 72
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -122,6 +124,13 @@ private const val TAG_RELAY_KIND_ONION = 2
 private const val TAG_OWN_WALLET_KIND_NONE = 0
 private const val TAG_OWN_WALLET_KIND_SINGLE_KEY = 1
 private const val TAG_OWN_WALLET_KIND_TWO_OF_THREE = 2
+private const val TAG_CHANGE_VALUE_KIND_UNITS = 0
+private const val TAG_CHANGE_VALUE_KIND_SATS = 1
+private const val TAG_CHANGE_VALUE_KIND_BPS = 2
+private const val TAG_CHANGE_VALUE_KIND_COUNT = 3
+private const val TAG_CHANGE_VALUE_KIND_SECONDS = 4
+private const val TAG_CHANGE_VALUE_KIND_FLAG = 5
+private const val TAG_CHANGE_VALUE_KIND_CODE = 6
 private const val TAG_ACTOR_ROLE_CASHIER = 0
 private const val TAG_ACTOR_ROLE_MANAGER = 1
 private const val TAG_REFUND_ASK_VIEW_SATS = 0
@@ -263,6 +272,36 @@ class TipTally(val count: Long, val minor: Long)
 
 /** A tip the counter offers for a sale: a suggested percent and what it comes to in minor units (CR-188). */
 class TipChoice(val percent: Int, val tipMinor: Long)
+
+/** How a value of a field of a change to the settings is to be written (CR-240). */
+enum class ChangeValueKind { Units, Sats, Bps, Count, Seconds, Flag, Code }
+
+/**
+ * One value of a field, now or after a change (CR-240). [number] holds the amount for every kind but
+ * [ChangeValueKind.Code], which has its three letters in [text]; a [ChangeValueKind.Flag] is 1 for on.
+ * [ChangeValueKind.Units] are whole units of the shop's currency, 0 being off.
+ */
+class ChangeValue(val kind: ChangeValueKind, val number: Long, val text: String)
+
+/** One field a change loosens: its name as the settings call it, its value now and its value after (CR-240). */
+class ChangeField(val field: String, val now: ChangeValue, val after: ChangeValue)
+
+/**
+ * The change to the shop's settings that waits for a counter's confirmation (CR-239, CR-240): its [version], the
+ * four [words] to compare with the owner phone, each [fields] it loosens, when it [arrived] and when it is dropped
+ * ([expiresAt]) if nobody confirms it, and whether this counter [confirmed] it since it last started.
+ */
+class PendingChange(
+    val version: Long,
+    val words: List<String>,
+    val fields: List<ChangeField>,
+    val arrived: Long,
+    val expiresAt: Long,
+    val confirmed: Boolean,
+)
+
+/** What [CounterNode.pendingChange] returns: the change that waits, and the words of one that came to nothing (CR-244). */
+class ChangeState(val pending: PendingChange?, val notice: Words?)
 
 /** What a sale carries besides its amount: its note, and the days of a request to send (0 for a sale shown at the till) (CR-205, CR-206). */
 class SaleInfo(val note: String?, val requestDays: Int, val expiresAt: Long, val cashRefundOnly: Boolean)
@@ -779,6 +818,27 @@ private fun Reader.payment(): Payment = Payment(string(), string(), string(), u3
 internal fun Reader.opened(): Opened =
     Opened(u32(), u64(), u64(), u64(), u64(), payment())
 
+private fun Reader.changeValueKind(): ChangeValueKind =
+    when (val t = u8()) {
+        TAG_CHANGE_VALUE_KIND_UNITS -> ChangeValueKind.Units
+        TAG_CHANGE_VALUE_KIND_SATS -> ChangeValueKind.Sats
+        TAG_CHANGE_VALUE_KIND_BPS -> ChangeValueKind.Bps
+        TAG_CHANGE_VALUE_KIND_COUNT -> ChangeValueKind.Count
+        TAG_CHANGE_VALUE_KIND_SECONDS -> ChangeValueKind.Seconds
+        TAG_CHANGE_VALUE_KIND_FLAG -> ChangeValueKind.Flag
+        TAG_CHANGE_VALUE_KIND_CODE -> ChangeValueKind.Code
+        else -> tag("ChangeValueKind $t")
+    }
+
+private fun Reader.changeValue(): ChangeValue = ChangeValue(changeValueKind(), u64(), string())
+
+private fun Reader.changeField(): ChangeField = ChangeField(string(), changeValue(), changeValue())
+
+private fun Reader.pendingChange(): PendingChange =
+    PendingChange(u32(), strings(), list { changeField() }, u64(), u64(), bool())
+
+internal fun Reader.changeState(): ChangeState = ChangeState(option { pendingChange() }, option { words() })
+
 internal fun Reader.saleInfo(): SaleInfo = SaleInfo(option { string() }, u8(), u64(), bool())
 
 internal fun Reader.openRequest(): OpenRequest =
@@ -1144,6 +1204,25 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
     fun saleInfo(index: Long): SaleInfo {
         val r = call(OP_SALE_INFO, handle) { it.u32(index) }
         return r.saleInfo().also { r.end() }
+    }
+
+    /**
+     * The change to the shop's settings that waits for a counter's confirmation, with each field it loosens, its
+     * version and the four words, and the words of a change that was dropped or refused (CR-239, CR-240, CR-244).
+     */
+    fun pendingChange(now: Long): ChangeState {
+        val r = call(OP_PENDING_CHANGE, handle) { it.u64(now) }
+        return r.changeState().also { r.end() }
+    }
+
+    /**
+     * CR-241: sign the confirmation of the change that waits, as the [version] the manager was shown, and write it
+     * as a record of the counter's chain; returns the words to show. The app asks only after the manager's PIN was
+     * right (CR-84): the library checks no PIN.
+     */
+    fun confirmChange(now: Long, version: Long): Words {
+        val r = call(OP_CONFIRM_CHANGE, handle) { it.u64(now).u32(version) }
+        return r.words().also { r.end() }
     }
 
     /** The open requests, newest first (CR-215). */

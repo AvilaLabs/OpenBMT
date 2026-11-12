@@ -76,6 +76,10 @@
 //!   `swap_next` hands out the next request for the provider's onion name,
 //!   `swap_reply` takes the bytes that came back and `swap_failed` says there
 //!   were none. The app sends them over plain HTTP/1.1 through its own Tor.
+//! - 71 `pending_change` reads the change to the shop's settings that waits
+//!   for a counter's confirmation, and 72 `confirm_change` signs it and
+//!   writes the record (CR-239 to CR-241). The PIN of CR-84 is the app's: it
+//!   asks `confirm_change` only after the manager's PIN was right.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -103,15 +107,16 @@ use crate::relay::take_relay;
 use crate::say::{TONES, WHOS};
 use crate::shop::{own_node_check, pairing_read, SettingsView};
 use crate::views::{
-    put_words, ActorRole, ActorView, AddNoteArgs, CancelArgs, CashArgs, CounterNetwork,
-    DayTotalsArgs, DayTotalsView, HealthView, HeartbeatOutcome, LightningSaleView,
-    LightningStatusView, LinkStepView, LinkView, LnFailArgs, LnKind, LnMethod, LnReplyArgs,
-    LnRequestView, LnSetupArgs, LnStepView, LnTransportView, OpenArgs, OpenRequestArgs,
-    OpenTipArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView, OwnWalletKind,
-    PairBeginArgs, PairStartedView, PairingView, PersonLineView, PumpView, RefundArgs,
-    RefundAskView, RefundRow, RefundStateView, RelayKind, ReportView, RequestRow, RequoteArgs,
-    SaleInfoView, ScreenView, StaffArgs, StartConfig, StateView, StatusView, SwapReplyArgs,
-    SwapRequestView, TallyView, TipChoiceView, TipTallyView, WithdrawArgs, WordsView,
+    put_words, ActorRole, ActorView, AddNoteArgs, CancelArgs, CashArgs, ChangeFieldView,
+    ChangeStateView, ChangeValueKind, ChangeValueView, CounterNetwork, DayTotalsArgs,
+    DayTotalsView, HealthView, HeartbeatOutcome, LightningSaleView, LightningStatusView,
+    LinkStepView, LinkView, LnFailArgs, LnKind, LnMethod, LnReplyArgs, LnRequestView, LnSetupArgs,
+    LnStepView, LnTransportView, OpenArgs, OpenRequestArgs, OpenTipArgs, OpenedView, OverrideArgs,
+    OwnNodeCheckArgs, OwnNodeView, OwnWalletKind, PairBeginArgs, PairStartedView, PairingView,
+    PendingChangeView, PersonLineView, PumpView, RefundArgs, RefundAskView, RefundRow,
+    RefundStateView, RelayKind, ReportView, RequestRow, RequoteArgs, SaleInfoView, ScreenView,
+    StaffArgs, StartConfig, StateView, StatusView, SwapReplyArgs, SwapRequestView, TallyView,
+    TipChoiceView, TipTallyView, WithdrawArgs, WordsView,
 };
 
 /// The first four bytes of a request.
@@ -504,6 +509,15 @@ fn build_ops() -> Vec<Op> {
         op(70, "pair_address_different", Zero, |c, ()| {
             c.registry.pair_address_different()
         }),
+        op(71, "pending_change", Node, |c, now: u64| {
+            c.entry()?.pending_change(now)
+        }),
+        op(
+            72,
+            "confirm_change",
+            Node,
+            |c, (now, version): (u64, u32)| c.entry()?.confirm_change(now, version),
+        ),
     ]
 }
 
@@ -693,6 +707,11 @@ fn definitions() -> Vec<TypeDef> {
         SwapRequestView::define(),
         SwapReplyArgs::define(),
         LightningStatusView::define(),
+        ChangeValueKind::define(),
+        ChangeValueView::define(),
+        ChangeFieldView::define(),
+        PendingChangeView::define(),
+        ChangeStateView::define(),
     ]
 }
 

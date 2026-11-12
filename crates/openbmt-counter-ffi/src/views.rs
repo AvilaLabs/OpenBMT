@@ -5,7 +5,7 @@
 
 use openbmt_core::say::Words;
 use openbmt_counter::{DayTotals, RefundState, Report, Role, State, Tally};
-use openbmt_counter_node::{LnRequest, LnTransport};
+use openbmt_counter_node::{FieldValue, LnRequest, LnTransport, PendingChange};
 use openbmt_lightning::request::Method;
 
 use crate::codec::{
@@ -409,6 +409,138 @@ wire_record!(SaleInfoView {
     expires_at,
     cash_refund_only
 });
+
+/// How a value of a field of a change to the settings is to be written
+/// (CR-240).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeValueKind {
+    /// Whole units of the shop's currency; `number` holds them (0 is off).
+    Units,
+    /// Satoshis; `number` holds them.
+    Sats,
+    /// Basis points, 100 to the percent; `number` holds them.
+    Bps,
+    /// A count; `number` holds it.
+    Count,
+    /// Seconds; `number` holds them.
+    Seconds,
+    /// A switch; `number` is 1 for on and 0 for off.
+    Flag,
+    /// A currency; `text` holds its three letters.
+    Code,
+}
+
+wire_unit_enum!(ChangeValueKind {
+    Units = 0,
+    Sats = 1,
+    Bps = 2,
+    Count = 3,
+    Seconds = 4,
+    Flag = 5,
+    Code = 6
+});
+
+/// One value of a field, now or after the change (CR-240). The app writes
+/// it, in the shop's currency where it is an amount.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeValueView {
+    /// What the value is.
+    pub kind: ChangeValueKind,
+    /// The number, for every kind but [`ChangeValueKind::Code`]; 0 for it.
+    pub number: u64,
+    /// The currency's letters for [`ChangeValueKind::Code`]; empty for the
+    /// others.
+    pub text: String,
+}
+
+wire_record!(ChangeValueView { kind, number, text });
+
+impl ChangeValueView {
+    fn of(v: &FieldValue) -> Self {
+        let (kind, number, text) = match v {
+            FieldValue::Units(n) => (ChangeValueKind::Units, u64::from(*n), String::new()),
+            FieldValue::Sats(n) => (ChangeValueKind::Sats, *n, String::new()),
+            FieldValue::Bps(n) => (ChangeValueKind::Bps, u64::from(*n), String::new()),
+            FieldValue::Count(n) => (ChangeValueKind::Count, u64::from(*n), String::new()),
+            FieldValue::Seconds(n) => (ChangeValueKind::Seconds, u64::from(*n), String::new()),
+            FieldValue::Flag(on) => (ChangeValueKind::Flag, u64::from(*on), String::new()),
+            FieldValue::Code(c) => (ChangeValueKind::Code, 0, c.clone()),
+        };
+        Self { kind, number, text }
+    }
+}
+
+/// One field a change loosens, with its value now and after (CR-240).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeFieldView {
+    /// The name of the field, as the settings call it (`light_per_sale`).
+    pub field: String,
+    /// The value in the settings in force.
+    pub now: ChangeValueView,
+    /// The value the change would put in force.
+    pub after: ChangeValueView,
+}
+
+wire_record!(ChangeFieldView { field, now, after });
+
+/// The change that waits to be confirmed at a counter (CR-239, CR-240).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingChangeView {
+    /// The settings version the change would put in force.
+    pub version: u32,
+    /// The four words of AP-03, to compare with the owner phone.
+    pub words: Vec<String>,
+    /// Each field the change loosens.
+    pub fields: Vec<ChangeFieldView>,
+    /// When the change arrived, in seconds since 1970.
+    pub arrived: u64,
+    /// When it is dropped if nobody confirmed it, in seconds since 1970.
+    pub expires_at: u64,
+    /// The counter signed its confirmation since it last started.
+    pub confirmed: bool,
+}
+
+wire_record!(PendingChangeView {
+    version,
+    words,
+    fields,
+    arrived,
+    expires_at,
+    confirmed
+});
+
+impl PendingChangeView {
+    pub(crate) fn of(p: &PendingChange) -> Self {
+        Self {
+            version: p.version,
+            words: p.words.iter().map(|w| (*w).to_string()).collect(),
+            fields: p
+                .fields
+                .iter()
+                .map(|f| ChangeFieldView {
+                    field: f.field.to_string(),
+                    now: ChangeValueView::of(&f.now),
+                    after: ChangeValueView::of(&f.after),
+                })
+                .collect(),
+            arrived: p.arrived,
+            expires_at: p.expires_at,
+            confirmed: p.confirmed,
+        }
+    }
+}
+
+/// What `pending_change` returns (CR-239, CR-244): the change that waits, if
+/// one does, and the words of a change that came to nothing, if one did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeStateView {
+    /// The change that waits.
+    pub pending: Option<PendingChangeView>,
+    /// What the manager is told about a change that was dropped or refused.
+    pub notice: Option<WordsView>,
+}
+
+wire_record!(ChangeStateView { pending, notice });
 
 /// One open request, for the list on Home (CR-215).
 #[derive(Debug, Clone, PartialEq, Eq)]

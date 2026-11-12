@@ -34,6 +34,7 @@ use openbmt_counter::{
     refund_destination, Actor, Amount, CashRefund, Currency, PosState, Rate, RateSource, RefundAsk,
     RefundRequest, Report, RequestDays, SaleExtras, Screen, StaffChange, StaffEvent,
 };
+use openbmt_counter_node::say::change_confirmed_words;
 use openbmt_counter_node::{effective_settings_of, own_node_setting};
 use openbmt_counter_node::{
     DirStore, DriverPort, HeartbeatNotTaken, Launch, Node, NodeConfig, PairedRecord, RecordRefused,
@@ -54,13 +55,13 @@ use crate::pay::{payment_for, payment_with_invoice, request_link, Payment};
 use crate::relay::{LinkPlan, LinkSlot, LEASE_WAIT};
 use crate::say::words_for;
 use crate::views::{
-    ActorView, AddNoteArgs, CancelArgs, CashArgs, DayTotalsArgs, DayTotalsView, HealthView,
-    HeartbeatOutcome, LightningSaleView, LightningStatusView, LinkStepView, LinkView, LnFailArgs,
-    LnKind, LnReplyArgs, LnRequestView, LnSetupArgs, LnStepView, OpenArgs, OpenRequestArgs,
-    OpenTipArgs, OpenedView, OverrideArgs, OwnNodeView, PumpView, RefundArgs, RefundAskView,
-    RefundRow, ReportView, RequestRow, RequoteArgs, SaleInfoView, ScreenView, StaffArgs,
-    StartConfig, StatusView, SwapReplyArgs, SwapRequestView, TipChoiceView, WithdrawArgs,
-    WordsView,
+    ActorView, AddNoteArgs, CancelArgs, CashArgs, ChangeStateView, DayTotalsArgs, DayTotalsView,
+    HealthView, HeartbeatOutcome, LightningSaleView, LightningStatusView, LinkStepView, LinkView,
+    LnFailArgs, LnKind, LnReplyArgs, LnRequestView, LnSetupArgs, LnStepView, OpenArgs,
+    OpenRequestArgs, OpenTipArgs, OpenedView, OverrideArgs, OwnNodeView, PendingChangeView,
+    PumpView, RefundArgs, RefundAskView, RefundRow, ReportView, RequestRow, RequoteArgs,
+    SaleInfoView, ScreenView, StaffArgs, StartConfig, StatusView, SwapReplyArgs, SwapRequestView,
+    TipChoiceView, WithdrawArgs, WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -534,6 +535,30 @@ impl Entry {
                 expires_at: sale.expires_at(),
                 cash_refund_only: node.refund_onchain_room(index) == Some(0),
             })
+        })
+    }
+
+    /// CR-239, CR-240, CR-244: the change that waits to be confirmed, with
+    /// each field it loosens, its version and the four words, and the words
+    /// of a change that came to nothing. A change that has waited seven days
+    /// is dropped here, as in every call that looks at the time.
+    pub(crate) fn pending_change(&self, now: u64) -> Result<ChangeStateView, CounterError> {
+        self.run(Some(now), |node, _, _| {
+            let pending = node.pending_change().map(|p| PendingChangeView::of(&p));
+            let notice = node.change_notice().map(|n| WordsView(n.words()));
+            Ok(ChangeStateView { pending, notice })
+        })
+    }
+
+    /// CR-241: sign the confirmation of the change that waits, as the
+    /// version the manager was shown, and write it as a record of the
+    /// counter's chain. The app asks only after the manager's PIN was right
+    /// (CR-84); the library checks no PIN.
+    pub(crate) fn confirm_change(&self, now: u64, version: u32) -> Result<WordsView, CounterError> {
+        self.run(Some(now), |node, _, _| {
+            node.confirm_pending(version)
+                .map(|()| WordsView(change_confirmed_words()))
+                .map_err(|e| from_rule(e.rule(), &e, e.words()))
         })
     }
 

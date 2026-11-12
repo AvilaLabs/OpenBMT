@@ -109,6 +109,8 @@ ops run on another; it waits for at most 250 ms.
  68 swap_failed      handle node  args u64 -> ()
  69 pair_address_same handle zero  args (u64, string) -> PairStartedView
  70 pair_address_different handle zero  args () -> Words
+ 71 pending_change   handle node  args u64 -> ChangeStateView
+ 72 confirm_change   handle node  args (u64, u32) -> Words
 ```
 
 ## Types
@@ -188,4 +190,10 @@ LightningSaleView: record: invoice: bool, waiting: bool, unavailable: option<Wor
 SwapRequestView: record: id: u64, host_port: string, bytes: list<u8>
 SwapReplyArgs: record: id: u64, bytes: list<u8>
 LightningStatusView: record: ready: bool, words: Words
+ChangeValueKind: enum, one tag byte
+    tags Units=0 Sats=1 Bps=2 Count=3 Seconds=4 Flag=5 Code=6
+ChangeValueView: record: kind: ChangeValueKind, number: u64, text: string
+ChangeFieldView: record: field: string, now: ChangeValueView, after: ChangeValueView
+PendingChangeView: record: version: u32, words: list<string>, fields: list<ChangeFieldView>, arrived: u64, expires_at: u64, confirmed: bool
+ChangeStateView: record: pending: option<PendingChangeView>, notice: option<Words>
 ```
