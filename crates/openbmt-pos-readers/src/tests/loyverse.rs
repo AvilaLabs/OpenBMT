@@ -513,7 +513,7 @@ fn ps_92_a_time_is_strict_rfc_3339_and_dropped_to_seconds() {
 }
 
 #[test]
-fn ps_104_an_amount_is_whole_units_scaled_by_the_decimal_places_of_the_account() {
+fn ps_104_an_amount_is_read_exactly_from_its_text_and_scaled_by_the_account_decimal_places() {
     // The sale of one unit: 100 minor units with two places, 1 with none and
     // 1000 with three.
     let body = page_of(&[SALE]);
@@ -560,24 +560,95 @@ fn ps_104_an_amount_is_whole_units_scaled_by_the_decimal_places_of_the_account()
         Err(ReadRefused::OutOfRange("receipts[].total_money"))
     );
     assert_eq!(at(2, "0").map(|p| p.orders[0].total_minor), Ok(0));
-    // An amount with a fraction or an exponent cannot be read exactly (the
-    // JSON reader keeps an integer only), so it is refused, never rounded.
-    for bad in ["17.52", "1e2", "1.0", "-0", "null", "true", "[1]"] {
-        let want = if bad == "null" {
-            ReadRefused::Missing("receipts[].total_money")
-        } else {
-            ReadRefused::WrongType("receipts[].total_money")
-        };
-        assert_eq!(at(2, bad), Err(want), "{bad}");
+    // Decimals are read exactly from the text, never rounded.
+    for (places, text, minor) in [
+        (2u8, "17.52", 1752u64),
+        (2, "0.5", 50),
+        (2, "100", 10_000),
+        (2, "1.0", 100),
+        (2, "0.05", 5),
+        (2, "5.00", 500),
+        (3, "0.125", 125),
+        (0, "17", 17),
+        (0, "0", 0),
+        (4, "1.5", 15_000),
+    ] {
+        assert_eq!(
+            at(places, text).map(|p| p.orders[0].total_minor),
+            Ok(minor),
+            "{text} with {places} places"
+        );
     }
+    // More decimals than the account's are refused, even zeros.
+    for (places, text) in [(2u8, "1.234"), (2, "1.000"), (0, "1.5"), (0, "0.0")] {
+        assert_eq!(
+            at(places, text),
+            Err(ReadRefused::OutOfRange("receipts[].total_money")),
+            "{text} with {places} places"
+        );
+    }
+    // A negative one, including `-0`, is out of range; an exponent is of the
+    // wrong type; so is anything that is not a number.
+    for bad in ["-0", "-0.5", "-17.52"] {
+        assert_eq!(
+            at(2, bad),
+            Err(ReadRefused::OutOfRange("receipts[].total_money")),
+            "{bad}"
+        );
+    }
+    for bad in ["1e2", "1.5E1", "1e-2", "true", "[1]", "\"1\""] {
+        assert_eq!(
+            at(2, bad),
+            Err(ReadRefused::WrongType("receipts[].total_money")),
+            "{bad}"
+        );
+    }
+    assert_eq!(
+        at(2, "null"),
+        Err(ReadRefused::Missing("receipts[].total_money"))
+    );
+    // The largest amount, with decimals, and one past it.
+    assert_eq!(
+        at(2, "92233720368547758.07").map(|p| p.orders[0].total_minor),
+        Ok(i64::MAX as u64)
+    );
+    assert_eq!(
+        at(2, "92233720368547758.08"),
+        Err(ReadRefused::OutOfRange("receipts[].total_money"))
+    );
+    assert_eq!(
+        at(2, "99999999999999999999999.99"),
+        Err(ReadRefused::OutOfRange("receipts[].total_money"))
+    );
 }
 
 #[test]
-fn ps_104_the_reference_example_is_refused_while_its_amounts_have_fractions() {
+fn ps_104_the_reference_example_is_read() {
     // The list example of the reference, whose amounts are 17.52 and 5.84.
+    let page = request().parse(REFERENCE, None, None).expect("reads");
+    assert_eq!(page.orders.len(), 1);
+    let o = &page.orders[0];
+    assert_eq!(o.id, id("2-1008"));
+    assert_eq!((o.state, o.total_minor), (OrderState::Closed, 1752));
+    assert_eq!(o.location, text(STORE));
+    let amounts: Vec<(&str, u64)> = o
+        .tenders
+        .iter()
+        .map(|t| (t.name.as_str(), t.amount_minor))
+        .collect();
     assert_eq!(
-        request().parse(REFERENCE, None, None),
-        Err(ReadRefused::WrongType("receipts[].total_money"))
+        amounts,
+        [
+            ("Cash", 584),
+            ("Cash rounding", 4),
+            ("Card", 584),
+            ("Worldpay", 584)
+        ]
+    );
+    // A currency with no decimals refuses the same example.
+    assert_eq!(
+        request_with(0, &cursor_at(SINCE).expect("a cursor")).parse(REFERENCE, None, None),
+        Err(ReadRefused::OutOfRange("receipts[].total_money"))
     );
 }
 

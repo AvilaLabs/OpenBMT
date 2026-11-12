@@ -562,15 +562,16 @@ the API reference as it was rendered on 2026-11-12.
   merchant request (`currency.code`, three capital letters, and
   `currency.decimal_places`, 0 to 9, which are refused outside that) and
   passes them in. Loyverse writes money as a decimal number in whole units
-  (`17.52`, and no decimals for a currency such as the yen). `openbmt-json`
-  keeps an integer exactly and does not keep a number with a fraction or an
-  exponent, so the reader reads an amount that is an integer and scales it by
-  ten to the power of the decimal places, and refuses any amount with a
-  fraction or an exponent as of the wrong type, never rounded (PS-92). An
-  amount from 0 to 9,223,372,036,854,775,807 after scaling is read; another is
-  out of range. Until the JSON reader keeps the text of a number, a receipt
-  with cents is refused whole. Times are RFC 3339 as PS-92 reads them,
-  whether or not they carry milliseconds. **[verify, Loyverse: that money
+  (`17.52`, and no decimals for a currency such as the yen). The reader
+  takes the exact text of the number (`openbmt-json` keeps it) and uses
+  integer arithmetic only: the whole units, then the decimals padded with
+  zeros to the decimal places, so `17.52` is 1752 with two places and `17` is
+  17 with none. A number with more decimals than the account's (zeros
+  included) is out of range, as is a negative one (`-0` too) or one above
+  9,223,372,036,854,775,807 after scaling. A number with an exponent, or that
+  is not a number, is of the wrong type. Nothing is rounded. Times are RFC
+  3339 as PS-92 reads them, whether or not they carry milliseconds.
+  **[verify, Loyverse: that money
   amounts never carry more decimal places than the account's, and the
   rounding of a total]**
 

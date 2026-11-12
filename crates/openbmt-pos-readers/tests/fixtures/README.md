@@ -25,12 +25,11 @@ These files follow the Loyverse API reference as it was rendered on
 2026-11-12 (the receipts, payment types and merchant endpoints). Only
 `receipts_reference.json` is the reference's own example, unchanged but for
 the layout; the others use the reference's field names and shapes with made-up
-ids, times and whole-unit amounts, because the reader refuses an amount with a
-fraction (PS-104).
+ids, times and whole-unit amounts.
 
 | File | What it stands for |
 |---|---|
-| `loyverse/receipts_reference.json` | The reference's list example, with amounts such as 17.52 and 5.84: refused whole until `openbmt-json` keeps the text of a number |
+| `loyverse/receipts_reference.json` | The reference's list example, with amounts such as 17.52 and 5.84, read with two decimal places |
 | `loyverse/receipts.json` | Five receipts: a sale with a cash and a Bitcoin payment, a cancelled sale, a sale with two Bitcoin payments of one type, a sale with a payment that has no name and one of an unknown type, and a refund of the first |
 | `loyverse/receipts_page1.json` | One receipt and a cursor |
 | `loyverse/receipts_empty.json` | A reply with no receipts |

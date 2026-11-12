@@ -119,9 +119,8 @@ fn read_payment_types(doc: &Value) -> Result<Vec<PayType>, ReadRefused> {
 pub struct Request {
     bitcoin_names: Vec<Text>,
     currency: Currency,
-    /// What a whole unit of the currency is in minor units; `None` when the
-    /// decimal places are too many to count in a `u64`.
-    scale: Option<u64>,
+    /// The decimal places of the currency's money amounts.
+    decimal_places: u8,
     since: u64,
     /// The newest change of the first page of this sync, from the cursor's
     /// marker; `None` on the first page.
@@ -198,7 +197,7 @@ impl Request {
         Ok(Self {
             bitcoin_names: settings.bitcoin_tenders.clone(),
             currency,
-            scale: 10u64.checked_pow(u32::from(decimal_places)),
+            decimal_places,
             since,
             first_newest,
             vendor_cursor,
@@ -421,15 +420,36 @@ impl Request {
         Ok(())
     }
 
-    /// PS-104: a money amount from a number of the reply, in minor units.
-    /// Loyverse writes money in whole units and decimals; the reader takes
-    /// only what `openbmt-json` keeps exactly, an integer, and scales it.
+    /// PS-104: a money amount from a number of the reply, in minor units,
+    /// read from the exact text of the number with integer arithmetic only:
+    /// the whole units, then the decimals padded with zeros to the account's
+    /// decimal places. A number with more decimals than that, or one that is
+    /// negative or too large, is out of range; an exponent, or anything that
+    /// is not a number, is of the wrong type. Nothing is rounded.
     fn minor(&self, v: &Value, what: &'static str) -> Result<u64, ReadRefused> {
-        let whole = amount(v, what)?;
-        let scale = self.scale.ok_or(ReadRefused::OutOfRange(what))?;
-        let n = whole
-            .checked_mul(scale)
-            .ok_or(ReadRefused::OutOfRange(what))?;
+        let text = match v {
+            Value::Int(i) => i.to_string(),
+            Value::UInt(u) => u.to_string(),
+            Value::Number(t) => t.clone(),
+            _ => return Err(ReadRefused::WrongType(what)),
+        };
+        if text.contains(['e', 'E']) {
+            return Err(ReadRefused::WrongType(what));
+        }
+        if text.starts_with('-') {
+            return Err(ReadRefused::OutOfRange(what));
+        }
+        let (whole, fraction) = text.split_once('.').unwrap_or((&text, ""));
+        let digits = |t: &str| t.bytes().all(|b| b.is_ascii_digit());
+        if whole.is_empty() || !digits(whole) || !digits(fraction) {
+            return Err(ReadRefused::WrongType(what));
+        }
+        let places = usize::from(self.decimal_places);
+        if fraction.len() > places {
+            return Err(ReadRefused::OutOfRange(what));
+        }
+        let padded = format!("{whole}{fraction}{}", "0".repeat(places - fraction.len()));
+        let n: u64 = padded.parse().map_err(|_| ReadRefused::OutOfRange(what))?;
         i64::try_from(n).map_err(|_| ReadRefused::OutOfRange(what))?;
         Ok(n)
     }

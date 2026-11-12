@@ -23,8 +23,8 @@ of that file (PS-90 to PS-104).
   its own name or by its payment type. It also gives the paths of the payment
   types, of the merchant (the account's currency and decimal places) and of
   the sales that refunds name. A receipt carries no currency, so the caller
-  passes the account's. It is read-only. A money amount with a fraction is
-  refused until `openbmt-json` keeps a number's text (PS-104).
+  passes the account's. It is read-only. A money amount is read exactly from
+  the text of the number and never rounded (PS-104).
 - Which tenders count as Bitcoin stays the shop's exact tender name
   (PS-10): a Square `OTHER` tender is named by its note or its payment's
   source, a Clover tender by its label, a Loyverse payment by its name.
