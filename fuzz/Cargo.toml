@@ -462,6 +462,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "pos_till_message_decode"
+path = "fuzz_targets/pos_till_message_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "pos_square_parse"
 path = "fuzz_targets/pos_square_parse.rs"
 test = false
@@ -499,6 +506,13 @@ bench = false
 [[bin]]
 name = "box_status_request"
 path = "fuzz_targets/box_status_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "box_till_request"
+path = "fuzz_targets/box_till_request.rs"
 test = false
 doc = false
 bench = false
