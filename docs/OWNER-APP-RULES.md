@@ -1053,3 +1053,29 @@ unchanged.
 - **OA-114.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`; until the words are written a placeholder
   constant `WORDS_NEEDED_OA_xxx` names the rule.
+
+## 18. Sending from the shop's own wallet
+
+A shop that uses its own wallet signs its refunds, cash-outs and merges in
+that wallet (`docs/SESSION-RULES.md` section 6). The owner phone prepares
+each payment, hands the file to the wallet, and takes back what the wallet
+made. The transports are those of a hardware signer (OA-70); the review is
+the wallet's own screen. Status: specification, written before the code.
+
+- **OA-115.** The owner phone of a shop with its own wallet shows "Send from
+  your wallet" with the refunds and cash-outs that are queued and, when it
+  holds (OC-19), the offer to merge. The owner picks what to send. Before
+  the file leaves, the screen lists what the wallet will show, as OA-73
+  says, and "Prepare" freezes the picked payments (AS-101).
+- **OA-116.** The file reaches the wallet by the person's pick of OA-70: a
+  UR (`crypto-psbt`), a BBQr (type P) or a `<name>.psbt` file, with
+  wallets that use each as examples. What the wallet gives back is read the
+  same ways and judged by the library (AS-103). No choice is made for the
+  person.
+- **OA-117.** A refusal shows the library's words and nothing else changes,
+  as OA-74 says. While a payment waits for its file to come back, the
+  screen says that a wallet which sent the payment itself needs nothing
+  more, because the payment is followed until it confirms (AS-105).
+- **OA-118.** Every state and refusal of this section has words under
+  `docs/SCREEN-RULES.md`; until the words are written a placeholder
+  constant `WORDS_NEEDED_OA_xxx` names the rule.

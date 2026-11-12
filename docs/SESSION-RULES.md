@@ -842,3 +842,69 @@ Each case below takes the reading that moves less money and loosens less.
     an address with no port is refused and the owner enters it again,
     because guessing the rest of a key would name a node the owner did not
     mean.
+
+## 6. Spends from a shop's own wallet
+
+A shop that uses its own wallet (`docs/OWNER-APP-RULES.md` §17) has no Key
+app and no key on the owner phone. Its refunds, cash-outs and merges are
+queued and frozen by the owner phone as section 3 says, and signed by the
+shop's own wallet: a wallet with one key, or a 2-of-3 wallet whose three
+keys the owner holds (`docs/WALLET-RULES.md` WL-07). Nothing on the owner
+phone can sign, so the wallet's own screen is the review that stops a wrong
+payment, and the owner phone shows what that screen will show before the
+file leaves (AS-92). Settings, ranges and pairings do not go through these
+rules (`docs/OWNER-APP-RULES.md` OA-105 to OA-113). Status: specification,
+written before the code.
+
+- **AS-100.** The queue of section 3 holds the shop's refunds, cash-outs
+  and merges, and the rules that decide them hold unchanged: AS-52 (never
+  more than was received), AS-57 (a cash-out is its own transaction), AS-67
+  (the outputs are frozen) and AS-68 (a dropped transaction asked for again
+  spends one of the same coins). An item that needs the Key app (a batch, a
+  pairing or settings) is refused in this queue with the rule string
+  `no-key-app`.
+- **AS-101.** `build_own_spend` freezes the queued spends the owner picked
+  into a spend session as AS-90 freezes the spends for a signer, with no
+  request for a Key app and no health check: one item for each
+  transaction, and an ID that is a tagged hash, under
+  `OpenBMT/own-spend/v1`, of the frozen items and the random bytes the
+  caller gives. The entries wait "in session" with that ID. Nothing is
+  signed. A refund is frozen only when the owner picked it on the owner
+  phone: no other device reviews it before the wallet does.
+- **AS-102.** `own_file` gives the file of one item for the shop's wallet:
+  the file of SP-82 for a wallet with one key, and the file of SP-45 with
+  no signature in it for a 2-of-3 wallet. The same item gives the same
+  bytes every time. The file is described for the person as AS-92 says
+  (`compare_words`), and the words say that the payment must not be
+  approved on the wallet unless every line matches.
+- **AS-103.** What comes back is read as AS-93 says and must hold the same
+  transaction as AS-94 says. For a wallet with one key, every input must
+  carry a valid signature of its own key (SP-84); for a 2-of-3 wallet,
+  valid signatures of two different keys of the wallet on every input
+  (SP-46, SP-52). A file without them is refused as "the wallet did not
+  sign", and a finished transaction is checked as SP-86 (one key) or SP-47
+  (2-of-3) says. A refusal changes nothing, so the right file can be
+  brought again.
+- **AS-104.** `take_own` finishes the item (SP-85 for one key, SP-60 for
+  2-of-3) or takes the finished transaction after its check, requires the
+  frozen outputs (AS-67), and only then moves the item's entries to
+  "signed", adds the transaction to the outbox and takes the item out of
+  the session, which ends with its last item (AS-88). The queue is stored
+  before the transaction is given to the outbox; a failed store changes
+  nothing.
+- **AS-105.** A wallet may send the payment itself and never give the file
+  back. From the first `own_file` of an item its transaction ID is watched
+  as AS-89 watches an exported approval: seen confirmed, its entries are
+  paid with that ID and its item leaves the session; another transaction
+  that spends one of its coins leaves the entries their outpoints as AS-68
+  says. An abandon follows the last paragraph of AS-89, so a session whose
+  coins have gone without a report cannot be abandoned.
+- **AS-106.** A merge (`docs/OWNER-COINS-RULES.md` OC-19, OC-20) is frozen
+  and signed by these rules: one cash-out of its coins to the wallet's next
+  change address, which the shop's wallet shows as a move inside itself.
+  The owner's tap on the offer is its approval on the owner phone.
+- **AS-107.** The open own-spend sessions are kept in the queue's snapshot
+  (AS-65) as version 5, with what each froze and the IDs of AS-105; a file
+  of versions 1 to 4 reads as before with no own-spend session. A snapshot
+  of a shop with its own wallet that holds a Key app session, and one of a
+  Key app shop that holds an own-spend session, are refused.
