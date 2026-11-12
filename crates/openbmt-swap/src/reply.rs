@@ -9,6 +9,7 @@ use openbmt_lightning::bolt11;
 
 use crate::error::Refused;
 use crate::keys::Secrets;
+use crate::pairs::Pairs;
 use crate::tree::{claim_script, refund_script, KeyOrder, SwapTree};
 use crate::{
     MAX_INVOICE_SATS, MAX_LEAF_BYTES, MAX_REPLY_BYTES, MAX_REPLY_DEPTH, MIN_CLAIM_BLOCKS,
@@ -117,6 +118,16 @@ pub struct Quote {
 }
 
 impl Quote {
+    /// SW-28, SW-63: the quote of the service's live terms, as they are at
+    /// `now_secs`. Terms that are not fresh give no quote.
+    pub fn from_pairs(pairs: &Pairs, now_secs: u64) -> Result<Self, Refused> {
+        let t = pairs.fresh(now_secs)?;
+        Ok(Self {
+            fee_ppm: t.fee_ppm,
+            lockup_fee_sats: t.lockup_fee_sats,
+        })
+    }
+
     /// SW-28: the least on-chain amount the quote leaves for an invoice.
     pub fn least_onchain(&self, invoice_sats: u64) -> u64 {
         let pct = (u128::from(invoice_sats) * u128::from(self.fee_ppm)).div_ceil(1_000_000);

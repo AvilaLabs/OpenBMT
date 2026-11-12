@@ -2,7 +2,11 @@
 
 mod claim;
 mod fixtures;
+mod follow;
+mod http;
 mod meta;
+mod pairs;
+mod pretend;
 mod reply;
 mod request;
 mod state;

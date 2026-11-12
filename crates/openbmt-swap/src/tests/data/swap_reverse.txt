@@ -1,0 +1,2 @@
+# 2026-11-12 04:23:11 UTC, GET /v2/swap/reverse
+{"BTC":{"BTC":{"hash":"c8ed0d7700fcc7dd3b3bec3bd3c8f92f6c24bcdbe731570b1d6e02a8279f318a","rate":1,"limits":{"maximal":5000000,"minimal":2142},"fees":{"percentage":0.6,"minerFees":{"claim":234,"lockup":324}}},"L-BTC":{"hash":"c3053010ddca349f92486a4dfb1391d70fe02f557c767a27fbe7500bcf6178d6","rate":1,"limits":{"maximal":5000000,"minimal":100},"fees":{"percentage":0.4,"minerFees":{"claim":20,"lockup":27}}}}}

@@ -1,0 +1,2 @@
+# 2026-11-12 04:23:12 UTC, GET /v2/swap/submarine
+{"BTC":{"BTC":{"hash":"e6102fd933c1b060727f0f266eeefcfd10984b5de397216da894b1f2295a9487","rate":1,"limits":{"maximal":5000000,"minimal":50000,"maximalZeroConf":0},"fees":{"percentage":0.5,"minerFees":318}}},"L-BTC":{"BTC":{"hash":"031f9ec653256986b2f3e4174402bfca3e6c8b54c725d49c6b7bfef7622134aa","rate":1,"limits":{"maximal":2000000,"minimal":1000,"maximalZeroConf":0,"minimalBatched":21},"fees":{"percentage":1,"minerFees":19}}}}

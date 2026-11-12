@@ -1,6 +1,9 @@
 # Swap rules: Lightning without a node
 
-Status: specification for `crates/openbmt-swap`, written before the code.
+Status: specification for `crates/openbmt-swap`. Parts 1 to 6 and the numbers
+were written before the code. Parts 7 to 10 (the live terms, following a
+swap, the HTTP bytes, the pretend service) are built and tested against
+fixtures and the pretend service. No swap has been made with a real service.
 Each rule has an ID so that a test can name the rule it proves.
 
 A shop can take Lightning without running a node. The customer pays a
@@ -19,11 +22,17 @@ chain and 32 random bytes where a key or a preimage is made. Everything that
 reads an untrusted reply and decides is here. This part has no words for a
 person; those come with the screens.
 
+The swap service is a setting (SW-82): a provider name, its pinned onion
+name and a path prefix. It is off by default, and the library has no provider
+built in: it names none and reaches none.
+
 The documents the rules rest on: the Boltz API v2 (`docs/api-v2.md`,
 `docs/lifecycle.md` and `docs/0-conf.md` of boltz-backend), BIP 341 and
 BIP 342 (Taproot), BIP 327 (MuSig2, for the key an output is made from) and
 BOLT 11 (the invoice). The fixtures of the tests are written from the shapes
-the documents give; none is captured from a service.
+the documents give, except the replies of `GET /v2/swap/reverse` and
+`GET /v2/swap/submarine` of a live service, read on 2026-11-12 and kept in
+`src/tests/data/` with a comment line giving the date and the path.
 
 ## 1. The request
 
@@ -35,6 +44,9 @@ the documents give; none is captured from a service.
   referral, nothing about the shop or the sale beyond these.
 - **SW-02.** The invoice amount is at least `MIN_INVOICE_SATS` and at most
   `MAX_INVOICE_SATS`. Anything else is refused before a request is made.
+  When the service's live terms are known (SW-60), the band is the shop's
+  and the service's together: at least the larger minimum, at most the
+  smaller maximum (SW-62).
 - **SW-03.** The description is 1 to `MAX_DESCRIPTION_BYTES` bytes of UTF-8
   with no control character. It is written with `"` and `\` escaped and
   every other character as it is.
@@ -101,7 +113,8 @@ order of the rules, so that the refusal names the first that fails.
   the invoice amount. With the quote the caller gives (the service's
   percentage in parts per million of the invoice amount, rounded up, and its
   lockup fee in satoshis), it is at least the invoice amount less those two.
-  The service may promise more than the quote, never less.
+  The service may promise more than the quote, never less. The quote is
+  made from the service's live terms (`Quote::from_pairs`, SW-60, SW-63).
 
 ## 4. The lockup
 
@@ -167,7 +180,94 @@ order of the rules, so that the refusal names the first that fails.
   `swap_state_decode.rs`): any bytes give a refusal or a state that encodes
   back to the same bytes.
 
-## 7. The numbers
+## 7. The live terms
+
+- **SW-60.** The reply of `GET /v2/swap/reverse` is read for the BTC to BTC
+  pair only, within `MAX_HTTP_BYTES` and 8 levels. It gives the least and
+  the most invoice amount, the percentage fee as parts per million, and the
+  claim and lockup miner fees in satoshis. The least is not zero and not
+  above the most. A reply with no BTC to BTC pair, or with a member of it
+  missing or mistyped, is refused. Every other pair is ignored.
+- **SW-61.** A percentage is turned into parts per million from the text of
+  the number, with no floating point: `0.6` is 6000 and `0.25` is 2500. More
+  than 4 decimal places, an exponent, a negative number and more than 10
+  percent are refused.
+- **SW-62.** An invoice amount outside the service's live limits is refused
+  before a request is made, with a refusal that names the service's limits.
+  The shop's band of SW-02 is refused as the shop's own.
+- **SW-63.** Terms are fresh for at most `PAIRS_FRESH_SECS` after the time
+  the caller says the reply was read. Older terms, and terms read at a later
+  time than now, give no quote and no band.
+
+## 8. Following a swap
+
+- **SW-70.** The reply of `GET /v2/swap/{id}` is read for `status` and, at
+  `transaction.mempool` and `transaction.confirmed`, for `transaction.hex`
+  and `transaction.id` if they are given; an id that is not the id of the
+  bytes is refused. The known states are `swap.created`,
+  `transaction.mempool`, `transaction.confirmed`, `invoice.settled`,
+  `invoice.expired`, `transaction.failed`, `swap.expired` and
+  `transaction.refunded`; any other is reported as unknown, not guessed.
+- **SW-71.** One swap is held from the request to the claim by a machine
+  that takes the status, the lockup the caller found, the time and the
+  height of the chain, and says what to do next: wait and ask again after a
+  number of seconds, check the lockup, build the claim, watch the claim, or
+  that the swap is paid or has failed, with the reason. Every change makes
+  a new value. A failed swap shows no preimage: after a status that says the
+  swap failed, or at the timeout, no claim is built. After the claim is
+  sent a status changes nothing.
+- **SW-72.** The machine does not believe the service about money. A lockup
+  is believed only after SW-30 has checked the bytes of the transaction,
+  and bytes in a status are always taken as not yet in a block. The swap is
+  paid only when the caller reports that the shop's own claim, by its id,
+  was seen in a block; another transaction is refused.
+- **SW-73.** The machine is saved and restored in a file of one framed
+  encoding: the magic `OBM'`, one version byte (1), the stage and its fields,
+  and the swap's state file (SW-50) with its length. The decoder reads the
+  exact length, refuses an unknown version or stage, a stage that does not
+  agree with the phase of the state, and a lockup of less than the promised
+  amount, and a file that decodes encodes back to the same bytes.
+- **SW-74.** The decoder of the machine's file is fuzzed (`fuzz/fuzz_targets/`
+  `swap_follow_decode.rs`): any bytes give a refusal or a machine that
+  encodes back to the same bytes.
+
+## 9. The bytes of the request and the reply
+
+- **SW-80.** A request is written as HTTP/1.1 with `Host` (the onion name),
+  `Connection: close` and, for a `POST`, `Content-Type: application/json`
+  and `Content-Length`. No other header is sent: no user agent, nothing
+  that names the shop. The path is the provider's path prefix and the call's
+  path (`/v2/swap/reverse`, `/v2/swap/{id}`); a path with a character outside
+  letters, digits and `/ _ . -`, with `..` or `//`, or one that is too long
+  is refused.
+- **SW-81.** A reply is read from its status line, its headers and its body,
+  by `Content-Length` or by `Transfer-Encoding: chunked`, in at most
+  `MAX_HTTP_BYTES`. It is refused when it is not HTTP/1.1, when a header is
+  not understood, when both lengths or none are given, when a body is cut
+  short or has bytes after it, when the content is encoded, and when the
+  status is not 2xx to 5xx. A status other than 200 or 201 gives no body to
+  read.
+- **SW-82.** The provider is a setting of three texts: a name, the pinned
+  Tor v3 onion name (56 characters and `.onion`, the checksum and version
+  checked, as `openbmt-net` checks them) and the path prefix of its API
+  (`/api` on an onion host, or empty). The setting is off by default, and
+  the library has no provider in it. No request is written while it is off.
+  The copy of the onion check in this crate gives the same answer as the one
+  in `openbmt-net` on every name a test tries.
+
+## 10. The pretend service
+
+- **SW-90.** A test helper plays the service: it answers the pairs call,
+  the create call and the status call, makes a real lockup to the address
+  it promised (it holds the refund key and builds the tree with the code the
+  client checks, and has a mode that builds a wrong tree), and broadcasts
+  to a regtest Bitcoin Core. A run, ignored by default, goes from the pairs
+  to a claim that Core accepts and mines, and to paid.
+- **SW-91.** Against the pretend service the refusals hold: a wrong tree, a
+  lockup that is too small, a timeout that is too near, stale pairs and an
+  amount above the live maximum.
+
+## 11. The numbers
 
 | name | value | rule |
 |---|---|---|
@@ -180,7 +280,12 @@ order of the rules, so that the refusal names the first that fails.
 | `MIN_INVOICE_LIFE_SECS` | 300 | SW-23 |
 | `MIN_CLAIM_BLOCKS` | 36 | SW-27 |
 | `MIN_ONCHAIN_SATS` | 1,000 | SW-28 |
+| `PAIRS_FRESH_SECS` | 600 | SW-63 |
+| `MAX_HTTP_BYTES` | 64 KiB | SW-60, SW-81 |
+| `POLL_WAITING_SECS` | 10 | SW-71 |
+| `POLL_LOCKED_SECS` | 30 | SW-71 |
 
-**[to tune]**: the service's own minimum and maximum, and its timeout in
-blocks, were not read from a live service; the numbers above are the shop's
-floors and caps, not the service's.
+**[to tune]**: the service's own minimum and maximum are read live (SW-60);
+the numbers above are the shop's floors and caps, not the service's. The
+service's timeout in blocks was not read from a swap, so `MIN_CLAIM_BLOCKS`
+stays to tune, and so do the age of the terms and the two polling intervals.

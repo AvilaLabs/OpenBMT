@@ -5,30 +5,40 @@
 use std::collections::BTreeSet;
 
 const RULES: &str = include_str!("../../../../docs/SWAP-RULES.md");
-const SOURCES: [&str; 8] = [
+const SOURCES: [&str; 12] = [
     include_str!("claim.rs"),
     include_str!("fixtures.rs"),
+    include_str!("follow.rs"),
+    include_str!("http.rs"),
     include_str!("meta.rs"),
     include_str!("mod.rs"),
+    include_str!("pairs.rs"),
+    include_str!("pretend.rs"),
     include_str!("reply.rs"),
     include_str!("request.rs"),
     include_str!("state.rs"),
     include_str!("tree.rs"),
 ];
-const CODE: [&str; 10] = [
+const CODE: [&str; 16] = [
     include_str!("../claim.rs"),
     include_str!("../error.rs"),
+    include_str!("../follow.rs"),
+    include_str!("../http.rs"),
     include_str!("../keys.rs"),
     include_str!("../lib.rs"),
     include_str!("../lockup.rs"),
+    include_str!("../onion.rs"),
+    include_str!("../pairs.rs"),
     include_str!("../reply.rs"),
     include_str!("../request.rs"),
     include_str!("../state.rs"),
+    include_str!("../status.rs"),
+    include_str!("../testing.rs"),
     include_str!("../tree.rs"),
     include_str!("../../Cargo.toml"),
 ];
 
-/// The rules the file defines, which are a subset of the numbers 01 to 55.
+/// The rules the file defines, which are a subset of the numbers 01 to 91.
 fn defined() -> BTreeSet<String> {
     RULES
         .lines()
@@ -44,6 +54,10 @@ fn expected() -> BTreeSet<String> {
         .chain(30..=31)
         .chain(40..=45)
         .chain(50..=55)
+        .chain(60..=63)
+        .chain(70..=74)
+        .chain(80..=82)
+        .chain(90..=91)
         .map(|i| format!("SW-{i:02}"))
         .collect()
 }
@@ -114,4 +128,8 @@ fn the_numbers_of_the_table_are_the_constants() {
     assert_eq!(MIN_INVOICE_LIFE_SECS, 300);
     assert_eq!(MIN_CLAIM_BLOCKS, 36);
     assert_eq!(MIN_ONCHAIN_SATS, 1_000);
+    assert_eq!(PAIRS_FRESH_SECS, 600);
+    assert_eq!(MAX_HTTP_BYTES, 64 * 1024);
+    assert_eq!(POLL_WAITING_SECS, 10);
+    assert_eq!(POLL_LOCKED_SECS, 30);
 }

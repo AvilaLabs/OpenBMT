@@ -19,3 +19,10 @@ openbmt-lightning = { path = "../openbmt-lightning" }
 
 [dev-dependencies]
 openbmt-lightning = { path = "../openbmt-lightning", features = ["testing"] }
+# SW-82: the copy of the onion-name check is held to the one of openbmt-net.
+openbmt-net = { path = "../openbmt-net" }
+
+# SW-90: the pretend service and the regtest harness, for tests of this crate
+# and the ones that drive it. Never on in a build of the app.
+[features]
+testing = ["openbmt-lightning/testing"]

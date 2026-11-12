@@ -80,6 +80,37 @@ pub enum Refused {
     AlreadyClaimed,
     /// SW-50 to SW-52: the state file is not a state.
     BadState(&'static str),
+    /// SW-60: the reply of the pairs call is not usable.
+    BadPairs(&'static str),
+    /// SW-61: a percentage is not a decimal the shop reads exactly.
+    BadPercentage,
+    /// SW-62: the amount is outside the service's own live limits.
+    ServiceLimit {
+        /// The least invoice amount the service takes now.
+        min: u64,
+        /// The most invoice amount the service takes now.
+        max: u64,
+    },
+    /// SW-63: the pairs were read too long ago, or at a later time than now.
+    PairsStale,
+    /// SW-70: the status reply is not usable.
+    BadStatus(&'static str),
+    /// SW-71: the swap is not at a point where this can be done.
+    NotReady(&'static str),
+    /// SW-72: the transaction reported is not the claim that was sent.
+    WrongClaim,
+    /// SW-73: the followed-swap file is not one.
+    BadFollow(&'static str),
+    /// SW-80: a request to the provider cannot be written.
+    BadHttpRequest(&'static str),
+    /// SW-81: the provider's reply is not an HTTP reply the shop reads.
+    BadHttpReply(&'static str),
+    /// SW-81: the provider answered with a status other than 200.
+    HttpStatus(u16),
+    /// SW-82: no provider is set; the swap service is off.
+    ProviderOff,
+    /// SW-82: the provider setting is not usable.
+    BadProvider(&'static str),
 }
 
 impl Refused {
@@ -109,6 +140,17 @@ impl Refused {
             Self::TooLate => "SW-44",
             Self::AlreadyClaimed => "SW-53",
             Self::BadState(_) => "SW-52",
+            Self::BadPairs(_) => "SW-60",
+            Self::BadPercentage => "SW-61",
+            Self::ServiceLimit { .. } => "SW-62",
+            Self::PairsStale => "SW-63",
+            Self::BadStatus(_) => "SW-70",
+            Self::NotReady(_) => "SW-71",
+            Self::WrongClaim => "SW-72",
+            Self::BadFollow(_) => "SW-73",
+            Self::BadHttpRequest(_) => "SW-80",
+            Self::BadHttpReply(_) | Self::HttpStatus(_) => "SW-81",
+            Self::ProviderOff | Self::BadProvider(_) => "SW-82",
         }
     }
 }
@@ -150,6 +192,21 @@ impl fmt::Display for Refused {
             Self::TooLate => f.write_str("the chain is at or past the timeout"),
             Self::AlreadyClaimed => f.write_str("the swap is already claimed"),
             Self::BadState(w) => write!(f, "the state file is refused: {w}"),
+            Self::BadPairs(w) => write!(f, "the service's terms are refused: {w}"),
+            Self::BadPercentage => f.write_str("the percentage is not read exactly"),
+            Self::ServiceLimit { min, max } => {
+                write!(f, "the service's own limit is {min} to {max} satoshis")
+            }
+            Self::PairsStale => f.write_str("the service's terms are too old"),
+            Self::BadStatus(w) => write!(f, "the status is refused: {w}"),
+            Self::NotReady(w) => write!(f, "not at this point: {w}"),
+            Self::WrongClaim => f.write_str("that is not the claim that was sent"),
+            Self::BadFollow(w) => write!(f, "the followed swap is refused: {w}"),
+            Self::BadHttpRequest(w) => write!(f, "the request cannot be written: {w}"),
+            Self::BadHttpReply(w) => write!(f, "the reply is refused: {w}"),
+            Self::HttpStatus(c) => write!(f, "the service answered {c}"),
+            Self::ProviderOff => f.write_str("no swap service is set"),
+            Self::BadProvider(w) => write!(f, "the swap service setting is refused: {w}"),
         }
     }
 }

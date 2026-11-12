@@ -638,6 +638,7 @@ dependencies = [
  "miniscript",
  "openbmt-json",
  "openbmt-lightning",
+ "openbmt-net",
 ]
 
 [[package]]

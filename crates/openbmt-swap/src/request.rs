@@ -5,6 +5,7 @@ use bitcoin::secp256k1::PublicKey;
 
 use crate::error::Refused;
 use crate::keys::Secrets;
+use crate::pairs::Pairs;
 use crate::{MAX_DESCRIPTION_BYTES, MAX_INVOICE_SATS, MIN_INVOICE_SATS};
 
 /// A request for a reverse swap, made and checked.
@@ -35,6 +36,30 @@ impl Request {
             claim_public: secrets.claim_public(),
             description: description.to_string(),
         })
+    }
+
+    /// SW-02, SW-62, SW-63: as [`Request::new`], and the amount must also be
+    /// inside the service's live limits in `pairs`, read at most
+    /// `PAIRS_FRESH_SECS` before `now_secs`. An amount outside the service's
+    /// band is refused as the service's limit, before any request is made.
+    pub fn new_live(
+        secrets: &Secrets,
+        amount_sats: u64,
+        description: &str,
+        pairs: &Pairs,
+        now_secs: u64,
+    ) -> Result<Self, Refused> {
+        let request = Self::new(secrets, amount_sats, description)?;
+        let terms = pairs.fresh(now_secs)?;
+        // The band is never empty when the amount is in the shop's band and
+        // in the service's.
+        if amount_sats < terms.min_sats || amount_sats > terms.max_sats {
+            return Err(Refused::ServiceLimit {
+                min: terms.min_sats,
+                max: terms.max_sats,
+            });
+        }
+        Ok(request)
     }
 
     /// The invoice amount asked for, in satoshis.
