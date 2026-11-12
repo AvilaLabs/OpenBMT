@@ -804,3 +804,17 @@ path = "fuzz_targets/bip321_uri.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "owner_range_outbox_decode"
+path = "fuzz_targets/owner_range_outbox_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "owner_allocation_book_decode"
+path = "fuzz_targets/owner_allocation_book_decode.rs"
+test = false
+doc = false
+bench = false

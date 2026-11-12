@@ -149,6 +149,20 @@ pub struct RangeOutbox {
 }
 
 impl RangeOutbox {
+    /// The list a file's bytes hold, read strictly (LK-72), and what it
+    /// encodes to. For `open` and for tests that feed it any bytes.
+    pub fn from_bytes(dir: &Path, bytes: &[u8]) -> Result<Self, RangeOutboxError> {
+        Ok(Self {
+            dir: dir.to_path_buf(),
+            items: decode(bytes)?,
+        })
+    }
+
+    /// The bytes of the file for the list in memory.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        encode(&self.items)
+    }
+
     /// Open the file under `dir`; no file is an empty list.
     pub fn open(dir: &Path) -> Result<Self, RangeOutboxError> {
         let items = match fs::read(dir.join(RANGE_OUTBOX_FILE)) {
