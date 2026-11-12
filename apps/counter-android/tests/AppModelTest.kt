@@ -1206,6 +1206,37 @@ object AppModelTest {
         ok(File(appDir, "../../docs/COUNTER-RULES.md").readText().contains("- **CR-204.**"), "CR-204 is in the rules")
     }
 
+    /** CR-213 to CR-216: the request to send and the note, in the app. */
+    private fun cr213RequestsTests(appDir: File?) {
+        val made = AppWords.requestMade("2026-11-14 10:00", "73,554 sats")
+        ok(made.heading == "Request ready" && made.what == "The customer can pay this request from anywhere until 2026-11-14 10:00. The amount in bitcoin is fixed at 73,554 sats." && made.next == "Share the link or the code with the customer. The counter shows Paid once the payment is confirmed." && made.who == Who.CASHIER, "CR-214: the words of a request just made, as written down")
+        val open = AppWords.requestOpen("2026-11-14 10:00")
+        ok(open.heading == "Waiting for payment" && open.what == "This request is open until 2026-11-14 10:00. It is paid once the payment is confirmed." && open.next == "Nothing to do." && open.who == Who.NOBODY, "CR-214: the words of a request that is open again, as written down")
+        ok(AppWords.all().map { it.first }.containsAll(listOf("requestMade", "requestOpen")), "the two words are in the list")
+        ok(
+            WordsOfRequests.REQUEST == "Request to send" && WordsOfRequests.MAKE == "Make the request" && WordsOfRequests.SHARE_LINK == "Share the link" &&
+                WordsOfRequests.SHARE_CODE == "Share the code" && WordsOfRequests.OPEN_REQUESTS == "Open requests" && WordsOfRequests.NOTE == "Note" &&
+                WordsOfRequests.ADD_NOTE == "Add a note" && WordsOfRequests.NOTE_HINT == "Optional. Like a booking name or date." &&
+                WordsOfRequests.LIFETIMES == listOf("1 day" to 1, "3 days" to 3, "7 days" to 7),
+            "CR-213, CR-215, CR-216: the labels, as written down",
+        )
+        ok(SaleModel.buttons(SaleState.NotPaidYet, true).let { !it.requote && it.cancel }, "CR-207: a request is cancelled but takes no new quote")
+        ok(SaleState.values().none { SaleModel.buttons(it, true).requote }, "CR-207: no state of a request offers Requote")
+        ok(SaleModel.buttons(SaleState.PartPaid, false).requote, "CR-207: a sale is as before")
+        if (appDir == null) return
+        val controller = File(appDir, "src/android/Controller.kt").readText()
+        ok(controller.contains("ui.secondary(WordsOfRequests.REQUEST)") && controller.contains("listOf(open, request)"), "CR-213: the quieter button is under the main one")
+        ok(controller.contains("n.openRequest(") && controller.contains("showSale(o.index, o.payment, null, made = true)"), "CR-213: the request is made and its page opens")
+        ok(controller.contains("Intent.ACTION_SEND") && controller.contains("setType(\"text/plain\")") && controller.contains("setType(\"image/png\")"), "CR-214: the link and the code go to the share sheet")
+        ok(controller.contains("File(shareFolder(), ShareImageProvider.NAME).delete()") && controller.contains("dropSharedImage()\n        tick = null"), "CR-214: the image is deleted when the page is left")
+        ok(controller.contains("n.requests(nowSecs())") && controller.contains("WordsOfRequests.OPEN_REQUESTS"), "CR-215: Home lists the open requests")
+        ok(controller.contains("WordsOfRequests.ADD_NOTE") && controller.contains("n.addNote("), "CR-216: a sale's details add a note")
+        val manifest = File(appDir, "AndroidManifest.xml").readText()
+        ok(manifest.contains("android:exported=\"false\"") && manifest.contains("ShareImageProvider") && manifest.contains("grantUriPermissions=\"true\""), "CR-214: one provider, not exported")
+        val rules = File(appDir, "../../docs/COUNTER-RULES.md").readText()
+        ok((205..216).all { rules.contains("- **CR-$it.**") }, "CR-205 to CR-216 are in the rules")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val screensMd = args.firstOrNull()?.let { File(it) }
@@ -1233,6 +1264,7 @@ object AppModelTest {
         cr202TorFilesTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr203TorChoiceTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr204TorFailsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr213RequestsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         println("AppModelTest (counter): $count checks passed")
     }
 }

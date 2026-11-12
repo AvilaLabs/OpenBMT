@@ -15,10 +15,11 @@ object SaleModel {
      * has arrived. CR-07: only a sale with nothing received is cancelled.
      * CR-20: a person accepts a sale that is waiting, part paid or not to be
      * handed over. The library still decides each; what it refuses is shown
-     * with its words. CR-109: a sale paid by Lightning is final and takes no button.
+     * with its words. CR-109: a sale paid by Lightning is final and takes no button. CR-207: a request to send keeps
+     * its one quote, so it takes no Requote.
      */
-    fun buttons(state: SaleState): SaleButtons = SaleButtons(
-        requote = state == SaleState.NotPaidYet || state == SaleState.PartPaid,
+    fun buttons(state: SaleState, request: Boolean = false): SaleButtons = SaleButtons(
+        requote = !request && (state == SaleState.NotPaidYet || state == SaleState.PartPaid),
         cancel = state == SaleState.NotPaidYet,
         override = state == SaleState.Waiting || state == SaleState.PartPaid || state == SaleState.DoNotHandOver,
     )

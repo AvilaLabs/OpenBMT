@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Checks what the built APK's manifest says, with the SDK's own aapt2: the
 # permissions are INTERNET and CAMERA and nothing else (no notifications,
-# foreground service, network state or Bluetooth), the camera is not required, backup and device transfer off, nothing exported but the launcher activity, and no service,
-# receiver or provider. The manifest in the APK is the merged one: no library
+# foreground service, network state or Bluetooth), the camera is not required, backup and device transfer off, nothing exported but the launcher activity, no service
+# or receiver, and one provider (the image of a request's code, CR-214), not exported. The manifest in the APK is the merged one: no library
 # adds to it.
 #
 # Usage: tests/check-manifest.sh APK [AAPT2]
@@ -76,12 +76,19 @@ fi
 
 # 3. Components: one activity, exported, the launcher; nothing else.
 if [ "$(count 'E: activity( |$)')" -eq 1 ]; then pass "one activity"; else fail "not exactly one activity"; fi
-for kind in service receiver provider activity-alias; do
+for kind in service receiver activity-alias; do
     if [ "$(count "E: $kind( |\$)")" -eq 0 ]; then pass "no $kind"; else fail "a $kind is declared"; fi
 done
+if [ "$(count 'E: provider( |$)')" -eq 1 ] \
+    && printf '%s\n' "$tree" | grep -q 'org.openbmt.counter.app.ShareImageProvider' \
+    && printf '%s\n' "$tree" | grep -q -E 'grantUriPermissions.*=true'; then
+    pass "one provider, the share image's"
+else
+    fail "the provider is not exactly the share image's"
+fi
 exported="$(printf '%s\n' "$tree" | grep -c -E 'exported.*=true')"
 unexported="$(printf '%s\n' "$tree" | grep -c -E 'exported.*=false')"
-if [ "$exported" -eq 1 ] && [ "$unexported" -eq 0 ]; then pass "exactly one exported component"; else fail "exported components: $exported true, $unexported false"; fi
+if [ "$exported" -eq 1 ] && [ "$unexported" -eq 1 ]; then pass "exactly one exported component, and the provider not exported"; else fail "exported components: $exported true, $unexported false"; fi
 if printf '%s\n' "$tree" | grep -q 'android.intent.category.LAUNCHER'; then pass "the exported one is the launcher"; else fail "no launcher category"; fi
 if [ "$(count 'E: intent-filter')" -eq 1 ] && [ "$(count 'E: action')" -eq 1 ]; then pass "one intent filter with one action"; else fail "more intent filters or actions than the launcher's"; fi
 

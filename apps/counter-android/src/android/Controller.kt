@@ -2,6 +2,10 @@ package org.openbmt.counter.app
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -53,6 +57,7 @@ import org.openbmt.counter.Rates
 import org.openbmt.counter.RefundAsk
 import org.openbmt.counter.RefundState
 import org.openbmt.counter.RelayKind
+import org.openbmt.counter.SaleInfo
 import org.openbmt.counter.SaleState
 import org.openbmt.counter.Shop
 import org.openbmt.counter.ShopSettings
@@ -612,6 +617,7 @@ class Controller(private val act: MainActivity) {
 
     /** Puts [view] on the screen, with the open screen's tick cleared and [shown] remembered (CR-177). */
     private fun put(view: View, shown: Showing = Showing.Other) {
+        dropSharedImage()
         tick = null
         showing = shown
         act.show(view)
@@ -956,6 +962,7 @@ class Controller(private val act: MainActivity) {
         val health = Slot(act)
         val lines = Slot(act)
         val noteSlot = Slot(act)
+        val requestsSlot = Slot(act)
         val linked = hasLink(n)
         // CR-147: who is at the till, and a way to lock it.
         val who = locks.who?.takeIf { cashiers.isNotEmpty() }
@@ -977,9 +984,10 @@ class Controller(private val act: MainActivity) {
         pair.addView(ui.tile("Sales", Glyph.List, false) { showSales() }, LinearLayout.LayoutParams(0, ui.px(104), 1f).also { it.rightMargin = ui.px(6) })
         pair.addView(ui.tile("Today", Glyph.Calendar, false) { showToday(false) }, LinearLayout.LayoutParams(0, ui.px(104), 1f).also { it.leftMargin = ui.px(6) })
         tiles.addView(pair, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.topMargin = ui.px(12) })
-        show(bar, listOf(health, lines, noteSlot, tiles), emptyList(), Showing.Home)
+        show(bar, listOf(health, lines, noteSlot, tiles, requestsSlot), emptyList(), Showing.Home)
         var healthSig: String? = null
         var linesSig: String? = null
+        var requestsSig: String? = null
         tick = {
             val h = healthWords(n)
             val hs = sig(h)
@@ -1020,6 +1028,27 @@ class Controller(private val act: MainActivity) {
             if (ls != linesSig) {
                 linesSig = ls
                 lines.show(ui.homeLines(items, openLines))
+            }
+            // CR-215: the open requests, newest first, under their own heading.
+            val open = try {
+                n.requests(nowSecs())
+            } catch (e: CounterException) {
+                emptyList()
+            }
+            val rs = open.joinToString("\u0002") { "${it.index}\u0001${it.note}\u0001${it.amountMinor}" }
+            if (rs != requestsSig) {
+                requestsSig = rs
+                if (open.isEmpty()) {
+                    requestsSlot.show()
+                } else {
+                    val m = money
+                    val rows = open.map { r ->
+                        amounts[r.index] = r.amountMinor
+                        val shown = r.note ?: m?.show(r.amountMinor) ?: Format.sats(r.amountMinor)
+                        RowItem(shown, Format.localTime(r.expiresAt), null, onClick = { showSale(r.index, null, null) })
+                    }
+                    requestsSlot.show(label(WordsOfRequests.OPEN_REQUESTS).also { it.setPadding(0, ui.px(20), 0, ui.px(8)) }, ui.rows(rows))
+                }
             }
         }
         homeTick = tick
@@ -1463,7 +1492,89 @@ class Controller(private val act: MainActivity) {
         val open = ui.primary("Open the sale") {
             if (entry.minor <= 0) msg.show(note(AppWords.amountNeeded)) else chooseTip(entry.minor) { msg.show(note(it)) }
         }
-        show(ui.bar("New sale", back = { showHome() }), listOf(centre, pad), listOf(open))
+        val request = ui.secondary(WordsOfRequests.REQUEST) {
+            if (entry.minor <= 0) msg.show(note(AppWords.amountNeeded)) else showRequestForm(entry.minor)
+        }
+        show(ui.bar("New sale", back = { showHome() }), listOf(centre, pad), listOf(open, request))
+    }
+
+    /** CR-213: the optional note and the lifetime of a request to send, for the amount typed on New sale. */
+    private fun showRequestForm(amountMinor: Long) {
+        if (lockedOut()) return
+        val m = money ?: return render()
+        val views = ArrayList<View>()
+        val msg = Slot(act)
+        views.add(msg)
+        views.add(label(WordsOfRequests.NOTE))
+        val noteField = ui.field(WordsOfRequests.NOTE_HINT)
+        views.add(noteField)
+        val lifetime = ui.chips(WordsOfRequests.LIFETIMES.map { it.first })
+        views.add(lifetime)
+        val make = ui.primary(WordsOfRequests.MAKE) {
+            val text = noteField.text.toString().trim()
+            makeRequest(amountMinor, text.takeIf { it.isNotEmpty() }, WordsOfRequests.LIFETIMES[ui.chosen(lifetime)].second) { msg.show(note(it)) }
+        }
+        show(ui.bar(WordsOfRequests.REQUEST, sub = m.show(amountMinor), back = { showNewSale() }), views, listOf(make))
+    }
+
+    private fun makeRequest(amountMinor: Long, noteText: String?, days: Int, refused: (SayWords) -> Unit) {
+        val n = node ?: return render()
+        val (rate, words) = quote()
+        if (rate == null) return refused(words ?: AppWords.stopped)
+        val m = money ?: return render()
+        try {
+            val o = n.openRequest(nowSecs(), amountMinor, m.code, rate.rate, rate.sourceLabel, rate.sourceFetchedAt, atTheTill(), noteText, days)
+            amounts[o.index] = amountMinor
+            showSale(o.index, o.payment, null, made = true)
+        } catch (e: CounterException) {
+            refused(e.sayWords())
+        }
+    }
+
+    // ---- sharing a request -------------------------------------------------------------------------------------------------------
+
+    private fun shareFolder(): File = File(act.cacheDir, ShareImageProvider.FOLDER)
+
+    /** CR-214: the image given to the share sheet is deleted when the page is left. */
+    private fun dropSharedImage() {
+        File(shareFolder(), ShareImageProvider.NAME).delete()
+    }
+
+    /** CR-214: the label of the payment link: the request's note, or its amount when it has none. */
+    private fun requestLabel(index: Long, info: SaleInfo, needsSats: Long): String =
+        info.note ?: amounts[index]?.let { a -> money?.takeIf { !it.isSats }?.show(a) } ?: Format.sats(needsSats)
+
+    /** CR-214: gives the share sheet the payment link; the app sends nothing itself. */
+    private fun shareLink(index: Long, label: String, refused: (SayWords) -> Unit) {
+        val n = node ?: return render()
+        try {
+            val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, n.requestLink(index, label))
+            act.startActivity(Intent.createChooser(send, null))
+        } catch (e: CounterException) {
+            refused(e.sayWords())
+        }
+    }
+
+    /** CR-214: gives the share sheet the code as a PNG image, read once through [ShareImageProvider]. */
+    private fun shareCode(payment: Payment, refused: (SayWords) -> Unit) {
+        try {
+            val side = 720
+            val view = QrView(act, payment, side)
+            view.measure(View.MeasureSpec.makeMeasureSpec(side, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(side, View.MeasureSpec.EXACTLY))
+            view.layout(0, 0, side, side)
+            val bitmap = Bitmap.createBitmap(side, side, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(bitmap))
+            val folder = shareFolder()
+            folder.mkdirs()
+            File(folder, ShareImageProvider.NAME).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            val uri = Uri.Builder().scheme("content").authority(ShareImageProvider.AUTHORITY)
+                .appendPath(ShareImageProvider.FOLDER).appendPath(ShareImageProvider.NAME).build()
+            val send = Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            act.startActivity(Intent.createChooser(send, null))
+        } catch (e: IOException) {
+            refused(AppWords.fileNotSaved(e.message))
+        }
     }
 
     /**
@@ -1579,7 +1690,7 @@ class Controller(private val act: MainActivity) {
      * again when what it says changes; the words are set at once, the background fades over 200 ms, and a sale
      * plays the sound of green once and of red once, the first time its screen shows that colour.
      */
-    private fun showSale(index: Long, first: Payment?, notice: SayWords?) {
+    private fun showSale(index: Long, first: Payment?, notice: SayWords?, made: Boolean = false) {
         val n = node ?: return render()
         val m = money ?: return render()
         locks.saleScreen(index)
@@ -1599,7 +1710,16 @@ class Controller(private val act: MainActivity) {
                 // The library gives a code only while the sale is open: with none, the code and the copied request are
                 // cleared, so a sale that ended or has no code never shows an earlier one (CR-112).
                 payment = s.payment
-                val says = WordsModel.of(s.words.say())
+                // CR-214: a request that is still open says its own words: ready when just made, waiting after.
+                val info = n.saleInfo(index)
+                val request = info.requestDays > 0
+                val says = WordsModel.of(
+                    if (request && s.state == SaleState.NotPaidYet) {
+                        if (made) AppWords.requestMade(Format.localTime(info.expiresAt), Format.sats(s.needsSats)) else AppWords.requestOpen(Format.localTime(info.expiresAt))
+                    } else {
+                        s.words.say()
+                    },
+                )
                 val extra = ArrayList<WordsModel>()
                 s.check?.let { extra.add(WordsModel.of(it.say())) }
                 for (f in s.flags) extra.add(WordsModel.of(f.say()))
@@ -1617,7 +1737,7 @@ class Controller(private val act: MainActivity) {
                 if (sig != lastSig) {
                     lastSig = sig
                     val code = SaleModel.showsCode(s.state)
-                    val b = SaleModel.buttons(s.state)
+                    val b = SaleModel.buttons(s.state, request)
                     val amountBig = SaleModel.amountBig(m, amounts[index], s.needsSats)
                     val bar = ui.bar("Sale ${index + 1}", onBlack = !code)
                     val page: View
@@ -1645,6 +1765,11 @@ class Controller(private val act: MainActivity) {
                         words.addView(left(ui.whoChip(says)).also { (it as LinearLayout).gravity = android.view.Gravity.CENTER_HORIZONTAL }, ui.margins(top = 10))
                         body.add(words)
                         for (w in extra) body.add(ui.notice(w))
+                        if (request) {
+                            val label = requestLabel(index, info, s.needsSats)
+                            body.add(ui.button(WordsOfRequests.SHARE_LINK) { shareLink(index, label) { w -> flashWith(w) } })
+                            payment?.let { p -> body.add(ui.button(WordsOfRequests.SHARE_CODE) { shareCode(p) { w -> flashWith(w) } }) }
+                        }
                         body.add(
                             ui.button("Copy the request") {
                                 val u = payment?.copyUri
@@ -1909,6 +2034,13 @@ class Controller(private val act: MainActivity) {
             views.add(note(s.words.say()))
             s.check?.let { views.add(note(it.say())) }
             for (f in s.flags) views.add(note(f.say()))
+            // CR-216: the note of the sale, or a way to add one.
+            val saleNote = n.saleInfo(index).note
+            if (saleNote != null) {
+                views.add(ui.facts(listOf(WordsOfRequests.NOTE to saleNote)))
+            } else {
+                actions.add(ui.button(WordsOfRequests.ADD_NOTE) { showAddNote(index) })
+            }
             views.add(label("Refunds"))
             val rows = n.refunds(index)
             if (rows.isEmpty()) views.add(ui.text("No refund was asked for.", 16f))
@@ -1931,6 +2063,27 @@ class Controller(private val act: MainActivity) {
         actions.add(ui.button("Back to the sale") { showSale(index, null, null) })
         actions.add(ui.button("Back to sales") { showSales() })
         show(ui.bar("Details and refunds", back = { showSale(index, null, null) }), views, actions, Showing.Sale(index))
+    }
+
+    /** CR-216: asks for the note of a sale that has none, and adds it once (CR-206). */
+    private fun showAddNote(index: Long) {
+        val n = node ?: return render()
+        locks.saleScreen(index)
+        val views = ArrayList<View>()
+        val msg = Slot(act)
+        views.add(msg)
+        views.add(label(WordsOfRequests.NOTE))
+        val field = ui.field(WordsOfRequests.NOTE_HINT)
+        views.add(field)
+        val save = ui.primary(WordsOfRequests.ADD_NOTE) {
+            try {
+                n.addNote(nowSecs(), index, field.text.toString().trim())
+                showSaleDetails(index)
+            } catch (e: CounterException) {
+                msg.show(note(e.sayWords()))
+            }
+        }
+        show(ui.bar(WordsOfRequests.ADD_NOTE, back = { showSaleDetails(index) }), views, listOf(save, ui.button("Back") { showSaleDetails(index) }), Showing.Sale(index))
     }
 
     private fun showRefundRequest(index: Long) {

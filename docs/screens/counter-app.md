@@ -77,6 +77,8 @@ These are the words of what the app decides itself.
 | destinationNeeded | Address needed | A refund needs the address the customer wants the money sent to. | Paste the address or the payment request the customer shows, then try again. | the cashier |  |
 | reasonNeeded | Reason needed | A refund is written down with the reason for it. | Type a short reason, then try again. | the cashier |  |
 | requestCopied | Request copied | The payment request is copied, written in lower case. | Paste it where the customer can use it. | the cashier |  |
+| requestMade | Request ready | The customer can pay this request from anywhere until 2026-11-14 10:00. The amount in bitcoin is fixed at 73,554 sats. | Share the link or the code with the customer. The counter shows Paid once the payment is confirmed. | the cashier |  |
+| requestOpen | Waiting for payment | This request is open until 2026-11-14 10:00. It is paid once the payment is confirmed. | Nothing to do. | nobody |  |
 | refundAsked | Refund asked for | The refund request is saved, and it is paid only after the owner approves it. | Nothing more to do here. Tell the customer the owner pays refunds from the owner's phone. | the cashier |  |
 | refundWithdrawn | Refund withdrawn | The withdrawal is sent to the owner. A refund the owner has already started approving may still be paid. | Do not give it in cash until the owner says it was dropped. | the cashier |  |
 | cashRefunded | Cash refund saved | The cash refund from the till is written down, and the bitcoin is kept. | Give the customer the cash. | the cashier |  |

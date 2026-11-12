@@ -511,6 +511,22 @@ object AppWords {
         "Paste it where the customer can use it.",
     )
 
+    /** CR-214: the page of a request just made; [date] is when it ends and [sats] what the customer sends. */
+    fun requestMade(date: String, sats: String) = w(
+        Tones.INFO, "Request ready",
+        "The customer can pay this request from anywhere until $date. The amount in bitcoin is fixed at $sats.",
+        Who.CASHIER,
+        "Share the link or the code with the customer. The counter shows Paid once the payment is confirmed.",
+    )
+
+    /** CR-214: the page of a request that is open again, from the list on Home. */
+    fun requestOpen(date: String) = w(
+        Tones.INFO, "Waiting for payment",
+        "This request is open until $date. It is paid once the payment is confirmed.",
+        Who.NOBODY,
+        "Nothing to do.",
+    )
+
     val refundAsked = w(
         Tones.GOOD, "Refund asked for",
         "The refund request is saved, and it is paid only after the owner approves it.",
@@ -689,6 +705,8 @@ object AppWords {
         "destinationNeeded" to destinationNeeded,
         "reasonNeeded" to reasonNeeded,
         "requestCopied" to requestCopied,
+        "requestMade" to requestMade("2026-11-14 10:00", "73,554 sats"),
+        "requestOpen" to requestOpen("2026-11-14 10:00"),
         "refundAsked" to refundAsked,
         "refundWithdrawn" to refundWithdrawn,
         "cashRefunded" to cashRefunded,

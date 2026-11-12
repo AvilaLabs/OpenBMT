@@ -3,8 +3,9 @@
      and fetches the price. CAMERA: asked for at run time only when the person
      taps Scan, to read the pairing code (CR-90). Nothing else is asked for: no
      notifications, no foreground service. The camera is not required, so the
-     app installs on a phone without one. tests/check-manifest.sh fails the
-     build if the list differs, or if anything but the launcher activity is
+     app installs on a phone without one. One provider, not exported, hands the
+     share sheet the image of a request's code. tests/check-manifest.sh fails
+     the build if the list differs, or if anything but the launcher activity is
      exported. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.openbmt.counter.app">
@@ -34,5 +35,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Hands the share sheet the image of a request's code (CR-214): not
+             exported, one address, read only, access given by the counter
+             for the one share. -->
+        <provider
+            android:name="org.openbmt.counter.app.ShareImageProvider"
+            android:authorities="org.openbmt.counter.app.share"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>
