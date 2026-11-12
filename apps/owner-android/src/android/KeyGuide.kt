@@ -71,8 +71,8 @@ internal fun Controller.showKeyGuide(r: FirstRun, message: SayWords? = null) {
             listOf(ui.primary(KeyGuideWords.kgDoneButton) { r.next(); go() }), back,
         )
         GuideStep.Stopped -> guidePage(
-            g, KeyGuideWords.kgCompareDifferent, listOf(para(KeyGuideWords.kgDifferentText)),
-            listOf(ui.primary(KeyGuideWords.kgBack) { back() }), back,
+            g, KeyGuideWords.kgStopTitle, listOf(para(KeyGuideWords.kgDifferentText)),
+            listOf(ui.primary(KeyGuideWords.kgStartAgain) { back() }), back,
         )
     }
 }
@@ -101,8 +101,7 @@ private fun Controller.scanGuide(r: FirstRun) {
     fun read(bytes: ByteArray) {
         val shown = try {
             val w = OwnerImport.read(String(bytes, Charsets.UTF_8))
-            r.guide.scanned(w.fingerprint, w.firstAddress)
-            null
+            if (r.guide.scanned(w.fingerprint, w.firstAddress)) null else KeyGuideWords.kgNotKeyMaker
         } catch (e: OwnerException) {
             e.sayWords()
         } catch (e: LinkageError) {
@@ -115,7 +114,7 @@ private fun Controller.scanGuide(r: FirstRun) {
     scan.begin(
         show = { v -> showScan(v) },
         onBytes = { read(it) },
-        onFailed = { f -> again((ScanResult.failed(f.off, f.problem, f.words) as SourceResult.Failed).words) },
+        onFailed = { f -> again(f.words ?: KeyGuideWords.kgCameraOff) },
         onCancel = { again(null) },
     )
 }

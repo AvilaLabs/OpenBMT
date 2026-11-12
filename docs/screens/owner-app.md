@@ -353,6 +353,14 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | kgElectrumText | Now follow step 6 on the page. Electrum must show the same fingerprint and first address as this phone. |
 | kgElectrumSame | Electrum shows the same |
 | kgElectrumDifferent | Electrum shows something different |
+| kgStopTitle | Stop |
+| kgStartAgain | Start again |
+| kgNotKeyMakerHeading | Not the key maker's code |
+| kgNotKeyMakerWhat | This code is for a wallet with more than one key. The key maker makes a wallet with one key. |
+| kgNotKeyMakerNext | Scan the code on the key maker page. |
+| kgCameraOffHeading | The camera is off for OpenBMT |
+| kgCameraOffWhat | The guide reads the page's code with the camera. |
+| kgCameraOffNext | Allow the camera for OpenBMT in the phone's settings, then press Scan the page's code again. |
 | kgDoneTitle | Shut down Tails |
 | kgDoneText | On the page, press Clear and close, then shut down Tails and take out both sticks. Keep the card somewhere safe and private, and put the words on steel as soon as you can. |
 | kgDoneButton | Done |

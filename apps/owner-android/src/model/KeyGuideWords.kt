@@ -1,5 +1,9 @@
 package org.openbmt.owner.app
 
+import org.openbmt.app.SayWords
+import org.openbmt.app.Tones
+import org.openbmt.app.Who
+
 /**
  * The words of the key maker guide, shown after "Help me make a savings wallet" and the why screen: the phone
  * walks beside the laptop, and its step numbers match the key maker page's from step 4 on. They are written down
@@ -63,6 +67,23 @@ object KeyGuideWords {
         "somewhere safe and private, and put the words on steel as soon as you can."
     const val kgDoneButton = "Done"
 
+    const val kgStopTitle = "Stop"
+    const val kgStartAgain = "Start again"
+
+    const val kgNotKeyMakerHeading = "Not the key maker's code"
+    const val kgNotKeyMakerWhat = "This code is for a wallet with more than one key. The key maker makes a wallet with one key."
+    const val kgNotKeyMakerNext = "Scan the code on the key maker page."
+
+    const val kgCameraOffHeading = "The camera is off for OpenBMT"
+    const val kgCameraOffWhat = "The guide reads the page's code with the camera."
+    const val kgCameraOffNext = "Allow the camera for OpenBMT in the phone's settings, then press Scan the page's code again."
+
+    /** A scanned wallet with more than one key: shown on step 6, which stays. */
+    val kgNotKeyMaker = SayWords(Tones.STOP, Who.OWNER, kgNotKeyMakerHeading, kgNotKeyMakerWhat, kgNotKeyMakerNext, null, null, null, null)
+
+    /** The camera is off or did not start: shown on step 6. */
+    val kgCameraOff = SayWords(Tones.STOP, Who.OWNER, kgCameraOffHeading, kgCameraOffWhat, kgCameraOffNext, null, null, null, null)
+
     /** The step badge for step [n] of [total]. */
     fun badge(n: Int, total: Int): String = kgStepBadge.replace("{n}", n.toString()).replace("{total}", total.toString())
 
@@ -84,6 +105,11 @@ object KeyGuideWords {
         add("kgCompareDifferent", kgCompareDifferent); add("kgDifferentText", kgDifferentText)
         add("kgElectrumTitle", kgElectrumTitle); add("kgElectrumText", kgElectrumText)
         add("kgElectrumSame", kgElectrumSame); add("kgElectrumDifferent", kgElectrumDifferent)
+        add("kgStopTitle", kgStopTitle); add("kgStartAgain", kgStartAgain)
+        add("kgNotKeyMakerHeading", kgNotKeyMakerHeading); add("kgNotKeyMakerWhat", kgNotKeyMakerWhat)
+        add("kgNotKeyMakerNext", kgNotKeyMakerNext)
+        add("kgCameraOffHeading", kgCameraOffHeading); add("kgCameraOffWhat", kgCameraOffWhat)
+        add("kgCameraOffNext", kgCameraOffNext)
         add("kgDoneTitle", kgDoneTitle); add("kgDoneText", kgDoneText); add("kgDoneButton", kgDoneButton)
         return out
     }

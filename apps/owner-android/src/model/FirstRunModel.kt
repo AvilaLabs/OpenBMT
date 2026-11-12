@@ -283,12 +283,16 @@ class KeyGuide {
         }
     }
 
-    /** The scan gave a wallet: the comparison with the page. */
-    fun scanned(fingerprint: String, firstAddress: String) {
-        if (step != GuideStep.Follow) return
+    /**
+     * The scan gave a wallet: the comparison with the page. A wallet with no fingerprint (more than one key) is
+     * not the key maker's: the guide stays on step 6 and false is returned.
+     */
+    fun scanned(fingerprint: String?, firstAddress: String): Boolean {
+        if (step != GuideStep.Follow || fingerprint == null) return false
         this.fingerprint = fingerprint
         this.firstAddress = firstAddress
         step = GuideStep.Compare
+        return true
     }
 
     /** "They are the same" or "Electrum shows the same": on to the next check, then to the end. */

@@ -2720,6 +2720,11 @@ object AppModelTest {
         val h = KeyGuide(); h.next(); h.next(); h.next(); h.next(); h.next(); h.scanned("1", "a"); h.different()
         ok(h.step == GuideStep.Stopped, "different at the first comparison stops")
         h.back(); ok(h.step == GuideStep.Need && h.fingerprint == null, "Back from the stop starts again")
+        val m = KeyGuide(); repeat(5) { m.next() }
+        ok(!m.scanned(null, "bc1qaaaa") && m.step == GuideStep.Follow && m.fingerprint == null && m.firstAddress == null, "a wallet with more than one key gives no comparison and stays on step 6")
+        ok(m.scanned("818bc9b6", "bc1qaaaa") && m.step == GuideStep.Compare, "a single-key wallet gives the comparison")
+        ok(KeyGuideWords.kgNotKeyMaker.heading == "Not the key maker's code" && KeyGuideWords.kgCameraOff.next == "Allow the camera for OpenBMT in the phone's settings, then press Scan the page's code again.", "the added words, exactly")
+        ok(KeyGuideWords.kgStopTitle == "Stop" && KeyGuideWords.kgStartAgain == "Start again", "the stop screen's title and button")
         val e = KeyGuide(); e.scanned("1", "a"); ok(e.step == GuideStep.Need && e.fingerprint == null, "a scan is taken only at step 6")
         ok(!KeyGuide().back(), "the first step has nothing before it")
         ok(KeyGuideWords.badge(3, 6) == "Step 3 of 6", "the badge")
