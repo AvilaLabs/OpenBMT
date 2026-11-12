@@ -7,10 +7,10 @@ use std::fs;
 use std::path::PathBuf;
 
 use common::*;
-use openbmt_core::say::check;
+use openbmt_core::say::{check, Words};
 use openbmt_requests::say::{
     book_unreadable, due_fact, empty_list, list_row, mark_lines, old_price, overdue_row,
-    return_added, returned_line, state_line, Said,
+    return_added, returned_line, state_line,
 };
 use openbmt_requests::{
     check_return_address, BookError, CreditRefused, EndRefused, Every, Limit, MakeRefused, Marks,
@@ -417,8 +417,8 @@ fn rq_35_the_owner_screens_have_their_words() {
 }
 
 #[test]
-fn rq_36_every_refusal_has_words_or_a_constant_that_names_its_rule() {
-    let said: Vec<Said> = vec![
+fn rq_36_every_refusal_has_words_that_name_its_rule() {
+    let said: Vec<Words> = vec![
         openbmt_requests::say::make_refused(&MakeRefused::NoteNeeded),
         openbmt_requests::say::make_refused(&MakeRefused::BitcoinOnly),
         openbmt_requests::say::make_refused(&MakeRefused::DueOutOfRange),
@@ -439,24 +439,8 @@ fn rq_36_every_refusal_has_words_or_a_constant_that_names_its_rule() {
         openbmt_requests::say::return_refused(&ReturnRefused::TooSmall { min_sats: 294 }),
         openbmt_requests::say::return_refused(&ReturnRefused::QueueFull),
     ];
-    let mut with_words = 0;
-    let mut placeholders = 0;
-    for s in said {
-        match s {
-            Ok(w) => {
-                with_words += 1;
-                assert_eq!(check(&w), Ok(()));
-                assert!(w.code.is_some_and(|c| c.starts_with("RQ-") || c == "CR-58"));
-            }
-            Err(constant) => {
-                placeholders += 1;
-                let rule = constant.strip_prefix("WORDS_NEEDED_RQ_").unwrap();
-                assert!(
-                    rule.chars().take(2).all(|c| c.is_ascii_digit()),
-                    "{constant}"
-                );
-            }
-        }
+    for w in said {
+        assert_eq!(check(&w), Ok(()));
+        assert!(w.code.is_some_and(|c| c.starts_with("RQ-")));
     }
-    assert!(with_words >= 7 && placeholders >= 8);
 }

@@ -5,12 +5,8 @@ use super::*;
 use openbmt_core::currency::ShopCurrency;
 use openbmt_core::say::{check, check_distinct, MAX_HEADING, MAX_SENTENCE};
 
-/// What the samples gave: words, the placeholders, and the names that share words.
-type Sampled = (
-    Vec<(String, Words)>,
-    Vec<(&'static str, &'static str)>,
-    Vec<&'static str>,
-);
+/// What the samples gave: words, and the names that share words.
+type Sampled = (Vec<(String, Words)>, Vec<&'static str>);
 
 fn make_name(e: &MakeRefused) -> &'static str {
     match e {
@@ -90,12 +86,13 @@ fn address_name(e: &AddressRefused) -> &'static str {
 /// others is in `shared`.
 fn samples() -> Sampled {
     let mut words: Vec<(String, Words)> = Vec::new();
-    let mut needed: Vec<(&'static str, &'static str)> = Vec::new();
     let mut shared: Vec<&'static str> = Vec::new();
-    let mut take = |name: &'static str, said: Said| match said {
-        Ok(w) if words.iter().any(|(_, have)| *have == w) => shared.push(name),
-        Ok(w) => words.push((name.to_string(), w)),
-        Err(placeholder) => needed.push((name, placeholder)),
+    let mut take = |name: &'static str, w: Words| {
+        if words.iter().any(|(_, have)| *have == w) {
+            shared.push(name);
+        } else {
+            words.push((name.to_string(), w));
+        }
     };
     for e in [
         MakeRefused::NoteNeeded,
@@ -164,7 +161,7 @@ fn samples() -> Sampled {
         AddressRefused::TestNetwork,
         AddressRefused::Own,
     ] {
-        take(address_name(&e), Ok(address_refused(&e)));
+        take(address_name(&e), address_refused(&e));
     }
     words.push((
         "BookError::Io".into(),
@@ -177,48 +174,39 @@ fn samples() -> Sampled {
     shared.push("BookError::Corrupt");
     words.push(("old price".into(), old_price()));
     words.push(("return added".into(), return_added("12,345 sats", 7)));
-    (words, needed, shared)
+    (words, shared)
 }
 
 #[test]
 fn sc_12_every_refusal_and_state_has_words_that_pass_the_check() {
-    let (words, _, shared) = samples();
+    let (words, shared) = samples();
     assert!(shared.len() >= 3);
-    assert!(words.len() >= 12);
+    assert!(words.len() >= 30);
     check_distinct(&words).unwrap();
     for (name, w) in &words {
         check(w).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let code = w.code.unwrap_or_else(|| panic!("{name} has no rule"));
+        assert!(code.starts_with("RQ-"), "{name}: {code}");
     }
 }
 
 #[test]
-fn sc_12_a_refusal_with_no_words_names_its_rule_in_a_placeholder() {
-    let (words, needed, _) = samples();
-    assert!(!needed.is_empty());
-    for (name, constant) in &needed {
-        assert!(constant.starts_with("WORDS_NEEDED_RQ_"), "{name}");
-        assert!(constant
-            .chars()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'));
+fn sc_12_the_steps_of_a_return_pass_the_check() {
+    for w in [ask_step(), check_step(), returns_waiting(3, "$120")] {
+        check(&w).unwrap_or_else(|e| panic!("{}: {e}", w.heading));
     }
-    let mut all: Vec<&str> = needed.iter().map(|(_, c)| *c).collect();
-    all.sort_unstable();
-    // Two refusals share a placeholder only where they are the same fault.
-    all.dedup();
-    assert!(all.len() >= 15);
-    // A variant has words or a placeholder, never both.
-    for (name, _) in &needed {
-        assert!(!words.iter().any(|(n, _)| n == name), "{name}");
-    }
+    assert_eq!(
+        returns_waiting(3, "$120").what,
+        "3 returns, $120 in all, go in one payment from your wallet."
+    );
 }
 
 #[test]
 fn sc_12_a_variant_missing_from_the_list_is_found() {
-    let (words, needed, shared) = samples();
+    let (words, shared) = samples();
     let listed: Vec<&str> = words
         .iter()
         .map(|(n, _)| n.as_str())
-        .chain(needed.iter().map(|(n, _)| *n))
         .chain(shared.iter().copied())
         .collect();
     let all = [
@@ -267,22 +255,15 @@ fn sc_12_a_variant_missing_from_the_list_is_found() {
 }
 
 #[test]
-fn sc_12_the_words_of_a_stale_rate_are_the_counters_as_they_are() {
+fn sc_12_the_owner_is_not_told_to_tell_the_owner_of_a_stale_rate() {
     let w = stale_rate();
-    assert_eq!(w.heading, "Price too old to renew");
-    assert_eq!(
-        w.what,
-        "The exchange price is too old to give this sale a new price."
-    );
-    assert_eq!(
-        w.next,
-        "Wait for a new price, or check the internet connection. If it stays old, tell the owner."
-    );
+    assert_eq!(w.heading, "Exchange price too old");
+    assert!(!w.next.contains("owner"));
 }
 
 #[test]
 fn rq_36_the_texts_are_the_table_as_it_is_written() {
-    let w = make_refused(&MakeRefused::TooSmall { min_sats: 5_000 }).unwrap();
+    let w = make_refused(&MakeRefused::TooSmall { min_sats: 5_000 });
     assert_eq!(w.heading, "Amount too small");
     assert_eq!(
         w.what,
@@ -291,8 +272,7 @@ fn rq_36_the_texts_are_the_table_as_it_is_written() {
     assert_eq!(w.next, "Ask for more, or change the setting.");
     let w = make_refused(&MakeRefused::TooLarge {
         max: Limit::Units(ShopCurrency::Usd, 1_000_000),
-    })
-    .unwrap();
+    });
     assert_eq!(w.what, "A request can be at most $1,000,000.");
     assert_eq!(
         book_unreadable(&BookError::Corrupt("x")).next,
@@ -359,6 +339,8 @@ fn sc_12_the_dialogs_keep_the_lengths_the_rules_give() {
         cancel_confirm(1),
         cancel_confirm(1_000_000),
         count_as_paid_confirm(1, "$0.40"),
+        close_confirm(1, "$40"),
+        close_confirm(100_000, "$1,000,000"),
     ];
     for d in &dialogs {
         assert!(d.title.chars().count() <= MAX_HEADING, "{}", d.title);
@@ -367,7 +349,4 @@ fn sc_12_the_dialogs_keep_the_lengths_the_rules_give() {
         }
         assert!(d.text.ends_with('.'));
     }
-    // "Close request No. 1 as it is?" is 29 characters: over the heading.
-    assert!("Close request No. 1 as it is?".chars().count() > MAX_HEADING);
-    assert_eq!(close_confirm(), Err(WORDS_NEEDED_RQ_20_CLOSE_CONFIRM));
 }

@@ -1,11 +1,8 @@
 //! What the owner is told about requests (RQ-35, RQ-36, SC-01 to SC-12).
 //!
 //! The texts are the ones of `words-owner-requests.md`, as they are
-//! written there. Where a text breaks the screen rules (a heading over 28
-//! characters, a button where a sentence is wanted) or is not written, the
-//! function gives the constant that names its rule, `WORDS_NEEDED_RQ_xx`,
-//! and nothing else: no text is made up here. Amounts and dates are given
-//! as text by the caller, in the shop's currency where it is known (SC-09).
+//! written there. Every refusal has words. Amounts and dates are given as
+//! text by the caller, in the shop's currency where it is known (SC-09).
 
 use openbmt_core::say::{sats, Tone, Who, Words};
 
@@ -14,31 +11,6 @@ use crate::error::{
     ReturnRefused, ShareRefused,
 };
 use crate::model::{Marks, Status};
-
-/// Words are not written for a refusal that has none: the rule is named.
-pub type Said = Result<Words, &'static str>;
-
-pub const WORDS_NEEDED_RQ_03_ADDRESS_USED: &str = "WORDS_NEEDED_RQ_03_ADDRESS_USED";
-pub const WORDS_NEEDED_RQ_07_BITCOIN_ONLY: &str = "WORDS_NEEDED_RQ_07_BITCOIN_ONLY";
-pub const WORDS_NEEDED_RQ_09_DUE_OUT_OF_RANGE: &str = "WORDS_NEEDED_RQ_09_DUE_OUT_OF_RANGE";
-pub const WORDS_NEEDED_RQ_12_NOT_OPEN: &str = "WORDS_NEEDED_RQ_12_NOT_OPEN";
-pub const WORDS_NEEDED_RQ_15_NO_RATE_TO_CREDIT: &str = "WORDS_NEEDED_RQ_15_NO_RATE_TO_CREDIT";
-pub const WORDS_NEEDED_RQ_15_NOT_IN_BLOCK_ORDER: &str = "WORDS_NEEDED_RQ_15_NOT_IN_BLOCK_ORDER";
-pub const WORDS_NEEDED_RQ_15_TOO_MANY_PAYMENTS: &str = "WORDS_NEEDED_RQ_15_TOO_MANY_PAYMENTS";
-pub const WORDS_NEEDED_RQ_16_NOT_ALMOST: &str = "WORDS_NEEDED_RQ_16_NOT_ALMOST";
-pub const WORDS_NEEDED_RQ_19_HAS_PAYMENTS: &str = "WORDS_NEEDED_RQ_19_HAS_PAYMENTS";
-pub const WORDS_NEEDED_RQ_19_ALREADY_ENDED: &str = "WORDS_NEEDED_RQ_19_ALREADY_ENDED";
-pub const WORDS_NEEDED_RQ_20_NOT_PART_PAID: &str = "WORDS_NEEDED_RQ_20_NOT_PART_PAID";
-pub const WORDS_NEEDED_RQ_20_CLOSE_CONFIRM: &str = "WORDS_NEEDED_RQ_20_CLOSE_CONFIRM";
-pub const WORDS_NEEDED_RQ_21_NO_SUCH_REQUEST: &str = "WORDS_NEEDED_RQ_21_NO_SUCH_REQUEST";
-pub const WORDS_NEEDED_RQ_25_NO_REPEAT: &str = "WORDS_NEEDED_RQ_25_NO_REPEAT";
-pub const WORDS_NEEDED_RQ_25_REPEAT_NOT_DUE: &str = "WORDS_NEEDED_RQ_25_REPEAT_NOT_DUE";
-pub const WORDS_NEEDED_RQ_26_TOO_SMALL: &str = "WORDS_NEEDED_RQ_26_TOO_SMALL";
-pub const WORDS_NEEDED_RQ_27_ASK_FOR_AN_ADDRESS: &str = "WORDS_NEEDED_RQ_27_ASK_FOR_AN_ADDRESS";
-pub const WORDS_NEEDED_RQ_28_CHECK_THE_ADDRESS: &str = "WORDS_NEEDED_RQ_28_CHECK_THE_ADDRESS";
-pub const WORDS_NEEDED_RQ_29_QUEUE_FULL: &str = "WORDS_NEEDED_RQ_29_QUEUE_FULL";
-pub const WORDS_NEEDED_RQ_29_RETURNS_WAITING: &str = "WORDS_NEEDED_RQ_29_RETURNS_WAITING";
-pub const WORDS_NEEDED_RQ_30_BOOK_FULL: &str = "WORDS_NEEDED_RQ_30_BOOK_FULL";
 
 fn refused(heading: &str, what: impl Into<String>, next: &str, code: &'static str) -> Words {
     Words::new(Tone::Ended, heading, what, Who::Owner, next).code(code)
@@ -71,33 +43,72 @@ fn too_large(max: &Limit) -> Words {
     )
 }
 
-/// RQ-12: the words of a stale rate at the counter, as they are there.
+/// RQ-12: the exchange price is too old to work out an amount. The
+/// counter's words for this end "tell the owner"; these are the owner's.
 pub fn stale_rate() -> Words {
     refused(
-        "Price too old to renew",
-        "The exchange price is too old to give this sale a new price.",
-        "Wait for a new price, or check the internet connection. If it stays old, tell the owner.",
-        "CR-58",
+        "Exchange price too old",
+        "The exchange price is too old to work out this amount in bitcoin.",
+        "Wait for a new price, or check the internet connection.",
+        "RQ-12",
+    )
+}
+
+/// The same fault from whichever call met it.
+fn no_such_request() -> Words {
+    refused(
+        "Request not found",
+        "There is no request with that number, so nothing changed.",
+        "Open the list of requests again.",
+        "RQ-21",
+    )
+}
+
+fn address_used() -> Words {
+    refused(
+        "Address already given",
+        "The next address had already been given to another request, so this request was not made.",
+        "Try again. Each request gets an address of its own.",
+        "RQ-03",
+    )
+}
+
+fn book_full() -> Words {
+    refused(
+        "Request book full",
+        "The request book holds at most 100,000 requests and 100,000 returns, and it is full.",
+        "Keep using the requests already made. This version cannot add more.",
+        "RQ-30",
     )
 }
 
 /// Words for a request that was not made.
-pub fn make_refused(why: &MakeRefused) -> Said {
+pub fn make_refused(why: &MakeRefused) -> Words {
     match why {
-        MakeRefused::NoteNeeded => Ok(refused(
+        MakeRefused::NoteNeeded => refused(
             "Note needed",
             "Give the request a name of 1 to 64 characters so you can find it later.",
             "Type a short note.",
             "RQ-06",
-        )),
-        MakeRefused::BitcoinOnly => Err(WORDS_NEEDED_RQ_07_BITCOIN_ONLY),
-        MakeRefused::DueOutOfRange => Err(WORDS_NEEDED_RQ_09_DUE_OUT_OF_RANGE),
-        MakeRefused::TooManyOpen => Ok(too_many_open()),
-        MakeRefused::TooSmall { min_sats } => Ok(too_small(*min_sats)),
-        MakeRefused::TooLarge { max } => Ok(too_large(max)),
-        MakeRefused::StaleRate => Ok(stale_rate()),
-        MakeRefused::IndexUsed => Err(WORDS_NEEDED_RQ_03_ADDRESS_USED),
-        MakeRefused::BookFull => Err(WORDS_NEEDED_RQ_30_BOOK_FULL),
+        ),
+        MakeRefused::BitcoinOnly => refused(
+            "Bitcoin only",
+            "Your shop runs on the Bitcoin Standard, so its requests are in bitcoin.",
+            "Make the request in bitcoin.",
+            "RQ-07",
+        ),
+        MakeRefused::DueOutOfRange => refused(
+            "Due date out of range",
+            "A request can be due today or on any day up to 366 days from today.",
+            "Pick another date.",
+            "RQ-09",
+        ),
+        MakeRefused::TooManyOpen => too_many_open(),
+        MakeRefused::TooSmall { min_sats } => too_small(*min_sats),
+        MakeRefused::TooLarge { max } => too_large(max),
+        MakeRefused::StaleRate => stale_rate(),
+        MakeRefused::IndexUsed => address_used(),
+        MakeRefused::BookFull => book_full(),
     }
 }
 
@@ -111,52 +122,103 @@ fn too_many_open() -> Words {
 }
 
 /// Words for a quote that was not made.
-pub fn share_refused(why: &ShareRefused) -> Said {
+pub fn share_refused(why: &ShareRefused) -> Words {
     match why {
-        ShareRefused::NoSuchRequest => Err(WORDS_NEEDED_RQ_21_NO_SUCH_REQUEST),
-        ShareRefused::NotOpen => Err(WORDS_NEEDED_RQ_12_NOT_OPEN),
-        ShareRefused::StaleRate => Ok(stale_rate()),
+        ShareRefused::NoSuchRequest => no_such_request(),
+        ShareRefused::NotOpen => refused(
+            "Request has ended",
+            "This request was cancelled, closed or counted as paid, so it is not sent again.",
+            "Make a new request to ask for more.",
+            "RQ-12",
+        ),
+        ShareRefused::StaleRate => stale_rate(),
     }
 }
 
-/// Words for payments that were not counted.
-pub fn credit_refused(why: &CreditRefused) -> Said {
+/// Words for payments that were not counted. The bitcoin is in the wallet
+/// whatever these say: only the request's count waits.
+pub fn credit_refused(why: &CreditRefused) -> Words {
     match why {
-        CreditRefused::NoSuchRequest => Err(WORDS_NEEDED_RQ_21_NO_SUCH_REQUEST),
-        CreditRefused::NotInBlockOrder => Err(WORDS_NEEDED_RQ_15_NOT_IN_BLOCK_ORDER),
-        CreditRefused::NoRate => Err(WORDS_NEEDED_RQ_15_NO_RATE_TO_CREDIT),
-        CreditRefused::TooManyPayments => Err(WORDS_NEEDED_RQ_15_TOO_MANY_PAYMENTS),
+        CreditRefused::NoSuchRequest => no_such_request(),
+        CreditRefused::NotInBlockOrder => refused(
+            "Payments not counted",
+            "The payments were not in the order of their blocks, so none was counted. The bitcoin is in your wallet.",
+            "Open the request again after the next block.",
+            "RQ-15",
+        ),
+        CreditRefused::NoRate => refused(
+            "Payment not counted yet",
+            "A payment arrived with no price to count it at, and the exchange price is too old. The bitcoin is in your wallet.",
+            "Wait for a new price, or check the internet connection.",
+            "RQ-15",
+        ),
+        CreditRefused::TooManyPayments => refused(
+            "Too many payments",
+            "This request holds 1,000 payments, the most one request can, so new ones are not counted. The bitcoin is in your wallet.",
+            "Check the newest payments in your wallet.",
+            "RQ-15",
+        ),
     }
 }
 
 /// Words for a request that was not cancelled, closed or counted as paid.
-pub fn end_refused(why: &EndRefused) -> Said {
+pub fn end_refused(why: &EndRefused) -> Words {
     match why {
-        EndRefused::NoSuchRequest => Err(WORDS_NEEDED_RQ_21_NO_SUCH_REQUEST),
-        EndRefused::AlreadyEnded => Err(WORDS_NEEDED_RQ_19_ALREADY_ENDED),
-        EndRefused::HasPayments => Err(WORDS_NEEDED_RQ_19_HAS_PAYMENTS),
-        EndRefused::NotPartPaid => Err(WORDS_NEEDED_RQ_20_NOT_PART_PAID),
-        EndRefused::NotAlmost => Err(WORDS_NEEDED_RQ_16_NOT_ALMOST),
-        EndRefused::NoRepeat => Err(WORDS_NEEDED_RQ_25_NO_REPEAT),
+        EndRefused::NoSuchRequest => no_such_request(),
+        EndRefused::AlreadyEnded => refused(
+            "Already ended",
+            "This request was already cancelled, closed or counted as paid.",
+            "Nothing to do.",
+            "RQ-19",
+        ),
+        EndRefused::HasPayments => refused(
+            "Something was paid",
+            "This request has received a payment, so it cannot be cancelled.",
+            "Close it as it is instead.",
+            "RQ-19",
+        ),
+        EndRefused::NotPartPaid => refused(
+            "Not part paid",
+            "Only a request that is part paid can be closed as it is.",
+            "Cancel it if nothing has arrived.",
+            "RQ-20",
+        ),
+        EndRefused::NotAlmost => refused(
+            "Not almost paid",
+            "Only a request a little short of its amount can be counted as paid.",
+            "Close it as it is, or wait for the rest.",
+            "RQ-16",
+        ),
+        EndRefused::NoRepeat => refused(
+            "Not repeating",
+            "This request does not repeat, so there is nothing to stop.",
+            "Nothing to do.",
+            "RQ-25",
+        ),
     }
 }
 
 /// Words for a repeat that was not made.
-pub fn repeat_refused(why: &RepeatRefused) -> Said {
+pub fn repeat_refused(why: &RepeatRefused) -> Words {
     match why {
-        RepeatRefused::NotDue => Err(WORDS_NEEDED_RQ_25_REPEAT_NOT_DUE),
-        RepeatRefused::TooManyOpen => Ok(too_many_open()),
-        RepeatRefused::IndexUsed => Err(WORDS_NEEDED_RQ_03_ADDRESS_USED),
-        RepeatRefused::BookFull => Err(WORDS_NEEDED_RQ_30_BOOK_FULL),
+        RepeatRefused::NotDue => refused(
+            "Repeat not due",
+            "The next request of this series is not due yet, so it was not made.",
+            "Nothing to do. It is made when it is due.",
+            "RQ-25",
+        ),
+        RepeatRefused::TooManyOpen => too_many_open(),
+        RepeatRefused::IndexUsed => address_used(),
+        RepeatRefused::BookFull => book_full(),
     }
 }
 
-/// Words for a return that was not queued. The amount of the "too much"
-/// refusal is written in satoshis.
-pub fn return_refused(why: &ReturnRefused) -> Said {
+/// Words for a return that was not queued. The amounts are written in
+/// satoshis.
+pub fn return_refused(why: &ReturnRefused) -> Words {
     match why {
-        ReturnRefused::NoSuchRequest => Err(WORDS_NEEDED_RQ_21_NO_SUCH_REQUEST),
-        ReturnRefused::TooMuch { most_sats } => Ok(refused(
+        ReturnRefused::NoSuchRequest => no_such_request(),
+        ReturnRefused::TooMuch { most_sats } => refused(
             "More than was paid",
             format!(
                 "You can return at most {} from this request.",
@@ -164,12 +226,25 @@ pub fn return_refused(why: &ReturnRefused) -> Said {
             ),
             "Lower the amount.",
             "RQ-26",
-        )),
-        ReturnRefused::TooSmall { .. } => Err(WORDS_NEEDED_RQ_26_TOO_SMALL),
-        ReturnRefused::StaleRate => Ok(stale_rate()),
-        ReturnRefused::BadScript => Ok(address_refused(&AddressRefused::NotAnAddress)),
-        ReturnRefused::QueueFull => Err(WORDS_NEEDED_RQ_29_QUEUE_FULL),
-        ReturnRefused::BookFull => Err(WORDS_NEEDED_RQ_30_BOOK_FULL),
+        ),
+        ReturnRefused::TooSmall { min_sats } => refused(
+            "Too small to send",
+            format!(
+                "Bitcoin cannot send less than {} to this kind of address.",
+                sats(*min_sats)
+            ),
+            "Return a larger amount.",
+            "RQ-26",
+        ),
+        ReturnRefused::StaleRate => stale_rate(),
+        ReturnRefused::BadScript => address_refused(&AddressRefused::NotAnAddress),
+        ReturnRefused::QueueFull => refused(
+            "Too many returns waiting",
+            "99 returns are waiting, the most one payment can hold.",
+            "Pay the returns, then add this one.",
+            "RQ-29",
+        ),
+        ReturnRefused::BookFull => book_full(),
     }
 }
 
@@ -272,10 +347,51 @@ pub fn count_as_paid_confirm(number: u64, short: &str) -> Confirm {
     }
 }
 
-/// RQ-20: the words of "Close as it is" are written with a title over 28
-/// characters; the rule is named until they are shortened.
-pub fn close_confirm() -> Result<Confirm, &'static str> {
-    Err(WORDS_NEEDED_RQ_20_CLOSE_CONFIRM)
+/// RQ-20: "Close No. {n} as it is?". `arrived` is what the request
+/// received, as text.
+pub fn close_confirm(number: u64, arrived: &str) -> Confirm {
+    Confirm {
+        title: format!("Close No. {number} as it is?"),
+        text: format!("{arrived} arrived and stays in your books. Nothing more is asked."),
+        yes: "Close it",
+        no: "Keep it open",
+    }
+}
+
+/// RQ-27: the step that asks the customer where to return money.
+pub fn ask_step() -> Words {
+    Words::new(
+        Tone::Info,
+        "The customer's address",
+        "Money is never sent back to where a payment came from, which can be an exchange or someone else.",
+        Who::Owner,
+        "Ask the customer for an address, then paste or scan their reply.",
+    )
+    .code("RQ-27")
+}
+
+/// RQ-28: the accepted address, shown to compare with the customer.
+pub fn check_step() -> Words {
+    Words::new(
+        Tone::Info,
+        "Check the address",
+        "Someone who can change your messages can change an address.",
+        Who::Owner,
+        "Compare it with the customer by phone or in person if you can.",
+    )
+    .code("RQ-28")
+}
+
+/// RQ-29: the returns that wait to be paid.
+pub fn returns_waiting(count: usize, amount: &str) -> Words {
+    Words::new(
+        Tone::Info,
+        "Returns waiting",
+        format!("{count} returns, {amount} in all, go in one payment from your wallet."),
+        Who::Owner,
+        "Pay them together when you are ready.",
+    )
+    .code("RQ-29")
 }
 
 /// RQ-13: the line above a shared link.
