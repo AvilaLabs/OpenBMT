@@ -85,7 +85,7 @@ small amounts but not for a shop's takings.
 - **Help me make one.** You make the wallet yourself on a laptop you
   already own, offline, from about 512 coin flips or about 270 die rolls.
   It takes about an hour, with two USB sticks, a pen and the card from the
-  app. [Setting up a shop](setting-up.md#making-a-savings-wallet-with-a-coin-or-a-die)
+  app. [Setting up a shop](setting-up.md#making-a-cold-wallet-with-a-coin-or-a-die)
   has the steps.
 - **Not now.** Steps 4 and 5 can be done first. The counter shows "Not
   taking bitcoin yet" until a wallet is added.
