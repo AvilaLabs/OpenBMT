@@ -197,6 +197,7 @@ object FirstRunWords {
         add("moneyOwnNote", moneyOwnNote); add("moneyMake", moneyMake); add("moneyMakeNote", moneyMakeNote)
         add("moneyLater", moneyLater); add("moneyLaterNote", moneyLaterNote); add("moneyNotYet", moneyNotYet)
         add("whyTitle", whyTitle); add("whyText1", whyText1); add("whyText2", whyText2); add("whyText3", whyText3)
+        out.addAll(KeyGuideWords.all())
         return out
     }
 }

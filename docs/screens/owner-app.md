@@ -318,3 +318,41 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | whyText1 | Any app can be hacked, ours included. So your keys never touch one. |
 | whyText2 | You make them yourself, offline, with a coin. After that, nobody can move your bitcoin without your words. Not even us. |
 | whyText3 | The inconvenience happens once. |
+| kgTitle | Make your savings wallet |
+| kgStepBadge | Step {n} of {total} |
+| kgNext | Next |
+| kgBack | Back |
+| kgNeedTitle | What you need |
+| kgNeedList1 | A laptop or desktop computer. It does not have to be new. |
+| kgNeedList2 | Two USB sticks: one of 8 GB or more for Tails, and any small one for the key maker page. |
+| kgNeedList3 | A coin, a pen, and the blank card from this app. |
+| kgNeedList4 | About an hour, somewhere nobody can see your screen. |
+| kgNeedCard | No card? Any paper will do for now. Write "TEMPORARY. PUT THIS ON STEEL." at the top. |
+| kgTailsTitle | Put Tails on the big stick |
+| kgTailsText | Tails is a free system that starts the computer from the USB stick, never touches its own disk, and forgets everything when you shut down. On any computer, go to tails.net and follow its install guide for a USB stick. Check the download the way the guide says. |
+| kgTailsNote | This step needs the internet. The rest does not. |
+| kgPageTitle | Put the key maker page on the small stick |
+| kgPageText | On the same computer, download the OpenBMT key maker page and its checksum file from the OpenBMT releases page, and copy the page onto the small stick. |
+| kgPageCheck | To check it, compare its SHA-256 with the checksum file. The handbook shows how. |
+| kgStartTitle | Start Tails, offline |
+| kgStartText | Plug in the big stick and start the computer from it. On the Tails start screen, press + under Additional Settings, choose Offline Mode, and turn it on. Then Start Tails. |
+| kgStartNote | With Offline Mode on, Tails turns off the network before anything else runs. |
+| kgOpenTitle | Open the key maker page |
+| kgOpenText | Plug in the small stick. Open it in the Files app and open openbmt-keymaker.html in Tor Browser. If it says the page did not start, reload it once. |
+| kgFollowTitle | Follow the page |
+| kgFollowText | Do the rehearsal first, then flip for real. Come back to this phone when the page shows a code to scan. |
+| kgScanButton | Scan the page's code |
+| kgCompareTitle | Compare with the page |
+| kgCompareText | The page and this phone must show the same fingerprint and first address, every character. |
+| kgFingerprint | Fingerprint |
+| kgFirstAddress | First address |
+| kgCompareSame | They are the same |
+| kgCompareDifferent | They are different |
+| kgDifferentText | Stop. Do not use this wallet. On the page, press Clear and close, shut down Tails, and start again. |
+| kgElectrumTitle | Check with Electrum |
+| kgElectrumText | Now follow step 6 on the page. Electrum must show the same fingerprint and first address as this phone. |
+| kgElectrumSame | Electrum shows the same |
+| kgElectrumDifferent | Electrum shows something different |
+| kgDoneTitle | Shut down Tails |
+| kgDoneText | On the page, press Clear and close, then shut down Tails and take out both sticks. Keep the card somewhere safe and private, and put the words on steel as soon as you can. |
+| kgDoneButton | Done |

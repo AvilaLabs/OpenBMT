@@ -45,17 +45,18 @@ internal fun Controller.showFirstRun() {
         FirstRunStep.Till -> showTillChoice(r)
         FirstRunStep.Money -> showMoney(r)
         FirstRunStep.Why -> showWhy(r)
+        FirstRunStep.Guide -> showKeyGuide(r)
         FirstRunStep.NotYet -> showNotYet(r)
     }
 }
 
 /** A page of the first run with a way back: the system's Back does the same as the bar's arrow. */
-private fun Controller.stepScreen(title: String, body: List<View>, actions: List<Button> = emptyList(), back: () -> Unit, tone: org.openbmt.app.Tone? = null) {
+internal fun Controller.stepScreen(title: String, body: List<View>, actions: List<Button> = emptyList(), back: () -> Unit, tone: org.openbmt.app.Tone? = null) {
     screen(title, body, actions, back = back, tone = tone)
     firstRunBack = back
 }
 
-private fun Controller.heading(text: String): TextView = ui.text(text, Type.HEADING, bold = true)
+internal fun Controller.heading(text: String): TextView = ui.text(text, Type.HEADING, bold = true)
 
 // ---- welcome -------------------------------------------------------------------------------------------------------
 

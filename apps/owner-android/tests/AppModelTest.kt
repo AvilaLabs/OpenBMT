@@ -2674,7 +2674,15 @@ object AppModelTest {
         r.name = "Cafe Anna"; r.currency = ShopCurrency.Gbp; r.next(); ok(r.step == FirstRunStep.Till, "till")
         r.till = Till.Toast; r.query = "to"; r.next(); ok(r.step == FirstRunStep.Money, "money")
         r.choose(MoneyChoice.Make); ok(r.step == FirstRunStep.Why, "the savings wallet shows the why first")
-        r.next(); ok(r.step == FirstRunStep.NotYet, "then the notice")
+        r.next(); ok(r.step == FirstRunStep.Guide && r.guide.step == GuideStep.Need, "then the key maker guide, at its first step")
+        r.back(); ok(r.step == FirstRunStep.Why, "back from the first step of the guide to the why")
+        r.next(); r.guide.next(); ok(r.step == FirstRunStep.Guide && r.guide.step == GuideStep.Tails, "the guide goes on by its own steps")
+        r.back(); ok(r.step == FirstRunStep.Guide && r.guide.step == GuideStep.Need, "back from step 2 stays in the guide")
+        r.back(); r.next(); ok(r.guide.step == GuideStep.Need, "the guide is made new each time it is entered")
+        for (i in 1..5) r.guide.next()
+        r.guide.scanned("818bc9b6", "bc1qaaaa"); r.guide.same(); r.guide.same()
+        ok(r.guide.step == GuideStep.Done, "the guide ends at its last screen")
+        r.next(); ok(r.step == FirstRunStep.NotYet, "Done leads to the notice")
         r.back(); ok(r.step == FirstRunStep.Why, "back from the notice to the why")
         r.back(); ok(r.step == FirstRunStep.Money, "back to the money")
         r.back(); r.back()
@@ -2685,6 +2693,39 @@ object AppModelTest {
         r.back(); ok(r.step == FirstRunStep.Money, "back from the notice to the money")
         r.choose(MoneyChoice.Later); ok(r.step == FirstRunStep.NotYet, "later: the notice directly")
         r.toWelcome(); r.back(); ok(r.step == FirstRunStep.Welcome, "the welcome has no step before it")
+
+        // The key maker guide: six steps in order, Back, the scan, and the two comparisons.
+        val g = KeyGuide()
+        val order = listOf(GuideStep.Need, GuideStep.Tails, GuideStep.Page, GuideStep.Start, GuideStep.Open, GuideStep.Follow)
+        ok(order.map { it.number } == (1..6).toList() && KeyGuide.TOTAL == 6, "the steps are numbered 1 to 6")
+        for ((i, want) in order.withIndex()) {
+            ok(g.step == want, "guide step ${i + 1}")
+            if (i < order.size - 1) g.next()
+        }
+        g.next(); ok(g.step == GuideStep.Follow, "step 6 goes on only by a scan")
+        g.back(); ok(g.step == GuideStep.Open, "back from step 6")
+        g.next(); g.scanned("818bc9b6", "bc1qyjassxtmzl02s8de8jw9365qmuvwg74udtp3vj")
+        ok(g.step == GuideStep.Compare && g.fingerprint == "818bc9b6", "a scan gives the comparison")
+        ok(KeyGuide.groups("bc1qyjassxtmzl02") == "bc1q yjas sxtm zl02", "the address in groups of four")
+        g.back(); ok(g.step == GuideStep.Follow && g.fingerprint == null && g.firstAddress == null, "back to the scan forgets what was scanned")
+        g.scanned("818bc9b6", "bc1qaaaa"); g.same()
+        ok(g.step == GuideStep.Electrum && g.fingerprint == "818bc9b6", "the same: on to Electrum, with the scan kept")
+        g.back(); ok(g.step == GuideStep.Compare, "back from Electrum")
+        g.same(); g.same(); ok(g.step == GuideStep.Done, "Electrum the same: the last screen")
+        g.back(); ok(g.step == GuideStep.Electrum, "back from the last screen")
+        g.different(); ok(g.step == GuideStep.Stopped, "Electrum different: stop")
+        g.restart(); repeat(5) { g.next() }; g.scanned("818bc9b6", "bc1qaaaa"); g.different(); ok(g.step == GuideStep.Stopped, "the page different: stop")
+        KeyGuide().also { it.different() }.let { ok(it.step == GuideStep.Need, "different has meaning only as the answer of a comparison") }
+        g.restart(); ok(g.step == GuideStep.Need && g.fingerprint == null && g.firstAddress == null, "after the stop the guide starts again with nothing kept")
+        val h = KeyGuide(); h.next(); h.next(); h.next(); h.next(); h.next(); h.scanned("1", "a"); h.different()
+        ok(h.step == GuideStep.Stopped, "different at the first comparison stops")
+        h.back(); ok(h.step == GuideStep.Need && h.fingerprint == null, "Back from the stop starts again")
+        val e = KeyGuide(); e.scanned("1", "a"); ok(e.step == GuideStep.Need && e.fingerprint == null, "a scan is taken only at step 6")
+        ok(!KeyGuide().back(), "the first step has nothing before it")
+        ok(KeyGuideWords.badge(3, 6) == "Step 3 of 6", "the badge")
+        ok(KeyGuideWords.kgNeedList.size == 4 && KeyGuideWords.kgScanButton == "Scan the page's code", "the guide's words")
+        ok(KeyGuideWords.kgDifferentText == "Stop. Do not use this wallet. On the page, press Clear and close, shut down Tails, and start again.", "the stop text, exactly")
+        ok(KeyGuideWords.kgNeedCard == "No card? Any paper will do for now. Write \"TEMPORARY. PUT THIS ON STEEL.\" at the top.", "the card note, exactly")
 
         // The locale guess: the nine of the app, the euro countries, and the dollar for the rest.
         val guesses = mapOf("US" to ShopCurrency.Usd, "GB" to ShopCurrency.Gbp, "FR" to ShopCurrency.Eur, "JP" to ShopCurrency.Jpy, "AU" to ShopCurrency.Aud,
@@ -2787,6 +2828,17 @@ object AppModelTest {
         ok(source("src/android/Controller.kt").contains("ScreenModel.pick(fault, status, torBlocked, node != null, ceremonyPending())") && source("src/android/Controller.kt").contains("return showEntry()"), "the app opens on the welcome when nothing is saved")
         ok(source("src/android/MainActivity.kt").contains("controller.systemBack()") && source("src/android/MainActivity.kt").contains("controller.firstRunBack = null"), "the system's Back does what the arrow does on a first-run screen, and a screen of any other kind clears it")
         ok(source("src/android/AddCounter.kt").contains("afterFirstCounter()") && source("src/android/Screens.kt").contains("tillStepsRow"), "the steps follow the first counter and are in Settings")
+
+        // The key maker guide: nothing from it reaches a file, the node or the ceremony, and it never asks for words.
+        val guideScreens = source("src/android/KeyGuide.kt")
+        val guideModel = source("src/model/FirstRunModel.kt").substringAfter("class KeyGuide").substringBefore("/** The screens of the practice shop")
+        for ((name, text) in listOf("screens" to guideScreens, "model" to guideModel)) {
+            for (bad in listOf("shopFile", "File\\(", "\\bnode\\b", "withNode", "async", "posTokens", "\\bsetup\\b", "OwnerNode", "OwnerCeremony", "ceremony", "writeText", "writeBytes", "FileOutputStream", "SharedPreferences", "DurableFile", "KeystoreSealer", "SealedFile", "\\.save\\(", "mnemonic", "seed")) {
+                ok(!Regex(bad).containsMatchIn(text), "the guide $name reach nothing outside memory: $bad")
+            }
+        }
+        ok(guideScreens.contains("OwnerImport.read(") && guideScreens.contains("bytes.fill(0)"), "the scan goes to the one library call and the scanned bytes are cleared")
+        ok(source("src/model/FirstRunWords.kt").contains("KeyGuideWords.all()"), "the guide's words are in the list of screens")
 
         val keys = FirstRunWords.all().map { it.first }
         ok(keys.size == keys.toSet().size, "every first-run key is used once")

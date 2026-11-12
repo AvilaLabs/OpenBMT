@@ -172,7 +172,7 @@ class ShopFile(private val dir: File, name: String = AppFiles.SHOP_FILE) {
 }
 
 /** The screens of the first run, in the order they come. Back from each is [FirstRun.back]. */
-enum class FirstRunStep { Welcome, Shop, Till, Money, Why, NotYet }
+enum class FirstRunStep { Welcome, Shop, Till, Money, Why, Guide, NotYet }
 
 /** The three choices of where the money goes. */
 enum class MoneyChoice { Own, Make, Later }
@@ -190,6 +190,10 @@ class FirstRun(start: ShopPrefs, locale: String) {
     var query = ""
     var money: MoneyChoice? = null
 
+    /** The key maker guide, made new each time the why screen is left for it. Held in memory only. */
+    var guide = KeyGuide()
+        private set
+
     fun prefs(stepsShown: Boolean): ShopPrefs = ShopPrefs(ShopPrefs.clean(name), currency, till, stepsShown)
 
     /** The step after [step]; the Money step goes on to Why for the savings wallet and to NotYet for the others. */
@@ -199,7 +203,11 @@ class FirstRun(start: ShopPrefs, locale: String) {
             FirstRunStep.Shop -> FirstRunStep.Till
             FirstRunStep.Till -> FirstRunStep.Money
             FirstRunStep.Money -> if (money == MoneyChoice.Make) FirstRunStep.Why else FirstRunStep.NotYet
-            FirstRunStep.Why -> FirstRunStep.NotYet
+            FirstRunStep.Why -> {
+                guide = KeyGuide()
+                FirstRunStep.Guide
+            }
+            FirstRunStep.Guide -> FirstRunStep.NotYet
             FirstRunStep.NotYet -> FirstRunStep.NotYet
         }
     }
@@ -217,6 +225,7 @@ class FirstRun(start: ShopPrefs, locale: String) {
             FirstRunStep.Till -> FirstRunStep.Shop
             FirstRunStep.Money -> FirstRunStep.Till
             FirstRunStep.Why -> FirstRunStep.Money
+            FirstRunStep.Guide -> if (guide.back()) FirstRunStep.Guide else FirstRunStep.Why
             FirstRunStep.NotYet -> if (money == MoneyChoice.Make) FirstRunStep.Why else FirstRunStep.Money
         }
     }
@@ -224,6 +233,116 @@ class FirstRun(start: ShopPrefs, locale: String) {
     /** Back to the welcome: the owner has chosen Set up my shop again, or left the practice. */
     fun toWelcome() {
         step = FirstRunStep.Welcome
+    }
+}
+
+/** The screens of the key maker guide, in the order they come. The first six are the steps, in the order of the page's. */
+enum class GuideStep(val number: Int?) {
+    Need(1), Tails(2), Page(3), Start(4), Open(5), Follow(6),
+
+    /** The scanned wallet beside the page's: the fingerprint and the first address. */
+    Compare(null),
+
+    /** The same two in Electrum. */
+    Electrum(null),
+
+    /** Shut down Tails. */
+    Done(null),
+
+    /** A difference was found: stop, and start the guide again. */
+    Stopped(null),
+}
+
+/**
+ * The key maker guide of the first run (the savings wallet): the steps one to a screen, then the comparison of
+ * what the page's code gave with the page and with Electrum. It is state in memory only: nothing here reads or
+ * writes a file, and no word of the wallet is asked for or shown. What was scanned is the fingerprint and the
+ * first address, which hold no secret.
+ */
+class KeyGuide {
+    var step = GuideStep.Need
+        private set
+
+    /** The 8 hex digits of the scanned wallet, until the guide ends or starts again. */
+    var fingerprint: String? = null
+        private set
+
+    /** The first receive address of the scanned wallet. */
+    var firstAddress: String? = null
+        private set
+
+    /** The next screen of a step. Follow goes on only by a scan ([scanned]); the comparisons go on by their answers. */
+    fun next() {
+        step = when (step) {
+            GuideStep.Need -> GuideStep.Tails
+            GuideStep.Tails -> GuideStep.Page
+            GuideStep.Page -> GuideStep.Start
+            GuideStep.Start -> GuideStep.Open
+            GuideStep.Open -> GuideStep.Follow
+            GuideStep.Follow, GuideStep.Compare, GuideStep.Electrum, GuideStep.Done, GuideStep.Stopped -> step
+        }
+    }
+
+    /** The scan gave a wallet: the comparison with the page. */
+    fun scanned(fingerprint: String, firstAddress: String) {
+        if (step != GuideStep.Follow) return
+        this.fingerprint = fingerprint
+        this.firstAddress = firstAddress
+        step = GuideStep.Compare
+    }
+
+    /** "They are the same" or "Electrum shows the same": on to the next check, then to the end. */
+    fun same() {
+        step = when (step) {
+            GuideStep.Compare -> GuideStep.Electrum
+            GuideStep.Electrum -> GuideStep.Done
+            else -> step
+        }
+    }
+
+    /** "They are different" or "Electrum shows something different": stop. */
+    fun different() {
+        if (step == GuideStep.Compare || step == GuideStep.Electrum) step = GuideStep.Stopped
+    }
+
+    /** Back from the stop to the first step, with nothing of the scan kept. */
+    fun restart() {
+        step = GuideStep.Need
+        forget()
+    }
+
+    /** The screen before; false at the first step, where the caller leaves the guide. */
+    fun back(): Boolean {
+        step = when (step) {
+            GuideStep.Need -> return false
+            GuideStep.Tails -> GuideStep.Need
+            GuideStep.Page -> GuideStep.Tails
+            GuideStep.Start -> GuideStep.Page
+            GuideStep.Open -> GuideStep.Start
+            GuideStep.Follow -> GuideStep.Open
+            GuideStep.Compare -> GuideStep.Follow
+            GuideStep.Electrum -> GuideStep.Compare
+            GuideStep.Done -> GuideStep.Electrum
+            GuideStep.Stopped -> {
+                forget()
+                GuideStep.Need
+            }
+        }
+        if (step == GuideStep.Follow) forget()
+        return true
+    }
+
+    private fun forget() {
+        fingerprint = null
+        firstAddress = null
+    }
+
+    companion object {
+        /** The number of steps the badge counts. */
+        const val TOTAL = 6
+
+        /** The address in groups of four, as the key maker page shows it. */
+        fun groups(address: String): String = address.chunked(4).joinToString(" ")
     }
 }
 
