@@ -86,6 +86,9 @@
 //!   WL-08 to WL-15) for the key maker guide: its fingerprint and first
 //!   address, or the words of the refusal. It works on no node and stores
 //!   nothing.
+//! - 146: the full ledger (`docs/BOOKS-RULES.md` BK-19), made only when the
+//!   request says the person accepted the warning; `false` refuses. The
+//!   books call (144) never holds it.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -689,6 +692,9 @@ fn build_ops() -> Vec<Op> {
         op(144, "books", Node, |c, a: BooksArgs| c.entry()?.books(a)),
         op(145, "wallet_import_read", Zero, |_, text: String| {
             import_view::read(text)
+        }),
+        op(146, "books_ledger", Node, |c, acknowledged: bool| {
+            c.entry()?.books_ledger(acknowledged)
         }),
     ]
 }

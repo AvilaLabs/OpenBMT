@@ -38,6 +38,10 @@ object OwnerLook {
     const val BOOKS_NOTE = "The files follow US rules only and are not tax advice."
     const val BOOKS_SAVE_ACCOUNTING = "Save the accounting file"
     const val BOOKS_SAVE_LEDGER = "Save the full ledger"
+    const val BOOKS_LEDGER_WARN_TITLE = "This file shows your payments"
+    const val BOOKS_LEDGER_WARN_TEXT = "The full ledger lists every sale with its bitcoin transaction. Anyone who has the file can find those payments on the blockchain and follow the money from them. Share it only with people you trust with that, such as your bookkeeper."
+    const val BOOKS_LEDGER_WARN_ACCEPT = "I understand, save it"
+    const val BOOKS_LEDGER_WARN_CANCEL = "Not now"
 
     /** What the Money row says under its title: the names of its first three entries, and the payments line when payments are in progress. */
     fun moneySub(inProgress: Int, sendsLine: String): String {

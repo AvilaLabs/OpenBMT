@@ -25,9 +25,42 @@ fn oa_103_a_node_that_holds_no_settings_has_empty_books() {
         .list(|r| (r.string(), r.u64(), r.u64(), r.string()))
         .is_empty());
     assert!(r.list(|r| (r.string(), r.bytes())).is_empty());
-    assert!(r.bytes().is_empty());
     assert!(r.opt(|r| r.words()).is_none());
     r.done();
+}
+
+#[test]
+fn bk_19_the_full_ledger_is_made_only_when_the_answer_is_yes() {
+    let rig = Rig::new();
+    let handle = rig.start();
+    let refused = Rd::error(&rig.call(146, handle, &[0])).expect("refused");
+    assert_eq!(refused.status, 1);
+    assert_eq!(refused.rule, "BK-19");
+    assert!(refused.text.contains("BK-19"), "{}", refused.text);
+    // Anything but 0 or 1 is not an answer.
+    assert!(Rd::error(&rig.call(146, handle, &[2])).is_some());
+    assert!(Rd::error(&rig.call(146, handle, &[])).is_some());
+    assert!(Rd::error(&rig.call(146, handle, &[1, 1])).is_some());
+    // A phone with no books gives no bytes, and still only on a yes.
+    let response = rig.call(146, handle, &[1]);
+    let mut r = Rd::ok(&response);
+    assert!(r.bytes().is_empty());
+    r.done();
+    assert_eq!(
+        Rd::error(&rig.call(146, 0, &[1])).expect("refused").rule,
+        "handle-unknown"
+    );
+}
+
+#[test]
+fn bk_19_the_ledger_call_gives_the_bytes_the_library_gives() {
+    let books = openbmt_books::Books::default();
+    let made = crate::books::full_ledger_bytes(&books).expect("ledger");
+    let direct = books
+        .full_ledger(openbmt_books::RevealsPayments::Acknowledged)
+        .expect("ledger");
+    assert_eq!(made, direct.into_bytes());
+    assert!(!made.is_empty());
 }
 
 #[test]

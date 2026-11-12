@@ -165,7 +165,9 @@ Nothing here says what a merchant owes. It writes down what the records say.
   final record and the late payments), the rate source, the value at first
   seen, the time first seen, the satoshis, rate and source of the last
   quote, the unknowns and what each unknown needs. It can be made only by
-  passing `RevealsPayments::Acknowledged`. The first line is a comment row
+  passing `RevealsPayments::Acknowledged`. The owner app passes it only
+  after showing the warning on its own screen and the person accepting it,
+  each time the ledger is saved. The first line is a comment row
   with the sentence "This file reveals the shop's payments on the
   blockchain. Share it only with people you trust with that." The second is
   a comment row with the high-water mark of each counter (BK-11).

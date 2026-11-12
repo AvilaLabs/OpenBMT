@@ -144,6 +144,7 @@ ops run on another; it waits for at most 250 ms.
 143 price_agree_for  handle zero  args PriceForArgs -> AgreedPriceInView
 144 books            handle node  args BooksArgs -> BooksView
 145 wallet_import_read handle zero  args string -> ImportView
+146 books_ledger     handle node  args bool -> list<u8>
 ```
 
 ## Types
@@ -293,7 +294,7 @@ AgreedPriceInView: record: whole_per_btc: u64, minor_per_btc: u64, source_label:
 BooksArgs: record: offset_minutes: i32
 BooksDayView: record: date: string, sales: u64, waiting: u64, amount: string
 BooksFileView: record: month: string, csv: list<u8>
-BooksView: record: currency: string, days: list<BooksDayView>, accounting: list<BooksFileView>, ledger: list<u8>, refusal: option<Words>
+BooksView: record: currency: string, days: list<BooksDayView>, accounting: list<BooksFileView>, refusal: option<Words>
 ImportKind: enum, one tag byte
     tags Single=1 Multisig=2
 ImportView: record: kind: ImportKind, fingerprint: option<string>, first_address: string

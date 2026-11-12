@@ -23,6 +23,7 @@ use openbmt_owner_node::{OwnerLink, OwnerNode, OwnerPort, PaidEntry, PaidWhat};
 
 use crate::codec::{wire_record, wire_record_get};
 use crate::error::{from_words, rule_in, AppError, Kind};
+use crate::say::words_for;
 use crate::views::WordsView;
 
 /// The most days the page lists.
@@ -80,8 +81,6 @@ pub struct BooksView {
     pub days: Vec<BooksDayView>,
     /// The accounting export, a file for each month, oldest first.
     pub accounting: Vec<BooksFileView>,
-    /// The full ledger, empty when it was not made.
-    pub ledger: Vec<u8>,
     /// Why an export was not made, in the library's words. The days are
     /// still given.
     pub refusal: Option<WordsView>,
@@ -91,7 +90,6 @@ wire_record!(BooksView {
     currency,
     days,
     accounting,
-    ledger,
     refusal
 });
 
@@ -101,7 +99,6 @@ impl BooksView {
             currency,
             days: Vec::new(),
             accounting: Vec::new(),
-            ledger: Vec::new(),
             refusal: None,
         }
     }
@@ -189,19 +186,18 @@ pub(crate) fn disposals(paid: &[PaidEntry], shop: Currency) -> Vec<Disposal> {
         .collect()
 }
 
-/// OA-103: the books from what the node holds. A phone with no link or no
-/// settings has none, and gives no days.
-pub(crate) fn build<P: OwnerPort>(
+/// The books from what the node holds, with the shop's currency code and
+/// currency; none for a phone with no link or no settings.
+fn make_books<P: OwnerPort>(
     node: &OwnerNode<P>,
     link: Option<&OwnerLink>,
-    args: &BooksArgs,
-) -> Result<BooksView, AppError> {
+) -> Result<Option<(Books, String, Currency)>, AppError> {
     let Some(shop) = node.owner().known_settings().map(|s| s.currency) else {
-        return Ok(BooksView::empty(String::new()));
+        return Ok(None);
     };
     let code = shop.code().to_string();
     let Some(link) = link else {
-        return Ok(BooksView::empty(code));
+        return Ok(None);
     };
     let currency = Currency::of_shop(shop);
     let chains: Vec<(DeviceId, Chain)> = link
@@ -216,6 +212,23 @@ pub(crate) fn build<P: OwnerPort>(
     let books = Books::from_chains(link.devices(), &refs)
         .and_then(|b| b.with_disposals(disposals(node.paid_log(), currency)))
         .map_err(|e| books_error(&e))?;
+    Ok(Some((books, code, currency)))
+}
+
+/// OA-103: the books from what the node holds. A phone with no link or no
+/// settings has none, and gives no days. The page holds the accounting
+/// export and never the full ledger (BK-19).
+pub(crate) fn build<P: OwnerPort>(
+    node: &OwnerNode<P>,
+    link: Option<&OwnerLink>,
+    args: &BooksArgs,
+) -> Result<BooksView, AppError> {
+    let Some(shop) = node.owner().known_settings().map(|s| s.currency) else {
+        return Ok(BooksView::empty(String::new()));
+    };
+    let Some((books, code, currency)) = make_books(node, link)? else {
+        return Ok(BooksView::empty(shop.code().to_string()));
+    };
     let totals = books
         .local_day_totals(args.offset_minutes)
         .map_err(|e| books_error(&e))?;
@@ -232,17 +245,11 @@ pub(crate) fn build<P: OwnerPort>(
         .collect();
     let mut view = BooksView::empty(code);
     view.days = days;
-    let made = books
+    match books
         .accounting_export()
         .map_err(|e| export_error(&e, ExportKind::Accounting))
-        .and_then(|files| {
-            let ledger = books
-                .full_ledger(RevealsPayments::Acknowledged)
-                .map_err(|e| export_error(&e, ExportKind::FullLedger))?;
-            Ok((files, ledger))
-        });
-    match made {
-        Ok((files, ledger)) => {
+    {
+        Ok(files) => {
             view.accounting = files
                 .into_iter()
                 .map(|(month, csv)| BooksFileView {
@@ -250,10 +257,42 @@ pub(crate) fn build<P: OwnerPort>(
                     csv: csv.into_bytes(),
                 })
                 .collect();
-            view.ledger = ledger.into_bytes();
         }
         Err(AppError::Refused { words, .. }) => view.refusal = Some(WordsView(*words)),
         Err(other) => return Err(other),
     }
     Ok(view)
+}
+
+/// BK-19: the full ledger, made only when the person has accepted the
+/// warning. `acknowledged` is the app's answer; `false` refuses. This is the
+/// only place that passes `RevealsPayments::Acknowledged`. A phone with no
+/// link or no settings has no books and gives no bytes.
+pub(crate) fn ledger<P: OwnerPort>(
+    node: &OwnerNode<P>,
+    link: Option<&OwnerLink>,
+    acknowledged: bool,
+) -> Result<Vec<u8>, AppError> {
+    if !acknowledged {
+        // The app always passes the person's answer after the warning, so no
+        // person is shown this refusal: it gets the words of its kind.
+        let text = "BK-19: the full ledger is made only after the person has accepted the warning";
+        return Err(from_words(
+            Kind::Refused,
+            "BK-19",
+            text,
+            words_for(Kind::Refused, "BK-19"),
+        ));
+    }
+    let Some((books, _, _)) = make_books(node, link)? else {
+        return Ok(Vec::new());
+    };
+    full_ledger_bytes(&books)
+}
+
+pub(crate) fn full_ledger_bytes(books: &Books) -> Result<Vec<u8>, AppError> {
+    books
+        .full_ledger(RevealsPayments::Acknowledged)
+        .map(String::into_bytes)
+        .map_err(|e| export_error(&e, ExportKind::FullLedger))
 }

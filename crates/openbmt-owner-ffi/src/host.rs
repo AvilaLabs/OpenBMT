@@ -1299,6 +1299,13 @@ impl Entry {
         self.run(None, move |st| books::build(&st.node, st.link.as_ref(), &a))
     }
 
+    /// BK-19: the full ledger, when the person accepted the warning.
+    pub(crate) fn books_ledger(&self, acknowledged: bool) -> Result<Vec<u8>, AppError> {
+        self.run(None, move |st| {
+            books::ledger(&st.node, st.link.as_ref(), acknowledged)
+        })
+    }
+
     /// Sign a batch of addresses for a counter and queue it. The wallet
     /// derives the batch; the owner node watches the new addresses.
     pub(crate) fn sign_batch(&self, now: u64, a: BatchArgs) -> Result<u32, AppError> {

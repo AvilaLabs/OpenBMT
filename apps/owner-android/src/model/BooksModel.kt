@@ -22,8 +22,38 @@ object BooksModel {
         /** The library's words when an export was not made. */
         val refusal: SayWords?,
         val accounting: SaveFile?,
-        val ledger: SaveFile?,
+        /** The name the full ledger is saved under; the file itself is made only after the warning is accepted (BK-19). */
+        val ledger: String?,
     )
+
+    /**
+     * The warning before the full ledger (BK-19): the button opens it, [cancel] closes it with no call, and [accept] closes it
+     * and makes the ledger with the answer true, once. The answer is not kept: the next save asks again.
+     */
+    class LedgerAsk(private val name: String, private val make: (Boolean) -> ByteArray) {
+        var open = false
+            private set
+
+        val title = OwnerLook.BOOKS_LEDGER_WARN_TITLE
+        val text = OwnerLook.BOOKS_LEDGER_WARN_TEXT
+        val acceptLabel = OwnerLook.BOOKS_LEDGER_WARN_ACCEPT
+        val cancelLabel = OwnerLook.BOOKS_LEDGER_WARN_CANCEL
+
+        fun ask() {
+            open = true
+        }
+
+        fun cancel() {
+            open = false
+        }
+
+        /** The file to save, or null when the warning was not open. */
+        fun accept(): SaveFile? {
+            if (!open) return null
+            open = false
+            return SaveFile(name, make(true))
+        }
+    }
 
     /**
      * The library gives no words for the totals of a day, so the line is "{n} sales, {amount}" with the amount in
@@ -42,8 +72,8 @@ object BooksModel {
         val rows = b.days.map { Row(it.date, totals(it.sales, it.amount, b.currency)) }
         val month = b.accounting.lastOrNull()?.month ?: b.days.firstOrNull()?.date?.take(7)
         val accounting = b.accounting.lastOrNull()?.let { SaveFile(fileName("accounting", it.month), it.csv) }
-        val ledger = if (month != null && b.ledger.isNotEmpty()) SaveFile(fileName("ledger", month), b.ledger) else null
         val refusal = b.refusal?.say()
+        val ledger = if (month != null && refusal == null) fileName("ledger", month) else null
         val empty = if (rows.isEmpty() && refusal == null) AppWords.booksEmpty else null
         return Page(rows, empty, refusal, accounting, ledger)
     }

@@ -143,6 +143,7 @@ private const val OP_PRICE_SOURCES_FOR = 142
 private const val OP_PRICE_AGREE_FOR = 143
 private const val OP_BOOKS = 144
 private const val OP_WALLET_IMPORT_READ = 145
+private const val OP_BOOKS_LEDGER = 146
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -775,15 +776,14 @@ class BooksDay(val date: String, val sales: Long, val waiting: Long, val amount:
 class BooksFile(val month: String, val csv: ByteArray)
 
 /**
- * The books (OA-103): the days newest first, the accounting export (a file for each month, oldest first), the full
- * ledger (empty when it was not made) and, when an export was not made, the library's words for why. [currency] is
- * empty when the phone holds no settings.
+ * The books (OA-103): the days newest first, the accounting export (a file for each month, oldest first) and, when
+ * an export was not made, the library's words for why. The full ledger is not here: [OwnerNode.booksLedger] makes
+ * it. [currency] is empty when the phone holds no settings.
  */
 class Books(
     val currency: String,
     val days: List<BooksDay>,
     val accounting: List<BooksFile>,
-    val ledger: ByteArray,
     val refusal: Words?,
 )
 
@@ -2018,9 +2018,18 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
             r.string(),
             r.list { BooksDay(r.string(), r.u64(), r.u64(), r.string()) },
             r.list { BooksFile(r.string(), r.bytes()) },
-            r.bytes(),
             r.option { r.words() },
         ).also { r.end() }
+    }
+
+    /**
+     * The full ledger (BK-19): every sale with its transaction. [acknowledged] is the person's answer to the
+     * warning, passed only after it was shown on the app's own screen and accepted; `false` is refused. Empty
+     * when the phone holds no books.
+     */
+    fun booksLedger(acknowledged: Boolean): ByteArray {
+        val r = call(OP_BOOKS_LEDGER, handle) { it.bool(acknowledged) }
+        return r.bytes().also { r.end() }
     }
 
     /** What the till screen shows: the connection, the open alerts and the counts. */

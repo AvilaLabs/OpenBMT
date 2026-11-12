@@ -2602,15 +2602,13 @@ object AppModelTest {
     private fun books(
         days: List<BooksDay> = emptyList(),
         accounting: List<BooksFile> = emptyList(),
-        ledger: ByteArray = ByteArray(0),
         refusal: Words? = null,
-    ) = Books("EUR", days, accounting, ledger, refusal)
+    ) = Books("EUR", days, accounting, refusal)
 
     private fun oa_103_the_books_page_lists_the_days_the_library_gives_in_its_order() {
         val b = books(
             days = listOf(BooksDay("2026-11-10", 3, 0, "45.50"), BooksDay("2026-11-09", 1, 0, "7.00"), BooksDay("2026-10-31", 12, 1, "1234.00")),
             accounting = listOf(BooksFile("2026-10", "a".toByteArray()), BooksFile("2026-11", "b".toByteArray())),
-            ledger = "ledger".toByteArray(),
         )
         val page = BooksModel.page(b)
         ok(page.rows.map { it.date } == listOf("2026-11-10", "2026-11-09", "2026-10-31"), "the days are in the library's order, newest first")
@@ -2629,15 +2627,13 @@ object AppModelTest {
 
     private fun oa_104_the_files_are_saved_exactly_as_the_library_made_them() {
         val acct = byteArrayOf(0, 1, 2, 13, 10, 127, -1)
-        val full = byteArrayOf(9, 8, 7, -128)
         val b = books(
             days = listOf(BooksDay("2026-11-10", 3, 0, "45.50")),
             accounting = listOf(BooksFile("2026-10", "old".toByteArray()), BooksFile("2026-11", acct)),
-            ledger = full,
         )
         val page = BooksModel.page(b)
         ok(page.accounting!!.name == "openbmt-accounting-2026-11.csv" && page.accounting.bytes.contentEquals(acct), "the accounting file is the library's bytes, named for the newest month")
-        ok(page.ledger!!.name == "openbmt-ledger-2026-11.csv" && page.ledger.bytes.contentEquals(full), "the full ledger is the library's bytes, named for the newest month")
+        ok(page.ledger == "openbmt-ledger-2026-11.csv", "the full ledger is offered under a name for the newest month, and the page holds no ledger bytes")
         // A refusal: its words, and nothing to save for what was refused.
         val refusal = words(Tones.STOP)
         val refused = BooksModel.page(books(days = b.days, refusal = refusal))
@@ -2646,8 +2642,33 @@ object AppModelTest {
         val booksSaved = AppWords.booksSaved
         ok(booksSaved.heading == "File saved" && booksSaved.what == "The file is saved where you chose. It holds sale numbers, times and amounts, and no addresses." && booksSaved.next == "Give it to your bookkeeper." && booksSaved.who == Who.OWNER, "the saved words, as written down")
         val src = source("src/android/Books.kt")
-        ok(src.contains("ui.primary(OwnerLook.BOOKS_SAVE_ACCOUNTING)") && src.contains("ui.button(OwnerLook.BOOKS_SAVE_LEDGER)") && src.contains("line(OwnerLook.BOOKS_NOTE, muted = true)"), "a primary and a secondary button, and the footnote in 13 sp secondary")
+        ok(src.contains("ui.primary(OwnerLook.BOOKS_SAVE_ACCOUNTING)") && src.contains("ui.button(OwnerLook.BOOKS_SAVE_LEDGER) { showLedgerWarning(n, name) }") && src.contains("line(OwnerLook.BOOKS_NOTE, muted = true)"), "a primary and a secondary button, and the footnote in 13 sp secondary")
         ok(src.contains("file.name, file.bytes, \"text/csv\"") && src.contains("AppWords.booksSaved"), "the save writes the bytes it was given, through the picker, and says it did")
+        fullLedgerWarning()
+    }
+
+    /** BK-19: the full ledger is made only after the warning is accepted; part of the checks of OA-104. */
+    private fun fullLedgerWarning() {
+        val full = byteArrayOf(9, 8, 7, -128)
+        val calls = ArrayList<Boolean>()
+        val ask = BooksModel.LedgerAsk("openbmt-ledger-2026-11.csv") { calls.add(it); full }
+        ok(!ask.open && calls.isEmpty() && ask.accept() == null && calls.isEmpty(), "nothing is made before the button is pressed")
+        ask.ask()
+        ok(ask.open && calls.isEmpty(), "the button opens the warning and makes nothing")
+        ask.cancel()
+        ok(!ask.open && calls.isEmpty() && ask.accept() == null && calls.isEmpty(), "not now closes the warning with no call")
+        ask.ask()
+        val file = ask.accept()
+        ok(calls == listOf(true) && !ask.open, "accepting makes the call once, with true")
+        ok(file != null && file.name == "openbmt-ledger-2026-11.csv" && file.bytes.contentEquals(full), "the file is the library's bytes under the offered name")
+        ok(ask.accept() == null && calls.size == 1, "the answer is not kept: a second accept makes no call")
+        ask.ask()
+        ask.accept()
+        ok(calls == listOf(true, true), "each save asks again, and each yes makes one call")
+        ok(ask.title == "This file shows your payments" && ask.acceptLabel == "I understand, save it" && ask.cancelLabel == "Not now" &&
+            ask.text == "The full ledger lists every sale with its bitcoin transaction. Anyone who has the file can find those payments on the blockchain and follow the money from them. Share it only with people you trust with that, such as your bookkeeper.", "the warning's words, as written down")
+        val src = source("src/android/Books.kt")
+        ok(src.contains("n.booksLedger(it)") && !src.contains("n.booksLedger(true)") && src.indexOf("ask.accept()") < src.indexOf("showBooks(it)"), "the call is made from the accept button only, and its file goes to the save picker")
     }
 
     // ---- the rules and their tests -----------------------------------------------------------------------------
