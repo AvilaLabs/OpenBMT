@@ -237,23 +237,26 @@ pub fn change_confirmed_words() -> Words {
     .code("CR-241")
 }
 
-/// CR-241: the refusals of a confirmation have no words yet; these stand in
-/// for a heading, a sentence and a next step, and name the rule. They are not
-/// in [`all_words`] until the words are written.
-pub const WORDS_NEEDED_CR_241_NOTHING_WAITS: &str = "WORDS NEEDED CR-241 NOTHING WAITS";
-/// CR-241: the record of the confirmation could not be written.
-pub const WORDS_NEEDED_CR_241_NOT_WRITTEN: &str = "WORDS NEEDED CR-241 NOT WRITTEN";
-
 impl ConfirmRefused {
     /// What a manager is told when the confirmation was not signed.
     pub fn words(&self) -> Words {
-        let needed = match self {
-            Self::NothingWaits => WORDS_NEEDED_CR_241_NOTHING_WAITS,
-            Self::NotWritten(_) => WORDS_NEEDED_CR_241_NOT_WRITTEN,
+        let words = match self {
+            Self::NothingWaits => Words::new(
+                Tone::Ended,
+                "Nothing to confirm",
+                "No change waits at this counter, or a newer one has taken its place, so nothing was confirmed.",
+                Who::Manager,
+                "Open Change to confirm again to see what waits now.",
+            ),
+            Self::NotWritten(_) => Words::new(
+                Tone::Stop,
+                "Confirmation not saved",
+                "The counter could not save its confirmation, so nothing was confirmed and nothing changed.",
+                Who::Manager,
+                "Try again. If it fails again, tell the owner.",
+            ),
         };
-        Words::new(Tone::Stop, needed, needed, Who::Manager, needed)
-            .code(self.rule())
-            .detail(self.to_string())
+        words.code(self.rule()).detail(self.to_string())
     }
 }
 
@@ -789,6 +792,15 @@ pub fn all_words() -> Vec<(String, Words)> {
     // CR-112 to CR-116: the words of the Lightning driver.
     all.extend(crate::lightning::all_words());
     all.extend(crate::swap::all_words());
+    for (name, e) in [
+        ("NothingWaits", crate::confirm::ConfirmRefused::NothingWaits),
+        (
+            "NotWritten",
+            crate::confirm::ConfirmRefused::NotWritten("records.bin: full".to_string()),
+        ),
+    ] {
+        all.push((format!("ConfirmRefused::{name}"), e.words()));
+    }
     for (name, e) in crate::ownnode::every_setting_refusal() {
         all.push((format!("OwnNodeSettingRefused::{name}"), e.words()));
     }

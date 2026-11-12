@@ -477,12 +477,9 @@ fn cr_241_a_confirmation_of_another_version_or_none_signs_nothing() {
         assert!(e.to_string().starts_with("CR-241"));
     }
     assert_eq!(rig.node.records_len(), before);
-    // The words are placeholders until they are written.
-    assert!(e_words_are_placeholders(&ConfirmRefused::NothingWaits));
-}
-
-fn e_words_are_placeholders(e: &ConfirmRefused) -> bool {
-    e.words().heading.starts_with("WORDS NEEDED CR-241")
+    let w = ConfirmRefused::NothingWaits.words();
+    assert_eq!(w.heading, "Nothing to confirm");
+    assert_eq!(openbmt_core::say::check(&w), Ok(()));
 }
 
 #[test]

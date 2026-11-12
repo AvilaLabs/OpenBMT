@@ -24,16 +24,15 @@ object AppWords {
 
     // ---- a change to the shop's settings to confirm (CR-239 to CR-244) ---------------
 
-    /** The words that are not written yet; they are shown as they are and are not in [all], so the checks do not pass them. */
-    const val WORDS_NEEDED_CR_239_HOME_NEXT = "WORDS_NEEDED_CR_239_HOME_NEXT"
-    const val WORDS_NEEDED_CR_240_FIELD = "WORDS_NEEDED_CR_240_FIELD"
+    /** The label of a changed field this app has no label for. */
+    const val OTHER_SETTING = "Another setting"
 
     /** The line on Home while a change waits for a manager. */
     val changeWaits = w(
         Tones.INFO, "Change to confirm",
         "A change to the shop's settings waits for a manager to confirm it.",
         Who.MANAGER,
-        WORDS_NEEDED_CR_239_HOME_NEXT,
+        "Check it with the owner, then open Change to confirm in Settings.",
     )
 
     val changeConfirmed = w(
@@ -713,6 +712,7 @@ object AppWords {
 
     /** Every fixed words of the app, for the test that checks them all and writes the list. */
     fun all(): List<Pair<String, SayWords>> = listOf(
+        "changeWaits" to changeWaits,
         "changeConfirmed" to changeConfirmed,
         "notSetUp" to notSetUp,
         "pairingSaved" to pairingSaved,
