@@ -28,6 +28,7 @@ use openbmt_spend::Coin;
 
 mod live;
 mod own;
+mod own_spend;
 mod paid_log;
 mod receipts;
 
@@ -225,6 +226,8 @@ struct Setup {
     time: Option<Arc<AtomicU64>>,
     /// A shop with its own wallet: the allocation book it starts with.
     own: Option<AllocationBook>,
+    /// With `own`: the shop's wallet, when a test needs keys it knows.
+    own_wallet: Option<openbmt_core::wallet_single::ImportedWallet>,
 }
 
 impl Default for Setup {
@@ -236,6 +239,7 @@ impl Default for Setup {
             limits: WatchLimits::default(),
             time: None,
             own: None,
+            own_wallet: None,
         }
     }
 }
@@ -276,7 +280,12 @@ fn start_at(dir: &Dir, setup: &Setup, chain: Vec<Block>) -> Result<Rig, NodeErro
     let mut parts = match &setup.own {
         Some(book) => {
             let approver = own_approver(&OWNER_SECRET).unwrap();
-            let mut parts = OwnerParts::new(OWNER_SECRET, own::single(), approver, policy())?;
+            let mut parts = OwnerParts::new(
+                OWNER_SECRET,
+                setup.own_wallet.clone().unwrap_or_else(own::single),
+                approver,
+                policy(),
+            )?;
             parts.own_book = Some(book.clone());
             parts
         }

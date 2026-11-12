@@ -87,7 +87,7 @@ impl Rig {
 
     /// A block the driver downloaded in full: it joins, is handed over and
     /// is checked. Its fees average `rate_milli`.
-    fn mine_full(&mut self, txs: &[Transaction], rate_milli: u64) -> Block {
+    pub(super) fn mine_full(&mut self, txs: &[Transaction], rate_milli: u64) -> Block {
         let block = self.next_block(txs, rate_milli);
         let height = u32::try_from(self.chain.len()).unwrap();
         self.feed(vec![
@@ -106,7 +106,7 @@ impl Rig {
 
     /// A block that no filter matched: it joins and is checked, and the
     /// driver never downloads it.
-    fn pass_over(&mut self) -> Block {
+    pub(super) fn pass_over(&mut self) -> Block {
         let tx = [filler(9)];
         let block = self.next_block(&tx, 1_000);
         let height = u32::try_from(self.chain.len()).unwrap();
@@ -471,13 +471,13 @@ fn sample(height: u32, rate_milli: u64) -> FeeSample {
 
 // ---- the line and the offer ------------------------------------------------------------
 
-const TIP: u32 = 200;
-const COIN: u64 = 100_000;
+pub(super) const TIP: u32 = 200;
+pub(super) const COIN: u64 = 100_000;
 
 /// A history of 17 older samples at `old` and 3 at the tip at `recent`
 /// (thousandths of a satoshi per virtual byte), written before the node
 /// starts: its recent rate is `recent`, its usual rate is `old`.
-fn write_history(dir: &Dir, old: u64, recent: u64) {
+pub(super) fn write_history(dir: &Dir, old: u64, recent: u64) {
     let mut history = FeeHistory::new();
     for h in 10..27 {
         history.insert(sample(h, old));

@@ -17,7 +17,9 @@ use bitcoin::hashes::Hash;
 use bitcoin::{Block, BlockHash};
 use openbmt_owner::own_spend::OwnBuilt;
 use openbmt_owner::{Built, CashAmount, Stage};
-use openbmt_spend::{consolidation_cost_sats, Coin, MAX_CONSOLIDATION_INPUTS};
+use openbmt_spend::{
+    consolidation_cost_sats, consolidation_cost_sats_single, Coin, MAX_CONSOLIDATION_INPUTS,
+};
 use openbmt_watch::fees::{LOW_WINDOW_BLOCKS, SAMPLE_EVERY_BLOCKS};
 use openbmt_watch::{block_fee_sample, FeeHistory, HeaderChain, WellFormedBlock};
 
@@ -134,6 +136,26 @@ pub fn cost_rate(rate_milli: u64) -> u64 {
 /// OC-16, OC-17, OC-18: the line, from whether the view is ready, the coins
 /// held and the recent rate.
 pub fn receipts_line(ready: bool, payments: usize, recent_milli: Option<u64>) -> ReceiptsLine {
+    receipts_line_for(false, ready, payments, recent_milli)
+}
+
+/// What a merge costs in a wallet with `single` key or with two of three
+/// (SP-81): the sizes of the inputs differ.
+fn cost_for(single: bool, coins: usize, rate: u64) -> Option<u64> {
+    if single {
+        consolidation_cost_sats_single(coins, rate)
+    } else {
+        consolidation_cost_sats(coins, rate)
+    }
+}
+
+/// [`receipts_line`] for the wallet of the shop.
+pub fn receipts_line_for(
+    single: bool,
+    ready: bool,
+    payments: usize,
+    recent_milli: Option<u64>,
+) -> ReceiptsLine {
     if !ready {
         return ReceiptsLine::NotReady;
     }
@@ -144,7 +166,7 @@ pub fn receipts_line(ready: bool, payments: usize, recent_milli: Option<u64>) ->
         return ReceiptsLine::FeeUnknown { payments };
     };
     let rate_per_kvb = cost_rate(rate);
-    match consolidation_cost_sats(payments, rate_per_kvb) {
+    match cost_for(single, payments, rate_per_kvb) {
         Some(cost_sats) => ReceiptsLine::Known {
             payments,
             cost_sats,
@@ -200,13 +222,25 @@ pub fn merge_offer(
     usual_milli: Option<u64>,
     low: Option<bool>,
 ) -> Option<MergeOffer> {
+    merge_offer_for(false, merged, of, recent_milli, usual_milli, low)
+}
+
+/// [`merge_offer`] for the wallet of the shop.
+pub fn merge_offer_for(
+    single: bool,
+    merged: usize,
+    of: usize,
+    recent_milli: Option<u64>,
+    usual_milli: Option<u64>,
+    low: Option<bool>,
+) -> Option<MergeOffer> {
     if low != Some(true) || of < MERGE_MIN_COINS {
         return None;
     }
     let rate_per_kvb = cost_rate(recent_milli?);
     let usual = cost_rate(usual_milli?);
-    let cost_sats = consolidation_cost_sats(merged, rate_per_kvb)?;
-    let usual_cost_sats = consolidation_cost_sats(merged, usual)?;
+    let cost_sats = cost_for(single, merged, rate_per_kvb)?;
+    let usual_cost_sats = cost_for(single, merged, usual)?;
     if usual_cost_sats <= cost_sats {
         return None;
     }
@@ -409,10 +443,16 @@ impl<P: OwnerPort> OwnerNode<P> {
             && self.view.checked() >= self.watcher.chain().tip_height()
     }
 
+    /// Whether the shop's wallet has one key (SP-81), for the sizes of a merge.
+    fn single_key(&self) -> bool {
+        matches!(self.wallet, openbmt_core::wallet_single::ImportedWallet::Single(_))
+    }
+
     /// OC-16 to OC-18: the line about receipts.
     pub fn receipts_line(&self) -> ReceiptsLine {
         let tip = self.watcher.chain().tip_height();
-        receipts_line(
+        receipts_line_for(
+            self.single_key(),
             self.counted(),
             self.view.coins(tip).len(),
             self.fees.recent_rate(tip),
@@ -426,7 +466,8 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
         let tip = self.watcher.chain().tip_height();
         let (pool, of) = merge_pool(self.view.coins(tip), self.owner.options().min_confirmations);
-        merge_offer(
+        merge_offer_for(
+            self.single_key(),
             pool.len(),
             of,
             self.fees.recent_rate(tip),
