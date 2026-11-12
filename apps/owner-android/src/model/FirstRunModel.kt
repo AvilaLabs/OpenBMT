@@ -207,7 +207,7 @@ class MoneyTabs(start: ShopCurrency, private val guess: ShopCurrency) {
 }
 
 /** The screens of the first run, in the order they come. Back from each is [FirstRun.back]. */
-enum class FirstRunStep { Welcome, Shop, Till, Money, OwnAdvice, Why, RealCases, Guide, NotYet }
+enum class FirstRunStep { Welcome, Shop, Till, Money, OwnAdvice, Connect, Why, RealCases, Guide, NotYet }
 
 /** The three choices of where the money goes. */
 enum class MoneyChoice { Own, Make, Later }
@@ -233,11 +233,15 @@ class FirstRun(start: ShopPrefs, locale: String) {
     var guide = KeyGuide()
         private set
 
+    /** "Connect your wallet", made new each time the advice is left for it. Held in memory only. */
+    var connect = Connect()
+        private set
+
     fun prefs(stepsShown: Boolean): ShopPrefs = ShopPrefs(ShopPrefs.clean(name), currency, till, stepsShown)
 
     /**
      * The step after [step]; the Money step goes on to Why for the cold wallet, to OwnAdvice for the own wallet and to
-     * NotYet for the others. OwnAdvice goes on to NotYet, or to Why once the choice is changed to the cold wallet.
+     * NotYet for the others. OwnAdvice goes on to Connect (and Connect, once checked, to NotYet), or to Why once the choice is changed to the cold wallet.
      */
     fun next() {
         step = when (step) {
@@ -249,7 +253,11 @@ class FirstRun(start: ShopPrefs, locale: String) {
                 MoneyChoice.Own -> FirstRunStep.OwnAdvice
                 else -> FirstRunStep.NotYet
             }
-            FirstRunStep.OwnAdvice -> if (money == MoneyChoice.Make) FirstRunStep.Why else FirstRunStep.NotYet
+            FirstRunStep.OwnAdvice -> if (money == MoneyChoice.Make) FirstRunStep.Why else {
+                connect = Connect()
+                FirstRunStep.Connect
+            }
+            FirstRunStep.Connect -> if (connect.step == ConnectStep.Checked) FirstRunStep.NotYet else FirstRunStep.Connect
             FirstRunStep.Why -> {
                 guide = KeyGuide()
                 FirstRunStep.Guide
@@ -300,6 +308,7 @@ class FirstRun(start: ShopPrefs, locale: String) {
             FirstRunStep.Till -> FirstRunStep.Shop
             FirstRunStep.Money -> FirstRunStep.Till
             FirstRunStep.OwnAdvice -> FirstRunStep.Money
+            FirstRunStep.Connect -> if (connect.back()) FirstRunStep.Connect else FirstRunStep.OwnAdvice
             FirstRunStep.Why -> FirstRunStep.Money
             FirstRunStep.RealCases -> if (realPage > 0) {
                 realPage--
@@ -310,7 +319,7 @@ class FirstRun(start: ShopPrefs, locale: String) {
             FirstRunStep.Guide -> if (guide.back()) FirstRunStep.Guide else FirstRunStep.Why
             FirstRunStep.NotYet -> when (money) {
                 MoneyChoice.Make -> FirstRunStep.Why
-                MoneyChoice.Own -> FirstRunStep.OwnAdvice
+                MoneyChoice.Own -> FirstRunStep.Connect
                 else -> FirstRunStep.Money
             }
         }

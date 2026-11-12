@@ -1309,6 +1309,12 @@ object AppWords {
         )
         for ((key, text) in FirstRunWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         out.append(
+            "\nConnect your wallet, after the advice on an own wallet, in `ConnectWords`:\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in ConnectWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
             "\nThe key map at the top of the key-setup screens. `{k1}`, `{k2}` and `{k3}` are\n" +
                 "the state words in lower case:\n\n" +
                 "| Key | Text |\n" +

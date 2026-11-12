@@ -41,6 +41,7 @@ import org.openbmt.owner.CashAmount
 import org.openbmt.owner.CounterShare
 import org.openbmt.owner.CounterState
 import org.openbmt.owner.EntryKind
+import org.openbmt.owner.ImportedWalletView
 import org.openbmt.owner.Limit
 import org.openbmt.owner.LightningAction
 import org.openbmt.owner.SwapAction
@@ -164,7 +165,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + AppWords.keyMapAll().size + 1, "one row for each words and the header, and for each of the first run's and of the key map's")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + AppWords.keyMapAll().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's and of the key map's")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -2783,6 +2784,103 @@ object AppModelTest {
 
     // ---- the first run ----------------------------------------------------------------------------
 
+    // ---- connect your wallet -------------------------------------------------------------------
+
+    /** The key maker's test seed (WL-06, fingerprint 818bc9b6), its account key and its first address. */
+    private const val WL06_XPUB = "xpub6CgURS1GrKZkAoRGBTKYX9FhLgkKnQVZ6vdNBUbiu24xtRJ6RzLKpdg4CqsVyBLzimcJsviP59hSoGJEpTJiXE8bdBLw1qPC1DXRatKehb8"
+    private const val WL06_ADDRESS = "bc1qyjassxtmzl02s8de8jw9365qmuvwg74udtp3vj"
+    private const val WL06_ONE = "wpkh([818bc9b6/84h/0h/0h]$WL06_XPUB/<0;1>/*)#96yh9yhx"
+    private const val WL06_RECEIVE = "wpkh([818bc9b6/84h/0h/0h]$WL06_XPUB/0/*)#epd8sdec"
+    private const val WL06_CHANGE = "wpkh([818bc9b6/84h/0h/0h]$WL06_XPUB/1/*)#g4gxdcfq"
+
+    private fun connectTests() {
+        // The library is not loaded on the JVM: a reader that answers as the core does for the known answers (WL-06,
+        // WL-03) and refuses as WL-08 and WL-10 do, with the words of docs/screens/core.md.
+        val seen = ArrayList<String>()
+        val refusedWords = Words(Tones.STOP, Who.OWNER, "This description is damaged", "Its checksum does not match, so part of it was misread or changed.", "Scan or export it again from your wallet.", null, null, null, null)
+        val reader: (String) -> ImportedWalletView = { text ->
+            seen.add(text)
+            val parts = text.trim().split(Regex("\\s+"))
+            val known = parts.all { it.contains("818bc9b6") && it.contains(WL06_XPUB) && it.contains("#") }
+            if (!known || parts.size > 2 || (parts.size == 2 && parts[0] == parts[1])) throw OwnerException("WL-10", "damaged", 1, refusedWords)
+            ImportedWalletView(false, "818bc9b6", WL06_ADDRESS)
+        }
+        fun bytes(t: String) = t.toByteArray(Charsets.UTF_8)
+
+        // The order: the intro first; nothing to check before a description reads.
+        val c = Connect()
+        ok(c.step == ConnectStep.Intro && c.firstAddress == null, "Connect starts at the intro, with nothing read")
+        c.same(); c.different(); ok(c.step == ConnectStep.Intro, "no address check answers before a description reads")
+        ok(!c.back(), "Back from the intro leaves Connect, to the advice")
+
+        // Paste: one line, then the screen before.
+        c.paste(); ok(c.step == ConnectStep.Paste, "Paste the text opens the paste screen")
+        c.same(); ok(c.step == ConnectStep.Paste, "Same address is nothing on the paste screen")
+        val one = bytes(WL06_ONE)
+        ok(c.read(one, reader) == null && c.step == ConnectStep.Address, "a one-line description reads and the address check follows")
+        ok(seen.last() == WL06_ONE && one.all { it == 0.toByte() }, "the library got the text whole, and the bytes are wiped")
+        ok(c.firstAddress == WL06_ADDRESS && !c.multisig && ConnectWords.kind(c.multisig) == "Wallet with one key", "the first address and the kind are held")
+        ok(c.back() && c.step == ConnectStep.Paste && c.firstAddress == null, "Back from the address check returns to the paste and forgets the address")
+        ok(c.back() && c.step == ConnectStep.Intro, "Back from the paste returns to the intro")
+
+        // Paste: the two-line form of WL-03.
+        c.paste()
+        val two = bytes("$WL06_RECEIVE\n$WL06_CHANGE\n")
+        ok(c.read(two, reader) == null && c.step == ConnectStep.Address && c.firstAddress == WL06_ADDRESS, "a two-line description (receive and change) reads")
+        ok(seen.last() == "$WL06_RECEIVE\n$WL06_CHANGE\n" && two.all { it == 0.toByte() }, "both lines went to the library together, and the bytes are wiped")
+
+        // Same address goes to Checked; Back returns; Next goes to the notice.
+        c.same(); ok(c.step == ConnectStep.Checked, "Same address: Wallet checked")
+        ok(c.back() && c.step == ConnectStep.Address && c.firstAddress == WL06_ADDRESS, "Back from Wallet checked returns to the address check")
+
+        // Different ends and clears.
+        c.different(); ok(c.step == ConnectStep.Different && c.firstAddress == null && !c.multisig, "Different ends and clears what was read")
+        ok(c.back() && c.step == ConnectStep.Intro, "Back from Different returns to the intro")
+
+        // A refusal shows the library's words, wipes the text, and stays.
+        val bad = bytes("wpkh(nothing)#aaaaaaaa")
+        val said = c.read(bad, reader)
+        ok(said != null && said.heading == "This description is damaged" && said.next == "Scan or export it again from your wallet." && c.step == ConnectStep.Intro, "a refusal gives the core's words and the step stays")
+        ok(said != null && SayCheck.problem(said) == null && bad.all { it == 0.toByte() } && c.firstAddress == null, "the words pass the check, the text is wiped and nothing is held")
+        c.paste()
+        val again = c.read(bytes("   "), reader)
+        ok(again != null && c.step == ConnectStep.Paste, "an empty paste is a refusal on the paste screen")
+
+        // The first run: Connect follows the advice, Checked's Next goes to the notice, Back at every step.
+        val r = FirstRun(ShopPrefs(), "DE")
+        r.next(); r.next(); r.next(); r.choose(MoneyChoice.Own); ok(r.step == FirstRunStep.OwnAdvice, "the advice on an own wallet")
+        r.next(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Intro, "Continue with my wallet: Connect your wallet")
+        r.next(); ok(r.step == FirstRunStep.Connect, "Next is nothing before the wallet is checked")
+        r.connect.paste(); r.back(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Intro, "Back from the paste: the intro")
+        r.back(); ok(r.step == FirstRunStep.OwnAdvice, "Back from the intro: the advice")
+        r.next(); r.connect.paste(); r.connect.read(bytes(WL06_ONE), reader)
+        ok(r.connect.step == ConnectStep.Address, "the paste path reaches the address check")
+        r.back(); ok(r.connect.step == ConnectStep.Paste, "Back from the address check: the paste")
+        r.connect.read(bytes(WL06_ONE), reader); r.connect.same(); ok(r.connect.step == ConnectStep.Checked, "Same address: checked")
+        r.next(); ok(r.step == FirstRunStep.NotYet, "Next from Wallet checked goes to the notice")
+        r.back(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Checked, "Back from the notice: Wallet checked")
+        r.back(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Address, "Back from Wallet checked: the address check")
+        r.back(); r.back(); r.back()
+        ok(r.step == FirstRunStep.OwnAdvice, "Back all the way returns to the advice")
+        r.next(); ok(r.connect.step == ConnectStep.Intro && r.connect.firstAddress == null, "Connect starts new each time")
+
+        // The words: exactly the words file's, and the screens copy them.
+        ok(ConnectWords.introTitle == "Connect your wallet" && ConnectWords.introSteps.size == 3 && ConnectWords.introScan == "Scan the code" && ConnectWords.introPaste == "Paste the text", "the intro words")
+        ok(ConnectWords.introSteps[1] == "Find Export or Settings, then Output descriptor." && ConnectWords.introWhere == "Where to find it", "the three steps")
+        ok(ConnectWords.addressKindMulti == "Wallet with 2 of 3 keys" && ConnectWords.kind(true) == ConnectWords.addressKindMulti && ConnectWords.addressSame == "Same address" && ConnectWords.addressDifferent == "Different", "the address check words")
+        ok(ConnectWords.differentTitle == "Different wallet" && ConnectWords.differentText.endsWith("Nothing was saved.") && ConnectWords.checkedTitle == "Wallet checked" && ConnectWords.checkedNext == "Next", "the ends")
+        ok(ConnectWords.pasteHint == "Paste the output descriptor here." && ConnectWords.pasteCheck == "Check", "the paste words")
+        val keys = ConnectWords.all().map { it.first }
+        ok(keys.size == keys.toSet().size && ConnectWords.all().all { (k, t) -> t.isNotBlank() && !t.contains("  ") && k.isNotEmpty() }, "every key is used once")
+        ok(Connect.rows(WL06_ADDRESS) == "bc1q yjas sxtm\nzl02 s8de 8jw9\n365q muvw g74u\ndtp3 vj", "the address in groups of four, three to a line")
+        val ui = source("src/android/Connect.kt")
+        for (bad in listOf("shopFile", "File\\(", "OwnerNode", "writeText", "SharedPreferences", "\\.save\\(", "mnemonic", "seed")) {
+            ok(!Regex(bad).containsMatchIn(ui), "Connect reaches nothing outside memory: $bad")
+        }
+        ok(ui.contains("r.connect.read("), "the screens hand the bytes to the model")
+        ok(source("src/model/ConnectModel.kt").contains("text.fill(0)") && ui.contains("field.setText(\"\")"), "the text is cleared from the field and the bytes wiped")
+    }
+
     private fun firstRunTests() {
         // The welcome is for a phone with no setup, and only then.
         val none = SetupStatus(false, false)
@@ -2847,8 +2945,8 @@ object AppModelTest {
         ok(r.till == Till.Toast && r.query == "to", "back to the till keeps the choice and the search")
         r.next(); r.choose(MoneyChoice.Own); ok(r.step == FirstRunStep.OwnAdvice, "own wallet: the advice first")
         r.back(); ok(r.step == FirstRunStep.Money && r.money == MoneyChoice.Own, "back from the advice to the money, the own wallet still chosen")
-        r.choose(MoneyChoice.Own); r.next(); ok(r.step == FirstRunStep.NotYet, "Continue with my wallet goes where the own wallet went")
-        r.back(); ok(r.step == FirstRunStep.OwnAdvice, "back from the notice to the advice")
+        r.choose(MoneyChoice.Own); r.next(); ok(r.step == FirstRunStep.Connect, "Continue with my wallet goes to Connect your wallet")
+        r.back(); ok(r.step == FirstRunStep.OwnAdvice, "back from Connect your wallet to the advice")
         r.makeInstead(); ok(r.step == FirstRunStep.Why && r.money == MoneyChoice.Make, "make a cold wallet: the choice is Make and the why follows")
         r.back(); ok(r.step == FirstRunStep.Money, "back from the why to the money")
         FirstRun(ShopPrefs(), "DE").let { f -> f.makeInstead(); ok(f.step == FirstRunStep.Welcome && f.money == null, "the switch is from the advice only") }
@@ -3078,6 +3176,7 @@ object AppModelTest {
         ceremonyTests()
         keyMapTests()
         firstRunTests()
+        connectTests()
         pictureTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")

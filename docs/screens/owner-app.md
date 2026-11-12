@@ -410,6 +410,35 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | kgDoneText | On the page, press Clear and close, then shut down Tails and take out both sticks. Keep the card somewhere safe and private, and put the words on steel as soon as you can. |
 | kgDoneButton | Done |
 
+Connect your wallet, after the advice on an own wallet, in `ConnectWords`:
+
+| Key | Text |
+|---|---|
+| introTitle | Connect your wallet |
+| introText | Your wallet can show a public description of itself, called an output descriptor. OpenBMT uses it to make a new address for every sale. It cannot spend your money. |
+| introWhere | Where to find it |
+| introStep1 | Open your wallet on the computer or phone where it lives. |
+| introStep2 | Find Export or Settings, then Output descriptor. |
+| introStep3 | Show it as a code, then scan it with this phone. |
+| introNote | Sparrow, Nunchuk and Bitcoin Core can show one. A wallet that shows only an xpub or zpub cannot be used yet. |
+| introScan | Scan the code |
+| introPaste | Paste the text |
+| pasteHint | Paste the output descriptor here. |
+| pasteCheck | Check |
+| addressTitle | Check the first address |
+| addressText | This is the first receive address of the wallet you scanned. In your wallet, open the list of addresses and find the first receive address. They must be the same. |
+| addressKindSingle | Wallet with one key |
+| addressKindMulti | Wallet with 2 of 3 keys |
+| addressSame | Same address |
+| addressDifferent | Different |
+| differentTitle | Different wallet |
+| differentText | The address is not your wallet's first address, so this is a different wallet, or the code was changed on the way. Nothing was saved. |
+| differentNext | Scan the code again from the right wallet. |
+| checkedTitle | Wallet checked |
+| checkedText | This is the right wallet. Sales will go straight to it, and OpenBMT can see what arrives but can never spend it. |
+| checkedNote | Connecting it to your counters is the next part, and it is still being built. |
+| checkedNext | Next |
+
 The key map at the top of the key-setup screens. `{k1}`, `{k2}` and `{k3}` are
 the state words in lower case:
 
