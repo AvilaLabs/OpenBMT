@@ -1,0 +1,140 @@
+:root {
+  --ink: #111;
+  --paper: #fff;
+  --soft: #f1f1ee;
+  --line: #444;
+  --accent: #0b4f8a;
+  --warn: #8a1010;
+  --heads: #d6e8d0;
+  --tails: #e8dccb;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html { font-size: 22px; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.35;
+}
+
+main { max-width: 62rem; margin: 0 auto; padding: 0.5rem 1.25rem 1rem; }
+
+.notice { margin: 1rem; padding: 1rem; border: 3px solid var(--warn); font-size: 1.2rem; }
+
+.banner {
+  background: #ffe36e;
+  border: 3px solid var(--ink);
+  padding: 0.35rem 0.75rem;
+  margin: 0.25rem 0 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.top { display: flex; align-items: center; gap: 1rem; margin: 0.25rem 0 0.5rem; }
+.step {
+  min-width: 3.4rem;
+  padding: 0.25rem 0.5rem;
+  border: 3px solid var(--ink);
+  border-radius: 0.5rem;
+  font-size: 1.3rem;
+  font-weight: 700;
+  text-align: center;
+}
+h1 { font-size: 2rem; margin: 0; }
+h1:focus { outline: none; }
+h2 { font-size: 1.4rem; margin: 0.6rem 0 0.25rem; }
+p { margin: 0.4rem 0; }
+.lead { font-size: 1.25rem; }
+.tagline { font-size: 1.3rem; font-weight: 700; }
+.note { color: #333; }
+.strong { font-weight: 700; }
+.warn { color: var(--warn); font-weight: 700; font-size: 1.25rem; border-left: 6px solid var(--warn); padding-left: 0.75rem; }
+.label { color: #333; font-size: 0.8rem; }
+footer.label { margin-top: 1rem; border-top: 1px solid #999; padding-top: 0.4rem; }
+
+button {
+  font: inherit;
+  cursor: pointer;
+  color: var(--ink);
+  background: var(--soft);
+  border: 3px solid var(--ink);
+  border-radius: 0.6rem;
+}
+button:focus-visible, input:focus-visible, summary:focus-visible {
+  outline: 4px solid var(--accent);
+  outline-offset: 2px;
+}
+button:disabled { opacity: 0.4; cursor: default; }
+button.big { font-size: 1.3rem; font-weight: 700; padding: 0.6rem 1.2rem; margin: 0.35rem 0.5rem 0.35rem 0; }
+button.alt { background: var(--paper); }
+button.small { font-size: 1rem; padding: 0.3rem 0.8rem; margin: 0.25rem 0.5rem 0.25rem 0; }
+.row { display: flex; flex-wrap: wrap; align-items: center; }
+.choice { margin: 0.4rem 0; }
+
+.checklist { font-size: 1.15rem; margin: 0.3rem 0; padding-left: 1.4rem; }
+.checklist li { margin: 0.15rem 0; }
+
+/* Step 2 */
+.pad { display: flex; gap: 1rem; }
+.pad button.flipbtn { flex: 1; font-size: 2rem; padding: 0.9rem 1rem; margin: 0.3rem 0; }
+.count { font-size: 2.2rem; font-weight: 700; margin: 0.2rem 0; }
+.grid { display: grid; grid-template-columns: repeat(16, 1.9rem); gap: 3px; margin: 0.3rem 0; }
+.cell {
+  height: 1.9rem;
+  border: 1px solid #888;
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.8rem;
+}
+.cell.h { background: var(--heads); border-color: var(--ink); }
+.cell.t { background: var(--tails); border-color: var(--ink); }
+.done { margin: 0.3rem 0; }
+
+/* Step 3 */
+.words {
+  list-style: none;
+  padding: 0;
+  margin: 0.4rem 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.35rem 1rem;
+}
+.words li { display: flex; align-items: baseline; gap: 0.6rem; border: 2px solid var(--ink); border-radius: 0.5rem; padding: 0.2rem 0.7rem; }
+.words .n { min-width: 2ch; font-size: 1.1rem; color: #333; text-align: right; }
+.words .w { font-size: 2rem; font-weight: 700; font-family: ui-monospace, "DejaVu Sans Mono", monospace; }
+details.hand { margin: 0.8rem 0; }
+details.hand summary { cursor: pointer; font-size: 1.2rem; font-weight: 700; }
+table.working { border-collapse: collapse; font-size: 0.9rem; margin: 0.4rem 0; }
+table.working th, table.working td { border: 1px solid #888; padding: 0.15rem 0.5rem; text-align: left; }
+table.working .bits, .checkbits { font-family: ui-monospace, "DejaVu Sans Mono", monospace; }
+.checkbits { background: #ffe36e; margin-left: 0.4rem; padding: 0 0.3rem; }
+
+/* Step 4 */
+form.check { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1rem; margin: 0.6rem 0; }
+.field { display: flex; flex-direction: column; font-size: 1.15rem; }
+input.prefix {
+  width: 7ch;
+  font: inherit;
+  font-size: 2rem;
+  font-family: ui-monospace, "DejaVu Sans Mono", monospace;
+  padding: 0.2rem 0.4rem;
+  border: 3px solid var(--ink);
+  border-radius: 0.4rem;
+}
+
+/* Steps 5 and 6 */
+.phone { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-start; margin: 0.4rem 0; }
+.qr svg { display: block; border: 1px solid #888; }
+.facts { flex: 1; min-width: 16rem; }
+.fp { font-size: 2.6rem; font-weight: 700; font-family: ui-monospace, "DejaVu Sans Mono", monospace; margin-bottom: 0.8rem; }
+.address { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; font-size: 1.9rem; font-weight: 700; font-family: ui-monospace, "DejaVu Sans Mono", monospace; }
+
+@media (max-height: 800px) {
+  html { font-size: 20px; }
+  .words .w { font-size: 1.8rem; }
+}
