@@ -47,6 +47,7 @@ object PictureTiming {
     /** Rises from 0 to 1 and back to 0 across the stretch: a press, a pulse. */
     fun bump(t: Float, from: Float, to: Float): Float {
         val x = seg(t, from, to)
+        if (x <= 0f || x >= 1f) return 0f
         return Math.sin(Math.PI * x).toFloat()
     }
 }

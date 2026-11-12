@@ -307,7 +307,7 @@ private class Scene(private val c: Canvas, private val p: Paint, private val pal
             val top = 78f
             val on = if (k == 3) lit else 0f
             if (on > 0f) {
-                dot(l + 16f, top + 28f, 38f * on, withAlpha(Palette.BRAND, 0.25f * on))
+                dot(l + 16f, top + 28f, 30f * on, withAlpha(Palette.BRAND, 0.25f * on))
             }
             rr(l, top, l + 32f, top + 56f, 8f, if (on > 0f) Palette.BRAND else pal.chip)
             rrOutline(l, top, l + 32f, top + 56f, 8f, if (on > 0f) Palette.BRAND else pal.fieldLine)
@@ -317,7 +317,7 @@ private class Scene(private val c: Canvas, private val p: Paint, private val pal
             when (k) {
                 0 -> { rrOutline(x - 10f, y - 7f, x + 10f, y + 7f, 2f, mark); c.drawLine(x - 10f, y - 2f, x + 10f, y - 2f, p) }
                 1 -> { rrOutline(x - 11f, y - 7f, x + 11f, y + 7f, 2f, mark); line(mark, 2f); c.drawCircle(x, y, 3f, p) }
-                2 -> for (r in listOf(4f, 8f, 12f)) { rect.set(x - r, y - r + 4f, x + r, y + r + 4f); c.drawArc(rect, 225f, 90f, false, p) }
+                2 -> for (r in listOf(4f, 8f, 12f).also { line(mark, 2f) }) { rect.set(x - r, y - r + 4f, x + r, y + r + 4f); c.drawArc(rect, 225f, 90f, false, p) }
                 else -> btc(x, y, 24f, mark)
             }
         }
@@ -345,9 +345,9 @@ private class Scene(private val c: Canvas, private val p: Paint, private val pal
     }
 
     private fun why(t: Float) {
-        val ground = 132f
+        val ground = 128f
         line(pal.divider, 3f)
-        c.drawLine(70f, ground + 16f, 250f, ground + 16f, p)
+        c.drawLine(70f, ground + 20f, 250f, ground + 20f, p)
         val up = seg(t, 0.05f, 0.58f)
         val y = ground - 92f * 4f * up * (1f - up)
         val spin = ease(up) * 4f * Math.PI.toFloat()
