@@ -2,6 +2,7 @@
 
 mod clover;
 mod common;
+mod loyverse;
 mod meta;
 mod refusals;
 mod say;

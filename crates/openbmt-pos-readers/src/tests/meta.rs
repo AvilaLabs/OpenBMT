@@ -1,4 +1,4 @@
-//! Ties the rules of section 9 of `docs/POS-RULES.md` (PS-90 to PS-99) to
+//! Ties the rules of section 9 of `docs/POS-RULES.md` (PS-90 to PS-104) to
 //! the tests: every one has a test named for it. The tests of the other
 //! rules are in `openbmt-pos`, which lists these as not tested there.
 
@@ -6,9 +6,10 @@ use std::collections::BTreeSet;
 
 const RULES: &str = include_str!("../../../../docs/POS-RULES.md");
 const CARGO: &str = include_str!("../../Cargo.toml");
-const SOURCES: [&str; 7] = [
+const SOURCES: [&str; 8] = [
     include_str!("clover.rs"),
     include_str!("common.rs"),
+    include_str!("loyverse.rs"),
     include_str!("refusals.rs"),
     include_str!("say.rs"),
     include_str!("square.rs"),
@@ -16,11 +17,19 @@ const SOURCES: [&str; 7] = [
     include_str!("meta.rs"),
 ];
 
+/// The number after `PS-` at the start of `text`, when it is one of section 9
+/// (90 and up).
+fn section_number(text: &str) -> Option<u32> {
+    let digits: String = text.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok().filter(|n| *n >= 90)
+}
+
 fn defined() -> BTreeSet<String> {
     RULES
         .lines()
-        .filter_map(|l| l.strip_prefix("- **PS-9"))
-        .map(|rest| format!("PS-9{}", &rest[..1]))
+        .filter_map(|l| l.strip_prefix("- **PS-"))
+        .filter_map(section_number)
+        .map(|n| format!("PS-{n}"))
         .collect()
 }
 
@@ -33,9 +42,9 @@ fn section() -> String {
 }
 
 #[test]
-fn the_rules_file_defines_ps_90_to_ps_99() {
+fn the_rules_file_defines_ps_90_to_ps_104() {
     let ids = defined();
-    let want: BTreeSet<String> = (0..10).map(|i| format!("PS-9{i}")).collect();
+    let want: BTreeSet<String> = (90..=104).map(|i| format!("PS-{i}")).collect();
     assert_eq!(ids, want);
 }
 
@@ -52,9 +61,8 @@ fn every_rule_of_section_9_has_a_test() {
 fn every_test_that_names_a_rule_of_section_9_names_one_that_exists() {
     let ids = defined();
     for line in SOURCES.concat().lines() {
-        if let Some(rest) = line.trim().strip_prefix("fn ps_9") {
-            let id = format!("PS-9{}", &rest[..1]);
-            assert!(ids.contains(&id), "test {line} names {id}");
+        if let Some(n) = line.trim().strip_prefix("fn ps_").and_then(section_number) {
+            assert!(ids.contains(&format!("PS-{n}")), "test {line} names PS-{n}");
         }
     }
 }
@@ -68,14 +76,17 @@ fn every_rule_the_code_names_exists() {
         include_str!("../common.rs"),
         include_str!("../error.rs"),
         include_str!("../lib.rs"),
+        include_str!("../loyverse.rs"),
         include_str!("../say.rs"),
         include_str!("../square.rs"),
         include_str!("../time.rs"),
     ] {
-        for (at, _) in file.match_indices("PS-9") {
-            let id = &file[at..at + 5];
-            assert!(ids.contains(id), "the code names {id}");
-            seen += 1;
+        for (at, _) in file.match_indices("PS-") {
+            let after = file.get(at + 3..).unwrap_or("");
+            if let Some(n) = section_number(after) {
+                assert!(ids.contains(&format!("PS-{n}")), "the code names PS-{n}");
+                seen += 1;
+            }
         }
     }
     assert!(seen > 30, "only {seen} rule names in the code");
@@ -86,6 +97,7 @@ fn what_the_vendors_documents_did_not_confirm_is_marked_in_the_rules() {
     let s = section();
     assert!(s.contains("[verify, E5]"));
     assert!(s.contains("[verify, E6]"));
+    assert!(s.contains("[verify, Loyverse]"));
     assert!(s.contains("written from the vendors' documentation"));
 }
 

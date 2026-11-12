@@ -1,0 +1,48 @@
+{
+  "payment_types": [
+    {
+      "id": "PT-CASH",
+      "name": "Cash",
+      "type": "CASH",
+      "stores": [
+        "42dc2cec-6f40-11ea-bde9-1269e7c5a22d"
+      ],
+      "created_at": "2020-03-25T19:55:23.077Z",
+      "updated_at": "2020-03-30T08:05:10.020Z",
+      "deleted_at": null
+    },
+    {
+      "id": "PT-BTC",
+      "name": "Bitcoin",
+      "type": "OTHER",
+      "stores": [
+        "42dc2cec-6f40-11ea-bde9-1269e7c5a22d"
+      ],
+      "created_at": "2020-03-25T19:55:23.077Z",
+      "updated_at": "2020-03-30T08:05:10.020Z",
+      "deleted_at": null
+    },
+    {
+      "id": "PT-BTC2",
+      "name": "Bitcoin",
+      "type": "OTHER",
+      "stores": [
+        "42dc2cec-6f40-11ea-bde9-1269e7c5a22d"
+      ],
+      "created_at": "2020-03-25T19:55:23.077Z",
+      "updated_at": "2020-03-30T08:05:10.020Z",
+      "deleted_at": null
+    },
+    {
+      "id": "PT-NEW",
+      "name": "Gift voucher",
+      "type": "OTHER",
+      "stores": [
+        "42dc2cec-6f40-11ea-bde9-1269e7c5a22d"
+      ],
+      "created_at": "2020-03-25T19:55:23.077Z",
+      "updated_at": "2020-03-30T08:05:10.020Z",
+      "deleted_at": null
+    }
+  ]
+}

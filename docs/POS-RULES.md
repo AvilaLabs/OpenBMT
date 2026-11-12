@@ -310,18 +310,21 @@ both in plain words, since every unknown explains itself (§2.6).
 
 ## 9. Vendor readers
 
-`crates/openbmt-pos-readers` holds one reader for each of two vendors,
-Square and Clover. Each builds the text of one request for the orders that
-changed since a cursor and reads the reply into a page of PS-80, or refuses
-it whole. It has no network, no clock and no sign-in: the caller sends the
-request with the sign-in it holds, hands the bytes of the reply in and stores
-the page. Square is read-only (`docs/DESIGN.md` section 5.6, decided
+`crates/openbmt-pos-readers` holds one reader for each of three vendors,
+Square, Clover and Loyverse. Each builds the text of one request for the orders
+that changed since a cursor and reads the reply into a page of PS-80, or
+refuses it whole. It has no network, no clock and no sign-in: the caller sends
+the request with the sign-in it holds, hands the bytes of the reply in and
+stores the page. Square is read-only (`docs/DESIGN.md` section 5.6, decided
 2026-11-10): nothing in its reader names a payment or a change of an order.
+So is Loyverse's: nothing in it names a receipt or a refund to create.
 
 The tests read fixtures that were written from the vendors' documentation,
 not captured from a real account. What the documentation did not confirm is
-marked **[verify, E5]** for Square and **[verify, E6]** for Clover: each such
-point needs a real seller or merchant account before the reader is relied on.
+marked **[verify, E5]** for Square, **[verify, E6]** for Clover and
+**[verify, Loyverse]** for Loyverse: each such point needs a real seller,
+merchant or account before the reader is relied on. Loyverse's fixtures follow
+the API reference as it was rendered on 2026-11-12.
 
 - **PS-90.** A reply is read with `openbmt-json`: at most 8 MiB, at most 64
   levels of arrays and objects, at most 400,000 values, UTF-8 throughout, the
@@ -465,6 +468,111 @@ point needs a real seller or merchant account before the reader is relied on.
   network, no clock and no sign-in, and reads nothing from a file. A refused
   reply is reported to a connector as `PosError::BadResponse` and a person is
   given the words of `say.rs`.
+- **PS-100.** The Loyverse request is a GET of `/v1.0/receipts` with the
+  query `updated_at_min` from the cursor's time, written
+  `YYYY-MM-DDTHH:MM:SS.000Z` in UTC, `limit` of 250 (the most the API gives)
+  and `cursor` when the cursor holds Loyverse's marker (PS-101); every value
+  is percent-encoded as in PS-97. The time is the cursor's whole second, so a
+  receipt of that second is read again, which PS-75 makes harmless. The API
+  lists receipts newest first by creation and has no way to ask for another
+  order, so the request cannot ask for oldest first (PS-101 says how the
+  reader orders a page). The request reads every store of the account: it
+  names no `store_id`, and each receipt names its own. A request is refused
+  when the settings name no location. Three more requests are read-only
+  GETs: the payment types, `/v1.0/payment_types` with `show_deleted` of
+  `true`, so that a type deleted since still has its name; the merchant,
+  `/v1.0/merchant/`; and the receipts that refunds name (PS-103),
+  `/v1.0/receipts` with `receipt_numbers` (1 to 250, each percent-encoded,
+  joined by an encoded comma) and `limit` of 250. The base URL and the bearer
+  sign-in are the caller's. **[verify, Loyverse: that `updated_at_min` means
+  "since" and whether it includes the time itself, that a cursor goes with
+  the same filter, that paging by cursor skips no receipt made or changed
+  while it runs, that `show_deleted` applies to payment types, whether a reply
+  of payment types has pages, and that `receipt_numbers` returns a receipt of
+  any age]**
+- **PS-101.** The Loyverse reply is `receipts`, which is required, and
+  `cursor`, which is absent or `null` when there is no more; a reply whose
+  `errors` is not empty is refused (PS-91). More than 250 receipts are
+  refused (PS-94). A receipt has a `receipt_number` (the order's id), a
+  `receipt_type`, a `store_id` (the location; refused, never cut, PS-93),
+  `created_at` (opened), `updated_at` and `total_money`, and optionally
+  `cancelled_at`, `receipt_date` (read and checked, not kept), `note`,
+  `order`, `refund_for` and `payments`. A receipt carries no currency: the
+  caller passes the account's own (PS-104). A `SALE` is a closed order, and a
+  voided one when `cancelled_at` is there; the reply gives no time of closing,
+  so `closed_at` stays empty. A `REFUND` is PS-103. A type that is not `SALE`
+  or `REFUND` leaves the receipt out of the page unless one of its payments is
+  or may be a Bitcoin tender (named as one, or with no name and no payment
+  type to name it), when it refuses the reply. The reference is the `note`,
+  else the `order`, read as a note typed by a person (PS-93). A tip is part of
+  `total_money` and has no payment of its own, so a tender's tip is 0 and the
+  receipt's `tip` is not read. The orders of a page are oldest first by last
+  change, then by receipt number, whatever order the reply has them in. The
+  API lists newest first, so Loyverse's marker leads to older receipts and the
+  newest receipts are on the first page. The cursor of a page that has more
+  keeps the time and holds a marker of the newest change of the first page
+  of the sync, a tilde and Loyverse's own cursor. The cursor of the last
+  page is that newest change (never earlier than the time the sync started
+  from), so the receipts that changed while the pages were read, which are
+  after it, are read again, which PS-75 makes harmless. **[verify, Loyverse:
+  that `receipts` is there when nothing was found, that a cursor is a
+  printable word, that an update moves `updated_at` and a cancellation sets
+  `cancelled_at`, and that a refund moves its sale's `updated_at` or not]**
+- **PS-102.** A payment of a `SALE` is a tender. Its `payment_type_id` is
+  required, and its `money_amount` and `paid_at`; `name` and `type` are
+  optional and checked when there. A payment has no id of its own, so the
+  tender's id is its payment type id, and `#2`, `#3` and so on after it for
+  a second and later payment of one type. The name is the payment's `name`
+  when the reply carries it, else the name of its payment type among the
+  payment types the caller handed in (including deleted ones); with neither
+  the reply is refused, since the payment may be Bitcoin. A name is cut as in
+  PS-93. Which tenders are Bitcoin stays PS-10, against that name. The kind is
+  `Cash` for the type `CASH`, `Card` for `NONINTEGRATEDCARD` and `Other` for
+  any other type or none, so a type the reader does not know is another kind
+  and never a Bitcoin tender; a Cash or Card payment named like a Bitcoin
+  tender is counted (PS-11). The payment types
+  reply is `payment_types` with an `id` and a `name` for each and optionally
+  a `type`, read as strictly as the receipts; an id that is there twice is
+  read once, from the later. Two Bitcoin payments, or a Bitcoin and a cash
+  payment, on one receipt are two tenders. **[verify, Loyverse: that a
+  payment's `name` and `type` are in every reply, the full list of payment
+  types a receipt's payment may have (the reference shows `CASHROUNDING`,
+  which a payment type does not), that the payments add up to the total, that
+  a shop's own Bitcoin type is of the type `OTHER`, and that `paid_at` is when
+  the customer paid]**
+- **PS-103.** A `REFUND` receipt is a refund of the sale its `refund_for`
+  names, as Square's and Clover's refunds are of a tender, and is never an
+  order itself. Each of its payments is added to the refunded amount of the
+  first tender of the sale with that payment type that has room for it, and
+  the sale's last change is the later of its own and the refund's, so the
+  refunded order is the newer version (PS-75). A refund that is cancelled
+  (`cancelled_at`) is not a refund. A refund of nothing is out of range, and
+  one beyond the tender and its tip is refused as in PS-94. The sale is found
+  among the receipts of the page, else among the sales the caller asked for
+  with the numbers `refunded_sales` lists, whose reply is read as strictly as
+  the page; a sale found there joins the page as an order. A refund whose sale
+  is nowhere, or whose payment type the sale does not hold, is refused for a
+  payment that is or may be Bitcoin and ignored for any other. A sale that is
+  cancelled stays voided. **[verify, Loyverse: that a refund receipt names its
+  sale in `refund_for` and its payments carry the payment types of the sale's,
+  that its amounts are positive, how a partial refund is written, and what a
+  cancelled refund looks like]**
+- **PS-104.** The currency of a receipt and the decimal places of its money
+  amounts are the account's: the caller reads them from the reply of the
+  merchant request (`currency.code`, three capital letters, and
+  `currency.decimal_places`, 0 to 9, which are refused outside that) and
+  passes them in. Loyverse writes money as a decimal number in whole units
+  (`17.52`, and no decimals for a currency such as the yen). `openbmt-json`
+  keeps an integer exactly and does not keep a number with a fraction or an
+  exponent, so the reader reads an amount that is an integer and scales it by
+  ten to the power of the decimal places, and refuses any amount with a
+  fraction or an exponent as of the wrong type, never rounded (PS-92). An
+  amount from 0 to 9,223,372,036,854,775,807 after scaling is read; another is
+  out of range. Until the JSON reader keeps the text of a number, a receipt
+  with cents is refused whole. Times are RFC 3339 as PS-92 reads them,
+  whether or not they carry milliseconds. **[verify, Loyverse: that money
+  amounts never carry more decimal places than the account's, and the
+  rounding of a total]**
 
 ## 10. What these rules do not do
 

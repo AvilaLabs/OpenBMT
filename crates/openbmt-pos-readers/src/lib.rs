@@ -1,14 +1,17 @@
-//! The readers of two POS vendors' orders: Square and Clover.
+//! The readers of three POS vendors' orders: Square, Clover and Loyverse.
 //!
 //! Each builds the text of one request for the orders that changed since a
 //! cursor and reads the reply into a page of the model of `openbmt-pos`
 //! (PS-80), or refuses it whole. The rules are in `docs/POS-RULES.md`,
-//! section 9 (PS-90 to PS-99); the tests name the rule they prove.
+//! section 9 (PS-90 to PS-104); the tests name the rule they prove.
 //!
 //! - [`square`]: the body of a SearchOrders request and the reading of its
 //!   reply (PS-95, PS-96). Read-only.
 //! - [`clover`]: the path and query of a request for a merchant's orders and
 //!   the reading of its reply (PS-97, PS-98).
+//! - [`loyverse`]: the path and query of a request for the receipts updated
+//!   since a time and the reading of its reply, with the payment types and the
+//!   merchant (PS-100 to PS-104).
 //!
 //! There is no network, no clock, no storage and no sign-in here: the caller
 //! sends the request with the sign-in it holds, hands the bytes of the reply
@@ -18,7 +21,8 @@
 //!
 //! The fixtures of the tests are written from the vendors' documentation,
 //! not captured from a real account; every point that needs one is marked
-//! **[verify, E5]** (Square) or **[verify, E6]** (Clover) in the rules.
+//! **[verify, E5]** (Square), **[verify, E6]** (Clover) or **[verify, Loyverse]**
+//! in the rules.
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.
@@ -38,6 +42,7 @@
 pub mod clover;
 mod common;
 pub mod error;
+pub mod loyverse;
 pub mod say;
 pub mod square;
 pub mod time;

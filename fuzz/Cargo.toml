@@ -483,6 +483,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "pos_loyverse_parse"
+path = "fuzz_targets/pos_loyverse_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "qr_jni_call"
 path = "fuzz_targets/qr_jni_call.rs"
 test = false

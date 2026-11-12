@@ -1,0 +1,256 @@
+{
+  "receipts": [
+    {
+      "receipt_number": "R-1001",
+      "note": "btc K7M2QX",
+      "receipt_type": "SALE",
+      "refund_for": null,
+      "order": null,
+      "created_at": "2026-11-10T14:00:00.000Z",
+      "receipt_date": "2026-11-10T14:00:00.000Z",
+      "updated_at": "2026-11-10T14:01:00.000Z",
+      "cancelled_at": null,
+      "source": "point of sale",
+      "total_money": 30,
+      "total_tax": 0,
+      "points_earned": 0,
+      "points_deducted": 0,
+      "points_balance": 0,
+      "customer_id": null,
+      "total_discount": 0,
+      "employee_id": "58f53835-7a17-11ea-bde9-1269e7c5a22d",
+      "store_id": "42dc2cec-6f40-11ea-bde9-1269e7c5a22d",
+      "pos_device_id": "1cce2f2e-8033-4b67-ad2a-b9d1c749ec26",
+      "dining_option": "Dine in",
+      "total_discounts": [],
+      "total_taxes": [],
+      "tip": 0,
+      "surcharge": 0,
+      "line_items": [
+        {
+          "id": "a94d8606-7268-11ea-bde9-1269e7c5a22d",
+          "item_name": "Coffee",
+          "quantity": 1,
+          "price": 30,
+          "total_money": 30
+        }
+      ],
+      "payments": [
+        {
+          "payment_type_id": "PT-CASH",
+          "name": "Cash",
+          "type": "CASH",
+          "money_amount": 10,
+          "paid_at": "2026-11-10T14:00:30.000Z",
+          "payment_details": null
+        },
+        {
+          "payment_type_id": "PT-BTC",
+          "name": "Bitcoin",
+          "type": "OTHER",
+          "money_amount": 20,
+          "paid_at": "2026-11-10T14:00:31.000Z",
+          "payment_details": null
+        }
+      ]
+    },
+    {
+      "receipt_number": "R-1002",
+      "note": null,
+      "receipt_type": "SALE",
+      "refund_for": null,
+      "order": null,
+      "created_at": "2026-11-10T14:10:00.000Z",
+      "receipt_date": "2026-11-10T14:10:00.000Z",
+      "updated_at": "2026-11-10T14:12:00.000Z",
+      "cancelled_at": "2026-11-10T14:12:00.000Z",
+      "source": "point of sale",
+      "total_money": 15,
+      "total_tax": 0,
+      "points_earned": 0,
+      "points_deducted": 0,
+      "points_balance": 0,
+      "customer_id": null,
+      "total_discount": 0,
+      "employee_id": "58f53835-7a17-11ea-bde9-1269e7c5a22d",
+      "store_id": "42dc2cec-6f40-11ea-bde9-1269e7c5a22d",
+      "pos_device_id": "1cce2f2e-8033-4b67-ad2a-b9d1c749ec26",
+      "dining_option": "Dine in",
+      "total_discounts": [],
+      "total_taxes": [],
+      "tip": 0,
+      "surcharge": 0,
+      "line_items": [
+        {
+          "id": "a94d8606-7268-11ea-bde9-1269e7c5a22d",
+          "item_name": "Coffee",
+          "quantity": 1,
+          "price": 15,
+          "total_money": 15
+        }
+      ],
+      "payments": [
+        {
+          "payment_type_id": "PT-BTC",
+          "name": "Bitcoin",
+          "type": "OTHER",
+          "money_amount": 15,
+          "paid_at": "2026-11-10T14:10:30.000Z",
+          "payment_details": null
+        }
+      ]
+    },
+    {
+      "receipt_number": "R-1003",
+      "note": null,
+      "receipt_type": "SALE",
+      "refund_for": null,
+      "order": null,
+      "created_at": "2026-11-10T14:20:00.000Z",
+      "receipt_date": "2026-11-10T14:20:00.000Z",
+      "updated_at": "2026-11-10T14:21:00.000Z",
+      "cancelled_at": null,
+      "source": "point of sale",
+      "total_money": 15,
+      "total_tax": 0,
+      "points_earned": 0,
+      "points_deducted": 0,
+      "points_balance": 0,
+      "customer_id": null,
+      "total_discount": 0,
+      "employee_id": "58f53835-7a17-11ea-bde9-1269e7c5a22d",
+      "store_id": "42dc2cec-6f40-11ea-bde9-1269e7c5a22d",
+      "pos_device_id": "1cce2f2e-8033-4b67-ad2a-b9d1c749ec26",
+      "dining_option": "Dine in",
+      "total_discounts": [],
+      "total_taxes": [],
+      "tip": 0,
+      "surcharge": 0,
+      "line_items": [
+        {
+          "id": "a94d8606-7268-11ea-bde9-1269e7c5a22d",
+          "item_name": "Coffee",
+          "quantity": 1,
+          "price": 15,
+          "total_money": 15
+        }
+      ],
+      "payments": [
+        {
+          "payment_type_id": "PT-BTC",
+          "name": "Bitcoin",
+          "type": "OTHER",
+          "money_amount": 10,
+          "paid_at": "2026-11-10T14:20:30.000Z",
+          "payment_details": null
+        },
+        {
+          "payment_type_id": "PT-BTC",
+          "name": " bitcoin ",
+          "type": "OTHER",
+          "money_amount": 5,
+          "paid_at": "2026-11-10T14:20:40.000Z",
+          "payment_details": null
+        }
+      ]
+    },
+    {
+      "receipt_number": "R-1004",
+      "note": null,
+      "receipt_type": "SALE",
+      "refund_for": null,
+      "order": "ORD-7",
+      "created_at": "2026-11-10T14:30:00.000Z",
+      "receipt_date": "2026-11-10T14:30:00.000Z",
+      "updated_at": "2026-11-10T14:31:00.000Z",
+      "cancelled_at": null,
+      "source": "point of sale",
+      "total_money": 30,
+      "total_tax": 0,
+      "points_earned": 0,
+      "points_deducted": 0,
+      "points_balance": 0,
+      "customer_id": null,
+      "total_discount": 0,
+      "employee_id": "58f53835-7a17-11ea-bde9-1269e7c5a22d",
+      "store_id": "42dc2cec-6f40-11ea-bde9-1269e7c5a22d",
+      "pos_device_id": "1cce2f2e-8033-4b67-ad2a-b9d1c749ec26",
+      "dining_option": "Dine in",
+      "total_discounts": [],
+      "total_taxes": [],
+      "tip": 0,
+      "surcharge": 0,
+      "line_items": [
+        {
+          "id": "a94d8606-7268-11ea-bde9-1269e7c5a22d",
+          "item_name": "Coffee",
+          "quantity": 1,
+          "price": 30,
+          "total_money": 30
+        }
+      ],
+      "payments": [
+        {
+          "payment_type_id": "PT-BTC2",
+          "money_amount": 25,
+          "paid_at": "2026-11-10T14:30:30.000Z",
+          "payment_details": null
+        },
+        {
+          "payment_type_id": "PT-NEW",
+          "name": "Gift voucher",
+          "type": "FUTURE_TYPE",
+          "money_amount": 5,
+          "paid_at": "2026-11-10T14:30:40.000Z",
+          "payment_details": null
+        }
+      ]
+    },
+    {
+      "receipt_number": "R-1005",
+      "note": null,
+      "receipt_type": "REFUND",
+      "refund_for": "R-1001",
+      "order": null,
+      "created_at": "2026-11-10T14:40:00.000Z",
+      "receipt_date": "2026-11-10T14:40:00.000Z",
+      "updated_at": "2026-11-10T14:40:00.000Z",
+      "cancelled_at": null,
+      "source": "point of sale",
+      "total_money": 5,
+      "total_tax": 0,
+      "points_earned": 0,
+      "points_deducted": 0,
+      "points_balance": 0,
+      "customer_id": null,
+      "total_discount": 0,
+      "employee_id": "58f53835-7a17-11ea-bde9-1269e7c5a22d",
+      "store_id": "42dc2cec-6f40-11ea-bde9-1269e7c5a22d",
+      "pos_device_id": "1cce2f2e-8033-4b67-ad2a-b9d1c749ec26",
+      "dining_option": "Dine in",
+      "total_discounts": [],
+      "total_taxes": [],
+      "tip": 0,
+      "surcharge": 0,
+      "line_items": [
+        {
+          "id": "a94d8606-7268-11ea-bde9-1269e7c5a22d",
+          "item_name": "Coffee",
+          "quantity": 1,
+          "price": 5,
+          "total_money": 5
+        }
+      ],
+      "payments": [
+        {
+          "payment_type_id": "PT-BTC",
+          "name": "Bitcoin",
+          "type": "OTHER",
+          "money_amount": 5,
+          "paid_at": "2026-11-10T14:40:00.000Z",
+          "payment_details": null
+        }
+      ]
+    }
+  ]
+}

@@ -442,7 +442,7 @@ impl Request {
 }
 
 /// PS-91: a reply whose `errors` is not empty is refused.
-fn no_service_error(doc: &Value) -> Result<(), ReadRefused> {
+pub(crate) fn no_service_error(doc: &Value) -> Result<(), ReadRefused> {
     match opt(doc, "errors") {
         Some(e) if !array(e, "errors")?.is_empty() => Err(ReadRefused::ServiceError),
         _ => Ok(()),

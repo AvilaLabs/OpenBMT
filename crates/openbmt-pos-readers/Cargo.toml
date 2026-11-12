@@ -1,6 +1,6 @@
 [package]
 name = "openbmt-pos-readers"
-description = "The readers of two POS vendors' orders (Square, Clover): the text of each request and the strict reading of each reply into a page of POS orders. No network, no clock, no sign-in"
+description = "The readers of three POS vendors' orders (Square, Clover, Loyverse): the text of each request and the strict reading of each reply into a page of POS orders. No network, no clock, no sign-in"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
