@@ -139,7 +139,7 @@ impl Words {
 }
 
 /// The longest heading, in characters.
-pub const MAX_HEADING: usize = 34;
+pub const MAX_HEADING: usize = 28;
 /// The longest sentence, in characters.
 pub const MAX_SENTENCE: usize = 140;
 /// The longest quoted text, in characters.

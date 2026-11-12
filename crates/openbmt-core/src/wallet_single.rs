@@ -1104,13 +1104,13 @@ mod tests {
             ),
             (
                 ImportRefused::TestNetwork,
-                "This is a test-network wallet",
+                "Test-network wallet",
                 "It is for testnet or signet, not real bitcoin.",
                 "Export the description of your real bitcoin account and scan that.",
             ),
             (
                 ImportRefused::Unsupported,
-                "This wallet type is not supported",
+                "Wallet type not supported",
                 "OpenBMT can check native SegWit single-key wallets and its own 2-of-3 multisig. This is a different kind.",
                 "In your wallet, export the public description of a native SegWit account (it starts with wpkh) and scan that.",
             ),

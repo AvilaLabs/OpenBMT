@@ -259,7 +259,10 @@ impl WalletDescription {
             return Err(WalletError::DuplicateXpub);
         }
         let body = Self::body(network, &slots, "<0;1>/*");
-        let canonical = format!("{body}#{}", descriptor_checksum(&body).expect("alphabet"));
+        let sum = descriptor_checksum(&body).ok_or_else(|| {
+            WalletError::Parse("character outside the descriptor alphabet".into())
+        })?;
+        let canonical = format!("{body}#{sum}");
         let multi = Descriptor::<DescriptorPublicKey>::from_str(&canonical)
             .map_err(|e| WalletError::Parse(e.to_string()))?;
         let singles = multi
@@ -302,7 +305,7 @@ impl WalletDescription {
         for (i, p) in parts.iter().enumerate() {
             slots.push(Self::parse_key(p, (i + 1) as u8)?);
         }
-        let slots: [KeySlot; 3] = slots.try_into().expect("three");
+        let slots: [KeySlot; 3] = slots.try_into().map_err(|_| WalletError::NonCanonical)?;
         let wallet = Self::new(network, slots)?;
         if wallet.canonical.split('#').next() != Some(&body.replace('\'', "h")) {
             return Err(WalletError::NonCanonical);
@@ -371,7 +374,9 @@ impl WalletDescription {
     pub fn single_path_strings(&self) -> [String; 2] {
         let make = |suffix: &str| {
             let body = Self::body(self.network, &self.slots, suffix);
-            format!("{body}#{}", descriptor_checksum(&body).expect("alphabet"))
+            // The body is made of the descriptor alphabet only.
+            let sum = descriptor_checksum(&body).unwrap_or_default();
+            format!("{body}#{sum}")
         };
         [make("0/*"), make("1/*")]
     }
@@ -430,7 +435,8 @@ impl WalletDescription {
                 .map_err(|e| WalletError::Derive(e.to_string()))?;
             keys.push(PublicKey::new(child.public_key));
         }
-        Ok(keys.try_into().expect("three keys"))
+        keys.try_into()
+            .map_err(|_| WalletError::Derive("expected three keys".into()))
     }
 
     /// The witness script at `index` on `chain`: `OP_2 <k> <k> <k> OP_3
