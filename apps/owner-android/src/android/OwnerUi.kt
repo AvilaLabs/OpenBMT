@@ -142,14 +142,15 @@ class PlaceEnd(context: Context, private val place: View, private val end: View,
     }
 }
 
-/** A small pill with [text] in the ink of the warn tone on its band, as the count badge of the waiting card is shaped. */
+/** A small pill with [text] in the ink of the warn tone on its tint, edged with its band: the palette checks that ink only on the tint. */
 internal fun Controller.endChip(text: String): TextView {
     val warn = ui.pal.warn
     return ui.text(text, 13f, bold = true, colour = warn.ink).also {
         it.setPadding(ui.px(10), ui.px(3), ui.px(10), ui.px(3))
         it.background = GradientDrawable().apply {
             cornerRadius = ui.px(13).toFloat()
-            setColor(warn.band)
+            setColor(warn.tint)
+            setStroke(ui.px(1), warn.band)
         }
     }
 }
