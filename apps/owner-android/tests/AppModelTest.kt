@@ -1278,12 +1278,12 @@ object AppModelTest {
         ok(AppWords.keyMapRule == "Any 2 of the 3 keys can spend. One alone cannot.", "the key map's rule")
         ok(AppWords.keyMapSpoken == "Key 1, on this phone: {k1}. Key 2, on the Key app: {k2}. Key 3, on steel: {k3}. Any 2 of the 3 keys can spend.", "the spoken description, as written")
         val keys = AppWords.keyMapAll().map { it.first }
-        ok(keys.size == 11 && keys.toSet().size == 11 && keys.all { k -> AppWords.all().none { it.first == k } }, "the key map's keys are used once")
+        ok(keys.size == 14 && keys.toSet().size == 14 && keys.all { k -> AppWords.all().none { it.first == k } }, "the key map's keys are used once")
         val screensMdText = File(appDir, "../../docs/screens/owner-app.md").readText()
         ok(keys.all { k -> screensMdText.contains("| $k |") }, "docs/screens/owner-app.md has every key map key")
         // The checks of the words: each label as a heading, each sentence as a sentence.
         for ((name, text) in AppWords.keyMapAll()) {
-            val sentence = name == "keyMapRule"
+            val sentence = name == "keyMapRule" || name == "keyMadeText"
             val w = if (sentence) Words(Tones.INFO, Who.OWNER, "Key map", text, "Go on.", null, null, null, null).say()
             else if (name == "keyMapSpoken") Words(Tones.INFO, Who.OWNER, "Key map", KeyMapModel.spoken(listOf(KeyState.Made, KeyState.Next, KeyState.NotYet)), "Go on.", null, null, null, null).say()
             else Words(Tones.INFO, Who.OWNER, text, "Go on.", "Look.", null, null, null, null).say()
@@ -1327,10 +1327,18 @@ object AppModelTest {
         val view = source("src/android/KeyMap.kt")
         ok(!view.contains("chip") && !view.contains("GradientDrawable") && !view.contains("tone(") && view.contains("KeyMapModel.fill(night)") && view.contains("IconDrawable(Icon.Tick"), "no chips and no cards; the tick is drawn")
         ok(!view.contains("keyMapMade") && !view.contains("stateWord"), "the state words are only spoken")
-        ok(src.contains("private fun Controller.keyRule(): View = ui.keyMapRule()") && Regex("after = keyRule\\(\\)").findAll(src).count() == 7, "each of the seven screens with the path puts the rule after its words")
+        ok(src.contains("private fun Controller.keyRule(): View = ui.keyMapRule()") && Regex("after = keyRule\\(\\)").findAll(src).count() == 6 && src.contains("stack(*stageFold(at.words.say()).toTypedArray(), keyRule())"), "each of the seven screens with the path puts the rule after its words")
         ok(view.contains("fun Ui.keyMapRule()") && view.contains("AppWords.keyMapRule") && view.indexOf("AppWords.keyMapRule") > view.indexOf("fun Ui.keyMapRule()"), "the rule is not part of the path")
         // "Start again" is the quiet button on the screens that show the path.
-        ok(Regex("ui\\.quiet\\(\"Start again\"\\)").findAll(src).count() == 6, "six screens with the path have the quiet Start again")
+        ok(Regex("ui\\.quiet\\(\"Start again\"\\)").findAll(src).count() == 12 && !src.contains("ui.button(\"Start again\")"), "every Start again of the ceremony but the confirmation's own is the quiet button")
+        // The key-made screen: the words file's title, heading and paragraph, the stage words under Details, the rule, one primary and one quiet button.
+        ok(AppWords.keyMadeTitle == "Your keys" && AppWords.keyMadeHeading == "Now make key 2" &&
+            AppWords.keyMadeText == "Open the Key app on the second phone and choose Set up keys. It shows a code. Scan that code with this phone.", "the key-made screen's words, as written")
+        val madeScreen = src.substringAfter("private fun Controller.showKeyMade(").substringBefore("// ---- an unfinished ceremony")
+        ok(madeScreen.contains("AppWords.keyMadeTitle") && Regex("ui\\.text\\(").findAll(madeScreen).count() == 2 && madeScreen.contains("ui.text(AppWords.keyMadeHeading, 26f, bold = true)") && madeScreen.contains("ui.text(AppWords.keyMadeText, 17f"), "one heading and one paragraph")
+        ok(madeScreen.contains("body.addAll(stageFold(stateWords))") && madeScreen.contains("lead = keyMap(ceremony), after = keyRule()") && !madeScreen.contains("ceremonyScanNext") && !madeScreen.contains("ui.words("), "the stage words are in the fold, the rule is after them, and there is no words panel")
+        ok(Regex("ui\\.primary\\(").findAll(madeScreen).count() == 1 && Regex("ui\\.quiet\\(").findAll(madeScreen).count() == 1 && !madeScreen.contains("ui.button(") && !madeScreen.contains("ui.danger("), "one primary and one quiet button")
+        ok(src.contains("ui.detailsFold(col)") && source("../android-common/src/android/Ui.kt").contains("fun detailsFold(content: View)") && source("../android-common/src/android/Ui.kt").contains("content.visibility = View.GONE"), "the fold is the kit's Details fold, closed at first")
         val common = File(appDir, "../android-common/src/android/Ui.kt").readText()
         ok(common.contains("fun quiet(label: String") && common.contains("ButtonKind.Quiet -> pal.secondary") && common.contains("ButtonKind.Quiet -> setColor(Color.TRANSPARENT)") && common.contains("Space.QUIET") && Space.QUIET == 48, "the quiet button: no fill, no outline, secondary text, 48 dp")
         ok(Palette.contrast(Palette.light.secondary, Palette.light.background) >= Palette.MIN_CONTRAST && Palette.contrast(Palette.dark.secondary, Palette.dark.background) >= Palette.MIN_CONTRAST, "the quiet button's text reads on the page in both schemes")
@@ -1365,10 +1373,10 @@ object AppModelTest {
         ok(first.contains("File(dir, AppFiles.CEREMONY_FILE).exists() && !File(dir, AppFiles.SETUP_FILE).exists()") && first.contains("showCeremonyResume(message)"), "a record and no setup resumes")
         val c = ceremonyCode()
         val resume = c.substringAfter("internal fun Controller.showCeremonyResume(").substringBefore("/** A record that does not read")
-        ok(resume.contains("OwnerCeremony.stage(record)") && resume.contains("at.words.say()") && resume.contains("CeremonyModel.resumeAction(at.stage)"), "the library says the stage, and its words are shown")
+        ok(resume.contains("OwnerCeremony.stage(record)") && resume.contains("stageFold(at.words.say())") && !resume.contains("ui.words(at.words") && !resume.contains("resumeWords") && resume.contains("words = AppWords.ceremonyResume") && resume.contains("CeremonyModel.resumeAction(at.stage)"), "the library says the stage, and its words are shown")
         ok(resume.contains("ResumeAction.ScanAnswer, ResumeAction.ScanAnswerAgain -> scanAnswer()") && resume.contains("ResumeAction.SaveSetup -> saveFinished(record)"), "each stage goes on from there")
         ok(resume.contains("ui.quiet(\"Start again\") { showStartAgain() }"), "start again is offered")
-        ok(c.contains("private fun Controller.notReadable(") && c.substringAfter("private fun Controller.notReadable(").substringBefore("/** The confirmation").contains("ui.button(\"Start again\")"), "a record that does not read can only be started again")
+        ok(c.contains("private fun Controller.notReadable(") && c.substringAfter("private fun Controller.notReadable(").substringBefore("/** The confirmation").contains("ui.quiet(\"Start again\")"), "a record that does not read can only be started again")
         val confirm = c.substringAfter("internal fun Controller.showStartAgain()").substringBefore("/** Deletes the ceremony's record.")
         ok(confirm.contains("AppWords.ceremonyStartAgain") && confirm.contains("ui.danger(\"Start again\") { throwAway() }") && confirm.contains("ui.primary(\"Keep going\") { begin() }"), "the confirmation, and the way to keep going")
         ok(!confirm.contains(".delete()"), "nothing is deleted before the confirmation")
@@ -1421,7 +1429,7 @@ object AppModelTest {
         ok(code.contains("ui.primary(\"The Key app shows the same words\") { finishCeremony(d) }") && code.contains("ui.danger(\"They differ\") { showWordsDiffer(d, built) }"), "the two answers")
         ok(Regex("OwnerCeremony\\.finish\\(").findAll(c).count() == 1 && Regex("finishCeremony\\(").findAll(c).count() == 3, "only the owner's word finishes, and the retry after a refusal")
         val differ = c.substringAfter("private fun Controller.showWordsDiffer(").substringBefore("// ---- the last step")
-        ok(differ.contains("AppWords.ceremonyWordsDiffer") && differ.contains("ui.button(\"Start again\") { showStartAgain() }"), "a difference leads to start again")
+        ok(differ.contains("AppWords.ceremonyWordsDiffer") && differ.contains("ui.quiet(\"Start again\") { showStartAgain() }"), "a difference leads to start again")
         ok(c.contains("OwnerCeremony.finish(FinishArgs(d.record, defaults.refundDepth, defaults.birthday))"), "the library's refund depth and first block")
         val save = c.substringAfter("private fun Controller.saveFinished(").substringBefore("private fun Controller.showSaveFailed(")
         ok(save.indexOf("OwnerCeremony.open(record)") in 1 until save.indexOf("OwnerSetup.format(") + 40 && save.indexOf("saveSetup(") > save.indexOf("OwnerSetup.format("), "the finished record is opened, written as the setup text and saved")

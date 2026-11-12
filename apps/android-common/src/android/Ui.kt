@@ -653,21 +653,25 @@ class Ui(internal val context: Context) {
 
     // ---- the four ways a screen's words are shown --------------------------------------------------
 
+    /** The "Details" fold: its toggle and, under it, [content], hidden until the toggle is pressed. */
+    fun detailsFold(content: View): List<View> {
+        content.visibility = View.GONE
+        val toggle = text("${WordsModel.DETAILS_TITLE} (show)", Type.SECONDARY, bold = true, colour = pal.info.ink)
+        toggle.minimumHeight = px(Space.TOUCH)
+        toggle.gravity = Gravity.CENTER_VERTICAL
+        toggle.setOnClickListener {
+            val open = content.visibility != View.VISIBLE
+            content.visibility = if (open) View.VISIBLE else View.GONE
+            toggle.text = "${WordsModel.DETAILS_TITLE} (${if (open) "hide" else "show"})"
+        }
+        return listOf(toggle, content)
+    }
+
     private fun detailsViews(model: WordsModel): List<View> {
         val out = ArrayList<View>()
         if (model.quotedText != null) out.add(quoted(model.quotedLabel ?: "", model.quotedText))
         if (model.details.isNotEmpty()) {
-            val fold = text(model.details.joinToString("\n"), Type.CODE - 2f, mono = true).apply { visibility = View.GONE }
-            val toggle = text("${WordsModel.DETAILS_TITLE} (show)", Type.SECONDARY, bold = true, colour = pal.info.ink)
-            toggle.minimumHeight = px(Space.TOUCH)
-            toggle.gravity = Gravity.CENTER_VERTICAL
-            toggle.setOnClickListener {
-                val open = fold.visibility != View.VISIBLE
-                fold.visibility = if (open) View.VISIBLE else View.GONE
-                toggle.text = "${WordsModel.DETAILS_TITLE} (${if (open) "hide" else "show"})"
-            }
-            out.add(toggle)
-            out.add(fold)
+            out.addAll(detailsFold(text(model.details.joinToString("\n"), Type.CODE - 2f, mono = true)))
         }
         return out
     }

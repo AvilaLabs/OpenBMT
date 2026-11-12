@@ -66,6 +66,9 @@ object AppWords {
     const val keyMapMade = "Made"
     const val keyMapNext = "Next"
     const val keyMapNotYet = "Not yet"
+    const val keyMadeTitle = "Your keys"
+    const val keyMadeHeading = "Now make key 2"
+    const val keyMadeText = "Open the Key app on the second phone and choose Set up keys. It shows a code. Scan that code with this phone."
     const val keyMapRule = "Any 2 of the 3 keys can spend. One alone cannot."
 
     /** The key map's spoken description; `{k1}`, `{k2}` and `{k3}` are the state words in lower case. */
@@ -78,6 +81,7 @@ object AppWords {
         "keyMapKey3" to keyMapKey3, "keyMapKey3Where" to keyMapKey3Where,
         "keyMapMade" to keyMapMade, "keyMapNext" to keyMapNext, "keyMapNotYet" to keyMapNotYet,
         "keyMapRule" to keyMapRule, "keyMapSpoken" to keyMapSpoken,
+        "keyMadeTitle" to keyMadeTitle, "keyMadeHeading" to keyMadeHeading, "keyMadeText" to keyMadeText,
     )
 
     // ---- setting up ------------------------------------------------------------------

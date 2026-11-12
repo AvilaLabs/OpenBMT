@@ -408,3 +408,6 @@ the state words in lower case:
 | keyMapNotYet | Not yet |
 | keyMapRule | Any 2 of the 3 keys can spend. One alone cannot. |
 | keyMapSpoken | Key 1, on this phone: {k1}. Key 2, on the Key app: {k2}. Key 3, on steel: {k3}. Any 2 of the 3 keys can spend. |
+| keyMadeTitle | Your keys |
+| keyMadeHeading | Now make key 2 |
+| keyMadeText | Open the Key app on the second phone and choose Set up keys. It shows a code. Scan that code with this phone. |

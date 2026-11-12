@@ -12,6 +12,7 @@ import org.openbmt.app.SayWords
 import org.openbmt.app.SealedFile
 import org.openbmt.app.UrCall
 import org.openbmt.app.UrScan
+import org.openbmt.app.WordsModel
 import org.openbmt.owner.AnswerView
 import org.openbmt.owner.BuildArgs
 import org.openbmt.owner.FinishArgs
@@ -90,12 +91,25 @@ internal fun Controller.startCeremony() {
     }
 }
 
-/** Key 1 is made: the library's words of the stage, and what to do on the Key app. */
+/** The library's words of a stage, folded under "Details" (OA-26, OA-27): its heading and what it says. */
+private fun Controller.stageFold(words: SayWords): List<View> {
+    val model = WordsModel.of(words)
+    val col = android.widget.LinearLayout(act).apply { orientation = android.widget.LinearLayout.VERTICAL }
+    col.addView(ui.text(model.heading, 15f, bold = true), ui.margins())
+    col.addView(ui.text(model.what, 15f, colour = ui.pal.secondary), ui.margins(top = 4))
+    return ui.detailsFold(col)
+}
+
+/** Key 1 is made: what to do on the Key app, with the library's words of the stage under "Details". */
 private fun Controller.showKeyMade(stateWords: SayWords) {
+    val body = ArrayList<View>()
+    body.add(ui.text(AppWords.keyMadeHeading, 26f, bold = true))
+    body.add(ui.text(AppWords.keyMadeText, 17f, colour = ui.pal.secondary))
+    body.addAll(stageFold(stateWords))
     screen(
-        "Key 1 is made", listOf(ui.words(AppWords.ceremonyScanNext)),
+        AppWords.keyMadeTitle, body,
         listOf(ui.primary(ResumeAction.ScanAnswer.label) { scanAnswer() }, ui.quiet("Start again") { showStartAgain() }),
-        words = stateWords, lead = keyMap(ceremony), after = keyRule(),
+        lead = keyMap(ceremony), after = keyRule(),
     )
 }
 
@@ -125,20 +139,19 @@ internal fun Controller.showCeremonyResume(message: SayWords?) {
     ceremonyLogoShown = false
     val views = ArrayList<View>()
     message?.let { views.add(ui.words(it)) }
-    views.add(ui.words(at.words.say()))
-    views.add(ui.words(CeremonyModel.resumeWords(action)))
     val go = ui.primary(action.label) {
         when (action) {
             ResumeAction.ScanAnswer, ResumeAction.ScanAnswerAgain -> scanAnswer()
             ResumeAction.SaveSetup -> saveFinished(record)
         }
     }
-    screen("Setup in progress", views, listOf(go, ui.quiet("Start again") { showStartAgain() }), words = AppWords.ceremonyResume, lead = keyMap(ceremony), after = keyRule())
+    screen("Setup in progress", views, listOf(go, ui.quiet("Start again") { showStartAgain() }), words = AppWords.ceremonyResume, lead = keyMap(ceremony),
+        after = stack(*stageFold(at.words.say()).toTypedArray(), keyRule()))
 }
 
 /** A record that does not read: the way out is to start again, which throws it away after a confirmation. */
 private fun Controller.notReadable(words: SayWords) {
-    centre(words, listOf(ui.primary("Try again") { begin() }, ui.button("Start again") { showStartAgain() }))
+    centre(words, listOf(ui.primary("Try again") { begin() }, ui.quiet("Start again") { showStartAgain() }))
 }
 
 /** The confirmation before the unfinished ceremony is thrown away. */
@@ -178,7 +191,7 @@ private fun Controller.scanAnswer() {
 private fun Controller.showAnswerFailed(words: SayWords) {
     centre(
         words,
-        listOf(ui.primary(ResumeAction.ScanAnswer.label) { scanAnswer() }, ui.button("Start again") { showStartAgain() }),
+        listOf(ui.primary(ResumeAction.ScanAnswer.label) { scanAnswer() }, ui.quiet("Start again") { showStartAgain() }),
         title = "Scan the Key app",
     )
 }
@@ -322,7 +335,7 @@ private fun Controller.showBuildRefused(d: CeremonyDraft, words: SayWords) {
     val actions = ArrayList<android.widget.Button>()
     actions.add(ui.primary(ResumeAction.ScanAnswer.label) { scanAnswer() })
     if (d.read?.key2 == null && d.answer != null) actions.add(ui.button("Give key 2 again") { showKey2(d, null) })
-    actions.add(ui.button("Start again") { showStartAgain() })
+    actions.add(ui.quiet("Start again") { showStartAgain() })
     centre(words, actions)
 }
 
@@ -382,7 +395,7 @@ private fun Controller.showSetupCode(d: CeremonyDraft, built: WalletBuiltView) {
 private fun Controller.showWordsDiffer(d: CeremonyDraft, built: WalletBuiltView) {
     centre(
         AppWords.ceremonyWordsDiffer,
-        listOf(ui.button("Start again") { showStartAgain() }, ui.button("Back") { showSetupCode(d, built) }),
+        listOf(ui.quiet("Start again") { showStartAgain() }, ui.button("Back") { showSetupCode(d, built) }),
         title = "Wallet not finished", back = { showSetupCode(d, built) },
     )
 }
@@ -412,7 +425,7 @@ private fun Controller.finishCeremony(d: CeremonyDraft) {
 }
 
 private fun Controller.showFinishFailed(words: SayWords, d: CeremonyDraft) {
-    centre(words, listOf(ui.primary("Try again") { finishCeremony(d) }, ui.button("Start again") { showStartAgain() }))
+    centre(words, listOf(ui.primary("Try again") { finishCeremony(d) }, ui.quiet("Start again") { showStartAgain() }))
 }
 
 /**
@@ -452,5 +465,5 @@ private fun Controller.saveFinished(record: ByteArray, message: SayWords? = null
 }
 
 private fun Controller.showSaveFailed(words: SayWords, record: ByteArray) {
-    centre(words, listOf(ui.primary("Try again") { saveFinished(record) }, ui.button("Start again") { showStartAgain() }))
+    centre(words, listOf(ui.primary("Try again") { saveFinished(record) }, ui.quiet("Start again") { showStartAgain() }))
 }
