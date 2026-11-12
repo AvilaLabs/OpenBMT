@@ -88,7 +88,7 @@ class Connect {
             } catch (e: OwnerException) {
                 return e.sayWords()
             } catch (e: IOException) {
-                return OwnPairWords.said(OwnPairWords.WORDS_NEEDED_OA_105)
+                return OwnPairWords.walletNotSaved
             } catch (e: LinkageError) {
                 return AppWords.libraryMissing(e.message)
             }

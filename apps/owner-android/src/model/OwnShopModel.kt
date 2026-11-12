@@ -160,7 +160,7 @@ class OwnPairing(
 
     /** The offer, made new (OA-108); the words when the library refused or no wallet is kept. */
     fun start(now: Long): SayWords? {
-        val args = shop() ?: return OwnPairWords.said(OwnPairWords.WORDS_NEEDED_OA_105_NONE)
+        val args = shop() ?: return OwnPairWords.noWallet
         step = OwnPairStep.Offer
         read = null
         bundle = null
@@ -175,8 +175,8 @@ class OwnPairing(
      * counter it names, and gives its name and the four words. The words when it is refused; the step stays.
      */
     fun readRequest(bytes: ByteArray, now: Long): SayWords? {
-        val args = shop() ?: return OwnPairWords.said(OwnPairWords.WORDS_NEEDED_OA_105_NONE)
-        val made = offer?.made ?: return OwnPairWords.said(OwnPairWords.WORDS_NEEDED_OA_108)
+        val args = shop() ?: return OwnPairWords.noWallet
+        val made = offer?.made ?: return OwnPairWords.codeNotShown
         if (step != OwnPairStep.Offer) return null
         return call {
             read = library.request(args, made, now, bytes)
@@ -187,9 +187,9 @@ class OwnPairing(
 
     /** "They match" (OA-110): the bundle is made and stored by the library. [usdPerBtc] is the first settings' price, when asked for. */
     fun match(now: Long, usdPerBtc: Long): SayWords? {
-        val args = shop() ?: return OwnPairWords.said(OwnPairWords.WORDS_NEEDED_OA_105_NONE)
-        val made = offer?.made ?: return OwnPairWords.said(OwnPairWords.WORDS_NEEDED_OA_108)
-        val bytes = request ?: return OwnPairWords.said(OwnPairWords.WORDS_NEEDED_OA_108)
+        val args = shop() ?: return OwnPairWords.noWallet
+        val made = offer?.made ?: return OwnPairWords.codeNotShown
+        val bytes = request ?: return OwnPairWords.codeNotShown
         if (step != OwnPairStep.Compare) return null
         return call {
             bundle = library.confirm(args, made, now, bytes, usdPerBtc, null)
@@ -214,7 +214,7 @@ class OwnPairing(
 
     /** A counter whose bundle waits (OA-111), shown again exactly as it was made. */
     fun resume(counter: WaitingCounter, now: Long): SayWords? {
-        val args = shop() ?: return OwnPairWords.said(OwnPairWords.WORDS_NEEDED_OA_105_NONE)
+        val args = shop() ?: return OwnPairWords.noWallet
         return call {
             val b = library.bundleAgain(args, counter.counter)
             bundle = b
@@ -225,7 +225,7 @@ class OwnPairing(
 
     /** "The counter shows Paired" (OA-111): the library marks the bundle delivered. */
     fun paired(): SayWords? {
-        val args = shop() ?: return OwnPairWords.said(OwnPairWords.WORDS_NEEDED_OA_105_NONE)
+        val args = shop() ?: return OwnPairWords.noWallet
         val b = bundle ?: return null
         if (step != OwnPairStep.Bundle) return null
         return call {

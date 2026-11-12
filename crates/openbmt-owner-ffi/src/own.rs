@@ -22,7 +22,7 @@ use openbmt_core::pinned_wallet::{PinnedWallet, WalletKind};
 use openbmt_core::relay::SignedRelayHint;
 use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_owner::own_book::{gap_limit, gap_needs_notice};
-use openbmt_owner::own_say::{needed, they_differ, wallet_not_readable, WORDS_NEEDED_OA_105};
+use openbmt_owner::own_say::{shop_file_failed, they_differ, wallet_not_readable};
 use openbmt_owner::own_shop::{MadeOffer, OwnError, OwnRefusal};
 use openbmt_owner_node::{OwnNode, OwnNodeError};
 use std::fmt;
@@ -294,10 +294,8 @@ fn refusal(r: &OwnRefusal) -> AppError {
 
 fn node_error(e: OwnNodeError) -> AppError {
     match e {
-        OwnNodeError::Io(_) => from_words(Kind::Store, "OA-105", &e, needed(WORDS_NEEDED_OA_105)),
-        OwnNodeError::State(_) => {
-            from_words(Kind::State, "OA-105", &e, needed(WORDS_NEEDED_OA_105))
-        }
+        OwnNodeError::Io(_) => from_words(Kind::Store, "OA-105", &e, shop_file_failed()),
+        OwnNodeError::State(_) => from_words(Kind::State, "OA-105", &e, shop_file_failed()),
         OwnNodeError::Derive(_) => internal(e),
     }
 }
@@ -305,9 +303,7 @@ fn node_error(e: OwnNodeError) -> AppError {
 fn own_error(e: OwnError<String>) -> AppError {
     match e {
         OwnError::Refused(r) => refusal(&r),
-        OwnError::Store(text) => {
-            from_words(Kind::Store, "OA-105", text, needed(WORDS_NEEDED_OA_105))
-        }
+        OwnError::Store(text) => from_words(Kind::Store, "OA-105", text, shop_file_failed()),
     }
 }
 

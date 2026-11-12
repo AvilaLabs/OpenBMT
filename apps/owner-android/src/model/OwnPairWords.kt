@@ -42,33 +42,32 @@ object OwnPairWords {
     const val gapTitle = "How far your wallet looks ahead"
     const val gapUsual = "Your wallet's usual setting shows every payment."
     const val gapMore = "Set your wallet to look at least {n} addresses ahead, or it will not show every payment."
-    const val gapMoreNext = "In Sparrow: Settings, then Gap limit. In Electrum: ask the console to change it."
+    const val gapMoreNext = "In Sparrow: Settings, then Advanced, then Gap limit. Bitcoin Keeper cannot change it."
 
-    // ---- not written yet (OA-114): each shows its own name ----
+    // ---- the wallet page and the waiting counters (OA-111, OA-113) ----
+    const val walletTitle = "Your wallet"
+    const val walletButton = "Your wallet"
+    const val waitingLabel = "Waiting for their code"
 
-    /** The bar of the wallet page of a shop with its own wallet (OA-113); the design file has no title for it. */
-    const val WORDS_NEEDED_OA_113_TITLE = "WORDS_NEEDED_OA_113_TITLE"
-
-    /** The button that opens the wallet page, after a counter is paired (OA-113). */
-    const val WORDS_NEEDED_OA_113_BUTTON = "WORDS_NEEDED_OA_113_BUTTON"
-
-    /** The words of a wallet file that could not be saved when the wallet was checked (OA-105). */
-    const val WORDS_NEEDED_OA_105 = "WORDS_NEEDED_OA_105"
-
-    /** The words of "the wallet was not saved, so add a counter cannot start": no wallet is kept yet (OA-105). */
-    const val WORDS_NEEDED_OA_105_NONE = "WORDS_NEEDED_OA_105_NONE"
-
-    /** The words that tell the owner that a counter's bundle is waiting after the app was left (OA-111). */
-    const val WORDS_NEEDED_OA_111_WAITING = "WORDS_NEEDED_OA_111_WAITING"
-
-    /** The words of a step that cannot be made without an offer that is held: the app asked in the wrong order (OA-108). */
-    const val WORDS_NEEDED_OA_108 = "WORDS_NEEDED_OA_108"
-
-    /** Every placeholder, for the test that checks that each one is named for a rule and none reads as words. */
-    val placeholders: List<String> = listOf(
-        WORDS_NEEDED_OA_113_TITLE, WORDS_NEEDED_OA_113_BUTTON, WORDS_NEEDED_OA_105, WORDS_NEEDED_OA_105_NONE,
-        WORDS_NEEDED_OA_111_WAITING, WORDS_NEEDED_OA_108,
+    // ---- refusals of the app's own steps (OA-105, OA-108) ----
+    val walletNotSaved = SayWords(
+        Tones.STOP, Who.OWNER, "Wallet not saved",
+        "The phone could not save your wallet's description, so nothing was kept.",
+        "Try again. Your money is in your wallet, not on this phone.", "OA-105", null, null, null,
     )
+    val noWallet = SayWords(
+        Tones.STOP, Who.OWNER, "No wallet connected",
+        "Adding a counter needs the shop's wallet, and none is kept on this phone.",
+        "Connect your wallet first.", "OA-105", null, null, null,
+    )
+    val codeNotShown = SayWords(
+        Tones.STOP, Who.OWNER, "Code not showing",
+        "This step needs the code from Add a counter, and none is showing now.",
+        "Start again from Add a counter.", "OA-108", null, null, null,
+    )
+
+    /** No text of this part is a placeholder now; the list stays for the test that would catch a new one. */
+    val placeholders: List<String> = emptyList()
 
     /** Words that are still to be written: the placeholder stands in the heading and both sentences. */
     fun said(placeholder: String): SayWords =
@@ -95,6 +94,10 @@ object OwnPairWords {
         add("bundlePaired", bundlePaired); add("bundleAgain", bundleAgain)
         add("pairedHeading", pairedHeading); add("pairedText", pairedText); add("pairedNext", pairedNext)
         add("gapTitle", gapTitle); add("gapUsual", gapUsual); add("gapMore", gapMore); add("gapMoreNext", gapMoreNext)
+        add("walletTitle", walletTitle); add("walletButton", walletButton); add("waitingLabel", waitingLabel)
+        for ((k, w) in listOf("walletNotSaved" to walletNotSaved, "noWallet" to noWallet, "codeNotShown" to codeNotShown)) {
+            add("$k.heading", w.heading); add("$k.what", w.what); add("$k.next", w.next)
+        }
         for (n in placeholders) add(n, n)
         return out
     }

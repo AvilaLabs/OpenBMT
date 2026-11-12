@@ -32,7 +32,7 @@ internal fun Controller.showOwnCounter(r: FirstRun, message: SayWords? = null) {
         OwnPairStep.Compare -> showOwnCompare(r, p, message, back)
         OwnPairStep.Bundle -> showOwnBundle(r, p, message, back)
         OwnPairStep.Paired -> showOwnPaired(r, p)
-        OwnPairStep.Stopped -> ownStopped(r, p.stopped ?: OwnPairWords.said(OwnPairWords.WORDS_NEEDED_OA_108))
+        OwnPairStep.Stopped -> ownStopped(r, p.stopped ?: OwnPairWords.codeNotShown)
     }
 }
 
@@ -75,7 +75,7 @@ private fun Controller.showOwnOffer(r: FirstRun, p: OwnPairing, message: SayWord
     // A bundle that was made and not yet taken waits in the library (OA-111).
     val waiting = p.waiting()
     if (waiting.isNotEmpty()) {
-        views.add(label(OwnPairWords.WORDS_NEEDED_OA_111_WAITING))
+        views.add(label(OwnPairWords.waitingLabel))
         for (w in waiting) views.add(ui.button(CounterModel.showCodeLabel(w)) { ownResume(r, p, w) })
     }
     views.add(msg)
@@ -173,7 +173,7 @@ private fun Controller.showOwnPaired(r: FirstRun, p: OwnPairing) {
         r.next()
         showFirstRun()
     }
-    val wallet = ui.button(OwnPairWords.WORDS_NEEDED_OA_113_BUTTON) { showOwnWallet(r) }
+    val wallet = ui.button(OwnPairWords.walletButton) { showOwnWallet(r) }
     stepScreen(OwnPairWords.title, views, listOf(done, wallet), { }, tone = ui.pal.good)
 }
 
@@ -186,7 +186,7 @@ internal fun Controller.showOwnWallet(r: FirstRun) {
     try {
         val file = ownStore.loadWallet()
         if (file == null) {
-            msg.show(ui.words(OwnPairWords.said(OwnPairWords.WORDS_NEEDED_OA_105_NONE)))
+            msg.show(ui.words(OwnPairWords.noWallet))
         } else {
             val wallet = org.openbmt.owner.OwnerOwn.read(file)
             file.fill(0)
@@ -199,9 +199,9 @@ internal fun Controller.showOwnWallet(r: FirstRun) {
     } catch (e: org.openbmt.owner.OwnerException) {
         msg.show(ui.words(e.sayWords()))
     } catch (e: java.io.IOException) {
-        msg.show(ui.words(OwnPairWords.said(OwnPairWords.WORDS_NEEDED_OA_105)))
+        msg.show(ui.words(OwnPairWords.walletNotSaved))
     } catch (e: LinkageError) {
         msg.show(ui.words(AppWords.libraryMissing(e.message)))
     }
-    stepScreen(OwnPairWords.WORDS_NEEDED_OA_113_TITLE, views, listOf(ui.button(KeyGuideWords.kgBack) { back() }), back)
+    stepScreen(OwnPairWords.walletTitle, views, listOf(ui.button(KeyGuideWords.kgBack) { back() }), back)
 }

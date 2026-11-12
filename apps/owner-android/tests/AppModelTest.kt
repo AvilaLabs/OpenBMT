@@ -2840,7 +2840,7 @@ object AppModelTest {
         val c2 = Connect()
         c2.read(WL06_ONE.toByteArray(), reader, own::pin)
         val said = c2.same { throw IOException("full") }
-        ok(said != null && c2.step == ConnectStep.Address && said.heading == OwnPairWords.WORDS_NEEDED_OA_105, "a write that fails stops at the address check, with the words of OA-105 (a placeholder until they are written)")
+        ok(said != null && c2.step == ConnectStep.Address && said.heading == OwnPairWords.walletNotSaved.heading, "a write that fails stops at the address check, with the words of OA-105")
         val c3 = Connect()
         c3.read(WL06_ONE.toByteArray(), reader, own::pin)
         c3.different()
@@ -2862,7 +2862,7 @@ object AppModelTest {
         var refused = false
         try { store.args() } catch (_: IOException) { refused = true }
         ok(refused, "a file that does not read back is refused, so no offer is made")
-        ok(OwnPairing({ null }, own).start(1_000)!!.heading == OwnPairWords.WORDS_NEEDED_OA_105_NONE && !own.calls.contains("offer"), "with no wallet kept no offer is made")
+        ok(OwnPairing({ null }, own).start(1_000)!!.heading == OwnPairWords.noWallet.heading && !own.calls.contains("offer"), "with no wallet kept no offer is made")
         ok(OwnShopStore::class.java.declaredMethods.none { it.name.contains("replace") || it.name.contains("change") }, "changing the wallet is not in these rules")
     }
 
@@ -2902,9 +2902,9 @@ object AppModelTest {
         late.start(1_000)
         ok(late.readRequest(byteArrayOf(1), 1_700)!!.heading == "Code ended", "a request after the 10 minutes")
         // A name that is not plain text has no words yet: its placeholder shows.
-        val name = OwnPairing({ ownArgs }, FakeOwn().also { it.refuse = Words(Tones.STOP, Who.OWNER, "WORDS_NEEDED_OA_109_NAME", "WORDS_NEEDED_OA_109_NAME", "WORDS_NEEDED_OA_109_NAME", "OA-109", null, null, null) })
+        val name = OwnPairing({ ownArgs }, FakeOwn().also { it.refuse = Words(Tones.STOP, Who.OWNER, "Counter name not usable", "A counter's name is 1 to 32 characters with no line breaks, and this one is not, so nothing was paired.", "Give the counter a shorter name, then start again from Add a counter.", "OA-109", null, null, null) })
         name.start(1_000)
-        ok(OwnPairWords.isPlaceholder(name.readRequest(byteArrayOf(1), 1_020)!!), "a name that is not plain text shows its placeholder")
+        ok(name.readRequest(byteArrayOf(1), 1_020)!!.heading == "Counter name not usable", "a name that is not plain text shows the library's words")
         ok(CounterModel.nameOf("Front\u0007 counter") == "Front counter" || CounterModel.nameOf("Front\u0007 counter").none { it.code < 32 }, "the name is made safe to show")
     }
 
@@ -2966,7 +2966,7 @@ object AppModelTest {
         val usual = OwnWalletPage.gapRow(own.gap(emptyList(), 20))
         ok(usual.title == "How far your wallet looks ahead" && usual.line == "Your wallet's usual setting shows every payment." && usual.next == null, "up to 20: the usual line and no action")
         val more = OwnWalletPage.gapRow(own.gap(emptyList(), 31))
-        ok(more.line == "Set your wallet to look at least 31 addresses ahead, or it will not show every payment." && more.next == "In Sparrow: Settings, then Gap limit. In Electrum: ask the console to change it.", "above 20: the number and the next step")
+        ok(more.line == "Set your wallet to look at least 31 addresses ahead, or it will not show every payment." && more.next == "In Sparrow: Settings, then Advanced, then Gap limit. Bitcoin Keeper cannot change it.", "above 20: the number and the next step")
         ok(source("src/android/OwnCounter.kt").contains("OwnWalletPage.gapRow("), "the wallet page shows the row")
     }
 
@@ -2989,7 +2989,7 @@ object AppModelTest {
         ok(OwnPairWords.placeholders.toSet().size == OwnPairWords.placeholders.size, "each placeholder once")
         // The list in docs/screens has every text and every placeholder.
         val md = AppWords.screensMarkdown()
-        ok(OwnPairWords.all().all { (k, _) -> md.contains("| $k |") } && md.contains("WORDS_NEEDED_OA_113_TITLE"), "the screens list has them")
+        ok(OwnPairWords.all().all { (k, _) -> md.contains("| $k |") } && md.contains("| walletTitle |"), "the screens list has them")
         // The app writes no sentence of its own for this part: each string of OwnCounter.kt that a person reads comes from a words object.
         val src = source("src/android/OwnCounter.kt")
         ok(!Regex("(ui\\.(text|primary|button|danger)|heading|para|line|label)\\(\"[A-Za-z]").containsMatchIn(src.replace("\"Dollars for one bitcoin\"", "")), "OwnCounter.kt has no sentence of its own")

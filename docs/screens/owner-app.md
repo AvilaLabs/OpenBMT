@@ -467,13 +467,19 @@ its own name:
 | gapTitle | How far your wallet looks ahead |
 | gapUsual | Your wallet's usual setting shows every payment. |
 | gapMore | Set your wallet to look at least {n} addresses ahead, or it will not show every payment. |
-| gapMoreNext | In Sparrow: Settings, then Gap limit. In Electrum: ask the console to change it. |
-| WORDS_NEEDED_OA_113_TITLE | WORDS_NEEDED_OA_113_TITLE |
-| WORDS_NEEDED_OA_113_BUTTON | WORDS_NEEDED_OA_113_BUTTON |
-| WORDS_NEEDED_OA_105 | WORDS_NEEDED_OA_105 |
-| WORDS_NEEDED_OA_105_NONE | WORDS_NEEDED_OA_105_NONE |
-| WORDS_NEEDED_OA_111_WAITING | WORDS_NEEDED_OA_111_WAITING |
-| WORDS_NEEDED_OA_108 | WORDS_NEEDED_OA_108 |
+| gapMoreNext | In Sparrow: Settings, then Advanced, then Gap limit. Bitcoin Keeper cannot change it. |
+| walletTitle | Your wallet |
+| walletButton | Your wallet |
+| waitingLabel | Waiting for their code |
+| walletNotSaved.heading | Wallet not saved |
+| walletNotSaved.what | The phone could not save your wallet's description, so nothing was kept. |
+| walletNotSaved.next | Try again. Your money is in your wallet, not on this phone. |
+| noWallet.heading | No wallet connected |
+| noWallet.what | Adding a counter needs the shop's wallet, and none is kept on this phone. |
+| noWallet.next | Connect your wallet first. |
+| codeNotShown.heading | Code not showing |
+| codeNotShown.what | This step needs the code from Add a counter, and none is showing now. |
+| codeNotShown.next | Start again from Add a counter. |
 
 The key map at the top of the key-setup screens. `{k1}`, `{k2}` and `{k3}` are
 the state words in lower case:

@@ -11,25 +11,10 @@ use openbmt_core::say::{Tone, Who, Words};
 use crate::own_shop::OwnRefusal;
 use crate::say::stop;
 
-/// OA-105: the words of a shop's state that does not read or is not stored.
-pub const WORDS_NEEDED_OA_105: &str = "WORDS_NEEDED_OA_105";
-/// OA-106: the words of a book that gave no range are still to be written.
-pub const WORDS_NEEDED_OA_106: &str = "WORDS_NEEDED_OA_106";
-/// OA-107: the words of a book that is past what the phone watches.
+/// OA-107: the book is past what the phone watches. This refusal goes away
+/// when the own wallet joins the owner node's live watch (OC-22 to OC-24);
+/// until then it has no words.
 pub const WORDS_NEEDED_OA_107: &str = "WORDS_NEEDED_OA_107";
-/// OA-108: the words of an offer that is not this shop's, and of a clock
-/// that went back.
-pub const WORDS_NEEDED_OA_108: &str = "WORDS_NEEDED_OA_108";
-/// OA-109: the words of a counter name that is not plain text.
-pub const WORDS_NEEDED_OA_109_NAME: &str = "WORDS_NEEDED_OA_109_NAME";
-/// OA-110: the words of a counter that is added already, and of a step of
-/// the ceremony that failed after the checks.
-pub const WORDS_NEEDED_OA_110: &str = "WORDS_NEEDED_OA_110";
-/// OA-111: the words of a bundle that does not wait, and of bundles that
-/// wait for as many counters as the shop keeps.
-pub const WORDS_NEEDED_OA_111: &str = "WORDS_NEEDED_OA_111";
-/// OA-112: the words of a range for a counter the book does not know.
-pub const WORDS_NEEDED_OA_112: &str = "WORDS_NEEDED_OA_112";
 
 /// Words that are still to be written: the placeholder stands in the
 /// heading and both sentences, so that it shows wherever the words would.
@@ -70,6 +55,17 @@ pub fn they_differ() -> Words {
     .code("OA-110")
 }
 
+/// OA-105: the shop's pairing file could not be read or saved.
+pub fn shop_file_failed() -> Words {
+    stop(
+        "Shop file not saved",
+        "The phone could not read or save the file that keeps the shop's counters and addresses, so nothing was changed.",
+        Who::Owner,
+        "Try again. Do not clear the app's data: your money is in your wallet, not in this file.",
+    )
+    .code("OA-105")
+}
+
 /// OA-105: the file that keeps the wallet's description does not read.
 pub fn wallet_not_readable() -> Words {
     stop(
@@ -103,7 +99,20 @@ impl OwnRefusal {
     pub fn words(&self) -> Words {
         match self {
             Self::OfferEnded => offer_ended(),
-            Self::ClockWentBack | Self::NotThisShopsOffer => needed(WORDS_NEEDED_OA_108),
+            Self::ClockWentBack => stop(
+                "Phone clock went back",
+                "The phone's clock is now earlier than when the code was made, so the code cannot be checked.",
+                Who::Owner,
+                "Set the phone's date and time, then show a new code.",
+            )
+            .code("OA-108"),
+            Self::NotThisShopsOffer => stop(
+                "Code not from this shop",
+                "The counter's code answers a code this phone did not make for this shop, so nothing was paired.",
+                Who::Owner,
+                "Start again from Add a counter on both.",
+            )
+            .code("OA-108"),
             Self::NotARequest => stop(
                 "Not a counter's code",
                 "This is not the code of a counter being paired.",
@@ -132,13 +141,71 @@ impl OwnRefusal {
                 "Start again from Add a counter.",
             )
             .code("OA-109"),
-            Self::BadName => needed(WORDS_NEEDED_OA_109_NAME),
-            Self::AlreadyAdded | Self::Pairing(_) => needed(WORDS_NEEDED_OA_110),
+            Self::BadName => stop(
+                "Counter name not usable",
+                "A counter's name is 1 to 32 characters with no line breaks, and this one is not, so nothing was paired.",
+                Who::Owner,
+                "Give the counter a shorter name, then start again from Add a counter.",
+            )
+            .code("OA-109"),
+            Self::AlreadyAdded => stop(
+                "Counter already added",
+                "This counter is already one of the shop's, so it was not added again.",
+                Who::Owner,
+                "Nothing to do. To pair it again, remove it from the shop first.",
+            )
+            .code("OA-110"),
+            Self::Pairing(_) => stop(
+                "Pairing failed",
+                "A last check of the counter's code did not pass, so nothing was paired.",
+                Who::Owner,
+                "Start again from Add a counter.",
+            )
+            .code("OA-110"),
             Self::Settings(r) => r.words(),
             Self::Book(crate::own_book::BookError::WatchBudget) => needed(WORDS_NEEDED_OA_107),
-            Self::Book(_) => needed(WORDS_NEEDED_OA_106),
-            Self::NoBundle | Self::TooManyWaiting => needed(WORDS_NEEDED_OA_111),
-            Self::UnknownCounter => needed(WORDS_NEEDED_OA_112),
+            Self::Book(crate::own_book::BookError::Full) => stop(
+                "No addresses left",
+                "The wallet has given every address it can make to counters, so no more can be given.",
+                Who::Owner,
+                "Connect a new wallet to add counters.",
+            )
+            .code("OA-106"),
+            Self::Book(crate::own_book::BookError::TooManyDevices) => stop(
+                "Too many counters",
+                "The shop has 64 counters, the most it can have.",
+                Who::Owner,
+                "Remove a counter that is no longer used, then add this one.",
+            )
+            .code("OA-106"),
+            Self::Book(crate::own_book::BookError::Corrupt(_)) => stop(
+                "Address book damaged",
+                "The record of which addresses each counter holds could not be read, so no counter can be added.",
+                Who::Owner,
+                "Do not clear the app's data. Your money is in your wallet, not in this file.",
+            )
+            .code("OA-106"),
+            Self::NoBundle => stop(
+                "No code waiting",
+                "No counter is waiting for its code from this phone.",
+                Who::Owner,
+                "Nothing to do. Start from Add a counter to pair one.",
+            )
+            .code("OA-111"),
+            Self::TooManyWaiting => stop(
+                "Too many counters waiting",
+                "16 counters are waiting for their codes, the most this phone keeps.",
+                Who::Owner,
+                "Finish pairing a waiting counter, then add this one.",
+            )
+            .code("OA-111"),
+            Self::UnknownCounter => stop(
+                "Counter not in the shop",
+                "Addresses were asked for a counter this phone did not pair, so none were given.",
+                Who::Owner,
+                "Nothing to do. Only paired counters get addresses.",
+            )
+            .code("OA-112"),
         }
     }
 }
@@ -153,6 +220,7 @@ pub fn all_own_words() -> Vec<(String, Words)> {
     let mut add = |name: &str, words: Words| all.push((name.to_string(), words));
     add("they_differ", they_differ());
     add("wallet_not_readable", wallet_not_readable());
+    add("shop_file_failed", shop_file_failed());
     let refusals = [
         ("OwnRefusal::OfferEnded", OwnRefusal::OfferEnded),
         ("OwnRefusal::ClockWentBack", OwnRefusal::ClockWentBack),
