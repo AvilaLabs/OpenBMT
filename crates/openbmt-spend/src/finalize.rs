@@ -4,15 +4,16 @@ use std::fmt;
 
 use bitcoin::absolute::LockTime;
 use bitcoin::ecdsa;
-use bitcoin::psbt::Psbt;
+use bitcoin::psbt::{Input, Psbt};
 use bitcoin::sighash::{EcdsaSighashType, SighashCache};
 use bitcoin::{PublicKey, Transaction, Witness};
-use openbmt_core::wallet::WalletDescription;
 use openbmt_signer::MAX_WEIGHT;
 
 use crate::common::{
-    claimed_path, input_message, script_keys, secp, shape_is_v0, HintFault, MAX_MONEY,
+    claimed_path, input_message, script_keys, secp, shape_is_v0, single_input_message, HintFault,
+    MAX_MONEY,
 };
+use crate::kind::{single_claimed_path, single_key, SingleHintFault, WalletKind, WalletRef};
 use crate::plan::Plan;
 
 /// Why a transaction could not be finished.
@@ -120,6 +121,19 @@ pub enum FinalizeError {
         /// The fee of the plan.
         planned: u64,
     },
+    /// SP-80: the input is of the other kind of wallet.
+    WrongKind {
+        /// The input.
+        input: usize,
+        /// The kind of wallet the path expected.
+        expected: WalletKind,
+    },
+    /// SP-85: an input of a wallet with one key has no signature by its own
+    /// key.
+    NoSignature {
+        /// The input.
+        input: usize,
+    },
 }
 
 impl fmt::Display for FinalizeError {
@@ -197,6 +211,13 @@ impl fmt::Display for FinalizeError {
                 f,
                 "SP-64: the fee is {found} sat; the plan's fee is {planned} sat"
             ),
+            Self::WrongKind { input, expected } => write!(
+                f,
+                "SP-80: input {input} is not of the kind this path takes; it expects {expected}"
+            ),
+            Self::NoSignature { input } => {
+                write!(f, "SP-85: input {input} has no signature by its own key")
+            }
         }
     }
 }
@@ -206,17 +227,26 @@ impl std::error::Error for FinalizeError {}
 /// What is known about an input once its wallet place is settled.
 struct InputFacts {
     amount: u64,
-    witness_script: bitcoin::ScriptBuf,
-    keys: [PublicKey; 3],
+    spend: Spend,
+}
+
+/// What is spent, by kind of wallet.
+enum Spend {
+    /// A P2WSH 2-of-3 output: the wallet's witness script and its keys.
+    Multisig {
+        witness_script: bitcoin::ScriptBuf,
+        keys: [PublicKey; 3],
+    },
+    /// A P2WPKH output: the script and the one key it pays to (SP-84).
+    Single {
+        script_pubkey: bitcoin::ScriptBuf,
+        key: PublicKey,
+    },
 }
 
 /// SP-10 and SP-61 for one input of `psbt`: the previous output, the place
 /// in the wallet, and the wallet's own witness script and keys.
-fn input_facts(
-    wallet: &WalletDescription,
-    psbt: &Psbt,
-    i: usize,
-) -> Result<InputFacts, FinalizeError> {
+fn input_facts(wallet: WalletRef<'_>, psbt: &Psbt, i: usize) -> Result<InputFacts, FinalizeError> {
     let (txin, input) = psbt
         .unsigned_tx
         .input
@@ -241,6 +271,18 @@ fn input_facts(
     if amount > MAX_MONEY {
         return Err(FinalizeError::AmountOutOfRange);
     }
+    if wallet.is_other_kind_input(&spent.script_pubkey, input.witness_script.is_some()) {
+        return Err(FinalizeError::WrongKind {
+            input: i,
+            expected: wallet.kind(),
+        });
+    }
+    if let Some(single) = wallet.single() {
+        return single_facts(wallet, single, i, input, spent, amount);
+    }
+    let Some(wallet) = wallet.multisig() else {
+        return Err(FinalizeError::FinalCheckFailed("a wallet of neither kind"));
+    };
     let (chain, index) = claimed_path(wallet, &input.bip32_derivation).map_err(|f| match f {
         HintFault::None => FinalizeError::NoWalletKeyHint { input: i },
         HintFault::Disagree | HintFault::KeyMismatch => {
@@ -267,13 +309,50 @@ fn input_facts(
         script_keys(&witness_script).ok_or(FinalizeError::WitnessScriptMismatch { input: i })?;
     Ok(InputFacts {
         amount,
-        witness_script,
-        keys,
+        spend: Spend::Multisig {
+            witness_script,
+            keys,
+        },
     })
 }
 
-/// SP-60: the witness of input `i`, from two valid signatures by different
-/// keys, in the order of the keys in the script.
+/// SP-84, SP-85 for one input of a wallet with one key: the hint names a
+/// place in the wallet, the key the wallet derives there hashes to the
+/// script spent, and nothing but the hint is read.
+fn single_facts(
+    wallet: WalletRef<'_>,
+    single: &openbmt_core::wallet_single::SingleKeyWallet,
+    i: usize,
+    input: &Input,
+    spent: &bitcoin::TxOut,
+    amount: u64,
+) -> Result<InputFacts, FinalizeError> {
+    let (chain, index) =
+        single_claimed_path(single, &input.bip32_derivation).map_err(|f| match f {
+            SingleHintFault::None => FinalizeError::NoWalletKeyHint { input: i },
+            SingleHintFault::KeyMismatch => FinalizeError::HintsInconsistent { input: i },
+        })?;
+    let script = wallet
+        .script(chain, index)
+        .ok_or(FinalizeError::ScriptNotInWallet { input: i })?;
+    if script != spent.script_pubkey {
+        return Err(FinalizeError::ScriptNotInWallet { input: i });
+    }
+    let key =
+        single_key(single, chain, index).ok_or(FinalizeError::ScriptNotInWallet { input: i })?;
+    Ok(InputFacts {
+        amount,
+        spend: Spend::Single {
+            script_pubkey: script,
+            key,
+        },
+    })
+}
+
+/// SP-60, SP-85: the witness of input `i`: for a wallet of three keys, from
+/// two valid signatures by different keys, in the order of the keys in the
+/// script; for a wallet with one key, the one signature by its own key and
+/// then the key.
 fn witness_for(
     psbt: &Psbt,
     cache: &mut SighashCache<&Transaction>,
@@ -290,20 +369,31 @@ fn witness_for(
     {
         return Err(FinalizeError::SighashType { input: i });
     }
+    let keys: &[PublicKey] = match &facts.spend {
+        Spend::Multisig { keys, .. } => keys,
+        Spend::Single { key, .. } => std::slice::from_ref(key),
+    };
     for key in input.partial_sigs.keys() {
-        if !facts.keys.contains(key) {
+        if !keys.contains(key) {
             return Err(FinalizeError::ForeignKey {
                 input: i,
                 key: *key,
             });
         }
     }
-    let message = input_message(cache, i, &facts.witness_script, facts.amount)
-        .ok_or(FinalizeError::FinalCheckFailed("signature hash"))?;
+    let message = match &facts.spend {
+        Spend::Multisig { witness_script, .. } => {
+            input_message(cache, i, witness_script, facts.amount)
+        }
+        Spend::Single { script_pubkey, .. } => {
+            single_input_message(cache, i, script_pubkey, facts.amount)
+        }
+    }
+    .ok_or(FinalizeError::FinalCheckFailed("signature hash"))?;
     let mut chosen: Vec<Vec<u8>> = Vec::with_capacity(2);
     // Script order, not file order: OP_CHECKMULTISIG wants the signatures
     // in the order of their keys.
-    for key in &facts.keys {
+    for key in keys {
         let Some(sig) = input.partial_sigs.get(key) else {
             continue;
         };
@@ -323,17 +413,28 @@ fn witness_for(
             chosen.push(sig.to_vec());
         }
     }
-    let [first, second] = chosen.as_slice() else {
-        return Err(FinalizeError::NotEnoughSignatures {
-            input: i,
-            have: chosen.len(),
-        });
-    };
     let mut witness = Witness::new();
-    witness.push([] as [u8; 0]);
-    witness.push(first);
-    witness.push(second);
-    witness.push(facts.witness_script.as_bytes());
+    match &facts.spend {
+        Spend::Multisig { witness_script, .. } => {
+            let [first, second] = chosen.as_slice() else {
+                return Err(FinalizeError::NotEnoughSignatures {
+                    input: i,
+                    have: chosen.len(),
+                });
+            };
+            witness.push([] as [u8; 0]);
+            witness.push(first);
+            witness.push(second);
+            witness.push(witness_script.as_bytes());
+        }
+        Spend::Single { key, .. } => {
+            let [sig] = chosen.as_slice() else {
+                return Err(FinalizeError::NoSignature { input: i });
+            };
+            witness.push(sig);
+            witness.push(key.inner.serialize());
+        }
+    }
     Ok(witness)
 }
 
@@ -342,7 +443,7 @@ fn witness_for(
 /// and the signature hashes, scripts and amounts are worked out again from
 /// the file's previous transactions and the wallet. Returns the fee.
 pub(crate) fn audit(
-    wallet: &WalletDescription,
+    wallet: WalletRef<'_>,
     psbt: &Psbt,
     tx: &Transaction,
 ) -> Result<u64, FinalizeError> {
@@ -380,43 +481,73 @@ pub(crate) fn audit(
         input_total = input_total
             .checked_add(facts.amount)
             .ok_or(FinalizeError::AmountOutOfRange)?;
-        // The witness: an empty item, two signatures, the witness script.
-        let items: Vec<&[u8]> = txin.witness.iter().collect();
-        let [empty, first, second, script] = items.as_slice() else {
-            return Err(fail("a witness does not have four items"));
-        };
-        if !empty.is_empty() || *script != facts.witness_script.as_bytes() {
-            return Err(fail("a witness does not have the shape of SP-60"));
-        }
-        let message = input_message(&mut cache, i, &facts.witness_script, facts.amount)
-            .ok_or(fail("signature hash"))?;
-        let first =
-            ecdsa::Signature::from_slice(first).map_err(|_| fail("a signature does not parse"))?;
-        let second =
-            ecdsa::Signature::from_slice(second).map_err(|_| fail("a signature does not parse"))?;
-        if first.sighash_type != EcdsaSighashType::All
-            || second.sighash_type != EcdsaSighashType::All
-        {
-            return Err(fail("a signature is not SIGHASH_ALL"));
-        }
-        // The way OP_CHECKMULTISIG matches: signatures and keys both in
-        // script order, each signature to a later key than the last.
-        let mut matched = 0usize;
-        for key in &facts.keys {
-            let Some(sig) = [first, second].get(matched).copied() else {
-                break;
-            };
-            if secp()
-                .verify_ecdsa(&message, &sig.signature, &key.inner)
-                .is_ok()
-            {
-                matched += 1;
+        match &facts.spend {
+            Spend::Multisig {
+                witness_script,
+                keys,
+            } => {
+                // The witness: an empty item, two signatures, the witness script.
+                let items: Vec<&[u8]> = txin.witness.iter().collect();
+                let [empty, first, second, script] = items.as_slice() else {
+                    return Err(fail("a witness does not have four items"));
+                };
+                if !empty.is_empty() || *script != witness_script.as_bytes() {
+                    return Err(fail("a witness does not have the shape of SP-60"));
+                }
+                let message = input_message(&mut cache, i, witness_script, facts.amount)
+                    .ok_or(fail("signature hash"))?;
+                let first = ecdsa::Signature::from_slice(first)
+                    .map_err(|_| fail("a signature does not parse"))?;
+                let second = ecdsa::Signature::from_slice(second)
+                    .map_err(|_| fail("a signature does not parse"))?;
+                if first.sighash_type != EcdsaSighashType::All
+                    || second.sighash_type != EcdsaSighashType::All
+                {
+                    return Err(fail("a signature is not SIGHASH_ALL"));
+                }
+                // The way OP_CHECKMULTISIG matches: signatures and keys both in
+                // script order, each signature to a later key than the last.
+                let mut matched = 0usize;
+                for key in keys {
+                    let Some(sig) = [first, second].get(matched).copied() else {
+                        break;
+                    };
+                    if secp()
+                        .verify_ecdsa(&message, &sig.signature, &key.inner)
+                        .is_ok()
+                    {
+                        matched += 1;
+                    }
+                }
+                if matched != 2 {
+                    return Err(fail(
+                        "two signatures do not verify against two keys in order",
+                    ));
+                }
             }
-        }
-        if matched != 2 {
-            return Err(fail(
-                "two signatures do not verify against two keys in order",
-            ));
+            Spend::Single { script_pubkey, key } => {
+                // SP-85: the witness is the signature, then the key.
+                let items: Vec<&[u8]> = txin.witness.iter().collect();
+                let [sig, witness_key] = items.as_slice() else {
+                    return Err(fail("a witness does not have two items"));
+                };
+                if *witness_key != key.inner.serialize() {
+                    return Err(fail("the witness key is not the input's own key"));
+                }
+                let message = single_input_message(&mut cache, i, script_pubkey, facts.amount)
+                    .ok_or(fail("signature hash"))?;
+                let sig = ecdsa::Signature::from_slice(sig)
+                    .map_err(|_| fail("a signature does not parse"))?;
+                if sig.sighash_type != EcdsaSighashType::All {
+                    return Err(fail("a signature is not SIGHASH_ALL"));
+                }
+                if secp()
+                    .verify_ecdsa(&message, &sig.signature, &key.inner)
+                    .is_err()
+                {
+                    return Err(fail("the signature is not the input's own key's"));
+                }
+            }
         }
     }
     let mut output_total: u64 = 0;
@@ -439,7 +570,7 @@ pub(crate) fn audit(
     Ok(fee)
 }
 
-fn finish(wallet: &WalletDescription, psbt: &Psbt) -> Result<(Transaction, u64), FinalizeError> {
+fn finish(wallet: WalletRef<'_>, psbt: &Psbt) -> Result<(Transaction, u64), FinalizeError> {
     if !shape_is_v0(psbt) {
         return Err(FinalizeError::NotVersionZero);
     }
@@ -466,21 +597,28 @@ fn finish(wallet: &WalletDescription, psbt: &Psbt) -> Result<(Transaction, u64),
 /// That check is this library's own, made with the `bitcoin` crate's
 /// signature hash and secp256k1. It is not a consensus library; Bitcoin
 /// Core's `testmempoolaccept` is the independent check.
-pub fn finalize(wallet: &WalletDescription, psbt: &Psbt) -> Result<Transaction, FinalizeError> {
-    finish(wallet, psbt).map(|(tx, _)| tx)
+///
+/// The wallet is an `ImportedWallet` (SP-80), or a `WalletDescription`. For a
+/// wallet with one key (SP-85) each input needs one valid signature by its
+/// own key, and its witness is the signature and then the key.
+pub fn finalize<'a>(
+    wallet: impl Into<WalletRef<'a>>,
+    psbt: &Psbt,
+) -> Result<Transaction, FinalizeError> {
+    finish(wallet.into(), psbt).map(|(tx, _)| tx)
 }
 
 /// SP-64: [`finalize`], and the file must also be the plan's: the same
 /// unsigned transaction, and the plan's fee.
-pub fn finalize_plan(
-    wallet: &WalletDescription,
+pub fn finalize_plan<'a>(
+    wallet: impl Into<WalletRef<'a>>,
     psbt: &Psbt,
     plan: &Plan,
 ) -> Result<Transaction, FinalizeError> {
     if psbt.unsigned_tx != *plan.unsigned_tx() {
         return Err(FinalizeError::NotThePlan);
     }
-    let (tx, fee) = finish(wallet, psbt)?;
+    let (tx, fee) = finish(wallet.into(), psbt)?;
     if fee != plan.fee_sats() {
         return Err(FinalizeError::FeeNotThePlan {
             found: fee,

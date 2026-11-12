@@ -35,6 +35,23 @@ fn fault(heading: &str, what: impl Into<String>) -> Words {
     stop(heading, what, Who::Owner, TELL_SUPPORT)
 }
 
+/// The words of a refusal that only a wallet with one key can meet are not
+/// written yet. Each constant stands in for a heading, a sentence and a
+/// next step; until they are written the screen shows the constant, which
+/// names the rule.
+///
+/// SP-80: a coin, file or transaction of the other kind of wallet.
+pub const WORDS_NEEDED_SP_80: &str = "WORDS NEEDED SP-80";
+/// SP-84: the key hint of an input does not name the wallet's key for the
+/// script spent.
+pub const WORDS_NEEDED_SP_84: &str = "WORDS NEEDED SP-84";
+/// SP-85: an input of a wallet with one key has no signature by its key.
+pub const WORDS_NEEDED_SP_85: &str = "WORDS NEEDED SP-85";
+
+fn words_needed(placeholder: &'static str, code: &'static str) -> Words {
+    stop(placeholder, placeholder, Who::Owner, placeholder).code(code)
+}
+
 /// The place a problem was found, for the details.
 fn place(source: Source, input: usize) -> String {
     format!("{source}, input {input}")
@@ -63,6 +80,10 @@ impl CoinError {
             )
             .code("SP-02")
             .detail(format!("coin {outpoint}")),
+            Self::WrongKind { outpoint, expected } => {
+                words_needed(WORDS_NEEDED_SP_80, "SP-80")
+                    .detail(format!("coin {outpoint}, expected {expected}"))
+            }
         }
     }
 }
@@ -433,6 +454,10 @@ impl CombineError {
             Self::BadSignature { source, input, key } => bad_signature()
                 .code("SP-53")
                 .detail(format!("{}, key {key}", place(*source, *input))),
+            Self::WrongKind { input, expected } => words_needed(WORDS_NEEDED_SP_80, "SP-80")
+                .detail(format!("base file, input {input}, expected {expected}")),
+            Self::KeyNotSpent { input } => words_needed(WORDS_NEEDED_SP_84, "SP-84")
+                .detail(format!("base file, input {input}")),
             Self::Internal(what) => own_check(what),
         }
     }
@@ -544,6 +569,10 @@ impl FinalizeError {
                 "Do not send it. Start the approval again.",
             )
             .code("SP-64"),
+            Self::WrongKind { input, expected } => words_needed(WORDS_NEEDED_SP_80, "SP-80")
+                .detail(format!("input {input}, expected {expected}")),
+            Self::NoSignature { input } => words_needed(WORDS_NEEDED_SP_85, "SP-85")
+                .detail(format!("input {input}")),
         }
     }
 }

@@ -8,7 +8,8 @@ use bitcoin::secp256k1::Message;
 use bitcoin::sighash::{EcdsaSighashType, SighashCache};
 use bitcoin::{PublicKey, ScriptBuf, Transaction};
 
-use crate::common::{input_message, script_keys, secp, shape_is_v0};
+use crate::common::{input_message, script_keys, secp, shape_is_v0, single_input_message};
+use crate::kind::{single_claimed_path, single_key, WalletKind, WalletRef};
 
 /// Which file a problem was found in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +115,19 @@ pub enum CombineError {
         /// The key.
         key: PublicKey,
     },
+    /// SP-80: the input is of the other kind of wallet.
+    WrongKind {
+        /// The input.
+        input: usize,
+        /// The kind of wallet the path expected.
+        expected: WalletKind,
+    },
+    /// SP-84: the input's key-path hint does not name the wallet's one key,
+    /// or that key does not hash to the script being spent.
+    KeyNotSpent {
+        /// The input.
+        input: usize,
+    },
     /// A check the library makes of its own work failed.
     Internal(&'static str),
 }
@@ -172,6 +186,16 @@ impl fmt::Display for CombineError {
                 f,
                 "SP-53: the signature by {key} on input {input} of {source} does not verify"
             ),
+            Self::WrongKind { input, expected } => write!(
+                f,
+                "SP-80: input {input} of the base is not of the kind this path takes; it \
+                 expects {expected}"
+            ),
+            Self::KeyNotSpent { input } => write!(
+                f,
+                "SP-84: input {input} of the base: the key-path hint does not name the \
+                 wallet's key for the script spent"
+            ),
             Self::Internal(what) => write!(f, "internal check failed: {what}"),
         }
     }
@@ -183,7 +207,7 @@ impl std::error::Error for CombineError {}
 /// over, the keys that may sign, and the data copies must repeat.
 struct Context {
     message: Message,
-    keys: [PublicKey; 3],
+    keys: Vec<PublicKey>,
 }
 
 fn check_final(source: Source, i: usize, input: &Input) -> Result<(), CombineError> {
@@ -268,6 +292,94 @@ fn take_signatures(
 /// key. The result is `base` with the good signatures added. It does not
 /// depend on the order of `signed`.
 pub fn combine(base: &Psbt, signed: &[Psbt]) -> Result<Psbt, CombineError> {
+    combine_inner(None, base, signed)
+}
+
+/// SP-50 to SP-54, SP-84: [`combine`] for a wallet of either kind (SP-80).
+///
+/// For a wallet of three keys this is [`combine`], with a file of a wallet
+/// with one key refused as the wrong kind. For a wallet with one key the
+/// only key that may sign an input is the one the wallet derives at the
+/// place the input's hint names, whose hash is the script being spent, and
+/// each signature is checked against the BIP 143 hash with the pay-to-key-hash
+/// script code.
+pub fn combine_wallet<'a>(
+    wallet: impl Into<WalletRef<'a>>,
+    base: &Psbt,
+    signed: &[Psbt],
+) -> Result<Psbt, CombineError> {
+    combine_inner(Some(wallet.into()), base, signed)
+}
+
+/// What the base says about one input of a wallet of three keys.
+fn multisig_context(
+    cache: &mut SighashCache<&Transaction>,
+    wallet: Option<WalletRef<'_>>,
+    i: usize,
+    input: &Input,
+    spent: &bitcoin::TxOut,
+) -> Result<Context, CombineError> {
+    if wallet.is_some_and(|w| w.is_other_kind_input(&spent.script_pubkey, false)) {
+        return Err(CombineError::WrongKind {
+            input: i,
+            expected: WalletKind::Multisig,
+        });
+    }
+    let witness_script = input
+        .witness_script
+        .as_ref()
+        .ok_or(CombineError::WitnessScriptShape { input: i })?;
+    let keys = script_keys(witness_script).ok_or(CombineError::WitnessScriptShape { input: i })?;
+    if ScriptBuf::new_p2wsh(&witness_script.wscript_hash()) != spent.script_pubkey {
+        return Err(CombineError::WitnessScriptNotSpent { input: i });
+    }
+    let message = input_message(cache, i, witness_script, spent.value.to_sat())
+        .ok_or(CombineError::Internal("signature hash"))?;
+    Ok(Context {
+        message,
+        keys: keys.to_vec(),
+    })
+}
+
+/// SP-84: what the base says about one input of a wallet with one key.
+fn single_context(
+    cache: &mut SighashCache<&Transaction>,
+    wallet: WalletRef<'_>,
+    i: usize,
+    input: &Input,
+    spent: &bitcoin::TxOut,
+) -> Result<Context, CombineError> {
+    let Some(single) = wallet.single() else {
+        return Err(CombineError::Internal("a wallet of neither kind"));
+    };
+    if wallet.is_other_kind_input(&spent.script_pubkey, input.witness_script.is_some()) {
+        return Err(CombineError::WrongKind {
+            input: i,
+            expected: WalletKind::Single,
+        });
+    }
+    let (chain, index) = single_claimed_path(single, &input.bip32_derivation)
+        .map_err(|_| CombineError::KeyNotSpent { input: i })?;
+    let key = single_key(single, chain, index).ok_or(CombineError::KeyNotSpent { input: i })?;
+    let script = wallet
+        .script(chain, index)
+        .ok_or(CombineError::KeyNotSpent { input: i })?;
+    if script != spent.script_pubkey {
+        return Err(CombineError::KeyNotSpent { input: i });
+    }
+    let message = single_input_message(cache, i, &spent.script_pubkey, spent.value.to_sat())
+        .ok_or(CombineError::Internal("signature hash"))?;
+    Ok(Context {
+        message,
+        keys: vec![key],
+    })
+}
+
+fn combine_inner(
+    wallet: Option<WalletRef<'_>>,
+    base: &Psbt,
+    signed: &[Psbt],
+) -> Result<Psbt, CombineError> {
     if !shape_is_v0(base) {
         return Err(CombineError::NotVersionZero {
             source: Source::Base,
@@ -292,18 +404,11 @@ pub fn combine(base: &Psbt, signed: &[Psbt]) -> Result<Psbt, CombineError> {
         if input.witness_utxo.as_ref().is_some_and(|w| w != spent) {
             return Err(CombineError::WitnessUtxoMismatch { input: i });
         }
-        let witness_script = input
-            .witness_script
-            .as_ref()
-            .ok_or(CombineError::WitnessScriptShape { input: i })?;
-        let keys =
-            script_keys(witness_script).ok_or(CombineError::WitnessScriptShape { input: i })?;
-        if ScriptBuf::new_p2wsh(&witness_script.wscript_hash()) != spent.script_pubkey {
-            return Err(CombineError::WitnessScriptNotSpent { input: i });
-        }
-        let message = input_message(&mut cache, i, witness_script, spent.value.to_sat())
-            .ok_or(CombineError::Internal("signature hash"))?;
-        contexts.push(Context { message, keys });
+        let context = match wallet.filter(|w| w.kind() == WalletKind::Single) {
+            Some(single) => single_context(&mut cache, single, i, input, spent)?,
+            None => multisig_context(&mut cache, wallet, i, input, spent)?,
+        };
+        contexts.push(context);
     }
 
     let mut result = base.clone();

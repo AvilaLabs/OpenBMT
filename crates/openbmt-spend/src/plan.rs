@@ -7,14 +7,15 @@ use bitcoin::absolute::LockTime;
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
 use openbmt_core::identity::tagged_hash;
-use openbmt_core::wallet::WalletDescription;
+use openbmt_core::wallet::Keychain;
 use openbmt_signer::{MAX_FEE_RATE_SAT_PER_VB, MAX_FEE_SATS, MAX_INPUTS, MAX_OUTPUTS, MAX_WEIGHT};
 
 use crate::coin::{Coin, CoinError};
 use crate::common::{
     shape_weight, template_weight, INPUT_BASE_BYTES, INPUT_WITNESS_BYTES, MAX_MONEY, SEQUENCE,
-    TX_VERSION,
+    SINGLE_INPUT_WITNESS_BYTES, TX_VERSION,
 };
+use crate::kind::{WalletKind, WalletRef};
 
 /// What to spend.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -447,7 +448,21 @@ pub fn dust_limit(script: &bitcoin::Script) -> Option<u64> {
 /// the rate over 1,000, rounded up to a whole satoshi. The sum is
 /// worked out in 128 bits and cannot overflow.
 pub fn receipt_spend_cost_sats(sat_per_vb_milli: u64) -> u64 {
-    let weight = INPUT_BASE_BYTES * 4 + INPUT_WITNESS_BYTES;
+    receipt_cost(WalletKind::Multisig, sat_per_vb_milli)
+}
+
+/// [`receipt_spend_cost_sats`] for a wallet with one key (SP-81): one
+/// P2WPKH input, signed with the longest signature.
+pub fn receipt_spend_cost_sats_single(sat_per_vb_milli: u64) -> u64 {
+    receipt_cost(WalletKind::Single, sat_per_vb_milli)
+}
+
+fn receipt_cost(kind: WalletKind, sat_per_vb_milli: u64) -> u64 {
+    let witness = match kind {
+        WalletKind::Multisig => INPUT_WITNESS_BYTES,
+        WalletKind::Single => SINGLE_INPUT_WITNESS_BYTES,
+    };
+    let weight = INPUT_BASE_BYTES * 4 + witness;
     let vsize = weight.div_ceil(4);
     let cost = u128::from(vsize) * u128::from(sat_per_vb_milli);
     u64::try_from(cost.div_ceil(1000)).unwrap_or(u64::MAX)
@@ -459,20 +474,26 @@ pub fn receipt_spend_cost_sats(sat_per_vb_milli: u64) -> u64 {
 /// transactions each input carries.
 pub const MAX_CONSOLIDATION_INPUTS: usize = 400;
 
-/// The script length of the one output of a consolidation: the wallet's
-/// P2WSH change script.
-const CONSOLIDATION_SCRIPT_BYTES: usize = 34;
-
 /// SP-38: the weight and the virtual size of a consolidation (SP-24) of
 /// `inputs` coins: that many inputs and one output to the wallet's change
 /// script, signed with the longest signatures (SP-30). `None` for no input
 /// or on overflow. The size is the one [`plan`] counts for the same shape.
 pub fn consolidation_size(inputs: usize) -> Option<(u64, u64)> {
+    consolidation_size_of(WalletKind::Multisig, inputs)
+}
+
+/// [`consolidation_size`] for a wallet with one key (SP-81): the one output
+/// is a P2WPKH script of 22 bytes.
+pub fn consolidation_size_single(inputs: usize) -> Option<(u64, u64)> {
+    consolidation_size_of(WalletKind::Single, inputs)
+}
+
+fn consolidation_size_of(kind: WalletKind, inputs: usize) -> Option<(u64, u64)> {
     if inputs == 0 {
         return None;
     }
     let inputs = u64::try_from(inputs).ok()?;
-    let weight = shape_weight(inputs, &[CONSOLIDATION_SCRIPT_BYTES])?;
+    let weight = shape_weight(kind, inputs, &[kind.own_script_bytes()])?;
     Some((weight, weight.div_ceil(4)))
 }
 
@@ -483,6 +504,15 @@ pub fn consolidation_size(inputs: usize) -> Option<(u64, u64)> {
 /// consolidations of that many, and one of the rest. `None` for no coin or
 /// on overflow.
 pub fn consolidation_cost_sats(coins: usize, rate: u64) -> Option<u64> {
+    consolidation_cost_of(WalletKind::Multisig, coins, rate)
+}
+
+/// [`consolidation_cost_sats`] for a wallet with one key (SP-81).
+pub fn consolidation_cost_sats_single(coins: usize, rate: u64) -> Option<u64> {
+    consolidation_cost_of(WalletKind::Single, coins, rate)
+}
+
+fn consolidation_cost_of(kind: WalletKind, coins: usize, rate: u64) -> Option<u64> {
     if coins == 0 {
         return None;
     }
@@ -490,7 +520,7 @@ pub fn consolidation_cost_sats(coins: usize, rate: u64) -> Option<u64> {
     let mut total: u64 = 0;
     while left > 0 {
         let take = left.min(MAX_CONSOLIDATION_INPUTS);
-        let (_, vsize) = consolidation_size(take)?;
+        let (_, vsize) = consolidation_size_of(kind, take)?;
         let fee = vsize.checked_mul(rate)?.div_ceil(1000);
         total = total.checked_add(fee)?;
         left -= take;
@@ -500,9 +530,14 @@ pub fn consolidation_cost_sats(coins: usize, rate: u64) -> Option<u64> {
 
 /// The fee for `inputs` coins and outputs with scripts of `lens` bytes at
 /// `rate` satoshis per 1000 virtual bytes: `(weight, vsize, fee)`.
-fn costs(inputs: usize, lens: &[usize], rate: u64) -> Result<(u64, u64, u64), PlanError> {
+fn costs(
+    kind: WalletKind,
+    inputs: usize,
+    lens: &[usize],
+    rate: u64,
+) -> Result<(u64, u64, u64), PlanError> {
     let inputs = u64::try_from(inputs).map_err(|_| PlanError::Overflow)?;
-    let weight = shape_weight(inputs, lens).ok_or(PlanError::Overflow)?;
+    let weight = shape_weight(kind, inputs, lens).ok_or(PlanError::Overflow)?;
     let vsize = weight.div_ceil(4);
     let fee = vsize
         .checked_mul(rate)
@@ -516,11 +551,13 @@ fn costs(inputs: usize, lens: &[usize], rate: u64) -> Result<(u64, u64, u64), Pl
 /// Every coin is checked first, eligible or not. Coins are then taken oldest
 /// first until they pay for the payments and the fee. The result is the same
 /// for the same arguments.
-pub fn plan(
-    wallet: &WalletDescription,
+pub fn plan<'a>(
+    wallet: impl Into<WalletRef<'a>>,
     coins: &[Coin],
     request: &SpendRequest,
 ) -> Result<Plan, PlanError> {
+    let wallet = wallet.into();
+    let kind = wallet.kind();
     if request.fee_rate == 0 {
         return Err(PlanError::ZeroFeeRate);
     }
@@ -556,8 +593,8 @@ pub fn plan(
         }
     }
     let change_script = wallet
-        .change_script(request.change_index)
-        .map_err(|_| PlanError::ChangeScript)?;
+        .script(Keychain::Change, request.change_index)
+        .ok_or(PlanError::ChangeScript)?;
     own_scripts.push(change_script.clone());
 
     // SP-22, SP-24
@@ -660,7 +697,7 @@ pub fn plan(
         if taken > MAX_INPUTS {
             return Err(PlanError::TooManyInputs);
         }
-        let (weight, vsize, fee) = costs(taken, &payment_lens, rate)?;
+        let (weight, vsize, fee) = costs(kind, taken, &payment_lens, rate)?;
         if weight > MAX_WEIGHT {
             return Err(PlanError::TooHeavy {
                 weight,
@@ -686,7 +723,7 @@ pub fn plan(
             continue;
         }
         if may_have_change {
-            let (c_weight, c_vsize, c_fee) = costs(taken, &change_lens, rate)?;
+            let (c_weight, c_vsize, c_fee) = costs(kind, taken, &change_lens, rate)?;
             if c_weight > MAX_WEIGHT {
                 return Err(PlanError::TooHeavy {
                     weight: c_weight,
@@ -722,7 +759,7 @@ pub fn plan(
         break;
     }
     let Some(finish) = finish else {
-        let (_, _, fee) = costs(amounts.len().max(1), &payment_lens, rate)?;
+        let (_, _, fee) = costs(kind, amounts.len().max(1), &payment_lens, rate)?;
         let needed = if request.send_all {
             fee
         } else {
@@ -841,7 +878,7 @@ pub fn plan(
         return Err(PlanError::TooManyOutputs);
     }
     // SP-30: the worked-out weight against the library's own count.
-    if template_weight(&tx) != weight {
+    if template_weight(kind, &tx) != weight {
         return Err(PlanError::Internal("the weight does not match the shape"));
     }
 

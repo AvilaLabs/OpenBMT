@@ -12,6 +12,8 @@ fn coin_name(e: &CoinError) -> &'static str {
         CoinError::PreviousTransactionMismatch { .. } => "CoinError::PreviousTransactionMismatch",
         CoinError::OutputMissing { .. } => "CoinError::OutputMissing",
         CoinError::ScriptNotInWallet { .. } => "CoinError::ScriptNotInWallet",
+        // Words not written yet (WORDS_NEEDED_SP_80): not in `all_words`.
+        CoinError::WrongKind { .. } => "CoinError::WrongKind",
     }
 }
 
@@ -72,6 +74,10 @@ fn combine_name(e: &CombineError) -> &'static str {
         CombineError::BadSignature { .. } => "CombineError::BadSignature",
         // The same words as a plan's own check.
         CombineError::Internal(_) => "PlanError::Internal",
+        // Words not written yet (WORDS_NEEDED_SP_80, WORDS_NEEDED_SP_84): not
+        // in `all_words`.
+        CombineError::WrongKind { .. } => "CombineError::WrongKind",
+        CombineError::KeyNotSpent { .. } => "CombineError::KeyNotSpent",
     }
 }
 
@@ -102,6 +108,10 @@ fn finalize_name(e: &FinalizeError) -> &'static str {
         FinalizeError::LockTimeNotHeight { .. } => "PlanError::LockTimeNotHeight",
         FinalizeError::NotThePlan => "FinalizeError::NotThePlan",
         FinalizeError::FeeNotThePlan { .. } => "FinalizeError::FeeNotThePlan",
+        // Words not written yet (WORDS_NEEDED_SP_80, WORDS_NEEDED_SP_85): not
+        // in `all_words`.
+        FinalizeError::WrongKind { .. } => "FinalizeError::WrongKind",
+        FinalizeError::NoSignature { .. } => "FinalizeError::NoSignature",
     }
 }
 

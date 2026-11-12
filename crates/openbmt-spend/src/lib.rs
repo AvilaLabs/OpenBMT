@@ -17,6 +17,13 @@
 //!    and [`transaction_of_final_file`] are the steps for a signer that
 //!    someone else made: the file it is shown and what it returns.
 //!
+//! A wallet with one key (`docs/SPEND-RULES.md` section 10) goes through the
+//! same four steps with one signature in place of two: every function that
+//! takes a wallet takes an `openbmt_core::wallet_single::ImportedWallet`
+//! (or, as before, a 2-of-3 `WalletDescription`), and [`combine_wallet`]
+//! and [`take_wallet_signature`] are the steps that need to know the
+//! wallet.
+//!
 //! The final check is this library's own. There is no consensus library
 //! here; Bitcoin Core's `testmempoolaccept` is the independent check (see
 //! `scripts/spend-e2e-core.sh`).
@@ -31,21 +38,24 @@ mod coin;
 mod combine;
 mod common;
 mod finalize;
+mod kind;
 mod plan;
 mod psbt;
 pub mod say;
 mod signer_file;
 
 pub use coin::{Coin, CoinError};
-pub use combine::{combine, CombineError, Source};
+pub use combine::{combine, combine_wallet, CombineError, Source};
 pub use finalize::{finalize, finalize_plan, FinalizeError};
+pub use kind::{WalletKind, WalletRef};
 pub use plan::{
-    consolidation_cost_sats, consolidation_size, dust_limit, plan, receipt_spend_cost_sats,
-    ChangePosition, Plan, PlanError, PlanInput, PlanOutput, PlannedChange, PlannedPayment,
-    SpendRequest, MAX_CONSOLIDATION_INPUTS,
+    consolidation_cost_sats, consolidation_cost_sats_single, consolidation_size,
+    consolidation_size_single, dust_limit, plan, receipt_spend_cost_sats,
+    receipt_spend_cost_sats_single, ChangePosition, Plan, PlanError, PlanInput, PlanOutput,
+    PlannedChange, PlannedPayment, SpendRequest, MAX_CONSOLIDATION_INPUTS,
 };
 pub use psbt::PsbtError;
 pub use signer_file::{
-    check_finished, psbt_for_signer, take_signer_signatures, transaction_of_final_file,
-    SignerFileError,
+    check_finished, psbt_for_signer, take_signer_signatures, take_wallet_signature,
+    transaction_of_final_file, SignerFileError,
 };

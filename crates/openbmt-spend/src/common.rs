@@ -13,6 +13,8 @@ use bitcoin::{Amount, PublicKey, Script, Transaction, Witness};
 use openbmt_core::wallet::{Keychain, WalletDescription};
 use openbmt_signer::{SIGNATURE_BYTES, WITNESS_SCRIPT_BYTES};
 
+use crate::kind::WalletKind;
+
 /// The version every transaction here has (SP-35).
 pub(crate) const TX_VERSION: i32 = 2;
 /// The sequence of every input (SP-35): signals replacement, sets no
@@ -170,6 +172,26 @@ pub(crate) fn input_message(
     Some(Message::from_digest(hash.to_byte_array()))
 }
 
+/// SP-84: the BIP 143 hash `SIGHASH_ALL` signs for input `index` of the
+/// transaction behind `cache`, spending the P2WPKH output `script_pubkey`
+/// (the script code is the pay-to-key-hash script of its key).
+pub(crate) fn single_input_message(
+    cache: &mut SighashCache<&Transaction>,
+    index: usize,
+    script_pubkey: &Script,
+    amount: u64,
+) -> Option<Message> {
+    let hash = cache
+        .p2wpkh_signature_hash(
+            index,
+            script_pubkey,
+            Amount::from_sat(amount),
+            EcdsaSighashType::All,
+        )
+        .ok()?;
+    Some(Message::from_digest(hash.to_byte_array()))
+}
+
 /// Bytes of a compact size.
 pub(crate) fn varint_len(n: u64) -> u64 {
     match n {
@@ -189,10 +211,39 @@ pub(crate) const INPUT_BASE_BYTES: u64 = 36 + 1 + 4;
 /// with its length byte.
 pub(crate) const INPUT_WITNESS_BYTES: u64 = 1 + 1 + 2 * (1 + SIGNATURE_BYTES as u64) + 1 + 105;
 
-/// The weight of a transaction of `inputs` P2WSH 2-of-3 inputs, signed with
-/// the longest signatures, and outputs with scripts of the given lengths
-/// (SP-30). `None` on overflow.
-pub(crate) fn shape_weight(inputs: u64, script_lens: &[usize]) -> Option<u64> {
+/// SP-81: bytes of the witness of one input of a wallet with one key once
+/// signed: item count, a signature of the longest size and a compressed
+/// key, each item with its length byte.
+pub(crate) const SINGLE_INPUT_WITNESS_BYTES: u64 = 1 + (1 + SIGNATURE_BYTES as u64) + (1 + 33);
+
+/// The bytes of the one output of a consolidation: the wallet's own change
+/// script (SP-24).
+pub(crate) const MULTISIG_SCRIPT_BYTES: usize = 34;
+/// The same for a wallet with one key: a P2WPKH script.
+pub(crate) const SINGLE_SCRIPT_BYTES: usize = 22;
+
+impl WalletKind {
+    /// Bytes of the witness of one signed input (SP-30, SP-81).
+    pub(crate) fn input_witness_bytes(self) -> u64 {
+        match self {
+            Self::Multisig => INPUT_WITNESS_BYTES,
+            Self::Single => SINGLE_INPUT_WITNESS_BYTES,
+        }
+    }
+
+    /// The script length of the one output of a consolidation.
+    pub(crate) fn own_script_bytes(self) -> usize {
+        match self {
+            Self::Multisig => MULTISIG_SCRIPT_BYTES,
+            Self::Single => SINGLE_SCRIPT_BYTES,
+        }
+    }
+}
+
+/// The weight of a transaction of `inputs` inputs of a wallet of `kind`,
+/// signed with the longest signatures, and outputs with scripts of the
+/// given lengths (SP-30, SP-81). `None` on overflow.
+pub(crate) fn shape_weight(kind: WalletKind, inputs: u64, script_lens: &[usize]) -> Option<u64> {
     let outputs = u64::try_from(script_lens.len()).ok()?;
     let mut base: u64 = 4u64
         .checked_add(varint_len(inputs))?
@@ -209,19 +260,28 @@ pub(crate) fn shape_weight(inputs: u64, script_lens: &[usize]) -> Option<u64> {
     let witness = if inputs == 0 {
         0
     } else {
-        inputs.checked_mul(INPUT_WITNESS_BYTES)?.checked_add(2)?
+        inputs
+            .checked_mul(kind.input_witness_bytes())?
+            .checked_add(2)?
     };
     base.checked_mul(4)?.checked_add(witness)
 }
 
 /// The weight the `bitcoin` crate gives `tx` once every input carries the
-/// witness shape of SP-30. The planner checks `shape_weight` against it.
-pub(crate) fn template_weight(tx: &Transaction) -> u64 {
+/// witness shape of SP-30 (or SP-81). The planner checks `shape_weight`
+/// against it.
+pub(crate) fn template_weight(kind: WalletKind, tx: &Transaction) -> u64 {
     let mut signed = tx.clone();
     let sig = [0u8; SIGNATURE_BYTES];
     let script = [0u8; WITNESS_SCRIPT_BYTES];
+    let key = [0u8; 33];
     for input in &mut signed.input {
-        input.witness = Witness::from_slice(&[&[][..], &sig[..], &sig[..], &script[..]]);
+        input.witness = match kind {
+            WalletKind::Multisig => {
+                Witness::from_slice(&[&[][..], &sig[..], &sig[..], &script[..]])
+            }
+            WalletKind::Single => Witness::from_slice(&[&sig[..], &key[..]]),
+        };
     }
     signed.weight().to_wu()
 }

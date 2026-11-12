@@ -3,7 +3,9 @@
 use std::fmt;
 
 use bitcoin::{OutPoint, Transaction, TxOut};
-use openbmt_core::wallet::{Keychain, WalletDescription};
+use openbmt_core::wallet::Keychain;
+
+use crate::kind::{WalletKind, WalletRef};
 
 /// A coin of the wallet: the whole previous transaction, the output being
 /// spent, and where in the wallet its script sits.
@@ -43,6 +45,13 @@ pub enum CoinError {
         /// The outpoint the coin names.
         outpoint: OutPoint,
     },
+    /// SP-80: the coin is of the other kind of wallet.
+    WrongKind {
+        /// The outpoint the coin names.
+        outpoint: OutPoint,
+        /// The kind of wallet the path expected.
+        expected: WalletKind,
+    },
 }
 
 impl fmt::Display for CoinError {
@@ -62,6 +71,10 @@ impl fmt::Display for CoinError {
                 "SP-02: the script of coin {outpoint} is not the wallet's script at the \
                  keychain and index it names"
             ),
+            Self::WrongKind { outpoint, expected } => write!(
+                f,
+                "SP-80: coin {outpoint} is not of the kind this path takes; it expects {expected}"
+            ),
         }
     }
 }
@@ -79,7 +92,12 @@ impl Coin {
     /// SP-01 and SP-02: the previous transaction hashes to the outpoint,
     /// the output exists, and its script is exactly the wallet's script at
     /// the coin's keychain and index.
-    pub fn check(&self, wallet: &WalletDescription) -> Result<(), CoinError> {
+    ///
+    /// The wallet is an `ImportedWallet` (SP-80), or a `WalletDescription`.
+    /// A coin of the other kind of wallet is refused with an error that
+    /// names the kind expected.
+    pub fn check<'a>(&self, wallet: impl Into<WalletRef<'a>>) -> Result<(), CoinError> {
+        let wallet = wallet.into();
         let outpoint = self.outpoint;
         if self.prev_tx.compute_txid() != outpoint.txid {
             return Err(CoinError::PreviousTransactionMismatch { outpoint });
@@ -90,8 +108,14 @@ impl Coin {
         let output = self.output().ok_or(CoinError::OutputMissing { outpoint })?;
         let script = wallet
             .script(self.chain, self.index)
-            .map_err(|_| CoinError::ScriptNotInWallet { outpoint })?;
+            .ok_or(CoinError::ScriptNotInWallet { outpoint })?;
         if script != output.script_pubkey {
+            if wallet.is_other_kind_script(&output.script_pubkey) {
+                return Err(CoinError::WrongKind {
+                    outpoint,
+                    expected: wallet.kind(),
+                });
+            }
             return Err(CoinError::ScriptNotInWallet { outpoint });
         }
         Ok(())

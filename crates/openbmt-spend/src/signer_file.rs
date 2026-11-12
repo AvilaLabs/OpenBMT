@@ -6,11 +6,12 @@ use std::fmt;
 use bitcoin::psbt::{Input, Output, Psbt, PsbtSighashType};
 use bitcoin::sighash::EcdsaSighashType;
 use bitcoin::{PublicKey, Transaction, Witness};
-use openbmt_core::wallet::{Keychain, WalletDescription};
+use openbmt_core::wallet::Keychain;
 
-use crate::combine::{combine, CombineError};
+use crate::combine::{combine, combine_wallet, CombineError};
 use crate::common::{claimed_path, key_hints, shape_is_v0};
 use crate::finalize::{audit, FinalizeError};
+use crate::kind::{single_claimed_path, single_key, WalletKind, WalletRef};
 
 /// Why a file could not be written for a signer, or what came back from one
 /// was not taken.
@@ -53,6 +54,11 @@ pub enum SignerFileError {
     Finished(FinalizeError),
     /// SP-45: a slot that is not 1, 2 or 3.
     Slot,
+    /// SP-80: the wallet is of the other kind than this path takes.
+    WrongKind {
+        /// The kind of wallet the path expected.
+        expected: WalletKind,
+    },
 }
 
 impl fmt::Display for SignerFileError {
@@ -80,6 +86,10 @@ impl fmt::Display for SignerFileError {
             ),
             Self::Finished(e) => write!(f, "SP-47: {e}"),
             Self::Slot => write!(f, "SP-45: the slot is not 1, 2 or 3"),
+            Self::WrongKind { expected } => write!(
+                f,
+                "SP-80: the wallet is not of the kind this path takes; it expects {expected}"
+            ),
         }
     }
 }
@@ -104,7 +114,17 @@ fn bad_input(input: usize, what: &'static str) -> SignerFileError {
 /// and the hints are exactly the three keys. An output that carries a
 /// witness script or hints must be the wallet's change script at the index
 /// they name, with exactly the wallet's script and keys.
-pub fn psbt_for_signer(wallet: &WalletDescription, psbt: &Psbt) -> Result<Psbt, SignerFileError> {
+///
+/// This is for a wallet of three keys; a wallet with one key is refused as
+/// the wrong kind (its file, SP-82, is written by `Plan::to_psbt` and goes
+/// to the shop's wallet as it is).
+pub fn psbt_for_signer<'a>(
+    wallet: impl Into<WalletRef<'a>>,
+    psbt: &Psbt,
+) -> Result<Psbt, SignerFileError> {
+    let wallet = wallet.into().multisig().ok_or(SignerFileError::WrongKind {
+        expected: WalletKind::Multisig,
+    })?;
     if !shape_is_v0(psbt) {
         return Err(SignerFileError::NotVersionZero);
     }
@@ -219,12 +239,15 @@ pub fn psbt_for_signer(wallet: &WalletDescription, psbt: &Psbt) -> Result<Psbt, 
 /// amounts, version and lock time). Every signature goes through
 /// [`combine`], which verifies each against the BIP 143 hash, and the
 /// result must hold a signature of the slot's key on every input.
-pub fn take_signer_signatures(
-    wallet: &WalletDescription,
+pub fn take_signer_signatures<'a>(
+    wallet: impl Into<WalletRef<'a>>,
     sent: &Psbt,
     returned: &Psbt,
     slot: u8,
 ) -> Result<Psbt, SignerFileError> {
+    let wallet = wallet.into().multisig().ok_or(SignerFileError::WrongKind {
+        expected: WalletKind::Multisig,
+    })?;
     let slot_index = match slot {
         1..=3 => usize::from(slot) - 1,
         _ => return Err(SignerFileError::Slot),
@@ -255,20 +278,65 @@ pub fn take_signer_signatures(
     Ok(both)
 }
 
+/// SP-83: the file that was sent (`sent`) joined with what the wallet with
+/// one key returned.
+///
+/// Only the unsigned transaction and the signatures of `returned` are read.
+/// The unsigned transaction must be the sent one's. Every signature goes
+/// through [`combine_wallet`], which verifies each against the BIP 143 hash
+/// with the pay-to-key-hash script code, and the result must hold a
+/// signature of the input's own key on every input. A wallet of three keys
+/// is refused as the wrong kind.
+pub fn take_wallet_signature<'a>(
+    wallet: impl Into<WalletRef<'a>>,
+    sent: &Psbt,
+    returned: &Psbt,
+) -> Result<Psbt, SignerFileError> {
+    let wallet = wallet.into();
+    let single = wallet.single().ok_or(SignerFileError::WrongKind {
+        expected: WalletKind::Single,
+    })?;
+    if !shape_is_v0(sent) || !shape_is_v0(returned) {
+        return Err(SignerFileError::NotVersionZero);
+    }
+    if returned.unsigned_tx != sent.unsigned_tx {
+        return Err(SignerFileError::DifferentTransaction);
+    }
+    let mut copy = sent.clone();
+    for (into, from) in copy.inputs.iter_mut().zip(&returned.inputs) {
+        into.partial_sigs = from.partial_sigs.clone();
+        into.sighash_type = from.sighash_type;
+    }
+    let both = combine_wallet(wallet, sent, &[copy]).map_err(SignerFileError::Combine)?;
+    for (i, input) in both.inputs.iter().enumerate() {
+        let (chain, index) = single_claimed_path(single, &input.bip32_derivation)
+            .map_err(|_| bad_input(i, "the key hint does not name a place in the wallet"))?;
+        let key = single_key(single, chain, index)
+            .ok_or_else(|| bad_input(i, "the wallet cannot derive its key"))?;
+        if !input.partial_sigs.contains_key(&key) {
+            return Err(SignerFileError::NotSigned { input: i });
+        }
+    }
+    Ok(both)
+}
+
 /// SP-47: the fee of `tx` if it is a finished transaction of the file
 /// `sent`: the same transaction ID, version, lock time, outputs and
 /// sequences, no script signature, and on every input the witness of SP-60
 /// whose two signatures verify against two keys of the script in order. This
 /// is the check of SP-62, and it does not say whose signatures they are.
-pub fn check_finished(
-    wallet: &WalletDescription,
+///
+/// For a wallet with one key (SP-86) the witness is the signature and the
+/// key, and the check does say that the signature is the input's own key's.
+pub fn check_finished<'a>(
+    wallet: impl Into<WalletRef<'a>>,
     sent: &Psbt,
     tx: &Transaction,
 ) -> Result<u64, SignerFileError> {
     if !shape_is_v0(sent) {
         return Err(SignerFileError::NotVersionZero);
     }
-    audit(wallet, sent, tx).map_err(SignerFileError::Finished)
+    audit(wallet.into(), sent, tx).map_err(SignerFileError::Finished)
 }
 
 /// SP-48: the transaction in a file whose every input is final (a signer

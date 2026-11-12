@@ -9,7 +9,7 @@ use openbmt_spend::{
 };
 
 const RULES: &str = include_str!("../../../docs/SPEND-RULES.md");
-const TEST_SOURCES: [&str; 10] = [
+const TEST_SOURCES: [&str; 11] = [
     include_str!("coins.rs"),
     include_str!("choice.rs"),
     include_str!("outputs.rs"),
@@ -20,6 +20,7 @@ const TEST_SOURCES: [&str; 10] = [
     include_str!("finalize.rs"),
     include_str!("signer_file.rs"),
     include_str!("hostile.rs"),
+    include_str!("single.rs"),
 ];
 
 /// Every rule ID that the rules file defines (in bold at the start of a
@@ -40,8 +41,9 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 43);
+    assert_eq!(ids.len(), 51);
     assert!(ids.contains(&"SP-01".to_string()) && ids.contains(&"SP-71".to_string()));
+    assert!(ids.contains(&"SP-80".to_string()) && ids.contains(&"SP-87".to_string()));
     let mut sorted = ids.clone();
     sorted.sort();
     sorted.dedup();
