@@ -142,10 +142,10 @@ object FirstRunWords {
     const val moneyText = "Bitcoin from your sales goes straight to a wallet you hold. OpenBMT never holds it and never makes your keys."
     const val moneyOwn = "Use my own wallet"
     const val moneyOwnNote = "You already have a wallet and want sales to go there."
-    const val moneyMake = "Help me make a savings wallet"
+    const val moneyMake = "Help me make a cold wallet"
     const val moneyMakeNote = "With a coin or a die and your laptop, offline. About an hour."
     const val moneyLater = "Set up the rest now, add the wallet later"
-    const val moneyLaterNote = "The till says \"Not taking bitcoin yet\" until you do."
+    const val moneyLaterNote = "The counter says \"Not taking bitcoin yet\" until you do."
 
     // ---- advice on an own wallet ----------------------------------------------------------------------
 

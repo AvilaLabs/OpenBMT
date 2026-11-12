@@ -2695,13 +2695,13 @@ object AppModelTest {
         ok(ScreenModel.pick(null, done, null, true) is Screen.Home, "after setup, running: home")
         ok(ScreenModel.pick(null, none, null, false, resuming = true) !is Screen.Welcome, "a ceremony to resume skips the welcome")
 
-        // The first run: Welcome, Shop, Till, Money, then Why for the savings wallet only, then the notice.
+        // The first run: Welcome, Shop, Till, Money, then Why for the cold wallet only, then the notice.
         val r = FirstRun(ShopPrefs(), "DE")
         ok(r.step == FirstRunStep.Welcome && r.currency == ShopCurrency.Eur, "the money is guessed from the locale")
         r.next(); ok(r.step == FirstRunStep.Shop, "shop")
         r.name = "Cafe Anna"; r.currency = ShopCurrency.Gbp; r.next(); ok(r.step == FirstRunStep.Till, "till")
         r.till = Till.Toast; r.query = "to"; r.next(); ok(r.step == FirstRunStep.Money, "money")
-        r.choose(MoneyChoice.Make); ok(r.step == FirstRunStep.Why, "the savings wallet shows the why first")
+        r.choose(MoneyChoice.Make); ok(r.step == FirstRunStep.Why, "the cold wallet shows the why first")
         r.next(); ok(r.step == FirstRunStep.Guide && r.guide.step == GuideStep.Need, "then the key maker guide, at its first step")
         r.back(); ok(r.step == FirstRunStep.Why, "back from the first step of the guide to the why")
         r.openRealCases(); ok(r.step == FirstRunStep.RealCases, "the button on the why screen opens the real cases")

@@ -5,13 +5,13 @@ import org.openbmt.app.Tones
 import org.openbmt.app.Who
 
 /**
- * The words of the key maker guide, shown after "Help me make a savings wallet" and the why screen: the phone
+ * The words of the key maker guide, shown after "Help me make a cold wallet" and the why screen: the phone
  * walks beside the laptop, and its step numbers match the key maker page's from step 4 on. They are written down
  * once and the screens copy them; nothing is written on a screen. `{n}` and `{total}` are the step and the count.
  * The list is written to docs/screens/owner-app.md by [AppWords.screensMarkdown]. No Android class is used.
  */
 object KeyGuideWords {
-    const val kgTitle = "Make your savings wallet"
+    const val kgTitle = "Make your cold wallet"
     const val kgStepBadge = "Step {n} of {total}"
     const val kgNext = "Next"
     const val kgBack = "Back"

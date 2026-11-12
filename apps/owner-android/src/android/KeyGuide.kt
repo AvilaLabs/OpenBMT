@@ -6,7 +6,7 @@ import org.openbmt.app.SayWords
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerImport
 
-// The key maker guide of the first run (the savings wallet): one step to a screen beside the key maker page, the
+// The key maker guide of the first run (the cold wallet): one step to a screen beside the key maker page, the
 // scan of the page's code and the two comparisons. Every sentence is in KeyGuideWords. The guide is in memory only:
 // it writes no file, keeps nothing and never asks for or shows words. The scanned text goes to the library, which
 // gives back a fingerprint and a first address and holds nothing; the text is not kept here either.

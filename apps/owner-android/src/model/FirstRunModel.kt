@@ -197,8 +197,8 @@ class FirstRun(start: ShopPrefs, locale: String) {
     fun prefs(stepsShown: Boolean): ShopPrefs = ShopPrefs(ShopPrefs.clean(name), currency, till, stepsShown)
 
     /**
-     * The step after [step]; the Money step goes on to Why for the savings wallet, to OwnAdvice for the own wallet and to
-     * NotYet for the others. OwnAdvice goes on to NotYet, or to Why once the choice is changed to the savings wallet.
+     * The step after [step]; the Money step goes on to Why for the cold wallet, to OwnAdvice for the own wallet and to
+     * NotYet for the others. OwnAdvice goes on to NotYet, or to Why once the choice is changed to the cold wallet.
      */
     fun next() {
         step = when (step) {
@@ -231,7 +231,7 @@ class FirstRun(start: ShopPrefs, locale: String) {
         next()
     }
 
-    /** From the advice on an own wallet: the owner would rather make a cold wallet, so the savings wallet path follows. */
+    /** From the advice on an own wallet: the owner would rather make a cold wallet, so the cold wallet path follows. */
     fun makeInstead() {
         if (step == FirstRunStep.OwnAdvice) choose(MoneyChoice.Make)
     }
@@ -279,7 +279,7 @@ enum class GuideStep(val number: Int?) {
 }
 
 /**
- * The key maker guide of the first run (the savings wallet): the steps one to a screen, then the comparison of
+ * The key maker guide of the first run (the cold wallet): the steps one to a screen, then the comparison of
  * what the page's code gave with the page and with Electrum. It is state in memory only: nothing here reads or
  * writes a file, and no word of the wallet is asked for or shown. What was scanned is the fingerprint and the
  * first address, which hold no secret.

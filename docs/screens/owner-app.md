@@ -309,10 +309,10 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | moneyText | Bitcoin from your sales goes straight to a wallet you hold. OpenBMT never holds it and never makes your keys. |
 | moneyOwn | Use my own wallet |
 | moneyOwnNote | You already have a wallet and want sales to go there. |
-| moneyMake | Help me make a savings wallet |
+| moneyMake | Help me make a cold wallet |
 | moneyMakeNote | With a coin or a die and your laptop, offline. About an hour. |
 | moneyLater | Set up the rest now, add the wallet later |
-| moneyLaterNote | The till says "Not taking bitcoin yet" until you do. |
+| moneyLaterNote | The counter says "Not taking bitcoin yet" until you do. |
 | moneyNotYet | This part is still being built. For now, setup continues with the test setup. |
 | ownAdviceTitle | We recommend a cold wallet |
 | ownAdviceText | A cold wallet keeps its keys on a device that never connects to the internet, such as a hardware signer or an offline computer. Its 12 words are best made from your own coin flips or die rolls. |
@@ -341,7 +341,7 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | realCoinTitle | Why a coin or a die |
 | realCoinText | Phones and computers make random numbers with chips and software, and those have had faults before. A coin or a die has no chip and no software, so nothing can reach into it from outside. The key maker only turns your flips into words, offline, and shows its work so you can check it by hand. |
 | realMore | More cases from 11 countries, with their sources, are in the handbook under "When someone else holds the money". |
-| kgTitle | Make your savings wallet |
+| kgTitle | Make your cold wallet |
 | kgStepBadge | Step {n} of {total} |
 | kgNext | Next |
 | kgBack | Back |
