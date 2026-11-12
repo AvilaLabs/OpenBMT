@@ -118,6 +118,7 @@ impl Mem {
     fn stored(&self) -> Stored<'_> {
         Stored {
             batches: self.slots.get(&Slot::Batches).map(Vec::as_slice),
+            ranges: self.slots.get(&Slot::Ranges).map(Vec::as_slice),
             exposure: self.slots.get(&Slot::Exposure).map(Vec::as_slice),
             pause: self.slots.get(&Slot::Pause).map(Vec::as_slice),
             desk: self.slots.get(&Slot::Desk).map(Vec::as_slice),
