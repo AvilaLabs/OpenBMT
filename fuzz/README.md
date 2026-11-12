@@ -31,6 +31,7 @@ exactly the input bytes.
 | `net_manager` | the peer manager on regtest with 3 peers, driven by a script of steps in the input: connect, receive bytes (optionally after a good handshake, and optionally framed as a chosen command with a right checksum), tick, close. It must never panic, and the bytes waiting for a peer never pass the session cap |
 | `approval_wallet_message` | `verify_wallet_message` for an address that is P2WPKH or of a type that must be refused, with the message and the signature (as text, or as bytes written in base64) taken from the input; it must never panic, and nothing the fuzzer makes may pass |
 | `approval_classify` | `classify` on two settings built from a script of field changes; it must never panic, an unchanged pair is Free, a change that only tightens is Free, and a Redirect names a node |
+| `bip321_uri` | `PaymentRequest::parse`; parsing is deterministic, and any request without an address has a nonempty recognized payment instruction |
 | `pair_offer_decode` | `PairOffer::from_bytes` |
 | `pinned_wallet_decode` | `PinnedWallet::from_bytes`; on success the bytes encode back exactly, the text reads again through the import, and addresses at 0, 1, 999 and 2^31 derive without a panic |
 | `signed_range_decode` | `SignedRange::from_bytes`; on success the bytes encode back exactly, the range does not verify under a key it was never signed by, and the range book takes it and hands out an index without a panic |

@@ -783,3 +783,10 @@ path = "fuzz_targets/requests_return_address.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "bip321_uri"
+path = "fuzz_targets/bip321_uri.rs"
+test = false
+doc = false
+bench = false

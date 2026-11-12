@@ -18,6 +18,11 @@ batch, record or setting is.
   both compared values can still find a pair in about 2^22 tries, so the words
   are only a human cross-check. Software always compares the full 32-byte
   hashes.
+- **Payment URIs** (`bip321`). A strict mainnet BIP 321 reader checks the
+  standard legacy, SegWit and Taproot address encodings, parses decimal BTC as
+  integer satoshis, and returns bounded UTF-8 labels and messages. Lightning,
+  Lightning offers and Silent Payment instructions stay URI-encoded for the
+  caller. The strict profile and its limits are in `docs/URI-RULES.md`.
 - **Own randomness** (`entropy`). Seed words from the owner's dice or coin,
   by two methods. Dice, hashed: at least 99 rolls written as digits 1 to 6,
   and the 24 words come from the SHA-256 hash of that text. Skew-corrected
