@@ -27,14 +27,15 @@ main { max-width: 62rem; margin: 0 auto; padding: 0.5rem 1.25rem 1rem; }
 
 .banner {
   background: #ffe36e;
-  border: 3px solid var(--ink);
-  padding: 0.35rem 0.75rem;
-  margin: 0.25rem 0 0.5rem;
+  border: 2px solid var(--ink);
+  padding: 0.05rem 0.5rem;
+  font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
-.top { display: flex; align-items: center; gap: 1rem; margin: 0.25rem 0 0.5rem; }
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 1rem; margin: 0.25rem 0 0.5rem; }
 .step {
   min-width: 3.4rem;
   padding: 0.25rem 0.5rem;
@@ -130,6 +131,8 @@ input.prefix {
 /* Steps 5 and 6 */
 .phone { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-start; margin: 0.4rem 0; }
 .qr svg { display: block; border: 1px solid #888; }
+.steps { flex: 1; min-width: 20rem; margin: 0; padding-left: 1.4rem; font-size: 1rem; }
+.steps li { margin: 0.25rem 0; }
 .facts { flex: 1; min-width: 16rem; }
 .fp { font-size: 2.6rem; font-weight: 700; font-family: ui-monospace, "DejaVu Sans Mono", monospace; margin-bottom: 0.8rem; }
 .address { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; font-size: 1.9rem; font-weight: 700; font-family: ui-monospace, "DejaVu Sans Mono", monospace; }

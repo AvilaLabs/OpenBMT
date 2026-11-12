@@ -106,7 +106,9 @@ through the same screens as the real run and has no screen of its own).
   of chance is used, so the same flips always ask the same words. The owner
   types the first four letters of each word (the whole word if it is shorter),
   in any letter case. A wrong answer returns to the check screen with the
-  first wrong position named, and a button shows the words again.
+  first wrong position named, and a button shows the words again. Only the
+  wrong boxes are emptied: the right ones keep what was typed, and focus goes
+  to the first wrong box.
 - **KM-17. The inert notice.** The file holds a visible notice that the
   script hides when it starts, and a `noscript` notice. The rehearsal fill
   (`rehearsalFill`) is offered only in a rehearsal, and made-up flips come
@@ -125,6 +127,15 @@ through the same screens as the real run and has no screen of its own).
   close. The test needs a browser, so it runs only where
   `KEYMAKER_BROWSER=1` is set and never in CI. It saves a screenshot of each
   step.
+- **KM-24. Step 6 and the screen.** Step 6 shows `electrumText`, a numbered
+  list of the eight `electrumSteps`, and `electrumClose`, then the two
+  buttons; beside the list, the fingerprint and first address of step 5 are
+  shown again, large. The rehearsal banner is one line of small type in the
+  step badge row, so it pushes nothing down. At 1280 x 800, in a rehearsal
+  and for real, the whole QR on step 5 lies inside the window without
+  scrolling; on a shorter window the QR is drawn smaller, a pixel a module at
+  a time and never below 4, before anything scrolls. Same local-only browser
+  test as KM-23.
 
 ## 6. The QR code
 

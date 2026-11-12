@@ -72,16 +72,29 @@ function helpers(page, width) {
     banner: () => page.eval("!!document.querySelector('.banner')"),
     words: () => page.eval("[...document.querySelectorAll('.words .w')].map((x) => x.textContent)"),
     count: () => page.eval("document.querySelector('.count').textContent"),
+    qrBox: () =>
+      page.eval(`(() => {
+        const r = document.querySelector('.qr svg').getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, left: r.left, right: r.right,
+          w: window.innerWidth, h: window.innerHeight };
+      })()`),
+    async qrInside() {
+      const b = await this.qrBox();
+      assert.ok(b.top >= 0 && b.left >= 0 && b.bottom <= b.h && b.right <= b.w, JSON.stringify(b));
+    },
     async noOverflow() {
       assert.equal(await page.eval('document.documentElement.scrollWidth <= window.innerWidth'), true);
     },
+    /** `right` is true or false for all three boxes, or one flag per box. */
     async answer(words, right) {
       const labels = await page.eval("[...document.querySelectorAll('label.field span')].map((x) => x.textContent)");
       assert.equal(labels.length, 3);
       const pos = labels.map((l) => Number(l.match(/\d+/)[0]));
       assert.equal(new Set(pos).size, 3);
       assert.deepEqual(pos, [...pos].sort((a, b) => a - b));
-      const typed = pos.map((p) => (right ? words[p - 1].slice(0, 4).toUpperCase() : 'zzzz'));
+      const typed = pos.map((p, k) =>
+        (Array.isArray(right) ? right[k] : right) ? words[p - 1].slice(0, 4).toUpperCase() : 'zzzz',
+      );
       await page.eval(`(() => {
         const t = ${J(typed)};
         [...document.querySelectorAll('input.prefix')].forEach((i, k) => { i.value = t[k]; });
@@ -112,7 +125,7 @@ function helpers(page, width) {
         };
       })()`);
       assert.equal(drawn.total, code.size + 8);
-      assert.ok(drawn.width / drawn.total >= 6);
+      assert.ok(drawn.width / drawn.total >= 4);
       assert.equal(drawn.ns, true);
       assert.deepEqual(
         drawn.rects,
@@ -247,3 +260,86 @@ for (const [width, height] of [
     },
   );
 }
+
+test(
+  'km_24 step 6 lists the Electrum steps beside the fingerprint and address; the whole QR is on screen',
+  { skip: enabled ? false : 'set KEYMAKER_BROWSER=1 (local only, needs a browser and bwrap)' },
+  async () => {
+    for (const [width, height] of [
+      [1280, 800],
+      [1024, 768],
+    ]) {
+      await session(width, height, async (page) => {
+        const h = helpers(page, `km24-${width}`);
+        await page.goto(`file://${file}`);
+        // Rehearsal: the banner shares the badge row and the QR is whole.
+        assert.equal(await h.click(WORDS.rehearseButton), true);
+        assert.equal(await page.eval("document.querySelector('.banner').closest('header.top') !== null"), true);
+        assert.equal(await h.click(WORDS.rehearsalFill), true);
+        assert.equal(await h.click(WORDS.next), true);
+        const words = await h.words();
+        assert.equal(await h.click(WORDS.writeDone), true);
+        await h.answer(words, true);
+        await h.qrInside();
+        const fp = await page.eval("document.querySelector('.fp').textContent");
+        const addr = await page.eval("[...document.querySelectorAll('.address .g')].map((x) => x.textContent).join('')");
+        await h.shot('phone-rehearsal-fit');
+        assert.equal(await h.click(WORDS.phoneDone), true);
+        // Step 6: eight steps, and the same fingerprint and address as step 5.
+        assert.equal(await h.step(), 'Step 6 of 7');
+        assert.deepEqual(
+          await page.eval("[...document.querySelectorAll('ol.steps li')].map((x) => x.textContent)"),
+          WORDS.electrumSteps,
+        );
+        assert.equal(WORDS.electrumSteps.length, 8);
+        assert.equal(await page.eval("document.querySelector('.fp').textContent"), fp);
+        assert.equal(
+          await page.eval("[...document.querySelectorAll('.address .g')].map((x) => x.textContent).join('')"),
+          addr,
+        );
+        const t = await h.text();
+        assert.ok(t.includes(WORDS.electrumText) && t.includes(WORDS.electrumClose));
+        await h.shot('electrum-steps');
+        // For real: no banner, whole QR.
+        assert.equal(await h.click(WORDS.electrumDone), true);
+        await realRun(page, h);
+        await h.qrInside();
+      });
+    }
+  },
+);
+
+test(
+  'km_16 a wrong card answer clears only the wrong boxes and focuses the first of them',
+  { skip: enabled ? false : 'set KEYMAKER_BROWSER=1 (local only, needs a browser and bwrap)' },
+  async () => {
+    await session(1280, 800, async (page) => {
+      const h = helpers(page, 'km16');
+      await page.goto(`file://${file}`);
+      assert.equal(await h.click(WORDS.rehearseButton), true);
+      assert.equal(await h.click(WORDS.rehearsalFill), true);
+      assert.equal(await h.click(WORDS.next), true);
+      const words = await h.words();
+      assert.equal(await h.click(WORDS.writeDone), true);
+      const state = () =>
+        page.eval(`({
+          values: [...document.querySelectorAll('input.prefix')].map((i) => i.value),
+          focus: [...document.querySelectorAll('input.prefix')].findIndex((i) => i === document.activeElement),
+        })`);
+      // The middle and last boxes wrong: the first stays, focus on the middle.
+      const pos = await h.answer(words, [true, false, false]);
+      let s = await state();
+      assert.deepEqual(s.values, [words[pos[0] - 1].slice(0, 4).toUpperCase(), '', '']);
+      assert.equal(s.focus, 1);
+      assert.ok((await h.text()).includes(WORDS.checkWrong.replace('{pos}', String(pos[1]))));
+      // Only the first wrong: the last right box is kept, focus on the first.
+      await h.answer(words, [false, true, true]);
+      s = await state();
+      assert.deepEqual(s.values, ['', words[pos[1] - 1].slice(0, 4).toUpperCase(), words[pos[2] - 1].slice(0, 4).toUpperCase()]);
+      assert.equal(s.focus, 0);
+      // All three right: on to step 5.
+      await h.answer(words, true);
+      assert.equal(await h.heading(), WORDS.phoneHeading);
+    });
+  },
+);

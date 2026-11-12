@@ -10,6 +10,7 @@ import { WORDS } from './words.js';
 
 const LAST_STEP = 7;
 const QR_SCALE = 7;
+const QR_MIN_SCALE = 4;
 const QR_QUIET = 4;
 const WORD_COUNT = 12;
 const CHECK_COUNT = 3;
@@ -82,6 +83,10 @@ function wipeState(s) {
     s.wordList.fill('');
     s.wordList.length = 0;
   }
+  if (s.kept) {
+    s.kept.fill('');
+    s.kept.length = 0;
+  }
   if (s.positions) {
     s.positions.fill(0);
     s.positions.length = 0;
@@ -114,6 +119,7 @@ function newState(rehearsal) {
     result: null,
     positions: null,
     wrong: null,
+    kept: null,
   };
 }
 
@@ -157,10 +163,10 @@ export function start(doc) {
     const head = el('header', 'top');
     const heading = el('h1', '', text(headingFor(screen)));
     heading.setAttribute('tabindex', '-1');
-    head.append(stepBadge(screen), heading);
-    const kids = [];
-    if (state && state.rehearsal) kids.push(el('div', 'banner', text(WORDS.rehearsalBanner)));
-    kids.push(head, ...body, el('footer', 'label', text(WORDS.label)));
+    head.append(stepBadge(screen));
+    if (state && state.rehearsal) head.append(el('div', 'banner', text(WORDS.rehearsalBanner)));
+    head.append(heading);
+    const kids = [head, ...body, el('footer', 'label', text(WORDS.label))];
     root.replaceChildren(...kids);
     heading.focus();
   }
@@ -394,6 +400,7 @@ export function start(doc) {
       el('p', 'strong', text(WORDS.writeSteel)),
       button(WORDS.writeDone, () => {
         state.wrong = null;
+        state.kept = null;
         go('check');
       }),
       details,
@@ -415,6 +422,8 @@ export function start(doc) {
       form.append(label);
       return input;
     });
+    // After a wrong answer the right boxes keep what was typed.
+    if (state.kept) inputs.forEach((input, i) => (input.value = state.kept[i]));
     const submit = el('button', 'big', text(WORDS.checkButton));
     submit.setAttribute('type', 'submit');
     form.append(submit);
@@ -423,14 +432,18 @@ export function start(doc) {
       guarded(() => checkCard(inputs));
     });
     function checkCard(inputs) {
-      const bad = state.positions.findIndex(
-        (p, i) => inputs[i].value.trim().toLowerCase() !== cardPrefix(state.wordList[p]),
+      const right = state.positions.map(
+        (p, i) => inputs[i].value.trim().toLowerCase() === cardPrefix(state.wordList[p]),
       );
-      for (const i of inputs) i.value = '';
+      const bad = right.indexOf(false);
       if (bad < 0) {
+        for (const i of inputs) i.value = '';
         state.wrong = null;
+        state.kept = null;
         go('phone');
       } else {
+        state.kept = inputs.map((input, i) => (right[i] ? input.value : ''));
+        for (const i of inputs) i.value = '';
         state.wrong = state.positions[bad] + 1;
         renderCheck();
       }
@@ -442,7 +455,9 @@ export function start(doc) {
       kids.push(warn, button(WORDS.checkBack, () => go('write'), 'small'));
     }
     frame('check', ...kids);
-    if (inputs[0]) inputs[0].focus();
+    const first = state.kept ? state.kept.indexOf('') : 0;
+    const focus = inputs[first < 0 ? 0 : first];
+    if (focus) focus.focus();
   }
 
   // Step 5
@@ -490,6 +505,21 @@ export function start(doc) {
     );
   }
 
+  // The code is drawn at 7 px a module; when the screen is too short to show
+  // it whole, it shrinks a pixel at a time, never below 4, before anything
+  // scrolls.
+  function fitQr(svg) {
+    const view = doc.defaultView;
+    if (!view) return;
+    const total = Number(svg.getAttribute('viewBox').split(' ')[2]);
+    let scale = QR_SCALE;
+    while (scale > QR_MIN_SCALE && svg.getBoundingClientRect().bottom > view.innerHeight) {
+      scale -= 1;
+      svg.setAttribute('width', String(total * scale));
+      svg.setAttribute('height', String(total * scale));
+    }
+  }
+
   function renderPhone() {
     const w = state.result.wallet;
     frame(
@@ -499,6 +529,7 @@ export function start(doc) {
       el('p', 'note', text(WORDS.phonePublic)),
       button(WORDS.phoneDone, () => go('electrum')),
     );
+    fitQr(root.querySelector('.qr svg'));
   }
 
   // Step 6
@@ -511,10 +542,12 @@ export function start(doc) {
       );
       return;
     }
+    const steps = el('ol', 'steps');
+    for (const item of WORDS.electrumSteps) steps.append(el('li', '', text(item)));
     frame(
       'electrum',
       el('p', 'lead', text(WORDS.electrumText)),
-      facts(),
+      el('div', 'phone', steps, facts()),
       el('p', 'note', text(WORDS.electrumClose)),
       el(
         'div',
