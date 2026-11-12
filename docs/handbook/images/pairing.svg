@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 330" role="img" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+<title>The counter shows a code, the owner phone scans it, both show the same four words, then the counter scans the owner phone's code and says Paired.</title>
+<rect x="0.5" y="0.5" width="719" height="329" rx="16" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" />
+<rect x="12" y="20" width="162" height="290" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
+<circle cx="93" cy="46" r="15" fill="#4A505A" stroke="none" stroke-width="1"/>
+<text x="93" y="52" font-size="18" font-weight="bold" text-anchor="middle" fill="#FFFFFF">1</text>
+<rect x="190" y="20" width="162" height="290" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
+<circle cx="271" cy="46" r="15" fill="#4A505A" stroke="none" stroke-width="1"/>
+<text x="271" y="52" font-size="18" font-weight="bold" text-anchor="middle" fill="#FFFFFF">2</text>
+<rect x="368" y="20" width="162" height="290" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
+<circle cx="449" cy="46" r="15" fill="#4A505A" stroke="none" stroke-width="1"/>
+<text x="449" y="52" font-size="18" font-weight="bold" text-anchor="middle" fill="#FFFFFF">3</text>
+<rect x="546" y="20" width="162" height="290" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
+<circle cx="627" cy="46" r="15" fill="#4A505A" stroke="none" stroke-width="1"/>
+<text x="627" y="52" font-size="18" font-weight="bold" text-anchor="middle" fill="#FFFFFF">4</text>
+<rect x="38" y="100" width="110" height="80" rx="9" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" />
+<circle cx="141" cy="140.0" r="2.5" fill="#4A505A" stroke="none" stroke-width="1"/>
+<rect x="44" y="106" width="90" height="68" rx="3" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" />
+<rect x="69.0" y="110.0" width="18.857142857142858" height="18.857142857142858" rx="0.6" fill="none" stroke="#111317" stroke-width="1.6" />
+<rect x="75.28571428571429" y="116.28571428571429" width="6.285714285714286" height="6.285714285714286" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="94.14285714285714" y="110.0" width="18.857142857142858" height="18.857142857142858" rx="0.6" fill="none" stroke="#111317" stroke-width="1.6" />
+<rect x="100.42857142857143" y="116.28571428571429" width="6.285714285714286" height="6.285714285714286" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="69.0" y="135.14285714285714" width="18.857142857142858" height="18.857142857142858" rx="0.6" fill="none" stroke="#111317" stroke-width="1.6" />
+<rect x="75.28571428571429" y="141.42857142857142" width="6.285714285714286" height="6.285714285714286" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="94.14285714285714" y="135.14285714285714" width="5.6571428571428575" height="5.6571428571428575" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="106.71428571428572" y="135.14285714285714" width="5.6571428571428575" height="5.6571428571428575" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="100.42857142857143" y="141.42857142857142" width="5.6571428571428575" height="5.6571428571428575" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="94.14285714285714" y="147.71428571428572" width="5.6571428571428575" height="5.6571428571428575" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="106.71428571428572" y="147.71428571428572" width="5.6571428571428575" height="5.6571428571428575" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="235" y="76" width="72" height="140" rx="10" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" />
+<rect x="263.0" y="81" width="16" height="4" rx="2" fill="#4A505A" stroke="none" stroke-width="1" />
+<rect x="241" y="90" width="60" height="116" rx="4" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" />
+<rect x="251.0" y="130.0" width="17.142857142857142" height="17.142857142857142" rx="0.6" fill="none" stroke="#111317" stroke-width="1.6" />
+<rect x="256.7142857142857" y="135.71428571428572" width="5.714285714285714" height="5.714285714285714" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="273.85714285714283" y="130.0" width="17.142857142857142" height="17.142857142857142" rx="0.6" fill="none" stroke="#111317" stroke-width="1.6" />
+<rect x="279.57142857142856" y="135.71428571428572" width="5.714285714285714" height="5.714285714285714" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="251.0" y="152.85714285714286" width="17.142857142857142" height="17.142857142857142" rx="0.6" fill="none" stroke="#111317" stroke-width="1.6" />
+<rect x="256.7142857142857" y="158.57142857142858" width="5.714285714285714" height="5.714285714285714" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="273.85714285714283" y="152.85714285714286" width="5.142857142857143" height="5.142857142857143" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="285.2857142857143" y="152.85714285714286" width="5.142857142857143" height="5.142857142857143" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="279.57142857142856" y="158.57142857142858" width="5.142857142857143" height="5.142857142857143" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="273.85714285714283" y="164.28571428571428" width="5.142857142857143" height="5.142857142857143" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="285.2857142857143" y="164.28571428571428" width="5.142857142857143" height="5.142857142857143" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<path d="M 243 136 L 243 122 L 257 122" fill="none" stroke="#12805C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 299 136 L 299 122 L 285 122" fill="none" stroke="#12805C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 243 164 L 243 178 L 257 178" fill="none" stroke="#12805C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 299 164 L 299 178 L 285 178" fill="none" stroke="#12805C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="379" y="100" width="46" height="86" rx="10" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" />
+<rect x="394.0" y="105" width="16" height="4" rx="2" fill="#4A505A" stroke="none" stroke-width="1" />
+<rect x="384" y="112" width="36" height="66" rx="3" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" />
+<rect x="388" y="122" width="28" height="4" rx="2" fill="#D5D9E0" stroke="none" stroke-width="1" />
+<rect x="388" y="134" width="19.599999999999998" height="4" rx="2" fill="#D5D9E0" stroke="none" stroke-width="1" />
+<rect x="388" y="146" width="28" height="4" rx="2" fill="#D5D9E0" stroke="none" stroke-width="1" />
+<rect x="388" y="158" width="19.599999999999998" height="4" rx="2" fill="#D5D9E0" stroke="none" stroke-width="1" />
+<text x="447" y="150" font-size="28" font-weight="bold" text-anchor="middle" fill="#111317">=</text>
+<rect x="459" y="110" width="64" height="52" rx="9" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" />
+<circle cx="516" cy="136.0" r="2.5" fill="#4A505A" stroke="none" stroke-width="1"/>
+<rect x="464" y="115" width="44" height="42" rx="3" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" />
+<rect x="468" y="123" width="36" height="4" rx="2" fill="#D5D9E0" stroke="none" stroke-width="1" />
+<rect x="468" y="132" width="25.2" height="4" rx="2" fill="#D5D9E0" stroke="none" stroke-width="1" />
+<rect x="468" y="141" width="36" height="4" rx="2" fill="#D5D9E0" stroke="none" stroke-width="1" />
+<rect x="468" y="150" width="25.2" height="4" rx="2" fill="#D5D9E0" stroke="none" stroke-width="1" />
+<rect x="553" y="90" width="52" height="98" rx="10" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" />
+<rect x="571.0" y="95" width="16" height="4" rx="2" fill="#4A505A" stroke="none" stroke-width="1" />
+<rect x="558" y="102" width="42" height="74" rx="3" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" />
+<rect x="560.0" y="119.0" width="14.57142857142857" height="14.57142857142857" rx="0.6" fill="none" stroke="#111317" stroke-width="1.6" />
+<rect x="564.8571428571429" y="123.85714285714286" width="4.857142857142857" height="4.857142857142857" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="579.4285714285714" y="119.0" width="14.57142857142857" height="14.57142857142857" rx="0.6" fill="none" stroke="#111317" stroke-width="1.6" />
+<rect x="584.2857142857143" y="123.85714285714286" width="4.857142857142857" height="4.857142857142857" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="560.0" y="138.42857142857142" width="14.57142857142857" height="14.57142857142857" rx="0.6" fill="none" stroke="#111317" stroke-width="1.6" />
+<rect x="564.8571428571429" y="143.28571428571428" width="4.857142857142857" height="4.857142857142857" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="579.4285714285714" y="138.42857142857142" width="4.371428571428571" height="4.371428571428571" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="589.1428571428571" y="138.42857142857142" width="4.371428571428571" height="4.371428571428571" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="584.2857142857143" y="143.28571428571428" width="4.371428571428571" height="4.371428571428571" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="579.4285714285714" y="148.14285714285714" width="4.371428571428571" height="4.371428571428571" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="589.1428571428571" y="148.14285714285714" width="4.371428571428571" height="4.371428571428571" rx="0" fill="#111317" stroke="none" stroke-width="1" />
+<rect x="619" y="114" width="78" height="56" rx="8" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" />
+<rect x="623" y="118" width="70" height="48" rx="3" fill="#E7F6EF" stroke="#12805C" stroke-width="1.5" />
+<text x="658" y="148" font-size="15" font-weight="bold" text-anchor="middle" fill="#12805C">Paired</text>
+<line x1="619" y1="142" x2="609" y2="142" stroke="#12805C" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="4 4"/>
+<text x="93" y="262" font-size="16" font-weight="normal" text-anchor="middle" fill="#111317">Counter shows</text>
+<text x="93" y="283" font-size="16" font-weight="normal" text-anchor="middle" fill="#111317">a code</text>
+<text x="271" y="262" font-size="16" font-weight="normal" text-anchor="middle" fill="#111317">Owner phone</text>
+<text x="271" y="283" font-size="16" font-weight="normal" text-anchor="middle" fill="#111317">scans it</text>
+<text x="449" y="262" font-size="16" font-weight="normal" text-anchor="middle" fill="#111317">Same four</text>
+<text x="449" y="283" font-size="16" font-weight="normal" text-anchor="middle" fill="#111317">words</text>
+<text x="627" y="262" font-size="16" font-weight="normal" text-anchor="middle" fill="#111317">Counter</text>
+<text x="627" y="283" font-size="16" font-weight="normal" text-anchor="middle" fill="#111317">scans back</text>
+</svg>

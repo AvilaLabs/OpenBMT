@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 280" role="img" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+<title>Once at setup, at every sale, and now and then.</title>
+<rect x="0.5" y="0.5" width="719" height="279" rx="16" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" />
+<rect x="20" y="20" width="216" height="240" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
+<rect x="252" y="20" width="216" height="240" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
+<rect x="484" y="20" width="216" height="240" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
+<circle cx="128.0" cy="80" r="28" fill="#12805C" stroke="none" stroke-width="1"/>
+<text x="128.0" y="91" font-size="30" font-weight="bold" text-anchor="middle" fill="#FFFFFF">1</text>
+<path d="M 373.0 57.5 A 26 26 0 1 1 343.3 60.1" fill="none" stroke="#12805C" stroke-width="6" stroke-linecap="round"/>
+<polygon points="354.0,51.1 350.4,68.5 336.2,51.7" fill="#12805C"/>
+<circle cx="592.0" cy="80" r="28" fill="#FFFFFF" stroke="#5B616B" stroke-width="4"/>
+<line x1="592.0" y1="80" x2="592.0" y2="62" stroke="#5B616B" stroke-width="4" stroke-linecap="round" />
+<line x1="592.0" y1="80" x2="606.0" y2="88" stroke="#5B616B" stroke-width="4" stroke-linecap="round" />
+<circle cx="592.0" cy="80" r="3" fill="#5B616B" stroke="none" stroke-width="1"/>
+<text x="128.0" y="148" font-size="20" font-weight="bold" text-anchor="middle" fill="#111317">Once</text>
+<text x="128.0" y="184" font-size="16" font-weight="normal" text-anchor="middle" fill="#4A505A">Steps 1 to 5</text>
+<text x="128.0" y="214" font-size="16" font-weight="bold" text-anchor="middle" fill="#12805C">About two hours</text>
+<text x="360.0" y="148" font-size="20" font-weight="bold" text-anchor="middle" fill="#111317">Every sale</text>
+<text x="360.0" y="184" font-size="16" font-weight="normal" text-anchor="middle" fill="#4A505A">Step 6</text>
+<text x="360.0" y="214" font-size="16" font-weight="bold" text-anchor="middle" fill="#12805C">Under a minute</text>
+<text x="592.0" y="148" font-size="20" font-weight="bold" text-anchor="middle" fill="#111317">Now and then</text>
+<text x="592.0" y="184" font-size="16" font-weight="normal" text-anchor="middle" fill="#4A505A">Step 7</text>
+<text x="592.0" y="214" font-size="16" font-weight="bold" text-anchor="middle" fill="#5B616B">When needed</text>
+</svg>

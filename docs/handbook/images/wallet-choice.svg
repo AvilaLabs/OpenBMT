@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 412" role="img" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+<title>Do you have a cold wallet? Yes: connect it. No: make one with a coin or a die. Not now: set up the rest first.</title>
+<rect x="0.5" y="0.5" width="719" height="411" rx="16" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" />
+<rect x="210" y="16" width="300" height="46" rx="10" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" />
+<text x="360" y="46" font-size="18" font-weight="bold" text-anchor="middle" fill="#111317">Do you have a cold wallet?</text>
+<line x1="360" y1="62" x2="360" y2="84" stroke="#4A505A" stroke-width="3" stroke-linecap="round" />
+<line x1="120" y1="84" x2="600" y2="84" stroke="#4A505A" stroke-width="3" stroke-linecap="round" />
+<line x1="120" y1="84" x2="120" y2="150" stroke="#4A505A" stroke-width="3" stroke-linecap="round" />
+<line x1="600" y1="84" x2="600" y2="170" stroke="#4A505A" stroke-width="3" stroke-linecap="round" />
+<line x1="360" y1="84" x2="360" y2="170" stroke="#4A505A" stroke-width="3" stroke-linecap="round" />
+<polygon points="360,174 353,160 367,160" fill="#4A505A"/>
+<polygon points="600,174 593,160 607,160" fill="#4A505A"/>
+<polygon points="120,152 113,138 127,138" fill="#4A505A"/>
+<text x="132" y="118" font-size="16" font-weight="bold" text-anchor="start" fill="#111317">Yes</text>
+<text x="372" y="118" font-size="16" font-weight="bold" text-anchor="start" fill="#111317">No</text>
+<text x="612" y="118" font-size="16" font-weight="bold" text-anchor="start" fill="#111317">Not now</text>
+<rect x="56" y="152" width="128" height="22" rx="11" fill="#12805C" stroke="none" stroke-width="1" />
+<text x="120" y="168" font-size="15" font-weight="bold" text-anchor="middle" fill="#FFFFFF">Recommended</text>
+<rect x="16" y="176" width="208" height="170" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
+<rect x="256" y="176" width="208" height="170" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
+<rect x="496" y="176" width="208" height="170" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
+<text x="120" y="206" font-size="18" font-weight="bold" text-anchor="middle" fill="#111317">Connect it</text>
+<text x="120" y="236" font-size="15" font-weight="normal" text-anchor="middle" fill="#4A505A">Scan its code</text>
+<text x="120" y="257" font-size="15" font-weight="normal" text-anchor="middle" fill="#4A505A">Compare the</text>
+<text x="120" y="278" font-size="15" font-weight="normal" text-anchor="middle" fill="#4A505A">first address</text>
+<text x="360" y="206" font-size="18" font-weight="bold" text-anchor="middle" fill="#111317">Make one</text>
+<text x="360" y="234" font-size="15" font-weight="normal" text-anchor="middle" fill="#4A505A">Coin or die,</text>
+<text x="360" y="255" font-size="15" font-weight="normal" text-anchor="middle" fill="#4A505A">offline laptop</text>
+<text x="360" y="286" font-size="15" font-weight="bold" text-anchor="middle" fill="#4A505A">About an hour</text>
+<circle cx="332" cy="318" r="13" fill="#E7E9EE" stroke="#4A505A" stroke-width="2"/>
+<circle cx="332" cy="318" r="8" fill="none" stroke="#6B7280" stroke-width="1.5"/>
+<rect x="362" y="305" width="26" height="26" rx="7" fill="#FFFFFF" stroke="#4A505A" stroke-width="2" />
+<circle cx="369.28" cy="312.28" r="2.6" fill="#4A505A" stroke="none" stroke-width="1"/>
+<circle cx="380.72" cy="312.28" r="2.6" fill="#4A505A" stroke="none" stroke-width="1"/>
+<circle cx="375.0" cy="318.0" r="2.6" fill="#4A505A" stroke="none" stroke-width="1"/>
+<circle cx="369.28" cy="323.72" r="2.6" fill="#4A505A" stroke="none" stroke-width="1"/>
+<circle cx="380.72" cy="323.72" r="2.6" fill="#4A505A" stroke="none" stroke-width="1"/>
+<text x="600" y="206" font-size="18" font-weight="bold" text-anchor="middle" fill="#111317">Set up the rest</text>
+<text x="600" y="236" font-size="15" font-weight="normal" text-anchor="middle" fill="#4A505A">Counter says:</text>
+<text x="600" y="257" font-size="15" font-weight="normal" text-anchor="middle" fill="#4A505A">Not taking bitcoin yet</text>
+<rect x="120" y="362" width="480" height="34" rx="10" fill="#ECEEF1" stroke="none" stroke-width="1" />
+<text x="360" y="385" font-size="15" font-weight="normal" text-anchor="middle" fill="#5B616B">Hot wallet on a phone: small amounts only</text>
+</svg>
