@@ -1330,6 +1330,91 @@ fn nr_86_a_transaction_another_spent_over_is_replaced_and_not_signed_again() {
     );
 }
 
+/// A refund exported to a hardware signer and then abandoned: the unsigned
+/// transaction of the file, whose ID signatures do not change.
+fn exported_then_abandoned(rig: &mut Rig) -> (Transaction, u32) {
+    let refund = rig.queue_refund(10_000);
+    rig.fund(300_000);
+    let (_, session) = rig.node.build_request_for_signer(1_000, NOW).unwrap();
+    let session = session.expect("the refund is a spend for the signer");
+    let mut signer = key1();
+    let file = rig
+        .node
+        .export_for_signer(
+            &session,
+            0,
+            &mut signer,
+            &kit().accounts[0],
+            NOW,
+            |_| Ok(()),
+        )
+        .unwrap();
+    let tx = bitcoin::psbt::Psbt::deserialize(&file.psbt)
+        .unwrap()
+        .unsigned_tx;
+    let write = rig.node.queue_writer();
+    rig.node
+        .owner_mut()
+        .unwrap()
+        .abandon_session(&session, &write)
+        .unwrap();
+    assert_eq!(rig.node.owner().signed_elsewhere().len(), 1);
+    (tx, refund)
+}
+
+#[test]
+fn as_89_an_abandoned_approval_whose_transaction_confirms_pays_its_entries() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, refund) = exported_then_abandoned(&mut rig);
+    let txid = tx.compute_txid();
+    // The refund is back in the queue, holding what the old one spends.
+    assert!(matches!(rig.node.owner().refunds()[0].stage, Stage::Queued));
+    assert_eq!(rig.node.owner().refunds()[0].conflict.len(), tx.input.len());
+    // A block holds the old transaction, finished elsewhere.
+    rig.mine(std::slice::from_ref(&tx));
+    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    let entry = rig
+        .node
+        .owner()
+        .refunds()
+        .iter()
+        .find(|r| r.id == refund)
+        .cloned()
+        .unwrap();
+    assert_eq!(entry.stage, Stage::Paid { txid });
+    // It is in the log of what was paid, once.
+    assert_eq!(rig.node.paid_log().len(), 1);
+    assert_eq!(rig.node.paid_log()[0].txid, txid);
+    let notes = rig.node.watcher_mut().take_notes();
+    assert!(
+        notes.iter().any(|n| n.contains("signed elsewhere")),
+        "{notes:?}"
+    );
+    // A restart keeps it paid.
+    drop(rig);
+    let rig = start(&dir, &Setup::default()).unwrap();
+    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    assert!(matches!(
+        rig.node.owner().refunds()[0].stage,
+        Stage::Paid { .. }
+    ));
+}
+
+#[test]
+fn as_89_an_abandoned_approval_whose_coin_another_transaction_spent_is_released() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, _) = exported_then_abandoned(&mut rig);
+    let other = tx_from(tx.input[0].previous_output, &[(&external(77), 1_000)]);
+    rig.mine(&[other]);
+    // The old transaction can not confirm: it is no longer watched, and the
+    // refund waits to be built again.
+    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    assert!(matches!(rig.node.owner().refunds()[0].stage, Stage::Queued));
+    assert!(rig.node.paid_log().is_empty());
+}
+
 #[test]
 fn nr_86_a_block_that_leaves_sends_a_confirmed_transaction_again() {
     let dir = Dir::new();

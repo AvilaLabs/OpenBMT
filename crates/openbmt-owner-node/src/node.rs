@@ -863,11 +863,37 @@ impl<P: OwnerPort> OwnerNode<P> {
             return Ok(());
         };
         let tx: Transaction = deserialize(&tx_bytes).map_err(|e| e.to_string())?;
+        self.log_paid_entries(txid, Some(&tx), refunds, cash_out)
+    }
+
+    /// AS-89: [`OwnerNode::log_paid`] for the entries of a transaction that
+    /// was signed elsewhere. The node never held its bytes, so each amount is
+    /// the entry's own.
+    fn log_paid_elsewhere(&mut self, txid: &Txid) -> Result<(), String> {
+        let Some((refunds, cash_out)) = self
+            .owner
+            .signed_elsewhere()
+            .iter()
+            .find(|e| e.txid == *txid)
+            .map(|e| (e.refunds.clone(), e.cash_out))
+        else {
+            return Ok(());
+        };
+        self.log_paid_entries(txid, None, refunds, cash_out)
+    }
+
+    fn log_paid_entries(
+        &mut self,
+        txid: &Txid,
+        tx: Option<&Transaction>,
+        refunds: Vec<u32>,
+        cash_out: Option<u32>,
+    ) -> Result<(), String> {
         let at = self.watcher.now();
-        let mut used = vec![false; tx.output.len()];
+        let outputs: &[bitcoin::TxOut] = tx.map_or(&[], |t| t.output.as_slice());
+        let mut used = vec![false; outputs.len()];
         let mut paid = |script: &ScriptBuf, fallback: u64| -> u64 {
-            let found = tx
-                .output
+            let found = outputs
                 .iter()
                 .zip(used.iter_mut())
                 .find(|(o, u)| !**u && o.script_pubkey == *script);
@@ -1695,6 +1721,77 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
     }
 
+    /// AS-89: transactions that were given to a hardware signer and whose
+    /// approval was abandoned are followed by their IDs, which signatures do
+    /// not change. One a block holds pays its entries; one whose coin a block
+    /// spent in another transaction can no longer confirm.
+    fn settle_elsewhere(&mut self, block: &BlockHash, spent_by: &[(OutPoint, Txid)]) {
+        if self.halted.is_some() || spent_by.is_empty() {
+            return;
+        }
+        let kept: Vec<(Txid, Vec<OutPoint>)> = self
+            .owner
+            .signed_elsewhere()
+            .iter()
+            .map(|e| (e.txid, e.inputs.clone()))
+            .collect();
+        for (txid, inputs) in kept {
+            let confirmed = spent_by.iter().any(|(_, by)| *by == txid);
+            let beaten = spent_by
+                .iter()
+                .any(|(op, by)| *by != txid && inputs.contains(op));
+            if !confirmed && !beaten {
+                continue;
+            }
+            if self.ready_for_queue_write().is_err() {
+                self.note(format!("{txid} waits for key 1 recovery"));
+                return;
+            }
+            let dir = self.dir.clone();
+            if confirmed {
+                if let Err(e) = self.log_paid_elsewhere(&txid) {
+                    self.note(format!(
+                        "{txid} is in block {block} but could not be logged: {e}"
+                    ));
+                    continue;
+                }
+                match self
+                    .owner
+                    .mark_elsewhere_confirmed(&txid, |b| write_queue_file(&dir, b))
+                {
+                    Ok(dropped) => {
+                        self.note(format!(
+                            "{txid} was signed elsewhere and is in block {block}: its entries are paid"
+                        ));
+                        for gone in dropped {
+                            self.unsend(&gone);
+                            self.states.insert(gone, SendState::Replaced);
+                            self.relays.remove(&gone);
+                            if let Err(e) = self
+                                .view
+                                .drop_pending(&gone, |b| write_file(&dir, COINS_FILE, b))
+                            {
+                                self.stop(format!("the coin view could not be stored: {e}"));
+                                return;
+                            }
+                        }
+                    }
+                    Err(e) => self.note(format!("{txid} could not be marked paid: {e}")),
+                }
+            } else {
+                match self
+                    .owner
+                    .mark_elsewhere_replaced(&txid, |b| write_queue_file(&dir, b))
+                {
+                    Ok(()) => self.note(format!(
+                        "{txid} was signed elsewhere and another transaction spent its coins; it is no longer watched"
+                    )),
+                    Err(e) => self.note(format!("{txid} could not be released: {e}")),
+                }
+            }
+        }
+    }
+
     fn replaced(&mut self, txid: Txid) {
         if self.ready_for_queue_write().is_err() {
             self.note(format!("{txid} replacement waits for key 1 recovery"));
@@ -1960,6 +2057,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 for txid in effect.replaced {
                     self.replaced(txid);
                 }
+                self.settle_elsewhere(hash, &effect.spent_by);
             }
             // A block that is not on the best chain is not the wallet's
             // business: the driver says it joined before it hands it over, so

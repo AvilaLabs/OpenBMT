@@ -251,6 +251,10 @@ pub struct BlockEffect {
     pub created: Vec<OutPoint>,
     /// Coins the block spent.
     pub spent: Vec<OutPoint>,
+    /// What spent each of them: the ID of the transaction in the block. The
+    /// node compares it with the transactions it was given only the ID of
+    /// (AS-89).
+    pub spent_by: Vec<(OutPoint, Txid)>,
     /// Held transactions the block confirmed.
     pub confirmed: Vec<Txid>,
     /// Held transactions whose input the block spent in another
@@ -1118,6 +1122,7 @@ impl CoinView {
         for (outpoint, by, _) in spends {
             if let Some(coin) = next.coins.remove(&outpoint) {
                 effect.spent.push(outpoint);
+                effect.spent_by.push((outpoint, by));
                 spent_coins.push(coin);
             }
             spenders.insert(outpoint, by);
