@@ -82,7 +82,7 @@ class TorRun internal constructor(private val dir: File) : TorService.Listener {
     }
 
     internal fun begin() {
-        val torDir = File(dir, TOR_DIR)
+        val torDir = File(dir, TorRunner.TOR_DIR)
         val data = File(torDir, "data")
         val cache = File(torDir, "cache")
         try {

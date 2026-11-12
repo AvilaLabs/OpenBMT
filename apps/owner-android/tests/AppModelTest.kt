@@ -2413,7 +2413,7 @@ object AppModelTest {
     private fun oa_98_the_built_in_tor_keeps_its_files_in_the_no_backup_folder_and_reads_no_configuration() {
         val svc = torSource("src/android/TorService.kt")
         val runner = torSource("src/android/TorRunner.kt")
-        ok(runner.contains("const val TOR_DIR = \"tor\"") && runner.contains("File(dir, TOR_DIR)") && runner.contains("File(torDir, \"data\")") && runner.contains("File(torDir, \"cache\")"), "the folders are under the app's folder")
+        ok(runner.contains("const val TOR_DIR = \"tor\"") && runner.contains("File(dir, TorRunner.TOR_DIR)") && runner.contains("File(torDir, \"data\")") && runner.contains("File(torDir, \"cache\")"), "the folders are under the app's folder")
         ok(source("src/android/Controller.kt").contains("private val dir: File = act.noBackupFilesDir") && source("src/android/Controller.kt").contains("TorRunner.acquire(dir)"), "and that folder is noBackupFilesDir")
         ok(source("src/android/WatchService.kt").contains("WatchRunner.begin(noBackupFilesDir)"), "the watcher's is the same folder")
         ok(runner.contains("setReadable(true, true)") && runner.contains("setWritable(true, true)") && runner.contains("setExecutable(true, true)"), "the folders are the app's alone")

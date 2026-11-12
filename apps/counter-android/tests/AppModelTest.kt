@@ -1123,7 +1123,7 @@ object AppModelTest {
         val common = File(appDir, "../android-common/tor")
         val runner = File(common, "src/android/TorRunner.kt").readText()
         val svc = File(common, "src/android/TorService.kt").readText()
-        ok(runner.contains("const val TOR_DIR = \"tor\"") && runner.contains("File(dir, TOR_DIR)") && runner.contains("File(torDir, \"data\")") && runner.contains("File(torDir, \"cache\")"), "CR-202: the folders are in a folder tor of the app's folder")
+        ok(runner.contains("const val TOR_DIR = \"tor\"") && runner.contains("File(dir, TorRunner.TOR_DIR)") && runner.contains("File(torDir, \"data\")") && runner.contains("File(torDir, \"cache\")"), "CR-202: the folders are in a folder tor of the app's folder")
         val controller = File(appDir, "src/android/Controller.kt").readText()
         ok(controller.contains("private val dir: File = act.noBackupFilesDir") && controller.contains("TorRunner.acquire(dir)"), "CR-202: and that folder is noBackupFilesDir")
         ok(runner.contains("setReadable(true, true)") && runner.contains("setWritable(true, true)") && runner.contains("setExecutable(true, true)"), "CR-202: the folders are the app's alone")
