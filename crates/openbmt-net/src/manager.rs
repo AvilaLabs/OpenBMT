@@ -40,11 +40,14 @@ use crate::v2::V2Entropy;
 use crate::{Drop, Event, PeerAddress, Request, Session, SessionConfig, MAX_HEADERS};
 
 mod broadcast;
+mod node_only;
 mod own;
 use broadcast::Held;
 pub use broadcast::{
     BroadcastRefused, RelayState, MAX_BROADCAST_WEIGHT, MAX_HELD, NOT_SEEN_SECS, SEEN_BACK_GROUPS,
 };
+use node_only::NodeOnlyState;
+pub use node_only::{NodeOnlyView, NODE_LIMITED_BLOCKS};
 use own::OwnPeer;
 pub use own::{OwnNodeView, MAX_OWN_ANNOUNCED, MAX_OWN_BLOCKS, MAX_OWN_WANTED, OWN_ANSWER_SECS};
 
@@ -323,6 +326,12 @@ struct PeerState {
     /// NR-33: the peer sent headers that the store could not take for a
     /// reason that is not the peer's doing.
     blocked: bool,
+    /// NR-106: the shop's own node as the only peer (`connected_node_only`).
+    own: bool,
+    /// NR-98: the own node was reached at a Tor v3 address.
+    authenticated: bool,
+    /// The time anything last came from the peer.
+    heard: Option<u64>,
 }
 
 /// What a peer's filter said about a block.
@@ -385,6 +394,8 @@ struct Announcer {
     id: PeerId,
     addr: PeerAddr,
     tried: bool,
+    /// NR-106: the own node, which is never a sighting's source (WR-66).
+    own: bool,
 }
 
 /// A transaction ID the manager remembers (NR-54).
@@ -438,6 +449,8 @@ pub struct Manager {
     /// NR-101: transactions the app asked the own node about and that it has
     /// not yet confirmed.
     own_wanted: VecDeque<Txid>,
+    /// NR-106 to NR-110: the own node as the only peer.
+    node: NodeOnlyState,
 }
 
 /// The sizes of the collections, for the tests of the bounds.
@@ -485,6 +498,7 @@ impl Manager {
             drops: 0,
             own: None,
             own_wanted: VecDeque::new(),
+            node: NodeOnlyState::default(),
         };
         manager.next_height = manager.floor();
         manager
@@ -568,25 +582,8 @@ impl Manager {
                 Session::new_v2(config, now, entropy).map_err(|_| ConnectRefused::BadEntropy)?
             }
         };
-        self.peers.insert(
-            id,
-            PeerState {
-                addr,
-                group,
-                session,
-                ready: false,
-                services: ServiceFlags::NONE,
-                shown_height: 0,
-                shown_at: now,
-                announced: VecDeque::new(),
-                ahead_since: None,
-                last_reask: None,
-                unanswered: 0,
-                body_misses: 0,
-                stale: VecDeque::new(),
-                blocked: false,
-            },
-        );
+        self.peers
+            .insert(id, PeerState::new(addr, group, session, now));
         Ok(())
     }
 
@@ -604,6 +601,9 @@ impl Manager {
         match result {
             Err(d) => self.drop_session(id, d, &mut out),
             Ok(events) => {
+                if let Some(peer) = self.peers.get_mut(&id) {
+                    peer.heard = Some(now);
+                }
                 for event in events {
                     if !self.peers.contains_key(&id) {
                         break;
@@ -663,6 +663,7 @@ impl Manager {
         }
         self.trim_tx_order(true);
         self.own_tick(now, &mut out);
+        self.node_tick(now);
         self.age_held(now, &mut out);
         self.settle(now, &mut out);
         out
@@ -696,6 +697,7 @@ impl Manager {
             }
             self.drops = self.drops.saturating_add(1);
             self.release_tx_of(id);
+            self.node_gone(&peer);
         }
         self.settle(now, &mut out);
         out
@@ -788,7 +790,7 @@ impl Manager {
     pub fn health_peers(&self) -> Vec<Peer> {
         self.peers
             .values()
-            .filter(|p| p.ready)
+            .filter(|p| p.ready && !p.own)
             .map(|p| Peer {
                 addr: p.addr,
                 serves_filters: p.services.has(ServiceFlags::COMPACT_FILTERS),
@@ -878,6 +880,7 @@ impl Manager {
                 break;
             }
         }
+        self.node_settled();
     }
 
     /// NR-33: note which ready peers show a height above the tip, and drop
@@ -939,11 +942,12 @@ impl Manager {
 
     /// Forget the peer and tell the driver to close it.
     fn drop_peer(&mut self, id: PeerId, reason: String, misbehaved: bool, out: &mut Vec<Output>) {
-        if self.peers.remove(&id).is_none() {
+        let Some(peer) = self.peers.remove(&id) else {
             return;
-        }
+        };
         self.drops = self.drops.saturating_add(1);
         self.release_tx_of(id);
+        self.node_gone(&peer);
         out.push(Output::Disconnect {
             id,
             reason,
@@ -1049,7 +1053,8 @@ impl Manager {
             Event::Filter { block, filter } => self.on_filter(id, block, &filter, out),
             Event::NotFound { txids, blocks } => self.on_not_found(id, &txids, &blocks),
             Event::Addresses(list) => {
-                if let Some(peer) = self.peers.get(&id) {
+                // NR-106: the own node's addresses are not learned.
+                if let Some(peer) = self.peers.get(&id).filter(|p| !p.own) {
                     // The book knows the groups of `network_group` alone, not
                     // the host groups of a check on one machine.
                     out.push(Output::Addresses {
@@ -1073,14 +1078,40 @@ impl Manager {
         let Some(peer) = self.peers.get_mut(&id) else {
             return;
         };
+        // NR-107: a node without compact filters and blocks cannot serve.
+        if peer.own && self.node.on && !node_only::serves(services) {
+            self.node.unfit = Some(self.now);
+            self.drop_peer(
+                id,
+                "NR-107: the own node does not offer compact filters and blocks".to_string(),
+                false,
+                out,
+            );
+            return;
+        }
+        let own = peer.own;
         peer.ready = true;
         peer.services = services;
         peer.shown_height = start_height;
         peer.shown_at = self.now;
-        out.push(Output::Ready { id, services });
+        if own {
+            self.node.unfit = None;
+            out.push(Output::OwnNodeReady {
+                id,
+                services,
+                height: start_height,
+            });
+        } else {
+            out.push(Output::Ready { id, services });
+        }
         let locator = self.store.locator();
         if self.send(id, Request::GetHeaders { locator }, out) {
-            self.send(id, Request::GetAddr, out);
+            if own {
+                // NR-106: what the own node was asked about is asked again.
+                self.node_ask_wanted(out);
+            } else {
+                self.send(id, Request::GetAddr, out);
+            }
             // NR-86: what is held is announced to a peer that comes late.
             self.announce_held_to_new(id, out);
         }
@@ -1399,7 +1430,7 @@ impl Manager {
                         return false;
                     }
                     // NR-44, and NR-42 for want of two filter peers.
-                    if self.all_blocks || self.filter_peers().len() < MIN_FILTER_PEERS {
+                    if self.all_blocks || self.filter_peers().len() < self.filter_quorum() {
                         item.stage = Stage::Fetch;
                     } else {
                         item.stage = Stage::Filters;
@@ -1414,6 +1445,14 @@ impl Manager {
                     }
                     let answers: Vec<Answer> =
                         item.asks.values().filter_map(|ask| ask.answer).collect();
+                    // NR-106: the own node alone is the whole check.
+                    if let ([first, ..], 1) = (answers.as_slice(), self.filter_quorum()) {
+                        if first.matched {
+                            item.stage = Stage::Fetch;
+                            continue;
+                        }
+                        return false;
+                    }
                     if let [first, second, ..] = answers.as_slice() {
                         // NR-42: both answered.
                         if first.digest != second.digest || first.matched || second.matched {
@@ -1461,7 +1500,7 @@ impl Manager {
             peers.rotate_left(turn);
         }
         for id in peers {
-            if item.asks.len() >= MIN_FILTER_PEERS || item.asked_total >= MAX_FILTER_ASKS {
+            if item.asks.len() >= self.filter_quorum() || item.asked_total >= MAX_FILTER_ASKS {
                 break;
             }
             let Some(group) = self.peers.get(&id).map(|p| p.group) else {
@@ -1526,12 +1565,14 @@ impl Manager {
         }
         // NR-104: a peer that missed twice in a row is asked last, whether
         // it has shown the block or not.
-        let (last, ready): (Vec<PeerId>, Vec<PeerId>) =
-            self.ready_peers().into_iter().partition(|id| {
-                self.peers
-                    .get(id)
-                    .is_some_and(|p| p.body_misses >= BODY_MISSES_LAST)
-            });
+        // NR-108: a block older than the own node serves is not asked of it,
+        // nor of anyone else here.
+        let candidates = self.block_servers(item.height, item.hash);
+        let (last, ready): (Vec<PeerId>, Vec<PeerId>) = candidates.into_iter().partition(|id| {
+            self.peers
+                .get(id)
+                .is_some_and(|p| p.body_misses >= BODY_MISSES_LAST)
+        });
         // NR-45: a peer that has shown the block is asked first.
         let shown = |id: &PeerId| {
             self.peers
@@ -1758,8 +1799,16 @@ impl Manager {
                 item.fetch_peer = None;
                 item.failed.insert(id);
                 answered = true;
+                if self.peers.get(&id).is_some_and(|p| p.own) && self.node.on {
+                    // NR-108: the own node does not have the block.
+                    self.node
+                        .lacks
+                        .entry(item.height)
+                        .or_insert((item.hash, self.now));
+                }
             }
         }
+        self.node_not_found(id, txids);
         if answered {
             self.answered(id);
         }
@@ -1773,9 +1822,13 @@ impl Manager {
         if self.heard_held(id, &txid, out) {
             return;
         }
-        let Some(addr) = self.peers.get(&id).map(|p| p.addr) else {
+        let Some((addr, own)) = self.peers.get(&id).map(|p| (p.addr, p.own)) else {
             return;
         };
+        if own {
+            // NR-101: what the own node announced it holds.
+            self.node_announced(txid, out);
+        }
         if let Some(entry) = self.txs.get_mut(&txid) {
             if entry.announcers.iter().any(|a| a.id == id)
                 || entry.announcers.len() >= MAX_ANNOUNCERS
@@ -1786,11 +1839,12 @@ impl Manager {
                 id,
                 addr,
                 tried: false,
+                own,
             });
-            if entry.fetched {
+            if entry.fetched && !own {
                 // NR-53: a further sighting.
                 out.push(Output::AlsoAnnounced { txid, from: addr });
-            } else if !entry.pending {
+            } else if !entry.pending && !entry.fetched {
                 self.queue_tx(txid, true);
             }
             return;
@@ -1802,6 +1856,7 @@ impl Manager {
                     id,
                     addr,
                     tried: false,
+                    own,
                 }],
                 first_seen: self.now,
                 fetched: false,
@@ -2001,6 +2056,10 @@ impl Manager {
         };
         let txid = tx.compute_txid();
         if !self.pending_tx.get(&txid).is_some_and(|(p, _)| *p == id) {
+            // NR-101: a transaction the app asked the own node about.
+            if self.node_answered(id, &txid, out) {
+                return;
+            }
             if !self.take_stale(id, Stale::Tx(txid)) {
                 self.drop_peer(
                     id,
@@ -2013,16 +2072,29 @@ impl Manager {
         }
         self.pending_tx.remove(&txid);
         self.answered(id);
+        let mut by_own_node = false;
         let from = match self.txs.get_mut(&txid) {
             Some(entry) => {
                 entry.pending = false;
                 entry.fetched = true;
-                entry.announcers.iter().map(|a| a.addr).collect()
+                by_own_node = entry.announcers.iter().any(|a| a.own);
+                // WR-66: the own node is not a source of the light client.
+                entry
+                    .announcers
+                    .iter()
+                    .filter(|a| !a.own)
+                    .map(|a| a.addr)
+                    .collect()
             }
             None => Vec::new(),
         };
         self.return_to_order(&txid);
         out.push(Output::Sighting { tx: bytes, from });
+        if by_own_node {
+            // The sale knows the transaction now: the own node's report is
+            // sent again, so that the app can record it (WR-61).
+            out.push(Output::OwnNodeHas { txid });
+        }
     }
 }
 

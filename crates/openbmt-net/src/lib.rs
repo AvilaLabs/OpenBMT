@@ -27,7 +27,8 @@
 //! 6. [`own_node`]: [`OwnNode`], the merchant's own node, which is only ever
 //!    a Tor v3 address (NR-98, NR-99); the manager keeps its session apart
 //!    from the peers and reports what it holds and how far it has got
-//!    (NR-100 to NR-102).
+//!    (NR-100 to NR-102). With `node_only` on (NR-106 to NR-111) the own
+//!    node is the manager's one peer instead, with the checks of any peer.
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.
@@ -51,9 +52,10 @@ mod tests;
 pub use book::{Added, AddressBook, BookError, OnionDraw, Picked, Refusal, Source};
 pub use frame::{encode, Command, Frame, FrameReader, Message, PeerAddress};
 pub use manager::{
-    BroadcastRefused, ConnectRefused, Manager, ManagerConfig, Output, OwnNodeView, PeerId,
-    RelayState, TransportChoice, Wanted, MAX_BROADCAST_WEIGHT, MAX_HELD, MAX_OWN_ANNOUNCED,
-    MAX_OWN_BLOCKS, MAX_OWN_WANTED, NOT_SEEN_SECS, OWN_ANSWER_SECS, SEEN_BACK_GROUPS,
+    BroadcastRefused, ConnectRefused, Manager, ManagerConfig, NodeOnlyView, Output, OwnNodeView,
+    PeerId, RelayState, TransportChoice, Wanted, MAX_BROADCAST_WEIGHT, MAX_HELD, MAX_OWN_ANNOUNCED,
+    MAX_OWN_BLOCKS, MAX_OWN_WANTED, NODE_LIMITED_BLOCKS, NOT_SEEN_SECS, OWN_ANSWER_SECS,
+    SEEN_BACK_GROUPS,
 };
 pub use own_node::{OwnNode, OwnNodeHost, OwnNodeRefused};
 pub use reason::Drop;

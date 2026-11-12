@@ -150,6 +150,9 @@ impl Manager {
     /// that counts: no answer is not a "no". The transaction stays wanted, up
     /// to [`MAX_OWN_WANTED`], and is asked again at the next connection.
     pub fn ask_own_node(&mut self, txid: Txid) -> Vec<Output> {
+        if self.node.on {
+            return self.ask_node_only(txid);
+        }
         if !self.own_wanted.contains(&txid) {
             if self.own_wanted.len() >= MAX_OWN_WANTED {
                 self.own_wanted.pop_front();

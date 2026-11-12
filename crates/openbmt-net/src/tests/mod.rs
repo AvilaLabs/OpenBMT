@@ -10,6 +10,7 @@ mod kit;
 mod manager;
 mod manager_kit;
 mod meta;
+mod node_only;
 mod onion;
 mod own_node;
 mod session;

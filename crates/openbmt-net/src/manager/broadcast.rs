@@ -112,7 +112,12 @@ impl Manager {
         if self.held.len() >= MAX_HELD {
             return Err(BroadcastRefused::Full);
         }
-        let ready = self.ready_peers();
+        // NR-109: with the own node alone, a transaction goes to it only.
+        let ready: Vec<PeerId> = self
+            .ready_peers()
+            .into_iter()
+            .filter(|id| !self.node.on || self.peers.get(id).is_some_and(|p| p.own))
+            .collect();
         let take = (ready.len() / 2).max(1);
         let first: Vec<PeerId> = ready.into_iter().take(take).collect();
         self.held.insert(
@@ -154,7 +159,12 @@ impl Manager {
 
     /// Announce one held transaction to one peer.
     fn announce_held(&mut self, txid: Txid, id: PeerId, out: &mut Vec<Output>) {
-        if !self.peers.get(&id).is_some_and(|p| p.ready) {
+        // NR-109: in the mode of NR-106, only the own node is told.
+        if !self
+            .peers
+            .get(&id)
+            .is_some_and(|p| p.ready && (p.own || !self.node.on))
+        {
             return;
         }
         if self.send(id, Request::Announce(vec![txid]), out) {
