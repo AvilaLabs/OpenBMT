@@ -31,6 +31,14 @@ class UrScan(
 )
 
 /**
+ * A scan that reads a wallet's code that changes: every part whose text starts with "ur:" goes to the wallet
+ * reader of the library, whatever its type, and [onWallet] is called with the descriptor text (as ASCII bytes, which
+ * the callee wipes) when it is complete and valid. A first code that does not start with "ur:" is a plain code and
+ * still goes to the scan's `onBytes`. [parts] shows how far the reading is.
+ */
+class WalletScan(val who: Int, val parts: PartsProgress, val onWallet: (text: ByteArray) -> Unit)
+
+/**
  * The words and the progress line of a scan of parts that come in any order: [words] are shown while the set
  * is not complete, and [line] gives the line under them for the parts read and the parts that are expected.
  */
@@ -60,6 +68,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
     private val main = Handler(Looper.getMainLooper())
     private var scanner: QrScanner? = null
     private var reading: UrReading? = null
+    private var walletReading: WalletReading? = null
     private var joining: BbqrReading? = null
     private var pending: Request? = null
     private var generation = 0
@@ -79,6 +88,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
         val onCancel: () -> Unit,
         val ur: UrScan?,
         val bbqr: BbqrScan?,
+        val wallet: WalletScan?,
     )
 
     /**
@@ -93,9 +103,10 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
         onCancel: () -> Unit,
         ur: UrScan? = null,
         bbqr: BbqrScan? = null,
+        wallet: WalletScan? = null,
     ) {
         stop()
-        val request = Request(show, onBytes, onFailed, onCancel, ur, bbqr)
+        val request = Request(show, onBytes, onFailed, onCancel, ur, bbqr, wallet)
         if (act.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             scan(request)
             return
@@ -129,6 +140,8 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
         reading = null
         joining?.drop()
         joining = null
+        walletReading?.drop()
+        walletReading = null
         pending = null
         asking = false
         askedAt = null
@@ -140,6 +153,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
         var shown: Any? = null
         val ur = request.ur
         val bbqr = request.bbqr
+        val wallet = request.wallet
         fun progress(key: Any, words: SayWords, line: String?): Boolean {
             if (key == shown) return false
             shown = key
@@ -152,7 +166,29 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
             if (mine == generation) {
                 val current = reading
                 val joined = joining
-                if (ur != null && UrText.startsWithUr(bytes)) {
+                val walleted = walletReading
+                if (wallet != null && UrText.startsWithUr(bytes)) {
+                    val r = walleted ?: WalletReading(UrCall.native(), wallet.who).also { walletReading = it }
+                    when (val step = r.feed(String(bytes, Charsets.UTF_8))) {
+                        is WalletStep.Show -> {
+                            if (step.expected > 0) {
+                                if (progress(step.received to step.expected, wallet.parts.words, wallet.parts.line(step.received, step.expected))) Feedback.scanPart(status)
+                            } else {
+                                progress(step.words, step.words, null)
+                            }
+                        }
+                        is WalletStep.Done -> {
+                            Feedback.scanDone(status)
+                            stop()
+                            wallet.onWallet(step.text)
+                        }
+                        is WalletStep.Fail -> {
+                            stop()
+                            request.onFailed(ScanFailure(false, null, step.words))
+                        }
+                        is WalletStep.Ignore -> {}
+                    }
+                } else if (ur != null && UrText.startsWithUr(bytes)) {
                     val r = current ?: UrReading(UrCall.native(), ur.types, ur.who).also { reading = it }
                     when (val step = r.feed(String(bytes, Charsets.UTF_8))) {
                         is UrStep.Show -> {
@@ -192,7 +228,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
                         }
                         is BbqrStep.Ignore -> {}
                     }
-                } else if (current == null && joined == null) {
+                } else if (current == null && joined == null && walleted == null) {
                     // A plain code: the scan is over.
                     Feedback.scanDone(status)
                     stop()
@@ -208,7 +244,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
                     request.onFailed(ScanFailure(false, text))
                 }
             },
-            ur != null || bbqr != null,
+            ur != null || bbqr != null || wallet != null,
         )
         val preview = try {
             s.prepare()
@@ -223,7 +259,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
             filterTouchesWhenObscured = true
         }
         column.addView(ui.text("Scan the code", 20f, bold = true), ui.margins(bottom = 8))
-        val hint = if (ur != null || bbqr != null) {
+        val hint = if (ur != null || bbqr != null || wallet != null) {
             "Hold the phone still with the whole code in view. A code that changes is read part by part: keep the phone on it until it is done."
         } else {
             "Hold the phone still with the whole code in view. It is read when it is steady."

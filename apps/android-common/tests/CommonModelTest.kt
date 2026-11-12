@@ -407,6 +407,59 @@ object CommonModelTest {
         UrReading(Script(emptyList()).call, setOf("bytes"), 0).drop()
     }
 
+    private fun walletReadingTests() {
+        val handle = okReply(0, 0, 0, 1)
+        // The framing of the wallet operations: the operation bytes, and the handle and text of a part.
+        var seen: ByteArray? = null
+        val framing = UrCall { request -> seen = request.copyOf(); okReply(0, 0, 0, 7) }
+        ok(framing.newWalletReader().let { it is UrOutcome.Ok && it.value == 7L }, "a wallet reader's handle")
+        ok(seen!!.contentEquals(byteArrayOf(0x4f, 0x42, 0x4d, 0x6f, 1, 13)), "a wallet_new request is the magic, the version and operation 13")
+        UrCall { request -> seen = request.copyOf(); progress(false, 1, 2) }.walletReceive(0x01020304L, "ur:x")
+        ok(seen!!.contentEquals(byteArrayOf(0x4f, 0x42, 0x4d, 0x6f, 1, 14, 1, 2, 3, 4, 0, 0, 0, 4, 'u'.code.toByte(), 'r'.code.toByte(), ':'.code.toByte(), 'x'.code.toByte())), "a wallet_receive request")
+        // Every part goes to the wallet reader, whatever its type; progress is shown in words.
+        val s = Script(listOf(handle, progress(false, 2, 9), progress(false, 3, 9)))
+        val r = WalletReading(s.call, Who.OWNER)
+        ok(!r.started, "nothing open before the first part")
+        val a = r.feed("ur:crypto-output/2-9/x")
+        ok(a is WalletStep.Show && a.words.what == "Reading the animated code: 2 of about 9 parts." && a.received == 2 && a.expected == 9, "the progress words")
+        ok(r.feed("ur:crypto-output/3-9/x") is WalletStep.Show && s.next == 3 && r.started, "one reader, opened once")
+        // A finished wallet: the text, as the library gave it.
+        val text = "wpkh([818bc9b6/84h/0h/0h]xpub/<0;1>/*)#abcdefgh"
+        val done = WalletReading(Script(listOf(handle, progress(true, 4, 4), reply(0, text.toByteArray()))).call, Who.OWNER).feed("x")
+        ok(done is WalletStep.Done && String(done.text) == text, "a finished wallet")
+        // Refusals: a restart is told, misreads are skipped, the wallet reader's own refusals end the scan.
+        val t = Script(listOf(handle, refusedReply("UR-12"), refusedReply("UR-06"), refusedReply("UR-22")))
+        val r2 = WalletReading(t.call, Who.OWNER)
+        ok(r2.feed("x").let { it is WalletStep.Show && it.words.heading == "Code did not add up" }, "UR-12 starts again with words")
+        ok(r2.feed("x") === WalletStep.Ignore, "a misread is skipped")
+        ok(r2.feed("x").let { it is WalletStep.Fail && it.words.heading == "Code reader failed" }, "a fault of the call stops the scan")
+        for (code in listOf("UR-35", "UR-36", "UR-37", "UR-38", "UR-39", "UR-40")) {
+            val step = WalletReading(Script(listOf(handle, refusedReply(code))).call, Who.OWNER).feed("x")
+            ok(step is WalletStep.Fail && step.words.heading == "Code content not usable", "$code ends the scan with the content words")
+        }
+        val kind = WalletReading(Script(listOf(handle, refusedReply("UR-34"))).call, Who.OWNER).feed("x")
+        ok(kind is WalletStep.Fail && kind.words.heading == "Not the code expected", "UR-34 is the wrong kind")
+        val strangers = Script(listOf(handle) + List(WalletReading.STRANGER_RUN * 2) { refusedReply("UR-10") })
+        val r3 = WalletReading(strangers.call, Who.OWNER)
+        val steps = (1..WalletReading.STRANGER_RUN * 2).map { r3.feed("x") }
+        ok(steps.withIndex().all { (i, st) -> ((i + 1) % WalletReading.STRANGER_RUN == 0) == (st is WalletStep.Show) }, "another stream is told after each run")
+        // A result the library refuses, or one that is not printable text, is never a wallet.
+        ok(WalletReading(Script(listOf(handle, progress(true, 1, 1), refusedReply("UR-38"))).call, 0).feed("x") is WalletStep.Fail, "a refused result")
+        ok(WalletReading(Script(listOf(handle, progress(true, 1, 1), reply(0, byteArrayOf(0x41, 0x0a)))).call, 0).feed("x") is WalletStep.Fail, "a result with a control character")
+        ok(WalletReading(Script(listOf(handle, progress(true, 1, 1), reply(0, ByteArray(0)))).call, 0).feed("x") is WalletStep.Fail, "an empty result")
+        // No reader can be opened, no answer to a part.
+        ok(WalletReading(Script(listOf(refusedReply("UR-22"))).call, 0).feed("x") is WalletStep.Fail, "no reader")
+        ok(WalletReading(Script(listOf(handle, null)).call, 0).feed("x") is WalletStep.Fail, "no answer to a part")
+        // Dropping closes the reader once.
+        val d = Script(listOf(handle, progress(false, 1, 3), okReply()))
+        val r4 = WalletReading(d.call, 0)
+        r4.feed("x")
+        r4.drop()
+        r4.drop()
+        ok(!r4.started && d.next == 3, "dropped once: ${d.next}")
+        WalletReading(Script(emptyList()).call, 0).drop()
+    }
+
     private fun urWordsTests() {
         for (who in listOf(Who.KEY_HOLDER, Who.MANAGER, Who.OWNER)) {
             val all = UrWords.all(who)
@@ -507,6 +560,7 @@ object CommonModelTest {
         urCallTests()
         animatedQrTests()
         readingTests()
+        walletReadingTests()
         urWordsTests()
         println("CommonModelTest: $count checks passed")
     }

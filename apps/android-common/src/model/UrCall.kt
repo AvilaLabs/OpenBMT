@@ -290,6 +290,41 @@ class UrCall(private val transport: (ByteArray) -> ByteArray?) {
         return run(out) { body -> if (body.isEmpty()) Unit else null }
     }
 
+    /** Opens a reader of a wallet's animated code; the handle is never given twice. */
+    fun newWalletReader(): UrOutcome<Long> = run(head(OP_WALLET_NEW)) { body -> if (body.size == 4) u32(body, 0) else null }
+
+    /** Gives the wallet reader the text of one scanned part, of any type a wallet's code comes in. */
+    fun walletReceive(handle: Long, text: String): UrOutcome<UrProgress> {
+        val out = head(OP_WALLET_RECEIVE)
+        u32(out, handle)
+        sized(out, text.toByteArray(Charsets.UTF_8))
+        return run(out) { body ->
+            if (body.size != 13 || (body[0].toInt() != 0 && body[0].toInt() != 1)) return@run null
+            val millionths = u32(body, 9)
+            if (millionths > 1_000_000) return@run null
+            UrProgress(body[0].toInt() == 1, u32(body, 1).toInt(), u32(body, 5).toInt(), millionths / 1_000_000.0)
+        }
+    }
+
+    /**
+     * The descriptor text of a complete wallet reader, as ASCII bytes: the caller wipes them once they are handed on.
+     * The library gives back nothing but a wallet that passed its checks.
+     */
+    fun walletResult(handle: Long): UrOutcome<ByteArray> {
+        val out = head(OP_WALLET_RESULT)
+        u32(out, handle)
+        return run(out) { body ->
+            if (body.isEmpty() || body.size > MAX_WALLET_TEXT || body.any { it < 0x20 || it > 0x7e }) null else body
+        }
+    }
+
+    /** Closes a wallet reader; whatever it held is gone. */
+    fun walletDrop(handle: Long): UrOutcome<Unit> {
+        val out = head(OP_WALLET_DROP)
+        u32(out, handle)
+        return run(out) { body -> if (body.isEmpty()) Unit else null }
+    }
+
     /** Closes a decoder; whatever it held is gone. */
     fun drop(handle: Long): UrOutcome<Unit> {
         val out = head(OP_DECODER_DROP)
@@ -367,6 +402,10 @@ class UrCall(private val transport: (ByteArray) -> ByteArray?) {
         const val OP_BBQR_ADD = 10
         const val OP_BBQR_RESULT = 11
         const val OP_BBQR_DROP = 12
+        const val OP_WALLET_NEW = 13
+        const val OP_WALLET_RECEIVE = 14
+        const val OP_WALLET_RESULT = 15
+        const val OP_WALLET_DROP = 16
 
         /** The rule codes of the call itself. */
         const val TYPE_NOT_USED = "UR-20"
@@ -375,6 +414,9 @@ class UrCall(private val transport: (ByteArray) -> ByteArray?) {
 
         /** The most parts one reply can hold: two turns of the longest sequence. */
         private const val MAX_PARTS = 20_000L
+
+        /** The longest wallet text the library gives (UR-39). */
+        private const val MAX_WALLET_TEXT = 4096
 
         /** The longest key text: the origin and an extended key of at most 112 characters. */
         private const val MAX_KEY_TEXT = 160
