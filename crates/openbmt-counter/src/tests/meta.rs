@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 24] = [
+const TEST_SOURCES: [&str; 25] = [
     include_str!("currency.rs"),
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
@@ -23,6 +23,7 @@ const TEST_SOURCES: [&str; 24] = [
     include_str!("settings.rs"),
     include_str!("settle.rs"),
     include_str!("batch_held.rs"),
+    include_str!("confirm_held.rs"),
     include_str!("staff.rs"),
     include_str!("states.rs"),
     include_str!("storage.rs"),
@@ -36,7 +37,7 @@ const TEST_SOURCES: [&str; 24] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 90] = [
+const NOT_HERE: [(&str, &str); 94] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -479,6 +480,22 @@ const NOT_HERE: [(&str, &str); 90] = [
         "CR-238",
         "the words are listed in `openbmt-counter-node` and `openbmt-counter-ffi` (SC-12)",
     ),
+    (
+        "CR-239",
+        "the pending change and its file are the counter node's (`confirm`, `node`); their tests are there",
+    ),
+    (
+        "CR-240",
+        "the page and its fields are the node's and the Android app's; their tests are in `openbmt-counter-node`, `openbmt-counter-ffi` and the app's JVM tests",
+    ),
+    (
+        "CR-242",
+        "the frame is `openbmt-core`'s (`confirmed`) and is taken by the counter node; their tests are there",
+    ),
+    (
+        "CR-244",
+        "the words are listed in `openbmt-counter-node`, `openbmt-counter-ffi` and the app (SC-12)",
+    ),
 ];
 
 /// The rule number at the start of `rest` (what follows `CR-`): every digit,
@@ -499,7 +516,7 @@ fn defined() -> BTreeSet<String> {
 #[test]
 fn the_rules_file_defines_one_hundred_and_sixty_seven_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 189);
+    assert_eq!(ids.len(), 195);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")

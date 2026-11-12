@@ -24,6 +24,8 @@ fn cr_162_a_setting_record_names_the_version_the_change_and_the_hash() {
     let record = w.c.record_setting(n, &mut w.m).unwrap();
     assert_eq!(record.kind, RecordKind::Setting);
     assert_eq!(SettingNote::from_body(&record.body), Ok(n));
+    // A confirmation's 97-byte body (CR-243) is not a setting note.
+    assert!(SettingNote::from_body(&[36u8; 97]).is_err());
     assert_eq!(w.c.settings_recorded(), Some(4));
     // It is the chain's next record and was stored first (CR-40).
     assert_eq!(w.m.log, vec!["record".to_string()]);

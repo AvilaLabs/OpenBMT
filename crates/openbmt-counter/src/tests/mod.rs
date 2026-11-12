@@ -2,6 +2,7 @@
 //! refusal test checks the exact refusal and the rule it names.
 
 mod batch_held;
+mod confirm_held;
 mod currency;
 mod encodings;
 mod heartbeat;

@@ -44,6 +44,7 @@
 )]
 
 pub mod batch_held;
+pub mod confirm_held;
 pub mod counter;
 pub mod desk;
 pub mod events;
@@ -65,6 +66,7 @@ pub mod totals;
 mod tests;
 
 pub use batch_held::{batch_digest, BatchHeld};
+pub use confirm_held::{ConfirmHeld, CONFIRM_HELD_LEN};
 pub use counter::{
     sale_payment_id, Actor, BlockEffect, BlockTaken, Counter, Facts, OpenFacts, Opened, Overridden,
     Pairing, SaleExtras, Settled, Sightings, Stored, SwapPaid,

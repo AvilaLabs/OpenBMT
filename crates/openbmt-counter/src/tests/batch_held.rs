@@ -194,6 +194,8 @@ fn cr_169_the_body_is_read_strictly_and_reencodes_byte_for_byte() {
         bad[0] = tag;
         assert!(BatchHeld::decode(&bad).is_err(), "tag {tag}");
     }
+    // The 97-byte body of a confirmation (CR-243) is not a batch's.
+    assert!(BatchHeld::decode(&[36u8; 97]).is_err());
     // An end that is not above the start.
     for (start, end) in [(5u32, 5u32), (9, 5)] {
         let mut bad = good.clone();

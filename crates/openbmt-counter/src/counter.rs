@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use bitcoin::consensus::deserialize;
 use bitcoin::hashes::Hash;
 use bitcoin::{ScriptBuf, Transaction, Txid};
+use openbmt_core::approval::CounterConfirmation;
 use openbmt_core::batch::{
     AddError, BatchError, BatchPolicy, CounterBatches, PinnedRoots, SignedBatch,
 };
@@ -31,6 +32,7 @@ use openbmt_watch::{
 };
 
 use crate::batch_held::BatchHeld;
+use crate::confirm_held::ConfirmHeld;
 use crate::desk::{valid_name, Desk, OverrideEntry, Role};
 use crate::events::{final_payments, Event};
 use crate::heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
@@ -626,6 +628,23 @@ impl Counter {
         let record = self.append_record(store, RecordKind::Setting, note.to_body())?;
         self.settings_recorded = self.settings_recorded.max(Some(note.version));
         Ok(record)
+    }
+
+    /// CR-241: sign the confirmation of AP-04 for `settings_hash` with the
+    /// counter's identity key and append it as a `Setting` record. The caller
+    /// asks this only after the manager's PIN was right. It does not change
+    /// the settings in force. On an error the chain is unchanged. Returns the
+    /// record.
+    pub fn record_confirmation<S: Store>(
+        &mut self,
+        settings_hash: &[u8; 32],
+        store: &mut S,
+    ) -> Result<Record, StoreFault<S::Error>> {
+        let held = ConfirmHeld {
+            settings_hash: *settings_hash,
+            sig: CounterConfirmation::sign(&self.identity, settings_hash).sig,
+        };
+        self.append_record(store, held.kind(), held.encode())
     }
 
     /// Take a new signed batch of addresses. The batches as they will be are
