@@ -172,7 +172,7 @@ class ShopFile(private val dir: File, name: String = AppFiles.SHOP_FILE) {
 }
 
 /** The screens of the first run, in the order they come. Back from each is [FirstRun.back]. */
-enum class FirstRunStep { Welcome, Shop, Till, Money, Why, RealCases, Guide, NotYet }
+enum class FirstRunStep { Welcome, Shop, Till, Money, OwnAdvice, Why, RealCases, Guide, NotYet }
 
 /** The three choices of where the money goes. */
 enum class MoneyChoice { Own, Make, Later }
@@ -196,13 +196,21 @@ class FirstRun(start: ShopPrefs, locale: String) {
 
     fun prefs(stepsShown: Boolean): ShopPrefs = ShopPrefs(ShopPrefs.clean(name), currency, till, stepsShown)
 
-    /** The step after [step]; the Money step goes on to Why for the savings wallet and to NotYet for the others. */
+    /**
+     * The step after [step]; the Money step goes on to Why for the savings wallet, to OwnAdvice for the own wallet and to
+     * NotYet for the others. OwnAdvice goes on to NotYet, or to Why once the choice is changed to the savings wallet.
+     */
     fun next() {
         step = when (step) {
             FirstRunStep.Welcome -> FirstRunStep.Shop
             FirstRunStep.Shop -> FirstRunStep.Till
             FirstRunStep.Till -> FirstRunStep.Money
-            FirstRunStep.Money -> if (money == MoneyChoice.Make) FirstRunStep.Why else FirstRunStep.NotYet
+            FirstRunStep.Money -> when (money) {
+                MoneyChoice.Make -> FirstRunStep.Why
+                MoneyChoice.Own -> FirstRunStep.OwnAdvice
+                else -> FirstRunStep.NotYet
+            }
+            FirstRunStep.OwnAdvice -> if (money == MoneyChoice.Make) FirstRunStep.Why else FirstRunStep.NotYet
             FirstRunStep.Why -> {
                 guide = KeyGuide()
                 FirstRunStep.Guide
@@ -223,6 +231,11 @@ class FirstRun(start: ShopPrefs, locale: String) {
         next()
     }
 
+    /** From the advice on an own wallet: the owner would rather make a cold wallet, so the savings wallet path follows. */
+    fun makeInstead() {
+        if (step == FirstRunStep.OwnAdvice) choose(MoneyChoice.Make)
+    }
+
     /** The step before: what was entered stays. Welcome has none. */
     fun back() {
         step = when (step) {
@@ -230,10 +243,15 @@ class FirstRun(start: ShopPrefs, locale: String) {
             FirstRunStep.Shop -> FirstRunStep.Welcome
             FirstRunStep.Till -> FirstRunStep.Shop
             FirstRunStep.Money -> FirstRunStep.Till
+            FirstRunStep.OwnAdvice -> FirstRunStep.Money
             FirstRunStep.Why -> FirstRunStep.Money
             FirstRunStep.RealCases -> FirstRunStep.Why
             FirstRunStep.Guide -> if (guide.back()) FirstRunStep.Guide else FirstRunStep.Why
-            FirstRunStep.NotYet -> if (money == MoneyChoice.Make) FirstRunStep.Why else FirstRunStep.Money
+            FirstRunStep.NotYet -> when (money) {
+                MoneyChoice.Make -> FirstRunStep.Why
+                MoneyChoice.Own -> FirstRunStep.OwnAdvice
+                else -> FirstRunStep.Money
+            }
         }
     }
 

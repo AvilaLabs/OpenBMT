@@ -143,9 +143,19 @@ object FirstRunWords {
     const val moneyOwn = "Use my own wallet"
     const val moneyOwnNote = "You already have a wallet and want sales to go there."
     const val moneyMake = "Help me make a savings wallet"
-    const val moneyMakeNote = "With a coin and your laptop, offline. About an hour."
+    const val moneyMakeNote = "With a coin or a die and your laptop, offline. About an hour."
     const val moneyLater = "Set up the rest now, add the wallet later"
     const val moneyLaterNote = "The till says \"Not taking bitcoin yet\" until you do."
+
+    // ---- advice on an own wallet ----------------------------------------------------------------------
+
+    const val ownAdviceTitle = "We recommend a cold wallet"
+    const val ownAdviceText = "A cold wallet keeps its keys on a device that never connects to the internet, such as a hardware signer or an offline computer. " +
+        "Its 12 words are best made from your own coin flips or die rolls."
+    const val ownAdviceHot = "A hot wallet, on a phone or an online computer, is fine for small amounts. " +
+        "Its keys sit on a device that can be hacked, so keep savings elsewhere."
+    const val ownAdviceMake = "Make a cold wallet with a coin or a die"
+    const val ownAdviceGo = "Continue with my wallet"
 
     /** The screen before the existing setup: this build does not have the three paths yet. */
     const val moneyNotYet = "This part is still being built. For now, setup continues with the test setup."
@@ -217,6 +227,8 @@ object FirstRunWords {
         add("moneyTitle", moneyTitle); add("moneyText", moneyText); add("moneyOwn", moneyOwn)
         add("moneyOwnNote", moneyOwnNote); add("moneyMake", moneyMake); add("moneyMakeNote", moneyMakeNote)
         add("moneyLater", moneyLater); add("moneyLaterNote", moneyLaterNote); add("moneyNotYet", moneyNotYet)
+        add("ownAdviceTitle", ownAdviceTitle); add("ownAdviceText", ownAdviceText); add("ownAdviceHot", ownAdviceHot)
+        add("ownAdviceMake", ownAdviceMake); add("ownAdviceGo", ownAdviceGo)
         add("whyTitle", whyTitle); add("whyText1", whyText1); add("whyText2", whyText2); add("whyText3", whyText3)
         add("whyRealCases", whyRealCases); add("realTitle", realTitle); add("realIntro", realIntro)
         add("realCase1Place", realCase1Place); add("realCase1Text", realCase1Text)

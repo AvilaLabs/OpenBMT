@@ -44,6 +44,7 @@ internal fun Controller.showFirstRun() {
         FirstRunStep.Shop -> showShop(r)
         FirstRunStep.Till -> showTillChoice(r)
         FirstRunStep.Money -> showMoney(r)
+        FirstRunStep.OwnAdvice -> showOwnAdvice(r)
         FirstRunStep.Why -> showWhy(r)
         FirstRunStep.RealCases -> showRealCases(r)
         FirstRunStep.Guide -> showKeyGuide(r)
@@ -256,6 +257,15 @@ private fun Controller.showMoney(r: FirstRun) {
     stepScreen(
         FirstRunWords.shopTitle, listOf(ui.moneyPicture(), heading(FirstRunWords.moneyTitle), para(FirstRunWords.moneyText), ui.rows(rows)),
         back = { r.back(); showFirstRun() },
+    )
+}
+
+/** The advice on an own wallet: a cold wallet is recommended; the owner may make one, or go on with the wallet they have. */
+private fun Controller.showOwnAdvice(r: FirstRun) {
+    stepScreen(
+        FirstRunWords.shopTitle,
+        listOf(heading(FirstRunWords.ownAdviceTitle), para(FirstRunWords.ownAdviceText), line(FirstRunWords.ownAdviceHot, muted = true), ui.secondary(FirstRunWords.ownAdviceMake) { r.makeInstead(); showFirstRun() }),
+        listOf(ui.primary(FirstRunWords.ownAdviceGo) { r.next(); showFirstRun() }), { r.back(); showFirstRun() },
     )
 }
 

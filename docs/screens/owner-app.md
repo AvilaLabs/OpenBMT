@@ -310,10 +310,15 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | moneyOwn | Use my own wallet |
 | moneyOwnNote | You already have a wallet and want sales to go there. |
 | moneyMake | Help me make a savings wallet |
-| moneyMakeNote | With a coin and your laptop, offline. About an hour. |
+| moneyMakeNote | With a coin or a die and your laptop, offline. About an hour. |
 | moneyLater | Set up the rest now, add the wallet later |
 | moneyLaterNote | The till says "Not taking bitcoin yet" until you do. |
 | moneyNotYet | This part is still being built. For now, setup continues with the test setup. |
+| ownAdviceTitle | We recommend a cold wallet |
+| ownAdviceText | A cold wallet keeps its keys on a device that never connects to the internet, such as a hardware signer or an offline computer. Its 12 words are best made from your own coin flips or die rolls. |
+| ownAdviceHot | A hot wallet, on a phone or an online computer, is fine for small amounts. Its keys sit on a device that can be hacked, so keep savings elsewhere. |
+| ownAdviceMake | Make a cold wallet with a coin or a die |
+| ownAdviceGo | Continue with my wallet |
 | whyTitle | Why we do it this way |
 | whyText1 | Any app can be hacked, ours included. So your keys never touch one. |
 | whyText2 | You make them yourself, offline, with a coin or a die. After that, nobody can move your bitcoin without your words. Not even us. |

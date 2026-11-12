@@ -2729,8 +2729,13 @@ object AppModelTest {
         ok(r.step == FirstRunStep.Shop && r.name == "Cafe Anna" && r.currency == ShopCurrency.Gbp, "back to the shop keeps what was entered")
         r.next()
         ok(r.till == Till.Toast && r.query == "to", "back to the till keeps the choice and the search")
-        r.next(); r.choose(MoneyChoice.Own); ok(r.step == FirstRunStep.NotYet, "own wallet: the notice directly")
-        r.back(); ok(r.step == FirstRunStep.Money, "back from the notice to the money")
+        r.next(); r.choose(MoneyChoice.Own); ok(r.step == FirstRunStep.OwnAdvice, "own wallet: the advice first")
+        r.back(); ok(r.step == FirstRunStep.Money && r.money == MoneyChoice.Own, "back from the advice to the money, the own wallet still chosen")
+        r.choose(MoneyChoice.Own); r.next(); ok(r.step == FirstRunStep.NotYet, "Continue with my wallet goes where the own wallet went")
+        r.back(); ok(r.step == FirstRunStep.OwnAdvice, "back from the notice to the advice")
+        r.makeInstead(); ok(r.step == FirstRunStep.Why && r.money == MoneyChoice.Make, "make a cold wallet: the choice is Make and the why follows")
+        r.back(); ok(r.step == FirstRunStep.Money, "back from the why to the money")
+        FirstRun(ShopPrefs(), "DE").let { f -> f.makeInstead(); ok(f.step == FirstRunStep.Welcome && f.money == null, "the switch is from the advice only") }
         r.choose(MoneyChoice.Later); ok(r.step == FirstRunStep.NotYet, "later: the notice directly")
         r.toWelcome(); r.back(); ok(r.step == FirstRunStep.Welcome, "the welcome has no step before it")
 
@@ -2887,6 +2892,11 @@ object AppModelTest {
 
         val keys = FirstRunWords.all().map { it.first }
         ok(keys.size == keys.toSet().size, "every first-run key is used once")
+        ok(shown["ownAdviceTitle"] == "We recommend a cold wallet" &&
+            shown["ownAdviceText"] == "A cold wallet keeps its keys on a device that never connects to the internet, such as a hardware signer or an offline computer. Its 12 words are best made from your own coin flips or die rolls." &&
+            shown["ownAdviceHot"] == "A hot wallet, on a phone or an online computer, is fine for small amounts. Its keys sit on a device that can be hacked, so keep savings elsewhere." &&
+            shown["ownAdviceMake"] == "Make a cold wallet with a coin or a die" && shown["ownAdviceGo"] == "Continue with my wallet" &&
+            shown["moneyMakeNote"] == "With a coin or a die and your laptop, offline. About an hour.", "the advice words are the ones of the words file")
         ok(FirstRunWords.moneyNotYet == "This part is still being built. For now, setup continues with the test setup.", "the notice, exactly")
         ok(FirstRunWords.with(FirstRunWords.tillStepsTitle, "Odoo") == "Add Bitcoin to Odoo", "{till} is the till's name")
     }
