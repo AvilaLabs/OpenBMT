@@ -127,6 +127,20 @@ impl World {
             .feed(vec![joined(height, &block), block_event(&block)])
     }
 
+    /// One block with a transaction that pays `sat_per_vb` to the miner.
+    fn block_paying(&mut self, n: u8, sat_per_vb: u64) {
+        let tx = spend(n, &[(&script_of(0), 1_000)]);
+        let fees = sat_per_vb * tx.weight().to_wu() / 4;
+        let block = self
+            .blocks
+            .extend_paying(std::slice::from_ref(&tx), fees)
+            .clone();
+        let height = self.blocks.height();
+        self.tip = (height, block.block_hash());
+        self.rig
+            .feed(vec![joined(height, &block), block_event(&block)]);
+    }
+
     /// The owner's heartbeat, with the next number and the chain the node
     /// has.
     fn heartbeat(&mut self) {
@@ -211,12 +225,13 @@ fn cr_219_a_quote_above_the_shops_limit_has_no_swap_and_says_so() {
 }
 
 #[test]
-fn cr_219_a_provider_that_has_not_answered_in_five_seconds_leaves_the_code_on_chain() {
+fn cr_219_a_provider_that_has_not_answered_in_twenty_seconds_leaves_the_code_on_chain() {
     let dir = Scratch::new();
     let mut w = world(&dir);
     let index = w.open();
     // The request goes out and no answer comes.
     let request = w.rig.node.swap_next().unwrap();
+    assert_eq!(SWAP_WINDOW_SECS, 20);
     w.at(SWAP_WINDOW_SECS + 1);
     assert!(matches!(w.view(index), SaleLightning::NotForThisSale));
     // A late answer is not shown.
@@ -375,6 +390,48 @@ fn cr_222_a_claim_that_stays_out_of_a_block_is_built_again_at_a_higher_fee() {
     let _ = index;
 }
 
+/// The rate of the first claim, in satoshis per 1000 virtual bytes.
+fn first_claim_rate(w: &mut World, lockup: &Transaction) -> u64 {
+    let claim = w.sent().remove(0);
+    let fee = lockup.output[0].value.to_sat() - claim.output[0].value.to_sat();
+    fee * 1000 / claim.vsize() as u64
+}
+
+#[test]
+fn cr_222_a_recent_rate_above_the_floor_starts_the_claim_at_that_rate() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    // Three blocks paying 10 sat/vB, which is above the floor of 2.
+    for n in 1..=3 {
+        w.block_paying(n, 10);
+    }
+    let index = w.open();
+    w.serve();
+    let lockup = w.lockup_in_mempool();
+    w.at(10);
+    w.block(std::slice::from_ref(&lockup));
+    let rate = first_claim_rate(&mut w, &lockup);
+    assert!((9_000..=11_000).contains(&rate), "{rate}");
+    let _ = index;
+}
+
+#[test]
+fn cr_222_with_no_recent_rate_the_claim_starts_at_the_floor() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    // One sample, and the block of the lockup is a second: too few for a
+    // recent rate (FE-13 wants three).
+    w.block_paying(1, 10);
+    let index = w.open();
+    w.serve();
+    let lockup = w.lockup_in_mempool();
+    w.at(10);
+    w.block(std::slice::from_ref(&lockup));
+    let rate = first_claim_rate(&mut w, &lockup);
+    assert!((1_800..=2_300).contains(&rate), "{rate}");
+    let _ = index;
+}
+
 #[test]
 fn cr_222_a_claim_near_the_timeout_is_told_to_the_owner() {
     let dir = Scratch::new();
@@ -472,13 +529,8 @@ fn cr_226_the_words_pass_the_screen_rules() {
     for (name, words) in all_words() {
         openbmt_core::say::check(&words).unwrap_or_else(|e| panic!("{name}: {e:?}"));
     }
-    // The heading of the failed swap is 30 characters, the brief's own: two
-    // over the limit. Everything else about it keeps the rules.
-    let failed = failed_words();
-    assert_eq!(failed.heading.chars().count(), 30);
-    let mut short = failed.clone();
-    short.heading = "Lightning payment unfinished".to_string();
-    assert_eq!(openbmt_core::say::check(&short), Ok(()));
+    assert_eq!(failed_words().heading, "Lightning payment unfinished");
+    assert_eq!(failed_words().heading.chars().count(), 28);
 }
 
 #[test]

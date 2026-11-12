@@ -1230,6 +1230,7 @@ impl<P: DriverPort> Node<P> {
             }
         };
         self.swap.block(&block, &self.view, now);
+        self.swap.fee_sample(bytes, &hash, &self.view);
         match self.counter.block(&block, &self.view, now, &mut self.store) {
             Ok(taken) => {
                 for (index, result) in taken.results {

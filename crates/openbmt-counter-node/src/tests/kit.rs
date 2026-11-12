@@ -158,7 +158,7 @@ pub fn bytes(tx: &Transaction) -> Vec<u8> {
     serialize(tx)
 }
 
-fn coinbase(height: u32, tag: u32) -> Transaction {
+fn coinbase(height: u32, tag: u32, fees: u64) -> Transaction {
     let mut script = height.to_le_bytes().to_vec();
     script.extend_from_slice(&tag.to_le_bytes());
     Transaction {
@@ -171,7 +171,7 @@ fn coinbase(height: u32, tag: u32) -> Transaction {
             witness: Witness::new(),
         }],
         output: vec![TxOut {
-            value: Sats::from_sat(5_000_000_000),
+            value: Sats::from_sat(5_000_000_000 + fees),
             script_pubkey: p2wsh(0xee),
         }],
     }
@@ -187,8 +187,19 @@ pub fn genesis() -> BlockHash {
 /// header store's median-time rule. `tag` makes two blocks of one height
 /// different.
 pub fn mine(prev: BlockHash, height: u32, tag: u32, txs: &[Transaction]) -> Block {
+    mine_paying(prev, height, tag, txs, 0)
+}
+
+/// As [`mine`], with a coinbase that claims `fees` above the subsidy.
+pub fn mine_paying(
+    prev: BlockHash,
+    height: u32,
+    tag: u32,
+    txs: &[Transaction],
+    fees: u64,
+) -> Block {
     let time = genesis_block(Network::Regtest).header.time + height * 10;
-    let mut all = vec![coinbase(height, tag)];
+    let mut all = vec![coinbase(height, tag, fees)];
     all.extend(txs.iter().cloned());
     let mut block = Block {
         header: Header {
@@ -234,6 +245,15 @@ impl Blocks {
     pub fn extend(&mut self, txs: &[Transaction]) -> &Block {
         let height = self.height() + 1;
         let block = mine(self.tip_hash(), height, 0, txs);
+        self.blocks.push(block);
+        &self.blocks[height as usize - 1]
+    }
+
+    /// Mine one more block with these transactions and a coinbase that
+    /// claims `fees` above the subsidy.
+    pub fn extend_paying(&mut self, txs: &[Transaction], fees: u64) -> &Block {
+        let height = self.height() + 1;
+        let block = mine_paying(self.tip_hash(), height, 0, txs, fees);
         self.blocks.push(block);
         &self.blocks[height as usize - 1]
     }

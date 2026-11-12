@@ -44,9 +44,9 @@
 
 use std::collections::BTreeMap;
 
-use bitcoin::consensus::serialize;
+use bitcoin::consensus::{deserialize, serialize};
 use bitcoin::hashes::Hash;
-use bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid};
+use bitcoin::{Address, Block, BlockHash, Network, OutPoint, ScriptBuf, Txid};
 use openbmt_core::say::{Tone, Who, Words};
 use openbmt_core::settings::SwapProvider;
 use openbmt_core::wire::{self, DecodeError, Reader};
@@ -56,19 +56,28 @@ use openbmt_swap::{
     check, parse_response, Expect, LockupSeen, Pairs, Provider, Quote, Refused, Reply, Request,
     Secrets, Seen, Status, SwapState, MIN_CLAIM_BLOCKS,
 };
-use openbmt_watch::{HeaderChain, SaleStatus, SaleWatch, Source, WellFormedBlock};
+use openbmt_watch::{
+    block_fee_sample, FeeHistory, HeaderChain, SaleStatus, SaleWatch, Source, WellFormedBlock,
+};
 
 /// The magic of the saved swap (version 1).
 pub const MAGIC_SWAP_RECORD: [u8; 4] = *b"OBM(";
-/// CR-219: seconds after the quote in which the invoice must have come.
-pub const SWAP_WINDOW_SECS: u64 = 5;
+/// CR-219: seconds after the quote in which the invoice must have come. The
+/// request crosses Tor, which is slow, so the window is long enough for a
+/// circuit and still short enough that a customer who is paying is not kept
+/// waiting for a code that never comes.
+pub const SWAP_WINDOW_SECS: u64 = 20;
 /// CR-219: most swaps the driver makes for one sale.
 pub const MAX_SWAPS: usize = 8;
-/// CR-222: the first fee rate of a claim, in satoshis per 1000 virtual
-/// bytes (2 sat/vB). **[to tune]**
+/// CR-222: the floor of the first fee rate of a claim, in satoshis per 1000
+/// virtual bytes (2 sat/vB). The first claim is built at this rate or at the
+/// recent rate of the blocks the counter has checked, whichever is higher,
+/// so that a claim does not start below what blocks are taking.
 pub const CLAIM_FEE_PER_KVB: u64 = 2_000;
 /// CR-222: the least a fee rate goes up by when a claim is built again, in
-/// satoshis per 1000 virtual bytes. **[to tune]**
+/// satoshis per 1000 virtual bytes. A low rate raised by half only would
+/// climb too slowly to matter before the provider's deadline, so each bump
+/// is at least this much.
 pub const BUMP_MIN_PER_KVB: u64 = 2_000;
 /// CR-225: seconds before a request that has no answer is let go.
 pub const REQUEST_GIVE_UP_SECS: u64 = 60;
@@ -405,6 +414,9 @@ pub struct SwapDriver {
     round: u64,
     out: Option<Out>,
     notes: Vec<String>,
+    /// CR-222: what the blocks checked in this run paid in fees. Kept in
+    /// memory only; with no sample the floor of the claim's fee applies.
+    fees: FeeHistory,
 }
 
 impl std::fmt::Debug for SwapDriver {
@@ -421,6 +433,23 @@ fn claim_ctx(now: u64, tip: u32, accept_unconfirmed: bool) -> Ctx {
         now_secs: now,
         tip_height: tip,
         accept_unconfirmed,
+    }
+}
+
+/// CR-222: the first claim, at `start_rate`; at the floor instead when the
+/// higher rate would be refused as too much of the lockup (SW-41), so that
+/// a high recent rate never keeps a swap from being claimed.
+fn claim_first(
+    machine: &ReverseSwap,
+    start_rate: u64,
+    ctx: &Ctx,
+) -> Result<(ReverseSwap, bitcoin::Transaction, u64), Refused> {
+    match machine.claim(start_rate, ctx) {
+        Ok((m, tx)) => Ok((m, tx, start_rate)),
+        Err(Refused::FeeTooHigh) if start_rate > CLAIM_FEE_PER_KVB => machine
+            .claim(CLAIM_FEE_PER_KVB, ctx)
+            .map(|(m, tx)| (m, tx, CLAIM_FEE_PER_KVB)),
+        Err(e) => Err(e),
     }
 }
 
@@ -467,6 +496,7 @@ impl SwapDriver {
             round: 0,
             out: None,
             notes,
+            fees: FeeHistory::new(),
         };
         // A swap that was saved is followed whether or not the setting is
         // still on: its lockup could still be claimed.
@@ -1049,6 +1079,36 @@ impl SwapDriver {
         }
     }
 
+    /// CR-222: a block the light client downloaded and checked, as bytes,
+    /// for its fee sample. A block that is not on the best chain, or whose
+    /// fees cannot be read, gives none.
+    pub fn fee_sample<C: HeaderChain + ?Sized>(
+        &mut self,
+        bytes: &[u8],
+        hash: &BlockHash,
+        headers: &C,
+    ) {
+        let Some(height) = headers.height_of(hash) else {
+            return;
+        };
+        let Ok(block) = deserialize::<Block>(bytes) else {
+            return;
+        };
+        if let Ok(sample) = block_fee_sample(&block, height, self.network) {
+            self.fees.insert(sample);
+        }
+    }
+
+    /// CR-222: the rate the first claim is built at, in satoshis per 1000
+    /// virtual bytes: the floor, or the recent rate of the blocks checked
+    /// when that is higher. A sample is in thousandths of a satoshi per
+    /// virtual byte, which is the same number.
+    fn claim_start_rate(&self, tip: u32) -> u64 {
+        self.fees
+            .recent_rate(tip)
+            .map_or(CLAIM_FEE_PER_KVB, |r| r.max(CLAIM_FEE_PER_KVB))
+    }
+
     /// The records that must be written (CR-220), and, with the last one of
     /// a swap that was just claimed, the claim to send once it is written.
     /// Asking again before [`SwapDriver::saved`] gives them again.
@@ -1107,6 +1167,7 @@ impl SwapDriver {
         let tip = chain.tip_height();
         let mut updates = Vec::new();
         let mut notes = Vec::new();
+        let start_rate = self.claim_start_rate(tip);
         for (index, sale) in &mut self.sales {
             let index = *index;
             let mut pending = false;
@@ -1122,6 +1183,7 @@ impl SwapDriver {
                     sats,
                     now,
                     tip,
+                    start_rate,
                     chain,
                     decide,
                     &mut updates,
@@ -1239,6 +1301,7 @@ impl Follow {
         sats: u64,
         now: u64,
         tip: u32,
+        start_rate: u64,
         chain: &C,
         decide: &mut dyn FnMut(u32, u64, &SaleStatus) -> bool,
         updates: &mut Vec<Update>,
@@ -1294,8 +1357,9 @@ impl Follow {
             let ctx = claim_ctx(now, tip, accept);
             let (machine, next) = self.record.machine.settle(&ctx);
             match next {
-                Next::BuildClaim { lockup } => match machine.claim(self.record.fee_per_kvb, &ctx) {
-                    Ok((claimed, tx)) => {
+                Next::BuildClaim { lockup } => match claim_first(&machine, start_rate, &ctx) {
+                    Ok((claimed, tx, rate)) => {
+                        self.record.fee_per_kvb = rate;
                         self.record.machine = claimed;
                         self.record.lockup = Some(lockup);
                         self.record.claims.push(tx.compute_txid());
@@ -1432,7 +1496,7 @@ pub fn confirming_words() -> Words {
 pub fn failed_words() -> Words {
     Words::new(
         Tone::Stop,
-        "Lightning payment not finished",
+        "Lightning payment unfinished",
         "The swap provider did not lock the bitcoin in time, so the customer's payment was cancelled and goes back to them.",
         Who::Cashier,
         "Ask the customer to pay again, or take another payment.",
@@ -1464,12 +1528,11 @@ pub fn claim_stuck_words() -> Words {
     .code("CR-222")
 }
 
-/// Every words of this driver, for the list of SC-12. The heading of
-/// [`failed_words`] is the brief's and is 30 characters, two over the
-/// limit of SC-12, so it is not in the list until that is decided.
+/// Every words of this driver, for the list of SC-12.
 pub fn all_words() -> Vec<(String, Words)> {
     vec![
         ("SwapConfirming".to_string(), confirming_words()),
+        ("SwapFailed".to_string(), failed_words()),
         ("SwapUnavailable".to_string(), unavailable_words()),
         ("SwapClaimStuck".to_string(), claim_stuck_words()),
     ]

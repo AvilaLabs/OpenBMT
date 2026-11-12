@@ -1613,10 +1613,10 @@ own, as the driver of section 12 has none.
   invoices), at most 8 for a sale. The sale shows its on-chain code at once
   and never waits. When a reply has passed every check of SW-20 to SW-28 the
   code becomes the combined code of the own-node path (LN-18), carrying the
-  invoice. If none has passed 5 seconds after the quote, or the amount is
-  outside the limits, the code stays on-chain and one small line says
-  "Lightning is not available for this sale." A provider that cannot be
-  reached, or that refuses, is "Lightning off for now" in the sale's
+  invoice. If none has passed 20 seconds after the quote (the request
+  crosses Tor), or the amount is outside the limits, the code stays
+  on-chain and one small line says "Lightning is not available for this
+  sale." A provider that cannot be reached, or that refuses, is "Lightning off for now" in the sale's
   details, and never a state of the sale.
 - **CR-220.** One swap is followed by the machine of SW-71, one per swap,
   and each is saved through the store (a slot of its own, `swap-N-M.bin`) in
@@ -1644,10 +1644,13 @@ own, as the driver of section 12 has none.
   one (CR-19). A sale paid before its lockup was in a block whose lockup is
   then replaced, or whose swap fails before the claim is in a block, is a
   cancel (CR-14): `Counter::swap_cancelled`.
-- **CR-222.** The claim pays the sale's address at the counter's fee rate
-  (2 sat/vB at first), signals replacement (SW-40) and is built again at
-  a higher fee (SW-46) every block it stays out of a block: 50% more, and at
-  least 2 sat/vB more **[to tune]**. It is never built at or after the
+- **CR-222.** The claim pays the sale's address at a fee rate that starts
+  at 2 sat/vB or at the recent rate of the blocks the counter has checked
+  (FE-13, from the fee samples it makes of them and keeps in memory only),
+  whichever is higher, and at 2 sat/vB when the higher rate would be refused
+  by SW-41 or no sample has been made. It signals replacement (SW-40) and is
+  built again at a higher fee (SW-46) every block it stays out of a block:
+  50% more, and at least 2 sat/vB more. It is never built at or after the
   provider's timeout (SW-44), and never above the limit of SW-41. A claim
   still unconfirmed `MIN_CLAIM_BLOCKS / 2` blocks before the timeout is
   told to the owner (words "Lightning claim waiting"). The swap is done
@@ -1656,7 +1659,7 @@ own, as the driver of section 12 has none.
 - **CR-223.** A swap that fails before the claim (the invoice ran out, the
   provider could not lock, the lockup is refused by SW-30, the provider took
   it back, the timeout) leaves the sale unpaid and shows "Lightning payment
-  not finished". The sale itself goes on: the same code takes bitcoin
+  unfinished". The sale itself goes on: the same code takes bitcoin
   on-chain, and the cashier may take another payment.
 - **CR-224.** A bitcoin refund of a sale paid through a swap is open as
   for any sale that arrived on-chain: the claim is on the chain, to the
@@ -1672,7 +1675,7 @@ own, as the driver of section 12 has none.
   bytes that came back.
 - **CR-226.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`. The cashier is told: "Waiting for one block",
-  "Lightning payment not finished" and "Lightning off for now", and sees the
+  "Lightning payment unfinished" and "Lightning off for now", and sees the
   line of CR-219. The owner is told "Lightning claim waiting" and has the
   settings row "Lightning through a swap provider" (CR-218): a provider, an
   onion address, the largest sale over Lightning, and "Turn on" and "Turn
