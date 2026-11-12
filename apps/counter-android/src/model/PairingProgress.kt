@@ -1,14 +1,18 @@
 package org.openbmt.counter.app
 
 import org.openbmt.app.SayWords
+import org.openbmt.counter.OwnWalletKind
 
 /** Where the pairing ceremony of this screen has got to (CR-98). */
 enum class PairPhase {
     /** No ceremony is under way. */
     Idle,
 
-    /** The camera is open for the Key app's offer. */
+    /** The camera is open for the offer: the Key app's, or the owner phone's for the shop's own wallet. */
     ScanOffer,
+
+    /** The offer was the owner phone's: the wallet's first address is on the screen, waiting for "Same address" (CR-228). */
+    CheckAddress,
 
     /** The request and its four words are on the screen, waiting for the person to compare them. */
     Compare,
@@ -31,11 +35,24 @@ class PairingProgress {
 
     private var forgotten = false
 
-    /** The person tapped to pair: the camera opens for the offer. */
-    fun start(): Boolean = move(PairPhase.Idle, PairPhase.ScanOffer)
+    /** Whether the ceremony of the last [start] was one with the shop's own wallet (CR-237): which words say it was forgotten. */
+    var own: Boolean = false
+        private set
 
-    /** The offer was read and the library gave a request and four words. */
+    /** The person tapped to pair: the camera opens for the offer. */
+    fun start(): Boolean = move(PairPhase.Idle, PairPhase.ScanOffer).also { if (it) own = false }
+
+    /** The Key app's offer was read and the library gave a request and four words. */
     fun offerRead(): Boolean = move(PairPhase.ScanOffer, PairPhase.Compare)
+
+    /** The owner phone's offer was read and the library gave the wallet's first address: no request yet (CR-228). */
+    fun offerReadOwn(): Boolean = move(PairPhase.ScanOffer, PairPhase.CheckAddress).also { if (it) own = true }
+
+    /** "Same address": the library made the request and the four words (CR-229). */
+    fun addressSame(): Boolean = move(PairPhase.CheckAddress, PairPhase.Compare)
+
+    /** "Different": the ceremony is over before any key was made (CR-228). */
+    fun addressDifferent(): Boolean = move(PairPhase.CheckAddress, PairPhase.Idle)
 
     /** "They match": the only way to the camera for the bundle. */
     fun matched(): Boolean = move(PairPhase.Compare, PairPhase.ScanBundle)
@@ -70,6 +87,19 @@ class PairingProgress {
         if (phase != from) return false
         phase = to
         return true
+    }
+}
+
+/** The first-address screen of a pairing with the shop's own wallet (CR-228, CR-237). */
+object FirstAddress {
+    /** The address in groups of four characters, as the largest thing on the screen, for the person to compare. */
+    fun groups(address: String): String = address.chunked(4).joinToString(" ")
+
+    /** The line beneath the address that says what kind of wallet it is. */
+    fun kindLine(kind: OwnWalletKind): String = when (kind) {
+        OwnWalletKind.SingleKey -> "Wallet with one key"
+        OwnWalletKind.TwoOfThree -> "Wallet with 2 of 3 keys"
+        OwnWalletKind.None -> ""
     }
 }
 

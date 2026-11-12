@@ -50,6 +50,7 @@ import org.openbmt.counter.ActorRole
 import org.openbmt.counter.CounterException
 import org.openbmt.counter.CounterNode
 import org.openbmt.counter.LnRequest
+import org.openbmt.counter.OwnWalletKind
 import org.openbmt.counter.PairStarted
 import org.openbmt.counter.Pairing
 import org.openbmt.counter.Payment
@@ -228,7 +229,7 @@ class Controller(private val act: MainActivity) {
             fault = AppWords.fileNotRead(e.message)
             return render()
         }
-        if (!setup.complete) return showFirstStart(if (progress.takeForgotten()) AppWords.pairingForgotten else null)
+        if (!setup.complete) return showFirstStart(if (progress.takeForgotten()) (if (progress.own) AppWords.pairingOwnForgotten else AppWords.pairingForgotten) else null)
         // CR-140: the list of cashiers is read whole or not at all; a file that does not read is a fault, and nobody is signed in.
         try {
             cashiers = staff.names()
@@ -873,7 +874,9 @@ class Controller(private val act: MainActivity) {
         showWorking()
         async({ Pairing.begin(offer, draftCounterName, nowSecs()) }) { r ->
             val started = r.getOrNull()
-            if (started != null && progress.offerRead()) return@async compare(started)
+            // CR-237: the same scan reads either kind of offer; the library says which ceremony follows.
+            if (started != null && started.wallet != OwnWalletKind.None && progress.offerReadOwn()) return@async checkAddress(started)
+            if (started != null && started.wallet == OwnWalletKind.None && progress.offerRead()) return@async compare(started)
             endCeremony()
             when (val e = r.exceptionOrNull()) {
                 is CounterException -> showMessage(e.sayWords(), "Back") { showFirstStart(null) }
@@ -883,9 +886,49 @@ class Controller(private val act: MainActivity) {
         }
     }
 
+    /** CR-228, CR-237: the wallet's first receive address, the largest thing on the screen, in groups of four, and the kind of wallet beneath it. */
+    private fun checkAddress(started: PairStarted) {
+        val words = AppWords.pairingOwnAddress
+        val model = WordsModel.of(words)
+        val views = ArrayList<View>()
+        views.add(ui.compactWords(model))
+        views.add(ui.text(FirstAddress.groups(started.address), 28f, bold = true, mono = true))
+        views.add(ui.text(FirstAddress.kindLine(started.wallet), 16f))
+        views.add(ui.hint(model))
+        show(ui.bar(words.heading, back = { endCeremony(); showFirstStart(null) }), views, listOf(ui.primary("Same address") { addressSame() }, ui.quiet("Different") { addressDifferent() }))
+    }
+
+    /** CR-229: only now does the library make the counter's key and number; the request and the four words come back. */
+    private fun addressSame() {
+        if (!progress.addressSame()) return
+        showWorking()
+        async({ Pairing.addressSame(nowSecs(), draftCounterName) }) { r ->
+            val started = r.getOrNull()
+            if (started != null) return@async compare(started, AppWords.pairingOwnCompare)
+            endCeremony()
+            when (val e = r.exceptionOrNull()) {
+                is CounterException -> showMessage(e.sayWords(), "Back") { showFirstStart(null) }
+                is LinkageError -> showMessage(AppWords.libraryMissing(e.message), "Back") { showFirstStart(null) }
+                else -> showFirstStart(null)
+            }
+        }
+    }
+
+    /** CR-228: the address is not the wallet's: the ceremony ends and nothing is kept. */
+    private fun addressDifferent() {
+        if (!progress.addressDifferent()) return
+        try {
+            Pairing.addressDifferent()
+        } catch (_: CounterException) {
+            // The ceremony is forgotten whatever the library says; the words below are the ones to show.
+        } catch (_: LinkageError) {
+            // No library, no ceremony.
+        }
+        showMessage(AppWords.pairingOwnDifferent, "Back") { showFirstStart(null) }
+    }
+
     /** The request as a code, and the four words, the most prominent thing on the screen (CR-98). */
-    private fun compare(started: PairStarted) {
-        val words = AppWords.pairingCompare
+    private fun compare(started: PairStarted, words: SayWords = AppWords.pairingCompare) {
         val model = WordsModel.of(words)
         val views = ArrayList<View>()
         views.add(ui.compactWords(model))

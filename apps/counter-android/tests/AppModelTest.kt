@@ -23,6 +23,7 @@ import org.openbmt.counter.LnMethod
 import org.openbmt.counter.LnRequest
 import org.openbmt.counter.LnStep
 import org.openbmt.counter.LnTransport
+import org.openbmt.counter.OwnWalletKind
 import org.openbmt.counter.Payment
 import org.openbmt.counter.PersonLine
 import org.openbmt.counter.TipTally
@@ -259,6 +260,24 @@ object AppModelTest {
         ok(p.left() && p.phase == PairPhase.Idle, "leaving ends the ceremony, and the library is told")
         ok(p.takeForgotten() && !p.takeForgotten(), "the message comes once")
         ok(AppWords.pairingForgotten.next.contains("Key app") && AppWords.pairingForgotten.what.contains("forgotten"), "the words say what happened and to start again from the Key app")
+
+        // CR-228, CR-229, CR-237: an offer from the shop's own wallet goes by the first-address screen.
+        val q = PairingProgress()
+        ok(q.start() && !q.own, "a ceremony starts as the Key app's")
+        ok(q.offerReadOwn() && q.phase == PairPhase.CheckAddress && q.own, "the owner phone's offer opens the first-address screen")
+        ok(!q.offerRead() && !q.matched() && !q.finished() && !q.start(), "nothing else is taken at the address")
+        ok(q.addressSame() && q.phase == PairPhase.Compare, "Same address goes on to the four words")
+        ok(q.matched() && q.finished() && q.phase == PairPhase.Idle, "the rest is the Key app's ceremony")
+        ok(q.start() && q.offerReadOwn() && q.addressDifferent() && q.phase == PairPhase.Idle, "Different ends the ceremony before any key")
+        ok(!q.addressSame() && !q.addressDifferent(), "after Different there is nothing to say the address of")
+        ok(q.start() && q.offerReadOwn() && q.left() && q.takeForgotten() && q.own, "leaving at the address forgets it, and says it was the own wallet's")
+        ok(q.start() && !q.own && q.offerRead() && q.left() && !q.own, "a Key app ceremony is not the own wallet's")
+        ok(!PairingProgress().also { it.start(); it.offerRead() }.addressSame(), "Same address is not a step of the Key app's ceremony")
+        ok(FirstAddress.groups("bc1qyjassxtmzl02s8de8jw9365qmuvwg74udtp3vj") == "bc1q yjas sxtm zl02 s8de 8jw9 365q muvw g74u dtp3 vj", "the address in groups of four")
+        ok(FirstAddress.groups("") == "" && FirstAddress.groups("abcd") == "abcd" && FirstAddress.groups("abcde") == "abcd e", "short and exact addresses")
+        ok(FirstAddress.kindLine(OwnWalletKind.SingleKey) == "Wallet with one key" && FirstAddress.kindLine(OwnWalletKind.TwoOfThree) == "Wallet with 2 of 3 keys", "the kind of wallet")
+        ok(AppWords.pairingOwnAddress.who == Who.MANAGER && AppWords.pairingOwnDifferent.tone == Tones.STOP && AppWords.pairingOwnDifferent.what.contains("Nothing was saved"), "the words of the first-address screen and of Different")
+        ok(AppWords.pairingOwnCompare.what == AppWords.WORDS_NEEDED_CR_229_COMPARE && !AppWords.pairingOwnCompare.next.contains("Key app") && AppWords.pairingOwnForgotten.next.contains("owner phone") && AppWords.pairingOwnForgotten.what == AppWords.WORDS_NEEDED_CR_237_FORGOTTEN, "the own wallet's words do not name the Key app")
 
         // What is checked before the camera opens.
         fun problem(counter: String = "Front", manager: String = "Mia", pin1: String = "246810", pin2: String = "246810") =

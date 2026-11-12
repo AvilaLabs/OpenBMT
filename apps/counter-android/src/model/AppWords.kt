@@ -69,6 +69,50 @@ object AppWords {
         "Start again from the Key app: open Pair a counter, then tap Pair on this counter and scan its code.",
     )
 
+    // ---- pairing with the shop's own wallet (CR-237) ---------------------------------
+
+    val pairingOwnAddress = w(
+        Tones.INFO, "Check your wallet",
+        "This is the first receive address of the wallet the owner phone gave this counter. Every sale's address will come from this wallet.",
+        Who.MANAGER,
+        "Open your wallet and find its first receive address. Tap Same address only if every character is the same. Otherwise tap Different.",
+    )
+
+    val pairingOwnDifferent = w(
+        Tones.STOP, "Different wallet",
+        "The address on this counter is not your wallet's first address, so the owner phone gave this counter a different wallet. Nothing was saved.",
+        Who.MANAGER,
+        "Check that the owner phone has your wallet, then start the pairing again from the owner phone.",
+    )
+
+    /**
+     * The design's sentence for what happened is 142 characters, over the 140 that SC-12 allows,
+     * so it is not pasted; [WORDS_NEEDED_CR_229_COMPARE] stands in until the words are written.
+     */
+    const val WORDS_NEEDED_CR_229_COMPARE = "Words needed: the owner phone shows the same four words."
+
+    val pairingOwnCompare = w(
+        Tones.INFO, "Compare the four words",
+        WORDS_NEEDED_CR_229_COMPARE,
+        Who.MANAGER,
+        "Check all four words on the owner phone, then tap They match, or tap They differ if any word is not the same.",
+    )
+
+    /** The app was left while a pairing with the shop's own wallet was open. */
+    /**
+     * The design gives the same heading and sentence as [pairingForgotten], which SC-12 does not
+     * allow for two words; [WORDS_NEEDED_CR_237_FORGOTTEN] stands in for the sentence until
+     * different words are written.
+     */
+    const val WORDS_NEEDED_CR_237_FORGOTTEN = "Words needed: the pairing with the shop's own wallet was forgotten."
+
+    val pairingOwnForgotten = w(
+        Tones.STOP, "Pairing not finished",
+        WORDS_NEEDED_CR_237_FORGOTTEN,
+        Who.MANAGER,
+        "Start again from the owner phone: open Add a counter, then tap Pair on this counter and scan its code.",
+    )
+
     val pinNotAccepted = w(
         Tones.STOP, "PIN not accepted",
         "A PIN is 6 to 12 digits, and the two entries must be the same, so nothing was saved.",
@@ -660,6 +704,10 @@ object AppWords {
         "pairingCompare" to pairingCompare,
         "pairingScanBundle" to pairingScanBundle,
         "pairingForgotten" to pairingForgotten,
+        "pairingOwnAddress" to pairingOwnAddress,
+        "pairingOwnDifferent" to pairingOwnDifferent,
+        "pairingOwnCompare" to pairingOwnCompare,
+        "pairingOwnForgotten" to pairingOwnForgotten,
         "counterNameNotAccepted" to counterNameNotAccepted,
         "pinNotAccepted" to pinNotAccepted,
         "nameNotAccepted" to nameNotAccepted,
