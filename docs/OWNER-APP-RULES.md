@@ -293,7 +293,11 @@ keeps the library's record between two steps and carries the owner's words.
   network is the build's one choice (`AppConfig.NETWORK`): the app has no
   picker, and the library refuses a Key app's answer for another network.
   Key 1 is made with no words to show (`show_words` false, `docs/DESIGN.md`
-  §5.4), and the app shows the library's words of the stage. After every op
+  §5.4), and the app shows the library's words of the stage. Where the
+  picture of the three keys shows the stage, as on the screen after key 1
+  and the screen of OA-27, those words are under the screen's "Details"
+  fold, and the screen's own heading and sentence say the next step. After
+  every op
   that returns a record the app seals the record in its own file in
   `noBackupFilesDir` (`ceremony.obks`, under the Keystore key of OA-01, by
   the same atomic steps) before it shows the next screen. A record that
@@ -303,7 +307,8 @@ keeps the library's record between two steps and carries the owner's words.
   ceremony are open.
 - **OA-27.** When the start finds the ceremony's file and no setup file,
   the app asks the library for the stage of the record (`ceremonyStage`)
-  and resumes there, with the library's words of the stage: at stage 1 the
+  and resumes there, with the library's words of the stage (under
+  "Details", as in OA-26): at stage 1 the
   scan of the Key app's code, at stage 2 the same scan again (the setup
   for the Key app is not kept, so the wallet is built again from the
   answer), at stage 3 the saving of the setup. A record that does not
