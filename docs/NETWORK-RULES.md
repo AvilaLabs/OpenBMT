@@ -207,9 +207,12 @@ thin driver that owns the sockets.
   announcement of the same transaction by another peer is a further
   sighting, reported by itself.
 - **NR-54.** This crate keeps no transaction: a fetched one is handed on
-  and forgotten. The counter remembers the IDs of the last 100,000
-  announced transactions **[to tune]** so that it does not fetch one
-  twice; it keeps no mempool.
+  and forgotten. The counter remembers each announced transaction ID for
+  30 minutes from its first announcement, and at most 20,000 IDs, so that
+  it does not fetch one twice while peers are still passing it on; it keeps
+  no mempool. An ID whose request is still out stays until the request
+  ends. An ID announced again after it is forgotten is fetched again and
+  handed on as a new sighting.
 - **NR-55.** The counter never announces or sends a transaction, except
   one the app asked it to broadcast (NR-86). It does not answer
   `getheaders`, `getaddr` or `mempool`, and it answers `getdata` only for

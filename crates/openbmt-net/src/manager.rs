@@ -80,8 +80,11 @@ pub const MAX_ANNOUNCED_BLOCKS: usize = 8;
 /// Most filter requests made for one block, over all peers, so that a
 /// block's record never grows with the peers that come and go.
 pub const MAX_FILTER_ASKS: usize = 6;
-/// NR-54: transaction IDs remembered.
-pub const MAX_REMEMBERED_TXIDS: usize = 100_000;
+/// NR-54: most transaction IDs remembered.
+pub const MAX_REMEMBERED_TXIDS: usize = 20_000;
+/// NR-54: seconds an announced transaction ID is remembered, counted from
+/// its first announcement.
+pub const TXID_KEEP_SECS: u64 = 1_800;
 /// NR-53: most announcing peers kept for one transaction.
 pub const MAX_ANNOUNCERS: usize = 8;
 /// NR-51: seconds a transaction may take to arrive.
@@ -388,6 +391,8 @@ struct Announcer {
 #[derive(Debug)]
 struct TxEntry {
     announcers: Vec<Announcer>,
+    /// The manager's time at the first announcement.
+    first_seen: u64,
     fetched: bool,
     pending: bool,
     /// In `waiting`.
@@ -444,6 +449,8 @@ pub(crate) struct Sizes {
     pub txs: usize,
     pub tx_order: usize,
     pub waiting: usize,
+    pub tx_order_capacity: usize,
+    pub waiting_capacity: usize,
     pub pending_tx: usize,
     pub scripts: usize,
     pub deferred: usize,
@@ -654,6 +661,7 @@ impl Manager {
                 self.note_unanswered(id, &mut out);
             }
         }
+        self.trim_tx_order(true);
         self.own_tick(now, &mut out);
         self.age_held(now, &mut out);
         self.settle(now, &mut out);
@@ -826,6 +834,8 @@ impl Manager {
             txs: self.txs.len(),
             tx_order: self.tx_order.len(),
             waiting: self.waiting.len(),
+            tx_order_capacity: self.tx_order.capacity(),
+            waiting_capacity: self.waiting.capacity(),
             pending_tx: self.pending_tx.len(),
             scripts: self.scripts.len(),
             deferred: self.deferred.len(),
@@ -1793,6 +1803,7 @@ impl Manager {
                     addr,
                     tried: false,
                 }],
+                first_seen: self.now,
                 fetched: false,
                 pending: false,
                 queued: false,
@@ -1800,26 +1811,47 @@ impl Manager {
             },
         );
         self.tx_order.push_back(txid);
-        self.trim_tx_order();
+        self.trim_tx_order(false);
         self.queue_tx(txid, false);
     }
 
-    /// NR-54: forget the oldest IDs beyond the bound. An ID with a request
-    /// pending leaves the order and stays until the request ends.
-    fn trim_tx_order(&mut self) {
-        while self.tx_order.len() > MAX_REMEMBERED_TXIDS {
-            let Some(old) = self.tx_order.pop_front() else {
+    /// NR-54: forget IDs from the oldest end while the order is over
+    /// `MAX_REMEMBERED_TXIDS` or the oldest was first announced
+    /// `TXID_KEEP_SECS` ago. An ID with a request pending leaves the order
+    /// and stays until the request ends. A forgotten ID that was waiting to
+    /// be asked for stays in `waiting` and is skipped when popped; a trim
+    /// with `compact` (the one in `tick`) also takes it out in one pass, so
+    /// that `waiting` empties when announcements stop, while the trim of an
+    /// announcement stays cheap. `waiting` keeps its own bound either way.
+    /// The rings give back room they no longer need.
+    fn trim_tx_order(&mut self, compact: bool) {
+        let now = self.now;
+        let mut forgot_waiting = false;
+        while let Some(&old) = self.tx_order.front() {
+            let over = self.tx_order.len() > MAX_REMEMBERED_TXIDS;
+            let aged = self
+                .txs
+                .get(&old)
+                .is_none_or(|e| e.first_seen.saturating_add(TXID_KEEP_SECS) <= now);
+            if !over && !aged {
                 break;
-            };
+            }
+            self.tx_order.pop_front();
             let pending = self.txs.get(&old).is_some_and(|e| e.pending);
             if pending {
                 if let Some(entry) = self.txs.get_mut(&old) {
                     entry.in_order = false;
                 }
-            } else {
-                self.txs.remove(&old);
+            } else if let Some(entry) = self.txs.remove(&old) {
+                forgot_waiting |= entry.queued;
             }
         }
+        if compact && forgot_waiting {
+            let txs = &self.txs;
+            self.waiting.retain(|t| txs.contains_key(t));
+        }
+        shrink_ring(&mut self.tx_order);
+        shrink_ring(&mut self.waiting);
     }
 
     /// Put a transaction in the line to be asked for, at the front when it
@@ -1867,9 +1899,14 @@ impl Manager {
             return;
         };
         if !entry.in_order {
+            // NR-54: past its window it is forgotten at once.
+            if entry.first_seen.saturating_add(TXID_KEEP_SECS) <= self.now {
+                self.txs.remove(txid);
+                return;
+            }
             entry.in_order = true;
             self.tx_order.push_back(*txid);
-            self.trim_tx_order();
+            self.trim_tx_order(false);
         }
     }
 
@@ -1986,6 +2023,13 @@ impl Manager {
         };
         self.return_to_order(&txid);
         out.push(Output::Sighting { tx: bytes, from });
+    }
+}
+
+/// Give back the room of a ring that holds far less than it once did.
+fn shrink_ring<T>(ring: &mut VecDeque<T>) {
+    if ring.capacity() > ring.len().max(1024).saturating_mul(4) {
+        ring.shrink_to(ring.len().saturating_mul(2));
     }
 }
 

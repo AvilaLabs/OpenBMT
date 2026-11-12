@@ -271,6 +271,23 @@ fn a_sighting_counts_once_for_every_peer_it_came_from() {
 }
 
 #[test]
+fn nr_54_a_transaction_offered_again_as_a_sighting_from_counted_groups_changes_nothing() {
+    let dir = Scratch::new();
+    let (mut rig, pay) = rig_with_a_sale(&dir);
+    let from = vec![peer(20), peer(21), peer(22)];
+    rig.feed(vec![sighting(&pay, from.clone())]);
+    let before = rig.node.judge(0).unwrap();
+    // The network crate forgot the ID and fetched the transaction again: the
+    // same groups report it once more, alone and together.
+    assert!(rig.feed(vec![sighting(&pay, from)]).is_empty());
+    assert!(rig.feed(vec![sighting(&pay, vec![peer(21)])]).is_empty());
+    let after = rig.node.judge(0).unwrap();
+    assert_eq!(format!("{before:?}"), format!("{after:?}"));
+    assert_eq!(after.received_sats, 5_000);
+    assert!(after.reports.is_empty());
+}
+
+#[test]
 fn the_transaction_cache_holds_the_last_256() {
     let dir = Scratch::new();
     let (mut rig, _) = rig_with_a_sale(&dir);

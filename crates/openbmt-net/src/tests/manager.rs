@@ -1634,18 +1634,17 @@ fn nr_52_while_fetching_is_off_announcements_are_remembered_and_nothing_is_asked
 }
 
 #[test]
-fn nr_54_only_the_last_100000_announced_ids_are_remembered() {
+fn nr_54_only_the_last_20000_announced_ids_are_remembered() {
     let mut n = Net::new();
     let a = n.up(1);
     n.m.set_fetch_transactions(false);
-    for k in 0..2u64 {
-        let ids: Vec<Txid> = (k * 50_000..(k + 1) * 50_000).map(fake_txid).collect();
-        n.inv_txs(a, &ids);
+    let ids: Vec<Txid> = (0..20_001u64).map(fake_txid).collect();
+    for chunk in ids.chunks(5_000) {
+        n.inv_txs(a, chunk);
     }
-    n.inv_txs(a, &[fake_txid(100_000)]);
     let sizes = n.m.sizes();
-    assert_eq!(sizes.txs, 100_000);
-    assert_eq!(sizes.tx_order, 100_000);
+    assert_eq!(sizes.txs, 20_000);
+    assert_eq!(sizes.tx_order, 20_000);
     // Turned on, the first 1,000 that are remembered are asked of the one
     // peer: the oldest, number 0, is forgotten.
     n.m.set_fetch_transactions(true);
@@ -1654,6 +1653,127 @@ fn nr_54_only_the_last_100000_announced_ids_are_remembered() {
     assert_eq!(asked[0], fake_txid(1));
     assert_eq!(asked[999], fake_txid(1_000));
     assert!(!asked.contains(&fake_txid(0)));
+}
+
+#[test]
+fn nr_54_an_id_is_forgotten_thirty_minutes_after_its_first_announcement() {
+    let mut n = Net::new();
+    let a = n.up(1);
+    n.m.set_fetch_transactions(false);
+    let t0 = n.now;
+    n.inv_txs(a, &[fake_txid(1), fake_txid(2)]);
+    n.tick(1_798 - (n.now - t0));
+    assert_eq!(n.m.sizes().txs, 2);
+    n.tick(1);
+    assert_eq!(n.now - t0, 1_799);
+    assert_eq!(n.m.sizes().txs, 2);
+    assert_eq!(n.m.sizes().waiting, 2);
+    n.tick(1);
+    assert_eq!(n.now - t0, 1_800);
+    let sizes = n.m.sizes();
+    assert_eq!((sizes.txs, sizes.tx_order, sizes.waiting), (0, 0, 0));
+}
+
+#[test]
+fn nr_54_the_table_empties_by_ticks_alone() {
+    let mut n = Net::new();
+    let a = n.up(1);
+    n.m.set_fetch_transactions(false);
+    for k in 0..10u64 {
+        let ids: Vec<Txid> = (k * 100..(k + 1) * 100).map(fake_txid).collect();
+        n.inv_txs(a, &ids);
+        n.tick(100);
+    }
+    assert!(n.m.sizes().txs > 0);
+    for _ in 0..40 {
+        n.tick(60);
+    }
+    let sizes = n.m.sizes();
+    assert_eq!((sizes.txs, sizes.tx_order, sizes.waiting), (0, 0, 0));
+}
+
+#[test]
+fn nr_54_an_id_with_a_request_out_past_the_window_stays_until_the_answer() {
+    let (mut n, a, b, _c) = three_peers();
+    n.m.set_fetch_transactions(false);
+    let tx = pay(&script(1), 1_000, 1);
+    let txid = tx.compute_txid();
+    n.inv_txs(a, &[txid]);
+    n.inv_txs(b, &[txid]);
+    n.tick(1_790);
+    n.m.set_fetch_transactions(true);
+    assert_eq!(tx_requests(&n.sent(a)), vec![txid]);
+    // Past the window with the request out: it leaves the order, not the
+    // table.
+    n.tick(10);
+    let sizes = n.m.sizes();
+    assert_eq!((sizes.txs, sizes.tx_order, sizes.pending_tx), (1, 0, 1));
+    // The answer is handed on, and the ID is gone.
+    let out = n.tx(a, &tx);
+    assert!(matches!(out[..], [Output::Sighting { .. }]), "{out:?}");
+    assert_eq!(n.m.sizes().txs, 0);
+}
+
+#[test]
+fn nr_54_an_id_whose_request_gives_up_past_the_window_is_gone_and_not_asked_again() {
+    let (mut n, a, b, _c) = three_peers();
+    n.m.set_fetch_transactions(false);
+    let txid = pay(&script(1), 1_000, 1).compute_txid();
+    n.inv_txs(a, &[txid]);
+    n.inv_txs(b, &[txid]);
+    n.tick(1_790);
+    n.m.set_fetch_transactions(true);
+    assert_eq!(tx_requests(&n.sent(a)), vec![txid]);
+    n.tick(10);
+    assert_eq!(n.m.sizes().txs, 1);
+    // The 30 seconds end: the second announcer is not tried.
+    n.tick(20);
+    let sizes = n.m.sizes();
+    assert_eq!((sizes.txs, sizes.tx_order, sizes.waiting), (0, 0, 0));
+    assert!(tx_requests(&n.sent(b)).is_empty());
+    n.tick(100);
+    assert!(tx_requests(&n.sent(b)).is_empty());
+}
+
+#[test]
+fn nr_54_an_id_announced_again_after_it_is_forgotten_is_fetched_again() {
+    let (mut n, a, b, _c) = three_peers();
+    let tx = pay(&script(1), 1_000, 1);
+    let txid = tx.compute_txid();
+    n.inv_txs(a, &[txid]);
+    n.sent(a);
+    let out = n.tx(a, &tx);
+    assert!(matches!(out[..], [Output::Sighting { .. }]), "{out:?}");
+    n.tick(1_800);
+    assert_eq!(n.m.sizes().txs, 0);
+    n.inv_txs(b, &[txid]);
+    assert_eq!(tx_requests(&n.sent(b)), vec![txid]);
+    let out = n.tx(b, &tx);
+    let Output::Sighting { from, .. } = &out[0] else {
+        panic!("{out:?}");
+    };
+    assert_eq!(from, &vec![addr(2)]);
+}
+
+#[test]
+fn nr_54_the_rings_give_back_room_after_the_ids_are_forgotten() {
+    let mut n = Net::new();
+    let a = n.up(1);
+    n.m.set_fetch_transactions(false);
+    let ids: Vec<Txid> = (0..20_000u64).map(fake_txid).collect();
+    for chunk in ids.chunks(5_000) {
+        n.inv_txs(a, chunk);
+    }
+    let sizes = n.m.sizes();
+    assert_eq!((sizes.tx_order, sizes.waiting), (20_000, 20_000));
+    assert!(sizes.tx_order_capacity >= 20_000);
+    for _ in 0..31 {
+        n.tick(60);
+    }
+    let sizes = n.m.sizes();
+    assert_eq!((sizes.txs, sizes.tx_order, sizes.waiting), (0, 0, 0));
+    assert!(sizes.tx_order_capacity <= 4 * 1024, "{sizes:?}");
+    assert!(sizes.waiting_capacity <= 4 * 1024, "{sizes:?}");
 }
 
 #[test]
@@ -1827,10 +1947,10 @@ fn nr_54_a_peer_that_announces_a_million_transactions_leaves_every_collection_bo
         let ids: Vec<Txid> = (k * 50_000..(k + 1) * 50_000).map(fake_txid).collect();
         n.inv_txs(a, &ids);
         let sizes = n.m.sizes();
-        assert!(sizes.tx_order <= 100_000, "{sizes:?}");
-        assert!(sizes.waiting <= 100_000, "{sizes:?}");
+        assert!(sizes.tx_order <= 20_000, "{sizes:?}");
+        assert!(sizes.waiting <= 20_000, "{sizes:?}");
         assert!(sizes.pending_tx <= 1_000, "{sizes:?}");
-        assert!(sizes.txs <= 105_000, "{sizes:?}");
+        assert!(sizes.txs <= 21_000, "{sizes:?}");
     }
     let sent = n.m.outgoing(a);
     assert!(sent.len() <= MAX_OUTGOING_BYTES);
