@@ -1,4 +1,4 @@
-# Key maker rules: coin flips to a wallet, offline
+# Key maker rules: coin flips or die rolls to a wallet, offline
 
 Status: implemented. The core is `tools/keymaker/src/core.js`, the QR encoder
 `src/qr.js`, the page `src/page.js` with `src/words.js`, and the bundler
@@ -9,30 +9,37 @@ computer. Each rule has an ID so
 that a test can name the rule it proves (`km_NN_...`, in
 `tools/keymaker/test/`, run with `npm test` inside `tools/keymaker/`). The
 rules serve the key maker design:
-the owner makes the wallet's words from their own coin flips, offline, and
-Electrum must show the same wallet before the shop goes live.
+the owner makes the wallet's words from their own coin flips or die rolls,
+offline, and Electrum must show the same wallet before the shop goes live.
+Both methods are skew-corrected, as the bitcoin purist reference this project
+follows requires, and follow its articles step for step so that a person can
+get the same words by hand.
 
-The core turns flips into words and words into the public description of a
-wallet. It has no screen, no storage and no network, and it has no source of
-chance: the only bits that enter are the flips the owner passes in.
+The core turns flips or rolls into words and words into the public
+description of a wallet. It has no screen, no storage and no network, and it
+has no source of chance: the only values that enter are the flips or rolls
+the owner passes in.
 
 **First build. No independent security audit has been done. Not for real
 funds.**
 
 ## 1. What is fixed
 
-- **KM-01. The fixed choices.** There are 128 flips, 12 BIP39 English words,
-  no passphrase, native SegWit with a single key (BIP84), the account
-  `m/84'/0'/0'` and real bitcoin only. Nothing chooses between options.
-- **KM-02. The order of the flips.** A flip is 1 for heads and 0 for tails.
-  The first flip is the most significant bit of the first byte, and the
-  flips fill 16 bytes of entropy in that order.
+- **KM-01. The fixed choices.** There are 128 kept bits (from a coin) or 50
+  values (from a die), 12 BIP39 English words, no passphrase, native SegWit
+  with a single key (BIP84), the account `m/84'/0'/0'` and real bitcoin only.
+  Nothing chooses between options but coin or die.
+- **KM-02. The order of the bits.** The 128 kept bits of a coin run fill 16
+  bytes of entropy, the first kept bit the most significant bit of the first
+  byte. (The page holds a raw flip as 1 for heads and 0 for tails; the bits
+  are made from the flips by KM-29.)
 - **KM-03. No source of chance.** Nothing in `src/` asks for random bytes,
   reads the clock or calls the platform's crypto object. The wallet is a
   function of the flips alone.
-- **KM-04. Wrong flips are refused.** Anything other than exactly 128 values,
-  each the number 1 or the number 0, is refused with `KM-04`, as is entropy
-  that is not 16 bytes. No value is converted or padded.
+- **KM-04. Wrong bits are refused.** Anything other than exactly 128 values,
+  each the number 1 or the number 0, is refused with `KM-04` when turned into
+  entropy, as is entropy that is not 16 bytes. No value is converted or
+  padded.
 - **KM-05. No network.** Nothing in `src/` fetches, opens a socket, loads a
   module from a URL or by a computed name, or names a web address. The same
   holds for the built file, libraries included: no `fetch(`,
@@ -48,7 +55,7 @@ funds.**
   and three descriptors: `wpkh([fp/84h/0h/0h]xpub/<0;1>/*)` and the two
   single-path forms ending `/0/*` and `/1/*`, each with its checksum.
 - **KM-07. The working.** For "Check it by hand" the core gives eleven groups
-  of 11 flips with each group's number and word, then the last 7 flips with
+  of 11 bits with each group's number and word, then the last 7 bits with
   the 4 check bits (the first 4 bits of the SHA-256 of the entropy), their
   number and their word. The twelve words so found equal the wallet's words,
   or the working is refused with `KM-07`.
@@ -72,7 +79,8 @@ funds.**
   private, along their chains.
 - **KM-13. BIP84.** The BIP84 mnemonic gives the published account key (as a
   plain `xpub`), root key and first receive address.
-- **KM-14. Electrum.** For 20 fixed flip strings (`test/electrum/flips.txt`),
+- **KM-14. Electrum.** For 20 fixed 128-bit strings (`test/electrum/flips.txt`,
+  also given as coin flips through the pair rule),
   the words, fingerprint, `xpub` and first receive address equal what the
   library of Electrum 4.8.4 prints (`test/electrum/expected.txt`).
   `test/electrum/crosscheck.sh` runs that Electrum again, without a network,
@@ -211,3 +219,47 @@ commit with a fixed environment and writes
   `scripts/keymaker-release.sh <version>`, and compare the new `SHA256SUMS`
   and page with the published ones, then verify the signature on the
   published `SHA256SUMS`.
+
+## 9. Coin or die, skew-corrected
+
+- **KM-29. The coin: pairs.** Flips are taken in pairs from the start. Heads
+  then tails is the bit 0, tails then heads is the bit 1, and heads-heads and
+  tails-tails are dropped. A flip with no partner yet gives nothing. The first
+  128 kept bits are the entropy (KM-02). A flip that is not 1 or 0 is refused
+  with `KM-29`. The core is `flipsToBits`; the walkthrough bits of the
+  reference give the check bits `1000` and the words `spatial elder easily
+  tool voice hungry eyebrow sniff hidden never ball weekend`, from a flip list
+  with dropped pairs mixed in.
+- **KM-30. The die: order of three.** Rolls 1 to 6 are taken in threes from
+  the start. Three different numbers give a value by the order of low (L),
+  middle (M) and high (H) as they came: LMH is 1, LHM 2, MHL 3, HML 4, HLM 5,
+  MLH 6. A three with any number repeated is dropped, and a last open three
+  gives nothing. A roll outside 1 to 6 is refused with `KM-30`. The core is
+  `rollsToValues`; the 50 triplets of the reference give its 50 values.
+- **KM-31. The die: the hash.** 50 values make a string of 50 ASCII digits.
+  The entropy is the first 16 bytes of the SHA-256 of that string, with no
+  newline. Any other number of values, or a value outside 1 to 6, is refused
+  with `KM-31`. The reference's worked example gives the hash
+  `375b26bdb3e85c176decb8e3988606254f9b9cabf8dbab080d3badf394faf90f` and the
+  words `dance summer quarter guitar magic arm response novel toe service
+  light enough`.
+- **KM-32. Undo.** Undo removes the last flip or roll, including one in a pair
+  or three still open, and takes away the bit or value that pair or three
+  had formed. The count of kept bits or values and the count of flips or rolls
+  made both follow.
+- **KM-33. The choice.** After Start for real and after Rehearse first the
+  page shows the choice of coin or die, then the screen of that method, then
+  the steps of KM-15 onward. The coin screen has Heads and Tails buttons and
+  the keys H and T; the die screen has six buttons 1 to 6 and the keys 1 to 6.
+  Each shows the kept bits or values out of their total and the flips or rolls
+  made. In a rehearsal the fill makes made-up results of the chosen kind from
+  a chain of SHA-256 hashes (KM-17); outside a rehearsal it is not offered.
+  Clear and close (KM-21) also overwrites the flips, rolls, bits, values and
+  digit string.
+- **KM-34. Check it by hand.** The coin run shows its bits in groups of 11
+  with numbers and words (KM-07) and a selectable monospace line
+  `printf '%s' '<128 bits>' | basenc --base2msbf --decode | sha256sum`, whose
+  first hex character is the 4 check bits. The die run shows its 50 digits as
+  one line, the line `echo -n "<50 digits>" | sha256sum`, the first 32 hex
+  characters of its answer, and then the same groups of 11. A test runs both
+  lines in a shell and compares.

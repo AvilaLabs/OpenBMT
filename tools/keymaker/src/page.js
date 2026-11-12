@@ -4,7 +4,18 @@
 // no windows, no timers.
 
 import { sha256 } from '@noble/hashes/sha2.js';
-import { FLIP_COUNT, flipsToEntropy, fromFlips } from './core.js';
+import {
+  DIE_VALUE_COUNT,
+  FLIP_COUNT,
+  coinCheckCommand,
+  dieCheckCommand,
+  flipsToBits,
+  flipsToEntropy,
+  fromDie,
+  fromFlips,
+  rollsToValues,
+  valuesToEntropy,
+} from './core.js';
 import { darkRuns, encodeBytes } from './qr.js';
 import { WORDS } from './words.js';
 
@@ -18,7 +29,9 @@ const CHECK_COUNT = 3;
 // The screens and the step number each one shows.
 const STEP = Object.freeze({
   start: 0,
+  method: 2,
   flip: 2,
+  die: 2,
   write: 3,
   check: 4,
   phone: 5,
@@ -49,21 +62,46 @@ export function checkPositions(entropy) {
   return out.sort((a, b) => a - b);
 }
 
+/** The bits of a chain of SHA-256 hashes, seeded by what is already made. */
+function* chainBytes(have) {
+  let block = sha256(Uint8Array.from(have));
+  for (;;) {
+    yield* block;
+    block = sha256(block);
+  }
+}
+
 /**
- * Made-up flips for the rehearsal: the flips so far, then bits taken from a
- * chain of SHA-256 hashes of them. The same input always gives the same bits.
+ * Made-up flips for the rehearsal: the flips so far, then flips taken from a
+ * chain of SHA-256 hashes of them, until 128 bits are kept by the pair rule.
+ * The same input always gives the same flips.
  */
 export function madeUpFlips(have) {
   const out = have.slice();
-  let block = sha256(Uint8Array.from(have));
-  let i = 0;
-  while (out.length < FLIP_COUNT) {
-    out.push((block[i >> 3] >> (7 - (i & 7))) & 1);
-    i++;
-    if (i === 256) {
-      block = sha256(block);
-      i = 0;
+  let kept = flipsToBits(out).length;
+  for (const byte of chainBytes(have)) {
+    for (let i = 7; i >= 0 && kept < FLIP_COUNT; i--) {
+      out.push((byte >> i) & 1);
+      if (out.length % 2 === 0 && out[out.length - 2] !== out[out.length - 1]) kept++;
     }
+    if (kept >= FLIP_COUNT) break;
+  }
+  return out;
+}
+
+/**
+ * Made-up rolls for the rehearsal: the rolls so far, then rolls from a chain
+ * of SHA-256 hashes of them (bytes below 252, modulo 6, plus 1), until 50
+ * values are made by the order-of-three rule.
+ */
+export function madeUpRolls(have) {
+  const out = have.slice();
+  let made = rollsToValues(out).length;
+  for (const byte of chainBytes(have)) {
+    if (made >= DIE_VALUE_COUNT) break;
+    if (byte >= 252) continue;
+    out.push((byte % 6) + 1);
+    if (out.length % 3 === 0 && new Set(out.slice(-3)).size === 3) made++;
   }
   return out;
 }
@@ -76,8 +114,12 @@ export function cardPrefix(word) {
 /** Overwrites what the page holds about a run, as far as it can. */
 function wipeState(s) {
   if (!s) return;
-  s.flips.fill(0);
-  s.flips.length = 0;
+  for (const list of [s.flips, s.rolls, s.bits, s.values]) {
+    if (!list) continue;
+    list.fill(0);
+    list.length = 0;
+  }
+  s.digits = '';
   if (s.entropy) s.entropy.fill(0);
   if (s.wordList) {
     s.wordList.fill('');
@@ -103,6 +145,13 @@ function wipeState(s) {
     w.last.checkBits = '';
     w.last.word = '';
     w.entropyHex = '';
+    w.bits = '';
+    if (s.result.die) {
+      s.result.die.values.fill(0);
+      s.result.die.values.length = 0;
+      s.result.die.digits = '';
+      s.result.die.hash = '';
+    }
     for (const k of Object.keys(s.result.wallet)) s.result.wallet[k] = '';
     s.result.words = '';
     s.result = null;
@@ -112,8 +161,13 @@ function wipeState(s) {
 function newState(rehearsal) {
   return {
     rehearsal,
-    screen: 'flip',
+    screen: 'method',
+    method: null,
     flips: [],
+    rolls: [],
+    bits: [],
+    values: [],
+    digits: '',
     entropy: null,
     wordList: null,
     result: null,
@@ -175,8 +229,12 @@ export function start(doc) {
     switch (screen) {
       case 'start':
         return WORDS.title;
+      case 'method':
+        return WORDS.methodHeading;
       case 'flip':
         return WORDS.flipHeading;
+      case 'die':
+        return WORDS.dieHeading;
       case 'write':
         return WORDS.writeHeading;
       case 'check':
@@ -199,8 +257,12 @@ export function start(doc) {
   function render() {
     try {
       switch (state ? state.screen : 'start') {
+        case 'method':
+          return renderMethod();
         case 'flip':
           return renderFlip();
+        case 'die':
+          return renderDie();
         case 'write':
           return renderWrite();
         case 'check':
@@ -254,13 +316,62 @@ export function start(doc) {
   function begin(rehearsal) {
     wipeState(state);
     state = newState(rehearsal);
-    go('flip');
+    go('method');
   }
 
-  // Step 2
+  // Step 2: coin or die
+  function renderMethod() {
+    frame(
+      'method',
+      el('p', 'lead', text(WORDS.methodText)),
+      el(
+        'div',
+        'choice',
+        button(WORDS.methodCoin, () => choose('coin')),
+        el('p', 'note', text(WORDS.methodCoinNote)),
+      ),
+      el(
+        'div',
+        'choice',
+        button(WORDS.methodDie, () => choose('die'), 'big alt'),
+        el('p', 'note', text(WORDS.methodDieNote)),
+      ),
+    );
+  }
+
+  function choose(method) {
+    state.method = method;
+    go(method === 'coin' ? 'flip' : 'die');
+  }
+
+  /** Replaces a held list, overwriting the old one first. */
+  function replaceList(key, next) {
+    const old = state[key];
+    old.fill(0);
+    old.length = 0;
+    state[key] = next;
+  }
+
+  function cellGrid(total) {
+    const grid = el('div', 'grid');
+    const cells = [];
+    for (let i = 0; i < total; i++) {
+      const c = el('span', 'cell');
+      cells.push(c);
+      grid.append(c);
+    }
+    return { grid, cells };
+  }
+
+  // Step 2: the coin
+  function setFlips(flips) {
+    replaceList('flips', flips);
+    replaceList('bits', flipsToBits(flips));
+  }
+
   function addFlip(v) {
-    if (!state || state.screen !== 'flip' || state.flips.length >= FLIP_COUNT) return;
-    state.flips.push(v);
+    if (!state || state.screen !== 'flip' || state.bits.length >= FLIP_COUNT) return;
+    setFlips([...state.flips, v]);
     updateFlip();
   }
 
@@ -269,16 +380,11 @@ export function start(doc) {
     const tails = button(WORDS.tails, () => addFlip(0), 'big flipbtn');
     const count = el('div', 'count');
     count.setAttribute('aria-live', 'polite');
-    const grid = el('div', 'grid');
-    const cells = [];
-    for (let i = 0; i < FLIP_COUNT; i++) {
-      const c = el('span', 'cell');
-      cells.push(c);
-      grid.append(c);
-    }
+    const made = el('div', 'note');
+    const { grid, cells } = cellGrid(FLIP_COUNT);
     const undo = button(WORDS.undo, () => {
       if (state.flips.length > 0) {
-        state.flips.pop();
+        setFlips(state.flips.slice(0, -1));
         updateFlip();
       }
     }, 'small');
@@ -290,7 +396,7 @@ export function start(doc) {
     if (state.rehearsal) {
       extras.push(
         button(WORDS.rehearsalFill, () => {
-          state.flips = madeUpFlips(state.flips);
+          setFlips(madeUpFlips(state.flips));
           updateFlip();
         }, 'small'),
       );
@@ -298,30 +404,107 @@ export function start(doc) {
     frame(
       'flip',
       el('p', 'lead', text(WORDS.flipText)),
+      el('p', 'note', text(WORDS.flipPairs)),
       pad,
       count,
+      made,
       grid,
       el('div', 'row', undo, ...extras),
       el('p', 'note', text(WORDS.flipMistake)),
       done,
     );
-    live = { heads, tails, count, cells, undo, done, next, pad };
+    live = { heads, tails, count, made, cells, undo, done, next, pad };
     updateFlip();
   }
 
   function updateFlip() {
     if (!live) return;
-    const n = state.flips.length;
+    const n = state.bits.length;
     const full = n >= FLIP_COUNT;
     live.count.replaceChildren(text(fill(WORDS.flipCount, { n, total: FLIP_COUNT })));
+    live.made.replaceChildren(text(fill(WORDS.flipsMade, { n: state.flips.length })));
     live.cells.forEach((c, i) => {
-      const f = state.flips[i];
-      c.replaceChildren(f === undefined ? text('') : text((f === 1 ? WORDS.heads : WORDS.tails)[0]));
-      c.setAttribute('class', f === undefined ? 'cell' : f === 1 ? 'cell h' : 'cell t');
+      const b = state.bits[i];
+      c.replaceChildren(text(b === undefined ? '' : String(b)));
+      c.setAttribute('class', b === undefined ? 'cell' : b === 1 ? 'cell h' : 'cell t');
     });
     live.heads.disabled = full;
     live.tails.disabled = full;
-    live.undo.disabled = n === 0;
+    live.undo.disabled = state.flips.length === 0;
+    live.done.hidden = !full;
+    live.pad.hidden = full;
+    if (full) live.next.focus();
+  }
+
+  // Step 2: the die
+  function setRolls(rolls) {
+    replaceList('rolls', rolls);
+    replaceList('values', rollsToValues(rolls));
+  }
+
+  function addRoll(v) {
+    if (!state || state.screen !== 'die' || state.values.length >= DIE_VALUE_COUNT) return;
+    setRolls([...state.rolls, v]);
+    updateDie();
+  }
+
+  function renderDie() {
+    const buttons = [1, 2, 3, 4, 5, 6].map((n) =>
+      button(String(n), () => addRoll(n), 'big flipbtn'),
+    );
+    const count = el('div', 'count');
+    count.setAttribute('aria-live', 'polite');
+    const made = el('div', 'note');
+    const { grid, cells } = cellGrid(DIE_VALUE_COUNT);
+    const undo = button(WORDS.dieUndo, () => {
+      if (state.rolls.length > 0) {
+        setRolls(state.rolls.slice(0, -1));
+        updateDie();
+      }
+    }, 'small');
+    const done = el('div', 'done');
+    const next = button(WORDS.next, () => toWrite());
+    done.append(el('p', 'strong', text(WORDS.dieDone)), next);
+    const pad = el('div', 'pad', ...buttons);
+    const extras = [];
+    if (state.rehearsal) {
+      extras.push(
+        button(WORDS.rehearsalFill, () => {
+          setRolls(madeUpRolls(state.rolls));
+          updateDie();
+        }, 'small'),
+      );
+    }
+    frame(
+      'die',
+      el('p', 'lead', text(WORDS.dieText)),
+      el('p', 'note', text(WORDS.dieTriples)),
+      el('p', 'note', text(WORDS.dieOrders)),
+      pad,
+      count,
+      made,
+      grid,
+      el('div', 'row', undo, ...extras),
+      el('p', 'note', text(WORDS.dieMistake)),
+      done,
+    );
+    live = { buttons, count, made, cells, undo, done, next, pad };
+    updateDie();
+  }
+
+  function updateDie() {
+    if (!live) return;
+    const n = state.values.length;
+    const full = n >= DIE_VALUE_COUNT;
+    live.count.replaceChildren(text(fill(WORDS.dieCount, { n, total: DIE_VALUE_COUNT })));
+    live.made.replaceChildren(text(fill(WORDS.dieRollsMade, { n: state.rolls.length })));
+    live.cells.forEach((c, i) => {
+      const v = state.values[i];
+      c.replaceChildren(text(v === undefined ? '' : String(v)));
+      c.setAttribute('class', v === undefined ? 'cell' : 'cell h');
+    });
+    for (const b of live.buttons) b.disabled = full;
+    live.undo.disabled = state.rolls.length === 0;
     live.done.hidden = !full;
     live.pad.hidden = full;
     if (full) live.next.focus();
@@ -329,9 +512,14 @@ export function start(doc) {
 
   // Step 3
   function toWrite() {
-    const flips = state.flips;
-    state.entropy = flipsToEntropy(flips);
-    state.result = fromFlips(flips);
+    if (state.method === 'die') {
+      state.entropy = valuesToEntropy(state.values);
+      state.result = fromDie(state.rolls);
+      state.digits = state.result.die.digits;
+    } else {
+      state.entropy = flipsToEntropy(state.bits);
+      state.result = fromFlips(state.bits);
+    }
     state.wordList = state.result.words.split(' ');
     state.positions = checkPositions(state.entropy);
     go('write');
@@ -387,12 +575,26 @@ export function start(doc) {
 
   function renderWrite() {
     const details = el('details', 'hand');
-    details.append(
-      el('summary', '', text(WORDS.handHeading)),
-      el('p', '', text(WORDS.handText)),
-      workingTable(),
-      el('p', '', text(WORDS.handLast)),
-    );
+    details.append(el('summary', '', text(WORDS.handHeading)));
+    if (state.method === 'die') {
+      const die = state.result.die;
+      details.append(
+        el('p', '', text(WORDS.handDieText)),
+        el('div', 'label', text(WORDS.handDieValues)),
+        el('pre', 'cmd', text(die.digits)),
+        el('p', '', text(WORDS.handDieCommand)),
+        el('pre', 'cmd', text(dieCheckCommand(die.values))),
+        el('div', 'label', text(WORDS.handDieHash)),
+        el('pre', 'cmd', text(die.hash)),
+      );
+    }
+    details.append(el('p', '', text(WORDS.handText)), workingTable(), el('p', '', text(WORDS.handLast)));
+    if (state.method !== 'die') {
+      details.append(
+        el('p', '', text(WORDS.handCheckCommand)),
+        el('pre', 'cmd', text(coinCheckCommand(state.bits))),
+      );
+    }
     frame(
       'write',
       el('p', 'lead', text(WORDS.writeText)),
@@ -595,11 +797,15 @@ export function start(doc) {
   }
 
   onKey = (e) => {
-    if (!state || state.screen !== 'flip' || e.repeat) return;
+    if (!state || e.repeat) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
-    if (k === 'h') addFlip(1);
-    else if (k === 't') addFlip(0);
+    if (state.screen === 'flip') {
+      if (k === 'h') addFlip(1);
+      else if (k === 't') addFlip(0);
+    } else if (state.screen === 'die' && k.length === 1 && k >= '1' && k <= '6') {
+      addRoll(Number(k));
+    }
   };
   doc.addEventListener('keydown', onKey);
   if (inert) inert.hidden = true;

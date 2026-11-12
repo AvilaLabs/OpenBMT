@@ -1,14 +1,24 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import {
   ACCOUNT_PATH,
   arithmetic,
   checkDescriptor,
+  coinCheckCommand,
   descriptorChecksum,
+  dieCheckCommand,
+  entropyToBits,
   entropyToWords,
+  flipsToBits,
   flipsToEntropy,
+  fromCoin,
+  fromDie,
   fromFlips,
+  rollsToValues,
+  valuesToDigits,
+  valuesToEntropy,
   wordsToWallet,
 } from '../src/core.js';
 
@@ -28,7 +38,7 @@ test('km_01 fixed choices: 12 English words, no passphrase, BIP84 account', () =
   assert.equal(r.wallet.address.startsWith('bc1q'), true);
 });
 
-test('km_02 flips: heads is 1, first flip is the most significant bit', () => {
+test('km_02 bits: the first kept bit is the most significant bit of the first byte', () => {
   const heads = new Array(128).fill(0);
   heads[0] = 1;
   assert.equal(flipsToEntropy(heads)[0], 0x80);
@@ -75,6 +85,7 @@ test('km_04 wrong flips are refused', () => {
   refuse(seedFlips.map((f, i) => (i === 5 ? null : f)));
   refuse('1'.repeat(128));
   refuse(undefined);
+  assert.throws(() => flipsToEntropy([...seedFlips.slice(1), 2]), /KM-04/);
   assert.throws(() => entropyToWords(new Uint8Array(15)), /KM-04/);
   assert.throws(() => entropyToWords(new Uint8Array(32)), /KM-04/);
   assert.throws(() => entropyToWords([...new Uint8Array(16)]), /KM-04/);
@@ -146,4 +157,124 @@ test('km_08 descriptors carry correct checksums', () => {
 test('km_09 characters outside the descriptor set are refused', () => {
   assert.throws(() => descriptorChecksum('raw(Ü)'), /KM-09/);
   assert.throws(() => descriptorChecksum('wpkh(€)'), /KM-09/);
+});
+
+// The pair rule: heads then tails is 0, tails then heads is 1, two the same
+// are dropped (heads is 1 and tails is 0 in the list the page holds).
+const H = 1;
+const T = 0;
+
+/** A flip list that gives `bits` through the pair rule, with dropped pairs mixed in. */
+function pairFlips(bits) {
+  const out = [];
+  bits.forEach((b, i) => {
+    if (i % 3 === 0) out.push(H, H);
+    if (i % 5 === 1) out.push(T, T);
+    out.push(...(b === 0 ? [H, T] : [T, H]));
+  });
+  out.push(T, T);
+  return out;
+}
+
+test('km_29 the pair rule: heads-tails is 0, tails-heads is 1, equal pairs are dropped', () => {
+  assert.deepEqual(flipsToBits([H, T]), [0]);
+  assert.deepEqual(flipsToBits([T, H]), [1]);
+  assert.deepEqual(flipsToBits([H, H, T, T]), []);
+  assert.deepEqual(flipsToBits([H, T, H, H, T, H, T, T, T, H]), [0, 1, 1]);
+  // An odd flip waits for its partner.
+  assert.deepEqual(flipsToBits([H, T, H]), [0]);
+  assert.deepEqual(flipsToBits([H, T, H, H]), [0]);
+  assert.deepEqual(flipsToBits([H, T, H, T]), [0, 0]);
+  // The pairs start at the first flip, not after a dropped pair.
+  assert.deepEqual(flipsToBits([H, H, H, T]), [0]);
+  assert.throws(() => flipsToBits([1, 2]), /KM-29/);
+  assert.throws(() => flipsToBits('10'), /KM-29/);
+});
+
+test('km_29 the reference walkthrough: the bits give check bits 1000 and the twelve words', () => {
+  const bits = [...'11010000100010001110100100010110011100100101111101010110110111101001010001010110011010110110101101110010101000000100011111111100'].map(Number);
+  assert.equal(bits.length, 128);
+  const flips = pairFlips(bits);
+  assert.ok(flips.length > 256);
+  assert.deepEqual(flipsToBits(flips), bits);
+  const r = fromCoin(flips);
+  assert.equal(r.working.last.checkBits, '1000');
+  assert.equal(r.words, 'spatial elder easily tool voice hungry eyebrow sniff hidden never ball weekend');
+  // The same words from the bits directly.
+  assert.equal(fromFlips(bits).words, r.words);
+});
+
+const triplets =
+  '136 235 425 512 124 432 523 456 456 652 532 431 651 643 314 361 145 162 145 265 365 641 143 532 531 541 146 614 461 364 126 324 256 216 214 231 126 325 524 541 265 326 436 416 634 631 461 245 356 352';
+const tripletValues =
+  '1 1 6 5 1 4 5 1 1 4 4 4 4 4 6 3 1 2 1 2 2 4 2 4 4 4 1 5 3 2 1 6 1 6 6 3 1 6 5 4 2 6 6 6 5 4 3 1 1 3';
+
+test('km_30 the order of three: each value follows the order of low, middle and high', () => {
+  const rolls = [...triplets.replaceAll(' ', '')].map(Number);
+  const values = rollsToValues(rolls);
+  assert.equal(values.join(' '), tripletValues);
+  // Every one of the six orders, by hand.
+  const table = { 123: 1, 132: 2, 231: 3, 321: 4, 312: 5, 213: 6 };
+  for (const [t, v] of Object.entries(table)) {
+    assert.deepEqual(rollsToValues([...t].map(Number)), [v], t);
+    assert.deepEqual(rollsToValues([...t].map((d) => Number(d) + (Number(d) < 4 ? 2 : 0))), [v], t);
+  }
+  // The small example: the three with a repeat is dropped.
+  const small = '123 463 244 152 236 654 411 614 614 336';
+  assert.deepEqual(rollsToValues([...small.replaceAll(' ', '')].map(Number)), [1, 3, 2, 1, 4, 5, 5]);
+  // A repeat anywhere in a three drops it; an open three gives nothing.
+  assert.deepEqual(rollsToValues([1, 1, 2, 2, 3, 3, 3, 3, 3]), []);
+  assert.deepEqual(rollsToValues([1, 2, 3, 4, 5]), [1]);
+  assert.throws(() => rollsToValues([1, 2, 7]), /KM-30/);
+  assert.throws(() => rollsToValues([0, 2, 3]), /KM-30/);
+  assert.throws(() => rollsToValues([1.5, 2, 3]), /KM-30/);
+  assert.throws(() => rollsToValues('123'), /KM-30/);
+});
+
+test('km_31 the die hash: 50 values, their digits, the first 16 bytes of SHA-256', () => {
+  const values = tripletValues.split(' ').map(Number);
+  assert.equal(values.length, 50);
+  const digits = '11651451144444631212242444153216166316542666543113';
+  assert.equal(valuesToDigits(values), digits);
+  const entropy = valuesToEntropy(values);
+  assert.equal(Buffer.from(entropy).toString('hex'), '375b26bdb3e85c176decb8e398860625');
+  const rolls = [...triplets.replaceAll(' ', '')].map(Number);
+  const r = fromDie(rolls);
+  assert.equal(r.words, 'dance summer quarter guitar magic arm response novel toe service light enough');
+  assert.equal(r.die.digits, digits);
+  assert.equal(r.die.hash, '375b26bdb3e85c176decb8e398860625');
+  assert.equal(r.working.entropyHex, r.die.hash);
+  assert.deepEqual(r.die.values, values);
+  // Exactly 50 values, each 1 to 6.
+  assert.throws(() => valuesToDigits(values.slice(1)), /KM-31/);
+  assert.throws(() => valuesToDigits([...values, 1]), /KM-31/);
+  assert.throws(() => valuesToDigits(values.map((v, i) => (i === 3 ? 7 : v))), /KM-31/);
+  assert.throws(() => fromDie(rolls.slice(0, 120)), /KM-31/);
+  // Dropped threes in the middle do not change the result.
+  const withDrops = [];
+  for (let i = 0; i < rolls.length; i += 3) {
+    withDrops.push(...rolls.slice(i, i + 3));
+    if (i % 9 === 0) withDrops.push(2, 2, 5);
+  }
+  assert.equal(fromDie(withDrops).words, r.words);
+});
+
+test('km_34 the hand check lines match the real tools', () => {
+  const bits = [...'11010000100010001110100100010110011100100101111101010110110111101001010001010110011010110110101101110010101000000100011111111100'].map(Number);
+  const cmd = coinCheckCommand(bits);
+  assert.equal(cmd, `printf '%s' '${bits.join('')}' | basenc --base2msbf --decode | sha256sum`);
+  assert.deepEqual(entropyToBits(flipsToEntropy(bits)), bits);
+  const values = tripletValues.split(' ').map(Number);
+  assert.equal(
+    dieCheckCommand(values),
+    'echo -n "11651451144444631212242444153216166316542666543113" | sha256sum',
+  );
+  // Run them: the first hex character is the check bits of the coin run, the
+  // first 32 are the entropy of the die run.
+  const sh = (c) => execFileSync('bash', ['-c', c], { encoding: 'utf8' });
+  const coinHash = sh(cmd).split(' ')[0];
+  assert.equal(parseInt(coinHash[0], 16).toString(2).padStart(4, '0'), '1000');
+  assert.equal(sh(dieCheckCommand(values)).split(' ')[0].slice(0, 32), '375b26bdb3e85c176decb8e398860625');
+  assert.throws(() => coinCheckCommand(bits.slice(1)), /KM-04/);
+  assert.throws(() => dieCheckCommand(values.slice(1)), /KM-31/);
 });

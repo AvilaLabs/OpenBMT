@@ -1,6 +1,6 @@
-// The key maker's core: coin flips to a wallet, with nothing else in between.
-// No screens, no storage, no network, and no source of chance: the only bits
-// that enter are the flips the owner passes in.
+// The key maker's core: coin flips or die rolls to a wallet, with nothing else
+// in between. No screens, no storage, no network, and no source of chance: the
+// only values that enter are the flips or rolls the owner passes in.
 
 import { ripemd160 } from '@noble/hashes/legacy.js';
 import { sha256 } from '@noble/hashes/sha2.js';
@@ -11,6 +11,7 @@ import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 
 export const FLIP_COUNT = 128;
+export const DIE_VALUE_COUNT = 50;
 export const ACCOUNT_PATH = "m/84'/0'/0'";
 export const FIRST_RECEIVE_PATH = "m/84'/0'/0'/0/0";
 
@@ -84,22 +85,109 @@ export function withChecksum(s) {
 }
 
 /**
- * Exactly 128 flips, heads = 1, tails = 0, first flip the most significant
- * bit. Anything else is refused. Returns 16 bytes.
+ * Raw coin flips (heads 1, tails 0) to kept bits, by von Neumann's rule. The
+ * flips are taken in pairs from the start: heads then tails is the bit 0,
+ * tails then heads is the bit 1, and two the same are dropped. A last flip
+ * with no partner yet gives nothing. Returns every kept bit, in order.
  */
-export function flipsToEntropy(flips) {
-  if (!Array.isArray(flips) || flips.length !== FLIP_COUNT) {
-    throw new Error(`KM-04: exactly ${FLIP_COUNT} flips are needed`);
+export function flipsToBits(flips) {
+  if (!Array.isArray(flips)) throw new Error('KM-29: flips must be a list');
+  for (const f of flips) {
+    if (f !== 0 && f !== 1) {
+      throw new Error('KM-29: a flip must be 1 (heads) or 0 (tails)');
+    }
+  }
+  const bits = [];
+  for (let i = 0; i + 1 < flips.length; i += 2) {
+    if (flips[i] !== flips[i + 1]) bits.push(flips[i] === 1 ? 0 : 1);
+  }
+  return bits;
+}
+
+// The order of three different numbers: L, M and H as they came.
+const ORDERS = Object.freeze({ LMH: 1, LHM: 2, MHL: 3, HML: 4, HLM: 5, MLH: 6 });
+
+/**
+ * Raw die rolls (1 to 6) to values 1 to 6, by the order of three. The rolls
+ * are taken in threes from the start. Three different numbers give a value
+ * from the order of low (L), middle (M) and high (H) as they came; a three
+ * with any number repeated is dropped. A last open three gives nothing.
+ */
+export function rollsToValues(rolls) {
+  if (!Array.isArray(rolls)) throw new Error('KM-30: rolls must be a list');
+  for (const r of rolls) {
+    if (!Number.isInteger(r) || r < 1 || r > 6) {
+      throw new Error('KM-30: a roll must be a number from 1 to 6');
+    }
+  }
+  const values = [];
+  for (let i = 0; i + 2 < rolls.length; i += 3) {
+    const t = rolls.slice(i, i + 3);
+    if (new Set(t).size !== 3) continue;
+    const sorted = [...t].sort((a, b) => a - b);
+    const key = t.map((x) => 'LMH'[sorted.indexOf(x)]).join('');
+    values.push(ORDERS[key]);
+  }
+  return values;
+}
+
+/** The values as one string of ASCII digits, exactly 50 of them. */
+export function valuesToDigits(values) {
+  if (!Array.isArray(values) || values.length !== DIE_VALUE_COUNT) {
+    throw new Error(`KM-31: exactly ${DIE_VALUE_COUNT} values are needed`);
+  }
+  for (const v of values) {
+    if (!Number.isInteger(v) || v < 1 || v > 6) {
+      throw new Error('KM-31: a value must be a number from 1 to 6');
+    }
+  }
+  return values.join('');
+}
+
+/** The entropy of a die run: the first 16 bytes of SHA-256 of its digits. */
+export function valuesToEntropy(values) {
+  const digits = valuesToDigits(values);
+  return sha256(new TextEncoder().encode(digits)).slice(0, 16);
+}
+
+/**
+ * Exactly 128 kept bits, each 1 or 0, first bit the most significant. Anything
+ * else is refused. Returns 16 bytes.
+ */
+export function flipsToEntropy(bits) {
+  if (!Array.isArray(bits) || bits.length !== FLIP_COUNT) {
+    throw new Error(`KM-04: exactly ${FLIP_COUNT} bits are needed`);
   }
   const out = new Uint8Array(FLIP_COUNT / 8);
   for (let i = 0; i < FLIP_COUNT; i++) {
-    const f = flips[i];
+    const f = bits[i];
     if (f !== 0 && f !== 1) {
-      throw new Error('KM-04: a flip must be 1 (heads) or 0 (tails)');
+      throw new Error('KM-04: a bit must be 1 or 0');
     }
     out[i >> 3] |= f << (7 - (i & 7));
   }
   return out;
+}
+
+/** The 128 bits of 16 bytes of entropy, first bit the most significant. */
+export function entropyToBits(entropy) {
+  if (!(entropy instanceof Uint8Array) || entropy.length !== 16) {
+    throw new Error('KM-04: 16 bytes of entropy are needed');
+  }
+  const bits = [];
+  for (let i = 0; i < FLIP_COUNT; i++) bits.push((entropy[i >> 3] >> (7 - (i & 7))) & 1);
+  return bits;
+}
+
+/** The line to type in Tails to check the check bits of 128 bits. */
+export function coinCheckCommand(bits) {
+  flipsToEntropy(bits);
+  return `printf '%s' '${bits.join('')}' | basenc --base2msbf --decode | sha256sum`;
+}
+
+/** The line to type in Tails to check the hash of a die run's digits. */
+export function dieCheckCommand(values) {
+  return `echo -n "${valuesToDigits(values)}" | sha256sum`;
 }
 
 /** BIP39 English words for 16 bytes of entropy: 12 words, space separated. */
@@ -162,11 +250,33 @@ export function arithmetic(flips) {
     groups,
     last: { bits: lastBits, checkBits, number, word: wordlist[number] },
     entropyHex: bytesToHex(entropy),
+    bits: flips.join(''),
   };
 }
 
-/** Everything from flips: words, wallet and working. */
-export function fromFlips(flips) {
-  const words = entropyToWords(flipsToEntropy(flips));
-  return { words, wallet: wordsToWallet(words), working: arithmetic(flips) };
+/** Everything from 128 kept bits: words, wallet and working. */
+export function fromFlips(bits) {
+  const words = entropyToWords(flipsToEntropy(bits));
+  return { words, wallet: wordsToWallet(words), working: arithmetic(bits) };
+}
+
+/** Everything from raw coin flips, through the pair rule. */
+export function fromCoin(flips) {
+  return fromFlips(flipsToBits(flips));
+}
+
+/**
+ * Everything from raw die rolls, through the order-of-three rule and the
+ * hash: words, wallet, working, and the values, digits and hash shown for
+ * the hand check.
+ */
+export function fromDie(rolls) {
+  const values = rollsToValues(rolls);
+  const entropy = valuesToEntropy(values);
+  const bits = entropyToBits(entropy);
+  const r = fromFlips(bits);
+  return {
+    ...r,
+    die: { values, digits: valuesToDigits(values), hash: r.working.entropyHex },
+  };
 }

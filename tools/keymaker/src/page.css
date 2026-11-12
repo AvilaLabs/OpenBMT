@@ -143,3 +143,15 @@ input.prefix {
 }
 
 .checklabel { margin-left: 0.6rem; font-family: system-ui, sans-serif; font-size: 0.8rem; color: #333; }
+
+.cmd {
+  margin: 0.3rem 0 0.6rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--soft);
+  border: 2px solid var(--ink);
+  font-family: ui-monospace, "DejaVu Sans Mono", monospace;
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
+}

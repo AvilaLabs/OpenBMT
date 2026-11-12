@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { fromFlips } from '../src/core.js';
+import { fromCoin, fromFlips } from '../src/core.js';
 
 test('km_14 core equals the recorded Electrum 4.8.4 output on 20 flip strings', () => {
   const lines = readFileSync(new URL('electrum/expected.txt', import.meta.url), 'utf8')
@@ -28,5 +28,9 @@ test('km_14 core equals the recorded Electrum 4.8.4 output on 20 flip strings', 
     assert.equal(r.wallet.fingerprint, fp);
     assert.equal(r.wallet.xpub, xpub);
     assert.equal(r.wallet.address, address);
+    // The same bits as coin flips through the pair rule (1 is tails-heads).
+    const coin = fromCoin(flips.flatMap((b) => (b === 0 ? [1, 0] : [0, 1])));
+    assert.equal(coin.words, words);
+    assert.equal(coin.wallet.address, address);
   }
 });

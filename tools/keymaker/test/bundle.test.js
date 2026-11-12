@@ -10,7 +10,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { BuildError, build } from '../build.mjs';
-import { fromFlips } from '../src/core.js';
+import { fromCoin, fromDie, fromFlips } from '../src/core.js';
 import { encodeBytes } from '../src/qr.js';
 import { WORDS } from '../src/words.js';
 
@@ -139,6 +139,17 @@ test('km_22 the bundle gives the same words, wallet and code as the core, on the
     assert.equal(w.words, rest.slice(0, 12).join(' '));
     assert.equal(w.wallet.address, rest.at(-1));
   }
+  // The coin pair rule and the die rule give the same in the bundle.
+  const coinFlips = seedFlips.flatMap((b) => (b === 0 ? [1, 0] : [0, 1]));
+  assert.equal(core.fromCoin(coinFlips).words, fromCoin(coinFlips).words);
+  assert.equal(core.fromCoin(coinFlips).words, core.fromFlips(seedFlips).words);
+  const rolls = [...'136235425512124432523456456652532431651643314361145162145265365641143532531541146614461364126324256216214231126325524541265326436416634631461245356352'].map(Number);
+  const dieA = fromDie(rolls);
+  const dieB = core.fromDie(rolls);
+  assert.equal(dieB.words, 'dance summer quarter guitar magic arm response novel toe service light enough');
+  assert.equal(dieB.words, dieA.words);
+  assert.equal(dieB.die.digits, dieA.die.digits);
+  assert.equal(dieB.die.hash, dieA.die.hash);
   // The library's random-bytes helper is replaced by one that refuses.
   const utils = req('node_modules/@noble/hashes/utils.js');
   assert.throws(() => utils.randomBytes(16), /KM-03/);

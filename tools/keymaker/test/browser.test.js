@@ -138,12 +138,20 @@ function helpers(page, width) {
 async function realRun(page, h) {
   assert.equal(await h.click(WORDS.realButton), true);
   assert.equal(await h.banner(), false);
+  assert.equal(await h.heading(), WORDS.methodHeading);
+  assert.equal(await h.click(WORDS.methodCoin), true);
   assert.equal(await h.heading(), WORDS.flipHeading);
   assert.equal(await h.has(WORDS.rehearsalFill), false, 'no fill outside the rehearsal');
-  assert.equal(await h.count(), '0 of 128');
-  // The test seed: heads, tails, heads, ... by the keyboard.
-  for (let i = 0; i < 128; i++) await page.key(i % 2 === 0 ? 'h' : 't');
-  assert.equal(await h.count(), '128 of 128');
+  assert.equal(await h.count(), '0 of 128 bits');
+  // The test seed: the bits 1, 0, 1, ... as pairs by the keyboard (a dropped
+  // pair first, then tails-heads for a 1 and heads-tails for a 0).
+  await page.key('h');
+  await page.key('h');
+  for (let i = 0; i < 128; i++) {
+    await page.key(i % 2 === 0 ? 't' : 'h');
+    await page.key(i % 2 === 0 ? 'h' : 't');
+  }
+  assert.equal(await h.count(), '128 of 128 bits');
   await h.shot('flip-real-full');
   assert.equal(await h.click(WORDS.next), true);
   assert.deepEqual(await h.words(), seedWords.split(' '));
@@ -180,16 +188,23 @@ for (const [width, height] of [
         assert.equal(await h.click(WORDS.rehearseButton), true);
         assert.equal(await h.banner(), true);
         assert.equal(await h.step(), 'Step 2 of 7');
+        assert.equal(await h.heading(), WORDS.methodHeading);
+        await h.shot('method-rehearsal');
+        assert.equal(await h.click(WORDS.methodCoin), true);
         assert.equal(await h.has(WORDS.rehearsalFill), true);
         await page.key('h');
         await page.key('t');
         await page.key('h');
-        assert.equal(await h.count(), '3 of 128');
+        assert.equal(await h.count(), '1 of 128 bits');
         assert.equal(await h.click(WORDS.undo), true);
-        assert.equal(await h.count(), '2 of 128');
+        assert.equal(await h.count(), '1 of 128 bits');
+        assert.equal(await h.click(WORDS.undo), true);
+        assert.equal(await h.count(), '0 of 128 bits');
+        await page.key('h');
+        await page.key('t');
         await h.shot('flip-rehearsal');
         assert.equal(await h.click(WORDS.rehearsalFill), true);
-        assert.equal(await h.count(), '128 of 128');
+        assert.equal(await h.count(), '128 of 128 bits');
         await h.noOverflow();
         await h.shot('flip-rehearsal-full');
         assert.equal(await h.click(WORDS.next), true);
@@ -202,6 +217,7 @@ for (const [width, height] of [
         await h.shot('write-rehearsal');
         await page.eval("document.querySelector('details.hand').open = true");
         assert.equal(await page.eval("document.querySelectorAll('table.working tr').length"), 13);
+        assert.equal(await page.eval("document.querySelectorAll('details.hand pre.cmd').length"), 1);
         await h.shot('write-rehearsal-hand-open');
         await page.eval("document.querySelector('details.hand').open = false");
         assert.equal(await h.click(WORDS.writeDone), true);
@@ -242,6 +258,7 @@ for (const [width, height] of [
         // Electrum shows something different: stop, and only clear is offered.
         await page.goto(`file://${file}`);
         assert.equal(await h.click(WORDS.rehearseButton), true);
+        assert.equal(await h.click(WORDS.methodCoin), true);
         assert.equal(await h.click(WORDS.rehearsalFill), true);
         assert.equal(await h.click(WORDS.next), true);
         const w2 = await h.words();
@@ -274,6 +291,7 @@ test(
         await page.goto(`file://${file}`);
         // Rehearsal: the banner shares the badge row and the QR is whole.
         assert.equal(await h.click(WORDS.rehearseButton), true);
+        assert.equal(await h.click(WORDS.methodCoin), true);
         assert.equal(await page.eval("document.querySelector('.banner').closest('header.top') !== null"), true);
         assert.equal(await h.click(WORDS.rehearsalFill), true);
         assert.equal(await h.click(WORDS.next), true);
@@ -317,6 +335,7 @@ test(
       const h = helpers(page, 'km16');
       await page.goto(`file://${file}`);
       assert.equal(await h.click(WORDS.rehearseButton), true);
+      assert.equal(await h.click(WORDS.methodCoin), true);
       assert.equal(await h.click(WORDS.rehearsalFill), true);
       assert.equal(await h.click(WORDS.next), true);
       const words = await h.words();
@@ -340,6 +359,44 @@ test(
       // All three right: on to step 5.
       await h.answer(words, true);
       assert.equal(await h.heading(), WORDS.phoneHeading);
+    });
+  },
+);
+
+test(
+  'km_33 the die: the reference rolls, by the keyboard, give the reference words; check by hand shows the digits',
+  { skip: enabled ? false : 'set KEYMAKER_BROWSER=1 (local only, needs a browser and bwrap)' },
+  async () => {
+    const rolls =
+      '136235425512124432523456456652532431651643314361145162145265365641143532531541146614461364126324256216214231126325524541265326436416634631461245356352';
+    const words = 'dance summer quarter guitar magic arm response novel toe service light enough'.split(' ');
+    await session(1280, 800, async (page) => {
+      const h = helpers(page, 'km33');
+      await page.goto(`file://${file}`);
+      assert.equal(await h.click(WORDS.realButton), true);
+      assert.equal(await h.click(WORDS.methodDie), true);
+      assert.equal(await h.heading(), WORDS.dieHeading);
+      assert.equal(await h.count(), '0 of 50 values');
+      for (const n of rolls.slice(0, 5)) await page.key(n);
+      assert.equal(await h.count(), '1 of 50 values');
+      assert.equal(await h.click(WORDS.dieUndo), true);
+      assert.equal(await h.click(WORDS.dieUndo), true);
+      assert.equal(await h.count(), '1 of 50 values');
+      for (const n of rolls.slice(3)) await page.key(n);
+      assert.equal(await h.count(), '50 of 50 values');
+      await h.shot('die-full');
+      assert.equal(await h.click(WORDS.next), true);
+      assert.deepEqual(await h.words(), words);
+      await page.eval("document.querySelector('details.hand').open = true");
+      assert.deepEqual(
+        await page.eval("[...document.querySelectorAll('details.hand pre.cmd')].map((x) => x.textContent)"),
+        [
+          '11651451144444631212242444153216166316542666543113',
+          'echo -n "11651451144444631212242444153216166316542666543113" | sha256sum',
+          '375b26bdb3e85c176decb8e398860625',
+        ],
+      );
+      await h.shot('die-hand-open');
     });
   },
 );

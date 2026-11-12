@@ -4,7 +4,7 @@
 
 export const WORDS = Object.freeze({
   title: 'OpenBMT Key Maker',
-  tagline: 'Your coin, your words. The inconvenience happens once.',
+  tagline: 'Your coin or die, your words. The inconvenience happens once.',
   label:
     'Internal review only. No independent security audit has been done yet.',
   rehearsalBanner: 'REHEARSAL. These words are made up and will be thrown away.',
@@ -16,16 +16,16 @@ export const WORDS = Object.freeze({
   startChecklist: [
     'Tails is running from the USB stick.',
     'You turned networking off on the Tails start screen.',
-    'You have a coin, a pen and the blank card.',
+    'You have a coin or one six-sided die, a pen and the blank card.',
     'Nobody can see your screen or your card.',
     'You have about an hour.',
   ],
   startOffline:
     'This page cannot reach the internet. It stores nothing and forgets ' +
     'everything when you close it.',
-  rehearseButton: 'Rehearse with made-up flips',
+  rehearseButton: 'Rehearse first',
   rehearseNote:
-    'Go through every step once with made-up flips. Nothing from the ' +
+    'Go through every step once with made-up results. Nothing from the ' +
     'rehearsal is kept. Then start again for real.',
   realButton: 'Start for real',
 
@@ -33,22 +33,54 @@ export const WORDS = Object.freeze({
   rehearsalDoneHeading: 'Rehearsal finished',
   rehearsalDoneText:
     'That is the whole process. Cross out anything you wrote during the ' +
-    'rehearsal. Now do it again for real, with your coin.',
+    'rehearsal. Now do it again for real.',
 
-  // Step 2
+  // Step 2: the choice
+  methodHeading: 'Coin or die',
+  methodText:
+    'Both are equally good. Use the same coin, or the same die, from ' +
+    'start to finish.',
+  methodCoin: 'Coin',
+  methodCoinNote: 'About 512 flips. Flips are read in pairs.',
+  methodDie: 'One six-sided die',
+  methodDieNote: 'About 270 rolls. Rolls are read in threes.',
+
+  // Step 2: the coin
   flipHeading: 'Flip your coin',
   flipText:
-    'Flip the coin and press what it landed on. Do it 128 times. ' +
-    'Keys H and T work too.',
-  flipCount: '{n} of {total}',
+    'Flip the coin and press what it landed on. Keys H and T work too.',
+  flipPairs:
+    'Each pair of flips gives one bit. Heads then tails gives 0, tails ' +
+    'then heads gives 1, and two the same are dropped. This cancels out a ' +
+    'coin that lands one way more often.',
+  flipCount: '{n} of {total} bits',
+  flipsMade: '{n} flips so far',
   heads: 'Heads',
   tails: 'Tails',
   undo: 'Undo last flip',
   flipMistake:
-    'Pressed the wrong one? It does no harm: it is still random. ' +
-    'Undo only if you want to.',
-  flipsDone: 'All 128 flips done',
-  rehearsalFill: 'Fill with made-up flips',
+    'Pressed the wrong one? Undo it and press what the coin showed.',
+  flipsDone: 'All 128 bits done',
+  rehearsalFill: 'Fill with made-up results',
+
+  // Step 2: the die
+  dieHeading: 'Roll your die',
+  dieText:
+    'Roll the die and press the number on top. Keys 1 to 6 work too.',
+  dieTriples:
+    'Each three rolls give one value. Three different numbers give a ' +
+    'value from their order, low, middle and high; three with a number ' +
+    'repeated are dropped. This cancels out a die that favours some ' +
+    'numbers.',
+  dieOrders:
+    'Low middle high 1, low high middle 2, middle high low 3, high middle ' +
+    'low 4, high low middle 5, middle low high 6.',
+  dieCount: '{n} of {total} values',
+  dieRollsMade: '{n} rolls so far',
+  dieUndo: 'Undo last roll',
+  dieMistake:
+    'Pressed the wrong one? Undo it and press what the die showed.',
+  dieDone: 'All 50 values done',
 
   // Step 3
   writeHeading: 'Write your words',
@@ -123,17 +155,29 @@ export const WORDS = Object.freeze({
   // Check it by hand
   handHeading: 'Check it by hand',
   handText:
-    'Your flips, in groups of 11. Each group is a number from 0 to 2047, ' +
+    'Your bits, in groups of 11. Each group is a number from 0 to 2047, ' +
     'and that number picks the word from the BIP39 word list, counting ' +
     'from 0.',
   handLast:
-    'The last word uses your last 7 flips, then 4 check bits made from ' +
-    'all your flips.',
+    'The last word uses your last 7 bits, then 4 check bits made from all ' +
+    'your bits.',
+  handCheckCommand:
+    'To check the 4 check bits in Tails, open Terminal and type the line ' +
+    'below. The first character of the answer, in binary, is the check ' +
+    'bits.',
+  handDieText:
+    'Your 50 values as one line of digits. Your bits are the first 128 ' +
+    'bits of its SHA-256.',
+  handDieCommand:
+    'To check this in Tails, open Terminal and type the line below. The ' +
+    'first 32 characters of the answer must be the ones shown here.',
+  handDieValues: 'Values',
+  handDieHash: 'First 32 characters',
   handGroup: 'Group {n}',
   handNumber: 'Number',
   handWord: 'Word',
   handCheckBits: 'Check bits',
-  handFlips: 'Flips (heads 1, tails 0)',
+  handFlips: 'Bits',
 
   // Shown in place of the page when something is wrong
   noScript:
