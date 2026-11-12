@@ -2,7 +2,7 @@
 
 Status: implemented. The core is `tools/keymaker/src/core.js`, the QR encoder
 `src/qr.js`, the page `src/page.js` with `src/words.js`, and the bundler
-`build.mjs`. Not yet done: the checksum and signature of a release, the
+`build.mjs`. Not yet done: the signature of a release, the
 handbook page and a run in a Tails virtual machine. Each rule has an ID so
 that a test can name the rule it proves (`km_NN_...`, in
 `tools/keymaker/test/`, run with `npm test` inside `tools/keymaker/`). The
@@ -178,3 +178,34 @@ through the same screens as the real run and has no screen of its own).
   modules give the same words, wallet, working and QR matrix as `core.js` and
   `qr.js` for the test seed and three Electrum flip strings, and its
   random-bytes helper refuses.
+
+## 8. The release
+
+`scripts/keymaker-release.sh <version>` builds the page from the checked-out
+commit with a fixed environment and writes
+`tools/keymaker/dist/release/openbmt-keymaker-<version>.html` and `SHA256SUMS`.
+
+- **KM-25. The page names its build.** The footer is the one line
+  `openbmt-keymaker <version> (<short commit>)`, filled in by the build from
+  `KEYMAKER_VERSION` and `KEYMAKER_COMMIT` (`0.0.0` and `dev` when unset), and
+  not from `WORDS`. The version is `N.N.N` with an optional `-suffix`; the
+  commit is 7 to 40 hex characters, shown as its first 12.
+- **KM-26. The release script.** It refuses a working tree that is not clean
+  and any Node other than 22.22.1, runs `npm ci --ignore-scripts` and
+  `node build.mjs` with `TZ=UTC`, `LC_ALL=C` and `SOURCE_DATE_EPOCH` set to
+  the commit time, and writes the page and a `SHA256SUMS` of one line in the
+  `sha256sum` format. It prints the hash and the full commit. The page holds
+  no path of the machine.
+- **KM-27. The release is reproducible.** Two releases of one commit, made in
+  two different folders, the second with another `HOME` and umask, are equal
+  byte for byte. A test makes the comparison, and so does a CI step. Only
+  Node 22.22.1 is checked: the script refuses any other version, and the
+  result is not claimed for another.
+- **KM-28. Published with a checksum and a signature.** A release is published
+  with its `SHA256SUMS` and a detached signature over that file. Signing is
+  not part of the script: after writing `SHA256SUMS` it stops with "signing is
+  done separately". To check a release, check out the commit it names (the
+  footer shows its first 12 characters), install Node 22.22.1, run
+  `scripts/keymaker-release.sh <version>`, and compare the new `SHA256SUMS`
+  and page with the published ones, then verify the signature on the
+  published `SHA256SUMS`.

@@ -251,6 +251,20 @@ jobs:
         run: node build.mjs
       - name: Bundle tests
         run: node --test test/bundle.test.js
+      - name: Release built twice, byte for byte
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          cache=$(npm config get cache)
+          for n in 1 2; do
+            git worktree add --detach "$RUNNER_TEMP/release-$n" HEAD
+          done
+          mkdir "$RUNNER_TEMP/home-2"
+          (cd "$RUNNER_TEMP/release-1" && npm_config_cache="$cache" scripts/keymaker-release.sh 0.0.0-ci)
+          (cd "$RUNNER_TEMP/release-2" && umask 077 && HOME="$RUNNER_TEMP/home-2" npm_config_cache="$cache" scripts/keymaker-release.sh 0.0.0-ci)
+          name=openbmt-keymaker-0.0.0-ci.html
+          cmp "$RUNNER_TEMP/release-1/tools/keymaker/dist/release/$name" "$RUNNER_TEMP/release-2/tools/keymaker/dist/release/$name"
+          cmp "$RUNNER_TEMP/release-1/tools/keymaker/dist/release/SHA256SUMS" "$RUNNER_TEMP/release-2/tools/keymaker/dist/release/SHA256SUMS"
       - name: Checks that stay local
         run: |
           echo "Skipped here: the Electrum cross-check (test/electrum/crosscheck.sh needs Electrum's own files and bwrap) and the browser run (KEYMAKER_BROWSER=1 needs a browser). Both run on the maintainer's machine."

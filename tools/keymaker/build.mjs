@@ -2,6 +2,10 @@
 //
 //   node build.mjs            writes dist/openbmt-keymaker.html
 //
+// The footer shows `openbmt-keymaker <version> (<commit>)`, from the
+// environment variables KEYMAKER_VERSION and KEYMAKER_COMMIT (0.0.0 and dev
+// when unset); scripts/keymaker-release.sh sets them.
+//
 // It starts from src/page.js, follows static `import` statements (relative
 // paths, and packages through each package's `package.json`: the `exports`
 // map with the `import` condition, or Node's own rules for a package that
@@ -493,18 +497,36 @@ const sha256b64 = (s) => createHash('sha256').update(s, 'utf8').digest('base64')
 const escapeHtml = (s) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-/** Builds the project in `root` (this folder unless told otherwise). */
-export async function build({ root = HERE } = {}) {
+const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$/;
+const COMMIT_RE = /^([0-9a-f]{7,40}|dev)$/;
+
+/** The footer line: the version and the short commit, nothing else. */
+export function versionLine(version, commit) {
+  if (!VERSION_RE.test(version)) fail(`the version "${version}" is not of the form 1.2.3`);
+  if (!COMMIT_RE.test(commit)) fail(`the commit "${commit}" is not 7 to 40 hex characters or "dev"`);
+  return `openbmt-keymaker ${version} (${commit.slice(0, 12)})`;
+}
+
+/**
+ * Builds the project in `root` (this folder unless told otherwise). The
+ * version and commit shown in the footer come from the arguments, else from
+ * KEYMAKER_VERSION and KEYMAKER_COMMIT, else they are 0.0.0 and dev.
+ */
+export async function build({
+  root = HERE,
+  version = process.env.KEYMAKER_VERSION || '0.0.0',
+  commit = process.env.KEYMAKER_COMMIT || 'dev',
+} = {}) {
   const saved = ROOT;
   ROOT = root;
   try {
-    return await buildHere();
+    return await buildHere(versionLine(version, commit));
   } finally {
     ROOT = saved;
   }
 }
 
-async function buildHere() {
+async function buildHere(version) {
   const { WORDS } = await import(pathToFileURL(path.join(ROOT, 'src/words.js')).href);
   const mods = collect();
   const script = bundle(mods);
@@ -524,10 +546,11 @@ async function buildHere() {
   fillIn('title', escapeHtml(WORDS.title));
   fillIn('inert', escapeHtml(WORDS.inert));
   fillIn('noScript', escapeHtml(WORDS.noScript));
+  fillIn('version', escapeHtml(version));
   fillIn('csp', escapeHtml(csp));
   fillIn('css', css);
   fillIn('script', script);
-  return { html, script, css, csp, modules: [...mods.keys()].sort() };
+  return { html, script, css, csp, version, modules: [...mods.keys()].sort() };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
