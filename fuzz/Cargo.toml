@@ -656,3 +656,17 @@ path = "fuzz_targets/swap_state_decode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "swap_follow_decode"
+path = "fuzz_targets/swap_follow_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "swap_http_reply"
+path = "fuzz_targets/swap_http_reply.rs"
+test = false
+doc = false
+bench = false
