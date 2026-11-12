@@ -65,7 +65,7 @@ mod tests;
 pub use batch_held::{batch_digest, BatchHeld};
 pub use counter::{
     sale_payment_id, Actor, BlockEffect, BlockTaken, Counter, Facts, OpenFacts, Opened, Overridden,
-    Pairing, SaleExtras, Settled, Sightings, Stored,
+    Pairing, SaleExtras, Settled, Sightings, Stored, SwapPaid,
 };
 pub use desk::{Desk, OverrideEntry, Role};
 pub use events::Event;

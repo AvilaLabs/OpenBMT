@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 22] = [
+const TEST_SOURCES: [&str; 23] = [
     include_str!("currency.rs"),
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
@@ -25,6 +25,7 @@ const TEST_SOURCES: [&str; 22] = [
     include_str!("staff.rs"),
     include_str!("states.rs"),
     include_str!("storage.rs"),
+    include_str!("swap.rs"),
     include_str!("tips.rs"),
     include_str!("totals.rs"),
     include_str!("valuation.rs"),
@@ -34,7 +35,7 @@ const TEST_SOURCES: [&str; 22] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 73] = [
+const NOT_HERE: [(&str, &str); 80] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -329,6 +330,41 @@ const NOT_HERE: [(&str, &str); 73] = [
          (`apps/counter-android`)",
     ),
     (
+        "CR-218",
+        "the setting is part of the signed settings; tested in `openbmt-core` (`cr_218_*` in \
+         `settings.rs`), and in `openbmt-counter-node` for what the node does with it",
+    ),
+    (
+        "CR-219",
+        "opening the swap for a sale is the node's driver (`swap`); tested in \
+         `openbmt-counter-node` (`cr_219_*`)",
+    ),
+    (
+        "CR-220",
+        "following and saving a swap is the node's driver and its directory; tested in \
+         `openbmt-counter-node` (`cr_220_*`)",
+    ),
+    (
+        "CR-222",
+        "building the claim again at a higher fee is the node's driver; tested in \
+         `openbmt-counter-node` (`cr_222_*`) and against Core in its ignored test",
+    ),
+    (
+        "CR-223",
+        "the failure of a swap is the node's driver and its screen; tested in \
+         `openbmt-counter-node` (`cr_223_*`)",
+    ),
+    (
+        "CR-225",
+        "the transport is the Android app's; tested in the app's JVM tests \
+         (`apps/counter-android`)",
+    ),
+    (
+        "CR-226",
+        "the words are listed and checked in `openbmt-counter-node` and \
+         `openbmt-counter-ffi` (SC-12); the settings row is the owner app's",
+    ),
+    (
         "CR-166",
         "the device list message is dropped by the link; tested in `openbmt-counter-node` \
          (`tests/link.rs`)",
@@ -422,7 +458,7 @@ fn defined() -> BTreeSet<String> {
 #[test]
 fn the_rules_file_defines_one_hundred_and_sixty_seven_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 168);
+    assert_eq!(ids.len(), 177);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -462,6 +498,7 @@ fn the_rules_file_defines_one_hundred_and_sixty_seven_rules() {
             && ids.contains("CR-205")
             && ids.contains("CR-216")
             && ids.contains("CR-217")
+            && ids.contains("CR-226")
     );
 }
 

@@ -145,6 +145,18 @@ pub struct Facts<'a, C: HeaderChain + ?Sized> {
     pub now: u64,
 }
 
+/// What the counter keeps of a swap payment (CR-221): the facts the node
+/// reports when the provider's bitcoin is locked and the claim is built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SwapPaid {
+    /// The payment hash of the provider's invoice.
+    pub payment_hash: [u8; 32],
+    /// What the customer paid, in satoshis: the invoice's amount.
+    pub invoice_sats: u64,
+    /// What the claim pays the sale's own address, in satoshis.
+    pub received_sats: u64,
+}
+
 /// The person who overrides (CR-21). The caller has already checked the PIN.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Actor {
@@ -298,6 +310,10 @@ pub struct Counter {
     /// range (first index, first index after) with its digest. Built from the
     /// records at start.
     held_batches: BTreeMap<(u32, u32), [u8; 32]>,
+    /// CR-221: sales whose swap provider has locked the bitcoin and whose
+    /// claim is not yet in a block. Such a sale does not expire. Not stored:
+    /// the node says it again after a start.
+    swap_pending: BTreeSet<u32>,
 }
 
 impl Counter {
@@ -334,6 +350,7 @@ impl Counter {
             last_record: BTreeMap::new(),
             settings_recorded: None,
             held_batches: BTreeMap::new(),
+            swap_pending: BTreeSet::new(),
         }
     }
 
@@ -1567,6 +1584,11 @@ impl Counter {
         let Some(base) = self.sales.get(&index) else {
             return Ok(());
         };
+        // CR-221: what a swap's claim pays the sale's address is the sale's
+        // own payment, not a late one.
+        if base.via_swap {
+            return Ok(());
+        }
         if base.late.iter().any(|(t, _)| *t == txid)
             || base.watch.transactions().any(|t| t.compute_txid() == txid)
         {
@@ -1797,6 +1819,247 @@ impl Counter {
         Ok(screen)
     }
 
+    /// CR-221: the node says the swap provider's lockup of a sale is on the
+    /// way: set when its bitcoin is seen and until the claim is in a block,
+    /// cleared with `false`. A sale in that state does not expire (CR-07).
+    pub fn set_swap_pending(&mut self, index: u32, pending: bool) {
+        if pending {
+            self.swap_pending.insert(index);
+        } else {
+            self.swap_pending.remove(&index);
+        }
+    }
+
+    /// CR-221: whether a swap payment of this sale may be taken at once,
+    /// before its lockup is in a block, as an on-chain payment seen by
+    /// `status` (the status of the lockup's watch, `SaleWatch::status`) may
+    /// be (CR-13): the same policy, the sale's quote in satoshis as the
+    /// amount, the same slice and the same heartbeat. `None` means the
+    /// payment waits for the lockup's first confirmation. Reads only.
+    pub fn swap_decide<C: HeaderChain + ?Sized>(
+        &self,
+        index: u32,
+        invoice_sats: u64,
+        status: &openbmt_watch::SaleStatus,
+        facts: &Facts<'_, C>,
+    ) -> Option<(openbmt_core::policy::InstantLabel, CheckMode)> {
+        let sale = self.sales.get(&index)?;
+        if !sale.is_live() || status.needs_a_person || !facts.health.healthy {
+            return None;
+        }
+        let mode = status.mode?;
+        let id = sale_payment_id(index);
+        let outstanding = {
+            let mut ledger = self.exposure.clone();
+            ledger.release_by_owner(&id);
+            ledger.outstanding()
+        };
+        let mut policy = InstantPolicy::for_counter(&self.settings, &self.identity.device_id());
+        policy.underpayment_tolerance_bps = 0;
+        let inputs = Inputs {
+            mode,
+            sale_sats: invoice_sats,
+            received_sats: invoice_sats,
+            outstanding_sats: outstanding,
+            check_healthy: facts.health.healthy,
+            heartbeat: facts.heartbeat,
+            remote_order: facts.remote_order,
+            customer_wifi: self.settings.customer_wifi,
+            tor_on: self.settings.tor_on,
+            pause: self.pause.status(facts.now),
+            conflict_seen: status.conflict_seen,
+            secs_since_first_seen: status.secs_since_first_seen,
+        };
+        match evaluate(&policy, &inputs) {
+            Decision::Instant { label, mode } => Some((label, mode)),
+            _ => None,
+        }
+    }
+
+    /// CR-221, CR-109: the swap provider's bitcoin for a sale is locked and
+    /// the claim to the sale's own address is built, so the sale is paid
+    /// over Lightning. `instant` is the decision of [`Counter::swap_decide`]
+    /// when the lockup is not yet in a block: the amount at risk is counted
+    /// in the exposure ledger as for any instant sale (CR-13) until the
+    /// lockup confirms ([`Counter::swap_lockup_confirmed`]). With `None` the
+    /// lockup is in a block and nothing is counted.
+    ///
+    /// The sale keeps the payment hash and `received_sats`, what the claim
+    /// pays the sale's address, in place of the node's millisatoshis. The
+    /// customer paid `invoice_sats`, which must cover a quote of the sale.
+    /// Refused as [`Counter::lightning_paid`] refuses. `Ok(None)` when the
+    /// exposure could not be counted (the slice is full or the ledger could
+    /// not be written): nothing was changed and the payment waits for the
+    /// lockup's confirmation. The writes are those of `lightning_paid`,
+    /// after the ledger.
+    pub fn swap_paid<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        paid: SwapPaid,
+        instant: Option<(openbmt_core::policy::InstantLabel, CheckMode)>,
+        facts: &Facts<'_, C>,
+        store: &mut S,
+    ) -> Result<Option<Screen>, LightningRefused<S::Error>> {
+        if self.unreadable.contains(&index) {
+            return Err(LightningRefused::Judge(JudgeError::UnknownSale(index)));
+        }
+        let base = self
+            .sales
+            .get(&index)
+            .cloned()
+            .ok_or(LightningRefused::UnknownSale(index))?;
+        let own = OwnNodeHealth::not_configured();
+        if base.lightning.is_some() {
+            return self
+                .judge_with_own_node(index, facts, &own, store)
+                .map(Some)
+                .map_err(LightningRefused::Judge);
+        }
+        if !base.is_live() {
+            return Err(LightningRefused::SaleClosed);
+        }
+        let now = facts.now;
+        let mut sale = base;
+        let (st, received) = sale.refresh(facts.chain, now, self.depth(), &own);
+        if sale.accepted.is_some()
+            || sale.overridden.is_some()
+            || sale.frozen.is_some()
+            || st.needs_a_person
+        {
+            return Err(LightningRefused::PaidAnotherWay);
+        }
+        let least = sale
+            .quotes
+            .iter()
+            .filter_map(|q| sats_for(sale.amount, q.rate))
+            .min()
+            .unwrap_or(u64::MAX);
+        if paid.received_sats == 0 || paid.invoice_sats < least {
+            return Err(LightningRefused::TooLittle {
+                sats: paid.invoice_sats,
+                least,
+            });
+        }
+        if let Some((label, mode)) = instant {
+            if self
+                .accept_exposure(index, paid.invoice_sats, mode, store)
+                .is_err()
+            {
+                return Ok(None);
+            }
+            sale.accepted = Some((label, mode));
+            sale.exposure_counted = true;
+        }
+        let amount_msat = paid.received_sats.saturating_mul(1_000);
+        let valued = match sale.rate_of(sale.quote_index_at(now)) {
+            Some(rate) => value_of(paid.received_sats, rate),
+            None => Amount(0),
+        };
+        let lightning = LightningPaid {
+            payment_hash: paid.payment_hash,
+            amount_msat,
+            settled_at: None,
+        };
+        sale.lightning = Some(lightning);
+        sale.via_swap = true;
+        sale.books_final = true;
+        let mut events = vec![Event::PaidByLightning {
+            index,
+            at: now,
+            payment_hash: paid.payment_hash,
+            amount_msat,
+            settled_at: None,
+            valued,
+        }];
+        let mut reports = Vec::new();
+        if received > 0 {
+            sale.surplus_reported = received;
+            events.push(Event::SurplusOwed {
+                index,
+                at: now,
+                sats: received,
+            });
+            reports.push(Report::SurplusOwed {
+                index,
+                sats: received,
+            });
+        }
+        if sale.pos != PosState::Paid {
+            sale.pos = PosState::Paid;
+            events.push(Event::PosPaid { index, at: now });
+            reports.push(Report::PosPaid { index });
+        }
+        reports.push(Report::BooksFinal {
+            index,
+            amount: sale.own_amount(),
+            currency: sale.currency,
+            received_sats: paid.received_sats,
+        });
+        self.swap_pending.remove(&index);
+        if let Err(e) = self.finish(store, sale, &events) {
+            // The exposure counted above stays: the sale is accepted by the
+            // next try, which does not count it twice.
+            return Err(LightningRefused::Store(e));
+        }
+        let mut screen = self
+            .judge_with_own_node(index, facts, &own, store)
+            .map_err(LightningRefused::Judge)?;
+        screen.reports = reports;
+        Ok(Some(screen))
+    }
+
+    /// CR-221, CR-15: the lockup of a sale paid before its bitcoin was in a
+    /// block is now in one: the exposure leaves the ledger. Asking again
+    /// changes nothing.
+    pub fn swap_lockup_confirmed<S: Store>(
+        &mut self,
+        index: u32,
+        store: &mut S,
+    ) -> Result<(), StoreFault<S::Error>> {
+        let Some(base) = self.sales.get(&index) else {
+            return Ok(());
+        };
+        if !base.via_swap || base.exposure_released || !base.exposure_counted {
+            return Ok(());
+        }
+        let mut sale = base.clone();
+        self.release_exposure(index, store)?;
+        sale.exposure_released = true;
+        self.put_sale(store, sale)
+    }
+
+    /// CR-221, CR-14: a sale paid by a swap before its lockup was in a
+    /// block, whose lockup was replaced or never came to the claim, is a
+    /// cancel: the pause tracker and the alarm, the POS told the sale is not
+    /// paid, and the sale shows that the goods are not to be handed over.
+    /// Once per sale; the exposure stays counted until the owner releases it.
+    pub fn swap_cancelled<S: Store>(
+        &mut self,
+        index: u32,
+        now: u64,
+        store: &mut S,
+    ) -> Result<Vec<Report>, StoreFault<S::Error>> {
+        let Some(base) = self.sales.get(&index) else {
+            return Ok(Vec::new());
+        };
+        if !base.via_swap || base.cancel_recorded || base.accepted.is_none() {
+            return Ok(Vec::new());
+        }
+        let mut sale = base.clone();
+        self.raise_cancel(index, now, store)?;
+        sale.cancel_recorded = true;
+        let mut events = vec![Event::Replaced { index, at: now }];
+        let mut reports = vec![Report::Alarm { index }];
+        if sale.pos == PosState::Paid {
+            sale.pos = PosState::Unpaid;
+            events.push(Event::PosUnpaid { index, at: now });
+            reports.push(Report::PosUnpaid { index });
+        }
+        self.finish(store, sale, &events)?;
+        self.cancel_applied.remove(&index);
+        Ok(reports)
+    }
+
     /// CR-117: the shop's own node says an invoice of a sale was settled
     /// after the sale ended, or after it was paid another way, or when the sale
     /// was paid over Lightning by another invoice. It is a late payment
@@ -1937,6 +2200,19 @@ impl Counter {
         // that arrive there are a late payment (CR-19) and nothing else is
         // judged.
         if let Some(paid) = sale.lightning {
+            // CR-221: a swap payment accepted before its lockup was in a
+            // block, whose lockup was then replaced, is a cancel (CR-14).
+            if sale.via_swap && sale.cancel_recorded {
+                let mut screen = screen_of(
+                    State::DoNotHandOver,
+                    Why::Replaced,
+                    Next::AskOwnerOrOtherPayment,
+                );
+                screen.received_sats = paid.sats();
+                screen.needs_sats = paid.sats();
+                screen.late = sale.is_late();
+                return Ok(screen);
+            }
             let mut screen = screen_of(State::PaidLightning, Why::PaidByLightning, Next::Nothing);
             screen.received_sats = paid.sats();
             screen.needs_sats = paid.sats();
@@ -1971,6 +2247,7 @@ impl Counter {
             && sale.accepted.is_none()
             && sale.overridden.is_none()
             && now >= sale.expires_at()
+            && !self.swap_pending.contains(&index)
         {
             sale.ended = Some((End::Expired, now));
             events.push(Event::Expired { index, at: now });
@@ -2913,6 +3190,11 @@ impl Counter {
         headers: &C,
     ) -> Option<u64> {
         let paid = sale.lightning.as_ref()?;
+        // CR-224: a payment through a swap provider is on the chain, in
+        // the claim to the sale's own address: no limit but CR-67.
+        if sale.via_swap {
+            return None;
+        }
         let (received, _) = self.refund_facts(sale, now, headers);
         let onchain = received.saturating_sub(paid.sats());
         let asked = sale

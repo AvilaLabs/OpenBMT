@@ -77,6 +77,11 @@ const SALE_VERSION_TIP: u8 = 4;
 /// The version byte of a request to send or a sale with a note (CR-204,
 /// CR-206).
 const SALE_VERSION_REQUEST: u8 = 5;
+/// The version byte of a sale that was paid over Lightning through a swap
+/// provider (CR-221): the fields of version 5, written for a sale that holds
+/// such a payment and for no other; the Lightning flag is always 1, and a
+/// request is never one.
+const SALE_VERSION_SWAP: u8 = 6;
 /// Seconds in a day.
 const DAY_SECS: u64 = 86_400;
 
@@ -215,6 +220,9 @@ pub struct Sale {
     pub(crate) late_unlisted: bool,
     pub(crate) refunds: Vec<RefundEntry>,
     pub(crate) lightning: Option<LightningPaid>,
+    /// The Lightning payment came through a swap provider (CR-221): its
+    /// claim is on the chain, to this sale's own address.
+    pub(crate) via_swap: bool,
     /// The lifetime of a request to send; none for a sale shown at the till
     /// (CR-204).
     pub(crate) request: Option<RequestDays>,
@@ -266,6 +274,7 @@ impl Sale {
             late_unlisted: false,
             refunds: Vec::new(),
             lightning: None,
+            via_swap: false,
             request: None,
             note: None,
         }
@@ -361,6 +370,14 @@ impl Sale {
     /// The Lightning payment that settled the sale, if one did (CR-109).
     pub fn lightning(&self) -> Option<&LightningPaid> {
         self.lightning.as_ref()
+    }
+
+    /// Whether the Lightning payment that settled the sale came through a
+    /// swap provider (CR-221) and not the shop's own node: its claim is on
+    /// the chain, to the sale's own address, so a bitcoin refund is open for
+    /// it (CR-224).
+    pub fn paid_via_swap(&self) -> bool {
+        self.via_swap && self.lightning.is_some()
     }
 
     /// The lifetime of the sale if it is a request to send (CR-204).
@@ -652,7 +669,31 @@ impl Sale {
         }
         out.extend_from_slice(&len32(watch.len()).to_le_bytes());
         out.extend_from_slice(&watch);
-        if self.request.is_some() || self.note.is_some() {
+        if self.via_swap && self.lightning.is_some() {
+            if let Some(byte) = out.get_mut(4) {
+                *byte = SALE_VERSION_SWAP;
+            }
+            out.extend_from_slice(&self.tip.0.to_le_bytes());
+            if let Some(paid) = &self.lightning {
+                out.push(1);
+                out.extend_from_slice(&paid.payment_hash);
+                out.extend_from_slice(&paid.amount_msat.to_le_bytes());
+                wire::put_opt_u64(&mut out, paid.settled_at);
+            }
+            out.extend_from_slice(&len32(self.refunds.len()).to_le_bytes());
+            for entry in &self.refunds {
+                entry.write(&mut out);
+            }
+            out.push(0);
+            match &self.note {
+                Some(note) => {
+                    out.push(1);
+                    out.push(u8::try_from(note.len()).unwrap_or(u8::MAX));
+                    out.extend_from_slice(note.as_bytes());
+                }
+                None => out.push(0),
+            }
+        } else if self.request.is_some() || self.note.is_some() {
             if let Some(byte) = out.get_mut(4) {
                 *byte = SALE_VERSION_REQUEST;
             }
@@ -744,6 +785,7 @@ impl Sale {
             && version != SALE_VERSION_LIGHTNING
             && version != SALE_VERSION_TIP
             && version != SALE_VERSION_REQUEST
+            && version != SALE_VERSION_SWAP
         {
             return Err(DecodeError::UnsupportedVersion(version));
         }
@@ -869,12 +911,13 @@ impl Sale {
         let mut refunds: Vec<RefundEntry> = Vec::new();
         let mut lightning = None;
         let mut tip = Amount(0);
-        let extended = version == SALE_VERSION_TIP || version == SALE_VERSION_REQUEST;
+        let swap = version == SALE_VERSION_SWAP;
+        let extended = version == SALE_VERSION_TIP || version == SALE_VERSION_REQUEST || swap;
         if extended {
             tip = Amount(r.u64_le()?);
             // The tip is part of the sum due, and a tip is never more than
             // the sale's own amount (CR-190). Version 5 may have none.
-            let none = tip.0 == 0 && version == SALE_VERSION_REQUEST;
+            let none = tip.0 == 0 && (version == SALE_VERSION_REQUEST || swap);
             if !none && (tip.0 == 0 || tip.0 > amount.0.saturating_sub(tip.0)) {
                 return Err(bad("a sale's tip is nothing or more than the sale itself"));
             }
@@ -910,7 +953,7 @@ impl Sale {
         }
         let mut request = None;
         let mut note = None;
-        if version == SALE_VERSION_REQUEST {
+        if version == SALE_VERSION_REQUEST || swap {
             request = match r.u8()? {
                 0 => None,
                 days => Some(
@@ -928,8 +971,11 @@ impl Sale {
                 }
                 note = Some(text);
             }
-            if request.is_none() && note.is_none() {
+            if !swap && request.is_none() && note.is_none() {
                 return Err(bad("version 5 holds neither a request nor a note"));
+            }
+            if swap && (request.is_some() || lightning.is_none()) {
+                return Err(bad("version 6 holds a swap payment and is not a request"));
             }
         }
         r.finish()?;
@@ -993,6 +1039,7 @@ impl Sale {
             late_unlisted,
             refunds,
             lightning,
+            via_swap: swap,
             request,
             note,
         })

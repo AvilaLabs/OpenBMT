@@ -22,6 +22,7 @@ mod settle;
 mod staff;
 mod states;
 mod storage;
+mod swap;
 mod tips;
 mod totals;
 mod valuation;

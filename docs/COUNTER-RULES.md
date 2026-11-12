@@ -826,10 +826,12 @@ counter holds is not, and never leaves the counter.
   to what arrived on-chain (CR-217). There is no refund over Lightning: the
   counter holds no key that can pay.
 - **CR-217.** The owner's phone pays a refund only against payments it sees
-  on the chain, and a payment over Lightning is not on the chain. So the
+  on the chain, and a payment over Lightning through the shop's own node is
+  not on the chain. (A payment through a swap provider is: CR-224.) So the
   counter offers only a cash refund (CR-71) for a sale whose payment is
-  all Lightning, and refuses a request for a bitcoin refund of it (CR-60)
-  with "Refund in cash", for the cashier: "This sale was paid over
+  all Lightning through the shop's own node, and refuses a request for a
+  bitcoin refund of it (CR-60) with "Refund in cash", for the cashier: "This
+  sale was paid over
   Lightning, and the owner's phone can only check payments it sees on the
   chain, so a bitcoin refund cannot be sent." and "Give the refund in cash
   from the till." A sale paid partly over Lightning and partly on-chain can
@@ -1577,3 +1579,101 @@ by any means the phone has.
 - **CR-216.** A sale's details show its note under "Note", or a button "Add a
   note" when it has none, which asks for the note as CR-213 does and adds it
   once (CR-206).
+
+## 22. Lightning through a swap provider
+
+The shop can take Lightning with no node of its own: a swap provider it
+picks makes the invoice the customer pays and locks its own bitcoin in an
+output that only the counter can claim, to the sale's own address
+(`docs/SWAP-RULES.md`, `docs/DESIGN.md` section 8). The provider never holds
+the shop's money. The library of the swap is `crates/openbmt-swap`; the
+driver that follows it is in `crates/openbmt-counter-node` (`swap`); the
+judgment of a paid sale is in `crates/openbmt-counter`; the transport and the
+screens are the app's. It has no network, no clock and no randomness of its
+own, as the driver of section 12 has none.
+
+- **CR-218.** The signed settings name the provider, or none
+  (`Settings::swap`): a name of up to 32 bytes, its Tor v3 onion name, the
+  path prefix of its API and the most the shop takes over Lightning for one
+  sale, in satoshis (at most 25,000,000, the library's own cap, SW-02). It is
+  off by default. Settings that name a Lightning node and a provider are
+  refused: one Lightning path at a time. The settings are version 3 when they
+  name a provider. Naming, changing or removing the provider is not a
+  loosening, because the claim pays the shop's own address and no money can
+  be sent anywhere new, so the owner phone's signature alone suffices. A
+  change takes effect when the counter starts again, as CR-164 says for the
+  node.
+- **CR-219.** A sale that opens with a provider set, and a quote of it that
+  is within the shop's maximum and the provider's live limits, gets a swap:
+  the driver reads the provider's terms if they are older than SW-63 allows,
+  then asks for a reverse swap for the quote's satoshis with a fresh preimage
+  and claim key, made from the operating system's randomness, and the sale's
+  own receive address as the claim address. A new quote asks again, and
+  every earlier swap of the sale stays followed (as CR-112 keeps its
+  invoices), at most 8 for a sale. The sale shows its on-chain code at once
+  and never waits. When a reply has passed every check of SW-20 to SW-28 the
+  code becomes the combined code of the own-node path (LN-18), carrying the
+  invoice. If none has passed 5 seconds after the quote, or the amount is
+  outside the limits, the code stays on-chain and one small line says
+  "Lightning is not available for this sale." A provider that cannot be
+  reached, or that refuses, is "Lightning off for now" in the sale's
+  details, and never a state of the sale.
+- **CR-220.** One swap is followed by the machine of SW-71, one per swap,
+  and each is saved through the store (a slot of its own, `swap-N-M.bin`) in
+  the counter's folder before its invoice is shown, so that a restart can
+  never lose a lockup it could claim. The secrets are made in memory only,
+  and the file is the framed encoding of the swap library with the counter's
+  own record of the lockup and the claims (magic `OBMz`). The status is
+  asked for as the machine says (SW-71). A lockup is taken from the status
+  bytes or from the counter's own watch of the lockup address, a sighting
+  of a peer or a block, and is checked by SW-30 before it is believed; the
+  counter's own watch alone tells whether it is in a block (SW-72).
+- **CR-221.** When the lockup is in the mempool and the sale's quote is
+  within the instant limits of the check that saw it (the same policy as
+  CR-13: the heartbeat, the conflict watch, the groups of peers, the slice)
+  and the exposure ledger has room, the sale is paid at once over Lightning
+  (`Counter::swap_paid`): the counter claims at once, the amount at risk is
+  counted in the ledger as for an instant on-chain sale and leaves it when
+  the lockup is in a block (CR-15). Otherwise the sale waits for the lockup's
+  first confirmation, shows "Waiting for one block", then claims and is paid.
+  The sale keeps the payment hash and what the claim pays its address, as
+  CR-110 keeps what the node received, and is final and told to the POS and
+  the books as in CR-109. The stored sale is version 6 when it holds a swap
+  payment. A sale whose lockup is on the way does not expire. What the
+  claim pays the sale's address is the sale's own payment and never a late
+  one (CR-19). A sale paid before its lockup was in a block whose lockup is
+  then replaced, or whose swap fails before the claim is in a block, is a
+  cancel (CR-14): `Counter::swap_cancelled`.
+- **CR-222.** The claim pays the sale's address at the counter's fee rate
+  (2 sat/vB at first), signals replacement (SW-40) and is built again at
+  a higher fee (SW-46) every block it stays out of a block: 50% more, and at
+  least 2 sat/vB more **[to tune]**. It is never built at or after the
+  provider's timeout (SW-44), and never above the limit of SW-41. A claim
+  still unconfirmed `MIN_CLAIM_BLOCKS / 2` blocks before the timeout is
+  told to the owner (words "Lightning claim waiting"). The swap is done
+  when the shop's own claim, or an earlier one it built, is in a block
+  (SW-72, SW-75).
+- **CR-223.** A swap that fails before the claim (the invoice ran out, the
+  provider could not lock, the lockup is refused by SW-30, the provider took
+  it back, the timeout) leaves the sale unpaid and shows "Lightning payment
+  not finished". The sale itself goes on: the same code takes bitcoin
+  on-chain, and the cashier may take another payment.
+- **CR-224.** A bitcoin refund of a sale paid through a swap is open as
+  for any sale that arrived on-chain: the claim is on the chain, to the
+  shop's own address. It is limited, as CR-67 says, to what the sale
+  received, which is what the claim pays; a sale paid through the shop's own
+  node stays cash only (CR-217).
+- **CR-225.** The app reaches the provider over plain HTTP/1.1 (the codec of
+  SW-80) to its onion name, through the counter's own Tor, as it reaches
+  the other onion services, and never around it: with no Tor, nothing is
+  sent. A request is sent at a time. The reply is at most 64 KiB and is
+  given to the driver whole; a connect or a read that does not end in 60
+  seconds fails. The driver gives the app the bytes to send and takes the
+  bytes that came back.
+- **CR-226.** Every state and refusal of this section has words under
+  `docs/SCREEN-RULES.md`. The cashier is told: "Waiting for one block",
+  "Lightning payment not finished" and "Lightning off for now", and sees the
+  line of CR-219. The owner is told "Lightning claim waiting" and has the
+  settings row "Lightning through a swap provider" (CR-218): a provider, an
+  onion address, the largest sale over Lightning, and "Turn on" and "Turn
+  off".
