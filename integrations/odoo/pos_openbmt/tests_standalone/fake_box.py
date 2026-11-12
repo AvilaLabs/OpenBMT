@@ -12,17 +12,18 @@ LIMIT = 4096
 MAX_WAITING = 32
 
 WORDS = {
-    'tillKeyWrong': ('The Box did not accept this till',
+    'tillKeyWrong': ('Wrong till key',
                      "The key in this payment method is not the Box's till key.",
                      "Copy the till key from the Box again into this payment method."),
     'tillNotPaired': ('The Box is not set up yet',
                       'The Box has not joined the shop, so it cannot reach a counter.',
                       'Finish setting up the Box from the owner app.'),
-    'tillUnknownCounter': ('No counter 00000000',
-                           'The shop has no counter with the code in this payment method.',
-                           'Check the counter code in this payment method.'),
-    'tillWrongMoney': ('The counters take EUR, not USD',
-                       "This sale is in USD, and the shop's counters are set up in EUR.",
+    'tillUnknownCounter': ('Counter not found',
+                           'The shop has no counter with the code 00000000.',
+                           'Check the counter code in this payment method. '
+                           'The owner app shows it after the word Counter.'),
+    'tillWrongMoney': ('Wrong currency',
+                       "This sale is in USD, and the shop's counters take EUR.",
                        'Take this payment on the counter by hand.'),
     'tillBadAmount': ('This amount cannot be taken',
                       'The amount is zero, below zero, or has more decimals than the money has.',
@@ -39,7 +40,7 @@ END_WORDS = {
     'unpaid': ('The payment did not arrive',
                "The counter's sale ended without being paid.",
                'Ask the customer to try again, or pick another way to pay.'),
-    'expired': ('The counter did not start this sale',
+    'expired': ('Sale not started',
                 'Nobody pressed Start on the counter within 5 minutes.',
                 'Try again.'),
     'cancelled': ('Sale cancelled',
