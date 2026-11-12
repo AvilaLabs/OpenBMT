@@ -270,6 +270,7 @@ private fun Controller.showWhy(r: FirstRun) {
 /** Four cases of money held by a bank or a payment company: words only, no link, no picture, no network. */
 private fun Controller.showRealCases(r: FirstRun) {
     fun case(place: String, text: String): View = stack(line(place, muted = true), ui.text(text, 15f), gap = 4)
+    fun part(title: String, text: String): View = stack(ui.text(title, Type.BODY, bold = true), para(text), gap = 6)
     val back: () -> Unit = { r.back(); showFirstRun() }
     stepScreen(
         FirstRunWords.shopTitle,
@@ -279,7 +280,10 @@ private fun Controller.showRealCases(r: FirstRun) {
             case(FirstRunWords.realCase2Place, FirstRunWords.realCase2Text),
             case(FirstRunWords.realCase3Place, FirstRunWords.realCase3Text),
             case(FirstRunWords.realCase4Place, FirstRunWords.realCase4Text),
-            para(FirstRunWords.realOutro), line(FirstRunWords.realMore, muted = true),
+            part(FirstRunWords.realBitcoinTitle, FirstRunWords.realBitcoinText),
+            part(FirstRunWords.realKeysTitle, FirstRunWords.realKeysText),
+            part(FirstRunWords.realCoinTitle, FirstRunWords.realCoinText),
+            line(FirstRunWords.realMore, muted = true),
         ),
         listOf(ui.button(KeyGuideWords.kgBack) { back() }), back,
     )

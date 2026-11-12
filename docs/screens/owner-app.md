@@ -329,7 +329,12 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | realCase3Text | Savers at the largest bank lost 47.5% of everything above €100,000. Twelve years on, 4,524 depositors had been paid about €9,800 each. |
 | realCase4Place | Lebanon, since 2019 |
 | realCase4Text | $107 billion of deposits could not be freely taken out. Dollars came out in local money at a loss of 70% or more. |
-| realOutro | A payment to your own wallet is held by nobody else. That is also why its backup is yours to keep. |
+| realBitcoinTitle | Why your own bitcoin is different |
+| realBitcoinText | Bitcoin in your own wallet is not held by a bank or a payment company. Nobody can put a hold on it, close the account or cap your withdrawals, because there is no account. It moves only when your keys sign. |
+| realKeysTitle | Why the keys need so much care |
+| realKeysText | With nobody in the middle, nobody can undo a mistake either. Whoever has your 12 words can spend the money, and if every copy is lost, nobody can give it back. So the words are made where no one can see them, written by hand, and put on steel. |
+| realCoinTitle | Why a coin or a die |
+| realCoinText | Phones and computers make random numbers with chips and software, and those have had faults before. A coin or a die has no chip and no software, so nothing can reach into it from outside. The key maker only turns your flips into words, offline, and shows its work so you can check it by hand. |
 | realMore | More cases from 11 countries, with their sources, are in the handbook under "When someone else holds the money". |
 | kgTitle | Make your savings wallet |
 | kgStepBadge | Step {n} of {total} |

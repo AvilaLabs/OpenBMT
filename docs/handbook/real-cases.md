@@ -149,11 +149,50 @@ else comes with that party's rules, its failures and its country's
 emergencies, and that a business can wait days, months or years through
 no fault of its own.
 
-A bitcoin payment to the shop's own wallet is not held by anyone else.
-Nobody can put a reserve on it, close the account or limit the
-withdrawals, because there is no account. The cost is that nobody can give
-it back if the keys are lost, which is why OpenBMT spends so much of its
-setup on making and keeping them.
+## Why bitcoin in the shop's own wallet is different
+
+Every case above needed someone between the business and its money: a
+processor that could hold a payout, a bank that could close an account or
+fail, a government that could cap what came out of the banks. Bitcoin in
+the shop's own wallet has no one in that place. It is not a balance in an
+account; it sits on a network that no single company or government runs,
+and it moves only when the shop's own keys sign for it. Nobody can put a
+reserve on it, close the account or cap the withdrawals, because there is
+no account, and no processor can hold a payout, because there is no
+payout.
+
+This holds only while the bitcoin stays in the shop's own wallet. Bitcoin
+left with an exchange or a payment company is again money held by someone
+else, and changing bitcoin into local money brings a bank back in at that
+moment.
+
+## Why the keys need so much care
+
+With nobody in the middle, nobody can undo a mistake either. There is no
+fraud desk, no password reset and no court that can move the coins back.
+Whoever has the shop's 12 words can spend its money, and if every copy of
+the words is lost, the money stays where it is for good.
+
+That is why OpenBMT asks for more care at setup than a bank account does.
+The words are made where nobody else can see them, written by hand, never
+typed into a phone or a connected computer, and put on steel as soon as
+possible.
+
+## Why a coin or a die
+
+Every wallet starts from one large random number, and the 12 words are
+that number written out. Phones, computers and hardware wallets make the
+number with chips and software, and those have had faults before: a number
+that looked random was one that someone who knew the fault could work out.
+
+A coin or a die has no chip, no software and no update. Nothing can reach
+into it over a network, and if it favours one side, the method in
+[Setting up a shop](setting-up.md#why-so-many-flips-and-rolls) removes the
+bias. What remains is the computer that turns the flips or rolls into
+words, and OpenBMT keeps that step as small and as checkable as it can.
+The key maker page runs on Tails with the network off, shows its working,
+and gives commands to check the result by hand, and Electrum, made by
+other people, must show the same wallet before the shop uses it.
 
 > **OpenBMT has had no independent security audit. Do not use it with real
 > funds.**

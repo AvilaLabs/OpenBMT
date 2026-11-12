@@ -171,7 +171,12 @@ object FirstRunWords {
     const val realCase3Text = "Savers at the largest bank lost 47.5% of everything above €100,000. Twelve years on, 4,524 depositors had been paid about €9,800 each."
     const val realCase4Place = "Lebanon, since 2019"
     const val realCase4Text = "\$107 billion of deposits could not be freely taken out. Dollars came out in local money at a loss of 70% or more."
-    const val realOutro = "A payment to your own wallet is held by nobody else. That is also why its backup is yours to keep."
+    const val realBitcoinTitle = "Why your own bitcoin is different"
+    const val realBitcoinText = "Bitcoin in your own wallet is not held by a bank or a payment company. Nobody can put a hold on it, close the account or cap your withdrawals, because there is no account. It moves only when your keys sign."
+    const val realKeysTitle = "Why the keys need so much care"
+    const val realKeysText = "With nobody in the middle, nobody can undo a mistake either. Whoever has your 12 words can spend the money, and if every copy is lost, nobody can give it back. So the words are made where no one can see them, written by hand, and put on steel."
+    const val realCoinTitle = "Why a coin or a die"
+    const val realCoinText = "Phones and computers make random numbers with chips and software, and those have had faults before. A coin or a die has no chip and no software, so nothing can reach into it from outside. The key maker only turns your flips into words, offline, and shows its work so you can check it by hand."
     const val realMore = "More cases from 11 countries, with their sources, are in the handbook under \"When someone else holds the money\"."
 
     /** The line of a till's name for [t] inside [text]: every `{till}` becomes [t]. */
@@ -218,7 +223,7 @@ object FirstRunWords {
         add("realCase2Place", realCase2Place); add("realCase2Text", realCase2Text)
         add("realCase3Place", realCase3Place); add("realCase3Text", realCase3Text)
         add("realCase4Place", realCase4Place); add("realCase4Text", realCase4Text)
-        add("realOutro", realOutro); add("realMore", realMore)
+        add("realBitcoinTitle", realBitcoinTitle); add("realBitcoinText", realBitcoinText); add("realKeysTitle", realKeysTitle); add("realKeysText", realKeysText); add("realCoinTitle", realCoinTitle); add("realCoinText", realCoinText); add("realMore", realMore)
         out.addAll(KeyGuideWords.all())
         return out
     }
