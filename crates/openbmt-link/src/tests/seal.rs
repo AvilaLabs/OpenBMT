@@ -530,13 +530,14 @@ fn lk_07_padding_that_is_not_zero_or_not_minimal_is_refused() {
 #[test]
 fn lk_08_the_table_of_kinds() {
     use Role::{Box as B, Counter as C, Owner as O, Watch as W};
-    let table: [(Kind, Role, Role); 14] = [
+    let table: [(Kind, Role, Role); 15] = [
         (Kind::Heartbeat, O, C),
         (Kind::Heartbeat, W, C),
         (Kind::Command, O, C),
         (Kind::Settings, O, C),
         (Kind::Settings, O, B),
         (Kind::Batch, O, C),
+        (Kind::Range, O, C),
         (Kind::DeviceList, O, C),
         (Kind::DeviceList, O, B),
         (Kind::CheckIn, C, O),
@@ -594,8 +595,8 @@ fn lk_08_seal_and_open_refuse_a_kind_the_role_may_not_send() {
         open_as_counter(&unknown).unwrap_err(),
         OpenError::UnknownKind(0)
     );
-    unknown[77] = 11;
-    assert_eq!(inspect(&unknown).unwrap_err(), OpenError::UnknownKind(11));
+    unknown[77] = 12;
+    assert_eq!(inspect(&unknown).unwrap_err(), OpenError::UnknownKind(12));
 }
 
 #[test]
@@ -735,4 +736,16 @@ fn lk_06_a_number_more_than_2_pow_32_above_the_last_is_refused() {
     // An honest sender adds 1, which is always within reach.
     let ok = make(last + 1);
     assert!(open(&counter(), Role::Counter, &ok, allowed, |_| last).is_ok());
+}
+
+#[test]
+fn lk_08_a_range_is_sent_by_the_owner_to_a_counter_and_is_kind_11() {
+    assert_eq!(Kind::Range.to_byte(), 11);
+    assert_eq!(Kind::from_byte(11), Some(Kind::Range));
+    let m = owner_to_counter(1, Kind::Range, b"x");
+    assert_eq!(open_as_counter(&m).unwrap().kind, Kind::Range);
+    // Not from a counter to the owner, and not from a box.
+    assert!(!Kind::Range.allowed(Role::Counter, Role::Owner));
+    assert!(!Kind::Range.allowed(Role::Box, Role::Counter));
+    assert!(!Kind::Range.allowed(Role::Watch, Role::Counter));
 }
