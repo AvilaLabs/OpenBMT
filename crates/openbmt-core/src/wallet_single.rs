@@ -285,6 +285,16 @@ impl SingleKeyWallet {
         Ok(CompressedPublicKey(child.public_key))
     }
 
+    /// The compressed public key at `index` on `chain`, the key the script
+    /// at the same place pays to.
+    pub fn public_key(
+        &self,
+        chain: Keychain,
+        index: u32,
+    ) -> Result<CompressedPublicKey, SingleKeyError> {
+        self.key_at(chain, index)
+    }
+
     /// The script at `index` on `chain`: P2WPKH, 22 bytes.
     pub fn script(&self, chain: Keychain, index: u32) -> Result<ScriptBuf, SingleKeyError> {
         let key = self.key_at(chain, index)?;
@@ -757,6 +767,35 @@ mod tests {
         assert_eq!(
             w.first_receive_address().unwrap().to_string(),
             "bc1qyjassxtmzl02s8de8jw9365qmuvwg74udtp3vj"
+        );
+    }
+
+    #[test]
+    fn wl_06_the_public_key_is_the_one_the_script_pays_to() {
+        let xpub = Xpub::from_str(
+            "xpub6CgURS1GrKZkAoRGBTKYX9FhLgkKnQVZ6vdNBUbiu24xtRJ6RzLKpdg4CqsVyBLzimcJsviP59hSoGJEpTJiXE8bdBLw1qPC1DXRatKehb8",
+        )
+        .unwrap();
+        let w = SingleKeyWallet::new(Fingerprint::from_str("818bc9b6").unwrap(), 0, xpub).unwrap();
+        // The known-answer first address, from the key.
+        let key = w.public_key(Keychain::Receive, 0).unwrap();
+        assert_eq!(
+            Address::p2wpkh(&key, Network::Bitcoin).to_string(),
+            "bc1qyjassxtmzl02s8de8jw9365qmuvwg74udtp3vj"
+        );
+        // Every place: the key's script is the wallet's script.
+        for chain in [Keychain::Receive, Keychain::Change] {
+            for index in [0, 1, 7, 19] {
+                let key = w.public_key(chain, index).unwrap();
+                assert_eq!(
+                    ScriptBuf::new_p2wpkh(&key.wpubkey_hash()),
+                    w.script(chain, index).unwrap()
+                );
+            }
+        }
+        assert_eq!(
+            w.public_key(Keychain::Receive, 1 << 31),
+            Err(SingleKeyError::IndexOutOfRange)
         );
     }
 
