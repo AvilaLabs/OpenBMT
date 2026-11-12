@@ -325,22 +325,26 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | whyText3 | The inconvenience happens once. |
 | whyRealCases | Real cases |
 | realTitle | When someone else holds the money |
-| realIntro | Banks and payment companies usually pay on time. Sometimes they hold the money, and the business waits. |
-| realCase1Place | PayPal, United Kingdom, 2016 |
-| realCase1Text | A food company's sales jumped. Within a week PayPal held £44,000 of its takings, and on 1 February £27,000 was still held. |
-| realCase2Place | Silicon Valley Bank, United States, 2023 |
-| realCase2Text | A payroll company had $545 million of its customers' wages locked in the bank and lent $130 million of its own to pay their staff. It all came back. |
-| realCase3Place | Cyprus, 2013 |
-| realCase3Text | Savers at the largest bank lost 47.5% of everything above €100,000. Twelve years on, 4,524 depositors had been paid about €9,800 each. |
-| realCase4Place | Lebanon, since 2019 |
-| realCase4Text | $107 billion of deposits could not be freely taken out. Dollars came out in local money at a loss of 70% or more. |
+| realIntro | Banks and payment companies usually pay on time. When one fails, or a government steps in, a business can wait years for its money, or lose it. |
+| realCase1Place | Lebanon, since 2019 |
+| realCase1End | Still held |
+| realCase1Text | In a financial crisis, the banks stopped letting depositors take out their $107 billion. Dollars came out in local money at a loss of 70% or more. In 2025 most could still take out only about $500 a month. |
+| realCase2Place | Laiki Bank, Cyprus, 2013 |
+| realCase2End | 6¢ per euro back |
+| realCase2Text | To rescue the banks, the government took the deposits above €100,000. Six years later, savers had got back about 6 cents of each euro above that limit. |
+| realCase3Place | TMON and WeMakePrice, South Korea, 2024 |
+| realCase3End | Still unpaid |
+| realCase3Text | Two online marketplaces collected the money for their sellers' sales, ran out of cash, and stopped paying. About 48,000 sellers were owed $900 million. At the last report they were still waiting. |
+| realCase4Place | Synapse, United States, 2024 |
+| realCase4End | 18¢ per dollar back |
+| realCase4Text | A company that sat between apps and their banks went bankrupt, and its records did not match the banks'. One app's customers were offered back 18 cents of each dollar. Deposit insurance did not apply. |
 | realBitcoinTitle | Why your own bitcoin is different |
 | realBitcoinText | Bitcoin in your own wallet is not held by a bank or a payment company. Nobody can put a hold on it, close the account or cap your withdrawals, because there is no account. It moves only when your keys sign. |
 | realKeysTitle | Why the keys need so much care |
 | realKeysText | With nobody in the middle, nobody can undo a mistake either. Whoever has your 12 words can spend the money, and if every copy is lost, nobody can give it back. So the words are made where no one can see them, written by hand, and put on steel. |
 | realCoinTitle | Why a coin or a die |
 | realCoinText | Phones and computers make random numbers with chips and software, and those have had faults before. A coin or a die has no chip and no software, so nothing can reach into it from outside. The key maker only turns your flips into words, offline, and shows its work so you can check it by hand. |
-| realMore | More cases from 11 countries, with their sources, are in the handbook under "When someone else holds the money". |
+| realMore | More cases, with their sources and how each ended, are in the handbook under "When someone else holds the money". |
 | kgTitle | Make your cold wallet |
 | kgStepBadge | Step {n} of {total} |
 | kgNext | Next |

@@ -2729,10 +2729,12 @@ object AppModelTest {
         r.back(); ok(r.step == FirstRunStep.Why, "back from the real cases to the why screen")
         val shown = FirstRunWords.all().toMap()
         ok(shown["whyRealCases"] == "Real cases" && shown["realTitle"] == "When someone else holds the money" &&
-            shown["realCase4Place"] == "Lebanon, since 2019" && shown["whyText2"]!!.contains("with a coin or a die."), "the real cases words are the ones of the words file")
+            shown["realCase1Place"] == "Lebanon, since 2019" && shown["realCase4End"] == "18¢ per dollar back" && shown["whyText2"]!!.contains("with a coin or a die."), "the real cases words are the ones of the words file")
+        ok(listOf(1, 2, 3, 4).map { shown["realCase${it}Place"]!!.substringBefore(",") } == listOf("Lebanon", "Laiki Bank", "TMON and WeMakePrice", "Synapse"), "the four cases come worst first, in the order of the words file")
+        ok(source("src/android/FirstRun.kt").contains("contentDescription = \"\$place. \$end. \$text\""), "each case is spoken as its place, how it ended and its text")
         val screensMdText = File(appDir, "../../docs/screens/owner-app.md").readText()
-        for (k in listOf("whyRealCases", "realTitle", "realIntro", "realCase1Place", "realCase1Text", "realCase2Place", "realCase2Text",
-            "realCase3Place", "realCase3Text", "realCase4Place", "realCase4Text", "realBitcoinTitle", "realBitcoinText", "realKeysTitle", "realKeysText", "realCoinTitle", "realCoinText", "realMore")) {
+        for (k in listOf("whyRealCases", "realTitle", "realIntro", "realCase1Place", "realCase1End", "realCase1Text", "realCase2Place", "realCase2End", "realCase2Text",
+            "realCase3Place", "realCase3End", "realCase3Text", "realCase4Place", "realCase4End", "realCase4Text", "realBitcoinTitle", "realBitcoinText", "realKeysTitle", "realKeysText", "realCoinTitle", "realCoinText", "realMore")) {
             ok(shown.containsKey(k) && screensMdText.contains("| $k |"), "docs/screens/owner-app.md has $k")
         }
         r.next(); r.back()

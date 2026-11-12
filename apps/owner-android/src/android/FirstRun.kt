@@ -279,17 +279,18 @@ private fun Controller.showWhy(r: FirstRun) {
 
 /** Four cases of money held by a bank or a payment company: words only, no link, no picture, no network. */
 private fun Controller.showRealCases(r: FirstRun) {
-    fun case(place: String, text: String): View = stack(line(place, muted = true), ui.text(text, 15f), gap = 4)
+    fun case(place: String, end: String, text: String): View =
+        stack(PlaceEnd(act, line(place, muted = true), endChip(end), ui.px(8)), ui.text(text, 15f), gap = 4).also { it.contentDescription = "$place. $end. $text" }
     fun part(title: String, text: String): View = stack(ui.text(title, Type.BODY, bold = true), para(text), gap = 6)
     val back: () -> Unit = { r.back(); showFirstRun() }
     stepScreen(
         FirstRunWords.shopTitle,
         listOf(
             heading(FirstRunWords.realTitle), para(FirstRunWords.realIntro),
-            case(FirstRunWords.realCase1Place, FirstRunWords.realCase1Text),
-            case(FirstRunWords.realCase2Place, FirstRunWords.realCase2Text),
-            case(FirstRunWords.realCase3Place, FirstRunWords.realCase3Text),
-            case(FirstRunWords.realCase4Place, FirstRunWords.realCase4Text),
+            case(FirstRunWords.realCase1Place, FirstRunWords.realCase1End, FirstRunWords.realCase1Text),
+            case(FirstRunWords.realCase2Place, FirstRunWords.realCase2End, FirstRunWords.realCase2Text),
+            case(FirstRunWords.realCase3Place, FirstRunWords.realCase3End, FirstRunWords.realCase3Text),
+            case(FirstRunWords.realCase4Place, FirstRunWords.realCase4End, FirstRunWords.realCase4Text),
             part(FirstRunWords.realBitcoinTitle, FirstRunWords.realBitcoinText),
             part(FirstRunWords.realKeysTitle, FirstRunWords.realKeysText),
             part(FirstRunWords.realCoinTitle, FirstRunWords.realCoinText),
