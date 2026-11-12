@@ -1416,6 +1416,93 @@ fn as_89_an_abandoned_approval_whose_coin_another_transaction_spent_is_released(
 }
 
 #[test]
+fn as_89_a_transaction_that_confirms_while_its_approval_is_open_pays_its_entries_and_ends_it() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let refund = rig.queue_refund(10_000);
+    rig.fund(300_000);
+    let (_, session) = rig.node.build_request_for_signer(1_000, NOW).unwrap();
+    let session = session.unwrap();
+    let mut signer = key1();
+    let file = rig
+        .node
+        .export_for_signer(
+            &session,
+            0,
+            &mut signer,
+            &kit().accounts[0],
+            NOW,
+            |_| Ok(()),
+        )
+        .unwrap();
+    let tx = bitcoin::psbt::Psbt::deserialize(&file.psbt)
+        .unwrap()
+        .unsigned_tx;
+    let txid = tx.compute_txid();
+    // The signer's answer was never brought back: the transaction is
+    // finished and sent elsewhere, and a block holds it.
+    rig.mine(std::slice::from_ref(&tx));
+    let entry = rig
+        .node
+        .owner()
+        .refunds()
+        .iter()
+        .find(|r| r.id == refund)
+        .cloned()
+        .unwrap();
+    assert_eq!(entry.stage, Stage::Paid { txid });
+    assert!(!rig.node.owner().open_sessions().contains(&session));
+    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    assert_eq!(rig.node.paid_log().len(), 1);
+    // There is nothing left to abandon.
+    assert!(rig.node.abandon_session(&session).is_err());
+    drop(rig);
+    let rig = start(&dir, &Setup::default()).unwrap();
+    assert!(matches!(
+        rig.node.owner().refunds()[0].stage,
+        Stage::Paid { .. }
+    ));
+}
+
+#[test]
+fn as_89_an_exported_approval_whose_coin_is_gone_is_not_abandoned_into_the_queue() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    rig.queue_refund(10_000);
+    rig.fund(300_000);
+    let (_, session) = rig.node.build_request_for_signer(1_000, NOW).unwrap();
+    let session = session.unwrap();
+    let mut signer = key1();
+    let file = rig
+        .node
+        .export_for_signer(
+            &session,
+            0,
+            &mut signer,
+            &kit().accounts[0],
+            NOW,
+            |_| Ok(()),
+        )
+        .unwrap();
+    let tx = bitcoin::psbt::Psbt::deserialize(&file.psbt)
+        .unwrap()
+        .unsigned_tx;
+    // A block the node applied spent a coin of the file in a transaction
+    // that is not the file's, which nothing here was watching for.
+    let other = tx_from(tx.input[0].previous_output, &[(&external(77), 1_000)]);
+    rig.mine(&[other]);
+    let before = rig.node.owner().snapshot().unwrap();
+    assert!(rig.node.abandon_session(&session).is_err());
+    // Nothing changed: the entry is still in its approval, held.
+    assert_eq!(rig.node.owner().snapshot().unwrap(), before);
+    assert!(rig.node.owner().open_sessions().contains(&session));
+    assert!(matches!(
+        rig.node.owner().refunds()[0].stage,
+        Stage::InSession { .. }
+    ));
+}
+
+#[test]
 fn nr_86_a_block_that_leaves_sends_a_confirmed_transaction_again() {
     let dir = Dir::new();
     let mut rig = start(&dir, &Setup::default()).unwrap();

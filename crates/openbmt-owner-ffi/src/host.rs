@@ -1158,12 +1158,7 @@ impl Entry {
                     "no open approval has this number",
                 ));
             }
-            let write = st.node.queue_writer();
-            st.node
-                .owner_mut()
-                .map_err(|e| node_error(&e))?
-                .abandon_session(&id, &write)
-                .map_err(|e| queue_error(&e))
+            st.node.abandon_session(&id).map_err(|e| node_error(&e))
         })
     }
 

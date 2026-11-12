@@ -1464,6 +1464,29 @@ impl<P: OwnerPort> OwnerNode<P> {
         Ok(taken)
     }
 
+    /// AS-66, AS-89: give up on an open approval. One whose file went to the
+    /// hardware signer is refused while a coin it spends is gone from the
+    /// view: something spent it that the node was not told of, perhaps the
+    /// transaction itself, and the entries must not be planned again freely.
+    pub fn abandon_session(&mut self, id: &[u8; 32]) -> Result<(), NodeError> {
+        let gone = self
+            .owner
+            .exported_transactions(Some(id))
+            .iter()
+            .flat_map(|e| e.inputs.iter())
+            .any(|op| !self.known_input(op));
+        if gone {
+            return Err(NodeError::Owner(OwnerError::Refused(
+                openbmt_owner::Refusal::WrongStage(
+                    "its dropped transaction may still confirm; ask for it again",
+                ),
+            )));
+        }
+        let write = self.queue_writer();
+        self.owner_mut()?.abandon_session(id, write)?;
+        Ok(())
+    }
+
     // Sending.
 
     /// NR-86, NR-91: send a finished transaction, through the second driver
@@ -1728,6 +1751,35 @@ impl<P: OwnerPort> OwnerNode<P> {
     fn settle_elsewhere(&mut self, block: &BlockHash, spent_by: &[(OutPoint, Txid)]) {
         if self.halted.is_some() || spent_by.is_empty() {
             return;
+        }
+        // An approval still open whose file went to the signer: the
+        // transaction may have been finished and sent without the owner.
+        for open in self.owner.exported_transactions(None) {
+            if !spent_by.iter().any(|(_, by)| *by == open.txid) {
+                continue;
+            }
+            if self.ready_for_queue_write().is_err() {
+                self.note(format!("{} waits for key 1 recovery", open.txid));
+                return;
+            }
+            let dir = self.dir.clone();
+            if let Err(e) = self.log_paid_entries(&open.txid, None, open.refunds, open.cash_out) {
+                self.note(format!(
+                    "{} is in block {block} but could not be logged: {e}",
+                    open.txid
+                ));
+                continue;
+            }
+            match self
+                .owner
+                .mark_exported_confirmed(&open.txid, |b| write_queue_file(&dir, b))
+            {
+                Ok(()) => self.note(format!(
+                    "{} was given to the signer and is in block {block}: its entries are paid",
+                    open.txid
+                )),
+                Err(e) => self.note(format!("{} could not be marked paid: {e}", open.txid)),
+            }
         }
         let kept: Vec<(Txid, Vec<OutPoint>)> = self
             .owner

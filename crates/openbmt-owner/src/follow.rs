@@ -248,6 +248,36 @@ impl Owner {
         Ok(dropped)
     }
 
+    /// AS-89: a transaction that was given to a hardware signer was seen
+    /// confirmed while its approval is still open. Its entries are paid with
+    /// its ID exactly as taking it would have left them, its item leaves the
+    /// approval, and the approval ends with its last item, so there is
+    /// nothing left to abandon.
+    pub fn mark_exported_confirmed<E>(
+        &mut self,
+        txid: &Txid,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), OwnerError<E>> {
+        let mut next = self.state.clone();
+        let found = next.sessions.iter().find_map(|s| {
+            let exported = crate::state::exported_in(s).ok()?;
+            let record = exported.into_iter().find(|e| e.txid == *txid)?;
+            let number = s.frozen.iter().find_map(|(n, f)| match f {
+                crate::state::Frozen::Spend { txid: t, .. } if t == txid => Some(*n),
+                _ => None,
+            })?;
+            Some((s.id, number, record))
+        });
+        let (session, number, record) = found.ok_or(Refusal::UnknownTransaction(*txid))?;
+        for id in record.refunds.iter().copied().chain(record.cash_out) {
+            if let Some(stage) = next.stage_mut(id) {
+                *stage = Stage::Paid { txid: *txid };
+            }
+        }
+        self.remove_item(&mut next, &session, number)?;
+        self.commit(next, persist)
+    }
+
     /// AS-89: another transaction spent a coin of the transaction that was
     /// given to a hardware signer, so it can no longer confirm. It is no
     /// longer watched. The outpoints kept with its entries stay: while any

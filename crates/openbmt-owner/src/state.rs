@@ -1004,6 +1004,18 @@ impl Owner {
         &self.state.elsewhere
     }
 
+    /// AS-89: the transactions of one open session that were given to a
+    /// hardware signer, or of every open session when `session` is `None`.
+    /// Each may be finished and sent without the owner.
+    pub fn exported_transactions(&self, session: Option<&[u8; 32]>) -> Vec<SignedElsewhere> {
+        self.state
+            .sessions
+            .iter()
+            .filter(|s| session.is_none_or(|id| s.id == *id))
+            .flat_map(|s| exported_in(s).unwrap_or_default())
+            .collect()
+    }
+
     /// AS-96, AS-89: take item `number` out of the open session `session`.
     /// The session stays while another item is in it, with its request made
     /// again without the item, and ends with the last.
@@ -1042,7 +1054,7 @@ impl Owner {
 
 /// AS-89: the transactions of an open session that were given to a hardware
 /// signer: their IDs, the entries they pay and what they spend.
-fn exported_in(session: &OpenSession) -> Result<Vec<SignedElsewhere>, Refusal> {
+pub(crate) fn exported_in(session: &OpenSession) -> Result<Vec<SignedElsewhere>, Refusal> {
     let mut gone = Vec::new();
     let request = Request::from_bytes(&session.request).map_err(Refusal::Frame)?;
     for (number, frozen) in &session.frozen {

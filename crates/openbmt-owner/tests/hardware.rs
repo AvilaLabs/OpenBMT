@@ -1119,6 +1119,36 @@ fn as_89_another_transaction_spending_its_coin_releases_the_protection() {
 }
 
 #[test]
+fn as_89_an_exported_transaction_confirming_with_its_approval_open_pays_and_ends_it() {
+    let mut f = fixture();
+    let file = export(&mut f);
+    assert_eq!(f.rig.owner.exported_transactions(None).len(), 1);
+    let store = &f.rig.owner_store;
+    ok(f.rig
+        .owner
+        .mark_exported_confirmed(&file.txid, |b| store.put(b)));
+    assert_eq!(
+        f.rig.owner.refunds()[0].stage,
+        Stage::Paid { txid: file.txid }
+    );
+    assert!(!f.rig.owner.open_sessions().contains(&f.session));
+    assert!(f.rig.owner.exported_transactions(None).is_empty());
+    assert!(f.rig.owner.signed_elsewhere().is_empty());
+    restart(&mut f);
+    assert_eq!(
+        f.rig.owner.refunds()[0].stage,
+        Stage::Paid { txid: file.txid }
+    );
+    // Not exported, or not known: refused.
+    let store = &f.rig.owner_store;
+    assert!(f
+        .rig
+        .owner
+        .mark_exported_confirmed(&file.txid, |b| store.put(b))
+        .is_err());
+}
+
+#[test]
 fn as_89_a_failed_store_changes_nothing() {
     let mut f = fixture();
     export(&mut f);

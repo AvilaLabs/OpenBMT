@@ -696,6 +696,16 @@ app, which holds the approver key.
   it is no longer watched, and the entries keep their outpoints as AS-68
   has it. An approval abandoned before the export keeps nothing and behaves
   as AS-66 says.
+
+  The transaction is watched from the moment of the export, not only after
+  an abandon. The caller reports `mark_exported_confirmed` when one that is
+  still in an open approval is seen confirmed: its entries are paid with its
+  ID as if it had been taken, its item leaves the approval, which ends with
+  its last item, and there is nothing to abandon. The node abandons an
+  exported approval only while every coin it spends is still in its coin
+  view; if one is gone, something spent it that was not reported, perhaps the
+  transaction itself, so the abandon is refused with the words of "its
+  dropped transaction may still confirm" and nothing changes.
 - **AS-97.** `registration` writes the wallet for a signer: the multisig
   text file (`Name` of at most 15 printable characters made from the shop's
   name, `Policy: 2 of 3`, `Derivation` as BIP 48, `Format: P2WSH`, then one
