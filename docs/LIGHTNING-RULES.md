@@ -61,10 +61,12 @@ version they describe.
   (2026-09-22), 26.06.9 (2026-10-07) and 26.06.10 (2026-11-04)
   (https://github.com/ElementsProject/lightning/releases). So the node must
   run a current release: Core Lightning 26.06.10 or later, and LND's current
-  release, which was v0.21.6-beta on 2026-10-30
+  release, which was v0.21.8-beta on 2026-11-11
   (https://github.com/lightningnetwork/lnd/releases). The setup words say so,
   and say that the counter holds a key to the node that is limited to
-  invoices. Reading a credential is never enough to trust it, so every setup
+  invoices. The counter cannot check the node's release: `getinfo`, the call
+  that names it, is one the credential must be refused (LN-06, LN-09), and a
+  credential wide enough to read it would be wider than invoices need. Reading a credential is never enough to trust it, so every setup
   probes it (LN-06, LN-09).
 
 ## 3. LND
