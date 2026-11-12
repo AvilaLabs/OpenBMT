@@ -733,3 +733,31 @@ path = "fuzz_targets/signed_range_decode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "own_offer_decode"
+path = "fuzz_targets/own_offer_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "own_request_decode"
+path = "fuzz_targets/own_request_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "own_bundle_decode"
+path = "fuzz_targets/own_bundle_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "range_ledger_decode"
+path = "fuzz_targets/range_ledger_decode.rs"
+test = false
+doc = false
+bench = false

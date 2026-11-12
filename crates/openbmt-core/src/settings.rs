@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use crate::approval::ChangeClass;
 use crate::batch::PinnedRoots;
 use crate::currency::ShopCurrency;
 use crate::identity::{tagged_hash, DeviceId, Identity, Sig, TAG_SETTINGS};
@@ -1011,6 +1012,11 @@ pub enum SettingsError {
     StaleVersion { current: u32, got: u32 },
     /// The values are not acceptable; the text says which rule failed.
     Invalid(&'static str),
+    /// CR-236: a shop that uses its own wallet has no Key app, and this
+    /// change needs a counter's confirmation or a wallet signature
+    /// (`docs/APPROVAL-RULES.md`), which are not joined to the settings yet.
+    /// The class says which.
+    ConfirmationRequired(ChangeClass),
 }
 
 impl fmt::Display for SettingsError {
@@ -1020,6 +1026,10 @@ impl fmt::Display for SettingsError {
             Self::ApproverRequired => write!(f, "this change needs the Key app's co-signature"),
             Self::ApproverSignatureInvalid => write!(f, "Key app signature is wrong"),
             Self::Invalid(reason) => write!(f, "settings are not valid: {reason}"),
+            Self::ConfirmationRequired(class) => write!(
+                f,
+                "CR-236: this change ({class:?}) must be confirmed at a counter"
+            ),
             Self::StaleVersion { current, got } => {
                 write!(
                     f,
@@ -1031,6 +1041,35 @@ impl fmt::Display for SettingsError {
 }
 
 impl std::error::Error for SettingsError {}
+
+/// Who may sign settings for a counter: the two pinned roots of a shop with
+/// a Key app, or the owner root alone of a shop that uses its own wallet
+/// (`docs/COUNTER-RULES.md` CR-236).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Authority {
+    /// The owner and Key app roots. A change that loosens needs both
+    /// signatures.
+    KeyApp(PinnedRoots),
+    /// The owner root alone. The class of a change is computed from the
+    /// settings ([`classify`]): a Free change is taken with the owner's
+    /// signature, a Loosen or Redirect change is refused until a counter's
+    /// confirmation or a wallet signature is joined to the settings. No Key
+    /// app signature is taken.
+    OwnWallet {
+        /// The owner root.
+        owner: DeviceId,
+    },
+}
+
+impl Authority {
+    /// The owner root.
+    pub fn owner(&self) -> &DeviceId {
+        match self {
+            Self::KeyApp(roots) => &roots.owner,
+            Self::OwnWallet { owner } => owner,
+        }
+    }
+}
 
 /// Settings with their signatures.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1052,8 +1091,24 @@ impl SignedSettings {
         roots: &PinnedRoots,
         current: Option<&Settings>,
     ) -> Result<Change, SettingsError> {
+        self.verify_with(&Authority::KeyApp(*roots), current)
+    }
+
+    /// [`SignedSettings::verify`] under an [`Authority`]. Under
+    /// `Authority::OwnWallet` the owner root's signature, the values, the
+    /// version and the carried limits are checked as for the Key app; a Key
+    /// app signature is refused; first settings (`current` is `None`) are
+    /// taken with no classification (CR-231); and a change from settings in
+    /// force is classified ([`crate::approval::classify`]): a Free one is
+    /// taken, a Loosen or Redirect one is
+    /// [`SettingsError::ConfirmationRequired`] (CR-236).
+    pub fn verify_with(
+        &self,
+        authority: &Authority,
+        current: Option<&Settings>,
+    ) -> Result<Change, SettingsError> {
         let h = self.settings.hash();
-        if !roots.owner.verify_digest(&h, &self.owner_sig) {
+        if !authority.owner().verify_digest(&h, &self.owner_sig) {
             return Err(SettingsError::OwnerSignatureInvalid);
         }
         self.settings.validate()?;
@@ -1071,12 +1126,25 @@ impl SignedSettings {
         let change = current.map_or(Change::Loosening, |cur| {
             classify_change(cur, &self.settings)
         });
-        match (&self.approver_sig, change) {
-            (Some(sig), _) if !roots.approver.verify_digest(&h, sig) => {
-                Err(SettingsError::ApproverSignatureInvalid)
+        match authority {
+            Authority::KeyApp(roots) => match (&self.approver_sig, change) {
+                (Some(sig), _) if !roots.approver.verify_digest(&h, sig) => {
+                    Err(SettingsError::ApproverSignatureInvalid)
+                }
+                (None, Change::Loosening) => Err(SettingsError::ApproverRequired),
+                _ => Ok(change),
+            },
+            Authority::OwnWallet { .. } => {
+                if self.approver_sig.is_some() {
+                    return Err(SettingsError::Invalid(
+                        "CR-236: settings of a shop with no Key app carry no Key app signature",
+                    ));
+                }
+                match current.map(|cur| crate::approval::classify(cur, &self.settings)) {
+                    None | Some(ChangeClass::Free) => Ok(change),
+                    Some(class) => Err(SettingsError::ConfirmationRequired(class)),
+                }
             }
-            (None, Change::Loosening) => Err(SettingsError::ApproverRequired),
-            _ => Ok(change),
         }
     }
 }
@@ -1087,14 +1155,26 @@ impl SignedSettings {
     /// and `validate`. For settings kept after they were checked as a change
     /// (a counter's settings file).
     pub fn verify_signatures(&self, roots: &PinnedRoots) -> Result<(), SettingsError> {
+        self.verify_signatures_with(&Authority::KeyApp(*roots))
+    }
+
+    /// [`SignedSettings::verify_signatures`] under an [`Authority`]. Under
+    /// `Authority::OwnWallet` a Key app signature is refused.
+    pub fn verify_signatures_with(&self, authority: &Authority) -> Result<(), SettingsError> {
         let h = self.settings.hash();
-        if !roots.owner.verify_digest(&h, &self.owner_sig) {
+        if !authority.owner().verify_digest(&h, &self.owner_sig) {
             return Err(SettingsError::OwnerSignatureInvalid);
         }
-        if let Some(sig) = &self.approver_sig {
-            if !roots.approver.verify_digest(&h, sig) {
+        match (authority, &self.approver_sig) {
+            (Authority::KeyApp(roots), Some(sig)) if !roots.approver.verify_digest(&h, sig) => {
                 return Err(SettingsError::ApproverSignatureInvalid);
             }
+            (Authority::OwnWallet { .. }, Some(_)) => {
+                return Err(SettingsError::Invalid(
+                    "CR-236: settings of a shop with no Key app carry no Key app signature",
+                ));
+            }
+            _ => {}
         }
         self.settings.validate()
     }
@@ -1155,7 +1235,7 @@ impl SignedSettings {
 /// The settings a counter has accepted so far.
 #[derive(Debug)]
 pub struct SettingsStore {
-    roots: PinnedRoots,
+    authority: Authority,
     min_version: u32,
     current: Option<SignedSettings>,
 }
@@ -1171,8 +1251,14 @@ impl SettingsStore {
     /// passes the newest version it knew of, so an old signed copy cannot be
     /// replayed into an empty store.
     pub fn with_floor(roots: PinnedRoots, min_version: u32) -> Self {
+        Self::with_authority(Authority::KeyApp(roots), min_version)
+    }
+
+    /// A store under any [`Authority`], with the version floor of
+    /// [`SettingsStore::with_floor`].
+    pub fn with_authority(authority: Authority, min_version: u32) -> Self {
         Self {
-            roots,
+            authority,
             min_version,
             current: None,
         }
@@ -1191,7 +1277,7 @@ impl SettingsStore {
                 got: signed.settings.version,
             });
         }
-        let change = signed.verify(&self.roots, self.current())?;
+        let change = signed.verify_with(&self.authority, self.current())?;
         self.current = Some(signed);
         Ok(change)
     }

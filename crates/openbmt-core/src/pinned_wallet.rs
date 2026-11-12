@@ -84,6 +84,16 @@ impl From<DecodeError> for PinnedError {
     }
 }
 
+/// The kind of wallet a description is, for the line a person reads beneath
+/// the first address (CR-228).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WalletKind {
+    /// A single-key native SegWit account.
+    SingleKey,
+    /// The 2-of-3 wallet.
+    TwoOfThree,
+}
+
 /// The wallet a counter derives its addresses from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinnedWallet {
@@ -106,6 +116,14 @@ impl PinnedWallet {
     /// The wallet.
     pub fn wallet(&self) -> &ImportedWallet {
         &self.wallet
+    }
+
+    /// The kind of wallet.
+    pub fn kind(&self) -> WalletKind {
+        match &self.wallet {
+            ImportedWallet::Single(_) => WalletKind::SingleKey,
+            ImportedWallet::Multisig(_) => WalletKind::TwoOfThree,
+        }
     }
 
     /// The canonical description text, checksum included.
@@ -401,6 +419,57 @@ impl RangeBook {
         let index = slot.next;
         slot.next += 1;
         Ok(index)
+    }
+
+    /// The ranges taken, in the order they were taken, each with the first
+    /// of its indexes not yet used.
+    pub fn taken(&self) -> Vec<(IndexRange, u32)> {
+        self.taken
+            .iter()
+            .map(|t| {
+                (
+                    IndexRange {
+                        counter: self.counter,
+                        start: t.start,
+                        end: t.end,
+                    },
+                    t.next,
+                )
+            })
+            .collect()
+    }
+
+    /// A book made again from what [`RangeBook::taken`] gave. It is read as
+    /// strictly as the book keeps itself: every range has a valid shape and
+    /// is for `counter`, no two ranges overlap (the book never takes one that
+    /// does, WL-25, WL-26), every position is inside its range, and a range
+    /// has a used index only if each range before it is used up (`next`
+    /// hands out in the order of taking, WL-27).
+    pub fn restore(counter: DeviceId, taken: &[(IndexRange, u32)]) -> Result<Self, RangeError> {
+        let mut book = Self::new(counter);
+        let mut open = false;
+        for (range, next) in taken {
+            range.check_shape()?;
+            if range.counter != counter {
+                return Err(RangeError::WrongCounter);
+            }
+            if book.taken.iter().any(|t| range.overlaps(t.start, t.end)) {
+                return Err(RangeError::OverlapsTaken);
+            }
+            if *next < range.start || *next > range.end {
+                return Err(RangeError::Empty);
+            }
+            if open && *next > range.start {
+                return Err(RangeError::OverlapsUsed);
+            }
+            open |= *next < range.end;
+            book.taken.push(Taken {
+                start: range.start,
+                end: range.end,
+                next: *next,
+            });
+        }
+        Ok(book)
     }
 
     /// How many unused indexes are left over all ranges taken.

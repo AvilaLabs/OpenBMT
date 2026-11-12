@@ -131,6 +131,17 @@ impl SignedCommand {
         counter: &DeviceId,
         last_seq: u64,
     ) -> Result<(), CommandError> {
+        self.verify_owner(&roots.owner, counter, last_seq)
+    }
+
+    /// [`SignedCommand::verify`] against the owner root alone, for a counter
+    /// that was paired with the shop's own wallet and pinned no Key app.
+    pub fn verify_owner(
+        &self,
+        owner: &DeviceId,
+        counter: &DeviceId,
+        last_seq: u64,
+    ) -> Result<(), CommandError> {
         if self.command.counter != *counter {
             return Err(CommandError::WrongCounter);
         }
@@ -140,10 +151,7 @@ impl SignedCommand {
                 got: self.command.seq,
             });
         }
-        if !roots
-            .owner
-            .verify_tagged(TAG_COMMAND, &self.command.encode(), &self.owner_sig)
-        {
+        if !owner.verify_tagged(TAG_COMMAND, &self.command.encode(), &self.owner_sig) {
             return Err(CommandError::OwnerSignatureInvalid);
         }
         Ok(())

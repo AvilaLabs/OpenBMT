@@ -145,6 +145,19 @@ impl SignedHeartbeat {
         counter: &DeviceId,
         last_seq: u64,
     ) -> Result<&WatcherHeartbeat, HeartbeatError> {
+        self.verify_owner(&roots.owner, watch, counter, last_seq)
+    }
+
+    /// [`SignedHeartbeat::verify`] against the owner root alone, for a
+    /// counter that was paired with the shop's own wallet and pinned no Key
+    /// app.
+    pub fn verify_owner(
+        &self,
+        owner: &DeviceId,
+        watch: Option<&DeviceId>,
+        counter: &DeviceId,
+        last_seq: u64,
+    ) -> Result<&WatcherHeartbeat, HeartbeatError> {
         if self.heartbeat.counter != *counter {
             return Err(HeartbeatError::WrongCounter);
         }
@@ -155,9 +168,7 @@ impl SignedHeartbeat {
             });
         }
         let body = self.heartbeat.encode();
-        let by_owner = roots
-            .owner
-            .verify_tagged(TAG_HEARTBEAT, &body, &self.owner_sig);
+        let by_owner = owner.verify_tagged(TAG_HEARTBEAT, &body, &self.owner_sig);
         let by_watch =
             watch.is_some_and(|w| w.verify_tagged(TAG_WATCH_HEARTBEAT, &body, &self.owner_sig));
         if !by_owner && !by_watch {

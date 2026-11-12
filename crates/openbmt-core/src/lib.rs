@@ -19,6 +19,7 @@ pub mod heartbeat;
 pub mod hkdf;
 pub mod identity;
 pub mod pairing;
+pub mod pairing_own;
 pub mod pinned_wallet;
 pub mod policy;
 pub mod records;

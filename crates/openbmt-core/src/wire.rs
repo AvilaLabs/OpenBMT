@@ -17,7 +17,9 @@
 //! sale watch, written by the `openbmt-watch` crate), `OBMG` (the counter's
 //! own state, "desk") and `OBML` (a stored sale), the last two written by the
 //! `openbmt-counter` crate, and `OBMT` (the owner's signed watcher
-//! heartbeat). The address book (`OBMA`) and the header store (`OBMW`) have
+//! heartbeat). An own-wallet pairing has `OBM-` (offer), `OBM.` (request),
+//! `OBM/` (bundle), `OBM:` (the counter's record) and `OBM;` (the range
+//! book), beside `OBM)` and `OBM*` of `pinned_wallet`. The address book (`OBMA`) and the header store (`OBMW`) have
 //! their own magics in the crates that write them.
 //!
 //! [`Reader`], [`start`], [`put_opt_u64`] and [`len_u32`] are public so that
@@ -82,6 +84,17 @@ pub const MAGIC_COUNTER_SALE: [u8; 4] = *b"OBML";
 pub const MAGIC_BOX_CLAIM: [u8; 4] = *b"OBM5";
 /// Magic of the welcome a Box takes (BX-15).
 pub const MAGIC_BOX_WELCOME: [u8; 4] = *b"OBMM";
+/// Magic of an [`OwnOffer`](crate::pairing_own::OwnOffer) (CR-227).
+pub const MAGIC_OWN_OFFER: [u8; 4] = *b"OBM-";
+/// Magic of an [`OwnRequest`](crate::pairing_own::OwnRequest) (CR-229).
+pub const MAGIC_OWN_REQUEST: [u8; 4] = *b"OBM.";
+/// Magic of an [`OwnBundle`](crate::pairing_own::OwnBundle) (CR-230).
+pub const MAGIC_OWN_BUNDLE: [u8; 4] = *b"OBM/";
+/// Magic of the counter's record of an own-wallet pairing (CR-233, written
+/// by the `openbmt-counter-node` crate).
+pub const MAGIC_OWN_PAIRING_RECORD: [u8; 4] = *b"OBM:";
+/// Magic of a counter's range book slot (CR-234).
+pub const MAGIC_RANGE_BOOK: [u8; 4] = *b"OBM;";
 /// Magic of a [`SignedRelayHint`](crate::relay::SignedRelayHint), the relay
 /// for counters (CR-132).
 pub const MAGIC_RELAY_FOR_COUNTERS: [u8; 4] = *b"OBMz";

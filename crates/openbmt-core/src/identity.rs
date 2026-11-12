@@ -36,6 +36,17 @@ pub const TAG_PAIR_OFFER: &str = "OpenBMT/pair-offer/v1";
 pub const TAG_PAIR_REQUEST: &str = "OpenBMT/pair-request/v1";
 /// Tag for the digest behind the session words.
 pub const TAG_PAIR_SESSION: &str = "OpenBMT/pair-session/v1";
+/// Tag for the owner root's signature on a pairing with the shop's own
+/// wallet (CR-230).
+pub const TAG_PAIRING_OWN: &str = "OpenBMT/pairing-own/v1";
+/// Tag for the binding of a counter's request to the own-wallet offer it
+/// was made for (CR-229).
+pub const TAG_PAIR_OWN_BINDING: &str = "OpenBMT/pair-own-binding/v1";
+/// Tag for the digest behind the session words of an own-wallet pairing
+/// (CR-229).
+pub const TAG_PAIR_OWN_SESSION: &str = "OpenBMT/pair-own-session/v1";
+/// Tag for the counter's signature on its own-wallet pairing request.
+pub const TAG_PAIR_OWN_REQUEST: &str = "OpenBMT/pair-own-request/v1";
 /// Tag for owner-signed commands to a counter.
 pub const TAG_COMMAND: &str = "OpenBMT/command/v1";
 /// Tag for the owner's signed watcher heartbeat to a counter.

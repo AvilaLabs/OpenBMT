@@ -32,6 +32,10 @@ exactly the input bytes.
 | `pair_offer_decode` | `PairOffer::from_bytes` |
 | `pinned_wallet_decode` | `PinnedWallet::from_bytes`; on success the bytes encode back exactly, the text reads again through the import, and addresses at 0, 1, 999 and 2^31 derive without a panic |
 | `signed_range_decode` | `SignedRange::from_bytes`; on success the bytes encode back exactly, the range does not verify under a key it was never signed by, and the range book takes it and hands out an index without a panic |
+| `own_offer_decode` | `OwnOffer::from_bytes` (CR-227): re-encode equality, the main network only, and the first address and the binding of any offer that decodes, on the input as it is and behind the frame header |
+| `own_request_decode` | `OwnRequest::from_bytes` (CR-229), with re-encode equality, on the input as it is and behind the frame header |
+| `own_bundle_decode` | `OwnBundle::from_bytes` (versions 1 and 2, the second with a relay, CR-230), with re-encode equality and the version that matches the relay, on the input as it is and behind each version's frame header |
+| `range_ledger_decode` | `RangeLedger::from_bytes` (the `OBM;` slot, CR-234) under a fixed owner root and counter: re-encode equality, and a ledger of no range hands out no index |
 | `pair_request_decode` | `PairRequest::from_bytes` |
 | `counter_bundle_decode` | `CounterBundle::from_bytes` (versions 1 and 2, the second with a relay, CR-130), with re-encode equality, on the input as it is and behind each version's frame header; a bundle with a relay must read as version 1 without it |
 | `counter_pairing_record_decode` | `PairingRecord::from_bytes` (the counter's stored pairing record, versions 1 and 2, CR-131), with re-encode equality, on the input as it is and behind each version's frame header |

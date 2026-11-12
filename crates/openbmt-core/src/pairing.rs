@@ -155,12 +155,12 @@ pub fn name_is_valid(name: &str) -> bool {
 
 /// A name as the wire carries it: length byte, then the UTF-8 bytes. The
 /// name must pass [`name_is_valid`].
-fn put_name(out: &mut Vec<u8>, name: &str) {
+pub(crate) fn put_name(out: &mut Vec<u8>, name: &str) {
     out.push(u8::try_from(name.len()).expect("a valid name fits the u8 length"));
     out.extend_from_slice(name.as_bytes());
 }
 
-fn read_name(r: &mut Reader<'_>) -> Result<String, DecodeError> {
+pub(crate) fn read_name(r: &mut Reader<'_>) -> Result<String, DecodeError> {
     let n = usize::from(r.u8()?);
     let name = std::str::from_utf8(r.take(n)?)
         .map_err(|_| DecodeError::NonCanonical("name is not UTF-8"))?;
@@ -400,7 +400,7 @@ impl PairingEntry {
         tagged_hash(TAG_PAIRING, &self.encode())
     }
 
-    fn read(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+    pub(crate) fn read(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
         let wallet = r.array()?;
         let counter = r.device_id()?;
         let name = read_name(r)?;
