@@ -298,6 +298,22 @@ pub enum Delivery {
     BoxWelcome(Vec<u8>),
 }
 
+/// AS-89: a transaction that was given to a hardware signer and whose open
+/// approval was then abandoned. Key 1's signature is on it already, so it
+/// may still be finished and sent, and it is watched until it confirms or
+/// can no longer confirm.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedElsewhere {
+    /// The transaction's ID. Signatures added later do not change it.
+    pub txid: Txid,
+    /// The refunds it pays.
+    pub refunds: Vec<u32>,
+    /// The cash-out it pays, if it is one.
+    pub cash_out: Option<u32>,
+    /// What it spends, ascending.
+    pub inputs: Vec<OutPoint>,
+}
+
 /// What happened to one item of a session when its response was taken
 /// (AS-62, AS-63).
 #[derive(Debug, Clone, PartialEq, Eq)]

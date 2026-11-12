@@ -242,8 +242,9 @@ in memory, and nothing is changed if the store fails.
   changes; 16 pairings; 4 Box claims; 1,024 sales' facts; 8 open sessions;
   256 finished objects waiting to be delivered; 99 refunds in one
   transaction; 16 transactions in one session; 64 items in one session
-  (AS-04); 256 outpoints kept with one refund or cash-out (AS-68); 65,536
-  issued address ranges (OC-11).
+  (AS-04); 256 outpoints kept with one refund or cash-out (AS-68); 64
+  transactions signed elsewhere (AS-89); 65,536 issued address ranges
+  (OC-11).
 - **AS-51.** A refund's destination is a plain on-chain script of a kind the
   signer allows (SR-22: P2WPKH, P2WSH, P2TR, P2PKH or P2SH) and its amount
   is at least the dust limit of that kind (SP-22). The refund QR's own
@@ -665,8 +666,34 @@ app, which holds the approver key.
   given, finishes it (SP-60) or takes the finished transaction after the
   check of SP-62, requires the ID and the frozen outputs (AS-67), and only
   then moves the item's entries to "signed", adds the transaction to the
-  outbox and ends the session. A refusal or a failed store changes nothing,
-  so the right file can be brought again. Broadcasting follows AS-64.
+  outbox and takes the item out of the session (AS-88). A refusal or a
+  failed store changes nothing, so the right file can be brought again.
+  Broadcasting follows AS-64.
+- **AS-88.** A hardware session holds one item for each transaction, and
+  taking one payment (AS-96) takes out that item only: its entries go to
+  "signed" and its request is made again without it, so the session stays
+  open, and can be continued or abandoned, while any item is in it. The
+  session ends with its last item. The snapshot (AS-65) is written only if it
+  would restore: `encode` runs the cross-reference check that `restore` runs,
+  and a queue that fails it is refused as not saved and nothing is stored.
+- **AS-89.** An approval for a hardware signer that was exported (AS-91)
+  holds key 1's signature, and a segwit transaction's ID does not change when
+  signatures are added, so the owner knows the ID of a payment that may be
+  finished and sent without it. When such an approval is abandoned
+  (AS-66), each of its transactions is kept as signed elsewhere: its ID, the
+  entries it pays and what it spends, bounded at 64 and kept in the queue
+  (`OBM4` version 4; older files hold none). The entries are queued again,
+  and what the transaction spends is kept with each of them as AS-68 keeps
+  what a dropped one spent, so a new transaction for them spends at least one
+  of those outpoints and the two cannot both confirm. The caller reports
+  `mark_elsewhere_confirmed` when the transaction is seen confirmed: its
+  entries are paid with its ID, whatever stage they are in, an approval that
+  holds one loses that item, and a waiting transaction that holds one is
+  dropped and the caller is told which. The caller reports
+  `mark_elsewhere_replaced` when another transaction spent one of its coins:
+  it is no longer watched, and the entries keep their outpoints as AS-68
+  has it. An approval abandoned before the export keeps nothing and behaves
+  as AS-66 says.
 - **AS-97.** `registration` writes the wallet for a signer: the multisig
   text file (`Name` of at most 15 printable characters made from the shop's
   name, `Policy: 2 of 3`, `Derivation` as BIP 48, `Format: P2WSH`, then one

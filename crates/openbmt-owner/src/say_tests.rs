@@ -127,6 +127,7 @@ fn refusal_name(r: &Refusal) -> String {
         Refusal::UnknownTransaction(_) => "UnknownTransaction".to_string(),
         Refusal::SnapshotTooLarge => "SnapshotTooLarge".to_string(),
         Refusal::Key1Wallet => "Key1Wallet".to_string(),
+        Refusal::QueueNotSaved(_) => "QueueNotSaved".to_string(),
         Refusal::Hardware(h) => {
             let kind = std::mem::discriminant(h);
             let name = crate::hardware::all_refusals()
@@ -458,4 +459,15 @@ fn sc_10_a_failed_store_names_the_details() {
 #[test]
 fn sc_12_the_list_on_disk_is_this_one() {
     screens_file::check_or_write("owner", &screens_markdown());
+}
+
+#[test]
+fn sc_12_a_queue_that_is_not_saved_reads_as_a_store_that_failed() {
+    let refused = Refusal::QueueNotSaved("a number is used twice").words();
+    let failed = OwnerError::<String>::Store("disk full".to_string()).words();
+    assert_eq!(refused.heading, failed.heading);
+    assert_eq!(refused.what, failed.what);
+    assert_eq!(refused.next, failed.next);
+    assert_eq!(refused.who, failed.who);
+    assert_eq!(check(&refused), Ok(()));
 }

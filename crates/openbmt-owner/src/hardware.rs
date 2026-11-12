@@ -811,7 +811,8 @@ impl Owner {
     /// given and finished. A finished transaction must have the same ID and
     /// pass the check of SP-62. In both cases the outputs must be the frozen
     /// ones (AS-67). The item's entries go to "signed", the transaction waits
-    /// in the outbox, and the session ends. `persist` is handed the new
+    /// in the outbox, and the item leaves the session, which ends with its last
+    /// item (AS-88). `persist` is handed the new
     /// queue, and a refusal leaves everything as it was, so the right file
     /// can be brought again.
     pub fn take_from_signer<E>(
@@ -887,7 +888,8 @@ impl Owner {
             return Err(HardwareRefusal::OutboxFull.into());
         }
         let mut next = self.state.clone();
-        next.sessions.retain(|s| s.id != *session);
+        // AS-96: only this item leaves the session; the others stay.
+        self.remove_item(&mut next, session, number)?;
         let id = next.take_id()?;
         for n in refunds.iter().copied().chain(*cash_out) {
             if let Some(stage) = next.stage_mut(n) {
@@ -919,6 +921,6 @@ impl Owner {
 
 /// Whether the file holds a signature on every input already: key 1's, put
 /// there when it was exported.
-fn is_exported(psbt: &Psbt) -> bool {
+pub(crate) fn is_exported(psbt: &Psbt) -> bool {
     !psbt.inputs.is_empty() && psbt.inputs.iter().all(|i| !i.partial_sigs.is_empty())
 }

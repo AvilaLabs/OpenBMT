@@ -68,7 +68,7 @@ pub use state::Owner;
 pub use types::{
     Built, CashAmount, CashOut, Deliverable, Delivery, FeePayer, IssuedRange, ItemOutcome, Options,
     QueuedBatch, QueuedBoxClaim, QueuedPairing, QueuedSettings, RateNote, Refund, RefundBooks,
-    RefundPacking, SaleFacts, SaleKey, SettingsQueued, Skipped, Stage, Taken,
+    RefundPacking, SaleFacts, SaleKey, SettingsQueued, SignedElsewhere, Skipped, Stage, Taken,
 };
 
 /// AS-65: the magic of the owner phone's stored queue.
@@ -91,6 +91,9 @@ pub const MAX_SALES: usize = 1024;
 pub const MAX_ISSUED_RANGES: usize = 65_536;
 /// AS-50: most open sessions.
 pub const MAX_OPEN_SESSIONS: usize = 8;
+/// AS-89, AS-50: most transactions watched that were given to a hardware
+/// signer and whose approval was abandoned.
+pub const MAX_SIGNED_ELSEWHERE: usize = 64;
 /// AS-50: most finished objects waiting to be delivered.
 pub const MAX_OUTBOX: usize = 256;
 /// AS-50: most refunds in one transaction.

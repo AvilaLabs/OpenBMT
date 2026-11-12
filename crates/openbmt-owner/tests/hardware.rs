@@ -15,7 +15,7 @@ use openbmt_owner::hardware::{
     first_address, read_returned, registration, wallet_name, FirstAddressRecord, FirstAddressState,
     HardwareRefusal, Returned, SignerFile, MAGIC_FIRST_ADDRESS,
 };
-use openbmt_owner::{Delivery, Refusal, Stage};
+use openbmt_owner::{Delivery, Options, RefundPacking, Refusal, Stage};
 use openbmt_session::{Item, ItemKind, Request};
 
 const BIG: u64 = 1_000_000_000;
@@ -727,6 +727,412 @@ fn as_99_a_record_that_is_not_this_wallets_or_not_framed_is_refused() {
     ] {
         assert!(FirstAddressRecord::from_bytes(wallet(), &bad).is_err());
     }
+}
+
+// ---- AS-88: taking one payment keeps the rest of the session -------------------------
+
+/// Two refunds, each in a transaction of its own, in one session for the
+/// signer.
+fn two_spends() -> Fixture {
+    let options = Options {
+        packing: RefundPacking::OneEach,
+        ..Default::default()
+    };
+    let mut rig = Rig::with(options, false);
+    refund(&mut rig.owner, 1, BIG, 40_000);
+    refund(&mut rig.owner, 2, BIG, 30_000);
+    let coins = [coin(1, 0, 500_000), coin(2, 1, 500_000)];
+    let random = rig.random();
+    let store = &rig.owner_store;
+    let (built, signer) = ok(rig.owner.build_request_for_signer(
+        &coins,
+        1_000,
+        0,
+        rig.lock_height,
+        NOW,
+        &random,
+        |b| store.put(b),
+    ));
+    Fixture {
+        key_app: built.request,
+        session: signer.expect("the refunds are spends for the signer"),
+        rig,
+    }
+}
+
+fn numbers(f: &Fixture) -> Vec<u32> {
+    Request::from_bytes(f.rig.owner.session_request(&f.session).unwrap())
+        .unwrap()
+        .items()
+        .iter()
+        .map(|i| i.number)
+        .collect()
+}
+
+fn export_item(f: &mut Fixture, number: u32) -> SignerFile {
+    let store1 = &f.rig.key1_store;
+    let store = &f.rig.owner_store;
+    ok(f.rig.owner.export_for_signer(
+        &f.session,
+        number,
+        &mut f.rig.key1,
+        &key1_account(),
+        NOW,
+        |o, k| {
+            store.put(o)?;
+            store1.put(k)
+        },
+    ))
+}
+
+fn take_item(f: &mut Fixture, number: u32) -> openbmt_owner::hardware::SignerTaken {
+    let file = export_item(f, number);
+    let signed = signer_signs(&file.psbt);
+    let store = &f.rig.owner_store;
+    ok(f.rig
+        .owner
+        .take_from_signer(&f.session, number, &signed, |b| store.put(b)))
+}
+
+/// The owner phone after a restart: what was stored, read back.
+fn restart(f: &mut Fixture) {
+    f.rig.owner = restore_owner(&f.rig.owner_store.last()).expect("the stored queue restores");
+}
+
+#[test]
+fn as_88_taking_one_payment_keeps_the_other_in_the_session() {
+    let mut f = two_spends();
+    let n = numbers(&f);
+    assert_eq!(n.len(), 2);
+    let first = take_item(&mut f, n[0]);
+    // The session stays, with the second payment only.
+    assert!(f.rig.owner.open_sessions().contains(&f.session));
+    assert_eq!(numbers(&f), [n[1]]);
+    assert!(matches!(
+        f.rig.owner.refunds()[0].stage,
+        Stage::Signed { txid } if txid == first.txid
+    ));
+    assert!(matches!(
+        f.rig.owner.refunds()[1].stage,
+        Stage::InSession { session } if session == f.session
+    ));
+    // A restart reads the queue back, and the second can be taken.
+    restart(&mut f);
+    assert_eq!(numbers(&f), [n[1]]);
+    let second = take_item(&mut f, n[1]);
+    assert_ne!(second.txid, first.txid);
+    assert_eq!(f.rig.owner.outbox().len(), 2);
+    // The last item ends the session.
+    assert!(!f.rig.owner.open_sessions().contains(&f.session));
+    restart(&mut f);
+    assert!(!f.rig.owner.open_sessions().contains(&f.session));
+}
+
+#[test]
+fn as_88_the_second_payment_can_be_abandoned_after_the_first_is_taken() {
+    let mut f = two_spends();
+    let n = numbers(&f);
+    take_item(&mut f, n[0]);
+    restart(&mut f);
+    let store = &f.rig.owner_store;
+    ok(f.rig.owner.abandon_session(&f.session, |b| store.put(b)));
+    assert!(!f.rig.owner.open_sessions().contains(&f.session));
+    assert_eq!(f.rig.owner.refunds()[1].stage, Stage::Queued);
+    // The first payment is untouched, and the queue reads back.
+    assert!(matches!(
+        f.rig.owner.refunds()[0].stage,
+        Stage::Signed { .. }
+    ));
+    restart(&mut f);
+    assert_eq!(f.rig.owner.outbox().len(), 1);
+    assert!(f.rig.owner.signed_elsewhere().is_empty());
+}
+
+// ---- AS-89: abandoning an exported approval can never pay twice -----------------------
+
+fn inputs_of(file: &SignerFile) -> Vec<bitcoin::OutPoint> {
+    let mut v: Vec<_> = Psbt::deserialize(&file.psbt)
+        .unwrap()
+        .unsigned_tx
+        .input
+        .iter()
+        .map(|i| i.previous_output)
+        .collect();
+    v.sort();
+    v
+}
+
+fn spent_by(f: &Fixture, session: &[u8; 32]) -> Vec<bitcoin::OutPoint> {
+    let request = Request::from_bytes(f.rig.owner.session_request(session).unwrap()).unwrap();
+    let mut v = Vec::new();
+    for item in request.items() {
+        if let Item::Spend { psbt, .. } = &item.item {
+            v.extend(
+                Psbt::deserialize(psbt)
+                    .unwrap()
+                    .unsigned_tx
+                    .input
+                    .iter()
+                    .map(|i| i.previous_output),
+            );
+        }
+    }
+    v.sort();
+    v
+}
+
+fn abandon(f: &mut Fixture) {
+    let store = &f.rig.owner_store;
+    ok(f.rig.owner.abandon_session(&f.session, |b| store.put(b)));
+}
+
+/// The refund is built again from `coins`, in a session of its own.
+fn rebuild(f: &mut Fixture, coins: &[openbmt_spend::Coin]) -> [u8; 32] {
+    let random = f.rig.random();
+    let store = &f.rig.owner_store;
+    let (_, signer) = ok(f.rig.owner.build_request_for_signer(
+        coins,
+        1_000,
+        1,
+        f.rig.lock_height,
+        NOW,
+        &random,
+        |b| store.put(b),
+    ));
+    signer.expect("the refund is built again")
+}
+
+/// A coin with `confirmations`.
+fn aged(tag: u32, index: u32, confirmations: u32) -> openbmt_spend::Coin {
+    let mut c = coin(tag, index, 500_000);
+    c.confirmations = confirmations;
+    c
+}
+
+#[test]
+fn as_89_an_exported_approval_that_is_abandoned_is_kept_as_signed_elsewhere() {
+    let mut f = fixture();
+    let file = export(&mut f);
+    abandon(&mut f);
+    let kept = f.rig.owner.signed_elsewhere().to_vec();
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].txid, file.txid);
+    assert_eq!(kept[0].refunds, [f.rig.owner.refunds()[0].id]);
+    assert_eq!(kept[0].cash_out, None);
+    assert_eq!(kept[0].inputs, inputs_of(&file));
+    // The payment is back in the queue, carrying what the old one spends.
+    assert_eq!(f.rig.owner.refunds()[0].stage, Stage::Queued);
+    assert_eq!(f.rig.owner.refunds()[0].conflict, inputs_of(&file));
+    // It cannot be cancelled while the old transaction may confirm.
+    let id = f.rig.owner.refunds()[0].id;
+    let store = &f.rig.owner_store;
+    assert!(f.rig.owner.cancel(id, |b| store.put(b)).is_err());
+    // A restart keeps all of it.
+    restart(&mut f);
+    assert_eq!(f.rig.owner.signed_elsewhere(), kept.as_slice());
+    assert_eq!(f.rig.owner.refunds()[0].conflict, inputs_of(&file));
+}
+
+#[test]
+fn as_89_an_approval_abandoned_before_the_export_behaves_as_before() {
+    let mut f = fixture();
+    abandon(&mut f);
+    assert!(f.rig.owner.signed_elsewhere().is_empty());
+    assert_eq!(f.rig.owner.refunds()[0].stage, Stage::Queued);
+    assert!(f.rig.owner.refunds()[0].conflict.is_empty());
+    // The queue is written as before: version 1.
+    assert_eq!(f.rig.owner_store.last()[4], 1);
+}
+
+#[test]
+fn as_89_the_old_transaction_confirming_pays_the_refund_once() {
+    let mut f = fixture();
+    let file = export(&mut f);
+    abandon(&mut f);
+    assert_eq!(f.rig.owner_store.last()[4], 4);
+    restart(&mut f);
+    let id = f.rig.owner.refunds()[0].id;
+    let store = &f.rig.owner_store;
+    let dropped = ok(f
+        .rig
+        .owner
+        .mark_elsewhere_confirmed(&file.txid, |b| store.put(b)));
+    assert!(dropped.is_empty());
+    assert!(f.rig.owner.signed_elsewhere().is_empty());
+    assert_eq!(f.rig.owner.refunds()[0].id, id);
+    assert_eq!(
+        f.rig.owner.refunds()[0].stage,
+        Stage::Paid { txid: file.txid }
+    );
+    // Nothing is left to build: the refund is not paid a second time, from
+    // the same coins or from others.
+    let coins = [
+        coin(1, 0, 500_000),
+        coin(2, 1, 500_000),
+        coin(3, 2, 500_000),
+    ];
+    let random = f.rig.random();
+    let store = &f.rig.owner_store;
+    let (_, signer) = ok(f.rig.owner.build_request_for_signer(
+        &coins,
+        1_000,
+        1,
+        f.rig.lock_height,
+        NOW,
+        &random,
+        |b| store.put(b),
+    ));
+    assert!(signer.is_none());
+    // The same report twice is refused.
+    assert!(f
+        .rig
+        .owner
+        .mark_elsewhere_confirmed(&file.txid, |b| store.put(b))
+        .is_err());
+    // It is paid for good: it archives, and nothing pays it again.
+    let n = ok(f
+        .rig
+        .owner
+        .archive_paid(&Default::default(), |b| store.put(b)));
+    assert_eq!(n, 1);
+    assert!(f.rig.owner.refunds().is_empty());
+}
+
+#[test]
+fn as_89_a_new_transaction_before_the_old_confirms_conflicts_with_it() {
+    let mut f = fixture();
+    let file = export(&mut f);
+    abandon(&mut f);
+    let old = inputs_of(&file);
+    // The coin the old transaction spends is the youngest now, and another
+    // is much older, which the planner would prefer.
+    let first = old[0];
+    let (young, older) = if first == coin(1, 0, 500_000).outpoint {
+        (aged(1, 0, 1), aged(2, 1, 9))
+    } else {
+        (aged(2, 1, 1), aged(1, 0, 9))
+    };
+    assert_eq!(young.outpoint, first);
+    let session = rebuild(&mut f, &[young, older]);
+    let new = spent_by(&f, &session);
+    assert!(
+        new.iter().any(|o| old.contains(o)),
+        "the new transaction spends one of the old one's coins"
+    );
+}
+
+#[test]
+fn as_89_when_the_old_coins_are_not_among_the_coins_the_entry_is_planned_freely() {
+    let mut f = fixture();
+    let file = export(&mut f);
+    abandon(&mut f);
+    // The old coins are not among the coins handed in: the protection holds
+    // only while one is, and the entry is planned freely once none is
+    // (AS-68).
+    let old = inputs_of(&file);
+    let others: Vec<_> = [coin(3, 2, 500_000), coin(4, 3, 500_000)]
+        .into_iter()
+        .filter(|c| !old.contains(&c.outpoint))
+        .collect();
+    let session = rebuild(&mut f, &others);
+    assert!(!spent_by(&f, &session).is_empty());
+}
+
+#[test]
+fn as_89_the_old_transaction_confirming_after_a_new_one_was_built_ends_the_new_one() {
+    let mut f = fixture();
+    let file = export(&mut f);
+    abandon(&mut f);
+    let old = inputs_of(&file);
+    let coins: Vec<_> = [coin(1, 0, 500_000), coin(2, 1, 500_000)].to_vec();
+    // The new one is in an open approval when the old one confirms.
+    let session = rebuild(&mut f, &coins);
+    assert!(spent_by(&f, &session).iter().any(|o| old.contains(o)));
+    let store = &f.rig.owner_store;
+    let dropped = ok(f
+        .rig
+        .owner
+        .mark_elsewhere_confirmed(&file.txid, |b| store.put(b)));
+    assert!(dropped.is_empty());
+    assert_eq!(
+        f.rig.owner.refunds()[0].stage,
+        Stage::Paid { txid: file.txid }
+    );
+    assert!(!f.rig.owner.open_sessions().contains(&session));
+    restart(&mut f);
+    assert_eq!(
+        f.rig.owner.refunds()[0].stage,
+        Stage::Paid { txid: file.txid }
+    );
+}
+
+#[test]
+fn as_89_the_old_transaction_confirming_after_a_new_one_was_signed_drops_the_new_one() {
+    let mut f = fixture();
+    let file = export(&mut f);
+    abandon(&mut f);
+    let coins: Vec<_> = [coin(1, 0, 500_000), coin(2, 1, 500_000)].to_vec();
+    f.session = rebuild(&mut f, &coins);
+    let new = take_item(&mut f, 0);
+    assert_ne!(new.txid, file.txid);
+    let store = &f.rig.owner_store;
+    ok(f.rig.owner.mark_broadcast(&new.txid, |b| store.put(b)));
+    let dropped = ok(f
+        .rig
+        .owner
+        .mark_elsewhere_confirmed(&file.txid, |b| store.put(b)));
+    assert_eq!(dropped, [new.txid]);
+    assert_eq!(
+        f.rig.owner.refunds()[0].stage,
+        Stage::Paid { txid: file.txid }
+    );
+    assert!(f.rig.owner.outbox().is_empty());
+    restart(&mut f);
+    assert!(f.rig.owner.outbox().is_empty());
+}
+
+#[test]
+fn as_89_another_transaction_spending_its_coin_releases_the_protection() {
+    let mut f = fixture();
+    let file = export(&mut f);
+    abandon(&mut f);
+    let store = &f.rig.owner_store;
+    ok(f.rig
+        .owner
+        .mark_elsewhere_replaced(&file.txid, |b| store.put(b)));
+    assert!(f.rig.owner.signed_elsewhere().is_empty());
+    assert_eq!(f.rig.owner.refunds()[0].stage, Stage::Queued);
+    assert!(f
+        .rig
+        .owner
+        .mark_elsewhere_replaced(&file.txid, |b| store.put(b))
+        .is_err());
+    // The coins it spent are gone for good, so the refund is planned freely
+    // from others (AS-68), and the old one can not confirm.
+    let old = inputs_of(&file);
+    let others: Vec<_> = [coin(3, 2, 500_000), coin(4, 3, 500_000)].to_vec();
+    assert!(others.iter().all(|c| !old.contains(&c.outpoint)));
+    let session = rebuild(&mut f, &others);
+    assert!(spent_by(&f, &session).iter().all(|o| !old.contains(o)));
+    restart(&mut f);
+    assert!(f.rig.owner.signed_elsewhere().is_empty());
+}
+
+#[test]
+fn as_89_a_failed_store_changes_nothing() {
+    let mut f = fixture();
+    export(&mut f);
+    let before = f.rig.owner.snapshot().unwrap();
+    f.rig.owner_store.fail_next(true);
+    let store = &f.rig.owner_store;
+    assert!(f
+        .rig
+        .owner
+        .abandon_session(&f.session, |b| store.put(b))
+        .is_err());
+    assert_eq!(f.rig.owner.snapshot().unwrap(), before);
+    assert!(f.rig.owner.signed_elsewhere().is_empty());
+    assert!(f.rig.owner.open_sessions().contains(&f.session));
 }
 
 fn hex(b: &[u8]) -> String {

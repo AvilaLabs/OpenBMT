@@ -8,7 +8,8 @@
 //!   | sales | refunds | cash-outs | batches | settings | pairings
 //!   | open sessions | finished objects | issued ranges
 //!   | version 2 and 3: Box claims
-//!   | version 3 only: cash-out prices | refund books
+//!   | version 3 and 4: cash-out prices | refund books
+//!   | version 4 only: transactions signed elsewhere
 //! ```
 //!
 //! The version is 1 until the queue holds anything of a Box (a claim, a
@@ -22,6 +23,14 @@
 //! and the refund books (a u32 count, then for each the refund's number, the
 //! request number u64 and a flag with, when set, the currency (3) and the
 //! last quote's rate u64), each list ascending by number.
+//!
+//! The version is 4 while the queue watches a transaction that was given to a
+//! hardware signer and whose approval was abandoned (AS-89), whatever else it
+//! holds. Version 4 has the lists of version 3 (possibly empty) and then the
+//! transactions signed elsewhere: a u32 count and, for each, ascending by
+//! transaction ID, the ID, the refunds it pays (a u32 count and the numbers),
+//! the cash-out (a flag and the number) and the outpoints it spends (a u32
+//! count and each as transaction ID and index, ascending).
 //!
 //! Every list is a u32 count and then its entries in ascending order of
 //! their key (the issued ranges: counter, start, count and the time the
@@ -49,13 +58,13 @@ use crate::state::{outputs_fit, Frozen, OpenSession, Owner, SaleEntry, State};
 use crate::types::{
     CashAmount, CashOut, Deliverable, Delivery, FeePayer, IssuedRange, Options, QueuedBatch,
     QueuedBoxClaim, QueuedPairing, QueuedSettings, RateNote, Refund, RefundBooks, RefundPacking,
-    SaleFacts, SaleKey, Stage,
+    SaleFacts, SaleKey, SignedElsewhere, Stage,
 };
 use crate::{
     MAGIC_OWNER_QUEUE, MAX_BATCHES, MAX_BOX_CLAIMS, MAX_CASH_OUTS, MAX_CONFLICT_OUTPOINTS,
     MAX_ISSUED_RANGES, MAX_ITEMS_PER_SESSION, MAX_OPEN_SESSIONS, MAX_OUTBOX, MAX_PAIRINGS,
     MAX_REFUNDS, MAX_REFUNDS_PER_TX, MAX_SALES, MAX_SESSION_REQUEST, MAX_SETTINGS,
-    MAX_SNAPSHOT_BYTES,
+    MAX_SIGNED_ELSEWHERE, MAX_SNAPSHOT_BYTES,
 };
 
 fn bad(why: &'static str) -> DecodeError {
@@ -213,11 +222,16 @@ fn uses_books(st: &State) -> bool {
 /// AS-65: the snapshot of `state`.
 pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
     let mut out = wire::start(&MAGIC_OWNER_QUEUE, 1024);
-    let with_books = uses_books(st);
+    let with_elsewhere = !st.elsewhere.is_empty();
+    let with_books = with_elsewhere || uses_books(st);
     let with_box = with_books || uses_box(st);
     if with_box {
         if let Some(v) = out.get_mut(4) {
-            *v = if with_books { 3 } else { 2 };
+            *v = match (with_elsewhere, with_books) {
+                (true, _) => 4,
+                (false, true) => 3,
+                (false, false) => 2,
+            };
         }
     }
     out.extend_from_slice(&owner.wallet_id);
@@ -399,9 +413,29 @@ pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
             }
         }
     }
+    if with_elsewhere {
+        put_u32(&mut out, st.elsewhere.len());
+        for e in &st.elsewhere {
+            put_txid(&mut out, &e.txid);
+            put_ids(&mut out, &e.refunds);
+            match e.cash_out {
+                Some(n) => {
+                    out.push(1);
+                    out.extend_from_slice(&n.to_le_bytes());
+                }
+                None => out.push(0),
+            }
+            put_outpoints(&mut out, &e.inputs);
+        }
+    }
     if out.len() > MAX_SNAPSHOT_BYTES {
         return Err(Refusal::SnapshotTooLarge);
     }
+    // AS-88: a queue that would not restore is not written.
+    check_consistency(owner, st).map_err(|e| match e {
+        RestoreError::Inconsistent(why) => Refusal::QueueNotSaved(why),
+        _ => Refusal::QueueNotSaved("the queue does not restore"),
+    })?;
     Ok(out)
 }
 
@@ -566,7 +600,7 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
     let version = r.u8().map_err(d)?;
     let with_box = match version {
         1 => false,
-        2 | 3 => true,
+        2..=4 => true,
         v => return Err(d(DecodeError::UnsupportedVersion(v))),
     };
     if r.array::<32>().map_err(d)? != owner.wallet_id {
@@ -865,7 +899,7 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
             st.box_claims.push(QueuedBoxClaim { id, claim, stage });
         }
     }
-    if version == 3 {
+    if version >= 3 {
         let n = r.count(MAX_CASH_OUTS, 15).map_err(d)?;
         let mut last = None;
         for _ in 0..n {
@@ -904,6 +938,21 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
             entry.books = Some(RefundBooks {
                 request,
                 last_quote,
+            });
+        }
+    }
+    if version == 4 {
+        let n = r.count(MAX_SIGNED_ELSEWHERE, 41).map_err(d)?;
+        for _ in 0..n {
+            let txid = read_txid(&mut r).map_err(d)?;
+            let refunds = read_ids(&mut r, MAX_REFUNDS_PER_TX).map_err(d)?;
+            let cash_out = read_opt_id(&mut r).map_err(d)?;
+            let inputs = read_outpoints(&mut r).map_err(d)?;
+            st.elsewhere.push(SignedElsewhere {
+                txid,
+                refunds,
+                cash_out,
+                inputs,
             });
         }
     }
@@ -1076,6 +1125,32 @@ fn check_consistency(owner: &Owner, st: &State) -> Result<(), RestoreError> {
     if in_session != frozen_refs {
         return Err(bad("the stages and the open sessions disagree"));
     }
+    // AS-89: the transactions signed elsewhere are in ascending order of ID
+    // and each names entries that exist and spends something.
+    let elsewhere_ids: Vec<[u8; 32]> = st
+        .elsewhere
+        .iter()
+        .map(|e| e.txid.to_byte_array())
+        .collect();
+    if !elsewhere_ids
+        .windows(2)
+        .all(|w| matches!(w, [a, b] if a < b))
+    {
+        return Err(bad(
+            "transactions signed elsewhere are not in ascending order",
+        ));
+    }
+    for e in &st.elsewhere {
+        let named = e.refunds.iter().chain(e.cash_out.iter());
+        let all_exist = named.clone().all(|n| {
+            st.refunds.iter().any(|r| r.id == *n) || st.cash_outs.iter().any(|c| c.id == *n)
+        });
+        if e.inputs.is_empty() || named.count() == 0 || !all_exist {
+            return Err(bad(
+                "a transaction signed elsewhere names no entry, or one that is gone",
+            ));
+        }
+    }
     // Signed and sent entries are held by a transaction that waits.
     let mut held: BTreeMap<u32, Txid> = BTreeMap::new();
     for d in &st.outbox {
@@ -1109,3 +1184,7 @@ fn check_consistency(owner: &Owner, st: &State) -> Result<(), RestoreError> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "codec_tests.rs"]
+mod tests;

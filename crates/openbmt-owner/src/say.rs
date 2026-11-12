@@ -795,6 +795,16 @@ impl Refusal {
                 "Nothing was changed. Archive paid entries and cancel old ones, then try again.",
             )
             .code("AS-65"),
+            // The same words as a store that failed (`OwnerError::Store`):
+            // the change was not saved, and the person is told what to do.
+            Self::QueueNotSaved(why) => stop(
+                "Change could not be saved",
+                "The phone could not confirm that the change was saved.",
+                Who::Owner,
+                "Reopen the owner app and check the saved queue before trying again. The system's text is under Details.",
+            )
+            .code("AS-64")
+            .detail(*why),
             Self::Key1Wallet => stop(
                 "Wallet does not match",
                 "The owner key's saved state belongs to a different wallet than this response.",

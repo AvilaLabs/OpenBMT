@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+use bitcoin::hashes::Hash;
+use bitcoin::psbt::Psbt;
 use bitcoin::{OutPoint, ScriptBuf, Txid};
 use openbmt_core::batch::{AddressBatch, BatchBuilder, BatchPolicy, PinnedRoots};
 use openbmt_core::boxpair::CLAIM_LEN;
@@ -9,7 +11,7 @@ use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pairing::{check_request, PairError, PairOffer, PairRequest, SignedPairing};
 use openbmt_core::settings::{classify_change, Change, Settings, SignedSettings};
 use openbmt_core::wallet::WalletDescription;
-use openbmt_session::{label_text_ok, ShopValue};
+use openbmt_session::{label_text_ok, Item, Request, RequestItem, ShopValue};
 use openbmt_spend::dust_limit;
 
 use crate::codec;
@@ -17,11 +19,11 @@ use crate::error::{OwnerError, Refusal, RestoreError, SetupError};
 use crate::types::{
     CashAmount, CashOut, Deliverable, Delivery, IssuedRange, Options, QueuedBatch, QueuedBoxClaim,
     QueuedPairing, QueuedSettings, RateNote, Refund, RefundBooks, SaleFacts, SaleKey,
-    SettingsQueued, Stage,
+    SettingsQueued, SignedElsewhere, Stage,
 };
 use crate::{
-    MAX_BATCHES, MAX_CASH_OUTS, MAX_ISSUED_RANGES, MAX_PAIRINGS, MAX_REFUNDS, MAX_SALES,
-    MAX_SETTINGS, MAX_SNAPSHOT_BYTES,
+    MAX_BATCHES, MAX_CASH_OUTS, MAX_CONFLICT_OUTPOINTS, MAX_ISSUED_RANGES, MAX_PAIRINGS,
+    MAX_REFUNDS, MAX_SALES, MAX_SETTINGS, MAX_SIGNED_ELSEWHERE, MAX_SNAPSHOT_BYTES,
 };
 
 /// 21,000,000 BTC in satoshis.
@@ -109,6 +111,9 @@ pub(crate) struct State {
     pub known: Option<SignedSettings>,
     pub sessions: Vec<OpenSession>,
     pub outbox: Vec<Deliverable>,
+    /// AS-89: transactions given to a hardware signer whose approval was
+    /// abandoned, ascending by ID.
+    pub elsewhere: Vec<SignedElsewhere>,
     /// OC-10: the ranges the owner signed batches for, ascending by start,
     /// never overlapping, never removed.
     pub issued: Vec<IssuedRange>,
@@ -129,6 +134,7 @@ impl State {
             known: None,
             sessions: Vec::new(),
             outbox: Vec::new(),
+            elsewhere: Vec::new(),
             issued: Vec::new(),
         }
     }
@@ -929,7 +935,10 @@ impl Owner {
         self.commit(next, persist)
     }
 
-    /// AS-66: give up on an open session. Its entries go back to queued.
+    /// AS-66, AS-89: give up on an open session. Its entries go back to
+    /// queued. A transaction of it that was given to a hardware signer is
+    /// kept as signed elsewhere: it is watched, and what it spends is kept
+    /// with the entries it pays.
     pub fn abandon_session<E>(
         &mut self,
         id: &[u8; 32],
@@ -942,6 +951,7 @@ impl Owner {
             .position(|s| s.id == *id)
             .ok_or(Refusal::UnknownSession)?;
         let session = next.sessions.remove(at);
+        let gone = exported_in(&session)?;
         for (_, frozen) in &session.frozen {
             let ids: Vec<u32> = match frozen {
                 Frozen::Spend {
@@ -961,6 +971,117 @@ impl Owner {
                 }
             }
         }
+        for record in gone {
+            // AS-89: a new transaction for these entries must conflict with
+            // the one that may still be sent, as AS-68 asks of a dropped one.
+            for n in record.refunds.iter().copied().chain(record.cash_out) {
+                if let Some(list) = next.conflict_mut(n) {
+                    list.extend(record.inputs.iter().copied());
+                    list.sort();
+                    list.dedup();
+                    if list.len() > MAX_CONFLICT_OUTPOINTS {
+                        return Err(Refusal::Full("the list of outpoints kept for a refund").into());
+                    }
+                }
+            }
+            if next.elsewhere.iter().any(|e| e.txid == record.txid) {
+                continue;
+            }
+            if next.elsewhere.len() >= MAX_SIGNED_ELSEWHERE {
+                return Err(Refusal::Full("the list of payments signed elsewhere").into());
+            }
+            let place = next
+                .elsewhere
+                .partition_point(|e| e.txid.to_byte_array() < record.txid.to_byte_array());
+            next.elsewhere.insert(place, record);
+        }
         self.commit(next, persist)
     }
+
+    /// AS-89: the transactions that were given to a hardware signer and then
+    /// abandoned, and are watched until they confirm or cannot.
+    pub fn signed_elsewhere(&self) -> &[SignedElsewhere] {
+        &self.state.elsewhere
+    }
+
+    /// AS-96, AS-89: take item `number` out of the open session `session`.
+    /// The session stays while another item is in it, with its request made
+    /// again without the item, and ends with the last.
+    pub(crate) fn remove_item(
+        &self,
+        next: &mut State,
+        session: &[u8; 32],
+        number: u32,
+    ) -> Result<(), Refusal> {
+        let at = next
+            .sessions
+            .iter()
+            .position(|s| s.id == *session)
+            .ok_or(Refusal::UnknownSession)?;
+        let Some(open) = next.sessions.get_mut(at) else {
+            return Err(Refusal::UnknownSession);
+        };
+        open.frozen.retain(|(n, _)| *n != number);
+        if open.frozen.is_empty() {
+            next.sessions.remove(at);
+            return Ok(());
+        }
+        let request = Request::from_bytes(&open.request).map_err(Refusal::Frame)?;
+        let items: Vec<RequestItem> = request
+            .items()
+            .iter()
+            .filter(|ri| ri.number != number)
+            .cloned()
+            .collect();
+        let rebuilt = Request::new(&self.identity, *session, self.wallet_id, items)
+            .map_err(Refusal::Encode)?;
+        open.request = rebuilt.as_bytes().to_vec();
+        Ok(())
+    }
+}
+
+/// AS-89: the transactions of an open session that were given to a hardware
+/// signer: their IDs, the entries they pay and what they spend.
+fn exported_in(session: &OpenSession) -> Result<Vec<SignedElsewhere>, Refusal> {
+    let mut gone = Vec::new();
+    let request = Request::from_bytes(&session.request).map_err(Refusal::Frame)?;
+    for (number, frozen) in &session.frozen {
+        let Frozen::Spend {
+            txid,
+            refunds,
+            cash_out,
+            ..
+        } = frozen
+        else {
+            continue;
+        };
+        let Some(RequestItem {
+            item: Item::Spend { psbt, .. },
+            ..
+        }) = request.item(*number)
+        else {
+            continue;
+        };
+        let Ok(parsed) = Psbt::deserialize(psbt) else {
+            continue;
+        };
+        if !crate::hardware::is_exported(&parsed) {
+            continue;
+        }
+        let mut inputs: Vec<OutPoint> = parsed
+            .unsigned_tx
+            .input
+            .iter()
+            .map(|i| i.previous_output)
+            .collect();
+        inputs.sort();
+        inputs.dedup();
+        gone.push(SignedElsewhere {
+            txid: *txid,
+            refunds: refunds.clone(),
+            cash_out: *cash_out,
+            inputs,
+        });
+    }
+    Ok(gone)
 }

@@ -31,6 +31,23 @@ fn waiting(st: &State, txid: &Txid) -> Option<(usize, Vec<u32>)> {
         })
 }
 
+/// AS-89: take `entry` out of the waiting transaction `held`, which cannot
+/// confirm any more. The transaction goes, and its other entries are returned
+/// as AS-54 does when another transaction spent their coins.
+fn drop_waiting(st: &mut State, held: &Txid, entry: u32) {
+    let Some((at, ids)) = waiting(st, held) else {
+        return;
+    };
+    for id in ids.into_iter().filter(|n| *n != entry) {
+        if let Some(stage) = st.stage_mut(id) {
+            *stage = Stage::Returned {
+                reason: "its coins were spent by another transaction".to_string(),
+            };
+        }
+    }
+    st.outbox.remove(at);
+}
+
 impl Owner {
     /// AS-54: the caller broadcast the transaction. Its refunds are sent.
     pub fn mark_broadcast<E>(
@@ -187,6 +204,98 @@ impl Owner {
         }
         next.outbox.remove(at);
         self.commit(next, persist)
+    }
+
+    /// AS-89: a transaction that was given to a hardware signer and whose
+    /// approval was abandoned was seen confirmed. Its entries are paid with
+    /// its ID, as if it had been taken. An entry that a new approval holds
+    /// has left that approval's item, and one that a new transaction holds
+    /// is paid and that transaction is dropped, since the two conflict. The
+    /// IDs of the dropped transactions are returned, so that the caller stops
+    /// sending them.
+    pub fn mark_elsewhere_confirmed<E>(
+        &mut self,
+        txid: &Txid,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<Vec<Txid>, OwnerError<E>> {
+        let mut next = self.state.clone();
+        let at = next
+            .elsewhere
+            .iter()
+            .position(|e| e.txid == *txid)
+            .ok_or(Refusal::UnknownTransaction(*txid))?;
+        let record = next.elsewhere.remove(at);
+        let mut dropped: Vec<Txid> = Vec::new();
+        for id in record.refunds.iter().copied().chain(record.cash_out) {
+            let stage = match next.stage_mut(id) {
+                Some(s) => s.clone(),
+                None => continue,
+            };
+            match stage {
+                Stage::Paid { .. } => continue,
+                Stage::Queued | Stage::Returned { .. } => {}
+                Stage::InSession { session } => self.leave_item(&mut next, &session, id)?,
+                Stage::Signed { txid: held } | Stage::Sent { txid: held } => {
+                    drop_waiting(&mut next, &held, id);
+                    dropped.push(held);
+                }
+            }
+            if let Some(stage) = next.stage_mut(id) {
+                *stage = Stage::Paid { txid: *txid };
+            }
+        }
+        self.commit(next, persist)?;
+        Ok(dropped)
+    }
+
+    /// AS-89: another transaction spent a coin of the transaction that was
+    /// given to a hardware signer, so it can no longer confirm. It is no
+    /// longer watched. The outpoints kept with its entries stay: while any
+    /// of them is among the coins, a new transaction spends it (AS-68), and
+    /// when none is, the entry is planned freely.
+    pub fn mark_elsewhere_replaced<E>(
+        &mut self,
+        txid: &Txid,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), OwnerError<E>> {
+        let mut next = self.state.clone();
+        let at = next
+            .elsewhere
+            .iter()
+            .position(|e| e.txid == *txid)
+            .ok_or(Refusal::UnknownTransaction(*txid))?;
+        next.elsewhere.remove(at);
+        self.commit(next, persist)
+    }
+
+    /// AS-89: an entry that is in an open approval is paid by another
+    /// transaction. The item that holds it leaves the approval and the other
+    /// entries of the item are queued again.
+    fn leave_item(&self, next: &mut State, session: &[u8; 32], entry: u32) -> Result<(), Refusal> {
+        let held = next
+            .sessions
+            .iter()
+            .find(|s| s.id == *session)
+            .and_then(|s| {
+                s.frozen.iter().find_map(|(number, f)| match f {
+                    crate::state::Frozen::Spend {
+                        refunds, cash_out, ..
+                    } if refunds.contains(&entry) || *cash_out == Some(entry) => {
+                        Some((*number, refunds.clone(), *cash_out))
+                    }
+                    _ => None,
+                })
+            });
+        let Some((number, refunds, cash_out)) = held else {
+            return Ok(());
+        };
+        self.remove_item(next, session, number)?;
+        for other in refunds.into_iter().chain(cash_out).filter(|n| *n != entry) {
+            if let Some(stage) = next.stage_mut(other) {
+                *stage = Stage::Queued;
+            }
+        }
+        Ok(())
     }
 
     /// AS-64: the caller delivered a signed batch, settings item or pairing.

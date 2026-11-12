@@ -42,9 +42,10 @@ fn own_rules() -> Vec<u32> {
 
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
-    assert_eq!(own_rules().len(), 43);
+    assert_eq!(own_rules().len(), 45);
     assert!(own_rules().contains(&50) && own_rules().contains(&77));
     assert!(own_rules().contains(&83) && own_rules().contains(&87));
+    assert!(own_rules().contains(&88) && own_rules().contains(&89));
     assert!(own_rules().contains(&90) && own_rules().contains(&99));
 }
 
@@ -123,6 +124,7 @@ fn every_error_says_which_rule_in_words() {
             .to_string(),
         Refusal::SnapshotTooLarge.to_string(),
         Refusal::Key1Wallet.to_string(),
+        Refusal::QueueNotSaved("x").to_string(),
         Refusal::Hardware(openbmt_owner::hardware::HardwareRefusal::NotExported).to_string(),
         Refusal::Hardware(openbmt_owner::hardware::HardwareRefusal::Record("x")).to_string(),
         OwnerError::<String>::Store("x".into()).to_string(),
