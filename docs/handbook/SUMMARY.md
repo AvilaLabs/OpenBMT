@@ -4,6 +4,7 @@
 
 # Merchant guide
 
+- [Getting started, step by step](getting-started.md)
 - [What a bitcoin payment is](bitcoin-basics.md)
 - [Setting up a shop](setting-up.md)
 - [A sale at the counter](getting-paid.md)

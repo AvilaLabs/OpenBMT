@@ -34,8 +34,12 @@ engineering tests. The current results are not an independent audit.
 | Box and its container, Umbrel and StartOS packages | Built; container image smoke-tested, Umbrel and StartOS packages not run on a device |
 | NFC tap to pay | Not built yet |
 | Square and Clover order matching | Built, read-only; based on vendor documentation, not tested with a real seller account |
+| Closing an Odoo sale from the till through the Box | Built; tested in Odoo 18 against a stand-in Box, the counter's side still to be joined |
 | Lightning through the shop's own node | Built at the counter; not run against a real node |
-| Books and exports | Built as a library; no books screen in the apps |
+| Lightning through a swap service the owner names | Built at the counter; tested against a test swap service on a test network, not a real service |
+| Books and exports | Built; the owner app has a Books page that saves the files |
+| Key maker page (a wallet from coin flips or die rolls, offline) | Built; tested in a Tails virtual machine, not yet released |
+| Connecting a wallet the owner already holds | Reading its public description is built; the apps do not keep it yet |
 | Recovery kit printing | Not built yet; the Key app can check a scanned wallet description against its own |
 | Push wake-ups, a full node on the Box and a hosted Box | Not built yet |
 | Reproducible builds and a second holder of the Key app's release key | Not in place yet |

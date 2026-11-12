@@ -10,20 +10,21 @@ sell, and whether you want to manage the money yourself.
 
 ## The equipment
 
+[Getting started](getting-started.md) shows these parts in pictures and
+puts the setup in order.
+
 | Part | Purpose | Work it adds |
 |---|---|---|
-| Counter phone or tablet | Shows sales and watches for payment | Keep it open, powered and connected; train staff to follow its payment result. |
-| Owner phone | Tracks money and records; prepares refunds, transfers and settings | Review the records and queue, protect the phone and arrange approvals. |
-| Separate Key phone | Reviews and provides the second signature for spending and sensitive changes | Keep it apart from the owner phone and bring it out when approving work. |
-| Key 3 and its recovery words | Helps recover the wallet after losing another key | Generate it outside OpenBMT; record its secret recovery words on steel and keep them away from the shop and the other keys. |
-| Optional Box | Connects shop devices and reads POS orders | Run and maintain the small server yourself if you want its information to stay inside the shop. |
+| Your wallet | A hardware signer or a computer kept offline, with its recovery words on steel. Every payment lands here, and only it can spend. | Keep the signer and the steel plate safe and apart from each other; bring the signer out to sign refunds and cash-outs. |
+| Owner phone | Shows payments and records; prepares refunds, transfers and settings | Lock it with a PIN, review the records and keep it charged. |
+| Counter phone or tablet | Shows sales and watches for payment; cannot spend | Keep it open, powered and connected; train staff to follow its payment result. |
+| Optional Box | Lets the till send amounts to the counter and reads POS orders | Run and maintain the small computer yourself if you want its information to stay inside the shop. |
 
-The separate Key app on a spare phone is the default second signer.
-Hardware wallets and an offline computer are alternatives in the design,
-but hardware signing has not been tried on real devices. The current
-release-signing weakness makes a hardware or different publisher's signer
-preferable in the design; those alternatives are still unverified.
-[Who controls the money](safety.md) explains that limitation.
+Until connecting a wallet you already hold is built, the apps use an
+earlier arrangement: a two-of-three wallet whose second key sits in a
+separate Key app on a spare phone, described in
+[Who controls the money](safety.md). The design is moving from that to a
+wallet the owner holds.
 
 A full Bitcoin node is optional. It checks the Bitcoin rules on a computer
 you run and can give the counter another source of payment evidence. The
@@ -31,11 +32,14 @@ counter keeps its light check as well. Its own-node connection currently
 requires a Tor v3 address, a kind of network address reached through Tor.
 The technical setup is in the [network reference](network-reference.md).
 
-A Lightning node is a separate, optional responsibility. OpenBMT connects
-only to a shop-run LND or Core Lightning node, two implementations of
-Lightning software. You maintain the receiving capacity, updates and
-backups; OpenBMT does not do that for you. If you do not want to operate
-one, evaluate the on-chain route and its fees first.
+Lightning is optional and has two routes. The first is a Lightning node
+the shop runs, LND or Core Lightning; you maintain its receiving capacity,
+updates and backups. The second is a swap service the owner names in the
+settings: the customer pays over Lightning, the service pays the same sum
+on-chain to the sale's own address in your wallet, and the counter checks
+that payment itself. The service charges a fee for each swap. It can
+refuse or fail a swap, and the counter then says the Lightning payment is
+unfinished.
 
 ## At the start of a day
 
@@ -69,9 +73,8 @@ enters the Bitcoin sale and closes the POS order manually. The readers
 have not been tried with a real seller account, so a shop cannot assume
 an existing POS will provide a finished automatic connector.
 
-The counter currently quotes prices in United States dollars only. The
-accounting export also follows United States rules only. A shop needing
-another pricing currency cannot assume that route is supported.
+The counter quotes prices in the shop's currency, chosen at setup. The
+accounting export follows United States rules only.
 
 ## Outside checkout
 
@@ -81,8 +84,8 @@ and approval. You can group the work into approval sessions, but the
 software does not yet remind you to do so.
 
 You also choose whether to keep bitcoin or send it to an exchange. There
-is no automatic bank payout. The accounting library can produce records
-and exports, but there is no books screen in the apps yet. Detailed
+is no automatic bank payout. The owner app's Books page shows sales,
+refunds and totals by day and saves the files for a bookkeeper. Detailed
 end-of-day instructions are still being written.
 
 Once a month, the design calls for an independent comparison: open a copy
