@@ -9,8 +9,8 @@ counter is a shop
 phone or tablet running the Counter app.
 
 The following describes the current design and built payment handling.
-The Android app has not been tested on a physical phone, so this is not a
-live-sales walkthrough.
+The apps have been installed on one physical phone but not used for real
+sales, so this is not a live-sales walkthrough.
 
 <a id="an-on-chain-sale-as-built"></a>
 

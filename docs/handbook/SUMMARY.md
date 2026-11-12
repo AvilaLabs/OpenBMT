@@ -5,6 +5,7 @@
 # Merchant guide
 
 - [What a bitcoin payment is](bitcoin-basics.md)
+- [Setting up a shop](setting-up.md)
 - [A sale at the counter](getting-paid.md)
 - [Costs and cashing out](why-bitcoin.md)
 - [Who controls the money](safety.md)

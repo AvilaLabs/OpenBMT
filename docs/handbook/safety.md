@@ -3,6 +3,11 @@
 
 # Who controls the money
 
+> The design is moving away from the two-phone arrangement below: OpenBMT
+> will make no keys, and the money goes to a wallet the owner holds
+> ([Setting up a shop](setting-up.md), design decision D6). This page
+> describes what the apps do today.
+
 A wallet needs secret information to authorize spending. That information
 is called a private key. Someone with the required keys can authorize a
 payment; someone without them cannot ask a company to reset the wallet.
@@ -74,8 +79,8 @@ unverified. The claim that no single compromised component can spend the
 wallet does not hold today. This is a launch condition, not a setting the
 merchant can solve by choosing a stronger PIN.
 
-> **OpenBMT has had no independent security audit. The apps have not been
-> tested on a physical phone. Do not use it with real funds.**
+> **OpenBMT has had no independent security audit. The apps have only
+> been tried on one physical phone. Do not use it with real funds.**
 
 <a id="roles-owner-manager-cashier"></a>
 

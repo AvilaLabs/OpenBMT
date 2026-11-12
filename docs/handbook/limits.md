@@ -8,8 +8,8 @@ goods released for a bad payment, eliminate price changes or guarantee
 that every app behaves correctly.
 
 > **OpenBMT has had internal review only, with no independent security audit.
-> The Android apps have not been tested on a physical phone. Do not use it
-> with real funds.**
+> The Android apps have only been tried on one physical phone. Do not use
+> it with real funds.**
 
 <a id="what-the-protection-claims-and-when-it-does-not-hold"></a>
 
