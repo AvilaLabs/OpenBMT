@@ -29,9 +29,11 @@ counter uses them yet.
   name the same key and origin; they read as the one canonical multipath
   description. One of them alone, two of the same branch, or two that
   name different keys are refused.
-- **WL-04. The checksum.** The BIP380 checksum is required and checked
-  (the check of the 2-of-3 wallet is reused). Text with no checksum, a
-  wrong one, or a character no description has is refused.
+- **WL-04. The checksum.** The strict single-key parser and the 2-of-3 wallet
+  require and check the BIP380 checksum. The import boundary also accepts the
+  checksumless BlueWallet account form in WL-16 and the two branch forms in
+  WL-17; any checksum present on those forms is checked. A bad checksum or a
+  character no description has is refused.
 - **WL-05. Scripts and addresses.** For an index below 2^31 the wallet
   gives the receive and change script (P2WPKH, 22 bytes) and address, the
   first receive address, and the two single-path strings with their own
@@ -57,22 +59,48 @@ counter uses them yet.
   refused whatever else is wrong with it.
 - **WL-09. The text is not repeated.** A refusal, in `Display`, in
   `Debug` and in its words, holds nothing of the text.
-- **WL-10. Damaged.** A checksum that is missing or wrong, on any of the
-  descriptions given, is refused as damaged.
+- **WL-10. Damaged.** A required checksum that is missing or wrong, or a
+  checksum supplied on an otherwise supported checksum-optional import form
+  that does not match, is refused as damaged.
 - **WL-11. A test network.** A `tpub`, `upub` or `vpub`, an address that
   starts `tb1` or `bcrt1`, or a coin type of `1h` in an origin is refused
   as a test network.
-- **WL-12. Another type.** Everything else is refused as a type that is
-  not supported: taproot, `sh(wpkh(`, a key with no origin, a `zpub`, a
-  threshold or key count not built, a miniscript, one branch alone.
+- **WL-12. Another type.** Everything outside the forms in WL-01, WL-03,
+  WL-16, WL-17 and WL-18 is refused as a type that is not supported: taproot,
+  `sh(wpkh(`, a key with no origin, a `ypub` or `zpub`, a threshold or key
+  count not built, a miniscript, one branch alone, or an ambiguous Core export.
 - **WL-13. The order.** The checks run in this order: a private key, a
-  test network, the checksum, the type. The first that applies decides.
+  test network, the checksum, the type. For Core JSON, private-key and
+  test-network checks also inspect every decoded JSON string before filtering
+  entries. The first applicable check decides.
 - **WL-14. The size.** Text of more than 4096 bytes is refused as not
   supported before any of it is read.
 - **WL-15. The words.** Each refusal has the words of
   `docs/screens/core.md`, under SC-01 to SC-12, for the owner: this holds
   a private key, this description is damaged, this is a test-network
   wallet, this wallet type is not supported.
+- **WL-16. BlueWallet account export.** The import boundary accepts
+  `wpkh([fp/84'/0'/0']xpub)` without a checksum or child suffix. It expands
+  this account-0 public key to the canonical receive/change multipath form.
+  The strict `SingleKeyWallet::parse` parser continues to require the
+  checksum and both branches.
+- **WL-17. Paired branch export.** The import boundary accepts the receive
+  `/0/*` and change `/1/*` descriptors together, in either order and with
+  whitespace between them. A checksum may be absent on either descriptor;
+  when present it must be valid. Both descriptors must have the same master
+  fingerprint, BIP84 account origin and xpub. A lone branch remains unsupported.
+- **WL-18. Bitcoin Core export.** The import boundary accepts a JSON object
+  shaped like Bitcoin Core 32.1 `listdescriptors` output. It selects exactly
+  one active account-0 BIP84 receive descriptor marked `internal:false` and
+  one active account-0 BIP84 change descriptor marked `internal:true`, with
+  matching origin and xpub. Descriptors have valid checksums. Inactive and
+  unsupported descriptors do not become candidates. Missing, mismatched,
+  duplicated or ambiguous candidates are refused.
+- **WL-19. Strict JSON.** Core export JSON is at most 4096 UTF-8 bytes, has
+  valid JSON strings and surrogate pairs, unique object keys, nesting depth
+  at most 16, and no trailing non-whitespace data. Private-key and
+  test-network checks inspect all decoded strings, including metadata and
+  inactive entries, before descriptor selection.
 
 ## 3. The wallet a counter pins, and its index ranges
 

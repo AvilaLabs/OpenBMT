@@ -1,18 +1,19 @@
 //! The single-key wallet description, and what the owner may bring in
-//! (`docs/WALLET-RULES.md`, WL-01 to WL-15).
+//! (`docs/WALLET-RULES.md`, WL-01 to WL-19).
 //!
 //! An owner who already holds their own keys gives OpenBMT only the public
-//! description of one account. The accepted single-key form is exactly
+//! description of one account. The strict single-key parser accepts exactly
 //!
 //! ```text
 //! wpkh([fp/84h/0h/Nh]xpub/<0;1>/*)#checksum
 //! ```
 //!
-//! on mainnet, with the checksum of BIP380. [`ImportedWallet::read`] is the
-//! one entry point for what the owner scans or opens: it returns this
-//! wallet or the 2-of-3 wallet of [`crate::wallet`], or says in one word why
-//! the text was refused. A refusal never carries the text, because the text
-//! may hold a private key.
+//! on mainnet, with the checksum of BIP380. [`ImportedWallet::read`] also
+//! recognizes the account xpub and paired branch exports described in
+//! `docs/WALLET-RULES.md`, plus Bitcoin Core `listdescriptors` JSON. It returns
+//! this wallet or the 2-of-3 wallet of [`crate::wallet`], or says in one word
+//! why the text was refused. A refusal never carries the text, because the
+//! text may hold a private key.
 
 use std::fmt;
 
@@ -24,6 +25,9 @@ use crate::identity::secp;
 use crate::wallet::{
     descriptor_checksum, split_and_verify, Keychain, WalletDescription, WalletError,
 };
+
+#[path = "wallet_single_json.rs"]
+mod json;
 
 /// The most bytes of text read (WL-14).
 pub const MAX_IMPORT_BYTES: usize = 4096;
@@ -81,6 +85,7 @@ enum Branches {
     Change,
 }
 
+#[derive(Clone)]
 struct Part {
     fingerprint: Fingerprint,
     account: u32,
@@ -101,8 +106,7 @@ fn hardened_index(text: &str) -> Option<u32> {
     digits.parse::<u32>().ok().filter(|n| *n < 1 << 31)
 }
 
-fn parse_part(text: &str) -> Result<Part, SingleKeyError> {
-    let body = split_and_verify(text).map_err(checksum_error)?;
+fn parse_part_body(body: &str) -> Result<Part, SingleKeyError> {
     let inner = body
         .strip_prefix("wpkh(")
         .and_then(|s| s.strip_suffix(')'))
@@ -150,6 +154,22 @@ fn parse_part(text: &str) -> Result<Part, SingleKeyError> {
         xpub,
         branches,
     })
+}
+
+fn parse_part(text: &str) -> Result<Part, SingleKeyError> {
+    let body = split_and_verify(text).map_err(checksum_error)?;
+    parse_part_body(body)
+}
+
+/// Import-only version: descriptor checksums, when supplied, are verified;
+/// callers decide which checksumless export shapes are supported.
+fn parse_import_part(text: &str) -> Result<Part, SingleKeyError> {
+    let body = if text.contains('#') {
+        split_and_verify(text).map_err(checksum_error)?
+    } else {
+        text
+    };
+    parse_part_body(body)
 }
 
 /// The validated single-key wallet: one BIP84 account, mainnet.
@@ -442,6 +462,12 @@ impl ImportedWallet {
         if text.len() > MAX_IMPORT_BYTES {
             return Err(ImportRefused::Unsupported);
         }
+        if text.trim_start().starts_with('{') {
+            if holds_private_key(text) {
+                return Err(ImportRefused::HasPrivateKey);
+            }
+            return Self::read_core_json(text);
+        }
         if holds_private_key(text) {
             return Err(ImportRefused::HasPrivateKey);
         }
@@ -452,8 +478,34 @@ impl ImportedWallet {
         if parts.is_empty() {
             return Err(ImportRefused::Damaged);
         }
+
+        // A checksumless form is allowed only for the explicit BlueWallet
+        // account export or for the two complementary branch descriptors.
+        let bluewallet = parts.len() == 1 && bluewallet_account_xpub(parts[0]).is_some();
+        let paired_branches = if parts.len() == 2 {
+            match (parse_import_part(parts[0]), parse_import_part(parts[1])) {
+                (Ok(a), Ok(b)) => matches!(
+                    (a.branches, b.branches),
+                    (Branches::Receive, Branches::Change) | (Branches::Change, Branches::Receive)
+                ),
+                _ => false,
+            }
+        } else {
+            false
+        };
         for part in &parts {
-            split_and_verify(part).map_err(|_| ImportRefused::Damaged)?;
+            if part.contains('#') {
+                split_and_verify(part).map_err(|_| ImportRefused::Damaged)?;
+            } else if !bluewallet && !paired_branches {
+                return Err(ImportRefused::Damaged);
+            }
+        }
+        if bluewallet {
+            let (fingerprint, xpub) =
+                bluewallet_account_xpub(parts[0]).ok_or(ImportRefused::Unsupported)?;
+            return SingleKeyWallet::new(fingerprint, 0, xpub)
+                .map(Self::Single)
+                .map_err(map_single_error);
         }
         if let [one] = parts.as_slice() {
             if one.starts_with("wsh(") {
@@ -464,12 +516,150 @@ impl ImportedWallet {
                 };
             }
         }
-        match SingleKeyWallet::parse(text) {
+        match single_import_parts(&parts) {
             Ok(w) => Ok(Self::Single(w)),
-            Err(SingleKeyError::TestNetwork) => Err(ImportRefused::TestNetwork),
-            Err(_) => Err(ImportRefused::Unsupported),
+            Err(e) => Err(map_single_error(e)),
         }
     }
+
+    fn read_core_json(text: &str) -> Result<Self, ImportRefused> {
+        let value = json::parse(text).map_err(|_| {
+            if is_test_network(text) {
+                ImportRefused::TestNetwork
+            } else {
+                ImportRefused::Unsupported
+            }
+        })?;
+        let mut strings = Vec::new();
+        json::strings(&value, &mut strings);
+        if holds_private_key(text) || strings.iter().any(|s| holds_private_key(s)) {
+            return Err(ImportRefused::HasPrivateKey);
+        }
+        if is_test_network(text) || strings.iter().any(|s| is_test_network(s)) {
+            return Err(ImportRefused::TestNetwork);
+        }
+        let entries = json::listdescriptors(&value).map_err(|_| ImportRefused::Unsupported)?;
+        // Core writes a checksum on every descriptor. Check all descriptor
+        // strings before filtering inactive or unsupported wallet types.
+        for entry in &entries {
+            split_and_verify(entry.desc).map_err(|_| ImportRefused::Damaged)?;
+        }
+        let mut receive = Vec::new();
+        let mut change = Vec::new();
+        for entry in entries.into_iter().filter(|entry| entry.active) {
+            let Ok(part) = parse_part(entry.desc) else {
+                if descriptor_is_account_zero_bip84(entry.desc) {
+                    return Err(ImportRefused::Unsupported);
+                }
+                continue;
+            };
+            if part.account != 0 {
+                continue;
+            }
+            match (part.branches, entry.internal) {
+                (Branches::Receive, Some(false)) => receive.push(part),
+                (Branches::Change, Some(true)) => change.push(part),
+                // A descriptor path and Core's role flag must agree.
+                (Branches::Receive | Branches::Change, _) => {
+                    return Err(ImportRefused::Unsupported)
+                }
+                (Branches::Both, _) => return Err(ImportRefused::Unsupported),
+            }
+        }
+        if receive.len() != 1 || change.len() != 1 {
+            return Err(ImportRefused::Unsupported);
+        }
+        let a = &receive[0];
+        let b = &change[0];
+        if part_key(a) != part_key(b) {
+            return Err(ImportRefused::Unsupported);
+        }
+        SingleKeyWallet::new(a.fingerprint, a.account, a.xpub)
+            .map(Self::Single)
+            .map_err(map_single_error)
+    }
+}
+
+fn map_single_error(error: SingleKeyError) -> ImportRefused {
+    match error {
+        SingleKeyError::TestNetwork => ImportRefused::TestNetwork,
+        _ => ImportRefused::Unsupported,
+    }
+}
+
+fn part_key(part: &Part) -> (Fingerprint, u32, [u8; 78]) {
+    (part.fingerprint, part.account, part.xpub.encode())
+}
+
+fn descriptor_is_account_zero_bip84(text: &str) -> bool {
+    let body = text.split_once('#').map_or(text, |(body, _)| body);
+    let Some(origin) = body
+        .strip_prefix("wpkh([")
+        .and_then(|s| s.split_once(']').map(|p| p.0))
+    else {
+        return false;
+    };
+    let comps: Vec<&str> = origin.split('/').collect();
+    let [fp, purpose, coin, account] = comps.as_slice() else {
+        return false;
+    };
+    fp.len() == 8
+        && fp.bytes().all(|b| b.is_ascii_hexdigit())
+        && hardened_index(purpose) == Some(84)
+        && hardened_index(coin) == Some(0)
+        && hardened_index(account) == Some(0)
+}
+
+fn single_import_parts(parts: &[&str]) -> Result<SingleKeyWallet, SingleKeyError> {
+    let parsed = parts
+        .iter()
+        .map(|text| parse_import_part(text))
+        .collect::<Result<Vec<_>, _>>()?;
+    let first = match parsed.as_slice() {
+        [one] if one.branches == Branches::Both => one,
+        [_] => return Err(unsupported("only one of the two branches was given")),
+        [a, b] => {
+            if !matches!(
+                (a.branches, b.branches),
+                (Branches::Receive, Branches::Change) | (Branches::Change, Branches::Receive)
+            ) {
+                return Err(unsupported(
+                    "the two descriptions are not receive and change",
+                ));
+            }
+            if part_key(a) != part_key(b) {
+                return Err(unsupported("the two descriptions name different keys"));
+            }
+            a
+        }
+        _ => return Err(unsupported("expected one description or two")),
+    };
+    SingleKeyWallet::new(first.fingerprint, first.account, first.xpub)
+}
+
+fn bluewallet_account_xpub(text: &str) -> Option<(Fingerprint, Xpub)> {
+    if text.contains('#') {
+        return None;
+    }
+    let inner = text.strip_prefix("wpkh(")?.strip_suffix(')')?;
+    let rest = inner.strip_prefix('[')?;
+    let (origin, key) = rest.split_once(']')?;
+    if key.contains('/') {
+        return None;
+    }
+    let comps: Vec<&str> = origin.split('/').collect();
+    let [fp, purpose, coin, account] = comps.as_slice() else {
+        return None;
+    };
+    if fp.len() != 8
+        || !fp.bytes().all(|b| b.is_ascii_hexdigit())
+        || hardened_index(purpose) != Some(84)
+        || hardened_index(coin) != Some(0)
+        || hardened_index(account) != Some(0)
+    {
+        return None;
+    }
+    Some((fp.parse().ok()?, key.parse().ok()?))
 }
 
 #[cfg(test)]
@@ -510,6 +700,20 @@ mod tests {
         SingleKeyWallet::new(fp, account, xpub).unwrap()
     }
 
+    fn keymaker_wallet() -> SingleKeyWallet {
+        let row = ELECTRUM
+            .lines()
+            .find(|line| line.contains("818bc9b6"))
+            .unwrap();
+        let fields: Vec<&str> = row.split_whitespace().collect();
+        SingleKeyWallet::new(
+            Fingerprint::from_str(fields[13]).unwrap(),
+            0,
+            Xpub::from_str(fields[14]).unwrap(),
+        )
+        .unwrap()
+    }
+
     fn with_sum(body: &str) -> String {
         format!("{body}#{}", descriptor_checksum(body).unwrap())
     }
@@ -527,6 +731,12 @@ mod tests {
     fn zpub(xpub: &Xpub) -> String {
         let mut raw = base58::decode_check(&xpub.to_string()).unwrap();
         raw[..4].copy_from_slice(&[0x04, 0xb2, 0x47, 0x46]);
+        base58::encode_check(&raw)
+    }
+
+    fn ypub(xpub: &Xpub) -> String {
+        let mut raw = base58::decode_check(&xpub.to_string()).unwrap();
+        raw[..4].copy_from_slice(&[0x04, 0x9d, 0x7c, 0xb2]);
         base58::encode_check(&raw)
     }
 
@@ -827,7 +1037,28 @@ mod tests {
             // And the description reads through the one entry point.
             assert_eq!(
                 ImportedWallet::read(w.canonical_string()),
-                Ok(ImportedWallet::Single(w))
+                Ok(ImportedWallet::Single(w.clone()))
+            );
+            let bluewallet = format!("wpkh([{fp}/84h/0h/0h]{xpub})");
+            assert_eq!(
+                ImportedWallet::read(&bluewallet),
+                Ok(ImportedWallet::Single(w.clone())),
+                "BlueWallet form for {line}"
+            );
+            let [receive, change] = w.single_path_strings();
+            let paired = format!("{}\n{}", receive.split('#').next().unwrap(), change);
+            assert_eq!(
+                ImportedWallet::read(&paired),
+                Ok(ImportedWallet::Single(w.clone())),
+                "paired form for {line}"
+            );
+            let core_json = format!(
+                r#"{{"descriptors":[{{"desc":"{receive}","active":true,"internal":false}},{{"desc":"{change}","active":true,"internal":true}}]}}"#
+            );
+            assert_eq!(
+                ImportedWallet::read(&core_json),
+                Ok(ImportedWallet::Single(w.clone())),
+                "Core JSON form for {line}"
             );
             rows += 1;
         }
@@ -960,7 +1191,7 @@ mod tests {
             wrong,
             c[..c.len() - 1].to_string(),
             c.replacen("84h", "84", 1),
-            format!("{r} {}", ch.rsplit_once('#').unwrap().0),
+            format!("{r} {}#", ch.rsplit_once('#').unwrap().0),
             mbody.to_string(),
             format!("{mbody}#qqqqqqqq"),
             "hello".to_string(),
@@ -1044,6 +1275,8 @@ mod tests {
             with_sum(&format!("pkh({k}/<0;1>/*)")),
             with_sum(&format!("wpkh({bare}/<0;1>/*)")),
             with_sum(&format!("wpkh([{fp}/84h/0h/0h]{}/<0;1>/*)", zpub(&z))),
+            with_sum(&format!("wpkh({}/<0;1>/*)", ypub(&z))),
+            with_sum(&format!("wpkh({}/<0;1>/*)", zpub(&z))),
             with_sum(&format!("wpkh({k}/0/*)")),
             with_sum(&format!("wpkh({k}/<0;1>/*,{k}/<0;1>/*)")),
             with_sum(&format!("wsh(pk({k}/<0;1>/*))")),
@@ -1166,6 +1399,245 @@ mod tests {
         assert!(SAY.contains("WL-15"));
     }
 
+    #[test]
+    fn wl_16_bluewallet_account_xpub_reads_as_account_zero() {
+        let wallet = keymaker_wallet();
+        let fp = wallet.fingerprint().to_string();
+        let xpub = wallet.xpub().to_string();
+        let text = format!("wpkh([{fp}/84'/0'/0']{xpub})");
+        assert_eq!(
+            ImportedWallet::read(&text),
+            Ok(ImportedWallet::Single(wallet.clone()))
+        );
+        assert_eq!(
+            SingleKeyWallet::parse(&text),
+            Err(SingleKeyError::ChecksumMissing)
+        );
+        assert_eq!(
+            wallet.first_receive_address().unwrap().to_string(),
+            "bc1qyjassxtmzl02s8de8jw9365qmuvwg74udtp3vj"
+        );
+        for account in [1, 2] {
+            let (fp, xpub) = key_text(0, account);
+            let text = format!("wpkh([{fp}/84h/0h/{account}h]{xpub})");
+            assert_eq!(ImportedWallet::read(&text), Err(ImportRefused::Damaged));
+        }
+    }
+
+    #[test]
+    fn wl_17_import_accepts_checked_or_checksumless_branch_pairs_only() {
+        let wallet = keymaker_wallet();
+        let [receive, change] = wallet.single_path_strings();
+        let (rbody, _) = receive.split_once('#').unwrap();
+        let (cbody, _) = change.split_once('#').unwrap();
+        for text in [
+            format!("{receive}\n{change}"),
+            format!("{cbody} {rbody}"),
+            format!("{rbody}\n{change}"),
+            format!("{receive} {cbody}"),
+        ] {
+            assert_eq!(
+                ImportedWallet::read(&text),
+                Ok(ImportedWallet::Single(wallet.clone())),
+                "{text}"
+            );
+        }
+        let other = mainnet(1, 0).single_path_strings();
+        assert_eq!(
+            ImportedWallet::read(&format!("{rbody} {}", other[1].split('#').next().unwrap())),
+            Err(ImportRefused::Unsupported)
+        );
+        assert_eq!(ImportedWallet::read(rbody), Err(ImportRefused::Damaged));
+        assert_eq!(
+            ImportedWallet::read(&format!("{receive} {receive}")),
+            Err(ImportRefused::Unsupported)
+        );
+        let bad = format!("{}#qqqqqqqq", rbody);
+        assert_eq!(
+            ImportedWallet::read(&format!("{bad} {change}")),
+            Err(ImportRefused::Damaged)
+        );
+        assert_eq!(
+            SingleKeyWallet::parse(&format!("{rbody} {cbody}")),
+            Err(SingleKeyError::ChecksumMissing)
+        );
+    }
+
+    #[test]
+    fn wl_18_core_listdescriptors_selects_one_active_matching_pair() {
+        let wallet = keymaker_wallet();
+        let [receive, change] = wallet.single_path_strings();
+        let text = format!(
+            r#"{{"wallet_name":"watch","descriptors":[
+              {{"desc":"{receive}","timestamp":0,"active":true,"internal":false,"range":[0,999],"next":0}},
+              {{"desc":"{change}","timestamp":0,"active":true,"internal":true,"range":[0,999],"next_index":0}},
+              {{"desc":"{}","timestamp":0,"active":true,"internal":false}}
+            ]}}"#,
+            with_sum("tr(02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5)")
+        );
+        assert_eq!(
+            ImportedWallet::read(&text),
+            Ok(ImportedWallet::Single(wallet.clone()))
+        );
+        assert_eq!(
+            wallet.first_receive_address().unwrap().to_string(),
+            "bc1qyjassxtmzl02s8de8jw9365qmuvwg74udtp3vj"
+        );
+
+        let mismatch = format!(
+            r#"{{"descriptors":[{{"desc":"{receive}","active":true,"internal":true}},{{"desc":"{change}","active":true,"internal":true}}]}}"#
+        );
+        assert_eq!(
+            ImportedWallet::read(&mismatch),
+            Err(ImportRefused::Unsupported)
+        );
+        let inactive = format!(
+            r#"{{"descriptors":[{{"desc":"{receive}","active":false,"internal":false}}]}}"#
+        );
+        assert_eq!(
+            ImportedWallet::read(&inactive),
+            Err(ImportRefused::Unsupported)
+        );
+        let duplicate = format!(
+            r#"{{"descriptors":[{{"desc":"{receive}","active":true,"internal":false}},{{"desc":"{receive}","active":true,"internal":false}},{{"desc":"{change}","active":true,"internal":true}}]}}"#
+        );
+        assert_eq!(
+            ImportedWallet::read(&duplicate),
+            Err(ImportRefused::Unsupported)
+        );
+        let no_internal = format!(
+            r#"{{"descriptors":[{{"desc":"{receive}","active":true}},{{"desc":"{change}","active":true,"internal":true}}]}}"#
+        );
+        assert_eq!(
+            ImportedWallet::read(&no_internal),
+            Err(ImportRefused::Unsupported)
+        );
+        let other_change = mainnet(1, 0).single_path_strings()[1].clone();
+        let mismatched_keys = format!(
+            r#"{{"descriptors":[{{"desc":"{receive}","active":true,"internal":false}},{{"desc":"{other_change}","active":true,"internal":true}}]}}"#
+        );
+        assert_eq!(
+            ImportedWallet::read(&mismatched_keys),
+            Err(ImportRefused::Unsupported)
+        );
+        let (fp, xpub) = key_text(0, 0);
+        let unsupported_branch = with_sum(&format!("wpkh([{fp}/84h/0h/0h]{xpub}/2/*)"));
+        let extra_branch = format!(
+            r#"{{"descriptors":[{{"desc":"{receive}","active":true,"internal":false}},{{"desc":"{change}","active":true,"internal":true}},{{"desc":"{unsupported_branch}","active":true,"internal":false}}]}}"#
+        );
+        assert_eq!(
+            ImportedWallet::read(&extra_branch),
+            Err(ImportRefused::Unsupported)
+        );
+    }
+
+    #[test]
+    fn wl_19_core_json_is_bounded_strict_and_checks_decoded_strings_first() {
+        let wallet = mainnet(0, 0);
+        let [receive, change] = wallet.single_path_strings();
+        let private_and_test = format!(
+            r#"{{"meta":"\u0078prv","descriptors":[{{"desc":"{receive}","active":true,"internal":false}},{{"desc":"{}","active":true,"internal":true}}]}}"#,
+            with_sum(
+                &format!(
+                    "wpkh([73c5da0a/84h/1h/0h]{} /1/*)",
+                    account_key(MNEMONICS[0], Network::Testnet, 1, 0).1
+                )
+                .replace(" /", "/")
+            )
+        );
+        assert_eq!(
+            ImportedWallet::read(&private_and_test),
+            Err(ImportRefused::HasPrivateKey)
+        );
+        let duplicate_keys = r#"{"descriptors":[],"descriptors":[]}"#.to_owned();
+        let too_deep = format!(
+            r#"{{"descriptors":[],"metadata":{}null{}}}"#,
+            "[".repeat(17),
+            "]".repeat(17)
+        );
+        for invalid in [
+            duplicate_keys,
+            too_deep,
+            r#"{"descriptors":[]} trailing"#.to_string(),
+            r#"{"descriptors":"\ud800"}"#.to_string(),
+            "{\u{000c}\"descriptors\":[]}".to_string(),
+            "{\u{000b}\"descriptors\":[]}".to_string(),
+        ] {
+            assert_eq!(
+                ImportedWallet::read(&invalid),
+                Err(ImportRefused::Unsupported),
+                "{invalid}"
+            );
+        }
+        let depth16 = format!(
+            r#"{{"descriptors":[],"metadata":{}null{}}}"#,
+            "[".repeat(15),
+            "]".repeat(15)
+        );
+        let depth17 = format!(
+            r#"{{"descriptors":[],"metadata":{}null{}}}"#,
+            "[".repeat(16),
+            "]".repeat(16)
+        );
+        assert!(json::parse(&depth16).is_ok());
+        assert!(json::parse(&depth17).is_err());
+        // An empty terminal container counts toward the same depth limit.
+        let empty16 = format!("{}{}", "[".repeat(16), "]".repeat(16));
+        let empty17 = format!("{}{}", "[".repeat(17), "]".repeat(17));
+        assert!(json::parse(&empty16).is_ok());
+        assert!(json::parse(&empty17).is_err());
+        assert_eq!(
+            ImportedWallet::read(&format!("{} ", " ".repeat(MAX_IMPORT_BYTES))),
+            Err(ImportRefused::Unsupported)
+        );
+        let escaped_test = r#"{"descriptors":[],"note":"tpub"}"#.replace("tpub", r#"\u0074pub"#);
+        assert_eq!(
+            ImportedWallet::read(&escaped_test),
+            Err(ImportRefused::TestNetwork)
+        );
+        let escaped_private = r#"{"descriptors":[],"note":"\u0078prv"}"#.to_owned();
+        assert_eq!(
+            ImportedWallet::read(&escaped_private),
+            Err(ImportRefused::HasPrivateKey)
+        );
+        let (_, tpub) = account_key(MNEMONICS[0], Network::Testnet, 1, 0);
+        let escaped_path =
+            format!(r#"{{"descriptors":[],"note":"[73c5da0a/84h/\u0031h/0h]{tpub}"}}"#);
+        assert_eq!(
+            ImportedWallet::read(&escaped_path),
+            Err(ImportRefused::TestNetwork)
+        );
+        let private_in_inactive = format!(
+            r#"{{"descriptors":[{{"desc":"{}","active":false}}]}}"#,
+            with_sum(
+                &format!(
+                    "wpkh([73c5da0a/84h/0h/0h]{} /0/*)",
+                    master(MNEMONICS[0], Network::Bitcoin)
+                )
+                .replace(" /", "/")
+            )
+        );
+        assert_eq!(
+            ImportedWallet::read(&private_in_inactive),
+            Err(ImportRefused::HasPrivateKey)
+        );
+        let bad_inactive = r#"{"descriptors":[{"desc":"bad#qqqqqqqq","active":false}]}"#;
+        assert_eq!(
+            ImportedWallet::read(bad_inactive),
+            Err(ImportRefused::Damaged)
+        );
+        let bare_xpub = key_text(0, 0).1;
+        assert_eq!(
+            ImportedWallet::read(&bare_xpub),
+            Err(ImportRefused::Damaged)
+        );
+        assert_eq!(
+            ImportedWallet::read(&format!("wpkh({bare_xpub}/<0;1>/*)")),
+            Err(ImportRefused::Damaged)
+        );
+        let _ = (receive, change);
+    }
+
     /// Every rule ID that the rules file defines.
     fn rule_ids() -> Vec<String> {
         RULES
@@ -1180,9 +1652,9 @@ mod tests {
     #[test]
     fn the_rules_file_defines_the_rules_the_tests_name() {
         let ids = rule_ids();
-        assert_eq!(ids.len(), 15);
+        assert_eq!(ids.len(), 19);
         assert_eq!(ids.first().map(String::as_str), Some("WL-01"));
-        assert_eq!(ids.last().map(String::as_str), Some("WL-15"));
+        assert_eq!(ids.last().map(String::as_str), Some("WL-19"));
     }
 
     #[test]
