@@ -309,8 +309,8 @@ private class Scene(private val c: Canvas, private val p: Paint, private val pal
             if (on > 0f) {
                 dot(l + 16f, top + 28f, 30f * on, withAlpha(Palette.BRAND, 0.25f * on))
             }
-            rr(l, top, l + 32f, top + 56f, 8f, if (on > 0f) Palette.BRAND else pal.chip)
-            rrOutline(l, top, l + 32f, top + 56f, 8f, if (on > 0f) Palette.BRAND else pal.fieldLine)
+            rr(l, top, l + 32f, top + 56f, 8f, if (on > 0.5f) Palette.BRAND else pal.chip)
+            rrOutline(l, top, l + 32f, top + 56f, 8f, if (on > 0.5f) Palette.BRAND else pal.fieldLine)
             val mark = if (on > 0.5f) Palette.WHITE else pal.secondary
             val x = l + 16f
             val y = top + 28f
