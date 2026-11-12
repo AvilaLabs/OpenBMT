@@ -207,7 +207,7 @@ class MoneyTabs(start: ShopCurrency, private val guess: ShopCurrency) {
 }
 
 /** The screens of the first run, in the order they come. Back from each is [FirstRun.back]. */
-enum class FirstRunStep { Welcome, Shop, Till, Money, OwnAdvice, Connect, Why, RealCases, Guide, NotYet }
+enum class FirstRunStep { Welcome, Shop, Till, Money, OwnAdvice, Connect, OwnCounter, Why, RealCases, Guide, NotYet }
 
 /** The three choices of where the money goes. */
 enum class MoneyChoice { Own, Make, Later }
@@ -241,7 +241,7 @@ class FirstRun(start: ShopPrefs, locale: String) {
 
     /**
      * The step after [step]; the Money step goes on to Why for the cold wallet, to OwnAdvice for the own wallet and to
-     * NotYet for the others. OwnAdvice goes on to Connect (and Connect, once checked, to NotYet), or to Why once the choice is changed to the cold wallet.
+     * NotYet for the others. OwnAdvice goes on to Connect (and Connect, once checked, to adding the first counter, then NotYet), or to Why once the choice is changed to the cold wallet.
      */
     fun next() {
         step = when (step) {
@@ -257,7 +257,8 @@ class FirstRun(start: ShopPrefs, locale: String) {
                 connect = Connect()
                 FirstRunStep.Connect
             }
-            FirstRunStep.Connect -> if (connect.step == ConnectStep.Checked) FirstRunStep.NotYet else FirstRunStep.Connect
+            FirstRunStep.Connect -> if (connect.step == ConnectStep.Checked) FirstRunStep.OwnCounter else FirstRunStep.Connect
+            FirstRunStep.OwnCounter -> FirstRunStep.NotYet
             FirstRunStep.Why -> {
                 guide = KeyGuide()
                 FirstRunStep.Guide
@@ -309,6 +310,7 @@ class FirstRun(start: ShopPrefs, locale: String) {
             FirstRunStep.Money -> FirstRunStep.Till
             FirstRunStep.OwnAdvice -> FirstRunStep.Money
             FirstRunStep.Connect -> if (connect.back()) FirstRunStep.Connect else FirstRunStep.OwnAdvice
+            FirstRunStep.OwnCounter -> FirstRunStep.Connect
             FirstRunStep.Why -> FirstRunStep.Money
             FirstRunStep.RealCases -> if (realPage > 0) {
                 realPage--

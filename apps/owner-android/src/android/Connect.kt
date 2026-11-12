@@ -4,6 +4,8 @@ import android.view.View
 import android.widget.Button
 import org.openbmt.app.CameraWords
 import org.openbmt.app.SayWords
+import org.openbmt.app.WalletScan
+import org.openbmt.owner.OwnerOwn
 import org.openbmt.app.Who
 
 // "Connect your wallet" of the first run, on the own wallet path: the wallet's output descriptor is scanned or
@@ -37,9 +39,14 @@ internal fun Controller.showConnect(r: FirstRun, message: SayWords? = null) {
                 heading(ConnectWords.addressTitle), para(ConnectWords.addressText),
                 ui.text(Connect.rows(c.firstAddress.orEmpty()), 28f, bold = true, mono = true),
                 line(ConnectWords.kind(c.multisig), muted = true),
-            ),
+                message?.let { ui.words(it) },
+            ).filterNotNull(),
             listOf(
-                ui.primary(ConnectWords.addressSame) { c.same(); go() },
+                // The wallet's file is saved, sealed, when the address is said to be the same (OA-105).
+                ui.primary(ConnectWords.addressSame) {
+                    val said = c.same { file -> ownStore.keep(file, NativeOwnLibrary) }
+                    if (said == null) go() else showConnect(r, said)
+                },
                 ui.button(ConnectWords.addressDifferent) { c.different(); go() },
             ),
             back,
@@ -51,7 +58,7 @@ internal fun Controller.showConnect(r: FirstRun, message: SayWords? = null) {
         )
         ConnectStep.Checked -> stepScreen(
             FirstRunWords.shopTitle,
-            listOf(heading(ConnectWords.checkedTitle), para(ConnectWords.checkedText), line(ConnectWords.checkedNote, muted = true)),
+            listOf(heading(ConnectWords.checkedTitle), para(ConnectWords.checkedText)),
             listOf(ui.primary(ConnectWords.checkedNext) { r.next(); go() }), back, tone = ui.pal.good,
         )
     }
@@ -66,7 +73,7 @@ private fun Controller.showConnectPaste(r: FirstRun, message: SayWords?, back: (
     val check: Button = ui.primary(ConnectWords.pasteCheck) {
         val bytes = field.text.toString().toByteArray(Charsets.UTF_8)
         field.setText("")
-        val said = r.connect.read(bytes)
+        val said = r.connect.read(bytes, pinner = OwnerOwn::pin)
         if (said == null) showFirstRun() else showConnect(r, said)
     }
     val views = ArrayList<View>()
@@ -76,15 +83,22 @@ private fun Controller.showConnectPaste(r: FirstRun, message: SayWords?, back: (
     stepScreen(FirstRunWords.shopTitle, views, listOf(check), back)
 }
 
-/** The wallet's code, read by the camera, which is asked for only when the button is pressed. */
+/**
+ * The wallet's code, read by the camera, which is asked for only when the button is pressed. A plain code is the
+ * descriptor's text and is read as a pasted text is. A code that changes (Sparrow's animated code, a crypto account,
+ * a `ur:bytes` that holds a descriptor) is read part by part by the library's wallet reader, with the progress shown
+ * as in the other animated scans, and its text is read as a pasted text is.
+ */
 private fun Controller.scanConnect(r: FirstRun) {
     fun again(message: SayWords?) = showConnect(r, message)
+    fun read(bytes: ByteArray) {
+        val said = r.connect.read(bytes, pinner = OwnerOwn::pin)
+        if (said == null) showFirstRun() else again(said)
+    }
     scan.begin(
         show = { v -> showScan(v) },
-        onBytes = { bytes ->
-            val said = r.connect.read(bytes)
-            if (said == null) showFirstRun() else again(said)
-        },
+        onBytes = { bytes -> read(bytes) },
+        wallet = WalletScan(Who.OWNER, HardwareModel::partsLine) { text -> read(text) },
         onFailed = { f -> again(f.words ?: if (f.off) CameraWords.off(Who.OWNER) else CameraWords.notStarted(Who.OWNER, f.problem)) },
         onCancel = { again(null) },
     )

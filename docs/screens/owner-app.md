@@ -436,8 +436,44 @@ Connect your wallet, after the advice on an own wallet, in `ConnectWords`:
 | differentNext | Scan the code again from the right wallet. |
 | checkedTitle | Wallet checked |
 | checkedText | This is the right wallet. Sales will go straight to it, and OpenBMT can see what arrives but can never spend it. |
-| checkedNote | Connecting it to your counters is the next part, and it is still being built. |
 | checkedNext | Next |
+
+Adding a counter to a shop with its own wallet (OA-105 to OA-114), in
+`OwnPairWords`. `{name}` is the counter's name and `{n}` a number of
+addresses. A text named `WORDS_NEEDED_OA_...` is not written yet and shows
+its own name:
+
+| Key | Text |
+|---|---|
+| title | Add a counter |
+| offerHeading | Scan this with the new counter |
+| offerText | The counter shows your wallet's first address. Check it against your wallet before you go on. |
+| offerScan | Scan the counter's code |
+| endedHeading | Code ended |
+| endedText | This code lasts 10 minutes and has ended. Nothing was paired. |
+| endedNext | Show a new code. |
+| endedButton | Show a new code |
+| compareHeading | Compare the four words |
+| compareText | Check that {name} shows these same four words. |
+| compareMatch | They match |
+| compareDiffer | They differ |
+| bundleHeading | Scan this with {name} |
+| bundleText | It holds the shop's settings and the counter's first 1,000 addresses. The counter shows Paired when it has taken it. |
+| bundlePaired | The counter shows Paired |
+| bundleAgain | Show the code again |
+| pairedHeading | {name} is paired |
+| pairedText | It makes its addresses from your wallet and sells within the shop's settings. |
+| pairedNext | Nothing to do. |
+| gapTitle | How far your wallet looks ahead |
+| gapUsual | Your wallet's usual setting shows every payment. |
+| gapMore | Set your wallet to look at least {n} addresses ahead, or it will not show every payment. |
+| gapMoreNext | In Sparrow: Settings, then Gap limit. In Electrum: ask the console to change it. |
+| WORDS_NEEDED_OA_113_TITLE | WORDS_NEEDED_OA_113_TITLE |
+| WORDS_NEEDED_OA_113_BUTTON | WORDS_NEEDED_OA_113_BUTTON |
+| WORDS_NEEDED_OA_105 | WORDS_NEEDED_OA_105 |
+| WORDS_NEEDED_OA_105_NONE | WORDS_NEEDED_OA_105_NONE |
+| WORDS_NEEDED_OA_111_WAITING | WORDS_NEEDED_OA_111_WAITING |
+| WORDS_NEEDED_OA_108 | WORDS_NEEDED_OA_108 |
 
 The key map at the top of the key-setup screens. `{k1}`, `{k2}` and `{k3}` are
 the state words in lower case:

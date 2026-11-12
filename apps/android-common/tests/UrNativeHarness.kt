@@ -321,6 +321,55 @@ object UrNativeHarness {
         ok(UrText.startsWithBbqr("B\$2P0100".toByteArray()) && !UrText.startsWithBbqr("ur:bytes".toByteArray()) && !UrText.startsWithBbqr(byteArrayOf()), "a part is told by its B$")
     }
 
+    private const val WALLET = "wpkh([818bc9b6/84h/0h/0h]xpub6CgURS1GrKZkAoRGBTKYX9FhLgkKnQVZ6vdNBUbiu24xtRJ6RzLKpdg4CqsVyBLzimcJsviP59hSoGJEpTJiXE8bdBLw1qPC1DXRatKehb8/<0;1>/*)#96yh9yhx"
+
+    private const val MULTI = "wsh(sortedmulti(2,[73c5da0a/48h/0h/0h/2h]xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf/<0;1>/*,[b8688df1/48h/0h/0h/2h]xpub6FQya7zGhR92kacYsNnjreouvnHJMpXYsUXnW6NJJAJRCKsa26TzDy4LdnGhEurr3d6y1J8PJ7EEMKQp74XTqYvmGJNogYXSKDszYHtF8mX/<0;1>/*,[28645006/48h/0h/0h/2h]xpub6DnEBNkSJKBYQmsbhS1sP9cNdtU5c9PLFGCjTJmxicxc13WB8zNNGQazabQpyFAGW5bV9tMko4uBxDxjUKL6dSAcx1tEbgEHtgSqyRsekh6/<0;1>/*))#34zcp4yt"
+
+    /** A wallet's animated code is read by the library's wallet reader, whatever its parts' order, and refused when it holds a secret. */
+    private fun walletReadingTests(call: UrCall) {
+        val parts = value(AnimatedQr.parts(call, "bytes", MULTI.toByteArray()), "parts of a descriptor")
+        ok(parts.size >= 2, "a descriptor is more than one part: ${parts.size}")
+        val order = parts.indices.shuffled(java.util.Random(11)) + listOf(0)
+        val reading = WalletReading(call, Who.OWNER)
+        var done: WalletStep.Done? = null
+        var shown = 0
+        for (i in order) {
+            when (val step = reading.feed(if (i % 2 == 0) parts[i] else parts[i].lowercase())) {
+                is WalletStep.Show -> {
+                    shown++
+                    ok(SayCheck.problem(step.words) == null, "the progress words pass: ${SayCheck.problem(step.words)}")
+                }
+                is WalletStep.Done -> {
+                    done = step
+                    break
+                }
+                else -> ok(false, "a good part gave $step")
+            }
+        }
+        ok(done != null && String(done.text, Charsets.US_ASCII) == MULTI, "the parts read back to the wallet's text")
+        reading.drop()
+        // A descriptor in one part, and one of a type that is not a wallet's.
+        val whole = value(AnimatedQr.parts(call, "bytes", WALLET.toByteArray()), "again")
+        ok(whole.size == 1, "a single-key descriptor is one part")
+        val single = WalletReading(call, Who.OWNER)
+        var last: WalletStep = WalletStep.Ignore
+        for (p in whole) last = single.feed(p)
+        ok(last is WalletStep.Done && String(last.text) == WALLET, "every part of the code is taken")
+        single.drop()
+        val psbt = value(AnimatedQr.parts(call, "crypto-psbt", psbt(40)), "a PSBT")
+        val wrong = WalletReading(call, Who.OWNER).feed(psbt[0])
+        ok(wrong is WalletStep.Fail && wrong.words.heading == "Not the code expected", "a code of another type is the wrong kind")
+        // A descriptor with a private key is never a wallet.
+        val secret = "wpkh([818bc9b6/84h/0h/0h]xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi/<0;1>/*)"
+        val bad = value(AnimatedQr.parts(call, "bytes", secret.toByteArray()), "a secret descriptor")
+        var refused: WalletStep = WalletStep.Ignore
+        val r = WalletReading(call, Who.OWNER)
+        for (p in bad) refused = r.feed(p)
+        ok(refused is WalletStep.Fail, "a descriptor with a private key is refused as a wallet: $refused")
+        ok(refused !is WalletStep.Done, "never done")
+        r.drop()
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         System.load(File(args[0]).absolutePath)
@@ -334,6 +383,7 @@ object UrNativeHarness {
         keyTests(call)
         bbqrTests(call)
         bbqrReadingTests(call)
+        walletReadingTests(call)
         println("UrNativeHarness: $count checks passed")
     }
 }

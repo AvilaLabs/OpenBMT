@@ -1315,6 +1315,15 @@ object AppWords {
         )
         for ((key, text) in ConnectWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         out.append(
+            "\nAdding a counter to a shop with its own wallet (OA-105 to OA-114), in\n" +
+                "`OwnPairWords`. `{name}` is the counter's name and `{n}` a number of\n" +
+                "addresses. A text named `WORDS_NEEDED_OA_...` is not written yet and shows\n" +
+                "its own name:\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in OwnPairWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
             "\nThe key map at the top of the key-setup screens. `{k1}`, `{k2}` and `{k3}` are\n" +
                 "the state words in lower case:\n\n" +
                 "| Key | Text |\n" +

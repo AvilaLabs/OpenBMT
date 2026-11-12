@@ -86,6 +86,11 @@ class Controller(internal val act: MainActivity) {
     internal var welcomeNotice: String? = null
     internal val shopFile by lazy { ShopFile(dir) }
 
+    // A shop with its own wallet (`OwnCounter.kt`): the wallet's sealed file and the owner root's secret, and the pairing in
+    // progress, which holds nothing but what is on the screen (OA-105, OA-108 to OA-111).
+    internal val ownStore by lazy { OwnShopStore(dir, KeystoreSealer(AppFiles.OWN_KEY_ALIAS)) }
+    internal var ownPairing: OwnPairing? = null
+
     /** What the system's Back does on a screen of the first run: the same as the bar's arrow. Cleared by every screen that is shown. */
     internal var firstRunBack: (() -> Unit)? = null
 

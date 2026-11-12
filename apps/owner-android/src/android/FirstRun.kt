@@ -49,6 +49,7 @@ internal fun Controller.showFirstRun() {
         FirstRunStep.Money -> showMoney(r)
         FirstRunStep.OwnAdvice -> showOwnAdvice(r)
         FirstRunStep.Connect -> showConnect(r)
+        FirstRunStep.OwnCounter -> showOwnCounter(r)
         FirstRunStep.Why -> showWhy(r)
         FirstRunStep.RealCases -> showRealCases(r)
         FirstRunStep.Guide -> showKeyGuide(r)

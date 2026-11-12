@@ -122,6 +122,21 @@ object AppFiles {
     /** Its presence is the setting "Watch in the background" being on (OA-80). */
     const val WATCH_ON_FILE = "watch-on"
 
+    /**
+     * The Keystore key that seals the own-wallet shop's secrets (OA-105): the owner root's secret and the wallet's
+     * description. Its own key, so that nothing of the other setups is opened with it.
+     */
+    const val OWN_KEY_ALIAS = "openbmt-owner-own-wallet-v1"
+
+    /** The sealed wallet file of a shop with its own wallet, as the library made it (`OBM)`, OA-105). */
+    const val OWN_WALLET_FILE = "own-wallet.obks"
+
+    /** The sealed secret of the owner root of a shop with its own wallet: 32 random bytes drawn by the library (OA-105). */
+    const val OWN_OWNER_FILE = "own-owner.obks"
+
+    /** The folder of the own-wallet shop's state (the library's `own-shop` file, the allocation book and the range outbox are kept in it). */
+    const val OWN_DIR = "own-shop-dir"
+
     /** The shop's name, money and till, and whether the till steps were shown: the first screens' own file. It holds no secret. */
     const val SHOP_FILE = "shop.txt"
 

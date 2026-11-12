@@ -34,9 +34,10 @@ class UrScan(
  * A scan that reads a wallet's code that changes: every part whose text starts with "ur:" goes to the wallet
  * reader of the library, whatever its type, and [onWallet] is called with the descriptor text (as ASCII bytes, which
  * the callee wipes) when it is complete and valid. A first code that does not start with "ur:" is a plain code and
- * still goes to the scan's `onBytes`. [parts] shows how far the reading is.
+ * still goes to the scan's `onBytes`. The words while it reads are the reading words of [UrWords], which say how many
+ * parts are in; [line] is the line under them for the parts read and the parts expected.
  */
-class WalletScan(val who: Int, val parts: PartsProgress, val onWallet: (text: ByteArray) -> Unit)
+class WalletScan(val who: Int, val line: (read: Int, of: Int) -> String, val onWallet: (text: ByteArray) -> Unit)
 
 /**
  * The words and the progress line of a scan of parts that come in any order: [words] are shown while the set
@@ -172,7 +173,7 @@ class ScanFlow(private val act: Activity, private val ui: Ui) {
                     when (val step = r.feed(String(bytes, Charsets.UTF_8))) {
                         is WalletStep.Show -> {
                             if (step.expected > 0) {
-                                if (progress(step.received to step.expected, wallet.parts.words, wallet.parts.line(step.received, step.expected))) Feedback.scanPart(status)
+                                if (progress(step.received to step.expected, step.words, wallet.line(step.received, step.expected))) Feedback.scanPart(status)
                             } else {
                                 progress(step.words, step.words, null)
                             }

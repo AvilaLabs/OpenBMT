@@ -40,7 +40,6 @@ object ConnectWords {
     const val checkedTitle = "Wallet checked"
     const val checkedText = "This is the right wallet. Sales will go straight to it, " +
         "and OpenBMT can see what arrives but can never spend it."
-    const val checkedNote = "Connecting it to your counters is the next part, and it is still being built."
     const val checkedNext = "Next"
 
     fun kind(multisig: Boolean): String = if (multisig) addressKindMulti else addressKindSingle
@@ -57,7 +56,7 @@ object ConnectWords {
         add("addressKindSingle", addressKindSingle); add("addressKindMulti", addressKindMulti)
         add("addressSame", addressSame); add("addressDifferent", addressDifferent)
         add("differentTitle", differentTitle); add("differentText", differentText); add("differentNext", differentNext)
-        add("checkedTitle", checkedTitle); add("checkedText", checkedText); add("checkedNote", checkedNote)
+        add("checkedTitle", checkedTitle); add("checkedText", checkedText)
         add("checkedNext", checkedNext)
         return out
     }

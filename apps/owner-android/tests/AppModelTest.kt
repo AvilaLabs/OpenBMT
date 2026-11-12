@@ -48,6 +48,14 @@ import org.openbmt.owner.SwapAction
 import org.openbmt.owner.LinkState
 import org.openbmt.owner.OutboxKind
 import org.openbmt.owner.OutboxRow
+import org.openbmt.owner.OwnBundleView
+import org.openbmt.owner.OwnGapView
+import org.openbmt.owner.OwnMade
+import org.openbmt.owner.OwnOfferView
+import org.openbmt.owner.OwnOwnerMade
+import org.openbmt.owner.OwnRequestView
+import org.openbmt.owner.OwnShopArgs
+import org.openbmt.owner.OwnWalletView
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNetwork
 import org.openbmt.owner.PairView
@@ -165,7 +173,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + AppWords.keyMapAll().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's and of the key map's")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's and of the key map's")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -2748,10 +2756,252 @@ object AppModelTest {
         ok(src.contains("n.booksLedger(it)") && !src.contains("n.booksLedger(true)") && src.indexOf("ask.accept()") < src.indexOf("showBooks(it)"), "the call is made from the accept button only, and its file goes to the save picker")
     }
 
+    // ---- a shop with its own wallet: adding a counter (OA-105, OA-108 to OA-111, OA-113, OA-114) ------------------
+
+    private class FakeOwn(
+        val needsRate: Boolean = true,
+        val ended: Boolean = false,
+        var refuse: Words? = null,
+    ) : OwnLibrary {
+        val calls = ArrayList<String>()
+        val counter = ByteArray(32) { 7 }
+        val code = ByteArray(40) { (it + 1).toByte() }
+
+        private fun refuseIfAsked() {
+            refuse?.let { throw OwnerException("OA-109", "refused", 1, it) }
+        }
+
+        override fun make(): OwnOwnerMade {
+            calls.add("make")
+            return OwnOwnerMade(ByteArray(32) { 9 }, ByteArray(32) { 8 })
+        }
+
+        override fun pin(text: String): OwnWalletView {
+            calls.add("pin")
+            return OwnWalletView(byteArrayOf(1, 2, 3), WL06_ADDRESS, false)
+        }
+
+        override fun offer(shop: OwnShopArgs, now: Long): OwnOfferView {
+            calls.add("offer")
+            return OwnOfferView(OwnMade(code, now), now + 600, 0, WL06_ADDRESS)
+        }
+
+        override fun request(shop: OwnShopArgs, made: OwnMade, now: Long, request: ByteArray): OwnRequestView {
+            calls.add("request")
+            refuseIfAsked()
+            if (ended && now >= made.madeAt + 600) {
+                throw OwnerException("OA-108", "ended", 1, Words(Tones.STOP, Who.OWNER, "Code ended", "This code lasts 10 minutes and has ended. Nothing was paired.", "Show a new code.", "OA-108", null, null, null))
+            }
+            return OwnRequestView(counter, "Front counter", listOf("able", "acid", "also", "apex"), needsRate, listOf(CounterShare(counter, 10_000)), 580)
+        }
+
+        override fun confirm(shop: OwnShopArgs, made: OwnMade, now: Long, request: ByteArray, usdPerBtc: Long, relay: ByteArray?): OwnBundleView {
+            calls.add("confirm:$usdPerBtc")
+            refuseIfAsked()
+            return OwnBundleView(counter, ByteArray(50) { 5 }, 0, 1_000, 1, listOf(CounterShare(counter, 10_000)))
+        }
+
+        override fun differ(): Words {
+            calls.add("differ")
+            return Words(Tones.STOP, Who.OWNER, "Pairing stopped", "The words did not match, so nothing was paired. Someone may have changed a code on the way.", "Start again from Add a counter.", "OA-110", null, null, null)
+        }
+
+        override fun waiting(shop: OwnShopArgs): List<WaitingCounter> = if (calls.contains("confirm:0") || calls.any { it.startsWith("confirm:") }) {
+            if (calls.contains("delivered")) emptyList() else listOf(WaitingCounter(counter, "Front counter"))
+        } else {
+            emptyList()
+        }
+
+        override fun bundleAgain(shop: OwnShopArgs, counter: ByteArray): OwnBundleView {
+            calls.add("again")
+            return OwnBundleView(counter, ByteArray(50) { 5 }, 0, 1_000, 1, listOf(CounterShare(counter, 10_000)))
+        }
+
+        override fun delivered(shop: OwnShopArgs, counter: ByteArray) {
+            calls.add("delivered")
+        }
+
+        override fun gap(paid: List<Long>, highestGiven: Long?): OwnGapView = OwnGapView(highestGiven ?: 0, (highestGiven ?: 0) > 20)
+    }
+
+    private val ownArgs = OwnShopArgs("/shop", ByteArray(32) { 1 }, byteArrayOf(1, 2, 3))
+
+    private fun oa_105_the_wallet_is_kept_sealed_only_after_same_address_and_reads_back() {
+        val own = FakeOwn()
+        val reader: (String) -> ImportedWalletView = { ImportedWalletView(false, "818bc9b6", WL06_ADDRESS) }
+        val c = Connect()
+        // Nothing is kept before the owner taps "Same address": reading pins the file and saves nothing.
+        var saved: ByteArray? = null
+        val text = WL06_ONE.toByteArray()
+        ok(c.read(text, reader, own::pin) == null && c.step == ConnectStep.Address && own.calls == listOf("pin") && saved == null, "reading pins the wallet in memory and saves nothing")
+        // The write comes with "Same address" and before the step moves on.
+        ok(c.same { saved = it.copyOf() } == null && c.step == ConnectStep.Checked && saved!!.contentEquals(byteArrayOf(1, 2, 3)), "Same address saves the wallet's file, then the step is Wallet checked")
+        // A write that fails keeps the step and gives words; Different keeps nothing.
+        val c2 = Connect()
+        c2.read(WL06_ONE.toByteArray(), reader, own::pin)
+        val said = c2.same { throw IOException("full") }
+        ok(said != null && c2.step == ConnectStep.Address && said.heading == OwnPairWords.WORDS_NEEDED_OA_105, "a write that fails stops at the address check, with the words of OA-105 (a placeholder until they are written)")
+        val c3 = Connect()
+        c3.read(WL06_ONE.toByteArray(), reader, own::pin)
+        c3.different()
+        var wrote = false
+        ok(c3.same { wrote = true } == null && !wrote && c3.step == ConnectStep.Different, "after Different nothing is written")
+        // The store: sealed, atomic, read back exactly; the owner root is made once; nothing is offered until it reads.
+        val dir = tempDir()
+        val store = OwnShopStore(dir, testSealer())
+        ok(store.args() == null && !store.hasWallet(), "a store with nothing kept gives no shop")
+        store.keep(byteArrayOf(1, 2, 3), own)
+        store.keep(byteArrayOf(1, 2, 3), own)
+        ok(own.calls.count { it == "make" } == 1, "the owner root is made once")
+        ok(store.loadWallet()!!.contentEquals(byteArrayOf(1, 2, 3)) && store.loadOwner()!!.contentEquals(ByteArray(32) { 9 }), "both read back exactly")
+        val raw = File(dir, AppFiles.OWN_WALLET_FILE).readBytes()
+        ok(raw.size > 3 && !raw.toList().windowed(3).any { it == listOf<Byte>(1, 2, 3) } && raw.copyOfRange(0, 4).contentEquals("OBKS".toByteArray()), "the file is sealed, not the wallet's bytes")
+        val args = store.args()!!
+        ok(args.wallet.contentEquals(byteArrayOf(1, 2, 3)) && args.ownerSecret.size == 32 && args.dir.endsWith(AppFiles.OWN_DIR) && File(args.dir).isDirectory, "the call is given the folder, the secret and the file")
+        File(dir, AppFiles.OWN_WALLET_FILE).writeBytes(raw.copyOf(raw.size - 1))
+        var refused = false
+        try { store.args() } catch (_: IOException) { refused = true }
+        ok(refused, "a file that does not read back is refused, so no offer is made")
+        ok(OwnPairing({ null }, own).start(1_000)!!.heading == OwnPairWords.WORDS_NEEDED_OA_105_NONE && !own.calls.contains("offer"), "with no wallet kept no offer is made")
+        ok(OwnShopStore::class.java.declaredMethods.none { it.name.contains("replace") || it.name.contains("change") }, "changing the wallet is not in these rules")
+    }
+
+    private fun oa_108_the_offer_is_drawn_for_ten_minutes_and_a_new_one_after_it() {
+        val own = FakeOwn()
+        val p = OwnPairing({ ownArgs }, own)
+        ok(p.start(1_000) == null && p.step == OwnPairStep.Offer && p.offer!!.firstAddress == WL06_ADDRESS && p.offer!!.endsAt == 1_600L, "the offer is made, to be shown as a code")
+        ok(!p.ended(1_599) && p.ended(1_600), "it lasts 10 minutes")
+        // The words are the design file's, as they are written.
+        ok(OwnPairWords.offerHeading == "Scan this with the new counter" && OwnPairWords.offerText == "The counter shows your wallet's first address. Check it against your wallet before you go on." && OwnPairWords.offerScan == "Scan the counter's code", "the offer's words")
+        ok(OwnPairWords.endedHeading == "Code ended" && OwnPairWords.endedText == "This code lasts 10 minutes and has ended. Nothing was paired." && OwnPairWords.endedNext == "Show a new code." && OwnPairWords.endedButton == "Show a new code", "the ended words")
+        ok(p.start(2_000) == null && p.offer!!.made.madeAt == 2_000L && own.calls.count { it == "offer" } == 2, "a new one is a new offer")
+        // The screen draws the offer as the shared animated code of OA-24 and gives it a scan button.
+        val src = source("src/android/OwnCounter.kt")
+        ok(src.contains("AnimatedQrView.make(") && src.contains("ExchangeModel.TYPE_BYTES") && src.contains("OwnPairWords.offerScan"), "the offer is a ur:bytes code, as a bundle is")
+    }
+
+    private fun oa_109_the_counters_request_is_judged_by_the_library_and_shows_four_words() {
+        val own = FakeOwn(needsRate = false)
+        val p = OwnPairing({ ownArgs }, own)
+        p.start(1_000)
+        ok(p.readRequest(byteArrayOf(1), 1_020) == null && p.step == OwnPairStep.Compare && p.name() == "Front counter" && p.read!!.sessionWords.size == 4, "a request that reads shows the counter's name and four words")
+        ok(CounterModel.wordsLine(p.read!!.sessionWords) == "able   acid   also   apex", "the four words, large on the screen")
+        ok(OwnPairWords.compare("Front counter") == "Check that Front counter shows these same four words." && OwnPairWords.compareHeading == "Compare the four words" && OwnPairWords.compareMatch == "They match" && OwnPairWords.compareDiffer == "They differ", "the words, as written")
+        // Only ur:bytes of at most 1,024 bytes goes to the node: the same check as OA-22.
+        ok(OwnPairing.requestBytes(ByteArray(1_024)) is SourceResult.Bytes && OwnPairing.requestBytes(ByteArray(1_025)) is SourceResult.Failed, "at most 1,024 bytes")
+        ok(source("src/android/OwnCounter.kt").contains("UrScan(CounterModel.REQUEST_TYPES"), "only ur:bytes is taken")
+        // Each refusal is the library's words; the model judges nothing.
+        for ((n, heading) in listOf("Not a counter's code", "Code for another pairing", "Counter code not signed", "Counter key refused").withIndex()) {
+            val q = OwnPairing({ ownArgs }, FakeOwn().also { it.refuse = Words(Tones.STOP, Who.OWNER, heading, "A sentence $n.", "Start again from Add a counter.", "OA-109", null, null, null) })
+            q.start(1_000)
+            val said = q.readRequest(byteArrayOf(1), 1_020)
+            ok(said != null && said.heading == heading && q.step == OwnPairStep.Offer && q.read == null, "$heading: refused with the library's words and the step stays")
+        }
+        // A request after the 10 minutes is refused with the ended words.
+        val late = OwnPairing({ ownArgs }, FakeOwn(ended = true))
+        late.start(1_000)
+        ok(late.readRequest(byteArrayOf(1), 1_700)!!.heading == "Code ended", "a request after the 10 minutes")
+        // A name that is not plain text has no words yet: its placeholder shows.
+        val name = OwnPairing({ ownArgs }, FakeOwn().also { it.refuse = Words(Tones.STOP, Who.OWNER, "WORDS_NEEDED_OA_109_NAME", "WORDS_NEEDED_OA_109_NAME", "WORDS_NEEDED_OA_109_NAME", "OA-109", null, null, null) })
+        name.start(1_000)
+        ok(OwnPairWords.isPlaceholder(name.readRequest(byteArrayOf(1), 1_020)!!), "a name that is not plain text shows its placeholder")
+        ok(CounterModel.nameOf("Front\u0007 counter") == "Front counter" || CounterModel.nameOf("Front\u0007 counter").none { it.code < 32 }, "the name is made safe to show")
+    }
+
+    private fun oa_110_they_match_makes_the_bundle_and_they_differ_allocates_nothing() {
+        val own = FakeOwn()
+        val p = OwnPairing({ ownArgs }, own)
+        p.start(1_000)
+        p.readRequest(byteArrayOf(1), 1_020)
+        // A phone with no settings asks for the price; the price goes to the library with "They match".
+        ok(p.read!!.needsRate && p.match(1_030, 95_000) == null && own.calls.last() == "confirm:95000" && p.step == OwnPairStep.Bundle, "They match makes the bundle, with the price")
+        ok(p.bundle!!.firstStart == 0L && p.bundle!!.firstEnd == 1_000L, "the bundle's first range is the library's")
+        ok(OwnPairWords.bundle("Front counter") == "Scan this with Front counter" && OwnPairWords.bundleText == "It holds the shop's settings and the counter's first 1,000 addresses. The counter shows Paired when it has taken it.", "the bundle's words")
+        // "They differ" forgets the request and allocates nothing.
+        val q = OwnPairing({ ownArgs }, FakeOwn().also { it.calls.clear() })
+        q.start(1_000)
+        q.readRequest(byteArrayOf(1), 1_020)
+        val said = q.differ()
+        ok(said.heading == "Pairing stopped" && q.step == OwnPairStep.Stopped && q.read == null && q.bundle == null, "They differ stops the pairing and forgets the request")
+        ok(q.match(1_040, 1) == null || q.step == OwnPairStep.Stopped, "nothing is made after They differ")
+        // Leaving before "They match" queues nothing: Back from the words forgets them and calls nothing.
+        val r = FakeOwn()
+        val leave = OwnPairing({ ownArgs }, r)
+        leave.start(1_000)
+        leave.readRequest(byteArrayOf(1), 1_020)
+        ok(leave.back() && leave.step == OwnPairStep.Offer && leave.read == null && r.calls.none { it.startsWith("confirm") }, "leaving before They match makes nothing")
+        // A refused "They match" shows the library's words and the step stays.
+        val bad = FakeOwn()
+        val s = OwnPairing({ ownArgs }, bad)
+        s.start(1_000)
+        s.readRequest(byteArrayOf(1), 1_020)
+        bad.refuse = Words(Tones.STOP, Who.OWNER, "Pairing stopped", "The words did not match, so nothing was paired. Someone may have changed a code on the way.", "Start again from Add a counter.", "OA-110", null, null, null)
+        ok(s.match(1_030, 95_000) != null && s.step == OwnPairStep.Compare && s.bundle == null, "a refusal of the library keeps the step")
+        // The price is typed or fetched as OA-23 says; a phone with settings is not asked.
+        ok(!OwnPairing({ ownArgs }, FakeOwn(needsRate = false)).also { it.start(1); it.readRequest(byteArrayOf(1), 2) }.read!!.needsRate, "a phone that holds settings asks for no price")
+        ok(OwnPairWords.pairedHeading == "{name} is paired" && OwnPairWords.pairedText == "It makes its addresses from your wallet and sells within the shop's settings." && OwnPairWords.pairedNext == "Nothing to do.", "the done words")
+    }
+
+    private fun oa_111_the_counter_is_paired_only_on_the_owners_word() {
+        val own = FakeOwn()
+        val p = OwnPairing({ ownArgs }, own)
+        p.start(1_000)
+        p.readRequest(byteArrayOf(1), 1_020)
+        p.match(1_030, 95_000)
+        ok(!own.calls.contains("delivered") && p.step == OwnPairStep.Bundle, "the bundle is shown and nothing is marked")
+        ok(p.waiting().size == 1 && p.waiting()[0].name == "Front counter", "the counter waits for its code")
+        ok(OwnPairWords.bundlePaired == "The counter shows Paired" && OwnPairWords.bundleAgain == "Show the code again", "the buttons")
+        // Back from the bundle leaves; the bundle waits in the library and is shown again as it was made.
+        ok(!p.back(), "Back from the bundle leaves the page")
+        val later = OwnPairing({ ownArgs }, own)
+        ok(later.resume(later.waiting()[0], 5_000) == null && later.step == OwnPairStep.Bundle && later.bundle!!.code.contentEquals(ByteArray(50) { 5 }) && own.calls.last() == "again", "the same bundle again, allocating nothing new")
+        ok(later.paired() == null && later.step == OwnPairStep.Paired && own.calls.last() == "delivered", "The counter shows Paired marks it delivered")
+        ok(later.waiting().isEmpty() && later.paired() == null, "it no longer waits, and a second tap does nothing")
+        val src = source("src/android/OwnCounter.kt")
+        ok(src.indexOf("p.paired()") > src.indexOf("OwnPairWords.bundlePaired") && src.count { it == '\n' } > 50, "the mark is made from that button")
+    }
+
+    private fun oa_113_the_wallet_page_says_how_far_ahead_the_wallet_must_look() {
+        val own = FakeOwn()
+        val usual = OwnWalletPage.gapRow(own.gap(emptyList(), 20))
+        ok(usual.title == "How far your wallet looks ahead" && usual.line == "Your wallet's usual setting shows every payment." && usual.next == null, "up to 20: the usual line and no action")
+        val more = OwnWalletPage.gapRow(own.gap(emptyList(), 31))
+        ok(more.line == "Set your wallet to look at least 31 addresses ahead, or it will not show every payment." && more.next == "In Sparrow: Settings, then Gap limit. In Electrum: ask the console to change it.", "above 20: the number and the next step")
+        ok(source("src/android/OwnCounter.kt").contains("OwnWalletPage.gapRow("), "the wallet page shows the row")
+    }
+
+    private fun oa_114_every_state_and_refusal_has_words_or_the_placeholder_that_names_its_rule() {
+        // Every text of the design file passes SC-12 as a sentence: at most 140 characters, no two alike.
+        val sentences = listOf(
+            OwnPairWords.offerText, OwnPairWords.endedText, OwnPairWords.endedNext, OwnPairWords.compareText, OwnPairWords.bundleText,
+            OwnPairWords.pairedText, OwnPairWords.pairedNext, OwnPairWords.gapUsual, OwnPairWords.gapMore, OwnPairWords.gapMoreNext,
+        )
+        for (t in sentences) ok(t.length <= 140 && t.endsWith("."), "at most 140 characters, ends with a full stop: $t")
+        ok(sentences.toSet().size == sentences.size, "no two sentences alike")
+        val headings = listOf(OwnPairWords.offerHeading, OwnPairWords.endedHeading, OwnPairWords.compareHeading, OwnPairWords.bundleHeading, OwnPairWords.pairedHeading, OwnPairWords.gapTitle)
+        ok(headings.none { it in sentences } && headings.toSet().size == headings.size, "no heading repeats a sentence")
+        // The placeholders are each named for a rule, hold nothing else and show their name in every part of the words.
+        for (n in OwnPairWords.placeholders) {
+            ok(Regex("WORDS_NEEDED_OA_\\d{3}(_[A-Z_]+)?").matches(n), "$n is named for a rule")
+            val w = OwnPairWords.said(n)
+            ok(OwnPairWords.isPlaceholder(w) && w.heading == n && w.what == n && w.next == n, "$n shows its name")
+        }
+        ok(OwnPairWords.placeholders.toSet().size == OwnPairWords.placeholders.size, "each placeholder once")
+        // The list in docs/screens has every text and every placeholder.
+        val md = AppWords.screensMarkdown()
+        ok(OwnPairWords.all().all { (k, _) -> md.contains("| $k |") } && md.contains("WORDS_NEEDED_OA_113_TITLE"), "the screens list has them")
+        // The app writes no sentence of its own for this part: each string of OwnCounter.kt that a person reads comes from a words object.
+        val src = source("src/android/OwnCounter.kt")
+        ok(!Regex("(ui\\.(text|primary|button|danger)|heading|para|line|label)\\(\"[A-Za-z]").containsMatchIn(src.replace("\"Dollars for one bitcoin\"", "")), "OwnCounter.kt has no sentence of its own")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
     private val notHere: Map<String, String> = mapOf(
+        "OA-106" to "the allocation book is the library's (crates/openbmt-owner tests/own.rs oa_106_...); the app only shows the first range it holds",
+        "OA-107" to "the watch set is the library's (oa_107_... in crates/openbmt-owner-node and the end-to-end test); the app draws nothing from it",
+        "OA-112" to "the top-up runs on the owner node and its link (oa_112_... in crates/openbmt-owner-node and the counter FFI's end-to-end test); this app starts no node for a shop with its own wallet yet",
         "OA-90" to "the redraw after a change of light and dark is the activity's and the window's, and needs a device; the screens it draws are those of OA-62",
     )
 
@@ -2769,7 +3019,7 @@ object AppModelTest {
         val rules = Regex("^- \\*\\*OA-(\\d{2,3})\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules.map { it.toInt() } == rules.map { it.toInt() }.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
         // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-79 for more.
-        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..104)
+        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..114)
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")
@@ -2857,7 +3107,9 @@ object AppModelTest {
         ok(r.connect.step == ConnectStep.Address, "the paste path reaches the address check")
         r.back(); ok(r.connect.step == ConnectStep.Paste, "Back from the address check: the paste")
         r.connect.read(bytes(WL06_ONE), reader); r.connect.same(); ok(r.connect.step == ConnectStep.Checked, "Same address: checked")
-        r.next(); ok(r.step == FirstRunStep.NotYet, "Next from Wallet checked goes to the notice")
+        r.next(); ok(r.step == FirstRunStep.OwnCounter, "Next from Wallet checked goes to adding the first counter (OA-108)")
+        r.back(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Checked, "Back from adding a counter: Wallet checked")
+        r.next(); r.next(); ok(r.step == FirstRunStep.NotYet, "Next from adding a counter goes to the notice")
         r.back(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Checked, "Back from the notice: Wallet checked")
         r.back(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Address, "Back from Wallet checked: the address check")
         r.back(); r.back(); r.back()
@@ -2874,9 +3126,11 @@ object AppModelTest {
         ok(keys.size == keys.toSet().size && ConnectWords.all().all { (k, t) -> t.isNotBlank() && !t.contains("  ") && k.isNotEmpty() }, "every key is used once")
         ok(Connect.rows(WL06_ADDRESS) == "bc1q yjas sxtm\nzl02 s8de 8jw9\n365q muvw g74u\ndtp3 vj", "the address in groups of four, three to a line")
         val ui = source("src/android/Connect.kt")
+        // Nothing is kept before "Same address" (OA-105): the one write is the store's, from that button.
         for (bad in listOf("shopFile", "File\\(", "OwnerNode", "writeText", "SharedPreferences", "\\.save\\(", "mnemonic", "seed")) {
-            ok(!Regex(bad).containsMatchIn(ui), "Connect reaches nothing outside memory: $bad")
+            ok(!Regex(bad).containsMatchIn(ui), "Connect reaches nothing outside memory but the store: $bad")
         }
+        ok(Regex("ownStore\\.keep\\(").findAll(ui).count() == 1 && ui.indexOf("c.same {") < ui.indexOf("ownStore.keep("), "the store is written from Same address and nowhere else")
         ok(ui.contains("r.connect.read("), "the screens hand the bytes to the model")
         ok(source("src/model/ConnectModel.kt").contains("text.fill(0)") && ui.contains("field.setText(\"\")"), "the text is cleared from the field and the bytes wiped")
     }
