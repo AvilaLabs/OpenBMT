@@ -659,7 +659,7 @@ code and checks the payment.
   to that counter only (LK-08), whose content is a sale request (`sale` 16
   bytes the Box makes, the amount in minor units, the currency, the reference
   and the time the request lapses) or a sale cancel (`sale`), with the magic
-  `OBM(`. A request lapses 5 minutes after it was made; a sale nobody started
+  `OBM+`. A request lapses 5 minutes after it was made; a sale nobody started
   by then is `expired`. At most 32 sales wait for a counter at once; one more
   is a 429 `tillBusy`. Sales and the messages not yet sent are in memory only,
   so a restart forgets them, and a sale it does not know is `tillLost`. A sale

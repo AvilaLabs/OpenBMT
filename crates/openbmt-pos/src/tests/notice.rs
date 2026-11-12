@@ -548,7 +548,7 @@ fn request() -> SaleRequest {
 fn bx_76_a_sale_request_and_a_cancel_read_back_exactly() {
     let r = TillMessage::Request(request());
     assert_eq!(TillMessage::from_bytes(&r.to_bytes()).unwrap(), r);
-    assert_eq!(&r.to_bytes()[..4], b"OBM(");
+    assert_eq!(&r.to_bytes()[..4], b"OBM+");
     let c = TillMessage::Cancel(SaleCancel { sale: [9; 16] });
     assert_eq!(TillMessage::from_bytes(&c.to_bytes()).unwrap(), c);
     assert_eq!(c.to_bytes().len(), 5 + 1 + 16);

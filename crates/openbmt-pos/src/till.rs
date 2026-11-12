@@ -11,7 +11,7 @@ use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_counter::{Amount, Currency};
 
 /// The magic of a till sale body.
-pub const MAGIC_TILL_SALE: [u8; 4] = *b"OBM(";
+pub const MAGIC_TILL_SALE: [u8; 4] = *b"OBM+";
 /// Longest reference a request carries, in bytes (BX-76).
 pub const MAX_TILL_REFERENCE: usize = 40;
 
