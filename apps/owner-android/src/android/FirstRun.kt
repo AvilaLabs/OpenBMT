@@ -1,9 +1,11 @@
 package org.openbmt.owner.app
 
+import android.graphics.Typeface
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -277,18 +279,31 @@ private fun Controller.showWhy(r: FirstRun) {
 
 /** Four cases of money held by a bank or a payment company: words only, no link, no picture, no network. */
 private fun Controller.showRealCases(r: FirstRun) {
-    fun case(place: String, end: String, text: String): View =
-        stack(PlaceEnd(act, line(place, muted = true), endChip(end), ui.px(8)), ui.text(text, 15f), gap = 4).also { it.contentDescription = "$place. $end. $text" }
+    fun case(place: String, end: String, text: String, quote: String, who: String): View {
+        val said = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(ui.px(12), 0, 0, 0)
+            addView(ui.text(quote, Type.BODY).apply { setTypeface(typeface, Typeface.ITALIC) })
+            addView(ui.text(who, Type.SECONDARY, colour = ui.pal.secondary))
+        }
+        val rule = LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(View(act).apply { setBackgroundColor(ui.pal.divider) }, LinearLayout.LayoutParams(ui.px(3), ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(said, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        return stack(PlaceEnd(act, line(place, muted = true), endChip(end), ui.px(8)), ui.text(text, 15f), rule, gap = 4)
+            .also { it.contentDescription = "$place. $end. $text $who said: $quote" }
+    }
     fun part(title: String, text: String): View = stack(ui.text(title, Type.BODY, bold = true), para(text), gap = 6)
     val back: () -> Unit = { r.back(); showFirstRun() }
     stepScreen(
         FirstRunWords.shopTitle,
         listOf(
             heading(FirstRunWords.realTitle), para(FirstRunWords.realIntro),
-            case(FirstRunWords.realCase1Place, FirstRunWords.realCase1End, FirstRunWords.realCase1Text),
-            case(FirstRunWords.realCase2Place, FirstRunWords.realCase2End, FirstRunWords.realCase2Text),
-            case(FirstRunWords.realCase3Place, FirstRunWords.realCase3End, FirstRunWords.realCase3Text),
-            case(FirstRunWords.realCase4Place, FirstRunWords.realCase4End, FirstRunWords.realCase4Text),
+            case(FirstRunWords.realCase1Place, FirstRunWords.realCase1End, FirstRunWords.realCase1Text, FirstRunWords.realCase1Quote, FirstRunWords.realCase1Who),
+            case(FirstRunWords.realCase2Place, FirstRunWords.realCase2End, FirstRunWords.realCase2Text, FirstRunWords.realCase2Quote, FirstRunWords.realCase2Who),
+            case(FirstRunWords.realCase3Place, FirstRunWords.realCase3End, FirstRunWords.realCase3Text, FirstRunWords.realCase3Quote, FirstRunWords.realCase3Who),
+            case(FirstRunWords.realCase4Place, FirstRunWords.realCase4End, FirstRunWords.realCase4Text, FirstRunWords.realCase4Quote, FirstRunWords.realCase4Who),
             part(FirstRunWords.realBitcoinTitle, FirstRunWords.realBitcoinText),
             part(FirstRunWords.realKeysTitle, FirstRunWords.realKeysText),
             part(FirstRunWords.realCoinTitle, FirstRunWords.realCoinText),

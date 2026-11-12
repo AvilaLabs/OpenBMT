@@ -2807,10 +2807,14 @@ object AppModelTest {
         ok(shown["whyRealCases"] == "Real cases" && shown["realTitle"] == "When someone else holds the money" &&
             shown["realCase1Place"] == "Lebanon, since 2019" && shown["realCase4End"] == "18¢ per dollar back" && shown["whyText2"]!!.contains("with a coin or a die."), "the real cases words are the ones of the words file")
         ok(listOf(1, 2, 3, 4).map { shown["realCase${it}Place"]!!.substringBefore(",") } == listOf("Lebanon", "Laiki Bank", "TMON and WeMakePrice", "Synapse"), "the four cases come worst first, in the order of the words file")
-        ok(source("src/android/FirstRun.kt").contains("contentDescription = \"\$place. \$end. \$text\""), "each case is spoken as its place, how it ended and its text")
+        ok(source("src/android/FirstRun.kt").contains("contentDescription = \"\$place. \$end. \$text \$who said: \$quote\""), "each case is spoken as its place, how it ended, its text, who said the quote and the quote")
+        ok(shown["realCase1Quote"] == "\"No bank transfers are allowed, so we cannot import materials.\"" && shown["realCase1Who"] == "A manufacturer in Lebanon" &&
+            shown["realCase2Quote"] == "\"We can't make any withdrawals, we can't make deposits, pay our suppliers.\"" && shown["realCase2Who"] == "A florist in Nicosia, with the banks shut" &&
+            shown["realCase3Quote"] == "\"If the settlement is not done by then, it means bankruptcy.\"" && shown["realCase3Who"] == "A seller of household goods in Seoul" &&
+            shown["realCase4Quote"] == "\"A bank just robbed us.\"" && shown["realCase4Who"] == "A customer who had \$94,000 and was shown \$128.68 back", "each real case has its quote and who, exactly")
         val screensMdText = File(appDir, "../../docs/screens/owner-app.md").readText()
-        for (k in listOf("whyRealCases", "realTitle", "realIntro", "realCase1Place", "realCase1End", "realCase1Text", "realCase2Place", "realCase2End", "realCase2Text",
-            "realCase3Place", "realCase3End", "realCase3Text", "realCase4Place", "realCase4End", "realCase4Text", "realBitcoinTitle", "realBitcoinText", "realKeysTitle", "realKeysText", "realCoinTitle", "realCoinText", "realMore")) {
+        for (k in listOf("whyRealCases", "realTitle", "realIntro", "realCase1Place", "realCase1End", "realCase1Text", "realCase1Quote", "realCase1Who", "realCase2Place", "realCase2End", "realCase2Text",
+            "realCase3Place", "realCase3End", "realCase3Text", "realCase3Quote", "realCase3Who", "realCase4Place", "realCase4End", "realCase4Text", "realCase4Quote", "realCase4Who", "realBitcoinTitle", "realBitcoinText", "realKeysTitle", "realKeysText", "realCoinTitle", "realCoinText", "realMore")) {
             ok(shown.containsKey(k) && screensMdText.contains("| $k |"), "docs/screens/owner-app.md has $k")
         }
         r.next(); r.back()
