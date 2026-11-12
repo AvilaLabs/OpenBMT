@@ -228,7 +228,7 @@ fn cr_234_the_watched_scripts_are_those_handed_out() {
 // CR-235.
 
 #[test]
-fn cr_235_a_range_taken_writes_one_record_between_the_check_and_the_store() {
+fn cr_235_a_range_taken_stores_the_ranges_and_then_writes_one_record() {
     let (mut w, _) = own_world(SINGLE, range(0, 1_000));
     let before = w.c.records_len();
     let r = range(5_000, 6_000);
@@ -236,8 +236,8 @@ fn cr_235_a_range_taken_writes_one_record_between_the_check_and_the_store() {
     assert_eq!(w.c.records_len(), before + 1);
     assert_eq!(
         w.m.log,
-        vec!["record".to_string(), "Ranges".to_string()],
-        "the record first, the ranges last"
+        vec!["Ranges".to_string(), "record".to_string()],
+        "the ranges first, the record last"
     );
     let stored = Record::from_bytes(w.m.records.last().unwrap()).unwrap();
     assert_eq!(stored.kind, RecordKind::Setting);
@@ -288,7 +288,7 @@ fn cr_235_a_range_overlapping_what_is_handed_out_or_in_use_is_refused() {
     assert_eq!(e, RangeTakeRefused::Range(RangeError::OverlapsTaken.into()));
     assert_eq!(e.rule(), "CR-235");
     // Over the index handed out.
-    let e = w.c.take_range(range(0, 1_000), &mut w.m).unwrap_err();
+    let e = w.c.take_range(range(0, 1_500), &mut w.m).unwrap_err();
     assert_eq!(e, RangeTakeRefused::Range(RangeError::OverlapsUsed.into()));
     assert_eq!(w.c.records_len(), before);
     assert!(w.m.log.is_empty(), "nothing was written: {:?}", w.m.log);
@@ -319,25 +319,119 @@ fn cr_235_a_range_for_another_counter_or_not_signed_by_the_owner_or_too_small_is
 }
 
 #[test]
-fn cr_235_a_record_or_store_that_fails_leaves_the_ranges_as_they_were() {
+fn cr_235_a_store_that_fails_records_nothing_and_leaves_the_ranges_as_they_were() {
     let (mut w, _) = own_world(SINGLE, range(0, 1_000));
     let r = range(5_000, 6_000);
-    w.m.fail_on = Some(1);
-    let e = w.c.take_range(r, &mut w.m).unwrap_err();
-    assert!(matches!(e, RangeTakeRefused::Record(_)));
-    assert_eq!(w.c.range_ledger().unwrap().signed().len(), 1);
-    // The record is written but the ranges are not: a second try stores them
-    // without a second record (CR-168).
-    w.m.reset();
-    w.m.fail_on = Some(2);
+    let ledger = w.c.range_ledger().unwrap().to_bytes();
+    w.m.fail_on = Some(1); // the ranges
     let e = w.c.take_range(r, &mut w.m).unwrap_err();
     assert!(matches!(e, RangeTakeRefused::Store(_)));
+    assert_eq!(e.rule(), "CR-235");
+    assert!(w.m.records.is_empty(), "no record before the ranges");
+    assert_eq!(w.c.records_len(), 0);
+    assert_eq!(w.c.range_ledger().unwrap().to_bytes(), ledger);
     assert_eq!(w.c.range_ledger().unwrap().signed().len(), 1);
-    assert_eq!(w.m.records.len(), 1);
+    // A second try takes it whole.
     w.m.reset();
     w.c.take_range(r, &mut w.m).unwrap();
     assert_eq!(w.m.records.len(), 1);
     assert_eq!(w.c.range_ledger().unwrap().signed().len(), 2);
+}
+
+#[test]
+fn cr_235_the_ledger_is_written_before_the_record() {
+    let (mut w, _) = own_world(SINGLE, range(0, 1_000));
+    let r = range(5_000, 6_000);
+    w.m.fail_on = Some(2); // the record, after the ranges
+    let e = w.c.take_range(r, &mut w.m).unwrap_err();
+    assert!(matches!(e, RangeTakeRefused::Record(_)));
+    assert_eq!(w.m.log, ["Ranges", "FAILED record"]);
+    assert_eq!(w.c.range_ledger().unwrap().signed().len(), 2);
+    assert_eq!(
+        w.m.slots[&Slot::Ranges],
+        w.c.range_ledger().unwrap().to_bytes()
+    );
+}
+
+#[test]
+fn cr_235_a_record_that_fails_after_the_store_gets_its_record_once_when_the_range_comes_again() {
+    let (mut w, _) = own_world(SINGLE, range(0, 1_000));
+    let r = range(5_000, 6_000);
+    w.m.fail_on = Some(2);
+    assert!(w.c.take_range(r, &mut w.m).is_err());
+    assert!(w.m.records.is_empty());
+    let ledger = w.m.slots[&Slot::Ranges].clone();
+    w.m.reset();
+    w.c.take_range(r, &mut w.m).unwrap();
+    assert_eq!(w.m.log, ["record"], "the record and nothing else");
+    assert_eq!(w.m.records.len(), 1);
+    assert_eq!(w.m.slots[&Slot::Ranges], ledger);
+    assert_eq!(w.c.range_ledger().unwrap().signed().len(), 2);
+    // And a third time is nothing.
+    w.m.reset();
+    w.c.take_range(r, &mut w.m).unwrap();
+    assert!(w.m.log.is_empty());
+    assert_eq!(w.m.records.len(), 1);
+}
+
+#[test]
+fn cr_235_a_range_recorded_but_not_stored_is_stored_with_no_second_record() {
+    let (mut w, p) = own_world(SINGLE, range(0, 1_000));
+    let old = w.c.range_ledger().unwrap().to_bytes();
+    let r = range(5_000, 6_000);
+    w.c.take_range(r, &mut w.m).unwrap();
+    // What a counter of the older order left: the record, not the ranges.
+    w.m.slots.insert(Slot::Ranges, old.clone());
+    restart(&mut w, &p);
+    assert_eq!(w.c.range_ledger().unwrap().to_bytes(), old);
+    let records = w.m.records.len();
+    w.m.reset();
+    w.c.take_range(r, &mut w.m).unwrap();
+    assert_eq!(w.m.records.len(), records);
+    assert_eq!(w.m.log, ["Ranges"]);
+    assert_eq!(w.c.range_ledger().unwrap().signed().len(), 2);
+    assert_eq!(
+        w.m.slots[&Slot::Ranges],
+        w.c.range_ledger().unwrap().to_bytes()
+    );
+}
+
+#[test]
+fn cr_235_a_range_stored_and_recorded_is_taken_as_nothing() {
+    let (mut w, _) = own_world(SINGLE, range(0, 1_000));
+    let r = range(5_000, 6_000);
+    w.c.take_range(r, &mut w.m).unwrap();
+    let (records, ledger) = (w.c.records_len(), w.m.slots[&Slot::Ranges].clone());
+    w.m.reset();
+    w.c.take_range(r, &mut w.m).unwrap();
+    assert!(w.m.log.is_empty(), "nothing written: {:?}", w.m.log);
+    assert_eq!(w.c.records_len(), records);
+    assert_eq!(w.m.slots[&Slot::Ranges], ledger);
+}
+
+#[test]
+fn cr_235_a_stop_between_the_store_and_the_record_then_a_restart_then_the_range_again() {
+    let (mut w, p) = own_world(SINGLE, range(0, 1_000));
+    let r = range(5_000, 6_000);
+    w.m.fail_on = Some(2);
+    assert!(w.c.take_range(r, &mut w.m).is_err());
+    w.m.reset();
+    restart(&mut w, &p);
+    // The ledger kept the range; the chain has no record of it.
+    assert_eq!(w.c.range_ledger().unwrap().remaining(), 2_000);
+    assert_eq!(w.c.records_len(), 0);
+    w.c.take_range(r, &mut w.m).unwrap();
+    assert_eq!(w.m.records.len(), 1);
+    assert_eq!(w.c.range_ledger().unwrap().signed().len(), 2);
+    // The range is there for sales: the first range's indexes go first, and
+    // the book still holds both.
+    assert_eq!(w.open_five().index, 0);
+    assert_eq!(w.c.range_ledger().unwrap().remaining(), 1_999);
+    // A restart reads the record and the ranges, and a third arrival is nothing.
+    restart(&mut w, &p);
+    w.m.reset();
+    w.c.take_range(r, &mut w.m).unwrap();
+    assert!(w.m.log.is_empty());
 }
 
 #[test]

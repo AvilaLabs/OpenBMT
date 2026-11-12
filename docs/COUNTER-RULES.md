@@ -1763,11 +1763,16 @@ a counter paired with the shop's own wallet.
   Range, each the `OBM*` frame. A range is taken when it passes CR-232 and
   overlaps no index the counter has handed out and no range still in use
   (WL-25, WL-26); otherwise nothing changes and a note gives the rule and
-  words. A range taken is recorded as CR-167 records a batch, in the same
-  order (check, record, store), with tag byte 35 and the digest of the text
-  `OpenBMT/range-held/v1` and the range's wire bytes; a range already held is
-  taken as nothing, as CR-168 says, and the body is read as strictly as
-  CR-169 says. A counter paired with the Key app drops a Range message with a
+  words. A range taken is recorded as CR-167 records a batch, with tag byte 35 and
+  the digest of the text `OpenBMT/range-held/v1` and the range's wire bytes,
+  but in the other order: check, store, record. The record tells the owner
+  that the range arrived (LK-77), so it is never written before the range is
+  stored. A range already stored and recorded is taken as nothing. A range
+  already stored with no record (the record failed after the store) gets
+  its record when it arrives again, and nothing else changes. A range
+  recorded but not stored (a counter that stopped between the two in an
+  older version) is stored and no second record is written. The body is read
+  as strictly as CR-169 says. A counter paired with the Key app drops a Range message with a
   note, and a counter paired with the shop's own wallet drops a Batch
   message with a note: "This counter makes its own addresses."
 - **CR-236.** Settings after pairing are checked as section 15 says, with

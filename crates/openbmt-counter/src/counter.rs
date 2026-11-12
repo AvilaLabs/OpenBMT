@@ -20,7 +20,7 @@ use openbmt_core::batch::{
 use openbmt_core::command::{Action, SignedCommand};
 use openbmt_core::heartbeat::SignedHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
-use openbmt_core::pinned_wallet::{RangeError, SignedRange};
+use openbmt_core::pinned_wallet::SignedRange;
 use openbmt_core::policy::{
     amount_at_risk, evaluate, CheckMode, Decision, Exposure, ExposureError, ExposureWriteError,
     Heartbeat, Inputs, InstantPolicy, PauseStatus, PauseTracker, PaymentId,
@@ -41,7 +41,7 @@ use crate::money::{
     MAX_SATS,
 };
 use crate::own::{OwnPairing, OwnSource};
-use crate::range_held::RangeHeld;
+use crate::range_held::{range_digest, RangeHeld};
 use crate::recordlog::{RecordLog, MAX_UNSENT_IN_MEMORY, READ_CHUNK};
 use crate::refund::{
     dust_limit, refund_text_ok, sats_floor, Ask, CashRefund, EntryKind, RefundAsk, RefundEntry,
@@ -698,17 +698,19 @@ impl Counter {
     }
 
     /// CR-235: take a signed range of indexes the owner sent, and say so in
-    /// a record, in the order of [`Counter::take_batch`]. A counter paired
-    /// with the Key app takes no range. The range must pass CR-232 (the owner
-    /// root's signature, this counter, a valid shape, at least the smallest
-    /// range) and overlap no index handed out and no range still in use
-    /// (WL-25, WL-26). A range the records already show as taken (the same
-    /// range and digest) is taken as nothing and writes no second record
-    /// (CR-168). Otherwise the range is checked on a copy of the ledger with
-    /// nothing stored; the record is written (CR-40, CR-167); and the ranges
-    /// are stored last. If that last write fails the record stays, the ranges
-    /// are as they were, and a second try of the same range stores it without
-    /// a second record.
+    /// a record, in the other order to [`Counter::take_batch`]: check, store,
+    /// record. The record tells the owner the range arrived (LK-77), so it is
+    /// never written before the range is stored. A counter paired with the
+    /// Key app takes no range. The range must pass CR-232 (the owner root's
+    /// signature, this counter, a valid shape, at least the smallest range)
+    /// and overlap no index handed out and no range still in use (WL-25,
+    /// WL-26). It is checked on a copy of the ledger with nothing stored;
+    /// then the ranges are stored; then the record is written. A range the
+    /// ledger already holds and the records show is taken as nothing. One the
+    /// ledger holds with no record (the record failed) gets its record and
+    /// nothing else changes. One the records show but the ledger does not
+    /// hold (a counter that stopped between the two in an older version) is
+    /// stored and no second record is written.
     pub fn take_range<S: Store>(
         &mut self,
         signed: SignedRange,
@@ -721,23 +723,32 @@ impl Counter {
         let held = RangeHeld::of(&signed);
         let recorded = self.held_ranges.get(&(held.start, held.end)) == Some(&held.digest);
         own.check(&signed, &me).map_err(RangeTakeRefused::Range)?;
-        let mut next = own.clone();
-        match next.ledger.accept(&signed) {
-            Err(RangeError::OverlapsUsed | RangeError::OverlapsTaken) if recorded => {
-                return Ok(());
+        let stored = own
+            .ledger
+            .signed()
+            .iter()
+            .any(|s| range_digest(s) == held.digest);
+        if stored {
+            if !recorded {
+                self.append_record(store, held.kind(), held.encode())
+                    .map_err(RangeTakeRefused::Record)?;
+                self.held_ranges.insert((held.start, held.end), held.digest);
             }
-            Err(e) => return Err(RangeTakeRefused::Range(e.into())),
-            Ok(()) => {}
+            return Ok(());
         }
+        let mut next = own.clone();
+        next.ledger
+            .accept(&signed)
+            .map_err(|e| RangeTakeRefused::Range(e.into()))?;
+        store
+            .put(Slot::Ranges, &next.ledger.to_bytes())
+            .map_err(RangeTakeRefused::Store)?;
+        self.own = Some(next);
         if !recorded {
             self.append_record(store, held.kind(), held.encode())
                 .map_err(RangeTakeRefused::Record)?;
             self.held_ranges.insert((held.start, held.end), held.digest);
         }
-        store
-            .put(Slot::Ranges, &next.ledger.to_bytes())
-            .map_err(RangeTakeRefused::Store)?;
-        self.own = Some(next);
         Ok(())
     }
 
