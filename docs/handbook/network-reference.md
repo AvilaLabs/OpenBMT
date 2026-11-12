@@ -435,8 +435,9 @@ Google Play distribution is excluded.
 
 Lightning connects to the shop's existing LND or Core Lightning node.
 OpenBMT does not run, rent or select one (design section 8). A provider
-holding the channels would hold the money and see every payment. The
-same reason excluded third-party swaps.
+holding the channels would hold the money and see every payment. A swap
+provider never holds the shop's money, so Lightning through one the shop
+picks is planned as an option, off by default and reached over Tor only.
 
 The node's public key is in the signed settings. Naming or changing it
 needs the Key app's co-signature, and each invoice must be signed by that

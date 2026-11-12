@@ -141,8 +141,12 @@ still planned. Google Play distribution is excluded.
 
 OpenBMT connects only to the shop's LND or Core Lightning node. It does
 not choose, run or rent one. A provider holding the channels would control
-those funds and see payments. Third-party swaps are excluded for the same
-reason.
+those funds and see payments.
+
+A swap provider is different: it never holds the shop's money, because the
+bitcoin it locks can be claimed only by the shop. Lightning through a swap
+provider the shop picks is planned as an option, off by default (design
+section 8). It is not built into the apps yet.
 
 Naming or changing the node needs approval through the Key app. OpenBMT
 cannot establish who actually operates the named node: pointing it at a

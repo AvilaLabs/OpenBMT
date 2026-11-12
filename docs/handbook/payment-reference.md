@@ -235,5 +235,9 @@ the instant limit. This counter integration is built but has never been
 run against a real node.
 
 The shop must operate the node and manage liquidity, updates and backups.
-OpenBMT does not do that work. Eclair is unsupported (`LN-02`), and
-third-party swap providers are excluded from the payment path.
+OpenBMT does not do that work. Eclair is unsupported (`LN-02`).
+
+Lightning without a node, through a swap provider the shop picks, is
+planned as an option, off by default (design section 8). The library that
+checks a provider's replies exists (`docs/SWAP-RULES.md`); the counter does
+not use it yet.
