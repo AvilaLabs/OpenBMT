@@ -369,7 +369,9 @@ in memory, and nothing is changed if the store fails.
   waits, as bytes, until the caller reports it confirmed or dropped. A signed batch, settings item or
   pairing waits until the caller reports it delivered. So a crash after the
   store loses nothing.
-- **AS-65.** The queue's snapshot is `OBM4`, version 1. Decoding is strict
+- **AS-65.** The queue's snapshot is `OBM4`, version 1 (2 to 4 with a Box,
+  the books' notes and signed-elsewhere transactions: AS-83, OC-51,
+  AS-89). Decoding is strict
   (AS-03) and bounded (AS-50). It holds the queue, the sales' facts, the
   settings in force, the open sessions (the request bytes and what was
   frozen, a transaction's change place included), the objects waiting to

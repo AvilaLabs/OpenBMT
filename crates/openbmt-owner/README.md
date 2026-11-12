@@ -28,6 +28,7 @@ been done yet.** Do not use it with real funds.
 | `take_response` | Checks the answer against the request, signs with key 1, joins, finishes, checks the outputs, stores, returns | AS-62 to AS-64, AS-67 |
 | `mark_broadcast`, `mark_confirmed`, `mark_dropped`, `mark_delivered`, `archive_paid` | Follow the finished objects | AS-54, AS-64 |
 | `cancel`, `requeue`, `abandon_session` | Take a returned entry back, drop it, or give up on a session | AS-54, AS-63, AS-66 |
+| `mark_elsewhere_confirmed`, `mark_elsewhere_replaced`, `signed_elsewhere` | Follow a transaction that went to a hardware signer in an approval that was then abandoned | AS-89 |
 
 Every call that changes anything takes a `persist` closure. The new state is
 handed to it first and takes effect in memory only if it returns `Ok`.
