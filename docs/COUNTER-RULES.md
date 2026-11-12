@@ -533,6 +533,15 @@ and sales not yet settled wait for the owner's copy to catch up.
      check the framing, cut a torn tail and make the index; a read seeks to
      the nearest mark and reads forward. A file that changed after the
      index was made is an error on read, not a wrong record.
+  8. **A failed append.** `DirStore::append_record` writes the record,
+     flushes the file's data and, for a file it made, the directory, all
+     before its index moves. If any of that fails the write is taken back
+     (the file cut to its length before and flushed, or the file it made
+     removed and the directory flushed) and only then is the error
+     returned: a failed append leaves the log as it was, so that the
+     retry does not write the same number twice. If the take back fails
+     too, no further record is appended (each is refused as a store fault,
+     CR-40) until the store is opened again, which reads the file as it is.
   A start with 100,000 records took about 11 seconds on the development
   laptop (debug build, signatures checked) and held 16,384 records.
 - **CR-82.** `openbmt-counter-node` calls `settle` from the node's pump once

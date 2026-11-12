@@ -3,6 +3,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::sync::atomic::Ordering;
 
 use openbmt_core::policy::Heartbeat;
 use openbmt_core::records::{Chain, Record, RecordKind};
@@ -418,4 +419,106 @@ impl HeaderChain for Chain0 {
     fn tip_time(&self) -> u64 {
         T0
     }
+}
+
+/// A counter on a directory, as a start makes it.
+fn open_counter(dir: &std::path::Path) -> (DirStore, Counter) {
+    let store = DirStore::open(dir).unwrap();
+    let loaded = store.load().unwrap();
+    let counter = Counter::load(id(3), pairing(), settings(), loaded.stored(), &store).unwrap();
+    (store, counter)
+}
+
+fn setting_note(version: u32) -> openbmt_core::settings::SettingNote {
+    openbmt_core::settings::SettingNote {
+        version,
+        change: openbmt_core::settings::Change::Loosening,
+        hash: [version as u8; 32],
+    }
+}
+
+/// The sequence numbers of the records on disk, in file order.
+fn seqs_on_disk(dir: &std::path::Path) -> Vec<u64> {
+    let store = DirStore::open(dir).unwrap();
+    let count = store.load().unwrap().record_count;
+    store
+        .read_records(0, count as usize)
+        .unwrap()
+        .iter()
+        .map(|b| Record::from_bytes(b).unwrap().seq)
+        .collect()
+}
+
+#[test]
+fn cr_81_a_failed_directory_flush_of_the_first_record_leaves_no_record_and_the_retry_loads() {
+    let dir = Scratch::new();
+    let (mut store, mut counter) = open_counter(dir.path());
+    store.faults.sync_dir.store(1, Ordering::SeqCst);
+    let first = setting_note(1);
+    assert!(counter.record_setting(first, &mut store).is_err());
+    assert_eq!(counter.records_len(), 0);
+    assert!(!dir.path().join("records.bin").exists());
+    // The automatic retry.
+    counter.record_setting(first, &mut store).unwrap();
+    assert_eq!(counter.records_len(), 1);
+    drop((store, counter));
+    let (_, counter) = open_counter(dir.path());
+    assert_eq!(counter.records_len(), 1);
+    assert_eq!(seqs_on_disk(dir.path()), vec![0]);
+}
+
+#[test]
+fn cr_81_a_failed_data_flush_of_a_later_record_cuts_the_file_and_the_retry_appends() {
+    let dir = Scratch::new();
+    let (mut store, mut counter) = open_counter(dir.path());
+    counter.record_setting(setting_note(1), &mut store).unwrap();
+    counter.record_setting(setting_note(2), &mut store).unwrap();
+    let size = fs::metadata(dir.path().join("records.bin")).unwrap().len();
+    store.faults.sync_data.store(1, Ordering::SeqCst);
+    assert!(counter.record_setting(setting_note(3), &mut store).is_err());
+    assert_eq!(counter.records_len(), 2);
+    assert_eq!(
+        fs::metadata(dir.path().join("records.bin")).unwrap().len(),
+        size
+    );
+    {
+        let (_, restarted) = open_counter(dir.path());
+        assert_eq!(restarted.records_len(), 2);
+    }
+    counter.record_setting(setting_note(3), &mut store).unwrap();
+    drop((store, counter));
+    let (_, counter) = open_counter(dir.path());
+    assert_eq!(counter.records_len(), 3);
+    assert_eq!(seqs_on_disk(dir.path()), vec![0, 1, 2]);
+}
+
+#[test]
+fn cr_81_a_take_back_that_fails_refuses_every_later_append_until_the_store_is_reopened() {
+    let dir = Scratch::new();
+    let (mut store, mut counter) = open_counter(dir.path());
+    counter.record_setting(setting_note(1), &mut store).unwrap();
+    // The record is written whole, then the flush and the take back fail.
+    store.faults.sync_data.store(1, Ordering::SeqCst);
+    store.faults.take_back.store(1, Ordering::SeqCst);
+    assert!(counter.record_setting(setting_note(2), &mut store).is_err());
+    assert_eq!(counter.records_len(), 1);
+    // Nothing is appended while the store is poisoned, retry or not.
+    for _ in 0..3 {
+        let err = counter
+            .record_setting(setting_note(2), &mut store)
+            .unwrap_err();
+        assert!(err.to_string().contains("append to records.bin"), "{err}");
+    }
+    assert_eq!(counter.records_len(), 1);
+    // Opened again, the store reads the file as it is: the whole record the
+    // failed append left is a record, and the chain it makes verifies. The
+    // counter that was running is dropped, as a restart does.
+    drop((store, counter));
+    let (mut store, mut counter) = open_counter(dir.path());
+    assert_eq!(counter.records_len(), 2);
+    counter.record_setting(setting_note(3), &mut store).unwrap();
+    drop((store, counter));
+    let (_, counter) = open_counter(dir.path());
+    assert_eq!(counter.records_len(), 3);
+    assert_eq!(seqs_on_disk(dir.path()), vec![0, 1, 2]);
 }

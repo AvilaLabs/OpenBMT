@@ -33,6 +33,9 @@ use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use openbmt_core::records::{Record, MAX_BODY};
@@ -176,6 +179,31 @@ impl Loaded {
 pub struct DirStore {
     dir: PathBuf,
     index: Mutex<Option<RecordIndex>>,
+    /// Set when an append could not be taken back: no record is appended
+    /// until the directory is opened again (CR-81 item 8).
+    poisoned: AtomicBool,
+    #[cfg(test)]
+    pub(crate) faults: Faults,
+}
+
+/// Faults a test asks for: each counts the calls that fail, one by one.
+#[cfg(test)]
+#[derive(Debug, Default)]
+pub(crate) struct Faults {
+    pub(crate) sync_data: AtomicU32,
+    pub(crate) sync_dir: AtomicU32,
+    pub(crate) take_back: AtomicU32,
+}
+
+#[cfg(test)]
+impl Faults {
+    fn fire(&self, which: &AtomicU32) -> io::Result<()> {
+        if which.load(Ordering::SeqCst) > 0 {
+            which.fetch_sub(1, Ordering::SeqCst);
+            return Err(io::Error::other("injected"));
+        }
+        Ok(())
+    }
 }
 
 /// Where the records are in the record file.
@@ -197,6 +225,9 @@ impl DirStore {
         Ok(Self {
             dir,
             index: Mutex::new(None),
+            poisoned: AtomicBool::new(false),
+            #[cfg(test)]
+            faults: Faults::default(),
         })
     }
 
@@ -222,6 +253,39 @@ impl DirStore {
         File::open(&self.dir)
             .and_then(|d| d.sync_all())
             .map_err(io_err(&name, "flush"))
+    }
+
+    /// `sync_data` on the record file, with the test seam.
+    fn data_synced(&self, file: &File) -> io::Result<()> {
+        #[cfg(test)]
+        self.faults.fire(&self.faults.sync_data)?;
+        file.sync_data()
+    }
+
+    /// The directory flush of an append, with the test seam.
+    fn dir_synced(&self) -> io::Result<()> {
+        #[cfg(test)]
+        self.faults.fire(&self.faults.sync_dir)?;
+        File::open(&self.dir).and_then(|d| d.sync_all())
+    }
+
+    /// Put the record file back as it was before an append that failed:
+    /// cut to `before` and flushed, or, for a file that append made,
+    /// removed and the directory flushed.
+    fn take_back(&self, file: &File, path: &Path, before: u64, created: bool) -> io::Result<()> {
+        #[cfg(test)]
+        self.faults.fire(&self.faults.take_back)?;
+        if created {
+            match fs::remove_file(path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
+            File::open(&self.dir).and_then(|d| d.sync_all())
+        } else {
+            file.set_len(before)?;
+            file.sync_data()
+        }
     }
 
     /// Write a file whole: temporary file, flush, rename, flush the
@@ -406,6 +470,14 @@ impl Store for DirStore {
         if bytes.len() > MAX_RECORD_BYTES {
             return Err(DirStoreError::RecordTooLarge(bytes.len()));
         }
+        // CR-81 item 8: after a take back that failed, the file is not known.
+        if self.poisoned.load(Ordering::SeqCst) {
+            return Err(DirStoreError::Io {
+                file: RECORDS_FILE.to_string(),
+                op: "append to",
+                kind: io::ErrorKind::Other,
+            });
+        }
         let path = self.path(RECORDS_FILE);
         let existed = path.exists();
         // The index first: a scan after the write would count it twice.
@@ -419,15 +491,25 @@ impl Store for DirStore {
             .metadata()
             .map_err(io_err(RECORDS_FILE, "measure"))?
             .len();
+        // A file that holds nothing yet has no entry in the directory that
+        // is known to be flushed.
+        let created = !existed || before == 0;
         // One buffer, one write: the length and the record are never parted
         // by this process.
         let mut buf = Vec::with_capacity(bytes.len().saturating_add(4));
         buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
         buf.extend_from_slice(bytes);
-        if let Err(e) = file.write_all(&buf).and_then(|()| file.sync_data()) {
+        // Everything that can fail comes before the index moves.
+        let written = file
+            .write_all(&buf)
+            .and_then(|()| self.data_synced(&file))
+            .and_then(|()| if created { self.dir_synced() } else { Ok(()) });
+        if let Err(e) = written {
             // Take back what may have been written, so that the next record
-            // does not follow a cut-short one.
-            let _ = file.set_len(before);
+            // does not follow a cut-short one or repeat a whole one.
+            if self.take_back(&file, &path, before, created).is_err() {
+                self.poisoned.store(true, Ordering::SeqCst);
+            }
             return Err(io_err(RECORDS_FILE, "append to")(e));
         }
         self.with_index(|index| {
@@ -440,11 +522,7 @@ impl Store for DirStore {
                 .saturating_add(4)
                 .saturating_add(bytes.len() as u64);
             Ok(())
-        })?;
-        if !existed {
-            self.sync_dir()?;
-        }
-        Ok(())
+        })
     }
 
     fn read_records(&self, from: u64, max: usize) -> Result<Vec<Vec<u8>>, DirStoreError> {
