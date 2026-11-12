@@ -87,7 +87,7 @@ pub fn descriptor_checksum(body: &str) -> Option<String> {
 }
 
 /// Split `body#checksum` and verify the checksum. Returns the body.
-fn split_and_verify(text: &str) -> Result<&str, WalletError> {
+pub(crate) fn split_and_verify(text: &str) -> Result<&str, WalletError> {
     let (body, sum) = text.rsplit_once('#').ok_or(WalletError::ChecksumMissing)?;
     let want = descriptor_checksum(body)
         .ok_or_else(|| WalletError::Parse("character outside the descriptor alphabet".into()))?;

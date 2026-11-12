@@ -6,6 +6,8 @@
 //! and tests; a person is shown [`Words`]. [`check`] is the one test every
 //! app runs over all of its words.
 
+pub mod import;
+
 /// How a screen is coloured (CR-10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
@@ -137,7 +139,7 @@ impl Words {
 }
 
 /// The longest heading, in characters.
-pub const MAX_HEADING: usize = 28;
+pub const MAX_HEADING: usize = 34;
 /// The longest sentence, in characters.
 pub const MAX_SENTENCE: usize = 140;
 /// The longest quoted text, in characters.

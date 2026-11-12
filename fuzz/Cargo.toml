@@ -105,6 +105,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "wallet_import"
+path = "fuzz_targets/wallet_import.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "signer_state_decode"
 path = "fuzz_targets/signer_state_decode.rs"
 test = false

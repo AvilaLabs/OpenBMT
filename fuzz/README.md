@@ -61,6 +61,7 @@ exactly the input bytes.
 | `link_leaving_decode` | `decode_leaving`, a relay's stored leaving list (LK-42); on success it must encode back to exactly the input |
 | `owner_settings_roster_decode` | `decode_roster`, the owner node's stored settings roster (LK-76); on success it must encode back to exactly the input |
 | `wallet_parse` | `WalletDescription::parse` for mainnet and testnet on UTF-8 input; on success, parsing the canonical string again must give the same canonical string |
+| `wallet_import` | `ImportedWallet::read` on UTF-8 input; it must never panic, and a single-key wallet that reads must read again from its canonical string and from its two single-path strings, as the same wallet |
 | `courier_records_decode` | `decode_records`, the content of a Records message; on success each record encoded again behind its length must give the input back |
 | `box_claim_decode` | `Claim::from_bytes` and `Welcome::from_bytes` (each must encode back to the input) and `Invitation::from_text` on UTF-8 input (one that reads must read back from its own text to the same invitation) |
 | `box_notice_decode` | `PaidNotice::from_bytes` (a notice that reads is the pinned 141 bytes and encodes back to the input) and `PosNotice::from_bytes` (encodes back to the input); checking a signature and writing the text of a notice never panic |

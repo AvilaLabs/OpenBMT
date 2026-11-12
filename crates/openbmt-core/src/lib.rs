@@ -25,6 +25,7 @@ pub mod say;
 pub mod say_policy;
 pub mod settings;
 pub mod wallet;
+pub mod wallet_single;
 pub mod wire;
 pub mod words;
 
