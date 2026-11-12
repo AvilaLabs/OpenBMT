@@ -60,9 +60,108 @@ pub const DEFAULT_TIP_PERCENTS: [u8; 3] = [10, 15, 20];
 /// earlier builds wrote.
 const EXTENSION_VERSION: u8 = 2;
 
+/// The version byte of a settings message that also names a swap provider
+/// (CR-218): the extension block of version 2 always, then the provider.
+const SWAP_VERSION: u8 = 3;
+
+/// Most bytes of a swap provider's name (CR-218).
+pub const MAX_SWAP_NAME_BYTES: usize = 32;
+/// Most bytes of a swap provider's path prefix (CR-218).
+pub const MAX_SWAP_PREFIX_BYTES: usize = 100;
+/// The most the shop's own maximum per sale over a swap can be, in
+/// satoshis: the library's own cap on one swap (SW-02).
+pub const MAX_SWAP_SALE_SATS: u64 = 25_000_000;
+
 /// Length of a Lightning node's public key: compressed, as in BOLT 11 and in
 /// the node's own `getinfo` (LN-03).
 pub const LIGHTNING_NODE_BYTES: usize = 33;
+
+/// The swap provider the shop picked and the most it takes over Lightning
+/// for one sale (CR-218). The settings hold the three texts as the owner
+/// gave them; the counter checks the onion name's checksum when it turns
+/// them into a provider (SW-82).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwapProvider {
+    /// The label of the provider, 1 to 32 bytes of letters, digits, space,
+    /// `-`, `_` and `.`.
+    pub name: String,
+    /// The provider's Tor v3 onion host name, 56 lower-case base32
+    /// characters and `.onion`.
+    pub onion: String,
+    /// The path its API is served under: empty, or starting with `/` and
+    /// not ending with one (`/api`).
+    pub path_prefix: String,
+    /// The most the shop takes over Lightning for one sale, in satoshis.
+    pub max_sale_sats: u64,
+}
+
+impl SwapProvider {
+    /// Check the texts and the maximum, as far as the settings can: the
+    /// checksum of the onion name is the counter's to check.
+    pub fn validate(&self) -> Result<(), SettingsError> {
+        let bad = |why: &'static str| Err(SettingsError::Invalid(why));
+        if self.name.is_empty()
+            || self.name.len() > MAX_SWAP_NAME_BYTES
+            || !self
+                .name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b' ' | b'-' | b'_' | b'.'))
+        {
+            return bad("CR-218: the swap provider's name is not 1 to 32 plain characters");
+        }
+        let host = self.onion.strip_suffix(".onion").unwrap_or("");
+        if host.len() != 56
+            || !host
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || (b'2'..=b'7').contains(&b))
+        {
+            return bad("CR-218: the swap provider's onion name is not a v3 onion name");
+        }
+        let p = &self.path_prefix;
+        if !p.is_empty()
+            && (!p.starts_with('/')
+                || p.ends_with('/')
+                || p.len() > MAX_SWAP_PREFIX_BYTES
+                || p.contains("//")
+                || p.contains("..")
+                || !p
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'_' | b'.' | b'-')))
+        {
+            return bad("CR-218: the swap provider's path is not a plain path");
+        }
+        if self.max_sale_sats == 0 || self.max_sale_sats > MAX_SWAP_SALE_SATS {
+            return bad("CR-218: the largest sale over a swap is outside 1 to 25,000,000 sats");
+        }
+        Ok(())
+    }
+
+    fn write(&self, out: &mut Vec<u8>) {
+        for text in [&self.name, &self.onion, &self.path_prefix] {
+            out.push(u8::try_from(text.len()).unwrap_or(u8::MAX));
+            out.extend_from_slice(text.as_bytes());
+        }
+        out.extend_from_slice(&self.max_sale_sats.to_le_bytes());
+    }
+
+    fn read(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let mut text = |why: &'static str| -> Result<String, DecodeError> {
+            let n = usize::from(r.u8()?);
+            std::str::from_utf8(r.take(n)?)
+                .map(str::to_string)
+                .map_err(|_| DecodeError::NonCanonical(why))
+        };
+        let name = text("the swap provider's name is not text")?;
+        let onion = text("the swap provider's onion name is not text")?;
+        let path_prefix = text("the swap provider's path is not text")?;
+        Ok(Self {
+            name,
+            onion,
+            path_prefix,
+            max_sale_sats: r.u64_le()?,
+        })
+    }
+}
 
 /// What a device is to the shop, as the signed settings give it (BX-24).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,6 +266,12 @@ pub struct Settings {
     /// that every invoice must be signed by is part of the signed settings
     /// and not of a counter's own configuration.
     pub lightning_node: Option<[u8; LIGHTNING_NODE_BYTES]>,
+    /// The swap provider that turns a Lightning payment into bitcoin the
+    /// counter can claim, if the shop uses one (CR-218). Off when `None`.
+    /// Naming one cannot send money anywhere new, because the counter's
+    /// claim pays the shop's own address, so the owner phone signs alone.
+    /// A shop names a Lightning node or a swap provider, never both.
+    pub swap: Option<SwapProvider>,
     /// The public key of the watch key the owner phone's background watcher
     /// signs heartbeats with (CR-50, CR-55), if the owner turned that on. A
     /// counter takes a heartbeat signed by it, under its own tag, as it
@@ -215,6 +320,7 @@ impl Settings {
             counters: BTreeMap::new(),
             boxes: BTreeSet::new(),
             lightning_node: None,
+            swap: None,
             watch_key: None,
             tips_on: false,
             tip_percents: DEFAULT_TIP_PERCENTS.to_vec(),
@@ -339,6 +445,14 @@ impl Settings {
                 "CR-194: a limit in Bitcoin Standard is not its own satoshis",
             ));
         }
+        if let Some(swap) = &self.swap {
+            swap.validate()?;
+            if self.lightning_node.is_some() {
+                return Err(SettingsError::Invalid(
+                    "CR-218: the settings name a Lightning node and a swap provider",
+                ));
+            }
+        }
         if let Some(key) = &self.watch_key {
             if self.devices.contains(key)
                 || self.counters.contains_key(key)
@@ -434,11 +548,16 @@ impl Settings {
         // CR-193, CR-187: the extension block is the currency byte and then
         // the tips block. It is left out, and the message is version 1, when
         // the shop is a dollar shop with tips off and the first percents.
-        if self.has_extension_block() {
+        if self.has_extension_block() || self.swap.is_some() {
             out.push(self.currency.to_byte());
             out.push(u8::from(self.tips_on));
             out.push(u8::try_from(self.tip_percents.len()).unwrap_or(u8::MAX));
             out.extend_from_slice(&self.tip_percents);
+        }
+        // CR-218: version 3 holds the swap provider after the block, and is
+        // the version of exactly the settings that name one.
+        if let Some(swap) = &self.swap {
+            swap.write(&mut out);
         }
         out
     }
@@ -526,7 +645,11 @@ impl Settings {
                 return Err(DecodeError::NonCanonical("more than three suggested tips"));
             }
             let percents = r.take(n)?.to_vec();
-            if currency == ShopCurrency::Usd && !on && percents == DEFAULT_TIP_PERCENTS {
+            if version_byte == EXTENSION_VERSION
+                && currency == ShopCurrency::Usd
+                && !on
+                && percents == DEFAULT_TIP_PERCENTS
+            {
                 return Err(DecodeError::NonCanonical(
                     "an extension block holds nothing but the first values",
                 ));
@@ -534,6 +657,12 @@ impl Settings {
             (currency, on, percents)
         } else {
             (ShopCurrency::Usd, false, DEFAULT_TIP_PERCENTS.to_vec())
+        };
+
+        let swap = if version_byte >= SWAP_VERSION {
+            Some(SwapProvider::read(r)?)
+        } else {
+            None
         };
 
         Ok(Self {
@@ -559,6 +688,7 @@ impl Settings {
             counters,
             boxes,
             lightning_node,
+            swap,
             watch_key,
             tips_on,
             tip_percents,
@@ -780,6 +910,15 @@ pub fn changed_fields(old: &Settings, new: &Settings) -> Vec<FieldChange> {
             direction: dir(new.lightning_node.is_some()),
         });
     }
+    // CR-218: a swap provider cannot send money anywhere new, because the
+    // counter's claim pays the shop's own address. Naming one, changing it
+    // or taking it away is a tightening: the owner phone signs alone.
+    if old.swap != new.swap {
+        o.push(FieldChange {
+            field: "swap",
+            direction: Change::Tightening,
+        });
+    }
     // Naming a watch key, or another one, lets instant sales go on on the
     // word of a key that is not the owner root, so it loosens; taking the key
     // away only stops that.
@@ -963,7 +1102,8 @@ impl SignedSettings {
 
 impl SignedSettings {
     /// Wire form: `OBMS`, version 1 (2 when the settings carry the extension
-    /// block, the currency and the tips, CR-187 and CR-193), the bytes of
+    /// block, the currency and the tips, CR-187 and CR-193, and 3 when they
+    /// also name a swap provider, CR-218), the bytes of
     /// [`Settings::encode`] (the
     /// bytes that are hashed and signed), the owner signature, a flag byte
     /// (1 if a Key app signature follows, else 0) and, only when the flag is
@@ -972,7 +1112,11 @@ impl SignedSettings {
     pub fn to_bytes(&self) -> Vec<u8> {
         let body = self.settings.encode();
         let mut out = wire::start(&wire::MAGIC_SIGNED_SETTINGS, body.len() + 129);
-        if self.settings.has_extension_block() {
+        if self.settings.swap.is_some() {
+            if let Some(byte) = out.get_mut(4) {
+                *byte = SWAP_VERSION;
+            }
+        } else if self.settings.has_extension_block() {
             if let Some(byte) = out.get_mut(4) {
                 *byte = EXTENSION_VERSION;
             }
@@ -995,7 +1139,7 @@ impl SignedSettings {
     /// [`SignedSettings::verify`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
         let (mut r, version) =
-            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, EXTENSION_VERSION)?;
+            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, SWAP_VERSION)?;
         let settings = Settings::read(&mut r, version)?;
         let owner_sig = r.sig()?;
         let approver_sig = if r.flag()? { Some(r.sig()?) } else { None };
@@ -1975,7 +2119,7 @@ mod tests {
         };
         assert_eq!(edit(3, b'X'), DecodeError::BadMagic);
         assert_eq!(edit(4, 0), DecodeError::UnsupportedVersion(0));
-        assert_eq!(edit(4, 3), DecodeError::UnsupportedVersion(3));
+        assert_eq!(edit(4, 4), DecodeError::UnsupportedVersion(4));
         assert!(matches!(edit(TOR_AT, 2), DecodeError::NonCanonical(_)));
         assert!(matches!(edit(TOR_AT + 1, 2), DecodeError::NonCanonical(_)));
         // The Key app signature flag is the last byte but 64.
@@ -2643,10 +2787,133 @@ mod tests {
         let mut v1 = bytes.clone();
         v1[4] = 1;
         assert!(SignedSettings::from_bytes(&v1).is_err());
-        // A version 3 frame is not known.
+        // A version 4 frame is not known, and a version 3 frame has no
+        // provider after the block.
+        let mut v4 = bytes.clone();
+        v4[4] = 4;
+        assert!(SignedSettings::from_bytes(&v4).is_err());
         let mut v3 = bytes;
         v3[4] = 3;
         assert!(SignedSettings::from_bytes(&v3).is_err());
+    }
+
+    fn swap_provider() -> SwapProvider {
+        SwapProvider {
+            name: "Pretend".to_string(),
+            onion: "w2mqd2fcbgiop7oyxoes2ozmdnvgon22oipj7vzh2rquepf7cxauauad.onion".to_string(),
+            path_prefix: "/api".to_string(),
+            max_sale_sats: 1_000_000,
+        }
+    }
+
+    #[test]
+    fn cr_218_the_first_settings_name_no_swap_provider_and_old_bytes_are_unchanged() {
+        assert_eq!(Settings::defaults(RATE).swap, None);
+        let s = wire_settings();
+        let bytes = signed_both(s.clone()).to_bytes();
+        assert_eq!(bytes[4], 1);
+        assert_eq!(SignedSettings::from_bytes(&bytes).unwrap().settings, s);
+        // The extension block of version 2 reads as before.
+        let mut tips = s;
+        tips.tips_on = true;
+        let bytes = signed_both(tips.clone()).to_bytes();
+        assert_eq!(bytes[4], 2);
+        assert_eq!(SignedSettings::from_bytes(&bytes).unwrap().settings, tips);
+    }
+
+    #[test]
+    fn cr_218_settings_with_a_provider_are_version_three_and_read_back() {
+        for tips in [false, true] {
+            let mut s = wire_settings();
+            s.swap = Some(swap_provider());
+            s.tips_on = tips;
+            let signed = signed_both(s.clone());
+            let bytes = signed.to_bytes();
+            assert_eq!(bytes[4], 3);
+            let back = SignedSettings::from_bytes(&bytes).unwrap();
+            assert_eq!(back.settings, s);
+            assert_eq!(back.to_bytes(), bytes);
+            let (_, _, roots) = roots();
+            assert!(back.verify_signatures(&roots).is_ok());
+            // Every cut of the body fails.
+            let body_end = bytes.len() - 64 - 1 - 64;
+            for cut in 1..=20 {
+                let mut short = bytes[..body_end - cut].to_vec();
+                short.extend_from_slice(&bytes[body_end..]);
+                assert!(SignedSettings::from_bytes(&short).is_err(), "{cut}");
+            }
+            // A version 2 frame would leave the provider's bytes over.
+            let mut v2 = bytes.clone();
+            v2[4] = 2;
+            assert!(SignedSettings::from_bytes(&v2).is_err());
+            // A version 4 frame is not known.
+            let mut v4 = bytes;
+            v4[4] = 4;
+            assert!(SignedSettings::from_bytes(&v4).is_err());
+        }
+    }
+
+    #[test]
+    fn cr_218_the_provider_is_checked_and_never_comes_with_a_lightning_node() {
+        let mut s = base();
+        s.swap = Some(swap_provider());
+        assert_eq!(s.validate(), Ok(()));
+        let bad: [Box<dyn Fn(&mut SwapProvider)>; 10] = [
+            Box::new(|p| p.name = String::new()),
+            Box::new(|p| p.name = "x".repeat(33)),
+            Box::new(|p| p.name = "a\nb".to_string()),
+            Box::new(|p| p.onion = "example.com".to_string()),
+            Box::new(|p| p.onion = p.onion.to_uppercase()),
+            Box::new(|p| p.path_prefix = "api".to_string()),
+            Box::new(|p| p.path_prefix = "/api/".to_string()),
+            Box::new(|p| p.path_prefix = "/a/../b".to_string()),
+            Box::new(|p| p.max_sale_sats = 0),
+            Box::new(|p| p.max_sale_sats = MAX_SWAP_SALE_SATS + 1),
+        ];
+        for (i, f) in bad.iter().enumerate() {
+            let mut t = base();
+            let mut p = swap_provider();
+            f(&mut p);
+            t.swap = Some(p);
+            assert!(
+                matches!(t.validate(), Err(SettingsError::Invalid(_))),
+                "{i}"
+            );
+        }
+        // An empty path is fine; a node and a provider together are not.
+        let mut t = base();
+        let mut p = swap_provider();
+        p.path_prefix = String::new();
+        t.swap = Some(p);
+        assert_eq!(t.validate(), Ok(()));
+        s.lightning_node = Some(node_key(7));
+        assert!(matches!(s.validate(), Err(SettingsError::Invalid(m)) if m.contains("CR-218")));
+    }
+
+    #[test]
+    fn cr_218_naming_changing_or_removing_the_provider_is_a_tightening() {
+        let (o, _, roots) = roots();
+        let old = base();
+        let mut named = old.clone();
+        named.version += 1;
+        named.swap = Some(swap_provider());
+        let fields = changed_fields(&old, &named);
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field, "swap");
+        assert_eq!(classify_change(&old, &named), Change::Tightening);
+        let signed = SignedSettings {
+            owner_sig: named.sign(&o),
+            approver_sig: None,
+            settings: named.clone(),
+        };
+        assert_eq!(signed.verify(&roots, Some(&old)), Ok(Change::Tightening));
+        let mut other = named.clone();
+        other.version += 1;
+        other.swap.as_mut().unwrap().max_sale_sats = 5_000_000;
+        assert_eq!(classify_change(&named, &other), Change::Tightening);
+        let mut gone = other.clone();
+        gone.swap = None;
+        assert_eq!(classify_change(&other, &gone), Change::Tightening);
     }
 
     #[test]
@@ -2772,11 +3039,11 @@ mod tests {
             SignedSettings::from_bytes(&wire).unwrap().settings.currency,
             ShopCurrency::Usd
         );
-        let mut v3 = wire.clone();
-        v3[4] = 3;
+        let mut v4 = wire.clone();
+        v4[4] = 4;
         assert_eq!(
-            SignedSettings::from_bytes(&v3),
-            Err(DecodeError::UnsupportedVersion(3))
+            SignedSettings::from_bytes(&v4),
+            Err(DecodeError::UnsupportedVersion(4))
         );
         let mut v0 = wire;
         v0[4] = 0;
@@ -2913,15 +3180,15 @@ mod tests {
         over[at + 1] = 200;
         assert!(SignedSettings::from_bytes(&over).is_err());
         // A version 1 message that carries a block has bytes left over, and
-        // version 3 is not known.
+        // version 4 is not known.
         let mut v1 = wire.clone();
         v1[4] = 1;
         assert!(SignedSettings::from_bytes(&v1).is_err());
-        let mut v3 = wire;
-        v3[4] = 3;
+        let mut v4 = wire;
+        v4[4] = 4;
         assert_eq!(
-            SignedSettings::from_bytes(&v3),
-            Err(DecodeError::UnsupportedVersion(3))
+            SignedSettings::from_bytes(&v4),
+            Err(DecodeError::UnsupportedVersion(4))
         );
     }
 
