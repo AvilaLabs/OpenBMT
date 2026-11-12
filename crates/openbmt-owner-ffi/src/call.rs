@@ -91,6 +91,11 @@
 //!   and read the wallet's file, make the offer, read the counter's request,
 //!   make the bundle, differ, the counters waiting, the bundle again, that
 //!   the counter took it, and the gap limit. They work on no node.
+//! - 159 to 164: the spends of a shop with its own wallet
+//!   (`docs/SESSION-RULES.md` AS-100 to AS-107, `docs/OWNER-APP-RULES.md`
+//!   OA-115 to OA-118): build them from the queue, the open sessions, the
+//!   file for the shop's wallet, taking what it returns, abandoning one, and
+//!   the merge of the offer.
 //! - 146: the full ledger (`docs/BOOKS-RULES.md` BK-19), made only when the
 //!   request says the person accepted the warning; `false` refuses. The
 //!   books call (144) never holds it.
@@ -127,6 +132,10 @@ use crate::import_view::{self, ImportKind, ImportView};
 use crate::own::{
     self, OwnBundleView, OwnConfirmArgs, OwnCounterArgs, OwnGapArgs, OwnGapView, OwnMade,
     OwnOfferView, OwnOwnerMade, OwnRequestArgs, OwnRequestView, OwnShopArgs, OwnWalletView,
+};
+use crate::own_spend_views::{
+    OwnSpendBuildArgs, OwnSpendBuiltView, OwnSpendFileView, OwnSpendItemView, OwnSpendSessionView,
+    OwnSpendTakeArgs, OwnSpendTakenView,
 };
 use crate::pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
@@ -733,6 +742,25 @@ fn build_ops() -> Vec<Op> {
         }),
         op(157, "own_gap", Zero, |_, a: OwnGapArgs| own::gap(a)),
         op(158, "own_gap_now", Node, |c, ()| c.entry()?.own_gap()),
+        op(159, "own_spend_build", Node, |c, a: OwnSpendBuildArgs| {
+            c.entry()?.own_spend_build(a)
+        }),
+        op(160, "own_spend_sessions", Node, |c, ()| {
+            c.entry()?.own_spend_sessions()
+        }),
+        op(
+            161,
+            "own_spend_file",
+            Node,
+            |c, (session, number): (Vec<u8>, u32)| c.entry()?.own_spend_file(session, number),
+        ),
+        op(162, "own_spend_take", Node, |c, a: OwnSpendTakeArgs| {
+            c.entry()?.own_spend_take(a)
+        }),
+        op(163, "own_spend_abandon", Node, |c, session: Vec<u8>| {
+            c.entry()?.own_spend_abandon(session)
+        }),
+        op(164, "own_merge", Node, |c, now: u64| c.entry()?.own_merge(now)),
     ]
 }
 
@@ -975,6 +1003,13 @@ fn definitions() -> Vec<TypeDef> {
         BoxOwnCheckArgs::define(),
         BoxOwnCheckView::define(),
         SignerLineView::define(),
+        OwnSpendItemView::define(),
+        OwnSpendBuiltView::define(),
+        OwnSpendSessionView::define(),
+        OwnSpendFileView::define(),
+        OwnSpendTakenView::define(),
+        OwnSpendBuildArgs::define(),
+        OwnSpendTakeArgs::define(),
         SignerBuiltView::define(),
         SignerFileView::define(),
         SignerTakenView::define(),

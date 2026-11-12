@@ -216,6 +216,10 @@ impl<'a> Rd<'a> {
         s
     }
 
+    pub fn pos(&self) -> usize {
+        self.p
+    }
+
     pub fn done(&self) {
         assert_eq!(self.p, self.b.len(), "bytes left over");
     }

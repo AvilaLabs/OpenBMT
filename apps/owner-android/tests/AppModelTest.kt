@@ -2086,6 +2086,88 @@ object AppModelTest {
         ok(AppWords.all().map { it.first }.containsAll(HardwareWords.all().map { it.first }), "they are in the list that is checked and written")
     }
 
+    // ---- sending from the shop's own wallet (OA-115 to OA-118) -------------------------------------------------
+
+    private fun ownStage(kind: org.openbmt.owner.StageKind) = org.openbmt.owner.Stage(kind, null, words())
+
+    private fun ownQueue() = org.openbmt.owner.Queue(
+        listOf(
+            org.openbmt.owner.RefundRow(1, ByteArray(32), 5, "Mia", "bc1qrefund", 40_000, ownStage(org.openbmt.owner.StageKind.Queued), null, null),
+            org.openbmt.owner.RefundRow(2, ByteArray(32), 6, "Mia", "bc1qother", 10_000, ownStage(org.openbmt.owner.StageKind.InSession), null, null),
+        ),
+        listOf(
+            org.openbmt.owner.CashOutRow(3, "bc1qsave", CashAmount.Sats(100_000), "Savings", ownStage(org.openbmt.owner.StageKind.Queued)),
+            org.openbmt.owner.CashOutRow(4, "bc1qall", CashAmount.All, "Everything", ownStage(org.openbmt.owner.StageKind.Queued)),
+            org.openbmt.owner.CashOutRow(5, "bc1qdone", CashAmount.All, "Done", ownStage(org.openbmt.owner.StageKind.Paid)),
+        ),
+        emptyList(),
+    )
+
+    private fun ownItem(filed: Boolean, refunds: List<Long> = listOf(1L), cashOut: Long? = null) = org.openbmt.owner.OwnSpendItem(
+        0, ByteArray(32), refunds, cashOut, filed, listOf(org.openbmt.owner.SignerLine("bcrt1qpay", 40_000)),
+        org.openbmt.owner.SignerLine("bcrt1qchange", 150_000), 473,
+    )
+
+    private fun oa_115_the_owner_picks_the_queued_payments_and_prepares_them_after_the_compare_lines() {
+        val rows = OwnSpendModel.rows(ownQueue())
+        ok(rows.map { it.id } == listOf(1L, 3L, 4L), "only the payments that are queued, refunds first: ${rows.map { it.id }}")
+        ok(rows[0].kind == OwnSendKind.Refund && rows[1].kind == OwnSendKind.CashOut, "refunds and cash-outs")
+        ok(rows[0].title.startsWith("Refund ") && rows[1].title.startsWith("Cash-out ") && rows[2].title == "Cash-out of everything", "the titles: ${rows.map { it.title }}")
+        ok(rows[0].detail.contains("bc1qrefund") && rows[1].detail.contains("Savings"), "the address and the label")
+        var picked = emptyList<Long>()
+        ok(!OwnSpendModel.canPrepare(rows, picked), "nothing picked, nothing to prepare")
+        picked = OwnSpendModel.toggle(picked, 3)
+        picked = OwnSpendModel.toggle(picked, 1)
+        ok(picked == listOf(3L, 1L) && OwnSpendModel.canPrepare(rows, picked), "picked in the order of the owner's taps")
+        ok(OwnSpendModel.toggle(picked, 3) == listOf(1L), "a second tap un-picks")
+        ok(!OwnSpendModel.canPrepare(rows, listOf(2L)), "a payment that is not listed is not prepared")
+        val offer = org.openbmt.owner.MergeOffer(12, 12, 1000, 500, 5000, 4500, words())
+        ok(!OwnSpendModel.showMerge(offer, rows) && OwnSpendModel.showMerge(offer, emptyList()) && !OwnSpendModel.showMerge(null, emptyList()), "the offer to merge is shown when it holds and nothing waits")
+        val lines = OwnSpendModel.compareLines(ownItem(false))
+        ok(lines == HardwareModel.compareLines(listOf("bcrt1qpay" to 40_000L), "bcrt1qchange" to 150_000L, 473), "the lines are those of OA-73")
+        ok(OwnSpendModel.itemTitle(ownItem(false), 1, 2) == "Payment 1 of 2: a refund", "a refund's title")
+        ok(OwnSpendModel.itemTitle(ownItem(false, emptyList(), 3), 2, 2) == "Payment 2 of 2: a cash-out", "a cash-out's title")
+        ok(OwnSpendModel.itemTitle(ownItem(false, listOf(1, 2), 3), 1, 1) == "Payment 1 of 1: 2 refunds and a cash-out", "a mixed title")
+        val c = source("src/android/OwnSpend.kt")
+        ok(c.indexOf("n.ownSpendBuild(") > c.indexOf("OwnSpendModel.compareLines("), "the lines are listed before Prepare freezes anything")
+        ok(source("src/android/Screens.kt").contains("showOwnSpend()"), "Spend of an own wallet shop opens this screen")
+    }
+
+    private fun oa_116_the_file_reaches_the_wallet_by_the_persons_pick_and_comes_back_the_same_ways() {
+        ok(OwnSpendModel.transports.map { it.transport } == listOf(Transport.Ur, Transport.Bbqr, Transport.File), "the three ways of OA-70, in order")
+        ok(OwnSpendModel.transports.all { it.examples.startsWith("For example ") }, "each with wallets as examples")
+        val c = source("src/android/OwnSpend.kt")
+        ok(c.contains("showTransportChoice("), "the person picks, and no choice is made for them")
+        ok(c.contains("HardwareModel.UR_PSBT") && c.contains("HardwareModel.BBQR_PSBT") && c.contains("file.fileName"), "a UR of crypto-psbt, a BBQr of type P or a <name>.psbt file")
+        ok(c.contains("HardwareModel.RETURN_UR_TYPES") && c.contains("HardwareModel.RETURN_BBQR_KINDS") && c.contains("pickBytes("), "what comes back is read the same ways")
+        ok(occurs(c, "n.ownSpendTake(") == 1, "one place gives what came back to the library, which judges it")
+        ok(c.contains("UrScan(") && c.contains("BbqrScan("), "the shared readers")
+    }
+
+    private fun oa_117_a_refusal_shows_the_librarys_words_and_a_waiting_payment_says_the_wallet_may_send_it_itself() {
+        val c = source("src/android/OwnSpend.kt")
+        ok(c.contains("refusal(e)") && c.contains("catch (e: OwnerException)"), "a refusal shows the library's words")
+        ok(OwnSpendModel.afterRefusal(listOf(1L, 3L), ByteArray(1)).first == listOf(1L, 3L), "nothing else changes after a refusal")
+        ok(OwnSpendModel.state(ownItem(false)) == OwnSendState.NotFiled && OwnSpendModel.state(ownItem(true)) == OwnSendState.Waiting, "given or not")
+        ok(!OwnSpendModel.showsWaiting(ownItem(false)) && OwnSpendModel.showsWaiting(ownItem(true)), "the waiting words show once the file was given")
+        ok(OwnSpendModel.waitingWords(OwnSendState.Waiting).heading == OwnSpendModel.WORDS_NEEDED_OA_117_WAITING, "the waiting state names its rule until its words are written")
+        val sessions = listOf(
+            org.openbmt.owner.OwnSpendSession(ByteArray(32) { 1 }, listOf(ownItem(false), ownItem(true))),
+            org.openbmt.owner.OwnSpendSession(ByteArray(32) { 2 }, listOf(ownItem(true))),
+        )
+        ok(OwnSpendModel.waiting(sessions).size == 2, "the payments given to the wallet, across sessions")
+        ok(c.contains("OwnSpendModel.waitingWords("), "the screen shows it")
+    }
+
+    private fun oa_118_every_state_and_refusal_of_the_section_has_a_placeholder_until_its_words_are_written() {
+        val names = OwnSpendModel.PLACEHOLDERS
+        ok(names.size == names.toSet().size && names.all { it.startsWith("WORDS_NEEDED_OA_11") }, "each names its rule: $names")
+        ok(names.all { OwnSpendModel.placeholder(it).heading == it && it.length < 40 }, "a placeholder stands for each part")
+        ok(AppWords.all().none { (_, w) -> w.heading.startsWith("WORDS_NEEDED") || w.what.startsWith("WORDS_NEEDED") }, "a placeholder is not in the words that are checked and written")
+        val c = source("src/android/OwnSpend.kt")
+        for (n in listOf("OA_115_LIST", "OA_116_TRANSPORT", "OA_116_RETURN", "OA_117_WAITING")) ok(c.contains("WORDS_NEEDED_$n"), "the screen uses WORDS_NEEDED_$n")
+    }
+
     // ---- watching in the background (OA-80 to OA-89) --------------------------------------------------------------
 
     /** The Keystore's stand-in: AES-GCM under a key of the test's own. */
@@ -3038,7 +3120,7 @@ object AppModelTest {
         val rules = Regex("^- \\*\\*OA-(\\d{2,3})\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules.map { it.toInt() } == rules.map { it.toInt() }.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
         // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-79 for more.
-        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..114)
+        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..118)
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")

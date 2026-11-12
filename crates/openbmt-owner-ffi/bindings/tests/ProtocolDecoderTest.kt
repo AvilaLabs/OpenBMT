@@ -178,6 +178,26 @@ object ProtocolDecoderTest {
         rejects("a pending Box flag") { decodeResponse(header(0, Writer().u32(1).bytes(ByteArray(32)).u32(0).u8(2).toByteArray())).let { r -> r.list { r.pendingBox() } } }
         rejects("a short Box delivery") { decodeResponse(header(0, Writer().bytes(ByteArray(32)).u32(2).bytes(ByteArray(32)).toByteArray())).boxDelivered() }
 
+        // The spends of a shop with its own wallet (AS-101, AS-102).
+        fun ownItem(filed: Int = 0): ByteArray =
+            Writer().u32(2).bytes(ByteArray(32) { 3 }).u32(2).u32(4).u32(5).u8(1).u32(9).u8(filed)
+                .u32(1).string("bc1qa").u64(40_000).u8(1).string("bc1qb").u64(9_000).u64(250).toByteArray()
+        val ownBuilt = decodeResponse(
+            header(0, Writer().u8(1).bytes(ByteArray(32) { 6 }).u32(1).raw(ownItem(1)).u32(0).toByteArray()),
+        ).ownSpendBuilt()
+        check(ownBuilt.session!!.size == 32 && ownBuilt.items.size == 1 && ownBuilt.skipped.isEmpty())
+        val ownItem0 = ownBuilt.items[0]
+        check(ownItem0.number == 2L && ownItem0.refunds == listOf(4L, 5L) && ownItem0.cashOut == 9L && ownItem0.filed)
+        check(ownItem0.payments.size == 1 && ownItem0.payments[0].sats == 40_000L && ownItem0.change!!.sats == 9_000L && ownItem0.fee == 250L)
+        val ownNone = decodeResponse(header(0, Writer().u8(0).u32(0).u32(0).toByteArray())).ownSpendBuilt()
+        check(ownNone.session == null && ownNone.items.isEmpty())
+        rejects("an own spend flag") { decodeResponse(header(0, Writer().u8(2).u32(0).u32(0).toByteArray())).ownSpendBuilt() }
+        rejects("an own spend filed flag") { decodeResponse(header(0, Writer().u8(1).bytes(ByteArray(32)).u32(1).raw(ownItem(2)).u32(0).toByteArray())).ownSpendBuilt() }
+        val ownFile = decodeResponse(
+            header(0, Writer().bytes(byteArrayOf(1, 2)).bytes(ByteArray(32) { 3 }).string("abcdef12.psbt").u32(0).u8(0).u64(7).raw(wordsBytes()).toByteArray()),
+        ).ownSpendFile()
+        check(ownFile.psbt.size == 2 && ownFile.fileName == "abcdef12.psbt" && ownFile.change == null && ownFile.fee == 7L)
+
         val outbox = decodeResponse(outboxFrame()).let { r -> r.list { r.outboxRow() } }
         check(outbox.size == 1 && outbox[0].kind == OutboxKind.Batch && outbox[0].id == 8L)
         check(outbox[0].txid == null && outbox[0].counter!!.size == 32 && outbox[0].version == null)

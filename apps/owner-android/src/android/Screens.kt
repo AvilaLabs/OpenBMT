@@ -208,6 +208,8 @@ internal fun Controller.showReceipts(): Unit = withNode { n ->
 // ---- spend -----------------------------------------------------------------------------------------------
 
 internal fun Controller.showSpend(): Unit = withNode { n ->
+    // A shop with its own wallet sends from that wallet (OA-115): there is no Key app to ask.
+    if (ownStore.hasWallet()) return@withNode showOwnSpend()
     val msg = Slot(act)
     val views = ArrayList<View>()
     views.add(

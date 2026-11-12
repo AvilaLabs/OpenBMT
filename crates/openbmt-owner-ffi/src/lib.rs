@@ -59,6 +59,7 @@ mod import_view;
 #[cfg(any(target_os = "android", feature = "jni"))]
 mod jni;
 mod own;
+mod own_spend_views;
 mod pos_views;
 mod price;
 mod say;

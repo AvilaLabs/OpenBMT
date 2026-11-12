@@ -65,10 +65,10 @@ internal fun Controller.firstAddressView(n: OwnerNode): View {
 }
 
 /** What goes under a code that could not be made: the words that say so. */
-private fun Controller.codeFallback(made: AnimatedQrMade): List<View> =
+internal fun Controller.codeFallback(made: AnimatedQrMade): List<View> =
     if (made.view != null) emptyList() else listOf(words(made.words ?: UrWords.cannotShow(Who.OWNER)))
 
-private fun Controller.codeHeight(): Int = ExchangeModel.codeHeight(act.resources.displayMetrics.heightPixels)
+internal fun Controller.codeHeight(): Int = ExchangeModel.codeHeight(act.resources.displayMetrics.heightPixels)
 
 // ---- the transport ---------------------------------------------------------------------------------------------------------
 

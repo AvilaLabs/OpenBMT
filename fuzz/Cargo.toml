@@ -818,3 +818,10 @@ path = "fuzz_targets/owner_allocation_book_decode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "owner_own_spend_decode"
+path = "fuzz_targets/owner_own_spend_decode.rs"
+test = false
+doc = false
+bench = false

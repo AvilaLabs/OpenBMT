@@ -157,6 +157,12 @@ ops run on another; it waits for at most 250 ms.
 156 own_delivered    handle zero  args OwnCounterArgs -> ()
 157 own_gap          handle zero  args OwnGapArgs -> OwnGapView
 158 own_gap_now      handle node  args () -> OwnGapView
+159 own_spend_build  handle node  args OwnSpendBuildArgs -> OwnSpendBuiltView
+160 own_spend_sessions handle node  args () -> list<OwnSpendSessionView>
+161 own_spend_file   handle node  args (list<u8>, u32) -> OwnSpendFileView
+162 own_spend_take   handle node  args OwnSpendTakeArgs -> OwnSpendTakenView
+163 own_spend_abandon handle node  args list<u8> -> ()
+164 own_merge        handle node  args u64 -> OwnSpendBuiltView
 ```
 
 ## Types
@@ -299,6 +305,13 @@ BoxOwnInvitationView: record: text: string, expires_at: u64
 BoxOwnCheckArgs: record: invitation: string, claim: list<u8>
 BoxOwnCheckView: record: box_key: list<u8>, words: list<string>
 SignerLineView: record: address: string, sats: u64
+OwnSpendItemView: record: number: u32, txid: list<u8>, refunds: list<u32>, cash_out: option<u32>, filed: bool, payments: list<SignerLineView>, change: option<SignerLineView>, fee: u64
+OwnSpendBuiltView: record: session: option<list<u8>>, items: list<OwnSpendItemView>, skipped: list<SkippedView>
+OwnSpendSessionView: record: session: list<u8>, items: list<OwnSpendItemView>
+OwnSpendFileView: record: psbt: list<u8>, txid: list<u8>, file_name: string, payments: list<SignerLineView>, change: option<SignerLineView>, fee: u64, words: Words
+OwnSpendTakenView: record: id: u32, txid: list<u8>, fee: u64, sends: list<SendRow>
+OwnSpendBuildArgs: record: now: u64, fee_rate: u64, picked: list<u32>
+OwnSpendTakeArgs: record: now: u64, session: list<u8>, number: u32, returned: list<u8>
 SignerBuiltView: record: built: BuiltView, signer_session: option<list<u8>>
 SignerFileView: record: psbt: list<u8>, txid: list<u8>, file_name: string, payments: list<SignerLineView>, change: option<SignerLineView>, fee: u64, words: Words
 SignerTakenView: record: id: u32, txid: list<u8>, fee: u64, sends: list<SendRow>

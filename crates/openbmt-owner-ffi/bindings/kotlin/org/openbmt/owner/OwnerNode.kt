@@ -156,6 +156,12 @@ private const val OP_OWN_BUNDLE = 155
 private const val OP_OWN_DELIVERED = 156
 private const val OP_OWN_GAP = 157
 private const val OP_OWN_GAP_NOW = 158
+private const val OP_OWN_SPEND_BUILD = 159
+private const val OP_OWN_SPEND_SESSIONS = 160
+private const val OP_OWN_SPEND_FILE = 161
+private const val OP_OWN_SPEND_TAKE = 162
+private const val OP_OWN_SPEND_ABANDON = 163
+private const val OP_OWN_MERGE = 164
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -442,6 +448,38 @@ class SignerFile(
     val fee: Long,
     val words: Words,
 )
+
+/** One transaction of a spend from the shop's own wallet (AS-101, AS-102). */
+class OwnSpendItem(
+    val number: Long,
+    val txid: ByteArray,
+    val refunds: List<Long>,
+    val cashOut: Long?,
+    val filed: Boolean,
+    val payments: List<SignerLine>,
+    val change: SignerLine?,
+    val fee: Long,
+)
+
+/** What building the spends of the own wallet froze: [session] is null when nothing was. */
+class OwnSpendBuilt(val session: ByteArray?, val items: List<OwnSpendItem>, val skipped: List<Skipped>)
+
+/** An open session of the own wallet and its transactions. */
+class OwnSpendSession(val session: ByteArray, val items: List<OwnSpendItem>)
+
+/** The file for the shop's own wallet: the PSBT, and what its screen must show. */
+class OwnSpendFile(
+    val psbt: ByteArray,
+    val txid: ByteArray,
+    val fileName: String,
+    val payments: List<SignerLine>,
+    val change: SignerLine?,
+    val fee: Long,
+    val words: Words,
+)
+
+/** What taking the own wallet's answer did. */
+class OwnSpendTaken(val id: Long, val txid: ByteArray, val fee: Long, val sends: List<SendRow>)
 
 /** What taking the signer's answer did. */
 class SignerTaken(val id: Long, val txid: ByteArray, val fee: Long, val sends: List<SendRow>)
@@ -1420,6 +1458,22 @@ private fun Reader.signerFile(): SignerFile =
         bytes(), bytes(), string(), list { signerLine() }, option { signerLine() }, u64(), words(),
     )
 
+private fun Reader.ownSpendItem(): OwnSpendItem =
+    OwnSpendItem(
+        u32(), bytes(), list { u32() }, option { u32() }, bool(), list { signerLine() },
+        option { signerLine() }, u64(),
+    )
+
+internal fun Reader.ownSpendBuilt(): OwnSpendBuilt =
+    OwnSpendBuilt(
+        option { bytes() }, list { ownSpendItem() }, list { Skipped(u32(), string(), words()) },
+    )
+
+internal fun Reader.ownSpendFile(): OwnSpendFile =
+    OwnSpendFile(
+        bytes(), bytes(), string(), list { signerLine() }, option { signerLine() }, u64(), words(),
+    )
+
 private fun Reader.importKind(): Boolean =
     when (u8()) {
         TAG_IMPORT_KIND_SINGLE -> false
@@ -1770,6 +1824,46 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     fun ownGap(): OwnGapView {
         val r = call(OP_OWN_GAP_NOW, handle)
         return OwnGapView(r.u32(), r.bool()).also { r.end() }
+    }
+
+    /**
+     * AS-101: freeze the spends of the queued refunds and cash-outs [picked] for the shop's own wallet, at [feeRate]
+     * satoshis per 1000 virtual bytes. Refused for a shop with a Key app.
+     */
+    fun ownSpendBuild(now: Long, feeRate: Long, picked: List<Long>): OwnSpendBuilt {
+        val r = call(OP_OWN_SPEND_BUILD, handle) { w ->
+            w.u64(now).u64(feeRate).list(picked) { w.u32(it) }
+        }
+        return r.ownSpendBuilt().also { r.end() }
+    }
+
+    /** AS-102: the open spends of the own wallet and their transactions. */
+    fun ownSpendSessions(): List<OwnSpendSession> {
+        val r = call(OP_OWN_SPEND_SESSIONS, handle)
+        return r.list { OwnSpendSession(r.bytes(), r.list { r.ownSpendItem() }) }.also { r.end() }
+    }
+
+    /** AS-102, AS-104: the file for the shop's wallet; giving it starts the watch of its transaction. */
+    fun ownSpendFile(session: ByteArray, number: Long): OwnSpendFile {
+        val r = call(OP_OWN_SPEND_FILE, handle) { it.bytes(session).u32(number) }
+        return r.ownSpendFile().also { r.end() }
+    }
+
+    /** AS-103, AS-104: take what the wallet returned (a PSBT or a finished transaction, as bytes). */
+    fun ownSpendTake(now: Long, session: ByteArray, number: Long, returned: ByteArray): OwnSpendTaken {
+        val r = call(OP_OWN_SPEND_TAKE, handle) {
+            it.u64(now).bytes(session).u32(number).bytes(returned)
+        }
+        return OwnSpendTaken(r.u32(), r.bytes(), r.u64(), r.list { r.sendRow() }).also { r.end() }
+    }
+
+    /** AS-105: give up an open spend of the own wallet; its entries go back to the queue. */
+    fun ownSpendAbandon(session: ByteArray) = callUnit(OP_OWN_SPEND_ABANDON, handle) { it.bytes(session) }
+
+    /** AS-106: freeze the merge of the offer for the shop's own wallet. */
+    fun ownMerge(now: Long): OwnSpendBuilt {
+        val r = call(OP_OWN_MERGE, handle) { it.u64(now) }
+        return r.ownSpendBuilt().also { r.end() }
     }
 
     /** Hand the signed batches in the outbox to the link. */

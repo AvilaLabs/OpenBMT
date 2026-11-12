@@ -88,6 +88,11 @@ use crate::error::{
     from_words, internal, poisoned, refused_by, rule_in, store_by, wrong_state, AppError, Kind,
 };
 use crate::own::{self, OwnGapView};
+use crate::own_spend_views::{
+    built_view as own_built_view, file_view as own_file_view, item_view as own_item_view,
+    taken_view as own_taken_view, OwnSpendBuildArgs, OwnSpendBuiltView, OwnSpendFileView,
+    OwnSpendSessionView, OwnSpendTakeArgs, OwnSpendTakenView,
+};
 use crate::pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
@@ -2688,6 +2693,105 @@ impl Entry {
             )
             .map(|r| record_view(&r))
             .map_err(|e| hardware_error(&e))
+        })
+    }
+}
+
+impl Entry {
+    /// AS-101: freeze the spends of the queued entries `a.picked` for the
+    /// shop's own wallet.
+    pub(crate) fn own_spend_build(
+        &self,
+        a: OwnSpendBuildArgs,
+    ) -> Result<OwnSpendBuiltView, AppError> {
+        self.run(Some(a.now), move |st| {
+            let built = st
+                .node
+                .build_own_spend(&a.picked, a.fee_rate, a.now)
+                .map_err(|e| node_error(&e))?;
+            Ok(own_built_view(&built, |s| words(s.words())))
+        })
+    }
+
+    /// AS-102: the open sessions of the own wallet and their transactions.
+    pub(crate) fn own_spend_sessions(&self) -> Result<Vec<OwnSpendSessionView>, AppError> {
+        self.run(None, |st| {
+            let owner = st.node.owner();
+            owner
+                .own_sessions()
+                .into_iter()
+                .map(|session| {
+                    let items = owner.own_items(&session).map_err(|e| {
+                        node_error(&NodeError::Owner(OwnerError::Refused(e.into())))
+                    })?;
+                    Ok(OwnSpendSessionView {
+                        session: session.to_vec(),
+                        items: items.iter().map(own_item_view).collect(),
+                    })
+                })
+                .collect()
+        })
+    }
+
+    /// AS-102: the file for the shop's wallet, given once and then again.
+    pub(crate) fn own_spend_file(
+        &self,
+        session: Vec<u8>,
+        number: u32,
+    ) -> Result<OwnSpendFileView, AppError> {
+        let session = session_id(&session)?;
+        self.run(None, move |st| {
+            st.node
+                .own_file(&session, number)
+                .map(own_file_view)
+                .map_err(|e| node_error(&e))
+        })
+    }
+
+    /// AS-103, AS-104: take what the shop's wallet returned.
+    pub(crate) fn own_spend_take(
+        &self,
+        a: OwnSpendTakeArgs,
+    ) -> Result<OwnSpendTakenView, AppError> {
+        let session = session_id(&a.session)?;
+        self.run(Some(a.now), move |st| {
+            let taken = st
+                .node
+                .take_own(&session, a.number, &a.returned)
+                .map_err(|e| node_error(&e))?;
+            let sends = st
+                .node
+                .send_states()
+                .iter()
+                .map(|(txid, state)| send_row(txid, *state))
+                .collect();
+            Ok(own_taken_view(&taken, sends))
+        })
+    }
+
+    /// AS-105: give up an open session of the own wallet: its entries go
+    /// back to the queue, and a filed transaction stays watched.
+    pub(crate) fn own_spend_abandon(&self, session: Vec<u8>) -> Result<(), AppError> {
+        let session = session_id(&session)?;
+        self.run(None, move |st| {
+            if !st.node.owner().own_sessions().contains(&session) {
+                return Err(refused_by(
+                    "session-unknown",
+                    "no open spend of the wallet has this number",
+                ));
+            }
+            st.node.abandon_session(&session).map_err(|e| node_error(&e))
+        })
+    }
+
+    /// AS-106: the merge of the offer, for the shop's own wallet.
+    pub(crate) fn own_merge(&self, now: u64) -> Result<OwnSpendBuiltView, AppError> {
+        self.run(Some(now), move |st| {
+            let built = st
+                .node
+                .approve_merge_own(now)
+                .map_err(|e| merge_error(&e))?;
+            Ok(own_built_view(&built, |s| words(s.words())))
         })
     }
 }

@@ -287,3 +287,140 @@ fn oa_113_a_shop_with_a_key_app_has_no_gap_row() {
     let fault = Rd::error(&rig.call(158, handle, &[])).expect("refused");
     assert_eq!(fault.rule, "no-own-wallet");
 }
+
+fn own_build(rig: &super::kit::Rig, handle: u64, picked: &[u32]) -> Vec<u8> {
+    let mut w = W::new()
+        .u64(T0)
+        .u64(1_000)
+        .u32(u32::try_from(picked.len()).unwrap());
+    for p in picked {
+        w = w.u32(*p);
+    }
+    rig.call(159, handle, &w.0)
+}
+
+#[test]
+fn as_101_oa_115_the_views_of_the_own_spend_are_written_in_the_order_the_binding_reads() {
+    use crate::codec::Put;
+    use crate::own_spend_views::{
+        OwnSpendBuiltView, OwnSpendFileView, OwnSpendItemView, OwnSpendSessionView,
+        OwnSpendTakenView,
+    };
+    use crate::signer_views::SignerLineView;
+    use crate::views::{SkippedView, WordsView};
+    let item = OwnSpendItemView {
+        number: 3,
+        txid: vec![5; 32],
+        refunds: vec![1, 2],
+        cash_out: Some(9),
+        filed: true,
+        payments: vec![SignerLineView {
+            address: "bc1qx".to_string(),
+            sats: 40_000,
+        }],
+        change: None,
+        fee: 300,
+    };
+    let mut bytes = Vec::new();
+    item.put(&mut bytes);
+    let mut r = Rd::new(&bytes);
+    assert_eq!(r.u32(), 3);
+    assert_eq!(r.bytes(), vec![5; 32]);
+    assert_eq!(r.list(|r| r.u32()), vec![1, 2]);
+    assert_eq!(r.opt(|r| r.u32()), Some(9));
+    assert!(r.bool());
+    assert_eq!(r.list(|r| (r.string(), r.u64())), vec![("bc1qx".to_string(), 40_000)]);
+    assert_eq!(r.opt(|r| (r.string(), r.u64())), None);
+    assert_eq!(r.u64(), 300);
+    r.done();
+    // The built view: the session first, then the items, then what was left out.
+    let words = openbmt_owner::own_spend::compare_words();
+    let built = OwnSpendBuiltView {
+        session: Some(vec![7; 32]),
+        items: vec![item.clone()],
+        skipped: vec![SkippedView {
+            id: 4,
+            reason: "why".to_string(),
+            words: WordsView(words.clone()),
+        }],
+    };
+    let mut bytes = Vec::new();
+    built.put(&mut bytes);
+    let mut r = Rd::new(&bytes);
+    assert_eq!(r.opt(|r| r.bytes()), Some(vec![7; 32]));
+    assert_eq!(r.u32(), 1);
+    let mut one = Vec::new();
+    item.put(&mut one);
+    assert_eq!(&bytes[r.pos()..r.pos() + one.len()], &one[..]);
+    // The session, the file and what was taken.
+    let mut bytes = Vec::new();
+    OwnSpendSessionView {
+        session: vec![7; 32],
+        items: vec![],
+    }
+    .put(&mut bytes);
+    assert_eq!(bytes.len(), 4 + 32 + 4);
+    let mut bytes = Vec::new();
+    OwnSpendFileView {
+        psbt: vec![1, 2],
+        txid: vec![5; 32],
+        file_name: "ab.psbt".to_string(),
+        payments: vec![],
+        change: None,
+        fee: 7,
+        words: WordsView(words),
+    }
+    .put(&mut bytes);
+    let mut r = Rd::new(&bytes);
+    assert_eq!(r.bytes(), vec![1, 2]);
+    assert_eq!(r.bytes(), vec![5; 32]);
+    assert_eq!(r.string(), "ab.psbt");
+    assert_eq!(r.u32(), 0);
+    assert!(r.opt(|r| r.u8()).is_none());
+    assert_eq!(r.u64(), 7);
+    let mut bytes = Vec::new();
+    OwnSpendTakenView {
+        id: 1,
+        txid: vec![5; 32],
+        fee: 9,
+        sends: vec![],
+    }
+    .put(&mut bytes);
+    let mut r = Rd::new(&bytes);
+    assert_eq!((r.u32(), r.bytes(), r.u64(), r.u32()), (1, vec![5; 32], 9, 0));
+    r.done();
+}
+
+#[test]
+fn as_101_a_node_that_is_not_ready_refuses_to_build_and_says_so() {
+    let rig = super::kit::Rig::new();
+    let file = wallet_file();
+    let handle = Rd::ok(&rig.start_own(&file)).u64();
+    let fault = Rd::error(&own_build(&rig, handle, &[1])).expect("refused");
+    assert_eq!(fault.rule, "not-ready");
+    let fault = Rd::error(&rig.call(164, handle, &W::new().u64(T0).0)).expect("refused");
+    assert!(!fault.rule.is_empty());
+}
+
+#[test]
+fn as_100_the_ops_of_the_own_wallet_are_refused_for_a_shop_with_a_key_app() {
+    let rig = super::kit::Rig::new();
+    let handle = rig.start();
+    assert!(Rd::error(&own_build(&rig, handle, &[1])).is_some());
+    assert!(Rd::error(&rig.call(164, handle, &W::new().u64(T0).0)).is_some());
+    let response = rig.call(160, handle, &[]);
+    let mut r = Rd::ok(&response);
+    assert_eq!(r.u32(), 0);
+    r.done();
+}
+
+#[test]
+fn as_103_a_bad_session_number_is_refused_by_length_and_an_unknown_one_by_name() {
+    let rig = super::kit::Rig::new();
+    let file = wallet_file();
+    let handle = Rd::ok(&rig.start_own(&file)).u64();
+    let fault = Rd::error(&rig.call(161, handle, &W::new().bytes(&[1, 2]).u32(0).0)).unwrap();
+    assert_eq!(fault.rule, "id-length");
+    let fault = Rd::error(&rig.call(163, handle, &W::new().bytes(&[9u8; 32]).0)).expect("refused");
+    assert_eq!(fault.rule, "session-unknown");
+}
