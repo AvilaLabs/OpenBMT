@@ -13,14 +13,18 @@ builds the code. The app sends every request over HTTPS to the node, with
 the pinned certificate (LN-12), and hands the status and the bytes of the
 answer back. A reply that cannot be read is a refusal, never a guess.
 
-**What the facts rest on.** The fixtures of the tests are written from the
-projects' own documents and source code, not captured from a running node,
-and no node was run. The error answers and the JSON of the replies were read
-from the source at the tags named in section 9 (LND v0.21.6-beta, Core
-Lightning v26.06.10) and from the packages those versions pin; each rule
-names the files it rests on. The bodies of the HTTP errors are derived from
-the code paths, not observed, so a run against real nodes is still to be
-done. The pages of Core Lightning (docs.corelightning.org) do not show the
+**What the facts rest on.** The rules were written from the projects' own
+documents and source code at the tags named in section 9 (LND v0.21.6-beta,
+Core Lightning v26.06.10) and from the packages those versions pin; each
+rule names the files it rests on. They were then run against real nodes on
+a private test network, LND v0.21.8-beta and Core Lightning v26.06.10, by
+`scripts/lightning-e2e-core.sh`: every check of the probes (LN-05, LN-06,
+LN-08, LN-09), the pinned certificate (LN-12), the lookups (LN-14, LN-15),
+the invoice (LN-17) and the code (LN-18) held, and the replies the nodes
+gave are kept as fixtures in `src/tests/real_nodes.rs`. Three answers were
+not produced by a real node and rest on the source alone: LND's state
+`ACCEPTED`, a payment of too little, and a rune whose master rune has a
+version. The pages of Core Lightning (docs.corelightning.org) do not show the
 version they describe.
 
 ## 1. What is supported

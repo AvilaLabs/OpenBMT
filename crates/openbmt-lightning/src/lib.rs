@@ -26,9 +26,11 @@
 //! counter and is never part of the shop's settings; the node's public key
 //! is (`openbmt_core::settings::Settings::lightning_node`).
 //!
-//! The fixtures of the tests are written from the projects' documents and
-//! source code, not captured from a running node; the rules name the source
-//! files the error answers and the replies were read from.
+//! Most fixtures of the tests are written from the projects' documents and
+//! source code, and the rules name the source files they were read from.
+//! The replies in `tests/real_nodes.rs` were captured from LND v0.21.8-beta
+//! and Core Lightning v26.06.10 on a private test network
+//! (`scripts/lightning-e2e-core.sh`).
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.

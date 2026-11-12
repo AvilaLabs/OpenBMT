@@ -91,11 +91,12 @@ fn every_rule_the_code_names_exists() {
 }
 
 #[test]
-fn what_no_node_confirmed_is_marked_in_the_rules() {
+fn what_real_nodes_confirmed_is_marked_in_the_rules() {
     assert!(!RULES.contains("[verify, E7]"));
     let flat = RULES.split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(flat.contains("no node was run"));
-    assert!(flat.contains("not captured from a running node"));
+    assert!(flat.contains("run against real nodes on a private test network"));
+    assert!(flat.contains("scripts/lightning-e2e-core.sh"));
+    assert!(flat.contains("rest on the source alone"));
 }
 
 #[test]
