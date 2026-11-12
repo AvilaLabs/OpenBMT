@@ -9,13 +9,16 @@
 //! is forgotten later. Nothing is ever removed from the book.
 //!
 //! ```text
-//! book: "OBM?" | 1 | device count u32 LE
+//! book: "OBM?" | 2 | device count u32 LE
 //!         | per device, ascending by key: device (32) | range count u32 LE
-//!           | per range, in the order given: start u32 LE
+//!           | per range, in the order given: start u32 LE | given at u64 LE
 //! ```
 //!
-//! Every range is [`RANGE_LEN`] long, so only the start is written. Decoding
-//! is strict: the devices ascend, no device has no range, every start is a
+//! Every range is [`RANGE_LEN`] long, so only the start is written, with the
+//! owner's clock in seconds at the moment the range was given (OC-10, OC-23:
+//! the live watch sets a range aside only when it has been quiet for the
+//! quiet time). Decoding is strict: the version is 2 (a version 1 book is
+//! refused), the devices ascend, no device has no range, every start is a
 //! multiple of [`RANGE_LEN`], and the starts of all devices together are
 //! exactly 0, 1000, 2000 and so on up to the last, none twice.
 
@@ -25,6 +28,8 @@ use std::fmt;
 use openbmt_core::identity::DeviceId;
 use openbmt_core::pinned_wallet::IndexRange;
 use openbmt_core::wire::{self, DecodeError, Reader};
+
+use crate::types::IssuedRange;
 
 /// The magic of the allocation book.
 pub const MAGIC_ALLOCATION_BOOK: [u8; 4] = *b"OBM?";
@@ -39,27 +44,39 @@ pub const TOP_UP_BELOW: u64 = 300;
 /// is told so.
 pub const WALLET_GAP: u32 = 20;
 
-/// The most indexes the owner phone watches for the shop's own wallet. The
-/// owner node's live watch (`OWNER_LIVE_WATCH`, OC-22) is the same number,
-/// and a test of that crate says so (OA-107).
-pub const MAX_WATCHED_INDEXES: u32 = 90_000;
+/// The version byte of the book.
+pub const BOOK_VERSION: u8 = 2;
 
-/// The most ranges the book holds.
-pub const MAX_RANGES: usize = (MAX_WATCHED_INDEXES / RANGE_LEN) as usize;
+/// Bytes before the first device: the magic, the version and the device
+/// count.
+pub const HEADER_BYTES: usize = 9;
+
+/// Bytes a device costs: its key and its range count.
+pub const DEVICE_BYTES: usize = 36;
+
+/// Bytes a range costs: its start and the time it was given.
+pub const RANGE_BYTES: usize = 12;
+
+/// OA-106, OA-107: the most ranges the book holds, which tile the indexes
+/// up to the wallet's last, 2^31.
+pub const MAX_RANGES: usize = (INDEX_LIMIT / RANGE_LEN) as usize;
 
 /// The most devices that hold a range.
 pub const MAX_DEVICES: usize = 64;
 
 /// The first index the wallet cannot make (hardened, WL-23).
-const INDEX_LIMIT: u32 = 1 << 31;
+pub const INDEX_LIMIT: u32 = 1 << 31;
+
+/// The size of a book in bytes with `devices` devices and `ranges` ranges.
+pub const fn encoded_len(devices: usize, ranges: usize) -> usize {
+    HEADER_BYTES + devices * DEVICE_BYTES + ranges * RANGE_BYTES
+}
 
 /// Why the book gave no range, or did not read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BookError {
     /// OA-106: the next range would reach 2^31.
     Full,
-    /// OA-107: the next range would pass the indexes the phone watches.
-    WatchBudget,
     /// The book holds ranges for as many devices as it takes.
     TooManyDevices,
     /// The bytes are not a book, and say why.
@@ -70,10 +87,6 @@ impl fmt::Display for BookError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Full => write!(f, "OA-106: no index is left below 2^31"),
-            Self::WatchBudget => write!(
-                f,
-                "OA-107: the phone watches at most {MAX_WATCHED_INDEXES} indexes"
-            ),
             Self::TooManyDevices => write!(f, "OA-106: the book holds {MAX_DEVICES} devices"),
             Self::Corrupt(why) => write!(f, "OA-106: the allocation book is bad: {why}"),
         }
@@ -93,8 +106,9 @@ fn corrupt(e: DecodeError) -> BookError {
 /// OA-106: every range given, by device.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AllocationBook {
-    /// The first index of each range of a device, in the order given.
-    given: BTreeMap<DeviceId, Vec<u32>>,
+    /// The first index of each range of a device, in the order given, and
+    /// the owner's clock when it was given.
+    given: BTreeMap<DeviceId, Vec<(u32, u64)>>,
     /// How many ranges were given in all: the next starts at this times
     /// [`RANGE_LEN`].
     taken: u32,
@@ -108,21 +122,18 @@ impl AllocationBook {
 
     /// OA-106: the next range for `device`: [`RANGE_LEN`] indexes from the
     /// end of the highest range ever given (0 for the first). The book
-    /// holds it from here on.
-    pub fn allocate(&mut self, device: DeviceId) -> Result<IndexRange, BookError> {
+    /// holds it from here on, with `now`, the owner's clock in seconds.
+    pub fn allocate(&mut self, device: DeviceId, now: u64) -> Result<IndexRange, BookError> {
         let start = self.taken.checked_mul(RANGE_LEN).ok_or(BookError::Full)?;
         let end = start.checked_add(RANGE_LEN).ok_or(BookError::Full)?;
         if end >= INDEX_LIMIT {
             return Err(BookError::Full);
         }
-        if end > MAX_WATCHED_INDEXES {
-            return Err(BookError::WatchBudget);
-        }
         if !self.given.contains_key(&device) && self.given.len() >= MAX_DEVICES {
             return Err(BookError::TooManyDevices);
         }
         let range = IndexRange::new(device, start, end).map_err(|_| BookError::Full)?;
-        self.given.entry(device).or_default().push(start);
+        self.given.entry(device).or_default().push((start, now));
         self.taken += 1;
         Ok(range)
     }
@@ -143,10 +154,30 @@ impl AllocationBook {
             .get(device)
             .into_iter()
             .flatten()
-            .filter_map(|start| {
+            .filter_map(|(start, _)| {
                 IndexRange::new(*device, *start, start.saturating_add(RANGE_LEN)).ok()
             })
             .collect()
+    }
+
+    /// OC-10: every range given, as the owner's issued ranges: the first
+    /// index, how many, the device it was given to and the owner's clock
+    /// when it was given. Ascending by start.
+    pub fn issued(&self) -> Vec<IssuedRange> {
+        let mut all: Vec<IssuedRange> = self
+            .given
+            .iter()
+            .flat_map(|(device, ranges)| {
+                ranges.iter().map(|(start, at)| IssuedRange {
+                    start: *start,
+                    count: RANGE_LEN,
+                    counter: *device,
+                    signed_at: *at,
+                })
+            })
+            .collect();
+        all.sort_by_key(|r| r.start);
+        all
     }
 
     /// Whether `device` was given a range.
@@ -160,7 +191,8 @@ impl AllocationBook {
     }
 
     /// OA-107: every index of every range, ascending: 0 up to, not
-    /// including, the end of the highest range.
+    /// including, the end of the highest range. The owner node watches all
+    /// of them, as OC-22 to OC-24 say.
     pub fn indexes(&self) -> std::ops::Range<u32> {
         0..self.next_start()
     }
@@ -171,23 +203,24 @@ impl AllocationBook {
         let start = index - index % RANGE_LEN;
         self.given
             .iter()
-            .find(|(_, starts)| starts.contains(&start))
+            .find(|(_, ranges)| ranges.binary_search_by_key(&start, |(s, _)| *s).is_ok())
             .map(|(d, _)| *d)
             .filter(|_| index < self.next_start())
     }
 
     /// The bytes of the book.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = wire::start(
-            &MAGIC_ALLOCATION_BOOK,
-            16 + self.given.len() * 36 + self.indexes().len() / 250,
-        );
+        let ranges = usize::try_from(self.taken).unwrap_or(0);
+        let mut out = Vec::with_capacity(encoded_len(self.given.len(), ranges));
+        out.extend_from_slice(&MAGIC_ALLOCATION_BOOK);
+        out.push(BOOK_VERSION);
         out.extend_from_slice(&wire::len_u32(self.given.len()).to_le_bytes());
-        for (device, starts) in &self.given {
+        for (device, ranges) in &self.given {
             out.extend_from_slice(&device.to_bytes());
-            out.extend_from_slice(&wire::len_u32(starts.len()).to_le_bytes());
-            for start in starts {
+            out.extend_from_slice(&wire::len_u32(ranges.len()).to_le_bytes());
+            for (start, at) in ranges {
                 out.extend_from_slice(&start.to_le_bytes());
+                out.extend_from_slice(&at.to_le_bytes());
             }
         }
         out
@@ -195,9 +228,13 @@ impl AllocationBook {
 
     /// Read a book strictly (OA-106).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, BookError> {
-        let mut r = Reader::framed(bytes, &MAGIC_ALLOCATION_BOOK).map_err(corrupt)?;
-        let devices = r.count(MAX_DEVICES, 36).map_err(corrupt)?;
-        let mut given: BTreeMap<DeviceId, Vec<u32>> = BTreeMap::new();
+        let (mut r, version) =
+            Reader::framed_up_to(bytes, &MAGIC_ALLOCATION_BOOK, BOOK_VERSION).map_err(corrupt)?;
+        if version != BOOK_VERSION {
+            return Err(BookError::Corrupt("the book is of an older version"));
+        }
+        let devices = r.count(MAX_DEVICES, DEVICE_BYTES).map_err(corrupt)?;
+        let mut given: BTreeMap<DeviceId, Vec<(u32, u64)>> = BTreeMap::new();
         let mut all: BTreeSet<u32> = BTreeSet::new();
         let mut last: Option<DeviceId> = None;
         let mut total = 0usize;
@@ -207,7 +244,7 @@ impl AllocationBook {
                 return Err(BookError::Corrupt("the devices are not in order"));
             }
             last = Some(device);
-            let n = r.count(MAX_RANGES, 4).map_err(corrupt)?;
+            let n = r.count(MAX_RANGES, RANGE_BYTES).map_err(corrupt)?;
             if n == 0 {
                 return Err(BookError::Corrupt("a device has no range"));
             }
@@ -218,16 +255,17 @@ impl AllocationBook {
             let mut starts = Vec::with_capacity(n);
             for _ in 0..n {
                 let start = r.u32_le().map_err(corrupt)?;
+                let at = r.u64_le().map_err(corrupt)?;
                 if start % RANGE_LEN != 0 {
                     return Err(BookError::Corrupt("a range does not start on a boundary"));
                 }
-                if starts.last().is_some_and(|l| *l >= start) {
+                if starts.last().is_some_and(|(l, _)| *l >= start) {
                     return Err(BookError::Corrupt("a device's ranges are not in order"));
                 }
                 if !all.insert(start) {
                     return Err(BookError::Corrupt("two ranges start at the same index"));
                 }
-                starts.push(start);
+                starts.push((start, at));
             }
             given.insert(device, starts);
         }
@@ -311,8 +349,8 @@ mod tests {
     #[test]
     fn the_book_round_trips_and_refuses_every_cut() {
         let mut b = AllocationBook::new();
-        for d in [3, 4, 3, 5, 4] {
-            b.allocate(dev(d)).unwrap();
+        for (i, d) in [3, 4, 3, 5, 4].into_iter().enumerate() {
+            b.allocate(dev(d), 1_000 + i as u64).unwrap();
         }
         let bytes = b.to_bytes();
         assert_eq!(AllocationBook::from_bytes(&bytes).unwrap(), b);
@@ -322,5 +360,94 @@ mod tests {
         let mut longer = bytes;
         longer.push(0);
         assert!(AllocationBook::from_bytes(&longer).is_err());
+    }
+
+    #[test]
+    fn oa_106_a_book_of_a_hundred_ranges_round_trips_with_its_times() {
+        let mut b = AllocationBook::new();
+        for i in 0..100u64 {
+            let d = dev(3 + u8::try_from(i % 4).unwrap());
+            b.allocate(d, 5_000 + i * 60).unwrap();
+        }
+        assert_eq!(b.ranges_given(), 100);
+        assert_eq!(b.next_start(), 100_000);
+        let bytes = b.to_bytes();
+        assert_eq!(bytes.len(), encoded_len(4, 100));
+        let back = AllocationBook::from_bytes(&bytes).unwrap();
+        assert_eq!(back, b);
+        let issued = back.issued();
+        assert_eq!(issued.len(), 100);
+        assert_eq!(issued[7].start, 7_000);
+        assert_eq!(issued[7].signed_at, 5_000 + 7 * 60);
+        assert_eq!(issued[7].counter, dev(3 + 3));
+        assert_eq!(back.device_of(99_999), Some(dev(3 + 3)));
+    }
+
+    #[test]
+    fn oa_107_the_book_goes_past_ninety_thousand_indexes() {
+        let mut b = AllocationBook::new();
+        for i in 0..95u64 {
+            b.allocate(dev(3), i).unwrap();
+        }
+        assert_eq!(b.next_start(), 95_000);
+        assert_eq!(b.indexes().len(), 95_000);
+    }
+
+    #[test]
+    fn oa_106_the_largest_book_costs_twelve_bytes_a_range() {
+        // One range, then two: the cost of a range is what the bytes grow by.
+        let mut b = AllocationBook::new();
+        b.allocate(dev(3), 1).unwrap();
+        let one = b.to_bytes();
+        b.allocate(dev(3), 2).unwrap();
+        let two = b.to_bytes();
+        assert_eq!(two.len() - one.len(), RANGE_BYTES);
+        // The header: the magic, the version and the device count.
+        assert_eq!(&one[..5], b"OBM?\x02");
+        assert_eq!(one.len(), HEADER_BYTES + DEVICE_BYTES + RANGE_BYTES);
+        // A second device costs its key and its range count.
+        b.allocate(dev(4), 3).unwrap();
+        assert_eq!(b.to_bytes().len() - two.len(), DEVICE_BYTES + RANGE_BYTES);
+        // The largest legal book: every range up to 2^31 for 64 devices.
+        assert_eq!(MAX_RANGES, 2_147_483);
+        assert_eq!(
+            encoded_len(MAX_DEVICES, MAX_RANGES),
+            9 + 64 * 36 + 2_147_483 * 12
+        );
+        assert!(encoded_len(MAX_DEVICES, MAX_RANGES) < 26_000_000);
+        // The last range ends below 2^31, and the next would not fit.
+        assert!(u64::try_from(MAX_RANGES).unwrap() * u64::from(RANGE_LEN) < u64::from(INDEX_LIMIT));
+        assert!(
+            (u64::try_from(MAX_RANGES).unwrap() + 1) * u64::from(RANGE_LEN)
+                >= u64::from(INDEX_LIMIT)
+        );
+    }
+
+    #[test]
+    fn oa_106_the_book_is_full_at_two_to_the_thirty_first() {
+        // The count is set, not reached: 2 million ranges are not made here.
+        let mut b = AllocationBook::new();
+        b.allocate(dev(3), 1).unwrap();
+        b.taken = u32::try_from(MAX_RANGES).unwrap() - 1;
+        let last = b.allocate(dev(3), 2).unwrap();
+        assert_eq!(last.end, u32::try_from(MAX_RANGES).unwrap() * RANGE_LEN);
+        assert!(last.end < INDEX_LIMIT);
+        let before = b.clone();
+        assert_eq!(b.allocate(dev(3), 3), Err(BookError::Full));
+        assert_eq!(b, before, "a refusal changes nothing");
+    }
+
+    #[test]
+    fn oa_106_a_version_one_book_is_refused() {
+        let mut b = AllocationBook::new();
+        b.allocate(dev(3), 1).unwrap();
+        let mut bytes = b.to_bytes();
+        bytes[4] = 1;
+        assert_eq!(
+            AllocationBook::from_bytes(&bytes),
+            Err(BookError::Corrupt("the book is of an older version"))
+        );
+        bytes[4] = 3;
+        assert!(AllocationBook::from_bytes(&bytes).is_err());
     }
 }

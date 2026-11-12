@@ -455,7 +455,70 @@ fn is_test_network(text: &str) -> bool {
     key || path
 }
 
+impl From<WalletDescription> for ImportedWallet {
+    fn from(wallet: WalletDescription) -> Self {
+        Self::Multisig(wallet)
+    }
+}
+
+impl From<SingleKeyWallet> for ImportedWallet {
+    fn from(wallet: SingleKeyWallet) -> Self {
+        Self::Single(wallet)
+    }
+}
+
 impl ImportedWallet {
+    /// The script at `chain` and `index`, by the derivation of the wallet's
+    /// kind. Every script of the wallet, receive or change, is made here.
+    pub fn script(&self, chain: Keychain, index: u32) -> Result<ScriptBuf, SingleKeyError> {
+        match self {
+            Self::Single(w) => w.script(chain, index),
+            Self::Multisig(w) => w.script(chain, index).map_err(|_| SingleKeyError::Derive),
+        }
+    }
+
+    /// The receive script at `index`.
+    pub fn receive_script(&self, index: u32) -> Result<ScriptBuf, SingleKeyError> {
+        self.script(Keychain::Receive, index)
+    }
+
+    /// The change script at `index`.
+    pub fn change_script(&self, index: u32) -> Result<ScriptBuf, SingleKeyError> {
+        self.script(Keychain::Change, index)
+    }
+
+    /// The network of the wallet.
+    pub fn network(&self) -> Network {
+        match self {
+            Self::Single(_) => Network::Bitcoin,
+            Self::Multisig(w) => w.network(),
+        }
+    }
+
+    /// The canonical description text, checksum included.
+    pub fn canonical_string(&self) -> &str {
+        match self {
+            Self::Single(w) => w.canonical_string(),
+            Self::Multisig(w) => w.canonical_string(),
+        }
+    }
+
+    /// SHA-256 of the canonical text.
+    pub fn checksum32(&self) -> [u8; 32] {
+        match self {
+            Self::Single(w) => w.checksum32(),
+            Self::Multisig(w) => w.checksum32(),
+        }
+    }
+
+    /// The 2-of-3 wallet, when that is what this is.
+    pub fn multisig(&self) -> Option<&WalletDescription> {
+        match self {
+            Self::Multisig(w) => Some(w),
+            Self::Single(_) => None,
+        }
+    }
+
     /// Read what the owner scanned or opened. The checks run in this order
     /// (WL-13): a private key, a test network, the checksum, the type.
     pub fn read(text: &str) -> Result<Self, ImportRefused> {

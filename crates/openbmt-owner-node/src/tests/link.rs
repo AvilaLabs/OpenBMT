@@ -1975,8 +1975,6 @@ fn lk_75_a_relay_that_does_not_list_the_watch_key_refuses_and_the_link_says_so()
 // ---- the ranges of a counter paired with the shop's own wallet (OA-112, LK-77) ----
 
 use std::collections::BTreeSet;
-use std::sync::mpsc::channel as range_channel;
-use std::sync::{Arc, Mutex};
 
 use openbmt_core::pairing_own::OwnCounterPairing;
 use openbmt_core::pinned_wallet::{IndexRange, PinnedWallet, SignedRange};
@@ -2186,22 +2184,6 @@ fn oa_112_the_link_reads_the_indexes_the_counters_sales_opened_and_the_ranges_it
 
 // ---- the owner node of a shop with its own wallet ----
 
-struct RecordingPort {
-    events: openbmt_net_io::EventReceiver,
-    watched: Arc<Mutex<Vec<ScriptBuf>>>,
-}
-
-impl DriverPort for RecordingPort {
-    fn events(&self) -> &openbmt_net_io::EventReceiver {
-        &self.events
-    }
-    fn watch_script(&self, script: ScriptBuf) {
-        self.watched.lock().unwrap().push(script);
-    }
-    fn set_all_blocks(&self, _: bool) {}
-    fn shutdown(&mut self) {}
-}
-
 /// An own-wallet owner node with counter 3 paired and delivered.
 fn paired_node(dir: &Dir) -> OwnNode {
     let wallet = PinnedWallet::from_text(SINGLE).unwrap();
@@ -2241,30 +2223,22 @@ fn oa_105_the_shops_state_is_in_its_file_and_a_node_opened_again_reads_it_back()
 }
 
 #[test]
-fn oa_107_every_index_of_every_range_is_given_to_the_driver_once() {
+fn oa_107_every_index_of_every_range_is_in_the_book_with_the_clock_it_was_given_at() {
     let dir = Dir::new();
     let mut node = paired_node(&dir);
-    let watched = Arc::new(Mutex::new(Vec::new()));
-    let (_tx, rx) = range_channel();
-    let port = RecordingPort {
-        events: rx.into(),
-        watched: watched.clone(),
-    };
-    assert_eq!(node.sync_watch(&port).unwrap(), 1_000);
-    assert_eq!(node.sync_watch(&port).unwrap(), 0, "nothing twice");
     let wallet = PinnedWallet::from_text(SINGLE).unwrap();
-    let seen = watched.lock().unwrap().clone();
-    assert_eq!(seen.len(), 1_000);
-    let expected: BTreeSet<ScriptBuf> = (0..1_000)
-        .map(|i| wallet.receive_script(i).unwrap())
-        .collect();
-    assert_eq!(seen.iter().cloned().collect::<BTreeSet<_>>(), expected);
-    // The desk's range is watched from the moment it is written.
+    // The first range was given at "They match", on the owner's clock.
+    let issued = node.shop().book().issued();
+    assert_eq!(issued.len(), 1);
+    assert_eq!((issued[0].start, issued[0].count), (0, 1_000));
+    assert_eq!(issued[0].signed_at, T0 + 10);
+    assert_eq!(issued[0].counter, counter());
+    // The desk's range is in the book from the moment it is written.
     {
         let (shop, store) = node.shop_and_store();
-        shop.allocate_desk(&store).unwrap();
+        shop.allocate_desk(T0 + 99, &store).unwrap();
     }
-    assert_eq!(node.sync_watch(&port).unwrap(), 1_000);
+    assert_eq!(node.shop().book().issued()[1].signed_at, T0 + 99);
     assert_eq!(
         node.index_of(&wallet.receive_script(1_500).unwrap())
             .unwrap(),
@@ -2363,10 +2337,234 @@ fn oa_113_the_gap_needed_follows_the_highest_index_a_counter_handed_out() {
     assert_eq!(node.gap_needed(&w.link, &paid), 1);
 }
 
+/// A second counter joins the shop: "They match" makes the settings that
+/// name both.
+fn pair_second(node: &mut OwnNode, who: u8, at: u64) {
+    let (shop, store) = node.shop_and_store();
+    let made = shop.make_offer(at).unwrap();
+    let (_, request) =
+        OwnCounterPairing::begin(made.offer.clone(), &id(who), "Back", [who; 32], at + 5).unwrap();
+    shop.confirm(
+        &made,
+        at + 10,
+        &request.to_bytes(),
+        100_000,
+        Vec::new(),
+        None,
+        &store,
+    )
+    .unwrap();
+    shop.mark_delivered(&id(who).device_id(), &store).unwrap();
+}
+
 #[test]
-fn oc_22_the_phones_watch_for_the_own_wallet_is_the_live_watch() {
+fn oa_107_a_shop_past_ninety_thousand_indexes_still_gets_the_next_range() {
+    let dir = Dir::new();
+    let mut node = paired_node(&dir);
+    // The desk takes the ranges up to 90,000: counter 3 holds 0 to 1,000.
+    for i in 0..89u64 {
+        let (shop, store) = node.shop_and_store();
+        shop.allocate_desk(T0 + 20 + i, &store).unwrap();
+    }
+    assert_eq!(node.shop().book().next_start(), 90_000);
+    let mut w = world();
+    let mut c = Chain::new();
+    for i in 0..720u32 {
+        c.append(&id(3), RecordKind::Sale, opened(i)).unwrap();
+    }
+    send_all(&mut w, c.records(), T0 + 2);
+    w.counter_gets();
+    let done = node.top_up(&mut w.link, T0 + 200).unwrap();
+    assert_eq!(done.len(), 1);
+    assert_eq!((done[0].start, done[0].end), (90_000, 91_000));
+    let sent = range_messages(&w.counter_gets());
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].range.end, 91_000);
+    // The book holds it with the owner's clock of the moment it was given.
+    let issued = node.shop().book().issued();
+    assert_eq!(issued.len(), 91);
+    assert_eq!(issued[90].start, 90_000);
+    assert_eq!(issued[90].signed_at, T0 + 200);
+    assert_eq!(issued[90].counter, counter());
+}
+
+/// A live watch that says whether it has room, and keeps what it was asked
+/// and told.
+struct Watched {
+    room: bool,
+    asked: std::cell::Cell<u32>,
+    told: Vec<u32>,
+}
+
+impl Watched {
+    fn new(room: bool) -> Self {
+        Self {
+            room,
+            asked: std::cell::Cell::new(0),
+            told: Vec::new(),
+        }
+    }
+}
+
+impl crate::Watching for Watched {
+    fn room_for(&self, end: u32) -> bool {
+        self.asked.set(end);
+        self.room
+    }
+    fn written(&mut self, book: &openbmt_owner::own_book::AllocationBook) {
+        self.told.push(book.next_start());
+    }
+}
+
+#[test]
+fn oa_112_a_range_the_live_watch_has_no_room_for_waits_and_is_given_when_it_has() {
+    let dir = Dir::new();
+    let mut node = paired_node(&dir);
+    let mut w = world();
+    let mut c = Chain::new();
+    for i in 0..720u32 {
+        c.append(&id(3), RecordKind::Sale, opened(i)).unwrap();
+    }
+    send_all(&mut w, c.records(), T0 + 2);
+    w.counter_gets();
+    // No room: nothing is allocated, the counter runs on what it has.
+    assert!(node
+        .top_up_with(&mut w.link, T0 + 3, &mut Watched::new(false))
+        .unwrap()
+        .is_empty());
+    assert_eq!(node.shop().book().next_start(), 1_000);
+    assert!(w.link.ranges_waiting(&counter()).is_none());
+    // The room is asked about the end of the range that would be given.
+    let mut watched = Watched::new(true);
+    let done = node.top_up_with(&mut w.link, T0 + 4, &mut watched).unwrap();
+    assert_eq!(watched.asked.get(), 2_000);
+    assert_eq!(done.len(), 1);
+    // It was told of the book after the range was written.
+    assert_eq!(watched.told, vec![2_000]);
+}
+
+#[test]
+fn lk_73_oa_112_a_range_not_taken_for_a_day_raises_the_alert_and_the_counters_record_clears_it() {
+    let dir = Dir::new();
+    let mut node = paired_node(&dir);
+    let mut w = world();
+    let mut c = Chain::new();
+    for i in 0..720u32 {
+        c.append(&id(3), RecordKind::Sale, opened(i)).unwrap();
+    }
+    send_all(&mut w, c.records(), T0 + 2);
+    node.top_up(&mut w.link, T0 + 3).unwrap();
+    let sent = range_messages(&w.counter_gets());
+    let day = 24 * 60 * 60;
+    w.step(T0 + 3 + day - 1);
+    assert!(batch_alerts(&w.link).is_empty());
+    w.step(T0 + 3 + day);
     assert_eq!(
-        usize::try_from(openbmt_owner::own_book::MAX_WATCHED_INDEXES).unwrap(),
-        crate::live::OWNER_LIVE_WATCH
+        batch_alerts(&w.link),
+        vec![Alert::BatchUndelivered {
+            counter: counter(),
+            since: T0 + 3
+        }]
     );
+    // The counter's range-held record clears it (tag 35).
+    let held = RangeHeld::of(&sent[0]);
+    let mut c2 = Chain::new();
+    for r in c.records() {
+        c2.append(&id(3), r.kind, r.body.clone()).unwrap();
+    }
+    c2.append(&id(3), held.kind(), held.encode()).unwrap();
+    send_all(&mut w, &c2.records()[720..], T0 + day + 10);
+    assert!(batch_alerts(&w.link).is_empty());
+    assert!(w.link.ranges_waiting(&counter()).is_none());
+}
+
+#[test]
+fn cr_236_a_counter_paired_earlier_gets_the_settings_that_name_a_later_one() {
+    let dir = Dir::new();
+    let mut node = paired_node(&dir);
+    let mut w = world();
+    let mut carried = 0u32;
+    // The settings of the first pairing name counter 3 alone.
+    assert!(node
+        .carry_settings(&mut w.link, &mut carried, T0 + 20)
+        .unwrap());
+    let first = node.shop().known_settings().unwrap().clone();
+    assert_eq!(settings_in(&w.counter_gets()), vec![first.to_bytes()]);
+    assert_eq!(first.settings.version, 1);
+    // Counter 3 shows it holds version 1: done, and not carried again.
+    let mut shown = Shown::new();
+    shown.holds(&mut w, 1);
+    w.step(T0 + 21);
+    node.carry_settings(&mut w.link, &mut carried, T0 + 22)
+        .unwrap();
+    assert_eq!(carried, 1);
+    assert!(!node
+        .carry_settings(&mut w.link, &mut carried, T0 + 23)
+        .unwrap());
+    // A second counter is paired: the settings that name both are version 2
+    // and go to counter 3, signed by the owner root alone.
+    pair_second(&mut node, 5, T0 + 100);
+    let second = node.shop().known_settings().unwrap().clone();
+    assert_eq!(second.settings.version, 2);
+    assert_eq!(second.settings.counters.len(), 2);
+    assert!(second.approver_sig.is_none());
+    assert_eq!(
+        node.counters_of_settings(),
+        vec![counter(), id(5).device_id()]
+    );
+    assert!(node
+        .carry_settings(&mut w.link, &mut carried, T0 + 101)
+        .unwrap());
+    assert_eq!(settings_in(&w.counter_gets()), vec![second.to_bytes()]);
+    // Until counter 3 shows version 2 the link keeps it, and carried stays.
+    assert_eq!(carried, 1);
+    shown.holds(&mut w, 2);
+    w.step(T0 + 102);
+    node.carry_settings(&mut w.link, &mut carried, T0 + 103)
+        .unwrap();
+    assert_eq!(carried, 2);
+}
+
+#[test]
+fn cr_236_cr_239_the_owners_change_is_signed_by_the_owner_root_alone_and_a_loosening_goes_out_as_it_is(
+) {
+    let dir = Dir::new();
+    let mut node = paired_node(&dir);
+    let mut w = world();
+    let mut carried = 0u32;
+    node.carry_settings(&mut w.link, &mut carried, T0 + 20)
+        .unwrap();
+    w.counter_gets();
+    let mut shown = Shown::new();
+    shown.holds(&mut w, 1);
+    w.step(T0 + 21);
+    node.carry_settings(&mut w.link, &mut carried, T0 + 22)
+        .unwrap();
+    assert_eq!(carried, 1);
+    // The owner raises a limit: a loosening. The shop signs it with the
+    // owner root and stores it before it is carried.
+    let mut looser = node.shop().known_settings().unwrap().settings.clone();
+    looser.version = 2;
+    looser.light_per_sale.sats += 50;
+    let signed = {
+        let (shop, store) = node.shop_and_store();
+        shop.change_settings(looser.clone(), &store).unwrap()
+    };
+    assert!(signed.approver_sig.is_none());
+    assert_eq!(
+        OwnNode::open(dir.path(), id(1), PinnedWallet::from_text(SINGLE).unwrap())
+            .unwrap()
+            .shop()
+            .known_settings(),
+        Some(&signed)
+    );
+    assert!(node
+        .carry_settings(&mut w.link, &mut carried, T0 + 30)
+        .unwrap());
+    // As signed: the plain bytes, with no Key app signature.
+    assert_eq!(settings_in(&w.counter_gets()), vec![signed.to_bytes()]);
+    // A version that is not above the one in force is refused, and nothing
+    // changes.
+    let (shop, store) = node.shop_and_store();
+    assert!(shop.change_settings(looser, &store).is_err());
 }

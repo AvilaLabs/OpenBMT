@@ -292,11 +292,11 @@ fn refusal(r: &OwnRefusal) -> AppError {
     from_words(Kind::Refused, r.rule(), r, r.words())
 }
 
-fn node_error(e: OwnNodeError) -> AppError {
+pub(crate) fn node_error(e: OwnNodeError) -> AppError {
     match e {
         OwnNodeError::Io(_) => from_words(Kind::Store, "OA-105", &e, shop_file_failed()),
         OwnNodeError::State(_) => from_words(Kind::State, "OA-105", &e, shop_file_failed()),
-        OwnNodeError::Derive(_) => internal(e),
+        OwnNodeError::Derive(_) | OwnNodeError::NoApprover => internal(e),
     }
 }
 
@@ -348,6 +348,22 @@ fn made_of(made: &OwnMade) -> Result<MadeOffer, AppError> {
         offer,
         made_at: made.made_at,
     })
+}
+
+/// The owner node's turn on the shop's state (OA-112): the state is read
+/// fresh from its file, under the lock the ops of the shop take, so that a
+/// range the node gives and a counter an op pairs cannot take the same
+/// indexes. The app's calls on the shop (`with_shop`) wait for it, and it
+/// waits for them.
+pub(crate) fn turn_on_shop<T>(
+    dir: &Path,
+    identity: Identity,
+    wallet: PinnedWallet,
+    f: impl FnOnce(&mut OwnNode) -> Result<T, OwnNodeError>,
+) -> Result<T, OwnNodeError> {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let mut node = OwnNode::open(dir, identity, wallet)?;
+    f(&mut node)
 }
 
 /// Open the shop for one call, run `f`, and wipe the secret.

@@ -21,11 +21,13 @@ use openbmt_core::identity::DeviceId;
 use openbmt_core::wallet::{KeySlot, WalletDescription};
 use openbmt_counter_node::DriverPort;
 use openbmt_net_io::{AppEvent, DriverConfig, EventReceiver, Randomness};
+use openbmt_owner::own_book::AllocationBook;
 use openbmt_owner::{Delivery, SaleFacts, SaleKey, Stage};
 use openbmt_signer::SignerState;
 use openbmt_spend::Coin;
 
 mod live;
+mod own;
 mod paid_log;
 mod receipts;
 
@@ -33,6 +35,7 @@ use super::coins::{mine, tx_from};
 use super::{id, Dir, TestClock};
 use crate::coins::{CoinView, ViewState};
 use crate::live::WatchLimits;
+use crate::own::own_approver;
 use crate::{
     NodeError, OwnerConfig, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState, COINS_FILE,
     NO_TOR,
@@ -220,6 +223,8 @@ struct Setup {
     limits: WatchLimits,
     /// The node's clock, when a test sets it.
     time: Option<Arc<AtomicU64>>,
+    /// A shop with its own wallet: the allocation book it starts with.
+    own: Option<AllocationBook>,
 }
 
 impl Default for Setup {
@@ -230,6 +235,7 @@ impl Default for Setup {
             refund_depth: 6,
             limits: WatchLimits::default(),
             time: None,
+            own: None,
         }
     }
 }
@@ -267,7 +273,15 @@ fn start_at(dir: &Dir, setup: &Setup, chain: Vec<Block>) -> Result<Rig, NodeErro
         problem: None,
         behind: false,
     });
-    let mut parts = OwnerParts::new(OWNER_SECRET, kit().wallet.clone(), approver_id(), policy())?;
+    let mut parts = match &setup.own {
+        Some(book) => {
+            let approver = own_approver(&OWNER_SECRET).unwrap();
+            let mut parts = OwnerParts::new(OWNER_SECRET, own::single(), approver, policy())?;
+            parts.own_book = Some(book.clone());
+            parts
+        }
+        None => OwnerParts::new(OWNER_SECRET, kit().wallet.clone(), approver_id(), policy())?,
+    };
     parts.refund_depth = setup.refund_depth;
     parts.limits = setup.limits;
     parts.random = Box::new(Counter(1));

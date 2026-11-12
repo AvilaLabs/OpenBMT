@@ -156,6 +156,7 @@ ops run on another; it waits for at most 250 ms.
 155 own_bundle       handle zero  args OwnCounterArgs -> OwnBundleView
 156 own_delivered    handle zero  args OwnCounterArgs -> ()
 157 own_gap          handle zero  args OwnGapArgs -> OwnGapView
+158 own_gap_now      handle node  args () -> OwnGapView
 ```
 
 ## Types
@@ -166,7 +167,7 @@ OwnerNetwork: enum, one tag byte
 RouteView: enum, a tag byte, then: Direct(addr: string) | Onion(proxy: string, host: string, port: u32)
     tags Direct=0 Onion=1
 LinkConfig: record: route: RouteView, relay_key: list<u8>, counters: list<list<u8>>, heartbeat_every_secs: u64, check_in_grace_secs: u64
-StartConfig: record: dir: string, network: OwnerNetwork, now: u64, owner_secret: list<u8>, approver_root: list<u8>, wallet: string, key1_account: list<u8>, key3_xpub: option<string>, batch_min_count: u32, refund_depth: u32, birthday: u32, proxy: option<string>, fixed_peers: list<string>, broadcast_proxy: option<string>, without_tor: bool, link: option<LinkConfig>
+StartConfig: record: dir: string, network: OwnerNetwork, now: u64, owner_secret: list<u8>, approver_root: list<u8>, wallet: string, key1_account: list<u8>, key3_xpub: option<string>, batch_min_count: u32, refund_depth: u32, birthday: u32, proxy: option<string>, fixed_peers: list<string>, broadcast_proxy: option<string>, without_tor: bool, link: option<LinkConfig>, own_wallet: option<list<u8>>
 WatchStart: record: dir: string, network: OwnerNetwork, secret: list<u8>, proxy: option<string>, fixed_peers: list<string>, route: RouteView, relay_key: list<u8>, counters: list<list<u8>>, heartbeat_every_secs: u64
 WatchStepView: record: sent: u64, reached: bool, relay_refused: bool, notes: list<string>
 RefundArgs: record: counter: list<u8>, sale: u32, cashier: string, address: string, sats: u64

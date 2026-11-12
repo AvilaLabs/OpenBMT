@@ -743,9 +743,13 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
         if signed.approver_sig.0 != [0; 64] {
             return Err(d(bad("a queued batch carries a Key app signature")));
         }
+        let wallet = owner
+            .wallet
+            .multisig()
+            .ok_or(RestoreError::Inconsistent("a queued batch is not derived"))?;
         let derived = BatchBuilder::new(owner.policy)
             .derive(
-                &owner.wallet,
+                wallet,
                 signed.batch.counter,
                 signed.batch.start,
                 signed.batch.count,

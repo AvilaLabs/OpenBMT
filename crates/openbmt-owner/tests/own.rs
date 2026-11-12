@@ -13,7 +13,7 @@ use openbmt_core::pinned_wallet::{PinnedWallet, SignedRange};
 use openbmt_core::say::check;
 use openbmt_owner::own_book::{
     gap_limit, gap_needs_notice, needs_range, unused_indexes, AllocationBook, BookError,
-    MAX_DEVICES, MAX_RANGES, MAX_WATCHED_INDEXES, RANGE_LEN, TOP_UP_BELOW, WALLET_GAP,
+    MAX_DEVICES, RANGE_LEN, TOP_UP_BELOW, WALLET_GAP,
 };
 use openbmt_owner::own_say::{all_own_words, is_placeholder};
 use openbmt_owner::own_shop::{
@@ -77,10 +77,10 @@ fn confirm(
 fn oa_105_the_state_is_stored_before_it_takes_effect_and_reads_back_exactly() {
     let disk = Disk::new();
     let mut s = shop(SINGLE);
-    let failing = s.allocate_desk(|_: &[u8]| Err("disk full".to_string()));
+    let failing = s.allocate_desk(T0, |_: &[u8]| Err("disk full".to_string()));
     assert!(matches!(failing, Err(OwnError::Store(_))));
     assert_eq!(s.book().ranges_given(), 0, "a failed store changes nothing");
-    s.allocate_desk(|b| disk.put(b)).unwrap();
+    s.allocate_desk(T0, |b| disk.put(b)).unwrap();
     let back =
         OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &disk.get()).unwrap();
     assert_eq!(back.to_bytes(), disk.get());
@@ -91,7 +91,7 @@ fn oa_105_the_state_is_stored_before_it_takes_effect_and_reads_back_exactly() {
 fn oa_105_a_state_of_another_wallet_or_owner_is_refused_and_every_cut_is_refused() {
     let disk = Disk::new();
     let mut s = shop(SINGLE);
-    s.allocate_desk(|b| disk.put(b)).unwrap();
+    s.allocate_desk(T0, |b| disk.put(b)).unwrap();
     let bytes = disk.get();
     let other_wallet = PinnedWallet::from_text(MULTI).unwrap();
     assert_eq!(
@@ -117,9 +117,9 @@ fn oa_105_a_state_of_another_wallet_or_owner_is_refused_and_every_cut_is_refused
 fn oa_106_a_range_holds_a_thousand_indexes_and_starts_where_the_highest_ended() {
     let mut b = AllocationBook::new();
     let (a, c) = (id(3).device_id(), id(4).device_id());
-    let r0 = b.allocate(a).unwrap();
-    let r1 = b.allocate(c).unwrap();
-    let r2 = b.allocate(a).unwrap();
+    let r0 = b.allocate(a, T0).unwrap();
+    let r1 = b.allocate(c, T0).unwrap();
+    let r2 = b.allocate(a, T0).unwrap();
     assert_eq!((r0.start, r0.end), (0, 1_000));
     assert_eq!((r1.start, r1.end), (1_000, 2_000));
     assert_eq!((r2.start, r2.end), (2_000, 3_000));
@@ -134,15 +134,15 @@ fn oa_106_no_index_is_given_twice_also_for_the_desk_and_after_a_counter_is_forgo
     let mut s = shop(SINGLE);
     let desk = s.owner_id();
     let counter = id(3).device_id();
-    let a = s.allocate(counter, |_| Ok::<(), String>(())).unwrap();
-    let d = s.allocate_desk(|_| Ok::<(), String>(())).unwrap();
+    let a = s.allocate(counter, T0, |_| Ok::<(), String>(())).unwrap();
+    let d = s.allocate_desk(T0, |_| Ok::<(), String>(())).unwrap();
     assert_eq!(a.range.end, d.range.start, "the desk takes the next range");
     assert_eq!(d.range.counter, desk);
     d.verify(&desk).unwrap();
     // Forgetting a counter removes nothing from the book: the next range
     // still starts at the end of the highest one.
     let c = s
-        .allocate(id(4).device_id(), |_| Ok::<(), String>(()))
+        .allocate(id(4).device_id(), T0, |_| Ok::<(), String>(()))
         .unwrap();
     assert_eq!(c.range.start, d.range.end);
     let mut seen = BTreeSet::new();
@@ -162,7 +162,7 @@ fn oa_106_the_range_is_stored_before_it_is_signed_and_signed_before_it_is_return
     let seen_before_return = RefCell::new(0u32);
     let counter = id(3).device_id();
     let signed = s
-        .allocate(counter, |bytes: &[u8]| {
+        .allocate(counter, T0, |bytes: &[u8]| {
             // At the time of the store the book already holds the range.
             let back = OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), bytes)
                 .map_err(|e| e.to_string())?;
@@ -176,27 +176,14 @@ fn oa_106_the_range_is_stored_before_it_is_signed_and_signed_before_it_is_return
 }
 
 #[test]
-fn oa_106_the_book_ends_below_two_to_the_thirty_first_and_at_what_the_phone_watches() {
-    let mut b = AllocationBook::new();
-    let d = id(3).device_id();
-    for _ in 0..MAX_RANGES {
-        b.allocate(d).unwrap();
-    }
-    assert_eq!(b.next_start(), MAX_WATCHED_INDEXES);
-    assert_eq!(b.allocate(d), Err(BookError::WatchBudget));
-    assert_eq!(
-        b.next_start(),
-        MAX_WATCHED_INDEXES,
-        "a refusal changes nothing"
-    );
-    // Devices are bounded too.
+fn oa_106_the_book_holds_at_most_sixty_four_devices() {
     let mut b = AllocationBook::new();
     for n in 0..MAX_DEVICES {
         let who = id(u8::try_from(n + 3).unwrap()).device_id();
-        b.allocate(who).unwrap();
+        b.allocate(who, T0).unwrap();
     }
     assert_eq!(
-        b.allocate(id(200).device_id()),
+        b.allocate(id(200).device_id(), T0),
         Err(BookError::TooManyDevices)
     );
 }
@@ -205,21 +192,21 @@ fn oa_106_the_book_ends_below_two_to_the_thirty_first_and_at_what_the_phone_watc
 fn oa_106_the_book_decodes_only_what_it_encodes() {
     let mut b = AllocationBook::new();
     for n in [3u8, 4, 3, 5] {
-        b.allocate(id(n).device_id()).unwrap();
+        b.allocate(id(n).device_id(), T0).unwrap();
     }
     let bytes = b.to_bytes();
     assert_eq!(AllocationBook::from_bytes(&bytes).unwrap(), b);
-    // One device with two ranges: the last u32 is the second start.
+    // One device with two ranges: the second start is 12 bytes from the end.
     let mut two = AllocationBook::new();
     let d = id(3).device_id();
-    two.allocate(d).unwrap();
-    two.allocate(d).unwrap();
+    two.allocate(d, T0).unwrap();
+    two.allocate(d, T0).unwrap();
     let good = two.to_bytes();
     assert_eq!(AllocationBook::from_bytes(&good).unwrap(), two);
     for bad_start in [2_000u32, 1_001, 0] {
         let mut bad = good.clone();
         let n = bad.len();
-        bad[n - 4..].copy_from_slice(&bad_start.to_le_bytes());
+        bad[n - 12..n - 8].copy_from_slice(&bad_start.to_le_bytes());
         assert!(AllocationBook::from_bytes(&bad).is_err(), "{bad_start}");
     }
     let mut bad_magic = bytes;
@@ -232,7 +219,7 @@ fn oa_107_every_index_of_every_range_is_watched_from_the_moment_it_is_written() 
     let mut s = shop(SINGLE);
     let counter = id(3).device_id();
     let seen_in_store = RefCell::new(0..0u32);
-    s.allocate(counter, |bytes: &[u8]| {
+    s.allocate(counter, T0, |bytes: &[u8]| {
         let back = OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), bytes)
             .map_err(|e| e.to_string())?;
         *seen_in_store.borrow_mut() = back.book().indexes();
@@ -240,7 +227,7 @@ fn oa_107_every_index_of_every_range_is_watched_from_the_moment_it_is_written() 
     })
     .unwrap();
     assert_eq!(*seen_in_store.borrow(), 0..1_000);
-    s.allocate_desk(|_| Ok::<(), String>(())).unwrap();
+    s.allocate_desk(T0, |_| Ok::<(), String>(())).unwrap();
     assert_eq!(s.book().indexes(), 0..2_000);
     assert_eq!(s.book().device_of(0), Some(counter));
     assert_eq!(s.book().device_of(1_999), Some(s.owner_id()));
@@ -545,14 +532,14 @@ fn oa_112_a_counter_below_three_hundred_with_no_range_waiting_is_given_the_next(
     let (counter, request) = counter_request(&made, 3, "Front");
     confirm(&mut s, &disk, &made, &request, T0 + 10).unwrap();
     let top_up = s
-        .allocate_top_up(counter.counter(), |b| disk.put(b))
+        .allocate_top_up(counter.counter(), T0, |b| disk.put(b))
         .unwrap();
     assert_eq!((top_up.range.start, top_up.range.end), (1_000, 2_000));
     top_up.verify(&s.owner_id()).unwrap();
     // A counter the book does not know gets none.
     let stranger = id(9).device_id();
     assert_eq!(
-        refused(s.allocate_top_up(stranger, |b| disk.put(b))),
+        refused(s.allocate_top_up(stranger, T0, |b| disk.put(b))),
         OwnRefusal::UnknownCounter
     );
     let _: SignedRange = top_up;

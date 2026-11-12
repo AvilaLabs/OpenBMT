@@ -29,6 +29,7 @@ import org.openbmt.app.TriesFile
 import org.openbmt.app.Ui
 import org.openbmt.app.UrScan
 import org.openbmt.app.WaitOutcome
+import org.openbmt.owner.OwnerCeremony
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.PosReply
@@ -261,7 +262,12 @@ class Controller(internal val act: MainActivity) {
         if (tries.read(nowSecs()).wrong >= Tries.WIPE_AT) return wipe()
         val setupStatus = try {
             config = configFile.load()
-            SetupStatus(File(dir, AppFiles.SETUP_FILE).exists(), config != null)
+            if (config == null && ownStore.hasWallet()) {
+                // A shop with its own wallet has no setup text to carry the config: it starts from the defaults.
+                configFile.save(AppConfig.fresh())
+                config = configFile.load()
+            }
+            SetupStatus(File(dir, AppFiles.SETUP_FILE).exists(), config != null, ownStore.hasWallet())
         } catch (e: IOException) {
             fault = AppWords.fileNotRead(e.message)
             return render()
@@ -274,11 +280,13 @@ class Controller(internal val act: MainActivity) {
         // Unlocked within the last minute: the setup is in memory, and the node starts from it. Otherwise the stored
         // setup is read and the PIN is asked for before anything else (OA-62, `Lock.kt`).
         if (setup != null) return startNode()
+        // A shop with its own wallet keeps no setup text: its node starts from the wallet and the owner root (OA-107).
+        if (!File(dir, AppFiles.SETUP_FILE).exists()) return startNode()
         openStored()
     }
 
     internal fun render() {
-        val status = SetupStatus(File(dir, AppFiles.SETUP_FILE).exists(), config != null)
+        val status = SetupStatus(File(dir, AppFiles.SETUP_FILE).exists(), config != null, ownStore.hasWallet())
         when (val s = ScreenModel.pick(fault, status, torBlocked, node != null, ceremonyPending())) {
             is Screen.Fault -> showMessage(s.words, "Try again") { begin() }
             is Screen.Welcome -> showFirstRun()
@@ -349,7 +357,8 @@ class Controller(internal val act: MainActivity) {
         // A node is never started while the app is hidden: `hidden()` has already run (OA-62).
         if (!visible) return
         val id = ++runId
-        val s = setup ?: return
+        val s = setup
+        if (s == null && !ownStore.hasWallet()) return
         val cfg = config ?: return
         waiting(if (cfg.tor == TorChoice.BuiltIn) AppWords.torStarting else AppWords.starting)
         val thread = Thread {
@@ -386,7 +395,13 @@ class Controller(internal val act: MainActivity) {
                     if (id != runId) return@Thread
                     nodeDir.mkdirs()
                     // The secrets are handed over for this start and kept nowhere but in the sealed file (OA-01).
-                    val n = OwnerNode.start(s.startConfig(nodeDir.path, nowSecs(), proxy))
+                    val start = if (s != null) {
+                        s.startConfig(nodeDir.path, nowSecs(), proxy)
+                    } else {
+                        val shop = ownStore.args() ?: return@Thread
+                        OwnStart.config(shop, OwnerCeremony.defaults(AppConfig.NETWORK), AppConfig.NETWORK, nowSecs(), proxy)
+                    }
+                    val n = OwnerNode.start(start)
                     if (id != runId) {
                         n.close()
                         return@Thread

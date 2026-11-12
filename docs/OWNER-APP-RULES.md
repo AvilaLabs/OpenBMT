@@ -995,12 +995,18 @@ unchanged.
   range starts at the end of the highest range ever given, so no two
   devices share an index and no index is given twice, also after a counter
   is forgotten. A range holds 1,000 indexes and ends below 2^31 (WL-23).
+  Each range is written with the owner's clock in seconds at the moment it
+  was given (the book is `OBM?`, version 2; a version 1 book is refused).
   The range is written to the book before it is signed, and signed before
   it is sent or shown. The owner phone's own requests take their ranges
   from the same book under the owner root as the device (RQ-02).
-- **OA-107.** Every index of every range in the book is in the owner
-  phone's watch set from the moment it is written, so a payment to any
-  address a counter or a request handed out is seen (OC-01).
+- **OA-107.** Every index of every range in the book is watched from the
+  moment it is written, so a payment to any address a counter or a request
+  handed out is seen (OC-01). For a shop with its own wallet the book's
+  ranges are the issued ranges of OC-10, each with the owner's clock when it
+  was given, so the live watch and the deep check of OC-22 to OC-24 keep
+  every one of them watched however many there are. The book holds ranges
+  up to the wallet's last index, 2^31 (OA-106).
 - **OA-108.** "Add a counter" shows the offer (`OBM-`, CR-227) as a code,
   `ur:bytes`, drawn as OA-24 draws a bundle, with the words "Scan this with
   the new counter. It shows your wallet's first address: check it against
@@ -1041,7 +1047,9 @@ unchanged.
   plus one. When that is above 20 it says "Set your wallet to look at least
   {n} addresses ahead, or it will not show every payment." and lists the
   wallets that can (as the handbook's wallet page does). It is worked out
-  from the watch set and changes as payments arrive.
+  from the payments the owner node's coin view has seen (the indexes with a
+  receipt or a coin) and the highest index any counter's sales opened, and
+  changes as payments arrive.
 - **OA-114.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`; until the words are written a placeholder
   constant `WORDS_NEEDED_OA_xxx` names the rule.

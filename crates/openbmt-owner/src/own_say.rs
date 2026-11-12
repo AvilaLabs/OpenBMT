@@ -11,11 +11,6 @@ use openbmt_core::say::{Tone, Who, Words};
 use crate::own_shop::OwnRefusal;
 use crate::say::stop;
 
-/// OA-107: the book is past what the phone watches. This refusal goes away
-/// when the own wallet joins the owner node's live watch (OC-22 to OC-24);
-/// until then it has no words.
-pub const WORDS_NEEDED_OA_107: &str = "WORDS_NEEDED_OA_107";
-
 /// Words that are still to be written: the placeholder stands in the
 /// heading and both sentences, so that it shows wherever the words would.
 pub fn needed(placeholder: &'static str) -> Words {
@@ -55,6 +50,23 @@ pub fn they_differ() -> Words {
     .code("OA-110")
 }
 
+/// OA-112, LK-73: a counter has not taken the range it was sent for a day.
+/// `name` is the counter's name, which is text from the owner's own
+/// pairing and is cleaned before it is shown.
+pub fn range_undelivered(name: &str) -> Words {
+    let name = openbmt_core::say::clean_foreign(name);
+    Words::new(
+        Tone::Info,
+        "Addresses not delivered",
+        format!(
+            "{name} has not taken its new addresses for a day. It can sell until its current ones run out."
+        ),
+        Who::Owner,
+        format!("Open {name} and check that it is connected."),
+    )
+    .code("OA-112")
+}
+
 /// OA-105: the shop's pairing file could not be read or saved.
 pub fn shop_file_failed() -> Words {
     stop(
@@ -88,7 +100,6 @@ impl OwnRefusal {
             | Self::OwnKey
             | Self::BadName => "OA-109",
             Self::AlreadyAdded | Self::Pairing(_) | Self::Settings(_) => "OA-110",
-            Self::Book(crate::own_book::BookError::WatchBudget) => "OA-107",
             Self::Book(_) => "OA-106",
             Self::NoBundle | Self::TooManyWaiting => "OA-111",
             Self::UnknownCounter => "OA-112",
@@ -163,7 +174,6 @@ impl OwnRefusal {
             )
             .code("OA-110"),
             Self::Settings(r) => r.words(),
-            Self::Book(crate::own_book::BookError::WatchBudget) => needed(WORDS_NEEDED_OA_107),
             Self::Book(crate::own_book::BookError::Full) => stop(
                 "No addresses left",
                 "The wallet has given every address it can make to counters, so no more can be given.",
@@ -221,6 +231,11 @@ pub fn all_own_words() -> Vec<(String, Words)> {
     add("they_differ", they_differ());
     add("wallet_not_readable", wallet_not_readable());
     add("shop_file_failed", shop_file_failed());
+    add("range_undelivered", range_undelivered("Front counter"));
+    add(
+        "range_undelivered_longest_name",
+        range_undelivered(&"W".repeat(32)),
+    );
     let refusals = [
         ("OwnRefusal::OfferEnded", OwnRefusal::OfferEnded),
         ("OwnRefusal::ClockWentBack", OwnRefusal::ClockWentBack),
@@ -239,10 +254,6 @@ pub fn all_own_words() -> Vec<(String, Words)> {
             OwnRefusal::Settings(crate::error::Refusal::NoSettingsRate),
         ),
         ("OwnRefusal::Book(Full)", OwnRefusal::Book(BookError::Full)),
-        (
-            "OwnRefusal::Book(WatchBudget)",
-            OwnRefusal::Book(BookError::WatchBudget),
-        ),
         (
             "OwnRefusal::Book(TooManyDevices)",
             OwnRefusal::Book(BookError::TooManyDevices),

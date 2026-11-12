@@ -732,6 +732,7 @@ fn build_ops() -> Vec<Op> {
             own::delivered(a)
         }),
         op(157, "own_gap", Zero, |_, a: OwnGapArgs| own::gap(a)),
+        op(158, "own_gap_now", Node, |c, ()| c.entry()?.own_gap()),
     ]
 }
 

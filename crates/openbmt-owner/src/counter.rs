@@ -218,8 +218,9 @@ impl Owner {
         let version = settings.version;
         let shares: Vec<(DeviceId, u16)> =
             settings.counters.iter().map(|(c, s)| (*c, *s)).collect();
+        let wallet = self.wallet.multisig().ok_or(Refusal::BatchNotDerived)?;
         let batch: AddressBatch = BatchBuilder::new(self.policy)
-            .derive(&self.wallet, counter, self.receive_mark(), count)
+            .derive(wallet, counter, self.receive_mark(), count)
             .map_err(|_| Refusal::BatchNotDerived)?;
         let mut next = self.state.clone();
         let settings_id = match self.stage_settings(&mut next, settings)? {

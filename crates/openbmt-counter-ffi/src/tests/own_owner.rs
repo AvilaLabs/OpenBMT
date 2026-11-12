@@ -21,7 +21,10 @@ use openbmt_link::{
 };
 use openbmt_net_io::{AppEvent, DriverConfig, EventReceiver, SystemClock};
 use openbmt_owner::own_shop::MadeOffer;
-use openbmt_owner_node::{OwnNode, OwnerConfig, OwnerLink, OwnerLinkConfig, OwnerWatcher};
+use openbmt_owner_node::{
+    own_approver, OwnNode, OwnerConfig, OwnerLink, OwnerLinkConfig, OwnerNode, OwnerParts,
+    OwnerPort,
+};
 
 use super::kit::{peers_event, Rig, Scratch, FIVE_DOLLARS, RATE, T0};
 use super::pairing_own::{begin, finish, matched, same, MULTI, SINGLE};
@@ -52,18 +55,29 @@ impl DriverPort for IdlePort {
     fn shutdown(&mut self) {}
 }
 
+impl OwnerPort for IdlePort {
+    fn broadcast(&self, _: Vec<u8>) {}
+    fn forget(&self, _: bitcoin::Txid) {}
+    fn unwatch_scripts(&self, _: Vec<bitcoin::ScriptBuf>) {}
+    fn rescan_from(&self, _: u32) {}
+    fn set_fetch_transactions(&self, _: bool) {}
+    fn fetch_block(&self, _: bitcoin::BlockHash) {}
+}
+
 /// The owner phone as the app has it: the node, the folder, the relay
 /// hint and the owner's end of the link once a counter is paired.
 struct Owner {
     node: OwnNode,
-    _dir: Scratch,
+    wallet: PinnedWallet,
+    dir: Scratch,
     link_dir: Scratch,
-    watcher_dir: Scratch,
     listener: Option<TcpListener>,
     server: Option<Server>,
     link: Option<OwnerLink<RelayPost>>,
-    watcher: Option<OwnerWatcher<IdlePort>>,
-    _events: Option<std::sync::mpsc::Sender<AppEvent>>,
+    /// The owner node the app runs (OA-107): the live watch over the book.
+    runner: Option<OwnerNode<IdlePort>>,
+    carried: u32,
+    _events: Arc<std::sync::Mutex<Vec<std::sync::mpsc::Sender<AppEvent>>>>,
 }
 
 impl Owner {
@@ -73,14 +87,15 @@ impl Owner {
             .expect("the owner node opens");
         Self {
             node,
-            _dir: dir,
+            wallet: PinnedWallet::from_text(text).unwrap(),
+            dir,
             link_dir: Scratch::new(),
-            watcher_dir: Scratch::new(),
             listener: Some(TcpListener::bind("127.0.0.1:0").unwrap()),
             server: None,
             link: None,
-            watcher: None,
-            _events: None,
+            runner: None,
+            carried: 0,
+            _events: Arc::default(),
         }
     }
 
@@ -152,34 +167,54 @@ impl Owner {
             )
             .unwrap(),
         );
-        let (tx, rx) = channel();
-        let watcher = OwnerWatcher::start_with(
-            OwnerConfig::new(
-                self.watcher_dir.path(),
-                id(1),
-                DriverConfig::new(Network::Regtest, 0),
-            ),
-            move |_, _| Ok(IdlePort(rx.into())),
+        // The owner node of OA-107, as the app starts it: on the book.
+        let secret = [1u8; 32];
+        let mut parts = OwnerParts::new(
+            secret,
+            self.wallet.wallet().clone(),
+            own_approver(&secret).unwrap(),
+            openbmt_core::batch::BatchPolicy { min_count: 3 },
         )
         .unwrap();
-        self._events = Some(tx);
-        self.watcher = Some(watcher);
+        parts.own_book = Some(self.node.shop().book().clone());
+        let senders = Arc::clone(&self._events);
+        self.runner = Some(
+            OwnerNode::start_with(
+                OwnerConfig::new(
+                    self.dir.path(),
+                    id(1),
+                    DriverConfig::new(Network::Bitcoin, 0),
+                ),
+                parts,
+                move |_, _, _| {
+                    let (tx, rx) = channel();
+                    senders.lock().unwrap().push(tx);
+                    Ok(IdlePort(rx.into()))
+                },
+            )
+            .unwrap(),
+        );
     }
 
-    fn step(&mut self, now: u64) {
+    /// One turn of the owner's side as the app makes it: the link's step,
+    /// then the shop's tick on the shop as the file holds it.
+    fn step(&mut self, now: u64) -> openbmt_owner_node::OwnTick {
+        let runner = self.runner.as_mut().unwrap();
         let link = self.link.as_mut().unwrap();
-        link.step(self.watcher.as_mut().unwrap(), now);
+        link.step(runner.watcher_mut(), now);
+        let mut shop = OwnNode::open(self.dir.path(), id(1), self.wallet.clone()).unwrap();
+        shop.tick(runner, link, &mut self.carried, now).unwrap()
     }
 }
 
 /// A turn of both ends of the link: the counter's step, then the owner's.
-fn turn(rig: &Rig, handle: u64, owner: &mut Owner, now: u64) {
+fn turn(rig: &Rig, handle: u64, owner: &mut Owner, now: u64) -> openbmt_owner_node::OwnTick {
     let response = rig.call(OP_LINK_STEP, handle, &W::new().u64(now).u8(0).0);
     let mut r = Rd::ok(&response);
     let _ = r.link();
     let _ = r.list(Rd::string);
     r.done();
-    owner.step(now);
+    owner.step(now)
 }
 
 /// Turns until the owner's copy of the counter's chain stops growing.
@@ -189,7 +224,7 @@ fn settle(rig: &Rig, handle: u64, owner: &mut Owner, mut now: u64) -> u64 {
     let mut quiet = 0;
     for _ in 0..40 {
         now += 10;
-        turn(rig, handle, owner, now);
+        let _ = turn(rig, handle, owner, now);
         let len = owner.link.as_ref().unwrap().copy(&counter).unwrap().len();
         if len == last {
             quiet += 1;
@@ -280,28 +315,44 @@ fn the_real_owner_pairs_the_real_counter_which_sells_from_the_wallet_and_takes_a
             wallet.receive_address(0).unwrap().to_string()
         );
 
-        // OA-107: the owner watches every index of the range.
-        assert_eq!(owner.node.watch_scripts().unwrap().len(), 1_000);
+        // OA-107: the owner node's live watch follows every index of the
+        // range, and the gap past it.
+        assert_eq!(
+            owner.runner.as_ref().unwrap().view().live_count(),
+            1_000 + 20 + 20
+        );
 
         // 720 sales in all leave 280 of the 1,000 indexes unused. The owner
-        // reads the counter's records and gives it the next range.
+        // reads the counter's records and, in its own turn, gives the next
+        // range without being asked (OA-112).
         let mut now = T0 + 100;
         for _ in 1..720 {
             now += SALE_GAP;
             let opened = open_sale(&rig, handle, now);
             assert!(opened.index < 1_000);
         }
-        now = settle(&rig, handle, &mut owner, now);
         let counter = read.counter;
-        let link = owner.link.as_mut().unwrap();
-        assert_eq!(owner.node.unused_of(link, &counter), Some(280));
-        let topped = owner.node.top_up(link, now).expect("a top-up");
-        assert_eq!(topped.len(), 1);
+        let mut topped = Vec::new();
+        for _ in 0..40 {
+            now += 10;
+            let turn = turn(&rig, handle, &mut owner, now);
+            topped.extend(turn.topped_up);
+            if !topped.is_empty() {
+                break;
+            }
+        }
+        assert_eq!(topped.len(), 1, "the node sent the next range by itself");
         assert_eq!((topped[0].start, topped[0].end), (1_000, 2_000));
-        assert!(link.ranges_waiting(&counter).is_some());
+        assert_eq!(topped[0].counter, counter);
+        assert!(owner
+            .link
+            .as_ref()
+            .unwrap()
+            .ranges_waiting(&counter)
+            .is_some());
         assert_eq!(
-            owner.node.watch_scripts().unwrap().len(),
-            2_000,
+            owner.runner.as_ref().unwrap().view().live_count(),
+            2_000 + 20 + 20,
             "the new range is watched at once"
         );
 
@@ -313,8 +364,10 @@ fn the_real_owner_pairs_the_real_counter_which_sells_from_the_wallet_and_takes_a
             link.ranges_waiting(&counter).is_none(),
             "the range was not shown as held"
         );
-        assert_eq!(owner.node.unused_of(link, &counter), Some(1_280));
-        assert!(owner.node.top_up(link, now + 1).unwrap().is_empty());
+        let shop = OwnNode::open(owner.dir.path(), id(1), owner.wallet.clone()).unwrap();
+        assert_eq!(shop.unused_of(link, &counter), Some(1_280));
+        // The outbox is empty, and no further range goes out.
+        assert!(owner.step(now + 1).topped_up.is_empty());
 
         // The counter sells on through 999 and then from 1,000: the first
         // index of the range it was sent.

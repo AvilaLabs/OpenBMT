@@ -75,6 +75,15 @@ type Entry = (
 );
 
 /// The rule strings this layer makes, each with its own words.
+// Words not written yet: a shop with its own wallet has no Key app.
+const WORDS_NEEDED_OA_NO_KEY_APP_HEADING: &str = "WORDS NEEDED OA-NO-KEY";
+const WORDS_NEEDED_OA_NO_KEY_APP_WHAT: &str = "WORDS NEEDED OA-NO-KEY-APP what.";
+const WORDS_NEEDED_OA_NO_KEY_APP_NEXT: &str = "WORDS NEEDED OA-NO-KEY-APP next.";
+
+const WORDS_NEEDED_OA_NO_OWN_WALLET_HEADING: &str = "WORDS NEEDED OA-NO-OWN";
+const WORDS_NEEDED_OA_NO_OWN_WALLET_WHAT: &str = "WORDS NEEDED OA-NO-OWN-WALLET what.";
+const WORDS_NEEDED_OA_NO_OWN_WALLET_NEXT: &str = "WORDS NEEDED OA-NO-OWN-WALLET next.";
+
 const RULES: &[Entry] = &[
     (
         "watch-file",
@@ -243,6 +252,22 @@ const RULES: &[Entry] = &[
         "The wallet description that the owner app was given cannot be read for this network, so it did not start.",
         Who::Owner,
         "Set the wallet up again from its backup.",
+    ),
+    (
+        "no-key-app",
+        Kind::State,
+        WORDS_NEEDED_OA_NO_KEY_APP_HEADING,
+        WORDS_NEEDED_OA_NO_KEY_APP_WHAT,
+        Who::Owner,
+        WORDS_NEEDED_OA_NO_KEY_APP_NEXT,
+    ),
+    (
+        "no-own-wallet",
+        Kind::State,
+        WORDS_NEEDED_OA_NO_OWN_WALLET_HEADING,
+        WORDS_NEEDED_OA_NO_OWN_WALLET_WHAT,
+        Who::Owner,
+        WORDS_NEEDED_OA_NO_OWN_WALLET_NEXT,
     ),
     (
         "start-key1",
@@ -620,6 +645,18 @@ pub(crate) fn link_alert_words(alert: &openbmt_owner_node::Alert) -> Words {
     }
 }
 
+/// The words of an alert of the link for a shop with its own wallet. A range
+/// that a counter has not taken for a day has its own words (OA-112); the
+/// others are those of every shop.
+pub(crate) fn own_alert_words(alert: &openbmt_owner_node::Alert) -> Words {
+    match alert {
+        Alert::BatchUndelivered { counter, .. } => {
+            openbmt_owner::own_say::range_undelivered(&crate::host::counter_label(counter))
+        }
+        other => link_alert_words(other),
+    }
+}
+
 /// The words of what the link holds about one counter.
 pub(crate) fn counter_words(
     check_in_seq: Option<u64>,
@@ -688,6 +725,13 @@ pub fn all_words() -> Vec<(String, Words)> {
         out.push((
             "alert-diverged".to_string(),
             link_alert_words(&Alert::Diverged { counter, seq: 3 }),
+        ));
+        out.push((
+            "alert-range-undelivered".to_string(),
+            own_alert_words(&Alert::BatchUndelivered {
+                counter,
+                since: 1_700_000_000,
+            }),
         ));
         out.push((
             "alert-batch-undelivered".to_string(),

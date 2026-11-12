@@ -141,6 +141,7 @@ pub fn start_config(dir: &str) -> StartConfig {
         broadcast_proxy: None,
         without_tor: true,
         link: None,
+        own_wallet: None,
     }
 }
 
@@ -501,6 +502,20 @@ impl Rig {
     pub fn start(&self) -> u64 {
         let response = dispatch(&self.registry, &start_request(&self.dir()));
         Rd::ok(&response).u64()
+    }
+
+    /// Start the node for a shop with its own wallet (OA-105), with the
+    /// wallet's file, and return the response.
+    pub fn start_own(&self, wallet: &[u8]) -> Vec<u8> {
+        let mut config = start_config(self.dir().to_str().expect("UTF-8"));
+        // A single-key wallet is for the main network only (WL-11).
+        config.network = OwnerNetwork::Mainnet;
+        config.own_wallet = Some(wallet.to_vec());
+        config.approver_root = Vec::new();
+        config.wallet = String::new();
+        config.key1_account = Vec::new();
+        config.key3_xpub = None;
+        dispatch(&self.registry, &frame(1, 0, &W::new().start(&config).0))
     }
 
     /// Take the events that are waiting, without waiting for more.

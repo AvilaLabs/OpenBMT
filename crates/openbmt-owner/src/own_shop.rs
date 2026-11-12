@@ -574,7 +574,7 @@ impl OwnShop {
         };
         // The range is written to the book before it is signed (OA-106).
         let mut next = self.state.clone();
-        let range = next.book.allocate(read.counter)?;
+        let range = next.book.allocate(read.counter, now)?;
         self.commit(next, &persist)?;
         let first_range = SignedRange::sign(&self.identity, range)
             .map_err(|e| OwnRefusal::Pairing(OwnPairError::Range(e)))?;
@@ -646,16 +646,50 @@ impl OwnShop {
         self.commit(next, persist)
     }
 
+    /// CR-236: the owner changes the settings. They are signed by the owner
+    /// root alone and stored as the settings in force, and the link carries
+    /// them to the counters. A change that loosens is carried as it is
+    /// signed: a counter holds it for confirmation (CR-239). The version
+    /// must be above the one in force.
+    pub fn change_settings<E>(
+        &mut self,
+        settings: Settings,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<SignedSettings, OwnError<E>> {
+        settings
+            .validate()
+            .map_err(|e| OwnRefusal::Settings(Refusal::SettingsInvalid(e.to_string())))?;
+        if let Some(known) = &self.state.known {
+            if settings.version <= known.settings.version {
+                return Err(OwnRefusal::Settings(Refusal::SettingsVersion {
+                    known: known.settings.version,
+                    got: settings.version,
+                })
+                .into());
+            }
+        }
+        let signed = SignedSettings {
+            owner_sig: settings.sign(&self.identity),
+            approver_sig: None,
+            settings,
+        };
+        let mut next = self.state.clone();
+        next.known = Some(signed.clone());
+        self.commit(next, persist)?;
+        Ok(signed)
+    }
+
     /// OA-106: the next range for `device` (a counter, or the owner root
     /// for the desk, RQ-02), written to the book and stored before it is
     /// signed, and signed before it is returned.
     pub fn allocate<E>(
         &mut self,
         device: DeviceId,
+        now: u64,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<SignedRange, OwnError<E>> {
         let mut next = self.state.clone();
-        let range = next.book.allocate(device)?;
+        let range = next.book.allocate(device, now)?;
         self.commit(next, persist)?;
         SignedRange::sign(&self.identity, range)
             .map_err(|e| OwnRefusal::Pairing(OwnPairError::Range(e)).into())
@@ -664,9 +698,10 @@ impl OwnShop {
     /// OA-106: the range of the desk, the owner root's own.
     pub fn allocate_desk<E>(
         &mut self,
+        now: u64,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<SignedRange, OwnError<E>> {
-        self.allocate(self.identity.device_id(), persist)
+        self.allocate(self.identity.device_id(), now, persist)
     }
 
     /// OA-112: the range after the ones a counter holds, for a top-up.
@@ -675,12 +710,13 @@ impl OwnShop {
     pub fn allocate_top_up<E>(
         &mut self,
         counter: DeviceId,
+        now: u64,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<SignedRange, OwnError<E>> {
         if !self.state.book.has_device(&counter) {
             return Err(OwnRefusal::UnknownCounter.into());
         }
-        self.allocate(counter, persist)
+        self.allocate(counter, now, persist)
     }
 
     /// The first range of the bundle that waits for a counter, or of the
@@ -694,7 +730,6 @@ fn book_why(e: BookError) -> &'static str {
     match e {
         BookError::Corrupt(why) => why,
         BookError::Full => "the book is full",
-        BookError::WatchBudget => "the book is past the watch",
         BookError::TooManyDevices => "the book holds too many devices",
     }
 }

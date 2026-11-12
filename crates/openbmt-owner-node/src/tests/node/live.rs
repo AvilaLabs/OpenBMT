@@ -7,10 +7,10 @@ use std::sync::atomic::Ordering;
 use super::*;
 use crate::live::{DeepLine, DEEP_RETRY_SECS, DEEP_STALL_SECS};
 
-const START: u64 = 1_700_000_000;
-const DAY: u64 = 86_400;
+pub(super) const START: u64 = 1_700_000_000;
+pub(super) const DAY: u64 = 86_400;
 
-fn limits(live: usize) -> WatchLimits {
+pub(super) fn limits(live: usize) -> WatchLimits {
     WatchLimits {
         live,
         quiet_secs: 60 * DAY,
@@ -18,7 +18,7 @@ fn limits(live: usize) -> WatchLimits {
     }
 }
 
-fn setup(live: usize) -> (Setup, Arc<AtomicU64>) {
+pub(super) fn setup(live: usize) -> (Setup, Arc<AtomicU64>) {
     let time = Arc::new(AtomicU64::new(START));
     let setup = Setup {
         limits: limits(live),
@@ -28,10 +28,18 @@ fn setup(live: usize) -> (Setup, Arc<AtomicU64>) {
     (setup, time)
 }
 
-fn pay_to(index: u32, from: u8, sats: u64) -> Transaction {
+pub(super) fn pay_to(index: u32, from: u8, sats: u64) -> Transaction {
     tx_from(
         OutPoint::new(Txid::from_byte_array([from; 32]), 0),
         &[(&receive(index), sats)],
+    )
+}
+
+/// A payment of `sats` to `script`, from an outpoint made of `from`.
+pub(super) fn pay_to_script(script: &ScriptBuf, from: u8, sats: u64) -> Transaction {
+    tx_from(
+        OutPoint::new(Txid::from_byte_array([from; 32]), 0),
+        &[(script, sats)],
     )
 }
 
@@ -49,17 +57,17 @@ impl Rig {
     }
 
     /// One pass of the node's loop.
-    fn tick(&mut self) {
+    pub(super) fn tick(&mut self) {
         self.node.pump(Duration::ZERO);
         self.rescan();
     }
 
-    fn released(&self) -> BTreeSet<u32> {
+    pub(super) fn released(&self) -> BTreeSet<u32> {
         self.node.view().released().iter().collect()
     }
 
     /// The indices of the deep check's drivers started so far.
-    fn deep_starts(&self) -> Vec<Spawned> {
+    pub(super) fn deep_starts(&self) -> Vec<Spawned> {
         self.spawned
             .lock()
             .unwrap()
@@ -69,7 +77,7 @@ impl Rig {
             .collect()
     }
 
-    fn deep_sender(&self) -> Sender<AppEvent> {
+    pub(super) fn deep_sender(&self) -> Sender<AppEvent> {
         let spawned = self.spawned.lock().unwrap();
         let at = spawned
             .iter()
@@ -80,7 +88,7 @@ impl Rig {
 
     /// The deep driver hands over every block above `from` and says it has
     /// checked it, as a rescan does.
-    fn deep_feed(&mut self, from: u32) {
+    pub(super) fn deep_feed(&mut self, from: u32) {
         let tx = self.deep_sender();
         let blocks: Vec<(u32, Block)> = self
             .chain
@@ -100,7 +108,7 @@ impl Rig {
         self.tick();
     }
 
-    fn count(&self, line: &str) -> usize {
+    pub(super) fn count(&self, line: &str) -> usize {
         self.calls().iter().filter(|l| l.as_str() == line).count()
     }
 }

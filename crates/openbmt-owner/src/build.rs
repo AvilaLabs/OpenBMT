@@ -6,7 +6,7 @@ use bitcoin::consensus::deserialize;
 use bitcoin::psbt::Psbt;
 use bitcoin::{OutPoint, ScriptBuf};
 use openbmt_core::identity::tagged_hash;
-use openbmt_core::wallet::WalletDescription;
+use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_core::wire::DecodeError;
 use openbmt_session::{Item, Label, OutputLabel, Request, RequestItem};
 use openbmt_spend::{dust_limit, plan, ChangePosition, Coin, Plan, PlanOutput, SpendRequest};
@@ -102,7 +102,7 @@ fn output_positions(plan: &Plan) -> (Vec<u32>, Option<u32>) {
 
 /// AS-55, AS-56: one transaction for `group`.
 fn plan_refunds(
-    wallet: &WalletDescription,
+    wallet: &ImportedWallet,
     pool: &[Coin],
     group: &[Refund],
     shape: Shape,

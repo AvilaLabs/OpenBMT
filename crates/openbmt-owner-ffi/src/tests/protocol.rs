@@ -133,6 +133,7 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (155, "own_bundle"),
         (156, "own_delivered"),
         (157, "own_gap"),
+        (158, "own_gap_now"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

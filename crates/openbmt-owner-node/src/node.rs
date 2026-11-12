@@ -72,13 +72,15 @@ use bitcoin::consensus::deserialize;
 use bitcoin::{BlockHash, Network, OutPoint, ScriptBuf, Transaction, Txid};
 use openbmt_core::batch::BatchPolicy;
 use openbmt_core::identity::{DeviceId, Identity};
-use openbmt_core::wallet::{Keychain, WalletDescription};
+use openbmt_core::wallet::Keychain;
+use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_counter_node::{DriverPort, MAX_EVENTS_PER_PUMP};
 use openbmt_net_io::{
     AppEvent, DirLock, Driver, DriverConfig, FileStorage, Handle, OsRandomness, Randomness,
     RelayState, SystemClock, MAX_WATCHED_SCRIPTS,
 };
-use openbmt_owner::{Built, Delivery, Options, Owner, OwnerError, Stage, Taken};
+use openbmt_owner::own_book::AllocationBook;
+use openbmt_owner::{Built, Delivery, IssuedRange, Options, Owner, OwnerError, Stage, Taken};
 use openbmt_signer::SignerState;
 use openbmt_watch::{FeeHistory, HeaderChain, Refusal, WellFormedBlock};
 
@@ -340,9 +342,11 @@ impl From<OwnerError<String>> for NodeError {
 pub struct OwnerParts {
     /// The owner root's secret, the one the watcher's identity is made from.
     pub owner_secret: [u8; 32],
-    /// The wallet.
-    pub wallet: WalletDescription,
-    /// The Key app's identity.
+    /// The wallet, the 2-of-3 wallet of a shop with a Key app or the single
+    /// key of a shop with its own wallet.
+    pub wallet: ImportedWallet,
+    /// The Key app's identity. A shop with its own wallet has none: the
+    /// caller gives a key nobody holds (`own_approver`).
     pub approver: DeviceId,
     /// The batch policy.
     pub policy: BatchPolicy,
@@ -357,26 +361,32 @@ pub struct OwnerParts {
     /// between deep checks. The defaults are the constants of
     /// [`crate::live`]; a check against a real node shrinks them.
     pub limits: WatchLimits,
+    /// OC-10, OA-107: for a shop with its own wallet, the allocation book,
+    /// whose ranges are the issued ranges the live watch and the deep check
+    /// follow (OC-22 to OC-24). `None` for a shop with a Key app, whose
+    /// issued ranges are those of its queue.
+    pub own_book: Option<AllocationBook>,
 }
 
 impl OwnerParts {
     /// Parts with the system's randomness and the default refund depth, 6.
     pub fn new(
         owner_secret: [u8; 32],
-        wallet: WalletDescription,
+        wallet: impl Into<ImportedWallet>,
         approver: DeviceId,
         policy: BatchPolicy,
     ) -> Result<Self, NodeError> {
         let random = OsRandomness::new().map_err(|e| NodeError::Config(e.to_string()))?;
         Ok(Self {
             owner_secret,
-            wallet,
+            wallet: wallet.into(),
             approver,
             policy,
             options: Options::default(),
             refund_depth: 6,
             random: Box::new(random),
             limits: WatchLimits::default(),
+            own_book: None,
         })
     }
 }
@@ -403,7 +413,7 @@ fn ensure_marks_fit_watch_budget(receive: u32, change: u32, aside: u64) -> Resul
 
 /// OC-22: the wallet scripts the live watch holds: the receive scripts up to
 /// the marks plus the gap that are not set aside, and the change scripts.
-fn live_scripts(wallet: &WalletDescription, view: &CoinView) -> Result<ScriptSet, NodeError> {
+fn live_scripts(wallet: &ImportedWallet, view: &CoinView) -> Result<ScriptSet, NodeError> {
     ensure_marks_fit_watch_budget(
         view.receive_next(),
         view.change_next(),
@@ -446,7 +456,7 @@ fn held_receive(view: &CoinView) -> std::collections::BTreeSet<u32> {
 /// when `allow` is false. An error when the live watch would still pass the
 /// driver's limit.
 fn release_plan(
-    owner: &Owner,
+    issuing: &Issuing<'_>,
     view: &CoinView,
     marks: (u32, u32),
     now: u64,
@@ -464,7 +474,7 @@ fn release_plan(
     let mut release = Vec::new();
     if allow && live > bound {
         release = plan_release(
-            owner.issued_ranges(),
+            issuing.ranges,
             view.released(),
             &held_receive(view),
             now,
@@ -477,10 +487,52 @@ fn release_plan(
     Ok(release)
 }
 
-/// The marks that follow from what the queue and the view hold.
-fn marks_of(owner: &Owner, view: &CoinView) -> (u32, u32) {
-    let mut receive = owner.receive_mark().max(view.receive_next());
-    let mut change = owner.change_mark().max(view.change_next());
+/// What the node follows of the addresses given out (OC-10): the marks and
+/// the issued ranges, from the owner's queue for a shop with a Key app and
+/// from the allocation book for a shop with its own wallet.
+struct Issuing<'a> {
+    receive: u32,
+    change: u32,
+    ranges: &'a [IssuedRange],
+}
+
+/// The issued ranges of a shop with its own wallet, from its book.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OwnIssued {
+    ranges: Vec<IssuedRange>,
+    /// The end of the highest range: the receive mark.
+    next: u32,
+}
+
+impl OwnIssued {
+    fn of(book: &AllocationBook) -> Self {
+        Self {
+            ranges: book.issued(),
+            next: book.next_start(),
+        }
+    }
+}
+
+fn issuing<'a>(owner: &'a Owner, own: Option<&'a OwnIssued>) -> Issuing<'a> {
+    match own {
+        Some(own) => Issuing {
+            receive: own.next,
+            change: owner.change_mark(),
+            ranges: &own.ranges,
+        },
+        None => Issuing {
+            receive: owner.receive_mark(),
+            change: owner.change_mark(),
+            ranges: owner.issued_ranges(),
+        },
+    }
+}
+
+/// The marks that follow from what the queue (or the book) and the view
+/// hold.
+fn marks_of(issuing: &Issuing<'_>, view: &CoinView) -> (u32, u32) {
+    let mut receive = issuing.receive.max(view.receive_next());
+    let mut change = issuing.change.max(view.change_next());
     let held = view.owned().map(|c| (c.chain, c.index));
     let pending = view
         .pending()
@@ -504,7 +556,9 @@ pub struct OwnerNode<P: OwnerPort = Handle> {
     pub(crate) owner: Owner,
     pub(crate) view: CoinView,
     pub(crate) scripts: ScriptSet,
-    pub(crate) wallet: WalletDescription,
+    pub(crate) wallet: ImportedWallet,
+    /// OC-10: the issued ranges of a shop with its own wallet.
+    pub(crate) own: Option<OwnIssued>,
     pub(crate) dir: PathBuf,
     refund_depth: u32,
     random: Box<dyn Randomness>,
@@ -581,6 +635,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             refund_depth,
             random,
             limits,
+            own_book,
         } = parts;
         limits.check().map_err(NodeError::Config)?;
         let now = clock.now();
@@ -655,8 +710,10 @@ impl<P: OwnerPort> OwnerNode<P> {
             view.return_to_live(&stuck, from, checked, |b| write_file(&dir, COINS_FILE, b))
                 .map_err(NodeError::Files)?;
         }
-        let (receive, change) = marks_of(&owner, &view);
-        let release = release_plan(&owner, &view, (receive, change), now, &limits, true)?;
+        let own = own_book.as_ref().map(OwnIssued::of);
+        let issued = issuing(&owner, own.as_ref());
+        let (receive, change) = marks_of(&issued, &view);
+        let release = release_plan(&issued, &view, (receive, change), now, &limits, true)?;
         let old_checked = view.checked();
         view.watch_plan(
             receive,
@@ -709,6 +766,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             view,
             scripts,
             wallet,
+            own,
             dir,
             refund_depth,
             random,
@@ -766,6 +824,14 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// The owner's queue, to read.
     pub fn owner(&self) -> &Owner {
         &self.owner
+    }
+
+    /// The owner's identity, made again from the secret the node holds, for
+    /// a caller that opens another file of the shop (the shop's state of a
+    /// shop with its own wallet).
+    pub fn owner_identity(&self) -> Result<Identity, NodeError> {
+        Identity::from_secret_bytes(&self.owner_secret)
+            .map_err(|e| NodeError::Config(format!("the owner key: {e}")))
     }
 
     /// The refund depth the node was started with.
@@ -1154,11 +1220,60 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
     }
 
+    /// OC-10, OA-107: a shop with its own wallet gave out another range.
+    /// The book's ranges, each with the owner's clock when it was given, are
+    /// the issued ranges the live watch follows (OC-22): the new indexes are
+    /// watched from here on, and quiet ones are set aside as OC-23 says. A
+    /// book that has not grown changes nothing. Refused for a node that was
+    /// not started with a book.
+    pub fn set_own_book(&mut self, book: &AllocationBook) -> Result<(), NodeError> {
+        let Some(own) = &self.own else {
+            return Err(NodeError::Config(
+                "OA-107: the node was started for a shop with a Key app".to_string(),
+            ));
+        };
+        // A book only grows: the same count and end is the same book.
+        if own.next == book.next_start()
+            && u32::try_from(own.ranges.len()).is_ok_and(|n| n == book.ranges_given())
+        {
+            return Ok(());
+        }
+        self.own = Some(OwnIssued::of(book));
+        self.refresh_marks_checked()
+    }
+
+    /// OC-22: whether the live watch could follow the indexes up to `end`
+    /// (one past the last) with the scripts that can be set aside now. A
+    /// shop with its own wallet asks before it gives a counter another
+    /// range.
+    pub fn own_room_for(&self, end: u32) -> bool {
+        if self.watch_limit.is_some() {
+            return false;
+        }
+        let issued = issuing(&self.owner, self.own.as_ref());
+        let wider = Issuing {
+            receive: issued.receive.max(end),
+            change: issued.change,
+            ranges: issued.ranges,
+        };
+        let marks = marks_of(&wider, &self.view);
+        release_plan(
+            &wider,
+            &self.view,
+            marks,
+            self.watcher.now(),
+            &self.limits,
+            self.deep_run.is_none(),
+        )
+        .is_ok()
+    }
+
     fn refresh_marks_checked(&mut self) -> Result<(), NodeError> {
         if let Some(error) = &self.watch_limit {
             return Err(error.clone());
         }
-        let (receive, change) = marks_of(&self.owner, &self.view);
+        let issued = issuing(&self.owner, self.own.as_ref());
+        let (receive, change) = marks_of(&issued, &self.view);
         let grew = receive > self.view.receive_next() || change > self.view.change_next();
         let now = self.watcher.now();
         // OC-22: scripts are set aside when the marks grow, and now and then
@@ -1166,7 +1281,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         // which would leave them out of the pass.
         let allow = self.deep_run.is_none() && (grew || now >= self.next_rebalance);
         let release = match release_plan(
-            &self.owner,
+            &issued,
             &self.view,
             (receive, change),
             now,
@@ -1245,7 +1360,8 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// Start again from the birthday: for a view in the deep reorg state, a
     /// restored owner or a person who suspects a missed payment.
     pub fn rescan(&mut self) -> Result<(), NodeError> {
-        let (receive, change) = marks_of(&self.owner, &self.view);
+        let issued = issuing(&self.owner, self.own.as_ref());
+        let (receive, change) = marks_of(&issued, &self.view);
         let aside = self
             .view
             .released()

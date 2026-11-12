@@ -2967,7 +2967,27 @@ object AppModelTest {
         ok(usual.title == "How far your wallet looks ahead" && usual.line == "Your wallet's usual setting shows every payment." && usual.next == null, "up to 20: the usual line and no action")
         val more = OwnWalletPage.gapRow(own.gap(emptyList(), 31))
         ok(more.line == "Set your wallet to look at least 31 addresses ahead, or it will not show every payment." && more.next == "In Sparrow: Settings, then Advanced, then Gap limit. Bitcoin Keeper cannot change it.", "above 20: the number and the next step")
-        ok(source("src/android/OwnCounter.kt").contains("OwnWalletPage.gapRow("), "the wallet page shows the row")
+        ok(source("src/android/OwnCounter.kt").contains("OwnWalletPage.gapNow("), "the wallet page shows the row")
+        // The running node works the row out from what was paid and what the counters handed out; without one the usual line stands.
+        val fromNode = OwnWalletPage.gapNow({ OwnGapView(31, true) }, own)
+        ok(fromNode.line.contains("31") && fromNode.next != null, "the row is the running node's")
+        ok(OwnWalletPage.gapNow(null, own).line == OwnPairWords.gapUsual, "with no node running, the usual line")
+        ok(source("src/android/OwnCounter.kt").contains("n.ownGap()"), "the page asks the running node")
+    }
+
+    private fun oa_107_the_node_is_started_for_a_shop_with_its_own_wallet_from_the_wallet_and_the_owner_root() {
+        val shop = OwnShopArgs("/shop/own", ByteArray(32) { 7 }, byteArrayOf(1, 2, 3))
+        val defaults = org.openbmt.owner.CeremonyDefaults(3, 6, 481_824)
+        val c = OwnStart.config(shop, defaults, OwnerNetwork.Mainnet, 1_000, "127.0.0.1:9050")
+        ok(c.dir == "/shop/own" && c.ownWallet!!.contentEquals(byteArrayOf(1, 2, 3)) && c.ownerSecret.contentEquals(ByteArray(32) { 7 }), "the folder, the wallet's file and the owner root")
+        ok(c.approverRoot.isEmpty() && c.wallet.isEmpty() && c.key1Account.isEmpty() && c.key3Xpub == null, "there is no Key app")
+        ok(c.proxy == "127.0.0.1:9050" && c.broadcastProxy == "127.0.0.1:9050" && !c.withoutTor && c.link == null, "everything goes through the proxy, and there is no link yet")
+        ok(c.birthday == 481_824L && c.batchMinCount == 3L && c.refundDepth == 6L, "the defaults of the network")
+        // A phone with a wallet and no setup text is set up, and its node starts at app start.
+        ok(SetupStatus(setup = false, config = true, ownWallet = true).complete && !SetupStatus(false, false, true).complete && !SetupStatus(false, true).complete, "a wallet and the config make a setup")
+        val controller = source("src/android/Controller.kt")
+        ok(controller.contains("OwnStart.config(") && controller.contains("ownStore.hasWallet()"), "the controller starts the node from the shop's wallet")
+        ok(controller.substringAfter("internal fun begin() {").substringBefore("internal fun render()").contains("if (!File(dir, AppFiles.SETUP_FILE).exists()) return startNode()"), "app start runs the node for a shop with no setup text")
     }
 
     private fun oa_114_every_state_and_refusal_has_words_or_the_placeholder_that_names_its_rule() {
@@ -3000,8 +3020,7 @@ object AppModelTest {
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
     private val notHere: Map<String, String> = mapOf(
         "OA-106" to "the allocation book is the library's (crates/openbmt-owner tests/own.rs oa_106_...); the app only shows the first range it holds",
-        "OA-107" to "the watch set is the library's (oa_107_... in crates/openbmt-owner-node and the end-to-end test); the app draws nothing from it",
-        "OA-112" to "the top-up runs on the owner node and its link (oa_112_... in crates/openbmt-owner-node and the counter FFI's end-to-end test); this app starts no node for a shop with its own wallet yet",
+        "OA-112" to "the top-up runs on the owner node and its link (oa_112_... in crates/openbmt-owner-node and the counter FFI's end-to-end test); the app starts the node for a shop with its own wallet (OA-107) but has no link to the counters for it yet, so no turn of the top-up runs here",
         "OA-90" to "the redraw after a change of light and dark is the activity's and the window's, and needs a device; the screens it draws are those of OA-62",
     )
 

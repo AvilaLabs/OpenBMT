@@ -43,10 +43,12 @@ use openbmt_core::batch::{BatchBuilder, BatchPolicy, SignedBatch};
 use openbmt_core::currency::ShopCurrency;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pairing::PAIRING_WINDOW_SECS;
+use openbmt_core::pinned_wallet::PinnedWallet;
 use openbmt_core::records::DeviceList;
 use openbmt_core::relay::{RelayHint, RelayRoute, SignedRelayHint};
 use openbmt_core::settings::{Limit, Settings, SignedSettings};
 use openbmt_core::wallet::WalletDescription;
+use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_counter_node::{DriverPort, BATCH_MIN_COUNT};
 use openbmt_courier::{Courier, CourierConfig, FirstStart};
 use openbmt_link::{ClientConfig, Role, Route};
@@ -66,10 +68,10 @@ use openbmt_owner_node::pos::{
 use openbmt_owner_node::say::Alert as NodeAlert;
 use openbmt_owner_node::watcher::write_file;
 use openbmt_owner_node::{
-    counter_facts, verified_facts, Alert, FactsRefused, MergeRefused, NodeError, OwnerConfig,
-    OwnerLink, OwnerLinkConfig, OwnerNode, OwnerParts, OwnerPort, OwnerPos, OwnerStartError,
-    PosMethod, PosRefused, PosSetup, PosVendor, ReceiptsLine, RefundIntake, SendState,
-    SettingsWaiting,
+    counter_facts, own_approver, verified_facts, Alert, FactsRefused, MergeRefused, NodeError,
+    OwnerConfig, OwnerLink, OwnerLinkConfig, OwnerNode, OwnerParts, OwnerPort, OwnerPos,
+    OwnerStartError, PosMethod, PosRefused, PosSetup, PosVendor, ReceiptsLine, RefundIntake,
+    SendState, SettingsWaiting,
 };
 use openbmt_signer::SignerState;
 use openbmt_watch::HeaderChain;
@@ -85,11 +87,12 @@ use crate::counter_views::{
 use crate::error::{
     from_words, internal, poisoned, refused_by, rule_in, store_by, wrong_state, AppError, Kind,
 };
+use crate::own::{self, OwnGapView};
 use crate::pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
 };
-use crate::say::{counter_words, link_alert_words, words_for};
+use crate::say::{counter_words, link_alert_words, own_alert_words, words_for};
 use crate::settings_edit::{preview_view, to_edit, SettingsEditArgs, SettingsPreviewView};
 use crate::signer_views::{
     file_view, record_view, registration_view, taken_view, FirstAddressArgs, FirstAddressView,
@@ -191,6 +194,16 @@ impl Clock for AppClock {
     }
 }
 
+/// What a node started for a shop with its own wallet keeps besides the
+/// others (OA-105): the wallet as the app keeps it, and the version of the
+/// settings already carried to every counter (CR-236). There is no Key app
+/// and no Key 1: the owner node's queue is a placeholder that is given
+/// nothing.
+struct OwnShop {
+    wallet: PinnedWallet,
+    carried: u32,
+}
+
 /// What lives on the node's thread.
 struct State {
     node: OwnerNode<Port>,
@@ -200,8 +213,11 @@ struct State {
     relay: Option<SignedRelayHint>,
     intake: RefundIntake,
     pos: OwnerPos,
-    key1: SignerState,
-    key1_account: Xpriv,
+    /// Key 1's state, or none for a shop with its own wallet.
+    key1: Option<SignerState>,
+    key1_account: Option<Xpriv>,
+    /// A shop with its own wallet: its wallet and carried settings.
+    own: Option<OwnShop>,
     policy: BatchPolicy,
     dir: PathBuf,
     network: Network,
@@ -229,6 +245,32 @@ pub struct Entry {
     thread: Mutex<Option<JoinHandle<()>>>,
     poisoned: AtomicBool,
     clock: Arc<AtomicU64>,
+}
+
+/// Key 1's state and account key, for a call that needs the Key app. A
+/// shop with its own wallet has neither, and the call says so.
+fn key_app_keys<'a>(
+    key1: &'a mut Option<SignerState>,
+    account: &'a Option<Xpriv>,
+) -> Result<(&'a mut SignerState, &'a Xpriv), AppError> {
+    match (key1.as_mut(), account.as_ref()) {
+        (Some(key1), Some(account)) => Ok((key1, account)),
+        _ => Err(wrong_state(
+            "no-key-app",
+            "this shop has its own wallet: there is no Key app and no Key 1",
+        )),
+    }
+}
+
+/// The 2-of-3 wallet of a shop with a Key app, for a call that reads its
+/// keys.
+fn key_app_wallet(node: &OwnerNode<Port>) -> Result<&WalletDescription, AppError> {
+    node.owner().multisig().ok_or_else(|| {
+        wrong_state(
+            "no-key-app",
+            "this shop has its own wallet: there is no 2-of-3 wallet",
+        )
+    })
 }
 
 fn unknown_handle() -> AppError {
@@ -649,6 +691,56 @@ fn follow_settings(
     link.follow(&counters, &boxes)
 }
 
+/// The link's turn for a shop with its own wallet: the step, then the owner
+/// node's turn on the shop (OA-112): the live watch follows the book, a
+/// counter running low is given its next range, and the settings in force
+/// are carried to the counters (CR-236). There is no queue of refunds to
+/// work on (the owner node's queue is a placeholder).
+fn own_link_step(
+    node: &mut OwnerNode<Port>,
+    link: &mut OwnerLink,
+    own: &mut OwnShop,
+    dir: &std::path::Path,
+    now: u64,
+) -> Result<LinkStepView, AppError> {
+    link.step(node.watcher_mut(), now);
+    let mut view = LinkStepView {
+        notes: link.take_notes(),
+        queued: 0,
+        refused: 0,
+        withdrawn: 0,
+        held: 0,
+        waiting: None,
+        stopped_early: None,
+        reached: link.courier().reachable(),
+    };
+    let identity = node.owner_identity().map_err(|e| node_error(&e))?;
+    let carried = &mut own.carried;
+    let turn = own::turn_on_shop(dir, identity, own.wallet.clone(), |shop| {
+        shop.tick(node, link, carried, now)
+    })
+    .map_err(own::node_error)?;
+    for topped in &turn.topped_up {
+        view.notes.push(format!(
+            "OA-112: {} was given addresses {} to {}",
+            counter_label(&topped.counter),
+            topped.start,
+            topped.end
+        ));
+    }
+    view.notes.extend(turn.notes);
+    view.notes.truncate(openbmt_owner_node::NOTE_LOG);
+    Ok(view)
+}
+
+/// The name an own-wallet shop gives a counter in its words: "Counter" and
+/// the first 4 bytes of its key in hex, as the app's lists label it.
+pub(crate) fn counter_label(counter: &DeviceId) -> String {
+    let bytes = counter.to_bytes();
+    let hex: String = bytes.iter().take(4).map(|b| format!("{b:02x}")).collect();
+    format!("Counter {hex}")
+}
+
 /// Everything `start` makes, on the node's thread.
 fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State, AppError> {
     if req.dir.is_empty() {
@@ -658,9 +750,39 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
     let secret = bytes32("the owner secret", "start-secret", &req.owner_secret)?;
     let identity = Identity::from_secret_bytes(&secret)
         .map_err(|e| refused_by("start-secret", format!("the owner secret: {e}")))?;
-    let approver = device("the Key app root", "start-roots", &req.approver_root)?;
-    let wallet = WalletDescription::parse(&req.wallet, network)
-        .map_err(|e| refused_by("start-wallet", format!("the wallet: {e}")))?;
+    // A shop with its own wallet has no Key app, no Key 1 and a wallet that
+    // is on mainnet (OA-105); the others are read from the setup.
+    let own_wallet = req
+        .own_wallet
+        .as_deref()
+        .map(|file| {
+            if network != Network::Bitcoin {
+                return Err(refused_by(
+                    "start-wallet",
+                    "the wallet of a shop with its own wallet is on mainnet",
+                ));
+            }
+            PinnedWallet::from_bytes(file)
+                .map_err(|e| refused_by("start-wallet", format!("the wallet's file: {e}")))
+        })
+        .transpose()?;
+    let (wallet, approver, key_app) = match &own_wallet {
+        Some(pinned) => (
+            pinned.wallet().clone(),
+            own_approver(&secret).map_err(|e| internal(e.to_string()))?,
+            None,
+        ),
+        None => {
+            let approver = device("the Key app root", "start-roots", &req.approver_root)?;
+            let description = WalletDescription::parse(&req.wallet, network)
+                .map_err(|e| refused_by("start-wallet", format!("the wallet: {e}")))?;
+            (
+                ImportedWallet::Multisig(description.clone()),
+                approver,
+                Some(description),
+            )
+        }
+    };
     let watch_base = req.link.as_ref().map(|l| WatchBase {
         network: req.network,
         proxy: req.proxy.clone(),
@@ -670,15 +792,21 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
         heartbeat_every_secs: l.heartbeat_every_secs,
     });
     let secp = Secp256k1::new();
-    let key1_account = Xpriv::decode(&req.key1_account)
-        .map_err(|e| refused_by("start-key1", format!("the account key: {e}")))?;
-    let key1_xpub = Xpub::from_priv(&secp, &key1_account);
-    let key3 = req
-        .key3_xpub
-        .as_deref()
-        .map(Xpub::from_str)
-        .transpose()
-        .map_err(|e| refused_by("start-key1", format!("Key 3's public key: {e}")))?;
+    let key1_keys = match &key_app {
+        Some(_) => {
+            let account = Xpriv::decode(&req.key1_account)
+                .map_err(|e| refused_by("start-key1", format!("the account key: {e}")))?;
+            let xpub = Xpub::from_priv(&secp, &account);
+            let key3 = req
+                .key3_xpub
+                .as_deref()
+                .map(Xpub::from_str)
+                .transpose()
+                .map_err(|e| refused_by("start-key1", format!("Key 3's public key: {e}")))?;
+            Some((account, xpub, key3))
+        }
+        None => None,
+    };
     let mut driver = DriverConfig::new(network, 0);
     driver.proxy = req
         .proxy
@@ -712,20 +840,36 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
     let mut parts =
         OwnerParts::new(secret, wallet.clone(), approver, policy).map_err(|e| node_error(&e))?;
     parts.refund_depth = req.refund_depth;
+    // OA-107: the ranges of the shop's allocation book are the issued
+    // ranges the live watch follows, from the file the shop's ops keep.
+    if let Some(pinned) = &own_wallet {
+        let identity = Identity::from_secret_bytes(&secret)
+            .map_err(|e| refused_by("start-secret", format!("the owner secret: {e}")))?;
+        let book = own::turn_on_shop(&dir, identity, pinned.clone(), |n| {
+            Ok(n.shop().book().clone())
+        })
+        .map_err(own::node_error)?;
+        parts.own_book = Some(book);
+    }
     let mut node = OwnerNode::start_with(config, parts, spawn).map_err(|e| node_error(&e))?;
     // From here on a failure lets the node go before it is reported.
     let rest = (|| {
-        let key1 = match std::fs::read(dir.join(KEY1_FILE)) {
-            Ok(bytes) => SignerState::from_bytes(&bytes, network, &key1_xpub)
-                .map_err(|e| refused_by("start-key1", format!("{KEY1_FILE}: {e}")))?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => SignerState::register(
-                wallet.canonical_string(),
-                network,
-                &key1_xpub,
-                key3.as_ref(),
-            )
-            .map_err(|e| refused_by("start-key1", format!("registering Key 1: {e}")))?,
-            Err(e) => return Err(store_by("owner-files", format!("{KEY1_FILE}: {e}"))),
+        let key1 = match (&key_app, &key1_keys) {
+            (Some(description), Some((_, key1_xpub, key3))) => {
+                Some(match std::fs::read(dir.join(KEY1_FILE)) {
+                    Ok(bytes) => SignerState::from_bytes(&bytes, network, key1_xpub)
+                        .map_err(|e| refused_by("start-key1", format!("{KEY1_FILE}: {e}")))?,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => SignerState::register(
+                        description.canonical_string(),
+                        network,
+                        key1_xpub,
+                        key3.as_ref(),
+                    )
+                    .map_err(|e| refused_by("start-key1", format!("registering Key 1: {e}")))?,
+                    Err(e) => return Err(store_by("owner-files", format!("{KEY1_FILE}: {e}"))),
+                })
+            }
+            _ => None,
         };
         let owner_identity = Identity::from_secret_bytes(&secret)
             .map_err(|e| refused_by("start-secret", format!("the owner secret: {e}")))?;
@@ -747,7 +891,11 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
         let intake = RefundIntake::open(&dir).map_err(|e| store_by("start-intake", e))?;
         let mut link = link;
         if let Some(link) = link.as_mut() {
-            follow_settings(&node, link).map_err(|e| store_by("start-link-files", e))?;
+            // A shop with its own wallet follows the counters of its own
+            // settings, on each turn of the link (OA-112).
+            if own_wallet.is_none() {
+                follow_settings(&node, link).map_err(|e| store_by("start-link-files", e))?;
+            }
         }
         Ok((key1, link, relay, intake))
     })();
@@ -759,7 +907,8 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
             intake,
             pos: OwnerPos::open(&dir),
             key1,
-            key1_account,
+            key1_account: key1_keys.map(|(account, _, _)| account),
+            own: own_wallet.map(|wallet| OwnShop { wallet, carried: 0 }),
             policy,
             dir,
             network,
@@ -946,11 +1095,19 @@ impl Entry {
     pub(crate) fn link_step(&self, now: u64) -> Result<LinkStepView, AppError> {
         self.run(Some(now), move |st| {
             let State {
-                node, link, intake, ..
+                node,
+                link,
+                intake,
+                own,
+                dir,
+                ..
             } = st;
             let link = link
                 .as_mut()
                 .ok_or_else(|| wrong_state("link-none", "the node was started without a link"))?;
+            if let Some(own) = own.as_mut() {
+                return own_link_step(node, link, own, dir, now);
+            }
             let followed = follow_settings(node, link);
             link.step(node.watcher_mut(), now);
             let done = node
@@ -1108,6 +1265,7 @@ impl Entry {
                 dir,
                 ..
             } = st;
+            let (key1, key1_account) = key_app_keys(key1, key1_account)?;
             let persist_dir = dir.clone();
             let taken = node
                 .take(&response, key1, key1_account, now, move |bytes| {
@@ -1316,7 +1474,7 @@ impl Entry {
         let counter = device("the counter's root", "id-length", &a.counter)?;
         self.run(Some(now), move |st| {
             let batch = BatchBuilder::new(st.policy)
-                .derive(st.node.owner().wallet(), counter, a.start, a.count)
+                .derive(key_app_wallet(&st.node)?, counter, a.start, a.count)
                 .map_err(|e| refused_by("batch-not-derived", e))?;
             let write = st.node.queue_writer();
             let id = st
@@ -1742,7 +1900,9 @@ impl Entry {
     /// delivered once the courier holds it.
     pub(crate) fn deliver(&self, now: u64) -> Result<DeliverView, AppError> {
         self.run(Some(now), move |st| {
-            let State { node, link, .. } = st;
+            let State {
+                node, link, own, ..
+            } = st;
             let link = link
                 .as_mut()
                 .ok_or_else(|| wrong_state("link-none", "the node was started without a link"))?;
@@ -1751,6 +1911,11 @@ impl Entry {
                 waiting: 0,
                 notes: Vec::new(),
             };
+            // A shop with its own wallet has no outbox of batches and
+            // settings: ranges and settings go out on each turn of the link.
+            if own.is_some() {
+                return Ok(view);
+            }
             // LK-76: devices kept for settings the owner dropped are let go.
             let pending: Vec<u32> = node
                 .owner()
@@ -1848,6 +2013,7 @@ impl Entry {
 
     pub(crate) fn link_state(&self) -> Result<LinkView, AppError> {
         self.run(None, |st| {
+            let own = st.own.is_some();
             let link = st
                 .link
                 .as_ref()
@@ -1865,11 +2031,16 @@ impl Entry {
                             (AlertKind::BatchUndelivered, counter, *since)
                         }
                     };
+                    let alert_words = if own {
+                        own_alert_words(a)
+                    } else {
+                        link_alert_words(a)
+                    };
                     AlertView {
                         kind,
                         counter: counter.to_bytes().to_vec(),
                         value,
-                        words: words(link_alert_words(a)),
+                        words: words(alert_words),
                     }
                 })
                 .collect();
@@ -2112,11 +2283,50 @@ impl Entry {
                 dir,
                 ..
             } = st;
+            let (key1, key1_account) = key_app_keys(key1, key1_account)?;
             let persist_dir = dir.clone();
             node.recover_key1(key1, key1_account, move |bytes| {
                 write_file(&persist_dir, KEY1_FILE, bytes)
             })
             .map_err(|e| node_error(&e))
+        })
+    }
+
+    /// OA-113: how far ahead the wallet of a shop with its own wallet must
+    /// look: from the receive indexes a payment was seen at (the coin view)
+    /// and the highest index the counters' sales opened (the link's copies).
+    /// Without a link nothing is known of what the counters handed out, and
+    /// the highest paid index stands for it.
+    pub(crate) fn own_gap(&self) -> Result<OwnGapView, AppError> {
+        self.run(None, |st| {
+            let State {
+                node,
+                link,
+                own,
+                dir,
+                ..
+            } = st;
+            let own = own.as_ref().ok_or_else(|| {
+                wrong_state(
+                    "no-own-wallet",
+                    "this shop has a Key app: there is no gap limit to work out",
+                )
+            })?;
+            let paid = node.view().paid_receive_indexes();
+            let needed = match link.as_ref() {
+                Some(link) => {
+                    let identity = node.owner_identity().map_err(|e| node_error(&e))?;
+                    own::turn_on_shop(dir, identity, own.wallet.clone(), |shop| {
+                        Ok(shop.gap_needed(link, &paid))
+                    })
+                    .map_err(own::node_error)?
+                }
+                None => openbmt_owner::own_book::gap_limit(&paid, paid.iter().next_back().copied()),
+            };
+            Ok(OwnGapView {
+                needed,
+                notice: openbmt_owner::own_book::gap_needs_notice(needed),
+            })
         })
     }
 
@@ -2362,7 +2572,7 @@ impl Entry {
     /// shop's.
     pub(crate) fn signer_registration(&self, shop: String) -> Result<RegistrationView, AppError> {
         self.run(None, move |st| {
-            let wallet = st.node.owner().wallet();
+            let wallet = key_app_wallet(&st.node)?;
             let registration = openbmt_owner::hardware::registration(wallet, &shop)
                 .map_err(|e| hardware_error(&e))?;
             let first =
@@ -2407,6 +2617,7 @@ impl Entry {
                 dir,
                 ..
             } = st;
+            let (key1, key1_account) = key_app_keys(key1, key1_account)?;
             let persist_dir = dir.clone();
             node.export_for_signer(&session, number, key1, key1_account, now, move |bytes| {
                 write_file(&persist_dir, KEY1_FILE, bytes)
@@ -2460,7 +2671,7 @@ impl Entry {
     pub(crate) fn first_address_record(&self, a: FirstAddressArgs) -> Result<Vec<u8>, AppError> {
         self.run(None, move |st| {
             Ok(openbmt_owner::hardware::FirstAddressRecord::new(
-                st.node.owner().wallet(),
+                key_app_wallet(&st.node)?,
                 a.kind.into(),
                 a.at,
             )
@@ -2472,7 +2683,7 @@ impl Entry {
     pub(crate) fn first_address_read(&self, bytes: Vec<u8>) -> Result<FirstAddressView, AppError> {
         self.run(None, move |st| {
             openbmt_owner::hardware::FirstAddressRecord::from_bytes(
-                st.node.owner().wallet(),
+                key_app_wallet(&st.node)?,
                 &bytes,
             )
             .map(|r| record_view(&r))

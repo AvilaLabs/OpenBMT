@@ -439,6 +439,27 @@ impl CoinView {
         self.receipts.get(&index).map_or(&[], Vec::as_slice)
     }
 
+    /// OA-113: the receive indices a payment was seen at: those with a
+    /// receipt kept, those whose receipt was pruned (OC-29) and those that
+    /// hold an unspent or unconfirmed-spend coin.
+    pub fn paid_receive_indexes(&self) -> BTreeSet<u32> {
+        let mut paid: BTreeSet<u32> = self
+            .receipts
+            .iter()
+            .filter(|(_, kept)| !kept.is_empty())
+            .map(|(index, _)| *index)
+            .collect();
+        for (start, end) in &self.pruned {
+            paid.extend(*start..=*end);
+        }
+        paid.extend(
+            self.owned()
+                .filter(|c| c.chain == Keychain::Receive)
+                .map(|c| c.index),
+        );
+        paid
+    }
+
     /// How many receipts are kept.
     pub fn receipt_count(&self) -> usize {
         self.receipt_total

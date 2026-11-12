@@ -183,6 +183,12 @@ pub struct StartConfig {
     pub without_tor: bool,
     /// The link to the counters, or none.
     pub link: Option<LinkConfig>,
+    /// A shop with its own wallet (OA-105): the wallet's file as the app
+    /// keeps it (`OBM)`). There is no Key app then: `approver_root`,
+    /// `wallet` and `key1_account` are not read, and the data folder is the
+    /// one the shop's state (`own-shop`) is kept in. `None` for a shop with
+    /// a Key app.
+    pub own_wallet: Option<Vec<u8>>,
 }
 
 wire_record!(StartConfig {
@@ -201,7 +207,8 @@ wire_record!(StartConfig {
     fixed_peers,
     broadcast_proxy,
     without_tor,
-    link
+    link,
+    own_wallet
 });
 wire_record_get!(StartConfig {
     dir,
@@ -219,7 +226,8 @@ wire_record_get!(StartConfig {
     fixed_peers,
     broadcast_proxy,
     without_tor,
-    link
+    link,
+    own_wallet
 });
 
 /// The arguments of `queue_refund`.

@@ -67,7 +67,7 @@ use openbmt_core::command::SignedCommand;
 use openbmt_core::identity::DeviceId;
 use openbmt_core::pinned_wallet::SignedRange;
 use openbmt_core::records::{DeviceList, Record, RecordKind};
-use openbmt_core::settings::{Settings, SettingsError, SignedSettings};
+use openbmt_core::settings::{Authority, Settings, SettingsError, SignedSettings};
 use openbmt_counter::{BatchHeld, Event, RangeHeld};
 use openbmt_counter_node::DriverPort;
 use openbmt_courier::{
@@ -691,13 +691,29 @@ impl<R: Post> OwnerLink<R> {
         previous: Option<&Settings>,
         now: u64,
     ) -> Result<(), SettingsNotCarried> {
+        self.carry_settings_with(id, signed, &Authority::KeyApp(*roots), previous, now)
+    }
+
+    /// [`OwnerLink::carry_settings`] under an [`Authority`]. For a shop with
+    /// its own wallet the authority is the owner root alone (CR-236): the
+    /// settings are given with no `previous`, so that a loosening change goes
+    /// out as the plain signed settings and the counter holds it for
+    /// confirmation (CR-239).
+    pub fn carry_settings_with(
+        &mut self,
+        id: u32,
+        signed: &SignedSettings,
+        authority: &Authority,
+        previous: Option<&Settings>,
+        now: u64,
+    ) -> Result<(), SettingsNotCarried> {
         let version = signed.settings.version;
         if self.carried.iter().any(|c| c.version == version) {
             return Ok(());
         }
         match previous {
-            Some(previous) => signed.verify(roots, Some(previous)).map(|_| ()),
-            None => signed.verify_signatures(roots),
+            Some(previous) => signed.verify_with(authority, Some(previous)).map(|_| ()),
+            None => signed.verify_signatures_with(authority),
         }
         .map_err(SettingsNotCarried::Check)?;
         if self.carried.len() >= MAX_CARRIED_SETTINGS {
@@ -720,7 +736,7 @@ impl<R: Post> OwnerLink<R> {
             }
         }
         // The owner's own key is never a target.
-        targets.remove(&roots.owner);
+        targets.remove(authority.owner());
         let entry = RosterEntry {
             id,
             version,

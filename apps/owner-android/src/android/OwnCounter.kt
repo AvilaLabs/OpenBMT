@@ -192,8 +192,13 @@ internal fun Controller.showOwnWallet(r: FirstRun) {
             file.fill(0)
             views.add(ui.text(Connect.rows(wallet.firstAddress), 22f, bold = true, mono = true))
             views.add(line(ConnectWords.kind(wallet.multisig), muted = true))
-            // What the counters handed out and what was paid is not known to this page yet: nothing is given out.
-            val row = OwnWalletPage.gapRow(org.openbmt.owner.OwnerOwn.gap(emptyList(), null))
+            // The running node knows what was paid and what the counters handed out (OA-113).
+            val running = node?.let { n -> { n.ownGap() } }
+            val row = try {
+                OwnWalletPage.gapNow(running, NativeOwnLibrary)
+            } catch (_: org.openbmt.owner.OwnerException) {
+                OwnWalletPage.gapNow(null, NativeOwnLibrary)
+            }
             views.add(stack(label(row.title), line(row.line), *listOfNotNull(row.next?.let { line(it, muted = true) }).toTypedArray(), gap = 4))
         }
     } catch (e: org.openbmt.owner.OwnerException) {

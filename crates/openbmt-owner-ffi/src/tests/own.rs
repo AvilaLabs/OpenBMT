@@ -9,7 +9,7 @@ use openbmt_core::pairing_own::{OwnCounterPairing, OwnOffer};
 use openbmt_core::pinned_wallet::PinnedWallet;
 
 use super::import::descriptor;
-use super::kit::Scratch;
+use super::kit::{tx_from, Scratch};
 use super::wire::{frame, Fault, Rd, W};
 use crate::{dispatch, Registry};
 
@@ -213,4 +213,77 @@ fn oa_105_a_secret_of_the_wrong_length_and_a_wallet_that_does_not_read_are_refus
         .bytes(&[1u8; 32])
         .bytes(&file[..10]);
     assert_eq!(refusal(150, &bad.u64(T0).0).rule, "OA-105");
+}
+
+/// The own wallet's receive script `i`, from the wallet's file.
+fn own_receive(file: &[u8], i: u32) -> bitcoin::ScriptBuf {
+    PinnedWallet::from_bytes(file)
+        .unwrap()
+        .receive_script(i)
+        .unwrap()
+}
+
+#[test]
+fn oa_105_the_node_starts_for_a_shop_with_its_own_wallet_and_has_no_key_app() {
+    let rig = super::kit::Rig::new();
+    let file = wallet_file();
+    let handle = Rd::ok(&rig.start_own(&file)).u64();
+    // A call that needs the Key app says there is none.
+    let response = rig.call(
+        45,
+        handle,
+        &W::new()
+            .u64(T0)
+            .bytes(&super::kit::counter_bytes())
+            .u32(0)
+            .u32(3)
+            .0,
+    );
+    let fault = Rd::error(&response).expect("refused");
+    assert_eq!(fault.rule, "no-key-app");
+}
+
+#[test]
+fn oa_105_a_wallet_file_that_does_not_read_stops_the_start() {
+    let rig = super::kit::Rig::new();
+    let response = rig.start_own(&[1, 2, 3]);
+    assert_eq!(Rd::error(&response).expect("refused").rule, "start-wallet");
+}
+
+#[test]
+fn oa_113_the_gap_row_of_the_running_node_is_worked_out_from_the_payments_it_saw() {
+    let rig = super::kit::Rig::new();
+    let file = wallet_file();
+    let handle = Rd::ok(&rig.start_own(&file)).u64();
+    let gap_now = |rig: &super::kit::Rig| {
+        let response = rig.call(158, handle, &[]);
+        let mut r = Rd::ok(&response);
+        let out = (r.u32(), r.bool());
+        r.done();
+        out
+    };
+    assert_eq!(gap_now(&rig), (0, false), "nothing paid yet");
+    let pay0 = tx_from(7, &[(&own_receive(&file, 0), 50_000)]);
+    let pay5 = tx_from(8, &[(&own_receive(&file, 5), 50_000)]);
+    rig.mine(handle, &[pay0, pay5]);
+    rig.mine_empty(handle, 5);
+    // The same inputs through op 157 give the same row: paid 0 and 5, and
+    // with no link the highest paid index stands for the highest handed out.
+    let by_args = {
+        let response = call(157, &W::new().u32(2).u32(0).u32(5).u8(1).u32(5).0);
+        let mut r = Rd::ok(&response);
+        let out = (r.u32(), r.bool());
+        r.done();
+        out
+    };
+    assert_eq!(gap_now(&rig), by_args);
+    assert!(by_args.0 > 0);
+}
+
+#[test]
+fn oa_113_a_shop_with_a_key_app_has_no_gap_row() {
+    let rig = super::kit::Rig::new();
+    let handle = rig.start();
+    let fault = Rd::error(&rig.call(158, handle, &[])).expect("refused");
+    assert_eq!(fault.rule, "no-own-wallet");
 }

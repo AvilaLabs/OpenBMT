@@ -98,7 +98,9 @@ pub use node::{
     NodeError, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState, BROADCAST_DIR, COINS_FILE,
     NO_TOR, QUEUE_FILE, TAKE_JOURNAL_FILE,
 };
-pub use own::{OwnNode, OwnNodeError, ToppedUp, OWN_STATE_FILE};
+pub use own::{
+    own_approver, NotWatching, OwnNode, OwnNodeError, OwnTick, ToppedUp, Watching, OWN_STATE_FILE,
+};
 pub use paid_log::{
     value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, MAGIC_PAID_LOG, MAX_PAID_ENTRIES,
     PAID_ENTRY_LEN, PAID_LOG_FILE,

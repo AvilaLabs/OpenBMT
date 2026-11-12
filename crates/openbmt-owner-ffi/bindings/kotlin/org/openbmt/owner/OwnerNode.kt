@@ -155,6 +155,7 @@ private const val OP_OWN_WAITING = 154
 private const val OP_OWN_BUNDLE = 155
 private const val OP_OWN_DELIVERED = 156
 private const val OP_OWN_GAP = 157
+private const val OP_OWN_GAP_NOW = 158
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -307,6 +308,8 @@ class StartConfig(
     val broadcastProxy: String?,
     val withoutTor: Boolean,
     val link: LinkConfig?,
+    /** A shop with its own wallet: the wallet's file as the app keeps it (`OBM)`); there is no Key app then. */
+    val ownWallet: ByteArray? = null,
 )
 
 /** A refund to queue. The facts it is queued on come from the wallet's own view. */
@@ -1165,7 +1168,7 @@ private fun Writer.start(c: StartConfig): Writer =
         .string(c.wallet).bytes(c.key1Account).option(c.key3Xpub) { string(it) }
         .u32(c.batchMinCount).u32(c.refundDepth).u32(c.birthday).option(c.proxy) { string(it) }
         .list(c.fixedPeers) { string(it) }.option(c.broadcastProxy) { string(it) }
-        .bool(c.withoutTor).option(c.link) { link(it) }
+        .bool(c.withoutTor).option(c.link) { link(it) }.option(c.ownWallet) { bytes(it) }
 
 private fun Writer.cashAmount(v: CashAmount): Writer {
     when (v) {
@@ -1728,6 +1731,15 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     fun linkStep(now: Long): LinkStep {
         val r = call(OP_LINK_STEP, handle) { it.u64(now) }
         return r.linkStep().also { r.end() }
+    }
+
+    /**
+     * How far ahead the wallet of a shop with its own wallet must look (OA-113), from the payments this node's coin
+     * view has seen and the highest index the counters' sales opened. Refused for a shop with a Key app.
+     */
+    fun ownGap(): OwnGapView {
+        val r = call(OP_OWN_GAP_NOW, handle)
+        return OwnGapView(r.u32(), r.bool()).also { r.end() }
     }
 
     /** Hand the signed batches in the outbox to the link. */

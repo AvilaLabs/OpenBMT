@@ -2,9 +2,12 @@ package org.openbmt.owner.app
 
 import org.openbmt.app.SayWords
 
-/** What is saved on this phone. The phone is set up only when both are there. */
-class SetupStatus(val setup: Boolean, val config: Boolean) {
-    val complete: Boolean get() = setup && config
+/**
+ * What is saved on this phone. The phone is set up only when both are there. A shop with its own wallet has no setup
+ * file: its wallet and owner root are kept instead ([ownWallet]).
+ */
+class SetupStatus(val setup: Boolean, val config: Boolean, val ownWallet: Boolean = false) {
+    val complete: Boolean get() = (setup || ownWallet) && config
 }
 
 /** One root screen of the app, chosen from what is saved and what is running. */

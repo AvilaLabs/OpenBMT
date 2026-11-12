@@ -76,7 +76,7 @@ impl W {
         w = w
             .opt_string(c.broadcast_proxy.as_deref())
             .u8(u8::from(c.without_tor));
-        match &c.link {
+        w = match &c.link {
             None => w.u8(0),
             Some(l) => {
                 w = w.u8(1);
@@ -92,7 +92,8 @@ impl W {
                 }
                 w.u64(l.heartbeat_every_secs).u64(l.check_in_grace_secs)
             }
-        }
+        };
+        w.opt_bytes(c.own_wallet.as_deref())
     }
 
     /// The fields of `queue_refund`.

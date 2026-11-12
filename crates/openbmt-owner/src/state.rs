@@ -11,6 +11,7 @@ use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pairing::{check_request, PairError, PairOffer, PairRequest, SignedPairing};
 use openbmt_core::settings::{classify_change, Change, Settings, SignedSettings};
 use openbmt_core::wallet::WalletDescription;
+use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_session::{label_text_ok, Item, Request, RequestItem, ShopValue};
 use openbmt_spend::dust_limit;
 
@@ -296,7 +297,7 @@ pub(crate) fn waiting_box(bytes: &[u8]) -> Option<DeviceId> {
 /// the queue.
 pub struct Owner {
     pub(crate) identity: Identity,
-    pub(crate) wallet: WalletDescription,
+    pub(crate) wallet: ImportedWallet,
     pub(crate) wallet_id: [u8; 32],
     pub(crate) roots: PinnedRoots,
     pub(crate) policy: BatchPolicy,
@@ -338,11 +339,12 @@ impl Owner {
     /// Set up the owner phone with an empty queue.
     pub fn new(
         owner_secret: &[u8; 32],
-        wallet: WalletDescription,
+        wallet: impl Into<ImportedWallet>,
         approver: DeviceId,
         policy: BatchPolicy,
         options: Options,
     ) -> Result<Self, SetupError> {
+        let wallet = wallet.into();
         let identity = Identity::from_secret_bytes(owner_secret).map_err(SetupError::Identity)?;
         let roots =
             PinnedRoots::new(identity.device_id(), approver).map_err(|_| SetupError::SameRoot)?;
@@ -360,7 +362,7 @@ impl Owner {
     /// AS-65: the owner phone from its stored snapshot.
     pub fn restore(
         owner_secret: &[u8; 32],
-        wallet: WalletDescription,
+        wallet: impl Into<ImportedWallet>,
         approver: DeviceId,
         policy: BatchPolicy,
         bytes: &[u8],
@@ -404,9 +406,15 @@ impl Owner {
         self.roots.approver
     }
 
-    /// The wallet.
-    pub fn wallet(&self) -> &WalletDescription {
+    /// The wallet, of either kind.
+    pub fn wallet(&self) -> &ImportedWallet {
         &self.wallet
+    }
+
+    /// The 2-of-3 wallet the Key app co-signs for, or none when the shop's
+    /// wallet is a single key (no Key app, so no queue to sign).
+    pub fn multisig(&self) -> Option<&WalletDescription> {
+        self.wallet.multisig()
     }
 
     /// The owner's choices.
@@ -740,8 +748,9 @@ impl Owner {
         batch: AddressBatch,
         now: u64,
     ) -> Result<u32, Refusal> {
+        let wallet = self.wallet.multisig().ok_or(Refusal::BatchNotDerived)?;
         let derived = BatchBuilder::new(self.policy)
-            .derive(&self.wallet, batch.counter, batch.start, batch.count)
+            .derive(wallet, batch.counter, batch.start, batch.count)
             .map_err(|_| Refusal::BatchNotDerived)?;
         if derived != batch {
             return Err(Refusal::BatchNotDerived);

@@ -11,8 +11,10 @@ import org.openbmt.owner.OwnMade
 import org.openbmt.owner.OwnOfferView
 import org.openbmt.owner.OwnRequestView
 import org.openbmt.owner.OwnShopArgs
+import org.openbmt.owner.OwnerNetwork
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerOwn
+import org.openbmt.owner.StartConfig
 import org.openbmt.owner.WaitingCounter
 
 /**
@@ -281,11 +283,46 @@ class OwnPairing(
     }
 }
 
+/**
+ * What the node is started with for a shop with its own wallet (OA-107): the wallet's file, the owner root's secret
+ * and the folder of the shop's state. There is no Key app, so the Key app's fields are empty, and there is no link
+ * to the counters until the shop has one.
+ */
+object OwnStart {
+    fun config(shop: OwnShopArgs, defaults: org.openbmt.owner.CeremonyDefaults, network: OwnerNetwork, now: Long, proxy: String): StartConfig =
+        StartConfig(
+            dir = shop.dir,
+            network = network,
+            now = now,
+            ownerSecret = shop.ownerSecret,
+            approverRoot = ByteArray(0),
+            wallet = "",
+            key1Account = ByteArray(0),
+            key3Xpub = null,
+            batchMinCount = defaults.batchMinCount,
+            refundDepth = defaults.refundDepth,
+            birthday = defaults.birthday,
+            proxy = proxy,
+            fixedPeers = emptyList(),
+            broadcastProxy = proxy,
+            withoutTor = false,
+            link = null,
+            ownWallet = shop.wallet,
+        )
+}
+
 /** The gap-limit row of the wallet page (OA-113): its title, what it says and the next step when the wallet must look further. */
 class GapRow(val title: String, val line: String, val next: String?)
 
 /** The wallet page of a shop with its own wallet (OA-113). */
 object OwnWalletPage {
+    /**
+     * The row for the wallet page: from the running node, which knows the receive indexes that were paid and the
+     * highest one the counters handed out, and when no node runs, the usual line (nothing is known).
+     */
+    fun gapNow(running: (() -> OwnGapView)?, library: OwnLibrary): GapRow =
+        gapRow(running?.invoke() ?: library.gap(emptyList(), null))
+
     /** The row for what the library worked out: the usual line up to 20, the number and the next step above it. */
     fun gapRow(gap: OwnGapView): GapRow =
         if (gap.notice) {
