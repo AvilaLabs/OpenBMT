@@ -25,7 +25,8 @@ runs Odoo on its own network, that is a local address.
    `openbmt-box till-key`. The key is shown once.
 2. In Odoo, install this module like any other module from a folder.
 3. In Point of Sale, open Configuration, then Payment Methods, and make a new
-   method. Choose OpenBMT as its terminal and fill in three fields:
+   method set up like the Bank method: a bank journal, and "Identify
+   Customer" off. Choose OpenBMT as its terminal and fill in three fields:
    - **Box address**: the address of the Box's till listener, such as
      `http://192.168.1.20:8091`.
    - **Till key**: the key from step 1. Only Point of Sale managers can see
@@ -46,10 +47,19 @@ setting. A new key from `openbmt-box till-key` replaces the old one at once.
 
 ## Status
 
-The module has been tested against a stand-in for the Box and for Odoo
-(`tests_standalone/`). It has not yet been run inside a real Odoo, so some of
-the names it uses from Odoo's own code may still need correcting. Odoo 17 and
-19 are not covered yet. The Box's side is described in `docs/BOX-RULES.md`.
+The module installs in Odoo 18.0 Community and passes its tests there
+(`tests/`): the server calls in every state and refusal, and one sale rung up
+in the till in a browser, from Send to the receipt. In those tests the Box is
+a stand-in that follows the Box's rules (`tests_standalone/fake_box.py`), not
+a real Box. Odoo 17 and 19 are not covered yet. The Box's side is described
+in `docs/BOX-RULES.md`.
+
+To run the tests inside Odoo, with the module's parent folder on the addons
+path:
+
+```
+odoo-bin -d <database> -i pos_openbmt --test-tags /pos_openbmt --stop-after-init
+```
 
 > **OpenBMT has had no independent security audit. Do not use it with real
 > funds.**

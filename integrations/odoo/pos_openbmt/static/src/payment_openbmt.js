@@ -21,9 +21,9 @@ const TEXT = {
     tillWaiting: "Waiting for the counter. Press Start on the counter.",
     tillOpened: "The customer can pay now.",
     tillServer: {
-        heading: "The till cannot reach Odoo",
-        what: "The call to Odoo's server failed.",
-        next: "Check the connection, then press Retry. If the customer already paid, check the counter before trying again.",
+        heading: "The till lost its connection to Odoo",
+        what: "The till could not reach Odoo's server to ask the Box.",
+        next: "Check the connection, then press Retry. If the customer may have paid already, look at the counter first.",
     },
 };
 
