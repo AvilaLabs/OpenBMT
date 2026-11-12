@@ -82,6 +82,10 @@
 //! - 144: the books (`docs/OWNER-APP-RULES.md` OA-103): the totals by day and
 //!   the two CSV exports, built from the counters' verified records and the
 //!   log of what was paid out.
+//! - 145: reading a scanned wallet description (`docs/WALLET-RULES.md`,
+//!   WL-08 to WL-15) for the key maker guide: its fingerprint and first
+//!   address, or the words of the refusal. It works on no node and stores
+//!   nothing.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -111,6 +115,7 @@ use crate::counter_views::{
 };
 use crate::error::{internal, refused_by, wrong_state, AppError};
 use crate::host::{real_spawn, Entry, Spawn};
+use crate::import_view::{self, ImportKind, ImportView};
 use crate::pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
@@ -681,6 +686,9 @@ fn build_ops() -> Vec<Op> {
             price::agree_for(a)
         }),
         op(144, "books", Node, |c, a: BooksArgs| c.entry()?.books(a)),
+        op(145, "wallet_import_read", Zero, |_, text: String| {
+            import_view::read(text)
+        }),
     ]
 }
 
@@ -928,6 +936,8 @@ fn definitions() -> Vec<TypeDef> {
         BooksDayView::define(),
         BooksFileView::define(),
         BooksView::define(),
+        ImportKind::define(),
+        ImportView::define(),
     ]
 }
 

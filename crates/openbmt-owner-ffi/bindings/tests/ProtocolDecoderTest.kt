@@ -49,6 +49,7 @@ object ProtocolDecoderTest {
         ceremonyThroughTheLibrary()
         setupLockThroughTheLibrary()
         priceThroughTheLibrary()
+        importThroughTheLibrary()
         println("ProtocolDecoderTest: ok")
     }
 
@@ -304,6 +305,22 @@ object ProtocolDecoderTest {
         val usd = OwnerPrice.agreeFor("USD", listOf(last("bitstamp", "98500.50"), last("gemini", "98500.50")), 1_700_000_000L)
         check(usd.wholePerBtc == 98_501L && usd.minorPerBtc == 9_850_050L && usd.sourceLabel == "med.bg") { "agreed in USD: ${usd.wholePerBtc}" }
         refusedBy("Bitcoin Standard", "request-malformed") { OwnerPrice.sourcesFor("SAT") }
+    }
+
+    /**
+     * A scanned wallet description through the real library (WL-14, WL-15): the test seed's fingerprint and first
+     * address, and each refusal with its rule and the core's words, none of which holds the text.
+     */
+    private fun importThroughTheLibrary() {
+        val text = "wpkh([818bc9b6/84h/0h/0h]xpub6CgURS1GrKZkAoRGBTKYX9FhLgkKnQVZ6vdNBUbiu24xtRJ6RzLKpdg4CqsVyBLzimcJsviP59hSoGJEpTJiXE8bdBLw1qPC1DXRatKehb8/<0;1>/*)#96yh9yhx"
+        val w = OwnerImport.read(text)
+        check(!w.multisig && w.fingerprint == "818bc9b6" && w.firstAddress == "bc1qyjassxtmzl02s8de8jw9365qmuvwg74udtp3vj") { "the test seed: ${w.fingerprint} ${w.firstAddress}" }
+        val secret = "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi"
+        val e = refusedBy("a private key", "WL-08") { OwnerImport.read(secret) }
+        check(!e.words!!.what.contains("xprv") && !e.text.contains("xprv")) { "the refusal holds the text" }
+        refusedBy("a bad checksum", "WL-10") { OwnerImport.read(text.dropLast(1) + "y") }
+        refusedBy("a test network", "WL-11") { OwnerImport.read("wpkh([818bc9b6/84h/1h/0h]tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba/0/*)") }
+        refusedBy("text that is not a description", "WL-10") { OwnerImport.read("hello") }
     }
 
     /**

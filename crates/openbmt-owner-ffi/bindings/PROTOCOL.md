@@ -143,6 +143,7 @@ ops run on another; it waits for at most 250 ms.
 142 price_sources_for handle zero  args string -> list<PriceSourceView>
 143 price_agree_for  handle zero  args PriceForArgs -> AgreedPriceInView
 144 books            handle node  args BooksArgs -> BooksView
+145 wallet_import_read handle zero  args string -> ImportView
 ```
 
 ## Types
@@ -290,4 +291,7 @@ BooksArgs: record: offset_minutes: i32
 BooksDayView: record: date: string, sales: u64, waiting: u64, amount: string
 BooksFileView: record: month: string, csv: list<u8>
 BooksView: record: currency: string, days: list<BooksDayView>, accounting: list<BooksFileView>, ledger: list<u8>, refusal: option<Words>
+ImportKind: enum, one tag byte
+    tags Single=1 Multisig=2
+ImportView: record: kind: ImportKind, fingerprint: string, first_address: string
 ```

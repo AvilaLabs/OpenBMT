@@ -55,6 +55,7 @@ mod codec;
 mod counter_views;
 mod error;
 pub mod host;
+mod import_view;
 #[cfg(any(target_os = "android", feature = "jni"))]
 mod jni;
 mod pos_views;
@@ -86,6 +87,7 @@ pub use counter_views::{
 };
 pub use error::{AppError, Kind};
 pub use host::{Entry, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};
+pub use import_view::{ImportKind, ImportView};
 pub use pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,

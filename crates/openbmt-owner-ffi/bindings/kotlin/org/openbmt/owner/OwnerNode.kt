@@ -142,6 +142,7 @@ private const val OP_PRICE_AGREE = 141
 private const val OP_PRICE_SOURCES_FOR = 142
 private const val OP_PRICE_AGREE_FOR = 143
 private const val OP_BOOKS = 144
+private const val OP_WALLET_IMPORT_READ = 145
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -211,6 +212,8 @@ private const val TAG_NOTE_KIND_VIEW_REFUSED = 0
 private const val TAG_NOTE_KIND_VIEW_WITHDRAWAL_NOT_APPLIED = 1
 private const val TAG_NOTE_KIND_VIEW_INTERRUPTED = 2
 private const val TAG_NOTE_KIND_VIEW_CLAIMED_MORE_THAN_SEEN = 3
+private const val TAG_IMPORT_KIND_SINGLE = 1
+private const val TAG_IMPORT_KIND_MULTISIG = 2
 private const val TAG_FIRST_ADDRESS_KIND_CHECKED = 1
 private const val TAG_FIRST_ADDRESS_KIND_SKIPPED = 2
 private const val TAG_OLD_KIND_NONE = 0
@@ -732,6 +735,9 @@ class BoxOwnInvitation(val text: String, val expiresAt: Long)
 
 /** A claim that answers this phone's own invitation. */
 class BoxOwnCheck(val boxKey: ByteArray, val words: List<String>)
+
+/** What a scanned wallet description shows: [multisig] or single-key, an 8 hex [fingerprint] and the [firstAddress]. */
+class ImportedWalletView(val multisig: Boolean, val fingerprint: String, val firstAddress: String)
 
 /** One source of the price of a bitcoin: its label and the HTTPS address the app asks (RT-01). */
 class PriceSource(val id: String, val url: String)
@@ -1325,6 +1331,13 @@ private fun Reader.signerFile(): SignerFile =
     SignerFile(
         bytes(), bytes(), string(), list { signerLine() }, option { signerLine() }, u64(), words(),
     )
+
+private fun Reader.importKind(): Boolean =
+    when (u8()) {
+        TAG_IMPORT_KIND_SINGLE -> false
+        TAG_IMPORT_KIND_MULTISIG -> true
+        else -> tag("ImportKind")
+    }
 
 private fun Reader.firstAddressKind(): Boolean =
     when (u8()) {
@@ -2105,6 +2118,18 @@ object OwnerPrice {
             w.string(currency).list(replies) { w.string(it.source).bytes(it.body).u64(it.fetchedAt) }.u64(now)
         }
         return AgreedPriceIn(r.u64(), r.u64(), r.string()).also { r.end() }
+    }
+}
+
+/**
+ * Reading a wallet description the owner scanned (`docs/WALLET-RULES.md`, WL-08 to WL-15). The call names no node,
+ * holds nothing and stores nothing; a refusal comes with the core's own words.
+ */
+object OwnerImport {
+    /** The fingerprint and first receive address of the description in [text], or an [OwnerException] with the words. */
+    fun read(text: String): ImportedWalletView {
+        val r = call(OP_WALLET_IMPORT_READ, 0) { it.string(text) }
+        return ImportedWalletView(r.importKind(), r.string(), r.string()).also { r.end() }
     }
 }
 

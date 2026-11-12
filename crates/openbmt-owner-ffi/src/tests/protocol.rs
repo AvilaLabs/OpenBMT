@@ -120,6 +120,7 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (142, "price_sources_for"),
         (143, "price_agree_for"),
         (144, "books"),
+        (145, "wallet_import_read"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);
