@@ -503,6 +503,11 @@ the shop's currency, so the node keeps a log of its own.
   list of the refunds' notes, each ascending by number and each naming a
   queued entry. A queue with neither stays version 1 or 2, byte for byte as
   before.
+- **OC-52.** A block that pays or beats a transaction given to a hardware
+  signer is written down as owed before the wallet's coin view takes the
+  block, and the entries are settled from that record, again after every
+  block, after key 1 recovery and at start, until each is settled or its
+  block has left the chain. A settlement retried is not logged twice.
 
 ## What these rules do not say
 

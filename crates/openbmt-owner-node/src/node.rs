@@ -12,7 +12,8 @@
 //!
 //! In the node's directory: [`COINS_FILE`] (the coin view, `OBMe`),
 //! [`QUEUE_FILE`] (the owner's queue, `OBM4`), [`PAID_LOG_FILE`] (what was
-//! paid out, `OBM&`, OC-48) and [`TAKE_JOURNAL_FILE`]
+//! paid out, `OBM&`, OC-48), [`SETTLE_OWED_FILE`] (the settlements a block
+//! owes the queue, `OBM,`, OC-52) and [`TAKE_JOURNAL_FILE`]
 //! (a joint queue/key 1 roll-forward record), written whole through the
 //! watcher's atomic write. The queue is written before the coin view takes
 //! the new transaction, so a restart finds the transaction in the queue's
@@ -57,7 +58,7 @@
 //! where it was and no session is built until the node is restarted. It is
 //! never silent: a note says what failed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::io::{self, Read};
@@ -88,6 +89,7 @@ use crate::deep::{DeepRun, DeepSpawn};
 use crate::live::{plan_release, WatchLimits, REBALANCE_SECS};
 use crate::paid_log::{value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, PAID_LOG_FILE};
 use crate::receipts::read_fee_history;
+use crate::settle_owed::{Owed, OwedKind, SettleOwed, SETTLE_OWED_FILE};
 use crate::take_journal::{TakeJournal, MAX_JOURNAL_BYTES};
 use crate::watcher::{write_file, OwnerConfig, OwnerStartError, OwnerWatcher};
 
@@ -502,6 +504,8 @@ pub struct OwnerNode<P: OwnerPort = Handle> {
     take_journal: Option<TakeJournal>,
     /// OC-48: what was paid out.
     paid_log: PaidLog,
+    /// OC-52: the settlements a block owes the queue.
+    owed: SettleOwed,
     pub(crate) owner_secret: [u8; 32],
     approver: DeviceId,
     policy: BatchPolicy,
@@ -600,6 +604,13 @@ impl<P: OwnerPort> OwnerNode<P> {
             Err(e) if e.kind() == io::ErrorKind::NotFound => PaidLog::new(),
             Err(e) => return Err(NodeError::Files(format!("{PAID_LOG_FILE}: {e}"))),
         };
+        let owed = match fs::read(dir.join(SETTLE_OWED_FILE)) {
+            Ok(bytes) => SettleOwed::from_bytes(&bytes).map_err(|e| {
+                NodeError::Files(format!("{SETTLE_OWED_FILE} does not read back: {e}"))
+            })?,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => SettleOwed::new(),
+            Err(e) => return Err(NodeError::Files(format!("{SETTLE_OWED_FILE}: {e}"))),
+        };
         let queue_bytes = if let Some(journal) = &take_journal {
             Ok(journal.queue.clone())
         } else {
@@ -693,6 +704,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             awaiting_rescan: 0,
             take_journal,
             paid_log,
+            owed,
             owner_secret,
             approver,
             policy,
@@ -715,6 +727,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 "a committed response needs key 1 recovery before queue operations".to_string(),
             );
         }
+        node.settle_owed();
         Ok(node)
     }
 
@@ -1031,6 +1044,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         drop(commit);
         self.refresh_marks();
         self.reconcile();
+        self.settle_owed();
         Ok(())
     }
 
@@ -1744,103 +1758,233 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
     }
 
-    /// AS-89: transactions that were given to a hardware signer and whose
-    /// approval was abandoned are followed by their IDs, which signatures do
-    /// not change. One a block holds pays its entries; one whose coin a block
-    /// spent in another transaction can no longer confirm.
-    fn settle_elsewhere(&mut self, block: &BlockHash, spent_by: &[(OutPoint, Txid)]) {
-        if self.halted.is_some() || spent_by.is_empty() {
+    /// OC-52, AS-89: what the block `hash` owes the queue, found from its
+    /// transactions alone. The transaction of an open exported approval or of
+    /// a signed-elsewhere entry that the block holds is paid; an entry one of
+    /// whose coins the block spends in another transaction is beaten.
+    fn owed_in(&self, hash: &BlockHash, bytes: &[u8]) -> Vec<Owed> {
+        let exported = self.owner.exported_transactions(None);
+        let elsewhere = self.owner.signed_elsewhere();
+        if exported.is_empty() && elsewhere.is_empty() {
+            return Vec::new();
+        }
+        let Ok(block) = deserialize::<bitcoin::Block>(bytes) else {
+            return Vec::new();
+        };
+        let mut ids: BTreeSet<Txid> = BTreeSet::new();
+        let mut spent: BTreeMap<OutPoint, Txid> = BTreeMap::new();
+        for tx in &block.txdata {
+            let id = tx.compute_txid();
+            ids.insert(id);
+            for input in &tx.input {
+                spent.insert(input.previous_output, id);
+            }
+        }
+        let mut owed = Vec::new();
+        for open in &exported {
+            if ids.contains(&open.txid) {
+                owed.push(Owed {
+                    kind: OwedKind::ExportedPaid,
+                    txid: open.txid,
+                    block: *hash,
+                });
+            }
+        }
+        for entry in elsewhere {
+            let kind = if ids.contains(&entry.txid) {
+                OwedKind::ElsewherePaid
+            } else if entry
+                .inputs
+                .iter()
+                .any(|op| spent.get(op).is_some_and(|by| *by != entry.txid))
+            {
+                OwedKind::ElsewhereBeaten
+            } else {
+                continue;
+            };
+            owed.push(Owed {
+                kind,
+                txid: entry.txid,
+                block: *hash,
+            });
+        }
+        owed
+    }
+
+    /// OC-52: store the owed list `next`, and keep it only if it was stored.
+    fn store_owed(&mut self, next: SettleOwed) -> Result<(), String> {
+        if next == self.owed {
+            return Ok(());
+        }
+        write_file(&self.dir, SETTLE_OWED_FILE, &next.to_bytes())?;
+        self.owed = next;
+        Ok(())
+    }
+
+    /// OC-52: an item is settled or can never be: take it out of the file.
+    /// If that cannot be stored the item stays, and settling it again finds
+    /// nothing open and takes it out then.
+    fn forget_owed(&mut self, item: &Owed) {
+        let next = self.owed.without(item);
+        if let Err(e) = self.store_owed(next) {
+            self.note(format!(
+                "{} is settled but still listed as owed: {e}",
+                item.txid
+            ));
+        }
+    }
+
+    /// OC-52: the blocks that left the chain take what they owed with them.
+    fn forget_owed_blocks(&mut self, blocks: &[BlockHash]) {
+        let next = self.owed.without_blocks(blocks);
+        let dropped = self.owed.items().len().saturating_sub(next.items().len());
+        if dropped == 0 {
             return;
         }
-        // An approval still open whose file went to the signer: the
-        // transaction may have been finished and sent without the owner.
-        for open in self.owner.exported_transactions(None) {
-            if !spent_by.iter().any(|(_, by)| *by == open.txid) {
-                continue;
-            }
-            if self.ready_for_queue_write().is_err() {
-                self.note(format!("{} waits for key 1 recovery", open.txid));
+        match self.store_owed(next) {
+            Ok(()) => self.note(format!(
+                "{dropped} settlement(s) owed by a block that left the chain were dropped"
+            )),
+            Err(e) => self.note(format!(
+                "settlements owed by a block that left the chain: {e}"
+            )),
+        }
+    }
+
+    /// OC-52, AS-89: transactions that were given to a hardware signer are
+    /// followed by their IDs, which signatures do not change. One a block
+    /// holds pays its entries; one whose coin a block spent in another
+    /// transaction can no longer confirm. Each is settled from the owed list,
+    /// whenever the queue may be written, and leaves the list only after its
+    /// change to the queue is stored.
+    fn settle_owed(&mut self) {
+        if self.halted.is_some() || self.owed.is_empty() {
+            return;
+        }
+        let items: Vec<Owed> = self.owed.items().to_vec();
+        for item in items {
+            if self.halted.is_some() {
                 return;
             }
-            let dir = self.dir.clone();
-            if let Err(e) = self.log_paid_entries(&open.txid, None, open.refunds, open.cash_out) {
+            // The chain has passed the wallet's position and does not hold
+            // the block: it has left.
+            let chain = self.watcher.chain();
+            if chain.height_of(&item.block).is_none() && chain.tip_height() > self.view.checked() {
                 self.note(format!(
-                    "{} is in block {block} but could not be logged: {e}",
-                    open.txid
+                    "{} was owed by block {}, which is not on the best chain; dropped",
+                    item.txid, item.block
                 ));
+                self.forget_owed(&item);
                 continue;
             }
-            match self
-                .owner
-                .mark_exported_confirmed(&open.txid, |b| write_queue_file(&dir, b))
-            {
-                Ok(()) => self.note(format!(
-                    "{} was given to the signer and is in block {block}: its entries are paid",
-                    open.txid
-                )),
-                Err(e) => self.note(format!("{} could not be marked paid: {e}", open.txid)),
+            match item.kind {
+                OwedKind::ExportedPaid => self.settle_exported(&item),
+                OwedKind::ElsewherePaid => self.settle_elsewhere_paid(&item),
+                OwedKind::ElsewhereBeaten => self.settle_elsewhere_beaten(&item),
             }
         }
-        let kept: Vec<(Txid, Vec<OutPoint>)> = self
+    }
+
+    /// An approval still open whose file went to the signer: the transaction
+    /// may have been finished and sent without the owner.
+    fn settle_exported(&mut self, item: &Owed) {
+        let (txid, block) = (item.txid, item.block);
+        let Some(open) = self
             .owner
-            .signed_elsewhere()
-            .iter()
-            .map(|e| (e.txid, e.inputs.clone()))
-            .collect();
-        for (txid, inputs) in kept {
-            let confirmed = spent_by.iter().any(|(_, by)| *by == txid);
-            let beaten = spent_by
-                .iter()
-                .any(|(op, by)| *by != txid && inputs.contains(op));
-            if !confirmed && !beaten {
-                continue;
+            .exported_transactions(None)
+            .into_iter()
+            .find(|e| e.txid == txid)
+        else {
+            return self.forget_owed(item);
+        };
+        if self.ready_for_queue_write().is_err() {
+            self.note(format!("{txid} waits for key 1 recovery"));
+            return;
+        }
+        let dir = self.dir.clone();
+        if let Err(e) = self.log_paid_entries(&txid, None, open.refunds, open.cash_out) {
+            self.note(format!(
+                "{txid} is in block {block} but could not be logged: {e}"
+            ));
+            return;
+        }
+        match self
+            .owner
+            .mark_exported_confirmed(&txid, |b| write_queue_file(&dir, b))
+        {
+            Ok(()) => {
+                self.note(format!(
+                    "{txid} was given to the signer and is in block {block}: its entries are paid"
+                ));
+                self.forget_owed(item);
             }
-            if self.ready_for_queue_write().is_err() {
-                self.note(format!("{txid} waits for key 1 recovery"));
-                return;
-            }
-            let dir = self.dir.clone();
-            if confirmed {
-                if let Err(e) = self.log_paid_elsewhere(&txid) {
-                    self.note(format!(
-                        "{txid} is in block {block} but could not be logged: {e}"
-                    ));
-                    continue;
-                }
-                match self
-                    .owner
-                    .mark_elsewhere_confirmed(&txid, |b| write_queue_file(&dir, b))
-                {
-                    Ok(dropped) => {
-                        self.note(format!(
-                            "{txid} was signed elsewhere and is in block {block}: its entries are paid"
-                        ));
-                        for gone in dropped {
-                            self.unsend(&gone);
-                            self.states.insert(gone, SendState::Replaced);
-                            self.relays.remove(&gone);
-                            if let Err(e) = self
-                                .view
-                                .drop_pending(&gone, |b| write_file(&dir, COINS_FILE, b))
-                            {
-                                self.stop(format!("the coin view could not be stored: {e}"));
-                                return;
-                            }
-                        }
+            Err(e) => self.note(format!("{txid} could not be marked paid: {e}")),
+        }
+    }
+
+    fn settle_elsewhere_paid(&mut self, item: &Owed) {
+        let (txid, block) = (item.txid, item.block);
+        if !self.owner.signed_elsewhere().iter().any(|e| e.txid == txid) {
+            return self.forget_owed(item);
+        }
+        if self.ready_for_queue_write().is_err() {
+            self.note(format!("{txid} waits for key 1 recovery"));
+            return;
+        }
+        let dir = self.dir.clone();
+        if let Err(e) = self.log_paid_elsewhere(&txid) {
+            self.note(format!(
+                "{txid} is in block {block} but could not be logged: {e}"
+            ));
+            return;
+        }
+        match self
+            .owner
+            .mark_elsewhere_confirmed(&txid, |b| write_queue_file(&dir, b))
+        {
+            Ok(dropped) => {
+                self.note(format!(
+                    "{txid} was signed elsewhere and is in block {block}: its entries are paid"
+                ));
+                self.forget_owed(item);
+                for gone in dropped {
+                    self.unsend(&gone);
+                    self.states.insert(gone, SendState::Replaced);
+                    self.relays.remove(&gone);
+                    if let Err(e) = self
+                        .view
+                        .drop_pending(&gone, |b| write_file(&dir, COINS_FILE, b))
+                    {
+                        self.stop(format!("the coin view could not be stored: {e}"));
+                        return;
                     }
-                    Err(e) => self.note(format!("{txid} could not be marked paid: {e}")),
-                }
-            } else {
-                match self
-                    .owner
-                    .mark_elsewhere_replaced(&txid, |b| write_queue_file(&dir, b))
-                {
-                    Ok(()) => self.note(format!(
-                        "{txid} was signed elsewhere and another transaction spent its coins; it is no longer watched"
-                    )),
-                    Err(e) => self.note(format!("{txid} could not be released: {e}")),
                 }
             }
+            Err(e) => self.note(format!("{txid} could not be marked paid: {e}")),
+        }
+    }
+
+    fn settle_elsewhere_beaten(&mut self, item: &Owed) {
+        let txid = item.txid;
+        if !self.owner.signed_elsewhere().iter().any(|e| e.txid == txid) {
+            return self.forget_owed(item);
+        }
+        if self.ready_for_queue_write().is_err() {
+            self.note(format!("{txid} waits for key 1 recovery"));
+            return;
+        }
+        let dir = self.dir.clone();
+        match self
+            .owner
+            .mark_elsewhere_replaced(&txid, |b| write_queue_file(&dir, b))
+        {
+            Ok(()) => {
+                self.note(format!(
+                    "{txid} was signed elsewhere and another transaction spent its coins; it is no longer watched"
+                ));
+                self.forget_owed(item);
+            }
+            Err(e) => self.note(format!("{txid} could not be released: {e}")),
         }
     }
 
@@ -1897,6 +2041,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         self.refresh_marks();
         self.deep_tick();
         self.settle();
+        self.settle_owed();
     }
 
     /// Stop the drivers.
@@ -1958,6 +2103,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         // OC-24: a deep check that read the chain before it changed starts
         // again when the view has caught up.
         self.cancel_deep("the chain changed while it ran");
+        self.forget_owed_blocks(left);
         self.refresh_marks();
         // The watcher has not applied this event yet, so its view still has
         // the heights of the blocks that left.
@@ -2093,6 +2239,21 @@ impl<P: OwnerPort> OwnerNode<P> {
             Ok(_) => return self.stop(format!("a block did not have the hash {hash} it came as")),
             Err(e) => return self.stop(format!("block {hash} was refused: {e}")),
         };
+        // OC-52: what the block owes is written down before the coin view
+        // takes it, so a restart that finds it not taken processes it again.
+        let owed = self.owed_in(hash, bytes);
+        if !owed.is_empty() {
+            let stored = self
+                .owed
+                .merged(&owed)
+                .map_err(|e| e.to_string())
+                .and_then(|next| self.store_owed(next));
+            if let Err(e) = stored {
+                return self.stop(format!(
+                    "block {hash} owes settlements that could not be stored: {e}"
+                ));
+            }
+        }
         let dir = self.dir.clone();
         match self
             .view
@@ -2109,7 +2270,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 for txid in effect.replaced {
                     self.replaced(txid);
                 }
-                self.settle_elsewhere(hash, &effect.spent_by);
+                self.settle_owed();
             }
             // A block that is not on the best chain is not the wallet's
             // business: the driver says it joined before it hands it over, so
@@ -2118,6 +2279,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 self.note(format!(
                     "block {hash} is not on the best chain; passed over"
                 ));
+                self.forget_owed_blocks(&[*hash]);
             }
             Err(ApplyError::Refused(r)) => self.stop(format!("block {hash} was refused: {r}")),
             Err(e) => self.stop(format!("block {hash} could not be applied: {e}")),

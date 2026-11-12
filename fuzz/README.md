@@ -43,6 +43,7 @@ exactly the input bytes.
 | `signed_pairing_decode` | `SignedPairing::from_bytes` |
 | `owner_command_decode` | `SignedCommand::from_bytes` |
 | `owner_paid_log_decode` | `PaidLog::from_bytes` of `openbmt-owner-node` (the log of what the owner paid out, magic `OBM&`, OC-50), on the input as it is and behind the start of a valid log of two entries; on success the log must encode back to exactly those bytes |
+| `owner_settle_owed_decode` | `SettleOwed::from_bytes` of `openbmt-owner-node` (the settlements a block owes the queue, magic `OBM,`, OC-52), on the input as it is and behind the start of a valid file of three items; on success the file must encode back to exactly those bytes |
 | `owner_pos_setup_decode` | `PosSetup::from_bytes` of `openbmt-owner-node` (the owner's till settings, magic `OBMr`); on success the settings must encode back to exactly those bytes |
 | `watch_sale_decode` | `SaleWatch::from_bytes` |
 | `net_v2_bytes` | a session on the encrypted transport after a good handshake with a fixed responder: the input is the raw stream, or the contents of valid packets (genuine or decoys) that the session decrypts and parses. It must never panic, a drop names its rule, and the bytes waiting never pass the session cap |

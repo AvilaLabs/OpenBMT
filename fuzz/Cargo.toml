@@ -413,6 +413,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "owner_settle_owed_decode"
+path = "fuzz_targets/owner_settle_owed_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "owner_coins_decode"
 path = "fuzz_targets/owner_coins_decode.rs"
 test = false

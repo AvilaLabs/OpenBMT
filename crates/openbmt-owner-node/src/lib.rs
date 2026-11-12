@@ -72,6 +72,7 @@ pub mod receipts;
 pub mod refunds;
 pub mod say;
 pub mod settings_roster;
+pub mod settle_owed;
 mod take_journal;
 pub mod watch;
 pub mod watcher;
@@ -109,6 +110,9 @@ pub use refunds::{
     Applied, CashRefundSeen, Evidence, IntakeError, NoteKind, RefundIntake, RefundNote, Stopped,
 };
 pub use settings_roster::{RosterEntry, RosterError, SettingsRoster};
+pub use settle_owed::{
+    Owed, OwedError, OwedKind, SettleOwed, MAGIC_SETTLE_OWED, MAX_OWED, SETTLE_OWED_FILE,
+};
 pub use watch::{
     WatchConfig, WatchLink, WatchLinkConfig, WatchNode, WatchStartError, WatchState, WATCH_LINK_DIR,
 };

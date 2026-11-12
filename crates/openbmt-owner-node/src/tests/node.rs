@@ -1767,3 +1767,290 @@ fn nr_79_second_owner_node_start_locks_before_reading_or_changing_state() {
         assert_eq!(fs::read(dir.path().join(name)).unwrap(), bytes);
     }
 }
+
+// ---- OC-52: settlements a block owes the queue (on AS-89) ------------------
+
+/// An approval exported to a hardware signer and left open: its refund, its
+/// session and the unsigned transaction of the file.
+fn exported_open(rig: &mut Rig) -> (Transaction, u32, [u8; 32]) {
+    let refund = rig.queue_refund(10_000);
+    rig.fund(300_000);
+    let (_, session) = rig.node.build_request_for_signer(1_000, NOW).unwrap();
+    let session = session.expect("the refund is a spend for the signer");
+    let mut signer = key1();
+    let file = rig
+        .node
+        .export_for_signer(
+            &session,
+            0,
+            &mut signer,
+            &kit().accounts[0],
+            NOW,
+            |_| Ok(()),
+        )
+        .unwrap();
+    let tx = bitcoin::psbt::Psbt::deserialize(&file.psbt)
+        .unwrap()
+        .unsigned_tx;
+    (tx, refund, session)
+}
+
+/// Restart the node with a take journal pending, as after a take whose key
+/// store write failed: the journal holds the queue as it is.
+fn restart_with_journal(dir: &Dir, rig: Rig) -> Rig {
+    let chain = rig.chain.clone();
+    drop(rig);
+    let journal = crate::take_journal::TakeJournal {
+        queue: fs::read(dir.path().join(crate::QUEUE_FILE)).unwrap(),
+        key1: key1().to_bytes(),
+    };
+    fs::write(
+        dir.path().join(crate::TAKE_JOURNAL_FILE),
+        journal.to_bytes().unwrap(),
+    )
+    .unwrap();
+    let rig = start_at(dir, &Setup::default(), chain).unwrap();
+    assert!(rig.node.take_recovery_pending());
+    rig
+}
+
+fn recover(rig: &mut Rig) {
+    let mut signer = key1();
+    rig.node
+        .recover_key1(&mut signer, &kit().accounts[0], |_| Ok(()))
+        .unwrap();
+    assert!(!rig.node.take_recovery_pending());
+}
+
+fn owed_on_disk(dir: &Dir) -> crate::SettleOwed {
+    match fs::read(dir.path().join(crate::SETTLE_OWED_FILE)) {
+        Ok(bytes) => crate::SettleOwed::from_bytes(&bytes).unwrap(),
+        Err(_) => crate::SettleOwed::new(),
+    }
+}
+
+/// A directory where a file's temporary copy goes makes every write of that
+/// file fail until it is removed.
+fn block_writes(dir: &Dir, file: &str) -> PathBuf {
+    let path = dir.path().join(format!("{file}.tmp"));
+    fs::create_dir(&path).unwrap();
+    path
+}
+
+fn refund_stage(rig: &Rig) -> Stage {
+    rig.node.owner().refunds()[0].stage.clone()
+}
+
+#[test]
+fn oc_52_as_89_an_exported_payment_confirmed_during_key_recovery_settles_once_after_it() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, _, session) = exported_open(&mut rig);
+    let txid = tx.compute_txid();
+    let mut rig = restart_with_journal(&dir, rig);
+    rig.mine(std::slice::from_ref(&tx));
+    // Nothing is settled while key 1 recovery is pending, and it is owed.
+    assert!(rig.node.owner().open_sessions().contains(&session));
+    assert!(rig.node.paid_log().is_empty());
+    assert_eq!(owed_on_disk(&dir).items().len(), 1);
+    assert_eq!(owed_on_disk(&dir).items()[0].txid, txid);
+    let notes = rig.node.watcher_mut().take_notes();
+    assert!(
+        notes.iter().any(|n| n.contains("key 1 recovery")),
+        "{notes:?}"
+    );
+    recover(&mut rig);
+    assert_eq!(refund_stage(&rig), Stage::Paid { txid });
+    assert!(!rig.node.owner().open_sessions().contains(&session));
+    assert_eq!(rig.node.paid_log().len(), 1);
+    assert!(owed_on_disk(&dir).is_empty());
+    assert!(rig.node.abandon_session(&session).is_err());
+    // More blocks settle nothing again.
+    rig.mine_empty(2);
+    assert_eq!(rig.node.paid_log().len(), 1);
+}
+
+#[test]
+fn oc_52_as_89_a_failed_queue_write_is_settled_on_the_next_tick_and_logged_once() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, _, session) = exported_open(&mut rig);
+    let txid = tx.compute_txid();
+    let blocked = block_writes(&dir, crate::QUEUE_FILE);
+    rig.mine(std::slice::from_ref(&tx));
+    // The log was written, the queue was not: the approval is still open.
+    assert_eq!(rig.node.paid_log().len(), 1);
+    assert!(rig.node.owner().open_sessions().contains(&session));
+    assert_eq!(owed_on_disk(&dir).items().len(), 1);
+    // Still failing on the tick.
+    rig.deliver(vec![]);
+    assert_eq!(owed_on_disk(&dir).items().len(), 1);
+    fs::remove_dir(blocked).unwrap();
+    rig.deliver(vec![]);
+    assert_eq!(refund_stage(&rig), Stage::Paid { txid });
+    assert!(!rig.node.owner().open_sessions().contains(&session));
+    assert_eq!(rig.node.paid_log().len(), 1);
+    assert!(owed_on_disk(&dir).is_empty());
+}
+
+#[test]
+fn oc_52_as_89_a_restart_between_the_owed_write_and_the_coin_view_commit_settles_once() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, _, session) = exported_open(&mut rig);
+    let txid = tx.compute_txid();
+    // The watch set grows with the approval; let that settle first.
+    rig.feed(vec![]);
+    let blocked = block_writes(&dir, COINS_FILE);
+    rig.mine(std::slice::from_ref(&tx));
+    // The block was written down as owed, and the coin view did not take it.
+    assert!(rig.node.halted().is_some());
+    assert_eq!(owed_on_disk(&dir).items().len(), 1);
+    assert!(rig.node.owner().open_sessions().contains(&session));
+    let chain = rig.chain.clone();
+    drop(rig);
+    fs::remove_dir(blocked).unwrap();
+    let rig = start_at(&dir, &Setup::default(), chain).unwrap();
+    assert_eq!(refund_stage(&rig), Stage::Paid { txid });
+    assert!(!rig.node.owner().open_sessions().contains(&session));
+    assert_eq!(rig.node.paid_log().len(), 1);
+    assert!(owed_on_disk(&dir).is_empty());
+}
+
+#[test]
+fn oc_52_as_89_a_settlement_still_owed_at_start_is_settled_at_start() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, _, session) = exported_open(&mut rig);
+    let txid = tx.compute_txid();
+    let blocked = block_writes(&dir, crate::QUEUE_FILE);
+    rig.mine(std::slice::from_ref(&tx));
+    assert_eq!(owed_on_disk(&dir).items().len(), 1);
+    let chain = rig.chain.clone();
+    drop(rig);
+    fs::remove_dir(blocked).unwrap();
+    let mut rig = start_at(&dir, &Setup::default(), chain).unwrap();
+    assert_eq!(refund_stage(&rig), Stage::Paid { txid });
+    assert!(!rig.node.owner().open_sessions().contains(&session));
+    assert_eq!(rig.node.paid_log().len(), 1);
+    assert!(owed_on_disk(&dir).is_empty());
+    let notes = rig.node.watcher_mut().take_notes();
+    assert!(
+        notes.iter().any(|n| n.contains("its entries are paid")),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn oc_52_as_89_a_settlement_owed_by_a_block_that_left_the_chain_is_dropped_unlogged() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, _, session) = exported_open(&mut rig);
+    let mut rig = restart_with_journal(&dir, rig);
+    let first = rig.mine(std::slice::from_ref(&tx));
+    assert_eq!(owed_on_disk(&dir).items().len(), 1);
+    // Another block takes its place.
+    let height = u32::try_from(rig.chain.len()).unwrap();
+    let parent = if height >= 2 {
+        rig.chain[usize::try_from(height).unwrap() - 2].block_hash()
+    } else {
+        bitcoin::blockdata::constants::genesis_block(NET).block_hash()
+    };
+    let other = mine(parent, height, 7, &[]);
+    rig.feed(vec![AppEvent::Chain {
+        joined: vec![(height, other.block_hash())],
+        left: vec![first.block_hash()],
+    }]);
+    assert!(owed_on_disk(&dir).is_empty());
+    let notes = rig.node.watcher_mut().take_notes();
+    assert!(
+        notes.iter().any(|n| n.contains("left the chain")),
+        "{notes:?}"
+    );
+    recover(&mut rig);
+    assert!(rig.node.paid_log().is_empty());
+    assert!(rig.node.owner().open_sessions().contains(&session));
+    assert!(matches!(refund_stage(&rig), Stage::InSession { .. }));
+}
+
+#[test]
+fn oc_52_as_89_a_signed_elsewhere_payment_confirmed_during_key_recovery_settles_once_after_it() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, _) = exported_then_abandoned(&mut rig);
+    let txid = tx.compute_txid();
+    let mut rig = restart_with_journal(&dir, rig);
+    rig.mine(std::slice::from_ref(&tx));
+    assert_eq!(rig.node.owner().signed_elsewhere().len(), 1);
+    assert!(rig.node.paid_log().is_empty());
+    assert_eq!(owed_on_disk(&dir).items().len(), 1);
+    recover(&mut rig);
+    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    assert_eq!(refund_stage(&rig), Stage::Paid { txid });
+    assert_eq!(rig.node.paid_log().len(), 1);
+    assert!(owed_on_disk(&dir).is_empty());
+}
+
+#[test]
+fn oc_52_as_89_a_signed_elsewhere_payment_beaten_during_key_recovery_is_released_after_it() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, _) = exported_then_abandoned(&mut rig);
+    let other = tx_from(tx.input[0].previous_output, &[(&external(77), 1_000)]);
+    let mut rig = restart_with_journal(&dir, rig);
+    rig.mine(&[other]);
+    assert_eq!(rig.node.owner().signed_elsewhere().len(), 1);
+    assert_eq!(owed_on_disk(&dir).items().len(), 1);
+    recover(&mut rig);
+    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    assert!(matches!(refund_stage(&rig), Stage::Queued));
+    assert!(rig.node.paid_log().is_empty());
+    assert!(owed_on_disk(&dir).is_empty());
+}
+
+#[test]
+fn oc_52_as_89_a_signed_elsewhere_payment_with_a_failed_queue_write_settles_on_the_next_block() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, _) = exported_then_abandoned(&mut rig);
+    let txid = tx.compute_txid();
+    let blocked = block_writes(&dir, crate::QUEUE_FILE);
+    rig.mine(std::slice::from_ref(&tx));
+    assert_eq!(rig.node.owner().signed_elsewhere().len(), 1);
+    assert_eq!(rig.node.paid_log().len(), 1);
+    fs::remove_dir(blocked).unwrap();
+    rig.mine_empty(1);
+    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    assert_eq!(refund_stage(&rig), Stage::Paid { txid });
+    assert_eq!(rig.node.paid_log().len(), 1);
+    assert!(owed_on_disk(&dir).is_empty());
+}
+
+#[test]
+fn oc_52_as_89_a_signed_elsewhere_payment_beaten_with_a_failed_queue_write_settles_later() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, _) = exported_then_abandoned(&mut rig);
+    let other = tx_from(tx.input[0].previous_output, &[(&external(77), 1_000)]);
+    let blocked = block_writes(&dir, crate::QUEUE_FILE);
+    rig.mine(&[other]);
+    assert_eq!(rig.node.owner().signed_elsewhere().len(), 1);
+    assert_eq!(owed_on_disk(&dir).items().len(), 1);
+    fs::remove_dir(blocked).unwrap();
+    rig.deliver(vec![]);
+    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    assert!(matches!(refund_stage(&rig), Stage::Queued));
+    assert!(rig.node.paid_log().is_empty());
+    assert!(owed_on_disk(&dir).is_empty());
+}
+
+#[test]
+fn oc_52_an_owed_file_that_does_not_read_back_stops_the_start() {
+    let dir = Dir::new();
+    fs::write(dir.path().join(crate::SETTLE_OWED_FILE), [0xb2]).unwrap();
+    let error = start(&dir, &Setup::default()).err().unwrap();
+    assert!(
+        matches!(error, NodeError::Files(ref e) if e.contains("OC-52")),
+        "{error:?}"
+    );
+}
