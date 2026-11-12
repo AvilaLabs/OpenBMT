@@ -12,127 +12,142 @@ Bitcoin in the shop's own wallet takes that party out of the middle. It
 does not take away the shop's own duties: the keys and their backups are
 then the shop's to keep, as [Who controls the money](safety.md) explains.
 
-The cases are grouped by kind. Each says how it ended, including when the
-money came back.
+Each case gives the amounts and how it ended, including when the money
+came back. Where an average is worked out here from two published
+figures, the page says so.
 
-## Payment companies holding payouts
+## Payment companies
 
-**PayPal, United States, settled 2017.** A class action said PayPal put
-holds and reserves on accounts without explanation and did not give the
-notices that the law on electronic transfers requires. The court approved
-a settlement of $3.2 million in March 2017, with changes to how PayPal
-explains and handles holds. About 10.5 million accounts were in the class
-that could claim. A basic claim paid part of the interest that the held
-money would have earned.[^paypal]
+**Huel, United Kingdom, PayPal, 2016.** Sales at the food company jumped,
+and within a week PayPal was holding about £44,000 of its takings, to be
+kept for 90 days while PayPal checked for fraud. After Huel complained,
+PayPal changed the hold to a share of each sale for 30 days. On 1 February
+2016, £17,000 had been released and £27,000 was still held. The same
+report said other UK start-ups had waited up to six months for their
+money.[^huel]
 
-**Card processors' own terms, read in November 2026.** Square's payment
-terms let it hold back a seller's payouts in a reserve whose size it sets
-and may change at any time, with no fixed end date. Shopify's terms for
-Shopify Payments let it set the terms of a reserve at its discretion and
-say the merchant has "no legal interest" in the reserve account. Stripe's
-terms describe a reserve as funds that Stripe holds and controls. These
-are standard contract terms, and most merchants never meet a reserve; they
-show that the processor, not the shop, decides when the money
-moves.[^terms]
+**Flipcause, United States, Stripe, 2025.** Flipcause ran online donations
+for charities and schools. On 2 December 2025, after a warning from a card
+network, Stripe held all of its funds, and two days later ended its
+service. Flipcause filed for bankruptcy on 19 December owing more than
+$29 million to over 3,200 organisations, about $9,000 each on average
+(worked out here). One of them, Millenium School, was owed $54,368.20. The
+platform's own handling of money is also under question, and the case
+was not settled at the last report.[^flipcause]
 
 **First American Payment Systems, United States, 2022 to 2025.** The
 Federal Trade Commission said this card processor took money from small
-businesses' accounts without their consent and locked them into contracts
-with hidden terms and fees. The company settled in 2022 and agreed to
-return $4.9 million. By February 2025 more than $2.6 million had been sent
-back to 5,588 businesses.[^fapss]
+businesses' accounts without consent and tied them to contracts with
+hidden terms and exit fees. The company agreed to return $4.9 million. By
+February 2025, cheques totalling more than $2.6 million had gone to 5,588
+businesses, about $465 each (worked out here).[^fapss]
 
-**Wirecard, Germany and the United Kingdom, 2020.** The German payment
-processor said that €1.9 billion in its trust accounts probably did not
-exist, and filed for insolvency. In the UK, the regulator ordered its card
-arm to stop moving funds, and customers of the card apps that ran through
-it could not reach their money for about four days, until the order was
-lifted on 30 June 2020.[^wirecard]
+**PayPal, United States, 2004 and 2017.** Two class actions said PayPal
+froze or held money in accounts without explanation. The first was
+settled in 2004 with a fund of $9.25 million. The second was settled in
+March 2017 with a fund of $3.2 million and changes to how PayPal explains
+holds. About 10.5 million accounts could claim and close to 400,000 did.
+A basic claim paid for the time the money was held: from $3 for a hold
+of up to 30 days to $440 for more than $10,000 held over 150 days.[^paypal]
+
+**PayPal, Poland, 2024.** The Polish competition authority fined PayPal
+about $27 million over terms that let it block users' access to their
+money without clear rules. PayPal could appeal.[^poland]
 
 **Synapse, United States, 2024.** Synapse sat between apps and the banks
-that held their customers' money. When it went bankrupt in April 2024, its
-records and the banks' records did not agree, and accounts were frozen for
-months. In June 2024 the trustee reported about $180 million held by the
-banks against $265 million owed. The consumer regulator later put the
-money still missing at $60 to $90 million and set aside about $46 million
-of its own fund to repay people. Deposit insurance did not apply, because
-Synapse was not a bank.[^synapse]
+that held their customers' money. When it went bankrupt in April 2024,
+its records and the banks' records did not agree, and accounts were
+frozen for months. Mainvest, which raised money from the public for
+restaurants and small shops, could not reach about $2.4 million and closed
+in June 2024. One app's 13,725 customers had $64.9 million deposited and
+were offered $11.8 million back, about 18 cents on the dollar (worked out
+here). Up to $96 million was missing in all, and deposit insurance did not
+apply, because Synapse was not a bank.[^synapse]
 
-## Banks closing accounts
+## Banks
 
-**United Kingdom, 2023.** The Financial Conduct Authority asked banks how
-often they close business accounts. In the year to June 2023, most banks
-reported closing between 1% and 6.9% of their business accounts, and
-declining up to 11.4% of applications. Its 2024 follow-up found that some
-small businesses, such as those that handle a lot of cash, are refused
-accounts because checking them costs the bank too much.[^fca]
+**Silicon Valley Bank, United States, 2023.** The bank closed on Friday
+10 March 2023, holding about $151.6 billion that was above the insured
+limit. Roku had $487 million there, about a quarter of its cash. Rocket
+Lab had $38 million. Rippling, a payroll company, had $545 million of its
+customers' wages locked in the bank, and lent nearly $130 million of its
+own money so that their staff were paid. On Sunday the government decided
+that every depositor would be paid in full, and the money was available
+from Monday 13 March. All of it came back.[^svb]
 
-**Australia, 2021.** A Senate committee heard that 23 members of the
-country's fintech association had lost their bank accounts, one of them
-four times between 2018 and 2020, often suddenly and without a clear
-reason. It asked for a clear process for businesses that lose their
-bank.[^australia]
+**United Kingdom, 2024.** A small limited company's account at Tide was
+blocked on 3 July 2024 and closed in August. Its balance of £3,100.79 was
+paid out on 18 November, four and a half months after the block. The
+Financial Ombudsman awarded £300 and interest. Barclays blocked another
+company's account on 5 August 2024 and held £4,020 for six weeks. In the
+regulator's own survey, the banks in the middle of the range closed
+between 1% and 6.9% of their business accounts in a year.[^uk]
 
-## Banks failing or closing their doors
+**Yes Bank, India, 2020.** On 5 March 2020 the central bank capped what
+each depositor could take out at Rs 50,000. Depositors had already taken
+out Rs 72,000 crore in the two months before, and the cap stayed for 13 days,
+until the bank was rescued on 18 March. PhonePe, one of the country's
+largest payment apps, ran through the bank, and its merchants' payouts
+stopped for about a day.[^yesbank]
 
-**Silicon Valley Bank, United States, 2023.** The bank was closed on 10
-March 2023. Roku, the streaming company, reported that $487 million, about
-a quarter of its cash, was there and mostly uninsured. A payroll company
-that banked there could not pay its customers' staff on time. Two days
-later the Treasury, the Federal Reserve and the deposit insurer decided
-that all depositors would be paid in full, and the money was available
-from Monday 13 March. It came back, after a weekend nobody could plan
-for.[^svb]
+**Cyprus, 2013.** To rescue its two largest banks, Cyprus took the losses
+from deposits above €100,000. At Bank of Cyprus, about 20,000 depositors
+had €3.8 billion above that limit, and 47.5% of it was turned into bank
+shares. At Laiki, about €4 billion above the limit was lost, and by 2019
+about 6 cents of each euro had been recovered. In September 2025, twelve
+years later, €44.36 million of compensation was paid to 4,524 depositors,
+about €9,800 each (worked out here).[^cyprus]
 
-**Yes Bank, India, 2020.** On 5 March 2020 the central bank put Yes Bank
-under a moratorium and capped what depositors could take out. Payment apps
-and merchants that ran through the bank lost their payment service for
-about a day. The bank was rescued, and the limit ended on 18
-March.[^yesbank]
+**Greece, 2015.** Between November 2014 and the summer of 2015, Greek
+businesses took €9.3 billion, 39% of their deposits, out of the banks. The
+banks then closed from 28 June to 20 July, and a large payment to a
+supplier abroad needed a government commission's approval. The national bank's
+own review found that firms kept importing and the damage stayed smaller
+than feared.[^greece]
 
-**Greece, 2015.** Banks closed from 28 June to 20 July 2015. Cash
-withdrawals were limited, and paying a supplier abroad needed approval
-from a government commission. Some shops could not pay their foreign
-suppliers and could not restock. The banks reopened with the limits still
-in place.[^greece]
+## Government money rules
 
-**Cyprus, 2013.** To rescue its two largest banks, Cyprus took losses from
-deposits above €100,000. At Bank of Cyprus, 47.5% of each such deposit was
-turned into shares; at Laiki, most of it was lost. In 2025 the government
-was still designing partial compensation, from a fund of about €260
-million against about €2 billion of losses.[^cyprus]
+**Lebanon, since 2019.** In March 2021, 1.45 million depositors had
+$107 billion in Lebanese banks that they could not freely take out. A
+dollar account paid out in Lebanese pounds at a rate set by the central
+bank, so a withdrawal lost 70% or more of its value against the market
+rate. In 2025 most customers were still limited to about $500 a month. A draft law
+of December 2025 would repay up to $100,000 per depositor in cash over
+four years and the rest in bonds; parliament had not passed it.[^lebanon]
 
-## Money that could not be taken out
+**Brazil, 1990.** A government plan moved $115 billion, about 70% of the
+money in the country, into the central bank for 18 months. Anything above
+about $600 in a savings account was frozen until September 1991, and
+companies struggled to pay their staff.[^brazil]
 
-**Lebanon, since 2019.** No capital-control law was passed, but banks
-limited dollar withdrawals and transfers anyway. The International
-Monetary Fund said in 2023 that deposits were mostly out of reach.
-Importers must now put up the full amount in cash before a bank will
-confirm a letter of credit. In 2025, depositors were still not expected to
-see the money soon.[^lebanon]
+**Argentina, 2001 to 2003.** Bank deposits were frozen in December 2001.
+In early 2002, 27,700 million pesos were locked into fixed terms, and in
+February 2003 nearly half of it, 12,995 million pesos, was still locked.
+Dollar deposits had been converted into pesos by order, and the
+government later paid part of the difference in bonds.[^argentina]
 
-**Myanmar, 2021.** After the military took power in February 2021, banks
-limited withdrawals: 2 million kyat a week for a person, and 20 million
-kyat for a business. Queues formed before dawn, and traders began to
-refuse bank transfers and ask for cash.[^myanmar]
+**Nigeria, 2023.** When new banknotes came in from December 2022, the cash
+in circulation fell from about ₦3.3 trillion to ₦982 billion within four
+months, and a company could withdraw only ₦500,000 a week at first.
+Nigerian Breweries, which took about 80% of its retail sales in cash,
+reported sales down 29.7% from a year earlier. Poultry farmers lost more
+than ₦30 billion of eggs they could not sell. The Supreme Court ruled on
+3 March 2023 that the old notes stayed valid, and the shortage
+eased.[^nigeria]
 
-**Nigeria, 2023.** When new banknotes were brought in from December 2022,
-cash ran short. Businesses had money in the bank but could not get it out
-as cash. In a survey of 46 businesses, about three in four said they were
-badly affected. The Supreme Court ruled on 3 March 2023 that the old notes
-stayed valid, and the shortage eased.[^nigeria]
-
-**Argentina, 2001.** In December 2001 the government partly froze bank
-deposits, and dollar deposits were later converted into pesos by
-order.[^argentina]
+**Zimbabwe, 2019.** In February 2019, US dollars in bank accounts were
+renamed RTGS dollars and then traded at 2.5 to one US dollar, so a
+$1,000 balance was worth about $400 (worked out here). In 2022 the
+government said it had begun compensating balances of $1,000 or less; the
+amount was not published.[^zimbabwe]
 
 ## What these cases say
 
 They do not say that banks or payment companies are bad, or that any of
-these will happen to a given shop. They say that money held by someone
-else comes with that someone's rules, their failures and their country's
-emergencies, and that a business can wait days, months or years through no
-fault of its own.
+this will happen to a given shop. They say that money held by someone
+else comes with that party's rules, its failures and its country's
+emergencies, and that a business can wait days, months or years through
+no fault of its own.
 
 A bitcoin payment to the shop's own wallet is not held by anyone else.
 Nobody can put a reserve on it, close the account or limit the
@@ -143,19 +158,14 @@ setup on making and keeping them.
 > **OpenBMT has had no independent security audit. Do not use it with real
 > funds.**
 
-[^paypal]: The court's
-    [final approval order](https://cases.justia.com/federal/district-courts/california/candce/4:2010cv01668/226532/172/0.pdf)
-    in *Zepeda v. PayPal, Inc.*, No. C 10-2500 SBA (N.D. Cal.), 24 March
-    2017, related to *Fernando v. PayPal*, No. C 10-1668 SBA. The amounts,
-    the class and the claim terms are from that order. Read 2026-11-12.
+[^huel]: [IBTimes UK, 1 February 2016](https://www.ibtimes.co.uk/paypal-withholding-large-sums-money-uk-startups-without-explanation-1541328).
+    Read 2026-11-12.
 
-[^terms]: [Square Payment Terms](https://squareup.com/us/en/legal/general/payment),
-    section 14, effective 6 November 2026;
-    [Shopify Payments Terms (US)](https://www.shopify.com/legal/terms-payments-us),
-    part I, sections B3, C4 and D3;
-    [Stripe Services Agreement](https://stripe.com/legal/ssa), section 12,
-    last modified 28 September 2026. Read 2026-11-12. Terms change; the
-    current text is on each page.
+[^flipcause]: [Oakland Voices, 10 January 2026](https://oaklandvoices.us/2026/01/10/stripe-terminated-services-flipcause-bankruptcy-filings-reveal/),
+    from the bankruptcy filings, including the amounts owed to named
+    organisations;
+    [Nonprofit Quarterly](https://nonprofitquarterly.org/nonprofits-in-limbo-as-flipcause-bankruptcy-unfolds/).
+    Read 2026-11-12.
 
 [^fapss]: Federal Trade Commission,
     [claims process](https://www.ftc.gov/news-events/news/press-releases/2024/02/ftc-announces-claims-process-small-businesses-harmed-payment-processor-first-american),
@@ -163,74 +173,82 @@ setup on making and keeping them.
     [refunds](https://www.ftc.gov/news-events/news/press-releases/2025/02/ftc-sends-more-26-million-refunds-small-businesses-harmed-payment-processor-first-american-payment),
     February 2025. Read 2026-11-12.
 
-[^wirecard]: [Al Jazeera, 22 June 2020](https://www.aljazeera.com/economy/2020/6/22/what-2-1bn-wirecard-says-missing-funds-most-likely-do-not-exist),
-    for the company's statement on the €1.9 billion;
-    [Which?, June 2020](https://www.which.co.uk/news/2020/06/wirecard-goes-bust-what-it-means-for-prepaid-card-and-curve-customers)
-    and [Finance Magnates](https://www.financemagnates.com/regulation-4/wirecard-uk-customer-funds-frozen-after-fca-imposes-requirements/)
-    for the UK order and its end. Read 2026-11-12.
+[^paypal]: The court's
+    [final approval order](https://cases.justia.com/federal/district-courts/california/candce/4:2010cv01668/226532/172/0.pdf)
+    in *Zepeda v. PayPal, Inc.*, No. C 10-2500 SBA (N.D. Cal.), 24 March
+    2017, which also records the 2004 settlement in *Comb v. PayPal*. The
+    claim amounts are from the order's table. Read 2026-11-12.
 
-[^synapse]: [Banking Dive, 12 June 2024](https://www.bankingdive.com/news/synapse-85-million-shortfall-partner-banks-mcwilliams/718796/),
-    for the trustee's figures;
-    [American Banker](https://www.americanbanker.com/news/cfpb-to-hold-synapse-responsible-for-missing-customer-funds),
-    for the Consumer Financial Protection Bureau's estimate;
-    [American Banker, December 2025](https://www.americanbanker.com/news/cfpb-to-refund-46-million-to-synapse-victims),
-    for the repayment fund;
+[^poland]: [PYMNTS, 15 July 2024](https://www.pymnts.com/?p=2010745).
+    Read 2026-11-12.
+
+[^synapse]: [Startland News, 18 May 2024](https://www.startlandnews.com/2024/05/mainvest-closing/)
+    and the
+    [letter of Lawyers for Civil Rights](https://lawyersforcivilrights.org/wp-content/uploads/2024/06/Mainvest-Collapse-Letter-to-FINRA-and-FDIC-1.pdf),
+    24 June 2024, for Mainvest;
     [CNBC, 22 November 2024](https://www.cnbc.com/2024/11/22/synapse-bankruptcy-thousands-of-americans-see-their-savings-vanish.html),
-    for deposit insurance. Read 2026-11-12.
-
-[^fca]: Financial Conduct Authority,
-    [UK payment accounts: access and closures](https://www.fca.org.uk/publication/corporate/uk-payment-accounts-access-and-closures.pdf),
-    September 2023, and its
-    [update](https://www.fca.org.uk/publication/corporate/uk-payment-accounts-access-closures-update.pdf),
-    September 2024. The percentages are the range reported by the banks in
-    the middle of the group, not totals. Read 2026-11-12.
-
-[^australia]: [Broker Daily](https://brokerdaily.au/technology/16174-senate-committee-pushes-for-accountability-in-debanking)
-    on the Senate committee's final report, October 2021, and the
-    [Treasury de-banking review](https://treasury.gov.au/review/de-banking/tor).
+    for the app's customers, the missing total and deposit insurance.
     Read 2026-11-12.
 
 [^svb]: FDIC
     [press release](https://www.fdic.gov/news/press-releases/2023/pr23016.html),
-    10 March 2023; Roku's
-    [SEC filing](https://www.sec.gov/Archives/edgar/data/1428439/000142843923000010/wk-20230310.htm),
-    10 March 2023; the
-    [joint statement](https://home.treasury.gov/news/press-releases/jy1337)
-    of the Treasury, the Federal Reserve and the FDIC, 12 March 2023;
-    [Fortune, 11 March 2023](https://fortune.com/2023/03/11/silicon-valley-bank-collapse-collateral-damage-stablecoin-paychecks/),
-    for payroll. Read 2026-11-12.
-
-[^yesbank]: [TechCrunch, 6 March 2020](https://techcrunch.com/2020/03/06/indias-yes-bank-breakdown-disrupts-walmarts-phonepe-among-a-dozen-other-services/),
-    for the payment outage; the bank's
-    [stock exchange notice](https://archives.nseindia.com/corporate/YESBANK_06032020100035_SE_Intimation.pdf)
-    of the moratorium;
-    [Scroll.in, 14 March 2020](https://scroll.in/latest/956334/troubled-lender-yes-bank-to-resume-all-services-from-6-pm-on-wednesday),
-    for its end. Read 2026-11-12.
-
-[^greece]: [NPR, 24 July 2015](https://www.kunc.org/npr-news/2015-07-24/struggling-greek-businesses-choked-by-money-controls).
+    10 March 2023; Congressional Research Service
+    [IN12125](https://www.everycrsreport.com/reports/IN12125.html), for the
+    uninsured total; Roku's
+    [SEC filing](https://www.sec.gov/Archives/edgar/data/1428439/000142843923000010/wk-20230310.htm);
+    [Yahoo News](https://ca.news.yahoo.com/companies-facing-major-troubles-silicon-181215746.html),
+    for Rocket Lab's filing;
+    [Rippling](https://www.rippling.com/blog/rippling-raises-500m-in-series-e-funding);
+    the [joint statement](https://home.treasury.gov/news/press-releases/jy1337)
+    of the Treasury, the Federal Reserve and the FDIC, 12 March 2023.
     Read 2026-11-12.
 
-[^cyprus]: [AP via Deseret News, 29 July 2013](https://www.deseret.com/2013/7/29/20455243/bank-of-cyprus-depositors-lose-47-5-pct-of-savings/),
-    for the 47.5%;
-    [Cyprus Mail, 31 March 2025](https://cyprus-mail.com/2025/03/31/2013-haircut-losers-to-get-some-compensation),
-    for the compensation fund. Read 2026-11-12.
+[^uk]: Financial Ombudsman Service decisions
+    [DRN-5169817](https://www.financial-ombudsman.org.uk/decision/DRN-5169817.pdf)
+    and [DRN-5552049](https://www.financial-ombudsman.org.uk/decision/DRN-5552049.pdf);
+    Financial Conduct Authority,
+    [UK payment accounts: access and closures](https://www.fca.org.uk/publication/corporate/uk-payment-accounts-access-and-closures.pdf),
+    September 2023, for the year to June 2023 (the range reported by the
+    banks in the middle of the group). Read 2026-11-12.
 
-[^lebanon]: US International Trade Administration,
-    [Lebanon trade financing](https://trade.gov/country-commercial-guides/lebanon-trade-financing),
-    which quotes the IMF's March 2023 statement;
-    [The National, 16 April 2025](https://www.thenationalnews.com/business/2025/04/16/lebanons-bank-customers-wont-see-the-93-billion-they-are-owed-any-time-soon).
+[^yesbank]: [The Week, 18 March 2020](https://www.theweek.in/news/biz-tech/2020/03/18/yes-bank-comes-out-of-moratorium-lender-says-all-services-available-now.html);
+    [PhonePe](https://www.phonepe.com/press/phonepes-transaction-and-traffic-numbers-bounce-back-to-normal/).
     Read 2026-11-12.
 
-[^myanmar]: [The Star (Bloomberg), 7 May 2021](https://www.thestar.com.my/aseanplus/aseanplus-news/2021/05/07/myanmars-central-bank-says-deposits-are-safe-amid-cash-crunch),
-    for the limits;
-    [RNZ (Reuters), 14 May 2021](https://www.rnz.co.nz/news/world/442621/lines-tokens-and-money-brokers-myanmar-s-crumbling-economy-runs-low-on-cash),
-    for the queues and traders. Read 2026-11-12.
+[^cyprus]: [Yale Program on Financial Stability](https://newbagehot.yale.edu/docs/cyprus-laiki-bank-and-bank-cyprus-restructuring-2013),
+    for Bank of Cyprus;
+    [Cyprus Mail, 12 August 2019](https://archive.cyprus-mail.com/?p=260923),
+    for Laiki;
+    [Cyprus Mail, 4 September 2025](https://cyprus-mail.com/2025/09/04/forty-four-million-in-compensation-paid-to-2013-depositors-says-letymbiotis),
+    for the compensation. Read 2026-11-12.
 
-[^nigeria]: [Nairametrics, 16 May 2023](https://nairametrics.com/2023/05/16/36-96-of-nigerian-businesses-forced-to-lay-off-staff-due-to-naira-scarcity-sbm),
-    on the SBM Intelligence survey (a small sample);
+[^greece]: [National Bank of Greece, October 2015](https://nbg.gr/en/group/studies-and-economic-analysis/reports/erminevontas-tis-antoches-stous-elenchous-kinisis-kefalaion---oktovrios-2015);
+    [NPR, 24 July 2015](https://www.kunc.org/npr-news/2015-07-24/struggling-greek-businesses-choked-by-money-controls).
+    Read 2026-11-12.
+
+[^lebanon]: Lebanese Center for Policy Studies,
+    [the central bank's circulars](https://www.lcps-lebanon.org/en/articles/details/2444/the-government-monitor-no-21-|-the-central-bank's-circulars-regulating-depositors'-accounts);
+    [Asharq Al-Awsat, 20 January 2023](https://english.aawsat.com/home/article/4109531/lebanon-central-bank-sets-new-rate-withdrawals-dollar-deposits);
+    [The National, 16 April 2025](https://www.thenationalnews.com/business/2025/04/16/lebanons-bank-customers-wont-see-the-93-billion-they-are-owed-any-time-soon);
+    [Al Jazeera, 30 December 2025](https://www.aljazeera.com/news/2025/12/30/what-is-lebanons-gap-law-that-attempts-to-end-the-financial-crisis).
+    Read 2026-11-12.
+
+[^brazil]: [Chicago Tribune, 25 March 1990](https://www.chicagotribune.com/news/ct-xpm-1990-03-25-9001240707-story.html).
+    Read 2026-11-12.
+
+[^argentina]: [Mercado, 13 February 2003](https://mercado.com.ar/economia-y-politica/corralon-casi-la-mitad-de-los-depositos-fue-liberada),
+    from central bank figures;
+    [Marval O'Farrell Mairal](https://www.marval.com/publicacion/se-abrio-el-corralon-4928?lang=en),
+    on Decree 739/03. Read 2026-11-12.
+
+[^nigeria]: [Carnegie Endowment, January 2024](https://carnegieendowment.org/research/2024/01/why-nigerias-controversial-naira-redesign-policy-hasnt-met-its-objectives),
+    which draws on Business Day, Bloomberg and Punch;
+    [Business Day](https://businessday.ng/business-economy/article/losers-trump-gainers-in-nigerias-naira-redesign/),
+    for the withdrawal limits;
     [Africanews, 3 March 2023](https://www.africanews.com/2023/03/03/supreme-court-faults-president-buhari-on-naira-redesign-policy/),
     for the ruling. Read 2026-11-12.
 
-[^argentina]: IMF Independent Evaluation Office,
-    [The IMF and Argentina, 1991-2001](https://www.imf.org/external/np/ieo/2003/arg/).
+[^zimbabwe]: [Pindula News, 22 March 2019](https://news.pindula.co.zw/2019/03/22/rtgs-dollar-loses-16-value-a-month-after-debut/);
+    the government's
+    [statement of 7 May 2022](https://zimpricecheck.com/wp-content/uploads/2022/05/ED-Speech-Measures-to-Restore-Confidence-07-May-2022-1-compressed.pdf).
     Read 2026-11-12.
