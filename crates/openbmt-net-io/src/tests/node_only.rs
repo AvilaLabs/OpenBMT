@@ -206,15 +206,20 @@ fn nr_106_a_transaction_the_node_announces_is_a_report_and_no_light_sighting() {
     let (net, ..) = net_to(node.addr, Vec::new());
     let clock = TestClock::at(T0);
     let handle = start(config(false), MemStorage::default(), net, &clock);
-    assert!(event(&handle, 10, connected).is_some());
+    // The node announces right after the handshake, so its report and the
+    // fetched transaction may come before the connected state: all three are
+    // watched from the start, and nothing read is thrown away.
     let end = Instant::now() + Duration::from_secs(10);
-    let (mut has, mut sighted) = (false, None);
-    while Instant::now() < end && !(has && sighted.is_some()) {
-        if let Ok(OwnNodeEvent::Has(t)) = handle
+    let (mut up, mut has, mut sighted) = (false, false, None);
+    while Instant::now() < end && !(up && has && sighted.is_some()) {
+        match handle
             .own_node_events()
             .recv_timeout(Duration::from_millis(50))
         {
-            has |= t == tx.compute_txid();
+            Ok(OwnNodeEvent::Has(t)) => has |= t == tx.compute_txid(),
+            Ok(OwnNodeEvent::NodeOnly(input)) => up |= connected(&input),
+            Ok(OwnNodeEvent::State(_)) => panic!("a State event with the mode on"),
+            _ => {}
         }
         while let Ok(e) = handle.events().try_recv() {
             if let AppEvent::Sighting { tx: bytes, from } = e {
@@ -222,6 +227,7 @@ fn nr_106_a_transaction_the_node_announces_is_a_report_and_no_light_sighting() {
             }
         }
     }
+    assert!(up, "the own node connects");
     assert!(has, "the node's report");
     let (bytes, from) = sighted.expect("the transaction is fetched");
     assert_eq!(bytes, serialize(&tx));
