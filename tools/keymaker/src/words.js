@@ -125,14 +125,15 @@ export const WORDS = Object.freeze({
       'is what you want. Click Launch, then I Accept.',
     'Keep the wallet name, click Next. Choose Standard wallet, Next. ' +
       'Choose I already have a seed, Next.',
-    'Click Options, tick BIP39 seed, click OK.',
-    'Type your 12 words from the card. Click Next twice: the first click ' +
-      'closes the word list.',
+    'Click Options, choose BIP39 seed, click OK.',
+    'Type your 12 words from the card, then read them against the card. ' +
+      'Click Next. If the first click only closes the word list, click it ' +
+      'again.',
     'Choose native segwit (p2wpkh). Leave the path as it is. Next.',
-    'Leave the password empty. Next.',
+    'Leave the password empty. Click Finish.',
     'Open Wallet, then Information: the BIP32 root fingerprint must be ' +
-      'the one on this page. Open the Receive tab: the first address must ' +
-      'be the one on this page.',
+      'the one on this page. Open the Receive tab and press Request: the ' +
+      'address must be the one on this page.',
   ],
   electrumClose: 'Close Electrum without saving the wallet.',
   electrumDone: 'Electrum shows the same',
@@ -162,15 +163,17 @@ export const WORDS = Object.freeze({
     'The last word uses your last 7 bits, then 4 check bits made from all ' +
     'your bits.',
   handCheckCommand:
-    'To check the 4 check bits in Tails, open Terminal and type the line ' +
-    'below. The first character of the answer, in binary, is the check ' +
-    'bits.',
+    'To check the 4 check bits in Tails, open Applications, then System ' +
+    'Tools, then Console, and type the line below. The first character of ' +
+    'the answer, in binary, is the check bits.',
   handDieText:
     'Your 50 values as one line of digits. Your bits are the first 128 ' +
     'bits of its SHA-256.',
   handDieCommand:
-    'To check this in Tails, open Terminal and type the line below. The ' +
-    'first 32 characters of the answer must be the ones shown here.',
+    'To check this in Tails, open Applications, then System Tools, then ' +
+    'Console, and type the line below. Read it against the page before ' +
+    'you press Enter: one wrong digit gives a different answer. The first ' +
+    '32 characters of the answer must be the ones shown here.',
   handDieValues: 'Values',
   handDieHash: 'First 32 characters',
   handGroup: 'Group {n}',

@@ -125,7 +125,8 @@ The orders for the die:
 ### Checking the page by hand
 
 The page's "Check it by hand" screen shows the bits, how they make each
-word, and a command to type in the Tails Terminal. For the die, it is
+word, and a command to type in the Tails Console (open Applications, then
+System Tools, then Console). For the die, it is
 
 ```
 echo -n "<the 50 digits>" | sha256sum
