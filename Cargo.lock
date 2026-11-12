@@ -608,6 +608,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-requests"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "openbmt-core",
+ "openbmt-counter",
+]
+
+[[package]]
 name = "openbmt-session"
 version = "0.1.0"
 dependencies = [

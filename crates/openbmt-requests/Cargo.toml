@@ -1,0 +1,17 @@
+[package]
+name = "openbmt-requests"
+description = "The owner phone's payment requests: the request book, quotes, matching payments, repeats and returns"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Path dependencies inside the workspace, and the same exact bitcoin version
+# as openbmt-core so the types unify. The counter is a dependency for its
+# money types and limits (CR-05, CR-08, CR-17, CR-58, CR-61, CR-63), so that
+# the two cannot drift apart; core is for the words a person is shown.
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+openbmt-counter = { path = "../openbmt-counter" }
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
