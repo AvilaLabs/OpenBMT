@@ -19,6 +19,8 @@ exactly the input bytes.
 | `signed_settings_decode` | `SignedSettings::from_bytes` |
 | `high_water_decode` | `HighWater::from_bytes` |
 | `counter_batches_decode` | `CounterBatches::from_bytes`, with fixed roots and policy; the counter and wallet checksum are read from the input's own header |
+| `requests_book_decode` | `RequestBook::from_bytes` on the input as it is and as changes to a valid book; on success the book must encode back to exactly those bytes and the list, the repeats, the ledger lines and the queue must not panic |
+| `requests_return_address` | `check_return_address` on any text, with the first byte saying whether the wallet claims the address; an accepted address is never the wallet's, is of a standard kind and shows in groups of four that read back to it |
 | `exposure_decode` | `Exposure::from_bytes` |
 | `pause_tracker_decode` | `PauseTracker::from_bytes` |
 | `signer_state_decode` | `SignerState::from_bytes` with a fixed network and key, on the input as it is and on the input placed after the wallet text of a valid snapshot (so that it gets past the header); on success the state must encode back to exactly those bytes |

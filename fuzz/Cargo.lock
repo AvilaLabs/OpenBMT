@@ -446,6 +446,7 @@ dependencies = [
  "openbmt-qr",
  "openbmt-qr-jni",
  "openbmt-rates",
+ "openbmt-requests",
  "openbmt-session",
  "openbmt-signer",
  "openbmt-spend",
@@ -662,6 +663,15 @@ dependencies = [
  "openbmt-core",
  "openbmt-counter",
  "openbmt-json",
+]
+
+[[package]]
+name = "openbmt-requests"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "openbmt-core",
+ "openbmt-counter",
 ]
 
 [[package]]

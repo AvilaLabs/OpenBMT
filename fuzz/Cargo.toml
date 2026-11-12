@@ -34,6 +34,7 @@ openbmt-key-ffi = { path = "../crates/openbmt-key-ffi" }
 openbmt-lock = { path = "../crates/openbmt-lock" }
 openbmt-qr = { path = "../crates/openbmt-qr" }
 openbmt-rates = { path = "../crates/openbmt-rates" }
+openbmt-requests = { path = "../crates/openbmt-requests" }
 openbmt-ur = { path = "../crates/openbmt-ur" }
 openbmt-bbqr = { path = "../crates/openbmt-bbqr" }
 openbmt-qr-jni = { path = "../crates/openbmt-qr-jni" }
@@ -765,6 +766,20 @@ bench = false
 [[bin]]
 name = "counter_own_pairing_record_decode"
 path = "fuzz_targets/counter_own_pairing_record_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "requests_book_decode"
+path = "fuzz_targets/requests_book_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "requests_return_address"
+path = "fuzz_targets/requests_return_address.rs"
 test = false
 doc = false
 bench = false

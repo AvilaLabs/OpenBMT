@@ -446,12 +446,15 @@ fn decode_request(r: &mut Reader<'_>) -> Result<Request, BookError> {
         if !fits {
             return bad("a payment's credit is not what its request credits");
         }
-        let ended = match (after, end) {
-            (None, _) => true,
-            (Some(After::Cancel), Some((End::Cancelled, _))) => true,
-            (Some(After::Close), Some((End::Closed | End::CountedPaid, _))) => true,
-            _ => false,
-        };
+        let ended = matches!(
+            (after, end),
+            (None, _)
+                | (Some(After::Cancel), Some((End::Cancelled, _)))
+                | (
+                    Some(After::Close),
+                    Some((End::Closed | End::CountedPaid, _))
+                )
+        );
         if !ended
             || credits
                 .last()

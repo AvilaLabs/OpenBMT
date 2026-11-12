@@ -477,7 +477,7 @@ fn rq_12_a_quote_in_the_currency_is_the_currency_still_owed_at_the_rate_for_24_h
     assert!(q.holds_at(T0 + DAY - 1));
     assert!(!q.holds_at(T0 + DAY));
     // A longer hold than a counter's quote of five minutes.
-    assert!(DAY > QUOTE_SECS);
+    const { assert!(DAY > QUOTE_SECS) };
 }
 
 #[test]

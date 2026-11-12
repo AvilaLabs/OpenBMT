@@ -5,6 +5,13 @@ use super::*;
 use openbmt_core::currency::ShopCurrency;
 use openbmt_core::say::{check, check_distinct, MAX_HEADING, MAX_SENTENCE};
 
+/// What the samples gave: words, the placeholders, and the names that share words.
+type Sampled = (
+    Vec<(String, Words)>,
+    Vec<(&'static str, &'static str)>,
+    Vec<&'static str>,
+);
+
 fn make_name(e: &MakeRefused) -> &'static str {
     match e {
         MakeRefused::NoteNeeded => "MakeRefused::NoteNeeded",
@@ -81,11 +88,7 @@ fn address_name(e: &AddressRefused) -> &'static str {
 /// A refusal that is the same fault as another (a stale rate, too many open
 /// requests) has the same words, and is listed once (SC-07); the name of the
 /// others is in `shared`.
-fn samples() -> (
-    Vec<(String, Words)>,
-    Vec<(&'static str, &'static str)>,
-    Vec<&'static str>,
-) {
+fn samples() -> Sampled {
     let mut words: Vec<(String, Words)> = Vec::new();
     let mut needed: Vec<(&'static str, &'static str)> = Vec::new();
     let mut shared: Vec<&'static str> = Vec::new();

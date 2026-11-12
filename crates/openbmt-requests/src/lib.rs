@@ -35,6 +35,9 @@ pub mod repeat;
 pub mod returns;
 pub mod say;
 
+#[cfg(test)]
+mod codec_tests;
+
 pub use address::{address_in_groups, check_return_address, MAX_ADDRESS_BYTES};
 pub use book::{NewRequest, PriceIn, RequestBook, Shop, MAX_REQUESTS, MAX_RETURNS};
 pub use codec::MAGIC_REQUEST_BOOK;
