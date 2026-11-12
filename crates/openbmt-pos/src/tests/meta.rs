@@ -22,7 +22,7 @@ const MORE_TEST_SOURCES: [&str; 2] = [include_str!("storage.rs"), include_str!("
 /// Rules this crate does not test, each with the reason: those of section 9
 /// are the vendor readers, which are in `openbmt-pos-readers` and tested there
 /// (its own `tests::meta` ties each to a test).
-const NOT_HERE: [(&str, &str); 10] = [
+const NOT_HERE: [(&str, &str); 15] = [
     (
         "PS-90",
         "the vendor readers are in openbmt-pos-readers, which tests this rule",
@@ -63,13 +63,41 @@ const NOT_HERE: [(&str, &str); 10] = [
         "PS-99",
         "the vendor readers are in openbmt-pos-readers, which tests this rule",
     ),
+    (
+        "PS-100",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+    (
+        "PS-101",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+    (
+        "PS-102",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+    (
+        "PS-103",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
+    (
+        "PS-104",
+        "the vendor readers are in openbmt-pos-readers, which tests this rule",
+    ),
 ];
+
+/// The whole number at the start of `text`: `PS-100` is never `PS-10`.
+fn number(text: &str) -> &str {
+    let end = text
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(text.len());
+    &text[..end]
+}
 
 fn defined() -> BTreeSet<String> {
     RULES
         .lines()
         .filter_map(|l| l.strip_prefix("- **PS-"))
-        .map(|rest| format!("PS-{}", &rest[..2]))
+        .map(|rest| format!("PS-{}", number(rest)))
         .collect()
 }
 
@@ -80,7 +108,7 @@ fn sources() -> String {
 #[test]
 fn the_rules_file_defines_its_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 65, "{ids:?}");
+    assert_eq!(ids.len(), 70, "{ids:?}");
     assert!(ids.contains("PS-01") && ids.contains("PS-82"));
 }
 
@@ -113,7 +141,7 @@ fn every_test_names_a_rule_that_exists() {
     let ids = defined();
     for line in sources().lines() {
         if let Some(rest) = line.trim().strip_prefix("fn ps_") {
-            let id = format!("PS-{}", &rest[..2]);
+            let id = format!("PS-{}", number(rest));
             assert!(ids.contains(&id), "test {line} names {id}");
         }
     }
@@ -134,8 +162,8 @@ fn every_rule_the_code_names_exists() {
         include_str!("../settings.rs"),
     ] {
         for (at, _) in file.match_indices("PS-") {
-            let id = &file[at..at + 5];
-            assert!(ids.contains(id), "the code names {id}");
+            let id = format!("PS-{}", number(&file[at + 3..]));
+            assert!(ids.contains(&id), "the code names {id}");
             seen += 1;
         }
     }

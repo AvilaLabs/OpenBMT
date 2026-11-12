@@ -148,7 +148,7 @@ pub(crate) fn split_cursor(c: &Cursor) -> Result<(u64, Option<String>), RequestR
 }
 
 /// PS-94: the cursor for a time and, if there is one, the vendor's marker.
-/// Refused above 256 bytes.
+/// Refused above `MAX_CURSOR_BYTES`.
 pub(crate) fn join_cursor(since: u64, vendor: Option<&str>) -> Result<Cursor, ReadRefused> {
     let text = match vendor {
         Some(v) => format!("{since}|{v}"),
