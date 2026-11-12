@@ -20,6 +20,10 @@ pub enum Slot {
     Desk,
     /// One sale (`OBML`), by its receive index.
     Sale(u32),
+    /// One swap of a sale (CR-220), by the sale's receive index and the
+    /// swap's number within the sale. What it holds is the node's own record;
+    /// the counter's library never reads it.
+    Swap(u32, u32),
 }
 
 /// The caller's storage. A write that returns `Ok` is durable: the bytes will

@@ -491,6 +491,7 @@ dependencies = [
  "openbmt-link",
  "openbmt-net-io",
  "openbmt-pos",
+ "openbmt-swap",
  "openbmt-watch",
 ]
 

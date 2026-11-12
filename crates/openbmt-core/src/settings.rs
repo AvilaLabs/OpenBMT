@@ -2858,7 +2858,8 @@ mod tests {
         let mut s = base();
         s.swap = Some(swap_provider());
         assert_eq!(s.validate(), Ok(()));
-        let bad: [Box<dyn Fn(&mut SwapProvider)>; 10] = [
+        type Break = Box<dyn Fn(&mut SwapProvider)>;
+        let bad: [Break; 10] = [
             Box::new(|p| p.name = String::new()),
             Box::new(|p| p.name = "x".repeat(33)),
             Box::new(|p| p.name = "a\nb".to_string()),

@@ -539,6 +539,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "counter_swap_record_decode"
+path = "fuzz_targets/counter_swap_record_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "counter_lightning_record_decode"
 path = "fuzz_targets/counter_lightning_record_decode.rs"
 test = false

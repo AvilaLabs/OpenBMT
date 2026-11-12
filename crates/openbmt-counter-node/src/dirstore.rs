@@ -113,7 +113,25 @@ pub fn slot_file(slot: Slot) -> String {
         Slot::Pause => "pause.bin".to_string(),
         Slot::Desk => "desk.bin".to_string(),
         Slot::Sale(index) => format!("sale-{index}.bin"),
+        Slot::Swap(index, n) => format!("swap-{index}-{n}.bin"),
     }
+}
+
+/// The sale index and the swap number a file name belongs to, if it is a
+/// swap file (CR-220): the form `slot_file` writes, digits with no leading
+/// zero.
+fn swap_key(name: &str) -> Option<(u32, u32)> {
+    let rest = name.strip_prefix("swap-")?.strip_suffix(".bin")?;
+    let (a, b) = rest.split_once('-')?;
+    let plain = |d: &str| {
+        !d.is_empty()
+            && !(d.len() > 1 && d.starts_with('0'))
+            && d.bytes().all(|c| c.is_ascii_digit())
+    };
+    if !plain(a) || !plain(b) {
+        return None;
+    }
+    Some((a.parse().ok()?, b.parse().ok()?))
 }
 
 /// The index of the sale a file name belongs to, if it is a sale file.
@@ -151,6 +169,9 @@ pub struct Loaded {
     pub desk: Option<Vec<u8>>,
     /// Each sale (`OBML`) with the index of its slot, lowest first.
     pub sales: Vec<(u32, Vec<u8>)>,
+    /// Each swap file (CR-220) with the sale's index and the swap's number,
+    /// lowest first.
+    pub swaps: Vec<(u32, u32, Vec<u8>)>,
     /// How many records the file holds. Each one parses; they are read back
     /// with `Store::read_records` and the chain is checked by
     /// `Counter::load`.
@@ -341,6 +362,12 @@ impl DirStore {
         for entry in listing {
             let entry = entry.map_err(io_err("the data directory", "list"))?;
             let name = entry.file_name();
+            if let Some((index, n)) = name.to_str().and_then(swap_key) {
+                if let Some(bytes) = self.read(&slot_file(Slot::Swap(index, n)))? {
+                    loaded.swaps.push((index, n, bytes));
+                }
+                continue;
+            }
             let Some(index) = name.to_str().and_then(sale_index) else {
                 continue;
             };
@@ -350,6 +377,7 @@ impl DirStore {
             }
         }
         loaded.sales.sort_by_key(|(i, _)| *i);
+        loaded.swaps.sort_by_key(|(i, n, _)| (*i, *n));
         self.load_records(&mut loaded)?;
         Ok(loaded)
     }

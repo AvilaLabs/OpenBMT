@@ -390,6 +390,14 @@ pub enum SaleLightning {
     Invoice(Checked),
     /// There is none for this sale, and why.
     Unavailable(Words),
+    /// Through a swap provider (CR-219): there is none for this sale, and
+    /// the small line says so.
+    NotForThisSale,
+    /// Through a swap provider (CR-221): the Lightning payment arrived and
+    /// the sale waits for one block.
+    Confirming(Words),
+    /// Through a swap provider (CR-223): the swap failed before its claim.
+    Failed(Words),
 }
 
 /// One request for the app to send.

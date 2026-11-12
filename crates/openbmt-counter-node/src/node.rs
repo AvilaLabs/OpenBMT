@@ -102,21 +102,24 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use bitcoin::consensus::deserialize;
-use bitcoin::{BlockHash, ScriptBuf, Transaction, Txid};
+use bitcoin::{Address, BlockHash, Network, ScriptBuf, Transaction, Txid};
 use openbmt_core::batch::{AddError, PinnedRoots, SignedBatch};
 use openbmt_core::command::SignedCommand;
 use openbmt_core::heartbeat::SignedHeartbeat;
 use openbmt_core::identity::Identity;
 use openbmt_core::records::Record;
-use openbmt_core::settings::{Change, SettingNote, Settings, SignedSettings, LIGHTNING_NODE_BYTES};
+use openbmt_core::say::Words;
+use openbmt_core::settings::{
+    Change, SettingNote, Settings, SignedSettings, SwapProvider, LIGHTNING_NODE_BYTES,
+};
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
     Actor, Amount, BatchTakeRefused, BlockError, CancelRefused, CashRefund, CommandRefused,
     Counter, Currency, DayTotals, Facts, HeartbeatRefused, HeartbeatView, JudgeError,
     LightningPaid, LoadError, NoteRefused, OpenFacts, OpenRefused, Opened, Overridden, Pairing,
     Quote, Rate, RateSource, RefundRefused, RefundRequest, RefundView, Report, RequoteRefused,
-    SaleExtras, Screen, SightingError, StaffEvent, StaffRefused, StoreFault, TotalsRefused,
-    WithdrawRefused,
+    SaleExtras, Screen, SightingError, Slot, StaffEvent, StaffRefused, Store, StoreFault, SwapPaid,
+    TotalsRefused, WithdrawRefused,
 };
 use openbmt_lightning::{CertPin, Credential, Reply};
 use openbmt_net_io::{
@@ -137,6 +140,7 @@ use crate::lightning::{
 };
 use crate::notices::NodeRecords;
 use crate::settings::{check_not_rolled, SettingsFault, SettingsRefused};
+use crate::swap::{Effect, SaleSwap, SwapDriver, SwapRequest, Update};
 
 /// Most transactions the node keeps for later announcements.
 pub const TX_CACHE: usize = 256;
@@ -262,6 +266,10 @@ pub trait DriverPort {
     fn ask_own_node(&self, _txid: Txid) {}
     /// NR-100: dial the own node again after it broke a rule.
     fn retry_own_node(&self) {}
+    /// NR-86: hold a finished transaction (consensus bytes) and send it to
+    /// the peers. The counter sends nothing else (NR-55): only the claim of
+    /// a swap (CR-222).
+    fn send_claim(&self, _tx: Vec<u8>) {}
 }
 
 impl DriverPort for Handle {
@@ -292,6 +300,19 @@ impl DriverPort for Handle {
     fn retry_own_node(&self) {
         Handle::retry_own_node(self);
     }
+
+    fn send_claim(&self, tx: Vec<u8>) {
+        Handle::broadcast(self, tx);
+    }
+}
+
+/// CR-219: 32 bytes from the operating system, or none when it has none.
+fn os_random() -> Option<[u8; 32]> {
+    use std::io::Read;
+    let mut file = std::fs::File::open("/dev/urandom").ok()?;
+    let mut bytes = [0u8; 32];
+    file.read_exact(&mut bytes).ok()?;
+    Some(bytes)
 }
 
 /// The function that answers the health question (WR-50 to WR-53; the node
@@ -372,7 +393,11 @@ pub struct Node<P: DriverPort = Handle> {
     roots: PinnedRoots,
     /// CR-164: what the node was started with that settings can change: the
     /// Tor switch and the Lightning node.
-    started_with: (bool, Option<[u8; LIGHTNING_NODE_BYTES]>),
+    started_with: (
+        bool,
+        Option<[u8; LIGHTNING_NODE_BYTES]>,
+        Option<SwapProvider>,
+    ),
     /// CR-162: the settings in force have no `Setting` record yet.
     setting_unrecorded: Option<SettingNote>,
     /// CR-103: the driver was started with an own node.
@@ -401,6 +426,13 @@ pub struct Node<P: DriverPort = Handle> {
     ln: Lightning,
     /// What a Lightning payment reported, for the next pump.
     ln_reports: Vec<Report>,
+    /// CR-218 to CR-226: the driver of Lightning through a swap provider.
+    swap: SwapDriver,
+    /// The operating system's randomness for a swap's secrets (CR-219).
+    swap_random: Box<dyn FnMut() -> Option<[u8; 32]> + Send>,
+    /// The lockup scripts the driver was already asked to watch.
+    swap_watching: Vec<ScriptBuf>,
+    network: Network,
     /// NR-79. Last, so that it is released after the driver has stopped.
     _lock: DirLock,
 }
@@ -527,10 +559,22 @@ impl<P: DriverPort> Node<P> {
             lightning.as_deref(),
         );
 
+        // CR-220: the swaps that were saved, with the sale scripts they claim
+        // to.
+        let swap = SwapDriver::new(
+            driver.network,
+            settings.swap.as_ref(),
+            &loaded.swaps,
+            |index| counter.sale(index).map(|s| s.script().clone()),
+        );
+        let mut scripts = counter.watched_scripts();
+        let launch_swap_scripts = swap.watched_scripts();
+        scripts.extend(launch_swap_scripts.iter().cloned());
+        let network = driver.network;
         let port = spawn(Launch {
             driver,
             dir,
-            scripts: counter.watched_scripts(),
+            scripts,
         })
         .map_err(StartError::Driver)?;
         let mut node = Self {
@@ -543,7 +587,11 @@ impl<P: DriverPort> Node<P> {
             health_base: None,
             health: None,
             blocks_behind_since: None,
-            started_with: (settings.tor_on, settings.lightning_node),
+            started_with: (
+                settings.tor_on,
+                settings.lightning_node,
+                settings.swap.clone(),
+            ),
             settings,
             roots,
             setting_unrecorded,
@@ -566,6 +614,10 @@ impl<P: DriverPort> Node<P> {
             settle_wanted: false,
             ln,
             ln_reports: Vec::new(),
+            swap,
+            swap_random: Box::new(os_random),
+            swap_watching: launch_swap_scripts,
+            network,
             _lock: lock,
         };
         // CR-112: a sale that was open at the last stop asks for an invoice
@@ -594,6 +646,7 @@ impl<P: DriverPort> Node<P> {
             node.ln.sale_restored(index, &quotes, open, started_at);
         }
         node.take_ln_notes();
+        node.restore_swaps(started_at);
         node.update_all_blocks();
         node.retry_setting_record();
         // WR-65: the sales are restored, so the own node is asked about
@@ -745,7 +798,11 @@ impl<P: DriverPort> Node<P> {
     /// started with (the Tor switch or the Lightning node), so that the app
     /// must start the node again before they take effect.
     pub fn restart_needed(&self) -> bool {
-        (self.settings.tor_on, self.settings.lightning_node) != self.started_with
+        (
+            self.settings.tor_on,
+            self.settings.lightning_node,
+            self.settings.swap.clone(),
+        ) != self.started_with
     }
 
     /// CR-165: whether the settings in force no longer list this counter.
@@ -834,6 +891,7 @@ impl<P: DriverPort> Node<P> {
             self.apply(event, &mut touched, &mut reports);
         }
         self.take_own_events(&mut touched);
+        self.swap_step(&mut reports);
         // WR-54 reads the checked height and the clock, which move without
         // a `Peers` event.
         self.refresh_health(&mut touched);
@@ -956,7 +1014,8 @@ impl<P: DriverPort> Node<P> {
                 touched.extend(self.sales_with_payments());
             }
             AppEvent::Sighting { tx, from } => {
-                if self.offer(&tx, &from, touched, reports) {
+                let swap_took = self.swap_sighting(&tx, &from);
+                if self.offer(&tx, &from, touched, reports) || swap_took {
                     self.remember(&tx);
                     self.ask_own_node_about(&tx);
                 }
@@ -1170,6 +1229,7 @@ impl<P: DriverPort> Node<P> {
                 return;
             }
         };
+        self.swap.block(&block, &self.view, now);
         match self.counter.block(&block, &self.view, now, &mut self.store) {
             Ok(taken) => {
                 for (index, result) in taken.results {
@@ -1270,6 +1330,227 @@ impl<P: DriverPort> Node<P> {
         }
     }
 
+    // CR-218 to CR-226: Lightning through a swap provider.
+
+    /// CR-220: after a start, every open sale that has no swap alive asks
+    /// for one, and the sales whose swap is on the way do not expire.
+    fn restore_swaps(&mut self, now: u64) {
+        let sales: Vec<(u32, ScriptBuf, u64, bool)> = self
+            .known
+            .iter()
+            .filter_map(|i| self.counter.sale(*i))
+            .filter(|s| !s.is_request())
+            .map(|s| (s.index(), s.script().clone(), s.needs_sats(), s.is_live()))
+            .collect();
+        for (index, script, sats, open) in sales {
+            if let Ok(address) = Address::from_script(&script, self.network) {
+                self.swap.sale_restored(index, address, sats, open, now);
+            }
+            if self.swap.sale_pending(index) {
+                self.counter.set_swap_pending(index, true);
+            }
+        }
+        self.swap_flush();
+    }
+
+    /// The lockup of a swap may be among the transactions the peers announce.
+    fn swap_sighting(&mut self, tx: &[u8], from: &[PeerAddr]) -> bool {
+        let now = self.clock.now();
+        let mut taken = false;
+        for addr in from {
+            taken |= self.swap.sighting(tx, Source::Peer(*addr), now);
+        }
+        taken
+    }
+
+    /// CR-220: write what the driver asks to be written and, once a record
+    /// that holds a claim is written, send the claim to the peers. A record
+    /// that was not written is asked for again at the next call.
+    fn swap_flush(&mut self) {
+        // The lockup address of a swap is watched from the moment the swap
+        // is made (CR-220).
+        for script in self.swap.watched_scripts() {
+            if !self.swap_watching.contains(&script) {
+                self.port.watch_script(script.clone());
+                self.swap_watching.push(script);
+            }
+        }
+        for effect in self.swap.flush() {
+            let Effect::Save {
+                index,
+                n,
+                bytes,
+                send,
+            } = effect;
+            match self.store.put(Slot::Swap(index, n), &bytes) {
+                Ok(()) => {
+                    self.swap.saved(index, n, &bytes);
+                    if let Some(tx) = send {
+                        self.port.send_claim(tx);
+                    }
+                }
+                Err(e) => self.note(format!(
+                    "CR-220: the record of swap {index}-{n} was not written: {e}"
+                )),
+            }
+        }
+        for line in self.swap.take_notes() {
+            self.note(line);
+        }
+    }
+
+    /// CR-219 to CR-223: what the chain and the provider showed is given to
+    /// the counter.
+    fn swap_step(&mut self, reports: &mut Vec<Report>) {
+        if !self.swap_active() {
+            return;
+        }
+        let now = self.clock.now();
+        let facts = Facts {
+            chain: &self.view,
+            health: self.health.unwrap_or(NO_ANSWER_YET),
+            heartbeat: self.counter.heartbeat_for_policy(now),
+            remote_order: false,
+            now,
+        };
+        let counter = &self.counter;
+        let updates = self.swap.step(now, &self.view, &mut |index, sats, status| {
+            counter.swap_decide(index, sats, status, &facts).is_some()
+        });
+        // The records first: a claim is sent only after its record is
+        // written (CR-220).
+        self.swap_flush();
+        for update in updates {
+            match update {
+                Update::Claimed {
+                    index,
+                    n,
+                    payment_hash,
+                    invoice_sats,
+                    received_sats,
+                    lockup_confirmed,
+                    status,
+                } => {
+                    let facts = Facts {
+                        chain: &self.view,
+                        health: self.health.unwrap_or(NO_ANSWER_YET),
+                        heartbeat: self.counter.heartbeat_for_policy(now),
+                        remote_order: false,
+                        now,
+                    };
+                    let instant = if lockup_confirmed {
+                        None
+                    } else {
+                        self.counter
+                            .swap_decide(index, invoice_sats, &status, &facts)
+                    };
+                    if !lockup_confirmed && instant.is_none() {
+                        // The claim is sent; the sale is paid when the
+                        // lockup is in a block.
+                        continue;
+                    }
+                    let paid = SwapPaid {
+                        payment_hash,
+                        invoice_sats,
+                        received_sats,
+                    };
+                    match self
+                        .counter
+                        .swap_paid(index, paid, instant, &facts, &mut self.store)
+                    {
+                        Ok(Some(screen)) => {
+                            reports.extend(screen.reports);
+                            self.swap.told(index, n, lockup_confirmed);
+                        }
+                        Ok(None) => {}
+                        Err(openbmt_counter::LightningRefused::Store(e)) => self.note(format!(
+                            "sale {index}: a swap payment was not recorded: {e}"
+                        )),
+                        Err(e) => {
+                            // The sale is over or was paid another way: the
+                            // claim pays the shop's address and the counter
+                            // shows it as a late payment (CR-19).
+                            self.note(format!("sale {index}: a swap payment was not taken: {e}"));
+                            self.swap.told(index, n, lockup_confirmed);
+                        }
+                    }
+                }
+                Update::LockupConfirmed { index } => {
+                    if let Err(e) = self.counter.swap_lockup_confirmed(index, &mut self.store) {
+                        self.note(format!("sale {index}: the exposure was not released: {e}"));
+                    }
+                }
+                Update::Cancel { index } => {
+                    match self.counter.swap_cancelled(index, now, &mut self.store) {
+                        Ok(r) => reports.extend(r),
+                        Err(e) => {
+                            self.note(format!("sale {index}: the cancel was not stored: {e}"))
+                        }
+                    }
+                }
+                Update::Pending { index, pending } => {
+                    self.counter.set_swap_pending(index, pending);
+                }
+                Update::Failed { index, n, failure } => {
+                    self.note(format!("CR-223: swap {index}-{n} failed: {failure:?}"));
+                }
+                Update::Stuck { index } => {
+                    self.note(format!(
+                        "CR-222: the claim of sale {index} is not in a block and the deadline is near"
+                    ));
+                }
+            }
+        }
+        self.swap_flush();
+    }
+
+    /// Whether any part of the swap driver has work: a provider is set, or
+    /// a swap that was saved is not over.
+    fn swap_active(&self) -> bool {
+        self.swap.is_on() || !self.swap.watched_scripts().is_empty()
+    }
+
+    /// CR-219, CR-225: the next request for the provider, as the bytes of an
+    /// HTTP/1.1 request for its onion name, or none.
+    pub fn swap_next(&mut self) -> Option<SwapRequest> {
+        let now = self.clock.now();
+        let tip = self.view.tip_height();
+        let request = self.swap.next(now, tip, &mut *self.swap_random);
+        self.swap_flush();
+        request
+    }
+
+    /// CR-225: the bytes that came back for the request with this number.
+    pub fn swap_reply(&mut self, id: u64, bytes: &[u8]) {
+        let now = self.clock.now();
+        let tip = self.view.tip_height();
+        self.swap.reply(id, bytes, now, tip);
+        self.swap_flush();
+    }
+
+    /// CR-225: the request with this number got no answer.
+    pub fn swap_failed(&mut self, id: u64) {
+        let now = self.clock.now();
+        self.swap.failed(id, now);
+        self.swap_flush();
+    }
+
+    /// CR-222: what the owner is told when a claim is stuck, if one is.
+    pub fn swap_status(&self) -> Option<Words> {
+        self.swap.any_stuck().then(crate::swap::claim_stuck_words)
+    }
+
+    /// CR-219: whether the swap provider of the settings is in use.
+    pub fn swap_on(&self) -> bool {
+        self.swap.is_on()
+    }
+
+    /// The source of the randomness for a swap's secrets: the operating
+    /// system's unless a test puts another.
+    pub fn set_swap_random(&mut self, random: Box<dyn FnMut() -> Option<[u8; 32]> + Send>) {
+        self.swap_random = random;
+    }
+
     // What the cashier asks.
 
     /// Open a sale (CR-01 to CR-05). The check must be healthy: before the
@@ -1355,6 +1636,11 @@ impl<P: DriverPort> Node<P> {
         if extras.request.is_none() {
             self.ln
                 .sale_opened(opened.index, opened.needs_sats, self.clock.now());
+            // CR-219: the sale asks the swap provider for an invoice too.
+            if let Ok(address) = Address::from_script(&opened.script, self.network) {
+                self.swap
+                    .sale_opened(opened.index, address, opened.needs_sats, self.clock.now());
+            }
         }
         Ok(opened)
     }
@@ -1390,7 +1676,20 @@ impl<P: DriverPort> Node<P> {
         }
         let view = self.ln.sale_view(index, now);
         self.take_ln_notes();
-        view
+        if !matches!(view, SaleLightning::Off) {
+            return view;
+        }
+        // CR-219: one Lightning path at a time, so only one of the two has
+        // anything to show.
+        match self.swap.sale_view(index, now) {
+            SaleSwap::Off => SaleLightning::Off,
+            SaleSwap::Waiting => SaleLightning::Waiting,
+            SaleSwap::Invoice(checked) => SaleLightning::Invoice(checked),
+            SaleSwap::NotForThisSale => SaleLightning::NotForThisSale,
+            SaleSwap::Unavailable(words) => SaleLightning::Unavailable(words),
+            SaleSwap::Confirming(words) => SaleLightning::Confirming(words),
+            SaleSwap::Failed(words) => SaleLightning::Failed(words),
+        }
     }
 
     /// CR-116: the Lightning line of the status, when a credential is saved.
@@ -1564,6 +1863,7 @@ impl<P: DriverPort> Node<P> {
         // CR-112: a new quote asks for a new invoice.
         let sats = self.counter.sale(index).map_or(0, |s| s.needs_sats());
         self.ln.sale_requoted(index, sats, now);
+        self.swap.sale_requoted(index, sats, now);
         Ok(quote)
     }
 
@@ -1582,6 +1882,7 @@ impl<P: DriverPort> Node<P> {
         let now = self.clock.now();
         self.counter.cancel_by(index, now, by, &mut self.store)?;
         self.ln.sale_closed(index);
+        self.swap.sale_closed(index);
         Ok(())
     }
 

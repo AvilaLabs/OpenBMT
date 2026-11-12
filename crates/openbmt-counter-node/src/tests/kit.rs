@@ -307,6 +307,8 @@ pub struct Calls {
     pub asked: Vec<Txid>,
     /// How many times the node asked to dial the own node again.
     pub retried: u32,
+    /// The transactions the node sent to the peers, in order.
+    pub broadcast: Vec<Vec<u8>>,
 }
 
 /// A driver port whose events the test sends.
@@ -343,6 +345,10 @@ impl DriverPort for FakePort {
 
     fn retry_own_node(&self) {
         self.calls.lock().unwrap().retried += 1;
+    }
+
+    fn send_claim(&self, tx: Vec<u8>) {
+        self.calls.lock().unwrap().broadcast.push(tx);
     }
 }
 

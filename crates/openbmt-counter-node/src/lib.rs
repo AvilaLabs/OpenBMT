@@ -19,7 +19,9 @@
 //!    CR-116).
 //! 7. [`ownnode`]: the counter's own-node setting (CR-100 to CR-102), read
 //!    from the text a manager typed.
-//! 8. [`settings`]: the settings the owner sends after pairing, the file the
+//! 8. [`swap`]: the driver of Lightning through a swap provider (CR-218 to
+//!    CR-226).
+//! 9. [`settings`]: the settings the owner sends after pairing, the file the
 //!    counter keeps them in and what a start does with it (CR-160 to
 //!    CR-166).
 //!
@@ -54,6 +56,7 @@ pub mod paired;
 pub mod relaylink;
 pub mod say;
 pub mod settings;
+pub mod swap;
 
 #[cfg(test)]
 mod tests;
@@ -82,4 +85,7 @@ pub use relaylink::{link_route, start_link, LinkLine, LinkNotStarted};
 pub use settings::{
     decode_file as decode_settings_file, effective as effective_settings, Effective, SettingsFault,
     SettingsLine, SettingsRefused, MAX_SETTINGS_FILE_BYTES,
+};
+pub use swap::{
+    SaleSwap, SwapDriver, SwapRecord, SwapRequest, MAGIC_SWAP_RECORD, NOT_FOR_THIS_SALE,
 };

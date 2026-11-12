@@ -20,7 +20,13 @@ openbmt-link = { path = "../openbmt-link" }
 openbmt-pos = { path = "../openbmt-pos" }
 # The shop's own Lightning node (CR-112 to CR-116).
 openbmt-lightning = { path = "../openbmt-lightning" }
+# Lightning through a swap provider (CR-218 to CR-226).
+openbmt-swap = { path = "../openbmt-swap" }
 
 [dev-dependencies]
 # The recorded replies and the invoice writer of the tests.
 openbmt-lightning = { path = "../openbmt-lightning", features = ["testing"] }
+# The pretend swap service and the regtest node of the tests (SW-90).
+openbmt-swap = { path = "../openbmt-swap", features = ["testing"] }
+# The owner phone's check of a refund (CR-224), in the end-to-end test.
+openbmt-owner = { path = "../openbmt-owner" }

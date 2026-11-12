@@ -422,7 +422,9 @@ dependencies = [
  "openbmt-lightning",
  "openbmt-link",
  "openbmt-net-io",
+ "openbmt-owner",
  "openbmt-pos",
+ "openbmt-swap",
  "openbmt-watch",
 ]
 
