@@ -58,10 +58,72 @@ off. The next section explains how.
 **Set up the rest now, add the wallet later.** Everything else is set up,
 and the counter says "Not taking bitcoin yet" until a wallet is added.
 
-Not built yet. Reading a public description and its checks are built; the
-app does not keep the wallet yet, and all three choices still continue
-into the older setup with two phones, described in [Who controls the
-money](safety.md).
+## Connecting the wallet you have
+
+Every wallet can be described by a line of public text, its output
+descriptor. It names the wallet's public keys and how addresses are made
+from them. With it, OpenBMT can make a new address for every sale and see
+what has been paid. It cannot spend: spending needs the private keys,
+which stay in the wallet.
+
+The owner app asks for that description on "Connect your wallet", by
+scanning a code from the wallet's screen or by pasting the text.
+
+| Wallet | Where the description is | Read by OpenBMT |
+|---|---|---|
+| Sparrow | The wallet's Settings tab, "Show Descriptor QR"; or File, Export Wallet, Output Descriptor | Pasted text today. Its animated code once the new scan reader is in the app. |
+| Coldcard | Export wallet, Descriptor, as a file, NFC or a code | Pasted text and its plain code today. |
+| Bitcoin Keeper | The wallet's settings, Wallet Configuration | Pasted text and its plain code today. Its animated code once the new scan reader is in the app. |
+| Jade, Keystone, Passport | The device's export of its account key as an animated code | Once the new scan reader is in the app. |
+| BlueWallet, Blockstream Green, Bitcoin Core | BlueWallet's "Show XPUB"; Green's two descriptors; Core's `listdescriptors` | Not yet: each writes the description in a form OpenBMT does not read yet. |
+| Electrum | Electrum shows no output descriptor | Not yet. |
+
+A wallet that shows only an xpub or a zpub, with no description around
+it, cannot be used: an xpub alone does not say which master key it came
+from, which hardware signers need in order to sign the shop's refunds.
+
+### The first address
+
+Before anything else, the app shows the wallet's first receive address in
+large type and asks the owner to find the same address in the wallet: in
+its list of addresses, the first receive address. They must be the same,
+character for character. "Same address" goes on; "Different" stops, and
+nothing is kept.
+
+The check matters because it is the one moment the owner sees, with their
+own eyes, that the description the phone holds is the wallet whose keys
+they hold. A description from the wrong wallet, or one changed on its way
+to the phone, would send every sale somewhere else.
+
+### How far the wallet looks ahead
+
+A wallet does not watch every address its keys could make. It watches
+the addresses it has used, plus a number of addresses after the last
+used one, its gap limit, usually 20. OpenBMT hands each counter a block
+of 1,000 addresses, and a sale that is never paid leaves its address
+unused. After enough unpaid sales in a row, a payment can land beyond
+what the wallet watches: the money is there, but the wallet does not
+show it until it looks further.
+
+The owner app keeps track of this. On the wallet's page it shows how far
+ahead the wallet must look to see every payment, and asks the owner to
+raise the wallet's setting when the usual 20 is not enough. Sparrow
+allows up to 1,000,000 (Settings, Advanced, Gap limit); Bitcoin Core
+looks 1,000 ahead by default; Blockstream Green allows up to 1,000;
+BlueWallet and Bitcoin Keeper are fixed at 20.
+
+### What is built
+
+Reading and checking a pasted description, and the first-address check,
+are built in the owner app. The counter's side of pairing with the shop's
+own wallet is built: it checks the first address, takes the owner phone's
+code and makes its own addresses from the wallet. The library prepares a
+refund from a wallet with one key in the form Bitcoin Core signs, checked
+against Bitcoin Core in a test; hardware signers have not been tried yet.
+The owner phone's side of adding a counter this way, the new scan reader
+and the other wallets' forms are being built. Until they are, all
+three choices continue into the older setup with two phones, described in
+[Who controls the money](safety.md).
 
 ## Making a cold wallet with a coin or a die
 
