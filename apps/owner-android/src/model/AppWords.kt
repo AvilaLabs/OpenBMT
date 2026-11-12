@@ -606,6 +606,38 @@ object AppWords {
         "Bring this phone and the Key app together and start an approval.",
     )
 
+    /** The sources gave the price a cash-out is recorded at, in the shop's currency (OA-102). */
+    fun cashOutPrice(whole: Long, c: ShopCurrency) = w(
+        Tones.INFO, "Today's price",
+        "The price sources give ${PriceModel.dollars(whole)} ${c.plural} for one bitcoin. The books record this cash-out at that price.",
+        Who.OWNER,
+        "If it looks right, go on. To use another price, type it below.",
+    )
+
+    /** The sources did not answer, so the owner types the price a cash-out is recorded at (OA-102). */
+    val cashOutPriceNeeded = w(
+        Tones.INFO, "Price needed",
+        "The price sources did not answer, and the books need what this cash-out is worth.",
+        Who.OWNER,
+        "Type the price of one bitcoin, then go on.",
+    )
+
+    /** No counter has reported a sale (OA-103). */
+    val booksEmpty = w(
+        Tones.INFO, "No sales yet",
+        "No counter has sent a sale to this phone yet.",
+        Who.NOBODY,
+        "Nothing to do. Sales appear here as the counters report them.",
+    )
+
+    /** A file of the books was written where the owner chose (OA-103). */
+    val booksSaved = w(
+        Tones.GOOD, "File saved",
+        "The file is saved where you chose. It holds sale numbers, times and amounts, and no addresses.",
+        Who.OWNER,
+        "Give it to your bookkeeper.",
+    )
+
     val entryCancelled = w(
         Tones.INFO, "Entry cancelled",
         "The entry is taken out of the queue.",
@@ -1281,6 +1313,10 @@ object AppWords {
         "refundQueuedAtDepth" to refundQueuedAtDepth,
         "refundQueuedWaiting" to refundQueuedWaiting,
         "cashOutQueued" to cashOutQueued,
+        "cashOutPrice" to cashOutPrice(98_500, ShopCurrency.Usd),
+        "cashOutPriceNeeded" to cashOutPriceNeeded,
+        "booksEmpty" to booksEmpty,
+        "booksSaved" to booksSaved,
         "entryCancelled" to entryCancelled,
         "entryRequeued" to entryRequeued,
         "sessionAbandoned" to sessionAbandoned,

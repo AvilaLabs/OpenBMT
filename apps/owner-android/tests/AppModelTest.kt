@@ -28,9 +28,13 @@ import org.openbmt.app.UrWords
 import org.openbmt.app.Who
 import org.openbmt.app.WipeOrder
 import org.openbmt.owner.AgreedPrice
+import org.openbmt.owner.AgreedPriceIn
 import org.openbmt.owner.Alert
 import org.openbmt.owner.AlertKind
 import org.openbmt.owner.BatchWaiting
+import org.openbmt.owner.Books
+import org.openbmt.owner.BooksDay
+import org.openbmt.owner.BooksFile
 import org.openbmt.owner.CashAmount
 import org.openbmt.owner.CounterShare
 import org.openbmt.owner.CounterState
@@ -2483,6 +2487,7 @@ object AppModelTest {
     private class FakePrice(val ids: List<String>, val refuse: Boolean = false) : PricePort {
         var got: List<PriceReply> = emptyList()
         var at = 0L
+        var asked = ""
 
         override fun sources(): List<PriceSource> = ids.map { PriceSource(it, "https://$it.example/price") }
 
@@ -2491,6 +2496,18 @@ object AppModelTest {
             at = now
             if (refuse || replies.size < 2) throw OwnerException("RT-31", "too few", 1, words())
             return AgreedPrice(98_500, 9_850_000, "med.kc")
+        }
+
+        override fun sourcesFor(currency: String): List<PriceSource> {
+            asked = currency
+            return sources()
+        }
+
+        override fun agreeFor(currency: String, replies: List<PriceReply>, now: Long): AgreedPriceIn {
+            got = replies
+            at = now
+            if (refuse || replies.size < 2) throw OwnerException("RT-31", "too few", 1, words())
+            return AgreedPriceIn(91_000, 9_100_000, "med.kc")
         }
     }
 
@@ -2525,6 +2542,85 @@ object AppModelTest {
         ok(!source("src/model/PriceModel.kt").contains("usdPerBtc *") && !source("src/model/PriceModel.kt").contains("/ 100"), "no price is worked out here: the library's dollars are used")
     }
 
+    // ---- the price of a cash-out, and the books (OA-102 to OA-104) --------------------------------------------------------
+
+    private fun oa_102_a_cash_out_is_recorded_at_the_price_of_the_shops_currency() {
+        val port = FakePrice(listOf("kraken", "coinbase"))
+        val fetched = PriceModel.fetchIn("EUR", port, { RateFetch.Body("{}".toByteArray()) }) { 1_700_000_000L }
+        ok(fetched is PriceOutcome.FetchedIn && fetched.whole == 91_000L && port.asked == "EUR", "the sources of the shop's currency are asked, and the price is the library's")
+        ok(port.got.size == 2 && port.got.all { it.fetchedAt == 1_700_000_000L } && port.at == 1_700_000_000L, "every reply is handed over, stamped by the phone's clock")
+        ok(PriceModel.fieldText(fetched) == "91000", "the price is in the field")
+        val refused = PriceModel.fetchIn("EUR", FakePrice(listOf("kraken", "coinbase"), refuse = true), { RateFetch.Body("{}".toByteArray()) }) { 1L }
+        ok(refused is PriceOutcome.Missing && PriceModel.fieldText(refused) == "", "sources that disagree leave the field empty")
+        ok(PriceModel.fetchIn("EUR", FakePrice(listOf("kraken", "coinbase")), { RateFetch.NotAnswered }) { 1L } is PriceOutcome.Missing, "sources that did not answer leave it empty too")
+        // The owner types over it: the field is what is used, in the shop's currency.
+        val typed = Forms.cashOutPrice("101,000", ShopCurrency.Eur) as Form.Ok
+        ok(typed.value.currency == "EUR" && typed.value.wholePerBtc == 101_000L, "the typed price is the one used, with the shop's currency code")
+        ok(Forms.cashOutPrice("", ShopCurrency.Eur) is Form.Refused && Forms.cashOutPrice("0", ShopCurrency.Eur) is Form.Refused, "an empty price and 0 are refused")
+        ok((Forms.cashOutPrice("x", ShopCurrency.Gbp) as Form.Refused).words.what.contains("pounds"), "the refusal names the shop's currency")
+        val w = AppWords.cashOutPrice(91_000, ShopCurrency.Eur)
+        ok(w.heading == "Today's price" && w.what == "The price sources give 91,000 euros for one bitcoin. The books record this cash-out at that price." && w.next == "If it looks right, go on. To use another price, type it below." && w.who == Who.OWNER, "the words of the fetched price")
+        val needed = AppWords.cashOutPriceNeeded
+        ok(needed.heading == "Price needed" && needed.what == "The price sources did not answer, and the books need what this cash-out is worth." && needed.next == "Type the price of one bitcoin, then go on." && needed.who == Who.OWNER, "the words of the price to type")
+        val screens = source("src/android/Screens.kt")
+        val flow = screens.substringAfter("private fun Controller.showCashOutPrice(").substringBefore("// ---- old addresses")
+        ok(flow.contains("OwnerLook.capital(currency.plural) + \" for one bitcoin\"") && flow.contains("fillPriceIn(") && flow.contains("Forms.cashOutPrice(") && flow.indexOf("Forms.cashOutPrice(") < flow.indexOf("n.cashOut(priced)"), "the field is labelled as the editor's, and the price is checked before the cash-out is queued")
+        ok(screens.contains("currency != ShopCurrency.Sats") && screens.contains("showCashOutPrice(n, f.value, currency)"), "Bitcoin Standard asks nothing")
+        val fetch = source("src/android/PriceFetch.kt")
+        ok(fetch.contains("PriceModel.fetchIn(currency.code") && fetch.contains("if (field.text.isNullOrBlank()) field.setText("), "the sources of the currency are asked off the screen thread, and what was typed is kept")
+    }
+
+    private fun books(
+        days: List<BooksDay> = emptyList(),
+        accounting: List<BooksFile> = emptyList(),
+        ledger: ByteArray = ByteArray(0),
+        refusal: Words? = null,
+    ) = Books("EUR", days, accounting, ledger, refusal)
+
+    private fun oa_103_the_books_page_lists_the_days_the_library_gives_in_its_order() {
+        val b = books(
+            days = listOf(BooksDay("2026-11-10", 3, 0, "45.50"), BooksDay("2026-11-09", 1, 0, "7.00"), BooksDay("2026-10-31", 12, 1, "1234.00")),
+            accounting = listOf(BooksFile("2026-10", "a".toByteArray()), BooksFile("2026-11", "b".toByteArray())),
+            ledger = "ledger".toByteArray(),
+        )
+        val page = BooksModel.page(b)
+        ok(page.rows.map { it.date } == listOf("2026-11-10", "2026-11-09", "2026-10-31"), "the days are in the library's order, newest first")
+        ok(page.rows.map { it.totals } == listOf("3 sales, 45.50 EUR", "1 sales, 7.00 EUR", "12 sales, 1234.00 EUR"), "a day's totals are \"{n} sales, {amount}\" in the shop's currency")
+        ok(page.empty == null && page.refusal == null, "a page with days has no empty words")
+        // Nothing yet: the empty words, and no file to save.
+        val none = BooksModel.page(books())
+        ok(none.empty === AppWords.booksEmpty && none.rows.isEmpty() && none.accounting == null && none.ledger == null, "an empty node shows the empty words and offers no file")
+        ok(AppWords.booksEmpty.heading == "No sales yet" && AppWords.booksEmpty.what == "No counter has sent a sale to this phone yet." && AppWords.booksEmpty.next == "Nothing to do. Sales appear here as the counters report them." && AppWords.booksEmpty.who == Who.NOBODY, "the empty words, as written down")
+        ok(OwnerLook.BOOKS == "Books" && OwnerLook.BOOKS_SUB == "Sales, refunds and totals by day, and the files for your bookkeeper." && OwnerLook.moneyTitles.last() == "Waiting to be delivered", "the Money row is Books, after the others")
+        val screens = source("src/android/Screens.kt")
+        ok(screens.contains("rows + RowItem(OwnerLook.BOOKS, OwnerLook.BOOKS_SUB, onClick = { showBooks() })"), "the row is the last of the Money page and opens the page")
+        val page2 = source("src/android/Books.kt")
+        ok(page2.contains("screen(OwnerLook.BOOKS, views, footer, back = { showHome() })") && page2.contains("ui.rows(") && page2.contains("n.books(offsetMinutes)") && page2.contains("TimeZone.getDefault().getOffset("), "the page is a title page with a back, one rows card, and the phone's offset")
+    }
+
+    private fun oa_104_the_files_are_saved_exactly_as_the_library_made_them() {
+        val acct = byteArrayOf(0, 1, 2, 13, 10, 127, -1)
+        val full = byteArrayOf(9, 8, 7, -128)
+        val b = books(
+            days = listOf(BooksDay("2026-11-10", 3, 0, "45.50")),
+            accounting = listOf(BooksFile("2026-10", "old".toByteArray()), BooksFile("2026-11", acct)),
+            ledger = full,
+        )
+        val page = BooksModel.page(b)
+        ok(page.accounting!!.name == "openbmt-accounting-2026-11.csv" && page.accounting.bytes.contentEquals(acct), "the accounting file is the library's bytes, named for the newest month")
+        ok(page.ledger!!.name == "openbmt-ledger-2026-11.csv" && page.ledger.bytes.contentEquals(full), "the full ledger is the library's bytes, named for the newest month")
+        // A refusal: its words, and nothing to save for what was refused.
+        val refusal = words(Tones.STOP)
+        val refused = BooksModel.page(books(days = b.days, refusal = refusal))
+        ok(refused.refusal != null && refused.refusal.heading == "Heading" && refused.accounting == null && refused.ledger == null && refused.empty == null, "a refusal shows the library's words and offers no file")
+        ok(OwnerLook.BOOKS_NOTE == "The files follow US rules only and are not tax advice." && OwnerLook.BOOKS_SAVE_ACCOUNTING == "Save the accounting file" && OwnerLook.BOOKS_SAVE_LEDGER == "Save the full ledger", "the footnote and the buttons, as written down")
+        val booksSaved = AppWords.booksSaved
+        ok(booksSaved.heading == "File saved" && booksSaved.what == "The file is saved where you chose. It holds sale numbers, times and amounts, and no addresses." && booksSaved.next == "Give it to your bookkeeper." && booksSaved.who == Who.OWNER, "the saved words, as written down")
+        val src = source("src/android/Books.kt")
+        ok(src.contains("ui.primary(OwnerLook.BOOKS_SAVE_ACCOUNTING)") && src.contains("ui.button(OwnerLook.BOOKS_SAVE_LEDGER)") && src.contains("line(OwnerLook.BOOKS_NOTE, muted = true)"), "a primary and a secondary button, and the footnote in 13 sp secondary")
+        ok(src.contains("file.name, file.bytes, \"text/csv\"") && src.contains("AppWords.booksSaved"), "the save writes the bytes it was given, through the picker, and says it did")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
@@ -2546,7 +2642,7 @@ object AppModelTest {
         val rules = Regex("^- \\*\\*OA-(\\d{2,3})\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules.map { it.toInt() } == rules.map { it.toInt() }.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
         // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-79 for more.
-        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..101)
+        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..104)
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")

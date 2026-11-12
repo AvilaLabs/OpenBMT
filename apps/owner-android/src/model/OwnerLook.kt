@@ -32,6 +32,13 @@ object OwnerLook {
         "Receipts and merge", "Cash out", "Old addresses", "Refund notes", "Open approvals", "Refund queue", "Waiting to be delivered",
     )
 
+    /** The Books row of the Money page: after the rows above, so the names of the first three do not change (OA-103). */
+    const val BOOKS = "Books"
+    const val BOOKS_SUB = "Sales, refunds and totals by day, and the files for your bookkeeper."
+    const val BOOKS_NOTE = "The files follow US rules only and are not tax advice."
+    const val BOOKS_SAVE_ACCOUNTING = "Save the accounting file"
+    const val BOOKS_SAVE_LEDGER = "Save the full ledger"
+
     /** What the Money row says under its title: the names of its first three entries, and the payments line when payments are in progress. */
     fun moneySub(inProgress: Int, sendsLine: String): String {
         val names = moneyTitles.take(3).joinToString(", ")

@@ -8,10 +8,12 @@ import org.openbmt.app.SayWords
 import org.openbmt.app.WordsModel
 import org.openbmt.owner.AlertKind
 import org.openbmt.owner.CashAmount
+import org.openbmt.owner.CashOutArgs
 import org.openbmt.owner.ClearArgs
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.ReceiptsKind
+import org.openbmt.owner.ShopCurrency
 import org.openbmt.owner.Stage
 import org.openbmt.owner.StageKind
 import org.openbmt.owner.ViewKind
@@ -118,7 +120,8 @@ private fun Controller.showMoney() {
     val opens: List<() -> Unit> = listOf(
         { showReceipts() }, { showCashOut() }, { showOld() }, { showRefundNotes() }, { showSessions() }, { showQueue() }, { showOutbox() },
     )
-    groupPage(OwnerLook.MONEY, OwnerLook.moneyTitles.zip(opens).map { (title, go) -> RowItem(title) { go() } })
+    val rows = OwnerLook.moneyTitles.zip(opens).map { (title, go) -> RowItem(title) { go() } }
+    groupPage(OwnerLook.MONEY, rows + RowItem(OwnerLook.BOOKS, OwnerLook.BOOKS_SUB, onClick = { showBooks() }))
 }
 
 private fun Controller.showDevices() {
@@ -464,12 +467,43 @@ internal fun Controller.showCashOut(): Unit = withNode { n ->
     val queue = ui.primary("Queue the cash-out") {
         when (val f = Forms.cashOut(address.text.toString(), ui.chosen(which) == 1, sats.text.toString(), name.text.toString())) {
             is Form.Refused -> msg.show(ui.words(f.words))
-            is Form.Ok -> if (attempt(msg) { n.cashOut(f.value) } != null) {
-                centre(AppWords.cashOutQueued, listOf(ui.button("Back") { showCashOut() }))
+            is Form.Ok -> {
+                // The books record a cash-out at a price (OA-102): the sources are asked for it, except in Bitcoin Standard.
+                val currency = attempt(msg) { n.settings().currency }
+                if (currency != null && currency != ShopCurrency.Sats) {
+                    showCashOutPrice(n, f.value, currency)
+                } else if (attempt(msg) { n.cashOut(f.value) } != null) {
+                    centre(AppWords.cashOutQueued, listOf(ui.button("Back") { showCashOut() }))
+                }
             }
         }
     }
     screen("Cash out", views, listOf(queue, backButton { showHome() }), back = { showHome() })
+}
+
+/**
+ * The price a cash-out is recorded at (OA-102): the sources are asked for the price of one bitcoin in the shop's
+ * currency and it is shown with the cash-out to confirm. The owner can type another price; when the sources do not
+ * answer, the owner types it.
+ */
+private fun Controller.showCashOutPrice(n: OwnerNode, args: CashOutArgs, currency: ShopCurrency) {
+    val note = Slot(act)
+    val msg = Slot(act)
+    val input = numberInput(OwnerLook.capital(currency.plural) + " for one bitcoin")
+    val field = input.field
+    fillPriceIn(note, field, currency, AppWords.counterPriceFetching, { AppWords.cashOutPrice(it, currency) }, AppWords.cashOutPriceNeeded)
+    val queue = ui.primary("Queue the cash-out") {
+        when (val p = Forms.cashOutPrice(field.text.toString(), currency)) {
+            is Form.Refused -> msg.show(ui.words(p.words))
+            is Form.Ok -> {
+                val priced = CashOutArgs(args.address, args.amount, args.label, p.value)
+                if (attempt(msg) { n.cashOut(priced) } != null) {
+                    centre(AppWords.cashOutQueued, listOf(ui.button("Back") { showCashOut() }))
+                }
+            }
+        }
+    }
+    screen("Cash out", listOf(note, input.view, msg), listOf(queue, backButton { showCashOut() }), back = { showCashOut() })
 }
 
 // ---- old addresses ------------------------------------------------------------------------------------------------

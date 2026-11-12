@@ -927,3 +927,36 @@ signs batches, settings and pairings, are never in the service.
   not answer, or do not agree, the screen shows the words of OA-23 or OA-42 and
   the field stays empty. The call works on no node, and the app asks again each
   time the screen opens: nothing is kept.
+- **OA-102.** Before a cash-out is queued, the phone asks the price sources
+  for the price of one bitcoin in the shop's currency, because the books
+  record the cash-out at it (OC-49). It fetches each source of that
+  currency in the table the library gives (`OwnerPrice.sourcesFor`), the
+  same way as in OA-101, and hands the replies to `OwnerPrice.agreeFor`, which
+  gives the price in whole units of the currency. The page says "Today's
+  price" with the price in it, and puts the price in a field labelled "{Plural}
+  for one bitcoin"; the owner can type another price over it. When the sources
+  do not answer or do not agree, the page says "Price needed" and the field is
+  empty. The cash-out is queued with the price in the field, checked as a
+  whole number above 0, and not before. Bitcoin Standard asks nothing and
+  queues the cash-out with no price.
+- **OA-103.** The Money page ends with a row "Books", under it "Sales, refunds
+  and totals by day, and the files for your bookkeeper." It opens a page with
+  the bar "Books" and a back. The phone asks the library for the books of what
+  the node holds (`OwnerNode.books`), with the shop's offset from UTC taken
+  from the phone. The page lists the days the library gives, in its order,
+  newest first and at most 90, one row for each: the date as the title, and
+  as the sub "{n} sales, {amount}" with the amount in the shop's currency, as
+  the library gives no words for a day's totals. When there is no day and no
+  refusal the page says "No sales yet", "No counter has sent a sale to this
+  phone yet." and "Nothing to do. Sales appear here as the counters report
+  them."
+- **OA-104.** Under the days the page says, in 13 sp secondary, "The files
+  follow US rules only and are not tax advice." Its footer has "Save the
+  accounting file" (primary) and "Save the full ledger" (secondary), each
+  only when the library made that file. Each opens the system's save picker with
+  a name like `openbmt-accounting-2026-11.csv` or `openbmt-ledger-2026-11.csv`,
+  for the newest month of the books, and writes exactly the bytes the library
+  gave, then says "File saved", "The file is saved where you chose. It holds
+  sale numbers, times and amounts, and no addresses." and "Give it to your
+  bookkeeper." A refusal of the library is shown in its own words, and then
+  no file is offered for what was refused and nothing is written.

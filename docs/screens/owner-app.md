@@ -83,6 +83,10 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | refundQueuedAtDepth | Refund queued | The refund is in the queue, and the sale is deep enough to be refunded. | Bring this phone and the Key app together and start an approval. | the owner |  |
 | refundQueuedWaiting | Refund queued, sale new | The refund is in the queue, but the sale is not deep enough yet to be refunded. | Wait for more blocks. The refund can be approved when the sale is deep enough. | the owner |  |
 | cashOutQueued | Cash-out queued | The cash-out is in the queue and has not been sent for approval yet. | Bring this phone and the Key app together and start an approval. | the owner |  |
+| cashOutPrice | Today's price | The price sources give 98,500 dollars for one bitcoin. The books record this cash-out at that price. | If it looks right, go on. To use another price, type it below. | the owner |  |
+| cashOutPriceNeeded | Price needed | The price sources did not answer, and the books need what this cash-out is worth. | Type the price of one bitcoin, then go on. | the owner |  |
+| booksEmpty | No sales yet | No counter has sent a sale to this phone yet. | Nothing to do. Sales appear here as the counters report them. | nobody |  |
+| booksSaved | File saved | The file is saved where you chose. It holds sale numbers, times and amounts, and no addresses. | Give it to your bookkeeper. | the owner |  |
 | entryCancelled | Entry cancelled | The entry is taken out of the queue. | Nothing to do. | nobody |  |
 | entryRequeued | Entry queued again | The entry that was sent back is in the queue again. | Start an approval when the Key app is at hand. | the owner |  |
 | sessionAbandoned | Approval abandoned | The open approval is closed, and its entries are back in the queue. | Nothing to do. Start a new approval when the Key app is at hand. | nobody |  |

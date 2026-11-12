@@ -4,6 +4,7 @@ import org.openbmt.app.Format
 import org.openbmt.app.SayWords
 import org.openbmt.owner.CashAmount
 import org.openbmt.owner.CashOutArgs
+import org.openbmt.owner.CashPrice
 import org.openbmt.owner.CounterState
 import org.openbmt.owner.EntryKind
 import org.openbmt.owner.BatchWaiting
@@ -204,4 +205,11 @@ object Forms {
         }
         return Form.Ok(CashOutArgs(address.trim(), amount, label.trim()))
     }
+
+    /** The price a cash-out is recorded at, typed or fetched, in whole units of the shop's currency (OA-102). */
+    fun cashOutPrice(text: String, currency: ShopCurrency): Form<CashPrice> =
+        when (val f = CounterModel.price(text, currency)) {
+            is Form.Ok -> Form.Ok(CashPrice(currency.code, f.value))
+            is Form.Refused -> Form.Refused(f.words)
+        }
 }
