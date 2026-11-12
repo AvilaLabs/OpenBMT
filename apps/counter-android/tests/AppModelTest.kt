@@ -277,7 +277,7 @@ object AppModelTest {
         ok(FirstAddress.groups("") == "" && FirstAddress.groups("abcd") == "abcd" && FirstAddress.groups("abcde") == "abcd e", "short and exact addresses")
         ok(FirstAddress.kindLine(OwnWalletKind.SingleKey) == "Wallet with one key" && FirstAddress.kindLine(OwnWalletKind.TwoOfThree) == "Wallet with 2 of 3 keys", "the kind of wallet")
         ok(AppWords.pairingOwnAddress.who == Who.MANAGER && AppWords.pairingOwnDifferent.tone == Tones.STOP && AppWords.pairingOwnDifferent.what.contains("Nothing was saved"), "the words of the first-address screen and of Different")
-        ok(AppWords.pairingOwnCompare.what == AppWords.WORDS_NEEDED_CR_229_COMPARE && !AppWords.pairingOwnCompare.next.contains("Key app") && AppWords.pairingOwnForgotten.next.contains("owner phone") && AppWords.pairingOwnForgotten.what == AppWords.WORDS_NEEDED_CR_237_FORGOTTEN, "the own wallet's words do not name the Key app")
+        ok(AppWords.pairingOwnCompare.what.contains("four words") && !AppWords.pairingOwnCompare.next.contains("Key app") && AppWords.pairingOwnForgotten.next.contains("owner phone") && AppWords.pairingOwnForgotten.what.contains("shop's wallet"), "the own wallet's words do not name the Key app")
 
         // What is checked before the camera opens.
         fun problem(counter: String = "Front", manager: String = "Mia", pin1: String = "246810", pin2: String = "246810") =

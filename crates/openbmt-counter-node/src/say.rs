@@ -112,10 +112,10 @@ impl SettingsRefused {
             .detail(e.to_string()),
             Self::Verify(SettingsError::ConfirmationRequired(_)) => Words::new(
                 Tone::Ended,
-                "Words needed",
-                WORDS_NEEDED_CR_236_CONFIRMATION,
+                "Needs a counter's OK",
+                "This change loosens the limits or moves where money goes. That needs a counter's OK, which is not built yet. Nothing changed.",
                 Who::Owner,
-                "Words needed for what to do next.",
+                "Make only changes that tighten for now, and keep this setting as it is.",
             ),
             Self::Verify(e) => Words::new(
                 Tone::Ended,
@@ -422,9 +422,9 @@ impl PairStep {
             Self::OwnDiffer => Words::new(
                 Tone::Stop,
                 "Words differ: stopped",
-                WORDS_NEEDED_CR_229_DIFFER,
+                "The four words did not match, so the counter forgot its key and did not pair. Someone may have changed a code on the way.",
                 Who::Manager,
-                "Words needed for what to do next.",
+                "Tap They differ on the owner phone too, then start again from it.",
             )
             .code("CR-229"),
         }
@@ -504,124 +504,46 @@ impl PairRefused {
     }
 }
 
-/// CR-236: the words for a settings change that needs a counter's OK are
-/// still to be written. The text in the design is longer than the rules for
-/// what happened allow.
-pub const WORDS_NEEDED_CR_236_CONFIRMATION: &str =
-    "Words needed: this change needs a counter to confirm it.";
-/// CR-229: the words for the four words differing in a pairing with the
-/// shop's own wallet are still to be written. The words of the Key app's
-/// ceremony name the Key app.
-pub const WORDS_NEEDED_CR_229_DIFFER: &str =
-    "Words needed: the four words did not match, so nothing was saved.";
-/// CR-228: the words for a pairing step with no pairing at that step are
-/// still to be written.
-pub const WORDS_NEEDED_CR_228_NO_CEREMONY: &str =
-    "Words needed: the pairing is not at this step or was forgotten.";
-/// CR-229: the words for a counter that could not make a key are still to be
-/// written.
-pub const WORDS_NEEDED_CR_229_NO_RANDOMNESS: &str =
-    "Words needed: the counter could not make its key for pairing.";
-/// CR-227: the words for an offer that is not for the main network are still
-/// to be written.
-pub const WORDS_NEEDED_CR_227_NETWORK: &str =
-    "Words needed: the owner phone's offer is not for the main network.";
-/// CR-229: the words for a counter whose key is the owner's are still to be
-/// written.
-pub const WORDS_NEEDED_CR_229_COUNTER_IS_OWNER: &str =
-    "Words needed: the counter's key is the owner phone's key.";
-/// CR-229: the words for a request made for another offer are still to be
-/// written.
-pub const WORDS_NEEDED_CR_229_BINDING: &str =
-    "Words needed: the request was made for another offer.";
-/// CR-232: the words for a first range that is not signed for this counter
-/// or is badly shaped are still to be written.
-pub const WORDS_NEEDED_CR_232_RANGE: &str =
-    "Words needed: the first range is not signed for this counter or is badly shaped.";
-/// CR-231: the words for settings that are not signed by the owner phone or
-/// are not valid are still to be written.
-pub const WORDS_NEEDED_CR_231_SETTINGS: &str =
-    "Words needed: the first settings are not signed by the owner phone or are not valid.";
-/// CR-231: the words for settings that are not newer than the offer's are
-/// still to be written.
-pub const WORDS_NEEDED_CR_231_SETTINGS_OLD: &str =
-    "Words needed: the first settings are not newer than the offer's.";
-/// CR-231: the words for settings that do not list this counter on the
-/// device list are still to be written.
-pub const WORDS_NEEDED_CR_231_NOT_ON_DEVICES: &str =
-    "Words needed: the first settings do not list this counter as a device.";
-/// CR-231: the words for settings that do not give this counter a share are
-/// still to be written.
-pub const WORDS_NEEDED_CR_231_NOT_ON_COUNTERS: &str =
-    "Words needed: the first settings do not give this counter a share.";
-/// CR-230: the words for a relay not signed by the owner root are still to
-/// be written.
-pub const WORDS_NEEDED_CR_230_RELAY: &str =
-    "Words needed: the relay in the owner phone's code is not signed by the owner.";
-/// CR-233: the words for a saved pairing that does not read back are still
-/// to be written.
-pub const WORDS_NEEDED_CR_233_RECORD: &str =
-    "Words needed: the pairing this counter saved does not read back.";
-/// CR-233: the words for a saved pairing that holds no key are still to be
-/// written.
-pub const WORDS_NEEDED_CR_233_RECORD_KEY: &str =
-    "Words needed: the pairing this counter saved holds no key.";
-
 impl OwnPairRefused {
     /// What the person at the counter or the owner is told when a step of
     /// pairing with the shop's own wallet, or a saved one, is not accepted
     /// (CR-227 to CR-233). Nothing was paired. A refusal whose words are
-    /// those of a refusal of the Key app's ceremony says them; the others
-    /// are the words of the design, or a `WORDS_NEEDED_` constant where none
-    /// are written yet.
+    /// those of a refusal of the Key app's ceremony says them.
     pub fn words(&self) -> Words {
-        let needed = |what: &str| {
-            Words::new(
-                Tone::Stop,
-                "Words needed",
-                what,
-                Who::Manager,
-                "Words needed for what to do next.",
-            )
-        };
         match self {
-            Self::NoCeremony => needed(WORDS_NEEDED_CR_228_NO_CEREMONY),
-            Self::NoRandomness => needed(WORDS_NEEDED_CR_229_NO_RANDOMNESS),
+            Self::NoCeremony => stopped("Pairing not under way", "This counter has no pairing with the shop's wallet at this step. Closing or restarting the app forgets one not yet finished.", Who::Manager, "Start again from the owner phone: open Add a counter and scan its code."),
+            Self::NoRandomness => stopped("No key made", "The phone gave no random numbers the counter can trust, so it made no key and the pairing with the shop's wallet did not start.", Who::Manager, "Try again. If it fails again, restart the phone and start again from the owner phone."),
             Self::Pair(e) => own_pair_error_words(e),
             Self::Bundle(e) => PairRefused::Bundle(e.clone()).words(),
-            Self::Settings(_) => needed(WORDS_NEEDED_CR_231_SETTINGS),
-            Self::SettingsOld { .. } => needed(WORDS_NEEDED_CR_231_SETTINGS_OLD),
-            Self::NotOnDevices => needed(WORDS_NEEDED_CR_231_NOT_ON_DEVICES),
-            Self::NotOnCounters => needed(WORDS_NEEDED_CR_231_NOT_ON_COUNTERS),
-            Self::RelayNotSigned => needed(WORDS_NEEDED_CR_230_RELAY),
-            Self::Record(_) => needed(WORDS_NEEDED_CR_233_RECORD),
-            Self::RecordKey => needed(WORDS_NEEDED_CR_233_RECORD_KEY),
+            Self::Settings(_) => stopped("Settings not signed", "The first settings in the owner phone's code are not signed by that owner phone, or are not valid. Nothing was saved.", Who::Manager, "Start the pairing again from the owner phone."),
+            Self::SettingsOld { .. } => stopped("Settings out of date", "The first settings in the owner phone's code are older than the ones it offered. Nothing was saved.", Who::Manager, "Update the owner phone, then start the pairing again."),
+            Self::NotOnDevices => stopped("Counter not in the settings", "The first settings from the owner phone do not list this counter, so it could not take them. Nothing was saved.", Who::Manager, "Start the pairing again from the owner phone."),
+            Self::NotOnCounters => stopped("Counter not set up to sell", "The first settings from the owner phone do not set this counter up to take sales. Nothing was saved.", Who::Manager, "Start the pairing again from the owner phone."),
+            Self::RelayNotSigned => stopped("Relay not the owner's", "The relay in the owner phone's code is not signed by that owner phone, so it may not be the shop's. Nothing was saved.", Who::Manager, "Start the pairing again from the owner phone."),
+            Self::Record(_) => stopped("Saved pairing damaged", "The pairing with the shop's wallet that this counter saved does not read back, so the counter did not start.", Who::Owner, "Put the counter's files back from a copy, or pair it again from the owner phone."),
+            Self::RecordKey => stopped("Saved key damaged", "The pairing with the shop's wallet that this counter saved holds no usable key, so the counter did not start.", Who::Owner, "Put the counter's files back from a copy, or pair it again from the owner phone."),
         }
         .code(self.rule())
         .detail(self.to_string())
     }
 }
 
+/// Words for a step of an own-wallet pairing that stopped.
+fn stopped(heading: &str, what: &str, who: Who, next: &str) -> Words {
+    Words::new(Tone::Stop, heading, what, who, next)
+}
+
 /// The words for a step of an own-wallet pairing that stopped (CR-227 to
 /// CR-232).
 pub fn own_pair_error_words(e: &OwnPairError) -> Words {
-    let needed = |what: &str| {
-        Words::new(
-            Tone::Stop,
-            "Words needed",
-            what,
-            Who::Manager,
-            "Words needed for what to do next.",
-        )
-    };
     // The refusals the two ceremonies share say the same words.
     let shared = |e: PairError| pair_error_words(&e);
     match e {
-        OwnPairError::NotMainNetwork => needed(WORDS_NEEDED_CR_227_NETWORK),
+        OwnPairError::NotMainNetwork => stopped("Not for real bitcoin", "The owner phone's code is for a test network, not for real bitcoin, so this counter did not pair.", Who::Manager, "Pair with an owner phone set up for real bitcoin."),
         OwnPairError::InvalidName => shared(PairError::InvalidName),
-        OwnPairError::CounterIsOwner => needed(WORDS_NEEDED_CR_229_COUNTER_IS_OWNER),
+        OwnPairError::CounterIsOwner => stopped("Counter key refused", "The key this counter made is the owner phone's own key, which a counter may not have. Nothing was saved.", Who::Manager, "Start the pairing again from the owner phone."),
         OwnPairError::Decode(inner) => shared(PairError::Decode(inner.clone())),
-        OwnPairError::BindingMismatch => needed(WORDS_NEEDED_CR_229_BINDING),
+        OwnPairError::BindingMismatch => stopped("Codes do not belong together", "The counter's code was made for a different code from the owner phone. Nothing was saved.", Who::Manager, "Start the pairing again from the owner phone and scan its newest code."),
         OwnPairError::RequestSignatureInvalid => shared(PairError::RequestSignatureInvalid),
         OwnPairError::NotConfirmed => shared(PairError::NotConfirmed),
         OwnPairError::ClockWentBack => shared(PairError::ClockWentBack),
@@ -641,7 +563,7 @@ pub fn own_pair_error_words(e: &OwnPairError) -> Words {
         OwnPairError::Bundle(_) => shared(PairError::Decode(
             openbmt_core::wire::DecodeError::NonCanonical("the peers"),
         )),
-        OwnPairError::Range(_) => needed(WORDS_NEEDED_CR_232_RANGE),
+        OwnPairError::Range(_) => stopped("Addresses not signed", "The addresses the owner phone gave this counter are not signed for it, or are not a proper range. Nothing was saved.", Who::Manager, "Start the pairing again from the owner phone."),
         OwnPairError::RangeTooSmall { .. } => Words::new(
             Tone::Stop,
             "Too few addresses",

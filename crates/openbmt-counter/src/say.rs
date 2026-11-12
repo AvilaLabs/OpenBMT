@@ -1280,11 +1280,6 @@ impl LoadError {
     }
 }
 
-/// CR-235: the words for a range that could not be saved are still to be
-/// written. This stands where they go.
-pub const WORDS_NEEDED_CR_235_STORE: &str =
-    "Words needed: the owner's new addresses could not be saved.";
-
 impl<E> BatchTakeRefused<E> {
     /// What the owner is told when a batch is sent to a counter that makes
     /// its own addresses from the shop's wallet (CR-235). The other refusals
@@ -1323,14 +1318,12 @@ impl<E: Display> RangeTakeRefused<E> {
                 "Pair the counter again from the owner phone if the shop now uses its own wallet.",
             )
             .code("CR-235"),
-            // The words for a range that could not be saved are still to be
-            // written.
             Self::Record(_) | Self::Store(_) => Words::new(
                 Tone::Ended,
-                "Words needed",
-                WORDS_NEEDED_CR_235_STORE,
+                "Addresses not saved",
+                "The counter could not save the new addresses from the owner phone, so it did not take them.",
                 Who::Owner,
-                "Words needed for what to do next.",
+                "Check that the counter has free storage. The owner phone sends them again by itself.",
             )
             .code("CR-235")
             .detail(self.to_string()),
