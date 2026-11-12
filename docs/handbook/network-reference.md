@@ -71,9 +71,10 @@ These requests do not completely conceal which blocks interest the shop
 ## Tor
 
 With the counter's Tor switch on, all connections, including Bitcoin peers
-and price sources, go through Orbot. Orbot is a separate Android app and
-must be running. If it is unavailable, the counter reports the problem
-and sends nothing around it (`CR-87`).
+and price sources, go through Tor. The counter runs Tor itself, or uses
+Orbot, a separate Android app, if the manager chooses it under Tor in the
+counter's settings. If Tor cannot connect, the counter reports the problem
+and sends nothing around it (`CR-87`, `CR-201` to `CR-204`).
 
 The Owner app sends its Bitcoin peer traffic and spend or refund
 broadcasts through Tor. It runs Tor itself, or uses Orbot if the owner
@@ -216,8 +217,8 @@ itself. A cashier PIN on the counter deters casual access only.
 The Counter app runs only while open, and the counter must stay open and
 plugged in. The Owner app follows the chain while closed only with Watch in
 the background turned on, and Android may stop that while the phone sleeps.
-The Counter app needs Orbot, a separate Android app, to use Tor. The
-Owner app runs Tor itself unless the owner chooses Orbot.
+Both apps run Tor themselves, unless the owner or the manager chooses
+Orbot, a separate Android app, instead.
 Some phones offer a software-only Keystore; the app reports this on screen.
 The design assumes the phone is not already
 controlled by an attacker.
@@ -470,9 +471,9 @@ what it is being asked to install. The dependency policy accepts only
 licences on its published list (`docs/DEPENDENCIES.md`, rule 6).
 
 Dependencies retain their own licences. OpenBMT does not publish the
-phone's operating system or Orbot, the separate app the counter needs
-for Tor. The Owner app includes Tor itself, as built by the Guardian
-Project from the Tor Project's code (`docs/DEPENDENCIES.md`).
+phone's operating system or Orbot. The Owner and Counter apps include
+Tor itself, as built by the Guardian Project from the Tor Project's code
+(`docs/DEPENDENCIES.md`).
 Reproducible builds, which would let someone check a released app against
 the source, are not built yet.
 

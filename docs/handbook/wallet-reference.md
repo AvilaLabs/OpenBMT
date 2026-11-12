@@ -395,8 +395,7 @@ opened on another phone.
 ### Tor and the shop's own node
 
 If customers can join the counter's Wi-Fi, enable Tor or use cellular
-instead. Instant acceptance on a shared network requires Tor. The
-counter needs Orbot running to use it.
+instead. Instant acceptance on a shared network requires Tor.
 
 Run your own node if you can. The counter accepts it as an own-node check
 only through a Tor v3 address.

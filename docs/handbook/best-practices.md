@@ -125,8 +125,8 @@ accounts on it.
 Set the instant limit to what the shop can afford to lose, not merely the
 amount that avoids a wait. Zero turns instant acceptance off. Overrides
 also count toward exposure. If customers can join the counter's network,
-instant acceptance requires Tor through Orbot; cellular is another way
-to keep the counter off their shared Wi-Fi.
+instant acceptance requires Tor; cellular is another way to keep the
+counter off their shared Wi-Fi.
 
 For larger sales, choose how many confirmations to wait for. The
 [reference](wallet-reference.md#the-instant-limit) links a confirmation-risk
