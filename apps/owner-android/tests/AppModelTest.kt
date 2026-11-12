@@ -322,7 +322,7 @@ object AppModelTest {
         ok(OwnerModel.alertsLine(0) == "No alerts." && OwnerModel.alertsLine(1) == "1 alert." && OwnerModel.alertsLine(3) == "3 alerts.", "the alerts line")
         ok(OwnerModel.sendsLine(0) == "No payments in progress." && OwnerModel.sendsLine(1) == "1 payment in progress." && OwnerModel.sendsLine(2) == "2 payments in progress.", "the sends line")
         val rows = SendKind.values().map { SendRow("ab", it, 0, words()) }
-        ok(OwnerModel.sendsInProgress(rows) == 6, "done and replaced are not in progress: ${OwnerModel.sendsInProgress(rows)}")
+        ok(OwnerModel.sendsInProgress(rows) == SendKind.values().size - 2, "done and replaced are not in progress: ${OwnerModel.sendsInProgress(rows)}")
         ok(OwnerModel.sendsInProgress(emptyList()) == 0, "no sends")
         ok(OwnerModel.counterLabel(ByteArray(32) { 0xab.toByte() }) == "Counter abababab", "a counter's label")
         ok(OwnerModel.saleNumber(0) == 1L, "the first sale is 1")
