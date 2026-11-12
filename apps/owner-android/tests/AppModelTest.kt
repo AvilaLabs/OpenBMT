@@ -2708,7 +2708,7 @@ object AppModelTest {
         r.back(); ok(r.step == FirstRunStep.Why, "back from the real cases to the why screen")
         val shown = FirstRunWords.all().toMap()
         ok(shown["whyRealCases"] == "Real cases" && shown["realTitle"] == "When someone else holds the money" &&
-            shown["realCase4Place"] == "India, 2020" && shown["whyText2"]!!.contains("with a coin or a die."), "the real cases words are the ones of the words file")
+            shown["realCase4Place"] == "Lebanon, since 2019" && shown["whyText2"]!!.contains("with a coin or a die."), "the real cases words are the ones of the words file")
         val screensMdText = File(appDir, "../../docs/screens/owner-app.md").readText()
         for (k in listOf("whyRealCases", "realTitle", "realIntro", "realCase1Place", "realCase1Text", "realCase2Place", "realCase2Text",
             "realCase3Place", "realCase3Text", "realCase4Place", "realCase4Text", "realOutro", "realMore")) {

@@ -321,14 +321,14 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | whyRealCases | Real cases |
 | realTitle | When someone else holds the money |
 | realIntro | Banks and payment companies usually pay on time. Sometimes they hold the money, and the business waits. |
-| realCase1Place | Card processors |
-| realCase1Text | Square's and Shopify's terms let them hold back a shop's payouts in a reserve, with no fixed end date. |
-| realCase2Place | United States, 2017 |
-| realCase2Text | A court approved a $3.2 million settlement over PayPal holding money in accounts without explanation. |
-| realCase3Place | Greece, 2015 |
-| realCase3Text | Banks closed for three weeks. Shops needed state approval to pay their suppliers abroad. |
-| realCase4Place | India, 2020 |
-| realCase4Text | A bank's withdrawals were capped for 13 days, and the payment apps that used it stopped for about a day. |
+| realCase1Place | PayPal, United Kingdom, 2016 |
+| realCase1Text | A food company's sales jumped. Within a week PayPal held £44,000 of its takings, and on 1 February £27,000 was still held. |
+| realCase2Place | Silicon Valley Bank, United States, 2023 |
+| realCase2Text | A payroll company had $545 million of its customers' wages locked in the bank and lent $130 million of its own to pay their staff. It all came back. |
+| realCase3Place | Cyprus, 2013 |
+| realCase3Text | Savers at the largest bank lost 47.5% of everything above €100,000. Twelve years on, 4,524 depositors had been paid about €9,800 each. |
+| realCase4Place | Lebanon, since 2019 |
+| realCase4Text | $107 billion of deposits could not be freely taken out. Dollars came out in local money at a loss of 70% or more. |
 | realOutro | A payment to your own wallet is held by nobody else. That is also why its backup is yours to keep. |
 | realMore | More cases from 11 countries, with their sources, are in the handbook under "When someone else holds the money". |
 | kgTitle | Make your savings wallet |
