@@ -5,6 +5,7 @@ import android.text.TextWatcher
 import android.view.View
 import android.widget.EditText
 import android.widget.RadioGroup
+import java.util.Locale
 import org.openbmt.app.ButtonKind
 import org.openbmt.app.RowItem
 import org.openbmt.app.SayWords
@@ -144,14 +145,12 @@ private fun Controller.showEditCurrency() {
     withHeld({ w -> showChangeSettings(w) }) { _, held ->
         val views = ArrayList<View>()
         views.add(ui.text("Now: ${held.currency.label}", 15f, bold = true))
-        val choices = ShopCurrency.entries
-        val choice = ui.chips(choices.map { it.label }, choices.indexOf(settingsDraft.currency ?: held.currency))
-        views.add(choice)
+        val tabs = MoneyTabs(settingsDraft.currency ?: held.currency, ShopPrefs.guessCurrency(Locale.getDefault().country))
+        views.add(moneyPicker(tabs))
         if (settingsDraft.currency != null) views.add(ui.words(AppWords.editCurrencyRetype))
         val done =
             ui.button("Done", ButtonKind.Primary) {
-                val i = ui.chosen(choice)
-                if (i >= 0) settingsDraft.chooseCurrency(choices[i], held.currency)
+                settingsDraft.chooseCurrency(tabs.currency, held.currency)
                 showChangeSettings()
             }
         screen(AppWords.editGroupCurrency.heading, views, listOf(done, ui.button("Back") { showChangeSettings() }), back = { showChangeSettings() }, words = AppWords.editGroupCurrency)

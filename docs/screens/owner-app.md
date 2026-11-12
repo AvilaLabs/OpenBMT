@@ -253,6 +253,11 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | shopNameHint | As customers know it |
 | shopCurrencyLabel | Your money |
 | shopCurrencyNote | Prices are set in this money and shown in bitcoin at the till. |
+| moneyTabLocal | Local money |
+| moneyTabBitcoin | Bitcoin Standard |
+| moneyBitcoinTitle | Prices in sats |
+| moneyBitcoinNote | Prices are set in sats, and the books count in sats. No exchange rate is used. |
+| moneyTabsSpoken | Your money: {tab} chosen. Double tap the other tab to switch. |
 | shopNext | Next |
 | tillTitle | How do you take payments now? |
 | tillText | Bitcoin is added to your till as one more way to pay. Nothing else about your till changes. |

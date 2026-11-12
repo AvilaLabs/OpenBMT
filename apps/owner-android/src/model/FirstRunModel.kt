@@ -171,6 +171,41 @@ class ShopFile(private val dir: File, name: String = AppFiles.SHOP_FILE) {
     fun save(prefs: ShopPrefs) = DurableFile.write(dir, file, prefs.encode())
 }
 
+/**
+ * The two tabs of the shop's money: Local money lists the country currencies, Bitcoin Standard (sats) is the tab alone.
+ * Choosing the Bitcoin tab sets the currency to sats; going back to Local restores the last local currency picked
+ * here, or [guess] (the money of the phone's country) when none was.
+ */
+class MoneyTabs(start: ShopCurrency, private val guess: ShopCurrency) {
+    var currency: ShopCurrency = start
+        private set
+    private var lastLocal: ShopCurrency = if (start == ShopCurrency.Sats) guess else start
+
+    /** True when the Bitcoin tab is the one shown. */
+    val onBitcoin: Boolean get() = currency == ShopCurrency.Sats
+
+    /** The Local tab's list: every currency but sats. */
+    val locals: List<ShopCurrency> get() = LOCALS
+
+    fun showBitcoin() {
+        currency = ShopCurrency.Sats
+    }
+
+    fun showLocal() {
+        currency = lastLocal
+    }
+
+    /** A pick on the Local list, or a currency set from outside. */
+    fun pick(c: ShopCurrency) {
+        currency = c
+        if (c != ShopCurrency.Sats) lastLocal = c
+    }
+
+    companion object {
+        val LOCALS: List<ShopCurrency> = ShopCurrency.values().filter { it != ShopCurrency.Sats }
+    }
+}
+
 /** The screens of the first run, in the order they come. Back from each is [FirstRun.back]. */
 enum class FirstRunStep { Welcome, Shop, Till, Money, OwnAdvice, Why, RealCases, Guide, NotYet }
 
@@ -185,7 +220,11 @@ class FirstRun(start: ShopPrefs, locale: String) {
     var step = FirstRunStep.Welcome
         private set
     var name = start.name
-    var currency: ShopCurrency = start.currency ?: ShopPrefs.guessCurrency(locale)
+    /** The money's tabs; [currency] is theirs. */
+    val moneyTabs = MoneyTabs(start.currency ?: ShopPrefs.guessCurrency(locale), ShopPrefs.guessCurrency(locale))
+    var currency: ShopCurrency
+        get() = moneyTabs.currency
+        set(c) = moneyTabs.pick(c)
     var till: Till? = start.till
     var query = ""
     var money: MoneyChoice? = null

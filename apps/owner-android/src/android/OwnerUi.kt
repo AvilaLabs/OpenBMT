@@ -639,3 +639,34 @@ internal fun Controller.foldedCard(groups: List<Pair<String, List<Pair<String, S
 
 /** A secondary action that is a button in the body rather than in the footer. */
 internal fun Controller.inlineButton(label: String, onClick: () -> Unit): Button = ui.button(label) { onClick() }
+
+/**
+ * The money choice as two tabs: Local money (a radio list of the country currencies and the note under it) and
+ * Bitcoin Standard (its title and note). [tabs] holds the choice; [onChange] runs after each change.
+ */
+internal fun Controller.moneyPicker(tabs: MoneyTabs, onChange: () -> Unit = {}): View {
+    val content = Slot(act)
+    fun fill() {
+        if (tabs.onBitcoin) {
+            content.show(ui.text(FirstRunWords.moneyBitcoinTitle, 15f, bold = true), ui.text(FirstRunWords.moneyBitcoinNote, 15f, colour = ui.pal.secondary))
+        } else {
+            val list = ui.choice(tabs.locals.map { it.label }, tabs.locals.indexOf(tabs.currency))
+            list.setOnCheckedChangeListener { _, _ ->
+                tabs.locals.getOrNull(ui.chosen(list))?.let { tabs.pick(it) }
+                onChange()
+            }
+            content.show(list, para(FirstRunWords.shopCurrencyNote))
+        }
+    }
+    val bar = ui.tabs(
+        listOf(FirstRunWords.moneyTabLocal, FirstRunWords.moneyTabBitcoin),
+        if (tabs.onBitcoin) 1 else 0,
+        { FirstRunWords.withTab(FirstRunWords.moneyTabsSpoken, it) },
+    ) { i ->
+        if (i == 1) tabs.showBitcoin() else tabs.showLocal()
+        fill()
+        onChange()
+    }
+    fill()
+    return stack(bar, content)
+}

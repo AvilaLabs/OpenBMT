@@ -171,14 +171,12 @@ private fun Controller.showPracticeAmount(p: Practice, back: () -> Unit) {
 
 private fun Controller.showShop(r: FirstRun) {
     val name = textInput(FirstRunWords.shopNameLabel, FirstRunWords.shopNameHint).also { it.field.setText(r.name) }
-    val currencies = ShopCurrency.values().toList()
-    val money = ui.choice(currencies.map { it.label }, currencies.indexOf(r.currency))
+    val money = moneyPicker(r.moneyTabs)
     val msg = Slot(act)
     fun capture() {
         r.name = name.field.text.toString()
-        currencies.getOrNull(ui.chosen(money))?.let { r.currency = it }
     }
-    val body = listOf(heading(FirstRunWords.shopTitle), name.view, stack(label(FirstRunWords.shopCurrencyLabel), money), para(FirstRunWords.shopCurrencyNote), msg)
+    val body = listOf(heading(FirstRunWords.shopTitle), name.view, stack(label(FirstRunWords.shopCurrencyLabel), money), msg)
     val back = { capture(); r.back(); showFirstRun() }
     stepScreen(
         FirstRunWords.shopTitle, body,

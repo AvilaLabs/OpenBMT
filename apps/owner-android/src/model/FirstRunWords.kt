@@ -51,6 +51,11 @@ object FirstRunWords {
     const val shopNameHint = "As customers know it"
     const val shopCurrencyLabel = "Your money"
     const val shopCurrencyNote = "Prices are set in this money and shown in bitcoin at the till."
+    const val moneyTabLocal = "Local money"
+    const val moneyTabBitcoin = "Bitcoin Standard"
+    const val moneyBitcoinTitle = "Prices in sats"
+    const val moneyBitcoinNote = "Prices are set in sats, and the books count in sats. No exchange rate is used."
+    const val moneyTabsSpoken = "Your money: {tab} chosen. Double tap the other tab to switch."
     const val shopNext = "Next"
 
     // ---- how you take payments now ------------------------------------------------------------------
@@ -196,6 +201,9 @@ object FirstRunWords {
     /** The line of a till's name for [t] inside [text]: every `{till}` becomes [t]. */
     fun with(text: String, t: String): String = text.replace("{till}", t)
 
+    /** The spoken description of the money tabs with the chosen tab [tab] named. */
+    fun withTab(text: String, tab: String): String = text.replace("{tab}", tab)
+
     /** Every key and its text, in the order of the words file, for docs/screens/owner-app.md. */
     fun all(): List<Pair<String, String>> {
         val out = ArrayList<Pair<String, String>>()
@@ -214,7 +222,10 @@ object FirstRunWords {
         add("practiceSetup", practiceSetup); add("practiceAgain", practiceAgain)
         add("practiceDelete", practiceDelete); add("practiceDeleted", practiceDeleted)
         add("shopTitle", shopTitle); add("shopNameLabel", shopNameLabel); add("shopNameHint", shopNameHint)
-        add("shopCurrencyLabel", shopCurrencyLabel); add("shopCurrencyNote", shopCurrencyNote); add("shopNext", shopNext)
+        add("shopCurrencyLabel", shopCurrencyLabel); add("shopCurrencyNote", shopCurrencyNote)
+        add("moneyTabLocal", moneyTabLocal); add("moneyTabBitcoin", moneyTabBitcoin)
+        add("moneyBitcoinTitle", moneyBitcoinTitle); add("moneyBitcoinNote", moneyBitcoinNote)
+        add("moneyTabsSpoken", moneyTabsSpoken); add("shopNext", shopNext)
         add("tillTitle", tillTitle); add("tillText", tillText); add("tillSearch", tillSearch)
         add("tillNone", tillNone); add("tillOther", tillOther); add("tillNext", tillNext)
         add("tillStepsTitle", tillStepsTitle); add("tillStepsIntro", tillStepsIntro)

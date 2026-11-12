@@ -857,6 +857,40 @@ class Ui(internal val context: Context) {
         }
     }
 
+    /**
+     * Two or more tabs side by side (48 dp, corner 20): the selected one filled in the text colour, the others
+     * outlined. A [RadioGroup] that [chosen] reads. [onPick] gets the index each time a different tab is chosen, and
+     * [describe] gives the spoken description of the group for the tab that is chosen.
+     */
+    fun tabs(options: List<String>, selected: Int, describe: (String) -> String, onPick: (Int) -> Unit): RadioGroup =
+        RadioGroup(context).apply {
+            orientation = RadioGroup.HORIZONTAL
+            isBaselineAligned = false
+            for ((i, label) in options.withIndex()) {
+                addView(
+                    PillButton(context, this@Ui, 48).apply {
+                        text = label
+                        id = View.generateViewId()
+                        isChecked = i == selected
+                    },
+                    RadioGroup.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).also {
+                        it.leftMargin = if (i == 0) 0 else px(4)
+                        it.rightMargin = if (i == options.size - 1) 0 else px(4)
+                    },
+                )
+            }
+            contentDescription = describe(options.getOrElse(selected) { "" })
+            var shown = selected
+            setOnCheckedChangeListener { _, _ ->
+                val now = chosen(this)
+                if (now >= 0 && now != shown) {
+                    shown = now
+                    contentDescription = describe(options[now])
+                    onPick(now)
+                }
+            }
+        }
+
     private fun card(radius: Float = 16f): LinearLayout = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         background = rounded(pal.surface, radius)
@@ -1227,7 +1261,7 @@ class SpinnerView(context: Context, private val track: Int) : View(context) {
 class PinPair(val view: View, val first: EditText, val second: EditText)
 
 /** One option of [Ui.chips]: a pill, filled when it is the chosen one. */
-class PillButton(context: Context, private val ui: Ui) : RadioButton(context) {
+class PillButton(context: Context, private val ui: Ui, private val heightDp: Int = 40) : RadioButton(context) {
     /**
      * False while [RadioButton]'s own constructor runs: it calls [setChecked] before this class has set [ui],
      * so the first restyle waits for [init].
@@ -1239,8 +1273,8 @@ class PillButton(context: Context, private val ui: Ui) : RadioButton(context) {
         gravity = Gravity.CENTER
         textSize = 15f
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        minHeight = ui.px(40)
-        minimumHeight = ui.px(40)
+        minHeight = ui.px(heightDp)
+        minimumHeight = ui.px(heightDp)
         setPadding(ui.px(12), ui.px(8), ui.px(12), ui.px(8))
         filterTouchesWhenObscured = true
         built = true
