@@ -389,7 +389,12 @@ so. It builds no settings bytes and signs nothing.
   takes a key or an address typed, pasted or scanned (plain text of a code,
   at the owner's press), or removes the node; it says that naming a node
   needs the Key app, which shows the key in full, and that Lightning must
-  then be set up on each counter, which holds its own limited key.
+  then be set up on each counter, which holds its own limited key. One more
+  row, "Lightning through a swap provider" (CR-218), takes the provider's
+  name, its onion address (a whole address with its path is split into the
+  name and the path prefix) and the largest sale over Lightning in whole
+  satoshis, and turns the provider on or off. It needs no Key app, because
+  the claim pays the shop's own address; the node judges every field.
 - **OA-34.** Review calls the node's `previewSettings`, which stores nothing,
   and shows every change as a line with its name, its old value and its new
   one, those that need the Key app (loosening) apart from those that take

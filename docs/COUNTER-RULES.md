@@ -1623,9 +1623,9 @@ own, as the driver of section 12 has none.
   the counter's folder before its invoice is shown, so that a restart can
   never lose a lockup it could claim. The secrets are made in memory only,
   and the file is the framed encoding of the swap library with the counter's
-  own record of the lockup and the claims (magic `OBMz`). The status is
-  asked for as the machine says (SW-71). A lockup is taken from the status
-  bytes or from the counter's own watch of the lockup address, a sighting
+  own record of the lockup and the claims (magic `OBM(`, version 1). The
+  status is asked for as the machine says (SW-71). A lockup is taken from the
+  status bytes or from the counter's own watch of the lockup address, a sighting
   of a peer or a block, and is checked by SW-30 before it is believed; the
   counter's own watch alone tells whether it is in a block (SW-72).
 - **CR-221.** When the lockup is in the mempool and the sale's quote is

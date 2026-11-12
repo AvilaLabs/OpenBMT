@@ -3,7 +3,9 @@
 Status: specification for `crates/openbmt-swap`. Parts 1 to 6 and the numbers
 were written before the code. Parts 7 to 10 (the live terms, following a
 swap, the HTTP bytes, the pretend service) are built and tested against
-fixtures and the pretend service. No swap has been made with a real service.
+fixtures and the pretend service. The counter drives them (CR-218 to CR-226
+in `docs/COUNTER-RULES.md`) and an end-to-end test runs every path against a
+private regtest node. No swap has been made with a real service.
 Each rule has an ID so that a test can name the rule it proves.
 
 A shop can take Lightning without running a node. The customer pays a

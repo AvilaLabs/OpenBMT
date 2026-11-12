@@ -1535,8 +1535,11 @@ provider takes its lockup back and the customer's payment is cancelled
   instant limits (§6).
 - Costs to the shop: the provider's fee, the claim transaction's network fee,
   and the provider's minimum and maximum per sale, read live.
-- A sale paid over Lightning is refunded in cash (CR-217): the owner phone
-  checks refunds against the chain, and a Lightning payment is not on it.
+- A sale paid through a swap provider can be refunded in bitcoin as well as
+  in cash (CR-224): the provider's lockup is claimed to the shop's own
+  address, so the owner phone sees the payment on the chain. A sale paid
+  over the shop's own node is refunded in cash (CR-217): that payment is not
+  on the chain.
 
 The price of the option is a dependency: every such sale relies on a provider
 that sees amounts and timing. That is why it is off by default and the
@@ -1922,7 +1925,8 @@ Each gets a written protocol before it runs.
   addresses from the pinned public description (§2.1, §5.4).
 - **D7. Lightning swaps, as an option.** Decided 2026-11-12. A swap
   provider the shop picks, off by default, over Tor, no account, no cut for
-  OpenBMT; refunds of Lightning sales in cash (§8).
+  OpenBMT; a sale paid through a provider is refunded in bitcoin or in cash,
+  one paid over the shop's own node in cash (§8).
 
 **Security-review decisions (Q1–Q4).** Decided on 2026-11-09.
 
