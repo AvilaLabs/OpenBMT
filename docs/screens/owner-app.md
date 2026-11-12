@@ -330,19 +330,19 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | whyText3 | The inconvenience happens once. |
 | whyRealCases | Real cases |
 | realTitle | When someone else holds the money |
-| realIntro | Banks and payment companies usually pay on time. When one fails, or a government steps in, a business can wait years for its money, or lose it. |
+| realIntro | Money in a bank or a payment app is not in your hands. Someone else decides when you can have it. In each case below, people could not get their own money out, through no fault of their own. |
 | realCase1Place | Lebanon, since 2019 |
-| realCase1End | Still held |
-| realCase1Text | In a financial crisis, the banks stopped letting depositors take out their $107 billion. Dollars came out in local money at a loss of 70% or more. In 2025 most could still take out only about $500 a month. |
+| realCase1End | Still locked |
+| realCase1Text | In 2019 Lebanon's banks stopped letting people take out their own dollars. Someone with $100,000 saved could get about $500 a month, paid in local money worth a third as much or less. Six years later most of it is still locked in the banks, and no law says they will get it back. |
 | realCase2Place | Laiki Bank, Cyprus, 2013 |
 | realCase2End | 6¢ per euro back |
-| realCase2Text | To rescue the banks, the government took the deposits above €100,000. Six years later, savers had got back about 6 cents of each euro above that limit. |
+| realCase2Text | Overnight, the government shut Laiki Bank and took every balance above €100,000 to cover the bank's losses. Nobody asked the account holders. A business with €500,000 there kept €100,000. Of the €400,000 taken, about €24,000 came back in six years. |
 | realCase3Place | TMON and WeMakePrice, South Korea, 2024 |
 | realCase3End | Still unpaid |
-| realCase3Text | Two online marketplaces collected the money for their sellers' sales, ran out of cash, and stopped paying. About 48,000 sellers were owed $900 million. At the last report they were still waiting. |
+| realCase3Text | Two large shopping websites held their sellers' money from every sale, then ran out of cash and stopped paying. About 48,000 sellers were cut off from $900 million they had already earned, about $19,000 each. The government's answer was to offer them loans: credit against their own unpaid money. |
 | realCase4Place | Synapse, United States, 2024 |
 | realCase4End | 18¢ per dollar back |
-| realCase4Text | A company that sat between apps and their banks went bankrupt, and its records did not match the banks'. One app's customers were offered back 18 cents of each dollar. Deposit insurance did not apply. |
+| realCase4Text | Synapse moved money between finance apps and the banks that held it. When it went bankrupt, accounts were frozen for months. One app's customers had $64.9 million in their accounts and were offered $11.8 million back. Deposit insurance did not cover them, because Synapse was not a bank. |
 | realBitcoinTitle | Why your own bitcoin is different |
 | realBitcoinText | Bitcoin in your own wallet is not held by a bank or a payment company. Nobody can put a hold on it, close the account or cap your withdrawals, because there is no account. It moves only when your keys sign. |
 | realKeysTitle | Why the keys need so much care |
