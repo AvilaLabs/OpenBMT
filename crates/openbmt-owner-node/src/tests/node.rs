@@ -2054,3 +2054,51 @@ fn oc_52_an_owed_file_that_does_not_read_back_stops_the_start() {
         "{error:?}"
     );
 }
+
+#[test]
+fn oc_07_a_coin_view_write_that_fails_while_the_marks_grow_stops_the_node() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let blocked = block_writes(&dir, COINS_FILE);
+    rig.queue_refund(10_000);
+    rig.feed(vec![]);
+    let halted = rig.node.halted().unwrap_or_default().to_string();
+    assert!(halted.contains("coin view could not be stored"), "{halted}");
+    assert!(halted.contains(COINS_FILE), "{halted}");
+    fs::remove_dir(blocked).unwrap();
+}
+
+#[test]
+fn oc_07_a_block_that_finds_the_node_stopped_by_the_marks_takes_nothing() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, _, session) = exported_open(&mut rig);
+    // The rescans the approval asked for are answered first.
+    rig.feed(vec![]);
+    // A batch queued without refreshing the marks: the block finds them grown.
+    let write = rig.node.queue_writer();
+    rig.node
+        .owner_mut()
+        .unwrap()
+        .queue_batch(batch(3, 3), 1_000, &write)
+        .unwrap();
+    let checked = rig.node.view().checked();
+    let blocked = block_writes(&dir, COINS_FILE);
+    let height = u32::try_from(rig.chain.len()).unwrap() + 1;
+    let block = mine(rig.tip_hash(), height, 0, std::slice::from_ref(&tx));
+    rig.deliver(vec![
+        AppEvent::Chain {
+            joined: vec![(height, block.block_hash())],
+            left: vec![],
+        },
+        AppEvent::Block {
+            hash: block.block_hash(),
+            bytes: serialize(&block),
+        },
+    ]);
+    assert!(rig.node.halted().is_some());
+    assert!(owed_on_disk(&dir).is_empty());
+    assert_eq!(rig.node.view().checked(), checked);
+    assert!(rig.node.owner().open_sessions().contains(&session));
+    fs::remove_dir(blocked).unwrap();
+}

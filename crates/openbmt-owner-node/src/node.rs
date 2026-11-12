@@ -1131,7 +1131,12 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// before the driver is started, right before each block and
     /// reorganization, and after each batch or spend changes the queue.
     pub fn refresh_marks(&mut self) {
-        let _ = self.refresh_marks_checked();
+        if let Err(e) = self.refresh_marks_checked() {
+            // A failure that did not stop the node already stops it here.
+            if self.halted.is_none() {
+                self.stop(e.to_string());
+            }
+        }
     }
 
     fn refresh_marks_checked(&mut self) -> Result<(), NodeError> {
@@ -2234,6 +2239,11 @@ impl<P: OwnerPort> OwnerNode<P> {
         // The marks first: a script the queue handed out is read in this
         // block (OC-07).
         self.refresh_marks();
+        // A node the marks stopped takes nothing of the block: neither the
+        // owed list nor the coin view is touched.
+        if self.halted.is_some() {
+            return;
+        }
         let block = match WellFormedBlock::parse(bytes) {
             Ok(b) if b.hash() == *hash => b,
             Ok(_) => return self.stop(format!("a block did not have the hash {hash} it came as")),
