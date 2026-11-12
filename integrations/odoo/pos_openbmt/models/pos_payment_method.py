@@ -1,7 +1,10 @@
-# Checked against: odoo/odoo 18.0, addons/pos_paytm/models/pos_payment_method.py
-# (as quoted in the research notes). UNCONFIRMED there: the exact decorator
-# and return shape of _get_payment_terminal_selection (written as paytm shows
-# it: parent list plus one tuple).
+# Checked against: odoo/odoo 18.0 (run in a real server): the
+# _get_payment_terminal_selection hook is a plain method returning a list, at
+# addons/point_of_sale/models/pos_payment_method.py line 11 (used by the
+# use_payment_terminal field, line 52); addons/pos_paytm/models/
+# pos_payment_method.py line 41 extends it the same way. The fields the POS
+# frontend loads are the fixed list in _load_pos_data_fields (same file, line
+# 72), so none of the openbmt_* fields reach the browser.
 import json
 import logging
 import re

@@ -64,6 +64,9 @@ class FakeBox:
         self.mode = 'normal'  # normal, redirect, garbage, slow, shape
         self.delay = 0.0
         self.shape = None
+        self.currency = 'EUR'
+        # When set, each status read moves a sale one step: waiting, opened, paid.
+        self.advance = False
         self.lock = threading.Lock()
         box = self
 
@@ -169,7 +172,7 @@ class FakeBox:
                 and float(amount) > 0):
             self.err(h, 400, 'tillBadAmount')
             return
-        if currency != 'EUR':
+        if currency != self.currency:
             self.err(h, 409, 'tillWrongMoney')
             return
         if not (isinstance(request, str) and ID_RE.match(request)):
@@ -195,6 +198,9 @@ class FakeBox:
     def status(self, h, sale):
         with self.lock:
             state = self.sales.get(sale)
+            if self.advance and state in ('waiting', 'opened'):
+                state = self.sales[sale] = (
+                    'opened' if state == 'waiting' else 'paid')
         if state is None:
             self.err(h, 404, 'tillLost')
             return

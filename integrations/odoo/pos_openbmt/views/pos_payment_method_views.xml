@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Checked against: odoo/odoo 18.0, point_of_sale pos_payment_method form
-     (view id point_of_sale.pos_payment_method_view_form: UNCONFIRMED). -->
+<!-- Checked against: odoo/odoo 18.0 (run in a real server): view id
+     point_of_sale.pos_payment_method_view_form, addons/point_of_sale/views/
+     pos_payment_method_views.xml line 3; the use_payment_terminal field it
+     anchors on is at line 29, as in addons/pos_paytm/views/
+     pos_payment_method_views.xml. -->
 <odoo>
     <record id="pos_payment_method_view_form_openbmt" model="ir.ui.view">
         <field name="name">pos.payment.method.form.openbmt</field>

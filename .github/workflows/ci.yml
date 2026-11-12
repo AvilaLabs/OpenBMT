@@ -294,6 +294,9 @@ jobs:
       - name: Model tests against a fake Box
         run: python3 -I -m unittest discover -s tests_standalone -p 'test_model.py'
       - name: Syntax check of the payment script
-        run: node --input-type=module --check < static/src/payment_openbmt.js
+        run: |
+          node --input-type=module --check < static/src/payment_openbmt.js
+          node --input-type=module --check < static/tests/tours/openbmt_tour.js
+          python3 -I -m py_compile tests/__init__.py tests/test_openbmt_server.py tests/test_openbmt_tour.py
       - name: Polling tests
         run: node --test tests_standalone/payment_openbmt.test.js

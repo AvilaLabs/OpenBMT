@@ -187,6 +187,13 @@ test("an error without words shows the key alone", async () => {
     assert.deepEqual(r.dialogs, [{ title: "tillTransport", body: "tillTransport" }]);
 });
 
+test("a failed call to Odoo shows words and resolves false", async () => {
+    const r = rig([false]);
+    assert.strictEqual(await r.iface.send_payment_request("uuid-1"), false);
+    assert.strictEqual(r.dialogs[0].title, "The till cannot reach Odoo");
+    assert.deepEqual(r.statuses.slice(-1), ["retry"]);
+});
+
 test("an error during polling stops polling", async () => {
     const r = rig([
         { state: "waiting", sale: SALE, words: null },

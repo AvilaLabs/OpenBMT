@@ -1,9 +1,17 @@
-/* Checked against: odoo/odoo 18.0, point_of_sale/static/src/app/payment/
-   payment_interface.js and pos_paytm/static/src/js/payment_paytm.js (as
-   quoted in the research notes). UNCONFIRMED there: the import path of
-   register_payment_method, the AlertDialog import, the notification service,
-   how a payment line is found from its uuid, the silentCall argument shape
-   (the record's id is sent), pos.currency.decimal_places and order.name. */
+/* Checked against: odoo/odoo 18.0 (branch 18.0, run in a real server and
+   browser): point_of_sale/static/src/app/payment/payment_interface.js (class
+   and the setup, fast_payments, send_payment_request and send_payment_cancel
+   hooks), point_of_sale/static/src/app/store/pos_store.js
+   register_payment_method (export, near line 2439) and `this.currency =
+   this.config.currency_id` (line 311), point_of_sale/static/src/app/models/
+   data_service.js silentCall(model, method, args, kwargs, queue) (line 622;
+   it returns false when the call fails), point_of_sale/static/src/app/
+   models/pos_payment.js pay() (line 73), point_of_sale/static/src/app/
+   models/pos_order.js payment_ids and get_selected_paymentline (line 581),
+   web/static/src/core/confirmation_dialog/confirmation_dialog.js AlertDialog
+   (line 93), res.currency fields decimal_places and name loaded by
+   point_of_sale/models/res_currency.py (line 17). The tour in
+   tests/test_openbmt_tour.py runs the whole path. */
 import { PaymentInterface } from "@point_of_sale/app/payment/payment_interface";
 import { register_payment_method } from "@point_of_sale/app/store/pos_store";
 import { AlertDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
@@ -12,6 +20,11 @@ const POLL_MS = 2000;
 const TEXT = {
     tillWaiting: "Waiting for the counter. Press Start on the counter.",
     tillOpened: "The customer can pay now.",
+    tillServer: {
+        heading: "The till cannot reach Odoo",
+        what: "The call to Odoo's server failed.",
+        next: "Check the connection, then press Retry. If the customer already paid, check the counter before trying again.",
+    },
 };
 
 export class PaymentOpenBMT extends PaymentInterface {
@@ -28,11 +41,13 @@ export class PaymentOpenBMT extends PaymentInterface {
         return false;
     }
 
-    _call(method, args) {
-        return this.pos.data.silentCall("pos.payment.method", method, [
+    async _call(method, args) {
+        const result = await this.pos.data.silentCall("pos.payment.method", method, [
             [this.payment_method_id.id],
             ...args,
         ]);
+        // silentCall answers false when Odoo's own server cannot be reached.
+        return result || { error: "tillServer", words: TEXT.tillServer };
     }
 
     _line(uuid) {
