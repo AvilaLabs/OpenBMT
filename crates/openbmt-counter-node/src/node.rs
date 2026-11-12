@@ -118,12 +118,13 @@ use openbmt_core::settings::{
 };
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
-    Actor, Amount, BatchTakeRefused, BlockError, CancelRefused, CashRefund, CommandRefused,
+    Actor, Amount, BatchTakeRefused, BillKind, BillRefused, BillView, BlockError, CancelRefused, CashRefund, CommandRefused,
     Counter, Currency, DayTotals, Facts, HeartbeatRefused, HeartbeatView, JudgeError,
     LightningPaid, LoadError, NoteRefused, OpenFacts, OpenRefused, Opened, Overridden, OwnCheck,
-    OwnPairing, Pairing, Quote, RangeTakeRefused, Rate, RateSource, RefundRefused, RefundRequest,
-    RefundView, Report, RequoteRefused, SaleExtras, Screen, SightingError, Slot, StaffEvent,
-    StaffRefused, Store, StoreFault, SwapPaid, TotalsRefused, WithdrawRefused,
+    OwnPairing, PartRefused, PartWay, Pairing, Quote, RangeTakeRefused, Rate, RateSource,
+    RefundRefused, RefundRequest, RefundView, Report, RequoteRefused, SaleExtras, Screen,
+    SightingError, Slot, StaffEvent, StaffRefused, Store, StoreFault, SwapPaid, TotalsRefused,
+    WithdrawRefused,
 };
 use openbmt_lightning::{CertPin, Credential, Reply};
 use openbmt_net_io::{
@@ -1896,6 +1897,8 @@ impl<P: DriverPort> Node<P> {
                         Ok(Some(screen)) => {
                             reports.extend(screen.reports);
                             self.swap.told(index, n, lockup_confirmed);
+                            // CR-249: a part paid by a swap settles its bill.
+                            self.bills_follow();
                         }
                         Ok(None) => {}
                         Err(openbmt_counter::LightningRefused::Store(e)) => self.note(format!(
@@ -2066,9 +2069,16 @@ impl<P: DriverPort> Node<P> {
             extras,
             &mut self.store,
         )?;
+        self.sale_started(&opened, extras.request.is_none());
+        Ok(opened)
+    }
+
+    /// The node starts to watch a sale that was opened, and asks for its
+    /// invoices unless it is a request.
+    fn sale_started(&mut self, opened: &Opened, invoices: bool) {
         self.known.insert(opened.index);
         self.port.watch_script(opened.script.clone());
-        if extras.request.is_none() {
+        if invoices {
             self.ln
                 .sale_opened(opened.index, opened.needs_sats, self.clock.now());
             // CR-219: the sale asks the swap provider for an invoice too.
@@ -2077,7 +2087,151 @@ impl<P: DriverPort> Node<P> {
                     .sale_opened(opened.index, address, opened.needs_sats, self.clock.now());
             }
         }
+    }
+
+    /// CR-245: add the till's reference to a sale.
+    pub fn add_reference(
+        &mut self,
+        index: u32,
+        reference: &str,
+    ) -> Result<(), BillRefused<DirStoreError>> {
+        let now = self.clock.now();
+        self.counter
+            .add_reference(index, reference, now, &mut self.store)
+    }
+
+    /// CR-246: open a bill or a tab; returns its number.
+    pub fn open_bill(
+        &mut self,
+        kind: BillKind,
+        amount: Amount,
+        reference: Option<&str>,
+    ) -> Result<u32, BillRefused<DirStoreError>> {
+        let now = self.clock.now();
+        self.counter
+            .open_bill(kind, amount, reference, now, &mut self.store)
+    }
+
+    /// CR-245: add the till's reference to a bill.
+    pub fn add_bill_reference(
+        &mut self,
+        number: u32,
+        reference: &str,
+    ) -> Result<(), BillRefused<DirStoreError>> {
+        let now = self.clock.now();
+        self.counter
+            .add_bill_reference(number, reference, now, &mut self.store)
+    }
+
+    /// CR-248: join a sale, such as a paid request, to a bill.
+    pub fn join_sale(&mut self, number: u32, sale: u32) -> Result<(), BillRefused<DirStoreError>> {
+        let now = self.clock.now();
+        self.counter.join_sale(number, sale, now, &mut self.store)
+    }
+
+    /// CR-248: open a sale for a bill and make it a part of it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_bill_part(
+        &mut self,
+        number: u32,
+        amount: Amount,
+        tip: Amount,
+        rate: Rate,
+        source: &RateSource,
+        by: Option<&Actor>,
+        extras: SaleExtras<'_>,
+    ) -> Result<Opened, PartRefused<DirStoreError>> {
+        let facts = OpenFacts {
+            health: self.health.unwrap_or(NO_ANSWER_YET),
+            rescan_pending: false,
+            now: self.clock.now(),
+        };
+        let opened = self.counter.open_bill_part(
+            number,
+            amount,
+            tip,
+            rate,
+            source,
+            facts,
+            by,
+            extras,
+            &mut self.store,
+        )?;
+        self.sale_started(&opened, true);
         Ok(opened)
+    }
+
+    /// CR-247: a part paid another way.
+    pub fn add_other_part(
+        &mut self,
+        number: u32,
+        amount: Amount,
+        way: PartWay,
+    ) -> Result<(), BillRefused<DirStoreError>> {
+        let now = self.clock.now();
+        self.counter
+            .add_other_part(number, amount, way, now, &mut self.store)
+    }
+
+    /// CR-250: what each of `people` pays of what is left of a bill.
+    pub fn bill_split(
+        &self,
+        number: u32,
+        people: u8,
+    ) -> Result<Vec<u64>, BillRefused<DirStoreError>> {
+        self.counter.bill_split(number, people)
+    }
+
+    /// CR-251: change the amount of a tab.
+    pub fn set_tab_amount(
+        &mut self,
+        number: u32,
+        amount: Amount,
+    ) -> Result<(), BillRefused<DirStoreError>> {
+        let now = self.clock.now();
+        self.counter
+            .set_tab_amount(number, amount, now, &mut self.store)
+    }
+
+    /// CR-251: a tab is finished.
+    pub fn finish_tab(&mut self, number: u32) -> Result<(), BillRefused<DirStoreError>> {
+        let now = self.clock.now();
+        self.counter.finish_tab(number, now, &mut self.store)
+    }
+
+    /// CR-252: close a bill short. The caller has checked the manager's PIN.
+    pub fn close_short(
+        &mut self,
+        number: u32,
+        by: &Actor,
+    ) -> Result<Amount, BillRefused<DirStoreError>> {
+        let now = self.clock.now();
+        self.counter.close_short(number, by, now, &mut self.store)
+    }
+
+    /// CR-252: cancel a bill that has no part that counts.
+    pub fn cancel_bill(&mut self, number: u32) -> Result<(), BillRefused<DirStoreError>> {
+        let now = self.clock.now();
+        self.counter.cancel_bill(number, now, &mut self.store)
+    }
+
+    /// CR-249: settle the bills whose parts have reached their amount. A
+    /// failed write is noted and tried again at the next call.
+    pub fn bills_follow(&mut self) {
+        let now = self.clock.now();
+        if let Err(e) = self.counter.bills_follow(now, &mut self.store) {
+            self.note(format!("CR-249: a bill was not settled: {e}"));
+        }
+    }
+
+    /// CR-246, CR-254: the bills, open ones and those ended in the last 7 days.
+    pub fn bill_views(&self) -> Vec<BillView> {
+        self.counter.bill_views()
+    }
+
+    /// CR-254: the bill a sale is a part of, when it is one.
+    pub fn bill_of_sale(&self, sale: u32) -> Option<u32> {
+        self.counter.bill_of_sale(sale)
     }
 
     /// CR-206: add a note to a sale that has none.

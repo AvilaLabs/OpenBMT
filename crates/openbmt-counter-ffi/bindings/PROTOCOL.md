@@ -111,6 +111,18 @@ ops run on another; it waits for at most 250 ms.
  70 pair_address_different handle zero  args () -> Words
  71 pending_change   handle node  args u64 -> ChangeStateView
  72 confirm_change   handle node  args (u64, u32) -> Words
+ 73 add_reference    handle node  args ReferenceArgs -> ()
+ 74 open_bill        handle node  args OpenBillArgs -> u32
+ 75 add_bill_reference handle node  args ReferenceArgs -> ()
+ 76 join_sale        handle node  args JoinSaleArgs -> ()
+ 77 open_bill_part   handle node  args BillPartArgs -> OpenedView
+ 78 add_other_part   handle node  args OtherPartArgs -> ()
+ 79 bill_split       handle node  args (u32, u8) -> list<u64>
+ 80 set_tab_amount   handle node  args TabAmountArgs -> ()
+ 81 finish_tab       handle node  args BillNumberArgs -> ()
+ 82 close_short      handle node  args CloseShortArgs -> u64
+ 83 cancel_bill      handle node  args BillNumberArgs -> ()
+ 84 bills            handle node  args u64 -> list<BillRow>
 ```
 
 ## Types
@@ -136,7 +148,7 @@ OpenArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, sour
 OpenTipArgs: record: now: u64, amount_minor: u64, tip_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>
 OpenRequestArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>, note: option<string>, days: u8
 AddNoteArgs: record: now: u64, index: u32, note: string
-SaleInfoView: record: note: option<string>, request_days: u8, expires_at: u64, cash_refund_only: bool
+SaleInfoView: record: note: option<string>, request_days: u8, expires_at: u64, cash_refund_only: bool, reference: option<string>, bill_number: option<u32>
 RequestRow: record: index: u32, note: option<string>, amount_minor: u64, opened_at: u64, expires_at: u64, needs_sats: u64
 TipChoiceView: record: percent: u8, tip_minor: u64
 TipTallyView: record: count: u32, minor: u64
@@ -192,6 +204,22 @@ SwapReplyArgs: record: id: u64, bytes: list<u8>
 LightningStatusView: record: ready: bool, words: Words
 ChangeValueKind: enum, one tag byte
     tags Units=0 Sats=1 Bps=2 Count=3 Seconds=4 Flag=5 Code=6
+BillKindView: enum, one tag byte
+    tags Bill=1 Tab=2
+PartWayView: enum, one tag byte
+    tags Cash=1 Card=2 Other=3
+BillStateView: enum, one tag byte
+    tags Open=0 Settled=1 ClosedShort=2 Cancelled=3
+OpenBillArgs: record: now: u64, kind: BillKindView, amount_minor: u64, reference: option<string>
+ReferenceArgs: record: now: u64, id: u32, reference: string
+JoinSaleArgs: record: now: u64, number: u32, sale: u32
+BillPartArgs: record: now: u64, number: u32, amount_minor: u64, tip_minor: u64, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>, reference: option<string>, note: option<string>
+OtherPartArgs: record: now: u64, number: u32, amount_minor: u64, way: PartWayView
+TabAmountArgs: record: now: u64, number: u32, amount_minor: u64
+BillNumberArgs: record: now: u64, number: u32
+CloseShortArgs: record: now: u64, number: u32, actor: ActorView
+BillPartView: record: sale: option<u32>, amount_minor: u64, way: option<PartWayView>, counts: bool
+BillRow: record: number: u32, kind: BillKindView, amount_minor: u64, reference: option<string>, opened_at: u64, state: BillStateView, ended_at: u64, unpaid_minor: u64, received_bitcoin: u64, received_other: u64, pending: u32, left: u64, parts: list<BillPartView>, words: Words
 ChangeValueView: record: kind: ChangeValueKind, number: u64, text: string
 ChangeFieldView: record: field: string, now: ChangeValueView, after: ChangeValueView
 PendingChangeView: record: version: u32, words: list<string>, fields: list<ChangeFieldView>, arrived: u64, expires_at: u64, confirmed: bool

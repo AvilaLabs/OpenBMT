@@ -168,14 +168,14 @@ fn reports(list: Vec<Report>) -> Vec<ReportView> {
     list.into_iter().map(ReportView).collect()
 }
 
-fn actor(a: ActorView) -> Actor {
+pub(crate) fn actor(a: ActorView) -> Actor {
     Actor {
         role: a.role.role(),
         name: a.name,
     }
 }
 
-fn rate_and_source(
+pub(crate) fn rate_and_source(
     rate: u64,
     label: &str,
     fetched_at: u64,
@@ -378,7 +378,7 @@ impl Entry {
 
     /// Run `f` on the node with the lock held. The time, when the call
     /// has one, raises the clock first.
-    fn run<R>(
+    pub(crate) fn run<R>(
         &self,
         now: Option<u64>,
         f: impl FnOnce(&mut Node<Port>, &mut Vec<Report>, Network) -> Result<R, CounterError>,
@@ -534,6 +534,8 @@ impl Entry {
                 request_days: sale.request().map_or(0, RequestDays::days),
                 expires_at: sale.expires_at(),
                 cash_refund_only: node.refund_onchain_room(index) == Some(0),
+                reference: node.counter().sale_reference(index).map(str::to_string),
+                bill_number: node.bill_of_sale(index),
             })
         })
     }
@@ -657,6 +659,7 @@ impl Entry {
             let extras = SaleExtras {
                 note: note.as_deref(),
                 request,
+                reference: None,
             };
             let opened = if note.is_some() || request.is_some() {
                 node.open_with_extras(

@@ -1,6 +1,7 @@
 //! Tests that drive the exported API the way the Android app does, through
 //! `dispatch`, on a node whose driver the test feeds by hand.
 
+mod bills;
 mod call;
 mod confirm;
 mod currency;

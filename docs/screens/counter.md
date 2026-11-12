@@ -65,6 +65,7 @@ by hand. To write it again, run the test
 | OpenRefused::AddressInUse | Payment code in use | The next payment code is already used by another sale. | Take another kind of payment and tell the owner: a payment code was used twice. | the cashier | CR-02 |
 | OpenRefused::BadName | Sale not opened | The name of the person at the till must be plain text of 1 to 64 characters, so the sale was not opened. | Sign in again, or ask a manager to rename the cashier. | the cashier | CR-61 |
 | OpenRefused::BadNote | Note not accepted | A note must be plain text of 1 to 64 characters, so it was not saved. | Type it again, shorter. | the cashier | CR-206 |
+| OpenRefused::BadReference | WORDS_NEEDED_CR_245_BAD | WORDS_NEEDED_CR_245_BAD_WHAT. | WORDS_NEEDED_CR_245_BAD_NEXT. | the cashier | CR-245 |
 | OpenRefused::AddressNotStored | Payment code not saved | The counter could not save it, so no payment code was handed out. | Try once more. If it fails again, take another kind of payment and tell the owner: the counter cannot save. See Details. | the cashier | CR-03 |
 | OpenRefused::Store | Sale not started | The counter could not save it, so the sale was not started. | Try once more. If it fails again, take another kind of payment and tell the owner: the counter cannot save. See Details. | the cashier | CR-40 |
 | OpenRefused::Store/Record | Sale not started | The counter could not write its record, so the sale was not started. | Try once more. If it fails again, take another kind of payment and tell the owner: the counter cannot save. See Details. | the cashier | CR-40 |
@@ -141,6 +142,7 @@ by hand. To write it again, run the test
 | LoadError::Exposure | Saved totals unreadable | The counter's saved total of payments accepted before a block does not read back, so it did not start. | Restart the counter. If it stays, the saved files need to be put back from a copy. See Details. | the owner | CR-42 |
 | LoadError::Pause | Saved pause unreadable | The counter's saved pause state does not read back, so it did not start and nothing was changed. | Restart the counter. If it stays, the saved files need to be put back from a copy. See Details. | the owner | CR-42 |
 | LoadError::Desk | Saved counter unreadable | The counter's own saved state does not read back, so it did not start and nothing was changed. | Restart the counter. If it stays, the saved files need to be put back from a copy. See Details. | the owner | CR-42 |
+| LoadError::Bills | WORDS_NEEDED_CR_253_UNREAD | WORDS_NEEDED_CR_253_UNREAD_WHAT. | WORDS_NEEDED_CR_253_UNREAD_NEXT. | the cashier | CR-253 |
 | LoadError::Records | Saved records do not match | The counter's saved sale records do not check out, so it did not start and nothing was changed. | Restart the counter. If it stays, the saved files need to be put back from a copy. See Details. | the owner | CR-42 |
 | LoadError::RecordsUnread | Saved records unreadable | The counter's saved sale records could not be read back, so it did not start and nothing was changed. | Restart the counter. If it stays, the saved files need to be put back from a copy. See Details. | the owner | CR-42 |
 | DestinationRefused::TooLong | Code is too long | The scanned code is too long to be an address. | Scan the code again, or ask the customer for an address from their own wallet. | the cashier | CR-62 |
@@ -180,6 +182,31 @@ by hand. To write it again, run the test
 | TotalsRefused::Overflow | Day too large to count | A sum of today's sales is too large to count, so nothing is shown. | Tell the owner. The owner's phone has the full books. | the cashier | CR-153 |
 | TotalsRefused::TooManyRecords | Too many records today | Today needs more of the counter's records than one count can read, so nothing is shown. | Tell the owner. The owner's phone has the full books. | the cashier | CR-152 |
 | TotalsRefused::Store | Totals not read | The counter could not save it, so today's totals could not be counted. | Try once more. If it fails again, tell the owner: the counter cannot save. See Details. | the cashier | CR-40 |
+| BillRefused::UnknownSale | WORDS_NEEDED_CR_248_NOSALE | WORDS_NEEDED_CR_248_NOSALE_WHAT. | WORDS_NEEDED_CR_248_NOSALE_NEXT. | the cashier | CR-11 |
+| BillRefused::UnknownBill | WORDS_NEEDED_CR_246_NOBILL | WORDS_NEEDED_CR_246_NOBILL_WHAT. | WORDS_NEEDED_CR_246_NOBILL_NEXT. | the cashier | CR-246 |
+| BillRefused::AlreadyReferenced | WORDS_NEEDED_CR_245_TWICE | WORDS_NEEDED_CR_245_TWICE_WHAT. | WORDS_NEEDED_CR_245_TWICE_NEXT. | the cashier | CR-245 |
+| BillRefused::BadAmount | WORDS_NEEDED_CR_246_AMOUNT | WORDS_NEEDED_CR_246_AMOUNT_WHAT. | WORDS_NEEDED_CR_246_AMOUNT_NEXT. | the cashier | CR-246 |
+| BillRefused::TooManyOpen | WORDS_NEEDED_CR_253_OPEN256 | WORDS_NEEDED_CR_253_OPEN256_WHAT. | WORDS_NEEDED_CR_253_OPEN256_NEXT. | the cashier | CR-253 |
+| BillRefused::TooManyParts | WORDS_NEEDED_CR_253_PARTS32 | WORDS_NEEDED_CR_253_PARTS32_WHAT. | WORDS_NEEDED_CR_253_PARTS32_NEXT. | the cashier | CR-253 |
+| BillRefused::NotOpen | WORDS_NEEDED_CR_246_ENDED | WORDS_NEEDED_CR_246_ENDED_WHAT. | WORDS_NEEDED_CR_246_ENDED_NEXT. | the cashier | CR-246 |
+| BillRefused::SaleInABill | WORDS_NEEDED_CR_248_INBILL | WORDS_NEEDED_CR_248_INBILL_WHAT. | WORDS_NEEDED_CR_248_INBILL_NEXT. | the cashier | CR-248 |
+| BillRefused::SaleEnded | WORDS_NEEDED_CR_248_SALEEND | WORDS_NEEDED_CR_248_SALEEND_WHAT. | WORDS_NEEDED_CR_248_SALEEND_NEXT. | the cashier | CR-248 |
+| BillRefused::OtherCurrency | WORDS_NEEDED_CR_248_CURR | WORDS_NEEDED_CR_248_CURR_WHAT. | WORDS_NEEDED_CR_248_CURR_NEXT. | the cashier | CR-248 |
+| BillRefused::NotATab | WORDS_NEEDED_CR_251_NOTTAB | WORDS_NEEDED_CR_251_NOTTAB_WHAT. | WORDS_NEEDED_CR_251_NOTTAB_NEXT. | the cashier | CR-251 |
+| BillRefused::BelowReceived | WORDS_NEEDED_CR_251_BELOW | WORDS_NEEDED_CR_251_BELOW_WHAT. | WORDS_NEEDED_CR_251_BELOW_NEXT. | the cashier | CR-251 |
+| BillRefused::NotReached | WORDS_NEEDED_CR_251_NOTYET | WORDS_NEEDED_CR_251_NOTYET_WHAT. | WORDS_NEEDED_CR_251_NOTYET_NEXT. | the cashier | CR-251 |
+| BillRefused::NotAFinishableBill | WORDS_NEEDED_CR_251_NOFIN | WORDS_NEEDED_CR_251_NOFIN_WHAT. | WORDS_NEEDED_CR_251_NOFIN_NEXT. | the cashier | CR-251 |
+| BillRefused::NothingShort | WORDS_NEEDED_CR_252_NOSHORT | WORDS_NEEDED_CR_252_NOSHORT_WHAT. | WORDS_NEEDED_CR_252_NOSHORT_NEXT. | the cashier | CR-252 |
+| BillRefused::NeedsManager | WORDS_NEEDED_CR_252_PIN | WORDS_NEEDED_CR_252_PIN_WHAT. | WORDS_NEEDED_CR_252_PIN_NEXT. | the cashier | CR-252 |
+| BillRefused::HasPart | WORDS_NEEDED_CR_252_HASPART | WORDS_NEEDED_CR_252_HASPART_WHAT. | WORDS_NEEDED_CR_252_HASPART_NEXT. | the cashier | CR-252 |
+| BillRefused::BadSplit/People | WORDS_NEEDED_CR_250_PEOPLE | WORDS_NEEDED_CR_250_PEOPLE_WHAT. | WORDS_NEEDED_CR_250_PEOPLE_NEXT. | the cashier | CR-250 |
+| BillRefused::BadSplit/TooLittle | WORDS_NEEDED_CR_250_LITTLE | WORDS_NEEDED_CR_250_LITTLE_WHAT. | WORDS_NEEDED_CR_250_LITTLE_NEXT. | the cashier | CR-250 |
+| BillRefused::Store | WORDS_NEEDED_CR_255_STORE | WORDS_NEEDED_CR_255_STORE_WHAT. | WORDS_NEEDED_CR_255_STORE_NEXT. | the cashier | CR-40 |
+| BillView::Open | WORDS_NEEDED_CR_246_OPEN | WORDS_NEEDED_CR_246_OPEN_WHAT. | WORDS_NEEDED_CR_246_OPEN_NEXT. | the cashier | CR-246 |
+| BillView::Tab | WORDS_NEEDED_CR_246_TAB | WORDS_NEEDED_CR_246_TAB_WHAT. | WORDS_NEEDED_CR_246_TAB_NEXT. | the cashier | CR-246 |
+| BillView::Settled | WORDS_NEEDED_CR_246_SETTLED | WORDS_NEEDED_CR_246_SETTLED_WHAT. | WORDS_NEEDED_CR_246_SETTLED_NEXT. | the cashier | CR-246 |
+| BillView::ClosedShort | WORDS_NEEDED_CR_246_SHORT | WORDS_NEEDED_CR_246_SHORT_WHAT. | WORDS_NEEDED_CR_246_SHORT_NEXT. | the cashier | CR-246 |
+| BillView::Cancelled | WORDS_NEEDED_CR_246_CANCEL | WORDS_NEEDED_CR_246_CANCEL_WHAT. | WORDS_NEEDED_CR_246_CANCEL_NEXT. | the cashier | CR-246 |
 | RefundState::Requested | Refund requested | The request went to the owner, and this counter is not told when it is paid. | Nothing to do here. The customer is paid from the owner's side; ask the owner to see if it is done. | the owner | CR-74 |
 | RefundView::Requested | Refund requested | The request for 5,000 sats went to the owner, and this counter is not told when it is paid. | Nothing to do here. The customer is paid from the owner's side; ask the owner to see if it is done. | the owner | CR-74 |
 | RefundState::WaitingForDepth | Refund waiting | The request is made, but the sale is not settled yet, so it cannot be paid yet. | Nothing to do. It can be paid when the sale is settled, or the request can be withdrawn. | nobody | CR-66 |

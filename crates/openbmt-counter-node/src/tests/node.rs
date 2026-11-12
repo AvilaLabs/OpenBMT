@@ -714,6 +714,7 @@ fn cr_210_a_request_paid_while_the_node_was_closed_shows_paid_on_the_next_start(
             SaleExtras {
                 note: Some("Tour 12 May"),
                 request: Some(RequestDays::Seven),
+                reference: None,
             },
         )
         .unwrap();

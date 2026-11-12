@@ -401,13 +401,19 @@ pub struct SaleInfoView {
     /// CR-217: a bitcoin refund of the sale cannot be asked for: it was paid
     /// over Lightning and nothing of it is left to refund on-chain.
     pub cash_refund_only: bool,
+    /// CR-245, CR-254: the till's reference of the sale, when it has one.
+    pub reference: Option<String>,
+    /// CR-254: the number of the bill the sale is a part of, when it is one.
+    pub bill_number: Option<u32>,
 }
 
 wire_record!(SaleInfoView {
     note,
     request_days,
     expires_at,
-    cash_refund_only
+    cash_refund_only,
+    reference,
+    bill_number
 });
 
 /// How a value of a field of a change to the settings is to be written

@@ -60,6 +60,7 @@
     )
 )]
 
+mod bills;
 mod call;
 mod codec;
 mod error;
@@ -77,6 +78,11 @@ mod views;
 #[cfg(test)]
 mod tests;
 
+pub use bills::{
+    BillKindView, BillNumberArgs, BillPartArgs, BillPartView, BillRow, BillStateView,
+    CloseShortArgs, JoinSaleArgs, OpenBillArgs, OtherPartArgs, PartWayView, ReferenceArgs,
+    TabAmountArgs,
+};
 pub use call::{
     dispatch, error_response, protocol_description, Registry, MAX_NODES, REQUEST_MAGIC,
     RESPONSE_MAGIC, VERSION,

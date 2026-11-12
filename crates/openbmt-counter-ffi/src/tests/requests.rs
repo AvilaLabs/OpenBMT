@@ -48,6 +48,8 @@ fn sale_info(rig: &Rig, handle: u64, index: u32) -> (Option<String>, u8, u64) {
     let info = (r.opt(Rd::string), r.u8(), r.u64());
     // CR-217: no sale of these tests was paid over Lightning.
     assert!(!r.bool());
+    // CR-245, CR-254: no reference and no bill in these tests.
+    assert!(r.opt(Rd::string).is_none() && r.opt(Rd::u32).is_none());
     r.done();
     info
 }

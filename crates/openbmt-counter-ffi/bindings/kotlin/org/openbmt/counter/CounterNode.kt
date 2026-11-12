@@ -111,6 +111,18 @@ private const val OP_PAIR_ADDRESS_SAME = 69
 private const val OP_PAIR_ADDRESS_DIFFERENT = 70
 private const val OP_PENDING_CHANGE = 71
 private const val OP_CONFIRM_CHANGE = 72
+private const val OP_ADD_REFERENCE = 73
+private const val OP_OPEN_BILL = 74
+private const val OP_ADD_BILL_REFERENCE = 75
+private const val OP_JOIN_SALE = 76
+private const val OP_OPEN_BILL_PART = 77
+private const val OP_ADD_OTHER_PART = 78
+private const val OP_BILL_SPLIT = 79
+private const val OP_SET_TAB_AMOUNT = 80
+private const val OP_FINISH_TAB = 81
+private const val OP_CLOSE_SHORT = 82
+private const val OP_CANCEL_BILL = 83
+private const val OP_BILLS = 84
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -131,6 +143,15 @@ private const val TAG_CHANGE_VALUE_KIND_COUNT = 3
 private const val TAG_CHANGE_VALUE_KIND_SECONDS = 4
 private const val TAG_CHANGE_VALUE_KIND_FLAG = 5
 private const val TAG_CHANGE_VALUE_KIND_CODE = 6
+private const val TAG_BILL_KIND_VIEW_BILL = 1
+private const val TAG_BILL_KIND_VIEW_TAB = 2
+private const val TAG_PART_WAY_VIEW_CASH = 1
+private const val TAG_PART_WAY_VIEW_CARD = 2
+private const val TAG_PART_WAY_VIEW_OTHER = 3
+private const val TAG_BILL_STATE_VIEW_OPEN = 0
+private const val TAG_BILL_STATE_VIEW_SETTLED = 1
+private const val TAG_BILL_STATE_VIEW_CLOSED_SHORT = 2
+private const val TAG_BILL_STATE_VIEW_CANCELLED = 3
 private const val TAG_ACTOR_ROLE_CASHIER = 0
 private const val TAG_ACTOR_ROLE_MANAGER = 1
 private const val TAG_REFUND_ASK_VIEW_SATS = 0
@@ -304,7 +325,46 @@ class PendingChange(
 class ChangeState(val pending: PendingChange?, val notice: Words?)
 
 /** What a sale carries besides its amount: its note, and the days of a request to send (0 for a sale shown at the till) (CR-205, CR-206). */
-class SaleInfo(val note: String?, val requestDays: Int, val expiresAt: Long, val cashRefundOnly: Boolean)
+class SaleInfo(
+    val note: String?,
+    val requestDays: Int,
+    val expiresAt: Long,
+    val cashRefundOnly: Boolean,
+    /** The till's reference of the sale (CR-245), for the Paid screen (CR-254). */
+    val reference: String?,
+    /** The number of the bill the sale is a part of (CR-248), for the Paid screen (CR-254). */
+    val billNumber: Long?,
+)
+
+/** A bill or a tab (CR-246). */
+enum class BillKind { Bill, Tab }
+
+/** How a part that is not bitcoin was paid (CR-247). */
+enum class PartWay { Cash, Card, Other }
+
+/** Where a bill stands (CR-246, CR-252). */
+enum class BillState { Open, Settled, ClosedShort, Cancelled }
+
+/** One part of a bill: a bitcoin sale, or money paid another way (CR-247, CR-248). */
+class BillPart(val sale: Long?, val amountMinor: Long, val way: PartWay?, val counts: Boolean)
+
+/** A bill with what it has received (CR-246, CR-249). The [words] are the library's; they are placeholders until written (CR-255). */
+class Bill(
+    val number: Long,
+    val kind: BillKind,
+    val amountMinor: Long,
+    val reference: String?,
+    val openedAt: Long,
+    val state: BillState,
+    val endedAt: Long,
+    val unpaidMinor: Long,
+    val receivedBitcoin: Long,
+    val receivedOther: Long,
+    val pending: Long,
+    val left: Long,
+    val parts: List<BillPart>,
+    val words: Words,
+)
 
 /** One open request to send, for the list on Home (CR-215). */
 class OpenRequest(
@@ -839,7 +899,57 @@ private fun Reader.pendingChange(): PendingChange =
 
 internal fun Reader.changeState(): ChangeState = ChangeState(option { pendingChange() }, option { words() })
 
-internal fun Reader.saleInfo(): SaleInfo = SaleInfo(option { string() }, u8(), u64(), bool())
+internal fun Reader.saleInfo(): SaleInfo =
+    SaleInfo(option { string() }, u8(), u64(), bool(), option { string() }, option { u32() })
+
+private fun Reader.billKind(): BillKind =
+    when (u8()) {
+        TAG_BILL_KIND_VIEW_BILL -> BillKind.Bill
+        TAG_BILL_KIND_VIEW_TAB -> BillKind.Tab
+        else -> tag("BillKindView")
+    }
+
+private fun Reader.partWay(): PartWay =
+    when (u8()) {
+        TAG_PART_WAY_VIEW_CASH -> PartWay.Cash
+        TAG_PART_WAY_VIEW_CARD -> PartWay.Card
+        TAG_PART_WAY_VIEW_OTHER -> PartWay.Other
+        else -> tag("PartWayView")
+    }
+
+private fun Reader.billState(): BillState =
+    when (u8()) {
+        TAG_BILL_STATE_VIEW_OPEN -> BillState.Open
+        TAG_BILL_STATE_VIEW_SETTLED -> BillState.Settled
+        TAG_BILL_STATE_VIEW_CLOSED_SHORT -> BillState.ClosedShort
+        TAG_BILL_STATE_VIEW_CANCELLED -> BillState.Cancelled
+        else -> tag("BillStateView")
+    }
+
+private fun Writer.billKind(v: BillKind): Writer =
+    u8(
+        when (v) {
+            BillKind.Bill -> TAG_BILL_KIND_VIEW_BILL
+            BillKind.Tab -> TAG_BILL_KIND_VIEW_TAB
+        },
+    )
+
+private fun Writer.partWay(v: PartWay): Writer =
+    u8(
+        when (v) {
+            PartWay.Cash -> TAG_PART_WAY_VIEW_CASH
+            PartWay.Card -> TAG_PART_WAY_VIEW_CARD
+            PartWay.Other -> TAG_PART_WAY_VIEW_OTHER
+        },
+    )
+
+private fun Reader.billPart(): BillPart = BillPart(option { u32() }, u64(), option { partWay() }, bool())
+
+internal fun Reader.bill(): Bill =
+    Bill(
+        u32(), billKind(), u64(), option { string() }, u64(), billState(), u64(), u64(), u64(), u64(), u32(), u64(),
+        list { billPart() }, words(),
+    )
 
 internal fun Reader.openRequest(): OpenRequest =
     OpenRequest(u32(), option { string() }, u64(), u64(), u64(), u64())
@@ -1235,6 +1345,97 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
     fun requestLink(index: Long, label: String): String {
         val r = call(OP_REQUEST_LINK, handle) { it.u32(index).string(label) }
         return r.string().also { r.end() }
+    }
+
+    /** CR-245: give a sale the till's reference. A reference the library refuses is a [CounterException] with its words. */
+    fun addReference(now: Long, index: Long, reference: String) {
+        val r = call(OP_ADD_REFERENCE, handle) { it.u64(now).u32(index).string(reference) }
+        r.end()
+    }
+
+    /** CR-246: open a bill or a tab for [amountMinor] of the shop's currency; returns its number. */
+    fun openBill(now: Long, kind: BillKind, amountMinor: Long, reference: String? = null): Long {
+        val r = call(OP_OPEN_BILL, handle) { it.u64(now).billKind(kind).u64(amountMinor).option(reference) { x -> it.string(x) } }
+        return r.u32().also { r.end() }
+    }
+
+    /** CR-245: give a bill that has none the till's reference. */
+    fun addBillReference(now: Long, number: Long, reference: String) {
+        val r = call(OP_ADD_BILL_REFERENCE, handle) { it.u64(now).u32(number).string(reference) }
+        r.end()
+    }
+
+    /** CR-248: a sale that is open or already paid, such as a paid request to send, becomes a part of a bill. */
+    fun joinSale(now: Long, number: Long, sale: Long) {
+        val r = call(OP_JOIN_SALE, handle) { it.u64(now).u32(number).u32(sale) }
+        r.end()
+    }
+
+    /** CR-248: open a sale of [amountMinor] (and [tipMinor]) for a bill and make it a part of it; the payment is what the customer scans. */
+    fun openBillPart(
+        now: Long,
+        number: Long,
+        amountMinor: Long,
+        tipMinor: Long,
+        rate: Long,
+        sourceLabel: String,
+        sourceFetchedAt: Long,
+        actor: Actor? = null,
+        reference: String? = null,
+        note: String? = null,
+    ): Opened {
+        val r =
+            call(OP_OPEN_BILL_PART, handle) {
+                it.u64(now).u32(number).u64(amountMinor).u64(tipMinor).u64(rate).string(sourceLabel)
+                    .u64(sourceFetchedAt).option(actor) { a -> it.actor(a) }.option(reference) { x -> it.string(x) }
+                    .option(note) { x -> it.string(x) }
+            }
+        return r.opened().also { r.end() }
+    }
+
+    /** CR-247: a part paid another way, with what the cashier typed. It counts at once. */
+    fun addOtherPart(now: Long, number: Long, amountMinor: Long, way: PartWay) {
+        val r = call(OP_ADD_OTHER_PART, handle) { it.u64(now).u32(number).u64(amountMinor).partWay(way) }
+        r.end()
+    }
+
+    /** CR-250: what each of [people] (2 to 20) pays of what is left of a bill; the last share takes the rest. */
+    fun billSplit(number: Long, people: Int): List<Long> {
+        val r = call(OP_BILL_SPLIT, handle) { it.u32(number).u8(people) }
+        return r.list { r.u64() }.also { r.end() }
+    }
+
+    /** CR-251: raise a tab, or lower it to no less than it has received. */
+    fun setTabAmount(now: Long, number: Long, amountMinor: Long) {
+        val r = call(OP_SET_TAB_AMOUNT, handle) { it.u64(now).u32(number).u64(amountMinor) }
+        r.end()
+    }
+
+    /** CR-251: the cashier says a tab is finished; it is settled only when it has received its amount. */
+    fun finishTab(now: Long, number: Long) {
+        val r = call(OP_FINISH_TAB, handle) { it.u64(now).u32(number) }
+        r.end()
+    }
+
+    /**
+     * CR-252: close a bill short, with what was not paid written in the record; returns that amount. The app asks only
+     * after the manager's PIN was right (CR-84); the library refuses an actor who is not a manager.
+     */
+    fun closeShort(now: Long, number: Long, actor: Actor): Long {
+        val r = call(OP_CLOSE_SHORT, handle) { it.u64(now).u32(number).actor(actor) }
+        return r.u64().also { r.end() }
+    }
+
+    /** CR-252: cancel a bill with no part that counts and none pending. */
+    fun cancelBill(now: Long, number: Long) {
+        val r = call(OP_CANCEL_BILL, handle) { it.u64(now).u32(number) }
+        r.end()
+    }
+
+    /** CR-246, CR-254: the bills, open ones and those ended in the last 7 days, by number. */
+    fun bills(now: Long): List<Bill> {
+        val r = call(OP_BILLS, handle) { it.u64(now) }
+        return r.list { r.bill() }.also { r.end() }
     }
 
     /** Work out the state of a sale now. */

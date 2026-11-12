@@ -89,6 +89,18 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (70, "pair_address_different"),
         (71, "pending_change"),
         (72, "confirm_change"),
+        (73, "add_reference"),
+        (74, "open_bill"),
+        (75, "add_bill_reference"),
+        (76, "join_sale"),
+        (77, "open_bill_part"),
+        (78, "add_other_part"),
+        (79, "bill_split"),
+        (80, "set_tab_amount"),
+        (81, "finish_tab"),
+        (82, "close_short"),
+        (83, "cancel_bill"),
+        (84, "bills"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

@@ -1,5 +1,6 @@
 //! Tests. The node's tests feed a fake driver by hand and use no network.
 
+mod bills;
 mod chainview;
 mod confirm;
 mod dirstore;

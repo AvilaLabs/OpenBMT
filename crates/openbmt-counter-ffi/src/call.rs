@@ -72,6 +72,12 @@
 //!   says what a sale carries besides its amount, 64 `requests` lists the
 //!   open requests (CR-215) and 65 `request_link` gives the payment link of
 //!   one (CR-214).
+//! - 73 `add_reference` gives a sale the till's reference (CR-245); 74
+//!   `open_bill`, 75 `add_bill_reference`, 76 `join_sale`, 77
+//!   `open_bill_part`, 78 `add_other_part`, 79 `bill_split`, 80
+//!   `set_tab_amount`, 81 `finish_tab`, 82 `close_short` and 83
+//!   `cancel_bill` work a bill or a tab, and 84 `bills` lists them
+//!   (CR-246 to CR-253).
 //! - 66 to 68 Lightning through a swap provider (CR-219, CR-225):
 //!   `swap_next` hands out the next request for the provider's onion name,
 //!   `swap_reply` takes the bytes that came back and `swap_failed` says there
@@ -97,6 +103,11 @@ use openbmt_counter_node::{Ceremony, OwnCeremony};
 
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::error::{internal, refused_by, wrong_state, CounterError};
+use crate::bills::{
+    BillKindView, BillNumberArgs, BillPartArgs, BillPartView, BillRow, BillStateView,
+    CloseShortArgs, JoinSaleArgs, OpenBillArgs, OtherPartArgs, PartWayView, ReferenceArgs,
+    TabAmountArgs,
+};
 use crate::host::{real_spawn, Entry, Spawn};
 use crate::pay::Payment;
 use crate::rates::{
@@ -518,6 +529,43 @@ fn build_ops() -> Vec<Op> {
             Node,
             |c, (now, version): (u64, u32)| c.entry()?.confirm_change(now, version),
         ),
+        op(73, "add_reference", Node, |c, a: ReferenceArgs| {
+            c.entry()?.add_reference(a)
+        }),
+        op(74, "open_bill", Node, |c, a: OpenBillArgs| {
+            c.entry()?.open_bill(a)
+        }),
+        op(75, "add_bill_reference", Node, |c, a: ReferenceArgs| {
+            c.entry()?.add_bill_reference(a)
+        }),
+        op(76, "join_sale", Node, |c, a: JoinSaleArgs| {
+            c.entry()?.join_sale(a)
+        }),
+        op(77, "open_bill_part", Node, |c, a: BillPartArgs| {
+            c.entry()?.open_bill_part(a)
+        }),
+        op(78, "add_other_part", Node, |c, a: OtherPartArgs| {
+            c.entry()?.add_other_part(a)
+        }),
+        op(
+            79,
+            "bill_split",
+            Node,
+            |c, (number, people): (u32, u8)| c.entry()?.bill_split(number, people),
+        ),
+        op(80, "set_tab_amount", Node, |c, a: TabAmountArgs| {
+            c.entry()?.set_tab_amount(a)
+        }),
+        op(81, "finish_tab", Node, |c, a: BillNumberArgs| {
+            c.entry()?.finish_tab(a)
+        }),
+        op(82, "close_short", Node, |c, a: CloseShortArgs| {
+            c.entry()?.close_short(a)
+        }),
+        op(83, "cancel_bill", Node, |c, a: BillNumberArgs| {
+            c.entry()?.cancel_bill(a)
+        }),
+        op(84, "bills", Node, |c, now: u64| c.entry()?.bills(now)),
     ]
 }
 
@@ -708,6 +756,19 @@ fn definitions() -> Vec<TypeDef> {
         SwapReplyArgs::define(),
         LightningStatusView::define(),
         ChangeValueKind::define(),
+        BillKindView::define(),
+        PartWayView::define(),
+        BillStateView::define(),
+        OpenBillArgs::define(),
+        ReferenceArgs::define(),
+        JoinSaleArgs::define(),
+        BillPartArgs::define(),
+        OtherPartArgs::define(),
+        TabAmountArgs::define(),
+        BillNumberArgs::define(),
+        CloseShortArgs::define(),
+        BillPartView::define(),
+        BillRow::define(),
         ChangeValueView::define(),
         ChangeFieldView::define(),
         PendingChangeView::define(),

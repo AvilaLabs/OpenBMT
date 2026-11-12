@@ -51,6 +51,7 @@ fn every_slot_and_the_checked_height_read_back() {
     store.put(Slot::Exposure, b"exposure").unwrap();
     store.put(Slot::Pause, b"pause").unwrap();
     store.put(Slot::Desk, b"desk").unwrap();
+    store.put(Slot::Bills, b"bills").unwrap();
     for index in [12, 0, 7] {
         store
             .put(Slot::Sale(index), format!("sale {index}").as_bytes())
@@ -62,6 +63,7 @@ fn every_slot_and_the_checked_height_read_back() {
     assert_eq!(loaded.exposure.as_deref(), Some(&b"exposure"[..]));
     assert_eq!(loaded.pause.as_deref(), Some(&b"pause"[..]));
     assert_eq!(loaded.desk.as_deref(), Some(&b"desk"[..]));
+    assert_eq!(loaded.bills.as_deref(), Some(&b"bills"[..]));
     assert_eq!(
         loaded.sales,
         vec![

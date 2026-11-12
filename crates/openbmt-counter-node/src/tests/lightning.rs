@@ -1001,6 +1001,7 @@ fn cr_208_a_request_is_never_asked_of_the_shops_node() {
         let facts = SaleExtras {
             note: None,
             request: Some(RequestDays::Three),
+            reference: None,
         };
         let index = rig
             .node
