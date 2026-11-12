@@ -1,6 +1,6 @@
 //! The owner phone's state and the calls that keep it (AS-50 to AS-66).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bitcoin::hashes::Hash;
 use bitcoin::psbt::Psbt;
@@ -94,6 +94,11 @@ pub(crate) struct OpenSession {
     pub request: Vec<u8>,
     /// One entry for each item of the request, with the item's number.
     pub frozen: Vec<(u32, Frozen)>,
+    /// AS-101, AS-105: set for a session of a shop's own wallet (the session
+    /// of `build_own_spend`): the numbers of the items whose file was given
+    /// to the wallet, whose transaction is watched. `None` for a session of
+    /// the Key app.
+    pub own: Option<BTreeSet<u32>>,
 }
 
 /// Everything the owner phone keeps. Every call works on a copy and stores
@@ -302,6 +307,8 @@ pub struct Owner {
     pub(crate) roots: PinnedRoots,
     pub(crate) policy: BatchPolicy,
     pub(crate) state: State,
+    /// AS-100: the shop uses its own wallet, so no Key app signs for it.
+    pub(crate) no_key_app: bool,
 }
 
 impl std::fmt::Debug for Owner {
@@ -349,6 +356,9 @@ impl Owner {
         let roots =
             PinnedRoots::new(identity.device_id(), approver).map_err(|_| SetupError::SameRoot)?;
         let wallet_id = wallet.checksum32();
+        let no_key_app = matches!(wallet, ImportedWallet::Single(_))
+            || crate::own_shop::own_approver(owner_secret)
+                .is_some_and(|key| key == roots.approver);
         Ok(Self {
             identity,
             wallet,
@@ -356,6 +366,7 @@ impl Owner {
             roots,
             policy,
             state: State::new(options),
+            no_key_app,
         })
     }
 
@@ -404,6 +415,24 @@ impl Owner {
     /// The pinned Key app root.
     pub fn approver_id(&self) -> DeviceId {
         self.roots.approver
+    }
+
+    /// AS-100: whether the shop uses its own wallet: a wallet with one key,
+    /// or the key a shop with its own wallet gives its queue in place of a
+    /// Key app's ([`own_approver`](crate::own_shop::own_approver)). Its
+    /// spends are signed in that wallet (AS-101 to AS-106), and nothing
+    /// that needs the Key app is queued.
+    pub fn is_own_wallet(&self) -> bool {
+        self.no_key_app
+    }
+
+    /// AS-100: refuse what needs the Key app when the shop has none.
+    pub(crate) fn require_key_app(&self) -> Result<(), Refusal> {
+        if self.no_key_app {
+            Err(Refusal::NoKeyApp)
+        } else {
+            Ok(())
+        }
     }
 
     /// The wallet, of either kind.
@@ -734,6 +763,7 @@ impl Owner {
         now: u64,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<u32, OwnerError<E>> {
+        self.require_key_app()?;
         let mut next = self.state.clone();
         let id = self.stage_batch(&mut next, batch, now)?;
         self.commit(next, persist)?;
@@ -786,6 +816,7 @@ impl Owner {
         request_bytes: &[u8],
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<u32, OwnerError<E>> {
+        self.require_key_app()?;
         let request = PairRequest::from_bytes(request_bytes)
             .map_err(|e| Refusal::PairingNotRequest(e.to_string()))?;
         let offer = PairOffer::new(
@@ -825,6 +856,7 @@ impl Owner {
         settings: Settings,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<SettingsQueued, OwnerError<E>> {
+        self.require_key_app()?;
         let mut next = self.state.clone();
         let outcome = self.stage_settings(&mut next, settings)?;
         self.commit(next, persist)?;
@@ -1025,6 +1057,18 @@ impl Owner {
             .collect()
     }
 
+    /// AS-105: the transactions of the open sessions of the shop's own
+    /// wallet whose file was given to the wallet. Each may be sent by the
+    /// wallet without the owner.
+    pub fn own_exported_transactions(&self) -> Vec<SignedElsewhere> {
+        self.state
+            .sessions
+            .iter()
+            .filter(|s| s.own.is_some())
+            .flat_map(|s| exported_in(s).unwrap_or_default())
+            .collect()
+    }
+
     /// AS-96, AS-89: take item `number` out of the open session `session`.
     /// The session stays while another item is in it, with its request made
     /// again without the item, and ends with the last.
@@ -1043,6 +1087,9 @@ impl Owner {
             return Err(Refusal::UnknownSession);
         };
         open.frozen.retain(|(n, _)| *n != number);
+        if let Some(filed) = open.own.as_mut() {
+            filed.remove(&number);
+        }
         if open.frozen.is_empty() {
             next.sessions.remove(at);
             return Ok(());
@@ -1086,7 +1133,13 @@ pub(crate) fn exported_in(session: &OpenSession) -> Result<Vec<SignedElsewhere>,
         let Ok(parsed) = Psbt::deserialize(psbt) else {
             continue;
         };
-        if !crate::hardware::is_exported(&parsed) {
+        // AS-105: an item of a shop's own wallet is watched from the first
+        // file; any other, once key 1 signed it (AS-89).
+        let watched = match &session.own {
+            Some(filed) => filed.contains(number),
+            None => crate::hardware::is_exported(&parsed),
+        };
+        if !watched {
             continue;
         }
         let mut inputs: Vec<OutPoint> = parsed

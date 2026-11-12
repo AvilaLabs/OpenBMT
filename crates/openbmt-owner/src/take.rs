@@ -146,6 +146,7 @@ impl Owner {
         now: u64,
         persist: impl FnOnce(&[u8], &[u8]) -> Result<(), E>,
     ) -> Result<Taken, OwnerError<E>> {
+        self.require_key_app()?;
         if response.len() > openbmt_session::MAX_SESSION_BYTES {
             return Err(Refusal::Frame(DecodeError::TooLarge).into());
         }
@@ -154,7 +155,7 @@ impl Owner {
             .state
             .sessions
             .iter()
-            .position(|s| s.id == *resp.session_id())
+            .position(|s| s.id == *resp.session_id() && s.own.is_none())
             .ok_or(Refusal::UnknownSession)?;
         let session = self.state.sessions.get(at).ok_or(Refusal::UnknownSession)?;
         let request = Request::from_bytes(&session.request).map_err(Refusal::Frame)?;

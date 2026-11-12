@@ -56,6 +56,6 @@ pub use plan::{
 };
 pub use psbt::PsbtError;
 pub use signer_file::{
-    check_finished, psbt_for_signer, take_signer_signatures, take_wallet_signature,
-    transaction_of_final_file, SignerFileError,
+    check_finished, psbt_for_signer, take_own_signatures, take_signer_signatures,
+    take_wallet_signature, transaction_of_final_file, SignerFileError,
 };

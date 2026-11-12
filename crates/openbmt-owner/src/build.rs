@@ -309,6 +309,7 @@ impl Owner {
             now,
             random,
             false,
+            None,
             persist,
         )
         .map(|(built, _)| built)
@@ -338,12 +339,13 @@ impl Owner {
             now,
             random,
             true,
+            None,
             persist,
         )
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_inner<E>(
+    pub(crate) fn build_inner<E>(
         &mut self,
         coins: &[Coin],
         fee_rate: u64,
@@ -352,13 +354,18 @@ impl Owner {
         now: u64,
         random: &[u8; 96],
         for_signer: bool,
+        own: Option<&BTreeSet<u32>>,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<(Built, Option<[u8; 32]>), OwnerError<E>> {
         if fee_rate == 0 {
             return Err(Refusal::ZeroFeeRate.into());
         }
+        // AS-100: a shop with its own wallet has no Key app to ask.
+        if own.is_none() {
+            self.require_key_app()?;
+        }
         let mut next = self.state.clone();
-        if next.sessions.len() + usize::from(for_signer) >= MAX_OPEN_SESSIONS {
+        if next.sessions.len() + usize::from(for_signer || own.is_some()) >= MAX_OPEN_SESSIONS {
             return Err(Refusal::Full("the list of open sessions").into());
         }
         let (session_id, nonce, change_seed) = thirds(random);
@@ -390,7 +397,7 @@ impl Owner {
         let ready: Vec<Refund> = next
             .refunds
             .iter()
-            .filter(|r| is_ready(&next, r))
+            .filter(|r| is_ready(&next, r) && own.is_none_or(|p| p.contains(&r.id)))
             .cloned()
             .collect();
         // AS-68: refunds that were in a dropped transaction are planned first,
@@ -526,7 +533,7 @@ impl Owner {
         let cash: Vec<_> = next
             .cash_outs
             .iter()
-            .filter(|c| c.stage == Stage::Queued)
+            .filter(|c| c.stage == Stage::Queued && own.is_none_or(|p| p.contains(&c.id)))
             .cloned()
             .collect();
         for c in cash {
@@ -627,6 +634,12 @@ impl Owner {
             ));
             txs += 1;
             k += 1;
+        }
+
+        // AS-101: the spends the owner picked are frozen alone, for the
+        // shop's own wallet: no other item, no health check.
+        if let Some(picked) = own {
+            return self.freeze_own(next, items, skipped, picked, random, now, persist);
         }
 
         // Pairings, settings, batches (AS-58), in that order.
@@ -756,6 +769,7 @@ impl Owner {
                 created_at: now,
                 request: made.as_bytes().to_vec(),
                 frozen: spend_frozen,
+                own: None,
             });
         }
 
@@ -798,6 +812,7 @@ impl Owner {
             created_at: now,
             request: bytes.clone(),
             frozen,
+            own: None,
         });
         let signer_session = spend_session.as_ref().map(|s| s.id);
         next.sessions.extend(spend_session);

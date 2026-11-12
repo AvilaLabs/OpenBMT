@@ -9,7 +9,8 @@
 //!   | open sessions | finished objects | issued ranges
 //!   | version 2 and 3: Box claims
 //!   | version 3 and 4: cash-out prices | refund books
-//!   | version 4 only: transactions signed elsewhere
+//!   | version 4 and 5: transactions signed elsewhere
+//!   | version 5 only: open sessions of the shop's own wallet
 //! ```
 //!
 //! The version is 1 until the queue holds anything of a Box (a claim, a
@@ -31,6 +32,16 @@
 //! transaction ID, the ID, the refunds it pays (a u32 count and the numbers),
 //! the cash-out (a flag and the number) and the outpoints it spends (a u32
 //! count and each as transaction ID and index, ascending).
+//!
+//! The version is 5 while the queue holds an open session of a shop's own
+//! wallet (AS-107), whatever else it holds. Version 5 has the lists of
+//! version 4 (the transactions signed elsewhere possibly empty) and then the
+//! own-spend sessions: a u32 count and, for each, the ID (32), the time u64,
+//! the request (a blob), the frozen items (a u32 count, each as the sessions
+//! of the Key app hold them, all spends) and the numbers of the items whose
+//! file was given to the wallet, whose transactions are watched (AS-105: a
+//! u32 count and the numbers, ascending). The sessions of the Key app are
+//! written in their own list as before and never hold an own-spend session.
 //!
 //! Every list is a u32 count and then its entries in ascending order of
 //! their key (the issued ranges: counter, start, count and the time the
@@ -222,15 +233,18 @@ fn uses_books(st: &State) -> bool {
 /// AS-65: the snapshot of `state`.
 pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
     let mut out = wire::start(&MAGIC_OWNER_QUEUE, 1024);
-    let with_elsewhere = !st.elsewhere.is_empty();
+    let own_sessions: Vec<&OpenSession> = st.sessions.iter().filter(|s| s.own.is_some()).collect();
+    let with_own = !own_sessions.is_empty();
+    let with_elsewhere = !st.elsewhere.is_empty() || with_own;
     let with_books = with_elsewhere || uses_books(st);
     let with_box = with_books || uses_box(st);
     if with_box {
         if let Some(v) = out.get_mut(4) {
-            *v = match (with_elsewhere, with_books) {
-                (true, _) => 4,
-                (false, true) => 3,
-                (false, false) => 2,
+            *v = match (with_own, with_elsewhere, with_books) {
+                (true, _, _) => 5,
+                (false, true, _) => 4,
+                (false, false, true) => 3,
+                (false, false, false) => 2,
             };
         }
     }
@@ -323,8 +337,8 @@ pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
         put_blob(&mut out, &p.request.to_bytes());
         put_stage(&mut out, &p.stage);
     }
-    put_u32(&mut out, st.sessions.len());
-    for s in &st.sessions {
+    put_u32(&mut out, st.sessions.len() - own_sessions.len());
+    for s in st.sessions.iter().filter(|s| s.own.is_none()) {
         out.extend_from_slice(&s.id);
         out.extend_from_slice(&s.created_at.to_le_bytes());
         put_blob(&mut out, &s.request);
@@ -426,6 +440,24 @@ pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
                 None => out.push(0),
             }
             put_outpoints(&mut out, &e.inputs);
+        }
+    }
+    if with_own {
+        put_u32(&mut out, own_sessions.len());
+        for s in own_sessions {
+            out.extend_from_slice(&s.id);
+            out.extend_from_slice(&s.created_at.to_le_bytes());
+            put_blob(&mut out, &s.request);
+            put_u32(&mut out, s.frozen.len());
+            for (number, f) in &s.frozen {
+                put_frozen(&mut out, *number, f);
+            }
+            let filed: Vec<u32> = s
+                .own
+                .as_ref()
+                .map(|set| set.iter().copied().collect())
+                .unwrap_or_default();
+            put_ids(&mut out, &filed);
         }
     }
     if out.len() > MAX_SNAPSHOT_BYTES {
@@ -600,7 +632,7 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
     let version = r.u8().map_err(d)?;
     let with_box = match version {
         1 => false,
-        2..=4 => true,
+        2..=5 => true,
         v => return Err(d(DecodeError::UnsupportedVersion(v))),
     };
     if r.array::<32>().map_err(d)? != owner.wallet_id {
@@ -824,6 +856,7 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
             created_at,
             request,
             frozen,
+            own: None,
         });
     }
 
@@ -945,7 +978,7 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
             });
         }
     }
-    if version == 4 {
+    if version >= 4 {
         let n = r.count(MAX_SIGNED_ELSEWHERE, 41).map_err(d)?;
         for _ in 0..n {
             let txid = read_txid(&mut r).map_err(d)?;
@@ -958,6 +991,42 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
                 cash_out,
                 inputs,
             });
+        }
+    }
+    if version == 5 {
+        // AS-107: the open sessions of the shop's own wallet.
+        let n = r.count(MAX_OPEN_SESSIONS, 44).map_err(d)?;
+        for _ in 0..n {
+            let id: [u8; 32] = r.array().map_err(d)?;
+            let created_at = r.u64_le().map_err(d)?;
+            let request = read_blob(&mut r, MAX_SESSION_REQUEST).map_err(d)?.to_vec();
+            let m = r.count(MAX_ITEMS_PER_SESSION, 5).map_err(d)?;
+            let mut frozen = Vec::with_capacity(m);
+            for _ in 0..m {
+                let (number, f) = read_frozen(&mut r, true).map_err(d)?;
+                if !matches!(f, Frozen::Spend { .. }) {
+                    return Err(d(bad("an own-spend session holds an item that is no spend")));
+                }
+                frozen.push((number, f));
+            }
+            let filed = read_ids(&mut r, MAX_ITEMS_PER_SESSION).map_err(d)?;
+            if !filed.windows(2).all(|w| matches!(w, [a, b] if a < b))
+                || filed.iter().any(|n| !frozen.iter().any(|(k, _)| k == n))
+            {
+                return Err(d(bad(
+                    "the filed items of an own-spend session are not among its items",
+                )));
+            }
+            st.sessions.push(OpenSession {
+                id,
+                created_at,
+                request,
+                frozen,
+                own: Some(filed.into_iter().collect()),
+            });
+        }
+        if st.sessions.len() > MAX_OPEN_SESSIONS {
+            return Err(d(bad("more sessions are open than the queue keeps")));
         }
     }
     r.finish().map_err(d)?;
@@ -1062,6 +1131,29 @@ fn check_consistency(owner: &Owner, st: &State) -> Result<(), RestoreError> {
     for s in &st.sessions {
         if !session_ids.insert(s.id) {
             return Err(bad("a session is open twice"));
+        }
+        // AS-107: a shop with its own wallet has no session for the Key app,
+        // and a shop with a Key app has none for its own wallet.
+        match (&s.own, owner.no_key_app) {
+            (None, true) => {
+                return Err(bad(
+                    "a shop with its own wallet holds a session for the Key app",
+                ))
+            }
+            (Some(_), false) => {
+                return Err(bad(
+                    "a shop with a Key app holds a session for its own wallet",
+                ))
+            }
+            _ => {}
+        }
+        if s.own.is_some()
+            && !s
+                .frozen
+                .iter()
+                .all(|(_, f)| matches!(f, Frozen::Spend { .. }))
+        {
+            return Err(bad("an own-spend session holds an item that is no spend"));
         }
         let request = Request::from_bytes(&s.request)
             .map_err(|_| bad("an open session's request does not decode"))?;

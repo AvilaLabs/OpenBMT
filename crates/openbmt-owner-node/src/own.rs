@@ -22,7 +22,6 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use bitcoin::hashes::{sha256, Hash};
 use bitcoin::ScriptBuf;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pinned_wallet::PinnedWallet;
@@ -43,14 +42,7 @@ pub const OWN_STATE_FILE: &str = "own-shop";
 /// device holds the key that goes with it. A shop with its own wallet has no
 /// Key app; the queue that takes this key is never given anything to sign.
 pub fn own_approver(owner_secret: &[u8; 32]) -> Result<DeviceId, OwnNodeError> {
-    let mut seed = Vec::with_capacity(32 + 32);
-    seed.extend_from_slice(b"OpenBMT/own-wallet-no-key-app/v1");
-    seed.extend_from_slice(owner_secret);
-    let digest = sha256::Hash::hash(&seed).to_byte_array();
-    seed.fill(0);
-    Identity::from_secret_bytes(&digest)
-        .map(|i| i.device_id())
-        .map_err(|_| OwnNodeError::NoApprover)
+    openbmt_owner::own_shop::own_approver(owner_secret).ok_or(OwnNodeError::NoApprover)
 }
 
 /// Why the node did not open, or a step did not go.

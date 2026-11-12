@@ -128,6 +128,8 @@ fn refusal_name(r: &Refusal) -> String {
         Refusal::SnapshotTooLarge => "SnapshotTooLarge".to_string(),
         Refusal::Key1Wallet => "Key1Wallet".to_string(),
         Refusal::QueueNotSaved(_) => "QueueNotSaved".to_string(),
+        Refusal::NoKeyApp => "NoKeyApp".to_string(),
+        Refusal::OwnSpend(_) => "OwnSpend".to_string(),
         Refusal::Hardware(h) => {
             let kind = std::mem::discriminant(h);
             let name = crate::hardware::all_refusals()

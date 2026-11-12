@@ -81,6 +81,7 @@ impl Owner {
         claim_bytes: &[u8],
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<BoxRequest, OwnerError<E>> {
+        self.require_key_app()?;
         let claim =
             Claim::from_bytes(claim_bytes).map_err(|e| Refusal::BoxNotClaim(e.to_string()))?;
         if claim.box_key == self.identity.device_id() || claim.box_key == self.roots.approver {

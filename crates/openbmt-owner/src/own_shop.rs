@@ -49,6 +49,22 @@ use crate::own_book::{AllocationBook, BookError};
 /// OA-105: the magic of the shop's state.
 pub const MAGIC_OWN_STATE: [u8; 4] = *b"OBM@";
 
+/// AS-100: the key a shop with its own wallet gives the owner queue in place
+/// of a Key app's, made from the owner's secret and a tag, so that no device
+/// holds the key that goes with it. The queue that takes this key is never
+/// given a Key app's item. `None` only for a secret that makes no key.
+pub fn own_approver(owner_secret: &[u8; 32]) -> Option<DeviceId> {
+    use bitcoin::hashes::{sha256, Hash};
+    let mut seed = Vec::with_capacity(32 + 32);
+    seed.extend_from_slice(b"OpenBMT/own-wallet-no-key-app/v1");
+    seed.extend_from_slice(owner_secret);
+    let digest = sha256::Hash::hash(&seed).to_byte_array();
+    seed.fill(0);
+    Identity::from_secret_bytes(&digest)
+        .map(|i| i.device_id())
+        .ok()
+}
+
 /// OA-109: the most bytes of a counter's request the phone reads.
 pub const MAX_REQUEST_BYTES: usize = 1_024;
 

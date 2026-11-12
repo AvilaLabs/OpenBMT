@@ -205,6 +205,12 @@ pub enum Refusal {
     QueueNotSaved(&'static str),
     /// AS-90 to AS-99: a step with a hardware signer was refused.
     Hardware(crate::hardware::HardwareRefusal),
+    /// AS-100: an item that needs the Key app was queued in a shop that
+    /// uses its own wallet.
+    NoKeyApp,
+    /// AS-101 to AS-106: a step of a spend from the shop's own wallet was
+    /// refused.
+    OwnSpend(crate::own_spend::OwnSpendRefusal),
 }
 
 impl fmt::Display for Refusal {
@@ -319,6 +325,11 @@ impl fmt::Display for Refusal {
                 )
             }
             Self::Hardware(h) => write!(f, "{h}"),
+            Self::NoKeyApp => write!(
+                f,
+                "no-key-app: this shop uses its own wallet and has no Key app; the item needs one"
+            ),
+            Self::OwnSpend(r) => write!(f, "{r}"),
         }
     }
 }

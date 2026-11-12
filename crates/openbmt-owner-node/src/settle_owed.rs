@@ -42,6 +42,10 @@ pub enum OwedKind {
     /// A coin of a transaction kept as signed elsewhere is spent in the block
     /// by another transaction.
     ElsewhereBeaten,
+    /// AS-105: a coin of a transaction whose file was given to a shop's own
+    /// wallet, in a session that is still open, is spent in the block by
+    /// another transaction.
+    ExportedBeaten,
 }
 
 impl OwedKind {
@@ -50,6 +54,7 @@ impl OwedKind {
             Self::ExportedPaid => 0,
             Self::ElsewherePaid => 1,
             Self::ElsewhereBeaten => 2,
+            Self::ExportedBeaten => 3,
         }
     }
 
@@ -58,6 +63,7 @@ impl OwedKind {
             0 => Some(Self::ExportedPaid),
             1 => Some(Self::ElsewherePaid),
             2 => Some(Self::ElsewhereBeaten),
+            3 => Some(Self::ExportedBeaten),
             _ => None,
         }
     }
@@ -263,6 +269,12 @@ mod tests {
         assert_eq!(&bytes[..5], b"OBM,\x01");
         assert_eq!(bytes.len(), 9 + 4 * OWED_LEN);
         assert_eq!(SettleOwed::from_bytes(&bytes).unwrap(), owed);
+        // AS-105: the kind of an own-wallet item sorts after the others.
+        let with_own = owed
+            .merged(&[item(OwedKind::ExportedBeaten, 4, 6)])
+            .unwrap();
+        assert_eq!(with_own.items().last().map(|o| o.kind), Some(OwedKind::ExportedBeaten));
+        assert_eq!(SettleOwed::from_bytes(&with_own.to_bytes()).unwrap(), with_own);
         let empty = SettleOwed::new().to_bytes();
         assert_eq!(SettleOwed::from_bytes(&empty).unwrap(), SettleOwed::new());
     }
@@ -292,7 +304,7 @@ mod tests {
     fn oc_52_an_unknown_kind_a_repeat_or_a_disordered_list_is_refused() {
         let bytes = sample().to_bytes();
         let mut kind = bytes.clone();
-        kind[9] = 3;
+        kind[9] = 4;
         assert!(SettleOwed::from_bytes(&kind).is_err());
         // The first two items swapped.
         let mut swapped = bytes.clone();

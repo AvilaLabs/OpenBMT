@@ -52,6 +52,7 @@ mod follow;
 pub mod hardware;
 pub mod own_book;
 pub mod own_say;
+pub mod own_spend;
 pub mod own_shop;
 pub mod say;
 mod state;

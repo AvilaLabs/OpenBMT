@@ -15,6 +15,7 @@ use std::path::Path;
 use bitcoin::consensus::deserialize;
 use bitcoin::hashes::Hash;
 use bitcoin::{Block, BlockHash};
+use openbmt_owner::own_spend::OwnBuilt;
 use openbmt_owner::{Built, CashAmount, Stage};
 use openbmt_spend::{consolidation_cost_sats, Coin, MAX_CONSOLIDATION_INPUTS};
 use openbmt_watch::fees::{LOW_WINDOW_BLOCKS, SAMPLE_EVERY_BLOCKS};
@@ -441,6 +442,13 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// sent here. On a refusal the queue is as it was.
     pub fn approve_merge(&mut self, now: u64) -> Result<Built, MergeRefused> {
         let offer = self.merge_offer().ok_or(MergeRefused::NoOffer)?;
+        // AS-100: a shop with its own wallet has no Key app to ask; its merge
+        // is `approve_merge_own`.
+        if self.owner.is_own_wallet() {
+            return Err(MergeRefused::Node(NodeError::Owner(
+                openbmt_owner::OwnerError::Refused(openbmt_owner::Refusal::NoKeyApp),
+            )));
+        }
         let waiting = |stage: &Stage| matches!(stage, Stage::Queued | Stage::InSession { .. });
         if self.owner.refunds().iter().any(|r| waiting(&r.stage))
             || self.owner.cash_outs().iter().any(|c| waiting(&c.stage))
@@ -481,6 +489,52 @@ impl<P: OwnerPort> OwnerNode<P> {
                 ));
             }
         }
+        let write = self.queue_writer();
+        if let Err(e) = self.owner.cancel(id, &write) {
+            self.note(format!(
+                "the merge entry could not be taken out of the queue: {e}"
+            ));
+        }
+        Err(why)
+    }
+
+    /// AS-106: approve the offer in a shop with its own wallet. The merge is
+    /// queued as a cash-out of every coin it takes in to the wallet's next
+    /// change address and frozen into a session for the shop's own wallet
+    /// (AS-101), which shows it as a move inside itself. The owner's tap on
+    /// the offer is its approval on this phone; nothing is signed or sent
+    /// here. On a refusal the queue is as it was.
+    pub fn approve_merge_own(&mut self, now: u64) -> Result<OwnBuilt, MergeRefused> {
+        let offer = self.merge_offer().ok_or(MergeRefused::NoOffer)?;
+        let waiting = |stage: &Stage| matches!(stage, Stage::Queued | Stage::InSession { .. });
+        if self.owner.refunds().iter().any(|r| waiting(&r.stage))
+            || self.owner.cash_outs().iter().any(|c| waiting(&c.stage))
+        {
+            return Err(MergeRefused::OtherPaymentsWaiting);
+        }
+        self.ready_for_queue_write()?;
+        let script = self
+            .wallet
+            .change_script(self.view.change_next())
+            .map_err(|e| MergeRefused::NotBuilt(e.to_string()))?;
+        let write = self.queue_writer();
+        let id = self
+            .owner
+            .queue_cash_out(script, CashAmount::All, MERGE_LABEL, &write)
+            .map_err(|e| MergeRefused::Node(e.into()))?;
+        let min_confirmations = self.owner.options().min_confirmations;
+        let built = self.build_own_from(&[id], offer.rate_per_kvb, now, |coins| {
+            merge_pool(coins, min_confirmations).0
+        });
+        let why = match built {
+            Ok(built) => match built.skipped.iter().find(|s| s.id == id) {
+                None if built.session.is_some() => return Ok(built),
+                Some(skipped) => MergeRefused::NotBuilt(skipped.reason.clone()),
+                None => MergeRefused::NotBuilt("nothing was frozen".to_string()),
+            },
+            Err(e) => MergeRefused::Node(e),
+        };
+        // Not built: the merge entry goes, so that the queue is as it was.
         let write = self.queue_writer();
         if let Err(e) = self.owner.cancel(id, &write) {
             self.note(format!(

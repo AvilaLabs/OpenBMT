@@ -320,6 +320,45 @@ pub fn take_wallet_signature<'a>(
     Ok(both)
 }
 
+/// SP-83, SP-46, SP-52: the file that was sent (`sent`) joined with what the
+/// shop's own wallet returned, for a wallet of either kind.
+///
+/// A wallet with one key is [`take_wallet_signature`]. For a wallet of three
+/// keys, whose three keys the owner holds, only the unsigned transaction and
+/// the signatures of `returned` are read, every signature goes through
+/// [`combine_wallet`] (each is verified against the BIP 143 hash, only
+/// `SIGHASH_ALL` is taken, a signature for a key that is not the input's is
+/// an error), and the result must hold signatures of two different keys on
+/// every input.
+pub fn take_own_signatures<'a>(
+    wallet: impl Into<WalletRef<'a>>,
+    sent: &Psbt,
+    returned: &Psbt,
+) -> Result<Psbt, SignerFileError> {
+    let wallet = wallet.into();
+    if wallet.single().is_some() {
+        return take_wallet_signature(wallet, sent, returned);
+    }
+    if !shape_is_v0(sent) || !shape_is_v0(returned) {
+        return Err(SignerFileError::NotVersionZero);
+    }
+    if returned.unsigned_tx != sent.unsigned_tx {
+        return Err(SignerFileError::DifferentTransaction);
+    }
+    let mut copy = sent.clone();
+    for (into, from) in copy.inputs.iter_mut().zip(&returned.inputs) {
+        into.partial_sigs = from.partial_sigs.clone();
+        into.sighash_type = from.sighash_type;
+    }
+    let both = combine_wallet(wallet, sent, &[copy]).map_err(SignerFileError::Combine)?;
+    for (i, input) in both.inputs.iter().enumerate() {
+        if input.partial_sigs.len() < 2 {
+            return Err(SignerFileError::NotSigned { input: i });
+        }
+    }
+    Ok(both)
+}
+
 /// SP-47: the fee of `tx` if it is a finished transaction of the file
 /// `sent`: the same transaction ID, version, lock time, outputs and
 /// sequences, no script signature, and on every input the witness of SP-60

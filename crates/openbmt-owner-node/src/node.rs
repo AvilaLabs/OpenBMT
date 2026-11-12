@@ -80,6 +80,7 @@ use openbmt_net_io::{
     RelayState, SystemClock, MAX_WATCHED_SCRIPTS,
 };
 use openbmt_owner::own_book::AllocationBook;
+use openbmt_owner::own_spend::{OwnBuilt, OwnFile, OwnTaken};
 use openbmt_owner::{Built, Delivery, IssuedRange, Options, Owner, OwnerError, Stage, Taken};
 use openbmt_signer::SignerState;
 use openbmt_watch::{FeeHistory, HeaderChain, Refusal, WellFormedBlock};
@@ -1484,6 +1485,117 @@ impl<P: OwnerPort> OwnerNode<P> {
         Ok(built)
     }
 
+    /// AS-101: freeze the queued refunds and cash-outs the owner picked into
+    /// a session for the shop's own wallet, from the coins the view holds.
+    /// The view must be ready and have checked every block up to the tip, or
+    /// nothing is built. Nothing is signed: the wallet signs (AS-102 to
+    /// AS-104).
+    pub fn build_own_spend(
+        &mut self,
+        picked: &[u32],
+        fee_rate: u64,
+        now: u64,
+    ) -> Result<OwnBuilt, NodeError> {
+        self.build_own_from(picked, fee_rate, now, |coins| coins)
+    }
+
+    /// [`OwnerNode::build_own_spend`] over the coins that `pick` keeps of
+    /// the ones the view offers: the merge of AS-106 hands in fewer coins
+    /// than the wallet holds when they do not fit one transaction (OC-21).
+    pub(crate) fn build_own_from(
+        &mut self,
+        picked: &[u32],
+        fee_rate: u64,
+        now: u64,
+        pick: impl FnOnce(Vec<openbmt_spend::Coin>) -> Vec<openbmt_spend::Coin>,
+    ) -> Result<OwnBuilt, NodeError> {
+        let commit = TAKE_JOURNAL_LOCK
+            .lock()
+            .map_err(|_| NodeError::Files("take journal lock is poisoned".to_string()))?;
+        self.ready_for_queue_write()?;
+        if let Some(why) = &self.halted {
+            return Err(NodeError::NotReady(why.clone()));
+        }
+        if self.awaiting_rescan > 0 {
+            return Err(NodeError::NotReady(
+                "waiting for the script rescan to start".into(),
+            ));
+        }
+        if !self.view.ready() {
+            return Err(NodeError::NotReady(self.view.state().to_string()));
+        }
+        let tip = self.watcher.chain().tip_height();
+        if self.view.checked() < tip {
+            return Err(NodeError::NotReady(format!(
+                "the coin view has checked blocks up to {} and the chain is at {tip}",
+                self.view.checked()
+            )));
+        }
+        // OC-47: a refund is ready on the facts of the view as it is now.
+        {
+            let dir = self.dir.clone();
+            self.refresh_refund_facts(tip, &mut |b| write_file(&dir, QUEUE_FILE, b))
+                .map_err(NodeError::Files)?;
+        }
+        let coins = pick(self.view.coins(tip));
+        let mut random = [0u8; 32];
+        for chunk in random.chunks_mut(8) {
+            let word = self.random.next_u64().to_le_bytes();
+            let n = chunk.len();
+            if let Some(src) = word.get(..n) {
+                chunk.copy_from_slice(src);
+            }
+        }
+        let change_index = self.view.change_next();
+        let dir = self.dir.clone();
+        let built = self.owner.build_own_spend(
+            &coins,
+            picked,
+            fee_rate,
+            change_index,
+            tip,
+            now,
+            &random,
+            |b| write_file(&dir, QUEUE_FILE, b),
+        )?;
+        drop(commit);
+        self.refresh_marks_checked()?;
+        Ok(built)
+    }
+
+    /// AS-102, AS-105: the file of item `number` of the own session
+    /// `session`, for the shop's wallet. From the first call the item's
+    /// transaction is watched: a block that holds it pays its entries, and a
+    /// block that spends one of its coins in another transaction gives them
+    /// back (OC-52).
+    pub fn own_file(
+        &mut self,
+        session: &[u8; 32],
+        number: u32,
+    ) -> Result<OwnFile, NodeError> {
+        let write = self.queue_writer();
+        Ok(self.owner_mut()?.own_file(session, number, write)?)
+    }
+
+    /// AS-103, AS-104: take what the shop's wallet returned for item
+    /// `number` of the own session `session`. Only the queue changes, so it
+    /// is stored as any queue change; the finished transaction then goes out
+    /// through the outbox and the send path as any other.
+    pub fn take_own(
+        &mut self,
+        session: &[u8; 32],
+        number: u32,
+        returned: &[u8],
+    ) -> Result<OwnTaken, NodeError> {
+        let write = self.queue_writer();
+        let taken = self
+            .owner_mut()?
+            .take_own(session, number, returned, write)?;
+        self.refresh_marks();
+        self.reconcile();
+        Ok(taken)
+    }
+
     /// Take the Key app's response. A durable journal commits the queue and
     /// key 1 snapshot as one roll-forward unit before either separate store
     /// is changed. A failed second store requires [`OwnerNode::recover_key1`].
@@ -1920,6 +2032,22 @@ impl<P: OwnerPort> OwnerNode<P> {
             }
         }
         let mut owed = Vec::new();
+        // AS-105: an item whose file went to the shop's own wallet is beaten
+        // when a block spends one of its coins in another transaction.
+        for open in self.owner.own_exported_transactions() {
+            if !ids.contains(&open.txid)
+                && open
+                    .inputs
+                    .iter()
+                    .any(|op| spent.get(op).is_some_and(|by| *by != open.txid))
+            {
+                owed.push(Owed {
+                    kind: OwedKind::ExportedBeaten,
+                    txid: open.txid,
+                    block: *hash,
+                });
+            }
+        }
         for open in &exported {
             if ids.contains(&open.txid) {
                 owed.push(Owed {
@@ -2020,6 +2148,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 OwedKind::ExportedPaid => self.settle_exported(&item),
                 OwedKind::ElsewherePaid => self.settle_elsewhere_paid(&item),
                 OwedKind::ElsewhereBeaten => self.settle_elsewhere_beaten(&item),
+                OwedKind::ExportedBeaten => self.settle_exported_beaten(&item),
             }
         }
     }
@@ -2058,6 +2187,39 @@ impl<P: OwnerPort> OwnerNode<P> {
                 self.forget_owed(item);
             }
             Err(e) => self.note(format!("{txid} could not be marked paid: {e}")),
+        }
+    }
+
+    /// AS-105: another transaction spent a coin of a payment whose file went
+    /// to the shop's own wallet, so it can no longer confirm. Its item leaves
+    /// the session and its entries keep the outpoints it spent (AS-68).
+    fn settle_exported_beaten(&mut self, item: &Owed) {
+        let txid = item.txid;
+        if !self
+            .owner
+            .own_exported_transactions()
+            .iter()
+            .any(|e| e.txid == txid)
+        {
+            return self.forget_owed(item);
+        }
+        if self.ready_for_queue_write().is_err() {
+            self.note(format!("{txid} waits for key 1 recovery"));
+            return;
+        }
+        let dir = self.dir.clone();
+        match self
+            .owner
+            .mark_exported_replaced(&txid, |b| write_queue_file(&dir, b))
+        {
+            Ok(()) => {
+                self.note(format!(
+                    "{txid} was given to the wallet and another transaction spent its coins; \
+                     its entries are back in the queue"
+                ));
+                self.forget_owed(item);
+            }
+            Err(e) => self.note(format!("{txid} could not be released: {e}")),
         }
     }
 

@@ -813,6 +813,8 @@ impl Refusal {
             )
             .code("AS-62"),
             Self::Hardware(h) => h.words(),
+            Self::NoKeyApp => crate::own_spend::needed(crate::own_spend::WORDS_NEEDED_AS_100),
+            Self::OwnSpend(r) => r.words(),
         }
     }
 }

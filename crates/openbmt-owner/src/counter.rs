@@ -207,6 +207,7 @@ impl Owner {
         now: u64,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<CounterQueued, OwnerError<E>> {
+        self.require_key_app()?;
         let counter = self
             .state
             .pairings

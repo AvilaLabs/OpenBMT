@@ -278,6 +278,46 @@ impl Owner {
         self.commit(next, persist)
     }
 
+    /// AS-105: another transaction spent a coin of a transaction whose file
+    /// was given to the shop's own wallet, while its session is open, so the
+    /// transaction can no longer confirm. Its item leaves the session and its
+    /// entries are queued again, keeping the outpoints it spent as AS-68
+    /// says: while any of them is among the coins a new transaction spends
+    /// it, and when none is the entry is planned freely.
+    pub fn mark_exported_replaced<E>(
+        &mut self,
+        txid: &Txid,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), OwnerError<E>> {
+        let mut next = self.state.clone();
+        let found = next.sessions.iter().find_map(|s| {
+            s.own.as_ref()?;
+            let exported = crate::state::exported_in(s).ok()?;
+            let record = exported.into_iter().find(|e| e.txid == *txid)?;
+            let number = s.frozen.iter().find_map(|(n, f)| match f {
+                crate::state::Frozen::Spend { txid: t, .. } if t == txid => Some(*n),
+                _ => None,
+            })?;
+            Some((s.id, number, record))
+        });
+        let (session, number, record) = found.ok_or(Refusal::UnknownTransaction(*txid))?;
+        for id in record.refunds.iter().copied().chain(record.cash_out) {
+            if let Some(stage) = next.stage_mut(id) {
+                *stage = Stage::Queued;
+            }
+            if let Some(list) = next.conflict_mut(id) {
+                list.extend(record.inputs.iter().copied());
+                list.sort();
+                list.dedup();
+                if list.len() > MAX_CONFLICT_OUTPOINTS {
+                    return Err(Refusal::Full("the list of outpoints kept for a refund").into());
+                }
+            }
+        }
+        self.remove_item(&mut next, &session, number)?;
+        self.commit(next, persist)
+    }
+
     /// AS-89: another transaction spent a coin of the transaction that was
     /// given to a hardware signer, so it can no longer confirm. It is no
     /// longer watched. The outpoints kept with its entries stay: while any

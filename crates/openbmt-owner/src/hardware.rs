@@ -595,6 +595,8 @@ impl Owner {
             .sessions
             .iter()
             .find(|s| s.id == *session)
+            // AS-101: a session of the shop's own wallet is not a signer's.
+            .filter(|s| s.own.is_none())
             .ok_or(HardwareRefusal::NotASignerSpend)?;
         let request =
             Request::from_bytes(&open.request).map_err(|_| HardwareRefusal::NotASignerSpend)?;
@@ -617,7 +619,7 @@ impl Owner {
         Ok((request, frozen, psbt, labels))
     }
 
-    fn summary(
+    pub(crate) fn summary(
         &self,
         psbt: &Psbt,
         payments: &[(bitcoin::ScriptBuf, u64)],
