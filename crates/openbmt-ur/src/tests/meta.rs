@@ -6,15 +6,16 @@ use std::collections::BTreeSet;
 
 const RULES: &str = include_str!("../../../../docs/UR-RULES.md");
 
-const TEST_SOURCES: [&str; 5] = [
+const TEST_SOURCES: [&str; 6] = [
     include_str!("key.rs"),
     include_str!("output.rs"),
     include_str!("refusals.rs"),
     include_str!("roundtrip.rs"),
     include_str!("vectors.rs"),
+    include_str!("wallet.rs"),
 ];
 
-const CODE_SOURCES: [&str; 15] = [
+const CODE_SOURCES: [&str; 18] = [
     include_str!("../base58.rs"),
     include_str!("../bytewords.rs"),
     include_str!("../cbor.rs"),
@@ -30,6 +31,9 @@ const CODE_SOURCES: [&str; 15] = [
     include_str!("../point.rs"),
     include_str!("../psbt.rs"),
     include_str!("../hash.rs"),
+    include_str!("../wallet.rs"),
+    include_str!("../wallet_decoder.rs"),
+    include_str!("../wallet_text.rs"),
 ];
 
 /// Rules this crate does not test, each with the reason. The others are
@@ -68,8 +72,8 @@ fn sources() -> String {
 #[test]
 fn the_rules_file_defines_its_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 33, "{ids:?}");
-    assert!(ids.contains("UR-01") && ids.contains("UR-33"));
+    assert_eq!(ids.len(), 40, "{ids:?}");
+    assert!(ids.contains("UR-01") && ids.contains("UR-40"));
 }
 
 #[test]

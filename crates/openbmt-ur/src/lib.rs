@@ -11,6 +11,9 @@
 //!   `crypto-output` of a shared wallet for a signer to read;
 //! - [`ur_to_key_text`] reads a cosigner key from a `crypto-account`, a
 //!   `crypto-hdkey` or a Coldcard-style JSON export.
+//! - [`ur_to_wallet_text`] reads a supported mainnet wallet descriptor;
+//!   [`WalletDecoder`] joins and validates its animated codes within a
+//!   finite scan budget.
 //!
 //! No dependencies and no clock, no storage and no screen: the app draws
 //! each part as a QR code and shows how far a scan has come.
@@ -40,6 +43,9 @@ mod key;
 mod output;
 mod point;
 mod psbt;
+mod wallet;
+mod wallet_decoder;
+mod wallet_text;
 mod xoshiro;
 
 pub use decoder::{Decoder, Progress, MAX_TEXT_LEN};
@@ -52,6 +58,8 @@ pub use output::{
     TYPE_BYTES, TYPE_CRYPTO_OUTPUT,
 };
 pub use psbt::{psbt_to_ur_parts, ur_to_psbt, TYPE_CRYPTO_PSBT, TYPE_PSBT};
+pub use wallet::{ur_to_wallet_text, WalletRefusal, WalletText, MAX_WALLET_CBOR};
+pub use wallet_decoder::{WalletDecoder, MAX_WALLET_PARTS, MAX_WALLET_SEQ_LEN, MAX_WALLET_TEXT};
 
 #[cfg(test)]
 mod tests;

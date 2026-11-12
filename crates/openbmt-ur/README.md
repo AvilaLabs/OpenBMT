@@ -44,6 +44,29 @@ if progress.complete {
 | `cbor::encode_bytes`, `cbor::decode_bytes` | The CBOR byte string of the `bytes` type and of the PSBT types |
 | `bytewords::{encode_minimal, decode_minimal}` | Minimal Bytewords with the CRC-32 |
 | `ur_to_key_text(type, cbor)` | The cosigner key text `[<fingerprint>/48h/<coin>h/0h/2h]<key>` of a `crypto-account`, a `crypto-hdkey` or a JSON `bytes` UR, or a `KeyRefusal` with `words()` (UR-23 to UR-30) |
+| `ur_to_wallet_text(type, cbor)` | A supported mainnet account descriptor with receive/change children and a BIP380 checksum (UR-34 to UR-39) |
+| `WalletDecoder::new()`, `receive(text)`, `finish()` | A wallet-specific animated scan with payload validation and a finite part budget; `result()` exposes only a validated descriptor (UR-39 and UR-40) |
+
+The wallet reader accepts legacy `crypto-output`, BIP84 entries in
+`crypto-account`, descriptor text in `bytes`, and the newer
+`output-descriptor` format (`output` is an alias). It reads BIP84 account 0
+`wpkh` and BIP48 account 0, 2-of-3 `wsh(sortedmulti)` wallets on Bitcoin
+mainnet. Explicit single-branch exports are refused. The newer format is a
+source/key-table map, not a retagged legacy script expression. No app is
+connected to this helper here.
+
+```rust
+use openbmt_ur::WalletDecoder;
+
+let mut scan = WalletDecoder::new();
+for text in scanned_parts {
+    if scan.receive(&text)?.complete {
+        break;
+    }
+}
+// Missing or dependent fragments are an error, not a partial wallet.
+let descriptor = scan.finish()?.into_string();
+```
 
 A message of at most `max_fragment_len` bytes is one part,
 `ur:<type>/<bytewords>`. A longer one is `ur:<type>/<n>-<m>/<bytewords>`
@@ -60,6 +83,10 @@ ones mix several, so any large enough subset completes it.
 | Fragment length | 10 to 2000 bytes | UR-04 |
 | Text | at most the longest UR within the bounds (about 2.1 million characters) | UR-16 |
 | Mixed parts held | at most twice the sequence length | UR-11 |
+| Wallet CBOR message | at most 64 KiB | UR-39 |
+| Wallet descriptor text | at most 4096 bytes | UR-39 |
+| Wallet sequence length | at most 512 | UR-39 |
+| Wallet scan attempts, including repeats/refusals | at most 4096 | UR-40 |
 
 A part that disagrees with the first accepted part on the type, the sequence
 length, the message length, the checksum or the fragment length is refused
@@ -84,6 +111,11 @@ length, the message length, the checksum or the fragment length is refused
   messages from 300 to 20,000 bytes; both cases of text; a decoder fed
   every prefix and every one-character change of valid parts and random
   text without a panic; and a fuzz target (`fuzz/fuzz_targets/ur_decode.rs`).
+
+- **Wallet payloads:** published BCR account/output vectors, canonical
+  descriptor checks against the core wallet importer, refusal cases, and
+  fountain-coded wallet scans. `fuzz/fuzz_targets/ur_wallet_text.rs` checks
+  that every successful result is accepted by the wallet importer.
 
 - **Hummingbird 1.7.6** (Sparrow's UR library), test-only, by
   `scripts/ur-crosscheck.sh` (and the CI job `ur-crosscheck`): 377 messages

@@ -1,4 +1,4 @@
-# UR rules: a PSBT as an animated sequence of QR codes
+# UR rules: wallet descriptions and PSBTs as animated QR codes
 
 Status: implemented in `crates/openbmt-ur`. Each rule has an ID so that a
 test can name the rule it proves (`ur_NN_...`). The rules implement the
@@ -258,8 +258,76 @@ the form SeedSigner, Krux and Sparrow read.
 - **UR-33.** `text_to_ur_parts` writes a non-empty text as a `ur:bytes`
   whose message is the CBOR byte string of the text's bytes, which is how
   a signer is given a setup file or a descriptor as animated codes. The
-  reader of this crate returns the type and the message as it does for any
-  type; nothing here reads the text.
+  general reader returns the type and the message as it does for any type;
+  the wallet reader of section 9 can validate descriptor text within it.
+
+## 9. Reading a wallet description
+
+`ur_to_wallet_text` reads the message of a finished UR. `WalletDecoder`
+combines the same reader with the fountain transport, so a caller can feed
+scanned parts and end the scan explicitly. Neither call is connected to an
+app here. Every successful result is descriptor text with a BIP380 checksum
+in the form `openbmt_core::wallet_single::ImportedWallet::read` accepts.
+
+The registry formats follow the Blockchain Commons [research papers][bcr]:
+BCR-2020-010, BCR-2020-015 and BCR-2023-010. The supported wallet shapes are
+narrower than the registry formats.
+
+[bcr]: https://github.com/BlockchainCommons/Research/tree/master/papers
+
+- **UR-34.** The wallet reader takes `crypto-output`, `crypto-account`,
+  `output-descriptor`, `output`, and `bytes`. Other types are refused.
+  `crypto-output` is the legacy script-expression encoding, optionally
+  under tag 308. `crypto-account` is the account map, optionally under tag
+  311, with outputs under tag 308. `output-descriptor` is the newer map of
+  source text and a key table, optionally under tag 40308; `output` is an
+  alias for that format. A tag for another format is refused. Tag 40308
+  never makes a legacy script-expression payload into the newer format.
+- **UR-35.** The registry payload uses the strict CBOR subset of UR-23,
+  with exactly one item and nothing after it. Keys have compressed public
+  points on secp256k1 and a 32-byte chain code. Origin and child keypaths
+  use tags 304 or 40304; public HD keys use 303 or 40303; coin information
+  uses 305 or 40305. Wrong field types, duplicate map keys, indefinite or
+  non-shortest heads, malformed paths and unsupported fields are refused.
+  A supplied descriptor checksum is checked before normalization.
+- **UR-36.** The supported wallets are `wpkh` at `84h/0h/0h`, and
+  `wsh(sortedmulti(2,...))` with three distinct keys and fingerprints at
+  `48h/0h/0h/2h`. The keys are account-level xpubs: depth 3 and child 0h
+  for the former, depth 4 and child 2h for the latter. Origins include a
+  master fingerprint. The result uses `/<0;1>/*` on every key and `h`
+  path markers. An absent child path denotes an account and supplies both
+  receive and change branches. An explicit child path must name exactly
+  the unhardened pair 0 and 1 followed by an unhardened wildcard; a single
+  branch or another derivation is refused, never silently widened.
+  From `crypto-account`, exactly one BIP84 wpkh account is selected;
+  unrelated standard public script entries do not become the wallet. A
+  selected account and origin fingerprint that disagree are refused. The
+  newer source templates are `wpkh(@0)` and `wsh(sortedmulti(2,@0,@1,@2))`, or
+  complete supported descriptor text without a key table. Names and notes
+  do not influence the wallet. `bytes` carries a CBOR byte string of UTF-8
+  descriptor text, with the same wallet and checksum checks.
+- **UR-37.** Only Bitcoin mainnet is read. A test network in coin
+  information, a test coin in the origin, or a test extended key in text
+  is refused. Omitted coin information denotes Bitcoin mainnet.
+- **UR-38.** Private keys and master-key records are refused. Public keys
+  are required in every key used by a wallet. Private key material or a
+  test network inside an unselected account entry is also refused.
+  Refusal text never repeats scanned key material.
+- **UR-39.** A wallet CBOR message is at most 64 KiB. Descriptor input and
+  canonical output are at most 4096 bytes. A wallet scan has at most 512
+  fragments, checked before transport state is allocated, and a scanned
+  text is at most `2 * (65536 + 64) + 128` bytes. The generic transport's
+  fragment, mixed-row and text checks still apply. These wallet-specific
+  limits also bound the storage for mixed rows' fragment indexes.
+- **UR-40.** `WalletDecoder` accepts at most 4096 calls per scan, counting
+  repeats and refused parts. A sequence that does not complete within that
+  budget is refused. Ending an incomplete scan with `finish` is an explicit
+  refusal. Only a complete, validated payload is available through
+  `result`; a malformed completed payload never yields a descriptor. A
+  caller controls elapsed-time limits and cancellation; the library has
+  no clock. A new scan uses a new decoder. Known-answer tests use published
+  BCR vectors, and `fuzz/fuzz_targets/ur_wallet_text.rs` checks the payload
+  and bounded scan interfaces.
 
 ## What these rules do not do
 
@@ -269,21 +337,21 @@ the form SeedSigner, Krux and Sparrow read.
 - **No secrecy and no authentication.** A UR is plain text in a picture.
   Anyone who sees the codes has the data, and nothing says who showed them.
   Its checksums find a misread, not a forgery.
-- **No other registry types.** Only `bytes`, `crypto-psbt` and `psbt` have
-  helpers for their payload here, and section 7 reads a cosigner key out of
-  `crypto-account`, `crypto-hdkey` and a JSON `bytes`. A `crypto-output` is
-  written (section 8) and not read as a key; the newer `hdkey`,
-  `account-descriptor` and `output-descriptor`, and the text of BSMS are
-  not read as keys. Other types are returned as the bytes they came in.
+- **No other registry types.** The payload helpers read PSBTs (section 5),
+  cosigner keys (section 7), and the supported wallet descriptions of
+  section 9. A wallet description is not a cosigner-key export. The newer
+  `hdkey` and `account-descriptor`, and the text of BSMS, are not read as
+  keys. Other types are returned by the generic transport as raw bytes.
 - **No other key than the first account's.** Only the account 0 key for
   `48h/<coin>h/0h/2h` is taken; a signer that writes another account, a
   `zpub` in JSON or a key without its chain code is refused, with words that
   say what to export instead.
-- **No frame counts or timing in the library.** How many parts fit one
+- **No timing in the library.** How many parts fit one
   code at what scanning distance, and how fast to show them, are for the
   app (DESIGN.md E8). The apps use fragments of at most 230 bytes, so that
   every part draws as a QR code of version 12 or less at level L, and show
-  five parts a second; both are still to be measured on a device.
+  five parts a second; both are still to be measured on a device. The
+  wallet reader has the finite attempt budget of UR-40.
 - **No picture.** The codes are drawn by `openbmt-qr` and read by the
   camera code; this crate sees text only.
 - **Not every sender's variants.** A sender that writes a longer-than-needed

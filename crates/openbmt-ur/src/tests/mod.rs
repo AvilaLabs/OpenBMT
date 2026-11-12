@@ -7,6 +7,7 @@ mod output;
 mod refusals;
 mod roundtrip;
 mod vectors;
+mod wallet;
 
 use crate::bytewords::encode_minimal;
 use crate::fountain::encode_part;

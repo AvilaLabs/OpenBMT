@@ -54,11 +54,11 @@ pub struct Decoder {
 }
 
 /// The pieces of a `ur:` text.
-struct Parsed {
-    ur_type: String,
+pub(crate) struct Parsed {
+    pub(crate) ur_type: String,
     /// `(seqNum, seqLen)` from the text of a multi-part part.
-    seq: Option<(u32, u32)>,
-    bytes: Vec<u8>,
+    pub(crate) seq: Option<(u32, u32)>,
+    pub(crate) bytes: Vec<u8>,
 }
 
 fn parse_number(s: &str) -> Option<u32> {
@@ -73,7 +73,7 @@ fn parse_number(s: &str) -> Option<u32> {
     }
 }
 
-fn parse(text: &str) -> Result<Parsed, UrError> {
+pub(crate) fn parse(text: &str) -> Result<Parsed, UrError> {
     if text.len() > MAX_TEXT_LEN {
         return Err(UrError::TextTooLong);
     }
@@ -121,6 +121,12 @@ impl Decoder {
     /// as it was.
     pub fn receive(&mut self, text: &str) -> Result<Progress, UrError> {
         let parsed = parse(text)?;
+        self.receive_parsed(parsed)
+    }
+
+    /// Read a part already parsed by a payload-specific reader, after its
+    /// tighter limits have been checked and before allocating stream state.
+    pub(crate) fn receive_parsed(&mut self, parsed: Parsed) -> Result<Progress, UrError> {
         if let Some((ur_type, _)) = &self.result {
             if *ur_type != parsed.ur_type {
                 return Err(UrError::Disagrees("the type differs from the finished one"));
