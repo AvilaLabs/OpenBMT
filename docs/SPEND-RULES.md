@@ -319,3 +319,64 @@ being spent.
   transaction; the signer joins it with the old one in its totals (SR-33).
 - **No Taproot, no other wallet shape.** One script shape (P2WSH 2-of-3
   `sortedmulti`) is built and finished.
+
+## 10. A wallet with one key
+
+A shop that uses its own wallet may hold its money in a wallet with one key
+(`docs/WALLET-RULES.md` WL-01 to WL-06: native SegWit, one key, the receive
+and change chains of one account). The owner phone plans the spend and
+writes the file; the shop's own wallet signs it. The steps are the same
+four, with one signature in place of two. Sections 1 to 4 and 8 apply as
+written, with "the wallet's script" meaning that wallet's script at the
+coin's chain and index. Sections 5 to 7 are replaced by the rules below for
+such a wallet and are unchanged for a wallet of three keys.
+
+- **SP-80.** The functions of this library take the wallet as
+  `openbmt_core::ImportedWallet`. A coin, a file or a finished transaction
+  of one kind of wallet is refused by the path of the other kind, with an
+  error that names the kind the path expected.
+- **SP-81.** The size of SP-30 counts, per input of a wallet with one key,
+  41 bytes without the witness and a witness of two items: a signature of
+  72 bytes and a compressed key of 33 bytes, each with its length byte. It
+  is checked against the `bitcoin` crate's own weight of a transaction with
+  a witness of that shape. SP-31 holds with one signature per input.
+- **SP-82.** The file is PSBT version 0. Every input carries the whole
+  previous transaction, the previous output, the hash type `SIGHASH_ALL`
+  and the key-path hint of its one key: the master fingerprint and the path
+  `84'/0'/account'/chain/index` of the wallet's description. The change
+  output (and the one output of a consolidation, SP-24) carries the
+  key-path hint of its key. The account's extended public key is written as
+  a global extended public key (BIP 174 type 0x01) with its fingerprint and
+  path `84'/0'/account'`. Nothing else is written: no witness script, no
+  signature, no unknown or proprietary field.
+- **SP-83.** The file goes to the shop's wallet, which signs it or signs
+  and finishes it. What comes back is read as SP-46 says: the unsigned
+  transaction must equal the one sent, and every signature goes through
+  `combine`. A returned file whose every input is final is read as the
+  finished transaction it holds and checked by SP-86; a file with some
+  inputs final and some not is not read as finished.
+- **SP-84.** `combine` takes a partial signature only for the input's own
+  key: the key the wallet derives at the place the hint names, whose hash is
+  the script being spent. A signature for any other key is an error that
+  names the key. SP-52 and SP-54 hold. Every signature is checked against
+  the BIP 143 hash of its input, with the script code of a single-key output
+  (the pay-to-key-hash script of that key) and the amount in the base's
+  previous transaction, before it is taken; one that does not verify is an
+  error that names the input, as SP-53 says.
+- **SP-85.** `finalize` needs, for every input, one valid signature by the
+  input's own key. The witness is the signature, then the key. Before the
+  transaction is returned it is checked from scratch as SP-62 says, with
+  this witness shape: the key derives at the hint's place and hashes to the
+  script spent, and the signature verifies. SP-63 and SP-64 hold.
+- **SP-86.** A transaction that came back finished is checked against the
+  file that was sent as SP-47 says, with the witness of SP-85; unlike a
+  wallet of three keys, the check also says that each signature is the
+  input's own key's.
+- **SP-87.** The file of SP-82 is signed and finished by Bitcoin Core (a
+  descriptor wallet holding the same key with its private part, under the
+  test network's prefixes, since the scripts do not depend on the network;
+  `walletprocesspsbt` and `finalizepsbt`), and the transaction that
+  `finalize` makes from Core's signatures is byte for byte the one Core
+  finishes, and is accepted by `testmempoolaccept`. A test on a private
+  test network proves it. The fuzz target `spend_combine` also feeds the
+  path of a wallet with one key (SP-70).
