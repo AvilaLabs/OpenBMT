@@ -736,8 +736,8 @@ class BoxOwnInvitation(val text: String, val expiresAt: Long)
 /** A claim that answers this phone's own invitation. */
 class BoxOwnCheck(val boxKey: ByteArray, val words: List<String>)
 
-/** What a scanned wallet description shows: [multisig] or single-key, an 8 hex [fingerprint] and the [firstAddress]. */
-class ImportedWalletView(val multisig: Boolean, val fingerprint: String, val firstAddress: String)
+/** What a scanned wallet description shows: [multisig] or single-key, an 8 hex [fingerprint] (null for a multisig, which has no single master key) and the [firstAddress]. */
+class ImportedWalletView(val multisig: Boolean, val fingerprint: String?, val firstAddress: String)
 
 /** One source of the price of a bitcoin: its label and the HTTPS address the app asks (RT-01). */
 class PriceSource(val id: String, val url: String)
@@ -2129,7 +2129,7 @@ object OwnerImport {
     /** The fingerprint and first receive address of the description in [text], or an [OwnerException] with the words. */
     fun read(text: String): ImportedWalletView {
         val r = call(OP_WALLET_IMPORT_READ, 0) { it.string(text) }
-        return ImportedWalletView(r.importKind(), r.string(), r.string()).also { r.end() }
+        return ImportedWalletView(r.importKind(), r.option { r.string() }, r.string()).also { r.end() }
     }
 }
 

@@ -4,9 +4,11 @@
 
 use std::str::FromStr;
 
-use bitcoin::bip32::{Fingerprint, Xpub};
+use bitcoin::bip32::{DerivationPath, Fingerprint, Xpriv, Xpub};
+use bitcoin::secp256k1::Secp256k1;
+use bitcoin::Network;
 
-use openbmt_core::wallet::descriptor_checksum;
+use openbmt_core::wallet::{descriptor_checksum, KeySlot, WalletDescription};
 use openbmt_core::wallet_single::{ImportRefused, SingleKeyWallet};
 
 use super::wire::{frame, Rd, W};
@@ -65,10 +67,10 @@ fn wl_14_the_test_seed_gives_its_fingerprint_and_first_address() {
     let text = descriptor();
     let response = call(&text);
     let mut r = Rd::ok(&response);
-    let (kind, fingerprint, first) = (r.u8(), r.string(), r.string());
+    let (kind, fingerprint, first) = (r.u8(), r.opt(|r| r.string()), r.string());
     r.done();
     assert_eq!(kind, 1, "single-key");
-    assert_eq!(fingerprint, "818bc9b6");
+    assert_eq!(fingerprint.as_deref(), Some("818bc9b6"));
     assert_eq!(first, address);
     // The view holds neither the description nor the key in it.
     assert!(!contains(&response, &text));
@@ -84,11 +86,11 @@ fn wl_14_the_two_single_path_descriptions_are_read_too() {
     };
     let response = call(&format!("{} {}", one(0), one(1)));
     let mut r = Rd::ok(&response);
-    let (_, fingerprint, first) = (r.u8(), r.string(), r.string());
+    let (_, fingerprint, first) = (r.u8(), r.opt(|r| r.string()), r.string());
     r.done();
     assert_eq!(
-        (fingerprint.as_str(), first.as_str()),
-        (fp.as_str(), address.as_str())
+        (fingerprint.as_deref(), first.as_str()),
+        (Some(fp.as_str()), address.as_str())
     );
 }
 
@@ -131,4 +133,38 @@ fn wl_15_the_request_is_read_completely() {
     extra.push(0);
     let response = dispatch(&Registry::new(), &frame(145, 0, &extra));
     assert!(Rd::error(&response).is_some());
+}
+
+/// A mainnet 2-of-3 wallet from three fixed seeds.
+fn multisig() -> WalletDescription {
+    let secp = Secp256k1::new();
+    let path: DerivationPath = "m/48'/0'/0'/2'".parse().expect("a path");
+    let slots: Vec<KeySlot> = (0..3u8)
+        .map(|n| {
+            let master = Xpriv::new_master(Network::Bitcoin, &[n + 1; 32]).expect("a master key");
+            let account = master.derive_priv(&secp, &path).expect("an account");
+            KeySlot {
+                index: n + 1,
+                origin_fingerprint: master.fingerprint(&secp),
+                origin_path: path.clone(),
+                xpub: Xpub::from_priv(&secp, &account),
+            }
+        })
+        .collect();
+    WalletDescription::new(Network::Bitcoin, slots.try_into().expect("three")).expect("a wallet")
+}
+
+#[test]
+fn wl_14_a_multisig_description_has_no_fingerprint_and_gives_its_first_address() {
+    let wallet = multisig();
+    let response = call(wallet.canonical_string());
+    let mut r = Rd::ok(&response);
+    let (kind, fingerprint, first) = (r.u8(), r.opt(|r| r.string()), r.string());
+    r.done();
+    assert_eq!(kind, 2, "multisig");
+    assert_eq!(fingerprint, None);
+    let want = wallet
+        .address(openbmt_core::wallet::Keychain::Receive, 0)
+        .expect("an address");
+    assert_eq!(first, want.to_string());
 }

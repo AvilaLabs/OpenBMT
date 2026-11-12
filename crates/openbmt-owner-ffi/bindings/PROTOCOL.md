@@ -293,5 +293,5 @@ BooksFileView: record: month: string, csv: list<u8>
 BooksView: record: currency: string, days: list<BooksDayView>, accounting: list<BooksFileView>, ledger: list<u8>, refusal: option<Words>
 ImportKind: enum, one tag byte
     tags Single=1 Multisig=2
-ImportView: record: kind: ImportKind, fingerprint: string, first_address: string
+ImportView: record: kind: ImportKind, fingerprint: option<string>, first_address: string
 ```

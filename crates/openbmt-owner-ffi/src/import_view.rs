@@ -30,9 +30,9 @@ wire_unit_enum!(ImportKind {
 pub struct ImportView {
     /// The kind of wallet.
     pub kind: ImportKind,
-    /// Eight hex digits: the master fingerprint of a single-key wallet, the
-    /// first four bytes of the checksum of a multisig description.
-    pub fingerprint: String,
+    /// Eight hex digits: the master fingerprint of a single-key wallet.
+    /// None for a multisig description, which has no single master key.
+    pub fingerprint: Option<String>,
     /// The first receive address.
     pub first_address: String,
 }
@@ -50,10 +50,6 @@ fn wipe(text: String) {
     std::hint::black_box(&mut bytes);
 }
 
-fn hex8(bytes: &[u8]) -> String {
-    bytes.iter().take(4).map(|b| format!("{b:02x}")).collect()
-}
-
 fn refused(r: ImportRefused) -> AppError {
     let rule = match r {
         ImportRefused::HasPrivateKey => "WL-08",
@@ -68,7 +64,7 @@ fn view(wallet: &ImportedWallet) -> Result<ImportView, AppError> {
     match wallet {
         ImportedWallet::Single(w) => Ok(ImportView {
             kind: ImportKind::Single,
-            fingerprint: w.fingerprint().to_string(),
+            fingerprint: Some(w.fingerprint().to_string()),
             first_address: w
                 .first_receive_address()
                 .map_err(|e| internal(format!("the first address: {e}")))?
@@ -76,7 +72,7 @@ fn view(wallet: &ImportedWallet) -> Result<ImportView, AppError> {
         }),
         ImportedWallet::Multisig(w) => Ok(ImportView {
             kind: ImportKind::Multisig,
-            fingerprint: hex8(&w.checksum32()),
+            fingerprint: None,
             first_address: w
                 .address(openbmt_core::wallet::Keychain::Receive, 0)
                 .map_err(|e| internal(format!("the first address: {e}")))?
