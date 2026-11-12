@@ -568,9 +568,9 @@ impl OwnPairingRecord {
 #[derive(Clone, PartialEq, Eq)]
 pub enum PairedRecord {
     /// A counter paired with the Key app (`OBMt`).
-    KeyApp(PairingRecord),
+    KeyApp(Box<PairingRecord>),
     /// A counter paired with the shop's own wallet (`OBM:`).
-    OwnWallet(OwnPairingRecord),
+    OwnWallet(Box<OwnPairingRecord>),
 }
 
 impl fmt::Debug for PairedRecord {
@@ -618,11 +618,11 @@ impl PairedRecord {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, RecordRefused> {
         if bytes.get(..4) == Some(&wire::MAGIC_OWN_PAIRING_RECORD[..]) {
             OwnPairingRecord::from_bytes(bytes)
-                .map(Self::OwnWallet)
+                .map(|r| Self::OwnWallet(Box::new(r)))
                 .map_err(|e| RecordRefused::OwnWallet(OwnPairRefused::Record(e)))
         } else {
             PairingRecord::from_bytes(bytes)
-                .map(Self::KeyApp)
+                .map(|r| Self::KeyApp(Box::new(r)))
                 .map_err(|e| RecordRefused::KeyApp(PairRefused::Record(e)))
         }
     }
@@ -697,8 +697,8 @@ impl PairedRecord {
         signed: &SignedRelayHint,
     ) -> Result<Self, crate::paired::RelayRefused> {
         match self {
-            Self::KeyApp(r) => r.with_relay(signed).map(Self::KeyApp),
-            Self::OwnWallet(r) => r.with_relay(signed).map(Self::OwnWallet),
+            Self::KeyApp(r) => r.with_relay(signed).map(|r| Self::KeyApp(Box::new(r))),
+            Self::OwnWallet(r) => r.with_relay(signed).map(|r| Self::OwnWallet(Box::new(r))),
         }
     }
 

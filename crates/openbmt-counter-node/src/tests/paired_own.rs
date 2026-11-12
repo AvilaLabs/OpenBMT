@@ -287,7 +287,10 @@ fn cr_233_a_saved_record_is_checked_again_at_start() {
 #[test]
 fn cr_233_the_secret_is_not_in_what_a_ceremony_or_a_record_prints() {
     let record = record();
-    let text = format!("{record:?} {:?}", PairedRecord::OwnWallet(record.clone()));
+    let text = format!(
+        "{record:?} {:?}",
+        PairedRecord::OwnWallet(Box::new(record.clone()))
+    );
     assert!(
         !text.contains("3, 3, 3") && !text.contains("0x03"),
         "{text}"
@@ -298,7 +301,7 @@ fn cr_233_the_secret_is_not_in_what_a_ceremony_or_a_record_prints() {
 
 #[test]
 fn cr_236_the_authority_of_an_own_wallet_record_is_the_owner_root_alone() {
-    let record = PairedRecord::OwnWallet(record());
+    let record = PairedRecord::OwnWallet(Box::new(record()));
     assert_eq!(
         record.authority(),
         Authority::OwnWallet {
