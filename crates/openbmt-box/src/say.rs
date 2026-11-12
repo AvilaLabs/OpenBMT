@@ -29,6 +29,7 @@ use crate::runner::{PosView, StartFailure};
 use crate::state::{
     BoxError, BoxStatus, INVITE_SECS, MAX_MEMBERS, MAX_TOKEN_BYTES, POS_TOKEN_FILE,
 };
+use crate::till::MAX_WAITING;
 
 /// The text of a `Details` line may hold no control character.
 fn plain(text: &str) -> String {
@@ -990,7 +991,7 @@ impl ConsoleAnswer {
                 "Command not known",
                 "The Box does not know that command.",
                 Who::BoxKeeper,
-                "Type one of invite, state, pos-setup, pos-token, pos, members, notes or quit.",
+                "Type one of invite, state, pos-setup, pos-token, till-key, pos, members, notes or quit.",
             )
             .quoted(Quoted::new("You typed", word)),
             Self::InvitationFileUnreadable { path, kind } => stop(
@@ -1003,9 +1004,9 @@ impl ConsoleAnswer {
             .detail(plain(&format!("{path}: {kind}"))),
             Self::BadArguments => stop(
                 "Wrong arguments",
-                "The Box needs a data folder and an address to listen on, and may take an invitation file, a status page address and --no-console.".into(),
+                "The Box needs a data folder and an address to listen on, and may take a till address and other options.".into(),
                 Who::BoxKeeper,
-                "Type the data folder and the address, then add --invitation-file, --status-page or --no-console as needed.",
+                "Type the data folder and the address, then add --invitation-file, --status-page, --till-listen or --no-console as needed.",
             ),
             Self::BadAddress(text) => stop(
                 "Address not understood",
@@ -1016,6 +1017,181 @@ impl ConsoleAnswer {
             .quoted(Quoted::new("You typed", text)),
         }
     }
+}
+
+/// What the till is told, and what the Box keeper is told when a till key is
+/// made (BX-71 to BX-75). The words are the ones the till shows, and
+/// they stay as they are in `words-till-request`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TillAnswer {
+    /// The till's key is not the Box's till key.
+    KeyWrong,
+    /// The Box was started without its till listener.
+    Off,
+    /// The Box has not joined the shop.
+    NotPaired,
+    /// No counter has the code the till gave; the code.
+    UnknownCounter(String),
+    /// The sale is in another money than the shop's.
+    WrongMoney {
+        /// The shop's currency, as the owner app shows it.
+        shop: String,
+        /// The currency the till asked in.
+        asked: String,
+    },
+    /// The amount cannot be taken.
+    BadAmount,
+    /// Nobody started the sale on the counter in time.
+    Expired,
+    /// Too many sales are waiting for a counter.
+    Busy,
+    /// The Box does not know the sale: it was restarted.
+    Lost,
+    /// The counter's sale ended without being paid.
+    Unpaid,
+    /// The till cancelled the sale.
+    Cancelled,
+    /// A new till key was made.
+    KeyMade,
+}
+
+/// What the till shows while the sale waits for the counter.
+pub const TILL_WAITING: &str = "Waiting for the counter. Press Start on the counter.";
+/// What the till shows once the counter has opened the sale.
+pub const TILL_OPENED: &str = "The customer can pay now.";
+/// What the till shows once the sale is paid.
+pub const TILL_PAID: &str = "Paid in bitcoin.";
+
+impl TillAnswer {
+    /// The key the till reads the answer by (BX-75).
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::KeyWrong => "tillKeyWrong",
+            Self::Off => "tillOff",
+            Self::NotPaired => "tillNotPaired",
+            Self::UnknownCounter(_) => "tillUnknownCounter",
+            Self::WrongMoney { .. } => "tillWrongMoney",
+            Self::BadAmount => "tillBadAmount",
+            Self::Expired => "tillExpired",
+            Self::Busy => "tillBusy",
+            Self::Lost => "tillLost",
+            Self::Unpaid => "tillUnpaid",
+            Self::Cancelled => "tillCancelled",
+            Self::KeyMade => "tillKeyMade",
+        }
+    }
+
+    /// What a person is told.
+    pub fn words(&self) -> Words {
+        match self {
+            Self::KeyWrong => stop(
+                "The Box did not accept this till",
+                "The key in this payment method is not the Box's till key.".into(),
+                Who::BoxKeeper,
+                "Copy the till key from the Box again into this payment method.",
+            )
+            .code("BX-71"),
+            Self::Off => stop(
+                "The Box does not take sales from a till",
+                "The Box was started without its till listener.".into(),
+                Who::BoxKeeper,
+                "Start the Box with the till listener on. The handbook shows how.",
+            )
+            .code("BX-70"),
+            Self::NotPaired => stop(
+                "The Box is not set up yet",
+                "The Box has not joined the shop, so it cannot reach a counter.".into(),
+                Who::Owner,
+                "Finish setting up the Box from the owner app.",
+            )
+            .code("BX-72"),
+            Self::UnknownCounter(code) => stop(
+                &format!("No counter {}", plain(code)),
+                "The shop has no counter with the code in this payment method.".into(),
+                Who::BoxKeeper,
+                "Check the counter code in this payment method. The owner app shows each counter as \"Counter\" and its code.",
+            )
+            .code("BX-72"),
+            Self::WrongMoney { shop, asked } => stop(
+                &format!("The counters take {}, not {}", plain(shop), plain(asked)),
+                format!(
+                    "This sale is in {}, and the shop's counters are set up in {}.",
+                    plain(asked),
+                    plain(shop)
+                ),
+                Who::Cashier,
+                "Take this payment on the counter by hand.",
+            )
+            .code("BX-72"),
+            Self::BadAmount => stop(
+                "This amount cannot be taken",
+                "The amount is zero, below zero, or has more decimals than the money has.".into(),
+                Who::Cashier,
+                "Check the sale in the till.",
+            )
+            .code("BX-72"),
+            Self::Expired => Words::new(
+                Tone::Ended,
+                "The counter did not start this sale",
+                "Nobody pressed Start on the counter within 5 minutes.",
+                Who::Cashier,
+                "Try again, or take the payment on the counter and pick Bitcoin by hand.",
+            )
+            .code("BX-76"),
+            Self::Busy => stop(
+                "Too many sales are waiting",
+                format!(
+                    "{MAX_WAITING} sales from the till are waiting for a counter."
+                ),
+                Who::Cashier,
+                "Finish or cancel some of them, then try again.",
+            )
+            .code("BX-76"),
+            Self::Lost => stop(
+                "The Box restarted",
+                "The Box no longer knows this sale. If the customer paid, the counter shows the sale as paid.".into(),
+                Who::Cashier,
+                "Check the counter. If it was paid, pick Bitcoin by hand in the till.",
+            )
+            .code("BX-76"),
+            Self::Unpaid => stop(
+                "The payment did not arrive",
+                "The counter's sale ended without being paid.".into(),
+                Who::Cashier,
+                "Ask the customer to try again, or pick another way to pay.",
+            )
+            .code("BX-78"),
+            Self::Cancelled => Words::new(
+                Tone::Ended,
+                "Sale cancelled",
+                "The till cancelled this sale before it was paid.",
+                Who::Nobody,
+                "Nothing to do.",
+            )
+            .code("BX-74"),
+            Self::KeyMade => Words::new(
+                Tone::Good,
+                "New till key",
+                "Put this key in the till's payment method. The old key no longer works.",
+                Who::BoxKeeper,
+                "Keep it out of sight. Anyone with it can ask a counter to start a sale, but cannot move money.",
+            )
+            .code("BX-71"),
+        }
+    }
+}
+
+/// The answer to `till-key`: the words, then the stable line `till key: ` with
+/// the key. The key is shown only here, once (BX-71).
+pub fn till_key_lines(key_hex: &str) -> Vec<String> {
+    let mut lines = lines_of(&TillAnswer::KeyMade.words());
+    lines.push(format!("till key: {key_hex}"));
+    lines
+}
+
+/// The answer to `till-key` when the key could not be made or stored.
+pub fn till_key_failed_lines(e: &BoxError) -> Vec<String> {
+    lines_of(&e.words())
 }
 
 /// How a paid notice was refused (BX-40), as the Box's note says it.
@@ -1898,6 +2074,9 @@ pub fn all_words() -> Vec<(String, Words)> {
     for (name, answer) in answers {
         add(&format!("ConsoleAnswer::{name}"), answer.words());
     }
+    for answer in till_samples() {
+        add(&format!("TillAnswer::{}", answer.key()), answer.words());
+    }
 
     for (name, line) in SAMPLE_NOTES {
         add(name, note_words(line));
@@ -1913,6 +2092,27 @@ pub fn all_words() -> Vec<(String, Words)> {
         );
     }
     all
+}
+
+/// One value of every variant of [`TillAnswer`].
+pub fn till_samples() -> Vec<TillAnswer> {
+    vec![
+        TillAnswer::KeyWrong,
+        TillAnswer::Off,
+        TillAnswer::NotPaired,
+        TillAnswer::UnknownCounter("1a2b3c4d".into()),
+        TillAnswer::WrongMoney {
+            shop: "USD".into(),
+            asked: "EUR".into(),
+        },
+        TillAnswer::BadAmount,
+        TillAnswer::Expired,
+        TillAnswer::Busy,
+        TillAnswer::Lost,
+        TillAnswer::Unpaid,
+        TillAnswer::Cancelled,
+        TillAnswer::KeyMade,
+    ]
 }
 
 /// One stored note for every kind of note, as its writer words it, with the

@@ -10,4 +10,5 @@ mod runner;
 mod say;
 mod state;
 mod status_page;
+mod till;
 mod vendor;

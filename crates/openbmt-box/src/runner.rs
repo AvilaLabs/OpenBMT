@@ -16,6 +16,11 @@
 //! found to the owner as POS notices (BX-42). A Box that is not paired or is
 //! turned off runs none of that (BX-03, BX-23).
 //!
+//! The Box can also take sale requests from a till on a listener of its own
+//! (BX-70 to BX-79). The listener keeps the sales in a table in memory; the
+//! worker sends what the table has for the counters and moves the sales on
+//! what the counters' notices say.
+//!
 //! The lock order is the relay's, then the core's: the welcome hook runs
 //! inside the relay's lock and takes the core's. Nothing here takes the
 //! relay's lock while holding the core's.
@@ -50,6 +55,11 @@ use crate::pos_config::{PosConfig, PosConfigError, POS_CONFIG_FILE};
 use crate::say::note_words;
 use crate::state::{BoxCore, BoxError, BoxStatus};
 use crate::status_page::{Entered, PageBackend, PageConfig, PageView, StatusPage};
+use crate::till::{
+    clean_reference, find_counter, make_till_key, parse_amount, till_key_matches, NewSale,
+    SaleState, TillRefusal, TillTable, TILL_KEY_FILE,
+};
+use crate::till_listener::{CreateBody, TillBackend, TillConfig, TillListener};
 use crate::vendor::{VendorConnector, VENDOR_POLL_SECS};
 
 /// The relay's own files (mailboxes, member list) are in this directory of
@@ -109,6 +119,7 @@ type Relays = Arc<Mutex<Relay<DirStore>>>;
 type Core = Arc<Mutex<BoxCore<DirFiles>>>;
 type Notes = Arc<Mutex<VecDeque<String>>>;
 type View = Arc<Mutex<PosView>>;
+type Till = Arc<Mutex<TillTable>>;
 
 /// What the console's `pos` command shows (BX-41): the POS side as the
 /// worker last saw it. It never holds the token.
@@ -336,6 +347,81 @@ impl PageBackend for PageHandles {
     }
 }
 
+/// The Box as the till listener sees it (BX-70 to BX-75). It holds the
+/// state's locks only for the moment of one call, and never the core's and
+/// the table's together.
+struct TillHandles {
+    core: Core,
+    clock: Arc<dyn Clock + Send + Sync>,
+    table: Till,
+}
+
+impl TillHandles {
+    /// The counters and the money of the settings in force, or why the Box
+    /// cannot take a sale (BX-72).
+    fn shop(&self) -> Result<(Vec<DeviceId>, openbmt_core::currency::ShopCurrency), TillRefusal> {
+        let mut core = lock(&self.core);
+        if core.status(self.clock.now()) != BoxStatus::Paired {
+            return Err(TillRefusal::NotPaired);
+        }
+        let settings = core.settings().ok_or(TillRefusal::NotPaired)?;
+        Ok((
+            settings.counters.keys().copied().collect(),
+            settings.currency,
+        ))
+    }
+}
+
+impl TillBackend for TillHandles {
+    fn key_ok(&self, presented: Option<&str>) -> bool {
+        let stored = lock(&self.core).files().read(TILL_KEY_FILE);
+        match (stored, presented) {
+            (Ok(Some(stored)), Some(presented)) => till_key_matches(&stored, presented),
+            _ => false,
+        }
+    }
+
+    fn create(&self, body: CreateBody) -> Result<([u8; 16], SaleState), TillRefusal> {
+        let (counters, money) = self.shop()?;
+        let counter = find_counter(counters, &body.counter)
+            .ok_or_else(|| TillRefusal::UnknownCounter(body.counter.clone()))?;
+        if body.currency != money.code() {
+            return Err(TillRefusal::WrongMoney {
+                shop: money.code().to_string(),
+                asked: body.currency,
+            });
+        }
+        let amount =
+            parse_amount(&body.amount, money.minor_digits()).ok_or(TillRefusal::BadAmount)?;
+        let mut random = [0u8; 32];
+        os_random(&mut random).map_err(|_| TillRefusal::Fault)?;
+        let mut id = [0u8; 16];
+        id.copy_from_slice(random.get(..16).ok_or(TillRefusal::Fault)?);
+        let new = NewSale {
+            counter,
+            amount,
+            currency: openbmt_counter::Currency::of_shop(money),
+            reference: clean_reference(&body.reference),
+            request: body.request,
+        };
+        lock(&self.table).create(self.clock.now(), id, new)
+    }
+
+    fn read(&self, sale: &[u8; 16]) -> Result<SaleState, TillRefusal> {
+        self.shop()?;
+        lock(&self.table)
+            .state(self.clock.now(), sale)
+            .ok_or(TillRefusal::Lost)
+    }
+
+    fn cancel(&self, sale: &[u8; 16]) -> Result<SaleState, TillRefusal> {
+        self.shop()?;
+        lock(&self.table)
+            .cancel(self.clock.now(), sale)
+            .ok_or(TillRefusal::Lost)
+    }
+}
+
 /// What the worker thread owns.
 struct Worker {
     core: Core,
@@ -347,6 +433,8 @@ struct Worker {
     pos: Option<BoxPos<DirFiles>>,
     view: View,
     send_error: Option<String>,
+    till: Till,
+    till_error: Option<String>,
 }
 
 impl Worker {
@@ -440,7 +528,58 @@ impl Worker {
         if changed {
             sync_relay(&self.core, &self.relay, &*self.clock, &self.notes);
         }
+        self.till_step(&paid_notices);
         self.pos_step(paid_notices);
+    }
+
+    /// BX-76, BX-78: move the till's sales on what the counters' notices
+    /// say, let the time pass, and send the counters what the table has for
+    /// them. A message the relay did not take stays for the next step.
+    fn till_step(&mut self, notices: &[(DeviceId, Vec<u8>)]) {
+        let now = self.clock.now();
+        let roles = lock(&self.core).roles();
+        let mut lines = Vec::new();
+        let out = {
+            let mut table = lock(&self.till);
+            for (sender, bytes) in notices {
+                if let Err(line) = table.take_notice(now, sender, bytes, &roles) {
+                    lines.push(line);
+                }
+            }
+            table.sweep(now);
+            table.outgoing()
+        };
+        let mut done = Vec::new();
+        if let Some(courier) = self.courier.as_mut() {
+            for o in &out {
+                match courier.send(&o.counter, Kind::PosNotice, &o.message.to_bytes()) {
+                    Ok(()) => {
+                        self.till_error = None;
+                        done.push(o.seq);
+                    }
+                    Err(e) => {
+                        let line =
+                            format!("BX-76: a till sale could not be sent to a counter: {e}");
+                        if self.till_error.as_deref() != Some(line.as_str()) {
+                            self.till_error = Some(line.clone());
+                            lines.push(line);
+                        }
+                        // A counter that is not on the list, or a message
+                        // that cannot be made, will not work later either.
+                        if e.is_retryable() {
+                            break;
+                        }
+                        done.push(o.seq);
+                    }
+                }
+            }
+        }
+        if !done.is_empty() {
+            lock(&self.till).sent(&done);
+        }
+        for line in lines {
+            note(&self.notes, line);
+        }
     }
 
     /// The Box is unpaired or turned off: the POS side stops (BX-03, BX-23).
@@ -553,10 +692,12 @@ pub struct BoxRunner {
     clock: Arc<dyn Clock + Send + Sync>,
     notes: Notes,
     view: View,
+    till: Till,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
     server: Option<Server>,
     page: Option<StatusPage>,
+    till_listener: Option<TillListener>,
     addr: SocketAddr,
     id: DeviceId,
     _dir_lock: DirLock,
@@ -661,6 +802,7 @@ impl BoxRunner {
             }
         };
         let view: View = Arc::new(Mutex::new(view));
+        let till: Till = Arc::new(Mutex::new(TillTable::new()));
         let mut worker = Worker {
             core: Arc::clone(&core),
             relay: Arc::clone(&relay),
@@ -671,6 +813,8 @@ impl BoxRunner {
             pos: pos_side,
             view: Arc::clone(&view),
             send_error: None,
+            till: Arc::clone(&till),
+            till_error: None,
         };
         // A paired Box whose number files are gone stops here (LK-40).
         let paired = matches!(lock(&core).status(clock.now()), BoxStatus::Paired);
@@ -701,10 +845,12 @@ impl BoxRunner {
             clock,
             notes,
             view,
+            till,
             stop,
             worker: Some(handle),
             server: Some(server),
             page: None,
+            till_listener: None,
             addr,
             id,
             _dir_lock: dir_lock,
@@ -758,6 +904,33 @@ impl BoxRunner {
         Ok(addr)
     }
 
+    /// Serve the till listener (BX-70) on `bind`; the address it listens on.
+    /// A second call replaces the first listener.
+    pub fn serve_till(
+        &mut self,
+        bind: SocketAddr,
+        cfg: TillConfig,
+    ) -> Result<SocketAddr, StartFailure> {
+        let listener = TcpListener::bind(bind).map_err(StartFailure::Listen)?;
+        let backend = Arc::new(TillHandles {
+            core: Arc::clone(&self.core),
+            clock: Arc::clone(&self.clock),
+            table: Arc::clone(&self.till),
+        });
+        let till = TillListener::start(listener, backend, cfg).map_err(StartFailure::Listen)?;
+        let addr = till.local_addr();
+        self.till_listener = Some(till);
+        Ok(addr)
+    }
+
+    /// BX-71: make a new till key and keep only its hash. The key is
+    /// returned as 64 lowercase hex and is not kept anywhere. The listener
+    /// reads the hash at each request, so the new key works at once and the
+    /// old one stops.
+    pub fn make_till_key(&self) -> Result<String, BoxError> {
+        make_till_key(lock(&self.core).files_mut())
+    }
+
     /// Store the POS token the merchant typed (BX-41). Only a paired Box that
     /// the settings list takes one.
     pub fn store_pos_token(&self, token: &str) -> Result<(), BoxError> {
@@ -807,6 +980,9 @@ impl BoxRunner {
         }
         if let Some(page) = self.page.take() {
             page.stop();
+        }
+        if let Some(till) = self.till_listener.take() {
+            till.stop();
         }
         if let Some(server) = self.server.take() {
             server.stop();

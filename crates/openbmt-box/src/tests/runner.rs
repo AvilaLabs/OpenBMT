@@ -109,7 +109,7 @@ fn sealed(
     sealed_to(from, from_role, &to.device_id(), to_role, n, kind, content)
 }
 
-fn sealed_to(
+pub(super) fn sealed_to(
     from: &Identity,
     from_role: Role,
     to: &DeviceId,
@@ -723,7 +723,7 @@ fn reading(r: &BoxRunner) -> Option<Reading> {
 }
 
 /// A counter's paid notice, sealed to the Box and put on its relay.
-fn put_notice(r: &BoxRunner, by: &Identity, link_number: u64, notice_bytes: &[u8]) {
+pub(super) fn put_notice(r: &BoxRunner, by: &Identity, link_number: u64, notice_bytes: &[u8]) {
     let m = sealed_to(
         by,
         Role::Counter,

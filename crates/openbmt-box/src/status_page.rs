@@ -122,17 +122,17 @@ struct Head {
 }
 
 /// Where the head ends: the index of the blank line's first byte.
-fn head_end(buf: &[u8]) -> Option<usize> {
+pub(crate) fn head_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
-fn is_token_byte(b: u8) -> bool {
+pub(crate) fn is_token_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)
 }
 
 /// Every byte of a head is printable ASCII or a tab, and every line ends in
 /// CR LF with no CR or LF alone.
-fn head_is_clean(head: &[u8]) -> bool {
+pub(crate) fn head_is_clean(head: &[u8]) -> bool {
     let mut lines = head.split(|&b| b == b'\n').peekable();
     while let Some(line) = lines.next() {
         // Each line but the last ends with the CR before its LF; the last
@@ -562,9 +562,12 @@ fn reason(status: u16) -> &'static str {
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        401 => "Unauthorized",
         409 => "Conflict",
         413 => "Content Too Large",
         422 => "Unprocessable Content",
+        429 => "Too Many Requests",
+        503 => "Service Unavailable",
         _ => "Internal Server Error",
     }
 }
@@ -639,7 +642,7 @@ fn invitation_page_status(e: &BoxError) -> u16 {
 }
 
 /// Counts a connection while it lives.
-struct Slot(Arc<AtomicUsize>);
+pub(crate) struct Slot(pub(crate) Arc<AtomicUsize>);
 
 impl Drop for Slot {
     fn drop(&mut self) {

@@ -21,6 +21,10 @@
 //! - [`status_page`]: the optional web page that shows the Box's state and
 //!   takes an invitation, on its own listener (BX-54 to BX-61).
 //!
+//! - [`till`] and [`till_listener`]: the optional listener that takes sale
+//!   requests from a till, the till key, and the sales it keeps in memory
+//!   (BX-70 to BX-79).
+//!
 //! The Box holds no bitcoin key and cannot move funds (BX-04); what it says
 //! is a hint to the other devices.
 //!
@@ -50,6 +54,8 @@ pub mod runner;
 pub mod say;
 pub mod state;
 pub mod status_page;
+pub mod till;
+pub mod till_listener;
 pub mod vendor;
 
 #[cfg(test)]
@@ -69,4 +75,6 @@ pub use state::{
     MAX_MEMBERS, MAX_TOKEN_BYTES, POS_TOKEN_FILE, ROOTS_FILE, SETTINGS_FILE,
 };
 pub use status_page::{PageBackend, PageConfig, PageView, StatusPage};
+pub use till::{make_till_key, SaleState, TillRefusal, TillTable, TILL_KEY_FILE};
+pub use till_listener::{TillBackend, TillConfig, TillListener};
 pub use vendor::VendorConnector;

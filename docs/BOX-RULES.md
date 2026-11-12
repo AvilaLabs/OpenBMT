@@ -2,7 +2,8 @@
 
 Status: specification for `crates/openbmt-box`. All sections are
 implemented, section 4 (the POS on the Box, and its way to a vendor over
-curl) and section 5b (the status page) included.
+curl), section 5b (the status page) and section 5c (the till listener)
+included.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement `docs/DESIGN.md` §5.3 and close the open item of §16: how a Box,
 which has no screen, is paired.
@@ -304,7 +305,8 @@ These details too leave every rule of section 4 as it is.
 
 - **The paid notice.** A counter sends it as a sealed message of kind Paid
   notice to each Box on its device list (LK-08). The content is exactly 141
-  bytes, strict, with the magic `OBMc`:
+  bytes, strict, with the magic `OBMc` (157 bytes, and version 2, when the
+  notice names a till sale, BX-77):
 
   ```text
   "OBMc" | 1 | counter key (32) | number (8) | sale index (4)
@@ -586,6 +588,122 @@ page is plain HTTP: whoever can read the network between the browser and the
 Box can read the invitation as it is typed, which the Umbrel and StartOS
 hosts answer with their own login and TLS in front of it.
 
+## 5c. The till listener
+
+A till that sits in front of the shop's counters (an Odoo point of sale, for
+one) can ask the Box for a bitcoin sale. The cashier presses Bitcoin in the
+till, the till asks the Box, the Box asks one counter, the cashier taps Start
+on the counter, the customer pays, and the till closes its own sale. The
+listener is how the till talks to the Box. It is off unless it is asked for,
+and it adds no way to move money: the counter still makes the quote, shows the
+code and checks the payment.
+
+- **BX-70.** The listener is plain HTTP/1.1 written with the standard library
+  alone, on its own listener and its own threads, separate from the status
+  page, and it answers JSON only. A request is at most 4 KiB, head and body
+  together. Every line of the head ends in CR LF and holds printable ASCII
+  only, with no folded line, no `Transfer-Encoding` and no `Content-Encoding`.
+  One request is served for each connection (`Connection: close`). A request
+  not whole 5 seconds after the connection was made is answered 400 and
+  closed, the answer must be written within 5 seconds, and no more than 16
+  connections are served at once; one more is closed at once. The listener is
+  off unless the Box is started with `--till-listen <addr:port>` (IPv4 or
+  IPv6, as BX-53); the Box prints `till listener: <addr>` when it is serving,
+  and an address that is not an address and a port, or that cannot be bound,
+  stops the Box at the start, saying so.
+- **BX-71.** The till key is 32 bytes from the system's randomness.
+  `openbmt-box till-key <data dir>` (or `till-key` on the console of a Box
+  that runs) makes one, prints it once as 64 lowercase hex with the words
+  `tillKeyMade`, and stores only its tagged hash (`OpenBMT/till-key/v1`) in
+  `till-key` in the data directory, written whole with mode 0600 (BX-50). A
+  new key replaces the old one, which stops working at the next request.
+  Every request carries `Authorization: Bearer <key>`. The Box compares the
+  hash of what it was given with the stored hash in constant time. No key
+  file, no header, a header that is not a bearer token or a wrong key is a
+  401 with the words `tillKeyWrong`. The Box never prints, logs or stores the
+  key.
+- **BX-72.** `POST /till/v1/sales` takes `Content-Type: application/json`
+  and an object of strings: `counter`, `amount`, `currency`, `request` and
+  `reference` (the last may be left out). `counter` is the first 4 bytes of a
+  counter's device key as 8 lowercase hex (the owner app's "Counter
+  1a2b3c4d") and must match exactly one counter of the settings in force, else
+  404 `tillUnknownCounter`. `currency` must be the shop's currency of the
+  settings in force, else 409 `tillWrongMoney`. `amount` is a decimal string
+  above zero with at most as many decimals as the shop's currency has minor
+  units (none for yen, won and satoshis), else 400 `tillBadAmount`.
+  `reference` is cut to 40 characters, with anything outside printable ASCII
+  dropped. `request` is 1 to 64 of `[A-Za-z0-9_-]`; the same `request` again
+  answers the same sale and sends nothing new. An object that does not read
+  is a 400 `tillBadRequest` with no words. The answer is 200 `{"sale":"<32
+  hex>","state":"waiting"}`. A Box that has not joined the shop answers 503
+  `tillNotPaired` to every request that carries the key.
+- **BX-73.** `GET /till/v1/sales/<sale>` answers 200 `{"sale","state"}`
+  where state is one of `waiting`, `opened`, `paid`, `unpaid`, `expired` and
+  `cancelled`, and for the last four also `words`, an object of `heading`,
+  `what` and `next`: for `paid` the plain line "Paid in bitcoin." in `what`
+  with the other two empty, and for the rest the words `tillUnpaid`,
+  `tillExpired` and `tillCancelled`. A sale the Box does not know, or an id
+  that is not 32 lowercase hex, is a 404 `tillLost`.
+- **BX-74.** `POST /till/v1/sales/<sale>/cancel` makes the sale `cancelled`
+  unless it is `paid`, which stays `paid`, and sends the counter a cancel. The
+  answer is the sale as BX-73 gives it. An unknown sale is a 404 `tillLost`.
+- **BX-75.** Every body the listener writes is JSON in UTF-8 with
+  `Content-Type: application/json`. A refusal is its status with `{"error":
+  "<key>","words":{...}}` and the words of the key. Any other path, and any
+  other method on a path of the three, is a 404 with `{"error":
+  "tillNotFound"}` and no words; a request that does not read is a 400 and one
+  over its limit a 413, each with an error key and no words. The paths are
+  matched exactly, with no query, before the till key is looked at, so a path
+  that does not exist says nothing about the key.
+- **BX-76.** The Box asks the counter with a sealed message of kind POS notice
+  to that counter only (LK-08), whose content is a sale request (`sale` 16
+  bytes the Box makes, the amount in minor units, the currency, the reference
+  and the time the request lapses) or a sale cancel (`sale`), with the magic
+  `OBM(`. A request lapses 5 minutes after it was made; a sale nobody started
+  by then is `expired`. At most 32 sales wait for a counter at once; one more
+  is a 429 `tillBusy`. Sales and the messages not yet sent are in memory only,
+  so a restart forgets them, and a sale it does not know is `tillLost`. A sale
+  that has ended is kept one hour and then dropped. A message the relay did not
+  take is sent again at the next step and then left off the list when the sale
+  can no longer use it.
+- **BX-77.** A paid notice may name the till sale it answers: `PaidNotice` and
+  `NoticeDraft` carry `till_sale`, 16 bytes or none, signed with the rest. A
+  notice with none is as it always was: version 1, 141 bytes, the same
+  signature. A notice with one is version 2 and 157 bytes, the 16 bytes
+  between the state time and the signature. Both read strictly.
+- **BX-78.** The Box moves a till sale to `opened` on a counter-signed
+  "opened" notice, and to `paid` only on a counter-signed "paid" or "final"
+  notice, each naming that sale, from the counter that was asked, with the
+  same amount and currency, with a good signature and a number above the last
+  from that counter. Any mismatch is ignored with a note, and its number is
+  not used up. "Unpaid again" before `paid` moves the sale to `unpaid`. After
+  `paid`, a later "unpaid again" does not change what the till was told; it
+  goes to the owner through the POS notices of BX-42, as it does for any sale.
+- **BX-79.** A till sale never closes a POS order by itself, and BX-43 is
+  unchanged: the Box closes an order only as BX-43 says. The till closes its
+  own order when it reads `paid`.
+
+What the code fixes. `till-key` takes no lock on the data directory (BX-02):
+it writes only that one file, by renaming a whole file over the old, and the
+Box reads the file at each request, so a key made while the Box runs works at
+once. The key is stored as the tagged hash `OpenBMT/till-key/v1` of its bytes,
+which is SHA-256 made as BIP340 tagged hashes are, so the Box needs no
+hashing code of its own. The shop's currency is named by its three letters,
+`SAT` for Bitcoin Standard (CR-196). A sale counts as waiting from BX-72 until
+the counter's "opened" notice; at most 32 do, and at most 4,096 sales of any
+state are kept, so that a till that makes and cancels sales cannot grow the
+table without limit. An opened sale that nothing comes of for an hour counts as
+`unpaid`. A "paid" or "final" notice moves a sale that is `unpaid`, `expired`
+or `cancelled` to `paid` while the Box still keeps it, because the counter's
+word that it was paid is what the till needs most; a till that cancelled a
+sale and then reads `paid` has been paid. The numbers of the counters' notices
+are checked for the till against the last till notice taken from the counter,
+in memory, because the till works on a Box that reads no POS. The words of
+the headings and sentences of `tillKeyWrong`, `tillOff`, `tillUnknownCounter`,
+`tillWrongMoney` and `tillLost` are longer than the console's limits for a
+screen (SC-12 `check`), so the SC-12 test checks them with the lengths
+cut and checks their text against the words as written.
+
 ## 6. What these rules do not do
 
 - **They do not make the Box trusted.** A Box that lies can hold messages
@@ -600,5 +718,10 @@ hosts answer with their own login and TLS in front of it.
   the POS vendor does. With a public price that gives a rough amount in
   bitcoin and a time window to search the chain with. Only running the
   Box yourself keeps that inside the shop.
+- **They do not stop whoever has the till key from asking a counter to
+  start a sale.** The cashier still taps Start on the counter, the counter
+  makes the quote and checks the payment, and nobody can move money with the
+  key. The key is kept as a hash, so a copy of the Box's disk does not give
+  it away, but a till that is taken over holds it.
 - **They do not cover push wake-ups, a full node on the Box, updates or
   packaging.** Those are separate work (`docs/DESIGN.md` §5.3, R4).
