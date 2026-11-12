@@ -86,8 +86,22 @@ export const WORDS = Object.freeze({
   electrumHeading: 'Check with Electrum',
   electrumText:
     'Electrum is made by other people, so it is an independent check. ' +
-    'Follow the steps on your phone. Electrum must show the same first ' +
-    'address and fingerprint.',
+    'It must show the same first address and fingerprint as this page.',
+  electrumSteps: [
+    'Open the Applications menu, then Internet, then Electrum.',
+    'Tails warns that persistence is off and the data will be lost. That ' +
+      'is what you want. Click Launch, then I Accept.',
+    'Keep the wallet name, click Next. Choose Standard wallet, Next. ' +
+      'Choose I already have a seed, Next.',
+    'Click Options, tick BIP39 seed, click OK.',
+    'Type your 12 words from the card. Click Next twice: the first click ' +
+      'closes the word list.',
+    'Choose native segwit (p2wpkh). Leave the path as it is. Next.',
+    'Leave the password empty. Next.',
+    'Open Wallet, then Information: the BIP32 root fingerprint must be ' +
+      'the one on this page. Open the Receive tab: the first address must ' +
+      'be the one on this page.',
+  ],
   electrumClose: 'Close Electrum without saving the wallet.',
   electrumDone: 'Electrum shows the same',
   electrumDifferent: 'Electrum shows something different',
