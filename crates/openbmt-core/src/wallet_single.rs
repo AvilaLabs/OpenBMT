@@ -1133,6 +1133,8 @@ mod tests {
             .lines()
             .filter_map(|l| l.trim_start().strip_prefix("- **WL-"))
             .map(|rest| format!("WL-{}", rest.chars().take(2).collect::<String>()))
+            // WL-20 and up belong to `pinned_wallet.rs`, which checks them.
+            .filter(|id| id.as_str() < "WL-20")
             .collect()
     }
 

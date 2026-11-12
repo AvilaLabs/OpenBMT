@@ -73,3 +73,46 @@ counter uses them yet.
   `docs/screens/core.md`, under SC-01 to SC-12, for the owner: this holds
   a private key, this description is damaged, this is a test-network
   wallet, this wallet type is not supported.
+
+## 3. The wallet a counter pins, and its index ranges
+
+The code is `crates/openbmt-core/src/pinned_wallet.rs`. A counter paired the
+new way derives its own receive addresses from the pinned description, for
+both kinds of wallet. The owner phone still gives it a range of indexes.
+No counter, owner screen or app uses these types yet.
+
+- **WL-20. The counter's own addresses.** `PinnedWallet` gives the receive
+  script and address at an index for the single-key wallet and for the
+  2-of-3 wallet. They are those of `SingleKeyWallet` and of
+  `WalletDescription` for the indexes 0, 1 and 999; the test seed's first
+  address is the known one of WL-06. An index of 2^31 or more has no
+  address.
+- **WL-21. The pinned wallet on the wire.** `OBM)`, version 1, the text
+  length, the canonical description text, its SHA-256. A message of another
+  magic or version, a length above the import limit, a cut or a longer
+  message is refused, and what decodes encodes to the same bytes.
+- **WL-22. Nothing the import refuses.** Decoding reads the text through
+  `ImportedWallet::read` and refuses a private key, a test network, a
+  damaged checksum and another type with the same refusal. The text must be
+  the canonical spelling and the hash must be its own.
+- **WL-23. The shape of a range.** A range `start..end` of one counter is
+  not empty, has `end` below 2^31 and holds at most 1,000,000 indexes. A
+  range of another shape is not signed and does not decode.
+- **WL-24. The owner's signature.** `SignedRange` carries the owner root's
+  signature over the counter, the start and the end, under its own tag.
+  `verify` accepts only the pinned owner root, and a changed counter, start
+  or end, or a signature under another tag, fails. On the wire: `OBM*`,
+  version 1, counter, start, end, signature; the decoder is strict.
+- **WL-25. Used indexes.** A `RangeBook` refuses a range that overlaps an
+  index it has used, in a range that is used up or in the used part of one
+  that is not. The book is unchanged by a refusal.
+- **WL-26. A range still in use.** A `RangeBook` refuses a range that
+  overlaps a range already taken that still has an unused index, with a
+  refusal of its own. A range next to it, or over one that is used up, is
+  taken.
+- **WL-27. The next index.** `next` hands out the unused indexes of the
+  ranges in the order they were taken, each once, and says when none is
+  left (or none was taken).
+- **WL-28. Another counter.** A `RangeBook` refuses a range for another
+  counter, and `accept_signed` checks the signature before it takes a
+  range.

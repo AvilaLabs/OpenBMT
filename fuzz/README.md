@@ -30,6 +30,8 @@ exactly the input bytes.
 | `approval_wallet_message` | `verify_wallet_message` for an address that is P2WPKH or of a type that must be refused, with the message and the signature (as text, or as bytes written in base64) taken from the input; it must never panic, and nothing the fuzzer makes may pass |
 | `approval_classify` | `classify` on two settings built from a script of field changes; it must never panic, an unchanged pair is Free, a change that only tightens is Free, and a Redirect names a node |
 | `pair_offer_decode` | `PairOffer::from_bytes` |
+| `pinned_wallet_decode` | `PinnedWallet::from_bytes`; on success the bytes encode back exactly, the text reads again through the import, and addresses at 0, 1, 999 and 2^31 derive without a panic |
+| `signed_range_decode` | `SignedRange::from_bytes`; on success the bytes encode back exactly, the range does not verify under a key it was never signed by, and the range book takes it and hands out an index without a panic |
 | `pair_request_decode` | `PairRequest::from_bytes` |
 | `counter_bundle_decode` | `CounterBundle::from_bytes` (versions 1 and 2, the second with a relay, CR-130), with re-encode equality, on the input as it is and behind each version's frame header; a bundle with a relay must read as version 1 without it |
 | `counter_pairing_record_decode` | `PairingRecord::from_bytes` (the counter's stored pairing record, versions 1 and 2, CR-131), with re-encode equality, on the input as it is and behind each version's frame header |
