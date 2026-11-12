@@ -60,6 +60,9 @@ internal fun Controller.showConnect(r: FirstRun, message: SayWords? = null) {
 /** The text of the descriptor typed or pasted: it is cleared from the field and wiped after it is read. */
 private fun Controller.showConnectPaste(r: FirstRun, message: SayWords?, back: () -> Unit) {
     val field = ui.field(ConnectWords.pasteHint, 6, mono = true)
+    // The field's look sets a minimum height in pixels, which replaces the line count: it is set again.
+    field.minLines = 6
+    field.gravity = android.view.Gravity.TOP or android.view.Gravity.START
     val check: Button = ui.primary(ConnectWords.pasteCheck) {
         val bytes = field.text.toString().toByteArray(Charsets.UTF_8)
         field.setText("")
