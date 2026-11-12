@@ -43,12 +43,18 @@ test('km_02 flips: heads is 1, first flip is the most significant bit', () => {
 });
 
 // words.js holds the sentences the page shows (one of them says the flips
-// are "still random"); it is text, not code, so the code checks skip it.
+// are "still random"). Its string contents are blanked for the code checks,
+// so its code is still scanned and a call could not hide there.
+function blankStrings(text) {
+  return text.replace(/'(?:[^'\\\n]|\\.)*'/g, "''");
+}
+
 function sourceFiles() {
   const dir = new URL('../src/', import.meta.url);
-  return readdirSync(dir)
-    .filter((f) => f !== 'words.js')
-    .map((f) => [f, readFileSync(new URL(f, dir), 'utf8')]);
+  return readdirSync(dir).map((f) => {
+    const text = readFileSync(new URL(f, dir), 'utf8');
+    return [f, f === 'words.js' ? blankStrings(text) : text];
+  });
 }
 
 test('km_03 no random source anywhere in src', () => {

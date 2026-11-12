@@ -150,7 +150,7 @@ export function start(doc) {
   }
 
   function stepBadge(screen) {
-    return el('div', 'step', text(`${STEP[screen]}/${LAST_STEP}`));
+    return el('div', 'step', text(fill(WORDS.stepBadge, { n: STEP[screen], total: LAST_STEP })));
   }
 
   function frame(screen, ...body) {
@@ -277,7 +277,7 @@ export function start(doc) {
       }
     }, 'small');
     const done = el('div', 'done');
-    const next = button(WORDS.writeHeading, () => toWrite());
+    const next = button(WORDS.next, () => toWrite());
     done.append(el('p', 'strong', text(WORDS.flipsDone)), next);
     const pad = el('div', 'pad', heads, tails);
     const extras = [];
@@ -335,7 +335,7 @@ export function start(doc) {
     const w = state.result.working;
     const table = el('table', 'working');
     const head = el('tr');
-    for (const h of ['', '', WORDS.handNumber, WORDS.handWord]) {
+    for (const h of ['', WORDS.handFlips, WORDS.handNumber, WORDS.handWord]) {
       head.append(el('th', '', text(h)));
     }
     table.append(head);
@@ -361,6 +361,7 @@ export function start(doc) {
           'td',
           'bits',
           text(last.bits),
+          el('span', 'checklabel', text(WORDS.handCheckBits)),
           el('span', 'checkbits', text(last.checkBits)),
         ),
         el('td', 'num', text(String(last.number))),
@@ -385,12 +386,6 @@ export function start(doc) {
       el('p', '', text(WORDS.handText)),
       workingTable(),
       el('p', '', text(WORDS.handLast)),
-      el(
-        'p',
-        'note',
-        text(WORDS.handCheckBits),
-        el('span', 'checkbits', text(state.result.working.last.checkBits)),
-      ),
     );
     frame(
       'write',

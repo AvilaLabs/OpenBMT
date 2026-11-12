@@ -138,3 +138,5 @@ input.prefix {
   html { font-size: 20px; }
   .words .w { font-size: 1.8rem; }
 }
+
+.checklabel { margin-left: 0.6rem; font-family: system-ui, sans-serif; font-size: 0.8rem; color: #333; }

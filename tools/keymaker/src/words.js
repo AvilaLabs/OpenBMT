@@ -8,6 +8,8 @@ export const WORDS = Object.freeze({
   label:
     'Internal review only. No independent security audit has been done yet.',
   rehearsalBanner: 'REHEARSAL. These words are made up and will be thrown away.',
+  stepBadge: 'Step {n} of {total}',
+  next: 'Next',
 
   // Step 0
   startHeading: 'Before you start',
@@ -117,6 +119,7 @@ export const WORDS = Object.freeze({
   handNumber: 'Number',
   handWord: 'Word',
   handCheckBits: 'Check bits',
+  handFlips: 'Flips (heads 1, tails 0)',
 
   // Shown in place of the page when something is wrong
   noScript:

@@ -132,14 +132,14 @@ async function realRun(page, h) {
   for (let i = 0; i < 128; i++) await page.key(i % 2 === 0 ? 'h' : 't');
   assert.equal(await h.count(), '128 of 128');
   await h.shot('flip-real-full');
-  assert.equal(await h.click(WORDS.writeHeading), true);
+  assert.equal(await h.click(WORDS.next), true);
   assert.deepEqual(await h.words(), seedWords.split(' '));
   assert.equal(await h.banner(), false);
   await h.shot('write-real');
   assert.equal(await h.click(WORDS.writeDone), true);
   await h.answer(seedWords.split(' '), true);
   assert.equal(await h.heading(), WORDS.phoneHeading);
-  assert.equal(await h.step(), '5/7');
+  assert.equal(await h.step(), 'Step 5 of 7');
   await h.phone(seedWords.split(' '), '818bc9b6', seedAddress);
   await h.noOverflow();
   await h.shot('phone-real');
@@ -159,14 +159,14 @@ for (const [width, height] of [
         // Step 0
         assert.equal(await page.eval("document.getElementById('inert').hidden"), true);
         assert.equal(await h.heading(), WORDS.title);
-        assert.equal(await h.step(), '0/7');
+        assert.equal(await h.step(), 'Step 0 of 7');
         assert.equal(await h.banner(), false);
         await h.noOverflow();
         await h.shot('start');
         // The rehearsal, every step
         assert.equal(await h.click(WORDS.rehearseButton), true);
         assert.equal(await h.banner(), true);
-        assert.equal(await h.step(), '2/7');
+        assert.equal(await h.step(), 'Step 2 of 7');
         assert.equal(await h.has(WORDS.rehearsalFill), true);
         await page.key('h');
         await page.key('t');
@@ -179,8 +179,8 @@ for (const [width, height] of [
         assert.equal(await h.count(), '128 of 128');
         await h.noOverflow();
         await h.shot('flip-rehearsal-full');
-        assert.equal(await h.click(WORDS.writeHeading), true);
-        assert.equal(await h.step(), '3/7');
+        assert.equal(await h.click(WORDS.next), true);
+        assert.equal(await h.step(), 'Step 3 of 7');
         assert.equal(await h.banner(), true);
         const words = await h.words();
         assert.equal(words.length, 12);
@@ -192,7 +192,7 @@ for (const [width, height] of [
         await h.shot('write-rehearsal-hand-open');
         await page.eval("document.querySelector('details.hand').open = false");
         assert.equal(await h.click(WORDS.writeDone), true);
-        assert.equal(await h.step(), '4/7');
+        assert.equal(await h.step(), 'Step 4 of 7');
         await h.shot('check-rehearsal');
         const pos = await h.answer(words, false);
         assert.ok((await h.text()).includes(WORDS.checkWrong.replace('{pos}', String(pos[0]))));
@@ -208,10 +208,10 @@ for (const [width, height] of [
         await h.noOverflow();
         await h.shot('phone-rehearsal');
         assert.equal(await h.click(WORDS.phoneDone), true);
-        assert.equal(await h.step(), '6/7');
+        assert.equal(await h.step(), 'Step 6 of 7');
         await h.shot('electrum');
         assert.equal(await h.click(WORDS.electrumDone), true);
-        assert.equal(await h.step(), '7/7');
+        assert.equal(await h.step(), 'Step 7 of 7');
         assert.ok((await h.text()).includes(WORDS.rehearsalDoneHeading));
         await h.shot('finish-rehearsal');
         // For real, with the test seed
@@ -230,7 +230,7 @@ for (const [width, height] of [
         await page.goto(`file://${file}`);
         assert.equal(await h.click(WORDS.rehearseButton), true);
         assert.equal(await h.click(WORDS.rehearsalFill), true);
-        assert.equal(await h.click(WORDS.writeHeading), true);
+        assert.equal(await h.click(WORDS.next), true);
         const w2 = await h.words();
         assert.equal(await h.click(WORDS.writeDone), true);
         await h.answer(w2, true);
