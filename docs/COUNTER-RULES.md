@@ -1515,9 +1515,9 @@ by any means the phone has.
   earlier file reads back, as a sale with no note and no request, and every
   earlier build's file is unchanged. The read is strict, as CR-42 says.
 - **CR-212.** The note is the owner's and the books': it is carried on the
-  sale's line in the books' full ledger (BK-41), and goes to no other device than the
-  owner's. The POS reader is told of a sale as before and is never told its
-  note: the record of a note changes nothing it is sent.
+  sale's line in the books' full ledger (BK-41), and goes to no other device
+  than the owner's. The POS reader is told of a sale as before and is never
+  told its note: the record of a note changes nothing it is sent.
 - **CR-213.** On New sale, under the keypad's main button, the counter app has
   a quieter button "Request to send". It opens a page with the note field,
   which says "Optional. Like a booking name or date.", and the choice of
