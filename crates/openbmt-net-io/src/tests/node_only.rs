@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use bitcoin::consensus::serialize;
 use bitcoin::p2p::address::AddrV2;
 use bitcoin::p2p::ServiceFlags;
-use bitcoin::{Network, ScriptBuf};
+use bitcoin::{Network, ScriptBuf, Witness};
 use openbmt_net::onion::onion_name;
 use openbmt_net::{AddressBook, OwnNode, Source};
 use openbmt_watch::{
@@ -24,6 +24,7 @@ use crate::driver::{
 };
 use crate::env::Key;
 use crate::socks::Target;
+use crate::RelayState;
 
 const T0: u64 = 1_700_000_000;
 
@@ -321,6 +322,50 @@ fn nr_109_a_transaction_is_announced_to_the_own_node_and_to_nobody_else() {
         .unwrap()
         .contains(&tx.compute_txid())));
     assert_eq!(other.accept_count(), 0);
+}
+
+// NR-112.
+
+#[test]
+fn nr_112_a_held_transaction_the_node_answers_for_is_held_by_node() {
+    let mut tx = blocks(1, 10)[0].txdata[0].clone();
+    tx.input[0].witness = Witness::from_slice(&[vec![1, 2, 3], vec![4; 33]]);
+    let node = FakePeer::start(Behavior::Node(NodeScript {
+        height: 7,
+        filters: true,
+        mempool: vec![tx.clone()],
+        ..NodeScript::default()
+    }));
+    let (net, ..) = net_to(node.addr, Vec::new());
+    let clock = TestClock::at(T0);
+    let handle = start(config(false), MemStorage::default(), net, &clock);
+    assert!(event(&handle, 10, connected).is_some());
+    let txid = tx.compute_txid();
+    handle.broadcast(serialize(&tx));
+    assert!(until(10, || node.invs.lock().unwrap().contains(&txid)));
+    // Before the 130 seconds nothing asks for it, so the state is `Sent`.
+    clock.set(T0 + 100);
+    let seen = wait_for(&handle, 2, |e| {
+        matches!(
+            e,
+            AppEvent::TxState {
+                state: RelayState::HeldByNode,
+                ..
+            }
+        )
+    });
+    assert!(seen.is_none(), "held by the node before it was asked");
+    clock.set(T0 + 140);
+    let seen = wait_for(&handle, 10, |e| {
+        matches!(
+            e,
+            AppEvent::TxState {
+                state: RelayState::HeldByNode,
+                ..
+            }
+        )
+    });
+    assert!(seen.is_some(), "the node's answer was not reported");
 }
 
 // NR-110.

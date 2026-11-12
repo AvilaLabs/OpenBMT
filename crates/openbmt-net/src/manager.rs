@@ -44,7 +44,8 @@ mod node_only;
 mod own;
 use broadcast::Held;
 pub use broadcast::{
-    BroadcastRefused, RelayState, MAX_BROADCAST_WEIGHT, MAX_HELD, NOT_SEEN_SECS, SEEN_BACK_GROUPS,
+    BroadcastRefused, RelayState, MAX_BROADCAST_WEIGHT, MAX_HELD, NODE_ASK_AFTER_SECS,
+    NODE_ASK_EVERY_SECS, NOT_SEEN_SECS, SEEN_BACK_GROUPS,
 };
 use node_only::NodeOnlyState;
 pub use node_only::{NodeOnlyView, NODE_LIMITED_BLOCKS};
@@ -2056,6 +2057,20 @@ impl Manager {
         };
         let txid = tx.compute_txid();
         if !self.pending_tx.get(&txid).is_some_and(|(p, _)| *p == id) {
+            // NR-112: the own node's answer for a held transaction.
+            match self.node_held_reply(id, &tx, &bytes, out) {
+                Some(true) => return,
+                Some(false) => {
+                    self.drop_peer(
+                        id,
+                        "NR-112: a transaction that is not the one held".to_string(),
+                        true,
+                        out,
+                    );
+                    return;
+                }
+                None => {}
+            }
             // NR-101: a transaction the app asked the own node about.
             if self.node_answered(id, &txid, out) {
                 return;

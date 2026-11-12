@@ -30,7 +30,7 @@ use bitcoin::address::NetworkUnchecked;
 use bitcoin::consensus::deserialize;
 use bitcoin::hex::FromHex;
 use bitcoin::{Address, Block, Network, Txid};
-use openbmt_net::OwnNode;
+use openbmt_net::{OwnNode, RelayState};
 use openbmt_watch::{NodeOnlyFault, NodeOnlyInput, NodeOnlyTracker, OwnNodeLink};
 
 use super::kit::*;
@@ -75,6 +75,9 @@ struct Seen {
     blocks: Vec<Vec<u8>>,
     sightings: Vec<Vec<u8>>,
     has: Vec<Txid>,
+    /// Transactions of the app's own broadcasts that the own node holds
+    /// (NR-112).
+    held_by_node: Vec<Txid>,
     state: Option<NodeOnlyInput>,
 }
 
@@ -88,6 +91,10 @@ impl Seen {
                 AppEvent::Checked(h) => self.checked = h,
                 AppEvent::Block { bytes, .. } => self.blocks.push(bytes),
                 AppEvent::Sighting { tx, .. } => self.sightings.push(tx),
+                AppEvent::TxState {
+                    txid,
+                    state: RelayState::HeldByNode,
+                } => self.held_by_node.push(txid),
                 _ => {}
             }
         }
@@ -250,6 +257,7 @@ fn node_only_core_regtest() {
     println!("5. a broadcast: Core accepts the transaction");
     let raw = Vec::<u8>::from_hex(&var("OBM_CORE_RAWTX")).expect("hex");
     let raw_id: Txid = var("OBM_CORE_RAWTXID").parse().expect("a txid");
+    let broadcast_at = Instant::now();
     handle.broadcast(raw);
     let end = Instant::now() + Duration::from_secs(30);
     let mut accepted = false;
@@ -268,6 +276,18 @@ fn node_only_core_regtest() {
         log.lock().unwrap()
     );
     println!("PASS  {raw_id} sent to Core only, and in Core's mempool");
+
+    println!("5b. NR-112: Core answers the getdata for it after its relay delay");
+    // The manager asks 130 seconds after the announcement and every 60 after;
+    // Core answers only once the transaction has waited out its relay delay.
+    let held = seen.wait(&handle, 300, |s| s.held_by_node.contains(&raw_id));
+    let secs = broadcast_at.elapsed().as_secs();
+    assert!(
+        held,
+        "Core did not answer the getdata for {raw_id} in {secs} s; mempool: {}",
+        cli(&["getrawmempool"])
+    );
+    println!("PASS  {raw_id} reported as held by the node {secs} s after the broadcast");
     handle.shutdown();
 
     println!("6. a node without compact filters is reported");

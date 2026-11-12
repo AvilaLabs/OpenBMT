@@ -8,11 +8,17 @@
 //! `getdata`, and listens for the other half to announce it back. Nothing
 //! here believes a peer: a peer that fetched a transaction may have thrown it
 //! away, and a peer that announced it back has said so and shown nothing.
+//!
+//! With `node_only` on no other peer can announce a transaction back, so the
+//! own node is asked for it instead (NR-112): once the node's relay delay is
+//! over, `getdata` by txid is answered with the transaction only from its
+//! memory pool, and the same transaction back, witness included, is
+//! evidence that the node holds it.
 
 use std::collections::BTreeSet;
 use std::fmt;
 
-use bitcoin::consensus::encode::deserialize;
+use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::{Transaction, Txid};
 use openbmt_watch::NetGroup;
 
@@ -30,8 +36,21 @@ pub const SEEN_BACK_GROUPS: usize = 2;
 /// NR-88: seconds after which a transaction that is neither seen back nor
 /// in a block is reported as not seen.
 pub const NOT_SEEN_SECS: u64 = 600;
+/// NR-112: seconds after the own node was sent the announcement before it is
+/// first asked for the transaction (its relay delay is 2 minutes).
+pub const NODE_ASK_AFTER_SECS: u64 = 130;
+/// NR-112: seconds between two requests to the own node for the same
+/// transaction, until it answers.
+pub const NODE_ASK_EVERY_SECS: u64 = 60;
 
-/// What the peers have shown of one held transaction (NR-87, NR-88).
+/// What the peers have shown of one held transaction (NR-87, NR-88,
+/// NR-112).
+///
+/// `SeenBack` and `HeldByNode` are two kinds of evidence that may come in
+/// either order, and only with the light fallback running (NR-110) can both
+/// come. The state follows whichever happened first, and the combined state
+/// [`RelayState::SeenBackAndHeldByNode`] keeps both once both have. The
+/// manager never goes from a combined or a single state back to `Sent`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RelayState {
     /// Announced, and nothing has come back yet.
@@ -42,8 +61,20 @@ pub enum RelayState {
         /// Distinct network groups that announced it back.
         groups: usize,
     },
-    /// [`NOT_SEEN_SECS`] passed with no two groups announcing it back. It
-    /// has been announced to every ready peer again.
+    /// NR-112: the own node answered a `getdata` for it with the same
+    /// transaction, witness included: it is in the node's memory pool. Only
+    /// in the mode of NR-106.
+    HeldByNode,
+    /// Both of the above: peers announced it back from `groups` network
+    /// groups and the own node holds it. Only with the light fallback
+    /// running.
+    SeenBackAndHeldByNode {
+        /// Distinct network groups that announced it back.
+        groups: usize,
+    },
+    /// [`NOT_SEEN_SECS`] passed with no two groups announcing it back and
+    /// the own node not answering. It has been announced to every ready peer
+    /// again (to the own node alone in the mode of NR-106).
     NotSeen,
 }
 
@@ -88,9 +119,34 @@ pub(super) struct Held {
     seen: BTreeSet<NetGroup>,
     /// When it was announced, or announced again.
     since: u64,
+    /// NR-112: when the own node was last sent the announcement.
+    node_sent: Option<u64>,
+    /// NR-112: when the own node was last asked for it since then.
+    node_asked_at: Option<u64>,
+    /// NR-112: the own node has been asked at least once, so a `tx` from it
+    /// is an answer and not unasked data.
+    node_asked: bool,
+    /// NR-112: the own node answered with the same transaction.
+    by_node: bool,
     state: RelayState,
     /// The counts and the state last reported.
     reported: Option<(usize, usize, RelayState)>,
+}
+
+impl Held {
+    /// The state that the evidence so far makes: peers that announced it
+    /// back (NR-87) and the own node that holds it (NR-112), whichever came
+    /// first and both once both have. With neither, the state stays.
+    fn refresh_state(&mut self) {
+        let seen = self.seen.len() >= SEEN_BACK_GROUPS;
+        let groups = self.seen.len();
+        self.state = match (seen, self.by_node) {
+            (true, true) => RelayState::SeenBackAndHeldByNode { groups },
+            (true, false) => RelayState::SeenBack { groups },
+            (false, true) => RelayState::HeldByNode,
+            (false, false) => self.state,
+        };
+    }
 }
 
 impl Manager {
@@ -128,6 +184,10 @@ impl Manager {
                 fetched: BTreeSet::new(),
                 seen: BTreeSet::new(),
                 since: self.now,
+                node_sent: None,
+                node_asked_at: None,
+                node_asked: false,
+                by_node: false,
                 state: RelayState::Sent,
                 reported: None,
             },
@@ -167,9 +227,16 @@ impl Manager {
         {
             return;
         }
+        let own = self.peers.get(&id).is_some_and(|p| p.own);
+        let now = self.now;
         if self.send(id, Request::Announce(vec![txid]), out) {
             if let Some(held) = self.held.get_mut(&txid) {
                 held.asked.insert(id);
+                if own && self.node.on {
+                    // NR-112: the time to ask the node starts again.
+                    held.node_sent = Some(now);
+                    held.node_asked_at = None;
+                }
             }
         }
     }
@@ -210,11 +277,7 @@ impl Manager {
         if let Some(group) = group {
             if !held.asked.contains(&id) {
                 held.seen.insert(group);
-                if held.seen.len() >= SEEN_BACK_GROUPS {
-                    held.state = RelayState::SeenBack {
-                        groups: held.seen.len(),
-                    };
-                }
+                held.refresh_state();
             }
         }
         self.report_held(txid, out);
@@ -229,12 +292,20 @@ impl Manager {
         for held in self.held.values_mut().filter(|h| h.since == 0) {
             held.since = now;
         }
+        for held in self.held.values_mut().filter(|h| h.node_sent == Some(0)) {
+            held.node_sent = Some(now);
+        }
+        self.ask_node_held(now, out);
         let due: Vec<Txid> = self
             .held
             .iter()
             .filter(|(_, h)| {
-                !matches!(h.state, RelayState::SeenBack { .. })
-                    && now.saturating_sub(h.since) >= NOT_SEEN_SECS
+                !matches!(
+                    h.state,
+                    RelayState::SeenBack { .. }
+                        | RelayState::HeldByNode
+                        | RelayState::SeenBackAndHeldByNode { .. }
+                ) && now.saturating_sub(h.since) >= NOT_SEEN_SECS
             })
             .map(|(txid, _)| *txid)
             .collect();
@@ -248,6 +319,67 @@ impl Manager {
             }
             self.report_held(&txid, out);
         }
+    }
+
+    /// NR-112: with `node_only` on, ask the own node for each held
+    /// transaction it has not answered for: first [`NODE_ASK_AFTER_SECS`]
+    /// after it was sent the announcement, then every
+    /// [`NODE_ASK_EVERY_SECS`]. Never runs in the other mode.
+    fn ask_node_held(&mut self, now: u64, out: &mut Vec<Output>) {
+        if !self.node.on {
+            return;
+        }
+        let Some(id) = self.node_peer() else {
+            return;
+        };
+        let due: Vec<Txid> = self
+            .held
+            .iter()
+            .filter(|(_, h)| {
+                !h.by_node
+                    && match (h.node_sent, h.node_asked_at) {
+                        (Some(sent), None) => now.saturating_sub(sent) >= NODE_ASK_AFTER_SECS,
+                        (Some(_), Some(at)) => now.saturating_sub(at) >= NODE_ASK_EVERY_SECS,
+                        (None, _) => false,
+                    }
+            })
+            .map(|(txid, _)| *txid)
+            .collect();
+        for txid in due {
+            // The request is `getdata` by txid with witness (`MSG_WITNESS_TX`).
+            if !self.send(id, Request::GetTx(vec![txid]), out) {
+                return;
+            }
+            if let Some(held) = self.held.get_mut(&txid) {
+                held.node_asked_at = Some(now);
+                held.node_asked = true;
+            }
+        }
+    }
+
+    /// NR-112: a `tx` from the own node for a held transaction that it was
+    /// asked for. `None` when it is not one (the caller goes on as for any
+    /// `tx`); otherwise whether it is the held transaction byte for byte,
+    /// witness included. A transaction that is not is a fault of the node.
+    pub(super) fn node_held_reply(
+        &mut self,
+        id: PeerId,
+        tx: &Transaction,
+        bytes: &[u8],
+        out: &mut Vec<Output>,
+    ) -> Option<bool> {
+        if !self.node.on || !self.peers.get(&id).is_some_and(|p| p.own) {
+            return None;
+        }
+        let txid = tx.compute_txid();
+        let held = self.held.get_mut(&txid).filter(|h| h.node_asked)?;
+        if serialize(&held.tx) != bytes {
+            return Some(false);
+        }
+        held.by_node = true;
+        held.refresh_state();
+        self.report_held(&txid, out);
+        Some(true)
     }
 
     /// Say what changed about a held transaction since it was last said.

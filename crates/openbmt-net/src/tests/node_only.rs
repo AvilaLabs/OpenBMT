@@ -5,7 +5,7 @@ use bitcoin::p2p::address::Address;
 use bitcoin::p2p::message::NetworkMessage;
 use bitcoin::p2p::message_blockdata::Inventory;
 use bitcoin::p2p::ServiceFlags;
-use bitcoin::{Block, Txid};
+use bitcoin::{Block, Transaction, Txid, Witness};
 use openbmt_watch::HeaderChain;
 use std::net::{Ipv4Addr, SocketAddr};
 
@@ -14,7 +14,10 @@ use super::manager_kit::*;
 use super::v2kit::{in_v2, mode, Mode, Wire};
 use crate::manager::FILTER_SETTLE_SECS;
 use crate::onion::onion_name;
-use crate::{ConnectRefused, Output, OwnNode, PeerId, TransportChoice, V2Entropy};
+use crate::{
+    ConnectRefused, Output, OwnNode, PeerId, RelayState, TransportChoice, V2Entropy,
+    NODE_ASK_AFTER_SECS, NODE_ASK_EVERY_SECS, NOT_SEEN_SECS,
+};
 
 const PORT: u16 = 8333;
 
@@ -468,4 +471,236 @@ fn nr_106_the_same_over_the_encrypted_transport() {
         let out = n.block(id, &blocks[0]);
         assert_eq!(blocks_out(&out), vec![blocks[0].block_hash()]);
     });
+}
+
+// NR-112.
+
+/// A transaction with witness data, so that a copy without it differs.
+fn witnessed(tag: u32) -> Transaction {
+    let mut tx = pay(&script(1), 10_000, tag);
+    tx.input[0].witness = Witness::from_slice(&[vec![1, 2, 3], vec![4; 33]]);
+    tx
+}
+
+/// The mode on, the node ready, and a witnessed transaction held and
+/// announced to the node.
+fn held(tag: u32) -> (Net, PeerId, Transaction, Txid) {
+    let mut n = net();
+    n.allow_broadcast = true;
+    let (node_id, _, _) = join_node(&mut n, 1, filters(), 0);
+    let tx = witnessed(tag);
+    let txid = n.m.broadcast(&serialize(&tx)).expect("held");
+    let inv = n.sent(node_id);
+    assert!(inv
+        .iter()
+        .any(|m| matches!(m, NetworkMessage::Inv(l) if l == &vec![Inventory::Transaction(txid)])));
+    (n, node_id, tx, txid)
+}
+
+/// Let `secs` pass in steps of at most 10, answering every ping so that no
+/// peer is dropped for NR-14. Returns what the manager said and what each
+/// peer was sent that is not a ping.
+fn pass(n: &mut Net, ids: &[PeerId], secs: u64) -> (Vec<Output>, Vec<(PeerId, NetworkMessage)>) {
+    let mut outs = Vec::new();
+    let mut got = Vec::new();
+    let mut left = secs;
+    while left > 0 {
+        let step = left.min(10);
+        left -= step;
+        outs.extend(n.tick(step));
+        for id in ids {
+            for message in n.sent(*id) {
+                match message {
+                    NetworkMessage::Ping(nonce) => {
+                        n.feed(*id, NetworkMessage::Pong(nonce));
+                    }
+                    other => got.push((*id, other)),
+                }
+            }
+        }
+    }
+    (outs, got)
+}
+
+/// The `getdata` for a transaction ID in these messages, with witness.
+fn asks_for(got: &[(PeerId, NetworkMessage)], txid: Txid) -> Vec<PeerId> {
+    got.iter()
+        .filter(|(_, m)| {
+            matches!(m, NetworkMessage::GetData(l) if l == &vec![Inventory::WitnessTransaction(txid)])
+        })
+        .map(|(id, _)| *id)
+        .collect()
+}
+
+fn states(out: &[Output]) -> Vec<RelayState> {
+    out.iter()
+        .filter_map(|o| match o {
+            Output::TxState { state, .. } => Some(*state),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn nr_112_the_node_is_asked_only_after_130_seconds() {
+    assert_eq!(NODE_ASK_AFTER_SECS, 130);
+    let (mut n, node_id, _, txid) = held(1);
+    let (_, got) = pass(&mut n, &[node_id], NODE_ASK_AFTER_SECS - 1);
+    assert!(asks_for(&got, txid).is_empty(), "{got:?}");
+    let (_, got) = pass(&mut n, &[node_id], 1);
+    assert_eq!(asks_for(&got, txid), vec![node_id]);
+}
+
+#[test]
+fn nr_112_the_asking_is_repeated_every_60_seconds_until_answered() {
+    assert_eq!(NODE_ASK_EVERY_SECS, 60);
+    let (mut n, node_id, _, txid) = held(2);
+    let (_, got) = pass(&mut n, &[node_id], NODE_ASK_AFTER_SECS);
+    assert_eq!(asks_for(&got, txid).len(), 1);
+    for _ in 0..3 {
+        let (_, got) = pass(&mut n, &[node_id], NODE_ASK_EVERY_SECS - 1);
+        assert!(asks_for(&got, txid).is_empty(), "{got:?}");
+        let (_, got) = pass(&mut n, &[node_id], 1);
+        assert_eq!(asks_for(&got, txid).len(), 1);
+    }
+}
+
+#[test]
+fn nr_112_the_same_transaction_with_its_witness_is_held_by_the_node() {
+    let (mut n, node_id, tx, txid) = held(3);
+    pass(&mut n, &[node_id], NODE_ASK_AFTER_SECS);
+    let out = n.tx(node_id, &tx);
+    assert_eq!(states(&out), vec![RelayState::HeldByNode]);
+    assert!(disconnects(&out).is_empty());
+    assert_eq!(n.m.relay_state(&txid), Some(RelayState::HeldByNode));
+    // Answered: no more asking, and no NotSeen after ten minutes.
+    let (outs, got) = pass(&mut n, &[node_id], NOT_SEEN_SECS + 120);
+    assert!(asks_for(&got, txid).is_empty());
+    assert!(states(&outs).is_empty(), "{outs:?}");
+    assert_eq!(n.m.relay_state(&txid), Some(RelayState::HeldByNode));
+}
+
+#[test]
+fn nr_112_a_transaction_that_is_not_the_one_held_is_a_fault_of_the_node() {
+    // The same ID with other witness data.
+    let (mut n, node_id, tx, txid) = held(4);
+    pass(&mut n, &[node_id], NODE_ASK_AFTER_SECS);
+    let mut other = tx.clone();
+    other.input[0].witness = Witness::from_slice(&[vec![9]]);
+    assert_eq!(other.compute_txid(), txid);
+    let out = n.tx(node_id, &other);
+    assert_eq!(disconnects(&out), vec![(node_id, true)]);
+    assert!(reason(&out).starts_with("NR-112"), "{}", reason(&out));
+    assert_eq!(n.m.relay_state(&txid), Some(RelayState::Sent));
+    // The same with the witness stripped.
+    let (mut n, node_id, tx, txid) = held(5);
+    pass(&mut n, &[node_id], NODE_ASK_AFTER_SECS);
+    let mut bare = tx.clone();
+    bare.input[0].witness = Witness::new();
+    let out = n.tx(node_id, &bare);
+    assert_eq!(disconnects(&out), vec![(node_id, true)]);
+    assert!(reason(&out).starts_with("NR-112"), "{}", reason(&out));
+    assert_eq!(n.m.relay_state(&txid), Some(RelayState::Sent));
+}
+
+#[test]
+fn nr_112_a_transaction_that_was_not_asked_for_is_still_a_fault() {
+    // Before the 130 seconds the node was not asked.
+    let (mut n, node_id, tx, txid) = held(6);
+    let out = n.tx(node_id, &tx);
+    assert_eq!(disconnects(&out), vec![(node_id, true)]);
+    assert!(reason(&out).starts_with("NR-25"), "{}", reason(&out));
+    assert_eq!(n.m.relay_state(&txid), Some(RelayState::Sent));
+}
+
+#[test]
+fn nr_112_notfound_changes_nothing_and_the_asking_goes_on() {
+    let (mut n, node_id, _, txid) = held(7);
+    let (_, got) = pass(&mut n, &[node_id], NODE_ASK_AFTER_SECS);
+    assert_eq!(asks_for(&got, txid).len(), 1);
+    let out = n.not_found_tx(node_id, txid);
+    assert!(out.is_empty(), "{out:?}");
+    assert_eq!(n.m.relay_state(&txid), Some(RelayState::Sent));
+    let (_, got) = pass(&mut n, &[node_id], NODE_ASK_EVERY_SECS);
+    assert_eq!(asks_for(&got, txid).len(), 1);
+}
+
+#[test]
+fn nr_112_with_the_fallback_either_state_may_come_first_and_both_are_kept() {
+    // The node first, then two groups announce it back.
+    let (mut n, node_id, tx, txid) = held(8);
+    n.m.set_node_only_fallback(true);
+    let a = n.up(2);
+    let b = n.up(3);
+    n.sent(a);
+    n.sent(b);
+    pass(&mut n, &[node_id, a, b], NODE_ASK_AFTER_SECS);
+    let out = n.tx(node_id, &tx);
+    assert_eq!(states(&out), vec![RelayState::HeldByNode]);
+    assert!(states(&n.inv_txs(a, &[txid])).is_empty());
+    let out = n.inv_txs(b, &[txid]);
+    assert_eq!(
+        states(&out),
+        vec![RelayState::SeenBackAndHeldByNode { groups: 2 }]
+    );
+    // Two groups first, then the node.
+    let (mut n, node_id, tx, txid) = held(9);
+    n.m.set_node_only_fallback(true);
+    let a = n.up(2);
+    let b = n.up(3);
+    n.sent(a);
+    n.sent(b);
+    n.inv_txs(a, &[txid]);
+    let out = n.inv_txs(b, &[txid]);
+    assert_eq!(states(&out), vec![RelayState::SeenBack { groups: 2 }]);
+    // Still asked: the evidence of the node is the stronger one.
+    let (_, got) = pass(&mut n, &[node_id, a, b], NODE_ASK_AFTER_SECS);
+    assert_eq!(asks_for(&got, txid), vec![node_id]);
+    let out = n.tx(node_id, &tx);
+    assert_eq!(
+        states(&out),
+        vec![RelayState::SeenBackAndHeldByNode { groups: 2 }]
+    );
+    let (_, got) = pass(&mut n, &[node_id, a, b], NODE_ASK_EVERY_SECS * 2);
+    assert!(asks_for(&got, txid).is_empty());
+}
+
+#[test]
+fn nr_112_nr_88_still_fires_when_the_node_never_answers() {
+    let (mut n, node_id, _, txid) = held(10);
+    let (outs, got) = pass(&mut n, &[node_id], NOT_SEEN_SECS);
+    // The first report (`Sent`) was kept for this tick; `NotSeen` follows.
+    assert_eq!(states(&outs).last(), Some(&RelayState::NotSeen));
+    assert!(!asks_for(&got, txid).is_empty());
+    // The announcement went again, to the node alone.
+    let announced = got.iter().any(|(id, m)| {
+        *id == node_id
+            && matches!(m, NetworkMessage::Inv(l) if l == &vec![Inventory::Transaction(txid)])
+    });
+    assert!(announced, "{got:?}");
+    // The time to ask starts again from that announcement.
+    let (_, got) = pass(&mut n, &[node_id], NODE_ASK_AFTER_SECS - 1);
+    assert!(asks_for(&got, txid).is_empty(), "{got:?}");
+    let (_, got) = pass(&mut n, &[node_id], 1);
+    assert_eq!(asks_for(&got, txid), vec![node_id]);
+    // And an answer then is still taken.
+    let tx = witnessed(10);
+    let out = n.tx(node_id, &tx);
+    assert_eq!(states(&out), vec![RelayState::HeldByNode]);
+}
+
+#[test]
+fn nr_112_in_the_mixed_mode_no_getdata_for_a_held_transaction_is_ever_sent() {
+    let mut n = Net::new();
+    n.allow_broadcast = true;
+    let ids: Vec<PeerId> = (1..=3).map(|i| n.up(i)).collect();
+    for id in &ids {
+        n.sent(*id);
+    }
+    let txid = n.m.broadcast(&serialize(&witnessed(11))).expect("held");
+    let (outs, got) = pass(&mut n, &ids, 3 * NOT_SEEN_SECS);
+    assert!(got.iter().all(|(_, m)| m.cmd() != "getdata"), "{got:?}");
+    // NR-88 ran as before.
+    assert!(states(&outs).contains(&RelayState::NotSeen));
+    assert_eq!(n.m.relay_state(&txid), Some(RelayState::NotSeen));
 }

@@ -53,8 +53,8 @@ pub use frame::{encode, Command, Frame, FrameReader, Message, PeerAddress};
 pub use manager::{
     BroadcastRefused, ConnectRefused, Manager, ManagerConfig, NodeOnlyView, Output, OwnNodeView,
     PeerId, RelayState, TransportChoice, Wanted, MAX_BROADCAST_WEIGHT, MAX_HELD, MAX_OWN_ANNOUNCED,
-    MAX_OWN_BLOCKS, MAX_OWN_WANTED, NODE_LIMITED_BLOCKS, NOT_SEEN_SECS, OWN_ANSWER_SECS,
-    SEEN_BACK_GROUPS,
+    MAX_OWN_BLOCKS, MAX_OWN_WANTED, NODE_ASK_AFTER_SECS, NODE_ASK_EVERY_SECS, NODE_LIMITED_BLOCKS,
+    NOT_SEEN_SECS, OWN_ANSWER_SECS, SEEN_BACK_GROUPS,
 };
 pub use own_node::{OwnNode, OwnNodeHost, OwnNodeRefused};
 pub use reason::Drop;

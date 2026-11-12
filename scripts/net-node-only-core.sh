@@ -6,8 +6,10 @@
 # Core as its own node and to nothing else; does it get headers, filters and
 # a block that pays a watched script from Core alone; does it see a
 # transaction that Core announces in its memory pool; does a transaction it
-# broadcasts reach Core and get accepted; and does it report a node that
-# does not serve compact filters? (docs/NETWORK-RULES.md NR-106 to NR-111.)
+# broadcasts reach Core and get accepted, and does Core answer the driver's
+# getdata for it after its relay delay (state HeldByNode); and does it report
+# a node that does not serve compact filters? (docs/NETWORK-RULES.md NR-106
+# to NR-112.)
 #
 # What it does:
 #   1. Starts a private regtest node with -blockfilterindex=1
@@ -25,7 +27,10 @@
 #          fetches it and reports that the own node holds it;
 #        - mines a block that holds the payment: the filter matches and the
 #          block is fetched from Core;
-#        - broadcasts a signed transaction: it is in Core's memory pool;
+#        - broadcasts a signed transaction: it is in Core's memory pool, and
+#          within 5 minutes (a bit over 2 in practice) the driver reports it
+#          as held by the node, because Core answered `getdata` for it
+#          (NR-112); the PASS line prints the seconds it took;
 #        - connects the mode to the second node: the driver reports the
 #          missing compact filters and does not count the node as usable.
 #

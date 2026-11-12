@@ -15,11 +15,11 @@ const TEST_SOURCES: [&str; 8] = [
 /// The rules this crate implements: those of the net crate that only a
 /// driver can carry out, and the ones the driver decides itself (NR-70 and
 /// on).
-const IMPLEMENTED: [&str; 38] = [
+const IMPLEMENTED: [&str; 39] = [
     "NR-22", "NR-23", "NR-24", "NR-25", "NR-26", "NR-70", "NR-71", "NR-72", "NR-73", "NR-74",
     "NR-75", "NR-76", "NR-77", "NR-78", "NR-79", "NR-80", "NR-81", "NR-82", "NR-83", "NR-85",
     "NR-90", "NR-92", "NR-93", "NR-94", "NR-96", "NR-97", "NR-98", "NR-99", "NR-100", "NR-101",
-    "NR-102", "NR-103", "NR-106", "NR-107", "NR-108", "NR-109", "NR-110", "NR-111",
+    "NR-102", "NR-103", "NR-106", "NR-107", "NR-108", "NR-109", "NR-110", "NR-111", "NR-112",
 ];
 
 /// Rules from NR-70 on that another crate alone carries out: the net crate
