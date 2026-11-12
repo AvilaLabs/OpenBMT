@@ -1,4 +1,4 @@
-# OpenBMT design (draft 3.2, 2026-11-09, after the round-4 code and design check)
+# OpenBMT design (draft 3.3, 2026-11-12, first run without keys)
 
 Status: design and threat model. Headless Rust components now implement many
 of these rules, and the Android apps have initial builds; integration and
@@ -6,6 +6,12 @@ device testing remain incomplete. The Bitcoin Core restore drill passes on
 regtest (`scripts/restore-drill-core.sh`). Every claim about another system
 cites a source in §17. **[verify]** marks a claim that still needs a primary
 check or a device test before it can be relied on.
+
+Draft 3.3 replaces the setup with a first run in which OpenBMT makes no key
+(§2.1, §5.4.1, D6) and brings Lightning swaps back as an option the shop
+turns on (§8, D7). Other sections still describe the key ceremony and the Key
+app, because the current code implements them; they are being rewritten to
+follow D6.
 
 Draft 3.2 applies four security reviews:
 
@@ -110,93 +116,95 @@ It is three pieces of software:
 
 These flows are the spec. The architecture exists to make them true.
 
-### 2.1 Merchant setup: a key ceremony, 7 steps, target 15 minutes to a test sale
+### 2.1 First run: try it, set up the shop, then add the wallet
 
-Setup creates keys on purpose, one on each device that will keep it. Key 3's
-secret is never seen by any OpenBMT-published software, or by a device that
-holds another key. It is the only time the owner does this. There are no waiting periods in setup. The
-15-minute limit is a requirement. If a trial breaks it, the steps must be cut, not
-safety.
+Decided 2026-11-12 (D6). This replaces the 7-step key ceremony of draft 3.2.
+OpenBMT never makes a key. The owner phone and the counter hold nothing that
+can spend.
 
-1. **Install and name the shop.** Business name, currency, logo. The app also
-   asks two plain questions:
-   - "How do you take sales?" The answers are "On a shop-run Box", "On a hosted
-     Box" (labeled, §5.3) or "No Box, tender by hand" (§5.6).
-   - "Can customers join this Wi-Fi?" If yes or unsure, the counter uses
-     cellular, or the counter's Tor switch is turned on (§5.1). If no, the
-     staff network is fine.
-2. **Make key 3 (recovery) outside OpenBMT software.** The owner makes it with
-   a wallet app from a different publisher (★ nothing to buy; for example
-   Nunchuk, **[verify that it exports a BIP48 P2WSH multisig key with origin,
-   E8]**). The app runs on the counter tablet before it becomes the counter,
-   in airplane mode. A hardware wallet is the stronger choice. The owner puts
-   the words on steel and checks them with the app's own backup check.
-   Only key 3's public key (xpub) goes to the Key app, by QR. The tablet
-   is then **factory reset** before OpenBMT is installed on it. The Key app
-   never makes or shows key 3's words. The screen says "do this step alone":
-   key 3's words and key 2's words are written in separate sittings, with no
-   one watching.
-3. **Make key 2 on the spare phone, in the Key app.** It is created offline.
-   The Key app shows the words once. The owner writes them down by default and
-   picks them back from an in-app word list, never the system keyboard. They
-   are kept with this device, because one key is not enough to spend (skipping
-   shows a plain warning). The Key app refuses to show words while an
-   accessibility service, overlay permission, non-system keyboard or USB debugging is on, and the
-   screen blocks screenshots (FLAG_SECURE). Honest note: these checks are
-   promises of the Key app's own software, and the phone that shows the words
-   could keep them. That is why a hardware wallet is the stronger choice. Key
-   2's words must never be stored with key 3's.
-   - **Where key 2 lives (★ the spare phone, at home):** a refund the cashier
-     starts waits for the next approval session (§2.10), or is paid in cash
-     from the till (§2.4). **On site:** the phone sits in the back office or
-     with a manager, and sessions are easier. A hardware wallet is the other
-     choice (§5.4). The app explains this in two lines. The merchant picks.
-4. **Make key 1 on the owner phone.** Owner mode creates key 1, sets its PIN
-   or passphrase (§5.4) and shows its short fingerprint. No seed words by
-   default.
-5. **Build and confirm the wallet.** Owner mode combines the three public
-   parts into the wallet description and sends it to the Key app by QR. The
-   Key app checks byte for byte that the key 2 and key 3 slots hold the
-   exact xpubs it knows. Key 3's came to it by QR in step 2. When key 2 is on
-   a hardware signer, the Key app takes key 2's public part from the signer by
-   QR too, before the wallet exists, so it never learns key 2 from the owner
-   phone. A bad owner phone can then corrupt only the key 1 slot.
-   Then **every device shows the same 4-word checksum of the whole wallet
-   description and all three fingerprints**, and the owner compares them. The
-   words are a check for people; the software on each device compares full
-   hashes and its own key slots (§5.4). A
-   hardware wallet also has the wallet registered on it and shows the first
-   receive address on its own screen, to compare with the owner phone. The
-   same screen then shows the **pairs screen**: "Any two of these can move all
-   your money", every pair (1 and 2, 1 and 3, 2 and 3), and who holds each
-   key. The owner confirms or goes back.
-6. **Print the recovery kit offline.** The one-page kit (§5.4) goes to a
-   printer directly or as a PDF on a USB drive, never through a cloud
-   service. It holds hints, not secrets. It prints the checksum words, and any
-   reprint is compared against them. **The Key app then scans the printed
-   kit** and compares the whole wallet description with its own, byte for
-   byte (§5.4). The owner checks off "stored safely".
-7. **Connect the counter and the POS, then run a test sale.** The counter
-   scans the Key app's offer, then shows its own pairing QR, which the owner
-   phone carries to the Key app. Both screens then show the same four session
-   words, and the owner confirms on both (§2.9).
-   The owner phone gets its own read-only sign-in to the POS (§5.3). If the
-   owner wants, a **practice mode on signet** runs the test sale with no real
-   money first. Then a $1 sale paid from any wallet shows up in the POS as
-   paid and in the books. The screen also shows the owner the line "If every
-   instant sale failed you would lose at most $X" (§6).
+A new owner should be able to try every screen in the first minute, have the
+whole shop set up in about ten, and go live once they have a wallet. Every
+screen has one thing to do and leads to the next. The hard truths (lose the
+words, lose the money; a phone is not a vault) are said once, plainly, at the
+moment they matter.
 
-Counts, honestly: 7 steps. Step 2 needs the counter tablet before it is set
-up as the counter, and the tablet's factory reset adds time **[to measure]**.
-Steps 3 to 5 and 7 need the spare phone, the owner phone and the counter
-device in hand, so the owner should have all three before starting. Setup has
-not been timed; **[to measure]** (E1–E3 phones, then a timed trial). Most time
-goes to writing down words twice, in two sittings.
+1. **Welcome.** "Take bitcoin in your shop. It goes straight to your own
+   wallet." Two buttons: Try it first, and Set up my shop.
+2. **Try it first** (optional). A practice shop on this phone only, offline,
+   marked Practice on every screen. It runs one sale (ring up, the customer
+   pays, Paid), the books and a refund, in the shop's own till flow. One tap
+   deletes it. No keys, no second device, nothing to buy.
+3. **Your shop.** Name and currency (guessed from the phone).
+4. **How you take payments now.** A searchable list of tills, plus "No till"
+   and "Another till" (§5.6).
+5. **Where the money goes.** Three choices, below.
+6. **Check the wallet.** The first receive address is compared on the
+   wallet's own screen. It can wait if the owner chose "Add the wallet
+   later".
+7. **Connect the counter.** The counter app on the shop's phone or tablet
+   scans the owner phone. Then the steps for the chosen till, for example
+   "In Square: add a payment type called Bitcoin".
+8. **A first sale.** A small real sale from any wallet.
 
-The words "xpub", "descriptor" and "multisig" never appear on these screens.
-They appear in the recovery kit and under Advanced, for people who want them.
-A hardware wallet's own screen may use its own words. The app tells the owner
-what to expect before that screen appears.
+Each step has a short looping picture.
+
+**Where the money goes.**
+
+- **Use my own wallet.** For anyone who already holds their own keys: an
+  offline laptop with Sparrow or Electrum, a do-it-yourself signer
+  (SeedSigner, Krux), a hardware signer, or a multisig. OpenBMT takes only the
+  wallet's public description, by QR or file. The first receive address is
+  compared on the wallet's own screen, and this cannot be skipped. OpenBMT
+  does not judge how the wallet was made, because it cannot see that. It
+  refuses only a description that holds a private key or words (and says that
+  key is now exposed), a wallet type it cannot derive or check, and a wallet
+  whose first address was not confirmed. A short checklist comes before the
+  confirmation: made offline, words on steel, used only for the shop. A fresh
+  account used only for the shop is suggested.
+- **Help me make a savings wallet.** The OpenBMT Key Maker (§5.4.1): the
+  owner's own coin flips, the laptop they already have started from a Tails
+  USB stick with networking off, and Electrum in Tails as an independent
+  check. About an hour, guided step by step on the phone. The owner app never
+  sees a flip or a word. A do-it-yourself signer (SeedSigner, Krux) is the
+  second way, a hardware signer with dice the third. Then the flow continues
+  as "Use my own wallet".
+- **Set up the rest now, add the wallet later.** Shop, till, counters, staff
+  and settings are all set up, and staff can practise. The counter shows
+  "Not taking bitcoin yet" until a wallet is added. There is no starter
+  wallet on the phone.
+
+**Before the savings guide, the app says why, once:** keys made by any app
+can be stolen through that app, ours included, so the keys are made offline,
+from a coin, and nobody can move the bitcoin without the words. The
+inconvenience happens once.
+
+**The words.** Never printed, by OpenBMT or by anyone it guides: written by
+hand on a card headed "TEMPORARY. PUT THIS ON STEEL." Steel as soon as
+possible, not when sales grow: plain steel washers and a letter-punch set, or
+a ready-made steel kit. Never a photo, a notes app, cloud storage, a password
+manager or email.
+
+**Addresses.** The counter derives its own receive addresses from the public
+description, pinned at pairing after the first address is compared on the
+counter, the owner phone and the wallet. A hacked owner phone cannot change
+an address. A stolen counter reveals the shop account's history (privacy,
+not money), which a fresh account used only for the shop limits to shop
+sales.
+
+**Refunds and cash-out.** A refund is paid in cash from the till at once, or
+as a bitcoin refund the owner app prepares as a PSBT for the owner to sign in
+their own wallet, weekly by default. Cash-out happens in the owner's own
+wallet software. **New phone:** install, scan the public description, compare
+the first address, pair each counter again.
+
+The words "xpub", "descriptor" and "multisig" never appear on the main
+screens. They appear under Advanced, for people who want them. A wallet's own
+screen may use its own words; the app says what to expect before it does.
+
+Counts, honestly: setup without the wallet has not been timed **[to
+measure]**. The savings guide was walked through in a Tails 7.17 virtual
+machine with networking off; a timed run with a person has not been done
+**[to measure]**.
 
 ### 2.2 Cashier sale: 3 taps
 
@@ -863,6 +871,45 @@ service or on the local network (§4.1).
 
 ### 5.4 Keys: the merchant chooses, every choice is safe
 
+Since 2026-11-12 (D6), OpenBMT makes no key and the owner phone holds none.
+The shop's money goes to a wallet the owner holds: their own, or one made
+with the Key Maker below. The 2-of-3 setup with the Key app (§5.4.2) is
+retired from the main path. The current code still implements it, so it
+stays described here until the code follows D6; a multisig remains possible
+through "Use my own wallet".
+
+#### 5.4.1 The OpenBMT Key Maker
+
+One page, one job: turn the owner's own coin flips into a wallet, offline, in
+a way they can check (docs/KEYMAKER-RULES.md).
+
+- **Fixed choices.** 128 coin flips, heads is 1, the first flip the most
+  significant bit; 12 BIP39 English words, no passphrase; native SegWit with
+  one key (BIP84, account m/84'/0'/0'). Nothing to choose, so nothing to get
+  wrong. Dice may come later; tools disagree on how rolls become bits, and
+  coins leave no room for that.
+- **Where it runs.** In the Tor Browser of Tails, started from a USB stick
+  with networking off, from one HTML file with every connection forbidden by
+  its content security policy. It stores nothing; Tails forgets the rest at
+  shutdown.
+- **Checked by someone else's code.** The owner restores the words in Tails'
+  own Electrum. The fingerprint and first address must match the page and the
+  phone before the shop can go live. A faulty or lying page is caught there.
+- **What reaches the phone.** Only the public description
+  `wpkh([fingerprint/84h/0h/0h]xpub/<0;1>/*)` with its checksum, by QR.
+- **What it is built from.** The audited noble and scure libraries, pinned
+  and bundled by a build script in the repository that gives the same file
+  every time. The project's own code adds the flips-to-entropy step, the
+  BIP380 checksum and the page.
+- **Why coins.** Wallets have failed at making random numbers more than once
+  (predictable fallbacks, a flawed chip, weak seeding in Milk Sad and
+  Randstorm). A coin has no chip and no update, and nobody can change how it
+  lands from the other side of the world. The honest limit: a coin protects
+  how a key is made, not how a signer uses it later.
+
+#### 5.4.2 The 2-of-3 setup (draft 3.2, retired from the main path)
+
+
 **Rule 1: no single device may hold or drive two keys.** "Drive" means making
 a key sign without that key's own device showing and checking the transaction
 on its own screen. The owner phone builds transactions that key 2 then checks
@@ -1470,6 +1517,36 @@ OpenBMT is on-chain by default and says so on the screen: "This shop takes
 on-chain bitcoin." Shops can offer a bitcoin price that absorbs the network
 fee on small tickets (§9).
 
+**Option: Lightning through a swap provider the shop picks** (decided
+2026-11-12, D7; replaces the 2026-11-09 decision to drop swaps). One QR code
+holds both the bitcoin address and a Lightning invoice, and the customer's
+wallet picks. Over Lightning, the provider locks bitcoin on chain in an
+output that only the counter can claim, to a fresh address of the shop's own
+wallet, and the provider is paid only when the shop claims. The provider
+never holds the shop's money: if the counter does not claim in time, the
+provider takes its lockup back and the customer's payment is cancelled
+(docs/SWAP-RULES.md).
+
+- Off until the shop turns it on. The provider is a setting (name, onion
+  address, path) the shop can change, reached over Tor only.
+- Listed providers need no account and swap only bitcoin with Lightning.
+  OpenBMT runs no provider and takes nothing from a swap.
+- Paid before the provider's lockup is in a block only within the shop's
+  instant limits (§6).
+- Costs to the shop: the provider's fee, the claim transaction's network fee,
+  and the provider's minimum and maximum per sale, read live.
+- A sale paid over Lightning is refunded in cash (CR-217): the owner phone
+  checks refunds against the chain, and a Lightning payment is not on it.
+
+The price of the option is a dependency: every such sale relies on a provider
+that sees amounts and timing. That is why it is off by default and the
+provider can be changed. Survey 2026-11-12: Boltz suspended all swaps on
+2026-08-03 after months of attacks and changed hands, with no relaunch yet.
+The one live fit is SATS Routing, an independent fork of the Boltz server
+speaking the same API (reverse swaps 2,142 to 5,000,000 sats, 0.6% plus about
+560 sats of miner fees, no account; one operator, self-reported audit)
+**[verify over Tor and on a real swap before any use]**.
+
 **Option: connect your own Lightning node** (decided 2026-11-09).
 A merchant who already runs Lightning (Core Lightning or LND on their own
 Box, Start9 or Umbrel) can connect it. The counter then offers a BIP321
@@ -1478,24 +1555,19 @@ instantly at any amount. Eclair is not supported: it has one password with
 the full power of its API and no restricted credential, so a counter that
 held it would hold a key that can spend (docs/LIGHTNING-RULES.md, LN-02).
 The node decides where Lightning payments go, so its public key is part of
-the signed settings, and naming or changing it needs the Key app's
-co-signature like a changed destination (LN-03). The counter holds only a
-key to the node limited to invoices, which the node software enforces: the
-node must run a current release, and the setup probes the key and makes a
-test invoice that must be signed by the node the settings name (LN-04 to
-LN-20). OpenBMT does not manage the node; the setup screen
-says plainly that running Lightning means watching liquidity, updates and
-backups. The self-managing node was researched and rejected: it cannot be
-hands-off, because receiving consumes inbound liquidity that must keep being
-bought (docs/research/merchant-lightning-node-2026-11-09.md).
+the signed settings, and naming or changing it needs the owner's approval
+like a changed destination (LN-03). The counter holds only a key to the node
+limited to invoices, which the node software enforces: the node must run a
+current release, and the setup probes the key and makes a test invoice that
+must be signed by the node the settings name (LN-04 to LN-20). OpenBMT does
+not manage the node; the setup screen says plainly that running Lightning
+means watching liquidity, updates and backups. A self-managing node was
+researched and rejected: it cannot be hands-off, because receiving consumes
+inbound liquidity that must keep being bought
+(docs/research/merchant-lightning-node-2026-11-09.md).
 
 **Design rule:** keep the payment-method layer pluggable, so a covenant-based
 layer 2 can be added if one ever activates.
-
-Dropped 2026-11-09 under the purist veto: Lightning-in via a third-party swap
-provider (for example Boltz). It makes every such sale depend on a central
-service that sees amounts, timing and both sides. Boltz paused its service
-after a wave of attacks, which showed how fragile that is.
 
 ## 9. Fees and the merchant pitch
 
@@ -1821,9 +1893,10 @@ Each gets a written protocol before it runs.
 ## 16. Decisions and open questions
 
 - **D1. Lightning-only customers and small sales.** Decided
-  2026-11-09: v1 is on-chain only and says so on the screen. Swaps were later
-  dropped under the purist veto (§8).
-- **D2. Keys.** Decided 2026-11-09: the merchant chooses, every
+  2026-11-09: v1 is on-chain only and says so on the screen. Swaps were
+  dropped under the purist veto the same day, then brought back as an option
+  off by default with a provider the shop picks (D7, §8).
+- **D2. Keys.** Superseded 2026-11-12 by D6. Decided 2026-11-09: the merchant chooses, every
   option protects funds and is purist-acceptable, and the recommended second key is a
   device the merchant already owns (§5.4). A key card on the owner's own phone
   and a single-key mode are never offered.
@@ -1838,6 +1911,18 @@ Each gets a written protocol before it runs.
   The gateway and manual connectors need neither. Phones for E1–E3 are
   needed now. Hardware wallets for E8 are needed before the key ceremony is
   built.
+
+- **D6. No keys in OpenBMT.** Decided 2026-11-12, replacing D2 and the key
+  ceremony. OpenBMT makes no key, and no phone of the shop holds one. The
+  owner uses their own wallet, makes one with the Key Maker from coin flips
+  in Tails (checked in Electrum), or sets up everything else first and adds
+  the wallet later. A single-key wallet is accepted because its key lives
+  offline, in words written by hand and put on steel, never on a phone; D2's
+  objection was to a single key on a phone. The counter derives its own
+  addresses from the pinned public description (§2.1, §5.4).
+- **D7. Lightning swaps, as an option.** Decided 2026-11-12. A swap
+  provider the shop picks, off by default, over Tor, no account, no cut for
+  OpenBMT; refunds of Lightning sales in cash (§8).
 
 **Security-review decisions (Q1–Q4).** Decided on 2026-11-09.
 
