@@ -2,8 +2,10 @@
 
 Status: implemented. The core is `tools/keymaker/src/core.js`, the QR encoder
 `src/qr.js`, the page `src/page.js` with `src/words.js`, and the bundler
-`build.mjs`. Not yet done: the signature of a release, the
-handbook page and a run in a Tails virtual machine. Each rule has an ID so
+`build.mjs`. The page has been run in a Tails 7.17 virtual machine with
+networking off, and the handbook's steps are in `docs/handbook/setting-up.md`.
+Not yet done: the signature of a release, and a run by a person on a real
+computer. Each rule has an ID so
 that a test can name the rule it proves (`km_NN_...`, in
 `tools/keymaker/test/`, run with `npm test` inside `tools/keymaker/`). The
 rules serve the key maker design:
