@@ -29,6 +29,10 @@ central bank set, so each withdrawal lost 70% or more of its value against
 the market rate. In 2025 most customers could still take out only about
 $500 a month.
 
+> "No bank transfers are allowed, so we cannot import materials."
+>
+> A manufacturer in Lebanon, November 2019.[^q-lebanon]
+
 **How it ended:** it has not. A draft law of December 2025 would repay up
 to $100,000 per depositor in cash over four years and the rest in bonds.
 Parliament had not passed it.[^lebanon]
@@ -39,6 +43,10 @@ them. At Laiki Bank, every balance above €100,000, about €4 billion in
 all, was taken to cover the bank's losses. At Bank of Cyprus, about 20,000
 account holders had €3.8 billion above that limit, and 47.5% of it was
 turned into shares of the bank.
+
+> "We can't make any withdrawals, we can't make deposits, pay our suppliers."
+>
+> A florist in the old town of Nicosia, with the banks shut, March 2013.[^q-cyprus]
 
 **How it ended:** by 2019, Laiki's account holders had got back about 6
 cents of each euro taken. A business with €500,000 there kept €100,000,
@@ -54,6 +62,10 @@ million: money for goods they had already sold. That is about $19,000 per
 seller (worked out here). Both companies went to the bankruptcy court on
 29 July 2024.
 
+> "If the settlement is not done by then, it means bankruptcy."
+>
+> A seller of household goods in Seoul, owed about 200 million won of May sales, July 2024 (translated).[^q-tmon]
+
 **How it ended:** at the last report, in September 2024, the sellers were
 still unpaid, and how much they would get back was left to a court plan
 due that December. The government's answer was loans and credit
@@ -66,6 +78,10 @@ frozen for months. Mainvest, which raised money from the public for
 restaurants and small shops, could not reach about $2.4 million and closed
 in June 2024.
 
+> "A bank just robbed us."
+>
+> A savings-app customer in Tampa, Florida, who had about $94,000 there and was shown $128.68 back, November 2024.[^q-synapse]
+
 **How it ended:** one app's 13,725 customers had $64.9 million in their
 accounts and were offered $11.8 million back, about 18 cents on the dollar
 (worked out here). Up to $96 million was missing in all. Deposit insurance
@@ -76,6 +92,10 @@ sold software and other digital products for the companies that made
 them, took the customers' payments, and paid each maker its share. From
 July 2024 it stopped paying many of them for sales they had already made.
 Its lawyers said it disputed the debts.
+
+> "We've experienced a complete halt in software sales revenue payments."
+>
+> The managing director of Traction Software, a UK software seller, October 2024.[^q-digitalriver]
 
 **How it ended:** its German companies filed for insolvency in January
 2025, and its US marketing company filed for liquidation in 2025 with
@@ -128,6 +148,10 @@ owing more than $29 million to over 3,200 organisations, about $9,000
 each (worked out here). One of them, Millenium School, was owed
 $54,368.20.
 
+> "It's a constant fight to get the money. I have to fight for each transfer."
+>
+> The executive director of East Oakland Collective, which runs food pantries, while Flipcause held more than $100,000 of its donations, September 2025.[^q-flipcause]
+
 **How it ended:** not settled at the last report. Flipcause's own handling
 of the money is also under question.[^flipcause]
 
@@ -146,6 +170,10 @@ own account. Nigerian Breweries, which took about 80% of its retail sales
 in cash, reported sales down 29.7% from a year earlier. Poultry farmers
 lost more than ₦30 billion of eggs they could not sell.
 
+> "Someone might want to transfer funds to you, but it can't be processed."
+>
+> A car parts seller in Abuja, February 2023.[^q-nigeria]
+
 **How it ended:** on 3 March 2023 the Supreme Court ruled that the old
 notes stayed valid, and the shortage eased.[^nigeria]
 
@@ -155,6 +183,10 @@ Then the government closed the banks from 28 June to 20 July. A large
 payment to a supplier abroad, from a business's own account, needed a
 government commission's approval.
 
+> "If we keep going like this we're going to close."
+>
+> The owner of a bird shop in Athens that imports its stock, July 2015.[^q-greece]
+
 **How it ended:** the banks reopened on 20 July. The national bank's own
 review found that firms kept importing and the damage stayed smaller than
 feared.[^greece]
@@ -163,6 +195,10 @@ feared.[^greece]
 and within a week PayPal was holding about £44,000 of its takings: money
 its customers had already paid. PayPal planned to keep it for 90 days
 while it checked for fraud.
+
+> "They have no legitimate reason to hold my money and earn interest."
+>
+> Huel's founder, February 2016.[^q-huel]
 
 **How it ended:** after Huel complained, PayPal changed the hold to a share
 of each sale for 30 days. On 1 February 2016, £17,000 had been released
@@ -277,6 +313,37 @@ other people, must show the same wallet before the shop uses it.
 
 > **OpenBMT has had no independent security audit. Do not use it with real
 > funds.**
+
+[^q-lebanon]: [Gulf News, 27 November 2019](https://gulfnews.com/world/mena/crunch-time-for-lebanons-businesses-1.68071494).
+    Read 2026-11-12.
+
+[^q-cyprus]: Associated Press,
+    [Bank closure leaves Cyprus businesses high and dry](https://www.yahoo.com/news/bank-closure-leaves-cyprus-businesses-143321129.html),
+    22 March 2013. Read 2026-11-12.
+
+[^q-tmon]: [The Asia Business Daily, 30 July 2024](https://view.asiae.co.kr/en/article/2024072916184740229),
+    in the paper's English translation. Read 2026-11-12.
+
+[^q-synapse]: CNBC, via
+    [NBC New York, 22 November 2024](https://www.nbcnewyork.com/news/business/money-report/i-have-no-money-thousands-of-americans-see-their-savings-vanish-in-synapse-fintech-crisis/6009469/?amp=1).
+    Read 2026-11-12.
+
+[^q-digitalriver]: [The Register, 15 October 2024](https://www.theregister.com/2024/10/15/digital_river_runs_dry_hasnt/).
+    Read 2026-11-12.
+
+[^q-flipcause]: [Oakland Voices, 11 September 2025](https://oaklandvoices.us/2025/09/11/flipcause-delayed-donation-transfers-nonprofits/).
+    Read 2026-11-12.
+
+[^q-nigeria]: Associated Press, via
+    [TheGrio, 1 February 2023](https://thegrio.com/2023/02/01/nigeria-sees-cash-shortage-amid-push-for-redesigned-currency/).
+    Read 2026-11-12.
+
+[^q-greece]: NPR, via
+    [GBH, 26 July 2015](https://www.wgbh.org/news/2015-07-26/struggling-greek-businesses-choked-by-money-controls).
+    Read 2026-11-12.
+
+[^q-huel]: [IBTimes UK, 1 February 2016](https://www.ibtimes.co.uk/paypal-withholding-large-sums-money-uk-startups-without-explanation-1541328).
+    Read 2026-11-12.
 
 [^huel]: [IBTimes UK, 1 February 2016](https://www.ibtimes.co.uk/paypal-withholding-large-sums-money-uk-startups-without-explanation-1541328).
     Read 2026-11-12.
