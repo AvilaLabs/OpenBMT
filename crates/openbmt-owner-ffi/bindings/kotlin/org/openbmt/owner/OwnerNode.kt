@@ -580,12 +580,12 @@ enum class ShopCurrency(val code: String, val label: String, val plural: String)
     Krw("KRW", "South Korean won (KRW)", "won"),
     Idr("IDR", "Indonesian rupiah (IDR)", "rupiah"),
     Sgd("SGD", "Singapore dollar (SGD)", "Singapore dollars"),
-    Cad("CAD", "WORDS_NEEDED_C5_CAD", "WORDS_NEEDED_C5_CAD"),
-    Mxn("MXN", "WORDS_NEEDED_C5_MXN", "WORDS_NEEDED_C5_MXN"),
-    Brl("BRL", "WORDS_NEEDED_C5_BRL", "WORDS_NEEDED_C5_BRL"),
-    Try("TRY", "WORDS_NEEDED_C5_TRY", "WORDS_NEEDED_C5_TRY"),
-    Thb("THB", "WORDS_NEEDED_C5_THB", "WORDS_NEEDED_C5_THB"),
-    Zar("ZAR", "WORDS_NEEDED_C5_ZAR", "WORDS_NEEDED_C5_ZAR"),
+    Cad("CAD", "Canadian dollar (CAD)", "Canadian dollars"),
+    Mxn("MXN", "Mexican peso (MXN)", "Mexican pesos"),
+    Brl("BRL", "Brazilian real (BRL)", "reais"),
+    Try("TRY", "Turkish lira (TRY)", "lira"),
+    Thb("THB", "Thai baht (THB)", "baht"),
+    Zar("ZAR", "South African rand (ZAR)", "rand"),
     Sats("SAT", "Bitcoin Standard (sats)", "sats"),
 }
 

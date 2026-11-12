@@ -832,7 +832,7 @@ signs batches, settings and pairings, are never in the service.
   shows no actions and no back arrow, and comes back when the removal is
   done. A remove followed by a save leaves the new token.
 - **OA-95.** The Currency screen is the first of the editor. It shows the
-  currency the settings hold and the ten choices as the library names them
+  currency the settings hold and the sixteen choices as the library names them
   (`US dollar (USD)` and the rest, ending with `Bitcoin Standard (sats)`),
   and keeps the choice in memory with what else was typed. A choice other
   than the one held is a new currency: it forgets every limit typed so far

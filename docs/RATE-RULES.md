@@ -25,11 +25,15 @@ bytes and a time the caller gives it and returns a price or a refusal.
   while the program runs. A currency is in the table only where at least two
   independent exchanges quote bitcoin in it directly. Coinbase's spot price
   is used only for the four currencies that have a Coinbase market (USD,
-  EUR, GBP, INR). Swiss francs are not in the table: the second source of
-  that currency is not confirmed. The table, as checked on 2026-11-11 (the
-  fixtures of RT-15 for the four dollar sources are real replies of these
-  addresses; the others are made from the exchanges' documented shapes and
-  are marked so in `tests/fixtures.rs`):
+  EUR, GBP, INR). Each source of a currency added on 2026-11-12 traded
+  bitcoin in that currency within the 24 hours before the check. Swiss
+  francs, Polish zloty and the other currencies not below are not in the
+  table: no second exchange was found, or the second one had not traded for
+  weeks. The table, as checked on 2026-11-11 and, where a row says so, on
+  2026-11-12 (the fixtures of RT-15 for the four dollar sources and for the
+  sources of 2026-11-12 are real replies of these addresses; the others are
+  made from the exchanges' documented shapes and are marked so in
+  `tests/fixtures.rs`):
 
   | currency | sources (id: shape) |
   |---|---|
@@ -67,15 +71,15 @@ bytes and a time the caller gives it and returns a price or a refusal.
   sources of one currency, so the label of a combined rate (RT-35) says
   which sources were used. A source that is not for dollars has its currency
   at the end of its id (`kraken-eur`).
-- **RT-03.** Each source has a currency, one of the fixed list of CR-193
-  (USD, EUR, GBP, JPY, AUD, INR, KRW, IDR, SGD, CAD, MXN, BRL, TRY, THB, ZAR). A reply that names another
-  currency is refused (RT-17), and a set of samples in more than one
-  currency is refused (RT-38). The shop's currency is in its signed settings
-  (CR-193); the app fetches the sources of that currency only (RT-40). An
-  amount is in the minor units of its currency, by ISO 4217: yen and won
-  have none (the amount is whole yen or won) and the others have hundredths.
-  Every place that read a price in cents reads it in the minor unit of the
-  source's currency (RT-22), and each currency has its own band (RT-24).
+- **RT-03.** Each source has a currency, one of the fixed list of CR-193 (USD,
+  EUR, GBP, JPY, AUD, INR, KRW, IDR, SGD, CAD, MXN, BRL, TRY, THB, ZAR). A reply
+  that names another currency is refused (RT-17), and a set of samples in more
+  than one currency is refused (RT-38). The shop's currency is in its signed
+  settings (CR-193); the app fetches the sources of that currency only (RT-40).
+  An amount is in the minor units of its currency, by ISO 4217: yen and won have
+  none (the amount is whole yen or won) and the others have hundredths. Every
+  place that read a price in cents reads it in the minor unit of the source's
+  currency (RT-22), and each currency has its own band (RT-24).
 - **RT-04.** The app's request is plain: a GET, no cookies, no account, no
   key, no user data, and a generic User-Agent. Nothing in a request depends
   on a shop or a sale (RT-41).
@@ -117,9 +121,13 @@ bytes and a time the caller gives it and returns a price or a refusal.
   - Last (Bitstamp and Gemini): the top-level `last` is the price, a string.
   - Text: the price is a string at a fixed path of keys and first items
     (Luno `last_trade`, BTC Markets `lastPrice`, WazirX `lastPrice`, Indodax
-    `ticker.last`, Bithumb `data.closing_price`).
+    `ticker.last`, Bithumb `data.closing_price`, Bitso `payload.last`,
+    Binance `price`, OKX the first item of `data`, its `last`, Foxbit the
+    first item of `data`, its `last_trade.price`, Bitkub the first item's
+    `last`, VALR `lastTradedPrice`).
   - Number: the price is a JSON number at a fixed path (bitFlyer `ltp`,
-    Upbit's first item's `trade_price`, Independent Reserve `LastPrice`).
+    Upbit's first item's `trade_price`, Independent Reserve `LastPrice`,
+    NDAX `LastTradedPx`, BtcTurk the first item of `data`, its `last`).
     It is read from the number's own digits, which are taken from the same
     bytes after the whole document has been read (RT-13), never as a float.
     A key spelled with an escape is not matched, so such a reply is refused
@@ -130,7 +138,9 @@ bytes and a time the caller gives it and returns a price or a refusal.
   that is a JSON number where the shape says a string is refused: a number
   would pass through a float in most readers. Where the shape says a number
   (above) a string is refused too. The shapes were checked against the real
-  replies of 2026-11-11 and are as described here, with no difference.
+  replies of 2026-11-11, and those of the sources added on 2026-11-12
+  against their replies of that day, and are as described here, with no
+  difference.
   Bitstamp's real reply holds more fields (`bid`, `ask`,
   `timestamp`) and Gemini's holds a `volume` object with its own `USD` key;
   neither is read.
@@ -140,10 +150,15 @@ bytes and a time the caller gives it and returns a price or a refusal.
 - **RT-17.** The currency of a reply, where the shape has one, must be the
   source's currency exactly (`USD`, not `usd` or `USDT`). Where the shape has
   none (Kraken's pair and the addresses of the others name it) the address
-  is the only statement of the currency. A shape that has a field naming the
-  market (Luno `pair`, BTC Markets `marketId`, WazirX `symbol`, bitFlyer
-  `product_code`, Upbit `market`, Independent Reserve
-  `SecondaryCurrencyCode`) checks it against the market of the address, and a
+  is the only statement of the currency. NDAX's address names its market by
+  a number (`InstrumentId=1`, the bitcoin and Canadian dollar market in
+  NDAX's documentation), and its reply holds only that number, so for that
+  source the number in the address is the only statement. A shape that has
+  a field naming the market (Luno `pair`, BTC Markets `marketId`, WazirX
+  `symbol`, bitFlyer `product_code`, Upbit `market`, Independent Reserve
+  `SecondaryCurrencyCode`, Bitso `payload.book`, Binance `symbol`, OKX
+  `instId`, Foxbit `market_symbol`, BtcTurk `pair`, Bitkub `symbol`, VALR
+  `currencyPair`) checks it against the market of the address, and a
   reply for another market is refused as `WrongCurrency`. Bithumb's `status`
   must be `0000`, and anything else is refused as `SourceError`.
 
@@ -221,12 +236,12 @@ cannot be made.
   (RT-50). Dropping an outlier would also let an attacker who can move one
   source move the median by choosing how far to move it. Refusing costs
   availability only, and the next fetch usually agrees again.
-- **RT-35.** The `RateSource` label of a rate is `med.` followed by the
-  letter of each source used, in the order of the table: `med.kc`,
-  `med.kbg`, `med.kcbg`. It is a label under CR-57, at most 4 bytes plus
-  one per source in the table (8 today), so it always fits the 32 bytes. A
-  test builds the label for every subset of the table. Letters are unique
-  (RT-02), so the label says which sources were used.
+- **RT-35.** The `RateSource` label of a rate is `med.` followed by the letter
+  of each source used, in the order of the table: `med.kc`, `med.kbg`,
+  `med.kcbg`. It is a label under CR-57, at most 4 bytes plus one per source of
+  the currency (8 today, for the four sources of USD, EUR and GBP), so it always
+  fits the 32 bytes. A test builds the label for every subset of the table.
+  Letters are unique (RT-02), so the label says which sources were used.
 - **RT-36.** The time of the `RateSource` is the oldest `fetched_at` of the
   samples used. Every one of them is fresh under RT-30, so the oldest is,
   and the counter's own check of CR-58 passes for a rate made at the same
@@ -285,7 +300,8 @@ the library as constants so that the app and the tests read the same ones.
 ## 7. Tests
 
 Tests are named after the rule they prove (`rt_22_...`). The real replies of
-the four dollar sources, fetched on 2026-11-11, and replies made from the
+the four dollar sources, fetched on 2026-11-11, those of the sources added
+on 2026-11-12, fetched that day, and replies made from the
 documented shapes of the other sources (marked so in the tests) are in
 `crates/openbmt-rates/tests/fixtures/`; each is read to the minor unit
 written by hand from the file. The fuzz target `rates_parse` feeds a source and

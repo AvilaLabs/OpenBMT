@@ -2393,7 +2393,7 @@ object AppModelTest {
         ok(AppWords.editGroupCurrency.what == "The money the counters price sales in, and the limits are set in." && AppWords.editGroupCurrency.next == "Choose one. Bitcoin Standard prices in sats and uses no price source.", "the words of the group")
         ok(AppWords.editCurrencyRetype.heading == "New currency, new limits" && AppWords.editCurrencyRetype.what == "Every limit is set again in the new currency, so the change shows them empty." && AppWords.editCurrencyRetype.next == "Type each limit in the new currency, then review. The change needs the Key app.", "the words of the new currency")
         ok(AppWords.editCurrencyRetype.who == Who.OWNER && AppWords.editGroupCurrency.who == Who.OWNER, "both are the owner's")
-        ok(ShopCurrency.entries.map { it.label } == listOf("US dollar (USD)", "Euro (EUR)", "Pound sterling (GBP)", "Japanese yen (JPY)", "Australian dollar (AUD)", "Indian rupee (INR)", "South Korean won (KRW)", "Indonesian rupiah (IDR)", "Singapore dollar (SGD)", "WORDS_NEEDED_C5_CAD", "WORDS_NEEDED_C5_MXN", "WORDS_NEEDED_C5_BRL", "WORDS_NEEDED_C5_TRY", "WORDS_NEEDED_C5_THB", "WORDS_NEEDED_C5_ZAR", "Bitcoin Standard (sats)"), "the sixteen choices in order")
+        ok(ShopCurrency.entries.map { it.label } == listOf("US dollar (USD)", "Euro (EUR)", "Pound sterling (GBP)", "Japanese yen (JPY)", "Australian dollar (AUD)", "Indian rupee (INR)", "South Korean won (KRW)", "Indonesian rupiah (IDR)", "Singapore dollar (SGD)", "Canadian dollar (CAD)", "Mexican peso (MXN)", "Brazilian real (BRL)", "Turkish lira (TRY)", "Thai baht (THB)", "South African rand (ZAR)", "Bitcoin Standard (sats)"), "the sixteen choices in order")
         ok(e.contains("MoneyTabs(settingsDraft.currency ?: held.currency") && e.contains("moneyPicker(tabs)") && e.contains("settingsDraft.chooseCurrency(tabs.currency") && e.contains("AppWords.editCurrencyRetype"), "the screen offers the choices and says every limit is typed again")
         val held = sampleSettings()
         val limit = SettingsEditModel.fields.first { it.kind == FieldKind.Dollars }
@@ -2427,8 +2427,7 @@ object AppModelTest {
                 val was = listOf(w.heading, w.what, w.next)
                 val now = listOf(here.getValue(id).heading, here.getValue(id).what, here.getValue(id).next)
                 ok(now == was.map { it.replace("Whole dollars", "Whole ${c.plural}") }, "the words of $id differ only where dollars stood: $c")
-                // A currency whose name is not written yet shows a WORDS_NEEDED_C5_ constant, which is not words to check.
-                ok(c.plural.startsWith("WORDS_NEEDED_C5_") || SayCheck.problem(here.getValue(id)) == null, "the words of $id in $c pass the checks")
+                ok(SayCheck.problem(here.getValue(id)) == null, "the words of $id in $c pass the checks")
             }
             val pairs = listOf(
                 AppWords.editGroupInstant to AppWords.editGroupInstantIn(c),
@@ -2439,9 +2438,9 @@ object AppModelTest {
             }
             val bad = AppWords.editValueNotRead(FieldKind.Dollars, "Refunds per day", c)
             val base = AppWords.editValueNotRead(FieldKind.Dollars, "Refunds per day")
-            ok(bad.what == base.what.replace("dollars", c.plural) && bad.next == base.next.replace("dollars", c.plural) && (c.plural.startsWith("WORDS_NEEDED_C5_") || SayCheck.problem(bad) == null), "the value not read says $c")
+            ok(bad.what == base.what.replace("dollars", c.plural) && bad.next == base.next.replace("dollars", c.plural) && SayCheck.problem(bad) == null, "the value not read says $c")
             val price = AppWords.priceNotReadIn(c)
-            ok(price.what == AppWords.priceNotRead.what.replace("dollars", c.plural) && price.next == AppWords.priceNotRead.next.replace("dollars", c.plural) && (c.plural.startsWith("WORDS_NEEDED_C5_") || SayCheck.problem(price) == null), "the price not read says $c")
+            ok(price.what == AppWords.priceNotRead.what.replace("dollars", c.plural) && price.next == AppWords.priceNotRead.next.replace("dollars", c.plural) && SayCheck.problem(price) == null, "the price not read says $c")
         }
         ok(AppWords.editGroupInstantIn(ShopCurrency.Usd) === AppWords.editGroupInstant && AppWords.priceNotReadIn(ShopCurrency.Usd) === AppWords.priceNotRead, "dollars are the words as before")
         ok(AppWords.editFieldsIn(ShopCurrency.Sats).toMap().getValue("refund_cap").next == "Whole sats. 0 turns it off.", "Bitcoin Standard: whole sats")

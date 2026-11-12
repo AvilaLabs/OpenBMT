@@ -1370,18 +1370,20 @@ another currency than the shop's is not part of these rules. The sources of
 a price and the band of each currency are in `docs/RATE-RULES.md` (RT-01,
 RT-03, RT-24).
 
-- **CR-193.** The settings carry the shop's currency: one byte, 1 for USD and
-  so on in the order above to 10 for Bitcoin Standard (`SAT` is the code a
-  sale records for it). It is the first part of the extension block that
-  follows the watch key, and the tips block of CR-187 follows it. The block
-  is written, in a message of version 2, only when the currency is not USD or
-  the tips are not off with the first percents: settings of a dollar shop
-  with those tips are written, hashed and signed exactly as before, in the
-  wire form of version 1. A version 1 form reads as USD with tips off. A
-  version 2 form whose currency byte is 0 or above 10, one whose block holds
-  USD, tips off and the first percents (it would have been written as version
-  1), one whose block is cut short or has bytes left over, and a form of any
-  other version are refused. The block is in the bytes that are signed.
+- **CR-193.** The settings carry the shop's currency: one byte, 1 for USD, 2 to
+  9 for EUR to SGD in the order above, 10 for Bitcoin Standard (`SAT` is the
+  code a sale records for it) and 11 to 16 for CAD to ZAR in the order above.
+  The currencies added after Bitcoin Standard take the bytes after it, so the
+  byte of every earlier currency is unchanged. It is the first part of the
+  extension block that follows the watch key, and the tips block of CR-187
+  follows it. The block is written, in a message of version 2, only when the
+  currency is not USD or the tips are not off with the first percents: settings
+  of a dollar shop with those tips are written, hashed and signed exactly as
+  before, in the wire form of version 1. A version 1 form reads as USD with tips
+  off. A version 2 form whose currency byte is 0 or above 16, one whose block
+  holds USD, tips off and the first percents (it would have been written as
+  version 1), one whose block is cut short or has bytes left over, and a form of
+  any other version are refused. The block is in the bytes that are signed.
 - **CR-194.** Every money value of the settings (the three instant limits
   and their budgets, the refund limits, the cashier's override cap and the
   manager's ceiling) is in whole units of the shop's currency, next to the
