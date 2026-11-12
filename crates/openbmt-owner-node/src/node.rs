@@ -11,7 +11,8 @@
 //! ## Files
 //!
 //! In the node's directory: [`COINS_FILE`] (the coin view, `OBMe`),
-//! [`QUEUE_FILE`] (the owner's queue, `OBM4`), and [`TAKE_JOURNAL_FILE`]
+//! [`QUEUE_FILE`] (the owner's queue, `OBM4`), [`PAID_LOG_FILE`] (what was
+//! paid out, `OBM&`, OC-48) and [`TAKE_JOURNAL_FILE`]
 //! (a joint queue/key 1 roll-forward record), written whole through the
 //! watcher's atomic write. The queue is written before the coin view takes
 //! the new transaction, so a restart finds the transaction in the queue's
@@ -85,6 +86,7 @@ use crate::coins::{
 };
 use crate::deep::{DeepRun, DeepSpawn};
 use crate::live::{plan_release, WatchLimits, REBALANCE_SECS};
+use crate::paid_log::{value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, PAID_LOG_FILE};
 use crate::receipts::read_fee_history;
 use crate::take_journal::{TakeJournal, MAX_JOURNAL_BYTES};
 use crate::watcher::{write_file, OwnerConfig, OwnerStartError, OwnerWatcher};
@@ -498,6 +500,8 @@ pub struct OwnerNode<P: OwnerPort = Handle> {
     /// not yet reached this node. Ignore old `Checked` events until then.
     pub(crate) awaiting_rescan: u32,
     take_journal: Option<TakeJournal>,
+    /// OC-48: what was paid out.
+    paid_log: PaidLog,
     pub(crate) owner_secret: [u8; 32],
     approver: DeviceId,
     policy: BatchPolicy,
@@ -589,6 +593,13 @@ impl<P: OwnerPort> OwnerNode<P> {
         // empty history, never a stop.
         let (fees, fee_note) = read_fee_history(&dir);
         let take_journal = read_take_journal(&dir).map_err(NodeError::Files)?;
+        let paid_log = match fs::read(dir.join(PAID_LOG_FILE)) {
+            Ok(bytes) => PaidLog::from_bytes(&bytes).map_err(|e| {
+                NodeError::Files(format!("{PAID_LOG_FILE} does not read back: {e}"))
+            })?,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => PaidLog::new(),
+            Err(e) => return Err(NodeError::Files(format!("{PAID_LOG_FILE}: {e}"))),
+        };
         let queue_bytes = if let Some(journal) = &take_journal {
             Ok(journal.queue.clone())
         } else {
@@ -681,6 +692,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             watch_limit: None,
             awaiting_rescan: 0,
             take_journal,
+            paid_log,
             owner_secret,
             approver,
             policy,
@@ -819,6 +831,111 @@ impl<P: OwnerPort> OwnerNode<P> {
             write_file(&dir, QUEUE_FILE, bytes)?;
             *prior = Ok(bytes.to_vec());
             Ok(())
+        }
+    }
+
+    /// OC-48: what the owner paid out, oldest first: every refund and
+    /// cash-out whose transaction was sent, kept after the queue forgets it.
+    pub fn paid_log(&self) -> &[PaidEntry] {
+        self.paid_log.entries()
+    }
+
+    /// OC-48 to OC-50: store the log entries for the refunds and the
+    /// cash-out the transaction `txid` of the outbox pays, unless the log
+    /// holds them already. The new log is built, stored, and swapped in only
+    /// when the store succeeds.
+    fn log_paid(&mut self, txid: &Txid) -> Result<(), String> {
+        let Some(tx_bytes) = self.owner.outbox().iter().find_map(|d| match &d.what {
+            Delivery::Transaction { txid: t, tx, .. } if t == txid => Some(tx.clone()),
+            _ => None,
+        }) else {
+            return Ok(());
+        };
+        let Some((refunds, cash_out)) = self.owner.outbox().iter().find_map(|d| match &d.what {
+            Delivery::Transaction {
+                txid: t,
+                refunds,
+                cash_out,
+                ..
+            } if t == txid => Some((refunds.clone(), *cash_out)),
+            _ => None,
+        }) else {
+            return Ok(());
+        };
+        let tx: Transaction = deserialize(&tx_bytes).map_err(|e| e.to_string())?;
+        let at = self.watcher.now();
+        let mut used = vec![false; tx.output.len()];
+        let mut paid = |script: &ScriptBuf, fallback: u64| -> u64 {
+            let found = tx
+                .output
+                .iter()
+                .zip(used.iter_mut())
+                .find(|(o, u)| !**u && o.script_pubkey == *script);
+            match found {
+                Some((o, u)) => {
+                    *u = true;
+                    o.value.to_sat()
+                }
+                None => fallback,
+            }
+        };
+        let mut added = Vec::new();
+        for id in refunds {
+            let Some(r) = self.owner.refunds().iter().find(|r| r.id == id) else {
+                continue;
+            };
+            let sats = paid(&r.script, r.sats);
+            let value = match (r.shop_value, r.books.and_then(|b| b.last_quote)) {
+                (Some(v), _) => Some(PaidValue {
+                    currency: v.currency,
+                    minor: v.minor,
+                }),
+                (None, Some(q)) => Some(PaidValue {
+                    currency: q.currency,
+                    minor: value_at(sats, q.minor_per_btc),
+                }),
+                (None, None) => None,
+            };
+            added.push(PaidEntry {
+                what: PaidWhat::Refund {
+                    sale: r.sale,
+                    request: r.books.map(|b| b.request),
+                },
+                number: id,
+                txid: *txid,
+                sats,
+                at,
+                value,
+            });
+        }
+        if let Some(id) = cash_out {
+            if let Some(c) = self.owner.cash_outs().iter().find(|c| c.id == id) {
+                let fallback = match c.amount {
+                    openbmt_owner::CashAmount::Sats(n) => n,
+                    openbmt_owner::CashAmount::All => 0,
+                };
+                let sats = paid(&c.script, fallback);
+                added.push(PaidEntry {
+                    what: PaidWhat::CashOut,
+                    number: id,
+                    txid: *txid,
+                    sats,
+                    at,
+                    value: c.price.map(|p| PaidValue {
+                        currency: p.currency,
+                        minor: value_at(sats, p.minor_per_btc),
+                    }),
+                });
+            }
+        }
+        match self.paid_log.with_added(&added) {
+            Ok(None) => Ok(()),
+            Ok(Some(next)) => {
+                write_file(&self.dir, PAID_LOG_FILE, &next.to_bytes())?;
+                self.paid_log = next;
+                Ok(())
+            }
+            Err(max) => Err(format!("the log holds {max} entries already")),
         }
     }
 
@@ -1379,6 +1496,13 @@ impl<P: OwnerPort> OwnerNode<P> {
         match self.send(&txid, bytes) {
             Ok(()) => {
                 self.states.insert(txid, SendState::Sent);
+                // OC-48: the payment is in the log before the queue is told
+                // it was sent. Without it the entry stays signed, and the
+                // next start sends again and tries again.
+                if let Err(e) = self.log_paid(&txid) {
+                    self.note(format!("{txid} was sent but could not be logged: {e}"));
+                    return;
+                }
                 if self.is_signed(&txid) {
                     let dir = self.dir.clone();
                     if let Err(e) = self
@@ -1518,6 +1642,12 @@ impl<P: OwnerPort> OwnerNode<P> {
         for txid in done {
             if self.ready_for_queue_write().is_err() {
                 return;
+            }
+            if let Err(e) = self.log_paid(&txid) {
+                self.note(format!(
+                    "{txid} is {depth} deep but could not be logged: {e}"
+                ));
+                continue;
             }
             let dir = self.dir.clone();
             match self

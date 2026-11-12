@@ -26,6 +26,7 @@ use openbmt_signer::SignerState;
 use openbmt_spend::Coin;
 
 mod live;
+mod paid_log;
 mod receipts;
 
 use super::coins::{mine, tx_from};

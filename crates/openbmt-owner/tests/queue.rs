@@ -6,7 +6,8 @@ mod common;
 use bitcoin::ScriptBuf;
 use common::*;
 use openbmt_owner::{
-    CashAmount, Delivery, Options, Owner, Refusal, RestoreError, SaleFacts, SettingsQueued, Stage,
+    CashAmount, Delivery, Options, Owner, RateNote, RefundBooks, Refusal, RestoreError, SaleFacts,
+    SettingsQueued, Stage,
 };
 
 // ---- AS-50 -----------------------------------------------------------------------------
@@ -697,4 +698,93 @@ fn as_65_a_sale_facts_value_survives() {
             reached_refund_depth: false
         })
     );
+}
+
+// ---- OC-51 -----------------------------------------------------------------------------
+
+fn rate(minor_per_btc: u64) -> RateNote {
+    RateNote {
+        currency: *b"USD",
+        minor_per_btc,
+    }
+}
+
+#[test]
+fn oc_51_a_price_and_the_books_notes_are_stored_in_version_3_and_restore() {
+    let mut o = new_owner(Options::default());
+    let plain = o.snapshot().unwrap();
+    assert_eq!(plain[4], 1);
+    set_facts(&mut o, sale(1), deep(1_000_000));
+    let r = ok(o.queue_refund_with_books(
+        sale(1),
+        "Mia",
+        external(1),
+        1_000,
+        None,
+        Some(RefundBooks {
+            request: 9,
+            last_quote: Some(rate(9_500_000)),
+        }),
+        nop,
+    ));
+    let bare = ok(o.queue_refund(sale(1), "Mia", external(2), 1_000, None, nop));
+    let c = ok(o.queue_cash_out_priced(
+        external(3),
+        CashAmount::All,
+        "Bank",
+        Some(rate(9_400_000)),
+        nop,
+    ));
+    let plain_cash = ok(o.queue_cash_out(external(4), CashAmount::All, "Bank", nop));
+    let bytes = o.snapshot().unwrap();
+    assert_eq!(bytes[4], 3);
+    let back = restore_owner(&bytes).unwrap();
+    assert_eq!(back.snapshot().unwrap(), bytes);
+    let refund = |id| back.refunds().iter().find(|x| x.id == id).unwrap().books;
+    assert_eq!(
+        refund(r),
+        Some(RefundBooks {
+            request: 9,
+            last_quote: Some(rate(9_500_000))
+        })
+    );
+    assert_eq!(refund(bare), None);
+    let price = |id| back.cash_outs().iter().find(|x| x.id == id).unwrap().price;
+    assert_eq!(price(c), Some(rate(9_400_000)));
+    assert_eq!(price(plain_cash), None);
+}
+
+#[test]
+fn oc_51_a_price_that_is_zero_or_not_a_currency_is_refused_and_a_damaged_list_is_refused() {
+    let mut o = new_owner(Options::default());
+    let zero = RateNote {
+        currency: *b"USD",
+        minor_per_btc: 0,
+    };
+    assert!(matches!(
+        refused(o.queue_cash_out_priced(external(3), CashAmount::All, "Bank", Some(zero), nop)),
+        Refusal::BadText(_)
+    ));
+    let lower = RateNote {
+        currency: *b"usd",
+        minor_per_btc: 5,
+    };
+    assert!(matches!(
+        refused(o.queue_cash_out_priced(external(3), CashAmount::All, "Bank", Some(lower), nop)),
+        Refusal::BadText(_)
+    ));
+    ok(o.queue_cash_out_priced(external(3), CashAmount::All, "Bank", Some(rate(5)), nop));
+    let bytes = o.snapshot().unwrap();
+    // The price is the last 11 bytes of the cash-out list's entry, then the
+    // (empty) refund list's count of 4 bytes follows.
+    let mut cut = bytes.clone();
+    cut.truncate(bytes.len() - 1);
+    assert!(restore_owner(&cut).is_err());
+    let mut zeroed = bytes.clone();
+    let at = bytes.len() - 4 - 8;
+    zeroed[at..at + 8].copy_from_slice(&[0; 8]);
+    assert!(restore_owner(&zeroed).is_err());
+    let mut padded = bytes.clone();
+    padded.push(0);
+    assert!(restore_owner(&padded).is_err());
 }

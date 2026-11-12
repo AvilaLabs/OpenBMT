@@ -70,7 +70,7 @@ use openbmt_core::records::RecordKind;
 use openbmt_core::wire::{DecodeError, Reader};
 use openbmt_counter::{Ask, Event};
 use openbmt_courier::Post;
-use openbmt_owner::{Owner, OwnerError, SaleFacts, SaleKey, Stage};
+use openbmt_owner::{Owner, OwnerError, RateNote, RefundBooks, SaleFacts, SaleKey, Stage};
 use openbmt_session::ShopValue;
 
 use crate::coins::CoinView;
@@ -261,6 +261,8 @@ struct SaleFold {
     reached: bool,
     confirmed_seen: bool,
     currency: Option<[u8; 3]>,
+    /// The last quote's rate, in minor units per bitcoin (OC-51).
+    rate: Option<u64>,
 }
 
 /// The facts of the sales of one counter, folded from its copy as far as
@@ -275,9 +277,21 @@ impl Fold {
     fn add(&mut self, event: &Event) {
         match event {
             Event::Opened {
-                index, currency, ..
+                index,
+                currency,
+                minor_per_btc,
+                ..
             } => {
-                self.sales.entry(*index).or_default().currency = Some(currency.code());
+                let s = self.sales.entry(*index).or_default();
+                s.currency = Some(currency.code());
+                s.rate = Some(*minor_per_btc);
+            }
+            Event::Requoted {
+                index,
+                minor_per_btc,
+                ..
+            } => {
+                self.sales.entry(*index).or_default().rate = Some(*minor_per_btc);
             }
             Event::Confirmed {
                 index,
@@ -520,6 +534,20 @@ impl RefundIntake {
                         .get(&counter)
                         .and_then(|f| f.sales.get(&index))
                         .and_then(|s| s.currency);
+                    let last_quote = self
+                        .folds
+                        .get(&counter)
+                        .and_then(|f| f.sales.get(&index))
+                        .and_then(|s| Some((s.currency?, s.rate?)))
+                        .filter(|(_, rate)| *rate != 0)
+                        .map(|(currency, minor_per_btc)| RateNote {
+                            currency,
+                            minor_per_btc,
+                        });
+                    let books = RefundBooks {
+                        request: number,
+                        last_quote,
+                    };
                     let shop_value = match (&ask, currency) {
                         (Ask::Value { minor, .. }, Some(currency)) => Some(ShopValue {
                             minor: *minor,
@@ -588,7 +616,7 @@ impl RefundIntake {
                         owner,
                         sale,
                         facts,
-                        (&name, destination, sats, shop_value),
+                        (&name, destination, sats, shop_value, books),
                         persist,
                     );
                     match effect {
@@ -710,14 +738,20 @@ impl RefundIntake {
         owner: &mut Owner,
         sale: SaleKey,
         facts: SaleFacts,
-        refund: (&str, bitcoin::ScriptBuf, u64, Option<ShopValue>),
+        refund: (
+            &str,
+            bitcoin::ScriptBuf,
+            u64,
+            Option<ShopValue>,
+            RefundBooks,
+        ),
         persist: &mut impl FnMut(&[u8]) -> Result<(), E>,
     ) -> Result<u32, OwnerError<E>> {
         if owner.sale_facts(&sale) != Some(facts) {
             owner.set_sale_facts(sale, facts, &mut *persist)?;
         }
-        let (name, script, sats, shop_value) = refund;
-        owner.queue_refund(sale, name, script, sats, shop_value, persist)
+        let (name, script, sats, shop_value, books) = refund;
+        owner.queue_refund_with_books(sale, name, script, sats, shop_value, Some(books), persist)
     }
 
     /// A withdrawal: the owner's `cancel` for a refund that is queued.

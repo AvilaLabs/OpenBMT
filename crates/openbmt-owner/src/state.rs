@@ -16,7 +16,8 @@ use crate::codec;
 use crate::error::{OwnerError, Refusal, RestoreError, SetupError};
 use crate::types::{
     CashAmount, CashOut, Deliverable, Delivery, IssuedRange, Options, QueuedBatch, QueuedBoxClaim,
-    QueuedPairing, QueuedSettings, Refund, SaleFacts, SaleKey, SettingsQueued, Stage,
+    QueuedPairing, QueuedSettings, RateNote, Refund, RefundBooks, SaleFacts, SaleKey,
+    SettingsQueued, Stage,
 };
 use crate::{
     MAX_BATCHES, MAX_CASH_OUTS, MAX_ISSUED_RANGES, MAX_PAIRINGS, MAX_REFUNDS, MAX_SALES,
@@ -605,6 +606,23 @@ impl Owner {
         shop_value: Option<ShopValue>,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<u32, OwnerError<E>> {
+        self.queue_refund_with_books(sale, cashier, script, sats, shop_value, None, persist)
+    }
+
+    /// OC-51: [`Owner::queue_refund`] for a counter's request, keeping the
+    /// request's number and the sale's last quote with the refund for the
+    /// books.
+    #[allow(clippy::too_many_arguments)]
+    pub fn queue_refund_with_books<E>(
+        &mut self,
+        sale: SaleKey,
+        cashier: &str,
+        script: ScriptBuf,
+        sats: u64,
+        shop_value: Option<ShopValue>,
+        books: Option<RefundBooks>,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<u32, OwnerError<E>> {
         label_ok(cashier, "cashier")?;
         if let Some(v) = &shop_value {
             if !v.currency.iter().all(u8::is_ascii_uppercase) {
@@ -633,6 +651,7 @@ impl Owner {
             script,
             sats,
             shop_value,
+            books,
             stage: Stage::Queued,
             conflict: Vec::new(),
         });
@@ -648,6 +667,24 @@ impl Owner {
         label: &str,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<u32, OwnerError<E>> {
+        self.queue_cash_out_priced(script, amount, label, None, persist)
+    }
+
+    /// OC-51: [`Owner::queue_cash_out`] with the price the owner confirmed
+    /// for it, which the books record it at.
+    pub fn queue_cash_out_priced<E>(
+        &mut self,
+        script: ScriptBuf,
+        amount: CashAmount,
+        label: &str,
+        price: Option<RateNote>,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<u32, OwnerError<E>> {
+        if let Some(p) = &price {
+            if p.minor_per_btc == 0 || !p.currency.iter().all(u8::is_ascii_uppercase) {
+                return Err(Refusal::BadText("price").into());
+            }
+        }
         label_ok(label, "cash-out label")?;
         match amount {
             CashAmount::Sats(sats) => destination_ok(&script, sats)?,
@@ -665,6 +702,7 @@ impl Owner {
             script,
             amount,
             label: label.to_owned(),
+            price,
             conflict: Vec::new(),
             stage: Stage::Queued,
         });

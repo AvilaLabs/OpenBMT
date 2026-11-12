@@ -1150,3 +1150,28 @@ fn cr_63_the_counters_list_of_payable_scripts_is_the_signers_and_the_owners() {
     }
     assert_eq!(payable, 5, "the five kinds, and no other");
 }
+
+#[test]
+fn oc_51_a_queued_refund_keeps_its_request_number_and_the_sales_last_quote() {
+    let mut s = Side::new();
+    let requote = Event::Requoted {
+        index: 0,
+        at: T0 + 5,
+        needs_sats: 4_000,
+        minor_per_btc: 12_500_000,
+        source: RateSource::new("test-fixed", T0).unwrap(),
+    };
+    s.push(&[
+        opened(0),
+        requote,
+        finished(0, 5_000),
+        requested(0, 4, 2_000, dest(9), 5_000),
+    ]);
+    assert_eq!(s.apply().queued, 1);
+    let books = s.owner.refunds()[0].books.unwrap();
+    assert_eq!(books.request, 4);
+    // The last quote is the requote's, not the first.
+    let quote = books.last_quote.unwrap();
+    assert_eq!(quote.currency, *b"USD");
+    assert_eq!(quote.minor_per_btc, 12_500_000);
+}

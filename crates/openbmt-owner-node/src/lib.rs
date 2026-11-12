@@ -26,6 +26,10 @@
 //! app sends the requests and hands the answers in, and the sales come from
 //! the verified copies of the counters' records.
 //!
+//! The [`paid_log`] module keeps what the owner paid out, a refund or a
+//! cash-out at a time, with its value in the shop's currency, for the books
+//! (`docs/OWNER-COINS-RULES.md`, OC-48 to OC-51).
+//!
 //! The [`price`] module is the owner phone's own ask of the price sources
 //! (`docs/OWNER-APP-RULES.md` OA-101, on `docs/RATE-RULES.md`): the app
 //! fetches the replies, the library reads them and agrees on one price.
@@ -61,6 +65,7 @@ pub mod facts;
 pub mod link;
 pub mod live;
 pub mod node;
+pub mod paid_log;
 pub mod pos;
 pub mod price;
 pub mod receipts;
@@ -89,6 +94,10 @@ pub use live::{
 pub use node::{
     NodeError, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState, BROADCAST_DIR, COINS_FILE,
     NO_TOR, QUEUE_FILE, TAKE_JOURNAL_FILE,
+};
+pub use paid_log::{
+    value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, MAGIC_PAID_LOG, MAX_PAID_ENTRIES,
+    PAID_ENTRY_LEN, PAID_LOG_FILE,
 };
 pub use pos::{
     counter_facts, OwnerPos, PosMethod, PosPolled, PosRefused, PosRequest, PosSetup, PosVendor,

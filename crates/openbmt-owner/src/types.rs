@@ -125,6 +125,26 @@ pub enum Stage {
     },
 }
 
+/// OC-51: a rate in the shop's currency, as the books need it: minor units of
+/// the currency per bitcoin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateNote {
+    /// Three upper-case ASCII letters (`SAT` for Bitcoin Standard).
+    pub currency: [u8; 3],
+    /// Minor units of the currency per bitcoin. Never zero.
+    pub minor_per_btc: u64,
+}
+
+/// OC-51: what the books need of a refund besides its amount, kept with it
+/// from the counter's request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RefundBooks {
+    /// The request's number on the counter.
+    pub request: u64,
+    /// The sale's last quote, when the counter's records have one.
+    pub last_quote: Option<RateNote>,
+}
+
 /// A refund in the queue (AS-51 to AS-56).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refund {
@@ -140,6 +160,9 @@ pub struct Refund {
     pub sats: u64,
     /// The refund's value in the shop's currency, if one is stated.
     pub shop_value: Option<ShopValue>,
+    /// OC-51: the request it came from and the sale's last quote, when it
+    /// came from a counter's request.
+    pub books: Option<RefundBooks>,
     /// Where it is.
     pub stage: Stage,
     /// AS-68: the outpoints that the transactions this refund was in spent,
@@ -168,6 +191,8 @@ pub struct CashOut {
     pub amount: CashAmount,
     /// The destination's label, as the owner phone says it.
     pub label: String,
+    /// OC-51: the price the owner confirmed for it, for the books.
+    pub price: Option<RateNote>,
     /// Where it is.
     pub stage: Stage,
     /// AS-68: the outpoints that the transactions this one paid spent, from

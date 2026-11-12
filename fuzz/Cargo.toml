@@ -399,6 +399,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "owner_paid_log_decode"
+path = "fuzz_targets/owner_paid_log_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "owner_coins_decode"
 path = "fuzz_targets/owner_coins_decode.rs"
 test = false

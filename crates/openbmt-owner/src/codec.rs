@@ -7,13 +7,21 @@
 //!   | known settings: flag, then length u32 and the `OBMS` bytes
 //!   | sales | refunds | cash-outs | batches | settings | pairings
 //!   | open sessions | finished objects | issued ranges
-//!   | version 2 only: Box claims
+//!   | version 2 and 3: Box claims
+//!   | version 3 only: cash-out prices | refund books
 //! ```
 //!
 //! The version is 1 until the queue holds anything of a Box (a claim, a
 //! frozen claim or a welcome that waits, AS-83 to AS-85) and 2 from then on:
 //! a queue without one is written exactly as before. Version 2 adds the list
 //! of Box claims at the end: number, the claim's `OBM5` bytes and the stage.
+//! The version is 3 when a cash-out carries a price or a refund carries what
+//! the books need of it (OC-51), whatever else the queue holds. Version 3 has
+//! the Box claims (possibly none), then the cash-out prices (a u32 count,
+//! then for each the cash-out's number, the currency (3) and the price u64)
+//! and the refund books (a u32 count, then for each the refund's number, the
+//! request number u64 and a flag with, when set, the currency (3) and the
+//! last quote's rate u64), each list ascending by number.
 //!
 //! Every list is a u32 count and then its entries in ascending order of
 //! their key (the issued ranges: counter, start, count and the time the
@@ -40,8 +48,8 @@ use crate::error::{Refusal, RestoreError};
 use crate::state::{outputs_fit, Frozen, OpenSession, Owner, SaleEntry, State};
 use crate::types::{
     CashAmount, CashOut, Deliverable, Delivery, FeePayer, IssuedRange, Options, QueuedBatch,
-    QueuedBoxClaim, QueuedPairing, QueuedSettings, Refund, RefundPacking, SaleFacts, SaleKey,
-    Stage,
+    QueuedBoxClaim, QueuedPairing, QueuedSettings, RateNote, Refund, RefundBooks, RefundPacking,
+    SaleFacts, SaleKey, Stage,
 };
 use crate::{
     MAGIC_OWNER_QUEUE, MAX_BATCHES, MAX_BOX_CLAIMS, MAX_CASH_OUTS, MAX_CONFLICT_OUTPOINTS,
@@ -93,6 +101,11 @@ fn put_outpoints(out: &mut Vec<u8>, list: &[OutPoint]) {
         put_txid(out, &o.txid);
         out.extend_from_slice(&o.vout.to_le_bytes());
     }
+}
+
+fn put_rate(out: &mut Vec<u8>, rate: &RateNote) {
+    out.extend_from_slice(&rate.currency);
+    out.extend_from_slice(&rate.minor_per_btc.to_le_bytes());
 }
 
 fn put_stage(out: &mut Vec<u8>, stage: &Stage) {
@@ -191,13 +204,20 @@ fn uses_box(st: &State) -> bool {
             .any(|d| matches!(d.what, Delivery::BoxWelcome(_)))
 }
 
+/// OC-51: whether the state holds a price or the books' notes, so that its
+/// snapshot is version 3.
+fn uses_books(st: &State) -> bool {
+    st.cash_outs.iter().any(|c| c.price.is_some()) || st.refunds.iter().any(|r| r.books.is_some())
+}
+
 /// AS-65: the snapshot of `state`.
 pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
     let mut out = wire::start(&MAGIC_OWNER_QUEUE, 1024);
-    let with_box = uses_box(st);
+    let with_books = uses_books(st);
+    let with_box = with_books || uses_box(st);
     if with_box {
         if let Some(v) = out.get_mut(4) {
-            *v = 2;
+            *v = if with_books { 3 } else { 2 };
         }
     }
     out.extend_from_slice(&owner.wallet_id);
@@ -354,6 +374,31 @@ pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
             put_stage(&mut out, &c.stage);
         }
     }
+    if with_books {
+        let priced: Vec<&CashOut> = st.cash_outs.iter().filter(|c| c.price.is_some()).collect();
+        put_u32(&mut out, priced.len());
+        for c in priced {
+            out.extend_from_slice(&c.id.to_le_bytes());
+            if let Some(p) = &c.price {
+                put_rate(&mut out, p);
+            }
+        }
+        let noted: Vec<&Refund> = st.refunds.iter().filter(|r| r.books.is_some()).collect();
+        put_u32(&mut out, noted.len());
+        for r in noted {
+            out.extend_from_slice(&r.id.to_le_bytes());
+            if let Some(b) = &r.books {
+                out.extend_from_slice(&b.request.to_le_bytes());
+                match &b.last_quote {
+                    Some(q) => {
+                        out.push(1);
+                        put_rate(&mut out, q);
+                    }
+                    None => out.push(0),
+                }
+            }
+        }
+    }
     if out.len() > MAX_SNAPSHOT_BYTES {
         return Err(Refusal::SnapshotTooLarge);
     }
@@ -382,6 +427,21 @@ fn read_script(r: &mut Reader<'_>) -> Result<ScriptBuf, DecodeError> {
     let script = ScriptBuf::from_bytes(r.take(n)?.to_vec());
     dust_limit(&script).ok_or(bad("script is not of an allowed kind"))?;
     Ok(script)
+}
+
+fn read_rate(r: &mut Reader<'_>) -> Result<RateNote, DecodeError> {
+    let currency = r.array::<3>()?;
+    if !currency.iter().all(u8::is_ascii_uppercase) {
+        return Err(bad("a currency code is not letters"));
+    }
+    let minor_per_btc = r.u64_le()?;
+    if minor_per_btc == 0 {
+        return Err(bad("a price is zero"));
+    }
+    Ok(RateNote {
+        currency,
+        minor_per_btc,
+    })
 }
 
 fn read_blob<'a>(r: &mut Reader<'a>, max: usize) -> Result<&'a [u8], DecodeError> {
@@ -503,9 +563,10 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
     if r.take(4).map_err(d)? != MAGIC_OWNER_QUEUE {
         return Err(d(DecodeError::BadMagic));
     }
-    let with_box = match r.u8().map_err(d)? {
+    let version = r.u8().map_err(d)?;
+    let with_box = match version {
         1 => false,
-        2 => true,
+        2 | 3 => true,
         v => return Err(d(DecodeError::UnsupportedVersion(v))),
     };
     if r.array::<32>().map_err(d)? != owner.wallet_id {
@@ -611,6 +672,7 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
             script,
             sats,
             shop_value,
+            books: None,
             conflict,
             stage,
         });
@@ -633,6 +695,7 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
             script,
             amount,
             label,
+            price: None,
             conflict,
             stage,
         });
@@ -800,6 +863,48 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
             }
             let stage = read_stage(&mut r).map_err(d)?;
             st.box_claims.push(QueuedBoxClaim { id, claim, stage });
+        }
+    }
+    if version == 3 {
+        let n = r.count(MAX_CASH_OUTS, 15).map_err(d)?;
+        let mut last = None;
+        for _ in 0..n {
+            let id = r.u32_le().map_err(d)?;
+            let rate = read_rate(&mut r).map_err(d)?;
+            if last.is_some_and(|l| l >= id) {
+                return Err(d(bad("cash-out prices are not in ascending order")));
+            }
+            last = Some(id);
+            let Some(entry) = st.cash_outs.iter_mut().find(|c| c.id == id) else {
+                return Err(RestoreError::Inconsistent(
+                    "a price is kept for a cash-out that is not queued",
+                ));
+            };
+            entry.price = Some(rate);
+        }
+        let n = r.count(MAX_REFUNDS, 13).map_err(d)?;
+        let mut last = None;
+        for _ in 0..n {
+            let id = r.u32_le().map_err(d)?;
+            let request = r.u64_le().map_err(d)?;
+            let last_quote = if r.flag().map_err(d)? {
+                Some(read_rate(&mut r).map_err(d)?)
+            } else {
+                None
+            };
+            if last.is_some_and(|l| l >= id) {
+                return Err(d(bad("refund books are not in ascending order")));
+            }
+            last = Some(id);
+            let Some(entry) = st.refunds.iter_mut().find(|x| x.id == id) else {
+                return Err(RestoreError::Inconsistent(
+                    "books are kept for a refund that is not queued",
+                ));
+            };
+            entry.books = Some(RefundBooks {
+                request,
+                last_quote,
+            });
         }
     }
     r.finish().map_err(d)?;

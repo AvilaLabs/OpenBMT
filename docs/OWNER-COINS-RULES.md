@@ -452,6 +452,58 @@ to 85 of `openbmt-owner-ffi`. OC-38 and OC-39 are not used.
   older than the view, and one whose receipt confirmed again is ready
   again. No new words: the refund shows the state it already has.
 
+## 10. What the owner paid out
+
+The owner's queue forgets a refund or a cash-out once its transaction is paid
+and past the undo horizon (`Owner::archive_paid`, AS-54). The books
+(`docs/BOOKS-RULES.md`, BK-12) need each one with its time and its value in
+the shop's currency, so the node keeps a log of its own.
+
+- **OC-48.** When the node sends a transaction of the queue's outbox, it
+  appends one entry for each refund and for the cash-out the transaction
+  pays: the kind, the number the entry had in the queue, the transaction,
+  the satoshis that went out (the value of the transaction's output to the
+  entry's destination, the first one not taken by another entry, and the
+  queue's amount when no output has the destination), the time by the node's
+  clock, and for a refund the sale (the counter's key and the sale index) and
+  the number of the counter's request when it came from one. The entry is
+  stored before the queue is told the transaction was sent. When it cannot be
+  stored, the entry stays signed with a note, and the next start sends again
+  and tries again. An entry for the same kind, number and transaction is
+  written once, however often the transaction is sent again; a transaction
+  that confirms before it was ever sent by this node is logged when it
+  reaches the refund depth, before the queue is told it is paid.
+- **OC-49.** An entry carries its value in the shop's currency, in minor units
+  with the currency's code (`SAT`, whose minor unit is the satoshi, for
+  Bitcoin Standard), or no value. A refund's value is the one its request
+  stated; without one, the satoshis paid out at the sale's last quote (the
+  last quote the counter's records give, as a cash refund is valued, CR-71),
+  rounded down; without a quote, none. A cash-out's value is the satoshis
+  paid out at the price the owner confirmed when the cash-out was queued
+  (OA-102); without one, none. A value that is none is never made up.
+- **OC-50.** The log is `paid-log.bin`: `OBM&`, version 1, and then entries of
+  118 bytes, each ending in the first 8 bytes of the SHA-256 of the 110 bytes
+  before it. The file is only added to: a new file is built from the old
+  entries and the new ones, stored through the watcher's atomic write, and
+  swapped in only when the store succeeds. `archive_paid` does not touch it.
+  It holds at most 100,000 entries; past that nothing more is appended and
+  the node notes it. It is read strictly: a length that is not a whole number
+  of entries, a check that does not match, a flag that is not 0 or 1, a field
+  that a kind does not use and is not zero, an entry that repeats an earlier
+  one, a currency that is not three capital letters and a kind that is not
+  known refuse the whole file. A node whose log does not read back does not
+  start: the fault is the one of any other file of the node that does not read
+  back (`NodeError::Files`).
+- **OC-51.** The queue keeps what the log needs until the entry is logged: a
+  cash-out keeps the price the owner confirmed for it (a currency code and
+  minor units per bitcoin, never zero), and a refund that came from a
+  counter's request keeps the request's number and the sale's last quote. The
+  stored queue is version 3 from the first such entry (AS-65, the codec's
+  module docs): after the Box claims, a list of the cash-outs' prices and a
+  list of the refunds' notes, each ascending by number and each naming a
+  queued entry. A queue with neither stays version 1 or 2, byte for byte as
+  before.
+
 ## What these rules do not say
 
 - **They do not watch an address set aside all the time.** A payment to one
