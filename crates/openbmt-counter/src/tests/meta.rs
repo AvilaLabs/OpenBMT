@@ -33,7 +33,7 @@ const TEST_SOURCES: [&str; 21] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 64] = [
+const NOT_HERE: [(&str, &str); 68] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -280,6 +280,27 @@ const NOT_HERE: [(&str, &str); 64] = [
          (`apps/counter-android`)",
     ),
     (
+        "CR-201",
+        "running Tor is the Android app's, with the code shared with the owner app; tested in \
+         the app's JVM tests (`apps/counter-android`), and what Tor does on a phone needs a \
+         device to test",
+    ),
+    (
+        "CR-202",
+        "Tor's folders, its command line and the pinned library are the Android app's and its \
+         build's; tested in the app's JVM tests (`apps/counter-android`)",
+    ),
+    (
+        "CR-203",
+        "the choice of Tor, its row, its page and its line in the config file are the Android \
+         app's; tested in the app's JVM tests (`apps/counter-android`)",
+    ),
+    (
+        "CR-204",
+        "the words and the screen when Tor does not start are the Android app's; tested in the \
+         app's JVM tests (`apps/counter-android`)",
+    ),
+    (
         "CR-166",
         "the device list message is dropped by the link; tested in `openbmt-counter-node` \
          (`tests/link.rs`)",
@@ -371,9 +392,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_one_hundred_and_fifty_one_rules() {
+fn the_rules_file_defines_one_hundred_and_fifty_five_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 151);
+    assert_eq!(ids.len(), 155);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -409,6 +430,7 @@ fn the_rules_file_defines_one_hundred_and_fifty_one_rules() {
             && ids.contains("CR-193")
             && ids.contains("CR-199")
             && ids.contains("CR-200")
+            && ids.contains("CR-204")
     );
 }
 

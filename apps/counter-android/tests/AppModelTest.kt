@@ -7,9 +7,11 @@ import java.net.ServerSocket
 import java.nio.file.Files
 import java.security.SecureRandom
 import org.openbmt.app.Colour
+import org.openbmt.app.ControlReader
 import org.openbmt.app.SayCheck
 import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
+import org.openbmt.app.TorControl
 import org.openbmt.app.Who
 import org.openbmt.counter.Actor
 import org.openbmt.counter.ActorRole
@@ -271,7 +273,7 @@ object AppModelTest {
         ok(problem(pin2 = "246811") === AppWords.pinNotAccepted, "two different PINs")
         ok(NetworkCheck.problem("orbot") === AppWords.torAddressNotAccepted, "an address that is not host:port")
         ok(NetworkCheck.problem("127.0.0.1:9050") == null && NetworkCheck.problem("192.168.1.5:9150") == null, "an address that is")
-        ok(AppConfig(AppConfig.DEFAULT_PROXY, "Mia", "Sam", "node.onion").withProxy("10.0.0.2:9150").encode().toString(Charsets.UTF_8) == "proxy: 10.0.0.2:9150\nmanager: Mia\ncashier: Sam\nownnode: node.onion\n", "the Network screen changes the proxy and nothing else")
+        ok(AppConfig(AppConfig.DEFAULT_PROXY, "Mia", "Sam", "node.onion").withProxy("10.0.0.2:9150").encode().toString(Charsets.UTF_8) == "proxy: 10.0.0.2:9150\nmanager: Mia\ncashier: Sam\nownnode: node.onion\ntor: builtin\n", "the Network screen changes the proxy and nothing else")
         ok(AppWords.orbotNotRunning.next.contains("Network") && AppWords.networkAbout.who == Who.MANAGER, "the Orbot words point to the Network screen")
         ok(!AppWords.notSetUp.next.contains("Orbot") && !AppWords.torIsOn.next.contains("below"), "the first start no longer asks for Orbot's address")
         ok(FirstStartCheck.wordsLine(listOf("river", "tulip", "anchor", "maple")) == "river   tulip   anchor   maple", "the four words on one line, spaced")
@@ -290,7 +292,7 @@ object AppModelTest {
         ok(AppConfig.decode(own.encode()).ownNode == own.ownNode && own.withCashier("Bo").ownNode == own.ownNode, "an own node, kept (CR-100)")
         ok(AppConfig.decode(own.withOwnNode("").encode()).ownNode == "", "an own node, removed")
         ok(AppConfig.decode("proxy: h:1\nmanager: M\ncashier: \n".toByteArray(Charsets.UTF_8)).ownNode == "", "a three-line file has no own node")
-        ok(String(c.encode(), Charsets.UTF_8).endsWith("cashier: Ann\nownnode: \n"), "the own node line is always written")
+        ok(String(c.encode(), Charsets.UTF_8).endsWith("cashier: Ann\nownnode: \ntor: builtin\n"), "the own node line and the choice of Tor are always written")
         ok(!AppConfig.validOwnNode("a b") && !AppConfig.validOwnNode("x".repeat(129)) && AppConfig.validOwnNode("") && AppConfig.validOwnNode("x.onion:1"), "own node text")
         ok(AppConfig.decode(c.withCashier("").encode()).cashier == "", "an empty cashier name")
         ok(AppConfig.decode(AppConfig("h:1", "Méa", "").encode()).manager == "Méa", "a name with a letter outside ASCII")
@@ -321,7 +323,7 @@ object AppModelTest {
         // The sounds choice: on by default, saved next to the cashier's name, read back, and kept by the other changes.
         ok(c.sounds && back.sounds && AppConfig.decode("proxy: h:1\nmanager: M\ncashier: \n".toByteArray(Charsets.UTF_8)).sounds, "the sounds are on by default")
         val quietOn = c.withSounds(false)
-        ok(String(quietOn.encode(), Charsets.UTF_8) == "proxy: 127.0.0.1:9050\nmanager: Mia\ncashier: Ann\nownnode: \nsounds: off\n", "the sounds line is written when they are off")
+        ok(String(quietOn.encode(), Charsets.UTF_8) == "proxy: 127.0.0.1:9050\nmanager: Mia\ncashier: Ann\nownnode: \nsounds: off\ntor: builtin\n", "the sounds line is written when they are off")
         ok(String(c.withSounds(true).encode(), Charsets.UTF_8) == String(c.encode(), Charsets.UTF_8), "and not when they are on")
         file.save(quietOn)
         ok(!file.load()!!.sounds && file.load()!!.cashier == "Ann", "the choice is saved and read back")
@@ -1072,6 +1074,131 @@ object AppModelTest {
         ok(tipWords.contains("Add a tip?") && tipWords.contains("Choose a tip, or No tip.") && !tipWords.contains("sats offered"), "the words file holds the library's words")
     }
 
+
+    // ---- the built-in Tor (CR-201 to CR-204) --------------------------------------------------------------
+
+    private fun torReply(text: String) = ControlReader(java.io.ByteArrayInputStream(text.toByteArray(Charsets.ISO_8859_1))).next()!!
+
+    private fun cr201BuiltInTorTests(appDir: File?) {
+        // The node, the price fetches and the Lightning transport are given the port Tor reported, where Orbot's address was.
+        var asked: Pair<String, Int>? = null
+        val gate = TorGate(true, "127.0.0.1:41233", SocksProbe { h, p -> asked = h to p; true })
+        ok(gate.proxy == "127.0.0.1:41233" && gate.address == "127.0.0.1:41233" && gate.available() && asked == "127.0.0.1" to 41233, "CR-201: with Tor on the proxy is the built-in Tor's port, and it answers")
+        ok(TorGate(false, "127.0.0.1:9050").proxy == null, "CR-201: with Tor off there is no proxy and nothing is started")
+        // The strict reader is the owner app's: the port of the one SOCKS listener, and a reply that is not exact is refused.
+        ok(TorControl.socksPort(torReply("250-net/listeners/socks=\"127.0.0.1:41233\"\r\n250 OK\r\n")) == 41233, "CR-201: the port is read from the control socket")
+        var refused = false
+        try {
+            torReply("250 OK\n")
+        } catch (_: java.io.IOException) {
+            refused = true
+        }
+        ok(refused, "CR-201: a line end that is not a carriage return and a line feed is refused")
+        if (appDir == null) return
+        val controller = File(appDir, "src/android/Controller.kt").readText()
+        val start = controller.substringAfter("private fun startNode()")
+        ok(start.contains("val builtIn = torOn && cfg.tor == TorChoice.BuiltIn"), "CR-201: the built-in Tor is wanted only with Tor on in the settings and the choice of it")
+        ok(start.indexOf("ensureTor().awaitPort(TOR_WAIT_MS)") in 1 until start.indexOf("CounterNode.start("), "CR-201: the node starts only after the built-in Tor has a port")
+        ok(start.contains("} else {\n                    releaseTor()\n                    address = cfg.proxy"), "CR-201: with Tor off or Orbot chosen no Tor of the app runs")
+        ok(start.contains("TorGate(torOn, address)") && start.contains("gate.proxy") && controller.contains("HttpsFetcher(gate)") && controller.contains("LightningTransport(gate.torOn, gate.address)"), "CR-201: the node, the price fetches and the Lightning transport use that address")
+        val hidden = controller.substringAfter("fun hidden() {").substringBefore("/** CR-91")
+        ok(hidden.indexOf("stopNode()") in 0 until hidden.indexOf("releaseTor()"), "CR-201: Tor is let go of when the app is hidden, after the node")
+        ok(controller.contains("if (!visible) throw TorStartException(\"the app is hidden\")"), "CR-201: a start that comes after the app was hidden does not take Tor")
+        ok(controller.contains("TorRunner.acquire(dir)") && controller.contains("torLease?.takeIf { !it.dead }"), "CR-201: one lease, taken again when its run has ended")
+        // The code is the shared Tor part, which the owner and counter builds take and the Key app's does not.
+        val common = File(appDir, "../android-common/tor")
+        ok(File(common, "src/android/TorRunner.kt").isFile && File(common, "src/android/TorService.kt").isFile && File(common, "src/model/TorControl.kt").isFile, "CR-201: the runner, the service and the control client are in the shared Tor part")
+        ok(!File(appDir, "src/android/TorRunner.kt").exists() && !File(appDir, "src/android/TorService.kt").exists() && !File(appDir, "src/model/TorControl.kt").exists(), "CR-201: the counter has no copy of them")
+        ok(File(appDir, "build.sh").readText().contains("\"\$tor_part\"/src/model/*.kt \"\$tor_part\"/src/android/*.kt") && File(appDir, "../owner-android/build.sh").readText().contains("\"\$tor_part\"/src/model/*.kt \"\$tor_part\"/src/android/*.kt"), "CR-201: the owner build and the counter build compile the Tor part")
+        val keyBuild = File(appDir, "../key-android/build.sh").readText()
+        ok(!keyBuild.contains("tor_part") && !keyBuild.contains("android-common/tor") && !keyBuild.contains("libtor") && !keyBuild.contains("tor-library"), "CR-201: the Key app's build takes none of the Tor part and no libtor.so")
+        val manifest = File(appDir, "AndroidManifest.xml").readText()
+        ok(!manifest.contains("TorService") && manifest.contains("android:extractNativeLibs=\"false\""), "CR-201: Tor is not an Android component, and the library is mapped from the APK")
+        val rules = File(appDir, "../../docs/COUNTER-RULES.md").readText()
+        ok(rules.contains("- **CR-201.**") && rules.substringAfter("- **CR-87.**").substringBefore("- **CR-88.**").let { it.contains("CR-201") && it.contains("CR-203") && it.contains("CR-204") }, "CR-201 is in the rules and CR-87 points to it")
+    }
+
+    private fun cr202TorFilesTests(appDir: File?) {
+        if (appDir == null) return
+        val common = File(appDir, "../android-common/tor")
+        val runner = File(common, "src/android/TorRunner.kt").readText()
+        val svc = File(common, "src/android/TorService.kt").readText()
+        ok(runner.contains("const val TOR_DIR = \"tor\"") && runner.contains("File(dir, TOR_DIR)") && runner.contains("File(torDir, \"data\")") && runner.contains("File(torDir, \"cache\")"), "CR-202: the folders are in a folder tor of the app's folder")
+        val controller = File(appDir, "src/android/Controller.kt").readText()
+        ok(controller.contains("private val dir: File = act.noBackupFilesDir") && controller.contains("TorRunner.acquire(dir)"), "CR-202: and that folder is noBackupFilesDir")
+        ok(runner.contains("setReadable(true, true)") && runner.contains("setWritable(true, true)") && runner.contains("setExecutable(true, true)"), "CR-202: the folders are the app's alone")
+        val options = Regex("\"(--[A-Za-z-]+)\"").findAll(svc).map { it.groupValues[1] }.toList()
+        ok(options == listOf("--verify-config", "--RunAsDaemon", "--defaults-torrc", "--ignore-missing-torrc", "--CacheDirectory", "--DataDirectory", "--ControlSocket", "--CookieAuthentication", "--SocksPort"), "CR-202: the options of the command line: $options")
+        ok(svc.contains("\"--SocksPort\", \"127.0.0.1:auto\"") && svc.contains("socket.delete()") && !svc.contains("writeText") && !svc.contains("FileWriter"), "CR-202: one SOCKS listener on 127.0.0.1, no configuration file written, an old control socket removed")
+        val manifest = File(appDir, "AndroidManifest.xml").readText()
+        ok(manifest.contains("android:allowBackup=\"false\""), "CR-202: nothing of it is backed up")
+        val script = File(common, "tor-library.sh").readText()
+        val build = File(appDir, "build.sh").readText()
+        ok(script.contains("aar_sha256=\"28ff2bb6d4d42eabe57183dedd7a97fce77e8ce4b6f5af6fa03993b3ca054edd\"") && script.contains("is not the pinned tor-android 0.4.9.14 AAR"), "CR-202: the shared script checks the library's hash and stops on a mismatch")
+        ok(build.contains("tor-library.sh\" check") && build.contains("tor-library.sh\" unpack") && !build.contains("unzip -q"), "CR-202: the counter build takes libtor.so only through that script")
+        ok(script.contains("jni/\$abi/libtor.so") && Regex("unzip [^\\n]*\"\\\$tor_aar\"").findAll(script).count() == 1, "CR-202: only libtor.so is taken from the AAR, by one unzip")
+        ok(File(appDir, "../../docs/COUNTER-RULES.md").readText().contains("- **CR-202.**"), "CR-202 is in the rules")
+    }
+
+    private fun cr203TorChoiceTests(appDir: File?) {
+        fun config(text: String) = AppConfig.decode(text.toByteArray(Charsets.UTF_8))
+        ok(AppConfig(AppConfig.DEFAULT_PROXY, "Mia", "").tor == TorChoice.BuiltIn, "CR-203: a new counter uses the built-in Tor")
+        val old3 = config("proxy: 10.0.0.2:9150\nmanager: M\ncashier: \n")
+        val old4 = config("proxy: 10.0.0.2:9150\nmanager: M\ncashier: A\nownnode: x.onion:1\n")
+        val old5 = config("proxy: 10.0.0.2:9150\nmanager: M\ncashier: A\nownnode: \nsounds: off\n")
+        ok(listOf(old3, old4, old5).all { it.tor == TorChoice.Orbot && it.proxy == "10.0.0.2:9150" }, "CR-203: a counter from before the choice keeps Use Orbot, at its address")
+        ok(!old5.sounds && old4.ownNode == "x.onion:1", "and keeps the rest of what its file said")
+        for (choice in TorChoice.values()) for (sounds in listOf(true, false)) {
+            val c = AppConfig("10.0.0.2:9150", "Mia", "Ann", "n.onion:1", sounds, choice)
+            val back = config(String(c.encode(), Charsets.UTF_8))
+            ok(back.tor == choice && back.sounds == sounds && back.proxy == "10.0.0.2:9150" && back.ownNode == "n.onion:1", "CR-203: the choice ${choice.key} reads back, sounds $sounds")
+        }
+        ok(String(AppConfig("h:1", "M", "").with(TorChoice.Orbot).encode(), Charsets.UTF_8) == "proxy: h:1\nmanager: M\ncashier: \nownnode: \ntor: orbot\n", "CR-203: the line is the last one")
+        ok(AppConfig("h:1", "M", "C").with(TorChoice.Orbot).let { it.proxy == "h:1" && it.cashier == "C" } && AppConfig("h:1", "M", "C", tor = TorChoice.Orbot).withCashier("D").withProxy("h:2").withOwnNode("a.onion:1").withSounds(false).tor == TorChoice.Orbot, "CR-203: changing the choice keeps the address, and every other change keeps the choice")
+        for (bad in listOf("tor: off", "tor: ", "tor: Orbot", "sounds: off\ntor: orbot\nsounds: off", "tor: orbot\nsounds: off", "tor: orbot\ntor: orbot")) {
+            var refused = false
+            try {
+                config("proxy: h:1\nmanager: M\ncashier: \nownnode: \n$bad\n")
+            } catch (_: ConfigFormatException) {
+                refused = true
+            }
+            ok(refused, "CR-203: refused: ${bad.replace("\n", "|")}")
+        }
+        ok(TorChoice.values().map { it.label } == listOf("Built-in Tor", "Use Orbot") && TorChoice.fromKey("off") == null, "CR-203: two choices with their labels, and none that turns Tor off")
+        ok(TorChoice.BuiltIn.words === AppWords.torBuiltIn && TorChoice.Orbot.words === AppWords.torUsesOrbot, "CR-203: each choice has its words")
+        ok(AppWords.torBuiltIn.heading == "Tor" && AppWords.torBuiltIn.what == "This app runs Tor itself, so Orbot is not needed." && AppWords.torBuiltIn.next == "Nothing to do. To use Orbot instead, choose Use Orbot." && AppWords.torBuiltIn.who == Who.NOBODY, "CR-203: the words of the built-in Tor, as written down")
+        ok(AppWords.torUsesOrbot.heading == "Tor through Orbot" && AppWords.torUsesOrbot.what == "This app sends everything through Orbot, which must be installed and running." && AppWords.torUsesOrbot.next == "Keep Orbot running. To stop needing it, choose Built-in Tor." && AppWords.torUsesOrbot.who == Who.OWNER, "CR-203: the words of Orbot, as written down")
+        for (w in listOf(AppWords.torBuiltIn, AppWords.torUsesOrbot, AppWords.torStarting, AppWords.torFailed)) ok(SayCheck.problem(w) == null, "the words of Tor pass the checks: ${SayCheck.problem(w)}")
+        if (appDir == null) return
+        val controller = File(appDir, "src/android/Controller.kt").readText()
+        ok(controller.contains("if (torOnNow) items.add(RowItem(\"Tor\", onClick = { showTor() }))") && controller.contains("torOnNow = gate.torOn"), "CR-203: Settings has the row Tor only while the shop's settings have Tor on")
+        val page = controller.substringAfter("private fun showTor()").substringBefore("/** The choice made")
+        ok(page.contains("TorChoice.values()") && page.contains("cfg.tor.words") && page.contains("checkPin(pinInput.text.toString()") && page.contains("showNetwork(choosing = true)"), "CR-203: a button for each choice, the words of the one in use, a PIN for Built-in Tor, the address for Use Orbot")
+        val choose = controller.substringAfter("private fun chooseTor(").substringBefore("// ----")
+        ok(choose.indexOf("configFile.save(cfg.with(choice))") in 1 until choose.indexOf("begin()"), "CR-203: the choice is saved before the app starts again with it")
+        ok(controller.contains("next.with(TorChoice.Orbot)") && controller.contains("checkPin(pinInput.text.toString(), pinInput, { keepNetwork(cfg, text, choosing, msg) }"), "CR-203: Use Orbot is saved behind the manager's PIN with the address")
+        ok(controller.contains("configFile.save(AppConfig(AppConfig.DEFAULT_PROXY, managerName, \"\"))"), "CR-203: a new counter's config takes the default, the built-in Tor")
+        val rules = File(appDir, "../../docs/COUNTER-RULES.md").readText()
+        ok(rules.contains("- **CR-203.**"), "CR-203 is in the rules")
+    }
+
+    private fun cr204TorFailsTests(appDir: File?) {
+        ok(AppWords.torStarting.heading == "Starting Tor" && AppWords.torStarting.what == "This app is connecting to the Tor network, which can take up to a minute." && AppWords.torStarting.next == "Wait on this screen." && AppWords.torStarting.who == Who.NOBODY, "CR-204: the words while it connects, as written down")
+        ok(AppWords.torFailed.heading == "Tor did not start" && AppWords.torFailed.what == "This app could not connect to the Tor network." && AppWords.torFailed.next == "Check that the phone is online, then try again. If it keeps failing, choose Use Orbot." && AppWords.torFailed.who == Who.OWNER && AppWords.torFailed.tone == Tones.STOP, "CR-204: the words when it did not, as written down")
+        ok(ScreenModel.pick(null, SetupStatus(true, true, true), AppWords.torFailed, false).let { it is Screen.TorBlocked && it.words === AppWords.torFailed }, "CR-204: a failed Tor is a screen of its own, before the node's")
+        ok(AppWords.all().map { it.first }.containsAll(listOf("torBuiltIn", "torUsesOrbot", "torStarting", "torFailed")), "the four words are in the list")
+        if (appDir == null) return
+        val controller = File(appDir, "src/android/Controller.kt").readText()
+        val start = controller.substringAfter("private fun startNode()")
+        ok(start.contains("showWorking(AppWords.torStarting)"), "CR-204: the screen says it is connecting while it waits")
+        ok(start.contains("catch (_: TorStartException)") && start.contains("torBlocked = AppWords.torFailed") && start.indexOf("torBlocked = AppWords.torFailed") in 1 until start.indexOf("CounterNode.start("), "CR-204: a failure shows its words and comes before the node is started")
+        ok(start.contains("torBlocked = if (builtIn) AppWords.torFailed else AppWords.orbotNotRunning"), "CR-204: a Tor that does not answer is not called Orbot")
+        ok(controller.contains("ui.primary(\"Try again\") { begin() }, ui.button(\"Tor\") { showTor() }") && controller.contains("const val TOR_WAIT_MS = 90_000L"), "CR-204: Try again starts again, Tor opens the choice, and it waits 90 seconds for a circuit")
+        val runner = File(appDir, "../android-common/tor/src/android/TorRunner.kt").readText()
+        ok(runner.contains("catch (e: LinkageError)") && runner.contains("class TorStartException") && runner.contains("val run = current?.takeIf { !it.done }"), "CR-204: a library that does not load fails to start, and a run that has ended is not reused")
+        ok(File(appDir, "../../docs/COUNTER-RULES.md").readText().contains("- **CR-204.**"), "CR-204 is in the rules")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val screensMd = args.firstOrNull()?.let { File(it) }
@@ -1095,6 +1222,10 @@ object AppModelTest {
         cr153TodayLinesTests()
         cr200PinStepsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr188TipTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr201BuiltInTorTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr202TorFilesTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr203TorChoiceTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr204TorFailsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         println("AppModelTest (counter): $count checks passed")
     }
 }

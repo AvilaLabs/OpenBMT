@@ -1,8 +1,8 @@
 # Code shared by the Android apps
 
 The Key app, the owner app and the counter app are built from their own sources plus the
-files here (`tor/` is for the owner app and the counter app only). Plain `android.widget` and the Kotlin standard library only: no
-Gradle, no AndroidX. `src/model/` has no Android class, so the JVM tests run
+files here (`tor/` is for the owner app and the counter app only). Plain
+`android.widget` and the Kotlin standard library only: no Gradle, no AndroidX. `src/model/` has no Android class, so the JVM tests run
 it; `src/android/` needs the framework.
 
 | File | What it is |

@@ -25,6 +25,10 @@ These are the words of what the app decides itself.
 | torIsOn | Tor is on for this shop | The shop's settings send every connection of this counter through Tor, with Orbot. | Keep Orbot running. The manager can check its address under Network. | a manager |  |
 | torIsOff | Tor is off for this shop | The shop's settings do not use Tor, so the price sources and the network can see this shop's address. | Nothing to do here. The owner can switch Tor on in the shop's settings. | the owner |  |
 | orbotNotRunning | Tor is not running | Tor is on for this shop, but Orbot is not running. | Open Orbot and turn it on. If it listens at another address, the manager can change it under Network. | a manager |  |
+| torBuiltIn | Tor | This app runs Tor itself, so Orbot is not needed. | Nothing to do. To use Orbot instead, choose Use Orbot. | nobody |  |
+| torUsesOrbot | Tor through Orbot | This app sends everything through Orbot, which must be installed and running. | Keep Orbot running. To stop needing it, choose Built-in Tor. | the owner |  |
+| torStarting | Starting Tor | This app is connecting to the Tor network, which can take up to a minute. | Wait on this screen. | nobody |  |
+| torFailed | Tor did not start | This app could not connect to the Tor network. | Check that the phone is online, then try again. If it keeps failing, choose Use Orbot. | the owner |  |
 | networkAbout | Network | When the shop's settings turn Tor on, this counter sends everything through Orbot, at the address below. | Change the address only if Orbot listens somewhere else, then type the manager's PIN. | a manager |  |
 | networkSaved | Address saved | The counter will look for Orbot at the new address. | Tap Start to use it now. | a manager |  |
 | ownNodeAbout | Your own node | A node of your own, reached by a Tor address, can check each payment as well as the light check does. | Type its Tor address and the manager's PIN, then save. | a manager |  |

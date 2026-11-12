@@ -571,20 +571,24 @@ own; the library judges sales and prices and knows nothing of them.
   actor without it. Each action names its actor, and the library keeps the
   name.
 - **CR-87.** When the signed settings have Tor on, every connection of the
-  app, the node's and the price fetch's, goes through the SOCKS5 proxy of
-  the app's setting (`127.0.0.1:9050` unless the owner changed it), and no
-  name is looked up by the phone. Before the node starts, and before every
-  price fetch, the app asks the proxy for a SOCKS5 greeting. If the proxy
-  does not answer, nothing is sent around it: the node is not started, no
-  price is fetched, and the app says "Tor is on for this shop, but Orbot is
-  not running." and "Open Orbot and turn it on. If it listens at another
-  address, the manager can change it under Network." The Network screen,
-  reached from home and from that screen, holds the proxy's address; it is
-  saved behind the manager's PIN. The manager is the one who acts. This is NR-26 applied: the proxy is the caller's. The node
-  enforces it from the verified settings: `start` refuses to start, with
-  this rule, when the signed settings have Tor on and the start has no
-  proxy. The app's reading of the settings before the start (`pairing_read`)
-  is for display only and is not trusted.
+  app, the node's and the price fetch's, goes through a SOCKS5 proxy, and no
+  name is looked up by the phone. The proxy is the app's own Tor (CR-201,
+  the choice "Built-in Tor", which a new counter has) or Orbot at the app's
+  setting (`127.0.0.1:9050` unless the owner changed it, the choice "Use
+  Orbot", CR-203). Before the node starts, and before every price fetch, the
+  app has the proxy: the built-in Tor's port once Tor has a circuit, or, with
+  Orbot, the answer to a SOCKS5 greeting. If it has none, nothing is sent
+  around it: the node is not started, no price is fetched, and the app says
+  so (CR-204 for the built-in Tor; for Orbot "Tor is on for this shop, but
+  Orbot is not running." and "Open Orbot and turn it on. If it listens at
+  another address, the manager can change it under Network."). The Network
+  screen, reached from home and from that screen, holds the proxy's address
+  of Orbot; it is saved behind the manager's PIN. The manager is the one who
+  acts. This is NR-26 applied: the proxy is the caller's. The node enforces
+  it from the verified settings: `start` refuses to start, with this rule,
+  when the signed settings have Tor on and the start has no proxy. The app's
+  reading of the settings before the start (`pairing_read`) is for display
+  only and is not trusted.
 - **CR-88.** The node runs only while the app is on the screen. It starts
   when the activity becomes visible and is stopped, cleanly, when it stops
   being visible, so that it lets go of its folder. The screen is kept on
@@ -1402,3 +1406,56 @@ RT-03, RT-24).
   does not clear it; the person types the PIN again when the app is shown.
   The app keeps a flag that is set when it is shown and cleared when it is
   hidden, and no answer is acted on while it is clear.
+
+## 20. The built-in Tor
+
+- **CR-201.** The counter app runs the Tor Project's C Tor itself, as the
+  owner app does (OA-97): the runner, the service and the strict reader of
+  Tor's control socket are the same code, in `apps/android-common/tor/`,
+  which only the owner and counter builds compile and package. The Key app
+  makes no network connection and has none of it, nor `libtor.so`. Tor runs
+  only when the signed settings in force have Tor on (CR-87, CR-163) and the
+  choice is "Built-in Tor" (CR-203). With Tor off in the settings, or with
+  Orbot chosen, no Tor of the app's runs, and one that was running is let go
+  of when the node starts again. Tor has one SOCKS listener on 127.0.0.1 at a
+  port Tor picks; when Tor reports its first circuit the app gives that
+  address, `127.0.0.1:port`, to the node, the price fetches and the
+  Lightning transport, where Orbot's address was. The app holds one lease on
+  the run while it is shown and lets go of it when it is hidden (CR-88); the
+  last lease let go of shuts Tor down, and a start that comes after the app
+  was hidden does not take one. The link's proxy (CR-134) is not changed.
+- **CR-202.** Tor's data and cache folders are inside the app's
+  `noBackupFilesDir`, in the folder `tor`, made readable, writable and
+  searchable by the app alone; nothing of Tor is backed up (CR-140). The
+  command line has the options OA-98 lists and no others, no `torrc` is
+  written, and a control socket left by an earlier run is deleted before Tor
+  starts. `libtor.so` is taken from the AAR pinned in `docs/DEPENDENCIES.md`
+  and nothing else of it is, by the script both builds call
+  (`apps/android-common/tor/tor-library.sh`), which checks the AAR's SHA-256
+  first and stops the build if it differs.
+- **CR-203.** Settings has a row "Tor", shown only while the shop's settings
+  in force have Tor on. It opens a page with the words of the choice in use
+  and two choices, "Built-in Tor" and "Use Orbot", and no third: there is no
+  way to turn Tor off in the app. "Built-in Tor" is chosen with the manager's
+  PIN. "Use Orbot" goes on to the screen of Orbot's address (CR-87) and is
+  chosen by saving it behind the PIN. The choice is kept in the config file
+  as a last line, `tor: builtin` or `tor: orbot`; the address of Orbot is kept
+  for either choice. A new counter is saved with "Built-in Tor". A config
+  file without the line, from before the choice, is read as "Use Orbot" at
+  the address it has, and stays so until the choice is changed. A choice is
+  saved first, and then the app starts again with it. "Built-in Tor" says
+  "Tor", "This app runs Tor itself, so Orbot is not needed." and "Nothing to
+  do. To use Orbot instead, choose Use Orbot." "Use Orbot" says "Tor through
+  Orbot", "This app sends everything through Orbot, which must be installed
+  and running." and "Keep Orbot running. To stop needing it, choose Built-in
+  Tor."
+- **CR-204.** With the built-in Tor the screen says "Starting Tor", "This app
+  is connecting to the Tor network, which can take up to a minute." and "Wait
+  on this screen." while the app waits, for up to 90 seconds, for Tor's first
+  circuit. If Tor stops, does not load, does not connect in time, or does not
+  answer, nothing is sent: the node is not started, no price is fetched, and
+  the screen says "Tor did not start", "This app could not connect to the Tor
+  network." and "Check that the phone is online, then try again. If it keeps
+  failing, choose Use Orbot.", with a button "Try again" that starts again,
+  with a new run if the old one ended, and a button "Tor" that opens the
+  choice (CR-203).

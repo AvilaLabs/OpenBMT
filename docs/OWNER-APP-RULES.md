@@ -849,11 +849,13 @@ signs batches, settings and pairings, are never in the service.
   library of the Guardian Project's `tor-android` (`docs/DEPENDENCIES.md`),
   in its own process and not as an Android component: the manifest does not
   change. `TorService` (`apps/android-common/tor/src/android/TorService.kt`,
-  shared with the counter app, CR-201) makes the same native calls in the same order as the library's own class, whose name it takes
-  because the native functions are bound by it, and says so in its header.
-  Tor has one SOCKS listener, on 127.0.0.1 at a port Tor picks, and its
-  control socket is the one the native code gives. The app reads that socket
-  with a strict reader (`apps/android-common/tor/src/model/TorControl.kt`): three-digit code, separator, text of
+  shared with the counter app, CR-201) makes the same native calls in the
+  same order as the library's own class, whose name it takes because the
+  native functions are bound by it, and says so in its header. Tor has one
+  SOCKS listener, on 127.0.0.1 at a port Tor picks, and its control socket
+  is the one the native code gives. The app reads that socket with a strict
+  reader (`apps/android-common/tor/src/model/TorControl.kt`): three-digit
+  code, separator, text of
   printable ASCII, carriage return and line feed, at most 1024 bytes a line
   and 8 lines a reply, no data reply, a code that does not change inside a
   reply, and a reply that is not complete is refused. It sends five commands

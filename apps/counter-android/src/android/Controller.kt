@@ -32,6 +32,9 @@ import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.SayWords
 import org.openbmt.app.ScanFlow
 import org.openbmt.app.SealedFile
+import org.openbmt.app.TorLease
+import org.openbmt.app.TorRunner
+import org.openbmt.app.TorStartException
 import org.openbmt.app.Ui
 import org.openbmt.app.UrScan
 import org.openbmt.app.UrWords
@@ -105,9 +108,13 @@ class Controller(private val act: MainActivity) {
     // What runs.
     @Volatile
     private var runId = 0
+    @Volatile
     private var visible = false
     private var fault: SayWords? = null
     private var torBlocked: SayWords? = null
+
+    /** Whether the settings in force, as the running node has them, have Tor on: the row Tor of Settings shows then (CR-203). */
+    private var torOnNow = false
     private var node: CounterNode? = null
     private var money: Money? = null
     private var book: PriceBook? = null
@@ -137,6 +144,26 @@ class Controller(private val act: MainActivity) {
     /** The tick of the Home screen: Home is showing when [tick] is this one (CR-164). */
     private var homeTick: (() -> Unit)? = null
 
+    // ---- the built-in Tor (CR-201 to CR-204) -------------------------------------------------------------
+
+    private val torLock = Any()
+    private var torLease: TorLease? = null
+
+    /** The lease on the built-in Tor, taken now if this controller has none or its run has ended; not while the app is hidden. */
+    private fun ensureTor(): TorLease = synchronized(torLock) {
+        if (!visible) throw TorStartException("the app is hidden")
+        torLease?.takeIf { !it.dead } ?: run {
+            torLease?.close()
+            TorRunner.acquire(dir).also { torLease = it }
+        }
+    }
+
+    /** Lets go of the built-in Tor; it shuts down at once, as nothing else holds it (CR-201). */
+    private fun releaseTor() {
+        val l = synchronized(torLock) { torLease.also { torLease = null } }
+        l?.close()
+    }
+
     /** CR-87: set when the start was refused because the settings the owner sent turned Tor on. */
     private var torForced = false
     private var lastTick = 0L
@@ -164,6 +191,8 @@ class Controller(private val act: MainActivity) {
         forgetCeremony()
         scan.stop()
         stopNode()
+        // CR-201: the built-in Tor runs only while the app is shown.
+        releaseTor()
     }
 
     /** CR-91, CR-98: a ceremony open when the app is left is forgotten, in the library too. */
@@ -232,7 +261,13 @@ class Controller(private val act: MainActivity) {
         when (val s = ScreenModel.pick(fault, setup, torBlocked, node != null, locked())) {
             is Screen.Fault -> showMessage(s.words, "Try again") { begin() }
             is Screen.FirstStart -> showFirstStart(null)
-            is Screen.TorBlocked -> showCenter(s.words, listOf(ui.primary("Check again") { begin() }, ui.button("Network") { showNetwork() }))
+            is Screen.TorBlocked ->
+                // CR-204: the built-in Tor did not start: try again, or choose Orbot. Orbot did not answer: check again, or its address.
+                if (s.words === AppWords.torFailed) {
+                    showCenter(s.words, listOf(ui.primary("Try again") { begin() }, ui.button("Tor") { showTor() }))
+                } else {
+                    showCenter(s.words, listOf(ui.primary("Check again") { begin() }, ui.button("Network") { showNetwork() }))
+                }
             is Screen.Starting -> showWorking()
             is Screen.WhoAtTill -> showWho(null)
             is Screen.Home -> showHome()
@@ -268,11 +303,33 @@ class Controller(private val act: MainActivity) {
                 // CR-163: Tor as the settings in force have it, which the owner may have changed since pairing.
                 val pairing = Shop.pairing(rec, nodeDir.path)
                 val torOn = pairing.settings.torOn || torForced
-                val gate = TorGate(torOn, cfg.proxy)
+                // CR-201: Tor of the app's own runs only when the settings have Tor on and it is the choice; else a run of it is let go of.
+                val builtIn = torOn && cfg.tor == TorChoice.BuiltIn
+                val address: String
+                if (builtIn) {
+                    main.post { if (id == runId && node == null) showWorking(AppWords.torStarting) }
+                    val port = try {
+                        ensureTor().awaitPort(TOR_WAIT_MS)
+                    } catch (_: TorStartException) {
+                        // CR-204: no Tor, no node: nothing is sent around the proxy.
+                        main.post {
+                            if (id == runId) {
+                                torBlocked = AppWords.torFailed
+                                render()
+                            }
+                        }
+                        return@Thread
+                    }
+                    address = "127.0.0.1:$port"
+                } else {
+                    releaseTor()
+                    address = cfg.proxy
+                }
+                val gate = TorGate(torOn, address)
                 if (!gate.available()) {
                     main.post {
                         if (id == runId) {
-                            torBlocked = AppWords.orbotNotRunning
+                            torBlocked = if (builtIn) AppWords.torFailed else AppWords.orbotNotRunning
                             render()
                         }
                     }
@@ -322,6 +379,7 @@ class Controller(private val act: MainActivity) {
             return render()
         }
         node = n
+        torOnNow = gate.torOn
         money = m
         pumpFault = null
         // CR-197: Bitcoin Standard has no price: no source is asked and there is no book.
@@ -475,7 +533,7 @@ class Controller(private val act: MainActivity) {
      * Without a connection `ln_next` has nothing, and the thread only waits.
      */
     private fun startLightning(id: Int, n: CounterNode, gate: TorGate) {
-        val t = LightningTransport(gate.torOn, config?.proxy ?: AppConfig.DEFAULT_PROXY)
+        val t = LightningTransport(gate.torOn, gate.address)
         transport = t
         lightningJobs.clear()
         val worker = Thread {
@@ -1024,6 +1082,8 @@ class Controller(private val act: MainActivity) {
         items.add(RowItem("Staff", onClick = { showStaffEntry() }))
         items.add(RowItem("Your own node", onClick = { showOwnNode() }))
         items.add(RowItem("Network", onClick = { showNetwork() }))
+        // CR-203: the choice of Tor is there only while the shop's settings have Tor on.
+        if (torOnNow) items.add(RowItem("Tor", onClick = { showTor() }))
         items.add(RowItem("Lightning", onClick = { showLightning(null) }))
         items.add(RowItem("About", onClick = { showAbout() }))
         items.add(RowItem("Sounds", SOUNDS_SENTENCE, onClick = { showSounds() }))
@@ -1136,26 +1196,29 @@ class Controller(private val act: MainActivity) {
 
     // ---- the network: the address of Orbot (CR-87) -----------------------------------------------
 
-    /** The address Tor is reached at, behind the manager's PIN. Open from Settings, and from the screen that says Orbot did not answer. */
-    private fun showNetwork() {
+    /**
+     * The address Tor is reached at, behind the manager's PIN. Open from Settings, and from the screen that says Orbot did not
+     * answer. With [choosing] it is the second step of choosing Use Orbot (CR-203): saving the address is the choice.
+     */
+    private fun showNetwork(choosing: Boolean = false) {
         if (node != null && lockedOut()) return
         val cfg = config ?: return render()
         val msg = Slot(act)
         val address = ui.field("host:port", mono = true).also { it.setText(cfg.proxy) }
         val pinInput = pinField(act, "")
-        val back = { if (node != null) showSettings() else render() }
+        val back = { if (choosing) showTor() else if (node != null) showSettings() else render() }
         titled(
             "Network",
             AppWords.networkAbout,
             listOf(ui.labelled("Address of Orbot", address), ui.labelled("Manager's PIN", pinInput), msg),
             listOf(
-                ui.primary("Save") {
+                ui.primary(if (choosing) TorChoice.Orbot.label else "Save") {
                     val text = address.text.toString().trim()
                     val problem = NetworkCheck.problem(text)
                     if (problem != null) {
                         msg.show(note(problem))
                     } else {
-                        checkPin(pinInput.text.toString(), pinInput, { keepNetwork(cfg, text, msg) }, { msg.show(note(it)) })
+                        checkPin(pinInput.text.toString(), pinInput, { keepNetwork(cfg, text, choosing, msg) }, { msg.show(note(it)) })
                     }
                 },
                 ui.button("Back") { back() },
@@ -1164,13 +1227,52 @@ class Controller(private val act: MainActivity) {
         )
     }
 
-    private fun keepNetwork(cfg: AppConfig, address: String, msg: Slot) {
+    private fun keepNetwork(cfg: AppConfig, address: String, choosing: Boolean, msg: Slot) {
         try {
-            configFile.save(cfg.withProxy(address))
+            val next = cfg.withProxy(address)
+            configFile.save(if (choosing) next.with(TorChoice.Orbot) else next)
         } catch (e: IOException) {
             return msg.show(note(AppWords.fileNotSaved(e.message)))
         }
         showMessage(AppWords.networkSaved, "Start") { begin() }
+    }
+
+    // ---- Tor: the built-in one or Orbot (CR-203) ----------------------------------------------------
+
+    /**
+     * The page of the two choices, behind the manager's PIN: the words of the choice in use, and a button for each. Built-in Tor
+     * is chosen here; Use Orbot goes on to the address of Orbot. Open from Settings, and from the screen that says Tor did not start.
+     */
+    private fun showTor() {
+        if (node != null && lockedOut()) return
+        val cfg = config ?: return render()
+        val msg = Slot(act)
+        val pinInput = pinField(act, "")
+        val back = { if (node != null) showSettings() else render() }
+        val actions = ArrayList<Button>()
+        for (choice in TorChoice.values()) {
+            val go = {
+                if (choice == TorChoice.Orbot) {
+                    showNetwork(choosing = true)
+                } else {
+                    checkPin(pinInput.text.toString(), pinInput, { chooseTor(cfg, choice, msg, back) }, { msg.show(note(it)) })
+                }
+            }
+            actions.add(if (choice == cfg.tor) ui.primary(choice.label) { go() } else ui.button(choice.label) { go() })
+        }
+        actions.add(ui.button("Back") { back() })
+        titled("Tor", cfg.tor.words, listOf(ui.labelled("Manager's PIN", pinInput), msg), actions, back = { back() })
+    }
+
+    /** The choice made: saved first, then the app starts again with it (CR-203). Tapping the choice in use goes back. */
+    private fun chooseTor(cfg: AppConfig, choice: TorChoice, msg: Slot, same: () -> Unit) {
+        if (choice == cfg.tor) return same()
+        try {
+            configFile.save(cfg.with(choice))
+        } catch (e: IOException) {
+            return msg.show(note(AppWords.fileNotSaved(e.message)))
+        }
+        begin()
     }
 
     // ---- Lightning through the shop's own node (CR-112 to CR-116) -------------------------------------
@@ -2391,6 +2493,9 @@ class Controller(private val act: MainActivity) {
 
     companion object {
         const val VERSION = "0.1.0"
+
+        /** How long the app waits for the built-in Tor to have a circuit: a little over the minute the words promise (CR-204). */
+        const val TOR_WAIT_MS = 90_000L
         const val KEY_ALIAS = "openbmt-counter-pairing-v1"
         const val PAIRING_FILE = "pairing.obks"
         const val TYPE_BYTES = "bytes"
