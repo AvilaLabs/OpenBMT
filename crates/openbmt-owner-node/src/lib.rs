@@ -65,9 +65,11 @@ pub mod facts;
 pub mod link;
 pub mod live;
 pub mod node;
+pub mod own;
 pub mod paid_log;
 pub mod pos;
 pub mod price;
+pub mod range_outbox;
 pub mod receipts;
 pub mod refunds;
 pub mod say;
@@ -84,9 +86,9 @@ pub use batch_outbox::{BatchOutbox, BatchOutboxError, PendingBatch, MAX_PENDING_
 pub use copy::{CheckInTaken, CopyError, CounterCopy, Stop, Taken};
 pub use facts::{verified_facts, FactsRefused};
 pub use link::{
-    Alert, BatchesWaiting, BoxReport, CounterState, OwnerLink, OwnerLinkConfig, OwnerLinkError,
-    SettingsNotCarried, SettingsWaiting, BATCH_ALERT_SECS, BATCH_RESEND_SECS, MAX_BOX_REPORTS,
-    MAX_CARRIED_SETTINGS,
+    Alert, BatchesWaiting, BoxReport, CounterState, IndexUse, OwnerLink, OwnerLinkConfig,
+    OwnerLinkError, RangesWaiting, SettingsNotCarried, SettingsWaiting, BATCH_ALERT_SECS,
+    BATCH_RESEND_SECS, MAX_BOX_REPORTS, MAX_CARRIED_SETTINGS,
 };
 pub use live::{
     DeepLine, Spans, WatchLimits, DEEP_CHECK_SECS, DEEP_RETRY_SECS, DEEP_STALL_SECS,
@@ -96,6 +98,7 @@ pub use node::{
     NodeError, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState, BROADCAST_DIR, COINS_FILE,
     NO_TOR, QUEUE_FILE, TAKE_JOURNAL_FILE,
 };
+pub use own::{OwnNode, OwnNodeError, ToppedUp, OWN_STATE_FILE};
 pub use paid_log::{
     value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, MAGIC_PAID_LOG, MAX_PAID_ENTRIES,
     PAID_ENTRY_LEN, PAID_LOG_FILE,
@@ -105,6 +108,7 @@ pub use pos::{
     PosView, POS_LEDGER_FILE, POS_SETUP_FILE,
 };
 pub use price::{agreed_price, AgreedPrice, PriceReply};
+pub use range_outbox::{PendingRange, RangeOutbox, RangeOutboxError, MAX_PENDING_RANGES};
 pub use receipts::{MergeOffer, MergeRefused, ReceiptsLine, FEE_FILE, MERGE_MIN_COINS};
 pub use refunds::{
     Applied, CashRefundSeen, Evidence, IntakeError, NoteKind, RefundIntake, RefundNote, Stopped,

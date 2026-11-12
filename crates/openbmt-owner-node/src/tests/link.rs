@@ -1971,3 +1971,402 @@ fn lk_75_a_relay_that_does_not_list_the_watch_key_refuses_and_the_link_says_so()
     assert_eq!(w.link.state().sent, 1);
     assert!(!w.link.state().relay_refused);
 }
+
+// ---- the ranges of a counter paired with the shop's own wallet (OA-112, LK-77) ----
+
+use std::collections::BTreeSet;
+use std::sync::mpsc::channel as range_channel;
+use std::sync::{Arc, Mutex};
+
+use openbmt_core::pairing_own::OwnCounterPairing;
+use openbmt_core::pinned_wallet::{IndexRange, PinnedWallet, SignedRange};
+use openbmt_counter::{Amount, Currency, Event, RangeHeld, RateSource};
+
+use crate::own::{OwnNode, OWN_STATE_FILE};
+use crate::range_outbox::RANGE_OUTBOX_FILE;
+
+const SINGLE: &str = "wpkh([818bc9b6/84h/0h/0h]xpub6CgURS1GrKZkAoRGBTKYX9FhLgkKnQVZ6vdNBUbiu24xtRJ6RzLKpdg4CqsVyBLzimcJsviP59hSoGJEpTJiXE8bdBLw1qPC1DXRatKehb8/<0;1>/*)#96yh9yhx";
+
+fn range_at(start: u32) -> SignedRange {
+    SignedRange::sign(
+        &id(1),
+        IndexRange::new(counter(), start, start + 1_000).unwrap(),
+    )
+    .unwrap()
+}
+
+fn range_messages(got: &[Received]) -> Vec<SignedRange> {
+    got.iter()
+        .filter(|r| r.kind == Kind::Range)
+        .map(|r| SignedRange::from_bytes(&r.content).unwrap())
+        .collect()
+}
+
+fn chain_holding_ranges(ranges: &[&SignedRange]) -> Chain {
+    let mut chain = Chain::new();
+    for r in ranges {
+        let held = RangeHeld::of(r);
+        chain.append(&id(3), held.kind(), held.encode()).unwrap();
+    }
+    chain
+}
+
+/// Send `records` to the owner in as many messages as it takes, and step
+/// the link until it has taken them all.
+fn send_all(w: &mut World, records: &[Record], now: u64) {
+    let mut at = 0;
+    while at < records.len() {
+        let (content, count) = records_content(&records[at..], usize::MAX);
+        w.counter_side
+            .send(&owner(), Kind::Records, &content)
+            .unwrap();
+        at += count;
+        w.step(now);
+    }
+}
+
+fn opened(index: u32) -> Vec<u8> {
+    Event::Opened {
+        index,
+        at: T0,
+        amount: Amount(500),
+        tip: Amount(0),
+        currency: Currency::new(*b"USD").unwrap(),
+        needs_sats: 5_000,
+        minor_per_btc: 10_000_000,
+        source: RateSource::new("test-fixed", T0).unwrap(),
+        by: None,
+    }
+    .encode()
+}
+
+#[test]
+fn oa_112_a_range_is_kept_until_the_copy_shows_the_counter_holds_it() {
+    let mut w = world();
+    let r = range_at(1_000);
+    w.link.send_range(&counter(), &r, T0).unwrap();
+    let waiting = w.link.ranges_waiting(&counter()).unwrap();
+    assert_eq!((waiting.ranges, waiting.since), (1, T0));
+    assert_eq!(range_messages(&w.counter_gets()), vec![r]);
+    // Records that say nothing about it leave it pending.
+    w.send_records(chain(3, 1).records());
+    w.step(T0 + 1);
+    assert!(w.link.ranges_waiting(&counter()).is_some());
+    // The record of this range, with its own digest, drops it.
+    let mut c = chain(3, 1);
+    let held = RangeHeld::of(&r);
+    c.append(&id(3), held.kind(), held.encode()).unwrap();
+    w.send_records(&c.records()[3..]);
+    w.step(T0 + 2);
+    assert!(w.link.ranges_waiting(&counter()).is_none());
+    // Nothing is sent again.
+    w.counter_gets();
+    w.step(T0 + 1_000);
+    assert!(range_messages(&w.counter_gets()).is_empty());
+}
+
+#[test]
+fn oa_112_a_record_for_the_range_with_another_digest_or_an_earlier_one_drops_nothing() {
+    let mut w = world();
+    let (first, second) = (range_at(1_000), range_at(2_000));
+    w.link.send_range(&counter(), &second, T0).unwrap();
+    // The same indexes signed by another key: another digest.
+    let other =
+        SignedRange::sign(&id(7), IndexRange::new(counter(), 2_000, 3_000).unwrap()).unwrap();
+    w.send_records(chain_holding_ranges(&[&other, &first]).records());
+    w.step(T0 + 1);
+    assert!(w.link.ranges_waiting(&counter()).is_some());
+    // A later range held shows the counter has gone past this one.
+    let mut w = world();
+    w.link.send_range(&counter(), &first, T0).unwrap();
+    w.send_records(chain_holding_ranges(&[&second]).records());
+    w.step(T0 + 1);
+    assert!(w.link.ranges_waiting(&counter()).is_none());
+}
+
+#[test]
+fn oa_112_a_pending_range_is_sent_again_once_in_a_hundred_and_twenty_seconds_as_kind_range() {
+    let mut w = world();
+    let r = range_at(1_000);
+    w.link.send_range(&counter(), &r, T0).unwrap();
+    assert_eq!(range_messages(&w.counter_gets()), vec![r]);
+    for dt in [1, 60, 119] {
+        w.step(T0 + dt);
+        assert!(range_messages(&w.counter_gets()).is_empty(), "at +{dt}");
+    }
+    w.step(T0 + 120);
+    assert_eq!(range_messages(&w.counter_gets()), vec![r]);
+    w.step(T0 + 121);
+    assert!(range_messages(&w.counter_gets()).is_empty());
+    // A relay that is down when the resend is due does not use up the turn.
+    w.relay.set_down(true);
+    w.step(T0 + 240);
+    w.relay.set_down(false);
+    w.step(T0 + 241);
+    assert_eq!(range_messages(&w.counter_gets()), vec![r]);
+}
+
+#[test]
+fn oa_112_the_pending_ranges_survive_a_restart_in_the_file_obm_greater_than_and_read_back_strictly()
+{
+    let mut w = world();
+    let (a, b) = (range_at(1_000), range_at(2_000));
+    w.link.send_range(&counter(), &b, T0 + 5).unwrap();
+    w.link.send_range(&counter(), &a, T0).unwrap();
+    let file = w.dir.path().join(RANGE_OUTBOX_FILE);
+    let bytes = fs::read(&file).unwrap();
+    assert_eq!(&bytes[..5], b"OBM>\x01");
+    let waiting = w.link.ranges_waiting(&counter()).unwrap();
+    assert_eq!((waiting.ranges, waiting.since), (2, T0));
+    let mut again = owner_link(&w.relay, &w.dir, FirstStart::No);
+    assert_eq!(again.ranges_waiting(&counter()), Some(waiting));
+    w.counter_gets();
+    again.step(&mut w.rig.watcher, T0 + 10);
+    assert_eq!(range_messages(&w.counter_gets()), vec![a, b]);
+    drop(again);
+    for n in 0..bytes.len() {
+        fs::write(&file, &bytes[..n]).unwrap();
+        assert!(restart_error(&w).is_some(), "cut at {n}");
+    }
+    let mut longer = bytes.clone();
+    longer.push(0);
+    fs::write(&file, &longer).unwrap();
+    let err = restart_error(&w).unwrap();
+    assert!(err.to_string().contains("LK-77"), "{err}");
+    fs::write(&file, &bytes).unwrap();
+    assert!(restart_error(&w).is_none());
+}
+
+#[test]
+fn oa_112_a_range_that_waits_a_day_raises_the_alert_of_lk_73_that_clears_when_it_is_held() {
+    let mut w = world();
+    let r = range_at(1_000);
+    w.link.send_range(&counter(), &r, T0).unwrap();
+    let day = 24 * 60 * 60;
+    w.step(T0 + day - 1);
+    assert!(batch_alerts(&w.link).is_empty());
+    w.step(T0 + day);
+    let alert = Alert::BatchUndelivered {
+        counter: counter(),
+        since: T0,
+    };
+    assert_eq!(batch_alerts(&w.link), vec![alert]);
+    w.step(T0 + day + 500);
+    assert_eq!(batch_alerts(&w.link).len(), 1, "raised once");
+    w.send_records(chain_holding_ranges(&[&r]).records());
+    w.step(T0 + day + 501);
+    assert!(batch_alerts(&w.link).is_empty());
+}
+
+#[test]
+fn oa_112_a_range_for_a_device_that_is_not_a_counter_is_not_kept() {
+    let mut w = world();
+    assert!(w
+        .link
+        .send_range(&id(8).device_id(), &range_at(0), T0)
+        .is_err());
+    assert!(!w.dir.path().join(RANGE_OUTBOX_FILE).exists());
+}
+
+#[test]
+fn oa_112_the_link_reads_the_indexes_the_counters_sales_opened_and_the_ranges_it_holds() {
+    let mut w = world();
+    let mut c = Chain::new();
+    for i in [0u32, 1, 1, 5] {
+        c.append(&id(3), RecordKind::Sale, opened(i)).unwrap();
+    }
+    let held = RangeHeld::of(&range_at(1_000));
+    c.append(&id(3), held.kind(), held.encode()).unwrap();
+    w.send_records(c.records());
+    w.step(T0 + 1);
+    let (ranges, opened) = w.link.index_use(&counter()).unwrap();
+    assert_eq!(ranges, vec![(1_000, 2_000)]);
+    assert_eq!(opened, BTreeSet::from([0, 1, 5]));
+}
+
+// ---- the owner node of a shop with its own wallet ----
+
+struct RecordingPort {
+    events: openbmt_net_io::EventReceiver,
+    watched: Arc<Mutex<Vec<ScriptBuf>>>,
+}
+
+impl DriverPort for RecordingPort {
+    fn events(&self) -> &openbmt_net_io::EventReceiver {
+        &self.events
+    }
+    fn watch_script(&self, script: ScriptBuf) {
+        self.watched.lock().unwrap().push(script);
+    }
+    fn set_all_blocks(&self, _: bool) {}
+    fn shutdown(&mut self) {}
+}
+
+/// An own-wallet owner node with counter 3 paired and delivered.
+fn paired_node(dir: &Dir) -> OwnNode {
+    let wallet = PinnedWallet::from_text(SINGLE).unwrap();
+    let mut node = OwnNode::open(dir.path(), id(1), wallet).unwrap();
+    {
+        let (shop, store) = node.shop_and_store();
+        let made = shop.make_offer(T0).unwrap();
+        let (_, request) =
+            OwnCounterPairing::begin(made.offer.clone(), &id(3), "Front", [3; 32], T0 + 5).unwrap();
+        shop.confirm(
+            &made,
+            T0 + 10,
+            &request.to_bytes(),
+            100_000,
+            Vec::new(),
+            None,
+            &store,
+        )
+        .unwrap();
+        shop.mark_delivered(&counter(), &store).unwrap();
+    }
+    node
+}
+
+#[test]
+fn oa_105_the_shops_state_is_in_its_file_and_a_node_opened_again_reads_it_back() {
+    let dir = Dir::new();
+    let node = paired_node(&dir);
+    let bytes = fs::read(dir.path().join(OWN_STATE_FILE)).unwrap();
+    assert_eq!(&bytes[..5], b"OBM=\x01");
+    assert_eq!(node.shop().to_bytes(), bytes);
+    let again = OwnNode::open(dir.path(), id(1), PinnedWallet::from_text(SINGLE).unwrap()).unwrap();
+    assert_eq!(again.shop().book(), node.shop().book());
+    // A file that is cut is refused whole.
+    fs::write(dir.path().join(OWN_STATE_FILE), &bytes[..bytes.len() - 1]).unwrap();
+    assert!(OwnNode::open(dir.path(), id(1), PinnedWallet::from_text(SINGLE).unwrap()).is_err());
+}
+
+#[test]
+fn oa_107_every_index_of_every_range_is_given_to_the_driver_once() {
+    let dir = Dir::new();
+    let mut node = paired_node(&dir);
+    let watched = Arc::new(Mutex::new(Vec::new()));
+    let (_tx, rx) = range_channel();
+    let port = RecordingPort {
+        events: rx.into(),
+        watched: watched.clone(),
+    };
+    assert_eq!(node.sync_watch(&port).unwrap(), 1_000);
+    assert_eq!(node.sync_watch(&port).unwrap(), 0, "nothing twice");
+    let wallet = PinnedWallet::from_text(SINGLE).unwrap();
+    let seen = watched.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1_000);
+    let expected: BTreeSet<ScriptBuf> = (0..1_000)
+        .map(|i| wallet.receive_script(i).unwrap())
+        .collect();
+    assert_eq!(seen.iter().cloned().collect::<BTreeSet<_>>(), expected);
+    // The desk's range is watched from the moment it is written.
+    {
+        let (shop, store) = node.shop_and_store();
+        shop.allocate_desk(&store).unwrap();
+    }
+    assert_eq!(node.sync_watch(&port).unwrap(), 1_000);
+    assert_eq!(
+        node.index_of(&wallet.receive_script(1_500).unwrap())
+            .unwrap(),
+        Some(1_500)
+    );
+    assert_eq!(
+        node.index_of(&wallet.receive_script(2_000).unwrap())
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn oa_112_a_counter_below_three_hundred_unused_indexes_is_sent_the_next_range_once() {
+    let dir = Dir::new();
+    let mut node = paired_node(&dir);
+    let mut w = world();
+    // 1,000 held and none used: nothing to do.
+    assert!(node.top_up(&mut w.link, T0 + 1).unwrap().is_empty());
+    // 720 sales opened: 280 left.
+    let mut c = Chain::new();
+    for i in 0..720u32 {
+        c.append(&id(3), RecordKind::Sale, opened(i)).unwrap();
+    }
+    send_all(&mut w, c.records(), T0 + 2);
+    assert_eq!(node.unused_of(&w.link, &counter()), Some(280));
+    w.counter_gets();
+    let done = node.top_up(&mut w.link, T0 + 3).unwrap();
+    assert_eq!(done.len(), 1);
+    assert_eq!((done[0].start, done[0].end), (1_000, 2_000));
+    let sent = range_messages(&w.counter_gets());
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].range.start, 1_000);
+    sent[0].verify(&id(1).device_id()).unwrap();
+    // At most one range waits for a counter.
+    assert!(node.top_up(&mut w.link, T0 + 4).unwrap().is_empty());
+    assert_eq!(w.link.ranges_waiting(&counter()).unwrap().ranges, 1);
+    // The book was written before the send: a restart has the range.
+    let again = OwnNode::open(dir.path(), id(1), PinnedWallet::from_text(SINGLE).unwrap()).unwrap();
+    assert_eq!(again.shop().book().next_start(), 2_000);
+    // The counter shows the range held: it no longer waits, and with 1,280
+    // unused nothing more is sent.
+    let mut c2 = Chain::new();
+    let held = RangeHeld::of(&sent[0]);
+    // The counter's chain is the 720 records, then the range-held record.
+    for r in c.records() {
+        c2.append(&id(3), r.kind, r.body.clone()).unwrap();
+    }
+    c2.append(&id(3), held.kind(), held.encode()).unwrap();
+    send_all(&mut w, &c2.records()[720..], T0 + 5);
+    assert!(w.link.ranges_waiting(&counter()).is_none());
+    assert_eq!(node.unused_of(&w.link, &counter()), Some(1_280));
+    assert!(node.top_up(&mut w.link, T0 + 6).unwrap().is_empty());
+}
+
+#[test]
+fn oa_112_a_counter_whose_bundle_still_waits_is_given_no_range() {
+    let dir = Dir::new();
+    let wallet = PinnedWallet::from_text(SINGLE).unwrap();
+    let mut node = OwnNode::open(dir.path(), id(1), wallet).unwrap();
+    {
+        let (shop, store) = node.shop_and_store();
+        let made = shop.make_offer(T0).unwrap();
+        let (_, request) =
+            OwnCounterPairing::begin(made.offer.clone(), &id(3), "Front", [3; 32], T0 + 5).unwrap();
+        shop.confirm(
+            &made,
+            T0 + 10,
+            &request.to_bytes(),
+            100_000,
+            Vec::new(),
+            None,
+            &store,
+        )
+        .unwrap();
+    }
+    let mut w = world();
+    assert!(node.top_up(&mut w.link, T0 + 1).unwrap().is_empty());
+    assert_eq!(node.unused_of(&w.link, &counter()), None);
+}
+
+#[test]
+fn oa_113_the_gap_needed_follows_the_highest_index_a_counter_handed_out() {
+    let dir = Dir::new();
+    let node = paired_node(&dir);
+    let mut w = world();
+    let mut c = Chain::new();
+    for i in 0..6u32 {
+        c.append(&id(3), RecordKind::Sale, opened(i)).unwrap();
+    }
+    w.send_records(c.records());
+    w.step(T0 + 1);
+    let paid = BTreeSet::from([0u32, 5]);
+    assert_eq!(node.gap_needed(&w.link, &paid), 5);
+    let paid = BTreeSet::from([0u32, 1, 2, 3, 4, 5]);
+    assert_eq!(node.gap_needed(&w.link, &paid), 1);
+}
+
+#[test]
+fn oc_22_the_phones_watch_for_the_own_wallet_is_the_live_watch() {
+    assert_eq!(
+        usize::try_from(openbmt_owner::own_book::MAX_WATCHED_INDEXES).unwrap(),
+        crate::live::OWNER_LIVE_WATCH
+    );
+}

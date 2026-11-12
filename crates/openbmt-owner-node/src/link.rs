@@ -65,9 +65,10 @@ use openbmt_core::batch::PinnedRoots;
 use openbmt_core::batch::SignedBatch;
 use openbmt_core::command::SignedCommand;
 use openbmt_core::identity::DeviceId;
+use openbmt_core::pinned_wallet::SignedRange;
 use openbmt_core::records::{DeviceList, Record, RecordKind};
 use openbmt_core::settings::{Settings, SettingsError, SignedSettings};
-use openbmt_counter::BatchHeld;
+use openbmt_counter::{BatchHeld, Event, RangeHeld};
 use openbmt_counter_node::DriverPort;
 use openbmt_courier::{
     decode_records, received_content, Courier, Post, Received, RelayPost, SendError,
@@ -77,6 +78,7 @@ use openbmt_pos::PosNotice;
 
 use crate::batch_outbox::{BatchOutbox, BatchOutboxError, PendingBatch};
 use crate::copy::{CheckInTaken, CopyError, CounterCopy, Stop};
+use crate::range_outbox::{PendingRange, RangeOutbox, RangeOutboxError};
 use crate::settings_roster::{RosterEntry, RosterError, SettingsRoster};
 use crate::watcher::OwnerWatcher;
 
@@ -216,6 +218,8 @@ pub enum OwnerLinkError {
     /// The file of the devices pending settings are for could not be opened
     /// (LK-76).
     Roster(RosterError),
+    /// The file of ranges that wait could not be opened (LK-77, OA-112).
+    Ranges(RangeOutboxError),
 }
 
 impl std::fmt::Display for OwnerLinkError {
@@ -226,6 +230,7 @@ impl std::fmt::Display for OwnerLinkError {
             }
             Self::Batches(error) => write!(f, "{error}"),
             Self::Roster(error) => write!(f, "{error}"),
+            Self::Ranges(error) => write!(f, "{error}"),
         }
     }
 }
@@ -301,6 +306,32 @@ struct HeldBatches {
     batches: BTreeSet<BatchHeld>,
 }
 
+/// What a counter's records show of its indexes (OA-112): the ranges it
+/// holds from range-held records (tag 35) and the indexes its sales opened,
+/// and how many of its records were looked at to find them.
+#[derive(Debug, Default)]
+struct IndexSeen {
+    looked_at: u64,
+    ranges: BTreeSet<RangeHeld>,
+    opened: BTreeSet<u32>,
+}
+
+/// What a counter's records show of its indexes: the (start, end) of each
+/// range it holds from range-held records, and the indexes its sales opened
+/// (OA-112).
+pub type IndexUse = (Vec<(u32, u32)>, BTreeSet<u32>);
+
+/// The ranges that wait for one counter to hold them (OA-112).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RangesWaiting {
+    /// The counter.
+    pub counter: DeviceId,
+    /// How many ranges wait.
+    pub ranges: usize,
+    /// When the oldest was first sent.
+    pub since: u64,
+}
+
 /// The owner's end of the link. See the module docs.
 pub struct OwnerLink<R: Post = RelayPost> {
     courier: Courier<R>,
@@ -330,6 +361,12 @@ pub struct OwnerLink<R: Post = RelayPost> {
     boxes_sent: BTreeSet<(DeviceId, u32)>,
     /// LK-70, LK-72: the batches sent and not yet shown as held.
     batches: BatchOutbox,
+    /// OA-112, LK-77: the ranges sent and not yet shown as held.
+    ranges: RangeOutbox,
+    /// OA-112: what each copy shows of the indexes of its counter.
+    index_use: BTreeMap<DeviceId, IndexSeen>,
+    /// LK-71, LK-77: when the pending ranges of a counter were last sent.
+    ranges_sent_at: BTreeMap<DeviceId, u64>,
     /// LK-76: the devices each pending settings delivery is for, kept so a
     /// start after a restart reaches the same ones.
     roster: SettingsRoster,
@@ -373,6 +410,7 @@ impl<R: Post> OwnerLink<R> {
             copies.insert(*counter, copy);
         }
         let batches = BatchOutbox::open(&root).map_err(OwnerLinkError::Batches)?;
+        let ranges = RangeOutbox::open(&root).map_err(OwnerLinkError::Ranges)?;
         let roster = SettingsRoster::open(&root).map_err(OwnerLinkError::Roster)?;
         Ok(Self {
             courier,
@@ -395,6 +433,9 @@ impl<R: Post> OwnerLink<R> {
             settings_sent: BTreeMap::new(),
             boxes_sent: BTreeSet::new(),
             batches,
+            ranges,
+            index_use: BTreeMap::new(),
+            ranges_sent_at: BTreeMap::new(),
             roster,
             held: BTreeMap::new(),
             batches_sent_at: BTreeMap::new(),
@@ -547,6 +588,87 @@ impl<R: Post> OwnerLink<R> {
         self.send_now(counter, Kind::Batch, &batch.to_bytes())?;
         self.batches_sent_at.insert(*counter, now);
         Ok(())
+    }
+
+    /// What the link says about the ranges that wait for a counter, or
+    /// `None` when none wait (OA-112).
+    pub fn ranges_waiting(&self, counter: &DeviceId) -> Option<RangesWaiting> {
+        let mut mine = self.ranges.items().iter().filter(|p| p.counter == *counter);
+        let first = mine.next()?;
+        let (ranges, since) = mine.fold((1, first.queued_at), |(n, at), p| {
+            (n + 1, at.min(p.queued_at))
+        });
+        Some(RangesWaiting {
+            counter: *counter,
+            ranges,
+            since,
+        })
+    }
+
+    /// OA-112, LK-77: send a signed range to a counter as a message of kind
+    /// Range, and keep it until the counter's records show it held. `now` is
+    /// the time of the first send; the link sends the range again by itself.
+    /// The range is kept, in its file, before the first send.
+    pub fn send_range(
+        &mut self,
+        counter: &DeviceId,
+        range: &SignedRange,
+        now: u64,
+    ) -> Result<(), SendError> {
+        if self.copies.contains_key(counter) {
+            let kept = self.ranges.push(PendingRange {
+                counter: *counter,
+                range: *range,
+                queued_at: now,
+            });
+            if let Err(e) = kept {
+                self.note(format!(
+                    "the range for {counter:?} could not be kept for sending again: {e}"
+                ));
+            }
+        }
+        self.send_now(counter, Kind::Range, &range.to_bytes())?;
+        self.ranges_sent_at.insert(*counter, now);
+        Ok(())
+    }
+
+    /// OA-112: the ranges `counter`'s records show it holds, as the start
+    /// and the end of each, and the indexes its sales opened. Read from the
+    /// copy as it grows; `None` for a counter the link does not follow.
+    pub fn index_use(&self, counter: &DeviceId) -> Option<IndexUse> {
+        let seen = self.index_use.get(counter)?;
+        Some((
+            seen.ranges.iter().map(|r| (r.start, r.end)).collect(),
+            seen.opened.clone(),
+        ))
+    }
+
+    /// OA-112: read what the copies show of each counter's indexes, from
+    /// where the last look stopped.
+    pub fn scan_index_use(&mut self) {
+        for counter in self.counters.clone() {
+            let Some(copy) = self.copies.get(&counter) else {
+                continue;
+            };
+            let seen = self.index_use.entry(counter).or_default();
+            let from = usize::try_from(seen.looked_at).unwrap_or(usize::MAX);
+            for record in copy.records().iter().skip(from) {
+                match record.kind {
+                    RecordKind::Setting => {
+                        if let Ok(range) = RangeHeld::decode(&record.body) {
+                            seen.ranges.insert(range);
+                        }
+                    }
+                    RecordKind::Sale => {
+                        if let Ok(Event::Opened { index, .. }) = Event::decode(&record.body) {
+                            seen.opened.insert(index);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            seen.looked_at = copy.len();
+        }
     }
 
     fn send_now(&mut self, to: &DeviceId, kind: Kind, content: &[u8]) -> Result<(), SendError> {
@@ -834,6 +956,8 @@ impl<R: Post> OwnerLink<R> {
     pub fn step<P: DriverPort>(&mut self, watcher: &mut OwnerWatcher<P>, now: u64) {
         let started = *self.started_at.get_or_insert(now);
         self.check_missed(now, started);
+        self.scan_index_use();
+        self.settle_ranges();
         self.settle_batches(now);
         if now < self.next_relay_at {
             return;
@@ -857,9 +981,14 @@ impl<R: Post> OwnerLink<R> {
             reached = self.reply(&reply_due);
         }
         if reached {
-            // Taking records may have shown a batch held.
+            // Taking records may have shown a batch or a range held.
+            self.scan_index_use();
+            self.settle_ranges();
             self.settle_batches(now);
             reached = self.resend_batches(now);
+            if reached {
+                reached = self.resend_ranges(now);
+            }
         }
         if reached {
             reached = self.heartbeats(watcher, now);
@@ -896,7 +1025,7 @@ impl<R: Post> OwnerLink<R> {
     /// LK-70, LK-73: drop the pending batches the copies show as held or
     /// passed, and raise or clear the alert for the ones that wait too long.
     fn settle_batches(&mut self, now: u64) {
-        if self.batches.is_empty() && self.held.is_empty() {
+        if self.batches.is_empty() && self.held.is_empty() && self.ranges.is_empty() {
             self.alerts
                 .retain(|a| !matches!(a, Alert::BatchUndelivered { .. }));
             return;
@@ -932,12 +1061,21 @@ impl<R: Post> OwnerLink<R> {
             Ok(_) => {}
             Err(e) => self.note(format!("the pending batches could not be saved: {e}")),
         }
+        // LK-73, OA-112: a range that waits too long raises the same alert,
+        // naming the oldest of the batches and ranges that wait.
         let late: Vec<(DeviceId, u64)> = self
             .counters
             .iter()
-            .filter_map(|c| self.batches_waiting(c))
-            .filter(|w| now.saturating_sub(w.since) >= self.cfg.batch_alert_secs)
-            .map(|w| (w.counter, w.since))
+            .filter_map(|c| {
+                let batch = self.batches_waiting(c).map(|w| w.since);
+                let range = self.ranges_waiting(c).map(|w| w.since);
+                batch
+                    .into_iter()
+                    .chain(range)
+                    .min()
+                    .map(|since| (*c, since))
+            })
+            .filter(|(_, since)| now.saturating_sub(*since) >= self.cfg.batch_alert_secs)
             .collect();
         self.alerts.retain(|a| match a {
             Alert::BatchUndelivered { counter, since } => late.contains(&(*counter, *since)),
@@ -981,6 +1119,69 @@ impl<R: Post> OwnerLink<R> {
                     }
                     Err(e) => {
                         self.note(format!("a batch for {counter:?} was not sent again: {e}"));
+                        break;
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// OA-112, LK-77: drop the pending ranges the copies show as held, or
+    /// show a later range held (one that starts at or after the end of this
+    /// one), as [`OwnerLink::settle_batches`] does for batches.
+    fn settle_ranges(&mut self) {
+        if self.ranges.is_empty() {
+            return;
+        }
+        let uses = &self.index_use;
+        let dropped = self.ranges.retain(|p| {
+            let Some(seen) = uses.get(&p.counter) else {
+                return true;
+            };
+            let mine = RangeHeld::of(&p.range);
+            let shown = seen.ranges.contains(&mine);
+            let passed = seen.ranges.iter().any(|r| r.start >= mine.end);
+            !(shown || passed)
+        });
+        if let Err(e) = dropped {
+            self.note(format!("the pending ranges could not be saved: {e}"));
+        }
+    }
+
+    /// LK-71, LK-77: send the ranges that still wait to each counter, oldest
+    /// first, at most once in `batch_resend_secs` for each counter. `false`
+    /// if the relay could not be reached.
+    fn resend_ranges(&mut self, now: u64) -> bool {
+        for counter in self.counters.clone() {
+            let due = self
+                .ranges_sent_at
+                .get(&counter)
+                .is_none_or(|at| now >= at.saturating_add(self.cfg.batch_resend_secs));
+            if !due {
+                continue;
+            }
+            let mine: Vec<SignedRange> = self
+                .ranges
+                .items()
+                .iter()
+                .filter(|p| p.counter == counter)
+                .map(|p| p.range)
+                .collect();
+            if mine.is_empty() {
+                continue;
+            }
+            self.ranges_sent_at.insert(counter, now);
+            for range in mine {
+                match self.courier.send(&counter, Kind::Range, &range.to_bytes()) {
+                    Ok(()) => {}
+                    Err(e) if e.is_retryable() => {
+                        // Tried again at the next step.
+                        self.ranges_sent_at.remove(&counter);
+                        return false;
+                    }
+                    Err(e) => {
+                        self.note(format!("a range for {counter:?} was not sent again: {e}"));
                         break;
                     }
                 }
