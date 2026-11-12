@@ -2,7 +2,9 @@
 //! curl on 2026-11-11 (UTC) from the public endpoints, with no key and no
 //! cookies. The expected cents are written by hand from the files. The
 //! fixtures of the other currencies are made from the shapes the exchanges
-//! document, not fetched; each is marked below.
+//! document, not fetched, except those of the last section (CAD, MXN, BRL,
+//! TRY, THB, ZAR), which are real replies of 2026-11-12; each is marked
+//! below.
 
 use super::src;
 use crate::{parse_response, ParseRefused};
@@ -291,5 +293,248 @@ fn rt_15_the_documented_fixtures_are_small_enough_and_valid() {
     ] {
         assert!(f.len() < 1024);
         assert!(std::str::from_utf8(f).is_ok());
+    }
+}
+
+// Real replies of the sources added for CAD, MXN, BRL, TRY, THB and ZAR:
+// fetched with curl on 2026-11-12 (UTC, between 22:55 and 22:56) from the
+// public endpoints, with no key and no cookies, and saved as they came.
+const KRAKEN_CAD: &[u8] = include_bytes!("../../tests/fixtures/kraken-cad.json");
+const NDAX_CAD: &[u8] = include_bytes!("../../tests/fixtures/ndax-cad.json");
+const BITSO_MXN: &[u8] = include_bytes!("../../tests/fixtures/bitso-mxn.json");
+const BINANCE_MXN: &[u8] = include_bytes!("../../tests/fixtures/binance-mxn.json");
+const FOXBIT_BRL: &[u8] = include_bytes!("../../tests/fixtures/foxbit-brl.json");
+const OKX_BRL: &[u8] = include_bytes!("../../tests/fixtures/okx-brl.json");
+const BINANCE_BRL: &[u8] = include_bytes!("../../tests/fixtures/binance-brl.json");
+const BTCTURK_TRY: &[u8] = include_bytes!("../../tests/fixtures/btcturk-try.json");
+const OKX_TRY: &[u8] = include_bytes!("../../tests/fixtures/okx-try.json");
+const BINANCE_TRY: &[u8] = include_bytes!("../../tests/fixtures/binance-try.json");
+const BITKUB_THB: &[u8] = include_bytes!("../../tests/fixtures/bitkub-thb.json");
+const BINANCE_THB: &[u8] = include_bytes!("../../tests/fixtures/binance-thb.json");
+const LUNO_ZAR: &[u8] = include_bytes!("../../tests/fixtures/luno-zar.json");
+const VALR_ZAR: &[u8] = include_bytes!("../../tests/fixtures/valr-zar.json");
+
+const ADDED: [(&str, &[u8]); 14] = [
+    ("kraken-cad", KRAKEN_CAD),
+    ("ndax-cad", NDAX_CAD),
+    ("bitso-mxn", BITSO_MXN),
+    ("binance-mxn", BINANCE_MXN),
+    ("foxbit-brl", FOXBIT_BRL),
+    ("okx-brl", OKX_BRL),
+    ("binance-brl", BINANCE_BRL),
+    ("btcturk-try", BTCTURK_TRY),
+    ("okx-try", OKX_TRY),
+    ("binance-try", BINANCE_TRY),
+    ("bitkub-thb", BITKUB_THB),
+    ("binance-thb", BINANCE_THB),
+    ("luno-zar", LUNO_ZAR),
+    ("valr-zar", VALR_ZAR),
+];
+
+#[test]
+fn rt_15_the_real_replies_of_the_added_currencies_are_read_to_the_minor_unit() {
+    let cases: [(&str, u64); 14] = [
+        // "c":["101772.10000", ..]
+        ("kraken-cad", 10_177_210),
+        // "LastTradedPx":101974.96, a number.
+        ("ndax-cad", 10_197_496),
+        // "payload":{"last":"1327450", ..}
+        ("bitso-mxn", 132_745_000),
+        // "price":"1327670.00000000"
+        ("binance-mxn", 132_767_000),
+        // "data":[{"last_trade":{"price":"405006.00000000", ..}}]
+        ("foxbit-brl", 40_500_600),
+        // "data":[{"last":"404294", ..}]
+        ("okx-brl", 40_429_400),
+        ("binance-brl", 40_498_600),
+        // "data":[{"last":3586000, ..}], a number.
+        ("btcturk-try", 358_600_000),
+        ("okx-try", 359_364_300),
+        ("binance-try", 359_010_800),
+        // [{"last":"2418106.23", ..}]
+        ("bitkub-thb", 241_810_623),
+        ("binance-thb", 241_753_700),
+        // "last_trade":"1203596.00"
+        ("luno-zar", 120_359_600),
+        // "lastTradedPrice":"1204791"
+        ("valr-zar", 120_479_100),
+    ];
+    for ((id, body), (want_id, want)) in ADDED.iter().zip(cases) {
+        assert_eq!(*id, want_id);
+        assert_eq!(parse_response(src(id), body), Ok(want), "{id}");
+    }
+}
+
+#[test]
+fn rt_17_a_reply_for_another_market_is_refused_in_every_added_shape() {
+    // NDAX's reply names no market (its instrument is a number): the address
+    // is the one statement of it, as for Indodax.
+    for (id, was, now) in [
+        ("bitso-mxn", "btc_mxn", "btc_usd"),
+        ("binance-mxn", "BTCMXN", "BTCUSDT"),
+        ("foxbit-brl", "btcbrl", "btcusdt"),
+        ("okx-brl", "BTC-BRL", "BTC-USDT"),
+        ("binance-brl", "BTCBRL", "BTCUSDT"),
+        ("btcturk-try", "BTCTRY", "BTCUSDT"),
+        ("okx-try", "BTC-TRY", "BTC-USDT"),
+        ("binance-try", "BTCTRY", "BTCUSDT"),
+        ("bitkub-thb", "BTC_THB", "BTC_USDT"),
+        ("binance-thb", "BTCTHB", "BTCUSDT"),
+        ("luno-zar", "XBTZAR", "XBTUSDC"),
+        ("valr-zar", "BTCZAR", "BTCUSDC"),
+    ] {
+        let body = ADDED.iter().find(|(i, _)| *i == id).expect("fixture").1;
+        let text = std::str::from_utf8(body).expect("utf-8");
+        let changed = text.replacen(&format!("\"{was}\""), &format!("\"{now}\""), 1);
+        assert_ne!(changed, text, "{id}");
+        assert_eq!(
+            parse_response(src(id), changed.as_bytes()),
+            Err(ParseRefused::WrongCurrency),
+            "{id}"
+        );
+    }
+    // A reply of another currency's market of the same exchange.
+    assert_eq!(
+        parse_response(src("binance-mxn"), BINANCE_BRL),
+        Err(ParseRefused::WrongCurrency)
+    );
+    assert_eq!(
+        parse_response(src("okx-brl"), OKX_TRY),
+        Err(ParseRefused::WrongCurrency)
+    );
+    assert_eq!(
+        parse_response(src("luno-zar"), LUNO_IDR),
+        Err(ParseRefused::WrongCurrency)
+    );
+}
+
+#[test]
+fn rt_15_a_missing_field_or_an_escaped_key_is_refused_in_every_added_shape() {
+    for (id, field) in [
+        ("ndax-cad", "\"LastTradedPx\""),
+        ("bitso-mxn", "\"last\""),
+        ("binance-mxn", "\"price\""),
+        ("foxbit-brl", "\"price\""),
+        ("okx-brl", "\"last\""),
+        ("binance-brl", "\"price\""),
+        ("btcturk-try", "\"last\""),
+        ("okx-try", "\"last\""),
+        ("binance-try", "\"price\""),
+        ("bitkub-thb", "\"last\""),
+        ("binance-thb", "\"price\""),
+        ("luno-zar", "\"last_trade\""),
+        ("valr-zar", "\"lastTradedPrice\""),
+    ] {
+        let body = ADDED.iter().find(|(i, _)| *i == id).expect("fixture").1;
+        let text = std::str::from_utf8(body).expect("utf-8");
+        let missing = text.replacen(field, "\"other\"", 1);
+        assert_ne!(missing, text, "{id}");
+        assert_eq!(
+            parse_response(src(id), missing.as_bytes()),
+            Err(ParseRefused::MissingField),
+            "{id}"
+        );
+        let escaped = text.replacen(field, &field.replacen(&field[1..2], "\\u00", 1), 1);
+        assert!(parse_response(src(id), escaped.as_bytes()).is_err(), "{id}");
+    }
+}
+
+#[test]
+fn rt_15_a_number_and_a_string_are_not_taken_for_each_other_in_the_added_shapes() {
+    // NDAX and BtcTurk say a number; the others say a string.
+    assert_eq!(
+        parse_response(
+            src("ndax-cad"),
+            br#"{"InstrumentId":1,"LastTradedPx":"101974.96"}"#
+        ),
+        Err(ParseRefused::WrongShape)
+    );
+    assert_eq!(
+        parse_response(
+            src("btcturk-try"),
+            br#"{"data":[{"pair":"BTCTRY","last":"3586000"}]}"#
+        ),
+        Err(ParseRefused::WrongShape)
+    );
+    assert_eq!(
+        parse_response(
+            src("binance-try"),
+            br#"{"symbol":"BTCTRY","price":3590108.0}"#
+        ),
+        Err(ParseRefused::WrongShape)
+    );
+    assert_eq!(
+        parse_response(
+            src("okx-try"),
+            br#"{"data":[{"instId":"BTC-TRY","last":3593643}]}"#
+        ),
+        Err(ParseRefused::WrongShape)
+    );
+    // An exponent in a number is refused (RT-20), as for the first nine.
+    assert_eq!(
+        parse_response(
+            src("ndax-cad"),
+            br#"{"InstrumentId":1,"LastTradedPx":1.0197496e5}"#
+        ),
+        Err(ParseRefused::Price(crate::PriceRefused::Exponent))
+    );
+}
+
+#[test]
+fn rt_15_an_empty_data_array_or_an_error_reply_is_refused_in_the_added_shapes() {
+    assert_eq!(
+        parse_response(src("okx-brl"), br#"{"code":"0","data":[],"msg":""}"#),
+        Err(ParseRefused::MissingField)
+    );
+    assert_eq!(
+        parse_response(
+            src("okx-brl"),
+            br#"{"code":"51001","msg":"Instrument ID does not exist","data":[]}"#
+        ),
+        Err(ParseRefused::MissingField)
+    );
+    assert_eq!(
+        parse_response(
+            src("binance-mxn"),
+            br#"{"code":-1121,"msg":"Invalid symbol."}"#
+        ),
+        Err(ParseRefused::MissingField)
+    );
+    assert_eq!(
+        parse_response(src("bitkub-thb"), br#"{"error":11}"#),
+        Err(ParseRefused::WrongShape)
+    );
+    assert_eq!(
+        parse_response(src("bitkub-thb"), b"[]"),
+        Err(ParseRefused::MissingField)
+    );
+    assert_eq!(
+        parse_response(src("foxbit-brl"), br#"{"error":{"code":404}}"#),
+        Err(ParseRefused::MissingField)
+    );
+}
+
+#[test]
+fn rt_24_the_added_currencies_are_read_in_their_own_band() {
+    // A price in satoshi-sized units is far under the band; a plausible one
+    // is in it.
+    assert_eq!(
+        parse_response(
+            src("binance-mxn"),
+            br#"{"symbol":"BTCMXN","price":"99.99"}"#
+        ),
+        Err(ParseRefused::Price(crate::PriceRefused::OutOfBand))
+    );
+    assert_eq!(
+        parse_response(src("binance-mxn"), br#"{"symbol":"BTCMXN","price":"100"}"#),
+        Ok(10_000)
+    );
+}
+
+#[test]
+fn rt_15_the_real_fixtures_of_the_added_currencies_are_small_and_valid() {
+    for (id, f) in ADDED {
+        assert!(f.len() < 1024, "{id}");
+        assert!(std::str::from_utf8(f).is_ok(), "{id}");
     }
 }

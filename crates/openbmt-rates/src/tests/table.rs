@@ -65,11 +65,15 @@ fn rt_03_every_source_names_a_currency_its_address_names_too() {
         let code = s.currency.code();
         assert!(code.len() == 3 && code.bytes().all(|b| b.is_ascii_uppercase()));
         // The address is the one statement of the currency where the reply
-        // has none (RT-17), so it must say it.
+        // has none (RT-17), so it must say it. NDAX's documented ticker
+        // (`GetLevel1`) takes the market as an instrument number, 1 for
+        // BTCCAD in its `GetInstruments`, and its reply carries that number
+        // only; the label of the source and the band say the currency.
         assert!(
-            s.url
-                .to_ascii_lowercase()
-                .contains(&code.to_ascii_lowercase()),
+            s.id == "ndax-cad"
+                || s.url
+                    .to_ascii_lowercase()
+                    .contains(&code.to_ascii_lowercase()),
             "{}",
             s.id
         );
@@ -111,9 +115,48 @@ fn rt_03_every_currency_but_bitcoin_standard_has_at_least_two_sources() {
             ("KRW", 2),
             ("IDR", 2),
             ("SGD", 2),
+            ("CAD", 2),
+            ("MXN", 2),
+            ("BRL", 3),
+            ("TRY", 3),
+            ("THB", 2),
+            ("ZAR", 2),
             ("SAT", 0)
         ]
     );
+}
+
+#[test]
+fn rt_01_the_added_currencies_have_their_sources_from_different_companies() {
+    let ids = |c| -> Vec<&str> { sources_for(c).map(|s| s.id).collect() };
+    assert_eq!(ids(ShopCurrency::Cad), ["kraken-cad", "ndax-cad"]);
+    assert_eq!(ids(ShopCurrency::Mxn), ["bitso-mxn", "binance-mxn"]);
+    assert_eq!(
+        ids(ShopCurrency::Brl),
+        ["foxbit-brl", "okx-brl", "binance-brl"]
+    );
+    assert_eq!(
+        ids(ShopCurrency::Try),
+        ["btcturk-try", "okx-try", "binance-try"]
+    );
+    assert_eq!(ids(ShopCurrency::Thb), ["bitkub-thb", "binance-thb"]);
+    assert_eq!(ids(ShopCurrency::Zar), ["luno-zar", "valr-zar"]);
+    // A company has one source per currency: the host of every source of a
+    // currency differs.
+    for c in ShopCurrency::ALL {
+        let hosts: Vec<&str> = sources_for(c)
+            .map(|s| {
+                s.url
+                    .trim_start_matches("https://")
+                    .split('/')
+                    .next()
+                    .unwrap()
+            })
+            .collect();
+        for (i, a) in hosts.iter().enumerate() {
+            assert!(!hosts[i + 1..].contains(a), "{} {a}", c.code());
+        }
+    }
 }
 
 #[test]

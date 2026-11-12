@@ -1280,6 +1280,18 @@ pub enum ShopCurrencyView {
     Sgd,
     /// Bitcoin Standard: sats, no price.
     Sats,
+    /// Canadian dollar.
+    Cad,
+    /// Mexican peso.
+    Mxn,
+    /// Brazilian real.
+    Brl,
+    /// Turkish lira.
+    Try,
+    /// Thai baht.
+    Thb,
+    /// South African rand.
+    Zar,
 }
 
 wire_unit_enum!(ShopCurrencyView {
@@ -1292,7 +1304,13 @@ wire_unit_enum!(ShopCurrencyView {
     Krw = 7,
     Idr = 8,
     Sgd = 9,
-    Sats = 10
+    Sats = 10,
+    Cad = 11,
+    Mxn = 12,
+    Brl = 13,
+    Try = 14,
+    Thb = 15,
+    Zar = 16
 });
 
 impl ShopCurrencyView {
@@ -1310,6 +1328,12 @@ impl ShopCurrencyView {
             C::Idr => Self::Idr,
             C::Sgd => Self::Sgd,
             C::Sats => Self::Sats,
+            C::Cad => Self::Cad,
+            C::Mxn => Self::Mxn,
+            C::Brl => Self::Brl,
+            C::Try => Self::Try,
+            C::Thb => Self::Thb,
+            C::Zar => Self::Zar,
         }
     }
 }

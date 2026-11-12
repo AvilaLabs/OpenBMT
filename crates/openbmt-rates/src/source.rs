@@ -81,7 +81,7 @@ pub struct Source {
     pub shape: Shape,
 }
 
-use ShopCurrency::{Aud, Eur, Gbp, Idr, Inr, Jpy, Krw, Sgd, Usd};
+use ShopCurrency::{Aud, Brl, Cad, Eur, Gbp, Idr, Inr, Jpy, Krw, Mxn, Sgd, Thb, Try, Usd, Zar};
 
 const fn src(
     id: &'static str,
@@ -100,11 +100,60 @@ const fn src(
 }
 
 const MARKET_ID: Step = Step::Key("marketId");
+const DATA: Step = Step::Key("data");
+
+/// Binance's last price of a market, from its market-data-only host: the
+/// price is a string and the reply names the market.
+const fn binance(
+    id: &'static str,
+    url: &'static str,
+    currency: ShopCurrency,
+    market: &'static str,
+) -> Source {
+    src(
+        id,
+        'n',
+        url,
+        currency,
+        Shape::Text {
+            price: &[Step::Key("price")],
+            check: Some(Check {
+                at: &[Step::Key("symbol")],
+                equals: market,
+                fault: Fault::Market,
+            }),
+        },
+    )
+}
+
+/// OKX's last price of a market: the first item of `data`, which names the
+/// market.
+const fn okx(
+    id: &'static str,
+    url: &'static str,
+    currency: ShopCurrency,
+    market: &'static str,
+) -> Source {
+    src(
+        id,
+        'o',
+        url,
+        currency,
+        Shape::Text {
+            price: &[DATA, Step::First, Step::Key("last")],
+            check: Some(Check {
+                at: &[DATA, Step::First, Step::Key("instId")],
+                equals: market,
+                fault: Fault::Market,
+            }),
+        },
+    )
+}
 
 /// RT-01: the sources, fixed at build time, a table for each currency. The
 /// order is the order of the letters in a combined label. The label of a
 /// source that is not for dollars ends in its currency.
-pub static SOURCES: [Source; 25] = [
+pub static SOURCES: [Source; 39] = [
     // US dollar.
     src(
         "kraken",
@@ -344,6 +393,149 @@ pub static SOURCES: [Source; 25] = [
             check: Some(Check {
                 at: &[Step::Key("SecondaryCurrencyCode")],
                 equals: "Sgd",
+                fault: Fault::Market,
+            }),
+        },
+    ),
+    // Canadian dollar.
+    src(
+        "kraken-cad",
+        'k',
+        "https://api.kraken.com/0/public/Ticker?pair=XBTCAD",
+        Cad,
+        Shape::Kraken,
+    ),
+    src(
+        "ndax-cad",
+        'n',
+        "https://api.ndax.io:8443/AP/GetLevel1?OMSId=1&InstrumentId=1",
+        Cad,
+        Shape::Number {
+            price: &[Step::Key("LastTradedPx")],
+            check: None,
+        },
+    ),
+    // Mexican peso.
+    src(
+        "bitso-mxn",
+        'b',
+        "https://api.bitso.com/v3/ticker/?book=btc_mxn",
+        Mxn,
+        Shape::Text {
+            price: &[Step::Key("payload"), Step::Key("last")],
+            check: Some(Check {
+                at: &[Step::Key("payload"), Step::Key("book")],
+                equals: "btc_mxn",
+                fault: Fault::Market,
+            }),
+        },
+    ),
+    binance(
+        "binance-mxn",
+        "https://data-api.binance.vision/api/v3/ticker/price?symbol=BTCMXN",
+        Mxn,
+        "BTCMXN",
+    ),
+    // Brazilian real.
+    src(
+        "foxbit-brl",
+        'f',
+        "https://api.foxbit.com.br/rest/v3/markets/btcbrl/ticker/24hr",
+        Brl,
+        Shape::Text {
+            price: &[DATA, Step::First, Step::Key("last_trade"), Step::Key("price")],
+            check: Some(Check {
+                at: &[DATA, Step::First, Step::Key("market_symbol")],
+                equals: "btcbrl",
+                fault: Fault::Market,
+            }),
+        },
+    ),
+    okx(
+        "okx-brl",
+        "https://www.okx.com/api/v5/market/ticker?instId=BTC-BRL",
+        Brl,
+        "BTC-BRL",
+    ),
+    binance(
+        "binance-brl",
+        "https://data-api.binance.vision/api/v3/ticker/price?symbol=BTCBRL",
+        Brl,
+        "BTCBRL",
+    ),
+    // Turkish lira.
+    src(
+        "btcturk-try",
+        't',
+        "https://api.btcturk.com/api/v2/ticker?pairSymbol=BTCTRY",
+        Try,
+        Shape::Number {
+            price: &[DATA, Step::First, Step::Key("last")],
+            check: Some(Check {
+                at: &[DATA, Step::First, Step::Key("pair")],
+                equals: "BTCTRY",
+                fault: Fault::Market,
+            }),
+        },
+    ),
+    okx(
+        "okx-try",
+        "https://www.okx.com/api/v5/market/ticker?instId=BTC-TRY",
+        Try,
+        "BTC-TRY",
+    ),
+    binance(
+        "binance-try",
+        "https://data-api.binance.vision/api/v3/ticker/price?symbol=BTCTRY",
+        Try,
+        "BTCTRY",
+    ),
+    // Thai baht.
+    src(
+        "bitkub-thb",
+        'k',
+        "https://api.bitkub.com/api/v3/market/ticker?sym=BTC_THB",
+        Thb,
+        Shape::Text {
+            price: &[Step::First, Step::Key("last")],
+            check: Some(Check {
+                at: &[Step::First, Step::Key("symbol")],
+                equals: "BTC_THB",
+                fault: Fault::Market,
+            }),
+        },
+    ),
+    binance(
+        "binance-thb",
+        "https://data-api.binance.vision/api/v3/ticker/price?symbol=BTCTHB",
+        Thb,
+        "BTCTHB",
+    ),
+    // South African rand.
+    src(
+        "luno-zar",
+        'l',
+        "https://api.luno.com/api/1/ticker?pair=XBTZAR",
+        Zar,
+        Shape::Text {
+            price: &[Step::Key("last_trade")],
+            check: Some(Check {
+                at: &[Step::Key("pair")],
+                equals: "XBTZAR",
+                fault: Fault::Market,
+            }),
+        },
+    ),
+    src(
+        "valr-zar",
+        'v',
+        "https://api.valr.com/v1/public/BTCZAR/marketsummary",
+        Zar,
+        Shape::Text {
+            price: &[Step::Key("lastTradedPrice")],
+            check: Some(Check {
+                at: &[Step::Key("currencyPair")],
+                equals: "BTCZAR",
                 fault: Fault::Market,
             }),
         },

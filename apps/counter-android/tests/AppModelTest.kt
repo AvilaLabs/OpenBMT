@@ -372,10 +372,10 @@ object AppModelTest {
         ok(usd.show(0) == "0.00 USD" && usd.show(5) == "0.05 USD" && usd.show(1234) == "12.34 USD", "small amounts")
         ok(usd.show(123456789) == "1,234,567.89 USD" && usd.plain(100) == "1.00", "separators")
         ok(Money.of("JPY")!!.show(1500) == "1,500 JPY" && Money.of("XXX") == null, "currencies")
-        // CR-193, CR-196: the nine currencies and Bitcoin Standard, with the places after the point of ISO 4217.
-        for (code in listOf("USD", "EUR", "GBP", "AUD", "INR", "IDR", "SGD")) ok(Money.of(code)!!.exponent == 2 && !Money.of(code)!!.isSats, "$code has two places")
+        // CR-193, CR-196: the fifteen currencies and Bitcoin Standard, with the places after the point of ISO 4217.
+        for (code in listOf("USD", "EUR", "GBP", "AUD", "INR", "IDR", "SGD", "CAD", "MXN", "BRL", "TRY", "THB", "ZAR")) ok(Money.of(code)!!.exponent == 2 && !Money.of(code)!!.isSats, "$code has two places")
         for (code in listOf("JPY", "KRW")) ok(Money.of(code)!!.exponent == 0 && Money.of(code)!!.show(12_345) == "12,345 $code", "$code has none")
-        ok(Money.of("CAD") == null && Money.of("CHF") == null, "a currency that is not a choice of the shop")
+        ok(Money.of("PLN") == null && Money.of("CHF") == null, "a currency that is not a choice of the shop")
         val sats = Money.of("SAT")!!
         ok(sats.isSats && sats.exponent == 0 && sats.show(7_500) == "7,500 sats" && sats.show(1) == "1 sat" && sats.parse("7500") == 7_500L && sats.parse("7.5") == null, "Bitcoin Standard: whole sats, no point")
         val yen = AmountEntry(Money.of("JPY")!!)

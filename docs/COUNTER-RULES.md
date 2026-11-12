@@ -1361,7 +1361,9 @@ member's own wallet is not part of these rules.
 A shop prices in one currency, held in its signed settings, chosen from a
 fixed list: US dollar (USD), euro (EUR), pound sterling (GBP), Japanese yen
 (JPY), Australian dollar (AUD), Indian rupee (INR), South Korean won (KRW),
-Indonesian rupiah (IDR), Singapore dollar (SGD), or Bitcoin Standard, which
+Indonesian rupiah (IDR), Singapore dollar (SGD), Canadian dollar (CAD),
+Mexican peso (MXN), Brazilian real (BRL), Turkish lira (TRY), Thai baht
+(THB), South African rand (ZAR), or Bitcoin Standard, which
 prices in satoshis and uses no price source at all. Every counter of the
 shop prices in it and every limit of the settings is in it. A counter in
 another currency than the shop's is not part of these rules. The sources of

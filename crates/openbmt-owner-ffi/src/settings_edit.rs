@@ -76,6 +76,18 @@ pub enum CurrencyAction {
     Sgd,
     /// Bitcoin Standard: sats, no price.
     Sats,
+    /// Canadian dollar.
+    Cad,
+    /// Mexican peso.
+    Mxn,
+    /// Brazilian real.
+    Brl,
+    /// Turkish lira.
+    Try,
+    /// Thai baht.
+    Thb,
+    /// South African rand.
+    Zar,
 }
 
 wire_unit_enum!(CurrencyAction {
@@ -89,7 +101,13 @@ wire_unit_enum!(CurrencyAction {
     Krw = 7,
     Idr = 8,
     Sgd = 9,
-    Sats = 10
+    Sats = 10,
+    Cad = 11,
+    Mxn = 12,
+    Brl = 13,
+    Try = 14,
+    Thb = 15,
+    Zar = 16
 });
 
 impl CurrencyAction {
@@ -107,6 +125,12 @@ impl CurrencyAction {
             Self::Idr => Some(ShopCurrency::Idr),
             Self::Sgd => Some(ShopCurrency::Sgd),
             Self::Sats => Some(ShopCurrency::Sats),
+            Self::Cad => Some(ShopCurrency::Cad),
+            Self::Mxn => Some(ShopCurrency::Mxn),
+            Self::Brl => Some(ShopCurrency::Brl),
+            Self::Try => Some(ShopCurrency::Try),
+            Self::Thb => Some(ShopCurrency::Thb),
+            Self::Zar => Some(ShopCurrency::Zar),
         }
     }
 }

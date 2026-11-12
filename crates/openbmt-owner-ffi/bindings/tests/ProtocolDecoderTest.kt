@@ -128,7 +128,9 @@ object ProtocolDecoderTest {
         check(preview.settings.size == 2)
         check(preview.currency == ShopCurrency.Eur && preview.currency.label == "Euro (EUR)")
         rejects("a currency tag that is not a choice") { decodeResponse(settingsFrame(swap = false).also { it[it.size - 2] = 0 }).let { r -> r.option { r.settingsHeld() } } }
-        rejects("a currency tag past the list") { decodeResponse(settingsFrame(swap = false).also { it[it.size - 2] = 11 }).let { r -> r.option { r.settingsHeld() } } }
+        check(decodeResponse(settingsFrame(swap = false).also { it[it.size - 2] = 11 }).let { r -> r.option { r.settingsHeld() } }!!.currency == ShopCurrency.Cad)
+        check(decodeResponse(settingsFrame(swap = false).also { it[it.size - 2] = 16 }).let { r -> r.option { r.settingsHeld() } }!!.currency == ShopCurrency.Zar)
+        rejects("a currency tag past the list") { decodeResponse(settingsFrame(swap = false).also { it[it.size - 2] = 17 }).let { r -> r.option { r.settingsHeld() } } }
         rejects("a preview flag") { decodeResponse(previewFrame(needsKeyApp = 2)).settingsPreview() }
         rejects("a short preview") { decodeResponse(previewFrame().copyOf(30)).settingsPreview() }
 

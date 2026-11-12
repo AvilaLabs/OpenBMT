@@ -42,6 +42,12 @@ bytes and a time the caller gives it and returns a price or a refusal.
   | KRW | `upbit-krw` (a number), `bithumb-krw` |
   | IDR | `luno-idr`, `indodax-idr` |
   | SGD | `gemini-sgd`, `independentreserve-sgd` (a number) |
+  | CAD (checked 2026-11-12) | `kraken-cad`, `ndax-cad` (a number) |
+  | MXN (checked 2026-11-12) | `bitso-mxn`, `binance-mxn` |
+  | BRL (checked 2026-11-12) | `foxbit-brl`, `okx-brl`, `binance-brl` |
+  | TRY (checked 2026-11-12) | `btcturk-try` (a number), `okx-try`, `binance-try` |
+  | THB (checked 2026-11-12) | `bitkub-thb`, `binance-thb` |
+  | ZAR (checked 2026-11-12) | `luno-zar`, `valr-zar` |
 
   The addresses are those of the table in `source.rs`; each names its
   currency (RT-17). The dollar sources are:
@@ -62,7 +68,7 @@ bytes and a time the caller gives it and returns a price or a refusal.
   which sources were used. A source that is not for dollars has its currency
   at the end of its id (`kraken-eur`).
 - **RT-03.** Each source has a currency, one of the fixed list of CR-193
-  (USD, EUR, GBP, JPY, AUD, INR, KRW, IDR, SGD). A reply that names another
+  (USD, EUR, GBP, JPY, AUD, INR, KRW, IDR, SGD, CAD, MXN, BRL, TRY, THB, ZAR). A reply that names another
   currency is refused (RT-17), and a set of samples in more than one
   currency is refused (RT-38). The shop's currency is in its signed settings
   (CR-193); the app fetches the sources of that currency only (RT-40). An
@@ -166,7 +172,7 @@ bytes and a time the caller gives it and returns a price or a refusal.
 
   | currency | factor | lowest | highest (minor units per bitcoin) |
   |---|---|---|---|
-  | USD, EUR, GBP, AUD, SGD | 1 | 10,000 | 10,000,000,000 |
+  | USD, EUR, GBP, AUD, SGD, CAD, MXN, BRL, TRY, THB, ZAR | 1 | 10,000 | 10,000,000,000 |
   | JPY, INR | 100 | 1,000,000 | 1,000,000,000,000 |
   | KRW | 1,000 | 10,000,000 | 10,000,000,000,000 |
   | IDR | 10,000 | 100,000,000 | 100,000,000,000,000 |

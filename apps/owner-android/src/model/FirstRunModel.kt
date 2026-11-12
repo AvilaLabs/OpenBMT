@@ -140,7 +140,7 @@ class ShopPrefs(
         }
 
         /**
-         * The money a phone's country most likely uses, from the two letters of its locale: the nine of the app,
+         * The money a phone's country most likely uses, from the two letters of its locale: the fifteen of the app,
          * the euro for the countries that use it, and the US dollar for any other, as the practice shop uses.
          */
         fun guessCurrency(country: String): ShopCurrency = when (country.uppercase()) {
@@ -151,6 +151,12 @@ class ShopPrefs(
             "KR" -> ShopCurrency.Krw
             "ID" -> ShopCurrency.Idr
             "SG" -> ShopCurrency.Sgd
+            "CA" -> ShopCurrency.Cad
+            "MX" -> ShopCurrency.Mxn
+            "BR" -> ShopCurrency.Brl
+            "TR" -> ShopCurrency.Try
+            "TH" -> ShopCurrency.Thb
+            "ZA" -> ShopCurrency.Zar
             "AT", "BE", "HR", "CY", "EE", "FI", "FR", "DE", "GR", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PT", "SK", "SI", "ES" -> ShopCurrency.Eur
             else -> ShopCurrency.Usd
         }

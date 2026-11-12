@@ -50,7 +50,7 @@ class Money(val code: String, val exponent: Int) {
 
         /** The shop's choices (CR-193) with the places after the point of ISO 4217; yen, won and satoshis have none. */
         fun of(code: String): Money? = when (code) {
-            "USD", "EUR", "GBP", "AUD", "INR", "IDR", "SGD" -> Money(code, 2)
+            "USD", "EUR", "GBP", "AUD", "INR", "IDR", "SGD", "CAD", "MXN", "BRL", "TRY", "THB", "ZAR" -> Money(code, 2)
             "JPY", "KRW", SATS -> Money(code, 0)
             else -> null
         }

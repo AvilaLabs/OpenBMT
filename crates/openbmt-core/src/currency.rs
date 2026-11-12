@@ -24,13 +24,25 @@ pub enum ShopCurrency {
     Idr,
     /// Singapore dollar.
     Sgd,
+    /// Canadian dollar.
+    Cad,
+    /// Mexican peso.
+    Mxn,
+    /// Brazilian real.
+    Brl,
+    /// Turkish lira.
+    Try,
+    /// Thai baht.
+    Thb,
+    /// South African rand.
+    Zar,
     /// Bitcoin Standard: prices in satoshis, no price source.
     Sats,
 }
 
 impl ShopCurrency {
     /// Every choice, in the order the owner is shown them.
-    pub const ALL: [ShopCurrency; 10] = [
+    pub const ALL: [ShopCurrency; 16] = [
         Self::Usd,
         Self::Eur,
         Self::Gbp,
@@ -40,6 +52,12 @@ impl ShopCurrency {
         Self::Krw,
         Self::Idr,
         Self::Sgd,
+        Self::Cad,
+        Self::Mxn,
+        Self::Brl,
+        Self::Try,
+        Self::Thb,
+        Self::Zar,
         Self::Sats,
     ];
 
@@ -56,6 +74,12 @@ impl ShopCurrency {
             Self::Krw => "KRW",
             Self::Idr => "IDR",
             Self::Sgd => "SGD",
+            Self::Cad => "CAD",
+            Self::Mxn => "MXN",
+            Self::Brl => "BRL",
+            Self::Try => "TRY",
+            Self::Thb => "THB",
+            Self::Zar => "ZAR",
             Self::Sats => "SAT",
         }
     }
@@ -79,6 +103,12 @@ impl ShopCurrency {
             Self::Idr => 8,
             Self::Sgd => 9,
             Self::Sats => 10,
+            Self::Cad => 11,
+            Self::Mxn => 12,
+            Self::Brl => 13,
+            Self::Try => 14,
+            Self::Thb => 15,
+            Self::Zar => 16,
         }
     }
 
@@ -115,6 +145,12 @@ impl ShopCurrency {
             Self::Krw => "won",
             Self::Idr => "rupiah",
             Self::Sgd => "Singapore dollars",
+            Self::Cad => "WORDS_NEEDED_C5_CAD",
+            Self::Mxn => "WORDS_NEEDED_C5_MXN",
+            Self::Brl => "WORDS_NEEDED_C5_BRL",
+            Self::Try => "WORDS_NEEDED_C5_TRY",
+            Self::Thb => "WORDS_NEEDED_C5_THB",
+            Self::Zar => "WORDS_NEEDED_C5_ZAR",
             Self::Sats => "sats",
         }
     }
@@ -131,6 +167,12 @@ impl ShopCurrency {
             Self::Krw => "South Korean won (KRW)",
             Self::Idr => "Indonesian rupiah (IDR)",
             Self::Sgd => "Singapore dollar (SGD)",
+            Self::Cad => "WORDS_NEEDED_C5_CAD",
+            Self::Mxn => "WORDS_NEEDED_C5_MXN",
+            Self::Brl => "WORDS_NEEDED_C5_BRL",
+            Self::Try => "WORDS_NEEDED_C5_TRY",
+            Self::Thb => "WORDS_NEEDED_C5_THB",
+            Self::Zar => "WORDS_NEEDED_C5_ZAR",
             Self::Sats => "Bitcoin Standard (sats)",
         }
     }
@@ -140,7 +182,17 @@ impl ShopCurrency {
     /// Bitcoin Standard, which has no price.
     pub fn band_factor(&self) -> Option<u64> {
         match self {
-            Self::Usd | Self::Eur | Self::Gbp | Self::Aud | Self::Sgd => Some(1),
+            Self::Usd
+            | Self::Eur
+            | Self::Gbp
+            | Self::Aud
+            | Self::Sgd
+            | Self::Cad
+            | Self::Mxn
+            | Self::Brl
+            | Self::Try
+            | Self::Thb
+            | Self::Zar => Some(1),
             Self::Jpy | Self::Inr => Some(100),
             Self::Krw => Some(1_000),
             Self::Idr => Some(10_000),
@@ -190,23 +242,57 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cu_01_the_list_has_ten_choices_with_distinct_codes_and_bytes() {
-        assert_eq!(ShopCurrency::ALL.len(), 10);
+    fn cu_01_the_list_has_sixteen_choices_with_distinct_codes_and_bytes() {
+        assert_eq!(ShopCurrency::ALL.len(), 16);
         for (i, a) in ShopCurrency::ALL.iter().enumerate() {
             assert_eq!(a.code().len(), 3);
             assert!(a.code().bytes().all(|b| b.is_ascii_uppercase()));
             assert_eq!(ShopCurrency::from_code(a.code()), Some(*a));
             assert_eq!(ShopCurrency::from_byte(a.to_byte()), Some(*a));
-            assert_eq!(usize::from(a.to_byte()), i + 1);
             for b in ShopCurrency::ALL.iter().skip(i + 1) {
                 assert_ne!(a.code(), b.code());
                 assert_ne!(a.label(), b.label());
+                assert_ne!(a.to_byte(), b.to_byte());
             }
         }
         assert_eq!(ShopCurrency::from_byte(0), None);
-        assert_eq!(ShopCurrency::from_byte(11), None);
+        assert_eq!(ShopCurrency::from_byte(17), None);
+        assert_eq!(ShopCurrency::from_byte(255), None);
         assert_eq!(ShopCurrency::from_code("CHF"), None);
         assert_eq!(ShopCurrency::from_code("usd"), None);
+    }
+
+    #[test]
+    fn cr_193_the_settings_bytes_of_the_first_ten_are_stable_and_new_ones_follow() {
+        // Written into signed settings: these never change.
+        let first = [
+            (ShopCurrency::Usd, 1),
+            (ShopCurrency::Eur, 2),
+            (ShopCurrency::Gbp, 3),
+            (ShopCurrency::Jpy, 4),
+            (ShopCurrency::Aud, 5),
+            (ShopCurrency::Inr, 6),
+            (ShopCurrency::Krw, 7),
+            (ShopCurrency::Idr, 8),
+            (ShopCurrency::Sgd, 9),
+            (ShopCurrency::Sats, 10),
+        ];
+        for (c, byte) in first {
+            assert_eq!(c.to_byte(), byte, "{}", c.code());
+        }
+        let added = [
+            (ShopCurrency::Cad, 11),
+            (ShopCurrency::Mxn, 12),
+            (ShopCurrency::Brl, 13),
+            (ShopCurrency::Try, 14),
+            (ShopCurrency::Thb, 15),
+            (ShopCurrency::Zar, 16),
+        ];
+        for (c, byte) in added {
+            assert_eq!(c.to_byte(), byte, "{}", c.code());
+        }
+        // Bitcoin Standard is last in the list the owner is shown.
+        assert_eq!(ShopCurrency::ALL.last(), Some(&ShopCurrency::Sats));
     }
 
     #[test]
@@ -261,6 +347,12 @@ mod tests {
             (ShopCurrency::Gbp, Some(1)),
             (ShopCurrency::Aud, Some(1)),
             (ShopCurrency::Sgd, Some(1)),
+            (ShopCurrency::Cad, Some(1)),
+            (ShopCurrency::Mxn, Some(1)),
+            (ShopCurrency::Brl, Some(1)),
+            (ShopCurrency::Try, Some(1)),
+            (ShopCurrency::Thb, Some(1)),
+            (ShopCurrency::Zar, Some(1)),
             (ShopCurrency::Jpy, Some(100)),
             (ShopCurrency::Inr, Some(100)),
             (ShopCurrency::Krw, Some(1_000)),

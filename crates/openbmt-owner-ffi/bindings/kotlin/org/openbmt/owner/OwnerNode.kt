@@ -183,6 +183,12 @@ private const val TAG_SHOP_CURRENCY_VIEW_KRW = 7
 private const val TAG_SHOP_CURRENCY_VIEW_IDR = 8
 private const val TAG_SHOP_CURRENCY_VIEW_SGD = 9
 private const val TAG_SHOP_CURRENCY_VIEW_SATS = 10
+private const val TAG_SHOP_CURRENCY_VIEW_CAD = 11
+private const val TAG_SHOP_CURRENCY_VIEW_MXN = 12
+private const val TAG_SHOP_CURRENCY_VIEW_BRL = 13
+private const val TAG_SHOP_CURRENCY_VIEW_TRY = 14
+private const val TAG_SHOP_CURRENCY_VIEW_THB = 15
+private const val TAG_SHOP_CURRENCY_VIEW_ZAR = 16
 private const val TAG_CURRENCY_ACTION_KEEP = 0
 private const val TAG_CURRENCY_ACTION_USD = 1
 private const val TAG_CURRENCY_ACTION_EUR = 2
@@ -194,6 +200,12 @@ private const val TAG_CURRENCY_ACTION_KRW = 7
 private const val TAG_CURRENCY_ACTION_IDR = 8
 private const val TAG_CURRENCY_ACTION_SGD = 9
 private const val TAG_CURRENCY_ACTION_SATS = 10
+private const val TAG_CURRENCY_ACTION_CAD = 11
+private const val TAG_CURRENCY_ACTION_MXN = 12
+private const val TAG_CURRENCY_ACTION_BRL = 13
+private const val TAG_CURRENCY_ACTION_TRY = 14
+private const val TAG_CURRENCY_ACTION_THB = 15
+private const val TAG_CURRENCY_ACTION_ZAR = 16
 private const val TAG_ALERT_KIND_MISSED_CHECK_IN = 0
 private const val TAG_ALERT_KIND_DIVERGED = 1
 private const val TAG_ALERT_KIND_BATCH_UNDELIVERED = 2
@@ -568,6 +580,12 @@ enum class ShopCurrency(val code: String, val label: String, val plural: String)
     Krw("KRW", "South Korean won (KRW)", "won"),
     Idr("IDR", "Indonesian rupiah (IDR)", "rupiah"),
     Sgd("SGD", "Singapore dollar (SGD)", "Singapore dollars"),
+    Cad("CAD", "WORDS_NEEDED_C5_CAD", "WORDS_NEEDED_C5_CAD"),
+    Mxn("MXN", "WORDS_NEEDED_C5_MXN", "WORDS_NEEDED_C5_MXN"),
+    Brl("BRL", "WORDS_NEEDED_C5_BRL", "WORDS_NEEDED_C5_BRL"),
+    Try("TRY", "WORDS_NEEDED_C5_TRY", "WORDS_NEEDED_C5_TRY"),
+    Thb("THB", "WORDS_NEEDED_C5_THB", "WORDS_NEEDED_C5_THB"),
+    Zar("ZAR", "WORDS_NEEDED_C5_ZAR", "WORDS_NEEDED_C5_ZAR"),
     Sats("SAT", "Bitcoin Standard (sats)", "sats"),
 }
 
@@ -1483,6 +1501,12 @@ private fun Reader.shopCurrency(): ShopCurrency =
         TAG_SHOP_CURRENCY_VIEW_IDR -> ShopCurrency.Idr
         TAG_SHOP_CURRENCY_VIEW_SGD -> ShopCurrency.Sgd
         TAG_SHOP_CURRENCY_VIEW_SATS -> ShopCurrency.Sats
+        TAG_SHOP_CURRENCY_VIEW_CAD -> ShopCurrency.Cad
+        TAG_SHOP_CURRENCY_VIEW_MXN -> ShopCurrency.Mxn
+        TAG_SHOP_CURRENCY_VIEW_BRL -> ShopCurrency.Brl
+        TAG_SHOP_CURRENCY_VIEW_TRY -> ShopCurrency.Try
+        TAG_SHOP_CURRENCY_VIEW_THB -> ShopCurrency.Thb
+        TAG_SHOP_CURRENCY_VIEW_ZAR -> ShopCurrency.Zar
         else -> tag("ShopCurrencyView")
     }
 
@@ -1501,6 +1525,12 @@ private fun Writer.currencyAction(v: ShopCurrency?): Writer =
             ShopCurrency.Idr -> TAG_CURRENCY_ACTION_IDR
             ShopCurrency.Sgd -> TAG_CURRENCY_ACTION_SGD
             ShopCurrency.Sats -> TAG_CURRENCY_ACTION_SATS
+            ShopCurrency.Cad -> TAG_CURRENCY_ACTION_CAD
+            ShopCurrency.Mxn -> TAG_CURRENCY_ACTION_MXN
+            ShopCurrency.Brl -> TAG_CURRENCY_ACTION_BRL
+            ShopCurrency.Try -> TAG_CURRENCY_ACTION_TRY
+            ShopCurrency.Thb -> TAG_CURRENCY_ACTION_THB
+            ShopCurrency.Zar -> TAG_CURRENCY_ACTION_ZAR
         },
     )
 

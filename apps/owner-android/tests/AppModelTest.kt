@@ -2393,7 +2393,7 @@ object AppModelTest {
         ok(AppWords.editGroupCurrency.what == "The money the counters price sales in, and the limits are set in." && AppWords.editGroupCurrency.next == "Choose one. Bitcoin Standard prices in sats and uses no price source.", "the words of the group")
         ok(AppWords.editCurrencyRetype.heading == "New currency, new limits" && AppWords.editCurrencyRetype.what == "Every limit is set again in the new currency, so the change shows them empty." && AppWords.editCurrencyRetype.next == "Type each limit in the new currency, then review. The change needs the Key app.", "the words of the new currency")
         ok(AppWords.editCurrencyRetype.who == Who.OWNER && AppWords.editGroupCurrency.who == Who.OWNER, "both are the owner's")
-        ok(ShopCurrency.entries.map { it.label } == listOf("US dollar (USD)", "Euro (EUR)", "Pound sterling (GBP)", "Japanese yen (JPY)", "Australian dollar (AUD)", "Indian rupee (INR)", "South Korean won (KRW)", "Indonesian rupiah (IDR)", "Singapore dollar (SGD)", "Bitcoin Standard (sats)"), "the ten choices in order")
+        ok(ShopCurrency.entries.map { it.label } == listOf("US dollar (USD)", "Euro (EUR)", "Pound sterling (GBP)", "Japanese yen (JPY)", "Australian dollar (AUD)", "Indian rupee (INR)", "South Korean won (KRW)", "Indonesian rupiah (IDR)", "Singapore dollar (SGD)", "WORDS_NEEDED_C5_CAD", "WORDS_NEEDED_C5_MXN", "WORDS_NEEDED_C5_BRL", "WORDS_NEEDED_C5_TRY", "WORDS_NEEDED_C5_THB", "WORDS_NEEDED_C5_ZAR", "Bitcoin Standard (sats)"), "the sixteen choices in order")
         ok(e.contains("MoneyTabs(settingsDraft.currency ?: held.currency") && e.contains("moneyPicker(tabs)") && e.contains("settingsDraft.chooseCurrency(tabs.currency") && e.contains("AppWords.editCurrencyRetype"), "the screen offers the choices and says every limit is typed again")
         val held = sampleSettings()
         val limit = SettingsEditModel.fields.first { it.kind == FieldKind.Dollars }
@@ -2427,7 +2427,8 @@ object AppModelTest {
                 val was = listOf(w.heading, w.what, w.next)
                 val now = listOf(here.getValue(id).heading, here.getValue(id).what, here.getValue(id).next)
                 ok(now == was.map { it.replace("Whole dollars", "Whole ${c.plural}") }, "the words of $id differ only where dollars stood: $c")
-                ok(SayCheck.problem(here.getValue(id)) == null, "the words of $id in $c pass the checks")
+                // A currency whose name is not written yet shows a WORDS_NEEDED_C5_ constant, which is not words to check.
+                ok(c.plural.startsWith("WORDS_NEEDED_C5_") || SayCheck.problem(here.getValue(id)) == null, "the words of $id in $c pass the checks")
             }
             val pairs = listOf(
                 AppWords.editGroupInstant to AppWords.editGroupInstantIn(c),
@@ -2438,9 +2439,9 @@ object AppModelTest {
             }
             val bad = AppWords.editValueNotRead(FieldKind.Dollars, "Refunds per day", c)
             val base = AppWords.editValueNotRead(FieldKind.Dollars, "Refunds per day")
-            ok(bad.what == base.what.replace("dollars", c.plural) && bad.next == base.next.replace("dollars", c.plural) && SayCheck.problem(bad) == null, "the value not read says $c")
+            ok(bad.what == base.what.replace("dollars", c.plural) && bad.next == base.next.replace("dollars", c.plural) && (c.plural.startsWith("WORDS_NEEDED_C5_") || SayCheck.problem(bad) == null), "the value not read says $c")
             val price = AppWords.priceNotReadIn(c)
-            ok(price.what == AppWords.priceNotRead.what.replace("dollars", c.plural) && price.next == AppWords.priceNotRead.next.replace("dollars", c.plural) && SayCheck.problem(price) == null, "the price not read says $c")
+            ok(price.what == AppWords.priceNotRead.what.replace("dollars", c.plural) && price.next == AppWords.priceNotRead.next.replace("dollars", c.plural) && (c.plural.startsWith("WORDS_NEEDED_C5_") || SayCheck.problem(price) == null), "the price not read says $c")
         }
         ok(AppWords.editGroupInstantIn(ShopCurrency.Usd) === AppWords.editGroupInstant && AppWords.priceNotReadIn(ShopCurrency.Usd) === AppWords.priceNotRead, "dollars are the words as before")
         ok(AppWords.editFieldsIn(ShopCurrency.Sats).toMap().getValue("refund_cap").next == "Whole sats. 0 turns it off.", "Bitcoin Standard: whole sats")
@@ -3264,9 +3265,10 @@ object AppModelTest {
         ok(KeyGuideWords.kgDifferentText == "Stop. Do not use this wallet. On the page, press Clear and close, shut down Tails, and start again.", "the stop text, exactly")
         ok(KeyGuideWords.kgNeedCard == "No card? Any paper will do for now. Write \"TEMPORARY. PUT THIS ON STEEL.\" at the top.", "the card note, exactly")
 
-        // The locale guess: the nine of the app, the euro countries, and the dollar for the rest.
+        // The locale guess: the fifteen of the app, the euro countries, and the dollar for the rest.
         val guesses = mapOf("US" to ShopCurrency.Usd, "GB" to ShopCurrency.Gbp, "FR" to ShopCurrency.Eur, "JP" to ShopCurrency.Jpy, "AU" to ShopCurrency.Aud,
-            "IN" to ShopCurrency.Inr, "KR" to ShopCurrency.Krw, "ID" to ShopCurrency.Idr, "SG" to ShopCurrency.Sgd, "" to ShopCurrency.Usd, "ZZ" to ShopCurrency.Usd)
+            "IN" to ShopCurrency.Inr, "KR" to ShopCurrency.Krw, "ID" to ShopCurrency.Idr, "SG" to ShopCurrency.Sgd,
+            "CA" to ShopCurrency.Cad, "MX" to ShopCurrency.Mxn, "BR" to ShopCurrency.Brl, "TR" to ShopCurrency.Try, "TH" to ShopCurrency.Thb, "ZA" to ShopCurrency.Zar, "" to ShopCurrency.Usd, "ZZ" to ShopCurrency.Usd)
         for ((c, want) in guesses) ok(ShopPrefs.guessCurrency(c) == want, "the money of $c")
         ok(FirstRun(ShopPrefs(currency = ShopCurrency.Sats), "US").currency == ShopCurrency.Sats, "a saved money wins over the guess")
 
@@ -3275,7 +3277,7 @@ object AppModelTest {
         ok(FirstRunWords.moneyBitcoinNote == "Prices are set in sats, and the books count in sats. No exchange rate is used.", "the Bitcoin tab note, exactly")
         ok(FirstRunWords.withTab(FirstRunWords.moneyTabsSpoken, FirstRunWords.moneyTabBitcoin) == "Your money: Bitcoin Standard chosen. Double tap the other tab to switch.", "the spoken description, exactly")
         ok(FirstRunWords.shopCurrencyNote == "Prices are set in this money and shown in bitcoin at the till.", "the Local tab note is as it was")
-        ok(MoneyTabs.LOCALS.size == 9 && ShopCurrency.Sats !in MoneyTabs.LOCALS && MoneyTabs(ShopCurrency.Sats, ShopCurrency.Eur).locals == MoneyTabs.LOCALS, "sats is never in the local list")
+        ok(MoneyTabs.LOCALS.size == 15 && ShopCurrency.Sats !in MoneyTabs.LOCALS && MoneyTabs(ShopCurrency.Sats, ShopCurrency.Eur).locals == MoneyTabs.LOCALS, "sats is never in the local list")
         ok(!MoneyTabs(ShopCurrency.Gbp, ShopCurrency.Usd).onBitcoin && MoneyTabs(ShopCurrency.Sats, ShopCurrency.Usd).onBitcoin, "the tab shown at open follows the currency")
         ok(FirstRun(ShopPrefs(currency = ShopCurrency.Sats), "US").moneyTabs.onBitcoin && !FirstRun(ShopPrefs(), "FR").moneyTabs.onBitcoin, "the shop screen opens on the saved money's tab")
         val tabs = MoneyTabs(ShopCurrency.Usd, ShopCurrency.Eur)

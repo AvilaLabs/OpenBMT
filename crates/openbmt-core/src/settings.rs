@@ -3667,7 +3667,7 @@ mod tests {
         let at = body_end(&wire) - 5 - 1;
         assert_eq!(wire.get(at), Some(&ShopCurrency::Eur.to_byte()));
         // USD with the first tips would have been written as version 1.
-        for bad in [0u8, 1, 11, 255] {
+        for bad in [0u8, 1, 17, 255] {
             let mut w = wire.clone();
             w[at] = bad;
             assert!(
